@@ -278,7 +278,41 @@ def deep_merge(default: dict, override: dict) -> dict:
     return result
 
 
+class LazyConfigProxy:
+    """延遲讀取 config，避免 module import 時就觸發 I/O 與 logging 初始化。"""
 
-# --- 初始化設定 ---
-config = load_config()
-setup_logging(config)
+    def _current(self) -> dict:
+        return load_config()
+
+    def get(self, key, default=None):
+        return self._current().get(key, default)
+
+    def __getitem__(self, key):
+        return self._current()[key]
+
+    def __contains__(self, key):
+        return key in self._current()
+
+    def __iter__(self):
+        return iter(self._current())
+
+    def __len__(self):
+        return len(self._current())
+
+    def items(self):
+        return self._current().items()
+
+    def keys(self):
+        return self._current().keys()
+
+    def values(self):
+        return self._current().values()
+
+    def copy(self):
+        return self._current().copy()
+
+    def __repr__(self):
+        return repr(self._current())
+
+
+config = LazyConfigProxy()

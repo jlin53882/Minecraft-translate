@@ -12,9 +12,20 @@ from app.views.lm_view import LMView
 from app.views.merge_view import MergeView
 from app.views.rules_view import RulesView
 from app.views.translation_view import TranslationView
-from translation_tool.utils.config_manager import load_config, setup_logging
 
 logger = logging.getLogger("main_app")
+
+
+def bootstrap_runtime():
+    from translation_tool.utils.config_manager import load_config, setup_logging
+
+    config = load_config()
+    setup_logging(config)
+
+    root_level = logging.getLogger().getEffectiveLevel()
+    logger.info(
+        f"日誌系統初始化成功，根記錄器級別已設為 {logging.getLevelName(root_level)} ({root_level})。"
+    )
 
 
 def main(page: ft.Page):
@@ -149,13 +160,7 @@ def main(page: ft.Page):
 
 if __name__ == "__main__":
     try:
-        config = load_config()
-        setup_logging(config)
-
-        root_level = logging.getLogger().getEffectiveLevel()
-        logger.info(
-            f"日誌系統初始化成功，根記錄器級別已設為 {logging.getLevelName(root_level)} ({root_level})。"
-        )
+        bootstrap_runtime()
     except Exception as e:
         print(f"致命錯誤：配置或日誌系統初始化失敗！錯誤: {e}")
 
