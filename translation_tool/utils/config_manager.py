@@ -6,7 +6,8 @@ import logging
 from datetime import datetime
 import copy
 
-# 提供一個最完整的預設設定，確保即使 config.json 不存在，程式也能正常運作
+# DEFAULT_CONFIG 是「缺檔或缺欄位時的保底值」，不是要取代使用者設定；
+# load_config() 會用它做深度合併，讓新欄位可以向後相容地補進舊 config.json。
 DEFAULT_CONFIG = {
   "logging": {
     "log_level": "INFO",
@@ -199,7 +200,10 @@ def save_config(config, config_path='config.json'):
         return False
 
 def setup_logging(config):
-    """根據設定檔配置 logging"""
+    """根據設定檔配置 logging。"""
+    # 這個函式只做 logging 初始化本身；
+    # 何時呼叫它，交給 main.bootstrap_runtime() 等 entry point 決定，
+    # 避免 import module 時就把全域 logger 狀態改掉。
     # 🔥 關鍵修正：將 flet 模組的日誌級別提高 🔥
     flet_logger = logging.getLogger("flet")
     flet_logger.setLevel(logging.WARNING) # 或 logging.ERROR
@@ -281,6 +285,10 @@ def deep_merge(default: dict, override: dict) -> dict:
 class LazyConfigProxy:
     """延遲讀取 config，避免 module import 時就觸發 I/O 與 logging 初始化。"""
 
+    # 這個 proxy 的目的是「保留舊介面相容性」：
+    # 舊模組仍可用 `from config_manager import config`，
+    # 但實際讀檔時機延後到真正取值的那一刻，而不是 import 當下。
+
     def _current(self) -> dict:
         return load_config()
 
@@ -315,4 +323,6 @@ class LazyConfigProxy:
         return repr(self._current())
 
 
+# 對外仍維持 `config` 這個名稱，讓既有呼叫點不用一次大改；
+# 真正的目標是先移除 import-time side effect，再逐步收斂舊依賴。
 config = LazyConfigProxy()

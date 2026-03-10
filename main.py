@@ -17,6 +17,11 @@ logger = logging.getLogger("main_app")
 
 
 def bootstrap_runtime():
+    """初始化 runtime，但只應在 script entry 被呼叫一次。"""
+
+    # main.py 可以被測試或其他模組 import；
+    # runtime 初始化（讀 config / 設定 logging）不能在 import 階段偷跑，
+    # 否則 `import main` 就會帶出 side effect。
     from translation_tool.utils.config_manager import load_config, setup_logging
 
     config = load_config()
@@ -29,6 +34,8 @@ def bootstrap_runtime():
 
 
 def main(page: ft.Page):
+    # 這個函式只負責組裝 Flet UI 與頁面切換邏輯；
+    # runtime 初始化、logging 設定等啟動責任都留在 bootstrap_runtime()。
     page.title = "Minecraft 模組包繁體化工具"
     page.window_width = 1200
     page.window_height = 850
@@ -48,6 +55,8 @@ def main(page: ft.Page):
     file_picker = ft.FilePicker()
     page.overlay.append(file_picker)
 
+    # 所有頁面都先經過 wrap_view()，把一致的卡片外框與邊距集中在 UI 共用層，
+    # 避免 main.py 再變回樣式雜物間。
     config_view = wrap_view(ConfigView(page))
     rules_view = wrap_view(RulesView(page))
     cache_view = wrap_view(CacheView(page))
@@ -56,6 +65,8 @@ def main(page: ft.Page):
     lm_view = wrap_view(LMView(page, file_picker))
     merge_view = wrap_view(MergeView(page, file_picker))
 
+    # nav_destinations 與 view_window_sizes 共享同一組 selected_index。
+    # 後面若有新增/刪除頁面，兩邊要一起維護，不然切頁時視窗尺寸會對錯頁。
     nav_destinations = [
         (ft.Icons.SETTINGS, "設定", config_view),
         (ft.Icons.RULE, "規則", rules_view),
@@ -149,6 +160,7 @@ def main(page: ft.Page):
     page.update()
 
     def _rebuild_index_on_startup():
+        # 索引重建放背景執行，避免主畫面啟動時被 I/O 卡住。
         try:
             cache_rebuild_index_service()
             logger.info("啟動時全域搜尋索引重建完成")

@@ -17,7 +17,9 @@ class ExtractorView(ft.Column):
         self.page = page
         self.file_picker = file_picker
 
-        # ===== TaskSession =====
+        # ExtractorView 的長任務狀態全部收斂到 TaskSession。
+        # 背景執行緒只寫 session，UI 端靠 poller 讀快照更新畫面，
+        # 這樣提取流程與畫面狀態不會互相纏在一起。
         self.session = TaskSession(max_logs=2000)
         self._ui_poller_stop = threading.Event()
         self._last_rendered_log_count = 0
@@ -471,7 +473,11 @@ class ExtractorView(ft.Column):
     # 預覽功能
     # ==================================================
     def show_preview(self, mode: str):
-        """顯示提取預覽對話框（背景執行 + 進度條更新）"""
+        """顯示提取預覽對話框（背景執行 + 進度條更新）。"""
+
+        # 預覽故意不走 app.services 的 wrapper，因為這裡需要的是「逐步回報進度」：
+        # UI 直接吃 generator update，比包成一次回傳的 service 更容易維持預覽進度條與結果對話框。
+        # 換句話說，提取流程偏 service façade；預覽流程偏 UI orchestration。
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         
         if not mods_dir:
@@ -490,7 +496,8 @@ class ExtractorView(ft.Column):
         # 鎖定按鈕
         self.set_controls_disabled(True)
         
-        # 共享狀態
+        # 預覽流程是「背景掃描 + 前景輪詢」：
+        # do_preview() 只負責推進狀態，poll() 專心把狀態轉成 UI，避免背景執行緒直接碰太多 Flet 控制項。
         preview_state = {
             'progress': 0.0,
             'current': 0,
