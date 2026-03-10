@@ -86,10 +86,10 @@ from translation_tool.utils import cache_manager
 
 from translation_tool.utils.log_unit import log_warning, log_error, log_debug, log_info
 
-# 1. 確保 Handler 設定正確
+# UI_LOG_HANDLER 負責把核心層 logger 轉送到畫面上的 TaskSession。
+# 它只處理「怎麼把 log 丟進 UI」；至於 log 量太大時如何節流，交給下面的 GLOBAL_LOG_LIMITER。
 UI_LOG_HANDLER = UISessionLogHandler()
 UI_LOG_HANDLER.setLevel(logging.INFO)
-# UI 顯示建議簡潔，只留 message
 UI_LOG_HANDLER.setFormatter(logging.Formatter("%(message)s"))
 
 
@@ -99,12 +99,16 @@ REPLACE_RULES_PATH = os.path.join(os.getcwd(), "replace_rules.json")
 
 
 def _load_app_config():
+    # 保留這層包裝的目的，是把 service 層對 config_manager 的依賴集中在單一入口。
+    # 之後如果要改成別的設定來源或做快取/注入，優先改這裡，不要讓 service 呼叫點四散。
     from translation_tool.utils.config_manager import load_config
 
     return load_config(CONFIG_PATH)
 
 
 def _save_app_config(config):
+    # 與 _load_app_config() 成對：service 層只知道「存設定」，
+    # 不直接綁死 config_manager 的實作細節。
     from translation_tool.utils.config_manager import save_config
 
     return save_config(config, CONFIG_PATH)
@@ -128,7 +132,11 @@ def save_config_json(config):
 # ------------------------------------------------------
 
 def update_logger_config():
-    """重新讀取 config 並套用最新的 Log 等級"""
+    """重新讀取 config 並套用最新的 Log 等級。"""
+
+    # 這裡故意在任務開始前重讀一次設定，而不是只在程式啟動時初始化：
+    # 使用者可以在 UI 裡修改 log level / format，下一輪任務就應該吃到新設定，
+    # 不需要重開整個 app。
     _config = _load_app_config()
     _log_cfg = _config.get("logging", {})
     

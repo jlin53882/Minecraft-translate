@@ -4,7 +4,14 @@ from collections import deque
 
 class TaskSession:
     """
-    單一長任務的 UI 狀態容器（Single Source of Truth）
+    單一長任務的 UI 狀態容器（Single Source of Truth）。
+
+    這個物件是 UI 執行緒與背景 worker 之間共享的最小狀態面：
+    - worker 只負責寫入 progress / logs / status
+    - UI 只透過 snapshot() 讀取快照後再決定如何渲染
+
+    這樣做的目的不是把所有事情都塞進 session，
+    而是把跨執行緒共享的狀態收斂到單一地方，降低 race condition 與散落旗標的維護成本。
     """
     def __init__(self, max_logs: int = 300):
         self.progress: float = 0.0
@@ -48,7 +55,10 @@ class TaskSession:
 
     def snapshot(self):
         """
-        UI 用的快照（避免 race condition）
+        回傳 UI 用的不可變快照。
+
+        UI 不直接拿著內部 deque / 欄位引用來讀，
+        而是每次取一份快照，避免畫面更新時撞上背景執行緒正在寫入。
         """
         with self._lock:
             return {
