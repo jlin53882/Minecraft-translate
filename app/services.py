@@ -75,7 +75,6 @@ from translation_tool.core.ftb_translator import translate_directory_generator
 from translation_tool.core.lang_merger import merge_zhcn_to_zhtw_from_zip
 from translation_tool.core.jar_processor import extract_lang_files_generator, extract_book_files_generator
 from translation_tool.utils.text_processor import load_replace_rules as load_rules_core, save_replace_rules as save_rules_core
-from translation_tool.utils.config_manager import load_config, save_config
 from translation_tool.utils.species_cache import lookup_species_name, is_potential_species_name
 from translation_tool.core.lm_translator import translate_directory_generator as lm_translate_gen
 from translation_tool.core.output_bundler import bundle_outputs_generator
@@ -98,6 +97,19 @@ UI_LOG_HANDLER.setFormatter(logging.Formatter("%(message)s"))
 CONFIG_PATH = os.path.join(os.getcwd(), "config.json")
 REPLACE_RULES_PATH = os.path.join(os.getcwd(), "replace_rules.json")
 
+
+def _load_app_config():
+    from translation_tool.utils.config_manager import load_config
+
+    return load_config(CONFIG_PATH)
+
+
+def _save_app_config(config):
+    from translation_tool.utils.config_manager import save_config
+
+    return save_config(config, CONFIG_PATH)
+
+
 # --- 檔案讀寫服務 ---
 def load_replace_rules():
     return load_rules_core(REPLACE_RULES_PATH)
@@ -106,10 +118,10 @@ def save_replace_rules(rules):
     save_rules_core(REPLACE_RULES_PATH, rules)
 
 def load_config_json():
-    return load_config(CONFIG_PATH)
+    return _load_app_config()
 
 def save_config_json(config):
-    save_config(config, CONFIG_PATH)
+    _save_app_config(config)
 
 # ------------------------------------------------------
 # ---------------- 核心功能服務（含 log 限制） ----------------
@@ -117,7 +129,7 @@ def save_config_json(config):
 
 def update_logger_config():
     """重新讀取 config 並套用最新的 Log 等級"""
-    _config = load_config()
+    _config = _load_app_config()
     _log_cfg = _config.get("logging", {})
     
     _level_name = _log_cfg.get("log_level", "INFO").upper()
