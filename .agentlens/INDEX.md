@@ -1,0 +1,92 @@
+# AgentLens INDEX
+
+Project: C:\Users\admin\Desktop\Minecraft_translator_flet
+
+## Python Files
+
+- `app/__init__.py` ? Package init file.
+- `app/services.py` ? Service facade between UI and core translation/extraction/checker workflows.
+- `app/task_session.py` ? Thread-safe task state container for progress, logs, and error status.
+- `app/ui/__init__.py` ? app.ui package init.
+- `app/ui/components.py` ? Shared Flet UI components and helpers.
+- `app/ui/view_wrapper.py` ? Shared card wrapper for view content.
+- `app/views/__init__.py` ? app.views package init.
+- `app/views/bundler_view.py` ? Output bundling page.
+- `app/views/cache_manger/__init__.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_manger/cache_controller.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_manger/cache_log_panel.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_manger/cache_overview_panel.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_manger/cache_presenter.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_manger/cache_shared_widgets.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_manger/cache_types.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_view.py` ? Cache management page.
+- `app/views/config_view.py` ? Config editing page.
+- `app/views/extractor_view.py` ? JAR/lang/book extraction page.
+- `app/views/icon_preview_view.py` ? Icon/entry preview page.
+- `app/views/lm_view.py` ? LM translation page.
+- `app/views/lookup_view.py` ? Species/manual lookup page.
+- `app/views/merge_view.py` ? ZIP/lang merge page.
+- `app/views/qc_view.py` ? Quality-check page.
+- `app/views/rules_view.py` ? Replace-rule editing page.
+- `app/views/translation_view.py` ? Translation tool page.
+- `CLEAN_AND_REBUILD.py` ? Maintenance/rebuild script.
+- `main.py` ? Flet entry point; wires views, boot logging, and startup index rebuild.
+- `REBUILD_INDEX_NOW.py` ? Maintenance/rebuild script.
+- `test_a1_a3_features.py` ? Root-level test or check script.
+- `test_search_fix.py` ? Root-level test or check script.
+- `tests/conftest.py` ? Automated test module.
+- `tests/test_cache_controller.py` ? Automated test module.
+- `tests/test_cache_presenter.py` ? Automated test module.
+- `tests/test_cache_view_features.py` ? Automated test module.
+- `tests/test_cache_view_monkeypatch_integration.py` ? Automated test module.
+- `tests/test_cache_view_state_gate.py` ? Automated test module.
+- `tests/test_main_imports.py` ? Automated test module.
+- `tests/test_ui_components.py` ? Automated test module.
+- `tests/test_ui_refactor_guard.py` ? Automated test module.
+- `tests/test_view_wrapper.py` ? Automated test module.
+- `translation_tool/__init__.py` ? Package init file.
+- `translation_tool/checkers/__init__.py` ? checkers package init.
+- `translation_tool/checkers/english_residue_checker.py` ? English residue checker.
+- `translation_tool/checkers/untranslated_checker.py` ? Untranslated-entry checker.
+- `translation_tool/checkers/variant_comparator.py` ? zh_cn vs zh_tw comparator.
+- `translation_tool/checkers/variant_comparator_tsv.py` ? TSV variant comparator.
+- `translation_tool/core/__init__.py` ? translation_tool.core package init.
+- `translation_tool/core/ftb_translator.py` ? FTB Quests pipeline orchestration and merge/inject logic.
+- `translation_tool/core/icon_classifier.py` ? Icon classification helper.
+- `translation_tool/core/icon_preview_cache.py` ? Icon preview cache helper.
+- `translation_tool/core/icon_reason.py` ? Icon decision/reason helper.
+- `translation_tool/core/icon_resolver.py` ? Icon resolution/mapping helper.
+- `translation_tool/core/jar_processor.py` ? JAR scanning, extraction, and preview/report generation.
+- `translation_tool/core/kubejs_translator.py` ? KubeJS extract/translate/inject pipeline orchestration.
+- `translation_tool/core/lang_item_row.py` ? Language row model used by preview/icon helpers.
+- `translation_tool/core/lang_merger.py` ? ZIP/lang merger for zh_cn/zh_tw/en_us and pending export.
+- `translation_tool/core/lang_processing_format.py` ? Helpers for lang/json serialization and formatting.
+- `translation_tool/core/lm_config_rules.py` ? LM validation and translatable-field rules.
+- `translation_tool/core/lm_translator.py` ? Public LM translation entry and directory-level orchestration.
+- `translation_tool/core/lm_translator_main.py` ? Gemini batch engine, retry logic, and response parsing.
+- `translation_tool/core/lm_translator_shared.py` ? Shared LM cache split, loop, preview, and recorder helpers.
+- `translation_tool/core/md_translation_assembly.py` ? Markdown extract/translate/inject pipeline orchestration.
+- `translation_tool/core/output_bundler.py` ? Final output bundling to zip.
+- `translation_tool/plugins/__init__.py` ? Package init file.
+- `translation_tool/plugins/ftbquests/__init__.py` ? FTB plugin package init.
+- `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py` ? LM translator for extracted FTB pending JSON files.
+- `translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py` ? FTB Quests SNBT extractor plugin.
+- `translation_tool/plugins/ftbquests/ftbquests_snbt_inject.py` ? FTB Quests SNBT injector plugin.
+- `translation_tool/plugins/kubejs/__init__.py` ? KubeJS plugin package init.
+- `translation_tool/plugins/kubejs/kubejs_tooltip_extract.py` ? KubeJS tooltip/ponder extractor plugin.
+- `translation_tool/plugins/kubejs/kubejs_tooltip_inject.py` ? KubeJS tooltip/ponder injector plugin.
+- `translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py` ? LM translator for KubeJS pending JSON files.
+- `translation_tool/plugins/md/__init__.py` ? Markdown plugin package init.
+- `translation_tool/plugins/md/md_extract_qa.py` ? Markdown block extractor that builds pending JSON.
+- `translation_tool/plugins/md/md_inject_qa.py` ? Markdown injector that writes translated blocks back.
+- `translation_tool/plugins/md/md_lmtranslator.py` ? LM translator for Markdown pending JSON files.
+- `translation_tool/utils/__init__.py` ? translation_tool.utils package init.
+- `translation_tool/utils/cache_manager.py` ? Cache storage, sharding, persistence, and search entrypoints.
+- `translation_tool/utils/cache_search.py` ? Cache search engine and fuzzy matcher.
+- `translation_tool/utils/config_manager.py` ? Config load/save plus logging setup.
+- `translation_tool/utils/exceptions.py` ? Custom exception types.
+- `translation_tool/utils/log_unit.py` ? Logging wrapper and progress helper.
+- `translation_tool/utils/safe_json_loader.py` ? Safe JSON loader helper.
+- `translation_tool/utils/species_cache.py` ? Species cache and Wikipedia lookup helper.
+- `translation_tool/utils/text_processor.py` ? Text conversion, replace rules, and string utilities.
+- `translation_tool/utils/ui_logging_handler.py` ? Logging handler that forwards messages into UI sessions.
