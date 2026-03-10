@@ -1,7 +1,5 @@
-import time
 import threading
 from collections import deque
-from typing import Optional
 
 
 class TaskSession:
@@ -16,7 +14,6 @@ class TaskSession:
         self.logs = deque(maxlen=max_logs)
 
         self._lock = threading.Lock()
-        self._last_log_flush = 0.0
 
     # ---------- 狀態寫入（Worker 使用） ----------
 

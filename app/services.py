@@ -911,30 +911,3 @@ def cache_rebuild_index_service() -> Dict[str, Any]:
             "error": str(e)
         }
 
-
-# --- JAR 提取預覽功能 ---
-def preview_jar_extraction_service(mods_dir: str, mode: str):
-    """
-    預覽將要提取的檔案（不實際提取）
-    
-    Args:
-        mods_dir: Mods 資料夾路徑
-        mode: 'lang' 或 'book'
-    
-    Returns:
-        {
-            'total_jars': int,
-            'preview_results': [...],
-            'total_files': int,
-            'total_size_mb': float,
-            'error': str | None
-        }
-    """
-    from translation_tool.core.jar_processor import preview_extraction
-    
-    try:
-        result = preview_extraction(mods_dir, mode)
-        return result
-    except Exception as e:
-        logger.error(f"預覽提取失敗: {e}")
-        return {'error': str(e)}
