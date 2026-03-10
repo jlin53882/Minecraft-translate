@@ -28,8 +28,8 @@
 
 ```bash
 # 1. Clone
-git clone https://github.com/YOUR_USERNAME/Minecraft_translator_flet.git
-cd Minecraft_translator_flet
+git clone https://github.com/jlin53882/Minecraft-translate.git
+cd Minecraft-translate
 
 # 2. 建立虛擬環境並安裝依賴
 uv sync
