@@ -31,6 +31,105 @@ chore: PR2 low-risk cleanup
 
 ---
 
+## 刪除項目補充說明（依 2026-03-11 新標準回填）
+
+### 刪除項目：`app/task_session.py` 的 `_last_log_flush` 欄位（含 `import time`、`from typing import Optional`）
+
+- **為什麼改**：`_last_log_flush` 依命名看起來是要記錄某種 log flush 時間點；搭配同檔當時存在的 `import time` 與 `Optional`，原本意圖應是想把 log 節流/flush 狀態放在 `TaskSession` 內處理。這一點沒有在程式內留下完整說明，屬於 `[需確認]` 的原始設計意圖判讀。
+- **為什麼能刪**：目前 `TaskSession` 的職責已經收斂成「單一長任務的 thread-safe 狀態容器」，只負責 progress / logs / status / error；真正的 log flush 節流已由 `app/services.py` 的 `LogLimiter` / `GLOBAL_LOG_LIMITER` 處理。欄位本身沒有任何讀取點，相關 import 也沒有再被使用。
+- **目前誰在用 / 沒人在用**：回填驗證時，對 `app/task_session.py` 執行 `rg -n --hidden --glob '!.git/**' --glob '!**/__pycache__/**' "_last_log_flush|import time|from typing import Optional" app/task_session.py`，輸出為空，代表目前程式碼中這三者都已無使用點。舊版備份 `backups/pr2_20260310_223941/task_session.py.bak` 可看到欄位與 import 曾存在。
+- **替代路徑是什麼**：不需要在 `TaskSession` 內保留替代欄位；log 節流邏輯目前由 `app/services.py` 的 `LogLimiter` / `GLOBAL_LOG_LIMITER` 承接，`TaskSession` 只保留狀態容器責任。
+- **風險是什麼**：若未來其實有外部程式用反射/猴補丁直接讀 `_last_log_flush`，刪除後會出現屬性不存在；但在專案內原始碼搜尋不到任何引用，且現行 flush 節流不依賴它，因此 repo 內 runtime 風險低。
+- **我是怎麼驗證的**：
+  - 舊版存在性：讀取 `backups/pr2_20260310_223941/task_session.py.bak`，可見：
+    ```text
+    import time
+    import threading
+    from collections import deque
+    from typing import Optional
+    ...
+            self._lock = threading.Lock()
+            self._last_log_flush = 0.0
+    ```
+  - 現況無引用：
+    ```text
+    rg -n --hidden --glob '!.git/**' --glob '!**/__pycache__/**' "_last_log_flush|import time|from typing import Optional" app/task_session.py
+    ```
+    輸出：
+    ```text
+    (no output)
+    ```
+
+### 刪除項目：`app/views/extractor_view.py` 的 `preview_jar_extraction_service` import
+
+- **為什麼改**：原本 `ExtractorView` 應是想沿用 `app/services.py` 的 façade 風格，把預覽功能也透過 service wrapper 呼叫，讓 view 不必直接碰 core。這可以從舊版 `extractor_view.py` 一開始直接 import `preview_jar_extraction_service` 看出來。
+- **為什麼能刪**：目前預覽流程已經明確改成 `ExtractorView.show_preview()` 直接使用 `translation_tool.core.jar_processor` 的 `preview_extraction_generator` 與 `generate_preview_report`，不再透過 service wrapper；留下舊 import 只會變成未使用殘留。
+- **目前誰在用 / 沒人在用**：舊版備份 `backups/pr2_20260310_223941/extractor_view.py.bak` 可看到：
+  `from app.services import run_lang_extraction_service, run_book_extraction_service, preview_jar_extraction_service`
+  但回填驗證時，程式碼搜尋結果只剩 `show_preview()`、`preview_extraction_generator`、`generate_preview_report`，沒有任何 `preview_jar_extraction_service` runtime 命中。
+- **替代路徑是什麼**：替代路徑就在 `app/views/extractor_view.py` 的 `show_preview()`：
+  - 背景執行：`preview_extraction_generator(mods_dir, mode)`
+  - 完成後輸出：`generate_preview_report(result, mode, output_dir)`
+- **風險是什麼**：如果有人以為預覽流程仍經過 service 層，閱讀時可能誤判呼叫鏈；但刪掉未使用 import 本身不影響 runtime，真正風險反而是保留它會讓人誤會 service 仍在被用。
+- **我是怎麼驗證的**：
+  - 舊版 import：讀取 `backups/pr2_20260310_223941/extractor_view.py.bak`，可見：
+    ```text
+    from app.services import run_lang_extraction_service, run_book_extraction_service, preview_jar_extraction_service
+    ```
+  - 現行預覽呼叫鏈搜尋：
+    ```text
+    rg -n --hidden --glob '!.git/**' --glob '!docs/**' --glob '!.agentlens/**' --glob '!**/__pycache__/**' "preview_jar_extraction_service|preview_extraction\(|preview_extraction_generator|generate_preview_report|show_preview\(" app translation_tool
+    ```
+    輸出節錄：
+    ```text
+    app\views\extractor_view.py:475:    def show_preview(self, mode: str):
+    app\views\extractor_view.py:512:            from translation_tool.core.jar_processor import preview_extraction_generator
+    app\views\extractor_view.py:515:                for update in preview_extraction_generator(mods_dir, mode):
+    app\views\extractor_view.py:576:                        from translation_tool.core.jar_processor import generate_preview_report
+    app\views\extractor_view.py:586:                        report_path = generate_preview_report(result, mode, output_dir)
+    translation_tool\core\jar_processor.py:313:def preview_extraction_generator(mods_dir: str, mode: str) -> Generator[Dict[str, Any], None, None]:
+    translation_tool\core\jar_processor.py:445:def generate_preview_report(result: Dict[str, Any], mode: str, output_path: str) -> str:
+    ```
+
+### 刪除項目：`app/services.py` 的 `preview_jar_extraction_service()` wrapper 整段
+
+- **為什麼改**：這個函式原本的存在理由，應是把 JAR 預覽也包成 `app/services.py` 的一個 service façade，讓 UI 可以像 `run_lang_extraction_service()` / `run_book_extraction_service()` 一樣統一從 service 層拿功能。[需確認] 原始作者沒有再留下額外設計說明，但命名與所在位置都支持這個判讀。
+- **為什麼能刪**：它不只沒人用，還是一個壞 wrapper。舊版實作是 `from translation_tool.core.jar_processor import preview_extraction` 再呼叫 `preview_extraction(mods_dir, mode)`；但目前 `jar_processor.py` 實際存在的是 `preview_extraction_generator(...)`，不存在 `preview_extraction(...)`。也就是說，這段函式即使留下，也已不是正確入口。
+- **目前誰在用 / 沒人在用**：回填驗證時，原始碼搜尋 `preview_jar_extraction_service` 已無任何 runtime caller；命中只剩 PR 文件、changelog 與 `.agentlens` 分析資料。真正正在使用的預覽路徑，是 `ExtractorView.show_preview()` 直接調 `preview_extraction_generator`，並在有輸出路徑時調 `generate_preview_report`。
+- **替代路徑是什麼**：不保留一個一次性 return dict 的 service wrapper；現行替代路徑就是 `app/views/extractor_view.py` 內的 generator + poller 流程：
+  - `preview_extraction_generator(...)` 持續回報進度
+  - `generate_preview_report(...)` 在預覽完成後輸出報告
+  這條路徑更符合預覽功能需要持續更新 UI 的實際需求。
+- **風險是什麼**：如果 repo 外還有未知腳本直接 import 這個 symbol，刪掉後會在 import 時失敗；但 repo 內沒有 caller，而且舊 wrapper 本身就引用不存在的 `preview_extraction(...)`，保留反而會讓未來維護者誤以為它仍是有效入口。
+- **我是怎麼驗證的**：
+  - 舊版函式內容：讀取 `backups/pr2_20260310_223941/services.py.bak`，可見：
+    ```text
+    def preview_jar_extraction_service(mods_dir: str, mode: str):
+        ...
+        from translation_tool.core.jar_processor import preview_extraction
+        
+        try:
+            result = preview_extraction(mods_dir, mode)
+            return result
+    ```
+  - 現行 repo 搜尋結果：
+    ```text
+    rg -n --hidden --glob '!.git/**' --glob '!docs/**' --glob '!.agentlens/**' --glob '!**/__pycache__/**' "preview_jar_extraction_service|preview_extraction\(|preview_extraction_generator|generate_preview_report|show_preview\(" app translation_tool
+    ```
+    輸出節錄：
+    ```text
+    app\views\extractor_view.py:475:    def show_preview(self, mode: str):
+    app\views\extractor_view.py:512:            from translation_tool.core.jar_processor import preview_extraction_generator
+    app\views\extractor_view.py:515:                for update in preview_extraction_generator(mods_dir, mode):
+    app\views\extractor_view.py:576:                        from translation_tool.core.jar_processor import generate_preview_report
+    app\views\extractor_view.py:586:                        report_path = generate_preview_report(result, mode, output_dir)
+    translation_tool\core\jar_processor.py:313:def preview_extraction_generator(mods_dir: str, mode: str) -> Generator[Dict[str, Any], None, None]:
+    translation_tool\core\jar_processor.py:445:def generate_preview_report(result: Dict[str, Any], mode: str, output_path: str) -> str:
+    ```
+    其中沒有任何 `preview_jar_extraction_service` runtime 命中，也沒有 `preview_extraction(...)` 函式定義。
+
+---
+
 ## Phase 2 Validation checklist
 
 ### 1) `uv run pytest`
