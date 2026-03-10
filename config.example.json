@@ -1,0 +1,111 @@
+{
+    "logging": {
+        "log_level": "INFO",
+        "log_format": "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",
+        "log_dir": "logs"
+    },
+    "translator": {
+        "output_dir_name": "zh_tw_generated",
+        "replace_rules_path": "replace_rules.json",
+        "cache_directory": "快取資料",
+        "enable_cache_saving": true,
+        "parallel_execution_workers": 4,
+        "cjk_ratio_threshold": 0.7
+    },
+    "species_cache": {
+        "cache_directory": "學名資料庫",
+        "cache_filename": "species_cache.tsv",
+        "wikipedia_language": "zh",
+        "wikipedia_rate_limit_delay": 0.5
+    },
+    "lm_translator": {
+        "temperature": 0.3,
+        "lm_translate_folder_name": "LM翻譯後",
+        "iniital_batch_size_patchouli": 200,
+        "iniital_batch_size_lang": 200,
+        "initial_batch_size_ftb": 200,
+        "initial_batch_size_kubejs": 200,
+        "initial_batch_size_md": 100,
+        "min_batch_size": 50,
+        "batch_shrink_factor": 0.5,
+        "rate_limit": {
+            "timeout": 600,
+            "sleep_seconds": 600
+        },
+        "models": {
+            "gemini-2.5-flash": {
+                "enabled": true
+            }
+        },
+        "keys": [
+            "YOUR_GEMINI_API_KEY_1",
+            "YOUR_GEMINI_API_KEY_2"
+        ],
+        "patchouli_system_prompt": "你是專業的 Minecraft Patchouli 手冊翻譯員。\r\n\r\n你正在翻譯一個「ID → Value 對照表」。\r\n\r\n⚠️【極重要規則 — ID 不可變】⚠️\r\n- items[].id 是不可變的識別符號\r\n- id 不具有任何語意，也不對應任何 JSON 結構\r\n- id 只能被視為純文字索引\r\n- 絕對禁止：\r\n  - 修改、重寫、補零、轉型、排序、重編任何 id\r\n  - 新增或刪除任何 id\r\n  - 嘗試推測 id 與內容的關聯\r\n\r\n📌 任務規則：\r\n1. 只允許修改 items[].value 的字串內容\r\n2. items[].id 必須與輸入完全一字不差\r\n3. items 的數量與順序必須與輸入完全一致\r\n4. 如果你不確定如何翻譯，請原樣回傳 value\r\n5. 回傳必須是合法 JSON，且格式與輸入完全一致\r\n6. 僅翻譯為繁體中文（台灣用語）\r\n7. 保留 §, %, {}, $(...) 等所有符號與格式\r\n8. 單位（mb、tick 等）請保留原文\r\n9. Minecraft 請保持原文，不要翻譯成「當個創世神」\r\n10. 每一筆 value 必須只根據該筆原文自身內容翻譯\r\n11. 只要 value 包含人類語言就必須翻譯\r\n12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石)",
+        "lang_system_prompt": "你正在翻譯 Minecraft 語言檔案（JSON 格式）。\r\n\r\n你收到的是一個「ID → value 對照表」。\r\n\r\n⚠️【極重要規則 — ID 不可變】⚠️\r\n- items[].id 是唯一識別符號\r\n- id 不具有任何語意\r\n- 絕對禁止：\r\n  - 修改、轉型、補零、重排、推測或重寫任何 id\r\n  - 新增或刪除任何 item\r\n\r\n📌 任務規則：\r\n1. 只允許修改 items[].value 的字串內容\r\n2. items[].id 必須與輸入完全一字不差\r\n3. items 的數量與順序必須與輸入完全一致\r\n4. 如果你不確定如何翻譯，請原樣回傳 value\r\n5. 回傳必須是合法 JSON，格式必須為 {\"items\":[{\"id\":...,\"value\":...}, ...]}\r\n6. 僅翻譯為繁體中文（台灣用語）\r\n7. 保留 §, %, {}, $(...) 等所有符號與格式\r\n8. 單位（mb、tick 等）請保留原文\r\n9. Minecraft 請保持原文\r\n10. 每一筆 value 只依該筆原文翻譯\r\n11. 只要 value 包含人類語言就必須翻譯\r\n12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石)",
+        "translator": {
+            "skip_terms": [
+                "api documentation",
+                "api docs",
+                "documentation",
+                "discord",
+                "github",
+                "homepage",
+                "mod page",
+                "modpack",
+                "official website",
+                "patreon",
+                "Twitter",
+                "Modrinth",
+                "CurseForge",
+                "Crowdin",
+                "Twitch",
+                "Wiki",
+                "Minecraft",
+                "Forge",
+                "YouTube",
+                "Reddit",
+                "Ko-fi",
+                "Flattr"
+            ],
+            "translatable_keywords": [
+                "text",
+                "name",
+                "title",
+                "description",
+                "subtitle",
+                "hover",
+                "note",
+                "warning",
+                "quote",
+                "paragraph",
+                "body",
+                "header",
+                "footer",
+                "heading",
+                "effects"
+            ]
+        },
+        "patchouli": {
+            "dir_names": [
+                "patchouli_books",
+                "book",
+                "manual",
+                "guidebook"
+            ]
+        }
+    },
+    "output_bundler": {
+        "output_zip_name": "可使用翻譯.zip",
+        "source_folders": {
+            "assets": "zh_tw_generated/assets",
+            "root": "zh_tw_generated/pack_mcmeta"
+        }
+    },
+    "lang_merger": {
+        "pending_folder_name": "待翻譯",
+        "pending_organized_folder_name": "待翻譯整理需翻譯",
+        "filtered_pending_min_count": 3,
+        "quarantine_folder_name": "問題檔案skipped_json"
+    }
+}

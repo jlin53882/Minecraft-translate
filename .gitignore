@@ -1,0 +1,52 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# === Virtual Environment ===
+.venv/
+venv/
+env/
+
+# === Config with secrets ===
+config.json
+config - *.json
+
+# === Logs & Backups ===
+logs/
+backups/
+
+# === Cache & Data (user-specific) ===
+快取資料/
+學名資料庫/
+
+# === Test cache ===
+.pytest_cache/
+
+# === Archives ===
+*.rar
+*.zip
+
+# === Root-level scripts (not part of main app) ===
+test_a1_a3_features.py
+test_search_fix.py
+CLEAN_AND_REBUILD.py
+REBUILD_INDEX_NOW.py
+
+# === Temp/personal docs ===
+README_new.md
+Cache_mange*.md
+文件分析/
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === OS ===
+Thumbs.db
+.DS_Store
