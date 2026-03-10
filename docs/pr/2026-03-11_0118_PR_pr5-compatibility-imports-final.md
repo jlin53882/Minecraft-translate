@@ -103,11 +103,48 @@ PR5 最終版改採 `app/views/__init__.py` 的 `sys.modules` alias 方案，而
 - `from .cache_manger import cache_types as _cache_types`
 - `sys.modules[...] = ...` 註冊三條 legacy module alias
 
+實際寫進去的程式碼如下：
+
+```python
+"""Compatibility aliases for legacy cache imports.
+
+Keep historical import paths alive while cache-related modules remain
+physically grouped under ``app.views.cache_manger``.
+"""
+
+from __future__ import annotations
+
+import sys
+
+from .cache_manger import cache_controller as _cache_controller
+from .cache_manger import cache_presenter as _cache_presenter
+from .cache_manger import cache_types as _cache_types
+
+# Legacy module aliases used by tests / older callers.
+sys.modules[__name__ + ".cache_controller"] = _cache_controller
+sys.modules[__name__ + ".cache_presenter"] = _cache_presenter
+sys.modules[__name__ + ".cache_types"] = _cache_types
+```
+
 ### 3. 保留既有 cache 模組物理位置
 這輪沒有搬動任何 `cache_manger/` 內的實作檔，真正業務邏輯仍留在：
 - `app/views/cache_manger/cache_controller.py`
 - `app/views/cache_manger/cache_presenter.py`
 - `app/views/cache_manger/cache_types.py`
+
+---
+
+## Rejected approach
+- 試過：在 `app/views/` 根目錄新增 3 個 compatibility shim 檔
+  - `cache_controller.py`
+  - `cache_presenter.py`
+  - `cache_types.py`
+- 為什麼放棄：雖然 targeted pytest 一度從 3 個 collection error 降到 1 個，後來也把 `cache_types` 補齊了，但 full pytest 被 `tests/test_ui_refactor_guard.py::test_cache_related_modules_are_grouped_under_cache_manger` 擋下來。關鍵錯誤是：
+  ```text
+  assert not (APP_VIEWS / "cache_controller.py").exists()
+  ```
+  也就是測試明確要求 root-level cache shim 檔不應存在。
+- 最終改採：刪除 3 個 root-level shim，改由 `app/views/__init__.py` 用 `sys.modules` 註冊 legacy module alias，把舊 import 路徑導向 `app.views.cache_manger.*` 真實模組。
 
 ---
 
@@ -118,6 +155,7 @@ PR5 最終版改採 `app/views/__init__.py` 的 `sys.modules` alias 方案，而
    - 保留 import 相容性
    - 維持 `cache_manger/` 的物理集中
 3. 這顆完成後，full pytest 已從「collection error」恢復到 **27 passed**。
+4. 最終進 GitHub 的程式碼 diff 只有 `app/views/__init__.py`，中途被放棄的 shim 方案則保留在 PR 文件與中間紀錄中，避免把錯誤嘗試混進正式 code history。
 
 ---
 
