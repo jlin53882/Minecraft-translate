@@ -30,7 +30,7 @@
 - translation_tool/utils/cache_store.py
 - translation_tool/utils/config_manager.py
 
-## 本次實際回補範圍（只動註解/docstring/必要排版）
+## 本次實際回補範圍（函式層級維護性註解補強；只動註解/docstring/必要排版）
 
 ### A) Service / entry
 - app/services.py：新增模組層 docstring；補 `LogLimiter` 類別 docstring

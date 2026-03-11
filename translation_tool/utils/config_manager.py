@@ -144,7 +144,17 @@ DEFAULT_CONFIG = {
 }
 
 def load_config(config_path='config.json'):
-    """讀取設定檔，如果檔案不存在或格式錯誤，則回傳預設設定。"""
+    """讀取設定檔並做向後相容合併。
+
+    行為：
+    - 若檔案不存在：回傳 DEFAULT_CONFIG（深拷貝/或原始結構）。
+    - 若檔案存在：讀取使用者設定，與 DEFAULT_CONFIG 做 deep merge，補齊新欄位。
+
+    重要規則：
+    - `lm_translator.models` 不做 deep merge（視為使用者資料），避免預設值混入導致誤啟用。
+
+    回傳：合併後的新 dict（避免直接回傳 DEFAULT_CONFIG 物件被外部修改）。
+    """
     if not os.path.exists(config_path):
         print(f"警告：找不到設定檔 {config_path}，將使用預設設定。")
         return DEFAULT_CONFIG

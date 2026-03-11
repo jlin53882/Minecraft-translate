@@ -128,6 +128,16 @@ def _load_cache_type(cache_type: str):
 
 # --- 初始化快取系統 ---
 def initialize_translation_cache():
+    """初始化快取（只做一次）。
+
+    副作用：
+    - 建立各 cache_type 的資料夾與必要檔案指標
+    - 讀取分片資料並合併到記憶體 `_translation_cache`
+
+    注意：
+    - 由於會做大量 IO/反序列化，建議在啟動階段或明確的重載操作時呼叫。
+    - 若 `_initialized` 已為 True，會直接返回以避免重複載入。
+    """
     global _translation_cache, _cache_file_path, _initialized
     if _initialized:
         return
@@ -255,6 +265,20 @@ def add_to_cache(
     mod: str | None = None,
     path: str | None = None,
 ):
+    """寫入/更新單筆翻譯快取。
+
+    維護重點：
+    - 會同時寫入兩個地方：
+      1) `_translation_cache`（記憶體主快取）
+      2) `_session_new_entries`（本次執行階段新增/更新的條目）
+    - `_session_new_entries` 用於後續 save_translation_cache() 寫入 shard。
+
+    參數說明：
+    - mod/path：用於搜尋索引 metadata（PR7 之後）；不存在時可省略。
+
+    注意：
+    - 若 key 或 dst 為空字串，會直接忽略（避免污染快取）。
+    """
     if not key or not dst: return
     with _cache_lock:
         cache = cache_store.get_cache_type_dict(_translation_cache, cache_type)
