@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 # --- 修正後的 import 路徑 ---
 import orjson as json
 from .config_manager import load_config
-from . import cache_shards
+from . import cache_shards, cache_store
 
 log = logging.getLogger(__name__)
 
@@ -126,8 +126,8 @@ def reload_translation_cache():
         _initialized = False
         _session_new_entries.clear()
         for k in CACHE_TYPES:
-            _session_new_entries[k] = {}
-            _is_dirty[k] = False
+            cache_store.get_session_entries(_session_new_entries, k)
+            cache_store.clear_dirty(_is_dirty, k)
     initialize_translation_cache()
 
 
@@ -139,8 +139,8 @@ def reload_translation_cache_type(cache_type: str):
     initialize_translation_cache()
     with _cache_lock:
         _translation_cache[cache_type] = {}
-        _session_new_entries[cache_type] = {}
-        _is_dirty[cache_type] = False
+        cache_store.get_session_entries(_session_new_entries, cache_type).clear()
+        cache_store.clear_dirty(_is_dirty, cache_type)
 
     _load_cache_type(cache_type)
 
@@ -175,16 +175,13 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
     if not load_config().get("translator", {}).get("enable_cache_saving", True):
         return
 
-    data_to_save = {}
-
     with _cache_lock:
-        src = _session_new_entries.get(cache_type)
-        if not src:
+        session_entries = cache_store.get_session_entries(_session_new_entries, cache_type)
+        if not session_entries:
             return
 
-        data_to_save = src.copy()
-        src.clear()
-        _is_dirty[cache_type] = False
+        data_to_save = cache_store.flush_session_entries(_session_new_entries, cache_type)
+        cache_store.clear_dirty(_is_dirty, cache_type)
 
     try:
         save_path = _cache_file_path.get(cache_type)
@@ -295,18 +292,20 @@ def add_to_cache(
 ):
     if not key or not dst: return
     with _cache_lock:
-        cache = _translation_cache.setdefault(cache_type, {})
-        if cache.get(key, {}).get("dst") != dst:
-            entry = {"src": src, "dst": dst}
-            if mod:
-                entry["mod"] = mod
-            if path:
-                entry["path"] = path
-            cache[key] = entry
+        cache = cache_store.get_cache_type_dict(_translation_cache, cache_type)
+        entry = {"src": src, "dst": dst}
+        if mod:
+            entry["mod"] = mod
+        if path:
+            entry["path"] = path
+
+        changed = cache_store.add_entry(cache, key, entry)
+        if changed:
             # ⭐ 同步紀錄到 Session 緩存，用於產生新分片
-            _session_new_entries[cache_type][key] = entry
+            session_entries = cache_store.get_session_entries(_session_new_entries, cache_type)
+            session_entries[key] = entry
             # ✅ 標記標籤：告訴 save 函式「資料變了，等一下記得存檔」
-            _is_dirty[cache_type] = True
+            cache_store.mark_dirty(_is_dirty, cache_type)
 
 
 def get_from_cache(cache_type: str, key: str) -> Optional[str]:
@@ -323,11 +322,10 @@ def get_from_cache(cache_type: str, key: str) -> Optional[str]:
         return None
 
     cache = _translation_cache.get(cache_type)
-    if not cache:
+    if not isinstance(cache, dict):
         return None
 
-    entry = cache.get(key)
-    return entry.get("dst") if isinstance(entry, dict) else None
+    return cache_store.get_value(cache, key)
 
 def get_cache_size_old() -> int:
     """獲取目前所有快取的總數量。"""
@@ -353,10 +351,9 @@ def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
     if not _initialized:
         return None
     cache = _translation_cache.get(cache_type)
-    if not cache:
+    if not isinstance(cache, dict):
         return None
-    entry = cache.get(key)
-    return entry if isinstance(entry, dict) else None
+    return cache_store.get_entry(cache, key)
 
 
 def get_cache_dict_ref(cache_type: str) -> Dict[str, Dict[str, Any]]:
@@ -372,7 +369,7 @@ def get_cache_dict_ref(cache_type: str) -> Dict[str, Dict[str, Any]]:
 
 def get_session_new_count(cache_type: str) -> int:
     with _cache_lock:
-        return len(_session_new_entries.get(cache_type, {}))
+        return len(cache_store.get_session_entries(_session_new_entries, cache_type))
 
 
 def get_active_shard_id(cache_type: str) -> str:
