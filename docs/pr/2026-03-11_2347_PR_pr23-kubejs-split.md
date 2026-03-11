@@ -1,0 +1,134 @@
+# PR Title
+refactor: split KubeJS pipeline service into app.services_impl.pipelines.kubejs_service
+
+# PR Description
+
+## Summary
+PR23 將 `app/services.py` 內的 `run_kubejs_tooltip_service()` 抽離到 `app/services_impl/pipelines/kubejs_service.py`，讓 `app/services.py` 持續只做 façade / re-export，維持 `app/views/translation_view.py` 既有 lazy import 不變。
+本次只處理 KubeJS service 這一顆，不碰 `TranslationView` UI、也不碰 `translation_tool/core/kubejs_translator.py` 核心流程。
+
+---
+
+## Phase 1 完成清單
+- [x] 做了：依已批准設計稿完成 PR23（KubeJS split）
+- [x] 做了：修改前先建立可回退備份，且備份放進 `backups/` 的 PR 專屬目錄
+- [x] 做了：新增 `app/services_impl/pipelines/kubejs_service.py`
+- [x] 做了：將 `run_kubejs_tooltip_service()` 自 `app/services.py` 抽離到新模組
+- [x] 做了：`app/services.py` 改為 re-export 新模組中的 KubeJS service
+- [x] 做了：完成 Validation checklist 內的 import smoke / view import smoke / UI guard test
+- [ ] 未做：`translation_view.py` UI 改版
+- [ ] 未做：`translation_tool/core/kubejs_translator.py` 重構
+- [ ] 未做：KubeJS 專屬額外 smoke test
+
+---
+
+## 刪除/移除/替換說明（若有，固定放這裡）
+
+### 刪除項目：`app/services.py` 內 inline `run_kubejs_tooltip_service()` 實作
+- **為什麼改**：PR23 的目標是把 `app/services.py` 內的 KubeJS pipeline wrapper 抽離到 `services_impl/pipelines/`，讓 `services.py` 更接近單純 façade，而不是持續堆疊各種 pipeline 細節。
+- **為什麼能刪**：原本實作已搬到 `app/services_impl/pipelines/kubejs_service.py`，而且 `app/services.py` 仍保留同名 re-export，所以既有 caller 不需要改。
+- **目前誰在用 / 沒人在用**：實際 caller 為 `app/views/translation_view.py` 的 lazy import 區塊，以及 `_run_kjs()` 內呼叫 `run_kubejs_tooltip_service(...)`。沒有在 `main.py` / `tests` 看到其他直接 caller。
+- **替代路徑是什麼**：實作改由 `app/services_impl/pipelines/kubejs_service.py::run_kubejs_tooltip_service` 提供；對外入口仍由 `app/services.py` re-export。
+- **風險是什麼**：若 re-export 漏掉，`translation_view.py` 的 lazy import 會失敗，導致 KubeJS service 變成 `None`；若搬移時 `step_extract / step_translate / step_inject / write_new_cache` 傳遞錯位，KubeJS 行為會回歸；若把目前的 error handling 改成額外 `session.add_log()`，UI log 行為會改變。
+- **我是怎麼驗證的**：執行 `uv run python -c "from app.services import run_kubejs_tooltip_service"`、`uv run python -c "from app.views.translation_view import TranslationView; print('ok')"`、`uv run pytest -q tests/test_ui_refactor_guard.py`，均通過。
+
+---
+
+## What was done
+
+### 1. 新增 `app/services_impl/pipelines/kubejs_service.py`
+新增 KubeJS 專用 pipeline service 模組，將原本的 `run_kubejs_tooltip_service()` 搬入。
+
+這次保留不變的點：
+- 函式簽名不變
+- `dry_run` / `step_extract` / `step_translate` / `step_inject` / `write_new_cache` 參數與順序不變
+- 仍在 service 內呼叫 `run_kubejs_pipeline(...)`
+- `session.start()` / `session.finish()` / `session.set_error()` 行為不變
+- `UI_LOG_HANDLER.set_session(None)` 行為不變
+- error handling 仍維持目前作法：`logger.error(...)` 後只 `session.set_error()`，**不額外 `session.add_log()`**
+
+### 2. 新模組內自行接回 logger config 更新責任
+原本 KubeJS wrapper 直接呼叫 `services.py::update_logger_config()`。
+搬移後，新的 `kubejs_service.py` 透過：
+- `app.services_impl.config_service._load_app_config`
+- `app.services_impl.logging_service.update_logger_config(...)`
+
+在模組內建立 `_update_logger_config()`，維持每次任務開始前都重新套用 logger config 的行為。
+
+這樣做的理由：
+- 避免 `kubejs_service.py` 反向 import `app.services` 造成 circular import
+- 保住原本 runtime 行為，不改 caller
+
+### 3. `app/services.py` 改為 façade / re-export
+`app/services.py` 的 KubeJS 區塊已改成：
+- 刪除 inline `run_kubejs_tooltip_service()`
+- 新增：
+  - `from app.services_impl.pipelines.kubejs_service import run_kubejs_tooltip_service`
+
+效果是：
+- `TranslationView` 不需要改 import
+- lazy import fallback 邏輯維持原樣
+- 本顆 PR 只改 service 實作位置，不動 UI
+- `services.py` 繼續往薄 façade 收斂
+
+### 4. 這顆 PR 刻意不碰 `kubejs_translator.py`
+這次**沒有**修改 `translation_tool/core/kubejs_translator.py`。
+原因：
+- PR23 的目標是 service split，不是 core KubeJS refactor
+- 如果這顆 PR 同時改 wrapper 與 core pipeline，問題一出來很難切責任
+- KubeJS 的 error handling 本來就和 FTB / MD 不完全相同，更不該在這顆 PR 亂動
+
+### 5. 備份位置
+本次修改前已建立可回退備份：
+- `backups/pr23-kubejs-split-20260311-2344/app/services.py`
+
+依目前專案備份規則，備份統一放在 `backups/<pr-slug-timestamp>/`，並保留原相對路徑。
+
+---
+
+## Important findings
+- KubeJS 與 FTB / MD 同掛在 `TranslationView`，但 error handling 細節不同；獨立一顆 PR 是對的。
+- `translation_view.py` 採 `try/except` lazy import，所以驗證時一定要直接做 view import smoke，單看 `from app.services import ...` 不夠。
+- 這顆 PR 的核心原則依然是：只搬位置，不改行為。
+
+---
+
+## Not included in this PR
+這個 PR **沒有做** 以下事情：
+- 沒有修改 `app/views/translation_view.py`
+- 沒有修改 `translation_tool/core/kubejs_translator.py`
+- 沒有新增 KubeJS 專屬 smoke test
+- 沒有清理其他無關的 `services.py` 殘留 import
+- 沒有碰 MD / QC 線
+
+---
+
+## Next step
+- PR24：MD split
+- PR25：services façade cleanup（排除 QC / checkers）
+
+---
+
+## Validation checklist
+- [x] `uv run python -c "from app.services_impl.pipelines import kubejs_service"`
+- [x] `uv run python -c "from app.services import run_kubejs_tooltip_service"`
+- [x] `uv run python -c "from app.views.translation_view import TranslationView; print('ok')"`
+- [x] `uv run pytest -q tests/test_ui_refactor_guard.py`
+
+---
+
+## Test result
+```text
+$ uv run python -c "from app.services_impl.pipelines import kubejs_service"
+(no output)
+
+$ uv run python -c "from app.services import run_kubejs_tooltip_service"
+(no output)
+
+$ uv run python -c "from app.views.translation_view import TranslationView; print('ok')"
+ok
+
+$ uv run pytest -q tests/test_ui_refactor_guard.py
+......                                                                   [100%]
+6 passed in 0.01s
+```

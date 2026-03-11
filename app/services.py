@@ -95,46 +95,9 @@ from app.services_impl.pipelines.extract_service import (
 # 注意：services.py 仍 re-export 同名符號，維持 translation_view.py 的 lazy import 相容。
 from app.services_impl.pipelines.ftb_service import run_ftb_translation_service
 
-
-def run_kubejs_tooltip_service(
-    input_dir: str,
-    session,
-    output_dir: str | None,
-    dry_run: bool = False,
-    step_extract: bool = True,
-    step_translate: bool = True,
-    step_inject: bool = True,
-    write_new_cache: bool = True,
-):
-    update_logger_config()
-    try:
-        session.start()
-        UI_LOG_HANDLER.set_session(session)
-
-        # ✅ 只呼叫 pipeline 入口（import 路徑請對齊你檔案放的位置）
-        from translation_tool.core.kubejs_translator import run_kubejs_pipeline
-
-        run_kubejs_pipeline(
-            input_dir=input_dir,
-            output_dir=output_dir,
-            session=session,
-            dry_run=dry_run,
-            step_extract=step_extract,
-            step_translate=step_translate,
-            step_inject=step_inject,
-            write_new_cache=write_new_cache,
-        )
-
-        session.finish()
-
-    except Exception as e:
-        full_traceback = traceback.format_exc()
-        logger.error(f"[致命錯誤] KubeJS 服務失敗：{e}\n{full_traceback}")
-        # ✅ UI_LOG_HANDLER 已接好：logger.error 會出現在 UI，所以不用 session.add_log
-        session.set_error()
-
-    finally:
-        UI_LOG_HANDLER.set_session(None)
+# PR23：KubeJS UI services 抽離至 app.services_impl.pipelines.kubejs_service。
+# 注意：services.py 仍 re-export 同名符號，維持 translation_view.py 的 lazy import 相容。
+from app.services_impl.pipelines.kubejs_service import run_kubejs_tooltip_service
 
 
 def run_md_translation_service(
