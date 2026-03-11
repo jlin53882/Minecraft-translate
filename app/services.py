@@ -33,7 +33,6 @@ from app.services_impl.logging_service import (
 )
 
 # 核心演算法層的匯入
-from translation_tool.core.ftb_translator import translate_directory_generator
 # PR15：config / rules IO 抽離到 services_impl。
 from app.services_impl.config_service import (
     PROJECT_ROOT,
@@ -92,48 +91,9 @@ from app.services_impl.pipelines.extract_service import (
 )
 
 
-# app/services.py
-def run_ftb_translation_service(
-    directory_path: str,
-    session,
-    output_dir: str | None,
-    dry_run: bool = False,   # ✅ 新增
-    step_export: bool = True,
-    step_clean: bool = True,
-    step_translate: bool = True,
-    step_inject: bool = True,
-    write_new_cache: bool = True,   # ✅ 新增
-):
-    # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
-    update_logger_config()
-    try:
-        session.start()
-        UI_LOG_HANDLER.set_session(session)
-
-        from translation_tool.core.ftb_translator import run_ftb_pipeline
-
-        run_ftb_pipeline(
-            directory_path,
-            session=session,
-            output_dir=output_dir,
-            dry_run=dry_run,
-            step_export=step_export,
-            step_clean=step_clean,
-            step_translate=step_translate,
-            step_inject=step_inject,
-            write_new_cache=write_new_cache,
-        )
-
-        session.finish()
-
-    except Exception as e:
-        full_traceback = traceback.format_exc()
-        logger.error(f"[致命錯誤] FTB 服務失敗：{e}\n{full_traceback}")
-        session.add_log(f"[致命錯誤] {e}\n{full_traceback}")
-        session.set_error()
-
-    finally:
-        UI_LOG_HANDLER.set_session(None)
+# PR22：FTB UI services 抽離至 app.services_impl.pipelines.ftb_service。
+# 注意：services.py 仍 re-export 同名符號，維持 translation_view.py 的 lazy import 相容。
+from app.services_impl.pipelines.ftb_service import run_ftb_translation_service
 
 
 def run_kubejs_tooltip_service(
