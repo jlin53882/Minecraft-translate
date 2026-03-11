@@ -37,7 +37,18 @@ from app.services_impl.logging_service import (
 from translation_tool.core.ftb_translator import translate_directory_generator
 from translation_tool.core.lang_merger import merge_zhcn_to_zhtw_from_zip
 from translation_tool.core.jar_processor import extract_lang_files_generator, extract_book_files_generator
-from translation_tool.utils.text_processor import load_replace_rules as load_rules_core, save_replace_rules as save_rules_core
+# PR15：config / rules IO 抽離到 services_impl。
+from app.services_impl.config_service import (
+    PROJECT_ROOT,
+    CONFIG_PATH,
+    REPLACE_RULES_PATH,
+    _load_app_config,
+    _save_app_config,
+    load_config_json,
+    save_config_json,
+    load_replace_rules,
+    save_replace_rules,
+)
 from translation_tool.utils.species_cache import lookup_species_name, is_potential_species_name
 from translation_tool.core.lm_translator import translate_directory_generator as lm_translate_gen
 from translation_tool.core.output_bundler import bundle_outputs_generator
@@ -50,49 +61,8 @@ from translation_tool.utils import cache_manager
 from translation_tool.utils.log_unit import log_warning, log_error, log_debug, log_info
 
 
-# --- 檔案路徑設定 ---
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CONFIG_PATH = str(PROJECT_ROOT / "config.json")
-REPLACE_RULES_PATH = str(PROJECT_ROOT / "replace_rules.json")
-
-
-def _load_app_config():
-    """讀取 app 設定（service 層唯一入口）。
-
-    維護目的：
-    - 把 service 層對 config_manager 的依賴集中在單一地方。
-    - 未來若要改設定來源（例如環境變數/多設定檔/快取），優先改這裡，
-      避免 service 各處散落 `load_config()` 呼叫點。
-    """
-    from translation_tool.utils.config_manager import load_config
-
-    return load_config(CONFIG_PATH)
-
-
-def _save_app_config(config):
-    """儲存 app 設定（service 層唯一入口）。
-
-    與 `_load_app_config()` 成對：
-    - service 層只知道「要存設定」，不應綁死底層儲存細節。
-    - 之後若要加上寫入驗證/寫入鎖/異動通知，也集中在這裡處理。
-    """
-    from translation_tool.utils.config_manager import save_config
-
-    return save_config(config, CONFIG_PATH)
-
-
-# --- 檔案讀寫服務 ---
-def load_replace_rules():
-    return load_rules_core(REPLACE_RULES_PATH)
-
-def save_replace_rules(rules):
-    save_rules_core(REPLACE_RULES_PATH, rules)
-
-def load_config_json():
-    return _load_app_config()
-
-def save_config_json(config):
-    _save_app_config(config)
+# PR15：config / rules IO 抽離至 app.services_impl.config_service。
+# 注意：services.py 仍 re-export 同名符號，維持 views 的 import 相容。
 
 # ------------------------------------------------------
 # ---------------- 核心功能服務（含 log 限制） ----------------
