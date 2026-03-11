@@ -19,7 +19,6 @@
 
 # /minecraft_translator_flet/translation_tool/utils/cache_manager.py (正式版)
 
-import os
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -29,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 # --- 修正後的 import 路徑 ---
 import orjson as json
-from .config_manager import load_config
+from .config_manager import get_project_root, load_config, resolve_project_path
 from . import cache_shards, cache_store
 
 log = logging.getLogger(__name__)
@@ -82,17 +81,13 @@ def _load_shard_file(f_path: Path) -> dict:
 def _get_cache_root() -> Path:
     """取得快取根目錄。
 
-    注意：目前仍以 `os.getcwd()` 作為專案根目錄（歷史行為）。
-    這代表：若上層程式在不同工作目錄啟動，快取可能落到非預期位置。
-
-    本次不改動行為（避免破壞既有流程），但維護時請特別留意：
-    - UI / CLI 的啟動目錄是否固定
-    - 是否應改為以本檔案所在路徑推導 project root（類似 app/services.py 的做法）
+    PR27 起改為以 project root 解析，避免 legacy cwd 依賴導致：
+    - 從不同工作目錄啟動時快取落到錯誤位置
+    - restore / history / backup 流程抓到不存在的舊路徑
     """
     translation_config = load_config().get("translator", {})
-    project_root = Path(os.getcwd())
     cache_dir_name = translation_config.get("cache_directory", _CACHE_DIR_NAME)
-    return project_root / cache_dir_name
+    return resolve_project_path(cache_dir_name)
 
 
 def _load_cache_type(cache_type: str):
@@ -410,7 +405,7 @@ def get_cache_overview() -> Dict[str, Any]:
     try:
         translation_config = load_config().get("translator", {})
         cache_dir_name = translation_config.get("cache_directory", _CACHE_DIR_NAME)
-        cache_root = str((Path(os.getcwd()) / cache_dir_name).resolve())
+        cache_root = str(resolve_project_path(cache_dir_name).resolve())
     except Exception:
         cache_root = ""
 
