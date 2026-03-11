@@ -10,7 +10,7 @@ import flet as ft
 # UI 共用元件：統一按鈕樣式（先套用在總覽區，避免一次改動過大）
 from app.ui.components import primary_button, secondary_button
 
-from app.views.cache_manger.cache_overview_panel import build_overview_page
+from app.views.cache_manager.cache_overview_panel import build_overview_page
 from app.services import (
     cache_get_entry_service,
     cache_get_overview_service,
@@ -1103,7 +1103,7 @@ class CacheView(ft.Column):
     def _build_overview_page(self):
         """總覽頁組裝（非查詢區）。
 
-        已抽到 cache_manger/cache_overview_panel.py：
+        已抽到 cache_manager/cache_overview_panel.py：
         - 本檔保留事件路由與資料狀態
         - 大段 UI 結構移到 panel，降低主檔閱讀負擔
         """

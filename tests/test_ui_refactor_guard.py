@@ -53,20 +53,20 @@ def test_cache_view_is_primary_entry_only():
 
 def test_cache_overview_is_split_to_panel_module():
     entry_src = _read("app/views/cache_view.py")
-    assert "from app.views.cache_manger.cache_overview_panel import build_overview_page" in entry_src
+    assert "from app.views.cache_manager.cache_overview_panel import build_overview_page" in entry_src
     assert "return build_overview_page(" in entry_src
 
 
-def test_cache_related_modules_are_grouped_under_cache_manger():
-    """Cache 相關模組應集中在 cache_manger 資料夾，避免 views 根目錄混亂。"""
+def test_cache_related_modules_are_grouped_under_cache_manager():
+    """Cache 相關模組應集中在 cache_manager 資料夾，避免 views 根目錄混亂。"""
 
-    assert not (APP_VIEWS / "cache_manger" / "cache_view_impl.py").exists()
-    assert (APP_VIEWS / "cache_manger" / "cache_controller.py").exists()
-    assert (APP_VIEWS / "cache_manger" / "cache_presenter.py").exists()
-    assert (APP_VIEWS / "cache_manger" / "cache_types.py").exists()
-    assert (APP_VIEWS / "cache_manger" / "cache_overview_panel.py").exists()
-    assert (APP_VIEWS / "cache_manger" / "cache_log_panel.py").exists()
-    assert (APP_VIEWS / "cache_manger" / "cache_shared_widgets.py").exists()
+    assert not (APP_VIEWS / "cache_manager" / "cache_view_impl.py").exists()
+    assert (APP_VIEWS / "cache_manager" / "cache_controller.py").exists()
+    assert (APP_VIEWS / "cache_manager" / "cache_presenter.py").exists()
+    assert (APP_VIEWS / "cache_manager" / "cache_types.py").exists()
+    assert (APP_VIEWS / "cache_manager" / "cache_overview_panel.py").exists()
+    assert (APP_VIEWS / "cache_manager" / "cache_log_panel.py").exists()
+    assert (APP_VIEWS / "cache_manager" / "cache_shared_widgets.py").exists()
 
     assert not (APP_VIEWS / "cache_controller.py").exists()
     assert not (APP_VIEWS / "cache_presenter.py").exists()
