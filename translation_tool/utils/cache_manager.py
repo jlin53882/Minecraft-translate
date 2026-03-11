@@ -22,14 +22,14 @@ _cache_lock = threading.Lock() # ✅ 建立全域鎖定物件
 CACHE_TYPES = ["lang", "patchouli", "ftbquests", "kubejs","md"]
 
 _is_dirty: dict[str, bool] = {k: False for k in CACHE_TYPES} # 標記各類型快取是否有變更
-# 新增：追蹤本次 Session 新增的翻譯，用於寫入新分
+# 新增：追蹤本次執行階段新增的翻譯，用於寫入新分片
 _session_new_entries: dict[str, dict] = {k: {} for k in CACHE_TYPES}
 
 
 _CACHE_DIR_NAME = "快取資料夾"
 
 # =========================
-# Cache 設定（方案 A：依用途分檔）
+# 快取設定（方案 A：依用途分檔）
 # =========================
 
 # --- 執行時期變數 ---
@@ -115,9 +115,9 @@ def initialize_translation_cache():
 # --- 核心快取操作函式 ---
 def reload_translation_cache():
     """
-    強制重新讀取所有 cache shard。
-    - 會清空記憶體 cache 並重跑 initialize_translation_cache()
-    - 若同時有其他執行緒在讀取 cache，呼叫端需自行協調
+    強制重新讀取所有快取分片。
+    - 會清空記憶體快取並重跑 initialize_translation_cache()
+    - 若同時有其他執行緒在讀取快取，呼叫端需自行協調
     """
     global _translation_cache, _cache_file_path, _initialized
     with _cache_lock:
@@ -145,11 +145,10 @@ def reload_translation_cache_type(cache_type: str):
     _load_cache_type(cache_type)
 
 def _write_json_atomic(path: Path, data: dict):
-    """Compatibility wrapper for shard persistence writes.
+    """分片寫入的相容層包裝函式。
 
-    The wrapper intentionally forwards the underlying return value as-is.
-    Today the callee returns ``None``; preserving transparent passthrough keeps
-    this facade stable if a future success/failure return contract is added.
+    這裡刻意原樣回傳底層函式的結果；目前底層回傳 ``None``。
+    這樣做可在未來若新增成功/失敗回傳契約時，維持此層介面不需改動。
     """
     return cache_shards._write_json_atomic(path, data)
 
@@ -273,14 +272,13 @@ def get_cache_size_old() -> int:
 # cache_manager.py
 
 """
-快速對照表（記住這張就好）
-情境	               用哪個
-大量 item cache 分流	get_cache_dict_ref()
-fast split	           fast_split_items_by_cache()
-單筆 cache 查詢	        get_cache_entry()
-Recorder / QC	       get_cache_entry()
-Debug / Preview	        get_cache_entry()
-安全 fallback	        get_cache_entry()
+快速對照表（維護時常用）
+情境                     建議函式
+大量條目分流讀取          get_cache_dict_ref()
+單筆快取查詢             get_cache_entry()
+紀錄器 / 品質檢查流程     get_cache_entry()
+除錯 / 預覽              get_cache_entry()
+需要安全備援            get_cache_entry()
 """
 def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
     """
@@ -392,7 +390,7 @@ def force_rotate_shard(cache_type: str) -> bool:
 
 
 # =========================
-# 快取搜尋功能（PR12：委派 cache_search orchestration）
+# 快取搜尋功能（PR12：委派 cache_search 協調流程）
 # =========================
 
 _search_orchestrator = None

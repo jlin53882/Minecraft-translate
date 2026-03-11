@@ -421,10 +421,15 @@ def search_cache(
 
 
 # =============================================================================
-# Search orchestration helpers (PR12)
+# 搜尋協調輔助函式（PR12）
 # =============================================================================
 
 def _extract_path_from_composite_key(key: str, src: str = "") -> str:
+    """從複合 key 拆出路徑段。
+
+    目前 key 可能長成 `path|src`；若提供 src，會優先以尾段對齊拆分，
+    避免 src 本身含有 `|` 時誤切。
+    """
     if not isinstance(key, str) or not key:
         return ""
     if src and key.endswith(f"|{src}"):
@@ -435,6 +440,10 @@ def _extract_path_from_composite_key(key: str, src: str = "") -> str:
 
 
 def _infer_search_path(cache_type: str, key: str, entry: Dict[str, Any] | None) -> str:
+    """推導索引要寫入的 path 欄位。
+
+    優先使用 entry 內明確提供的 path；若缺少，再依 cache_type 與 key 形態推導。
+    """
     if isinstance(entry, dict):
         explicit = str(entry.get("path") or "").strip()
         if explicit:
@@ -452,6 +461,10 @@ def _infer_search_path(cache_type: str, key: str, entry: Dict[str, Any] | None) 
 
 
 def _infer_search_mod(cache_type: str, key: str, path: str, entry: Dict[str, Any] | None) -> str:
+    """推導索引要寫入的 mod 欄位。
+
+    規則依序為：entry 明確值 > 路徑 anchor(`assets`/`data`) > 類型特定 fallback。
+    """
     if isinstance(entry, dict):
         explicit = str(entry.get("mod") or "").strip()
         if explicit:
@@ -480,12 +493,14 @@ def _infer_search_mod(cache_type: str, key: str, path: str, entry: Dict[str, Any
 
 
 def _build_search_metadata(cache_type: str, key: str, entry: Dict[str, Any] | None) -> Dict[str, str]:
+    """組合單筆索引所需的 metadata（mod/path）。"""
     path = _infer_search_path(cache_type, key, entry)
     mod = _infer_search_mod(cache_type, key, path, entry)
     return {"mod": mod, "path": path}
 
 
 def build_index_entries(cache_type: str, cache_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """把單一 cache_type 的記憶體字典轉成可批次索引的條目陣列。"""
     entries: List[Dict[str, Any]] = []
     for key, entry in cache_dict.items():
         if not isinstance(entry, dict):
@@ -505,6 +520,7 @@ def rebuild_from_cache_dicts(
     cache_types: List[str],
     cache_state: Dict[str, Dict[str, Any]],
 ) -> int:
+    """依序重建多個類型的索引，回傳實際索引筆數。"""
     total_indexed = 0
     for cache_type in cache_types:
         cache_dict = cache_store.get_cache_type_dict(cache_state, cache_type)
@@ -516,23 +532,32 @@ def rebuild_from_cache_dicts(
 
 
 class SearchOrchestrator:
+    """快取搜尋協調器。
+
+    職責：管理搜尋引擎生命週期、提供重建索引流程，並封裝查詢入口。
+    """
+
     def __init__(self, cache_root_getter: Callable[[], Path]):
+        """以可注入的 cache root getter 建立協調器。"""
         self._cache_root_getter = cache_root_getter
         self._engine: Optional[CacheSearchEngine] = None
         self._lock = threading.RLock()
 
     def _db_path(self) -> Path:
+        """回傳搜尋索引資料庫路徑，必要時先建立目錄。"""
         cache_root = self._cache_root_getter()
         cache_root.mkdir(parents=True, exist_ok=True)
         return cache_root / "search_index.db"
 
     def get_engine(self) -> Optional[CacheSearchEngine]:
+        """取得（或延遲建立）共享搜尋引擎實例。"""
         with self._lock:
             if self._engine is None:
                 self._engine = CacheSearchEngine(str(self._db_path()))
             return self._engine
 
     def rebuild_search_index(self, cache_types: List[str], cache_state: Dict[str, Dict[str, Any]]) -> int:
+        """以暫存檔重建整體索引，完成後原子替換正式索引檔。"""
         db_path = self._db_path()
         tmp_path = db_path.with_name(f"{db_path.name}.tmp-{os.getpid()}-{threading.get_ident()}")
         tmp_engine: Optional[CacheSearchEngine] = None
@@ -559,6 +584,7 @@ class SearchOrchestrator:
                 tmp_path.unlink(missing_ok=True)
 
     def rebuild_search_index_for_type(self, cache_type: str, cache_state: Dict[str, Dict[str, Any]]) -> int:
+        """只重建單一 cache_type 的索引資料。"""
         engine = self.get_engine()
         if engine is None:
             return 0
@@ -570,6 +596,7 @@ class SearchOrchestrator:
         return len(entries)
 
     def search_cache(self, query: str, cache_type: str = None, limit: int = 50, use_fuzzy: bool = True) -> List[Dict]:
+        """統一封裝查詢流程，必要時再做模糊重排序。"""
         engine = self.get_engine()
         if engine is None:
             return []
@@ -586,6 +613,7 @@ class SearchOrchestrator:
         threshold: float = 0.6,
         limit: int = 20,
     ) -> List[Dict]:
+        """先取候選，再以來源文字相似度過濾並截斷結果。"""
         candidates = self.search_cache(text, cache_type=cache_type, limit=limit * 2, use_fuzzy=False)
         if not candidates:
             return []
@@ -594,6 +622,7 @@ class SearchOrchestrator:
         return similar[:limit]
 
     def close(self):
+        """關閉並釋放協調器持有的搜尋引擎連線。"""
         with self._lock:
             if self._engine is not None:
                 self._engine.close()
