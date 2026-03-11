@@ -21,6 +21,13 @@ class CacheController:
         self.current_action_id = 0
 
     def begin_action(self) -> int:
+        """開始一個新動作並回傳 action_id。
+
+        呼叫端通常會：
+        - 在按鈕事件觸發時先 begin_action()
+        - 把回傳 action_id 透傳進背景任務
+        - 背景任務回來更新 UI 前先用 is_current() 檢查是否仍是最新動作
+        """
         self._seq += 1
         self.current_action_id = self._seq
         return self.current_action_id

@@ -125,16 +125,25 @@ REPLACE_RULES_PATH = str(PROJECT_ROOT / "replace_rules.json")
 
 
 def _load_app_config():
-    # 保留這層包裝的目的，是把 service 層對 config_manager 的依賴集中在單一入口。
-    # 之後如果要改成別的設定來源或做快取/注入，優先改這裡，不要讓 service 呼叫點四散。
+    """讀取 app 設定（service 層唯一入口）。
+
+    維護目的：
+    - 把 service 層對 config_manager 的依賴集中在單一地方。
+    - 未來若要改設定來源（例如環境變數/多設定檔/快取），優先改這裡，
+      避免 service 各處散落 `load_config()` 呼叫點。
+    """
     from translation_tool.utils.config_manager import load_config
 
     return load_config(CONFIG_PATH)
 
 
 def _save_app_config(config):
-    # 與 _load_app_config() 成對：service 層只知道「存設定」，
-    # 不直接綁死 config_manager 的實作細節。
+    """儲存 app 設定（service 層唯一入口）。
+
+    與 `_load_app_config()` 成對：
+    - service 層只知道「要存設定」，不應綁死底層儲存細節。
+    - 之後若要加上寫入驗證/寫入鎖/異動通知，也集中在這裡處理。
+    """
     from translation_tool.utils.config_manager import save_config
 
     return save_config(config, CONFIG_PATH)
@@ -207,6 +216,17 @@ def run_lm_translation_service(
     export_lang: bool = False,  # 新增參數
     write_new_cache: bool = True,  # 新增參數
 ):
+    """執行 LM 翻譯流程（service 層包裝）。
+
+    重點：
+    - 內部呼叫 core generator，並把 generator 的 update_dict 轉成 TaskSession 更新。
+    - 每次任務開始都會重讀 config 並更新 logger（讓 UI 修改 log level 後可立即生效）。
+
+    風險/邊界：
+    - 背景 thread 執行時，任何例外都必須轉成 session.add_log + session.set_error，
+      避免 UI 沒訊息但任務已中止。
+    - dry_run=True 時只做分析/預覽，不應送出任何實際翻譯請求。
+    """
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
     update_logger_config() 
 

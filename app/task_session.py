@@ -38,6 +38,10 @@ class TaskSession:
     # ---------- 狀態寫入（Worker 使用） ----------
 
     def set_progress(self, value: float):
+        """更新 progress（0.0～1.0）。
+
+        注意：會在此處做 clamp，避免 UI 因上層誤傳 >1 或 <0 造成顯示錯亂。
+        """
         with self._lock:
             self.progress = max(0.0, min(1.0, value))
 
@@ -67,11 +71,11 @@ class TaskSession:
     # ---------- UI 讀取（UI 使用） ----------
 
     def snapshot(self):
-        """
-        回傳 UI 用的不可變快照。
+        """回傳 UI 用的不可變快照。
 
-        UI 不直接拿著內部 deque / 欄位引用來讀，
-        而是每次取一份快照，避免畫面更新時撞上背景執行緒正在寫入。
+        為什麼要快照：
+        - UI 不直接持有 deque / 欄位引用，避免 UI 更新時撞上 worker 正在寫入。
+        - 回傳的新 dict/list 是可安全渲染的資料結構（但仍可能很大，log 量請用 max_logs 控制）。
         """
         with self._lock:
             return {

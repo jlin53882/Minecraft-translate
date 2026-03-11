@@ -28,7 +28,12 @@ logger = logging.getLogger("main_app")
 
 
 def bootstrap_runtime():
-    """初始化 runtime，但只應在 script entry 被呼叫一次。"""
+    """初始化 runtime（config + logging），只應在 script entry 被呼叫一次。
+
+    維護注意：
+    - main.py 可能被測試 import，因此這段必須由 `__main__` 主動呼叫，
+      不能在 import 階段自動執行。
+    """
 
     # main.py 可以被測試或其他模組 import；
     # runtime 初始化（讀 config / 設定 logging）不能在 import 階段偷跑，
