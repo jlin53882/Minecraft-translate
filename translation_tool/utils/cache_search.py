@@ -17,11 +17,14 @@
     results = engine.search("你好", limit=50)
 """
 
+import os
 import sqlite3
 import threading
 from pathlib import Path
 from difflib import SequenceMatcher
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any, Callable
+
+from . import cache_store
 
 
 # =============================================================================
@@ -406,18 +409,7 @@ def search_cache(
     fuzzy: bool = True,
     threshold: float = 0.6
 ) -> List[Dict]:
-    """快取搜尋的便利函式
-
-    Args:
-        query: 搜尋關鍵字
-        db_path: 資料庫路徑
-        limit: 結果數量上限
-        fuzzy: 是否使用模糊比對
-        threshold: 模糊比對門檻
-
-    Returns:
-        搜尋結果清單
-    """
+    """快取搜尋的便利函式"""
     with CacheSearchEngine(db_path) as engine:
         results = engine.search(query, limit)
 
@@ -426,3 +418,183 @@ def search_cache(
             results = matcher.rank_results(query, results)
 
         return results
+
+
+# =============================================================================
+# Search orchestration helpers (PR12)
+# =============================================================================
+
+def _extract_path_from_composite_key(key: str, src: str = "") -> str:
+    if not isinstance(key, str) or not key:
+        return ""
+    if src and key.endswith(f"|{src}"):
+        return key[: -(len(src) + 1)]
+    if "|" in key:
+        return key.split("|", 1)[0]
+    return key
+
+
+def _infer_search_path(cache_type: str, key: str, entry: Dict[str, Any] | None) -> str:
+    if isinstance(entry, dict):
+        explicit = str(entry.get("path") or "").strip()
+        if explicit:
+            return explicit
+
+    src = str((entry or {}).get("src") or "") if isinstance(entry, dict) else ""
+
+    if cache_type in {"patchouli", "ftbquests", "kubejs", "md"}:
+        return _extract_path_from_composite_key(key, src)
+
+    if cache_type == "lang":
+        return str(key or "")
+
+    return _extract_path_from_composite_key(key, src)
+
+
+def _infer_search_mod(cache_type: str, key: str, path: str, entry: Dict[str, Any] | None) -> str:
+    if isinstance(entry, dict):
+        explicit = str(entry.get("mod") or "").strip()
+        if explicit:
+            return explicit
+
+    norm_path = str(path or "").replace("\\", "/").strip("/")
+    parts = [p for p in norm_path.split("/") if p]
+
+    for anchor in ("assets", "data"):
+        if anchor in parts:
+            idx = parts.index(anchor)
+            if idx + 1 < len(parts):
+                return parts[idx + 1]
+
+    if cache_type == "lang":
+        dotted = [p for p in str(key or "").split(".") if p]
+        if len(dotted) >= 2:
+            return dotted[1]
+
+    fallback = {
+        "ftbquests": "ftbquests",
+        "kubejs": "kubejs",
+        "md": "md",
+    }
+    return fallback.get(cache_type, "")
+
+
+def _build_search_metadata(cache_type: str, key: str, entry: Dict[str, Any] | None) -> Dict[str, str]:
+    path = _infer_search_path(cache_type, key, entry)
+    mod = _infer_search_mod(cache_type, key, path, entry)
+    return {"mod": mod, "path": path}
+
+
+def build_index_entries(cache_type: str, cache_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+    entries: List[Dict[str, Any]] = []
+    for key, entry in cache_dict.items():
+        if not isinstance(entry, dict):
+            continue
+        entries.append({
+            "key": key,
+            "src": entry.get("src", ""),
+            "dst": entry.get("dst", ""),
+            "type": cache_type,
+            **_build_search_metadata(cache_type, key, entry),
+        })
+    return entries
+
+
+def rebuild_from_cache_dicts(
+    engine: CacheSearchEngine,
+    cache_types: List[str],
+    cache_state: Dict[str, Dict[str, Any]],
+) -> int:
+    total_indexed = 0
+    for cache_type in cache_types:
+        cache_dict = cache_store.get_cache_type_dict(cache_state, cache_type)
+        entries = build_index_entries(cache_type, cache_dict)
+        if entries:
+            engine.index_batch(entries)
+            total_indexed += len(entries)
+    return total_indexed
+
+
+class SearchOrchestrator:
+    def __init__(self, cache_root_getter: Callable[[], Path]):
+        self._cache_root_getter = cache_root_getter
+        self._engine: Optional[CacheSearchEngine] = None
+        self._lock = threading.RLock()
+
+    def _db_path(self) -> Path:
+        cache_root = self._cache_root_getter()
+        cache_root.mkdir(parents=True, exist_ok=True)
+        return cache_root / "search_index.db"
+
+    def get_engine(self) -> Optional[CacheSearchEngine]:
+        with self._lock:
+            if self._engine is None:
+                self._engine = CacheSearchEngine(str(self._db_path()))
+            return self._engine
+
+    def rebuild_search_index(self, cache_types: List[str], cache_state: Dict[str, Dict[str, Any]]) -> int:
+        db_path = self._db_path()
+        tmp_path = db_path.with_name(f"{db_path.name}.tmp-{os.getpid()}-{threading.get_ident()}")
+        tmp_engine: Optional[CacheSearchEngine] = None
+        old_engine: Optional[CacheSearchEngine] = None
+        total_indexed = 0
+        try:
+            tmp_engine = CacheSearchEngine(str(tmp_path))
+            total_indexed = rebuild_from_cache_dicts(tmp_engine, cache_types, cache_state)
+            tmp_engine.close()
+            tmp_engine = None
+
+            with self._lock:
+                old_engine = self._engine
+                if old_engine is not None:
+                    old_engine.close()
+                os.replace(str(tmp_path), str(db_path))
+                self._engine = CacheSearchEngine(str(db_path))
+
+            return total_indexed
+        finally:
+            if tmp_engine is not None:
+                tmp_engine.close()
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+
+    def rebuild_search_index_for_type(self, cache_type: str, cache_state: Dict[str, Dict[str, Any]]) -> int:
+        engine = self.get_engine()
+        if engine is None:
+            return 0
+        engine.clear_index_by_type(cache_type)
+        cache_dict = cache_store.get_cache_type_dict(cache_state, cache_type)
+        entries = build_index_entries(cache_type, cache_dict)
+        if entries:
+            engine.index_batch(entries)
+        return len(entries)
+
+    def search_cache(self, query: str, cache_type: str = None, limit: int = 50, use_fuzzy: bool = True) -> List[Dict]:
+        engine = self.get_engine()
+        if engine is None:
+            return []
+        results = engine.search(query, limit=limit, cache_type=cache_type)
+        if use_fuzzy and results:
+            matcher = FuzzyMatcher()
+            results = matcher.rank_results(query, results)
+        return results
+
+    def find_similar_translations(
+        self,
+        text: str,
+        cache_type: str = None,
+        threshold: float = 0.6,
+        limit: int = 20,
+    ) -> List[Dict]:
+        candidates = self.search_cache(text, cache_type=cache_type, limit=limit * 2, use_fuzzy=False)
+        if not candidates:
+            return []
+        matcher = FuzzyMatcher()
+        similar = matcher.find_similar(text, candidates, threshold=threshold, key_field="src")
+        return similar[:limit]
+
+    def close(self):
+        with self._lock:
+            if self._engine is not None:
+                self._engine.close()
+                self._engine = None

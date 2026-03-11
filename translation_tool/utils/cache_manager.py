@@ -219,68 +219,6 @@ def _rotate_shard_if_needed(cache_type: str, data: dict):
         logger=log,
     )
 
-def _extract_path_from_composite_key(key: str, src: str = "") -> str:
-    """從 `path|source_text` 這類 composite key 取回 path。"""
-    if not isinstance(key, str) or not key:
-        return ""
-    if src and key.endswith(f"|{src}"):
-        return key[: -(len(src) + 1)]
-    if "|" in key:
-        return key.split("|", 1)[0]
-    return key
-
-
-def _infer_search_path(cache_type: str, key: str, entry: Dict[str, Any] | None) -> str:
-    if isinstance(entry, dict):
-        explicit = str(entry.get("path") or "").strip()
-        if explicit:
-            return explicit
-
-    src = str((entry or {}).get("src") or "") if isinstance(entry, dict) else ""
-
-    if cache_type in {"patchouli", "ftbquests", "kubejs", "md"}:
-        return _extract_path_from_composite_key(key, src)
-
-    if cache_type == "lang":
-        return str(key or "")
-
-    return _extract_path_from_composite_key(key, src)
-
-
-def _infer_search_mod(cache_type: str, key: str, path: str, entry: Dict[str, Any] | None) -> str:
-    if isinstance(entry, dict):
-        explicit = str(entry.get("mod") or "").strip()
-        if explicit:
-            return explicit
-
-    norm_path = str(path or "").replace("\\", "/").strip("/")
-    parts = [p for p in norm_path.split("/") if p]
-
-    for anchor in ("assets", "data"):
-        if anchor in parts:
-            idx = parts.index(anchor)
-            if idx + 1 < len(parts):
-                return parts[idx + 1]
-
-    if cache_type == "lang":
-        dotted = [p for p in str(key or "").split(".") if p]
-        if len(dotted) >= 2:
-            return dotted[1]
-
-    fallback = {
-        "ftbquests": "ftbquests",
-        "kubejs": "kubejs",
-        "md": "md",
-    }
-    return fallback.get(cache_type, "")
-
-
-def _build_search_metadata(cache_type: str, key: str, entry: Dict[str, Any] | None) -> Dict[str, str]:
-    path = _infer_search_path(cache_type, key, entry)
-    mod = _infer_search_mod(cache_type, key, path, entry)
-    return {"mod": mod, "path": path}
-
-
 def add_to_cache(
     cache_type: str,
     key: str,
@@ -454,133 +392,47 @@ def force_rotate_shard(cache_type: str) -> bool:
 
 
 # =========================
-# 快取搜尋功能（A3 改進）
+# 快取搜尋功能（PR12：委派 cache_search orchestration）
 # =========================
 
-# 全域搜尋引擎實例（延遲初始化）
-_search_engine = None
-_search_engine_lock = threading.Lock()
+_search_orchestrator = None
+_search_orchestrator_lock = threading.Lock()
+
+
+def _get_search_orchestrator():
+    global _search_orchestrator
+    if _search_orchestrator is None:
+        with _search_orchestrator_lock:
+            if _search_orchestrator is None:
+                from .cache_search import SearchOrchestrator
+                _search_orchestrator = SearchOrchestrator(_get_cache_root)
+    return _search_orchestrator
 
 
 def get_search_engine():
-    """取得全域搜尋引擎實例（單例模式）"""
-    global _search_engine
-    
-    if _search_engine is None:
-        with _search_engine_lock:
-            if _search_engine is None:  # Double-check locking
-                try:
-                    # 延遲導入避免循環依賴
-                    from .cache_search import CacheSearchEngine
-                    
-                    # 搜尋索引存放在快取根目錄
-                    cache_root = _get_cache_root()
-                    db_path = str(cache_root / "search_index.db")
-                    
-                    _search_engine = CacheSearchEngine(db_path)
-                    log.info(f"✅ 快取搜尋引擎已初始化: {db_path}")
-                except Exception as e:
-                    log.error(f"❌ 搜尋引擎初始化失敗: {e}", exc_info=True)
-                    _search_engine = None
-    
-    return _search_engine
+    orchestrator = _get_search_orchestrator()
+    try:
+        return orchestrator.get_engine()
+    except Exception as e:
+        log.error(f"❌ 搜尋引擎初始化失敗: {e}", exc_info=True)
+        return None
 
 
 def rebuild_search_index():
-    """重建搜尋索引（從記憶體快取）
-    
-    注意：這會清空舊索引並重新建立，可能需要幾秒鐘時間
-    """
-    global _search_engine
-    
     try:
         log.info("🔄 開始重建搜尋索引...")
-        
-        # 關閉舊的搜尋引擎（如果存在）
-        if _search_engine is not None:
-            try:
-                _search_engine.close()
-            except:
-                pass
-            _search_engine = None
-        
-        # 刪除舊的索引檔案（確保重建表格結構）
-        try:
-            cache_root = _get_cache_root()
-            db_path = cache_root / "search_index.db"
-            if db_path.exists():
-                import os
-                os.remove(str(db_path))
-                log.info("  ✓ 已刪除舊索引檔案")
-        except Exception as e:
-            log.warning(f"刪除舊索引失敗: {e}")
-        
-        # 重新初始化搜尋引擎（會建立新表格）
-        engine = get_search_engine()
-        if engine is None:
-            log.error("搜尋引擎初始化失敗")
-            return
-        
-        # 從記憶體快取重建
-        total_indexed = 0
-        for cache_type in CACHE_TYPES:
-            cache_dict = _translation_cache.get(cache_type, {})
-            
-            # 批次準備資料
-            entries = [
-                {
-                    'key': key,  # cache key（重要！）
-                    'src': entry.get('src', ''),
-                    'dst': entry.get('dst', ''),
-                    'type': cache_type,
-                    **_build_search_metadata(cache_type, key, entry),
-                }
-                for key, entry in cache_dict.items()
-                if isinstance(entry, dict)
-            ]
-            
-            if entries:
-                engine.index_batch(entries)
-                total_indexed += len(entries)
-                log.info(f"  ✓ {cache_type}: 已索引 {len(entries)} 條")
-        
+        total_indexed = _get_search_orchestrator().rebuild_search_index(CACHE_TYPES, _translation_cache)
         log.info(f"✅ 搜尋索引重建完成，共索引 {total_indexed} 條翻譯")
-    
     except Exception as e:
         log.error(f"❌ 重建搜尋索引失敗: {e}", exc_info=True)
 
 
 def rebuild_search_index_for_type(cache_type: str):
-    """重建單一 cache_type 的搜尋索引。"""
     if cache_type not in CACHE_TYPES:
         return
-
-    engine = get_search_engine()
-    if engine is None:
-        log.warning("搜尋引擎未初始化，無法重建單一分類索引")
-        return
-
     try:
-        # 先刪掉該分類舊索引
-        engine.clear_index_by_type(cache_type)
-
-        # 再重建該分類
-        cache_dict = _translation_cache.get(cache_type, {})
-        entries = [
-            {
-                'key': key,
-                'src': entry.get('src', ''),
-                'dst': entry.get('dst', ''),
-                'type': cache_type,
-                **_build_search_metadata(cache_type, key, entry),
-            }
-            for key, entry in cache_dict.items()
-            if isinstance(entry, dict)
-        ]
-
-        if entries:
-            engine.index_batch(entries)
-        log.info(f"✅ {cache_type} 索引重建完成（{len(entries)} 條）")
+        indexed = _get_search_orchestrator().rebuild_search_index_for_type(cache_type, _translation_cache)
+        log.info(f"✅ {cache_type} 索引重建完成（{indexed} 條）")
     except Exception as e:
         log.error(f"❌ {cache_type} 索引重建失敗: {e}", exc_info=True)
 
@@ -591,42 +443,13 @@ def search_cache(
     limit: int = 50,
     use_fuzzy: bool = True
 ) -> list:
-    """搜尋快取
-    
-    Args:
-        query: 搜尋關鍵字（可以是原文或譯文）
-        cache_type: 限定快取類型（lang/patchouli 等），None 表示搜尋全部
-        limit: 回傳結果數量上限
-        use_fuzzy: 是否使用模糊比對重新排序
-    
-    Returns:
-        搜尋結果清單，每個結果包含：
-        - src: 原文
-        - dst: 譯文
-        - type: 快取類型
-        - score: 相關度分數（越高越相關）
-    
-    Example:
-        results = search_cache("creeper", cache_type="lang", limit=20)
-        for r in results:
-            print(f"{r['src']} → {r['dst']} (score: {r.get('score', 0):.2f})")
-    """
-    engine = get_search_engine()
-    if engine is None:
-        log.warning("搜尋引擎未初始化")
-        return []
-    
     try:
-        results = engine.search(query, limit=limit, cache_type=cache_type)
-        
-        # 如果啟用模糊比對，使用 FuzzyMatcher 重新評分
-        if use_fuzzy and results:
-            from .cache_search import FuzzyMatcher
-            matcher = FuzzyMatcher()
-            results = matcher.rank_results(query, results)
-        
-        return results
-    
+        return _get_search_orchestrator().search_cache(
+            query=query,
+            cache_type=cache_type,
+            limit=limit,
+            use_fuzzy=use_fuzzy,
+        )
     except Exception as e:
         log.error(f"搜尋失敗: {e}", exc_info=True)
         return []
@@ -638,35 +461,16 @@ def find_similar_translations(
     threshold: float = 0.6,
     limit: int = 20
 ) -> list:
-    """找出相似的翻譯（基於模糊比對）
-    
-    Args:
-        text: 要比對的文字
-        cache_type: 限定快取類型
-        threshold: 相似度門檻（0~1）
-        limit: 結果數量上限
-    
-    Returns:
-        相似翻譯清單，包含 'similarity' 欄位（0~1）
-    """
-    from .cache_search import FuzzyMatcher
-    
-    # 先用搜尋引擎找候選項
-    candidates = search_cache(text, cache_type=cache_type, limit=limit * 2, use_fuzzy=False)
-    
-    if not candidates:
+    try:
+        return _get_search_orchestrator().find_similar_translations(
+            text=text,
+            cache_type=cache_type,
+            threshold=threshold,
+            limit=limit,
+        )
+    except Exception as e:
+        log.error(f"相似翻譯搜尋失敗: {e}", exc_info=True)
         return []
-    
-    # 模糊比對
-    matcher = FuzzyMatcher()
-    similar = matcher.find_similar(
-        text,
-        candidates,
-        threshold=threshold,
-        key_field='src'
-    )
-    
-    return similar[:limit]
 
 
 # --- 當模組被匯入時，自動執行初始化 ---
