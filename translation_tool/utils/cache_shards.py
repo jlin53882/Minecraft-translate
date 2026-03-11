@@ -8,12 +8,11 @@ import orjson as json
 
 
 def _write_json_atomic(path: Path, data: dict[str, Any]):
-    """Atomically replace ``path`` with JSON content.
+    """以原子方式將 JSON 內容覆寫到 ``path``。
 
-    The function intentionally has no meaningful return value today.
-    Callers may still choose to transparently forward the result so a future
-    success/failure return contract can be introduced without changing the
-    wrapper shape.
+    目前此函式沒有具語意的回傳值；
+    呼叫端若選擇直接透傳回傳結果，可在未來新增成功/失敗回傳契約時
+    免於同步調整外層包裝介面。
     """
     tmp_path = path.with_suffix(".tmp")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -27,6 +26,7 @@ def _get_active_shard_path(
     cache_type: str,
     active_shard_file: str,
 ) -> Path:
+    """取得目前作用中的分片檔路徑，必要時初始化 `.active` 指標。"""
     active_file = type_dir / active_shard_file
 
     if not active_file.exists():
@@ -57,6 +57,7 @@ def _rotate_shard_if_needed(
     active_shard_file: str,
     logger: logging.Logger | None = None,
 ) -> bool:
+    """當目前分片容量達上限時切到下一片，並回傳是否有旋轉。"""
     if len(data) < rolling_shard_size:
         return False
 
@@ -88,12 +89,13 @@ def _save_entries_to_active_shards(
     force_new_shard: bool = False,
     logger: logging.Logger | None = None,
 ):
+    """把多筆條目分段寫入 active shard，必要時自動切片。"""
     if not entries:
         return
 
     active_file = type_dir / active_shard_file
-    # Ensure the `.active` pointer exists before any branch below reads it
-    # directly. The returned path is intentionally ignored here.
+    # 先確保 `.active` 指標檔存在，避免下方分支直接讀取時找不到檔案。
+    # 這裡只需要副作用，不使用回傳路徑。
     _get_active_shard_path(
         type_dir=type_dir,
         cache_type=cache_type,
@@ -149,8 +151,8 @@ def _save_entries_to_active_shards(
 
         pending_items = pending_items[capacity:]
         if pending_items:
-            # Pre-rotate for the next loop iteration when the current shard is now
-            # full; the boolean return value is intentionally ignored here.
+            # 若目前分片已滿，先預轉到下一片，讓下次迴圈可直接續寫。
+            # 此處只依賴副作用，刻意忽略布林回傳值。
             _ = _rotate_shard_if_needed(
                 type_dir=type_dir,
                 cache_type=cache_type,
