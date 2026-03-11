@@ -46,7 +46,6 @@ from app.services_impl.config_service import (
     load_replace_rules,
     save_replace_rules,
 )
-from translation_tool.core.lm_translator import translate_directory_generator as lm_translate_gen
 from translation_tool.checkers.untranslated_checker import check_untranslated_generator
 from translation_tool.checkers.variant_comparator import compare_variants_generator
 from translation_tool.checkers.english_residue_checker import check_english_residue_generator
@@ -80,85 +79,9 @@ def update_logger_config():
 
 
 
-def run_lm_translation_service(
-    input_dir: str,
-    output_dir: str,
-    session,
-    dry_run: bool = False ,
-    export_lang: bool = False,  # 新增參數
-    write_new_cache: bool = True,  # 新增參數
-):
-    """執行 LM 翻譯流程（service 層包裝）。
-
-    重點：
-    - 內部呼叫 core generator，並把 generator 的 update_dict 轉成 TaskSession 更新。
-    - 每次任務開始都會重讀 config 並更新 logger（讓 UI 修改 log level 後可立即生效）。
-
-    風險/邊界：
-    - 背景 thread 執行時，任何例外都必須轉成 session.add_log + session.set_error，
-      避免 UI 沒訊息但任務已中止。
-    - dry_run=True 時只做分析/預覽，不應送出任何實際翻譯請求。
-    """
-    # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
-    update_logger_config() 
-
-    logger.debug(f"DEBUG [2. Service]: 接收到的 export_lang 為 -> {export_lang}")
-
-    try:
-        # 初始化 Session 狀態
-        session.start()
-        UI_LOG_HANDLER.set_session(session)
-        # ⭐ Dry Run 模式提示
-        if dry_run:
-            session.add_log(
-                "[DRY-RUN] 啟用：僅進行分析與預覽，不會送出任何 API 請求"
-            )
-
-        # ⭐ 把 dry_run 明確傳遞給 generator
-        for update_dict in lm_translate_gen(
-            input_dir,
-            output_dir,
-            dry_run=dry_run,   # ⭐ 關鍵
-            export_lang=export_lang,
-            write_new_cache=write_new_cache # ⭐ 傳遞下去
-        ):
-            # ---- log ----
-            log = update_dict.get("log")
-            if log:
-                session.add_log(log)
-
-            # ---- progress ----
-            if "progress" in update_dict and update_dict["progress"] is not None:
-                session.set_progress(update_dict["progress"])
-
-            # ---- error ----
-            if update_dict.get("error"):
-                session.set_error()
-                return
-
-        # ---- 正常結束 ----
-        final = GLOBAL_LOG_LIMITER.flush()
-        if final and "log" in final:
-            session.add_log(final["log"])
-
-        if dry_run:
-            session.add_log(
-                "[DRY-RUN] 分析完成，未執行實際翻譯"
-            )
-
-        session.finish()
-
-    except Exception as e:
-        full_traceback = traceback.format_exc()
-        logger.error(f"LM 服務失敗: {e}\n{full_traceback}")
-        session.add_log(
-            f"[致命錯誤] LM 翻譯服務失敗：{e}\n{full_traceback}"
-        )
-        session.set_error()
-    finally:
-        # ⭐ 避免 handler 留著舊 session
-        UI_LOG_HANDLER.set_session(None)
-
+# PR21：LM UI services 抽離至 app.services_impl.pipelines.lm_service。
+# 注意：services.py 仍 re-export 同名符號，維持 lm_view.py 的 import 相容。
+from app.services_impl.pipelines.lm_service import run_lm_translation_service
 
 
 # PR19：extract UI services 抽離至 app.services_impl.pipelines.extract_service。
