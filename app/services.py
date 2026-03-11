@@ -11,6 +11,8 @@
 """
 
 # /minecraft_translator_flet/app/services.py
+# PR13：建立 app.services_impl 骨架；本檔暫時仍是唯一實作來源。
+# 後續 PR 會逐步把下方函式搬到 services_impl，再由本檔做薄 façade / re-export。
 import os
 import json
 import traceback

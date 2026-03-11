@@ -1,8 +1,8 @@
-# PR13（設計）— app/services.py 分拆規劃（只做評估與設計，不改 code）
+# PR13 — app/services.py 分拆規劃（設計 + Phase 1 骨架落地）
 
 > 專案：`C:\Users\admin\Desktop\minecraft_translator_flet`
 > 目標：針對 `app/services.py` 做架構評估，產出可實作的分拆方案與 PR 設計序列。
-> 本輪狀態：已評估 / 可交付（未改任何程式邏輯）。
+> 本輪狀態：已評估 / 可交付 + PR13 骨架已落地（仍未搬移任何程式邏輯）。
 
 ---
 
@@ -153,13 +153,15 @@ app/
 
 ---
 
-## 5) 本輪新增文件
-- `docs/pr/2026-03-11_2030_PR_pr13-services-splitting-design.md`（本文件）
+## 5) 本輪新增/更新文件
+- `docs/pr/2026-03-11_2030_PR_pr13-services-splitting-design.md`（本文件；更新為已落地骨架版本）
 
 ---
 
-## 6) 驗證（本輪不改 code 的 smoke）
+## 6) 驗證（PR13：骨架落地 + 相容性 smoke）
 - `uv run python -c "import app.services as s; print('ok', hasattr(s,'run_lm_translation_service'), hasattr(s,'cache_get_overview_service'))"`
+- `uv run python -c "import app.services_impl as si; print('ok', si.__name__)"`
+- （建議）`uv run pytest -q tests/test_main_imports.py tests/test_cache_view_features.py`
 
 ---
 
