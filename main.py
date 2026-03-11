@@ -1,3 +1,14 @@
+"""main.py（Flet App 入口）
+
+責任：
+- 組裝各個 View（設定/規則/快取/翻譯/...）並處理切頁。
+- 只在 `__main__` 路徑呼叫 bootstrap_runtime() 做一次性的 runtime 初始化。
+
+維護注意：
+- main.py 可能被測試 import；因此不能在 import 階段就做 logging/config 初始化。
+- 快取搜尋索引重建會在啟動後用背景 thread 執行，避免主畫面卡住。
+"""
+
 import logging
 import threading
 

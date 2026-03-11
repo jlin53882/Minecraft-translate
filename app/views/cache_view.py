@@ -1,3 +1,19 @@
+"""app/views/cache_view.py（快取管理頁）
+
+本頁是快取系統的 UI 入口，功能包含：
+- 總覽：各 cache_type 的統計、重載、儲存、新分片/補滿舊檔、輪替分片
+- 查詢：依 key / dst / 關鍵字搜尋（含全文索引）
+- 編輯：針對單筆 dst 做調整並寫回快取
+- 歷史：查看並套用歷史版本（查詢區與分片區共用一套浮動視窗）
+
+維護注意：
+- 這個檔案偏大是歷史因素；PR 期間已把「總覽頁 UI 組裝」抽到
+  `app.views.cache_manager.cache_overview_panel` 以降低閱讀負擔。
+- 本頁大量事件回呼會觸發背景操作；若要避免舊任務覆蓋新狀態，
+  需配合 CacheController 的 action_id 機制。
+- 本輪只補註解/docstring，不改任何 UI 行為。
+"""
+
 import json
 import re
 import time
@@ -26,7 +42,18 @@ from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
 
 class CacheView(ft.Column):
-    """快取管理器：總覽/管理 + 查詢功能。"""
+    """快取管理器（UI）。
+
+    本類別是 UI 組裝與事件處理的集中點。
+
+    維護重點（避免踩坑）：
+    - 任何會跑背景任務的操作（reload/save/rebuild index/search）都應
+      更新 ui_busy/busy_reason，並透過統一的 log 訊息回饋給使用者。
+    - 查詢結果的顯示/分頁/選取狀態彼此耦合，改動時要注意同步更新
+      `query_results/query_selected_result/query_page`。
+    - 歷史視窗同時支援 query 與 shard 兩種來源，靠 history_window_source
+      切換；擴充時避免分叉出兩套近似 UI。
+    """
 
     def __init__(self, page: ft.Page):
         super().__init__(expand=True, spacing=10)

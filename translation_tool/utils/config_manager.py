@@ -1,3 +1,16 @@
+"""config_manager.py（設定讀寫與合併）
+
+提供：
+- DEFAULT_CONFIG：缺檔/缺欄位時的保底值（不是要覆蓋使用者設定）。
+- load_config()：讀取 `config.json`，並用深度合併補齊新欄位，維持向後相容。
+- save_config()：寫回設定並做基本可讀性驗證（避免寫出壞 JSON）。
+
+維護注意：
+- `lm_translator.models` 視為「使用者資料」，刻意不做 deep merge；
+  以避免預設模型列表與使用者設定混在一起造成誤啟用。
+- 本模組應避免在 import 時就改動全域 logging；logging 初始化交由 entry point 決定。
+"""
+
 # /minecraft_translator_flet/translator_tool/utils/config_manager.py (最終修正版)
 
 import os
