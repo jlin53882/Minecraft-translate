@@ -49,7 +49,6 @@ from app.services_impl.config_service import (
     save_replace_rules,
 )
 from translation_tool.core.lm_translator import translate_directory_generator as lm_translate_gen
-from translation_tool.core.output_bundler import bundle_outputs_generator
 from translation_tool.checkers.untranslated_checker import check_untranslated_generator
 from translation_tool.checkers.variant_comparator import compare_variants_generator
 from translation_tool.checkers.english_residue_checker import check_english_residue_generator
@@ -445,16 +444,9 @@ from app.services_impl.pipelines.lookup_service import (
     run_batch_lookup_service,
 )
 
-def run_bundling_service(input_root_dir: str, output_zip_path: str):
-    try:
-        for update_dict in bundle_outputs_generator(input_root_dir, output_zip_path):
-            filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
-            if filtered is not None:
-                yield filtered
-    except Exception as e:
-        full_traceback = traceback.format_exc()
-        logger.error(f"[致命錯誤] 打包服務失敗：{e}\n{full_traceback}")
-        yield {"log": f"[致命錯誤] 打包服務失敗：{e}\n{full_traceback}", "error": True, "progress": 0}
+# PR18：bundle UI services 抽離至 app.services_impl.pipelines.bundle_service。
+# 注意：services.py 仍 re-export 同名符號，維持 bundler_view.py 的 import 相容。
+from app.services_impl.pipelines.bundle_service import run_bundling_service
 
 def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
     try:
