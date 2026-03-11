@@ -17,7 +17,27 @@ import os
 import json
 import logging
 from datetime import datetime
+from pathlib import Path
 import copy
+
+
+# PR27：統一路徑解析基準，避免 legacy cwd 依賴造成找不到 config / 資源檔。
+def get_project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+PROJECT_ROOT = get_project_root()
+CONFIG_PATH = PROJECT_ROOT / "config.json"
+
+
+def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
+    if path_like is None:
+        return PROJECT_ROOT
+
+    p = Path(path_like)
+    if p.is_absolute():
+        return p
+    return PROJECT_ROOT / p
 
 # DEFAULT_CONFIG 是「缺檔或缺欄位時的保底值」，不是要取代使用者設定；
 # load_config() 會用它做深度合併，讓新欄位可以向後相容地補進舊 config.json。
@@ -143,7 +163,7 @@ DEFAULT_CONFIG = {
     },
 }
 
-def load_config(config_path='config.json'):
+def load_config(config_path: str | os.PathLike | None = None):
     """讀取設定檔並做向後相容合併。
 
     行為：
@@ -155,12 +175,13 @@ def load_config(config_path='config.json'):
 
     回傳：合併後的新 dict（避免直接回傳 DEFAULT_CONFIG 物件被外部修改）。
     """
-    if not os.path.exists(config_path):
-        print(f"警告：找不到設定檔 {config_path}，將使用預設設定。")
-        return DEFAULT_CONFIG
+    resolved_config_path = resolve_project_path(config_path or CONFIG_PATH)
+    if not resolved_config_path.exists():
+        print(f"警告：找不到設定檔 {resolved_config_path}，將使用預設設定。")
+        return copy.deepcopy(DEFAULT_CONFIG)
 
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with resolved_config_path.open('r', encoding='utf-8') as f:
             user_config = json.load(f)
 
         # 深度合併
@@ -195,27 +216,28 @@ def load_config(config_path='config.json'):
         return config
 
     except (json.JSONDecodeError, IOError) as e:
-        print(f"錯誤：讀取設定檔 {config_path} 失敗: {e}，將使用預設設定。")
-        #return DEFAULT_CONFIG
+        print(f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。")
         return copy.deepcopy(DEFAULT_CONFIG)
 
-def save_config(config, config_path='config.json'):
+def save_config(config, config_path: str | os.PathLike | None = None):
     """
     儲存設定並檢查是否成功寫入。
     回傳 True = 寫入成功
           False = 寫入失敗
     """
+    resolved_config_path = resolve_project_path(config_path or CONFIG_PATH)
     try:
-        with open(config_path, 'w', encoding='utf-8') as f:
+        resolved_config_path.parent.mkdir(parents=True, exist_ok=True)
+        with resolved_config_path.open('w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=4)
 
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with resolved_config_path.open('r', encoding='utf-8') as f:
             written_data = json.load(f)
 
         # 能 dump 代表結構是乾淨的
         json.dumps(written_data, sort_keys=True)
 
-        logging.info(f"設定已成功儲存並驗證至 {config_path}")
+        logging.info(f"設定已成功儲存並驗證至 {resolved_config_path}")
         return True
 
     except Exception as e:
@@ -244,6 +266,7 @@ def setup_logging(config):
         "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s"
     )
     log_dir = logging_cfg.get("log_dir", "logs")
+    resolved_log_dir = resolve_project_path(log_dir)
 
     # 清理舊 handler
     for handler in logging.root.handlers[:]:
@@ -251,9 +274,9 @@ def setup_logging(config):
 
     # 建立 log 資料夾
     today = datetime.now().strftime('%Y%m%d')
-    log_folder = os.path.join(log_dir, today)
-    os.makedirs(log_folder, exist_ok=True)
-    log_file = os.path.join(log_folder, 'app.log')
+    log_folder = resolved_log_dir / today
+    log_folder.mkdir(parents=True, exist_ok=True)
+    log_file = log_folder / 'app.log'
 
     handlers = [
         logging.StreamHandler(),

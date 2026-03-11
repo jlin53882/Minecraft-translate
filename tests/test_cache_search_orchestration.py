@@ -12,7 +12,7 @@ def _reset_cache_state():
 
 
 def test_rebuild_search_index_contract_and_tmp_cleanup(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: tmp_path / p)
     _reset_cache_state()
 
     cache_manager.add_to_cache("lang", "item.minecraft.diamond", "Diamond", "鑽石")
@@ -34,7 +34,7 @@ def test_rebuild_search_index_contract_and_tmp_cleanup(tmp_path, monkeypatch):
 
 
 def test_rebuild_search_index_for_type_no_pollution(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: tmp_path / p)
     _reset_cache_state()
 
     cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "蘋果")
@@ -52,7 +52,7 @@ def test_rebuild_search_index_for_type_no_pollution(tmp_path, monkeypatch):
 
 
 def test_rebuild_uses_build_then_swap_query_not_crash(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: tmp_path / p)
     _reset_cache_state()
 
     cache_manager.add_to_cache("lang", "item.minecraft.iron", "Iron", "鐵")

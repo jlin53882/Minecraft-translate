@@ -7,7 +7,7 @@ import re
 from typing import List, Dict, Any
 from opencc import OpenCC
 # 從 config_manager 導入我們已經載入好的全域 config
-from .config_manager import config
+from .config_manager import config, resolve_project_path
 
 
 logger = logging.getLogger(__name__)
@@ -122,19 +122,20 @@ def load_replace_rules(path: str) -> List[Dict[str, str]]:
     - 固定字串規則：from 長度由長到短（長詞優先）
     - 正則規則：保持原順序
     """
-    if not os.path.exists(path):
-        logger.warning("找不到替換規則檔案: %s，將略過替換處理。", path)
+    resolved_path = resolve_project_path(path)
+    if not resolved_path.exists():
+        logger.warning("找不到替換規則檔案: %s，將略過替換處理。", resolved_path)
         return []
 
     try:
-        with open(path, "rb") as f:
+        with resolved_path.open("rb") as f:
             rules = orjson.loads(f.read())
     except Exception as e:
-        logger.error("讀取替換規則檔案 %s 失敗: %s", path, e)
+        logger.error("讀取替換規則檔案 %s 失敗: %s", resolved_path, e)
         return []
 
     if not isinstance(rules, list):
-        logger.error("替換規則檔案格式錯誤（需為 list）: %s", path)
+        logger.error("替換規則檔案格式錯誤（需為 list）: %s", resolved_path)
         return []
 
     fixed_rules: List[Dict[str, str]] = []
@@ -166,22 +167,23 @@ def load_replace_rules(path: str) -> List[Dict[str, str]]:
 
 def save_replace_rules(path: str, rules: List[Dict[str, str]]):
     """將替換規則儲存到指定的 JSON 檔案（orjson 版）。"""
+    resolved_path = resolve_project_path(path)
     try:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "wb") as f:
+        resolved_path.parent.mkdir(parents=True, exist_ok=True)
+        with resolved_path.open("wb") as f:
             f.write(orjson.dumps(
                 rules,
                 option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE
             ))
     except Exception as e:
-        logger.error("儲存替換規則到 %s 失敗: %s", path, e)
+        logger.error("儲存替換規則到 %s 失敗: %s", resolved_path, e)
 
 
 def load_custom_translations(folder_path: str, filename="table.tsv") -> Dict[str, str]:
     """從指定資料夾載入自訂的翻譯表 (TSV 格式)。"""
     custom_map = {}
-    file_path = os.path.join(folder_path, filename)
-    if not os.path.exists(file_path):
+    file_path = resolve_project_path(folder_path) / filename
+    if not file_path.exists():
         logger.info(f"自訂翻譯檔 {file_path} 不存在，略過。")
         return custom_map
     try:

@@ -1,6 +1,5 @@
 # /minecraft_translator_flet/translation_tool/utils/species_cache.py (僅儲存成功查詢的修正版)
 
-import os
 import csv
 import time
 import re
@@ -8,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional
 
-from .config_manager import load_config
+from .config_manager import load_config, resolve_project_path
 
 log = logging.getLogger(__name__)
 
@@ -59,10 +58,9 @@ def initialize_species_cache():
     log.info("正在初始化學名快取系統...")
     try:
         species_config = load_config().get("species_cache", {})
-        
-        project_root = Path(os.getcwd())
+
         cache_dir_name = species_config.get("cache_directory", _CACHE_DIR_NAME)
-        _CACHE_DIR = project_root / cache_dir_name
+        _CACHE_DIR = resolve_project_path(cache_dir_name)
         cache_filename = species_config.get("cache_filename", _CACHE_FILENAME)
         _CACHE_FILE = _CACHE_DIR / cache_filename
         _CACHE_DIR.mkdir(exist_ok=True)
