@@ -1,45 +1,30 @@
 """app/services.py
 
-此模組是 Flet UI 與核心翻譯流程之間的「服務層」：
-- 封裝核心 generator（翻譯/抽取/檢查/打包）成 UI 友善的呼叫介面。
-- 統一處理 TaskSession 的 log/progress/error 更新。
-- 提供 log 節流（避免大量 log 造成 UI 重繪卡頓）。
+此模組現在的主要角色是 façade / export surface：
+- 對外維持 `app.services` 這個穩定入口，避免 UI caller 每拆一顆 service 就跟著改 import。
+- 少數尚未拆除或暫緩處理的 legacy wrappers，暫時仍留在這裡。
 
 維護注意：
-- 這裡的函式偏長是歷史因素；本次僅補註解以降低維護風險，不改動邏輯。
-- 設定檔路徑以 PROJECT_ROOT 為基準，避免 `os.getcwd()` 造成工作目錄切換時讀錯。
+- 新的 pipeline 實作優先放 `app/services_impl/pipelines/`。
+- `app/services.py` 只保留穩定出口與少量過渡層邏輯，避免再次膨脹回雜物間。
+- QC / checkers 線目前方向未定，先維持現狀，不在這顆 cleanup 內處理。
 """
 
 # /minecraft_translator_flet/app/services.py
-# PR13：建立 app.services_impl 骨架；本檔暫時仍是唯一實作來源。
-# 後續 PR 會逐步把下方函式搬到 services_impl，再由本檔做薄 façade / re-export。
-import os
-import traceback
-import time
-from collections import deque
-from typing import Generator, Dict, Any
-from pathlib import Path
-
-# services.py
+# PR13：建立 app.services_impl 骨架；後續逐步由本檔做薄 façade / re-export。
 import logging
+import traceback
+
 logger = logging.getLogger(__name__)
 
 # PR14：logging / 節流 / handler 綁定抽離到 services_impl。
-# 重要：這裡 re-export 的必須是同一個單例物件，避免外部拿到不同 instance。
-from app.services_impl.logging_service import (
-    LogLimiter,
-    GLOBAL_LOG_LIMITER,
-    UI_LOG_HANDLER,
-)
+# 目前本檔仍需保留 GLOBAL_LOG_LIMITER 與 update_logger_config() 這個對外入口。
+from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
 
-# 核心演算法層的匯入
 # PR15：config / rules IO 抽離到 services_impl。
+# 注意：services.py 仍 re-export 同名符號，維持 views 的 import 相容。
 from app.services_impl.config_service import (
-    PROJECT_ROOT,
-    CONFIG_PATH,
-    REPLACE_RULES_PATH,
     _load_app_config,
-    _save_app_config,
     load_config_json,
     save_config_json,
     load_replace_rules,
@@ -49,16 +34,10 @@ from translation_tool.checkers.untranslated_checker import check_untranslated_ge
 from translation_tool.checkers.variant_comparator import compare_variants_generator
 from translation_tool.checkers.english_residue_checker import check_english_residue_generator
 from translation_tool.checkers.variant_comparator_tsv import compare_variants_tsv_generator
-from translation_tool.utils import cache_manager
 
-from translation_tool.utils.log_unit import log_warning, log_error, log_debug, log_info
-
-
-# PR15：config / rules IO 抽離至 app.services_impl.config_service。
-# 注意：services.py 仍 re-export 同名符號，維持 views 的 import 相容。
 
 # ------------------------------------------------------
-# ---------------- 核心功能服務（含 log 限制） ----------------
+# façade helper
 # ------------------------------------------------------
 
 def update_logger_config():
@@ -77,6 +56,10 @@ def update_logger_config():
     return logging_service.update_logger_config(_load_app_config, logger_name="translation_tool")
 
 
+
+# ------------------------------------------------------
+# pipeline façade exports
+# ------------------------------------------------------
 
 # PR21：LM UI services 抽離至 app.services_impl.pipelines.lm_service。
 # 注意：services.py 仍 re-export 同名符號，維持 lm_view.py 的 import 相容。
@@ -118,6 +101,11 @@ from app.services_impl.pipelines.lookup_service import (
 # PR18：bundle UI services 抽離至 app.services_impl.pipelines.bundle_service。
 # 注意：services.py 仍 re-export 同名符號，維持 bundler_view.py 的 import 相容。
 from app.services_impl.pipelines.bundle_service import run_bundling_service
+
+
+# ------------------------------------------------------
+# legacy QC / checkers（暫緩線：先不拆、不刪）
+# ------------------------------------------------------
 
 def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
     try:
@@ -163,6 +151,10 @@ def run_variant_compare_tsv_service(tsv_path: str, output_csv_path: str):
         logger.error(f"[致命錯誤] TSV 簡繁差異比較失敗：{e}\n{full_traceback}")
         yield {"log": f"[致命錯誤] TSV 簡繁差異比較失敗：{e}\n{full_traceback}", "error": True, "progress": 0}
 
+
+# ------------------------------------------------------
+# cache façade exports
+# ------------------------------------------------------
 
 # PR16：cache UI services 抽離至 app.services_impl.cache.cache_services。
 # 注意：services.py 仍 re-export 同名符號，維持 cache_view.py 的 import 相容。
