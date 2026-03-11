@@ -24,78 +24,14 @@ from pathlib import Path
 # services.py
 import logging
 logger = logging.getLogger(__name__)
-from translation_tool.utils.ui_logging_handler import UISessionLogHandler
 
-
-# ----------------- 日誌限制器（強化版） -----------------
-class LogLimiter:
-    """Log 節流器（UI 友善）
-
-    目的：核心流程可能在短時間噴出大量 log；若逐筆推進 UI，會造成明顯卡頓。
-
-    做法：
-    - 用 queue 保留近期 log（避免無限制成長）。
-    - 用 pending buffer 把多筆 log 合併成一筆，降低 UI 重繪頻率。
-
-    注意：
-    - `filter()` 可能回傳 None，代表本輪不更新 UI。
-    - `flush()` 只負責把 pending 合併輸出，不保證與任務結束同步；呼叫端需視流程決定何時 flush。
-    """
-
-    def __init__(self, max_logs=3000, flush_interval=0.1):
-        """
-        max_logs: 最多保留多少條 log
-        flush_interval: 多久允許送出一次 log（秒）
-        """
-        self.max_logs = max_logs
-        self.flush_interval = flush_interval
-        self.log_queue = deque(maxlen=max_logs)
-
-        # buffer 來累積大量 log（避免 UI 每筆重繪）
-        self.pending_logs = []
-
-        self.last_flush = 0
-
-    def filter(self, update_dict: Dict[str, Any]):
-        """批次合併 log + 限制輸出頻率"""
-
-        # 若沒有 log 欄位 → 直接放行（如 progress）
-        if "log" not in update_dict:
-            return update_dict
-
-        log_text = update_dict["log"]
-        self.log_queue.append(log_text)
-        self.pending_logs.append(log_text)
-
-        now = time.time()
-
-        # 不到 flush 週期 → 不更新 UI
-        if now - self.last_flush < self.flush_interval:
-            return None
-
-        # 準備批次輸出
-        self.last_flush = now
-
-        # 結合 pending logs
-        merged = "\n".join(self.pending_logs)
-        self.pending_logs.clear()
-
-        return {"log": merged, "progress": update_dict.get("progress")}
-    
-    def flush(self):
-        """強制輸出尚未送出的 pending logs"""
-        if not self.pending_logs:
-            return None
-
-        merged = "\n".join(self.pending_logs)
-        self.pending_logs.clear()
-        self.last_flush = time.time()
-        return {"log": merged}
-
-
-# 建立全域限制器
-GLOBAL_LOG_LIMITER = LogLimiter(max_logs=5000, flush_interval=0.1)
-# ------------------------------------------------------
+# PR14：logging / 節流 / handler 綁定抽離到 services_impl。
+# 重要：這裡 re-export 的必須是同一個單例物件，避免外部拿到不同 instance。
+from app.services_impl.logging_service import (
+    LogLimiter,
+    GLOBAL_LOG_LIMITER,
+    UI_LOG_HANDLER,
+)
 
 # 核心演算法層的匯入
 from translation_tool.core.ftb_translator import translate_directory_generator
@@ -112,12 +48,6 @@ from translation_tool.checkers.variant_comparator_tsv import compare_variants_ts
 from translation_tool.utils import cache_manager
 
 from translation_tool.utils.log_unit import log_warning, log_error, log_debug, log_info
-
-# UI_LOG_HANDLER 負責把核心層 logger 轉送到畫面上的 TaskSession。
-# 它只處理「怎麼把 log 丟進 UI」；至於 log 量太大時如何節流，交給下面的 GLOBAL_LOG_LIMITER。
-UI_LOG_HANDLER = UISessionLogHandler()
-UI_LOG_HANDLER.setLevel(logging.INFO)
-UI_LOG_HANDLER.setFormatter(logging.Formatter("%(message)s"))
 
 
 # --- 檔案路徑設定 ---
@@ -169,44 +99,19 @@ def save_config_json(config):
 # ------------------------------------------------------
 
 def update_logger_config():
-    """重新讀取 config 並套用最新的 Log 等級。"""
+    """重新讀取 config 並套用最新的 Log 等級。
 
-    # 這裡故意在任務開始前重讀一次設定，而不是只在程式啟動時初始化：
-    # 使用者可以在 UI 裡修改 log level / format，下一輪任務就應該吃到新設定，
-    # 不需要重開整個 app。
-    _config = _load_app_config()
-    _log_cfg = _config.get("logging", {})
-    
-    _level_name = _log_cfg.get("log_level", "INFO").upper()
-    _numeric_level = getattr(logging, _level_name, logging.INFO)
-    _format_str = _log_cfg.get("log_format", "%(message)s")
+    PR14：此函式保留原本對外入口與呼叫點，但實作已抽離到
+    `app.services_impl.logging_service.update_logger_config()`。
 
-    # 獲取 Logger 對象
-    root_logger = logging.getLogger()
-    target_logger = logging.getLogger("translation_tool")
+    注意：
+    - 仍由 services.py 決定如何讀取 config（透過 `_load_app_config()`）。
+    - handler/session 的 bind/unbind 流程不在 PR14 變更範圍內。
+    """
 
-    # ⭐ 2. 關鍵：檢查是否已經掛載過，避免重複顯示
-    # 我們統一掛在 Root Logger 即可，子 Logger 會透過 propagate 傳上來
-    if UI_LOG_HANDLER not in root_logger.handlers:
-        root_logger.addHandler(UI_LOG_HANDLER)
+    from app.services_impl import logging_service
 
-    target_logger = logging.getLogger("translation_tool") 
-    target_logger.setLevel(logging.INFO)
-    target_logger.propagate = True # 確保訊息會向傳遞
-
-    # ⭐ 3. 動態更新等級與格式
-    # 這樣你在 config 改 DEBUG，這裡就會立刻變成 10
-    root_logger.setLevel(_numeric_level)
-    target_logger.setLevel(_numeric_level)
-    UI_LOG_HANDLER.setLevel(_numeric_level)
-    
-    # 套用 config 裡的格式
-    UI_LOG_HANDLER.setFormatter(logging.Formatter(_format_str))
-
-    # 確保子模組訊息會向上傳遞
-    target_logger.propagate = True 
-    
-    logger.debug(f"Log 系統已同步：Level={_level_name}, Format={_format_str}")
+    return logging_service.update_logger_config(_load_app_config, logger_name="translation_tool")
 
 
 
