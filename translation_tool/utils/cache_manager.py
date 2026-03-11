@@ -145,6 +145,12 @@ def reload_translation_cache_type(cache_type: str):
     _load_cache_type(cache_type)
 
 def _write_json_atomic(path: Path, data: dict):
+    """Compatibility wrapper for shard persistence writes.
+
+    The wrapper intentionally forwards the underlying return value as-is.
+    Today the callee returns ``None``; preserving transparent passthrough keeps
+    this facade stable if a future success/failure return contract is added.
+    """
     return cache_shards._write_json_atomic(path, data)
 
 
