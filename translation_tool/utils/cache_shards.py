@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 from pathlib import Path
@@ -7,6 +8,13 @@ import orjson as json
 
 
 def _write_json_atomic(path: Path, data: dict[str, Any]):
+    """Atomically replace ``path`` with JSON content.
+
+    The function intentionally has no meaningful return value today.
+    Callers may still choose to transparently forward the result so a future
+    success/failure return contract can be introduced without changing the
+    wrapper shape.
+    """
     tmp_path = path.with_suffix(".tmp")
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path.write_bytes(json.dumps(data, option=json.OPT_INDENT_2))
@@ -47,7 +55,7 @@ def _rotate_shard_if_needed(
     data: dict[str, Any],
     rolling_shard_size: int,
     active_shard_file: str,
-    logger=None,
+    logger: logging.Logger | None = None,
 ) -> bool:
     if len(data) < rolling_shard_size:
         return False
@@ -78,12 +86,14 @@ def _save_entries_to_active_shards(
     rolling_shard_size: int,
     active_shard_file: str,
     force_new_shard: bool = False,
-    logger=None,
+    logger: logging.Logger | None = None,
 ):
     if not entries:
         return
 
     active_file = type_dir / active_shard_file
+    # Ensure the `.active` pointer exists before any branch below reads it
+    # directly. The returned path is intentionally ignored here.
     _get_active_shard_path(
         type_dir=type_dir,
         cache_type=cache_type,
@@ -139,7 +149,9 @@ def _save_entries_to_active_shards(
 
         pending_items = pending_items[capacity:]
         if pending_items:
-            _rotate_shard_if_needed(
+            # Pre-rotate for the next loop iteration when the current shard is now
+            # full; the boolean return value is intentionally ignored here.
+            _ = _rotate_shard_if_needed(
                 type_dir=type_dir,
                 cache_type=cache_type,
                 data=current_data,
