@@ -4,6 +4,14 @@ from .cache_types import ActionState, CacheUiState
 
 
 class CachePresenter:
+    """Cache UI 的顯示層轉換器（Presenter）。
+
+    功能：把內部狀態（busy/reason/phase）轉成 UI 顯示用的中文 label。
+
+    維護注意：
+    - _STATUS_MAP / _PHASE_MAP 是 UI 文案的單一來源；改文案時先改這裡。
+    - action_id/phase 主要用於 trace 與 log；不建議把 UI 邏輯散落在 cache_view.py。
+    """
     _STATUS_MAP = {
         "": "就緒",
         "READY": "就緒",

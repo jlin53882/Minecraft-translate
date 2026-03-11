@@ -1,3 +1,22 @@
+"""cache_manager.py（快取管理器）
+
+定位：本模組提供翻譯快取的「對外 façade」，讓核心翻譯流程只需要：
+- initialize / reload
+- get / add
+- save
+
+歷史背景：PR1～PR12 期間逐步把快取機制改為「依類型分資料夾 + rolling shards」，
+並將部分責任抽到：
+- `cache_shards.py`：分片檔的讀寫/旋轉（IO 層）
+- `cache_store.py`：純 dict 操作（狀態層）
+- `cache_search.py`：搜尋索引（SQLite/FTS）
+
+維護注意：
+- `_translation_cache/_initialized/_cache_lock` 仍是既有外部依賴點（例如 UI/翻譯流程）；
+  本次僅補註解，不調整變數與流程。
+- shard 指標檔 `.active` 是重要 state；若手動刪除/污染，可能導致寫入落到非預期分片。
+"""
+
 # /minecraft_translator_flet/translation_tool/utils/cache_manager.py (正式版)
 
 import os
@@ -61,6 +80,15 @@ def _load_shard_file(f_path: Path) -> dict:
 
 
 def _get_cache_root() -> Path:
+    """取得快取根目錄。
+
+    注意：目前仍以 `os.getcwd()` 作為專案根目錄（歷史行為）。
+    這代表：若上層程式在不同工作目錄啟動，快取可能落到非預期位置。
+
+    本次不改動行為（避免破壞既有流程），但維護時請特別留意：
+    - UI / CLI 的啟動目錄是否固定
+    - 是否應改為以本檔案所在路徑推導 project root（類似 app/services.py 的做法）
+    """
     translation_config = load_config().get("translator", {})
     project_root = Path(os.getcwd())
     cache_dir_name = translation_config.get("cache_directory", _CACHE_DIR_NAME)

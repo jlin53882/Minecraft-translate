@@ -1,4 +1,16 @@
-# /minecraft_translator_flet/app/services.py 
+"""app/services.py
+
+此模組是 Flet UI 與核心翻譯流程之間的「服務層」：
+- 封裝核心 generator（翻譯/抽取/檢查/打包）成 UI 友善的呼叫介面。
+- 統一處理 TaskSession 的 log/progress/error 更新。
+- 提供 log 節流（避免大量 log 造成 UI 重繪卡頓）。
+
+維護注意：
+- 這裡的函式偏長是歷史因素；本次僅補註解以降低維護風險，不改動邏輯。
+- 設定檔路徑以 PROJECT_ROOT 為基準，避免 `os.getcwd()` 造成工作目錄切換時讀錯。
+"""
+
+# /minecraft_translator_flet/app/services.py
 import os
 import json
 import traceback
@@ -15,6 +27,19 @@ from translation_tool.utils.ui_logging_handler import UISessionLogHandler
 
 # ----------------- 日誌限制器（強化版） -----------------
 class LogLimiter:
+    """Log 節流器（UI 友善）
+
+    目的：核心流程可能在短時間噴出大量 log；若逐筆推進 UI，會造成明顯卡頓。
+
+    做法：
+    - 用 queue 保留近期 log（避免無限制成長）。
+    - 用 pending buffer 把多筆 log 合併成一筆，降低 UI 重繪頻率。
+
+    注意：
+    - `filter()` 可能回傳 None，代表本輪不更新 UI。
+    - `flush()` 只負責把 pending 合併輸出，不保證與任務結束同步；呼叫端需視流程決定何時 flush。
+    """
+
     def __init__(self, max_logs=3000, flush_interval=0.1):
         """
         max_logs: 最多保留多少條 log

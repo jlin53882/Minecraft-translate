@@ -1,3 +1,16 @@
+"""app/views/extractor_view.py（JAR 提取頁）
+
+提供兩種提取流程：
+- Lang：從 mods/*.jar 提取語言檔案
+- Book：從 mods/*.jar 提取 Patchouli 等手冊內容
+
+維護重點：
+- 提取屬於長時間 I/O 任務；UI 與背景執行緒透過 TaskSession 溝通。
+- UI 端靠 poller 定期讀 snapshot，避免背景執行緒直接操作 UI 控制項。
+
+本輪僅補 docstring/註解，不調整提取流程。
+"""
+
 # /minecraft_translator_flet/app/views/extractor_view.py
 import flet as ft
 
@@ -12,6 +25,17 @@ from app.task_session import TaskSession
 
 
 class ExtractorView(ft.Column):
+    """JAR 提取頁（UI）。
+
+    設計概念：
+    - 長任務全部寫入 TaskSession（log/progress/status）。
+    - UI 只渲染 session 的快照，避免跨執行緒操作 UI 造成不穩定。
+
+    維護注意：
+    - 若新增新的提取模式，務必沿用同一套 session + poller 流程。
+    - stats 欄位是 UI 顯示用途；不要在核心流程依賴它當正確性來源。
+    """
+
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         super().__init__(expand=True, spacing=15)
         self.page = page

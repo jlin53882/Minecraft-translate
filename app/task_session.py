@@ -1,3 +1,16 @@
+"""app/task_session.py
+
+TaskSession 是 UI 與背景工作執行緒之間的「任務狀態容器」。
+
+設計目標：
+- 背景 worker 只負責寫入：progress / logs / status。
+- UI 只透過 snapshot() 讀取不可變快照，避免讀寫競態。
+
+維護注意：
+- 這裡的鎖只保證 session 內部狀態一致，不涵蓋任何 IO 或外部資源。
+- logs 使用 deque 限長，避免長任務把記憶體撐爆。
+"""
+
 import threading
 from collections import deque
 
