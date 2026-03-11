@@ -94,8 +94,9 @@ UI_LOG_HANDLER.setFormatter(logging.Formatter("%(message)s"))
 
 
 # --- 檔案路徑設定 ---
-CONFIG_PATH = os.path.join(os.getcwd(), "config.json")
-REPLACE_RULES_PATH = os.path.join(os.getcwd(), "replace_rules.json")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CONFIG_PATH = str(PROJECT_ROOT / "config.json")
+REPLACE_RULES_PATH = str(PROJECT_ROOT / "replace_rules.json")
 
 
 def _load_app_config():
