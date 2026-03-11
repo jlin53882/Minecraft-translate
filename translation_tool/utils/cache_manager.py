@@ -271,12 +271,86 @@ def _rotate_shard_if_needed(cache_type: str, data: dict):
     active_file.write_text(new_id, encoding="utf-8")
     log.info(f"🔁 {cache_type} rolling shard rotate → {new_id}")
 
-def add_to_cache(cache_type: str, key: str, src: str, dst: str):
+def _extract_path_from_composite_key(key: str, src: str = "") -> str:
+    """從 `path|source_text` 這類 composite key 取回 path。"""
+    if not isinstance(key, str) or not key:
+        return ""
+    if src and key.endswith(f"|{src}"):
+        return key[: -(len(src) + 1)]
+    if "|" in key:
+        return key.split("|", 1)[0]
+    return key
+
+
+def _infer_search_path(cache_type: str, key: str, entry: Dict[str, Any] | None) -> str:
+    if isinstance(entry, dict):
+        explicit = str(entry.get("path") or "").strip()
+        if explicit:
+            return explicit
+
+    src = str((entry or {}).get("src") or "") if isinstance(entry, dict) else ""
+
+    if cache_type in {"patchouli", "ftbquests", "kubejs", "md"}:
+        return _extract_path_from_composite_key(key, src)
+
+    if cache_type == "lang":
+        return str(key or "")
+
+    return _extract_path_from_composite_key(key, src)
+
+
+def _infer_search_mod(cache_type: str, key: str, path: str, entry: Dict[str, Any] | None) -> str:
+    if isinstance(entry, dict):
+        explicit = str(entry.get("mod") or "").strip()
+        if explicit:
+            return explicit
+
+    norm_path = str(path or "").replace("\\", "/").strip("/")
+    parts = [p for p in norm_path.split("/") if p]
+
+    for anchor in ("assets", "data"):
+        if anchor in parts:
+            idx = parts.index(anchor)
+            if idx + 1 < len(parts):
+                return parts[idx + 1]
+
+    if cache_type == "lang":
+        dotted = [p for p in str(key or "").split(".") if p]
+        if len(dotted) >= 2:
+            return dotted[1]
+
+    fallback = {
+        "ftbquests": "ftbquests",
+        "kubejs": "kubejs",
+        "md": "md",
+    }
+    return fallback.get(cache_type, "")
+
+
+def _build_search_metadata(cache_type: str, key: str, entry: Dict[str, Any] | None) -> Dict[str, str]:
+    path = _infer_search_path(cache_type, key, entry)
+    mod = _infer_search_mod(cache_type, key, path, entry)
+    return {"mod": mod, "path": path}
+
+
+def add_to_cache(
+    cache_type: str,
+    key: str,
+    src: str,
+    dst: str,
+    *,
+    mod: str | None = None,
+    path: str | None = None,
+):
     if not key or not dst: return
     with _cache_lock:
         cache = _translation_cache.setdefault(cache_type, {})
         if cache.get(key, {}).get("dst") != dst:
             entry = {"src": src, "dst": dst}
+            if mod:
+                entry["mod"] = mod
+            if path:
+                entry["path"] = path
             cache[key] = entry
             # ⭐ 同步紀錄到 Session 緩存，用於產生新分片
             _session_new_entries[cache_type][key] = entry
@@ -511,8 +585,7 @@ def rebuild_search_index():
                     'src': entry.get('src', ''),
                     'dst': entry.get('dst', ''),
                     'type': cache_type,
-                    'mod': '',  # TODO: 如果有模組名稱資訊可以加入
-                    'path': ''  # TODO: 如果有檔案路徑資訊可以加入
+                    **_build_search_metadata(cache_type, key, entry),
                 }
                 for key, entry in cache_dict.items()
                 if isinstance(entry, dict)
@@ -551,8 +624,7 @@ def rebuild_search_index_for_type(cache_type: str):
                 'src': entry.get('src', ''),
                 'dst': entry.get('dst', ''),
                 'type': cache_type,
-                'mod': '',
-                'path': ''
+                **_build_search_metadata(cache_type, key, entry),
             }
             for key, entry in cache_dict.items()
             if isinstance(entry, dict)
