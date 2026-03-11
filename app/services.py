@@ -14,7 +14,6 @@
 # PR13：建立 app.services_impl 骨架；本檔暫時仍是唯一實作來源。
 # 後續 PR 會逐步把下方函式搬到 services_impl，再由本檔做薄 façade / re-export。
 import os
-import json
 import traceback
 import time
 from collections import deque
@@ -49,7 +48,6 @@ from app.services_impl.config_service import (
     load_replace_rules,
     save_replace_rules,
 )
-from translation_tool.utils.species_cache import lookup_species_name, is_potential_species_name
 from translation_tool.core.lm_translator import translate_directory_generator as lm_translate_gen
 from translation_tool.core.output_bundler import bundle_outputs_generator
 from translation_tool.checkers.untranslated_checker import check_untranslated_generator
@@ -440,50 +438,12 @@ def run_merge_zip_batch_service(
     # ⭐ 避免 handler 留著舊 session
         UI_LOG_HANDLER.set_session(None)
 
-def run_manual_lookup_service(name: str) -> str:
-    if not is_potential_species_name(name):
-        return f"'{name}' 不像是一個有效的學名格式 (例如：Felis catus)。"
-    result = lookup_species_name(name)
-    return result if result else "在本地快取和線上查詢中均未找到結果。"
-
-def run_batch_lookup_service(json_text: str):
-    try:
-        names = json.loads(json_text)
-        if not isinstance(names, list):
-            yield {"log": "錯誤：JSON 內容必須是一個列表 (List)。", "error": True}
-            return
-
-        results = {}
-        total = len(names)
-
-        first = GLOBAL_LOG_LIMITER.filter({"log": f"開始批次查詢 {total} 個學名...", "progress": 0})
-        if first is not None:
-            yield first
-
-        for i, name in enumerate(names):
-            if is_potential_species_name(name):
-                result = lookup_species_name(name)
-                results[name] = result if result else "未找到"
-            else:
-                results[name] = "格式錯誤"
-
-            update = GLOBAL_LOG_LIMITER.filter({"log": f"({i+1}/{total}) 已查詢: {name}", "progress": (i + 1) / total})
-            if update is not None:
-                yield update
-
-        final = GLOBAL_LOG_LIMITER.filter({
-            "log": "--- 批次查詢完成 ---",
-            "result": json.dumps(results, indent=2, ensure_ascii=False)
-        })
-        if final is not None:
-            yield final
-
-    except json.JSONDecodeError:
-        logger.error( {"log": "輸入的不是有效的 JSON 格式。"})
-        yield {"log": "輸入的不是有效的 JSON 格式。", "error": True}
-    except Exception as e:
-        logger.error( {"log": f"查詢時發生錯誤: {e}"})
-        yield {"log": f"查詢時發生錯誤: {e}", "error": True}
+# PR17：lookup UI services 抽離至 app.services_impl.pipelines.lookup_service。
+# 注意：services.py 仍 re-export 同名符號，維持 lookup_view.py 的 import 相容。
+from app.services_impl.pipelines.lookup_service import (
+    run_manual_lookup_service,
+    run_batch_lookup_service,
+)
 
 def run_bundling_service(input_root_dir: str, output_zip_path: str):
     try:
