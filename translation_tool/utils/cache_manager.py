@@ -1,7 +1,6 @@
 # /minecraft_translator_flet/translation_tool/utils/cache_manager.py (正式版)
 
 import os
-import re
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -12,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 # --- 修正後的 import 路徑 ---
 import orjson as json
 from .config_manager import load_config
+from . import cache_shards
 
 log = logging.getLogger(__name__)
 
@@ -145,10 +145,7 @@ def reload_translation_cache_type(cache_type: str):
     _load_cache_type(cache_type)
 
 def _write_json_atomic(path: Path, data: dict):
-    tmp_path = path.with_suffix(".tmp")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path.write_bytes(json.dumps(data, option=json.OPT_INDENT_2))
-    os.replace(tmp_path, path)
+    return cache_shards._write_json_atomic(path, data)
 
 
 def _save_entries_to_active_shards(cache_type: str, entries: dict, force_new_shard: bool = False):
@@ -156,50 +153,16 @@ def _save_entries_to_active_shards(cache_type: str, entries: dict, force_new_sha
     將 entries 依 active shard 續寫；達 2500 自動切下一片。
     force_new_shard=True 時先切到新片再開始寫（對應「新分片」）。
     """
-    if not entries:
-        return
-
     type_dir = _cache_file_path[cache_type].parent
-    active_file = type_dir / ACTIVE_SHARD_FILE
-    _ = _get_active_shard_path(cache_type)
-
-    if force_new_shard:
-        cur = int((active_file.read_text(encoding="utf-8") or "1").strip())
-        nxt = cur + 1
-        active_file.write_text(f"{nxt:05d}", encoding="utf-8")
-        log.info(f"🔁 {cache_type} 手動切新分片 -> {nxt:05d}")
-
-    pending_items = list(entries.items())
-
-    while pending_items:
-        save_path = _get_active_shard_path(cache_type)
-        current_data = {}
-        if save_path.exists():
-            try:
-                old_data = json.loads(save_path.read_bytes())
-                if isinstance(old_data, dict):
-                    current_data = old_data
-            except Exception as e:
-                log.warning(f"⚠️ 讀取舊分片失敗，將以空白分片續寫: {e}")
-
-        # 先檢查是否已滿，滿了就先旋轉
-        if len(current_data) >= ROLLING_SHARD_SIZE:
-            _rotate_shard_if_needed(cache_type, current_data)
-            continue
-
-        capacity = max(0, ROLLING_SHARD_SIZE - len(current_data))
-        chunk = pending_items[:capacity]
-
-        for k, v in chunk:
-            current_data[k] = v
-
-        _write_json_atomic(save_path, current_data)
-        log.info(f"💾 {cache_type} saved: {save_path.name} (+{len(chunk)} / total={len(current_data)})")
-
-        pending_items = pending_items[capacity:]
-
-        if pending_items:
-            _rotate_shard_if_needed(cache_type, current_data)
+    return cache_shards._save_entries_to_active_shards(
+        type_dir=type_dir,
+        cache_type=cache_type,
+        entries=entries,
+        rolling_shard_size=ROLLING_SHARD_SIZE,
+        active_shard_file=ACTIVE_SHARD_FILE,
+        force_new_shard=force_new_shard,
+        logger=log,
+    )
 
 
 def save_translation_cache(cache_type: str, write_new_shard: bool = True):
@@ -234,42 +197,24 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
 
 def _get_active_shard_path(cache_type: str) -> Path:
     type_dir = _cache_file_path[cache_type].parent
-    active_file = type_dir / ACTIVE_SHARD_FILE
-
-    # 1) 建立或找回 active shard id
-    if not active_file.exists():
-        # 只接受 cache_type_00001.json 這種檔名
-        pat = re.compile(rf"^{re.escape(cache_type)}_(\d+)\.json$", re.IGNORECASE)
-
-        existing_shards = []
-        for f in type_dir.glob(f"{cache_type}_*.json"):
-            m = pat.match(f.name)
-            if not m:
-                continue
-            existing_shards.append(int(m.group(1)))
-
-        latest_id = max(existing_shards) if existing_shards else 1
-        active_file.write_text(f"{latest_id:05d}", encoding="utf-8")
-
-    # 2) 讀取 active shard
-    shard_id_str = active_file.read_text().strip()
-    return type_dir / f"{cache_type}_{shard_id_str}.json"
-
+    return cache_shards._get_active_shard_path(
+        type_dir=type_dir,
+        cache_type=cache_type,
+        active_shard_file=ACTIVE_SHARD_FILE,
+    )
 
 
 
 def _rotate_shard_if_needed(cache_type: str, data: dict):
-    if len(data) < ROLLING_SHARD_SIZE:
-        return
-
     type_dir = _cache_file_path[cache_type].parent
-    active_file = type_dir / ACTIVE_SHARD_FILE
-
-    cur_id = int(active_file.read_text())
-    new_id = f"{cur_id + 1:05d}"
-
-    active_file.write_text(new_id, encoding="utf-8")
-    log.info(f"🔁 {cache_type} rolling shard rotate → {new_id}")
+    return cache_shards._rotate_shard_if_needed(
+        type_dir=type_dir,
+        cache_type=cache_type,
+        data=data,
+        rolling_shard_size=ROLLING_SHARD_SIZE,
+        active_shard_file=ACTIVE_SHARD_FILE,
+        logger=log,
+    )
 
 def _extract_path_from_composite_key(key: str, src: str = "") -> str:
     """從 `path|source_text` 這類 composite key 取回 path。"""
