@@ -105,75 +105,70 @@
 
 ---
 
-# 3. 已設計完成、待執行區
+# 3. 已完成、可視為落檔的近期 PR
 
 ## PR6 — rename `cache_manager` package and clean up typo remnants
-狀態：🟡 設計完成，待進 Phase 1
+狀態：✅ 已完成
 
 設計檔：
 - `docs/pr/2026-03-11_0932_PR_pr6-cache-manager-rename-design.md`
 - `docs/pr/2026-03-11_0129_PR_pr6-phase0-cache-manger-inventory.md`
 
-目標：
+完成內容：
 - 將 canonical package 名稱改成 `cache_manager`
-- 保留 legacy import 相容性
+- 保留 legacy root-level import 相容性
 - 更新 guard test
 - 僅改 code + test，不碰 docs
 
-已確認決策：
+關鍵決策：
 1. compatibility bridge 放在 `app/views/__init__.py`
-2. PR6 只改 code + test
-3. guard test 必須同 PR 一起改
-4. guard test function 名稱也要一起改，不然 `pytest -k ...cache_manager` 可能靜默跳過
-
-Phase 1 預計範圍：
-- rename cache manager view package to `app/views/cache_manager/`
-- 更新 `app/views/cache_view.py` import
-- 更新 `app/views/__init__.py` alias
-- 更新 `app/views/cache_manager/__init__.py` docstring
-- 更新 `tests/test_ui_refactor_guard.py`
+2. 不保留 `app.views.cache_manger.*` 舊 package path
+3. guard test function 名稱與斷言一併更新
 
 類型：邊界型 / 結構型
 
 ---
 
 ## PR7 — populate cache search metadata for `mod` / `path`
-狀態：🟡 有設計稿，待確認 Phase 1 前置條件
+狀態：✅ 已完成
 
 設計來源：
 - `docs/pr/2026-03-11_0015_PR_pr5-pr7-design-drafts.md`
+- `docs/pr/2026-03-11_PR_pr7-cache-search-metadata-design.md`
 
-目標：
+完成內容：
 - 補 `translation_tool/utils/cache_manager.py` 內 search result 的 `mod` / `path`
 - 讓搜尋結果不只命中，還有可追來源的上下文
+- metadata 於 rebuild search index 後生效
 
-Phase 1 前必須先確認：
-1. rebuild index / cache 的實際指令是什麼
-2. 驗證時要貼哪種 search result / JSON 片段作為證據
+關鍵結論：
+1. search result schema 本來就有 `mod` / `path`
+2. 真正缺口是 rebuild index 時把它們硬塞空字串
+3. 這輪採 backward-compatible inference，不做 cache shard migration
 
 類型：功能型 / 驗證型
 
 ---
 
-# 4. 中期高機率會需要的 follow-up
+## PR8 — replace `os.getcwd()` with project-root-based paths in `app/services.py`
+狀態：✅ 已完成
 
-## PR6 docs follow-up
-狀態：🔵 尚未設計，但高機率需要
+設計 / 記錄檔：
+- `docs/pr/2026-03-11_PR_pr8-services-project-root-paths.md`
 
-內容：
-- README 內 `cache_manager` 正名
-- changelog 舊文同步更新
-- 舊 PR 文件若有必要可補充說明
-- `.agentlens` 分析檔同步正名
+完成內容：
+- `CONFIG_PATH` / `REPLACE_RULES_PATH` 不再依賴目前 shell 的 `cwd`
+- 改為基於專案根目錄的穩定路徑
+- 與測試中的 `Path(__file__).resolve().parents[...]` 慣例對齊
 
-這顆不應與 PR6 code rename 混在一起，避免範圍膨脹。
-
-類型：文件型
+類型：穩定性修復 / 邊界型
 
 ---
 
-## `cache_manager.py` 分層重構 PR
-狀態：🔵 尚未立項，但中期高機率出現
+# 4. 接下來的中期主線（重新編號）
+
+## PR9 — `cache_manager.py` 分層重構（Phase 0 / 設計）
+狀態：🔵 尚未立項
 
 依據：
 - `.agentlens/03-translation-tool-review.md`
@@ -183,13 +178,24 @@ Phase 1 前必須先確認：
 - `translation_tool/utils/cache_manager.py` 責任太雜
 - storage / shard / search entry / overview 混在一起
 
+預期目標：
+- 先完成 Phase 0 盤點與設計稿
+- 明確切出 boundary，避免一次性大爆改
+
+類型：邊界型 + 重構型
+
+---
+
+## PR10 — `cache_manager.py` 分層重構第一顆實作 PR
+狀態：🔵 尚未立項
+
 可能方向：
 - 拆 storage
 - 拆 shard 管理
 - 保留 search 入口轉接
 - 避免重複發明平行 search module
 
-這類 PR 建議等 PR6、PR7 收乾淨後再設計。
+這顆應在 PR9 設計完成後再開始。
 
 類型：邊界型 + 重構型
 
@@ -197,48 +203,45 @@ Phase 1 前必須先確認：
 
 # 5. 建議執行順序
 
-## 短期
+## 已完成
 1. PR6
 2. PR7
+3. PR8
 
-## 中期
-3. PR6 docs follow-up
-4. `cache_manager.py` 分層重構 PR
+## 接下來
+4. PR9
+5. PR10
 
 ---
 
 # 6. 目前工作的重點判讀
 
-現在最值得做的不是再開很多新 PR，而是：
-- 先把 PR6 這顆 naming debt 收乾淨
-- 再做 PR7，把 cache metadata 補完整
-- 等這兩顆穩了，再進更大的 cache 分層重構
+現在最值得做的不是再補零碎小修，而是：
+- PR6 已收掉 naming debt
+- PR7 已把 cache search metadata 補完整
+- PR8 已補掉 `cwd` 路徑耦合
+- 下一步該正式進入 `cache_manager.py` 的結構切分設計
 
-換句話說，現在 roadmap 的主線很清楚：
+換句話說，現在 roadmap 的主線已經變成：
 
-> **先收命名債，再補搜尋 metadata，最後才拆更深的結構。**
+> **前置地基已收斂，下一步是把 `cache_manager.py` 拆成可維護的邊界。**
 
 ## 目前所處階段
 
 如果用階段來看，現在專案處在：
 
-> **「重構前置收斂期」的尾聲**
+> **「重構前置收斂期」已完成，正要進入結構拆分期**
 
 更細一點說：
-- **PR1～PR6**：主要都屬於前置基底 / 驗證 / 補強
-  - 建 baseline
-  - 補分析索引
-  - 清 dead code
-  - 收 import / side effect / naming debt
-  - 修 test 與 import 相容性
-- **PR7**：開始半隻腳跨進功能品質層
-  - 不只是補地基
-  - 還會直接改善 cache search 結果的可用性與上下文品質
+- **PR1～PR6**：前置基底 / 驗證 / 補強 / naming debt 收斂
+- **PR7**：開始跨進功能品質層，改善 search result 上下文
+- **PR8**：補掉基礎路徑穩定性風險
+- **PR9 之後**：才是真正的大型結構重整
 
-所以目前不是還在亂修零碎問題，而是：
-- 前置地基已經補到尾聲
-- PR6 是這段的最後一顆大結構整理
-- PR7 會是第一顆真正往功能結果品質推進的 PR
+所以現在不是還在清理地基，而是：
+- 前置整理已經足夠
+- 功能品質也有第一輪補強
+- 接下來可以開始設計 `cache_manager.py` 的結構拆分
 
 ---
 
@@ -246,9 +249,10 @@ Phase 1 前必須先確認：
 
 目前整體進度健康：
 - PR1～PR5 已收尾
+- PR6 已完成
+- PR7 已完成
+- PR8 已完成
 - 規範與文件治理已到位
-- PR6 已設計完成且前置盤點完成
-- PR7 已有方向
 
 下一步真正的主線就是：
-**PR6 → PR7 → docs follow-up → cache_manager 深層重構**
+**PR9（分層重構設計）→ PR10（第一顆結構拆分實作）**
