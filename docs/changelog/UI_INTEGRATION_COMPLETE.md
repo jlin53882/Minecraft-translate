@@ -43,7 +43,7 @@
 
 ---
 
-### 3. **Overview 面板更新** (app/views/cache_manger/cache_overview_panel.py)
+### 3. **Overview 面板更新** (app/views/cache_manager/cache_overview_panel.py)
 
 **UI 調整**:
 - 按鈕列加入「重建搜尋索引」按鈕
@@ -167,7 +167,7 @@
 
 1. `app/services.py.bak_20260213_HHMMSS`
 2. `app/views/cache_view.py.bak_20260213_HHMMSS`
-3. `app/views/cache_manger/cache_overview_panel.py.bak_20260213_HHMMSS`
+3. `app/views/cache_manager/cache_overview_panel.py.bak_20260213_HHMMSS`
 
 ### 新增檔案
 
