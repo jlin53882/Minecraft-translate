@@ -99,47 +99,9 @@ from app.services_impl.pipelines.ftb_service import run_ftb_translation_service
 # 注意：services.py 仍 re-export 同名符號，維持 translation_view.py 的 lazy import 相容。
 from app.services_impl.pipelines.kubejs_service import run_kubejs_tooltip_service
 
-
-def run_md_translation_service(
-    input_dir: str,
-    session,
-    output_dir: str | None = None,
-    dry_run: bool = False,
-    step_extract: bool = True,
-    step_translate: bool = True,
-    step_inject: bool = True,
-    write_new_cache: bool = True,
-    lang_mode: str = "non_cjk_only",
-):
-    update_logger_config()
-    try:
-        session.start()
-        UI_LOG_HANDLER.set_session(session)
-
-        from translation_tool.core.md_translation_assembly import run_md_pipeline
-
-        run_md_pipeline(
-            input_dir=input_dir,
-            session=session,
-            output_dir=output_dir,
-            dry_run=dry_run,
-            step_extract=step_extract,
-            step_translate=step_translate,
-            step_inject=step_inject,
-            write_new_cache=write_new_cache,
-            lang_mode=lang_mode,
-        )
-
-        session.finish()
-
-    except Exception as e:
-        full_traceback = traceback.format_exc()
-        logger.error(f"[非預期錯誤] MD 流程失敗：{e}\n{full_traceback}")
-        session.add_log(f"[非預期錯誤] {e}\n{full_traceback}")
-        session.set_error()
-
-    finally:
-        UI_LOG_HANDLER.set_session(None)
+# PR24：MD UI services 抽離至 app.services_impl.pipelines.md_service。
+# 注意：services.py 仍 re-export 同名符號，維持 translation_view.py 的 lazy import 相容。
+from app.services_impl.pipelines.md_service import run_md_translation_service
 
 
 # PR20：merge UI services 抽離至 app.services_impl.pipelines.merge_service。
