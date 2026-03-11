@@ -12,13 +12,13 @@ Project: C:\Users\admin\Desktop\Minecraft_translator_flet
 - `app/ui/view_wrapper.py` ? Shared card wrapper for view content.
 - `app/views/__init__.py` ? app.views package init.
 - `app/views/bundler_view.py` ? Output bundling page.
-- `app/views/cache_manger/__init__.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
-- `app/views/cache_manger/cache_controller.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
-- `app/views/cache_manger/cache_log_panel.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
-- `app/views/cache_manger/cache_overview_panel.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
-- `app/views/cache_manger/cache_presenter.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
-- `app/views/cache_manger/cache_shared_widgets.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
-- `app/views/cache_manger/cache_types.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_manager/__init__.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_manager/cache_controller.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_manager/cache_log_panel.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_manager/cache_overview_panel.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_manager/cache_presenter.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_manager/cache_shared_widgets.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
+- `app/views/cache_manager/cache_types.py` ? Cache management submodule split into controller, presenter, panels, and shared types.
 - `app/views/cache_view.py` ? Cache management page.
 - `app/views/config_view.py` ? Config editing page.
 - `app/views/extractor_view.py` ? JAR/lang/book extraction page.

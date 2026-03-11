@@ -107,7 +107,7 @@
 
 # 3. 已設計完成、待執行區
 
-## PR6 — rename `cache_manger` to `cache_manager`
+## PR6 — rename `cache_manager` package and clean up typo remnants
 狀態：🟡 設計完成，待進 Phase 1
 
 設計檔：
@@ -127,7 +127,7 @@
 4. guard test function 名稱也要一起改，不然 `pytest -k ...cache_manager` 可能靜默跳過
 
 Phase 1 預計範圍：
-- rename `app/views/cache_manger/` → `app/views/cache_manager/`
+- rename cache manager view package to `app/views/cache_manager/`
 - 更新 `app/views/cache_view.py` import
 - 更新 `app/views/__init__.py` alias
 - 更新 `app/views/cache_manager/__init__.py` docstring
@@ -161,7 +161,7 @@ Phase 1 前必須先確認：
 狀態：🔵 尚未設計，但高機率需要
 
 內容：
-- README 內 `cache_manger` 正名
+- README 內 `cache_manager` 正名
 - changelog 舊文同步更新
 - 舊 PR 文件若有必要可補充說明
 - `.agentlens` 分析檔同步正名

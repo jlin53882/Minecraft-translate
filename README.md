@@ -103,7 +103,7 @@ while 還有剩餘資料:
 │   ├── services.py             # UI ↔ 核心之間的服務層
 │   ├── ui/                     # 共用 UI 元件
 │   └── views/                  # 各功能頁面
-│       └── cache_manger/       # 快取管理子模組
+│       └── cache_manager/       # 快取管理子模組
 │
 ├── translation_tool/           # 核心演算法層
 │   ├── core/                   # 主要處理器

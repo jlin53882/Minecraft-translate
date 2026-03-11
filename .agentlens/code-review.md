@@ -407,7 +407,7 @@
 - task lifecycle 重複包裝
 - `os.getcwd()` 導致路徑耦合
 - `preview_jar_extraction_service` 疑似壞引用
-- `cache_manger/` 目錄命名有拼字債（應為 `cache_manager`）
+- `cache_manager/` 目錄命名債已於 PR6 修正。
 
 ### 建議
 先拆 `services.py`：
@@ -419,7 +419,7 @@
 - checker_service
 - lookup_service
 
-另外，`cache_manger` 這個命名問題先不要急著直接 rename，因為 UI / import 路徑可能已經依賴它。比較穩的作法是：
+補註：上述命名問題已在 PR6 完成 rename；以下段落保留作為當時 code review 脈絡參考：
 1. 先標記為 naming debt
 2. 等重構時統一改名
 3. 一次性修所有 import / 測試
@@ -480,7 +480,7 @@
 2. 讓 `main.py` 成為單一啟動入口
 3. 把 `main.py` 的 registry / startup task 外移
 4. 把 `app/services.py` 的 `os.getcwd()` 改成穩定專案根路徑
-5. 把 `cache_manger` 列入命名債，準備重構時一次性改名
+5. `cache_manager` 命名債已在 PR6 收斂完成
 
 ### 理由
 這一層能先把邊界整理乾淨，又不需要碰 UI 版面。
