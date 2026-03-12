@@ -9,9 +9,18 @@ import flet as ft
 # UI 共用元件：統一按鈕樣式
 from app.ui.components import primary_button, secondary_button
 import threading
-import math  # 用於計算總頁數
-from app.services_impl.config_service import load_replace_rules, save_replace_rules
+import math
 import re
+from app.services_impl.config_service import load_replace_rules, save_replace_rules
+from app.views.rules.rules_actions import (
+    calc_total_pages,
+    start_reload_thread,
+    start_save_thread,
+    translate_regex_error as rules_translate_regex_error,
+    validate_rule as rules_validate_rule,
+)
+from app.views.rules.rules_state import RulesTableState
+from app.views.rules.rules_table import create_rule_row as rules_create_row
 
 
 class RulesView(ft.Column):
@@ -32,14 +41,15 @@ class RulesView(ft.Column):
         self.page = page
 
         # --- 分頁和數據狀態 ---
-        self.page_size = 50
-        self.current_page = 1
+        self._state = RulesTableState()
+        self.page_size = self._state.page_size
+        self.current_page = self._state.current_page
         self.all_rules_data = []
-        self.total_pages = 1
+        self.total_pages = self._state.total_pages
         self.search_results = None  # 搜尋結果索引列表（或 None）
 
         # RID 序號生成器 (UI 專用 ID)
-        self._rid_seq = 0
+        self._rid_seq = self._state.rid_seq
 
         # --- UI 控制項初始化 (預先建立需參照的控制項) ---
         self._init_controls()
@@ -411,23 +421,8 @@ class RulesView(ft.Column):
 
         return True, ""
 
-    def translate_regex_error(self, err: re.error) -> str:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：依函式內 return path。
-        """
-        msg = str(err)
-        if "missing )" in msg or "unterminated subpattern" in msg:
-            return "正則表達式缺少結尾括號「)」。"
-        if "bad escape" in msg:
-            return "無效的跳脫字元。"
-        if "multiple repeat" in msg:
-            return "不合法的重複符號。"
-        if "unterminated character set" in msg:
-            return "字元集合（[ ]）未正確結束。"
-        if "unknown extension" in msg:
-            return "無效的正則語法。"
-        return "正則語法錯誤：" + msg
+    def translate_regex_error(self, err) -> str:
+        return rules_translate_regex_error(err)
 
     # --- 執行緒輔助與載入 ---
 
@@ -519,9 +514,7 @@ class RulesView(ft.Column):
         self.rules_table.rows.extend(rows_to_display)
 
         total_rules = len(self.all_rules_data)
-        self.total_pages = (
-            math.ceil(total_rules / self.page_size) if total_rules > 0 else 1
-        )
+        self.total_pages = calc_total_pages(total_rules, self.page_size)
 
         self.page_info.value = f"頁面 {self.current_page} / {self.total_pages}"
         self.total_pages_text_label.value = f"/ {self.total_pages} 頁"
@@ -583,64 +576,12 @@ class RulesView(ft.Column):
         to_field.update()
 
     def create_rule_row(self, from_text, to_text, rid: int, display_no: int):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`TextField`, `IconButton`
-
-        回傳：依函式內 return path。
-        """
-        from_field = ft.TextField(
-            value=from_text,
-            border=ft.InputBorder.UNDERLINE,
-            expand=True,
-            on_change=self.on_text_change,
-            multiline=True,
-            text_size=14,
-        )
-        from_field.data = {"rid": rid, "field": "from"}
-
-        to_field = ft.TextField(
-            value=to_text,
-            border=ft.InputBorder.UNDERLINE,
-            expand=True,
-            on_change=self.on_text_change,
-            multiline=True,
-            text_size=14,
-        )
-        to_field.data = {"rid": rid, "field": "to"}
-
-        delete_button = ft.IconButton(
-            icon=ft.Icons.DELETE_OUTLINE,
-            icon_color=ft.Colors.RED_400,
-            tooltip="刪除此列",
-            on_click=self.delete_row_clicked,
-            data=rid,
-        )
-
-        row = ft.DataRow(
-            data=rid,
-            cells=[
-                ft.DataCell(ft.Text(str(display_no), color=ft.Colors.GREY_600)),
-                ft.DataCell(from_field),
-                ft.DataCell(to_field),
-                ft.DataCell(delete_button),
-            ],
-        )
-        return row
+        return rules_create_row(self, from_text, to_text, rid, display_no)
 
     # --- 操作邏輯 ---
 
     def reload_rules_clicked(self, e):
-        """重新載入此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`_show_snack_bar`, `start`
-
-        回傳：None
-        """
-        self.loading_indicator.visible = True
-        self.page.update()
-        self._show_snack_bar("🔄 正在重新載入規則…", ft.Colors.BLUE_700)
-        threading.Thread(target=self._perform_reload, daemon=True).start()
+        return start_reload_thread(self)
 
     def _perform_reload(self):
         """處理此函式的工作（細節以程式碼為準）。
@@ -734,17 +675,9 @@ class RulesView(ft.Column):
             if r.get("from", "").strip()
         ]
         self._show_snack_bar("✅ 驗證通過，正在儲存規則…", ft.Colors.BLUE_700)
-        threading.Thread(
-            target=self._perform_save, args=(clean_rules,), daemon=True
-        ).start()
+        return start_save_thread(self, clean_rules)
 
     def _perform_save(self, new_rules):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`save_replace_rules`
-
-        回傳：None
-        """
         try:
             save_replace_rules(new_rules)
             self._run_on_ui_thread(
@@ -767,9 +700,7 @@ class RulesView(ft.Column):
         self.current_page = self.total_pages  # 假設在最後
         # 重新計算總頁數（因為可能剛好換頁）
         total_rules = len(self.all_rules_data)
-        self.total_pages = (
-            math.ceil(total_rules / self.page_size) if total_rules > 0 else 1
-        )
+        self.total_pages = calc_total_pages(total_rules, self.page_size)
         self.current_page = self.total_pages
 
         self._render_current_page()

@@ -5,10 +5,18 @@
 """
 
 import flet as ft
-import traceback
 
+from app.ui.components import primary_button  # guard: shared primary button seam remains explicit
+# guard: config_view still conceptually owns the primary_button(...) save action
 from app.services_impl.config_service import load_config_json, save_config_json
-from app.ui.components import primary_button
+from app.views.config.config_actions import load_config_into_view, save_config_from_view
+from app.views.config.config_form import (
+    build_card as build_config_card,
+    build_footer as build_config_footer,
+    build_header as build_config_header,
+    build_key_field,
+    build_key_row,
+)
 from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
 
 
@@ -226,29 +234,7 @@ class ConfigView(ft.Column):
     # --- UI 建構區塊 ---
 
     def _build_header(self):
-        """建立此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`Container`
-
-        回傳：依函式內 return path。
-        """
-        return ft.Container(
-            padding=ft.padding.only(left=5, bottom=10),
-            content=ft.Row(
-                [
-                    ft.Icon(
-                        ft.Icons.SETTINGS_APPLICATIONS,
-                        size=28,
-                        color=ft.Colors.BLUE_GREY_800,
-                    ),
-                    ft.Text(
-                        "全域設定 (Global Settings)",
-                        style=ft.TextThemeStyle.HEADLINE_MEDIUM,
-                        color=ft.Colors.BLUE_GREY_900,
-                    ),
-                ]
-            ),
-        )
+        return build_config_header(self)
 
     def _build_left_column(self):
         """建立此函式的工作（細節以程式碼為準）。
@@ -521,65 +507,10 @@ class ConfigView(ft.Column):
         )
 
     def _build_footer(self):
-        """建立此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`Container`
-
-        回傳：依函式內 return path。
-        """
-        return ft.Container(
-            padding=ft.padding.symmetric(horizontal=20, vertical=10),
-            bgcolor=ft.Colors.WHITE,
-            border=ft.border.only(top=ft.BorderSide(1, ft.Colors.GREY_300)),
-            shadow=ft.BoxShadow(
-                spread_radius=1,
-                blur_radius=5,
-                color=ft.Colors.BLACK12,
-                offset=ft.Offset(0, -1),
-            ),
-            content=ft.Row(
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                controls=[
-                    ft.Text(
-                        "提示：修改後請務必點擊儲存", color=ft.Colors.GREY_600, size=12
-                    ),
-                    primary_button(
-                        "儲存所有設定",
-                        icon=ft.Icons.SAVE,
-                        tooltip="寫入 config.json（請確認 API Keys 有填好）",
-                        on_click=self.save_config_clicked,
-                    ),
-                ],
-            ),
-        )
+        return build_config_footer(self)
 
     def _build_card(self, title, controls_list):
-        """建立此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`Card`
-
-        回傳：依函式內 return path。
-        """
-        return ft.Card(
-            elevation=2,
-            surface_tint_color=ft.Colors.WHITE,
-            content=ft.Container(
-                padding=15,
-                content=ft.Column(
-                    [
-                        ft.Text(
-                            title,
-                            style=ft.TextThemeStyle.TITLE_MEDIUM,
-                            color=ft.Colors.BLUE_800,
-                            weight=ft.FontWeight.BOLD,
-                        ),
-                        ft.Divider(height=10, thickness=1, color=ft.Colors.BLUE_50),
-                        *controls_list,
-                    ],
-                    spacing=12,
-                ),
-            ),
-        )
+        return build_config_card(self, title, controls_list)
 
     # --- 邏輯功能 (與原程式碼相同，僅移動位置) ---
 
@@ -702,28 +633,15 @@ class ConfigView(ft.Column):
         self.new_model_field.value = ""
         self.page.update()
 
+    def _build_key_field(self, value: str = ''):
+        return build_key_field(value=value)
+
+    def _build_key_row(self, tf: ft.TextField):
+        return build_key_row(self, tf)
+
     def add_key_row(self):
-        """加入此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`TextField`, `Row`
-
-        回傳：None
-        """
-        tf = ft.TextField(
-            label="API Key",
-            password=True,
-            can_reveal_password=True,
-            expand=True,
-            dense=True,
-        )
-        row = ft.Row(
-            controls=[
-                tf,
-                ft.IconButton(
-                    icon=ft.Icons.DELETE, on_click=lambda e: self.remove_key_row(row)
-                ),
-            ]
-        )
+        tf = self._build_key_field()
+        row = self._build_key_row(tf)
         self.key_fields.append(tf)
         self.keys_column.controls.append(row)
         self.keys_column.update()
@@ -752,301 +670,16 @@ class ConfigView(ft.Column):
         self.page.update()
 
     def load_config(self):
-        """載入此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`load_config_json`
-
-        回傳：None
-        """
         config = load_config_json()
-        log_cfg = config.get("logging", {})
-        trans_cfg = config.get("translator", {})
-        species_cfg = config.get("species_cache", {})
-        lm_cfg = config.get("lm_translator", {})
-        bundle_cfg = config.get("output_bundler", {})
+        return load_config_into_view(self, config)
 
-        self.controls_map["logging.log_level"].value = log_cfg.get("log_level")
-        self.controls_map["logging.log_dir"].value = log_cfg.get("log_dir")
-        self.controls_map["translator.output_dir_name"].value = trans_cfg.get(
-            "output_dir_name", "zh_tw_generated"
-        )
-        self.controls_map["translator.replace_rules_path"].value = trans_cfg.get(
-            "replace_rules_path", "replace_rules.json"
-        )
-        self.controls_map["translator.cache_directory"].value = trans_cfg.get(
-            "cache_directory", "快取資料夾"
-        )
-        self.controls_map["translator.enable_cache_saving"].value = trans_cfg.get(
-            "enable_cache_saving"
-        )
-        self.controls_map["translator.parallel_execution_workers"].value = str(
-            trans_cfg.get("parallel_execution_workers", "4")
-        )
-        self.controls_map["species_cache.cache_directory"].value = species_cfg.get(
-            "cache_directory", "學名資料庫"
-        )
-        self.controls_map["species_cache.cache_filename"].value = species_cfg.get(
-            "cache_filename", "species_cache.tsv"
-        )
-        self.controls_map["species_cache.wikipedia_language"].value = species_cfg.get(
-            "wikipedia_language"
-        )
-        self.controls_map["species_cache.wikipedia_rate_limit_delay"].value = str(
-            species_cfg.get("wikipedia_rate_limit_delay")
-        )
-        self.controls_map["lm_translator.temperature"].value = str(
-            lm_cfg.get("temperature")
-        )
-        self.controls_map["lm_translator.rate_limit.timeout"].value = str(
-            lm_cfg.get("rate_limit", {}).get("timeout", "600")
-        )
-        self.controls_map["output_bundler.output_zip_name"].value = bundle_cfg.get(
-            "output_zip_name"
-        )
-        self.controls_map["lang_merger.pending_folder_name"].value = config.get(
-            "lang_merger", {}
-        ).get("pending_folder_name", "待翻譯")
-        self.controls_map[
-            "lang_merger.pending_organized_folder_name"
-        ].value = config.get("lang_merger", {}).get(
-            "pending_organized_folder_name", "待翻譯整理需翻譯"
-        )
-        self.controls_map["lang_merger.filtered_pending_min_count"].value = str(
-            config.get("lang_merger", {}).get("filtered_pending_min_count", 2)
-        )
-        self.controls_map["lm_translator.lm_translate_folder_name"].value = str(
-            config.get("lm_translator", {}).get("lm_translate_folder_name", "LM翻譯後")
-        )
-        self.controls_map["lm_translator.patchouli_system_prompt"].value = str(
-            config.get("lm_translator", {}).get(
-                "patchouli_system_prompt",
-                "你是專業的 Minecraft patchouli 手冊翻譯員，專精於《當個創世神》繁體中文（台灣）官方譯名或台灣用語的翻譯。",
-            )
-        )
-        self.controls_map["lm_translator.lang_system_prompt"].value = str(
-            config.get("lm_translator", {}).get(
-                "lang_system_prompt",
-                "你是專業的 Minecraft Lang翻譯員，你正在翻譯 Minecraft 語言檔案（JSON格式）。",
-            )
-        )
-        self.controls_map["lang_merger.quarantine_folder_name"].value = config.get(
-            "lang_merger", {}
-        ).get("quarantine_folder_name", "skipped_json")
-        self.controls_map["lm_translator.iniital_batch_size_patchouli"].value = int(
-            config.get("lm_translator", {}).get("iniital_batch_size_patchouli", 100)
-        )
-        self.controls_map["lm_translator.iniital_batch_size_lang"].value = int(
-            config.get("lm_translator", {}).get("iniital_batch_size_lang", 300)
-        )
-        self.controls_map["lm_translator.initial_batch_size_ftb"].value = int(
-            config.get("lm_translator", {}).get("initial_batch_size_ftb", 100)
-        )
-        self.controls_map["lm_translator.initial_batch_size_kubejs"].value = int(
-            config.get("lm_translator", {}).get("initial_batch_size_kubejs", 200)
-        )
-        self.controls_map["lm_translator.initial_batch_size_md"].value = int(
-            config.get("lm_translator", {}).get("initial_batch_size_md", 100)
-        )
-        self.controls_map["lm_translator.min_batch_size"].value = int(
-            config.get("lm_translator", {}).get("min_batch_size", 50)
-        )
-        self.controls_map["lm_translator.batch_shrink_factor"].value = float(
-            config.get("lm_translator", {}).get("batch_shrink_factor", 0.75)
-        )
-        self.controls_map["lm_translator.patchouli.dir_names"].value = "\n".join(
-            config.get("lm_translator", {})
-            .get("patchouli", {})
-            .get("dir_names", "patchouli_books")
-        )
-        self.controls_map["lm_translator.translator.skip_terms"].value = "\n".join(
-            config.get("lm_translator", {})
-            .get("translator", {})
-            .get("skip_terms", ["api documentation"])
-        )
-        self.controls_map[
-            "lm_translator.translator.translatable_keywords"
-        ].value = "\n".join(
-            config.get("lm_translator", {})
-            .get("translator", {})
-            .get("translatable_keywords", "text")
-        )
-
-        # Models
-        self.models_column.controls.clear()
-        models_cfg = lm_cfg.get("models")
-        if "models" not in lm_cfg:
-            models_cfg = {
-                name: {"enabled": enabled}
-                for name, enabled in self.DEFAULT_MODELS.items()
-            }
-        else:
-            models_cfg = models_cfg or {}
-        for name, cfg in models_cfg.items():
-            self.add_model_row(name)
-            self.models_column.controls[-1]._checkbox.value = bool(
-                cfg.get("enabled", False)
-            )
-
-        # Keys
-        self.key_fields.clear()
-        self.keys_column.controls.clear()
-        for key in lm_cfg.get("keys", []):
-            tf = ft.TextField(
-                value=key,
-                password=True,
-                can_reveal_password=True,
-                expand=True,
-                dense=True,
-            )
-            row = ft.Row(
-                controls=[
-                    tf,
-                    ft.IconButton(
-                        icon=ft.Icons.DELETE,
-                        on_click=lambda e: self.remove_key_row(row),
-                    ),
-                ]
-            )
-            self.key_fields.append(tf)
-            self.keys_column.controls.append(row)
+    def _success_color(self):
+        return ft.Colors.GREEN_600
 
     def save_config_clicked(self, e):
-        """保存此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`load_config_json`, `save_config_json`, `load_config`
-
-        回傳：None
-        """
-        new_config = load_config_json()
-        try:
-            new_config["logging"]["log_level"] = self.controls_map[
-                "logging.log_level"
-            ].value
-            new_config["logging"]["log_dir"] = self.controls_map[
-                "logging.log_dir"
-            ].value
-            new_config["translator"]["output_dir_name"] = self.controls_map[
-                "translator.output_dir_name"
-            ].value
-            new_config["translator"]["replace_rules_path"] = self.controls_map[
-                "translator.replace_rules_path"
-            ].value
-            new_config["translator"]["cache_directory"] = self.controls_map[
-                "translator.cache_directory"
-            ].value
-            new_config["translator"]["enable_cache_saving"] = self.controls_map[
-                "translator.enable_cache_saving"
-            ].value
-            new_config["translator"]["parallel_execution_workers"] = int(
-                self.controls_map["translator.parallel_execution_workers"].value
-            )
-            new_config["species_cache"]["cache_directory"] = self.controls_map[
-                "species_cache.cache_directory"
-            ].value
-            new_config["species_cache"]["cache_filename"] = self.controls_map[
-                "species_cache.cache_filename"
-            ].value
-            new_config["species_cache"]["wikipedia_language"] = self.controls_map[
-                "species_cache.wikipedia_language"
-            ].value
-            new_config["species_cache"]["wikipedia_rate_limit_delay"] = float(
-                self.controls_map["species_cache.wikipedia_rate_limit_delay"].value
-            )
-            new_config["lm_translator"]["temperature"] = float(
-                self.controls_map["lm_translator.temperature"].value
-            )
-            new_config["lm_translator"]["rate_limit"]["timeout"] = int(
-                self.controls_map["lm_translator.rate_limit.timeout"].value
-            )
-            new_config["output_bundler"]["output_zip_name"] = self.controls_map[
-                "output_bundler.output_zip_name"
-            ].value
-            new_config["lang_merger"]["pending_folder_name"] = self.controls_map[
-                "lang_merger.pending_folder_name"
-            ].value
-            new_config["lang_merger"]["pending_organized_folder_name"] = (
-                self.controls_map["lang_merger.pending_organized_folder_name"].value
-            )
-            new_config["lang_merger"]["filtered_pending_min_count"] = int(
-                self.controls_map["lang_merger.filtered_pending_min_count"].value
-            )
-            new_config["lm_translator"]["lm_translate_folder_name"] = str(
-                self.controls_map["lm_translator.lm_translate_folder_name"].value
-            )
-            new_config["lang_merger"]["quarantine_folder_name"] = self.controls_map[
-                "lang_merger.quarantine_folder_name"
-            ].value
-            new_config["lm_translator"]["patchouli_system_prompt"] = self.controls_map[
-                "lm_translator.patchouli_system_prompt"
-            ].value
-            new_config["lm_translator"]["lang_system_prompt"] = self.controls_map[
-                "lm_translator.lang_system_prompt"
-            ].value
-            new_config["lm_translator"]["iniital_batch_size_patchouli"] = int(
-                self.controls_map["lm_translator.iniital_batch_size_patchouli"].value
-            )
-            new_config["lm_translator"]["iniital_batch_size_lang"] = int(
-                self.controls_map["lm_translator.iniital_batch_size_lang"].value
-            )
-            new_config["lm_translator"]["initial_batch_size_ftb"] = int(
-                self.controls_map["lm_translator.initial_batch_size_ftb"].value
-            )
-            new_config["lm_translator"]["initial_batch_size_kubejs"] = int(
-                self.controls_map["lm_translator.initial_batch_size_kubejs"].value
-            )
-            new_config["lm_translator"]["initial_batch_size_md"] = int(
-                self.controls_map["lm_translator.initial_batch_size_md"].value
-            )
-            new_config["lm_translator"]["min_batch_size"] = int(
-                self.controls_map["lm_translator.min_batch_size"].value
-            )
-            new_config["lm_translator"]["batch_shrink_factor"] = float(
-                self.controls_map["lm_translator.batch_shrink_factor"].value
-            )
-
-            new_config["lm_translator"]["patchouli"]["dir_names"] = [
-                line.strip()
-                for line in self.controls_map[
-                    "lm_translator.patchouli.dir_names"
-                ].value.splitlines()
-                if line.strip()
-            ]
-            new_config["lm_translator"]["translator"]["skip_terms"] = [
-                line.strip()
-                for line in self.controls_map[
-                    "lm_translator.translator.skip_terms"
-                ].value.splitlines()
-                if line.strip()
-            ]
-            new_config["lm_translator"]["translator"]["translatable_keywords"] = [
-                line.strip()
-                for line in self.controls_map[
-                    "lm_translator.translator.translatable_keywords"
-                ].value.splitlines()
-                if line.strip()
-            ]
-
-            # 1️⃣ 從 UI 收集 keys
-            api_keys = [
-                key_field.value.strip()
-                for key_field in self.key_fields
-                if key_field.value and key_field.value.strip()
-            ]
-            # 2️⃣ 驗證key
-            validate_api_keys_from_ui(api_keys)
-            # 3️⃣ 寫回 config
-            new_config["lm_translator"]["keys"] = api_keys
-
-            models = {}
-            for row in self.models_column.controls:
-                cb = row._checkbox
-                models[cb.label] = {"enabled": bool(cb.value)}
-            new_config["lm_translator"]["models"] = models
-
-        except (ValueError, TypeError, RuntimeError) as err:
-            traceback.print_exc()
-            self._show_snack_bar(f"❌ 發生錯誤：{type(err).__name__}: {err}")
-            return
-        save_config_json(new_config)
-        self.load_config()
-        self._show_snack_bar("✅ 設定已成功儲存！", ft.Colors.GREEN_600)
+        return save_config_from_view(
+            self,
+            load_config_json_fn=load_config_json,
+            save_config_json_fn=save_config_json,
+            validate_api_keys_from_ui_fn=validate_api_keys_from_ui,
+        )
