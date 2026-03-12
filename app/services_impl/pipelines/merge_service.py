@@ -10,15 +10,11 @@ import logging
 import traceback
 from pathlib import Path
 
-from app.services_impl.config_service import _load_app_config
-from app.services_impl.logging_service import UI_LOG_HANDLER, update_logger_config as apply_logger_config
+from app.services_impl.logging_service import UI_LOG_HANDLER
+from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
 from translation_tool.core.lang_merger import merge_zhcn_to_zhtw_from_zip
 
 logger = logging.getLogger(__name__)
-
-
-def _update_logger_config():
-    return apply_logger_config(_load_app_config, logger_name="translation_tool")
 
 
 def run_merge_zip_batch_service(
@@ -34,7 +30,7 @@ def run_merge_zip_batch_service(
     - log / error 完整轉交給 session
     """
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
-    _update_logger_config()
+    ensure_pipeline_logging()
     UI_LOG_HANDLER.set_session(session)
     try:
         total = len(zip_paths)

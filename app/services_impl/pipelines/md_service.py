@@ -9,14 +9,10 @@ from __future__ import annotations
 import logging
 import traceback
 
-from app.services_impl.config_service import _load_app_config
-from app.services_impl.logging_service import UI_LOG_HANDLER, update_logger_config as apply_logger_config
+from app.services_impl.logging_service import UI_LOG_HANDLER
+from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
 
 logger = logging.getLogger(__name__)
-
-
-def _update_logger_config():
-    return apply_logger_config(_load_app_config, logger_name="translation_tool")
 
 
 def run_md_translation_service(
@@ -30,7 +26,7 @@ def run_md_translation_service(
     write_new_cache: bool = True,
     lang_mode: str = "non_cjk_only",
 ):
-    _update_logger_config()
+    ensure_pipeline_logging()
     try:
         session.start()
         UI_LOG_HANDLER.set_session(session)
