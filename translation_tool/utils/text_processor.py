@@ -13,12 +13,19 @@ import re
 from typing import List, Dict, Any
 from opencc import OpenCC
 
-# 從 config_manager 導入我們已經載入好的全域 config
-from .config_manager import resolve_project_path
+from .config_access import resolve_runtime_path
+
+# legacy seam：保留給既有 monkeypatch/tests，用新 helper 實作
+resolve_project_path = resolve_runtime_path
 
 import threading
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_rules_path(path: str):
+    return resolve_project_path(path)
+
 
 _thread_local = threading.local()
 _CJK_PATTERN = re.compile(r"([\u4e00-\u9fff]+)")
@@ -137,7 +144,7 @@ def load_replace_rules(path: str) -> List[Dict[str, str]]:
     - 固定字串規則：from 長度由長到短（長詞優先）
     - 正則規則：保持原順序
     """
-    resolved_path = resolve_project_path(path)
+    resolved_path = _resolve_rules_path(path)
     if not resolved_path.exists():
         logger.warning("找不到替換規則檔案: %s，將略過替換處理。", resolved_path)
         return []
@@ -182,7 +189,7 @@ def load_replace_rules(path: str) -> List[Dict[str, str]]:
 
 def save_replace_rules(path: str, rules: List[Dict[str, str]]):
     """將替換規則儲存到指定的 JSON 檔案（orjson 版）。"""
-    resolved_path = resolve_project_path(path)
+    resolved_path = _resolve_rules_path(path)
     try:
         resolved_path.parent.mkdir(parents=True, exist_ok=True)
         with resolved_path.open("wb") as f:
@@ -198,7 +205,7 @@ def save_replace_rules(path: str, rules: List[Dict[str, str]]):
 def load_custom_translations(folder_path: str, filename="table.tsv") -> Dict[str, str]:
     """從指定資料夾載入自訂的翻譯表 (TSV 格式)。"""
     custom_map = {}
-    file_path = resolve_project_path(folder_path) / filename
+    file_path = resolve_runtime_path(folder_path) / filename
     if not file_path.exists():
         logger.info(f"自訂翻譯檔 {file_path} 不存在，略過。")
         return custom_map
