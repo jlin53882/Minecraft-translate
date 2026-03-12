@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          python-version: '3.12'
+          enable-cache: true
+
+      - name: Install dependencies (frozen)
+        run: uv sync --frozen --all-groups
+
+      - name: Run tests
+        run: uv run pytest -q
+
+  lint:
+    # 只在 PR 上強制 lint/format，避免一次性導入 ruff 時需要全 repo 大掃除。
+    # 之後可以逐步把檢查範圍擴大到全 repo。
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          python-version: '3.12'
+          enable-cache: true
+
+      - name: Install dependencies (frozen)
+        run: uv sync --frozen --all-groups
+
+      - name: Ruff (lint + format) on changed Python files
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.sha }}"
+
+          echo "Diff: $BASE_SHA..$HEAD_SHA"
+
+          FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E '\.py$' || true)
+          if [ -z "$FILES" ]; then
+            echo "No Python files changed; skipping ruff."
+            exit 0
+          fi
+
+          echo "Changed Python files:"
+          echo "$FILES"
+
+          echo "$FILES" | xargs uv run ruff check
+          echo "$FILES" | xargs uv run ruff format --check
