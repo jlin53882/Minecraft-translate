@@ -39,7 +39,7 @@ def try_repair_lang_line(line: str):
 
 def collapse_lang_lines(text: str):
     """
-    Forge .lang: 行尾 \ 表示續行
+    Forge .lang: 行尾 \\ 表示續行
     將多行合併成實際的一行
     """
     lines = text.splitlines()
