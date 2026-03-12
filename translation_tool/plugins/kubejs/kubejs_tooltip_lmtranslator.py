@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from translation_tool.core.lm_translator_main import translate_batch_smart, value_fully_translated
-from translation_tool.core.lm_config_rules import validate_api_keys
+from translation_tool.core.lm_translator_main import translate_batch_smart
+from translation_tool.core.lm_config_rules import validate_api_keys, value_fully_translated
 from translation_tool.utils.config_manager import load_config
 
 from translation_tool.core.lm_translator_shared import (

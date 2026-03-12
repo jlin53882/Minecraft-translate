@@ -14,8 +14,8 @@ from typing import Any, Dict, List, Tuple, Optional
 import time
 
 from translation_tool.utils.log_unit import log_info, log_warning, log_error,get_formatted_duration,progress
-from translation_tool.core.lm_config_rules import validate_api_keys
-from translation_tool.core.lm_translator_main import translate_batch_smart, value_fully_translated
+from translation_tool.core.lm_config_rules import validate_api_keys, value_fully_translated
+from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_translator_shared import (
     CacheRule,
     TouchSet,
