@@ -1,3 +1,9 @@
+"""translation_tool/core/lm_config_rules.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 import re
 import json
 from pathlib import Path
@@ -109,6 +115,15 @@ def validate_api_keys():
     logger.info(f"✅ 金鑰格式驗證通過，共載入 {len(keys)} 組金鑰。")
 
 def validate_api_keys_from_ui(keys: list[str]): #ui 專用
+    """validate_api_keys_from_ui 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     for k in keys:
         if not k or not k.startswith("AIza"):
             raise RuntimeError(
@@ -154,6 +169,15 @@ TOKEN_PATTERN = re.compile(r"\$\([^)]+\)")
 HASH_PREFIX_PATTERN = re.compile(r"^\s*#")  # 任何 # 開頭（含前置空白）
 
 def needs_translation_text(s: str) -> bool:
+    """needs_translation_text 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     if not s or not isinstance(s, str):
         return False
 
@@ -316,6 +340,15 @@ def build_skip_terms_pattern(terms: list[str]) -> re.Pattern:
 # =========================
 # 值是否值得翻譯（核心判斷）
 def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
+    """is_value_translatable 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     if not isinstance(value, str):
         return False
 

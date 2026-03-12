@@ -1,3 +1,9 @@
+"""app/views/cache_manager/cache_presenter.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 from __future__ import annotations
 
 from .cache_types import ActionState, CacheUiState
@@ -32,20 +38,65 @@ class CachePresenter:
     }
 
     def status_label(self, state: CacheUiState) -> str:
+        """status_label 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if not state.busy:
             return self._STATUS_MAP["READY"]
         reason = (state.reason or "").strip().upper()
         return self._STATUS_MAP.get(reason, state.reason or "處理中")
 
     def status_text(self, state: CacheUiState) -> str:
+        """status_text 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         label = self.status_label(state)
         return f"狀態：{label}" + ("..." if state.busy else "")
 
     def phase_label(self, phase: str) -> str:
+        """phase_label 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         return self._PHASE_MAP.get((phase or "").strip().lower(), phase or "next")
 
     def action_trace(self, action: ActionState) -> str:
+        """action_trace 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         return f"trace: ACTION#{action.action_id} {self.phase_label(action.phase)} {action.reason}"
 
     def action_log(self, action: ActionState) -> str:
+        """action_log 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         return f"[ACTION#{action.action_id}] {self.phase_label(action.phase)} {action.reason}"

@@ -28,11 +28,29 @@ class TranslationError(Exception):
     """翻譯相關錯誤的基底類別"""
     
     def __init__(self, message: str, context: dict = None):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.message = message
         self.context = context or {}
         super().__init__(self.message)
     
     def __str__(self):
+        """__str__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if self.context:
             ctx = ', '.join(f"{k}={v}" for k, v in self.context.items())
             return f"{self.message} (context: {ctx})"
@@ -48,6 +66,15 @@ class RateLimitError(APIError):
     """API 限流錯誤（429 Too Many Requests）"""
     
     def __init__(self, retry_after: int = 600, **context):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         super().__init__(
             f"API 限流，建議 {retry_after} 秒後重試",
             context={'retry_after': retry_after, **context}
@@ -59,6 +86,15 @@ class OverloadError(APIError):
     """API 過載錯誤（503 Service Unavailable - overload）"""
     
     def __init__(self, **context):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         super().__init__("API 伺服器過載", context)
 
 
@@ -99,8 +135,26 @@ def handle_translation_errors(log_func=None, auto_retry=True, max_retries=3):
             pass
     """
     def decorator(func):
+        """decorator 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         @wraps(func)
         def wrapper(*args, **kwargs):
+            """wrapper 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             retry_count = 0
             
             while retry_count <= max_retries:

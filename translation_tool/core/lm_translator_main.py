@@ -1,3 +1,9 @@
+"""translation_tool/core/lm_translator_main.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 import time
 import math
 import logging
@@ -59,11 +65,29 @@ def translate_batch_smart(batch_items,total=None):
 
     # 判斷這批次類型（影響 System Prompt 與 batch 上限）
     def _norm_file(item):
+        """_norm_file 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         return str(item.get("file", "")).replace("\\", "/").lower()
 
 
     def detect_batch_profile(items):
         # ✅ 優先用 cache_type（最可靠）
+        """detect_batch_profile 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         cache_types = [str(i.get("cache_type", "")).lower() for i in items if isinstance(i, dict)]
         cache_types = [c for c in cache_types if c]
 

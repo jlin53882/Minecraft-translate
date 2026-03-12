@@ -1,3 +1,9 @@
+"""translation_tool/core/jar_processor.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # /minecraft_translator_flet/translation_tool/core/jar_processor.py (路徑分隔符修正版)
 
 import os
@@ -15,9 +21,27 @@ log = logging.getLogger(__name__)
 
 # --- 通用輔助函式 (保持不變) ---
 def _get_file_hash(data: bytes) -> str:
+    """_get_file_hash 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     return hashlib.sha256(data).hexdigest()
 
 def find_jar_files(folder_path: str) -> List[str]:
+    """find_jar_files 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     jar_files = []
     for root, _, files in os.walk(folder_path):
         for file in files:
@@ -120,6 +144,15 @@ def _extract_from_jar(jar_path: str, output_root: str, target_regex: re.Pattern)
 
 def _run_extraction_process(mods_dir: str, output_dir: str, target_regex: re.Pattern, process_name: str) -> Generator[Dict[str, Any], None, None]:
     # (此函式邏輯不變)
+    """_run_extraction_process 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     os.makedirs(output_dir, exist_ok=True)
     jar_files = find_jar_files(mods_dir)
     total_jars = len(jar_files)
@@ -412,6 +445,15 @@ class ExtractionSummary:
     """提取結果摘要（記錄成功/警告/失敗）"""
     
     def __init__(self):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.success = []
         self.warnings = []
         self.failures = []

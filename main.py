@@ -52,6 +52,15 @@ def bootstrap_runtime():
 def main(page: ft.Page):
     # 這個函式只負責組裝 Flet UI 與頁面切換邏輯；
     # runtime 初始化、logging 設定等啟動責任都留在 bootstrap_runtime()。
+    """main 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     page.title = "Minecraft 模組包繁體化工具"
     page.window_width = 1200
     page.window_height = 850
@@ -103,6 +112,15 @@ def main(page: ft.Page):
     }
 
     def resize_window_for_view(selected_index: int):
+        """resize_window_for_view 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         width, height = view_window_sizes.get(selected_index, (1280, 960))
         try:
             page.window.maximized = False
@@ -115,6 +133,15 @@ def main(page: ft.Page):
     content_area = ft.Container(content=nav_destinations[0][2], expand=True)
 
     def change_view(e):
+        """change_view 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         selected_index = e.control.selected_index
         _, _, target_view = nav_destinations[selected_index]
         content_area.content = target_view
@@ -122,6 +149,15 @@ def main(page: ft.Page):
         page.update()
 
     def toggle_theme_mode(e):
+        """toggle_theme_mode 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         is_light = page.theme_mode == ft.ThemeMode.LIGHT
         page.theme_mode = ft.ThemeMode.DARK if is_light else ft.ThemeMode.LIGHT
         toggle_icon_btn.icon = ft.Icons.LIGHT_MODE if is_light else ft.Icons.DARK_MODE
@@ -177,6 +213,15 @@ def main(page: ft.Page):
 
     def _rebuild_index_on_startup():
         # 索引重建放背景執行，避免主畫面啟動時被 I/O 卡住。
+        """_rebuild_index_on_startup 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         try:
             cache_rebuild_index_service()
             logger.info("啟動時全域搜尋索引重建完成")

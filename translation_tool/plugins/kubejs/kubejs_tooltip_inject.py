@@ -1,3 +1,9 @@
+"""translation_tool/plugins/kubejs/kubejs_tooltip_inject.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 import os
 import json
 import re
@@ -49,6 +55,15 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
 # ---------------- 工具 ----------------
 
 def split_js_args(s):
+    """split_js_args 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     args = []
     buf = ""
     depth = 0
@@ -85,6 +100,15 @@ def split_js_args(s):
 
 
 def strip_quotes(s):
+    """strip_quotes 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     s = s.strip()
     if (s.startswith("'") and s.endswith("'")) or (s.startswith('"') and s.endswith('"')):
         return s[1:-1]
@@ -92,6 +116,15 @@ def strip_quotes(s):
 
 
 def replace_text_in_text_obj(expr, new_text):
+    """replace_text_in_text_obj 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     return re.sub(
         r'(Text\.\w+\(\s*[\'"])(.+?)([\'"]\s*\))',
         lambda m: m.group(1) + new_text + m.group(3),
@@ -101,10 +134,28 @@ def replace_text_in_text_obj(expr, new_text):
 
 
 def extract_array_strings(expr):
+    """extract_array_strings 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     return re.findall(r"[\"']([^\"']+)[\"']", expr)
 
 
 def replace_array(expr, new_values):
+    """replace_array 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     parts = split_js_args(expr[1:-1])
     out = []
 
@@ -119,6 +170,15 @@ def replace_array(expr, new_values):
 
 
 def to_js_name(json_name):
+    """to_js_name 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     if json_name.endswith(".json"):
         return json_name[:-5] + ".js"
     return json_name
@@ -236,6 +296,15 @@ def inject(
         # 1) Patch event.add(...)
         # ----------------------------
         def repl_event_add(m: re.Match) -> str:
+            """repl_event_add 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             nonlocal auto_id
             arg_str = m.group(1)
             args = split_js_args(arg_str)
@@ -265,6 +334,15 @@ def inject(
                         idx = 0
 
                         def repl_text(mm: re.Match) -> str:
+                            """repl_text 的用途說明。
+
+                            Args:
+                                參數請見函式簽名。
+                            Returns:
+                                回傳內容依實作而定；若無顯式回傳則為 None。
+                            Side Effects:
+                                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+                            """
                             nonlocal idx
                             key = f"{original_js}|{item_id}.{n}.{idx}"
                             idx += 1
@@ -295,6 +373,15 @@ def inject(
         #    key: file|scene.{auto_id}  (✅ 接續 event.add 用掉的 auto_id)
         # ----------------------------
         def repl_scene_text(m: re.Match) -> str:
+            """repl_scene_text 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             nonlocal auto_id
             arg_str = m.group(1)
             args = split_js_args(arg_str)
@@ -342,6 +429,15 @@ def inject(
         # ----------------------------
         def extract_call_args_with_end(text: str, start: int) -> tuple[str | None, int | None]:
             # start 指向 '(' 後面的位置
+            """extract_call_args_with_end 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             depth = 1
             i = start
             buf = ""
@@ -358,6 +454,15 @@ def inject(
             return None, None
 
         def patch_itemevents_tooltips(full: str) -> str:
+            """patch_itemevents_tooltips 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             out = []
             last = 0
 
@@ -386,6 +491,15 @@ def inject(
                 idx = 0
 
                 def repl_text_call(mm: re.Match) -> str:
+                    """repl_text_call 的用途說明。
+
+                    Args:
+                        參數請見函式簽名。
+                    Returns:
+                        回傳內容依實作而定；若無顯式回傳則為 None。
+                    Side Effects:
+                        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+                    """
                     nonlocal idx
                     key = f"{original_js}|{item_id}.tooltip.{idx}"
                     idx += 1

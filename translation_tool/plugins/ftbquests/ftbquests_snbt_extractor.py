@@ -1,3 +1,9 @@
+"""translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # ftbquests_snbt_extractor.py
 # FTB Quests SNBT 抽取工具
 import os
@@ -26,6 +32,15 @@ LANG_KEY_SUFFIX = (".title", ".quest_desc")
 
 def is_lang_key_ref(val: str):
     # 遇到 {ftbquests.xxx} 這種語言 reference 直接跳過
+    """is_lang_key_ref 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     return bool(re.match(r"^\{ftbquests\.", val))
 
 
@@ -71,6 +86,15 @@ def walk_snbt_file(path: str) -> Compound | None:
 # lang/*.snbt 抽取
 # =========================
 def extract_lang_file(filename: str, root: Compound) -> dict:
+    """extract_lang_file 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     out = {}
 
     for key, val in root.items():
@@ -103,9 +127,27 @@ def extract_lang_file(filename: str, root: Compound) -> dict:
 # quest 本體抽取（title）
 # =========================
 def extract_quest_file(filename: str, root: Compound) -> dict:
+    """extract_quest_file 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     out = {}
 
     def _emit(obj: Compound, field: str, kind: str):
+        """_emit 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         val = obj.get(field)
         if val is None:
             return
@@ -148,6 +190,15 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
         out[key] = text
 
     def recurse(obj, path):
+        """recurse 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if isinstance(obj, Compound):
             # ✅ 抽三種欄位
             _emit(obj, "title", "title")
@@ -169,6 +220,15 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
 
 
 def ensure_lang(store: dict, lang: str):
+    """ensure_lang 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     if lang not in store:
         store[lang] = {"lang": {}, "quests": {}}
 
@@ -177,6 +237,15 @@ def ensure_lang(store: dict, lang: str):
 # 主流程
 # =========================
 def process_quest_folder(quests_root: str) -> dict:
+    """process_quest_folder 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     final_output = {}
     lang_dir = os.path.join(quests_root, "lang")
 

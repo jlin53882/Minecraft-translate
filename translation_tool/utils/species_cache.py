@@ -1,3 +1,9 @@
+"""translation_tool/utils/species_cache.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # /minecraft_translator_flet/translation_tool/utils/species_cache.py (僅儲存成功查詢的修正版)
 
 import csv
@@ -51,6 +57,15 @@ except Exception as e:
     log.error(f"載入 Wikipedia 函式庫時發生未知錯誤: {e}")
 
 def initialize_species_cache():
+    """initialize_species_cache 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     global _species_cache_data, _CACHE_DIR, _CACHE_FILE, _WIKI_LANG, _RATE_LIMIT_DELAY, _initialized
     if _initialized:
         return True
@@ -92,11 +107,29 @@ def initialize_species_cache():
         return False
 
 def is_potential_species_name(name: str) -> bool:
+    """is_potential_species_name 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     if not isinstance(name, str):
         return False
     return bool(_SPECIES_NAME_REGEX.match(name))
 
 def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
+    """query_wikipedia_and_update_cache 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     if not _WIKIPEDIA_AVAILABLE or _species_cache_data is None:
         return None
         
@@ -135,6 +168,15 @@ def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
         return None
 
 def lookup_species_name(name: str) -> Optional[str]:
+    """lookup_species_name 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     if not _initialized:
         if not initialize_species_cache():
              log.error("學名快取系統初始化失敗，查詢功能無法使用。")

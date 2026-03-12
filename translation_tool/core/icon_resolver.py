@@ -1,3 +1,9 @@
+"""translation_tool/core/icon_resolver.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 from pathlib import Path
 from functools import lru_cache
 from .icon_classifier import classify_no_icon_reason
@@ -54,6 +60,15 @@ def resolve_icon_for_lang_key(lang_key: str, assets_root: Path) -> Path | None:
 
 
 def resolve_icon_with_reason(lang_key: str, assets_root):
+    """resolve_icon_with_reason 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     icon = resolve_icon_for_lang_key(lang_key, assets_root)
 
     if icon:

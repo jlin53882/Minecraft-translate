@@ -1,3 +1,9 @@
+"""translation_tool/core/lang_processing_format.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # /minecraft_translator_flet/translation_tool/core/lang_processing_format.py
 import re
 from typing import Callable, Optional, Any, Dict
@@ -64,6 +70,15 @@ def convert_only_cjk(text: str, rules=None) -> str:
 
     def replacer(match):
         # 抓到的一整串中文字
+        """replacer 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         cjk_chunk = match.group(1)
         # 整串丟給 OpenCC，這樣「内存」才會變「記憶體」
         return converter.convert(cjk_chunk)

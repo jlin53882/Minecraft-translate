@@ -1,3 +1,9 @@
+"""app/views/qc_view.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # /minecraft_translator_flet/app/views/qc_view.py (修改版)
 
 import flet as ft
@@ -16,7 +22,21 @@ from app.services import (
 )
 
 class QCView(ft.Column):
+    """QCView 類別。
+
+    用途：封裝與 QCView 相關的狀態與行為。
+    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    """
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
         self.page = page
         self.file_picker = file_picker
@@ -98,6 +118,15 @@ class QCView(ft.Column):
     
     # --- 輔助函式 (已修改以支援檔案/資料夾選擇和過濾) ---
     def _create_pick_button(self, target_textfield: ft.TextField, title: str, folder_mode: bool, file_filter: str = None):
+        """_create_pick_button 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         return ft.IconButton(
             icon=ft.Icons.FOLDER_OPEN if folder_mode else ft.Icons.FILE_PRESENT,
             tooltip=title,
@@ -105,12 +134,30 @@ class QCView(ft.Column):
         )
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
+        """_show_snack_bar 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
 
     def pick_file_or_directory_with_tkinter(self, e, target_textfield: ft.TextField, title: str, folder_mode: bool, file_filter: str = None):
+        """pick_file_or_directory_with_tkinter 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         path = ""
         try:
             root = tk.Tk()
@@ -138,6 +185,15 @@ class QCView(ft.Column):
 
     def set_controls_disabled(self, disabled: bool):
         # 禁用所有相關控制項 (已更新)
+        """set_controls_disabled 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         controls_to_disable = [
             # 未翻譯檢查
             self.en_dir_textfield, self.tw_dir_textfield_1, self.untranslated_out_dir_textfield, 
@@ -153,6 +209,15 @@ class QCView(ft.Column):
         self.page.update()
 
     def start_task(self, task_type: str):
+        """start_task 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.log_view.controls.clear()
         self.progress_bar.value = 0
         self.progress_bar.color = ft.Colors.PRIMARY
@@ -208,6 +273,15 @@ class QCView(ft.Column):
         thread.start()
 
     def task_worker(self, service_func, args_tuple):
+        """task_worker 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         try:
             for update in service_func(*args_tuple):
                 log_msg = update.get("log", "")
@@ -225,6 +299,15 @@ class QCView(ft.Column):
         finally:
             self.set_controls_disabled(False)
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
+        """_show_snack_bar 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

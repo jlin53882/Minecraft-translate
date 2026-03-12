@@ -1,3 +1,9 @@
+"""app/views/lookup_view.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # /minecraft_translator_flet/app/views/lookup_view.py (加入「查詢中...」功能的修正版)
 
 #待修待測試
@@ -10,7 +16,21 @@ from app.services_impl.pipelines.lookup_service import (
 )
 
 class LookupView(ft.Column):
+    """LookupView 類別。
+
+    用途：封裝與 LookupView 相關的狀態與行為。
+    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    """
     def __init__(self, page: ft.Page):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
         self.page = page
 
@@ -51,6 +71,15 @@ class LookupView(ft.Column):
 
     # --- 單筆查詢邏輯 ---
     def single_lookup_clicked(self, e):
+        """single_lookup_clicked 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         search_term = self.single_input.value
         if not search_term:
             self.single_result_text.value = "錯誤：請輸入要查詢的學名。"
@@ -72,6 +101,15 @@ class LookupView(ft.Column):
     
     def single_lookup_worker(self, name: str):
         # 3. 呼叫後端服務
+        """single_lookup_worker 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         result = run_manual_lookup_service(name)
         
         # 4. 在 UI 執行緒中更新最終結果
@@ -86,6 +124,15 @@ class LookupView(ft.Column):
 
     # --- 批次查詢邏輯 ---
     def batch_lookup_clicked(self, e):
+        """batch_lookup_clicked 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         json_text = self.batch_input.value
         if not json_text:
             self.batch_result_textfield.value = "錯誤：請貼上 JSON 內容"
@@ -102,6 +149,15 @@ class LookupView(ft.Column):
         thread.start()
 
     def batch_lookup_worker(self, json_text):
+        """batch_lookup_worker 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         try:
             for update in run_batch_lookup_service(json_text):
                 if update.get("error"):

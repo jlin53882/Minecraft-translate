@@ -1,3 +1,9 @@
+"""translation_tool/utils/text_processor.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # /minecraft_translator_flet/translation_tool/utils/text_processor.py (最終完整版)
 
 import os
@@ -32,6 +38,15 @@ _REGEX_RULES = None     # List[Tuple[re.Pattern, str]]
 _RULE_KEYWORDS = None   # set[str]
 
 def _init_replace_rules_cache(rules: List[Dict[str, str]]):
+    """_init_replace_rules_cache 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     global _LITERAL_RULES, _REGEX_RULES, _RULE_KEYWORDS
 
     if _LITERAL_RULES is not None:
@@ -198,6 +213,15 @@ def load_custom_translations(folder_path: str, filename="table.tsv") -> Dict[str
     return custom_map
 
 def safe_convert_text(text: str) -> str:
+    """safe_convert_text 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     if not text:
         return text
     conv = get_converter()

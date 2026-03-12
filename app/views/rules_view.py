@@ -1,3 +1,9 @@
+"""app/views/rules_view.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 import flet as ft
 
 # UI 共用元件：統一按鈕樣式
@@ -8,7 +14,21 @@ from app.services_impl.config_service import load_replace_rules, save_replace_ru
 import re
 
 class RulesView(ft.Column):
+    """RulesView 類別。
+
+    用途：封裝與 RulesView 相關的狀態與行為。
+    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    """
     def __init__(self, page: ft.Page):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         super().__init__(expand=True, spacing=15)
         self.page = page
 
@@ -52,6 +72,15 @@ class RulesView(ft.Column):
 
     def _sync_page_jump_field(self):
         # 確保欄位顯示跟 current_page 一致
+        """_sync_page_jump_field 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if hasattr(self, "page_jump_field"):
             self.page_jump_field.value = str(self.current_page)
             # 只有當控制項已加入頁面時才執行 update，避免初始化時 crash
@@ -59,6 +88,15 @@ class RulesView(ft.Column):
                 self.page_jump_field.update()
     
     def on_page_jump_submit(self, e):
+        """on_page_jump_submit 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         raw = (e.control.value or "").strip()
         if not raw:
             self._show_snack_bar("請輸入頁碼", ft.Colors.BLUE_GREY_700)
@@ -270,6 +308,15 @@ class RulesView(ft.Column):
 
     # --- 邏輯功能 ---
     def on_sort_change(self, e):
+        """on_sort_change 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         mode = e.control.value
         if mode == "from_asc":
             self.all_rules_data.sort(key=lambda r: r.get("from", ""))
@@ -284,6 +331,15 @@ class RulesView(ft.Column):
 
 
     def on_search(self, e: ft.ControlEvent):
+        """on_search 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         keyword = e.control.value.strip().lower()
 
         if not keyword:
@@ -345,6 +401,15 @@ class RulesView(ft.Column):
         return True, ""
     
     def translate_regex_error(self, err: re.error) -> str:
+        """translate_regex_error 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         msg = str(err)
         if "missing )" in msg or "unterminated subpattern" in msg:
             return "正則表達式缺少結尾括號「)」。"
@@ -361,10 +426,28 @@ class RulesView(ft.Column):
     # --- 執行緒輔助與載入 ---
     
     def _run_on_ui_thread(self, func, *args, **kwargs):
+        """_run_on_ui_thread 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if self.page and self.page.loop:
             self.page.loop.call_soon_threadsafe(func, *args, **kwargs)
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
+        """_show_snack_bar 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if not self.page: return   
         snack = ft.SnackBar(
             ft.Text(message, color=ft.Colors.WHITE),
@@ -376,9 +459,27 @@ class RulesView(ft.Column):
         self.page.update()
 
     def _load_rules_core(self):
+        """_load_rules_core 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         return load_replace_rules()
 
     def _initial_load(self):
+        """_initial_load 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         try:
             rules_data = self._load_rules_core()
             self._run_on_ui_thread(lambda: self._handle_reload_success(rules_data))
@@ -388,6 +489,15 @@ class RulesView(ft.Column):
     # --- 分頁渲染邏輯 ---
 
     def _render_current_page(self):
+        """_render_current_page 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         start = (self.current_page - 1) * self.page_size
         end = start + self.page_size
         current_page_data = self.all_rules_data[start:end]
@@ -433,6 +543,15 @@ class RulesView(ft.Column):
     # --- 互動事件處理 ---
     
     def on_text_change(self, e):
+        """on_text_change 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         rid = e.control.data['rid']
         field = e.control.data['field']
         
@@ -474,6 +593,15 @@ class RulesView(ft.Column):
         to_field.update()
 
     def create_rule_row(self, from_text, to_text, rid: int, display_no: int):
+        """create_rule_row 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         from_field = ft.TextField(
             value=from_text, 
             border=ft.InputBorder.UNDERLINE, 
@@ -516,12 +644,30 @@ class RulesView(ft.Column):
     # --- 操作邏輯 ---
 
     def reload_rules_clicked(self, e):
+        """reload_rules_clicked 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.loading_indicator.visible = True
         self.page.update()
         self._show_snack_bar("🔄 正在重新載入規則…", ft.Colors.BLUE_700)
         threading.Thread(target=self._perform_reload, daemon=True).start()
 
     def _perform_reload(self):
+        """_perform_reload 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         try:
             rules_data = self._load_rules_core()
             self._run_on_ui_thread(lambda: self._handle_reload_success(rules_data))
@@ -529,6 +675,15 @@ class RulesView(ft.Column):
             self._run_on_ui_thread(lambda: self._handle_reload_failure(err))
 
     def _handle_reload_success(self, rules_data):
+        """_handle_reload_success 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.all_rules_data = rules_data
         # ✅ 給每條 rule 補上穩定 rid
         for r in self.all_rules_data:
@@ -542,11 +697,29 @@ class RulesView(ft.Column):
         self.page.update()
 
     def _handle_reload_failure(self, err):
+        """_handle_reload_failure 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.loading_indicator.visible = False
         self.page.update()
         self._show_snack_bar(f"載入規則時發生錯誤: {err}", ft.Colors.RED_600)
 
     def prev_page(self, e):
+        """prev_page 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if self.current_page > 1:
             self.current_page -= 1
             self._render_current_page()
@@ -554,6 +727,15 @@ class RulesView(ft.Column):
             self._show_snack_bar("已在第一頁", ft.Colors.BLUE_GREY_700)
 
     def next_page(self, e):
+        """next_page 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if self.current_page < self.total_pages:
             self.current_page += 1
             self._render_current_page()
@@ -562,6 +744,15 @@ class RulesView(ft.Column):
             
     def save_rules_clicked(self, e):
         # 先驗證
+        """save_rules_clicked 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         for idx, rule in enumerate(self.all_rules_data):
             ok, msg = self.validate_rule(rule["from"], rule["to"], self.all_rules_data, idx)
             if not ok:
@@ -580,6 +771,15 @@ class RulesView(ft.Column):
         threading.Thread(target=self._perform_save, args=(clean_rules,), daemon=True).start()
             
     def _perform_save(self, new_rules):
+        """_perform_save 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         try:
             save_replace_rules(new_rules)
             self._run_on_ui_thread(lambda: self._show_snack_bar("規則已成功儲存！", ft.Colors.GREEN_600))
@@ -587,6 +787,15 @@ class RulesView(ft.Column):
             self._run_on_ui_thread(lambda: self._show_snack_bar(f"儲存規則時發生錯誤: {err}", ft.Colors.RED_600))
 
     def add_row_clicked(self, e):
+        """add_row_clicked 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.all_rules_data.append({"from": "", "to": "", "_rid": self._new_rid()})
         self.current_page = self.total_pages # 假設在最後
         # 重新計算總頁數（因為可能剛好換頁）
@@ -598,6 +807,15 @@ class RulesView(ft.Column):
         self._show_snack_bar("➕ 已新增一條規則（已跳至最後一頁）", ft.Colors.BLUE_700)
 
     def delete_row_clicked(self, e):
+        """delete_row_clicked 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         rid_to_delete = e.control.data
         idx = self._find_index_by_rid(rid_to_delete)
 

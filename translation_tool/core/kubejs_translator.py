@@ -1,3 +1,9 @@
+"""translation_tool/core/kubejs_translator.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # kubejs_translator.py
 from __future__ import annotations
 
@@ -464,12 +470,35 @@ def step2_translate_lm(
 
     # ✅ session wrapper：子流程 0~1 → 外層 base~base+span
     class _ProgressProxy:
+        """_ProgressProxy 類別。
+
+        用途：封裝與 _ProgressProxy 相關的狀態與行為。
+        維護注意：修改公開方法前請確認外部呼叫點與相容性。
+        """
         def __init__(self, parent, base: float, span: float):
+            """__init__ 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             self.parent = parent
             self.base = float(base)
             self.span = float(span)
 
         def set_progress(self, p: float):
+            """set_progress 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             if not self.parent or not hasattr(self.parent, "set_progress"):
                 return
             try:
@@ -484,6 +513,15 @@ def step2_translate_lm(
 
         # 可選轉發
         def set_status(self, msg: str):
+            """set_status 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             if self.parent and hasattr(self.parent, "set_status"):
                 try:
                     self.parent.set_status(msg)
@@ -624,6 +662,15 @@ def run_kubejs_pipeline(
 
     # 統計「待翻譯」資料夾中有多少個 Key 需要處理
     def _count_pending_lang_keys(pending_dir: Path) -> int:
+        """_count_pending_lang_keys 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         total = 0
         for p in pending_dir.rglob("*.json"):
             try:
@@ -635,6 +682,15 @@ def run_kubejs_pipeline(
         return total
 
     def _log_kubejs_step2_stats(step2_res: Dict[str, Any]) -> None:
+        """_log_kubejs_step2_stats 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if not isinstance(step2_res, dict):
             return
 

@@ -1,3 +1,9 @@
+"""translation_tool/core/lang_item_row.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 import flet as ft
 from pathlib import Path
 from typing import Callable
@@ -9,12 +15,26 @@ from translation_tool.core.icon_reason import IconRisk
 
 
 def to_halfwidth(text):
+    """to_halfwidth 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     if not isinstance(text, str):
         return text
     return unicodedata.normalize("NFKC", text)
 
 
 class LangItemRow(ft.Container):
+    """LangItemRow 類別。
+
+    用途：封裝與 LangItemRow 相關的狀態與行為。
+    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    """
     def __init__(
         self,
         *,
@@ -25,6 +45,15 @@ class LangItemRow(ft.Container):
         preview_root: Path,
         on_value_changed: Callable[[str, str], None],
     ):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         super().__init__(
             padding=ft.padding.symmetric(vertical=10, horizontal=8),
             border_radius=8,
