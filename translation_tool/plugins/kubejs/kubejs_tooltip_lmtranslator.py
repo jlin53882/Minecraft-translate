@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
@@ -40,6 +39,18 @@ from translation_tool.core.lm_translator_shared import (
 
 )
 
+from translation_tool.plugins.shared.json_io import (
+    read_json_dict,
+    write_json_dict,
+    collect_json_files,
+)
+from translation_tool.plugins.shared.lang_path_rules import (
+    should_rename_to_zh_tw,
+    is_lang_code_segment,
+    replace_lang_folder_with_zh_tw,
+    compute_output_path,
+)
+
 from translation_tool.utils.log_unit import( 
     log_info, 
     log_error, 
@@ -47,78 +58,6 @@ from translation_tool.utils.log_unit import(
     log_debug, 
     progress
     )
-
-
-# -------------------------
-# JSON IO
-# -------------------------
-def read_json_dict(path: Path) -> Dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"JSON must be an object/dict: {path}")
-    return data
-
-
-def write_json_dict(path: Path, data: Dict[str, str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as wf:
-        json.dump(data, wf, ensure_ascii=False, indent=2)
-
-
-def collect_json_files(input_dir: Path) -> List[Path]:
-    return sorted(input_dir.rglob("*.json"))
-
-
-def count_translatable_keys(mapping: Dict[str, Any]) -> int:
-    return sum(1 for _, v in mapping.items() if isinstance(v, str) and v.strip())
-
-
-# -------------------------
-# Path rename helpers (align with FTB style)
-# -------------------------
-def should_rename_to_zh_tw(src_path: Path, rename_langs: set[str]) -> bool:
-    name = src_path.name.lower()
-    if not name.endswith(".json"):
-        return False
-    stem = name[:-5]  # remove .json
-    if len(stem) == 5 and stem[2] == "_":
-        return stem in rename_langs
-    return False
-
-
-def is_lang_code_segment(seg: str) -> bool:
-    seg = seg.lower()
-    return (
-        len(seg) == 5
-        and seg[2] == "_"
-        and seg[:2].isalpha()
-        and seg[3:].isalpha()
-    )
-
-
-def replace_lang_folder_with_zh_tw(rel: Path) -> Path:
-    parts = list(rel.parts)
-    new_parts = []
-    for p in parts:
-        if is_lang_code_segment(p):
-            new_parts.append("zh_tw")
-        else:
-            new_parts.append(p)
-    return Path(*new_parts)
-
-
-def compute_output_path(src_path: Path, in_dir: Path, out_dir: Path, rename_langs: set[str]) -> Path:
-    rel = src_path.relative_to(in_dir)
-
-    # ✅ folder lang code -> zh_tw
-    rel = replace_lang_folder_with_zh_tw(rel)
-
-    # ✅ filename lang code -> zh_tw.json
-    if should_rename_to_zh_tw(src_path, rename_langs):
-        return out_dir / rel.parent / "zh_tw.json"
-
-    return out_dir / rel
 
 
 # -------------------------
