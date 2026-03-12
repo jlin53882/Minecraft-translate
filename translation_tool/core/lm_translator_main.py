@@ -114,35 +114,6 @@ def find_lang_json(root: Path):
     return list(root.rglob("assets/*/lang/*.json"))
 
 
-def safe_json_loads_old(text: str):
-    text = text.strip()
-
-    # 1️⃣ 去掉 ```json ``` 包裹
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z]*", "", text)
-        text = re.sub(r"```$", "", text)
-        text = text.strip()
-
-    # 2️⃣ 找出所有可能的 JSON 區塊（由大到小）
-    candidates = []
-
-    # dict 型
-    candidates += re.findall(r"\{[\s\S]*?\}", text)
-    # list 型
-    candidates += re.findall(r"\[[\s\S]*?\]", text)
-
-    # 3️⃣ 嘗試逐個解析，成功就回傳
-    last_error = None
-    for chunk in candidates:
-        try:
-            return json.loads(chunk)
-        except json.JSONDecodeError as e:
-            last_error = e
-            continue
-
-    # 4️⃣ 全部失敗才真的報錯
-    raise RuntimeError(f"JSON 解析失敗（所有候選都無法解析）: {last_error}")
-
 def safe_json_loads(text: str):
     text = text.strip()
 

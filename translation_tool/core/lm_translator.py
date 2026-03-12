@@ -108,26 +108,6 @@ def format_duration_seconds(seconds: int) -> str:
 
 
 
-from collections import defaultdict
-
-def build_minimal_dict(items: list[dict]) -> dict:
-    """
-    用 items（每個有 path/text）建立最小輸出 dict
-    - Lang 檔通常是 flat key，不需要 set_by_path
-    - 但你既然全系統都有 path，這裡用 set_by_path 最通用
-    """
-    out = {}
-    for it in items:
-        set_by_path(out, it["path"], it["text"])
-    return out
-
-def group_by_file(items: list[dict]) -> dict[str, list[dict]]:
-    g = defaultdict(list)
-    for it in items:
-        g[it["file"]].append(it)
-    return g
-
-
 # ============================================================
 # 對外唯一入口（UI / CLI 共用）
 # ============================================================
