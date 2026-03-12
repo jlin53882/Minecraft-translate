@@ -18,6 +18,7 @@ class CachePresenter:
     - _STATUS_MAP / _PHASE_MAP 是 UI 文案的單一來源；改文案時先改這裡。
     - action_id/phase 主要用於 trace 與 log；不建議把 UI 邏輯散落在 cache_view.py。
     """
+
     _STATUS_MAP = {
         "": "就緒",
         "READY": "就緒",
@@ -38,14 +39,11 @@ class CachePresenter:
     }
 
     def status_label(self, state: CacheUiState) -> str:
-        """status_label 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`upper`
+
+        回傳：依函式內 return path。
         """
         if not state.busy:
             return self._STATUS_MAP["READY"]
@@ -53,50 +51,32 @@ class CachePresenter:
         return self._STATUS_MAP.get(reason, state.reason or "處理中")
 
     def status_text(self, state: CacheUiState) -> str:
-        """status_text 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`status_label`
+
+        回傳：依函式內 return path。
         """
         label = self.status_label(state)
         return f"狀態：{label}" + ("..." if state.busy else "")
 
     def phase_label(self, phase: str) -> str:
-        """phase_label 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        回傳：依函式內 return path。
         """
         return self._PHASE_MAP.get((phase or "").strip().lower(), phase or "next")
 
     def action_trace(self, action: ActionState) -> str:
-        """action_trace 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        回傳：依函式內 return path。
         """
         return f"trace: ACTION#{action.action_id} {self.phase_label(action.phase)} {action.reason}"
 
     def action_log(self, action: ActionState) -> str:
-        """action_log 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        回傳：依函式內 return path。
         """
         return f"[ACTION#{action.action_id}] {self.phase_label(action.phase)} {action.reason}"

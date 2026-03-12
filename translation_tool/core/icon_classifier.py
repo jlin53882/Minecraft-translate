@@ -8,14 +8,9 @@ from .icon_reason import IconRisk
 
 
 def classify_no_icon_reason(lang_key: str) -> tuple[str, IconRisk]:
-    """classify_no_icon_reason 的用途說明。
+    """處理此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    回傳：依函式內 return path。
     """
     k = lang_key.lower()
 
@@ -25,7 +20,9 @@ def classify_no_icon_reason(lang_key: str) -> tuple[str, IconRisk]:
     if k.startswith(("jei.", "tooltip.", "itemgroup.", "misc.")):
         return "UI / 分類文字（無 icon）", IconRisk.IGNORE
 
-    if any(c in k for c in ["light", "dark", "red", "blue", "green", "active", "powered"]):
+    if any(
+        c in k for c in ["light", "dark", "red", "blue", "green", "active", "powered"]
+    ):
         return "動態染色 / 狀態 icon", IconRisk.WARN
 
     if k.startswith(("item.", "block.")):

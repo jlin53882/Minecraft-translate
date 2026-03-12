@@ -5,22 +5,20 @@
 """
 
 import re
-import json
-from pathlib import Path
 from typing import Any
 from ..utils.config_manager import load_config
 import logging
+
 logger = logging.getLogger(__name__)
-
-
 
 
 # =========================
 # 1. 提示詞與配置
 # =========================
-    
+
 # 目前使用的 API Key 索引
-_current_key_index = 0 
+_current_key_index = 0
+
 
 def _get_all_keys() -> list[str]:
     """
@@ -33,13 +31,14 @@ def _get_all_keys() -> list[str]:
         if isinstance(key, str) and key.strip()
     ]
 
+
 def get_current_api_key() -> str:
     """
     從金鑰池中取得目前正在使用的 API 金鑰。
-    
+
     此函式依賴於全域索引變數 `_current_key_index`，
     確保在執行翻譯請求或進行輪替（Rotate）時，始終能獲取到當前設定的金鑰。
-    
+
     回傳:
         str: 目前指向的 Gemini API 金鑰字串。
     """
@@ -47,10 +46,11 @@ def get_current_api_key() -> str:
     if not keys:
         logger.error("❌ 設定檔中沒有找到任何有效的 API Key")
         return ""
-    
+
     # 加上一個防護：避免 index 越界
     safe_index = min(_current_key_index, len(keys) - 1)
     return keys[safe_index]
+
 
 def rotate_api_key():
     """
@@ -91,7 +91,8 @@ def rotate_api_key():
     _current_key_index += 1
     logger.info(f"🔁 切換 API Key → index {_current_key_index}")
     return True
-        
+
+
 def validate_api_keys():
     """
     驗證 API 金鑰格式。
@@ -99,7 +100,7 @@ def validate_api_keys():
     """
     # 統一使用輔助函式獲取金鑰清單
     keys = _get_all_keys()
-    
+
     if not keys:
         raise RuntimeError("❌ 設定檔中沒有找到任何 API Key，請先設定金鑰。")
 
@@ -111,18 +112,14 @@ def validate_api_keys():
                 f"❌ 無效的 API Key 格式：{k!r}\n"
                 "Gemini API Key 應以 'AIza' 開頭，請檢查您的設定檔。"
             )
-    
+
     logger.info(f"✅ 金鑰格式驗證通過，共載入 {len(keys)} 組金鑰。")
 
-def validate_api_keys_from_ui(keys: list[str]): #ui 專用
-    """validate_api_keys_from_ui 的用途說明。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
+    """處理此函式的工作（細節以程式碼為準）。
+
+    回傳：None
     """
     for k in keys:
         if not k or not k.startswith("AIza"):
@@ -131,6 +128,7 @@ def validate_api_keys_from_ui(keys: list[str]): #ui 專用
                 "請使用 Google AI Studio 產生的 Gemini API Key，"
                 "通常應以 'AIza' 字樣開頭。"
             )
+
 
 # =========================
 # 2. Regex 規則定義
@@ -141,26 +139,24 @@ CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 ROMAN_NUMERAL_PATTERN = re.compile(
     r"^\s*M{0,4}(CM|CD|D?C{0,3})"
     r"(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})\s*$",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 # ✅ 新增：純數字模式 (包含整數、浮點數、正負號與千分位逗號)
-DIGIT_PATTERN = re.compile(
-    r"^\s*[+-]?(\d{1,3}(,\d{3})*|\d+)(\.\d+)?\s*$"
-)
+DIGIT_PATTERN = re.compile(r"^\s*[+-]?(\d{1,3}(,\d{3})*|\d+)(\.\d+)?\s*$")
 
 TECH_PATTERN = re.compile(
     r"""
     ^[a-z0-9_\-.]+:[a-z0-9_\-./]+$ |   # minecraft:diamond
     ^[a-z0-9_\-.]+(\.[a-z0-9_\-.]+)+$ | # some.mod.key.path
     """,
-    re.VERBOSE
+    re.VERBOSE,
 )
 
 # 例如 booklet.section.entry 之類的 lang key 引用
 LANG_KEY_REF_PATTERN = re.compile(
     r"^[a-z0-9_]+(\.[a-z0-9_]+){2,}$",
-    re.IGNORECASE # 不區分大小寫
+    re.IGNORECASE,  # 不區分大小寫
 )
 # 完整  $(...)  token
 TOKEN_PATTERN = re.compile(r"\$\([^)]+\)")
@@ -168,15 +164,11 @@ TOKEN_PATTERN = re.compile(r"\$\([^)]+\)")
 # 需要跳過翻譯的文字（你指定的類型）
 HASH_PREFIX_PATTERN = re.compile(r"^\s*#")  # 任何 # 開頭（含前置空白）
 
-def needs_translation_text(s: str) -> bool:
-    """needs_translation_text 的用途說明。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+def needs_translation_text(s: str) -> bool:
+    """處理此函式的工作（細節以程式碼為準）。
+
+    回傳：依函式內 return path。
     """
     if not s or not isinstance(s, str):
         return False
@@ -195,6 +187,7 @@ def needs_translation_text(s: str) -> bool:
 
     # 還有英文 → 需要翻
     return True
+
 
 def value_fully_translated(value) -> bool:
     """
@@ -242,7 +235,7 @@ def value_fully_translated(value) -> bool:
         for v in value:
             # 只要 list 裡的字串不是空的，就視為已翻譯
             if isinstance(v, str) and v == "":
-                return False   # ⭐ 一票否決制
+                return False  # ⭐ 一票否決制
         return True
 
     # ---------- 情況三：其他型別 ----------
@@ -330,7 +323,7 @@ def build_skip_terms_pattern(terms: list[str]) -> re.Pattern:
     escaped = [re.escape(t) for t in terms]
 
     # 使用 OR (|) 合併所有關鍵字，並加上單字邊界
-    #pattern = r"\b(" + "|".join(escaped) + r")\b"
+    # pattern = r"\b(" + "|".join(escaped) + r")\b"
     pattern = r"^\s*(?:" + "|".join(escaped) + r")\s*$"
 
     # 編譯為不區分大小寫的正規表達式
@@ -340,14 +333,11 @@ def build_skip_terms_pattern(terms: list[str]) -> re.Pattern:
 # =========================
 # 值是否值得翻譯（核心判斷）
 def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
-    """is_value_translatable 的用途說明。
+    """判斷此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`strip`, `build_skip_terms_pattern`
+
+    回傳：依函式內 return path。
     """
     if not isinstance(value, str):
         return False
@@ -355,7 +345,7 @@ def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
     s = value.strip()
     if not s:
         return False
-    
+
     # 已翻譯（含中日韓）
     if contains_cjk(s):
         return False
@@ -375,37 +365,39 @@ def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
     # 太短且無空白，通常不是顯示文字
     if is_lang and len(s) <= 3 and " " not in s:
         return False
-    
+
         # 避開 #...（#heading、#title）
     if HASH_PREFIX_PATTERN.match(s):
         return False
-    
+
     # 需要跳過翻譯的關鍵字（可自由擴充）
-    SKIP_TERMS=load_config().get("lm_translator", {}).get("translator", {}).get("skip_terms", [])
-    #print("config skip_terms:",SKIP_TERMS)
+    SKIP_TERMS = (
+        load_config()
+        .get("lm_translator", {})
+        .get("translator", {})
+        .get("skip_terms", [])
+    )
+    # print("config skip_terms:",SKIP_TERMS)
     # 生成跳過關鍵字的 regex pattern
     SKIP_TERMS_PATTERN = build_skip_terms_pattern(SKIP_TERMS)
 
     # 避開指定關鍵字（API documentation / Discord）
     if (
-        is_lang
-        and SKIP_TERMS_PATTERN.search(s)
-        and len(s) <= 5        # ⭐ 關鍵
+        is_lang and SKIP_TERMS_PATTERN.search(s) and len(s) <= 5  # ⭐ 關鍵
     ):
         logger.debug("SKIP[skip_terms] len=%d text=%r", len(s), s)
         return False
-    
+
     # 避開羅馬數字
     if is_lang and ROMAN_NUMERAL_PATTERN.fullmatch(s):
         return False
-    
+
     # 避開純數字
     if is_lang and DIGIT_PATTERN.fullmatch(s):
         return False
 
-
-
     return True
+
 
 # =========================
 # 可翻譯欄位判斷
@@ -416,5 +408,10 @@ def is_translatable_field(key: str) -> bool:
     """
     key_lower = key.lower()
     # 允許翻譯的欄位（包含你自訂的各種文字欄位） 關鍵字版本
-    TRANSLATABLE_KEYWORDS=load_config().get("lm_translator", {}).get("translator", {}).get("translatable_keywords", [])
+    TRANSLATABLE_KEYWORDS = (
+        load_config()
+        .get("lm_translator", {})
+        .get("translator", {})
+        .get("translatable_keywords", [])
+    )
     return any(keyword in key_lower for keyword in TRANSLATABLE_KEYWORDS)

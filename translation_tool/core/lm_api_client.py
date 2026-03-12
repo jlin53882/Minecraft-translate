@@ -21,14 +21,11 @@ def call_gemini_requests(
     api_key: str,
     temperature: float,
 ) -> str:
-    """call_gemini_requests 的用途說明。
+    """處理此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`post`, `json`
+
+    回傳：依函式內 return path。
     """
     url = (
         "https://generativelanguage.googleapis.com/"
@@ -74,4 +71,6 @@ def call_gemini_requests(
     try:
         return result["candidates"][0]["content"]["parts"][0]["text"]
     except Exception:
-        raise RuntimeError(f"Gemini 回傳格式異常: {json.dumps(result, ensure_ascii=False)}")
+        raise RuntimeError(
+            f"Gemini 回傳格式異常: {json.dumps(result, ensure_ascii=False)}"
+        )

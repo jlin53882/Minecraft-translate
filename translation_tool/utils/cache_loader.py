@@ -15,14 +15,11 @@ import orjson as json
 
 
 def load_shard_file(path: Path) -> dict[str, Any]:
-    """load_shard_file 的用途說明。
+    """載入此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`loads`
+
+    回傳：依函式內 return path。
     """
     try:
         data = json.loads(path.read_bytes())
@@ -40,14 +37,11 @@ def load_cache_type(
     parallel_workers: int,
     logger: logging.Logger,
 ) -> None:
-    """load_cache_type 的用途說明。
+    """載入此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`mkdir`, `sorted`, `info`
+
+    回傳：None
     """
     if cache_type not in translation_cache:
         translation_cache[cache_type] = {}
@@ -72,4 +66,6 @@ def load_cache_type(
             loaded_count += len(data)
 
     translation_cache[cache_type] = temp_cache
-    logger.info(f"🚀 高速載入完成：{cache_type} 共 {loaded_count} 條翻譯 (分片數: {len(json_files)})")
+    logger.info(
+        f"🚀 高速載入完成：{cache_type} 共 {loaded_count} 條翻譯 (分片數: {len(json_files)})"
+    )

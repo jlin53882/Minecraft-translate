@@ -8,23 +8,21 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 
 JSON_LINE = re.compile(r'^\s*"(.+?)"\s*:\s*"(.+?)"\s*,?\s*$')
-KEY_ZH = re.compile(r'^([a-zA-Z0-9_.-]+)([\u4e00-\u9fff].+)$')
+KEY_ZH = re.compile(r"^([a-zA-Z0-9_.-]+)([\u4e00-\u9fff].+)$")
+
 
 def try_repair_lang_line(line: str):
     # JSON 風格
-    """try_repair_lang_line 的用途說明。
+    """處理此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`match`
+
+    回傳：依函式內 return path。
     """
     m = JSON_LINE.match(line)
     if m:
@@ -36,6 +34,7 @@ def try_repair_lang_line(line: str):
         return m.group(1), m.group(2)
 
     return None
+
 
 def collapse_lang_lines(text: str):
     """
@@ -53,7 +52,7 @@ def collapse_lang_lines(text: str):
             buf = line
 
         if buf.rstrip().endswith("\\"):
-            buf = buf.rstrip()[:-1]   # 移除 \ 繼續
+            buf = buf.rstrip()[:-1]  # 移除 \ 繼續
             continue
         else:
             out.append(buf)
@@ -64,6 +63,7 @@ def collapse_lang_lines(text: str):
 
     return out
 
+
 def parse_lang_text(text: str, *, on_error=None) -> Dict[str, str]:
     """
     優化後的 .lang 解析：處理 BOM、註解、以及無 '=' 的長文本續行。
@@ -73,8 +73,8 @@ def parse_lang_text(text: str, *, on_error=None) -> Dict[str, str]:
     text = text.lstrip("\ufeff")
 
     data = {}
-    lines = text.splitlines() # 如果 collapse_lang_lines 效果不好，建議直接 split
-    
+    lines = text.splitlines()  # 如果 collapse_lang_lines 效果不好，建議直接 split
+
     last_key = None  # 用於記錄上一個處理的 Key，處理續行問題
 
     for idx, raw in enumerate(lines, start=1):
@@ -88,7 +88,7 @@ def parse_lang_text(text: str, *, on_error=None) -> Dict[str, str]:
             key, val = line.split("=", 1)
             key = key.strip()
             val = val.strip()
-            
+
             if key:
                 data[key] = val
                 last_key = key
@@ -99,7 +99,7 @@ def parse_lang_text(text: str, *, on_error=None) -> Dict[str, str]:
             # 如果這行沒有 '='，它極可能是上一行價值的延伸（續行）
             if last_key is not None:
                 # 將這行內容合併到上一個 key 的 value 中
-                data[last_key] += "\n" + line 
+                data[last_key] += "\n" + line
                 logger.debug(f"已自動修復續行 (line {idx}): 合併至 {last_key}")
             else:
                 # 如果第一行就沒有 '=' 且不是註解，這才是真正的錯誤
@@ -109,6 +109,7 @@ def parse_lang_text(text: str, *, on_error=None) -> Dict[str, str]:
 
     return data
 
+
 def dump_lang_text(data: Dict[str, str]) -> str:
     """將字典轉換回 .lang 的文字格式"""
     lines = []
@@ -116,6 +117,7 @@ def dump_lang_text(data: Dict[str, str]) -> str:
     for key in sorted(data.keys()):
         lines.append(f"{key}={data[key]}")
     return "\n".join(lines)
+
 
 def is_mc_standard_lang_path(path: str) -> bool:
     """
@@ -127,20 +129,17 @@ def is_mc_standard_lang_path(path: str) -> bool:
     # 必須在 /lang/ 資料夾內且為 .lang 結尾
     return "/lang/" in p and p.endswith(".lang")
 
-def pick_first_not_none(*vals):
-    """pick_first_not_none 的用途說明。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+def pick_first_not_none(*vals):
+    """處理此函式的工作（細節以程式碼為準）。
+
+    回傳：依函式內 return path。
     """
     for v in vals:
         if v is not None:
             return v
     return ""
+
 
 def normalize_patchouli_book_root(path: str) -> str:
     """

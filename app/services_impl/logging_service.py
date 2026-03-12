@@ -19,7 +19,6 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
-from pathlib import Path
 from typing import Any, Dict
 
 from translation_tool.utils.ui_logging_handler import UISessionLogHandler
@@ -42,14 +41,11 @@ class LogLimiter:
     """
 
     def __init__(self, max_logs: int = 3000, flush_interval: float = 0.1):
-        """__init__ 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`deque`
+
+        回傳：None
         """
         self.max_logs = max_logs
         self.flush_interval = flush_interval

@@ -31,6 +31,7 @@ from . import cache_store
 # 全文搜尋引擎
 # =============================================================================
 
+
 class CacheSearchEngine:
     """快取全文搜尋引擎（使用 SQLite FTS5）"""
 
@@ -66,7 +67,7 @@ class CacheSearchEngine:
 
             # 如果表格存在但結構不對（沒有 cache_key），刪除重建
             with self._lock:
-                if existing and 'cache_key' not in existing[0]:
+                if existing and "cache_key" not in existing[0]:
                     print("[INFO] 偵測到舊索引表格，正在刪除重建...")
                     self.conn.execute("DROP TABLE IF EXISTS cache_fts")
                     self.conn.commit()
@@ -86,7 +87,7 @@ class CacheSearchEngine:
         except sqlite3.OperationalError as e:
             # FTS5 可能不支援（SQLite 版本過舊）
             print(f"[WARN] FTS5 初始化失敗，將使用基本搜尋: {e}")
-        
+
         # 不論 FTS5 成功與否，都建立 basic 表格做為 fallback（雙保險）
         self._init_basic_table()
 
@@ -101,7 +102,7 @@ class CacheSearchEngine:
 
         # 如果表格存在但結構不對（沒有 cache_key），刪除重建
         with self._lock:
-            if existing and 'cache_key' not in existing[0]:
+            if existing and "cache_key" not in existing[0]:
                 print("[INFO] 偵測到舊基本表格，正在刪除重建...")
                 self.conn.execute("DROP TABLE IF EXISTS cache_basic")
                 self.conn.commit()
@@ -141,26 +142,32 @@ class CacheSearchEngine:
                 - path: 檔案路徑（可選）
                 - type: 快取類型（lang/patchouli/ftbquests 等，可選）
         """
-        key = entry.get('key', '')
-        src = entry.get('src', '')
-        dst = entry.get('dst', '')
-        mod = entry.get('mod', '')
-        path = entry.get('path', '')
-        cache_type = entry.get('type', 'lang')
+        key = entry.get("key", "")
+        src = entry.get("src", "")
+        dst = entry.get("dst", "")
+        mod = entry.get("mod", "")
+        path = entry.get("path", "")
+        cache_type = entry.get("type", "lang")
 
         with self._lock:
             try:
                 # 嘗試插入 FTS5 表
-                self.conn.execute("""
+                self.conn.execute(
+                    """
                     INSERT INTO cache_fts (cache_key, source_text, translated_text, mod_name, file_path, cache_type)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (key, src, dst, mod, path, cache_type))
+                """,
+                    (key, src, dst, mod, path, cache_type),
+                )
             except sqlite3.OperationalError:
                 # FTS5 不可用，使用基本表
-                self.conn.execute("""
+                self.conn.execute(
+                    """
                     INSERT INTO cache_basic (cache_key, source_text, translated_text, mod_name, file_path, cache_type)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (key, src, dst, mod, path, cache_type))
+                """,
+                    (key, src, dst, mod, path, cache_type),
+                )
 
             self.conn.commit()
 
@@ -171,22 +178,34 @@ class CacheSearchEngine:
             entries: 快取條目清單
         """
         data = [
-            (e.get('key', ''), e.get('src', ''), e.get('dst', ''), e.get('mod', ''),
-             e.get('path', ''), e.get('type', 'lang'))
+            (
+                e.get("key", ""),
+                e.get("src", ""),
+                e.get("dst", ""),
+                e.get("mod", ""),
+                e.get("path", ""),
+                e.get("type", "lang"),
+            )
             for e in entries
         ]
 
         with self._lock:
             try:
-                self.conn.executemany("""
+                self.conn.executemany(
+                    """
                     INSERT INTO cache_fts (cache_key, source_text, translated_text, mod_name, file_path, cache_type)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, data)
+                """,
+                    data,
+                )
             except sqlite3.OperationalError:
-                self.conn.executemany("""
+                self.conn.executemany(
+                    """
                     INSERT INTO cache_basic (cache_key, source_text, translated_text, mod_name, file_path, cache_type)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, data)
+                """,
+                    data,
+                )
 
             self.conn.commit()
 
@@ -234,13 +253,13 @@ class CacheSearchEngine:
 
             return [
                 {
-                    'key': row['cache_key'],  # cache key
-                    'src': row['source_text'],
-                    'dst': row['translated_text'],
-                    'mod': row['mod_name'],
-                    'path': row['file_path'],
-                    'type': row['cache_type'],
-                    'score': -row['rank']  # rank 是負數，轉成正數便於理解
+                    "key": row["cache_key"],  # cache key
+                    "src": row["source_text"],
+                    "dst": row["translated_text"],
+                    "mod": row["mod_name"],
+                    "path": row["file_path"],
+                    "type": row["cache_type"],
+                    "score": -row["rank"],  # rank 是負數，轉成正數便於理解
                 }
                 for row in rows
             ]
@@ -249,7 +268,9 @@ class CacheSearchEngine:
             # FTS5 不可用，使用基本 LIKE 搜尋
             return self._basic_search(query, limit, cache_type)
 
-    def _basic_search(self, query: str, limit: int, cache_type: str = None) -> List[Dict]:
+    def _basic_search(
+        self, query: str, limit: int, cache_type: str = None
+    ) -> List[Dict]:
         """基本搜尋（當 FTS5 不可用時）"""
         sql = """
             SELECT cache_key, source_text, translated_text, mod_name, file_path, cache_type
@@ -271,12 +292,12 @@ class CacheSearchEngine:
 
         return [
             {
-                'key': row['cache_key'],  # cache key
-                'src': row['source_text'],
-                'dst': row['translated_text'],
-                'mod': row['mod_name'],
-                'path': row['file_path'],
-                'type': row['cache_type']
+                "key": row["cache_key"],  # cache key
+                "src": row["source_text"],
+                "dst": row["translated_text"],
+                "mod": row["mod_name"],
+                "path": row["file_path"],
+                "type": row["cache_type"],
             }
             for row in rows
         ]
@@ -294,9 +315,13 @@ class CacheSearchEngine:
         """只清空指定類型的索引資料。"""
         with self._lock:
             try:
-                self.conn.execute("DELETE FROM cache_fts WHERE cache_type = ?", (cache_type,))
+                self.conn.execute(
+                    "DELETE FROM cache_fts WHERE cache_type = ?", (cache_type,)
+                )
             except sqlite3.OperationalError:
-                self.conn.execute("DELETE FROM cache_basic WHERE cache_type = ?", (cache_type,))
+                self.conn.execute(
+                    "DELETE FROM cache_basic WHERE cache_type = ?", (cache_type,)
+                )
             self.conn.commit()
 
     def close(self):
@@ -305,26 +330,18 @@ class CacheSearchEngine:
             self.conn.close()
 
     def __enter__(self):
-        """__enter__ 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        回傳：依函式內 return path。
         """
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """__exit__ 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`close`
+
+        回傳：None
         """
         self.close()
 
@@ -332,6 +349,7 @@ class CacheSearchEngine:
 # =============================================================================
 # 模糊比對器
 # =============================================================================
+
 
 class FuzzyMatcher:
     """模糊比對器（相似度計算）"""
@@ -358,7 +376,7 @@ class FuzzyMatcher:
         query: str,
         candidates: List[dict],
         threshold: float = 0.6,
-        key_field: str = 'src'
+        key_field: str = "src",
     ) -> List[dict]:
         """找出相似的候選項
 
@@ -374,21 +392,21 @@ class FuzzyMatcher:
         results = []
 
         for candidate in candidates:
-            text = candidate.get(key_field, '')
+            text = candidate.get(key_field, "")
             score = self.similarity(query, text)
 
             if score >= threshold:
-                results.append({**candidate, 'similarity': score})
+                results.append({**candidate, "similarity": score})
 
         # 按相似度排序（高到低）
-        return sorted(results, key=lambda x: x['similarity'], reverse=True)
+        return sorted(results, key=lambda x: x["similarity"], reverse=True)
 
     def rank_results(
         self,
         query: str,
         results: List[dict],
         src_weight: float = 0.6,
-        dst_weight: float = 0.4
+        dst_weight: float = 0.4,
     ) -> List[dict]:
         """對搜尋結果重新評分（同時考慮原文與譯文的相似度）
 
@@ -404,28 +422,29 @@ class FuzzyMatcher:
         scored = []
 
         for result in results:
-            src_sim = self.similarity(query, result.get('src', ''))
-            dst_sim = self.similarity(query, result.get('dst', ''))
+            src_sim = self.similarity(query, result.get("src", ""))
+            dst_sim = self.similarity(query, result.get("dst", ""))
 
             # 加權平均
             combined_score = src_sim * src_weight + dst_sim * dst_weight
 
-            scored.append({**result, 'combined_score': combined_score})
+            scored.append({**result, "combined_score": combined_score})
 
         # 按綜合分數排序
-        return sorted(scored, key=lambda x: x['combined_score'], reverse=True)
+        return sorted(scored, key=lambda x: x["combined_score"], reverse=True)
 
 
 # =============================================================================
 # 便利函式
 # =============================================================================
 
+
 def search_cache(
     query: str,
     db_path: str = None,
     limit: int = 50,
     fuzzy: bool = True,
-    threshold: float = 0.6
+    threshold: float = 0.6,
 ) -> List[Dict]:
     """快取搜尋的便利函式"""
     with CacheSearchEngine(db_path) as engine:
@@ -441,6 +460,7 @@ def search_cache(
 # =============================================================================
 # 搜尋協調輔助函式（PR12）
 # =============================================================================
+
 
 def _extract_path_from_composite_key(key: str, src: str = "") -> str:
     """從複合 key 拆出路徑段。
@@ -478,7 +498,9 @@ def _infer_search_path(cache_type: str, key: str, entry: Dict[str, Any] | None) 
     return _extract_path_from_composite_key(key, src)
 
 
-def _infer_search_mod(cache_type: str, key: str, path: str, entry: Dict[str, Any] | None) -> str:
+def _infer_search_mod(
+    cache_type: str, key: str, path: str, entry: Dict[str, Any] | None
+) -> str:
     """推導索引要寫入的 mod 欄位。
 
     規則依序為：entry 明確值 > 路徑 anchor(`assets`/`data`) > 類型特定 fallback。
@@ -510,26 +532,32 @@ def _infer_search_mod(cache_type: str, key: str, path: str, entry: Dict[str, Any
     return fallback.get(cache_type, "")
 
 
-def _build_search_metadata(cache_type: str, key: str, entry: Dict[str, Any] | None) -> Dict[str, str]:
+def _build_search_metadata(
+    cache_type: str, key: str, entry: Dict[str, Any] | None
+) -> Dict[str, str]:
     """組合單筆索引所需的 metadata（mod/path）。"""
     path = _infer_search_path(cache_type, key, entry)
     mod = _infer_search_mod(cache_type, key, path, entry)
     return {"mod": mod, "path": path}
 
 
-def build_index_entries(cache_type: str, cache_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+def build_index_entries(
+    cache_type: str, cache_dict: Dict[str, Any]
+) -> List[Dict[str, Any]]:
     """把單一 cache_type 的記憶體字典轉成可批次索引的條目陣列。"""
     entries: List[Dict[str, Any]] = []
     for key, entry in cache_dict.items():
         if not isinstance(entry, dict):
             continue
-        entries.append({
-            "key": key,
-            "src": entry.get("src", ""),
-            "dst": entry.get("dst", ""),
-            "type": cache_type,
-            **_build_search_metadata(cache_type, key, entry),
-        })
+        entries.append(
+            {
+                "key": key,
+                "src": entry.get("src", ""),
+                "dst": entry.get("dst", ""),
+                "type": cache_type,
+                **_build_search_metadata(cache_type, key, entry),
+            }
+        )
     return entries
 
 
@@ -574,16 +602,22 @@ class SearchOrchestrator:
                 self._engine = CacheSearchEngine(str(self._db_path()))
             return self._engine
 
-    def rebuild_search_index(self, cache_types: List[str], cache_state: Dict[str, Dict[str, Any]]) -> int:
+    def rebuild_search_index(
+        self, cache_types: List[str], cache_state: Dict[str, Dict[str, Any]]
+    ) -> int:
         """以暫存檔重建整體索引，完成後原子替換正式索引檔。"""
         db_path = self._db_path()
-        tmp_path = db_path.with_name(f"{db_path.name}.tmp-{os.getpid()}-{threading.get_ident()}")
+        tmp_path = db_path.with_name(
+            f"{db_path.name}.tmp-{os.getpid()}-{threading.get_ident()}"
+        )
         tmp_engine: Optional[CacheSearchEngine] = None
         old_engine: Optional[CacheSearchEngine] = None
         total_indexed = 0
         try:
             tmp_engine = CacheSearchEngine(str(tmp_path))
-            total_indexed = rebuild_from_cache_dicts(tmp_engine, cache_types, cache_state)
+            total_indexed = rebuild_from_cache_dicts(
+                tmp_engine, cache_types, cache_state
+            )
             tmp_engine.close()
             tmp_engine = None
 
@@ -601,7 +635,9 @@ class SearchOrchestrator:
             if tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
 
-    def rebuild_search_index_for_type(self, cache_type: str, cache_state: Dict[str, Dict[str, Any]]) -> int:
+    def rebuild_search_index_for_type(
+        self, cache_type: str, cache_state: Dict[str, Dict[str, Any]]
+    ) -> int:
         """只重建單一 cache_type 的索引資料。"""
         engine = self.get_engine()
         if engine is None:
@@ -613,7 +649,13 @@ class SearchOrchestrator:
             engine.index_batch(entries)
         return len(entries)
 
-    def search_cache(self, query: str, cache_type: str = None, limit: int = 50, use_fuzzy: bool = True) -> List[Dict]:
+    def search_cache(
+        self,
+        query: str,
+        cache_type: str = None,
+        limit: int = 50,
+        use_fuzzy: bool = True,
+    ) -> List[Dict]:
         """統一封裝查詢流程，必要時再做模糊重排序。"""
         engine = self.get_engine()
         if engine is None:
@@ -632,11 +674,15 @@ class SearchOrchestrator:
         limit: int = 20,
     ) -> List[Dict]:
         """先取候選，再以來源文字相似度過濾並截斷結果。"""
-        candidates = self.search_cache(text, cache_type=cache_type, limit=limit * 2, use_fuzzy=False)
+        candidates = self.search_cache(
+            text, cache_type=cache_type, limit=limit * 2, use_fuzzy=False
+        )
         if not candidates:
             return []
         matcher = FuzzyMatcher()
-        similar = matcher.find_similar(text, candidates, threshold=threshold, key_field="src")
+        similar = matcher.find_similar(
+            text, candidates, threshold=threshold, key_field="src"
+        )
         return similar[:limit]
 
     def close(self):

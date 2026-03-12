@@ -10,14 +10,9 @@ from pathlib import Path
 
 
 def map_lang_output_path(src: Path) -> Path:
-    """map_lang_output_path 的用途說明。
+    """處理此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    回傳：依函式內 return path。
     """
     if src.name.lower() == "en_us.json" and "lang" in src.parts:
         return src.with_name("zh_tw.json")
@@ -25,14 +20,11 @@ def map_lang_output_path(src: Path) -> Path:
 
 
 def set_by_path(root: dict, path: str, value):
-    """set_by_path 的用途說明。
+    """設定此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`replace`, `split`
+
+    回傳：依函式內 return path。
     """
     current = root
     normalized_path = path.replace("][", "].[")
@@ -54,7 +46,9 @@ def set_by_path(root: dict, path: str, value):
 
             if not key:
                 if not isinstance(current, list):
-                    raise TypeError(f"預期是 list 但得到 {type(current)}，於路徑片段 '{part}'")
+                    raise TypeError(
+                        f"預期是 list 但得到 {type(current)}，於路徑片段 '{part}'"
+                    )
                 if i == len(parts) - 1:
                     current[index] = value
                     return
@@ -64,7 +58,9 @@ def set_by_path(root: dict, path: str, value):
                     raise KeyError(f"找不到列表 key: '{key}' 於路徑 '{part}'")
                 target_list = current[key]
                 if not isinstance(target_list, list):
-                    raise TypeError(f"Key '{key}' 的值不是 list，而是 {type(target_list)}")
+                    raise TypeError(
+                        f"Key '{key}' 的值不是 list，而是 {type(target_list)}"
+                    )
                 if i == len(parts) - 1:
                     target_list[index] = value
                     return

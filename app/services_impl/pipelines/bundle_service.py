@@ -16,14 +16,9 @@ logger = logging.getLogger(__name__)
 
 
 def run_bundling_service(input_root_dir: str, output_zip_path: str):
-    """run_bundling_service 的用途說明。
+    """執行此 generator 並逐步回報進度（yield update dict）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`bundle_outputs_generator`
     """
     try:
         for update_dict in bundle_outputs_generator(input_root_dir, output_zip_path):

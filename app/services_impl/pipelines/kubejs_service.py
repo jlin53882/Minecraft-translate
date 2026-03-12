@@ -25,14 +25,11 @@ def run_kubejs_tooltip_service(
     step_inject: bool = True,
     write_new_cache: bool = True,
 ):
-    """run_kubejs_tooltip_service 的用途說明。
+    """執行此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`ensure_pipeline_logging`, `start`
+
+    回傳：None
     """
     ensure_pipeline_logging()
     try:

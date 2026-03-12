@@ -13,15 +13,12 @@ from typing import Any, Callable
 import orjson as json
 
 
-def get_active_shard_id(cache_file_path: dict[str, Path], cache_type: str, active_shard_file: str) -> str:
-    """get_active_shard_id 的用途說明。
+def get_active_shard_id(
+    cache_file_path: dict[str, Path], cache_type: str, active_shard_file: str
+) -> str:
+    """取得此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    回傳：依函式內 return path。
     """
     try:
         type_dir = cache_file_path.get(cache_type, Path(".")).parent
@@ -47,14 +44,9 @@ def build_cache_overview(
     cache_dir_name: str,
     resolve_project_path: Callable[[str], Path],
 ) -> dict[str, Any]:
-    """build_cache_overview 的用途說明。
+    """建立此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    回傳：依函式內 return path。
     """
     out_types: dict[str, Any] = {}
     total_entries = 0
@@ -91,7 +83,11 @@ def build_cache_overview(
 
     try:
         translation_config = load_config().get("translator", {})
-        cache_root = str(resolve_project_path(translation_config.get("cache_directory", cache_dir_name)).resolve())
+        cache_root = str(
+            resolve_project_path(
+                translation_config.get("cache_directory", cache_dir_name)
+            ).resolve()
+        )
     except Exception:
         cache_root = ""
 

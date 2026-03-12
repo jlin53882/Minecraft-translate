@@ -92,14 +92,12 @@ def cache_search_service(
                         continue
 
                 def _rank(text: str) -> int:
-                    """_rank 的用途說明。
+                    """計算搜尋排序用的 rank（越小代表越符合 query）。
 
-                    Args:
-                        參數請見函式簽名。
-                    Returns:
-                        回傳內容依實作而定；若無顯式回傳則為 None。
-                    Side Effects:
-                        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+                    規則（case-insensitive）：
+                    - 0：text 完全等於 query
+                    - 1：text 以 query 開頭（prefix match）
+                    - 2：其他（fallback）
                     """
                     t = (text or "").lower()
                     if t == q.lower():
@@ -139,14 +137,12 @@ def cache_search_service(
     truncated = False
 
     def _rank(text: str) -> int:
-        """_rank 的用途說明。
+        """計算搜尋排序用的 rank（越小代表越符合 query）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        規則（case-insensitive）：
+        - 0：text 完全等於 query
+        - 1：text 以 query 開頭（prefix match）
+        - 2：其他（fallback）
         """
         t = (text or "").lower()
         if t == q_lower:
@@ -227,7 +223,10 @@ def cache_rebuild_index_service() -> Dict[str, Any]:
     try:
         cache_manager.rebuild_search_index()
 
-        total = sum(len(cache_manager.get_cache_dict_ref(ct)) for ct in cache_manager.CACHE_TYPES)
+        total = sum(
+            len(cache_manager.get_cache_dict_ref(ct))
+            for ct in cache_manager.CACHE_TYPES
+        )
 
         return {
             "success": True,
