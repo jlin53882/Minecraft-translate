@@ -11,6 +11,20 @@ import flet as ft
 
 # UI 共用元件：抽出重複的卡片/按鈕樣式，集中在 app.ui
 from app.ui.components import primary_button, secondary_button, styled_card
+from app.views.translation.translation_actions import (
+    run_ftb,
+    run_kjs,
+    run_md,
+    start_ui_timer as start_translation_ui_timer,
+)
+from app.views.translation.translation_panels import (
+    build_action_row,
+    build_ftb_tab,
+    build_kjs_tab,
+    build_md_tab,
+    build_path_row,
+)
+from app.views.translation.translation_state import TranslationRunState
 
 # 可選匯入：避免某個 service 暫時不可用時，整頁無法開啟
 try:
@@ -47,6 +61,7 @@ class TranslationView(ft.Column):
         super().__init__(expand=True, spacing=16)
         self.page = page
         self.file_picker = file_picker
+        self._state = TranslationRunState()
         self._picker_target_field: ft.TextField | None = None
 
         self.session = None
@@ -84,6 +99,12 @@ class TranslationView(ft.Column):
                 ft.Tab(text="Markdown", content=self._build_md_tab()),
             ],
         )
+
+        # action layer 讀取的相容 seam
+        self.run_ftb_translation_service = run_ftb_translation_service
+        self.run_kubejs_tooltip_service = run_kubejs_tooltip_service
+        self.run_md_translation_service = run_md_translation_service
+        self.TaskSession = TaskSession
 
         right_panel = ft.Column(
             [
@@ -160,24 +181,7 @@ class TranslationView(ft.Column):
     # - 之後要調 UI 一致性，只需要改 app/ui/components.py
 
     def _path_row(self, field: ft.TextField) -> ft.Control:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`Row`
-
-        回傳：依函式內 return path。
-        """
-        return ft.Row(
-            [
-                ft.Container(expand=True, content=field),
-                ft.IconButton(
-                    icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                    icon_color=ft.Colors.BLUE_GREY_700,
-                    tooltip="選擇資料夾",
-                    on_click=lambda e: self._pick_directory_into(field),
-                ),
-            ],
-            spacing=6,
-        )
+        return build_path_row(self, field)
 
     def _action_row(
         self,
@@ -187,284 +191,19 @@ class TranslationView(ft.Column):
         on_reset,
         trailing: list[ft.Control] | None = None,
     ) -> ft.Control:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`Row`
-
-        回傳：依函式內 return path。
-        """
-        controls = [
-            primary_button(
-                "開始翻譯",
-                icon=ft.Icons.PLAY_ARROW,
-                tooltip="依照目前設定執行完整翻譯流程",
-                on_click=on_start,
-            ),
-            secondary_button(
-                "Dry-run 開始模擬翻譯",
-                icon=ft.Icons.SEARCH,
-                tooltip="依照目前設定執行翻譯流程，但不實際修改檔案",
-                on_click=on_dry_run,
-            ),
-            ft.TextButton(
-                "Reset",
-                icon=ft.Icons.REFRESH,
-                tooltip="重置輸入與輸出資料夾，並恢復所有步驟為預設值",
-                on_click=on_reset,
-            ),
-        ]
-        if trailing:
-            controls.extend(trailing)
-        return ft.Row(controls=controls, wrap=True, spacing=10)
+        return build_action_row(view=self, on_start=on_start, on_dry_run=on_dry_run, on_reset=on_reset, trailing=trailing)
 
     # ------------------------------------------------------------------
     # Tab builders
     # ------------------------------------------------------------------
     def _build_ftb_tab(self) -> ft.Control:
-        """建立此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`TextField`, `Checkbox`
-
-        回傳：依函式內 return path。
-        """
-        self.ftb_in_dir = ft.TextField(
-            label="輸入資料夾（模組包根目錄）",
-            hint_text="例如：C:\\\\Modpack",
-            expand=True,
-            dense=True,
-            border_color=ft.Colors.OUTLINE,
-            text_size=14,
-            content_padding=14,
-            prefix_icon=ft.Icons.FOLDER,
-        )
-        self.ftb_out_dir = ft.TextField(
-            label="輸出資料夾（可選）",
-            hint_text="留空使用 <input>/Output",
-            expand=True,
-            dense=True,
-            border_color=ft.Colors.OUTLINE,
-            text_size=14,
-            content_padding=14,
-            prefix_icon=ft.Icons.FOLDER_COPY,
-        )
-
-        self.ftb_step_export = ft.Checkbox(
-            label="Step 1：Export Raw（抽取）", value=True
-        )
-        self.ftb_step_clean = ft.Checkbox(
-            label="Step 2：Clean（補洞/產生待翻譯）", value=True
-        )
-        self.ftb_step_translate = ft.Checkbox(
-            label="Step 3：LM 翻譯（待翻譯 JSON）", value=True
-        )
-        self.ftb_step_inject = ft.Checkbox(
-            label="Step 4：Inject（寫回 zh_tw/*.snbt）", value=True
-        )
-        self.ftb_write_new_cache = ft.Switch(
-            label="寫入新快取（write_new_cache）", value=True
-        )
-
-        return ft.Column(
-            [
-                styled_card(
-                    title="路徑設定",
-                    icon=ft.Icons.FOLDER,
-                    content=ft.Column(
-                        [
-                            self._path_row(self.ftb_in_dir),
-                            self._path_row(self.ftb_out_dir),
-                        ],
-                        spacing=10,
-                    ),
-                ),
-                styled_card(
-                    title="步驟與選項",
-                    icon=ft.Icons.FACT_CHECK,
-                    content=ft.Column(
-                        [
-                            self.ftb_step_export,
-                            self.ftb_step_clean,
-                            self.ftb_step_translate,
-                            self.ftb_step_inject,
-                        ],
-                        spacing=6,
-                    ),
-                ),
-                self._action_row(
-                    on_start=lambda e: self._run_ftb(dry_run=False),
-                    on_dry_run=lambda e: self._run_ftb(dry_run=True),
-                    on_reset=lambda e: self._reset_ftb_inputs(),
-                    trailing=[self.ftb_write_new_cache],
-                ),
-            ],
-            spacing=12,
-            expand=True,
-        )
+        return build_ftb_tab(self)
 
     def _build_kjs_tab(self) -> ft.Control:
-        """建立此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`TextField`, `Checkbox`
-
-        回傳：依函式內 return path。
-        """
-        self.kjs_in_dir = ft.TextField(
-            label="輸入資料夾（模組包根目錄）",
-            hint_text="例如：C:\\\\Modpack",
-            expand=True,
-            dense=True,
-            border_color=ft.Colors.OUTLINE,
-            text_size=14,
-            content_padding=14,
-            prefix_icon=ft.Icons.FOLDER,
-        )
-        self.kjs_out_dir = ft.TextField(
-            label="輸出資料夾（可選）",
-            hint_text="留空使用 <input>/Output",
-            expand=True,
-            dense=True,
-            border_color=ft.Colors.OUTLINE,
-            text_size=14,
-            content_padding=14,
-            prefix_icon=ft.Icons.FOLDER_COPY,
-        )
-
-        self.kjs_step_extract = ft.Checkbox(
-            label="Step 1：Export Raw + Clean", value=True
-        )
-        self.kjs_step_translate = ft.Checkbox(
-            label="Step 2：LM 翻譯（待翻譯 JSON）", value=True
-        )
-        self.kjs_step_inject = ft.Checkbox(
-            label="Step 3：Inject 回 scripts", value=True
-        )
-        self.kjs_write_new_cache = ft.Switch(
-            label="寫入新快取（write_new_cache）", value=True
-        )
-
-        return ft.Column(
-            [
-                styled_card(
-                    title="路徑設定",
-                    icon=ft.Icons.FOLDER,
-                    content=ft.Column(
-                        [
-                            self._path_row(self.kjs_in_dir),
-                            self._path_row(self.kjs_out_dir),
-                        ],
-                        spacing=10,
-                    ),
-                ),
-                styled_card(
-                    title="步驟與選項",
-                    icon=ft.Icons.FACT_CHECK,
-                    content=ft.Column(
-                        [
-                            self.kjs_step_extract,
-                            self.kjs_step_translate,
-                            self.kjs_step_inject,
-                        ],
-                        spacing=6,
-                    ),
-                ),
-                self._action_row(
-                    on_start=lambda e: self._run_kjs(dry_run=False),
-                    on_dry_run=lambda e: self._run_kjs(dry_run=True),
-                    on_reset=lambda e: self._reset_kjs_inputs(),
-                    trailing=[self.kjs_write_new_cache],
-                ),
-            ],
-            spacing=12,
-            expand=True,
-        )
+        return build_kjs_tab(self)
 
     def _build_md_tab(self) -> ft.Control:
-        """建立此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`TextField`, `Checkbox`
-
-        回傳：依函式內 return path。
-        """
-        self.md_in_dir = ft.TextField(
-            label="輸入資料夾（遞迴掃描 .md）",
-            hint_text="例如：C:\\\\Modpack\\\\config\\\\patchouli_books",
-            expand=True,
-            dense=True,
-            border_color=ft.Colors.OUTLINE,
-            text_size=14,
-            content_padding=14,
-            prefix_icon=ft.Icons.FOLDER,
-        )
-        self.md_out_dir = ft.TextField(
-            label="輸出資料夾（可選）",
-            hint_text="留空使用 <input>/Output/md",
-            expand=True,
-            dense=True,
-            border_color=ft.Colors.OUTLINE,
-            text_size=14,
-            content_padding=14,
-            prefix_icon=ft.Icons.FOLDER_COPY,
-        )
-
-        self.md_step_extract = ft.Checkbox(
-            label="Step 1：Extract（產生待翻譯）", value=True
-        )
-        self.md_step_translate = ft.Checkbox(
-            label="Step 2：LM 翻譯（待翻譯 JSON）", value=True
-        )
-        self.md_step_inject = ft.Checkbox(label="Step 3：Inject（寫回 md）", value=True)
-        self.md_write_new_cache = ft.Switch(
-            label="寫入新快取（write_new_cache）", value=True
-        )
-        self.md_lang_mode = ft.Dropdown(
-            label="抽取語言模式（lang_mode）",
-            value="non_cjk_only",
-            dense=True,
-            options=[
-                ft.dropdown.Option(
-                    key="non_cjk_only", text="僅抽取非中文（non_cjk_only）"
-                ),
-                ft.dropdown.Option(key="cjk_only", text="僅抽取中文（cjk_only）"),
-                ft.dropdown.Option(key="all", text="抽取全部（all）"),
-            ],
-        )
-
-        return ft.Column(
-            [
-                styled_card(
-                    title="路徑設定",
-                    icon=ft.Icons.FOLDER,
-                    content=ft.Column(
-                        [
-                            self._path_row(self.md_in_dir),
-                            self._path_row(self.md_out_dir),
-                            self.md_lang_mode,
-                        ],
-                        spacing=10,
-                    ),
-                ),
-                styled_card(
-                    title="步驟與選項",
-                    icon=ft.Icons.FACT_CHECK,
-                    content=ft.Column(
-                        [
-                            self.md_step_extract,
-                            self.md_step_translate,
-                            self.md_step_inject,
-                        ],
-                        spacing=6,
-                    ),
-                ),
-                self._action_row(
-                    on_start=lambda e: self._run_md(dry_run=False),
-                    on_dry_run=lambda e: self._run_md(dry_run=True),
-                    on_reset=lambda e: self._reset_md_inputs(),
-                    trailing=[self.md_write_new_cache],
-                ),
-            ],
-            spacing=12,
-            expand=True,
-        )
+        return build_md_tab(self)
 
     # ------------------------------------------------------------------
     # directory picker
@@ -495,251 +234,19 @@ class TranslationView(ft.Column):
     # runners
     # ------------------------------------------------------------------
     def _run_ftb(self, *, dry_run: bool):
-        """執行此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`strip`, `_set_status`, `clear`
-
-        回傳：None
-        """
-        in_dir = (self.ftb_in_dir.value or "").strip()
-        if not in_dir:
-            self._show_snack("請先選擇輸入資料夾", ft.Colors.RED_600)
-            return
-        if run_ftb_translation_service is None:
-            self._show_snack("FTB service 尚未可用", ft.Colors.RED_600)
-            return
-        if TaskSession is None:
-            self._show_snack("TaskSession 尚未可用", ft.Colors.RED_600)
-            return
-
-        out_dir = (self.ftb_out_dir.value or "").strip() or None
-        self._set_status(
-            "模擬執行" if dry_run else "執行中",
-            ft.Colors.AMBER_200 if dry_run else ft.Colors.BLUE_200,
-        )
-        self.progress.value = 0
-        self.log_view.controls.clear()
-        self.page.update()
-
-        self.session = TaskSession()
-        try:
-            self.session.start()
-        except Exception:
-            pass
-
-        def worker():
-            """處理此函式的工作（細節以程式碼為準）。
-
-            - 主要包裝：`run_ftb_translation_service`
-
-            回傳：None
-            """
-            try:
-                run_ftb_translation_service(
-                    in_dir,
-                    self.session,
-                    output_dir=out_dir,
-                    dry_run=dry_run,
-                    step_export=bool(self.ftb_step_export.value),
-                    step_clean=bool(self.ftb_step_clean.value),
-                    step_translate=bool(self.ftb_step_translate.value),
-                    step_inject=bool(self.ftb_step_inject.value),
-                    write_new_cache=bool(self.ftb_write_new_cache.value),
-                )
-            except Exception as ex:
-                try:
-                    if hasattr(self.session, "add_log"):
-                        self.session.add_log(f"[UI] 服務執行失敗：{ex}")
-                    if hasattr(self.session, "set_error"):
-                        self.session.set_error(str(ex))
-                except Exception:
-                    pass
-
-        threading.Thread(target=worker, daemon=True).start()
-        self._start_ui_timer()
+        return run_ftb(self, dry_run=dry_run)
 
     def _run_kjs(self, *, dry_run: bool):
-        """執行此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`strip`, `_set_status`, `clear`
-
-        回傳：None
-        """
-        in_dir = (self.kjs_in_dir.value or "").strip()
-        if not in_dir:
-            self._show_snack("請先選擇輸入資料夾", ft.Colors.RED_600)
-            return
-        if run_kubejs_tooltip_service is None:
-            self._show_snack("KubeJS service 尚未可用", ft.Colors.RED_600)
-            return
-        if TaskSession is None:
-            self._show_snack("TaskSession 尚未可用", ft.Colors.RED_600)
-            return
-
-        out_dir = (self.kjs_out_dir.value or "").strip() or None
-        self._set_status(
-            "模擬執行" if dry_run else "執行中",
-            ft.Colors.AMBER_200 if dry_run else ft.Colors.BLUE_200,
-        )
-        self.progress.value = 0
-        self.log_view.controls.clear()
-        self.page.update()
-
-        self.session = TaskSession()
-        try:
-            self.session.start()
-        except Exception:
-            pass
-
-        def worker():
-            """處理此函式的工作（細節以程式碼為準）。
-
-            - 主要包裝：`run_kubejs_tooltip_service`
-
-            回傳：None
-            """
-            try:
-                run_kubejs_tooltip_service(
-                    in_dir,
-                    self.session,
-                    output_dir=out_dir,
-                    dry_run=dry_run,
-                    step_extract=bool(self.kjs_step_extract.value),
-                    step_translate=bool(self.kjs_step_translate.value),
-                    step_inject=bool(self.kjs_step_inject.value),
-                    write_new_cache=bool(self.kjs_write_new_cache.value),
-                )
-            except Exception as ex:
-                try:
-                    if hasattr(self.session, "add_log"):
-                        self.session.add_log(f"[UI] 服務執行失敗：{ex}")
-                    if hasattr(self.session, "set_error"):
-                        self.session.set_error(str(ex))
-                except Exception:
-                    pass
-
-        threading.Thread(target=worker, daemon=True).start()
-        self._start_ui_timer()
+        return run_kjs(self, dry_run=dry_run)
 
     def _run_md(self, *, dry_run: bool):
-        """執行此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`strip`, `_set_status`, `clear`
-
-        回傳：None
-        """
-        in_dir = (self.md_in_dir.value or "").strip()
-        if not in_dir:
-            self._show_snack("請先選擇輸入資料夾", ft.Colors.RED_600)
-            return
-        if run_md_translation_service is None:
-            self._show_snack("MD service 尚未可用", ft.Colors.RED_600)
-            return
-        if TaskSession is None:
-            self._show_snack("TaskSession 尚未可用", ft.Colors.RED_600)
-            return
-
-        out_dir = (self.md_out_dir.value or "").strip() or None
-        self._set_status(
-            "模擬執行" if dry_run else "執行中",
-            ft.Colors.AMBER_200 if dry_run else ft.Colors.BLUE_200,
-        )
-        self.progress.value = 0
-        self.log_view.controls.clear()
-        self.page.update()
-
-        self.session = TaskSession()
-        try:
-            self.session.start()
-        except Exception:
-            pass
-
-        def worker():
-            """處理此函式的工作（細節以程式碼為準）。
-
-            - 主要包裝：`run_md_translation_service`
-
-            回傳：None
-            """
-            try:
-                run_md_translation_service(
-                    input_dir=in_dir,
-                    session=self.session,
-                    output_dir=out_dir,
-                    dry_run=dry_run,
-                    step_extract=bool(self.md_step_extract.value),
-                    step_translate=bool(self.md_step_translate.value),
-                    step_inject=bool(self.md_step_inject.value),
-                    write_new_cache=bool(self.md_write_new_cache.value),
-                    lang_mode=str(self.md_lang_mode.value or "non_cjk_only"),
-                )
-            except Exception as ex:
-                try:
-                    if hasattr(self.session, "add_log"):
-                        self.session.add_log(f"[UI] 服務執行失敗：{ex}")
-                    if hasattr(self.session, "set_error"):
-                        self.session.set_error(str(ex))
-                except Exception:
-                    pass
-
-        threading.Thread(target=worker, daemon=True).start()
-        self._start_ui_timer()
+        return run_md(self, dry_run=dry_run)
 
     # ------------------------------------------------------------------
     # ui poller
     # ------------------------------------------------------------------
     def _start_ui_timer(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`start`
-
-        回傳：None
-        """
-        if self._ui_timer_running:
-            return
-        self._ui_timer_running = True
-
-        def loop():
-            """處理此函式的工作（細節以程式碼為準）。
-
-            回傳：None
-            """
-            while self._ui_timer_running:
-                time.sleep(0.1)
-                if self.session is None:
-                    continue
-
-                try:
-                    snap = self.session.snapshot()
-                except Exception:
-                    continue
-
-                try:
-                    self.progress.value = float(snap.get("progress", 0) or 0)
-                except Exception:
-                    self.progress.value = 0
-
-                logs = snap.get("logs", []) or []
-                try:
-                    tail = logs[-250:]
-                    self.log_view.controls = [
-                        ft.Text(line, size=13, color=ft.Colors.GREY_100)
-                        for line in tail
-                    ]
-                except Exception:
-                    pass
-
-                status = (snap.get("status") or "").upper()
-                if status == "DONE":
-                    self._set_status("任務完成", ft.Colors.GREEN_200)
-                    self._ui_timer_running = False
-                elif status == "ERROR":
-                    self._set_status("任務發生錯誤", ft.Colors.RED_200)
-                    self._ui_timer_running = False
-
-                self.page.update()
-
-        threading.Thread(target=loop, daemon=True).start()
+        return start_translation_ui_timer(self)
 
     # ------------------------------------------------------------------
     # UI helpers
