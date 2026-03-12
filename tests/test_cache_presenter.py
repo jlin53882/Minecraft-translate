@@ -1,5 +1,5 @@
-from app.views.cache_presenter import CachePresenter
-from app.views.cache_types import ActionState, CacheUiState
+from app.views.cache_manager.cache_presenter import CachePresenter
+from app.views.cache_manager.cache_types import ActionState, CacheUiState
 
 
 def test_status_text_ready_and_busy():
