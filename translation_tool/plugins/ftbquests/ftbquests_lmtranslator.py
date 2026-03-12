@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -37,168 +36,24 @@ from translation_tool.core.lm_translator_shared import (
     _get_default_batch_size,
 )
 
+from translation_tool.plugins.shared.json_io import (
+    read_json_dict,
+    write_json_dict,
+    collect_json_files,
+)
+from translation_tool.plugins.shared.lang_path_rules import (
+    should_rename_to_zh_tw,
+    is_lang_code_segment,
+    replace_lang_folder_with_zh_tw,
+    compute_output_path,
+)
+
 from translation_tool.utils.log_unit import( 
     log_info, 
     log_error, 
     log_warning, 
     log_debug, 
     )
-
-# -------------------------
-# 檔案讀寫相關工具（JSON 專用）
-# -------------------------
-
-def read_json_dict(path: Path) -> Dict[str, Any]:
-    """
-    讀取 JSON 檔案並回傳 dict。
-
-    - 只接受「最外層為物件（dict）」的 JSON
-    - 若 JSON 內容不是 dict（例如 list / 純文字），直接拋出錯誤
-    - 這是翻譯流程的前置保護，避免後續處理 key/value 時出錯
-    """
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    # 確保 JSON 最外層是 dict（key -> text）
-    if not isinstance(data, dict):
-        raise ValueError(f"JSON 內容不是物件格式（dict）：{path}")
-
-    return data
-
-
-def write_json_dict(path: Path, data: Dict[str, str]) -> None:
-    """
-    將 dict 內容寫入 JSON 檔案。
-
-    - 若輸出資料夾不存在，會自動建立
-    - 使用 UTF-8（不轉義中文），方便直接閱讀與比對
-    - indent=2：讓輸出的 JSON 結構清楚、利於版本控管
-    """
-    # 確保輸出資料夾存在
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    # 寫入 JSON（保留中文，不使用 ASCII escape）
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-def collect_json_files(input_dir: Path) -> List[Path]:
-    """
-    遞迴搜尋指定資料夾底下所有 .json 檔案。
-
-    - 使用 rglob 會包含所有子資料夾
-    - 回傳結果排序後，確保處理順序穩定（利於 log 與除錯）
-    """
-    return sorted(input_dir.rglob("*.json"))
-
-
-
-# -------------------------
-# 輸出檔名與路徑規則（語系處理）
-# -------------------------
-
-def should_rename_to_zh_tw(src_path: Path, rename_langs: set[str]) -> bool:
-    """
-    判斷「檔名本身就是語系檔」時，是否需要改名為 zh_tw.json。
-
-    使用情境：
-    - 原始檔名為 en_us.json、ru_ru.json 這類「語系即檔名」的格式
-    - 若語系在 rename_langs 白名單中，輸出時統一改為 zh_tw.json
-
-    注意：
-    - 只處理檔名，不處理資料夾路徑
-    - 非 .json 檔案一定不會進來
-    """
-    name = src_path.name.lower()
-
-    # 只處理 .json 檔
-    if not name.endswith(".json"):
-        return False
-
-    # 去掉副檔名，例如 en_us.json -> en_us
-    stem = name[:-5]
-
-    # 判斷是否符合語系格式 xx_xx
-    if len(stem) == 5 and stem[2] == "_":
-        return stem in rename_langs
-
-    return False
-
-
-def is_lang_code_segment(seg: str) -> bool:
-    """
-    判斷路徑片段是否為語系資料夾（xx_xx 格式）。
-
-    例如：
-    - en_us → True
-    - zh_tw → True
-    - assets / lang / data → False
-    """
-    seg = seg.lower()
-    return (
-        len(seg) == 5
-        and seg[2] == "_"
-        and seg[:2].isalpha()
-        and seg[3:].isalpha()
-    )
-
-
-def replace_lang_folder_with_zh_tw(rel: Path) -> Path:
-    """
-    將相對路徑中的「語系資料夾」統一替換成 zh_tw。
-
-    使用情境：
-    - 原始路徑包含 en_us / ja_jp / ru_ru 等語系資料夾
-    - 輸出時一律改為 zh_tw，避免多語系混在一起
-
-    範例：
-    quests/lang/en_us/ftb_lang.json
-    → quests/lang/zh_tw/ftb_lang.json
-    """
-    parts = list(rel.parts)
-    new_parts = []
-
-    for p in parts:
-        if is_lang_code_segment(p):
-            new_parts.append("zh_tw")
-        else:
-            new_parts.append(p)
-
-    return Path(*new_parts)
-
-
-def compute_output_path(
-    src_path: Path,
-    in_dir: Path,
-    out_dir: Path,
-    rename_langs: set[str],
-) -> Path:
-    """
-    計算單一檔案的最終輸出路徑。
-
-    處理流程（依順序）：
-    1️⃣ 將相對路徑中的語系資料夾（xx_xx）替換成 zh_tw
-    2️⃣ 若檔名本身是語系檔（如 en_us.json），改名為 zh_tw.json
-    3️⃣ 其他情況維持原檔名不變
-
-    這樣可以同時支援：
-    - lang/en_us/*.json
-    - lang/en_us.json
-    - 以及混合結構的模組資料
-    """
-    # 取得相對於輸入資料夾的路徑
-    rel = src_path.relative_to(in_dir)
-
-    # 1️⃣ 先統一資料夾語系為 zh_tw
-    rel = replace_lang_folder_with_zh_tw(rel)
-
-    # 2️⃣ 若檔名本身是語系檔，改成 zh_tw.json
-    if should_rename_to_zh_tw(src_path, rename_langs):
-        return out_dir / rel.parent / "zh_tw.json"
-
-    # 3️⃣ 其他檔案維持原檔名
-    return out_dir / rel
-
 
 # -------------------------
 # Smart 翻譯轉接器（資料格式轉換）
