@@ -2,7 +2,8 @@
 
 import flet as ft
 import threading
-from app.services import run_bundling_service, load_config_json
+from app.services_impl.config_service import load_config_json
+from app.services_impl.pipelines.bundle_service import run_bundling_service
 
 # --- 導入 tkinter ---
 import tkinter as tk

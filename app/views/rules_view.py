@@ -4,7 +4,7 @@ import flet as ft
 from app.ui.components import primary_button, secondary_button
 import threading 
 import math # 用於計算總頁數
-from app.services import load_replace_rules, save_replace_rules
+from app.services_impl.config_service import load_replace_rules, save_replace_rules
 import re
 
 class RulesView(ft.Column):

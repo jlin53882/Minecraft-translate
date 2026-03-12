@@ -27,7 +27,7 @@ import flet as ft
 from app.ui.components import primary_button, secondary_button
 
 from app.views.cache_manager.cache_overview_panel import build_overview_page
-from app.services import (
+from app.services_impl.cache.cache_services import (
     cache_get_entry_service,
     cache_get_overview_service,
     cache_reload_service,

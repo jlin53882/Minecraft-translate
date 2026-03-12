@@ -7,7 +7,7 @@ import flet as ft
 # UI 共用元件：統一卡片/按鈕樣式
 from app.ui.components import primary_button, styled_card
 
-from app.services import run_merge_zip_batch_service
+from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
 from app.task_session import TaskSession
 
 

@@ -4,7 +4,10 @@
 
 import flet as ft
 import threading
-from app.services import run_manual_lookup_service, run_batch_lookup_service
+from app.services_impl.pipelines.lookup_service import (
+    run_batch_lookup_service,
+    run_manual_lookup_service,
+)
 
 class LookupView(ft.Column):
     def __init__(self, page: ft.Page):
