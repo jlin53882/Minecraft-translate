@@ -14,7 +14,7 @@ import threading
 
 import flet as ft
 
-from app.services import cache_rebuild_index_service
+from app.services_impl.cache.cache_services import cache_rebuild_index_service
 from app.ui.view_wrapper import wrap_view
 from app.views.cache_view import CacheView
 from app.views.config_view import ConfigView

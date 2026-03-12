@@ -1,7 +1,7 @@
 import flet as ft
 import traceback
 
-from app.services import load_config_json, save_config_json
+from app.services_impl.config_service import load_config_json, save_config_json
 from app.ui.components import primary_button
 from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
 

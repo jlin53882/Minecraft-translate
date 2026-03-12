@@ -8,17 +8,17 @@ from app.ui.components import primary_button, secondary_button, styled_card
 
 # 可選匯入：避免某個 service 暫時不可用時，整頁無法開啟
 try:
-    from app.services import run_ftb_translation_service
+    from app.services_impl.pipelines.ftb_service import run_ftb_translation_service
 except Exception:
     run_ftb_translation_service = None
 
 try:
-    from app.services import run_kubejs_tooltip_service
+    from app.services_impl.pipelines.kubejs_service import run_kubejs_tooltip_service
 except Exception:
     run_kubejs_tooltip_service = None
 
 try:
-    from app.services import run_md_translation_service
+    from app.services_impl.pipelines.md_service import run_md_translation_service
 except Exception:
     run_md_translation_service = None
 

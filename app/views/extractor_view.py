@@ -20,7 +20,10 @@ import threading
 import time
 from pathlib import Path
 
-from app.services import run_lang_extraction_service, run_book_extraction_service
+from app.services_impl.pipelines.extract_service import (
+    run_book_extraction_service,
+    run_lang_extraction_service,
+)
 from app.task_session import TaskSession
 
 
