@@ -25,12 +25,6 @@ from translation_tool.core.lm_translator_main import (
     EXPORT_CACHE_ONLY,
     translate_batch_smart,
 )
-from translation_tool.core.translatable_extractor import (
-    extract_translatables,
-    find_patchouli_json,
-    find_lang_json,
-    is_lang_file,
-)
 from translation_tool.core.translation_path_writer import (
     map_lang_output_path,
     set_by_path,
@@ -38,6 +32,10 @@ from translation_tool.core.translation_path_writer import (
 from translation_tool.core.lm_config_rules import (
     validate_api_keys,
     value_fully_translated,
+)
+from translation_tool.core.lm_translator_scan import (
+    extract_items_parallel,
+    scan_translatable_files,
 )
 from translation_tool.utils.config_manager import load_config
 
@@ -163,9 +161,7 @@ def translate_directory_generator(
     # =========================
     # 掃描檔案
     # =========================
-    patchouli_files = find_patchouli_json(root)
-    lang_files = find_lang_json(root)
-    files = patchouli_files + lang_files
+    patchouli_files, lang_files, files = scan_translatable_files(root)
 
     msg_scan = f"🔍 掃描完成：Patchouli={len(patchouli_files)}，Lang={len(lang_files)}"
     logger.info(msg_scan)  # 同步到日誌檔案 (log 檔)
@@ -190,77 +186,15 @@ def translate_directory_generator(
     all_items = []
     translation_log: list[dict] = []
 
-    def is_plain_lang_json(data: dict) -> bool:
-        """
-        判斷是否為傳統 lang 檔（key: str -> value: str）
-        只要出現非 str 的 value，就視為複合格式，應跳過
-        """
-        if not isinstance(data, dict):
-            return False
-
-        for v in data.values():
-            if not isinstance(v, str):
-                return False
-        return True
-
-    # 定義一個內部工作函式，處理單個檔案的讀取與抽取
-    def process_file_task(f: Path):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`loads`
-
-        回傳：依函式內 return path。
-        """
-        try:
-            # 使用 orjson 快速讀取
-            data = json.loads(f.read_bytes())
-            # 判斷快取類型
-            # c_type = "lang" if is_lang_file(f) else "patchouli"
-            # if is_lang_file(f):
-            #    if not is_plain_lang_json(data):
-            #        logger.info(f"⏭️ 跳過複合格式 Lang 檔案：{f}")
-            #        return None
-            #    c_type = "lang"
-
-            if is_lang_file(f):
-                c_type = "lang"
-
-                # ⭐ 若要輸出 .lang，但內容不是純 key->str，就只能退回輸出 json
-                if export_lang and not is_plain_lang_json(data):
-                    logger.info(
-                        f"⚠️ Lang 檔為複合格式（含 list/dict），無法輸出 .lang，將改用 .json：{f}"
-                    )
-            else:
-                c_type = "patchouli"
-            # 抽取文字
-            extracted_items = extract_translatables(data, f)
-
-            # 預先打上類型標籤
-            for item in extracted_items:
-                item["cache_type"] = c_type
-
-            return {"file_path": str(f), "data": data, "items": extracted_items}
-        except Exception as e:
-            logger.error(f"❌ 檔案處理失敗 {f.name}: {e}")
-            return None
-
     logger.info(f"🚀 開始並行抽取文字 (檔案數量: {len(files)})")
-    work_thread = (
-        load_config().get("translator", {}).get("parallel_execution_workers", 4)
+    work_thread = load_config().get("translator", {}).get("parallel_execution_workers", 4)
+
+    file_cache, all_items = extract_items_parallel(
+        files=files,
+        export_lang=export_lang,
+        work_thread=work_thread,
+        logger=logger,
     )
-
-    # 使用執行緒池加速 I/O 與解析
-    # max_workers 建議設定為 8~16，或根據 CPU 核心數調整
-    with concurrent.futures.ThreadPoolExecutor(max_workers=work_thread) as executor:
-        # 提交所有任務
-        future_to_file = {executor.submit(process_file_task, f): f for f in files}
-
-        for future in concurrent.futures.as_completed(future_to_file):
-            result = future.result()
-            if result:
-                # 將結果整合回主程式的變數中
-                file_cache[result["file_path"]] = result["data"]
-                all_items.extend(result["items"])
 
     msg_extract = f"✂️ 抽取完成：共 {len(all_items)} 段文字"
     logger.info(msg_extract)
