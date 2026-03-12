@@ -1,18 +1,8 @@
-"""KubeJS pipeline service wrappers.
-
-PR23：將 KubeJS 類 service 從 app.services.py 抽離到 pipelines 子模組，
-由 app.services 持續做 façade / re-export，維持 UI import 相容。
-"""
+"""KubeJS pipeline service wrappers."""
 
 from __future__ import annotations
 
-import logging
-import traceback
-
 from app.services_impl.logging_service import UI_LOG_HANDLER
-from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
-
-logger = logging.getLogger(__name__)
 
 
 def run_kubejs_tooltip_service(
@@ -25,37 +15,23 @@ def run_kubejs_tooltip_service(
     step_inject: bool = True,
     write_new_cache: bool = True,
 ):
-    """執行此函式的工作（細節以程式碼為準）。
+    from app.services_impl.pipelines._task_runner import run_callable_task
+    from translation_tool.core.kubejs_translator import run_kubejs_pipeline
 
-    - 主要包裝：`ensure_pipeline_logging`, `start`
-
-    回傳：None
-    """
-    ensure_pipeline_logging()
-    try:
-        session.start()
-        UI_LOG_HANDLER.set_session(session)
-
-        from translation_tool.core.kubejs_translator import run_kubejs_pipeline
-
-        run_kubejs_pipeline(
-            input_dir=input_dir,
-            output_dir=output_dir,
-            session=session,
-            dry_run=dry_run,
-            step_extract=step_extract,
-            step_translate=step_translate,
-            step_inject=step_inject,
-            write_new_cache=write_new_cache,
-        )
-
-        session.finish()
-
-    except Exception as e:
-        full_traceback = traceback.format_exc()
-        logger.error(f"[致命錯誤] KubeJS 服務失敗：{e}\n{full_traceback}")
-        # ✅ UI_LOG_HANDLER 已接好：logger.error 會出現在 UI，所以不用 session.add_log
-        session.set_error()
-
-    finally:
-        UI_LOG_HANDLER.set_session(None)
+    return run_callable_task(
+        session=session,
+        task_name="致命錯誤] KubeJS 服務失敗：",
+        func=run_kubejs_pipeline,
+        kwargs={
+            "input_dir": input_dir,
+            "output_dir": output_dir,
+            "session": session,
+            "dry_run": dry_run,
+            "step_extract": step_extract,
+            "step_translate": step_translate,
+            "step_inject": step_inject,
+            "write_new_cache": write_new_cache,
+        },
+        add_session_log_on_error=False,
+        ui_log_handler=UI_LOG_HANDLER,
+    )
