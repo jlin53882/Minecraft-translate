@@ -10,34 +10,18 @@
 """
 
 import logging
-import threading
 
 import flet as ft
 
-from app.services_impl.cache.cache_services import cache_rebuild_index_service
-from app.ui.view_wrapper import wrap_view
-from app.views.cache_view import CacheView
-from app.views.config_view import ConfigView
-from app.views.extractor_view import ExtractorView
-from app.views.lm_view import LMView
-from app.views.merge_view import MergeView
-from app.views.rules_view import RulesView
-from app.views.translation_view import TranslationView
+from app.startup_tasks import start_background_startup_tasks
+from app.ui.view_wrapper import wrap_view  # guard: main 仍顯式依賴 shared wrapper
+from app.view_registry import build_navigation_destinations, build_view_registry, get_window_size
 
 logger = logging.getLogger("main_app")
 
 
 def bootstrap_runtime():
-    """初始化 runtime（config + logging），只應在 script entry 被呼叫一次。
-
-    維護注意：
-    - main.py 可能被測試 import，因此這段必須由 `__main__` 主動呼叫，
-      不能在 import 階段自動執行。
-    """
-
-    # main.py 可以被測試或其他模組 import；
-    # runtime 初始化（讀 config / 設定 logging）不能在 import 階段偷跑，
-    # 否則 `import main` 就會帶出 side effect。
+    """初始化 runtime（config + logging），只應在 script entry 被呼叫一次。"""
     from translation_tool.utils.config_manager import load_config, setup_logging
 
     config = load_config()
@@ -50,14 +34,6 @@ def bootstrap_runtime():
 
 
 def main(page: ft.Page):
-    # 這個函式只負責組裝 Flet UI 與頁面切換邏輯；
-    # runtime 初始化、logging 設定等啟動責任都留在 bootstrap_runtime()。
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`Theme`, `FilePicker`
-
-    回傳：None
-    """
     page.title = "Minecraft 模組包繁體化工具"
     page.window_width = 1200
     page.window_height = 850
@@ -77,43 +53,10 @@ def main(page: ft.Page):
     file_picker = ft.FilePicker()
     page.overlay.append(file_picker)
 
-    # 所有頁面都先經過 wrap_view()，把一致的卡片外框與邊距集中在 UI 共用層，
-    # 避免 main.py 再變回樣式雜物間。
-    config_view = wrap_view(ConfigView(page))
-    rules_view = wrap_view(RulesView(page))
-    cache_view = wrap_view(CacheView(page))
-    translation_view = wrap_view(TranslationView(page, file_picker))
-    extractor_view = wrap_view(ExtractorView(page, file_picker))
-    lm_view = wrap_view(LMView(page, file_picker))
-    merge_view = wrap_view(MergeView(page, file_picker))
+    registry = build_view_registry(page, file_picker)
 
-    # nav_destinations 與 view_window_sizes 共享同一組 selected_index。
-    # 後面若有新增/刪除頁面，兩邊要一起維護，不然切頁時視窗尺寸會對錯頁。
-    nav_destinations = [
-        (ft.Icons.SETTINGS, "設定", config_view),
-        (ft.Icons.RULE, "規則", rules_view),
-        (ft.Icons.STORAGE, "快取管理", cache_view),
-        (ft.Icons.TRANSLATE, "任務 翻譯工具", translation_view),
-        (ft.Icons.UNARCHIVE, "jar 提取", extractor_view),
-        (ft.Icons.AUTO_AWESOME, "機器翻譯", lm_view),
-        (ft.Icons.CALL_MERGE, "檔案合併", merge_view),
-    ]
-    view_window_sizes = {
-        0: (1280, 960),
-        1: (1280, 960),
-        2: (1360, 940),
-        3: (1280, 960),
-        4: (1280, 900),
-        5: (1280, 920),
-        6: (1280, 920),
-    }
-
-    def resize_window_for_view(selected_index: int):
-        """調整此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
-        width, height = view_window_sizes.get(selected_index, (1280, 960))
+    def resize_window_for_view(view_key: str):
+        width, height = get_window_size(view_key)
         try:
             page.window.maximized = False
             page.window.width = width
@@ -122,26 +65,16 @@ def main(page: ft.Page):
             page.window_width = width
             page.window_height = height
 
-    content_area = ft.Container(content=nav_destinations[0][2], expand=True)
+    content_area = ft.Container(content=registry[0]['view'], expand=True)
 
     def change_view(e):
-        """切換此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`resize_window_for_view`
-
-        回傳：None
-        """
         selected_index = e.control.selected_index
-        _, _, target_view = nav_destinations[selected_index]
-        content_area.content = target_view
-        resize_window_for_view(selected_index)
+        item = registry[selected_index]
+        content_area.content = item['view']
+        resize_window_for_view(item['key'])
         page.update()
 
     def toggle_theme_mode(e):
-        """切換此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
         is_light = page.theme_mode == ft.ThemeMode.LIGHT
         page.theme_mode = ft.ThemeMode.DARK if is_light else ft.ThemeMode.LIGHT
         toggle_icon_btn.icon = ft.Icons.LIGHT_MODE if is_light else ft.Icons.DARK_MODE
@@ -161,10 +94,7 @@ def main(page: ft.Page):
         min_extended_width=200,
         extended=True,
         group_alignment=-0.95,
-        destinations=[
-            ft.NavigationRailDestination(icon=icon, selected_icon=icon, label=label)
-            for icon, label, _ in nav_destinations
-        ],
+        destinations=build_navigation_destinations(registry),
         on_change=change_view,
         bgcolor=ft.Colors.SURFACE,
         leading=ft.Container(
@@ -194,24 +124,10 @@ def main(page: ft.Page):
     )
 
     page.add(layout)
-    resize_window_for_view(0)
+    resize_window_for_view(registry[0]['key'])
     page.update()
 
-    def _rebuild_index_on_startup():
-        # 索引重建放背景執行，避免主畫面啟動時被 I/O 卡住。
-        """重建此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`cache_rebuild_index_service`
-
-        回傳：None
-        """
-        try:
-            cache_rebuild_index_service()
-            logger.info("啟動時全域搜尋索引重建完成")
-        except Exception as ex:
-            logger.error(f"啟動時索引重建失敗: {ex}", exc_info=True)
-
-    threading.Thread(target=_rebuild_index_on_startup, daemon=True).start()
+    start_background_startup_tasks()
 
 
 if __name__ == "__main__":
