@@ -311,11 +311,6 @@ def get_from_cache(cache_type: str, key: str) -> Optional[str]:
 
     return cache_store.get_value(cache, key)
 
-def get_cache_size_old() -> int:
-    """獲取目前所有快取的總數量。"""
-    return sum(len(c) for c in _translation_cache.values())
-
-
 # cache_manager.py
 
 """

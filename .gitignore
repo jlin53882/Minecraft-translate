@@ -25,6 +25,8 @@ backups/
 
 # === Test cache ===
 .pytest_cache/
+.pytest-tmp/
+.tmp/
 
 # === Archives ===
 *.rar

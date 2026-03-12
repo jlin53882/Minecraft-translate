@@ -197,15 +197,6 @@ def load_custom_translations(folder_path: str, filename="table.tsv") -> Dict[str
         logger.error(f"讀取自訂翻譯檔 {file_path} 失敗: {e}")
     return custom_map
 
-# ✅ 修改後：保護詞彙與符號的「塊狀翻譯」
-def safe_convert_text_old(text: str) -> str:
-    if not text: return text
-    conv = get_converter() # 取得執行緒專用實例
-    # 🔍 正則：抓取「連續」的中文字符區塊
-    cjk_pattern = re.compile(r'([\u4e00-\u9fff]+)')
-    # 只有中文區塊會被轉換，保留詞彙修正 (例如：内存 -> 記憶體)
-    return cjk_pattern.sub(lambda m: conv.convert(m.group(1)), text)
-
 def safe_convert_text(text: str) -> str:
     if not text:
         return text
