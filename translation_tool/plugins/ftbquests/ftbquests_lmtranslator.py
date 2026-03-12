@@ -47,6 +47,7 @@ from translation_tool.plugins.shared.lang_path_rules import (
     replace_lang_folder_with_zh_tw,
     compute_output_path,
 )
+from translation_tool.plugins.shared.lang_text_rules import _strip_fmt, is_already_zh
 
 from translation_tool.utils.log_unit import( 
     log_info, 
@@ -150,27 +151,6 @@ class DryRunStats:
     cache_miss: int = 0          # 實際需翻譯數
     per_file: list[dict] = None  # 每個檔案的明細
 
-
-
-_FMT_RE = re.compile(r"(?:&|§)[0-9a-fk-or]", re.IGNORECASE)
-
-def _strip_fmt(s: str) -> str:
-    return _FMT_RE.sub("", s)
-
-def is_already_zh(s: str) -> bool:
-    """
-    粗略判斷：去掉 &5 / §x 等格式碼後，
-    若含 CJK 且幾乎沒有英文，就視為已是中文，不送 LM。
-    """
-    t = _strip_fmt(s).strip()
-    if not t:
-        return True  # 空字串當作不用翻
-    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", t))
-    if not has_cjk:
-        return False
-    # 若包含較多英文，視為混合句，仍交給 LM（避免 "獲得 3x Iron" 這種）
-    letters = len(re.findall(r"[A-Za-z]", t))
-    return letters <= 2
 
 
 

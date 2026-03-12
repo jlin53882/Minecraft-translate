@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
@@ -28,6 +27,7 @@ from translation_tool.core.lm_translator_shared import (
     _is_valid_hit                   # ✅ 新增：cache hit 判斷
 
 )
+from translation_tool.plugins.shared.lang_text_rules import _strip_fmt, is_already_zh
 
 
 
@@ -54,22 +54,6 @@ def collect_pending_json_files(pending_root: Path) -> List[Path]:
 # -------------------------
 # zh detection（避免已中文又送）
 # -------------------------
-
-_FMT_RE = re.compile(r"(?:&|§)[0-9a-fk-or]", re.IGNORECASE)
-
-def _strip_fmt(s: str) -> str:
-    return _FMT_RE.sub("", s)
-
-def is_already_zh(s: str) -> bool:
-    t = _strip_fmt(s).strip()
-    if not t:
-        return True
-    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", t))
-    if not has_cjk:
-        return False
-    letters = len(re.findall(r"[A-Za-z]", t))
-    return letters <= 2
-
 
 # -------------------------
 # pending model
