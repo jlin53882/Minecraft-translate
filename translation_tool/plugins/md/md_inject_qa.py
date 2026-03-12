@@ -40,14 +40,13 @@
 #   - 以「不破壞原 md 骨架」與「不殘留英文」為最高優先
 # ------------------------------------------------------------
 
-
 from __future__ import annotations
 
 import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Tuple
 
 
 # ======== 跟抽取器一致：哪些行視為 token 行（不可翻、不可改） ========
@@ -58,7 +57,10 @@ RE_SOFT_SKIP_LINE = re.compile(r"^\s*§(align:|stack\[)", re.I)
 # ======== 語言資料夾段落映射：en_us -> zh_tw（支援 _en_us、大小寫） ========
 RE_LANG_SEG = re.compile(r"^(_?)([a-z]{2}_[a-z]{2})$", re.IGNORECASE)
 
-def map_lang_in_rel_path(rel_path: str, src_lang: str = "en_us", dst_lang: str = "zh_tw") -> str:
+
+def map_lang_in_rel_path(
+    rel_path: str, src_lang: str = "en_us", dst_lang: str = "zh_tw"
+) -> str:
     """
     只替換「路徑 segment」剛好等於語言碼的那一段，避免誤傷其他字串。
     - 支援: en_us / EN_US / _en_us / _EN_US
@@ -83,9 +85,10 @@ def map_lang_in_rel_path(rel_path: str, src_lang: str = "en_us", dst_lang: str =
 # ======== 語言資料夾段落映射：允許 en_us -> zh_tw，也允許來源是 zh_tw ========
 RE_LANG_SEG = re.compile(r"^(_?)([a-z]{2}_[a-z]{2})$", re.IGNORECASE)
 
-def map_lang_in_rel_path_allow_zh(rel_path: str,
-                                 src_lang: str = "en_us",
-                                 dst_lang: str = "zh_tw") -> tuple[str, str]:
+
+def map_lang_in_rel_path_allow_zh(
+    rel_path: str, src_lang: str = "en_us", dst_lang: str = "zh_tw"
+) -> tuple[str, str]:
     """
     回傳 (mapped_rel_path, status)
 
@@ -133,11 +136,12 @@ def map_lang_in_rel_path_allow_zh(rel_path: str,
 # 若一整行幾乎都是 §token，也視為 token 行（避免誤判）
 RE_MOSTLY_TOKEN_LINE = re.compile(r"^\s*(§[0-9a-zA-Z]+\S*)\s*(§[0-9a-zA-Z]+\S*)*\s*$")
 
+
 def is_token_line(line: str) -> bool:
     """判斷此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`strip`
-    
+
     回傳：依函式內 return path。
     """
     s = line.strip()
@@ -159,6 +163,7 @@ def is_text_line_old(line: str) -> bool:
       - 非 token 行
     """
     return bool(line.strip()) and (not is_token_line(line))
+
 
 def is_text_line(line: str) -> bool:
     """
@@ -192,13 +197,13 @@ def flatten_for_md(text: str) -> str:
       - 段落內如果有多行，合併成一行（用空格接）
     這樣回寫時比較不會把原 md 洗成怪格式。
     """
-    lines = [l.rstrip() for l in text.splitlines()]
+    lines = [line.rstrip() for line in text.splitlines()]
     out: List[str] = []
     buf: List[str] = []
 
     def flush_buf():
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         nonlocal buf
@@ -206,8 +211,8 @@ def flatten_for_md(text: str) -> str:
             out.append(" ".join([x.strip() for x in buf if x.strip()]))
             buf = []
 
-    for l in lines:
-        if not l.strip():
+    for line in lines:
+        if not line.strip():
             flush_buf()
             # 保留段落空行（不要連續堆很多空行）
             if out and out[-1] != "":
@@ -215,7 +220,7 @@ def flatten_for_md(text: str) -> str:
             elif not out:
                 out.append("")
         else:
-            buf.append(l)
+            buf.append(line)
 
     flush_buf()
 
@@ -235,6 +240,7 @@ class Item:
     用途：封裝與 Item 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
+
     source_md: str
     start_line: int
     end_line: int
@@ -249,12 +255,14 @@ def load_items_from_json(json_path: Path) -> Tuple[str, List[Item]]:
     source_md = data["source_md"]
     items: List[Item] = []
     for it in data.get("items", []):
-        items.append(Item(
-            source_md=source_md,
-            start_line=int(it["start_line"]),
-            end_line=int(it["end_line"]),
-            text=str(it["text"]),
-        ))
+        items.append(
+            Item(
+                source_md=source_md,
+                start_line=int(it["start_line"]),
+                end_line=int(it["end_line"]),
+                text=str(it["text"]),
+            )
+        )
     return source_md, items
 
 
@@ -361,7 +369,7 @@ def apply_item_to_md_lines(md_lines: List[str], item: Item) -> None:
 
 def iter_json_files(root: Path):
     """處理此 generator 並逐步回報進度（yield update dict）。
-    
+
     - 主要包裝：`rglob`
     """
     for p in root.rglob("*.json"):
@@ -371,16 +379,28 @@ def iter_json_files(root: Path):
 
 def main():
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`strip`
-    
+
     回傳：None
     """
     print("=== md 寫回（方案 A：保留原檔骨架，只替換文字行）===")
 
-    src_md_root = input("原始 .md 輸入資料夾（原檔所在根目錄）: ").strip().strip('"').strip("'")
-    json_root = input("翻譯後 JSON 資料夾（例如：輸出/LM翻譯後）: ").strip().strip('"').strip("'")
-    out_root = input("輸出資料夾（會輸出到：<輸出>/完成/.../*.md）: ").strip().strip('"').strip("'")
+    src_md_root = (
+        input("原始 .md 輸入資料夾（原檔所在根目錄）: ").strip().strip('"').strip("'")
+    )
+    json_root = (
+        input("翻譯後 JSON 資料夾（例如：輸出/LM翻譯後）: ")
+        .strip()
+        .strip('"')
+        .strip("'")
+    )
+    out_root = (
+        input("輸出資料夾（會輸出到：<輸出>/完成/.../*.md）: ")
+        .strip()
+        .strip('"')
+        .strip("'")
+    )
 
     src_root = Path(src_md_root).expanduser().resolve()
     jroot = Path(json_root).expanduser().resolve()
@@ -431,15 +451,17 @@ def main():
             apply_item_to_md_lines(md_lines, it)
 
         # 寫出到 <輸出>/完成/<相對路徑>
-        #out_path = out_done / source_md
+        # out_path = out_done / source_md
         # 寫出到 <輸出>/完成/<相對路徑>（但語言段落 en_us -> zh_tw）
-        #out_rel = map_lang_in_rel_path(source_md, src_lang="en_us", dst_lang="zh_tw")
+        # out_rel = map_lang_in_rel_path(source_md, src_lang="en_us", dst_lang="zh_tw")
 
         # 寫出到 <輸出>/完成/<相對路徑>
         # - 來源是 en_us/_en_us：輸出轉成 zh_tw/_zh_tw
         # - 來源是 zh_tw/_zh_tw：保持 zh_tw（可用於重寫/覆蓋）
         # - 其他語言或找不到語言段：跳過，避免污染輸出樹
-        out_rel, status = map_lang_in_rel_path_allow_zh(source_md, src_lang="en_us", dst_lang="zh_tw")
+        out_rel, status = map_lang_in_rel_path_allow_zh(
+            source_md, src_lang="en_us", dst_lang="zh_tw"
+        )
         if status not in ("SRC_EN", "SRC_ZH"):
             print(f"[SKIP:{status}] {source_md}")
             continue

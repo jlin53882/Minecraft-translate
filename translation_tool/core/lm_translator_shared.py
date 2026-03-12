@@ -12,20 +12,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Any , Set
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Any, Set
 from pathlib import Path
 import csv
 import json
 
-from translation_tool.utils.log_unit import log_info,log_debug,log_error,log_warning
+from translation_tool.utils.log_unit import log_info
 
-from translation_tool.utils.cache_manager import get_cache_dict_ref, get_cache_entry  # 新增
+from translation_tool.utils.cache_manager import get_cache_dict_ref  # 新增
 from translation_tool.core.lm_config_rules import value_fully_translated
 import time
 
 
 from translation_tool.utils.cache_manager import (
-    get_from_cache,
     add_to_cache,
     save_translation_cache,
     reload_translation_cache,
@@ -37,6 +36,7 @@ from translation_tool.utils.config_manager import load_config
 # 資料型態定義 (Types)
 # ---------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class CacheRule:
     """
@@ -45,11 +45,12 @@ class CacheRule:
       - "path"            : 僅使用 item["path"] 作為快取鍵
       - "path|source_text": 使用路徑加原文作為鍵（最安全）
     """
+
     key_mode: str = "path|source_text"
 
     def make_key(self, item: Dict[str, Any]) -> str:
         """建立此函式的工作（細節以程式碼為準）。
-        
+
         回傳：依函式內 return path。
         """
         path = str(item.get("path") or "")
@@ -63,10 +64,11 @@ class CacheRule:
 # 快取拆分邏輯 (Cache split)
 # ---------------------------------------------------------------------
 
+
 def get_default_cache_rules() -> Dict[str, CacheRule]:
     # 每次回傳新 dict，避免外部修改污染全域
     """取得此函式的工作（細節以程式碼為準）。
-    
+
     回傳：依函式內 return path。
     """
     return {
@@ -78,13 +80,19 @@ def get_default_cache_rules() -> Dict[str, CacheRule]:
     }
 
 
-
 # cache 命中判定（需比對 src）
-STRICT_SRC_TYPES = {"lang","kubejs","ftbquests","md"}   # 之後要加很容易，例如 {"lang", "md"}
+STRICT_SRC_TYPES = {
+    "lang",
+    "kubejs",
+    "ftbquests",
+    "md",
+}  # 之後要加很容易，例如 {"lang", "md"}
+
+
 def _is_valid_hit(dst: str, entry: dict, item: dict) -> bool:
     # 1️⃣ dst 本身必須是有效翻譯
     """判斷此函式的工作（細節以程式碼為準）。
-    
+
     回傳：依函式內 return path。
     """
     if not value_fully_translated(dst):
@@ -96,10 +104,7 @@ def _is_valid_hit(dst: str, entry: dict, item: dict) -> bool:
     # 3️⃣ 只有「指定類型」才做嚴格 src 檢查
     if ctype in STRICT_SRC_TYPES:
         item_src = (
-            item.get("source_text")
-            or item.get("source")
-            or item.get("src_text")
-            or ""
+            item.get("source_text") or item.get("source") or item.get("src_text") or ""
         )
         entry_src = entry.get("src") or ""
 
@@ -115,6 +120,7 @@ def _is_valid_hit(dst: str, entry: dict, item: dict) -> bool:
 
 
 ValidHitFn = Callable[[str, Dict[str, Any], Dict[str, Any]], bool]
+
 
 def fast_split_items_by_cache(
     all_items: Iterable[Dict[str, Any]],
@@ -165,6 +171,7 @@ def fast_split_items_by_cache(
 # ---------------------------------------------------------------------
 # 觸發集 (Touch Set)
 
+
 @dataclass
 class TouchSet:
     """TouchSet 類別。
@@ -172,11 +179,12 @@ class TouchSet:
     用途：封裝與 TouchSet 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
+
     touched: Set[str] = field(default_factory=set)
 
     def touch(self, file_id: str) -> None:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if file_id:
@@ -191,7 +199,6 @@ class TouchSet:
         self.touched.clear()
 
 
-
 def write_dry_run_preview(
     out_dir: str | Path,
     items: List[Dict[str, Any]],
@@ -200,9 +207,9 @@ def write_dry_run_preview(
     meta: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`Path`, `mkdir`, `write_text`
-    
+
     回傳：依函式內 return path。
     """
     out_dir = Path(out_dir)
@@ -217,6 +224,7 @@ def write_dry_run_preview(
     p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return p
 
+
 def write_cache_hit_preview(
     out_dir: str | Path,
     cached_items: List[Dict[str, Any]],
@@ -225,9 +233,9 @@ def write_cache_hit_preview(
     meta: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`Path`, `mkdir`, `write_text`
-    
+
     回傳：依函式內 return path。
     """
     out_dir = Path(out_dir)
@@ -237,13 +245,15 @@ def write_cache_hit_preview(
     # 只留你最需要看的欄位，避免爆大
     rows = []
     for it in cached_items:
-        rows.append({
-            "file": it.get("file"),
-            "path": it.get("path"),
-            "source_text": it.get("source_text"),
-            "text": it.get("text"),           # cache 命中後會是 dst
-            "cache_type": it.get("cache_type"),
-        })
+        rows.append(
+            {
+                "file": it.get("file"),
+                "path": it.get("path"),
+                "source_text": it.get("source_text"),
+                "text": it.get("text"),  # cache 命中後會是 dst
+                "cache_type": it.get("cache_type"),
+            }
+        )
 
     payload = {
         "meta": meta or {},
@@ -254,9 +264,9 @@ def write_cache_hit_preview(
     return p
 
 
-
 # ---------------------------------------------------------------------
-#翻譯記錄表，JSON/CSV雙格式輸出
+# 翻譯記錄表，JSON/CSV雙格式輸出
+
 
 @dataclass
 class TranslationRecorder:
@@ -265,6 +275,7 @@ class TranslationRecorder:
     用途：封裝與 TranslationRecorder 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
+
     rows: List[Dict[str, Any]] = field(default_factory=list)
 
     def record(
@@ -279,36 +290,40 @@ class TranslationRecorder:
         extra: Optional[Dict[str, Any]] = None,
     ) -> None:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
-        self.rows.append({
-            "cache_type": cache_type,
-            "file_id": file_id or "",
-            "path": path,
-            "src": src,
-            "dst": dst,
-            "cache_hit": bool(cache_hit),
-            **(extra or {}),
-        })
+        self.rows.append(
+            {
+                "cache_type": cache_type,
+                "file_id": file_id or "",
+                "path": path,
+                "src": src,
+                "dst": dst,
+                "cache_hit": bool(cache_hit),
+                **(extra or {}),
+            }
+        )
 
     def export_json(self, out_path: str | Path) -> Path:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`Path`, `mkdir`, `write_text`
-        
+
         回傳：依函式內 return path。
         """
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(self.rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        out_path.write_text(
+            json.dumps(self.rows, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         return out_path
 
     def export_csv(self, out_path: str | Path) -> Path:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`Path`, `mkdir`, `sorted`
-        
+
         回傳：依函式內 return path。
         """
         out_path = Path(out_path)
@@ -326,14 +341,15 @@ class TranslationRecorder:
         return out_path
 
 
-
 # ---------------------------------------------------------------------
 # 核心翻譯迴圈 (Core translate loop)
 # ---------------------------------------------------------------------
 
+
 @dataclass
 class TranslateLoopResult:
     """翻譯任務結束後的統計資料"""
+
     status: str
     processed: int
     total: int
@@ -343,7 +359,9 @@ class TranslateLoopResult:
     last_error: Optional[str] = None
 
 
-def _get_default_batch_size(cache_type: str, batch_size_by_type: Optional[Dict[str, int]]) -> int:
+def _get_default_batch_size(
+    cache_type: str, batch_size_by_type: Optional[Dict[str, int]]
+) -> int:
     """
     從設定檔讀取批次大小
     修正：同步辨識 ftbquests 與 kubejs 的專屬批次設定
@@ -358,13 +376,13 @@ def _get_default_batch_size(cache_type: str, batch_size_by_type: Optional[Dict[s
     if cache_type == "ftbquests":
         # 注意：這裡的 key 名稱必須與你 config.yaml 或 main.py 裡印出來的一致
         return int(lm_cfg.get("initial_batch_size_ftb", 100) or 100)
-    
+
     if cache_type == "kubejs":
         return int(lm_cfg.get("initial_batch_size_kubejs", 200) or 200)
 
     if cache_type == "patchouli":
         return int(lm_cfg.get("iniital_batch_size_patchouli", 100) or 100)
-    
+
     if cache_type == "md":
         return int(lm_cfg.get("iniital_batch_size_md", 100) or 100)
 
@@ -372,20 +390,23 @@ def _get_default_batch_size(cache_type: str, batch_size_by_type: Optional[Dict[s
     return int(lm_cfg.get("iniital_batch_size_lang", 300) or 300)
 
 
-
-
 def translate_items_with_cache_loop(
     items_to_translate: List[Dict[str, Any]],
     *,
     total_for_smart: Optional[int] = None,
-    translate_batch_smart: Callable[[List[Dict[str, Any]], Optional[int]], Tuple[Optional[List[Dict[str, Any]]], str]],
+    translate_batch_smart: Callable[
+        [List[Dict[str, Any]], Optional[int]],
+        Tuple[Optional[List[Dict[str, Any]]], str],
+    ],
     # ---- 行為控制 ----
     batch_size_by_type: Optional[Dict[str, int]] = None,
     write_new_cache: bool = True,
     # ---- 鉤子函式 (on_progress 現在多傳一個 eta_sec) ----
     on_translated_item: Optional[Callable[[Dict[str, Any]], None]] = None,
     on_batch_flushed: Optional[Callable[[], None]] = None,
-    on_progress: Optional[Callable[[float, str, float], None]] = None, # (進度%, 訊息, 剩餘秒數)
+    on_progress: Optional[
+        Callable[[float, str, float], None]
+    ] = None,  # (進度%, 訊息, 剩餘秒數)
     # ---- 快取規則 ----
     cache_rules: Optional[Dict[str, CacheRule]] = None,
     # ---- 安全 ----
@@ -401,9 +422,13 @@ def translate_items_with_cache_loop(
     reload_translation_cache()
     log_info("[Translator Gen]: 重新載入快取完成")
     start_time = time.time()
-    
+
     # 確保 total 至少為 1 避免除以零
-    total = int(total_for_smart) if isinstance(total_for_smart, int) and total_for_smart > 0 else len(items_to_translate)
+    total = (
+        int(total_for_smart)
+        if isinstance(total_for_smart, int) and total_for_smart > 0
+        else len(items_to_translate)
+    )
     remaining: List[Dict[str, Any]] = list(items_to_translate)
 
     processed = 0
@@ -417,7 +442,7 @@ def translate_items_with_cache_loop(
             try:
                 # 1. 計算進度百分比
                 p = min(processed / max(total, 1), 1.0)
-                
+
                 # 2. 計算 ETA (預計剩餘秒數)
                 elapsed = time.time() - start_time
                 if processed > 0 and elapsed > 0:
@@ -426,7 +451,7 @@ def translate_items_with_cache_loop(
                     eta_sec = remaining_count / speed
                 else:
                     eta_sec = 0.0  # 還沒開始或還沒成功翻譯前，ETA 為 0
-                
+
                 on_progress(p, msg, eta_sec)
             except Exception:
                 pass
@@ -466,13 +491,15 @@ def translate_items_with_cache_loop(
         for it in safe_translated:
             if not isinstance(it, dict):
                 continue
-            
+
             pth = it.get("path")
             txt = it.get("text")
             src = it.get("source_text")
             ctype = str(it.get("cache_type") or cache_type)
 
-            if not (isinstance(pth, str) and isinstance(txt, str) and isinstance(src, str)):
+            if not (
+                isinstance(pth, str) and isinstance(txt, str) and isinstance(src, str)
+            ):
                 continue
 
             actual_processed_in_this_batch += 1

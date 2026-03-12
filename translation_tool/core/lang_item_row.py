@@ -16,9 +16,9 @@ from translation_tool.core.icon_reason import IconRisk
 
 def to_halfwidth(text):
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`normalize`
-    
+
     回傳：依函式內 return path。
     """
     if not isinstance(text, str):
@@ -32,6 +32,7 @@ class LangItemRow(ft.Container):
     用途：封裝與 LangItemRow 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
+
     def __init__(
         self,
         *,
@@ -43,9 +44,9 @@ class LangItemRow(ft.Container):
         on_value_changed: Callable[[str, str], None],
     ):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`__init__`, `resolve_icon_with_reason`, `Column`
-        
+
         回傳：None
         """
         super().__init__(
@@ -125,7 +126,6 @@ class LangItemRow(ft.Container):
                         to_halfwidth(e.control.value),
                     ),
                 ),
-
                 # lang key（可選取）
                 ft.TextField(
                     value=to_halfwidth(lang_key),
@@ -134,7 +134,6 @@ class LangItemRow(ft.Container):
                     border=ft.InputBorder.NONE,
                     text_size=12,
                 ),
-
                 # 英文原文（可選取）
                 ft.TextField(
                     value=to_halfwidth(en_text),
@@ -144,7 +143,6 @@ class LangItemRow(ft.Container):
                     border=ft.InputBorder.NONE,
                     text_size=14,
                 ),
-
                 risk_label if risk_label else ft.Container(),
             ],
         )

@@ -26,9 +26,9 @@ def run_kubejs_tooltip_service(
     write_new_cache: bool = True,
 ):
     """執行此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`ensure_pipeline_logging`, `start`
-    
+
     回傳：None
     """
     ensure_pipeline_logging()

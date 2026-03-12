@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
     """執行此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`ensure_pipeline_logging`, `start`
-    
+
     回傳：None
     """
     ensure_pipeline_logging()
@@ -65,13 +65,12 @@ def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
         UI_LOG_HANDLER.set_session(None)
 
 
-
 def run_book_extraction_service(mods_dir: str, output_dir: str, session):
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
     """執行此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`ensure_pipeline_logging`, `start`
-    
+
     回傳：None
     """
     ensure_pipeline_logging()

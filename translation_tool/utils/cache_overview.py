@@ -13,9 +13,11 @@ from typing import Any, Callable
 import orjson as json
 
 
-def get_active_shard_id(cache_file_path: dict[str, Path], cache_type: str, active_shard_file: str) -> str:
+def get_active_shard_id(
+    cache_file_path: dict[str, Path], cache_type: str, active_shard_file: str
+) -> str:
     """取得此函式的工作（細節以程式碼為準）。
-    
+
     回傳：依函式內 return path。
     """
     try:
@@ -43,7 +45,7 @@ def build_cache_overview(
     resolve_project_path: Callable[[str], Path],
 ) -> dict[str, Any]:
     """建立此函式的工作（細節以程式碼為準）。
-    
+
     回傳：依函式內 return path。
     """
     out_types: dict[str, Any] = {}
@@ -81,7 +83,11 @@ def build_cache_overview(
 
     try:
         translation_config = load_config().get("translator", {})
-        cache_root = str(resolve_project_path(translation_config.get("cache_directory", cache_dir_name)).resolve())
+        cache_root = str(
+            resolve_project_path(
+                translation_config.get("cache_directory", cache_dir_name)
+            ).resolve()
+        )
     except Exception:
         cache_root = ""
 

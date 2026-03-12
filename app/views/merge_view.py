@@ -22,9 +22,9 @@ class MergeView(ft.Column):
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`__init__`, `TaskSession`, `Event`
-        
+
         回傳：None
         """
         super().__init__(expand=True, spacing=16)
@@ -57,8 +57,12 @@ class MergeView(ft.Column):
         self.zip_list_view = ft.ListView(height=160, spacing=4, auto_scroll=False)
 
         # 狀態區
-        self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=ft.Colors.GREY_200)
-        self.progress_bar = ft.ProgressBar(value=0, height=8, bgcolor=ft.Colors.GREY_200, color=ft.Colors.BLUE)
+        self.status_chip = ft.Chip(
+            label=ft.Text("尚未開始"), bgcolor=ft.Colors.GREY_200
+        )
+        self.progress_bar = ft.ProgressBar(
+            value=0, height=8, bgcolor=ft.Colors.GREY_200, color=ft.Colors.BLUE
+        )
 
         # 日誌區
         self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
@@ -88,7 +92,11 @@ class MergeView(ft.Column):
                         ft.Row(
                             [
                                 self.pick_zip_button,
-                                ft.Text("可加入多個 ZIP，會依序合併", size=12, color=ft.Colors.GREY_600),
+                                ft.Text(
+                                    "可加入多個 ZIP，會依序合併",
+                                    size=12,
+                                    color=ft.Colors.GREY_600,
+                                ),
                             ],
                             spacing=10,
                         ),
@@ -156,9 +164,9 @@ class MergeView(ft.Column):
     # --------------------------------------------------
     def pick_zips(self, e):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`pick_files`
-        
+
         回傳：None
         """
         self.file_picker.on_result = self._on_zip_picked
@@ -170,9 +178,9 @@ class MergeView(ft.Column):
 
     def _on_zip_picked(self, e: ft.FilePickerResultEvent):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`_refresh_zip_list`
-        
+
         回傳：None
         """
         if not e.files:
@@ -185,9 +193,9 @@ class MergeView(ft.Column):
 
     def _refresh_zip_list(self):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`clear`
-        
+
         回傳：None
         """
         self.zip_list_view.controls.clear()
@@ -209,7 +217,7 @@ class MergeView(ft.Column):
 
     def _remove_zip(self, path: str):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if path in self.selected_zips:
@@ -222,9 +230,9 @@ class MergeView(ft.Column):
     # --------------------------------------------------
     def pick_output_dir(self):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`get_directory_path`
-        
+
         回傳：None
         """
         self.file_picker.on_result = self._on_output_picked
@@ -232,7 +240,7 @@ class MergeView(ft.Column):
 
     def _on_output_picked(self, e: ft.FilePickerResultEvent):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if e.path:
@@ -244,9 +252,9 @@ class MergeView(ft.Column):
     # --------------------------------------------------
     def start_merge(self, e):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`clear`, `_set_status`, `start`
-        
+
         回傳：None
         """
         if not self.selected_zips or not (self.output_dir_field.value or "").strip():
@@ -278,9 +286,9 @@ class MergeView(ft.Column):
     # --------------------------------------------------
     def _start_ui_poller(self):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`clear`, `start`
-        
+
         回傳：None
         """
         self._ui_stop.clear()
@@ -288,7 +296,7 @@ class MergeView(ft.Column):
 
         def poll():
             """處理此函式的工作（細節以程式碼為準）。
-            
+
             回傳：None
             """
             while not self._ui_stop.is_set():
@@ -307,8 +315,10 @@ class MergeView(ft.Column):
                 self.progress_bar.value = progress
 
                 if len(logs) > self._last_log_count:
-                    for line in logs[self._last_log_count:]:
-                        self.log_view.controls.append(ft.Text(line, size=13, color=ft.Colors.GREY_100))
+                    for line in logs[self._last_log_count :]:
+                        self.log_view.controls.append(
+                            ft.Text(line, size=13, color=ft.Colors.GREY_100)
+                        )
                     self._last_log_count = len(logs)
                     self.log_view.scroll_to(offset=-1, duration=100)
 
@@ -328,9 +338,9 @@ class MergeView(ft.Column):
     # --------------------------------------------------
     def _set_status(self, text: str, color: str):
         """設定此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`Text`
-        
+
         回傳：None
         """
         self.status_chip.label = ft.Text(text)
@@ -338,9 +348,9 @@ class MergeView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`SnackBar`
-        
+
         回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)

@@ -80,9 +80,9 @@ def _count_md_pending_docs(root: Path) -> int:
 
 def _log_md_step2_stats(step2_res: Dict[str, Any]) -> None:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`bool`
-    
+
     回傳：None
     """
     if not isinstance(step2_res, dict):
@@ -150,7 +150,7 @@ class _ProgressProxy:
 
     def __init__(self, parent: Any, base: float, span: float):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         self.parent = parent
@@ -159,7 +159,7 @@ class _ProgressProxy:
 
     def set_progress(self, p: float):
         """設定此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if not self.parent or not hasattr(self.parent, "set_progress"):
@@ -183,9 +183,9 @@ def step1_extract(
 ) -> Dict[str, Any]:
     # Step1：抽取 md 區塊並輸出待翻譯 JSON
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`resolve`, `mkdir`
-    
+
     回傳：依函式內 return path。
     """
     in_root = Path(input_dir).resolve()
@@ -341,9 +341,9 @@ def step2_translate(
 ) -> Dict[str, Any]:
     # Step2：待翻譯 JSON -> LM 翻譯後 JSON
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`_ProgressProxy`, `translate_md_pending`, `progress`
-    
+
     回傳：依函式內 return path。
     """
     proxy = _ProgressProxy(session, progress_base, progress_span)
@@ -369,9 +369,9 @@ def step3_inject(
 ) -> Dict[str, Any]:
     # Step3：把翻譯後 JSON 回寫到 md 檔案
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`resolve`
-    
+
     回傳：依函式內 return path。
     """
     src_root = Path(input_dir).resolve()
@@ -564,7 +564,9 @@ def run_md_pipeline(
             )
 
     # 結尾明細（白話摘要）
-    step2_summary = result.get("step2", {}) if isinstance(result.get("step2"), dict) else {}
+    step2_summary = (
+        result.get("step2", {}) if isinstance(result.get("step2"), dict) else {}
+    )
     if step2_summary and not step2_summary.get("skipped"):
         total_blocks = step2_summary.get("total_blocks")
         cache_hit = step2_summary.get("cache_hit")

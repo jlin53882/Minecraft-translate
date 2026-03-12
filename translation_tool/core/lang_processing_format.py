@@ -8,7 +8,7 @@
 import re
 from typing import Callable, Optional, Any, Dict
 import logging
-import opencc # 導入 OpenCC 庫
+import opencc  # 導入 OpenCC 庫
 import orjson as json
 import threading
 
@@ -21,10 +21,11 @@ logger = logging.getLogger(__name__)
 converter = opencc.OpenCC("s2twp")
 
 # 設定哪些語言標籤的程式碼區塊內容是需要翻譯的 (Metadata/文本)
-TRANSLATABLE_CODE_LANGUAGES = {'json', 'yaml', 'text'} 
+TRANSLATABLE_CODE_LANGUAGES = {"json", "yaml", "text"}
 
 # 建立執行緒本地存儲物件
 thread_local = threading.local()
+
 
 def get_converter():
     """私有方法：確保每個執行緒都有自己的 OpenCC 實例"""
@@ -66,14 +67,14 @@ def convert_only_cjk(text: str, rules=None) -> str:
 
     # 定義連續 CJK 字元的正則 (包含基本漢字、擴展區)
     # \u4e00-\u9fa5 是常用區，根據需求可擴大
-    cjk_pattern = re.compile(r'([\u4e00-\u9fff]+)')
+    cjk_pattern = re.compile(r"([\u4e00-\u9fff]+)")
 
     def replacer(match):
         # 抓到的一整串中文字
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`group`, `convert`
-        
+
         回傳：依函式內 return path。
         """
         cjk_chunk = match.group(1)
@@ -89,31 +90,33 @@ def convert_only_cjk(text: str, rules=None) -> str:
 
     return result_text
 
+
 def opencc_markdown_safe(md: str, rules=None) -> str:
     """
     更新後的安全轉換器：可以翻譯特定語言標籤（如 json, yaml）的程式碼區塊內容，
     同時保證不變動任何換行數，格式完全不跑掉。
     """
     # 分割三種區塊：```code block```
-    parts = re.split(r'(```[\s\S]*?```)', md)
+    parts = re.split(r"(```[\s\S]*?```)", md)
 
     output = []
 
     for part in parts:
         if part.startswith("```") and part.endswith("```"):
-            
             # --- Code Block 處理邏輯 ---
-            
+
             # 1. 提取語言標籤 (```json\n...\n``` -> json)
             # 使用 re.match 提取開頭的語言標籤
-            match = re.match(r'```(\w+)', part)
-            lang = match.group(1).lower() if match else ''
+            match = re.match(r"```(\w+)", part)
+            lang = match.group(1).lower() if match else ""
 
             if lang in TRANSLATABLE_CODE_LANGUAGES:
                 # 2. 提取內容
                 # 使用 re.search 提取中間的內容
                 # 假設格式是 ```lang\nCONTENT\n```
-                content_match = re.search(r'```\w+\s*\n([\s\S]*?)\n```', part, re.MULTILINE)
+                content_match = re.search(
+                    r"```\w+\s*\n([\s\S]*?)\n```", part, re.MULTILINE
+                )
                 if content_match:
                     content = content_match.group(1)
                     # 3. 轉換內容
@@ -126,12 +129,12 @@ def opencc_markdown_safe(md: str, rules=None) -> str:
             else:
                 # 非翻譯語言（如 python, java, c++）直接保留
                 output.append(part)
-                
+
             # --- End Code Block 處理 ---
-            
+
         else:
             # 處理此區塊中的 inline code `...`
-            inline_parts = re.split(r'(`[^`]*`)', part)
+            inline_parts = re.split(r"(`[^`]*`)", part)
             for seg in inline_parts:
                 if seg.startswith("`") and seg.endswith("`"):
                     inner = seg[1:-1]
@@ -143,7 +146,10 @@ def opencc_markdown_safe(md: str, rules=None) -> str:
 
     return "".join(output)
 
-def remove_translated_keys(en_dict: Dict[str, Any], tw_dict: Dict[str, Any]) -> Dict[str, Any]:
+
+def remove_translated_keys(
+    en_dict: Dict[str, Any], tw_dict: Dict[str, Any]
+) -> Dict[str, Any]:
     """
     從 en_dict 中移除在 tw_dict 中已經被翻譯（存在且非空白）的 key，
     回傳新的 en_dict（淺拷貝）
@@ -158,7 +164,10 @@ def remove_translated_keys(en_dict: Dict[str, Any], tw_dict: Dict[str, Any]) -> 
             continue
     return result
 
-def compare_and_remove_translated_from_en(en_source: Dict[str, Any], tw_base: Dict[str, Any]) -> Dict[str, Any]:
+
+def compare_and_remove_translated_from_en(
+    en_source: Dict[str, Any], tw_base: Dict[str, Any]
+) -> Dict[str, Any]:
     """
     比較英文來源 (en_source) 和繁體中文基準 (tw_base) 字典，
     並從 en_source 中移除所有 '已翻譯' (即 tw_base 中已存在的) 鍵值。
@@ -176,6 +185,7 @@ def compare_and_remove_translated_from_en(en_source: Dict[str, Any], tw_base: Di
     # 只移除在 tw_base 中已被翻譯的 key
     return remove_translated_keys(en_source, tw_base)
 
+
 def dump_json_bytes(obj: Any) -> bytes:
     """
     將 Python 物件序列化為帶有縮排的 JSON 格式位元組。
@@ -186,7 +196,7 @@ def dump_json_bytes(obj: Any) -> bytes:
     Returns:
         bytes: JSON 格式的位元組資料。
     """
-    # 遵循既有程式風格：使用 orjson 
+    # 遵循既有程式風格：使用 orjson
     # OPT_INDENT_2 選項用於增加 2 個空格的縮排，使 JSON 易讀。
     return json.dumps(obj, option=json.OPT_INDENT_2)
 
@@ -195,8 +205,14 @@ def dump_json_bytes(obj: Any) -> bytes:
 # I. 核心處理函式 (與 lang_merger.py 保持依賴性，需傳入翻譯規則/函式)
 # --------------------------------------------------------------------------
 
+
 # 調整 translate_markdown 函數簽名和邏輯
-def translate_markdown(cn_content: str, translate_func: Callable[[str, Any], str], rules: Any, file_path: str = "") -> str:
+def translate_markdown(
+    cn_content: str,
+    translate_func: Callable[[str, Any], str],
+    rules: Any,
+    file_path: str = "",
+) -> str:
     """
     處理 Markdown：
     - Patchouli Book 的 .md 不經過 Markdown Parser（避免破壞 XML tag）
@@ -214,17 +230,17 @@ def translate_markdown(cn_content: str, translate_func: Callable[[str, Any], str
     # ============================
 
     # 嘗試分離 YAML Front Matter
-    yaml_match = re.match(r'---\s*\n(.*?)\n---\s*\n', cn_content, re.DOTALL)
+    yaml_match = re.match(r"---\s*\n(.*?)\n---\s*\n", cn_content, re.DOTALL)
 
     if yaml_match:
         front_matter_raw = yaml_match.group(1).strip()
-        markdown_body = cn_content[yaml_match.end():]
+        markdown_body = cn_content[yaml_match.end() :]
 
         # 1. 處理 Front Matter (只翻譯 title)
         front_matter_lines = []
-        for line in front_matter_raw.split('\n'):
-            if line.strip().lower().startswith('title:'):
-                parts = line.split(':', 1)
+        for line in front_matter_raw.split("\n"):
+            if line.strip().lower().startswith("title:"):
+                parts = line.split(":", 1)
                 if len(parts) == 2:
                     title_key = parts[0]
                     title_value_cn = parts[1].strip()
@@ -233,7 +249,7 @@ def translate_markdown(cn_content: str, translate_func: Callable[[str, Any], str
                     continue
             front_matter_lines.append(line)
 
-        front_matter_tw = '\n'.join(front_matter_lines)
+        front_matter_tw = "\n".join(front_matter_lines)
 
         # 2. Markdown body 用安全轉換器
         markdown_body_tw = opencc_markdown_safe(markdown_body, rules)
@@ -246,7 +262,12 @@ def translate_markdown(cn_content: str, translate_func: Callable[[str, Any], str
         return opencc_markdown_safe(cn_content)
 
 
-def translate_plain_text(cn_content: str, translate_func: Callable[[str, Any], str], rules: Any,file_path: str) -> str:
+def translate_plain_text(
+    cn_content: str,
+    translate_func: Callable[[str, Any], str],
+    rules: Any,
+    file_path: str,
+) -> str:
     """
     通用純文字處理器：對整個文件內容進行 S2TW 轉換。
     適用於非結構化 JSON (如 JSON/JSON5)、SNBT, .txt, .lang, .hl 檔案。
@@ -263,19 +284,22 @@ def translate_plain_text(cn_content: str, translate_func: Callable[[str, Any], s
 
 # 將文件擴展名映射到對應的處理函式。
 # 所有處理函式都需接受 (cn_content, translate_func, rules) 三個參數。
-TEXT_FILE_PROCESSORS: Dict[str, Callable[[str, Callable[[str, Any], str], Any], str]] = {
+TEXT_FILE_PROCESSORS: Dict[
+    str, Callable[[str, Callable[[str, Any], str], Any], str]
+] = {
     # 結構化內容處理器
-    '.md': translate_markdown,
+    ".md": translate_markdown,
     # 通用純文字處理器 (適用於 JSON 結構、SNBT 或其他鍵值對檔案)
-    '.json': translate_plain_text, 
-    '.json5': translate_plain_text,
-    '.snbt': translate_plain_text,
-    '.txt': translate_plain_text,
-    #'.lang': translate_plain_text,  
-    '.mcmeta': translate_plain_text, # 這裡假設 mcmeta 內容為純文字且需要翻譯
-    '.hl': translate_plain_text,
-    '.gui': translate_plain_text,
+    ".json": translate_plain_text,
+    ".json5": translate_plain_text,
+    ".snbt": translate_plain_text,
+    ".txt": translate_plain_text,
+    #'.lang': translate_plain_text,
+    ".mcmeta": translate_plain_text,  # 這裡假設 mcmeta 內容為純文字且需要翻譯
+    ".hl": translate_plain_text,
+    ".gui": translate_plain_text,
 }
+
 
 def get_text_processor(ext: str) -> Optional[Callable]:
     """根據擴展名獲取對應的文字處理函式。"""

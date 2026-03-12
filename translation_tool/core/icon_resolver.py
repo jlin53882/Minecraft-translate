@@ -9,6 +9,7 @@ from functools import lru_cache
 from .icon_classifier import classify_no_icon_reason
 from .icon_reason import IconResult
 
+
 @lru_cache(maxsize=128)
 def _build_icon_index(mod_textures_root: Path) -> dict[str, Path]:
     """
@@ -61,9 +62,9 @@ def resolve_icon_for_lang_key(lang_key: str, assets_root: Path) -> Path | None:
 
 def resolve_icon_with_reason(lang_key: str, assets_root):
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`resolve_icon_for_lang_key`, `classify_no_icon_reason`, `IconResult`
-    
+
     回傳：依函式內 return path。
     """
     icon = resolve_icon_for_lang_key(lang_key, assets_root)

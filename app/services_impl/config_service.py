@@ -61,11 +61,12 @@ def _save_app_config(config: dict[str, Any]):
 
 # --- 檔案讀寫服務 ---
 
+
 def load_replace_rules():
     """載入此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`load_rules_core`
-    
+
     回傳：依函式內 return path。
     """
     return load_rules_core(REPLACE_RULES_PATH)
@@ -73,9 +74,9 @@ def load_replace_rules():
 
 def save_replace_rules(rules):
     """保存此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`save_rules_core`
-    
+
     回傳：None
     """
     save_rules_core(REPLACE_RULES_PATH, rules)
@@ -83,9 +84,9 @@ def save_replace_rules(rules):
 
 def load_config_json():
     """載入此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`_load_app_config`
-    
+
     回傳：依函式內 return path。
     """
     return _load_app_config()
@@ -93,9 +94,9 @@ def load_config_json():
 
 def save_config_json(config):
     """保存此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`_save_app_config`
-    
+
     回傳：None
     """
     _save_app_config(config)

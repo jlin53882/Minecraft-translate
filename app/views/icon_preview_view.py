@@ -14,6 +14,8 @@ from translation_tool.utils.safe_json_loader import load_json_auto_encoding
 from translation_tool.core.lang_item_row import LangItemRow
 
 import unicodedata
+
+
 def to_halfwidth(text):
     """
     將字串正規化為半形（NFKC）
@@ -24,6 +26,7 @@ def to_halfwidth(text):
         return text
     return unicodedata.normalize("NFKC", text)
 
+
 class IconPreviewView(ft.Column):
     """
     Icon / 翻譯校對 View（模組分層版）
@@ -33,9 +36,9 @@ class IconPreviewView(ft.Column):
 
     def __init__(self, page: ft.Page):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`__init__`, `FilePicker`
-        
+
         回傳：None
         """
         super().__init__(expand=True, spacing=8)
@@ -44,8 +47,8 @@ class IconPreviewView(ft.Column):
         # =========================
         # 使用者選擇的資料夾
         # =========================
-        self.source_root: Path | None = None   # 原文（en_us + textures）
-        self.review_root: Path | None = None   # 校對（zh_tw）
+        self.source_root: Path | None = None  # 原文（en_us + textures）
+        self.review_root: Path | None = None  # 校對（zh_tw）
 
         # =========================
         # 狀態
@@ -68,7 +71,7 @@ class IconPreviewView(ft.Column):
         self.current_page = 0
         self.total_pages = 0
 
-        #設定頁數
+        # 設定頁數
         self.page_info = ft.Text("")
 
         self.prev_page_btn = ft.IconButton(
@@ -95,7 +98,6 @@ class IconPreviewView(ft.Column):
         self.mod_page_size = 50
         self.mod_current_page = 0
         self.mod_total_pages = 0
-
 
         # =========================
         # UI 元件
@@ -148,20 +150,17 @@ class IconPreviewView(ft.Column):
             self.review_label,
             self.load_btn,
             self.save_btn,
-            self.page_bar,     
+            self.page_bar,
             ft.Divider(),
             self.list_view,
         ]
-
-
-
 
     # ==================================================
     # Folder picker callbacks
     # ==================================================
     def _on_pick_source(self, e: ft.FilePickerResultEvent):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if e.path:
@@ -171,7 +170,7 @@ class IconPreviewView(ft.Column):
 
     def _on_pick_review(self, e: ft.FilePickerResultEvent):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if e.path:
@@ -181,7 +180,7 @@ class IconPreviewView(ft.Column):
 
     def _update_load_state(self):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         self.load_btn.disabled = not (self.source_root and self.review_root)
@@ -192,9 +191,9 @@ class IconPreviewView(ft.Column):
     # ==================================================
     def _on_load_clicked(self, e):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`_load_entries`, `defaultdict`, `dict`
-        
+
         回傳：None
         """
         entries = self._load_entries()
@@ -211,9 +210,9 @@ class IconPreviewView(ft.Column):
     # ==================================================
     def _render_mod_list(self):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`sorted`
-        
+
         回傳：None
         """
         self.current_modid = None
@@ -251,19 +250,20 @@ class IconPreviewView(ft.Column):
         self._update_page_bar_for_mods()
         self.update()
 
-
     def _update_page_bar_for_mods(self):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
-        self.page_info.value = f"模組清單｜第 {self.mod_current_page + 1} / {self.mod_total_pages} 頁"
+        self.page_info.value = (
+            f"模組清單｜第 {self.mod_current_page + 1} / {self.mod_total_pages} 頁"
+        )
         self.prev_page_btn.disabled = self.mod_current_page <= 0
         self.next_page_btn.disabled = self.mod_current_page >= self.mod_total_pages - 1
 
     def _prev_page(self, e):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if self.current_modid:
@@ -277,10 +277,9 @@ class IconPreviewView(ft.Column):
                 self.mod_current_page -= 1
                 self._render_mod_list()
 
-
     def _next_page(self, e):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if self.current_modid:
@@ -292,19 +291,18 @@ class IconPreviewView(ft.Column):
                 self.mod_current_page += 1
                 self._render_mod_list()
 
-
     # ==================================================
     # 第二層：單一模組 detail
     # ==================================================
     def _open_mod_detail(self, modid: str):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`list`, `_render_current_page`
-        
+
         回傳：None
         """
         self.current_modid = modid
-        self.current_page = 0   # ⭐ 重設頁碼
+        self.current_page = 0  # ⭐ 重設頁碼
         self.back_btn.visible = True
         self.save_btn.visible = True
         self.header.value = f"📦 {modid}"
@@ -320,12 +318,11 @@ class IconPreviewView(ft.Column):
 
         self._render_current_page()
 
-
     def _go_back(self, e):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`clear`, `_render_mod_list`
-        
+
         回傳：None
         """
         self.current_modid = None
@@ -334,16 +331,14 @@ class IconPreviewView(ft.Column):
         self.list_view.controls.clear()
         self._render_mod_list()
 
-
-
     # ==================================================
     # Row → 回報翻譯變更
     # ==================================================
     def _on_value_changed(self, key: str, value: str):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`to_halfwidth`
-        
+
         回傳：None
         """
         self._zh_data[key] = to_halfwidth(value)
@@ -353,9 +348,9 @@ class IconPreviewView(ft.Column):
     # ==================================================
     def _save_current_zh(self, e):
         """保存此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`mkdir`, `write_text`, `_show_snack`
-        
+
         回傳：None
         """
         if not self._current_zh_file:
@@ -444,19 +439,19 @@ class IconPreviewView(ft.Column):
 
     def _render_current_page(self):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         entries = self.mods.get(self.current_modid, [])
         total = len(entries)
-    
+
         self.total_pages = max(1, (total + self.page_size - 1) // self.page_size)
-    
+
         start = self.current_page * self.page_size
         end = start + self.page_size
-    
+
         self.list_view.controls.clear()
-    
+
         for entry in entries[start:end]:
             self.list_view.controls.append(
                 LangItemRow(
@@ -468,9 +463,11 @@ class IconPreviewView(ft.Column):
                     on_value_changed=self._on_value_changed,
                 )
             )
-    
-        self.page_info.value = f"{self.current_modid}｜第 {self.current_page + 1} / {self.total_pages} 頁"
+
+        self.page_info.value = (
+            f"{self.current_modid}｜第 {self.current_page + 1} / {self.total_pages} 頁"
+        )
         self.prev_page_btn.disabled = self.current_page <= 0
         self.next_page_btn.disabled = self.current_page >= self.total_pages - 1
-    
-        self.update()   
+
+        self.update()

@@ -16,11 +16,16 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple
 import time
 
-from translation_tool.utils.log_unit import log_info, log_warning, log_error,get_formatted_duration,progress
-from translation_tool.core.lm_config_rules import validate_api_keys, value_fully_translated
+from translation_tool.utils.log_unit import (
+    log_info,
+    log_warning,
+    get_formatted_duration,
+    progress,
+)
+from translation_tool.core.lm_config_rules import validate_api_keys
 from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_translator_shared import (
     CacheRule,
@@ -28,43 +33,44 @@ from translation_tool.core.lm_translator_shared import (
     TranslationRecorder,
     fast_split_items_by_cache,
     translate_items_with_cache_loop,
-    write_dry_run_preview,          # ✅ NEW
-    write_cache_hit_preview,        # ✅ 新增：cache hit preview 檔
-    _is_valid_hit                   # ✅ 新增：cache hit 判斷
-
+    write_dry_run_preview,  # ✅ NEW
+    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
+    _is_valid_hit,  # ✅ 新增：cache hit 判斷
 )
-from translation_tool.plugins.shared.lang_text_rules import _strip_fmt, is_already_zh
-
+from translation_tool.plugins.shared.lang_text_rules import is_already_zh
 
 
 # -------------------------
 # basic io
 # -------------------------
 
+
 def read_json(path: Path) -> Dict[str, Any]:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     回傳：依函式內 return path。
     """
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
+
 def write_json(path: Path, data: Dict[str, Any]) -> None:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`mkdir`
-    
+
     回傳：None
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+
 def collect_pending_json_files(pending_root: Path) -> List[Path]:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`sorted`
-    
+
     回傳：依函式內 return path。
     """
     files = sorted(pending_root.rglob("*.json"))
@@ -81,6 +87,7 @@ def collect_pending_json_files(pending_root: Path) -> List[Path]:
 # pending model
 # -------------------------
 
+
 @dataclass
 class PendingItem:
     """PendingItem 類別。
@@ -88,17 +95,19 @@ class PendingItem:
     用途：封裝與 PendingItem 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
+
     id: str
     text: str
     content_hash: str
     start_line: int
     end_line: int
 
+
 def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
     """載入此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`read_json`
-    
+
     回傳：依函式內 return path。
     """
     data = read_json(path)
@@ -107,24 +116,30 @@ def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
 
     items: List[PendingItem] = []
     for it in data.get("items", []):
-        items.append(PendingItem(
-            id=str(it.get("id", "")),
-            text=str(it.get("text", "")),
-            content_hash=str(it.get("content_hash", "")),
-            start_line=int(it.get("start_line", 0) or 0),
-            end_line=int(it.get("end_line", 0) or 0),
-        ))
+        items.append(
+            PendingItem(
+                id=str(it.get("id", "")),
+                text=str(it.get("text", "")),
+                content_hash=str(it.get("content_hash", "")),
+                start_line=int(it.get("start_line", 0) or 0),
+                end_line=int(it.get("end_line", 0) or 0),
+            )
+        )
     return data, items
 
-def compute_out_json_path(src_json: Path, in_pending_root: Path, out_root: Path) -> Path:
+
+def compute_out_json_path(
+    src_json: Path, in_pending_root: Path, out_root: Path
+) -> Path:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`relative_to`
-    
+
     回傳：依函式內 return path。
     """
     rel = src_json.relative_to(in_pending_root)
     return out_root / "LM翻譯後" / rel
+
 
 def translate_md_pending(
     *,
@@ -135,14 +150,13 @@ def translate_md_pending(
     session=None,
 ) -> Dict[str, Any]:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`validate_api_keys`, `perf_counter`, `resolve`
-    
+
     回傳：依函式內 return path。
     """
     validate_api_keys()
-    start_time=time.perf_counter()
-
+    start_time = time.perf_counter()
 
     in_pending_root = Path(pending_dir).resolve()
     out_root = Path(out_dir).resolve()
@@ -188,11 +202,15 @@ def translate_md_pending(
     )
 
     if unique_blocks == 0:
-
         progress(session, 1.0)
         log_info("ℹ️ [MD-LM] 無唯一 blocks（可能全部空白/被過濾），不需翻譯。")
         log_info("總花費時間：%s", get_formatted_duration(start_time))
-        return {"written_files": 0, "total_blocks": total_blocks, "unique_blocks": 0, "duplicate_blocks": dup_blocks}
+        return {
+            "written_files": 0,
+            "total_blocks": total_blocks,
+            "unique_blocks": 0,
+            "duplicate_blocks": dup_blocks,
+        }
 
     # -------------------------
     # 2) 準備 unique items → shared cache split
@@ -206,13 +224,15 @@ def translate_md_pending(
         if is_already_zh(src):
             already_zh_skipped += 1
             continue
-        all_unique_items.append({
-            "cache_type": "md",
-            "file": "md_pending_blocks",
-            "path": h,            # ✅ 用 content_hash 當 path（去重 + 快取 key 的一部分）
-            "source_text": src,
-            "text": src,
-        })
+        all_unique_items.append(
+            {
+                "cache_type": "md",
+                "file": "md_pending_blocks",
+                "path": h,  # ✅ 用 content_hash 當 path（去重 + 快取 key 的一部分）
+                "source_text": src,
+                "text": src,
+            }
+        )
 
     cached_items, items_to_translate = fast_split_items_by_cache(
         all_unique_items,
@@ -225,8 +245,7 @@ def translate_md_pending(
         f"需 AI 翻譯：{len(items_to_translate)} | "
         f"已中文跳過：{already_zh_skipped}"
     )
-    
-    
+
     if dry_run:
         meta = {
             "files": len(json_files),
@@ -290,16 +309,16 @@ def translate_md_pending(
     # md 是「最後一次寫出全部檔案」即可，所以 touched writer 這裡先做 noop
     def _writer(_fid: str) -> None:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         return
 
     def on_translated_item(it: Dict[str, Any]) -> None:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`record`
-        
+
         回傳：None
         """
         h = str(it.get("path") or "")
@@ -322,9 +341,9 @@ def translate_md_pending(
 
     def on_batch_flushed() -> None:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`touch`
-        
+
         回傳：None
         """
         try:
@@ -335,9 +354,9 @@ def translate_md_pending(
 
     def _fmt_eta(sec: float) -> str:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`divmod`
-        
+
         回傳：依函式內 return path。
         """
         if sec <= 0:
@@ -347,9 +366,9 @@ def translate_md_pending(
 
     def on_progress(p: float, msg: str, eta_sec: float) -> None:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`_fmt_eta`, `log_info`, `progress`
-        
+
         回傳：None
         """
         eta_txt = _fmt_eta(eta_sec)
@@ -360,21 +379,28 @@ def translate_md_pending(
         )
         progress(session, p)
 
-
     avg_batch_sec = None
     if items_to_translate:
         res = translate_items_with_cache_loop(
             items_to_translate,
             total_for_smart=len(items_to_translate),
-            translate_batch_smart=lambda batch, total: translate_batch_smart(batch, total=total),
-            write_new_cache=bool(write_new_cache),   # ✅ 這裡會走 add_to_cache('md') + save_translation_cache('md')
+            translate_batch_smart=lambda batch, total: translate_batch_smart(
+                batch, total=total
+            ),
+            write_new_cache=bool(
+                write_new_cache
+            ),  # ✅ 這裡會走 add_to_cache('md') + save_translation_cache('md')
             cache_rules=cache_rules,
             on_translated_item=on_translated_item,
             on_batch_flushed=on_batch_flushed,
             on_progress=on_progress,
         )
-        avg_batch_sec = (res.elapsed_sec / res.completed_calls) if res.completed_calls else None
-        log_info(f"✨ [MD-LM] 翻譯迴圈結束：processed={int(res.processed or 0)} status={res.status}")
+        avg_batch_sec = (
+            (res.elapsed_sec / res.completed_calls) if res.completed_calls else None
+        )
+        log_info(
+            f"✨ [MD-LM] 翻譯迴圈結束：processed={int(res.processed or 0)} status={res.status}"
+        )
         log_info("總花費時間：%s", get_formatted_duration(start_time))
 
     else:
@@ -406,26 +432,30 @@ def translate_md_pending(
                 else:
                     missing += 1
 
-            out_items.append({
-                "id": it.id,
-                "text": new_text,
-                "content_hash": it.content_hash,
-                "start_line": it.start_line,
-                "end_line": it.end_line,
-            })
+            out_items.append(
+                {
+                    "id": it.id,
+                    "text": new_text,
+                    "content_hash": it.content_hash,
+                    "start_line": it.start_line,
+                    "end_line": it.end_line,
+                }
+            )
 
         out_payload = dict(data)
         out_payload["items"] = out_items
         out_payload.setdefault("stats", {})
-        out_payload["stats"].update({
-            "blocks": len(out_items),
-            "total_blocks_global": total_blocks,
-            "unique_blocks_global": unique_blocks,
-            "duplicate_blocks_global": dup_blocks,
-            "cache_hit_global": len(cached_items),
-            "cache_miss_global": len(items_to_translate),
-            "already_zh_skipped_global": already_zh_skipped,
-        })
+        out_payload["stats"].update(
+            {
+                "blocks": len(out_items),
+                "total_blocks_global": total_blocks,
+                "unique_blocks_global": unique_blocks,
+                "duplicate_blocks_global": dup_blocks,
+                "cache_hit_global": len(cached_items),
+                "cache_miss_global": len(items_to_translate),
+                "already_zh_skipped_global": already_zh_skipped,
+            }
+        )
 
         out_path = compute_out_json_path(jp, in_pending_root, out_root)
         write_json(out_path, out_payload)
@@ -464,9 +494,9 @@ def translate_md_pending(
 
 def main():
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`log_info`, `strip`
-    
+
     回傳：None
     """
     log_info("=== MD Pending Blocks -> LM 翻譯（md cache 全接 + content_hash 去重）===")
@@ -481,7 +511,7 @@ def main():
     dry = input("> ").strip().lower() == "y"
 
     log_info("寫入快取分片? (Y/n)")
-    write_cache = (input("> ").strip().lower() != "n")
+    write_cache = input("> ").strip().lower() != "n"
 
     res = translate_md_pending(
         pending_dir=pending_dir,
@@ -494,7 +524,6 @@ def main():
     log_info("=== 結果 ===")
     for k, v in res.items():
         log_info("%s: %s", k, v)
-
 
 
 if __name__ == "__main__":

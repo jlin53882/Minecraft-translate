@@ -22,9 +22,9 @@ def call_gemini_requests(
     temperature: float,
 ) -> str:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`post`, `json`
-    
+
     回傳：依函式內 return path。
     """
     url = (
@@ -71,4 +71,6 @@ def call_gemini_requests(
     try:
         return result["candidates"][0]["content"]["parts"][0]["text"]
     except Exception:
-        raise RuntimeError(f"Gemini 回傳格式異常: {json.dumps(result, ensure_ascii=False)}")
+        raise RuntimeError(
+            f"Gemini 回傳格式異常: {json.dumps(result, ensure_ascii=False)}"
+        )

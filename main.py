@@ -53,9 +53,9 @@ def main(page: ft.Page):
     # 這個函式只負責組裝 Flet UI 與頁面切換邏輯；
     # runtime 初始化、logging 設定等啟動責任都留在 bootstrap_runtime()。
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`Theme`, `FilePicker`
-    
+
     回傳：None
     """
     page.title = "Minecraft 模組包繁體化工具"
@@ -110,7 +110,7 @@ def main(page: ft.Page):
 
     def resize_window_for_view(selected_index: int):
         """調整此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         width, height = view_window_sizes.get(selected_index, (1280, 960))
@@ -126,9 +126,9 @@ def main(page: ft.Page):
 
     def change_view(e):
         """切換此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`resize_window_for_view`
-        
+
         回傳：None
         """
         selected_index = e.control.selected_index
@@ -139,7 +139,7 @@ def main(page: ft.Page):
 
     def toggle_theme_mode(e):
         """切換此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         is_light = page.theme_mode == ft.ThemeMode.LIGHT
@@ -170,7 +170,9 @@ def main(page: ft.Page):
         leading=ft.Container(
             content=ft.IconButton(
                 ft.Icons.MENU,
-                on_click=lambda _: setattr(rail, "extended", not rail.extended) or page.update(),
+                on_click=lambda _: (
+                    setattr(rail, "extended", not rail.extended) or page.update()
+                ),
                 tooltip="收合/展開選單",
             ),
             margin=ft.margin.only(bottom=10),
@@ -198,9 +200,9 @@ def main(page: ft.Page):
     def _rebuild_index_on_startup():
         # 索引重建放背景執行，避免主畫面啟動時被 I/O 卡住。
         """重建此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`cache_rebuild_index_service`
-        
+
         回傳：None
         """
         try:

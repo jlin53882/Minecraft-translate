@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def run_bundling_service(input_root_dir: str, output_zip_path: str):
     """執行此 generator 並逐步回報進度（yield update dict）。
-    
+
     - 主要包裝：`bundle_outputs_generator`
     """
     try:

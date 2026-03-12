@@ -93,7 +93,7 @@ def cache_search_service(
 
                 def _rank(text: str) -> int:
                     """計算搜尋排序用的 rank（越小代表越符合 query）。
-                    
+
                     規則（case-insensitive）：
                     - 0：text 完全等於 query
                     - 1：text 以 query 開頭（prefix match）
@@ -138,7 +138,7 @@ def cache_search_service(
 
     def _rank(text: str) -> int:
         """計算搜尋排序用的 rank（越小代表越符合 query）。
-        
+
         規則（case-insensitive）：
         - 0：text 完全等於 query
         - 1：text 以 query 開頭（prefix match）
@@ -223,7 +223,10 @@ def cache_rebuild_index_service() -> Dict[str, Any]:
     try:
         cache_manager.rebuild_search_index()
 
-        total = sum(len(cache_manager.get_cache_dict_ref(ct)) for ct in cache_manager.CACHE_TYPES)
+        total = sum(
+            len(cache_manager.get_cache_dict_ref(ct))
+            for ct in cache_manager.CACHE_TYPES
+        )
 
         return {
             "success": True,

@@ -26,15 +26,16 @@ class TaskSession:
     這樣做的目的不是把所有事情都塞進 session，
     而是把跨執行緒共享的狀態收斂到單一地方，降低 race condition 與散落旗標的維護成本。
     """
+
     def __init__(self, max_logs: int = 300):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`deque`, `Lock`
-        
+
         回傳：None
         """
         self.progress: float = 0.0
-        self.status: str = "IDLE"   # IDLE / RUNNING / DONE / ERROR
+        self.status: str = "IDLE"  # IDLE / RUNNING / DONE / ERROR
         self.error: bool = False
 
         self.logs = deque(maxlen=max_logs)
@@ -53,7 +54,7 @@ class TaskSession:
 
     def add_log(self, text: str):
         """加入此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if not text:
@@ -63,7 +64,7 @@ class TaskSession:
 
     def set_error(self):
         """設定此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         with self._lock:
@@ -72,7 +73,7 @@ class TaskSession:
 
     def finish(self):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         with self._lock:
@@ -81,7 +82,7 @@ class TaskSession:
 
     def start(self):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         with self._lock:

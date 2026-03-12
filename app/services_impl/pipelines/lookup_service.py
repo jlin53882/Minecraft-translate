@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 
 def run_manual_lookup_service(name: str) -> str:
     """執行此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`lookup_species_name`
-    
+
     回傳：依函式內 return path。
     """
     if not is_potential_species_name(name):
@@ -33,7 +33,7 @@ def run_manual_lookup_service(name: str) -> str:
 
 def run_batch_lookup_service(json_text: str):
     """執行此 generator 並逐步回報進度（yield update dict）。
-    
+
     - 主要包裝：`loads`
     """
     try:
@@ -59,7 +59,10 @@ def run_batch_lookup_service(json_text: str):
                 results[name] = "格式錯誤"
 
             update = GLOBAL_LOG_LIMITER.filter(
-                {"log": f"({i + 1}/{total}) 已查詢: {name}", "progress": (i + 1) / total}
+                {
+                    "log": f"({i + 1}/{total}) 已查詢: {name}",
+                    "progress": (i + 1) / total,
+                }
             )
             if update is not None:
                 yield update

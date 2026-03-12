@@ -16,9 +16,9 @@ import orjson as json
 
 def load_shard_file(path: Path) -> dict[str, Any]:
     """載入此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`loads`
-    
+
     回傳：依函式內 return path。
     """
     try:
@@ -38,9 +38,9 @@ def load_cache_type(
     logger: logging.Logger,
 ) -> None:
     """載入此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`mkdir`, `sorted`, `info`
-    
+
     回傳：None
     """
     if cache_type not in translation_cache:
@@ -66,4 +66,6 @@ def load_cache_type(
             loaded_count += len(data)
 
     translation_cache[cache_type] = temp_cache
-    logger.info(f"🚀 高速載入完成：{cache_type} 共 {loaded_count} 條翻譯 (分片數: {len(json_files)})")
+    logger.info(
+        f"🚀 高速載入完成：{cache_type} 共 {loaded_count} 條翻譯 (分片數: {len(json_files)})"
+    )

@@ -8,16 +8,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from translation_tool.core.lm_config_rules import is_translatable_field, is_value_translatable
+from translation_tool.core.lm_config_rules import (
+    is_translatable_field,
+    is_value_translatable,
+)
 from translation_tool.utils.config_manager import load_config
 
 
 def find_patchouli_json(root: Path, dir_names=None):
     """找出此函式的工作（細節以程式碼為準）。
-    
+
     回傳：依函式內 return path。
     """
-    patchouli_dir_names = load_config().get("lm_translator", {}).get("patchouli", {}).get("dir_names", [])
+    patchouli_dir_names = (
+        load_config().get("lm_translator", {}).get("patchouli", {}).get("dir_names", [])
+    )
     if dir_names is None:
         dir_names = patchouli_dir_names
 
@@ -31,9 +36,9 @@ def find_patchouli_json(root: Path, dir_names=None):
 
 def find_lang_json(root: Path):
     """找出此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`list`
-    
+
     回傳：依函式內 return path。
     """
     return list(root.rglob("assets/*/lang/*.json"))
@@ -41,7 +46,7 @@ def find_lang_json(root: Path):
 
 def is_lang_file(file_path: Path) -> bool:
     """判斷此函式的工作（細節以程式碼為準）。
-    
+
     回傳：依函式內 return path。
     """
     return "lang" in file_path.parts
@@ -49,9 +54,9 @@ def is_lang_file(file_path: Path) -> bool:
 
 def extract_translatables(json_data, file_path):
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`is_lang_file`, `walk`
-    
+
     回傳：依函式內 return path。
     """
     items = []
@@ -59,7 +64,7 @@ def extract_translatables(json_data, file_path):
 
     def walk(obj, base_path=""):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if isinstance(obj, dict):

@@ -8,14 +8,13 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Iterable
 
 
 def safe_json_loads(text: str):
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`strip`, `findall`
-    
+
     回傳：依函式內 return path。
     """
     text = text.strip()
@@ -41,7 +40,6 @@ def safe_json_loads(text: str):
 
 
 def chunked(lst, size):
-    """處理此 generator 並逐步回報進度（yield update dict）。
-    """
+    """處理此 generator 並逐步回報進度（yield update dict）。"""
     for i in range(0, len(lst), size):
-        yield lst[i:i + size]
+        yield lst[i : i + size]

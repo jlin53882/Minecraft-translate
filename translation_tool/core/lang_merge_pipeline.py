@@ -16,35 +16,40 @@ import orjson as json
 
 from ..utils.text_processor import apply_replace_rules, recursive_translate_dict
 from .lang_codec import dump_lang_text, parse_lang_text, pick_first_not_none
-from .lang_merge_zip_io import _read_json_from_zip, _read_text_from_zip, _write_bytes_atomic, _write_text_atomic, quarantine_copy_from_zip
+from .lang_merge_zip_io import (
+    _read_json_from_zip,
+    _read_text_from_zip,
+    _write_bytes_atomic,
+    _write_text_atomic,
+    quarantine_copy_from_zip,
+)
 from .lang_processing_format import dump_json_bytes
 
 logger = logging.getLogger(__name__)
+
 
 def _process_single_mod(
     zf: zipfile.ZipFile,
     paths: Dict[str, str],
     rules: list,
     output_dir: str,
-    must_translate_dir: str
+    must_translate_dir: str,
 ) -> Dict[str, Any]:
-
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`compile`
-    
+
     回傳：依函式內 return path。
     """
     CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 
-    #def contains_cjk(s: str) -> bool:
+    # def contains_cjk(s: str) -> bool:
     #    """是否包含任意 CJK（中文/日文/韓文）"""
     #    return isinstance(s, str) and CJK_RE.search(s) is not None
-#
-    #def is_pure_english(s: str) -> bool:
+    #
+    # def is_pure_english(s: str) -> bool:
     #    """判斷是否為純英文（不包含 CJK）"""
     #    return isinstance(s, str) and not contains_cjk(s)
-
 
     def contains_cjk(v: Any) -> bool:
         """是否包含任意 CJK（支援 str / list / dict 遞迴）"""
@@ -76,11 +81,9 @@ def _process_single_mod(
             return False
         return not contains_cjk(v)
 
-
-
     def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：依函式內 return path。
         """
         path = paths.get(lang_key)
@@ -95,7 +98,7 @@ def _process_single_mod(
 
                 def on_error(line_no, raw, reason):
                     """處理此函式的工作（細節以程式碼為準）。
-                    
+
                     回傳：None
                     """
                     bad_lines.append((line_no, raw, reason))
@@ -109,9 +112,9 @@ def _process_single_mod(
                         output_dir=output_dir,
                         reason="lang_partial_parse_error",
                         extra_text="\n".join(
-                            f"[line {n}] {r}: {l}"
-                            for n, l, r in bad_lines
-                        )
+                            f"[line {n}] {reason}: {raw}"
+                            for n, raw, reason in bad_lines
+                        ),
                     )
 
                 return data
@@ -125,29 +128,28 @@ def _process_single_mod(
                 zf=zf,
                 zip_path=path,
                 output_dir=output_dir,
-                reason=f"lang_json_parse_failed: {e}"
+                reason=f"lang_json_parse_failed: {e}",
             )
             return {}
 
-
     try:
-        #=============================
+        # =============================
         # 基本資訊
-        #=============================
+        # =============================
         mod_key = paths.get("zh_cn") or paths.get("zh_tw") or paths.get("en_us")
         mod_name = mod_key.split("/lang/")[0].split("/")[-1]
         log_prefix = f"處理語言模組 '{mod_name}': "
 
-        #=============================
+        # =============================
         # Step 1 — 讀取所有來源
-        #=============================
+        # =============================
         cn_data = _safe_read_lang_json("zh_cn")
         tw_src_data = _safe_read_lang_json("zh_tw")
         en_data = _safe_read_lang_json("en_us")
 
-        #=============================
+        # =============================
         # Step 2 — 決定輸出路徑
-        #=============================
+        # =============================
         base_path_hint = paths.get("zh_cn") or paths.get("zh_tw") or paths.get("en_us")
         if "/lang/" in base_path_hint:
             relative_tw_path = base_path_hint.split("/lang/")[0] + "/lang/zh_tw.json"
@@ -157,22 +159,22 @@ def _process_single_mod(
         final_output_path = os.path.join(output_dir, relative_tw_path)
         target_has_tw = os.path.exists(final_output_path)
 
-        #=============================
+        # =============================
         # Step 3 — 建立 final_tw
-        #=============================
+        # =============================
         # 第一優先：已存在 output zh_tw.json
         if target_has_tw:
             try:
                 with open(final_output_path, "rb") as f:
                     final_tw = json.loads(f.read())
-            except:
+            except Exception:
                 final_tw = {}
         else:
             final_tw = {}
 
-        #=============================
+        # =============================
         # Step 4 — 逐條判斷合併來源（重點修改）
-        #=============================
+        # =============================
         pending = {}
 
         # 所有 key 的集合
@@ -180,7 +182,7 @@ def _process_single_mod(
 
         for key in all_keys:
             # 1. 若 final_tw 已有人工翻譯（含 CJK），不覆蓋
-            #if key in final_tw and contains_cjk(final_tw[key]):
+            # if key in final_tw and contains_cjk(final_tw[key]):
             #    continue
 
             # -----------------------------
@@ -190,8 +192,7 @@ def _process_single_mod(
             # 外部 zip 內的 zh_tw（tw_src_data）仍允許再處理（套規則）
 
             is_from_output_dir = (
-                key in final_tw
-                and target_has_tw          # 代表 output_dir 已存在 zh_tw.json
+                key in final_tw and target_has_tw  # 代表 output_dir 已存在 zh_tw.json
             )
 
             if is_from_output_dir and contains_cjk(final_tw.get(key, "")):
@@ -203,7 +204,7 @@ def _process_single_mod(
             en_val = en_data.get(key)
 
             # 2. zh_tw（ZIP）若含中文 → 優先使用
-            #if contains_cjk(tw_val):
+            # if contains_cjk(tw_val):
             #    #final_tw[key] = tw_val # 直接使用 ZIP 內的 zh_tw
             #    final_tw[key] = apply_replace_rules(tw_val, rules) # 進行規則處理
             #    continue
@@ -221,18 +222,18 @@ def _process_single_mod(
                 continue
 
             # 4. zh_tw 與 zh_cn 皆為英文 → 視為未翻完，寫入 pending
-            #english_source = en_val or cn_val or tw_val
+            # english_source = en_val or cn_val or tw_val
             english_source = pick_first_not_none(en_val, cn_val, tw_val)
             if english_source is None:
                 english_source = ""
-            
+
             # -----------------------------
             # 過濾空字串（來源本來就是 ""）
             # -----------------------------
             if isinstance(english_source, str) and english_source.strip() == "":
                 # 空字串不是待翻譯內容，直接跳過
-                continue            
-                
+                continue
+
             if is_pure_english(english_source):
                 pending[key] = english_source
                 continue
@@ -242,9 +243,9 @@ def _process_single_mod(
                 english_source = ""
             final_tw.setdefault(key, english_source)
 
-        #=============================
+        # =============================
         # Step 5 — 寫入 pending.json
-        #=============================
+        # =============================
         pending_rel = relative_tw_path.replace("zh_tw.json", "en_us.json")
         pending_path = os.path.join(must_translate_dir, pending_rel)
         os.makedirs(os.path.dirname(pending_path), exist_ok=True)
@@ -259,16 +260,16 @@ def _process_single_mod(
                 os.remove(pending_path)
             pending_count = 0
 
-        #=============================
+        # =============================
         # Step 6 — 輸出 zh_tw.json
-        #=============================
+        # =============================
 
-        #if final_tw:
+        # if final_tw:
         #    # ⭐⭐ 新增：讓 key 按英文字母排序 ⭐⭐
         #    final_tw = dict(sorted(final_tw.items(), key=lambda item: item[0]))
         #    os.makedirs(os.path.dirname(final_output_path), exist_ok=True)
         #    _write_bytes_atomic(final_output_path, dump_json_bytes(final_tw))
-                
+
         if final_tw:
             # 是否為 lang 格式（依原始檔案）
             is_lang_format = base_path_hint.lower().endswith(".lang")
@@ -294,14 +295,14 @@ def _process_single_mod(
         logger.info(f"{log_prefix}完成，pending 條目: {pending_count}")
         return {
             "success": True,
-            #"log": f"{log_prefix}完成，pending 條目: {pending_count}",
-            "pending_count": pending_count
+            # "log": f"{log_prefix}完成，pending 條目: {pending_count}",
+            "pending_count": pending_count,
         }
 
     except Exception as exc:
         logger.exception(f"{log_prefix}處理失敗: {exc}")
         return {
             "success": False,
-            #"log": f"{log_prefix}處理失敗: {exc}",
-            "error": True
+            # "log": f"{log_prefix}處理失敗: {exc}",
+            "error": True,
         }

@@ -12,36 +12,38 @@ import logging
 import re
 from typing import List, Dict, Any
 from opencc import OpenCC
-# 從 config_manager 導入我們已經載入好的全域 config
-from .config_manager import config, resolve_project_path
 
+# 從 config_manager 導入我們已經載入好的全域 config
+from .config_manager import resolve_project_path
+
+import threading
 
 logger = logging.getLogger(__name__)
 
-# ✅ 修改後：執行緒安全 (Thread-Safe)
-import threading
-
 _thread_local = threading.local()
-_CJK_PATTERN = re.compile(r'([\u4e00-\u9fff]+)')
+_CJK_PATTERN = re.compile(r"([\u4e00-\u9fff]+)")
+
 
 def get_converter():
     """獲取當前執行緒專用的 OpenCC 實例"""
     if not hasattr(_thread_local, "converter"):
-        _thread_local.converter = OpenCC('s2twp')
+        _thread_local.converter = OpenCC("s2twp")
     return _thread_local.converter
 
+
 # =========================
-# replace rules 快取 
+# replace rules 快取
 # =========================
-_LITERAL_RULES = None   # List[Tuple[str, str]]
-_REGEX_RULES = None     # List[Tuple[re.Pattern, str]]
-_RULE_KEYWORDS = None   # set[str]
+_LITERAL_RULES = None  # List[Tuple[str, str]]
+_REGEX_RULES = None  # List[Tuple[re.Pattern, str]]
+_RULE_KEYWORDS = None  # set[str]
+
 
 def _init_replace_rules_cache(rules: List[Dict[str, str]]):
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`set`, `sort`
-    
+
     回傳：None
     """
     global _LITERAL_RULES, _REGEX_RULES, _RULE_KEYWORDS
@@ -86,6 +88,7 @@ def _init_replace_rules_cache(rules: List[Dict[str, str]]):
     _LITERAL_RULES = literal_rules
     _REGEX_RULES = regex_rules
     _RULE_KEYWORDS = keywords
+
 
 def apply_replace_rules(text: str, rules: List[Dict[str, str]]) -> str:
     """應用替換規則到給定的文字（舊介面，加速版）"""
@@ -183,10 +186,11 @@ def save_replace_rules(path: str, rules: List[Dict[str, str]]):
     try:
         resolved_path.parent.mkdir(parents=True, exist_ok=True)
         with resolved_path.open("wb") as f:
-            f.write(orjson.dumps(
-                rules,
-                option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE
-            ))
+            f.write(
+                orjson.dumps(
+                    rules, option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE
+                )
+            )
     except Exception as e:
         logger.error("儲存替換規則到 %s 失敗: %s", resolved_path, e)
 
@@ -200,26 +204,31 @@ def load_custom_translations(folder_path: str, filename="table.tsv") -> Dict[str
         return custom_map
     try:
         import pandas as pd
-        df = pd.read_csv(file_path, sep='\t', header=None, names=['source', 'translation'])
+
+        df = pd.read_csv(
+            file_path, sep="\t", header=None, names=["source", "translation"]
+        )
         for _, row in df.iterrows():
-            if pd.notna(row['source']) and pd.notna(row['translation']):
-                custom_map[str(row['source'])] = str(row['translation'])
+            if pd.notna(row["source"]) and pd.notna(row["translation"]):
+                custom_map[str(row["source"])] = str(row["translation"])
         logger.info(f"成功從 {file_path} 載入 {len(custom_map)} 條自訂翻譯。")
     except Exception as e:
         logger.error(f"讀取自訂翻譯檔 {file_path} 失敗: {e}")
     return custom_map
 
+
 def safe_convert_text(text: str) -> str:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`get_converter`, `sub`
-    
+
     回傳：依函式內 return path。
     """
     if not text:
         return text
     conv = get_converter()
     return _CJK_PATTERN.sub(lambda m: conv.convert(m.group(1)), text)
+
 
 def convert_text(text: str, rules: List[Dict[str, str]] | None = None) -> str:
     """
@@ -236,7 +245,10 @@ def convert_text(text: str, rules: List[Dict[str, str]] | None = None) -> str:
         out = apply_replace_rules(out, rules)
     return out
 
-def convert_snbt_file_inplace(path: str, rules: List[Dict[str, str]] | None = None) -> bool:
+
+def convert_snbt_file_inplace(
+    path: str, rules: List[Dict[str, str]] | None = None
+) -> bool:
     """
     就地轉換單一 .snbt（或任何純文字檔）內容。
     回傳：是否有變更。
@@ -255,7 +267,9 @@ def convert_snbt_file_inplace(path: str, rules: List[Dict[str, str]] | None = No
         return False
 
 
-def convert_snbt_tree_inplace(root_dir: str, rules: List[Dict[str, str]] | None = None) -> int:
+def convert_snbt_tree_inplace(
+    root_dir: str, rules: List[Dict[str, str]] | None = None
+) -> int:
     """
     遞迴掃描資料夾，把所有 .snbt 就地轉繁（CJK-only + rules）。
     回傳：有變更的檔案數。
@@ -270,6 +284,7 @@ def convert_snbt_tree_inplace(root_dir: str, rules: List[Dict[str, str]] | None 
                     changed += 1
     return changed
 
+
 def recursive_translate_dict(data: Any, rules: List[Dict[str, str]]) -> Any:
     """
     (僅用於簡轉繁) 遞迴地對一個字典或列表中的所有字串值進行 OpenCC 轉換和規則替換。
@@ -282,7 +297,10 @@ def recursive_translate_dict(data: Any, rules: List[Dict[str, str]]) -> Any:
         return apply_replace_rules(safe_convert_text(data), rules)
     return data
 
-def recursive_translate(data: Any, rules: List[Dict[str, str]], custom_translations: Dict[str, str]) -> Any:
+
+def recursive_translate(
+    data: Any, rules: List[Dict[str, str]], custom_translations: Dict[str, str]
+) -> Any:
     """
     修改點：
     1. 移除 converter 參數 (不需要再從外部傳入)
@@ -313,6 +331,7 @@ def recursive_translate(data: Any, rules: List[Dict[str, str]], custom_translati
     else:
         return data
 
+
 def orjson_dump_file(obj, fp, *, indent2: bool = True, newline: bool = True):
     """
     用 orjson 寫入檔案物件 fp。
@@ -332,13 +351,12 @@ def orjson_dump_file(obj, fp, *, indent2: bool = True, newline: bool = True):
 def orjson_pretty_str(obj) -> str:
     """
     orjson_pretty_str 的 Docstring
-    
+
     :param obj: 說明
     :return: 說明
     :rtype: str
     """
 
     return orjson.dumps(
-        obj,
-        option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE
+        obj, option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE
     ).decode("utf-8")

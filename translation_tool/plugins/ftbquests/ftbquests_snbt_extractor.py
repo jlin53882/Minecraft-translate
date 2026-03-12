@@ -13,12 +13,11 @@ import ftb_snbt_lib as snbt
 
 from ftb_snbt_lib.tag import Compound, List
 
-from translation_tool.utils.log_unit import( 
-    log_info, 
-    log_error, 
-    log_warning, 
-    log_debug, 
-    )
+from translation_tool.utils.log_unit import (
+    log_info,
+    log_error,
+    log_warning,
+)
 
 # =========================
 # 語系設定
@@ -33,9 +32,9 @@ LANG_KEY_SUFFIX = (".title", ".quest_desc")
 def is_lang_key_ref(val: str):
     # 遇到 {ftbquests.xxx} 這種語言 reference 直接跳過
     """判斷此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`bool`
-    
+
     回傳：依函式內 return path。
     """
     return bool(re.match(r"^\{ftbquests\.", val))
@@ -54,10 +53,12 @@ def is_lang_key_ref_like(val: str) -> bool:
         return False
     return bool(re.fullmatch(r"\{[^{}]+\}(?:\n\{[^{}]+\})*", s))
 
+
 TAG_CONDITION_PATTERN = re.compile(
     r"^\s*(any\s+of|any|all|no)\s*#",
     re.IGNORECASE,
 )
+
 
 def is_tag_condition_text(s: str) -> bool:
     """
@@ -67,6 +68,7 @@ def is_tag_condition_text(s: str) -> bool:
     - All #forge:ores
     """
     return bool(TAG_CONDITION_PATTERN.match(s))
+
 
 def walk_snbt_file(path: str) -> Compound | None:
     """讀取 SNBT 檔案"""
@@ -78,22 +80,20 @@ def walk_snbt_file(path: str) -> Compound | None:
         return None
 
 
-
 # =========================
 # lang/*.snbt 抽取
 # =========================
 def extract_lang_file(filename: str, root: Compound) -> dict:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`items`
-    
+
     回傳：依函式內 return path。
     """
     out = {}
 
     for key, val in root.items():
         if any(key.endswith(s) for s in LANG_KEY_SUFFIX):
-
             if isinstance(val, snbt.String):
                 raw = str(val)
                 if (
@@ -107,31 +107,32 @@ def extract_lang_file(filename: str, root: Compound) -> dict:
             elif isinstance(val, List):
                 texts = []
                 for e in val:
-                        if isinstance(e, snbt.String):
-                            s = str(e)
-                            if s and not is_lang_key_ref(s) and not is_lang_key_ref_like(s):
-                                texts.append(s)
+                    if isinstance(e, snbt.String):
+                        s = str(e)
+                        if s and not is_lang_key_ref(s) and not is_lang_key_ref_like(s):
+                            texts.append(s)
 
                 if texts:
                     out[f"{filename}|{key}"] = "\n".join(texts)
 
     return out
 
+
 # =========================
 # quest 本體抽取（title）
 # =========================
 def extract_quest_file(filename: str, root: Compound) -> dict:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`recurse`
-    
+
     回傳：依函式內 return path。
     """
     out = {}
 
     def _emit(obj: Compound, field: str, kind: str):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         val = obj.get(field)
@@ -162,7 +163,7 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
 
         if not text:
             return
-        
+
         # ✅ 新增：Tag 條件字串不抽取（避免翻譯破壞）
         if is_tag_condition_text(text):
             return
@@ -177,7 +178,7 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
 
     def recurse(obj, path):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if isinstance(obj, Compound):
@@ -199,10 +200,9 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
     return out
 
 
-
 def ensure_lang(store: dict, lang: str):
     """確保此函式的工作（細節以程式碼為準）。
-    
+
     回傳：None
     """
     if lang not in store:
@@ -214,9 +214,9 @@ def ensure_lang(store: dict, lang: str):
 # =========================
 def process_quest_folder(quests_root: str) -> dict:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`join`, `set`, `walk`
-    
+
     回傳：依函式內 return path。
     """
     final_output = {}
@@ -239,7 +239,7 @@ def process_quest_folder(quests_root: str) -> dict:
     # ---------
     # 決定實際處理語系
     # ---------
-    hit_whitelist = [l for l in LANG_WHITELIST if l in available_langs]
+    hit_whitelist = [lang for lang in LANG_WHITELIST if lang in available_langs]
 
     if hit_whitelist:
         target_langs = hit_whitelist
@@ -250,12 +250,12 @@ def process_quest_folder(quests_root: str) -> dict:
         if not target_langs:
             # ✅ lang 目錄不存在或掃不到任何語系：仍需至少用 en_us 承載 quest 本體抽取結果
             target_langs = ["en_us"]
-            log_warning(f"⚠️ 未掃到任何語系（lang 目錄不存在或為空），fallback 使用: {target_langs}")
+            log_warning(
+                f"⚠️ 未掃到任何語系（lang 目錄不存在或為空），fallback 使用: {target_langs}"
+            )
         else:
             # ✅ 沒命中白名單：改為處理全部掃到的語系（可能包含 ru_ru、ja_jp 等）
             log_warning(f"⚠️ 未命中白名單，使用全部語系: {target_langs}")
-
-
 
     # ---------
     # 1. 解析 lang/*.snbt
@@ -315,8 +315,8 @@ def process_quest_folder(quests_root: str) -> dict:
                 continue
 
             extracted = extract_quest_file(file, data)
-            #rel_path = os.path.relpath(fp, quests_root).replace("\\", "/")
-            #extracted = extract_quest_file(rel_path, data)
+            # rel_path = os.path.relpath(fp, quests_root).replace("\\", "/")
+            # extracted = extract_quest_file(rel_path, data)
 
             for lang in target_langs:
                 ensure_lang(final_output, lang)
@@ -365,10 +365,11 @@ if __name__ == "__main__":
         with open(os.path.join(lang_dir, "ftb_lang.json"), "w", encoding="utf-8") as f:
             json.dump(data["lang"], f, indent=2, ensure_ascii=False)
 
-        with open(os.path.join(lang_dir, "ftb_quests.json"), "w", encoding="utf-8") as f:
+        with open(
+            os.path.join(lang_dir, "ftb_quests.json"), "w", encoding="utf-8"
+        ) as f:
             json.dump(data["quests"], f, indent=2, ensure_ascii=False)
 
     # ✅ 成功訊息：info
     log_info("✅ 抽取完成")
     log_info(f"📤 輸出位置: {output_root}")
-

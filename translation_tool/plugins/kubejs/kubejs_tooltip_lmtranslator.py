@@ -1,5 +1,5 @@
 # kubejs_tooltip_lmtranslator.py
-#---------------------------------
+# ---------------------------------
 """
 核心功能概覽
 智慧批量翻譯 (translate_batch_smart)：利用快取機制優化翻譯流程，避免重複翻譯相同的文字，節省 API 消耗。
@@ -17,14 +17,13 @@
 
 from __future__ import annotations
 
-import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from translation_tool.core.lm_translator_main import translate_batch_smart
-from translation_tool.core.lm_config_rules import validate_api_keys, value_fully_translated
+from translation_tool.core.lm_config_rules import validate_api_keys
 from translation_tool.utils.config_manager import load_config
 
 from translation_tool.core.lm_translator_shared import (
@@ -34,9 +33,8 @@ from translation_tool.core.lm_translator_shared import (
     TouchSet,
     TranslationRecorder,
     write_dry_run_preview,
-    write_cache_hit_preview,              # ✅ 新增：cache hit preview 檔
-    _is_valid_hit                         # ✅ 新增：cache hit 判斷
-
+    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
+    _is_valid_hit,  # ✅ 新增：cache hit 判斷
 )
 
 from translation_tool.plugins.shared.json_io import (
@@ -45,19 +43,10 @@ from translation_tool.plugins.shared.json_io import (
     collect_json_files,
 )
 from translation_tool.plugins.shared.lang_path_rules import (
-    should_rename_to_zh_tw,
-    is_lang_code_segment,
-    replace_lang_folder_with_zh_tw,
     compute_output_path,
 )
 
-from translation_tool.utils.log_unit import( 
-    log_info, 
-    log_error, 
-    log_warning, 
-    log_debug, 
-    progress
-    )
+from translation_tool.utils.log_unit import log_info, log_warning, progress
 
 
 # -------------------------
@@ -80,7 +69,7 @@ def collect_items_from_mapping(
             continue
         items.append(
             {
-                "file": file_hint,   # important for smart profile detection
+                "file": file_hint,  # important for smart profile detection
                 "path": k,
                 "source_text": v,
                 "text": v,
@@ -88,6 +77,18 @@ def collect_items_from_mapping(
             }
         )
     return items
+
+
+def count_translatable_keys(mapping: Dict[str, Any]) -> int:
+    """計算 mapping 中『可翻譯字串』的數量。
+
+    判斷條件：
+    - value 是字串
+    - 去除空白後仍有內容
+
+    用途：顯示進度 / 估算翻譯總量。
+    """
+    return sum(1 for _, v in mapping.items() if isinstance(v, str) and v.strip())
 
 
 # -------------------------
@@ -100,6 +101,7 @@ class DryRunStats:
     用途：封裝與 DryRunStats 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
+
     files: int = 0
     total_keys: int = 0
     cache_hit: int = 0
@@ -132,8 +134,28 @@ def translate_kubejs_pending_to_zh_tw(
 
     if rename_langs is None:
         rename_langs = {
-            "ru_ru","ja_jp","ko_kr","zh_cn","zh_hk","zh_sg","pt_br","es_es","en_us","fr_fr","de_de",
-            "it_it","pl_pl","tr_tr","uk_ua","cs_cz","hu_hu","nl_nl","sv_se","no_no","da_dk","fi_fi"
+            "ru_ru",
+            "ja_jp",
+            "ko_kr",
+            "zh_cn",
+            "zh_hk",
+            "zh_sg",
+            "pt_br",
+            "es_es",
+            "en_us",
+            "fr_fr",
+            "de_de",
+            "it_it",
+            "pl_pl",
+            "tr_tr",
+            "uk_ua",
+            "cs_cz",
+            "hu_hu",
+            "nl_nl",
+            "sv_se",
+            "no_no",
+            "da_dk",
+            "fi_fi",
         }
 
     if not in_dir.exists() or not in_dir.is_dir():
@@ -151,9 +173,9 @@ def translate_kubejs_pending_to_zh_tw(
 
     def _count_one(src: Path) -> Tuple[Path, int]:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`read_json_dict`
-        
+
         回傳：依函式內 return path。
         """
         try:
@@ -162,7 +184,9 @@ def translate_kubejs_pending_to_zh_tw(
         except Exception:
             return src, 0
 
-    max_workers = int(load_config().get("translator", {}).get("parallel_execution_workers", 4) or 4)
+    max_workers = int(
+        load_config().get("translator", {}).get("parallel_execution_workers", 4) or 4
+    )
     max_workers = max(1, max_workers)
 
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
@@ -230,9 +254,9 @@ def translate_kubejs_pending_to_zh_tw(
 
     def _writer(file_id: str) -> None:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`write_json_dict`
-        
+
         回傳：None
         """
         dst_path, data = _file_write_table[file_id]
@@ -258,7 +282,7 @@ def translate_kubejs_pending_to_zh_tw(
             cache_rules=cache_rules,
             is_valid_hit=_is_valid_hit,
         )
-        
+
         # ✅ NEW：累積 hit items
         all_hit_items.extend(cached_items)
 
@@ -284,7 +308,9 @@ def translate_kubejs_pending_to_zh_tw(
 
         # out_map base
         out_map: Dict[str, str] = {
-            k: v for k, v in mapping.items() if isinstance(k, str) and isinstance(v, str)
+            k: v
+            for k, v in mapping.items()
+            if isinstance(k, str) and isinstance(v, str)
         }
 
         # apply cache hits now (record as hit)
@@ -353,7 +379,9 @@ def translate_kubejs_pending_to_zh_tw(
                 filename="_kubejs_dry_run_cache_hit_preview.json",
                 meta=meta,
             )
-            log_info(f"🎯 [DRY-RUN] cache-hit preview written: {hit_preview_path.as_posix()}")
+            log_info(
+                f"🎯 [DRY-RUN] cache-hit preview written: {hit_preview_path.as_posix()}"
+            )
 
         except Exception as e:
             log_warning(f"⚠️ [KubeJS-LM] DRY-RUN preview 輸出失敗：{e}")
@@ -385,7 +413,7 @@ def translate_kubejs_pending_to_zh_tw(
 
         def on_translated_item(it: Dict[str, Any]) -> None:
             """處理此函式的工作（細節以程式碼為準）。
-            
+
             回傳：None
             """
             rel_src = it.get("file_rel")
@@ -422,9 +450,9 @@ def translate_kubejs_pending_to_zh_tw(
         def on_batch_flushed() -> None:
             # write touched files each batch
             """處理此函式的工作（細節以程式碼為準）。
-            
+
             - 主要包裝：`flush`
-            
+
             回傳：None
             """
             try:
@@ -436,9 +464,9 @@ def translate_kubejs_pending_to_zh_tw(
 
         def _fmt_eta(sec: float) -> str:
             """處理此函式的工作（細節以程式碼為準）。
-            
+
             - 主要包裝：`divmod`
-            
+
             回傳：依函式內 return path。
             """
             if sec <= 0:
@@ -453,9 +481,9 @@ def translate_kubejs_pending_to_zh_tw(
 
         def on_progress(p: float, msg: str, eta_sec: float) -> None:
             """處理此函式的工作（細節以程式碼為準）。
-            
+
             - 主要包裝：`_fmt_eta`, `log_info`, `progress`
-            
+
             回傳：None
             """
             eta_txt = _fmt_eta(eta_sec)
@@ -465,7 +493,9 @@ def translate_kubejs_pending_to_zh_tw(
         res = translate_items_with_cache_loop(
             all_miss_items,
             total_for_smart=global_total_to_translate,
-            translate_batch_smart=lambda batch, total: translate_batch_smart(batch, total=total),
+            translate_batch_smart=lambda batch, total: translate_batch_smart(
+                batch, total=total
+            ),
             write_new_cache=bool(write_new_cache),
             cache_rules=cache_rules,
             on_translated_item=on_translated_item,
@@ -474,7 +504,9 @@ def translate_kubejs_pending_to_zh_tw(
         )
 
         translated_done = int(res.processed or 0)
-        avg_batch_sec = (res.elapsed_sec / res.completed_calls) if res.completed_calls else None
+        avg_batch_sec = (
+            (res.elapsed_sec / res.completed_calls) if res.completed_calls else None
+        )
 
         # final flush all
         for st in file_states.values():
@@ -483,7 +515,6 @@ def translate_kubejs_pending_to_zh_tw(
 
         total_written = len(file_states)
         progress(1.0)
-
 
     # -------------------------
     # Export records
@@ -496,7 +527,6 @@ def translate_kubejs_pending_to_zh_tw(
         log_info(f"🧾 [KubeJS-LM] records written: {rec_json} | {rec_csv}")
     except Exception as ex:
         log_info(f"⚠️ [KubeJS-LM] export records failed: {ex}")
-    
 
     return {
         "written_files": total_written,

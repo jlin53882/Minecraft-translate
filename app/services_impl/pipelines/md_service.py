@@ -27,9 +27,9 @@ def run_md_translation_service(
     lang_mode: str = "non_cjk_only",
 ):
     """執行此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`ensure_pipeline_logging`, `start`
-    
+
     回傳：None
     """
     ensure_pipeline_logging()

@@ -15,17 +15,19 @@ from app.services_impl.pipelines.bundle_service import run_bundling_service
 import tkinter as tk
 from tkinter import filedialog
 
+
 class BundlerView(ft.Column):
     """BundlerView 類別。
 
     用途：封裝與 BundlerView 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
+
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`__init__`, `TextField`
-        
+
         回傳：None
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
@@ -35,65 +37,93 @@ class BundlerView(ft.Column):
 
         # --- UI 元件 (保持不變) ---
         self.root_dir_textfield = ft.TextField(
-            label="翻譯專案根目錄", 
-            expand=True, 
-            tooltip="包含所有翻譯產出資料夾 (如 zh_tw_generated) 的最上層資料夾"
+            label="翻譯專案根目錄",
+            expand=True,
+            tooltip="包含所有翻譯產出資料夾 (如 zh_tw_generated) 的最上層資料夾",
         )
         self.output_zip_textfield = ft.TextField(
-            label="最終 ZIP 檔案儲存路徑", 
-            expand=True, 
-            tooltip="選擇您要將 .zip 檔案儲存的位置和檔名"
+            label="最終 ZIP 檔案儲存路徑",
+            expand=True,
+            tooltip="選擇您要將 .zip 檔案儲存的位置和檔名",
         )
-        self.start_button = ft.ElevatedButton("開始打包", on_click=self.start_bundling_clicked, icon=ft.Icons.ARCHIVE)
+        self.start_button = ft.ElevatedButton(
+            "開始打包", on_click=self.start_bundling_clicked, icon=ft.Icons.ARCHIVE
+        )
         self.progress_bar = ft.ProgressBar(value=0, visible=False)
         self.log_view = ft.ListView(expand=True, spacing=5, auto_scroll=True)
 
         # --- UI 佈局 (保持不變) ---
         self.controls = [
-            ft.Card(content=ft.Container(padding=15, content=ft.Column([
-                ft.Text("打包成品資源包", style=ft.TextThemeStyle.TITLE_LARGE),
-                ft.Row([self.root_dir_textfield, self._create_pick_button(self.root_dir_textfield, 'dir')]),
-                ft.Row([self.output_zip_textfield, self._create_pick_button(self.output_zip_textfield, 'save')]),
-                self.start_button,
-                self.progress_bar
-            ], spacing=15))),
+            ft.Card(
+                content=ft.Container(
+                    padding=15,
+                    content=ft.Column(
+                        [
+                            ft.Text(
+                                "打包成品資源包", style=ft.TextThemeStyle.TITLE_LARGE
+                            ),
+                            ft.Row(
+                                [
+                                    self.root_dir_textfield,
+                                    self._create_pick_button(
+                                        self.root_dir_textfield, "dir"
+                                    ),
+                                ]
+                            ),
+                            ft.Row(
+                                [
+                                    self.output_zip_textfield,
+                                    self._create_pick_button(
+                                        self.output_zip_textfield, "save"
+                                    ),
+                                ]
+                            ),
+                            self.start_button,
+                            self.progress_bar,
+                        ],
+                        spacing=15,
+                    ),
+                )
+            ),
             ft.Text("打包日誌", style=ft.TextThemeStyle.TITLE_MEDIUM),
             ft.Container(
                 content=self.log_view,
                 border=ft.border.all(1, ft.Colors.OUTLINE),
                 border_radius=ft.border_radius.all(5),
                 padding=10,
-                expand=True
-            )
+                expand=True,
+            ),
         ]
-    
+
     # --- 輔助函式 ---
     def _create_pick_button(self, target_textfield: ft.TextField, pick_type: str):
         # (函式內容... 保持不變)
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`IconButton`
-        
+
         回傳：依函式內 return path。
         """
-        if pick_type == 'dir':
+        if pick_type == "dir":
             icon = ft.Icons.FOLDER_OPEN
             tooltip = "選擇資料夾"
-        else: # 'save'
+        else:  # 'save'
             icon = ft.Icons.SAVE_AS
             tooltip = "選擇儲存位置"
         return ft.IconButton(
             icon=icon,
             tooltip=tooltip,
-            on_click=lambda e: self.pick_path_with_tkinter(e, target_textfield, pick_type) # <-- 修改點
+            on_click=lambda e: self.pick_path_with_tkinter(
+                e, target_textfield, pick_type
+            ),  # <-- 修改點
         )
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
         # (函式內容... 保持不變)
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`SnackBar`
-        
+
         回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
@@ -108,21 +138,23 @@ class BundlerView(ft.Column):
         path = ""
         try:
             root = tk.Tk()
-            root.withdraw() # 隱藏主視窗
-            root.attributes('-topmost', True) # 強制置頂
+            root.withdraw()  # 隱藏主視窗
+            root.attributes("-topmost", True)  # 強制置頂
 
-            if pick_type == 'dir':
+            if pick_type == "dir":
                 path = filedialog.askdirectory(title="請選擇翻譯專案根目錄")
-            else: # 'save'
+            else:  # 'save'
                 config = load_config_json()
-                default_name = config.get("output_bundler", {}).get("output_zip_name", "可使用翻譯.zip")
+                default_name = config.get("output_bundler", {}).get(
+                    "output_zip_name", "可使用翻譯.zip"
+                )
                 path = filedialog.asksaveasfilename(
                     title="請選擇要儲存的 ZIP 檔案路徑",
                     initialfile=default_name,
                     defaultextension=".zip",
-                    filetypes=[("ZIP 壓縮檔", "*.zip"), ("所有檔案", "*.*")]
+                    filetypes=[("ZIP 壓縮檔", "*.zip"), ("所有檔案", "*.*")],
                 )
-            
+
             root.destroy()
 
             if path:
@@ -130,7 +162,7 @@ class BundlerView(ft.Column):
                 self.page.update()
             else:
                 self._show_snack_bar("您已取消選擇", ft.Colors.BLUE_GREY_500)
-                
+
         except Exception as ex:
             self._show_snack_bar(f"開啟對話框失敗: {ex}")
 
@@ -139,19 +171,23 @@ class BundlerView(ft.Column):
     def set_controls_disabled(self, disabled: bool):
         # (函式內容... 保持不變)
         """設定此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
-        for ctrl in [self.root_dir_textfield, self.output_zip_textfield, self.start_button]:
+        for ctrl in [
+            self.root_dir_textfield,
+            self.output_zip_textfield,
+            self.start_button,
+        ]:
             ctrl.disabled = disabled
         self.page.update()
 
     def start_bundling_clicked(self, e):
         # (函式內容... 保持不變)
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`set_controls_disabled`, `clear`
-        
+
         回傳：None
         """
         root_dir = self.root_dir_textfield.value
@@ -169,21 +205,23 @@ class BundlerView(ft.Column):
         self.log_view.controls.append(ft.Text("[系統] 開始執行打包..."))
         self.page.update()
 
-        thread = threading.Thread(target=self.bundling_worker, args=(root_dir, output_zip))
+        thread = threading.Thread(
+            target=self.bundling_worker, args=(root_dir, output_zip)
+        )
         thread.start()
 
     def bundling_worker(self, root_dir, output_zip):
         # (函式內容... 保持不變)
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`run_bundling_service`
-        
+
         回傳：None
         """
         try:
             for update in run_bundling_service(root_dir, output_zip):
                 log_msg = update.get("log", "")
-                for line in log_msg.split('\n'):
+                for line in log_msg.split("\n"):
                     if line.strip():
                         self.log_view.controls.append(ft.Text(line))
                 if "progress" in update:

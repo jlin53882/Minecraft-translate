@@ -15,16 +15,16 @@ import math
 
 # 導入我們自訂的日誌工具
 from translation_tool.utils.log_unit import (
-    log_info,  
-    log_error, 
-    log_warning, 
-    log_debug, 
-    progress, 
-    get_formatted_duration
+    log_info,
+    log_debug,
+    progress,
+    get_formatted_duration,
 )
 
 import re
-from translation_tool.utils.text_processor import safe_convert_text  # 你 FTB 也有用類似概念
+from translation_tool.utils.text_processor import (
+    safe_convert_text,
+)  # 你 FTB 也有用類似概念
 import orjson
 from translation_tool.core.lm_translator_shared import _get_default_batch_size
 
@@ -33,50 +33,52 @@ from translation_tool.core.lm_translator_shared import _get_default_batch_size
 # 匹配以 '{' 開頭、'}' 結尾，且中間包含至少一個字元的字串 (例如: "{key_name}")
 _LANG_REF_RE = re.compile(r"^\{.+\}$")
 
+
 def _is_filled_text(v: Any) -> bool:
     """
     檢查輸入值是否為有實質內容的文字。
-    
+
     回傳 False 的情況：
     1. 不是字串類型
     2. 是空字串或只包含空白
     3. 格式符合語言引用標記 (例如 "{translation_key}")
     """
-    
+
     # 檢查是否為字串類型，若不是則判定為無實質文字
     if not isinstance(v, str):
         return False
-    
+
     # 去除首尾空白
     s = v.strip()
-    
+
     # 檢查去除空白後是否為空字串
     if not s:
         return False
-    
+
     # 檢查字串是否符合語言引用格式
     # 這通常用於排除尚未翻譯或僅作為佔位符的標記
     if _LANG_REF_RE.match(s):
         return False
-    
+
     # 若通過以上檢查，則判定為有效的實質文字
     return True
+
 
 def deep_merge_3way_flat(tw: dict, cn: dict, en: dict) -> dict:
     """
     執行三方語系檔的深度合併（扁平化版本）。
-    
+
     優先順序邏輯：
     1. 繁體中文 (zh_tw)：最優先使用。
     2. 簡體中文 (zh_cn)：若無繁中，則將簡中轉為繁中後使用。
     3. 英文 (en_us)：若前兩者皆無，則使用英文作為最後備援。
-    
+
     註：若呼叫時傳入 en={}，則代表不希望使用英文回退，輸出將僅包含中文字串。
     """
     out = {}
     # 聯集所有字典中的 Key，確保每個存在的翻譯鍵值都會被處理到
     keys = set(tw.keys()) | set(cn.keys()) | set(en.keys())
-    
+
     for k in keys:
         # 1. 檢查繁體中文
         v_tw = tw.get(k)
@@ -95,13 +97,14 @@ def deep_merge_3way_flat(tw: dict, cn: dict, en: dict) -> dict:
         v_en = en.get(k)
         if _is_filled_text(v_en):
             out[k] = v_en
-            
+
     return out
+
 
 def prune_en_by_tw_flat(en_map: dict, tw_available: dict) -> dict:
     """
     根據繁體中文的可用性來「剪裁」英文語系檔。
-    
+
     用途：
     常用於找出「尚未翻譯」的清單。如果一個 Key 在繁體中文已經有內容了，
     就不再需要保留其英文版本（避免重複或用於產生待翻譯任務）。
@@ -111,17 +114,17 @@ def prune_en_by_tw_flat(en_map: dict, tw_available: dict) -> dict:
         # 如果該 Key 在繁體中文版中已經有有效內容，則跳過（剪裁掉）
         if _is_filled_text(tw_available.get(k)):
             continue
-        
+
         # 只有當繁體中文還沒有內容時，才保留這個英文翻譯
         out[k] = v
-        
+
     return out
 
 
 def _read_json_dict_orjson(path: Path) -> dict:
     """
     使用 orjson 讀取 JSON 檔案並轉換為字典。
-    
+
     特點：
     1. 自動處理編碼問題（BOM）。
     2. 自動修正結尾逗號（Trailing Comma），避免 orjson 解析失敗。
@@ -130,22 +133,22 @@ def _read_json_dict_orjson(path: Path) -> dict:
     # 檢查路徑是否存在且為檔案
     if not path or not path.is_file():
         return {}
-        
+
     try:
         # 讀取文字內容
         raw = path.read_text(encoding="utf-8")
-        
+
         # 移除 UTF-8 BOM 標頭（有些舊 Windows 軟體產生的檔案會帶有此標記）
         raw = raw.lstrip("\ufeff")
-        
+
         # 修正尾逗號問題：
         # 正則表達式匹配：逗號 + 任意空白 + 右大/中括號
         # 例如將 {"a":1,} 轉換為 {"a":1}
         raw = re.sub(r",\s*([}\]])", r"\1", raw)
-        
+
         # orjson.loads 接收 bytes 效能最佳，故轉碼後解析
         data = orjson.loads(raw.encode("utf-8"))
-        
+
         # 確保回傳格式為字典，否則回傳空字典
         return data if isinstance(data, dict) else {}
     except Exception:
@@ -181,18 +184,17 @@ def _write_json_orjson(path: Path, data: dict) -> None:
     path.write_bytes(b)
 
 
-
 def clean_kubejs_from_raw(
     base_dir: str,
     *,
     output_dir: str | None = None,
     raw_dir: str | None = None,
-    pending_root: str | None = None,   
-    final_root: str | None = None,     
+    pending_root: str | None = None,
+    final_root: str | None = None,
 ) -> dict:
     """
     KubeJS 語系檔案清理與分流（orjson 版）
-    
+
     工作流程：
     1. 讀取 raw 目錄下的所有 JSON。
     2. 分類：
@@ -207,9 +209,19 @@ def clean_kubejs_from_raw(
     out_root = Path(output_dir).resolve() if output_dir else (base / "Output")
 
     # 定義原始、待翻譯、完成三個核心路徑
-    raw_root = Path(raw_dir).resolve() if raw_dir else (out_root / "kubejs" / "raw" / "kubejs")
-    pending_root_p = Path(pending_root).resolve() if pending_root else (out_root / "kubejs" / "待翻譯" / "kubejs")
-    final_root_p   = Path(final_root).resolve() if final_root else (out_root / "kubejs" / "完成" / "kubejs")
+    raw_root = (
+        Path(raw_dir).resolve() if raw_dir else (out_root / "kubejs" / "raw" / "kubejs")
+    )
+    pending_root_p = (
+        Path(pending_root).resolve()
+        if pending_root
+        else (out_root / "kubejs" / "待翻譯" / "kubejs")
+    )
+    final_root_p = (
+        Path(final_root).resolve()
+        if final_root
+        else (out_root / "kubejs" / "完成" / "kubejs")
+    )
 
     # 確保輸出目錄存在
     pending_root_p.mkdir(parents=True, exist_ok=True)
@@ -219,7 +231,7 @@ def clean_kubejs_from_raw(
     lang_files = []
     other_jsons = []
     for p in raw_root.rglob("*.json"):
-        pp = str(p).replace("\\", "/") # 統一轉為正斜線方便判斷
+        pp = str(p).replace("\\", "/")  # 統一轉為正斜線方便判斷
         if "/lang/" in pp:
             lang_files.append(p)
         else:
@@ -230,7 +242,7 @@ def clean_kubejs_from_raw(
     for p in other_jsons:
         rel = p.relative_to(raw_root)
         # 注意：這裡應使用實例化的 pending_root_p
-        dst = pending_root_p / rel 
+        dst = pending_root_p / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(p.read_bytes())
         copied_other += 1
@@ -264,14 +276,14 @@ def clean_kubejs_from_raw(
         if en:
             if has_twcn:
                 # 取得目前已有的繁中內容（tw + cn轉繁）
-                available_tw = deep_merge_3way_flat(tw, cn, {}) 
+                available_tw = deep_merge_3way_flat(tw, cn, {})
                 # 從英文檔中剔除已經有繁中內容的 Key
                 pending_en = prune_en_by_tw_flat(en, available_tw)
             else:
                 # 完全沒有中文字心，則整份英文都是待翻譯
                 pending_en = en
 
-            if pending_en: # 只有當還有剩餘未翻譯項時才寫檔
+            if pending_en:  # 只有當還有剩餘未翻譯項時才寫檔
                 dst_en = pending_root_p / rel_group / "en_us.json"
                 _write_json_orjson(dst_en, pending_en)
                 pending_lang_written += 1
@@ -280,7 +292,7 @@ def clean_kubejs_from_raw(
         if has_twcn:
             # 合併繁中與簡中（不使用英文當備援，確保輸出的全是中文）
             merged_tw = deep_merge_3way_flat(tw, cn, {})
-            
+
             dst_tw = final_root_p / rel_group / "zh_tw.json"
             _write_json_orjson(dst_tw, merged_tw)
             merged_lang_written += 1
@@ -289,7 +301,6 @@ def clean_kubejs_from_raw(
     log_info(
         f"[KubeJS-CLEAN] 處理完畢！群組數: {len(groups)} | 產出待翻譯: {pending_lang_written} | 產出完成品: {merged_lang_written} | 複製其他檔案: {copied_other}"
     )
-
 
     return {
         "raw_root": str(raw_root),
@@ -302,17 +313,16 @@ def clean_kubejs_from_raw(
     }
 
 
-
 # ------------------------------------------------------------
 # 路徑解析工具 (Path Resolver)
 # ------------------------------------------------------------
 def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> Path:
     """
     自動解析 KubeJS 的根目錄。
-    
+
     原因：使用者在 UI 介面可能會選取模組包的根目錄（例如 "All the Mods 10"），
     但 KubeJS 資料夾可能藏在更深層。
-    
+
     邏輯：
     1. 往下尋找名為 "kubejs" 的資料夾（不區分大小寫）。
     2. 優先選擇包含 "client_scripts" 子目錄的 kubejs，因為那通常是翻譯發生的核心地帶。
@@ -336,12 +346,12 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> Path:
     for p in base.rglob("*"):
         if not p.is_dir():
             continue
-            
+
         # 計算目前路徑相對於起點的深度
         depth = len(p.parts) - base_parts
         if depth > max_depth:
             continue
-            
+
         # 找到名為 kubejs 的目錄就加入候選清單
         if p.name.lower() == "kubejs":
             candidates.append(p)
@@ -366,18 +376,19 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> Path:
     candidates.sort(key=score)
     return candidates[0]
 
+
 # ------------------------------------------------------------
 # 第一步：提取與清理 (Extract & Clean)
 # ------------------------------------------------------------
 def step1_extract_and_clean(
     *,
     pack_or_kubejs_dir: str,  # 模組包或 kubejs 根目錄
-    raw_dir: str,             # 存放初步提取結果的原始目錄
-    pending_dir: str,         # 存放「待翻譯」檔案的目錄
-    final_dir: str,           # 存放「已完成」檔案的目錄
-    session=None,             # UI 回話 (Session)，用於回傳進度
-    progress_base: float = 0.0, # 目前進度條基數
-    progress_span: float = 0.33, # 本步驟佔總進度條的比例
+    raw_dir: str,  # 存放初步提取結果的原始目錄
+    pending_dir: str,  # 存放「待翻譯」檔案的目錄
+    final_dir: str,  # 存放「已完成」檔案的目錄
+    session=None,  # UI 回話 (Session)，用於回傳進度
+    progress_base: float = 0.0,  # 目前進度條基數
+    progress_span: float = 0.33,  # 本步驟佔總進度條的比例
 ) -> Dict[str, Any]:
     """
     執行 KubeJS 的自動化工作流第一階段：
@@ -385,7 +396,7 @@ def step1_extract_and_clean(
     2. 從 .js 腳本中提取 tooltip/ponder 等文字到 raw 資料夾。
     3. 清理 raw 資料夾，分類出「完成品」與「待翻譯項」。
     """
-    
+
     # 0) 核心路徑解析：自動定位 kubejs 資料夾
     # resolve_kubejs_root 內部已經做了 .resolve()，這裡直接拿結果
     kubejs_dir_path = Path(resolve_kubejs_root(pack_or_kubejs_dir))
@@ -393,7 +404,9 @@ def step1_extract_and_clean(
 
     # 1) 提取階段
     log_info(f"📦 [KubeJS] 步驟 1-1：正在提取文字至 -> {raw_dir}")
-    from translation_tool.plugins.kubejs.kubejs_tooltip_extract import extract as kjs_extract
+    from translation_tool.plugins.kubejs.kubejs_tooltip_extract import (
+        extract as kjs_extract,
+    )
 
     extract_result = kjs_extract(
         source_dir=str(kubejs_dir_path),
@@ -402,7 +415,9 @@ def step1_extract_and_clean(
         progress_base=progress_base,
         progress_span=progress_span * 0.7,
     )
-    log_info(f"✅ [KubeJS] 提取完成: 檔案數={extract_result.get('extracted_files')} 總鍵值數={extract_result.get('extracted_keys_total')}")
+    log_info(
+        f"✅ [KubeJS] 提取完成: 檔案數={extract_result.get('extracted_files')} 總鍵值數={extract_result.get('extracted_keys_total')}"
+    )
 
     # 2) 清理與分流階段
     log_info("🧹 [KubeJS] 步驟 1-2：執行清理並分類 (三方合併邏輯)")
@@ -419,7 +434,6 @@ def step1_extract_and_clean(
 
     # 更新 UI 進度
     progress(session, min(progress_base + progress_span, 0.999))
-    
 
     # 回傳各階段結果摘要
     return {
@@ -432,21 +446,19 @@ def step1_extract_and_clean(
     }
 
 
-
-
 # ------------------------------------------------------------
 # Step 2: Translate (pluggable)
 # ------------------------------------------------------------
 def step2_translate_lm(
     *,
     pending_dir: str,
-    output_dir: Optional[str] = None,          # ✅ 新：pipeline 用 output_dir
-    translated_dir: Optional[str] = None,      # ✅ 舊：相容你以前的 translated_dir
+    output_dir: Optional[str] = None,  # ✅ 新：pipeline 用 output_dir
+    translated_dir: Optional[str] = None,  # ✅ 舊：相容你以前的 translated_dir
     session=None,
     progress_base: float = 0.33,
     progress_span: float = 0.33,
-    dry_run: bool = False,                     # ✅ 新：讓 dry-run 也能產表
-    write_new_cache: bool = True,              # ✅ 新：UI 勾選有效
+    dry_run: bool = False,  # ✅ 新：讓 dry-run 也能產表
+    write_new_cache: bool = True,  # ✅ 新：UI 勾選有效
 ) -> Dict[str, Any]:
     """
     KubeJS Step2 LM translate wrapper.
@@ -459,7 +471,9 @@ def step2_translate_lm(
     if not out_arg:
         raise ValueError("step2_translate_lm: 必須提供 output_dir 或 translated_dir")
 
-    log_info(f"🧠 [KubeJS] Step2 LM translate: {pending_dir} -> {out_arg} (dry_run={dry_run}, write_new_cache={write_new_cache})")
+    log_info(
+        f"🧠 [KubeJS] Step2 LM translate: {pending_dir} -> {out_arg} (dry_run={dry_run}, write_new_cache={write_new_cache})"
+    )
 
     from translation_tool.plugins.kubejs.kubejs_tooltip_lmtranslator import (
         translate_kubejs_pending_to_zh_tw,
@@ -475,9 +489,10 @@ def step2_translate_lm(
         用途：封裝與 _ProgressProxy 相關的狀態與行為。
         維護注意：修改公開方法前請確認外部呼叫點與相容性。
         """
+
         def __init__(self, parent, base: float, span: float):
             """處理此函式的工作（細節以程式碼為準）。
-            
+
             回傳：None
             """
             self.parent = parent
@@ -486,7 +501,7 @@ def step2_translate_lm(
 
         def set_progress(self, p: float):
             """設定此函式的工作（細節以程式碼為準）。
-            
+
             回傳：None
             """
             if not self.parent or not hasattr(self.parent, "set_progress"):
@@ -504,7 +519,7 @@ def step2_translate_lm(
         # 可選轉發
         def set_status(self, msg: str):
             """設定此函式的工作（細節以程式碼為準）。
-            
+
             回傳：None
             """
             if self.parent and hasattr(self.parent, "set_status"):
@@ -534,36 +549,37 @@ def step2_translate_lm(
     return result
 
 
-
 # ------------------------------------------------------------
 # 第三步：注入 (Inject)
 # ------------------------------------------------------------
 def step3_inject(
     *,
     pack_or_kubejs_dir: str,  # 模組包或 kubejs 根目錄
-    src_dir: str,             # 翻譯來源目錄（通常是經過 AI 或人工翻譯後的 en_us 檔案）
-    final_dir: str,           # 最終產出目錄（存放注入後的結果）
-    session=None,             # UI 回話 (Session)，用於回傳進度
-    progress_base: float = 0.66, # 進度條起點（假設前兩步已完成 66%）
-    progress_span: float = 0.33, # 本步驟佔總進度條的比例（約佔最後三分之一）
+    src_dir: str,  # 翻譯來源目錄（通常是經過 AI 或人工翻譯後的 en_us 檔案）
+    final_dir: str,  # 最終產出目錄（存放注入後的結果）
+    session=None,  # UI 回話 (Session)，用於回傳進度
+    progress_base: float = 0.66,  # 進度條起點（假設前兩步已完成 66%）
+    progress_span: float = 0.33,  # 本步驟佔總進度條的比例（約佔最後三分之一）
 ) -> Dict[str, Any]:
     """
     執行 KubeJS 的自動化工作流第三階段：
     將處理好的翻譯內容「注入」回 KubeJS 系統中。
-    
+
     此步驟通常會：
     1. 讀取 src_dir 中的翻譯。
     2. 對比 kubejs_dir 裡的原始腳本或語言檔。
     3. 將最終結果輸出至 final_dir。
     """
-    
+
     # 0) 再次確認 KubeJS 根目錄路徑，確保操作對象正確
     kubejs_dir = resolve_kubejs_root(pack_or_kubejs_dir)
     log_info(f"⚡[KubeJS] 步驟 3：開始注入翻譯 -> 目標目錄: {final_dir}")
 
     # 1) 載入注入插件
     # 這裡的 kjs_inject 是實際執行「腳本修改」或「語言檔覆蓋」的核心邏輯
-    from translation_tool.plugins.kubejs.kubejs_tooltip_inject import inject as kjs_inject
+    from translation_tool.plugins.kubejs.kubejs_tooltip_inject import (
+        inject as kjs_inject,
+    )
 
     # 2) 執行注入操作
     # 傳入三個路徑：原始位置、翻譯源、輸出位置
@@ -578,20 +594,19 @@ def step3_inject(
     )
 
 
-
 # ------------------------------------------------------------
 # 流程進入點 (Pipeline Entry)
 # ------------------------------------------------------------
 def run_kubejs_pipeline(
     *,
-    input_dir: str,                # 輸入路徑 (模組包根目錄或 kubejs)
-    output_dir: Optional[str],     # 輸出根目錄
-    session=None,                  # UI 溝通物件，用於更新進度條
-    dry_run: bool = False,         # 測試模式：若為 True，則不執行耗時或具破壞性的操作
-    step_extract: bool = True,     # 開關：步驟 1 (提取與清理)
-    step_translate: bool = True,   # 開關：步驟 2 (大型語言模型 AI 翻譯)
-    step_inject: bool = True,      # 開關：步驟 3 (注入回腳本)
-    translator_fn: Optional[Callable[..., Dict[str, Any]]] = None, # 外部翻譯函式
+    input_dir: str,  # 輸入路徑 (模組包根目錄或 kubejs)
+    output_dir: Optional[str],  # 輸出根目錄
+    session=None,  # UI 溝通物件，用於更新進度條
+    dry_run: bool = False,  # 測試模式：若為 True，則不執行耗時或具破壞性的操作
+    step_extract: bool = True,  # 開關：步驟 1 (提取與清理)
+    step_translate: bool = True,  # 開關：步驟 2 (大型語言模型 AI 翻譯)
+    step_inject: bool = True,  # 開關：步驟 3 (注入回腳本)
+    translator_fn: Optional[Callable[..., Dict[str, Any]]] = None,  # 外部翻譯函式
     write_new_cache: bool = False,  # 是否寫入新的快取 (僅在 step2_translate_lm 有效)
 ) -> Dict[str, Any]:
     """
@@ -603,10 +618,12 @@ def run_kubejs_pipeline(
     out_root = Path(output_dir).resolve() if output_dir else (base / "Output")
 
     # 定義四個階段的專屬資料夾（多一層 kubejs，避免與其他輸出混在一起）
-    raw_dir = out_root / "kubejs" / "raw" / "kubejs"          # 剛提取出來的原始檔
-    pending_dir = out_root / "kubejs" / "待翻譯" / "kubejs"    # 整理後，真正需要翻的 en_us
-    translated_dir = out_root / "kubejs" / "LM翻譯後" / "kubejs" # AI 翻好的檔案
-    final_dir = out_root / "kubejs" / "完成" / "kubejs"        # 注入完成的最終成果
+    raw_dir = out_root / "kubejs" / "raw" / "kubejs"  # 剛提取出來的原始檔
+    pending_dir = (
+        out_root / "kubejs" / "待翻譯" / "kubejs"
+    )  # 整理後，真正需要翻的 en_us
+    translated_dir = out_root / "kubejs" / "LM翻譯後" / "kubejs"  # AI 翻好的檔案
+    final_dir = out_root / "kubejs" / "完成" / "kubejs"  # 注入完成的最終成果
 
     # 初始化目錄環境
     for d in [raw_dir, pending_dir, translated_dir, final_dir]:
@@ -648,9 +665,9 @@ def run_kubejs_pipeline(
     # 統計「待翻譯」資料夾中有多少個 Key 需要處理
     def _count_pending_lang_keys(pending_dir: Path) -> int:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`rglob`
-        
+
         回傳：依函式內 return path。
         """
         total = 0
@@ -665,9 +682,9 @@ def run_kubejs_pipeline(
 
     def _log_kubejs_step2_stats(step2_res: Dict[str, Any]) -> None:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`bool`
-        
+
         回傳：None
         """
         if not isinstance(step2_res, dict):
@@ -714,7 +731,9 @@ def run_kubejs_pipeline(
             if api_translated is not None:
                 log_info("[KubeJS] API 翻譯: %s", api_translated)
             if records_json or records_csv:
-                log_info("[KubeJS] records: json=%s | csv=%s", records_json, records_csv)
+                log_info(
+                    "[KubeJS] records: json=%s | csv=%s", records_json, records_csv
+                )
         if est_batches is not None:
             log_info(
                 "[KubeJS] 預估批次：%s (batch_size=%s)",
@@ -753,7 +772,6 @@ def run_kubejs_pipeline(
                     f_batches,
                     dst,
                 )
-    
 
     pending_lang_keys = _count_pending_lang_keys(pending_dir)
     log_info(f"🧾 [KubeJS] 統計：共有 {pending_lang_keys} 個 Key 待翻譯")
@@ -763,7 +781,7 @@ def run_kubejs_pipeline(
         log_info("✅ [KubeJS] 無待翻譯項目，自動跳過步驟 2 (AI 翻譯)")
         result["step2"] = {"skipped": True, "reason": "pending lang keys = 0"}
         progress(session, 0.66)
-    
+
     # ------------------------------------------------------------
     # 步驟 2: AI 翻譯 (LM Translate)
     # 進度範圍: 0.33 -> 0.66
@@ -782,8 +800,8 @@ def run_kubejs_pipeline(
                 session=session,
                 progress_base=0.33,
                 progress_span=0.33,
-                dry_run=True,            # ✅ 關鍵：讓 step2_translate_lm 走 dry-run preview
-                write_new_cache=False,   # ✅ dry-run 通常不寫新快取（你也可以改成 True）
+                dry_run=True,  # ✅ 關鍵：讓 step2_translate_lm 走 dry-run preview
+                write_new_cache=False,  # ✅ dry-run 通常不寫新快取（你也可以改成 True）
             )
             _log_kubejs_step2_stats(result["step2"])
             progress(session, 0.66)
@@ -806,9 +824,6 @@ def run_kubejs_pipeline(
         log_info("⏭️ [KubeJS] 跳過步驟 2")
         progress(session, 0.66)
 
-
-        
-
     # ------------------------------------------------------------
     # 步驟 3: 注入 (Inject)
     # 進度範圍: 0.66 -> 0.99
@@ -819,7 +834,11 @@ def run_kubejs_pipeline(
             result["step3"] = {"skipped": True, "reason": "dry_run"}
         else:
             # 容錯逻辑：如果翻譯資料夾有東西就用翻譯後的，否則拿 pending 的（原封不動注入）
-            src_for_inject = translated_dir if translated_dir.exists() and any(translated_dir.rglob("*.json")) else pending_dir
+            src_for_inject = (
+                translated_dir
+                if translated_dir.exists() and any(translated_dir.rglob("*.json"))
+                else pending_dir
+            )
             log_info(f"💉 [KubeJS] 執行注入：來源為 {src_for_inject.name}")
             result["step3"] = step3_inject(
                 pack_or_kubejs_dir=str(base),
@@ -834,12 +853,16 @@ def run_kubejs_pipeline(
 
     duration = get_formatted_duration(start_time)
     # 結尾明細（對齊 FTB 風格，避免前面訊息被沖掉）
-    step2_summary = result.get("step2", {}) if isinstance(result.get("step2"), dict) else {}
+    step2_summary = (
+        result.get("step2", {}) if isinstance(result.get("step2"), dict) else {}
+    )
     if step2_summary:
         log_info("✅ [KubeJS] Step2 統計明細：")
         summary = dict(step2_summary)
         summary.pop("per_file", None)
-        log_info("%s", orjson.dumps(summary, option=orjson.OPT_INDENT_2).decode("utf-8"))
+        log_info(
+            "%s", orjson.dumps(summary, option=orjson.OPT_INDENT_2).decode("utf-8")
+        )
 
         # 白話總結（避免太多細節被洗掉）
         if not summary.get("skipped"):
@@ -864,8 +887,5 @@ def run_kubejs_pipeline(
 
     log_info(f"🎉 [KubeJS] 任務完成！ {duration}")
 
-
     progress(session, 0.999)
     return result
-
-

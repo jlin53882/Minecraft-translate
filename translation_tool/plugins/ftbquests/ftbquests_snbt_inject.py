@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import logging
 from typing import Dict, Any, Tuple, Optional, List
 from collections import defaultdict
 
@@ -19,19 +18,19 @@ import orjson
 import ftb_snbt_lib as snbt
 from ftb_snbt_lib.tag import Compound, List as SnbtList  # 避免跟 typing.List 混淆
 from ...utils.text_processor import (
-    convert_snbt_tree_inplace,  #轉換.snbt 資料夾檔案內容（就地修改）。
-    convert_snbt_file_inplace, #轉換.snbt（或任何純文字檔）內容。
-    load_replace_rules, #載入替換規則。
+    convert_snbt_tree_inplace,  # 轉換.snbt 資料夾檔案內容（就地修改）。
+    convert_snbt_file_inplace,  # 轉換.snbt（或任何純文字檔）內容。
+    load_replace_rules,  # 載入替換規則。
 )
 from ...utils.config_manager import load_config
 
-# 導入我們自訂的日誌工具 
-from translation_tool.utils.log_unit import( 
-    log_info, 
-    log_error, 
-    log_warning, 
-    log_debug, 
-    )
+# 導入我們自訂的日誌工具
+from translation_tool.utils.log_unit import (
+    log_info,
+    log_error,
+    log_warning,
+    log_debug,
+)
 
 
 def _normalize_config_dir(path: str) -> str:
@@ -48,10 +47,9 @@ def _normalize_config_dir(path: str) -> str:
     return norm
 
 
-
 def _load_json_dict(path: str) -> dict:
     """載入此函式的工作（細節以程式碼為準）。
-    
+
     回傳：依函式內 return path。
     """
     if not os.path.isfile(path):
@@ -74,7 +72,10 @@ def split_lang_by_source_file(lang_map: dict) -> Dict[str, Dict[str, str]]:
     """
     out: Dict[str, Dict[str, str]] = {}
     for k, v in lang_map.items():
-        if not (isinstance(v, str) or (isinstance(v, list) and all(isinstance(x, str) for x in v))):
+        if not (
+            isinstance(v, str)
+            or (isinstance(v, list) and all(isinstance(x, str) for x in v))
+        ):
             continue
         if "|" in k:
             filename, inner_key = k.split("|", 1)
@@ -105,6 +106,7 @@ def _walk_and_copy_template(template_dir: str, zh_tw_dir: str) -> int:
 
     return copied
 
+
 def walk_and_copy_all_snbt(src_root_dir: str, dst_root_dir: str) -> int:
     """
     把 src_root_dir 下所有 .snbt 複製到 dst_root_dir（保留相對路徑）
@@ -127,11 +129,9 @@ def walk_and_copy_all_snbt(src_root_dir: str, dst_root_dir: str) -> int:
     return copied
 
 
-
-
 def _read_snbt(path: str) -> Compound | None:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     回傳：依函式內 return path。
     """
     try:
@@ -144,9 +144,9 @@ def _read_snbt(path: str) -> Compound | None:
 
 def _write_snbt(path: str, root: Compound) -> None:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`makedirs`
-    
+
     回傳：None
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -159,7 +159,7 @@ def patch_lang_snbt_file(
     dst_path: str,
     updates: Dict[str, Any],
     *,
-    return_details: bool = False,   # ✅ 新增：要不要回傳詳細資訊
+    return_details: bool = False,  # ✅ 新增：要不要回傳詳細資訊
 ) -> Tuple[int, int] | Tuple[int, int, Dict[str, Any]]:
     """
     以 src_path 的結構為準，將 updates 覆蓋到 dst_path（dst 通常是複製的模板檔）
@@ -182,13 +182,17 @@ def patch_lang_snbt_file(
     src_root = _read_snbt(src_path)
     if not src_root:
         if return_details:
-            return 0, 0, {
-                "total_updates": len(updates),
-                "missing_in_template": [],
-                "skipped_type_mismatch": [],
-                "unchanged_keys": [],
-                "changed_keys": [],
-            }
+            return (
+                0,
+                0,
+                {
+                    "total_updates": len(updates),
+                    "missing_in_template": [],
+                    "skipped_type_mismatch": [],
+                    "unchanged_keys": [],
+                    "changed_keys": [],
+                },
+            )
         return 0, 0
 
     dst_root = _read_snbt(dst_path)
@@ -206,7 +210,7 @@ def patch_lang_snbt_file(
 
     def _list_to_py(v):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：依函式內 return path。
         """
         if isinstance(v, SnbtList):
@@ -234,7 +238,7 @@ def patch_lang_snbt_file(
 
             old_s = str(old_val) if isinstance(old_val, snbt.String) else None
             if old_s == new_val:
-                unchanged_keys.append(k)   # ✅ 找到但一樣
+                unchanged_keys.append(k)  # ✅ 找到但一樣
                 continue
 
             dst_root[k] = snbt.String(new_val)
@@ -254,7 +258,7 @@ def patch_lang_snbt_file(
 
             old_py = _list_to_py(old_val)
             if old_py is not None and old_py == parts:
-                unchanged_keys.append(k)   # ✅ 找到但一樣
+                unchanged_keys.append(k)  # ✅ 找到但一樣
                 continue
 
             dst_root[k] = SnbtList([snbt.String(p) for p in parts])
@@ -301,7 +305,17 @@ def patch_quest_snbt_file(
     src_root = _read_snbt(src_path)
     if not src_root:
         if return_details:
-            return 0, 0, {"total_updates": len(updates), "changed_keys": [], "unchanged_keys": [], "skipped": [], "missing": []}
+            return (
+                0,
+                0,
+                {
+                    "total_updates": len(updates),
+                    "changed_keys": [],
+                    "unchanged_keys": [],
+                    "skipped": [],
+                    "missing": [],
+                },
+            )
         return 0, 0
 
     dst_root = _read_snbt(dst_path)
@@ -312,7 +326,10 @@ def patch_quest_snbt_file(
     skipped: list[str] = []
 
     for k, v in updates.items():
-        if not (isinstance(v, str) or (isinstance(v, list) and all(isinstance(x, str) for x in v))):
+        if not (
+            isinstance(v, str)
+            or (isinstance(v, list) and all(isinstance(x, str) for x in v))
+        ):
             skipped.append(k)
             continue
         # k = "id:xxxx|title"
@@ -332,7 +349,7 @@ def patch_quest_snbt_file(
 
     def _coerce_to_list(new_val: Any) -> list[str] | None:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：依函式內 return path。
         """
         if isinstance(new_val, list):
@@ -344,7 +361,7 @@ def patch_quest_snbt_file(
 
     def _apply_field(obj: Compound, kind: str, new_val: Any, tag_key: str):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         nonlocal changed, candidates
@@ -394,7 +411,7 @@ def patch_quest_snbt_file(
 
     def _recurse(node):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if isinstance(node, Compound):
@@ -422,15 +439,17 @@ def patch_quest_snbt_file(
     if not return_details:
         return changed, candidates
 
-    return changed, candidates, {
-        "total_updates": len(updates),
-        "changed_keys": changed_keys,
-        "unchanged_keys": unchanged_keys,
-        "skipped": skipped,
-        "missing": missing,
-    }
-
-
+    return (
+        changed,
+        candidates,
+        {
+            "total_updates": len(updates),
+            "changed_keys": changed_keys,
+            "unchanged_keys": unchanged_keys,
+            "skipped": skipped,
+            "missing": missing,
+        },
+    )
 
 
 def inject_ftbquests_zh_tw_from_json_old(
@@ -460,7 +479,9 @@ def inject_ftbquests_zh_tw_from_json_old(
 
     template_dir = prefer_dir if os.path.isdir(prefer_dir) else fallback_dir
     if not os.path.isdir(template_dir):
-        raise FileNotFoundError(f"找不到模板語系資料夾（{prefer_dir} / {fallback_dir} 都不存在）")
+        raise FileNotFoundError(
+            f"找不到模板語系資料夾（{prefer_dir} / {fallback_dir} 都不存在）"
+        )
 
     zh_tw_dir = os.path.join(lang_root, "zh_tw")
 
@@ -513,10 +534,11 @@ def inject_ftbquests_zh_tw_from_json_old(
         "missing_template_files": missing_template_files,
     }
 
+
 def inject_ftbquests_quests_from_zh_tw_json(
     *,
-    input_config_dir: str,      # 原包 config（只讀）
-    output_config_dir: str,     # 翻譯後 config（只寫）
+    input_config_dir: str,  # 原包 config（只讀）
+    output_config_dir: str,  # 翻譯後 config（只寫）
     zh_tw_quests_json_path: str,
 ) -> dict:
     """
@@ -550,12 +572,11 @@ def inject_ftbquests_quests_from_zh_tw_json(
     if "_default" in by_file and by_file["_default"]:
         skipped_default = len(by_file["_default"])
 
-
     def _build_filename_index(root_dir: str) -> dict[str, list[str]]:
         """建立此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`defaultdict`, `walk`, `dict`
-        
+
         回傳：依函式內 return path。
         """
         idx = defaultdict(list)
@@ -567,13 +588,12 @@ def inject_ftbquests_quests_from_zh_tw_json(
 
     filename_index = _build_filename_index(in_quests)
 
-
     for rel_file, updates in by_file.items():
         if rel_file == "_default":
             continue
-        
+
         targets: list[tuple[str, str]] = []
-    
+
         # 1) rel_file 可能是 "chapters/xxx.snbt"（帶路徑）=> 直接用
         if ("/" in rel_file) or ("\\" in rel_file):
             src_path = os.path.join(in_quests, rel_file)
@@ -582,33 +602,36 @@ def inject_ftbquests_quests_from_zh_tw_json(
                 continue
             dst_path = os.path.join(out_quests, rel_file)
             targets.append((src_path, dst_path))
-    
+
         # 2) rel_file 只有檔名（你現在的狀況）=> 用索引找 quests/**/同名檔
         else:
             hits = filename_index.get(rel_file, [])
             if not hits:
                 missing_source_files += 1
                 continue
-            
+
             # 若同名檔有多個：你可以選擇全部 patch（推薦先全部 patch，至少不漏）
             if len(hits) > 1:
-                log_warning("⚠️ quests 下找到多個同名檔 %s，將全部套用更新（count=%d）", rel_file, len(hits))
-    
+                log_warning(
+                    "⚠️ quests 下找到多個同名檔 %s，將全部套用更新（count=%d）",
+                    rel_file,
+                    len(hits),
+                )
+
             for h in hits:
                 rel = os.path.relpath(h, in_quests)
                 targets.append((h, os.path.join(out_quests, rel)))
-    
+
         # 對所有命中的檔案做 patch
         for src_path2, dst_path2 in targets:
             if not os.path.isfile(dst_path2):
                 os.makedirs(os.path.dirname(dst_path2), exist_ok=True)
                 shutil.copy2(src_path2, dst_path2)
-    
+
             changed, candidates = patch_quest_snbt_file(src_path2, dst_path2, updates)
             patched_files += 1
             patched_keys += changed
             candidate_keys += candidates
-    
 
     return {
         "template_quests_dir": in_quests,
@@ -620,9 +643,6 @@ def inject_ftbquests_quests_from_zh_tw_json(
         "missing_source_files": missing_source_files,
         "skipped_default_keys": skipped_default,
     }
-
-
-
 
 
 def inject_ftbquests_zh_tw_from_jsons(
@@ -726,7 +746,6 @@ def inject_ftbquests_zh_tw_from_jsons(
     unchanged_keys_all: list[str] = []
     skipped_keys_all: list[str] = []
 
-    
     # _default：沒有 filename| 前綴的 key（通常不該出現，除非你的 make_output_key 規則改過）
     if template_mode == "dir":
         if "_default" in by_file and by_file["_default"]:
@@ -744,10 +763,11 @@ def inject_ftbquests_zh_tw_from_jsons(
 
     if template_mode == "dir":
         # ✅ copy zh_cn -> zh_tw 後，先把整包 SNBT OpenCC(s2twp) 轉繁，再 patch
-        template_is_zh_cn = os.path.basename(os.path.normpath(template_base)).lower() == "zh_cn"
+        template_is_zh_cn = (
+            os.path.basename(os.path.normpath(template_base)).lower() == "zh_cn"
+        )
     else:
         template_is_zh_cn = os.path.basename(template_base).lower() == "zh_cn.snbt"
-
 
     if template_mode == "dir":
         # ---------- 資料夾制 ----------
@@ -761,7 +781,9 @@ def inject_ftbquests_zh_tw_from_jsons(
 
         if template_is_zh_cn and copied > 0:
             cfg = load_config()
-            rules_path = cfg.get("translator", {}).get("replace_rules_path", "replace_rules.json")
+            rules_path = cfg.get("translator", {}).get(
+                "replace_rules_path", "replace_rules.json"
+            )
             rules = load_replace_rules(rules_path)
 
             converted_files = convert_snbt_tree_inplace(zh_tw_dir, rules)
@@ -769,8 +791,6 @@ def inject_ftbquests_zh_tw_from_jsons(
                 "🈶 模板 zh_cn 已複製到 zh_tw，並已先 OpenCC(s2twp) 轉換：converted_files=%d",
                 converted_files,
             )
-
-
 
         for filename, updates in by_file.items():
             if filename == "_default":
@@ -783,8 +803,10 @@ def inject_ftbquests_zh_tw_from_jsons(
                 missing_template_files += 1
                 continue
 
-            #changed, candidates = patch_lang_snbt_file(src_path, dst_path, updates)
-            changed, candidates, details = patch_lang_snbt_file(src_path, dst_path, updates, return_details=True)
+            # changed, candidates = patch_lang_snbt_file(src_path, dst_path, updates)
+            changed, candidates, details = patch_lang_snbt_file(
+                src_path, dst_path, updates, return_details=True
+            )
             # ✅ A: 摘要直接寫進 message（不用改 log_format 也看得到）
             unchanged_count = len(details.get("unchanged_keys", []))
             skipped_count = len(details.get("skipped_type_mismatch", []))
@@ -809,17 +831,20 @@ def inject_ftbquests_zh_tw_from_jsons(
             for k in details.get("missing_in_template", []):
                 log_debug("MISSING(TEMPLATE) %s|%s", filename, k)
 
-
-
             patched_files += 1
             patched_keys += changed
             candidate_keys += candidates
 
             # ✅ 加上 file 前綴，之後一眼看懂是哪個檔案的哪個 key
-            missing_keys_all += [f"{filename}|{k}" for k in details.get("missing_in_template", [])]
-            unchanged_keys_all += [f"{filename}|{k}" for k in details.get("unchanged_keys", [])]
-            skipped_keys_all += [f"{filename}|{k}" for k in details.get("skipped_type_mismatch", [])]
-
+            missing_keys_all += [
+                f"{filename}|{k}" for k in details.get("missing_in_template", [])
+            ]
+            unchanged_keys_all += [
+                f"{filename}|{k}" for k in details.get("unchanged_keys", [])
+            ]
+            skipped_keys_all += [
+                f"{filename}|{k}" for k in details.get("skipped_type_mismatch", [])
+            ]
 
         zh_tw_output = zh_tw_dir  # 回傳用（資料夾路徑）
 
@@ -829,36 +854,38 @@ def inject_ftbquests_zh_tw_from_jsons(
 
         if overwrite_template_copy or not os.path.isfile(dst_file):
             import shutil
+
             shutil.copy2(template_base, dst_file)
             copied = 1
         else:
             copied = 0
 
-
         # ✅ 單檔制：copy zh_cn -> zh_tw.snbt 後，先 OpenCC(s2twp) 轉繁，再 patch
         if template_is_zh_cn and copied > 0:
             cfg = load_config()
-            rules_path = cfg.get("translator", {}).get("replace_rules_path", "replace_rules.json")
+            rules_path = cfg.get("translator", {}).get(
+                "replace_rules_path", "replace_rules.json"
+            )
             rules = load_replace_rules(rules_path)
 
             convert_snbt_file_inplace(dst_file, rules)
             log_info("🈶 模板 zh_cn 單檔已複製到 zh_tw.snbt，並已先 OpenCC(s2twp) 轉換")
 
-
-
         # 單檔制：把所有 updates 合併後 patch 到同一個檔案
         merged_updates: dict = {}
-        
+
         for filename, updates in by_file.items():
             if isinstance(updates, dict):
                 merged_updates.update(updates)
 
-        changed, candidates, details = patch_lang_snbt_file(template_base, dst_file, merged_updates, return_details=True)
+        changed, candidates, details = patch_lang_snbt_file(
+            template_base, dst_file, merged_updates, return_details=True
+        )
         # ✅ A: 單檔制摘要直接寫進 message（不用改 log_format 也看得到）
         unchanged_count = len(details.get("unchanged_keys", []))
         skipped_count = len(details.get("skipped_type_mismatch", []))
         missing_count = len(details.get("missing_in_template", []))
-        
+
         if unchanged_count or skipped_count or missing_count:
             log_info(
                 "ℹ️ [FTB-INJECT] zh_tw.snbt | candidates=%d | changed=%d | unchanged=%d | skipped_type=%d | missing=%d",
@@ -868,7 +895,7 @@ def inject_ftbquests_zh_tw_from_jsons(
                 skipped_count,
                 missing_count,
             )
-        
+
         # ✅ B: 單檔制詳細 key（只在 DEBUG 才會看到）
         for k in details.get("unchanged_keys", [])[:50]:
             log_debug("UNCHANGED zh_tw.snbt|%s", k)
@@ -876,7 +903,7 @@ def inject_ftbquests_zh_tw_from_jsons(
             log_debug("SKIPPED(TYPE) zh_tw.snbt|%s", k)
         for k in details.get("missing_in_template", [])[:50]:
             log_debug("MISSING(TEMPLATE) zh_tw.snbt|%s", k)
-        
+
         missing_keys_all += [f"{k}" for k in details.get("missing_in_template", [])]
         unchanged_keys_all += [f"{k}" for k in details.get("unchanged_keys", [])]
         skipped_keys_all += [f"{k}" for k in details.get("skipped_type_mismatch", [])]
@@ -892,15 +919,14 @@ def inject_ftbquests_zh_tw_from_jsons(
         # 1. 訊息主體 (Message)：
         # 這是一段固定字串，方便你在日誌檔案中「搜尋」。
         # 保持固定不變，不要把變數塞進這裡，是為了讓日誌過濾器（Filter）更容易抓取。
-        "[INJECT-DIFF] Summary updated", 
-
+        "[INJECT-DIFF] Summary updated",
         # 2. 額外欄位 (Extra Parameter)：
         # 這是 Python logging 模組的強大功能。它會把這些資料封裝成「屬性」。
         extra={
             "missing_in_template": len(missing_keys_all),  # 模板中缺失的鍵數量
-            "unchanged": len(unchanged_keys_all),          # 未變動的鍵數量
-            "skipped_type_mismatch": len(skipped_keys_all) # 因類型不符而跳過的數量
-        }
+            "unchanged": len(unchanged_keys_all),  # 未變動的鍵數量
+            "skipped_type_mismatch": len(skipped_keys_all),  # 因類型不符而跳過的數量
+        },
     )
 
     return {
@@ -931,5 +957,3 @@ def inject_ftbquests_zh_tw_from_jsons(
             "skipped_type_mismatch_count": len(skipped_keys_all),
         },
     }
-
-

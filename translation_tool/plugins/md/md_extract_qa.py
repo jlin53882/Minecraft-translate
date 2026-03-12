@@ -38,7 +38,9 @@ RE_MOSTLY_TOKEN_LINE = re.compile(r"^\s*(§[0-9a-zA-Z]+\S*)\s*(§[0-9a-zA-Z]+\S*
 
 # 標題：##### §nTITLE§n（這行是「文字」，要納入段落）
 # 我們保留整行進段落（讓翻譯有上下文），但也可以選擇只翻 TITLE（之後翻譯階段再做保護）
-RE_HEADING_N = re.compile(r"^(?P<prefix>\s*#{1,6}\s+)(?P<pre>§n)(?P<title>.*?)(?P<post>§n)\s*$")
+RE_HEADING_N = re.compile(
+    r"^(?P<prefix>\s*#{1,6}\s+)(?P<pre>§n)(?P<title>.*?)(?P<post>§n)\s*$"
+)
 
 # 格式碼開頭行：§bStats 或 §4Warning...
 # 這行也是「文字」，要納入段落（但 § 前綴要保留）
@@ -50,9 +52,9 @@ RE_CJK = re.compile(r"[\u4e00-\u9fff]")
 
 def contains_cjk(s: str) -> bool:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`bool`
-    
+
     回傳：依函式內 return path。
     """
     return bool(RE_CJK.search(s))
@@ -73,7 +75,6 @@ def pass_lang_filter(block_text: str, mode: str) -> bool:
     return True
 
 
-
 def normalize_for_dedupe(s: str) -> str:
     """
     去重用的正規化（保守版）：
@@ -90,14 +91,13 @@ def normalize_for_dedupe(s: str) -> str:
 
 def make_content_hash(text: str) -> str:
     """建立此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`normalize_for_dedupe`, `hexdigest`
-    
+
     回傳：依函式內 return path。
     """
     n = normalize_for_dedupe(text)
     return hashlib.sha1(n.encode("utf-8")).hexdigest()
-
 
 
 @dataclass
@@ -105,14 +105,12 @@ class BlockItem:
     """
     段落/區塊 item（你要的：不要碎成一行一行）
     """
-    id: str                 # 唯一 ID：<relpath>:<start>-<end>
-    text: str               # 段落文字（多行，以 \n 串起來）
-    content_hash: str       # 資料重複標記
-    start_line: int         # 起始行（1-based）
-    end_line: int           # 結束行（1-based）
 
-
-
+    id: str  # 唯一 ID：<relpath>:<start>-<end>
+    text: str  # 段落文字（多行，以 \n 串起來）
+    content_hash: str  # 資料重複標記
+    start_line: int  # 起始行（1-based）
+    end_line: int  # 結束行（1-based）
 
 
 def is_splitter_line_old(line: str) -> bool:
@@ -129,27 +127,26 @@ def is_splitter_line_old(line: str) -> bool:
     return False
 
 
-
 def is_splitter_line(line: str) -> bool:
     # 原有的強分隔符
     """判斷此函式的工作（細節以程式碼為準）。
-    
+
     回傳：依函式內 return path。
     """
     if RE_TOKEN_LINE.match(line):
         return True
     if RE_MOSTLY_TOKEN_LINE.match(line.strip()):
         return True
-    
+
     # 新增：標題行也是一種切分點 (但標題行本身稍後要被納入翻譯)
     # 這裡我們只判斷「是否觸發切段」
     if line.strip().startswith("#"):
         return True
-        
+
     # 新增：YAML Frontmatter 標記
     if line.strip() == "---":
         return True
-        
+
     return False
 
 
@@ -187,7 +184,6 @@ def is_translatable_text_line(line: str) -> bool:
     return True
 
 
-
 def normalize_blank_lines(text: str) -> str:
     """
     將 3 個以上連續空行壓縮成最多 2 個，
@@ -195,6 +191,7 @@ def normalize_blank_lines(text: str) -> str:
     """
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip("\n")
+
 
 def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockItem]:
     """
@@ -224,13 +221,15 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockIte
         block_text = "\n".join(buf).strip()
         if block_text and pass_lang_filter(block_text, lang_mode):
             h = make_content_hash(block_text)
-            items.append(BlockItem(
-                id=f"{rel_file}:{start_ln}-{end_ln}",
-                text=block_text,
-                content_hash=h,
-                start_line=start_ln,
-                end_line=end_ln
-            ))
+            items.append(
+                BlockItem(
+                    id=f"{rel_file}:{start_ln}-{end_ln}",
+                    text=block_text,
+                    content_hash=h,
+                    start_line=start_ln,
+                    end_line=end_ln,
+                )
+            )
         buf = []
         start_ln = None
 
@@ -289,9 +288,11 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockIte
     return items
 
 
-def build_pending_json(rel_md: str, abs_md: Path, items: List[BlockItem], lang_mode: str) -> dict:
+def build_pending_json(
+    rel_md: str, abs_md: Path, items: List[BlockItem], lang_mode: str
+) -> dict:
     """建立此函式的工作（細節以程式碼為準）。
-    
+
     回傳：依函式內 return path。
     """
     return {
@@ -306,19 +307,21 @@ def build_pending_json(rel_md: str, abs_md: Path, items: List[BlockItem], lang_m
         "notes": [
             "本版本以「段落/區塊」為單位抽取（連續文字行合併）。",
             "遇到空行或 §align/§stack/§rule/§recipe/§entity 等指令行會切段，且指令行不納入抽取。",
-            "語言過濾是以整個段落判斷（不是逐行）。"
-        ]
+            "語言過濾是以整個段落判斷（不是逐行）。",
+        ],
     }
+
 
 # 語言資料夾段落（en_us / zh_tw，允許 _en_us / _zh_tw，大小寫不拘）
 RE_LANG_SEG = re.compile(r"^_?(en_us|zh_cn|zh_tw)$", re.IGNORECASE)
 
+
 def has_allowed_lang_segment(path: Path) -> bool:
     # 用 parts 掃描每個 segment，支援 structure/en_us 這種深層結構
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`any`
-    
+
     回傳：依函式內 return path。
     """
     return any(RE_LANG_SEG.match(seg) for seg in path.parts)
@@ -361,7 +364,6 @@ def map_rel_lang_path(rel_path: str, src_lang: str, dst_lang: str) -> str:
     return "/".join(parts)
 
 
-
 def iter_md_files(root: Path):
     """
     遞迴列出所有 .md（大小寫不敏感），排除 README.md（不分大小寫、任何層級）
@@ -384,9 +386,9 @@ def iter_md_files(root: Path):
 
 def safe_relpath(path: Path, root: Path) -> str:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`as_posix`
-    
+
     回傳：依函式內 return path。
     """
     return path.relative_to(root).as_posix()
@@ -394,15 +396,20 @@ def safe_relpath(path: Path, root: Path) -> str:
 
 def main():
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`strip`
-    
+
     回傳：None
     """
     print("=== Markdown .md 抽取（段落/區塊）問答式 ===")
 
     in_dir = input("輸入資料夾（會遞迴往下找 .md）: ").strip().strip('"').strip("'")
-    out_dir = input("輸出資料夾（會輸出到：<輸出>/待翻譯/.../*.json）: ").strip().strip('"').strip("'")
+    out_dir = (
+        input("輸出資料夾（會輸出到：<輸出>/待翻譯/.../*.json）: ")
+        .strip()
+        .strip('"')
+        .strip("'")
+    )
 
     in_root = Path(in_dir).expanduser().resolve()
     out_root = Path(out_dir).expanduser().resolve()
@@ -451,10 +458,10 @@ def main():
             md_text = md_path.read_text(encoding="utf-8", errors="replace")
 
         ## 段落抽取
-        #items = extract_blocks(md_text, rel_md, lang_mode=lang_mode)
-        #total_blocks += len(items)
-#
-        #for it in items:
+        # items = extract_blocks(md_text, rel_md, lang_mode=lang_mode)
+        # total_blocks += len(items)
+        #
+        # for it in items:
         #    if it.content_hash in seen_hashes:
         #        dup_blocks += 1
         #    else:
@@ -494,7 +501,9 @@ def main():
                         items = filtered
                     else:
                         # 可選：印 log 方便你抓到需要人工處理的檔案
-                        print(f"[WARN] block misaligned, keep all: {rel_md} (en={len(items)} zh={len(zh_items)})")
+                        print(
+                            f"[WARN] block misaligned, keep all: {rel_md} (en={len(items)} zh={len(zh_items)})"
+                        )
 
         total_blocks += len(items)
 
@@ -505,8 +514,6 @@ def main():
                 seen_hashes.add(it.content_hash)
                 unique_blocks += 1
 
-
-
         if not items:
             skipped_empty += 1
             continue
@@ -515,7 +522,9 @@ def main():
         out_json_path.parent.mkdir(parents=True, exist_ok=True)
 
         payload = build_pending_json(rel_md, md_path, items, lang_mode)
-        out_json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        out_json_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         json_written += 1
 
     # manifest
@@ -535,10 +544,12 @@ def main():
         "notes": [
             "README.md 已排除（不分大小寫、任何層級）。",
             "以段落/區塊抽取（連續文字行合併）。",
-            "空行或 §align/§stack/§rule/§recipe/§entity 行會切段，且該行不納入抽取。"
-        ]
+            "空行或 §align/§stack/§rule/§recipe/§entity 行會切段，且該行不納入抽取。",
+        ],
     }
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     print("\n=== 完成 ===")
     print(f"輸入根目錄：{in_root}")

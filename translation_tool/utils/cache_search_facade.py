@@ -20,11 +20,12 @@ class CacheSearchFacade:
     用途：封裝與 CacheSearchFacade 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
+
     def __init__(self, cache_root_getter: Callable[[], Path], logger: logging.Logger):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`Lock`
-        
+
         回傳：None
         """
         self._cache_root_getter = cache_root_getter
@@ -34,7 +35,7 @@ class CacheSearchFacade:
 
     def _get_orchestrator(self) -> SearchOrchestrator:
         """取得此函式的工作（細節以程式碼為準）。
-        
+
         回傳：依函式內 return path。
         """
         if self._orchestrator is None:
@@ -45,7 +46,7 @@ class CacheSearchFacade:
 
     def get_search_engine(self):
         """取得此函式的工作（細節以程式碼為準）。
-        
+
         回傳：依函式內 return path。
         """
         try:
@@ -54,31 +55,42 @@ class CacheSearchFacade:
             self._logger.error(f"❌ 搜尋引擎初始化失敗: {e}", exc_info=True)
             return None
 
-    def rebuild_search_index(self, cache_types: list[str], translation_cache: dict[str, dict[str, Any]]) -> None:
+    def rebuild_search_index(
+        self, cache_types: list[str], translation_cache: dict[str, dict[str, Any]]
+    ) -> None:
         """重建此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`info`
-        
+
         回傳：None
         """
         try:
             self._logger.info("🔄 開始重建搜尋索引...")
-            total_indexed = self._get_orchestrator().rebuild_search_index(cache_types, translation_cache)
+            total_indexed = self._get_orchestrator().rebuild_search_index(
+                cache_types, translation_cache
+            )
             self._logger.info(f"✅ 搜尋索引重建完成，共索引 {total_indexed} 條翻譯")
         except Exception as e:
             self._logger.error(f"❌ 重建搜尋索引失敗: {e}", exc_info=True)
 
-    def rebuild_search_index_for_type(self, cache_type: str, cache_types: list[str], translation_cache: dict[str, dict[str, Any]]) -> None:
+    def rebuild_search_index_for_type(
+        self,
+        cache_type: str,
+        cache_types: list[str],
+        translation_cache: dict[str, dict[str, Any]],
+    ) -> None:
         """重建此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`rebuild_search_index_for_type`
-        
+
         回傳：None
         """
         if cache_type not in cache_types:
             return
         try:
-            indexed = self._get_orchestrator().rebuild_search_index_for_type(cache_type, translation_cache)
+            indexed = self._get_orchestrator().rebuild_search_index_for_type(
+                cache_type, translation_cache
+            )
             self._logger.info(f"✅ {cache_type} 索引重建完成（{indexed} 條）")
         except Exception as e:
             self._logger.error(f"❌ {cache_type} 索引重建失敗: {e}", exc_info=True)
@@ -92,7 +104,7 @@ class CacheSearchFacade:
         use_fuzzy: bool = True,
     ) -> list:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：依函式內 return path。
         """
         try:
@@ -115,7 +127,7 @@ class CacheSearchFacade:
         limit: int = 20,
     ) -> list:
         """找出此函式的工作（細節以程式碼為準）。
-        
+
         回傳：依函式內 return path。
         """
         try:

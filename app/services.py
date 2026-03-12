@@ -12,10 +12,14 @@ import logging
 import traceback
 
 from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
-from translation_tool.checkers.english_residue_checker import check_english_residue_generator
+from translation_tool.checkers.english_residue_checker import (
+    check_english_residue_generator,
+)
 from translation_tool.checkers.untranslated_checker import check_untranslated_generator
 from translation_tool.checkers.variant_comparator import compare_variants_generator
-from translation_tool.checkers.variant_comparator_tsv import compare_variants_tsv_generator
+from translation_tool.checkers.variant_comparator_tsv import (
+    compare_variants_tsv_generator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +34,7 @@ __all__ = [
 
 def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
     """執行此 generator 並逐步回報進度（yield update dict）。
-    
+
     - 主要包裝：`check_untranslated_generator`
     """
     try:
@@ -50,7 +54,7 @@ def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
 
 def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
     """執行此 generator 並逐步回報進度（yield update dict）。
-    
+
     - 主要包裝：`compare_variants_generator`
     """
     try:
@@ -70,7 +74,7 @@ def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
 
 def run_english_residue_check_service(input_dir: str, out_dir: str):
     """執行此 generator 並逐步回報進度（yield update dict）。
-    
+
     - 主要包裝：`check_english_residue_generator`
     """
     try:
@@ -90,7 +94,7 @@ def run_english_residue_check_service(input_dir: str, out_dir: str):
 
 def run_variant_compare_tsv_service(tsv_path: str, output_csv_path: str):
     """執行此 generator 並逐步回報進度（yield update dict）。
-    
+
     - 主要包裝：`compare_variants_tsv_generator`
     """
     try:

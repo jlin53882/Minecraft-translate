@@ -25,6 +25,7 @@ class CacheRuntimeState:
     用途：封裝與 CacheRuntimeState 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
+
     translation_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
     cache_file_path: dict[str, Path] = field(default_factory=dict)
     initialized: bool = False
@@ -38,7 +39,7 @@ _RUNTIME = CacheRuntimeState()
 
 def get_runtime_state() -> CacheRuntimeState:
     """取得此函式的工作（細節以程式碼為準）。
-    
+
     回傳：依函式內 return path。
     """
     return _RUNTIME
@@ -46,9 +47,9 @@ def get_runtime_state() -> CacheRuntimeState:
 
 def reset_runtime_state(cache_types: list[str]) -> CacheRuntimeState:
     """處理此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`get_runtime_state`
-    
+
     回傳：依函式內 return path。
     """
     state = get_runtime_state()
@@ -62,9 +63,9 @@ def reset_runtime_state(cache_types: list[str]) -> CacheRuntimeState:
 
 def ensure_runtime_maps(cache_types: list[str]) -> CacheRuntimeState:
     """確保此函式的工作（細節以程式碼為準）。
-    
+
     - 主要包裝：`get_runtime_state`
-    
+
     回傳：依函式內 return path。
     """
     state = get_runtime_state()
@@ -81,7 +82,9 @@ def ensure_runtime_maps(cache_types: list[str]) -> CacheRuntimeState:
     return state
 
 
-def get_cache_type_dict(cache_state: dict[str, dict[str, Any]], cache_type: str) -> dict[str, Any]:
+def get_cache_type_dict(
+    cache_state: dict[str, dict[str, Any]], cache_type: str
+) -> dict[str, Any]:
     """取得指定 cache_type 的可變字典（不存在就建立）。"""
     bucket = cache_state.get(cache_type)
     if not isinstance(bucket, dict):
@@ -125,12 +128,16 @@ def clear_dirty(is_dirty: dict[str, bool], cache_type: str) -> None:
     is_dirty[cache_type] = False
 
 
-def get_session_entries(session_new_entries: dict[str, dict[str, Any]], cache_type: str) -> dict[str, Any]:
+def get_session_entries(
+    session_new_entries: dict[str, dict[str, Any]], cache_type: str
+) -> dict[str, Any]:
     """取得本次執行階段的暫存條目容器（不存在就建立）。"""
     return get_cache_type_dict(session_new_entries, cache_type)
 
 
-def flush_session_entries(session_new_entries: dict[str, dict[str, Any]], cache_type: str) -> dict[str, Any]:
+def flush_session_entries(
+    session_new_entries: dict[str, dict[str, Any]], cache_type: str
+) -> dict[str, Any]:
     """回傳暫存條目的淺拷貝並清空原容器。"""
     bucket = get_session_entries(session_new_entries, cache_type)
     data = bucket.copy()

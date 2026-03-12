@@ -18,7 +18,9 @@ from app.task_session import TaskSession
 from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
-LM_translate_folder_name = load_config().get("lm_translator", {}).get("lm_translate_folder_name", "LM翻譯後")
+LM_translate_folder_name = (
+    load_config().get("lm_translator", {}).get("lm_translate_folder_name", "LM翻譯後")
+)
 
 
 class LMView(ft.Column):
@@ -26,9 +28,9 @@ class LMView(ft.Column):
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`__init__`, `TextField`
-        
+
         回傳：None
         """
         super().__init__(expand=True, spacing=16)
@@ -61,13 +63,23 @@ class LMView(ft.Column):
         )
 
         # 參數
-        self.dry_run_switch = ft.Switch(label="Dry-run（只分析，不發送 API）", value=False)
-        self.export_lang_checkbox = ft.Switch(label="輸出 .lang 檔案（不是 .json）", value=False)
-        self.write_new_cache_switch = ft.Switch(label="寫入新快取(每次回傳單獨快取)（write_new_cache）", value=False)
+        self.dry_run_switch = ft.Switch(
+            label="Dry-run（只分析，不發送 API）", value=False
+        )
+        self.export_lang_checkbox = ft.Switch(
+            label="輸出 .lang 檔案（不是 .json）", value=False
+        )
+        self.write_new_cache_switch = ft.Switch(
+            label="寫入新快取(每次回傳單獨快取)（write_new_cache）", value=False
+        )
 
         # 狀態與日誌
-        self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=ft.Colors.GREY_200)
-        self.progress_bar = ft.ProgressBar(value=0, height=8, bgcolor=ft.Colors.GREY_200, color=ft.Colors.BLUE)
+        self.status_chip = ft.Chip(
+            label=ft.Text("尚未開始"), bgcolor=ft.Colors.GREY_200
+        )
+        self.progress_bar = ft.ProgressBar(
+            value=0, height=8, bgcolor=ft.Colors.GREY_200, color=ft.Colors.BLUE
+        )
         self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
 
         # 按鈕（共用 primary style）
@@ -138,9 +150,9 @@ class LMView(ft.Column):
 
     def _path_row(self, field: ft.TextField, on_pick) -> ft.Control:
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`Row`
-        
+
         回傳：依函式內 return path。
         """
         return ft.Row(
@@ -161,9 +173,9 @@ class LMView(ft.Column):
     # --------------------------------------------------
     def pick_input_directory(self, e):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`get_directory_path`
-        
+
         回傳：None
         """
         self.file_picker.on_result = self.on_input_dir_picked
@@ -171,7 +183,7 @@ class LMView(ft.Column):
 
     def on_input_dir_picked(self, e):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if e.path:
@@ -180,9 +192,9 @@ class LMView(ft.Column):
 
     def pick_output_directory(self, e):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`get_directory_path`
-        
+
         回傳：None
         """
         self.file_picker.on_result = self.on_output_dir_picked
@@ -190,7 +202,7 @@ class LMView(ft.Column):
 
     def on_output_dir_picked(self, e):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         if e.path:
@@ -199,9 +211,9 @@ class LMView(ft.Column):
 
     def start_clicked(self, e):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`TaskSession`, `start`, `_set_status`
-        
+
         回傳：None
         """
         if not (self.input_path.value or "").strip():
@@ -213,7 +225,9 @@ class LMView(ft.Column):
         self.session.start()
 
         if not (self.output_path.value or "").strip():
-            self.session.add_log(f"[資訊] 未指定輸出，將使用預設：{LM_translate_folder_name}")
+            self.session.add_log(
+                f"[資訊] 未指定輸出，將使用預設：{LM_translate_folder_name}"
+            )
 
         self._set_status("執行中", ft.Colors.BLUE_200)
         self.progress_bar.value = 0
@@ -225,7 +239,12 @@ class LMView(ft.Column):
         export_lang = self.export_lang_checkbox.value
         write_new_cache = self.write_new_cache_switch.value
 
-        logger.debug("LM UI options: dry_run=%s export_lang=%s write_new_cache=%s", dry_run, export_lang, write_new_cache)
+        logger.debug(
+            "LM UI options: dry_run=%s export_lang=%s write_new_cache=%s",
+            dry_run,
+            export_lang,
+            write_new_cache,
+        )
 
         threading.Thread(
             target=run_lm_translation_service,
@@ -247,9 +266,9 @@ class LMView(ft.Column):
     # --------------------------------------------------
     def start_ui_timer(self):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`start`
-        
+
         回傳：None
         """
         if self._ui_timer_running:
@@ -258,7 +277,7 @@ class LMView(ft.Column):
 
         def loop():
             """處理此函式的工作（細節以程式碼為準）。
-            
+
             回傳：None
             """
             while self._ui_timer_running:
@@ -271,7 +290,9 @@ class LMView(ft.Column):
 
                 self.log_view.controls.clear()
                 for line in snap["logs"][-250:]:
-                    self.log_view.controls.append(ft.Text(line, size=13, color=ft.Colors.GREY_100))
+                    self.log_view.controls.append(
+                        ft.Text(line, size=13, color=ft.Colors.GREY_100)
+                    )
 
                 if snap["status"] == "DONE":
                     self._set_status("任務完成", ft.Colors.GREEN_200)
@@ -289,9 +310,9 @@ class LMView(ft.Column):
     # --------------------------------------------------
     def _set_status(self, text: str, color: str):
         """設定此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`Text`
-        
+
         回傳：None
         """
         self.status_chip.label = ft.Text(text)
@@ -299,9 +320,9 @@ class LMView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         - 主要包裝：`SnackBar`
-        
+
         回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)

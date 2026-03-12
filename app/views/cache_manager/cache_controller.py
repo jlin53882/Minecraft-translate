@@ -21,9 +21,10 @@ class CacheController:
     用途：封裝與 CacheController 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
+
     def __init__(self):
         """處理此函式的工作（細節以程式碼為準）。
-        
+
         回傳：None
         """
         self._seq = 0
@@ -43,7 +44,7 @@ class CacheController:
 
     def is_current(self, run_id: int | None) -> bool:
         """判斷此函式的工作（細節以程式碼為準）。
-        
+
         回傳：依函式內 return path。
         """
         if run_id is None:
