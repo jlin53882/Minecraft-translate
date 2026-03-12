@@ -583,18 +583,6 @@ class RulesView(ft.Column):
     def reload_rules_clicked(self, e):
         return start_reload_thread(self)
 
-    def _perform_reload(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`_load_rules_core`
-
-        回傳：None
-        """
-        try:
-            rules_data = self._load_rules_core()
-            self._run_on_ui_thread(lambda: self._handle_reload_success(rules_data))
-        except Exception as err:
-            self._run_on_ui_thread(lambda err=err: self._handle_reload_failure(err))
 
     def _handle_reload_success(self, rules_data):
         """處理此函式的工作（細節以程式碼為準）。
@@ -677,17 +665,6 @@ class RulesView(ft.Column):
         self._show_snack_bar("✅ 驗證通過，正在儲存規則…", ft.Colors.BLUE_700)
         return start_save_thread(self, clean_rules)
 
-    def _perform_save(self, new_rules):
-        try:
-            save_replace_rules(new_rules)
-            self._run_on_ui_thread(
-                lambda: self._show_snack_bar("規則已成功儲存！", ft.Colors.GREEN_600)
-            )
-        except Exception as err:
-            msg = f"儲存規則時發生錯誤: {err}"
-            self._run_on_ui_thread(
-                lambda msg=msg: self._show_snack_bar(msg, ft.Colors.RED_600)
-            )
 
     def add_row_clicked(self, e):
         """加入此函式的工作（細節以程式碼為準）。
