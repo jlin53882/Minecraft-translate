@@ -73,7 +73,7 @@ class LookupView(ft.Column):
                     content=ft.Column(
                         [
                             ft.Text(
-                                "單筆學名查詢", style=ft.TextThemeStyle.TITLE_MEDIUM
+                                "單筆學名查詢", theme_style=ft.TextThemeStyle.TITLE_MEDIUM
                             ),
                             ft.Row([self.single_input, self.single_button]),
                             ft.Divider(),
@@ -95,7 +95,7 @@ class LookupView(ft.Column):
                     content=ft.Column(
                         [
                             ft.Text(
-                                "批次學名查詢", style=ft.TextThemeStyle.TITLE_MEDIUM
+                                "批次學名查詢", theme_style=ft.TextThemeStyle.TITLE_MEDIUM
                             ),
                             ft.Row(
                                 [self.batch_input, self.batch_result_textfield],
