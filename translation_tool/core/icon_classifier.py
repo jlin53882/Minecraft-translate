@@ -8,14 +8,17 @@ from .icon_reason import IconRisk
 
 
 def classify_no_icon_reason(lang_key: str) -> tuple[str, IconRisk]:
-    """classify_no_icon_reason 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`classify_no_icon_reason`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`lower`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     k = lang_key.lower()
 

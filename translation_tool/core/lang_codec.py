@@ -17,14 +17,17 @@ KEY_ZH = re.compile(r'^([a-zA-Z0-9_.-]+)([\u4e00-\u9fff].+)$')
 
 def try_repair_lang_line(line: str):
     # JSON 風格
-    """try_repair_lang_line 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`try_repair_lang_line`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`match`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     m = JSON_LINE.match(line)
     if m:
@@ -128,14 +131,16 @@ def is_mc_standard_lang_path(path: str) -> bool:
     return "/lang/" in p and p.endswith(".lang")
 
 def pick_first_not_none(*vals):
-    """pick_first_not_none 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`pick_first_not_none`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     for v in vals:
         if v is not None:

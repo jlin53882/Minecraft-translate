@@ -14,14 +14,17 @@ class UISessionLogHandler(logging.Handler):
     """
 
     def __init__(self):
-        """__init__ 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`__init__`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`__init__`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         super().__init__()
         self._session = None
@@ -33,14 +36,17 @@ class UISessionLogHandler(logging.Handler):
         self._session = session
 
     def emit(self, record: logging.LogRecord):
-        """emit 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`emit`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`format`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if not self._session:
             return

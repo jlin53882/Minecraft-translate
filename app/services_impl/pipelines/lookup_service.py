@@ -19,14 +19,17 @@ logger = logging.getLogger(__name__)
 
 
 def run_manual_lookup_service(name: str) -> str:
-    """run_manual_lookup_service 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`run_manual_lookup_service`
+    
+    用途：
+    - 執行此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`lookup_species_name`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     if not is_potential_species_name(name):
         return f"'{name}' 不像是一個有效的學名格式 (例如：Felis catus)。"
@@ -35,14 +38,17 @@ def run_manual_lookup_service(name: str) -> str:
 
 
 def run_batch_lookup_service(json_text: str):
-    """run_batch_lookup_service 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`run_batch_lookup_service`
+    
+    用途：
+    - 執行此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`loads`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - Generator：逐步 yield update dict（log/progress/error 等）。
     """
     try:
         names = json.loads(json_text)

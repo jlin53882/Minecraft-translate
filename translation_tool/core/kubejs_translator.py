@@ -476,28 +476,33 @@ def step2_translate_lm(
         維護注意：修改公開方法前請確認外部呼叫點與相容性。
         """
         def __init__(self, parent, base: float, span: float):
-            """__init__ 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`__init__`
+            
+            用途：
+            - 處理此函式的主要流程（細節以程式碼為準）。
+            - 主要包裝/呼叫：`float`
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - None
             """
             self.parent = parent
             self.base = float(base)
             self.span = float(span)
 
         def set_progress(self, p: float):
-            """set_progress 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`set_progress`
+            
+            用途：
+            - 設定此函式的主要流程（細節以程式碼為準）。
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - None
             """
             if not self.parent or not hasattr(self.parent, "set_progress"):
                 return
@@ -513,14 +518,16 @@ def step2_translate_lm(
 
         # 可選轉發
         def set_status(self, msg: str):
-            """set_status 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`set_status`
+            
+            用途：
+            - 設定此函式的主要流程（細節以程式碼為準）。
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - None
             """
             if self.parent and hasattr(self.parent, "set_status"):
                 try:
@@ -662,14 +669,17 @@ def run_kubejs_pipeline(
 
     # 統計「待翻譯」資料夾中有多少個 Key 需要處理
     def _count_pending_lang_keys(pending_dir: Path) -> int:
-        """_count_pending_lang_keys 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_count_pending_lang_keys`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`rglob`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         total = 0
         for p in pending_dir.rglob("*.json"):
@@ -682,14 +692,17 @@ def run_kubejs_pipeline(
         return total
 
     def _log_kubejs_step2_stats(step2_res: Dict[str, Any]) -> None:
-        """_log_kubejs_step2_stats 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_log_kubejs_step2_stats`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`bool`, `get`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if not isinstance(step2_res, dict):
             return

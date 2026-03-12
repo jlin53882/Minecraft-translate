@@ -187,14 +187,16 @@ def translate_ftb_pending_to_zh_tw(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def set_prog(v: float):
-        """set_prog 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`set_prog`
+        
+        用途：
+        - 設定此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if session is not None and hasattr(session, "set_progress"):
             try:
@@ -222,14 +224,17 @@ def translate_ftb_pending_to_zh_tw(
     global_total_keys = 0
 
     def _count_one(src: Path) -> Tuple[Path, int]:
-        """_count_one 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_count_one`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`read_json_dict`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         try:
             mapping = read_json_dict(src)
@@ -328,14 +333,17 @@ def translate_ftb_pending_to_zh_tw(
     _file_write_table: dict[str, tuple[Path, Dict[str, str]]] = {}
 
     def _writer(file_id: str) -> None:
-        """_writer 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_writer`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`write_json_dict`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         dst_path, data = _file_write_table[file_id]
         write_json_dict(dst_path, data)
@@ -483,14 +491,17 @@ def translate_ftb_pending_to_zh_tw(
 
         # shared while-loop（includes add_to_cache + save_translation_cache + safe slicing）
         def on_translated_item(it: Dict[str, Any]) -> None:
-            """on_translated_item 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`on_translated_item`
+            
+            用途：
+            - 處理此函式的主要流程（細節以程式碼為準）。
+            - 主要包裝/呼叫：`get`
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - None
             """
             p = it.get("path")
             t = it.get("text")
@@ -516,14 +527,17 @@ def translate_ftb_pending_to_zh_tw(
 
         # 在這之前先確保 file_id/_file_write_table 設定好了（下面會說加在哪）
         def on_batch_flushed() -> None:
-            """on_batch_flushed 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`on_batch_flushed`
+            
+            用途：
+            - 處理此函式的主要流程（細節以程式碼為準）。
+            - 主要包裝/呼叫：`touch`
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - None
             """
             try:
                 touch.touch(file_id)
@@ -534,14 +548,17 @@ def translate_ftb_pending_to_zh_tw(
 
 
         def _fmt_eta(sec: float) -> str:
-            """_fmt_eta 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`_fmt_eta`
+            
+            用途：
+            - 處理此函式的主要流程（細節以程式碼為準）。
+            - 主要包裝/呼叫：`divmod`
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - 依實作回傳值（請見函式內 return path）。
             """
             if sec <= 0:
                 return ""
@@ -552,14 +569,17 @@ def translate_ftb_pending_to_zh_tw(
 
 
         def on_progress(p: float, msg: str, eta_sec: float) -> None:
-            """on_progress 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`on_progress`
+            
+            用途：
+            - 處理此函式的主要流程（細節以程式碼為準）。
+            - 主要包裝/呼叫：`_fmt_eta`, `set_prog`
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - None
             """
             eta_txt = _fmt_eta(eta_sec)
             if eta_txt:

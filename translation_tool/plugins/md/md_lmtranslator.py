@@ -42,41 +42,49 @@ from translation_tool.plugins.shared.lang_text_rules import _strip_fmt, is_alrea
 # -------------------------
 
 def read_json(path: Path) -> Dict[str, Any]:
-    """read_json 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`read_json`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 def write_json(path: Path, data: Dict[str, Any]) -> None:
-    """write_json 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`write_json`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`mkdir`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - None
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def collect_pending_json_files(pending_root: Path) -> List[Path]:
-    """collect_pending_json_files 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`collect_pending_json_files`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`sorted`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     files = sorted(pending_root.rglob("*.json"))
     # 跳過 manifest
@@ -106,14 +114,17 @@ class PendingItem:
     end_line: int
 
 def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
-    """load_pending_doc 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`load_pending_doc`
+    
+    用途：
+    - 載入此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`read_json`, `get`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     data = read_json(path)
     if data.get("schema") != "md_pending_blocks_v1":
@@ -131,14 +142,17 @@ def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
     return data, items
 
 def compute_out_json_path(src_json: Path, in_pending_root: Path, out_root: Path) -> Path:
-    """compute_out_json_path 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`compute_out_json_path`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`relative_to`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     rel = src_json.relative_to(in_pending_root)
     return out_root / "LM翻譯後" / rel
@@ -151,14 +165,17 @@ def translate_md_pending(
     dry_run: bool = False,
     session=None,
 ) -> Dict[str, Any]:
-    """translate_md_pending 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`translate_md_pending`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`validate_api_keys`, `perf_counter`, `resolve`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     validate_api_keys()
     start_time=time.perf_counter()
@@ -309,26 +326,31 @@ def translate_md_pending(
 
     # md 是「最後一次寫出全部檔案」即可，所以 touched writer 這裡先做 noop
     def _writer(_fid: str) -> None:
-        """_writer 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_writer`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         return
 
     def on_translated_item(it: Dict[str, Any]) -> None:
-        """on_translated_item 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`on_translated_item`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`str`, `record`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
@@ -349,14 +371,17 @@ def translate_md_pending(
             pass
 
     def on_batch_flushed() -> None:
-        """on_batch_flushed 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`on_batch_flushed`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`touch`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         try:
             touch.touch("noop")
@@ -365,14 +390,17 @@ def translate_md_pending(
             pass
 
     def _fmt_eta(sec: float) -> str:
-        """_fmt_eta 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_fmt_eta`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`divmod`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         if sec <= 0:
             return ""
@@ -380,14 +408,17 @@ def translate_md_pending(
         return f"{m}m{s:02d}s" if m > 0 else f"{s}s"
 
     def on_progress(p: float, msg: str, eta_sec: float) -> None:
-        """on_progress 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`on_progress`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_fmt_eta`, `log_info`, `progress`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         eta_txt = _fmt_eta(eta_sec)
         log_info(
@@ -500,14 +531,17 @@ def translate_md_pending(
 
 
 def main():
-    """main 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`main`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`log_info`, `strip`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - None
     """
     log_info("=== MD Pending Blocks -> LM 翻譯（md cache 全接 + content_hash 去重）===")
 

@@ -52,27 +52,33 @@ __all__ = [
 
 
 def _state():
-    """_state 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`_state`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`ensure_runtime_maps`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     return cache_store.ensure_runtime_maps(CACHE_TYPES)
 
 
 def _get_cache_root() -> Path:
-    """_get_cache_root 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`_get_cache_root`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`get`, `resolve_project_path`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     translation_config = load_config().get("translator", {})
     cache_dir_name = translation_config.get("cache_directory", _CACHE_DIR_NAME)
@@ -80,14 +86,17 @@ def _get_cache_root() -> Path:
 
 
 def _load_cache_type(cache_type: str):
-    """_load_cache_type 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`_load_cache_type`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`, `get`, `load_cache_type`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - None
     """
     state = _state()
     translation_config = load_config().get("translator", {})
@@ -102,14 +111,17 @@ def _load_cache_type(cache_type: str):
 
 
 def initialize_translation_cache():
-    """initialize_translation_cache 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`initialize_translation_cache`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - None
     """
     state = _state()
     if state.initialized:
@@ -123,27 +135,33 @@ def initialize_translation_cache():
 
 
 def is_cache_initialized() -> bool:
-    """is_cache_initialized 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`is_cache_initialized`
+    
+    用途：
+    - 判斷此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`bool`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     return bool(_state().initialized)
 
 
 def reload_translation_cache():
-    """reload_translation_cache 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`reload_translation_cache`
+    
+    用途：
+    - 重新載入此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`reset_runtime_state`, `initialize_translation_cache`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - None
     """
     state = cache_store.reset_runtime_state(CACHE_TYPES)
     with state.cache_lock:
@@ -152,14 +170,17 @@ def reload_translation_cache():
 
 
 def reload_translation_cache_type(cache_type: str):
-    """reload_translation_cache_type 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`reload_translation_cache_type`
+    
+    用途：
+    - 重新載入此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`, `initialize_translation_cache`, `_load_cache_type`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - None
     """
     if cache_type not in CACHE_TYPES:
         return
@@ -173,14 +194,17 @@ def reload_translation_cache_type(cache_type: str):
 
 
 def _save_entries_to_active_shards(cache_type: str, entries: dict, force_new_shard: bool = False):
-    """_save_entries_to_active_shards 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`_save_entries_to_active_shards`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`, `_save_entries_to_active_shards`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     state = _state()
     type_dir = state.cache_file_path[cache_type].parent
@@ -196,14 +220,17 @@ def _save_entries_to_active_shards(cache_type: str, entries: dict, force_new_sha
 
 
 def save_translation_cache(cache_type: str, write_new_shard: bool = True):
-    """save_translation_cache 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`save_translation_cache`
+    
+    用途：
+    - 保存此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`, `get`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - None
     """
     if not load_config().get("translator", {}).get("enable_cache_saving", True):
         return
@@ -226,14 +253,17 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
 
 
 def _get_active_shard_path(cache_type: str) -> Path:
-    """_get_active_shard_path 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`_get_active_shard_path`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`, `_get_active_shard_path`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     state = _state()
     type_dir = state.cache_file_path[cache_type].parent
@@ -253,14 +283,17 @@ def add_to_cache(
     mod: str | None = None,
     path: str | None = None,
 ):
-    """add_to_cache 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`add_to_cache`
+    
+    用途：
+    - 加入此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - None
     """
     if not key or not dst:
         return
@@ -281,14 +314,17 @@ def add_to_cache(
 
 
 def get_from_cache(cache_type: str, key: str) -> Optional[str]:
-    """get_from_cache 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`get_from_cache`
+    
+    用途：
+    - 取得此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`, `get`, `get_value`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     state = _state()
     if not state.initialized:
@@ -300,14 +336,17 @@ def get_from_cache(cache_type: str, key: str) -> Optional[str]:
 
 
 def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
-    """get_cache_entry 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`get_cache_entry`
+    
+    用途：
+    - 取得此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`, `get`, `get_entry`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     state = _state()
     if not state.initialized:
@@ -319,14 +358,17 @@ def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
 
 
 def get_cache_dict_ref(cache_type: str) -> Dict[str, Dict[str, Any]]:
-    """get_cache_dict_ref 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`get_cache_dict_ref`
+    
+    用途：
+    - 取得此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`, `get`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     state = _state()
     if not state.initialized:
@@ -336,14 +378,17 @@ def get_cache_dict_ref(cache_type: str) -> Dict[str, Dict[str, Any]]:
 
 
 def get_session_new_count(cache_type: str) -> int:
-    """get_session_new_count 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`get_session_new_count`
+    
+    用途：
+    - 取得此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     state = _state()
     with state.cache_lock:
@@ -351,28 +396,34 @@ def get_session_new_count(cache_type: str) -> int:
 
 
 def get_active_shard_id(cache_type: str) -> str:
-    """get_active_shard_id 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`get_active_shard_id`
+    
+    用途：
+    - 取得此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`, `_get_active_shard_id_impl`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     state = _state()
     return _get_active_shard_id_impl(state.cache_file_path, cache_type, ACTIVE_SHARD_FILE)
 
 
 def get_cache_overview() -> Dict[str, Any]:
-    """get_cache_overview 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`get_cache_overview`
+    
+    用途：
+    - 取得此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`initialize_translation_cache`, `_state`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     initialize_translation_cache()
     state = _state()
@@ -393,14 +444,17 @@ def get_cache_overview() -> Dict[str, Any]:
 
 
 def force_rotate_shard(cache_type: str) -> bool:
-    """force_rotate_shard 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`force_rotate_shard`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`initialize_translation_cache`, `_state`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     initialize_translation_cache()
     state = _state()
@@ -420,14 +474,16 @@ def force_rotate_shard(cache_type: str) -> bool:
 
 
 def _get_search_facade() -> CacheSearchFacade:
-    """_get_search_facade 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`_get_search_facade`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     global _search_facade
     if _search_facade is None:
@@ -438,68 +494,83 @@ def _get_search_facade() -> CacheSearchFacade:
 
 
 def get_search_engine():
-    """get_search_engine 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`get_search_engine`
+    
+    用途：
+    - 取得此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`get_search_engine`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     return _get_search_facade().get_search_engine()
 
 
 def rebuild_search_index():
-    """rebuild_search_index 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`rebuild_search_index`
+    
+    用途：
+    - 重建此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`, `rebuild_search_index`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     state = _state()
     return _get_search_facade().rebuild_search_index(CACHE_TYPES, state.translation_cache)
 
 
 def rebuild_search_index_for_type(cache_type: str):
-    """rebuild_search_index_for_type 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`rebuild_search_index_for_type`
+    
+    用途：
+    - 重建此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`_state`, `rebuild_search_index_for_type`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     state = _state()
     return _get_search_facade().rebuild_search_index_for_type(cache_type, CACHE_TYPES, state.translation_cache)
 
 
 def search_cache(query: str, cache_type: str = None, limit: int = 50, use_fuzzy: bool = True) -> list:
-    """search_cache 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`search_cache`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`search_cache`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     return _get_search_facade().search_cache(query=query, cache_type=cache_type, limit=limit, use_fuzzy=use_fuzzy)
 
 
 def find_similar_translations(text: str, cache_type: str = None, threshold: float = 0.6, limit: int = 20) -> list:
-    """find_similar_translations 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`find_similar_translations`
+    
+    用途：
+    - 找出此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`find_similar_translations`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     return _get_search_facade().find_similar_translations(text=text, cache_type=cache_type, threshold=threshold, limit=limit)
 

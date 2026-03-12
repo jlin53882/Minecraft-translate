@@ -57,14 +57,17 @@ except Exception as e:
     log.error(f"載入 Wikipedia 函式庫時發生未知錯誤: {e}")
 
 def initialize_species_cache():
-    """initialize_species_cache 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`initialize_species_cache`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`info`, `get`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     global _species_cache_data, _CACHE_DIR, _CACHE_FILE, _WIKI_LANG, _RATE_LIMIT_DELAY, _initialized
     if _initialized:
@@ -107,28 +110,34 @@ def initialize_species_cache():
         return False
 
 def is_potential_species_name(name: str) -> bool:
-    """is_potential_species_name 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`is_potential_species_name`
+    
+    用途：
+    - 判斷此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`bool`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     if not isinstance(name, str):
         return False
     return bool(_SPECIES_NAME_REGEX.match(name))
 
 def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
-    """query_wikipedia_and_update_cache 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`query_wikipedia_and_update_cache`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`debug`, `sleep`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     if not _WIKIPEDIA_AVAILABLE or _species_cache_data is None:
         return None
@@ -168,14 +177,16 @@ def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
         return None
 
 def lookup_species_name(name: str) -> Optional[str]:
-    """lookup_species_name 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`lookup_species_name`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     if not _initialized:
         if not initialize_species_cache():

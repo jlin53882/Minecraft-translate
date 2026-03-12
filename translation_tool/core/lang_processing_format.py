@@ -70,14 +70,17 @@ def convert_only_cjk(text: str, rules=None) -> str:
 
     def replacer(match):
         # 抓到的一整串中文字
-        """replacer 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`replacer`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`group`, `convert`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         cjk_chunk = match.group(1)
         # 整串丟給 OpenCC，這樣「内存」才會變「記憶體」

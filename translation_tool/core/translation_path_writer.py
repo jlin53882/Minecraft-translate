@@ -10,14 +10,16 @@ from pathlib import Path
 
 
 def map_lang_output_path(src: Path) -> Path:
-    """map_lang_output_path 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`map_lang_output_path`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     if src.name.lower() == "en_us.json" and "lang" in src.parts:
         return src.with_name("zh_tw.json")
@@ -25,14 +27,17 @@ def map_lang_output_path(src: Path) -> Path:
 
 
 def set_by_path(root: dict, path: str, value):
-    """set_by_path 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`set_by_path`
+    
+    用途：
+    - 設定此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`replace`, `split`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     current = root
     normalized_path = path.replace("][", "].[")

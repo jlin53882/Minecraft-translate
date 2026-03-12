@@ -25,14 +25,17 @@ class LMView(ft.Column):
     """LM 翻譯頁（風格對齊 Translation/Extractor）。"""
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """__init__ 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`__init__`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`__init__`, `TextField`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         super().__init__(expand=True, spacing=16)
         self.page = page
@@ -140,14 +143,17 @@ class LMView(ft.Column):
     # - 之後調整 UI（padding/radius/border/divider）只要改一處
 
     def _path_row(self, field: ft.TextField, on_pick) -> ft.Control:
-        """_path_row 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_path_row`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`Row`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         return ft.Row(
             [
@@ -166,68 +172,81 @@ class LMView(ft.Column):
     # Events
     # --------------------------------------------------
     def pick_input_directory(self, e):
-        """pick_input_directory 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`pick_input_directory`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`get_directory_path`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.file_picker.on_result = self.on_input_dir_picked
         self.file_picker.get_directory_path()
 
     def on_input_dir_picked(self, e):
-        """on_input_dir_picked 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`on_input_dir_picked`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if e.path:
             self.input_path.value = e.path
             self.page.update()
 
     def pick_output_directory(self, e):
-        """pick_output_directory 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`pick_output_directory`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`get_directory_path`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.file_picker.on_result = self.on_output_dir_picked
         self.file_picker.get_directory_path()
 
     def on_output_dir_picked(self, e):
-        """on_output_dir_picked 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`on_output_dir_picked`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if e.path:
             self.output_path.value = e.path
             self.page.update()
 
     def start_clicked(self, e):
-        """start_clicked 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`start_clicked`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`TaskSession`, `start`, `_set_status`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if not (self.input_path.value or "").strip():
             self._set_status("請先選擇輸入資料夾", ft.Colors.RED_200)
@@ -271,28 +290,33 @@ class LMView(ft.Column):
     # UI Timer
     # --------------------------------------------------
     def start_ui_timer(self):
-        """start_ui_timer 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`start_ui_timer`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`start`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if self._ui_timer_running:
             return
         self._ui_timer_running = True
 
         def loop():
-            """loop 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`loop`
+            
+            用途：
+            - 處理此函式的主要流程（細節以程式碼為準）。
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - None
             """
             while self._ui_timer_running:
                 time.sleep(0.1)
@@ -321,27 +345,33 @@ class LMView(ft.Column):
     # UI helpers
     # --------------------------------------------------
     def _set_status(self, text: str, color: str):
-        """_set_status 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_set_status`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`Text`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
-        """_show_snack_bar 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_show_snack_bar`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`SnackBar`, `append`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)

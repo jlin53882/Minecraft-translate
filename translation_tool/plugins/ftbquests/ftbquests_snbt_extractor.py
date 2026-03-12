@@ -32,14 +32,17 @@ LANG_KEY_SUFFIX = (".title", ".quest_desc")
 
 def is_lang_key_ref(val: str):
     # 遇到 {ftbquests.xxx} 這種語言 reference 直接跳過
-    """is_lang_key_ref 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`is_lang_key_ref`
+    
+    用途：
+    - 判斷此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`bool`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     return bool(re.match(r"^\{ftbquests\.", val))
 
@@ -86,14 +89,17 @@ def walk_snbt_file(path: str) -> Compound | None:
 # lang/*.snbt 抽取
 # =========================
 def extract_lang_file(filename: str, root: Compound) -> dict:
-    """extract_lang_file 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`extract_lang_file`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`items`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     out = {}
 
@@ -127,26 +133,32 @@ def extract_lang_file(filename: str, root: Compound) -> dict:
 # quest 本體抽取（title）
 # =========================
 def extract_quest_file(filename: str, root: Compound) -> dict:
-    """extract_quest_file 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`extract_quest_file`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`recurse`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     out = {}
 
     def _emit(obj: Compound, field: str, kind: str):
-        """_emit 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_emit`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`get`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         val = obj.get(field)
         if val is None:
@@ -190,14 +202,16 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
         out[key] = text
 
     def recurse(obj, path):
-        """recurse 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`recurse`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if isinstance(obj, Compound):
             # ✅ 抽三種欄位
@@ -220,14 +234,16 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
 
 
 def ensure_lang(store: dict, lang: str):
-    """ensure_lang 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`ensure_lang`
+    
+    用途：
+    - 確保此函式的主要流程（細節以程式碼為準）。
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - None
     """
     if lang not in store:
         store[lang] = {"lang": {}, "quests": {}}
@@ -237,14 +253,17 @@ def ensure_lang(store: dict, lang: str):
 # 主流程
 # =========================
 def process_quest_folder(quests_root: str) -> dict:
-    """process_quest_folder 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`process_quest_folder`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`join`, `set`, `walk`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     final_output = {}
     lang_dir = os.path.join(quests_root, "lang")

@@ -28,14 +28,17 @@ class QCView(ft.Column):
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """__init__ 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`__init__`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`__init__`, `TextField`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
         self.page = page
@@ -118,14 +121,17 @@ class QCView(ft.Column):
     
     # --- 輔助函式 (已修改以支援檔案/資料夾選擇和過濾) ---
     def _create_pick_button(self, target_textfield: ft.TextField, title: str, folder_mode: bool, file_filter: str = None):
-        """_create_pick_button 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_create_pick_button`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`IconButton`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         return ft.IconButton(
             icon=ft.Icons.FOLDER_OPEN if folder_mode else ft.Icons.FILE_PRESENT,
@@ -134,14 +140,17 @@ class QCView(ft.Column):
         )
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
-        """_show_snack_bar 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_show_snack_bar`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`SnackBar`, `append`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
@@ -149,14 +158,17 @@ class QCView(ft.Column):
         self.page.update()
 
     def pick_file_or_directory_with_tkinter(self, e, target_textfield: ft.TextField, title: str, folder_mode: bool, file_filter: str = None):
-        """pick_file_or_directory_with_tkinter 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`pick_file_or_directory_with_tkinter`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`Tk`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         path = ""
         try:
@@ -185,14 +197,17 @@ class QCView(ft.Column):
 
     def set_controls_disabled(self, disabled: bool):
         # 禁用所有相關控制項 (已更新)
-        """set_controls_disabled 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`set_controls_disabled`
+        
+        用途：
+        - 設定此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         controls_to_disable = [
             # 未翻譯檢查
@@ -209,14 +224,17 @@ class QCView(ft.Column):
         self.page.update()
 
     def start_task(self, task_type: str):
-        """start_task 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`start_task`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`clear`, `set_controls_disabled`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.log_view.controls.clear()
         self.progress_bar.value = 0
@@ -273,14 +291,17 @@ class QCView(ft.Column):
         thread.start()
 
     def task_worker(self, service_func, args_tuple):
-        """task_worker 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`task_worker`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`service_func`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         try:
             for update in service_func(*args_tuple):
@@ -299,14 +320,17 @@ class QCView(ft.Column):
         finally:
             self.set_controls_disabled(False)
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
-        """_show_snack_bar 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_show_snack_bar`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`SnackBar`, `append`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)

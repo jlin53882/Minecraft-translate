@@ -29,14 +29,17 @@ def _process_single_mod(
     must_translate_dir: str
 ) -> Dict[str, Any]:
 
-    """_process_single_mod 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`_process_single_mod`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`compile`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 
@@ -82,14 +85,17 @@ def _process_single_mod(
 
 
     def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
-        """_safe_read_lang_json 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_safe_read_lang_json`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`get`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         path = paths.get(lang_key)
         if not path:
@@ -102,14 +108,17 @@ def _process_single_mod(
                 bad_lines = []
 
                 def on_error(line_no, raw, reason):
-                    """on_error 的用途說明。
-
-                    Args:
-                        參數請見函式簽名。
-                    Returns:
-                        回傳內容依實作而定；若無顯式回傳則為 None。
-                    Side Effects:
-                        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+                    """`on_error`
+                    
+                    用途：
+                    - 處理此函式的主要流程（細節以程式碼為準）。
+                    - 主要包裝/呼叫：`append`
+                    
+                    參數：
+                    - 依函式簽名。
+                    
+                    回傳：
+                    - None
                     """
                     bad_lines.append((line_no, raw, reason))
 

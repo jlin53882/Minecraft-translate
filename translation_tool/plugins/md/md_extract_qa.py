@@ -49,14 +49,17 @@ RE_CJK = re.compile(r"[\u4e00-\u9fff]")
 
 
 def contains_cjk(s: str) -> bool:
-    """contains_cjk 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`contains_cjk`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`bool`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     return bool(RE_CJK.search(s))
 
@@ -92,14 +95,17 @@ def normalize_for_dedupe(s: str) -> str:
 
 
 def make_content_hash(text: str) -> str:
-    """make_content_hash 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`make_content_hash`
+    
+    用途：
+    - 建立此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`normalize_for_dedupe`, `hexdigest`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     n = normalize_for_dedupe(text)
     return hashlib.sha1(n.encode("utf-8")).hexdigest()
@@ -138,14 +144,16 @@ def is_splitter_line_old(line: str) -> bool:
 
 def is_splitter_line(line: str) -> bool:
     # 原有的強分隔符
-    """is_splitter_line 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`is_splitter_line`
+    
+    用途：
+    - 判斷此函式的主要流程（細節以程式碼為準）。
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     if RE_TOKEN_LINE.match(line):
         return True
@@ -301,14 +309,16 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockIte
 
 
 def build_pending_json(rel_md: str, abs_md: Path, items: List[BlockItem], lang_mode: str) -> dict:
-    """build_pending_json 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`build_pending_json`
+    
+    用途：
+    - 建立此函式的主要流程（細節以程式碼為準）。
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     return {
         "schema": "md_pending_blocks_v1",
@@ -331,14 +341,17 @@ RE_LANG_SEG = re.compile(r"^_?(en_us|zh_cn|zh_tw)$", re.IGNORECASE)
 
 def has_allowed_lang_segment(path: Path) -> bool:
     # 用 parts 掃描每個 segment，支援 structure/en_us 這種深層結構
-    """has_allowed_lang_segment 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`has_allowed_lang_segment`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`any`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     return any(RE_LANG_SEG.match(seg) for seg in path.parts)
 
@@ -402,27 +415,33 @@ def iter_md_files(root: Path):
 
 
 def safe_relpath(path: Path, root: Path) -> str:
-    """safe_relpath 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`safe_relpath`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`as_posix`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     return path.relative_to(root).as_posix()
 
 
 def main():
-    """main 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`main`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`print`, `strip`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - None
     """
     print("=== Markdown .md 抽取（段落/區塊）問答式 ===")
 

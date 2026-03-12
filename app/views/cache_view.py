@@ -56,14 +56,17 @@ class CacheView(ft.Column):
     """
 
     def __init__(self, page: ft.Page):
-        """__init__ 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`__init__`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`__init__`, `Text`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         super().__init__(expand=True, spacing=10)
         self.page = page
@@ -858,14 +861,17 @@ class CacheView(ft.Column):
     # Lifecycle
     # =========================================================
     def did_mount(self):
-        """did_mount 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`did_mount`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_load_overview`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         try:
             self._load_overview()
@@ -891,14 +897,17 @@ class CacheView(ft.Column):
     # Shared helpers
     # =========================================================
     def _dynamic_shard_list_height(self) -> int:
-        """_dynamic_shard_list_height 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_dynamic_shard_list_height`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`float`, `max`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
@@ -912,14 +921,17 @@ class CacheView(ft.Column):
         return max(120, min(360, int(h * 0.24)))
 
     def _dynamic_type_shard_panel_height(self) -> int:
-        """_dynamic_type_shard_panel_height 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_dynamic_type_shard_panel_height`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`float`, `max`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
@@ -933,14 +945,17 @@ class CacheView(ft.Column):
         return max(180, min(420, int(h * 0.30)))
 
     def _dynamic_shard_key_list_height(self) -> int:
-        """_dynamic_shard_key_list_height 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_dynamic_shard_key_list_height`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`float`, `max`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
@@ -953,14 +968,17 @@ class CacheView(ft.Column):
         return max(140, min(420, int(h * 0.30)))
 
     def _dynamic_shard_src_height(self) -> int:
-        """_dynamic_shard_src_height 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_dynamic_shard_src_height`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`float`, `max`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
@@ -973,14 +991,17 @@ class CacheView(ft.Column):
         return max(120, min(320, int(h * 0.24)))
 
     def _dynamic_shard_dst_height(self) -> int:
-        """_dynamic_shard_dst_height 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_dynamic_shard_dst_height`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`float`, `max`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
@@ -993,14 +1014,17 @@ class CacheView(ft.Column):
         return max(120, min(320, int(h * 0.24)))
 
     def _dynamic_shard_key_panel_width(self) -> int:
-        """_dynamic_shard_key_panel_width 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_dynamic_shard_key_panel_width`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`float`, `max`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         try:
             w = float(getattr(self.page, "width", 0) or 0)
@@ -1014,14 +1038,16 @@ class CacheView(ft.Column):
 
     def _on_page_resized(self, e):
         # 重繪分類/分片與 C1 KeyListCard，讓大小可跟視窗動態變更
-        """_on_page_resized 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_page_resized`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         try:
             if hasattr(self, "shard_key_column"):
@@ -1033,14 +1059,17 @@ class CacheView(ft.Column):
             pass
 
     def _set_state(self, busy: bool, reason: str, trace: str):
-        """_set_state 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_set_state`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_refresh_disabled_state`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.ui_busy = busy
         self.busy_reason = reason
@@ -1067,14 +1096,16 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _refresh_disabled_state(self):
-        """_refresh_disabled_state 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_refresh_disabled_state`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if hasattr(self, "btn_reload_all"):
             self.btn_reload_all.disabled = self.ui_busy
@@ -1151,14 +1182,16 @@ class CacheView(ft.Column):
 
     # 與舊測試相容：集中提交 UI 更新
     def commit_ui(self, controls=None):
-        """commit_ui 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`commit_ui`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         try:
             for c in (controls or []):
@@ -1171,14 +1204,17 @@ class CacheView(ft.Column):
 
     # 與舊測試相容：run_id guard 的狀態更新入口
     def set_ui_state(self, busy: bool, reason: str, trace: str, run_id: int | None = None):
-        """set_ui_state 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`set_ui_state`
+        
+        用途：
+        - 設定此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`getattr`, `bool`, `_refresh_disabled_state`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         current_action_id = getattr(getattr(self, "_controller", None), "current_action_id", None)
         if run_id is not None and current_action_id is not None and run_id < current_action_id:
@@ -1217,14 +1253,17 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _append_log(self, text: str):
-        """_append_log 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_append_log`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`append`, `_render_logs`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if text.startswith("[ERROR"):
             log_error(text)
@@ -1239,14 +1278,17 @@ class CacheView(ft.Column):
         self._render_logs()
 
     def _notify(self, message: str, level: str = "info"):
-        """_notify 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_notify`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`lower`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         lv = (level or "info").lower()
         if lv == "error":
@@ -1284,14 +1326,17 @@ class CacheView(ft.Column):
         )
 
     def _build_query_entry_page(self):
-        """_build_query_entry_page 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_build_query_entry_page`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`Tabs`, `Container`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         self.query_sub_tabs = ft.Tabs(
             selected_index=0,
@@ -1313,14 +1358,17 @@ class CacheView(ft.Column):
         )
 
     def _render_logs(self):
-        """_render_logs 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_render_logs`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`clear`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.log_list.controls.clear()
         rows = self._all_logs
@@ -1331,40 +1379,49 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_log_filter_changed(self, e):
-        """_on_log_filter_changed 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_log_filter_changed`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`bool`, `_render_logs`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self._only_error = bool(self.sw_log_only_error.value)
         self._render_logs()
 
     def _clear_logs(self):
-        """_clear_logs 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_clear_logs`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`clear`, `_render_logs`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self._all_logs.clear()
         self._render_logs()
 
     def _copy_logs(self):
-        """_copy_logs 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_copy_logs`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`join`, `set_clipboard`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         txt = "\n".join(self._all_logs)
         try:
@@ -1374,14 +1431,16 @@ class CacheView(ft.Column):
             self._show_snack_bar("複製失敗", ft.Colors.RED_400)
 
     def _iter_type_states(self, data: dict):
-        """_iter_type_states 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_iter_type_states`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         raw_types = data.get("types") or {}
         if isinstance(raw_types, dict):
@@ -1397,14 +1456,17 @@ class CacheView(ft.Column):
         return []
 
     def _render_type_list(self, data: dict):
-        """_render_type_list 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_render_type_list`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`clear`, `_iter_type_states`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.type_list.controls.clear()
 
@@ -1474,14 +1536,17 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _refresh_overview_ui(self, data: dict):
-        """_refresh_overview_ui 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_refresh_overview_ui`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`strftime`, `_render_type_list`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self._last_overview_data = data or {}
         ts = time.strftime("%H:%M:%S")
@@ -1496,14 +1561,17 @@ class CacheView(ft.Column):
         self._render_type_list(data)
 
     def _load_overview(self):
-        """_load_overview 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_load_overview`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`cache_get_overview_service`, `_refresh_overview_ui`, `_refresh_query_type_options`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         try:
             data = cache_get_overview_service()
@@ -1517,14 +1585,17 @@ class CacheView(ft.Column):
         self._render_query_type_shard_page()
 
     def _run_action(self, reason: str, work_fn, success_msg: str):
-        """_run_action 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_run_action`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_append_log`, `_set_state`, `work_fn`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if self.ui_busy:
             self._notify("目前正在處理，請稍候", "warn")
@@ -1552,38 +1623,47 @@ class CacheView(ft.Column):
 
     # top actions
     def _on_reload_all(self, e):
-        """_on_reload_all 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_reload_all`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_run_action`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self._run_action("RELOADING", lambda: cache_reload_service(), "已重新載入全部快取")
 
     def _on_save_all_new(self, e):
-        """_on_save_all_new 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_save_all_new`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_run_action`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self._run_action("SAVING", lambda: cache_save_all_service(write_new_shard=True), "已儲存全部新分片")
 
     def _on_save_all_fill(self, e):
-        """_on_save_all_fill 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_save_all_fill`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_run_action`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if hasattr(self, "chk_danger_confirm") and not bool(getattr(self.chk_danger_confirm, "value", False)):
             self._notify("尚未勾選高風險確認", "warn")
@@ -1591,14 +1671,17 @@ class CacheView(ft.Column):
         self._run_action("SAVING", lambda: cache_save_all_service(write_new_shard=False), "已補滿活躍分片")
 
     def _on_refresh_stats(self, e):
-        """_on_refresh_stats 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_refresh_stats`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_load_overview`, `_notify`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self._load_overview()
         self._notify("已刷新統計", "info")
@@ -1635,14 +1718,17 @@ class CacheView(ft.Column):
 
     # per-type actions
     def _on_reload_one(self, cache_type: str):
-        """_on_reload_one 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_reload_one`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_run_action`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self._run_action(
             "RELOADING",
@@ -1651,14 +1737,17 @@ class CacheView(ft.Column):
         )
 
     def _on_save_one_new(self, cache_type: str):
-        """_on_save_one_new 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_save_one_new`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_run_action`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self._run_action(
             "SAVING",
@@ -1667,14 +1756,17 @@ class CacheView(ft.Column):
         )
 
     def _on_save_one_fill(self, cache_type: str):
-        """_on_save_one_fill 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_save_one_fill`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_run_action`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if hasattr(self, "chk_danger_confirm") and not bool(getattr(self.chk_danger_confirm, "value", False)):
             self._notify("尚未勾選高風險確認", "warn")
@@ -1686,24 +1778,30 @@ class CacheView(ft.Column):
         )
 
     def _on_rotate_one(self, cache_type: str):
-        """_on_rotate_one 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_rotate_one`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_run_action`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         def _work():
-            """_work 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`_work`
+            
+            用途：
+            - 處理此函式的主要流程（細節以程式碼為準）。
+            - 主要包裝/呼叫：`cache_rotate_service`, `cache_get_overview_service`
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - 依實作回傳值（請見函式內 return path）。
             """
             ok = cache_rotate_service(cache_type)
             if not ok:
@@ -1713,14 +1811,17 @@ class CacheView(ft.Column):
         self._run_action("ROTATING", _work, f"已輪替分片：{cache_type}")
 
     def _on_analyze_one(self, cache_type: str):
-        """_on_analyze_one 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_analyze_one`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_iter_type_states`, `get`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         target = None
         for ctype, st in self._iter_type_states(self._last_overview_data):
@@ -1744,14 +1845,17 @@ class CacheView(ft.Column):
 
     def _on_jump_to_query_type(self, cache_type: str):
         # 切到查詢頁 -> 查詢區，並預先設定 KEY + 指定分類
-        """_on_jump_to_query_type 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_jump_to_query_type`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if hasattr(self, "main_tabs"):
             self.main_tabs.selected_index = 1
@@ -1773,14 +1877,17 @@ class CacheView(ft.Column):
     # Query phase-2: search block
     # =========================================================
     def _refresh_query_type_options(self):
-        """_refresh_query_type_options 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_refresh_query_type_options`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`sorted`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         types = sorted([ctype for ctype, _ in self._iter_type_states(self._last_overview_data)])
 
@@ -1793,14 +1900,17 @@ class CacheView(ft.Column):
         # overview 分類下拉已移除（按鈕維持在分類卡）
 
     def _load_shard_rows(self, cache_type: str, active_shard_id: str, shard_capacity: int) -> list[dict]:
-        """_load_shard_rows 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_load_shard_rows`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`strip`, `glob`, `sorted`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
@@ -1811,14 +1921,17 @@ class CacheView(ft.Column):
             return []
 
         def _sort_key(path: Path):
-            """_sort_key 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`_sort_key`
+            
+            用途：
+            - 處理此函式的主要流程（細節以程式碼為準）。
+            - 主要包裝/呼叫：`search`
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - 依實作回傳值（請見函式內 return path）。
             """
             stem = path.stem
             m = re.search(r"(\d+)$", stem)
@@ -1856,14 +1969,17 @@ class CacheView(ft.Column):
         return rows
 
     def _load_shard_keys(self, cache_type: str, filename: str) -> list[str]:
-        """_load_shard_keys 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_load_shard_keys`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`strip`, `loads`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
@@ -1893,28 +2009,34 @@ class CacheView(ft.Column):
         return []
 
     def _set_shard_detail_page(self, page: int):
-        """_set_shard_detail_page 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_set_shard_detail_page`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`len`, `max`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         total = len(self.shard_detail_keys)
         self.shard_detail_total_pages = max(1, (total + self.shard_detail_page_size - 1) // self.shard_detail_page_size)
         self.shard_detail_page = max(1, min(page, self.shard_detail_total_pages))
 
     def _render_shard_detail_keys(self):
-        """_render_shard_detail_keys 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_render_shard_detail_keys`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`clear`, `list`, `lower`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if not hasattr(self, "shard_detail_key_list"):
             return
@@ -1992,28 +2114,34 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_shard_key_filter_change(self, e):
-        """_on_shard_key_filter_change 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_shard_key_filter_change`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_shard_detail_keys`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.shard_detail_page = 1
         self._render_shard_detail_keys()
         self.page.update()
 
     def _set_shard_workspace_visible(self, visible: bool):
-        """_set_shard_workspace_visible 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_set_shard_workspace_visible`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`bool`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         show_workspace = bool(visible)
         if hasattr(self, "shard_nav_view"):
@@ -2022,39 +2150,48 @@ class CacheView(ft.Column):
             self.shard_workspace_card.visible = show_workspace
 
     def _open_shard_workspace_tab(self):
-        """_open_shard_workspace_tab 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_open_shard_workspace_tab`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_set_shard_workspace_visible`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self._set_shard_workspace_visible(True)
 
     def _on_back_to_shard_list(self, e):
-        """_on_back_to_shard_list 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_back_to_shard_list`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_set_shard_workspace_visible`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self._set_shard_workspace_visible(False)
         self.page.update()
 
     def _on_select_shard_row(self, cache_type: str, filename: str):
-        """_on_select_shard_row 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_select_shard_row`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_load_shard_keys`, `_render_query_type_shard_page`, `_open_shard_workspace_tab`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.shard_detail_selected_type = cache_type
         self.shard_detail_selected_file = filename
@@ -2070,14 +2207,17 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_select_shard_key(self, key: str):
-        """_on_select_shard_key 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_select_shard_key`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_shard_detail_keys`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if key != self.shard_detail_selected_key:
             self.shard_dst_loaded_sig = None
@@ -2089,14 +2229,17 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _load_shard_entry(self, cache_type: str, filename: str, key: str) -> dict | None:
-        """_load_shard_entry 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_load_shard_entry`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`strip`, `loads`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
@@ -2118,14 +2261,17 @@ class CacheView(ft.Column):
         return None
 
     def _format_shard_src_text(self, src_text: str, mode: str) -> str:
-        """_format_shard_src_text 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_format_shard_src_text`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`str`, `replace`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         src = str(src_text or "")
         if mode == "raw":
@@ -2133,14 +2279,17 @@ class CacheView(ft.Column):
         return src.replace("\\r\\n", "\n").replace("\\n", "\n")
 
     def _render_shard_src_panel(self):
-        """_render_shard_src_panel 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_render_shard_src_panel`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`cache_get_entry_service`, `_format_shard_src_text`, `_refresh_disabled_state`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if not hasattr(self, "shard_src_field"):
             return
@@ -2169,54 +2318,66 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_shard_src_preview_mode(self, e):
-        """_on_shard_src_preview_mode 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_shard_src_preview_mode`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_shard_src_panel`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.shard_detail_src_mode = "preview"
         self._render_shard_src_panel()
         self.page.update()
 
     def _on_shard_src_raw_mode(self, e):
-        """_on_shard_src_raw_mode 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_shard_src_raw_mode`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_shard_src_panel`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.shard_detail_src_mode = "raw"
         self._render_shard_src_panel()
         self.page.update()
 
     def _normalize_cache_text(self, text: str) -> str:
-        """_normalize_cache_text 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_normalize_cache_text`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`replace`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         return str(text or "").replace("\\r\\n", "\n").replace("\\n", "\n")
 
     def _render_shard_dst_panel(self):
-        """_render_shard_dst_panel 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_render_shard_dst_panel`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`str`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if not hasattr(self, "shard_dst_field"):
             return
@@ -2251,14 +2412,17 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_shard_dst_apply(self, e):
-        """_on_shard_dst_apply 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_shard_dst_apply`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`str`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if self.ui_busy:
             self._notify("目前忙碌中，暫停套用", "warn")
@@ -2324,14 +2488,17 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_shard_dst_copy(self, e):
-        """_on_shard_dst_copy 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_shard_dst_copy`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`set_clipboard`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if not self.shard_detail_selected_key:
             self._notify("請先選擇 key", "warn")
@@ -2407,14 +2574,16 @@ class CacheView(ft.Column):
 
         # 若當前選取不在新清單中，就預設第一筆
         def _ev_id(ev: dict):
-            """_ev_id 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`_ev_id`
+            
+            用途：
+            - 處理此函式的主要流程（細節以程式碼為準）。
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - 依實作回傳值（請見函式內 return path）。
             """
             return (str(ev.get("ts", "")), str(ev.get("old_dst", "")), str(ev.get("new_dst", "")))
 
@@ -2531,70 +2700,85 @@ class CacheView(ft.Column):
             self._notify(f"套用舊值失敗：{ex}", "error")
 
     def _on_shard_page_first(self, e):
-        """_on_shard_page_first 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_shard_page_first`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_shard_detail_keys`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.shard_detail_page = 1
         self._render_shard_detail_keys()
         self.page.update()
 
     def _on_shard_page_prev(self, e):
-        """_on_shard_page_prev 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_shard_page_prev`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_shard_detail_keys`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.shard_detail_page -= 1
         self._render_shard_detail_keys()
         self.page.update()
 
     def _on_shard_page_next(self, e):
-        """_on_shard_page_next 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_shard_page_next`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_shard_detail_keys`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.shard_detail_page += 1
         self._render_shard_detail_keys()
         self.page.update()
 
     def _on_shard_page_last(self, e):
-        """_on_shard_page_last 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_shard_page_last`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_shard_detail_keys`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.shard_detail_page = self.shard_detail_total_pages
         self._render_shard_detail_keys()
         self.page.update()
 
     def _render_query_type_shard_page(self):
-        """_render_query_type_shard_page 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_render_query_type_shard_page`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`clear`, `list`, `set`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if not hasattr(self, "query_type_shard_col"):
             return
@@ -2722,14 +2906,17 @@ class CacheView(ft.Column):
         self._render_shard_detail_keys()
 
     def _active_shard_filename(self, cache_type: str) -> str:
-        """_active_shard_filename 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_active_shard_filename`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_iter_type_states`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         for ctype, st in self._iter_type_states(self._last_overview_data):
             if ctype == cache_type:
@@ -2739,14 +2926,17 @@ class CacheView(ft.Column):
         return "-"
 
     def _type_dirty_text(self, cache_type: str) -> str:
-        """_type_dirty_text 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_type_dirty_text`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_iter_type_states`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         for ctype, st in self._iter_type_states(self._last_overview_data):
             if ctype == cache_type:
@@ -2755,26 +2945,32 @@ class CacheView(ft.Column):
 
     # -------------------- History storage helpers --------------------
     def _history_now_ts(self) -> str:
-        """_history_now_ts 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_history_now_ts`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`isoformat`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         return datetime.now().astimezone().isoformat(timespec="seconds")
 
     def _history_dirs(self, cache_type: str):
-        """_history_dirs 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_history_dirs`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`strip`, `mkdir`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
@@ -2788,14 +2984,16 @@ class CacheView(ft.Column):
         return base, jsonl_dir, json_dir
 
     def _history_active_default(self, cache_type: str) -> dict:
-        """_history_active_default 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_history_active_default`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         return {
             "current_file": f"{cache_type}_h000001.jsonl",
@@ -2805,14 +3003,17 @@ class CacheView(ft.Column):
         }
 
     def _history_load_active(self, cache_type: str):
-        """_history_load_active 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_history_load_active`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_history_dirs`, `loads`, `setdefault`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         _base, jsonl_dir, json_dir = self._history_dirs(cache_type)
         if jsonl_dir is None:
@@ -2839,26 +3040,32 @@ class CacheView(ft.Column):
         return active, active_path, jsonl_dir, json_dir
 
     def _history_save_active(self, active_path: Path, active: dict):
-        """_history_save_active 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_history_save_active`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`write_text`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         active_path.write_text(json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _history_append_event(self, cache_type: str, event: dict):
-        """_history_append_event 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_history_append_event`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_history_load_active`, `int`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         active, active_path, jsonl_dir, json_dir = self._history_load_active(cache_type)
         if not active:
@@ -2900,14 +3107,17 @@ class CacheView(ft.Column):
         json_path.write_text(json.dumps(arr, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _history_load_recent(self, cache_type: str, key: str, limit: int = 20) -> list[dict]:
-        """_history_load_recent 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_history_load_recent`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_history_dirs`, `sorted`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         _base, jsonl_dir, _json_dir = self._history_dirs(cache_type)
         if jsonl_dir is None:
@@ -2938,14 +3148,17 @@ class CacheView(ft.Column):
         return out
 
     def _render_query_history(self):
-        """_render_query_history 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_render_query_history`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`clear`, `str`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         if not hasattr(self, "query_history_list"):
             return
@@ -2977,14 +3190,16 @@ class CacheView(ft.Column):
 
         # 若當前選取不在新清單中，就預設第一筆
         def _ev_id(ev: dict):
-            """_ev_id 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`_ev_id`
+            
+            用途：
+            - 處理此函式的主要流程（細節以程式碼為準）。
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - 依實作回傳值（請見函式內 return path）。
             """
             return (str(ev.get("ts", "")), str(ev.get("old_dst", "")), str(ev.get("new_dst", "")))
 
@@ -3026,14 +3241,17 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _update_history_preview(self):
-        """_update_history_preview 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_update_history_preview`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`str`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         ev = self.query_history_selected_event
         if not ev:
@@ -3131,28 +3349,34 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_select_history_event(self, event: dict):
-        """_on_select_history_event 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_select_history_event`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_query_history`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.query_history_selected_event = event
         self._render_query_history()
         self.page.update()
 
     def _on_apply_selected_history(self, e):
-        """_on_apply_selected_history 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_apply_selected_history`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`str`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if self.ui_busy:
             self._notify("目前忙碌中，暫停套用", "warn")
@@ -3209,14 +3433,17 @@ class CacheView(ft.Column):
             self._notify(f"套用舊值失敗：{ex}", "error")
 
     def _render_query_detail(self):
-        """_render_query_detail 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_render_query_detail`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`str`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         row = self.query_selected_result
         if not row:
@@ -3248,28 +3475,34 @@ class CacheView(ft.Column):
         self._render_query_history()
 
     def _set_query_page(self, page: int):
-        """_set_query_page 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_set_query_page`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`len`, `max`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         total = len(self.query_results)
         self.query_total_pages = max(1, (total + self.query_page_size - 1) // self.query_page_size)
         self.query_page = max(1, min(page, self.query_total_pages))
 
     def _render_query_results(self):
-        """_render_query_results 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_render_query_results`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_set_query_page`, `clear`, `len`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if not hasattr(self, "query_result_list"):
             return
@@ -3358,14 +3591,17 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_select_result(self, row: dict):
-        """_on_select_result 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_select_result`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_query_results`, `_render_query_detail`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.query_selected_result = row
         self._render_query_results()
@@ -3373,70 +3609,85 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_page_first(self, e):
-        """_on_page_first 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_page_first`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_query_results`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.query_page = 1
         self._render_query_results()
         self.page.update()
 
     def _on_page_prev(self, e):
-        """_on_page_prev 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_page_prev`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_query_results`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.query_page -= 1
         self._render_query_results()
         self.page.update()
 
     def _on_page_next(self, e):
-        """_on_page_next 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_page_next`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_query_results`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.query_page += 1
         self._render_query_results()
         self.page.update()
 
     def _on_page_last(self, e):
-        """_on_page_last 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_page_last`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_query_results`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.query_page = self.query_total_pages
         self._render_query_results()
         self.page.update()
 
     def _on_page_jump(self, e):
-        """_on_page_jump 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_page_jump`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`int`, `_render_query_results`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         try:
             p = int((self.tf_page_jump.value or "1").strip())
@@ -3447,14 +3698,17 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_page_size_change(self, e):
-        """_on_page_size_change 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_page_size_change`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`int`, `_render_query_results`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         try:
             self.query_page_size = int(self.dd_page_size.value or "50")
@@ -3465,14 +3719,17 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_apply_dst(self, e):
-        """_on_apply_dst 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_apply_dst`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`str`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if self.ui_busy:
             self._notify("目前忙碌中，暫停套用", "warn")
@@ -3564,14 +3821,17 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_query_search(self, e):
-        """_on_query_search 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_query_search`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`strip`, `upper`, `set`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if self.ui_busy:
             self._notify("目前忙碌中，暫停搜尋", "warn")
@@ -3630,14 +3890,17 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_query_clear(self, e):
-        """_on_query_clear 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_query_clear`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`_render_query_results`, `_render_query_detail`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.tf_query_input.value = ""
         self.query_results = []

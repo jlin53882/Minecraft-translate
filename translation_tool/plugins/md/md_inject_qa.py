@@ -134,14 +134,17 @@ def map_lang_in_rel_path_allow_zh(rel_path: str,
 RE_MOSTLY_TOKEN_LINE = re.compile(r"^\s*(§[0-9a-zA-Z]+\S*)\s*(§[0-9a-zA-Z]+\S*)*\s*$")
 
 def is_token_line(line: str) -> bool:
-    """is_token_line 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`is_token_line`
+    
+    用途：
+    - 判斷此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`strip`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     s = line.strip()
     if not s:
@@ -200,14 +203,16 @@ def flatten_for_md(text: str) -> str:
     buf: List[str] = []
 
     def flush_buf():
-        """flush_buf 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`flush_buf`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         nonlocal buf
         if buf:
@@ -368,14 +373,17 @@ def apply_item_to_md_lines(md_lines: List[str], item: Item) -> None:
 
 
 def iter_json_files(root: Path):
-    """iter_json_files 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`iter_json_files`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`rglob`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - Generator：逐步 yield update dict（log/progress/error 等）。
     """
     for p in root.rglob("*.json"):
         if p.is_file():
@@ -383,14 +391,17 @@ def iter_json_files(root: Path):
 
 
 def main():
-    """main 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`main`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`print`, `strip`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - None
     """
     print("=== md 寫回（方案 A：保留原檔骨架，只替換文字行）===")
 

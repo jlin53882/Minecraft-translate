@@ -22,14 +22,16 @@ class CacheController:
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
     def __init__(self):
-        """__init__ 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`__init__`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self._seq = 0
         self.current_action_id = 0
@@ -47,14 +49,16 @@ class CacheController:
         return self.current_action_id
 
     def is_current(self, run_id: int | None) -> bool:
-        """is_current 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`is_current`
+        
+        用途：
+        - 判斷此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         if run_id is None:
             return True

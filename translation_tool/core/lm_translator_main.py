@@ -65,28 +65,33 @@ def translate_batch_smart(batch_items,total=None):
 
     # 判斷這批次類型（影響 System Prompt 與 batch 上限）
     def _norm_file(item):
-        """_norm_file 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_norm_file`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`lower`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         return str(item.get("file", "")).replace("\\", "/").lower()
 
 
     def detect_batch_profile(items):
         # ✅ 優先用 cache_type（最可靠）
-        """detect_batch_profile 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`detect_batch_profile`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         cache_types = [str(i.get("cache_type", "")).lower() for i in items if isinstance(i, dict)]
         cache_types = [c for c in cache_types if c]

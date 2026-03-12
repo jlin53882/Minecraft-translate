@@ -50,14 +50,16 @@ def _normalize_config_dir(path: str) -> str:
 
 
 def _load_json_dict(path: str) -> dict:
-    """_load_json_dict 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`_load_json_dict`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     if not os.path.isfile(path):
         return {}
@@ -135,14 +137,16 @@ def walk_and_copy_all_snbt(src_root_dir: str, dst_root_dir: str) -> int:
 
 
 def _read_snbt(path: str) -> Compound | None:
-    """_read_snbt 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`_read_snbt`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -153,14 +157,17 @@ def _read_snbt(path: str) -> Compound | None:
 
 
 def _write_snbt(path: str, root: Compound) -> None:
-    """_write_snbt 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`_write_snbt`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`makedirs`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - None
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -218,14 +225,16 @@ def patch_lang_snbt_file(
     changed_keys: List[str] = []
 
     def _list_to_py(v):
-        """_list_to_py 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_list_to_py`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         if isinstance(v, SnbtList):
             out = []
@@ -349,14 +358,16 @@ def patch_quest_snbt_file(
     missing: list[str] = []
 
     def _coerce_to_list(new_val: Any) -> list[str] | None:
-        """_coerce_to_list 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_coerce_to_list`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         if isinstance(new_val, list):
             parts = [x for x in new_val if isinstance(x, str)]
@@ -366,14 +377,17 @@ def patch_quest_snbt_file(
         return None
 
     def _apply_field(obj: Compound, kind: str, new_val: Any, tag_key: str):
-        """_apply_field 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_apply_field`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`get`, `append`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         nonlocal changed, candidates
 
@@ -421,14 +435,16 @@ def patch_quest_snbt_file(
         skipped.append(tag_key)
 
     def _recurse(node):
-        """_recurse 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_recurse`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if isinstance(node, Compound):
             id_val = node.get("id")
@@ -585,14 +601,17 @@ def inject_ftbquests_quests_from_zh_tw_json(
 
 
     def _build_filename_index(root_dir: str) -> dict[str, list[str]]:
-        """_build_filename_index 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_build_filename_index`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`defaultdict`, `walk`, `dict`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         idx = defaultdict(list)
         for r, _, files in os.walk(root_dir):

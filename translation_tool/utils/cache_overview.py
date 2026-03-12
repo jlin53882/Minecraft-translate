@@ -14,14 +14,16 @@ import orjson as json
 
 
 def get_active_shard_id(cache_file_path: dict[str, Path], cache_type: str, active_shard_file: str) -> str:
-    """get_active_shard_id 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`get_active_shard_id`
+    
+    用途：
+    - 取得此函式的主要流程（細節以程式碼為準）。
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     try:
         type_dir = cache_file_path.get(cache_type, Path(".")).parent
@@ -47,14 +49,17 @@ def build_cache_overview(
     cache_dir_name: str,
     resolve_project_path: Callable[[str], Path],
 ) -> dict[str, Any]:
-    """build_cache_overview 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`build_cache_overview`
+    
+    用途：
+    - 建立此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`get`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     out_types: dict[str, Any] = {}
     total_entries = 0

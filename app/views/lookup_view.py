@@ -22,14 +22,17 @@ class LookupView(ft.Column):
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
     def __init__(self, page: ft.Page):
-        """__init__ 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`__init__`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`__init__`, `TextField`, `ElevatedButton`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
         self.page = page
@@ -71,14 +74,17 @@ class LookupView(ft.Column):
 
     # --- 單筆查詢邏輯 ---
     def single_lookup_clicked(self, e):
-        """single_lookup_clicked 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`single_lookup_clicked`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`update`, `Thread`, `start`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         search_term = self.single_input.value
         if not search_term:
@@ -101,14 +107,17 @@ class LookupView(ft.Column):
     
     def single_lookup_worker(self, name: str):
         # 3. 呼叫後端服務
-        """single_lookup_worker 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`single_lookup_worker`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`run_manual_lookup_service`, `update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         result = run_manual_lookup_service(name)
         
@@ -124,14 +133,17 @@ class LookupView(ft.Column):
 
     # --- 批次查詢邏輯 ---
     def batch_lookup_clicked(self, e):
-        """batch_lookup_clicked 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`batch_lookup_clicked`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`update`, `Thread`, `start`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         json_text = self.batch_input.value
         if not json_text:
@@ -149,14 +161,17 @@ class LookupView(ft.Column):
         thread.start()
 
     def batch_lookup_worker(self, json_text):
-        """batch_lookup_worker 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`batch_lookup_worker`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`run_batch_lookup_service`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         try:
             for update in run_batch_lookup_service(json_text):

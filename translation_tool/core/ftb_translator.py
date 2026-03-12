@@ -188,27 +188,31 @@ def deep_merge_3way(zh_tw: dict, zh_cn: dict, en_us: dict) -> dict:
     支援巢狀 dict 遞迴補洞
     """
     def is_empty(v):
-        """is_empty 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`is_empty`
+        
+        用途：
+        - 判斷此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         return v is None or v == "" or v == {} or v == []
 
     def merge(a, b, c):
         # 三者都是 dict → 遞迴合併 key union
-        """merge 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`merge`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         if isinstance(a, dict) or isinstance(b, dict) or isinstance(c, dict):
             a = a if isinstance(a, dict) else {}
@@ -237,14 +241,16 @@ def prune_en_us_by_zh_tw(en_us: Any, zh_tw: Any) -> Any:
     規則：只要 zh_tw 該位置是「有內容」（非 None/""/{}/[]），就視為已翻，en_us 刪掉。
     """
     def is_filled(v: Any) -> bool:
-        """is_filled 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`is_filled`
+        
+        用途：
+        - 判斷此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         return v is not None and v != "" and v != {} and v != []
 
@@ -352,14 +358,17 @@ def export_ftbquests_raw_json(base_dir: str, *, output_dir: str | None = None) -
 _LANG_REF_RE = re.compile(r"^\{ftbquests\..+\}$")
 
 def _is_filled_text(v) -> bool:
-    """_is_filled_text 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`_is_filled_text`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`strip`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     if not isinstance(v, str):
         return False
@@ -395,14 +404,17 @@ def clean_ftbquests_from_raw(base_dir: str, *, output_dir: str | None = None) ->
     raw_root = os.path.join(out_root,"ftbquests", "raw", "config", "ftbquests", "quests", "lang")
 
     def load_json(lang: str, name: str):
-        """load_json 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`load_json`
+        
+        用途：
+        - 載入此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`join`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         path = os.path.join(raw_root, lang, name)
         if not os.path.isfile(path):

@@ -179,14 +179,17 @@ def _process_content_or_copy_file(
     # 這可以防止將 Patchouli 書籍等純英文內容複製到 zh_tw 目標中
     # --- Patchouli Book 特殊規則修正 ---
     def get_patchouli_book_root(path: str):
-        """get_patchouli_book_root 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`get_patchouli_book_root`
+        
+        用途：
+        - 取得此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`lower`, `find`, `get`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         p = path.replace("\\", "/").lower()
         if not p.startswith("/"):

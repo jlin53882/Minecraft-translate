@@ -29,14 +29,17 @@ __all__ = [
 
 
 def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
-    """run_untranslated_check_service 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`run_untranslated_check_service`
+    
+    用途：
+    - 執行此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`check_untranslated_generator`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - Generator：逐步 yield update dict（log/progress/error 等）。
     """
     try:
         for update_dict in check_untranslated_generator(en_dir, tw_dir, out_dir):
@@ -54,14 +57,17 @@ def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
 
 
 def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
-    """run_variant_compare_service 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`run_variant_compare_service`
+    
+    用途：
+    - 執行此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`compare_variants_generator`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - Generator：逐步 yield update dict（log/progress/error 等）。
     """
     try:
         for update_dict in compare_variants_generator(cn_dir, tw_dir, out_dir):
@@ -79,14 +85,17 @@ def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
 
 
 def run_english_residue_check_service(input_dir: str, out_dir: str):
-    """run_english_residue_check_service 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`run_english_residue_check_service`
+    
+    用途：
+    - 執行此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`check_english_residue_generator`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - Generator：逐步 yield update dict（log/progress/error 等）。
     """
     try:
         for update_dict in check_english_residue_generator(input_dir, out_dir):
@@ -104,14 +113,17 @@ def run_english_residue_check_service(input_dir: str, out_dir: str):
 
 
 def run_variant_compare_tsv_service(tsv_path: str, output_csv_path: str):
-    """run_variant_compare_tsv_service 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`run_variant_compare_tsv_service`
+    
+    用途：
+    - 執行此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`compare_variants_tsv_generator`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - Generator：逐步 yield update dict（log/progress/error 等）。
     """
     try:
         for update_dict in compare_variants_tsv_generator(tsv_path, output_csv_path):

@@ -40,14 +40,17 @@ class ExtractorView(ft.Column):
     """
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """__init__ 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`__init__`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`__init__`, `TaskSession`, `Event`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         super().__init__(expand=True, spacing=15)
         self.page = page
@@ -258,14 +261,17 @@ class ExtractorView(ft.Column):
     # UI helpers
     # ==================================================
     def _pick_button(self, target):
-        """_pick_button 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_pick_button`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`IconButton`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - 依實作回傳值（請見函式內 return path）。
         """
         return ft.IconButton(
             icon=ft.Icons.FOLDER_OPEN_OUTLINED,
@@ -275,14 +281,17 @@ class ExtractorView(ft.Column):
         )
 
     def pick_directory(self, target):
-        """pick_directory 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`pick_directory`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`getattr`, `_show_snack_bar`, `get_directory_path`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         label = getattr(target, "label", "資料夾")
         self._show_snack_bar(f"請選擇此欄位的資料夾", color=ft.Colors.BLUE_600)
@@ -291,14 +300,16 @@ class ExtractorView(ft.Column):
 
 
     def _on_dir_picked(self, e, target):
-        """_on_dir_picked 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_on_dir_picked`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if e.path:
             target.value = e.path
@@ -308,14 +319,17 @@ class ExtractorView(ft.Column):
 
 
     def set_controls_disabled(self, disabled: bool):
-        """set_controls_disabled 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`set_controls_disabled`
+        
+        用途：
+        - 設定此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`update`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         for ctrl in (
             self.mods_dir_textfield,
@@ -328,14 +342,17 @@ class ExtractorView(ft.Column):
         self.page.update()
 
     def clear_output_path(self, e=None):
-        """clear_output_path 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`clear_output_path`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`update`, `_append_log_line`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         if not (self.output_dir_textfield.value or "").strip():
             return
@@ -347,14 +364,17 @@ class ExtractorView(ft.Column):
     # TaskSession UI Poller
     # ==================================================
     def _start_ui_poller(self, mode: str = ""):
-        """_start_ui_poller 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_start_ui_poller`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`clear`, `start`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self._ui_poller_stop.clear()
         self._last_rendered_log_count = 0
@@ -368,14 +388,16 @@ class ExtractorView(ft.Column):
         }
 
         def poll():
-            """poll 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`poll`
+            
+            用途：
+            - 處理此函式的主要流程（細節以程式碼為準）。
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - None
             """
             while not self._ui_poller_stop.is_set():
                 snap = self.session.snapshot()
@@ -485,14 +507,17 @@ class ExtractorView(ft.Column):
         self.page.update()
     
     def _append_log_line(self, line: str):
-        """_append_log_line 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`_append_log_line`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`append`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         color = "#e0e0e0" # default logs are light grey
         if "[ERROR]" in line:
@@ -510,14 +535,17 @@ class ExtractorView(ft.Column):
     # Worker Logic
     # ==================================================
     def start_extraction(self, mode: str):
-        """start_extraction 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`start_extraction`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        - 主要包裝/呼叫：`snapshot`, `strip`
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         snap = self.session.snapshot()
         if snap.get("status") == "RUNNING":
@@ -626,14 +654,17 @@ class ExtractorView(ft.Column):
         
         # 背景執行預覽
         def do_preview():
-            """do_preview 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`do_preview`
+            
+            用途：
+            - 處理此函式的主要流程（細節以程式碼為準）。
+            - 主要包裝/呼叫：`preview_extraction_generator`
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - None
             """
             from translation_tool.core.jar_processor import preview_extraction_generator
             
@@ -663,14 +694,17 @@ class ExtractorView(ft.Column):
         
         # UI 輪詢器（類似提取時的 poller）
         def poll():
-            """poll 的用途說明。
-
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """`poll`
+            
+            用途：
+            - 處理此函式的主要流程（細節以程式碼為準）。
+            - 主要包裝/呼叫：`set_controls_disabled`, `_append_log_line`, `update`
+            
+            參數：
+            - 依函式簽名。
+            
+            回傳：
+            - None
             """
             while not preview_state['done']:
                 # 更新進度 UI

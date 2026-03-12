@@ -21,26 +21,32 @@ log = logging.getLogger(__name__)
 
 # --- 通用輔助函式 (保持不變) ---
 def _get_file_hash(data: bytes) -> str:
-    """_get_file_hash 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`_get_file_hash`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`hexdigest`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     return hashlib.sha256(data).hexdigest()
 
 def find_jar_files(folder_path: str) -> List[str]:
-    """find_jar_files 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`find_jar_files`
+    
+    用途：
+    - 找出此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`walk`, `info`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - 依實作回傳值（請見函式內 return path）。
     """
     jar_files = []
     for root, _, files in os.walk(folder_path):
@@ -144,14 +150,17 @@ def _extract_from_jar(jar_path: str, output_root: str, target_regex: re.Pattern)
 
 def _run_extraction_process(mods_dir: str, output_dir: str, target_regex: re.Pattern, process_name: str) -> Generator[Dict[str, Any], None, None]:
     # (此函式邏輯不變)
-    """_run_extraction_process 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """`_run_extraction_process`
+    
+    用途：
+    - 處理此函式的主要流程（細節以程式碼為準）。
+    - 主要包裝/呼叫：`makedirs`, `find_jar_files`, `len`
+    
+    參數：
+    - 依函式簽名。
+    
+    回傳：
+    - Generator：逐步 yield update dict（log/progress/error 等）。
     """
     os.makedirs(output_dir, exist_ok=True)
     jar_files = find_jar_files(mods_dir)
@@ -445,14 +454,16 @@ class ExtractionSummary:
     """提取結果摘要（記錄成功/警告/失敗）"""
     
     def __init__(self):
-        """__init__ 的用途說明。
-
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """`__init__`
+        
+        用途：
+        - 處理此函式的主要流程（細節以程式碼為準）。
+        
+        參數：
+        - 依函式簽名。
+        
+        回傳：
+        - None
         """
         self.success = []
         self.warnings = []
