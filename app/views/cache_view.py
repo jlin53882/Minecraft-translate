@@ -26,7 +26,22 @@ import flet as ft
 # UI 共用元件：統一按鈕樣式（先套用在總覽區，避免一次改動過大）
 from app.ui.components import primary_button, secondary_button
 
+from app.views.cache_manager.cache_actions import run_cache_action
+from app.views.cache_manager.cache_history_store import (
+    history_active_default,
+    history_append_event,
+    history_dirs,
+    history_load_active,
+    history_load_recent,
+    history_now_ts,
+    history_save_active,
+)
 from app.views.cache_manager.cache_overview_panel import build_overview_page
+from app.views.cache_manager.cache_state import (
+    CacheHistoryState,
+    CacheQueryState,
+    CacheShardState,
+)
 from app.services_impl.cache.cache_services import (
     cache_get_entry_service,
     cache_get_overview_service,
@@ -115,12 +130,13 @@ class CacheView(ft.Column):
         )
 
         # -------------------- Query: Search / Explorer --------------------
-        self.query_results: list[dict] = []
-        self.query_selected_result: dict | None = None
-        self.query_original_dst = ""
-        self.query_page = 1
-        self.query_page_size = 50
-        self.query_total_pages = 1
+        self._query_state = CacheQueryState()
+        self.query_results = self._query_state.query_results
+        self.query_selected_result = self._query_state.query_selected_result
+        self.query_original_dst = self._query_state.query_original_dst
+        self.query_page = self._query_state.query_page
+        self.query_page_size = self._query_state.query_page_size
+        self.query_total_pages = self._query_state.query_total_pages
 
         self.tf_query_input = ft.TextField(
             label="輸入 key / dst / 關鍵字",
@@ -183,9 +199,10 @@ class CacheView(ft.Column):
         )
 
         # 歷史還原（持久化）- 改成可拖曳浮動視窗（查詢區 + 分類分片共用）
-        self.history_window_source = None  # 記錄歷史紀錄來源（'query' 或 'shard'）
-        self.query_history_records: list[dict] = []
-        self.query_history_selected_event: dict | None = None
+        self._history_state = CacheHistoryState()
+        self.history_window_source = self._history_state.history_window_source
+        self.query_history_records = self._history_state.query_records
+        self.query_history_selected_event = self._history_state.query_selected_event
         self.query_history_selected_text = ft.Text(
             "未選取歷史紀錄", size=11, color=ft.Colors.GREY_700
         )
@@ -705,16 +722,17 @@ class CacheView(ft.Column):
         )
 
         # C1：ShardDetail - KeyListCard
-        self.shard_detail_selected_type = ""
-        self.shard_detail_selected_file = ""
-        self.shard_detail_selected_key = ""
-        self.shard_detail_keys: list[str] = []
-        self.shard_detail_page = 1
-        self.shard_detail_page_size = 50
-        self.shard_detail_total_pages = 1
+        self._shard_state = CacheShardState()
+        self.shard_detail_selected_type = self._shard_state.selected_type
+        self.shard_detail_selected_file = self._shard_state.selected_file
+        self.shard_detail_selected_key = self._shard_state.selected_key
+        self.shard_detail_keys = self._shard_state.keys
+        self.shard_detail_page = self._shard_state.page
+        self.shard_detail_page_size = self._shard_state.page_size
+        self.shard_detail_total_pages = self._shard_state.total_pages
 
         # C2：SRC 預覽模式
-        self.shard_detail_src_mode = "preview"  # preview | raw
+        self.shard_detail_src_mode = self._shard_state.src_mode  # preview | raw
 
         self.shard_detail_meta = ft.Text(
             "尚未選擇分片", size=11, color=ft.Colors.GREY_700
@@ -784,8 +802,8 @@ class CacheView(ft.Column):
         )
 
         # C3：DST 編輯
-        self.shard_dst_loaded_sig: tuple[str, str, str] | None = None
-        self.shard_dst_original = ""
+        self.shard_dst_loaded_sig = self._shard_state.dst_loaded_sig
+        self.shard_dst_original = self._shard_state.dst_original
         self.shard_dst_meta = ft.Text(
             "DST：請先選擇 key", size=11, color=ft.Colors.GREY_700
         )
@@ -1732,35 +1750,8 @@ class CacheView(ft.Column):
         self._render_query_type_shard_page()
 
     def _run_action(self, reason: str, work_fn, success_msg: str):
-        """執行此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`_append_log`, `_set_state`, `work_fn`
-
-        回傳：None
-        """
-        if self.ui_busy:
-            self._notify("目前正在處理，請稍候", "warn")
-            return
-
-        action_id = int(time.time() * 1000) % 1000000
-        self._append_log(f"[ACTION#{action_id}] start {reason}")
-        self._set_state(True, reason, f"trace: ACTION#{action_id} start {reason}")
-
-        try:
-            data = work_fn()
-            self._refresh_overview_ui(data)
-            self._refresh_query_type_options()
-            self._render_query_type_shard_page()
-            self._append_log(f"[ACTION#{action_id}] success {reason}")
-            self._notify(success_msg, "info")
-        except Exception as ex:
-            self._append_log(f"[ACTION#{action_id}] error {reason}: {ex}")
-            self._append_log(traceback.format_exc())
-            self._notify(f"{reason} 失敗: {ex}", "error")
-        finally:
-            self._append_log(f"[ACTION#{action_id}] finish READY")
-            self._set_state(False, "READY", f"trace: ACTION#{action_id} ready")
-            self._append_log(f"[STATE] {self.overview_status.value}")
+        """執行此函式的工作（細節以程式碼為準）。"""
+        return run_cache_action(self, reason, work_fn, success_msg)
 
     # top actions
     def _on_reload_all(self, e):
@@ -2988,174 +2979,31 @@ class CacheView(ft.Column):
 
     # -------------------- History storage helpers --------------------
     def _history_now_ts(self) -> str:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`isoformat`
-
-        回傳：依函式內 return path。
-        """
-        return datetime.now().astimezone().isoformat(timespec="seconds")
+        return history_now_ts()
 
     def _history_dirs(self, cache_type: str):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`strip`, `mkdir`
-
-        回傳：依函式內 return path。
-        """
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
-        if not root:
-            return None, None, None
-
-        base = Path(root) / "cache_history" / cache_type
-        jsonl_dir = base / "jsonl"
-        json_dir = base / "json"
-        jsonl_dir.mkdir(parents=True, exist_ok=True)
-        json_dir.mkdir(parents=True, exist_ok=True)
-        return base, jsonl_dir, json_dir
+        return history_dirs(root, cache_type)
 
     def _history_active_default(self, cache_type: str) -> dict:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：依函式內 return path。
-        """
-        return {
-            "current_file": f"{cache_type}_h000001.jsonl",
-            "current_count": 0,
-            "next_seq": 2,
-            "max_per_file": 10000,
-        }
+        return history_active_default(cache_type)
 
     def _history_load_active(self, cache_type: str):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`_history_dirs`, `loads`, `setdefault`
-
-        回傳：依函式內 return path。
-        """
-        _base, jsonl_dir, json_dir = self._history_dirs(cache_type)
-        if jsonl_dir is None:
-            return None, None, None, None
-
-        active_path = jsonl_dir / ".history.active"
-        if not active_path.exists():
-            active = self._history_active_default(cache_type)
-            active_path.write_text(
-                json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            return active, active_path, jsonl_dir, json_dir
-
-        try:
-            active = json.loads(active_path.read_text(encoding="utf-8"))
-            if not isinstance(active, dict):
-                raise ValueError("active format error")
-        except Exception:
-            active = self._history_active_default(cache_type)
-            active_path.write_text(
-                json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-
-        active.setdefault("current_file", f"{cache_type}_h000001.jsonl")
-        active.setdefault("current_count", 0)
-        active.setdefault("next_seq", 2)
-        active.setdefault("max_per_file", 10000)
-        return active, active_path, jsonl_dir, json_dir
+        root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
+        return history_load_active(root, cache_type)
 
     def _history_save_active(self, active_path: Path, active: dict):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`write_text`
-
-        回傳：None
-        """
-        active_path.write_text(
-            json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        return history_save_active(active_path, active)
 
     def _history_append_event(self, cache_type: str, event: dict):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`_history_load_active`
-
-        回傳：None
-        """
-        active, active_path, jsonl_dir, json_dir = self._history_load_active(cache_type)
-        if not active:
-            return
-
-        max_per_file = int(active.get("max_per_file", 10000) or 10000)
-        current_count = int(active.get("current_count", 0) or 0)
-
-        if current_count >= max_per_file:
-            seq = int(active.get("next_seq", 2) or 2)
-            active["current_file"] = f"{cache_type}_h{seq:06d}.jsonl"
-            active["current_count"] = 0
-            active["next_seq"] = seq + 1
-
-        current_file = str(active.get("current_file"))
-        jsonl_path = jsonl_dir / current_file
-
-        line = json.dumps(event, ensure_ascii=False)
-        with jsonl_path.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
-
-        active["current_count"] = int(active.get("current_count", 0) or 0) + 1
-        self._history_save_active(active_path, active)
-
-        # pretty mirror（人類可讀）
-        json_path = json_dir / current_file.replace(".jsonl", ".json")
-        arr = []
-        if json_path.exists():
-            try:
-                raw = json.loads(json_path.read_text(encoding="utf-8"))
-                if isinstance(raw, list):
-                    arr = raw
-            except Exception:
-                arr = []
-
-        arr.append(event)
-        if len(arr) > max_per_file:
-            arr = arr[-max_per_file:]
-        json_path.write_text(
-            json.dumps(arr, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
+        return history_append_event(root, cache_type, event)
 
     def _history_load_recent(
         self, cache_type: str, key: str, limit: int = 20
     ) -> list[dict]:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`_history_dirs`, `sorted`
-
-        回傳：依函式內 return path。
-        """
-        _base, jsonl_dir, _json_dir = self._history_dirs(cache_type)
-        if jsonl_dir is None:
-            return []
-
-        files = sorted(jsonl_dir.glob(f"{cache_type}_h*.jsonl"), reverse=True)
-        out: list[dict] = []
-
-        for fp in files:
-            try:
-                lines = fp.read_text(encoding="utf-8").splitlines()
-            except Exception:
-                continue
-
-            for ln in reversed(lines):
-                ln = ln.strip()
-                if not ln:
-                    continue
-                try:
-                    ev = json.loads(ln)
-                except Exception:
-                    continue
-                if str(ev.get("key", "")) != key:
-                    continue
-                out.append(ev)
-                if len(out) >= limit:
-                    return out
-        return out
+        root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
+        return history_load_recent(root, cache_type, key, limit)
 
     def _render_query_history(self):
         """處理此函式的工作（細節以程式碼為準）。
