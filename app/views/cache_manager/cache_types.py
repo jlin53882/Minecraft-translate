@@ -18,6 +18,11 @@ from dataclasses import dataclass
 
 @dataclass(slots=True)
 class CacheUiState:
+    """CacheUiState 類別。
+
+    用途：封裝與 CacheUiState 相關的狀態與行為。
+    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    """
     busy: bool = False
     reason: str = ""
     trace: str = "trace: init"
@@ -25,6 +30,11 @@ class CacheUiState:
 
 @dataclass(slots=True)
 class ActionState:
+    """ActionState 類別。
+
+    用途：封裝與 ActionState 相關的狀態與行為。
+    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    """
     action_id: int
     reason: str
     phase: str

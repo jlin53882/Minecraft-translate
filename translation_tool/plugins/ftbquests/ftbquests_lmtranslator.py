@@ -1,3 +1,9 @@
+"""translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # ftbquests_lmtranslator.py
 # ------------------------------------------------------------
 # FTB Quests (Already Extracted JSON) -> translate_batch_smart -> Export translated JSON maps
@@ -181,6 +187,15 @@ def translate_ftb_pending_to_zh_tw(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def set_prog(v: float):
+        """set_prog 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if session is not None and hasattr(session, "set_progress"):
             try:
                 session.set_progress(v)
@@ -207,6 +222,15 @@ def translate_ftb_pending_to_zh_tw(
     global_total_keys = 0
 
     def _count_one(src: Path) -> Tuple[Path, int]:
+        """_count_one 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         try:
             mapping = read_json_dict(src)
             c = count_translatable_keys(mapping)
@@ -304,6 +328,15 @@ def translate_ftb_pending_to_zh_tw(
     _file_write_table: dict[str, tuple[Path, Dict[str, str]]] = {}
 
     def _writer(file_id: str) -> None:
+        """_writer 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         dst_path, data = _file_write_table[file_id]
         write_json_dict(dst_path, data)
 
@@ -450,6 +483,15 @@ def translate_ftb_pending_to_zh_tw(
 
         # shared while-loop（includes add_to_cache + save_translation_cache + safe slicing）
         def on_translated_item(it: Dict[str, Any]) -> None:
+            """on_translated_item 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             p = it.get("path")
             t = it.get("text")
             if isinstance(p, str) and isinstance(t, str):
@@ -474,6 +516,15 @@ def translate_ftb_pending_to_zh_tw(
 
         # 在這之前先確保 file_id/_file_write_table 設定好了（下面會說加在哪）
         def on_batch_flushed() -> None:
+            """on_batch_flushed 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             try:
                 touch.touch(file_id)
                 touch.flush(_writer)     # 最小改動：每批也照樣寫，避免中斷損失
@@ -483,6 +534,15 @@ def translate_ftb_pending_to_zh_tw(
 
 
         def _fmt_eta(sec: float) -> str:
+            """_fmt_eta 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             if sec <= 0:
                 return ""
             m, s = divmod(int(sec), 60)
@@ -492,6 +552,15 @@ def translate_ftb_pending_to_zh_tw(
 
 
         def on_progress(p: float, msg: str, eta_sec: float) -> None:
+            """on_progress 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             eta_txt = _fmt_eta(eta_sec)
             if eta_txt:
                 log_info(f"⏳ [AI 翻譯中] {msg} | 預估剩餘時間：{eta_txt}")

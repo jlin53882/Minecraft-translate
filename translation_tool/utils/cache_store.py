@@ -20,6 +20,11 @@ from typing import Any, Optional
 
 @dataclass
 class CacheRuntimeState:
+    """CacheRuntimeState 類別。
+
+    用途：封裝與 CacheRuntimeState 相關的狀態與行為。
+    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    """
     translation_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
     cache_file_path: dict[str, Path] = field(default_factory=dict)
     initialized: bool = False
@@ -32,10 +37,28 @@ _RUNTIME = CacheRuntimeState()
 
 
 def get_runtime_state() -> CacheRuntimeState:
+    """get_runtime_state 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     return _RUNTIME
 
 
 def reset_runtime_state(cache_types: list[str]) -> CacheRuntimeState:
+    """reset_runtime_state 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     state = get_runtime_state()
     state.translation_cache = {}
     state.cache_file_path = {}
@@ -46,6 +69,15 @@ def reset_runtime_state(cache_types: list[str]) -> CacheRuntimeState:
 
 
 def ensure_runtime_maps(cache_types: list[str]) -> CacheRuntimeState:
+    """ensure_runtime_maps 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     state = get_runtime_state()
     if not state.session_new_entries:
         state.session_new_entries = {k: {} for k in cache_types}

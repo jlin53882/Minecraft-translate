@@ -1,3 +1,9 @@
+"""translation_tool/utils/cache_overview.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 from __future__ import annotations
 
 import datetime
@@ -8,6 +14,15 @@ import orjson as json
 
 
 def get_active_shard_id(cache_file_path: dict[str, Path], cache_type: str, active_shard_file: str) -> str:
+    """get_active_shard_id 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     try:
         type_dir = cache_file_path.get(cache_type, Path(".")).parent
         active_file = type_dir / active_shard_file
@@ -32,6 +47,15 @@ def build_cache_overview(
     cache_dir_name: str,
     resolve_project_path: Callable[[str], Path],
 ) -> dict[str, Any]:
+    """build_cache_overview 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     out_types: dict[str, Any] = {}
     total_entries = 0
     dirty_type_count = 0

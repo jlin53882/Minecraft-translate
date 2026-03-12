@@ -1,3 +1,9 @@
+"""translation_tool/core/lang_merge_pipeline.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -23,6 +29,15 @@ def _process_single_mod(
     must_translate_dir: str
 ) -> Dict[str, Any]:
 
+    """_process_single_mod 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 
     #def contains_cjk(s: str) -> bool:
@@ -67,6 +82,15 @@ def _process_single_mod(
 
 
     def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
+        """_safe_read_lang_json 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         path = paths.get(lang_key)
         if not path:
             return {}
@@ -78,6 +102,15 @@ def _process_single_mod(
                 bad_lines = []
 
                 def on_error(line_no, raw, reason):
+                    """on_error 的用途說明。
+
+                    Args:
+                        參數請見函式簽名。
+                    Returns:
+                        回傳內容依實作而定；若無顯式回傳則為 None。
+                    Side Effects:
+                        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+                    """
                     bad_lines.append((line_no, raw, reason))
 
                 data = parse_lang_text(text, on_error=on_error)

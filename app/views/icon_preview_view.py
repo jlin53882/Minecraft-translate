@@ -1,3 +1,9 @@
+"""app/views/icon_preview_view.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 import flet as ft
 import json
 from pathlib import Path
@@ -26,6 +32,15 @@ class IconPreviewView(ft.Column):
     """
 
     def __init__(self, page: ft.Page):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         super().__init__(expand=True, spacing=8)
         self.page = page
 
@@ -148,18 +163,45 @@ class IconPreviewView(ft.Column):
     # Folder picker callbacks
     # ==================================================
     def _on_pick_source(self, e: ft.FilePickerResultEvent):
+        """_on_pick_source 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if e.path:
             self.source_root = Path(e.path)
             self.source_label.value = f"原文資料夾：{self.source_root}"
             self._update_load_state()
 
     def _on_pick_review(self, e: ft.FilePickerResultEvent):
+        """_on_pick_review 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if e.path:
             self.review_root = Path(e.path)
             self.review_label.value = f"校對資料夾：{self.review_root}"
             self._update_load_state()
 
     def _update_load_state(self):
+        """_update_load_state 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.load_btn.disabled = not (self.source_root and self.review_root)
         self.update()
 
@@ -167,6 +209,15 @@ class IconPreviewView(ft.Column):
     # 載入 → 建立模組清單
     # ==================================================
     def _on_load_clicked(self, e):
+        """_on_load_clicked 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         entries = self._load_entries()
         mods = defaultdict(list)
 
@@ -180,6 +231,15 @@ class IconPreviewView(ft.Column):
     # 第一層：模組清單
     # ==================================================
     def _render_mod_list(self):
+        """_render_mod_list 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.current_modid = None
         self.back_btn.visible = False
         self.save_btn.visible = False
@@ -217,11 +277,29 @@ class IconPreviewView(ft.Column):
 
 
     def _update_page_bar_for_mods(self):
+        """_update_page_bar_for_mods 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.page_info.value = f"模組清單｜第 {self.mod_current_page + 1} / {self.mod_total_pages} 頁"
         self.prev_page_btn.disabled = self.mod_current_page <= 0
         self.next_page_btn.disabled = self.mod_current_page >= self.mod_total_pages - 1
 
     def _prev_page(self, e):
+        """_prev_page 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if self.current_modid:
             # 第二層（item）
             if self.current_page > 0:
@@ -235,6 +313,15 @@ class IconPreviewView(ft.Column):
 
 
     def _next_page(self, e):
+        """_next_page 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if self.current_modid:
             if self.current_page < self.total_pages - 1:
                 self.current_page += 1
@@ -249,6 +336,15 @@ class IconPreviewView(ft.Column):
     # 第二層：單一模組 detail
     # ==================================================
     def _open_mod_detail(self, modid: str):
+        """_open_mod_detail 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.current_modid = modid
         self.current_page = 0   # ⭐ 重設頁碼
         self.back_btn.visible = True
@@ -268,6 +364,15 @@ class IconPreviewView(ft.Column):
 
 
     def _go_back(self, e):
+        """_go_back 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.current_modid = None
         self.current_page = 0
         self.page_info.value = ""
@@ -280,12 +385,30 @@ class IconPreviewView(ft.Column):
     # Row → 回報翻譯變更
     # ==================================================
     def _on_value_changed(self, key: str, value: str):
+        """_on_value_changed 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self._zh_data[key] = to_halfwidth(value)
 
     # ==================================================
     # 儲存 zh_tw.json
     # ==================================================
     def _save_current_zh(self, e):
+        """_save_current_zh 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if not self._current_zh_file:
             self._show_snack("❌ 找不到 zh_tw.json")
             return
@@ -371,6 +494,15 @@ class IconPreviewView(ft.Column):
         return entries
 
     def _render_current_page(self):
+        """_render_current_page 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         entries = self.mods.get(self.current_modid, [])
         total = len(entries)
     

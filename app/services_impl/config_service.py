@@ -62,16 +62,52 @@ def _save_app_config(config: dict[str, Any]):
 # --- 檔案讀寫服務 ---
 
 def load_replace_rules():
+    """load_replace_rules 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     return load_rules_core(REPLACE_RULES_PATH)
 
 
 def save_replace_rules(rules):
+    """save_replace_rules 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     save_rules_core(REPLACE_RULES_PATH, rules)
 
 
 def load_config_json():
+    """load_config_json 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     return _load_app_config()
 
 
 def save_config_json(config):
+    """save_config_json 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     _save_app_config(config)

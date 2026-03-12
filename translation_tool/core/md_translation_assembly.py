@@ -1,3 +1,9 @@
+"""translation_tool/core/md_translation_assembly.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 from __future__ import annotations
 
 import json
@@ -73,6 +79,15 @@ def _count_md_pending_docs(root: Path) -> int:
 
 
 def _log_md_step2_stats(step2_res: Dict[str, Any]) -> None:
+    """_log_md_step2_stats 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     if not isinstance(step2_res, dict):
         return
 
@@ -137,11 +152,29 @@ class _ProgressProxy:
     """把 step 內部 0~1 進度轉成整體 pipeline 的區段進度。"""
 
     def __init__(self, parent: Any, base: float, span: float):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.parent = parent
         self.base = float(base)
         self.span = float(span)
 
     def set_progress(self, p: float):
+        """set_progress 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if not self.parent or not hasattr(self.parent, "set_progress"):
             return
         try:
@@ -162,6 +195,15 @@ def step1_extract(
     progress_span: float = 0.33,
 ) -> Dict[str, Any]:
     # Step1：抽取 md 區塊並輸出待翻譯 JSON
+    """step1_extract 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     in_root = Path(input_dir).resolve()
     pending_root = Path(pending_dir).resolve()
     pending_root.mkdir(parents=True, exist_ok=True)
@@ -314,6 +356,15 @@ def step2_translate(
     write_new_cache: bool = True,
 ) -> Dict[str, Any]:
     # Step2：待翻譯 JSON -> LM 翻譯後 JSON
+    """step2_translate 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     proxy = _ProgressProxy(session, progress_base, progress_span)
     result = translate_md_pending(
         pending_dir=str(Path(pending_dir).resolve()),
@@ -336,6 +387,15 @@ def step3_inject(
     progress_span: float = 0.33,
 ) -> Dict[str, Any]:
     # Step3：把翻譯後 JSON 回寫到 md 檔案
+    """step3_inject 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     src_root = Path(input_dir).resolve()
     jroot = Path(json_dir).resolve()
     out_done = Path(final_dir).resolve()

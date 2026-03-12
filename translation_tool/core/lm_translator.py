@@ -1,3 +1,9 @@
+"""translation_tool/core/lm_translator.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # lm_translator.py
 import math
 import time
@@ -205,6 +211,15 @@ def translate_directory_generator(
 
     # 定義一個內部工作函式，處理單個檔案的讀取與抽取
     def process_file_task(f: Path):
+        """process_file_task 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         try:
             # 使用 orjson 快速讀取
             data = json.loads(f.read_bytes())

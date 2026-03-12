@@ -1,3 +1,9 @@
+"""translation_tool/utils/cache_loader.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -9,6 +15,15 @@ import orjson as json
 
 
 def load_shard_file(path: Path) -> dict[str, Any]:
+    """load_shard_file 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     try:
         data = json.loads(path.read_bytes())
         return data if isinstance(data, dict) else {}
@@ -25,6 +40,15 @@ def load_cache_type(
     parallel_workers: int,
     logger: logging.Logger,
 ) -> None:
+    """load_cache_type 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     if cache_type not in translation_cache:
         translation_cache[cache_type] = {}
 

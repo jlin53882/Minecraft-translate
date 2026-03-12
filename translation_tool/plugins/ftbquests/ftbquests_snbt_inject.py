@@ -1,3 +1,9 @@
+"""translation_tool/plugins/ftbquests/ftbquests_snbt_inject.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # ftbquests_snbt_inject.py
 # FTB Quests SNBT 注入工具：將已整理好的 zh_tw JSON 寫回 quests/lang/zh_tw/*.snbt
 
@@ -44,6 +50,15 @@ def _normalize_config_dir(path: str) -> str:
 
 
 def _load_json_dict(path: str) -> dict:
+    """_load_json_dict 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     if not os.path.isfile(path):
         return {}
     with open(path, "rb") as f:
@@ -120,6 +135,15 @@ def walk_and_copy_all_snbt(src_root_dir: str, dst_root_dir: str) -> int:
 
 
 def _read_snbt(path: str) -> Compound | None:
+    """_read_snbt 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     try:
         with open(path, "r", encoding="utf-8") as f:
             return snbt.load(f)
@@ -129,6 +153,15 @@ def _read_snbt(path: str) -> Compound | None:
 
 
 def _write_snbt(path: str, root: Compound) -> None:
+    """_write_snbt 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(snbt.dumps(root))
@@ -185,6 +218,15 @@ def patch_lang_snbt_file(
     changed_keys: List[str] = []
 
     def _list_to_py(v):
+        """_list_to_py 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if isinstance(v, SnbtList):
             out = []
             for e in v:
@@ -307,6 +349,15 @@ def patch_quest_snbt_file(
     missing: list[str] = []
 
     def _coerce_to_list(new_val: Any) -> list[str] | None:
+        """_coerce_to_list 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if isinstance(new_val, list):
             parts = [x for x in new_val if isinstance(x, str)]
             return parts
@@ -315,6 +366,15 @@ def patch_quest_snbt_file(
         return None
 
     def _apply_field(obj: Compound, kind: str, new_val: Any, tag_key: str):
+        """_apply_field 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         nonlocal changed, candidates
 
         if kind not in ("title", "subtitle", "description"):
@@ -361,6 +421,15 @@ def patch_quest_snbt_file(
         skipped.append(tag_key)
 
     def _recurse(node):
+        """_recurse 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if isinstance(node, Compound):
             id_val = node.get("id")
             if isinstance(id_val, snbt.String):
@@ -516,6 +585,15 @@ def inject_ftbquests_quests_from_zh_tw_json(
 
 
     def _build_filename_index(root_dir: str) -> dict[str, list[str]]:
+        """_build_filename_index 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         idx = defaultdict(list)
         for r, _, files in os.walk(root_dir):
             for fn in files:

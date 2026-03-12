@@ -42,6 +42,15 @@ class LogLimiter:
     """
 
     def __init__(self, max_logs: int = 3000, flush_interval: float = 0.1):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.max_logs = max_logs
         self.flush_interval = flush_interval
         self.log_queue = deque(maxlen=max_logs)

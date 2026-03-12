@@ -40,6 +40,15 @@ class ExtractorView(ft.Column):
     """
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         super().__init__(expand=True, spacing=15)
         self.page = page
         self.file_picker = file_picker
@@ -249,6 +258,15 @@ class ExtractorView(ft.Column):
     # UI helpers
     # ==================================================
     def _pick_button(self, target):
+        """_pick_button 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         return ft.IconButton(
             icon=ft.Icons.FOLDER_OPEN_OUTLINED,
             icon_color=ft.Colors.BLUE_GREY_700,
@@ -257,6 +275,15 @@ class ExtractorView(ft.Column):
         )
 
     def pick_directory(self, target):
+        """pick_directory 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         label = getattr(target, "label", "資料夾")
         self._show_snack_bar(f"請選擇此欄位的資料夾", color=ft.Colors.BLUE_600)
         self.file_picker.on_result = lambda e: self._on_dir_picked(e, target)
@@ -264,6 +291,15 @@ class ExtractorView(ft.Column):
 
 
     def _on_dir_picked(self, e, target):
+        """_on_dir_picked 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if e.path:
             target.value = e.path
             self.page.update()
@@ -272,6 +308,15 @@ class ExtractorView(ft.Column):
 
 
     def set_controls_disabled(self, disabled: bool):
+        """set_controls_disabled 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         for ctrl in (
             self.mods_dir_textfield,
             self.output_dir_textfield,
@@ -283,6 +328,15 @@ class ExtractorView(ft.Column):
         self.page.update()
 
     def clear_output_path(self, e=None):
+        """clear_output_path 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if not (self.output_dir_textfield.value or "").strip():
             return
         self.output_dir_textfield.value = ""
@@ -293,6 +347,15 @@ class ExtractorView(ft.Column):
     # TaskSession UI Poller
     # ==================================================
     def _start_ui_poller(self, mode: str = ""):
+        """_start_ui_poller 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self._ui_poller_stop.clear()
         self._last_rendered_log_count = 0
         
@@ -305,6 +368,15 @@ class ExtractorView(ft.Column):
         }
 
         def poll():
+            """poll 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             while not self._ui_poller_stop.is_set():
                 snap = self.session.snapshot()
                 status = snap["status"]
@@ -413,6 +485,15 @@ class ExtractorView(ft.Column):
         self.page.update()
     
     def _append_log_line(self, line: str):
+        """_append_log_line 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         color = "#e0e0e0" # default logs are light grey
         if "[ERROR]" in line:
             color = "#ff6b6b" # soft red
@@ -429,6 +510,15 @@ class ExtractorView(ft.Column):
     # Worker Logic
     # ==================================================
     def start_extraction(self, mode: str):
+        """start_extraction 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         snap = self.session.snapshot()
         if snap.get("status") == "RUNNING":
             self._show_snack_bar("任務進行中...")
@@ -536,6 +626,15 @@ class ExtractorView(ft.Column):
         
         # 背景執行預覽
         def do_preview():
+            """do_preview 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             from translation_tool.core.jar_processor import preview_extraction_generator
             
             try:
@@ -564,6 +663,15 @@ class ExtractorView(ft.Column):
         
         # UI 輪詢器（類似提取時的 poller）
         def poll():
+            """poll 的用途說明。
+
+            Args:
+                參數請見函式簽名。
+            Returns:
+                回傳內容依實作而定；若無顯式回傳則為 None。
+            Side Effects:
+                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            """
             while not preview_state['done']:
                 # 更新進度 UI
                 self.progress_bar.value = preview_state['progress']

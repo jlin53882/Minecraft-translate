@@ -1,3 +1,9 @@
+"""translation_tool/plugins/md/md_inject_qa.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # md_inject_qa.py
 # ------------------------------------------------------------
 # 方案 B（實際使用）：以「原始 .md 行結構」為骨架，保留翻譯段落的多行寫回
@@ -128,6 +134,15 @@ def map_lang_in_rel_path_allow_zh(rel_path: str,
 RE_MOSTLY_TOKEN_LINE = re.compile(r"^\s*(§[0-9a-zA-Z]+\S*)\s*(§[0-9a-zA-Z]+\S*)*\s*$")
 
 def is_token_line(line: str) -> bool:
+    """is_token_line 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     s = line.strip()
     if not s:
         return False  # 空行不是 token 行（要保留）
@@ -185,6 +200,15 @@ def flatten_for_md(text: str) -> str:
     buf: List[str] = []
 
     def flush_buf():
+        """flush_buf 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         nonlocal buf
         if buf:
             out.append(" ".join([x.strip() for x in buf if x.strip()]))
@@ -214,6 +238,11 @@ def flatten_for_md(text: str) -> str:
 
 @dataclass
 class Item:
+    """Item 類別。
+
+    用途：封裝與 Item 相關的狀態與行為。
+    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    """
     source_md: str
     start_line: int
     end_line: int
@@ -339,12 +368,30 @@ def apply_item_to_md_lines(md_lines: List[str], item: Item) -> None:
 
 
 def iter_json_files(root: Path):
+    """iter_json_files 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     for p in root.rglob("*.json"):
         if p.is_file():
             yield p
 
 
 def main():
+    """main 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     print("=== md 寫回（方案 A：保留原檔骨架，只替換文字行）===")
 
     src_md_root = input("原始 .md 輸入資料夾（原檔所在根目錄）: ").strip().strip('"').strip("'")

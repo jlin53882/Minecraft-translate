@@ -27,6 +27,15 @@ class TaskSession:
     而是把跨執行緒共享的狀態收斂到單一地方，降低 race condition 與散落旗標的維護成本。
     """
     def __init__(self, max_logs: int = 300):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.progress: float = 0.0
         self.status: str = "IDLE"   # IDLE / RUNNING / DONE / ERROR
         self.error: bool = False
@@ -46,22 +55,58 @@ class TaskSession:
             self.progress = max(0.0, min(1.0, value))
 
     def add_log(self, text: str):
+        """add_log 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if not text:
             return
         with self._lock:
             self.logs.append(text)
 
     def set_error(self):
+        """set_error 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         with self._lock:
             self.error = True
             self.status = "ERROR"
 
     def finish(self):
+        """finish 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         with self._lock:
             self.progress = 1.0
             self.status = "DONE"
 
     def start(self):
+        """start 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         with self._lock:
             self.progress = 0.0
             self.logs.clear()

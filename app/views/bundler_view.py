@@ -1,3 +1,9 @@
+"""app/views/bundler_view.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # /minecraft_translator_flet/app/views/bundler_view.py (tkinter 修正版)
 
 import flet as ft
@@ -10,7 +16,21 @@ import tkinter as tk
 from tkinter import filedialog
 
 class BundlerView(ft.Column):
+    """BundlerView 類別。
+
+    用途：封裝與 BundlerView 相關的狀態與行為。
+    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    """
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
         self.page = page
         # 我們仍然保留 file_picker，以防萬一 (雖然現在主要用 tkinter)
@@ -53,6 +73,15 @@ class BundlerView(ft.Column):
     # --- 輔助函式 ---
     def _create_pick_button(self, target_textfield: ft.TextField, pick_type: str):
         # (函式內容... 保持不變)
+        """_create_pick_button 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if pick_type == 'dir':
             icon = ft.Icons.FOLDER_OPEN
             tooltip = "選擇資料夾"
@@ -67,6 +96,15 @@ class BundlerView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
         # (函式內容... 保持不變)
+        """_show_snack_bar 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True
@@ -109,12 +147,30 @@ class BundlerView(ft.Column):
 
     def set_controls_disabled(self, disabled: bool):
         # (函式內容... 保持不變)
+        """set_controls_disabled 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         for ctrl in [self.root_dir_textfield, self.output_zip_textfield, self.start_button]:
             ctrl.disabled = disabled
         self.page.update()
 
     def start_bundling_clicked(self, e):
         # (函式內容... 保持不變)
+        """start_bundling_clicked 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         root_dir = self.root_dir_textfield.value
         output_zip = self.output_zip_textfield.value
 
@@ -135,6 +191,15 @@ class BundlerView(ft.Column):
 
     def bundling_worker(self, root_dir, output_zip):
         # (函式內容... 保持不變)
+        """bundling_worker 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         try:
             for update in run_bundling_service(root_dir, output_zip):
                 log_msg = update.get("log", "")

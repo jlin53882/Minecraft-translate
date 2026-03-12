@@ -1,3 +1,9 @@
+"""app/views/config_view.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 import flet as ft
 import traceback
 
@@ -6,12 +12,26 @@ from app.ui.components import primary_button
 from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
 
 class ConfigView(ft.Column):
+    """ConfigView 類別。
+
+    用途：封裝與 ConfigView 相關的狀態與行為。
+    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    """
     DEFAULT_MODELS = {
         "gemini-2.5-flash": True,
     }
 
     def __init__(self, page: ft.Page):
         # 設定 Root Column 不滾動，為了做 Fixed Footer
+        """__init__ 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         super().__init__(expand=True, spacing=0)
         self.page = page
         self.controls_map = {}
@@ -123,6 +143,15 @@ class ConfigView(ft.Column):
     # --- UI 建構區塊 ---
 
     def _build_header(self):
+        """_build_header 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         return ft.Container(
             padding=ft.padding.only(left=5, bottom=10),
             content=ft.Row([
@@ -132,6 +161,15 @@ class ConfigView(ft.Column):
         )
 
     def _build_left_column(self):
+        """_build_left_column 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         return ft.Column(
             expand=1,
             spacing=15,
@@ -163,6 +201,15 @@ class ConfigView(ft.Column):
         # LM Translator Section content
         
         # 1. Top Params
+        """_build_right_column 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         top_row = ft.Row([
             ft.Column([self.controls_map['lm_translator.temperature']], expand=1),
             ft.Column([self.controls_map['lm_translator.rate_limit.timeout']], expand=1),
@@ -244,6 +291,15 @@ class ConfigView(ft.Column):
         )
 
     def _build_lang_merger_card(self):
+        """_build_lang_merger_card 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         return self._build_card("語言合併器設定 (Lang Merger)", [
             ft.Row([
                 ft.Column([self.controls_map['lang_merger.pending_folder_name']], expand=1),
@@ -256,6 +312,15 @@ class ConfigView(ft.Column):
         ])
 
     def _build_footer(self):
+        """_build_footer 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         return ft.Container(
             padding=ft.padding.symmetric(horizontal=20, vertical=10),
             bgcolor=ft.Colors.WHITE,
@@ -276,6 +341,15 @@ class ConfigView(ft.Column):
         )
 
     def _build_card(self, title, controls_list):
+        """_build_card 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         return ft.Card(
             elevation=2,
             surface_tint_color=ft.Colors.WHITE,
@@ -292,12 +366,30 @@ class ConfigView(ft.Column):
     # --- 邏輯功能 (與原程式碼相同，僅移動位置) ---
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
+        """_show_snack_bar 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
 
     def add_model_row(self, model_name: str):
+        """add_model_row 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         cb = ft.Checkbox(label=model_name, value=True, expand=True, label_style=ft.TextStyle(size=14, weight=ft.FontWeight.W_500))
         order_text = ft.Text("00", size=12, color=ft.Colors.GREY_600, weight=ft.FontWeight.W_500, width=28, text_align=ft.TextAlign.RIGHT)
         btn_up = ft.IconButton(icon=ft.Icons.KEYBOARD_ARROW_UP, tooltip="上移", icon_size=18, on_click=lambda e: self.move_model_row(cb, -1))
@@ -321,6 +413,15 @@ class ConfigView(ft.Column):
         self._refresh_model_order_labels()
 
     def move_model_row(self, cb: ft.Checkbox, direction: int):
+        """move_model_row 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         controls = self.models_column.controls
         idx = next((i for i, r in enumerate(controls) if r._checkbox is cb), None)
         if idx is None: return
@@ -330,11 +431,29 @@ class ConfigView(ft.Column):
         self._refresh_model_order_labels()
 
     def remove_model_by_checkbox(self, cb: ft.Checkbox):
+        """remove_model_by_checkbox 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         row = next((r for r in self.models_column.controls if r._checkbox is cb), None)
         if row: self.models_column.controls.remove(row)
         self._refresh_model_order_labels()
 
     def on_add_model_clicked(self, e):
+        """on_add_model_clicked 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         name = self.new_model_field.value.strip()
         if not name:
             self._show_snack_bar("模型名稱不能為空")
@@ -347,6 +466,15 @@ class ConfigView(ft.Column):
         self.page.update()
 
     def add_key_row(self):
+        """add_key_row 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         tf = ft.TextField(label="API Key", password=True, can_reveal_password=True, expand=True, dense=True)
         row = ft.Row(controls=[tf, ft.IconButton(icon=ft.Icons.DELETE, on_click=lambda e: self.remove_key_row(row))])
         self.key_fields.append(tf)
@@ -354,6 +482,15 @@ class ConfigView(ft.Column):
         self.keys_column.update()
 
     def remove_key_row(self, row: ft.Row):
+        """remove_key_row 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if row in self.keys_column.controls:
             idx = self.keys_column.controls.index(row)
             self.keys_column.controls.remove(row)
@@ -361,12 +498,30 @@ class ConfigView(ft.Column):
         self.keys_column.update()
 
     def _refresh_model_order_labels(self):
+        """_refresh_model_order_labels 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         for idx, row in enumerate(self.models_column.controls):
             if hasattr(row, "_order_text"):
                 row._order_text.value = f"{idx + 1:02d}"
         self.page.update()
 
     def load_config(self):
+        """load_config 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         config = load_config_json()
         log_cfg = config.get("logging", {})
         trans_cfg = config.get("translator", {})
@@ -427,6 +582,15 @@ class ConfigView(ft.Column):
             self.keys_column.controls.append(row)   
 
     def save_config_clicked(self, e):
+        """save_config_clicked 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         new_config = load_config_json()  
         try:
             new_config["logging"]["log_level"] = self.controls_map['logging.log_level'].value

@@ -1,3 +1,9 @@
+"""translation_tool/core/lm_translator_shared.py 模組。
+
+用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 # translation_tool/core/lm_translator_shared.py
 # ------------------------------------------------------------
 # 共享的語言模型 (LM) 翻譯迴圈邏輯 (含 ETA 計算版本)
@@ -42,6 +48,15 @@ class CacheRule:
     key_mode: str = "path|source_text"
 
     def make_key(self, item: Dict[str, Any]) -> str:
+        """make_key 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         path = str(item.get("path") or "")
         src = str(item.get("source_text") or "")
         if self.key_mode == "path":
@@ -55,6 +70,15 @@ class CacheRule:
 
 def get_default_cache_rules() -> Dict[str, CacheRule]:
     # 每次回傳新 dict，避免外部修改污染全域
+    """get_default_cache_rules 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     return {
         "lang": CacheRule("path"),
         "patchouli": CacheRule("path|source_text"),
@@ -69,6 +93,15 @@ def get_default_cache_rules() -> Dict[str, CacheRule]:
 STRICT_SRC_TYPES = {"lang","kubejs","ftbquests","md"}   # 之後要加很容易，例如 {"lang", "md"}
 def _is_valid_hit(dst: str, entry: dict, item: dict) -> bool:
     # 1️⃣ dst 本身必須是有效翻譯
+    """_is_valid_hit 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     if not value_fully_translated(dst):
         return False
 
@@ -149,9 +182,23 @@ def fast_split_items_by_cache(
 
 @dataclass
 class TouchSet:
+    """TouchSet 類別。
+
+    用途：封裝與 TouchSet 相關的狀態與行為。
+    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    """
     touched: Set[str] = field(default_factory=set)
 
     def touch(self, file_id: str) -> None:
+        """touch 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         if file_id:
             self.touched.add(str(file_id))
 
@@ -172,6 +219,15 @@ def write_dry_run_preview(
     filename: str = "_dry_run_preview.json",
     meta: Optional[Dict[str, Any]] = None,
 ) -> Path:
+    """write_dry_run_preview 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     p = out_dir / filename
@@ -191,6 +247,15 @@ def write_cache_hit_preview(
     filename: str = "_dry_run_cache_hit_preview.json",
     meta: Optional[Dict[str, Any]] = None,
 ) -> Path:
+    """write_cache_hit_preview 的用途說明。
+
+    Args:
+        參數請見函式簽名。
+    Returns:
+        回傳內容依實作而定；若無顯式回傳則為 None。
+    Side Effects:
+        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     p = out_dir / filename
@@ -221,6 +286,11 @@ def write_cache_hit_preview(
 
 @dataclass
 class TranslationRecorder:
+    """TranslationRecorder 類別。
+
+    用途：封裝與 TranslationRecorder 相關的狀態與行為。
+    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    """
     rows: List[Dict[str, Any]] = field(default_factory=list)
 
     def record(
@@ -234,6 +304,15 @@ class TranslationRecorder:
         cache_hit: bool,
         extra: Optional[Dict[str, Any]] = None,
     ) -> None:
+        """record 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         self.rows.append({
             "cache_type": cache_type,
             "file_id": file_id or "",
@@ -245,12 +324,30 @@ class TranslationRecorder:
         })
 
     def export_json(self, out_path: str | Path) -> Path:
+        """export_json 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(self.rows, ensure_ascii=False, indent=2), encoding="utf-8")
         return out_path
 
     def export_csv(self, out_path: str | Path) -> Path:
+        """export_csv 的用途說明。
+
+        Args:
+            參數請見函式簽名。
+        Returns:
+            回傳內容依實作而定；若無顯式回傳則為 None。
+        Side Effects:
+            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        """
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         cols = ["cache_type", "file_id", "path", "src", "dst", "cache_hit"]
