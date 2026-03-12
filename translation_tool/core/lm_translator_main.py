@@ -9,15 +9,7 @@ from translation_tool.utils.cache_manager import (
 )
 from translation_tool.core.lm_api_client import call_gemini_requests
 from translation_tool.core.lm_response_parser import chunked, safe_json_loads
-from translation_tool.core.translatable_extractor import (
-    extract_translatables,
-    find_patchouli_json,
-    find_lang_json,
-    is_lang_file,
-)
-from translation_tool.core.translation_path_writer import map_lang_output_path, set_by_path
 from translation_tool.core.lm_config_rules import (
-    value_fully_translated, 
     get_current_api_key, #取得正在使用的 key
     rotate_api_key,     #切換 key
     validate_api_keys,  #驗證 key 是否可以使用
@@ -30,10 +22,6 @@ DRY_RUN = False # True = 不送 API，只做分析 / 預覽 測試使用
 EXPORT_CACHE_ONLY = True  # True = 先輸出 cache 命中內容
 
 
-
-# =========================
-# 拆分後 helper / 相容 re-export
-# =========================
 
 def translate_batch_smart(batch_items,total=None):
     """

@@ -9,31 +9,11 @@ from typing import Any, Dict, Generator, List
 
 from ..utils.config_manager import load_config
 from ..utils.text_processor import load_replace_rules
-from .lang_codec import (
-    collapse_lang_lines,
-    dump_lang_text,
-    is_mc_standard_lang_path,
-    normalize_patchouli_book_root,
-    parse_lang_text,
-    pick_first_not_none,
-    try_repair_lang_line,
-)
-from .lang_merge_content import (
-    _patch_localized_content_json,
-    _process_content_or_copy_file,
-    export_filtered_pending,
-    remove_empty_dirs,
-)
+from .lang_merge_content import _process_content_or_copy_file, export_filtered_pending, remove_empty_dirs
 from .lang_merge_pipeline import _process_single_mod
-from .lang_merge_zip_io import (
-    _read_json_from_zip,
-    _read_text_from_zip,
-    _write_bytes_atomic,
-    _write_text_atomic,
-    quarantine_copy_from_zip,
-)
 
 logger = logging.getLogger(__name__)
+
 
 def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang: bool = False ) -> Generator[Dict[str, Any], None, None]:
     """

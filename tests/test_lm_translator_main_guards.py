@@ -4,21 +4,20 @@ from pathlib import Path
 
 import pytest
 
-from translation_tool.core import lm_translator_main as lm_main
-from translation_tool.core import translatable_extractor
+from translation_tool.core import lm_response_parser, translatable_extractor, translation_path_writer
 
 
 def test_safe_json_loads_parses_fenced_json_object() -> None:
     raw = '```json\n{"a": 1, "b": "測試"}\n```'
 
-    parsed = lm_main.safe_json_loads(raw)
+    parsed = lm_response_parser.safe_json_loads(raw)
 
     assert parsed == {"a": 1, "b": "測試"}
 
 
 def test_safe_json_loads_raises_for_invalid_payload() -> None:
     with pytest.raises(RuntimeError, match="JSON 解析失敗"):
-        lm_main.safe_json_loads("not valid json at all")
+        lm_response_parser.safe_json_loads("not valid json at all")
 
 
 def test_find_lang_json_finds_only_assets_lang_json(tmp_path: Path) -> None:
@@ -34,7 +33,7 @@ def test_find_lang_json_finds_only_assets_lang_json(tmp_path: Path) -> None:
     ignored_model.write_text("{}", encoding="utf-8")
     ignored_root.write_text("{}", encoding="utf-8")
 
-    found = lm_main.find_lang_json(tmp_path)
+    found = translatable_extractor.find_lang_json(tmp_path)
 
     assert found == [good]
 
@@ -49,7 +48,7 @@ def test_extract_translatables_for_lang_file_handles_top_level_nested_text_and_l
         "blank": "   ",
     }
 
-    items = lm_main.extract_translatables(data, "assets/demo/lang/en_us.json")
+    items = translatable_extractor.extract_translatables(data, "assets/demo/lang/en_us.json")
     paths = {item["path"] for item in items}
 
     assert paths == {
@@ -71,7 +70,7 @@ def test_extract_translatables_for_patchouli_uses_translatable_field_rules(monke
         "nested": {"text": "巢狀內文", "color": "blue"},
     }
 
-    items = lm_main.extract_translatables(data, "assets/demo/patchouli_books/book/en_us/entry.json")
+    items = translatable_extractor.extract_translatables(data, "assets/demo/patchouli_books/book/en_us/entry.json")
     paths = {item["path"] for item in items}
 
     assert paths == {"title", "text", "nested.text"}
@@ -80,7 +79,7 @@ def test_extract_translatables_for_patchouli_uses_translatable_field_rules(monke
 def test_set_by_path_supports_nested_list_path() -> None:
     root = {"pages": [{"text": "old"}]}
 
-    lm_main.set_by_path(root, "pages[0].text", "new")
+    translation_path_writer.set_by_path(root, "pages[0].text", "new")
 
     assert root["pages"][0]["text"] == "new"
 
@@ -88,6 +87,6 @@ def test_set_by_path_supports_nested_list_path() -> None:
 def test_set_by_path_supports_flat_key_followed_by_index() -> None:
     root = {"pages": [{"multiblock.pattern": ["AAA", "BBB"]}]}
 
-    lm_main.set_by_path(root, "pages[0].multiblock.pattern[1]", "CCC")
+    translation_path_writer.set_by_path(root, "pages[0].multiblock.pattern[1]", "CCC")
 
     assert root["pages"][0]["multiblock.pattern"] == ["AAA", "CCC"]

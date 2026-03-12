@@ -5,13 +5,13 @@ from pathlib import Path
 import orjson
 import pytest
 
-from translation_tool.core import lang_merger
+from translation_tool.core import lang_codec, lang_merge_content
 
 
 def test_collapse_lang_lines_merges_backslash_continuations() -> None:
     text = "key1=Hello\\\n world\nkey2=Done"
 
-    lines = lang_merger.collapse_lang_lines(text)
+    lines = lang_codec.collapse_lang_lines(text)
 
     assert lines == ["key1=Helloworld", "key2=Done"]
 
@@ -19,17 +19,17 @@ def test_collapse_lang_lines_merges_backslash_continuations() -> None:
 def test_parse_and_dump_lang_text_round_trip() -> None:
     raw = "alpha=一號\nbeta=二號"
 
-    parsed = lang_merger.parse_lang_text(raw)
-    dumped = lang_merger.dump_lang_text(parsed)
+    parsed = lang_codec.parse_lang_text(raw)
+    dumped = lang_codec.dump_lang_text(parsed)
 
     assert parsed == {"alpha": "一號", "beta": "二號"}
-    assert lang_merger.parse_lang_text(dumped) == parsed
+    assert lang_codec.parse_lang_text(dumped) == parsed
 
 
 def test_parse_lang_text_appends_missing_equals_line_to_previous_key() -> None:
     raw = "title=第一行\n第二行續寫\nfooter=結尾"
 
-    parsed = lang_merger.parse_lang_text(raw)
+    parsed = lang_codec.parse_lang_text(raw)
 
     assert parsed["title"] == "第一行\n第二行續寫"
     assert parsed["footer"] == "結尾"
@@ -46,7 +46,7 @@ def test_parse_lang_text_appends_missing_equals_line_to_previous_key() -> None:
     ],
 )
 def test_is_mc_standard_lang_path_samples(path: str, expected: bool) -> None:
-    assert lang_merger.is_mc_standard_lang_path(path) is expected
+    assert lang_codec.is_mc_standard_lang_path(path) is expected
 
 
 def test_export_filtered_pending_keeps_only_threshold_files_and_cleans_output(tmp_path: Path) -> None:
@@ -65,7 +65,7 @@ def test_export_filtered_pending_keeps_only_threshold_files_and_cleans_output(tm
     skip_file.write_bytes(orjson.dumps([{"k": 1}], option=orjson.OPT_INDENT_2))
     stale_file.write_text("stale", encoding="utf-8")
 
-    lang_merger.export_filtered_pending(str(pending_root), str(output_root), min_count=2)
+    lang_merge_content.export_filtered_pending(str(pending_root), str(output_root), min_count=2)
 
     assert not stale_file.exists()
     assert (output_root / "a" / "keep.json").exists()
