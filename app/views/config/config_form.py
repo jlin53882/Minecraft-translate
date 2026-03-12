@@ -13,7 +13,7 @@ def build_card(view, title, controls_list):
             padding=15,
             content=ft.Column(
                 [
-                    ft.Text(title, style=ft.TextThemeStyle.TITLE_MEDIUM, color=ft.Colors.BLUE_800, weight=ft.FontWeight.BOLD),
+                    ft.Text(title, theme_style=ft.TextThemeStyle.TITLE_MEDIUM, color=ft.Colors.BLUE_800, weight=ft.FontWeight.BOLD),
                     ft.Divider(height=10, thickness=1, color=ft.Colors.BLUE_50),
                     *controls_list,
                 ],
@@ -28,7 +28,7 @@ def build_header(view):
         padding=ft.padding.only(left=5, bottom=10),
         content=ft.Row([
             ft.Icon(ft.Icons.SETTINGS_APPLICATIONS, size=28, color=ft.Colors.BLUE_GREY_800),
-            ft.Text('全域設定 (Global Settings)', style=ft.TextThemeStyle.HEADLINE_MEDIUM, color=ft.Colors.BLUE_GREY_900),
+            ft.Text('全域設定 (Global Settings)', theme_style=ft.TextThemeStyle.HEADLINE_MEDIUM, color=ft.Colors.BLUE_GREY_900),
         ]),
     )
 
