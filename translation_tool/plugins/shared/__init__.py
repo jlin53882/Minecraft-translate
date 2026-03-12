@@ -7,6 +7,7 @@ from .lang_path_rules import (
     replace_lang_folder_with_zh_tw,
     compute_output_path,
 )
+from .lang_text_rules import _strip_fmt, is_already_zh
 
 __all__ = [
     "read_json_dict",
@@ -16,4 +17,6 @@ __all__ = [
     "is_lang_code_segment",
     "replace_lang_folder_with_zh_tw",
     "compute_output_path",
+    "_strip_fmt",
+    "is_already_zh",
 ]

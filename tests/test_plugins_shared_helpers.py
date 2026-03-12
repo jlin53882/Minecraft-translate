@@ -10,6 +10,7 @@ from translation_tool.plugins.shared.lang_path_rules import (
     compute_output_path,
     is_lang_code_segment,
 )
+from translation_tool.plugins.shared.lang_text_rules import _strip_fmt, is_already_zh
 
 
 def test_compute_output_path_renames_lang_folder_and_filename() -> None:
@@ -45,6 +46,31 @@ def test_compute_output_path_keeps_filename_when_not_lang_code_file() -> None:
 )
 def test_is_lang_code_segment_samples(segment: str, expected: bool) -> None:
     assert is_lang_code_segment(segment) is expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("§a測試 &l文字", "測試 文字"),
+        ("&6Hello §rWorld", "Hello World"),
+        ("純文字", "純文字"),
+    ],
+)
+def test_strip_fmt_samples(raw: str, expected: str) -> None:
+    assert _strip_fmt(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("這是中文內容", True),      # 中文 -> True
+        ("This is english", False),  # 英文 -> False
+        ("獲得 3x Iron", False),     # 邊界：中英混合（英文字母較多）
+        ("§a獲得 3x 鐵", True),      # 邊界：有格式碼且主要為中文
+    ],
+)
+def test_is_already_zh_samples(text: str, expected: bool) -> None:
+    assert is_already_zh(text) is expected
 
 
 def test_read_write_json_dict_roundtrip(tmp_path: Path) -> None:
