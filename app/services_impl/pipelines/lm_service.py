@@ -9,19 +9,14 @@ from __future__ import annotations
 import logging
 import traceback
 
-from app.services_impl.config_service import _load_app_config
 from app.services_impl.logging_service import (
     GLOBAL_LOG_LIMITER,
     UI_LOG_HANDLER,
-    update_logger_config as apply_logger_config,
 )
+from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
 from translation_tool.core.lm_translator import translate_directory_generator as lm_translate_gen
 
 logger = logging.getLogger(__name__)
-
-
-def _update_logger_config():
-    return apply_logger_config(_load_app_config, logger_name="translation_tool")
 
 
 def run_lm_translation_service(
@@ -34,7 +29,7 @@ def run_lm_translation_service(
 ):
     """執行 LM 翻譯流程（service 層包裝）。"""
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
-    _update_logger_config()
+    ensure_pipeline_logging()
 
     logger.debug(f"DEBUG [2. Service]: 接收到的 export_lang 為 -> {export_lang}")
 
