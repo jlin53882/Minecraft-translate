@@ -1,4 +1,4 @@
-from app.views.cache_controller import CacheController
+from app.views.cache_manager.cache_controller import CacheController
 
 
 def test_begin_action_increments_and_sets_current():
