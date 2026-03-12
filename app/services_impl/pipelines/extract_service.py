@@ -24,14 +24,11 @@ logger = logging.getLogger(__name__)
 
 def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
-    """run_lang_extraction_service 的用途說明。
+    """執行此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`ensure_pipeline_logging`, `start`
+
+    回傳：None
     """
     ensure_pipeline_logging()
     try:
@@ -68,17 +65,13 @@ def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
         UI_LOG_HANDLER.set_session(None)
 
 
-
 def run_book_extraction_service(mods_dir: str, output_dir: str, session):
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
-    """run_book_extraction_service 的用途說明。
+    """執行此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`ensure_pipeline_logging`, `start`
+
+    回傳：None
     """
     ensure_pipeline_logging()
     try:

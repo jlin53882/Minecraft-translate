@@ -8,18 +8,14 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Iterable
 
 
 def safe_json_loads(text: str):
-    """safe_json_loads 的用途說明。
+    """處理此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`strip`, `findall`
+
+    回傳：依函式內 return path。
     """
     text = text.strip()
 
@@ -44,14 +40,6 @@ def safe_json_loads(text: str):
 
 
 def chunked(lst, size):
-    """chunked 的用途說明。
-
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
-    """
+    """處理此 generator 並逐步回報進度（yield update dict）。"""
     for i in range(0, len(lst), size):
-        yield lst[i:i + size]
+        yield lst[i : i + size]

@@ -15,14 +15,11 @@ from translation_tool.core.icon_reason import IconRisk
 
 
 def to_halfwidth(text):
-    """to_halfwidth 的用途說明。
+    """處理此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`normalize`
+
+    回傳：依函式內 return path。
     """
     if not isinstance(text, str):
         return text
@@ -35,6 +32,7 @@ class LangItemRow(ft.Container):
     用途：封裝與 LangItemRow 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
+
     def __init__(
         self,
         *,
@@ -45,14 +43,11 @@ class LangItemRow(ft.Container):
         preview_root: Path,
         on_value_changed: Callable[[str, str], None],
     ):
-        """__init__ 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`__init__`, `resolve_icon_with_reason`, `Column`
+
+        回傳：None
         """
         super().__init__(
             padding=ft.padding.symmetric(vertical=10, horizontal=8),
@@ -131,7 +126,6 @@ class LangItemRow(ft.Container):
                         to_halfwidth(e.control.value),
                     ),
                 ),
-
                 # lang key（可選取）
                 ft.TextField(
                     value=to_halfwidth(lang_key),
@@ -140,7 +134,6 @@ class LangItemRow(ft.Container):
                     border=ft.InputBorder.NONE,
                     text_size=12,
                 ),
-
                 # 英文原文（可選取）
                 ft.TextField(
                     value=to_halfwidth(en_text),
@@ -150,7 +143,6 @@ class LangItemRow(ft.Container):
                     border=ft.InputBorder.NONE,
                     text_size=14,
                 ),
-
                 risk_label if risk_label else ft.Container(),
             ],
         )

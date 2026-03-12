@@ -12,10 +12,14 @@ import logging
 import traceback
 
 from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
-from translation_tool.checkers.english_residue_checker import check_english_residue_generator
+from translation_tool.checkers.english_residue_checker import (
+    check_english_residue_generator,
+)
 from translation_tool.checkers.untranslated_checker import check_untranslated_generator
 from translation_tool.checkers.variant_comparator import compare_variants_generator
-from translation_tool.checkers.variant_comparator_tsv import compare_variants_tsv_generator
+from translation_tool.checkers.variant_comparator_tsv import (
+    compare_variants_tsv_generator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +33,9 @@ __all__ = [
 
 
 def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
-    """run_untranslated_check_service 的用途說明。
+    """執行此 generator 並逐步回報進度（yield update dict）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`check_untranslated_generator`
     """
     try:
         for update_dict in check_untranslated_generator(en_dir, tw_dir, out_dir):
@@ -54,14 +53,9 @@ def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
 
 
 def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
-    """run_variant_compare_service 的用途說明。
+    """執行此 generator 並逐步回報進度（yield update dict）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`compare_variants_generator`
     """
     try:
         for update_dict in compare_variants_generator(cn_dir, tw_dir, out_dir):
@@ -79,14 +73,9 @@ def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
 
 
 def run_english_residue_check_service(input_dir: str, out_dir: str):
-    """run_english_residue_check_service 的用途說明。
+    """執行此 generator 並逐步回報進度（yield update dict）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`check_english_residue_generator`
     """
     try:
         for update_dict in check_english_residue_generator(input_dir, out_dir):
@@ -104,14 +93,9 @@ def run_english_residue_check_service(input_dir: str, out_dir: str):
 
 
 def run_variant_compare_tsv_service(tsv_path: str, output_csv_path: str):
-    """run_variant_compare_tsv_service 的用途說明。
+    """執行此 generator 並逐步回報進度（yield update dict）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`compare_variants_tsv_generator`
     """
     try:
         for update_dict in compare_variants_tsv_generator(tsv_path, output_csv_path):

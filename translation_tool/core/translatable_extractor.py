@@ -8,21 +8,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from translation_tool.core.lm_config_rules import is_translatable_field, is_value_translatable
+from translation_tool.core.lm_config_rules import (
+    is_translatable_field,
+    is_value_translatable,
+)
 from translation_tool.utils.config_manager import load_config
 
 
 def find_patchouli_json(root: Path, dir_names=None):
-    """find_patchouli_json 的用途說明。
+    """找出此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    回傳：依函式內 return path。
     """
-    patchouli_dir_names = load_config().get("lm_translator", {}).get("patchouli", {}).get("dir_names", [])
+    patchouli_dir_names = (
+        load_config().get("lm_translator", {}).get("patchouli", {}).get("dir_names", [])
+    )
     if dir_names is None:
         dir_names = patchouli_dir_names
 
@@ -35,53 +35,37 @@ def find_patchouli_json(root: Path, dir_names=None):
 
 
 def find_lang_json(root: Path):
-    """find_lang_json 的用途說明。
+    """找出此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`list`
+
+    回傳：依函式內 return path。
     """
     return list(root.rglob("assets/*/lang/*.json"))
 
 
 def is_lang_file(file_path: Path) -> bool:
-    """is_lang_file 的用途說明。
+    """判斷此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    回傳：依函式內 return path。
     """
     return "lang" in file_path.parts
 
 
 def extract_translatables(json_data, file_path):
-    """extract_translatables 的用途說明。
+    """處理此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`is_lang_file`, `walk`
+
+    回傳：依函式內 return path。
     """
     items = []
     is_lang = is_lang_file(Path(file_path))
 
     def walk(obj, base_path=""):
-        """walk 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        回傳：None
         """
         if isinstance(obj, dict):
             for k, v in obj.items():

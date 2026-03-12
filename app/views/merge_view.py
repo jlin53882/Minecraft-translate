@@ -21,14 +21,11 @@ class MergeView(ft.Column):
     """ZIP 合併頁面（視覺風格對齊 Translation/Extractor）。"""
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """__init__ 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`__init__`, `TaskSession`, `Event`
+
+        回傳：None
         """
         super().__init__(expand=True, spacing=16)
         self.page = page
@@ -60,8 +57,12 @@ class MergeView(ft.Column):
         self.zip_list_view = ft.ListView(height=160, spacing=4, auto_scroll=False)
 
         # 狀態區
-        self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=ft.Colors.GREY_200)
-        self.progress_bar = ft.ProgressBar(value=0, height=8, bgcolor=ft.Colors.GREY_200, color=ft.Colors.BLUE)
+        self.status_chip = ft.Chip(
+            label=ft.Text("尚未開始"), bgcolor=ft.Colors.GREY_200
+        )
+        self.progress_bar = ft.ProgressBar(
+            value=0, height=8, bgcolor=ft.Colors.GREY_200, color=ft.Colors.BLUE
+        )
 
         # 日誌區
         self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
@@ -91,7 +92,11 @@ class MergeView(ft.Column):
                         ft.Row(
                             [
                                 self.pick_zip_button,
-                                ft.Text("可加入多個 ZIP，會依序合併", size=12, color=ft.Colors.GREY_600),
+                                ft.Text(
+                                    "可加入多個 ZIP，會依序合併",
+                                    size=12,
+                                    color=ft.Colors.GREY_600,
+                                ),
                             ],
                             spacing=10,
                         ),
@@ -158,14 +163,11 @@ class MergeView(ft.Column):
     # ZIP handling
     # --------------------------------------------------
     def pick_zips(self, e):
-        """pick_zips 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`pick_files`
+
+        回傳：None
         """
         self.file_picker.on_result = self._on_zip_picked
         self.file_picker.pick_files(
@@ -175,14 +177,11 @@ class MergeView(ft.Column):
         )
 
     def _on_zip_picked(self, e: ft.FilePickerResultEvent):
-        """_on_zip_picked 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`_refresh_zip_list`
+
+        回傳：None
         """
         if not e.files:
             return
@@ -193,14 +192,11 @@ class MergeView(ft.Column):
         self.page.update()
 
     def _refresh_zip_list(self):
-        """_refresh_zip_list 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`clear`
+
+        回傳：None
         """
         self.zip_list_view.controls.clear()
         for path in self.selected_zips:
@@ -220,14 +216,9 @@ class MergeView(ft.Column):
             )
 
     def _remove_zip(self, path: str):
-        """_remove_zip 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        回傳：None
         """
         if path in self.selected_zips:
             self.selected_zips.remove(path)
@@ -238,27 +229,19 @@ class MergeView(ft.Column):
     # Output dir
     # --------------------------------------------------
     def pick_output_dir(self):
-        """pick_output_dir 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`get_directory_path`
+
+        回傳：None
         """
         self.file_picker.on_result = self._on_output_picked
         self.file_picker.get_directory_path(dialog_title="選擇輸出資料夾")
 
     def _on_output_picked(self, e: ft.FilePickerResultEvent):
-        """_on_output_picked 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        回傳：None
         """
         if e.path:
             self.output_dir_field.value = e.path
@@ -268,14 +251,11 @@ class MergeView(ft.Column):
     # Task runner
     # --------------------------------------------------
     def start_merge(self, e):
-        """start_merge 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`clear`, `_set_status`, `start`
+
+        回傳：None
         """
         if not self.selected_zips or not (self.output_dir_field.value or "").strip():
             self._show_snack_bar("請先選擇 ZIP 與輸出資料夾")
@@ -305,27 +285,19 @@ class MergeView(ft.Column):
     # UI poller
     # --------------------------------------------------
     def _start_ui_poller(self):
-        """_start_ui_poller 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`clear`, `start`
+
+        回傳：None
         """
         self._ui_stop.clear()
         self._last_log_count = 0
 
         def poll():
-            """poll 的用途說明。
+            """處理此函式的工作（細節以程式碼為準）。
 
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            回傳：None
             """
             while not self._ui_stop.is_set():
                 snap = self.session.snapshot()
@@ -343,8 +315,10 @@ class MergeView(ft.Column):
                 self.progress_bar.value = progress
 
                 if len(logs) > self._last_log_count:
-                    for line in logs[self._last_log_count:]:
-                        self.log_view.controls.append(ft.Text(line, size=13, color=ft.Colors.GREY_100))
+                    for line in logs[self._last_log_count :]:
+                        self.log_view.controls.append(
+                            ft.Text(line, size=13, color=ft.Colors.GREY_100)
+                        )
                     self._last_log_count = len(logs)
                     self.log_view.scroll_to(offset=-1, duration=100)
 
@@ -363,27 +337,21 @@ class MergeView(ft.Column):
     # UI helpers
     # --------------------------------------------------
     def _set_status(self, text: str, color: str):
-        """_set_status 的用途說明。
+        """設定此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`Text`
+
+        回傳：None
         """
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
-        """_show_snack_bar 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`SnackBar`
+
+        回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)

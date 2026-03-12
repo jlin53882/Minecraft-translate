@@ -19,14 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 def run_manual_lookup_service(name: str) -> str:
-    """run_manual_lookup_service 的用途說明。
+    """執行此函式的工作（細節以程式碼為準）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`lookup_species_name`
+
+    回傳：依函式內 return path。
     """
     if not is_potential_species_name(name):
         return f"'{name}' 不像是一個有效的學名格式 (例如：Felis catus)。"
@@ -35,14 +32,9 @@ def run_manual_lookup_service(name: str) -> str:
 
 
 def run_batch_lookup_service(json_text: str):
-    """run_batch_lookup_service 的用途說明。
+    """執行此 generator 並逐步回報進度（yield update dict）。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+    - 主要包裝：`loads`
     """
     try:
         names = json.loads(json_text)
@@ -67,7 +59,10 @@ def run_batch_lookup_service(json_text: str):
                 results[name] = "格式錯誤"
 
             update = GLOBAL_LOG_LIMITER.filter(
-                {"log": f"({i + 1}/{total}) 已查詢: {name}", "progress": (i + 1) / total}
+                {
+                    "log": f"({i + 1}/{total}) 已查詢: {name}",
+                    "progress": (i + 1) / total,
+                }
             )
             if update is not None:
                 yield update

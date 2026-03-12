@@ -18,25 +18,31 @@ from .config_manager import load_config, resolve_project_path
 log = logging.getLogger(__name__)
 
 # --- 全域變數 ---
-#_CACHE_DIR_NAME = "學名資料庫"
-#設定學名資料庫
-_CACHE_DIR_NAME = load_config().get("species_cache", {}).get("cache_directory", "學名資料庫")
-#_CACHE_FILENAME = "species_cache.tsv"
+# _CACHE_DIR_NAME = "學名資料庫"
+# 設定學名資料庫
+_CACHE_DIR_NAME = (
+    load_config().get("species_cache", {}).get("cache_directory", "學名資料庫")
+)
+# _CACHE_FILENAME = "species_cache.tsv"
 
-#設定學名快取檔名
-_CACHE_FILENAME = load_config().get("species_cache", {}).get("cache_filename", "species_cache.tsv")
-#_WIKI_LANG = "zh"
+# 設定學名快取檔名
+_CACHE_FILENAME = (
+    load_config().get("species_cache", {}).get("cache_filename", "species_cache.tsv")
+)
+# _WIKI_LANG = "zh"
 
-#設定語言
+# 設定語言
 _WIKI_LANG = load_config().get("species_cache", {}).get("wikipedia_language", "zh")
-#_RATE_LIMIT_DELAY = 0.5
+# _RATE_LIMIT_DELAY = 0.5
 
-#設定延遲時間
-_RATE_LIMIT_DELAY = load_config().get("species_cache", {}).get("wikipedia_rate_limit_delay", 0.5)
+# 設定延遲時間
+_RATE_LIMIT_DELAY = (
+    load_config().get("species_cache", {}).get("wikipedia_rate_limit_delay", 0.5)
+)
 
 _SPECIES_NAME_REGEX = re.compile(r"^[A-Z][a-z]+ [a-z]+$")
 
-#表示是否成功 import wikipedia
+# 表示是否成功 import wikipedia
 _WIKIPEDIA_AVAILABLE = False
 
 # --- 核心快取操作函式 ---
@@ -44,29 +50,36 @@ _CACHE_DIR: Optional[Path] = None
 _CACHE_FILE: Optional[Path] = None
 _species_cache_data: Optional[Dict[str, str]] = None
 
-#防止 initialize_species_cache() 被重複執行
+# 防止 initialize_species_cache() 被重複執行
 _initialized = False
 
 try:
     import wikipedia
+
     _WIKIPEDIA_AVAILABLE = True
     log.info("Wikipedia 函式庫已成功載入。")
 except ImportError:
-    log.warning("未找到 Wikipedia 函式庫 (請執行 pip install wikipedia)。線上查詢功能將不可用。")
+    log.warning(
+        "未找到 Wikipedia 函式庫 (請執行 pip install wikipedia)。線上查詢功能將不可用。"
+    )
 except Exception as e:
     log.error(f"載入 Wikipedia 函式庫時發生未知錯誤: {e}")
 
-def initialize_species_cache():
-    """initialize_species_cache 的用途說明。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+def initialize_species_cache():
+    """處理此函式的工作（細節以程式碼為準）。
+
+    - 主要包裝：`info`
+
+    回傳：依函式內 return path。
     """
-    global _species_cache_data, _CACHE_DIR, _CACHE_FILE, _WIKI_LANG, _RATE_LIMIT_DELAY, _initialized
+    global \
+        _species_cache_data, \
+        _CACHE_DIR, \
+        _CACHE_FILE, \
+        _WIKI_LANG, \
+        _RATE_LIMIT_DELAY, \
+        _initialized
     if _initialized:
         return True
 
@@ -82,105 +95,105 @@ def initialize_species_cache():
 
         _species_cache_data = {}
         if _CACHE_FILE.exists():
-            with open(_CACHE_FILE, 'r', encoding='utf-8', newline='') as f:
-                reader = csv.reader(f, delimiter='\t')
+            with open(_CACHE_FILE, "r", encoding="utf-8", newline="") as f:
+                reader = csv.reader(f, delimiter="\t")
                 for row in reader:
                     if len(row) >= 2:
                         _species_cache_data[row[0]] = row[1]
-            log.info(f"成功從 {_CACHE_FILE} 載入 {len(_species_cache_data)} 條學名快取。")
+            log.info(
+                f"成功從 {_CACHE_FILE} 載入 {len(_species_cache_data)} 條學名快取。"
+            )
         else:
             log.info(f"快取檔案 {_CACHE_FILE} 不存在，將在查詢後自動建立。")
 
         if _WIKIPEDIA_AVAILABLE:
             _WIKI_LANG = species_config.get("wikipedia_language", _WIKI_LANG)
-            _RATE_LIMIT_DELAY = float(species_config.get("wikipedia_rate_limit_delay", _RATE_LIMIT_DELAY))
+            _RATE_LIMIT_DELAY = float(
+                species_config.get("wikipedia_rate_limit_delay", _RATE_LIMIT_DELAY)
+            )
             wikipedia.set_lang(_WIKI_LANG)
-            log.info(f"Wikipedia 語言已設定為 '{_WIKI_LANG}'，請求延遲為 {_RATE_LIMIT_DELAY} 秒。")
-        
+            log.info(
+                f"Wikipedia 語言已設定為 '{_WIKI_LANG}'，請求延遲為 {_RATE_LIMIT_DELAY} 秒。"
+            )
+
         _initialized = True
         log.info("學名快取系統初始化完成。")
         return True
-        
+
     except Exception as e:
         log.error(f"初始化學名快取時發生嚴重錯誤: {e}", exc_info=True)
         _initialized = False
         return False
 
-def is_potential_species_name(name: str) -> bool:
-    """is_potential_species_name 的用途說明。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+def is_potential_species_name(name: str) -> bool:
+    """判斷此函式的工作（細節以程式碼為準）。
+
+    - 主要包裝：`bool`
+
+    回傳：依函式內 return path。
     """
     if not isinstance(name, str):
         return False
     return bool(_SPECIES_NAME_REGEX.match(name))
 
-def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
-    """query_wikipedia_and_update_cache 的用途說明。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
+    """處理此函式的工作（細節以程式碼為準）。
+
+    - 主要包裝：`debug`, `sleep`
+
+    回傳：依函式內 return path。
     """
     if not _WIKIPEDIA_AVAILABLE or _species_cache_data is None:
         return None
-        
+
     log.debug(f"開始線上查詢: {species_name}")
     try:
         time.sleep(_RATE_LIMIT_DELAY)
         page = wikipedia.page(species_name, auto_suggest=False)
-        common_name = page.title.split('(')[0].strip()
+        common_name = page.title.split("(")[0].strip()
         log.info(f"線上查詢成功: {species_name} -> {common_name}")
-        
+
         # *** 修改點：只有在查詢成功時，才更新記憶體快取並寫入檔案 ***
         _species_cache_data[species_name] = common_name
         if _CACHE_FILE:
             try:
-                with open(_CACHE_FILE, 'a', encoding='utf-8', newline='') as f:
-                    writer = csv.writer(f, delimiter='\t')
+                with open(_CACHE_FILE, "a", encoding="utf-8", newline="") as f:
+                    writer = csv.writer(f, delimiter="\t")
                     writer.writerow([species_name, common_name])
             except IOError as e:
                 log.error(f"寫入快取檔案 {_CACHE_FILE} 失敗: {e}")
-        
+
         return common_name
-        
+
     except wikipedia.exceptions.PageError:
         log.warning(f"線上查詢失敗：找不到 '{species_name}' 的 Wikipedia 頁面。")
-        _species_cache_data[species_name] = "" # 僅更新記憶體快取，避免重複查詢
+        _species_cache_data[species_name] = ""  # 僅更新記憶體快取，避免重複查詢
         return None
     except wikipedia.exceptions.DisambiguationError as e:
-        log.warning(f"線上查詢 '{species_name}' 時遇到消歧義頁面，將嘗試選擇第一個選項: {e.options[0] if e.options else '無選項'}")
-        _species_cache_data[species_name] = "" # 僅更新記憶體快取
+        log.warning(
+            f"線上查詢 '{species_name}' 時遇到消歧義頁面，將嘗試選擇第一個選項: {e.options[0] if e.options else '無選項'}"
+        )
+        _species_cache_data[species_name] = ""  # 僅更新記憶體快取
         if e.options:
             return query_wikipedia_and_update_cache(e.options[0])
         return None
     except Exception as e:
         log.error(f"線上查詢 '{species_name}' 時發生未知網路或API錯誤: {e}")
-        _species_cache_data[species_name] = "" # 僅更新記憶體快取
+        _species_cache_data[species_name] = ""  # 僅更新記憶體快取
         return None
 
-def lookup_species_name(name: str) -> Optional[str]:
-    """lookup_species_name 的用途說明。
 
-    Args:
-        參數請見函式簽名。
-    Returns:
-        回傳內容依實作而定；若無顯式回傳則為 None。
-    Side Effects:
-        可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+def lookup_species_name(name: str) -> Optional[str]:
+    """處理此函式的工作（細節以程式碼為準）。
+
+    回傳：依函式內 return path。
     """
     if not _initialized:
         if not initialize_species_cache():
-             log.error("學名快取系統初始化失敗，查詢功能無法使用。")
-             return None
+            log.error("學名快取系統初始化失敗，查詢功能無法使用。")
+            return None
 
     if _species_cache_data is None:
         return None
@@ -192,7 +205,8 @@ def lookup_species_name(name: str) -> Optional[str]:
 
     if is_potential_species_name(name):
         return query_wikipedia_and_update_cache(name)
-    
+
     return None
+
 
 initialize_species_cache()

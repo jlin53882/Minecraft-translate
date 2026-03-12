@@ -38,14 +38,11 @@ class TranslationView(ft.Column):
     """翻譯工作台：FTB / KubeJS / Markdown 三流程統一入口。"""
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """__init__ 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`__init__`, `Chip`, `ProgressBar`
+
+        回傳：None
         """
         super().__init__(expand=True, spacing=16)
         self.page = page
@@ -56,8 +53,12 @@ class TranslationView(ft.Column):
         self._ui_timer_running = False
 
         # 右側共用狀態與日誌
-        self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=ft.Colors.GREY_200)
-        self.progress = ft.ProgressBar(value=0, height=8, bgcolor=ft.Colors.GREY_200, color=ft.Colors.BLUE)
+        self.status_chip = ft.Chip(
+            label=ft.Text("尚未開始"), bgcolor=ft.Colors.GREY_200
+        )
+        self.progress = ft.ProgressBar(
+            value=0, height=8, bgcolor=ft.Colors.GREY_200, color=ft.Colors.BLUE
+        )
         self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
 
         header = ft.Row(
@@ -138,8 +139,8 @@ class TranslationView(ft.Column):
             border=ft.border.all(1, ft.Colors.BLACK12),
             content=ft.Row(
                 [
-                    #ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color=ft.Colors.BLUE_GREY_700),
-                    #ft.Text("本頁已與 Extractor 風格對齊；僅調整 UI 樣式，不影響流程邏輯。"),
+                    # ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color=ft.Colors.BLUE_GREY_700),
+                    # ft.Text("本頁已與 Extractor 風格對齊；僅調整 UI 樣式，不影響流程邏輯。"),
                 ],
                 spacing=10,
             ),
@@ -159,14 +160,11 @@ class TranslationView(ft.Column):
     # - 之後要調 UI 一致性，只需要改 app/ui/components.py
 
     def _path_row(self, field: ft.TextField) -> ft.Control:
-        """_path_row 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`Row`
+
+        回傳：依函式內 return path。
         """
         return ft.Row(
             [
@@ -189,14 +187,11 @@ class TranslationView(ft.Column):
         on_reset,
         trailing: list[ft.Control] | None = None,
     ) -> ft.Control:
-        """_action_row 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`Row`
+
+        回傳：依函式內 return path。
         """
         controls = [
             primary_button(
@@ -226,14 +221,11 @@ class TranslationView(ft.Column):
     # Tab builders
     # ------------------------------------------------------------------
     def _build_ftb_tab(self) -> ft.Control:
-        """_build_ftb_tab 的用途說明。
+        """建立此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`TextField`, `Checkbox`
+
+        回傳：依函式內 return path。
         """
         self.ftb_in_dir = ft.TextField(
             label="輸入資料夾（模組包根目錄）",
@@ -256,11 +248,21 @@ class TranslationView(ft.Column):
             prefix_icon=ft.Icons.FOLDER_COPY,
         )
 
-        self.ftb_step_export = ft.Checkbox(label="Step 1：Export Raw（抽取）", value=True)
-        self.ftb_step_clean = ft.Checkbox(label="Step 2：Clean（補洞/產生待翻譯）", value=True)
-        self.ftb_step_translate = ft.Checkbox(label="Step 3：LM 翻譯（待翻譯 JSON）", value=True)
-        self.ftb_step_inject = ft.Checkbox(label="Step 4：Inject（寫回 zh_tw/*.snbt）", value=True)
-        self.ftb_write_new_cache = ft.Switch(label="寫入新快取（write_new_cache）", value=True)
+        self.ftb_step_export = ft.Checkbox(
+            label="Step 1：Export Raw（抽取）", value=True
+        )
+        self.ftb_step_clean = ft.Checkbox(
+            label="Step 2：Clean（補洞/產生待翻譯）", value=True
+        )
+        self.ftb_step_translate = ft.Checkbox(
+            label="Step 3：LM 翻譯（待翻譯 JSON）", value=True
+        )
+        self.ftb_step_inject = ft.Checkbox(
+            label="Step 4：Inject（寫回 zh_tw/*.snbt）", value=True
+        )
+        self.ftb_write_new_cache = ft.Switch(
+            label="寫入新快取（write_new_cache）", value=True
+        )
 
         return ft.Column(
             [
@@ -300,14 +302,11 @@ class TranslationView(ft.Column):
         )
 
     def _build_kjs_tab(self) -> ft.Control:
-        """_build_kjs_tab 的用途說明。
+        """建立此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`TextField`, `Checkbox`
+
+        回傳：依函式內 return path。
         """
         self.kjs_in_dir = ft.TextField(
             label="輸入資料夾（模組包根目錄）",
@@ -330,10 +329,18 @@ class TranslationView(ft.Column):
             prefix_icon=ft.Icons.FOLDER_COPY,
         )
 
-        self.kjs_step_extract = ft.Checkbox(label="Step 1：Export Raw + Clean", value=True)
-        self.kjs_step_translate = ft.Checkbox(label="Step 2：LM 翻譯（待翻譯 JSON）", value=True)
-        self.kjs_step_inject = ft.Checkbox(label="Step 3：Inject 回 scripts", value=True)
-        self.kjs_write_new_cache = ft.Switch(label="寫入新快取（write_new_cache）", value=True)
+        self.kjs_step_extract = ft.Checkbox(
+            label="Step 1：Export Raw + Clean", value=True
+        )
+        self.kjs_step_translate = ft.Checkbox(
+            label="Step 2：LM 翻譯（待翻譯 JSON）", value=True
+        )
+        self.kjs_step_inject = ft.Checkbox(
+            label="Step 3：Inject 回 scripts", value=True
+        )
+        self.kjs_write_new_cache = ft.Switch(
+            label="寫入新快取（write_new_cache）", value=True
+        )
 
         return ft.Column(
             [
@@ -372,14 +379,11 @@ class TranslationView(ft.Column):
         )
 
     def _build_md_tab(self) -> ft.Control:
-        """_build_md_tab 的用途說明。
+        """建立此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`TextField`, `Checkbox`
+
+        回傳：依函式內 return path。
         """
         self.md_in_dir = ft.TextField(
             label="輸入資料夾（遞迴掃描 .md）",
@@ -402,16 +406,24 @@ class TranslationView(ft.Column):
             prefix_icon=ft.Icons.FOLDER_COPY,
         )
 
-        self.md_step_extract = ft.Checkbox(label="Step 1：Extract（產生待翻譯）", value=True)
-        self.md_step_translate = ft.Checkbox(label="Step 2：LM 翻譯（待翻譯 JSON）", value=True)
+        self.md_step_extract = ft.Checkbox(
+            label="Step 1：Extract（產生待翻譯）", value=True
+        )
+        self.md_step_translate = ft.Checkbox(
+            label="Step 2：LM 翻譯（待翻譯 JSON）", value=True
+        )
         self.md_step_inject = ft.Checkbox(label="Step 3：Inject（寫回 md）", value=True)
-        self.md_write_new_cache = ft.Switch(label="寫入新快取（write_new_cache）", value=True)
+        self.md_write_new_cache = ft.Switch(
+            label="寫入新快取（write_new_cache）", value=True
+        )
         self.md_lang_mode = ft.Dropdown(
             label="抽取語言模式（lang_mode）",
             value="non_cjk_only",
             dense=True,
             options=[
-                ft.dropdown.Option(key="non_cjk_only", text="僅抽取非中文（non_cjk_only）"),
+                ft.dropdown.Option(
+                    key="non_cjk_only", text="僅抽取非中文（non_cjk_only）"
+                ),
                 ft.dropdown.Option(key="cjk_only", text="僅抽取中文（cjk_only）"),
                 ft.dropdown.Option(key="all", text="抽取全部（all）"),
             ],
@@ -458,28 +470,20 @@ class TranslationView(ft.Column):
     # directory picker
     # ------------------------------------------------------------------
     def _pick_directory_into(self, target: ft.TextField):
-        """_pick_directory_into 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`get_directory_path`
+
+        回傳：None
         """
         self._picker_target_field = target
         self.file_picker.on_result = self._on_dir_picked
         self.file_picker.get_directory_path()
 
     def _on_dir_picked(self, e: ft.FilePickerResultEvent):
-        """_on_dir_picked 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        回傳：None
         """
         if not e.path:
             return
@@ -491,14 +495,11 @@ class TranslationView(ft.Column):
     # runners
     # ------------------------------------------------------------------
     def _run_ftb(self, *, dry_run: bool):
-        """_run_ftb 的用途說明。
+        """執行此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`strip`, `_set_status`, `clear`
+
+        回傳：None
         """
         in_dir = (self.ftb_in_dir.value or "").strip()
         if not in_dir:
@@ -512,7 +513,10 @@ class TranslationView(ft.Column):
             return
 
         out_dir = (self.ftb_out_dir.value or "").strip() or None
-        self._set_status("模擬執行" if dry_run else "執行中", ft.Colors.AMBER_200 if dry_run else ft.Colors.BLUE_200)
+        self._set_status(
+            "模擬執行" if dry_run else "執行中",
+            ft.Colors.AMBER_200 if dry_run else ft.Colors.BLUE_200,
+        )
         self.progress.value = 0
         self.log_view.controls.clear()
         self.page.update()
@@ -524,14 +528,11 @@ class TranslationView(ft.Column):
             pass
 
         def worker():
-            """worker 的用途說明。
+            """處理此函式的工作（細節以程式碼為準）。
 
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            - 主要包裝：`run_ftb_translation_service`
+
+            回傳：None
             """
             try:
                 run_ftb_translation_service(
@@ -558,14 +559,11 @@ class TranslationView(ft.Column):
         self._start_ui_timer()
 
     def _run_kjs(self, *, dry_run: bool):
-        """_run_kjs 的用途說明。
+        """執行此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`strip`, `_set_status`, `clear`
+
+        回傳：None
         """
         in_dir = (self.kjs_in_dir.value or "").strip()
         if not in_dir:
@@ -579,7 +577,10 @@ class TranslationView(ft.Column):
             return
 
         out_dir = (self.kjs_out_dir.value or "").strip() or None
-        self._set_status("模擬執行" if dry_run else "執行中", ft.Colors.AMBER_200 if dry_run else ft.Colors.BLUE_200)
+        self._set_status(
+            "模擬執行" if dry_run else "執行中",
+            ft.Colors.AMBER_200 if dry_run else ft.Colors.BLUE_200,
+        )
         self.progress.value = 0
         self.log_view.controls.clear()
         self.page.update()
@@ -591,14 +592,11 @@ class TranslationView(ft.Column):
             pass
 
         def worker():
-            """worker 的用途說明。
+            """處理此函式的工作（細節以程式碼為準）。
 
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            - 主要包裝：`run_kubejs_tooltip_service`
+
+            回傳：None
             """
             try:
                 run_kubejs_tooltip_service(
@@ -624,14 +622,11 @@ class TranslationView(ft.Column):
         self._start_ui_timer()
 
     def _run_md(self, *, dry_run: bool):
-        """_run_md 的用途說明。
+        """執行此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`strip`, `_set_status`, `clear`
+
+        回傳：None
         """
         in_dir = (self.md_in_dir.value or "").strip()
         if not in_dir:
@@ -645,7 +640,10 @@ class TranslationView(ft.Column):
             return
 
         out_dir = (self.md_out_dir.value or "").strip() or None
-        self._set_status("模擬執行" if dry_run else "執行中", ft.Colors.AMBER_200 if dry_run else ft.Colors.BLUE_200)
+        self._set_status(
+            "模擬執行" if dry_run else "執行中",
+            ft.Colors.AMBER_200 if dry_run else ft.Colors.BLUE_200,
+        )
         self.progress.value = 0
         self.log_view.controls.clear()
         self.page.update()
@@ -657,14 +655,11 @@ class TranslationView(ft.Column):
             pass
 
         def worker():
-            """worker 的用途說明。
+            """處理此函式的工作（細節以程式碼為準）。
 
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            - 主要包裝：`run_md_translation_service`
+
+            回傳：None
             """
             try:
                 run_md_translation_service(
@@ -694,28 +689,20 @@ class TranslationView(ft.Column):
     # ui poller
     # ------------------------------------------------------------------
     def _start_ui_timer(self):
-        """_start_ui_timer 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`start`
+
+        回傳：None
         """
         if self._ui_timer_running:
             return
         self._ui_timer_running = True
 
         def loop():
-            """loop 的用途說明。
+            """處理此函式的工作（細節以程式碼為準）。
 
-            Args:
-                參數請見函式簽名。
-            Returns:
-                回傳內容依實作而定；若無顯式回傳則為 None。
-            Side Effects:
-                可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+            回傳：None
             """
             while self._ui_timer_running:
                 time.sleep(0.1)
@@ -736,7 +723,8 @@ class TranslationView(ft.Column):
                 try:
                     tail = logs[-250:]
                     self.log_view.controls = [
-                        ft.Text(line, size=13, color=ft.Colors.GREY_100) for line in tail
+                        ft.Text(line, size=13, color=ft.Colors.GREY_100)
+                        for line in tail
                     ]
                 except Exception:
                     pass
@@ -757,28 +745,20 @@ class TranslationView(ft.Column):
     # UI helpers
     # ------------------------------------------------------------------
     def _set_status(self, text: str, color: str):
-        """_set_status 的用途說明。
+        """設定此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`Text`
+
+        回傳：None
         """
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
         self.page.update()
 
     def _append_log(self, line: str):
-        """_append_log 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        回傳：None
         """
         self.log_view.controls.append(ft.Text(line, size=13, color=ft.Colors.GREY_100))
         if len(self.log_view.controls) > 400:
@@ -786,14 +766,11 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _clear_logs(self):
-        """_clear_logs 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`clear`
+
+        回傳：None
         """
         self.log_view.controls.clear()
         self.page.update()
@@ -802,14 +779,11 @@ class TranslationView(ft.Column):
     # reset actions
     # ------------------------------------------------------------------
     def _reset_ftb_inputs(self):
-        """_reset_ftb_inputs 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`_set_status`, `_append_log`
+
+        回傳：None
         """
         self.ftb_in_dir.value = ""
         self.ftb_out_dir.value = ""
@@ -824,14 +798,11 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _reset_kjs_inputs(self):
-        """_reset_kjs_inputs 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`_set_status`, `_append_log`
+
+        回傳：None
         """
         self.kjs_in_dir.value = ""
         self.kjs_out_dir.value = ""
@@ -845,14 +816,11 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _reset_md_inputs(self):
-        """_reset_md_inputs 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`_set_status`, `_append_log`
+
+        回傳：None
         """
         self.md_in_dir.value = ""
         self.md_out_dir.value = ""
@@ -867,14 +835,11 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _show_snack(self, message: str, color: str = ft.Colors.RED_600):
-        """_show_snack 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`SnackBar`
+
+        回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)

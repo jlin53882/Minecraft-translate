@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Dict, Any, Generator, Optional
 import concurrent.futures
 import logging
-logger = logging.getLogger(__name__)
 
 import orjson as json
 
@@ -32,33 +31,25 @@ from translation_tool.core.translatable_extractor import (
     find_lang_json,
     is_lang_file,
 )
-from translation_tool.core.translation_path_writer import map_lang_output_path, set_by_path
-from translation_tool.core.lm_config_rules import validate_api_keys, value_fully_translated
+from translation_tool.core.translation_path_writer import (
+    map_lang_output_path,
+    set_by_path,
+)
+from translation_tool.core.lm_config_rules import (
+    validate_api_keys,
+    value_fully_translated,
+)
 from translation_tool.utils.config_manager import load_config
 
+logger = logging.getLogger(__name__)
+
+
 def get_formatted_duration(start_tick: float) -> str:
-    """
-    根據起始時間點（perf_counter）計算並格式化「已經過的時間」。
+    """取得此函式的工作（細節以程式碼為準）。
 
-    用途：
-    - 顯示整個翻譯流程的總耗時
-    - 顯示某一段流程（如單一 batch）的執行時間
-    - 適合用於「已耗時」，而非 ETA（剩餘時間）
+    - 主要包裝：`perf_counter`, `divmod`
 
-    參數：
-    - start_tick (float):
-        必須是由 time.perf_counter() 取得的時間點。
-        ⚠️ 不可混用 time.time()，否則時間計算會錯亂。
-
-    回傳：
-    - str：格式化後的時間字串，例如：
-        - "3 分 12 秒"
-        - "1 小時 5 分 9 秒"
-
-    設計原則：
-    - 使用 perf_counter()，避免系統時間校正（NTP、手動改時間）影響
-    - 僅處理「經過多久」，不涉及任何預測邏輯
-    - 超過 1 小時才顯示「小時」欄位，讓輸出更精簡
+    回傳：依函式內 return path。
     """
 
     # 使用 perf_counter 計算目前時間（高精度、單調遞增）
@@ -78,8 +69,7 @@ def get_formatted_duration(start_tick: float) -> str:
         return f"{minutes} 分 {seconds} 秒"
 
 
-
-#剩餘時間
+# 剩餘時間
 def format_duration_seconds(seconds: int) -> str:
     """
     將「秒數」格式化為人類可讀的時間字串。
@@ -114,10 +104,10 @@ def format_duration_seconds(seconds: int) -> str:
         return f"{minutes} 分 {seconds} 秒"
 
 
-
 # ============================================================
 # 對外唯一入口（UI / CLI 共用）
 # ============================================================
+
 
 def translate_directory_generator(
     input_dir: str,
@@ -125,43 +115,49 @@ def translate_directory_generator(
     *,
     dry_run: Optional[bool] = None,
     export_lang: bool = False,
-    write_new_cache: bool = False, # ⭐ 新增
+    write_new_cache: bool = False,  # ⭐ 新增
 ) -> Generator[Dict[str, Any], None, None]:
     """
     UI / CLI 共用翻譯入口
     - dry_run=None → 使用 lm_translate_tast.py 的 DRY_RUN
     - dry_run=True/False → 由 UI / argparse 覆寫
     """
-    #批次大小決定 LM 送出多少條文字進行翻譯
-    INITIAL_BATCH_SIZE_LANG = load_config().get("lm_translator", {}).get("iniital_batch_size_lang", 300) 
-    INITIAL_BATCH_SIZE_PATCHOULI = load_config().get("lm_translator", {}).get("iniital_batch_size_patchouli", 100)  
+    # 批次大小決定 LM 送出多少條文字進行翻譯
+    INITIAL_BATCH_SIZE_LANG = (
+        load_config().get("lm_translator", {}).get("iniital_batch_size_lang", 300)
+    )
+    INITIAL_BATCH_SIZE_PATCHOULI = (
+        load_config().get("lm_translator", {}).get("iniital_batch_size_patchouli", 100)
+    )
 
     # =========================
     # DRY_RUN 覆寫邏輯（核心）
     # =========================
 
-    #如果使用者沒有特別指定 dry_run 的值（即為 None），就使用系統全域定義的預設變數 DRY_RUN；否則，就遵從使用者傳入的值。
+    # 如果使用者沒有特別指定 dry_run 的值（即為 None），就使用系統全域定義的預設變數 DRY_RUN；否則，就遵從使用者傳入的值。
     dry_run = DRY_RUN if dry_run is None else dry_run
 
-    logger.debug(f"DEBUG [3. Translator Gen]: 接收到的 export_lang 為 -> {export_lang}") # <--- 加在這裡
+    logger.debug(
+        f"DEBUG [3. Translator Gen]: 接收到的 export_lang 為 -> {export_lang}"
+    )  # <--- 加在這裡
 
-    #驗證API 翻譯key 是否有效
+    # 驗證API 翻譯key 是否有效
     validate_api_keys()
     # 每次執行都重新讀取快取分片，確保手動修改的快取可立即生效
     reload_translation_cache()
-    logger.info(f"[3. Translator Gen]: 重新載入快取完成")
+    logger.info("[3. Translator Gen]: 重新載入快取完成")
 
-    #獲取 並建立輸入、輸出路徑
+    # 獲取 並建立輸入、輸出路徑
     root = Path(input_dir).resolve()
     out_root = Path(output_dir).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
 
     # --- 1. 初始化路徑 Log ---
     msg_init = f"\n📂 輸入資料夾：{root}\n📤 輸出資料夾：{out_root}"
-    logger.info(msg_init) # 同步到日誌檔案 (log 檔)
+    logger.info(msg_init)  # 同步到日誌檔案 (log 檔)
     yield {
         "progress": 0.0,
-        #"log": msg_init,
+        # "log": msg_init,
     }
 
     # =========================
@@ -172,18 +168,18 @@ def translate_directory_generator(
     files = patchouli_files + lang_files
 
     msg_scan = f"🔍 掃描完成：Patchouli={len(patchouli_files)}，Lang={len(lang_files)}"
-    logger.info(msg_scan) # 同步到日誌檔案 (log 檔)
+    logger.info(msg_scan)  # 同步到日誌檔案 (log 檔)
     yield {
         "progress": 0.0,
-        #"log": msg_scan,
+        # "log": msg_scan,
     }
 
     if not files:
         msg_no_files = "⚠️ 未找到任何可翻譯 JSON 檔案"
-        logger.info(msg_no_files) # 同步到日誌檔案 (log 檔)
+        logger.info(msg_no_files)  # 同步到日誌檔案 (log 檔)
         yield {
             "progress": 1.0,
-            #"log": msg_no_files,
+            # "log": msg_no_files,
         }
         return
 
@@ -207,25 +203,20 @@ def translate_directory_generator(
                 return False
         return True
 
-
-
     # 定義一個內部工作函式，處理單個檔案的讀取與抽取
     def process_file_task(f: Path):
-        """process_file_task 的用途說明。
+        """處理此函式的工作（細節以程式碼為準）。
 
-        Args:
-            參數請見函式簽名。
-        Returns:
-            回傳內容依實作而定；若無顯式回傳則為 None。
-        Side Effects:
-            可能包含檔案 I/O、網路呼叫或 log 輸出等副作用（依實作而定）。
+        - 主要包裝：`loads`
+
+        回傳：依函式內 return path。
         """
         try:
             # 使用 orjson 快速讀取
             data = json.loads(f.read_bytes())
             # 判斷快取類型
-            #c_type = "lang" if is_lang_file(f) else "patchouli"
-            #if is_lang_file(f):
+            # c_type = "lang" if is_lang_file(f) else "patchouli"
+            # if is_lang_file(f):
             #    if not is_plain_lang_json(data):
             #        logger.info(f"⏭️ 跳過複合格式 Lang 檔案：{f}")
             #        return None
@@ -236,34 +227,34 @@ def translate_directory_generator(
 
                 # ⭐ 若要輸出 .lang，但內容不是純 key->str，就只能退回輸出 json
                 if export_lang and not is_plain_lang_json(data):
-                    logger.info(f"⚠️ Lang 檔為複合格式（含 list/dict），無法輸出 .lang，將改用 .json：{f}")
+                    logger.info(
+                        f"⚠️ Lang 檔為複合格式（含 list/dict），無法輸出 .lang，將改用 .json：{f}"
+                    )
             else:
                 c_type = "patchouli"
             # 抽取文字
             extracted_items = extract_translatables(data, f)
-            
+
             # 預先打上類型標籤
             for item in extracted_items:
                 item["cache_type"] = c_type
-                
-            return {
-                "file_path": str(f),
-                "data": data,
-                "items": extracted_items
-            }
+
+            return {"file_path": str(f), "data": data, "items": extracted_items}
         except Exception as e:
             logger.error(f"❌ 檔案處理失敗 {f.name}: {e}")
             return None
 
     logger.info(f"🚀 開始並行抽取文字 (檔案數量: {len(files)})")
-    work_thread=load_config().get("translator", {}).get("parallel_execution_workers", 4)
+    work_thread = (
+        load_config().get("translator", {}).get("parallel_execution_workers", 4)
+    )
 
     # 使用執行緒池加速 I/O 與解析
     # max_workers 建議設定為 8~16，或根據 CPU 核心數調整
     with concurrent.futures.ThreadPoolExecutor(max_workers=work_thread) as executor:
         # 提交所有任務
         future_to_file = {executor.submit(process_file_task, f): f for f in files}
-        
+
         for future in concurrent.futures.as_completed(future_to_file):
             result = future.result()
             if result:
@@ -275,21 +266,21 @@ def translate_directory_generator(
     logger.info(msg_extract)
     yield {
         "progress": 0.05,
-        #"log": msg_extract,
+        # "log": msg_extract,
     }
 
     # ============================================================
     # Cache 命中處理（針對萬筆數據的極速比對版）
     # ============================================================
-    cached_items = [] #快取數據
-    items_to_translate = [] #待翻譯數據
+    cached_items = []  # 快取數據
+    items_to_translate = []  # 待翻譯數據
 
     # 1. 透過正式 façade 取得 live reference，避免直接越權碰 private state
     lang_cache = get_cache_dict_ref("lang")
     patch_cache = get_cache_dict_ref("patchouli")
 
     logger.info(f"⚡ 正在進行 Cache 比對 (總量: {len(all_items)} 筆)...")
-    #開始計時 cache 比對時間
+    # 開始計時 cache 比對時間
     start_match = time.perf_counter()
 
     # 2. 分流處理：利用 List Comprehension 快速將項目歸類
@@ -316,13 +307,14 @@ def translate_directory_generator(
         else:
             items_to_translate.append(item)
 
-
     # 處理 Lang 項目 (Key: path)
     for item in lang_items:
         unique_key = item["path"]
         entry = lang_cache.get(unique_key)
 
-        src_text = item.get("source_text") or item.get("text") or ""   # 這行你下面翻譯階段也這樣做
+        src_text = (
+            item.get("source_text") or item.get("text") or ""
+        )  # 這行你下面翻譯階段也這樣做
         entry_src = entry.get("src") if isinstance(entry, dict) else None
         entry_dst = entry.get("dst") if isinstance(entry, dict) else None
 
@@ -337,19 +329,21 @@ def translate_directory_generator(
     msg_cache = f"🧠 Cache 命中 {len(cached_items)} 筆，需翻譯 {len(items_to_translate)} 筆 (耗時: {match_duration:.2f}s)"
     logger.info(msg_cache)
 
-
     # =========================
     # DEBUG：列出 Cache 命中來源
     # =========================
     if logger.isEnabledFor(logging.DEBUG) and cached_items:
         from collections import defaultdict
+
         hit_by_file = defaultdict(list)
-    
+
         # 先把命中按檔名聚合，避免 log 太長
         for it in cached_items:
             hit_by_file[Path(it["file"]).name].append(it)
-    
-        logger.debug("🎯 [CACHE HIT] total=%d files=%d", len(cached_items), len(hit_by_file))
+
+        logger.debug(
+            "🎯 [CACHE HIT] total=%d files=%d", len(cached_items), len(hit_by_file)
+        )
 
         for fname, items in hit_by_file.items():
             logger.debug("🎯 [CACHE HIT] %s (%d)", fname, len(items))
@@ -391,17 +385,15 @@ def translate_directory_generator(
                 entry_dst,
             )
 
-
-
     yield {
         "progress": 0.1,
-        #"log": msg_cache, # 如果 UI 需要顯示比對結果
+        # "log": msg_cache, # 如果 UI 需要顯示比對結果
     }
 
     # 輸出 Cache 命中內容 (優化版)
     # 先把所有資料填入 file_cache，最後「一次性」遍歷 touched_files 進行寫入。
     # =========================
-    #if cached_items:
+    # if cached_items:
     if cached_items and not dry_run:
         touched_files = set()
 
@@ -419,22 +411,21 @@ def translate_directory_generator(
         # 2. 針對受影響的檔案進行一次性寫入
         # 這裡可以使用 orjson 的快遞優勢
         logger.info(f"💾 正在更新 {len(touched_files)} 個受影響的檔案...")
-        
 
         for file in touched_files:
             src = Path(file)
             # 預先計算相對路徑，減少 Path 物件轉換開銷
             rel = map_lang_output_path(src.relative_to(root))
-            
+
             # 判斷格式
             is_lang_folder = "lang" in src.parts
             dst_base = out_root / rel
-            
+
             if export_lang and is_lang_folder:
                 # 輸出為 .lang (純文字拼接)
                 dst = dst_base.with_suffix(".lang")
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                
+
                 # 優化：使用 list comprehension 配合 join，比不斷 lines.append 快
                 content = "\n".join([f"{k}={v}" for k, v in file_cache[file].items()])
                 dst.write_text(content, encoding="utf-8")
@@ -442,7 +433,7 @@ def translate_directory_generator(
                 # 輸出為 .json
                 dst = dst_base
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                
+
                 # 使用 orjson 進行極速序列化
                 dst.write_bytes(
                     json.dumps(
@@ -456,11 +447,11 @@ def translate_directory_generator(
         yield {"progress": 0.15}
 
         if EXPORT_CACHE_ONLY and not items_to_translate and not dry_run:
-            msg_cache_pass=f"🎉 僅 Cache 命中，無需翻譯，流程結束"
-            logger.info(msg_cache_pass) # 同步到日誌檔案 (log 檔)
+            msg_cache_pass = "🎉 僅 Cache 命中，無需翻譯，流程結束"
+            logger.info(msg_cache_pass)  # 同步到日誌檔案 (log 檔)
             yield {
                 "progress": 1.0,
-                #"log": msg_cache_pass,
+                # "log": msg_cache_pass,
             }
             return
 
@@ -507,7 +498,6 @@ def translate_directory_generator(
         yield {"progress": 1.0}
         return
 
-
     # =========================
     # 正式翻譯流程
     # =========================
@@ -522,10 +512,10 @@ def translate_directory_generator(
 
     # 2. 確定有東西要翻，再發送開始訊息
     msg_start = f"🚀 開始翻譯（共 {total} 筆）"
-    logger.info(msg_start) 
+    logger.info(msg_start)
     yield {
         "progress": 0.2,
-        #"log": msg_start,
+        # "log": msg_start,
     }
 
     remaining = items_to_translate[:]
@@ -537,55 +527,55 @@ def translate_directory_generator(
     while remaining:
         is_lang = remaining[0]["cache_type"] == "lang"
         batch_size = (
-            INITIAL_BATCH_SIZE_LANG
-            if is_lang
-            else INITIAL_BATCH_SIZE_PATCHOULI
+            INITIAL_BATCH_SIZE_LANG if is_lang else INITIAL_BATCH_SIZE_PATCHOULI
         )
         batch = remaining[:batch_size]
 
         # ⭐ 1. 接收 status (原本是 _, 現在改為 status)
         translated, status = translate_batch_smart(batch, total)
-        logger.debug("翻譯結果：%s",translated)
+        logger.debug("翻譯結果：%s", translated)
         logger.debug("翻譯狀態：%s", status)
 
-
         # ⭐ 2. 判斷是否發生「額度用盡」或「無法翻譯」的情況
-        is_interrupted = (status in ["PARTIAL", "FAILED","ALL_KEYS_EXHAUSTED"])
+        is_interrupted = status in ["PARTIAL", "FAILED", "ALL_KEYS_EXHAUSTED"]
         # ⭐ 3. 安全檢查：防止 translated 為 None 導致後面的 for item in translated 崩潰
         safe_translated = translated if translated is not None else []
-        #logger.debug("安全翻譯結果：",safe_translated)
-
+        # logger.debug("安全翻譯結果：",safe_translated)
 
         # 無論是否中斷，只要有翻出來的東西 (translated)，就先處理掉
         touched_files = set()
 
         # 建立一個快速對照表，避免在迴圈內反覆搜尋
         # 用 (file, path) 作為 key 來比對原始文本
-        #src_map = {(i["file"], i["path"]): i["text"] for i in batch}
-        #src_map = {(i["file"], i["path"]): i.get("source_text") for i in batch}
-        src_map = {(i["file"], i["path"]): (i.get("source_text") or i.get("text") or "") for i in batch}
-
+        # src_map = {(i["file"], i["path"]): i["text"] for i in batch}
+        # src_map = {(i["file"], i["path"]): i.get("source_text") for i in batch}
+        src_map = {
+            (i["file"], i["path"]): (i.get("source_text") or i.get("text") or "")
+            for i in batch
+        }
 
         for item in safe_translated:
             file = item["file"]
             path = item["path"]
             text = item["text"]
             c_type = item["cache_type"]
-            
+
             # 從對照表取得原始文字
-            src_text = src_map.get((file, path)) # 取得原文
+            src_text = src_map.get((file, path))  # 取得原文
 
             if src_text:
                 # 1. 紀錄到 Log
-                translation_log.append({
-                    "file": file,
-                    "path": path,
-                    "cache_type": c_type,
-                    "source": src_text,
-                    "translated": text,
-                })
+                translation_log.append(
+                    {
+                        "file": file,
+                        "path": path,
+                        "cache_type": c_type,
+                        "source": src_text,
+                        "translated": text,
+                    }
+                )
 
-            # --- 第一步：登記到快取管理員 (這決定了存檔有沒有內容) ---  
+            # --- 第一步：登記到快取管理員 (這決定了存檔有沒有內容) ---
             # 2. 存入記憶體快取
             if c_type == "patchouli":
                 # Patchouli 的文本可能隨 path 變動，故使用組合 Key
@@ -604,7 +594,6 @@ def translate_directory_generator(
                     path,
                 )
 
-
             # --- 第二步：更新準備輸出的遊戲 JSON 物件 ---
             set_by_path(file_cache[file], path, text)
             touched_files.add(file)
@@ -617,7 +606,6 @@ def translate_directory_generator(
             save_translation_cache("patchouli", write_new_shard=write_new_cache)
             logger.debug("✅ patchouli 分片快取已寫入硬碟")
 
-
         # ⭐ checkpoint：立刻寫檔
         for file in touched_files:
             src = Path(file)
@@ -626,7 +614,9 @@ def translate_directory_generator(
             # 檢查是否為語言檔案 (通常路徑包含 /lang/)
             # 以及使用者是否要求輸出 .lang 格式
             is_lang_folder = "lang" in src.parts
-            logger.debug(f"DEBUG [4. Main Logic]: 正在處理檔案 {src.name}, export_lang={export_lang}, is_lang_folder={is_lang_folder}")
+            logger.debug(
+                f"DEBUG [4. Main Logic]: 正在處理檔案 {src.name}, export_lang={export_lang}, is_lang_folder={is_lang_folder}"
+            )
 
             if export_lang and is_lang_folder:
                 # 變更副檔名為 .lang
@@ -654,16 +644,16 @@ def translate_directory_generator(
 
         # 更新進度數值
         # 注意：如果中斷了，這批次可能只翻了部分，len(translated) 才是真正完成的數量
-        #actual_processed = len(translated)
-        actual_processed = len(safe_translated) 
+        # actual_processed = len(translated)
+        actual_processed = len(safe_translated)
         processed += actual_processed
-        
+
         # ✅ 只移除真的翻過的
         # 移動剩餘指標
-        #remaining = remaining[len(translated):]
+        # remaining = remaining[len(translated):]
         remaining = remaining[actual_processed:]
 
-        #計算 ETA
+        # 計算 ETA
         elapsed = time.perf_counter() - start_time
         avg_per_item = elapsed / processed if processed > 0 else 0.0
         eta_seconds = int(len(remaining) * avg_per_item)
@@ -681,17 +671,16 @@ def translate_directory_generator(
         progress_msg = (
             f"[{current_type} - Batch {batch_index}] "
             f"{'✅ 成功' if not is_interrupted else '⚠️ 部分完成並停止'} | "
-            f"進度: {processed}/{total} ({(processed/total):.1%})"
+            f"進度: {processed}/{total} ({(processed / total):.1%})"
             + (f" | {eta_text}" if eta_text else "")
         )
 
         logger.info(progress_msg)
 
-        
         # 3. 回傳給 UI 或 CLI
         yield {
             "progress": min(0.2 + 0.8 * (processed / total), 1.0),
-            #"log": progress_msg,
+            # "log": progress_msg,
         }
 
         # ⭐ 5. 如果中斷，發送最後訊息並跳出
@@ -701,7 +690,7 @@ def translate_directory_generator(
                 stop_msg = "❌ 所有 API Key 額度已耗盡，已儲存進度並停止翻譯。"
             elif status == "FAILED":
                 stop_msg = "❌ 發生嚴重錯誤，無法繼續翻譯。"
-            
+
             logger.warning(stop_msg)
             yield {"progress": processed / total if total > 0 else 1.0}
             break  # 結束 while 迴圈
@@ -738,6 +727,6 @@ def translate_directory_generator(
     logger.info(final_status_msg)
 
     yield {
-        "progress": 1.0 if processed >= total else processed/total,
-        #"log": "\n".join(final_logs),
+        "progress": 1.0 if processed >= total else processed / total,
+        # "log": "\n".join(final_logs),
     }
