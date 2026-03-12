@@ -29,17 +29,9 @@ __all__ = [
 
 
 def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
-    """`run_untranslated_check_service`
+    """執行此 generator 並逐步回報進度（yield update dict）。
     
-    用途：
-    - 執行此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`check_untranslated_generator`
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - Generator：逐步 yield update dict（log/progress/error 等）。
+    - 主要包裝：`check_untranslated_generator`
     """
     try:
         for update_dict in check_untranslated_generator(en_dir, tw_dir, out_dir):
@@ -57,17 +49,9 @@ def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
 
 
 def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
-    """`run_variant_compare_service`
+    """執行此 generator 並逐步回報進度（yield update dict）。
     
-    用途：
-    - 執行此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`compare_variants_generator`
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - Generator：逐步 yield update dict（log/progress/error 等）。
+    - 主要包裝：`compare_variants_generator`
     """
     try:
         for update_dict in compare_variants_generator(cn_dir, tw_dir, out_dir):
@@ -85,17 +69,9 @@ def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
 
 
 def run_english_residue_check_service(input_dir: str, out_dir: str):
-    """`run_english_residue_check_service`
+    """執行此 generator 並逐步回報進度（yield update dict）。
     
-    用途：
-    - 執行此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`check_english_residue_generator`
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - Generator：逐步 yield update dict（log/progress/error 等）。
+    - 主要包裝：`check_english_residue_generator`
     """
     try:
         for update_dict in check_english_residue_generator(input_dir, out_dir):
@@ -113,17 +89,9 @@ def run_english_residue_check_service(input_dir: str, out_dir: str):
 
 
 def run_variant_compare_tsv_service(tsv_path: str, output_csv_path: str):
-    """`run_variant_compare_tsv_service`
+    """執行此 generator 並逐步回報進度（yield update dict）。
     
-    用途：
-    - 執行此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`compare_variants_tsv_generator`
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - Generator：逐步 yield update dict（log/progress/error 等）。
+    - 主要包裝：`compare_variants_tsv_generator`
     """
     try:
         for update_dict in compare_variants_tsv_generator(tsv_path, output_csv_path):

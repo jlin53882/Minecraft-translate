@@ -62,64 +62,40 @@ def _save_app_config(config: dict[str, Any]):
 # --- 檔案讀寫服務 ---
 
 def load_replace_rules():
-    """`load_replace_rules`
+    """載入此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 載入此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`load_rules_core`
+    - 主要包裝：`load_rules_core`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     return load_rules_core(REPLACE_RULES_PATH)
 
 
 def save_replace_rules(rules):
-    """`save_replace_rules`
+    """保存此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 保存此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`save_rules_core`
+    - 主要包裝：`save_rules_core`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - None
+    回傳：None
     """
     save_rules_core(REPLACE_RULES_PATH, rules)
 
 
 def load_config_json():
-    """`load_config_json`
+    """載入此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 載入此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`_load_app_config`
+    - 主要包裝：`_load_app_config`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     return _load_app_config()
 
 
 def save_config_json(config):
-    """`save_config_json`
+    """保存此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 保存此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`_save_app_config`
+    - 主要包裝：`_save_app_config`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - None
+    回傳：None
     """
     _save_app_config(config)

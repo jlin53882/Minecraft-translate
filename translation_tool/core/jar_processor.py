@@ -21,32 +21,20 @@ log = logging.getLogger(__name__)
 
 # --- 通用輔助函式 (保持不變) ---
 def _get_file_hash(data: bytes) -> str:
-    """`_get_file_hash`
+    """取得此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`hexdigest`
+    - 主要包裝：`hexdigest`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     return hashlib.sha256(data).hexdigest()
 
 def find_jar_files(folder_path: str) -> List[str]:
-    """`find_jar_files`
+    """找出此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 找出此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`walk`, `info`
+    - 主要包裝：`walk`, `info`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     jar_files = []
     for root, _, files in os.walk(folder_path):
@@ -150,17 +138,9 @@ def _extract_from_jar(jar_path: str, output_root: str, target_regex: re.Pattern)
 
 def _run_extraction_process(mods_dir: str, output_dir: str, target_regex: re.Pattern, process_name: str) -> Generator[Dict[str, Any], None, None]:
     # (此函式邏輯不變)
-    """`_run_extraction_process`
+    """執行此 generator 並逐步回報進度（yield update dict）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`makedirs`, `find_jar_files`, `len`
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - Generator：逐步 yield update dict（log/progress/error 等）。
+    - 主要包裝：`makedirs`, `find_jar_files`
     """
     os.makedirs(output_dir, exist_ok=True)
     jar_files = find_jar_files(mods_dir)
@@ -454,16 +434,9 @@ class ExtractionSummary:
     """提取結果摘要（記錄成功/警告/失敗）"""
     
     def __init__(self):
-        """`__init__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.success = []
         self.warnings = []

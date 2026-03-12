@@ -12,17 +12,11 @@ from typing import Iterable
 
 
 def safe_json_loads(text: str):
-    """`safe_json_loads`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`strip`, `findall`
+    - 主要包裝：`strip`, `findall`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     text = text.strip()
 
@@ -47,17 +41,7 @@ def safe_json_loads(text: str):
 
 
 def chunked(lst, size):
-    """`chunked`
-    
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`range`
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - Generator：逐步 yield update dict（log/progress/error 等）。
+    """處理此 generator 並逐步回報進度（yield update dict）。
     """
     for i in range(0, len(lst), size):
         yield lst[i:i + size]

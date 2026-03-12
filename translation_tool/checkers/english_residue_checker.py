@@ -20,17 +20,9 @@ ENGLISH_PATTERN = re.compile(r'[A-Za-z]')
 
 # 輔助函式：尋找 json 檔案
 def find_json_files(directory: str):
-    """`find_json_files`
+    """找出此 generator 並逐步回報進度（yield update dict）。
     
-    用途：
-    - 找出此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`walk`
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - Generator：逐步 yield update dict（log/progress/error 等）。
+    - 主要包裝：`walk`
     """
     for root, _, files in os.walk(directory):
         for file in files:

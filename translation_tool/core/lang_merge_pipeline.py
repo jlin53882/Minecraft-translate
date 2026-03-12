@@ -29,17 +29,11 @@ def _process_single_mod(
     must_translate_dir: str
 ) -> Dict[str, Any]:
 
-    """`_process_single_mod`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`compile`
+    - 主要包裝：`compile`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 
@@ -85,17 +79,9 @@ def _process_single_mod(
 
 
     def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
-        """`_safe_read_lang_json`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`get`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         path = paths.get(lang_key)
         if not path:
@@ -108,17 +94,9 @@ def _process_single_mod(
                 bad_lines = []
 
                 def on_error(line_no, raw, reason):
-                    """`on_error`
+                    """處理此函式的工作（細節以程式碼為準）。
                     
-                    用途：
-                    - 處理此函式的主要流程（細節以程式碼為準）。
-                    - 主要包裝/呼叫：`append`
-                    
-                    參數：
-                    - 依函式簽名。
-                    
-                    回傳：
-                    - None
+                    回傳：None
                     """
                     bad_lines.append((line_no, raw, reason))
 

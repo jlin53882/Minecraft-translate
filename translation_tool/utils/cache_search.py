@@ -305,31 +305,18 @@ class CacheSearchEngine:
             self.conn.close()
 
     def __enter__(self):
-        """`__enter__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """`__exit__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`close`
+        - 主要包裝：`close`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.close()
 

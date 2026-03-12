@@ -37,28 +37,11 @@ from translation_tool.core.lm_config_rules import validate_api_keys, value_fully
 from translation_tool.utils.config_manager import load_config
 
 def get_formatted_duration(start_tick: float) -> str:
-    """
-    根據起始時間點（perf_counter）計算並格式化「已經過的時間」。
-
-    用途：
-    - 顯示整個翻譯流程的總耗時
-    - 顯示某一段流程（如單一 batch）的執行時間
-    - 適合用於「已耗時」，而非 ETA（剩餘時間）
-
-    參數：
-    - start_tick (float):
-        必須是由 time.perf_counter() 取得的時間點。
-        ⚠️ 不可混用 time.time()，否則時間計算會錯亂。
-
-    回傳：
-    - str：格式化後的時間字串，例如：
-        - "3 分 12 秒"
-        - "1 小時 5 分 9 秒"
-
-    設計原則：
-    - 使用 perf_counter()，避免系統時間校正（NTP、手動改時間）影響
-    - 僅處理「經過多久」，不涉及任何預測邏輯
-    - 超過 1 小時才顯示「小時」欄位，讓輸出更精簡
+    """取得此函式的工作（細節以程式碼為準）。
+    
+    - 主要包裝：`perf_counter`, `divmod`
+    
+    回傳：依函式內 return path。
     """
 
     # 使用 perf_counter 計算目前時間（高精度、單調遞增）
@@ -211,17 +194,11 @@ def translate_directory_generator(
 
     # 定義一個內部工作函式，處理單個檔案的讀取與抽取
     def process_file_task(f: Path):
-        """`process_file_task`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`loads`
+        - 主要包裝：`loads`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         try:
             # 使用 orjson 快速讀取

@@ -32,17 +32,11 @@ class IconPreviewView(ft.Column):
     """
 
     def __init__(self, page: ft.Page):
-        """`__init__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`__init__`, `FilePicker`
+        - 主要包裝：`__init__`, `FilePicker`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         super().__init__(expand=True, spacing=8)
         self.page = page
@@ -166,16 +160,9 @@ class IconPreviewView(ft.Column):
     # Folder picker callbacks
     # ==================================================
     def _on_pick_source(self, e: ft.FilePickerResultEvent):
-        """`_on_pick_source`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if e.path:
             self.source_root = Path(e.path)
@@ -183,16 +170,9 @@ class IconPreviewView(ft.Column):
             self._update_load_state()
 
     def _on_pick_review(self, e: ft.FilePickerResultEvent):
-        """`_on_pick_review`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if e.path:
             self.review_root = Path(e.path)
@@ -200,17 +180,9 @@ class IconPreviewView(ft.Column):
             self._update_load_state()
 
     def _update_load_state(self):
-        """`_update_load_state`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`update`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.load_btn.disabled = not (self.source_root and self.review_root)
         self.update()
@@ -219,17 +191,11 @@ class IconPreviewView(ft.Column):
     # 載入 → 建立模組清單
     # ==================================================
     def _on_load_clicked(self, e):
-        """`_on_load_clicked`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_load_entries`, `defaultdict`, `dict`
+        - 主要包裝：`_load_entries`, `defaultdict`, `dict`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         entries = self._load_entries()
         mods = defaultdict(list)
@@ -244,17 +210,11 @@ class IconPreviewView(ft.Column):
     # 第一層：模組清單
     # ==================================================
     def _render_mod_list(self):
-        """`_render_mod_list`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`sorted`, `len`, `max`
+        - 主要包裝：`sorted`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.current_modid = None
         self.back_btn.visible = False
@@ -293,32 +253,18 @@ class IconPreviewView(ft.Column):
 
 
     def _update_page_bar_for_mods(self):
-        """`_update_page_bar_for_mods`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.page_info.value = f"模組清單｜第 {self.mod_current_page + 1} / {self.mod_total_pages} 頁"
         self.prev_page_btn.disabled = self.mod_current_page <= 0
         self.next_page_btn.disabled = self.mod_current_page >= self.mod_total_pages - 1
 
     def _prev_page(self, e):
-        """`_prev_page`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if self.current_modid:
             # 第二層（item）
@@ -333,16 +279,9 @@ class IconPreviewView(ft.Column):
 
 
     def _next_page(self, e):
-        """`_next_page`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if self.current_modid:
             if self.current_page < self.total_pages - 1:
@@ -358,17 +297,11 @@ class IconPreviewView(ft.Column):
     # 第二層：單一模組 detail
     # ==================================================
     def _open_mod_detail(self, modid: str):
-        """`_open_mod_detail`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`list`, `_render_current_page`
+        - 主要包裝：`list`, `_render_current_page`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.current_modid = modid
         self.current_page = 0   # ⭐ 重設頁碼
@@ -389,17 +322,11 @@ class IconPreviewView(ft.Column):
 
 
     def _go_back(self, e):
-        """`_go_back`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`clear`, `_render_mod_list`
+        - 主要包裝：`clear`, `_render_mod_list`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.current_modid = None
         self.current_page = 0
@@ -413,17 +340,11 @@ class IconPreviewView(ft.Column):
     # Row → 回報翻譯變更
     # ==================================================
     def _on_value_changed(self, key: str, value: str):
-        """`_on_value_changed`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`to_halfwidth`
+        - 主要包裝：`to_halfwidth`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self._zh_data[key] = to_halfwidth(value)
 
@@ -431,17 +352,11 @@ class IconPreviewView(ft.Column):
     # 儲存 zh_tw.json
     # ==================================================
     def _save_current_zh(self, e):
-        """`_save_current_zh`
+        """保存此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`mkdir`, `write_text`, `_show_snack`
+        - 主要包裝：`mkdir`, `write_text`, `_show_snack`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if not self._current_zh_file:
             self._show_snack("❌ 找不到 zh_tw.json")
@@ -528,17 +443,9 @@ class IconPreviewView(ft.Column):
         return entries
 
     def _render_current_page(self):
-        """`_render_current_page`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`get`, `len`, `max`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         entries = self.mods.get(self.current_modid, [])
         total = len(entries)

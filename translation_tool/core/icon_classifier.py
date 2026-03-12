@@ -8,17 +8,9 @@ from .icon_reason import IconRisk
 
 
 def classify_no_icon_reason(lang_key: str) -> tuple[str, IconRisk]:
-    """`classify_no_icon_reason`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`lower`
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     k = lang_key.lower()
 

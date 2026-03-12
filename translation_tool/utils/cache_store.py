@@ -37,32 +37,19 @@ _RUNTIME = CacheRuntimeState()
 
 
 def get_runtime_state() -> CacheRuntimeState:
-    """`get_runtime_state`
+    """取得此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 取得此函式的主要流程（細節以程式碼為準）。
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     return _RUNTIME
 
 
 def reset_runtime_state(cache_types: list[str]) -> CacheRuntimeState:
-    """`reset_runtime_state`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`get_runtime_state`
+    - 主要包裝：`get_runtime_state`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     state = get_runtime_state()
     state.translation_cache = {}
@@ -74,17 +61,11 @@ def reset_runtime_state(cache_types: list[str]) -> CacheRuntimeState:
 
 
 def ensure_runtime_maps(cache_types: list[str]) -> CacheRuntimeState:
-    """`ensure_runtime_maps`
+    """確保此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 確保此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`get_runtime_state`
+    - 主要包裝：`get_runtime_state`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     state = get_runtime_state()
     if not state.session_new_entries:

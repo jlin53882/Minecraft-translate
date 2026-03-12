@@ -21,17 +21,11 @@ class MergeView(ft.Column):
     """ZIP 合併頁面（視覺風格對齊 Translation/Extractor）。"""
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """`__init__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`__init__`, `TaskSession`, `Event`
+        - 主要包裝：`__init__`, `TaskSession`, `Event`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         super().__init__(expand=True, spacing=16)
         self.page = page
@@ -161,17 +155,11 @@ class MergeView(ft.Column):
     # ZIP handling
     # --------------------------------------------------
     def pick_zips(self, e):
-        """`pick_zips`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`pick_files`
+        - 主要包裝：`pick_files`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.file_picker.on_result = self._on_zip_picked
         self.file_picker.pick_files(
@@ -181,17 +169,11 @@ class MergeView(ft.Column):
         )
 
     def _on_zip_picked(self, e: ft.FilePickerResultEvent):
-        """`_on_zip_picked`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_refresh_zip_list`, `update`
+        - 主要包裝：`_refresh_zip_list`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if not e.files:
             return
@@ -202,17 +184,11 @@ class MergeView(ft.Column):
         self.page.update()
 
     def _refresh_zip_list(self):
-        """`_refresh_zip_list`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`clear`
+        - 主要包裝：`clear`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.zip_list_view.controls.clear()
         for path in self.selected_zips:
@@ -232,16 +208,9 @@ class MergeView(ft.Column):
             )
 
     def _remove_zip(self, path: str):
-        """`_remove_zip`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if path in self.selected_zips:
             self.selected_zips.remove(path)
@@ -252,32 +221,19 @@ class MergeView(ft.Column):
     # Output dir
     # --------------------------------------------------
     def pick_output_dir(self):
-        """`pick_output_dir`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`get_directory_path`
+        - 主要包裝：`get_directory_path`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.file_picker.on_result = self._on_output_picked
         self.file_picker.get_directory_path(dialog_title="選擇輸出資料夾")
 
     def _on_output_picked(self, e: ft.FilePickerResultEvent):
-        """`_on_output_picked`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if e.path:
             self.output_dir_field.value = e.path
@@ -287,17 +243,11 @@ class MergeView(ft.Column):
     # Task runner
     # --------------------------------------------------
     def start_merge(self, e):
-        """`start_merge`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`clear`, `_set_status`, `start`
+        - 主要包裝：`clear`, `_set_status`, `start`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if not self.selected_zips or not (self.output_dir_field.value or "").strip():
             self._show_snack_bar("請先選擇 ZIP 與輸出資料夾")
@@ -327,32 +277,19 @@ class MergeView(ft.Column):
     # UI poller
     # --------------------------------------------------
     def _start_ui_poller(self):
-        """`_start_ui_poller`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`clear`, `start`
+        - 主要包裝：`clear`, `start`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self._ui_stop.clear()
         self._last_log_count = 0
 
         def poll():
-            """`poll`
+            """處理此函式的工作（細節以程式碼為準）。
             
-            用途：
-            - 處理此函式的主要流程（細節以程式碼為準）。
-            
-            參數：
-            - 依函式簽名。
-            
-            回傳：
-            - None
+            回傳：None
             """
             while not self._ui_stop.is_set():
                 snap = self.session.snapshot()
@@ -390,33 +327,21 @@ class MergeView(ft.Column):
     # UI helpers
     # --------------------------------------------------
     def _set_status(self, text: str, color: str):
-        """`_set_status`
+        """設定此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`Text`
+        - 主要包裝：`Text`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
-        """`_show_snack_bar`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`SnackBar`, `append`, `update`
+        - 主要包裝：`SnackBar`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)

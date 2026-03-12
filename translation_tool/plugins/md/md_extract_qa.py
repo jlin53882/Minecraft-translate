@@ -49,17 +49,11 @@ RE_CJK = re.compile(r"[\u4e00-\u9fff]")
 
 
 def contains_cjk(s: str) -> bool:
-    """`contains_cjk`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`bool`
+    - 主要包裝：`bool`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     return bool(RE_CJK.search(s))
 
@@ -95,17 +89,11 @@ def normalize_for_dedupe(s: str) -> str:
 
 
 def make_content_hash(text: str) -> str:
-    """`make_content_hash`
+    """建立此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 建立此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`normalize_for_dedupe`, `hexdigest`
+    - 主要包裝：`normalize_for_dedupe`, `hexdigest`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     n = normalize_for_dedupe(text)
     return hashlib.sha1(n.encode("utf-8")).hexdigest()
@@ -144,16 +132,9 @@ def is_splitter_line_old(line: str) -> bool:
 
 def is_splitter_line(line: str) -> bool:
     # 原有的強分隔符
-    """`is_splitter_line`
+    """判斷此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 判斷此函式的主要流程（細節以程式碼為準）。
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     if RE_TOKEN_LINE.match(line):
         return True
@@ -309,16 +290,9 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockIte
 
 
 def build_pending_json(rel_md: str, abs_md: Path, items: List[BlockItem], lang_mode: str) -> dict:
-    """`build_pending_json`
+    """建立此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 建立此函式的主要流程（細節以程式碼為準）。
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     return {
         "schema": "md_pending_blocks_v1",
@@ -341,17 +315,11 @@ RE_LANG_SEG = re.compile(r"^_?(en_us|zh_cn|zh_tw)$", re.IGNORECASE)
 
 def has_allowed_lang_segment(path: Path) -> bool:
     # 用 parts 掃描每個 segment，支援 structure/en_us 這種深層結構
-    """`has_allowed_lang_segment`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`any`
+    - 主要包裝：`any`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     return any(RE_LANG_SEG.match(seg) for seg in path.parts)
 
@@ -415,33 +383,21 @@ def iter_md_files(root: Path):
 
 
 def safe_relpath(path: Path, root: Path) -> str:
-    """`safe_relpath`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`as_posix`
+    - 主要包裝：`as_posix`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     return path.relative_to(root).as_posix()
 
 
 def main():
-    """`main`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`print`, `strip`
+    - 主要包裝：`strip`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - None
+    回傳：None
     """
     print("=== Markdown .md 抽取（段落/區塊）問答式 ===")
 

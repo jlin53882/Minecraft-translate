@@ -52,17 +52,11 @@ def bootstrap_runtime():
 def main(page: ft.Page):
     # 這個函式只負責組裝 Flet UI 與頁面切換邏輯；
     # runtime 初始化、logging 設定等啟動責任都留在 bootstrap_runtime()。
-    """`main`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`Theme`, `FilePicker`, `append`
+    - 主要包裝：`Theme`, `FilePicker`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - None
+    回傳：None
     """
     page.title = "Minecraft 模組包繁體化工具"
     page.window_width = 1200
@@ -115,17 +109,9 @@ def main(page: ft.Page):
     }
 
     def resize_window_for_view(selected_index: int):
-        """`resize_window_for_view`
+        """調整此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 調整此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`get`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         width, height = view_window_sizes.get(selected_index, (1280, 960))
         try:
@@ -139,17 +125,11 @@ def main(page: ft.Page):
     content_area = ft.Container(content=nav_destinations[0][2], expand=True)
 
     def change_view(e):
-        """`change_view`
+        """切換此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 切換此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`resize_window_for_view`, `update`
+        - 主要包裝：`resize_window_for_view`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         selected_index = e.control.selected_index
         _, _, target_view = nav_destinations[selected_index]
@@ -158,17 +138,9 @@ def main(page: ft.Page):
         page.update()
 
     def toggle_theme_mode(e):
-        """`toggle_theme_mode`
+        """切換此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 切換此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`update`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         is_light = page.theme_mode == ft.ThemeMode.LIGHT
         page.theme_mode = ft.ThemeMode.DARK if is_light else ft.ThemeMode.LIGHT
@@ -225,17 +197,11 @@ def main(page: ft.Page):
 
     def _rebuild_index_on_startup():
         # 索引重建放背景執行，避免主畫面啟動時被 I/O 卡住。
-        """`_rebuild_index_on_startup`
+        """重建此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`cache_rebuild_index_service`
+        - 主要包裝：`cache_rebuild_index_service`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         try:
             cache_rebuild_index_service()

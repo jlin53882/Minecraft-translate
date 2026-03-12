@@ -134,17 +134,11 @@ def map_lang_in_rel_path_allow_zh(rel_path: str,
 RE_MOSTLY_TOKEN_LINE = re.compile(r"^\s*(§[0-9a-zA-Z]+\S*)\s*(§[0-9a-zA-Z]+\S*)*\s*$")
 
 def is_token_line(line: str) -> bool:
-    """`is_token_line`
+    """判斷此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 判斷此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`strip`
+    - 主要包裝：`strip`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     s = line.strip()
     if not s:
@@ -203,16 +197,9 @@ def flatten_for_md(text: str) -> str:
     buf: List[str] = []
 
     def flush_buf():
-        """`flush_buf`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         nonlocal buf
         if buf:
@@ -373,17 +360,9 @@ def apply_item_to_md_lines(md_lines: List[str], item: Item) -> None:
 
 
 def iter_json_files(root: Path):
-    """`iter_json_files`
+    """處理此 generator 並逐步回報進度（yield update dict）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`rglob`
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - Generator：逐步 yield update dict（log/progress/error 等）。
+    - 主要包裝：`rglob`
     """
     for p in root.rglob("*.json"):
         if p.is_file():
@@ -391,17 +370,11 @@ def iter_json_files(root: Path):
 
 
 def main():
-    """`main`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`print`, `strip`
+    - 主要包裝：`strip`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - None
+    回傳：None
     """
     print("=== md 寫回（方案 A：保留原檔骨架，只替換文字行）===")
 

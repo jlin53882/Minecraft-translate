@@ -22,17 +22,11 @@ class BundlerView(ft.Column):
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """`__init__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`__init__`, `TextField`
+        - 主要包裝：`__init__`, `TextField`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
         self.page = page
@@ -76,17 +70,11 @@ class BundlerView(ft.Column):
     # --- 輔助函式 ---
     def _create_pick_button(self, target_textfield: ft.TextField, pick_type: str):
         # (函式內容... 保持不變)
-        """`_create_pick_button`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`IconButton`
+        - 主要包裝：`IconButton`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         if pick_type == 'dir':
             icon = ft.Icons.FOLDER_OPEN
@@ -102,17 +90,11 @@ class BundlerView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
         # (函式內容... 保持不變)
-        """`_show_snack_bar`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`SnackBar`, `append`, `update`
+        - 主要包裝：`SnackBar`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
@@ -156,17 +138,9 @@ class BundlerView(ft.Column):
 
     def set_controls_disabled(self, disabled: bool):
         # (函式內容... 保持不變)
-        """`set_controls_disabled`
+        """設定此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 設定此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`update`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         for ctrl in [self.root_dir_textfield, self.output_zip_textfield, self.start_button]:
             ctrl.disabled = disabled
@@ -174,17 +148,11 @@ class BundlerView(ft.Column):
 
     def start_bundling_clicked(self, e):
         # (函式內容... 保持不變)
-        """`start_bundling_clicked`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`set_controls_disabled`, `clear`, `append`
+        - 主要包裝：`set_controls_disabled`, `clear`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         root_dir = self.root_dir_textfield.value
         output_zip = self.output_zip_textfield.value
@@ -206,17 +174,11 @@ class BundlerView(ft.Column):
 
     def bundling_worker(self, root_dir, output_zip):
         # (函式內容... 保持不變)
-        """`bundling_worker`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`run_bundling_service`
+        - 主要包裝：`run_bundling_service`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         try:
             for update in run_bundling_service(root_dir, output_zip):

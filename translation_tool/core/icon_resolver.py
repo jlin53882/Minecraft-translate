@@ -60,17 +60,11 @@ def resolve_icon_for_lang_key(lang_key: str, assets_root: Path) -> Path | None:
 
 
 def resolve_icon_with_reason(lang_key: str, assets_root):
-    """`resolve_icon_with_reason`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`resolve_icon_for_lang_key`, `classify_no_icon_reason`, `IconResult`
+    - 主要包裝：`resolve_icon_for_lang_key`, `classify_no_icon_reason`, `IconResult`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     icon = resolve_icon_for_lang_key(lang_key, assets_root)
 

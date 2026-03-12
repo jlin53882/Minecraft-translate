@@ -15,17 +15,11 @@ from translation_tool.core.icon_reason import IconRisk
 
 
 def to_halfwidth(text):
-    """`to_halfwidth`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`normalize`
+    - 主要包裝：`normalize`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     if not isinstance(text, str):
         return text
@@ -48,17 +42,11 @@ class LangItemRow(ft.Container):
         preview_root: Path,
         on_value_changed: Callable[[str, str], None],
     ):
-        """`__init__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`__init__`, `resolve_icon_with_reason`, `Column`
+        - 主要包裝：`__init__`, `resolve_icon_with_reason`, `Column`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         super().__init__(
             padding=ft.padding.symmetric(vertical=10, horizontal=8),

@@ -22,17 +22,11 @@ class LookupView(ft.Column):
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
     def __init__(self, page: ft.Page):
-        """`__init__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`__init__`, `TextField`, `ElevatedButton`
+        - 主要包裝：`__init__`, `TextField`, `ElevatedButton`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
         self.page = page
@@ -74,17 +68,11 @@ class LookupView(ft.Column):
 
     # --- 單筆查詢邏輯 ---
     def single_lookup_clicked(self, e):
-        """`single_lookup_clicked`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`update`, `Thread`, `start`
+        - 主要包裝：`Thread`, `start`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         search_term = self.single_input.value
         if not search_term:
@@ -107,17 +95,11 @@ class LookupView(ft.Column):
     
     def single_lookup_worker(self, name: str):
         # 3. 呼叫後端服務
-        """`single_lookup_worker`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`run_manual_lookup_service`, `update`
+        - 主要包裝：`run_manual_lookup_service`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         result = run_manual_lookup_service(name)
         
@@ -133,17 +115,11 @@ class LookupView(ft.Column):
 
     # --- 批次查詢邏輯 ---
     def batch_lookup_clicked(self, e):
-        """`batch_lookup_clicked`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`update`, `Thread`, `start`
+        - 主要包裝：`Thread`, `start`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         json_text = self.batch_input.value
         if not json_text:
@@ -161,17 +137,11 @@ class LookupView(ft.Column):
         thread.start()
 
     def batch_lookup_worker(self, json_text):
-        """`batch_lookup_worker`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`run_batch_lookup_service`
+        - 主要包裝：`run_batch_lookup_service`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         try:
             for update in run_batch_lookup_service(json_text):

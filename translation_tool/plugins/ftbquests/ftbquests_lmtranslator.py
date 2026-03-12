@@ -187,16 +187,9 @@ def translate_ftb_pending_to_zh_tw(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def set_prog(v: float):
-        """`set_prog`
+        """設定此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 設定此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if session is not None and hasattr(session, "set_progress"):
             try:
@@ -224,17 +217,11 @@ def translate_ftb_pending_to_zh_tw(
     global_total_keys = 0
 
     def _count_one(src: Path) -> Tuple[Path, int]:
-        """`_count_one`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`read_json_dict`
+        - 主要包裝：`read_json_dict`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         try:
             mapping = read_json_dict(src)
@@ -333,17 +320,11 @@ def translate_ftb_pending_to_zh_tw(
     _file_write_table: dict[str, tuple[Path, Dict[str, str]]] = {}
 
     def _writer(file_id: str) -> None:
-        """`_writer`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`write_json_dict`
+        - 主要包裝：`write_json_dict`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         dst_path, data = _file_write_table[file_id]
         write_json_dict(dst_path, data)
@@ -491,17 +472,9 @@ def translate_ftb_pending_to_zh_tw(
 
         # shared while-loop（includes add_to_cache + save_translation_cache + safe slicing）
         def on_translated_item(it: Dict[str, Any]) -> None:
-            """`on_translated_item`
+            """處理此函式的工作（細節以程式碼為準）。
             
-            用途：
-            - 處理此函式的主要流程（細節以程式碼為準）。
-            - 主要包裝/呼叫：`get`
-            
-            參數：
-            - 依函式簽名。
-            
-            回傳：
-            - None
+            回傳：None
             """
             p = it.get("path")
             t = it.get("text")
@@ -527,17 +500,11 @@ def translate_ftb_pending_to_zh_tw(
 
         # 在這之前先確保 file_id/_file_write_table 設定好了（下面會說加在哪）
         def on_batch_flushed() -> None:
-            """`on_batch_flushed`
+            """處理此函式的工作（細節以程式碼為準）。
             
-            用途：
-            - 處理此函式的主要流程（細節以程式碼為準）。
-            - 主要包裝/呼叫：`touch`
+            - 主要包裝：`touch`
             
-            參數：
-            - 依函式簽名。
-            
-            回傳：
-            - None
+            回傳：None
             """
             try:
                 touch.touch(file_id)
@@ -548,17 +515,11 @@ def translate_ftb_pending_to_zh_tw(
 
 
         def _fmt_eta(sec: float) -> str:
-            """`_fmt_eta`
+            """處理此函式的工作（細節以程式碼為準）。
             
-            用途：
-            - 處理此函式的主要流程（細節以程式碼為準）。
-            - 主要包裝/呼叫：`divmod`
+            - 主要包裝：`divmod`
             
-            參數：
-            - 依函式簽名。
-            
-            回傳：
-            - 依實作回傳值（請見函式內 return path）。
+            回傳：依函式內 return path。
             """
             if sec <= 0:
                 return ""
@@ -569,17 +530,11 @@ def translate_ftb_pending_to_zh_tw(
 
 
         def on_progress(p: float, msg: str, eta_sec: float) -> None:
-            """`on_progress`
+            """處理此函式的工作（細節以程式碼為準）。
             
-            用途：
-            - 處理此函式的主要流程（細節以程式碼為準）。
-            - 主要包裝/呼叫：`_fmt_eta`, `set_prog`
+            - 主要包裝：`_fmt_eta`, `set_prog`
             
-            參數：
-            - 依函式簽名。
-            
-            回傳：
-            - None
+            回傳：None
             """
             eta_txt = _fmt_eta(eta_sec)
             if eta_txt:

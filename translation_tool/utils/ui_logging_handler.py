@@ -14,17 +14,11 @@ class UISessionLogHandler(logging.Handler):
     """
 
     def __init__(self):
-        """`__init__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`__init__`
+        - 主要包裝：`__init__`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         super().__init__()
         self._session = None
@@ -36,17 +30,11 @@ class UISessionLogHandler(logging.Handler):
         self._session = session
 
     def emit(self, record: logging.LogRecord):
-        """`emit`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`format`
+        - 主要包裝：`format`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if not self._session:
             return

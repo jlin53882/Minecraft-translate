@@ -38,17 +38,11 @@ _REGEX_RULES = None     # List[Tuple[re.Pattern, str]]
 _RULE_KEYWORDS = None   # set[str]
 
 def _init_replace_rules_cache(rules: List[Dict[str, str]]):
-    """`_init_replace_rules_cache`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`set`, `sort`
+    - 主要包裝：`set`, `sort`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - None
+    回傳：None
     """
     global _LITERAL_RULES, _REGEX_RULES, _RULE_KEYWORDS
 
@@ -216,17 +210,11 @@ def load_custom_translations(folder_path: str, filename="table.tsv") -> Dict[str
     return custom_map
 
 def safe_convert_text(text: str) -> str:
-    """`safe_convert_text`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`get_converter`, `sub`
+    - 主要包裝：`get_converter`, `sub`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     if not text:
         return text

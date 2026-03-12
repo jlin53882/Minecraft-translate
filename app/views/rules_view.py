@@ -20,17 +20,11 @@ class RulesView(ft.Column):
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
     def __init__(self, page: ft.Page):
-        """`__init__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`__init__`, `_init_controls`, `start`
+        - 主要包裝：`__init__`, `_init_controls`, `start`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         super().__init__(expand=True, spacing=15)
         self.page = page
@@ -75,16 +69,9 @@ class RulesView(ft.Column):
 
     def _sync_page_jump_field(self):
         # 確保欄位顯示跟 current_page 一致
-        """`_sync_page_jump_field`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if hasattr(self, "page_jump_field"):
             self.page_jump_field.value = str(self.current_page)
@@ -93,17 +80,11 @@ class RulesView(ft.Column):
                 self.page_jump_field.update()
     
     def on_page_jump_submit(self, e):
-        """`on_page_jump_submit`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`strip`, `int`, `_render_current_page`
+        - 主要包裝：`strip`, `_render_current_page`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         raw = (e.control.value or "").strip()
         if not raw:
@@ -316,17 +297,11 @@ class RulesView(ft.Column):
 
     # --- 邏輯功能 ---
     def on_sort_change(self, e):
-        """`on_sort_change`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_current_page`
+        - 主要包裝：`_render_current_page`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         mode = e.control.value
         if mode == "from_asc":
@@ -342,17 +317,11 @@ class RulesView(ft.Column):
 
 
     def on_search(self, e: ft.ControlEvent):
-        """`on_search`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`lower`, `_render_current_page`
+        - 主要包裝：`_render_current_page`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         keyword = e.control.value.strip().lower()
 
@@ -415,17 +384,9 @@ class RulesView(ft.Column):
         return True, ""
     
     def translate_regex_error(self, err: re.error) -> str:
-        """`translate_regex_error`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`str`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         msg = str(err)
         if "missing )" in msg or "unterminated subpattern" in msg:
@@ -443,32 +404,19 @@ class RulesView(ft.Column):
     # --- 執行緒輔助與載入 ---
     
     def _run_on_ui_thread(self, func, *args, **kwargs):
-        """`_run_on_ui_thread`
+        """執行此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if self.page and self.page.loop:
             self.page.loop.call_soon_threadsafe(func, *args, **kwargs)
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
-        """`_show_snack_bar`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`SnackBar`, `append`, `update`
+        - 主要包裝：`SnackBar`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if not self.page: return   
         snack = ft.SnackBar(
@@ -481,32 +429,20 @@ class RulesView(ft.Column):
         self.page.update()
 
     def _load_rules_core(self):
-        """`_load_rules_core`
+        """載入此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`load_replace_rules`
+        - 主要包裝：`load_replace_rules`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         return load_replace_rules()
 
     def _initial_load(self):
-        """`_initial_load`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_load_rules_core`
+        - 主要包裝：`_load_rules_core`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         try:
             rules_data = self._load_rules_core()
@@ -517,17 +453,11 @@ class RulesView(ft.Column):
     # --- 分頁渲染邏輯 ---
 
     def _render_current_page(self):
-        """`_render_current_page`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`clear`, `enumerate`, `extend`
+        - 主要包裝：`clear`, `enumerate`, `extend`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         start = (self.current_page - 1) * self.page_size
         end = start + self.page_size
@@ -574,17 +504,11 @@ class RulesView(ft.Column):
     # --- 互動事件處理 ---
     
     def on_text_change(self, e):
-        """`on_text_change`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_find_index_by_rid`
+        - 主要包裝：`_find_index_by_rid`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         rid = e.control.data['rid']
         field = e.control.data['field']
@@ -627,17 +551,11 @@ class RulesView(ft.Column):
         to_field.update()
 
     def create_rule_row(self, from_text, to_text, rid: int, display_no: int):
-        """`create_rule_row`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`TextField`, `IconButton`
+        - 主要包裝：`TextField`, `IconButton`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         from_field = ft.TextField(
             value=from_text, 
@@ -681,17 +599,11 @@ class RulesView(ft.Column):
     # --- 操作邏輯 ---
 
     def reload_rules_clicked(self, e):
-        """`reload_rules_clicked`
+        """重新載入此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 重新載入此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`update`, `_show_snack_bar`, `start`
+        - 主要包裝：`_show_snack_bar`, `start`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.loading_indicator.visible = True
         self.page.update()
@@ -699,17 +611,11 @@ class RulesView(ft.Column):
         threading.Thread(target=self._perform_reload, daemon=True).start()
 
     def _perform_reload(self):
-        """`_perform_reload`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_load_rules_core`
+        - 主要包裝：`_load_rules_core`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         try:
             rules_data = self._load_rules_core()
@@ -718,17 +624,11 @@ class RulesView(ft.Column):
             self._run_on_ui_thread(lambda: self._handle_reload_failure(err))
 
     def _handle_reload_success(self, rules_data):
-        """`_handle_reload_success`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_current_page`, `_show_snack_bar`, `update`
+        - 主要包裝：`_render_current_page`, `_show_snack_bar`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.all_rules_data = rules_data
         # ✅ 給每條 rule 補上穩定 rid
@@ -743,33 +643,20 @@ class RulesView(ft.Column):
         self.page.update()
 
     def _handle_reload_failure(self, err):
-        """`_handle_reload_failure`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`update`, `_show_snack_bar`
+        - 主要包裝：`_show_snack_bar`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.loading_indicator.visible = False
         self.page.update()
         self._show_snack_bar(f"載入規則時發生錯誤: {err}", ft.Colors.RED_600)
 
     def prev_page(self, e):
-        """`prev_page`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if self.current_page > 1:
             self.current_page -= 1
@@ -778,16 +665,9 @@ class RulesView(ft.Column):
             self._show_snack_bar("已在第一頁", ft.Colors.BLUE_GREY_700)
 
     def next_page(self, e):
-        """`next_page`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if self.current_page < self.total_pages:
             self.current_page += 1
@@ -797,17 +677,11 @@ class RulesView(ft.Column):
             
     def save_rules_clicked(self, e):
         # 先驗證
-        """`save_rules_clicked`
+        """保存此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 保存此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`enumerate`, `_show_snack_bar`, `start`
+        - 主要包裝：`enumerate`, `_show_snack_bar`, `start`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         for idx, rule in enumerate(self.all_rules_data):
             ok, msg = self.validate_rule(rule["from"], rule["to"], self.all_rules_data, idx)
@@ -827,17 +701,11 @@ class RulesView(ft.Column):
         threading.Thread(target=self._perform_save, args=(clean_rules,), daemon=True).start()
             
     def _perform_save(self, new_rules):
-        """`_perform_save`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`save_replace_rules`
+        - 主要包裝：`save_replace_rules`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         try:
             save_replace_rules(new_rules)
@@ -846,17 +714,11 @@ class RulesView(ft.Column):
             self._run_on_ui_thread(lambda: self._show_snack_bar(f"儲存規則時發生錯誤: {err}", ft.Colors.RED_600))
 
     def add_row_clicked(self, e):
-        """`add_row_clicked`
+        """加入此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 加入此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`append`, `len`, `_render_current_page`
+        - 主要包裝：`_render_current_page`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.all_rules_data.append({"from": "", "to": "", "_rid": self._new_rid()})
         self.current_page = self.total_pages # 假設在最後
@@ -869,17 +731,11 @@ class RulesView(ft.Column):
         self._show_snack_bar("➕ 已新增一條規則（已跳至最後一頁）", ft.Colors.BLUE_700)
 
     def delete_row_clicked(self, e):
-        """`delete_row_clicked`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_find_index_by_rid`
+        - 主要包裝：`_find_index_by_rid`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         rid_to_delete = e.control.data
         idx = self._find_index_by_rid(rid_to_delete)

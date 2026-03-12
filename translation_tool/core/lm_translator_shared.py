@@ -48,17 +48,9 @@ class CacheRule:
     key_mode: str = "path|source_text"
 
     def make_key(self, item: Dict[str, Any]) -> str:
-        """`make_key`
+        """建立此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 建立此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`str`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         path = str(item.get("path") or "")
         src = str(item.get("source_text") or "")
@@ -73,16 +65,9 @@ class CacheRule:
 
 def get_default_cache_rules() -> Dict[str, CacheRule]:
     # 每次回傳新 dict，避免外部修改污染全域
-    """`get_default_cache_rules`
+    """取得此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 取得此函式的主要流程（細節以程式碼為準）。
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     return {
         "lang": CacheRule("path"),
@@ -98,16 +83,9 @@ def get_default_cache_rules() -> Dict[str, CacheRule]:
 STRICT_SRC_TYPES = {"lang","kubejs","ftbquests","md"}   # 之後要加很容易，例如 {"lang", "md"}
 def _is_valid_hit(dst: str, entry: dict, item: dict) -> bool:
     # 1️⃣ dst 本身必須是有效翻譯
-    """`_is_valid_hit`
+    """判斷此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     if not value_fully_translated(dst):
         return False
@@ -197,16 +175,9 @@ class TouchSet:
     touched: Set[str] = field(default_factory=set)
 
     def touch(self, file_id: str) -> None:
-        """`touch`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if file_id:
             self.touched.add(str(file_id))
@@ -228,17 +199,11 @@ def write_dry_run_preview(
     filename: str = "_dry_run_preview.json",
     meta: Optional[Dict[str, Any]] = None,
 ) -> Path:
-    """`write_dry_run_preview`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`Path`, `mkdir`, `write_text`
+    - 主要包裝：`Path`, `mkdir`, `write_text`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -259,17 +224,11 @@ def write_cache_hit_preview(
     filename: str = "_dry_run_cache_hit_preview.json",
     meta: Optional[Dict[str, Any]] = None,
 ) -> Path:
-    """`write_cache_hit_preview`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`Path`, `mkdir`, `write_text`
+    - 主要包裝：`Path`, `mkdir`, `write_text`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -319,17 +278,9 @@ class TranslationRecorder:
         cache_hit: bool,
         extra: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """`record`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`append`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.rows.append({
             "cache_type": cache_type,
@@ -342,17 +293,11 @@ class TranslationRecorder:
         })
 
     def export_json(self, out_path: str | Path) -> Path:
-        """`export_json`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`Path`, `mkdir`, `write_text`
+        - 主要包裝：`Path`, `mkdir`, `write_text`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -360,17 +305,11 @@ class TranslationRecorder:
         return out_path
 
     def export_csv(self, out_path: str | Path) -> Path:
-        """`export_csv`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`Path`, `mkdir`, `sorted`
+        - 主要包裝：`Path`, `mkdir`, `sorted`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)

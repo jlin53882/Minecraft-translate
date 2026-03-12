@@ -26,17 +26,11 @@ def run_md_translation_service(
     write_new_cache: bool = True,
     lang_mode: str = "non_cjk_only",
 ):
-    """`run_md_translation_service`
+    """執行此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 執行此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`ensure_pipeline_logging`, `start`
+    - 主要包裝：`ensure_pipeline_logging`, `start`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - None
+    回傳：None
     """
     ensure_pipeline_logging()
     try:

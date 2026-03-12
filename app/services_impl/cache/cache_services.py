@@ -92,17 +92,12 @@ def cache_search_service(
                         continue
 
                 def _rank(text: str) -> int:
-                    """`_rank`
+                    """計算搜尋排序用的 rank（越小代表越符合 query）。
                     
-                    用途：
-                    - 處理此函式的主要流程（細節以程式碼為準）。
-                    - 主要包裝/呼叫：`lower`
-                    
-                    參數：
-                    - 依函式簽名。
-                    
-                    回傳：
-                    - 依實作回傳值（請見函式內 return path）。
+                    規則（case-insensitive）：
+                    - 0：text 完全等於 query
+                    - 1：text 以 query 開頭（prefix match）
+                    - 2：其他（fallback）
                     """
                     t = (text or "").lower()
                     if t == q.lower():
@@ -142,17 +137,12 @@ def cache_search_service(
     truncated = False
 
     def _rank(text: str) -> int:
-        """`_rank`
+        """計算搜尋排序用的 rank（越小代表越符合 query）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`lower`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        規則（case-insensitive）：
+        - 0：text 完全等於 query
+        - 1：text 以 query 開頭（prefix match）
+        - 2：其他（fallback）
         """
         t = (text or "").lower()
         if t == q_lower:

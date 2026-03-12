@@ -79,17 +79,11 @@ def _count_md_pending_docs(root: Path) -> int:
 
 
 def _log_md_step2_stats(step2_res: Dict[str, Any]) -> None:
-    """`_log_md_step2_stats`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`bool`, `get`
+    - 主要包裝：`bool`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - None
+    回傳：None
     """
     if not isinstance(step2_res, dict):
         return
@@ -155,33 +149,18 @@ class _ProgressProxy:
     """把 step 內部 0~1 進度轉成整體 pipeline 的區段進度。"""
 
     def __init__(self, parent: Any, base: float, span: float):
-        """`__init__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`float`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.parent = parent
         self.base = float(base)
         self.span = float(span)
 
     def set_progress(self, p: float):
-        """`set_progress`
+        """設定此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 設定此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if not self.parent or not hasattr(self.parent, "set_progress"):
             return
@@ -203,17 +182,11 @@ def step1_extract(
     progress_span: float = 0.33,
 ) -> Dict[str, Any]:
     # Step1：抽取 md 區塊並輸出待翻譯 JSON
-    """`step1_extract`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`resolve`, `mkdir`
+    - 主要包裝：`resolve`, `mkdir`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     in_root = Path(input_dir).resolve()
     pending_root = Path(pending_dir).resolve()
@@ -367,17 +340,11 @@ def step2_translate(
     write_new_cache: bool = True,
 ) -> Dict[str, Any]:
     # Step2：待翻譯 JSON -> LM 翻譯後 JSON
-    """`step2_translate`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`_ProgressProxy`, `translate_md_pending`, `progress`
+    - 主要包裝：`_ProgressProxy`, `translate_md_pending`, `progress`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     proxy = _ProgressProxy(session, progress_base, progress_span)
     result = translate_md_pending(
@@ -401,17 +368,11 @@ def step3_inject(
     progress_span: float = 0.33,
 ) -> Dict[str, Any]:
     # Step3：把翻譯後 JSON 回寫到 md 檔案
-    """`step3_inject`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`resolve`
+    - 主要包裝：`resolve`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     src_root = Path(input_dir).resolve()
     jroot = Path(json_dir).resolve()

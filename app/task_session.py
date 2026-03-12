@@ -27,17 +27,11 @@ class TaskSession:
     而是把跨執行緒共享的狀態收斂到單一地方，降低 race condition 與散落旗標的維護成本。
     """
     def __init__(self, max_logs: int = 300):
-        """`__init__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`deque`, `Lock`
+        - 主要包裝：`deque`, `Lock`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.progress: float = 0.0
         self.status: str = "IDLE"   # IDLE / RUNNING / DONE / ERROR
@@ -58,16 +52,9 @@ class TaskSession:
             self.progress = max(0.0, min(1.0, value))
 
     def add_log(self, text: str):
-        """`add_log`
+        """加入此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 加入此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if not text:
             return
@@ -75,48 +62,27 @@ class TaskSession:
             self.logs.append(text)
 
     def set_error(self):
-        """`set_error`
+        """設定此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 設定此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         with self._lock:
             self.error = True
             self.status = "ERROR"
 
     def finish(self):
-        """`finish`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         with self._lock:
             self.progress = 1.0
             self.status = "DONE"
 
     def start(self):
-        """`start`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         with self._lock:
             self.progress = 0.0

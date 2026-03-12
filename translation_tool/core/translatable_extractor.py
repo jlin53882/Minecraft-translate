@@ -13,17 +13,9 @@ from translation_tool.utils.config_manager import load_config
 
 
 def find_patchouli_json(root: Path, dir_names=None):
-    """`find_patchouli_json`
+    """找出此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 找出此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`get`
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     patchouli_dir_names = load_config().get("lm_translator", {}).get("patchouli", {}).get("dir_names", [])
     if dir_names is None:
@@ -38,63 +30,37 @@ def find_patchouli_json(root: Path, dir_names=None):
 
 
 def find_lang_json(root: Path):
-    """`find_lang_json`
+    """找出此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 找出此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`list`
+    - 主要包裝：`list`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     return list(root.rglob("assets/*/lang/*.json"))
 
 
 def is_lang_file(file_path: Path) -> bool:
-    """`is_lang_file`
+    """判斷此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 判斷此函式的主要流程（細節以程式碼為準）。
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     return "lang" in file_path.parts
 
 
 def extract_translatables(json_data, file_path):
-    """`extract_translatables`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`is_lang_file`, `walk`
+    - 主要包裝：`is_lang_file`, `walk`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     items = []
     is_lang = is_lang_file(Path(file_path))
 
     def walk(obj, base_path=""):
-        """`walk`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if isinstance(obj, dict):
             for k, v in obj.items():

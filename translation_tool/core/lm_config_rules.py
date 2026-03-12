@@ -115,16 +115,9 @@ def validate_api_keys():
     logger.info(f"✅ 金鑰格式驗證通過，共載入 {len(keys)} 組金鑰。")
 
 def validate_api_keys_from_ui(keys: list[str]): #ui 專用
-    """`validate_api_keys_from_ui`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - None
+    回傳：None
     """
     for k in keys:
         if not k or not k.startswith("AIza"):
@@ -171,16 +164,9 @@ TOKEN_PATTERN = re.compile(r"\$\([^)]+\)")
 HASH_PREFIX_PATTERN = re.compile(r"^\s*#")  # 任何 # 開頭（含前置空白）
 
 def needs_translation_text(s: str) -> bool:
-    """`needs_translation_text`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     if not s or not isinstance(s, str):
         return False
@@ -344,17 +330,11 @@ def build_skip_terms_pattern(terms: list[str]) -> re.Pattern:
 # =========================
 # 值是否值得翻譯（核心判斷）
 def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
-    """`is_value_translatable`
+    """判斷此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 判斷此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`strip`, `get`, `build_skip_terms_pattern`
+    - 主要包裝：`strip`, `build_skip_terms_pattern`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     if not isinstance(value, str):
         return False

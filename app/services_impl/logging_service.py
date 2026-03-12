@@ -42,17 +42,11 @@ class LogLimiter:
     """
 
     def __init__(self, max_logs: int = 3000, flush_interval: float = 0.1):
-        """`__init__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`deque`
+        - 主要包裝：`deque`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.max_logs = max_logs
         self.flush_interval = flush_interval

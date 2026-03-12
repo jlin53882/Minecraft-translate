@@ -55,16 +55,9 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
 # ---------------- 工具 ----------------
 
 def split_js_args(s):
-    """`split_js_args`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     args = []
     buf = ""
@@ -102,17 +95,11 @@ def split_js_args(s):
 
 
 def strip_quotes(s):
-    """`strip_quotes`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`strip`
+    - 主要包裝：`strip`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     s = s.strip()
     if (s.startswith("'") and s.endswith("'")) or (s.startswith('"') and s.endswith('"')):
@@ -121,17 +108,11 @@ def strip_quotes(s):
 
 
 def replace_text_in_text_obj(expr, new_text):
-    """`replace_text_in_text_obj`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`sub`
+    - 主要包裝：`sub`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     return re.sub(
         r'(Text\.\w+\(\s*[\'"])(.+?)([\'"]\s*\))',
@@ -142,33 +123,21 @@ def replace_text_in_text_obj(expr, new_text):
 
 
 def extract_array_strings(expr):
-    """`extract_array_strings`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`findall`
+    - 主要包裝：`findall`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     return re.findall(r"[\"']([^\"']+)[\"']", expr)
 
 
 def replace_array(expr, new_values):
-    """`replace_array`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`split_js_args`, `enumerate`
+    - 主要包裝：`split_js_args`, `enumerate`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     parts = split_js_args(expr[1:-1])
     out = []
@@ -184,16 +153,9 @@ def replace_array(expr, new_values):
 
 
 def to_js_name(json_name):
-    """`to_js_name`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     if json_name.endswith(".json"):
         return json_name[:-5] + ".js"
@@ -312,17 +274,11 @@ def inject(
         # 1) Patch event.add(...)
         # ----------------------------
         def repl_event_add(m: re.Match) -> str:
-            """`repl_event_add`
+            """處理此函式的工作（細節以程式碼為準）。
             
-            用途：
-            - 處理此函式的主要流程（細節以程式碼為準）。
-            - 主要包裝/呼叫：`group`, `split_js_args`, `list`
+            - 主要包裝：`group`, `split_js_args`, `list`
             
-            參數：
-            - 依函式簽名。
-            
-            回傳：
-            - 依實作回傳值（請見函式內 return path）。
+            回傳：依函式內 return path。
             """
             nonlocal auto_id
             arg_str = m.group(1)
@@ -353,17 +309,11 @@ def inject(
                         idx = 0
 
                         def repl_text(mm: re.Match) -> str:
-                            """`repl_text`
+                            """處理此函式的工作（細節以程式碼為準）。
                             
-                            用途：
-                            - 處理此函式的主要流程（細節以程式碼為準）。
-                            - 主要包裝/呼叫：`group`
+                            - 主要包裝：`group`
                             
-                            參數：
-                            - 依函式簽名。
-                            
-                            回傳：
-                            - 依實作回傳值（請見函式內 return path）。
+                            回傳：依函式內 return path。
                             """
                             nonlocal idx
                             key = f"{original_js}|{item_id}.{n}.{idx}"
@@ -395,17 +345,11 @@ def inject(
         #    key: file|scene.{auto_id}  (✅ 接續 event.add 用掉的 auto_id)
         # ----------------------------
         def repl_scene_text(m: re.Match) -> str:
-            """`repl_scene_text`
+            """處理此函式的工作（細節以程式碼為準）。
             
-            用途：
-            - 處理此函式的主要流程（細節以程式碼為準）。
-            - 主要包裝/呼叫：`group`, `split_js_args`, `strip`
+            - 主要包裝：`group`, `split_js_args`, `strip`
             
-            參數：
-            - 依函式簽名。
-            
-            回傳：
-            - 依實作回傳值（請見函式內 return path）。
+            回傳：依函式內 return path。
             """
             nonlocal auto_id
             arg_str = m.group(1)
@@ -454,16 +398,9 @@ def inject(
         # ----------------------------
         def extract_call_args_with_end(text: str, start: int) -> tuple[str | None, int | None]:
             # start 指向 '(' 後面的位置
-            """`extract_call_args_with_end`
+            """處理此函式的工作（細節以程式碼為準）。
             
-            用途：
-            - 處理此函式的主要流程（細節以程式碼為準）。
-            
-            參數：
-            - 依函式簽名。
-            
-            回傳：
-            - 依實作回傳值（請見函式內 return path）。
+            回傳：依函式內 return path。
             """
             depth = 1
             i = start
@@ -481,17 +418,11 @@ def inject(
             return None, None
 
         def patch_itemevents_tooltips(full: str) -> str:
-            """`patch_itemevents_tooltips`
+            """處理此函式的工作（細節以程式碼為準）。
             
-            用途：
-            - 處理此函式的主要流程（細節以程式碼為準）。
-            - 主要包裝/呼叫：`finditer`, `append`, `join`
+            - 主要包裝：`finditer`, `join`
             
-            參數：
-            - 依函式簽名。
-            
-            回傳：
-            - 依實作回傳值（請見函式內 return path）。
+            回傳：依函式內 return path。
             """
             out = []
             last = 0
@@ -521,17 +452,11 @@ def inject(
                 idx = 0
 
                 def repl_text_call(mm: re.Match) -> str:
-                    """`repl_text_call`
+                    """處理此函式的工作（細節以程式碼為準）。
                     
-                    用途：
-                    - 處理此函式的主要流程（細節以程式碼為準）。
-                    - 主要包裝/呼叫：`group`
+                    - 主要包裝：`group`
                     
-                    參數：
-                    - 依函式簽名。
-                    
-                    回傳：
-                    - 依實作回傳值（請見函式內 return path）。
+                    回傳：依函式內 return path。
                     """
                     nonlocal idx
                     key = f"{original_js}|{item_id}.tooltip.{idx}"

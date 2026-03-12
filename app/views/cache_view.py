@@ -56,17 +56,11 @@ class CacheView(ft.Column):
     """
 
     def __init__(self, page: ft.Page):
-        """`__init__`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`__init__`, `Text`
+        - 主要包裝：`__init__`, `Text`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         super().__init__(expand=True, spacing=10)
         self.page = page
@@ -861,17 +855,11 @@ class CacheView(ft.Column):
     # Lifecycle
     # =========================================================
     def did_mount(self):
-        """`did_mount`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_load_overview`
+        - 主要包裝：`_load_overview`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         try:
             self._load_overview()
@@ -897,17 +885,11 @@ class CacheView(ft.Column):
     # Shared helpers
     # =========================================================
     def _dynamic_shard_list_height(self) -> int:
-        """`_dynamic_shard_list_height`
+        """計算 shard list height 高度（跟視窗 height 自適應）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`float`, `max`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        規則：
+        - 若 page.height 取得失敗或 <= 0 → 180
+        - 正常：int(page.height * 0.24)，clamp 120..360
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
@@ -921,17 +903,11 @@ class CacheView(ft.Column):
         return max(120, min(360, int(h * 0.24)))
 
     def _dynamic_type_shard_panel_height(self) -> int:
-        """`_dynamic_type_shard_panel_height`
+        """計算 type shard panel height（跟視窗 height 自適應）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`float`, `max`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        規則：
+        - 若 page.height 取得失敗或 <= 0 → 260
+        - 正常：int(page.height * 0.30)，clamp 180..420
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
@@ -945,17 +921,11 @@ class CacheView(ft.Column):
         return max(180, min(420, int(h * 0.30)))
 
     def _dynamic_shard_key_list_height(self) -> int:
-        """`_dynamic_shard_key_list_height`
+        """計算 shard key list height 高度（跟視窗 height 自適應）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`float`, `max`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        規則：
+        - 若 page.height 取得失敗或 <= 0 → 220
+        - 正常：int(page.height * 0.30)，clamp 140..420
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
@@ -968,17 +938,11 @@ class CacheView(ft.Column):
         return max(140, min(420, int(h * 0.30)))
 
     def _dynamic_shard_src_height(self) -> int:
-        """`_dynamic_shard_src_height`
+        """計算 shard src height（跟視窗 height 自適應）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`float`, `max`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        規則：
+        - 若 page.height 取得失敗或 <= 0 → 180
+        - 正常：int(page.height * 0.24)，clamp 120..320
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
@@ -991,17 +955,11 @@ class CacheView(ft.Column):
         return max(120, min(320, int(h * 0.24)))
 
     def _dynamic_shard_dst_height(self) -> int:
-        """`_dynamic_shard_dst_height`
+        """計算 shard dst height（跟視窗 height 自適應）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`float`, `max`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        規則：
+        - 若 page.height 取得失敗或 <= 0 → 180
+        - 正常：int(page.height * 0.24)，clamp 120..320
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
@@ -1014,17 +972,11 @@ class CacheView(ft.Column):
         return max(120, min(320, int(h * 0.24)))
 
     def _dynamic_shard_key_panel_width(self) -> int:
-        """`_dynamic_shard_key_panel_width`
+        """計算 shard key panel width（跟視窗 width 自適應）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`float`, `max`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        規則：
+        - 若 page.width 取得失敗或 <= 0 → 360
+        - 正常：int(page.width * 0.30)，clamp 280..560
         """
         try:
             w = float(getattr(self.page, "width", 0) or 0)
@@ -1038,16 +990,9 @@ class CacheView(ft.Column):
 
     def _on_page_resized(self, e):
         # 重繪分類/分片與 C1 KeyListCard，讓大小可跟視窗動態變更
-        """`_on_page_resized`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         try:
             if hasattr(self, "shard_key_column"):
@@ -1059,17 +1004,11 @@ class CacheView(ft.Column):
             pass
 
     def _set_state(self, busy: bool, reason: str, trace: str):
-        """`_set_state`
+        """設定此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_refresh_disabled_state`, `update`
+        - 主要包裝：`_refresh_disabled_state`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.ui_busy = busy
         self.busy_reason = reason
@@ -1096,16 +1035,9 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _refresh_disabled_state(self):
-        """`_refresh_disabled_state`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if hasattr(self, "btn_reload_all"):
             self.btn_reload_all.disabled = self.ui_busy
@@ -1182,16 +1114,9 @@ class CacheView(ft.Column):
 
     # 與舊測試相容：集中提交 UI 更新
     def commit_ui(self, controls=None):
-        """`commit_ui`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         try:
             for c in (controls or []):
@@ -1204,17 +1129,11 @@ class CacheView(ft.Column):
 
     # 與舊測試相容：run_id guard 的狀態更新入口
     def set_ui_state(self, busy: bool, reason: str, trace: str, run_id: int | None = None):
-        """`set_ui_state`
+        """設定此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 設定此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`getattr`, `bool`, `_refresh_disabled_state`
+        - 主要包裝：`getattr`, `bool`, `_refresh_disabled_state`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         current_action_id = getattr(getattr(self, "_controller", None), "current_action_id", None)
         if run_id is not None and current_action_id is not None and run_id < current_action_id:
@@ -1253,17 +1172,11 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _append_log(self, text: str):
-        """`_append_log`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`append`, `_render_logs`
+        - 主要包裝：`_render_logs`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if text.startswith("[ERROR"):
             log_error(text)
@@ -1278,17 +1191,9 @@ class CacheView(ft.Column):
         self._render_logs()
 
     def _notify(self, message: str, level: str = "info"):
-        """`_notify`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`lower`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         lv = (level or "info").lower()
         if lv == "error":
@@ -1326,17 +1231,11 @@ class CacheView(ft.Column):
         )
 
     def _build_query_entry_page(self):
-        """`_build_query_entry_page`
+        """建立此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`Tabs`, `Container`
+        - 主要包裝：`Tabs`, `Container`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         self.query_sub_tabs = ft.Tabs(
             selected_index=0,
@@ -1358,17 +1257,11 @@ class CacheView(ft.Column):
         )
 
     def _render_logs(self):
-        """`_render_logs`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`clear`, `update`
+        - 主要包裝：`clear`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.log_list.controls.clear()
         rows = self._all_logs
@@ -1379,49 +1272,31 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_log_filter_changed(self, e):
-        """`_on_log_filter_changed`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`bool`, `_render_logs`
+        - 主要包裝：`bool`, `_render_logs`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self._only_error = bool(self.sw_log_only_error.value)
         self._render_logs()
 
     def _clear_logs(self):
-        """`_clear_logs`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`clear`, `_render_logs`
+        - 主要包裝：`clear`, `_render_logs`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self._all_logs.clear()
         self._render_logs()
 
     def _copy_logs(self):
-        """`_copy_logs`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`join`, `set_clipboard`
+        - 主要包裝：`join`, `set_clipboard`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         txt = "\n".join(self._all_logs)
         try:
@@ -1431,16 +1306,9 @@ class CacheView(ft.Column):
             self._show_snack_bar("複製失敗", ft.Colors.RED_400)
 
     def _iter_type_states(self, data: dict):
-        """`_iter_type_states`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         raw_types = data.get("types") or {}
         if isinstance(raw_types, dict):
@@ -1456,17 +1324,11 @@ class CacheView(ft.Column):
         return []
 
     def _render_type_list(self, data: dict):
-        """`_render_type_list`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`clear`, `_iter_type_states`, `update`
+        - 主要包裝：`clear`, `_iter_type_states`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.type_list.controls.clear()
 
@@ -1536,17 +1398,11 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _refresh_overview_ui(self, data: dict):
-        """`_refresh_overview_ui`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`strftime`, `_render_type_list`
+        - 主要包裝：`strftime`, `_render_type_list`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self._last_overview_data = data or {}
         ts = time.strftime("%H:%M:%S")
@@ -1561,17 +1417,11 @@ class CacheView(ft.Column):
         self._render_type_list(data)
 
     def _load_overview(self):
-        """`_load_overview`
+        """載入此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`cache_get_overview_service`, `_refresh_overview_ui`, `_refresh_query_type_options`
+        - 主要包裝：`cache_get_overview_service`, `_refresh_overview_ui`, `_refresh_query_type_options`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         try:
             data = cache_get_overview_service()
@@ -1585,17 +1435,11 @@ class CacheView(ft.Column):
         self._render_query_type_shard_page()
 
     def _run_action(self, reason: str, work_fn, success_msg: str):
-        """`_run_action`
+        """執行此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_append_log`, `_set_state`, `work_fn`
+        - 主要包裝：`_append_log`, `_set_state`, `work_fn`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if self.ui_busy:
             self._notify("目前正在處理，請稍候", "warn")
@@ -1623,47 +1467,29 @@ class CacheView(ft.Column):
 
     # top actions
     def _on_reload_all(self, e):
-        """`_on_reload_all`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_run_action`
+        - 主要包裝：`_run_action`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self._run_action("RELOADING", lambda: cache_reload_service(), "已重新載入全部快取")
 
     def _on_save_all_new(self, e):
-        """`_on_save_all_new`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_run_action`
+        - 主要包裝：`_run_action`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self._run_action("SAVING", lambda: cache_save_all_service(write_new_shard=True), "已儲存全部新分片")
 
     def _on_save_all_fill(self, e):
-        """`_on_save_all_fill`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_run_action`
+        - 主要包裝：`_run_action`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if hasattr(self, "chk_danger_confirm") and not bool(getattr(self.chk_danger_confirm, "value", False)):
             self._notify("尚未勾選高風險確認", "warn")
@@ -1671,17 +1497,11 @@ class CacheView(ft.Column):
         self._run_action("SAVING", lambda: cache_save_all_service(write_new_shard=False), "已補滿活躍分片")
 
     def _on_refresh_stats(self, e):
-        """`_on_refresh_stats`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_load_overview`, `_notify`
+        - 主要包裝：`_load_overview`, `_notify`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self._load_overview()
         self._notify("已刷新統計", "info")
@@ -1718,17 +1538,11 @@ class CacheView(ft.Column):
 
     # per-type actions
     def _on_reload_one(self, cache_type: str):
-        """`_on_reload_one`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_run_action`
+        - 主要包裝：`_run_action`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self._run_action(
             "RELOADING",
@@ -1737,17 +1551,11 @@ class CacheView(ft.Column):
         )
 
     def _on_save_one_new(self, cache_type: str):
-        """`_on_save_one_new`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_run_action`
+        - 主要包裝：`_run_action`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self._run_action(
             "SAVING",
@@ -1756,17 +1564,11 @@ class CacheView(ft.Column):
         )
 
     def _on_save_one_fill(self, cache_type: str):
-        """`_on_save_one_fill`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_run_action`
+        - 主要包裝：`_run_action`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if hasattr(self, "chk_danger_confirm") and not bool(getattr(self.chk_danger_confirm, "value", False)):
             self._notify("尚未勾選高風險確認", "warn")
@@ -1778,30 +1580,18 @@ class CacheView(ft.Column):
         )
 
     def _on_rotate_one(self, cache_type: str):
-        """`_on_rotate_one`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_run_action`
+        - 主要包裝：`_run_action`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         def _work():
-            """`_work`
+            """處理此函式的工作（細節以程式碼為準）。
             
-            用途：
-            - 處理此函式的主要流程（細節以程式碼為準）。
-            - 主要包裝/呼叫：`cache_rotate_service`, `cache_get_overview_service`
+            - 主要包裝：`cache_rotate_service`, `cache_get_overview_service`
             
-            參數：
-            - 依函式簽名。
-            
-            回傳：
-            - 依實作回傳值（請見函式內 return path）。
+            回傳：依函式內 return path。
             """
             ok = cache_rotate_service(cache_type)
             if not ok:
@@ -1811,17 +1601,11 @@ class CacheView(ft.Column):
         self._run_action("ROTATING", _work, f"已輪替分片：{cache_type}")
 
     def _on_analyze_one(self, cache_type: str):
-        """`_on_analyze_one`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_iter_type_states`, `get`
+        - 主要包裝：`_iter_type_states`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         target = None
         for ctype, st in self._iter_type_states(self._last_overview_data):
@@ -1845,17 +1629,9 @@ class CacheView(ft.Column):
 
     def _on_jump_to_query_type(self, cache_type: str):
         # 切到查詢頁 -> 查詢區，並預先設定 KEY + 指定分類
-        """`_on_jump_to_query_type`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`update`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if hasattr(self, "main_tabs"):
             self.main_tabs.selected_index = 1
@@ -1877,17 +1653,11 @@ class CacheView(ft.Column):
     # Query phase-2: search block
     # =========================================================
     def _refresh_query_type_options(self):
-        """`_refresh_query_type_options`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`sorted`
+        - 主要包裝：`sorted`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         types = sorted([ctype for ctype, _ in self._iter_type_states(self._last_overview_data)])
 
@@ -1900,17 +1670,11 @@ class CacheView(ft.Column):
         # overview 分類下拉已移除（按鈕維持在分類卡）
 
     def _load_shard_rows(self, cache_type: str, active_shard_id: str, shard_capacity: int) -> list[dict]:
-        """`_load_shard_rows`
+        """載入此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`strip`, `glob`, `sorted`
+        - 主要包裝：`strip`, `glob`, `sorted`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
@@ -1921,17 +1685,11 @@ class CacheView(ft.Column):
             return []
 
         def _sort_key(path: Path):
-            """`_sort_key`
+            """處理此函式的工作（細節以程式碼為準）。
             
-            用途：
-            - 處理此函式的主要流程（細節以程式碼為準）。
-            - 主要包裝/呼叫：`search`
+            - 主要包裝：`search`
             
-            參數：
-            - 依函式簽名。
-            
-            回傳：
-            - 依實作回傳值（請見函式內 return path）。
+            回傳：依函式內 return path。
             """
             stem = path.stem
             m = re.search(r"(\d+)$", stem)
@@ -1969,17 +1727,11 @@ class CacheView(ft.Column):
         return rows
 
     def _load_shard_keys(self, cache_type: str, filename: str) -> list[str]:
-        """`_load_shard_keys`
+        """載入此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`strip`, `loads`
+        - 主要包裝：`strip`, `loads`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
@@ -2009,34 +1761,20 @@ class CacheView(ft.Column):
         return []
 
     def _set_shard_detail_page(self, page: int):
-        """`_set_shard_detail_page`
+        """設定此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`len`, `max`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         total = len(self.shard_detail_keys)
         self.shard_detail_total_pages = max(1, (total + self.shard_detail_page_size - 1) // self.shard_detail_page_size)
         self.shard_detail_page = max(1, min(page, self.shard_detail_total_pages))
 
     def _render_shard_detail_keys(self):
-        """`_render_shard_detail_keys`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`clear`, `list`, `lower`
+        - 主要包裝：`clear`, `list`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if not hasattr(self, "shard_detail_key_list"):
             return
@@ -2114,34 +1852,22 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_shard_key_filter_change(self, e):
-        """`_on_shard_key_filter_change`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_shard_detail_keys`, `update`
+        - 主要包裝：`_render_shard_detail_keys`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.shard_detail_page = 1
         self._render_shard_detail_keys()
         self.page.update()
 
     def _set_shard_workspace_visible(self, visible: bool):
-        """`_set_shard_workspace_visible`
+        """設定此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`bool`
+        - 主要包裝：`bool`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         show_workspace = bool(visible)
         if hasattr(self, "shard_nav_view"):
@@ -2150,48 +1876,30 @@ class CacheView(ft.Column):
             self.shard_workspace_card.visible = show_workspace
 
     def _open_shard_workspace_tab(self):
-        """`_open_shard_workspace_tab`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_set_shard_workspace_visible`
+        - 主要包裝：`_set_shard_workspace_visible`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self._set_shard_workspace_visible(True)
 
     def _on_back_to_shard_list(self, e):
-        """`_on_back_to_shard_list`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_set_shard_workspace_visible`, `update`
+        - 主要包裝：`_set_shard_workspace_visible`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self._set_shard_workspace_visible(False)
         self.page.update()
 
     def _on_select_shard_row(self, cache_type: str, filename: str):
-        """`_on_select_shard_row`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_load_shard_keys`, `_render_query_type_shard_page`, `_open_shard_workspace_tab`
+        - 主要包裝：`_load_shard_keys`, `_render_query_type_shard_page`, `_open_shard_workspace_tab`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.shard_detail_selected_type = cache_type
         self.shard_detail_selected_file = filename
@@ -2207,17 +1915,11 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_select_shard_key(self, key: str):
-        """`_on_select_shard_key`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_shard_detail_keys`, `update`
+        - 主要包裝：`_render_shard_detail_keys`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if key != self.shard_detail_selected_key:
             self.shard_dst_loaded_sig = None
@@ -2229,17 +1931,11 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _load_shard_entry(self, cache_type: str, filename: str, key: str) -> dict | None:
-        """`_load_shard_entry`
+        """載入此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`strip`, `loads`
+        - 主要包裝：`strip`, `loads`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
@@ -2261,17 +1957,11 @@ class CacheView(ft.Column):
         return None
 
     def _format_shard_src_text(self, src_text: str, mode: str) -> str:
-        """`_format_shard_src_text`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`str`, `replace`
+        - 主要包裝：`replace`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         src = str(src_text or "")
         if mode == "raw":
@@ -2279,17 +1969,11 @@ class CacheView(ft.Column):
         return src.replace("\\r\\n", "\n").replace("\\n", "\n")
 
     def _render_shard_src_panel(self):
-        """`_render_shard_src_panel`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`cache_get_entry_service`, `_format_shard_src_text`, `_refresh_disabled_state`
+        - 主要包裝：`cache_get_entry_service`, `_format_shard_src_text`, `_refresh_disabled_state`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if not hasattr(self, "shard_src_field"):
             return
@@ -2318,66 +2002,40 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_shard_src_preview_mode(self, e):
-        """`_on_shard_src_preview_mode`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_shard_src_panel`, `update`
+        - 主要包裝：`_render_shard_src_panel`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.shard_detail_src_mode = "preview"
         self._render_shard_src_panel()
         self.page.update()
 
     def _on_shard_src_raw_mode(self, e):
-        """`_on_shard_src_raw_mode`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_shard_src_panel`, `update`
+        - 主要包裝：`_render_shard_src_panel`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.shard_detail_src_mode = "raw"
         self._render_shard_src_panel()
         self.page.update()
 
     def _normalize_cache_text(self, text: str) -> str:
-        """`_normalize_cache_text`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`replace`
+        - 主要包裝：`replace`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         return str(text or "").replace("\\r\\n", "\n").replace("\\n", "\n")
 
     def _render_shard_dst_panel(self):
-        """`_render_shard_dst_panel`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`str`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if not hasattr(self, "shard_dst_field"):
             return
@@ -2412,17 +2070,9 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_shard_dst_apply(self, e):
-        """`_on_shard_dst_apply`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`str`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if self.ui_busy:
             self._notify("目前忙碌中，暫停套用", "warn")
@@ -2488,17 +2138,11 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_shard_dst_copy(self, e):
-        """`_on_shard_dst_copy`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`set_clipboard`
+        - 主要包裝：`set_clipboard`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if not self.shard_detail_selected_key:
             self._notify("請先選擇 key", "warn")
@@ -2574,16 +2218,9 @@ class CacheView(ft.Column):
 
         # 若當前選取不在新清單中，就預設第一筆
         def _ev_id(ev: dict):
-            """`_ev_id`
+            """處理此函式的工作（細節以程式碼為準）。
             
-            用途：
-            - 處理此函式的主要流程（細節以程式碼為準）。
-            
-            參數：
-            - 依函式簽名。
-            
-            回傳：
-            - 依實作回傳值（請見函式內 return path）。
+            回傳：依函式內 return path。
             """
             return (str(ev.get("ts", "")), str(ev.get("old_dst", "")), str(ev.get("new_dst", "")))
 
@@ -2700,85 +2337,55 @@ class CacheView(ft.Column):
             self._notify(f"套用舊值失敗：{ex}", "error")
 
     def _on_shard_page_first(self, e):
-        """`_on_shard_page_first`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_shard_detail_keys`, `update`
+        - 主要包裝：`_render_shard_detail_keys`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.shard_detail_page = 1
         self._render_shard_detail_keys()
         self.page.update()
 
     def _on_shard_page_prev(self, e):
-        """`_on_shard_page_prev`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_shard_detail_keys`, `update`
+        - 主要包裝：`_render_shard_detail_keys`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.shard_detail_page -= 1
         self._render_shard_detail_keys()
         self.page.update()
 
     def _on_shard_page_next(self, e):
-        """`_on_shard_page_next`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_shard_detail_keys`, `update`
+        - 主要包裝：`_render_shard_detail_keys`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.shard_detail_page += 1
         self._render_shard_detail_keys()
         self.page.update()
 
     def _on_shard_page_last(self, e):
-        """`_on_shard_page_last`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_shard_detail_keys`, `update`
+        - 主要包裝：`_render_shard_detail_keys`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.shard_detail_page = self.shard_detail_total_pages
         self._render_shard_detail_keys()
         self.page.update()
 
     def _render_query_type_shard_page(self):
-        """`_render_query_type_shard_page`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`clear`, `list`, `set`
+        - 主要包裝：`clear`, `list`, `set`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if not hasattr(self, "query_type_shard_col"):
             return
@@ -2906,17 +2513,11 @@ class CacheView(ft.Column):
         self._render_shard_detail_keys()
 
     def _active_shard_filename(self, cache_type: str) -> str:
-        """`_active_shard_filename`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_iter_type_states`
+        - 主要包裝：`_iter_type_states`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         for ctype, st in self._iter_type_states(self._last_overview_data):
             if ctype == cache_type:
@@ -2926,17 +2527,11 @@ class CacheView(ft.Column):
         return "-"
 
     def _type_dirty_text(self, cache_type: str) -> str:
-        """`_type_dirty_text`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_iter_type_states`
+        - 主要包裝：`_iter_type_states`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         for ctype, st in self._iter_type_states(self._last_overview_data):
             if ctype == cache_type:
@@ -2945,32 +2540,20 @@ class CacheView(ft.Column):
 
     # -------------------- History storage helpers --------------------
     def _history_now_ts(self) -> str:
-        """`_history_now_ts`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`isoformat`
+        - 主要包裝：`isoformat`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         return datetime.now().astimezone().isoformat(timespec="seconds")
 
     def _history_dirs(self, cache_type: str):
-        """`_history_dirs`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`strip`, `mkdir`
+        - 主要包裝：`strip`, `mkdir`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
@@ -2984,16 +2567,9 @@ class CacheView(ft.Column):
         return base, jsonl_dir, json_dir
 
     def _history_active_default(self, cache_type: str) -> dict:
-        """`_history_active_default`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         return {
             "current_file": f"{cache_type}_h000001.jsonl",
@@ -3003,17 +2579,11 @@ class CacheView(ft.Column):
         }
 
     def _history_load_active(self, cache_type: str):
-        """`_history_load_active`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_history_dirs`, `loads`, `setdefault`
+        - 主要包裝：`_history_dirs`, `loads`, `setdefault`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         _base, jsonl_dir, json_dir = self._history_dirs(cache_type)
         if jsonl_dir is None:
@@ -3040,32 +2610,20 @@ class CacheView(ft.Column):
         return active, active_path, jsonl_dir, json_dir
 
     def _history_save_active(self, active_path: Path, active: dict):
-        """`_history_save_active`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`write_text`
+        - 主要包裝：`write_text`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         active_path.write_text(json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _history_append_event(self, cache_type: str, event: dict):
-        """`_history_append_event`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_history_load_active`, `int`
+        - 主要包裝：`_history_load_active`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         active, active_path, jsonl_dir, json_dir = self._history_load_active(cache_type)
         if not active:
@@ -3107,17 +2665,11 @@ class CacheView(ft.Column):
         json_path.write_text(json.dumps(arr, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _history_load_recent(self, cache_type: str, key: str, limit: int = 20) -> list[dict]:
-        """`_history_load_recent`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_history_dirs`, `sorted`
+        - 主要包裝：`_history_dirs`, `sorted`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         _base, jsonl_dir, _json_dir = self._history_dirs(cache_type)
         if jsonl_dir is None:
@@ -3148,17 +2700,11 @@ class CacheView(ft.Column):
         return out
 
     def _render_query_history(self):
-        """`_render_query_history`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`clear`, `str`
+        - 主要包裝：`clear`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - 依實作回傳值（請見函式內 return path）。
+        回傳：依函式內 return path。
         """
         if not hasattr(self, "query_history_list"):
             return
@@ -3190,16 +2736,9 @@ class CacheView(ft.Column):
 
         # 若當前選取不在新清單中，就預設第一筆
         def _ev_id(ev: dict):
-            """`_ev_id`
+            """處理此函式的工作（細節以程式碼為準）。
             
-            用途：
-            - 處理此函式的主要流程（細節以程式碼為準）。
-            
-            參數：
-            - 依函式簽名。
-            
-            回傳：
-            - 依實作回傳值（請見函式內 return path）。
+            回傳：依函式內 return path。
             """
             return (str(ev.get("ts", "")), str(ev.get("old_dst", "")), str(ev.get("new_dst", "")))
 
@@ -3241,17 +2780,9 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _update_history_preview(self):
-        """`_update_history_preview`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`str`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         ev = self.query_history_selected_event
         if not ev:
@@ -3349,34 +2880,20 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_select_history_event(self, event: dict):
-        """`_on_select_history_event`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_query_history`, `update`
+        - 主要包裝：`_render_query_history`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.query_history_selected_event = event
         self._render_query_history()
         self.page.update()
 
     def _on_apply_selected_history(self, e):
-        """`_on_apply_selected_history`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`str`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if self.ui_busy:
             self._notify("目前忙碌中，暫停套用", "warn")
@@ -3433,17 +2950,9 @@ class CacheView(ft.Column):
             self._notify(f"套用舊值失敗：{ex}", "error")
 
     def _render_query_detail(self):
-        """`_render_query_detail`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`str`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         row = self.query_selected_result
         if not row:
@@ -3475,34 +2984,20 @@ class CacheView(ft.Column):
         self._render_query_history()
 
     def _set_query_page(self, page: int):
-        """`_set_query_page`
+        """設定此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`len`, `max`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         total = len(self.query_results)
         self.query_total_pages = max(1, (total + self.query_page_size - 1) // self.query_page_size)
         self.query_page = max(1, min(page, self.query_total_pages))
 
     def _render_query_results(self):
-        """`_render_query_results`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_set_query_page`, `clear`, `len`
+        - 主要包裝：`_set_query_page`, `clear`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if not hasattr(self, "query_result_list"):
             return
@@ -3591,17 +3086,11 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_select_result(self, row: dict):
-        """`_on_select_result`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_query_results`, `_render_query_detail`, `update`
+        - 主要包裝：`_render_query_results`, `_render_query_detail`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.query_selected_result = row
         self._render_query_results()
@@ -3609,85 +3098,55 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_page_first(self, e):
-        """`_on_page_first`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_query_results`, `update`
+        - 主要包裝：`_render_query_results`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.query_page = 1
         self._render_query_results()
         self.page.update()
 
     def _on_page_prev(self, e):
-        """`_on_page_prev`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_query_results`, `update`
+        - 主要包裝：`_render_query_results`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.query_page -= 1
         self._render_query_results()
         self.page.update()
 
     def _on_page_next(self, e):
-        """`_on_page_next`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_query_results`, `update`
+        - 主要包裝：`_render_query_results`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.query_page += 1
         self._render_query_results()
         self.page.update()
 
     def _on_page_last(self, e):
-        """`_on_page_last`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_query_results`, `update`
+        - 主要包裝：`_render_query_results`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.query_page = self.query_total_pages
         self._render_query_results()
         self.page.update()
 
     def _on_page_jump(self, e):
-        """`_on_page_jump`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`int`, `_render_query_results`, `update`
+        - 主要包裝：`_render_query_results`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         try:
             p = int((self.tf_page_jump.value or "1").strip())
@@ -3698,17 +3157,11 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_page_size_change(self, e):
-        """`_on_page_size_change`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`int`, `_render_query_results`, `update`
+        - 主要包裝：`_render_query_results`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         try:
             self.query_page_size = int(self.dd_page_size.value or "50")
@@ -3719,17 +3172,9 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_apply_dst(self, e):
-        """`_on_apply_dst`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`str`
-        
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if self.ui_busy:
             self._notify("目前忙碌中，暫停套用", "warn")
@@ -3821,17 +3266,11 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_query_search(self, e):
-        """`_on_query_search`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`strip`, `upper`, `set`
+        - 主要包裝：`strip`, `upper`, `set`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         if self.ui_busy:
             self._notify("目前忙碌中，暫停搜尋", "warn")
@@ -3890,17 +3329,11 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_query_clear(self, e):
-        """`_on_query_clear`
+        """處理此函式的工作（細節以程式碼為準）。
         
-        用途：
-        - 處理此函式的主要流程（細節以程式碼為準）。
-        - 主要包裝/呼叫：`_render_query_results`, `_render_query_detail`, `update`
+        - 主要包裝：`_render_query_results`, `_render_query_detail`
         
-        參數：
-        - 依函式簽名。
-        
-        回傳：
-        - None
+        回傳：None
         """
         self.tf_query_input.value = ""
         self.query_results = []

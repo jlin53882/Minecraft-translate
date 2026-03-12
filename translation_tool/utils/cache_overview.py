@@ -14,16 +14,9 @@ import orjson as json
 
 
 def get_active_shard_id(cache_file_path: dict[str, Path], cache_type: str, active_shard_file: str) -> str:
-    """`get_active_shard_id`
+    """取得此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 取得此函式的主要流程（細節以程式碼為準）。
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     try:
         type_dir = cache_file_path.get(cache_type, Path(".")).parent
@@ -49,17 +42,9 @@ def build_cache_overview(
     cache_dir_name: str,
     resolve_project_path: Callable[[str], Path],
 ) -> dict[str, Any]:
-    """`build_cache_overview`
+    """建立此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 建立此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`get`
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     out_types: dict[str, Any] = {}
     total_entries = 0

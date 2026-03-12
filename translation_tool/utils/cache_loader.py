@@ -15,17 +15,11 @@ import orjson as json
 
 
 def load_shard_file(path: Path) -> dict[str, Any]:
-    """`load_shard_file`
+    """載入此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 載入此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`loads`
+    - 主要包裝：`loads`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     try:
         data = json.loads(path.read_bytes())
@@ -43,17 +37,11 @@ def load_cache_type(
     parallel_workers: int,
     logger: logging.Logger,
 ) -> None:
-    """`load_cache_type`
+    """載入此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 載入此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`mkdir`, `sorted`, `info`
+    - 主要包裝：`mkdir`, `sorted`, `info`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - None
+    回傳：None
     """
     if cache_type not in translation_cache:
         translation_cache[cache_type] = {}

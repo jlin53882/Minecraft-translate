@@ -57,17 +57,11 @@ except Exception as e:
     log.error(f"載入 Wikipedia 函式庫時發生未知錯誤: {e}")
 
 def initialize_species_cache():
-    """`initialize_species_cache`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`info`, `get`
+    - 主要包裝：`info`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     global _species_cache_data, _CACHE_DIR, _CACHE_FILE, _WIKI_LANG, _RATE_LIMIT_DELAY, _initialized
     if _initialized:
@@ -110,34 +104,22 @@ def initialize_species_cache():
         return False
 
 def is_potential_species_name(name: str) -> bool:
-    """`is_potential_species_name`
+    """判斷此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 判斷此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`bool`
+    - 主要包裝：`bool`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     if not isinstance(name, str):
         return False
     return bool(_SPECIES_NAME_REGEX.match(name))
 
 def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
-    """`query_wikipedia_and_update_cache`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    - 主要包裝/呼叫：`debug`, `sleep`
+    - 主要包裝：`debug`, `sleep`
     
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     if not _WIKIPEDIA_AVAILABLE or _species_cache_data is None:
         return None
@@ -177,16 +159,9 @@ def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
         return None
 
 def lookup_species_name(name: str) -> Optional[str]:
-    """`lookup_species_name`
+    """處理此函式的工作（細節以程式碼為準）。
     
-    用途：
-    - 處理此函式的主要流程（細節以程式碼為準）。
-    
-    參數：
-    - 依函式簽名。
-    
-    回傳：
-    - 依實作回傳值（請見函式內 return path）。
+    回傳：依函式內 return path。
     """
     if not _initialized:
         if not initialize_species_cache():
