@@ -17,16 +17,16 @@ from translation_tool.utils.cache_manager import (
 from translation_tool.core.lm_translator_main import (
     DRY_RUN,
     EXPORT_CACHE_ONLY,
+    translate_batch_smart,
+)
+from translation_tool.core.translatable_extractor import (
     extract_translatables,
     find_patchouli_json,
     find_lang_json,
     is_lang_file,
-    map_lang_output_path,
-    set_by_path,
-    translate_batch_smart,
-    value_fully_translated,
 )
-from translation_tool.core.lm_config_rules import validate_api_keys
+from translation_tool.core.translation_path_writer import map_lang_output_path, set_by_path
+from translation_tool.core.lm_config_rules import validate_api_keys, value_fully_translated
 from translation_tool.utils.config_manager import load_config
 
 def get_formatted_duration(start_tick: float) -> str:

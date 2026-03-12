@@ -14,8 +14,7 @@ import json
 from translation_tool.utils.log_unit import log_info,log_debug,log_error,log_warning
 
 from translation_tool.utils.cache_manager import get_cache_dict_ref, get_cache_entry  # 新增
-
-from translation_tool.core.lm_translator_main import value_fully_translated
+from translation_tool.core.lm_config_rules import value_fully_translated
 import time
 
 
