@@ -18,6 +18,14 @@ def test_cache_manager_public_api_surface_exists() -> None:
         assert hasattr(cache_manager, name), f"missing public API: {name}"
 
 
+def test_cache_manager___all___whitelists_public_api_only() -> None:
+    exported = set(getattr(cache_manager, "__all__", []))
+
+    assert {"reload_translation_cache", "save_translation_cache", "search_cache", "CACHE_TYPES"} <= exported
+    assert "_translation_cache" not in exported
+    assert "_initialized" not in exported
+
+
 def test_get_cache_dict_ref_returns_live_reference_when_initialized() -> None:
     cache_manager._initialized = True
     cache_manager._translation_cache = {k: {} for k in cache_manager.CACHE_TYPES}
