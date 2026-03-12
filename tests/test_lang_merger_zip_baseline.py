@@ -5,7 +5,7 @@ from pathlib import Path
 
 import orjson
 
-from translation_tool.core import lang_merger
+from translation_tool.core import lang_merger, lang_merge_content, lang_merge_pipeline, lang_merge_zip_io
 
 
 PENDING_DIR = "待翻譯"
@@ -79,8 +79,12 @@ def test_merge_zip_baseline_fixture_outputs_are_stable(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(lang_merger, "load_config", _fake_config)
     monkeypatch.setattr(lang_merger, "load_replace_rules", lambda _path: [])
-    monkeypatch.setattr(lang_merger, "recursive_translate_dict", _fake_recursive_translate_dict)
-    monkeypatch.setattr(lang_merger, "apply_replace_rules", _fake_apply_replace_rules)
+    monkeypatch.setattr(lang_merge_content, "load_config", _fake_config)
+    monkeypatch.setattr(lang_merge_zip_io, "load_config", _fake_config)
+    monkeypatch.setattr(lang_merge_content, "recursive_translate_dict", _fake_recursive_translate_dict)
+    monkeypatch.setattr(lang_merge_pipeline, "recursive_translate_dict", _fake_recursive_translate_dict)
+    monkeypatch.setattr(lang_merge_content, "apply_replace_rules", _fake_apply_replace_rules)
+    monkeypatch.setattr(lang_merge_pipeline, "apply_replace_rules", _fake_apply_replace_rules)
 
     updates = list(lang_merger.merge_zhcn_to_zhtw_from_zip(str(zip_path), str(output_dir), False))
 
