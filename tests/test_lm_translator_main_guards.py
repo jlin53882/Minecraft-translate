@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from translation_tool.core import lm_translator_main as lm_main
+from translation_tool.core import translatable_extractor
 
 
 def test_safe_json_loads_parses_fenced_json_object() -> None:
@@ -39,7 +40,7 @@ def test_find_lang_json_finds_only_assets_lang_json(tmp_path: Path) -> None:
 
 
 def test_extract_translatables_for_lang_file_handles_top_level_nested_text_and_lists(monkeypatch) -> None:
-    monkeypatch.setattr(lm_main, "is_value_translatable", lambda value, is_lang=False: isinstance(value, str) and bool(value.strip()))
+    monkeypatch.setattr(translatable_extractor, "is_value_translatable", lambda value, is_lang=False: isinstance(value, str) and bool(value.strip()))
 
     data = {
         "item.demo.name": "鑽石劍",
@@ -60,8 +61,8 @@ def test_extract_translatables_for_lang_file_handles_top_level_nested_text_and_l
 
 
 def test_extract_translatables_for_patchouli_uses_translatable_field_rules(monkeypatch) -> None:
-    monkeypatch.setattr(lm_main, "is_translatable_field", lambda key: key in {"title", "text"})
-    monkeypatch.setattr(lm_main, "is_value_translatable", lambda value, is_lang=False: isinstance(value, str) and bool(value.strip()))
+    monkeypatch.setattr(translatable_extractor, "is_translatable_field", lambda key: key in {"title", "text"})
+    monkeypatch.setattr(translatable_extractor, "is_value_translatable", lambda value, is_lang=False: isinstance(value, str) and bool(value.strip()))
 
     data = {
         "title": "章節標題",
