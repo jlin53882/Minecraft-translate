@@ -37,14 +37,15 @@ def test_manager_add_save_reload_smoke(monkeypatch, tmp_path: Path):
     cache_type = "lang"
     key = "hello"
 
-    cache_manager._initialized = True
-    cache_manager._translation_cache = {k: {} for k in cache_manager.CACHE_TYPES}
-    cache_manager._session_new_entries = {k: {} for k in cache_manager.CACHE_TYPES}
-    cache_manager._is_dirty = {k: False for k in cache_manager.CACHE_TYPES}
+    state = cache_store.reset_runtime_state(cache_manager.CACHE_TYPES)
+    state.initialized = True
+    state.translation_cache = {k: {} for k in cache_manager.CACHE_TYPES}
+    state.session_new_entries = {k: {} for k in cache_manager.CACHE_TYPES}
+    state.is_dirty = {k: False for k in cache_manager.CACHE_TYPES}
 
     type_dir = tmp_path / cache_type
     type_dir.mkdir(parents=True, exist_ok=True)
-    cache_manager._cache_file_path = {cache_type: type_dir / f"{cache_type}_cache_main.json"}
+    state.cache_file_path = {cache_type: type_dir / f"{cache_type}_cache_main.json"}
 
     monkeypatch.setattr(
         cache_manager,
@@ -70,10 +71,10 @@ def test_manager_add_save_reload_smoke(monkeypatch, tmp_path: Path):
     assert saved["entries"] == {key: {"src": "Hello", "dst": "哈囉"}}
     assert saved["force_new_shard"] is True
     assert cache_manager.get_session_new_count(cache_type) == 0
-    assert cache_manager._is_dirty[cache_type] is False
+    assert state.is_dirty[cache_type] is False
 
     def _fake_load_cache_type(_cache_type: str):
-        cache_manager._translation_cache[_cache_type] = {key: {"src": "Hello", "dst": "哈囉"}}
+        state.translation_cache[_cache_type] = {key: {"src": "Hello", "dst": "哈囉"}}
 
     monkeypatch.setattr(cache_manager, "_load_cache_type", _fake_load_cache_type)
     cache_manager.reload_translation_cache_type(cache_type)

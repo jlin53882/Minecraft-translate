@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from translation_tool.utils import cache_manager
+from translation_tool.utils import cache_manager, cache_store
 
 
 def test_cache_manager_public_api_surface_exists() -> None:
@@ -27,19 +27,21 @@ def test_cache_manager___all___whitelists_public_api_only() -> None:
 
 
 def test_get_cache_dict_ref_returns_live_reference_when_initialized() -> None:
-    cache_manager._initialized = True
-    cache_manager._translation_cache = {k: {} for k in cache_manager.CACHE_TYPES}
-    cache_manager._translation_cache["lang"] = {"demo": {"src": "Hello", "dst": "哈囉"}}
+    state = cache_store.reset_runtime_state(cache_manager.CACHE_TYPES)
+    state.initialized = True
+    state.translation_cache = {k: {} for k in cache_manager.CACHE_TYPES}
+    state.translation_cache["lang"] = {"demo": {"src": "Hello", "dst": "哈囉"}}
 
     ref = cache_manager.get_cache_dict_ref("lang")
     ref["new-key"] = {"src": "World", "dst": "世界"}
 
-    assert cache_manager._translation_cache["lang"]["new-key"] == {"src": "World", "dst": "世界"}
+    assert state.translation_cache["lang"]["new-key"] == {"src": "World", "dst": "世界"}
 
 
 def test_cache_entry_and_dict_ref_are_safe_when_uninitialized() -> None:
-    cache_manager._initialized = False
-    cache_manager._translation_cache = {}
+    state = cache_store.reset_runtime_state(cache_manager.CACHE_TYPES)
+    state.initialized = False
+    state.translation_cache = {}
 
     assert cache_manager.get_cache_entry("lang", "missing") is None
     assert cache_manager.get_cache_dict_ref("lang") == {}

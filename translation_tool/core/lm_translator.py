@@ -13,6 +13,7 @@ from translation_tool.utils.cache_manager import (
     add_to_cache,
     save_translation_cache,
     reload_translation_cache,
+    get_cache_dict_ref,
 )
 from translation_tool.core.lm_translator_main import (
     DRY_RUN,
@@ -268,12 +269,9 @@ def translate_directory_generator(
     cached_items = [] #快取數據
     items_to_translate = [] #待翻譯數據
 
-    # 1. 直接存取底層字典，繞過函數呼叫開銷
-    from translation_tool.utils.cache_manager import _translation_cache, _initialized
-    
-    # 預先獲取本地引用，避免在 5 萬次迴圈中反覆檢查全域變數
-    lang_cache = _translation_cache.get("lang", {}) if _initialized else {}
-    patch_cache = _translation_cache.get("patchouli", {}) if _initialized else {}
+    # 1. 透過正式 façade 取得 live reference，避免直接越權碰 private state
+    lang_cache = get_cache_dict_ref("lang")
+    patch_cache = get_cache_dict_ref("patchouli")
 
     logger.info(f"⚡ 正在進行 Cache 比對 (總量: {len(all_items)} 筆)...")
     #開始計時 cache 比對時間

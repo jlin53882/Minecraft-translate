@@ -2,13 +2,14 @@ import threading
 import time
 
 from translation_tool.utils import cache_manager
-from translation_tool.utils import cache_search
+from translation_tool.utils import cache_search, cache_store
 
 
 def _reset_cache_state():
-    cache_manager._translation_cache = {k: {} for k in cache_manager.CACHE_TYPES}
-    cache_manager._initialized = True
-    cache_manager._search_orchestrator = None
+    state = cache_store.reset_runtime_state(cache_manager.CACHE_TYPES)
+    state.translation_cache = {k: {} for k in cache_manager.CACHE_TYPES}
+    state.initialized = True
+    cache_manager._search_facade = None
 
 
 def test_rebuild_search_index_contract_and_tmp_cleanup(tmp_path, monkeypatch):

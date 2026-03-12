@@ -1,16 +1,63 @@
 """cache_store.py
 
-本模組只處理「快取狀態 dict」的最小讀寫語意，刻意不碰 IO、不碰鎖。
+本模組處理兩件事：
+1. 翻譯快取狀態（runtime state）的持有與測試重置
+2. 對快取 dict 的最小讀寫語意 helper
 
-設計目的：
-- 讓 `cache_manager.py` 可以把「狀態/資料結構操作」與「流程/生命週期/IO」分離。
-- 降低未來重構時的影響面：只要維持這些 helper 的契約，外部流程可以替換。
-
-注意：
-- 這裡的函式多半不做深拷貝，呼叫端需自行決定快照/隔離策略。
+設計原則：
+- 狀態由這裡持有，`cache_manager.py` 僅作 façade
+- 不碰 IO、不碰搜尋索引實作
+- `get_cache_dict_ref()` 必須能回傳這裡持有的 live object
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+import threading
 from typing import Any, Optional
+
+
+@dataclass
+class CacheRuntimeState:
+    translation_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
+    cache_file_path: dict[str, Path] = field(default_factory=dict)
+    initialized: bool = False
+    session_new_entries: dict[str, dict[str, Any]] = field(default_factory=dict)
+    is_dirty: dict[str, bool] = field(default_factory=dict)
+    cache_lock: threading.RLock = field(default_factory=threading.RLock)
+
+
+_RUNTIME = CacheRuntimeState()
+
+
+def get_runtime_state() -> CacheRuntimeState:
+    return _RUNTIME
+
+
+def reset_runtime_state(cache_types: list[str]) -> CacheRuntimeState:
+    state = get_runtime_state()
+    state.translation_cache = {}
+    state.cache_file_path = {}
+    state.initialized = False
+    state.session_new_entries = {k: {} for k in cache_types}
+    state.is_dirty = {k: False for k in cache_types}
+    return state
+
+
+def ensure_runtime_maps(cache_types: list[str]) -> CacheRuntimeState:
+    state = get_runtime_state()
+    if not state.session_new_entries:
+        state.session_new_entries = {k: {} for k in cache_types}
+    else:
+        for k in cache_types:
+            state.session_new_entries.setdefault(k, {})
+    if not state.is_dirty:
+        state.is_dirty = {k: False for k in cache_types}
+    else:
+        for k in cache_types:
+            state.is_dirty.setdefault(k, False)
+    return state
 
 
 def get_cache_type_dict(cache_state: dict[str, dict[str, Any]], cache_type: str) -> dict[str, Any]:
