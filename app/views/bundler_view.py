@@ -60,7 +60,7 @@ class BundlerView(ft.Column):
                     content=ft.Column(
                         [
                             ft.Text(
-                                "打包成品資源包", style=ft.TextThemeStyle.TITLE_LARGE
+                                "打包成品資源包", theme_style=ft.TextThemeStyle.TITLE_LARGE
                             ),
                             ft.Row(
                                 [
@@ -85,7 +85,7 @@ class BundlerView(ft.Column):
                     ),
                 )
             ),
-            ft.Text("打包日誌", style=ft.TextThemeStyle.TITLE_MEDIUM),
+            ft.Text("打包日誌", theme_style=ft.TextThemeStyle.TITLE_MEDIUM),
             ft.Container(
                 content=self.log_view,
                 border=ft.border.all(1, ft.Colors.OUTLINE),

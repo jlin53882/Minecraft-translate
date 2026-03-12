@@ -99,7 +99,7 @@ class QCView(ft.Column):
                         [
                             ft.Text(
                                 "翻譯 Key 缺失檢查 (en_us vs zh_tw)",
-                                style=ft.TextThemeStyle.TITLE_LARGE,
+                                theme_style=ft.TextThemeStyle.TITLE_LARGE,
                             ),
                             ft.Row(
                                 [
@@ -145,11 +145,11 @@ class QCView(ft.Column):
                         [
                             ft.Text(
                                 "簡繁翻譯差異比較 - JSON 資料夾模式",
-                                style=ft.TextThemeStyle.TITLE_LARGE,
+                                theme_style=ft.TextThemeStyle.TITLE_LARGE,
                             ),
                             ft.Text(
                                 "適用於大規模翻譯資料夾的比對，輸出 JSON 報告。",
-                                style=ft.TextThemeStyle.BODY_SMALL,
+                                theme_style=ft.TextThemeStyle.BODY_SMALL,
                                 color=ft.Colors.BLUE_GREY,
                             ),
                             ft.Row(
@@ -196,11 +196,11 @@ class QCView(ft.Column):
                         [
                             ft.Text(
                                 "簡繁翻譯差異比較 - TSV 單檔案模式",
-                                style=ft.TextThemeStyle.TITLE_LARGE,
+                                theme_style=ft.TextThemeStyle.TITLE_LARGE,
                             ),
                             ft.Text(
                                 "比較 TSV 檔案中 'zh_cn' 和 'zh_tw' 欄位的差異。將 'zh_cn' 轉換為繁體中文後，與 'zh_tw' 進行比較，並列出所有不匹配的條目。",
-                                style=ft.TextThemeStyle.BODY_SMALL,
+                                theme_style=ft.TextThemeStyle.BODY_SMALL,
                                 color=ft.Colors.BLUE_GREY,
                             ),
                             ft.Row(
@@ -232,7 +232,7 @@ class QCView(ft.Column):
                 )
             ),
             # 共用日誌
-            ft.Text("處理日誌", style=ft.TextThemeStyle.TITLE_MEDIUM),
+            ft.Text("處理日誌", theme_style=ft.TextThemeStyle.TITLE_MEDIUM),
             self.progress_bar,
             ft.Container(
                 content=self.log_view,

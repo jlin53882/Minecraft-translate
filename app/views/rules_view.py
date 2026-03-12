@@ -235,7 +235,7 @@ class RulesView(ft.Column):
                     ),
                     ft.Text(
                         "規則管理 (Translation Rules)",
-                        style=ft.TextThemeStyle.HEADLINE_MEDIUM,
+                        theme_style=ft.TextThemeStyle.HEADLINE_MEDIUM,
                         color=ft.Colors.BLUE_GREY_900,
                     ),
                     self.loading_indicator,
