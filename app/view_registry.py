@@ -19,7 +19,8 @@ VIEW_WINDOW_SIZES = {
 }
 
 
-# Lazy import map - only import when needed
+# Lazy import map - 延遲載入 view 的對應表
+# 格式：{'key': (module_name, class_name, needs_file_picker)}
 _VIEW_IMPORT_MAP = {
     'config': ('app.views.config_view', 'ConfigView', False),  # 不需要 file_picker
     'rules': ('app.views.rules_view', 'RulesView', False),
@@ -32,7 +33,16 @@ _VIEW_IMPORT_MAP = {
 
 
 def _lazy_import_view(view_key: str, page: ft.Page, file_picker: ft.FilePicker):
-    """Lazy import view class."""
+    """Lazy import view 類別（PR67 優化）。
+
+    Args:
+        view_key: View 的 key（如 'config', 'cache'）
+        page: Flet Page 物件
+        file_picker: Flet FilePicker 物件（部分 view 需要）
+
+    Returns:
+        View 實例
+    """
     module_name, class_name, needs_file_picker = _VIEW_IMPORT_MAP[view_key]
     module = __import__(module_name, fromlist=[class_name])
     view_class = getattr(module, class_name)
@@ -42,6 +52,17 @@ def _lazy_import_view(view_key: str, page: ft.Page, file_picker: ft.FilePicker):
 
 
 def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
+    """建立 view 註冊表（Lazy import 優化）。
+
+    使用 lazy import 按需載入 view，減少啟動時間。
+
+    Args:
+        page: Flet Page 物件
+        file_picker: Flet FilePicker 物件
+
+    Returns:
+        View 註冊表列表
+    """
     # Lazy import all views
     registry = [
         {'key': 'config', 'icon': ft.Icons.SETTINGS, 'label': '設定', 'view': wrap_view(_lazy_import_view('config', page, file_picker))},
@@ -55,9 +76,25 @@ def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
     return registry
 
 
-def get_window_size(view_key: str):
+def get_window_size(view_key: str) -> tuple:
+    """取得 view 的視窗大小。
+
+    Args:
+        view_key: View 的 key
+
+    Returns:
+        (寬, 高) 元組
+    """
     return VIEW_WINDOW_SIZES.get(view_key, DEFAULT_WINDOW_SIZE)
 
 
 def build_navigation_destinations(registry):
+    """從 registry 建立導航目的地。
+
+    Args:
+        registry: View 註冊表
+
+    Returns:
+        NavigationRailDestination 列表
+    """
     return [ft.NavigationRailDestination(icon=item['icon'], selected_icon=item['icon'], label=item['label']) for item in registry]
