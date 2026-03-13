@@ -6,7 +6,6 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from translation_tool.core.lm_config_rules import value_fully_translated
 from translation_tool.utils.cache_manager import get_cache_dict_ref
 
-
 @dataclass(frozen=True)
 class CacheRule:
     """定義快取鍵值的生成規則。"""
@@ -21,7 +20,6 @@ class CacheRule:
             return path
         return f"{path}|{src}"
 
-
 STRICT_SRC_TYPES = {
     "lang",
     "kubejs",
@@ -29,9 +27,7 @@ STRICT_SRC_TYPES = {
     "md",
 }
 
-
 ValidHitFn = Callable[[str, Dict[str, Any], Dict[str, Any]], bool]
-
 
 def get_default_cache_rules() -> Dict[str, CacheRule]:
     """回傳預設 cache rule map。"""
@@ -42,7 +38,6 @@ def get_default_cache_rules() -> Dict[str, CacheRule]:
         "kubejs": CacheRule("path|source_text"),
         "md": CacheRule("path|source_text"),
     }
-
 
 def _is_valid_hit(dst: str, entry: dict, item: dict) -> bool:
     """判斷 cache 命中是否可信。"""
@@ -62,7 +57,6 @@ def _is_valid_hit(dst: str, entry: dict, item: dict) -> bool:
         return entry_src == item_src
 
     return True
-
 
 def fast_split_items_by_cache(
     all_items: Iterable[Dict[str, Any]],

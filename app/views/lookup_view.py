@@ -14,7 +14,6 @@ from app.services_impl.pipelines.lookup_service import (
     run_manual_lookup_service,
 )
 
-
 class LookupView(ft.Column):
     """LookupView 類別。
 
@@ -24,8 +23,6 @@ class LookupView(ft.Column):
 
     def __init__(self, page: ft.Page):
         """
-
-        - 主要包裝：`__init__`, `TextField`, `ElevatedButton`
 
         回傳：None
         """
@@ -114,8 +111,6 @@ class LookupView(ft.Column):
     def single_lookup_clicked(self, e):
         """
 
-        - 主要包裝：`Thread`, `start`
-
         回傳：None
         """
         search_term = self.single_input.value
@@ -141,8 +136,6 @@ class LookupView(ft.Column):
         # 3. 呼叫後端服務
         """
 
-        - 主要包裝：`run_manual_lookup_service`
-
         回傳：None
         """
         result = run_manual_lookup_service(name)
@@ -160,8 +153,6 @@ class LookupView(ft.Column):
     # --- 批次查詢邏輯 ---
     def batch_lookup_clicked(self, e):
         """
-
-        - 主要包裝：`Thread`, `start`
 
         回傳：None
         """
@@ -182,8 +173,6 @@ class LookupView(ft.Column):
 
     def batch_lookup_worker(self, json_text):
         """
-
-        - 主要包裝：`run_batch_lookup_service`
 
         回傳：None
         """

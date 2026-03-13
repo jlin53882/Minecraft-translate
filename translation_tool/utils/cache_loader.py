@@ -13,20 +13,15 @@ from typing import Any
 
 import orjson as json
 
-
 def load_shard_file(path: Path) -> dict[str, Any]:
     """
 
-    - 主要包裝：`loads`
-
-    回傳：依函式內 return path。
     """
     try:
         data = json.loads(path.read_bytes())
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
-
 
 def load_cache_type(
     cache_type: str,
@@ -38,8 +33,6 @@ def load_cache_type(
     logger: logging.Logger,
 ) -> None:
     """
-
-    - 主要包裝：`mkdir`, `sorted`, `info`
 
     回傳：None
     """

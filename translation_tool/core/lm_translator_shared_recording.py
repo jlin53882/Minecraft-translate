@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 import csv
 import json
 
-
 @dataclass
 class TranslationRecorder:
     """收集翻譯紀錄並輸出 JSON/CSV。"""

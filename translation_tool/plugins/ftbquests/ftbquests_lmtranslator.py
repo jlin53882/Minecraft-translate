@@ -22,7 +22,6 @@ from typing import Dict, Any, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
 
-
 from translation_tool.core.lm_translator_main import translate_batch_smart
 
 from translation_tool.core.lm_config_rules import validate_api_keys
@@ -59,7 +58,6 @@ from translation_tool.utils.log_unit import (
 # -------------------------
 # Smart 翻譯轉接器（資料格式轉換）
 # -------------------------
-
 
 def map_to_items(
     mapping: Dict[str, Any],
@@ -111,7 +109,6 @@ def map_to_items(
 
     return items
 
-
 def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     """
     計算 mapping 中「實際可翻譯的字串數量」。
@@ -126,7 +123,6 @@ def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     - 作為 batch 翻譯的總量基準
     """
     return sum(1 for _, v in mapping.items() if isinstance(v, str) and v.strip())
-
 
 @dataclass
 class DryRunStats:
@@ -144,7 +140,6 @@ class DryRunStats:
     cache_hit: int = 0  # 快取命中數
     cache_miss: int = 0  # 實際需翻譯數
     per_file: list[dict] = None  # 每個檔案的明細
-
 
 # -------------------------
 # Public API (callable from pipeline)
@@ -224,9 +219,7 @@ def translate_ftb_pending_to_zh_tw(
     def _count_one(src: Path) -> Tuple[Path, int]:
         """
 
-        - 主要包裝：`read_json_dict`
-
-        回傳：依函式內 return path。
+    
         """
         try:
             mapping = read_json_dict(src)
@@ -328,8 +321,6 @@ def translate_ftb_pending_to_zh_tw(
 
     def _writer(file_id: str) -> None:
         """
-
-        - 主要包裝：`write_json_dict`
 
         回傳：None
         """
@@ -506,8 +497,6 @@ def translate_ftb_pending_to_zh_tw(
         def on_batch_flushed() -> None:
             """
 
-            - 主要包裝：`touch`
-
             回傳：None
             """
             try:
@@ -520,9 +509,7 @@ def translate_ftb_pending_to_zh_tw(
         def _fmt_eta(sec: float) -> str:
             """
 
-            - 主要包裝：`divmod`
-
-            回傳：依函式內 return path。
+        
             """
             if sec <= 0:
                 return ""
@@ -533,8 +520,6 @@ def translate_ftb_pending_to_zh_tw(
 
         def on_progress(p: float, msg: str, eta_sec: float) -> None:
             """
-
-            - 主要包裝：`_fmt_eta`, `set_prog`
 
             回傳：None
             """

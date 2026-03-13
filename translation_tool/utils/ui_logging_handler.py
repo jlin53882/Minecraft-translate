@@ -6,7 +6,6 @@
 
 import logging
 
-
 class UISessionLogHandler(logging.Handler):
     """
     將 Python logging 訊息轉送到 TaskSession（UI）
@@ -14,8 +13,6 @@ class UISessionLogHandler(logging.Handler):
 
     def __init__(self):
         """
-
-        - 主要包裝：`__init__`
 
         回傳：None
         """
@@ -30,8 +27,6 @@ class UISessionLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord):
         """
-
-        - 主要包裝：`format`
 
         回傳：None
         """

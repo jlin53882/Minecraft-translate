@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 @dataclass
 class RulesTableState:
     page_size: int = 50

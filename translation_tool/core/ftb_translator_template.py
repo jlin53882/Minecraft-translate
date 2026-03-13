@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import shutil
 
-
 def prepare_ftbquests_lang_template_only_impl(
     input_config_dir: str,
     output_config_dir: str,

@@ -19,7 +19,6 @@ from app.views.config.config_form import (
 )
 from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
 
-
 class ConfigView(ft.Column):
     """ConfigView 類別。
 
@@ -34,8 +33,6 @@ class ConfigView(ft.Column):
     def __init__(self, page: ft.Page):
         # 設定 Root Column 不滾動，為了做 Fixed Footer
         """
-
-        - 主要包裝：`__init__`, `_init_controls`, `Column`
 
         回傳：None
         """
@@ -239,9 +236,7 @@ class ConfigView(ft.Column):
     def _build_left_column(self):
         """
 
-        - 主要包裝：`Column`
-
-        回傳：依函式內 return path。
+    
         """
         return ft.Column(
             expand=1,
@@ -286,9 +281,7 @@ class ConfigView(ft.Column):
         # 1. Top Params
         """
 
-        - 主要包裝：`Row`, `Container`
-
-        回傳：依函式內 return path。
+    
         """
         top_row = ft.Row(
             [
@@ -464,9 +457,7 @@ class ConfigView(ft.Column):
     def _build_lang_merger_card(self):
         """
 
-        - 主要包裝：`_build_card`
-
-        回傳：依函式內 return path。
+    
         """
         return self._build_card(
             "語言合併器設定 (Lang Merger)",
@@ -517,8 +508,6 @@ class ConfigView(ft.Column):
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """
 
-        - 主要包裝：`SnackBar`
-
         回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
@@ -528,8 +517,6 @@ class ConfigView(ft.Column):
 
     def add_model_row(self, model_name: str):
         """
-
-        - 主要包裝：`Checkbox`, `Text`, `IconButton`
 
         回傳：None
         """
@@ -589,8 +576,6 @@ class ConfigView(ft.Column):
     def move_model_row(self, cb: ft.Checkbox, direction: int):
         """
 
-        - 主要包裝：`next`, `_refresh_model_order_labels`
-
         回傳：None
         """
         controls = self.models_column.controls
@@ -606,8 +591,6 @@ class ConfigView(ft.Column):
     def remove_model_by_checkbox(self, cb: ft.Checkbox):
         """
 
-        - 主要包裝：`next`, `_refresh_model_order_labels`
-
         回傳：None
         """
         row = next((r for r in self.models_column.controls if r._checkbox is cb), None)
@@ -617,8 +600,6 @@ class ConfigView(ft.Column):
 
     def on_add_model_clicked(self, e):
         """
-
-        - 主要包裝：`strip`, `add_model_row`
 
         回傳：None
         """
@@ -659,8 +640,6 @@ class ConfigView(ft.Column):
 
     def _refresh_model_order_labels(self):
         """
-
-        - 主要包裝：`enumerate`
 
         回傳：None
         """

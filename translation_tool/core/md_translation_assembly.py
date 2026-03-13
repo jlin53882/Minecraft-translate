@@ -51,10 +51,8 @@ from translation_tool.utils.log_unit import (
     progress,
 )
 
-
 def _log_md_step2_stats(step2_res: Dict[str, Any]) -> None:
     _log_md_step2_stats_impl(step2_res, log_info_fn=log_info)
-
 
 def step1_extract(
     *,
@@ -83,7 +81,6 @@ def step1_extract(
         log_warning_fn=log_warning,
     )
 
-
 def step2_translate(
     *,
     pending_dir: str,
@@ -107,7 +104,6 @@ def step2_translate(
         progress_fn=progress,
     )
 
-
 def step3_inject(
     *,
     input_dir: str,
@@ -130,7 +126,6 @@ def step3_inject(
         map_lang_in_rel_path_allow_zh_fn=map_lang_in_rel_path_allow_zh,
         progress_fn=progress,
     )
-
 
 def run_md_pipeline(
     input_dir: str,
@@ -253,7 +248,6 @@ def run_md_pipeline(
     progress(session, 0.999)
     log_info("[MD] 流程完成，耗時：%s", get_formatted_duration(start_tick))
     return result
-
 
 __all__ = [
     "_ProgressProxy",

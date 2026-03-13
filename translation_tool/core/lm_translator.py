@@ -40,7 +40,6 @@ from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
 
-
 def get_formatted_duration(start_tick: float) -> str:
     """將開始時間轉換為人類可讀的格式。
 
@@ -65,7 +64,6 @@ def get_formatted_duration(start_tick: float) -> str:
         return f"{hours} 小時 {minutes} 分 {seconds} 秒"
     else:
         return f"{minutes} 分 {seconds} 秒"
-
 
 # 剩餘時間
 def format_duration_seconds(seconds: int) -> str:
@@ -101,11 +99,9 @@ def format_duration_seconds(seconds: int) -> str:
     else:
         return f"{minutes} 分 {seconds} 秒"
 
-
 # ============================================================
 # 對外唯一入口（UI / CLI 共用）
 # ============================================================
-
 
 def translate_directory_generator(
     input_dir: str,

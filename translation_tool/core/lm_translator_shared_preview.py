@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 import json
 
-
 @dataclass
 class TouchSet:
     """收集本輪被寫入的 file id。"""
@@ -20,7 +19,6 @@ class TouchSet:
         for fid in list(self.touched):
             writer_fn(fid)
         self.touched.clear()
-
 
 def write_dry_run_preview(
     out_dir: str | Path,
@@ -41,7 +39,6 @@ def write_dry_run_preview(
     }
     p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return p
-
 
 def write_cache_hit_preview(
     out_dir: str | Path,

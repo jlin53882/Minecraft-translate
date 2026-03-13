@@ -25,7 +25,6 @@ from translation_tool.utils.ui_logging_handler import UISessionLogHandler
 
 logger = logging.getLogger(__name__)
 
-
 class LogLimiter:
     """Log 節流器（UI 友善）。
 
@@ -42,8 +41,6 @@ class LogLimiter:
 
     def __init__(self, max_logs: int = 3000, flush_interval: float = 0.1):
         """
-
-        - 主要包裝：`deque`
 
         回傳：None
         """
@@ -86,16 +83,13 @@ class LogLimiter:
         self.last_flush = time.time()
         return {"log": merged}
 
-
 # 單例：全域節流器（維持與 services.py 過去行為一致）
 GLOBAL_LOG_LIMITER = LogLimiter(max_logs=5000, flush_interval=0.1)
-
 
 # 單例：UI log handler（維持與 services.py 過去行為一致）
 UI_LOG_HANDLER = UISessionLogHandler()
 UI_LOG_HANDLER.setLevel(logging.INFO)
 UI_LOG_HANDLER.setFormatter(logging.Formatter("%(message)s"))
-
 
 def update_logger_config(config_loader, *, logger_name: str = "translation_tool"):
     """重新讀取 config 並套用最新的 Log 等級。

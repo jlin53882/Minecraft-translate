@@ -22,21 +22,17 @@ import threading
 
 logger = logging.getLogger(__name__)
 
-
 def _resolve_rules_path(path: str):
     return resolve_project_path(path)
 
-
 _thread_local = threading.local()
 _CJK_PATTERN = re.compile(r"([\u4e00-\u9fff]+)")
-
 
 def get_converter():
     """獲取當前執行緒專用的 OpenCC 實例"""
     if not hasattr(_thread_local, "converter"):
         _thread_local.converter = OpenCC("s2twp")
     return _thread_local.converter
-
 
 # =========================
 # replace rules 快取
@@ -45,11 +41,8 @@ _LITERAL_RULES = None  # List[Tuple[str, str]]
 _REGEX_RULES = None  # List[Tuple[re.Pattern, str]]
 _RULE_KEYWORDS = None  # set[str]
 
-
 def _init_replace_rules_cache(rules: List[Dict[str, str]]):
     """
-
-    - 主要包裝：`set`, `sort`
 
     回傳：None
     """
@@ -96,7 +89,6 @@ def _init_replace_rules_cache(rules: List[Dict[str, str]]):
     _REGEX_RULES = regex_rules
     _RULE_KEYWORDS = keywords
 
-
 def apply_replace_rules(text: str, rules: List[Dict[str, str]]) -> str:
     """應用替換規則到給定的文字（舊介面，加速版）"""
 
@@ -135,7 +127,6 @@ def apply_replace_rules(text: str, rules: List[Dict[str, str]]) -> str:
         text = pattern.sub(repl, text)
 
     return text
-
 
 # --- 檔案讀寫與文字處理工具函式 ---
 def load_replace_rules(path: str) -> List[Dict[str, str]]:
@@ -186,7 +177,6 @@ def load_replace_rules(path: str) -> List[Dict[str, str]]:
     )
     return sorted_rules
 
-
 def save_replace_rules(path: str, rules: List[Dict[str, str]]):
     """將替換規則儲存到指定的 JSON 檔案（orjson 版）。"""
     resolved_path = _resolve_rules_path(path)
@@ -200,7 +190,6 @@ def save_replace_rules(path: str, rules: List[Dict[str, str]]):
             )
     except Exception as e:
         logger.error("儲存替換規則到 %s 失敗: %s", resolved_path, e)
-
 
 def load_custom_translations(folder_path: str, filename="table.tsv") -> Dict[str, str]:
     """從指定資料夾載入自訂的翻譯表 (TSV 格式)。"""
@@ -223,19 +212,14 @@ def load_custom_translations(folder_path: str, filename="table.tsv") -> Dict[str
         logger.error(f"讀取自訂翻譯檔 {file_path} 失敗: {e}")
     return custom_map
 
-
 def safe_convert_text(text: str) -> str:
     """
 
-    - 主要包裝：`get_converter`, `sub`
-
-    回傳：依函式內 return path。
     """
     if not text:
         return text
     conv = get_converter()
     return _CJK_PATTERN.sub(lambda m: conv.convert(m.group(1)), text)
-
 
 def convert_text(text: str, rules: List[Dict[str, str]] | None = None) -> str:
     """
@@ -251,7 +235,6 @@ def convert_text(text: str, rules: List[Dict[str, str]] | None = None) -> str:
     if rules:
         out = apply_replace_rules(out, rules)
     return out
-
 
 def convert_snbt_file_inplace(
     path: str, rules: List[Dict[str, str]] | None = None
@@ -273,7 +256,6 @@ def convert_snbt_file_inplace(
         logger.error("convert_snbt_file_inplace 失敗: %s (%s)", path, e)
         return False
 
-
 def convert_snbt_tree_inplace(
     root_dir: str, rules: List[Dict[str, str]] | None = None
 ) -> int:
@@ -291,7 +273,6 @@ def convert_snbt_tree_inplace(
                     changed += 1
     return changed
 
-
 def recursive_translate_dict(data: Any, rules: List[Dict[str, str]]) -> Any:
     """
     (僅用於簡轉繁) 遞迴地對一個字典或列表中的所有字串值進行 OpenCC 轉換和規則替換。
@@ -303,7 +284,6 @@ def recursive_translate_dict(data: Any, rules: List[Dict[str, str]]) -> Any:
     if isinstance(data, str):
         return apply_replace_rules(safe_convert_text(data), rules)
     return data
-
 
 def recursive_translate(
     data: Any, rules: List[Dict[str, str]], custom_translations: Dict[str, str]
@@ -338,7 +318,6 @@ def recursive_translate(
     else:
         return data
 
-
 def orjson_dump_file(obj, fp, *, indent2: bool = True, newline: bool = True):
     """
     用 orjson 寫入檔案物件 fp。
@@ -353,7 +332,6 @@ def orjson_dump_file(obj, fp, *, indent2: bool = True, newline: bool = True):
 
     data = orjson.dumps(obj, option=option)
     fp.write(data)
-
 
 def orjson_pretty_str(obj) -> str:
     """

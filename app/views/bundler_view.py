@@ -16,7 +16,6 @@ from app.services_impl.pipelines.bundle_service import run_bundling_service
 import tkinter as tk
 from tkinter import filedialog
 
-
 class BundlerView(ft.Column):
     """BundlerView 類別。
 
@@ -26,8 +25,6 @@ class BundlerView(ft.Column):
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """
-
-        - 主要包裝：`__init__`, `TextField`
 
         回傳：None
         """
@@ -101,9 +98,7 @@ class BundlerView(ft.Column):
         
         """
 
-        - 主要包裝：`IconButton`
-
-        回傳：依函式內 return path。
+    
         """
         if pick_type == "dir":
             icon = ft.Icons.FOLDER_OPEN
@@ -122,8 +117,6 @@ class BundlerView(ft.Column):
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         
         """
-
-        - 主要包裝：`SnackBar`
 
         回傳：None
         """
@@ -187,8 +180,6 @@ class BundlerView(ft.Column):
         
         """
 
-        - 主要包裝：`set_controls_disabled`, `clear`
-
         回傳：None
         """
         root_dir = self.root_dir_textfield.value
@@ -214,8 +205,6 @@ class BundlerView(ft.Column):
     def bundling_worker(self, root_dir, output_zip):
         
         """
-
-        - 主要包裝：`run_bundling_service`
 
         回傳：None
         """

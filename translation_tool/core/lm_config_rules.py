@@ -11,14 +11,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 # =========================
 # 1. 提示詞與配置
 # =========================
 
 # 目前使用的 API Key 索引
 _current_key_index = 0
-
 
 def _get_all_keys() -> list[str]:
     """
@@ -30,7 +28,6 @@ def _get_all_keys() -> list[str]:
         for key in config.get("lm_translator", {}).get("keys", [])
         if isinstance(key, str) and key.strip()
     ]
-
 
 def get_current_api_key() -> str:
     """
@@ -50,7 +47,6 @@ def get_current_api_key() -> str:
     # 加上一個防護：避免 index 越界
     safe_index = min(_current_key_index, len(keys) - 1)
     return keys[safe_index]
-
 
 def rotate_api_key():
     """
@@ -92,7 +88,6 @@ def rotate_api_key():
     logger.info(f"🔁 切換 API Key → index {_current_key_index}")
     return True
 
-
 def validate_api_keys():
     """
     驗證 API 金鑰格式。
@@ -115,7 +110,6 @@ def validate_api_keys():
 
     logger.info(f"✅ 金鑰格式驗證通過，共載入 {len(keys)} 組金鑰。")
 
-
 def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
     """
 
@@ -128,7 +122,6 @@ def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
                 "請使用 Google AI Studio 產生的 Gemini API Key，"
                 "通常應以 'AIza' 字樣開頭。"
             )
-
 
 # =========================
 # 2. Regex 規則定義
@@ -164,11 +157,9 @@ TOKEN_PATTERN = re.compile(r"\$\([^)]+\)")
 # 需要跳過翻譯的文字（你指定的類型）
 HASH_PREFIX_PATTERN = re.compile(r"^\s*#")  # 任何 # 開頭（含前置空白）
 
-
 def needs_translation_text(s: str) -> bool:
     """
 
-    回傳：依函式內 return path。
     """
     if not s or not isinstance(s, str):
         return False
@@ -187,7 +178,6 @@ def needs_translation_text(s: str) -> bool:
 
     # 還有英文 → 需要翻
     return True
-
 
 def value_fully_translated(value) -> bool:
     """
@@ -243,7 +233,6 @@ def value_fully_translated(value) -> bool:
     # 直接視為已完成翻譯
     return True
 
-
 def contains_cjk(s: str) -> bool:
     """
     檢查字串中是否包含 CJK（中 / 日 / 韓）文字。
@@ -278,7 +267,6 @@ def contains_cjk(s: str) -> bool:
             False → 不包含任何 CJK 字元
     """
     return isinstance(s, str) and CJK_RE.search(s) is not None
-
 
 def build_skip_terms_pattern(terms: list[str]) -> re.Pattern:
     """
@@ -329,15 +317,11 @@ def build_skip_terms_pattern(terms: list[str]) -> re.Pattern:
     # 編譯為不區分大小寫的正規表達式
     return re.compile(pattern, re.IGNORECASE)
 
-
 # =========================
 # 值是否值得翻譯（核心判斷）
 def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
     """
 
-    - 主要包裝：`strip`, `build_skip_terms_pattern`
-
-    回傳：依函式內 return path。
     """
     if not isinstance(value, str):
         return False
@@ -397,7 +381,6 @@ def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
         return False
 
     return True
-
 
 # =========================
 # 可翻譯欄位判斷

@@ -6,7 +6,6 @@ import re
 
 _LANG_REF_RE = re.compile(r"^\{.+\}$")
 
-
 def is_filled_text_impl(v: Any) -> bool:
     """判斷是否為有實質內容的文字。"""
     if not isinstance(v, str):
@@ -17,7 +16,6 @@ def is_filled_text_impl(v: Any) -> bool:
     if _LANG_REF_RE.match(s):
         return False
     return True
-
 
 def deep_merge_3way_flat_impl(tw: dict, cn: dict, en: dict, *, safe_convert_text_fn: Callable[[str], str]) -> dict:
     """扁平 KubeJS 三語 merge：tw > cn->tw > en。"""
@@ -41,7 +39,6 @@ def deep_merge_3way_flat_impl(tw: dict, cn: dict, en: dict, *, safe_convert_text
 
     return out
 
-
 def prune_en_by_tw_flat_impl(en_map: dict, tw_available: dict) -> dict:
     """剪掉 tw 已有內容的 en key。"""
     out = {}
@@ -50,7 +47,6 @@ def prune_en_by_tw_flat_impl(en_map: dict, tw_available: dict) -> dict:
             continue
         out[k] = v
     return out
-
 
 def clean_kubejs_from_raw_impl(
     base_dir: str,

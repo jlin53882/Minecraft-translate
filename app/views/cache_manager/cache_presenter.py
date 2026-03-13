@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from .cache_types import ActionState, CacheUiState
 
-
 class CachePresenter:
     """Cache UI 的顯示層轉換器（Presenter）。
 
@@ -41,9 +40,7 @@ class CachePresenter:
     def status_label(self, state: CacheUiState) -> str:
         """
 
-        - 主要包裝：`upper`
-
-        回傳：依函式內 return path。
+    
         """
         if not state.busy:
             return self._STATUS_MAP["READY"]
@@ -53,9 +50,7 @@ class CachePresenter:
     def status_text(self, state: CacheUiState) -> str:
         """
 
-        - 主要包裝：`status_label`
-
-        回傳：依函式內 return path。
+    
         """
         label = self.status_label(state)
         return f"狀態：{label}" + ("..." if state.busy else "")
@@ -63,20 +58,20 @@ class CachePresenter:
     def phase_label(self, phase: str) -> str:
         """
 
-        回傳：依函式內 return path。
+    
         """
         return self._PHASE_MAP.get((phase or "").strip().lower(), phase or "next")
 
     def action_trace(self, action: ActionState) -> str:
         """
 
-        回傳：依函式內 return path。
+    
         """
         return f"trace: ACTION#{action.action_id} {self.phase_label(action.phase)} {action.reason}"
 
     def action_log(self, action: ActionState) -> str:
         """
 
-        回傳：依函式內 return path。
+    
         """
         return f"[ACTION#{action.action_id}] {self.phase_label(action.phase)} {action.reason}"

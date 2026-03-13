@@ -14,7 +14,6 @@ Cache UI 的「動作序號控制器」。
 
 from __future__ import annotations
 
-
 class CacheController:
     """CacheController 類別。
 
@@ -45,7 +44,7 @@ class CacheController:
     def is_current(self, run_id: int | None) -> bool:
         """
 
-        回傳：依函式內 return path。
+    
         """
         if run_id is None:
             return True

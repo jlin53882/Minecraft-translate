@@ -4,7 +4,6 @@ import time
 import traceback
 from typing import Callable
 
-
 def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str):
     if view.ui_busy:
         view._notify("目前正在處理，請稍候", "warn")

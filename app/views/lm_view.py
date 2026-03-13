@@ -23,14 +23,11 @@ LM_translate_folder_name = (
     load_config().get("lm_translator", {}).get("lm_translate_folder_name", "LM翻譯後")
 )
 
-
 class LMView(ft.Column):
     """LM 翻譯頁（風格對齊 Translation/Extractor）。"""
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """
-
-        - 主要包裝：`__init__`, `TextField`
 
         回傳：None
         """
@@ -152,9 +149,7 @@ class LMView(ft.Column):
     def _path_row(self, field: ft.TextField, on_pick) -> ft.Control:
         """
 
-        - 主要包裝：`Row`
-
-        回傳：依函式內 return path。
+    
         """
         return ft.Row(
             [
@@ -175,8 +170,6 @@ class LMView(ft.Column):
     def pick_input_directory(self, e):
         """
 
-        - 主要包裝：`get_directory_path`
-
         回傳：None
         """
         self.file_picker.on_result = self.on_input_dir_picked
@@ -194,8 +187,6 @@ class LMView(ft.Column):
     def pick_output_directory(self, e):
         """
 
-        - 主要包裝：`get_directory_path`
-
         回傳：None
         """
         self.file_picker.on_result = self.on_output_dir_picked
@@ -212,8 +203,6 @@ class LMView(ft.Column):
 
     def start_clicked(self, e):
         """
-
-        - 主要包裝：`TaskSession`, `start`, `_set_status`
 
         回傳：None
         """
@@ -268,8 +257,6 @@ class LMView(ft.Column):
     def start_ui_timer(self):
         """
 
-        - 主要包裝：`start`
-
         回傳：None
         """
         if self._ui_timer_running:
@@ -312,8 +299,6 @@ class LMView(ft.Column):
     def _set_status(self, text: str, color: str):
         """
 
-        - 主要包裝：`Text`
-
         回傳：None
         """
         self.status_chip.label = ft.Text(text)
@@ -321,8 +306,6 @@ class LMView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """
-
-        - 主要包裝：`SnackBar`
 
         回傳：None
         """

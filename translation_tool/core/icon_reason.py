@@ -20,7 +20,6 @@ class IconRisk(Enum):
     WARN = "warn"
     DANGER = "danger"
 
-
 @dataclass
 class IconResult:
     """IconResult 類別。

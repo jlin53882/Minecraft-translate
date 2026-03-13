@@ -7,7 +7,6 @@ from typing import Any, Dict, Callable
 
 logger = logging.getLogger(__name__)
 
-
 def patch_localized_content_json_impl(
     zf: zipfile.ZipFile,
     cn_path: str,

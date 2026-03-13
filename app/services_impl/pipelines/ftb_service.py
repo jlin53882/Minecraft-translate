@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
 
-
 def run_ftb_translation_service(
     directory_path: str,
     session,

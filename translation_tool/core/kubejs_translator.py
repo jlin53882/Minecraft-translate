@@ -33,26 +33,20 @@ from translation_tool.utils.log_unit import (
 )
 from translation_tool.utils.text_processor import safe_convert_text
 
-
 def _is_filled_text(v: Any) -> bool:
     return is_filled_text_impl(v)
-
 
 def deep_merge_3way_flat(tw: dict, cn: dict, en: dict) -> dict:
     return deep_merge_3way_flat_impl(tw, cn, en, safe_convert_text_fn=safe_convert_text)
 
-
 def prune_en_by_tw_flat(en_map: dict, tw_available: dict) -> dict:
     return prune_en_by_tw_flat_impl(en_map, tw_available)
-
 
 def _read_json_dict_orjson(path: Path) -> dict:
     return read_json_dict_orjson_impl(path)
 
-
 def _write_json_orjson(path: Path, data: dict) -> None:
     write_json_orjson_impl(path, data)
-
 
 def clean_kubejs_from_raw(
     base_dir: str,
@@ -75,10 +69,8 @@ def clean_kubejs_from_raw(
         log_info_fn=log_info,
     )
 
-
 def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> Path:
     return resolve_kubejs_root_impl(input_dir, max_depth=max_depth)
-
 
 def step1_extract_and_clean(
     *,
@@ -127,7 +119,6 @@ def step1_extract_and_clean(
         "pending_dir": str(Path(pending_dir).resolve()),
         "final_dir": str(Path(final_dir).resolve()),
     }
-
 
 def step2_translate_lm(
     *,
@@ -199,7 +190,6 @@ def step2_translate_lm(
 
     return result
 
-
 def step3_inject(
     *,
     pack_or_kubejs_dir: str,
@@ -222,7 +212,6 @@ def step3_inject(
         progress_base=progress_base,
         progress_span=progress_span,
     )
-
 
 def run_kubejs_pipeline(
     *,
@@ -440,7 +429,6 @@ def run_kubejs_pipeline(
     log_info(f"🎉 [KubeJS] 任務完成！ {duration}")
     progress(session, 0.999)
     return result
-
 
 __all__ = [
     "_is_filled_text",

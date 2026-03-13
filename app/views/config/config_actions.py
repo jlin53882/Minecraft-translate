@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import traceback
 
-
 def load_config_into_view(view, config: dict):
     log_cfg = config.get('logging', {})
     trans_cfg = config.get('translator', {})
@@ -59,7 +58,6 @@ def load_config_into_view(view, config: dict):
         row = view._build_key_row(tf)
         view.key_fields.append(tf)
         view.keys_column.controls.append(row)
-
 
 def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, validate_api_keys_from_ui_fn):
     new_config = load_config_json_fn()

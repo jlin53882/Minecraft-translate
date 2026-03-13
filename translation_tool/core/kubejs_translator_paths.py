@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 def resolve_kubejs_root_impl(input_dir: str, *, max_depth: int = 4) -> Path:
     """自動解析 KubeJS 根目錄。"""
     base = Path(input_dir).resolve()

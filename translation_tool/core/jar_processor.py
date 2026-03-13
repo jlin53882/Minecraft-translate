@@ -18,7 +18,6 @@ from translation_tool.core.jar_processor_preview import (
     preview_extraction_generator_impl,
 )
 
-
 BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
     rf"(assets|data)/([^/]+)/"
     rf"(patchouli_books|book|manual|guidebook)/"
@@ -31,10 +30,8 @@ BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
     re.IGNORECASE,
 )
 
-
 LANG_CODES = ["en_us", "zh_tw", "zh_cn"]
 lang_pattern = r"_?(?:" + "|".join(map(re.escape, LANG_CODES)) + r")"
-
 
 def _extract_from_jar(jar_path: str, output_root: str, target_regex: re.Pattern) -> Dict[str, Any]:
     """從 JAR 檔案提取檔案。
@@ -48,7 +45,6 @@ def _extract_from_jar(jar_path: str, output_root: str, target_regex: re.Pattern)
         提取結果字典
     """
     return extract_from_jar_impl(jar_path, output_root, target_regex)
-
 
 def _run_extraction_process(
     mods_dir: str, output_dir: str, target_regex: re.Pattern, process_name: str
@@ -73,7 +69,6 @@ def _run_extraction_process(
         extract_from_jar_fn=_extract_from_jar,
     )
 
-
 def extract_lang_files_generator(mods_dir: str, output_dir: str) -> Generator[Dict[str, Any], None, None]:
     """從 mods 目錄提取語言檔。
 
@@ -94,7 +89,6 @@ def extract_lang_files_generator(mods_dir: str, output_dir: str) -> Generator[Di
         process_name="Lang",
     )
 
-
 def extract_book_files_generator(mods_dir: str, output_dir: str) -> Generator[Dict[str, Any], None, None]:
     """從 mods 目錄提取 Patchouli 書本檔。
 
@@ -112,7 +106,6 @@ def extract_book_files_generator(mods_dir: str, output_dir: str) -> Generator[Di
         "Patchouli Book",
     )
 
-
 def preview_extraction_generator(mods_dir: str, mode: str) -> Generator[Dict[str, Any], None, None]:
     """預覽提取結果。
 
@@ -129,7 +122,6 @@ def preview_extraction_generator(mods_dir: str, mode: str) -> Generator[Dict[str
         find_jar_files_fn=find_jar_files,
         book_path_regex=BOOK_PATH_REGEX_DUAL_STRUCTURE,
     )
-
 
 __all__ = [
     "find_jar_files",

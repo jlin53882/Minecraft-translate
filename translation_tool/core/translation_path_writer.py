@@ -8,23 +8,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 def map_lang_output_path(src: Path) -> Path:
     """
 
-    回傳：依函式內 return path。
     """
     if src.name.lower() == "en_us.json" and "lang" in src.parts:
         return src.with_name("zh_tw.json")
     return src
 
-
 def set_by_path(root: dict, path: str, value):
     """
 
-    - 主要包裝：`replace`, `split`
-
-    回傳：依函式內 return path。
     """
     current = root
     normalized_path = path.replace("][", "].[")

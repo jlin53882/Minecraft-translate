@@ -6,7 +6,6 @@ from typing import Any, Callable
 
 _LANG_REF_RE = re.compile(r"^\{ftbquests\..+\}$")
 
-
 def _is_filled_text(v) -> bool:
     if not isinstance(v, str):
         return False
@@ -16,7 +15,6 @@ def _is_filled_text(v) -> bool:
     if _LANG_REF_RE.match(s):
         return False
     return True
-
 
 def deep_merge_3way(zh_tw: dict, zh_cn: dict, en_us: dict) -> dict:
     """優先順序：zh_tw > (zh_cn 轉繁) > en_us。"""
@@ -44,7 +42,6 @@ def deep_merge_3way(zh_tw: dict, zh_cn: dict, en_us: dict) -> dict:
 
     return merge(zh_tw, zh_cn, en_us)
 
-
 def prune_en_us_by_zh_tw(en_us: Any, zh_tw: Any) -> Any:
     """從 en_us 中刪掉 zh_tw 已有內容的部分。"""
 
@@ -66,7 +63,6 @@ def prune_en_us_by_zh_tw(en_us: Any, zh_tw: Any) -> Any:
         return en_us
     return en_us
 
-
 def prune_flat_en_by_tw(en_map: dict, tw_available: dict) -> dict:
     """針對扁平 dict，只保留 tw 尚未覆蓋的 en key。"""
     out = {}
@@ -76,7 +72,6 @@ def prune_flat_en_by_tw(en_map: dict, tw_available: dict) -> dict:
             continue
         out[k] = v
     return out
-
 
 def clean_ftbquests_from_raw_impl(
     base_dir: str,

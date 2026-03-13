@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import flet as ft
 
-
 # -------------------------
 # 基礎視覺常數（集中管理）
 # -------------------------
@@ -23,7 +22,6 @@ CARD_RADIUS: int = 10
 CARD_BORDER_COLOR = ft.Colors.BLACK12
 CARD_BG_COLOR = ft.Colors.WHITE
 DIVIDER_COLOR = ft.Colors.GREY_200
-
 
 def section_header(
     title: str,
@@ -53,7 +51,6 @@ def section_header(
         ],
         spacing=8,
     )
-
 
 def styled_card(
     *,
@@ -96,7 +93,6 @@ def styled_card(
         ),
     )
 
-
 def primary_button(
     text: str,
     *,
@@ -126,7 +122,6 @@ def primary_button(
         on_click=on_click,
     )
 
-
 def secondary_button(
     text: str,
     *,
@@ -145,7 +140,6 @@ def secondary_button(
         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=6), padding=16),
         on_click=on_click,
     )
-
 
 # -------------------------
 # 通知元件

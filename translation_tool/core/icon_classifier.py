@@ -6,11 +6,9 @@
 
 from .icon_reason import IconRisk
 
-
 def classify_no_icon_reason(lang_key: str) -> tuple[str, IconRisk]:
     """
 
-    回傳：依函式內 return path。
     """
     k = lang_key.lower()
 

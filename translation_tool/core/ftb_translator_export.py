@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 from typing import Callable
 
-
 def resolve_ftbquests_quests_root_impl(base_dir: str) -> str:
     """往下遞迴找 config/ftbquests/quests。"""
     base = Path(base_dir).expanduser().resolve()
@@ -26,7 +25,6 @@ def resolve_ftbquests_quests_root_impl(base_dir: str) -> str:
 
     candidates.sort(key=lambda p: (len(p.parts), str(p)))
     return str(candidates[0])
-
 
 def export_ftbquests_raw_json_impl(
     base_dir: str,

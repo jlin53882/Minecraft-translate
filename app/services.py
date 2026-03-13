@@ -23,7 +23,6 @@ from translation_tool.checkers.variant_comparator_tsv import (
 
 logger = logging.getLogger(__name__)
 
-
 __all__ = [
     "run_untranslated_check_service",
     "run_variant_compare_service",
@@ -31,11 +30,9 @@ __all__ = [
     "run_variant_compare_tsv_service",
 ]
 
-
 def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
     """執行此 generator 並逐步回報進度（yield update dict）。
 
-    - 主要包裝：`check_untranslated_generator`
     """
     try:
         for update_dict in check_untranslated_generator(en_dir, tw_dir, out_dir):
@@ -51,11 +48,9 @@ def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
             "progress": 0,
         }
 
-
 def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
     """執行此 generator 並逐步回報進度（yield update dict）。
 
-    - 主要包裝：`compare_variants_generator`
     """
     try:
         for update_dict in compare_variants_generator(cn_dir, tw_dir, out_dir):
@@ -71,11 +66,9 @@ def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
             "progress": 0,
         }
 
-
 def run_english_residue_check_service(input_dir: str, out_dir: str):
     """執行此 generator 並逐步回報進度（yield update dict）。
 
-    - 主要包裝：`check_english_residue_generator`
     """
     try:
         for update_dict in check_english_residue_generator(input_dir, out_dir):
@@ -91,11 +84,9 @@ def run_english_residue_check_service(input_dir: str, out_dir: str):
             "progress": 0,
         }
 
-
 def run_variant_compare_tsv_service(tsv_path: str, output_csv_path: str):
     """執行此 generator 並逐步回報進度（yield update dict）。
 
-    - 主要包裝：`compare_variants_tsv_generator`
     """
     try:
         for update_dict in compare_variants_tsv_generator(tsv_path, output_csv_path):

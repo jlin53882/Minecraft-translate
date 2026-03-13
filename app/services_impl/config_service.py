@@ -31,7 +31,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = str(PROJECT_ROOT / "config.json")
 REPLACE_RULES_PATH = str(PROJECT_ROOT / "replace_rules.json")
 
-
 def _load_app_config() -> dict[str, Any]:
     """讀取 app 設定（service 層唯一入口）。
 
@@ -45,7 +44,6 @@ def _load_app_config() -> dict[str, Any]:
 
     return load_config(CONFIG_PATH)
 
-
 def _save_app_config(config: dict[str, Any]):
     """儲存 app 設定（service 層唯一入口）。
 
@@ -58,44 +56,29 @@ def _save_app_config(config: dict[str, Any]):
 
     return save_config(config, CONFIG_PATH)
 
-
 # --- 檔案讀寫服務 ---
-
 
 def load_replace_rules():
     """
 
-    - 主要包裝：`load_rules_core`
-
-    回傳：依函式內 return path。
     """
     return load_rules_core(REPLACE_RULES_PATH)
 
-
 def save_replace_rules(rules):
     """
-
-    - 主要包裝：`save_rules_core`
 
     回傳：None
     """
     save_rules_core(REPLACE_RULES_PATH, rules)
 
-
 def load_config_json():
     """
 
-    - 主要包裝：`_load_app_config`
-
-    回傳：依函式內 return path。
     """
     return _load_app_config()
 
-
 def save_config_json(config):
     """
-
-    - 主要包裝：`_save_app_config`
 
     回傳：None
     """

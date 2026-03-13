@@ -28,7 +28,6 @@ from pathlib import Path
 from typing import List, Optional
 import hashlib
 
-
 # ========= 你那套 § 指令行（遇到就切段，且本行不納入段落翻譯） =========
 # 你貼的內容常見：§align, §stack, §rule, §recipe, §entity
 RE_TOKEN_LINE = re.compile(r"^\s*§(align:|stack\[|rule\{|recipe\[|entity\[)", re.I)
@@ -49,16 +48,11 @@ RE_FORMAT_PREFIX = re.compile(r"^(?P<prefix>\s*§[0-9a-zA-Z]+)(?P<text>.+)$")
 # 語言過濾（漢字）
 RE_CJK = re.compile(r"[\u4e00-\u9fff]")
 
-
 def contains_cjk(s: str) -> bool:
     """
 
-    - 主要包裝：`bool`
-
-    回傳：依函式內 return path。
     """
     return bool(RE_CJK.search(s))
-
 
 def pass_lang_filter(block_text: str, mode: str) -> bool:
     """
@@ -74,7 +68,6 @@ def pass_lang_filter(block_text: str, mode: str) -> bool:
         return not has_cjk
     return True
 
-
 def normalize_for_dedupe(s: str) -> str:
     """
     去重用的正規化（保守版）：
@@ -88,17 +81,12 @@ def normalize_for_dedupe(s: str) -> str:
     s = re.sub(r"\n{3,}", "\n\n", s).strip()
     return s
 
-
 def make_content_hash(text: str) -> str:
     """
 
-    - 主要包裝：`normalize_for_dedupe`, `hexdigest`
-
-    回傳：依函式內 return path。
     """
     n = normalize_for_dedupe(text)
     return hashlib.sha1(n.encode("utf-8")).hexdigest()
-
 
 @dataclass
 class BlockItem:
@@ -111,7 +99,6 @@ class BlockItem:
     content_hash: str  # 資料重複標記
     start_line: int  # 起始行（1-based）
     end_line: int  # 結束行（1-based）
-
 
 def is_splitter_line_old(line: str) -> bool:
     """
@@ -126,12 +113,10 @@ def is_splitter_line_old(line: str) -> bool:
         return True
     return False
 
-
 def is_splitter_line(line: str) -> bool:
     # 原有的強分隔符
     """
 
-    回傳：依函式內 return path。
     """
     if RE_TOKEN_LINE.match(line):
         return True
@@ -148,7 +133,6 @@ def is_splitter_line(line: str) -> bool:
         return True
 
     return False
-
 
 def is_translatable_text_line(line: str) -> bool:
     """
@@ -183,7 +167,6 @@ def is_translatable_text_line(line: str) -> bool:
 
     return True
 
-
 def normalize_blank_lines(text: str) -> str:
     """
     將 3 個以上連續空行壓縮成最多 2 個，
@@ -191,7 +174,6 @@ def normalize_blank_lines(text: str) -> str:
     """
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip("\n")
-
 
 def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockItem]:
     """
@@ -287,13 +269,11 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockIte
     flush(end_ln=len(lines))
     return items
 
-
 def build_pending_json(
     rel_md: str, abs_md: Path, items: List[BlockItem], lang_mode: str
 ) -> dict:
     """
 
-    回傳：依函式內 return path。
     """
     return {
         "schema": "md_pending_blocks_v1",
@@ -311,21 +291,15 @@ def build_pending_json(
         ],
     }
 
-
 # 語言資料夾段落（en_us / zh_tw，允許 _en_us / _zh_tw，大小寫不拘）
 RE_LANG_SEG = re.compile(r"^_?(en_us|zh_cn|zh_tw)$", re.IGNORECASE)
-
 
 def has_allowed_lang_segment(path: Path) -> bool:
     # 用 parts 掃描每個 segment，支援 structure/en_us 這種深層結構
     """
 
-    - 主要包裝：`any`
-
-    回傳：依函式內 return path。
     """
     return any(RE_LANG_SEG.match(seg) for seg in path.parts)
-
 
 def detect_lang_segment(parts: List[str]) -> Optional[str]:
     """
@@ -338,7 +312,6 @@ def detect_lang_segment(parts: List[str]) -> Optional[str]:
             # m.group(0) 可能是 _EN_US 這種，把前綴 _ 去掉再 lower
             return seg.lstrip("_").lower()
     return None
-
 
 def map_rel_lang_path(rel_path: str, src_lang: str, dst_lang: str) -> str:
     """
@@ -363,7 +336,6 @@ def map_rel_lang_path(rel_path: str, src_lang: str, dst_lang: str) -> str:
 
     return "/".join(parts)
 
-
 def iter_md_files(root: Path):
     """
     遞迴列出所有 .md（大小寫不敏感），排除 README.md（不分大小寫、任何層級）
@@ -383,21 +355,14 @@ def iter_md_files(root: Path):
 
         yield p
 
-
 def safe_relpath(path: Path, root: Path) -> str:
     """
 
-    - 主要包裝：`as_posix`
-
-    回傳：依函式內 return path。
     """
     return path.relative_to(root).as_posix()
 
-
 def main():
     """
-
-    - 主要包裝：`strip`
 
     回傳：None
     """
@@ -563,7 +528,6 @@ def main():
     print(f"重複 blocks（若不 cache 會重送）：{dup_blocks}")
 
     print(f"manifest：{manifest_path}")
-
 
 if __name__ == "__main__":
     main()

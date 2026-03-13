@@ -12,7 +12,6 @@ import requests
 
 from translation_tool.utils.config_manager import load_config
 
-
 def call_gemini_requests(
     *,
     model_name: str,
@@ -23,9 +22,6 @@ def call_gemini_requests(
 ) -> str:
     """
 
-    - 主要包裝：`post`, `json`
-
-    回傳：依函式內 return path。
     """
     url = (
         "https://generativelanguage.googleapis.com/"

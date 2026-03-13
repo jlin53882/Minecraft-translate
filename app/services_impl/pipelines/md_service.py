@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
 
-
 def run_md_translation_service(
     input_dir: str,
     session,

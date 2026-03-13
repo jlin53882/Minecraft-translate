@@ -10,7 +10,6 @@ from typing import Any, Dict, Generator, Callable
 
 log = logging.getLogger(__name__)
 
-
 class ExtractionSummary:
     """提取結果摘要（記錄成功/警告/失敗）。"""
 
@@ -37,7 +36,6 @@ class ExtractionSummary:
             'warnings': self.warnings[:5],
             'failures': self.failures[:5],
         }
-
 
 def preview_extraction_generator_impl(
     mods_dir: str,
@@ -97,7 +95,6 @@ def preview_extraction_generator_impl(
             'total_size_mb': total_size_bytes / (1024**2),
         },
     }
-
 
 def generate_preview_report(result: Dict[str, Any], mode: str, output_path: str) -> str:
     output_dir = Path(output_path)

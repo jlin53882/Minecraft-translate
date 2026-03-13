@@ -6,7 +6,6 @@ import shutil
 
 logger = logging.getLogger(__name__)
 
-
 def remove_empty_dirs_impl(root_dir: str, *, logger_override=None) -> None:
     """遞迴刪除空資料夾。"""
     active_logger = logger_override or logger
@@ -20,7 +19,6 @@ def remove_empty_dirs_impl(root_dir: str, *, logger_override=None) -> None:
                 os.rmdir(dirpath)
         except OSError as e:
             active_logger.warning(f"刪除空目錄失敗 {dirpath}: {e}")
-
 
 def export_filtered_pending_impl(
     pending_root: str,

@@ -48,7 +48,6 @@ from translation_tool.plugins.shared.lang_path_rules import (
 
 from translation_tool.utils.log_unit import log_info, log_warning, progress
 
-
 # -------------------------
 # Smart item mapping
 # -------------------------
@@ -78,7 +77,6 @@ def collect_items_from_mapping(
         )
     return items
 
-
 def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     """計算 mapping 中『可翻譯字串』的數量。
 
@@ -89,7 +87,6 @@ def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     用途：顯示進度 / 估算翻譯總量。
     """
     return sum(1 for _, v in mapping.items() if isinstance(v, str) and v.strip())
-
 
 # -------------------------
 # Dry-run stats (optional)
@@ -107,7 +104,6 @@ class DryRunStats:
     cache_hit: int = 0
     cache_miss: int = 0
     per_file: Optional[list[dict]] = None
-
 
 # -------------------------
 # Public API (for UI/pipeline)
@@ -174,9 +170,7 @@ def translate_kubejs_pending_to_zh_tw(
     def _count_one(src: Path) -> Tuple[Path, int]:
         """
 
-        - 主要包裝：`read_json_dict`
-
-        回傳：依函式內 return path。
+    
         """
         try:
             mapping = read_json_dict(src)
@@ -254,8 +248,6 @@ def translate_kubejs_pending_to_zh_tw(
 
     def _writer(file_id: str) -> None:
         """
-
-        - 主要包裝：`write_json_dict`
 
         回傳：None
         """
@@ -451,8 +443,6 @@ def translate_kubejs_pending_to_zh_tw(
             # write touched files each batch
             """
 
-            - 主要包裝：`flush`
-
             回傳：None
             """
             try:
@@ -465,9 +455,7 @@ def translate_kubejs_pending_to_zh_tw(
         def _fmt_eta(sec: float) -> str:
             """
 
-            - 主要包裝：`divmod`
-
-            回傳：依函式內 return path。
+        
             """
             if sec <= 0:
                 return ""
@@ -481,8 +469,6 @@ def translate_kubejs_pending_to_zh_tw(
 
         def on_progress(p: float, msg: str, eta_sec: float) -> None:
             """
-
-            - 主要包裝：`_fmt_eta`, `log_info`, `progress`
 
             回傳：None
             """

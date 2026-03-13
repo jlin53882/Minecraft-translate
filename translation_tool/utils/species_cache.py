@@ -65,13 +65,9 @@ except ImportError:
 except Exception as e:
     log.error(f"載入 Wikipedia 函式庫時發生未知錯誤: {e}")
 
-
 def initialize_species_cache():
     """
 
-    - 主要包裝：`info`
-
-    回傳：依函式內 return path。
     """
     global \
         _species_cache_data, \
@@ -125,25 +121,17 @@ def initialize_species_cache():
         _initialized = False
         return False
 
-
 def is_potential_species_name(name: str) -> bool:
     """
 
-    - 主要包裝：`bool`
-
-    回傳：依函式內 return path。
     """
     if not isinstance(name, str):
         return False
     return bool(_SPECIES_NAME_REGEX.match(name))
 
-
 def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
     """
 
-    - 主要包裝：`debug`, `sleep`
-
-    回傳：依函式內 return path。
     """
     if not _WIKIPEDIA_AVAILABLE or _species_cache_data is None:
         return None
@@ -184,11 +172,9 @@ def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
         _species_cache_data[species_name] = ""  # 僅更新記憶體快取
         return None
 
-
 def lookup_species_name(name: str) -> Optional[str]:
     """
 
-    回傳：依函式內 return path。
     """
     if not _initialized:
         if not initialize_species_cache():
@@ -207,6 +193,5 @@ def lookup_species_name(name: str) -> Optional[str]:
         return query_wikipedia_and_update_cache(name)
 
     return None
-
 
 initialize_species_cache()

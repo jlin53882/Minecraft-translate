@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 @dataclass
 class ExtractionStats:
     success: int = 0
@@ -23,7 +22,6 @@ class ExtractionStats:
             'failures': self.failures,
             'total_files': self.total_files,
         }
-
 
 @dataclass
 class PreviewState:

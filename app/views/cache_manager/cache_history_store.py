@@ -4,10 +4,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-
 def history_now_ts() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
-
 
 def history_dirs(cache_root: str, cache_type: str):
     root = str(cache_root or "").strip()
@@ -20,7 +18,6 @@ def history_dirs(cache_root: str, cache_type: str):
     json_dir.mkdir(parents=True, exist_ok=True)
     return base, jsonl_dir, json_dir
 
-
 def history_active_default(cache_type: str) -> dict:
     return {
         "current_file": f"{cache_type}_h000001.jsonl",
@@ -28,7 +25,6 @@ def history_active_default(cache_type: str) -> dict:
         "next_seq": 2,
         "max_per_file": 10000,
     }
-
 
 def history_load_active(cache_root: str, cache_type: str):
     _base, jsonl_dir, json_dir = history_dirs(cache_root, cache_type)
@@ -55,10 +51,8 @@ def history_load_active(cache_root: str, cache_type: str):
     active.setdefault("max_per_file", 10000)
     return active, active_path, jsonl_dir, json_dir
 
-
 def history_save_active(active_path: Path, active: dict):
     active_path.write_text(json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8")
-
 
 def history_append_event(cache_root: str, cache_type: str, event: dict):
     active, active_path, jsonl_dir, json_dir = history_load_active(cache_root, cache_type)
@@ -97,7 +91,6 @@ def history_append_event(cache_root: str, cache_type: str, event: dict):
     if len(arr) > max_per_file:
         arr = arr[-max_per_file:]
     json_path.write_text(json.dumps(arr, ensure_ascii=False, indent=2), encoding="utf-8")
-
 
 def history_load_recent(cache_root: str, cache_type: str, key: str, limit: int = 20) -> list[dict]:
     _base, jsonl_dir, _json_dir = history_dirs(cache_root, cache_type)

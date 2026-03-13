@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 DRY_RUN = False  # True = 不送 API，只做分析 / 預覽 測試使用
 EXPORT_CACHE_ONLY = True  # True = 先輸出 cache 命中內容
 
-
 def translate_batch_smart(batch_items, total=None):
     """
     智慧型分批翻譯函式
@@ -64,7 +63,7 @@ def translate_batch_smart(batch_items, total=None):
     def _norm_file(item):
         """
 
-        回傳：依函式內 return path。
+    
         """
         return str(item.get("file", "")).replace("\\", "/").lower()
 
@@ -72,7 +71,7 @@ def translate_batch_smart(batch_items, total=None):
         # ✅ 優先用 cache_type（最可靠）
         """
 
-        回傳：依函式內 return path。
+    
         """
         cache_types = [
             str(i.get("cache_type", "")).lower() for i in items if isinstance(i, dict)

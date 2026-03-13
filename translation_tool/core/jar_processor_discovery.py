@@ -6,7 +6,6 @@ from typing import List
 
 log = logging.getLogger(__name__)
 
-
 def find_jar_files(folder_path: str) -> List[str]:
     """遞迴找出資料夾下所有 .jar 檔案。"""
     jar_files: List[str] = []

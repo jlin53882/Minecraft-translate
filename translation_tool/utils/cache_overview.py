@@ -12,13 +12,11 @@ from typing import Any, Callable
 
 import orjson as json
 
-
 def get_active_shard_id(
     cache_file_path: dict[str, Path], cache_type: str, active_shard_file: str
 ) -> str:
     """
 
-    回傳：依函式內 return path。
     """
     try:
         type_dir = cache_file_path.get(cache_type, Path(".")).parent
@@ -28,7 +26,6 @@ def get_active_shard_id(
     except Exception:
         pass
     return ""
-
 
 def build_cache_overview(
     *,
@@ -46,7 +43,6 @@ def build_cache_overview(
 ) -> dict[str, Any]:
     """
 
-    回傳：依函式內 return path。
     """
     out_types: dict[str, Any] = {}
     total_entries = 0

@@ -4,7 +4,6 @@ import flet as ft
 
 from app.ui.components import styled_card
 
-
 def build_pick_button(view, target):
     return ft.IconButton(
         icon=ft.Icons.FOLDER_OPEN_OUTLINED,
@@ -12,7 +11,6 @@ def build_pick_button(view, target):
         tooltip='瀏覽...',
         on_click=lambda e: view.pick_directory(target),
     )
-
 
 def build_settings_card(view):
     return styled_card(
@@ -86,7 +84,6 @@ def build_settings_card(view):
             ],
         ),
     )
-
 
 def build_logs_card(view):
     return styled_card(

@@ -14,7 +14,6 @@ TaskSession 是 UI 與背景工作執行緒之間的「任務狀態容器」。
 import threading
 from collections import deque
 
-
 class TaskSession:
     """
     單一長任務的 UI 狀態容器（Single Source of Truth）。
@@ -29,8 +28,6 @@ class TaskSession:
 
     def __init__(self, max_logs: int = 300):
         """
-
-        - 主要包裝：`deque`, `Lock`
 
         回傳：None
         """

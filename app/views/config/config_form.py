@@ -4,7 +4,6 @@ import flet as ft
 
 from app.ui.components import primary_button
 
-
 def build_card(view, title, controls_list):
     return ft.Card(
         elevation=2,
@@ -22,7 +21,6 @@ def build_card(view, title, controls_list):
         ),
     )
 
-
 def build_header(view):
     return ft.Container(
         padding=ft.padding.only(left=5, bottom=10),
@@ -31,7 +29,6 @@ def build_header(view):
             ft.Text('全域設定 (Global Settings)', theme_style=ft.TextThemeStyle.HEADLINE_MEDIUM, color=ft.Colors.BLUE_GREY_900),
         ]),
     )
-
 
 def build_footer(view):
     return ft.Container(
@@ -48,11 +45,9 @@ def build_footer(view):
         ),
     )
 
-
 def build_key_row(view, tf: ft.TextField):
     row = ft.Row(controls=[tf, ft.IconButton(icon=ft.Icons.DELETE, on_click=lambda e: view.remove_key_row(row))])
     return row
-
 
 def build_key_field(value: str = ''):
     return ft.TextField(value=value, password=True, can_reveal_password=True, expand=True, dense=True)

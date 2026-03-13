@@ -6,7 +6,6 @@ import re
 
 import orjson
 
-
 def read_json_dict_orjson_impl(path: Path) -> dict:
     """使用 orjson 讀取 JSON 檔並容忍 BOM / trailing comma。"""
     if not path or not path.is_file():
@@ -20,7 +19,6 @@ def read_json_dict_orjson_impl(path: Path) -> dict:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
-
 
 def write_json_orjson_impl(path: Path, data: dict) -> None:
     """使用 orjson pretty-print 寫回 JSON。"""
