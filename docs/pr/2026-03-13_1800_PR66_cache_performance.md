@@ -1,6 +1,6 @@
-# PR66 設計稿：Cache 效能優化
+# PR66 設計稿：Cache 監控版（PR66-A）
 
-> 版本：v1.1（修復版）  
+> 版本：v2.0（監控版）  
 > 適用：Minecraft_translator_flet v0.6.0+  
 > 編寫日期：2026-03-13
 
@@ -9,12 +9,20 @@
 ## 1. 目標與動機
 
 ### 目標
-利用 PR61 canonicalize 後的 cache 結構，優化 cache 命中率與讀寫效能。
+建立 cache 監控與基準測量，不改變既有 cache 行為。
 
 ### 動機
-- PR61 完成後，cache import 已 canonicalize，結構更清晰
-- 可基於清晰的結構進行效能優化
-- 減少重複翻譯，提升使用者體驗
+- PR66 設計稿將 key 變更、lazy write 列為高風險
+- 應該先取得數據，再決定是否優化
+- 保持向後相容是最重要的
+
+### 本次 PR66-A 範圍
+- ✅ 新增 cache metrics（統計）
+- ✅ 建立 benchmark 腳本
+- ✅ 建立 collision observer（只記錄，不改行為）
+- ❌ 不改 key 生成邏輯
+- ❌ 不改寫入時機
+- ❌ 不引入 lazy write
 
 ---
 

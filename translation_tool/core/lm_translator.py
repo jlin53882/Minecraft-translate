@@ -43,13 +43,14 @@ logger = logging.getLogger(__name__)
 
 
 def get_formatted_duration(start_tick: float) -> str:
-    """取得此函式的工作（細節以程式碼為準）。
+    """將開始時間轉換為人類可讀的格式。
 
-    - 主要包裝：`perf_counter`, `divmod`
+    Args:
+        start_tick: 開始時間（由 time.perf_counter() 取得）
 
-    回傳：依函式內 return path。
+    Returns:
+        人類可讀的時間字串，如 "1 小時 30 分 45 秒" 或 "30 分 45 秒"
     """
-
     # 使用 perf_counter 計算目前時間（高精度、單調遞增）
     current_tick = time.perf_counter()
 
@@ -113,12 +114,23 @@ def translate_directory_generator(
     *,
     dry_run: Optional[bool] = None,
     export_lang: bool = False,
-    write_new_cache: bool = False,  # ⭐ 新增
+    write_new_cache: bool = False,
 ) -> Generator[Dict[str, Any], None, None]:
-    """
-    UI / CLI 共用翻譯入口
-    - dry_run=None → 使用 lm_translate_tast.py 的 DRY_RUN
-    - dry_run=True/False → 由 UI / argparse 覆寫
+    """翻譯目錄的 generator 入口。
+
+    Args:
+        input_dir: 輸入目錄路徑
+        output_dir: 輸出目錄路徑
+        dry_run: 是否為模擬執行（None 使用預設值）
+        export_lang: 是否匯出語言檔
+        write_new_cache: 是否寫入新快取
+
+    Yields:
+        進度字典，包含 progress、log 等資訊
+
+    Note:
+        - dry_run=None → 使用 lm_translate_task.py 的 DRY_RUN
+        - dry_run=True/False → 由 UI / argparse 覆寫
     """
     # 批次大小決定 LM 送出多少條文字進行翻譯
     INITIAL_BATCH_SIZE_LANG = (

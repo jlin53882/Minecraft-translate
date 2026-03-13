@@ -2,11 +2,12 @@
 
 基於 [Flet](https://flet.dev/) 的桌面應用程式，用於將 Minecraft 模組包從簡體中文／英文批量翻譯為繁體中文（台灣用語）。
 
-## 目前狀態（2026-03-12）
+## 目前狀態（2026-03-13）
 
 - ✅ `app.services` 已收斂為 **QC/checkers 暫緩線 façade**（PR29）
 - ✅ 主線 caller 已完成遷移到 `app.services_impl.*`（PR28a + PR28b）
-- ✅ 最近一次完整測試記錄：`40 passed`
+- ✅ 最近一次完整測試記錄：**171 passed**（PR62 驗證）
+- ✅ PR62-64 設計稿已合併（PR63: Fixtures, PR64: Docstring）
 
 > 詳細變更請看 `docs/pr/2026-03-12_0204_PR_pr28a-low-risk-caller-migration-design.md`、
 > `docs/pr/2026-03-12_0205_PR_pr28b-high-risk-caller-migration-design.md`、
