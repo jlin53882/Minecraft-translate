@@ -9,6 +9,9 @@ import time
 from pathlib import Path
 
 import flet as ft
+from app.ui import theme
+
+import flet as ft
 
 # UI 共用元件：統一卡片/按鈕樣式
 from app.ui.components import primary_button, styled_card
@@ -47,7 +50,7 @@ class MergeView(ft.Column):
             hint_text="請選擇合併結果輸出位置",
             expand=True,
             dense=True,
-            border_color=ft.Colors.OUTLINE,
+            border_color=theme.OUTLINE,
             text_size=14,
             content_padding=14,
             prefix_icon=ft.Icons.FOLDER_COPY,
@@ -58,10 +61,10 @@ class MergeView(ft.Column):
 
         # 狀態區
         self.status_chip = ft.Chip(
-            label=ft.Text("尚未開始"), bgcolor=ft.Colors.GREY_200
+            label=ft.Text("尚未開始"), bgcolor=theme.GREY_200
         )
         self.progress_bar = ft.ProgressBar(
-            value=0, height=8, bgcolor=ft.Colors.GREY_200, color=ft.Colors.BLUE
+            value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
 
         # 日誌區
@@ -73,14 +76,14 @@ class MergeView(ft.Column):
             icon=ft.Icons.ADD,
             tooltip="選擇要合併的 ZIP 檔案",
             on_click=self.pick_zips,
-            bgcolor=ft.Colors.BLUE_700,
+            bgcolor=theme.BLUE_700,
         )
         self.start_button = primary_button(
             "開始合併 ZIP",
             icon=ft.Icons.PLAY_ARROW,
             tooltip="開始執行 ZIP 合併流程",
             on_click=self.start_merge,
-            bgcolor=ft.Colors.GREEN_700,
+            bgcolor=theme.GREEN_700,
         )
 
         self.controls = [
@@ -95,7 +98,7 @@ class MergeView(ft.Column):
                                 ft.Text(
                                     "可加入多個 ZIP，會依序合併",
                                     size=12,
-                                    color=ft.Colors.GREY_600,
+                                    color=theme.GREY_600,
                                 ),
                             ],
                             spacing=10,
@@ -115,7 +118,7 @@ class MergeView(ft.Column):
                                 self.output_dir_field,
                                 ft.IconButton(
                                     icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                                    icon_color=ft.Colors.BLUE_GREY_700,
+                                    icon_color=theme.BLUE_GREY_700,
                                     tooltip="選擇輸出資料夾",
                                     on_click=lambda e: self.pick_output_dir(),
                                 ),
@@ -264,7 +267,7 @@ class MergeView(ft.Column):
         self.start_button.disabled = True
         self.zip_list_view.disabled = True
         self.log_view.controls.clear()
-        self._set_status("執行中", ft.Colors.BLUE_200)
+        self._set_status("執行中", theme.BLUE_200)
 
         self.session.start()
         self.session.add_log("[系統] 開始 ZIP 合併任務")
@@ -306,18 +309,18 @@ class MergeView(ft.Column):
                 logs = snap["logs"]
 
                 if status == "RUNNING":
-                    self._set_status("執行中", ft.Colors.BLUE_200)
+                    self._set_status("執行中", theme.BLUE_200)
                 elif status == "DONE":
-                    self._set_status("任務完成", ft.Colors.GREEN_200)
+                    self._set_status("任務完成", theme.GREEN_200)
                 elif status == "ERROR":
-                    self._set_status("任務發生錯誤", ft.Colors.RED_200)
+                    self._set_status("任務發生錯誤", theme.RED_200)
 
                 self.progress_bar.value = progress
 
                 if len(logs) > self._last_log_count:
                     for line in logs[self._last_log_count :]:
                         self.log_view.controls.append(
-                            ft.Text(line, size=13, color=ft.Colors.GREY_100)
+                            ft.Text(line, size=13, color=theme.GREY_100)
                         )
                     self._last_log_count = len(logs)
                     self.log_view.scroll_to(offset=-1, duration=100)
@@ -346,7 +349,7 @@ class MergeView(ft.Column):
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
-    def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """處理此函式的工作（細節以程式碼為準）。
 
         - 主要包裝：`SnackBar`

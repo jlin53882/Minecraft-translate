@@ -9,6 +9,7 @@ import threading
 import time
 
 import flet as ft
+from app.ui import theme
 
 # UI 共用元件：統一卡片/按鈕樣式
 from app.ui.components import primary_button, styled_card
@@ -46,7 +47,7 @@ class LMView(ft.Column):
             hint_text="請選擇要進行 LM 翻譯的資料夾",
             expand=True,
             dense=True,
-            border_color=ft.Colors.OUTLINE,
+            border_color=theme.OUTLINE,
             text_size=14,
             content_padding=14,
             prefix_icon=ft.Icons.FOLDER,
@@ -56,7 +57,7 @@ class LMView(ft.Column):
             hint_text=f"留空會使用：{LM_translate_folder_name}",
             expand=True,
             dense=True,
-            border_color=ft.Colors.OUTLINE,
+            border_color=theme.OUTLINE,
             text_size=14,
             content_padding=14,
             prefix_icon=ft.Icons.FOLDER_COPY,
@@ -75,10 +76,10 @@ class LMView(ft.Column):
 
         # 狀態與日誌
         self.status_chip = ft.Chip(
-            label=ft.Text("尚未開始"), bgcolor=ft.Colors.GREY_200
+            label=ft.Text("尚未開始"), bgcolor=theme.GREY_200
         )
         self.progress_bar = ft.ProgressBar(
-            value=0, height=8, bgcolor=ft.Colors.GREY_200, color=ft.Colors.BLUE
+            value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
         self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
 
@@ -160,7 +161,7 @@ class LMView(ft.Column):
                 field,
                 ft.IconButton(
                     icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                    icon_color=ft.Colors.BLUE_GREY_700,
+                    icon_color=theme.BLUE_GREY_700,
                     tooltip="選擇資料夾",
                     on_click=on_pick,
                 ),
@@ -217,7 +218,7 @@ class LMView(ft.Column):
         回傳：None
         """
         if not (self.input_path.value or "").strip():
-            self._set_status("請先選擇輸入資料夾", ft.Colors.RED_200)
+            self._set_status("請先選擇輸入資料夾", theme.RED_200)
             self.page.update()
             return
 
@@ -229,7 +230,7 @@ class LMView(ft.Column):
                 f"[資訊] 未指定輸出，將使用預設：{LM_translate_folder_name}"
             )
 
-        self._set_status("執行中", ft.Colors.BLUE_200)
+        self._set_status("執行中", theme.BLUE_200)
         self.progress_bar.value = 0
         self.log_view.controls.clear()
         self.page.update()
@@ -291,14 +292,14 @@ class LMView(ft.Column):
                 self.log_view.controls.clear()
                 for line in snap["logs"][-250:]:
                     self.log_view.controls.append(
-                        ft.Text(line, size=13, color=ft.Colors.GREY_100)
+                        ft.Text(line, size=13, color=theme.GREY_100)
                     )
 
                 if snap["status"] == "DONE":
-                    self._set_status("任務完成", ft.Colors.GREEN_200)
+                    self._set_status("任務完成", theme.GREEN_200)
                     self._ui_timer_running = False
                 elif snap["status"] == "ERROR":
-                    self._set_status("任務發生錯誤", ft.Colors.RED_200)
+                    self._set_status("任務發生錯誤", theme.RED_200)
                     self._ui_timer_running = False
 
                 self.page.update()
@@ -318,7 +319,7 @@ class LMView(ft.Column):
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
-    def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """處理此函式的工作（細節以程式碼為準）。
 
         - 主要包裝：`SnackBar`
