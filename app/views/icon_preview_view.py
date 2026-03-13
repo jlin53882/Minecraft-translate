@@ -8,6 +8,7 @@ import flet as ft
 import json
 from pathlib import Path
 from collections import defaultdict
+from app.ui import theme
 from types import SimpleNamespace
 
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
@@ -371,7 +372,7 @@ class IconPreviewView(ft.Column):
     def _show_snack(
         self,
         message: str,
-        color: str = ft.Colors.GREEN_600,
+        color: str = theme.GREEN_600,
     ):
         """
         統一 SnackBar 顯示（Flet Desktop 穩定版）
