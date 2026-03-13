@@ -5,13 +5,6 @@ from __future__ import annotations
 import flet as ft
 
 from app.ui.view_wrapper import wrap_view
-from app.views.cache_view import CacheView
-from app.views.config_view import ConfigView
-from app.views.extractor_view import ExtractorView
-from app.views.lm_view import LMView
-from app.views.merge_view import MergeView
-from app.views.rules_view import RulesView
-from app.views.translation_view import TranslationView
 
 
 DEFAULT_WINDOW_SIZE = (1280, 960)
@@ -26,15 +19,36 @@ VIEW_WINDOW_SIZES = {
 }
 
 
+# Lazy import map - only import when needed
+_VIEW_IMPORT_MAP = {
+    'config': ('app.views.config_view', 'ConfigView'),
+    'rules': ('app.views.rules_view', 'RulesView'),
+    'cache': ('app.views.cache_view', 'CacheView'),
+    'translation': ('app.views.translation_view', 'TranslationView'),
+    'extractor': ('app.views.extractor_view', 'ExtractorView'),
+    'lm': ('app.views.lm_view', 'LMView'),
+    'merge': ('app.views.merge_view', 'MergeView'),
+}
+
+
+def _lazy_import_view(view_key: str, page: ft.Page, file_picker: ft.FilePicker):
+    """Lazy import view class."""
+    module_name, class_name = _VIEW_IMPORT_MAP[view_key]
+    module = __import__(module_name, fromlist=[class_name])
+    view_class = getattr(module, class_name)
+    return view_class(page, file_picker) if file_picker else view_class(page)
+
+
 def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
+    # Lazy import all views
     registry = [
-        {'key': 'config', 'icon': ft.Icons.SETTINGS, 'label': '設定', 'view': wrap_view(ConfigView(page))},
-        {'key': 'rules', 'icon': ft.Icons.RULE, 'label': '規則', 'view': wrap_view(RulesView(page))},
-        {'key': 'cache', 'icon': ft.Icons.STORAGE, 'label': '快取管理', 'view': wrap_view(CacheView(page))},
-        {'key': 'translation', 'icon': ft.Icons.TRANSLATE, 'label': '任務 翻譯工具', 'view': wrap_view(TranslationView(page, file_picker))},
-        {'key': 'extractor', 'icon': ft.Icons.UNARCHIVE, 'label': 'jar 提取', 'view': wrap_view(ExtractorView(page, file_picker))},
-        {'key': 'lm', 'icon': ft.Icons.AUTO_AWESOME, 'label': '機器翻譯', 'view': wrap_view(LMView(page, file_picker))},
-        {'key': 'merge', 'icon': ft.Icons.CALL_MERGE, 'label': '檔案合併', 'view': wrap_view(MergeView(page, file_picker))},
+        {'key': 'config', 'icon': ft.Icons.SETTINGS, 'label': '設定', 'view': wrap_view(_lazy_import_view('config', page, file_picker))},
+        {'key': 'rules', 'icon': ft.Icons.RULE, 'label': '規則', 'view': wrap_view(_lazy_import_view('rules', page, file_picker))},
+        {'key': 'cache', 'icon': ft.Icons.STORAGE, 'label': '快取管理', 'view': wrap_view(_lazy_import_view('cache', page, file_picker))},
+        {'key': 'translation', 'icon': ft.Icons.TRANSLATE, 'label': '任務 翻譯工具', 'view': wrap_view(_lazy_import_view('translation', page, file_picker))},
+        {'key': 'extractor', 'icon': ft.Icons.UNARCHIVE, 'label': 'jar 提取', 'view': wrap_view(_lazy_import_view('extractor', page, file_picker))},
+        {'key': 'lm', 'icon': ft.Icons.AUTO_AWESOME, 'label': '機器翻譯', 'view': wrap_view(_lazy_import_view('lm', page, file_picker))},
+        {'key': 'merge', 'icon': ft.Icons.CALL_MERGE, 'label': '檔案合併', 'view': wrap_view(_lazy_import_view('merge', page, file_picker))},
     ]
     return registry
 
