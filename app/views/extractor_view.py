@@ -13,6 +13,7 @@
 
 # /minecraft_translator_flet/app/views/extractor_view.py
 import flet as ft
+from app.ui import theme
 import threading
 
 from app.task_session import TaskSession
@@ -75,7 +76,7 @@ class ExtractorView(ft.Column):
             hint_text="C:\\Example\\Mods",
             expand=True,
             dense=True,
-            border_color=ft.Colors.OUTLINE,
+            border_color=theme.OUTLINE,
             text_size=14,
             content_padding=15,
         )
@@ -84,7 +85,7 @@ class ExtractorView(ft.Column):
             hint_text="（未指定將自動產生）",
             expand=True,
             dense=True,
-            border_color=ft.Colors.OUTLINE,
+            border_color=theme.OUTLINE,
             text_size=14,
             content_padding=15,
         )
@@ -94,8 +95,8 @@ class ExtractorView(ft.Column):
             "提取 Lang",
             icon=ft.Icons.LANGUAGE,
             style=ft.ButtonStyle(
-                color=ft.Colors.WHITE,
-                bgcolor=ft.Colors.BLUE_700,
+                color=theme.WHITE,
+                bgcolor=theme.BLUE_700,
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
@@ -105,8 +106,8 @@ class ExtractorView(ft.Column):
             "提取 Book",
             icon=ft.Icons.BOOK,
             style=ft.ButtonStyle(
-                color=ft.Colors.WHITE,
-                bgcolor=ft.Colors.GREEN_700,
+                color=theme.WHITE,
+                bgcolor=theme.GREEN_700,
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
@@ -126,13 +127,13 @@ class ExtractorView(ft.Column):
         )
 
         # 3. Status Display
-        self.status_text = ft.Text("狀態：閒置", size=14, color=ft.Colors.GREY_700)
+        self.status_text = ft.Text("狀態：閒置", size=14, color=theme.GREY_700)
         self.progress_bar = ft.ProgressBar(
             value=0,
             visible=True,
             height=8,
-            bgcolor=ft.Colors.GREY_200,
-            color=ft.Colors.BLUE,
+            bgcolor=theme.GREY_200,
+            color=theme.BLUE,
         )
 
         # 4. Logs Console
@@ -171,7 +172,7 @@ class ExtractorView(ft.Column):
 
         回傳：None
         """
-        self._show_snack_bar("請選擇此欄位的資料夾", color=ft.Colors.BLUE_600)
+        self._show_snack_bar("請選擇此欄位的資料夾", color=theme.BLUE_600)
         self.file_picker.on_result = lambda e: self._on_dir_picked(e, target)
         self.file_picker.get_directory_path()
 
@@ -184,7 +185,7 @@ class ExtractorView(ft.Column):
             target.value = e.path
             self.page.update()
         else:
-            self._show_snack_bar("未選擇資料夾", color=ft.Colors.BLUE_600)
+            self._show_snack_bar("未選擇資料夾", color=theme.BLUE_600)
 
     def set_controls_disabled(self, disabled: bool):
         """設定此函式的工作（細節以程式碼為準）。
@@ -234,21 +235,21 @@ class ExtractorView(ft.Column):
                 ft.Divider(),
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=ft.Colors.GREEN, size=24),
+                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=24),
                         ft.Text(f"成功: {stats['success']} 個 JAR", size=14),
                     ],
                     spacing=8,
                 ),
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.WARNING, color=ft.Colors.ORANGE, size=24),
+                        ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=24),
                         ft.Text(f"跳過: {stats['warnings']} 個 JAR", size=14),
                     ],
                     spacing=8,
                 ),
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.ERROR, color=ft.Colors.RED, size=24),
+                        ft.Icon(ft.Icons.ERROR, color=theme.RED, size=24),
                         ft.Text(f"失敗: {stats['failures']} 個 JAR", size=14),
                     ],
                     spacing=8,
@@ -258,7 +259,7 @@ class ExtractorView(ft.Column):
                     f"總共提取: {stats['total_files']} 個檔案",
                     size=15,
                     weight=ft.FontWeight.BOLD,
-                    color=ft.Colors.BLUE_700,
+                    color=theme.BLUE_700,
                 ),
             ],
             spacing=12,
@@ -308,7 +309,7 @@ class ExtractorView(ft.Column):
     def start_extraction(self, mode: str):
         return run_extraction_flow(self, mode)
 
-    def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_400):
+    def _show_snack_bar(self, message: str, color: str = theme.RED_400):
         """
         顯示底部的快訊通知 (SnackBar)
 
