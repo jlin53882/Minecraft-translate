@@ -145,3 +145,26 @@ def secondary_button(
         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=6), padding=16),
         on_click=on_click,
     )
+
+
+# -------------------------
+# 通知元件
+# -------------------------
+
+def create_snackbar(
+    message: str,
+    color: str = ft.Colors.RED_400,
+) -> ft.SnackBar:
+    """建立 SnackBar 元件（統一的樣式）。
+
+    Args:
+        message: 顯示的文字內容
+        color: 背景顏色，預設紅色
+
+    Returns:
+        SnackBar 元件
+    """
+    return ft.SnackBar(
+        ft.Text(message),
+        bgcolor=color,
+    )
