@@ -5,6 +5,7 @@
 """
 
 import flet as ft
+from app.ui import theme
 
 # UI 共用元件：統一按鈕樣式
 from app.ui.components import primary_button, secondary_button
@@ -98,25 +99,25 @@ class RulesView(ft.Column):
         """
         raw = (e.control.value or "").strip()
         if not raw:
-            self._show_snack_bar("請輸入頁碼", ft.Colors.BLUE_GREY_700)
+            self._show_snack_bar("請輸入頁碼", theme.BLUE_GREY_700)
             self._sync_page_jump_field()
             return
 
         try:
             page = int(raw)
         except ValueError:
-            self._show_snack_bar("頁碼必須是數字", ft.Colors.RED_400)
+            self._show_snack_bar("頁碼必須是數字", theme.RED_400)
             self._sync_page_jump_field()
             return
 
         if page < 1 or page > self.total_pages:
-            self._show_snack_bar(f"頁碼範圍：1 ~ {self.total_pages}", ft.Colors.RED_400)
+            self._show_snack_bar(f"頁碼範圍：1 ~ {self.total_pages}", theme.RED_400)
             self._sync_page_jump_field()
             return
 
         self.current_page = page
         self._render_current_page()
-        self._show_snack_bar(f"已跳至第 {page} 頁", ft.Colors.BLUE_700)
+        self._show_snack_bar(f"已跳至第 {page} 頁", theme.BLUE_700)
         self._sync_page_jump_field()
 
     def _init_controls(self):
@@ -127,9 +128,9 @@ class RulesView(ft.Column):
         )
 
         # 2. 分頁控制
-        self.page_info = ft.Text("頁面 0 / 0", size=14, color=ft.Colors.GREY_700)
+        self.page_info = ft.Text("頁面 0 / 0", size=14, color=theme.GREY_700)
         self.total_count_text = ft.Text(
-            "共 0 條規則", size=14, color=ft.Colors.GREY_700
+            "共 0 條規則", size=14, color=theme.GREY_700
         )
 
         self.prev_button = ft.IconButton(
@@ -137,18 +138,18 @@ class RulesView(ft.Column):
             on_click=self.prev_page,
             tooltip="上一頁",
             disabled=True,
-            icon_color=ft.Colors.GREY_800,
+            icon_color=theme.GREY_800,
         )
         self.next_button = ft.IconButton(
             ft.Icons.ARROW_FORWARD,
             on_click=self.next_page,
             tooltip="下一頁",
             disabled=True,
-            icon_color=ft.Colors.GREY_800,
+            icon_color=theme.GREY_800,
         )
 
         self.total_pages_text_label = ft.Text(
-            " / 1 頁", size=13, color=ft.Colors.GREY_700
+            " / 1 頁", size=13, color=theme.GREY_700
         )
 
         self.page_jump_field = ft.TextField(
@@ -170,7 +171,7 @@ class RulesView(ft.Column):
             dense=True,
             expand=True,
             text_size=14,
-            border_color=ft.Colors.OUTLINE,
+            border_color=theme.OUTLINE,
             content_padding=15,
         )
 
@@ -184,7 +185,7 @@ class RulesView(ft.Column):
             dense=True,
             width=180,
             text_size=14,
-            border_color=ft.Colors.OUTLINE,
+            border_color=theme.OUTLINE,
             content_padding=10,
         )
 
@@ -195,26 +196,26 @@ class RulesView(ft.Column):
             data_row_min_height=50,
             columns=[
                 ft.DataColumn(
-                    ft.Text("#", weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_800),
+                    ft.Text("#", weight=ft.FontWeight.BOLD, color=theme.GREY_800),
                     numeric=True,
                 ),
                 ft.DataColumn(
                     ft.Text(
                         "原文 (簡體)",
                         weight=ft.FontWeight.BOLD,
-                        color=ft.Colors.GREY_800,
+                        color=theme.GREY_800,
                     )
                 ),
                 ft.DataColumn(
                     ft.Text(
                         "替換為 (繁體)",
                         weight=ft.FontWeight.BOLD,
-                        color=ft.Colors.GREY_800,
+                        color=theme.GREY_800,
                     )
                 ),
                 ft.DataColumn(
                     ft.Text(
-                        "操作", weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_800
+                        "操作", weight=ft.FontWeight.BOLD, color=theme.GREY_800
                     ),
                     numeric=True,
                 ),
@@ -231,12 +232,12 @@ class RulesView(ft.Column):
             content=ft.Row(
                 [
                     ft.Icon(
-                        ft.Icons.RULE_FOLDER, size=28, color=ft.Colors.BLUE_GREY_800
+                        ft.Icons.RULE_FOLDER, size=28, color=theme.BLUE_GREY_800
                     ),
                     ft.Text(
                         "規則管理 (Translation Rules)",
                         theme_style=ft.TextThemeStyle.HEADLINE_MEDIUM,
-                        color=ft.Colors.BLUE_GREY_900,
+                        color=theme.BLUE_GREY_900,
                     ),
                     self.loading_indicator,
                 ],
@@ -248,7 +249,7 @@ class RulesView(ft.Column):
         """工具與操作區 (搜尋/排序/按鈕)"""
         return ft.Card(
             elevation=2,
-            surface_tint_color=ft.Colors.WHITE,
+            surface_tint_color=theme.WHITE,
             content=ft.Container(
                 padding=15,
                 content=ft.Row(
@@ -277,14 +278,14 @@ class RulesView(ft.Column):
                                     icon=ft.Icons.ADD,
                                     tooltip="新增一列規則",
                                     on_click=self.add_row_clicked,
-                                    bgcolor=ft.Colors.BLUE_600,
+                                    bgcolor=theme.BLUE_600,
                                 ),
                                 primary_button(
                                     "全部儲存",
                                     icon=ft.Icons.SAVE,
                                     tooltip="儲存全部規則到 replace_rules.json",
                                     on_click=self.save_rules_clicked,
-                                    bgcolor=ft.Colors.GREEN_700,
+                                    bgcolor=theme.GREEN_700,
                                 ),
                             ],
                             spacing=10,
@@ -299,7 +300,7 @@ class RulesView(ft.Column):
         return ft.Card(
             expand=True,
             elevation=2,
-            surface_tint_color=ft.Colors.WHITE,
+            surface_tint_color=theme.WHITE,
             content=ft.Container(
                 padding=10,
                 content=ft.ListView(
@@ -321,7 +322,7 @@ class RulesView(ft.Column):
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
                             self.prev_button,
-                            ft.Text("第", size=13, color=ft.Colors.GREY_700),
+                            ft.Text("第", size=13, color=theme.GREY_700),
                             self.page_jump_field,
                             self.total_pages_text_label,
                             self.next_button,
@@ -345,10 +346,10 @@ class RulesView(ft.Column):
         mode = e.control.value
         if mode == "from_asc":
             self.all_rules_data.sort(key=lambda r: r.get("from", ""))
-            self._show_snack_bar("✅ 已排序：依 From 字典序", ft.Colors.BLUE_700)
+            self._show_snack_bar("✅ 已排序：依 From 字典序", theme.BLUE_700)
         elif mode == "from_len":
             self.all_rules_data.sort(key=lambda r: len(r.get("from", "")))
-            self._show_snack_bar("✅ 已排序：依 From 長度", ft.Colors.BLUE_700)
+            self._show_snack_bar("✅ 已排序：依 From 長度", theme.BLUE_700)
 
         self.current_page = 1
         self._render_current_page()
@@ -367,7 +368,7 @@ class RulesView(ft.Column):
             self.search_results = None
             self.current_page = 1
             self._render_current_page()
-            self._show_snack_bar("已清除搜尋，顯示全部規則", ft.Colors.BLUE_GREY_700)
+            self._show_snack_bar("已清除搜尋，顯示全部規則", theme.BLUE_GREY_700)
             return
 
         # 找出所有匹配的規則 index
@@ -379,7 +380,7 @@ class RulesView(ft.Column):
         ]
 
         if not self.search_results:
-            self._show_snack_bar("找不到符合的規則", ft.Colors.AMBER_700)
+            self._show_snack_bar("找不到符合的規則", theme.AMBER_700)
             self._render_current_page()
             return
 
@@ -434,7 +435,7 @@ class RulesView(ft.Column):
         if self.page and self.page.loop:
             self.page.loop.call_soon_threadsafe(func, *args, **kwargs)
 
-    def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """處理此函式的工作（細節以程式碼為準）。
 
         - 主要包裝：`SnackBar`
@@ -444,7 +445,7 @@ class RulesView(ft.Column):
         if not self.page:
             return
         snack = ft.SnackBar(
-            ft.Text(message, color=ft.Colors.WHITE), bgcolor=color, open=True
+            ft.Text(message, color=theme.WHITE), bgcolor=color, open=True
         )
         self.page.overlay.append(snack)
         snack.open = True
@@ -472,7 +473,7 @@ class RulesView(ft.Column):
         except Exception as err:
             msg = f"初次載入規則失敗: {err}"
             self._run_on_ui_thread(
-                lambda msg=msg: self._show_snack_bar(msg, ft.Colors.RED_600)
+                lambda msg=msg: self._show_snack_bar(msg, theme.RED_600)
             )
 
     # --- 分頁渲染邏輯 ---
@@ -506,7 +507,7 @@ class RulesView(ft.Column):
             )
             # 搜尋結果高亮
             if self.search_results and index_on_all_data in self.search_results:
-                row.color = ft.Colors.YELLOW_50
+                row.color = theme.YELLOW_50
             else:
                 row.color = None
             rows_to_display.append(row)
@@ -567,8 +568,8 @@ class RulesView(ft.Column):
             from_field.error_text = None
             to_field.error_text = None
         else:
-            from_field.border_color = ft.Colors.RED_400
-            to_field.border_color = ft.Colors.RED_400
+            from_field.border_color = theme.RED_400
+            to_field.border_color = theme.RED_400
             from_field.error_text = msg
             to_field.error_text = msg
 
@@ -600,7 +601,7 @@ class RulesView(ft.Column):
         self.current_page = 1
         self._render_current_page()
         self.loading_indicator.visible = False
-        self._show_snack_bar("規則載入完成！", ft.Colors.GREEN_600)
+        self._show_snack_bar("規則載入完成！", theme.GREEN_600)
         self.page.update()
 
     def _handle_reload_failure(self, err):
@@ -612,7 +613,7 @@ class RulesView(ft.Column):
         """
         self.loading_indicator.visible = False
         self.page.update()
-        self._show_snack_bar(f"載入規則時發生錯誤: {err}", ft.Colors.RED_600)
+        self._show_snack_bar(f"載入規則時發生錯誤: {err}", theme.RED_600)
 
     def prev_page(self, e):
         """處理此函式的工作（細節以程式碼為準）。
@@ -623,7 +624,7 @@ class RulesView(ft.Column):
             self.current_page -= 1
             self._render_current_page()
         else:
-            self._show_snack_bar("已在第一頁", ft.Colors.BLUE_GREY_700)
+            self._show_snack_bar("已在第一頁", theme.BLUE_GREY_700)
 
     def next_page(self, e):
         """處理此函式的工作（細節以程式碼為準）。
@@ -634,7 +635,7 @@ class RulesView(ft.Column):
             self.current_page += 1
             self._render_current_page()
         else:
-            self._show_snack_bar("已在最後一頁", ft.Colors.BLUE_GREY_700)
+            self._show_snack_bar("已在最後一頁", theme.BLUE_GREY_700)
 
     def save_rules_clicked(self, e):
         # 先驗證
@@ -650,7 +651,7 @@ class RulesView(ft.Column):
             )
             if not ok:
                 self._show_snack_bar(
-                    f"第 {idx + 1} 條規則錯誤：{msg}", ft.Colors.RED_600
+                    f"第 {idx + 1} 條規則錯誤：{msg}", theme.RED_600
                 )
                 self.current_page = idx // self.page_size + 1
                 self._render_current_page()
@@ -662,7 +663,7 @@ class RulesView(ft.Column):
             for r in self.all_rules_data
             if r.get("from", "").strip()
         ]
-        self._show_snack_bar("✅ 驗證通過，正在儲存規則…", ft.Colors.BLUE_700)
+        self._show_snack_bar("✅ 驗證通過，正在儲存規則…", theme.BLUE_700)
         return start_save_thread(self, clean_rules)
 
 
@@ -681,7 +682,7 @@ class RulesView(ft.Column):
         self.current_page = self.total_pages
 
         self._render_current_page()
-        self._show_snack_bar("➕ 已新增一條規則（已跳至最後一頁）", ft.Colors.BLUE_700)
+        self._show_snack_bar("➕ 已新增一條規則（已跳至最後一頁）", theme.BLUE_700)
 
     def delete_row_clicked(self, e):
         """處理此函式的工作（細節以程式碼為準）。
@@ -711,5 +712,5 @@ class RulesView(ft.Column):
             src_preview = src[:20] + ("…" if len(src) > 20 else "")
             dst_preview = dst[:20] + ("…" if len(dst) > 20 else "")
             self._show_snack_bar(
-                f"🗑 已刪除：{src_preview} → {dst_preview}", ft.Colors.RED_400
+                f"🗑 已刪除：{src_preview} → {dst_preview}", theme.RED_400
             )
