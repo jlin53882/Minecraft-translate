@@ -6,7 +6,6 @@ import threading
 
 import flet as ft
 
-
 def translate_regex_error(err: re.error) -> str:
     msg = str(err)
     if 'missing )' in msg or 'unterminated subpattern' in msg:
@@ -20,7 +19,6 @@ def translate_regex_error(err: re.error) -> str:
     if 'unknown extension' in msg:
         return '無效的正則語法。'
     return '正則語法錯誤：' + msg
-
 
 def validate_rule(view, src: str, dst: str, all_rules, current_index):
     if not src.strip():
@@ -43,7 +41,6 @@ def validate_rule(view, src: str, dst: str, all_rules, current_index):
         return False, '可能存在無效跳脫（\\）'
     return True, ''
 
-
 def perform_reload(view):
     try:
         rules_data = view._load_rules_core()
@@ -51,13 +48,11 @@ def perform_reload(view):
     except Exception as err:
         view._run_on_ui_thread(lambda err=err: view._handle_reload_failure(err))
 
-
 def start_reload_thread(view):
     view.loading_indicator.visible = True
     view.page.update()
     view._show_snack_bar('🔄 正在重新載入規則…', ft.Colors.BLUE_700)
     threading.Thread(target=lambda: perform_reload(view), daemon=True).start()
-
 
 def start_save_thread(view, clean_rules):
     def worker():
@@ -69,7 +64,6 @@ def start_save_thread(view, clean_rules):
             msg = f'儲存規則時發生錯誤: {err}'
             view._run_on_ui_thread(lambda msg=msg: view._show_snack_bar(msg, ft.Colors.RED_600))
     threading.Thread(target=worker, daemon=True).start()
-
 
 def calc_total_pages(total_rules: int, page_size: int) -> int:
     return math.ceil(total_rules / page_size) if total_rules > 0 else 1

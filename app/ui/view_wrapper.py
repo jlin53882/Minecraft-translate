@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import flet as ft
 
-
 # -------------------------
 # 統一樣式常數（可在此集中調整）
 # -------------------------
@@ -33,7 +32,6 @@ VIEW_SHADOW: ft.BoxShadow = ft.BoxShadow(
     color=ft.Colors.with_opacity(0.05, ft.Colors.BLACK),
     offset=ft.Offset(0, 2),
 )
-
 
 def wrap_view(content: ft.Control) -> ft.Container:
     """把一個 View 包成一致的卡片外框。

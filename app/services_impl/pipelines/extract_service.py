@@ -21,12 +21,9 @@ from translation_tool.core.jar_processor import (
 
 logger = logging.getLogger(__name__)
 
-
 def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
     """
-
-    - 主要包裝：`ensure_pipeline_logging`, `start`
 
     回傳：None
     """
@@ -64,12 +61,9 @@ def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
         # ⭐ 避免 handler 留著舊 session
         UI_LOG_HANDLER.set_session(None)
 
-
 def run_book_extraction_service(mods_dir: str, output_dir: str, session):
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
     """
-
-    - 主要包裝：`ensure_pipeline_logging`, `start`
 
     回傳：None
     """

@@ -11,7 +11,6 @@ import flet as ft
 from .cache_log_panel import build_log_panel
 from .cache_shared_widgets import bordered_block
 
-
 def build_overview_page(
     *,
     overview_text: ft.Control,

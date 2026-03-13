@@ -20,7 +20,6 @@ from .lang_merge_pipeline import _process_single_mod
 
 logger = logging.getLogger(__name__)
 
-
 def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang: bool = False ) -> Generator[Dict[str, Any], None, None]:
     """將 ZIP 檔案中的簡體中文合併為繁體中文。
 
@@ -91,7 +90,6 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
             #        other_files.append(normalized)
                     
 
-
             for file_path in zf.namelist():
                 normalized = file_path.replace("\\", "/")
                 if normalized.endswith("/") or not normalized:
@@ -112,8 +110,6 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
                     #    other_files.append(normalized)  # 🔒 保險：避免直接消失
                 else:
                     other_files.append(normalized)
-
-
 
             # 計算任務數量（模組 + 其他檔案）
             mods_to_process = {k: v for k, v in lang_files_by_mod.items() if v}  # 只取有任何 lang 檔的 mod

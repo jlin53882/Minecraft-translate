@@ -13,7 +13,6 @@ from translation_tool.core.translatable_extractor import (
     is_lang_file,
 )
 
-
 def is_plain_lang_json(data: dict) -> bool:
     """判斷是否為純 lang JSON（key: str -> value: str）。
 
@@ -29,7 +28,6 @@ def is_plain_lang_json(data: dict) -> bool:
 
     return True
 
-
 def scan_translatable_files(root: Path) -> tuple[list[Path], list[Path], list[Path]]:
     """掃描 root 下可翻譯 JSON 檔案。
 
@@ -40,7 +38,6 @@ def scan_translatable_files(root: Path) -> tuple[list[Path], list[Path], list[Pa
     lang_files = find_lang_json(root)
     files = patchouli_files + lang_files
     return patchouli_files, lang_files, files
-
 
 def extract_items_parallel(
     *,

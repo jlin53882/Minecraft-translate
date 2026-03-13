@@ -21,7 +21,6 @@ from app.views.rules.rules_actions import (
 from app.views.rules.rules_state import RulesTableState
 from app.views.rules.rules_table import create_rule_row as rules_create_row
 
-
 class RulesView(ft.Column):
     """RulesView 類別。
 
@@ -31,8 +30,6 @@ class RulesView(ft.Column):
 
     def __init__(self, page: ft.Page):
         """
-
-        - 主要包裝：`__init__`, `_init_controls`, `start`
 
         回傳：None
         """
@@ -90,8 +87,6 @@ class RulesView(ft.Column):
 
     def on_page_jump_submit(self, e):
         """
-
-        - 主要包裝：`strip`, `_render_current_page`
 
         回傳：None
         """
@@ -337,8 +332,6 @@ class RulesView(ft.Column):
     def on_sort_change(self, e):
         """
 
-        - 主要包裝：`_render_current_page`
-
         回傳：None
         """
         mode = e.control.value
@@ -354,8 +347,6 @@ class RulesView(ft.Column):
 
     def on_search(self, e: ft.ControlEvent):
         """
-
-        - 主要包裝：`_render_current_page`
 
         回傳：None
         """
@@ -436,8 +427,6 @@ class RulesView(ft.Column):
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """
 
-        - 主要包裝：`SnackBar`
-
         回傳：None
         """
         if not self.page:
@@ -452,16 +441,12 @@ class RulesView(ft.Column):
     def _load_rules_core(self):
         """
 
-        - 主要包裝：`load_replace_rules`
-
-        回傳：依函式內 return path。
+    
         """
         return load_replace_rules()
 
     def _initial_load(self):
         """
-
-        - 主要包裝：`_load_rules_core`
 
         回傳：None
         """
@@ -478,8 +463,6 @@ class RulesView(ft.Column):
 
     def _render_current_page(self):
         """
-
-        - 主要包裝：`clear`, `enumerate`, `extend`
 
         回傳：None
         """
@@ -529,8 +512,6 @@ class RulesView(ft.Column):
 
     def on_text_change(self, e):
         """
-
-        - 主要包裝：`_find_index_by_rid`
 
         回傳：None
         """
@@ -582,11 +563,8 @@ class RulesView(ft.Column):
     def reload_rules_clicked(self, e):
         return start_reload_thread(self)
 
-
     def _handle_reload_success(self, rules_data):
         """
-
-        - 主要包裝：`_render_current_page`, `_show_snack_bar`
 
         回傳：None
         """
@@ -604,8 +582,6 @@ class RulesView(ft.Column):
 
     def _handle_reload_failure(self, err):
         """
-
-        - 主要包裝：`_show_snack_bar`
 
         回傳：None
         """
@@ -639,8 +615,6 @@ class RulesView(ft.Column):
         # 先驗證
         """
 
-        - 主要包裝：`enumerate`, `_show_snack_bar`, `start`
-
         回傳：None
         """
         for idx, rule in enumerate(self.all_rules_data):
@@ -664,11 +638,8 @@ class RulesView(ft.Column):
         self._show_snack_bar("✅ 驗證通過，正在儲存規則…", theme.BLUE_700)
         return start_save_thread(self, clean_rules)
 
-
     def add_row_clicked(self, e):
         """
-
-        - 主要包裝：`_render_current_page`
 
         回傳：None
         """
@@ -684,8 +655,6 @@ class RulesView(ft.Column):
 
     def delete_row_clicked(self, e):
         """
-
-        - 主要包裝：`_find_index_by_rid`
 
         回傳：None
         """

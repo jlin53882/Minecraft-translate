@@ -8,7 +8,6 @@ from pathlib import Path
 from PIL import Image, UnidentifiedImageError
 import hashlib
 
-
 def generate_icon_preview(icon_path: Path, preview_root: Path) -> Path | None:
     """
     生成 icon 預覽圖（安全版）

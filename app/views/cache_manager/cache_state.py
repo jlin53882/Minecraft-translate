@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 @dataclass
 class CacheQueryState:
     query_results: list[dict] = field(default_factory=list)
@@ -11,7 +10,6 @@ class CacheQueryState:
     query_page: int = 1
     query_page_size: int = 50
     query_total_pages: int = 1
-
 
 @dataclass
 class CacheShardState:
@@ -25,7 +23,6 @@ class CacheShardState:
     src_mode: str = "preview"
     dst_loaded_sig: tuple[str, str, str] | None = None
     dst_original: str = ""
-
 
 @dataclass
 class CacheHistoryState:

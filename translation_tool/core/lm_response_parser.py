@@ -9,13 +9,9 @@ from __future__ import annotations
 import json
 import re
 
-
 def safe_json_loads(text: str):
     """
 
-    - 主要包裝：`strip`, `findall`
-
-    回傳：依函式內 return path。
     """
     text = text.strip()
 
@@ -37,7 +33,6 @@ def safe_json_loads(text: str):
             continue
 
     raise RuntimeError("JSON 解析失敗：無法解析模型回傳內容")
-
 
 def chunked(lst, size):
     """處理此 generator 並逐步回報進度（yield update dict）。"""

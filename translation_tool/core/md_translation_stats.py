@@ -13,19 +13,16 @@ _LANG_MODE_LABELS = {
     "all": "抽取全部（all）",
 }
 
-
 def normalize_lang_mode(lang_mode: str) -> str:
     mode = (lang_mode or "").strip().lower()
     if mode in _LANG_MODE_LABELS:
         return mode
     return "non_cjk_only"
 
-
 def count_json_files(root: Path) -> int:
     if not root.exists() or not root.is_dir():
         return 0
     return sum(1 for p in root.rglob("*.json") if p.is_file())
-
 
 def count_md_pending_docs(root: Path) -> int:
     if not root.exists() or not root.is_dir():
@@ -41,7 +38,6 @@ def count_md_pending_docs(root: Path) -> int:
         if isinstance(data, dict) and data.get("schema") == "md_pending_blocks_v1":
             count += 1
     return count
-
 
 def log_md_step2_stats(step2_res: Dict[str, Any], *, log_info_fn: Callable[..., None]) -> None:
     if not isinstance(step2_res, dict):

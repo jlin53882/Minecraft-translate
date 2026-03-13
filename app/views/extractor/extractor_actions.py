@@ -12,7 +12,6 @@ from app.services_impl.pipelines.extract_service import (
 )
 from app.views.extractor.extractor_state import PreviewState
 
-
 def update_stats_from_log(view, line: str):
     stats = view._extraction_stats
     if '成功提取' in line and '個新檔案' in line:
@@ -29,7 +28,6 @@ def update_stats_from_log(view, line: str):
         stats['warnings'] += 1
     elif '[ERROR]' in line or '失敗' in line or '錯誤' in line:
         stats['failures'] += 1
-
 
 def start_ui_poller(view, mode: str = ''):
     view._ui_poller_stop.clear()
@@ -76,7 +74,6 @@ def start_ui_poller(view, mode: str = ''):
 
     threading.Thread(target=poll, daemon=True).start()
 
-
 def start_extraction(view, mode: str):
     snap = view.session.snapshot()
     if snap.get('status') == 'RUNNING':
@@ -118,7 +115,6 @@ def start_extraction(view, mode: str):
 
     target = run_lang_extraction_service if mode == 'lang' else run_book_extraction_service
     threading.Thread(target=target, args=(mods_dir, str(out_path), view.session), daemon=True).start()
-
 
 def build_preview_result_dialog(view, result: dict, mode: str):
     preview_results = result.get('preview_results', [])
@@ -175,7 +171,6 @@ def build_preview_result_dialog(view, result: dict, mode: str):
     )
     return dialog
 
-
 def build_preview_error_dialog(view, error: str, mode: str):
     return ft.AlertDialog(
         modal=True,
@@ -183,7 +178,6 @@ def build_preview_error_dialog(view, error: str, mode: str):
         content=ft.Text(f'無法預覽 {mode.upper()} 提取：{error}'),
         actions=[ft.TextButton('關閉', on_click=lambda e: view._close_dialog_overlay(view._preview_error_dialog))],
     )
-
 
 def show_preview(view, mode: str):
     mods_dir = (view.mods_dir_textfield.value or '').strip()

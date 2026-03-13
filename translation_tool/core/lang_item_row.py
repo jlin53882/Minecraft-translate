@@ -13,18 +13,13 @@ from translation_tool.core.icon_preview_cache import generate_icon_preview
 from translation_tool.core.icon_resolver import resolve_icon_with_reason
 from translation_tool.core.icon_reason import IconRisk
 
-
 def to_halfwidth(text):
     """
 
-    - 主要包裝：`normalize`
-
-    回傳：依函式內 return path。
     """
     if not isinstance(text, str):
         return text
     return unicodedata.normalize("NFKC", text)
-
 
 class LangItemRow(ft.Container):
     """LangItemRow 類別。
@@ -44,8 +39,6 @@ class LangItemRow(ft.Container):
         on_value_changed: Callable[[str, str], None],
     ):
         """
-
-        - 主要包裝：`__init__`, `resolve_icon_with_reason`, `Column`
 
         回傳：None
         """

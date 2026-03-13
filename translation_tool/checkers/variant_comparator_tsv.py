@@ -74,7 +74,6 @@ def compare_variants_tsv_generator(file_path: str, output_file: str) -> Generato
         except Exception as e:
              yield {"progress": progress, "log": f"處理第 {index + 1} 行時出錯: {e}", "error": True}
 
-
     if differences:
         total_diff = len(differences)
         yield {"progress": 1.0, "log": f"\n--- 簡繁 TSV 比較完成 ---"}

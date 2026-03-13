@@ -5,7 +5,6 @@ import time
 
 import flet as ft
 
-
 def run_ftb(view, *, dry_run: bool):
     in_dir = (view.ftb_in_dir.value or '').strip()
     if not in_dir:
@@ -40,7 +39,6 @@ def run_ftb(view, *, dry_run: bool):
                 pass
     threading.Thread(target=worker, daemon=True).start()
     view._start_ui_timer()
-
 
 def run_kjs(view, *, dry_run: bool):
     in_dir = (view.kjs_in_dir.value or '').strip()
@@ -77,7 +75,6 @@ def run_kjs(view, *, dry_run: bool):
     threading.Thread(target=worker, daemon=True).start()
     view._start_ui_timer()
 
-
 def run_md(view, *, dry_run: bool):
     in_dir = (view.md_in_dir.value or '').strip()
     if not in_dir:
@@ -112,7 +109,6 @@ def run_md(view, *, dry_run: bool):
                 pass
     threading.Thread(target=worker, daemon=True).start()
     view._start_ui_timer()
-
 
 def start_ui_timer(view):
     if view._ui_timer_running:

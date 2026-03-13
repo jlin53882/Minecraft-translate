@@ -16,7 +16,6 @@ from translation_tool.core.lang_merger import merge_zhcn_to_zhtw_from_zip
 
 logger = logging.getLogger(__name__)
 
-
 def run_merge_zip_batch_service(
     zip_paths: list[str],
     output_dir: str,

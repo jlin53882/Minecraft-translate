@@ -28,7 +28,6 @@ from app.views.extractor.extractor_actions import (
 )
 from app.views.extractor.extractor_panels import build_logs_card, build_settings_card, build_pick_button
 
-
 class ExtractorView(ft.Column):
     """JAR 提取頁（UI）。
 
@@ -43,8 +42,6 @@ class ExtractorView(ft.Column):
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """
-
-        - 主要包裝：`__init__`, `TaskSession`, `Event`
 
         回傳：None
         """
@@ -168,8 +165,6 @@ class ExtractorView(ft.Column):
     def pick_directory(self, target):
         """
 
-        - 主要包裝：`getattr`, `_show_snack_bar`, `get_directory_path`
-
         回傳：None
         """
         self._show_snack_bar("請選擇此欄位的資料夾", color=theme.BLUE_600)
@@ -204,8 +199,6 @@ class ExtractorView(ft.Column):
 
     def clear_output_path(self, e=None):
         """
-
-        - 主要包裝：`_append_log_line`
 
         回傳：None
         """
@@ -368,5 +361,4 @@ class ExtractorView(ft.Column):
         """從預覽對話框開始提取（overlay 版本）"""
         self._close_dialog_overlay(dialog)
         self.start_extraction(mode)
-
 

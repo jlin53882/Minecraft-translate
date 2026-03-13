@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Callable
 
-
 def step1_extract_impl(
     *,
     input_dir: str,
@@ -144,7 +143,6 @@ def step1_extract_impl(
         "manifest_path": str(manifest_path),
     }
 
-
 def step2_translate_impl(*, pending_dir: str, translated_dir: str, session, progress_base: float, progress_span: float, dry_run: bool, write_new_cache: bool, progress_proxy_cls, translate_md_pending_fn, progress_fn) -> Dict[str, Any]:
     proxy = progress_proxy_cls(session, progress_base, progress_span)
     result = translate_md_pending_fn(
@@ -156,7 +154,6 @@ def step2_translate_impl(*, pending_dir: str, translated_dir: str, session, prog
     )
     progress_fn(session, progress_base + progress_span)
     return result
-
 
 def step3_inject_impl(*, input_dir: str, json_dir: str, final_dir: str, session, progress_base: float, progress_span: float, iter_json_files_fn, load_items_from_json_fn, apply_item_to_md_lines_fn, map_lang_in_rel_path_allow_zh_fn, progress_fn) -> Dict[str, Any]:
     src_root = Path(input_dir).resolve()

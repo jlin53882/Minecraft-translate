@@ -55,7 +55,6 @@ from app.services_impl.cache.cache_services import (
 )
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
-
 class CacheView(ft.Column):
     """快取管理器（UI）。
 
@@ -72,8 +71,6 @@ class CacheView(ft.Column):
 
     def __init__(self, page: ft.Page):
         """
-
-        - 主要包裝：`__init__`, `Text`
 
         回傳：None
         """
@@ -1065,8 +1062,6 @@ class CacheView(ft.Column):
     def did_mount(self):
         """
 
-        - 主要包裝：`_load_overview`
-
         回傳：None
         """
         try:
@@ -1216,8 +1211,6 @@ class CacheView(ft.Column):
 
     def _set_state(self, busy: bool, reason: str, trace: str):
         """
-
-        - 主要包裝：`_refresh_disabled_state`
 
         回傳：None
         """
@@ -1385,8 +1378,6 @@ class CacheView(ft.Column):
     ):
         """
 
-        - 主要包裝：`getattr`, `bool`, `_refresh_disabled_state`
-
         回傳：None
         """
         current_action_id = getattr(
@@ -1447,8 +1438,6 @@ class CacheView(ft.Column):
     def _append_log(self, text: str):
         """
 
-        - 主要包裝：`_render_logs`
-
         回傳：None
         """
         if text.startswith("[ERROR"):
@@ -1506,9 +1495,7 @@ class CacheView(ft.Column):
     def _build_query_entry_page(self):
         """
 
-        - 主要包裝：`Tabs`, `Container`
-
-        回傳：依函式內 return path。
+    
         """
         self.query_sub_tabs = ft.Tabs(
             selected_index=0,
@@ -1532,8 +1519,6 @@ class CacheView(ft.Column):
     def _render_logs(self):
         """
 
-        - 主要包裝：`clear`
-
         回傳：None
         """
         self.log_list.controls.clear()
@@ -1547,8 +1532,6 @@ class CacheView(ft.Column):
     def _on_log_filter_changed(self, e):
         """
 
-        - 主要包裝：`bool`, `_render_logs`
-
         回傳：None
         """
         self._only_error = bool(self.sw_log_only_error.value)
@@ -1557,8 +1540,6 @@ class CacheView(ft.Column):
     def _clear_logs(self):
         """
 
-        - 主要包裝：`clear`, `_render_logs`
-
         回傳：None
         """
         self._all_logs.clear()
@@ -1566,8 +1547,6 @@ class CacheView(ft.Column):
 
     def _copy_logs(self):
         """
-
-        - 主要包裝：`join`, `set_clipboard`
 
         回傳：None
         """
@@ -1581,7 +1560,7 @@ class CacheView(ft.Column):
     def _iter_type_states(self, data: dict):
         """
 
-        回傳：依函式內 return path。
+    
         """
         raw_types = data.get("types") or {}
         if isinstance(raw_types, dict):
@@ -1600,8 +1579,6 @@ class CacheView(ft.Column):
 
     def _render_type_list(self, data: dict):
         """
-
-        - 主要包裝：`clear`, `_iter_type_states`
 
         回傳：None
         """
@@ -1718,8 +1695,6 @@ class CacheView(ft.Column):
     def _refresh_overview_ui(self, data: dict):
         """
 
-        - 主要包裝：`strftime`, `_render_type_list`
-
         回傳：None
         """
         self._last_overview_data = data or {}
@@ -1736,8 +1711,6 @@ class CacheView(ft.Column):
 
     def _load_overview(self):
         """
-
-        - 主要包裝：`cache_get_overview_service`, `_refresh_overview_ui`, `_refresh_query_type_options`
 
         回傳：None
         """
@@ -1760,8 +1733,6 @@ class CacheView(ft.Column):
     def _on_reload_all(self, e):
         """
 
-        - 主要包裝：`_run_action`
-
         回傳：None
         """
         self._run_action(
@@ -1770,8 +1741,6 @@ class CacheView(ft.Column):
 
     def _on_save_all_new(self, e):
         """
-
-        - 主要包裝：`_run_action`
 
         回傳：None
         """
@@ -1783,8 +1752,6 @@ class CacheView(ft.Column):
 
     def _on_save_all_fill(self, e):
         """
-
-        - 主要包裝：`_run_action`
 
         回傳：None
         """
@@ -1801,8 +1768,6 @@ class CacheView(ft.Column):
 
     def _on_refresh_stats(self, e):
         """
-
-        - 主要包裝：`_load_overview`, `_notify`
 
         回傳：None
         """
@@ -1843,8 +1808,6 @@ class CacheView(ft.Column):
     def _on_reload_one(self, cache_type: str):
         """
 
-        - 主要包裝：`_run_action`
-
         回傳：None
         """
         self._run_action(
@@ -1855,8 +1818,6 @@ class CacheView(ft.Column):
 
     def _on_save_one_new(self, cache_type: str):
         """
-
-        - 主要包裝：`_run_action`
 
         回傳：None
         """
@@ -1870,8 +1831,6 @@ class CacheView(ft.Column):
 
     def _on_save_one_fill(self, cache_type: str):
         """
-
-        - 主要包裝：`_run_action`
 
         回傳：None
         """
@@ -1891,17 +1850,13 @@ class CacheView(ft.Column):
     def _on_rotate_one(self, cache_type: str):
         """
 
-        - 主要包裝：`_run_action`
-
-        回傳：依函式內 return path。
+    
         """
 
         def _work():
             """
 
-            - 主要包裝：`cache_rotate_service`, `cache_get_overview_service`
-
-            回傳：依函式內 return path。
+        
             """
             ok = cache_rotate_service(cache_type)
             if not ok:
@@ -1912,8 +1867,6 @@ class CacheView(ft.Column):
 
     def _on_analyze_one(self, cache_type: str):
         """
-
-        - 主要包裝：`_iter_type_states`
 
         回傳：None
         """
@@ -1967,8 +1920,6 @@ class CacheView(ft.Column):
     def _refresh_query_type_options(self):
         """
 
-        - 主要包裝：`sorted`
-
         回傳：None
         """
         types = sorted(
@@ -1988,9 +1939,7 @@ class CacheView(ft.Column):
     ) -> list[dict]:
         """
 
-        - 主要包裝：`strip`, `glob`, `sorted`
-
-        回傳：依函式內 return path。
+    
         """
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
@@ -2003,9 +1952,7 @@ class CacheView(ft.Column):
         def _sort_key(path: Path):
             """
 
-            - 主要包裝：`search`
-
-            回傳：依函式內 return path。
+        
             """
             stem = path.stem
             m = re.search(r"(\d+)$", stem)
@@ -2051,9 +1998,7 @@ class CacheView(ft.Column):
     def _load_shard_keys(self, cache_type: str, filename: str) -> list[str]:
         """
 
-        - 主要包裝：`strip`, `loads`
-
-        回傳：依函式內 return path。
+    
         """
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
@@ -2095,8 +2040,6 @@ class CacheView(ft.Column):
 
     def _render_shard_detail_keys(self):
         """
-
-        - 主要包裝：`clear`, `list`
 
         回傳：None
         """
@@ -2223,8 +2166,6 @@ class CacheView(ft.Column):
     def _on_shard_key_filter_change(self, e):
         """
 
-        - 主要包裝：`_render_shard_detail_keys`
-
         回傳：None
         """
         self.shard_detail_page = 1
@@ -2233,8 +2174,6 @@ class CacheView(ft.Column):
 
     def _set_shard_workspace_visible(self, visible: bool):
         """
-
-        - 主要包裝：`bool`
 
         回傳：None
         """
@@ -2247,16 +2186,12 @@ class CacheView(ft.Column):
     def _open_shard_workspace_tab(self):
         """
 
-        - 主要包裝：`_set_shard_workspace_visible`
-
         回傳：None
         """
         self._set_shard_workspace_visible(True)
 
     def _on_back_to_shard_list(self, e):
         """
-
-        - 主要包裝：`_set_shard_workspace_visible`
 
         回傳：None
         """
@@ -2265,8 +2200,6 @@ class CacheView(ft.Column):
 
     def _on_select_shard_row(self, cache_type: str, filename: str):
         """
-
-        - 主要包裝：`_load_shard_keys`, `_render_query_type_shard_page`, `_open_shard_workspace_tab`
 
         回傳：None
         """
@@ -2288,8 +2221,6 @@ class CacheView(ft.Column):
     def _on_select_shard_key(self, key: str):
         """
 
-        - 主要包裝：`_render_shard_detail_keys`
-
         回傳：None
         """
         if key != self.shard_detail_selected_key:
@@ -2306,9 +2237,7 @@ class CacheView(ft.Column):
     ) -> dict | None:
         """
 
-        - 主要包裝：`strip`, `loads`
-
-        回傳：依函式內 return path。
+    
         """
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
@@ -2332,9 +2261,7 @@ class CacheView(ft.Column):
     def _format_shard_src_text(self, src_text: str, mode: str) -> str:
         """
 
-        - 主要包裝：`replace`
-
-        回傳：依函式內 return path。
+    
         """
         src = str(src_text or "")
         if mode == "raw":
@@ -2343,8 +2270,6 @@ class CacheView(ft.Column):
 
     def _render_shard_src_panel(self):
         """
-
-        - 主要包裝：`cache_get_entry_service`, `_format_shard_src_text`, `_refresh_disabled_state`
 
         回傳：None
         """
@@ -2385,8 +2310,6 @@ class CacheView(ft.Column):
     def _on_shard_src_preview_mode(self, e):
         """
 
-        - 主要包裝：`_render_shard_src_panel`
-
         回傳：None
         """
         self.shard_detail_src_mode = "preview"
@@ -2395,8 +2318,6 @@ class CacheView(ft.Column):
 
     def _on_shard_src_raw_mode(self, e):
         """
-
-        - 主要包裝：`_render_shard_src_panel`
 
         回傳：None
         """
@@ -2407,9 +2328,7 @@ class CacheView(ft.Column):
     def _normalize_cache_text(self, text: str) -> str:
         """
 
-        - 主要包裝：`replace`
-
-        回傳：依函式內 return path。
+    
         """
         return str(text or "").replace("\\r\\n", "\n").replace("\\n", "\n")
 
@@ -2521,8 +2440,6 @@ class CacheView(ft.Column):
     def _on_shard_dst_copy(self, e):
         """
 
-        - 主要包裝：`set_clipboard`
-
         回傳：None
         """
         if not self.shard_detail_selected_key:
@@ -2607,7 +2524,7 @@ class CacheView(ft.Column):
         def _ev_id(ev: dict):
             """
 
-            回傳：依函式內 return path。
+        
             """
             return (
                 str(ev.get("ts", "")),
@@ -2751,8 +2668,6 @@ class CacheView(ft.Column):
     def _on_shard_page_first(self, e):
         """
 
-        - 主要包裝：`_render_shard_detail_keys`
-
         回傳：None
         """
         self.shard_detail_page = 1
@@ -2761,8 +2676,6 @@ class CacheView(ft.Column):
 
     def _on_shard_page_prev(self, e):
         """
-
-        - 主要包裝：`_render_shard_detail_keys`
 
         回傳：None
         """
@@ -2773,8 +2686,6 @@ class CacheView(ft.Column):
     def _on_shard_page_next(self, e):
         """
 
-        - 主要包裝：`_render_shard_detail_keys`
-
         回傳：None
         """
         self.shard_detail_page += 1
@@ -2784,8 +2695,6 @@ class CacheView(ft.Column):
     def _on_shard_page_last(self, e):
         """
 
-        - 主要包裝：`_render_shard_detail_keys`
-
         回傳：None
         """
         self.shard_detail_page = self.shard_detail_total_pages
@@ -2794,8 +2703,6 @@ class CacheView(ft.Column):
 
     def _render_query_type_shard_page(self):
         """
-
-        - 主要包裝：`clear`, `list`, `set`
 
         回傳：None
         """
@@ -2957,9 +2864,7 @@ class CacheView(ft.Column):
     def _active_shard_filename(self, cache_type: str) -> str:
         """
 
-        - 主要包裝：`_iter_type_states`
-
-        回傳：依函式內 return path。
+    
         """
         for ctype, st in self._iter_type_states(self._last_overview_data):
             if ctype == cache_type:
@@ -2971,9 +2876,7 @@ class CacheView(ft.Column):
     def _type_dirty_text(self, cache_type: str) -> str:
         """
 
-        - 主要包裝：`_iter_type_states`
-
-        回傳：依函式內 return path。
+    
         """
         for ctype, st in self._iter_type_states(self._last_overview_data):
             if ctype == cache_type:
@@ -3011,9 +2914,7 @@ class CacheView(ft.Column):
     def _render_query_history(self):
         """
 
-        - 主要包裝：`clear`
-
-        回傳：依函式內 return path。
+    
         """
         if not hasattr(self, "query_history_list"):
             return
@@ -3051,7 +2952,7 @@ class CacheView(ft.Column):
         def _ev_id(ev: dict):
             """
 
-            回傳：依函式內 return path。
+        
             """
             return (
                 str(ev.get("ts", "")),
@@ -3212,8 +3113,6 @@ class CacheView(ft.Column):
     def _on_select_history_event(self, event: dict):
         """
 
-        - 主要包裝：`_render_query_history`
-
         回傳：None
         """
         self.query_history_selected_event = event
@@ -3327,8 +3226,6 @@ class CacheView(ft.Column):
     def _render_query_results(self):
         """
 
-        - 主要包裝：`_set_query_page`, `clear`
-
         回傳：None
         """
         if not hasattr(self, "query_result_list"):
@@ -3425,8 +3322,6 @@ class CacheView(ft.Column):
     def _on_select_result(self, row: dict):
         """
 
-        - 主要包裝：`_render_query_results`, `_render_query_detail`
-
         回傳：None
         """
         self.query_selected_result = row
@@ -3437,8 +3332,6 @@ class CacheView(ft.Column):
     def _on_page_first(self, e):
         """
 
-        - 主要包裝：`_render_query_results`
-
         回傳：None
         """
         self.query_page = 1
@@ -3447,8 +3340,6 @@ class CacheView(ft.Column):
 
     def _on_page_prev(self, e):
         """
-
-        - 主要包裝：`_render_query_results`
 
         回傳：None
         """
@@ -3459,8 +3350,6 @@ class CacheView(ft.Column):
     def _on_page_next(self, e):
         """
 
-        - 主要包裝：`_render_query_results`
-
         回傳：None
         """
         self.query_page += 1
@@ -3470,8 +3359,6 @@ class CacheView(ft.Column):
     def _on_page_last(self, e):
         """
 
-        - 主要包裝：`_render_query_results`
-
         回傳：None
         """
         self.query_page = self.query_total_pages
@@ -3480,8 +3367,6 @@ class CacheView(ft.Column):
 
     def _on_page_jump(self, e):
         """
-
-        - 主要包裝：`_render_query_results`
 
         回傳：None
         """
@@ -3495,8 +3380,6 @@ class CacheView(ft.Column):
 
     def _on_page_size_change(self, e):
         """
-
-        - 主要包裝：`_render_query_results`
 
         回傳：None
         """
@@ -3608,8 +3491,6 @@ class CacheView(ft.Column):
     def _on_query_search(self, e):
         """
 
-        - 主要包裝：`strip`, `upper`, `set`
-
         回傳：None
         """
         if self.ui_busy:
@@ -3688,8 +3569,6 @@ class CacheView(ft.Column):
 
     def _on_query_clear(self, e):
         """
-
-        - 主要包裝：`_render_query_results`, `_render_query_detail`
 
         回傳：None
         """

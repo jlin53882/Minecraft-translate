@@ -5,7 +5,6 @@
 
 from flet import Colors
 
-
 # 主題顏色
 PRIMARY = Colors.BLUE_700
 SECONDARY = Colors.BLUE_GREY_700

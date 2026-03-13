@@ -12,7 +12,6 @@ from typing import Any
 
 import orjson as json
 
-
 def _write_json_atomic(path: Path, data: dict[str, Any]):
     """以原子方式將 JSON 內容覆寫到 ``path``。
 
@@ -24,7 +23,6 @@ def _write_json_atomic(path: Path, data: dict[str, Any]):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path.write_bytes(json.dumps(data, option=json.OPT_INDENT_2))
     os.replace(tmp_path, path)
-
 
 def _get_active_shard_path(
     *,
@@ -52,7 +50,6 @@ def _get_active_shard_path(
         active_file.write_text(shard_id_str, encoding="utf-8")
 
     return type_dir / f"{cache_type}_{shard_id_str}.json"
-
 
 def _rotate_shard_if_needed(
     *,
@@ -83,7 +80,6 @@ def _rotate_shard_if_needed(
         logger.info(f"🔁 {cache_type} rolling shard rotate → {new_id}")
 
     return True
-
 
 def _save_entries_to_active_shards(
     *,

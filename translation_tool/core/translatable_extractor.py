@@ -14,11 +14,9 @@ from translation_tool.core.lm_config_rules import (
 )
 from translation_tool.utils.config_manager import load_config
 
-
 def find_patchouli_json(root: Path, dir_names=None):
     """
 
-    回傳：依函式內 return path。
     """
     patchouli_dir_names = (
         load_config().get("lm_translator", {}).get("patchouli", {}).get("dir_names", [])
@@ -33,31 +31,21 @@ def find_patchouli_json(root: Path, dir_names=None):
 
     return files
 
-
 def find_lang_json(root: Path):
     """
 
-    - 主要包裝：`list`
-
-    回傳：依函式內 return path。
     """
     return list(root.rglob("assets/*/lang/*.json"))
-
 
 def is_lang_file(file_path: Path) -> bool:
     """
 
-    回傳：依函式內 return path。
     """
     return "lang" in file_path.parts
-
 
 def extract_translatables(json_data, file_path):
     """
 
-    - 主要包裝：`is_lang_file`, `walk`
-
-    回傳：依函式內 return path。
     """
     items = []
     is_lang = is_lang_file(Path(file_path))

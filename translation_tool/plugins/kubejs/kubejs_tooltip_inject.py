@@ -12,7 +12,6 @@ from collections import defaultdict
 from pathlib import Path
 from translation_tool.utils.log_unit import log_info, log_error
 
-
 def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
     """
     UI 可能傳：
@@ -50,14 +49,11 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
 
     return str(best) if best else str(base)
 
-
 # ---------------- 工具 ----------------
-
 
 def split_js_args(s):
     """
 
-    回傳：依函式內 return path。
     """
     args = []
     buf = ""
@@ -92,13 +88,9 @@ def split_js_args(s):
 
     return args
 
-
 def strip_quotes(s):
     """
 
-    - 主要包裝：`strip`
-
-    回傳：依函式內 return path。
     """
     s = s.strip()
     if (s.startswith("'") and s.endswith("'")) or (
@@ -107,13 +99,9 @@ def strip_quotes(s):
         return s[1:-1]
     return s
 
-
 def replace_text_in_text_obj(expr, new_text):
     """
 
-    - 主要包裝：`sub`
-
-    回傳：依函式內 return path。
     """
     return re.sub(
         r'(Text\.\w+\(\s*[\'"])(.+?)([\'"]\s*\))',
@@ -122,23 +110,15 @@ def replace_text_in_text_obj(expr, new_text):
         count=1,
     )
 
-
 def extract_array_strings(expr):
     """
 
-    - 主要包裝：`findall`
-
-    回傳：依函式內 return path。
     """
     return re.findall(r"[\"']([^\"']+)[\"']", expr)
-
 
 def replace_array(expr, new_values):
     """
 
-    - 主要包裝：`split_js_args`, `enumerate`
-
-    回傳：依函式內 return path。
     """
     parts = split_js_args(expr[1:-1])
     out = []
@@ -152,16 +132,13 @@ def replace_array(expr, new_values):
 
     return "[" + ", ".join(out) + "]"
 
-
 def to_js_name(json_name):
     """
 
-    回傳：依函式內 return path。
     """
     if json_name.endswith(".json"):
         return json_name[:-5] + ".js"
     return json_name
-
 
 def clean_text(s: str) -> str:
     """
@@ -173,9 +150,7 @@ def clean_text(s: str) -> str:
         return ""
     return str(s).replace("\\n", "\n").strip()
 
-
 # ---------------- 主流程 ----------------
-
 
 def inject(
     original_dir: str,
@@ -274,9 +249,7 @@ def inject(
         def repl_event_add(m: re.Match) -> str:
             """
 
-            - 主要包裝：`group`, `split_js_args`, `list`
-
-            回傳：依函式內 return path。
+        
             """
             nonlocal auto_id
             arg_str = m.group(1)
@@ -313,7 +286,7 @@ def inject(
 
                             - 主要包裝：`group`
 
-                            回傳：依函式內 return path。
+                        
                             """
                             nonlocal idx
                             key = f"{original_js}|{item_id}.{n}.{idx}"
@@ -349,9 +322,7 @@ def inject(
         def repl_scene_text(m: re.Match) -> str:
             """
 
-            - 主要包裝：`group`, `split_js_args`, `strip`
-
-            回傳：依函式內 return path。
+        
             """
             nonlocal auto_id
             arg_str = m.group(1)
@@ -406,7 +377,7 @@ def inject(
             # start 指向 '(' 後面的位置
             """
 
-            回傳：依函式內 return path。
+        
             """
             depth = 1
             i = start
@@ -426,9 +397,7 @@ def inject(
         def patch_itemevents_tooltips(full: str) -> str:
             """
 
-            - 主要包裝：`finditer`, `join`
-
-            回傳：依函式內 return path。
+        
             """
             out = []
             last = 0
@@ -462,9 +431,7 @@ def inject(
                 def repl_text_call(mm: re.Match) -> str:
                     """
 
-                    - 主要包裝：`group`
-
-                    回傳：依函式內 return path。
+                
                     """
                     nonlocal idx
                     key = f"{original_js}|{item_id}.tooltip.{idx}"
@@ -537,7 +504,6 @@ def inject(
         "patched_js_files": patched_js_files,
         "wrote_lang_files": wrote_lang_files,
     }
-
 
 if __name__ == "__main__":
     inject()

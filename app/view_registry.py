@@ -6,7 +6,6 @@ import flet as ft
 
 from app.ui.view_wrapper import wrap_view
 
-
 DEFAULT_WINDOW_SIZE = (1280, 960)
 VIEW_WINDOW_SIZES = {
     'config': (1280, 960),
@@ -21,7 +20,6 @@ VIEW_WINDOW_SIZES = {
     'lm': (1280, 920),
     'merge': (1280, 920),
 }
-
 
 # Lazy import map - 延遲載入 view 的對應表
 # 格式：{'key': (module_name, class_name, needs_file_picker)}
@@ -38,7 +36,6 @@ _VIEW_IMPORT_MAP = {
     'lm': ('app.views.lm_view', 'LMView', True),
     'merge': ('app.views.merge_view', 'MergeView', True),
 }
-
 
 def _lazy_import_view(view_key: str, page: ft.Page, file_picker: ft.FilePicker):
     """Lazy import view 類別（PR67 優化）。
@@ -57,7 +54,6 @@ def _lazy_import_view(view_key: str, page: ft.Page, file_picker: ft.FilePicker):
     if needs_file_picker:
         return view_class(page, file_picker)
     return view_class(page)
-
 
 def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
     """建立 view 註冊表（Lazy import 優化）。
@@ -87,7 +83,6 @@ def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
     ]
     return registry
 
-
 def get_window_size(view_key: str) -> tuple:
     """取得 view 的視窗大小。
 
@@ -98,7 +93,6 @@ def get_window_size(view_key: str) -> tuple:
         (寬, 高) 元組
     """
     return VIEW_WINDOW_SIZES.get(view_key, DEFAULT_WINDOW_SIZE)
-
 
 def build_navigation_destinations(registry):
     """從 registry 建立導航目的地。

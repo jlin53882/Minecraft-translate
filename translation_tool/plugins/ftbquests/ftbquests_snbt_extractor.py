@@ -28,17 +28,12 @@ LANG_PRIORITY = {lang: i for i, lang in enumerate(LANG_WHITELIST)}
 # 只解析語言字串 key
 LANG_KEY_SUFFIX = (".title", ".quest_desc")
 
-
 def is_lang_key_ref(val: str):
     # 遇到 {ftbquests.xxx} 這種語言 reference 直接跳過
     """
 
-    - 主要包裝：`bool`
-
-    回傳：依函式內 return path。
     """
     return bool(re.match(r"^\{ftbquests\.", val))
-
 
 def is_lang_key_ref_like(val: str) -> bool:
     """
@@ -53,12 +48,10 @@ def is_lang_key_ref_like(val: str) -> bool:
         return False
     return bool(re.fullmatch(r"\{[^{}]+\}(?:\n\{[^{}]+\})*", s))
 
-
 TAG_CONDITION_PATTERN = re.compile(
     r"^\s*(any\s+of|any|all|no)\s*#",
     re.IGNORECASE,
 )
-
 
 def is_tag_condition_text(s: str) -> bool:
     """
@@ -69,7 +62,6 @@ def is_tag_condition_text(s: str) -> bool:
     """
     return bool(TAG_CONDITION_PATTERN.match(s))
 
-
 def walk_snbt_file(path: str) -> Compound | None:
     """讀取 SNBT 檔案"""
     try:
@@ -79,16 +71,12 @@ def walk_snbt_file(path: str) -> Compound | None:
         log_error(f"❌ SNBT 解析失敗: {path} -> {e}")
         return None
 
-
 # =========================
 # lang/*.snbt 抽取
 # =========================
 def extract_lang_file(filename: str, root: Compound) -> dict:
     """
 
-    - 主要包裝：`items`
-
-    回傳：依函式內 return path。
     """
     out = {}
 
@@ -117,16 +105,12 @@ def extract_lang_file(filename: str, root: Compound) -> dict:
 
     return out
 
-
 # =========================
 # quest 本體抽取（title）
 # =========================
 def extract_quest_file(filename: str, root: Compound) -> dict:
     """
 
-    - 主要包裝：`recurse`
-
-    回傳：依函式內 return path。
     """
     out = {}
 
@@ -199,7 +183,6 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
     recurse(root, "root")
     return out
 
-
 def ensure_lang(store: dict, lang: str):
     """
 
@@ -208,16 +191,12 @@ def ensure_lang(store: dict, lang: str):
     if lang not in store:
         store[lang] = {"lang": {}, "quests": {}}
 
-
 # =========================
 # 主流程
 # =========================
 def process_quest_folder(quests_root: str) -> dict:
     """
 
-    - 主要包裝：`join`, `set`, `walk`
-
-    回傳：依函式內 return path。
     """
     final_output = {}
     lang_dir = os.path.join(quests_root, "lang")
@@ -323,7 +302,6 @@ def process_quest_folder(quests_root: str) -> dict:
                 final_output[lang]["quests"].update(extracted)
 
     return final_output
-
 
 # =========================
 # CLI 入口

@@ -19,14 +19,11 @@ from app.ui.components import primary_button, styled_card
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
 from app.task_session import TaskSession
 
-
 class MergeView(ft.Column):
     """ZIP 合併頁面（視覺風格對齊 Translation/Extractor）。"""
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """
-
-        - 主要包裝：`__init__`, `TaskSession`, `Event`
 
         回傳：None
         """
@@ -168,8 +165,6 @@ class MergeView(ft.Column):
     def pick_zips(self, e):
         """
 
-        - 主要包裝：`pick_files`
-
         回傳：None
         """
         self.file_picker.on_result = self._on_zip_picked
@@ -181,8 +176,6 @@ class MergeView(ft.Column):
 
     def _on_zip_picked(self, e: ft.FilePickerResultEvent):
         """
-
-        - 主要包裝：`_refresh_zip_list`
 
         回傳：None
         """
@@ -196,8 +189,6 @@ class MergeView(ft.Column):
 
     def _refresh_zip_list(self):
         """
-
-        - 主要包裝：`clear`
 
         回傳：None
         """
@@ -234,8 +225,6 @@ class MergeView(ft.Column):
     def pick_output_dir(self):
         """
 
-        - 主要包裝：`get_directory_path`
-
         回傳：None
         """
         self.file_picker.on_result = self._on_output_picked
@@ -255,8 +244,6 @@ class MergeView(ft.Column):
     # --------------------------------------------------
     def start_merge(self, e):
         """
-
-        - 主要包裝：`clear`, `_set_status`, `start`
 
         回傳：None
         """
@@ -289,8 +276,6 @@ class MergeView(ft.Column):
     # --------------------------------------------------
     def _start_ui_poller(self):
         """
-
-        - 主要包裝：`clear`, `start`
 
         回傳：None
         """
@@ -342,8 +327,6 @@ class MergeView(ft.Column):
     def _set_status(self, text: str, color: str):
         """
 
-        - 主要包裝：`Text`
-
         回傳：None
         """
         self.status_chip.label = ft.Text(text)
@@ -351,8 +334,6 @@ class MergeView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """
-
-        - 主要包裝：`SnackBar`
 
         回傳：None
         """

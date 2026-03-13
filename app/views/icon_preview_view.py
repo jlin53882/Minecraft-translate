@@ -16,7 +16,6 @@ from translation_tool.core.lang_item_row import LangItemRow
 
 import unicodedata
 
-
 def to_halfwidth(text):
     """
     將字串正規化為半形（NFKC）
@@ -27,7 +26,6 @@ def to_halfwidth(text):
         return text
     return unicodedata.normalize("NFKC", text)
 
-
 class IconPreviewView(ft.Column):
     """
     Icon / 翻譯校對 View（模組分層版）
@@ -37,8 +35,6 @@ class IconPreviewView(ft.Column):
 
     def __init__(self, page: ft.Page):
         """
-
-        - 主要包裝：`__init__`, `FilePicker`
 
         回傳：None
         """
@@ -193,8 +189,6 @@ class IconPreviewView(ft.Column):
     def _on_load_clicked(self, e):
         """
 
-        - 主要包裝：`_load_entries`, `defaultdict`, `dict`
-
         回傳：None
         """
         entries = self._load_entries()
@@ -211,8 +205,6 @@ class IconPreviewView(ft.Column):
     # ==================================================
     def _render_mod_list(self):
         """
-
-        - 主要包裝：`sorted`
 
         回傳：None
         """
@@ -298,8 +290,6 @@ class IconPreviewView(ft.Column):
     def _open_mod_detail(self, modid: str):
         """
 
-        - 主要包裝：`list`, `_render_current_page`
-
         回傳：None
         """
         self.current_modid = modid
@@ -322,8 +312,6 @@ class IconPreviewView(ft.Column):
     def _go_back(self, e):
         """
 
-        - 主要包裝：`clear`, `_render_mod_list`
-
         回傳：None
         """
         self.current_modid = None
@@ -338,8 +326,6 @@ class IconPreviewView(ft.Column):
     def _on_value_changed(self, key: str, value: str):
         """
 
-        - 主要包裝：`to_halfwidth`
-
         回傳：None
         """
         self._zh_data[key] = to_halfwidth(value)
@@ -349,8 +335,6 @@ class IconPreviewView(ft.Column):
     # ==================================================
     def _save_current_zh(self, e):
         """
-
-        - 主要包裝：`mkdir`, `write_text`, `_show_snack`
 
         回傳：None
         """

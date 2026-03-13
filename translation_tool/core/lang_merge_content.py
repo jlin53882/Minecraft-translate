@@ -27,7 +27,6 @@ from .lang_merge_zip_io import (
 
 logger = logging.getLogger(__name__)
 
-
 def _patch_localized_content_json(
     zf,
     cn_path: str,
@@ -48,7 +47,6 @@ def _patch_localized_content_json(
         json_module=json,
         logger_override=logger,
     )
-
 
 def _process_content_or_copy_file(
     zf,
@@ -78,10 +76,8 @@ def _process_content_or_copy_file(
         logger_override=logger,
     )
 
-
 def remove_empty_dirs(root_dir: str):
     return remove_empty_dirs_impl(root_dir, logger_override=logger)
-
 
 def export_filtered_pending(pending_root: str, output_root: str, min_count: int):
     return export_filtered_pending_impl(
@@ -90,7 +86,6 @@ def export_filtered_pending(pending_root: str, output_root: str, min_count: int)
         min_count,
         json_module=json,
     )
-
 
 __all__ = [
     "_patch_localized_content_json",

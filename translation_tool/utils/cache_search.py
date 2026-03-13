@@ -26,11 +26,9 @@ from typing import List, Dict, Optional, Any, Callable
 
 from . import cache_store
 
-
 # =============================================================================
 # 全文搜尋引擎
 # =============================================================================
-
 
 class CacheSearchEngine:
     """快取全文搜尋引擎（使用 SQLite FTS5）"""
@@ -332,24 +330,20 @@ class CacheSearchEngine:
     def __enter__(self):
         """
 
-        回傳：依函式內 return path。
+    
         """
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """
 
-        - 主要包裝：`close`
-
         回傳：None
         """
         self.close()
 
-
 # =============================================================================
 # 模糊比對器
 # =============================================================================
-
 
 class FuzzyMatcher:
     """模糊比對器（相似度計算）"""
@@ -433,11 +427,9 @@ class FuzzyMatcher:
         # 按綜合分數排序
         return sorted(scored, key=lambda x: x["combined_score"], reverse=True)
 
-
 # =============================================================================
 # 便利函式
 # =============================================================================
-
 
 def search_cache(
     query: str,
@@ -456,11 +448,9 @@ def search_cache(
 
         return results
 
-
 # =============================================================================
 # 搜尋協調輔助函式（PR12）
 # =============================================================================
-
 
 def _extract_path_from_composite_key(key: str, src: str = "") -> str:
     """從複合 key 拆出路徑段。
@@ -475,7 +465,6 @@ def _extract_path_from_composite_key(key: str, src: str = "") -> str:
     if "|" in key:
         return key.split("|", 1)[0]
     return key
-
 
 def _infer_search_path(cache_type: str, key: str, entry: Dict[str, Any] | None) -> str:
     """推導索引要寫入的 path 欄位。
@@ -496,7 +485,6 @@ def _infer_search_path(cache_type: str, key: str, entry: Dict[str, Any] | None) 
         return str(key or "")
 
     return _extract_path_from_composite_key(key, src)
-
 
 def _infer_search_mod(
     cache_type: str, key: str, path: str, entry: Dict[str, Any] | None
@@ -531,7 +519,6 @@ def _infer_search_mod(
     }
     return fallback.get(cache_type, "")
 
-
 def _build_search_metadata(
     cache_type: str, key: str, entry: Dict[str, Any] | None
 ) -> Dict[str, str]:
@@ -539,7 +526,6 @@ def _build_search_metadata(
     path = _infer_search_path(cache_type, key, entry)
     mod = _infer_search_mod(cache_type, key, path, entry)
     return {"mod": mod, "path": path}
-
 
 def build_index_entries(
     cache_type: str, cache_dict: Dict[str, Any]
@@ -560,7 +546,6 @@ def build_index_entries(
         )
     return entries
 
-
 def rebuild_from_cache_dicts(
     engine: CacheSearchEngine,
     cache_types: List[str],
@@ -575,7 +560,6 @@ def rebuild_from_cache_dicts(
             engine.index_batch(entries)
             total_indexed += len(entries)
     return total_indexed
-
 
 class SearchOrchestrator:
     """快取搜尋協調器。

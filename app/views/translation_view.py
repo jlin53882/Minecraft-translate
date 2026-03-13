@@ -48,14 +48,11 @@ try:
 except Exception:
     TaskSession = None
 
-
 class TranslationView(ft.Column):
     """翻譯工作台：FTB / KubeJS / Markdown 三流程統一入口。"""
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """
-
-        - 主要包裝：`__init__`, `Chip`, `ProgressBar`
 
         回傳：None
         """
@@ -212,8 +209,6 @@ class TranslationView(ft.Column):
     def _pick_directory_into(self, target: ft.TextField):
         """
 
-        - 主要包裝：`get_directory_path`
-
         回傳：None
         """
         self._picker_target_field = target
@@ -255,8 +250,6 @@ class TranslationView(ft.Column):
     def _set_status(self, text: str, color: str):
         """
 
-        - 主要包裝：`Text`
-
         回傳：None
         """
         self.status_chip.label = ft.Text(text)
@@ -276,8 +269,6 @@ class TranslationView(ft.Column):
     def _clear_logs(self):
         """
 
-        - 主要包裝：`clear`
-
         回傳：None
         """
         self.log_view.controls.clear()
@@ -288,8 +279,6 @@ class TranslationView(ft.Column):
     # ------------------------------------------------------------------
     def _reset_ftb_inputs(self):
         """
-
-        - 主要包裝：`_set_status`, `_append_log`
 
         回傳：None
         """
@@ -308,8 +297,6 @@ class TranslationView(ft.Column):
     def _reset_kjs_inputs(self):
         """
 
-        - 主要包裝：`_set_status`, `_append_log`
-
         回傳：None
         """
         self.kjs_in_dir.value = ""
@@ -325,8 +312,6 @@ class TranslationView(ft.Column):
 
     def _reset_md_inputs(self):
         """
-
-        - 主要包裝：`_set_status`, `_append_log`
 
         回傳：None
         """
@@ -344,8 +329,6 @@ class TranslationView(ft.Column):
 
     def _show_snack(self, message: str, color: str = theme.RED_600):
         """
-
-        - 主要包裝：`SnackBar`
 
         回傳：None
         """

@@ -17,10 +17,8 @@ VERSION_REGEX = re.compile(
     re.IGNORECASE,
 )
 
-
 def get_file_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
 
 def _normalize_jar_base_name(jar_filename: str) -> str:
     base_full = os.path.splitext(os.path.basename(jar_filename))[0]
@@ -36,7 +34,6 @@ def _normalize_jar_base_name(jar_filename: str) -> str:
     else:
         base_name = clean_name
     return base_name or base_full
-
 
 def extract_from_jar_impl(
     jar_path: str,
@@ -84,7 +81,6 @@ def extract_from_jar_impl(
     except Exception as e:
         log.error("處理 %s 時發生錯誤: %s", os.path.basename(jar_path), e)
         return {'status': 'error', 'extracted': 0, 'skipped': 0}
-
 
 def run_extraction_process_impl(
     mods_dir: str,

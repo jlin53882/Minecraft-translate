@@ -13,7 +13,6 @@ from typing import Any, Callable, Optional
 
 from .cache_search import SearchOrchestrator
 
-
 class CacheSearchFacade:
     """CacheSearchFacade 類別。
 
@@ -23,8 +22,6 @@ class CacheSearchFacade:
 
     def __init__(self, cache_root_getter: Callable[[], Path], logger: logging.Logger):
         """
-
-        - 主要包裝：`Lock`
 
         回傳：None
         """
@@ -36,7 +33,7 @@ class CacheSearchFacade:
     def _get_orchestrator(self) -> SearchOrchestrator:
         """
 
-        回傳：依函式內 return path。
+    
         """
         if self._orchestrator is None:
             with self._lock:
@@ -47,7 +44,7 @@ class CacheSearchFacade:
     def get_search_engine(self):
         """
 
-        回傳：依函式內 return path。
+    
         """
         try:
             return self._get_orchestrator().get_engine()
@@ -59,8 +56,6 @@ class CacheSearchFacade:
         self, cache_types: list[str], translation_cache: dict[str, dict[str, Any]]
     ) -> None:
         """
-
-        - 主要包裝：`info`
 
         回傳：None
         """
@@ -80,8 +75,6 @@ class CacheSearchFacade:
         translation_cache: dict[str, dict[str, Any]],
     ) -> None:
         """
-
-        - 主要包裝：`rebuild_search_index_for_type`
 
         回傳：None
         """
@@ -105,7 +98,7 @@ class CacheSearchFacade:
     ) -> list:
         """
 
-        回傳：依函式內 return path。
+    
         """
         try:
             return self._get_orchestrator().search_cache(
@@ -128,7 +121,7 @@ class CacheSearchFacade:
     ) -> list:
         """
 
-        回傳：依函式內 return path。
+    
         """
         try:
             return self._get_orchestrator().find_similar_translations(

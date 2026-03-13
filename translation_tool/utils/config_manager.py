@@ -20,26 +20,19 @@ from datetime import datetime
 from pathlib import Path
 import copy
 
-
 # PR27：統一路徑解析基準，避免 legacy cwd 依賴造成找不到 config / 資源檔。
 def get_project_root() -> Path:
     """
 
-    回傳：依函式內 return path。
     """
     return Path(__file__).resolve().parents[2]
-
 
 PROJECT_ROOT = get_project_root()
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 
-
 def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
     """
 
-    - 主要包裝：`Path`
-
-    回傳：依函式內 return path。
     """
     if path_like is None:
         return PROJECT_ROOT
@@ -48,7 +41,6 @@ def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
     if p.is_absolute():
         return p
     return PROJECT_ROOT / p
-
 
 # DEFAULT_CONFIG 是「缺檔或缺欄位時的保底值」，不是要取代使用者設定；
 # load_config() 會用它做深度合併，讓新欄位可以向後相容地補進舊 config.json。
@@ -166,7 +158,6 @@ DEFAULT_CONFIG = {
     },
 }
 
-
 def load_config(config_path: str | os.PathLike | None = None):
     """讀取設定檔並做向後相容合併。
 
@@ -226,7 +217,6 @@ def load_config(config_path: str | os.PathLike | None = None):
         print(f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。")
         return copy.deepcopy(DEFAULT_CONFIG)
 
-
 def save_config(config, config_path: str | os.PathLike | None = None):
     """
     儲存設定並檢查是否成功寫入。
@@ -251,7 +241,6 @@ def save_config(config, config_path: str | os.PathLike | None = None):
     except Exception as e:
         logging.error(f"錯誤：儲存或驗證設定檔失敗: {e}")
         return False
-
 
 def setup_logging(config):
     """根據設定檔配置 logging。"""
@@ -292,7 +281,6 @@ def setup_logging(config):
     logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
     logging.info("日誌系統已成功設定。")
 
-
 def get_models_config(cfg: dict) -> dict[str, dict]:
     """
     安全取得 models 設定
@@ -318,13 +306,9 @@ def get_models_config(cfg: dict) -> dict[str, dict]:
 
     return safe_models
 
-
 def deep_merge(default: dict, override: dict) -> dict:
     """
 
-    - 主要包裝：`copy`, `items`
-
-    回傳：依函式內 return path。
     """
     result = default.copy()
     for k, v in override.items():
@@ -333,7 +317,6 @@ def deep_merge(default: dict, override: dict) -> dict:
         else:
             result[k] = v
     return result
-
 
 class LazyConfigProxy:
     """延遲讀取 config，避免 module import 時就觸發 I/O 與 logging 初始化。"""
@@ -345,94 +328,79 @@ class LazyConfigProxy:
     def _current(self) -> dict:
         """
 
-        - 主要包裝：`load_config`
-
-        回傳：依函式內 return path。
+    
         """
         return load_config()
 
     def get(self, key, default=None):
         """
 
-        回傳：依函式內 return path。
+    
         """
         return self._current().get(key, default)
 
     def __getitem__(self, key):
         """
 
-        回傳：依函式內 return path。
+    
         """
         return self._current()[key]
 
     def __contains__(self, key):
         """
 
-        回傳：依函式內 return path。
+    
         """
         return key in self._current()
 
     def __iter__(self):
         """
 
-        - 主要包裝：`iter`
-
-        回傳：依函式內 return path。
+    
         """
         return iter(self._current())
 
     def __len__(self):
         """
 
-        回傳：依函式內 return path。
+    
         """
         return len(self._current())
 
     def items(self):
         """
 
-        - 主要包裝：`items`
-
-        回傳：依函式內 return path。
+    
         """
         return self._current().items()
 
     def keys(self):
         """
 
-        - 主要包裝：`keys`
-
-        回傳：依函式內 return path。
+    
         """
         return self._current().keys()
 
     def values(self):
         """
 
-        - 主要包裝：`values`
-
-        回傳：依函式內 return path。
+    
         """
         return self._current().values()
 
     def copy(self):
         """
 
-        - 主要包裝：`copy`
-
-        回傳：依函式內 return path。
+    
         """
         return self._current().copy()
 
     def __repr__(self):
         """
 
-        - 主要包裝：`repr`
-
-        回傳：依函式內 return path。
+    
         """
         return repr(self._current())
-
 
 # 對外仍維持 `config` 這個名稱，讓既有呼叫點不用一次大改；
 # 真正的目標是先移除 import-time side effect，再逐步收斂舊依賴。

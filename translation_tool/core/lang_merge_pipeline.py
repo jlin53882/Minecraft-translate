@@ -27,7 +27,6 @@ from .lang_processing_format import dump_json_bytes
 
 logger = logging.getLogger(__name__)
 
-
 def _process_single_mod(
     zf: zipfile.ZipFile,
     paths: Dict[str, str],
@@ -37,9 +36,6 @@ def _process_single_mod(
 ) -> Dict[str, Any]:
     """
 
-    - 主要包裝：`compile`
-
-    回傳：依函式內 return path。
     """
     CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 
@@ -84,7 +80,7 @@ def _process_single_mod(
     def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
         """
 
-        回傳：依函式內 return path。
+    
         """
         path = paths.get(lang_key)
         if not path:

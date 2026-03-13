@@ -9,7 +9,6 @@ from typing import Any, Callable, Dict, List
 
 logger = logging.getLogger(__name__)
 
-
 def process_content_or_copy_file_impl(
     zf: zipfile.ZipFile,
     input_path: str,

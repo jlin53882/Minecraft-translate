@@ -17,24 +17,18 @@ from translation_tool.utils.species_cache import (
 
 logger = logging.getLogger(__name__)
 
-
 def run_manual_lookup_service(name: str) -> str:
     """
 
-    - 主要包裝：`lookup_species_name`
-
-    回傳：依函式內 return path。
     """
     if not is_potential_species_name(name):
         return f"'{name}' 不像是一個有效的學名格式 (例如：Felis catus)。"
     result = lookup_species_name(name)
     return result if result else "在本地快取和線上查詢中均未找到結果。"
 
-
 def run_batch_lookup_service(json_text: str):
     """執行此 generator 並逐步回報進度（yield update dict）。
 
-    - 主要包裝：`loads`
     """
     try:
         names = json.loads(json_text)

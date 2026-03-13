@@ -39,25 +39,19 @@ from translation_tool.core.lm_translator_shared import (
 )
 from translation_tool.plugins.shared.lang_text_rules import is_already_zh
 
-
 # -------------------------
 # basic io
 # -------------------------
 
-
 def read_json(path: Path) -> Dict[str, Any]:
     """
 
-    回傳：依函式內 return path。
     """
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
-
 def write_json(path: Path, data: Dict[str, Any]) -> None:
     """
-
-    - 主要包裝：`mkdir`
 
     回傳：None
     """
@@ -65,19 +59,14 @@ def write_json(path: Path, data: Dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-
 def collect_pending_json_files(pending_root: Path) -> List[Path]:
     """
 
-    - 主要包裝：`sorted`
-
-    回傳：依函式內 return path。
     """
     files = sorted(pending_root.rglob("*.json"))
     # 跳過 manifest
     files = [p for p in files if p.name.lower() != "_manifest.json"]
     return files
-
 
 # -------------------------
 # zh detection（避免已中文又送）
@@ -86,7 +75,6 @@ def collect_pending_json_files(pending_root: Path) -> List[Path]:
 # -------------------------
 # pending model
 # -------------------------
-
 
 @dataclass
 class PendingItem:
@@ -102,13 +90,9 @@ class PendingItem:
     start_line: int
     end_line: int
 
-
 def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
     """
 
-    - 主要包裝：`read_json`
-
-    回傳：依函式內 return path。
     """
     data = read_json(path)
     if data.get("schema") != "md_pending_blocks_v1":
@@ -127,19 +111,14 @@ def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
         )
     return data, items
 
-
 def compute_out_json_path(
     src_json: Path, in_pending_root: Path, out_root: Path
 ) -> Path:
     """
 
-    - 主要包裝：`relative_to`
-
-    回傳：依函式內 return path。
     """
     rel = src_json.relative_to(in_pending_root)
     return out_root / "LM翻譯後" / rel
-
 
 def translate_md_pending(
     *,
@@ -151,9 +130,6 @@ def translate_md_pending(
 ) -> Dict[str, Any]:
     """
 
-    - 主要包裝：`validate_api_keys`, `perf_counter`, `resolve`
-
-    回傳：依函式內 return path。
     """
     validate_api_keys()
     start_time = time.perf_counter()
@@ -317,8 +293,6 @@ def translate_md_pending(
     def on_translated_item(it: Dict[str, Any]) -> None:
         """
 
-        - 主要包裝：`record`
-
         回傳：None
         """
         h = str(it.get("path") or "")
@@ -342,8 +316,6 @@ def translate_md_pending(
     def on_batch_flushed() -> None:
         """
 
-        - 主要包裝：`touch`
-
         回傳：None
         """
         try:
@@ -355,9 +327,7 @@ def translate_md_pending(
     def _fmt_eta(sec: float) -> str:
         """
 
-        - 主要包裝：`divmod`
-
-        回傳：依函式內 return path。
+    
         """
         if sec <= 0:
             return ""
@@ -366,8 +336,6 @@ def translate_md_pending(
 
     def on_progress(p: float, msg: str, eta_sec: float) -> None:
         """
-
-        - 主要包裝：`_fmt_eta`, `log_info`, `progress`
 
         回傳：None
         """
@@ -491,11 +459,8 @@ def translate_md_pending(
         "out_dir": str(out_root),
     }
 
-
 def main():
     """
-
-    - 主要包裝：`log_info`, `strip`
 
     回傳：None
     """
@@ -524,7 +489,6 @@ def main():
     log_info("=== 結果 ===")
     for k, v in res.items():
         log_info("%s: %s", k, v)
-
 
 if __name__ == "__main__":
     main()

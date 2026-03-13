@@ -44,7 +44,6 @@ from translation_tool.utils.log_unit import (
     log_warning,
 )
 
-
 def _translate_single_file(
     file_path: str,
     input_dir: str,
@@ -79,7 +78,6 @@ def _translate_single_file(
     except Exception as e:
         log_error("處理檔案 %s 時發生錯誤: %s", relative_path, e)
         return f"處理 {relative_path} 失敗: {e}"
-
 
 def translate_directory_generator(input_dir: str) -> Generator[Dict[str, Any], None, None]:
     """主翻譯流程，支援多執行緒處理。"""
@@ -163,14 +161,11 @@ def translate_directory_generator(input_dir: str) -> Generator[Dict[str, Any], N
     log_info(final_log_msg)
     yield {"progress": 1.0}
 
-
 def deep_merge_3way(zh_tw: dict, zh_cn: dict, en_us: dict) -> dict:
     return _deep_merge_3way_impl(zh_tw, zh_cn, en_us)
 
-
 def resolve_ftbquests_quests_root(base_dir: str) -> str:
     return resolve_ftbquests_quests_root_impl(base_dir)
-
 
 def export_ftbquests_raw_json(base_dir: str, *, output_dir: str | None = None) -> dict:
     return export_ftbquests_raw_json_impl(
@@ -182,7 +177,6 @@ def export_ftbquests_raw_json(base_dir: str, *, output_dir: str | None = None) -
         log_info_fn=log_info,
     )
 
-
 def clean_ftbquests_from_raw(base_dir: str, *, output_dir: str | None = None) -> dict:
     return clean_ftbquests_from_raw_impl(
         base_dir,
@@ -191,7 +185,6 @@ def clean_ftbquests_from_raw(base_dir: str, *, output_dir: str | None = None) ->
         orjson_dump_file_fn=orjson_dump_file,
         log_info_fn=log_info,
     )
-
 
 def prepare_ftbquests_lang_template_only(
     input_config_dir: str,
@@ -204,7 +197,6 @@ def prepare_ftbquests_lang_template_only(
         output_config_dir,
         prefer_lang=prefer_lang,
     )
-
 
 # NOTE: FTB pipeline does NOT use translate_directory_generator
 
@@ -404,7 +396,6 @@ def run_ftb_pipeline(
         )
 
     return result
-
 
 __all__ = [
     "translate_directory_generator",

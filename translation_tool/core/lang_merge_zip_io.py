@@ -130,7 +130,6 @@ def quarantine_copy_from_zip(
     目錄結構會與「待翻譯」完全一致，方便人工比對與修復。
     """
 
-
     # skipped_json/ + 原始 zip 路徑（例如 assets/xxx）
     quarantine_root_name= load_config().get("lang_merger", {}).get("quarantine_folder_name", "skipped_json")
     quarantine_root = os.path.join(output_dir, quarantine_root_name)

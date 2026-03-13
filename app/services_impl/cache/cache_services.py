@@ -18,12 +18,10 @@ from typing import Any, Dict
 from translation_tool.utils import cache_manager
 from translation_tool.utils.log_unit import log_error, log_warning
 
-
 def cache_get_overview_service() -> Dict[str, Any]:
     """取得目前所有翻譯快取（cache）的整體概覽資訊。"""
 
     return cache_manager.get_cache_overview()
-
 
 def cache_reload_service() -> Dict[str, Any]:
     """重新載入翻譯快取，並重建全域搜尋索引。"""
@@ -32,14 +30,12 @@ def cache_reload_service() -> Dict[str, Any]:
     cache_manager.rebuild_search_index()
     return cache_manager.get_cache_overview()
 
-
 def cache_reload_type_service(cache_type: str) -> Dict[str, Any]:
     """只重新載入單一 cache_type，並重建該分類搜尋索引。"""
 
     cache_manager.reload_translation_cache_type(cache_type)
     cache_manager.rebuild_search_index_for_type(cache_type)
     return cache_manager.get_cache_overview()
-
 
 def cache_save_all_service(
     write_new_shard: bool = True,
@@ -56,7 +52,6 @@ def cache_save_all_service(
         )
 
     return cache_manager.get_cache_overview()
-
 
 def cache_search_service(
     cache_type: str,
@@ -192,12 +187,10 @@ def cache_search_service(
         "limit": limit,
     }
 
-
 def cache_get_entry_service(cache_type: str, key: str) -> Dict[str, Any] | None:
     """取得指定 cache_type 中的單筆快取條目。"""
 
     return cache_manager.get_cache_entry(cache_type, key)
-
 
 def cache_update_dst_service(cache_type: str, key: str, new_dst: str) -> bool:
     """更新指定快取條目的翻譯結果（dst）；僅更新記憶體快取，未寫回磁碟。"""
@@ -210,12 +203,10 @@ def cache_update_dst_service(cache_type: str, key: str, new_dst: str) -> bool:
     cache_manager.add_to_cache(cache_type, key, src, new_dst)
     return True
 
-
 def cache_rotate_service(cache_type: str) -> bool:
     """強制對指定 cache_type 進行 shard rotation。"""
 
     return cache_manager.force_rotate_shard(cache_type)
-
 
 def cache_rebuild_index_service() -> Dict[str, Any]:
     """重建快取搜尋索引（A3 改進功能）。"""
