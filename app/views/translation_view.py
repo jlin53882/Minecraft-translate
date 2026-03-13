@@ -8,6 +8,7 @@ import threading
 import time
 
 import flet as ft
+from app.ui import theme
 
 # UI 共用元件：抽出重複的卡片/按鈕樣式，集中在 app.ui
 from app.ui.components import primary_button, secondary_button, styled_card
@@ -69,10 +70,10 @@ class TranslationView(ft.Column):
 
         # 右側共用狀態與日誌
         self.status_chip = ft.Chip(
-            label=ft.Text("尚未開始"), bgcolor=ft.Colors.GREY_200
+            label=ft.Text("尚未開始"), bgcolor=theme.GREY_200
         )
         self.progress = ft.ProgressBar(
-            value=0, height=8, bgcolor=ft.Colors.GREY_200, color=ft.Colors.BLUE
+            value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
         self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
 
@@ -156,11 +157,11 @@ class TranslationView(ft.Column):
         self.summary_card = ft.Container(
             padding=14,
             border_radius=10,
-            bgcolor=ft.Colors.WHITE,
-            border=ft.border.all(1, ft.Colors.BLACK12),
+            bgcolor=theme.WHITE,
+            border=ft.border.all(1, theme.BLACK12),
             content=ft.Row(
                 [
-                    # ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color=ft.Colors.BLUE_GREY_700),
+                    # ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color=theme.BLUE_GREY_700),
                     # ft.Text("本頁已與 Extractor 風格對齊；僅調整 UI 樣式，不影響流程邏輯。"),
                 ],
                 spacing=10,
@@ -267,7 +268,7 @@ class TranslationView(ft.Column):
 
         回傳：None
         """
-        self.log_view.controls.append(ft.Text(line, size=13, color=ft.Colors.GREY_100))
+        self.log_view.controls.append(ft.Text(line, size=13, color=theme.GREY_100))
         if len(self.log_view.controls) > 400:
             self.log_view.controls = self.log_view.controls[-300:]
         self.page.update()
@@ -299,7 +300,7 @@ class TranslationView(ft.Column):
         self.ftb_step_translate.value = True
         self.ftb_step_inject.value = True
         self.ftb_write_new_cache.value = True
-        self._set_status("尚未開始", ft.Colors.GREY_200)
+        self._set_status("尚未開始", theme.GREY_200)
         self.progress.value = 0
         self._append_log("[UI] 已重置：FTB Quests 輸入已清空")
         self.page.update()
@@ -317,7 +318,7 @@ class TranslationView(ft.Column):
         self.kjs_step_translate.value = True
         self.kjs_step_inject.value = True
         self.kjs_write_new_cache.value = True
-        self._set_status("尚未開始", ft.Colors.GREY_200)
+        self._set_status("尚未開始", theme.GREY_200)
         self.progress.value = 0
         self._append_log("[UI] 已重置：KubeJS 輸入已清空")
         self.page.update()
@@ -336,12 +337,12 @@ class TranslationView(ft.Column):
         self.md_step_inject.value = True
         self.md_write_new_cache.value = True
         self.md_lang_mode.value = "non_cjk_only"
-        self._set_status("尚未開始", ft.Colors.GREY_200)
+        self._set_status("尚未開始", theme.GREY_200)
         self.progress.value = 0
         self._append_log("[UI] 已重置：Markdown 輸入已清空")
         self.page.update()
 
-    def _show_snack(self, message: str, color: str = ft.Colors.RED_600):
+    def _show_snack(self, message: str, color: str = theme.RED_600):
         """處理此函式的工作（細節以程式碼為準）。
 
         - 主要包裝：`SnackBar`

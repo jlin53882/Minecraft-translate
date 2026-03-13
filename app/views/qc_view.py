@@ -8,6 +8,7 @@
 
 import flet as ft
 import threading
+from app.ui import theme
 
 # 導入 tkinter
 import tkinter as tk
@@ -150,7 +151,7 @@ class QCView(ft.Column):
                             ft.Text(
                                 "適用於大規模翻譯資料夾的比對，輸出 JSON 報告。",
                                 theme_style=ft.TextThemeStyle.BODY_SMALL,
-                                color=ft.Colors.BLUE_GREY,
+                                color=theme.BLUE_GREY,
                             ),
                             ft.Row(
                                 [
@@ -201,7 +202,7 @@ class QCView(ft.Column):
                             ft.Text(
                                 "比較 TSV 檔案中 'zh_cn' 和 'zh_tw' 欄位的差異。將 'zh_cn' 轉換為繁體中文後，與 'zh_tw' 進行比較，並列出所有不匹配的條目。",
                                 theme_style=ft.TextThemeStyle.BODY_SMALL,
-                                color=ft.Colors.BLUE_GREY,
+                                color=theme.BLUE_GREY,
                             ),
                             ft.Row(
                                 [
@@ -236,7 +237,7 @@ class QCView(ft.Column):
             self.progress_bar,
             ft.Container(
                 content=self.log_view,
-                border=ft.border.all(1, ft.Colors.OUTLINE),
+                border=ft.border.all(1, theme.OUTLINE),
                 border_radius=ft.border_radius.all(5),
                 padding=10,
                 expand=True,
@@ -265,7 +266,7 @@ class QCView(ft.Column):
             ),
         )
 
-    def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """處理此函式的工作（細節以程式碼為準）。
 
         - 主要包裝：`SnackBar`
@@ -331,7 +332,7 @@ class QCView(ft.Column):
                 target_textfield.value = path
                 self.page.update()
             else:
-                self._show_snack_bar("您已取消選擇", ft.Colors.BLUE_GREY_500)
+                self._show_snack_bar("您已取消選擇", theme.BLUE_GREY_500)
         except Exception as ex:
             self._show_snack_bar(f"開啟對話框失敗: {ex}")
 
@@ -370,7 +371,7 @@ class QCView(ft.Column):
         """
         self.log_view.controls.clear()
         self.progress_bar.value = 0
-        self.progress_bar.color = ft.Colors.PRIMARY
+        self.progress_bar.color = theme.PRIMARY
         self.progress_bar.visible = True
         self.set_controls_disabled(True)
         self.page.update()
@@ -443,14 +444,14 @@ class QCView(ft.Column):
                 if "progress" in update:
                     self.progress_bar.value = update["progress"]
                 if update.get("error"):
-                    self.progress_bar.color = ft.Colors.RED
+                    self.progress_bar.color = theme.RED
 
                 self.log_view.scroll_to(offset=-1, duration=100)
                 self.page.update()
         finally:
             self.set_controls_disabled(False)
 
-    def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """處理此函式的工作（細節以程式碼為準）。
 
         - 主要包裝：`SnackBar`
