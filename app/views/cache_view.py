@@ -1074,10 +1074,13 @@ class CacheView(ft.Column):
             self._refresh_query_type_options()
             self._render_query_type_shard_page()
             self._render_query_results()
-            self.page.on_resized = self._on_page_resized
+            # 防護：確保 page 存在
+            if self.page is not None:
+                self.page.on_resized = self._on_page_resized
             self._render_query_detail()
             self._refresh_disabled_state()
-            self.page.update()
+            if self.page is not None:
+                self.page.update()
         except Exception as ex:
             log_error(f"CacheView did_mount failed: {ex}")
             log_error(traceback.format_exc())
