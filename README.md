@@ -2,12 +2,22 @@
 
 基於 [Flet](https://flet.dev/) 的桌面應用程式，用於將 Minecraft 模組包從簡體中文／英文批量翻譯為繁體中文（台灣用語）。
 
-## 目前狀態（2026-03-13）
+## 目前狀態（2026-03-14）
 
 - ✅ `app.services` 已收斂為 **QC/checkers 暫緩線 façade**（PR29）
 - ✅ 主線 caller 已完成遷移到 `app.services_impl.*`（PR28a + PR28b）
-- ✅ 最近一次完整測試記錄：**171 passed**（PR62 驗證）
-- ✅ PR62-64 設計稿已合併（PR63: Fixtures, PR64: Docstring）
+- ✅ 最近一次完整測試記錄：**171 passed**
+- ✅ **PR62-71 全部完成**：
+  - PR62: 測試覆蓋率健檢
+  - PR63: 測試基礎設施（fixtures）
+  - PR64: Docstring 補完
+  - PR65: README 更新
+  - PR66-A: Cache 監控
+  - PR67: Lazy Load 優化
+  - PR68: UI Component 抽取
+  - PR69: 主題系統建立（app/ui/theme.py）
+  - PR70: 廢棄程式碼清理
+  - PR71: Exception 使用一致性評估
 
 > 詳細變更請看 `docs/pr/2026-03-12_0204_PR_pr28a-low-risk-caller-migration-design.md`、
 > `docs/pr/2026-03-12_0205_PR_pr28b-high-risk-caller-migration-design.md`、
@@ -15,22 +25,18 @@
 
 ## UI 對照（啟用狀態，依 `main.py`）
 
-### 已啟用（目前會出現在左側選單）
+### 已啟用（目前會出現在左側選單）- 全部 11 個 view
 - `config_view.py`：設定
 - `rules_view.py`：規則
 - `cache_view.py`：快取管理
+- `qc_view.py`：品質檢查
+- `lookup_view.py`：查詢
+- `icon_preview_view.py`：圖示預覽
+- `bundler_view.py`：打包
 - `translation_view.py`：任務翻譯工具（FTB / KubeJS / Markdown）
 - `extractor_view.py`：JAR 提取
 - `lm_view.py`：機器翻譯
 - `merge_view.py`：檔案合併
-
-### 未啟用（檔案存在，但目前未掛到 `nav_destinations`）
-- `bundler_view.py`：打包成品 ZIP
-- `lookup_view.py`：學名查詢
-- `icon_preview_view.py`：圖示映對翻譯
-- `qc_view.py`：品質檢查
-
-> 註：未啟用代表「目前 UI 主選單不顯示」，不代表功能檔案已刪除。
 
 ## 功能
 
@@ -130,17 +136,19 @@ uv run pytest -q --basetemp=.pytest-tmp\full -o cache_dir=.pytest-cache\full
 
 ### 3) UI 頁面檔案索引（`app/views`）
 
-- ✅ `config_view.py`：Config 設定（已啟用）
-- ✅ `rules_view.py`：替換規則（已啟用）
-- ✅ `cache_view.py`：快取處理 / 檢視（已啟用）
-- ✅ `translation_view.py`：FTB / KubeJS / Markdown 翻譯（已啟用）
-- ✅ `extractor_view.py`：JAR 抽取（已啟用）
-- ✅ `lm_view.py`：機器翻譯（已啟用）
-- ✅ `merge_view.py`：`zh_cn` / `zh_tw` / `en_us` 合併（已啟用）
-- ⏸ `bundler_view.py`：打包成品 ZIP（未啟用）
-- ⏸ `lookup_view.py`：學名查詢（未啟用）
-- ⏸ `icon_preview_view.py`：圖示映對翻譯（未啟用）
-- ⏸ `qc_view.py`：品質檢查（未啟用）
+全部 11 個 view 已啟用：
+
+- ✅ `config_view.py`：Config 設定
+- ✅ `rules_view.py`：替換規則
+- ✅ `cache_view.py`：快取處理 / 檢視
+- ✅ `qc_view.py`：品質檢查
+- ✅ `lookup_view.py`：查詢
+- ✅ `icon_preview_view.py`：圖示預覽
+- ✅ `bundler_view.py`：打包
+- ✅ `translation_view.py`：FTB / KubeJS / Markdown 翻譯
+- ✅ `extractor_view.py`：JAR 抽取
+- ✅ `lm_view.py`：機器翻譯
+- ✅ `merge_view.py`：`zh_cn` / `zh_tw` / `en_us` 合併
 
 ## 專案結構
 
@@ -162,7 +170,9 @@ uv run pytest -q --basetemp=.pytest-tmp\full -o cache_dir=.pytest-cache\full
 │   │       ├── md_service.py            # run_md_translation_service
 │   │       └── merge_service.py         # run_merge_zip_batch_service
 │   ├── ui/                              # 共用 UI 元件
-│   └── views/
+│   │   ├── components.py               # 按鈕、卡片、SnackBar 等
+│   │   ├── theme.py                     # 主題顏色常數（PR69）
+│   │   └── view_wrapper.py              # View 包装
 │       ├── cache_manager/               # 快取管理子模組（controller/presenter/panel）
 │       ├── bundler_view.py              # 打包成品 ZIP
 │       ├── cache_view.py                # 快取處理 / 檢視
