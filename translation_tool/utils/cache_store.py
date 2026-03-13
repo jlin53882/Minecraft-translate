@@ -112,19 +112,22 @@ _RUNTIME = CacheRuntimeState()
 
 
 def get_runtime_state() -> CacheRuntimeState:
-    """取得此函式的工作（細節以程式碼為準）。
+    """取得 cache runtime 狀態實例。
 
-    回傳：依函式內 return path。
+    Returns:
+        CacheRuntimeState 實例
     """
     return _RUNTIME
 
 
 def reset_runtime_state(cache_types: list[str]) -> CacheRuntimeState:
-    """處理此函式的工作（細節以程式碼為準）。
+    """重置 cache runtime 狀態。
 
-    - 主要包裝：`get_runtime_state`
+    Args:
+        cache_types: 要重置的 cache 類型列表
 
-    回傳：依函式內 return path。
+    Returns:
+        重置後的 CacheRuntimeState 實例
     """
     state = get_runtime_state()
     state.translation_cache = {}
@@ -136,11 +139,13 @@ def reset_runtime_state(cache_types: list[str]) -> CacheRuntimeState:
 
 
 def ensure_runtime_maps(cache_types: list[str]) -> CacheRuntimeState:
-    """確保此函式的工作（細節以程式碼為準）。
+    """確保 runtime maps 已初始化。
 
-    - 主要包裝：`get_runtime_state`
+    Args:
+        cache_types: 要確保存在的 cache 類型列表
 
-    回傳：依函式內 return path。
+    Returns:
+        CacheRuntimeState 實例
     """
     state = get_runtime_state()
     if not state.session_new_entries:
