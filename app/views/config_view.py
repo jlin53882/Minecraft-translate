@@ -5,7 +5,7 @@
 """
 
 import flet as ft
-
+from app.ui import theme
 from app.ui.components import primary_button  # guard: shared primary button seam remains explicit
 # guard: config_view still conceptually owns the primary_button(...) save action
 from app.services_impl.config_service import load_config_json, save_config_json
@@ -387,7 +387,7 @@ class ConfigView(ft.Column):
 
         # 5. Models & Keys
         models_section = ft.Container(
-            bgcolor=ft.Colors.GREY_50,
+            bgcolor=theme.GREY_50,
             padding=10,
             border_radius=8,
             content=ft.Column(
@@ -405,7 +405,7 @@ class ConfigView(ft.Column):
         )
 
         keys_section = ft.Container(
-            bgcolor=ft.Colors.GREY_50,
+            bgcolor=theme.GREY_50,
             padding=10,
             border_radius=8,
             content=ft.Column(
@@ -428,32 +428,32 @@ class ConfigView(ft.Column):
                     "大型語言模型設定 (LM Translator)",
                     [
                         top_row,
-                        ft.Divider(height=20, color=ft.Colors.GREY_200),
+                        ft.Divider(height=20, color=theme.GREY_200),
                         ft.Text(
                             "System Prompts",
                             weight=ft.FontWeight.BOLD,
                             size=14,
-                            color=ft.Colors.GREY_700,
+                            color=theme.GREY_700,
                         ),
                         prompts_row,
-                        ft.Divider(height=20, color=ft.Colors.GREY_200),
+                        ft.Divider(height=20, color=theme.GREY_200),
                         ft.Text(
                             "Batch Sizes & Limits",
                             weight=ft.FontWeight.BOLD,
                             size=14,
-                            color=ft.Colors.GREY_700,
+                            color=theme.GREY_700,
                         ),
                         batch_row_1,
                         batch_row_2,
-                        ft.Divider(height=20, color=ft.Colors.GREY_200),
+                        ft.Divider(height=20, color=theme.GREY_200),
                         ft.Text(
                             "Filtering & Directories",
                             weight=ft.FontWeight.BOLD,
                             size=14,
-                            color=ft.Colors.GREY_700,
+                            color=theme.GREY_700,
                         ),
                         lists_row,
-                        ft.Divider(height=20, color=ft.Colors.GREY_200),
+                        ft.Divider(height=20, color=theme.GREY_200),
                         models_section,
                         keys_section,
                     ],
@@ -514,7 +514,7 @@ class ConfigView(ft.Column):
 
     # --- 邏輯功能 (與原程式碼相同，僅移動位置) ---
 
-    def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """處理此函式的工作（細節以程式碼為準）。
 
         - 主要包裝：`SnackBar`
@@ -542,7 +542,7 @@ class ConfigView(ft.Column):
         order_text = ft.Text(
             "00",
             size=12,
-            color=ft.Colors.GREY_600,
+            color=theme.GREY_600,
             weight=ft.FontWeight.W_500,
             width=28,
             text_align=ft.TextAlign.RIGHT,
@@ -569,8 +569,8 @@ class ConfigView(ft.Column):
         row = ft.Container(
             padding=ft.padding.symmetric(horizontal=12, vertical=8),
             border_radius=8,
-            bgcolor=ft.Colors.WHITE,
-            border=ft.border.all(1, ft.Colors.GREY_200),
+            bgcolor=theme.WHITE,
+            border=ft.border.all(1, theme.GREY_200),
             content=ft.Row(
                 [
                     order_text,
@@ -674,7 +674,7 @@ class ConfigView(ft.Column):
         return load_config_into_view(self, config)
 
     def _success_color(self):
-        return ft.Colors.GREEN_600
+        return theme.GREEN_600
 
     def save_config_clicked(self, e):
         return save_config_from_view(
