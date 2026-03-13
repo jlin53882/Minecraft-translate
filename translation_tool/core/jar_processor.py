@@ -37,12 +37,33 @@ lang_pattern = r"_?(?:" + "|".join(map(re.escape, LANG_CODES)) + r")"
 
 
 def _extract_from_jar(jar_path: str, output_root: str, target_regex: re.Pattern) -> Dict[str, Any]:
+    """從 JAR 檔案提取檔案。
+
+    Args:
+        jar_path: JAR 檔案路徑
+        output_root: 輸出根目錄
+        target_regex: 目標檔案正規表達式
+
+    Returns:
+        提取結果字典
+    """
     return extract_from_jar_impl(jar_path, output_root, target_regex)
 
 
 def _run_extraction_process(
     mods_dir: str, output_dir: str, target_regex: re.Pattern, process_name: str
 ) -> Generator[Dict[str, Any], None, None]:
+    """執行提取流程的 generator。
+
+    Args:
+        mods_dir: Mod 目錄路徑
+        output_dir: 輸出目錄路徑
+        target_regex: 目標檔案正規表達式
+        process_name: 處理名稱（如 "Lang"、"Patchouli Book"）
+
+    Yields:
+        進度字典
+    """
     yield from run_extraction_process_impl(
         mods_dir,
         output_dir,
@@ -54,6 +75,15 @@ def _run_extraction_process(
 
 
 def extract_lang_files_generator(mods_dir: str, output_dir: str) -> Generator[Dict[str, Any], None, None]:
+    """從 mods 目錄提取語言檔。
+
+    Args:
+        mods_dir: Mod 目錄路徑
+        output_dir: 輸出目錄路徑
+
+    Yields:
+        進度字典
+    """
     lang_file_regex = re.compile(
         r"(?:assets/([^/]+)/)?lang/(en_us|zh_cn|zh_tw)\.(json|lang)$", re.IGNORECASE
     )
@@ -66,6 +96,15 @@ def extract_lang_files_generator(mods_dir: str, output_dir: str) -> Generator[Di
 
 
 def extract_book_files_generator(mods_dir: str, output_dir: str) -> Generator[Dict[str, Any], None, None]:
+    """從 mods 目錄提取 Patchouli 書本檔。
+
+    Args:
+        mods_dir: Mod 目錄路徑
+        output_dir: 輸出目錄路徑
+
+    Yields:
+        進度字典
+    """
     yield from _run_extraction_process(
         mods_dir,
         output_dir,
@@ -75,6 +114,15 @@ def extract_book_files_generator(mods_dir: str, output_dir: str) -> Generator[Di
 
 
 def preview_extraction_generator(mods_dir: str, mode: str) -> Generator[Dict[str, Any], None, None]:
+    """預覽提取結果。
+
+    Args:
+        mods_dir: Mod 目錄路徑
+        mode: 預覽模式
+
+    Yields:
+        進度字典
+    """
     yield from preview_extraction_generator_impl(
         mods_dir,
         mode,
