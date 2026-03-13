@@ -31,7 +31,7 @@ class QCView(ft.Column):
     """
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`, `TextField`
 
@@ -86,7 +86,7 @@ class QCView(ft.Column):
             on_click=lambda e: self.start_task("compare_tsv"),
         )
 
-        # --- 共用的日誌 UI (保持不變) ---
+        # --- 共用的日誌 UI ---
         self.progress_bar = ft.ProgressBar(value=0, visible=False)
         self.log_view = ft.ListView(expand=True, spacing=5, auto_scroll=True)
 
@@ -252,7 +252,7 @@ class QCView(ft.Column):
         folder_mode: bool,
         file_filter: str = None,
     ):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`IconButton`
 
@@ -267,7 +267,7 @@ class QCView(ft.Column):
         )
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`SnackBar`
 
@@ -286,7 +286,7 @@ class QCView(ft.Column):
         folder_mode: bool,
         file_filter: str = None,
     ):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`Tk`
 
@@ -338,7 +338,7 @@ class QCView(ft.Column):
 
     def set_controls_disabled(self, disabled: bool):
         # 禁用所有相關控制項 (已更新)
-        """設定此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -363,7 +363,7 @@ class QCView(ft.Column):
         self.page.update()
 
     def start_task(self, task_type: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`clear`, `set_controls_disabled`
 
@@ -428,7 +428,7 @@ class QCView(ft.Column):
         thread.start()
 
     def task_worker(self, service_func, args_tuple):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`service_func`
 
@@ -452,7 +452,7 @@ class QCView(ft.Column):
             self.set_controls_disabled(False)
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`SnackBar`
 

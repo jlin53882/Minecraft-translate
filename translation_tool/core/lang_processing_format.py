@@ -71,7 +71,7 @@ def convert_only_cjk(text: str, rules=None) -> str:
 
     def replacer(match):
         # 抓到的一整串中文字
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`group`, `convert`
 

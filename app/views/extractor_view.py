@@ -42,7 +42,7 @@ class ExtractorView(ft.Column):
     """
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`, `TaskSession`, `Event`
 
@@ -166,7 +166,7 @@ class ExtractorView(ft.Column):
         return build_pick_button(self, target)
 
     def pick_directory(self, target):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`getattr`, `_show_snack_bar`, `get_directory_path`
 
@@ -177,7 +177,7 @@ class ExtractorView(ft.Column):
         self.file_picker.get_directory_path()
 
     def _on_dir_picked(self, e, target):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -188,7 +188,7 @@ class ExtractorView(ft.Column):
             self._show_snack_bar("未選擇資料夾", color=theme.BLUE_600)
 
     def set_controls_disabled(self, disabled: bool):
-        """設定此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -203,7 +203,7 @@ class ExtractorView(ft.Column):
         self.page.update()
 
     def clear_output_path(self, e=None):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_append_log_line`
 
@@ -281,7 +281,7 @@ class ExtractorView(ft.Column):
         self.page.update()
 
     def _append_log_line(self, line: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """

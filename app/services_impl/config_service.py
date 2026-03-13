@@ -63,7 +63,7 @@ def _save_app_config(config: dict[str, Any]):
 
 
 def load_replace_rules():
-    """載入此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`load_rules_core`
 
@@ -73,7 +73,7 @@ def load_replace_rules():
 
 
 def save_replace_rules(rules):
-    """保存此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`save_rules_core`
 
@@ -83,7 +83,7 @@ def save_replace_rules(rules):
 
 
 def load_config_json():
-    """載入此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_load_app_config`
 
@@ -93,7 +93,7 @@ def load_config_json():
 
 
 def save_config_json(config):
-    """保存此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_save_app_config`
 

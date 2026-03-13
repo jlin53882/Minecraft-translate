@@ -53,7 +53,7 @@ class TranslationView(ft.Column):
     """翻譯工作台：FTB / KubeJS / Markdown 三流程統一入口。"""
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`, `Chip`, `ProgressBar`
 
@@ -210,7 +210,7 @@ class TranslationView(ft.Column):
     # directory picker
     # ------------------------------------------------------------------
     def _pick_directory_into(self, target: ft.TextField):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`get_directory_path`
 
@@ -221,7 +221,7 @@ class TranslationView(ft.Column):
         self.file_picker.get_directory_path()
 
     def _on_dir_picked(self, e: ft.FilePickerResultEvent):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -253,7 +253,7 @@ class TranslationView(ft.Column):
     # UI helpers
     # ------------------------------------------------------------------
     def _set_status(self, text: str, color: str):
-        """設定此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`Text`
 
@@ -264,7 +264,7 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _append_log(self, line: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -274,7 +274,7 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _clear_logs(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`clear`
 
@@ -287,7 +287,7 @@ class TranslationView(ft.Column):
     # reset actions
     # ------------------------------------------------------------------
     def _reset_ftb_inputs(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_set_status`, `_append_log`
 
@@ -306,7 +306,7 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _reset_kjs_inputs(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_set_status`, `_append_log`
 
@@ -324,7 +324,7 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _reset_md_inputs(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_set_status`, `_append_log`
 
@@ -343,7 +343,7 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _show_snack(self, message: str, color: str = theme.RED_600):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`SnackBar`
 

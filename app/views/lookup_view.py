@@ -23,7 +23,7 @@ class LookupView(ft.Column):
     """
 
     def __init__(self, page: ft.Page):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`, `TextField`, `ElevatedButton`
 
@@ -112,7 +112,7 @@ class LookupView(ft.Column):
 
     # --- 單筆查詢邏輯 ---
     def single_lookup_clicked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`Thread`, `start`
 
@@ -139,7 +139,7 @@ class LookupView(ft.Column):
 
     def single_lookup_worker(self, name: str):
         # 3. 呼叫後端服務
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`run_manual_lookup_service`
 
@@ -159,7 +159,7 @@ class LookupView(ft.Column):
 
     # --- 批次查詢邏輯 ---
     def batch_lookup_clicked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`Thread`, `start`
 
@@ -181,7 +181,7 @@ class LookupView(ft.Column):
         thread.start()
 
     def batch_lookup_worker(self, json_text):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`run_batch_lookup_service`
 

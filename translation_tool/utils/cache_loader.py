@@ -15,7 +15,7 @@ import orjson as json
 
 
 def load_shard_file(path: Path) -> dict[str, Any]:
-    """載入此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`loads`
 
@@ -37,7 +37,7 @@ def load_cache_type(
     parallel_workers: int,
     logger: logging.Logger,
 ) -> None:
-    """載入此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`mkdir`, `sorted`, `info`
 

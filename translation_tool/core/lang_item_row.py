@@ -15,7 +15,7 @@ from translation_tool.core.icon_reason import IconRisk
 
 
 def to_halfwidth(text):
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`normalize`
 
@@ -43,7 +43,7 @@ class LangItemRow(ft.Container):
         preview_root: Path,
         on_value_changed: Callable[[str, str], None],
     ):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`, `resolve_icon_with_reason`, `Column`
 

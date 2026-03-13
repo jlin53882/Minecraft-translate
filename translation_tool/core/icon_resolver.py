@@ -61,7 +61,7 @@ def resolve_icon_for_lang_key(lang_key: str, assets_root: Path) -> Path | None:
 
 
 def resolve_icon_with_reason(lang_key: str, assets_root):
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`resolve_icon_for_lang_key`, `classify_no_icon_reason`, `IconResult`
 

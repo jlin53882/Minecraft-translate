@@ -173,7 +173,7 @@ def translate_ftb_pending_to_zh_tw(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def set_prog(v: float):
-        """設定此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -222,7 +222,7 @@ def translate_ftb_pending_to_zh_tw(
     global_total_keys = 0
 
     def _count_one(src: Path) -> Tuple[Path, int]:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`read_json_dict`
 
@@ -327,7 +327,7 @@ def translate_ftb_pending_to_zh_tw(
     _file_write_table: dict[str, tuple[Path, Dict[str, str]]] = {}
 
     def _writer(file_id: str) -> None:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`write_json_dict`
 
@@ -477,7 +477,7 @@ def translate_ftb_pending_to_zh_tw(
 
         # shared while-loop（includes add_to_cache + save_translation_cache + safe slicing）
         def on_translated_item(it: Dict[str, Any]) -> None:
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             回傳：None
             """
@@ -504,7 +504,7 @@ def translate_ftb_pending_to_zh_tw(
 
         # 在這之前先確保 file_id/_file_write_table 設定好了（下面會說加在哪）
         def on_batch_flushed() -> None:
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             - 主要包裝：`touch`
 
@@ -518,7 +518,7 @@ def translate_ftb_pending_to_zh_tw(
                 write_json_dict(dst, out_map)
 
         def _fmt_eta(sec: float) -> str:
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             - 主要包裝：`divmod`
 
@@ -532,7 +532,7 @@ def translate_ftb_pending_to_zh_tw(
             return f"{s}s"
 
         def on_progress(p: float, msg: str, eta_sec: float) -> None:
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             - 主要包裝：`_fmt_eta`, `set_prog`
 

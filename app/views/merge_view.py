@@ -24,7 +24,7 @@ class MergeView(ft.Column):
     """ZIP 合併頁面（視覺風格對齊 Translation/Extractor）。"""
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`, `TaskSession`, `Event`
 
@@ -166,7 +166,7 @@ class MergeView(ft.Column):
     # ZIP handling
     # --------------------------------------------------
     def pick_zips(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`pick_files`
 
@@ -180,7 +180,7 @@ class MergeView(ft.Column):
         )
 
     def _on_zip_picked(self, e: ft.FilePickerResultEvent):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_refresh_zip_list`
 
@@ -195,7 +195,7 @@ class MergeView(ft.Column):
         self.page.update()
 
     def _refresh_zip_list(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`clear`
 
@@ -219,7 +219,7 @@ class MergeView(ft.Column):
             )
 
     def _remove_zip(self, path: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -232,7 +232,7 @@ class MergeView(ft.Column):
     # Output dir
     # --------------------------------------------------
     def pick_output_dir(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`get_directory_path`
 
@@ -242,7 +242,7 @@ class MergeView(ft.Column):
         self.file_picker.get_directory_path(dialog_title="選擇輸出資料夾")
 
     def _on_output_picked(self, e: ft.FilePickerResultEvent):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -254,7 +254,7 @@ class MergeView(ft.Column):
     # Task runner
     # --------------------------------------------------
     def start_merge(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`clear`, `_set_status`, `start`
 
@@ -288,7 +288,7 @@ class MergeView(ft.Column):
     # UI poller
     # --------------------------------------------------
     def _start_ui_poller(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`clear`, `start`
 
@@ -298,7 +298,7 @@ class MergeView(ft.Column):
         self._last_log_count = 0
 
         def poll():
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             回傳：None
             """
@@ -340,7 +340,7 @@ class MergeView(ft.Column):
     # UI helpers
     # --------------------------------------------------
     def _set_status(self, text: str, color: str):
-        """設定此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`Text`
 
@@ -350,7 +350,7 @@ class MergeView(ft.Column):
         self.status_chip.bgcolor = color
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`SnackBar`
 

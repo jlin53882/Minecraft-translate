@@ -29,7 +29,7 @@ class TranslationError(Exception):
     """翻譯相關錯誤的基底類別"""
 
     def __init__(self, message: str, context: dict = None):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`
 
@@ -40,7 +40,7 @@ class TranslationError(Exception):
         super().__init__(self.message)
 
     def __str__(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
@@ -60,7 +60,7 @@ class RateLimitError(APIError):
     """API 限流錯誤（429 Too Many Requests）"""
 
     def __init__(self, retry_after: int = 600, **context):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`
 
@@ -77,7 +77,7 @@ class OverloadError(APIError):
     """API 過載錯誤（503 Service Unavailable - overload）"""
 
     def __init__(self, **context):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`
 
@@ -128,14 +128,14 @@ def handle_translation_errors(log_func=None, auto_retry=True, max_retries=3):
     """
 
     def decorator(func):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             回傳：依函式內 return path。
             """

@@ -13,7 +13,7 @@ class UISessionLogHandler(logging.Handler):
     """
 
     def __init__(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`
 
@@ -29,7 +29,7 @@ class UISessionLogHandler(logging.Handler):
         self._session = session
 
     def emit(self, record: logging.LogRecord):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`format`
 

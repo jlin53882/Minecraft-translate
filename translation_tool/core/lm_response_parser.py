@@ -11,7 +11,7 @@ import re
 
 
 def safe_json_loads(text: str):
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`strip`, `findall`
 

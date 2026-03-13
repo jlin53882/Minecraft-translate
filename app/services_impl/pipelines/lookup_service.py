@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_manual_lookup_service(name: str) -> str:
-    """執行此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`lookup_species_name`
 

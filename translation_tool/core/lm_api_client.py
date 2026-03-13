@@ -21,7 +21,7 @@ def call_gemini_requests(
     api_key: str,
     temperature: float,
 ) -> str:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`post`, `json`
 

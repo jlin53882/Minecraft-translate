@@ -48,7 +48,7 @@ def _normalize_config_dir(path: str) -> str:
 
 
 def _load_json_dict(path: str) -> dict:
-    """載入此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """
@@ -130,7 +130,7 @@ def walk_and_copy_all_snbt(src_root_dir: str, dst_root_dir: str) -> int:
 
 
 def _read_snbt(path: str) -> Compound | None:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """
@@ -143,7 +143,7 @@ def _read_snbt(path: str) -> Compound | None:
 
 
 def _write_snbt(path: str, root: Compound) -> None:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`makedirs`
 
@@ -209,7 +209,7 @@ def patch_lang_snbt_file(
     changed_keys: List[str] = []
 
     def _list_to_py(v):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
@@ -348,7 +348,7 @@ def patch_quest_snbt_file(
     missing: list[str] = []
 
     def _coerce_to_list(new_val: Any) -> list[str] | None:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
@@ -360,7 +360,7 @@ def patch_quest_snbt_file(
         return None
 
     def _apply_field(obj: Compound, kind: str, new_val: Any, tag_key: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -410,7 +410,7 @@ def patch_quest_snbt_file(
         skipped.append(tag_key)
 
     def _recurse(node):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -573,7 +573,7 @@ def inject_ftbquests_quests_from_zh_tw_json(
         skipped_default = len(by_file["_default"])
 
     def _build_filename_index(root_dir: str) -> dict[str, list[str]]:
-        """建立此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`defaultdict`, `walk`, `dict`
 

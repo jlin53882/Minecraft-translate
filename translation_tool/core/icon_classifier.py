@@ -8,7 +8,7 @@ from .icon_reason import IconRisk
 
 
 def classify_no_icon_reason(lang_key: str) -> tuple[str, IconRisk]:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """

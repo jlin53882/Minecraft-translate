@@ -23,7 +23,7 @@ class CacheController:
     """
 
     def __init__(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -43,7 +43,7 @@ class CacheController:
         return self.current_action_id
 
     def is_current(self, run_id: int | None) -> bool:
-        """判斷此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
