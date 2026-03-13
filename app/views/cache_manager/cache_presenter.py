@@ -39,7 +39,7 @@ class CachePresenter:
     }
 
     def status_label(self, state: CacheUiState) -> str:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`upper`
 
@@ -51,7 +51,7 @@ class CachePresenter:
         return self._STATUS_MAP.get(reason, state.reason or "處理中")
 
     def status_text(self, state: CacheUiState) -> str:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`status_label`
 
@@ -61,21 +61,21 @@ class CachePresenter:
         return f"狀態：{label}" + ("..." if state.busy else "")
 
     def phase_label(self, phase: str) -> str:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
         return self._PHASE_MAP.get((phase or "").strip().lower(), phase or "next")
 
     def action_trace(self, action: ActionState) -> str:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
         return f"trace: ACTION#{action.action_id} {self.phase_label(action.phase)} {action.reason}"
 
     def action_log(self, action: ActionState) -> str:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """

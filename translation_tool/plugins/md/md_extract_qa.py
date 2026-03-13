@@ -51,7 +51,7 @@ RE_CJK = re.compile(r"[\u4e00-\u9fff]")
 
 
 def contains_cjk(s: str) -> bool:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`bool`
 
@@ -90,7 +90,7 @@ def normalize_for_dedupe(s: str) -> str:
 
 
 def make_content_hash(text: str) -> str:
-    """建立此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`normalize_for_dedupe`, `hexdigest`
 
@@ -129,7 +129,7 @@ def is_splitter_line_old(line: str) -> bool:
 
 def is_splitter_line(line: str) -> bool:
     # 原有的強分隔符
-    """判斷此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """
@@ -291,7 +291,7 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockIte
 def build_pending_json(
     rel_md: str, abs_md: Path, items: List[BlockItem], lang_mode: str
 ) -> dict:
-    """建立此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """
@@ -318,7 +318,7 @@ RE_LANG_SEG = re.compile(r"^_?(en_us|zh_cn|zh_tw)$", re.IGNORECASE)
 
 def has_allowed_lang_segment(path: Path) -> bool:
     # 用 parts 掃描每個 segment，支援 structure/en_us 這種深層結構
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`any`
 
@@ -385,7 +385,7 @@ def iter_md_files(root: Path):
 
 
 def safe_relpath(path: Path, root: Path) -> str:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`as_posix`
 
@@ -395,7 +395,7 @@ def safe_relpath(path: Path, root: Path) -> str:
 
 
 def main():
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`strip`
 

@@ -31,7 +31,7 @@ LANG_KEY_SUFFIX = (".title", ".quest_desc")
 
 def is_lang_key_ref(val: str):
     # 遇到 {ftbquests.xxx} 這種語言 reference 直接跳過
-    """判斷此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`bool`
 
@@ -84,7 +84,7 @@ def walk_snbt_file(path: str) -> Compound | None:
 # lang/*.snbt 抽取
 # =========================
 def extract_lang_file(filename: str, root: Compound) -> dict:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`items`
 
@@ -122,7 +122,7 @@ def extract_lang_file(filename: str, root: Compound) -> dict:
 # quest 本體抽取（title）
 # =========================
 def extract_quest_file(filename: str, root: Compound) -> dict:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`recurse`
 
@@ -131,7 +131,7 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
     out = {}
 
     def _emit(obj: Compound, field: str, kind: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -177,7 +177,7 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
         out[key] = text
 
     def recurse(obj, path):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -201,7 +201,7 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
 
 
 def ensure_lang(store: dict, lang: str):
-    """確保此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：None
     """
@@ -213,7 +213,7 @@ def ensure_lang(store: dict, lang: str):
 # 主流程
 # =========================
 def process_quest_folder(quests_root: str) -> dict:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`join`, `set`, `walk`
 

@@ -33,7 +33,7 @@ class ConfigView(ft.Column):
 
     def __init__(self, page: ft.Page):
         # 設定 Root Column 不滾動，為了做 Fixed Footer
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`, `_init_controls`, `Column`
 
@@ -237,7 +237,7 @@ class ConfigView(ft.Column):
         return build_config_header(self)
 
     def _build_left_column(self):
-        """建立此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`Column`
 
@@ -284,7 +284,7 @@ class ConfigView(ft.Column):
         # LM Translator Section content
 
         # 1. Top Params
-        """建立此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`Row`, `Container`
 
@@ -462,7 +462,7 @@ class ConfigView(ft.Column):
         )
 
     def _build_lang_merger_card(self):
-        """建立此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_build_card`
 
@@ -515,7 +515,7 @@ class ConfigView(ft.Column):
     # --- 邏輯功能 (與原程式碼相同，僅移動位置) ---
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`SnackBar`
 
@@ -527,7 +527,7 @@ class ConfigView(ft.Column):
         self.page.update()
 
     def add_model_row(self, model_name: str):
-        """加入此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`Checkbox`, `Text`, `IconButton`
 
@@ -587,7 +587,7 @@ class ConfigView(ft.Column):
         self._refresh_model_order_labels()
 
     def move_model_row(self, cb: ft.Checkbox, direction: int):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`next`, `_refresh_model_order_labels`
 
@@ -604,7 +604,7 @@ class ConfigView(ft.Column):
         self._refresh_model_order_labels()
 
     def remove_model_by_checkbox(self, cb: ft.Checkbox):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`next`, `_refresh_model_order_labels`
 
@@ -616,7 +616,7 @@ class ConfigView(ft.Column):
         self._refresh_model_order_labels()
 
     def on_add_model_clicked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`strip`, `add_model_row`
 
@@ -647,7 +647,7 @@ class ConfigView(ft.Column):
         self.keys_column.update()
 
     def remove_key_row(self, row: ft.Row):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -658,7 +658,7 @@ class ConfigView(ft.Column):
         self.keys_column.update()
 
     def _refresh_model_order_labels(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`enumerate`
 

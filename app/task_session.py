@@ -28,7 +28,7 @@ class TaskSession:
     """
 
     def __init__(self, max_logs: int = 300):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`deque`, `Lock`
 
@@ -53,7 +53,7 @@ class TaskSession:
             self.progress = max(0.0, min(1.0, value))
 
     def add_log(self, text: str):
-        """加入此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -63,7 +63,7 @@ class TaskSession:
             self.logs.append(text)
 
     def set_error(self):
-        """設定此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -72,7 +72,7 @@ class TaskSession:
             self.status = "ERROR"
 
     def finish(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -81,7 +81,7 @@ class TaskSession:
             self.status = "DONE"
 
     def start(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """

@@ -62,7 +62,7 @@ def translate_batch_smart(batch_items, total=None):
 
     # 判斷這批次類型（影響 System Prompt 與 batch 上限）
     def _norm_file(item):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
@@ -70,7 +70,7 @@ def translate_batch_smart(batch_items, total=None):
 
     def detect_batch_profile(items):
         # ✅ 優先用 cache_type（最可靠）
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """

@@ -46,7 +46,7 @@ from translation_tool.plugins.shared.lang_text_rules import is_already_zh
 
 
 def read_json(path: Path) -> Dict[str, Any]:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """
@@ -55,7 +55,7 @@ def read_json(path: Path) -> Dict[str, Any]:
 
 
 def write_json(path: Path, data: Dict[str, Any]) -> None:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`mkdir`
 
@@ -67,7 +67,7 @@ def write_json(path: Path, data: Dict[str, Any]) -> None:
 
 
 def collect_pending_json_files(pending_root: Path) -> List[Path]:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`sorted`
 
@@ -104,7 +104,7 @@ class PendingItem:
 
 
 def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
-    """載入此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`read_json`
 
@@ -131,7 +131,7 @@ def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
 def compute_out_json_path(
     src_json: Path, in_pending_root: Path, out_root: Path
 ) -> Path:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`relative_to`
 
@@ -149,7 +149,7 @@ def translate_md_pending(
     dry_run: bool = False,
     session=None,
 ) -> Dict[str, Any]:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`validate_api_keys`, `perf_counter`, `resolve`
 
@@ -308,14 +308,14 @@ def translate_md_pending(
 
     # md 是「最後一次寫出全部檔案」即可，所以 touched writer 這裡先做 noop
     def _writer(_fid: str) -> None:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
         return
 
     def on_translated_item(it: Dict[str, Any]) -> None:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`record`
 
@@ -340,7 +340,7 @@ def translate_md_pending(
             pass
 
     def on_batch_flushed() -> None:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`touch`
 
@@ -353,7 +353,7 @@ def translate_md_pending(
             pass
 
     def _fmt_eta(sec: float) -> str:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`divmod`
 
@@ -365,7 +365,7 @@ def translate_md_pending(
         return f"{m}m{s:02d}s" if m > 0 else f"{s}s"
 
     def on_progress(p: float, msg: str, eta_sec: float) -> None:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_fmt_eta`, `log_info`, `progress`
 
@@ -493,7 +493,7 @@ def translate_md_pending(
 
 
 def main():
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`log_info`, `strip`
 

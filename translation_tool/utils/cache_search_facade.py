@@ -22,7 +22,7 @@ class CacheSearchFacade:
     """
 
     def __init__(self, cache_root_getter: Callable[[], Path], logger: logging.Logger):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`Lock`
 
@@ -34,7 +34,7 @@ class CacheSearchFacade:
         self._lock = threading.Lock()
 
     def _get_orchestrator(self) -> SearchOrchestrator:
-        """取得此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
@@ -45,7 +45,7 @@ class CacheSearchFacade:
         return self._orchestrator
 
     def get_search_engine(self):
-        """取得此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
@@ -58,7 +58,7 @@ class CacheSearchFacade:
     def rebuild_search_index(
         self, cache_types: list[str], translation_cache: dict[str, dict[str, Any]]
     ) -> None:
-        """重建此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`info`
 
@@ -79,7 +79,7 @@ class CacheSearchFacade:
         cache_types: list[str],
         translation_cache: dict[str, dict[str, Any]],
     ) -> None:
-        """重建此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`rebuild_search_index_for_type`
 
@@ -103,7 +103,7 @@ class CacheSearchFacade:
         limit: int = 50,
         use_fuzzy: bool = True,
     ) -> list:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
@@ -126,7 +126,7 @@ class CacheSearchFacade:
         threshold: float = 0.6,
         limit: int = 20,
     ) -> list:
-        """找出此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """

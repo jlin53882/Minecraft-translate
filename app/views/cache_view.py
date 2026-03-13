@@ -71,7 +71,7 @@ class CacheView(ft.Column):
     """
 
     def __init__(self, page: ft.Page):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`, `Text`
 
@@ -1063,7 +1063,7 @@ class CacheView(ft.Column):
     # Lifecycle
     # =========================================================
     def did_mount(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_load_overview`
 
@@ -1201,7 +1201,7 @@ class CacheView(ft.Column):
 
     def _on_page_resized(self, e):
         # 重繪分類/分片與 C1 KeyListCard，讓大小可跟視窗動態變更
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -1215,7 +1215,7 @@ class CacheView(ft.Column):
             pass
 
     def _set_state(self, busy: bool, reason: str, trace: str):
-        """設定此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_refresh_disabled_state`
 
@@ -1246,7 +1246,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _refresh_disabled_state(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -1366,7 +1366,7 @@ class CacheView(ft.Column):
 
     # 與舊測試相容：集中提交 UI 更新
     def commit_ui(self, controls=None):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -1383,7 +1383,7 @@ class CacheView(ft.Column):
     def set_ui_state(
         self, busy: bool, reason: str, trace: str, run_id: int | None = None
     ):
-        """設定此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`getattr`, `bool`, `_refresh_disabled_state`
 
@@ -1445,7 +1445,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _append_log(self, text: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_logs`
 
@@ -1464,7 +1464,7 @@ class CacheView(ft.Column):
         self._render_logs()
 
     def _notify(self, message: str, level: str = "info"):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -1504,7 +1504,7 @@ class CacheView(ft.Column):
         )
 
     def _build_query_entry_page(self):
-        """建立此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`Tabs`, `Container`
 
@@ -1530,7 +1530,7 @@ class CacheView(ft.Column):
         )
 
     def _render_logs(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`clear`
 
@@ -1545,7 +1545,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_log_filter_changed(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`bool`, `_render_logs`
 
@@ -1555,7 +1555,7 @@ class CacheView(ft.Column):
         self._render_logs()
 
     def _clear_logs(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`clear`, `_render_logs`
 
@@ -1565,7 +1565,7 @@ class CacheView(ft.Column):
         self._render_logs()
 
     def _copy_logs(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`join`, `set_clipboard`
 
@@ -1579,7 +1579,7 @@ class CacheView(ft.Column):
             self._show_snack_bar("複製失敗", theme.RED_400)
 
     def _iter_type_states(self, data: dict):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
@@ -1599,7 +1599,7 @@ class CacheView(ft.Column):
         return []
 
     def _render_type_list(self, data: dict):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`clear`, `_iter_type_states`
 
@@ -1716,7 +1716,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _refresh_overview_ui(self, data: dict):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`strftime`, `_render_type_list`
 
@@ -1735,7 +1735,7 @@ class CacheView(ft.Column):
         self._render_type_list(data)
 
     def _load_overview(self):
-        """載入此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`cache_get_overview_service`, `_refresh_overview_ui`, `_refresh_query_type_options`
 
@@ -1753,12 +1753,12 @@ class CacheView(ft.Column):
         self._render_query_type_shard_page()
 
     def _run_action(self, reason: str, work_fn, success_msg: str):
-        """執行此函式的工作（細節以程式碼為準）。"""
+        """"""
         return run_cache_action(self, reason, work_fn, success_msg)
 
     # top actions
     def _on_reload_all(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_run_action`
 
@@ -1769,7 +1769,7 @@ class CacheView(ft.Column):
         )
 
     def _on_save_all_new(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_run_action`
 
@@ -1782,7 +1782,7 @@ class CacheView(ft.Column):
         )
 
     def _on_save_all_fill(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_run_action`
 
@@ -1800,7 +1800,7 @@ class CacheView(ft.Column):
         )
 
     def _on_refresh_stats(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_load_overview`, `_notify`
 
@@ -1841,7 +1841,7 @@ class CacheView(ft.Column):
 
     # per-type actions
     def _on_reload_one(self, cache_type: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_run_action`
 
@@ -1854,7 +1854,7 @@ class CacheView(ft.Column):
         )
 
     def _on_save_one_new(self, cache_type: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_run_action`
 
@@ -1869,7 +1869,7 @@ class CacheView(ft.Column):
         )
 
     def _on_save_one_fill(self, cache_type: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_run_action`
 
@@ -1889,7 +1889,7 @@ class CacheView(ft.Column):
         )
 
     def _on_rotate_one(self, cache_type: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_run_action`
 
@@ -1897,7 +1897,7 @@ class CacheView(ft.Column):
         """
 
         def _work():
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             - 主要包裝：`cache_rotate_service`, `cache_get_overview_service`
 
@@ -1911,7 +1911,7 @@ class CacheView(ft.Column):
         self._run_action("ROTATING", _work, f"已輪替分片：{cache_type}")
 
     def _on_analyze_one(self, cache_type: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_iter_type_states`
 
@@ -1939,7 +1939,7 @@ class CacheView(ft.Column):
 
     def _on_jump_to_query_type(self, cache_type: str):
         # 切到查詢頁 -> 查詢區，並預先設定 KEY + 指定分類
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -1965,7 +1965,7 @@ class CacheView(ft.Column):
     # Query phase-2: search block
     # =========================================================
     def _refresh_query_type_options(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`sorted`
 
@@ -1986,7 +1986,7 @@ class CacheView(ft.Column):
     def _load_shard_rows(
         self, cache_type: str, active_shard_id: str, shard_capacity: int
     ) -> list[dict]:
-        """載入此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`strip`, `glob`, `sorted`
 
@@ -2001,7 +2001,7 @@ class CacheView(ft.Column):
             return []
 
         def _sort_key(path: Path):
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             - 主要包裝：`search`
 
@@ -2049,7 +2049,7 @@ class CacheView(ft.Column):
         return rows
 
     def _load_shard_keys(self, cache_type: str, filename: str) -> list[str]:
-        """載入此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`strip`, `loads`
 
@@ -2083,7 +2083,7 @@ class CacheView(ft.Column):
         return []
 
     def _set_shard_detail_page(self, page: int):
-        """設定此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -2094,7 +2094,7 @@ class CacheView(ft.Column):
         self.shard_detail_page = max(1, min(page, self.shard_detail_total_pages))
 
     def _render_shard_detail_keys(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`clear`, `list`
 
@@ -2221,7 +2221,7 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_shard_key_filter_change(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_shard_detail_keys`
 
@@ -2232,7 +2232,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _set_shard_workspace_visible(self, visible: bool):
-        """設定此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`bool`
 
@@ -2245,7 +2245,7 @@ class CacheView(ft.Column):
             self.shard_workspace_card.visible = show_workspace
 
     def _open_shard_workspace_tab(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_set_shard_workspace_visible`
 
@@ -2254,7 +2254,7 @@ class CacheView(ft.Column):
         self._set_shard_workspace_visible(True)
 
     def _on_back_to_shard_list(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_set_shard_workspace_visible`
 
@@ -2264,7 +2264,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_select_shard_row(self, cache_type: str, filename: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_load_shard_keys`, `_render_query_type_shard_page`, `_open_shard_workspace_tab`
 
@@ -2286,7 +2286,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_select_shard_key(self, key: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_shard_detail_keys`
 
@@ -2304,7 +2304,7 @@ class CacheView(ft.Column):
     def _load_shard_entry(
         self, cache_type: str, filename: str, key: str
     ) -> dict | None:
-        """載入此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`strip`, `loads`
 
@@ -2330,7 +2330,7 @@ class CacheView(ft.Column):
         return None
 
     def _format_shard_src_text(self, src_text: str, mode: str) -> str:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`replace`
 
@@ -2342,7 +2342,7 @@ class CacheView(ft.Column):
         return src.replace("\\r\\n", "\n").replace("\\n", "\n")
 
     def _render_shard_src_panel(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`cache_get_entry_service`, `_format_shard_src_text`, `_refresh_disabled_state`
 
@@ -2383,7 +2383,7 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_shard_src_preview_mode(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_shard_src_panel`
 
@@ -2394,7 +2394,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_shard_src_raw_mode(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_shard_src_panel`
 
@@ -2405,7 +2405,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _normalize_cache_text(self, text: str) -> str:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`replace`
 
@@ -2414,7 +2414,7 @@ class CacheView(ft.Column):
         return str(text or "").replace("\\r\\n", "\n").replace("\\n", "\n")
 
     def _render_shard_dst_panel(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -2451,7 +2451,7 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_shard_dst_apply(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -2519,7 +2519,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_shard_dst_copy(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`set_clipboard`
 
@@ -2605,7 +2605,7 @@ class CacheView(ft.Column):
 
         # 若當前選取不在新清單中，就預設第一筆
         def _ev_id(ev: dict):
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             回傳：依函式內 return path。
             """
@@ -2749,7 +2749,7 @@ class CacheView(ft.Column):
             self._notify(f"套用舊值失敗：{ex}", "error")
 
     def _on_shard_page_first(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_shard_detail_keys`
 
@@ -2760,7 +2760,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_shard_page_prev(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_shard_detail_keys`
 
@@ -2771,7 +2771,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_shard_page_next(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_shard_detail_keys`
 
@@ -2782,7 +2782,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_shard_page_last(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_shard_detail_keys`
 
@@ -2793,7 +2793,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _render_query_type_shard_page(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`clear`, `list`, `set`
 
@@ -2955,7 +2955,7 @@ class CacheView(ft.Column):
         self._render_shard_detail_keys()
 
     def _active_shard_filename(self, cache_type: str) -> str:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_iter_type_states`
 
@@ -2969,7 +2969,7 @@ class CacheView(ft.Column):
         return "-"
 
     def _type_dirty_text(self, cache_type: str) -> str:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_iter_type_states`
 
@@ -3009,7 +3009,7 @@ class CacheView(ft.Column):
         return history_load_recent(root, cache_type, key, limit)
 
     def _render_query_history(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`clear`
 
@@ -3049,7 +3049,7 @@ class CacheView(ft.Column):
 
         # 若當前選取不在新清單中，就預設第一筆
         def _ev_id(ev: dict):
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             回傳：依函式內 return path。
             """
@@ -3108,7 +3108,7 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _update_history_preview(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -3210,7 +3210,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_select_history_event(self, event: dict):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_query_history`
 
@@ -3221,7 +3221,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_apply_selected_history(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -3280,7 +3280,7 @@ class CacheView(ft.Column):
             self._notify(f"套用舊值失敗：{ex}", "error")
 
     def _render_query_detail(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -3314,7 +3314,7 @@ class CacheView(ft.Column):
         self._render_query_history()
 
     def _set_query_page(self, page: int):
-        """設定此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -3325,7 +3325,7 @@ class CacheView(ft.Column):
         self.query_page = max(1, min(page, self.query_total_pages))
 
     def _render_query_results(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_set_query_page`, `clear`
 
@@ -3423,7 +3423,7 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_select_result(self, row: dict):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_query_results`, `_render_query_detail`
 
@@ -3435,7 +3435,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_page_first(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_query_results`
 
@@ -3446,7 +3446,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_page_prev(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_query_results`
 
@@ -3457,7 +3457,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_page_next(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_query_results`
 
@@ -3468,7 +3468,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_page_last(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_query_results`
 
@@ -3479,7 +3479,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_page_jump(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_query_results`
 
@@ -3494,7 +3494,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_page_size_change(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_query_results`
 
@@ -3509,7 +3509,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_apply_dst(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -3606,7 +3606,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_query_search(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`strip`, `upper`, `set`
 
@@ -3687,7 +3687,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_query_clear(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_query_results`, `_render_query_detail`
 

@@ -55,7 +55,7 @@ __all__ = [
 
 
 def _state():
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`ensure_runtime_maps`
 
@@ -65,7 +65,7 @@ def _state():
 
 
 def _get_cache_root() -> Path:
-    """取得此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`resolve_project_path`
 
@@ -77,7 +77,7 @@ def _get_cache_root() -> Path:
 
 
 def _load_cache_type(cache_type: str):
-    """載入此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`, `load_cache_type`
 
@@ -96,7 +96,7 @@ def _load_cache_type(cache_type: str):
 
 
 def initialize_translation_cache():
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`
 
@@ -114,7 +114,7 @@ def initialize_translation_cache():
 
 
 def is_cache_initialized() -> bool:
-    """判斷此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`bool`
 
@@ -124,7 +124,7 @@ def is_cache_initialized() -> bool:
 
 
 def reload_translation_cache():
-    """重新載入此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`reset_runtime_state`, `initialize_translation_cache`
 
@@ -137,7 +137,7 @@ def reload_translation_cache():
 
 
 def reload_translation_cache_type(cache_type: str):
-    """重新載入此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`, `initialize_translation_cache`, `_load_cache_type`
 
@@ -157,7 +157,7 @@ def reload_translation_cache_type(cache_type: str):
 def _save_entries_to_active_shards(
     cache_type: str, entries: dict, force_new_shard: bool = False
 ):
-    """保存此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`, `_save_entries_to_active_shards`
 
@@ -177,7 +177,7 @@ def _save_entries_to_active_shards(
 
 
 def save_translation_cache(cache_type: str, write_new_shard: bool = True):
-    """保存此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`
 
@@ -210,7 +210,7 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
 
 
 def _get_active_shard_path(cache_type: str) -> Path:
-    """取得此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`, `_get_active_shard_path`
 
@@ -234,7 +234,7 @@ def add_to_cache(
     mod: str | None = None,
     path: str | None = None,
 ):
-    """加入此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`
 
@@ -261,7 +261,7 @@ def add_to_cache(
 
 
 def get_from_cache(cache_type: str, key: str) -> Optional[str]:
-    """取得此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`, `get_value`
 
@@ -277,7 +277,7 @@ def get_from_cache(cache_type: str, key: str) -> Optional[str]:
 
 
 def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
-    """取得此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`, `get_entry`
 
@@ -293,7 +293,7 @@ def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
 
 
 def get_cache_dict_ref(cache_type: str) -> Dict[str, Dict[str, Any]]:
-    """取得此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`
 
@@ -307,7 +307,7 @@ def get_cache_dict_ref(cache_type: str) -> Dict[str, Dict[str, Any]]:
 
 
 def get_session_new_count(cache_type: str) -> int:
-    """取得此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`
 
@@ -321,7 +321,7 @@ def get_session_new_count(cache_type: str) -> int:
 
 
 def get_active_shard_id(cache_type: str) -> str:
-    """取得此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`, `_get_active_shard_id_impl`
 
@@ -334,7 +334,7 @@ def get_active_shard_id(cache_type: str) -> str:
 
 
 def get_cache_overview() -> Dict[str, Any]:
-    """取得此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`initialize_translation_cache`, `_state`
 
@@ -359,7 +359,7 @@ def get_cache_overview() -> Dict[str, Any]:
 
 
 def force_rotate_shard(cache_type: str) -> bool:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`initialize_translation_cache`, `_state`
 
@@ -383,7 +383,7 @@ def force_rotate_shard(cache_type: str) -> bool:
 
 
 def _get_search_facade() -> CacheSearchFacade:
-    """取得此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """
@@ -396,7 +396,7 @@ def _get_search_facade() -> CacheSearchFacade:
 
 
 def get_search_engine():
-    """取得此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`get_search_engine`
 
@@ -406,7 +406,7 @@ def get_search_engine():
 
 
 def rebuild_search_index():
-    """重建此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`, `rebuild_search_index`
 
@@ -419,7 +419,7 @@ def rebuild_search_index():
 
 
 def rebuild_search_index_for_type(cache_type: str):
-    """重建此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`_state`, `rebuild_search_index_for_type`
 
@@ -434,7 +434,7 @@ def rebuild_search_index_for_type(cache_type: str):
 def search_cache(
     query: str, cache_type: str = None, limit: int = 50, use_fuzzy: bool = True
 ) -> list:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`search_cache`
 
@@ -448,7 +448,7 @@ def search_cache(
 def find_similar_translations(
     text: str, cache_type: str = None, threshold: float = 0.6, limit: int = 20
 ) -> list:
-    """找出此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`find_similar_translations`
 

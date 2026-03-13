@@ -67,7 +67,7 @@ except Exception as e:
 
 
 def initialize_species_cache():
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`info`
 
@@ -127,7 +127,7 @@ def initialize_species_cache():
 
 
 def is_potential_species_name(name: str) -> bool:
-    """判斷此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`bool`
 
@@ -139,7 +139,7 @@ def is_potential_species_name(name: str) -> bool:
 
 
 def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`debug`, `sleep`
 
@@ -186,7 +186,7 @@ def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
 
 
 def lookup_species_name(name: str) -> Optional[str]:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """

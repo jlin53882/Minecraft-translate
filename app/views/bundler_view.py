@@ -25,7 +25,7 @@ class BundlerView(ft.Column):
     """
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`, `TextField`
 
@@ -36,7 +36,7 @@ class BundlerView(ft.Column):
         # 我們仍然保留 file_picker，以防萬一 (雖然現在主要用 tkinter)
         self.file_picker = file_picker
 
-        # --- UI 元件 (保持不變) ---
+        # --- UI 元件 ---
         self.root_dir_textfield = ft.TextField(
             label="翻譯專案根目錄",
             expand=True,
@@ -53,7 +53,7 @@ class BundlerView(ft.Column):
         self.progress_bar = ft.ProgressBar(value=0, visible=False)
         self.log_view = ft.ListView(expand=True, spacing=5, auto_scroll=True)
 
-        # --- UI 佈局 (保持不變) ---
+        # --- UI 佈局 ---
         self.controls = [
             ft.Card(
                 content=ft.Container(
@@ -98,8 +98,8 @@ class BundlerView(ft.Column):
 
     # --- 輔助函式 ---
     def _create_pick_button(self, target_textfield: ft.TextField, pick_type: str):
-        # (函式內容... 保持不變)
-        """處理此函式的工作（細節以程式碼為準）。
+        
+        """
 
         - 主要包裝：`IconButton`
 
@@ -120,8 +120,8 @@ class BundlerView(ft.Column):
         )
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        # (函式內容... 保持不變)
-        """處理此函式的工作（細節以程式碼為準）。
+        
+        """
 
         - 主要包裝：`SnackBar`
 
@@ -170,8 +170,8 @@ class BundlerView(ft.Column):
     # (原有的 Flet FilePicker 相關函式 on_path_picked 已被 pick_path_with_tkinter 取代)
 
     def set_controls_disabled(self, disabled: bool):
-        # (函式內容... 保持不變)
-        """設定此函式的工作（細節以程式碼為準）。
+        
+        """
 
         回傳：None
         """
@@ -184,8 +184,8 @@ class BundlerView(ft.Column):
         self.page.update()
 
     def start_bundling_clicked(self, e):
-        # (函式內容... 保持不變)
-        """處理此函式的工作（細節以程式碼為準）。
+        
+        """
 
         - 主要包裝：`set_controls_disabled`, `clear`
 
@@ -212,8 +212,8 @@ class BundlerView(ft.Column):
         thread.start()
 
     def bundling_worker(self, root_dir, output_zip):
-        # (函式內容... 保持不變)
-        """處理此函式的工作（細節以程式碼為準）。
+        
+        """
 
         - 主要包裝：`run_bundling_service`
 

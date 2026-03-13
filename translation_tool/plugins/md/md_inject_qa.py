@@ -138,7 +138,7 @@ RE_MOSTLY_TOKEN_LINE = re.compile(r"^\s*(§[0-9a-zA-Z]+\S*)\s*(§[0-9a-zA-Z]+\S*
 
 
 def is_token_line(line: str) -> bool:
-    """判斷此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`strip`
 
@@ -202,7 +202,7 @@ def flatten_for_md(text: str) -> str:
     buf: List[str] = []
 
     def flush_buf():
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -378,7 +378,7 @@ def iter_json_files(root: Path):
 
 
 def main():
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`strip`
 

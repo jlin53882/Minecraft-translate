@@ -18,7 +18,7 @@ KEY_ZH = re.compile(r"^([a-zA-Z0-9_.-]+)([\u4e00-\u9fff].+)$")
 
 def try_repair_lang_line(line: str):
     # JSON 風格
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`match`
 
@@ -131,7 +131,7 @@ def is_mc_standard_lang_path(path: str) -> bool:
 
 
 def pick_first_not_none(*vals):
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """

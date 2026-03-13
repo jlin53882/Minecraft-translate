@@ -30,7 +30,7 @@ class RulesView(ft.Column):
     """
 
     def __init__(self, page: ft.Page):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`, `_init_controls`, `start`
 
@@ -78,7 +78,7 @@ class RulesView(ft.Column):
 
     def _sync_page_jump_field(self):
         # 確保欄位顯示跟 current_page 一致
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -89,7 +89,7 @@ class RulesView(ft.Column):
                 self.page_jump_field.update()
 
     def on_page_jump_submit(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`strip`, `_render_current_page`
 
@@ -335,7 +335,7 @@ class RulesView(ft.Column):
 
     # --- 邏輯功能 ---
     def on_sort_change(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_current_page`
 
@@ -353,7 +353,7 @@ class RulesView(ft.Column):
         self._render_current_page()
 
     def on_search(self, e: ft.ControlEvent):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_current_page`
 
@@ -426,7 +426,7 @@ class RulesView(ft.Column):
     # --- 執行緒輔助與載入 ---
 
     def _run_on_ui_thread(self, func, *args, **kwargs):
-        """執行此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -434,7 +434,7 @@ class RulesView(ft.Column):
             self.page.loop.call_soon_threadsafe(func, *args, **kwargs)
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`SnackBar`
 
@@ -450,7 +450,7 @@ class RulesView(ft.Column):
         self.page.update()
 
     def _load_rules_core(self):
-        """載入此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`load_replace_rules`
 
@@ -459,7 +459,7 @@ class RulesView(ft.Column):
         return load_replace_rules()
 
     def _initial_load(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_load_rules_core`
 
@@ -477,7 +477,7 @@ class RulesView(ft.Column):
     # --- 分頁渲染邏輯 ---
 
     def _render_current_page(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`clear`, `enumerate`, `extend`
 
@@ -528,7 +528,7 @@ class RulesView(ft.Column):
     # --- 互動事件處理 ---
 
     def on_text_change(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_find_index_by_rid`
 
@@ -584,7 +584,7 @@ class RulesView(ft.Column):
 
 
     def _handle_reload_success(self, rules_data):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_current_page`, `_show_snack_bar`
 
@@ -603,7 +603,7 @@ class RulesView(ft.Column):
         self.page.update()
 
     def _handle_reload_failure(self, err):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_show_snack_bar`
 
@@ -614,7 +614,7 @@ class RulesView(ft.Column):
         self._show_snack_bar(f"載入規則時發生錯誤: {err}", theme.RED_600)
 
     def prev_page(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -625,7 +625,7 @@ class RulesView(ft.Column):
             self._show_snack_bar("已在第一頁", theme.BLUE_GREY_700)
 
     def next_page(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -637,7 +637,7 @@ class RulesView(ft.Column):
 
     def save_rules_clicked(self, e):
         # 先驗證
-        """保存此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`enumerate`, `_show_snack_bar`, `start`
 
@@ -666,7 +666,7 @@ class RulesView(ft.Column):
 
 
     def add_row_clicked(self, e):
-        """加入此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_render_current_page`
 
@@ -683,7 +683,7 @@ class RulesView(ft.Column):
         self._show_snack_bar("➕ 已新增一條規則（已跳至最後一頁）", theme.BLUE_700)
 
     def delete_row_clicked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_find_index_by_rid`
 

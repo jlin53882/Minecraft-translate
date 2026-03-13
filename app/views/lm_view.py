@@ -28,7 +28,7 @@ class LMView(ft.Column):
     """LM 翻譯頁（風格對齊 Translation/Extractor）。"""
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`, `TextField`
 
@@ -150,7 +150,7 @@ class LMView(ft.Column):
     # - 之後調整 UI（padding/radius/border/divider）只要改一處
 
     def _path_row(self, field: ft.TextField, on_pick) -> ft.Control:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`Row`
 
@@ -173,7 +173,7 @@ class LMView(ft.Column):
     # Events
     # --------------------------------------------------
     def pick_input_directory(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`get_directory_path`
 
@@ -183,7 +183,7 @@ class LMView(ft.Column):
         self.file_picker.get_directory_path()
 
     def on_input_dir_picked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -192,7 +192,7 @@ class LMView(ft.Column):
             self.page.update()
 
     def pick_output_directory(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`get_directory_path`
 
@@ -202,7 +202,7 @@ class LMView(ft.Column):
         self.file_picker.get_directory_path()
 
     def on_output_dir_picked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -211,7 +211,7 @@ class LMView(ft.Column):
             self.page.update()
 
     def start_clicked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`TaskSession`, `start`, `_set_status`
 
@@ -266,7 +266,7 @@ class LMView(ft.Column):
     # UI Timer
     # --------------------------------------------------
     def start_ui_timer(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`start`
 
@@ -277,7 +277,7 @@ class LMView(ft.Column):
         self._ui_timer_running = True
 
         def loop():
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             回傳：None
             """
@@ -310,7 +310,7 @@ class LMView(ft.Column):
     # UI helpers
     # --------------------------------------------------
     def _set_status(self, text: str, color: str):
-        """設定此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`Text`
 
@@ -320,7 +320,7 @@ class LMView(ft.Column):
         self.status_chip.bgcolor = color
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`SnackBar`
 

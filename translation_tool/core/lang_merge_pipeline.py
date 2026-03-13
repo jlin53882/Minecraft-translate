@@ -35,7 +35,7 @@ def _process_single_mod(
     output_dir: str,
     must_translate_dir: str,
 ) -> Dict[str, Any]:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`compile`
 
@@ -82,7 +82,7 @@ def _process_single_mod(
         return not contains_cjk(v)
 
     def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
@@ -97,7 +97,7 @@ def _process_single_mod(
                 bad_lines = []
 
                 def on_error(line_no, raw, reason):
-                    """處理此函式的工作（細節以程式碼為準）。
+                    """
 
                     回傳：None
                     """

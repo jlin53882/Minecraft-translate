@@ -330,14 +330,14 @@ class CacheSearchEngine:
             self.conn.close()
 
     def __enter__(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`close`
 

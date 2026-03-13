@@ -23,7 +23,7 @@ import copy
 
 # PR27：統一路徑解析基準，避免 legacy cwd 依賴造成找不到 config / 資源檔。
 def get_project_root() -> Path:
-    """取得此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """
@@ -35,7 +35,7 @@ CONFIG_PATH = PROJECT_ROOT / "config.json"
 
 
 def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`Path`
 
@@ -320,7 +320,7 @@ def get_models_config(cfg: dict) -> dict[str, dict]:
 
 
 def deep_merge(default: dict, override: dict) -> dict:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`copy`, `items`
 
@@ -343,7 +343,7 @@ class LazyConfigProxy:
     # 但實際讀檔時機延後到真正取值的那一刻，而不是 import 當下。
 
     def _current(self) -> dict:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`load_config`
 
@@ -352,28 +352,28 @@ class LazyConfigProxy:
         return load_config()
 
     def get(self, key, default=None):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
         return self._current().get(key, default)
 
     def __getitem__(self, key):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
         return self._current()[key]
 
     def __contains__(self, key):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
         return key in self._current()
 
     def __iter__(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`iter`
 
@@ -382,14 +382,14 @@ class LazyConfigProxy:
         return iter(self._current())
 
     def __len__(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：依函式內 return path。
         """
         return len(self._current())
 
     def items(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`items`
 
@@ -398,7 +398,7 @@ class LazyConfigProxy:
         return self._current().items()
 
     def keys(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`keys`
 
@@ -407,7 +407,7 @@ class LazyConfigProxy:
         return self._current().keys()
 
     def values(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`values`
 
@@ -416,7 +416,7 @@ class LazyConfigProxy:
         return self._current().values()
 
     def copy(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`copy`
 
@@ -425,7 +425,7 @@ class LazyConfigProxy:
         return self._current().copy()
 
     def __repr__(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`repr`
 

@@ -16,7 +16,7 @@ from translation_tool.utils.config_manager import load_config
 
 
 def find_patchouli_json(root: Path, dir_names=None):
-    """找出此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """
@@ -35,7 +35,7 @@ def find_patchouli_json(root: Path, dir_names=None):
 
 
 def find_lang_json(root: Path):
-    """找出此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`list`
 
@@ -45,7 +45,7 @@ def find_lang_json(root: Path):
 
 
 def is_lang_file(file_path: Path) -> bool:
-    """判斷此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """
@@ -53,7 +53,7 @@ def is_lang_file(file_path: Path) -> bool:
 
 
 def extract_translatables(json_data, file_path):
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`is_lang_file`, `walk`
 
@@ -63,7 +63,7 @@ def extract_translatables(json_data, file_path):
     is_lang = is_lang_file(Path(file_path))
 
     def walk(obj, base_path=""):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """

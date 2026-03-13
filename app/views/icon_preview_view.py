@@ -36,7 +36,7 @@ class IconPreviewView(ft.Column):
     """
 
     def __init__(self, page: ft.Page):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`__init__`, `FilePicker`
 
@@ -160,7 +160,7 @@ class IconPreviewView(ft.Column):
     # Folder picker callbacks
     # ==================================================
     def _on_pick_source(self, e: ft.FilePickerResultEvent):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -170,7 +170,7 @@ class IconPreviewView(ft.Column):
             self._update_load_state()
 
     def _on_pick_review(self, e: ft.FilePickerResultEvent):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -180,7 +180,7 @@ class IconPreviewView(ft.Column):
             self._update_load_state()
 
     def _update_load_state(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -191,7 +191,7 @@ class IconPreviewView(ft.Column):
     # 載入 → 建立模組清單
     # ==================================================
     def _on_load_clicked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`_load_entries`, `defaultdict`, `dict`
 
@@ -210,7 +210,7 @@ class IconPreviewView(ft.Column):
     # 第一層：模組清單
     # ==================================================
     def _render_mod_list(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`sorted`
 
@@ -252,7 +252,7 @@ class IconPreviewView(ft.Column):
         self.update()
 
     def _update_page_bar_for_mods(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -263,7 +263,7 @@ class IconPreviewView(ft.Column):
         self.next_page_btn.disabled = self.mod_current_page >= self.mod_total_pages - 1
 
     def _prev_page(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -279,7 +279,7 @@ class IconPreviewView(ft.Column):
                 self._render_mod_list()
 
     def _next_page(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """
@@ -296,7 +296,7 @@ class IconPreviewView(ft.Column):
     # 第二層：單一模組 detail
     # ==================================================
     def _open_mod_detail(self, modid: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`list`, `_render_current_page`
 
@@ -320,7 +320,7 @@ class IconPreviewView(ft.Column):
         self._render_current_page()
 
     def _go_back(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`clear`, `_render_mod_list`
 
@@ -336,7 +336,7 @@ class IconPreviewView(ft.Column):
     # Row → 回報翻譯變更
     # ==================================================
     def _on_value_changed(self, key: str, value: str):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`to_halfwidth`
 
@@ -348,7 +348,7 @@ class IconPreviewView(ft.Column):
     # 儲存 zh_tw.json
     # ==================================================
     def _save_current_zh(self, e):
-        """保存此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`mkdir`, `write_text`, `_show_snack`
 
@@ -439,7 +439,7 @@ class IconPreviewView(ft.Column):
         return entries
 
     def _render_current_page(self):
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         回傳：None
         """

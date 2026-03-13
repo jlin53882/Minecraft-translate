@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 def map_lang_output_path(src: Path) -> Path:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """
@@ -20,7 +20,7 @@ def map_lang_output_path(src: Path) -> Path:
 
 
 def set_by_path(root: dict, path: str, value):
-    """設定此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`replace`, `split`
 

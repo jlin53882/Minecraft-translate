@@ -172,7 +172,7 @@ def translate_kubejs_pending_to_zh_tw(
     global_total_keys = 0
 
     def _count_one(src: Path) -> Tuple[Path, int]:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`read_json_dict`
 
@@ -253,7 +253,7 @@ def translate_kubejs_pending_to_zh_tw(
     _file_write_table: dict[str, tuple[Path, Dict[str, str]]] = {}
 
     def _writer(file_id: str) -> None:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
         - 主要包裝：`write_json_dict`
 
@@ -412,7 +412,7 @@ def translate_kubejs_pending_to_zh_tw(
     else:
 
         def on_translated_item(it: Dict[str, Any]) -> None:
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             回傳：None
             """
@@ -449,7 +449,7 @@ def translate_kubejs_pending_to_zh_tw(
 
         def on_batch_flushed() -> None:
             # write touched files each batch
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             - 主要包裝：`flush`
 
@@ -463,7 +463,7 @@ def translate_kubejs_pending_to_zh_tw(
                     write_json_dict(dstp, data)
 
         def _fmt_eta(sec: float) -> str:
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             - 主要包裝：`divmod`
 
@@ -480,7 +480,7 @@ def translate_kubejs_pending_to_zh_tw(
             return f"{s}s"
 
         def on_progress(p: float, msg: str, eta_sec: float) -> None:
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             - 主要包裝：`_fmt_eta`, `log_info`, `progress`
 

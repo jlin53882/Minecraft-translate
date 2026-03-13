@@ -55,7 +55,7 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
 
 
 def split_js_args(s):
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """
@@ -94,7 +94,7 @@ def split_js_args(s):
 
 
 def strip_quotes(s):
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`strip`
 
@@ -109,7 +109,7 @@ def strip_quotes(s):
 
 
 def replace_text_in_text_obj(expr, new_text):
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`sub`
 
@@ -124,7 +124,7 @@ def replace_text_in_text_obj(expr, new_text):
 
 
 def extract_array_strings(expr):
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`findall`
 
@@ -134,7 +134,7 @@ def extract_array_strings(expr):
 
 
 def replace_array(expr, new_values):
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     - 主要包裝：`split_js_args`, `enumerate`
 
@@ -154,7 +154,7 @@ def replace_array(expr, new_values):
 
 
 def to_js_name(json_name):
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
     回傳：依函式內 return path。
     """
@@ -272,7 +272,7 @@ def inject(
         # 1) Patch event.add(...)
         # ----------------------------
         def repl_event_add(m: re.Match) -> str:
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             - 主要包裝：`group`, `split_js_args`, `list`
 
@@ -309,7 +309,7 @@ def inject(
                         idx = 0
 
                         def repl_text(mm: re.Match) -> str:
-                            """處理此函式的工作（細節以程式碼為準）。
+                            """
 
                             - 主要包裝：`group`
 
@@ -347,7 +347,7 @@ def inject(
         #    key: file|scene.{auto_id}  (✅ 接續 event.add 用掉的 auto_id)
         # ----------------------------
         def repl_scene_text(m: re.Match) -> str:
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             - 主要包裝：`group`, `split_js_args`, `strip`
 
@@ -404,7 +404,7 @@ def inject(
             text: str, start: int
         ) -> tuple[str | None, int | None]:
             # start 指向 '(' 後面的位置
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             回傳：依函式內 return path。
             """
@@ -424,7 +424,7 @@ def inject(
             return None, None
 
         def patch_itemevents_tooltips(full: str) -> str:
-            """處理此函式的工作（細節以程式碼為準）。
+            """
 
             - 主要包裝：`finditer`, `join`
 
@@ -460,7 +460,7 @@ def inject(
                 idx = 0
 
                 def repl_text_call(mm: re.Match) -> str:
-                    """處理此函式的工作（細節以程式碼為準）。
+                    """
 
                     - 主要包裝：`group`
 
