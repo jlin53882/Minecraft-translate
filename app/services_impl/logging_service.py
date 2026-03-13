@@ -40,9 +40,11 @@ class LogLimiter:
     """
 
     def __init__(self, max_logs: int = 3000, flush_interval: float = 0.1):
-        """
+        """初始化 LogLimiter。
 
-        回傳：None
+        參數：
+            max_logs: 最大保留 log 數量
+            flush_interval: 刷新間隔（秒）
         """
         self.max_logs = max_logs
         self.flush_interval = flush_interval
