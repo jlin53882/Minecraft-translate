@@ -22,10 +22,19 @@ logger = logging.getLogger(__name__)
 
 
 def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang: bool = False ) -> Generator[Dict[str, Any], None, None]:
-    """
-    入口函式（保持名稱不變）
-    - 負責掃描 ZIP、分類每個 mod 的 zh_cn/zh_tw/en_us、決定各模組執行哪些步驟
-    - 最終回傳產生的 log/progress（generator）
+    """將 ZIP 檔案中的簡體中文合併為繁體中文。
+
+    Args:
+        zip_file: 輸入的 ZIP 檔案路徑
+        output_dir: 輸出目錄路徑
+        only_process_lang: 是否只處理 lang 檔案
+
+    Yields:
+        進度字典，包含 progress、log、error 等資訊
+
+    Note:
+        負責掃描 ZIP、分類每個 mod 的 zh_cn/zh_tw/en_us、
+        決定各模組執行哪些步驟，最終回傳產生的 log/progress
     """
     os.makedirs(output_dir, exist_ok=True)
     must_translate_dir = os.path.join(output_dir, load_config().get("lang_merger", {}).get("pending_folder_name", "待翻譯"))
