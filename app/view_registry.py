@@ -70,7 +70,7 @@ def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
         {'key': 'config', 'icon': ft.Icons.SETTINGS, 'label': '設定', 'view': wrap_view(_lazy_import_view('config', page, file_picker))},
         {'key': 'rules', 'icon': ft.Icons.RULE, 'label': '規則', 'view': wrap_view(_lazy_import_view('rules', page, file_picker))},
         {'key': 'cache', 'icon': ft.Icons.STORAGE, 'label': '快取管理', 'view': wrap_view(_lazy_import_view('cache', page, file_picker))},
-        {'key': 'qc', 'icon': ft.Icons.QUALITY_CONTROL, 'label': 'QC 檢驗', 'view': wrap_view(_lazy_import_view('qc', page, file_picker))},
+        {'key': 'qc', 'icon': ft.Icons.CHECK_CIRCLE, 'label': 'QC 檢驗', 'view': wrap_view(_lazy_import_view('qc', page, file_picker))},
         {'key': 'translation', 'icon': ft.Icons.TRANSLATE, 'label': '任務 翻譯工具', 'view': wrap_view(_lazy_import_view('translation', page, file_picker))},
         {'key': 'extractor', 'icon': ft.Icons.UNARCHIVE, 'label': 'jar 提取', 'view': wrap_view(_lazy_import_view('extractor', page, file_picker))},
         {'key': 'lm', 'icon': ft.Icons.AUTO_AWESOME, 'label': '機器翻譯', 'view': wrap_view(_lazy_import_view('lm', page, file_picker))},
