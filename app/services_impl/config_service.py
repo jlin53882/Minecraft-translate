@@ -59,27 +59,33 @@ def _save_app_config(config: dict[str, Any]):
 # --- 檔案讀寫服務 ---
 
 def load_replace_rules():
-    """
+    """載入替換規則。
 
+    回傳：
+        dict: 規則資料
     """
     return load_rules_core(REPLACE_RULES_PATH)
 
 def save_replace_rules(rules):
-    """
+    """儲存替換規則。
 
-    回傳：None
+    參數：
+        rules: 規則資料
     """
     save_rules_core(REPLACE_RULES_PATH, rules)
 
 def load_config_json():
-    """
+    """載入應用程式設定。
 
+    回傳：
+        dict: 設定資料
     """
     return _load_app_config()
 
 def save_config_json(config):
-    """
+    """儲存應用程式設定。
 
-    回傳：None
+    參數：
+        config: 設定資料
     """
     _save_app_config(config)
