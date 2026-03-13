@@ -21,22 +21,24 @@ VIEW_WINDOW_SIZES = {
 
 # Lazy import map - only import when needed
 _VIEW_IMPORT_MAP = {
-    'config': ('app.views.config_view', 'ConfigView'),
-    'rules': ('app.views.rules_view', 'RulesView'),
-    'cache': ('app.views.cache_view', 'CacheView'),
-    'translation': ('app.views.translation_view', 'TranslationView'),
-    'extractor': ('app.views.extractor_view', 'ExtractorView'),
-    'lm': ('app.views.lm_view', 'LMView'),
-    'merge': ('app.views.merge_view', 'MergeView'),
+    'config': ('app.views.config_view', 'ConfigView', False),  # 不需要 file_picker
+    'rules': ('app.views.rules_view', 'RulesView', False),
+    'cache': ('app.views.cache_view', 'CacheView', False),
+    'translation': ('app.views.translation_view', 'TranslationView', True),  # 需要 file_picker
+    'extractor': ('app.views.extractor_view', 'ExtractorView', True),
+    'lm': ('app.views.lm_view', 'LMView', True),
+    'merge': ('app.views.merge_view', 'MergeView', True),
 }
 
 
 def _lazy_import_view(view_key: str, page: ft.Page, file_picker: ft.FilePicker):
     """Lazy import view class."""
-    module_name, class_name = _VIEW_IMPORT_MAP[view_key]
+    module_name, class_name, needs_file_picker = _VIEW_IMPORT_MAP[view_key]
     module = __import__(module_name, fromlist=[class_name])
     view_class = getattr(module, class_name)
-    return view_class(page, file_picker) if file_picker else view_class(page)
+    if needs_file_picker:
+        return view_class(page, file_picker)
+    return view_class(page)
 
 
 def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
