@@ -9,7 +9,6 @@ import math
 import time
 from pathlib import Path
 from typing import Dict, Any, Generator, Optional
-import concurrent.futures
 import logging
 
 import orjson as json
