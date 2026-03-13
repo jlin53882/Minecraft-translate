@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import traceback
-from typing import Callable, Iterable, Any
+from typing import Callable, Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging

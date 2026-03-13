@@ -10,15 +10,13 @@ from app.ui import theme
 # UI 共用元件：統一按鈕樣式
 from app.ui.components import primary_button, secondary_button
 import threading
-import math
 import re
-from app.services_impl.config_service import load_replace_rules, save_replace_rules
+from app.services_impl.config_service import load_replace_rules
 from app.views.rules.rules_actions import (
     calc_total_pages,
     start_reload_thread,
     start_save_thread,
     translate_regex_error as rules_translate_regex_error,
-    validate_rule as rules_validate_rule,
 )
 from app.views.rules.rules_state import RulesTableState
 from app.views.rules.rules_table import create_rule_row as rules_create_row
