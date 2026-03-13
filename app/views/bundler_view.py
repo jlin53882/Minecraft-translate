@@ -8,6 +8,7 @@
 
 import flet as ft
 import threading
+from app.ui import theme
 from app.services_impl.config_service import load_config_json
 from app.services_impl.pipelines.bundle_service import run_bundling_service
 
@@ -88,7 +89,7 @@ class BundlerView(ft.Column):
             ft.Text("打包日誌", theme_style=ft.TextThemeStyle.TITLE_MEDIUM),
             ft.Container(
                 content=self.log_view,
-                border=ft.border.all(1, ft.Colors.OUTLINE),
+                border=ft.border.all(1, theme.OUTLINE),
                 border_radius=ft.border_radius.all(5),
                 padding=10,
                 expand=True,
@@ -118,7 +119,7 @@ class BundlerView(ft.Column):
             ),  # <-- 修改點
         )
 
-    def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         # (函式內容... 保持不變)
         """處理此函式的工作（細節以程式碼為準）。
 
@@ -161,7 +162,7 @@ class BundlerView(ft.Column):
                 target_textfield.value = path
                 self.page.update()
             else:
-                self._show_snack_bar("您已取消選擇", ft.Colors.BLUE_GREY_500)
+                self._show_snack_bar("您已取消選擇", theme.BLUE_GREY_500)
 
         except Exception as ex:
             self._show_snack_bar(f"開啟對話框失敗: {ex}")
@@ -199,7 +200,7 @@ class BundlerView(ft.Column):
 
         self.set_controls_disabled(True)
         self.progress_bar.value = 0
-        self.progress_bar.color = ft.Colors.PRIMARY
+        self.progress_bar.color = theme.PRIMARY
         self.progress_bar.visible = True
         self.log_view.controls.clear()
         self.log_view.controls.append(ft.Text("[系統] 開始執行打包..."))
@@ -227,7 +228,7 @@ class BundlerView(ft.Column):
                 if "progress" in update:
                     self.progress_bar.value = update["progress"]
                 if update.get("error"):
-                    self.progress_bar.color = ft.Colors.RED
+                    self.progress_bar.color = theme.RED
                 self.log_view.scroll_to(offset=-1, duration=100)
                 self.page.update()
         finally:

@@ -6,10 +6,9 @@
 
 # /minecraft_translator_flet/app/views/lookup_view.py (加入「查詢中...」功能的修正版)
 
-# 待修待測試
-
 import flet as ft
 import threading
+from app.ui import theme
 from app.services_impl.pipelines.lookup_service import (
     run_batch_lookup_service,
     run_manual_lookup_service,
@@ -122,7 +121,7 @@ class LookupView(ft.Column):
         search_term = self.single_input.value
         if not search_term:
             self.single_result_text.value = "錯誤：請輸入要查詢的學名。"
-            self.single_result_text.color = ft.Colors.RED
+            self.single_result_text.color = theme.RED
             self.page.update()
             return
 
@@ -131,7 +130,7 @@ class LookupView(ft.Column):
         self.single_input.disabled = True
         self.single_progress_ring.visible = True
         self.single_result_text.value = "查詢中..."
-        self.single_result_text.color = ft.Colors.GREY_500
+        self.single_result_text.color = theme.GREY_500
         self.page.update()
 
         # 2. 在背景執行緒中執行查詢
@@ -203,7 +202,7 @@ class LookupView(ft.Column):
             self.batch_progress_bar.visible = False
             self.page.update()
 
-    def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """
         (新) 統一的 SnackBar 觸發函式 (使用您提供的 Overlay 方案)
         """
