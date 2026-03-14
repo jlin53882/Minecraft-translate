@@ -192,7 +192,7 @@ def patch_lang_snbt_file(
     changed_keys: List[str] = []
 
     def _list_to_py(v):
-        """(待補)"""
+        """將 SnbtList 物件轉換為標準 Python 列表，並將內部元素格式化為字串。"""
         if isinstance(v, SnbtList):
             out = []
             for e in v:
@@ -327,7 +327,7 @@ def patch_quest_snbt_file(
     missing: list[str] = []
 
     def _coerce_to_list(new_val: Any) -> list[str] | None:
-        """(待補)"""
+        """將輸入值強制轉換為字串列表；若為列表則篩選出字串，若為字串則依換行符分割。"""
         if isinstance(new_val, list):
             parts = [x for x in new_val if isinstance(x, str)]
             return parts
@@ -541,7 +541,7 @@ def inject_ftbquests_quests_from_zh_tw_json(
         skipped_default = len(by_file["_default"])
 
     def _build_filename_index(root_dir: str) -> dict[str, list[str]]:
-        """(待補)"""
+        """掃描指定目錄及其子目錄，建立檔名到其完整路徑清單的映射索引（僅限 .snbt 檔案）。"""
         idx = defaultdict(list)
         for r, _, files in os.walk(root_dir):
             for fn in files:
