@@ -59,8 +59,11 @@ def styled_card(
     content: ft.Control,
     expand: bool = False,
     icon_color: str = ft.Colors.BLUE_GREY_700,
+    collapsible: bool = False,
+    default_collapsed: bool = False,
+    quick_actions: list = None,
 ) -> ft.Container:
-    """統一的「區塊卡片」外觀。
+    """統一的「區塊卡片」外觀（支援收合）。
 
     這個元件用在大型 View 內，把每個區塊包成一致的白底卡片。
 
@@ -69,29 +72,73 @@ def styled_card(
         icon: 區塊 icon
         content: 內容控制項
         expand: 是否要讓卡片本身 expand
+        icon_color: 圖標顏色
+        collapsible: 是否支援收合
+        default_collapsed: 預設是否收合
+        quick_actions: 快速操作按鈕列表
 
     Returns:
         ft.Container
     """
+    # 內部狀態管理
+    is_collapsed = [default_collapsed]
 
-    body = ft.Container(expand=True, content=content) if expand else content
+    # 內容區域
+    content_container = ft.Container(
+        expand=True,
+        content=content,
+        visible=not default_collapsed,
+    )
 
-    return ft.Container(
+    body = content_container if expand else content
+
+    # 建立卡片內容
+    card_content = [
+        section_header(title, icon, icon_color=icon_color),
+        ft.Divider(height=1, color=DIVIDER_COLOR),
+        body,
+    ]
+
+    if collapsible:
+        # 添加收合按鈕
+        collapse_btn = ft.IconButton(
+            icon=ft.Icons.EXPAND_MORE if default_collapsed else ft.Icons.EXPAND_LESS,
+            icon_size=20,
+            tooltip="收合/展開",
+            on_click=lambda _: (
+                is_collapsed.__setitem__(0, not is_collapsed[0]),
+                content_container.__setattr__('visible', not is_collapsed[0]),
+                collapse_btn.__setattr__(
+                    'icon',
+                    ft.Icons.EXPAND_MORE if is_collapsed[0] else ft.Icons.EXPAND_LESS
+                ),
+            ),
+        )
+
+        # 標題列加入收合按鈕
+        card_content[0] = ft.Row(
+            [
+                ft.Icon(icon, size=18, color=icon_color),
+                ft.Text(title, weight=ft.FontWeight.BOLD, size=16),
+                collapse_btn,
+            ],
+            spacing=8,
+        )
+
+    card = ft.Container(
         expand=expand,
         padding=CARD_PADDING,
         border_radius=CARD_RADIUS,
         bgcolor=CARD_BG_COLOR,
         border=ft.border.all(1, CARD_BORDER_COLOR),
         content=ft.Column(
-            [
-                section_header(title, icon, icon_color=icon_color),
-                ft.Divider(height=1, color=DIVIDER_COLOR),
-                body,
-            ],
+            card_content,
             spacing=12,
             expand=expand,
         ),
     )
+
+    return card
 
 def primary_button(
     text: str,
