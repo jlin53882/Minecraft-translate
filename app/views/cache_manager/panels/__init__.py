@@ -1,9 +1,5 @@
-"""快取管理器模組（PR6 重構）。
+"""快取管理面板導出。"""
 
-將 CacheView 拆分為多個獨立模組，提升可維護性。
-"""
-
-# 導出所有子模組
 from app.views.cache_manager.panels.overview_panel import CacheOverviewPanel
 from app.views.cache_manager.panels.query_panel import CacheQueryPanel
 from app.views.cache_manager.panels.shard_panel import CacheShardPanel
