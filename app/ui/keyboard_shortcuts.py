@@ -35,11 +35,16 @@ class KeyboardShortcutHandler:
         self.view_registry = view_registry
         self.change_view_callback = change_view_callback
         self._search_field = None
+        self._search_callback = None
         self._save_callback = None
 
     def set_search_field(self, search_field):
         """設定搜尋框控制項"""
         self._search_field = search_field
+
+    def set_search_callback(self, callback):
+        """設定搜尋回調函數（開啟快速跳轉面板）"""
+        self._search_callback = callback
 
     def set_save_callback(self, callback):
         """設定儲存回調函數"""
@@ -87,6 +92,12 @@ class KeyboardShortcutHandler:
         if key == "r":
             self._show_toast("重新整理...")
             # 重新整理邏輯可由各頁面自行處理
+            return
+
+        # P 鍵：快速跳轉面板
+        if key == "p":
+            if hasattr(self, '_search_callback') and self._search_callback:
+                self._search_callback(None)
             return
 
     def _show_toast(self, message: str):

@@ -16,6 +16,7 @@ import flet as ft
 from app.startup_tasks import start_background_startup_tasks
 from app.ui.view_wrapper import wrap_view  # guard: main 仍顯式依賴 shared wrapper
 from app.ui.keyboard_shortcuts import create_keyboard_handler
+from app.ui.quick_jump import show_quick_jump_panel
 from app.view_registry import build_navigation_destinations, build_view_registry, get_window_size
 
 logger = logging.getLogger("main_app")
@@ -105,6 +106,13 @@ def main(page: ft.Page):
         on_click=toggle_theme_mode,
     )
 
+    # 快速跳轉功能
+    def on_quick_jump(e):
+        show_quick_jump_panel(page, registry, change_view_by_index)
+
+    # 快捷鍵綁定搜尋功能
+    keyboard_handler.set_search_callback(on_quick_jump)
+
     rail = ft.NavigationRail(
         selected_index=0,
         label_type=ft.NavigationRailLabelType.ALL,
@@ -116,12 +124,23 @@ def main(page: ft.Page):
         on_change=change_view,
         bgcolor=ft.Colors.SURFACE,
         leading=ft.Container(
-            content=ft.IconButton(
-                ft.Icons.MENU,
-                on_click=lambda _: (
-                    setattr(rail, "extended", not rail.extended) or page.update()
-                ),
-                tooltip="收合/展開選單",
+            content=ft.Column(
+                [
+                    ft.IconButton(
+                        ft.Icons.MENU,
+                        on_click=lambda _: (
+                            setattr(rail, "extended", not rail.extended) or page.update()
+                        ),
+                        tooltip="收合/展開選單",
+                    ),
+                    ft.IconButton(
+                        ft.Icons.SEARCH,
+                        on_click=on_quick_jump,
+                        tooltip="快速跳轉 (Ctrl+P)",
+                    ),
+                ],
+                spacing=5,
+                alignment=ft.MainAxisAlignment.CENTER,
             ),
             margin=ft.margin.only(bottom=10),
         ),
