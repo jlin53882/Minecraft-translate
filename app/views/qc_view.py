@@ -279,10 +279,7 @@ class QCView(ft.Column):
         folder_mode: bool,
         file_filter: str = None,
     ):
-        """
-
-        回傳：None
-        """
+        """使用 tkinter 選擇檔案或目錄。"""
         path = ""
         try:
             root = tk.Tk()
@@ -329,10 +326,7 @@ class QCView(ft.Column):
 
     def set_controls_disabled(self, disabled: bool):
         # 禁用所有相關控制項 (已更新)
-        """
-
-        回傳：None
-        """
+        """設定控制項是否禁用。"""
         controls_to_disable = [
             # 未翻譯檢查
             self.en_dir_textfield,
