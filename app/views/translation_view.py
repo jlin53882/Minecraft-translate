@@ -181,6 +181,7 @@ class TranslationView(ft.Column):
     # - 之後要調 UI 一致性，只需要改 app/ui/components.py
 
     def _path_row(self, field: ft.TextField) -> ft.Control:
+        """建立路徑輸入列 UI"""
         return build_path_row(self, field)
 
     def _action_row(
@@ -191,31 +192,35 @@ class TranslationView(ft.Column):
         on_reset,
         trailing: list[ft.Control] | None = None,
     ) -> ft.Control:
+        """建立操作按鈕列 UI"""
         return build_action_row(view=self, on_start=on_start, on_dry_run=on_dry_run, on_reset=on_reset, trailing=trailing)
 
     # ------------------------------------------------------------------
     # Tab builders
     # ------------------------------------------------------------------
     def _build_ftb_tab(self) -> ft.Control:
+        """建立 FTB 翻譯標籤頁"""
         return build_ftb_tab(self)
 
     def _build_kjs_tab(self) -> ft.Control:
+        """建立 KubeJS 翻譯標籤頁"""
         return build_kjs_tab(self)
 
     def _build_md_tab(self) -> ft.Control:
+        """建立 Markdown 翻譯標籤頁"""
         return build_md_tab(self)
 
     # ------------------------------------------------------------------
     # directory picker
     # ------------------------------------------------------------------
     def _pick_directory_into(self, target: ft.TextField):
-        """處理函數。"""
+        """開啟目錄選擇器並設定目標欄位"""
         self._picker_target_field = target
         self.file_picker.on_result = self._on_dir_picked
         self.file_picker.get_directory_path()
 
     def _on_dir_picked(self, e: ft.FilePickerResultEvent):
-        """處理函數。"""
+        """目錄選擇後更新目標欄位"""
         if not e.path:
             return
         if self._picker_target_field is not None:
@@ -226,38 +231,42 @@ class TranslationView(ft.Column):
     # runners
     # ------------------------------------------------------------------
     def _run_ftb(self, *, dry_run: bool):
+        """執行 FBT 翻譯流程"""
         return run_ftb(self, dry_run=dry_run)
 
     def _run_kjs(self, *, dry_run: bool):
+        """執行 KubeJS 翻譯流程"""
         return run_kjs(self, dry_run=dry_run)
 
     def _run_md(self, *, dry_run: bool):
+        """執行 Markdown 翻譯流程"""
         return run_md(self, dry_run=dry_run)
 
     # ------------------------------------------------------------------
     # ui poller
     # ------------------------------------------------------------------
     def _start_ui_timer(self):
+        """啟動 UI 更新計時器"""
         return start_translation_ui_timer(self)
 
     # ------------------------------------------------------------------
     # UI helpers
     # ------------------------------------------------------------------
     def _set_status(self, text: str, color: str):
-        """處理函數。"""
+        """更新狀態晶片的文字與顏色"""
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
         self.page.update()
 
     def _append_log(self, line: str):
-        """處理函數。"""
+        """新增一行日誌到日誌檢視區"""
         self.log_view.controls.append(ft.Text(line, size=13, color=theme.GREY_100))
         if len(self.log_view.controls) > 400:
             self.log_view.controls = self.log_view.controls[-300:]
         self.page.update()
 
     def _clear_logs(self):
-        """處理函數。"""
+        """清除日誌檢視區的所有內容"""
         self.log_view.controls.clear()
         self.page.update()
 
@@ -265,7 +274,7 @@ class TranslationView(ft.Column):
     # reset actions
     # ------------------------------------------------------------------
     def _reset_ftb_inputs(self):
-        """處理函數。"""
+        """重置 FTB 翻譯的所有輸入欄位"""
         self.ftb_in_dir.value = ""
         self.ftb_out_dir.value = ""
         self.ftb_step_export.value = True
@@ -279,7 +288,7 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _reset_kjs_inputs(self):
-        """處理函數。"""
+        """重置 KubeJS 翻譯的所有輸入欄位"""
         self.kjs_in_dir.value = ""
         self.kjs_out_dir.value = ""
         self.kjs_step_extract.value = True
@@ -292,7 +301,7 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _reset_md_inputs(self):
-        """處理函數。"""
+        """重置 Markdown 翻譯的所有輸入欄位"""
         self.md_in_dir.value = ""
         self.md_out_dir.value = ""
         self.md_step_extract.value = True
@@ -306,7 +315,7 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _show_snack(self, message: str, color: str = theme.RED_600):
-        """處理函數。"""
+        """在頁面顯示 Snack Bar 提示訊息"""
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

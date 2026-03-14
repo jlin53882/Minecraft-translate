@@ -18,9 +18,7 @@ from translation_tool.utils.species_cache import (
 logger = logging.getLogger(__name__)
 
 def run_manual_lookup_service(name: str) -> str:
-    """
-
-    """
+    """執行學名查詢"""
     if not is_potential_species_name(name):
         return f"'{name}' 不像是一個有效的學名格式 (例如：Felis catus)。"
     result = lookup_species_name(name)

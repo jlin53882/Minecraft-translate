@@ -97,11 +97,7 @@ class BundlerView(ft.Column):
 
     # --- 輔助函式 ---
     def _create_pick_button(self, target_textfield: ft.TextField, pick_type: str):
-        
-        """
-
-    
-        """
+        """建立路徑選擇按鈕"""
         if pick_type == "dir":
             icon = ft.Icons.FOLDER_OPEN
             tooltip = "選擇資料夾"
@@ -117,9 +113,7 @@ class BundlerView(ft.Column):
         )
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        
-        """
-        """
+        """顯示提示訊息"""
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True
@@ -163,9 +157,7 @@ class BundlerView(ft.Column):
     # (原有的 Flet FilePicker 相關函式 on_path_picked 已被 pick_path_with_tkinter 取代)
 
     def set_controls_disabled(self, disabled: bool):
-        
-        """
-        """
+        """設定控制項是否禁用"""
         for ctrl in [
             self.root_dir_textfield,
             self.output_zip_textfield,
@@ -175,9 +167,7 @@ class BundlerView(ft.Column):
         self.page.update()
 
     def start_bundling_clicked(self, e):
-        
-        """
-        """
+        """點擊開始打包按鈕"""
         root_dir = self.root_dir_textfield.value
         output_zip = self.output_zip_textfield.value
 
@@ -199,9 +189,7 @@ class BundlerView(ft.Column):
         thread.start()
 
     def bundling_worker(self, root_dir, output_zip):
-        
-        """
-        """
+        """在背景執行打包工作"""
         try:
             for update in run_bundling_service(root_dir, output_zip):
                 log_msg = update.get("log", "")

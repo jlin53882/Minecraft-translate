@@ -152,26 +152,29 @@ class ExtractorView(ft.Column):
         ]
 
     def _build_settings_card(self):
+        """构建设置卡片 UI 组件"""
         # delegate to panel builder; actual card仍使用 shared styled_card(...)
         return build_settings_card(self)
 
     def _build_logs_card(self):
+        """构建日志卡片 UI 组件"""
         return build_logs_card(self)
 
     # ==================================================
     # UI helpers
     # ==================================================
     def _pick_button(self, target):
+        """构建目录选择按钮"""
         return build_pick_button(self, target)
 
     def pick_directory(self, target):
-        """處理函數。"""
+        """開啟目錄選擇對話框"""
         self._show_snack_bar("請選擇此欄位的資料夾", color=theme.BLUE_600)
         self.file_picker.on_result = lambda e: self._on_dir_picked(e, target)
         self.file_picker.get_directory_path()
 
     def _on_dir_picked(self, e, target):
-        """處理函數。"""
+        """處理目錄選擇結果"""
         if e.path:
             target.value = e.path
             self.page.update()
@@ -179,7 +182,7 @@ class ExtractorView(ft.Column):
             self._show_snack_bar("未選擇資料夾", color=theme.BLUE_600)
 
     def set_controls_disabled(self, disabled: bool):
-        """處理函數。"""
+        """設定控制項停用/啟用狀態"""
         for ctrl in (
             self.mods_dir_textfield,
             self.output_dir_textfield,
@@ -191,7 +194,7 @@ class ExtractorView(ft.Column):
         self.page.update()
 
     def clear_output_path(self, e=None):
-        """處理函數。"""
+        """清除輸出路徑欄位"""
         if not (self.output_dir_textfield.value or "").strip():
             return
         self.output_dir_textfield.value = ""
@@ -202,9 +205,11 @@ class ExtractorView(ft.Column):
     # TaskSession UI Poller
     # ==================================================
     def _start_ui_poller(self, mode: str = ""):
+        """启动 UI 轮询器以定期更新界面状态"""
         return run_ui_poller(self, mode=mode)
 
     def _update_stats_from_log(self, line: str):
+        """根据日志内容更新提取统计信息"""
         return update_stats_from_log(self, line)
 
     def _show_extraction_summary(self, mode: str):
@@ -264,7 +269,7 @@ class ExtractorView(ft.Column):
         self.page.update()
 
     def _append_log_line(self, line: str):
-        """處理函數。"""
+        """新增日誌訊息到日誌檢視區"""
         color = "#e0e0e0"  # default logs are light grey
         if "[ERROR]" in line:
             color = "#ff6b6b"  # soft red
@@ -287,6 +292,7 @@ class ExtractorView(ft.Column):
     # Worker Logic
     # ==================================================
     def start_extraction(self, mode: str):
+        """启动 JAR 文件提取任务（lang 或 book 模式）"""
         return run_extraction_flow(self, mode)
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_400):
@@ -313,9 +319,11 @@ class ExtractorView(ft.Column):
     # 預覽功能
     # ==================================================
     def show_preview(self, mode: str):
+        """显示提取预览对话框（lang 或 book 模式）"""
         return run_preview_flow(self, mode)
 
     def _show_preview_dialog_result_v2(self, result: dict, mode: str):
+        """显示预览结果对话框"""
         dialog = build_preview_result_dialog(self, result, mode)
         try:
             self.page.open(dialog)
@@ -323,6 +331,7 @@ class ExtractorView(ft.Column):
             self._append_log_line(f"[ERROR] 顯示對話框失敗: {ex}")
 
     def _show_preview_dialog_error_v2(self, error: str, mode: str):
+        """显示预览错误对话框"""
         self._preview_error_dialog = build_preview_error_dialog(self, error, mode)
         try:
             self.page.open(self._preview_error_dialog)

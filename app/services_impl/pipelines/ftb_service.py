@@ -15,6 +15,7 @@ def run_ftb_translation_service(
     step_inject: bool = True,
     write_new_cache: bool = True,
 ):
+    """執行 FTB 翻譯流程"""
     from app.services_impl.pipelines._task_runner import run_callable_task
     from translation_tool.core.ftb_translator import run_ftb_pipeline
 

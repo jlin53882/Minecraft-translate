@@ -49,9 +49,7 @@ RE_FORMAT_PREFIX = re.compile(r"^(?P<prefix>\s*§[0-9a-zA-Z]+)(?P<text>.+)$")
 RE_CJK = re.compile(r"[\u4e00-\u9fff]")
 
 def contains_cjk(s: str) -> bool:
-    """
-
-    """
+    """檢查字串是否包含中日韓文字"""
     return bool(RE_CJK.search(s))
 
 def pass_lang_filter(block_text: str, mode: str) -> bool:

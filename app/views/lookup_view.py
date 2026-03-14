@@ -147,7 +147,7 @@ class LookupView(ft.Column):
 
     # --- 批次查詢邏輯 ---
     def batch_lookup_clicked(self, e):
-        """處理函數。"""
+        """處理批次查詢按鈕點擊事件"""
         json_text = self.batch_input.value
         if not json_text:
             self.batch_result_textfield.value = "錯誤：請貼上 JSON 內容"
@@ -164,7 +164,7 @@ class LookupView(ft.Column):
         thread.start()
 
     def batch_lookup_worker(self, json_text):
-        """處理函數。"""
+        """執行批次查詢翻譯服務"""
         try:
             for update in run_batch_lookup_service(json_text):
                 if update.get("error"):

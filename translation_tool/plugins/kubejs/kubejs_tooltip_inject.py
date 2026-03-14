@@ -52,9 +52,7 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
 # ---------------- 工具 ----------------
 
 def split_js_args(s):
-    """
-
-    """
+    """解析 JavaScript 函式參數"""
     args = []
     buf = ""
     depth = 0
@@ -89,9 +87,7 @@ def split_js_args(s):
     return args
 
 def strip_quotes(s):
-    """
-
-    """
+    """移除字串首尾的引號"""
     s = s.strip()
     if (s.startswith("'") and s.endswith("'")) or (
         s.startswith('"') and s.endswith('"')
@@ -111,9 +107,7 @@ def replace_text_in_text_obj(expr, new_text):
     )
 
 def extract_array_strings(expr):
-    """
-
-    """
+    """從表達式中擷取陣列字串"""
     return re.findall(r"[\"']([^\"']+)[\"']", expr)
 
 def replace_array(expr, new_values):

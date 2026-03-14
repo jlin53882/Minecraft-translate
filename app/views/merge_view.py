@@ -165,7 +165,7 @@ class MergeView(ft.Column):
     # ZIP handling
     # --------------------------------------------------
     def pick_zips(self, e):
-        """處理函數。"""
+        """開啟 ZIP 檔案選擇對話框"""
         self.file_picker.on_result = self._on_zip_picked
         self.file_picker.pick_files(
             dialog_title="選擇 ZIP 檔案",
@@ -174,7 +174,7 @@ class MergeView(ft.Column):
         )
 
     def _on_zip_picked(self, e: ft.FilePickerResultEvent):
-        """處理函數。"""
+        """處理 ZIP 檔案選擇結果"""
         if not e.files:
             return
         for f in e.files:
@@ -184,7 +184,7 @@ class MergeView(ft.Column):
         self.page.update()
 
     def _refresh_zip_list(self):
-        """處理函數。"""
+        """重新整理 ZIP 檔案清單顯示"""
         self.zip_list_view.controls.clear()
         for path in self.selected_zips:
             name = Path(path).name
@@ -203,7 +203,7 @@ class MergeView(ft.Column):
             )
 
     def _remove_zip(self, path: str):
-        """處理函數。"""
+        """移除指定的 ZIP 檔案"""
         if path in self.selected_zips:
             self.selected_zips.remove(path)
             self._refresh_zip_list()
@@ -213,12 +213,12 @@ class MergeView(ft.Column):
     # Output dir
     # --------------------------------------------------
     def pick_output_dir(self):
-        """處理函數。"""
+        """開啟輸出目錄選擇對話框"""
         self.file_picker.on_result = self._on_output_picked
         self.file_picker.get_directory_path(dialog_title="選擇輸出資料夾")
 
     def _on_output_picked(self, e: ft.FilePickerResultEvent):
-        """處理函數。"""
+        """處理輸出目錄選擇結果"""
         if e.path:
             self.output_dir_field.value = e.path
             self.page.update()
@@ -227,7 +227,7 @@ class MergeView(ft.Column):
     # Task runner
     # --------------------------------------------------
     def start_merge(self, e):
-        """處理函數。"""
+        """處理開始合併按鈕點擊事件"""
         if not self.selected_zips or not (self.output_dir_field.value or "").strip():
             self._show_snack_bar("請先選擇 ZIP 與輸出資料夾")
             return
@@ -256,13 +256,11 @@ class MergeView(ft.Column):
     # UI poller
     # --------------------------------------------------
     def _start_ui_poller(self):
-        """處理函數。"""
+        """啟動 UI 輪詢器，定期更新進度條與日誌顯示。"""
         self._ui_stop.clear()
         self._last_log_count = 0
 
         def poll():
-            """
-            """
             while not self._ui_stop.is_set():
                 snap = self.session.snapshot()
                 status = snap["status"]
@@ -301,12 +299,12 @@ class MergeView(ft.Column):
     # UI helpers
     # --------------------------------------------------
     def _set_status(self, text: str, color: str):
-        """處理函數。"""
+        """更新狀態晶片顯示"""
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """處理函數。"""
+        """顯示 SnackBar 訊息提示"""
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

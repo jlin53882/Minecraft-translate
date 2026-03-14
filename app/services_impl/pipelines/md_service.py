@@ -15,6 +15,7 @@ def run_md_translation_service(
     write_new_cache: bool = True,
     lang_mode: str = "non_cjk_only",
 ):
+    """執行 Markdown 翻譯流程"""
     from app.services_impl.pipelines._task_runner import run_callable_task
     from translation_tool.core.md_translation_assembly import run_md_pipeline
 

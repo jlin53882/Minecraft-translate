@@ -39,10 +39,7 @@ class CacheController:
         return self.current_action_id
 
     def is_current(self, run_id: int | None) -> bool:
-        """
-
-    
-        """
+        """檢查是否為當前執行的動作"""
         if run_id is None:
             return True
         return run_id == self.current_action_id

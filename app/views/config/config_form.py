@@ -5,6 +5,7 @@ import flet as ft
 from app.ui.components import primary_button
 
 def build_card(view, title, controls_list):
+    """建立一個包含標題與控制項的卡片 UI 元件。"""
     return ft.Card(
         elevation=2,
         surface_tint_color=ft.Colors.WHITE,
@@ -22,6 +23,7 @@ def build_card(view, title, controls_list):
     )
 
 def build_header(view):
+    """建立設定頁面的頂部標題列（含圖示與標題文字）。"""
     return ft.Container(
         padding=ft.padding.only(left=5, bottom=10),
         content=ft.Row([
@@ -31,6 +33,7 @@ def build_header(view):
     )
 
 def build_footer(view):
+    """建立設定頁面的底部橫幅（含提示文字與儲存按鈕）。"""
     return ft.Container(
         padding=ft.padding.symmetric(horizontal=20, vertical=10),
         bgcolor=ft.Colors.WHITE,
@@ -46,8 +49,10 @@ def build_footer(view):
     )
 
 def build_key_row(view, tf: ft.TextField):
+    """建立包含 TextField 與刪除按鈕的橫向排列。"""
     row = ft.Row(controls=[tf, ft.IconButton(icon=ft.Icons.DELETE, on_click=lambda e: view.remove_key_row(row))])
     return row
 
 def build_key_field(value: str = ''):
+    """建立一個密碼类型的 TextField（可顯示密碼）。"""
     return ft.TextField(value=value, password=True, can_reveal_password=True, expand=True, dense=True)

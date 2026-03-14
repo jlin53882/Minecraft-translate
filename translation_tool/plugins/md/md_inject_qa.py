@@ -131,9 +131,7 @@ def map_lang_in_rel_path_allow_zh(
 RE_MOSTLY_TOKEN_LINE = re.compile(r"^\s*(§[0-9a-zA-Z]+\S*)\s*(§[0-9a-zA-Z]+\S*)*\s*$")
 
 def is_token_line(line: str) -> bool:
-    """
-
-    """
+    """判斷行是否為 Minecraft 格式 token 行"""
     s = line.strip()
     if not s:
         return False  # 空行不是 token 行（要保留）
