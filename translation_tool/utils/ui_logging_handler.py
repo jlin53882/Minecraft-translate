@@ -12,24 +12,16 @@ class UISessionLogHandler(logging.Handler):
     """
 
     def __init__(self):
-        """
-
-        回傳：None
-        """
+        """初始化 UISessionLogHandler。"""
         super().__init__()
         self._session = None
 
     def set_session(self, session):
-        """
-        動態綁定 TaskSession
-        """
+        """動態綁定 TaskSession。"""
         self._session = session
 
     def emit(self, record: logging.LogRecord):
-        """
-
-        回傳：None
-        """
+        """發送日誌記錄到 UI。"""
         if not self._session:
             return
 

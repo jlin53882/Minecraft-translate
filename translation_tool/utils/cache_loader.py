@@ -32,10 +32,7 @@ def load_cache_type(
     parallel_workers: int,
     logger: logging.Logger,
 ) -> None:
-    """
-
-    回傳：None
-    """
+    """載入指定類型的快取。"""
     if cache_type not in translation_cache:
         translation_cache[cache_type] = {}
 

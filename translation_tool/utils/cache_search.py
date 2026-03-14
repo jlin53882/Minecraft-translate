@@ -335,10 +335,7 @@ class CacheSearchEngine:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """
-
-        回傳：None
-        """
+        """離開上下文時關閉搜尋引擎。"""
         self.close()
 
 # =============================================================================

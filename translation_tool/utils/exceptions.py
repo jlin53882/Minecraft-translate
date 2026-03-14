@@ -54,9 +54,11 @@ class RateLimitError(APIError):
     """API 限流錯誤（429 Too Many Requests）"""
 
     def __init__(self, retry_after: int = 600, **context):
-        """
+        """初始化 RateLimitError。
 
-        回傳：None
+        參數：
+            retry_after: 重試秒數
+            context: 額外上下文
         """
         super().__init__(
             f"API 限流，建議 {retry_after} 秒後重試",
@@ -68,9 +70,10 @@ class OverloadError(APIError):
     """API 過載錯誤（503 Service Unavailable - overload）"""
 
     def __init__(self, **context):
-        """
+        """初始化 OverloadError。
 
-        回傳：None
+        參數：
+            context: 額外上下文
         """
         super().__init__("API 伺服器過載", context)
 

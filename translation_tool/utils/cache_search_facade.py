@@ -21,9 +21,11 @@ class CacheSearchFacade:
     """
 
     def __init__(self, cache_root_getter: Callable[[], Path], logger: logging.Logger):
-        """
+        """初始化 CacheSearchFacade。
 
-        回傳：None
+        參數：
+            cache_root_getter: 取得快取根目錄的回調函數
+            logger: 日誌記錄器
         """
         self._cache_root_getter = cache_root_getter
         self._logger = logger
@@ -31,10 +33,7 @@ class CacheSearchFacade:
         self._lock = threading.Lock()
 
     def _get_orchestrator(self) -> SearchOrchestrator:
-        """
-
-    
-        """
+        """取得搜尋協調器（延遲初始化）。"""
         if self._orchestrator is None:
             with self._lock:
                 if self._orchestrator is None:
@@ -55,10 +54,7 @@ class CacheSearchFacade:
     def rebuild_search_index(
         self, cache_types: list[str], translation_cache: dict[str, dict[str, Any]]
     ) -> None:
-        """
-
-        回傳：None
-        """
+        """重建搜尋索引。"""
         try:
             self._logger.info("🔄 開始重建搜尋索引...")
             total_indexed = self._get_orchestrator().rebuild_search_index(
@@ -74,10 +70,7 @@ class CacheSearchFacade:
         cache_types: list[str],
         translation_cache: dict[str, dict[str, Any]],
     ) -> None:
-        """
-
-        回傳：None
-        """
+        """重建特定類型的搜尋索引。"""
         if cache_type not in cache_types:
             return
         try:
