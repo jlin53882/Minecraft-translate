@@ -168,10 +168,7 @@ def translate_ftb_pending_to_zh_tw(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def set_prog(v: float):
-        """
-
-        回傳：None
-        """
+        """設定翻譯進度。"""
         if session is not None and hasattr(session, "set_progress"):
             try:
                 session.set_progress(v)
@@ -320,10 +317,7 @@ def translate_ftb_pending_to_zh_tw(
     _file_write_table: dict[str, tuple[Path, Dict[str, str]]] = {}
 
     def _writer(file_id: str) -> None:
-        """
-
-        回傳：None
-        """
+        """寫入翻譯結果到檔案。"""
         dst_path, data = _file_write_table[file_id]
         write_json_dict(dst_path, data)
 
@@ -468,10 +462,7 @@ def translate_ftb_pending_to_zh_tw(
 
         # shared while-loop（includes add_to_cache + save_translation_cache + safe slicing）
         def on_translated_item(it: Dict[str, Any]) -> None:
-            """
-
-            回傳：None
-            """
+            """處理翻譯結果並寫入映射。"""
             p = it.get("path")
             t = it.get("text")
             if isinstance(p, str) and isinstance(t, str):
@@ -495,10 +486,7 @@ def translate_ftb_pending_to_zh_tw(
 
         # 在這之前先確保 file_id/_file_write_table 設定好了（下面會說加在哪）
         def on_batch_flushed() -> None:
-            """
-
-            回傳：None
-            """
+            """批量寫入翻譯結果。"""
             try:
                 touch.touch(file_id)
                 touch.flush(_writer)  # 最小改動：每批也照樣寫，避免中斷損失
@@ -507,10 +495,7 @@ def translate_ftb_pending_to_zh_tw(
                 write_json_dict(dst, out_map)
 
         def _fmt_eta(sec: float) -> str:
-            """
-
-        
-            """
+            """格式化剩餘時間。"""
             if sec <= 0:
                 return ""
             m, s = divmod(int(sec), 60)
@@ -519,10 +504,7 @@ def translate_ftb_pending_to_zh_tw(
             return f"{s}s"
 
         def on_progress(p: float, msg: str, eta_sec: float) -> None:
-            """
-
-            回傳：None
-            """
+            """報告翻譯進度。"""
             eta_txt = _fmt_eta(eta_sec)
             if eta_txt:
                 log_info(f"⏳ [AI 翻譯中] {msg} | 預估剩餘時間：{eta_txt}")
