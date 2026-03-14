@@ -1195,10 +1195,7 @@ class CacheView(ft.Column):
 
     def _on_page_resized(self, e):
         # 重繪分類/分片與 C1 KeyListCard，讓大小可跟視窗動態變更
-        """
-
-        回傳：None
-        """
+        """頁面大小變更時重新調整元件。"""
         try:
             if hasattr(self, "shard_key_column"):
                 self.shard_key_column.width = self._dynamic_shard_key_panel_width()
@@ -1369,10 +1366,7 @@ class CacheView(ft.Column):
     def set_ui_state(
         self, busy: bool, reason: str, trace: str, run_id: int | None = None
     ):
-        """
-
-        回傳：None
-        """
+        """設定 UI 狀態。"""
         current_action_id = getattr(
             getattr(self, "_controller", None), "current_action_id", None
         )
@@ -1851,10 +1845,7 @@ class CacheView(ft.Column):
 
     def _on_jump_to_query_type(self, cache_type: str):
         # 切到查詢頁 -> 查詢區，並預先設定 KEY + 指定分類
-        """
-
-        回傳：None
-        """
+        """跳轉到查詢類型頁面。"""
         if hasattr(self, "main_tabs"):
             self.main_tabs.selected_index = 1
         if hasattr(self, "query_sub_tabs"):

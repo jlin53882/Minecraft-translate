@@ -133,10 +133,7 @@ class LookupView(ft.Column):
 
     def single_lookup_worker(self, name: str):
         # 3. 呼叫後端服務
-        """
-
-        回傳：None
-        """
+        """執行單筆查詢工作。"""
         result = run_manual_lookup_service(name)
 
         # 4. 在 UI 執行緒中更新最終結果

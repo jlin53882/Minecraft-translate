@@ -76,10 +76,7 @@ class RulesView(ft.Column):
 
     def _sync_page_jump_field(self):
         # 確保欄位顯示跟 current_page 一致
-        """
-
-        回傳：None
-        """
+        """同步分頁跳轉欄位。"""
         if hasattr(self, "page_jump_field"):
             self.page_jump_field.value = str(self.current_page)
             # 只有當控制項已加入頁面時才執行 update，避免初始化時 crash
@@ -590,10 +587,7 @@ class RulesView(ft.Column):
 
     def save_rules_clicked(self, e):
         # 先驗證
-        """
-
-        回傳：None
-        """
+        """儲存規則點擊事件。"""
         for idx, rule in enumerate(self.all_rules_data):
             ok, msg = self.validate_rule(
                 rule["from"], rule["to"], self.all_rules_data, idx
