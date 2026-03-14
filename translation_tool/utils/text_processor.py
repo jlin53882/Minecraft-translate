@@ -42,9 +42,10 @@ _REGEX_RULES = None  # List[Tuple[re.Pattern, str]]
 _RULE_KEYWORDS = None  # set[str]
 
 def _init_replace_rules_cache(rules: List[Dict[str, str]]):
-    """
+    """初始化替換規則快取。
 
-    回傳：None
+    參數：
+        rules: 規則資料列表
     """
     global _LITERAL_RULES, _REGEX_RULES, _RULE_KEYWORDS
 
