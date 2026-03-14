@@ -134,10 +134,7 @@ def _read_snbt(path: str) -> Compound | None:
         return None
 
 def _write_snbt(path: str, root: Compound) -> None:
-    """
-
-    回傳：None
-    """
+    """寫入 SNBT 檔案。"""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(snbt.dumps(root))
@@ -347,10 +344,7 @@ def patch_quest_snbt_file(
         return None
 
     def _apply_field(obj: Compound, kind: str, new_val: Any, tag_key: str):
-        """
-
-        回傳：None
-        """
+        """應用翻譯到欄位。"""
         nonlocal changed, candidates
 
         if kind not in ("title", "subtitle", "description"):
@@ -398,9 +392,7 @@ def patch_quest_snbt_file(
 
     def _recurse(node):
         """
-
-        回傳：None
-        """
+        """遞迴應用翻譯到節點。"""
         if isinstance(node, Compound):
             id_val = node.get("id")
             if isinstance(id_val, snbt.String):

@@ -115,10 +115,7 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
     out = {}
 
     def _emit(obj: Compound, field: str, kind: str):
-        """
-
-        回傳：None
-        """
+        """發射翻譯項目。"""
         val = obj.get(field)
         if val is None:
             return
@@ -161,10 +158,7 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
         out[key] = text
 
     def recurse(obj, path):
-        """
-
-        回傳：None
-        """
+        """遞迴遍歷物件提取翻譯。"""
         if isinstance(obj, Compound):
             # ✅ 抽三種欄位
             _emit(obj, "title", "title")
@@ -184,10 +178,7 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
     return out
 
 def ensure_lang(store: dict, lang: str):
-    """
-
-    回傳：None
-    """
+    """確保語系存在於儲存區。"""
     if lang not in store:
         store[lang] = {"lang": {}, "quests": {}}
 
@@ -195,9 +186,8 @@ def ensure_lang(store: dict, lang: str):
 # 主流程
 # =========================
 def process_quest_folder(quests_root: str) -> dict:
-    """
-
-    """
+    """處理任務資料夾並提取翻譯。"""
+    final_output = {}
     final_output = {}
     lang_dir = os.path.join(quests_root, "lang")
 
