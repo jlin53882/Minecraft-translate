@@ -162,3 +162,123 @@ def create_snackbar(
         ft.Text(message),
         bgcolor=color,
     )
+
+
+# -------------------------
+# 進度條元件
+# -------------------------
+
+class ProgressCard(ft.Container):
+    """進度條卡片元件。
+
+    用於長時間操作的視覺反饋，顯示進度百分比和 ETA。
+
+    屬性：
+        current: 目前進度值
+        total: 總進度值
+    """
+
+    def __init__(
+        self,
+        title: str,
+        current: int = 0,
+        total: int = 100,
+        on_cancel=None,
+        **kwargs,
+    ):
+        self._current = current
+        self._total = total
+        self._start_time = None
+        self._on_cancel = on_cancel
+        self._progress_bar = ft.ProgressBar(
+            width=200,
+            value=current / total if total > 0 else 0,
+        )
+        self._percent_text = ft.Text(
+            f"{int(current / total * 100)}%" if total > 0 else "0%",
+            size=12,
+        )
+        self._eta_text = ft.Text("", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
+        self._status_text = ft.Text("", size=12)
+
+        # 取消按鈕
+        cancel_btn = None
+        if on_cancel:
+            cancel_btn = ft.TextButton(
+                text="取消",
+                on_click=lambda _: self._on_cancel() if self._on_cancel else None,
+            )
+
+        super().__init__(
+            padding=15,
+            border_radius=8,
+            bgcolor=ft.Colors.SURFACE_VARIANT,
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [ft.Text(title, weight=ft.FontWeight.BOLD), cancel_btn],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    self._progress_bar,
+                    ft.Row(
+                        [self._percent_text, self._status_text, self._eta_text],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                ],
+                spacing=8,
+            ),
+            **kwargs,
+        )
+
+    @property
+    def current(self) -> int:
+        return self._current
+
+    @current.setter
+    def current(self, value: int):
+        self._current = value
+        self._update_progress()
+
+    @property
+    def total(self) -> int:
+        return self._total
+
+    @total.setter
+    def total(self, value: int):
+        self._total = value
+        self._update_progress()
+
+    def _update_progress(self):
+        """更新進度條顯示"""
+        if self._total > 0:
+            ratio = self._current / self._total
+            self._progress_bar.value = ratio
+            self._percent_text.value = f"{int(ratio * 100)}%"
+            self._status_text.value = f"{self._current} / {self._total}"
+
+            # 計算 ETA
+            if self._start_time and self._current > 0:
+                import time
+                elapsed = time.time() - self._start_time
+                rate = self._current / elapsed
+                remaining = self._total - self._current
+                eta_seconds = remaining / rate if rate > 0 else 0
+
+                if eta_seconds < 60:
+                    self._eta_text.value = f"約 {int(eta_seconds)} 秒"
+                elif eta_seconds < 3600:
+                    self._eta_text.value = f"約 {int(eta_seconds / 60)} 分鐘"
+                else:
+                    self._eta_text.value = f"約 {int(eta_seconds / 3600)} 小時"
+        else:
+            self._progress_bar.value = None  # 不確定進度
+            self._percent_text.value = "處理中..."
+
+    def start(self):
+        """開始計時"""
+        import time
+        self._start_time = time.time()
+
+    def set_status(self, status: str):
+        """設定狀態文字"""
+        self._status_text.value = status
