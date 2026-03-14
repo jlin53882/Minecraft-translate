@@ -27,9 +27,10 @@ class TaskSession:
     """
 
     def __init__(self, max_logs: int = 300):
-        """
+        """初始化 TaskSession。
 
-        回傳：None
+        參數：
+            max_logs: 最大日誌數量
         """
         self.progress: float = 0.0
         self.status: str = "IDLE"  # IDLE / RUNNING / DONE / ERROR
@@ -50,38 +51,26 @@ class TaskSession:
             self.progress = max(0.0, min(1.0, value))
 
     def add_log(self, text: str):
-        """
-
-        回傳：None
-        """
+        """新增日誌訊息。"""
         if not text:
             return
         with self._lock:
             self.logs.append(text)
 
     def set_error(self):
-        """
-
-        回傳：None
-        """
+        """設定錯誤狀態。"""
         with self._lock:
             self.error = True
             self.status = "ERROR"
 
     def finish(self):
-        """
-
-        回傳：None
-        """
+        """完成任務。"""
         with self._lock:
             self.progress = 1.0
             self.status = "DONE"
 
     def start(self):
-        """
-
-        回傳：None
-        """
+        """開始任務。"""
         with self._lock:
             self.progress = 0.0
             self.logs.clear()

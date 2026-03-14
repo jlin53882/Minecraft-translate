@@ -22,10 +22,7 @@ class CacheController:
     """
 
     def __init__(self):
-        """
-
-        回傳：None
-        """
+        """初始化 CacheController。"""
         self._seq = 0
         self.current_action_id = 0
 

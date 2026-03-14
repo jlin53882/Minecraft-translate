@@ -22,11 +22,7 @@ from translation_tool.core.jar_processor import (
 logger = logging.getLogger(__name__)
 
 def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
-    # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
-    """
-
-    回傳：None
-    """
+    """執行語言檔擷取服務。"""
     ensure_pipeline_logging()
     try:
         session.start()
@@ -62,11 +58,7 @@ def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
         UI_LOG_HANDLER.set_session(None)
 
 def run_book_extraction_service(mods_dir: str, output_dir: str, session):
-    # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
-    """
-
-    回傳：None
-    """
+    """執行書本檔擷取服務。"""
     ensure_pipeline_logging()
     try:
         session.start()
