@@ -52,9 +52,11 @@ class TranslationView(ft.Column):
     """翻譯工作台：FTB / KubeJS / Markdown 三流程統一入口。"""
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """
+        """初始化 TranslationView。
 
-        回傳：None
+        參數：
+            page: Flet Page 物件
+            file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=16)
         self.page = page
