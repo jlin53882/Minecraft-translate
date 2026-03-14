@@ -51,10 +51,7 @@ def read_json(path: Path) -> Dict[str, Any]:
         return json.load(f)
 
 def write_json(path: Path, data: Dict[str, Any]) -> None:
-    """
-
-    回傳：None
-    """
+    """寫入 JSON 檔案。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -284,17 +281,11 @@ def translate_md_pending(
 
     # md 是「最後一次寫出全部檔案」即可，所以 touched writer 這裡先做 noop
     def _writer(_fid: str) -> None:
-        """
-
-        回傳：None
-        """
+        """空寫入函數（MD 模式不需要即時寫入）。"""
         return
 
     def on_translated_item(it: Dict[str, Any]) -> None:
-        """
-
-        回傳：None
-        """
+        """處理翻譯結果。"""
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
         if h and dst:

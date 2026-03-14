@@ -189,10 +189,7 @@ def flatten_for_md(text: str) -> str:
     buf: List[str] = []
 
     def flush_buf():
-        """
-
-        回傳：None
-        """
+        """將緩衝區內容刷新到輸出。"""
         nonlocal buf
         if buf:
             out.append(" ".join([x.strip() for x in buf if x.strip()]))
@@ -358,10 +355,7 @@ def iter_json_files(root: Path):
             yield p
 
 def main():
-    """
-
-    回傳：None
-    """
+    """Markdown 寫回工具主入口。"""
     print("=== md 寫回（方案 A：保留原檔骨架，只替換文字行）===")
 
     src_md_root = (

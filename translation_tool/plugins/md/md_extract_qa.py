@@ -362,10 +362,7 @@ def safe_relpath(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 def main():
-    """
-
-    回傳：None
-    """
+    """Markdown 抽取工具主入口。"""
     print("=== Markdown .md 抽取（段落/區塊）問答式 ===")
 
     in_dir = input("輸入資料夾（會遞迴往下找 .md）: ").strip().strip('"').strip("'")
