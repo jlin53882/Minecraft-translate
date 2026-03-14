@@ -111,9 +111,10 @@ def validate_api_keys():
     logger.info(f"✅ 金鑰格式驗證通過，共載入 {len(keys)} 組金鑰。")
 
 def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
-    """
+    """驗證 API Key 格式（UI 專用）。
 
-    回傳：None
+    參數：
+        keys: API Key 列表
     """
     for k in keys:
         if not k or not k.startswith("AIza"):

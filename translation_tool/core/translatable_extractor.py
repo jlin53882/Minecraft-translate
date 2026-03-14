@@ -51,10 +51,7 @@ def extract_translatables(json_data, file_path):
     is_lang = is_lang_file(Path(file_path))
 
     def walk(obj, base_path=""):
-        """
-
-        回傳：None
-        """
+        """遞迴遍历对象提取可翻译文本。"""
         if isinstance(obj, dict):
             for k, v in obj.items():
                 new_path = f"{base_path}.{k}" if base_path else k

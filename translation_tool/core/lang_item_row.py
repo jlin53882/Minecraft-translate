@@ -38,9 +38,15 @@ class LangItemRow(ft.Container):
         preview_root: Path,
         on_value_changed: Callable[[str, str], None],
     ):
-        """
+        """初始化 LangItemRow。
 
-        回傳：None
+        參數：
+            lang_key: 語言 key
+            en_text: 英文原文
+            zh_text: 中文翻譯
+            assets_root: 資源根目錄
+            preview_root: 預覽根目錄
+            on_value_changed: 值變更回調函數
         """
         super().__init__(
             padding=ft.padding.symmetric(vertical=10, horizontal=8),
