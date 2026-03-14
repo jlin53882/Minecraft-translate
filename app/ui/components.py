@@ -329,3 +329,72 @@ class ProgressCard(ft.Container):
     def set_status(self, status: str):
         """設定狀態文字"""
         self._status_text.value = status
+
+
+# -------------------------
+# 統一狀態元件
+# -------------------------
+
+def loading_state(
+    message: str = "載入中...",
+    show_spinner: bool = True,
+) -> ft.Container:
+    """統一的載入狀態顯示。"""
+    spinner = ft.CupertinoActivityIndicator() if show_spinner else None
+
+    return ft.Container(
+        alignment=ft.alignment.center,
+        padding=40,
+        content=ft.Column(
+            [
+                spinner,
+                ft.Text(message, size=14, color=ft.Colors.ON_SURFACE_VARIANT),
+            ] if spinner else [ft.Text(message, size=14, color=ft.Colors.ON_SURFACE_VARIANT)],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=10,
+        ),
+    )
+
+
+def empty_state(
+    icon: str,
+    title: str,
+    message: str,
+    action_button: ft.Control | None = None,
+) -> ft.Container:
+    """統一的空資料狀態顯示。"""
+    return ft.Container(
+        alignment=ft.alignment.center,
+        padding=40,
+        content=ft.Column(
+            [
+                ft.Icon(icon, size=48, color=ft.Colors.ON_SURFACE_VARIANT),
+                ft.Text(title, size=16, weight=ft.FontWeight.BOLD),
+                ft.Text(message, size=14, color=ft.Colors.ON_SURFACE_VARIANT),
+            ] + ([action_button] if action_button else []),
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=10,
+        ),
+    )
+
+
+def error_state(
+    icon: str,
+    title: str,
+    message: str,
+    retry_button: ft.Control | None = None,
+) -> ft.Container:
+    """統一的錯誤狀態顯示。"""
+    return ft.Container(
+        alignment=ft.alignment.center,
+        padding=40,
+        content=ft.Column(
+            [
+                ft.Icon(icon, size=48, color=ft.Colors.ERROR),
+                ft.Text(title, size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ERROR),
+                ft.Text(message, size=14, color=ft.Colors.ON_SURFACE_VARIANT),
+            ] + ([retry_button] if retry_button else []),
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=10,
+        ),
+    )
