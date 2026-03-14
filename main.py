@@ -77,8 +77,18 @@ def main(page: ft.Page):
         selected_index = e.control.selected_index
         item = registry[selected_index]
         content_area.content = item['view']
-        resize_window_for_view(item['key'])
-        page.update()
+
+    def change_view_by_index(index: int):
+        """透過索引直接切換視圖"""
+        if 0 <= index < len(registry):
+            rail.selected_index = index
+            item = registry[index]
+            content_area.content = item['view']
+            resize_window_for_view(item['key'])
+            page.update()
+
+    # 註冊鍵盤事件處理
+    page.on_keyboard_event = keyboard_handler.handle_keyboard
 
     def change_view_by_index(index: int):
         """透過索引直接切換視圖"""

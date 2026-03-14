@@ -8,7 +8,7 @@
 使用方法：
     python test_main.py
 
-然後用瀏覽器打開 http://localhost:8550
+然後用瀏覽器打開 http://127.0.0.1:8550
 """
 
 import flet as ft
@@ -34,7 +34,7 @@ if __name__ == "__main__":
 
     print("=" * 50)
     print("🚀 Web 測試模式啟動中...")
-    print("📍 請用瀏覽器打開: http://localhost:8550")
+    print("📍 請用瀏覽器打開: http://127.0.0.1:8550")
     print("💡 按 Ctrl+C 停止服務")
     print("=" * 50)
 
