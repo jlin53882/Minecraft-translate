@@ -507,16 +507,14 @@ class ConfigView(ft.Column):
     # --- 邏輯功能 (與原程式碼相同，僅移動位置) ---
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """
-        """
+        """處理函數。"""
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
 
     def add_model_row(self, model_name: str):
-        """
-        """
+        """處理函數。"""
         cb = ft.Checkbox(
             label=model_name,
             value=True,
@@ -571,8 +569,7 @@ class ConfigView(ft.Column):
         self._refresh_model_order_labels()
 
     def move_model_row(self, cb: ft.Checkbox, direction: int):
-        """
-        """
+        """處理函數。"""
         controls = self.models_column.controls
         idx = next((i for i, r in enumerate(controls) if r._checkbox is cb), None)
         if idx is None:
@@ -584,16 +581,14 @@ class ConfigView(ft.Column):
         self._refresh_model_order_labels()
 
     def remove_model_by_checkbox(self, cb: ft.Checkbox):
-        """
-        """
+        """處理函數。"""
         row = next((r for r in self.models_column.controls if r._checkbox is cb), None)
         if row:
             self.models_column.controls.remove(row)
         self._refresh_model_order_labels()
 
     def on_add_model_clicked(self, e):
-        """
-        """
+        """處理函數。"""
         name = self.new_model_field.value.strip()
         if not name:
             self._show_snack_bar("模型名稱不能為空")
@@ -619,8 +614,7 @@ class ConfigView(ft.Column):
         self.keys_column.update()
 
     def remove_key_row(self, row: ft.Row):
-        """
-        """
+        """處理函數。"""
         if row in self.keys_column.controls:
             idx = self.keys_column.controls.index(row)
             self.keys_column.controls.remove(row)
@@ -628,8 +622,7 @@ class ConfigView(ft.Column):
         self.keys_column.update()
 
     def _refresh_model_order_labels(self):
-        """
-        """
+        """處理函數。"""
         for idx, row in enumerate(self.models_column.controls):
             if hasattr(row, "_order_text"):
                 row._order_text.value = f"{idx + 1:02d}"
