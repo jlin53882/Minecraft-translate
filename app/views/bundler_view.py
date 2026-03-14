@@ -24,9 +24,11 @@ class BundlerView(ft.Column):
     """
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """
+        """初始化 BundlerView。
 
-        回傳：None
+        參數：
+            page: Flet Page 物件
+            file_picker: Flet FilePicker 物件
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
         self.page = page
