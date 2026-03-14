@@ -328,7 +328,7 @@ class CacheSearchEngine:
             self.conn.close()
 
     def __enter__(self):
-        """Enter the context manager, returning self."""
+        """進入上下文管理，回傳自身。"""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

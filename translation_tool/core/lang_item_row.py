@@ -14,9 +14,7 @@ from translation_tool.core.icon_resolver import resolve_icon_with_reason
 from translation_tool.core.icon_reason import IconRisk
 
 def to_halfwidth(text):
-    """
-
-    """
+    """將字串轉換為半形。"""
     if not isinstance(text, str):
         return text
     return unicodedata.normalize("NFKC", text)

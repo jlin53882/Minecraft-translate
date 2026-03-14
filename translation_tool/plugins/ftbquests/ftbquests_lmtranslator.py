@@ -214,10 +214,7 @@ def translate_ftb_pending_to_zh_tw(
     global_total_keys = 0
 
     def _count_one(src: Path) -> Tuple[Path, int]:
-        """
-
-    
-        """
+        """讀取指定的 JSON 檔案並統計其中可翻譯的鍵值數量，若發生錯誤則返回 0。"""
         try:
             mapping = read_json_dict(src)
             c = count_translatable_keys(mapping)

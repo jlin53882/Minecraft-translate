@@ -80,9 +80,7 @@ def normalize_for_dedupe(s: str) -> str:
     return s
 
 def make_content_hash(text: str) -> str:
-    """
-
-    """
+    """產生內容的雜湊值以識別唯一性。"""
     n = normalize_for_dedupe(text)
     return hashlib.sha1(n.encode("utf-8")).hexdigest()
 
@@ -113,9 +111,7 @@ def is_splitter_line_old(line: str) -> bool:
 
 def is_splitter_line(line: str) -> bool:
     # 原有的強分隔符
-    """
-
-    """
+    """判斷是否為分割線（觸發新段落）。"""
     if RE_TOKEN_LINE.match(line):
         return True
     if RE_MOSTLY_TOKEN_LINE.match(line.strip()):
@@ -270,9 +266,8 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockIte
 def build_pending_json(
     rel_md: str, abs_md: Path, items: List[BlockItem], lang_mode: str
 ) -> dict:
-    """
+    """建構 Markdown 翻譯任務的 JSON 描述檔，包含來源路徑、待處理區塊清單及分塊統計資訊。"""
 
-    """
     return {
         "schema": "md_pending_blocks_v1",
         "source_md": rel_md.replace("\\", "/"),
@@ -293,10 +288,7 @@ def build_pending_json(
 RE_LANG_SEG = re.compile(r"^_?(en_us|zh_cn|zh_tw)$", re.IGNORECASE)
 
 def has_allowed_lang_segment(path: Path) -> bool:
-    # 用 parts 掃描每個 segment，支援 structure/en_us 這種深層結構
-    """
-
-    """
+    # 用 parts 掃描每個 segment，支援 structure/en_us 這種深層結構，且大小寫不拘
     return any(RE_LANG_SEG.match(seg) for seg in path.parts)
 
 def detect_lang_segment(parts: List[str]) -> Optional[str]:

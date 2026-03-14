@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 def should_rename_to_zh_tw(src_path: Path, rename_langs: set[str]) -> bool:
-    """Return True if filename itself is a language code that should become zh_tw.json."""
+    """判斷檔名是否為語系代碼並需要轉換為 zh_tw.json。"""
     name = src_path.name.lower()
     if not name.endswith(".json"):
         return False
@@ -19,7 +19,7 @@ def should_rename_to_zh_tw(src_path: Path, rename_langs: set[str]) -> bool:
     return False
 
 def is_lang_code_segment(seg: str) -> bool:
-    """Check whether path segment matches xx_xx language code format."""
+    """判斷路徑段落是否符合語系代碼格式（xx_xx）。"""
     seg = seg.lower()
     return (
         len(seg) == 5
@@ -29,7 +29,7 @@ def is_lang_code_segment(seg: str) -> bool:
     )
 
 def replace_lang_folder_with_zh_tw(rel: Path) -> Path:
-    """Replace any language-code folder segment in rel path with zh_tw."""
+    """將路徑中的語系資料夾替換為 zh_tw。"""
     parts = list(rel.parts)
     new_parts = []
     for p in parts:
@@ -40,7 +40,7 @@ def replace_lang_folder_with_zh_tw(rel: Path) -> Path:
     return Path(*new_parts)
 
 def compute_output_path(src_path: Path, in_dir: Path, out_dir: Path, rename_langs: set[str]) -> Path:
-    """Compute final output path with folder/filename language normalization."""
+    """計算最終輸出路徑並標準化資料夾/檔名的語系。"""
     rel = src_path.relative_to(in_dir)
     rel = replace_lang_folder_with_zh_tw(rel)
     if should_rename_to_zh_tw(src_path, rename_langs):

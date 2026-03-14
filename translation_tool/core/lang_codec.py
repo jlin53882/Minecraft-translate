@@ -17,9 +17,7 @@ KEY_ZH = re.compile(r"^([a-zA-Z0-9_.-]+)([\u4e00-\u9fff].+)$")
 
 def try_repair_lang_line(line: str):
     # JSON 風格
-    """
-
-    """
+    """嘗試修復損壞的 lang 行。"""
     m = JSON_LINE.match(line)
     if m:
         return m.group(1), m.group(2)
@@ -122,9 +120,7 @@ def is_mc_standard_lang_path(path: str) -> bool:
     return "/lang/" in p and p.endswith(".lang")
 
 def pick_first_not_none(*vals):
-    """
-
-    """
+    """取得第一個非 None 值。"""
     for v in vals:
         if v is not None:
             return v

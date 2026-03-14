@@ -96,9 +96,7 @@ def strip_quotes(s):
     return s
 
 def replace_text_in_text_obj(expr, new_text):
-    """
-
-    """
+    """利用正規表示式將 Text 函數物件中的目標字串內容替換為新文字。"""
     return re.sub(
         r'(Text\.\w+\(\s*[\'"])(.+?)([\'"]\s*\))',
         lambda m: m.group(1) + new_text + m.group(3),
@@ -111,9 +109,7 @@ def extract_array_strings(expr):
     return re.findall(r"[\"']([^\"']+)[\"']", expr)
 
 def replace_array(expr, new_values):
-    """
-
-    """
+    """解析陣列表達式，將其中的字串元素依序替換為新的值。"""
     parts = split_js_args(expr[1:-1])
     out = []
 
@@ -127,9 +123,7 @@ def replace_array(expr, new_values):
     return "[" + ", ".join(out) + "]"
 
 def to_js_name(json_name):
-    """
-
-    """
+    """將檔案名稱的副檔名從 .json 轉換為 .js。"""
     if json_name.endswith(".json"):
         return json_name[:-5] + ".js"
     return json_name
@@ -241,10 +235,7 @@ def inject(
         # 1) Patch event.add(...)
         # ----------------------------
         def repl_event_add(m: re.Match) -> str:
-            """
-
-        
-            """
+            """處理 event.add 事件中的翻譯。"""
             nonlocal auto_id
             arg_str = m.group(1)
             args = split_js_args(arg_str)
@@ -280,7 +271,7 @@ def inject(
 
                             - 主要包裝：`group`
 
-                        
+
                             """
                             nonlocal idx
                             key = f"{original_js}|{item_id}.{n}.{idx}"
@@ -314,10 +305,7 @@ def inject(
         #    key: file|scene.{auto_id}  (✅ 接續 event.add 用掉的 auto_id)
         # ----------------------------
         def repl_scene_text(m: re.Match) -> str:
-            """
-
-        
-            """
+            """處理 scene.text 事件中的翻譯。"""
             nonlocal auto_id
             arg_str = m.group(1)
             args = split_js_args(arg_str)
@@ -369,10 +357,7 @@ def inject(
             text: str, start: int
         ) -> tuple[str | None, int | None]:
             # start 指向 '(' 後面的位置
-            """
-
-        
-            """
+            """提取函數呼叫的參數。"""
             depth = 1
             i = start
             buf = ""
@@ -389,10 +374,7 @@ def inject(
             return None, None
 
         def patch_itemevents_tooltips(full: str) -> str:
-            """
-
-        
-            """
+            """修補 ItemEvents 的 Tooltip。"""
             out = []
             last = 0
 
@@ -423,10 +405,7 @@ def inject(
                 idx = 0
 
                 def repl_text_call(mm: re.Match) -> str:
-                    """
-
-                
-                    """
+                    """處理 Tooltip 文字替換。"""
                     nonlocal idx
                     key = f"{original_js}|{item_id}.tooltip.{idx}"
                     idx += 1

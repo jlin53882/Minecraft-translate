@@ -44,9 +44,7 @@ from translation_tool.plugins.shared.lang_text_rules import is_already_zh
 # -------------------------
 
 def read_json(path: Path) -> Dict[str, Any]:
-    """
-
-    """
+    """讀取 JSON 檔案並回傳字典。"""
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -57,9 +55,7 @@ def write_json(path: Path, data: Dict[str, Any]) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def collect_pending_json_files(pending_root: Path) -> List[Path]:
-    """
-
-    """
+    """收集所有待翻譯的 JSON 檔案路徑。"""
     files = sorted(pending_root.rglob("*.json"))
     # 跳過 manifest
     files = [p for p in files if p.name.lower() != "_manifest.json"]
@@ -88,9 +84,7 @@ class PendingItem:
     end_line: int
 
 def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
-    """
-
-    """
+    """載入待翻譯的 Markdown 文件。"""
     data = read_json(path)
     if data.get("schema") != "md_pending_blocks_v1":
         raise ValueError(f"schema 不符：{path}")
@@ -111,9 +105,7 @@ def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
 def compute_out_json_path(
     src_json: Path, in_pending_root: Path, out_root: Path
 ) -> Path:
-    """
-
-    """
+    """計算輸出 JSON 檔案的路徑。"""
     rel = src_json.relative_to(in_pending_root)
     return out_root / "LM翻譯後" / rel
 

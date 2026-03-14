@@ -41,11 +41,11 @@ class CacheSearchFacade:
         return self._orchestrator
 
     def get_search_engine(self):
-        """Get the search engine instance, initializing if needed."""
+        """取得搜尋引擎實例，如有需要則進行初始化。"""
         try:
             return self._get_orchestrator().get_engine()
         except Exception as e:
-            self._logger.error(f"Failed to initialize search engine: {e}", exc_info=True)
+            self._logger.error(f"搜尋引擎初始化失敗: {e}", exc_info=True)
             return None
 
     def rebuild_search_index(
@@ -86,7 +86,7 @@ class CacheSearchFacade:
         limit: int = 50,
         use_fuzzy: bool = True,
     ) -> list:
-        """Search the cache for translations matching the query."""
+        """在快取中搜尋符合查詢條件的翻譯。"""
         try:
             return self._get_orchestrator().search_cache(
                 query=query,
@@ -106,10 +106,7 @@ class CacheSearchFacade:
         threshold: float = 0.6,
         limit: int = 20,
     ) -> list:
-        """
-
-    
-        """
+        """尋找相似的翻譯結果。"""
         try:
             return self._get_orchestrator().find_similar_translations(
                 text=text,

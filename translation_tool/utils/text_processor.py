@@ -23,6 +23,7 @@ import threading
 logger = logging.getLogger(__name__)
 
 def _resolve_rules_path(path: str):
+    """將相對規則路徑解析為專案內的完整絕對路徑。"""
     return resolve_project_path(path)
 
 _thread_local = threading.local()
@@ -214,9 +215,7 @@ def load_custom_translations(folder_path: str, filename="table.tsv") -> Dict[str
     return custom_map
 
 def safe_convert_text(text: str) -> str:
-    """
-
-    """
+    """安全的文字轉換，處理空值與例外。"""
     if not text:
         return text
     conv = get_converter()

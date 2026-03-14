@@ -7,6 +7,7 @@ from typing import Any, Callable
 _LANG_REF_RE = re.compile(r"^\{ftbquests\..+\}$")
 
 def _is_filled_text(v) -> bool:
+    """檢查內容是否為有效的非空字串，且不屬於語言參考標記格式。"""
     if not isinstance(v, str):
         return False
     s = v.strip()
