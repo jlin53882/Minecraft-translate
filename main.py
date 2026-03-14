@@ -15,6 +15,7 @@ import flet as ft
 
 from app.startup_tasks import start_background_startup_tasks
 from app.ui.view_wrapper import wrap_view  # guard: main 仍顯式依賴 shared wrapper
+from app.ui.keyboard_shortcuts import create_keyboard_handler
 from app.view_registry import build_navigation_destinations, build_view_registry, get_window_size
 
 logger = logging.getLogger("main_app")
@@ -67,12 +68,27 @@ def main(page: ft.Page):
 
     content_area = ft.Container(content=registry[0]['view'], expand=True)
 
+    # 建立鍵盤快捷鍵處理器
+    keyboard_handler = create_keyboard_handler(
+        page, registry, lambda idx: change_view_by_index(idx)
+    )
+
     def change_view(e):
         selected_index = e.control.selected_index
         item = registry[selected_index]
         content_area.content = item['view']
-        resize_window_for_view(item['key'])
-        page.update()
+
+    def change_view_by_index(index: int):
+        """透過索引直接切換視圖"""
+        if 0 <= index < len(registry):
+            rail.selected_index = index
+            item = registry[index]
+            content_area.content = item['view']
+            resize_window_for_view(item['key'])
+            page.update()
+
+    # 註冊鍵盤事件處理
+    page.on_keyboard_event = keyboard_handler.handle_keyboard
 
     def toggle_theme_mode(e):
         is_light = page.theme_mode == ft.ThemeMode.LIGHT
