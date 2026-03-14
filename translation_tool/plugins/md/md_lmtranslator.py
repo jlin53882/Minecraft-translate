@@ -305,10 +305,7 @@ def translate_md_pending(
             pass
 
     def on_batch_flushed() -> None:
-        """
-
-        回傳：None
-        """
+        """刷新批次緩衝區。"""
         try:
             touch.touch("noop")
             touch.flush(_writer)
@@ -316,20 +313,14 @@ def translate_md_pending(
             pass
 
     def _fmt_eta(sec: float) -> str:
-        """
-
-    
-        """
+        """格式化剩餘時間。"""
         if sec <= 0:
             return ""
         m, s = divmod(int(sec), 60)
         return f"{m}m{s:02d}s" if m > 0 else f"{s}s"
 
     def on_progress(p: float, msg: str, eta_sec: float) -> None:
-        """
-
-        回傳：None
-        """
+        """報告翻譯進度。"""
         eta_txt = _fmt_eta(eta_sec)
         log_info(
             "⏳ [MD-LM] %s%s",
@@ -451,10 +442,7 @@ def translate_md_pending(
     }
 
 def main():
-    """
-
-    回傳：None
-    """
+    """MD 翻譯工具主入口。"""
     log_info("=== MD Pending Blocks -> LM 翻譯（md cache 全接 + content_hash 去重）===")
 
     log_info("請輸入待翻譯根目錄（pending）")
