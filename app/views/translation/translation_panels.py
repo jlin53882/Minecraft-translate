@@ -5,6 +5,7 @@ import flet as ft
 from app.ui.components import primary_button, secondary_button, styled_card
 
 def build_path_row(view, field: ft.TextField) -> ft.Control:
+    """建立路徑輸入欄位與資料夾選擇按鈕的橫向排列。"""
     return ft.Row(
         [
             ft.Container(expand=True, content=field),
@@ -19,6 +20,7 @@ def build_path_row(view, field: ft.TextField) -> ft.Control:
     )
 
 def build_action_row(*, view, on_start, on_dry_run, on_reset, trailing=None) -> ft.Control:
+    """建立翻譯操作按鈕列（開始、Dry-run、Reset）。"""
     controls = [
         primary_button('開始翻譯', icon=ft.Icons.PLAY_ARROW, tooltip='依照目前設定執行完整翻譯流程', on_click=on_start),
         secondary_button('Dry-run 開始模擬翻譯', icon=ft.Icons.SEARCH, tooltip='依照目前設定執行翻譯流程，但不實際修改檔案', on_click=on_dry_run),
@@ -29,6 +31,7 @@ def build_action_row(*, view, on_start, on_dry_run, on_reset, trailing=None) -> 
     return ft.Row(controls=controls, wrap=True, spacing=10)
 
 def build_ftb_tab(view) -> ft.Control:
+    """建立 FTB (Forge 模組包) 翻譯面板的完整 UI。"""
     view.ftb_in_dir = ft.TextField(label='輸入資料夾（模組包根目錄）', hint_text='例如：C:\\Modpack', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER)
     view.ftb_out_dir = ft.TextField(label='輸出資料夾（可選）', hint_text='留空使用 <input>/Output', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER_COPY)
     view.ftb_step_export = ft.Checkbox(label='Step 1：Export Raw（抽取）', value=True)
@@ -43,6 +46,7 @@ def build_ftb_tab(view) -> ft.Control:
     ], spacing=12, expand=True)
 
 def build_kjs_tab(view) -> ft.Control:
+    """建立 KubeJS 翻譯面板的完整 UI。"""
     view.kjs_in_dir = ft.TextField(label='輸入資料夾（模組包根目錄）', hint_text='例如：C:\\Modpack', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER)
     view.kjs_out_dir = ft.TextField(label='輸出資料夾（可選）', hint_text='留空使用 <input>/Output', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER_COPY)
     view.kjs_step_extract = ft.Checkbox(label='Step 1：Export Raw + Clean', value=True)
@@ -56,6 +60,7 @@ def build_kjs_tab(view) -> ft.Control:
     ], spacing=12, expand=True)
 
 def build_md_tab(view) -> ft.Control:
+    """建立 Markdown (Patchouli) 翻譯面板的完整 UI。"""
     view.md_in_dir = ft.TextField(label='輸入資料夾（遞迴掃描 .md）', hint_text='例如：C:\\Modpack\\config\\patchouli_books', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER)
     view.md_out_dir = ft.TextField(label='輸出資料夾（可選）', hint_text='留空使用 <input>/Output/md', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER_COPY)
     view.md_step_extract = ft.Checkbox(label='Step 1：Extract（產生待翻譯）', value=True)

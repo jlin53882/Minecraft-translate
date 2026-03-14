@@ -39,7 +39,6 @@ class TranslationError(Exception):
 
     def __str__(self):
         """取得錯誤訊息字串。"""
-        """
         if self.context:
             ctx = ", ".join(f"{k}={v}" for k, v in self.context.items())
             return f"{self.message} (context: {ctx})"

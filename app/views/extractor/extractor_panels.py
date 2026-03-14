@@ -5,6 +5,7 @@ import flet as ft
 from app.ui.components import styled_card
 
 def build_pick_button(view, target):
+    """建立資料夾選擇按鈕，點擊後開啟資料夾選擇對話框。"""
     return ft.IconButton(
         icon=ft.Icons.FOLDER_OPEN_OUTLINED,
         icon_color=ft.Colors.BLUE_GREY_700,
@@ -13,6 +14,7 @@ def build_pick_button(view, target):
     )
 
 def build_settings_card(view):
+    """建立任務設定卡片（含 Mods 資料夾、輸出資料夾、語言選擇等）。"""
     return styled_card(
         title='任務設定',
         icon=ft.Icons.FOLDER,
@@ -86,6 +88,7 @@ def build_settings_card(view):
     )
 
 def build_logs_card(view):
+    """建立執行日誌卡片（含黑色背景的日誌檢視器）。"""
     return styled_card(
         title='執行日誌',
         icon=ft.Icons.RECEIPT_LONG,

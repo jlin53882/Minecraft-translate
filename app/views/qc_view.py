@@ -251,10 +251,7 @@ class QCView(ft.Column):
         folder_mode: bool,
         file_filter: str = None,
     ):
-        """
-
-    
-        """
+        """建立檔案/資料夾選擇按鈕"""
         return ft.IconButton(
             icon=ft.Icons.FOLDER_OPEN if folder_mode else ft.Icons.FILE_PRESENT,
             tooltip=title,
@@ -264,7 +261,7 @@ class QCView(ft.Column):
         )
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """處理函數。"""
+        """顯示 SnackBar 訊息提示"""
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True
@@ -347,7 +344,7 @@ class QCView(ft.Column):
         self.page.update()
 
     def start_task(self, task_type: str):
-        """處理函數。"""
+        """處理開始品質檢查任務"""
         self.log_view.controls.clear()
         self.progress_bar.value = 0
         self.progress_bar.color = theme.PRIMARY
@@ -407,7 +404,7 @@ class QCView(ft.Column):
         thread.start()
 
     def task_worker(self, service_func, args_tuple):
-        """處理函數。"""
+        """執行品質檢查服務工作執行緒"""
         try:
             for update in service_func(*args_tuple):
                 log_msg = update.get("log", "")
@@ -426,7 +423,7 @@ class QCView(ft.Column):
             self.set_controls_disabled(False)
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """處理函數。"""
+        """顯示 SnackBar 訊息提示"""
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

@@ -149,10 +149,7 @@ class LMView(ft.Column):
     # - 之後調整 UI（padding/radius/border/divider）只要改一處
 
     def _path_row(self, field: ft.TextField, on_pick) -> ft.Control:
-        """
-
-    
-        """
+        """建立路徑輸入列"""
         return ft.Row(
             [
                 field,
@@ -170,29 +167,29 @@ class LMView(ft.Column):
     # Events
     # --------------------------------------------------
     def pick_input_directory(self, e):
-        """處理函數。"""
+        """開啟輸入目錄選擇對話框"""
         self.file_picker.on_result = self.on_input_dir_picked
         self.file_picker.get_directory_path()
 
     def on_input_dir_picked(self, e):
-        """處理函數。"""
+        """處理輸入目錄選擇結果"""
         if e.path:
             self.input_path.value = e.path
             self.page.update()
 
     def pick_output_directory(self, e):
-        """處理函數。"""
+        """開啟輸出目錄選擇對話框"""
         self.file_picker.on_result = self.on_output_dir_picked
         self.file_picker.get_directory_path()
 
     def on_output_dir_picked(self, e):
-        """處理函數。"""
+        """處理輸出目錄選擇結果"""
         if e.path:
             self.output_path.value = e.path
             self.page.update()
 
     def start_clicked(self, e):
-        """處理函數。"""
+        """處理開始翻譯按鈕點擊事件"""
         if not (self.input_path.value or "").strip():
             self._set_status("請先選擇輸入資料夾", theme.RED_200)
             self.page.update()
@@ -242,14 +239,12 @@ class LMView(ft.Column):
     # UI Timer
     # --------------------------------------------------
     def start_ui_timer(self):
-        """處理函數。"""
+        """啟動 UI 更新定時器，定期刷新進度條與日誌。"""
         if self._ui_timer_running:
             return
         self._ui_timer_running = True
 
         def loop():
-            """
-            """
             while self._ui_timer_running:
                 time.sleep(0.1)
                 if not self.session:
@@ -279,12 +274,12 @@ class LMView(ft.Column):
     # UI helpers
     # --------------------------------------------------
     def _set_status(self, text: str, color: str):
-        """處理函數。"""
+        """更新狀態晶片顯示"""
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """處理函數。"""
+        """顯示 SnackBar 訊息提示"""
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

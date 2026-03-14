@@ -13,6 +13,7 @@ from app.services_impl.pipelines.extract_service import (
 from app.views.extractor.extractor_state import PreviewState
 
 def update_stats_from_log(view, line: str):
+    """根据日志行更新提取统计（成功/警告/失败计数）"""
     stats = view._extraction_stats
     if '成功提取' in line and '個新檔案' in line:
         try:
@@ -30,11 +31,13 @@ def update_stats_from_log(view, line: str):
         stats['failures'] += 1
 
 def start_ui_poller(view, mode: str = ''):
+    """启动后台轮询线程，定期从 TaskSession 读取状态更新 UI"""
     view._ui_poller_stop.clear()
     view._last_rendered_log_count = 0
     view._extraction_stats = {'success': 0, 'warnings': 0, 'failures': 0, 'total_files': 0}
 
     def poll():
+        """轮询 TaskSession 状态并更新 UI"""
         while not view._ui_poller_stop.is_set():
             snap = view.session.snapshot()
             status = snap['status']
@@ -75,6 +78,7 @@ def start_ui_poller(view, mode: str = ''):
     threading.Thread(target=poll, daemon=True).start()
 
 def start_extraction(view, mode: str):
+    """启动 JAR 文件提取任务，根据 mode 选择 lang 或 book 提取服务"""
     snap = view.session.snapshot()
     if snap.get('status') == 'RUNNING':
         view._show_snack_bar('任務進行中...')
@@ -117,6 +121,7 @@ def start_extraction(view, mode: str):
     threading.Thread(target=target, args=(mods_dir, str(out_path), view.session), daemon=True).start()
 
 def build_preview_result_dialog(view, result: dict, mode: str):
+    """构建提取预览结果对话框，显示找到的文件数量和大小"""
     preview_results = result.get('preview_results', [])
     total_files = result.get('total_files', 0)
     total_size_mb = result.get('total_size_mb', 0)
@@ -172,6 +177,7 @@ def build_preview_result_dialog(view, result: dict, mode: str):
     return dialog
 
 def build_preview_error_dialog(view, error: str, mode: str):
+    """构建预览失败错误对话框"""
     return ft.AlertDialog(
         modal=True,
         title=ft.Text('預覽失敗'),
@@ -180,6 +186,7 @@ def build_preview_error_dialog(view, error: str, mode: str):
     )
 
 def show_preview(view, mode: str):
+    """执行预览扫描，显示将要提取的文件列表（不执行实际提取）"""
     mods_dir = (view.mods_dir_textfield.value or '').strip()
     if not mods_dir:
         view._show_snack_bar('請先選擇 Mods 資料夾')
@@ -196,6 +203,7 @@ def show_preview(view, mode: str):
     preview_state = PreviewState()
 
     def do_preview():
+        """执行预览扫描生成器，收集提取结果"""
         from translation_tool.core.jar_processor import preview_extraction_generator
         try:
             for update in preview_extraction_generator(mods_dir, mode):
@@ -216,6 +224,7 @@ def show_preview(view, mode: str):
     threading.Thread(target=do_preview, daemon=True).start()
 
     def poll():
+        """轮询预览状态并更新 UI"""
         while not preview_state.done:
             view.progress_bar.value = preview_state.progress
             view.progress_bar.color = ft.Colors.BLUE

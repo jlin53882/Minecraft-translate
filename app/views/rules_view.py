@@ -84,7 +84,7 @@ class RulesView(ft.Column):
                 self.page_jump_field.update()
 
     def on_page_jump_submit(self, e):
-        """處理函數。"""
+        """驗證並執行頁碼跳轉"""
         raw = (e.control.value or "").strip()
         if not raw:
             self._show_snack_bar("請輸入頁碼", theme.BLUE_GREY_700)
@@ -325,7 +325,7 @@ class RulesView(ft.Column):
 
     # --- 邏輯功能 ---
     def on_sort_change(self, e):
-        """處理函數。"""
+        """根據選擇的排序模式重新排序規則資料"""
         mode = e.control.value
         if mode == "from_asc":
             self.all_rules_data.sort(key=lambda r: r.get("from", ""))
@@ -338,7 +338,7 @@ class RulesView(ft.Column):
         self._render_current_page()
 
     def on_search(self, e: ft.ControlEvent):
-        """處理函數。"""
+        """根據關鍵字搜尋規則並更新顯示"""
         keyword = e.control.value.strip().lower()
 
         if not keyword:
@@ -401,17 +401,18 @@ class RulesView(ft.Column):
         return True, ""
 
     def translate_regex_error(self, err) -> str:
+        """翻譯正則表達式錯誤訊息"""
         return rules_translate_regex_error(err)
 
     # --- 執行緒輔助與載入 ---
 
     def _run_on_ui_thread(self, func, *args, **kwargs):
-        """處理函數。"""
+        """在 UI 執行緒上安全執行函式"""
         if self.page and self.page.loop:
             self.page.loop.call_soon_threadsafe(func, *args, **kwargs)
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """處理函數。"""
+        """在頁面顯示提示訊息 snack bar"""
         if not self.page:
             return
         snack = ft.SnackBar(
@@ -422,14 +423,11 @@ class RulesView(ft.Column):
         self.page.update()
 
     def _load_rules_core(self):
-        """
-
-    
-        """
+        """從檔案載入替換規則並回傳"""
         return load_replace_rules()
 
     def _initial_load(self):
-        """處理函數。"""
+        """初次啟動時從檔案載入規則並渲染"""
         try:
             rules_data = self._load_rules_core()
             self._run_on_ui_thread(lambda: self._handle_reload_success(rules_data))
@@ -442,7 +440,7 @@ class RulesView(ft.Column):
     # --- 分頁渲染邏輯 ---
 
     def _render_current_page(self):
-        """處理函數。"""
+        """根據當前頁碼渲染規則表格"""
         start = (self.current_page - 1) * self.page_size
         end = start + self.page_size
         current_page_data = self.all_rules_data[start:end]
@@ -488,7 +486,7 @@ class RulesView(ft.Column):
     # --- 互動事件處理 ---
 
     def on_text_change(self, e):
-        """處理函數。"""
+        """當文字輸入變更時即時驗證並更新資料"""
         rid = e.control.data["rid"]
         field = e.control.data["field"]
 
@@ -530,15 +528,17 @@ class RulesView(ft.Column):
         to_field.update()
 
     def create_rule_row(self, from_text, to_text, rid: int, display_no: int):
+        """建立規則編輯列 UI 元件"""
         return rules_create_row(self, from_text, to_text, rid, display_no)
 
     # --- 操作邏輯 ---
 
     def reload_rules_clicked(self, e):
+        """觸發重新載入規則的執行緒"""
         return start_reload_thread(self)
 
     def _handle_reload_success(self, rules_data):
-        """處理函數。"""
+        """處理規則重新載入成功後的資料初始化與渲染"""
         self.all_rules_data = rules_data
         # ✅ 給每條 rule 補上穩定 rid
         for r in self.all_rules_data:
@@ -552,13 +552,13 @@ class RulesView(ft.Column):
         self.page.update()
 
     def _handle_reload_failure(self, err):
-        """處理函數。"""
+        """處理規則重新載入失敗的錯誤顯示"""
         self.loading_indicator.visible = False
         self.page.update()
         self._show_snack_bar(f"載入規則時發生錯誤: {err}", theme.RED_600)
 
     def prev_page(self, e):
-        """處理函數。"""
+        """上一頁，若已在首頁則顯示提示"""
         if self.current_page > 1:
             self.current_page -= 1
             self._render_current_page()
@@ -566,7 +566,7 @@ class RulesView(ft.Column):
             self._show_snack_bar("已在第一頁", theme.BLUE_GREY_700)
 
     def next_page(self, e):
-        """處理函數。"""
+        """下一頁，若已在末頁則顯示提示"""
         if self.current_page < self.total_pages:
             self.current_page += 1
             self._render_current_page()
@@ -598,7 +598,7 @@ class RulesView(ft.Column):
         return start_save_thread(self, clean_rules)
 
     def add_row_clicked(self, e):
-        """處理函數。"""
+        """新增一列空白規則並跳轉至最後一頁"""
         self.all_rules_data.append({"from": "", "to": "", "_rid": self._new_rid()})
         self.current_page = self.total_pages  # 假設在最後
         # 重新計算總頁數（因為可能剛好換頁）
@@ -610,7 +610,7 @@ class RulesView(ft.Column):
         self._show_snack_bar("➕ 已新增一條規則（已跳至最後一頁）", theme.BLUE_700)
 
     def delete_row_clicked(self, e):
-        """處理函數。"""
+        """刪除指定 RID 的規則並重新渲染"""
         rid_to_delete = e.control.data
         idx = self._find_index_by_rid(rid_to_delete)
 

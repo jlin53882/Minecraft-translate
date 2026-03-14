@@ -41,14 +41,11 @@ class CacheSearchFacade:
         return self._orchestrator
 
     def get_search_engine(self):
-        """
-
-    
-        """
+        """Get the search engine instance, initializing if needed."""
         try:
             return self._get_orchestrator().get_engine()
         except Exception as e:
-            self._logger.error(f"❌ 搜尋引擎初始化失敗: {e}", exc_info=True)
+            self._logger.error(f"Failed to initialize search engine: {e}", exc_info=True)
             return None
 
     def rebuild_search_index(
@@ -89,10 +86,7 @@ class CacheSearchFacade:
         limit: int = 50,
         use_fuzzy: bool = True,
     ) -> list:
-        """
-
-    
-        """
+        """Search the cache for translations matching the query."""
         try:
             return self._get_orchestrator().search_cache(
                 query=query,
@@ -101,7 +95,7 @@ class CacheSearchFacade:
                 use_fuzzy=use_fuzzy,
             )
         except Exception as e:
-            self._logger.error(f"搜尋失敗: {e}", exc_info=True)
+            self._logger.error(f"Search failed: {e}", exc_info=True)
             return []
 
     def find_similar_translations(

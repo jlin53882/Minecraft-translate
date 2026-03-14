@@ -1061,7 +1061,7 @@ class CacheView(ft.Column):
     # Lifecycle
     # =========================================================
     def did_mount(self):
-        """處理函數。"""
+        """元件載入完成後初始化資料與 UI"""
         try:
             self._load_overview()
             self._refresh_query_type_options()
@@ -1205,7 +1205,7 @@ class CacheView(ft.Column):
             pass
 
     def _set_state(self, busy: bool, reason: str, trace: str):
-        """處理函數。"""
+        """更新忙碌狀態與原因"""
         self.ui_busy = busy
         self.busy_reason = reason
 
@@ -1231,7 +1231,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _refresh_disabled_state(self):
-        """處理函數。"""
+        """根據忙碌狀態更新按鈕啟用/禁用"""
         if hasattr(self, "btn_reload_all"):
             self.btn_reload_all.disabled = self.ui_busy
         if hasattr(self, "btn_refresh_stats"):
@@ -1348,7 +1348,7 @@ class CacheView(ft.Column):
 
     # 與舊測試相容：集中提交 UI 更新
     def commit_ui(self, controls=None):
-        """處理函數。"""
+        """批次更新多個 UI 控制項"""
         try:
             for c in controls or []:
                 if hasattr(c, "update"):
@@ -1419,7 +1419,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _append_log(self, text: str):
-        """處理函數。"""
+        """新增日誌訊息並根據等級記錄"""
         if text.startswith("[ERROR"):
             log_error(text)
         elif text.startswith("[WARN"):
@@ -1433,7 +1433,7 @@ class CacheView(ft.Column):
         self._render_logs()
 
     def _notify(self, message: str, level: str = "info"):
-        """處理函數。"""
+        """根據等級顯示訊息並記錄日誌"""
         lv = (level or "info").lower()
         if lv == "error":
             self._append_log(f"[ERROR/錯誤] {message}")
@@ -1470,10 +1470,7 @@ class CacheView(ft.Column):
         )
 
     def _build_query_entry_page(self):
-        """
-
-    
-        """
+        """建立查詢頁面的 UI"""
         self.query_sub_tabs = ft.Tabs(
             selected_index=0,
             animation_duration=200,
@@ -1494,7 +1491,7 @@ class CacheView(ft.Column):
         )
 
     def _render_logs(self):
-        """處理函數。"""
+        """渲染日誌列表 UI"""
         self.log_list.controls.clear()
         rows = self._all_logs
         if self._only_error:
@@ -1504,17 +1501,17 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_log_filter_changed(self, e):
-        """處理函數。"""
+        """日誌篩選條件變更時重新渲染"""
         self._only_error = bool(self.sw_log_only_error.value)
         self._render_logs()
 
     def _clear_logs(self):
-        """處理函數。"""
+        """清除所有日誌記錄"""
         self._all_logs.clear()
         self._render_logs()
 
     def _copy_logs(self):
-        """處理函數。"""
+        """複製所有日誌到剪貼簿"""
         txt = "\n".join(self._all_logs)
         try:
             self.page.set_clipboard(txt)
@@ -1523,10 +1520,7 @@ class CacheView(ft.Column):
             self._show_snack_bar("複製失敗", theme.RED_400)
 
     def _iter_type_states(self, data: dict):
-        """
-
-    
-        """
+        """迭代所有快取類型與其狀態"""
         raw_types = data.get("types") or {}
         if isinstance(raw_types, dict):
             return raw_types.items()
@@ -1543,7 +1537,7 @@ class CacheView(ft.Column):
         return []
 
     def _render_type_list(self, data: dict):
-        """處理函數。"""
+        """渲染快取類型列表 UI"""
         self.type_list.controls.clear()
 
         for ctype, st in self._iter_type_states(data):
@@ -1655,7 +1649,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _refresh_overview_ui(self, data: dict):
-        """處理函數。"""
+        """更新總覽區域的統計資料顯示"""
         self._last_overview_data = data or {}
         ts = time.strftime("%H:%M:%S")
         self.overview_text.value = (
@@ -1669,7 +1663,7 @@ class CacheView(ft.Column):
         self._render_type_list(data)
 
     def _load_overview(self):
-        """處理函數。"""
+        """從服務載入快取總覽資料"""
         try:
             data = cache_get_overview_service()
         except Exception as ex:
@@ -1682,18 +1676,18 @@ class CacheView(ft.Column):
         self._render_query_type_shard_page()
 
     def _run_action(self, reason: str, work_fn, success_msg: str):
-        """"""
+        """包裝非同步工作函式的執行與狀態更新"""
         return run_cache_action(self, reason, work_fn, success_msg)
 
     # top actions
     def _on_reload_all(self, e):
-        """處理函數。"""
+        """觸發重新載入所有快取"""
         self._run_action(
             "RELOADING", lambda: cache_reload_service(), "已重新載入全部快取"
         )
 
     def _on_save_all_new(self, e):
-        """處理函數。"""
+        """觸發儲存所有新分片"""
         self._run_action(
             "SAVING",
             lambda: cache_save_all_service(write_new_shard=True),
@@ -1701,7 +1695,7 @@ class CacheView(ft.Column):
         )
 
     def _on_save_all_fill(self, e):
-        """處理函數。"""
+        """觸發補滿所有活躍分片（高風險）"""
         if hasattr(self, "chk_danger_confirm") and not bool(
             getattr(self.chk_danger_confirm, "value", False)
         ):
@@ -1714,7 +1708,7 @@ class CacheView(ft.Column):
         )
 
     def _on_refresh_stats(self, e):
-        """處理函數。"""
+        """刷新快取統計資料"""
         self._load_overview()
         self._notify("已刷新統計", "info")
 
@@ -1750,7 +1744,7 @@ class CacheView(ft.Column):
 
     # per-type actions
     def _on_reload_one(self, cache_type: str):
-        """處理函數。"""
+        """重新載入指定類型的快取"""
         self._run_action(
             "RELOADING",
             lambda: cache_reload_type_service(cache_type),
@@ -1758,7 +1752,7 @@ class CacheView(ft.Column):
         )
 
     def _on_save_one_new(self, cache_type: str):
-        """處理函數。"""
+        """儲存指定類型的新分片"""
         self._run_action(
             "SAVING",
             lambda: cache_save_all_service(
@@ -1768,7 +1762,7 @@ class CacheView(ft.Column):
         )
 
     def _on_save_one_fill(self, cache_type: str):
-        """處理函數。"""
+        """補滿指定類型的活躍分片（高風險）"""
         if hasattr(self, "chk_danger_confirm") and not bool(
             getattr(self.chk_danger_confirm, "value", False)
         ):
@@ -1783,16 +1777,9 @@ class CacheView(ft.Column):
         )
 
     def _on_rotate_one(self, cache_type: str):
-        """
-
-    
-        """
-
+        """處理單一快取類型的分片輪替（Rotation）動作。"""
         def _work():
-            """
-
-        
-            """
+            """執行分片輪替的工作函式"""
             ok = cache_rotate_service(cache_type)
             if not ok:
                 raise RuntimeError(f"輪替失敗: {cache_type}")
@@ -1801,7 +1788,7 @@ class CacheView(ft.Column):
         self._run_action("ROTATING", _work, f"已輪替分片：{cache_type}")
 
     def _on_analyze_one(self, cache_type: str):
-        """處理函數。"""
+        """分析指定類型的快取內容"""
         target = None
         for ctype, st in self._iter_type_states(self._last_overview_data):
             if ctype == cache_type:
@@ -1847,7 +1834,7 @@ class CacheView(ft.Column):
     # Query phase-2: search block
     # =========================================================
     def _refresh_query_type_options(self):
-        """處理函數。"""
+        """更新查詢類型下拉選單的選項"""
         types = sorted(
             [ctype for ctype, _ in self._iter_type_states(self._last_overview_data)]
         )
@@ -1863,10 +1850,7 @@ class CacheView(ft.Column):
     def _load_shard_rows(
         self, cache_type: str, active_shard_id: str, shard_capacity: int
     ) -> list[dict]:
-        """
-
-    
-        """
+        """載入指定類型的所有分片資料"""
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
             return []
@@ -1876,10 +1860,7 @@ class CacheView(ft.Column):
             return []
 
         def _sort_key(path: Path):
-            """
-
-        
-            """
+            """從路徑提取排序用的序列號"""
             stem = path.stem
             m = re.search(r"(\d+)$", stem)
             seq = int(m.group(1)) if m else -1
@@ -1922,10 +1903,7 @@ class CacheView(ft.Column):
         return rows
 
     def _load_shard_keys(self, cache_type: str, filename: str) -> list[str]:
-        """
-
-    
-        """
+        """從分片檔案載入所有鍵值"""
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
             return []
@@ -1954,7 +1932,7 @@ class CacheView(ft.Column):
         return []
 
     def _set_shard_detail_page(self, page: int):
-        """處理函數。"""
+        """設定分片詳情頁碼並計算總頁數"""
         total = len(self.shard_detail_keys)
         self.shard_detail_total_pages = max(
             1, (total + self.shard_detail_page_size - 1) // self.shard_detail_page_size
@@ -1962,7 +1940,7 @@ class CacheView(ft.Column):
         self.shard_detail_page = max(1, min(page, self.shard_detail_total_pages))
 
     def _render_shard_detail_keys(self):
-        """處理函數。"""
+        """渲染分片詳情的鍵值列表 UI"""
         if not hasattr(self, "shard_detail_key_list"):
             return
 
@@ -2084,13 +2062,13 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_shard_key_filter_change(self, e):
-        """處理函數。"""
+        """鍵值篩選條件變更時重新渲染"""
         self.shard_detail_page = 1
         self._render_shard_detail_keys()
         self.page.update()
 
     def _set_shard_workspace_visible(self, visible: bool):
-        """處理函數。"""
+        """顯示或隱藏分片工作區面板"""
         show_workspace = bool(visible)
         if hasattr(self, "shard_nav_view"):
             self.shard_nav_view.visible = not show_workspace
@@ -2098,16 +2076,15 @@ class CacheView(ft.Column):
             self.shard_workspace_card.visible = show_workspace
 
     def _open_shard_workspace_tab(self):
-        """處理函數。"""
+        """開啟分片工作區標籤"""
         self._set_shard_workspace_visible(True)
 
     def _on_back_to_shard_list(self, e):
-        """處理函數。"""
+        """返回分片列表檢視"""
         self._set_shard_workspace_visible(False)
-        self.page.update()
 
     def _on_select_shard_row(self, cache_type: str, filename: str):
-        """處理函數。"""
+        """選擇分片列時載入該分片的鍵值"""
         self.shard_detail_selected_type = cache_type
         self.shard_detail_selected_file = filename
         self.shard_detail_keys = self._load_shard_keys(cache_type, filename)
@@ -2124,7 +2101,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_select_shard_key(self, key: str):
-        """處理函數。"""
+        """選擇鍵值時更新詳情面板"""
         if key != self.shard_detail_selected_key:
             self.shard_dst_loaded_sig = None
         self.shard_detail_selected_key = key
@@ -2137,10 +2114,7 @@ class CacheView(ft.Column):
     def _load_shard_entry(
         self, cache_type: str, filename: str, key: str
     ) -> dict | None:
-        """
-
-    
-        """
+        """載入單一鍵值的詳細資料"""
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
             return None
@@ -2161,17 +2135,14 @@ class CacheView(ft.Column):
         return None
 
     def _format_shard_src_text(self, src_text: str, mode: str) -> str:
-        """
-
-    
-        """
+        """格式化來源文字（raw 或 preview 模式）"""
         src = str(src_text or "")
         if mode == "raw":
             return json.dumps(src, ensure_ascii=False)
         return src.replace("\\r\\n", "\n").replace("\\n", "\n")
 
     def _render_shard_src_panel(self):
-        """處理函數。"""
+        """渲染分片來源內容面板"""
         if not hasattr(self, "shard_src_field"):
             return
 
@@ -2207,26 +2178,21 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_shard_src_preview_mode(self, e):
-        """處理函數。"""
+        """切換來源預覽模式"""
         self.shard_detail_src_mode = "preview"
-        self._render_shard_src_panel()
-        self.page.update()
 
     def _on_shard_src_raw_mode(self, e):
-        """處理函數。"""
+        """切換來源原始模式"""
         self.shard_detail_src_mode = "raw"
         self._render_shard_src_panel()
         self.page.update()
 
     def _normalize_cache_text(self, text: str) -> str:
-        """
-
-    
-        """
+        """正規化快取文字（移除跳脫序列）"""
         return str(text or "").replace("\\r\\n", "\n").replace("\\n", "\n")
 
     def _render_shard_dst_panel(self):
-        """處理函數。"""
+        """渲染分片目標內容面板"""
         if not hasattr(self, "shard_dst_field"):
             return
 
@@ -2260,7 +2226,7 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_shard_dst_apply(self, e):
-        """處理函數。"""
+        """套用目標翻譯到快取"""
         if self.ui_busy:
             self._notify("目前忙碌中，暫停套用", "warn")
             return
@@ -2325,7 +2291,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_shard_dst_copy(self, e):
-        """處理函數。"""
+        """複製目標內容到剪貼簿"""
         if not self.shard_detail_selected_key:
             self._notify("請先選擇 key", "warn")
             return
@@ -2406,10 +2372,7 @@ class CacheView(ft.Column):
 
         # 若當前選取不在新清單中，就預設第一筆
         def _ev_id(ev: dict):
-            """
-
-        
-            """
+            """從事件物件取出 ID 組合"""
             return (
                 str(ev.get("ts", "")),
                 str(ev.get("old_dst", "")),
@@ -2550,31 +2513,23 @@ class CacheView(ft.Column):
             self._notify(f"套用舊值失敗：{ex}", "error")
 
     def _on_shard_page_first(self, e):
-        """處理函數。"""
+        """跳到分片詳情第一頁"""
         self.shard_detail_page = 1
-        self._render_shard_detail_keys()
-        self.page.update()
 
     def _on_shard_page_prev(self, e):
-        """處理函數。"""
+        """上一頁分片詳情"""
         self.shard_detail_page -= 1
-        self._render_shard_detail_keys()
-        self.page.update()
 
     def _on_shard_page_next(self, e):
-        """處理函數。"""
+        """下一頁分片詳情"""
         self.shard_detail_page += 1
-        self._render_shard_detail_keys()
-        self.page.update()
 
     def _on_shard_page_last(self, e):
-        """處理函數。"""
+        """跳到分片詳情最後一頁"""
         self.shard_detail_page = self.shard_detail_total_pages
-        self._render_shard_detail_keys()
-        self.page.update()
 
     def _render_query_type_shard_page(self):
-        """處理函數。"""
+        """渲染類型分片列表"""
         if not hasattr(self, "query_type_shard_col"):
             return
 
@@ -2731,10 +2686,7 @@ class CacheView(ft.Column):
         self._render_shard_detail_keys()
 
     def _active_shard_filename(self, cache_type: str) -> str:
-        """
-
-    
-        """
+        """取得指定類型的活躍分片檔案名"""
         for ctype, st in self._iter_type_states(self._last_overview_data):
             if ctype == cache_type:
                 sid = st.get("active_shard_id")
@@ -2743,10 +2695,7 @@ class CacheView(ft.Column):
         return "-"
 
     def _type_dirty_text(self, cache_type: str) -> str:
-        """
-
-    
-        """
+        """取得指定類型的髒污狀態文字"""
         for ctype, st in self._iter_type_states(self._last_overview_data):
             if ctype == cache_type:
                 return "dirty" if bool(st.get("is_dirty", False)) else "clean"
@@ -2754,37 +2703,41 @@ class CacheView(ft.Column):
 
     # -------------------- History storage helpers --------------------
     def _history_now_ts(self) -> str:
+        """取得目前時間戳"""
         return history_now_ts()
 
     def _history_dirs(self, cache_type: str):
+        """取得歷史記錄目錄"""
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         return history_dirs(root, cache_type)
 
     def _history_active_default(self, cache_type: str) -> dict:
+        """取得預設的活跃记录"""
         return history_active_default(cache_type)
 
     def _history_load_active(self, cache_type: str):
+        """載入活跃记录"""
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         return history_load_active(root, cache_type)
 
     def _history_save_active(self, active_path: Path, active: dict):
+        """儲存活跃记录"""
         return history_save_active(active_path, active)
 
     def _history_append_event(self, cache_type: str, event: dict):
+        """新增歷史事件"""
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         return history_append_event(root, cache_type, event)
 
     def _history_load_recent(
         self, cache_type: str, key: str, limit: int = 20
     ) -> list[dict]:
+        """載入最近的歷史記錄"""
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         return history_load_recent(root, cache_type, key, limit)
 
     def _render_query_history(self):
-        """
-
-    
-        """
+        """渲染查詢區的歷史記錄列表"""
         if not hasattr(self, "query_history_list"):
             return
 
@@ -2819,10 +2772,7 @@ class CacheView(ft.Column):
 
         # 若當前選取不在新清單中，就預設第一筆
         def _ev_id(ev: dict):
-            """
-
-        
-            """
+            """從事件物件取出 ID 組合"""
             return (
                 str(ev.get("ts", "")),
                 str(ev.get("old_dst", "")),
@@ -2878,7 +2828,7 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _update_history_preview(self):
-        """處理函數。"""
+        """更新歷史紀錄預覽"""
         ev = self.query_history_selected_event
         if not ev:
             self.query_history_selected_text.value = "未選取歷史紀錄"
@@ -2977,13 +2927,11 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_select_history_event(self, event: dict):
-        """處理函數。"""
+        """選擇歷史紀錄項目"""
         self.query_history_selected_event = event
-        self._render_query_history()
-        self.page.update()
 
     def _on_apply_selected_history(self, e):
-        """處理函數。"""
+        """套用選取的歷史紀錄"""
         if self.ui_busy:
             self._notify("目前忙碌中，暫停套用", "warn")
             return
@@ -3039,7 +2987,7 @@ class CacheView(ft.Column):
             self._notify(f"套用舊值失敗：{ex}", "error")
 
     def _render_query_detail(self):
-        """處理函數。"""
+        """渲染查詢詳情面板"""
         row = self.query_selected_result
         if not row:
             self.query_detail_key.value = "Key: -"
@@ -3070,7 +3018,7 @@ class CacheView(ft.Column):
         self._render_query_history()
 
     def _set_query_page(self, page: int):
-        """處理函數。"""
+        """設定查詢結果頁碼並計算總頁數"""
         total = len(self.query_results)
         self.query_total_pages = max(
             1, (total + self.query_page_size - 1) // self.query_page_size
@@ -3078,7 +3026,7 @@ class CacheView(ft.Column):
         self.query_page = max(1, min(page, self.query_total_pages))
 
     def _render_query_results(self):
-        """處理函數。"""
+        """渲染查詢結果列表"""
         if not hasattr(self, "query_result_list"):
             return
 
@@ -3171,38 +3119,32 @@ class CacheView(ft.Column):
         self._refresh_disabled_state()
 
     def _on_select_result(self, row: dict):
-        """處理函數。"""
+        """選擇查詢結果項目"""
         self.query_selected_result = row
         self._render_query_results()
         self._render_query_detail()
         self.page.update()
 
     def _on_page_first(self, e):
-        """處理函數。"""
+        """跳到查詢結果第一頁"""
         self.query_page = 1
-        self._render_query_results()
-        self.page.update()
 
     def _on_page_prev(self, e):
-        """處理函數。"""
+        """上一頁查詢結果"""
         self.query_page -= 1
         self._render_query_results()
         self.page.update()
 
     def _on_page_next(self, e):
-        """處理函數。"""
+        """下一頁查詢結果"""
         self.query_page += 1
-        self._render_query_results()
-        self.page.update()
 
     def _on_page_last(self, e):
-        """處理函數。"""
+        """跳到查詢結果最後一頁"""
         self.query_page = self.query_total_pages
-        self._render_query_results()
-        self.page.update()
 
     def _on_page_jump(self, e):
-        """處理函數。"""
+        """跳轉到指定頁碼"""
         try:
             p = int((self.tf_page_jump.value or "1").strip())
         except Exception:
@@ -3212,17 +3154,15 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_page_size_change(self, e):
-        """處理函數。"""
+        """變更每頁顯示數量"""
         try:
             self.query_page_size = int(self.dd_page_size.value or "50")
         except Exception:
             self.query_page_size = 50
         self.query_page = 1
-        self._render_query_results()
-        self.page.update()
 
     def _on_apply_dst(self, e):
-        """處理函數。"""
+        """套用目標翻譯到選取的查詢結果"""
         if self.ui_busy:
             self._notify("目前忙碌中，暫停套用", "warn")
             return
@@ -3316,7 +3256,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_query_search(self, e):
-        """處理函數。"""
+        """執行關鍵字搜尋快取"""
         if self.ui_busy:
             self._notify("目前忙碌中，暫停搜尋", "warn")
             return
@@ -3392,7 +3332,7 @@ class CacheView(ft.Column):
         self.page.update()
 
     def _on_query_clear(self, e):
-        """處理函數。"""
+        """清除搜尋條件與結果"""
         self.tf_query_input.value = ""
         self.query_results = []
         self.query_selected_result = None

@@ -38,40 +38,25 @@ class CachePresenter:
     }
 
     def status_label(self, state: CacheUiState) -> str:
-        """
-
-    
-        """
+        """將 CacheUiState 轉換為 UI 顯示的中文狀態標籤。"""
         if not state.busy:
             return self._STATUS_MAP["READY"]
         reason = (state.reason or "").strip().upper()
         return self._STATUS_MAP.get(reason, state.reason or "處理中")
 
     def status_text(self, state: CacheUiState) -> str:
-        """
-
-    
-        """
+        """取得完整的 UI 狀態文字（含「狀態：」前綴與省略號）。"""
         label = self.status_label(state)
         return f"狀態：{label}" + ("..." if state.busy else "")
 
     def phase_label(self, phase: str) -> str:
-        """
-
-    
-        """
+        """將 phase 字串映射為 UI 顯示用的標籤。"""
         return self._PHASE_MAP.get((phase or "").strip().lower(), phase or "next")
 
     def action_trace(self, action: ActionState) -> str:
-        """
-
-    
-        """
+        """產生 action 的 trace 格式字串（供除錯用）。"""
         return f"trace: ACTION#{action.action_id} {self.phase_label(action.phase)} {action.reason}"
 
     def action_log(self, action: ActionState) -> str:
-        """
-
-    
-        """
+        """產生 action 的 log 格式字串（供日誌用）。"""
         return f"[ACTION#{action.action_id}] {self.phase_label(action.phase)} {action.reason}"

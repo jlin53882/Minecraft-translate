@@ -15,9 +15,7 @@ import orjson as json
 def get_active_shard_id(
     cache_file_path: dict[str, Path], cache_type: str, active_shard_file: str
 ) -> str:
-    """
-
-    """
+    """取得指定快取類型的作用中分片 ID"""
     try:
         type_dir = cache_file_path.get(cache_type, Path(".")).parent
         active_file = type_dir / active_shard_file
@@ -41,9 +39,7 @@ def build_cache_overview(
     cache_dir_name: str,
     resolve_project_path: Callable[[str], Path],
 ) -> dict[str, Any]:
-    """
-
-    """
+    """建立所有快取類型及其狀態的完整概覽"""
     out_types: dict[str, Any] = {}
     total_entries = 0
     dirty_type_count = 0

@@ -7,6 +7,7 @@ import threading
 import flet as ft
 
 def translate_regex_error(err: re.error) -> str:
+    """将 Python 正则表达式错误转换为中文用户提示"""
     msg = str(err)
     if 'missing )' in msg or 'unterminated subpattern' in msg:
         return '正則表達式缺少結尾括號「)」。'
@@ -21,6 +22,7 @@ def translate_regex_error(err: re.error) -> str:
     return '正則語法錯誤：' + msg
 
 def validate_rule(view, src: str, dst: str, all_rules, current_index):
+    """验证替换规则的语法正确性和逻辑一致性"""
     if not src.strip():
         return False, 'from 欄位不可為空'
     try:
@@ -42,6 +44,7 @@ def validate_rule(view, src: str, dst: str, all_rules, current_index):
     return True, ''
 
 def perform_reload(view):
+    """执行规则重新加载，读取配置文件并更新界面"""
     try:
         rules_data = view._load_rules_core()
         view._run_on_ui_thread(lambda: view._handle_reload_success(rules_data))
@@ -49,13 +52,16 @@ def perform_reload(view):
         view._run_on_ui_thread(lambda err=err: view._handle_reload_failure(err))
 
 def start_reload_thread(view):
+    """在后台线程启动规则重新加载流程"""
     view.loading_indicator.visible = True
     view.page.update()
     view._show_snack_bar('🔄 正在重新載入規則…', ft.Colors.BLUE_700)
     threading.Thread(target=lambda: perform_reload(view), daemon=True).start()
 
 def start_save_thread(view, clean_rules):
+    """在后台线程保存规则到配置文件"""
     def worker():
+        """执行规则保存操作"""
         try:
             from app.services_impl.config_service import save_replace_rules
             save_replace_rules(clean_rules)
@@ -66,4 +72,5 @@ def start_save_thread(view, clean_rules):
     threading.Thread(target=worker, daemon=True).start()
 
 def calc_total_pages(total_rules: int, page_size: int) -> int:
+    """计算规则列表的总页数"""
     return math.ceil(total_rules / page_size) if total_rules > 0 else 1

@@ -3,6 +3,7 @@ from __future__ import annotations
 import traceback
 
 def load_config_into_view(view, config: dict):
+    """將 config 字典中的值填入 view 的各個 UI 控制項。"""
     log_cfg = config.get('logging', {})
     trans_cfg = config.get('translator', {})
     species_cfg = config.get('species_cache', {})
@@ -60,6 +61,7 @@ def load_config_into_view(view, config: dict):
         view.keys_column.controls.append(row)
 
 def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, validate_api_keys_from_ui_fn):
+    """從 view UI 控制項收集使用者輸入並儲存至 config.json。"""
     new_config = load_config_json_fn()
     try:
         new_config['logging']['log_level'] = view.controls_map['logging.log_level'].value

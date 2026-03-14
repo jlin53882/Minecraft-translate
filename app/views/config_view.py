@@ -232,13 +232,11 @@ class ConfigView(ft.Column):
     # --- UI 建構區塊 ---
 
     def _build_header(self):
+        """建立頁面標題"""
         return build_config_header(self)
 
     def _build_left_column(self):
-        """
-
-    
-        """
+        """建立左側欄位"""
         return ft.Column(
             expand=1,
             spacing=15,
@@ -280,10 +278,7 @@ class ConfigView(ft.Column):
         # LM Translator Section content
 
         # 1. Top Params
-        """
-
-    
-        """
+        """建立右側欄位"""
         top_row = ft.Row(
             [
                 ft.Column([self.controls_map["lm_translator.temperature"]], expand=1),
@@ -456,10 +451,7 @@ class ConfigView(ft.Column):
         )
 
     def _build_lang_merger_card(self):
-        """
-
-    
-        """
+        """建立語言合併器設定區塊"""
         return self._build_card(
             "語言合併器設定 (Lang Merger)",
             [
@@ -499,22 +491,24 @@ class ConfigView(ft.Column):
         )
 
     def _build_footer(self):
+        """建立底部儲存列"""
         return build_config_footer(self)
 
     def _build_card(self, title, controls_list):
+        """建立設定卡片"""
         return build_config_card(self, title, controls_list)
 
     # --- 邏輯功能 (與原程式碼相同，僅移動位置) ---
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """處理函數。"""
+        """顯示 SnackBar 訊息提示"""
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
 
     def add_model_row(self, model_name: str):
-        """處理函數。"""
+        """新增模型項目到列表"""
         cb = ft.Checkbox(
             label=model_name,
             value=True,
@@ -569,7 +563,7 @@ class ConfigView(ft.Column):
         self._refresh_model_order_labels()
 
     def move_model_row(self, cb: ft.Checkbox, direction: int):
-        """處理函數。"""
+        """移動模型順序（上移/下移）"""
         controls = self.models_column.controls
         idx = next((i for i, r in enumerate(controls) if r._checkbox is cb), None)
         if idx is None:
@@ -581,14 +575,14 @@ class ConfigView(ft.Column):
         self._refresh_model_order_labels()
 
     def remove_model_by_checkbox(self, cb: ft.Checkbox):
-        """處理函數。"""
+        """刪除勾選的模型項目"""
         row = next((r for r in self.models_column.controls if r._checkbox is cb), None)
         if row:
             self.models_column.controls.remove(row)
         self._refresh_model_order_labels()
 
     def on_add_model_clicked(self, e):
-        """處理函數。"""
+        """處理新增模型按鈕點擊事件"""
         name = self.new_model_field.value.strip()
         if not name:
             self._show_snack_bar("模型名稱不能為空")
@@ -601,12 +595,15 @@ class ConfigView(ft.Column):
         self.page.update()
 
     def _build_key_field(self, value: str = ''):
+        """建立 API Key 輸入欄位"""
         return build_key_field(value=value)
 
     def _build_key_row(self, tf: ft.TextField):
+        """建立 API Key 列"""
         return build_key_row(self, tf)
 
     def add_key_row(self):
+        """新增 API Key 列"""
         tf = self._build_key_field()
         row = self._build_key_row(tf)
         self.key_fields.append(tf)
@@ -614,7 +611,7 @@ class ConfigView(ft.Column):
         self.keys_column.update()
 
     def remove_key_row(self, row: ft.Row):
-        """處理函數。"""
+        """刪除 API Key 列表中的指定列"""
         if row in self.keys_column.controls:
             idx = self.keys_column.controls.index(row)
             self.keys_column.controls.remove(row)
@@ -622,20 +619,23 @@ class ConfigView(ft.Column):
         self.keys_column.update()
 
     def _refresh_model_order_labels(self):
-        """處理函數。"""
+        """重新整理模型順序編號"""
         for idx, row in enumerate(self.models_column.controls):
             if hasattr(row, "_order_text"):
                 row._order_text.value = f"{idx + 1:02d}"
         self.page.update()
 
     def load_config(self):
+        """載入設定檔"""
         config = load_config_json()
         return load_config_into_view(self, config)
 
     def _success_color(self):
+        """取得成功顏色"""
         return theme.GREEN_600
 
     def save_config_clicked(self, e):
+        """儲存設定"""
         return save_config_from_view(
             self,
             load_config_json_fn=load_config_json,

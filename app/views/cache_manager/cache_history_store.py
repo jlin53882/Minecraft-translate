@@ -5,9 +5,14 @@ from datetime import datetime
 from pathlib import Path
 
 def history_now_ts() -> str:
+    """取得目前的 ISO 時間戳字串（時區Aware）。"""
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 def history_dirs(cache_root: str, cache_type: str):
+    """根據 cache_root 與 cache_type 取得並建立 cache_history 目錄結構。
+
+    回傳：(base_path, jsonl_dir, json_dir)
+    """
     root = str(cache_root or "").strip()
     if not root:
         return None, None, None
@@ -19,6 +24,7 @@ def history_dirs(cache_root: str, cache_type: str):
     return base, jsonl_dir, json_dir
 
 def history_active_default(cache_type: str) -> dict:
+    """取得指定 cache_type 的預設活動狀態（用於新檔案）。"""
     return {
         "current_file": f"{cache_type}_h000001.jsonl",
         "current_count": 0,
@@ -27,6 +33,10 @@ def history_active_default(cache_type: str) -> dict:
     }
 
 def history_load_active(cache_root: str, cache_type: str):
+    """載入或初始化 cache_type 的活動狀態（.history.active 檔案）。
+
+    回傳：(active_dict, active_path, jsonl_dir, json_dir)
+    """
     _base, jsonl_dir, json_dir = history_dirs(cache_root, cache_type)
     if jsonl_dir is None:
         return None, None, None, None
@@ -52,9 +62,11 @@ def history_load_active(cache_root: str, cache_type: str):
     return active, active_path, jsonl_dir, json_dir
 
 def history_save_active(active_path: Path, active: dict):
+    """將活動狀態寫入 .history.active 檔案（JSON 格式）。"""
     active_path.write_text(json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8")
 
 def history_append_event(cache_root: str, cache_type: str, event: dict):
+    """將事件寫入 cache_type 的歷史記錄（自動分檔、寫入 jsonl 與 json）。"""
     active, active_path, jsonl_dir, json_dir = history_load_active(cache_root, cache_type)
     if not active:
         return
@@ -93,6 +105,7 @@ def history_append_event(cache_root: str, cache_type: str, event: dict):
     json_path.write_text(json.dumps(arr, ensure_ascii=False, indent=2), encoding="utf-8")
 
 def history_load_recent(cache_root: str, cache_type: str, key: str, limit: int = 20) -> list[dict]:
+    """根據 key 取得最近 limit 筆歷史事件（從最新的檔案往前掃）。"""
     _base, jsonl_dir, _json_dir = history_dirs(cache_root, cache_type)
     if jsonl_dir is None:
         return []

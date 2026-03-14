@@ -157,21 +157,21 @@ class IconPreviewView(ft.Column):
     # Folder picker callbacks
     # ==================================================
     def _on_pick_source(self, e: ft.FilePickerResultEvent):
-        """處理函數。"""
+        """處理來源目錄選擇結果"""
         if e.path:
             self.source_root = Path(e.path)
             self.source_label.value = f"原文資料夾：{self.source_root}"
             self._update_load_state()
 
     def _on_pick_review(self, e: ft.FilePickerResultEvent):
-        """處理函數。"""
+        """處理校對目錄選擇結果"""
         if e.path:
             self.review_root = Path(e.path)
             self.review_label.value = f"校對資料夾：{self.review_root}"
             self._update_load_state()
 
     def _update_load_state(self):
-        """處理函數。"""
+        """更新載入按鈕的啟用狀態"""
         self.load_btn.disabled = not (self.source_root and self.review_root)
         self.update()
 
@@ -179,7 +179,7 @@ class IconPreviewView(ft.Column):
     # 載入 → 建立模組清單
     # ==================================================
     def _on_load_clicked(self, e):
-        """處理函數。"""
+        """處理載入按鈕點擊事件"""
         entries = self._load_entries()
         mods = defaultdict(list)
 
@@ -193,7 +193,7 @@ class IconPreviewView(ft.Column):
     # 第一層：模組清單
     # ==================================================
     def _render_mod_list(self):
-        """處理函數。"""
+        """渲染模組清單畫面"""
         self.current_modid = None
         self.back_btn.visible = False
         self.save_btn.visible = False
@@ -230,7 +230,7 @@ class IconPreviewView(ft.Column):
         self.update()
 
     def _update_page_bar_for_mods(self):
-        """處理函數。"""
+        """更新分頁資訊顯示"""
         self.page_info.value = (
             f"模組清單｜第 {self.mod_current_page + 1} / {self.mod_total_pages} 頁"
         )
@@ -238,7 +238,7 @@ class IconPreviewView(ft.Column):
         self.next_page_btn.disabled = self.mod_current_page >= self.mod_total_pages - 1
 
     def _prev_page(self, e):
-        """處理函數。"""
+        """處理上一頁按鈕點擊"""
         if self.current_modid:
             # 第二層（item）
             if self.current_page > 0:
@@ -251,7 +251,7 @@ class IconPreviewView(ft.Column):
                 self._render_mod_list()
 
     def _next_page(self, e):
-        """處理函數。"""
+        """處理下一頁按鈕點擊"""
         if self.current_modid:
             if self.current_page < self.total_pages - 1:
                 self.current_page += 1
@@ -265,7 +265,7 @@ class IconPreviewView(ft.Column):
     # 第二層：單一模組 detail
     # ==================================================
     def _open_mod_detail(self, modid: str):
-        """處理函數。"""
+        """開啟模組詳情畫面"""
         self.current_modid = modid
         self.current_page = 0  # ⭐ 重設頁碼
         self.back_btn.visible = True
@@ -284,7 +284,7 @@ class IconPreviewView(ft.Column):
         self._render_current_page()
 
     def _go_back(self, e):
-        """處理函數。"""
+        """處理返回按鈕，返回模組清單"""
         self.current_modid = None
         self.current_page = 0
         self.page_info.value = ""
@@ -295,14 +295,14 @@ class IconPreviewView(ft.Column):
     # Row → 回報翻譯變更
     # ==================================================
     def _on_value_changed(self, key: str, value: str):
-        """處理函數。"""
+        """處理翻譯值變更事件"""
         self._zh_data[key] = to_halfwidth(value)
 
     # ==================================================
     # 儲存 zh_tw.json
     # ==================================================
     def _save_current_zh(self, e):
-        """處理函數。"""
+        """儲存目前的翻譯到 zh_tw.json"""
         if not self._current_zh_file:
             self._show_snack("❌ 找不到 zh_tw.json")
             return
@@ -388,7 +388,7 @@ class IconPreviewView(ft.Column):
         return entries
 
     def _render_current_page(self):
-        """處理函數。"""
+        """渲染當前頁面的項目列表"""
         entries = self.mods.get(self.current_modid, [])
         total = len(entries)
 

@@ -391,7 +391,6 @@ def patch_quest_snbt_file(
         skipped.append(tag_key)
 
     def _recurse(node):
-        """
         """遞迴應用翻譯到節點。"""
         if isinstance(node, Compound):
             id_val = node.get("id")
