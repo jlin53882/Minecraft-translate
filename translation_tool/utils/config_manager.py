@@ -22,17 +22,20 @@ import copy
 
 # PR27：統一路徑解析基準，避免 legacy cwd 依賴造成找不到 config / 資源檔。
 def get_project_root() -> Path:
-    """
-
-    """
+    """取得專案根目錄路徑。"""
     return Path(__file__).resolve().parents[2]
 
 PROJECT_ROOT = get_project_root()
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 
 def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
-    """
+    """解析專案相對路徑為絕對路徑。
 
+    參數：
+        path_like: 相對路徑字串或 None
+
+    回傳：
+        Path: 絕對路徑
     """
     if path_like is None:
         return PROJECT_ROOT
