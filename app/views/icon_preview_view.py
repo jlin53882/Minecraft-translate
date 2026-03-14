@@ -158,8 +158,6 @@ class IconPreviewView(ft.Column):
     # ==================================================
     def _on_pick_source(self, e: ft.FilePickerResultEvent):
         """
-
-        回傳：None
         """
         if e.path:
             self.source_root = Path(e.path)
@@ -168,8 +166,6 @@ class IconPreviewView(ft.Column):
 
     def _on_pick_review(self, e: ft.FilePickerResultEvent):
         """
-
-        回傳：None
         """
         if e.path:
             self.review_root = Path(e.path)
@@ -178,8 +174,6 @@ class IconPreviewView(ft.Column):
 
     def _update_load_state(self):
         """
-
-        回傳：None
         """
         self.load_btn.disabled = not (self.source_root and self.review_root)
         self.update()
@@ -189,8 +183,6 @@ class IconPreviewView(ft.Column):
     # ==================================================
     def _on_load_clicked(self, e):
         """
-
-        回傳：None
         """
         entries = self._load_entries()
         mods = defaultdict(list)
@@ -206,8 +198,6 @@ class IconPreviewView(ft.Column):
     # ==================================================
     def _render_mod_list(self):
         """
-
-        回傳：None
         """
         self.current_modid = None
         self.back_btn.visible = False
@@ -246,8 +236,6 @@ class IconPreviewView(ft.Column):
 
     def _update_page_bar_for_mods(self):
         """
-
-        回傳：None
         """
         self.page_info.value = (
             f"模組清單｜第 {self.mod_current_page + 1} / {self.mod_total_pages} 頁"
@@ -257,8 +245,6 @@ class IconPreviewView(ft.Column):
 
     def _prev_page(self, e):
         """
-
-        回傳：None
         """
         if self.current_modid:
             # 第二層（item）
@@ -273,8 +259,6 @@ class IconPreviewView(ft.Column):
 
     def _next_page(self, e):
         """
-
-        回傳：None
         """
         if self.current_modid:
             if self.current_page < self.total_pages - 1:
@@ -290,8 +274,6 @@ class IconPreviewView(ft.Column):
     # ==================================================
     def _open_mod_detail(self, modid: str):
         """
-
-        回傳：None
         """
         self.current_modid = modid
         self.current_page = 0  # ⭐ 重設頁碼
@@ -312,8 +294,6 @@ class IconPreviewView(ft.Column):
 
     def _go_back(self, e):
         """
-
-        回傳：None
         """
         self.current_modid = None
         self.current_page = 0
@@ -326,8 +306,6 @@ class IconPreviewView(ft.Column):
     # ==================================================
     def _on_value_changed(self, key: str, value: str):
         """
-
-        回傳：None
         """
         self._zh_data[key] = to_halfwidth(value)
 
@@ -336,8 +314,6 @@ class IconPreviewView(ft.Column):
     # ==================================================
     def _save_current_zh(self, e):
         """
-
-        回傳：None
         """
         if not self._current_zh_file:
             self._show_snack("❌ 找不到 zh_tw.json")
@@ -425,8 +401,6 @@ class IconPreviewView(ft.Column):
 
     def _render_current_page(self):
         """
-
-        回傳：None
         """
         entries = self.mods.get(self.current_modid, [])
         total = len(entries)

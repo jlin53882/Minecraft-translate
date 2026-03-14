@@ -210,8 +210,6 @@ class TranslationView(ft.Column):
     # ------------------------------------------------------------------
     def _pick_directory_into(self, target: ft.TextField):
         """
-
-        回傳：None
         """
         self._picker_target_field = target
         self.file_picker.on_result = self._on_dir_picked
@@ -219,8 +217,6 @@ class TranslationView(ft.Column):
 
     def _on_dir_picked(self, e: ft.FilePickerResultEvent):
         """
-
-        回傳：None
         """
         if not e.path:
             return
@@ -251,8 +247,6 @@ class TranslationView(ft.Column):
     # ------------------------------------------------------------------
     def _set_status(self, text: str, color: str):
         """
-
-        回傳：None
         """
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
@@ -260,8 +254,6 @@ class TranslationView(ft.Column):
 
     def _append_log(self, line: str):
         """
-
-        回傳：None
         """
         self.log_view.controls.append(ft.Text(line, size=13, color=theme.GREY_100))
         if len(self.log_view.controls) > 400:
@@ -270,8 +262,6 @@ class TranslationView(ft.Column):
 
     def _clear_logs(self):
         """
-
-        回傳：None
         """
         self.log_view.controls.clear()
         self.page.update()
@@ -281,8 +271,6 @@ class TranslationView(ft.Column):
     # ------------------------------------------------------------------
     def _reset_ftb_inputs(self):
         """
-
-        回傳：None
         """
         self.ftb_in_dir.value = ""
         self.ftb_out_dir.value = ""
@@ -298,8 +286,6 @@ class TranslationView(ft.Column):
 
     def _reset_kjs_inputs(self):
         """
-
-        回傳：None
         """
         self.kjs_in_dir.value = ""
         self.kjs_out_dir.value = ""
@@ -314,8 +300,6 @@ class TranslationView(ft.Column):
 
     def _reset_md_inputs(self):
         """
-
-        回傳：None
         """
         self.md_in_dir.value = ""
         self.md_out_dir.value = ""
@@ -331,8 +315,6 @@ class TranslationView(ft.Column):
 
     def _show_snack(self, message: str, color: str = theme.RED_600):
         """
-
-        回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
