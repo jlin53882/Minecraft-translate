@@ -194,7 +194,7 @@ def add_to_cache(
             cache_store.mark_dirty(state.is_dirty, cache_type)
 
 def get_from_cache(cache_type: str, key: str) -> Optional[str]:
-    """Get the translated text (dst) from cache for a given key."""
+    """從快取取得指定 key 的翻譯文字 (dst)。"""
     state = _state()
     if not state.initialized:
         return None
@@ -204,7 +204,7 @@ def get_from_cache(cache_type: str, key: str) -> Optional[str]:
     return cache_store.get_value(cache, key)
 
 def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
-    """Get the full cache entry (dict with src, dst, mod, path) for a key."""
+    """取得指定 key 的完整快取項目（包含 src、dst、mod、path）。"""
     state = _state()
     if not state.initialized:
         return None
@@ -214,7 +214,7 @@ def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
     return cache_store.get_entry(cache, key)
 
 def get_cache_dict_ref(cache_type: str) -> Dict[str, Dict[str, Any]]:
-    """Get a direct reference to the cache dictionary for a type."""
+    """取得指定類型的快取字典參照。"""
     state = _state()
     if not state.initialized:
         return {}
@@ -256,7 +256,7 @@ def get_cache_overview() -> Dict[str, Any]:
         )
 
 def force_rotate_shard(cache_type: str) -> bool:
-    """Force rotation to the next shard for a cache type."""
+    """強制輪轉至下一個分片。"""
     initialize_translation_cache()
     state = _state()
     if cache_type not in CACHE_TYPES:
@@ -287,7 +287,7 @@ def get_search_engine():
     return _get_search_facade().get_search_engine()
 
 def rebuild_search_index():
-    """Rebuild the search index for all cache types."""
+    """重建所有快取類型的搜尋索引。"""
     state = _state()
     return _get_search_facade().rebuild_search_index(
         CACHE_TYPES, state.translation_cache

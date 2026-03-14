@@ -12,11 +12,11 @@ import re
 _FMT_RE = re.compile(r"(?:&|§)[0-9a-fk-or]", re.IGNORECASE)
 
 def _strip_fmt(s: str) -> str:
-    """Remove inline formatting tokens (e.g. &a / §l) from text."""
+    """移除行內格式標記（如 &a / §l）。"""
     return _FMT_RE.sub("", s)
 
 def is_already_zh(s: str) -> bool:
-    """Heuristic: after format-strip, if text has CJK and little/no English, treat as already zh."""
+    """啟發式判斷：去除格式標記後，若有中日韓文字且几乎無英文，則視為已翻譯。"""
     t = _strip_fmt(s).strip()
     if not t:
         return True

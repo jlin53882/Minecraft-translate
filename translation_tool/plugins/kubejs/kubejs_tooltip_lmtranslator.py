@@ -57,8 +57,8 @@ def collect_items_from_mapping(
     file_hint: str,
 ) -> List[Dict[str, Any]]:
     """
-    Convert {path_key: source_text} mapping to translate_batch_smart items.
-    Must ensure smart detects KubeJS profile => item["file"] contains "/kubejs/".
+    將 {路徑鍵: 原文} 的映射轉換為翻譯批次項目。
+    需確保智慧偵測能識別 KubeJS 配置（item["file"] 包含 "/kubejs/"）。
     """
     items: List[Dict[str, Any]] = []
     for k, v in mapping.items():
@@ -68,7 +68,7 @@ def collect_items_from_mapping(
             continue
         items.append(
             {
-                "file": file_hint,  # important for smart profile detection
+                "file": file_hint,  # 智慧偵測用於識別 KubeJS 配置
                 "path": k,
                 "source_text": v,
                 "text": v,
@@ -168,10 +168,7 @@ def translate_kubejs_pending_to_zh_tw(
     global_total_keys = 0
 
     def _count_one(src: Path) -> Tuple[Path, int]:
-        """
-
-    
-        """
+        """統計單一檔案的翻譯 key 數量。"""
         try:
             mapping = read_json_dict(src)
             return src, int(count_translatable_keys(mapping))
@@ -444,10 +441,7 @@ def translate_kubejs_pending_to_zh_tw(
                     write_json_dict(dstp, data)
 
         def _fmt_eta(sec: float) -> str:
-            """
-
-        
-            """
+            """格式化剩餘時間。"""
             if sec <= 0:
                 return ""
             m, s = divmod(int(sec), 60)

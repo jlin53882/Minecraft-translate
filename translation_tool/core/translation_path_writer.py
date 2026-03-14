@@ -17,9 +17,7 @@ def map_lang_output_path(src: Path) -> Path:
     return src
 
 def set_by_path(root: dict, path: str, value):
-    """
-
-    """
+    """依路徑設定值。"""
     current = root
     normalized_path = path.replace("][", "].[")
     parts = normalized_path.split(".")

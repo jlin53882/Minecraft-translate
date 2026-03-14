@@ -58,9 +58,7 @@ def resolve_icon_for_lang_key(lang_key: str, assets_root: Path) -> Path | None:
     return index.get(key_tail)
 
 def resolve_icon_with_reason(lang_key: str, assets_root):
-    """
-
-    """
+    """解析圖示並回傳原因。"""
     icon = resolve_icon_for_lang_key(lang_key, assets_root)
 
     if icon:

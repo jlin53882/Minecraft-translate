@@ -7,9 +7,7 @@
 from .icon_reason import IconRisk
 
 def classify_no_icon_reason(lang_key: str) -> tuple[str, IconRisk]:
-    """
-
-    """
+    """分類無圖示的原因。"""
     k = lang_key.lower()
 
     if "banner" in k or "pattern" in k:

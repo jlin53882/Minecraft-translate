@@ -329,80 +329,47 @@ class LazyConfigProxy:
     # 但實際讀檔時機延後到真正取值的那一刻，而不是 import 當下。
 
     def _current(self) -> dict:
-        """
-
-    
-        """
+        """取得目前設定。"""
         return load_config()
 
     def get(self, key, default=None):
-        """
-
-    
-        """
+        """取得指定鍵的值。"""
         return self._current().get(key, default)
 
     def __getitem__(self, key):
-        """
-
-    
-        """
+        """取得鍵對應的值。"""
         return self._current()[key]
 
     def __contains__(self, key):
-        """
-
-    
-        """
+        """檢查鍵是否存在。"""
         return key in self._current()
 
     def __iter__(self):
-        """
-
-    
-        """
+        """回傳迭代器。"""
         return iter(self._current())
 
     def __len__(self):
-        """
-
-    
-        """
+        """回傳鍵的數量。"""
         return len(self._current())
 
     def items(self):
-        """
-
-    
-        """
+        """回傳鍵值對。"""
         return self._current().items()
 
     def keys(self):
-        """
-
-    
-        """
+        """回傳所有鍵。"""
         return self._current().keys()
 
     def values(self):
-        """
-
-    
-        """
+        """回傳所有值。"""
         return self._current().values()
 
     def copy(self):
-        """
-
-    
-        """
+        """複製目前設定。"""
         return self._current().copy()
 
     def __repr__(self):
-        """
-
-    
-        """
+        """回傳字串表示。"""
         return repr(self._current())
 
 # 對外仍維持 `config` 這個名稱，讓既有呼叫點不用一次大改；

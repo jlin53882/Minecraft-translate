@@ -66,9 +66,7 @@ except Exception as e:
     log.error(f"載入 Wikipedia 函式庫時發生未知錯誤: {e}")
 
 def initialize_species_cache():
-    """
-
-    """
+    """初始化學名快取系統。"""
     global \
         _species_cache_data, \
         _CACHE_DIR, \
@@ -122,17 +120,13 @@ def initialize_species_cache():
         return False
 
 def is_potential_species_name(name: str) -> bool:
-    """
-
-    """
+    """判斷是否可能是物種名稱。"""
     if not isinstance(name, str):
         return False
     return bool(_SPECIES_NAME_REGEX.match(name))
 
 def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
-    """
-
-    """
+    """線上查詢維基百科並更新快取。"""
     if not _WIKIPEDIA_AVAILABLE or _species_cache_data is None:
         return None
 
@@ -173,9 +167,7 @@ def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
         return None
 
 def lookup_species_name(name: str) -> Optional[str]:
-    """
-
-    """
+    """查詢物種名稱。"""
     if not _initialized:
         if not initialize_species_cache():
             log.error("學名快取系統初始化失敗，查詢功能無法使用。")

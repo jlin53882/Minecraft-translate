@@ -34,9 +34,7 @@ def _process_single_mod(
     output_dir: str,
     must_translate_dir: str,
 ) -> Dict[str, Any]:
-    """
-
-    """
+    """處理單一模組的語言合併。"""
     CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 
     # def contains_cjk(s: str) -> bool:

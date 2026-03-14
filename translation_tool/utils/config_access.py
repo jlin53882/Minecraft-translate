@@ -1,4 +1,4 @@
-"""Compatibility-friendly config access helpers."""
+"""相容性友好的設定存取輔助模組。"""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from pathlib import Path
 from translation_tool.utils.config_manager import load_config, resolve_project_path
 
 def get_runtime_config() -> dict:
-    """Explicit runtime config accessor for non-legacy callers."""
+    """取得執行期設定。"""
     return load_config()
 
 def resolve_runtime_path(path_like: str | Path | None) -> Path:
-    """Explicit project-relative path resolver for runtime helpers."""
+    """解析執行期的相對路徑。"""
     return resolve_project_path(path_like)

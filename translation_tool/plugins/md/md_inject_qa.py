@@ -144,7 +144,7 @@ def is_token_line(line: str) -> bool:
     return False
 
 def is_text_line_old(line: str) -> bool:
-    """
+    """判斷是否為文字行（舊版）。
     判斷「原始 md」中的某一行是否視為可翻文字行：
       - 非空行
       - 非 token 行

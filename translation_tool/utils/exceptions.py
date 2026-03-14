@@ -114,17 +114,11 @@ def handle_translation_errors(log_func=None, auto_retry=True, max_retries=3):
     """
 
     def decorator(func):
-        """
-
-
-        """
+        """翻譯錯誤處理的裝飾器。"""
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            """
-
-
-            """
+            """執行翻譯並處理錯誤與重試。"""
             retry_count = 0
 
             while retry_count <= max_retries:

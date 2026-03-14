@@ -29,10 +29,7 @@ LANG_PRIORITY = {lang: i for i, lang in enumerate(LANG_WHITELIST)}
 LANG_KEY_SUFFIX = (".title", ".quest_desc")
 
 def is_lang_key_ref(val: str):
-    # 遇到 {ftbquests.xxx} 這種語言 reference 直接跳過
-    """
-
-    """
+    """判斷是否為 FTB 語系參考（{ftbquests.xxx} 格式）。"""
     return bool(re.match(r"^\{ftbquests\.", val))
 
 def is_lang_key_ref_like(val: str) -> bool:
@@ -75,9 +72,7 @@ def walk_snbt_file(path: str) -> Compound | None:
 # lang/*.snbt 抽取
 # =========================
 def extract_lang_file(filename: str, root: Compound) -> dict:
-    """
-
-    """
+    """從 SNBT 檔案抽取語系翻譯項目。"""
     out = {}
 
     for key, val in root.items():
@@ -109,9 +104,7 @@ def extract_lang_file(filename: str, root: Compound) -> dict:
 # quest 本體抽取（title）
 # =========================
 def extract_quest_file(filename: str, root: Compound) -> dict:
-    """
-
-    """
+    """從 Quest 檔案抽取任務翻譯項目。"""
     out = {}
 
     def _emit(obj: Compound, field: str, kind: str):

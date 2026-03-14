@@ -46,9 +46,7 @@ def _normalize_config_dir(path: str) -> str:
     return norm
 
 def _load_json_dict(path: str) -> dict:
-    """
-
-    """
+    """載入 JSON 檔案為字典。"""
     if not os.path.isfile(path):
         return {}
     with open(path, "rb") as f:
@@ -194,10 +192,7 @@ def patch_lang_snbt_file(
     changed_keys: List[str] = []
 
     def _list_to_py(v):
-        """
-
-    
-        """
+        """(待補)"""
         if isinstance(v, SnbtList):
             out = []
             for e in v:
@@ -332,10 +327,7 @@ def patch_quest_snbt_file(
     missing: list[str] = []
 
     def _coerce_to_list(new_val: Any) -> list[str] | None:
-        """
-
-    
-        """
+        """(待補)"""
         if isinstance(new_val, list):
             parts = [x for x in new_val if isinstance(x, str)]
             return parts
@@ -549,10 +541,7 @@ def inject_ftbquests_quests_from_zh_tw_json(
         skipped_default = len(by_file["_default"])
 
     def _build_filename_index(root_dir: str) -> dict[str, list[str]]:
-        """
-
-    
-        """
+        """(待補)"""
         idx = defaultdict(list)
         for r, _, files in os.walk(root_dir):
             for fn in files:

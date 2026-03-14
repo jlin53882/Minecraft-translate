@@ -38,15 +38,11 @@ def find_lang_json(root: Path):
     return list(root.rglob("assets/*/lang/*.json"))
 
 def is_lang_file(file_path: Path) -> bool:
-    """
-
-    """
+    """判斷是否為語言檔。"""
     return "lang" in file_path.parts
 
 def extract_translatables(json_data, file_path):
-    """
-
-    """
+    """抽取可翻譯項目。"""
     items = []
     is_lang = is_lang_file(Path(file_path))
 
