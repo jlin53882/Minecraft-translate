@@ -265,8 +265,6 @@ class QCView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """
-
-        回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
@@ -357,8 +355,6 @@ class QCView(ft.Column):
 
     def start_task(self, task_type: str):
         """
-
-        回傳：None
         """
         self.log_view.controls.clear()
         self.progress_bar.value = 0
@@ -420,8 +416,6 @@ class QCView(ft.Column):
 
     def task_worker(self, service_func, args_tuple):
         """
-
-        回傳：None
         """
         try:
             for update in service_func(*args_tuple):
@@ -442,8 +436,6 @@ class QCView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """
-
-        回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)

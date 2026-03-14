@@ -88,8 +88,6 @@ class RulesView(ft.Column):
 
     def on_page_jump_submit(self, e):
         """
-
-        回傳：None
         """
         raw = (e.control.value or "").strip()
         if not raw:
@@ -332,8 +330,6 @@ class RulesView(ft.Column):
     # --- 邏輯功能 ---
     def on_sort_change(self, e):
         """
-
-        回傳：None
         """
         mode = e.control.value
         if mode == "from_asc":
@@ -348,8 +344,6 @@ class RulesView(ft.Column):
 
     def on_search(self, e: ft.ControlEvent):
         """
-
-        回傳：None
         """
         keyword = e.control.value.strip().lower()
 
@@ -419,16 +413,12 @@ class RulesView(ft.Column):
 
     def _run_on_ui_thread(self, func, *args, **kwargs):
         """
-
-        回傳：None
         """
         if self.page and self.page.loop:
             self.page.loop.call_soon_threadsafe(func, *args, **kwargs)
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """
-
-        回傳：None
         """
         if not self.page:
             return
@@ -448,8 +438,6 @@ class RulesView(ft.Column):
 
     def _initial_load(self):
         """
-
-        回傳：None
         """
         try:
             rules_data = self._load_rules_core()
@@ -464,8 +452,6 @@ class RulesView(ft.Column):
 
     def _render_current_page(self):
         """
-
-        回傳：None
         """
         start = (self.current_page - 1) * self.page_size
         end = start + self.page_size
@@ -513,8 +499,6 @@ class RulesView(ft.Column):
 
     def on_text_change(self, e):
         """
-
-        回傳：None
         """
         rid = e.control.data["rid"]
         field = e.control.data["field"]
@@ -566,8 +550,6 @@ class RulesView(ft.Column):
 
     def _handle_reload_success(self, rules_data):
         """
-
-        回傳：None
         """
         self.all_rules_data = rules_data
         # ✅ 給每條 rule 補上穩定 rid
@@ -583,8 +565,6 @@ class RulesView(ft.Column):
 
     def _handle_reload_failure(self, err):
         """
-
-        回傳：None
         """
         self.loading_indicator.visible = False
         self.page.update()
@@ -592,8 +572,6 @@ class RulesView(ft.Column):
 
     def prev_page(self, e):
         """
-
-        回傳：None
         """
         if self.current_page > 1:
             self.current_page -= 1
@@ -603,8 +581,6 @@ class RulesView(ft.Column):
 
     def next_page(self, e):
         """
-
-        回傳：None
         """
         if self.current_page < self.total_pages:
             self.current_page += 1
@@ -641,8 +617,6 @@ class RulesView(ft.Column):
 
     def add_row_clicked(self, e):
         """
-
-        回傳：None
         """
         self.all_rules_data.append({"from": "", "to": "", "_rid": self._new_rid()})
         self.current_page = self.total_pages  # 假設在最後
@@ -656,8 +630,6 @@ class RulesView(ft.Column):
 
     def delete_row_clicked(self, e):
         """
-
-        回傳：None
         """
         rid_to_delete = e.control.data
         idx = self._find_index_by_rid(rid_to_delete)

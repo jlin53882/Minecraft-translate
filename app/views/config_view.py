@@ -508,8 +508,6 @@ class ConfigView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """
-
-        回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
@@ -518,8 +516,6 @@ class ConfigView(ft.Column):
 
     def add_model_row(self, model_name: str):
         """
-
-        回傳：None
         """
         cb = ft.Checkbox(
             label=model_name,
@@ -576,8 +572,6 @@ class ConfigView(ft.Column):
 
     def move_model_row(self, cb: ft.Checkbox, direction: int):
         """
-
-        回傳：None
         """
         controls = self.models_column.controls
         idx = next((i for i, r in enumerate(controls) if r._checkbox is cb), None)
@@ -591,8 +585,6 @@ class ConfigView(ft.Column):
 
     def remove_model_by_checkbox(self, cb: ft.Checkbox):
         """
-
-        回傳：None
         """
         row = next((r for r in self.models_column.controls if r._checkbox is cb), None)
         if row:
@@ -601,8 +593,6 @@ class ConfigView(ft.Column):
 
     def on_add_model_clicked(self, e):
         """
-
-        回傳：None
         """
         name = self.new_model_field.value.strip()
         if not name:
@@ -630,8 +620,6 @@ class ConfigView(ft.Column):
 
     def remove_key_row(self, row: ft.Row):
         """
-
-        回傳：None
         """
         if row in self.keys_column.controls:
             idx = self.keys_column.controls.index(row)
@@ -641,8 +629,6 @@ class ConfigView(ft.Column):
 
     def _refresh_model_order_labels(self):
         """
-
-        回傳：None
         """
         for idx, row in enumerate(self.models_column.controls):
             if hasattr(row, "_order_text"):

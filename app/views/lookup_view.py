@@ -111,8 +111,6 @@ class LookupView(ft.Column):
     # --- 單筆查詢邏輯 ---
     def single_lookup_clicked(self, e):
         """
-
-        回傳：None
         """
         search_term = self.single_input.value
         if not search_term:
@@ -154,8 +152,6 @@ class LookupView(ft.Column):
     # --- 批次查詢邏輯 ---
     def batch_lookup_clicked(self, e):
         """
-
-        回傳：None
         """
         json_text = self.batch_input.value
         if not json_text:
@@ -174,8 +170,6 @@ class LookupView(ft.Column):
 
     def batch_lookup_worker(self, json_text):
         """
-
-        回傳：None
         """
         try:
             for update in run_batch_lookup_service(json_text):

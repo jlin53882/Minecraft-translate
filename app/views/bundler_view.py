@@ -119,8 +119,6 @@ class BundlerView(ft.Column):
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         
         """
-
-        回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
@@ -167,8 +165,6 @@ class BundlerView(ft.Column):
     def set_controls_disabled(self, disabled: bool):
         
         """
-
-        回傳：None
         """
         for ctrl in [
             self.root_dir_textfield,
@@ -181,8 +177,6 @@ class BundlerView(ft.Column):
     def start_bundling_clicked(self, e):
         
         """
-
-        回傳：None
         """
         root_dir = self.root_dir_textfield.value
         output_zip = self.output_zip_textfield.value
@@ -207,8 +201,6 @@ class BundlerView(ft.Column):
     def bundling_worker(self, root_dir, output_zip):
         
         """
-
-        回傳：None
         """
         try:
             for update in run_bundling_service(root_dir, output_zip):

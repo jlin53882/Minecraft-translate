@@ -166,8 +166,6 @@ class MergeView(ft.Column):
     # --------------------------------------------------
     def pick_zips(self, e):
         """
-
-        回傳：None
         """
         self.file_picker.on_result = self._on_zip_picked
         self.file_picker.pick_files(
@@ -178,8 +176,6 @@ class MergeView(ft.Column):
 
     def _on_zip_picked(self, e: ft.FilePickerResultEvent):
         """
-
-        回傳：None
         """
         if not e.files:
             return
@@ -191,8 +187,6 @@ class MergeView(ft.Column):
 
     def _refresh_zip_list(self):
         """
-
-        回傳：None
         """
         self.zip_list_view.controls.clear()
         for path in self.selected_zips:
@@ -213,8 +207,6 @@ class MergeView(ft.Column):
 
     def _remove_zip(self, path: str):
         """
-
-        回傳：None
         """
         if path in self.selected_zips:
             self.selected_zips.remove(path)
@@ -226,16 +218,12 @@ class MergeView(ft.Column):
     # --------------------------------------------------
     def pick_output_dir(self):
         """
-
-        回傳：None
         """
         self.file_picker.on_result = self._on_output_picked
         self.file_picker.get_directory_path(dialog_title="選擇輸出資料夾")
 
     def _on_output_picked(self, e: ft.FilePickerResultEvent):
         """
-
-        回傳：None
         """
         if e.path:
             self.output_dir_field.value = e.path
@@ -246,8 +234,6 @@ class MergeView(ft.Column):
     # --------------------------------------------------
     def start_merge(self, e):
         """
-
-        回傳：None
         """
         if not self.selected_zips or not (self.output_dir_field.value or "").strip():
             self._show_snack_bar("請先選擇 ZIP 與輸出資料夾")
@@ -278,16 +264,12 @@ class MergeView(ft.Column):
     # --------------------------------------------------
     def _start_ui_poller(self):
         """
-
-        回傳：None
         """
         self._ui_stop.clear()
         self._last_log_count = 0
 
         def poll():
             """
-
-            回傳：None
             """
             while not self._ui_stop.is_set():
                 snap = self.session.snapshot()
@@ -328,16 +310,12 @@ class MergeView(ft.Column):
     # --------------------------------------------------
     def _set_status(self, text: str, color: str):
         """
-
-        回傳：None
         """
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """
-
-        回傳：None
         """
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
