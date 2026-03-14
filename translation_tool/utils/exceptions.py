@@ -27,18 +27,18 @@ class TranslationError(Exception):
     """翻譯相關錯誤的基底類別"""
 
     def __init__(self, message: str, context: dict = None):
-        """
+        """初始化翻譯錯誤。
 
-        回傳：None
+        參數：
+            message: 錯誤訊息
+            context: 額外上下文資料
         """
         self.message = message
         self.context = context or {}
         super().__init__(self.message)
 
     def __str__(self):
-        """
-
-    
+        """取得錯誤訊息字串。"""
         """
         if self.context:
             ctx = ", ".join(f"{k}={v}" for k, v in self.context.items())
@@ -114,14 +114,14 @@ def handle_translation_errors(log_func=None, auto_retry=True, max_retries=3):
     def decorator(func):
         """
 
-    
+
         """
 
         @wraps(func)
         def wrapper(*args, **kwargs):
             """
 
-        
+
             """
             retry_count = 0
 
