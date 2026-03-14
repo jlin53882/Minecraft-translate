@@ -29,9 +29,10 @@ class RulesView(ft.Column):
     """
 
     def __init__(self, page: ft.Page):
-        """
+        """初始化 RulesView。
 
-        回傳：None
+        參數：
+            page: Flet Page 物件
         """
         super().__init__(expand=True, spacing=15)
         self.page = page

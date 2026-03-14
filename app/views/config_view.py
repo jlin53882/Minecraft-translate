@@ -31,11 +31,12 @@ class ConfigView(ft.Column):
     }
 
     def __init__(self, page: ft.Page):
-        # 設定 Root Column 不滾動，為了做 Fixed Footer
-        """
+        """初始化 ConfigView。
 
-        回傳：None
+        參數：
+            page: Flet Page 物件
         """
+        # 設定 Root Column 不滾動，為了做 Fixed Footer
         super().__init__(expand=True, spacing=0)
         self.page = page
         self.controls_map = {}
