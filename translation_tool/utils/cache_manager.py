@@ -68,10 +68,7 @@ def _get_cache_root() -> Path:
     return resolve_project_path(cache_dir_name)
 
 def _load_cache_type(cache_type: str):
-    """
-
-    回傳：None
-    """
+    """載入指定類型的快取。"""
     state = _state()
     translation_config = load_config().get("translator", {})
     load_cache_type(
@@ -84,10 +81,7 @@ def _load_cache_type(cache_type: str):
     )
 
 def initialize_translation_cache():
-    """
-
-    回傳：None
-    """
+    """初始化翻譯快取系統。"""
     state = _state()
     if state.initialized:
         return
@@ -99,26 +93,18 @@ def initialize_translation_cache():
         log.error(f"快取系統初始化失敗: {e}", exc_info=True)
 
 def is_cache_initialized() -> bool:
-    """
-
-    """
+    """檢查快取是否已初始化。"""
     return bool(_state().initialized)
 
 def reload_translation_cache():
-    """
-
-    回傳：None
-    """
+    """重新載入翻譯快取。"""
     state = cache_store.reset_runtime_state(CACHE_TYPES)
     with state.cache_lock:
         pass
     initialize_translation_cache()
 
 def reload_translation_cache_type(cache_type: str):
-    """
-
-    回傳：None
-    """
+    """重新載入指定類型的翻譯快取。"""
     if cache_type not in CACHE_TYPES:
         return
     state = _state()
@@ -148,10 +134,7 @@ def _save_entries_to_active_shards(
     )
 
 def save_translation_cache(cache_type: str, write_new_shard: bool = True):
-    """
-
-    回傳：None
-    """
+    """儲存翻譯快取。"""
     if not load_config().get("translator", {}).get("enable_cache_saving", True):
         return
 
@@ -198,10 +181,7 @@ def add_to_cache(
     mod: str | None = None,
     path: str | None = None,
 ):
-    """
-
-    回傳：None
-    """
+    """新增翻譯到快取。"""
     if not key or not dst:
         return
 
