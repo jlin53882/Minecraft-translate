@@ -93,10 +93,7 @@ def _process_single_mod(
                 bad_lines = []
 
                 def on_error(line_no, raw, reason):
-                    """
-
-                    回傳：None
-                    """
+                    """記錄解析錯誤。"""
                     bad_lines.append((line_no, raw, reason))
 
                 data = parse_lang_text(text, on_error=on_error)
