@@ -110,8 +110,7 @@ class LookupView(ft.Column):
 
     # --- 單筆查詢邏輯 ---
     def single_lookup_clicked(self, e):
-        """
-        """
+        """單筆查詢點擊事件。"""
         search_term = self.single_input.value
         if not search_term:
             self.single_result_text.value = "錯誤：請輸入要查詢的學名。"
@@ -148,8 +147,7 @@ class LookupView(ft.Column):
 
     # --- 批次查詢邏輯 ---
     def batch_lookup_clicked(self, e):
-        """
-        """
+        """處理函數。"""
         json_text = self.batch_input.value
         if not json_text:
             self.batch_result_textfield.value = "錯誤：請貼上 JSON 內容"
@@ -166,8 +164,7 @@ class LookupView(ft.Column):
         thread.start()
 
     def batch_lookup_worker(self, json_text):
-        """
-        """
+        """處理函數。"""
         try:
             for update in run_batch_lookup_service(json_text):
                 if update.get("error"):

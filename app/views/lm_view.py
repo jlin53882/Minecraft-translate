@@ -170,34 +170,29 @@ class LMView(ft.Column):
     # Events
     # --------------------------------------------------
     def pick_input_directory(self, e):
-        """
-        """
+        """處理函數。"""
         self.file_picker.on_result = self.on_input_dir_picked
         self.file_picker.get_directory_path()
 
     def on_input_dir_picked(self, e):
-        """
-        """
+        """處理函數。"""
         if e.path:
             self.input_path.value = e.path
             self.page.update()
 
     def pick_output_directory(self, e):
-        """
-        """
+        """處理函數。"""
         self.file_picker.on_result = self.on_output_dir_picked
         self.file_picker.get_directory_path()
 
     def on_output_dir_picked(self, e):
-        """
-        """
+        """處理函數。"""
         if e.path:
             self.output_path.value = e.path
             self.page.update()
 
     def start_clicked(self, e):
-        """
-        """
+        """處理函數。"""
         if not (self.input_path.value or "").strip():
             self._set_status("請先選擇輸入資料夾", theme.RED_200)
             self.page.update()
@@ -247,8 +242,7 @@ class LMView(ft.Column):
     # UI Timer
     # --------------------------------------------------
     def start_ui_timer(self):
-        """
-        """
+        """處理函數。"""
         if self._ui_timer_running:
             return
         self._ui_timer_running = True
@@ -285,14 +279,12 @@ class LMView(ft.Column):
     # UI helpers
     # --------------------------------------------------
     def _set_status(self, text: str, color: str):
-        """
-        """
+        """處理函數。"""
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """
-        """
+        """處理函數。"""
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

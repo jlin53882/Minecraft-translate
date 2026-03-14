@@ -209,15 +209,13 @@ class TranslationView(ft.Column):
     # directory picker
     # ------------------------------------------------------------------
     def _pick_directory_into(self, target: ft.TextField):
-        """
-        """
+        """處理函數。"""
         self._picker_target_field = target
         self.file_picker.on_result = self._on_dir_picked
         self.file_picker.get_directory_path()
 
     def _on_dir_picked(self, e: ft.FilePickerResultEvent):
-        """
-        """
+        """處理函數。"""
         if not e.path:
             return
         if self._picker_target_field is not None:
@@ -246,23 +244,20 @@ class TranslationView(ft.Column):
     # UI helpers
     # ------------------------------------------------------------------
     def _set_status(self, text: str, color: str):
-        """
-        """
+        """處理函數。"""
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
         self.page.update()
 
     def _append_log(self, line: str):
-        """
-        """
+        """處理函數。"""
         self.log_view.controls.append(ft.Text(line, size=13, color=theme.GREY_100))
         if len(self.log_view.controls) > 400:
             self.log_view.controls = self.log_view.controls[-300:]
         self.page.update()
 
     def _clear_logs(self):
-        """
-        """
+        """處理函數。"""
         self.log_view.controls.clear()
         self.page.update()
 
@@ -270,8 +265,7 @@ class TranslationView(ft.Column):
     # reset actions
     # ------------------------------------------------------------------
     def _reset_ftb_inputs(self):
-        """
-        """
+        """處理函數。"""
         self.ftb_in_dir.value = ""
         self.ftb_out_dir.value = ""
         self.ftb_step_export.value = True
@@ -285,8 +279,7 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _reset_kjs_inputs(self):
-        """
-        """
+        """處理函數。"""
         self.kjs_in_dir.value = ""
         self.kjs_out_dir.value = ""
         self.kjs_step_extract.value = True
@@ -299,8 +292,7 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _reset_md_inputs(self):
-        """
-        """
+        """處理函數。"""
         self.md_in_dir.value = ""
         self.md_out_dir.value = ""
         self.md_step_extract.value = True
@@ -314,8 +306,7 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _show_snack(self, message: str, color: str = theme.RED_600):
-        """
-        """
+        """處理函數。"""
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

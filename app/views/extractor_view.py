@@ -165,15 +165,13 @@ class ExtractorView(ft.Column):
         return build_pick_button(self, target)
 
     def pick_directory(self, target):
-        """
-        """
+        """處理函數。"""
         self._show_snack_bar("請選擇此欄位的資料夾", color=theme.BLUE_600)
         self.file_picker.on_result = lambda e: self._on_dir_picked(e, target)
         self.file_picker.get_directory_path()
 
     def _on_dir_picked(self, e, target):
-        """
-        """
+        """處理函數。"""
         if e.path:
             target.value = e.path
             self.page.update()
@@ -181,8 +179,7 @@ class ExtractorView(ft.Column):
             self._show_snack_bar("未選擇資料夾", color=theme.BLUE_600)
 
     def set_controls_disabled(self, disabled: bool):
-        """
-        """
+        """處理函數。"""
         for ctrl in (
             self.mods_dir_textfield,
             self.output_dir_textfield,
@@ -194,8 +191,7 @@ class ExtractorView(ft.Column):
         self.page.update()
 
     def clear_output_path(self, e=None):
-        """
-        """
+        """處理函數。"""
         if not (self.output_dir_textfield.value or "").strip():
             return
         self.output_dir_textfield.value = ""
@@ -268,8 +264,7 @@ class ExtractorView(ft.Column):
         self.page.update()
 
     def _append_log_line(self, line: str):
-        """
-        """
+        """處理函數。"""
         color = "#e0e0e0"  # default logs are light grey
         if "[ERROR]" in line:
             color = "#ff6b6b"  # soft red
