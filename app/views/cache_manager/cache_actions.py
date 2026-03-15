@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
 import flet as ft
@@ -63,35 +65,48 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
 
     view._set_state(True, reason, f"trace: ACTION#{action_id} start {reason}")
 
-    try:
-        # 執行操作，傳入進度回調
-        # 注意：service 函數目前不支持 on_progress，會被忽略
+    # 使用线程池执行，避免阻塞 UI
+    def execute_work():
         try:
-            # 嘗試帶參數調用
-            data = work_fn(on_progress=progress_callback)
-        except TypeError:
+            # 執行操作，傳入進度回調
+            # 注意：service 函數目前不支持 on_progress，會被忽略
             try:
-                # 如果不支持關鍵字參數，嘗試 positional 調用
-                data = work_fn(progress_callback)
-            except (TypeError, Exception):
-                # 都不支持，使用舊方式（無參數）
-                data = work_fn()
+                data = work_fn(on_progress=progress_callback)
+            except TypeError:
+                try:
+                    data = work_fn(progress_callback)
+                except (TypeError, Exception):
+                    data = work_fn()
+            return data, None
+        except Exception as ex:
+            return None, ex
 
+    # 在線程池中執行
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(execute_work)
+
+    # 等待結果
+    data, error = future.result()
+    executor.shutdown(wait=True)
+
+    # 處理結果
+    if error:
+        view._append_log(f"[ACTION#{action_id}] error {reason}: {error}")
+        view._append_log(traceback.format_exc())
+        view._notify(f"{reason} 失敗: {error}", "error")
+    else:
         view._refresh_overview_ui(data)
         view._refresh_query_type_options()
         view._render_query_type_shard_page()
         view._append_log(f"[ACTION#{action_id}] success {reason}")
         view._notify(success_msg, "info")
-    except Exception as ex:
-        view._append_log(f"[ACTION#{action_id}] error {reason}: {ex}")
-        view._append_log(traceback.format_exc())
-        view._notify(f"{reason} 失敗: {ex}", "error")
-    finally:
-        view._append_log(f"[ACTION#{action_id}] finish READY")
-        view._set_state(False, "READY", f"trace: ACTION#{action_id} ready")
-        view._append_log(f"[STATE] {view.overview_status.value}")
 
-        # 關閉 Banner
-        if banner and hasattr(view, 'page'):
-            view.page.banner.open = False
-            view.page.update()
+    # 清理
+    view._append_log(f"[ACTION#{action_id}] finish READY")
+    view._set_state(False, "READY", f"trace: ACTION#{action_id} ready")
+    view._append_log(f"[STATE] {view.overview_status.value}")
+
+    # 關閉 Banner
+    if banner and hasattr(view, 'page') and view.page:
+        view.page.banner.open = False
+        view.page.update()
