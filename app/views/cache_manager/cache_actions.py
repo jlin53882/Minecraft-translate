@@ -34,25 +34,15 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
     action_id = int(time.time() * 1000) % 1000000
     view._append_log(f"[ACTION#{action_id}] start {reason}")
 
-    # 顯示 ProgressCard（使用 Banner 方式）
+    # 顯示 ProgressCard（使用 SnackBar 提示）
     if show_progress and hasattr(view, 'page'):
-        progress_card = ProgressCard(
-            title=f"操作進行中: {reason}",
-            current=0,
-            total=100,
+        # 目前 ProgressCard 有渲染問題，先用 SnackBar 提示
+        snack = ft.SnackBar(
+            content=ft.Text(f"{reason} 開始處理..."),
+            duration=2,
         )
-        progress_card.start()
-
-        # 使用 Banner 顯示進度（需要至少一個 action）
-        progress_dialog = ft.Banner(
-            leading=ft.Icon(ft.Icons.HOURGLASS_TOP, color=ft.Colors.BLUE),
-            content=progress_card,
-            actions=[
-                ft.TextButton(text="處理中...", disabled=True),
-            ],
-        )
-        view.page.add(progress_dialog)
-        progress_dialog.open = True
+        view.page.overlay.append(snack)
+        snack.open = True
         view.page.update()
 
     view._set_state(True, reason, f"trace: ACTION#{action_id} start {reason}")
@@ -73,9 +63,3 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
         view._append_log(f"[ACTION#{action_id}] finish READY")
         view._set_state(False, "READY", f"trace: ACTION#{action_id} ready")
         view._append_log(f"[STATE] {view.overview_status.value}")
-
-        # 移除 ProgressCard Banner
-        if progress_dialog and hasattr(view, 'page'):
-            progress_dialog.open = False
-            view.page.remove(progress_dialog)
-            view.page.update()
