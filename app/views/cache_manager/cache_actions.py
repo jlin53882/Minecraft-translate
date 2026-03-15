@@ -9,6 +9,9 @@ import time
 import traceback
 from typing import Callable
 
+import flet as ft
+from app.ui.components import ProgressCard
+
 
 def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, show_progress: bool = False):
     """執行快取操作並更新 UI
@@ -25,18 +28,30 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
         return
 
     # ProgressCard 實例（如果需要顯示進度）
-    # 注意：目前 overlay 方式有問題，先註冊但不使用
     progress_card = None
-    progress_container = None
+    progress_dialog = None
 
     action_id = int(time.time() * 1000) % 1000000
     view._append_log(f"[ACTION#{action_id}] start {reason}")
 
-    # 顯示 ProgressCard（如果啟用）- 目前暫時禁用，改用狀態文字顯示
+    # 顯示 ProgressCard（使用 Dialog 方式）
     if show_progress and hasattr(view, 'page'):
-        # TODO: 未來可以改用 Dialog 或其他方式顯示進度
-        # 目前先透過 _set_state 顯示狀態
-        view._append_log(f"[PROGRESS] {reason} 開始處理...")
+        progress_card = ProgressCard(
+            title=f"操作進行中: {reason}",
+            current=0,
+            total=100,
+        )
+        progress_card.start()
+
+        # 使用 Banner 顯示進度（比 Dialog 更輕量）
+        progress_dialog = ft.Banner(
+            leading=ft.Icon(ft.Icons.HOURGLASS_TOP, color=ft.Colors.BLUE),
+            content=progress_card,
+            actions=[],
+        )
+        view.page.add(progress_dialog)
+        progress_dialog.open = True
+        view.page.update()
 
     view._set_state(True, reason, f"trace: ACTION#{action_id} start {reason}")
 
@@ -56,3 +71,9 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
         view._append_log(f"[ACTION#{action_id}] finish READY")
         view._set_state(False, "READY", f"trace: ACTION#{action_id} ready")
         view._append_log(f"[STATE] {view.overview_status.value}")
+
+        # 移除 ProgressCard Banner
+        if progress_dialog and hasattr(view, 'page'):
+            progress_dialog.open = False
+            view.page.remove(progress_dialog)
+            view.page.update()
