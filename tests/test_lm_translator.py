@@ -91,12 +91,12 @@ class TestFormatDuration:
         from translation_tool.core.lm_translator import format_duration_seconds
         
         result = format_duration_seconds(75)
-        assert "1" in result
-        assert "15" in result
+        assert "1 分" in result
+        assert "15 秒" in result
 
     def test_format_duration_seconds_hours(self):
         """測試小時格式化"""
         from translation_tool.core.lm_translator import format_duration_seconds
         
         result = format_duration_seconds(3661)
-        assert "1" in result
+        assert "1 小時" in result

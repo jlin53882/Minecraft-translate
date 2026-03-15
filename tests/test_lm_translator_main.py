@@ -45,7 +45,8 @@ class TestTranslateBatchSmart:
         result, status = translate_batch_smart(items, 1)
 
         assert status in ["AUTO", "PARTIAL", "FAILED"]
-        # 注意：由於重試機制，sleep 可能被調用
+        # 成功時 API 應該被調用一次
+        mock_call_api.assert_called_once()
 
     @patch('translation_tool.core.lm_translator_main.safe_json_loads')
     @patch('translation_tool.core.lm_translator_main.load_config')
