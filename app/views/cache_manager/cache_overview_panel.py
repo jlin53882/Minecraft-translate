@@ -10,7 +10,6 @@ import flet as ft
 
 from app.ui.components import styled_card
 from .cache_log_panel import build_log_panel
-from .cache_shared_widgets import bordered_block
 
 def build_overview_page(
     *,
@@ -64,11 +63,17 @@ def build_overview_page(
         ),
     )
 
-    left_panel = bordered_block(
+    # 分類狀態列表 - 使用 styled_card 支援收合
+    left_panel = styled_card(
+        title="分類狀態清單",
+        icon=ft.Icons.LIST,
+        icon_color=ft.Colors.BLUE_GREY_700,
+        collapsible=True,
+        default_collapsed=False,
         expand=True,
+        page=page,
         content=ft.Column(
             [
-                ft.Text("分類狀態清單", weight=ft.FontWeight.BOLD),
                 ft.Text("卡片可捲動瀏覽，避免分類過多被截斷", size=11, color=ft.Colors.GREY_700),
                 type_list,
             ],
@@ -94,7 +99,16 @@ def build_overview_page(
         expand=True,
         spacing=10,
         controls=[
-            bordered_block(content=overview_text),
+            # 總覽狀態 - 使用 styled_card
+            styled_card(
+                title="總覽",
+                icon=ft.Icons.SUMMARY,
+                icon_color=ft.Colors.BLUE_GREY_700,
+                collapsible=True,
+                default_collapsed=False,
+                page=page,
+                content=overview_text,
+            ),
             ft.ResponsiveRow(
                 expand=True,
                 controls=[
