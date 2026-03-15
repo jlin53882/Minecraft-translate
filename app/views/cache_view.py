@@ -3128,6 +3128,7 @@ class CacheView(ft.Column):
     def _on_page_first(self, e):
         """跳到查詢結果第一頁"""
         self.query_page = 1
+        self._query_state.query_page = 1
         self._render_query_results()
         self.update()
         self.page.update()
@@ -3135,6 +3136,7 @@ class CacheView(ft.Column):
     def _on_page_prev(self, e):
         """上一頁查詢結果"""
         self.query_page -= 1
+        self._query_state.query_page = self.query_page
         self._render_query_results()
         self.update()
         self.page.update()
@@ -3142,6 +3144,7 @@ class CacheView(ft.Column):
     def _on_page_next(self, e):
         """下一頁查詢結果"""
         self.query_page += 1
+        self._query_state.query_page = self.query_page
         self._render_query_results()
         self.update()
         self.page.update()
@@ -3149,6 +3152,7 @@ class CacheView(ft.Column):
     def _on_page_last(self, e):
         """跳到查詢結果最後一頁"""
         self.query_page = self.query_total_pages
+        self._query_state.query_page = self.query_page
         self._render_query_results()
         self.update()
         self.page.update()
