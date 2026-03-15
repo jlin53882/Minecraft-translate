@@ -24,7 +24,7 @@ import flet as ft
 from app.ui import theme
 
 # UI 共用元件：統一按鈕樣式（先套用在總覽區，避免一次改動過大）
-from app.ui.components import primary_button, secondary_button
+from app.ui.components import primary_button, secondary_button, empty_state
 
 from app.views.cache_manager.cache_actions import run_cache_action
 from app.views.cache_manager.cache_history_store import (
@@ -1644,7 +1644,11 @@ class CacheView(ft.Column):
 
         if not self.type_list.controls:
             self.type_list.controls.append(
-                ft.Text("目前沒有可顯示的分類資料", color=theme.GREY_600)
+                empty_state(
+                    icon=ft.Icons.INVENTORY_2_OUTLINED,
+                    title="沒有分類資料",
+                    message="請先建立快取或重新載入",
+                )
             )
 
         self.page.update()
