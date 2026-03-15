@@ -34,7 +34,7 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
     action_id = int(time.time() * 1000) % 1000000
     view._append_log(f"[ACTION#{action_id}] start {reason}")
 
-    # 顯示 ProgressCard（使用 Dialog 方式）
+    # 顯示 ProgressCard（使用 Banner 方式）
     if show_progress and hasattr(view, 'page'):
         progress_card = ProgressCard(
             title=f"操作進行中: {reason}",
@@ -43,11 +43,13 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
         )
         progress_card.start()
 
-        # 使用 Banner 顯示進度（比 Dialog 更輕量）
+        # 使用 Banner 顯示進度（需要至少一個 action）
         progress_dialog = ft.Banner(
             leading=ft.Icon(ft.Icons.HOURGLASS_TOP, color=ft.Colors.BLUE),
             content=progress_card,
-            actions=[],
+            actions=[
+                ft.TextButton(text="處理中...", disabled=True),
+            ],
         )
         view.page.add(progress_dialog)
         progress_dialog.open = True
