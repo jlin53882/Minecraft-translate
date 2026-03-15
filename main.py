@@ -14,6 +14,7 @@ import logging
 import flet as ft
 
 from app.startup_tasks import start_background_startup_tasks
+from app.ui.view_wrapper import wrap_view  # guard: main 仍顯式依賴 shared wrapper
 from app.ui.keyboard_shortcuts import create_keyboard_handler
 from app.ui.quick_jump import show_quick_jump_panel
 from app.view_registry import build_navigation_destinations, build_view_registry, get_window_size
