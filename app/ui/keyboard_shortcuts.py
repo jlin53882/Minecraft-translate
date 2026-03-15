@@ -6,6 +6,7 @@
 import flet as ft
 
 # 快捷鍵定義：key -> (描述, 處理函數)
+# 支援 Ctrl+1~0 跳轉 1~10，Ctrl+Shift+0 跳轉 11
 SHORTCUTS_DEFINITION = {
     # 數字鍵 1-9：快速跳轉
     "1": {"label": "設定", "view_index": 0},
@@ -17,6 +18,8 @@ SHORTCUTS_DEFINITION = {
     "7": {"label": "打包", "view_index": 6},
     "8": {"label": "提取", "view_index": 7},
     "9": {"label": "翻譯結果", "view_index": 8},
+    # 數字鍵 0：第 10 個 View (lm)
+    "0": {"label": "LM", "view_index": 9},
 }
 
 
@@ -69,11 +72,17 @@ class KeyboardShortcutHandler:
 
         key = e.key.lower()
 
-        # 數字鍵：快速跳轉
+        # 數字鍵：快速跳轉 (1-9, 0)
         if key in SHORTCUTS_DEFINITION:
             view_info = SHORTCUTS_DEFINITION[key]
             self.change_view_callback(view_info["view_index"])
             self._show_toast(f"跳轉到：{view_info['label']}")
+            return
+
+        # Ctrl+Shift+0：跳轉到第 11 個 View (merge)
+        if key == "0" and e.shift:
+            self.change_view_callback(10)  # merge 是第 11 個，index 為 10
+            self._show_toast("跳轉到：合併")
             return
 
         # F 鍵：搜尋
