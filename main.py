@@ -84,10 +84,10 @@ def main(page: ft.Page):
     def change_view_by_index(index: int):
         """透過索引直接切換視圖"""
         if 0 <= index < len(registry):
-            rail.selected_index = index
             item = registry[index]
             content_area.content = item['view']
             resize_window_for_view(item['key'])
+            rail.selected_index = index
             page.update()
 
     # 註冊鍵盤事件處理
