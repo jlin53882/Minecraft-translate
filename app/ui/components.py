@@ -62,6 +62,7 @@ def styled_card(
     collapsible: bool = False,
     default_collapsed: bool = False,
     quick_actions: list = None,
+    page: ft.Page = None,  # 新增：用於收合後刷新 UI
 ) -> ft.Container:
     """統一的「區塊卡片」外觀（支援收合）。
 
@@ -76,6 +77,7 @@ def styled_card(
         collapsible: 是否支援收合
         default_collapsed: 預設是否收合
         quick_actions: 快速操作按鈕列表
+        page: Flet Page 物件（收合時需要）
 
     Returns:
         ft.Container
@@ -112,6 +114,7 @@ def styled_card(
                     'icon',
                     ft.Icons.EXPAND_MORE if is_collapsed[0] else ft.Icons.EXPAND_LESS
                 ),
+                page.update() if page else None,  # 刷新 UI
             ),
         )
 
