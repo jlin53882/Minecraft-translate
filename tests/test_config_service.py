@@ -27,13 +27,20 @@ class TestConfigServicePaths:
 
     def test_config_path_format(self):
         """測試 CONFIG_PATH 是正確的格式"""
+        # 測試檔名
         assert config_service.CONFIG_PATH.endswith("config.json")
-        assert "minecraft_translator_flet" in config_service.CONFIG_PATH
+        # 測試是絕對路徑（跨環境都成立）
+        assert os.path.isabs(config_service.CONFIG_PATH)
+        # 測試路徑相對於專案根目錄
+        project_root = config_service.PROJECT_ROOT
+        assert Path(config_service.CONFIG_PATH).is_relative_to(project_root)
 
     def test_replace_rules_path_format(self):
         """測試 REPLACE_RULES_PATH 是正確的格式"""
         assert config_service.REPLACE_RULES_PATH.endswith("replace_rules.json")
-        assert "minecraft_translator_flet" in config_service.REPLACE_RULES_PATH
+        assert os.path.isabs(config_service.REPLACE_RULES_PATH)
+        project_root = config_service.PROJECT_ROOT
+        assert Path(config_service.REPLACE_RULES_PATH).is_relative_to(project_root)
 
 
 class TestConfigServiceLoadSave:
