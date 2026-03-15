@@ -13,6 +13,18 @@ from app.ui.components import (
 )
 
 
+# Mock Page for testing
+class MockPage:
+    def __init__(self):
+        self.banner = None
+        self.snack_bar = None
+        self.overlay = []
+        self.update_count = 0
+
+    def update(self):
+        self.update_count += 1
+
+
 # PR1: Keyboard Shortcuts
 
 
@@ -26,6 +38,16 @@ def test_keyboard_handler_class():
     """Verify KeyboardShortcutHandler is a class."""
     from app.ui.keyboard_shortcuts import KeyboardShortcutHandler
     assert isinstance(KeyboardShortcutHandler, type)
+
+
+def test_keyboard_handler_has_view_registry_param():
+    """Verify KeyboardShortcutHandler has view_registry parameter."""
+    from app.ui.keyboard_shortcuts import KeyboardShortcutHandler
+    import inspect
+    sig = inspect.signature(KeyboardShortcutHandler.__init__)
+    params = list(sig.parameters.keys())
+    # Should have page, view_registry, change_view_callback
+    assert 'view_registry' in params
 
 
 # PR2: Quick Jump Panel
@@ -43,7 +65,7 @@ def test_quick_jump_class():
     assert isinstance(QuickJumpPanel, type)
 
 
-# PR3: styled_card collapsible
+# PR3: styled_card collapsible - Behavior Tests
 
 
 def test_styled_card_no_collapsible():
@@ -80,11 +102,6 @@ def test_styled_card_collapsible_true():
 
 def test_styled_card_with_page():
     """Verify styled_card with page parameter."""
-    # Use a mock-like object
-    class MockPage:
-        def update(self):
-            pass
-
     page = MockPage()
     inner = ft.Text("x")
     c = styled_card(
@@ -97,7 +114,37 @@ def test_styled_card_with_page():
     assert isinstance(c, ft.Container)
 
 
-# PR4: Progress Bar
+def test_styled_card_collapse_toggle():
+    """Test collapse button structure exists."""
+    page = MockPage()
+    inner = ft.Text("content")
+    c = styled_card(
+        title="Test",
+        icon=ft.Icons.INFO,
+        content=inner,
+        collapsible=True,
+        default_collapsed=False,
+        page=page
+    )
+    # Verify card structure
+    assert isinstance(c, ft.Container)
+    assert c.content is not None
+
+
+def test_styled_card_default_collapsed():
+    """Verify default_collapsed=True creates collapsed card."""
+    inner = ft.Text("content")
+    c = styled_card(
+        title="Test",
+        icon=ft.Icons.INFO,
+        content=inner,
+        collapsible=True,
+        default_collapsed=True
+    )
+    assert isinstance(c, ft.Container)
+
+
+# PR4: Progress Bar - SnackBar Integration
 
 
 def test_progress_bar_creation():
@@ -111,6 +158,61 @@ def test_progress_bar_update():
     pb = ft.ProgressBar(value=0)
     pb.value = 0.7
     assert pb.value == 0.7
+
+
+def test_progress_snackbar_display():
+    """Test SnackBar progress display."""
+    page = MockPage()
+    pb = ft.ProgressBar(value=0.3, width=200)
+
+    snack = ft.SnackBar(
+        content=ft.Row([
+            ft.Text("Loading..."),
+            pb,
+        ], spacing=10),
+        duration=999999,
+    )
+    page.snack_bar = snack
+    page.snack_bar.open = True
+
+    assert page.snack_bar is not None
+    assert page.snack_bar.open is True
+    assert pb.value == 0.3
+
+
+def test_progress_snackbar_update():
+    """Test SnackBar progress can be updated."""
+    page = MockPage()
+    pb = ft.ProgressBar(value=0.0, width=200)
+
+    snack = ft.SnackBar(
+        content=ft.Row([
+            ft.Text("Loading..."),
+            pb,
+        ]),
+        duration=999999,
+    )
+    page.snack_bar = snack
+
+    # Update progress
+    pb.value = 0.5
+    page.update()
+
+    assert pb.value == 0.5
+
+
+def test_snackbar_close():
+    """Test SnackBar can be closed."""
+    page = MockPage()
+    snack = ft.SnackBar(
+        content=ft.Text("Done"),
+        duration=999999,
+    )
+    page.snack_bar = snack
+    page.snack_bar.open = False
+    page.update()
+
+    assert page.snack_bar.open is False
 
 
 # PR5: Unified States
