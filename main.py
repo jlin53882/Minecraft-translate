@@ -1,4 +1,4 @@
-﻿"""main.py（Flet App 入口）
+"""main.py（Flet App 入口）
 
 責任：
 - 組裝各個 View（設定/規則/快取/翻譯/...）並處理切頁。
