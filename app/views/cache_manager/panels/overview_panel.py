@@ -1,4 +1,4 @@
-"""快取總覽面板。
+﻿"""快取總覽面板。
 
 顯示快取統計資訊、重載、儲存等功能。
 """
@@ -25,7 +25,7 @@ class CacheOverviewPanel(ft.Container):
                         ft.Text("0", size=24, weight=ft.FontWeight.BOLD),
                     ]),
                     padding=10,
-                    bgcolor=ft.Colors.SURFACE_VARIANT,
+                    bgcolor=ft.Colors.SURFACE,
                     border_radius=8,
                 ),
                 ft.Container(
@@ -34,7 +34,7 @@ class CacheOverviewPanel(ft.Container):
                         ft.Text("0", size=24, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE),
                     ]),
                     padding=10,
-                    bgcolor=ft.Colors.SURFACE_VARIANT,
+                    bgcolor=ft.Colors.SURFACE,
                     border_radius=8,
                 ),
             ],

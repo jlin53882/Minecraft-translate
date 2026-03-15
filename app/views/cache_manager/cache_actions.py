@@ -30,26 +30,22 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
 
     # 進度條組件
     progress_bar = None
-    status_text = None
-    banner = None
+    snack_bar = None
     action_id = int(time.time() * 1000) % 1000000
     view._append_log(f"[ACTION#{action_id}] start {reason}")
 
-    # 顯示進度條（使用 Banner，不會自動消失）
+    # 顯示 SnackBar 進度條
     if show_progress and hasattr(view, 'page'):
         progress_bar = ft.ProgressBar(value=0, width=300)
-        status_text = ft.Text(f"{reason} 處理中...", size=14)
-        banner = ft.Banner(
-            content=ft.Column([
-                status_text,
+        snack_bar = ft.SnackBar(
+            content=ft.Row([
+                ft.Text(f"{reason} 處理中..."),
                 progress_bar,
-            ], spacing=5),
-            actions=[
-                ft.TextButton(text="處理中...", disabled=True),
-            ],
+            ], spacing=10),
+            duration=999999,  # 長時間顯示
         )
-        view.page.banner = banner
-        view.page.banner.open = True
+        view.page.snack_bar = snack_bar
+        snack_bar.open = True
         view.page.update()
 
         # 進度回調函式
@@ -57,8 +53,6 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
             if not hasattr(view, 'page') or view.page is None:
                 return
             progress_bar.value = current / total if total > 0 else 0
-            if msg:
-                status_text.value = msg
             view.page.update()
     else:
         progress_callback = None
@@ -106,7 +100,7 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
     view._set_state(False, "READY", f"trace: ACTION#{action_id} ready")
     view._append_log(f"[STATE] {view.overview_status.value}")
 
-    # 關閉 Banner
-    if banner and hasattr(view, 'page') and view.page:
-        view.page.banner.open = False
+    # 關閉 SnackBar
+    if snack_bar and hasattr(view, 'page') and view.page:
+        snack_bar.open = False
         view.page.update()

@@ -264,7 +264,7 @@ class ExtractorView(ft.Column):
             ],
         )
 
-        self.page.dialog = dialog
+        self.page.overlay.append(dialog)
         dialog.open = True
         self.page.update()
 
