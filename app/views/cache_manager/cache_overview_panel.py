@@ -102,7 +102,7 @@ def build_overview_page(
             # 總覽狀態 - 使用 styled_card
             styled_card(
                 title="總覽",
-                icon=ft.Icons.SUMMARY,
+                icon=ft.Icons.DASHBOARD,
                 icon_color=ft.Colors.BLUE_GREY_700,
                 collapsible=True,
                 default_collapsed=False,
