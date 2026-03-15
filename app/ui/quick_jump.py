@@ -1,4 +1,4 @@
-"""快速跳轉面板模組。
+﻿"""快速跳轉面板模組。
 
 提供快速跳轉功能，讓使用者可以快速搜尋並跳轉到目標頁面。
 """
@@ -79,7 +79,7 @@ class QuickJumpPanel(ft.Container):
         hint = ft.Text(
             "按 Enter 跳轉 / Esc 關閉",
             size=12,
-            color=ft.Colors.ON_SURFACE_VARIANT,
+            color=ft.Colors.GREY,
         )
 
         return ft.Column(
