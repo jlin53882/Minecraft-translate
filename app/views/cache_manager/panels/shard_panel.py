@@ -26,7 +26,7 @@ class CacheShardPanel(ft.Container):
         actions = ft.Column([
             ft.Row([
                 ft.ElevatedButton("新增分片", icon=ft.Icons.ADD),
-                ft.ElevatedButton("補滿舊檔", icon=ft.Icons.FILL_OUTLINED),
+                ft.ElevatedButton("補滿舊檔", icon=ft.Icons.FILL_IN),
                 ft.ElevatedButton("輪替分片", icon=ft.Icons.SWAP_HORIZ),
             ], spacing=10),
         ], spacing=10)
