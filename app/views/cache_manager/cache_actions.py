@@ -29,22 +29,27 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
 
     # ProgressCard 實例（如果需要顯示進度）
     progress_card = None
+    progress_container = None
 
     action_id = int(time.time() * 1000) % 1000000
     view._append_log(f"[ACTION#{action_id}] start {reason}")
 
     # 顯示 ProgressCard（如果啟用）
-    if show_progress:
+    if show_progress and hasattr(view, 'page'):
         progress_card = ProgressCard(
             title=f"操作進行中: {reason}",
             current=0,
             total=100,
         )
         progress_card.start()
-        # 將 ProgressCard 添加到 overview_text 區域附近
-        if hasattr(view, 'overview_status') and hasattr(view.overview_status, 'parent'):
-            # 找到合適的位置添加
-            pass
+
+        # 將 ProgressCard 添加到頁面 overlay
+        progress_container = ft.Container(
+            content=progress_card,
+            alignment=ft.alignment.center,
+        )
+        view.page.overlay.append(progress_container)
+        view.page.update()
 
     view._set_state(True, reason, f"trace: ACTION#{action_id} start {reason}")
 
@@ -55,6 +60,7 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
         if progress_card:
             progress_card.current = progress_card.total
             progress_card.set_status("完成")
+            view.page.update()
 
         view._refresh_overview_ui(data)
         view._refresh_query_type_options()
@@ -69,3 +75,9 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
         view._append_log(f"[ACTION#{action_id}] finish READY")
         view._set_state(False, "READY", f"trace: ACTION#{action_id} ready")
         view._append_log(f"[STATE] {view.overview_status.value}")
+
+        # 移除 ProgressCard overlay
+        if progress_container and hasattr(view, 'page'):
+            if progress_container in view.page.overlay:
+                view.page.overlay.remove(progress_container)
+            view.page.update()
