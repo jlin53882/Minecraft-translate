@@ -89,7 +89,7 @@ def styled_card(
     content_container = ft.Container(
         expand=expand,
         content=content,
-        visible=not default_collapsed,
+        visible=not default_collapsed,  # 修正：default_collapsed=False 時 visible=True
     )
 
     # 建立卡片內容 - 始終使用 content_container 以確保收合功能正常
@@ -110,8 +110,8 @@ def styled_card(
         def on_collapse_click(e):
             """處理收合按鈕點擊"""
             is_collapsed[0] = not is_collapsed[0]
-            # 切換內容可見性
-            content_container.visible = is_collapsed[0]
+            # 切換內容可見性：收合時隱藏，展開時顯示
+            content_container.visible = not is_collapsed[0]
             # 切換按鈕圖標
             collapse_btn.icon = ft.Icons.EXPAND_MORE if is_collapsed[0] else ft.Icons.EXPAND_LESS
             # 刷新頁面
