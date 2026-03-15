@@ -25,6 +25,7 @@ def build_overview_page(
     btn_log_copy: ft.Control,
     btn_log_clear: ft.Control,
     log_list: ft.Control,
+    page: ft.Page = None,  # 用於 styled_card 收合功能
 ) -> ft.Control:
     """Cache 總覽頁（非查詢區）組裝。
 
@@ -40,6 +41,7 @@ def build_overview_page(
         icon_color=ft.Colors.BLUE_GREY_700,
         collapsible=True,
         default_collapsed=False,
+        page=page,
         content=ft.Column(
             [
                 overview_status,

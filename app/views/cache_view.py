@@ -1467,6 +1467,7 @@ class CacheView(ft.Column):
             btn_log_copy=self.btn_log_copy,
             btn_log_clear=self.btn_log_clear,
             log_list=self.log_list,
+            page=self.page,  # 用於 styled_card 收合功能
         )
 
     def _build_query_entry_page(self):
