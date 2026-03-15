@@ -4,6 +4,7 @@
 """
 
 import flet as ft
+from app.ui import theme
 
 
 class QuickJumpPanel(ft.Container):
@@ -79,7 +80,7 @@ class QuickJumpPanel(ft.Container):
         hint = ft.Text(
             "按 Enter 跳轉 / Esc 關閉",
             size=12,
-            color=ft.Colors.GREY,
+            color=theme.TEXT_SECONDARY,
         )
 
         return ft.Column(
