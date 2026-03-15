@@ -1,21 +1,61 @@
+"""快取操作包裝模組。
+
+提供統一的操作執行框架，處理忙碌狀態、異常和 UI 更新。
+"""
+
 from __future__ import annotations
 
 import time
 import traceback
 from typing import Callable
 
-def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str):
-    """執行快取操作並更新 UI"""
+import flet as ft
+from app.ui.components import ProgressCard
+
+
+def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, show_progress: bool = False):
+    """執行快取操作並更新 UI
+
+    參數：
+        view: CacheView 實例
+        reason: 操作原因（如 RELOADING, SAVING）
+        work_fn: 要執行的函數
+        success_msg: 成功時的訊息
+        show_progress: 是否顯示 ProgressCard（長時間操作）
+    """
     if view.ui_busy:
         view._notify("目前正在處理，請稍候", "warn")
         return
 
+    # ProgressCard 實例（如果需要顯示進度）
+    progress_card = None
+
     action_id = int(time.time() * 1000) % 1000000
     view._append_log(f"[ACTION#{action_id}] start {reason}")
+
+    # 顯示 ProgressCard（如果啟用）
+    if show_progress:
+        progress_card = ProgressCard(
+            title=f"操作進行中: {reason}",
+            current=0,
+            total=100,
+        )
+        progress_card.start()
+        # 將 ProgressCard 添加到 overview_text 區域附近
+        if hasattr(view, 'overview_status') and hasattr(view.overview_status, 'parent'):
+            # 找到合適的位置添加
+            pass
+
     view._set_state(True, reason, f"trace: ACTION#{action_id} start {reason}")
 
     try:
         data = work_fn()
+
+        # 更新 ProgressCard 為完成狀態
+        if progress_card:
+            progress_card.current = progress_card.total
+            progress_card.set_status("完成")
+
         view._refresh_overview_ui(data)
         view._refresh_query_type_options()
         view._render_query_type_shard_page()

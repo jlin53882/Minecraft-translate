@@ -1682,21 +1682,22 @@ class CacheView(ft.Column):
 
     # top actions
     def _on_reload_all(self, e):
-        """觸發重新載入所有快取"""
+        """觸發重新載入所有快取（長時間操作）"""
         self._run_action(
-            "RELOADING", lambda: cache_reload_service(), "已重新載入全部快取"
+            "RELOADING", lambda: cache_reload_service(), "已重新載入全部快取", show_progress=True
         )
 
     def _on_save_all_new(self, e):
-        """觸發儲存所有新分片"""
+        """觸發儲存所有新分片（長時間操作）"""
         self._run_action(
             "SAVING",
             lambda: cache_save_all_service(write_new_shard=True),
             "已儲存全部新分片",
+            show_progress=True,
         )
 
     def _on_save_all_fill(self, e):
-        """觸發補滿所有活躍分片（高風險）"""
+        """觸發補滿所有活躍分片（高風險，長時間操作）"""
         if hasattr(self, "chk_danger_confirm") and not bool(
             getattr(self.chk_danger_confirm, "value", False)
         ):
@@ -1706,6 +1707,7 @@ class CacheView(ft.Column):
             "SAVING",
             lambda: cache_save_all_service(write_new_shard=False),
             "已補滿活躍分片",
+            show_progress=True,
         )
 
     def _on_refresh_stats(self, e):
