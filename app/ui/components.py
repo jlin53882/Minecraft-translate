@@ -1,4 +1,4 @@
-"""共用 UI 元件（可重用的小拼裝）。
+﻿"""共用 UI 元件（可重用的小拼裝）。
 
 原則
 - 只放純 UI / 樣式封裝，不碰任何 services / translation_tool 業務邏輯。
@@ -250,7 +250,7 @@ class ProgressCard(ft.Container):
             f"{int(current / total * 100)}%" if total > 0 else "0%",
             size=12,
         )
-        self._eta_text = ft.Text("", size=12, color=ft.Colors.ON_SURFACE_VARIANT)
+        self._eta_text = ft.Text("", size=12, color=ft.Colors.GREY)
         self._status_text = ft.Text("", size=12)
 
         # 取消按鈕
@@ -353,8 +353,8 @@ def loading_state(
         content=ft.Column(
             [
                 spinner,
-                ft.Text(message, size=14, color=ft.Colors.ON_SURFACE_VARIANT),
-            ] if spinner else [ft.Text(message, size=14, color=ft.Colors.ON_SURFACE_VARIANT)],
+                ft.Text(message, size=14, color=ft.Colors.GREY),
+            ] if spinner else [ft.Text(message, size=14, color=ft.Colors.GREY)],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=10,
         ),
@@ -373,9 +373,9 @@ def empty_state(
         padding=40,
         content=ft.Column(
             [
-                ft.Icon(icon, size=48, color=ft.Colors.ON_SURFACE_VARIANT),
+                ft.Icon(icon, size=48, color=ft.Colors.GREY),
                 ft.Text(title, size=16, weight=ft.FontWeight.BOLD),
-                ft.Text(message, size=14, color=ft.Colors.ON_SURFACE_VARIANT),
+                ft.Text(message, size=14, color=ft.Colors.GREY),
             ] + ([action_button] if action_button else []),
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=10,
@@ -397,7 +397,7 @@ def error_state(
             [
                 ft.Icon(icon, size=48, color=ft.Colors.ERROR),
                 ft.Text(title, size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ERROR),
-                ft.Text(message, size=14, color=ft.Colors.ON_SURFACE_VARIANT),
+                ft.Text(message, size=14, color=ft.Colors.GREY),
             ] + ([retry_button] if retry_button else []),
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=10,
