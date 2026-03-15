@@ -65,7 +65,12 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
 
     try:
         # 執行操作，傳入進度回調
-        data = work_fn(on_progress=progress_callback)
+        # 注意：service 函數目前不支持 on_progress，會被忽略
+        try:
+            data = work_fn(on_progress=progress_callback)
+        except TypeError:
+            # service 不支持 on_progress，使用舊方式
+            data = work_fn()
 
         view._refresh_overview_ui(data)
         view._refresh_query_type_options()
