@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import flet as ft
 
+from app.ui.components import styled_card
 from .cache_log_panel import build_log_panel
 from .cache_shared_widgets import bordered_block
 
@@ -28,9 +29,17 @@ def build_overview_page(
     """Cache 總覽頁（非查詢區）組裝。
 
     把大段 UI 結構從 cache_view.py 抽離，讓主檔更容易閱讀與維護。
+
+    PR3 試點：使用 styled_card 替換 bordered_block，支援卡片收合功能
     """
 
-    help_block = bordered_block(
+    # 試點：使用 styled_card 包裝說明區塊（PR3 產出，支援收合）
+    help_block = styled_card(
+        title="操作說明",
+        icon=ft.Icons.HELP_OUTLINE,
+        icon_color=ft.Colors.BLUE_GREY_700,
+        collapsible=True,
+        default_collapsed=False,
         content=ft.Column(
             [
                 overview_status,
