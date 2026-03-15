@@ -22,7 +22,7 @@ CARD_PADDING: int = 16
 CARD_RADIUS: int = 10
 CARD_BORDER_COLOR = ft.Colors.BLACK12
 CARD_BG_COLOR = ft.Colors.WHITE
-DIVIDER_COLOR = theme.TEXT_SECONDARY_200
+DIVIDER_COLOR = ft.Colors.GREY_200
 
 def section_header(
     title: str,
