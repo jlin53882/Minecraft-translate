@@ -2514,35 +2514,51 @@ class CacheView(ft.Column):
 
     def _on_shard_page_first(self, e):
         """跳到分片詳情第一頁"""
+        if getattr(self, '_is_shard_rendering', False):
+            return  # 防止重複點擊
+        self._is_shard_rendering = True
         self.shard_detail_page = 1
         self._shard_state.page = 1
         self._render_query_type_shard_page()
         self.update()
         self.page.update()
+        self._is_shard_rendering = False
 
     def _on_shard_page_prev(self, e):
         """上一頁分片詳情"""
+        if getattr(self, '_is_shard_rendering', False):
+            return
+        self._is_shard_rendering = True
         self.shard_detail_page -= 1
         self._shard_state.page = self.shard_detail_page
         self._render_query_type_shard_page()
         self.update()
         self.page.update()
+        self._is_shard_rendering = False
 
     def _on_shard_page_next(self, e):
         """下一頁分片詳情"""
+        if getattr(self, '_is_shard_rendering', False):
+            return
+        self._is_shard_rendering = True
         self.shard_detail_page += 1
         self._shard_state.page = self.shard_detail_page
         self._render_query_type_shard_page()
         self.update()
         self.page.update()
+        self._is_shard_rendering = False
 
     def _on_shard_page_last(self, e):
         """跳到分片詳情最後一頁"""
+        if getattr(self, '_is_shard_rendering', False):
+            return
+        self._is_shard_rendering = True
         self.shard_detail_page = self.shard_detail_total_pages
         self._shard_state.page = self.shard_detail_page
         self._render_query_type_shard_page()
         self.update()
         self.page.update()
+        self._is_shard_rendering = False
 
     def _render_query_type_shard_page(self):
         """渲染類型分片列表"""
