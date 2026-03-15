@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import flet as ft
+from app.ui import theme
 
 # -------------------------
 # 基礎視覺常數（集中管理）
@@ -21,7 +22,7 @@ CARD_PADDING: int = 16
 CARD_RADIUS: int = 10
 CARD_BORDER_COLOR = ft.Colors.BLACK12
 CARD_BG_COLOR = ft.Colors.WHITE
-DIVIDER_COLOR = ft.Colors.GREY_200
+DIVIDER_COLOR = theme.TEXT_SECONDARY_200
 
 def section_header(
     title: str,
@@ -250,7 +251,7 @@ class ProgressCard(ft.Container):
             f"{int(current / total * 100)}%" if total > 0 else "0%",
             size=12,
         )
-        self._eta_text = ft.Text("", size=12, color=ft.Colors.GREY)
+        self._eta_text = ft.Text("", size=12, color=theme.TEXT_SECONDARY)
         self._status_text = ft.Text("", size=12)
 
         # 取消按鈕
@@ -353,8 +354,8 @@ def loading_state(
         content=ft.Column(
             [
                 spinner,
-                ft.Text(message, size=14, color=ft.Colors.GREY),
-            ] if spinner else [ft.Text(message, size=14, color=ft.Colors.GREY)],
+                ft.Text(message, size=14, color=theme.TEXT_SECONDARY),
+            ] if spinner else [ft.Text(message, size=14, color=theme.TEXT_SECONDARY)],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=10,
         ),
@@ -373,9 +374,9 @@ def empty_state(
         padding=40,
         content=ft.Column(
             [
-                ft.Icon(icon, size=48, color=ft.Colors.GREY),
+                ft.Icon(icon, size=48, color=theme.TEXT_SECONDARY),
                 ft.Text(title, size=16, weight=ft.FontWeight.BOLD),
-                ft.Text(message, size=14, color=ft.Colors.GREY),
+                ft.Text(message, size=14, color=theme.TEXT_SECONDARY),
             ] + ([action_button] if action_button else []),
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=10,
@@ -397,7 +398,7 @@ def error_state(
             [
                 ft.Icon(icon, size=48, color=ft.Colors.ERROR),
                 ft.Text(title, size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ERROR),
-                ft.Text(message, size=14, color=ft.Colors.GREY),
+                ft.Text(message, size=14, color=theme.TEXT_SECONDARY),
             ] + ([retry_button] if retry_button else []),
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=10,
