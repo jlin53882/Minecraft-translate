@@ -259,7 +259,7 @@ class ProgressCard(ft.Container):
         super().__init__(
             padding=15,
             border_radius=8,
-            bgcolor=ft.Colors.SURFACE_VARIANT,
+            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
             content=ft.Column(
                 [
                     ft.Row(
