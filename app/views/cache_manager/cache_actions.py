@@ -9,6 +9,8 @@ import time
 import traceback
 from typing import Callable
 
+import flet as ft
+
 
 def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, show_progress: bool = False):
     """執行快取操作並更新 UI
