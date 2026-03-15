@@ -9,9 +9,6 @@ import time
 import traceback
 from typing import Callable
 
-import flet as ft
-from app.ui.components import ProgressCard
-
 
 def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, show_progress: bool = False):
     """執行快取操作並更新 UI
@@ -21,36 +18,52 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
         reason: 操作原因（如 RELOADING, SAVING）
         work_fn: 要執行的函數
         success_msg: 成功時的訊息
-        show_progress: 是否顯示 ProgressCard（長時間操作）
+        show_progress: 是否顯示進度條
     """
     if view.ui_busy:
         view._notify("目前正在處理，請稍候", "warn")
         return
 
-    # ProgressCard 實例（如果需要顯示進度）
-    progress_card = None
-    progress_dialog = None
-
+    # 進度條組件
+    progress_bar = None
+    status_text = None
+    banner = None
     action_id = int(time.time() * 1000) % 1000000
     view._append_log(f"[ACTION#{action_id}] start {reason}")
 
-    # 顯示進度（使用 SnackBar，顯示在底部）
+    # 顯示進度條（使用 Banner，不會自動消失）
     if show_progress and hasattr(view, 'page'):
-        snack = ft.SnackBar(
+        progress_bar = ft.ProgressBar(value=0, width=300)
+        status_text = ft.Text(f"{reason} 處理中...", size=14)
+        banner = ft.Banner(
             content=ft.Column([
-                ft.Text(f"{reason} 處理中...", weight=ft.FontWeight.BOLD),
-                ft.ProgressBar(width=300, value=0.3),
+                status_text,
+                progress_bar,
             ], spacing=5),
-            duration=5,
+            actions=[
+                ft.TextButton(text="處理中...", disabled=True),
+            ],
         )
-        view.page.overlay.append(snack)
-        snack.open = True
+        view.page.banner = banner
+        view.page.banner.open = True
         view.page.update()
+
+        # 進度回調函式
+        def progress_callback(current: int, total: int, msg: str = None):
+            if not hasattr(view, 'page') or view.page is None:
+                return
+            progress_bar.value = current / total if total > 0 else 0
+            if msg:
+                status_text.value = msg
+            view.page.update()
+    else:
+        progress_callback = None
 
     view._set_state(True, reason, f"trace: ACTION#{action_id} start {reason}")
 
     try:
-        data = work_fn()
+        # 執行操作，傳入進度回調
+        data = work_fn(on_progress=progress_callback)
 
         view._refresh_overview_ui(data)
         view._refresh_query_type_options()
@@ -65,3 +78,8 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
         view._append_log(f"[ACTION#{action_id}] finish READY")
         view._set_state(False, "READY", f"trace: ACTION#{action_id} ready")
         view._append_log(f"[STATE] {view.overview_status.value}")
+
+        # 關閉 Banner
+        if banner and hasattr(view, 'page'):
+            view.page.banner.open = False
+            view.page.update()
