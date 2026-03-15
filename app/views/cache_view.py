@@ -3080,16 +3080,10 @@ class CacheView(ft.Column):
 
         if not page_rows:
             self.query_result_list.controls.append(
-                ft.Row(
-                    [
-                        ft.Container(
-                            expand=True,
-                            padding=8,
-                            border=ft.border.all(1, theme.OUTLINE_VARIANT),
-                            border_radius=8,
-                            content=ft.Text("尚未有搜尋結果", color=theme.GREY_600),
-                        )
-                    ]
+                empty_state(
+                    icon=ft.Icons.SEARCH_OFF,
+                    title="无搜索结果",
+                    message="请尝试其他关键词或调整筛选条件",
                 )
             )
         else:
