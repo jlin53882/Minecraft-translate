@@ -33,15 +33,15 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print("=" * 50)
-    print("Web 測試模式啟動中...")
-    print("請用瀏覽器打開: http://localhost:8550")
-    print("按 Ctrl+C 停止服務")
+    print("🚀 Web 測試模式啟動中...")
+    print("📍 請用瀏覽器打開: http://localhost:8550")
+    print("💡 按 Ctrl+C 停止服務")
     print("=" * 50)
 
     # Web 模式運行
     ft.app(
         target=main,
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=8550,
         view=ft.AppView.WEB_BROWSER,
     )
