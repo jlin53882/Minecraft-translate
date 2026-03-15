@@ -85,20 +85,18 @@ def styled_card(
     # 內部狀態管理
     is_collapsed = [default_collapsed]
 
-    # 內容區域
+    # 內容區域 - 始終使用 container 包裝以便控制可見性
     content_container = ft.Container(
-        expand=True,
+        expand=expand,
         content=content,
         visible=not default_collapsed,
     )
 
-    body = content_container if expand else content
-
-    # 建立卡片內容
+    # 建立卡片內容 - 始終使用 content_container 以確保收合功能正常
     card_content = [
         section_header(title, icon, icon_color=icon_color),
         ft.Divider(height=1, color=DIVIDER_COLOR),
-        body,
+        content_container,  # 始終使用 container 包裝
     ]
 
     if collapsible:
