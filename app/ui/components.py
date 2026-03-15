@@ -102,21 +102,25 @@ def styled_card(
     ]
 
     if collapsible:
-        # 添加收合按鈕
+        # 添加收合按鈕 - 使用 ref 確保可以從事件中訪問
         collapse_btn = ft.IconButton(
             icon=ft.Icons.EXPAND_MORE if default_collapsed else ft.Icons.EXPAND_LESS,
             icon_size=20,
             tooltip="收合/展開",
-            on_click=lambda _: (
-                is_collapsed.__setitem__(0, not is_collapsed[0]),
-                content_container.__setattr__('visible', not is_collapsed[0]),
-                collapse_btn.__setattr__(
-                    'icon',
-                    ft.Icons.EXPAND_MORE if is_collapsed[0] else ft.Icons.EXPAND_LESS
-                ),
-                page.update() if page else None,  # 刷新 UI
-            ),
         )
+
+        def on_collapse_click(e):
+            """處理收合按鈕點擊"""
+            is_collapsed[0] = not is_collapsed[0]
+            # 切換內容可見性
+            content_container.visible = is_collapsed[0]
+            # 切換按鈕圖標
+            collapse_btn.icon = ft.Icons.EXPAND_MORE if is_collapsed[0] else ft.Icons.EXPAND_LESS
+            # 刷新頁面
+            if page:
+                page.update()
+
+        collapse_btn.on_click = on_collapse_click
 
         # 標題列加入收合按鈕
         card_content[0] = ft.Row(
