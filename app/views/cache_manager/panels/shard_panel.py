@@ -23,13 +23,22 @@ class CacheShardPanel(ft.Container):
         )
 
         # 操作按鈕
-        actions = ft.Row(
-            [
+        actions = ft.Column([
+            ft.Row([
                 ft.ElevatedButton("新增分片", icon=ft.Icons.ADD),
-                ft.ElevatedButton("補滿舊檔", icon=ft.Icons.FILL),
+                ft.ElevatedButton("補滿舊檔", icon=ft.Icons.FILL_OUTLINED),
                 ft.ElevatedButton("輪替分片", icon=ft.Icons.SWAP_HORIZ),
-            ],
-            spacing=10,
+            ], spacing=10),
+        ], spacing=10)
+
+        # 使用 styled_card 包裝
+        shard_card = styled_card(
+            title="分片管理",
+            icon=ft.Icons.FOLDER,
+            content=ft.Column([actions, self.shard_list], spacing=10),
+            collapsible=True,
+            default_collapsed=False,
+            page=self.page,
         )
 
-        return ft.Column([actions, self.shard_list], spacing=10)
+        return shard_card

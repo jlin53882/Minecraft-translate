@@ -17,6 +17,7 @@ class CacheQueryPanel(ft.Container):
             hint_text="輸入關鍵字搜尋...",
             prefix_icon=ft.Icons.SEARCH,
             on_submit=self._on_search,
+            expand=True,
         )
         super().__init__(expand=True, content=self._build_content())
 
@@ -33,11 +34,21 @@ class CacheQueryPanel(ft.Container):
             spacing=5,
         )
 
-        return ft.Column([search_bar, self.results_list], spacing=10)
+        # 使用 styled_card 包裝
+        search_card = styled_card(
+            title="關鍵字搜尋",
+            icon=ft.Icons.SEARCH,
+            content=ft.Column([search_bar, self.results_list], spacing=10),
+            collapsible=True,
+            default_collapsed=False,
+            page=self.page,
+        )
+
+        return search_card
 
     def _on_search(self, e):
         query = self.search_field.value
         # TODO: 實作搜尋邏輯
-        self.results_list.controls.clear()
-        self.results_list.controls.append(ft.Text(f"搜尋: {query}"))
-        self.page.update()
+        self.results_list.controls = [
+            ft.ListTile(title=ft.Text(f"搜尋: {query}"))]
+        self.results_list.update()
