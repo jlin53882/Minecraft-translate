@@ -32,11 +32,11 @@
 
 ## UI 對照（啟用狀態，依 `main.py`）
 
-### 已啟用（目前會出現在左側選單）- 全部 11 個 view
+### 已啟用（目前會出現在左側選單）- 11 個主 View
 - `config_view.py`：設定
-- `rules_view.py`：規則
-- `cache_view.py`：快取管理
-- `qc_view.py`：品質檢查
+- `rules_view.py`：替換規則
+- `cache_view.py`：快取管理（含 QueryPanel / ShardPanel）
+- `qc_view.py`：品質檢查（含 UntranslatedChecker / QCBase）
 - `lookup_view.py`：查詢
 - `icon_preview_view.py`：圖示預覽
 - `bundler_view.py`：打包
@@ -126,114 +126,132 @@ uv run pytest -q --basetemp=.pytest-tmp\full -o cache_dir=.pytest-cache\full
 
 ## 架構重點
 
-### 1) Service 分層（最新）
+### 1) Service 分層
 
 - `app/services_impl/*`：主線 canonical services（config/cache/pipelines）
-- `app/services.py`：目前僅保留 QC/checkers 所需 façade
+- `app/services.py`：QC/checkers 所需 façade
 
-也就是說，除了 QC/checkers 暫緩線，其他流程都應直接 import `app.services_impl.*`。
+### 2) Views 子模組化
 
-### 2) 核心處理邏輯
+部分 View 已拆分為獨立子模組：
+- `views/cache_manager/`：快取管理（panels/overview/query/shard）
+- `views/config/`：設定（config_form/actions）
+- `views/extractor/`：JAR 提取（extractor_panels/actions/state）
+- `views/rules/`：替換規則（rules_table/actions/state）
+- `views/translation/`：翻譯任務（translation_panels/actions/state）
 
-- `translation_tool/core/lang_merger.py`
+### 3) 核心處理邏輯
+
+- `translation_tool/core/lang_merger.py` + `lang_merge_*.py`
   - 依 `en_us.json` / `zh_cn.json` / `zh_tw.json` 組合決定合併策略
-  - JSON 語言檔採增量更新；內容檔（`.md`、`.png`、`.snbt`）採覆寫策略
-- `translation_tool/core/lm_translator_main.py`
+  - JSON 語言檔採增量更新；內容檔採覆寫策略
+- `translation_tool/core/lm_translator_main.py` + `lm_translator_*.py`
   - 批次送 Gemini，依錯誤類型做縮批、重試、換 Key、節流
 
-### 3) UI 頁面檔案索引（`app/views`）
+### 4) 快取搜尋系統
 
-全部 11 個 view 已啟用：
-
-- ✅ `config_view.py`：Config 設定
-- ✅ `rules_view.py`：替換規則
-- ✅ `cache_view.py`：快取處理 / 檢視
-- ✅ `qc_view.py`：品質檢查
-- ✅ `lookup_view.py`：查詢
-- ✅ `icon_preview_view.py`：圖示預覽
-- ✅ `bundler_view.py`：打包
-- ✅ `translation_view.py`：FTB / KubeJS / Markdown 翻譯
-- ✅ `extractor_view.py`：JAR 抽取
-- ✅ `lm_view.py`：機器翻譯
-- ✅ `merge_view.py`：`zh_cn` / `zh_tw` / `en_us` 合併
+- `translation_tool/utils/cache_search.py`
+  - SQLite FTS5 全文搜尋
+  - 支援模糊比對、相似詞推薦
+  - 2026-03-16 優化：49秒 → 4秒（提升 91%）
 
 ## 專案結構
 
 ```text
 ├── app/
-│   ├── services.py                      # QC façade：run_untranslated_check_service / run_variant_compare_service / run_english_residue_check_service / run_variant_compare_tsv_service
-│   ├── services_impl/                   # 主線 canonical services（非 QC 流程都走這層）
-│   │   ├── config_service.py            # load_config_json / save_config_json / load_replace_rules / save_replace_rules
-│   │   ├── logging_service.py           # update_logger_config（重建 logger 與 handler）
+│   ├── services.py                      # QC façade
+│   ├── services_impl/                    # 主線 canonical services
+│   │   ├── config_service.py
+│   │   ├── logging_service.py
 │   │   ├── cache/
-│   │   │   └── cache_services.py        # cache_get_overview / reload / save_all / search / get_entry / update_dst / rotate / rebuild_index
+│   │   │   └── cache_services.py
 │   │   └── pipelines/
-│   │       ├── bundle_service.py        # run_bundling_service（打包輸出 ZIP）
-│   │       ├── extract_service.py       # run_lang_extraction_service / run_book_extraction_service
-│   │       ├── ftb_service.py           # run_ftb_translation_service
-│   │       ├── kubejs_service.py        # run_kubejs_tooltip_service
-│   │       ├── lm_service.py            # run_lm_translation_service
-│   │       ├── lookup_service.py        # run_manual_lookup_service / run_batch_lookup_service
-│   │       ├── md_service.py            # run_md_translation_service
-│   │       └── merge_service.py         # run_merge_zip_batch_service
-│   ├── ui/                              # 共用 UI 元件
-│   │   ├── components.py               # 按鈕、卡片、SnackBar 等
-│   │   ├── theme.py                     # 主題顏色常數（PR69）
-│   │   └── view_wrapper.py              # View 包装
-│       ├── cache_manager/               # 快取管理子模組（controller/presenter/panel）
-│       ├── bundler_view.py              # 打包成品 ZIP
-│       ├── cache_view.py                # 快取處理 / 檢視
-│       ├── config_view.py               # Config 設定
-│       ├── extractor_view.py            # JAR 抽取
-│       ├── icon_preview_view.py         # 圖示映對翻譯
-│       ├── lm_view.py                   # 機器翻譯
-│       ├── lookup_view.py               # 學名查詢
-│       ├── merge_view.py                # zh_cn/zh_tw/en_us 合併
-│       ├── qc_view.py                   # 品質檢查
-│       ├── rules_view.py                # 替換規則
-│       └── translation_view.py          # FTB/KubeJS/Markdown 翻譯
+│   │       ├── bundle_service.py
+│   │       ├── extract_service.py
+│   │       ├── ftb_service.py
+│   │       ├── kubejs_service.py
+│   │       ├── lm_service.py
+│   │       ├── lookup_service.py
+│   │       ├── md_service.py
+│   │       ├── merge_service.py
+│   │       ├── _pipeline_logging.py
+│   │       └── _task_runner.py
+│   ├── ui/
+│   │   ├── components.py
+│   │   ├── theme.py
+│   │   ├── view_wrapper.py
+│   │   ├── keyboard_shortcuts.py
+│   │   └── quick_jump.py
+│   └── views/                           # 11 個 View + 子模組
+│       ├── bundler_view.py
+│       ├── cache_view.py
+│       ├── cache_query_panel.py
+│       ├── cache_shard_panel.py
+│       ├── config_view.py
+│       ├── extractor_view.py
+│       ├── icon_preview_view.py
+│       ├── lm_view.py
+│       ├── lookup_view.py
+│       ├── merge_view.py
+│       ├── qc_view.py
+│       ├── qc_base.py
+│       ├── rules_view.py
+│       ├── translation_view.py
+│       ├── untranslated_checker.py
+│       ├── cache_manager/                # 子模組：cache
+│       ├── config/                      # 子模組：config
+│       ├── extractor/                   # 子模組：extractor
+│       ├── rules/                       # 子模組：rules
+│       └── translation/                 # 子模組：translation
 │
 ├── translation_tool/                    # 核心演算法層
 │   ├── core/
-│   │   ├── jar_processor.py             # extract_lang_files_generator / extract_book_files_generator / preview_extraction_generator
-│   │   ├── lang_merger.py               # merge_zhcn_to_zhtw_from_zip / export_filtered_pending
-│   │   ├── lm_translator_main.py        # call_gemini_requests / translate_batch_smart（批次翻譯主流程）
-│   │   ├── lm_translator.py             # translate_directory_generator（翻譯迴圈）
-│   │   ├── output_bundler.py            # bundle_outputs_generator
-│   │   ├── ftb_translator.py            # run_ftb_pipeline（FTB 三步流程）
-│   │   ├── kubejs_translator.py         # run_kubejs_pipeline（KubeJS 三步流程）
-│   │   ├── md_translation_assembly.py   # run_md_pipeline（Markdown 三步流程）
-│   │   ├── icon_*.py                    # 圖示分類/解析/預覽快取
-│   │   ├── lang_processing_format.py    # OpenCC 轉換與文字格式處理
-│   │   └── lm_config_rules.py           # API key 輪替、可翻譯欄位與規則判定
+│   │   ├── jar_processor.py             # JAR 提取
+│   │   ├── jar_processor_discovery.py
+│   │   ├── jar_processor_extract.py
+│   │   ├── jar_processor_preview.py
+│   │   ├── lang_merger.py               # 語言合併
+│   │   ├── lang_merge_*.py              # 合併子流程
+│   │   ├── lm_translator.py             # 翻譯主流程
+│   │   ├── lm_translator_main.py
+│   │   ├── lm_translator_*.py           # 翻譯子模組
+│   │   ├── lm_api_client.py
+│   │   ├── lm_config_rules.py
+│   │   ├── lm_response_parser.py
+│   │   ├── ftb_translator.py            # FTB 翻譯
+│   │   ├── kubejs_translator.py          # KubeJS 翻譯
+│   │   ├── md_translation_*.py           # Markdown 翻譯
+│   │   ├── output_bundler.py            # 打包輸出
+│   │   ├── icon_*.py                    # 圖示處理
+│   │   └── lang_processing_format.py
 │   ├── plugins/
-│   │   ├── ftbquests/                   # SNBT 抽取/注入 + FTB JSON 翻譯
-│   │   │   ├── ftbquests_snbt_extractor.py
-│   │   │   ├── ftbquests_snbt_inject.py
-│   │   │   └── ftbquests_lmtranslator.py
-│   │   ├── kubejs/                      # Tooltip 抽取/注入 + JSON 翻譯
-│   │   │   ├── kubejs_tooltip_extract.py
-│   │   │   ├── kubejs_tooltip_inject.py
-│   │   │   └── kubejs_tooltip_lmtranslator.py
-│   │   └── md/                          # Markdown 區塊抽取/回填 + JSON 翻譯
-│   │       ├── md_extract_qa.py
-│   │       ├── md_inject_qa.py
-│   │       └── md_lmtranslator.py
-│   ├── checkers/                        # 品質檢查
-│   │   ├── untranslated_checker.py      # check_untranslated_generator
-│   │   ├── variant_comparator.py        # compare_variants_generator
-│   │   ├── variant_comparator_tsv.py    # compare_variants_tsv_generator
-│   │   └── english_residue_checker.py   # check_english_residue_generator
-│   └── utils/                           # 共用基礎工具
-│       ├── config_manager.py            # load_config / save_config / setup_logging
-│       ├── text_processor.py            # OpenCC + replace_rules 套用
-│       ├── cache_manager.py             # initialize/reload/save/search cache
-│       ├── cache_search.py              # 快取索引與查詢
-│       ├── species_cache.py             # Wikipedia 學名快取
-│       ├── exceptions.py                # 統一錯誤處理 decorator
-│       └── log_unit.py                  # progress / log_* 封裝
+│   │   ├── ftbquests/
+│   │   ├── kubejs/
+│   │   ├── md/
+│   │   └── shared/
+│   ├── checkers/
+│   │   ├── untranslated_checker.py
+│   │   ├── variant_comparator.py
+│   │   ├── variant_comparator_tsv.py
+│   │   └── english_residue_checker.py
+│   └── utils/
+│       ├── cache_manager.py
+│       ├── cache_search.py               # SQLite FTS5 全文搜尋
+│       ├── cache_search_facade.py
+│       ├── cache_loader.py
+│       ├── cache_store.py
+│       ├── cache_shards.py
+│       ├── cache_overview.py
+│       ├── config_manager.py
+│       ├── config_access.py
+│       ├── text_processor.py
+│       ├── species_cache.py
+│       ├── exceptions.py
+│       ├── log_unit.py
+│       ├── safe_json_loader.py
+│       └── ui_logging_handler.py
 │
-├── tests/
+├── tests/                               # 834 個單元測試
 ├── docs/pr/
 ├── config.example.json
 ├── main.py
