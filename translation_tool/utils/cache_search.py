@@ -210,7 +210,7 @@ class CacheSearchEngine:
             try:
                 try:
                     self.conn.execute("PRAGMA recursive_triggers = OFF")
-                except:
+                except Exception:
                     pass
                 
                 write_start = time.time()
@@ -705,14 +705,14 @@ class SearchOrchestrator:
                 if wal_file.exists():
                     try:
                         wal_file.unlink()
-                    except:
+                    except Exception:
                         pass
             
             # 刪除舊資料庫重新建立
             if db_path.exists():
                 try:
                     db_path.unlink()
-                except:
+                except Exception:
                     pass
             
             # 建立新引擎並直接寫入
