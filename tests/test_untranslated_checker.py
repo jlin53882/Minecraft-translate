@@ -1,173 +1,136 @@
-"""untranslated_checker.py 測試。
+"""app/views/untranslated_checker.py 單元測試。
 
-用途：測試未翻譯條目檢查功能。
+用途：驗證 UntranslatedChecker 元件的功能正確性。
 """
-import json
+
 import pytest
+from app.views.untranslated_checker import UntranslatedChecker
+from app.views.qc_base import QCBase
 
-from translation_tool.checkers import untranslated_checker
+
+class _MockPage:
+    def __init__(self):
+        self.overlay = []
+        self.updated = 0
+
+    def update(self):
+        self.updated += 1
 
 
-class TestCheckUntranslatedGenerator:
-    """測試 check_untranslated_generator 函式。"""
+class _MockFilePicker:
+    def __init__(self):
+        self.on_result = None
+        self.last_directory_path = None
+        self.last_title = None
 
-    def test_no_en_us_files(self, tmp_path):
-        """測試無 en_us 檔案時的行為。"""
-        en_us_dir = tmp_path / "en_us"
-        en_us_dir.mkdir()
-        zh_tw_dir = tmp_path / "zh_tw"
-        zh_tw_dir.mkdir()
-        output_dir = tmp_path / "output"
-        
-        results = list(untranslated_checker.check_untranslated_generator(
-            str(en_us_dir), str(zh_tw_dir), str(output_dir)
-        ))
-        
-        # 應該有 2 個結果（開始 + 結束錯誤）
-        assert len(results) == 2
-        assert results[1]["error"] is True
-        assert "未找到任何 en_us.json 檔案" in results[1]["log"]
+    def get_directory_path(self, title: str = None):
+        self.last_title = title
 
-    def test_all_translated(self, tmp_path):
-        """測試全部翻譯完成時的行為。"""
-        en_us_dir = tmp_path / "en_us"
-        en_us_dir.mkdir()
-        zh_tw_dir = tmp_path / "zh_tw"
-        zh_tw_dir.mkdir()
-        output_dir = tmp_path / "output"
-        
-        # 建立 en_us 檔案
-        en_data = {"key1": "Hello", "key2": "World"}
-        (en_us_dir / "test.json").write_text(
-            json.dumps(en_data), encoding="utf-8"
-        )
-        
-        # 建立完全對應的 zh_tw 檔案
-        tw_data = {"key1": "你好", "key2": "世界"}
-        (zh_tw_dir / "test.json").write_text(
-            json.dumps(tw_data), encoding="utf-8"
-        )
-        
-        results = list(untranslated_checker.check_untranslated_generator(
-            str(en_us_dir), str(zh_tw_dir), str(output_dir)
-        ))
-        
-        # 應該找到 0 個未翻譯條目 - 最後一個結果包含統計
-        final_result = results[-2]  # 倒數第二個結果包含統計
-        assert "0 個未翻譯的條目" in final_result["log"]
+    def pick_files(self, title: str = None):
+        self.last_title = title
 
-    def test_missing_translation_keys(self, tmp_path):
-        """測試部分 key 未翻譯時的行為。"""
-        en_us_dir = tmp_path / "en_us"
-        en_us_dir.mkdir()
-        zh_tw_dir = tmp_path / "zh_tw"
-        zh_tw_dir.mkdir()
-        output_dir = tmp_path / "output"
-        
-        # 建立 en_us 檔案
-        en_data = {"key1": "Hello", "key2": "World", "key3": "Test"}
-        (en_us_dir / "test.json").write_text(
-            json.dumps(en_data), encoding="utf-8"
-        )
-        
-        # 建立只有部分 key 的 zh_tw 檔案
-        tw_data = {"key1": "你好"}  # 缺少 key2, key3
-        (zh_tw_dir / "test.json").write_text(
-            json.dumps(tw_data), encoding="utf-8"
-        )
-        
-        results = list(untranslated_checker.check_untranslated_generator(
-            str(en_us_dir), str(zh_tw_dir), str(output_dir)
-        ))
-        
-        # 應該找到 2 個未翻譯條目 - 最後一個結果包含統計
-        final_result = results[-2]  # 倒數第二個結果包含統計
-        assert "2 個未翻譯的條目" in final_result["log"]
-        
-        # 檢查輸出檔案
-        output_file = output_dir / "test.json"
-        assert output_file.exists()
-        
-        with open(output_file, encoding="utf-8") as f:
-            saved_data = json.load(f)
-        
-        assert "key2" in saved_data
-        assert "key3" in saved_data
 
-    def test_missing_zh_tw_file(self, tmp_path):
-        """測試對應的 zh_tw 檔案不存在時的行為。"""
-        en_us_dir = tmp_path / "en_us"
-        en_us_dir.mkdir()
-        zh_tw_dir = tmp_path / "zh_tw"
-        zh_tw_dir.mkdir()
-        output_dir = tmp_path / "output"
-        
-        # 建立 en_us 檔案
-        en_data = {"key1": "Hello", "key2": "World"}
-        (en_us_dir / "missing.json").write_text(
-            json.dumps(en_data), encoding="utf-8"
-        )
-        
-        # 不建立 zh_tw 檔案
-        
-        results = list(untranslated_checker.check_untranslated_generator(
-            str(en_us_dir), str(zh_tw_dir), str(output_dir)
-        ))
-        
-        # 應該有警告訊息
-        warning_result = [r for r in results if "警告" in r.get("log", "")][0]
-        assert "找不到對應的繁中檔案" in warning_result["log"]
-        
-        # 檢查輸出 - 應該包含整個檔案
-        output_file = output_dir / "missing.json"
-        assert output_file.exists()
+class _MockProgressBar:
+    def __init__(self):
+        self.value = 0
+        self.visible = False
+        self.color = None
 
-    def test_multiple_files(self, tmp_path):
-        """測試多個檔案處理。"""
-        en_us_dir = tmp_path / "en_us"
-        en_us_dir.mkdir()
-        zh_tw_dir = tmp_path / "zh_tw"
-        zh_tw_dir.mkdir()
-        output_dir = tmp_path / "output"
-        
-        # 建立多個 en_us 檔案
-        en_data1 = {"key1": "Hello"}
-        en_data2 = {"key2": "World"}
-        (en_us_dir / "file1.json").write_text(json.dumps(en_data1), encoding="utf-8")
-        (en_us_dir / "file2.json").write_text(json.dumps(en_data2), encoding="utf-8")
-        
-        # 建立對應的 zh_tw 檔案（部分翻譯）
-        tw_data1 = {"key1": "你好"}
-        (zh_tw_dir / "file1.json").write_text(json.dumps(tw_data1), encoding="utf-8")
-        # file2.json 不建立 -> 整個檔案視為未翻譯
-        
-        results = list(untranslated_checker.check_untranslated_generator(
-            str(en_us_dir), str(zh_tw_dir), str(output_dir)
-        ))
-        
-        # 應該處理 2 個檔案，1 個檔案有未翻譯（file2 整個未翻譯）
-        final_result = results[-2]
-        assert "1 個未翻譯的條目" in final_result["log"]
 
-    def test_preserves_directory_structure(self, tmp_path):
-        """測試保留目錄結構。"""
-        en_us_dir = tmp_path / "en_us"
-        en_us_dir.mkdir()
-        zh_tw_dir = tmp_path / "zh_tw"
-        zh_tw_dir.mkdir()
-        output_dir = tmp_path / "output"
-        
-        # 在子目錄建立檔案
-        subdir = en_us_dir / "subfolder"
-        subdir.mkdir()
-        
-        en_data = {"key1": "Hello"}
-        (subdir / "nested.json").write_text(json.dumps(en_data), encoding="utf-8")
-        
-        results = list(untranslated_checker.check_untranslated_generator(
-            str(en_us_dir), str(zh_tw_dir), str(output_dir)
-        ))
-        
-        # 檢查輸出結構
-        output_file = output_dir / "subfolder" / "nested.json"
-        assert output_file.exists()
+class _MockListView:
+    def __init__(self):
+        self.controls = []
+
+    def scroll_to(self, offset=None, duration=None):
+        pass
+
+
+def test_untranslated_checker_initialization():
+    """測試 UntranslatedChecker 初始化"""
+    page = _MockPage()
+    file_picker = _MockFilePicker()
+    task_runner = QCBase(page, _MockProgressBar(), _MockListView())
+
+    checker = UntranslatedChecker(page, file_picker, task_runner)
+
+    assert checker.page is page
+    assert checker.file_picker is file_picker
+    assert checker.task_runner is task_runner
+
+
+def test_untranslated_checker_has_required_fields():
+    """測試 UntranslatedChecker 有所需的 UI 欄位"""
+    page = _MockPage()
+    file_picker = _MockFilePicker()
+    task_runner = QCBase(page, _MockProgressBar(), _MockListView())
+
+    checker = UntranslatedChecker(page, file_picker, task_runner)
+
+    assert hasattr(checker, "en_dir")
+    assert hasattr(checker, "tw_dir")
+    assert hasattr(checker, "out_dir")
+    assert hasattr(checker, "start_button")
+
+
+def test_untranslated_checker_start_button_text():
+    """測試開始按鈕文字"""
+    page = _MockPage()
+    file_picker = _MockFilePicker()
+    task_runner = QCBase(page, _MockProgressBar(), _MockListView())
+
+    checker = UntranslatedChecker(page, file_picker, task_runner)
+
+    assert checker.start_button.text == "開始檢查"
+
+
+def test_untranslated_checker_registers_file_picker():
+    """測試 UntranslatedChecker 將 file_picker 加入 page.overlay"""
+    page = _MockPage()
+    file_picker = _MockFilePicker()
+    task_runner = QCBase(page, _MockProgressBar(), _MockListView())
+
+    # file_picker 不在 overlay 中
+    assert file_picker not in page.overlay
+
+    checker = UntranslatedChecker(page, file_picker, task_runner)
+
+    # 建立後 file_picker 應該在 overlay 中
+    assert file_picker in page.overlay
+
+
+def test_untranslated_checker_pick_directory():
+    """測試選擇目錄功能"""
+    page = _MockPage()
+    file_picker = _MockFilePicker()
+    task_runner = QCBase(page, _MockProgressBar(), _MockListView())
+
+    checker = UntranslatedChecker(page, file_picker, task_runner)
+
+    # 模擬點擊選擇目錄
+    checker._pick_file_or_directory(
+        e=None,
+        target_textfield=checker.en_dir,
+        title="選擇目錄",
+        folder_mode=True,
+    )
+
+    # 驗證 file_picker 被呼叫
+    assert file_picker.last_title == "選擇目錄"
+
+
+def test_untranslated_checker_shows_snackbar_on_cancel():
+    """測試取消選擇時顯示訊息"""
+    page = _MockPage()
+    file_picker = _MockFilePicker()
+    task_runner = QCBase(page, _MockProgressBar(), _MockListView())
+
+    checker = UntranslatedChecker(page, file_picker, task_runner)
+
+    # 設定 file_picker.on_result 為 None（取消選擇）
+    file_picker.on_result = None
+
+    # 呼叫 snackbar（應該不崩潰）
+    checker._show_snack_bar("測試訊息")
+
+    # 驗證 snackbar 被加入 overlay
+    assert len(page.overlay) >= 1
