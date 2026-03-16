@@ -26,7 +26,11 @@ def test_rules_view_initial_load_populates_data(monkeypatch):
 
 
 def test_rules_view_search_filters_and_moves_to_matching_page(monkeypatch):
+    import threading
+    
+    # Mock threading.Thread and Timer for tests
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.threading.Timer', lambda delay, target: type('Tm', (), {'start': lambda self: target(), 'cancel': lambda self: None})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [{'from': 'aaa', 'to': 'bbb'}, {'from': 'ccc', 'to': 'ddd'}])
     view = RulesView(_Page())
 
@@ -34,7 +38,10 @@ def test_rules_view_search_filters_and_moves_to_matching_page(monkeypatch):
     e = E(); e.control = type('C', (), {'value': 'ccc'})()
     view.on_search(e)
 
-    assert view.search_results == [1]
+    # 搜尋結果應該是 rule 物件列表（不是 index 列表）
+    assert view.search_results is not None
+    assert len(view.search_results) == 1
+    assert view.search_results[0].get('from') == 'ccc'
     assert view.current_page == 1
 
 
