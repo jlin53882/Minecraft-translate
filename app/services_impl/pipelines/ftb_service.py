@@ -21,7 +21,7 @@ def run_ftb_translation_service(
 
     return run_callable_task(
         session=session,
-        task_name="致命錯誤] FTB 服務失敗：",
+        task_name="[致命錯誤] FTB 服務失敗：",
         func=run_ftb_pipeline,
         kwargs={
             "directory_path": directory_path,

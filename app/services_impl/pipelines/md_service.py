@@ -21,7 +21,7 @@ def run_md_translation_service(
 
     return run_callable_task(
         session=session,
-        task_name="非預期錯誤] MD 流程失敗：",
+        task_name="[非預期錯誤] MD 流程失敗：",
         func=run_md_pipeline,
         kwargs={
             "input_dir": input_dir,

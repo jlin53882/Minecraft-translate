@@ -20,7 +20,7 @@ def run_kubejs_tooltip_service(
 
     return run_callable_task(
         session=session,
-        task_name="致命錯誤] KubeJS 服務失敗：",
+        task_name="[致命錯誤] KubeJS 服務失敗：",
         func=run_kubejs_pipeline,
         kwargs={
             "input_dir": input_dir,

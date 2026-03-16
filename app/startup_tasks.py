@@ -22,5 +22,3 @@ def start_background_startup_tasks() -> threading.Thread:
     thread = threading.Thread(target=rebuild_index_on_startup, daemon=True)
     thread.start()
     return thread
-
-    return thread
