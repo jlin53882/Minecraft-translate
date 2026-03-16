@@ -4,23 +4,25 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-# /minecraft_translator_flet/app/views/qc_view.py (修改版)
-
 import flet as ft
-import threading
-from app.ui import theme
-
-# 導入 tkinter
 import tkinter as tk
 from tkinter import filedialog
 from typing import Callable, Tuple, Any
 
-# 導入我們需要的服務 (新增 run_variant_compare_tsv_service)
+# 導入 UI 主題
+from app.ui import theme
+
+# 導入我們需要的服務
 from app.services import (
     run_untranslated_check_service,
     run_variant_compare_service,
     run_variant_compare_tsv_service,
 )
+
+# 導入新的拆分元件
+from app.views.qc_base import QCBase
+from app.views.untranslated_checker import UntranslatedChecker
+
 
 class QCView(ft.Column):
     """QCView 類別。
@@ -40,20 +42,16 @@ class QCView(ft.Column):
         self.page = page
         self.file_picker = file_picker
 
-        # --- 「未翻譯檢查」的 UI 元件 ---
-        self.en_dir_textfield = ft.TextField(
-            label="英文 (en_us) 來源資料夾", expand=True
-        )
-        self.tw_dir_textfield_1 = ft.TextField(
-            label="繁中 (zh_tw) 來源資料夾 (未翻譯檢查)", expand=True
-        )
-        self.untranslated_out_dir_textfield = ft.TextField(
-            label="未翻譯報告 輸出資料夾", expand=True
-        )
-        self.untranslated_start_button = ft.ElevatedButton(
-            "開始檢查未翻譯",
-            icon=ft.Icons.SEARCH_OFF,
-            on_click=lambda e: self.start_task("untranslated"),
+        # --- 共用的日誌 UI ---
+        self.progress_bar = ft.ProgressBar(value=0, visible=False)
+        self.log_view = ft.ListView(expand=True, spacing=5, auto_scroll=True)
+
+        # --- 建立 QCBase 任務執行器 ---
+        self.task_runner = QCBase(page, self.progress_bar, self.log_view)
+
+        # --- 「未翻譯檢查」元件 (PR1 拆分) ---
+        self.untranslated_checker = UntranslatedChecker(
+            page, file_picker, self.task_runner
         )
 
         # --- 「簡繁差異比較 (JSON 資料夾模式)」的 UI 元件 ---
@@ -85,59 +83,16 @@ class QCView(ft.Column):
             on_click=lambda e: self.start_task("compare_tsv"),
         )
 
-        # --- 共用的日誌 UI ---
-        self.progress_bar = ft.ProgressBar(value=0, visible=False)
-        self.log_view = ft.ListView(expand=True, spacing=5, auto_scroll=True)
-
         # --- UI 佈局 (分三個卡片避免雜亂) ---
         self.controls = [
-            # 卡片 1: Key 缺失檢查 (untranslated_checker.py)
+            # 卡片 1: Key 缺失檢查 (已拆分為 UntranslatedChecker 元件)
             ft.Card(
                 content=ft.Container(
                     padding=15,
-                    content=ft.Column(
-                        [
-                            ft.Text(
-                                "翻譯 Key 缺失檢查 (en_us vs zh_tw)",
-                                theme_style=ft.TextThemeStyle.TITLE_LARGE,
-                            ),
-                            ft.Row(
-                                [
-                                    self.en_dir_textfield,
-                                    self._create_pick_button(
-                                        self.en_dir_textfield,
-                                        "選擇英文 (en_us) 來源資料夾",
-                                        folder_mode=True,
-                                    ),
-                                ]
-                            ),
-                            ft.Row(
-                                [
-                                    self.tw_dir_textfield_1,
-                                    self._create_pick_button(
-                                        self.tw_dir_textfield_1,
-                                        "選擇繁中 (zh_tw) 來源資料夾",
-                                        folder_mode=True,
-                                    ),
-                                ]
-                            ),
-                            ft.Row(
-                                [
-                                    self.untranslated_out_dir_textfield,
-                                    self._create_pick_button(
-                                        self.untranslated_out_dir_textfield,
-                                        "選擇報告輸出資料夾",
-                                        folder_mode=True,
-                                    ),
-                                ]
-                            ),
-                            self.untranslated_start_button,
-                        ],
-                        spacing=15,
-                    ),
+                    content=self.untranslated_checker,
                 )
             ),
-            # 卡片 2: 簡繁差異比較 - JSON 資料夾模式 (variant_comparator.py)
+            # 卡片 2: 簡繁差異比較 - JSON 資料夾模式
             ft.Card(
                 content=ft.Container(
                     padding=15,
@@ -188,7 +143,7 @@ class QCView(ft.Column):
                     ),
                 )
             ),
-            # 卡片 3: 簡繁差異比較 - TSV 單檔案模式 (compare_zh_variants.py)
+            # 卡片 3: 簡繁差異比較 - TSV 單檔案模式
             ft.Card(
                 content=ft.Container(
                     padding=15,
@@ -321,14 +276,8 @@ class QCView(ft.Column):
             self._show_snack_bar(f"開啟對話框失敗: {ex}")
 
     def set_controls_disabled(self, disabled: bool):
-        # 禁用所有相關控制項 (已更新)
         """設定控制項是否禁用。"""
         controls_to_disable = [
-            # 未翻譯檢查
-            self.en_dir_textfield,
-            self.tw_dir_textfield_1,
-            self.untranslated_out_dir_textfield,
-            self.untranslated_start_button,
             # JSON 比較
             self.cn_dir_textfield,
             self.tw_dir_textfield_2,
@@ -355,11 +304,11 @@ class QCView(ft.Column):
         target_func: Callable[..., Any] | None = None
         args: Tuple[str, ...] = tuple()
 
-        # 1. 未翻譯檢查
+        # 1. 未翻譯檢查 (已移至 UntranslatedChecker 元件，這裡保留作為備用)
         if task_type == "untranslated":
-            en_dir = self.en_dir_textfield.value
-            tw_dir = self.tw_dir_textfield_1.value
-            out_dir = self.untranslated_out_dir_textfield.value
+            en_dir = self.untranslated_checker.en_dir.value
+            tw_dir = self.untranslated_checker.tw_dir.value
+            out_dir = self.untranslated_checker.out_dir.value
             if not en_dir or not tw_dir or not out_dir:
                 self._show_snack_bar("錯誤：請填寫所有「Key 缺失檢查」的路徑！")
                 self.set_controls_disabled(False)
@@ -383,7 +332,7 @@ class QCView(ft.Column):
             target_func = run_variant_compare_service
             args = (cn_dir, tw_dir, out_dir)
 
-        # 3. TSV 單檔案差異比較 (新增)
+        # 3. TSV 單檔案差異比較
         elif task_type == "compare_tsv":
             tsv_path = self.tsv_file_textfield.value
             out_csv_path = self.tsv_out_file_textfield.value
@@ -400,31 +349,9 @@ class QCView(ft.Column):
         else:
             return
 
-        thread = threading.Thread(target=self.task_worker, args=(target_func, args))
-        thread.start()
-
-    def task_worker(self, service_func, args_tuple):
-        """執行品質檢查服務工作執行緒"""
-        try:
-            for update in service_func(*args_tuple):
-                log_msg = update.get("log", "")
-                for line in log_msg.split("\n"):
-                    if line.strip():
-                        self.log_view.controls.append(ft.Text(line))
-
-                if "progress" in update:
-                    self.progress_bar.value = update["progress"]
-                if update.get("error"):
-                    self.progress_bar.color = theme.RED
-
-                self.log_view.scroll_to(offset=-1, duration=100)
-                self.page.update()
-        finally:
-            self.set_controls_disabled(False)
-
-    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """顯示 SnackBar 訊息提示"""
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
+        # 使用 task_runner 執行任務
+        self.task_runner.task_worker(
+            target_func,
+            args,
+            on_complete=lambda: self.set_controls_disabled(False),
+        )
