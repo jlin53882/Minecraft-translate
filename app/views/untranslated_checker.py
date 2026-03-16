@@ -31,15 +31,7 @@ class UntranslatedChecker(ft.Container):
             file_picker: Flet FilePicker 物件
             task_runner: QCBase 實例，用於執行緒任務
         """
-        self.page = page
-        self.file_picker = file_picker
-        self.task_runner = task_runner
-
-        # 確保 file_picker 已加入 page.overlay
-        if file_picker not in page.overlay:
-            page.overlay.append(file_picker)
-
-        # --- UI 元件 ---
+        # --- 先建立 UI 元件 ---
         self.en_dir = ft.TextField(
             label="英文 (en_us) 來源資料夾",
             expand=True,
@@ -58,7 +50,17 @@ class UntranslatedChecker(ft.Container):
             on_click=self._on_start,
         )
 
+        # --- 先呼叫父類初始化 ---
         super().__init__(content=self._build_content())
+
+        # --- 再設定實例屬性 ---
+        self.page = page
+        self.file_picker = file_picker
+        self.task_runner = task_runner
+
+        # 確保 file_picker 已加入 page.overlay
+        if file_picker not in page.overlay:
+            page.overlay.append(file_picker)
 
     def _build_content(self) -> ft.Column:
         """建立 UI 內容"""

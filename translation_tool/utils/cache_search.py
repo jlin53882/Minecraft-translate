@@ -20,11 +20,14 @@
 import os
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from difflib import SequenceMatcher
 from typing import List, Dict, Optional, Any, Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import cache_store
+from .log_unit import log_info, log_warning, log_debug
 
 # =============================================================================
 # 全文搜尋引擎
@@ -33,7 +36,7 @@ from . import cache_store
 class CacheSearchEngine:
     """快取全文搜尋引擎（使用 SQLite FTS5）"""
 
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str | None = None):
         """初始化搜尋引擎
 
         Args:
@@ -51,6 +54,14 @@ class CacheSearchEngine:
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # 讓結果可以用欄位名稱存取
         self._lock = threading.RLock()
+        
+        # SQLite 效能優化（大幅提升大量寫入速度）
+        with self._lock:
+            self.conn.execute("PRAGMA journal_mode = WAL")
+            self.conn.execute("PRAGMA synchronous = OFF")
+            self.conn.execute("PRAGMA cache_size = 10000")
+            self.conn.execute("PRAGMA temp_store = MEMORY")
+        
         self._init_fts_table()
 
     def _init_fts_table(self):
@@ -66,7 +77,7 @@ class CacheSearchEngine:
             # 如果表格存在但結構不對（沒有 cache_key），刪除重建
             with self._lock:
                 if existing and "cache_key" not in existing[0]:
-                    print("[INFO] 偵測到舊索引表格，正在刪除重建...")
+                    log_info("偵測到舊索引表格，正在刪除重建...")
                     self.conn.execute("DROP TABLE IF EXISTS cache_fts")
                     self.conn.commit()
 
@@ -84,7 +95,7 @@ class CacheSearchEngine:
                 self.conn.commit()
         except sqlite3.OperationalError as e:
             # FTS5 可能不支援（SQLite 版本過舊）
-            print(f"[WARN] FTS5 初始化失敗，將使用基本搜尋: {e}")
+            log_warning(f"FTS5 初始化失敗，將使用基本搜尋: {e}")
 
         # 不論 FTS5 成功與否，都建立 basic 表格做為 fallback（雙保險）
         self._init_basic_table()
@@ -101,7 +112,7 @@ class CacheSearchEngine:
         # 如果表格存在但結構不對（沒有 cache_key），刪除重建
         with self._lock:
             if existing and "cache_key" not in existing[0]:
-                print("[INFO] 偵測到舊基本表格，正在刪除重建...")
+                log_info("偵測到舊基本表格，正在刪除重建...")
                 self.conn.execute("DROP TABLE IF EXISTS cache_basic")
                 self.conn.commit()
 
@@ -169,12 +180,18 @@ class CacheSearchEngine:
 
             self.conn.commit()
 
-    def index_batch(self, entries: List[dict]):
+    def index_batch(self, entries: List[dict], batch_size: int = 20000):
         """批次加入索引（效能更好）
 
         Args:
             entries: 快取條目清單
+            batch_size: 每批處理筆數（避免記憶體佔用過大）
         """
+        if not entries:
+            return
+        
+        t0 = time.time()
+            
         data = [
             (
                 e.get("key", ""),
@@ -186,28 +203,45 @@ class CacheSearchEngine:
             )
             for e in entries
         ]
+        
+        prepare_time = time.time() - t0
 
         with self._lock:
             try:
-                self.conn.executemany(
-                    """
-                    INSERT INTO cache_fts (cache_key, source_text, translated_text, mod_name, file_path, cache_type)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                    data,
-                )
+                try:
+                    self.conn.execute("PRAGMA recursive_triggers = OFF")
+                except:
+                    pass
+                
+                write_start = time.time()
+                for i in range(0, len(data), batch_size):
+                    batch = data[i:i + batch_size]
+                    self.conn.executemany(
+                        """
+                        INSERT INTO cache_fts (cache_key, source_text, translated_text, mod_name, file_path, cache_type)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                        batch,
+                    )
             except sqlite3.OperationalError:
-                self.conn.executemany(
-                    """
-                    INSERT INTO cache_basic (cache_key, source_text, translated_text, mod_name, file_path, cache_type)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                    data,
-                )
+                write_start = time.time()
+                for i in range(0, len(data), batch_size):
+                    batch = data[i:i + batch_size]
+                    self.conn.executemany(
+                        """
+                        INSERT INTO cache_basic (cache_key, source_text, translated_text, mod_name, file_path, cache_type)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                        batch,
+                    )
 
+            write_time = time.time() - write_start
             self.conn.commit()
+        
+        total_time = time.time() - t0
+        log_debug(f"index_batch: {len(entries)} entries, prepare={prepare_time:.2f}s, write={write_time:.2f}s, total={total_time:.2f}s")
 
-    def search(self, query: str, limit: int = 50, cache_type: str = None) -> List[Dict]:
+    def search(self, query: str, limit: int = 50, cache_type: str | None = None) -> List[Dict]:
         """搜尋快取（支援中英文、模糊比對）
 
         Args:
@@ -236,7 +270,7 @@ class CacheSearchEngine:
                 FROM cache_fts
                 WHERE cache_fts MATCH ?
             """
-            params = [query]
+            params: list[str | int] = [query]
 
             if cache_type:
                 sql += " AND cache_type = ?"
@@ -267,7 +301,7 @@ class CacheSearchEngine:
             return self._basic_search(query, limit, cache_type)
 
     def _basic_search(
-        self, query: str, limit: int, cache_type: str = None
+        self, query: str, limit: int, cache_type: str | None = None
     ) -> List[Dict]:
         """基本搜尋（當 FTS5 不可用時）"""
         sql = """
@@ -275,7 +309,7 @@ class CacheSearchEngine:
             FROM cache_basic
             WHERE source_text LIKE ? OR translated_text LIKE ?
         """
-        params = [f"%{query}%", f"%{query}%"]
+        params: list[str | int] = [f"%{query}%", f"%{query}%"]
 
         if cache_type:
             sql += " AND cache_type = ?"
@@ -524,35 +558,70 @@ def _build_search_metadata(
 def build_index_entries(
     cache_type: str, cache_dict: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
-    """把單一 cache_type 的記憶體字典轉成可批次索引的條目陣列。"""
-    entries: List[Dict[str, Any]] = []
-    for key, entry in cache_dict.items():
-        if not isinstance(entry, dict):
-            continue
-        entries.append(
-            {
-                "key": key,
-                "src": entry.get("src", ""),
-                "dst": entry.get("dst", ""),
-                "type": cache_type,
-                **_build_search_metadata(cache_type, key, entry),
-            }
-        )
-    return entries
+    """把單一 cache_type 的記憶體字典轉成可批次索引的條目陣列（並行版本）。"""
+    t0 = time.time()
+    items = [(key, entry) for key, entry in cache_dict.items() if isinstance(entry, dict)]
+    
+    if not items:
+        return []
+    
+    # 使用多執行緒並行處理 metadata 建立
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(_build_single_entry, cache_type, key, entry): idx
+            for idx, (key, entry) in enumerate(items)
+        }
+        results: List[Optional[Dict[str, Any]]] = [None] * len(items)
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                results[idx] = future.result()
+            except Exception:
+                pass
+    
+    elapsed = time.time() - t0
+    log_debug(f"build_index_entries({cache_type}): {len(items)} entries in {elapsed:.2f}s")
+    
+    return [r for r in results if r is not None]
+
+def _build_single_entry(cache_type: str, key: str, entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """建立單筆索引條目（供並行呼叫）。"""
+    return {
+        "key": key,
+        "src": entry.get("src", ""),
+        "dst": entry.get("dst", ""),
+        "type": cache_type,
+        **_build_search_metadata(cache_type, key, entry),
+    }
 
 def rebuild_from_cache_dicts(
     engine: CacheSearchEngine,
     cache_types: List[str],
     cache_state: Dict[str, Dict[str, Any]],
 ) -> int:
-    """依序重建多個類型的索引，回傳實際索引筆數。"""
+    """依序重建多個類型的索引，回傳實際索引筆數（並行版本）。"""
     total_indexed = 0
+    
+    # 先並行處理所有 cache_type 的 entries 建立
+    all_entries: Dict[str, List[Dict[str, Any]]] = {}
+    with ThreadPoolExecutor(max_workers=len(cache_types)) as executor:
+        futures = {
+            executor.submit(build_index_entries, cache_type, cache_store.get_cache_type_dict(cache_state, cache_type)): cache_type
+            for cache_type in cache_types
+        }
+        for future in as_completed(futures):
+            cache_type = futures[future]
+            entries = future.result()
+            if entries:
+                all_entries[cache_type] = entries
+    
+    # 再依序寫入 SQLite（保持原有寫入邏輯）
     for cache_type in cache_types:
-        cache_dict = cache_store.get_cache_type_dict(cache_state, cache_type)
-        entries = build_index_entries(cache_type, cache_dict)
+        entries = all_entries.get(cache_type, [])
         if entries:
             engine.index_batch(entries)
             total_indexed += len(entries)
+    
     return total_indexed
 
 class SearchOrchestrator:
@@ -583,35 +652,84 @@ class SearchOrchestrator:
     def rebuild_search_index(
         self, cache_types: List[str], cache_state: Dict[str, Dict[str, Any]]
     ) -> int:
-        """以暫存檔重建整體索引，完成後原子替換正式索引檔。"""
+        """以暫存檔重建整體索引，完成後原子替換正式索引檔。
+
+        包含 Retry 機制：當檔案被鎖定時最多重試 3 次。
+        """
         db_path = self._db_path()
-        tmp_path = db_path.with_name(
-            f"{db_path.name}.tmp-{os.getpid()}-{threading.get_ident()}"
-        )
+        max_retries = 5
+        retry_delay = 1.0  # 秒
+
+        for attempt in range(max_retries):
+            try:
+                return self._do_rebuild_search_index(db_path, cache_types, cache_state)
+            except PermissionError as e:
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    # 重試失敗，拋出原始錯誤
+                    raise
+
+    def _do_rebuild_search_index(
+        self,
+        db_path,
+        cache_types: List[str],
+        cache_state: Dict[str, Dict[str, Any]]
+    ) -> int:
+        """執行實際的索引重建作業。"""
         tmp_engine: Optional[CacheSearchEngine] = None
         old_engine: Optional[CacheSearchEngine] = None
         total_indexed = 0
+        
+        import time
+        import shutil
+        
         try:
-            tmp_engine = CacheSearchEngine(str(tmp_path))
-            total_indexed = rebuild_from_cache_dicts(
-                tmp_engine, cache_types, cache_state
-            )
-            tmp_engine.close()
-            tmp_engine = None
-
+            # 直接寫入目標資料庫（不使用 tmp 檔案，避免 Windows 檔案鎖問題）
+            # 先關閉舊引擎
             with self._lock:
                 old_engine = self._engine
                 if old_engine is not None:
                     old_engine.close()
-                os.replace(str(tmp_path), str(db_path))
+                    self._engine = None
+            
+            del old_engine
+            import gc
+            gc.collect()
+            
+            # 清理 WAL/SHM 檔案
+            for suffix in ["-wal", "-shm"]:
+                wal_file = db_path.with_name(db_path.name + suffix)
+                if wal_file.exists():
+                    try:
+                        wal_file.unlink()
+                    except:
+                        pass
+            
+            # 刪除舊資料庫重新建立
+            if db_path.exists():
+                try:
+                    db_path.unlink()
+                except:
+                    pass
+            
+            # 建立新引擎並直接寫入
+            tmp_engine = CacheSearchEngine(str(db_path))
+            total_indexed = rebuild_from_cache_dicts(
+                tmp_engine, cache_types, cache_state
+            )
+            
+            # 重新建立引擎
+            with self._lock:
                 self._engine = CacheSearchEngine(str(db_path))
-
+            
+            log_debug(f"索引重建完成: {total_indexed} 條")
             return total_indexed
         finally:
             if tmp_engine is not None:
                 tmp_engine.close()
-            if tmp_path.exists():
-                tmp_path.unlink(missing_ok=True)
 
     def rebuild_search_index_for_type(
         self, cache_type: str, cache_state: Dict[str, Dict[str, Any]]
