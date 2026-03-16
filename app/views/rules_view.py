@@ -428,14 +428,18 @@ class RulesView(ft.Column):
 
     def _initial_load(self):
         """初次啟動時從檔案載入規則並渲染"""
-        try:
-            rules_data = self._load_rules_core()
-            self._run_on_ui_thread(lambda: self._handle_reload_success(rules_data))
-        except Exception as err:
-            msg = f"初次載入規則失敗: {err}"
-            self._run_on_ui_thread(
-                lambda msg=msg: self._show_snack_bar(msg, theme.RED_600)
-            )
+
+        def run():
+            try:
+                rules_data = self._load_rules_core()
+                self._handle_reload_success(rules_data)
+                self.page.update()
+            except Exception as err:
+                msg = f"初次載入規則失敗: {err}"
+                self._show_snack_bar(msg, theme.RED_600)
+                self.page.update()
+
+        threading.Thread(target=run, daemon=True).start()
 
     # --- 分頁渲染邏輯 ---
 
