@@ -43,7 +43,16 @@ class RulesView(ft.Column):
         self.current_page = self._state.current_page
         self.all_rules_data = []
         self.total_pages = self._state.total_pages
-        self.search_results = None  # 搜尋結果索引列表（或 None）
+        
+        # --- 搜尋狀態（進階版）---
+        self.search_results = None  # 搜尋結果（符合的 rule 物件列表）
+        self.search_keyword = ""   # 當前搜尋關鍵字
+        self.search_case_sensitive = False  # 大小寫區分
+        self.search_regex = False           # Regex 模式
+        self.search_current_idx = 0         # 當前導航位置
+        
+        # Debounce timer
+        self._search_debounce_timer = None
 
         # RID 序號生成器 (UI 專用 ID)
         self._rid_seq = self._state.rid_seq
@@ -338,34 +347,107 @@ class RulesView(ft.Column):
         self._render_current_page()
 
     def on_search(self, e: ft.ControlEvent):
-        """根據關鍵字搜尋規則並更新顯示"""
-        keyword = e.control.value.strip().lower()
-
+        """根據關鍵字搜尋規則並更新顯示（進階版：過濾顯示 + 多欄位 + Regex）"""
+        # Debounce: 延遲搜尋
+        keyword = e.control.value
+        
+        # 取消之前的計時器
+        if self._search_debounce_timer is not None:
+            try:
+                self._search_debounce_timer.cancel()
+            except Exception:
+                pass
+        
+        if not keyword.strip():
+            # 清除搜尋，回覆顯示全部
+            self._do_search("")
+            return
+        
+        # 設定新的 debounce 計時器（300ms）
+        import threading
+        self._search_debounce_timer = threading.Timer(0.3, lambda: self._do_search(keyword))
+        self._search_debounce_timer.start()
+    
+    def _do_search(self, keyword: str):
+        """執行實際搜尋（Debounce 觸發）"""
+        keyword = keyword.strip()
+        
         if not keyword:
-            # 清除搜尋狀態
+            # 清除搜尋
             self.search_results = None
+            self.search_keyword = ""
+            self.search_case_sensitive = False
+            self.search_regex = False
+            self.search_current_idx = 0
             self.current_page = 1
             self._render_current_page()
             self._show_snack_bar("已清除搜尋，顯示全部規則", theme.BLUE_GREY_700)
             return
-
-        # 找出所有匹配的規則 index
-        self.search_results = [
-            idx
-            for idx, rule in enumerate(self.all_rules_data)
-            if keyword in rule.get("from", "").lower()
-            or keyword in rule.get("to", "").lower()
-        ]
-
+        
+        # 檢測 Regex 模式（以 / 開頭和結尾）
+        use_regex = False
+        search_keyword = keyword
+        
+        if keyword.startswith("/") and keyword.endswith("/") and len(keyword) > 2:
+            use_regex = True
+            search_keyword = keyword[1:-1]  # 移除 /
+        
+        self.search_keyword = search_keyword
+        self.search_regex = use_regex
+        
+        # 執行搜尋
+        matched_rules = []
+        
+        for rule in self.all_rules_data:
+            if self._rule_matches(rule, search_keyword, use_regex):
+                matched_rules.append(rule)
+        
+        self.search_results = matched_rules
+        self.search_current_idx = 0
+        
         if not self.search_results:
             self._show_snack_bar("找不到符合的規則", theme.AMBER_700)
             self._render_current_page()
             return
-
-        # 跳到第一筆搜尋命中的頁面
-        first_idx = self.search_results[0]
-        self.current_page = first_idx // self.page_size + 1
+        
+        # 顯示結果數量
+        count = len(self.search_results)
+        mode_text = "（正則）" if use_regex else ""
+        self._show_snack_bar(f"找到 {count} 筆符合的規則{mode_text}", theme.BLUE_700)
+        
+        # 強制回到第一頁
+        self.current_page = 1
         self._render_current_page()
+    
+    def _rule_matches(self, rule: dict, keyword: str, use_regex: bool) -> bool:
+        """檢查規則是否符合搜尋條件"""
+        # 搜尋欄位
+        fields = ["from", "to", "comment", "category"]
+        
+        for field in fields:
+            value = rule.get(field, "")
+            if not value:
+                continue
+            
+            # Regex 模式
+            if use_regex:
+                try:
+                    flags = 0 if self.search_case_sensitive else re.IGNORECASE
+                    if re.search(keyword, value, flags):
+                        return True
+                except re.error:
+                    # Regex 錯誤，回退到普通搜尋
+                    pass
+            
+            # 普通搜尋模式
+            if not self.search_case_sensitive:
+                if keyword.lower() in value.lower():
+                    return True
+            else:
+                if keyword in value:
+                    return True
+        
+        return False
 
     # ---------------------------------------------
     # 規則驗證模組
@@ -444,42 +526,67 @@ class RulesView(ft.Column):
     # --- 分頁渲染邏輯 ---
 
     def _render_current_page(self):
-        """根據當前頁碼渲染規則表格"""
+        """根據當前頁碼渲染規則表格（支援搜尋結果過濾）"""
+        # 決定資料來源：搜尋結果 OR 全部資料
+        if self.search_results is not None:
+            # 搜尋模式：只顯示符合的資料
+            display_data = self.search_results
+            total_count = len(display_data)
+            self.total_pages = max(1, (total_count + self.page_size - 1) // self.page_size)
+            # 確保頁碼在有效範圍內
+            if self.current_page > self.total_pages:
+                self.current_page = self.total_pages
+            if self.current_page < 1:
+                self.current_page = 1
+        else:
+            # 一般模式：顯示全部資料
+            display_data = self.all_rules_data
+            total_count = len(self.all_rules_data)
+            self.total_pages = calc_total_pages(total_count, self.page_size)
+        
+        # 計算當前頁的資料範圍
         start = (self.current_page - 1) * self.page_size
         end = start + self.page_size
-        current_page_data = self.all_rules_data[start:end]
+        current_page_data = display_data[start:end]
 
         self.rules_table.rows.clear()
         rows_to_display = []
 
-        for index_on_all_data, rule in enumerate(current_page_data, start=start):
+        for rule in current_page_data:
             # 確保有 RID
             if "_rid" not in rule:
                 rule["_rid"] = self._new_rid()
 
             rid = rule["_rid"]
+            
+            # 計算在 all_rules_data 中的索引（用於刪除操作）
+            try:
+                all_idx = self.all_rules_data.index(rule)
+            except ValueError:
+                all_idx = -1
 
             row = self.create_rule_row(
                 rule.get("from", ""),
                 rule.get("to", ""),
                 rid,
-                display_no=index_on_all_data + 1,
+                display_no=start + len(rows_to_display) + 1,
             )
-            # 搜尋結果高亮
-            if self.search_results and index_on_all_data in self.search_results:
-                row.color = theme.YELLOW_50
-            else:
-                row.color = None
+            # 搜尋結果不需標記顏色（已過濾顯示）
             rows_to_display.append(row)
 
         self.rules_table.rows.extend(rows_to_display)
 
-        total_rules = len(self.all_rules_data)
-        self.total_pages = calc_total_pages(total_rules, self.page_size)
+        # 顯示搜尋結果數或總數
+        if self.search_results is not None:
+            total_rules = len(self.search_results)
+            status_text = f"（搜尋結果）"
+        else:
+            total_rules = len(self.all_rules_data)
+            status_text = ""
 
         self.page_info.value = f"頁面 {self.current_page} / {self.total_pages}"
         self.total_pages_text_label.value = f"/ {self.total_pages} 頁"
-        self.total_count_text.value = f"共 {total_rules} 條規則"
+        self.total_count_text.value = f"共 {total_rules} 條規則 {status_text}"
         self._sync_page_jump_field()
 
         self.prev_button.disabled = self.current_page == 1
