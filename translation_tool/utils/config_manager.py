@@ -69,8 +69,8 @@ DEFAULT_CONFIG = {
     "lm_translator": {
         "temperature": 0.2,
         "lm_translate_folder_name": "LM翻譯後",
-        "iniital_batch_size_patchouli": 100,  # ⭐ 新增（建議 80~150） patchouli 專用
-        "iniital_batch_size_lang": 300,  # 起始 batch（你 TPM 很夠） Lang 專用
+        "initial_batch_size_patchouli": 100,  # ⭐ 新增（建議 80~150） patchouli 專用
+        "initial_batch_size_lang": 300,  # 起始 batch（你 TPM 很夠） Lang 專用
         "initial_batch_size_ftb": 100,  # 起始 batch（FTB 專用）
         "initial_batch_size_kubejs": 200,  # 起始 batch（kubejs 專用）
         "initial_batch_size_md": 100,  # 起始 batch（Markdown 專用）
