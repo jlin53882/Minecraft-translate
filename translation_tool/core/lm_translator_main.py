@@ -32,18 +32,25 @@ DEFAULT_BATCH_SIZE = 50  # 預設批次大小
 
 logger = logging.getLogger(__name__)
 
-# 設定區
-
-DRY_RUN = False  # True = 不送 API，只做分析 / 預覽 測試使用
-EXPORT_CACHE_ONLY = True  # True = 先輸出 cache 命中內容
+# =========================================================
+# 預設參數
+# =========================================================
+DEFAULT_DRY_RUN = False  # 預設不跳過 API
+DEFAULT_EXPORT_CACHE_ONLY = False  # 預設進行完整翻譯
 
 # =========================================================
 # 翻譯入口函數（新結構）
 # =========================================================
 
-def translate_batch_smart(batch_items, total=None):
+def translate_batch_smart(batch_items, total=None, dry_run: bool = DEFAULT_DRY_RUN, export_cache_only: bool = DEFAULT_EXPORT_CACHE_ONLY):
     """
     智慧批次翻譯函數（主入口）
+    
+    參數:
+        batch_items: 翻譯項目列表
+        total: 總項目數（可選）
+        dry_run: True = 不呼叫API，只模擬流程（測試用）
+        export_cache_only: True = 只輸出快取中的內容
     
     職責：協調各子流程，不直接處理細節
     """
@@ -59,7 +66,7 @@ def translate_batch_smart(batch_items, total=None):
     batch_size = _calculate_batch_size(batch_profile)
     
     # 4. 執行翻譯
-    results, status = _execute_translation(items, batch_size, batch_profile, total)
+    results, status = _execute_translation(items, batch_size, batch_profile, total, dry_run, export_cache_only)
     
     # 5. 處理輸出
     return _process_output(results, status)
@@ -171,7 +178,7 @@ def _calculate_batch_size(profile):
         return lm_cfg.get("iniital_batch_size_patchouli", 100)
 
 
-def _execute_translation(items, batch_size, batch_profile, total):
+def _execute_translation(items, batch_size, batch_profile, total, dry_run=False, export_cache_only=False):
     """
     執行翻譯主循環
     
@@ -180,6 +187,8 @@ def _execute_translation(items, batch_size, batch_profile, total):
         batch_size: 初始批次大小
         batch_profile: 批次類型
         total: 總項目數
+        dry_run: 是否為測試模式
+        export_cache_only: 是否只輸出快取
     回傳：
         (結果列表, 狀態字串)
     """
