@@ -9,6 +9,14 @@
 - 快取搜尋索引重建會在啟動後用背景 thread 執行，避免主畫面卡住。
 """
 
+# =========================================================
+# Window Constants - 視窗尺寸常數
+# =========================================================
+WINDOW_WIDTH_DEFAULT = 1200  # 預設視窗寬度
+WINDOW_HEIGHT_DEFAULT = 850  # 預設視窗高度
+WINDOW_MIN_WIDTH = 1050  # 視窗最小寬度
+WINDOW_MIN_HEIGHT = 760  # 視窗最小高度
+
 import logging
 
 import flet as ft
@@ -36,10 +44,10 @@ def bootstrap_runtime():
 
 def main(page: ft.Page):
     page.title = "Minecraft 模組包繁體化工具"
-    page.window_width = 1200
-    page.window_height = 850
-    page.window_min_width = 1050
-    page.window_min_height = 760
+    page.window_width = WINDOW_WIDTH_DEFAULT
+    page.window_height = WINDOW_HEIGHT_DEFAULT
+    page.window_min_width = WINDOW_MIN_WIDTH
+    page.window_min_height = WINDOW_MIN_HEIGHT
     page.window_resizable = True
     page.bgcolor = "surfaceVariant"
 
