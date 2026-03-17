@@ -5,6 +5,8 @@
 """
 
 import flet as ft
+
+from translation_tool.utils.log_unit import log_warning
 from app.ui import theme
 from app.views.cache_manager.cache_state import CacheShardState
 from app.services_impl.cache.cache_services import (
@@ -385,7 +387,8 @@ class CacheShardPanel(ft.Container):
 
         try:
             raw = json.loads(fp.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as e:
+            log_warning(f"載入 shard 資料失敗: {e}")
             return None
 
         if isinstance(raw, dict):

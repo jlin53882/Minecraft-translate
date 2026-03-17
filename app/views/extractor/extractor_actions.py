@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import threading
+
+from translation_tool.utils.log_unit import log_warning
 import time
 from pathlib import Path
 
@@ -23,8 +25,8 @@ def update_stats_from_log(view, line: str):
                 count = int(match.group(1))
                 stats['success'] += 1
                 stats['total_files'] += count
-        except Exception:
-            pass
+        except Exception as e:
+            log_warning(f'解析統計數字失敗: {e}')
     elif '跳過' in line or '已存在' in line:
         stats['warnings'] += 1
     elif '[ERROR]' in line or '失敗' in line or '錯誤' in line:
@@ -231,8 +233,8 @@ def show_preview(view, mode: str):
             view.status_text.value = f'狀態：預覽掃描中 ({preview_state.current}/{preview_state.total})...'
             try:
                 view.page.update()
-            except Exception:
-                pass
+            except Exception as e:
+                log_warning(f'更新預覽進度 UI 失敗: {e}')
             time.sleep(0.1)
 
         view.set_controls_disabled(False)
@@ -241,8 +243,8 @@ def show_preview(view, mode: str):
         view._append_log_line(f"[系統] 預覽完成：error={preview_state.error is not None}, result={preview_state.result is not None}")
         try:
             view.page.update()
-        except Exception:
-            pass
+        except Exception as e:
+            log_warning(f'更新預覽完成 UI 失敗: {e}')
 
         if preview_state.error:
             view._append_log_line(f'[ERROR] 預覽錯誤：{preview_state.error}')

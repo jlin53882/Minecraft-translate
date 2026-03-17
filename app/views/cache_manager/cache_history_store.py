@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+
+from translation_tool.utils.log_unit import log_warning
 from datetime import datetime
 from pathlib import Path
 
@@ -51,7 +53,8 @@ def history_load_active(cache_root: str, cache_type: str):
         active = json.loads(active_path.read_text(encoding="utf-8"))
         if not isinstance(active, dict):
             raise ValueError("active format error")
-    except Exception:
+    except Exception as e:
+        log_warning(f'載入 active 失敗，使用預設值: {e}')
         active = history_active_default(cache_type)
         active_path.write_text(json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -96,7 +99,8 @@ def history_append_event(cache_root: str, cache_type: str, event: dict):
             raw = json.loads(json_path.read_text(encoding="utf-8"))
             if isinstance(raw, list):
                 arr = raw
-        except Exception:
+        except Exception as e:
+            log_warning(f'載入歷史記錄失敗，使用空陣列: {e}')
             arr = []
 
     arr.append(event)
