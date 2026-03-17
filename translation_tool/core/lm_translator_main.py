@@ -58,14 +58,14 @@ def translate_batch_smart(batch_items, total=None, dry_run: bool = DEFAULT_DRY_R
     if not items:
         return [], "AUTO"
     
-    # 2. 偵測 profile
-    batch_profile = _detect_batch_profile(items)
+    # 2. 偵測 profile（TODO: 舊函數會重新計算，目前是被丟棄的死碼）
+    # batch_profile = _detect_batch_profile(items)
     
-    # 3. 計算批次大小
-    batch_size = _calculate_batch_size(batch_profile)
+    # 3. 計算批次大小（TODO: 舊函數會重新計算，目前是被丟棄的死碼）
+    # batch_size = _calculate_batch_size(batch_profile)
     
-    # 4. 執行翻譯
-    results, status = _execute_translation(items, batch_size, batch_profile, total, dry_run, export_cache_only)
+    # 4. 執行翻譯（dry_run/export_cache_only 參數未傳遞給舊函數，TODO: 需要修復）
+    results, status = _execute_translation(items, total, dry_run, export_cache_only)
     
     # 5. 處理輸出
     return _process_output(results, status)
