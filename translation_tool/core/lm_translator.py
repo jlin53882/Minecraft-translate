@@ -20,8 +20,8 @@ from translation_tool.utils.cache_manager import (
     get_cache_dict_ref,
 )
 from translation_tool.core.lm_translator_main import (
-    DRY_RUN,
-    EXPORT_CACHE_ONLY,
+    DEFAULT_DRY_RUN,
+    DEFAULT_EXPORT_CACHE_ONLY,
     translate_batch_smart,
 )
 from translation_tool.core.translation_path_writer import (
@@ -139,8 +139,8 @@ def translate_directory_generator(
     # DRY_RUN 覆寫邏輯（核心）
     # =========================
 
-    # 如果使用者沒有特別指定 dry_run 的值（即為 None），就使用系統全域定義的預設變數 DRY_RUN；否則，就遵從使用者傳入的值。
-    dry_run = DRY_RUN if dry_run is None else dry_run
+    # 如果使用者沒有特別指定 dry_run 的值（即為 None），就使用系統全域定義的預設變數 DEFAULT_DRY_RUN；否則，就遵從使用者傳入的值。
+    dry_run = DEFAULT_DRY_RUN if dry_run is None else dry_run
 
     logger.debug(
         f"DEBUG [3. Translator Gen]: 接收到的 export_lang 為 -> {export_lang}"
@@ -387,7 +387,7 @@ def translate_directory_generator(
         logger.info(msg_cache_done)
         yield {"progress": 0.15}
 
-        if EXPORT_CACHE_ONLY and not items_to_translate and not dry_run:
+        if DEFAULT_EXPORT_CACHE_ONLY and not items_to_translate and not dry_run:
             msg_cache_pass = "🎉 僅 Cache 命中，無需翻譯，流程結束"
             logger.info(msg_cache_pass)  # 同步到日誌檔案 (log 檔)
             yield {
