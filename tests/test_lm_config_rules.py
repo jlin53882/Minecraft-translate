@@ -39,7 +39,7 @@ class TestAPIKeyManagement:
     @patch('translation_tool.core.lm_config_rules.load_config')
     def test_rotate_api_key_success(self, mock_load_config):
         """測試 API Key 輪換（成功）。"""
-        from translation_tool.core.lm_config_rules import rotate_api_key, _current_key_index, _get_all_keys
+        from translation_tool.core.lm_config_rules import rotate_api_key, reset_key_index, get_current_key_index, _key_tracker
         
         mock_load_config.return_value = {
             "lm_translator": {
@@ -48,18 +48,17 @@ class TestAPIKeyManagement:
         }
         
         # 重置索引
-        import translation_tool.core.lm_config_rules as rules_module
-        rules_module._current_key_index = 0
+        reset_key_index()
         
         result = rotate_api_key()
         
         assert result is True
-        assert rules_module._current_key_index == 1
+        assert get_current_key_index() == 1
 
     @patch('translation_tool.core.lm_config_rules.load_config')
     def test_rotate_api_key_no_more_keys(self, mock_load_config):
         """測試 API Key 輪換（無更多金鑰）。"""
-        from translation_tool.core.lm_config_rules import rotate_api_key
+        from translation_tool.core.lm_config_rules import rotate_api_key, reset_key_index
         
         mock_load_config.return_value = {
             "lm_translator": {
@@ -68,8 +67,7 @@ class TestAPIKeyManagement:
         }
         
         # 重置索引
-        import translation_tool.core.lm_config_rules as rules_module
-        rules_module._current_key_index = 0
+        reset_key_index()
         
         result = rotate_api_key()
         

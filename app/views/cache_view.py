@@ -2072,7 +2072,8 @@ class CacheView(ft.Column):
         """鍵值篩選條件變更時重新渲染"""
         self.shard_detail_page = 1
         self._render_shard_detail_keys()
-        self.page.update()
+        if self.page:
+            self.page.update()
 
     def _set_shard_workspace_visible(self, visible: bool):
         """顯示或隱藏分片工作區面板"""
@@ -2081,7 +2082,8 @@ class CacheView(ft.Column):
             self.shard_nav_view.visible = not show_workspace
         if hasattr(self, "shard_workspace_card"):
             self.shard_workspace_card.visible = show_workspace
-        self.page.update()
+        if self.page:
+            self.page.update()
 
     def _open_shard_workspace_tab(self):
         """開啟分片工作區標籤"""
@@ -2106,7 +2108,8 @@ class CacheView(ft.Column):
         self.shard_dst_loaded_sig = None
         self._render_query_type_shard_page()
         self._open_shard_workspace_tab()
-        self.page.update()
+        if self.page:
+            self.page.update()
 
     def _on_select_shard_key(self, key: str):
         """選擇鍵值時更新詳情面板"""
@@ -2117,7 +2120,8 @@ class CacheView(ft.Column):
         # 如果歷史紀錄視窗已開啟，自動更新
         if hasattr(self, "shard_history_window") and self.shard_history_window.visible:
             self._render_shard_history()
-        self.page.update()
+        if self.page:
+            self.page.update()
 
     def _load_shard_entry(
         self, cache_type: str, filename: str, key: str
@@ -2193,7 +2197,8 @@ class CacheView(ft.Column):
         """切換來源原始模式"""
         self.shard_detail_src_mode = "raw"
         self._render_shard_src_panel()
-        self.page.update()
+        if self.page:
+            self.page.update()
 
     def _normalize_cache_text(self, text: str) -> str:
         """正規化快取文字（移除跳脫序列）"""
@@ -2283,7 +2288,8 @@ class CacheView(ft.Column):
             self._render_shard_src_panel()
             self._render_shard_dst_panel()
             self._notify("已套用 C3 DST 並寫入快取", "info")
-            self.page.update()
+            if self.page:
+                self.page.update()
         except Exception as ex:
             self._notify(f"套用 DST 失敗：{ex}", "error")
 
@@ -2296,7 +2302,8 @@ class CacheView(ft.Column):
         self.shard_dst_field.value = str(self.shard_dst_original or "")
         self._show_snack_bar("已還原到原始值", theme.BLUE_400)
         self._refresh_disabled_state()
-        self.page.update()
+        if self.page:
+            self.page.update()
 
     def _on_shard_dst_copy(self, e):
         """複製目標內容到剪貼簿"""
@@ -2336,7 +2343,8 @@ class CacheView(ft.Column):
         self._notify(
             "已載入最新歷史紀錄到 DST（尚未寫入快取，請點「套用 DST」儲存）", "info"
         )
-        self.page.update()
+        if self.page:
+            self.page.update()
 
     def _on_select_shard_history_event(self, event: dict):
         """選擇歷史事件"""
@@ -2516,7 +2524,8 @@ class CacheView(ft.Column):
             self._render_shard_dst_panel()
             self._render_shard_history()
             self._notify("已套用選取舊值並寫入快取", "info")
-            self.page.update()
+            if self.page:
+                self.page.update()
         except Exception as ex:
             self._notify(f"套用舊值失敗：{ex}", "error")
 

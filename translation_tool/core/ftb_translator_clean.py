@@ -1,3 +1,9 @@
+"""translation_tool/core/ftb_translator_clean.py 模組。
+
+用途：FTB Quests 翻譯的清理與合併功能。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 from __future__ import annotations
 
 import os

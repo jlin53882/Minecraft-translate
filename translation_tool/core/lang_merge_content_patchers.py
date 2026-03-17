@@ -1,3 +1,9 @@
+"""translation_tool/core/lang_merge_content_patchers.py 模組。
+
+用途：語言檔案的修補與修改功能。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 from __future__ import annotations
 
 import logging

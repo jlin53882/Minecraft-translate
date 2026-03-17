@@ -9,9 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 def map_lang_output_path(src: Path) -> Path:
-    """
-
-    """
+    """根據來源路徑自動判定翻譯輸出的目標路徑（例如將 en_us.json 映射至 zh_tw.json）。"""
     if src.name.lower() == "en_us.json" and "lang" in src.parts:
         return src.with_name("zh_tw.json")
     return src

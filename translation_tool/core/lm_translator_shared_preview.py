@@ -1,3 +1,9 @@
+"""translation_tool/core/lm_translator_shared_preview.py 模組。
+
+用途：翻譯結果的預覽功能。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

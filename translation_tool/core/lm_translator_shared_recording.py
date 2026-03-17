@@ -1,3 +1,9 @@
+"""translation_tool/core/lm_translator_shared_recording.py 模組。
+
+用途：翻譯紀錄的收集與匯出功能。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
