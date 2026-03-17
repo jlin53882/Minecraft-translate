@@ -14,6 +14,7 @@
 # /minecraft_translator_flet/app/views/extractor_view.py
 import flet as ft
 from app.ui import theme
+from translation_tool.utils.log_unit import log_info, log_warning, log_error
 import threading
 
 from app.task_session import TaskSession
@@ -302,6 +303,7 @@ class ExtractorView(ft.Column):
         :param message: 要顯示的文字訊息
         :param color: SnackBar 的背景顏色，預設為淺紅色 (RED_400)
         """
+        log_info(f"[UI] SnackBar: {message}")
         # 建立 SnackBar 元件，包含文字內容與背景顏色
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
 

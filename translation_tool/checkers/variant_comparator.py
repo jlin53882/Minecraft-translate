@@ -8,15 +8,14 @@
 
 import os
 import orjson as json
-import logging
 from typing import Dict, Any, Generator
 from opencc import OpenCC
 
 # 導入我們自訂的工具
 from ..utils.config_manager import config
 from ..utils.text_processor import load_replace_rules, apply_replace_rules
+from ..utils.log_unit import log_info, log_warning, log_error, log_debug
 
-log = logging.getLogger(__name__)
 
 def compare_variants_generator(zh_cn_dir: str, zh_tw_dir: str, output_dir: str) -> Generator[Dict[str, Any], None, None]:
     """

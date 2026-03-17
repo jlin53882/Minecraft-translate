@@ -11,6 +11,7 @@ import threading
 from app.ui import theme
 from app.services_impl.config_service import load_config_json
 from app.services_impl.pipelines.bundle_service import run_bundling_service
+from translation_tool.utils.log_unit import log_info, log_warning, log_error
 
 # --- 導入 tkinter ---
 import tkinter as tk
@@ -114,6 +115,7 @@ class BundlerView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """顯示提示訊息"""
+        log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

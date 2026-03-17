@@ -4,12 +4,12 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import logging
 import threading
 import time
 
 import flet as ft
 from app.ui import theme
+from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug
 
 # UI 共用元件：統一卡片/按鈕樣式
 from app.ui.components import primary_button, styled_card
@@ -18,7 +18,6 @@ from app.services_impl.pipelines.lm_service import run_lm_translation_service
 from app.task_session import TaskSession
 from translation_tool.utils.config_manager import load_config
 
-logger = logging.getLogger(__name__)
 LM_translate_folder_name = (
     load_config().get("lm_translator", {}).get("lm_translate_folder_name", "LM翻譯後")
 )
@@ -213,7 +212,7 @@ class LMView(ft.Column):
         export_lang = self.export_lang_checkbox.value
         write_new_cache = self.write_new_cache_switch.value
 
-        logger.debug(
+        log_debug(
             "LM UI options: dry_run=%s export_lang=%s write_new_cache=%s",
             dry_run,
             export_lang,
@@ -280,6 +279,7 @@ class LMView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """顯示 SnackBar 訊息提示"""
+        log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

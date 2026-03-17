@@ -4,7 +4,6 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import logging
 import time
 
 import requests
@@ -17,6 +16,7 @@ from translation_tool.core.lm_config_rules import (
 )
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
 
 # =========================================================
 # Time Constants - 時間相關常數
@@ -30,7 +30,6 @@ OVERLOAD_RETRY_WAIT_SEC = 12  # Overload 重試等待秒數
 MIN_LANG_BATCH_SIZE = 20  # Lang 類型最小批次大小
 DEFAULT_BATCH_SIZE = 50  # 預設批次大小
 
-logger = logging.getLogger(__name__)
 
 # =========================================================
 # 預設參數
@@ -370,7 +369,7 @@ def translate_batch_smart_old(batch_items, total=None):
 
         # [DEBUG] 記錄發送摘要
         first_path = current_batch[0]["path"] if current_batch else "N/A"
-        logger.debug(
+        log_debug(
             f"[🔍 DEBUG] 準備發送 Payload: 總量={len(current_batch)} | ID 範圍: 0-{len(current_batch) - 1} | 起點: {first_path}"
         )
 
@@ -396,7 +395,7 @@ def translate_batch_smart_old(batch_items, total=None):
             model_name = MODEL_POOL[i]
             try:
                 # print(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/{original_total} | 類型={'Lang' if is_lang else 'Patch'}")
-                # logger.info(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/{original_total} | 類型={'Lang' if is_lang else 'Patch'}")
+                # log_info(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/{original_total} | 類型={'Lang' if is_lang else 'Patch'}")
 
                 profile_name = {
                     "lang": "Lang",
@@ -405,8 +404,8 @@ def translate_batch_smart_old(batch_items, total=None):
                     "md": "MD",
                     "patch": "Patch",
                 }.get(batch_profile, batch_profile)
-                # logger.info(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/{original_total} | 類型={profile_name}")
-                logger.info(
+                # log_info(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/{original_total} | 類型={profile_name}")
+                log_info(
                     f"[→] 嘗試模型 {model_name} | "
                     f"Batch={len(current_batch)}/{max_bs} | "
                     f"翻譯總量={original_total} | "
@@ -423,7 +422,7 @@ def translate_batch_smart_old(batch_items, total=None):
                     # ftb / patchouli / 其他
                     prompt = PATCHOUI_SYSTEM_PROMPT
 
-                logger.debug(
+                log_debug(
                     "Batch profile=%s -> System Prompt=%s",
                     batch_profile,
                     "LANG" if prompt is LANG_SYSTEM_PROMPT else "PATCHOUI",
@@ -440,14 +439,14 @@ def translate_batch_smart_old(batch_items, total=None):
                 # ✅ 空內容檢查（改成 raw_text）
                 if not raw_text:
                     # print(f"[!] 模型 {model_name} 回傳空內容，切換模型...")
-                    logger.info(f"[!] 模型 {model_name} 回傳空內容，切換模型...")
+                    log_info(f"[!] 模型 {model_name} 回傳空內容，切換模型...")
                     continue
 
                 # --- 核心改進：檢查輸出是否被截斷 ---
                 if not raw_text.endswith(("}", "]")):
                     # print(f"[!] 偵測到 JSON 可能被截斷（結尾不完整），將縮小 Batch 重試")
                     overload_retry_count = 0  # ⭐ 重置過載計數器
-                    logger.info(
+                    log_info(
                         "[!] 偵測到 JSON 可能被截斷（結尾不完整），將縮小 Batch 重試"
                     )
                     break
@@ -491,12 +490,12 @@ def translate_batch_smart_old(batch_items, total=None):
                     missing_ids = list(
                         set(id_to_item_map.keys()) - set(normalized_translations.keys())
                     )
-                    logger.warning(
+                    log_warning(
                         f"[❌ 漏翻] 送出 {sent_count} 條，實收 {received_count} 條"
                     )
-                    logger.warning(f"[❌ 缺失 ID] {missing_ids[:5]}")
+                    log_warning(f"[❌ 缺失 ID] {missing_ids[:5]}")
                     if missing_ids:
-                        logger.debug(
+                        log_debug(
                             f"[🔍 缺失範例] {id_to_item_map[missing_ids[0]]['path']}"
                         )
                     break
@@ -518,19 +517,19 @@ def translate_batch_smart_old(batch_items, total=None):
                     ):
                         lazy_count += 1
                         if lazy_count <= 3:
-                            logger.debug(f"[⚠️ 疑似未翻] {original_item['path']}")
+                            log_debug(f"[⚠️ 疑似未翻] {original_item['path']}")
 
                     new_item["text"] = translated_text
                     merged_result.append(new_item)
 
                 if lazy_count > 0:
-                    logger.info(
+                    log_info(
                         f"[📊 本批次疑似未翻，建議Cache內容查詢 {lazy_count}/{sent_count}]"
                     )
 
                 result = merged_result
 
-                logger.info(f"[✓] 成功取得翻譯：{model_name}")
+                log_info(f"[✓] 成功取得翻譯：{model_name}")
 
                 completed_calls += 1
 
@@ -550,12 +549,12 @@ def translate_batch_smart_old(batch_items, total=None):
                 pinned_model_index = None  # ⭐ 解鎖 模型
 
                 if remaining_count == 0:
-                    # logger.info(f"📊 已完成 API 呼叫：{completed_calls} 次 | 所有 items 已完成")
-                    logger.info(
+                    # log_info(f"📊 已完成 API 呼叫：{completed_calls} 次 | 所有 items 已完成")
+                    log_info(
                         f"📊 本批次已完成：calls={completed_calls} | 本批 items={len(batch_items)}"
                     )
                     # 免費層保護
-                    logger.info("⏳ 等待 12 秒以避免觸發 RPM 限制…")
+                    log_info("⏳ 等待 12 秒以避免觸發 RPM 限制…")
                     time.sleep(12)
                 # else: #本批次 進來不會進來這裡處理
                 #    remaining_calls_estimated = math.ceil(
@@ -566,20 +565,20 @@ def translate_batch_smart_old(batch_items, total=None):
                 #    eta_min = eta_sec // 60
                 #    eta_sec = eta_sec % 60
 
-                #    logger.info(
+                #    log_info(
                 #        f"📊 已完成 API 呼叫：{completed_calls} 次 | "
                 #        f"剩餘 items：{remaining_count} | "
                 #        f"目前 batch={batch_size} | "
                 #        f"ETA ≈ {eta_min}m {eta_sec}s"
                 #    )
                 #    # 免費層保護
-                #    logger.info("⏳ 等待 12 秒以避免觸發 RPM 限制…")
+                #    log_info("⏳ 等待 12 秒以避免觸發 RPM 限制…")
                 #    time.sleep(12)
                 #
 
                 # ⭐ 如果已經沒有剩餘項目，直接結束 while
                 if not remaining_items:
-                    logger.info("✅ 所有項目已翻譯完成")
+                    log_info("✅ 所有項目已翻譯完成")
                     return all_results, "AUTO"
 
                 break  # 跳出 model loop
@@ -601,12 +600,12 @@ def translate_batch_smart_old(batch_items, total=None):
 
                 # ========== 404 ==========
                 if status == 404:
-                    logger.info(f"[⛔] 模型 {model_name} 不存在或無法使用，跳過此模型")
+                    log_info(f"[⛔] 模型 {model_name} 不存在或無法使用，跳過此模型")
                     break  # ⭐ 跳離迴圈
 
                 # ========== 403 ==========
                 if status == 403:
-                    logger.info(
+                    log_info(
                         f"❌ 403 PERMISSION_DENIED：API Key 無權限 (index {get_current_key_index()})"
                     )
                     try:
@@ -622,7 +621,7 @@ def translate_batch_smart_old(batch_items, total=None):
                         raise RuntimeError(
                             "❌ FAILED_PRECONDITION：此地區未啟用 Gemini API 免費方案，請啟用付費"
                         )
-                    logger.info(
+                    log_info(
                         "[⚠️] 400 INVALID_ARGUMENT：payload 格式錯誤或過大，縮小 batch"
                     )
                     break  # ⭐ 交給 batch shrink
@@ -664,7 +663,7 @@ def translate_batch_smart_old(batch_items, total=None):
                         # 3. 根據 Quota ID 進行分類處理
                         if "PERDAY" in quota_id or "DAILY" in remote_msg:
                             # 情況 A：每日額度 (RPD) 滿了 (Log 顯示：GENERATEREQUESTSPERDAY...)
-                            logger.warning(
+                            log_warning(
                                 f"[🚫] 每日限額已滿 (RPD)：Key Index {get_current_key_index()} 今日失效"
                             )
                             hit_rpm = True
@@ -676,7 +675,7 @@ def translate_batch_smart_old(batch_items, total=None):
                         elif "PERMINUTE" in quota_id or "RPM" in remote_msg:
                             # 情況 B：每分鐘頻率 (RPM) 太快
                             wait_time = retry_after if retry_after > 0 else 10
-                            logger.info(
+                            log_info(
                                 f"[⏳] 每分鐘頻率限制 (RPM)：稍後重試，預計等待 {wait_time} 秒"
                             )
                             time.sleep(wait_time)
@@ -685,7 +684,7 @@ def translate_batch_smart_old(batch_items, total=None):
 
                         else:
                             # 情況 C：其他或未知的 429 (例如 Free Tier 的總請求限制)
-                            logger.warning(
+                            log_warning(
                                 f"[❓] 偵測到 429 限制 ({quota_id if quota_id else remote_msg})，嘗試切換 Key"
                             )
                             hit_rpm = True
@@ -697,7 +696,7 @@ def translate_batch_smart_old(batch_items, total=None):
                     except Exception as parse_err:
                         # 備援比對邏輯
                         err_msg = str(e).upper()
-                        logger.error(
+                        log_error(
                             f"[⚠️] 無法解析 429 JSON，使用備援。錯誤: {parse_err}"
                         )
 
@@ -718,12 +717,12 @@ def translate_batch_smart_old(batch_items, total=None):
                         error_final = (
                             "❌ 所有 API Key 均已耗盡每日配額 (RPD)，請等待重置時間。"
                         )
-                        logger.error(error_final)
+                        log_error(error_final)
                         return None, "ALL_KEYS_EXHAUSTED"
 
                 # ========== 504 ==========
                 if status == 504:
-                    logger.info(
+                    log_info(
                         "[⏱️] 504 DEADLINE_EXCEEDED：請求過大或模型計算太久，縮小 batch"
                     )
                     break
@@ -737,10 +736,10 @@ def translate_batch_smart_old(batch_items, total=None):
                         remote_msg = e.response.text or ""
                         remote_status = "NON_JSON"
 
-                    logger.error("-" * 60)
-                    logger.error("[🚨 Gemini 503]")
-                    logger.error(f"狀態: {remote_status}")
-                    logger.error(f"訊息: {remote_msg}")
+                    log_error("-" * 60)
+                    log_error("[🚨 Gemini 503]")
+                    log_error(f"狀態: {remote_status}")
+                    log_error(f"訊息: {remote_msg}")
 
                     is_overloaded = (
                         "overloaded" in remote_msg.lower()
@@ -754,10 +753,10 @@ def translate_batch_smart_old(batch_items, total=None):
                         pinned_model_index = i  # ⭐ 記住是哪個 model 過載
 
                         # if overload_retry_count >= 3:
-                        #    logger.error(f"[❌] 持續 overload（{overload_retry_count} 次）→ 回傳 PARTIAL 保護進度")
+                        #    log_error(f"[❌] 持續 overload（{overload_retry_count} 次）→ 回傳 PARTIAL 保護進度")
                         #    return all_results, "PARTIAL"
                         if overload_retry_count >= 3:
-                            logger.warning(
+                            log_warning(
                                 f"[🔁] 模型連續 overload（{overload_retry_count} 次），嘗試切換 API Key"
                             )
 
@@ -766,7 +765,7 @@ def translate_batch_smart_old(batch_items, total=None):
                                 if rotate_api_key():
                                     overload_retry_count = 0  # ⭐ 重置過載計數
                                     pinned_model_index = None  # ⭐ 解鎖模型，允許重新選
-                                    logger.info(
+                                    log_info(
                                         "[✅] API Key 切換成功 → 原地重送同一 batch,等待12秒"
                                     )
                                     time.sleep(12)  # ⭐ 給新 Key 一點緩衝
@@ -776,13 +775,13 @@ def translate_batch_smart_old(batch_items, total=None):
                                     raise RuntimeError("NO_MORE_KEYS")
 
                             except RuntimeError:
-                                logger.error(
+                                log_error(
                                     "[❌] 所有 API Key 在 overload 狀態下均不可用 → 回傳 PARTIAL 保護進度"
                                 )
                                 return all_results, "PARTIAL"
 
                         wait_sec = OVERLOAD_RETRY_WAIT_SEC
-                        logger.warning(
+                        log_warning(
                             f"[⚠️] 模型過載（第 {overload_retry_count} 次），"
                             f"原地等待 {wait_sec}s 後重送【同一 batch / 同一模型】"
                         )
@@ -793,7 +792,7 @@ def translate_batch_smart_old(batch_items, total=None):
 
                     # ===== B. 非 overload 的 503：換 key / model =====
                     else:
-                        logger.warning(
+                        log_warning(
                             "503 非 overload（可能節點或區域異常）→ 嘗試切換 API key"
                         )
                         try:
@@ -801,23 +800,23 @@ def translate_batch_smart_old(batch_items, total=None):
                             time.sleep(5)
                             continue  # 換 key 繼續 model pool
                         except Exception as err:
-                            logger.error(f"API key 切換失敗: {err}")
+                            log_error(f"API key 切換失敗: {err}")
                             break
 
                 # ======== 500 ==========
                 if status == 500:
-                    logger.info(
+                    log_info(
                         "[⚠️] 500 INTERNAL：Gemini 後端錯誤，嘗試換模型或縮 batch"
                     )
                     break
 
                 # ========== requests timeout ==========
                 if isinstance(e, requests.Timeout):
-                    logger.info("[⏱️] Timeout：模型尚未完成計算，縮小 batch")
+                    log_info("[⏱️] Timeout：模型尚未完成計算，縮小 batch")
                     break
 
                 # ========== fallback ==========
-                logger.info(f"[!] 未分類錯誤: {e}")
+                log_info(f"[!] 未分類錯誤: {e}")
                 break
 
         # ⭐⭐⭐ 關鍵判定：如果是因為過載而跳出，直接進入下一次 while 迴圈（不執行下方的縮小邏輯）
@@ -831,7 +830,7 @@ def translate_batch_smart_old(batch_items, total=None):
         # --- 如果所有模型都失敗，或者觸發了 break (截斷 / 數量不符) ---
         # ⭐ hit_rpm 代表「需要重試同一批」（不再代表等待）
         if hit_rpm:
-            logger.info("[🔁] 使用新 API Key，重新嘗試同一批次")
+            log_info("[🔁] 使用新 API Key，重新嘗試同一批次")
             hit_rpm = False  # ⭐ 重置旗標，避免無限 continue
             continue
         ## 發生錯誤時縮小比例
@@ -856,12 +855,12 @@ def translate_batch_smart_old(batch_items, total=None):
             # 情況 A：如果是因為 RPM (Rate Limit) 或 API 請求失敗而需要重試
             if hit_rpm:
                 try:
-                    logger.info("🔄 觸發頻率限制，嘗試切換 API Key...")
+                    log_info("🔄 觸發頻率限制，嘗試切換 API Key...")
                     rotate_api_key()
                     # 保持 hit_rpm = True，下一輪會用新 Key 重試這批
                     continue
                 except RuntimeError:
-                    logger.error(
+                    log_error(
                         f"[❌] 致命錯誤：API Key 已全數耗盡，且目前 Batch ({batch_size}) 無法再縮小。"
                         "將儲存目前進度並結束任務。"
                     )
@@ -869,7 +868,7 @@ def translate_batch_smart_old(batch_items, total=None):
 
             # 情況 B：如果是因為 JSON 截斷或模型內容過長 (非 RPM 錯誤)
             else:
-                logger.warning(
+                log_warning(
                     f"[⚠️] Batch Size 已縮至極限 ({batch_size}) 仍持續截斷。"
                     "策略：跳過此批（輸出原值），直接處理下一批，避免浪費其他 API Key。"
                 )
@@ -889,7 +888,7 @@ def translate_batch_smart_old(batch_items, total=None):
                 # 4. 繼續 while 迴圈處理後面的東西
                 continue
 
-        logger.info(f"[↓] 調整 Batch：{batch_size} → {new_size}")
+        log_info(f"[↓] 調整 Batch：{batch_size} → {new_size}")
         batch_size = new_size
 
     return all_results, "AUTO"  # （只有真的要炸掉時才 raise，你現在這行會吃掉正常流程）

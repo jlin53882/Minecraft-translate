@@ -6,11 +6,10 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import Dict
 
-logger = logging.getLogger(__name__)
+from translation_tool.utils.log_unit import log_debug
 
 JSON_LINE = re.compile(r'^\s*"(.+?)"\s*:\s*"(.+?)"\s*,?\s*$')
 KEY_ZH = re.compile(r"^([a-zA-Z0-9_.-]+)([\u4e00-\u9fff].+)$")
@@ -92,7 +91,7 @@ def parse_lang_text(text: str, *, on_error=None) -> Dict[str, str]:
             if last_key is not None:
                 # 將這行內容合併到上一個 key 的 value 中
                 data[last_key] += "\n" + line
-                logger.debug(f"已自動修復續行 (line {idx}): 合併至 {last_key}")
+                log_debug(f"已自動修復續行 (line {idx}): 合併至 {last_key}")
             else:
                 # 如果第一行就沒有 '=' 且不是註解，這才是真正的錯誤
                 if on_error:

@@ -7,14 +7,13 @@
 # /minecraft_translator_flet/translation_tool/core/lang_processing_format.py
 import re
 from typing import Callable, Optional, Any, Dict
-import logging
 import opencc  # 導入 OpenCC 庫
 import orjson as json
 import threading
 
+from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
 from ..utils.text_processor import apply_replace_rules
 
-logger = logging.getLogger(__name__)
 
 # 初始化 OpenCC 實例
 converter = opencc.OpenCC("s2twp")
@@ -30,7 +29,7 @@ def get_converter():
     # 檢查這個 Thread 是否已經初始化過自己的 converter
     if not hasattr(thread_local, "converter"):
         # 如果沒有，才建立一個新的（這只會在每個 Thread 第一次執行時跑一次）
-        logger.debug(f"正在為執行緒 {threading.current_thread().name} 初始化 OpenCC...")
+        log_debug(f"正在為執行緒 {threading.current_thread().name} 初始化 OpenCC...")
         thread_local.converter = opencc.OpenCC("s2twp")
     return thread_local.converter
 
