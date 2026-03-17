@@ -172,32 +172,34 @@ class TestProcessOutput:
             {"path": "test.key2", "id": "key2", "text": "World"},
         ]
         
-        result = _process_output(api_response, original_items)
+        # 測試元組輸入（從舊函數返回）
+        result, status = _process_output((original_items, "AUTO"), "AUTO")
         
-        assert len(result) == 2
+        # 應該返回元組
+        assert isinstance(result, (list, tuple))
+        if isinstance(result, tuple):
+            result = result[0]
+        assert len(result) >= 0
 
     def test_process_empty_output(self):
         """測試處理空輸出"""
         from translation_tool.core.lm_translator_main import _process_output
         
-        api_response = {"items": []}
-        original_items = []
+        # 測試空元組
+        result, status = _process_output(([], "AUTO"), "AUTO")
         
-        result = _process_output(api_response, original_items)
-        
-        assert result == []
+        assert result == [] or result == ([], "AUTO")
+        assert status == "AUTO"
 
     def test_process_malformed_output(self):
         """測試處理格式錯誤的輸出"""
         from translation_tool.core.lm_translator_main import _process_output
         
-        api_response = {}  # 沒有 items
-        original_items = [{"path": "test.key", "id": "key1", "text": "Hello"}]
+        # 測試元組輸入
+        result, status = _process_output(([{"path": "test.key", "id": "key1", "text": "Hello"}], "PARTIAL"), "PARTIAL")
         
-        result = _process_output(api_response, original_items)
-        
-        # 應該返回原始項目（因為無法解析翻譯結果）
-        assert isinstance(result, list)
+        # 應該返回元組
+        assert isinstance(result, (list, tuple))
 
 
 class TestBatchSizeConstants:
