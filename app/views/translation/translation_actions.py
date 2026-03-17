@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import threading
+
+from translation_tool.utils.log_unit import log_error, log_warning
 import time
 
 import flet as ft
@@ -25,8 +27,8 @@ def run_ftb(view, *, dry_run: bool):
     view.session = view.TaskSession()
     try:
         view.session.start()
-    except Exception:
-        pass
+    except Exception as e:
+        log_warning(f'FTB session.start() 失敗: {e}')
     def worker():
         """执行 FTB 翻译服务"""
         try:
@@ -37,8 +39,8 @@ def run_ftb(view, *, dry_run: bool):
                     view.session.add_log(f'[UI] 服務執行失敗：{ex}')
                 if hasattr(view.session, 'set_error'):
                     view.session.set_error(str(ex))
-            except Exception:
-                pass
+            except Exception as e:
+                log_error(f'記錄 FTB 執行失敗時發生錯誤: {e}')
     threading.Thread(target=worker, daemon=True).start()
     view._start_ui_timer()
 
@@ -62,8 +64,8 @@ def run_kjs(view, *, dry_run: bool):
     view.session = view.TaskSession()
     try:
         view.session.start()
-    except Exception:
-        pass
+    except Exception as e:
+        log_warning(f'FTB session.start() 失敗: {e}')
     def worker():
         """执行 KubeJS 翻译服务"""
         try:
@@ -74,8 +76,8 @@ def run_kjs(view, *, dry_run: bool):
                     view.session.add_log(f'[UI] 服務執行失敗：{ex}')
                 if hasattr(view.session, 'set_error'):
                     view.session.set_error(str(ex))
-            except Exception:
-                pass
+            except Exception as e:
+                log_error(f'記錄 KubeJS 執行失敗時發生錯誤: {e}')
     threading.Thread(target=worker, daemon=True).start()
     view._start_ui_timer()
 
@@ -99,8 +101,8 @@ def run_md(view, *, dry_run: bool):
     view.session = view.TaskSession()
     try:
         view.session.start()
-    except Exception:
-        pass
+    except Exception as e:
+        log_warning(f'FTB session.start() 失敗: {e}')
     def worker():
         """执行 MD 翻译服务"""
         try:
@@ -111,8 +113,8 @@ def run_md(view, *, dry_run: bool):
                     view.session.add_log(f'[UI] 服務執行失敗：{ex}')
                 if hasattr(view.session, 'set_error'):
                     view.session.set_error(str(ex))
-            except Exception:
-                pass
+            except Exception as e:
+                log_error(f'記錄 MD 執行失敗時發生錯誤: {e}')
     threading.Thread(target=worker, daemon=True).start()
     view._start_ui_timer()
 
@@ -139,8 +141,8 @@ def start_ui_timer(view):
             try:
                 tail = logs[-250:]
                 view.log_view.controls = [ft.Text(line, size=13, color=ft.Colors.GREY_100) for line in tail]
-            except Exception:
-                pass
+            except Exception as e:
+                log_warning(f'更新日誌視圖失敗: {e}')
             status = (snap.get('status') or '').upper()
             if status == 'DONE':
                 view._set_status('任務完成', ft.Colors.GREEN_200)
