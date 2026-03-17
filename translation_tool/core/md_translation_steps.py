@@ -1,8 +1,15 @@
+"""translation_tool/core/md_translation_steps.py 模組。
+
+用途：Markdown 翻譯流程的三個步驟實作（抽取、翻譯、注入）。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from typing import Any, Dict, Callable
+
 
 def step1_extract_impl(
     *,
@@ -22,6 +29,32 @@ def step1_extract_impl(
     progress_fn: Callable[[Any, float], None],
     log_warning_fn: Callable[..., None],
 ) -> Dict[str, Any]:
+    """
+    Step 1：從 Markdown 檔案中抽取可翻譯的區塊。
+
+    將原始 Markdown 檔案轉換為待翻譯的 JSON 格式。
+    支援去重複（相同內容只保留一份）。
+
+    參數：
+        input_dir: Markdown 輸入資料夾
+        pending_dir: 待翻譯 JSON 輸出資料夾
+        lang_mode: 語言模式（non_cjk_only / all）
+        session: 進度會話
+        progress_base: 進度起始值
+        progress_span: 進度範圍
+        iter_md_files_fn: 迭代 Markdown 檔案的函式
+        safe_relpath_fn: 計算相對路徑的函式
+        extract_blocks_fn: 抽取區塊的函式
+        detect_lang_segment_fn: 偵測語言區段的函式
+        map_rel_lang_path_fn: 映射語言路徑的函式
+        contains_cjk_fn: 判斷是否包含中日韓文字的函式
+        build_pending_json_fn: 建構待翻譯 JSON 的函式
+        progress_fn: 進度回呼函式
+        log_warning_fn: 警告日誌回呼函式
+
+    回傳：
+        處理結果字典，包含找到的檔案數、區塊數等統計
+    """
     in_root = Path(input_dir).resolve()
     pending_root = Path(pending_dir).resolve()
     pending_root.mkdir(parents=True, exist_ok=True)
@@ -143,7 +176,40 @@ def step1_extract_impl(
         "manifest_path": str(manifest_path),
     }
 
-def step2_translate_impl(*, pending_dir: str, translated_dir: str, session, progress_base: float, progress_span: float, dry_run: bool, write_new_cache: bool, progress_proxy_cls, translate_md_pending_fn, progress_fn) -> Dict[str, Any]:
+
+def step2_translate_impl(
+    *,
+    pending_dir: str,
+    translated_dir: str,
+    session,
+    progress_base: float,
+    progress_span: float,
+    dry_run: bool,
+    write_new_cache: bool,
+    progress_proxy_cls,
+    translate_md_pending_fn,
+    progress_fn
+) -> Dict[str, Any]:
+    """
+    Step 2：翻譯待翻譯的 JSON 檔案。
+
+    呼叫翻譯 API 將待翻譯內容翻譯為目標語言。
+
+    參數：
+        pending_dir: 待翻譯 JSON 資料夾
+        translated_dir: 翻譯完成 JSON 輸出資料夾
+        session: 進度會話
+        progress_base: 進度起始值
+        progress_span: 進度範圍
+        dry_run: 是否為測試模式（不實際呼叫 API）
+        write_new_cache: 是否寫入新快取
+        progress_proxy_cls: 進度代理類別
+        translate_md_pending_fn: 翻譯函式
+        progress_fn: 進度回呼函式
+
+    回傳：
+        翻譯結果字典
+    """
     proxy = progress_proxy_cls(session, progress_base, progress_span)
     result = translate_md_pending_fn(
         pending_dir=str(Path(pending_dir).resolve()),
@@ -155,7 +221,42 @@ def step2_translate_impl(*, pending_dir: str, translated_dir: str, session, prog
     progress_fn(session, progress_base + progress_span)
     return result
 
-def step3_inject_impl(*, input_dir: str, json_dir: str, final_dir: str, session, progress_base: float, progress_span: float, iter_json_files_fn, load_items_from_json_fn, apply_item_to_md_lines_fn, map_lang_in_rel_path_allow_zh_fn, progress_fn) -> Dict[str, Any]:
+
+def step3_inject_impl(
+    *,
+    input_dir: str,
+    json_dir: str,
+    final_dir: str,
+    session,
+    progress_base: float,
+    progress_span: float,
+    iter_json_files_fn,
+    load_items_from_json_fn,
+    apply_item_to_md_lines_fn,
+    map_lang_in_rel_path_allow_zh_fn,
+    progress_fn
+) -> Dict[str, Any]:
+    """
+    Step 3：將翻譯結果注入回 Markdown 檔案。
+
+    讀取原始 Markdown 和翻譯 JSON，將翻譯後的內容寫入輸出檔案。
+
+    參數：
+        input_dir: 原始 Markdown 資料夾
+        json_dir: 翻譯 JSON 資料夾
+        final_dir: 最終輸出資料夾
+        session: 進度會話
+        progress_base: 進度起始值
+        progress_span: 進度範圍
+        iter_json_files_fn: 迭代 JSON 檔案的函式
+        load_items_from_json_fn: 從 JSON 載入項目的函式
+        apply_item_to_md_lines_fn: 將項目套用到 Markdown 行內容的函式
+        map_lang_in_rel_path_allow_zh_fn: 映射語言路徑的函式
+        progress_fn: 進度回呼函式
+
+    回傳：
+        處理結果字典，包含寫入檔案數、略過檔案數等統計
+    """
     src_root = Path(input_dir).resolve()
     jroot = Path(json_dir).resolve()
     out_done = Path(final_dir).resolve()

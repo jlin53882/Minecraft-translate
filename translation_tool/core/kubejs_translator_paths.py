@@ -1,3 +1,9 @@
+"""translation_tool/core/kubejs_translator_paths.py 模組。
+
+用途：KubeJS 路徑解析功能。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

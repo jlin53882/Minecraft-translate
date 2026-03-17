@@ -1,3 +1,9 @@
+"""translation_tool/core/md_translation_stats.py 模組。
+
+用途：Markdown 翻譯的統計與分析功能。
+維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+"""
+
 from __future__ import annotations
 
 import json
@@ -14,17 +20,20 @@ _LANG_MODE_LABELS = {
 }
 
 def normalize_lang_mode(lang_mode: str) -> str:
+    """正規化語言過濾模式參數，若輸入無效則預設回傳 "non_cjk_only"。"""
     mode = (lang_mode or "").strip().lower()
     if mode in _LANG_MODE_LABELS:
         return mode
     return "non_cjk_only"
 
 def count_json_files(root: Path) -> int:
+    """遞迴統計指定目錄下所有 .json 檔案的總數。"""
     if not root.exists() or not root.is_dir():
         return 0
     return sum(1 for p in root.rglob("*.json") if p.is_file())
 
 def count_md_pending_docs(root: Path) -> int:
+    """統計指定目錄下符合 Markdown 待處理結構（schema v1）的 JSON 文件數量。"""
     if not root.exists() or not root.is_dir():
         return 0
     count = 0
@@ -40,6 +49,7 @@ def count_md_pending_docs(root: Path) -> int:
     return count
 
 def log_md_step2_stats(step2_res: Dict[str, Any], *, log_info_fn: Callable[..., None]) -> None:
+    """解析並格式化 Markdown 翻譯任務的統計數據，輸出包含快取命中率、批次預估及 ETA 的進度日誌。"""
     if not isinstance(step2_res, dict):
         return
 
