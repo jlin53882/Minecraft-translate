@@ -7,10 +7,10 @@
 import re
 import threading
 from typing import Any
-from ..utils.config_manager import load_config
-import logging
 
-logger = logging.getLogger(__name__)
+from ..utils.config_manager import load_config
+from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
+
 
 
 # =========================
@@ -106,7 +106,7 @@ def get_current_api_key() -> str:
     """
     keys = _get_all_keys()
     if not keys:
-        logger.error("❌ 設定檔中沒有找到任何有效的 API Key")
+        log_error("❌ 設定檔中沒有找到任何有效的 API Key")
         return ""
 
     # 更新 key_count 以便正確環繞
@@ -152,12 +152,12 @@ def rotate_api_key():
     # 檢查是否還有下一個 Key 可以切換
     current_index = _key_tracker.get_current()
     if current_index + 1 >= len(keys):
-        logger.error("❌ 所有 API Key 已用盡（RPD exhausted）")
+        log_error("❌ 所有 API Key 已用盡（RPD exhausted）")
         return False
 
     # 切換至下一個 API Key（執行緒安全）
     new_index = _key_tracker.next()
-    logger.info(f"🔁 切換 API Key → index {new_index}")
+    log_info(f"🔁 切換 API Key → index {new_index}")
     return True
 
 def validate_api_keys():
@@ -174,13 +174,13 @@ def validate_api_keys():
     for k in keys:
         # 1. 檢查金鑰是否符合 Google API Key 的標準前綴 "AIza"
         if not k.startswith("AIza"):
-            logger.error(f"❌ 偵測到無效格式金鑰: {k!r}")
+            log_error(f"❌ 偵測到無效格式金鑰: {k!r}")
             raise RuntimeError(
                 f"❌ 無效的 API Key 格式：{k!r}\n"
                 "Gemini API Key 應以 'AIza' 開頭，請檢查您的設定檔。"
             )
 
-    logger.info(f"✅ 金鑰格式驗證通過，共載入 {len(keys)} 組金鑰。")
+    log_info(f"✅ 金鑰格式驗證通過，共載入 {len(keys)} 組金鑰。")
 
 def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
     """驗證 API Key 格式（UI 專用）。
@@ -442,7 +442,7 @@ def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
     if (
         is_lang and SKIP_TERMS_PATTERN.search(s) and len(s) <= 5  # ⭐ 關鍵
     ):
-        logger.debug("SKIP[skip_terms] len=%d text=%r", len(s), s)
+        log_debug("SKIP[skip_terms] len=%d text=%r", len(s), s)
         return False
 
     # 避開羅馬數字

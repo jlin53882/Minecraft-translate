@@ -68,13 +68,7 @@ class TestLangMergeContentExports:
 class TestLangMergeContentProxyFunctions:
     """測試代理函式是否正確委派。"""
 
-    @pytest.fixture
-    def mock_logger(self):
-        """建立 mock logger。"""
-        with patch("translation_tool.core.lang_merge_content.logger") as mock:
-            yield mock
-
-    def test_remove_empty_dirs_calls_impl(self, mock_logger, tmp_path: Path):
+    def test_remove_empty_dirs_calls_impl(self, tmp_path: Path):
         """測試 remove_empty_dirs 是否正確呼叫實作。"""
         from translation_tool.core.lang_merge_content import remove_empty_dirs
         

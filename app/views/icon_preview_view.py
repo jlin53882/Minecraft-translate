@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from collections import defaultdict
 from app.ui import theme
+from translation_tool.utils.log_unit import log_info, log_warning, log_error
 from types import SimpleNamespace
 
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
@@ -328,7 +329,7 @@ class IconPreviewView(ft.Column):
         - 使用 page.overlay
         - 不會被 ListView / update 吃掉
         """
-
+        log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(
             content=ft.Text(message),
             bgcolor=color,

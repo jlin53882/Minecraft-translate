@@ -7,18 +7,16 @@
 from __future__ import annotations
 
 import concurrent.futures
-import logging
 import os
 import zipfile
 from collections import defaultdict
 from typing import Any, Dict, Generator, List
 
 from ..utils.config_manager import load_config
+from ..utils.log_unit import log_error, log_info, log_warning, log_debug, log_exception
 from ..utils.text_processor import load_replace_rules
 from .lang_merge_content import _process_content_or_copy_file, export_filtered_pending, remove_empty_dirs
 from .lang_merge_pipeline import _process_single_mod
-
-logger = logging.getLogger(__name__)
 
 def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang: bool = False ) -> Generator[Dict[str, Any], None, None]:
     """將 ZIP 檔案中的簡體中文合併為繁體中文。
@@ -42,14 +40,14 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
     try:
         rules = load_replace_rules(load_config().get("replace_rules_path", "replace_rules.json"))
     except Exception as e:
-        logger.error(f"載入替換規則失敗: {e}")
+        log_error(f"載入替換規則失敗: {e}")
         yield {"progress": 0.0, "error": True}
         return
 
     # --- 新增：檢查 ZIP 檔案是否存在 ---
     if not os.path.exists(zip_file):
         full_path = os.path.abspath(zip_file) # 取得絕對路徑，方便除錯
-        logger.warning(f"檔案不存在，已跳過: {full_path}")
+        log_warning(f"檔案不存在，已跳過: {full_path}")
         yield {
             "progress": 1.0, 
             #"log": f"跳過：找不到檔案 {full_path}", 
@@ -117,10 +115,10 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
             total_content_files = len(other_files)
             total_tasks = total_lang_mods + total_content_files
             if total_tasks == 0:
-                logger.info("未找到任何可處理的文件，處理結束。")
+                log_info("未找到任何可處理的文件，處理結束。")
                 yield {"progress": 1.0, "error": False}
                 return
-            logger.info(f"找到 {total_lang_mods} 個語言模組與 {total_content_files} 個內容檔案，開始處理...")
+            log_info(f"找到 {total_lang_mods} 個語言模組與 {total_content_files} 個內容檔案，開始處理...")
             yield {"progress": 0.0}
 
             # 使用 ThreadPoolExecutor 處理（你可以依需求調整 max_workers）
@@ -153,7 +151,7 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
                     try:
                         res = fut.result()
                     except Exception as e:
-                        logger.error(f"處理時發生未預期錯誤: {e}")
+                        log_error(f"處理時發生未預期錯誤: {e}")
                         res = {"success": False, "error": True}
 
                     progress = completed / total_tasks
@@ -170,31 +168,31 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
                     # 2. 終端機日誌處理
                     log_msg = res.get("log")
                     if log_msg:
-                        logger.info(log_msg)
+                        log_info(log_msg)
                     else:
-                        logger.debug(f"靜默處理完成 (進度: {progress:.2%})")
+                        log_debug(f"靜默處理完成 (進度: {progress:.2%})")
 
                     # 3. 核心重點：無論有沒有 log，每一條任務完成都 yield 一次
                     # 這樣進度條 (progress) 就會隨著任務完成一個個跳動
                     yield yield_data
             # <--- 在這裡插入清理代碼 --->
-            logger.info("正在清理空的待翻譯資料夾...")
+            log_info("正在清理空的待翻譯資料夾...")
             remove_empty_dirs(must_translate_dir)
             # 🔥 新增：輸出整理後的待翻譯檔案
             #讀取config 設定資料
             folder_name=load_config().get("lang_merger", {}).get("pending_organized_folder_name", "待翻譯整理需翻譯")
             filtered_pending_dir = os.path.join(output_dir, folder_name)
-            logger.info("正在產生待翻譯整理需翻譯 檔案...")
+            log_info("正在產生待翻譯整理需翻譯 檔案...")
             #config 讀取資料
             filtered_pending_min_count=load_config().get("lang_merger", {}).get("filtered_pending_min_count", 2)
             export_filtered_pending(must_translate_dir, filtered_pending_dir, min_count=filtered_pending_min_count)
             # <--- 插入結束 --->
-            logger.info(f"--- 全部處理完成: {total_tasks} 個任務完成 ---")
+            log_info(f"--- 全部處理完成: {total_tasks} 個任務完成 ---")
             yield {"progress": 1.0}
 
     except zipfile.BadZipFile:
-        logger.error(f"錯誤：檔案 '{zip_file}' 不是有效 ZIP。")
+        log_error(f"錯誤：檔案 '{zip_file}' 不是有效 ZIP。")
         yield {"progress": 1.0, "error": True}
     except Exception as e:
-        logger.exception(f"處理 ZIP 發生錯誤: {e}")
+        log_exception(f"處理 ZIP 發生錯誤: {e}")
         yield {"progress": 1.0, "error": True}

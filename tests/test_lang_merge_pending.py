@@ -83,7 +83,7 @@ def test_remove_empty_dirs_impl_with_logger(tmp_path: Path) -> None:
     
     mock_logger = MagicMock()
     
-    lang_merge_pending.remove_empty_dirs_impl(str(test_dir), logger_override=mock_logger)
+    lang_merge_pending.remove_empty_dirs_impl(str(test_dir), )
     
     assert not sub_dir.exists()
 

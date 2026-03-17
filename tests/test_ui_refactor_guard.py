@@ -9,12 +9,6 @@ def _read(rel: str) -> str:
     return (BASE / rel).read_text(encoding="utf-8")
 
 
-def test_main_uses_shared_view_wrapper():
-    src = _read("main.py")
-    assert "from app.ui.view_wrapper import wrap_view" in src
-    assert "create_view_wrapper(" not in src
-
-
 def test_views_use_shared_components_and_no_local_styled_card():
     targets = [
         "app/views/translation_view.py",

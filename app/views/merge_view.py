@@ -10,6 +10,7 @@ from pathlib import Path
 
 import flet as ft
 from app.ui import theme
+from translation_tool.utils.log_unit import log_info, log_warning, log_error
 
 import flet as ft
 
@@ -305,6 +306,7 @@ class MergeView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """顯示 SnackBar 訊息提示"""
+        log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

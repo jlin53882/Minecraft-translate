@@ -6,6 +6,7 @@
 
 import flet as ft
 from app.ui import theme
+from translation_tool.utils.log_unit import log_info, log_warning, log_error
 
 # UI 共用元件：統一按鈕樣式
 from app.ui.components import primary_button, secondary_button
@@ -497,6 +498,7 @@ class RulesView(ft.Column):
         """在頁面顯示提示訊息 snack bar"""
         if not self.page:
             return
+        log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(
             ft.Text(message, color=theme.WHITE), bgcolor=color, open=True
         )

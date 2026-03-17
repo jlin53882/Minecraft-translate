@@ -12,6 +12,7 @@ from typing import Any
 
 import orjson as json
 
+from ..utils.log_unit import log_info, log_error, log_debug, log_warning
 from translation_tool.core.translatable_extractor import (
     extract_translatables,
     find_lang_json,
@@ -50,7 +51,7 @@ def extract_items_parallel(
     files: list[Path],
     export_lang: bool,
     work_thread: int,
-    logger,
+    logger=None,
 ) -> tuple[dict[str, dict], list[dict[str, Any]]]:
     """並行讀取/解析/抽取可翻譯文字。
 
@@ -73,7 +74,7 @@ def extract_items_parallel(
 
                 # ⭐ 若要輸出 .lang，但內容不是純 key->str，就只能退回輸出 json
                 if export_lang and not is_plain_lang_json(data):
-                    logger.info(f"⚠️ Lang 檔為複合格式（含 list/dict），無法輸出 .lang，將改用 .json：{f}")
+                    log_info(f"⚠️ Lang 檔為複合格式（含 list/dict），無法輸出 .lang，將改用 .json：{f}")
             else:
                 c_type = "patchouli"
 
@@ -87,7 +88,7 @@ def extract_items_parallel(
                 "items": extracted_items,
             }
         except Exception as e:
-            logger.error(f"❌ 檔案處理失敗 {f.name}: {e}")
+            log_error(f"❌ 檔案處理失敗 {f.name}: {e}")
             return None
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=work_thread) as executor:

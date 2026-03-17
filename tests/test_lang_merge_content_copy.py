@@ -183,7 +183,7 @@ class TestMockZipHandling:
             normalize_patchouli_book_root_fn=lambda x: x,
             patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
             json_module=MagicMock(),
-            logger_override=None,
+            
         )
         
         assert result.get("success") is True
@@ -223,7 +223,7 @@ class TestMockZipHandling:
             normalize_patchouli_book_root_fn=lambda x: x.strip("/"),
             patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
             json_module=MagicMock(),
-            logger_override=None,
+            
         )
         
         # 由於有 zh_cn 版本，應跳過 en_us

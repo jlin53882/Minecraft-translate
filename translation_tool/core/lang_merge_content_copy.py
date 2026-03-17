@@ -6,14 +6,14 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import re
 import shutil
 import zipfile
 from typing import Any, Callable, Dict, List
 
-logger = logging.getLogger(__name__)
+from ..utils.log_unit import log_info, log_warning, log_error, log_debug
+
 
 def process_content_or_copy_file_impl(
     zf: zipfile.ZipFile,
@@ -33,19 +33,17 @@ def process_content_or_copy_file_impl(
     normalize_patchouli_book_root_fn: Callable[[str], str],
     patch_localized_content_json_fn: Callable[..., Dict[str, Any]],
     json_module,
-    logger_override=None,
 ) -> Dict[str, Any]:
     """處理非標準 lang JSON / patchouli / 純文字內容的 copy-or-patch 流程。"""
-    active_logger = logger_override or logger
     normalized_path = input_path.lower().replace("\\", "/")
-    active_logger.debug(f"[Patchouli DEBUG] 原始 input_path = {input_path}")
-    active_logger.debug(f"[Patchouli DEBUG] normalized_path(初始) = {normalized_path}")
+    log_debug(f"[Patchouli DEBUG] 原始 input_path = {input_path}")
+    log_debug(f"[Patchouli DEBUG] normalized_path(初始) = {normalized_path}")
 
     assets_idx = normalized_path.find("/assets/")
-    active_logger.debug(f"[Patchouli DEBUG] assets_idx = {assets_idx}")
+    log_debug(f"[Patchouli DEBUG] assets_idx = {assets_idx}")
     if assets_idx != -1:
         normalized_path = normalized_path[assets_idx + 1 :]
-    active_logger.debug(f"[Patchouli DEBUG] normalized_path(裁切後) = {normalized_path}")
+    log_debug(f"[Patchouli DEBUG] normalized_path(裁切後) = {normalized_path}")
 
     if only_process_lang:
         if "/lang/" not in f"/{normalized_path}":
@@ -127,7 +125,7 @@ def process_content_or_copy_file_impl(
                 with open(target, "w", encoding="utf-8") as f:
                     f.write(tw_content)
             except Exception as e:
-                active_logger.error(f"[Patchouli] 寫入失敗: {e}")
+                log_error(f"[Patchouli] 寫入失敗: {e}")
                 with zf.open(input_path) as src, open(target, "wb") as dst:
                     shutil.copyfileobj(src, dst)
         else:
@@ -148,9 +146,9 @@ def process_content_or_copy_file_impl(
     force_s2tw_extensions = {".md", ".json5", ".gui", ".lang", ".snbt", ".txt", ".properties", ".hl"}
     is_forced_s2tw = ext in force_s2tw_extensions
 
-    active_logger.debug(f"DEBUG: 進入處理函數，檔案: {input_path}")
-    active_logger.debug(f"DEBUG: 檔案 '{input_path}' 是否為本地化 (zh_cn/ 或 zh_cn.*.ext): {is_localized_cn_file}")
-    active_logger.debug(f"DEBUG: 檔案 '{input_path}' 是否為強制 S2TW: {is_forced_s2tw}")
+    log_debug(f"DEBUG: 進入處理函數，檔案: {input_path}")
+    log_debug(f"DEBUG: 檔案 '{input_path}' 是否為本地化 (zh_cn/ 或 zh_cn.*.ext): {is_localized_cn_file}")
+    log_debug(f"DEBUG: 檔案 '{input_path}' 是否為強制 S2TW: {is_forced_s2tw}")
 
     tw_path = input_path
     if is_localized_cn_file:
@@ -185,7 +183,7 @@ def process_content_or_copy_file_impl(
                         reason=f"JSON解析失敗 (語言: {lang})",
                         extra_text=error_detail,
                     )
-                    active_logger.warning(f"{log_prefix} JSON 無法解析，已跳過並隔離: {e}")
+                    log_warning(f"{log_prefix} JSON 無法解析，已跳過並隔離: {e}")
                     return {"success": True}
 
                 if "/lang/" in normalized_path and file_name.lower() == "zh_tw.json":
@@ -220,22 +218,22 @@ def process_content_or_copy_file_impl(
                         should_write = True
                 if should_write:
                     write_bytes_atomic_fn(final_output_path, final_bytes)
-                    active_logger.info(log_message)
+                    log_info(log_message)
                     return {"success": True}
-                active_logger.debug(f"{log_prefix} JSON 檔案內容和格式一致，略過寫入。")
+                log_debug(f"{log_prefix} JSON 檔案內容和格式一致，略過寫入。")
                 return {"success": True, "log": None}
 
             if ext == ".png":
                 with zf.open(input_path) as src, open(final_output_path, "wb") as dst:
                     shutil.copyfileobj(src, dst)
-                active_logger.debug(f"DEBUG: 本地化圖片檔案 {file_name} 複製完成: {final_output_path}")
-                active_logger.info(f"{log_prefix} PNG 檔案直接複製。")
+                log_debug(f"DEBUG: 本地化圖片檔案 {file_name} 複製完成: {final_output_path}")
+                log_info(f"{log_prefix} PNG 檔案直接複製。")
                 return {"success": True}
 
             if ext == ".mcmeta":
                 with zf.open(input_path) as src, open(final_output_path, "wb") as dst:
                     shutil.copyfileobj(src, dst)
-                active_logger.info(f"{log_prefix} .mcmeta 檔案複製完成: {final_output_path}")
+                log_info(f"{log_prefix} .mcmeta 檔案複製完成: {final_output_path}")
                 return {"success": True}
 
             processor = get_text_processor_fn(ext)
@@ -256,9 +254,9 @@ def process_content_or_copy_file_impl(
                     should_write = True
             if should_write:
                 write_text_atomic_fn(final_output_path, tw_content)
-                active_logger.info(f"{log_prefix} 非本地化純文字檔案 S2TW 轉換完成。")
+                log_info(f"{log_prefix} 非本地化純文字檔案 S2TW 轉換完成。")
                 return {"success": True}
-            active_logger.debug(f"{log_prefix} 檔案內容一致，略過寫入。")
+            log_debug(f"{log_prefix} 檔案內容一致，略過寫入。")
             return {"success": True, "log": None}
 
         if ext == ".png":
@@ -278,14 +276,14 @@ def process_content_or_copy_file_impl(
                         log_msg = f"{log_prefix} 圖片檔案 (.png) 內容不同，執行覆蓋。"
                     else:
                         log_msg = f"{log_prefix} 圖片檔案 (.png) 內容相同，跳過複製。"
-                active_logger.debug(f"DEBUG: 本地化圖片檔案 {file_name} 處理完成: {final_output_path}")
-                active_logger.info(log_msg)
+                log_debug(f"DEBUG: 本地化圖片檔案 {file_name} 處理完成: {final_output_path}")
+                log_info(log_msg)
                 return {"success": True}
             except (zipfile.BadZipFile, EOFError) as e:
-                active_logger.error(f"跳過損毀的 ZIP 內檔案 {input_path}: {e}")
+                log_error(f"跳過損毀的 ZIP 內檔案 {input_path}: {e}")
                 return {"success": False, "error": True}
             except Exception as e:
-                active_logger.error(f"處理 {input_path} 時發生未預期錯誤: {e}")
+                log_error(f"處理 {input_path} 時發生未預期錯誤: {e}")
                 return {"success": False, "error": True}
 
         if ext == ".json" and is_localized_cn_file:
@@ -294,8 +292,8 @@ def process_content_or_copy_file_impl(
         if ext == ".mcmeta":
             with zf.open(input_path) as src, open(final_output_path, "wb") as dst:
                 shutil.copyfileobj(src, dst)
-            active_logger.debug(f"DEBUG: 本地化 .mcmeta 檔案 {file_name} 複製完成: {final_output_path}")
-            active_logger.info(f"{log_prefix} 本地化檔案類型 ({ext}) 已被排除 S2TW 轉換，執行直接複製。")
+            log_debug(f"DEBUG: 本地化 .mcmeta 檔案 {file_name} 複製完成: {final_output_path}")
+            log_info(f"{log_prefix} 本地化檔案類型 ({ext}) 已被排除 S2TW 轉換，執行直接複製。")
             return {"success": True}
 
         processor = get_text_processor_fn(ext)
@@ -311,7 +309,7 @@ def process_content_or_copy_file_impl(
                         existing_content = f.read().replace("\r\n", "\n").replace("\r", "\n")
                     if existing_content == tw_content:
                         should_write = False
-                        active_logger.debug(f"{log_prefix} 內容檔案 ({ext}) S2TW 轉換後內容無變動，略過寫入。")
+                        log_debug(f"{log_prefix} 內容檔案 ({ext}) S2TW 轉換後內容無變動，略過寫入。")
                 except Exception:
                     should_write = True
             if should_write:
@@ -320,14 +318,14 @@ def process_content_or_copy_file_impl(
                     log_msg = f"{log_prefix} 非本地化檔案 ({ext}) S2TW 結構化轉換完成。"
                 else:
                     log_msg = f"{log_prefix} 內容檔案 ({ext}) S2TW 結構化轉換完成。"
-            active_logger.debug(f"DEBUG: 檔案 {file_name} S2TW 處理完成。")
-            active_logger.info(log_msg)
+            log_debug(f"DEBUG: 檔案 {file_name} S2TW 處理完成。")
+            log_info(log_msg)
             return {"success": True}
 
         with zf.open(input_path) as src, open(final_output_path, "wb") as dst:
             shutil.copyfileobj(src, dst)
-        active_logger.info(f"{log_prefix} 未知本地化檔案類型 ({ext}) 直接複製完成。")
+        log_info(f"{log_prefix} 未知本地化檔案類型 ({ext}) 直接複製完成。")
         return {"success": True}
     except Exception as exc:
-        active_logger.error(f"處理內容檔案 {input_path} 時發生錯誤: {exc}", exc_info=True)
+        log_error(f"處理內容檔案 {input_path} 時發生錯誤: {exc}", exc_info=True)
         return {"success": False, "error": True}

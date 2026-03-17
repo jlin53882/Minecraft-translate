@@ -1413,6 +1413,8 @@ class CacheView(ft.Column):
         :param message: 要顯示的文字訊息
         :param color: SnackBar 的背景顏色，預設為 RED_400
         """
+        # 記錄 snackbar 顯示到日誌
+        log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

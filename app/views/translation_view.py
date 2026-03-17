@@ -9,6 +9,7 @@ import time
 
 import flet as ft
 from app.ui import theme
+from translation_tool.utils.log_unit import log_info, log_warning, log_error
 
 # UI 共用元件：抽出重複的卡片/按鈕樣式，集中在 app.ui
 from app.ui.components import primary_button, secondary_button, styled_card
@@ -316,6 +317,7 @@ class TranslationView(ft.Column):
 
     def _show_snack(self, message: str, color: str = theme.RED_600):
         """在頁面顯示 Snack Bar 提示訊息"""
+        log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

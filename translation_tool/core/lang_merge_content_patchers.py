@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import zipfile
 from typing import Any, Dict, Callable
 
-logger = logging.getLogger(__name__)
+from ..utils.log_unit import log_info, log_warning, log_error, log_debug
+
 
 def patch_localized_content_json_impl(
     zf: zipfile.ZipFile,
@@ -27,7 +27,7 @@ def patch_localized_content_json_impl(
     logger_override=None,
 ) -> Dict[str, Any]:
     """處理本地化 JSON 的 patch / pretty-print / quarantine 流程。"""
-    active_logger = logger_override or logger
+    # 使用 centralized logger
 
     try:
         with zf.open(cn_path) as f:
@@ -36,7 +36,7 @@ def patch_localized_content_json_impl(
         try:
             cn_data = json_module.loads(raw_text)
         except Exception as e:
-            active_logger.warning(f"{log_prefix} zh_cn JSON 無法解析，已跳過該檔案: {e}")
+            log_warning(f"{log_prefix} zh_cn JSON 無法解析，已跳過該檔案: {e}")
             quarantine_copy_from_zip_fn(
                 zf=zf,
                 zip_path=cn_path,
@@ -61,7 +61,7 @@ def patch_localized_content_json_impl(
                 try:
                     existing_data = json_module.loads(existing_raw)
                 except Exception:
-                    active_logger.warning(f"{log_prefix} TW JSON 無法解析，將覆蓋修復")
+                    log_warning(f"{log_prefix} TW JSON 無法解析，將覆蓋修復")
                     existing_data = None
 
                 if existing_data is not None:
@@ -71,7 +71,7 @@ def patch_localized_content_json_impl(
                     if new_content_bytes == existing_normalized_bytes:
                         should_write = False
             except Exception as e:
-                active_logger.warning(f"{log_prefix} 無法載入現有 TW 檔案 ({e})，將覆蓋寫入")
+                log_warning(f"{log_prefix} 無法載入現有 TW 檔案 ({e})，將覆蓋寫入")
 
         if should_write:
             os.makedirs(os.path.dirname(tw_output_path), exist_ok=True)
@@ -79,15 +79,15 @@ def patch_localized_content_json_impl(
                 f.write(new_content_bytes)
             log_msg = f"{log_prefix} 內容 JSON 已 S2TW 轉換並寫入（格式化）"
         else:
-            active_logger.debug(f"{log_prefix} 內容 JSON 無變動，略過寫入")
+            log_debug(f"{log_prefix} 內容 JSON 無變動，略過寫入")
 
-        active_logger.info(log_msg)
+        log_info(log_msg)
         return {
             "success": True,
             "pending_count": 0,
         }
     except Exception as exc:
-        active_logger.error(f"處理內容 JSON 檔案 {cn_path} 發生錯誤: {exc}", exc_info=True)
+        log_error(f"處理內容 JSON 檔案 {cn_path} 發生錯誤: {exc}", exc_info=True)
         return {
             "success": False,
             "error": True,

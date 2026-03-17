@@ -6,11 +6,10 @@
 
 from __future__ import annotations
 
-import logging
-
 import orjson as json
 
 from ..utils.config_manager import load_config
+from ..utils.log_unit import log_info, log_warning, log_error, log_debug
 from ..utils.text_processor import apply_replace_rules  # noqa: F401
 from ..utils.text_processor import recursive_translate_dict
 from .lang_codec import normalize_patchouli_book_root
@@ -24,8 +23,6 @@ from .lang_merge_zip_io import (
     _write_text_atomic,
     quarantine_copy_from_zip,
 )
-
-logger = logging.getLogger(__name__)
 
 def _patch_localized_content_json(
     zf,
@@ -45,7 +42,7 @@ def _patch_localized_content_json(
         recursive_translate_dict_fn=recursive_translate_dict,
         quarantine_copy_from_zip_fn=quarantine_copy_from_zip,
         json_module=json,
-        logger_override=logger,
+        
     )
 
 def _process_content_or_copy_file(
@@ -73,11 +70,11 @@ def _process_content_or_copy_file(
         normalize_patchouli_book_root_fn=normalize_patchouli_book_root,
         patch_localized_content_json_fn=_patch_localized_content_json,
         json_module=json,
-        logger_override=logger,
+        
     )
 
 def remove_empty_dirs(root_dir: str):
-    return remove_empty_dirs_impl(root_dir, logger_override=logger)
+    return remove_empty_dirs_impl(root_dir)
 
 def export_filtered_pending(pending_root: str, output_root: str, min_count: int):
     return export_filtered_pending_impl(

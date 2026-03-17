@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import re
 import zipfile
@@ -14,7 +13,8 @@ from typing import Any, Dict
 
 import orjson as json
 
-from ..utils.text_processor import apply_replace_rules, recursive_translate_dict
+from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
+from ..utils.text_processor import recursive_translate_dict, apply_replace_rules
 from .lang_codec import dump_lang_text, parse_lang_text, pick_first_not_none
 from .lang_merge_zip_io import (
     _read_json_from_zip,
@@ -25,7 +25,6 @@ from .lang_merge_zip_io import (
 )
 from .lang_processing_format import dump_json_bytes
 
-logger = logging.getLogger(__name__)
 
 def _process_single_mod(
     zf: zipfile.ZipFile,
@@ -283,7 +282,7 @@ def _process_single_mod(
             else:
                 _write_bytes_atomic(final_output_path, dump_json_bytes(final_tw))
 
-        logger.info(f"{log_prefix}完成，pending 條目: {pending_count}")
+        log_info(f"{log_prefix}完成，pending 條目: {pending_count}")
         return {
             "success": True,
             # "log": f"{log_prefix}完成，pending 條目: {pending_count}",
@@ -291,7 +290,7 @@ def _process_single_mod(
         }
 
     except Exception as exc:
-        logger.exception(f"{log_prefix}處理失敗: {exc}")
+        log_exception(f"{log_prefix}處理失敗: {exc}")
         return {
             "success": False,
             # "log": f"{log_prefix}處理失敗: {exc}",
