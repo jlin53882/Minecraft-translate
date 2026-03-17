@@ -18,6 +18,18 @@ from translation_tool.core.lm_config_rules import (
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.utils.config_manager import load_config
 
+# =========================================================
+# Time Constants - 時間相關常數
+# =========================================================
+RPM_COOLDOWN_SEC = 12  # RPM 限制冷卻秒數
+OVERLOAD_RETRY_WAIT_SEC = 12  # Overload 重試等待秒數
+
+# =========================================================
+# Size Constants - 大小相關常數
+# =========================================================
+MIN_LANG_BATCH_SIZE = 20  # Lang 類型最小批次大小
+DEFAULT_BATCH_SIZE = 50  # 預設批次大小
+
 logger = logging.getLogger(__name__)
 
 # 設定區
@@ -585,7 +597,7 @@ def translate_batch_smart(batch_items, total=None):
                                 )
                                 return all_results, "PARTIAL"
 
-                        wait_sec = 12
+                        wait_sec = OVERLOAD_RETRY_WAIT_SEC
                         logger.warning(
                             f"[⚠️] 模型過載（第 {overload_retry_count} 次），"
                             f"原地等待 {wait_sec}s 後重送【同一 batch / 同一模型】"
@@ -687,7 +699,7 @@ def translate_batch_smart(batch_items, total=None):
                 # 3. 如果還有剩下的，重置 batch_size
                 if remaining_items:
                     batch_size = min(
-                        len(remaining_items), MIN_BATCH_SIZE if not is_lang else 20
+                        len(remaining_items), MIN_BATCH_SIZE if not is_lang else MIN_LANG_BATCH_SIZE
                     )
 
                 # 4. 繼續 while 迴圈處理後面的東西
