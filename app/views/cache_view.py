@@ -142,6 +142,10 @@ class CacheView(ft.Column):
             label="只看警告以上", value=True, on_change=self._on_log_filter_changed
         )
 
+        self._build_query_widgets()
+
+    def _build_query_widgets(self):
+        """建立查詢相關的 UI widgets（從 __init__ 提取）"""
         # -------------------- Query: Search / Explorer --------------------
         self._query_state = CacheQueryState()
         self.query_results = self._query_state.query_results
@@ -745,6 +749,7 @@ class CacheView(ft.Column):
             alignment=ft.alignment.top_left,
             content=self.query_type_shard_col,
         )
+
 
         # C1：ShardDetail - KeyListCard
         self._shard_state = CacheShardState()
