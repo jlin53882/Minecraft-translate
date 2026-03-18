@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """分析專案模組與測試覆蓋情況"""
+# ruff: noqa: E402
 
 import os
 import pkgutil
@@ -18,7 +19,7 @@ for importer, modname, ispkg in pkgutil.iter_modules(translation_tool.__path__):
                 for _, subname, is_sub_pkg in pkgutil.iter_modules(submod.__path__):
                     fullname = f"translation_tool.{modname}.{subname}"
                     modules.append(fullname)
-        except (ImportError, AttributeError) as e:
+        except (ImportError, AttributeError):
             pass
 
 # app 子模組
