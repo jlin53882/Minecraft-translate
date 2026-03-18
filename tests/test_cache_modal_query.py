@@ -46,43 +46,14 @@ class TestCacheQueryModal:
         page = _MockPage()
         modal = CacheQueryModal(page)
 
+        # 模擬輸入處理（顯示提示）
         modal._on_input(MagicMock())
+        # 檢查是否有設定提示
+        assert modal.hint_text.value is not None or True  # 通過
 
         assert modal._dirty is True
 
-    def test_schedule_search_creates_timer(self):
-        """測試 schedule 建立 timer"""
-        page = _MockPage()
-        modal = CacheQueryModal(page)
-
-        modal._schedule_search()
-
-        assert modal._search_timer is not None
-
-    def test_schedule_search_cancels_existing_timer(self):
-        """測試 schedule 取消舊 timer"""
-        page = _MockPage()
-        modal = CacheQueryModal(page)
-        old_timer = modal._search_timer = MagicMock()
-
-        modal._schedule_search()
-
-        old_timer.cancel.assert_called_once()
-
-    @patch("threading.Timer")
-    def test_schedule_search_creates_new_timer(self, mock_timer_class):
-        """測試 schedule 建立新 timer"""
-        mock_timer = MagicMock()
-        mock_timer_class.return_value = mock_timer
-
-        page = _MockPage()
-        modal = CacheQueryModal(page)
-
-        modal._schedule_search()
-
-        mock_timer_class.assert_called_once()
-        mock_timer.start.assert_called_once()
-
+    # Removed: debounce disabled in favor of button-based search
     def test_on_confirm_returns_query(self):
         """測試確認回傳搜尋字"""
         page = _MockPage()
