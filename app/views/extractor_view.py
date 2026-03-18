@@ -73,7 +73,7 @@ class ExtractorView(ft.Column):
 
         # 1. Configuration Section Components
         self.mods_dir_textfield = ft.TextField(
-            hint_text="C:\\Example\\Mods",
+            hint_text="./mods 或 %USERPROFILE%/Mods",
             expand=True,
             dense=True,
             border_color=theme.OUTLINE,

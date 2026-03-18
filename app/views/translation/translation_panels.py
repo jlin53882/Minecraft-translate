@@ -32,7 +32,7 @@ def build_action_row(*, view, on_start, on_dry_run, on_reset, trailing=None) -> 
 
 def build_ftb_tab(view) -> ft.Control:
     """建立 FTB (Forge 模組包) 翻譯面板的完整 UI。"""
-    view.ftb_in_dir = ft.TextField(label='輸入資料夾（模組包根目錄）', hint_text='例如：C:\\Modpack', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER)
+    view.ftb_in_dir = ft.TextField(label='輸入資料夾（模組包根目錄）', hint_text='例如：./mods', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER)
     view.ftb_out_dir = ft.TextField(label='輸出資料夾（可選）', hint_text='留空使用 <input>/Output', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER_COPY)
     view.ftb_step_export = ft.Checkbox(label='Step 1：Export Raw（抽取）', value=True)
     view.ftb_step_clean = ft.Checkbox(label='Step 2：Clean（補洞/產生待翻譯）', value=True)
@@ -47,7 +47,7 @@ def build_ftb_tab(view) -> ft.Control:
 
 def build_kjs_tab(view) -> ft.Control:
     """建立 KubeJS 翻譯面板的完整 UI。"""
-    view.kjs_in_dir = ft.TextField(label='輸入資料夾（模組包根目錄）', hint_text='例如：C:\\Modpack', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER)
+    view.kjs_in_dir = ft.TextField(label='輸入資料夾（模組包根目錄）', hint_text='例如：./mods', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER)
     view.kjs_out_dir = ft.TextField(label='輸出資料夾（可選）', hint_text='留空使用 <input>/Output', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER_COPY)
     view.kjs_step_extract = ft.Checkbox(label='Step 1：Export Raw + Clean', value=True)
     view.kjs_step_translate = ft.Checkbox(label='Step 2：LM 翻譯（待翻譯 JSON）', value=True)
@@ -61,7 +61,7 @@ def build_kjs_tab(view) -> ft.Control:
 
 def build_md_tab(view) -> ft.Control:
     """建立 Markdown (Patchouli) 翻譯面板的完整 UI。"""
-    view.md_in_dir = ft.TextField(label='輸入資料夾（遞迴掃描 .md）', hint_text='例如：C:\\Modpack\\config\\patchouli_books', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER)
+    view.md_in_dir = ft.TextField(label='輸入資料夾（遞迴掃描 .md）', hint_text='例如：./config/patchouli_books', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER)
     view.md_out_dir = ft.TextField(label='輸出資料夾（可選）', hint_text='留空使用 <input>/Output/md', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER_COPY)
     view.md_step_extract = ft.Checkbox(label='Step 1：Extract（產生待翻譯）', value=True)
     view.md_step_translate = ft.Checkbox(label='Step 2：LM 翻譯（待翻譯 JSON）', value=True)
