@@ -168,11 +168,18 @@ class CacheView(ft.Column):
         self.query_page_size = self._query_state.query_page_size
         self.query_total_pages = self._query_state.query_total_pages
 
+        # PR5-7: 查詢變更提示
+        self._last_query_value = ""
+
         self.tf_query_input = ft.TextField(
             label="輸入 key / dst / 關鍵字",
             width=360,
             tooltip="輸入要搜尋的 key、dst 或關鍵字",
             on_submit=self._on_query_search,
+            on_change=self._on_query_input_change,
+        )
+        self.query_change_hint = ft.Text(
+            "", size=11, color=ft.Colors.ORANGE_700, selectable=True
         )
         self.dd_query_mode = ft.Dropdown(
             width=130,
@@ -3446,6 +3453,16 @@ class CacheView(ft.Column):
         )
         self.update()
 
+    # PR5-7: 查詢變更提示
+    def _on_query_input_change(self, e):
+        """偵測輸入框變更"""
+        current = self.tf_query_input.value or ""
+        if current != self._last_query_value and self._last_query_value:
+            # 有變更且不是第一次
+            self.query_change_hint.value = "⚠️ 偵測到變更，請重新搜尋"
+            self.query_change_hint.color = theme.ORANGE_700
+            self.update()
+
     def _on_query_search(self, e):
         """執行關鍵字搜尋快取"""
         if self.ui_busy:
@@ -3514,6 +3531,9 @@ class CacheView(ft.Column):
         self.query_selected_result = (
             self.query_results[0] if self.query_results else None
         )
+        # PR5-7: 清除變更提示
+        self._last_query_value = self.tf_query_input.value or ""
+        self.query_change_hint.value = ""
         self.query_search_hint.value = (
             f"搜尋完成：{len(self.query_results)} 筆（左側點選，右側檢視）"
         )
