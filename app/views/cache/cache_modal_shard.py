@@ -28,7 +28,8 @@ class CacheShardModal(CacheModalBase):
         self.initial_data = initial_data
         self.cache_view = cache_view  # 主 View 引用
         self._current_tab = "key"
-        # TODO: 自動儲存功能（未實作）
+        # 變更提示
+        self._last_shard_type = ""
         super().__init__(
             page=page,
             on_complete=on_complete,
@@ -40,6 +41,22 @@ class CacheShardModal(CacheModalBase):
 
     def _build_content(self):
         """建立分頁 UI"""
+        # 分片類型選擇
+        self.dd_shard_type = ft.Dropdown(
+            width=200,
+            label="選擇分類",
+            options=[
+                ft.dropdown.Option("ALL", "全部"),
+            ],
+            on_change=self._on_shard_type_change,
+        )
+        # 提示文字
+        self.shard_hint = ft.Text(
+            "請選擇分類",
+            size=12,
+            color=ft.Colors.GREY_700,
+        )
+        # Tab
         self.tabs = ft.Tabs(
             selected_index=0,
             on_change=self._on_tab_change,
@@ -52,21 +69,91 @@ class CacheShardModal(CacheModalBase):
         self.content = ft.Column(
             [
                 ft.Text("分片管理", size=20, weight=ft.FontWeight.BOLD),
+                ft.Row([self.dd_shard_type, self.shard_hint]),
                 self.tabs,
             ]
         )
 
     def _build_key_tab(self):
         """建立 Key 列表標籤"""
-        return ft.Container(content=ft.Column([ft.Text("目前分片 Key")]))
+        self.key_list = ft.ListView(expand=True, spacing=5)
+        return ft.Container(
+            content=ft.Column([
+                ft.Text("分片 Key 列表", size=14, weight=ft.FontWeight.BOLD),
+                self.key_list,
+            ]),
+            padding=10,
+        )
 
     def _build_src_tab(self):
         """建立 SRC 編輯標籤"""
-        return ft.Container(content=ft.Column([ft.Text("來源語言編輯")]))
+        self.src_field = ft.TextField(
+            multiline=True,
+            min_lines=10,
+            label="來源語言",
+        )
+        return ft.Container(
+            content=ft.Column([
+                ft.Text("來源語言編輯", size=14, weight=ft.FontWeight.BOLD),
+                self.src_field,
+            ]),
+            padding=10,
+        )
 
     def _build_dst_tab(self):
         """建立 DST 編輯標籤"""
-        return ft.Container(content=ft.Column([ft.Text("目標語言編輯")]))
+        self.dst_field = ft.TextField(
+            multiline=True,
+            min_lines=10,
+            label="目標語言",
+        )
+        return ft.Container(
+            content=ft.Column([
+                ft.Text("目標語言編輯", size=14, weight=ft.FontWeight.BOLD),
+                self.dst_field,
+            ]),
+            padding=10,
+        )
+
+    def _on_shard_type_change(self, e):
+        """分類選擇變更"""
+        shard_type = self.dd_shard_type.value or "ALL"
+        if shard_type != self._last_shard_type and self._last_shard_type:
+            self.shard_hint.value = "⚠️ 偵測到變更，請重新載入"
+            self.shard_hint.color = ft.Colors.ORANGE_700
+            self.update()
+        # 加載該分類的分片數據
+        self._load_shard_data(shard_type)
+
+    def _load_shard_data(self, shard_type):
+        """載入分片數據"""
+        if not self.cache_view:
+            self.shard_hint.value = "無法訪問主視圖"
+            self.shard_hint.color = ft.Colors.RED_700
+            self.update()
+            return
+        try:
+            # 從主 View 獲取數據
+            overview = self.cache_view._last_overview_data
+            if shard_type == "ALL":
+                shard_type = list(overview.keys())[0] if overview else "mods"
+            
+            # 更新 Key 列表
+            self.key_list.controls.clear()
+            type_data = overview.get(shard_type, {})
+            entries = type_data.get("entries_count", 0)
+            self.key_list.controls.append(
+                ft.Text(f"{shard_type}: {entries} 筆")
+            )
+            
+            self.shard_hint.value = f"已載入 {shard_type}"
+            self.shard_hint.color = ft.Colors.GREEN_700
+            self._last_shard_type = shard_type
+            self.update()
+        except Exception as e:
+            self.shard_hint.value = f"載入失敗: {e}"
+            self.shard_hint.color = ft.Colors.RED_700
+            self.update()
 
     def _on_tab_change(self, e):
         """切換標籤"""
@@ -74,10 +161,17 @@ class CacheShardModal(CacheModalBase):
 
     def _on_confirm(self):
         """確認回傳當前標籤"""
-        data = {"tab": self._current_tab}
+        data = {
+            "tab": self._current_tab,
+            "shard_type": self.dd_shard_type.value,
+            "src": self.src_field.value if hasattr(self, "src_field") else "",
+            "dst": self.dst_field.value if hasattr(self, "dst_field") else "",
+        }
         self._do_complete(data)
 
     def _on_close(self):
+        """關閉時清理資源"""
+        pass
         """關閉時處理（預留自動儲存）"""
         # TODO: 自動儲存功能（未實作）
         pass
