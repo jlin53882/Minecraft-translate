@@ -1115,6 +1115,9 @@ class CacheView(ft.Column):
 
     def _schedule_update(self):
         """排程更新（debounce 100ms）"""
+        # 防呆：確保已在 page 上
+        if not hasattr(self, 'page') or self.page is None:
+            return
         import threading
         if self._update_timer:
             self._update_timer.cancel()
@@ -1123,6 +1126,9 @@ class CacheView(ft.Column):
 
     def _do_update(self):
         """批次更新所有髒區域"""
+        # 防呆：確保已在 page 上
+        if not hasattr(self, 'page') or self.page is None:
+            return
         if not any(self._dirty_flags.values()):
             return
         try:
