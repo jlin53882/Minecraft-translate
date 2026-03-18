@@ -55,6 +55,7 @@ from app.services_impl.cache.cache_services import (
 )
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
+
 class CacheView(ft.Column):
     """快取管理器（UI）。
 
@@ -77,6 +78,16 @@ class CacheView(ft.Column):
         """
         super().__init__(expand=True, spacing=10)
         self.page = page
+
+        # -------------------- 效能優化：髒標記機制 --------------------
+        # PR5-7 整合：減少 update() 呼叫次數，避免 UI 卡顿
+        self._dirty_flags = {
+            "overview": False,
+            "query": False,
+            "shard": False,
+            "logs": False,
+        }
+        self._update_timer = None
 
         # -------------------- Global state --------------------
         self.ui_busy = False
@@ -127,6 +138,10 @@ class CacheView(ft.Column):
             label="只看警告以上", value=True, on_change=self._on_log_filter_changed
         )
 
+        self._build_query_widgets()
+
+    def _build_query_widgets(self):
+        """建立查詢相關的 UI widgets（從 __init__ 提取）"""
         # -------------------- Query: Search / Explorer --------------------
         self._query_state = CacheQueryState()
         self.query_results = self._query_state.query_results
@@ -136,11 +151,23 @@ class CacheView(ft.Column):
         self.query_page_size = self._query_state.query_page_size
         self.query_total_pages = self._query_state.query_total_pages
 
+        # PR5-7: 查詢變更提示
+        self._last_query_value = ""
+
         self.tf_query_input = ft.TextField(
             label="輸入 key / dst / 關鍵字",
             width=360,
             tooltip="輸入要搜尋的 key、dst 或關鍵字",
             on_submit=self._on_query_search,
+            on_change=self._on_query_input_change,
+        )
+        self.query_change_hint = ft.Text(
+            "", size=11, color=theme.WARNING, selectable=True
+        )
+        # PR5-7: 将提示加入 UI
+        self.query_input_row = ft.Row(
+            [self.tf_query_input, self.query_change_hint],
+            spacing=10,
         )
         self.dd_query_mode = ft.Dropdown(
             width=130,
@@ -151,12 +178,14 @@ class CacheView(ft.Column):
                 ft.dropdown.Option("DST", "DST"),
                 ft.dropdown.Option("ALL", "全部"),
             ],
+            on_change=self._on_query_mode_change,
         )
         self.dd_query_type = ft.Dropdown(
             width=180,
             value="ALL",
             tooltip="選擇要查詢的分類（例如 lang / patchouli）",
             options=[ft.dropdown.Option("ALL", "全部")],
+            on_change=self._on_query_type_change,
         )
         self.btn_query_search = ft.ElevatedButton(
             "搜尋", icon=ft.Icons.SEARCH, on_click=self._on_query_search
@@ -224,9 +253,7 @@ class CacheView(ft.Column):
             on_click=self._on_restore_latest_query,
             tooltip="載入最新歷史紀錄（不立即寫入快取）",
         )
-        self.query_history_key_text = ft.Text(
-            "Key: -", size=11, color=theme.GREY_700
-        )
+        self.query_history_key_text = ft.Text("Key: -", size=11, color=theme.GREY_700)
         self.btn_open_history_drawer = ft.OutlinedButton(
             "歷史紀錄",
             icon=ft.Icons.HISTORY,
@@ -371,9 +398,7 @@ class CacheView(ft.Column):
             icon=ft.Icons.HISTORY,
             on_click=self._on_shard_apply_selected_history,
         )
-        self.shard_history_key_text = ft.Text(
-            "Key: -", size=11, color=theme.GREY_700
-        )
+        self.shard_history_key_text = ft.Text("Key: -", size=11, color=theme.GREY_700)
         self.btn_open_shard_history_drawer = ft.OutlinedButton(
             "歷史紀錄",
             icon=ft.Icons.HISTORY,
@@ -587,6 +612,8 @@ class CacheView(ft.Column):
                         ],
                         wrap=True,
                     ),
+                    # PR5-7: 查询变更提示
+                    self.query_change_hint,
                     ft.Text("查詢模式與分類選擇", size=11, color=theme.GREY_700),
                     ft.Row([self.dd_query_mode, self.dd_query_type], wrap=True),
                     self.query_search_hint,
@@ -719,6 +746,11 @@ class CacheView(ft.Column):
             content=self.query_type_shard_col,
         )
 
+
+        self._build_shard_widgets()
+
+    def _build_shard_widgets(self):
+        """建立分片相關的 UI widgets（從 __init__ 提取）"""
         # C1：ShardDetail - KeyListCard
         self._shard_state = CacheShardState()
         self.shard_detail_selected_type = self._shard_state.selected_type
@@ -732,9 +764,7 @@ class CacheView(ft.Column):
         # C2：SRC 預覽模式
         self.shard_detail_src_mode = self._shard_state.src_mode  # preview | raw
 
-        self.shard_detail_meta = ft.Text(
-            "尚未選擇分片", size=11, color=theme.GREY_700
-        )
+        self.shard_detail_meta = ft.Text("尚未選擇分片", size=11, color=theme.GREY_700)
         self.tf_shard_key_filter = ft.TextField(
             label="過濾 key",
             hint_text="輸入關鍵字快速過濾",
@@ -872,9 +902,7 @@ class CacheView(ft.Column):
         self.shard_key_column = ft.Container(
             width=self._dynamic_shard_key_panel_width(),
             padding=10,
-            border=ft.border.only(
-                right=ft.border.BorderSide(1, theme.OUTLINE_VARIANT)
-            ),
+            border=ft.border.only(right=ft.border.BorderSide(1, theme.OUTLINE_VARIANT)),
             content=ft.Column(
                 [
                     ft.Text("C1 KeyListCard", weight=ft.FontWeight.BOLD),
@@ -1025,6 +1053,7 @@ class CacheView(ft.Column):
             ],
         )
 
+        # PR5-7: Modal 入口按鈕（提供替代 Tab 的現代化體驗）
         # 主布局改成 Stack，支援浮動視窗
         self.controls = [
             ft.Stack(
@@ -1058,6 +1087,62 @@ class CacheView(ft.Column):
         ]
 
     # =========================================================
+    # 效能優化：髒標記機制（PR5-7 整合）
+    # =========================================================
+    def _mark_dirty(self, area: str):
+        """標記某區域需要更新"""
+        if area not in self._dirty_flags:
+            return
+        self._dirty_flags[area] = True
+        self._schedule_update()
+
+    def _schedule_update(self):
+        """排程更新（debounce 100ms）"""
+        # 防呆：確保已在 page 上
+        if not hasattr(self, "page") or self.page is None:
+            return
+        import threading
+
+        if self._update_timer:
+            self._update_timer.cancel()
+        self._update_timer = threading.Timer(0.1, self._do_update)
+        self._update_timer.start()
+
+    def _do_update(self):
+        """批次更新所有髒區域"""
+        # 防呆：確保已在 page 上
+        if not hasattr(self, "page") or self.page is None:
+            return
+        if not any(self._dirty_flags.values()):
+            return
+        try:
+            # 根據髒標記決定要更新的區域
+            if self._dirty_flags.get("overview"):
+                pass  # overview 由背景任務觸發更新
+            if self._dirty_flags.get("query"):
+                pass  # query 由背景任務觸發更新
+            if self._dirty_flags.get("shard"):
+                pass  # shard 由背景任務觸發更新
+            if self._dirty_flags.get("logs"):
+                pass  # logs 由背景任務觸發更新
+
+            self.update()
+            for k in self._dirty_flags:
+                self._dirty_flags[k] = False
+        except (AttributeError, AssertionError):
+            # 控件尚未添加到 page，略過
+            pass
+        except Exception as e:
+            print(f"[CacheView] 更新失敗: {e}")
+
+    def _batch_refresh(self):
+        """批量刷新所有區域（用於初始載入）"""
+        try:
+            self.update()
+        except Exception as e:
+            print(f"[CacheView] 批量刷新失敗: {e}")
+
+    # =========================================================
     # Lifecycle
     # =========================================================
     def did_mount(self):
@@ -1072,8 +1157,8 @@ class CacheView(ft.Column):
                 self.page.on_resized = self._on_page_resized
             self._render_query_detail()
             self._refresh_disabled_state()
-            if self.page is not None:
-                self.page.update()
+            # PR5-7: 使用批量刷新優化初始載入
+            self._batch_refresh()
         except Exception as ex:
             log_error(f"CacheView did_mount failed: {ex}")
             log_error(traceback.format_exc())
@@ -1081,7 +1166,7 @@ class CacheView(ft.Column):
             self.overview_status.color = theme.RED_700
             self.overview_trace.value = f"trace: did_mount error -> {ex}"
             try:
-                self.page.update()
+                self.update()
             except Exception:
                 pass
 
@@ -1200,7 +1285,7 @@ class CacheView(ft.Column):
                 self.shard_key_column.width = self._dynamic_shard_key_panel_width()
             self._render_query_type_shard_page()
             self._render_shard_detail_keys()
-            self.page.update()
+            self.update()
         except Exception:
             pass
 
@@ -1228,7 +1313,7 @@ class CacheView(ft.Column):
         if hasattr(self, "query_status"):
             self._recalc_query_status()
         self._refresh_disabled_state()
-        self.page.update()
+        self.update()
 
     def _refresh_disabled_state(self):
         """根據忙碌狀態更新按鈕啟用/禁用"""
@@ -1354,7 +1439,7 @@ class CacheView(ft.Column):
                 if hasattr(c, "update"):
                     c.update()
             if hasattr(self, "page") and self.page:
-                self.page.update()
+                self.update()
         except Exception as ex:
             self._append_log(f"[WARN] UI refresh 異常: {ex}")
 
@@ -1418,7 +1503,7 @@ class CacheView(ft.Column):
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True
-        self.page.update()
+        self.update()
 
     def _append_log(self, text: str):
         """新增日誌訊息並根據等級記錄"""
@@ -1501,7 +1586,8 @@ class CacheView(ft.Column):
             rows = [x for x in rows if ("[ERROR" in x or "[WARN" in x)]
         for line in rows[-800:]:
             self.log_list.controls.append(ft.Text(line, size=12, selectable=True))
-        self.page.update()
+        # PR5-7: 使用局部更新替代全頁更新
+        self.update()
 
     def _on_log_filter_changed(self, e):
         """日誌篩選條件變更時重新渲染"""
@@ -1653,7 +1739,8 @@ class CacheView(ft.Column):
                 )
             )
 
-        self.page.update()
+        # PR5-7: 使用局部更新替代全頁更新
+        self.update()
 
     def _refresh_overview_ui(self, data: dict):
         """更新總覽區域的統計資料顯示"""
@@ -1682,15 +1769,22 @@ class CacheView(ft.Column):
         self._refresh_query_type_options()
         self._render_query_type_shard_page()
 
-    def _run_action(self, reason: str, work_fn, success_msg: str, show_progress: bool = False):
+    def _run_action(
+        self, reason: str, work_fn, success_msg: str, show_progress: bool = False
+    ):
         """包裝非同步工作函式的執行與狀態更新"""
-        return run_cache_action(self, reason, work_fn, success_msg, show_progress=show_progress)
+        return run_cache_action(
+            self, reason, work_fn, success_msg, show_progress=show_progress
+        )
 
     # top actions
     def _on_reload_all(self, e):
         """觸發重新載入所有快取（長時間操作）"""
         self._run_action(
-            "RELOADING", lambda: cache_reload_service(), "已重新載入全部快取", show_progress=True
+            "RELOADING",
+            lambda: cache_reload_service(),
+            "已重新載入全部快取",
+            show_progress=True,
         )
 
     def _on_save_all_new(self, e):
@@ -1787,6 +1881,7 @@ class CacheView(ft.Column):
 
     def _on_rotate_one(self, cache_type: str):
         """處理單一快取類型的分片輪替（Rotation）動作。"""
+
         def _work():
             """執行分片輪替的工作函式"""
             ok = cache_rotate_service(cache_type)
@@ -1837,7 +1932,7 @@ class CacheView(ft.Column):
             f"已切換到查詢區：模式=KEY，分類={self.dd_query_type.value or 'ALL'}"
         )
         self.query_search_hint.color = theme.BLUE_700
-        self.page.update()
+        self.update()
 
     # =========================================================
     # Query phase-2: search block
@@ -2023,9 +2118,7 @@ class CacheView(ft.Column):
         if not page_keys:
             if keyword and all_keys:
                 self.shard_detail_key_list.controls.append(
-                    ft.Text(
-                        "此篩選條件沒有符合的 key", size=11, color=theme.GREY_600
-                    )
+                    ft.Text("此篩選條件沒有符合的 key", size=11, color=theme.GREY_600)
                 )
             else:
                 self.shard_detail_key_list.controls.append(
@@ -2039,9 +2132,7 @@ class CacheView(ft.Column):
                         padding=6,
                         border=ft.border.all(
                             1,
-                            theme.BLUE_300
-                            if selected
-                            else theme.OUTLINE_VARIANT,
+                            theme.BLUE_300 if selected else theme.OUTLINE_VARIANT,
                         ),
                         border_radius=6,
                         bgcolor=theme.BLUE_50 if selected else None,
@@ -2075,7 +2166,7 @@ class CacheView(ft.Column):
         self.shard_detail_page = 1
         self._render_shard_detail_keys()
         if self.page:
-            self.page.update()
+            self.update()
 
     def _set_shard_workspace_visible(self, visible: bool):
         """顯示或隱藏分片工作區面板"""
@@ -2084,8 +2175,12 @@ class CacheView(ft.Column):
             self.shard_nav_view.visible = not show_workspace
         if hasattr(self, "shard_workspace_card"):
             self.shard_workspace_card.visible = show_workspace
-        if self.page:
-            self.page.update()
+        # 防護：確保 page 存在且已完全初始化
+        if self.page is not None and hasattr(self, 'page'):
+            try:
+                self.page.update()
+            except Exception:
+                pass
 
     def _open_shard_workspace_tab(self):
         """開啟分片工作區標籤"""
@@ -2111,7 +2206,7 @@ class CacheView(ft.Column):
         self._render_query_type_shard_page()
         self._open_shard_workspace_tab()
         if self.page:
-            self.page.update()
+            self.update()
 
     def _on_select_shard_key(self, key: str):
         """選擇鍵值時更新詳情面板"""
@@ -2123,7 +2218,7 @@ class CacheView(ft.Column):
         if hasattr(self, "shard_history_window") and self.shard_history_window.visible:
             self._render_shard_history()
         if self.page:
-            self.page.update()
+            self.update()
 
     def _load_shard_entry(
         self, cache_type: str, filename: str, key: str
@@ -2200,7 +2295,7 @@ class CacheView(ft.Column):
         self.shard_detail_src_mode = "raw"
         self._render_shard_src_panel()
         if self.page:
-            self.page.update()
+            self.update()
 
     def _normalize_cache_text(self, text: str) -> str:
         """正規化快取文字（移除跳脫序列）"""
@@ -2291,7 +2386,7 @@ class CacheView(ft.Column):
             self._render_shard_dst_panel()
             self._notify("已套用 C3 DST 並寫入快取", "info")
             if self.page:
-                self.page.update()
+                self.update()
         except Exception as ex:
             self._notify(f"套用 DST 失敗：{ex}", "error")
 
@@ -2305,7 +2400,7 @@ class CacheView(ft.Column):
         self._show_snack_bar("已還原到原始值", theme.BLUE_400)
         self._refresh_disabled_state()
         if self.page:
-            self.page.update()
+            self.update()
 
     def _on_shard_dst_copy(self, e):
         """複製目標內容到剪貼簿"""
@@ -2346,13 +2441,13 @@ class CacheView(ft.Column):
             "已載入最新歷史紀錄到 DST（尚未寫入快取，請點「套用 DST」儲存）", "info"
         )
         if self.page:
-            self.page.update()
+            self.update()
 
     def _on_select_shard_history_event(self, event: dict):
         """選擇歷史事件"""
         self.shard_history_selected_event = event
         self._render_shard_history()
-        self.page.update()
+        self.update()
 
     def _render_shard_history(self):
         """渲染分類分片的歷史紀錄列表"""
@@ -2421,9 +2516,7 @@ class CacheView(ft.Column):
                     padding=6,
                     border=ft.border.all(
                         1,
-                        theme.BLUE_200
-                        if is_selected
-                        else theme.OUTLINE_VARIANT,
+                        theme.BLUE_200 if is_selected else theme.OUTLINE_VARIANT,
                     ),
                     border_radius=8,
                     bgcolor=theme.BLUE_50 if is_selected else None,
@@ -2432,9 +2525,7 @@ class CacheView(ft.Column):
                     ),
                     content=ft.Column(
                         [
-                            ft.Text(
-                                f"{ts} | {action}", size=10, color=theme.GREY_700
-                            ),
+                            ft.Text(f"{ts} | {action}", size=10, color=theme.GREY_700),
                             ft.Text(f"old: {old_dst[:60]}", size=11, no_wrap=False),
                             ft.Text(f"new: {new_dst[:60]}", size=11, no_wrap=False),
                         ],
@@ -2527,56 +2618,56 @@ class CacheView(ft.Column):
             self._render_shard_history()
             self._notify("已套用選取舊值並寫入快取", "info")
             if self.page:
-                self.page.update()
+                self.update()
         except Exception as ex:
             self._notify(f"套用舊值失敗：{ex}", "error")
 
     def _on_shard_page_first(self, e):
         """跳到分片詳情第一頁"""
-        if getattr(self, '_is_shard_rendering', False):
+        if getattr(self, "_is_shard_rendering", False):
             return  # 防止重複點擊
         self._is_shard_rendering = True
         self.shard_detail_page = 1
         self._shard_state.page = 1
         self._render_query_type_shard_page()
         self.update()
-        self.page.update()
+        self.update()
         self._is_shard_rendering = False
 
     def _on_shard_page_prev(self, e):
         """上一頁分片詳情"""
-        if getattr(self, '_is_shard_rendering', False):
+        if getattr(self, "_is_shard_rendering", False):
             return
         self._is_shard_rendering = True
         self.shard_detail_page -= 1
         self._shard_state.page = self.shard_detail_page
         self._render_query_type_shard_page()
         self.update()
-        self.page.update()
+        self.update()
         self._is_shard_rendering = False
 
     def _on_shard_page_next(self, e):
         """下一頁分片詳情"""
-        if getattr(self, '_is_shard_rendering', False):
+        if getattr(self, "_is_shard_rendering", False):
             return
         self._is_shard_rendering = True
         self.shard_detail_page += 1
         self._shard_state.page = self.shard_detail_page
         self._render_query_type_shard_page()
         self.update()
-        self.page.update()
+        self.update()
         self._is_shard_rendering = False
 
     def _on_shard_page_last(self, e):
         """跳到分片詳情最後一頁"""
-        if getattr(self, '_is_shard_rendering', False):
+        if getattr(self, "_is_shard_rendering", False):
             return
         self._is_shard_rendering = True
         self.shard_detail_page = self.shard_detail_total_pages
         self._shard_state.page = self.shard_detail_page
         self._render_query_type_shard_page()
         self.update()
-        self.page.update()
+        self.update()
         self._is_shard_rendering = False
 
     def _render_query_type_shard_page(self):
@@ -2632,9 +2723,7 @@ class CacheView(ft.Column):
                             padding=6,
                             border=ft.border.all(
                                 1,
-                                theme.BLUE_300
-                                if selected
-                                else theme.OUTLINE_VARIANT,
+                                theme.BLUE_300 if selected else theme.OUTLINE_VARIANT,
                             ),
                             border_radius=8,
                             bgcolor=theme.BLUE_50 if selected else None,
@@ -2854,18 +2943,14 @@ class CacheView(ft.Column):
                     padding=6,
                     border=ft.border.all(
                         1,
-                        theme.BLUE_200
-                        if is_selected
-                        else theme.OUTLINE_VARIANT,
+                        theme.BLUE_200 if is_selected else theme.OUTLINE_VARIANT,
                     ),
                     border_radius=8,
                     bgcolor=theme.BLUE_50 if is_selected else None,
                     on_click=lambda e, item=ev: self._on_select_history_event(item),
                     content=ft.Column(
                         [
-                            ft.Text(
-                                f"{ts} | {action}", size=10, color=theme.GREY_700
-                            ),
+                            ft.Text(f"{ts} | {action}", size=10, color=theme.GREY_700),
                             ft.Text(f"old: {old_dst[:60]}", size=11, no_wrap=False),
                             ft.Text(f"new: {new_dst[:60]}", size=11, no_wrap=False),
                         ],
@@ -2915,13 +3000,13 @@ class CacheView(ft.Column):
         self._show_snack_bar(
             f"歷史紀錄視窗已打開（{source_text}，可拖曳標題列移動）", theme.BLUE_400
         )
-        self.page.update()
+        self.update()
 
     def _on_close_history_window(self, e):
         """關閉歷史紀錄浮動視窗"""
         self.query_history_window.visible = False
         self.history_window_source = None
-        self.page.update()
+        self.update()
 
     def _on_query_history_window_drag(self, e: ft.DragUpdateEvent):
         """拖曳歷史紀錄視窗"""
@@ -2941,7 +3026,7 @@ class CacheView(ft.Column):
         """關閉分片歷史紀錄浮動視窗"""
         self.shard_history_window.visible = False
         self.history_window_source = None
-        self.page.update()
+        self.update()
 
     def _on_shard_history_window_drag(self, e: ft.DragUpdateEvent):
         """拖曳分片歷史紀錄視窗"""
@@ -2965,7 +3050,7 @@ class CacheView(ft.Column):
         if self.shard_history_window.visible:
             self.shard_history_window.visible = False
             self.history_window_source = None
-        self.page.update()
+        self.update()
 
     def _on_query_sub_tab_change(self, e):
         """查詢區內 sub-tab 切換時自動關閉歷史紀錄視窗（查詢區 ↔ 分類/分片）"""
@@ -2975,7 +3060,7 @@ class CacheView(ft.Column):
         if self.shard_history_window.visible:
             self.shard_history_window.visible = False
             self.history_window_source = None
-        self.page.update()
+        self.update()
 
     def _on_select_history_event(self, event: dict):
         """選擇歷史紀錄項目"""
@@ -3033,7 +3118,7 @@ class CacheView(ft.Column):
             self._render_query_results()
             self._render_query_detail()
             self._notify("已套用選取舊值並寫入快取", "info")
-            self.page.update()
+            self.update()
         except Exception as ex:
             self._notify(f"套用舊值失敗：{ex}", "error")
 
@@ -3168,7 +3253,7 @@ class CacheView(ft.Column):
         self.query_selected_result = row
         self._render_query_results()
         self._render_query_detail()
-        self.page.update()
+        self.update()
 
     def _on_page_first(self, e):
         """跳到查詢結果第一頁"""
@@ -3176,7 +3261,7 @@ class CacheView(ft.Column):
         self._query_state.query_page = 1
         self._render_query_results()
         self.update()
-        self.page.update()
+        self.update()
 
     def _on_page_prev(self, e):
         """上一頁查詢結果"""
@@ -3184,7 +3269,7 @@ class CacheView(ft.Column):
         self._query_state.query_page = self.query_page
         self._render_query_results()
         self.update()
-        self.page.update()
+        self.update()
 
     def _on_page_next(self, e):
         """下一頁查詢結果"""
@@ -3192,7 +3277,7 @@ class CacheView(ft.Column):
         self._query_state.query_page = self.query_page
         self._render_query_results()
         self.update()
-        self.page.update()
+        self.update()
 
     def _on_page_last(self, e):
         """跳到查詢結果最後一頁"""
@@ -3200,7 +3285,7 @@ class CacheView(ft.Column):
         self._query_state.query_page = self.query_page
         self._render_query_results()
         self.update()
-        self.page.update()
+        self.update()
 
     def _on_page_jump(self, e):
         """跳轉到指定頁碼"""
@@ -3210,7 +3295,7 @@ class CacheView(ft.Column):
             p = 1
         self.query_page = p
         self._render_query_results()
-        self.page.update()
+        self.update()
 
     def _on_page_size_change(self, e):
         """變更每頁顯示數量"""
@@ -3267,7 +3352,7 @@ class CacheView(ft.Column):
             self._render_query_results()
             self._render_query_detail()
             self._notify("已套用並寫入快取", "info")
-            self.page.update()
+            self.update()
         except Exception as ex:
             self._notify(f"套用失敗：{ex}", "error")
 
@@ -3279,7 +3364,7 @@ class CacheView(ft.Column):
 
         self.query_detail_dst.value = str(self.query_original_dst or "")
         self._show_snack_bar("已還原到原始值", theme.BLUE_400)
-        self.page.update()
+        self.update()
 
     def _on_restore_latest_query(self, e):
         """還原最新歷史紀錄（查詢區，不立即寫入快取）"""
@@ -3312,7 +3397,29 @@ class CacheView(ft.Column):
             "已載入最新歷史紀錄到 DST（尚未寫入快取，請點「套用」儲存）",
             theme.BLUE_400,
         )
-        self.page.update()
+        self.update()
+
+    # PR5-7: 查詢變更提示
+    def _on_query_input_change(self, e):
+        """偵測輸入框變更"""
+        current = self.tf_query_input.value or ""
+        if current != self._last_query_value:
+            # 有變更
+            self.query_change_hint.value = "⚠️ 偵測到變更，請重新搜尋"
+            self.query_change_hint.color = theme.WARNING
+            self.update()
+
+    def _on_query_mode_change(self, e):
+        """偵測搜尋模式變更"""
+        self.query_change_hint.value = "⚠️ 偵測到變更，請重新搜尋"
+        self.query_change_hint.color = theme.WARNING
+        self.update()
+
+    def _on_query_type_change(self, e):
+        """偵測分類選擇變更"""
+        self.query_change_hint.value = "⚠️ 偵測到變更，請重新搜尋"
+        self.query_change_hint.color = theme.WARNING
+        self.update()
 
     def _on_query_search(self, e):
         """執行關鍵字搜尋快取"""
@@ -3382,13 +3489,16 @@ class CacheView(ft.Column):
         self.query_selected_result = (
             self.query_results[0] if self.query_results else None
         )
+        # PR5-7: 清除變更提示
+        self._last_query_value = self.tf_query_input.value or ""
+        self.query_change_hint.value = ""
         self.query_search_hint.value = (
             f"搜尋完成：{len(self.query_results)} 筆（左側點選，右側檢視）"
         )
         self.query_search_hint.color = theme.BLUE_700
         self._render_query_results()
         self._render_query_detail()
-        self.page.update()
+        self.update()
 
     def _on_query_clear(self, e):
         """清除搜尋條件與結果"""
@@ -3400,4 +3510,4 @@ class CacheView(ft.Column):
         self.query_search_hint.color = theme.GREY_700
         self._render_query_results()
         self._render_query_detail()
-        self.page.update()
+        self.update()

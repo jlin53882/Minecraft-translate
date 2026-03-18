@@ -4,7 +4,7 @@ from app.views.cache_view import CacheView
 
 
 class FakePage:
-    def update(self):
+    def update(self, *args, **kwargs):
         return None
 
     def set_clipboard(self, _text):
