@@ -45,41 +45,66 @@ class CacheQueryModal(CacheModalBase):
             label="查詢關鍵字",
             value=self.initial_query or "",
             on_change=self._on_input,
+            on_submit=self._on_search_click,
+        )
+        # 搜尋按鈕
+        self.btn_search = ft.ElevatedButton(
+            "搜尋",
+            icon=ft.Icons.SEARCH,
+            on_click=self._on_search_click,
+        )
+        # 提示文字
+        self.hint_text = ft.Text(
+            "請輸入關鍵字後點擊搜尋",
+            size=12,
+            color=ft.Colors.GREY_700,
         )
         self.result_area = ft.Column([])
         self.content = ft.Column(
             [
                 ft.Text("查詢 Cache", size=20, weight=ft.FontWeight.BOLD),
-                self.query_input,
+                ft.Row([self.query_input, self.btn_search]),
+                self.hint_text,
                 ft.Divider(),
                 self.result_area,
             ]
         )
 
     def _on_input(self, e):
-        """輸入變更時觸發搜尋"""
-        self._dirty = True
-        self._schedule_search()
+        """輸入變更時顯示提示"""
+        # 顯示提示
+        self.hint_text.value = "請點擊上方搜尋按鈕"
+        self.hint_text.color = ft.Colors.ORANGE_700
+        self.update()
+
+    def _on_search_click(self, e):
+        """搜尋按鈕點擊"""
+        query = self.query_input.value
+        if not query:
+            self.hint_text.value = "請輸入關鍵字"
+            self.hint_text.color = ft.Colors.RED_700
+            self.update()
+            return
+
+        self.hint_text.value = "搜尋中..."
+        self.hint_text.color = ft.Colors.BLUE_700
+        self.update()
+
+        # 執行搜尋
+        results = self._existing_search_logic(query)
+        self.result_area.controls = [ft.Text(r) for r in results]
+
+        if results:
+            self.hint_text.value = f"找到 {len(results)} 筆結果"
+            self.hint_text.color = ft.Colors.GREEN_700
+        else:
+            self.hint_text.value = "無搜尋結果"
+            self.hint_text.color = ft.Colors.GREY_700
+        self.update()
 
     def _schedule_search(self):
-        """Debounce 搜尋（300ms）"""
-        if self._search_timer:
-            self._search_timer.cancel()
-        self._search_timer = threading.Timer(0.3, self._do_search)
-        self._search_timer.start()
-
-    def _do_search(self):
-        """執行搜尋邏輯"""
-        if not self._dirty:
-            return
-        try:
-            query = self.query_input.value
-            results = self._existing_search_logic(query)
-            self.result_area.controls = [ft.Text(r) for r in results]
-            self._dirty = False
-            self.update()
-        except Exception as e:
-            print(f"[CacheQueryModal] 搜尋失敗: {e}")
+        """Debounce 搜尋（已停用，改用按鈕）"""
+        pass
 
     def _existing_search_logic(self, query):
         """搜尋邏輯：使用主 View 的搜索服務"""
