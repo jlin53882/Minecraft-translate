@@ -195,12 +195,14 @@ class CacheView(ft.Column):
                 ft.dropdown.Option("DST", "DST"),
                 ft.dropdown.Option("ALL", "全部"),
             ],
+            on_change=self._on_query_mode_change,
         )
         self.dd_query_type = ft.Dropdown(
             width=180,
             value="ALL",
             tooltip="選擇要查詢的分類（例如 lang / patchouli）",
             options=[ft.dropdown.Option("ALL", "全部")],
+            on_change=self._on_query_type_change,
         )
         self.btn_query_search = ft.ElevatedButton(
             "搜尋", icon=ft.Icons.SEARCH, on_click=self._on_query_search
@@ -3469,6 +3471,18 @@ class CacheView(ft.Column):
             self.query_change_hint.value = "⚠️ 偵測到變更，請重新搜尋"
             self.query_change_hint.color = theme.WARNING
             self.update()
+
+    def _on_query_mode_change(self, e):
+        """偵測搜尋模式變更"""
+        self.query_change_hint.value = "⚠️ 偵測到變更，請重新搜尋"
+        self.query_change_hint.color = theme.WARNING
+        self.update()
+
+    def _on_query_type_change(self, e):
+        """偵測分類選擇變更"""
+        self.query_change_hint.value = "⚠️ 偵測到變更，請重新搜尋"
+        self.query_change_hint.color = theme.WARNING
+        self.update()
 
     def _on_query_search(self, e):
         """執行關鍵字搜尋快取"""
