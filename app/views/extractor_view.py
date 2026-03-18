@@ -14,7 +14,7 @@
 # /minecraft_translator_flet/app/views/extractor_view.py
 import flet as ft
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info
+from translation_tool.utils.log_unit import log_info, log_warning, log_error
 import threading
 
 from app.task_session import TaskSession
