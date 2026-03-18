@@ -18,7 +18,7 @@ for importer, modname, ispkg in pkgutil.iter_modules(translation_tool.__path__):
                 for _, subname, is_sub_pkg in pkgutil.iter_modules(submod.__path__):
                     fullname = f"translation_tool.{modname}.{subname}"
                     modules.append(fullname)
-        except:
+        except (ImportError, AttributeError) as e:
             pass
 
 # app 子模組
