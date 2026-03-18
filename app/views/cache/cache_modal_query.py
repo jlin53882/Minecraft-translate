@@ -86,9 +86,17 @@ class CacheQueryModal(CacheModalBase):
         if not query:
             return []
         try:
-            # 嘗試使用主 View 的搜索功能
-            if self.cache_view and hasattr(self.cache_view, "_do_search_logic"):
-                return self.cache_view._do_search_logic(query)
+            # 直接調用主 View 的搜索功能
+            if self.cache_view:
+                # 臨時設定主 View 的輸入框
+                self.cache_view.tf_query_input.value = query
+                # 調用主 View 的搜索
+                self.cache_view._on_query_search(None)
+                # 取得結果
+                results = self.cache_view.query_results
+                if results:
+                    return [f"{r.get('cache_type', '')}: {r.get('key', '')}" for r in results[:20]]
+                return ["無搜尋結果"]
             return [f"搜尋: {query}"]
         except Exception as e:
             return [f"搜尋失敗: {e}"]
