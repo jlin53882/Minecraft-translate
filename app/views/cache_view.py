@@ -1592,7 +1592,8 @@ class CacheView(ft.Column):
             rows = [x for x in rows if ("[ERROR" in x or "[WARN" in x)]
         for line in rows[-800:]:
             self.log_list.controls.append(ft.Text(line, size=12, selectable=True))
-        self.page.update()
+        # PR5-7: 使用局部更新替代全頁更新
+        self.update()
 
     def _on_log_filter_changed(self, e):
         """日誌篩選條件變更時重新渲染"""
@@ -1744,7 +1745,8 @@ class CacheView(ft.Column):
                 )
             )
 
-        self.page.update()
+        # PR5-7: 使用局部更新替代全頁更新
+        self.update()
 
     def _refresh_overview_ui(self, data: dict):
         """更新總覽區域的統計資料顯示"""
