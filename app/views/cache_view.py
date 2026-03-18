@@ -56,6 +56,10 @@ from app.services_impl.cache.cache_services import (
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
 
+# PR5-7: 查詢視圖（可獨立測試）
+from app.views.cache.cache_query_view import CacheQueryView
+
+
 class CacheView(ft.Column):
     """快取管理器（UI）。
 
@@ -3499,3 +3503,24 @@ class CacheView(ft.Column):
         self._render_query_results()
         self._render_query_detail()
         self.update()
+
+    # PR5-7: CacheQueryView 回調
+    def _on_query_view_search(self, query, mode, dtype):
+        """處理來自 CacheQueryView 的搜尋請求"""
+        if self.ui_busy:
+            self._notify("目前忙碌中，暫停搜尋", "warn")
+            return
+
+        if not query:
+            self._notify("請輸入查詢內容", "warn")
+            return
+
+        # 代理到主搜尋方法
+        self.dd_query_mode.value = mode
+        self.dd_query_type.value = dtype
+        self.tf_query_input.value = query
+        self._on_query_search(None)
+
+    def _on_query_view_clear(self):
+        """處理來自 CacheQueryView 的清除請求"""
+        self._on_query_clear(None)
