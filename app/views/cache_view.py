@@ -3460,12 +3460,10 @@ class CacheView(ft.Column):
         )
         self.update()
 
-    # PR5-7: 查詢變�提示
+    # PR5-7: 查詢變更提示
     def _on_query_input_change(self, e):
         """偵測輸入框變更"""
         current = self.tf_query_input.value or ""
-        # Debug
-        print(f"[DEBUG] _on_query_input_change: current='{current}', last='{self._last_query_value}'")
         if current != self._last_query_value:
             # 有變更
             self.query_change_hint.value = "⚠️ 偵測到變更，請重新搜尋"
