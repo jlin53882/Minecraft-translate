@@ -179,7 +179,12 @@ class CacheView(ft.Column):
             on_change=self._on_query_input_change,
         )
         self.query_change_hint = ft.Text(
-            "", size=11, color=ft.Colors.ORANGE_700, selectable=True
+            "", size=11, color=theme.WARNING, selectable=True
+        )
+        # PR5-7: 将提示加入 UI
+        self.query_input_row = ft.Row(
+            [self.tf_query_input, self.query_change_hint],
+            spacing=10,
         )
         self.dd_query_mode = ft.Dropdown(
             width=130,
@@ -622,6 +627,8 @@ class CacheView(ft.Column):
                         ],
                         wrap=True,
                     ),
+                    # PR5-7: 查询变更提示
+                    self.query_change_hint,
                     ft.Text("查詢模式與分類選擇", size=11, color=theme.GREY_700),
                     ft.Row([self.dd_query_mode, self.dd_query_type], wrap=True),
                     self.query_search_hint,
@@ -3460,7 +3467,7 @@ class CacheView(ft.Column):
         if current != self._last_query_value and self._last_query_value:
             # 有變更且不是第一次
             self.query_change_hint.value = "⚠️ 偵測到變更，請重新搜尋"
-            self.query_change_hint.color = theme.ORANGE_700
+            self.query_change_hint.color = theme.WARNING
             self.update()
 
     def _on_query_search(self, e):
