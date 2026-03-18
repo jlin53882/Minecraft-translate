@@ -30,12 +30,14 @@ class CacheQueryModal(CacheModalBase):
             on_change=self._on_input,
         )
         self.result_area = ft.Column([])
-        self.content = ft.Column([
-            ft.Text("查詢 Cache", size=20, weight=ft.FontWeight.BOLD),
-            self.query_input,
-            ft.Divider(),
-            self.result_area,
-        ])
+        self.content = ft.Column(
+            [
+                ft.Text("查詢 Cache", size=20, weight=ft.FontWeight.BOLD),
+                self.query_input,
+                ft.Divider(),
+                self.result_area,
+            ]
+        )
 
     def _on_input(self, e):
         """輸入變更時觸發搜尋"""
