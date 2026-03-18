@@ -3,7 +3,6 @@
 用途：驗證 CacheShardModal 分片管理功能正確性。
 """
 
-import pytest
 from unittest.mock import MagicMock
 from app.views.cache.cache_modal_shard import CacheShardModal
 

@@ -3,7 +3,6 @@
 用途：驗證 CacheQueryModal 搜尋功能正確性。
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 from app.views.cache.cache_modal_query import CacheQueryModal
 
