@@ -90,11 +90,12 @@ class CacheQueryModal(CacheModalBase):
             if self.cache_view:
                 # 臨時設定主 View 的輸入框
                 self.cache_view.tf_query_input.value = query
-                # 調用主 View 的搜索
+                # 調用主 View 的搜索（已優化為局部更新）
                 self.cache_view._on_query_search(None)
                 # 取得結果
                 results = self.cache_view.query_results
                 if results:
+                    # 只顯示前 20 筆，避免 Modal 卡頓
                     return [f"{r.get('cache_type', '')}: {r.get('key', '')}" for r in results[:20]]
                 return ["無搜尋結果"]
             return [f"搜尋: {query}"]
