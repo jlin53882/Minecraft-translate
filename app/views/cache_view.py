@@ -1141,6 +1141,13 @@ class CacheView(ft.Column):
         except Exception as e:
             print(f"[CacheView] 更新失敗: {e}")
 
+    def _batch_refresh(self):
+        """批量刷新所有區域（用於初始載入）"""
+        try:
+            self.update()
+        except Exception as e:
+            print(f"[CacheView] 批量刷新失敗: {e}")
+
     # =========================================================
     # Lifecycle
     # =========================================================
@@ -1156,8 +1163,8 @@ class CacheView(ft.Column):
                 self.page.on_resized = self._on_page_resized
             self._render_query_detail()
             self._refresh_disabled_state()
-            if self.page is not None:
-                self.page.update()
+            # PR5-7: 使用批量刷新優化初始載入
+            self._batch_refresh()
         except Exception as ex:
             log_error(f"CacheView did_mount failed: {ex}")
             log_error(traceback.format_exc())
