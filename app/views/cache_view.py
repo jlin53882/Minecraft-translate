@@ -1848,6 +1848,7 @@ class CacheView(ft.Column):
                 page=self.page,
                 on_complete=self._on_query_modal_complete,
                 on_error=self._on_query_modal_error,
+                cache_view=self,  # 傳入主 View 引用
             )
         self._query_modal.open()
 
@@ -1871,6 +1872,7 @@ class CacheView(ft.Column):
                 page=self.page,
                 on_complete=self._on_shard_modal_complete,
                 on_error=self._on_shard_modal_error,
+                cache_view=self,  # 傳入主 View 引用
             )
         self._shard_modal.open()
 
