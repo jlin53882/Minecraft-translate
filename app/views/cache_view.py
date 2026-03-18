@@ -751,6 +751,10 @@ class CacheView(ft.Column):
         )
 
 
+        self._build_shard_widgets()
+
+    def _build_shard_widgets(self):
+        """建立分片相關的 UI widgets（從 __init__ 提取）"""
         # C1：ShardDetail - KeyListCard
         self._shard_state = CacheShardState()
         self.shard_detail_selected_type = self._shard_state.selected_type
@@ -1086,62 +1090,6 @@ class CacheView(ft.Column):
             ),
         ]
 
-    # =========================================================
-    # 效能優化：髒標記機制（PR5-7 整合）
-    # =========================================================
-    def _mark_dirty(self, area: str):
-        """標記某區域需要更新"""
-        if area not in self._dirty_flags:
-            return
-        self._dirty_flags[area] = True
-        self._schedule_update()
-
-    def _schedule_update(self):
-        """排程更新（debounce 100ms）"""
-        # 防呆：確保已在 page 上
-        if not hasattr(self, "page") or self.page is None:
-            return
-        import threading
-
-        if self._update_timer:
-            self._update_timer.cancel()
-        self._update_timer = threading.Timer(0.1, self._do_update)
-        self._update_timer.start()
-
-    def _do_update(self):
-        """批次更新所有髒區域"""
-        # 防呆：確保已在 page 上
-        if not hasattr(self, "page") or self.page is None:
-            return
-        if not any(self._dirty_flags.values()):
-            return
-        try:
-            # 根據髒標記決定要更新的區域
-            if self._dirty_flags.get("overview"):
-                pass  # overview 由背景任務觸發更新
-            if self._dirty_flags.get("query"):
-                pass  # query 由背景任務觸發更新
-            if self._dirty_flags.get("shard"):
-                pass  # shard 由背景任務觸發更新
-            if self._dirty_flags.get("logs"):
-                pass  # logs 由背景任務觸發更新
-
-            self.update()
-            for k in self._dirty_flags:
-                self._dirty_flags[k] = False
-        except Exception as e:
-            print(f"[CacheView] 更新失敗: {e}")
-
-    def _batch_refresh(self):
-        """批量刷新所有區域（用於初始載入）"""
-        try:
-            self.update()
-        except Exception as e:
-            print(f"[CacheView] 批量刷新失敗: {e}")
-
-    # =========================================================
-    # Lifecycle
-    # =========================================================
     def did_mount(self):
         """元件載入完成後初始化資料與 UI"""
         try:
