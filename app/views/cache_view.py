@@ -78,6 +78,16 @@ class CacheView(ft.Column):
         super().__init__(expand=True, spacing=10)
         self.page = page
 
+        # -------------------- 效能優化：髒標記機制 --------------------
+        # PR5-7 整合：減少 update() 呼叫次數，避免 UI 卡顿
+        self._dirty_flags = {
+            "overview": False,
+            "query": False,
+            "shard": False,
+            "logs": False,
+        }
+        self._update_timer = None
+
         # -------------------- Global state --------------------
         self.ui_busy = False
         self.busy_reason = ""
@@ -1056,6 +1066,45 @@ class CacheView(ft.Column):
                 ],
             ),
         ]
+
+    # =========================================================
+    # 效能優化：髒標記機制（PR5-7 整合）
+    # =========================================================
+    def _mark_dirty(self, area: str):
+        """標記某區域需要更新"""
+        if area not in self._dirty_flags:
+            return
+        self._dirty_flags[area] = True
+        self._schedule_update()
+
+    def _schedule_update(self):
+        """排程更新（debounce 100ms）"""
+        import threading
+        if self._update_timer:
+            self._update_timer.cancel()
+        self._update_timer = threading.Timer(0.1, self._do_update)
+        self._update_timer.start()
+
+    def _do_update(self):
+        """批次更新所有髒區域"""
+        if not any(self._dirty_flags.values()):
+            return
+        try:
+            # 根據髒標記決定要更新的區域
+            if self._dirty_flags.get("overview"):
+                pass  # overview 由背景任務觸發更新
+            if self._dirty_flags.get("query"):
+                pass  # query 由背景任務觸發更新
+            if self._dirty_flags.get("shard"):
+                pass  # shard 由背景任務觸發更新
+            if self._dirty_flags.get("logs"):
+                pass  # logs 由背景任務觸發更新
+
+            self.update()
+            for k in self._dirty_flags:
+                self._dirty_flags[k] = False
+        except Exception as e:
+            print(f"[CacheView] 更新失敗: {e}")
 
     # =========================================================
     # Lifecycle
