@@ -1066,8 +1066,6 @@ class CacheView(ft.Column):
                                     ]
                                 ),
                             ),
-                            # PR5-7: Modal 入口按鈕
-                            self.modal_buttons_row,
                             self.main_tabs,
                         ],
                     ),
