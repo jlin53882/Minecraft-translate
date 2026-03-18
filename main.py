@@ -60,13 +60,13 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.LIGHT
 
     # PR: 全域錯誤處理
-    def on_error_handler(e: ft.ErrorEvent):
-        error_msg = f"UI 錯誤: {e.data}"
-        print(f"[FLET ERROR] {error_msg}")
+    # page.on_error 的 signature 是 error(self, message: str)
+    def on_error_handler(message: str):
+        print(f"[FLET ERROR] {message}")
         import traceback
         print(f"[FLET ERROR] {traceback.format_exc()}")
         # 顯示 SnackBar（使用 overlay 方式）
-        snack = ft.SnackBar(content=ft.Text(error_msg), bgcolor=ft.Colors.RED_700)
+        snack = ft.SnackBar(content=ft.Text(f"錯誤: {message}"), bgcolor=ft.Colors.RED_700)
         page.overlay.append(snack)
         snack.open = True
         page.update()
