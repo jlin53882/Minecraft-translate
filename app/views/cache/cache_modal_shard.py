@@ -8,8 +8,25 @@ from app.views.cache.cache_modal_base import CacheModalBase
 class CacheShardModal(CacheModalBase):
     """分片管理 Modal"""
 
-    def __init__(self, page, on_complete=None, on_error=None, initial_data=None):
+    def __init__(
+        self,
+        page,
+        on_complete=None,
+        on_error=None,
+        initial_data=None,
+        cache_view=None,
+    ):
+        """初始化分片 Modal
+
+        參數：
+            page: Flet Page
+            on_complete: 完成回調
+            on_error: 錯誤回調
+            initial_data: 初始資料
+            cache_view: 主 View 引用（用於訪問其分片方法）
+        """
         self.initial_data = initial_data
+        self.cache_view = cache_view  # 主 View 引用
         self._current_tab = "key"
         # TODO: 自動儲存功能（未實作）
         super().__init__(

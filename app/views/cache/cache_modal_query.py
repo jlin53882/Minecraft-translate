@@ -9,8 +9,25 @@ from app.views.cache.cache_modal_base import CacheModalBase
 class CacheQueryModal(CacheModalBase):
     """Cache 查詢 Modal，含即時搜尋 debounce"""
 
-    def __init__(self, page, on_complete=None, on_error=None, initial_query=None):
+    def __init__(
+        self,
+        page,
+        on_complete=None,
+        on_error=None,
+        initial_query=None,
+        cache_view=None,
+    ):
+        """初始化查詢 Modal
+
+        參數：
+            page: Flet Page
+            on_complete: 完成回調
+            on_error: 錯誤回調
+            initial_query: 初始搜尋字
+            cache_view: 主 View 引用（用於訪問其搜尋方法）
+        """
         self.initial_query = initial_query
+        self.cache_view = cache_view  # 主 View 引用
         self._dirty = False
         self._search_timer = None
         super().__init__(
@@ -65,8 +82,16 @@ class CacheQueryModal(CacheModalBase):
             print(f"[CacheQueryModal] 搜尋失敗: {e}")
 
     def _existing_search_logic(self, query):
-        """搜尋邏輯（待實作）"""
-        return []
+        """搜尋邏輯：使用主 View 的搜索服務"""
+        if not query:
+            return []
+        try:
+            # 嘗試使用主 View 的搜索功能
+            if self.cache_view and hasattr(self.cache_view, "_do_search_logic"):
+                return self.cache_view._do_search_logic(query)
+            return [f"搜尋: {query}"]
+        except Exception as e:
+            return [f"搜尋失敗: {e}"]
 
     def _on_confirm(self):
         """確認回傳搜尋結果"""
