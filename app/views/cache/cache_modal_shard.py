@@ -30,12 +30,14 @@ class CacheShardModal(CacheModalBase):
                 ft.Tab(text="Key 列表", content=self._build_key_tab()),
                 ft.Tab(text="SRC 編輯", content=self._build_src_tab()),
                 ft.Tab(text="DST 編輯", content=self._build_dst_tab()),
+            ],
+        )
+        self.content = ft.Column(
+            [
+                ft.Text("分片管理", size=20, weight=ft.FontWeight.BOLD),
+                self.tabs,
             ]
         )
-        self.content = ft.Column([
-            ft.Text("分片管理", size=20, weight=ft.FontWeight.BOLD),
-            self.tabs,
-        ])
 
     def _build_key_tab(self):
         """建立 Key 列表標籤"""

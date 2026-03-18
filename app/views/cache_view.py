@@ -256,9 +256,7 @@ class CacheView(ft.Column):
             on_click=self._on_restore_latest_query,
             tooltip="載入最新歷史紀錄（不立即寫入快取）",
         )
-        self.query_history_key_text = ft.Text(
-            "Key: -", size=11, color=theme.GREY_700
-        )
+        self.query_history_key_text = ft.Text("Key: -", size=11, color=theme.GREY_700)
         self.btn_open_history_drawer = ft.OutlinedButton(
             "歷史紀錄",
             icon=ft.Icons.HISTORY,
@@ -403,9 +401,7 @@ class CacheView(ft.Column):
             icon=ft.Icons.HISTORY,
             on_click=self._on_shard_apply_selected_history,
         )
-        self.shard_history_key_text = ft.Text(
-            "Key: -", size=11, color=theme.GREY_700
-        )
+        self.shard_history_key_text = ft.Text("Key: -", size=11, color=theme.GREY_700)
         self.btn_open_shard_history_drawer = ft.OutlinedButton(
             "歷史紀錄",
             icon=ft.Icons.HISTORY,
@@ -764,9 +760,7 @@ class CacheView(ft.Column):
         # C2：SRC 預覽模式
         self.shard_detail_src_mode = self._shard_state.src_mode  # preview | raw
 
-        self.shard_detail_meta = ft.Text(
-            "尚未選擇分片", size=11, color=theme.GREY_700
-        )
+        self.shard_detail_meta = ft.Text("尚未選擇分片", size=11, color=theme.GREY_700)
         self.tf_shard_key_filter = ft.TextField(
             label="過濾 key",
             hint_text="輸入關鍵字快速過濾",
@@ -904,9 +898,7 @@ class CacheView(ft.Column):
         self.shard_key_column = ft.Container(
             width=self._dynamic_shard_key_panel_width(),
             padding=10,
-            border=ft.border.only(
-                right=ft.border.BorderSide(1, theme.OUTLINE_VARIANT)
-            ),
+            border=ft.border.only(right=ft.border.BorderSide(1, theme.OUTLINE_VARIANT)),
             content=ft.Column(
                 [
                     ft.Text("C1 KeyListCard", weight=ft.FontWeight.BOLD),
@@ -1116,9 +1108,10 @@ class CacheView(ft.Column):
     def _schedule_update(self):
         """排程更新（debounce 100ms）"""
         # 防呆：確保已在 page 上
-        if not hasattr(self, 'page') or self.page is None:
+        if not hasattr(self, "page") or self.page is None:
             return
         import threading
+
         if self._update_timer:
             self._update_timer.cancel()
         self._update_timer = threading.Timer(0.1, self._do_update)
@@ -1127,7 +1120,7 @@ class CacheView(ft.Column):
     def _do_update(self):
         """批次更新所有髒區域"""
         # 防呆：確保已在 page 上
-        if not hasattr(self, 'page') or self.page is None:
+        if not hasattr(self, "page") or self.page is None:
             return
         if not any(self._dirty_flags.values()):
             return
@@ -1773,15 +1766,22 @@ class CacheView(ft.Column):
         self._refresh_query_type_options()
         self._render_query_type_shard_page()
 
-    def _run_action(self, reason: str, work_fn, success_msg: str, show_progress: bool = False):
+    def _run_action(
+        self, reason: str, work_fn, success_msg: str, show_progress: bool = False
+    ):
         """包裝非同步工作函式的執行與狀態更新"""
-        return run_cache_action(self, reason, work_fn, success_msg, show_progress=show_progress)
+        return run_cache_action(
+            self, reason, work_fn, success_msg, show_progress=show_progress
+        )
 
     # top actions
     def _on_reload_all(self, e):
         """觸發重新載入所有快取（長時間操作）"""
         self._run_action(
-            "RELOADING", lambda: cache_reload_service(), "已重新載入全部快取", show_progress=True
+            "RELOADING",
+            lambda: cache_reload_service(),
+            "已重新載入全部快取",
+            show_progress=True,
         )
 
     def _on_save_all_new(self, e):
@@ -1921,6 +1921,7 @@ class CacheView(ft.Column):
 
     def _on_rotate_one(self, cache_type: str):
         """處理單一快取類型的分片輪替（Rotation）動作。"""
+
         def _work():
             """執行分片輪替的工作函式"""
             ok = cache_rotate_service(cache_type)
@@ -2157,9 +2158,7 @@ class CacheView(ft.Column):
         if not page_keys:
             if keyword and all_keys:
                 self.shard_detail_key_list.controls.append(
-                    ft.Text(
-                        "此篩選條件沒有符合的 key", size=11, color=theme.GREY_600
-                    )
+                    ft.Text("此篩選條件沒有符合的 key", size=11, color=theme.GREY_600)
                 )
             else:
                 self.shard_detail_key_list.controls.append(
@@ -2173,9 +2172,7 @@ class CacheView(ft.Column):
                         padding=6,
                         border=ft.border.all(
                             1,
-                            theme.BLUE_300
-                            if selected
-                            else theme.OUTLINE_VARIANT,
+                            theme.BLUE_300 if selected else theme.OUTLINE_VARIANT,
                         ),
                         border_radius=6,
                         bgcolor=theme.BLUE_50 if selected else None,
@@ -2555,9 +2552,7 @@ class CacheView(ft.Column):
                     padding=6,
                     border=ft.border.all(
                         1,
-                        theme.BLUE_200
-                        if is_selected
-                        else theme.OUTLINE_VARIANT,
+                        theme.BLUE_200 if is_selected else theme.OUTLINE_VARIANT,
                     ),
                     border_radius=8,
                     bgcolor=theme.BLUE_50 if is_selected else None,
@@ -2566,9 +2561,7 @@ class CacheView(ft.Column):
                     ),
                     content=ft.Column(
                         [
-                            ft.Text(
-                                f"{ts} | {action}", size=10, color=theme.GREY_700
-                            ),
+                            ft.Text(f"{ts} | {action}", size=10, color=theme.GREY_700),
                             ft.Text(f"old: {old_dst[:60]}", size=11, no_wrap=False),
                             ft.Text(f"new: {new_dst[:60]}", size=11, no_wrap=False),
                         ],
@@ -2667,7 +2660,7 @@ class CacheView(ft.Column):
 
     def _on_shard_page_first(self, e):
         """跳到分片詳情第一頁"""
-        if getattr(self, '_is_shard_rendering', False):
+        if getattr(self, "_is_shard_rendering", False):
             return  # 防止重複點擊
         self._is_shard_rendering = True
         self.shard_detail_page = 1
@@ -2679,7 +2672,7 @@ class CacheView(ft.Column):
 
     def _on_shard_page_prev(self, e):
         """上一頁分片詳情"""
-        if getattr(self, '_is_shard_rendering', False):
+        if getattr(self, "_is_shard_rendering", False):
             return
         self._is_shard_rendering = True
         self.shard_detail_page -= 1
@@ -2691,7 +2684,7 @@ class CacheView(ft.Column):
 
     def _on_shard_page_next(self, e):
         """下一頁分片詳情"""
-        if getattr(self, '_is_shard_rendering', False):
+        if getattr(self, "_is_shard_rendering", False):
             return
         self._is_shard_rendering = True
         self.shard_detail_page += 1
@@ -2703,7 +2696,7 @@ class CacheView(ft.Column):
 
     def _on_shard_page_last(self, e):
         """跳到分片詳情最後一頁"""
-        if getattr(self, '_is_shard_rendering', False):
+        if getattr(self, "_is_shard_rendering", False):
             return
         self._is_shard_rendering = True
         self.shard_detail_page = self.shard_detail_total_pages
@@ -2766,9 +2759,7 @@ class CacheView(ft.Column):
                             padding=6,
                             border=ft.border.all(
                                 1,
-                                theme.BLUE_300
-                                if selected
-                                else theme.OUTLINE_VARIANT,
+                                theme.BLUE_300 if selected else theme.OUTLINE_VARIANT,
                             ),
                             border_radius=8,
                             bgcolor=theme.BLUE_50 if selected else None,
@@ -2988,18 +2979,14 @@ class CacheView(ft.Column):
                     padding=6,
                     border=ft.border.all(
                         1,
-                        theme.BLUE_200
-                        if is_selected
-                        else theme.OUTLINE_VARIANT,
+                        theme.BLUE_200 if is_selected else theme.OUTLINE_VARIANT,
                     ),
                     border_radius=8,
                     bgcolor=theme.BLUE_50 if is_selected else None,
                     on_click=lambda e, item=ev: self._on_select_history_event(item),
                     content=ft.Column(
                         [
-                            ft.Text(
-                                f"{ts} | {action}", size=10, color=theme.GREY_700
-                            ),
+                            ft.Text(f"{ts} | {action}", size=10, color=theme.GREY_700),
                             ft.Text(f"old: {old_dst[:60]}", size=11, no_wrap=False),
                             ft.Text(f"new: {new_dst[:60]}", size=11, no_wrap=False),
                         ],
