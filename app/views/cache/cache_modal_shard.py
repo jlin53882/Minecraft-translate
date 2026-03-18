@@ -38,6 +38,8 @@ class CacheShardModal(CacheModalBase):
             height=500,
         )
         self._build_content()
+        # 建立後立即載入分類選項
+        self._preload_type_options()
 
     def _build_content(self):
         """建立分頁 UI"""
@@ -125,6 +127,30 @@ class CacheShardModal(CacheModalBase):
         # 加載該分類的分片數據
         self._load_shard_data(shard_type)
 
+    def _preload_type_options(self):
+        """預先載入所有分類選項到下拉選單"""
+        if not self.cache_view:
+            return
+        try:
+            overview = self.cache_view._last_overview_data
+            raw_types = overview.get("types", {}) if isinstance(overview, dict) else {}
+            
+            type_list = []
+            if isinstance(raw_types, dict):
+                type_list = list(raw_types.keys())
+            elif isinstance(raw_types, list):
+                type_list = [t.get("cache_type") or t.get("type") for t in raw_types if isinstance(t, dict)]
+            
+            if type_list:
+                self.dd_shard_type.options = [
+                    ft.dropdown.Option("ALL", "全部"),
+                ] + [
+                    ft.dropdown.Option(t, t) for t in type_list
+                ]
+                self.dd_shard_type.value = type_list[0]
+        except Exception:
+            pass  # 忽略錯誤，避免影響 modal 開啟
+
     def _load_shard_data(self, shard_type):
         """載入分片數據"""
         if not self.cache_view:
@@ -149,8 +175,10 @@ class CacheShardModal(CacheModalBase):
             if shard_type == "ALL":
                 shard_type = type_list[0] if type_list else "mods"
             
-            # 更新下拉選單
+            # 更新下拉選單（保留 ALL 選項）
             self.dd_shard_type.options = [
+                ft.dropdown.Option("ALL", "全部"),
+            ] + [
                 ft.dropdown.Option(t, t) for t in type_list
             ]
             self.dd_shard_type.value = shard_type
