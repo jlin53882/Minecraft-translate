@@ -3,9 +3,6 @@
 用途：驗證 CacheView 髒標記優化機制正確性。
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
-
 
 class TestCacheViewDirtyFlags:
     """CacheView 髒標記機制測試"""
