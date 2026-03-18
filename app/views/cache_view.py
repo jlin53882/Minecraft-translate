@@ -2242,8 +2242,12 @@ class CacheView(ft.Column):
             self.shard_nav_view.visible = not show_workspace
         if hasattr(self, "shard_workspace_card"):
             self.shard_workspace_card.visible = show_workspace
-        if self.page:
-            self.update()
+        # 防護：確保 page 存在且已完全初始化
+        if self.page is not None and hasattr(self, 'page'):
+            try:
+                self.page.update()
+            except Exception:
+                pass
 
     def _open_shard_workspace_tab(self):
         """開啟分片工作區標籤"""
