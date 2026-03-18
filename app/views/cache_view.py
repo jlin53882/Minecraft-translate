@@ -1503,7 +1503,7 @@ class CacheView(ft.Column):
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True
-        self.update()
+        self.page.update()
 
     def _append_log(self, text: str):
         """新增日誌訊息並根據等級記錄"""
