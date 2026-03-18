@@ -65,10 +65,11 @@ def main(page: ft.Page):
         print(f"[FLET ERROR] {error_msg}")
         import traceback
         print(f"[FLET ERROR] {traceback.format_exc()}")
-        try:
-            page.show_snack_bar(ft.SnackBar(content=ft.Text(error_msg), bgcolor=ft.Colors.RED_700))
-        except Exception:
-            pass
+        # 顯示 SnackBar（使用 overlay 方式）
+        snack = ft.SnackBar(content=ft.Text(error_msg), bgcolor=ft.Colors.RED_700)
+        page.overlay.append(snack)
+        snack.open = True
+        page.update()
 
     page.on_error = on_error_handler
 
