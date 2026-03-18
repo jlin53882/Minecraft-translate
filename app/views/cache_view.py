@@ -1057,6 +1057,18 @@ class CacheView(ft.Column):
             ],
         )
 
+        # PR5-7: Modal 入口按鈕（提供替代 Tab 的現代化體驗）
+        self.modal_buttons_row = ft.Container(
+            padding=10,
+            content=ft.Row(
+                [
+                    self.btn_open_query_modal,
+                    self.btn_open_shard_modal,
+                ],
+                spacing=10,
+            ),
+        )
+
         # 主布局改成 Stack，支援浮動視窗
         self.controls = [
             ft.Stack(
@@ -1078,6 +1090,8 @@ class CacheView(ft.Column):
                                     ]
                                 ),
                             ),
+                            # PR5-7: Modal 入口按鈕
+                            self.modal_buttons_row,
                             self.main_tabs,
                         ],
                     ),
