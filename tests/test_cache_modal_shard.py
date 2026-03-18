@@ -93,7 +93,9 @@ class TestCacheShardModal:
 
         modal._on_confirm()
 
-        on_complete.assert_called_once_with({"tab": "src"})
+        # 現在回傳包含更多欄位
+        call_args = on_complete.call_args[0][0]
+        assert call_args["tab"] == "src"
 
     def test_build_key_tab_returns_container(self):
         """測試建立 Key 標籤"""
