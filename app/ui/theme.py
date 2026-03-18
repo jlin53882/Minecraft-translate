@@ -22,6 +22,7 @@ BUTTON_HEIGHT = 42
 BUTTON_RADIUS = 6
 
 # 額外常用顏色（過渡用）
+# 注意：Colors.BLACK12 在 Flet 0.28.3 中仍可用，無需修改
 RED = Colors.RED
 RED_400 = Colors.RED_400
 RED_500 = Colors.RED_500
