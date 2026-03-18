@@ -135,13 +135,32 @@ class CacheShardModal(CacheModalBase):
         try:
             # 從主 View 獲取數據
             overview = self.cache_view._last_overview_data
+            # 取得 types 結構
+            raw_types = overview.get("types", {}) if isinstance(overview, dict) else {}
+            
+            # 取得所有分類
+            type_list = []
+            if isinstance(raw_types, dict):
+                type_list = list(raw_types.keys())
+            elif isinstance(raw_types, list):
+                type_list = [t.get("cache_type") or t.get("type") for t in raw_types if isinstance(t, dict)]
+            
+            # 如果沒有選擇分類，預設選擇第一個
             if shard_type == "ALL":
-                shard_type = list(overview.keys())[0] if overview else "mods"
+                shard_type = type_list[0] if type_list else "mods"
+            
+            # 更新下拉選單
+            self.dd_shard_type.options = [
+                ft.dropdown.Option(t, t) for t in type_list
+            ]
+            self.dd_shard_type.value = shard_type
+            
+            # 取得該分類的數據
+            type_data = raw_types.get(shard_type, {}) if isinstance(raw_types, dict) else {}
             
             # 更新 Key 列表
             self.key_list.controls.clear()
-            type_data = overview.get(shard_type, {})
-            entries = type_data.get("entries_count", 0)
+            entries = type_data.get("entries_count", 0) if isinstance(type_data, dict) else 0
             self.key_list.controls.append(
                 ft.Text(f"{shard_type}: {entries} 筆")
             )
