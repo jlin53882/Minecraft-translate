@@ -14,11 +14,10 @@
 # /minecraft_translator_flet/app/views/extractor_view.py
 import flet as ft
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
+from translation_tool.utils.log_unit import log_info
 import threading
 
 from app.task_session import TaskSession
-from app.ui.components import styled_card  # guard: shared card source remains explicit in extractor_view
 from app.views.extractor.extractor_actions import (
     build_preview_error_dialog,
     build_preview_result_dialog,
