@@ -3,7 +3,6 @@
 用途：驗證 CacheModalBase 基底類的功能正確性。
 """
 
-import pytest
 from app.views.cache.cache_modal_base import CacheModalBase
 
 
@@ -41,8 +40,12 @@ class TestCacheModalBase:
     def test_initialization_with_callbacks(self):
         """測試帶 callback 初始化"""
         page = _MockPage()
-        on_complete = lambda data: None
-        on_error = lambda e: None
+
+        def on_complete(data):
+            pass
+
+        def on_error(e):
+            pass
 
         modal = CacheModalBase(page, on_complete=on_complete, on_error=on_error)
 
@@ -97,7 +100,9 @@ class TestCacheModalBase:
         """測試 _do_complete 呼叫 callback"""
         page = _MockPage()
         result = {}
-        on_complete = lambda data: result.update(data)
+
+        def on_complete(data):
+            result.update(data)
 
         modal = CacheModalBase(page, on_complete=on_complete)
         modal._do_complete({"key": "value"})
@@ -109,7 +114,9 @@ class TestCacheModalBase:
         """測試 _do_error 呼叫 callback"""
         page = _MockPage()
         error_result = {}
-        on_error = lambda e: error_result.update({"error": e})
+
+        def on_error(e):
+            error_result.update({"error": e})
 
         modal = CacheModalBase(page, on_error=on_error)
         modal._do_error("test error")

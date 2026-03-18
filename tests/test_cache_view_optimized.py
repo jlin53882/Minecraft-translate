@@ -3,7 +3,6 @@
 用途：驗證 CacheViewOptimized 髒標記機制正確性。
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 from app.views.cache.cache_view_optimized import CacheViewOptimized
 
