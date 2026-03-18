@@ -59,6 +59,19 @@ def main(page: ft.Page):
     )
     page.theme_mode = ft.ThemeMode.LIGHT
 
+    # PR: 全域錯誤處理
+    def on_error_handler(e: ft.ErrorEvent):
+        error_msg = f"UI 錯誤: {e.data}"
+        print(f"[FLET ERROR] {error_msg}")
+        import traceback
+        print(f"[FLET ERROR] {traceback.format_exc()}")
+        try:
+            page.show_snack_bar(ft.SnackBar(content=ft.Text(error_msg), bgcolor=ft.Colors.RED_700))
+        except Exception:
+            pass
+
+    page.on_error = on_error_handler
+
     file_picker = ft.FilePicker()
     page.overlay.append(file_picker)
 
