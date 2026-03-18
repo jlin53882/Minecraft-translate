@@ -55,9 +55,6 @@ from app.services_impl.cache.cache_services import (
 )
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
-# PR5-7: Modal 元件
-from app.views.cache import CacheQueryModal, CacheShardModal
-
 
 class CacheView(ft.Column):
     """快取管理器（UI）。
@@ -127,24 +124,6 @@ class CacheView(ft.Column):
             tooltip="重建全文搜尋索引（提升搜尋速度）",
             on_click=self._on_rebuild_index,
         )
-
-        # PR5-7: Modal 彈窗按鈕
-        self.btn_open_query_modal = primary_button(
-            "查詢 Cache",
-            icon=ft.Icons.SEARCH,
-            tooltip="開啟查詢視窗",
-            on_click=self._on_open_query_modal,
-        )
-        self.btn_open_shard_modal = primary_button(
-            "分片管理",
-            icon=ft.Icons.EDIT,
-            tooltip="開啟分片管理視窗",
-            on_click=self._on_open_shard_modal,
-        )
-
-        # Modal 實例（延遲初始化）
-        self._query_modal = None
-        self._shard_modal = None
 
         # list + log controls
         self.type_list = ft.ListView(expand=True, spacing=6, auto_scroll=True)
@@ -1066,17 +1045,6 @@ class CacheView(ft.Column):
         )
 
         # PR5-7: Modal 入口按鈕（提供替代 Tab 的現代化體驗）
-        self.modal_buttons_row = ft.Container(
-            padding=10,
-            content=ft.Row(
-                [
-                    self.btn_open_query_modal,
-                    self.btn_open_shard_modal,
-                ],
-                spacing=10,
-            ),
-        )
-
         # 主布局改成 Stack，支援浮動視窗
         self.controls = [
             ft.Stack(
@@ -1864,51 +1832,6 @@ class CacheView(ft.Column):
 
         finally:
             self._set_state(False, "READY", "trace: 重建完成")
-
-    # PR5-7: Modal 彈窗處理
-    def _on_open_query_modal(self, e):
-        """開啟查詢 Modal"""
-        if self._query_modal is None:
-            self._query_modal = CacheQueryModal(
-                page=self.page,
-                on_complete=self._on_query_modal_complete,
-                on_error=self._on_query_modal_error,
-                cache_view=self,  # 傳入主 View 引用
-            )
-        self._query_modal.open()
-
-    def _on_query_modal_complete(self, data):
-        """查詢 Modal 完成回調"""
-        query = data.get("query", "")
-        if query:
-            # 觸發搜尋
-            self.tf_query_input.value = query
-            self._on_query_search(None)
-        self._mark_dirty("query")
-
-    def _on_query_modal_error(self, error):
-        """查詢 Modal 錯誤回調"""
-        self._notify(f"查詢失敗: {error}", "error")
-
-    def _on_open_shard_modal(self, e):
-        """開啟分片管理 Modal"""
-        if self._shard_modal is None:
-            self._shard_modal = CacheShardModal(
-                page=self.page,
-                on_complete=self._on_shard_modal_complete,
-                on_error=self._on_shard_modal_error,
-                cache_view=self,  # 傳入主 View 引用
-            )
-        self._shard_modal.open()
-
-    def _on_shard_modal_complete(self, data):
-        """分片 Modal 完成回調"""
-        self._notify("分片已更新", "info")
-        self._mark_dirty("shard")
-
-    def _on_shard_modal_error(self, error):
-        """分片 Modal 錯誤回調"""
-        self._notify(f"操作失敗: {error}", "error")
 
     # overview 集中操作已移除，功能保留在分類卡按鈕
 
