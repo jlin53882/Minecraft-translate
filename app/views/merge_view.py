@@ -64,7 +64,7 @@ class MergeView(ft.Column):
 
         # 參數區
         self.only_lang_checkbox = ft.Checkbox(
-            label="只處理 lang 檔案（其他檔案不處理）",
+            label="只處理 lang 檔案",
             value=True,
         )
 
@@ -76,25 +76,25 @@ class MergeView(ft.Column):
         )
         # 2. skip_zh_cn_when_only_lang switch
         self.skip_zh_cn_switch = ft.Switch(
-            label="只處理 lang 時跳過 zh_cn",
+            label="只處理 Patchouli 的 zh_cn",
             value=False,
         )
         # 3. patchouli_skip_zh_cn switch
         self.patchouli_skip_zh_cn_switch = ft.Switch(
-            label="Patchouli：允許 zh_cn 觸發跳過 en_us",
+            label="允許 zh_cn 觸發跳過 en_us",
             value=False,
         )
         # 4. threshold field
         self.patchouli_threshold_field = ft.TextField(
-            label="Patchouli 有效翻譯比例門檻",
+            label="en_us 跳過門檻",
             value="0.5",
             width=120,
             keyboard_type=ft.KeyboardType.NUMBER,
-            suffix_text="(0.0~1.0)",
+            suffix_text="0.0~1.0",
         )
         # Disabled 原因說明
         self._zh_cn_disabled_note = ft.Text(
-            "⚠️ 需先開啟「處理 zh_cn 檔案」才能使用",
+            "需先開啟「處理 zh_cn 檔案」",
             size=11,
             color=theme.RED_400,
             visible=False,
@@ -111,7 +111,12 @@ class MergeView(ft.Column):
         )
 
         # ZIP 清單
-        self.zip_list_view = ft.Column(scroll="auto", spacing=4, tight=True)
+        self.zip_list_view = ft.Column(
+            [ft.Text("尚未加入任何 ZIP 檔案", size=12, color=theme.GREY_400)],
+            scroll="auto",
+            spacing=4,
+            tight=True,
+        )
 
         # 狀態區
         self.status_chip = ft.Chip(
@@ -133,7 +138,7 @@ class MergeView(ft.Column):
             bgcolor=theme.BLUE_700,
         )
         self.start_button = primary_button(
-            "開始合併 ZIP",
+            "開始處理",
             icon=ft.Icons.PLAY_ARROW,
             tooltip="開始執行 ZIP 合併流程",
             on_click=self.start_merge,
@@ -165,7 +170,7 @@ class MergeView(ft.Column):
 
         self.controls = [
             styled_card(
-                title="ZIP 清單",
+                title="檔案清單",
                 icon=ft.Icons.ARCHIVE,
                 content=ft.Column(
                     [
@@ -186,7 +191,7 @@ class MergeView(ft.Column):
                 ),
             ),
             styled_card(
-                title="輸出與選項",
+                title="輸出與執行",
                 icon=ft.Icons.FOLDER,
                 content=ft.Column(
                     [
@@ -203,13 +208,13 @@ class MergeView(ft.Column):
                             ],
                             spacing=6,
                         ),
-                        # 2. 一般選項 section header
-                        _section_header("一般選項"),
+                        # 2. 一般處理 section header
+                        _section_header("一般處理"),
                         # 只處理 lang 檔案 — VERTICAL block
                         _setting_block(
                             label="只處理 lang 檔案",
                             control=self.only_lang_checkbox,
-                            note="開啟後，只處理語言檔；其他內容檔案會略過。",
+                            note="只處理語言檔，其他內容檔案略過。",
                         ),
                         ft.Divider(height=16, color=theme.GREY_100),
                         # 3. zh_cn 處理 section header
@@ -218,25 +223,30 @@ class MergeView(ft.Column):
                         _setting_block(
                             label="處理 zh_cn 檔案",
                             control=self.process_zh_cn_switch,
-                            note="關閉後，所有 zh_cn 檔案都會略過。",
+                            note="關閉後，所有 zh_cn 檔案會略過。",
                             disabled_note=self._zh_cn_disabled_note,
                         ),
                         ft.Divider(height=16, color=theme.GREY_100),
-                        # 4. Patchouli 進階設定 section header
-                        _section_header("Patchouli 進階設定"),
-                        # Card 1: 只處理 lang 時跳過 zh_cn
+                        # 4. Patchouli 進階 section header
+                        _section_header("Patchouli 進階"),
+                        # Sub-section A: Patchouli 處理模式
+                        ft.Text("Patchouli 處理模式", size=11, weight=ft.FontWeight.W_500, color=theme.GREY_500),
+                        # Card 1: 只處理 Patchouli 的 zh_cn
                         ft.Container(
                             bgcolor=ft.Colors.WHITE,
                             border_radius=8,
                             padding=12,
                             border=ft.border.all(1, theme.GREY_200),
                             content=_setting_block(
-                                label="只處理 lang 時跳過 zh_cn",
+                                label="只處理 Patchouli 的 zh_cn",
                                 control=self.skip_zh_cn_switch,
-                                note="僅在「只處理 lang」模式生效。開啟後，zh_cn 的 lang 檔會直接跳過。",
+                                note="僅處理 Patchouli 的 zh_cn 語言檔。",
                             ),
                         ),
                         ft.Container(height=8),
+                        # Sub-section B: 跳過判斷
+                        ft.Text("跳過判斷", size=11, weight=ft.FontWeight.W_500, color=theme.GREY_500),
+                        ft.Container(height=4),
                         # Card 2: 允許 zh_cn 觸發跳過 en_us
                         ft.Container(
                             bgcolor=ft.Colors.WHITE,
@@ -246,21 +256,20 @@ class MergeView(ft.Column):
                             content=_setting_block(
                                 label="允許 zh_cn 觸發跳過 en_us",
                                 control=self.patchouli_skip_zh_cn_switch,
-                                note="開啟後，若 zh_cn 的有效翻譯比例達門檻，會跳過對應的 en_us。",
+                                note="zh_cn 達門檻時，跳過對應 en_us。",
                                 disabled_note=self._zh_cn_disabled_note,
                             ),
                         ),
                         ft.Container(height=8),
-                        # Card 3: 有效翻譯比例門檻
+                        # Card 3: en_us 跳過門檻
                         ft.Container(
                             bgcolor=ft.Colors.WHITE,
                             border_radius=8,
                             padding=12,
                             border=ft.border.all(1, theme.GREY_200),
                             content=ft.Column([
-                                ft.Text("有效翻譯比例門檻", size=13),
+                                ft.Text("en_us 跳過門檻", size=13),
                                 ft.Row([self.patchouli_threshold_field], spacing=8),
-                                ft.Text("預設 0.5，代表至少一半的文字檔需被判定為有效翻譯。", size=11, color=theme.GREY_600),
                             ], spacing=4),
                         ),
                     ],
@@ -325,6 +334,11 @@ class MergeView(ft.Column):
     def _refresh_zip_list(self):
         """重新整理 ZIP 檔案清單顯示"""
         self.zip_list_view.controls.clear()
+        if not self.selected_zips:
+            self.zip_list_view.controls.append(
+                ft.Text("尚未加入任何 ZIP 檔案", size=12, color=theme.GREY_400)
+            )
+            return
         for path in self.selected_zips:
             name = Path(path).name
             self.zip_list_view.controls.append(
