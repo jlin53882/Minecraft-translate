@@ -112,7 +112,9 @@ def run_extraction_process_impl(
     processed_count = 0
     total_extracted = 0
     total_skipped = 0
-    max_workers = load_config().get('translation', {}).get('parallel_execution_workers') or os.cpu_count()
+    max_workers = load_config().get("translator", {}).get("parallel_execution_workers")
+    if max_workers is None:
+        max_workers = min(32, max(1, (os.cpu_count() or 4) // 2))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_jar = {

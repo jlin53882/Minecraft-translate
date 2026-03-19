@@ -15,6 +15,85 @@ from typing import Any, Callable, Dict, List
 from ..utils.log_unit import log_info, log_warning, log_error, log_debug
 
 
+# ----------------------------------------------------------------------
+# Helper: Patchouli 翻譯有效性 ratio 計算
+# ----------------------------------------------------------------------
+def _compute_patchouli_lang_effectiveness(
+    zf,
+    book_root: str,
+    threshold: float = 0.5,
+    json_module=None,
+) -> dict[str, bool]:
+    """Compute effective translation status for zh_tw and zh_cn in a book_root.
+
+    Returns: {"zh_tw": bool, "zh_cn": bool}
+    A language is "effective" when its ratio of effective-CJK files >= threshold.
+
+    "Effective CJK file" definition:
+    - JSON: parse, recursively extract strings, if CJK chars / total chars >= 0.5 → effective
+    - MD/TXT: read as text, if CJK char ratio >= 0.5 → effective
+    """
+    import re as _re
+
+    CJK_RE = _re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
+    TEXT_EXTS = {".json", ".md", ".txt"}
+
+    result: dict[str, bool] = {"zh_tw": False, "zh_cn": False}
+
+    for lang in ("zh_tw", "zh_cn"):
+        prefix = book_root + lang + "/"
+        text_files: list[str] = []
+        for name in zf.namelist():
+            if name.startswith(prefix):
+                ext = os.path.splitext(name)[1].lower()
+                if ext in TEXT_EXTS:
+                    text_files.append((name, ext))
+
+        if not text_files:
+            continue
+
+        effective_count = 0
+        for fname, ext in text_files:
+            try:
+                raw = zf.read(fname).decode("utf-8", errors="replace")
+                if ext == ".json":
+                    try:
+                        data = json_module.loads(raw)
+                        strings = _extract_all_strings(data)
+                    except Exception:
+                        continue
+                else:
+                    strings = [raw]
+
+                total = sum(len(s) for s in strings if isinstance(s, str))
+                if total == 0:
+                    continue
+                cjk_chars = sum(len(CJK_RE.findall(s)) for s in strings if isinstance(s, str))
+                if total > 0 and cjk_chars / total >= 0.5:
+                    effective_count += 1
+            except Exception:
+                continue
+
+        ratio = effective_count / len(text_files) if text_files else 0
+        result[lang] = ratio >= threshold
+
+    return result
+
+
+def _extract_all_strings(data) -> list[str]:
+    """Recursively extract all string values from a dict/list."""
+    strings: list[str] = []
+    if isinstance(data, str):
+        strings.append(data)
+    elif isinstance(data, dict):
+        for v in data.values():
+            strings.extend(_extract_all_strings(v))
+    elif isinstance(data, list):
+        for item in data:
+            strings.extend(_extract_all_strings(item))
+    return strings
+
+
 def process_content_or_copy_file_impl(
     zf: zipfile.ZipFile,
     input_path: str,
@@ -45,12 +124,28 @@ def process_content_or_copy_file_impl(
         normalized_path = normalized_path[assets_idx + 1 :]
     log_debug(f"[Patchouli DEBUG] normalized_path(裁切後) = {normalized_path}")
 
+    # --- v3 新增：zh_cn skip logic (在 early return 判斷之前，先做全局開關檢查) ---
+    merger_cfg = load_config_fn().get("lang_merger", {})
+    process_zh_cn = merger_cfg.get("process_zh_cn_files", True)
+    skip_zh_cn_when_only_lang = merger_cfg.get("skip_zh_cn_when_only_process_lang", False)
+    # 全局關閉 zh_cn 時，直接跳過所有 zh_cn 內容檔案（非 lang 也要檢查）
+    norm_lower = input_path.lower().replace("\\", "/")
+    if not process_zh_cn:
+        if "/zh_cn/" in norm_lower or "/zh_cn." in norm_lower:
+            return {"success": True, "log": None}
+
     if only_process_lang:
         if "/lang/" not in f"/{normalized_path}":
             return {"success": True, "log": None}
         file_stem = os.path.splitext(os.path.basename(normalized_path))[0].lower()
         if file_stem not in ["zh_cn", "zh_tw", "en_us"]:
             return {"success": True, "log": None}
+        # 只處理 lang + zh_cn 模式下，額外跳過 zh_cn.lang/zh_cn.json
+        if not process_zh_cn:
+            return {"success": True, "log": None}
+        if skip_zh_cn_when_only_lang:
+            if "/lang/" in norm_lower and ("zh_cn.json" in norm_lower or "zh_cn.lang" in norm_lower):
+                return {"success": True, "log": None}
 
     def get_patchouli_book_root(path: str):
         p = path.replace("\\", "/").lower()
@@ -91,8 +186,29 @@ def process_content_or_copy_file_impl(
                 for n in all_files_cache
             )
 
-        if has_cn_or_tw and "/en_us/" in normalized_path.lower():
-            return {"success": True, "log": f"[Patchouli] 跳過已有翻譯的英文原件: {normalized_path}"}
+        # --- v3 ratio-based patchouli skip ---
+        _allow_zh_cn_for_skip = load_config_fn().get("lang_merger", {}).get(
+            "patchouli_skip_en_us_when_zh_cn_exists", False
+        )
+        _effective_threshold = load_config_fn().get("lang_merger", {}).get(
+            "patchouli_effective_translation_threshold", 0.5
+        )
+
+        _patchouli_effective = {}
+        if book_root:
+            _patchouli_effective = _compute_patchouli_lang_effectiveness(
+                zf, book_root, threshold=_effective_threshold, json_module=json_module
+            )
+
+        has_effective_zh_tw = _patchouli_effective.get("zh_tw", False)
+        has_effective_zh_cn = _patchouli_effective.get("zh_cn", False)
+
+        if has_cn_or_tw:
+            if normalized_path.lower().endswith("/en_us/...") or "/en_us/" in normalized_path.lower():
+                should_skip = has_effective_zh_tw or (_allow_zh_cn_for_skip and has_effective_zh_cn)
+                if should_skip:
+                    return {"success": True, "log": f"[Patchouli] 跳過已有有效翻譯的英文原件: {normalized_path}"}
+        # --- end v3 ratio-based patchouli skip ---
 
         rel_path = normalized_path[len(book_root) :]
         rel_low = rel_path.lower()
@@ -105,7 +221,9 @@ def process_content_or_copy_file_impl(
 
         if has_cn_or_tw:
             if rel_low.startswith("en_us/"):
-                return {"success": True, "log": f"[Patchouli] 跳過已有翻譯的英文原件: {normalized_path}"}
+                should_skip = has_effective_zh_tw or (_allow_zh_cn_for_skip and has_effective_zh_cn)
+                if should_skip:
+                    return {"success": True, "log": f"[Patchouli] 跳過已有有效翻譯的英文原件: {normalized_path}"}
             if rel_low.startswith("zh_cn/"):
                 rel_path = "zh_tw/" + rel_path[len("zh_cn/") :]
             elif rel_low.startswith("zh_tw/"):

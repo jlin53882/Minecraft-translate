@@ -54,6 +54,18 @@ def _process_single_mod(
             return any(contains_cjk(x) for x in v.values())
         return False
 
+    # Add memoization for contains_cjk - use a dict for values that need repeated checks
+    _value_cjk_cache: dict = {}
+
+    def memo_cjk(v):
+        """Memoized contains_cjk for any value (avoids repeated regex on same value)."""
+        if not isinstance(v, str):
+            return contains_cjk(v)
+        vid = id(v)
+        if vid not in _value_cjk_cache:
+            _value_cjk_cache[vid] = contains_cjk(v)
+        return _value_cjk_cache[vid]
+
     def has_any_text(v: Any) -> bool:
         """結構內是否至少有一段可用的文字（避免空結構被當 pending）"""
         if isinstance(v, str):
@@ -185,7 +197,7 @@ def _process_single_mod(
                 key in final_tw and target_has_tw  # 代表 output_dir 已存在 zh_tw.json
             )
 
-            if is_from_output_dir and contains_cjk(final_tw.get(key, "")):
+            if is_from_output_dir and memo_cjk(final_tw.get(key, "")):
                 # ✔ 人工翻譯 → 不動
                 continue
 
@@ -199,7 +211,7 @@ def _process_single_mod(
             #    final_tw[key] = apply_replace_rules(tw_val, rules) # 進行規則處理
             #    continue
 
-            if contains_cjk(tw_val):
+            if memo_cjk(tw_val):
                 if isinstance(tw_val, str):
                     final_tw[key] = apply_replace_rules(tw_val, rules)
                 else:
@@ -207,7 +219,7 @@ def _process_single_mod(
                 continue
 
             # 3. zh_cn 若含中文 → 用 S2TW 翻譯
-            if contains_cjk(cn_val):
+            if memo_cjk(cn_val):
                 final_tw[key] = recursive_translate_dict(cn_val, rules)
                 continue
 

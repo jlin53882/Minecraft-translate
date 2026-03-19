@@ -23,6 +23,28 @@ from app.task_session import TaskSession
 class MergeView(ft.Column):
     """ZIP 合併頁面（視覺風格對齊 Translation/Extractor）。"""
 
+    # --------------------------------------------------
+    # Interlocking: when process_zh_cn_switch goes False, disable 2 and 3
+    # --------------------------------------------------
+    # Disabled 原因說明（兩個開關被禁用時動態顯示）
+    _zh_cn_disabled_note: ft.Text = None  # type: ignore[assignment]
+
+    def _skip_disabled_note(self) -> ft.Text:
+        """對外暴露的 disabled 原因文字（讓 UI 可以引用同一個物件）。"""
+        return self._zh_cn_disabled_note
+
+    def _on_zh_cn_switch_changed(self, e):
+        """互鎖：當 zh_cn 處理關閉時，禁用兩個依賴開關並顯示原因。"""
+        enabled = e.control.value
+        self.skip_zh_cn_switch.disabled = not enabled
+        self.patchouli_skip_zh_cn_switch.disabled = not enabled
+        if self._zh_cn_disabled_note:
+            self._zh_cn_disabled_note.visible = not enabled
+        if not enabled:
+            self.skip_zh_cn_switch.value = False
+            self.patchouli_skip_zh_cn_switch.value = False
+        self.update()
+
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """初始化 MergeView。
 
@@ -44,6 +66,38 @@ class MergeView(ft.Column):
         self.only_lang_checkbox = ft.Checkbox(
             label="只處理 lang 檔案（其他檔案不處理）",
             value=True,
+        )
+
+        # 1. process_zh_cn_files switch
+        self.process_zh_cn_switch = ft.Switch(
+            label="處理 zh_cn 檔案",
+            value=True,
+            on_change=self._on_zh_cn_switch_changed,
+        )
+        # 2. skip_zh_cn_when_only_lang switch
+        self.skip_zh_cn_switch = ft.Switch(
+            label="只處理 lang 時跳過 zh_cn",
+            value=False,
+        )
+        # 3. patchouli_skip_zh_cn switch
+        self.patchouli_skip_zh_cn_switch = ft.Switch(
+            label="Patchouli：允許 zh_cn 觸發跳過 en_us",
+            value=False,
+        )
+        # 4. threshold field
+        self.patchouli_threshold_field = ft.TextField(
+            label="Patchouli 有效翻譯比例門檻",
+            value="0.5",
+            width=120,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            suffix_text="(0.0~1.0)",
+        )
+        # Disabled 原因說明
+        self._zh_cn_disabled_note = ft.Text(
+            "⚠️ 需先開啟「處理 zh_cn 檔案」才能使用",
+            size=11,
+            color=theme.ORANGE_700,
+            visible=False,
         )
         self.output_dir_field = ft.TextField(
             label="輸出資料夾",
@@ -126,6 +180,69 @@ class MergeView(ft.Column):
                             spacing=6,
                         ),
                         self.only_lang_checkbox,
+                        # --- v3 新增：zh_cn 處理選項 ---
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    ft.Row(
+                                        [
+                                            ft.Text("zh_cn 處理", weight=ft.FontWeight.W_500, size=14),
+                                            self.process_zh_cn_switch,
+                                        ]
+                                    ),
+                                    ft.Text(
+                                        "關閉後，所有 zh_cn 檔案將被跳過",
+                                        size=12,
+                                        color=theme.GREY_600,
+                                    ),
+                                ],
+                                spacing=4,
+                            ),
+                            padding=8,
+                            bgcolor=theme.SURFACE,
+                            border_radius=8,
+                        ),
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    ft.Row([ft.Text("PATCHOULI 進階", weight=ft.FontWeight.W_500, size=14)]),
+                                    ft.Row(
+                                        [ft.Text("跳過條件：", size=13), self.skip_zh_cn_switch],
+                                        spacing=6,
+                                    ),
+                                    ft.Text(
+                                        "僅處理 lang 時自動跳過 zh_cn lang 檔",
+                                        size=12,
+                                        color=theme.GREY_600,
+                                    ),
+                                    ft.Container(height=4),
+                                    ft.Row(
+                                        [ft.Text("允許 zh_cn 觸發：", size=13), self.patchouli_skip_zh_cn_switch],
+                                        spacing=6,
+                                    ),
+                                    ft.Text(
+                                        "開啟後，若 zh_cn 有效翻譯比例達門檻，會視為可用翻譯並跳過 en_us",
+                                        size=12,
+                                        color=theme.GREY_600,
+                                    ),
+                                    self._skip_disabled_note(),
+                                    ft.Container(height=4),
+                                    ft.Row(
+                                        [ft.Text("翻譯有效性門檻：", size=13), self.patchouli_threshold_field],
+                                        spacing=6,
+                                    ),
+                                    ft.Text(
+                                        "Patchouli en_us 跳過決策的 CJK 有效比例（0.0~1.0）",
+                                        size=12,
+                                        color=theme.GREY_600,
+                                    ),
+                                ],
+                                spacing=4,
+                            ),
+                            padding=8,
+                            bgcolor=theme.SURFACE,
+                            border_radius=8,
+                        ),
                     ],
                     spacing=8,
                 ),
