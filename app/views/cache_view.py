@@ -2166,7 +2166,7 @@ class CacheView(ft.Column):
         self.shard_detail_page = 1
         self._render_shard_detail_keys()
         if self.page:
-            self.update()
+            self.page.update()
 
     def _set_shard_workspace_visible(self, visible: bool):
         """顯示或隱藏分片工作區面板"""
@@ -2386,7 +2386,7 @@ class CacheView(ft.Column):
             self._render_shard_dst_panel()
             self._notify("已套用 C3 DST 並寫入快取", "info")
             if self.page:
-                self.update()
+                self.page.update()
         except Exception as ex:
             self._notify(f"套用 DST 失敗：{ex}", "error")
 
@@ -2400,7 +2400,7 @@ class CacheView(ft.Column):
         self._show_snack_bar("已還原到原始值", theme.BLUE_400)
         self._refresh_disabled_state()
         if self.page:
-            self.update()
+            self.page.update()
 
     def _on_shard_dst_copy(self, e):
         """複製目標內容到剪貼簿"""
@@ -2441,7 +2441,7 @@ class CacheView(ft.Column):
             "已載入最新歷史紀錄到 DST（尚未寫入快取，請點「套用 DST」儲存）", "info"
         )
         if self.page:
-            self.update()
+            self.page.update()
 
     def _on_select_shard_history_event(self, event: dict):
         """選擇歷史事件"""
@@ -2618,7 +2618,7 @@ class CacheView(ft.Column):
             self._render_shard_history()
             self._notify("已套用選取舊值並寫入快取", "info")
             if self.page:
-                self.update()
+                self.page.update()
         except Exception as ex:
             self._notify(f"套用舊值失敗：{ex}", "error")
 
@@ -3000,13 +3000,15 @@ class CacheView(ft.Column):
         self._show_snack_bar(
             f"歷史紀錄視窗已打開（{source_text}，可拖曳標題列移動）", theme.BLUE_400
         )
-        self.update()
+        if self.page:
+            self.page.update()
 
     def _on_close_history_window(self, e):
         """關閉歷史紀錄浮動視窗"""
         self.query_history_window.visible = False
         self.history_window_source = None
-        self.update()
+        if self.page:
+            self.page.update()
 
     def _on_query_history_window_drag(self, e: ft.DragUpdateEvent):
         """拖曳歷史紀錄視窗"""
@@ -3352,7 +3354,8 @@ class CacheView(ft.Column):
             self._render_query_results()
             self._render_query_detail()
             self._notify("已套用並寫入快取", "info")
-            self.update()
+            if self.page:
+                self.page.update()
         except Exception as ex:
             self._notify(f"套用失敗：{ex}", "error")
 
@@ -3364,7 +3367,8 @@ class CacheView(ft.Column):
 
         self.query_detail_dst.value = str(self.query_original_dst or "")
         self._show_snack_bar("已還原到原始值", theme.BLUE_400)
-        self.update()
+        if self.page:
+            self.page.update()
 
     def _on_restore_latest_query(self, e):
         """還原最新歷史紀錄（查詢區，不立即寫入快取）"""
