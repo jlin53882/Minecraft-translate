@@ -96,7 +96,7 @@ class MergeView(ft.Column):
         self._zh_cn_disabled_note = ft.Text(
             "⚠️ 需先開啟「處理 zh_cn 檔案」才能使用",
             size=11,
-            color=theme.ORANGE_700,
+            color=theme.RED_400,
             visible=False,
         )
         self.output_dir_field = ft.TextField(
@@ -199,7 +199,7 @@ class MergeView(ft.Column):
                                 spacing=4,
                             ),
                             padding=8,
-                            bgcolor=theme.SURFACE,
+                            bgcolor=theme.GREY_50,
                             border_radius=8,
                         ),
                         ft.Container(
@@ -240,7 +240,7 @@ class MergeView(ft.Column):
                                 spacing=4,
                             ),
                             padding=8,
-                            bgcolor=theme.SURFACE,
+                            bgcolor=theme.GREY_50,
                             border_radius=8,
                         ),
                     ],
