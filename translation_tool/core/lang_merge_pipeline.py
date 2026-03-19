@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import zipfile
+from functools import lru_cache
 from typing import Any, Dict
 
 import orjson as json
@@ -25,6 +26,14 @@ from .lang_merge_zip_io import (
 )
 from .lang_processing_format import dump_json_bytes
 
+CJK_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002ebef\U00030000-\U0003134f]')
+
+
+@lru_cache(maxsize=4096)
+def _contains_cjk_str(s: str) -> bool:
+    """Memoized CJK check for string input (module-level)."""
+    return bool(CJK_RE.search(s))
+
 
 def _process_single_mod(
     zf: zipfile.ZipFile,
@@ -34,24 +43,15 @@ def _process_single_mod(
     must_translate_dir: str,
 ) -> Dict[str, Any]:
     """處理單一模組的語言合併。"""
-    CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 
-    # def contains_cjk(s: str) -> bool:
-    #    """是否包含任意 CJK（中文/日文/韓文）"""
-    #    return isinstance(s, str) and CJK_RE.search(s) is not None
-    #
-    # def is_pure_english(s: str) -> bool:
-    #    """判斷是否為純英文（不包含 CJK）"""
-    #    return isinstance(s, str) and not contains_cjk(s)
-
-    def contains_cjk(v: Any) -> bool:
-        """是否包含任意 CJK（支援 str / list / dict 遞迴）"""
+    def _contains_cjk(v: Any) -> bool:
+        """Check if value contains CJK characters. Dispatches to memoized str version."""
         if isinstance(v, str):
-            return CJK_RE.search(v) is not None
+            return _contains_cjk_str(v)
         if isinstance(v, list):
-            return any(contains_cjk(x) for x in v)
+            return any(_contains_cjk(x) for x in v)
         if isinstance(v, dict):
-            return any(contains_cjk(x) for x in v.values())
+            return any(_contains_cjk(x) for x in v.values())
         return False
 
     def has_any_text(v: Any) -> bool:
@@ -72,7 +72,7 @@ def _process_single_mod(
         """
         if not has_any_text(v):
             return False
-        return not contains_cjk(v)
+        return not _contains_cjk(v)
 
     def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
         """
@@ -185,7 +185,7 @@ def _process_single_mod(
                 key in final_tw and target_has_tw  # 代表 output_dir 已存在 zh_tw.json
             )
 
-            if is_from_output_dir and contains_cjk(final_tw.get(key, "")):
+            if is_from_output_dir and _contains_cjk(final_tw.get(key, "")):
                 # ✔ 人工翻譯 → 不動
                 continue
 
@@ -199,7 +199,7 @@ def _process_single_mod(
             #    final_tw[key] = apply_replace_rules(tw_val, rules) # 進行規則處理
             #    continue
 
-            if contains_cjk(tw_val):
+            if _contains_cjk(tw_val):
                 if isinstance(tw_val, str):
                     final_tw[key] = apply_replace_rules(tw_val, rules)
                 else:
@@ -207,7 +207,7 @@ def _process_single_mod(
                 continue
 
             # 3. zh_cn 若含中文 → 用 S2TW 翻譯
-            if contains_cjk(cn_val):
+            if _contains_cjk(cn_val):
                 final_tw[key] = recursive_translate_dict(cn_val, rules)
                 continue
 

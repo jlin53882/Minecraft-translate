@@ -23,6 +23,28 @@ from app.task_session import TaskSession
 class MergeView(ft.Column):
     """ZIP 合併頁面（視覺風格對齊 Translation/Extractor）。"""
 
+    # --------------------------------------------------
+    # Interlocking: when process_zh_cn_switch goes False, disable 2 and 3
+    # --------------------------------------------------
+    # Disabled 原因說明（兩個開關被禁用時動態顯示）
+    _zh_cn_disabled_note: ft.Text = None  # type: ignore[assignment]
+
+    def _skip_disabled_note(self) -> ft.Text:
+        """對外暴露的 disabled 原因文字（讓 UI 可以引用同一個物件）。"""
+        return self._zh_cn_disabled_note
+
+    def _on_zh_cn_switch_changed(self, e):
+        """互鎖：當 zh_cn 處理關閉時，禁用兩個依賴開關並顯示原因。"""
+        enabled = e.control.value
+        self.skip_zh_cn_switch.disabled = not enabled
+        self.patchouli_skip_zh_cn_switch.disabled = not enabled
+        if self._zh_cn_disabled_note:
+            self._zh_cn_disabled_note.visible = not enabled
+        if not enabled:
+            self.skip_zh_cn_switch.value = False
+            self.patchouli_skip_zh_cn_switch.value = False
+        self.update()
+
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """初始化 MergeView。
 
@@ -44,6 +66,38 @@ class MergeView(ft.Column):
         self.only_lang_checkbox = ft.Checkbox(
             label="只處理 lang 檔案（其他檔案不處理）",
             value=True,
+        )
+
+        # 1. process_zh_cn_files switch
+        self.process_zh_cn_switch = ft.Switch(
+            label="處理 zh_cn 檔案",
+            value=True,
+            on_change=self._on_zh_cn_switch_changed,
+        )
+        # 2. skip_zh_cn_when_only_lang switch
+        self.skip_zh_cn_switch = ft.Switch(
+            label="只處理 lang 時跳過 zh_cn",
+            value=False,
+        )
+        # 3. patchouli_skip_zh_cn switch
+        self.patchouli_skip_zh_cn_switch = ft.Switch(
+            label="Patchouli：允許 zh_cn 觸發跳過 en_us",
+            value=False,
+        )
+        # 4. threshold field
+        self.patchouli_threshold_field = ft.TextField(
+            label="Patchouli 有效翻譯比例門檻",
+            value="0.5",
+            width=120,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            suffix_text="(0.0~1.0)",
+        )
+        # Disabled 原因說明
+        self._zh_cn_disabled_note = ft.Text(
+            "⚠️ 需先開啟「處理 zh_cn 檔案」才能使用",
+            size=11,
+            color=theme.RED_400,
+            visible=False,
         )
         self.output_dir_field = ft.TextField(
             label="輸出資料夾",
@@ -126,8 +180,47 @@ class MergeView(ft.Column):
                             spacing=6,
                         ),
                         self.only_lang_checkbox,
+                        # v3: zh_cn 處理
+                        ft.Row([self.process_zh_cn_switch]),
+                        ft.Container(height=8),
+                        # ── Patchouli 進階設定 ──
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    ft.Text("Patchouli 進階設定", size=12, weight=ft.FontWeight.W_600, color=theme.GREY_700),
+                                    ft.Container(height=8),
+                                    ft.Row(
+                                        [self.skip_zh_cn_switch],
+                                        spacing=15,
+                                    ),
+                                    self._skip_disabled_note(),
+                                    ft.Container(height=10),
+                                    ft.Row(
+                                        [self.patchouli_skip_zh_cn_switch],
+                                        spacing=10,
+                                    ),
+                                    ft.Container(height=12),
+                                    ft.Row(
+                                        [
+                                            ft.Text("en_us 跳過門檻：", size=11, color=theme.GREY_600),
+                                            ft.Container(
+                                                content=self.patchouli_threshold_field,
+                                                width=80,
+                                            ),
+                                            ft.Text("範圍：0.0-1.0", size=10, color=theme.GREY_400),
+                                        ],
+                                        alignment=ft.MainAxisAlignment.START,
+                                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                    ),
+                                ],
+                                spacing=6,
+                            ),
+                            padding=10,
+                            bgcolor=theme.GREY_100,
+                            border_radius=8,
+                        ),
                     ],
-                    spacing=8,
+                    spacing=4,
                 ),
             ),
             styled_card(
