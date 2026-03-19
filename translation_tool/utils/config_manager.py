@@ -158,6 +158,11 @@ DEFAULT_CONFIG = {
         "pending_organized_folder_name": "待翻譯整理需翻譯",  # 專門用於 lang_merger 的設定
         "filtered_pending_min_count": 2,  # 專門用於 lang_merger 的設定
         "quarantine_folder_name": "skipped_json",  # 專門用於 lang_merger  zip 檔案合併錯誤處理的設定
+        # --- v3 新增 ---
+        "process_zh_cn_files": True,
+        "skip_zh_cn_when_only_process_lang": False,
+        "patchouli_skip_en_us_when_zh_cn_exists": False,
+        "patchouli_effective_translation_threshold": 0.5,
     },
 }
 

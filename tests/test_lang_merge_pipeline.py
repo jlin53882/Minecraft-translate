@@ -298,3 +298,57 @@ class TestProcessSingleMod:
             )
 
         assert result["success"] is True
+
+
+class TestContainsCjkLruCache:
+    """測試 _contains_cjk_str 的 lru_cache 命中行為。"""
+
+    def test_contains_cjk_lru_cache(self):
+        """驗證同一字串第二次呼叫直接命中快取。"""
+        from translation_tool.core.lang_merge_pipeline import _contains_cjk_str
+
+        _contains_cjk_str.cache_clear()
+
+        s = "測試中文字符"
+        r1 = _contains_cjk_str(s)
+        assert r1 is True
+        assert _contains_cjk_str.cache_info().hits == 0
+
+        r2 = _contains_cjk_str(s)
+        assert r2 is True
+        assert _contains_cjk_str.cache_info().hits == 1
+
+    def test_contains_cjk_lru_cache_miss_on_different_string(self):
+        """驗證不同字串不會命中快取。"""
+        from translation_tool.core.lang_merge_pipeline import _contains_cjk_str
+
+        _contains_cjk_str.cache_clear()
+
+        r1 = _contains_cjk_str("蘋果")
+        assert r1 is True
+        assert _contains_cjk_str.cache_info().hits == 0
+
+        r2 = _contains_cjk_str("Apple")
+        assert r2 is False
+        assert _contains_cjk_str.cache_info().hits == 0  # 仍未命中
+
+        # 現在再呼叫 "蘋果" 應該命中
+        r3 = _contains_cjk_str("蘋果")
+        assert r3 is True
+        assert _contains_cjk_str.cache_info().hits == 1
+
+    def test_contains_cjk_lru_cache_info(self):
+        """驗證 cache_info 回傳有意義的統計。"""
+        from translation_tool.core.lang_merge_pipeline import _contains_cjk_str
+
+        _contains_cjk_str.cache_clear()
+        info = _contains_cjk_str.cache_info()
+        assert info.hits == 0
+        assert info.misses == 0
+
+        _contains_cjk_str("hello")
+        assert _contains_cjk_str.cache_info().misses == 1
+        _contains_cjk_str("world")
+        assert _contains_cjk_str.cache_info().misses == 2
+        _contains_cjk_str("hello")
+        assert _contains_cjk_str.cache_info().hits == 1

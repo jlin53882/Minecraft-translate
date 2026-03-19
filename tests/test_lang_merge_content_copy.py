@@ -189,46 +189,166 @@ class TestMockZipHandling:
         assert result.get("success") is True
 
     def test_patchouli_path_detection(self, tmp_path: Path):
-        """測試 Patchouli 書籍路徑偵測。"""
+        """測試 Patchouli en_us skip：Ratio 方案（zh_cn 有 CJK 內容時跳過 en_us）。
+
+        新 ratio 邏輯：不再只看目錄是否存在，而是計算 zh_cn/zh_tw 的 CJK 內容比例。
+        """
         from translation_tool.core.lang_merge_content_copy import (
             process_content_or_copy_file_impl,
         )
         from unittest.mock import MagicMock
-        
+
         def mock_load_config():
             return {
-                "lang_merger": {"pending_folder_name": "待翻譯"},
+                "lang_merger": {
+                    "pending_folder_name": "待翻譯",
+                    # ratio 方案：threshold=0.5，允許 zh_cn 觸發 skip
+                    "patchouli_effective_translation_threshold": 0.5,
+                    "patchouli_skip_en_us_when_zh_cn_exists": True,
+                },
                 "lm_translator": {"patchouli": {"dir_names": ["patchouli_books"]}},
             }
-        
+
+        # _compute_patchouli_lang_effectiveness 直接呼叫 zf.read(name)，
+        # 因此 mock zf.read 的回傳值（不經 read_text_from_zip_fn）
+        def read_zh_cn(zf_obj, path):
+            # 這個 callback 對 ratio 計算無效，因為 ratio 走 zf.read()
+            if "zh_cn" in path:
+                return "這是中文介紹"
+            return "# Intro"
+
         mock_zf = MagicMock()
-        
+        # 關鍵：zf.namelist() → 決定哪些檔案要被掃描
+        mock_zf.namelist.return_value = [
+            "assets/patchouli_books/test_book/zh_cn/intro.md",
+            "assets/patchouli_books/test_book/en_us/intro.md",
+        ]
+        # 關鍵：zf.read() → _compute_patchouli_lang_effectiveness 直接呼叫這個
+        # .md 副檔名走純文字 CJK ratio 計算，不走 JSON 解析
+        def zf_read(path):
+            if "zh_cn" in path:
+                return "這是中文介紹".encode("utf-8")
+            return "# Intro English".encode("utf-8")
+        mock_zf.read.side_effect = zf_read
+
         result = process_content_or_copy_file_impl(
             zf=mock_zf,
             input_path="assets/patchouli_books/test_book/en_us/intro.md",
             rules=[],
             output_dir=str(tmp_path / "output"),
             only_process_lang=False,
-            all_files_cache=[
-                "assets/patchouli_books/test_book/zh_cn/intro.md",
-                "assets/patchouli_books/test_book/en_us/intro.md",
-            ],
+            all_files_cache=None,
             load_config_fn=mock_load_config,
             recursive_translate_dict_fn=lambda x, rules: x,
             get_text_processor_fn=lambda ext: None,
-            read_text_from_zip_fn=lambda zf, path: "# Intro",
+            read_text_from_zip_fn=read_zh_cn,
             write_bytes_atomic_fn=lambda path, data: None,
             write_text_atomic_fn=lambda path, data: None,
             quarantine_copy_from_zip_fn=lambda **kwargs: None,
             normalize_patchouli_book_root_fn=lambda x: x.strip("/"),
             patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
             json_module=MagicMock(),
-            
         )
-        
-        # 由於有 zh_cn 版本，應跳過 en_us
+
+        # zh_cn 含 CJK，ratio=1.0 >= 0.5，且開關允許 zh_cn 觸發 skip → en_us 應被跳過
         assert result.get("success") is True
-        assert "跳過已有翻譯" in result.get("log", "")
+        assert "跳過已有" in result.get("log", ""), f"預期 skip，但得到：{result}"
+
+    def test_patchouli_effectiveness_cache(self, tmp_path: Path):
+        """驗證同一 book_root 第二次處理時直接用快取，不重算。"""
+        from translation_tool.core.lang_merge_content_copy import (
+            process_content_or_copy_file_impl,
+            _patchouli_eff_cache,
+        )
+        from unittest.mock import MagicMock
+
+        # 先清除 module-level cache，確保從乾淨狀態開始
+        _patchouli_eff_cache.clear()
+
+        def mock_load_config():
+            return {
+                "lang_merger": {
+                    "pending_folder_name": "待翻譯",
+                    "patchouli_effective_translation_threshold": 0.5,
+                    "patchouli_skip_en_us_when_zh_cn_exists": True,
+                },
+                "lm_translator": {"patchouli": {"dir_names": ["patchouli_books"]}},
+            }
+
+        # 建立含 zh_cn 有效譯文的 mock zip
+        mock_zf = MagicMock()
+        mock_zf.namelist.return_value = [
+            "assets/patchouli_books/test_book/zh_cn/intro.md",
+            "assets/patchouli_books/test_book/en_us/intro.md",
+            "assets/patchouli_books/test_book/en_us/index.md",
+        ]
+        read_calls = []
+
+        def zf_read(path):
+            read_calls.append(path)
+            if "zh_cn" in path:
+                return "這是中文介紹內容".encode("utf-8")
+            return "# English content".encode("utf-8")
+
+        mock_zf.read.side_effect = zf_read
+
+        def read_text_from_zip(zf, path):
+            return ""
+
+        # 第一次處理 en_us/intro.md → 應寫入並計算 ratio，zf.read 被呼叫
+        result1 = process_content_or_copy_file_impl(
+            zf=mock_zf,
+            input_path="assets/patchouli_books/test_book/en_us/intro.md",
+            rules=[],
+            output_dir=str(tmp_path / "output"),
+            only_process_lang=False,
+            all_files_cache=None,
+            load_config_fn=mock_load_config,
+            recursive_translate_dict_fn=lambda x, rules: x,
+            get_text_processor_fn=lambda ext: None,
+            read_text_from_zip_fn=read_text_from_zip,
+            write_bytes_atomic_fn=lambda path, data: None,
+            write_text_atomic_fn=lambda path, data: None,
+            quarantine_copy_from_zip_fn=lambda **kwargs: None,
+            normalize_patchouli_book_root_fn=lambda x: x.strip("/"),
+            patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
+            json_module=MagicMock(),
+        )
+
+        # 第一次應成功（未 skip，因為 zh_cn ratio >= 0.5 且 allow_zh_cn=True）
+        assert result1.get("success") is True
+        # zf.read 應被呼叫若干次（用於 ratio 計算）
+        first_call_count = len(read_calls)
+
+        # 重置 call tracker，準備第二次處理
+        read_calls.clear()
+        mock_zf.read.side_effect = zf_read  # restore
+
+        # 第二次處理同一 book_root 的另一個 en_us 檔 → 應 SKIP（命中快取）
+        result2 = process_content_or_copy_file_impl(
+            zf=mock_zf,
+            input_path="assets/patchouli_books/test_book/en_us/index.md",
+            rules=[],
+            output_dir=str(tmp_path / "output"),
+            only_process_lang=False,
+            all_files_cache=None,
+            load_config_fn=mock_load_config,
+            recursive_translate_dict_fn=lambda x, rules: x,
+            get_text_processor_fn=lambda ext: None,
+            read_text_from_zip_fn=read_text_from_zip,
+            write_bytes_atomic_fn=lambda path, data: None,
+            write_text_atomic_fn=lambda path, data: None,
+            quarantine_copy_from_zip_fn=lambda **kwargs: None,
+            normalize_patchouli_book_root_fn=lambda x: x.strip("/"),
+            patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
+            json_module=MagicMock(),
+        )
+
+        # 第二次應 skip（命中快取）
+        assert result2.get("success") is True
+        assert "跳過已有" in result2.get("log", ""), f"預期 SKIP 快取命中，但得到：{result2}"
+        # zf.read 不應再被呼叫（因為快取已命中，不再重新計算 ratio）
+        assert len(read_calls) == 0, f"zf.read 被呼叫了 {len(read_calls)} 次，預期 0 次（快取應命中）"
 
 
 class TestJsonModuleHandling:

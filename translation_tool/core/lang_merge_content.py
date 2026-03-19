@@ -52,6 +52,7 @@ def _process_content_or_copy_file(
     output_dir: str,
     only_process_lang: bool = False,
     all_files_cache=None,
+    patchouli_eff_cache: dict | None = None,
 ):
     return process_content_or_copy_file_impl(
         zf,
@@ -60,6 +61,7 @@ def _process_content_or_copy_file(
         output_dir,
         only_process_lang=only_process_lang,
         all_files_cache=all_files_cache,
+        patchouli_eff_cache=patchouli_eff_cache,
         load_config_fn=load_config,
         recursive_translate_dict_fn=recursive_translate_dict,
         get_text_processor_fn=get_text_processor,
