@@ -182,16 +182,33 @@ class MergeView(ft.Column):
                         self.only_lang_checkbox,
                         # v3: zh_cn 處理
                         ft.Row([self.process_zh_cn_switch]),
-                        ft.Container(height=4),
-                        # Patchouli 進階：小小 toggle 們
-                        ft.Text("Patchouli 進階", size=12, weight=ft.FontWeight.W_600, color=theme.GREY_600),
-                        ft.Container(height=4),
-                        ft.Row([self.skip_zh_cn_switch]),
-                        ft.Row([self.patchouli_skip_zh_cn_switch]),
-                        self._skip_disabled_note(),
-                        ft.Container(height=4),
-                        ft.Text("en_us 跳過門檻", size=12, color=theme.GREY_600),
-                        ft.Row([self.patchouli_threshold_field], spacing=6),
+                        ft.Container(height=8),
+                        # ── Patchouli 進階設定 ──
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    ft.Text("Patchouli 進階設定", size=12, weight=ft.FontWeight.W_600, color=theme.GREY_700),
+                                    ft.Container(height=6),
+                                    ft.Row(
+                                        [self.skip_zh_cn_switch],
+                                        spacing=6,
+                                    ),
+                                    self._skip_disabled_note(),
+                                    ft.Container(height=4),
+                                    ft.Row(
+                                        [self.patchouli_skip_zh_cn_switch],
+                                        spacing=6,
+                                    ),
+                                    ft.Container(height=4),
+                                    ft.Text("en_us 跳過門檻", size=11, color=theme.GREY_600),
+                                    ft.Row([self.patchouli_threshold_field], spacing=6),
+                                ],
+                                spacing=2,
+                            ),
+                            padding=10,
+                            bgcolor=theme.GREY_100,
+                            border_radius=8,
+                        ),
                     ],
                     spacing=4,
                 ),
