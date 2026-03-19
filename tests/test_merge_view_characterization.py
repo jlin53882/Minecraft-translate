@@ -35,7 +35,7 @@ def test_merge_view_initializes_buttons_and_status(monkeypatch):
     view = merge_view.MergeView(_Page(), _FilePicker())
 
     assert view.pick_zip_button.text == '新增 ZIP'
-    assert view.start_button.text == '開始處理'
+    assert view.start_button.text == '開始合併 ZIP'
     assert view.status_chip.label.value == '尚未開始'
 
 

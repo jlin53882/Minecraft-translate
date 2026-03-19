@@ -64,7 +64,7 @@ class MergeView(ft.Column):
 
         # 參數區
         self.only_lang_checkbox = ft.Checkbox(
-            label="只處理 lang 檔案",
+            label="只處理 lang 檔案（其他檔案不處理）",
             value=True,
         )
 
@@ -76,25 +76,25 @@ class MergeView(ft.Column):
         )
         # 2. skip_zh_cn_when_only_lang switch
         self.skip_zh_cn_switch = ft.Switch(
-            label="只處理 Patchouli 的 zh_cn",
+            label="只處理 lang 時跳過 zh_cn",
             value=False,
         )
         # 3. patchouli_skip_zh_cn switch
         self.patchouli_skip_zh_cn_switch = ft.Switch(
-            label="允許 zh_cn 觸發跳過 en_us",
+            label="Patchouli：允許 zh_cn 觸發跳過 en_us",
             value=False,
         )
         # 4. threshold field
         self.patchouli_threshold_field = ft.TextField(
-            label="en_us 跳過門檻",
+            label="Patchouli 有效翻譯比例門檻",
             value="0.5",
             width=120,
             keyboard_type=ft.KeyboardType.NUMBER,
-            suffix_text="0.0~1.0",
+            suffix_text="(0.0~1.0)",
         )
         # Disabled 原因說明
         self._zh_cn_disabled_note = ft.Text(
-            "需先開啟「處理 zh_cn 檔案」",
+            "⚠️ 需先開啟「處理 zh_cn 檔案」才能使用",
             size=11,
             color=theme.RED_400,
             visible=False,
@@ -110,15 +110,8 @@ class MergeView(ft.Column):
             prefix_icon=ft.Icons.FOLDER_COPY,
         )
 
-        # ZIP 清單（橫向滾動）
-        self.zip_list_view = ft.ListView(
-            [],
-            expand=True,
-            horizontal=True,
-            spacing=8,
-        )
-        # 空的 ZIP list 顯示提示
-        self._zip_empty_placeholder = ft.Text("尚未加入任何 ZIP 檔案", size=12, color=theme.GREY_400)
+        # ZIP 清單
+        self.zip_list_view = ft.ListView(height=160, spacing=4, auto_scroll=False)
 
         # 狀態區
         self.status_chip = ft.Chip(
@@ -140,133 +133,81 @@ class MergeView(ft.Column):
             bgcolor=theme.BLUE_700,
         )
         self.start_button = primary_button(
-            "開始處理",
+            "開始合併 ZIP",
             icon=ft.Icons.PLAY_ARROW,
             tooltip="開始執行 ZIP 合併流程",
             on_click=self.start_merge,
             bgcolor=theme.GREEN_700,
         )
 
-        # ------------------------------------------------------------------
-        # Helper functions for settings UI (vertical block layout)
-        # ------------------------------------------------------------------
-        def _section_header(title: str) -> ft.Text:
-            return ft.Text(title, size=12, weight=ft.FontWeight.W_600, color=theme.GREY_600)
-
-        def _setting_block(
-            label: str,
-            control,
-            note: str = "",
-            disabled_note=None,
-        ) -> ft.Column:
-            """Vertical block: label + control + note + optional disabled_note."""
-            children = [
-                ft.Text(label, size=14),
-                control,
-            ]
-            if note:
-                children.append(ft.Text(note, size=11, color=theme.GREY_600))
-            if disabled_note is not None:
-                children.append(disabled_note)
-            return ft.Column(children, spacing=4)
-
         self.controls = [
-            # Section 1: 檔案清單
             styled_card(
-                title="檔案清單",
+                title="ZIP 清單",
                 icon=ft.Icons.ARCHIVE,
-                content=ft.Column([
-                    # Drop zone hint
-                    ft.Container(
-                        content=ft.Column([
-                            ft.Icon(ft.Icons.ADD, size=32, color=theme.GREY_400),
-                            ft.Text("拖放 ZIP 檔案到此，或按「新增 ZIP」", size=12, color=theme.GREY_500),
-                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=4),
-                        border=ft.border.all(1, theme.GREY_300),
-                        border_radius=8,
-                        padding=20,
-                    ),
-                    ft.Container(height=4),
-                    ft.Container(
-                        content=self.zip_list_view,
-                        height=60,
-                    ),
-                    ft.Container(height=4),
-                    ft.Row(
-                        [
-                            self.pick_zip_button,
-                            ft.Text("可加入多個 ZIP，會依序合併", size=12, color=theme.GREY_600),
-                        ],
-                        spacing=10,
-                    ),
-                ], spacing=4),
+                content=ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                self.pick_zip_button,
+                                ft.Text(
+                                    "可加入多個 ZIP，會依序合併",
+                                    size=12,
+                                    color=theme.GREY_600,
+                                ),
+                            ],
+                            spacing=10,
+                        ),
+                        self.zip_list_view,
+                    ],
+                    spacing=10,
+                ),
             ),
-            # Section 2: 處理選項 (TWO COLUMNS)
             styled_card(
-                title="處理選項",
-                icon=ft.Icons.TUNE,
-                content=ft.Column([
-                    ft.Row(
-                        [
-                            # Left: 一般處理
-                            ft.Container(
-                                expand=True,
-                                content=ft.Column([
-                                    ft.Text("一般處理", size=14, weight=ft.FontWeight.W_600),
-                                    ft.Container(height=8),
-                                    self.only_lang_checkbox,
-                                    ft.Container(height=4),
-                                    self.process_zh_cn_switch,
-                                ], spacing=4),
-                                padding=12,
-                                bgcolor=ft.Colors.GREY_100,
-                                border_radius=8,
-                            ),
-                            # Right: Patchouli 進階
-                            ft.Container(
-                                expand=True,
-                                content=ft.Column([
-                                    ft.Text("Patchouli 進階", size=14, weight=ft.FontWeight.W_600),
-                                    ft.Container(height=8),
-                                    self.skip_zh_cn_switch,
-                                    ft.Container(height=4),
-                                    self.patchouli_skip_zh_cn_switch,
-                                    ft.Container(height=4),
-                                    ft.Text("en_us 跳過門檻", size=12),
-                                    ft.Row([self.patchouli_threshold_field], spacing=6),
-                                ], spacing=4),
-                                padding=12,
-                                bgcolor=ft.Colors.GREY_100,
-                                border_radius=8,
-                            ),
-                        ],
-                        spacing=12,
-                    ),
-                ], spacing=8),
+                title="輸出與選項",
+                icon=ft.Icons.FOLDER,
+                content=ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                self.output_dir_field,
+                                ft.IconButton(
+                                    icon=ft.Icons.FOLDER_OPEN_OUTLINED,
+                                    icon_color=theme.BLUE_GREY_700,
+                                    tooltip="選擇輸出資料夾",
+                                    on_click=lambda e: self.pick_output_dir(),
+                                ),
+                            ],
+                            spacing=6,
+                        ),
+                        self.only_lang_checkbox,
+                        # v3: zh_cn 處理
+                        ft.Row([self.process_zh_cn_switch]),
+                        ft.Container(height=4),
+                        # Patchouli 進階：小小 toggle 們
+                        ft.Text("Patchouli 進階", size=12, weight=ft.FontWeight.W_600, color=theme.GREY_600),
+                        ft.Container(height=4),
+                        ft.Row([self.skip_zh_cn_switch]),
+                        ft.Row([self.patchouli_skip_zh_cn_switch]),
+                        self._skip_disabled_note(),
+                        ft.Container(height=4),
+                        ft.Text("en_us 跳過門檻", size=12, color=theme.GREY_600),
+                        ft.Row([self.patchouli_threshold_field], spacing=6),
+                    ],
+                    spacing=4,
+                ),
             ),
-            # Section 3: 輸出與執行
             styled_card(
-                title="輸出與執行",
-                icon=ft.Icons.PLAY_ARROW,
-                content=ft.Column([
-                    ft.Row(
-                        [
-                            self.output_dir_field,
-                            ft.IconButton(
-                                icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                                icon_color=theme.BLUE_GREY_700,
-                                tooltip="選擇輸出資料夾",
-                                on_click=lambda e: self.pick_output_dir(),
-                            ),
-                        ],
-                        spacing=6,
-                    ),
-                    self.progress_bar,
-                    ft.Container(height=8),
-                    self.start_button,
-                ], spacing=10),
+                title="執行狀態",
+                icon=ft.Icons.TIMELINE,
+                content=ft.Column(
+                    [
+                        ft.Row([self.status_chip], wrap=True),
+                        self.progress_bar,
+                        self.start_button,
+                    ],
+                    spacing=10,
+                ),
             ),
-            # Section 4: 執行日誌
             styled_card(
                 title="執行日誌",
                 icon=ft.Icons.RECEIPT_LONG,
@@ -312,11 +253,6 @@ class MergeView(ft.Column):
     def _refresh_zip_list(self):
         """重新整理 ZIP 檔案清單顯示"""
         self.zip_list_view.controls.clear()
-        if not self.selected_zips:
-            self.zip_list_view.controls.append(
-                ft.Text("尚未加入任何 ZIP 檔案", size=12, color=theme.GREY_400)
-            )
-            return
         for path in self.selected_zips:
             name = Path(path).name
             self.zip_list_view.controls.append(
