@@ -200,8 +200,18 @@ class MergeView(ft.Column):
                                         spacing=10,
                                     ),
                                     ft.Container(height=12),
-                                    ft.Text("en_us 跳過門檻", size=11, color=theme.GREY_600),
-                                    ft.Row([self.patchouli_threshold_field], spacing=10),
+                                    ft.Row(
+                                        [
+                                            ft.Text("en_us 跳過門檻：", size=11, color=theme.GREY_600),
+                                            ft.Container(
+                                                content=self.patchouli_threshold_field,
+                                                width=80,
+                                            ),
+                                            ft.Text("範圍：0.0-1.0", size=10, color=theme.GREY_400),
+                                        ],
+                                        alignment=ft.MainAxisAlignment.START,
+                                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                    ),
                                 ],
                                 spacing=6,
                             ),
