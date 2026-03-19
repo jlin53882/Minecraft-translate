@@ -29,6 +29,12 @@ from .lang_processing_format import dump_json_bytes
 CJK_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002ebef\U00030000-\U0003134f]')
 
 
+@lru_cache(maxsize=4096)
+def _contains_cjk_str(s: str) -> bool:
+    """Memoized CJK check for string input (module-level)."""
+    return bool(CJK_RE.search(s))
+
+
 def _process_single_mod(
     zf: zipfile.ZipFile,
     paths: Dict[str, str],
@@ -37,26 +43,16 @@ def _process_single_mod(
     must_translate_dir: str,
 ) -> Dict[str, Any]:
     """處理單一模組的語言合併。"""
-    CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 
-    # def contains_cjk(s: str) -> bool:
-    #    """是否包含任意 CJK（中文/日文/韓文）"""
-    #    return isinstance(s, str) and CJK_RE.search(s) is not None
-    #
-    # def is_pure_english(s: str) -> bool:
-    #    """判斷是否為純英文（不包含 CJK）"""
-    #    return isinstance(s, str) and not contains_cjk(s)
-
-    @lru_cache(maxsize=4096)
-    def _contains_cjk_str(s: str) -> bool:
-        """Memoized CJK check for string input."""
-        return bool(CJK_RE.search(s))
-
-    def _contains_cjk(v) -> bool:
+    def _contains_cjk(v: Any) -> bool:
         """Check if value contains CJK characters. Dispatches to memoized str version."""
         if isinstance(v, str):
             return _contains_cjk_str(v)
-        return bool(CJK_RE.search(str(v)))
+        if isinstance(v, list):
+            return any(_contains_cjk(x) for x in v)
+        if isinstance(v, dict):
+            return any(_contains_cjk(x) for x in v.values())
+        return False
 
     def has_any_text(v: Any) -> bool:
         """結構內是否至少有一段可用的文字（避免空結構被當 pending）"""
