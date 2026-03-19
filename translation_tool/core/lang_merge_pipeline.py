@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import zipfile
+from functools import lru_cache
 from typing import Any, Dict
 
 import orjson as json
@@ -24,6 +25,8 @@ from .lang_merge_zip_io import (
     quarantine_copy_from_zip,
 )
 from .lang_processing_format import dump_json_bytes
+
+CJK_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002ebef\U00030000-\U0003134f]')
 
 
 def _process_single_mod(
@@ -44,27 +47,16 @@ def _process_single_mod(
     #    """判斷是否為純英文（不包含 CJK）"""
     #    return isinstance(s, str) and not contains_cjk(s)
 
-    def contains_cjk(v: Any) -> bool:
-        """是否包含任意 CJK（支援 str / list / dict 遞迴）"""
+    @lru_cache(maxsize=4096)
+    def _contains_cjk_str(s: str) -> bool:
+        """Memoized CJK check for string input."""
+        return bool(CJK_RE.search(s))
+
+    def _contains_cjk(v) -> bool:
+        """Check if value contains CJK characters. Dispatches to memoized str version."""
         if isinstance(v, str):
-            return CJK_RE.search(v) is not None
-        if isinstance(v, list):
-            return any(contains_cjk(x) for x in v)
-        if isinstance(v, dict):
-            return any(contains_cjk(x) for x in v.values())
-        return False
-
-    # Add memoization for contains_cjk - use a dict for values that need repeated checks
-    _value_cjk_cache: dict = {}
-
-    def memo_cjk(v):
-        """Memoized contains_cjk for any value (avoids repeated regex on same value)."""
-        if not isinstance(v, str):
-            return contains_cjk(v)
-        vid = id(v)
-        if vid not in _value_cjk_cache:
-            _value_cjk_cache[vid] = contains_cjk(v)
-        return _value_cjk_cache[vid]
+            return _contains_cjk_str(v)
+        return bool(CJK_RE.search(str(v)))
 
     def has_any_text(v: Any) -> bool:
         """結構內是否至少有一段可用的文字（避免空結構被當 pending）"""
@@ -84,7 +76,7 @@ def _process_single_mod(
         """
         if not has_any_text(v):
             return False
-        return not contains_cjk(v)
+        return not _contains_cjk(v)
 
     def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
         """
@@ -197,7 +189,7 @@ def _process_single_mod(
                 key in final_tw and target_has_tw  # 代表 output_dir 已存在 zh_tw.json
             )
 
-            if is_from_output_dir and memo_cjk(final_tw.get(key, "")):
+            if is_from_output_dir and _contains_cjk(final_tw.get(key, "")):
                 # ✔ 人工翻譯 → 不動
                 continue
 
@@ -211,7 +203,7 @@ def _process_single_mod(
             #    final_tw[key] = apply_replace_rules(tw_val, rules) # 進行規則處理
             #    continue
 
-            if memo_cjk(tw_val):
+            if _contains_cjk(tw_val):
                 if isinstance(tw_val, str):
                     final_tw[key] = apply_replace_rules(tw_val, rules)
                 else:
@@ -219,7 +211,7 @@ def _process_single_mod(
                 continue
 
             # 3. zh_cn 若含中文 → 用 S2TW 翻譯
-            if memo_cjk(cn_val):
+            if _contains_cjk(cn_val):
                 final_tw[key] = recursive_translate_dict(cn_val, rules)
                 continue
 

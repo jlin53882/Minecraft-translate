@@ -208,7 +208,10 @@ def process_content_or_copy_file_impl(
 
     if book_root:
         merger_cfg = load_config_fn().get("lang_merger", {})
-        allow_zh_cn = bool(merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False))
+        process_zh_cn = merger_cfg.get("process_zh_cn_files", True)
+        allow_zh_cn = False if not process_zh_cn else bool(
+            merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False)
+        )
         threshold = float(merger_cfg.get("patchouli_effective_translation_threshold", 0.5))
 
         # 優先使用外部傳入的預掃描 cache，否則走內部 _compute_patchouli_lang_effectiveness（自帶 module-level cache）

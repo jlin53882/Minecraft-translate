@@ -123,12 +123,13 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
 
             # 使用 ThreadPoolExecutor 處理（你可以依需求調整 max_workers）
             #讀取config 設定資料
-            _trans_cfg = load_config().get("translator", {})
-            _workers_cfg = _trans_cfg.get("parallel_execution_workers")
-            if _workers_cfg is None:
-                max_workers = min(32, max(1, (os.cpu_count() or 4) // 2))
+            cpu_count = os.cpu_count() or 2
+            max_allowed_workers = max(1, cpu_count // 2)
+            config_workers = load_config().get("translator", {}).get("parallel_execution_workers")
+            if isinstance(config_workers, int) and config_workers > 0:
+                max_workers = min(config_workers, max_allowed_workers)
             else:
-                max_workers = _workers_cfg
+                max_workers = max_allowed_workers
 
             futures = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
