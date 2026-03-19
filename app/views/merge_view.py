@@ -169,126 +169,119 @@ class MergeView(ft.Column):
             return ft.Column(children, spacing=4)
 
         self.controls = [
+            # Section 1: 檔案清單
             styled_card(
                 title="檔案清單",
                 icon=ft.Icons.ARCHIVE,
-                content=ft.Column(
-                    [
-                        ft.Row(
-                            [
-                                self.pick_zip_button,
-                                ft.Text(
-                                    "可加入多個 ZIP，會依序合併",
-                                    size=12,
-                                    color=theme.GREY_600,
-                                ),
-                            ],
-                            spacing=10,
+                content=ft.Column([
+                    # Drop zone hint
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Icon(ft.Icons.ADD, size=32, color=theme.GREY_400),
+                            ft.Text("拖放 ZIP 檔案到此，或按「新增 ZIP」", size=12, color=theme.GREY_500),
+                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=4),
+                        border=ft.border.all(1, theme.GREY_300),
+                        border_radius=8,
+                        padding=20,
+                    ),
+                    ft.Container(height=8),
+                    # ZIP chips with horizontal scroll
+                    ft.Container(
+                        content=ft.ListView(
+                            expand=True,
+                            scroll="auto",
+                            direction=ft.Axis.HORIZONTAL,
+                            controls=[],  # will be populated at runtime via self.zip_list_view
                         ),
-                        self.zip_list_view,
-                    ],
-                    spacing=10,
-                ),
+                        height=60,
+                    ),
+                    ft.Container(height=4),
+                    # Existing zip list view (reused for runtime population)
+                    ft.Container(
+                        content=ft.ListView(
+                            expand=True,
+                            scroll="auto",
+                            direction=ft.Axis.HORIZONTAL,
+                            controls=self.zip_list_view.controls,
+                        ),
+                        height=60,
+                    ),
+                    ft.Container(height=4),
+                    ft.Row(
+                        [
+                            self.pick_zip_button,
+                            ft.Text("可加入多個 ZIP，會依序合併", size=12, color=theme.GREY_600),
+                        ],
+                        spacing=10,
+                    ),
+                ], spacing=4),
             ),
+            # Section 2: 處理選項 (TWO COLUMNS)
+            styled_card(
+                title="處理選項",
+                icon=ft.Icons.TUNE,
+                content=ft.Column([
+                    ft.Row(
+                        [
+                            # Left: 一般處理
+                            ft.Container(
+                                expand=True,
+                                content=ft.Column([
+                                    ft.Text("一般處理", size=14, weight=ft.FontWeight.W_600),
+                                    ft.Container(height=8),
+                                    self.only_lang_checkbox,
+                                    ft.Container(height=4),
+                                    self.process_zh_cn_switch,
+                                ], spacing=4),
+                                padding=12,
+                                bgcolor=ft.Colors.GREY_100,
+                                border_radius=8,
+                            ),
+                            # Right: Patchouli 進階
+                            ft.Container(
+                                expand=True,
+                                content=ft.Column([
+                                    ft.Text("Patchouli 進階", size=14, weight=ft.FontWeight.W_600),
+                                    ft.Container(height=8),
+                                    self.skip_zh_cn_switch,
+                                    ft.Container(height=4),
+                                    self.patchouli_skip_zh_cn_switch,
+                                    ft.Container(height=4),
+                                    ft.Text("en_us 跳過門檻", size=12),
+                                    ft.Row([self.patchouli_threshold_field], spacing=6),
+                                ], spacing=4),
+                                padding=12,
+                                bgcolor=ft.Colors.GREY_100,
+                                border_radius=8,
+                            ),
+                        ],
+                        spacing=12,
+                    ),
+                ], spacing=8),
+            ),
+            # Section 3: 輸出與執行
             styled_card(
                 title="輸出與執行",
-                icon=ft.Icons.FOLDER,
-                content=ft.Column(
-                    [
-                        # 1. 輸出資料夾（keep existing row）
-                        ft.Row(
-                            [
-                                self.output_dir_field,
-                                ft.IconButton(
-                                    icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                                    icon_color=theme.BLUE_GREY_700,
-                                    tooltip="選擇輸出資料夾",
-                                    on_click=lambda e: self.pick_output_dir(),
-                                ),
-                            ],
-                            spacing=6,
-                        ),
-                        # 2. 一般處理 section header
-                        _section_header("一般處理"),
-                        # 只處理 lang 檔案 — VERTICAL block
-                        _setting_block(
-                            label="只處理 lang 檔案",
-                            control=self.only_lang_checkbox,
-                            note="只處理語言檔，其他內容檔案略過。",
-                        ),
-                        ft.Divider(height=16, color=theme.GREY_100),
-                        # 3. zh_cn 處理 section header
-                        _section_header("zh_cn 處理"),
-                        # 啟用 zh_cn 處理 — VERTICAL block
-                        _setting_block(
-                            label="處理 zh_cn 檔案",
-                            control=self.process_zh_cn_switch,
-                            note="關閉後，所有 zh_cn 檔案會略過。",
-                            disabled_note=self._zh_cn_disabled_note,
-                        ),
-                        ft.Divider(height=16, color=theme.GREY_100),
-                        # 4. Patchouli 進階 section header
-                        _section_header("Patchouli 進階"),
-                        # Sub-section A: Patchouli 處理模式
-                        ft.Text("Patchouli 處理模式", size=11, weight=ft.FontWeight.W_500, color=theme.GREY_500),
-                        # Card 1: 只處理 Patchouli 的 zh_cn
-                        ft.Container(
-                            bgcolor=ft.Colors.WHITE,
-                            border_radius=8,
-                            padding=12,
-                            border=ft.border.all(1, theme.GREY_200),
-                            content=_setting_block(
-                                label="只處理 Patchouli 的 zh_cn",
-                                control=self.skip_zh_cn_switch,
-                                note="僅處理 Patchouli 的 zh_cn 語言檔。",
+                icon=ft.Icons.PLAY_ARROW,
+                content=ft.Column([
+                    ft.Row(
+                        [
+                            self.output_dir_field,
+                            ft.IconButton(
+                                icon=ft.Icons.FOLDER_OPEN_OUTLINED,
+                                icon_color=theme.BLUE_GREY_700,
+                                tooltip="選擇輸出資料夾",
+                                on_click=lambda e: self.pick_output_dir(),
                             ),
-                        ),
-                        ft.Container(height=8),
-                        # Sub-section B: 跳過判斷
-                        ft.Text("跳過判斷", size=11, weight=ft.FontWeight.W_500, color=theme.GREY_500),
-                        ft.Container(height=4),
-                        # Card 2: 允許 zh_cn 觸發跳過 en_us
-                        ft.Container(
-                            bgcolor=ft.Colors.WHITE,
-                            border_radius=8,
-                            padding=12,
-                            border=ft.border.all(1, theme.GREY_200),
-                            content=_setting_block(
-                                label="允許 zh_cn 觸發跳過 en_us",
-                                control=self.patchouli_skip_zh_cn_switch,
-                                note="zh_cn 達門檻時，跳過對應 en_us。",
-                                disabled_note=self._zh_cn_disabled_note,
-                            ),
-                        ),
-                        ft.Container(height=8),
-                        # Card 3: en_us 跳過門檻
-                        ft.Container(
-                            bgcolor=ft.Colors.WHITE,
-                            border_radius=8,
-                            padding=12,
-                            border=ft.border.all(1, theme.GREY_200),
-                            content=ft.Column([
-                                ft.Text("en_us 跳過門檻", size=13),
-                                ft.Row([self.patchouli_threshold_field], spacing=8),
-                            ], spacing=4),
-                        ),
-                    ],
-                    spacing=8,
-                    scroll="auto",
-                ),
+                        ],
+                        spacing=6,
+                    ),
+                    self.progress_bar,
+                    ft.Container(height=8),
+                    self.start_button,
+                ], spacing=10),
             ),
-            styled_card(
-                title="執行狀態",
-                icon=ft.Icons.TIMELINE,
-                content=ft.Column(
-                    [
-                        ft.Row([self.status_chip], wrap=True),
-                        self.progress_bar,
-                        self.start_button,
-                    ],
-                    spacing=10,
-                ),
-            ),
+            # Section 4: 執行日誌
             styled_card(
                 title="執行日誌",
                 icon=ft.Icons.RECEIPT_LONG,
