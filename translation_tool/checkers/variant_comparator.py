@@ -27,7 +27,7 @@ def compare_variants_generator(zh_cn_dir: str, zh_tw_dir: str, output_dir: str) 
     # 初始化 OpenCC 和規則
     try:
         converter = OpenCC('s2twp')
-        rules = load_replace_rules(config.get("translation", {}).get("replace_rules_path", "replace_rules.json"))
+        rules = load_replace_rules(config.get("translator", {}).get("replace_rules_path", "replace_rules.json"))
     except Exception as e:
         yield {"progress": 1.0, "log": f"錯誤：初始化 OpenCC 或讀取規則失敗: {e}", "error": True}
         return

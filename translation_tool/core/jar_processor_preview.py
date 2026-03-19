@@ -58,7 +58,8 @@ def preview_extraction_generator_impl(
         return
 
     if mode == 'lang':
-        target_regex = re.compile(r"(?:assets/([^/]+)/)?lang/(en_us|zh_cn|zh_tw)\.(json|lang)$", re.IGNORECASE)
+        from translation_tool.core.jar_processor import build_lang_file_regex
+        target_regex = build_lang_file_regex()
     elif mode == 'book':
         target_regex = book_path_regex
     else:

@@ -18,8 +18,8 @@ from translation_tool.core.jar_processor import (
     ExtractionSummary,
     generate_preview_report,
     BOOK_PATH_REGEX_DUAL_STRUCTURE,
-    LANG_CODES,
-    lang_pattern,
+    get_lang_codes,
+    build_lang_file_regex,
 )
 
 
@@ -27,16 +27,23 @@ class TestJarProcessorExports:
     """測試 jar_processor 導出的常數與函數"""
 
     def test_lang_codes_defined(self):
-        """測試 LANG_CODES 有定義"""
-        assert "en_us" in LANG_CODES
-        assert "zh_tw" in LANG_CODES
-        assert "zh_cn" in LANG_CODES
-        assert len(LANG_CODES) == 3
+        """測試 get_lang_codes() 有定義且預設包含 en_us/zh_tw/zh_cn"""
+        lang_codes = get_lang_codes()
+        assert isinstance(lang_codes, list)
+        assert len(lang_codes) > 0
+        assert "en_us" in lang_codes
+        assert "zh_tw" in lang_codes
+        assert "zh_cn" in lang_codes
 
-    def test_lang_pattern_defined(self):
-        """測試 lang_pattern 有定義"""
-        assert lang_pattern is not None
-        assert isinstance(lang_pattern, str)
+    def test_build_lang_file_regex(self):
+        """測試 build_lang_file_regex() 能正確產出 Pattern"""
+        regex = build_lang_file_regex()
+        assert regex is not None
+        assert isinstance(regex, re.Pattern)
+        # 確認 regex 能正確匹配 lang 檔案路徑
+        assert regex.search("assets/mymod/lang/en_us.json")
+        assert regex.search("assets/mymod/lang/zh_cn.json")
+        assert regex.search("assets/mymod/lang/zh_tw.json")
 
     def test_book_regex_defined(self):
         """測試 BOOK_PATH_REGEX_DUAL_STRUCTURE 有定義"""
