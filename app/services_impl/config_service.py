@@ -52,6 +52,12 @@ def _save_app_config(config: dict[str, Any]):
     - 之後若要加上寫入驗證/寫入鎖/異動通知，也集中在這裡處理。
     """
 
+    # Normalization: if process_zh_cn_files is False, force-dependent fields to False
+    # 防止不一致狀態寫入磁碟（例如 UI 只勾選「停用簡中處理」但忘記一併關閉相關選項）
+    if not config.get("process_zh_cn_files", True):
+        config["skip_zh_cn_when_only_process_lang"] = False
+        config["patchouli_skip_en_us_when_zh_cn_exists"] = False
+
     from translation_tool.utils.config_manager import save_config
 
     return save_config(config, CONFIG_PATH)
