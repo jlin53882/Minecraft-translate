@@ -8,6 +8,7 @@ import re
 from typing import Dict, Any, Generator
 
 from translation_tool.core.jar_processor_discovery import find_jar_files
+from translation_tool.utils.config_manager import load_config
 from translation_tool.core.jar_processor_extract import (
     extract_from_jar_impl,
     run_extraction_process_impl,
@@ -30,8 +31,25 @@ BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
     re.IGNORECASE,
 )
 
-LANG_CODES = ["en_us", "zh_tw", "zh_cn"]
-lang_pattern = r"_?(?:" + "|".join(map(re.escape, LANG_CODES)) + r")"
+def get_lang_codes() -> list[str]:
+    """從 config 取得 jar_extractor.lang_codes，預設 ["en_us", "zh_tw", "zh_cn"]。
+    
+    回傳值保證為非空 list。
+    """
+    cfg = load_config()
+    codes = cfg.get("jar_extractor", {}).get("lang_codes", ["en_us", "zh_tw", "zh_cn"])
+    if not isinstance(codes, list) or not codes:
+        codes = ["en_us", "zh_tw", "zh_cn"]
+    return codes
+
+def build_lang_file_regex() -> re.Pattern:
+    """根據 config 中的 lang_codes 動態建 lang file regex。
+    
+    確保與 preview 使用的 regex 行為一致。
+    """
+    codes = get_lang_codes()
+    codes_str = "|".join(map(re.escape, codes))
+    return re.compile(rf"(?:assets/([^/]+)/)?lang/({codes_str})\.(json|lang)$", re.IGNORECASE)
 
 def _extract_from_jar(jar_path: str, output_root: str, target_regex: re.Pattern) -> Dict[str, Any]:
     """從 JAR 檔案提取檔案。
@@ -79,9 +97,7 @@ def extract_lang_files_generator(mods_dir: str, output_dir: str) -> Generator[Di
     Yields:
         進度字典
     """
-    lang_file_regex = re.compile(
-        r"(?:assets/([^/]+)/)?lang/(en_us|zh_cn|zh_tw)\.(json|lang)$", re.IGNORECASE
-    )
+    lang_file_regex = build_lang_file_regex()
     yield from _run_extraction_process(
         mods_dir=mods_dir,
         output_dir=output_dir,
@@ -133,6 +149,6 @@ __all__ = [
     "ExtractionSummary",
     "generate_preview_report",
     "BOOK_PATH_REGEX_DUAL_STRUCTURE",
-    "LANG_CODES",
-    "lang_pattern",
+    "get_lang_codes",
+    "build_lang_file_regex",
 ]
