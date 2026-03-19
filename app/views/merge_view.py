@@ -110,13 +110,15 @@ class MergeView(ft.Column):
             prefix_icon=ft.Icons.FOLDER_COPY,
         )
 
-        # ZIP 清單
-        self.zip_list_view = ft.Column(
-            [ft.Text("尚未加入任何 ZIP 檔案", size=12, color=theme.GREY_400)],
-            scroll="auto",
-            spacing=4,
-            tight=True,
+        # ZIP 清單（橫向滾動）
+        self.zip_list_view = ft.ListView(
+            [],
+            expand=True,
+            horizontal=True,
+            spacing=8,
         )
+        # 空的 ZIP list 顯示提示
+        self._zip_empty_placeholder = ft.Text("尚未加入任何 ZIP 檔案", size=12, color=theme.GREY_400)
 
         # 狀態區
         self.status_chip = ft.Chip(
@@ -184,26 +186,9 @@ class MergeView(ft.Column):
                         border_radius=8,
                         padding=20,
                     ),
-                    ft.Container(height=8),
-                    # ZIP chips with horizontal scroll
-                    ft.Container(
-                        content=ft.ListView(
-                            expand=True,
-                            scroll="auto",
-                            direction=ft.Axis.HORIZONTAL,
-                            controls=[],  # will be populated at runtime via self.zip_list_view
-                        ),
-                        height=60,
-                    ),
                     ft.Container(height=4),
-                    # Existing zip list view (reused for runtime population)
                     ft.Container(
-                        content=ft.ListView(
-                            expand=True,
-                            scroll="auto",
-                            direction=ft.Axis.HORIZONTAL,
-                            controls=self.zip_list_view.controls,
-                        ),
+                        content=self.zip_list_view,
                         height=60,
                     ),
                     ft.Container(height=4),
