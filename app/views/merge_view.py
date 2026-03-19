@@ -111,7 +111,7 @@ class MergeView(ft.Column):
         )
 
         # ZIP 清單
-        self.zip_list_view = ft.ListView(height=160, spacing=4, auto_scroll=False)
+        self.zip_list_view = ft.Column(scroll="auto", spacing=4, tight=True)
 
         # 狀態區
         self.status_chip = ft.Chip(
@@ -212,7 +212,7 @@ class MergeView(ft.Column):
                                     ),
                                     ft.Text(
                                         "僅處理 lang 時自動跳過 zh_cn lang 檔",
-                                        size=12,
+                                        size=11,
                                         color=theme.GREY_600,
                                     ),
                                     ft.Container(height=4),
@@ -222,7 +222,7 @@ class MergeView(ft.Column):
                                     ),
                                     ft.Text(
                                         "開啟後，若 zh_cn 有效翻譯比例達門檻，會視為可用翻譯並跳過 en_us",
-                                        size=12,
+                                        size=11,
                                         color=theme.GREY_600,
                                     ),
                                     self._skip_disabled_note(),
@@ -233,7 +233,7 @@ class MergeView(ft.Column):
                                     ),
                                     ft.Text(
                                         "Patchouli en_us 跳過決策的 CJK 有效比例（0.0~1.0）",
-                                        size=12,
+                                        size=11,
                                         color=theme.GREY_600,
                                     ),
                                 ],
