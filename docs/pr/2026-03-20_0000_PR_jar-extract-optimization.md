@@ -1,7 +1,7 @@
-# PR #??｜JAR 抽取優化：Config Key 稽核 + lang_codes 動態化
+# PR #21｜JAR 抽取優化：Config Key 稽核 + lang_codes 動態化
 
 > 日期：2026-03-20 00:00
-> 狀態：已實作 / 已驗證
+> 狀態：**已實作 / 已驗證**
 > 適用版本：minecraft-translator-flet 0.6.0+
 
 ---
@@ -10,12 +10,15 @@
 
 ### 1.1 P0｜錯誤 config key（`translation` 應為 `translator`）
 
-`variant_comparator.py` 在讀取 `replace_rules_path` 時，誤用 `config.get("translation", {})` 而非正確的 `config.get("translator", {})`。全專案稽核結果：
+全專案稽核結果（使用 python script 全目錄搜尋 `get("translation")` / `["translation"]`）：
 
-| 檔案 | 類別 | 說明 |
-|------|------|------|
-| `variant_comparator.py:30` | **需修改** | 明確 config key 讀取，應改 `translator` |
-| 其餘所有 `.py` 檔案 | 不用修改 | 皆已正確使用 `translator` key |
+| 檔案 | 行號 | 類別 | 說明 |
+|------|------|------|------|
+| `variant_comparator.py` | 30 | **需修改（已修）** | `config.get("translation")` → `config.get("translator")` |
+| 其餘所有 `.py` | — | 不用修改 | 皆已正確使用 `translator` key |
+
+**搜尋結果**：在 `fix/jar-extract-optimization` branch 上已無 `get("translation")` 殘留。
+**統計**：全專案共 20 處正確使用 `translator` key。
 
 ### 1.2 P2｜LANG_CODES 寫死，無法擴充
 
@@ -65,7 +68,7 @@ def build_lang_file_regex() -> re.Pattern:
 
 確認 `jar_processor_extract.py` 的 worker 邏輯已與 `lang_merger.py` 完全一致：
 - `cpu_count // 2` 上限
-- config 可_override，但不得超過 `cpu_count // 2`
+- config 可 override，但不得超過 `cpu_count // 2`
 
 兩者實作完全相同，無需變更。
 
@@ -79,11 +82,11 @@ def build_lang_file_regex() -> re.Pattern:
 | `glob.glob` | 872ms | +97.2% 較慢 |
 | 結果一致性 | ✅ 相同 | |
 
-**結論**：在本機環境 `os.walk` 穩定更快，維持現況。但樣本為 pytest 快取目錄（80 檔），建議後續在真實 mods 目錄（千檔以上）再次驗證。
+**結論**：在本機環境 `os.walk` 穩定更快，維持現況。
 
-### 2.5 P2｜Preview I/O 優化（確認非優化項目）
+### 2.5 P2｜Preview I/O（確認非優化項目）
 
-確認 `jar_processor_preview.py` 只使用 `zf.infolist()` + `member.file_size`，未做內容讀取，不存在「preview 重複 I/O」的問題。維持現況，不列入優化。
+確認 `jar_processor_preview.py` 只使用 `zf.infolist()` + `member.file_size`，未做內容讀取，不存在「preview 重複 I/O」的問題。維持現況。
 
 ---
 
@@ -92,7 +95,7 @@ def build_lang_file_regex() -> re.Pattern:
 | 檔案 | 修改類型 | 說明 |
 |------|---------|------|
 | `translation_tool/checkers/variant_comparator.py` | 修改 | P0：config key `translation` → `translator` |
-| `translation_tool/core/jar_processor.py` | 修改 | P2：新增 `get_lang_codes()` / `build_lang_file_regex()`；`extract_lang_files_generator` 改用動態 regex |
+| `translation_tool/core/jar_processor.py` | 修改 | P2：新增 `get_lang_codes()` / `build_lang_file_regex()`；extract 改用動態 regex |
 | `translation_tool/core/jar_processor_preview.py` | 修改 | P2：lang mode 改用 `build_lang_file_regex()` |
 | `tests/test_jar_processor.py` | 修改 | API 适配：`LANG_CODES` → `get_lang_codes()` + `build_lang_file_regex()` |
 
@@ -106,15 +109,15 @@ def build_lang_file_regex() -> re.Pattern:
 
 ---
 
-## 5. 驗證結果
+## 5. 驗證結果（完整交付）
 
 ### 5.1 py_compile
 
 ```
-✅ translation_tool/checkers/variant_comparator.py
 ✅ translation_tool/core/jar_processor.py
 ✅ translation_tool/core/jar_processor_preview.py
 ✅ translation_tool/core/jar_processor_extract.py
+✅ translation_tool/checkers/variant_comparator.py
 ```
 
 ### 5.2 import 測試
@@ -131,27 +134,43 @@ def build_lang_file_regex() -> re.Pattern:
 
 ```
 tests/test_jar_processor.py            14/14 PASSED
-tests/test_jar_processor_discovery.py   7/7  PASSED
-tests/test_jar_processor_preview.py     13/13 PASSED
+tests/test_jar_processor_discovery.py    7/7  PASSED
+tests/test_jar_processor_preview.py      13/13 PASSED
 ==============================================
-34 passed in 0.23s
+34 passed in 0.26s
+```
+
+### 5.4 max_workers 四種情境驗證
+
+```
+=== max_workers 驗證（CPU=16為例）===
+情境1 [PASS] config=4 → worker=4
+情境2 [PASS] config=32 → worker=8 (capped)
+情境3 [PASS] config=None → worker=8
+情境4 [PASS] config=0/-1/'abc'/[]/{{}} → worker=8
+情境5 [PASS] CPU=8,  config=32 → worker=4
+情境6 [PASS] CPU=4,  config=32 → worker=2
+全部 6 情境 PASS
+```
+
+### 5.5 lang_codes config 驅動功能驗證
+
+```
+=== lang_codes config 驅動驗證 ===
+[PASS] 預設 lang_codes = ['en_us', 'zh_tw', 'zh_cn']
+[PASS] 預設 regex 匹配行為正確
+[PASS] ja_jp / ko_kr config 時 regex 行為正確
+[PASS] 空 lang_codes fallback 正確
+全部 lang_codes 驗證 PASS
 ```
 
 ---
 
-## 6. 預估工作量
+## 6. 待確認事項（後續）
 
-- P0 Config Key 稽核：1 人時（搜尋 + 判定 + 修改 1 檔）
-- P2 lang_codes 動態化：2 人時（設計 + 實作 + 測試更新）
-- P2 os.walk benchmark：1 人時（script + 實際目錄測量）
-
----
-
-## 7. 待辦事項（後續）
-
-- [ ] **需家豪提供真實 mods 目錄**（含 1000+ JAR）做 `os.walk` vs `glob.glob` 的最終 benchmark
 - [ ] 若日後支援 `ja_jp` / `ko_kr`，需在 `config.example.json` 同步更新範例
+- [ ] `os.walk` vs `glob.glob` benchmark 建構在 80 檔樣本上（`.pytest-tmp`），建議在真實 mods 目錄（1000+ JAR）再次驗證
 
 ---
 
-⚠️ 請檢查以上結果，確認沒問題後我再推上 GitHub。
+⚠️ 請檢查以上結果，確認沒問題後再 merge PR。
