@@ -16,6 +16,13 @@ from ..utils.log_unit import log_info, log_warning, log_error, log_debug
 
 
 # ----------------------------------------------------------------------
+# Module-level cache for patchouli effectiveness results
+# Key: (book_root_lower, threshold) → (zh_tw: bool, zh_cn: bool)
+# ----------------------------------------------------------------------
+_patchouli_eff_cache: dict = {}
+
+
+# ----------------------------------------------------------------------
 # Helper: Patchouli 翻譯有效性 ratio 計算
 # ----------------------------------------------------------------------
 def _compute_patchouli_lang_effectiveness(
@@ -38,13 +45,24 @@ def _compute_patchouli_lang_effectiveness(
     CJK_RE = _re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
     TEXT_EXTS = {".json", ".md", ".txt"}
 
+    # book_root 可能大小寫與 zf.namelist() 不一致，統一轉小寫後比對
+    book_root_lower = book_root.lower()
+    cache_key = (book_root_lower, threshold)
+
+    # ── 1. Cache lookup ────────────────────────────────────────────────
+    if cache_key in _patchouli_eff_cache:
+        log_debug(f"[Patchouli Eff] cache hit for book_root={book_root!r} threshold={threshold}")
+        return _patchouli_eff_cache[cache_key]
+
+    log_debug(f"[Patchouli Eff] cache miss for book_root={book_root!r} threshold={threshold}, computing…")
+
     result: dict[str, bool] = {"zh_tw": False, "zh_cn": False}
 
     for lang in ("zh_tw", "zh_cn"):
-        prefix = book_root + lang + "/"
+        prefix_lower = book_root_lower + lang + "/"
         text_files: list[str] = []
         for name in zf.namelist():
-            if name.startswith(prefix):
+            if name.lower().startswith(prefix_lower):
                 ext = os.path.splitext(name)[1].lower()
                 if ext in TEXT_EXTS:
                     text_files.append((name, ext))
@@ -77,6 +95,10 @@ def _compute_patchouli_lang_effectiveness(
         ratio = effective_count / len(text_files) if text_files else 0
         result[lang] = ratio >= threshold
 
+    # ── 2. Cache store ─────────────────────────────────────────────────
+    _patchouli_eff_cache[cache_key] = result
+    log_debug(f"[Patchouli Eff] cached result for {book_root!r} threshold={threshold}: {result}")
+
     return result
 
 
@@ -102,6 +124,7 @@ def process_content_or_copy_file_impl(
     *,
     only_process_lang: bool = False,
     all_files_cache: List[str] | None = None,
+    patchouli_eff_cache: dict | None = None,
     load_config_fn: Callable[[], dict],
     recursive_translate_dict_fn: Callable[[Any, list], Any],
     get_text_processor_fn: Callable[[str], Any],
@@ -148,13 +171,15 @@ def process_content_or_copy_file_impl(
                 return {"success": True, "log": None}
 
     def get_patchouli_book_root(path: str):
-        p = path.replace("\\", "/").lower()
-        if not p.startswith("/"):
-            p = "/" + p
-        idx = p.find("/assets/")
+        # 保留原始大小寫（因為 zf.namelist() 可能用原始大小寫）
+        p_orig = path.replace("\\", "/")
+        if not p_orig.startswith("/"):
+            p_orig = "/" + p_orig
+        p_lower = p_orig.lower()
+        idx = p_lower.find("/assets/")
         if idx == -1:
             return None
-        p_sub = p[idx + 1 :]
+        p_sub = p_lower[idx + 1:]  # 只用於找到 marker 相對位置，book_root 從原始建構
         patchouli_dirs = (
             load_config_fn().get("lm_translator", {}).get("patchouli", {}).get("dir_names", ["patchouli_books"])
         )
@@ -162,79 +187,67 @@ def process_content_or_copy_file_impl(
             patchouli_dirs = [patchouli_dirs]
         lang_dirs = {"zh_cn", "zh_tw", "en_us"}
         for dir_name in patchouli_dirs:
-            marker = f"/{dir_name}/"
-            if marker in p_sub:
-                parts = p_sub.split(marker, 1)
-                rest = parts[1].lstrip("/")
+            marker_lower = f"/{dir_name}/"
+            if marker_lower in p_sub:
+                # 用原始路徑的對應切片重建 book_root（保留大小寫）
+                orig_sub = p_orig[idx + 1:]
+                parts_orig = orig_sub.split("/" + dir_name + "/", 1)
+                rest = parts_orig[1].lstrip("/") if len(parts_orig) > 1 else ""
                 first = rest.split("/", 1)[0] if rest else ""
-                if first in lang_dirs:
-                    book_root = parts[0] + marker
-                    return (book_root, dir_name)
-                book_id = first
-                book_root = parts[0] + marker + book_id + "/"
+                if first.lower() in lang_dirs:
+                    book_root = parts_orig[0] + "/" + dir_name + "/"
+                else:
+                    book_id = first
+                    book_root = parts_orig[0] + "/" + dir_name + "/" + book_id + "/"
                 return (book_root, dir_name)
         return None
 
+    # ── PATCHOULI 處理（v3 ratio 方案）────────────────────────────────────
     hit = get_patchouli_book_root(normalized_path)
     book_root, matched_dir_name = hit if hit else (None, None)
 
     if book_root:
-        has_cn_or_tw = False
-        if all_files_cache:
-            has_cn_or_tw = any(
-                n.startswith(book_root) and ("/zh_cn/" in n or "/zh_tw/" in n)
-                for n in all_files_cache
+        merger_cfg = load_config_fn().get("lang_merger", {})
+        allow_zh_cn = bool(merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False))
+        threshold = float(merger_cfg.get("patchouli_effective_translation_threshold", 0.5))
+
+        # 優先使用外部傳入的預掃描 cache，否則走內部 _compute_patchouli_lang_effectiveness（自帶 module-level cache）
+        book_root_lower = book_root.lower()
+        cache_key = (book_root_lower, threshold)
+        if patchouli_eff_cache is not None and cache_key in patchouli_eff_cache:
+            eff = patchouli_eff_cache[cache_key]
+            log_debug(f"[Patchouli Eff] 使用外部預掃描 cache for {book_root!r}: {eff}")
+        else:
+            eff = _compute_patchouli_lang_effectiveness(
+                zf,
+                book_root,
+                threshold=threshold,
+                json_module=json_module,
             )
+        has_eff_zh_tw = bool(eff.get("zh_tw", False))
+        has_eff_zh_cn = bool(eff.get("zh_cn", False))
 
-        # --- v3 ratio-based patchouli skip ---
-        _allow_zh_cn_for_skip = load_config_fn().get("lang_merger", {}).get(
-            "patchouli_skip_en_us_when_zh_cn_exists", False
-        )
-        _effective_threshold = load_config_fn().get("lang_merger", {}).get(
-            "patchouli_effective_translation_threshold", 0.5
-        )
-
-        _patchouli_effective = {}
-        if book_root:
-            _patchouli_effective = _compute_patchouli_lang_effectiveness(
-                zf, book_root, threshold=_effective_threshold, json_module=json_module
-            )
-
-        has_effective_zh_tw = _patchouli_effective.get("zh_tw", False)
-        has_effective_zh_cn = _patchouli_effective.get("zh_cn", False)
-
-        if has_cn_or_tw:
-            if normalized_path.lower().endswith("/en_us/...") or "/en_us/" in normalized_path.lower():
-                should_skip = has_effective_zh_tw or (_allow_zh_cn_for_skip and has_effective_zh_cn)
-                if should_skip:
-                    return {"success": True, "log": f"[Patchouli] 跳過已有有效翻譯的英文原件: {normalized_path}"}
-        # --- end v3 ratio-based patchouli skip ---
-
-        rel_path = normalized_path[len(book_root) :]
+        rel_path = normalized_path[len(book_root):]
         rel_low = rel_path.lower()
         normalized_root = normalize_patchouli_book_root_fn(book_root).strip("/")
-        pending_name = load_config_fn().get("lang_merger", {}).get("pending_folder_name", "待翻譯")
-        patchouli_dirs = (
-            load_config_fn().get("lm_translator", {}).get("patchouli", {}).get("dir_names", ["patchouli_books"])
-        )
-        patchouli_root_dir = matched_dir_name if isinstance(patchouli_dirs, list) and patchouli_dirs else patchouli_dirs
+        pending_name = merger_cfg.get("pending_folder_name", "待翻譯")
+        patchouli_dirs_cfg = load_config_fn().get("lm_translator", {}).get("patchouli", {}).get("dir_names", ["patchouli_books"])
+        patchouli_root_dir = matched_dir_name if isinstance(patchouli_dirs_cfg, list) and patchouli_dirs_cfg else patchouli_dirs_cfg
 
-        if has_cn_or_tw:
-            if rel_low.startswith("en_us/"):
-                should_skip = has_effective_zh_tw or (_allow_zh_cn_for_skip and has_effective_zh_cn)
-                if should_skip:
-                    return {"success": True, "log": f"[Patchouli] 跳過已有有效翻譯的英文原件: {normalized_path}"}
-            if rel_low.startswith("zh_cn/"):
-                rel_path = "zh_tw/" + rel_path[len("zh_cn/") :]
-            elif rel_low.startswith("zh_tw/"):
-                rel_path = rel_path
-            target = os.path.join(output_dir, patchouli_root_dir, normalized_root, rel_path)
+        if rel_low.startswith("en_us/") and (has_eff_zh_tw or (allow_zh_cn and has_eff_zh_cn)):
+            return {"success": True, "log": f"[Patchouli] 跳過已有有效翻譯的英文原件: {normalized_path}"}
+
+        if rel_low.startswith("zh_cn/"):
+            rel_path = "zh_tw/" + rel_path[len("zh_cn/"):]
             action_log = "轉換中文化"
+        elif rel_low.startswith("zh_tw/"):
+            action_log = "寫入譯文"
         else:
-            target = os.path.join(output_dir, patchouli_root_dir, pending_name, normalized_root, rel_path)
             action_log = "歸檔至待翻譯"
 
+        target = os.path.join(output_dir, patchouli_root_dir, normalized_root, rel_path)
         os.makedirs(os.path.dirname(target), exist_ok=True)
+
         ext = os.path.splitext(input_path)[1].lower()
         if ext in [".json", ".md", ".txt"]:
             try:
@@ -249,6 +262,7 @@ def process_content_or_copy_file_impl(
         else:
             with zf.open(input_path) as src, open(target, "wb") as dst:
                 shutil.copyfileobj(src, dst)
+
         return {"success": True, "log": f"[Patchouli] {action_log}: {target}"}
 
     log_prefix = f"處理內容檔案 '{input_path}':"
