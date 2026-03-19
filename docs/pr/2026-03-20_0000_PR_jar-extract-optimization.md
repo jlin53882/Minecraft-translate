@@ -168,8 +168,8 @@ tests/test_jar_processor_preview.py      13/13 PASSED
 
 ## 6. 待確認事項（後續）
 
-- [ ] 若日後支援 `ja_jp` / `ko_kr`，需在 `config.example.json` 同步更新範例
-- [ ] `os.walk` vs `glob.glob` benchmark 建構在 80 檔樣本上（`.pytest-tmp`），建議在真實 mods 目錄（1000+ JAR）再次驗證
+- [ ] ✅ `config.example.json` 已補 `jar_extractor.lang_codes` 範例
+- [ ] ⚠️ `os.walk` vs `glob.glob` benchmark 建構在 80 檔樣本上（`.pytest-tmp`），建議未來在真實 mods 目錄（1000+ JAR）再次驗證，作為長期結論的依據
 
 ---
 
