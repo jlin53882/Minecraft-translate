@@ -1,7 +1,7 @@
 """app/views/merge_view.py 模組。
 
-用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
-維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+用途：提供 ZIP 合併頁面 UI 與執行流程。
+維護注意：本檔案的 docstring 與中文註解用於維護說明，不代表行為變更。
 """
 
 import threading
@@ -9,33 +9,26 @@ import time
 from pathlib import Path
 
 import flet as ft
-from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
-
-import flet as ft
-
-# UI 共用元件：統一卡片/按鈕樣式
-from app.ui.components import primary_button, styled_card
 
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
 from app.task_session import TaskSession
+from app.ui import theme
+from app.ui.components import primary_button, styled_card
+from translation_tool.utils.log_unit import log_info
+
 
 class MergeView(ft.Column):
-    """ZIP 合併頁面（視覺風格對齊 Translation/Extractor）。"""
+    """ZIP 合併頁面（視覺風格對齊 Translation / Extractor）。"""
 
-    # --------------------------------------------------
-    # Interlocking: when process_zh_cn_switch goes False, disable 2 and 3
-    # --------------------------------------------------
-    # Disabled 原因說明（兩個開關被禁用時動態顯示）
     _zh_cn_disabled_note: ft.Text = None  # type: ignore[assignment]
 
     def _skip_disabled_note(self) -> ft.Text:
-        """對外暴露的 disabled 原因文字（讓 UI 可以引用同一個物件）。"""
+        """回傳 zh_cn 關聯設定停用時的提示文字元件。"""
         return self._zh_cn_disabled_note
 
     def _on_zh_cn_switch_changed(self, e):
-        """互鎖：當 zh_cn 處理關閉時，禁用兩個依賴開關並顯示原因。"""
-        enabled = e.control.value
+        """主開關互鎖：關閉 zh_cn 處理時，同步停用兩個相依設定。"""
+        enabled = bool(e.control.value)
         self.skip_zh_cn_switch.disabled = not enabled
         self.patchouli_skip_zh_cn_switch.disabled = not enabled
         if self._zh_cn_disabled_note:
@@ -46,59 +39,59 @@ class MergeView(ft.Column):
         self.update()
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """初始化 MergeView。
-
-        參數：
-            page: Flet Page 物件
-            file_picker: Flet FilePicker 物件
-        """
-        super().__init__(expand=True, spacing=16)
+        """初始化 MergeView。"""
+        super().__init__(expand=True, spacing=16, scroll=ft.ScrollMode.AUTO)
         self.page = page
         self.file_picker = file_picker
 
         self.session = TaskSession(max_logs=2000)
         self._ui_stop = threading.Event()
         self._last_log_count = 0
-
         self.selected_zips: list[str] = []
 
-        # 參數區
+        # 一般選項：控制是否只處理語言檔案。
         self.only_lang_checkbox = ft.Checkbox(
-            label="只處理 lang 檔案（其他檔案不處理）",
+            label="只處理 lang 檔案",
             value=True,
         )
 
-        # 1. process_zh_cn_files switch
+        # zh_cn 主開關：控制是否處理 zh_cn 檔案。
         self.process_zh_cn_switch = ft.Switch(
             label="處理 zh_cn 檔案",
             value=True,
             on_change=self._on_zh_cn_switch_changed,
         )
-        # 2. skip_zh_cn_when_only_lang switch
+
+        # 只處理 lang 時，是否直接跳過 zh_cn。
         self.skip_zh_cn_switch = ft.Switch(
             label="只處理 lang 時跳過 zh_cn",
             value=False,
         )
-        # 3. patchouli_skip_zh_cn switch
+
+        # Patchouli 是否允許 zh_cn 達門檻後跳過 en_us。
         self.patchouli_skip_zh_cn_switch = ft.Switch(
-            label="Patchouli：允許 zh_cn 觸發跳過 en_us",
+            label="允許 zh_cn 觸發跳過 en_us",
             value=False,
         )
-        # 4. threshold field
+
+        # Patchouli 門檻：控制 en_us 是否可被視為可跳過。
         self.patchouli_threshold_field = ft.TextField(
-            label="Patchouli 有效翻譯比例門檻",
             value="0.5",
-            width=120,
+            width=96,
+            dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
-            suffix_text="(0.0~1.0)",
+            text_align=ft.TextAlign.CENTER,
         )
-        # Disabled 原因說明
+
+        # 停用原因提示：當未開啟 zh_cn 主開關時，提示相依設定不可用。
         self._zh_cn_disabled_note = ft.Text(
-            "⚠️ 需先開啟「處理 zh_cn 檔案」才能使用",
+            "需先開啟「處理 zh_cn 檔案」",
             size=11,
             color=theme.RED_400,
             visible=False,
         )
+
+        # 輸出資料夾：指定合併結果輸出位置。
         self.output_dir_field = ft.TextField(
             label="輸出資料夾",
             hint_text="請選擇合併結果輸出位置",
@@ -110,21 +103,22 @@ class MergeView(ft.Column):
             prefix_icon=ft.Icons.FOLDER_COPY,
         )
 
-        # ZIP 清單
+        # ZIP 清單：顯示待合併檔案列表。
         self.zip_list_view = ft.ListView(height=160, spacing=4, auto_scroll=False)
 
-        # 狀態區
-        self.status_chip = ft.Chip(
-            label=ft.Text("尚未開始"), bgcolor=theme.GREY_200
-        )
+        # 狀態區：顯示任務狀態與進度條。
+        self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=theme.GREY_200)
         self.progress_bar = ft.ProgressBar(
-            value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
+            value=0,
+            height=8,
+            bgcolor=theme.GREY_200,
+            color=theme.BLUE,
         )
 
-        # 日誌區
+        # 執行日誌：顯示合併過程中的訊息。
         self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
 
-        # 動作按鈕（共用 primary style；語意色彩用 bgcolor 控制）
+        # 新增 ZIP 按鈕：加入待合併 ZIP。
         self.pick_zip_button = primary_button(
             "新增 ZIP",
             icon=ft.Icons.ADD,
@@ -132,12 +126,150 @@ class MergeView(ft.Column):
             on_click=self.pick_zips,
             bgcolor=theme.BLUE_700,
         )
+
+        # 開始合併按鈕：啟動合併流程。
         self.start_button = primary_button(
             "開始合併 ZIP",
             icon=ft.Icons.PLAY_ARROW,
             tooltip="開始執行 ZIP 合併流程",
             on_click=self.start_merge,
             bgcolor=theme.GREEN_700,
+        )
+
+        # 一般選項卡：單純設定，保留一個控件加一句短說明。
+        general_options_section = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text("一般選項", weight=ft.FontWeight.W_600, size=15),
+                    self.only_lang_checkbox,
+                    ft.Text(
+                        "開啟後，只處理語言檔；其他內容檔案會略過。",
+                        size=12,
+                        color=theme.GREY_600,
+                    ),
+                ],
+                spacing=6,
+            ),
+            padding=12,
+            bgcolor=theme.GREY_50,
+            border_radius=10,
+        )
+
+        # zh_cn 處理卡：一個主開關配一個簡短說明。
+        zh_cn_section = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text("zh_cn 處理", weight=ft.FontWeight.W_600, size=15),
+                    self.process_zh_cn_switch,
+                    ft.Text(
+                        "關閉後，所有 zh_cn 檔案都會略過。",
+                        size=12,
+                        color=theme.GREY_600,
+                    ),
+                ],
+                spacing=6,
+            ),
+            padding=12,
+            bgcolor=theme.GREY_50,
+            border_radius=10,
+        )
+
+        # Patchouli 進階設定：每列採標題 + 控件 + 短說明，避免再次回到 debug 表單感。
+        patchouli_section = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text("Patchouli 進階設定", weight=ft.FontWeight.W_600, size=15),
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Row(
+                                    [
+                                        ft.Text(
+                                            "只處理 lang 時跳過 zh_cn",
+                                            weight=ft.FontWeight.W_500,
+                                            size=14,
+                                            expand=True,
+                                        ),
+                                        self.skip_zh_cn_switch,
+                                    ],
+                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                                ft.Text(
+                                    "僅在「只處理 lang」模式生效。",
+                                    size=12,
+                                    color=theme.GREY_600,
+                                ),
+                            ],
+                            spacing=4,
+                        ),
+                        padding=10,
+                        bgcolor=theme.WHITE,
+                        border_radius=8,
+                    ),
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Row(
+                                    [
+                                        ft.Text(
+                                            "允許 zh_cn 觸發跳過 en_us",
+                                            weight=ft.FontWeight.W_500,
+                                            size=14,
+                                            expand=True,
+                                        ),
+                                        self.patchouli_skip_zh_cn_switch,
+                                    ],
+                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                                ft.Text(
+                                    "zh_cn 達門檻時，跳過對應 en_us。",
+                                    size=12,
+                                    color=theme.GREY_600,
+                                ),
+                                self._skip_disabled_note(),
+                            ],
+                            spacing=4,
+                        ),
+                        padding=10,
+                        bgcolor=theme.WHITE,
+                        border_radius=8,
+                    ),
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Row(
+                                    [
+                                        ft.Text(
+                                            "en_us 跳過門檻",
+                                            weight=ft.FontWeight.W_500,
+                                            size=14,
+                                            expand=True,
+                                        ),
+                                        self.patchouli_threshold_field,
+                                    ],
+                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                                ft.Text(
+                                    "預設 0.5，範圍 0.0 ~ 1.0。",
+                                    size=12,
+                                    color=theme.GREY_600,
+                                ),
+                            ],
+                            spacing=4,
+                        ),
+                        padding=10,
+                        bgcolor=theme.WHITE,
+                        border_radius=8,
+                    ),
+                ],
+                spacing=10,
+            ),
+            padding=12,
+            bgcolor=theme.GREY_50,
+            border_radius=10,
         )
 
         self.controls = [
@@ -150,7 +282,7 @@ class MergeView(ft.Column):
                             [
                                 self.pick_zip_button,
                                 ft.Text(
-                                    "可加入多個 ZIP，會依序合併",
+                                    "可加入多個 ZIP，會依序合併。",
                                     size=12,
                                     color=theme.GREY_600,
                                 ),
@@ -179,48 +311,11 @@ class MergeView(ft.Column):
                             ],
                             spacing=6,
                         ),
-                        self.only_lang_checkbox,
-                        # v3: zh_cn 處理
-                        ft.Row([self.process_zh_cn_switch]),
-                        ft.Container(height=8),
-                        # ── Patchouli 進階設定 ──
-                        ft.Container(
-                            content=ft.Column(
-                                [
-                                    ft.Text("Patchouli 進階設定", size=12, weight=ft.FontWeight.W_600, color=theme.GREY_700),
-                                    ft.Container(height=8),
-                                    ft.Row(
-                                        [self.skip_zh_cn_switch],
-                                        spacing=15,
-                                    ),
-                                    self._skip_disabled_note(),
-                                    ft.Container(height=10),
-                                    ft.Row(
-                                        [self.patchouli_skip_zh_cn_switch],
-                                        spacing=10,
-                                    ),
-                                    ft.Container(height=12),
-                                    ft.Row(
-                                        [
-                                            ft.Text("en_us 跳過門檻：", size=11, color=theme.GREY_600),
-                                            ft.Container(
-                                                content=self.patchouli_threshold_field,
-                                                width=80,
-                                            ),
-                                            ft.Text("範圍：0.0-1.0", size=10, color=theme.GREY_400),
-                                        ],
-                                        alignment=ft.MainAxisAlignment.START,
-                                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                    ),
-                                ],
-                                spacing=6,
-                            ),
-                            padding=10,
-                            bgcolor=theme.GREY_100,
-                            border_radius=8,
-                        ),
+                        general_options_section,
+                        zh_cn_section,
+                        patchouli_section,
                     ],
-                    spacing=4,
+                    spacing=12,
                 ),
             ),
             styled_card(
@@ -249,17 +344,8 @@ class MergeView(ft.Column):
             ),
         ]
 
-    # --------------------------------------------------
-    # Style helpers
-    # --------------------------------------------------
-    # 本頁原本有 _section_header / _styled_card，現在改用 app.ui.components.styled_card。
-    # 目的：統一各頁卡片樣式，並降低重複程式碼。
-
-    # --------------------------------------------------
-    # ZIP handling
-    # --------------------------------------------------
     def pick_zips(self, e):
-        """開啟 ZIP 檔案選擇對話框"""
+        """開啟 ZIP 檔案選擇對話框。"""
         self.file_picker.on_result = self._on_zip_picked
         self.file_picker.pick_files(
             dialog_title="選擇 ZIP 檔案",
@@ -268,7 +354,7 @@ class MergeView(ft.Column):
         )
 
     def _on_zip_picked(self, e: ft.FilePickerResultEvent):
-        """處理 ZIP 檔案選擇結果"""
+        """處理 ZIP 檔案選擇結果。"""
         if not e.files:
             return
         for f in e.files:
@@ -278,7 +364,7 @@ class MergeView(ft.Column):
         self.page.update()
 
     def _refresh_zip_list(self):
-        """重新整理 ZIP 檔案清單顯示"""
+        """重新整理 ZIP 檔案清單顯示。"""
         self.zip_list_view.controls.clear()
         for path in self.selected_zips:
             name = Path(path).name
@@ -297,31 +383,25 @@ class MergeView(ft.Column):
             )
 
     def _remove_zip(self, path: str):
-        """移除指定的 ZIP 檔案"""
+        """移除指定的 ZIP 檔案。"""
         if path in self.selected_zips:
             self.selected_zips.remove(path)
             self._refresh_zip_list()
             self.page.update()
 
-    # --------------------------------------------------
-    # Output dir
-    # --------------------------------------------------
     def pick_output_dir(self):
-        """開啟輸出目錄選擇對話框"""
+        """開啟輸出目錄選擇對話框。"""
         self.file_picker.on_result = self._on_output_picked
         self.file_picker.get_directory_path(dialog_title="選擇輸出資料夾")
 
     def _on_output_picked(self, e: ft.FilePickerResultEvent):
-        """處理輸出目錄選擇結果"""
+        """處理輸出目錄選擇結果。"""
         if e.path:
             self.output_dir_field.value = e.path
             self.page.update()
 
-    # --------------------------------------------------
-    # Task runner
-    # --------------------------------------------------
     def start_merge(self, e):
-        """處理開始合併按鈕點擊事件"""
+        """處理開始合併按鈕事件。"""
         if not self.selected_zips or not (self.output_dir_field.value or "").strip():
             self._show_snack_bar("請先選擇 ZIP 與輸出資料夾")
             return
@@ -346,11 +426,8 @@ class MergeView(ft.Column):
             daemon=True,
         ).start()
 
-    # --------------------------------------------------
-    # UI poller
-    # --------------------------------------------------
     def _start_ui_poller(self):
-        """啟動 UI 輪詢器，定期更新進度條與日誌顯示。"""
+        """啟動 UI 輪詢器，定期同步進度與日誌。"""
         self._ui_stop.clear()
         self._last_log_count = 0
 
@@ -389,16 +466,13 @@ class MergeView(ft.Column):
 
         threading.Thread(target=poll, daemon=True).start()
 
-    # --------------------------------------------------
-    # UI helpers
-    # --------------------------------------------------
     def _set_status(self, text: str, color: str):
-        """更新狀態晶片顯示"""
+        """更新狀態晶片顯示。"""
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """顯示 SnackBar 訊息提示"""
+        """顯示 SnackBar 訊息。"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
