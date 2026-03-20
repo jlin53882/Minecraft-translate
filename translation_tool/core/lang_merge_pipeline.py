@@ -14,7 +14,7 @@ from typing import Any, Dict
 
 import orjson as json
 
-from ..utils.log_unit import log_info, log_exception
+from ..utils.log_unit import log_info, log_warning, log_exception
 from ..utils.text_processor import recursive_translate_dict, apply_replace_rules
 from .lang_codec import dump_lang_text, parse_lang_text, pick_first_not_none
 from .lang_merge_zip_io import (
@@ -157,6 +157,10 @@ def _process_single_mod(
             final_output_rel = relative_tw_path[len(_prefix) + 1 :]
         else:
             final_output_rel = relative_tw_path
+            if _prefix and not _prefix.startswith("."):
+                log_warning(
+                    f"未知 ZIP 包裝前綴 '{_prefix}'，輸出路徑可能包含非預期的前綴目錄。檔案：{relative_tw_path}"
+                )
         final_output_path = os.path.join(output_dir, final_output_rel)
         target_has_tw = os.path.exists(final_output_path)
 

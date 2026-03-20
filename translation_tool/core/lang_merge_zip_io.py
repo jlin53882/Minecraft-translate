@@ -13,33 +13,46 @@ from typing import Any, Dict
 import orjson as json
 
 from ..utils.config_manager import load_config
-from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
+from ..utils.log_unit import log_error, log_warning
+
+
+# ZIP 解壓縮安全上限：50MB（防止 ZIP bomb 攻擊）
+_MAX_UNCOMPRESSED_SIZE = 50 * 1024 * 1024
 
 
 def _read_text_from_zip(zf: zipfile.ZipFile, path: str) -> str:
     """
     從 ZipFile 物件中讀取指定路徑的檔案內容，並解碼為字串。
+    含 ZIP bomb 保護：若解壓縮後預估大小超過 50MB，拋出例外。
     Args:
         zf (zipfile.ZipFile): 已開啟的 ZipFile 物件。
         path (str): Zip 檔案內部的路徑。
     Returns:
         str: 解碼後的文字內容。
     """
-    
-    # 1. 以位元組形式讀取檔案的原始內容
+    # 1. 先檢查解壓縮後大小（防止 ZIP bomb）
+    info = zf.getinfo(path)
+    if info.file_size > _MAX_UNCOMPRESSED_SIZE:
+        raise RuntimeError(
+            f"ZIP 檔案 {path} 解壓縮後大小（{info.file_size / 1024 / 1024:.1f}MB）"
+            f"超過安全上限（50MB），拒絕讀取以防止 ZIP bomb 攻擊。"
+        )
+
+    # 2. 以位元組形式讀取檔案的原始內容
     with zf.open(path) as f:
         raw = f.read()
     # 2. 嘗試使用 UTF-8 進行標準解碼
     # 優先使用 utf-8-sig，它會自動過濾掉 UTF-8 的 BOM (\ufeff)
     try:
-        return raw.decode('utf-8-sig')
+        return raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         # 如果 utf-8 失敗，嘗試繁體/簡體常用的 GBK (常見於舊模組)
         try:
-            return raw.decode('gbk')
+            return raw.decode("gbk")
         except UnicodeDecodeError:
             # 最後才用 ignore 模式保命
-            return raw.decode('utf-8', errors='replace')
+            return raw.decode("utf-8", errors="replace")
+
 
 def _read_json_from_zip(zf: zipfile.ZipFile, path: str) -> Dict[str, Any]:
     """
@@ -57,11 +70,11 @@ def _read_json_from_zip(zf: zipfile.ZipFile, path: str) -> Dict[str, Any]:
     # 1. 取得原始文字
     text = _read_text_from_zip(zf, path)
     if not text:
-            return {}
-    
+        return {}
+
     # 2. 事前處理：徹底移除 BOM 與所有不可見字元 (空格, \n, \r, \t)
     # .strip() 移除首尾空白，.lstrip('\ufeff') 移除 UTF-8 BOM
-    cleaned_text = text.strip().lstrip('\ufeff')
+    cleaned_text = text.strip().lstrip("\ufeff")
 
     # 3. 如果清理後內容為空，直接回傳
     if not cleaned_text:
@@ -75,6 +88,7 @@ def _read_json_from_zip(zf: zipfile.ZipFile, path: str) -> Dict[str, Any]:
         log_warning(f"JSON 解析依然失敗 (路徑: {path}): {e}")
         # 在某些極端情況下，檔案可能是編碼損毀，回傳空字典避免程式崩潰
         return {}
+
 
 def _write_bytes_atomic(path: str, data: bytes) -> None:
     """
@@ -91,10 +105,11 @@ def _write_bytes_atomic(path: str, data: bytes) -> None:
     tmp = path + ".tmp"
     # 3. 將資料寫入臨時檔案
     with open(tmp, "wb") as f:
-        f.write(data)  
+        f.write(data)
     # 4. 原子性替換：將完整的臨時檔案替換為目標檔案。
     #    這個操作在大多數 OS 上是原子的，防止在寫入過程中斷電或崩潰導致檔案損壞。
     os.replace(tmp, path)
+
 
 def _write_text_atomic(path: str, text: str) -> None:
     """
@@ -106,21 +121,18 @@ def _write_text_atomic(path: str, text: str) -> None:
         text (str): 要寫入的文字內容。
     """
     # 1. 確保目標檔案路徑的資料夾存在
-    os.makedirs(os.path.dirname(path), exist_ok=True)    
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     # 2. 定義臨時檔案名稱
-    tmp = path + ".tmp"   
+    tmp = path + ".tmp"
     # 3. 將文字資料寫入臨時檔案，指定 UTF-8 編碼
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(text)
     # 4. 原子性替換
     os.replace(tmp, path)
 
+
 def quarantine_copy_from_zip(
-    zf: zipfile.ZipFile,
-    zip_path: str,
-    output_dir: str,
-    reason: str,
-    extra_text=None
+    zf: zipfile.ZipFile, zip_path: str, output_dir: str, reason: str, extra_text=None
 ):
     """
     將解析失敗的檔案原樣複製到：
@@ -130,7 +142,11 @@ def quarantine_copy_from_zip(
     """
 
     # skipped_json/ + 原始 zip 路徑（例如 assets/xxx）
-    quarantine_root_name= load_config().get("lang_merger", {}).get("quarantine_folder_name", "skipped_json")
+    quarantine_root_name = (
+        load_config()
+        .get("lang_merger", {})
+        .get("quarantine_folder_name", "skipped_json")
+    )
     quarantine_root = os.path.join(output_dir, quarantine_root_name)
     target_path = os.path.join(quarantine_root, zip_path)
 
@@ -146,19 +162,14 @@ def quarantine_copy_from_zip(
         reason_path = target_path + ".reason.txt"
         with open(reason_path, "w", encoding="utf-8") as f:
             f.write(reason)
-        
+
         # ⭐ 新增：如果提供額外文本（如詳細報錯），則寫入 .detail.txt
         if extra_text:
             detail_path = target_path + ".detail.txt"
             with open(detail_path, "w", encoding="utf-8") as f:
                 f.write(extra_text)
 
-        log_warning(
-            f"[隔離] 檔案已複製至 {target_path}（原因: {reason}）"
-        )
+        log_warning(f"[隔離] 檔案已複製至 {target_path}（原因: {reason}）")
 
     except Exception as e:
-        log_error(
-            f"[隔離失敗] 無法複製檔案 {zip_path}: {e}",
-            exc_info=True
-        )
+        log_error(f"[隔離失敗] 無法複製檔案 {zip_path}: {e}", exc_info=True)
