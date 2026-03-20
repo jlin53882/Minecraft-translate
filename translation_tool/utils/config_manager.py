@@ -219,6 +219,10 @@ def load_config(config_path: str | os.PathLike | None = None):
             else:
                 config[key] = user_value if key in user_config else default_value
 
+        # ATK-C-2: 對最終結果做驗證
+        _validate_lm_translator_config(config["lm_translator"])
+        if isinstance(config.get("translator"), dict):
+            _validate_translator_config(config["translator"])
         return config
 
     except (json.JSONDecodeError, IOError) as e:
@@ -313,6 +317,82 @@ def get_models_config(cfg: dict) -> dict[str, dict]:
         safe_models[model_name] = {"enabled": bool(model_cfg.get("enabled", False))}
 
     return safe_models
+
+class ConfigValidationError(ValueError):
+    """Config 欄位驗證失敗時拋出。"""
+    pass
+
+
+def _validate_lm_translator_config(lm: dict) -> None:
+    """驗證 lm_translator 關鍵欄位的型別（ATK-C-2）。
+
+    若驗證失敗，拋出 ConfigValidationError。
+    這樣當使用者編輯 config.json 打錯時，錯誤會在啟動時就爆炸，
+    而不是在翻譯到一半時才出現在奇怪的地方。
+
+    驗證規則：
+    - keys: 必須是 list（不接受 str）
+    - initial_batch_size_*: 必須是 int（不接受 str）
+    - parallel_execution_workers: 必須是 int > 0
+    """
+    # 1. keys 必須是 list
+    keys_val = lm.get("keys")
+    if keys_val is not None and not isinstance(keys_val, list):
+        raise ConfigValidationError(
+            f"lm_translator.keys 必須為 list，"
+            f"目前為 {type(keys_val).__name__}：'{keys_val}'"
+        )
+
+    # 2. initial_batch_size_* 必須是 int
+    for key, value in lm.items():
+        if key.startswith("initial_batch_size_") and value is not None:
+            if not isinstance(value, int):
+                raise ConfigValidationError(
+                    f"lm_translator.{key} 必須為 int，"
+                    f"目前為 {type(value).__name__}：'{value}'"
+                )
+
+    # 3. parallel_execution_workers 必須是 int > 0
+    workers = lm.get("parallel_execution_workers")
+    if workers is not None:
+        if not isinstance(workers, int) or workers <= 0:
+            raise ConfigValidationError(
+                f"lm_translator.parallel_execution_workers 必須為正整數，"
+                f"目前為 {type(workers).__name__}：{workers}"
+            )
+
+    # 4. temperature 必須是 0.0~2.0 的 float
+    temp = lm.get("temperature")
+    if temp is not None:
+        if not isinstance(temp, (int, float)):
+            raise ConfigValidationError(
+                f"lm_translator.temperature 必須為數字，"
+                f"目前為 {type(temp).__name__}：'{temp}'"
+            )
+        if not (0.0 <= float(temp) <= 2.0):
+            raise ConfigValidationError(
+                f"lm_translator.temperature 必須在 0.0~2.0 範圍內，目前為 {temp}"
+            )
+
+    # 5. models 必須是 dict（不接受 list）
+    models_val = lm.get("models")
+    if models_val is not None and not isinstance(models_val, dict):
+        raise ConfigValidationError(
+            f"lm_translator.models 必須為 dict，"
+            f"目前為 {type(models_val).__name__}"
+        )
+
+
+def _validate_translator_config(translator: dict) -> None:
+    """驗證 translator 區塊的型別（ATK-C-2）。"""
+    workers = translator.get("parallel_execution_workers")
+    if workers is not None and (not isinstance(workers, int) or workers <= 0):
+        raise ConfigValidationError(
+            f"translator.parallel_execution_workers 必須為正整數，"
+            f"目前為 {type(workers).__name__}：{workers}"
+        )
+
+
 
 def deep_merge(default: dict, override: dict) -> dict:
     """

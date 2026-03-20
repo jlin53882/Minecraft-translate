@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import load_config, ConfigValidationError
 
 
 # =============================================================================
@@ -70,9 +70,8 @@ class TestConfigSchemaValidation:
         )
 
         # Act & Assert
-        # 預期：未來加入 schema 驗證後，load_config 應拋出 ConfigValidationError
-        # 目前：直接回傳，錯誤在下游才爆
-        with pytest.raises((TypeError, KeyError)):
+        # 預期：load_config 現在會拋出 ConfigValidationError
+        with pytest.raises(ConfigValidationError):
             load_config(str(config_file))
 
     # -------------------------------------------------------------------------
@@ -103,13 +102,9 @@ class TestConfigSchemaValidation:
         )
 
         # Act & Assert
-        # 預期：未來實作 schema 驗證後應拋出例外
-        with pytest.raises((TypeError, ValueError)):
-            cfg = load_config(str(config_file))
-            # 若 load_config 未拋例外，嘗試引發下游錯誤
-            # 這一行會在 batch_size 被當作 int 使用時觸發 TypeError
-            batch = cfg["lm_translator"]["initial_batch_size_lang"]
-            _ = batch * 2  # int * int，正常；str * int → TypeError
+        # 預期：load_config 現在會拋出 ConfigValidationError
+        with pytest.raises(ConfigValidationError):
+            load_config(str(config_file))
 
     # -------------------------------------------------------------------------
     # 負向測試 3：parallel_execution_workers 應為 int，傳入字串 "4" 時應拋出錯誤
@@ -175,21 +170,9 @@ class TestConfigSchemaValidation:
         )
 
         # Act & Assert
-        with pytest.raises((TypeError, KeyError)):
-            cfg = load_config(str(config_file))
-            # 若未拋例外，嘗試在 downstream 取用時觸發錯誤
-            from translation_tool.utils.config_manager import get_models_config
-
-            def _trigger():
-                # get_models_config 內有 isinstance(models, dict) 檢查，
-                # 但若傳入 list，會跳過並回傳空 dict，測試需失敗
-                result = get_models_config(cfg)
-                # 若 result 是空 dict（因為驗證失敗被跳過），視為測試失敗
-                # 只有 models 被正確解析成 dict，才會有內容
-                if not result:
-                    raise TypeError("models 應為非空 dict")
-
-            _trigger()
+        # 預期：load_config 現在會拋出 ConfigValidationError
+        with pytest.raises(ConfigValidationError):
+            load_config(str(config_file))
 
     # -------------------------------------------------------------------------
     # 正向測試（對照組）：合法 int 應該正常通過
