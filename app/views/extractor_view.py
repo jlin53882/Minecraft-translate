@@ -213,60 +213,61 @@ class ExtractorView(ft.Column):
         return update_stats_from_log(self, line)
 
     def _show_extraction_summary(self, mode: str):
-        """顯示提取結果摘要"""
+        """顯示提取結果摘要（UI 風格對齊預覽 modal）。"""
         stats = self._extraction_stats
 
-        # 建立摘要內容
-        summary_content = ft.Column(
+        content = ft.Column(
             [
-                ft.Text("提取結果摘要", size=18, weight=ft.FontWeight.BOLD),
+                ft.Text("提取結果摘要", size=16, weight=ft.FontWeight.BOLD),
                 ft.Divider(),
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=24),
-                        ft.Text(f"成功: {stats['success']} 個 JAR", size=14),
+                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=20),
+                        ft.Text(f"成功處理 JAR：{stats['success']} 個", size=14),
                     ],
                     spacing=8,
                 ),
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=24),
-                        ft.Text(f"跳過: {stats['warnings']} 個 JAR", size=14),
+                        ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=20),
+                        ft.Text(f"跳過檔案：{stats['warnings']} 個", size=14),
                     ],
                     spacing=8,
                 ),
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.ERROR, color=theme.RED, size=24),
-                        ft.Text(f"失敗: {stats['failures']} 個 JAR", size=14),
+                        ft.Icon(ft.Icons.ERROR, color=theme.RED, size=20),
+                        ft.Text(f"失敗項目：{stats['failures']} 個", size=14),
                     ],
                     spacing=8,
                 ),
                 ft.Divider(),
                 ft.Text(
-                    f"總共提取: {stats['total_files']} 個檔案",
-                    size=15,
+                    f"新提取或更新的檔案：{stats['total_files']} 個",
+                    size=14,
+                    color=ft.Colors.BLUE_700,
                     weight=ft.FontWeight.BOLD,
-                    color=theme.BLUE_700,
                 ),
             ],
-            spacing=12,
+            spacing=10,
+            tight=True,
         )
 
-        # 建立對話框
         dialog = ft.AlertDialog(
-            title=ft.Text(f"{mode.upper()} 提取完成"),
-            content=summary_content,
+            modal=True,
+            title=ft.Text(f"提取完成 - {mode.upper()}"),
+            content=ft.Container(content=content, width=520),
             actions=[
-                ft.ElevatedButton(
-                    "確定", on_click=lambda e: self._close_dialog(dialog)
-                ),
+                ft.TextButton("關閉", on_click=lambda e: self._close_dialog_overlay(dialog)),
             ],
         )
 
-        self.page.overlay.append(dialog)
-        dialog.open = True
-        self.page.update()
+        try:
+            self.page.open(dialog)
+        except Exception:
+            self.page.overlay.append(dialog)
+            dialog.open = True
+            self.page.update()
 
     def _append_log_line(self, line: str):
         """新增日誌訊息到日誌檢視區"""
