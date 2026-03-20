@@ -15,19 +15,25 @@
 | `log_colors.py` | 等級 → 顏色對應收斂 |
 | `__init__.py` | 統一出口 |
 
-### 破壞性變更（預期）
-- `TaskSession.snapshot()["logs"]` 現在回傳 `list[LogEntry]` 而非 `list[str]`
-- caller（merge/extractor/translation）尚未更新，由 PR2/PR3 處理
+### 破壞性變更（已被相容層覆蓋）
+- `snapshot()["logs"]` 新回傳 `list[LogEntry]`；但 `snapshot()["log_texts"]` 同時提供 `list[str]`，舊 caller 不會被破壞
+
+### snapshot() 契約（兩 key 並存）
+
+| Key | 型別 | 用途 |
+|-----|------|------|
+| `snapshot()["logs"]` | `list[LogEntry]` | **新 caller**（PR2/PR3 presenter 使用）|
+| `snapshot()["log_texts"]` | `list[str]` | **backward compat**（舊 caller 可正常運行）|
 
 ### 相容層
 - `app/task_session.py` 改為 re-export shim：`from app.logging.task_session import TaskSession`
 - `add_log("text")` 不帶 level/source 時仍可運作（預設 info/ui）
 
 ### 測試
-- `tests/test_logging_core.py` — 8 tests
+- `tests/test_logging_core.py` — 9 tests
 - `tests/test_logging_presenter.py` — 6 tests
 - `tests/test_logging_config.py` — 4 tests
-- **19/19 PASS**
+- **20/20 PASS**
 
 ---
 
