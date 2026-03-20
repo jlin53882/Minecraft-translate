@@ -4,8 +4,6 @@
 """
 
 import threading
-import time
-import pytest
 from app.task_session import TaskSession
 
 
@@ -48,7 +46,7 @@ class TestTaskSession:
         session = TaskSession()
         session.add_log("Test log message")
         assert len(session.logs) == 1
-        assert "Test log message" in session.logs
+        assert session.logs[0].text == "Test log message"
 
     def test_add_log_empty_ignored(self):
         """測試空日誌被忽略"""
@@ -77,9 +75,9 @@ class TestTaskSession:
         session.status = "DONE"
         session.error = True
         session.logs.append("Old log")
-        
+
         session.start()
-        
+
         assert session.progress == 0.0
         assert session.status == "RUNNING"
         assert session.error is False
@@ -91,11 +89,11 @@ class TestTaskSession:
         session.set_progress(0.7)
         session.add_log("Log 1")
         session.add_log("Log 2")
-        
+
         snapshot = session.snapshot()
-        
+
         assert snapshot["progress"] == 0.7
-        assert snapshot["logs"] == ["Log 1", "Log 2"]
+        assert snapshot["log_texts"] == ["Log 1", "Log 2"]
         assert snapshot["status"] == "IDLE"
         assert snapshot["error"] is False
 
@@ -103,10 +101,10 @@ class TestTaskSession:
         """測試快照是不可變的"""
         session = TaskSession()
         session.add_log("Original")
-        
+
         snapshot = session.snapshot()
         snapshot["logs"].append("Modified")  # 不會影響原始
-        
+
         assert len(session.logs) == 1
 
     def test_max_logs_limit(self):
@@ -115,7 +113,7 @@ class TestTaskSession:
         session.add_log("Log 1")
         session.add_log("Log 2")
         session.add_log("Log 3")  # 超過上限
-        
+
         assert len(session.logs) == 2
         assert "Log 1" not in session.logs  # 最早的會被移除
 
@@ -123,7 +121,7 @@ class TestTaskSession:
         """測試執行緒安全"""
         session = TaskSession()
         errors = []
-        
+
         def worker():
             try:
                 for i in range(100):
@@ -131,12 +129,12 @@ class TestTaskSession:
                     session.add_log(f"Log {i}")
             except Exception as e:
                 errors.append(e)
-        
+
         threads = [threading.Thread(target=worker) for _ in range(5)]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        
+
         assert len(errors) == 0
         assert len(session.logs) > 0

@@ -14,7 +14,7 @@ from typing import Any, Dict
 
 import orjson as json
 
-from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
+from ..utils.log_unit import log_info, log_exception
 from ..utils.text_processor import recursive_translate_dict, apply_replace_rules
 from .lang_codec import dump_lang_text, parse_lang_text, pick_first_not_none
 from .lang_merge_zip_io import (
@@ -26,7 +26,12 @@ from .lang_merge_zip_io import (
 )
 from .lang_processing_format import dump_json_bytes
 
-CJK_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002ebef\U00030000-\U0003134f]')
+# ZIP 包裝層前綴集合（避免每次呼叫重建 frozenset）
+KNOWN_ZIP_PACKAGING_PREFIXES = frozenset(["lang_out", "book_out", "patchouli_out"])
+
+CJK_RE = re.compile(
+    r"[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002ebef\U00030000-\U0003134f]"
+)
 
 
 @lru_cache(maxsize=4096)
@@ -75,10 +80,7 @@ def _process_single_mod(
         return not _contains_cjk(v)
 
     def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
-        """
-
-    
-        """
+        """ """
         path = paths.get(lang_key)
         if not path:
             return {}
@@ -147,10 +149,12 @@ def _process_single_mod(
             relative_tw_path = os.path.join(mod_name, "lang", "zh_tw.json")
 
         # 新結構：主輸出剝離 ZIP 來源前綴（如 lang_out/），改寫到 lang_output/assets/.../
-        # 待翻譯路徑 P4-B 修復在下方單獨處理（維持 assets/... 乾淨結構）
+        # 待翻譯路徑剝離與主輸出使用相同的 KNOWN_ZIP_PACKAGING_PREFIXES（前綴已提升至模組常數）
         _prefix = relative_tw_path.split("/")[0]
-        if _prefix and relative_tw_path.startswith(_prefix + "/"):
-            final_output_rel = relative_tw_path[len(_prefix) + 1:]
+        if _prefix in KNOWN_ZIP_PACKAGING_PREFIXES and relative_tw_path.startswith(
+            _prefix + "/"
+        ):
+            final_output_rel = relative_tw_path[len(_prefix) + 1 :]
         else:
             final_output_rel = relative_tw_path
         final_output_path = os.path.join(output_dir, final_output_rel)
@@ -243,10 +247,12 @@ def _process_single_mod(
         # =============================
         # Step 5 — 寫入 pending.json
         # =============================
-        # P4-B 修復：pending 路徑剝離 ZIP 來源前綴，與主輸出保持一致
+        # pending 路徑剝離 ZIP 包裝前綴，與 final_output_rel 使用相同的已知前綴集合
         pending_rel = relative_tw_path.replace("zh_tw.json", "en_us.json")
-        if _prefix and relative_tw_path.startswith(_prefix + "/"):
-            pending_rel = pending_rel[len(_prefix) + 1:]
+        if _prefix in KNOWN_ZIP_PACKAGING_PREFIXES and relative_tw_path.startswith(
+            _prefix + "/"
+        ):
+            pending_rel = pending_rel[len(_prefix) + 1 :]
         pending_path = os.path.join(must_translate_dir, pending_rel)
         os.makedirs(os.path.dirname(pending_path), exist_ok=True)
 
