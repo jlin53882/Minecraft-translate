@@ -5,7 +5,12 @@ from pathlib import Path
 
 import orjson
 
-from translation_tool.core import lang_merger, lang_merge_content, lang_merge_pipeline, lang_merge_zip_io
+from translation_tool.core import (
+    lang_merger,
+    lang_merge_content,
+    lang_merge_pipeline,
+    lang_merge_zip_io,
+)
 
 
 PENDING_DIR = "待翻譯"
@@ -72,7 +77,9 @@ def _fake_apply_replace_rules(value, _rules):
     return value
 
 
-def test_merge_zip_baseline_fixture_outputs_are_stable(tmp_path: Path, monkeypatch) -> None:
+def test_merge_zip_baseline_fixture_outputs_are_stable(
+    tmp_path: Path, monkeypatch
+) -> None:
     zip_path = tmp_path / "fixture.zip"
     output_dir = tmp_path / "out"
     _write_zip_fixture(zip_path)
@@ -81,12 +88,22 @@ def test_merge_zip_baseline_fixture_outputs_are_stable(tmp_path: Path, monkeypat
     monkeypatch.setattr(lang_merger, "load_replace_rules", lambda _path: [])
     monkeypatch.setattr(lang_merge_content, "load_config", _fake_config)
     monkeypatch.setattr(lang_merge_zip_io, "load_config", _fake_config)
-    monkeypatch.setattr(lang_merge_content, "recursive_translate_dict", _fake_recursive_translate_dict)
-    monkeypatch.setattr(lang_merge_pipeline, "recursive_translate_dict", _fake_recursive_translate_dict)
-    monkeypatch.setattr(lang_merge_content, "apply_replace_rules", _fake_apply_replace_rules)
-    monkeypatch.setattr(lang_merge_pipeline, "apply_replace_rules", _fake_apply_replace_rules)
+    monkeypatch.setattr(
+        lang_merge_content, "recursive_translate_dict", _fake_recursive_translate_dict
+    )
+    monkeypatch.setattr(
+        lang_merge_pipeline, "recursive_translate_dict", _fake_recursive_translate_dict
+    )
+    monkeypatch.setattr(
+        lang_merge_content, "apply_replace_rules", _fake_apply_replace_rules
+    )
+    monkeypatch.setattr(
+        lang_merge_pipeline, "apply_replace_rules", _fake_apply_replace_rules
+    )
 
-    updates = list(lang_merger.merge_zhcn_to_zhtw_from_zip(str(zip_path), str(output_dir), False))
+    updates = list(
+        lang_merger.merge_zhcn_to_zhtw_from_zip(str(zip_path), str(output_dir), False)
+    )
 
     assert updates[0]["log"].startswith("分析 ZIP 檔案")
     assert all(not update.get("error", False) for update in updates)
@@ -97,8 +114,24 @@ def test_merge_zip_baseline_fixture_outputs_are_stable(tmp_path: Path, monkeypat
     # 所以 assets/ 標準資源路徑會完整保留（不被當成包裝層剝離）
     # zh_cn.extra.json 是非 patchouli 的 localized 檔案，zh_cn→zh_tw 轉換後寫入 output_dir/assets/
     zh_tw_path = output_dir / "lang_output" / "assets" / "demo" / "lang" / "zh_tw.json"
-    pending_path = output_dir / "lang_output" / PENDING_DIR / "assets" / "demo" / "lang" / "en_us.json"
-    filtered_pending_path = output_dir / "lang_output" / FILTERED_DIR / "assets" / "demo" / "lang" / "en_us.json"
+    pending_path = (
+        output_dir
+        / "lang_output"
+        / PENDING_DIR
+        / "assets"
+        / "demo"
+        / "lang"
+        / "en_us.json"
+    )
+    filtered_pending_path = (
+        output_dir
+        / "lang_output"
+        / FILTERED_DIR
+        / "assets"
+        / "demo"
+        / "lang"
+        / "en_us.json"
+    )
     localized_json_path = output_dir / "assets" / "demo" / "docs" / "zh_tw.extra.json"
 
     assert zh_tw_path.exists()
@@ -116,10 +149,12 @@ def test_merge_zip_baseline_fixture_outputs_are_stable(tmp_path: Path, monkeypat
     assert filtered_pending_data == {"item.demo.pending": "Only English"}
     assert localized_data == {"title": "TW:简体内容", "body": "TW:Only English"}
 
-    all_json_outputs = {p.relative_to(output_dir).as_posix() for p in output_dir.rglob("*.json")}
+    all_json_outputs = {
+        p.relative_to(output_dir).as_posix() for p in output_dir.rglob("*.json")
+    }
     assert all_json_outputs == {
         "assets/demo/docs/zh_tw.extra.json",
-        f"lang_output/assets/demo/lang/zh_tw.json",
+        "lang_output/assets/demo/lang/zh_tw.json",
         f"lang_output/{FILTERED_DIR}/assets/demo/lang/en_us.json",
         f"lang_output/{PENDING_DIR}/assets/demo/lang/en_us.json",
     }
