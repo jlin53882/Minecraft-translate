@@ -47,6 +47,8 @@ class MergeView(ft.Column):
         self._ui_stop = threading.Event()
         self._last_log_count = 0
         self.selected_zips: list[str] = []
+        # UI 日誌顯示上限（超過則移除最舊的，防止 ListView 凍住）
+        self._MAX_UI_LOG_LINES = 2000
 
         self.only_lang_checkbox = ft.Checkbox(
             label="只處理 lang 檔案",
@@ -377,7 +379,15 @@ class MergeView(ft.Column):
                 if len(logs) > self._last_log_count:
                     for line in logs[self._last_log_count:]:
                         self.log_view.controls.append(ft.Text(line, size=13, color=theme.WHITE))
-                    self._last_log_count = len(logs)
+                    # 防止 UI 控制項無限增長導致凍住：超過上限時移除最舊的
+                    max_lines = self._MAX_UI_LOG_LINES
+                    if len(self.log_view.controls) > max_lines:
+                        overflow = len(self.log_view.controls) - max_lines
+                        del self.log_view.controls[:overflow]
+                        # _last_log_count 同步往前移動，避免下次重複渲染已移除的舊日誌
+                        self._last_log_count = max(0, self._last_log_count - overflow)
+                    else:
+                        self._last_log_count = len(logs)
                     self.log_view.scroll_to(offset=-1, duration=100)
 
                 if status in ("DONE", "ERROR"):
