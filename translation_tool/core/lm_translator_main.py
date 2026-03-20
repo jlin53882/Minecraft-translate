@@ -170,6 +170,12 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
     INITIAL_BATCH_SIZE_KUBEJS = lm_cfg.get("initial_batch_size_kubejs", 200)
     INITIAL_BATCH_SIZE_MD = lm_cfg.get("initial_batch_size_md", 100)
 
+    # ATK-A-6: 動態 RPM 等待時間（可從 config 設定，預設用 module-level 常數）
+    rpm_cooldown_sec = lm_cfg.get("rpm_cooldown_sec", RPM_COOLDOWN_SEC)
+    key_rotation_buffer_sec = lm_cfg.get("key_rotation_buffer_sec", 5)
+    overload_retry_sec = lm_cfg.get("overload_retry_sec", OVERLOAD_RETRY_WAIT_SEC)
+    request_interval_sec = lm_cfg.get("request_interval_sec", 4)
+
     remaining_items = list(batch_items)  # 尚未處理的
     # ⭐ 已成功送出的 API 次數
     completed_calls = 0
@@ -349,13 +355,35 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                     log_info(f"[!] 模型 {model_name} 回傳空內容，切換模型...")
                     continue
 
-                # --- 核心改進：檢查輸出是否被截斷 ---
-                if not raw_text.endswith(("}", "]")):
-                    # print(f"[!] 偵測到 JSON 可能被截斷（結尾不完整），將縮小 Batch 重試")
-                    overload_retry_count = 0  # ⭐ 重置過載計數器
-                    log_info(
-                        "[!] 偵測到 JSON 可能被截斷（結尾不完整），將縮小 Batch 重試"
-                    )
+                # --- 核心改進：檢查輸出是否被截斷（ATK-B-1）---
+                def _is_truncated(text: str) -> bool:
+                    """判斷 API 回應是否被截斷。
+
+                    三層檢查：
+                    1. 嘗試直接解析 JSON（最準確）
+                    2. JSON 失敗時，檢查大括號平衡（} 比 { 先出現代表截斷）
+                    3. 簡單檢查結尾是否完整
+                    """
+                    try:
+                        import json
+                        json.loads(text)
+                        return False  # 成功解析，代表沒截斷
+                    except json.JSONDecodeError:
+                        pass
+                    # 大括號平衡檢查
+                    count = 0
+                    for ch in text:
+                        if ch == '{':
+                            count += 1
+                        elif ch == '}':
+                            count -= 1
+                        if count < 0:
+                            return True  # } 比 { 先出現，代表截斷
+                    return count != 0  # 括號不平衡代表截斷
+
+                if _is_truncated(raw_text):
+                    overload_retry_count = 0  # 重置過載計數器
+                    log_info("[!] 偵測到 JSON 被截斷（結尾不完整或格式錯誤），將縮小 Batch 重試")
                     break
 
                 # 解析 JSON
@@ -426,6 +454,15 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                         if lazy_count <= 3:
                             log_debug(f"[⚠️ 疑似未翻] {original_item['path']}")
 
+                    # ATK-B-2: 翻譯品質驗證
+                    # 1. 空翻譯
+                    if not translated_text or translated_text.strip() == "":
+                        log_warning(f"[⚠️ 空翻譯] {original_item['path']}：原文='{original_item[\"text\"]}'")
+                    # 2. 異常長度（翻譯後長度是原文 3 倍以上）
+                    orig_len = len(original_item["text"])
+                    if orig_len > 0 and len(translated_text) / orig_len > 3:
+                        log_warning(f"[⚠️ 異常長度] {original_item['path']}：原文 {orig_len} 字，翻譯 {len(translated_text)} 字")
+
                     new_item["text"] = translated_text
                     merged_result.append(new_item)
 
@@ -462,7 +499,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                     )
                     # 免費層保護
                     log_info("⏳ 等待 12 秒以避免觸發 RPM 限制…")
-                    time.sleep(12)
+                    time.sleep(rpm_cooldown_sec)
                 # else: #本批次 進來不會進來這裡處理
                 #    remaining_calls_estimated = math.ceil(
                 #        remaining_count / max(batch_size, 1)
@@ -480,7 +517,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                 #    )
                 #    # 免費層保護
                 #    log_info("⏳ 等待 12 秒以避免觸發 RPM 限制…")
-                #    time.sleep(12)
+                #    time.sleep(rpm_cooldown_sec)
                 #
 
                 # ⭐ 如果已經沒有剩餘項目，直接結束 while
@@ -675,7 +712,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                                     log_info(
                                         "[✅] API Key 切換成功 → 原地重送同一 batch,等待12秒"
                                     )
-                                    time.sleep(12)  # ⭐ 給新 Key 一點緩衝
+                                    time.sleep(key_rotation_buffer_sec)  # ⭐ 給新 Key 一點緩衝
                                     hit_overload_retry = True  # ⭐ 重送同一 batch
                                     break  # ← 跳出 model loop，回 while
                                 else:
@@ -687,7 +724,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                                 )
                                 return all_results, "PARTIAL"
 
-                        wait_sec = OVERLOAD_RETRY_WAIT_SEC
+                        wait_sec = overload_retry_sec
                         log_warning(
                             f"[⚠️] 模型過載（第 {overload_retry_count} 次），"
                             f"原地等待 {wait_sec}s 後重送【同一 batch / 同一模型】"
@@ -704,7 +741,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                         )
                         try:
                             rotate_api_key()
-                            time.sleep(5)
+                            time.sleep(request_interval_sec)
                             continue  # 換 key 繼續 model pool
                         except Exception as err:
                             log_error(f"API key 切換失敗: {err}")
