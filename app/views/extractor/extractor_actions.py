@@ -8,6 +8,7 @@ from pathlib import Path
 
 import flet as ft
 
+from app.logging import LogPresenter
 from app.services_impl.pipelines.extract_service import (
     run_book_extraction_service,
     run_lang_extraction_service,
@@ -61,8 +62,9 @@ def update_stats_from_log(view, line: str):
 def start_ui_poller(view, mode: str = ''):
     """启动后台轮询线程，定期从 TaskSession 读取状态更新 UI"""
     view._ui_poller_stop.clear()
-    view._last_rendered_log_count = 0
     view._extraction_stats = {'success': 0, 'warnings': 0, 'failures': 0, 'total_files': 0}
+    presenter = LogPresenter(mode="append", max_ui_lines=2000)
+    presenter.reset()
 
     def poll():
         """轮询 TaskSession 状态并更新 UI"""
@@ -85,13 +87,13 @@ def start_ui_poller(view, mode: str = ''):
             view.progress_bar.value = progress
             view.progress_bar.color = ft.Colors.RED if is_error else ft.Colors.BLUE
 
-            if len(logs) > view._last_rendered_log_count:
-                for line in logs[view._last_rendered_log_count:]:
-                    if line.strip():
-                        view._append_log_line(line)
-                        update_stats_from_log(view, line)
-                view._last_rendered_log_count = len(logs)
-                view.log_view.scroll_to(offset=-1, duration=100)
+            # LogPresenter 接管 append + truncate，回傳新增 entries
+            # presenter.sync() 內部已直接 append 到 view.log_view.controls
+            # caller 只做 stats side effect，不再重複渲染
+            new_entries = presenter.sync(view.log_view, logs)
+            for entry in new_entries:
+                if entry.text.strip():
+                    update_stats_from_log(view, entry.text)
 
             if status in ('DONE', 'ERROR'):
                 view.set_controls_disabled(False)

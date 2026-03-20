@@ -56,7 +56,6 @@ class ExtractorView(ft.Column):
         # 這樣提取流程與畫面狀態不會互相纏在一起。
         self.session = TaskSession(max_logs=2000)
         self._ui_poller_stop = threading.Event()
-        self._last_rendered_log_count = 0
 
         # 提取統計
         self._extraction_stats = {
@@ -269,19 +268,23 @@ class ExtractorView(ft.Column):
             dialog.open = True
             self.page.update()
 
-    def _append_log_line(self, line: str):
-        """新增日誌訊息到日誌檢視區"""
+    def _append_log_line(self, entry_or_str):
+        """新增日誌訊息到日誌檢視區。
+
+        支援傳入 LogEntry（PR2 後 poller 傳入）或 str（直接呼叫時）。
+        """
+        text = entry_or_str.text if hasattr(entry_or_str, "text") else entry_or_str
         color = "#e0e0e0"  # default logs are light grey
-        if "[ERROR]" in line:
+        if "[ERROR]" in text:
             color = "#ff6b6b"  # soft red
-        elif "[系統]" in line:
+        elif "[系統]" in text:
             color = "#69db7c"  # soft green
-        elif "Translation" in line or "完成" in line:
+        elif "Translation" in text or "完成" in text:
             color = "#74c0fc"  # soft blue
 
         self.log_view.controls.append(
             ft.Text(
-                line,
+                text,
                 font_family="Consolas,Monospace",
                 size=13,
                 color=color,

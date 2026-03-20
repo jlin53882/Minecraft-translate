@@ -9,13 +9,12 @@ from pathlib import Path
 
 import flet as ft
 
+from app.logging import LogPresenter
+from translation_tool.utils.log_unit import log_info
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
 from app.task_session import TaskSession
 from app.ui import theme
 from app.ui.components import primary_button, styled_card
-from translation_tool.utils.log_unit import log_info
-
-
 class MergeView(ft.Column):
     """ZIP 合併頁面（視覺風格對齊 Translation / Extractor）。"""
 
@@ -45,10 +44,9 @@ class MergeView(ft.Column):
 
         self.session = TaskSession(max_logs=2000)
         self._ui_stop = threading.Event()
-        self._last_log_count = 0
         self.selected_zips: list[str] = []
-        # UI 日誌顯示上限（超過則移除最舊的，防止 ListView 凍住）
-        self._MAX_UI_LOG_LINES = 2000
+        # LogPresenter 接管 append 與 UI controls 數量控制
+        self.log_presenter = LogPresenter(mode="append", max_ui_lines=2000)
 
         self.only_lang_checkbox = ft.Checkbox(
             label="只處理 lang 檔案",
@@ -358,7 +356,7 @@ class MergeView(ft.Column):
     def _start_ui_poller(self):
         """啟動 UI 輪詢器，定期同步進度與日誌。"""
         self._ui_stop.clear()
-        self._last_log_count = 0
+        self.log_presenter.reset()
 
         def poll():
             while not self._ui_stop.is_set():
@@ -376,19 +374,8 @@ class MergeView(ft.Column):
 
                 self.progress_bar.value = progress
 
-                if len(logs) > self._last_log_count:
-                    for line in logs[self._last_log_count:]:
-                        self.log_view.controls.append(ft.Text(line, size=13, color=theme.WHITE))
-                    # 防止 UI 控制項無限增長導致凍住：超過上限時移除最舊的
-                    max_lines = self._MAX_UI_LOG_LINES
-                    if len(self.log_view.controls) > max_lines:
-                        overflow = len(self.log_view.controls) - max_lines
-                        del self.log_view.controls[:overflow]
-                        # _last_log_count 同步往前移動，避免下次重複渲染已移除的舊日誌
-                        self._last_log_count = max(0, self._last_log_count - overflow)
-                    else:
-                        self._last_log_count = len(logs)
-                    self.log_view.scroll_to(offset=-1, duration=100)
+                # LogPresenter 接管 append + truncate + scroll
+                self.log_presenter.sync(self.log_view, logs)
 
                 if status in ("DONE", "ERROR"):
                     self.start_button.disabled = False
