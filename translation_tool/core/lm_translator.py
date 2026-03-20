@@ -5,7 +5,9 @@
 """
 
 # lm_translator.py
+import json as json_std
 import math
+import os
 import time
 from pathlib import Path
 from typing import Dict, Any, Generator, Optional
@@ -37,6 +39,55 @@ from translation_tool.core.lm_translator_scan import (
     scan_translatable_files,
 )
 from translation_tool.utils.config_manager import load_config
+
+# ============================================================
+# B-3: 快取寫入頻率優化（每 N 個批次才寫一次硬碟）
+# ============================================================
+BATCH_WRITE_INTERVAL = 5  # 每 N 個批次寫一次硬碟
+
+# ============================================================
+# B-4: 斷點續傳機制
+# ============================================================
+CHECKPOINT_FILE = "logs/translation_checkpoint.json"
+
+
+def save_checkpoint(batch_index: int, remaining: list, output_dir: str):
+    """寫入 checkpoint（每批次完成後）。
+
+    Args:
+        batch_index: 目前處理的批次編號
+        remaining: 剩餘待翻譯項目清單
+        output_dir: 輸出目錄路徑
+    """
+    os.makedirs(os.path.dirname(CHECKPOINT_FILE), exist_ok=True)
+    with open(CHECKPOINT_FILE, "w", encoding="utf-8") as f:
+        json_std.dump({
+            "batch_index": batch_index,
+            "remaining_count": len(remaining),
+            "remaining": remaining[:3],  # 只保留前三筆範例，不存完整清單
+            "output_dir": output_dir
+        }, f, ensure_ascii=False)
+
+
+def load_checkpoint() -> dict | None:
+    """讀取 checkpoint，若不存在或讀取失敗回傳 None。
+
+    Returns:
+        checkpoint 字典，若無 checkpoint 則回傳 None
+    """
+    if not os.path.exists(CHECKPOINT_FILE):
+        return None
+    try:
+        with open(CHECKPOINT_FILE, "r", encoding="utf-8") as f:
+            return json_std.load(f)
+    except Exception:
+        return None
+
+
+def clear_checkpoint():
+    """清除 checkpoint 檔案（恢复成功后调用）。"""
+    if os.path.exists(CHECKPOINT_FILE):
+        os.remove(CHECKPOINT_FILE)
 
 
 def get_formatted_duration(start_tick: float) -> str:
@@ -463,6 +514,28 @@ def translate_directory_generator(
     batch_index = 1
     start_time = time.perf_counter()
 
+    # ============================================================
+    # B-4: 斷點續傳 - 嘗試從 checkpoint 恢復
+    # ============================================================
+    checkpoint = load_checkpoint()
+    if checkpoint:
+        cp_remaining = checkpoint.get("remaining_count", 0)
+        # 如果 checkpoint 的剩餘數量少於等於當前 total，代表是合理的中斷點
+        if cp_remaining <= total:
+            log_info(f"🔄 偵測到 checkpoint，恢复进度：剩餘 {cp_remaining} 筆")
+            # 注意：這裡只恢復 remaining 數量的追蹤，不實際還原 items_to_translate
+            # 因為翻譯結果是增量寫入，已翻過的項目會因為 cache 命中而快速完成
+            total = cp_remaining
+            remaining = remaining[-cp_remaining:] if cp_remaining <= len(remaining) else remaining
+            batch_index = checkpoint.get("batch_index", 1)
+            clear_checkpoint()  # 清除 checkpoint，表示已成功恢復
+            log_info(f"✅ checkpoint 已清除，將從 Batch {batch_index} 繼續翻譯")
+        else:
+            log_warning(f"⚠️ checkpoint 數量異常（{cp_remaining} > {total}），忽略並重新開始")
+
+    # B-3: 快取寫入頻率優化 - 批次計數器
+    _batch_write_counter = 0
+
     while remaining:
         is_lang = remaining[0]["cache_type"] == "lang"
         batch_size = (
@@ -538,12 +611,7 @@ def translate_directory_generator(
             touched_files.add(file)
 
         # --- 第三步：根據類型「定向存檔」 (優化效能) ---
-        if is_lang:
-            save_translation_cache("lang", write_new_shard=write_new_cache)
-            log_debug("✅ lang 分片快取已寫入硬碟")
-        else:
-            save_translation_cache("patchouli", write_new_shard=write_new_cache)
-            log_debug("✅ patchouli 分片快取已寫入硬碟")
+        # B-3/B-4 的實際寫入會在 remaining 更新後執行（見下方）
 
         # ⭐ checkpoint：立刻寫檔
         for file in touched_files:
@@ -592,6 +660,25 @@ def translate_directory_generator(
         # remaining = remaining[len(translated):]
         remaining = remaining[actual_processed:]
 
+        # ============================================================
+        # B-3: 快取寫入頻率優化 - 每 N 個批次才寫一次硬碟
+        # ============================================================
+        _batch_write_counter += 1
+        # len(remaining) == 0 表示是最後一批，必須寫入
+        if _batch_write_counter % BATCH_WRITE_INTERVAL == 0 or len(remaining) == 0:
+            if is_lang:
+                save_translation_cache("lang", write_new_shard=write_new_cache)
+                log_debug("✅ lang 分片快取已寫入硬碟（每 {} 批次）".format(BATCH_WRITE_INTERVAL))
+            else:
+                save_translation_cache("patchouli", write_new_shard=write_new_cache)
+                log_debug("✅ patchouli 分片快取已寫入硬碟（每 {} 批次）".format(BATCH_WRITE_INTERVAL))
+            _batch_write_counter = 0  # 重置計數器
+
+        # ============================================================
+        # B-4: 斷點續傳 - 每批次完成後寫入 checkpoint
+        # ============================================================
+        save_checkpoint(batch_index, remaining, str(out_root))
+
         # 計算 ETA
         elapsed = time.perf_counter() - start_time
         avg_per_item = elapsed / processed if processed > 0 else 0.0
@@ -639,6 +726,9 @@ def translate_directory_generator(
     # ============================================================
     # 這裡就是迴圈結束後會跑的地方 (不論是正常翻完，還是被 break)
     # ============================================================
+
+    # B-4: 翻譯結束後清除 checkpoint（無論成功或中斷都清除）
+    clear_checkpoint()
 
     duration = get_formatted_duration(start_time)
 
