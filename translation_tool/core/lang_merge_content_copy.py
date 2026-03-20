@@ -251,8 +251,13 @@ def process_content_or_copy_file_impl(
             action_log = "歸檔至待翻譯"
 
         # 新結構：Patchouli 輸出到 patchouli_output_dir（而非 lang_output_dir）
+        # zh_tw/zh_cn → 寫入主要目錄；en_us → 寫入待翻譯子目錄
         _pp_dir = patchouli_output_dir if patchouli_output_dir else output_dir
-        target = os.path.join(_pp_dir, patchouli_root_dir, normalized_root, rel_path)
+        if rel_low.startswith("en_us/"):
+            # en_us 未翻譯內容 → 寫入待翻譯子目錄
+            target = os.path.join(_pp_dir, pending_name, patchouli_root_dir, normalized_root, rel_path)
+        else:
+            target = os.path.join(_pp_dir, patchouli_root_dir, normalized_root, rel_path)
         os.makedirs(os.path.dirname(target), exist_ok=True)
 
         ext = os.path.splitext(input_path)[1].lower()
