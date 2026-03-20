@@ -1,4 +1,5 @@
 from app.views import lm_view
+from app.logging import LogEntry
 
 
 class _Page:
@@ -25,7 +26,7 @@ class _Session:
     def add_log(self, text):
         self.logs.append(text)
     def snapshot(self):
-        return {'status': 'DONE', 'progress': 1.0, 'logs': ['done']}
+        return {'status': 'DONE', 'progress': 1.0, 'logs': [LogEntry(seq=0, level='info', text='done', source='test')]}
 
 
 def test_lm_view_initializes_primary_controls(monkeypatch):

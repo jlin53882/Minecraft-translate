@@ -16,6 +16,7 @@ from app.ui.components import primary_button, styled_card
 
 from app.services_impl.pipelines.lm_service import run_lm_translation_service
 from app.task_session import TaskSession
+from app.logging import LogPresenter, load_ui_logging_config
 from translation_tool.utils.config_manager import load_config
 
 LM_translate_folder_name = (
@@ -80,6 +81,16 @@ class LMView(ft.Column):
             value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
         self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
+
+        # LogPresenter：接管 log_view 的渲染，防止 UI controls 膨脹凍住
+        # tail 模式與既有的 [-250:] 行為一致
+        ui_cfg = load_ui_logging_config(load_config)
+        self.log_presenter = LogPresenter(
+            mode="tail",
+            tail_lines=ui_cfg.get("tail_lines", 250),
+            colorize=False,  # 目前 UI 只用灰底灰字，不做等级著色
+            default_color=str(theme.GREY_100),
+        )
 
         # 按鈕（共用 primary style）
         self.start_button = primary_button(
@@ -252,11 +263,7 @@ class LMView(ft.Column):
                 snap = self.session.snapshot()
                 self.progress_bar.value = snap["progress"]
 
-                self.log_view.controls.clear()
-                for line in snap["logs"][-250:]:
-                    self.log_view.controls.append(
-                        ft.Text(line, size=13, color=theme.GREY_100)
-                    )
+                self.log_presenter.sync(self.log_view, snap["logs"])
 
                 if snap["status"] == "DONE":
                     self._set_status("任務完成", theme.GREEN_200)
