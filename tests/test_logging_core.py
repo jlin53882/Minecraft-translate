@@ -84,6 +84,16 @@ class TestTaskSessionLogEntry:
         assert snap1 is not snap2
         assert snap1["logs"] is not snap2["logs"]
 
+    def test_snapshot_log_texts_backward_compat(self):
+        """snapshot()["log_texts"] 回傳 list[str]，確保舊 caller 相容。"""
+        s = TaskSession()
+        s.add_log("hello")
+        s.add_log("world", "warning")
+        snap = s.snapshot()
+        assert "log_texts" in snap
+        assert snap["log_texts"] == ["hello", "world"]
+        assert all(isinstance(t, str) for t in snap["log_texts"])
+
     def test_progress_clamp(self):
         """set_progress 超界時自動 clamp。"""
         s = TaskSession()

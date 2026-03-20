@@ -102,15 +102,17 @@ class TaskSession:
         回傳 UI 用的不可變快照。
 
         回傳值：
-            logs    — list[LogEntry]
-            progress — float
-            status  — str
-            error   — bool
+            logs      — list[LogEntry]（新格式）
+            log_texts — list[str]（backward compat：舊 caller 仍可正常運行）
+            progress  — float
+            status   — str
+            error    — bool
         """
         with self._lock:
             return {
                 "progress": self.progress,
                 "logs": list(self.logs),
+                "log_texts": [e.text for e in self.logs],
                 "status": self.status,
                 "error": self.error,
             }

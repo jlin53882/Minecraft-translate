@@ -21,16 +21,16 @@ class TestLogPresenterAppendMode:
     """Append 模式：每次只渲染新增的 entries。"""
 
     def test_append_mode_renders_all_first_time(self):
-        """首次 sync 應渲染所有 entries。"""
+        """首次 sync（_last_seq=-1）應渲染所有 entries，含 seq=0。"""
         s = TaskSession(max_logs=100)
         p = LogPresenter(mode="append")
-        p.reset()  # 确保从干净状态开始
+        p.reset()  # reset() 將 _last_seq 設為 -1
         s.add_log("line0")
         s.add_log("line1")
         s.add_log("line2")
         lv = MockListView()
         new = p.sync(lv, s.snapshot()["logs"])
-        # _last_seq=0，3條 entries seqs=[0,1,2]，全部大於0 → 3條
+        # _last_seq=-1，所以 seq=[0,1,2] 全部大於-1 → 3條全部渲染
         assert len(new) == 3
         assert len(lv.controls) == 3
 
