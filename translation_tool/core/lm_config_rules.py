@@ -9,7 +9,7 @@ import threading
 from typing import Any
 
 from ..utils.config_manager import load_config
-from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
+from ..utils.log_unit import log_info, log_error, log_debug
 
 
 
@@ -39,7 +39,7 @@ class KeyIndexTracker:
     def next(self) -> int:
         """
         輪替至下一個索引（執行緒安全，自動環繞）。
-        
+
         當索引超過 key 數量時，會自動環繞回 0。
         """
         with self._lock:
@@ -112,10 +112,18 @@ def get_current_api_key() -> str:
     # 更新 key_count 以便正確環繞
     _key_tracker.set_key_count(len(keys))
 
-    # 加上一個防護：避免 index 越界
-    current_index = _key_tracker.get_current()
-    safe_index = min(current_index, len(keys) - 1)
-    return keys[safe_index]
+    # 執行緒安全：atomic get-and-rotate。
+    # 每個執行緒呼叫都會拿到「目前 key」並輪替到下一把，
+    # 確保高並發時不同執行緒分散到不同 key（ATK-009 修復）。
+    with _key_tracker._lock:
+        current_index = _key_tracker._index
+        safe_index = min(current_index, len(keys) - 1)
+        key = keys[safe_index]
+        # 立即輪替，讓下一個執行緒拿到不同 key
+        _key_tracker._index += 1
+        if len(keys) > 0:
+            _key_tracker._index = _key_tracker._index % len(keys)
+        return key
 
 def rotate_api_key():
     """

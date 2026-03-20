@@ -16,7 +16,7 @@ from translation_tool.core.lm_config_rules import (
 )
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
+from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug
 
 # =========================================================
 # Time Constants - 時間相關常數
@@ -64,7 +64,7 @@ def translate_batch_smart(batch_items, total=None, dry_run: bool = DEFAULT_DRY_R
     # 3. 計算批次大小（TODO: 舊函數會重新計算，目前是被丟棄的死碼）
     # batch_size = _calculate_batch_size(batch_profile)
     
-    # 4. 執行翻譯（dry_run/export_cache_only 參數未傳遞給舊函數，TODO: 需要修復）
+    # 4. 執行翻譯
     results, status = _execute_translation(items, total, dry_run, export_cache_only)
     
     # 5. 處理輸出
@@ -177,22 +177,20 @@ def _calculate_batch_size(profile):
         return lm_cfg.get("iniital_batch_size_patchouli", 100)
 
 
-def _execute_translation(items, batch_size, batch_profile, total, dry_run=False, export_cache_only=False):
+def _execute_translation(items, total, dry_run=False, export_cache_only=False):
     """
     執行翻譯主循環
-    
+
     參數：
         items: 項目列表
-        batch_size: 初始批次大小
-        batch_profile: 批次類型
         total: 總項目數
-        dry_run: 是否為測試模式
+        dry_run: 是否為測試模式（不呼叫 API）
         export_cache_only: 是否只輸出快取
     回傳：
         (結果列表, 狀態字串)
     """
-    # 代理到舊函數（保留完整邏輯）
-    return translate_batch_smart_old(items, total)
+    # 代理到舊函數（正確傳遞所有參數）
+    return translate_batch_smart_old(items, total, dry_run, export_cache_only)
 
 
 def _process_output(results, status):
@@ -220,11 +218,19 @@ def _process_output(results, status):
 # 舊翻譯函數（保留原邏輯）
 # =========================================================
 
-def translate_batch_smart_old(batch_items, total=None):
+def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cache_only=False):
     """
     智慧型分批翻譯函式
     支援動態縮減 Batch Size、模型切換、以及自動處理輸出截斷問題。
     """
+    # dry_run：模擬翻譯流程，不呼叫任何 API
+    if dry_run:
+        return [], "DRY_RUN"
+
+    # export_cache_only：目前與 dry_run 等效（快取實作後再擴充）
+    if export_cache_only:
+        return [], "EXPORT_CACHE_ONLY"
+
     # 起始 batch（你 TPM 很夠） Lang 專用
     INITIAL_BATCH_SIZE_LANG = (
         load_config().get("lm_translator", {}).get("iniital_batch_size_lang", 300)
