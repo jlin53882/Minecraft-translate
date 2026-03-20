@@ -79,6 +79,9 @@ def run_book_extraction_service(mods_dir: str, output_dir: str, session):
                 session.set_error()
                 return
 
+        final = GLOBAL_LOG_LIMITER.flush()
+        if final and "log" in final:
+            session.add_log(final["log"])
         session.finish()
 
     except Exception as e:
