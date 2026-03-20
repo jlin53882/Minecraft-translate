@@ -10,6 +10,7 @@ from pathlib import Path
 import flet as ft
 
 from app.logging import LogPresenter
+from translation_tool.utils.log_unit import log_info
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
 from app.task_session import TaskSession
 from app.ui import theme
