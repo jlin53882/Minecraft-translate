@@ -135,6 +135,8 @@ def process_content_or_copy_file_impl(
     normalize_patchouli_book_root_fn: Callable[[str], str],
     patch_localized_content_json_fn: Callable[..., Dict[str, Any]],
     json_module,
+    patchouli_output_dir: str | None = None,
+    other_output_dir: str | None = None,
 ) -> Dict[str, Any]:
     """處理非標準 lang JSON / patchouli / 純文字內容的 copy-or-patch 流程。"""
     normalized_path = input_path.lower().replace("\\", "/")
@@ -248,7 +250,9 @@ def process_content_or_copy_file_impl(
         else:
             action_log = "歸檔至待翻譯"
 
-        target = os.path.join(output_dir, patchouli_root_dir, normalized_root, rel_path)
+        # 新結構：Patchouli 輸出到 patchouli_output_dir（而非 lang_output_dir）
+        _pp_dir = patchouli_output_dir if patchouli_output_dir else output_dir
+        target = os.path.join(_pp_dir, patchouli_root_dir, normalized_root, rel_path)
         os.makedirs(os.path.dirname(target), exist_ok=True)
 
         ext = os.path.splitext(input_path)[1].lower()
@@ -293,7 +297,9 @@ def process_content_or_copy_file_impl(
         final_output_path = os.path.join(output_dir, tw_path)
         os.makedirs(os.path.dirname(final_output_path), exist_ok=True)
     else:
-        final_output_path = os.path.join(output_dir, tw_path)
+        # 新結構：非 zh_cn 內容（manual、book.json 等）寫入 other_output_dir
+        _out_dir = other_output_dir if other_output_dir else output_dir
+        final_output_path = os.path.join(_out_dir, tw_path)
 
     output_dir_path = os.path.dirname(final_output_path)
     os.makedirs(output_dir_path, exist_ok=True)

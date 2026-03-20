@@ -146,7 +146,14 @@ def _process_single_mod(
         else:
             relative_tw_path = os.path.join(mod_name, "lang", "zh_tw.json")
 
-        final_output_path = os.path.join(output_dir, relative_tw_path)
+        # 新結構：主輸出剝離 ZIP 來源前綴（如 lang_out/），改寫到 lang_output/assets/.../
+        # 待翻譯路徑 P4-B 修復在下方單獨處理（維持 assets/... 乾淨結構）
+        _prefix = relative_tw_path.split("/")[0]
+        if _prefix and relative_tw_path.startswith(_prefix + "/"):
+            final_output_rel = relative_tw_path[len(_prefix) + 1:]
+        else:
+            final_output_rel = relative_tw_path
+        final_output_path = os.path.join(output_dir, final_output_rel)
         target_has_tw = os.path.exists(final_output_path)
 
         # =============================
@@ -236,7 +243,10 @@ def _process_single_mod(
         # =============================
         # Step 5 — 寫入 pending.json
         # =============================
+        # P4-B 修復：pending 路徑剝離 ZIP 來源前綴，與主輸出保持一致
         pending_rel = relative_tw_path.replace("zh_tw.json", "en_us.json")
+        if _prefix and relative_tw_path.startswith(_prefix + "/"):
+            pending_rel = pending_rel[len(_prefix) + 1:]
         pending_path = os.path.join(must_translate_dir, pending_rel)
         os.makedirs(os.path.dirname(pending_path), exist_ok=True)
 
