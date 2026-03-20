@@ -53,6 +53,8 @@ def _process_content_or_copy_file(
     only_process_lang: bool = False,
     all_files_cache=None,
     patchouli_eff_cache: dict | None = None,
+    patchouli_output_dir: str | None = None,
+    other_output_dir: str | None = None,
 ):
     return process_content_or_copy_file_impl(
         zf,
@@ -72,7 +74,8 @@ def _process_content_or_copy_file(
         normalize_patchouli_book_root_fn=normalize_patchouli_book_root,
         patch_localized_content_json_fn=_patch_localized_content_json,
         json_module=json,
-        
+        patchouli_output_dir=patchouli_output_dir,
+        other_output_dir=other_output_dir,
     )
 
 def remove_empty_dirs(root_dir: str):
