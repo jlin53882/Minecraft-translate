@@ -7,6 +7,9 @@ import time
 
 import flet as ft
 
+from app.logging import LogPresenter, load_ui_logging_config
+from translation_tool.utils.config_manager import load_config
+
 def run_ftb(view, *, dry_run: bool):
     """执行 FTB (Feed The Beast) 模组翻译流程"""
     in_dir = (view.ftb_in_dir.value or '').strip()
@@ -119,10 +122,22 @@ def run_md(view, *, dry_run: bool):
     view._start_ui_timer()
 
 def start_ui_timer(view):
-    """启动 UI 定时器，定期从 TaskSession 读取状态更新翻译进度界面"""
+    """启动 UI 定时器，定期从 TaskSession 读取状态更新翻译进度界面
+
+    PR3：改用 LogPresenter(mode="tail")，tail_lines 由 config 控制。
+    """
     if view._ui_timer_running:
         return
     view._ui_timer_running = True
+    # PR3：使用 config 驅動的 tail_lines（預設 250，與舊行為一致）
+    ui_cfg = load_ui_logging_config(load_config)
+    presenter = LogPresenter(
+        mode="tail",
+        tail_lines=ui_cfg.get("tail_lines", 250),
+        colorize=False,  # Translation 目前只有灰白色，保持現有外觀
+        default_color=str(ft.Colors.GREY_100),
+    )
+
     def loop():
         """定时轮询 session 状态并更新 UI"""
         while view._ui_timer_running:
@@ -139,8 +154,8 @@ def start_ui_timer(view):
                 view.progress.value = 0
             logs = snap.get('logs', []) or []
             try:
-                tail = logs[-250:]
-                view.log_view.controls = [ft.Text(line, size=13, color=ft.Colors.GREY_100) for line in tail]
+                # PR3：presenter.sync() 內部處理 tail rebuild + 顏色
+                presenter.sync(view.log_view, logs)
             except Exception as e:
                 log_warning(f'更新日誌視圖失敗: {e}')
             status = (snap.get('status') or '').upper()
