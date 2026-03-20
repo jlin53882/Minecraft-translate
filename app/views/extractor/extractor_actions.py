@@ -15,22 +15,48 @@ from app.services_impl.pipelines.extract_service import (
 from app.views.extractor.extractor_state import PreviewState
 
 def update_stats_from_log(view, line: str):
-    """根据日志行更新提取统计（成功/警告/失败计数）"""
+    """根据日志行更新提取統計。
+
+    規則：
+    - 只在明確的「最終摘要」日誌上覆蓋 success / warnings / total_files
+    - 一般過程日誌不再用模糊關鍵字累加，避免 UI 摘要與真實 log 不一致
+    """
     stats = view._extraction_stats
-    if '成功提取' in line and '個新檔案' in line:
-        try:
-            import re
-            match = re.search(r'成功提取 (\d+) 個新檔案', line)
-            if match:
-                count = int(match.group(1))
-                stats['success'] += 1
-                stats['total_files'] += count
-        except Exception as e:
-            log_warning(f'解析統計數字失敗: {e}')
-    elif '跳過' in line or '已存在' in line:
-        stats['warnings'] += 1
-    elif '[ERROR]' in line or '失敗' in line or '錯誤' in line:
-        stats['failures'] += 1
+    try:
+        import re
+
+        final_match = re.search(
+            r'已檢查\s+(\d+)/(\d+)\s+個\s+JAR\s+檔案。\s*\n\s*-\s*新提取或更新的檔案:\s*(\d+)\s*個\s*\n\s*-\s*因內容相同而跳過的檔案:\s*(\d+)\s*個',
+            line,
+            re.MULTILINE,
+        )
+        if final_match:
+            processed_jars = int(final_match.group(1))
+            total_jars = int(final_match.group(2))
+            extracted_files = int(final_match.group(3))
+            skipped_files = int(final_match.group(4))
+
+            stats['success'] = processed_jars
+            stats['warnings'] = skipped_files
+            stats['failures'] = 0 if processed_jars == total_jars else max(total_jars - processed_jars, 0)
+            stats['total_files'] = extracted_files
+            return
+
+        legacy_success = re.search(r'成功提取\s+(\d+)\s+個新檔案', line)
+        if legacy_success:
+            stats['success'] += 1
+            stats['total_files'] += int(legacy_success.group(1))
+            return
+
+        if '跳過' in line or '已存在' in line:
+            stats['warnings'] += 1
+            return
+
+        error_match = re.search(r'提取\s+(.+?)\s+時產生例外', line)
+        if error_match or '[ERROR]' in line or '[致命錯誤]' in line:
+            stats['failures'] += 1
+    except Exception as e:
+        log_warning(f'解析統計數字失敗: {e}')
 
 def start_ui_poller(view, mode: str = ''):
     """启动后台轮询线程，定期从 TaskSession 读取状态更新 UI"""
