@@ -2,7 +2,7 @@
 
 ### PR3：Logging Translation / Cleanup Convergence
 
-翻譯長任務頁接入 tail mode presenter，清理舊補丁，完成整個 logging system 收斂。
+翻譯長任務頁接入 tail mode presenter，清理舊補丁，完成主要長任務頁（merge / extractor / translation）的 logging system 收斂。
 
 ---
 
