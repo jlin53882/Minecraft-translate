@@ -48,7 +48,7 @@ class TestTaskSession:
         session = TaskSession()
         session.add_log("Test log message")
         assert len(session.logs) == 1
-        assert "Test log message" in session.logs
+        assert session.logs[0].text == "Test log message"
 
     def test_add_log_empty_ignored(self):
         """測試空日誌被忽略"""
@@ -95,7 +95,7 @@ class TestTaskSession:
         snapshot = session.snapshot()
         
         assert snapshot["progress"] == 0.7
-        assert snapshot["logs"] == ["Log 1", "Log 2"]
+        assert snapshot["log_texts"] == ["Log 1", "Log 2"]
         assert snapshot["status"] == "IDLE"
         assert snapshot["error"] is False
 
