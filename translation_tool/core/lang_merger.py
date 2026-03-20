@@ -34,7 +34,17 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
         決定各模組執行哪些步驟，最終回傳產生的 log/progress
     """
     os.makedirs(output_dir, exist_ok=True)
-    must_translate_dir = os.path.join(output_dir, load_config().get("lang_merger", {}).get("pending_folder_name", "待翻譯"))
+    # 新結構：輸出分為三個子目錄
+    # - lang_output/：lang 合併輸出（含待翻譯）
+    # - patchouli_output/：Patchouli 書籍內容輸出
+    # - other_output/：manual、book.json 等其他內容
+    lang_output_dir = os.path.join(output_dir, "lang_output")
+    patchouli_output_dir = os.path.join(output_dir, "patchouli_output")
+    other_output_dir = os.path.join(output_dir, "other_output")
+    os.makedirs(lang_output_dir, exist_ok=True)
+    os.makedirs(patchouli_output_dir, exist_ok=True)
+    os.makedirs(other_output_dir, exist_ok=True)
+    must_translate_dir = os.path.join(lang_output_dir, load_config().get("lang_merger", {}).get("pending_folder_name", "待翻譯"))
     os.makedirs(must_translate_dir, exist_ok=True)
 
     try:
@@ -139,17 +149,19 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
                 
                 # 提交每個 mod 的處理（這裡每個 mod 的 paths 會包含 zh_cn/zh_tw/en_us 任一或多個）
                 for mod_key, paths in mods_to_process.items():
-                    futures.append(executor.submit(_process_single_mod, zf, paths, rules, output_dir, must_translate_dir))
+                    futures.append(executor.submit(_process_single_mod, zf, paths, rules, lang_output_dir, must_translate_dir))
 
                 # 提交其他檔案處理（例如圖片、md、json5、localized files 等）
                 for input_path in other_files:
                     futures.append(
                         executor.submit(
-                            _process_content_or_copy_file, 
-                            zf, input_path, rules, 
-                            output_dir,only_process_lang,
-                            all_files_cache=all_files_cache  # 傳遞快取
-                            ))
+                            _process_content_or_copy_file,
+                            zf, input_path, rules,
+                            output_dir, only_process_lang,
+                            all_files_cache=all_files_cache,  # 傳遞快取
+                            patchouli_output_dir=patchouli_output_dir,
+                            other_output_dir=other_output_dir,
+                        ))
 
                 completed = 0
                 for fut in concurrent.futures.as_completed(futures):
@@ -184,11 +196,11 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
             # <--- 在這裡插入清理代碼 --->
             log_info("正在清理空的待翻譯資料夾...")
             remove_empty_dirs(must_translate_dir)
-            # 🔥 新增：輸出整理後的待翻譯檔案
+            # 🔥 新增：輸出整理後的待翻譯檔案（位於 lang_output/）
             #讀取config 設定資料
-            folder_name=load_config().get("lang_merger", {}).get("pending_organized_folder_name", "待翻譯整理需翻譯")
-            filtered_pending_dir = os.path.join(output_dir, folder_name)
-            log_info("正在產生待翻譯整理需翻譯 檔案...")
+            folder_name=load_config().get("lang_merger", {}).get("pending_organized_folder_name", "待翻譯整理")
+            filtered_pending_dir = os.path.join(lang_output_dir, folder_name)
+            log_info("正在產生待翻譯整理 檔案...")
             #config 讀取資料
             filtered_pending_min_count=load_config().get("lang_merger", {}).get("filtered_pending_min_count", 2)
             export_filtered_pending(must_translate_dir, filtered_pending_dir, min_count=filtered_pending_min_count)
