@@ -12,8 +12,6 @@ PR4 補測：lm_view LogPresenter tail mode 整合測試。
 from __future__ import annotations
 
 import flet as ft
-import pytest
-from unittest.mock import MagicMock
 
 from app.logging.task_session import TaskSession
 from app.logging.log_entry import LogEntry
@@ -45,7 +43,10 @@ class TestLmPresenterTailMode:
         )
         lv = MockListView()
         # 寫入 10 筆 LogEntry
-        entries = [LogEntry(seq=i, level="info", text=f"line_{i}", source="lm") for i in range(10)]
+        entries = [
+            LogEntry(seq=i, level="info", text=f"line_{i}", source="lm")
+            for i in range(10)
+        ]
         presenter.sync(lv, entries)
         assert len(lv.controls) == 5
         assert lv.controls[0].value == "line_5"
@@ -75,16 +76,27 @@ class TestLmPresenterTailMode:
         """tail mode 每次 sync 全量替換 controls。"""
         from app.logging.log_presenter import LogPresenter
 
-        presenter = LogPresenter(mode="tail", tail_lines=3, colorize=False, default_color=str(ft.Colors.GREY_100))
+        presenter = LogPresenter(
+            mode="tail",
+            tail_lines=3,
+            colorize=False,
+            default_color=str(ft.Colors.GREY_100),
+        )
         lv = MockListView()
 
         # 第一輪：3條
-        e1 = [LogEntry(seq=i, level="info", text=f"batch1_{i}", source="lm") for i in range(3)]
+        e1 = [
+            LogEntry(seq=i, level="info", text=f"batch1_{i}", source="lm")
+            for i in range(3)
+        ]
         presenter.sync(lv, e1)
         assert len(lv.controls) == 3
 
         # 第二輪：新增2條（總5條），tail=3 應只留最後3條
-        e2 = e1 + [LogEntry(seq=i, level="info", text=f"batch2_{i}", source="lm") for i in range(3, 5)]
+        e2 = e1 + [
+            LogEntry(seq=i, level="info", text=f"batch2_{i}", source="lm")
+            for i in range(3, 5)
+        ]
         presenter.sync(lv, e2)
         # tail mode 全量替換，應只有 batch2_3, batch2_4, batch2_4... wait
         # 總 entries = 5，tail=3，應取最後3筆: seq=2,3,4 → batch1_2, batch2_3, batch2_4
@@ -131,7 +143,12 @@ class TestLmPresenterWithSessionSnapshot:
         assert all(isinstance(e, LogEntry) for e in logs)
 
         # presenter 吃 list[LogEntry] 正常渲染
-        presenter = LogPresenter(mode="tail", tail_lines=3, colorize=False, default_color=str(ft.Colors.GREY_100))
+        presenter = LogPresenter(
+            mode="tail",
+            tail_lines=3,
+            colorize=False,
+            default_color=str(ft.Colors.GREY_100),
+        )
         lv = MockListView()
         presenter.sync(lv, logs)
         assert len(lv.controls) == 3  # tail=3
