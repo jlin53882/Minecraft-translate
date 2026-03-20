@@ -11,10 +11,11 @@ class TestAPIKeyManagement:
 
     @pytest.fixture(autouse=True)
     def reset_key_tracker(self):
-        """每個測試執行後重置 KeyIndexTracker 狀態，避免跨測試污染。"""
-        yield
+        """每個測試執行前重置 KeyIndexTracker 狀態，確保測試隔離。"""
         from translation_tool.core.lm_config_rules import reset_key_index
-        reset_key_index()
+        reset_key_index()  # 重置在測試之前
+        yield
+        reset_key_index()  # 重置在測試之後（確保不影響後續測試）
 
     @patch('translation_tool.core.lm_config_rules.load_config')
     def test_get_current_api_key_with_keys(self, mock_load_config):

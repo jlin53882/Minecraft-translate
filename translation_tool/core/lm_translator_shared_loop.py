@@ -42,10 +42,10 @@ def _get_default_batch_size(
     if cache_type == "kubejs":
         return int(lm_cfg.get("initial_batch_size_kubejs", 200) or 200)
     if cache_type == "patchouli":
-        return int(lm_cfg.get("iniital_batch_size_patchouli", 100) or 100)
+        return int(lm_cfg.get("initial_batch_size_patchouli", 100) or 100)
     if cache_type == "md":
-        return int(lm_cfg.get("iniital_batch_size_md", 100) or 100)
-    return int(lm_cfg.get("iniital_batch_size_lang", 300) or 300)
+        return int(lm_cfg.get("initial_batch_size_md", 100) or 100)
+    return int(lm_cfg.get("initial_batch_size_lang", 300) or 300)
 
 def translate_items_with_cache_loop(
     items_to_translate: List[Dict[str, Any]],

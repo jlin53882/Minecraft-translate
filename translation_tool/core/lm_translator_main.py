@@ -102,81 +102,6 @@ def _validate_batch_items(items):
     return validated
 
 
-def _detect_batch_profile(items):
-    """
-    偵測翻譯類型（lang/patchouli/md/ftb/kubejs）
-    
-    參數：
-        items: 項目列表
-    回傳：
-        批次類型字串
-    """
-    if not items:
-        return "patch"
-    
-    # 優先用 cache_type
-    cache_types = [
-        str(i.get("cache_type", "")).lower() for i in items if isinstance(i, dict)
-    ]
-    cache_types = [c for c in cache_types if c]
-    
-    if cache_types:
-        uniq = set(cache_types)
-        if len(uniq) == 1:
-            ct = next(iter(uniq))
-            if ct in ("lang", "patchouli", "ftbquests", "kubejs", "md"):
-                return "lang" if ct == "lang" else ("ftb" if ct == "ftbquests" else ct)
-        
-        # 混合批次優先級
-        if "lang" in cache_types:
-            return "lang"
-        if "ftbquests" in cache_types:
-            return "ftb"
-        if "kubejs" in cache_types:
-            return "kubejs"
-        if "md" in cache_types:
-            return "md"
-        if "patchouli" in cache_types:
-            return "patch"
-    
-    # fallback: 用路徑判斷
-    for item in items:
-        file_path = str(item.get("file", "")).replace("\\", "/").lower()
-        if "/lang/" in file_path:
-            return "lang"
-        if "/ftbquests/" in file_path:
-            return "ftb"
-        if "/kubejs/" in file_path:
-            return "kubejs"
-        if "/md/" in file_path:
-            return "md"
-    
-    return "patch"
-
-
-def _calculate_batch_size(profile):
-    """
-    計算批次大小
-    
-    參數：
-        profile: 批次類型
-    回傳：
-        初始批次大小
-    """
-    lm_cfg = load_config().get("lm_translator", {})
-    
-    if profile == "lang":
-        return lm_cfg.get("iniital_batch_size_lang", 200)
-    elif profile == "ftb":
-        return lm_cfg.get("initial_batch_size_ftb", 100)
-    elif profile == "kubejs":
-        return lm_cfg.get("initial_batch_size_kubejs", 200)
-    elif profile == "md":
-        return lm_cfg.get("initial_batch_size_md", 100)
-    else:  # patchouli
-        return lm_cfg.get("iniital_batch_size_patchouli", 100)
-
-
 def _execute_translation(items, total, dry_run=False, export_cache_only=False):
     """
     執行翻譯主循環
@@ -231,22 +156,14 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
     if export_cache_only:
         return [], "EXPORT_CACHE_ONLY"
 
-    # 起始 batch（你 TPM 很夠） Lang 專用
-    INITIAL_BATCH_SIZE_LANG = (
-        load_config().get("lm_translator", {}).get("iniital_batch_size_lang", 300)
-    )
-    # ⭐ 新增（建議 80~150） Patchoui 專用
-    INITIAL_BATCH_SIZE_PATCHOULI = (
-        load_config().get("lm_translator", {}).get("iniital_batch_size_patchouli", 100)
-    )
-
+    # 統一從 lm_cfg 讀取（iniital 拼寫已修正為 initial）
     lm_cfg = load_config().get("lm_translator", {})  # ✅ 只讀一次
 
     # 起始 batch（Lang）
-    INITIAL_BATCH_SIZE_LANG = lm_cfg.get("iniital_batch_size_lang", 200)
+    INITIAL_BATCH_SIZE_LANG = lm_cfg.get("initial_batch_size_lang", 200)
 
     # Patchouli / 其他（預設小）
-    INITIAL_BATCH_SIZE_PATCHOULI = lm_cfg.get("iniital_batch_size_patchouli", 100)
+    INITIAL_BATCH_SIZE_PATCHOULI = lm_cfg.get("initial_batch_size_patchouli", 100)
 
     # ✅ 新增：FTB / KubeJS 專用 batch 上限（你可以在 config 調整）
     INITIAL_BATCH_SIZE_FTB = lm_cfg.get("initial_batch_size_ftb", 100)
@@ -305,22 +222,6 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
             return "md"
         return "patch"
 
-    """
-    def detect_batch_profile(items):
-        files = [_norm_file(i) for i in items if isinstance(i, dict)]
-        if files and all("/lang/" in f for f in files):
-            return "lang"
-        # ✅ 你的規則：包含 /ftbquests/ 判定為 FTB
-        if any("/ftbquests/" in f for f in files):
-            return "ftb"
-        # ✅ 你的規則：包含 /kubejs/ 判定為 KubeJS
-        if any("/kubejs/" in f for f in files):
-            return "kubejs"
-        if any("/md/" in f for f in files):
-            return "md"
-
-        return "patch"
-    """
     batch_profile = detect_batch_profile(batch_items)
     is_lang = batch_profile == "lang"
 

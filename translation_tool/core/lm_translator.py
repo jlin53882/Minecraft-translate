@@ -12,7 +12,7 @@ from typing import Dict, Any, Generator, Optional
 
 import orjson as json
 
-from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
+from translation_tool.utils.log_unit import log_info, log_warning, log_debug
 from translation_tool.utils.cache_manager import (
     add_to_cache,
     save_translation_cache,
@@ -128,10 +128,10 @@ def translate_directory_generator(
     """
     # 批次大小決定 LM 送出多少條文字進行翻譯
     INITIAL_BATCH_SIZE_LANG = (
-        load_config().get("lm_translator", {}).get("iniital_batch_size_lang", 300)
+        load_config().get("lm_translator", {}).get("initial_batch_size_lang", 300)
     )
     INITIAL_BATCH_SIZE_PATCHOULI = (
-        load_config().get("lm_translator", {}).get("iniital_batch_size_patchouli", 100)
+        load_config().get("lm_translator", {}).get("initial_batch_size_patchouli", 100)
     )
 
     # =========================
