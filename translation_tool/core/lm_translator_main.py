@@ -457,7 +457,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                     # ATK-B-2: 翻譯品質驗證
                     # 1. 空翻譯
                     if not translated_text or translated_text.strip() == "":
-                        log_warning(f"[⚠️ 空翻譯] {original_item['path']}：原文='{original_item[\"text\"]}'")
+                        log_warning("[⚠️ 空翻譯] path=%s：原文='%s'", original_item["path"], original_item["text"])
                     # 2. 異常長度（翻譯後長度是原文 3 倍以上）
                     orig_len = len(original_item["text"])
                     if orig_len > 0 and len(translated_text) / orig_len > 3:
