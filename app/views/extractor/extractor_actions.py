@@ -88,10 +88,11 @@ def start_ui_poller(view, mode: str = ''):
             view.progress_bar.color = ft.Colors.RED if is_error else ft.Colors.BLUE
 
             # LogPresenter 接管 append + truncate，回傳新增 entries
+            # presenter.sync() 內部已直接 append 到 view.log_view.controls
+            # caller 只做 stats side effect，不再重複渲染
             new_entries = presenter.sync(view.log_view, logs)
             for entry in new_entries:
                 if entry.text.strip():
-                    view._append_log_line(entry)
                     update_stats_from_log(view, entry.text)
 
             if status in ('DONE', 'ERROR'):
