@@ -394,6 +394,11 @@ class MergeView(ft.Column):
                         "failed_zips": failed_zips,
                         "failed_zip_details": "、".join(failed_zip_details) if failed_zip_details else "無",
                     }
+                    # SnackBar 先提示即將顯示摘要，確保 user 有回饋
+                    snack = ft.SnackBar(ft.Text("處理完成，正在顯示摘要..."), bgcolor=theme.GREEN_700)
+                    self.page.overlay.append(snack)
+                    snack.open = True
+                    self.page.update()
                     self._show_merge_summary(self._merge_stats)
                 elif status == "ERROR":
                     self._set_status("任務發生錯誤", theme.RED_200)
@@ -471,6 +476,10 @@ class MergeView(ft.Column):
     def _open_output_folder(self):
         """開啟輸出資料夾（使用檔案總管）。"""
         import subprocess
+        snack = ft.SnackBar(ft.Text("正在開啟輸出資料夾..."), bgcolor=theme.BLUE_700)
+        self.page.overlay.append(snack)
+        snack.open = True
+        self.page.update()
         subprocess.Popen(["explorer", self.output_dir_field.value], shell=True)
 
     def _close_dialog_overlay(self, dialog):
