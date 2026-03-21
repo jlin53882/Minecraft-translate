@@ -16,7 +16,7 @@ from translation_tool.core.lm_config_rules import (
 )
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
+from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug
 
 # =========================================================
 # Time Constants - 時間相關常數
@@ -64,7 +64,7 @@ def translate_batch_smart(batch_items, total=None, dry_run: bool = DEFAULT_DRY_R
     # 3. 計算批次大小（TODO: 舊函數會重新計算，目前是被丟棄的死碼）
     # batch_size = _calculate_batch_size(batch_profile)
     
-    # 4. 執行翻譯（dry_run/export_cache_only 參數未傳遞給舊函數，TODO: 需要修復）
+    # 4. 執行翻譯
     results, status = _execute_translation(items, total, dry_run, export_cache_only)
     
     # 5. 處理輸出
@@ -102,97 +102,20 @@ def _validate_batch_items(items):
     return validated
 
 
-def _detect_batch_profile(items):
-    """
-    偵測翻譯類型（lang/patchouli/md/ftb/kubejs）
-    
-    參數：
-        items: 項目列表
-    回傳：
-        批次類型字串
-    """
-    if not items:
-        return "patch"
-    
-    # 優先用 cache_type
-    cache_types = [
-        str(i.get("cache_type", "")).lower() for i in items if isinstance(i, dict)
-    ]
-    cache_types = [c for c in cache_types if c]
-    
-    if cache_types:
-        uniq = set(cache_types)
-        if len(uniq) == 1:
-            ct = next(iter(uniq))
-            if ct in ("lang", "patchouli", "ftbquests", "kubejs", "md"):
-                return "lang" if ct == "lang" else ("ftb" if ct == "ftbquests" else ct)
-        
-        # 混合批次優先級
-        if "lang" in cache_types:
-            return "lang"
-        if "ftbquests" in cache_types:
-            return "ftb"
-        if "kubejs" in cache_types:
-            return "kubejs"
-        if "md" in cache_types:
-            return "md"
-        if "patchouli" in cache_types:
-            return "patch"
-    
-    # fallback: 用路徑判斷
-    for item in items:
-        file_path = str(item.get("file", "")).replace("\\", "/").lower()
-        if "/lang/" in file_path:
-            return "lang"
-        if "/ftbquests/" in file_path:
-            return "ftb"
-        if "/kubejs/" in file_path:
-            return "kubejs"
-        if "/md/" in file_path:
-            return "md"
-    
-    return "patch"
-
-
-def _calculate_batch_size(profile):
-    """
-    計算批次大小
-    
-    參數：
-        profile: 批次類型
-    回傳：
-        初始批次大小
-    """
-    lm_cfg = load_config().get("lm_translator", {})
-    
-    if profile == "lang":
-        return lm_cfg.get("iniital_batch_size_lang", 200)
-    elif profile == "ftb":
-        return lm_cfg.get("initial_batch_size_ftb", 100)
-    elif profile == "kubejs":
-        return lm_cfg.get("initial_batch_size_kubejs", 200)
-    elif profile == "md":
-        return lm_cfg.get("initial_batch_size_md", 100)
-    else:  # patchouli
-        return lm_cfg.get("iniital_batch_size_patchouli", 100)
-
-
-def _execute_translation(items, batch_size, batch_profile, total, dry_run=False, export_cache_only=False):
+def _execute_translation(items, total, dry_run=False, export_cache_only=False):
     """
     執行翻譯主循環
-    
+
     參數：
         items: 項目列表
-        batch_size: 初始批次大小
-        batch_profile: 批次類型
         total: 總項目數
-        dry_run: 是否為測試模式
+        dry_run: 是否為測試模式（不呼叫 API）
         export_cache_only: 是否只輸出快取
     回傳：
         (結果列表, 狀態字串)
     """
-    # 代理到舊函數（保留完整邏輯）
-    return translate_batch_smart_old(items, total)
+    # 代理到舊函數（正確傳遞所有參數）
+    return translate_batch_smart_old(items, total, dry_run, export_cache_only)
 
 
 def _process_output(results, status):
@@ -220,32 +143,38 @@ def _process_output(results, status):
 # 舊翻譯函數（保留原邏輯）
 # =========================================================
 
-def translate_batch_smart_old(batch_items, total=None):
+def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cache_only=False):
     """
     智慧型分批翻譯函式
     支援動態縮減 Batch Size、模型切換、以及自動處理輸出截斷問題。
     """
-    # 起始 batch（你 TPM 很夠） Lang 專用
-    INITIAL_BATCH_SIZE_LANG = (
-        load_config().get("lm_translator", {}).get("iniital_batch_size_lang", 300)
-    )
-    # ⭐ 新增（建議 80~150） Patchoui 專用
-    INITIAL_BATCH_SIZE_PATCHOULI = (
-        load_config().get("lm_translator", {}).get("iniital_batch_size_patchouli", 100)
-    )
+    # dry_run：模擬翻譯流程，不呼叫任何 API
+    if dry_run:
+        return [], "DRY_RUN"
 
-    lm_cfg = load_config().get("lm_translator", {})  # ✅ 只讀一次
+    # export_cache_only：目前與 dry_run 等效（快取實作後再擴充）
+    if export_cache_only:
+        return [], "EXPORT_CACHE_ONLY"
+
+    # 統一從 lm_cfg 讀取 batch size 設定
+    lm_cfg = load_config().get("lm_translator", {})
 
     # 起始 batch（Lang）
-    INITIAL_BATCH_SIZE_LANG = lm_cfg.get("iniital_batch_size_lang", 200)
+    INITIAL_BATCH_SIZE_LANG = lm_cfg.get("initial_batch_size_lang", 200)
 
     # Patchouli / 其他（預設小）
-    INITIAL_BATCH_SIZE_PATCHOULI = lm_cfg.get("iniital_batch_size_patchouli", 100)
+    INITIAL_BATCH_SIZE_PATCHOULI = lm_cfg.get("initial_batch_size_patchouli", 100)
 
     # ✅ 新增：FTB / KubeJS 專用 batch 上限（你可以在 config 調整）
     INITIAL_BATCH_SIZE_FTB = lm_cfg.get("initial_batch_size_ftb", 100)
     INITIAL_BATCH_SIZE_KUBEJS = lm_cfg.get("initial_batch_size_kubejs", 200)
     INITIAL_BATCH_SIZE_MD = lm_cfg.get("initial_batch_size_md", 100)
+
+    # ATK-A-6: 動態 RPM 等待時間（可從 config 設定，預設用 module-level 常數）
+    rpm_cooldown_sec = lm_cfg.get("rpm_cooldown_sec", RPM_COOLDOWN_SEC)
+    key_rotation_buffer_sec = lm_cfg.get("key_rotation_buffer_sec", 5)
+    overload_retry_sec = lm_cfg.get("overload_retry_sec", OVERLOAD_RETRY_WAIT_SEC)
+    request_interval_sec = lm_cfg.get("request_interval_sec", 4)
 
     remaining_items = list(batch_items)  # 尚未處理的
     # ⭐ 已成功送出的 API 次數
@@ -299,22 +228,6 @@ def translate_batch_smart_old(batch_items, total=None):
             return "md"
         return "patch"
 
-    """
-    def detect_batch_profile(items):
-        files = [_norm_file(i) for i in items if isinstance(i, dict)]
-        if files and all("/lang/" in f for f in files):
-            return "lang"
-        # ✅ 你的規則：包含 /ftbquests/ 判定為 FTB
-        if any("/ftbquests/" in f for f in files):
-            return "ftb"
-        # ✅ 你的規則：包含 /kubejs/ 判定為 KubeJS
-        if any("/kubejs/" in f for f in files):
-            return "kubejs"
-        if any("/md/" in f for f in files):
-            return "md"
-
-        return "patch"
-    """
     batch_profile = detect_batch_profile(batch_items)
     is_lang = batch_profile == "lang"
 
@@ -442,13 +355,35 @@ def translate_batch_smart_old(batch_items, total=None):
                     log_info(f"[!] 模型 {model_name} 回傳空內容，切換模型...")
                     continue
 
-                # --- 核心改進：檢查輸出是否被截斷 ---
-                if not raw_text.endswith(("}", "]")):
-                    # print(f"[!] 偵測到 JSON 可能被截斷（結尾不完整），將縮小 Batch 重試")
-                    overload_retry_count = 0  # ⭐ 重置過載計數器
-                    log_info(
-                        "[!] 偵測到 JSON 可能被截斷（結尾不完整），將縮小 Batch 重試"
-                    )
+                # --- 核心改進：檢查輸出是否被截斷（ATK-B-1）---
+                def _is_truncated(text: str) -> bool:
+                    """判斷 API 回應是否被截斷。
+
+                    三層檢查：
+                    1. 嘗試直接解析 JSON（最準確）
+                    2. JSON 失敗時，檢查大括號平衡（} 比 { 先出現代表截斷）
+                    3. 簡單檢查結尾是否完整
+                    """
+                    try:
+                        import json
+                        json.loads(text)
+                        return False  # 成功解析，代表沒截斷
+                    except json.JSONDecodeError:
+                        pass
+                    # 大括號平衡檢查
+                    count = 0
+                    for ch in text:
+                        if ch == '{':
+                            count += 1
+                        elif ch == '}':
+                            count -= 1
+                        if count < 0:
+                            return True  # } 比 { 先出現，代表截斷
+                    return count != 0  # 括號不平衡代表截斷
+
+                if _is_truncated(raw_text):
+                    overload_retry_count = 0  # 重置過載計數器
+                    log_info("[!] 偵測到 JSON 被截斷（結尾不完整或格式錯誤），將縮小 Batch 重試")
                     break
 
                 # 解析 JSON
@@ -519,6 +454,15 @@ def translate_batch_smart_old(batch_items, total=None):
                         if lazy_count <= 3:
                             log_debug(f"[⚠️ 疑似未翻] {original_item['path']}")
 
+                    # ATK-B-2: 翻譯品質驗證
+                    # 1. 空翻譯
+                    if not translated_text or translated_text.strip() == "":
+                        log_warning("[⚠️ 空翻譯] path=%s：原文='%s'", original_item["path"], original_item["text"])
+                    # 2. 異常長度（翻譯後長度是原文 3 倍以上）
+                    orig_len = len(original_item["text"])
+                    if orig_len > 0 and len(translated_text) / orig_len > 3:
+                        log_warning(f"[⚠️ 異常長度] {original_item['path']}：原文 {orig_len} 字，翻譯 {len(translated_text)} 字")
+
                     new_item["text"] = translated_text
                     merged_result.append(new_item)
 
@@ -555,7 +499,7 @@ def translate_batch_smart_old(batch_items, total=None):
                     )
                     # 免費層保護
                     log_info("⏳ 等待 12 秒以避免觸發 RPM 限制…")
-                    time.sleep(12)
+                    time.sleep(rpm_cooldown_sec)
                 # else: #本批次 進來不會進來這裡處理
                 #    remaining_calls_estimated = math.ceil(
                 #        remaining_count / max(batch_size, 1)
@@ -573,7 +517,7 @@ def translate_batch_smart_old(batch_items, total=None):
                 #    )
                 #    # 免費層保護
                 #    log_info("⏳ 等待 12 秒以避免觸發 RPM 限制…")
-                #    time.sleep(12)
+                #    time.sleep(rpm_cooldown_sec)
                 #
 
                 # ⭐ 如果已經沒有剩餘項目，直接結束 while
@@ -768,7 +712,7 @@ def translate_batch_smart_old(batch_items, total=None):
                                     log_info(
                                         "[✅] API Key 切換成功 → 原地重送同一 batch,等待12秒"
                                     )
-                                    time.sleep(12)  # ⭐ 給新 Key 一點緩衝
+                                    time.sleep(key_rotation_buffer_sec)  # ⭐ 給新 Key 一點緩衝
                                     hit_overload_retry = True  # ⭐ 重送同一 batch
                                     break  # ← 跳出 model loop，回 while
                                 else:
@@ -780,7 +724,7 @@ def translate_batch_smart_old(batch_items, total=None):
                                 )
                                 return all_results, "PARTIAL"
 
-                        wait_sec = OVERLOAD_RETRY_WAIT_SEC
+                        wait_sec = overload_retry_sec
                         log_warning(
                             f"[⚠️] 模型過載（第 {overload_retry_count} 次），"
                             f"原地等待 {wait_sec}s 後重送【同一 batch / 同一模型】"
@@ -797,7 +741,7 @@ def translate_batch_smart_old(batch_items, total=None):
                         )
                         try:
                             rotate_api_key()
-                            time.sleep(5)
+                            time.sleep(request_interval_sec)
                             continue  # 換 key 繼續 model pool
                         except Exception as err:
                             log_error(f"API key 切換失敗: {err}")

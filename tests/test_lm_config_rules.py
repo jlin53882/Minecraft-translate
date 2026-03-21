@@ -3,12 +3,19 @@
 用途：測試 LM 翻譯配置與規則相關功能。
 """
 import pytest
-import re
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 class TestAPIKeyManagement:
     """測試 API Key 管理函數。"""
+
+    @pytest.fixture(autouse=True)
+    def reset_key_tracker(self):
+        """每個測試執行前重置 KeyIndexTracker 狀態，確保測試隔離。"""
+        from translation_tool.core.lm_config_rules import reset_key_index
+        reset_key_index()  # 重置在測試之前
+        yield
+        reset_key_index()  # 重置在測試之後（確保不影響後續測試）
 
     @patch('translation_tool.core.lm_config_rules.load_config')
     def test_get_current_api_key_with_keys(self, mock_load_config):
@@ -39,7 +46,7 @@ class TestAPIKeyManagement:
     @patch('translation_tool.core.lm_config_rules.load_config')
     def test_rotate_api_key_success(self, mock_load_config):
         """測試 API Key 輪換（成功）。"""
-        from translation_tool.core.lm_config_rules import rotate_api_key, reset_key_index, get_current_key_index, _key_tracker
+        from translation_tool.core.lm_config_rules import rotate_api_key, reset_key_index, get_current_key_index
         
         mock_load_config.return_value = {
             "lm_translator": {

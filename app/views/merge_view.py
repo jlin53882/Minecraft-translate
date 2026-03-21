@@ -45,6 +45,8 @@ class MergeView(ft.Column):
         self.session = TaskSession(max_logs=2000)
         self._ui_stop = threading.Event()
         self.selected_zips: list[str] = []
+        # 合併統計（用於 DONE 時顯示摘要）
+        self._merge_stats = {"success_zips": 0, "failed_zips": 0, "failed_zip_details": ""}
         # LogPresenter 接管 append 與 UI controls 數量控制
         self.log_presenter = LogPresenter(mode="append", max_ui_lines=2000)
 
@@ -347,11 +349,14 @@ class MergeView(ft.Column):
         self.session.add_log("[系統] 開始 ZIP 合併任務")
         self._start_ui_poller()
 
-        threading.Thread(
-            target=run_merge_zip_batch_service,
-            args=(self.selected_zips, self.output_dir_field.value, self.session, self.only_lang_checkbox.value),
-            daemon=True,
-        ).start()
+        def _run_merge():
+            # ⚠️ generator 必須完整迭代，否則程式碼不會執行
+            for _ in run_merge_zip_batch_service(
+                self.selected_zips, self.output_dir_field.value, self.session, self.only_lang_checkbox.value
+            ):
+                pass
+
+        threading.Thread(target=_run_merge, daemon=True).start()
 
     def _start_ui_poller(self):
         """啟動 UI 輪詢器，定期同步進度與日誌。"""
@@ -369,6 +374,31 @@ class MergeView(ft.Column):
                     self._set_status("執行中", theme.BLUE_200)
                 elif status == "DONE":
                     self._set_status("任務完成", theme.GREEN_200)
+                    # 直接從 session 取得 service 統計的 summary
+                    snap_summary = snap.get("summary")
+                    if snap_summary:
+                        self._merge_stats = snap_summary
+                    else:
+                        # fallback：從 logs 解析
+                        success_zips = 0
+                        failed_zips = 0
+                        failed_zip_details = []
+                        for log_line in logs:
+                            text = log_line.text if hasattr(log_line, "text") else str(log_line)
+                            if "[完成]" in text and "[錯誤]" not in text:
+                                success_zips += 1
+                            elif "[錯誤]" in text:
+                                failed_zips += 1
+                                for zp in self.selected_zips:
+                                    if zp in text:
+                                        failed_zip_details.append(Path(zp).name)
+                                        break
+                        self._merge_stats = {
+                            "success_zips": success_zips,
+                            "failed_zips": failed_zips,
+                            "failed_zip_details": failed_zip_details,
+                        }
+                    self._show_merge_summary(self._merge_stats)
                 elif status == "ERROR":
                     self._set_status("任務發生錯誤", theme.RED_200)
 
@@ -400,3 +430,96 @@ class MergeView(ft.Column):
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
+
+    def _show_merge_summary(self, summary: dict):
+        """顯示合併結果摘要（使用 overlay 確保穩定顯示）。"""
+        s_zips = summary.get("success_zips", 0)
+        f_zips = summary.get("failed_zips", 0)
+        failed_list = summary.get("failed_zips_list", [])
+        oc = summary.get("output_counts", {})
+
+        # 輸出統計 block
+        oc_rows = []
+        for label, count in [
+            ("lang_output", oc.get("lang_output", 0)),
+            ("待翻譯", oc.get("待翻譯", 0)),
+            ("patchouli_output", oc.get("patchouli_output", 0)),
+            ("other_output", oc.get("other_output", 0)),
+            ("errordata_output", oc.get("errordata_output", 0)),
+        ]:
+            if count > 0:
+                oc_rows.append(ft.Text(f"├─ {label}：{count} 個", size=13))
+        output_block = (
+            [ft.Divider(), ft.Text("📁 輸出統計", size=14, weight=ft.FontWeight.BOLD)] + oc_rows
+            if oc_rows else []
+        )
+
+        # 失敗 ZIP block
+        failed_block = []
+        if failed_list:
+            for item in failed_list:
+                failed_block.append(ft.Text(
+                    f"├─ {item.get('Name', '?')}", size=13, color=ft.Colors.ORANGE_700
+                ))
+                err = item.get("error", "未知錯誤")
+                # 截斷過長錯誤訊息
+                if len(err) > 80:
+                    err = err[:80] + "..."
+                failed_block.append(ft.Text(f"│  └─ {err}", size=12, color="#cccccc"))
+            failed_block = [ft.Divider(), ft.Text("📋 處理失敗的 ZIP", size=14, weight=ft.FontWeight.BOLD)] + failed_block
+
+        content = ft.Column([
+            ft.Text("合併結果摘要", size=16, weight=ft.FontWeight.BOLD),
+            ft.Divider(),
+            ft.Row(
+                [ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=20),
+                 ft.Text(f"成功處理 ZIP：{s_zips} 個", size=14)],
+                spacing=8,
+            ),
+            ft.Row(
+                [ft.Icon(ft.Icons.ERROR, color=theme.RED, size=20),
+                 ft.Text(f"失敗 ZIP：{f_zips} 個", size=14)],
+                spacing=8,
+            ),
+            *output_block,
+            *failed_block,
+            ft.Divider(),
+            ft.Text("詳見上方日誌", size=12, color="#aaaaaa"),
+        ], spacing=10, tight=True)
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("合併完成"),
+            content=ft.Container(content=content, width=520),
+            actions=[
+                ft.TextButton("開啟輸出資料夾", on_click=lambda e: self._open_output_folder()),
+                ft.TextButton("關閉", on_click=lambda e: self._close_dialog_overlay(dialog)),
+            ],
+        )
+
+        # 使用 overlay 方式，穩定性高於 page.open()
+        self.page.overlay.append(dialog)
+        dialog.open = True
+        self.page.update()
+
+    def _open_output_folder(self):
+        """開啟輸出資料夾（使用檔案總管）。"""
+        import subprocess
+        snack = ft.SnackBar(ft.Text("正在開啟輸出資料夾..."), bgcolor=theme.BLUE_700)
+        self.page.overlay.append(snack)
+        snack.open = True
+        self.page.update()
+        subprocess.Popen(["explorer", self.output_dir_field.value], shell=True)
+
+    def _close_dialog_overlay(self, dialog):
+        """關閉 overlay 對話框。"""
+        try:
+            self.page.close(dialog)
+        except Exception:
+            dialog.open = False
+            if dialog in self.page.overlay:
+                self.page.overlay.remove(dialog)
+            try:
+                self.page.update()
+            except Exception:
+                pass

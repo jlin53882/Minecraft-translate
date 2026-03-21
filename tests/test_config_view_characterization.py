@@ -25,8 +25,8 @@ def test_config_view_loads_models_and_keys_from_config(monkeypatch):
             'lm_translate_folder_name': 'LM翻譯後',
             'patchouli_system_prompt': 'p',
             'lang_system_prompt': 'l',
-            'iniital_batch_size_patchouli': 1,
-            'iniital_batch_size_lang': 2,
+            'initial_batch_size_patchouli': 1,
+            'initial_batch_size_lang': 2,
             'initial_batch_size_ftb': 3,
             'initial_batch_size_kubejs': 4,
             'initial_batch_size_md': 5,
@@ -86,8 +86,8 @@ def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
     view.controls_map['lang_merger.quarantine_folder_name'].value = 'skip'
     view.controls_map['lm_translator.patchouli_system_prompt'].value = 'p'
     view.controls_map['lm_translator.lang_system_prompt'].value = 'l'
-    view.controls_map['lm_translator.iniital_batch_size_patchouli'].value = '1'
-    view.controls_map['lm_translator.iniital_batch_size_lang'].value = '2'
+    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = '1'
+    view.controls_map['lm_translator.initial_batch_size_lang'].value = '2'
     view.controls_map['lm_translator.initial_batch_size_ftb'].value = '3'
     view.controls_map['lm_translator.initial_batch_size_kubejs'].value = '4'
     view.controls_map['lm_translator.initial_batch_size_md'].value = '5'

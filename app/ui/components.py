@@ -1,4 +1,4 @@
-﻿"""共用 UI 元件（可重用的小拼裝）。
+"""共用 UI 元件（可重用的小拼裝）。
 
 原則
 - 只放純 UI / 樣式封裝，不碰任何 services / translation_tool 業務邏輯。
@@ -23,6 +23,7 @@ CARD_RADIUS: int = 10
 CARD_BORDER_COLOR = ft.Colors.BLACK12
 CARD_BG_COLOR = ft.Colors.WHITE
 DIVIDER_COLOR = ft.Colors.GREY_200
+
 
 def section_header(
     title: str,
@@ -52,6 +53,7 @@ def section_header(
         ],
         spacing=8,
     )
+
 
 def styled_card(
     *,
@@ -114,7 +116,9 @@ def styled_card(
             # 切換內容可見性：收合時隱藏，展開時顯示
             content_container.visible = not is_collapsed[0]
             # 切換按鈕圖標
-            collapse_btn.icon = ft.Icons.EXPAND_MORE if is_collapsed[0] else ft.Icons.EXPAND_LESS
+            collapse_btn.icon = (
+                ft.Icons.EXPAND_MORE if is_collapsed[0] else ft.Icons.EXPAND_LESS
+            )
             # 刷新頁面
             if page:
                 page.update()
@@ -146,6 +150,7 @@ def styled_card(
 
     return card
 
+
 def primary_button(
     text: str,
     *,
@@ -175,6 +180,7 @@ def primary_button(
         on_click=on_click,
     )
 
+
 def secondary_button(
     text: str,
     *,
@@ -194,9 +200,11 @@ def secondary_button(
         on_click=on_click,
     )
 
+
 # -------------------------
 # 通知元件
 # -------------------------
+
 
 def create_snackbar(
     message: str,
@@ -220,6 +228,7 @@ def create_snackbar(
 # -------------------------
 # 進度條元件
 # -------------------------
+
 
 class ProgressCard(ft.Container):
     """進度條卡片元件。
@@ -312,6 +321,7 @@ class ProgressCard(ft.Container):
             # 計算 ETA
             if self._start_time and self._current > 0:
                 import time
+
                 elapsed = time.time() - self._start_time
                 rate = self._current / elapsed
                 remaining = self._total - self._current
@@ -330,6 +340,7 @@ class ProgressCard(ft.Container):
     def start(self):
         """開始計時"""
         import time
+
         self._start_time = time.time()
 
     def set_status(self, status: str):
@@ -340,6 +351,7 @@ class ProgressCard(ft.Container):
 # -------------------------
 # 統一狀態元件
 # -------------------------
+
 
 def loading_state(
     message: str = "載入中...",
@@ -355,7 +367,9 @@ def loading_state(
             [
                 spinner,
                 ft.Text(message, size=14, color=theme.TEXT_SECONDARY),
-            ] if spinner else [ft.Text(message, size=14, color=theme.TEXT_SECONDARY)],
+            ]
+            if spinner
+            else [ft.Text(message, size=14, color=theme.TEXT_SECONDARY)],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=10,
         ),
@@ -377,7 +391,8 @@ def empty_state(
                 ft.Icon(icon, size=48, color=theme.TEXT_SECONDARY),
                 ft.Text(title, size=16, weight=ft.FontWeight.BOLD),
                 ft.Text(message, size=14, color=theme.TEXT_SECONDARY),
-            ] + ([action_button] if action_button else []),
+            ]
+            + ([action_button] if action_button else []),
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=10,
         ),
@@ -397,9 +412,12 @@ def error_state(
         content=ft.Column(
             [
                 ft.Icon(icon, size=48, color=ft.Colors.ERROR),
-                ft.Text(title, size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ERROR),
+                ft.Text(
+                    title, size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ERROR
+                ),
                 ft.Text(message, size=14, color=theme.TEXT_SECONDARY),
-            ] + ([retry_button] if retry_button else []),
+            ]
+            + ([retry_button] if retry_button else []),
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=10,
         ),

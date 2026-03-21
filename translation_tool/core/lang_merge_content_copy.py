@@ -137,8 +137,22 @@ def process_content_or_copy_file_impl(
     json_module,
     patchouli_output_dir: str | None = None,
     other_output_dir: str | None = None,
+    errordata_dir: str | None = None,
 ) -> Dict[str, Any]:
     """處理非標準 lang JSON / patchouli / 純文字內容的 copy-or-patch 流程。"""
+    # 自動偵測並剝離 ZIP 統一包裝前綴（任何名稱皆適用）
+    _wp = None
+    _all_names = zf.namelist()
+    if _all_names:
+        _tops = set(n.replace("\\", "/").split("/")[0] for n in _all_names if n.replace("\\", "/").split("/")[0])
+        if len(_tops) == 1:
+            _candidate = list(_tops)[0] + "/"
+            if _all_names[0].startswith(_candidate):
+                _wp = _candidate
+
+    def _strip(p):
+        return p[len(_wp):] if _wp and p.startswith(_wp) else p
+
     normalized_path = input_path.lower().replace("\\", "/")
     log_debug(f"[Patchouli DEBUG] 原始 input_path = {input_path}")
     log_debug(f"[Patchouli DEBUG] normalized_path(初始) = {normalized_path}")
@@ -252,12 +266,14 @@ def process_content_or_copy_file_impl(
 
         # 新結構：Patchouli 輸出到 patchouli_output_dir（而非 lang_output_dir）
         # zh_tw/zh_cn → 寫入主要目錄；en_us → 寫入待翻譯子目錄
+        # 注意：normalized_root 已包含 patchouli_root_dir（如 patchouli_books/book_id），
+        # 不需再重複拼接 patchouli_root_dir，否則會產生 patchouli_books/patchouli_books/ 雙層目錄。
         _pp_dir = patchouli_output_dir if patchouli_output_dir else output_dir
         if rel_low.startswith("en_us/"):
             # en_us 未翻譯內容 → 寫入待翻譯子目錄
-            target = os.path.join(_pp_dir, pending_name, patchouli_root_dir, normalized_root, rel_path)
+            target = os.path.join(_pp_dir, pending_name, normalized_root, rel_path)
         else:
-            target = os.path.join(_pp_dir, patchouli_root_dir, normalized_root, rel_path)
+            target = os.path.join(_pp_dir, normalized_root, rel_path)
         os.makedirs(os.path.dirname(target), exist_ok=True)
 
         ext = os.path.splitext(input_path)[1].lower()
@@ -304,19 +320,43 @@ def process_content_or_copy_file_impl(
     else:
         # 新結構：非 zh_cn 內容（manual、book.json 等）寫入 other_output_dir
         _out_dir = other_output_dir if other_output_dir else output_dir
-        final_output_path = os.path.join(_out_dir, tw_path)
-
-    output_dir_path = os.path.dirname(final_output_path)
-    os.makedirs(output_dir_path, exist_ok=True)
+        final_output_path = os.path.join(_out_dir, _strip(tw_path))
+        os.makedirs(os.path.dirname(final_output_path), exist_ok=True)
 
     try:
         if not is_localized_cn_file:
             if ext == ".json":
+                text = read_text_from_zip_fn(zf, input_path)
+
+                # ── Step 1: 先直接解析 ──────────────────────────────────────
+                source_data = None
+                parse_error: Exception | None = None
                 try:
-                    text = read_text_from_zip_fn(zf, input_path)
                     source_data = json_module.loads(text)
                 except Exception as e:
-                    error_detail = f"Exception: {type(e).__name__}\nMessage: {str(e)}\nPath: {input_path}"
+                    parse_error = e
+
+                # ── Step 2: 若失敗，檢查是否為未轉義控制字元問題 ─────────────
+                if source_data is None and parse_error is not None:
+                    err_msg = str(parse_error).lower()
+                    if "invalid control character" in err_msg or "unexpected control character" in err_msg:
+                        log_debug(f"{log_prefix} 偵測到未轉義控制字元，嘗試清理後重試解析…")
+                        # 清理未轉義的控制字元（Tab \t, 換行 \n, CR \r 等），
+                        # 只清理字串內容中的，保留 JSON 語法結構字元（: , { } [ ] "）
+                        cleaned = re.sub(r'(?<=["\'])[\t\n\r](?=["\'])', lambda m: "\\n" if m.group() == "\n" else ("\\r" if m.group() == "\r" else "\\t"), text)
+                        # 通用寫法：把所有在 JSON 字串內部的控制字元都做轉義
+                        # 符合 JSON 規範：value 中的控制字元必須是 \t \n \r
+                        cleaned = re.sub(r'(?<!\\)((?:\\\\)*)[\t\x01-\x1f](?=(?:[^\\"]*\\.)*[^\\"]*$)', r'\1\\n', text, flags=re.DOTALL)
+                        try:
+                            source_data = json_module.loads(cleaned)
+                            log_debug(f"{log_prefix} 控制字元清理後解析成功")
+                        except Exception as e2:
+                            parse_error = e2
+                            source_data = None
+
+                # ── Step 3: 真的失敗才隔離 ───────────────────────────────────
+                if source_data is None:
+                    error_detail = f"Exception: {type(parse_error).__name__}\nMessage: {str(parse_error)}\nPath: {input_path}"
                     lang = "unknown"
                     for possible_lang in ["zh_cn", "zh_tw", "en_us"]:
                         if possible_lang in normalized_path:
@@ -328,8 +368,9 @@ def process_content_or_copy_file_impl(
                         output_dir=output_dir,
                         reason=f"JSON解析失敗 (語言: {lang})",
                         extra_text=error_detail,
+                        errordata_dir=errordata_dir,
                     )
-                    log_warning(f"{log_prefix} JSON 無法解析，已跳過並隔離: {e}")
+                    log_warning(f"{log_prefix} JSON 無法解析，已跳過並隔離: {parse_error}")
                     return {"success": True}
 
                 if "/lang/" in normalized_path and file_name.lower() == "zh_tw.json":
