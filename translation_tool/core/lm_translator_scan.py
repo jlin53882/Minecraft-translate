@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import concurrent.futures
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator
 
 import orjson as json
 
@@ -56,8 +56,12 @@ def extract_items_parallel(
     export_lang: bool,
     work_thread: int,
     logger=None,
-) -> tuple[dict[str, dict], list[dict[str, Any]]]:
-    """使用執行緒池並行讀取多個 JSON 檔案並抽取可翻譯項目，回傳檔案快取與所有抽取結果（已標記 cache_type）。"""
+) -> Generator[tuple[dict[str, dict], list[dict[str, Any]]], None, None]:
+    """使用執行緒池並行讀取多個 JSON 檔案並抽取可翻譯項目。
+
+    身為 generator，每完成一個檔案就 yield 一次 (file_cache, all_items)，
+    讓子呼叫端可以追蹤進度並回傳給 UI。
+    """
 
     file_cache: dict[str, dict] = {}
     all_items: list[dict[str, Any]] = []
@@ -96,5 +100,5 @@ def extract_items_parallel(
                 continue
             file_cache[result["file_path"]] = result["data"]
             all_items.extend(result["items"])
-
-    return file_cache, all_items
+            # 每完成一個檔案就 yield，讓 caller 可以更新 UI 進度
+            yield file_cache, all_items
