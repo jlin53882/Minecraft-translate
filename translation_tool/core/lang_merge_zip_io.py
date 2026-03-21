@@ -150,10 +150,13 @@ def quarantine_copy_from_zip(
     *,
     errordata_dir: str | None = None,
 ):
-    """將解析失敗的檔案原樣複製至隔離目錄，並寫入原因說明。
+    """
+    將解析失敗的檔案原樣複製至隔離目錄，並寫入原因說明。
 
     - errordata_dir 有值時：寫入 errordata_dir/<zip_path>（隔離的錯誤資料目錄）。
-    - 否則：寫入 output_dir/quarantine_folder_name/<zip_path>。
+      用於硬性解析失敗（如 JSON 完全無法解讀）。
+    - 否則：寫入 output_dir/quarantine_folder_name/<zip_path>
+      （部分解析失敗、格式問題等，仍屬正常流程的一部分）。
     同時寫入 .reason.txt（原因）與 .detail.txt（可選的詳細錯誤資訊）。
     目錄結構與「待翻譯」一致，方便人工比對與修復。
     """
