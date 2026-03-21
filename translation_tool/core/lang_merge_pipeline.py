@@ -149,15 +149,21 @@ def _process_single_mod(
         else:
             relative_tw_path = os.path.join(mod_name, "lang", "zh_tw.json")
 
-        # 剝離 ZIP 包裝前綴層，避免多個 ZIP 時產生多餘的 {prefix}/ 子目錄。
-        # - 已知前綴（lang_out / book_out / patchouli_out）：直接剝離第一層前綴。
-        # - 剝離後若剩餘路徑以 assets/、book/、patchouli_books/ 開頭（表示有第二層
-        #   中間目錄），則再剝離一層，讓 content 目錄直接置於 {prefix}/ 下。
-        #   例：lang_output/mods_XXX/assets/... → lang_output/assets/...
-        #       patchouli_out/patchouli_books/assets/... → patchouli_out/assets/...
-        # - 未知前綴：只有當剩餘路徑以已知內容目錄開頭時才剝離；其餘不動。
-        # 路徑已在 lang_merger.py 中由統一前綴偵測剝離乾淨，直接使用
-        final_output_rel = relative_tw_path
+        # 自動偵測並剝離 ZIP 統一包裝前綴（任何名稱皆適用）
+        # 讀取 ZIP 時用原始路徑，只在輸出路徑建構時剝離
+        _all_names = zf.namelist()
+        _wp = None
+        if _all_names:
+            _tops = set(n.replace("\\", "/").split("/")[0] for n in _all_names if n.replace("\\", "/").split("/")[0])
+            if len(_tops) == 1:
+                _candidate = list(_tops)[0] + "/"
+                if _all_names[0].startswith(_candidate):
+                    _wp = _candidate
+
+        def _strip(p):
+            return p[len(_wp):] if _wp and p.startswith(_wp) else p
+
+        final_output_rel = _strip(relative_tw_path)
         final_output_path = os.path.join(output_dir, final_output_rel)
         target_has_tw = os.path.exists(final_output_path)
 

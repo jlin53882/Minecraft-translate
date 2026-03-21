@@ -134,10 +134,8 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
                 if normalized.endswith("/") or not normalized:
                     continue
 
-                # 套用統一前綴剝離（若已偵測到包裝前綴）
-                if strip_wrapper is not None:
-                    normalized = strip_wrapper(normalized)
-
+                # ⚠️ 這裡保持原始路徑，剝離只在 _process_single_mod 輸出時進行
+                # （避免用剝離後路徑讀 ZIP 讀不到的問題）
                 norm_low = normalized.lower()
 
                 if "/lang/" in norm_low and (norm_low.endswith(".json") or norm_low.endswith(".lang")):

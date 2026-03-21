@@ -140,6 +140,19 @@ def process_content_or_copy_file_impl(
     errordata_dir: str | None = None,
 ) -> Dict[str, Any]:
     """處理非標準 lang JSON / patchouli / 純文字內容的 copy-or-patch 流程。"""
+    # 自動偵測並剝離 ZIP 統一包裝前綴（任何名稱皆適用）
+    _wp = None
+    _all_names = zf.namelist()
+    if _all_names:
+        _tops = set(n.replace("\\", "/").split("/")[0] for n in _all_names if n.replace("\\", "/").split("/")[0])
+        if len(_tops) == 1:
+            _candidate = list(_tops)[0] + "/"
+            if _all_names[0].startswith(_candidate):
+                _wp = _candidate
+
+    def _strip(p):
+        return p[len(_wp):] if _wp and p.startswith(_wp) else p
+
     normalized_path = input_path.lower().replace("\\", "/")
     log_debug(f"[Patchouli DEBUG] 原始 input_path = {input_path}")
     log_debug(f"[Patchouli DEBUG] normalized_path(初始) = {normalized_path}")
@@ -307,10 +320,8 @@ def process_content_or_copy_file_impl(
     else:
         # 新結構：非 zh_cn 內容（manual、book.json 等）寫入 other_output_dir
         _out_dir = other_output_dir if other_output_dir else output_dir
-        final_output_path = os.path.join(_out_dir, tw_path)
-
-    output_dir_path = os.path.dirname(final_output_path)
-    os.makedirs(output_dir_path, exist_ok=True)
+        final_output_path = os.path.join(_out_dir, _strip(tw_path))
+        os.makedirs(os.path.dirname(final_output_path), exist_ok=True)
 
     try:
         if not is_localized_cn_file:
