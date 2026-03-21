@@ -3,15 +3,12 @@
 用途：測試 jar_processor.py 的主要導出函數與常數。
 """
 
-import pytest
 import re
 import os
 import zipfile
-import tempfile
 from pathlib import Path
 
 from translation_tool.core.jar_processor import (
-    find_jar_files,
     extract_lang_files_generator,
     extract_book_files_generator,
     preview_extraction_generator,

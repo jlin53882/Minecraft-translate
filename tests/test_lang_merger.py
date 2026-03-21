@@ -6,10 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
-import os
 import zipfile
-import tempfile
-from unittest.mock import patch, MagicMock
 
 import pytest
 

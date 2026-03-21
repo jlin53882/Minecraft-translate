@@ -7,8 +7,7 @@ LM View 完整模組驗證。
 """
 
 import flet as ft
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from app.views import lm_view
 from app.logging import LogEntry
 

@@ -3,9 +3,6 @@
 用途：測試 generate_icon_preview 函數的圖示預覽生成功能。
 """
 
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 from translation_tool.core.icon_preview_cache import generate_icon_preview
 

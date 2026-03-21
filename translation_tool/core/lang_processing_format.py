@@ -11,7 +11,7 @@ import opencc  # 導入 OpenCC 庫
 import orjson as json
 import threading
 
-from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
+from ..utils.log_unit import log_debug
 from ..utils.text_processor import apply_replace_rules
 
 

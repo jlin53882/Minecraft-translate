@@ -9,7 +9,7 @@
 import flet as ft
 import threading
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
+from translation_tool.utils.log_unit import log_info
 from app.services_impl.pipelines.lookup_service import (
     run_batch_lookup_service,
     run_manual_lookup_service,

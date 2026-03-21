@@ -3,7 +3,6 @@
 用途：測試 TSV 檔案簡繁翻譯變體比較功能。
 """
 import pandas as pd
-import pytest
 from unittest.mock import patch, MagicMock
 
 from translation_tool.checkers import variant_comparator_tsv

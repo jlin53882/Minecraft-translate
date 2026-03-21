@@ -20,9 +20,8 @@ ATK-001 測試：translate_batch_smart 的 dry_run / export_cache_only 參數失
 
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-import pytest
 
 
 class TestAtk001DryRunParameter:

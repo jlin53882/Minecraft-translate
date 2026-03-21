@@ -6,8 +6,7 @@
 
 import flet as ft
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
-from app.ui.components import primary_button  # guard: shared primary button seam remains explicit
+from translation_tool.utils.log_unit import log_info
 # guard: config_view still conceptually owns the primary_button(...) save action
 from app.services_impl.config_service import load_config_json, save_config_json
 from app.views.config.config_actions import load_config_into_view, save_config_from_view

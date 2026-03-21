@@ -5,8 +5,7 @@
 
 import logging
 import time
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 from app.services_impl.logging_service import (
     LogLimiter,

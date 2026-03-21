@@ -3,11 +3,7 @@
 用途：測試 Markdown 翻譯組裝相關功能。
 """
 import pytest
-from unittest.mock import patch, Mock, MagicMock, mock_open
-from pathlib import Path
-import json
-import tempfile
-import shutil
+from unittest.mock import patch, Mock
 
 
 class TestStep1Extract:
@@ -114,7 +110,6 @@ class TestRunMdPipeline:
     def test_full_pipeline(self, tmp_path):
         """測試完整流程。"""
         from translation_tool.core.md_translation_assembly import run_md_pipeline
-        from translation_tool.core.md_translation_assembly import step1_extract, step2_translate, step3_inject
         
         # 建立臨時輸入目錄
         input_dir = tmp_path / "input"
@@ -199,7 +194,6 @@ class TestModuleExports:
     def test_exports(self):
         """測試導出的函數和類別。"""
         from translation_tool.core.md_translation_assembly import (
-            _ProgressProxy,
             step1_extract,
             step2_translate,
             step3_inject,

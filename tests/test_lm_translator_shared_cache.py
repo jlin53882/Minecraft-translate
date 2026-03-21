@@ -2,8 +2,7 @@
 
 用途：測試 LM 翻譯共享快取相關功能。
 """
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 class TestCacheRule:

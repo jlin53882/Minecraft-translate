@@ -4,11 +4,7 @@
 """
 
 import os
-import tempfile
-import shutil
-from pathlib import Path
 
-import pytest
 
 from translation_tool.core.jar_processor_discovery import find_jar_files
 
