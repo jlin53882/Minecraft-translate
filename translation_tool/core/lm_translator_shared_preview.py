@@ -33,7 +33,7 @@ def write_dry_run_preview(
     filename: str = "_dry_run_preview.json",
     meta: Optional[Dict[str, Any]] = None,
 ) -> Path:
-    """寫出 dry-run preview 檔。"""
+    """將待翻譯項目寫入 JSON 預覽檔，供 Dry-Run 模式查閱（不實際呼叫 API）。"""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     p = out_dir / filename
@@ -53,7 +53,7 @@ def write_cache_hit_preview(
     filename: str = "_dry_run_cache_hit_preview.json",
     meta: Optional[Dict[str, Any]] = None,
 ) -> Path:
-    """寫出 cache-hit preview 檔。"""
+    """將快取直接命中的項目寫入 JSON 預覽檔，記錄哪些內容無需翻譯即可還原。"""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     p = out_dir / filename

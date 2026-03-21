@@ -30,30 +30,8 @@ def step1_extract_impl(
     log_warning_fn: Callable[..., None],
 ) -> Dict[str, Any]:
     """
-    Step 1：從 Markdown 檔案中抽取可翻譯的區塊。
-
-    將原始 Markdown 檔案轉換為待翻譯的 JSON 格式。
-    支援去重複（相同內容只保留一份）。
-
-    參數：
-        input_dir: Markdown 輸入資料夾
-        pending_dir: 待翻譯 JSON 輸出資料夾
-        lang_mode: 語言模式（non_cjk_only / all）
-        session: 進度會話
-        progress_base: 進度起始值
-        progress_span: 進度範圍
-        iter_md_files_fn: 迭代 Markdown 檔案的函式
-        safe_relpath_fn: 計算相對路徑的函式
-        extract_blocks_fn: 抽取區塊的函式
-        detect_lang_segment_fn: 偵測語言區段的函式
-        map_rel_lang_path_fn: 映射語言路徑的函式
-        contains_cjk_fn: 判斷是否包含中日韓文字的函式
-        build_pending_json_fn: 建構待翻譯 JSON 的函式
-        progress_fn: 進度回呼函式
-        log_warning_fn: 警告日誌回呼函式
-
-    回傳：
-        處理結果字典，包含找到的檔案數、區塊數等統計
+    第一步實作：掃描 Markdown 資料夾，依 lang_mode 過濾並抽取可翻譯區塊，將結果寫入待翻譯 JSON。
+    若為 non_cjk_only 模式，會比對同義的 zh_tw 檔案以過濾已譯內容；支援去重複（相同 hash 只留一份）。
     """
     in_root = Path(input_dir).resolve()
     pending_root = Path(pending_dir).resolve()

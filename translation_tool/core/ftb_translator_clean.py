@@ -88,7 +88,20 @@ def clean_ftbquests_from_raw_impl(
     orjson_dump_file_fn: Callable[[object, object], None],
     log_info_fn: Callable[..., None],
 ) -> dict:
-    """從 raw 資料產出 pending/en_us 與整理後 zh_tw。"""
+    """清理 FTB Quests RAW JSON（移除翻譯過的金鑰，保留原始結構）。
+    
+    讀取 base_dir 下的 quests.json，過濾掉已翻譯項目後寫入 output_dir。
+    
+    Args:
+        base_dir: 原始 FTB quests 目錄
+        output_dir: 輸出目錄（None 時覆寫原檔）
+        orjson_loads: JSON 解析函式
+        orjson_dump_file_fn: JSON 寫檔函式
+        log_info_fn: 日誌函式
+    Returns:
+        包含處理統計的字典
+    """
+    out_root = output_dir or os.path.join(base_dir, "Output")
     out_root = output_dir or os.path.join(base_dir, "Output")
     raw_root = os.path.join(
         out_root, "ftbquests", "raw", "config", "ftbquests", "quests", "lang"

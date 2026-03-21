@@ -50,6 +50,16 @@ def preview_extraction_generator_impl(
     find_jar_files_fn: Callable[[str], list[str]],
     book_path_regex: re.Pattern,
 ) -> Generator[Dict[str, Any], None, None]:
+    """產生 JAR 檔案預覽（不實際寫入檔案，僅掃描並回報找到的檔案）。
+    
+    Args:
+        mods_dir: Mod 目錄路徑。
+        mode: 模式（'lang' 或 'book'）。
+        find_jar_files_fn: 尋找 JAR 檔案的函式。
+        book_path_regex: Book 檔案路徑正則表達式。
+    Yields:
+        進度字典，含預覽結果（檔案數、大小等）。
+    """
     jar_files = find_jar_files_fn(mods_dir)
     total_jars = len(jar_files)
 
@@ -104,6 +114,18 @@ def preview_extraction_generator_impl(
     }
 
 def generate_preview_report(result: Dict[str, Any], mode: str, output_path: str) -> str:
+    """將預覽結果寫入 Markdown 報告檔案。
+
+    報告包含摘要統計與每個 JAR 的檔案清單（最多 50 筆）。
+
+    Args:
+        result: 預覽 generator 最終回傳的結果字典（包含 preview_results、total_jars 等）。
+        mode: 預覽模式（用於報告檔名）。
+        output_path: 報告檔案的輸出目錄。
+
+    Returns:
+        產生的報告檔案之完整路徑。
+    """
     output_dir = Path(output_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')

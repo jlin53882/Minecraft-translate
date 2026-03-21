@@ -67,7 +67,22 @@ def clean_kubejs_from_raw_impl(
     log_debug_fn: Callable[..., None],
     log_info_fn: Callable[..., None],
 ) -> dict:
-    """從 KubeJS raw 產出 pending/final 結果。"""
+    """實作：將 KubeJS 原始 lang 檔（en_us/zh_cn/zh_tw）做三方合併，產出待翻譯 en_us 與完成品 zh_tw。
+    
+    Args:
+        base_dir: Modpack 根目錄。
+        output_dir: 輸出根目錄（預設 base_dir/Output）。
+        raw_dir: 原始 lang 檔所在目錄。
+        pending_root: 待翻譯 en_us 的輸出目錄。
+        final_root: 合併後 zh_tw 的輸出目錄。
+        read_json_dict_fn: 讀取 JSON 檔的函式。
+        write_json_fn: 寫入 JSON 檔的函式。
+        safe_convert_text_fn: 簡體轉繁體的函式。
+        log_debug_fn: Debug 層級日誌函式。
+        log_info_fn: Info 層級日誌函式。
+    Returns:
+        dict: 處理摘要（群組數、寫入檔案數等）。
+    """
     base = Path(base_dir).resolve()
     out_root = Path(output_dir).resolve() if output_dir else (base / "Output")
     raw_root = Path(raw_dir).resolve() if raw_dir else (out_root / "kubejs" / "raw" / "kubejs")

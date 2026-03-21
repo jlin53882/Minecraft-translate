@@ -53,14 +53,7 @@ def extract_items_parallel(
     work_thread: int,
     logger=None,
 ) -> tuple[dict[str, dict], list[dict[str, Any]]]:
-    """並行讀取/解析/抽取可翻譯文字。
-
-    - 回傳：
-      - file_cache：key=檔案路徑字串，value=原始 json dict
-      - all_items：抽取後的 items（已含 cache_type 標籤）
-
-    注意：為了保留既有行為與 log，這裡保留與原本 lm_translator.py 相同的處理策略。
-    """
+    """使用執行緒池並行讀取多個 JSON 檔案並抽取可翻譯項目，回傳檔案快取與所有抽取結果（已標記 cache_type）。"""
 
     file_cache: dict[str, dict] = {}
     all_items: list[dict[str, Any]] = []
