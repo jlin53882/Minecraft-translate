@@ -79,6 +79,7 @@ def preview_extraction_generator_impl(
     preview_results = []
     total_files = 0
     total_size_bytes = 0
+    failed_jars = []  # 收集處理失敗的 JAR
 
     for idx, jar_path in enumerate(jar_files, 1):
         jar_name = os.path.basename(jar_path)
@@ -98,11 +99,14 @@ def preview_extraction_generator_impl(
                 total_files += len(matched_files)
         except Exception as e:
             log.warning("預覽 %s 時發生錯誤: %s", jar_name, e)
+            failed_jars.append({'jar': jar_name, 'error': str(e)})
 
         yield {'progress': idx / total_jars, 'current': idx, 'total': total_jars}
 
+    # 若有任何 JAR 失敗，progress 低於 1.0；UI 可依 failed_jars 判斷「有失敗但完成了」
+    final_progress = (total_jars - len(failed_jars)) / total_jars if failed_jars else 1.0
     yield {
-        'progress': 1.0,
+        'progress': final_progress,
         'current': total_jars,
         'total': total_jars,
         'result': {
@@ -110,6 +114,7 @@ def preview_extraction_generator_impl(
             'preview_results': preview_results,
             'total_files': total_files,
             'total_size_mb': total_size_bytes / (1024**2),
+            'failed_jars': failed_jars,  # 供 UI 判斷是否有 JAR 處理失敗
         },
     }
 
