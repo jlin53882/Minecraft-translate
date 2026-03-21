@@ -371,3 +371,25 @@ def test_start_clicked_resets_log_presenter(monkeypatch):
     view.start_clicked(None)
 
     assert reset_calls == [True]
+
+
+def test_start_ui_timer_stops_when_page_update_fails(monkeypatch):
+    """驗證 page.update() 失敗時，LM UI timer 會安全停止，不再拋出背景執行緒例外。"""
+
+    class _FailingPage(_Page):
+        def update(self):
+            raise RuntimeError("Event loop is closed")
+
+    page = _FailingPage()
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+
+    view = lm_view.LMView(page, _FilePicker())
+    view.session = _Session()
+    view.session.start()
+    view.session.add_log("hello")
+    view.session.set_progress(0.3)
+
+    view.start_ui_timer()
+    lm_view.time.sleep(0.25)
+
+    assert view._ui_timer_running is False

@@ -261,19 +261,36 @@ class LMView(ft.Column):
                 if not self.session:
                     continue
 
-                snap = self.session.snapshot()
-                self.progress_bar.value = snap["progress"]
+                try:
+                    snap = self.session.snapshot()
+                except Exception:
+                    continue
 
-                self.log_presenter.sync(self.log_view, snap["logs"])
+                try:
+                    self.progress_bar.value = float(snap.get("progress", 0) or 0)
+                except Exception:
+                    self.progress_bar.value = 0
 
-                if snap["status"] == "DONE":
+                logs = snap.get("logs", []) or []
+                try:
+                    self.log_presenter.sync(self.log_view, logs)
+                except Exception as e:
+                    log_debug(f"LM log presenter sync failed: {e}")
+
+                status = (snap.get("status") or "").upper()
+                if status == "DONE":
                     self._set_status("任務完成", theme.GREEN_200)
                     self._ui_timer_running = False
-                elif snap["status"] == "ERROR":
+                elif status == "ERROR":
                     self._set_status("任務發生錯誤", theme.RED_200)
                     self._ui_timer_running = False
 
-                self.page.update()
+                try:
+                    self.page.update()
+                except Exception as e:
+                    log_debug(f"LM page update failed: {e}")
+                    self._ui_timer_running = False
+                    break
 
         threading.Thread(target=loop, daemon=True).start()
 
