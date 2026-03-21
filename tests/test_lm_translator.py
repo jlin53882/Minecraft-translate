@@ -38,10 +38,13 @@ class TestTranslateDirectoryGenerator:
 
         mock_scan.return_value = ([], [lang_file], [lang_file])
         mock_cache_ref.return_value = {}
-        mock_extract.return_value = (
-            {str(lang_file): {"test.key": "Hello"}},
-            [{"path": "test.key", "text": "Hello", "source_text": "Hello", "cache_type": "lang", "file": str(lang_file)}]
-        )
+        # extract_items_parallel 現在是 generator
+        def _fake_gen(**kw):
+            yield (
+                {str(lang_file): {"test.key": "Hello"}},
+                [{"path": "test.key", "text": "Hello", "source_text": "Hello", "cache_type": "lang", "file": str(lang_file)}]
+            )
+        mock_extract.side_effect = _fake_gen
         
         # Mock translate_batch_smart 避免真實 API 呼叫
         mock_translate.return_value = (

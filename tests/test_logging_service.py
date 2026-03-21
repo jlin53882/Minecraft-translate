@@ -47,9 +47,9 @@ class TestLogLimiter:
         result1 = limiter.filter({"log": "Log 1", "progress": 0.1})
         result2 = limiter.filter({"log": "Log 2", "progress": 0.2})
         
-        # 短時間內，兩次都應該被節流，回傳 None
-        assert result1 is None
-        assert result2 is None
+        # 短時間內，log 被節流，但 progress 仍會單獨 forward（PR #38 fix）
+        assert result1 == {"progress": 0.1}
+        assert result2 == {"progress": 0.2}
         
         # 等待超過 flush_interval
         time.sleep(1.1)
