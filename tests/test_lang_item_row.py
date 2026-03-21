@@ -2,9 +2,6 @@
 
 用途：測試 LangItemRow 類別相關功能。
 """
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from pathlib import Path
 
 
 class TestToHalfwidth:
@@ -56,7 +53,6 @@ class TestLangItemRow:
 
     def test_resolve_icon_with_reason_called(self):
         """測試圖標解析是否被調用。"""
-        from translation_tool.core.lang_item_row import LangItemRow
         
         # 驗證 resolve_icon_with_reason 被導入
         from translation_tool.core.lang_item_row import resolve_icon_with_reason

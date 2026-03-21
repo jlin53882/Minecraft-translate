@@ -3,7 +3,6 @@
 用途：測試 icon_classifier.py 的無圖示原因分類功能。
 """
 
-import pytest
 from translation_tool.core.icon_classifier import classify_no_icon_reason
 from translation_tool.core.icon_reason import IconRisk
 

@@ -3,7 +3,6 @@
 用途：驗證 UntranslatedChecker 元件的功能正確性。
 """
 
-import pytest
 from app.views.untranslated_checker import UntranslatedChecker
 from app.views.qc_base import QCBase
 

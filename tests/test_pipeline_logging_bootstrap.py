@@ -30,6 +30,9 @@ class DummySession:
     def set_error(self):
         self.error = True
 
+    def set_summary(self, _summary):
+        return None
+
 
 class DummyHandler:
     def set_session(self, _session):
@@ -52,7 +55,11 @@ def _make_logger_patch(events: list[str]):
 
 
 def test_ftb_pipeline_bootstrap_order(monkeypatch):
-    import translation_tool.core.ftb_translator as ftb_core
+    try:
+        import translation_tool.core.ftb_translator as ftb_core
+    except ModuleNotFoundError:
+        import pytest
+        pytest.skip("ftb_snbt_lib not installed")
 
     events: list[str] = []
     monkeypatch.setattr(_pipeline_logging, "apply_logger_config", _make_logger_patch(events))
@@ -155,5 +162,5 @@ def test_merge_pipeline_bootstrap_order(monkeypatch):
 
     monkeypatch.setattr(merge_service, "merge_zhcn_to_zhtw_from_zip", _fake_merge_gen)
 
-    merge_service.run_merge_zip_batch_service(["demo.zip"], "out", DummySession(), True)
+    list(merge_service.run_merge_zip_batch_service(["demo.zip"], "out", DummySession(), True))
     _assert_logger_before_first_step(events)

@@ -26,7 +26,6 @@ def test_rules_view_initial_load_populates_data(monkeypatch):
 
 
 def test_rules_view_search_filters_and_moves_to_matching_page(monkeypatch):
-    import threading
     
     # Mock threading.Thread and Timer for tests
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())

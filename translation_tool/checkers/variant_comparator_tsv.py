@@ -74,7 +74,7 @@ def compare_variants_tsv_generator(file_path: str, output_file: str) -> Generato
 
     if differences:
         total_diff = len(differences)
-        yield {"progress": 1.0, "log": f"\n--- 簡繁 TSV 比較完成 ---"}
+        yield {"progress": 1.0, "log": "\n--- 簡繁 TSV 比較完成 ---"}
         yield {"progress": 1.0, "log": f"總共發現 {total_diff} 條差異條目。"}
         
         diff_df = pd.DataFrame(differences)

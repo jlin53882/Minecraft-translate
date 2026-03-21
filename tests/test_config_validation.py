@@ -19,11 +19,9 @@
 
 import json
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
-import unittest.mock
 
 # 確保 translation_tool 在 sys.path
 ROOT = Path(__file__).resolve().parents[1]

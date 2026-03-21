@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from collections import defaultdict
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
+from translation_tool.utils.log_unit import log_info
 from types import SimpleNamespace
 
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding

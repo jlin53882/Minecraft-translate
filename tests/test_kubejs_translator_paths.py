@@ -7,7 +7,6 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-import pytest
 
 # 確保可以導入 translation_tool
 ROOT = Path(__file__).resolve().parents[1]

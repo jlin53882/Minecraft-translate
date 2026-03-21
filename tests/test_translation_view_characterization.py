@@ -1,4 +1,3 @@
-import flet as ft
 
 from app.views import translation_view as tv
 

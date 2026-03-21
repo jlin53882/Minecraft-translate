@@ -7,7 +7,6 @@ from __future__ import annotations
 import sys
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 # 確保可以導入翻譯工具模組
 ROOT = Path(__file__).resolve().parents[2]

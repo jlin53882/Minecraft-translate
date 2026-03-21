@@ -1609,8 +1609,22 @@ class CacheView(ft.Column):
             self._show_snack_bar("複製失敗", theme.RED_400)
 
     def _iter_type_states(self, data: dict):
-        """迭代所有快取類型與其狀態"""
-        raw_types = data.get("types") or {}
+        """迭代所有快取類型與其狀態。
+
+        回傳值：
+        - list of (ctype, state_dict): 正常迭代
+        - None: 讀取失敗（資料結構異常，區分「無資料」）
+        """
+        if not isinstance(data, dict):
+            log_warning(f"[_iter_type_states] 預期 dict，收到 {type(data).__name__}，回傳 None 表示讀取失敗")
+            return None
+
+        raw_types = data.get("types")
+        if raw_types is None:
+            # 完全沒有 types 欄位 → 視為讀取失敗（區分「有 types 但是空的」）
+            log_warning("[_iter_type_states] data 缺少 'types' 欄位，視為讀取失敗")
+            return None
+
         if isinstance(raw_types, dict):
             return raw_types.items()
         if isinstance(raw_types, list):
@@ -1625,11 +1639,29 @@ class CacheView(ft.Column):
             return pairs
         return []
 
+    def _iter_type_states_safe(self, data: dict):
+        """_iter_type_states 的安全包裝：None 時回傳空列表，保持迭代語意一致。"""
+        result = self._iter_type_states(data)
+        return result if result is not None else []
+
     def _render_type_list(self, data: dict):
         """渲染快取類型列表 UI"""
         self.type_list.controls.clear()
 
-        for ctype, st in self._iter_type_states(data):
+        type_states = self._iter_type_states(data)
+        if type_states is None:
+            # 讀取失敗：顯示錯誤狀態
+            self.type_list.controls.append(
+                empty_state(
+                    icon=ft.Icons.ERROR_OUTLINE,
+                    title="讀取失敗",
+                    message="無法載入快取類型，請檢查日誌或重新整理",
+                )
+            )
+            self.update()
+            return
+
+        for ctype, st in type_states:
             entries_count = st.get("entries_count", 0)
             new_count = st.get("session_new_count", 0)
             dirty = bool(st.get("is_dirty", False))

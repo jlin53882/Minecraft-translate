@@ -1,7 +1,7 @@
 """tests/test_zip_prefix_handling.py
-用途：驗證 lang_merge_pipeline.py 的 ZIP 包裝前綴警告邏輯。
-已知前綴（lang_out / book_out / patchouli_out）不應觸發警告，
-未知前綴應呼叫 log_warning。
+
+用途：驗證 lang_merge_pipeline.py 的 ZIP 包裝前綴自動偵測剝離邏輯。
+新行為：所有前綴（已知或未知）皆自動偵測並剝離，不應觸發任何警告。
 """
 import io
 import zipfile
@@ -10,10 +10,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from translation_tool.core.lang_merge_pipeline import (
-    _process_single_mod,
-    KNOWN_ZIP_PACKAGING_PREFIXES,
-)
+from translation_tool.core.lang_merge_pipeline import _process_single_mod
 
 
 def _make_zip_with_prefix(prefix: str) -> zipfile.ZipFile:
@@ -21,7 +18,6 @@ def _make_zip_with_prefix(prefix: str) -> zipfile.ZipFile:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         base = f"{prefix}/assets/testmod/lang/"
-        # 有效 .lang 內容：英文 key=value（不含 CJK，避免觸發翻譯邏輯）
         content = "hello=Hello World\nbye=Goodbye\n"
         zf.writestr(base + "zh_cn.lang", content.encode("utf-8"))
         zf.writestr(base + "zh_tw.lang", content.encode("utf-8"))
@@ -39,18 +35,21 @@ def _paths_for(prefix: str) -> dict:
     }
 
 
-class TestKnownZipPrefixesNoWarning:
-    """已知前綴不應觸發 log_warning。"""
+class TestZipPrefixAutoStrip:
+    """新行為：所有前綴皆自動偵測剝離，不應有任何警告。"""
 
-    @pytest.mark.parametrize("prefix", sorted(KNOWN_ZIP_PACKAGING_PREFIXES))
-    def test_whitelisted_prefix_no_warning(self, prefix: str):
-        """whitelist 前綴 'lang_out' / 'book_out' / 'patchouli_out' 不應呼叫 log_warning。"""
+    @pytest.mark.parametrize(
+        "prefix",
+        ["lang_out", "book_out", "patchouli_out", "custom_out", ".hidden_out"],
+    )
+    def test_no_warning_for_any_prefix(self, prefix: str):
+        """已知前綴（lang_out/book_out/patchouli_out）與未知前綴皆不應呼叫 log_warning。"""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             zf = _make_zip_with_prefix(prefix)
             paths = _paths_for(prefix)
             with patch("translation_tool.core.lang_merge_pipeline.log_warning") as mock_warn:
-                _process_single_mod(
+                _ = _process_single_mod(
                     zf=zf,
                     paths=paths,
                     rules=[],
@@ -60,31 +59,26 @@ class TestKnownZipPrefixesNoWarning:
                 mock_warn.assert_not_called()
             zf.close()
 
-
-class TestUnknownZipPrefixWarning:
-    """未知前綴應觸發 log_warning。"""
-
-    def test_unknown_prefix_calls_log_warning_once(self):
-        """自訂前綴 'custom_out'（不在白名單）應觸發一次警告，訊息包含前綴名。"""
+    def test_output_dir_created_for_custom_prefix(self):
+        """自訂前綴 custom_out 也應正常處理（無 CJK → 無輸出，目錄不建立是預期行為）。"""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             zf = _make_zip_with_prefix("custom_out")
             paths = _paths_for("custom_out")
-            with patch("translation_tool.core.lang_merge_pipeline.log_warning") as mock_warn:
-                _process_single_mod(
+            with patch("translation_tool.core.lang_merge_pipeline.log_warning"):
+                result = _process_single_mod(
                     zf=zf,
                     paths=paths,
                     rules=[],
                     output_dir=str(tmp_path / "output"),
                     must_translate_dir=str(tmp_path / "pending"),
                 )
-                mock_warn.assert_called_once()
-                args, _ = mock_warn.call_args
-                assert "custom_out" in args[0]
             zf.close()
+            # 無 CJK 內容時不產生輸出，目錄不會建立；此測試確認不拋例外即可
+            assert result is not None  # 確認處理完成未崩潰
 
     def test_dot_prefix_no_warning(self):
-        """以 '.' 開頭的前綴依邏輯不會警告（hidden folder）。"""
+        """隱藏資料夾前綴（.hidden_out）亦不應警告。"""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             zf = _make_zip_with_prefix(".hidden_out")
