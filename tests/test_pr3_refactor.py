@@ -3,8 +3,6 @@
 測試目標：確保拆分後的 helper 函數行為與重構前一致。
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
 
 
 class TestValidateBatchItems:

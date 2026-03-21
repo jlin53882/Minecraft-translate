@@ -5,8 +5,6 @@
 from __future__ import annotations
 
 import sys
-import json
-import os
 from pathlib import Path
 
 # 確保可以導入翻譯工具模組

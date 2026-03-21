@@ -1,7 +1,6 @@
 """tests/test_bom_prevention.py
 用途：防止 UI 模組檔案帶有 UTF-8 BOM，確保 BOM 被徹底移除且未來不會復發。
 """
-import pytest
 from pathlib import Path
 
 

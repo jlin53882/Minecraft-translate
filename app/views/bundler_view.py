@@ -11,7 +11,7 @@ import threading
 from app.ui import theme
 from app.services_impl.config_service import load_config_json
 from app.services_impl.pipelines.bundle_service import run_bundling_service
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
+from translation_tool.utils.log_unit import log_info
 
 # --- 導入 tkinter ---
 import tkinter as tk

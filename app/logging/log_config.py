@@ -46,7 +46,7 @@ def load_ui_logging_config(config_getter: callable) -> dict[str, Any]:
             result[key] = raw[key]
 
     if "show_levels" in raw and isinstance(raw["show_levels"], list):
-        result["show_levels"] = [str(l).lower() for l in raw["show_levels"] if l]
+        result["show_levels"] = [str(level_str).lower() for level_str in raw["show_levels"] if level_str]
 
     if "colorize" in raw:
         result["colorize"] = bool(raw["colorize"])

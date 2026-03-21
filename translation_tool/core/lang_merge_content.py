@@ -9,7 +9,6 @@ from __future__ import annotations
 import orjson as json
 
 from ..utils.config_manager import load_config
-from ..utils.log_unit import log_info, log_warning, log_error, log_debug
 from ..utils.text_processor import apply_replace_rules  # noqa: F401
 from ..utils.text_processor import recursive_translate_dict
 from .lang_codec import normalize_patchouli_book_root

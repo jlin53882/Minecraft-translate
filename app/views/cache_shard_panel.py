@@ -17,7 +17,6 @@ from app.services_impl.cache.cache_services import (
 from app.views.cache_manager.cache_history_store import (
     history_now_ts,
     history_append_event,
-    history_load_recent,
 )
 
 

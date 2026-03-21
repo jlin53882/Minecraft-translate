@@ -78,6 +78,6 @@ def check_untranslated_generator(en_us_dir: str, zh_tw_dir: str, output_dir: str
         except Exception as e:
             yield {"progress": progress, "log": f"處理 {rel_path} 時出錯: {e}", "error": True}
 
-    yield {"progress": 1.0, "log": f"--- 未翻譯檢查完成 ---"}
+    yield {"progress": 1.0, "log": "--- 未翻譯檢查完成 ---"}
     yield {"progress": 1.0, "log": f"總共在 {files_with_missing} 個檔案中，找到 {total_untranslated_keys} 個未翻譯的條目。"}
     yield {"progress": 1.0, "log": f"報告已儲存至: {output_dir}"}

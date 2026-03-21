@@ -7,8 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 # 確保可以導入 translation_tool
 ROOT = Path(__file__).resolve().parents[1]
@@ -116,7 +115,6 @@ class TestLangMergeContentProcessContent:
     def test_process_content_with_mock_zip(self, tmp_path: Path):
         """測試使用 mock ZIP 呼叫 _process_content_or_copy_file。"""
         from translation_tool.core.lang_merge_content import _process_content_or_copy_file
-        from unittest.mock import MagicMock, patch
         
         # 建立 mock ZIP 檔案
         mock_zf = MagicMock()
@@ -155,7 +153,6 @@ class TestLangMergeContentPatchLocalied:
     def test_patch_with_mock_zip(self, tmp_path: Path):
         """測試使用 mock ZIP 呼叫 _patch_localized_content_json。"""
         from translation_tool.core.lang_merge_content import _patch_localized_content_json
-        from unittest.mock import MagicMock
         
         mock_zf = MagicMock()
         

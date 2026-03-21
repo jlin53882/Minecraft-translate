@@ -3,7 +3,6 @@
 用途：測試翻譯檔案中英文殘留檢查功能。
 """
 import json
-import pytest
 
 from translation_tool.checkers import english_residue_checker
 

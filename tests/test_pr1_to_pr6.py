@@ -2,7 +2,6 @@
 """PR1-6 UI 优化功能测试。"""
 
 import flet as ft
-import pytest
 
 from app.ui import theme
 from app.ui.components import (

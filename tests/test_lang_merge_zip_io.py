@@ -112,17 +112,16 @@ class TestReadJsonFromZip:
 
         assert result == {}
 
-    def test_read_invalid_json_returns_empty_dict(self, tmp_path: Path) -> None:
-        """測試讀取無效 JSON 時返回空字典。"""
+    def test_read_invalid_json_raises_runtime_error(self, tmp_path: Path) -> None:
+        """測試讀取無效 JSON 時拋出 RuntimeError（讓子層 quarantine 邏輯啟動）。"""
         zip_path = tmp_path / "test.zip"
 
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("test.json", "not valid json {")
 
         with zipfile.ZipFile(zip_path, "r") as zf:
-            result = _read_json_from_zip(zf, "test.json")
-
-        assert result == {}
+            with pytest.raises(RuntimeError, match="無法讀取 ZIP 內 JSON 檔案"):
+                _read_json_from_zip(zf, "test.json")
 
 
 class TestWriteBytesAtomic:

@@ -7,9 +7,7 @@ from __future__ import annotations
 import json
 import zipfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
-import pytest
 
 from translation_tool.core.lang_merge_pipeline import _process_single_mod
 
@@ -66,17 +64,17 @@ class TestProcessSingleMod:
         must_translate_dir.mkdir()
 
         zip_path = _create_test_zip(tmp_path, {
-            "assets/demo/lang/zh_cn.json": json.dumps({
+            "demo/lang/zh_cn.json": json.dumps({
                 "item.demo": "簡體內容"
             }),
-            "assets/demo/lang/en_us.json": json.dumps({
+            "demo/lang/en_us.json": json.dumps({
                 "item.demo": "English Content"
             }),
         })
 
         paths = {
-            "zh_cn": "assets/demo/lang/zh_cn.json",
-            "en_us": "assets/demo/lang/en_us.json",
+            "zh_cn": "demo/lang/zh_cn.json",
+            "en_us": "demo/lang/en_us.json",
         }
 
         with zipfile.ZipFile(zip_path, "r") as zf:
@@ -90,7 +88,8 @@ class TestProcessSingleMod:
 
         assert result["success"] is True
         # 英文內容應該被放入 pending
-        zh_tw_path = output_dir / "assets" / "demo" / "lang" / "zh_tw.json"
+        # 注意：ZIP 頂層目錄 demo/ 會被自動剝離，所以輸出為 lang/zh_tw.json
+        zh_tw_path = output_dir / "lang" / "zh_tw.json"
         assert zh_tw_path.exists()
 
     def test_process_mod_protects_existing_tw_translation(self, tmp_path: Path) -> None:
@@ -101,7 +100,8 @@ class TestProcessSingleMod:
         must_translate_dir.mkdir()
 
         # 先建立已存在的 zh_tw.json
-        existing_tw = output_dir / "assets" / "demo" / "lang"
+        # 注意：輸出路徑不含頂層目錄（demo/ 會被剝離）
+        existing_tw = output_dir / "lang"
         existing_tw.mkdir(parents=True)
         existing_tw_file = existing_tw / "zh_tw.json"
         existing_tw_file.write_text(json.dumps({
@@ -109,17 +109,17 @@ class TestProcessSingleMod:
         }), encoding="utf-8")
 
         zip_path = _create_test_zip(tmp_path, {
-            "assets/demo/lang/zh_cn.json": json.dumps({
+            "demo/lang/zh_cn.json": json.dumps({
                 "item.demo": "新簡體內容"
             }),
-            "assets/demo/lang/en_us.json": json.dumps({
+            "demo/lang/en_us.json": json.dumps({
                 "item.demo": "New English"
             }),
         })
 
         paths = {
-            "zh_cn": "assets/demo/lang/zh_cn.json",
-            "en_us": "assets/demo/lang/en_us.json",
+            "zh_cn": "demo/lang/zh_cn.json",
+            "en_us": "demo/lang/en_us.json",
         }
 
         with zipfile.ZipFile(zip_path, "r") as zf:
@@ -145,13 +145,13 @@ class TestProcessSingleMod:
 
         # 測試同時有 zh_cn 和 en_us 的 lang 格式
         zip_path = _create_test_zip(tmp_path, {
-            "assets/demo/lang/zh_cn.lang": "item.demo=簡體\nitem.new=新項目",
-            "assets/demo/lang/en_us.lang": "item.demo=English\nitem.new=New Item",
+            "demo/lang/zh_cn.lang": "item.demo=簡體\nitem.new=新項目",
+            "demo/lang/en_us.lang": "item.demo=English\nitem.new=New Item",
         })
 
         paths = {
-            "zh_cn": "assets/demo/lang/zh_cn.lang",
-            "en_us": "assets/demo/lang/en_us.lang",
+            "zh_cn": "demo/lang/zh_cn.lang",
+            "en_us": "demo/lang/en_us.lang",
         }
 
         with zipfile.ZipFile(zip_path, "r") as zf:
@@ -164,8 +164,8 @@ class TestProcessSingleMod:
             )
 
         assert result["success"] is True
-        # 應該輸出為 .lang 格式
-        zh_tw_path = output_dir / "assets" / "demo" / "lang" / "zh_tw.lang"
+        # 應該輸出為 .lang 格式（demo/ 頂層被剝離）
+        zh_tw_path = output_dir / "lang" / "zh_tw.lang"
         assert zh_tw_path.exists()
         # 驗證內容格式正確 (key=value 格式)
         content = zh_tw_path.read_text(encoding="utf-8")
@@ -209,12 +209,12 @@ class TestProcessSingleMod:
         must_translate_dir.mkdir()
 
         zip_path = _create_test_zip(tmp_path, {
-            "assets/demo/lang/zh_cn.json": json.dumps({
+            "demo/lang/zh_cn.json": json.dumps({
                 "item.cjk": "這是中文",
                 "item.eng": "This is English",
                 "item.mixed": "Hello 你好",
             }),
-            "assets/demo/lang/en_us.json": json.dumps({
+            "demo/lang/en_us.json": json.dumps({
                 "item.cjk": "Chinese",
                 "item.eng": "English",
                 "item.mixed": "Mixed",
@@ -222,8 +222,8 @@ class TestProcessSingleMod:
         })
 
         paths = {
-            "zh_cn": "assets/demo/lang/zh_cn.json",
-            "en_us": "assets/demo/lang/en_us.json",
+            "zh_cn": "demo/lang/zh_cn.json",
+            "en_us": "demo/lang/en_us.json",
         }
 
         with zipfile.ZipFile(zip_path, "r") as zf:
@@ -236,7 +236,8 @@ class TestProcessSingleMod:
             )
 
         assert result["success"] is True
-        zh_tw_path = output_dir / "assets" / "demo" / "lang" / "zh_tw.json"
+        # demo/ 頂層被剝離
+        zh_tw_path = output_dir / "lang" / "zh_tw.json"
         assert zh_tw_path.exists()
 
     def test_process_mod_with_zh_tw_source(self, tmp_path: Path) -> None:

@@ -6,7 +6,7 @@
 
 import flet as ft
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
+from translation_tool.utils.log_unit import log_info
 from app.views.cache_manager.cache_state import CacheQueryState
 from app.services_impl.cache.cache_services import (
     cache_get_entry_service,
@@ -17,7 +17,6 @@ from app.services_impl.cache.cache_services import (
 from app.views.cache_manager.cache_history_store import (
     history_now_ts,
     history_append_event,
-    history_load_recent,
 )
 
 

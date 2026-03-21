@@ -9,7 +9,7 @@ from typing import List
 from app.views.qc_base import QCBase
 from app.services import run_untranslated_check_service
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
+from translation_tool.utils.log_unit import log_info
 
 
 class UntranslatedChecker(ft.Container):
