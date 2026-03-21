@@ -3,7 +3,6 @@
 用途：測試 IconRisk enum 和 IconResult dataclass。
 """
 
-import pytest
 from translation_tool.core.icon_reason import IconRisk, IconResult
 
 

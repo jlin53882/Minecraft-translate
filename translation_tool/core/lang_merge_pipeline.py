@@ -14,7 +14,7 @@ from typing import Any, Dict
 
 import orjson as json
 
-from ..utils.log_unit import log_info, log_warning, log_exception
+from ..utils.log_unit import log_info, log_exception
 from ..utils.text_processor import recursive_translate_dict, apply_replace_rules
 from .lang_codec import dump_lang_text, parse_lang_text, pick_first_not_none
 from .lang_merge_zip_io import (

@@ -1,4 +1,3 @@
-import flet as ft
 
 from app.views.extractor_view import ExtractorView
 

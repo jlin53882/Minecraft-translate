@@ -3,9 +3,8 @@
 用途：測試 translatable_extractor.py 的功能。
 """
 
-import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 
 class TestIsLangFile:

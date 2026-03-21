@@ -6,7 +6,7 @@
 
 import flet as ft
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
+from translation_tool.utils.log_unit import log_info
 
 # UI 共用元件：統一按鈕樣式
 from app.ui.components import primary_button, secondary_button
@@ -563,9 +563,9 @@ class RulesView(ft.Column):
             
             # 計算在 all_rules_data 中的索引（用於刪除操作）
             try:
-                all_idx = self.all_rules_data.index(rule)
+                self.all_rules_data.index(rule)
             except ValueError:
-                all_idx = -1
+                pass
 
             row = self.create_rule_row(
                 rule.get("from", ""),
@@ -581,7 +581,7 @@ class RulesView(ft.Column):
         # 顯示搜尋結果數或總數
         if self.search_results is not None:
             total_rules = len(self.search_results)
-            status_text = f"（搜尋結果）"
+            status_text = "（搜尋結果）"
         else:
             total_rules = len(self.all_rules_data)
             status_text = ""

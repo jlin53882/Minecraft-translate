@@ -12,7 +12,7 @@ from typing import Any
 
 import orjson as json
 
-from ..utils.log_unit import log_info, log_error, log_debug, log_warning
+from ..utils.log_unit import log_info, log_error
 from translation_tool.core.translatable_extractor import (
     extract_translatables,
     find_lang_json,

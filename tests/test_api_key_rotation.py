@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from unittest.mock import patch
 
 import pytest
@@ -55,7 +54,6 @@ class TestAtk009ApiKeyRotationThreadSafety:
           - 至少有不同的 key 被回傳（表示並發有在發生）
         """
         from translation_tool.core.lm_config_rules import (
-            KeyIndexTracker,
             _key_tracker,
             get_current_api_key,
         )
@@ -183,7 +181,6 @@ class TestAtk009ApiKeyRotationThreadSafety:
         """
         from translation_tool.core.lm_config_rules import (
             _key_tracker,
-            get_current_api_key,
         )
 
         # 先設定 5 個 key，並將 index 設到 4（最後一個）

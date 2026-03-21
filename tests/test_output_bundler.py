@@ -3,10 +3,7 @@
 用途：測試 output_bundler.py 的功能。
 """
 
-import os
 import zipfile
-import pytest
-from pathlib import Path
 
 
 class TestAddFolderToZip:

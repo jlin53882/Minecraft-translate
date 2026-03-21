@@ -1622,7 +1622,7 @@ class CacheView(ft.Column):
         raw_types = data.get("types")
         if raw_types is None:
             # 完全沒有 types 欄位 → 視為讀取失敗（區分「有 types 但是空的」）
-            log_warning(f"[_iter_type_states] data 缺少 'types' 欄位，視為讀取失敗")
+            log_warning("[_iter_type_states] data 缺少 'types' 欄位，視為讀取失敗")
             return None
 
         if isinstance(raw_types, dict):
