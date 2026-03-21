@@ -433,14 +433,40 @@ class MergeView(ft.Column):
 
     def _show_merge_summary(self, summary: dict):
         """顯示合併結果摘要（使用 overlay 確保穩定顯示）。"""
-        # 失敗時顯示預設值，避免 KeyError
         s_zips = summary.get("success_zips", 0)
         f_zips = summary.get("failed_zips", 0)
-        f_details = summary.get("failed_zip_details", "無")
-        if isinstance(f_details, list):
-            f_details = "、".join(f_details)
-        elif not f_details:
-            f_details = "無"
+        failed_list = summary.get("failed_zips_list", [])
+        oc = summary.get("output_counts", {})
+
+        # 輸出統計 block
+        oc_rows = []
+        for label, count in [
+            ("lang_output", oc.get("lang_output", 0)),
+            ("待翻譯", oc.get("待翻譯", 0)),
+            ("patchouli_output", oc.get("patchouli_output", 0)),
+            ("other_output", oc.get("other_output", 0)),
+            ("errordata_output", oc.get("errordata_output", 0)),
+        ]:
+            if count > 0:
+                oc_rows.append(ft.Text(f"├─ {label}：{count} 個", size=13))
+        output_block = (
+            [ft.Divider(), ft.Text("📁 輸出統計", size=14, weight=ft.FontWeight.BOLD)] + oc_rows
+            if oc_rows else []
+        )
+
+        # 失敗 ZIP block
+        failed_block = []
+        if failed_list:
+            for item in failed_list:
+                failed_block.append(ft.Text(
+                    f"├─ {item.get('Name', '?')}", size=13, color=ft.Colors.ORANGE_700
+                ))
+                err = item.get("error", "未知錯誤")
+                # 截斷過長錯誤訊息
+                if len(err) > 80:
+                    err = err[:80] + "..."
+                failed_block.append(ft.Text(f"│  └─ {err}", size=12, color="#cccccc"))
+            failed_block = [ft.Divider(), ft.Text("📋 處理失敗的 ZIP", size=14, weight=ft.FontWeight.BOLD)] + failed_block
 
         content = ft.Column([
             ft.Text("合併結果摘要", size=16, weight=ft.FontWeight.BOLD),
@@ -455,9 +481,8 @@ class MergeView(ft.Column):
                  ft.Text(f"失敗 ZIP：{f_zips} 個", size=14)],
                 spacing=8,
             ),
-            ft.Divider(),
-            ft.Text(f"處理失敗的 ZIP：{f_details}", size=13, color=ft.Colors.ORANGE_700)
-            if f_zips > 0 else ft.Container(),
+            *output_block,
+            *failed_block,
             ft.Divider(),
             ft.Text("詳見上方日誌", size=12, color="#aaaaaa"),
         ], spacing=10, tight=True)

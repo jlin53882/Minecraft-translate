@@ -14,6 +14,8 @@ from app.services_impl.logging_service import UI_LOG_HANDLER
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
 from translation_tool.core.lang_merger import merge_zhcn_to_zhtw_from_zip
 
+import os
+
 logger = logging.getLogger(__name__)
 
 def run_merge_zip_batch_service(
@@ -39,8 +41,34 @@ def run_merge_zip_batch_service(
         "success_zips": 0,
         "failed_zips": 0,
         "errored_files": 0,
-        "failed_zip_details": [],  # [(zip_name, error_message), ...]
+        "failed_zips_list": [],  # [{"name": str, "error": str}, ...]
     }
+
+    def _count_output_files(out_dir: str) -> dict:
+        """掃描各輸出子目錄的檔案數量。"""
+        result = {
+            "lang_output": 0,
+            "待翻譯": 0,
+            "patchouli_output": 0,
+            "other_output": 0,
+            "errordata_output": 0,
+        }
+        if not os.path.exists(out_dir):
+            return result
+        for root, dirs, files in os.walk(out_dir):
+            rel = os.path.relpath(root, out_dir)
+            if rel.startswith("lang_output"):
+                if "待翻譯" in rel:
+                    result["待翻譯"] += len(files)
+                else:
+                    result["lang_output"] += len(files)
+            elif rel.startswith("patchouli_output"):
+                result["patchouli_output"] += len(files)
+            elif rel.startswith("other_output"):
+                result["other_output"] += len(files)
+            elif rel.startswith("errordata_output"):
+                result["errordata_output"] += len(files)
+        return result
 
     try:
         total = len(zip_paths)
@@ -85,20 +113,21 @@ def run_merge_zip_batch_service(
                 logger.error(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
                 session.add_log(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
                 stats["failed_zips"] += 1
-                stats["failed_zip_details"].append((zip_name, str(e)))
-                session.set_error()
-                return
+                stats["failed_zips_list"].append({"name": zip_name, "error": str(e)})
+                # 不再 return，繼續處理下一個 ZIP
 
             # ZIP 完成後，至少推進一次 progress
             session.set_progress((idx + 1) / total)
 
         # 產出統計摘要，並寫入 session 供 UI 取用
+        output_counts = _count_output_files(output_dir)
         final_summary = {
             "total_zips": stats["total_zips"],
             "success_zips": stats["success_zips"],
             "failed_zips": stats["failed_zips"],
             "errored_files": stats["errored_files"],
-            "failed_zip_details": stats["failed_zip_details"],
+            "failed_zips_list": stats["failed_zips_list"],
+            "output_counts": output_counts,
         }
         session.set_summary(final_summary)
         yield {"progress": 1.0, "log": None, "summary": final_summary}
@@ -114,7 +143,8 @@ def run_merge_zip_batch_service(
             "success_zips": stats["success_zips"],
             "failed_zips": stats["failed_zips"],
             "errored_files": stats["errored_files"],
-            "failed_zip_details": stats["failed_zip_details"],
+            "failed_zips_list": stats["failed_zips_list"],
+            "output_counts": _count_output_files(output_dir),
         }
         session.set_summary(error_summary)
         yield {"progress": 1.0, "log": None, "summary": error_summary}
