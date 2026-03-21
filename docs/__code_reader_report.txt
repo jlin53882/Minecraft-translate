@@ -1,0 +1,3201 @@
+================================================================================
+Minecraft Translator Flet — 完整模組掃描報告
+================================================================================
+掃描時間：2026-03-20
+專案根目錄：C:\Users\admin\Desktop\minecraft_translator_flet
+
+全域摘要
+  - 總模組檔案：175
+  - 成功解析：173
+  - 解析失敗：2
+  - 總類別數：67
+  - 總函式數：463
+  - 總方法數（公眾方法）：167
+
+================================================================================
+⚠️ 解析失敗的檔案（共 2 個）
+================================================================================
+  ❌ app\ui\components.py — invalid non-printable character U+FEFF (components.py, line 1)
+  ❌ app\ui\quick_jump.py — invalid non-printable character U+FEFF (quick_jump.py, line 1)
+
+================================================================================
+🔴 高風險模組清單（副作用/並發/複雜分支 風險評分）
+================================================================================
+  [ 40分] __code_scan.py
+         ⚠️ func has_side_effects: 檔案寫入 (open w/a), 檔案寫入 (.write), JSON序列化寫入, 檔案/zip操作, 網路呼叫, 外部API呼叫, 修改全域狀態
+         ⚠️ func has_threading_asyncio: threading, asyncio, threading.Queue
+         ⚠️ func has_external_dependencies: 檔案寫入 (open w/a), 檔案/zip操作, 網路呼叫
+         ⚠️ func analyze_file: 檔案寫入 (open w/a)
+         ⚠️ func analyze_file: asyncio
+         ... 以及其他 1 個問題
+
+  [ 33分] tools\test_all_features.py
+         ⚠️ func test_rules: 檔案寫入 (open w/a)
+         ⚠️ func test_qc: 檔案寫入 (.write)
+         ⚠️ func test_bundler: 檔案寫入 (.write)
+         ⚠️ func test_lm: 檔案寫入 (.write)
+         ⚠️ func test_merge: 檔案寫入 (.write), 檔案/zip操作
+
+  [ 31分] translation_tool\utils\cache_manager.py
+         ⚠️ func force_rotate_shard: 檔案寫入 (.write)
+         ⚠️ func _get_search_facade: 修改全域狀態
+
+  [ 29分] translation_tool\utils\text_processor.py
+         ⚠️ func _init_replace_rules_cache: 修改全域狀態
+         ⚠️ func load_replace_rules: 檔案寫入 (open w/a)
+         ⚠️ func save_replace_rules: 檔案寫入 (open w/a), 檔案寫入 (.write), JSON序列化寫入
+         ⚠️ func convert_snbt_file_inplace: 檔案寫入 (open w/a), 檔案寫入 (.write)
+         ⚠️ func orjson_dump_file: 檔案寫入 (.write), JSON序列化寫入
+         ... 以及其他 1 個問題
+
+  [ 27分] translation_tool\core\lang_merge_zip_io.py
+         ⚠️ func _read_text_from_zip: 檔案寫入 (open w/a), 檔案/zip操作
+         ⚠️ func _read_json_from_zip: 檔案/zip操作
+         ⚠️ func _write_bytes_atomic: 檔案寫入 (open w/a)
+         ⚠️ func _write_text_atomic: 檔案寫入 (open w/a), 檔案寫入 (.write)
+         ⚠️ func quarantine_copy_from_zip: 檔案寫入 (open w/a), 檔案寫入 (.write), 檔案/zip操作
+
+  [ 25分] app\views\cache_manager\cache_history_store.py
+         ⚠️ func history_load_active: 檔案寫入 (.write), JSON序列化寫入
+         ⚠️ func history_save_active: 檔案寫入 (.write), JSON序列化寫入
+         ⚠️ func history_append_event: 檔案寫入 (open w/a), 檔案寫入 (.write), JSON序列化寫入
+
+  [ 24分] translation_tool\plugins\ftbquests\ftbquests_snbt_inject.py
+         ⚠️ func _load_json_dict: 檔案寫入 (open w/a)
+         ⚠️ func _walk_and_copy_template: 檔案/zip操作
+         ⚠️ func walk_and_copy_all_snbt: 檔案/zip操作
+         ⚠️ func _read_snbt: 檔案寫入 (open w/a)
+         ⚠️ func _write_snbt: 檔案寫入 (open w/a), JSON序列化寫入
+         ... 以及其他 2 個問題
+
+  [ 22分] translation_tool\utils\cache_search.py
+         ⚠️ method CacheSearchEngine.__init__: threading
+         ⚠️ method SearchOrchestrator.__init__: threading
+
+  [ 20分] translation_tool\utils\cache_store.py
+         ⚠️ func record_save_time: 檔案/zip操作
+  [ 16分] translation_tool\plugins\md\md_lmtranslator.py
+         ⚠️ func read_json: 檔案寫入 (open w/a)
+         ⚠️ func write_json: 檔案寫入 (open w/a), JSON序列化寫入
+         ⚠️ func translate_md_pending: 外部API呼叫
+  [ 15分] translation_tool\utils\cache_shards.py
+         ⚠️ func _write_json_atomic: 檔案寫入 (.write), JSON序列化寫入
+         ⚠️ func _get_active_shard_path: 檔案寫入 (.write)
+         ⚠️ func _rotate_shard_if_needed: 檔案寫入 (.write)
+         ⚠️ func _save_entries_to_active_shards: 檔案寫入 (.write)
+  [ 15分] translation_tool\utils\species_cache.py
+         ⚠️ func initialize_species_cache: 檔案寫入 (open w/a), 修改全域狀態
+         ⚠️ func query_wikipedia_and_update_cache: 檔案寫入 (open w/a), 檔案寫入 (.write)
+  [ 14分] translation_tool\core\ftb_translator.py
+         ⚠️ func _translate_single_file: 檔案寫入 (open w/a), 檔案寫入 (.write)
+         ⚠️ func translate_directory_generator: 檔案/zip操作
+         ⚠️ func run_ftb_pipeline: 外部API呼叫
+  [ 14分] translation_tool\core\lang_merge_content_copy.py
+         ⚠️ func process_content_or_copy_file_impl: 檔案寫入 (open w/a), 檔案寫入 (.write), JSON序列化寫入, 檔案/zip操作
+  [ 14分] translation_tool\core\lm_translator_shared_recording.py
+         ⚠️ method TranslationRecorder.export_json: 檔案寫入 (.write), JSON序列化寫入
+         ⚠️ method TranslationRecorder.export_csv: 檔案寫入 (open w/a), 檔案寫入 (.write)
+  [ 14分] translation_tool\utils\config_manager.py
+         ⚠️ func load_config: 檔案寫入 (open w/a)
+         ⚠️ func save_config: 檔案寫入 (open w/a), JSON序列化寫入
+  [ 13分] translation_tool\core\lm_config_rules.py
+         ⚠️ func get_current_api_key: 外部API呼叫
+         ⚠️ func rotate_api_key: 外部API呼叫
+         ⚠️ func validate_api_keys: 外部API呼叫
+         ⚠️ func validate_api_keys_from_ui: 外部API呼叫
+         ⚠️ method KeyIndexTracker.__init__: threading
+  [ 13分] translation_tool\core\lm_translator_main.py
+         ⚠️ func translate_batch_smart_old: 網路呼叫, 外部API呼叫
+  [ 13分] translation_tool\core\lm_translator_shared_preview.py
+         ⚠️ func write_dry_run_preview: 檔案寫入 (.write), JSON序列化寫入
+         ⚠️ func write_cache_hit_preview: 檔案寫入 (.write), JSON序列化寫入
+  [ 12分] app\services_impl\cache\cache_services.py
+         ⚠️ func cache_save_all_service: 檔案/zip操作
+
+================================================================================
+各模組詳細資訊（依目錄分組）
+================================================================================
+
+--------------------------------------------------------------------------------
+📁 (root)/ （11 個模組）
+--------------------------------------------------------------------------------
+
+### `__code_scan.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 319 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 7 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `is_excluded` | (path) | 6 | ✗ | 無 |  | 無 |
+| `has_side_effects` | (path_str, src) | 22 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write), JSON序列化寫入, 檔案/zip操作, 網路呼叫, 外部API呼叫, 修改全域狀態 |  | 無 |
+| `has_complex_conditionals` | (src) | 16 | ✓ | 無 |  | 無 |
+| `has_threading_asyncio` | (src) | 10 | ✓ | 無 |  | threading, asyncio, threading.Queue |
+| `has_external_dependencies` | (src) | 18 | ✓ | 檔案寫入 (open w/a), 檔案/zip操作, 網路呼叫 |  | 無 |
+| `analyze_file` | (path) | 69 | ✗ | 檔案寫入 (open w/a) |  | asyncio |
+| `risk_score` | (r) | 17 | ✓ | 無 |  | asyncio |
+
+
+
+### `_dep_scan.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 64 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `_dep_scan2.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 282 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 3 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `resolve_import` | (importer_module, imp) | 18 | ✗ | 無 |  | 無 |
+| `get_internal_imports` | (importer, imports) | 10 | ✗ | 無 |  | 無 |
+| `dfs` | (node, path) | 13 | ✗ | 無 |  | 無 |
+
+
+
+### `analyze_all.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 128 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `analyze_coverage.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 54 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `analyze_coverage2.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 267 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `analyze_coverage3.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 139 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `analyze_coverage_final.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 93 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `fix_merge_ui.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 18 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `main.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 183 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `bootstrap_runtime` | () | 11 | ✓ | 無 |  | 無 |
+| `main` | (page) | 130 | ✗ | 無 |  | 無 |
+
+
+
+### `test_main.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 47 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `main` | (page) | 5 | ✓ | 無 |  | 無 |
+
+
+
+--------------------------------------------------------------------------------
+📁 app/ （75 個模組）
+--------------------------------------------------------------------------------
+
+### `app\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 5 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `app\logging\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 32 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `app\logging\log_colors.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 37 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `get_level_color` | (level) | 3 | ✓ | 無 |  | 無 |
+| `get_level_prefix` | (level) | 3 | ✓ | 無 |  | 無 |
+
+
+
+### `app\logging\log_config.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 54 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `load_ui_logging_config` | (config_getter) | 30 | ✓ | 無 |  | 無 |
+
+
+
+### `app\logging\log_entry.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 67 |
+| 模組docstring | 有 |
+| 類別數 | 2 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `LogLevel` | L15-22 | ✓ | 無 |
+| `LogEntry` | L36-67 | ✓ | __post_init__, make |
+
+
+
+### `app\logging\log_presenter.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 146 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `LogPresenter` | L22-146 | ✓ | __init__, reset, sync |
+
+
+
+### `app\logging\task_session.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 118 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `TaskSession` | L17-118 | ✓ | __init__, set_progress, add_log, set_error, finish, start, snapshot |
+
+
+
+### `app\services.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 103 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 4 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `run_untranslated_check_service` | (en_dir, tw_dir, out_dir) | 17 | ✓ | 無 |  | 無 |
+| `run_variant_compare_service` | (cn_dir, tw_dir, out_dir) | 17 | ✓ | 無 |  | 無 |
+| `run_english_residue_check_service` | (input_dir, out_dir) | 17 | ✓ | 無 |  | 無 |
+| `run_variant_compare_tsv_service` | (tsv_path, output_csv_path) | 17 | ✓ | 無 |  | 無 |
+
+
+
+### `app\services_impl\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 15 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `app\services_impl\cache\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 11 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `app\services_impl\cache\cache_services.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 236 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 9 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `cache_get_overview_service` | () | 4 | ✓ | 無 |  | 無 |
+| `cache_reload_service` | () | 6 | ✓ | 無 |  | 無 |
+| `cache_reload_type_service` | (cache_type) | 6 | ✓ | 無 |  | 無 |
+| `cache_save_all_service` | (write_new_shard, only_types) | 15 | ✓ | 檔案/zip操作 |  | 無 |
+| `cache_search_service` | (cache_type, query, mode, limit) | 133 | ✓ | 無 | ⚠️ | 無 |
+| `cache_get_entry_service` | (cache_type, key) | 4 | ✓ | 無 |  | 無 |
+| `cache_update_dst_service` | (cache_type, key, new_dst) | 10 | ✓ | 無 |  | 無 |
+| `cache_rotate_service` | (cache_type) | 4 | ✓ | 無 |  | 無 |
+| `cache_rebuild_index_service` | () | 26 | ✓ | 無 |  | 無 |
+
+
+
+### `app\services_impl\config_service.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 97 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 6 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_load_app_config` | () | 12 | ✓ | 無 |  | 無 |
+| `_save_app_config` | (config) | 17 | ✓ | 無 |  | 無 |
+| `load_replace_rules` | () | 7 | ✓ | 無 |  | 無 |
+| `save_replace_rules` | (rules) | 7 | ✓ | 無 |  | 無 |
+| `load_config_json` | () | 7 | ✓ | 無 |  | 無 |
+| `save_config_json` | (config) | 7 | ✓ | 無 |  | 無 |
+
+
+
+### `app\services_impl\logging_service.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 130 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 1 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `LogLimiter` | L28-86 | ✓ | __init__, filter, flush |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `update_logger_config` | (config_loader) | 35 | ✓ | 無 |  | 無 |
+
+
+
+### `app\services_impl\pipelines\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 9 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `app\services_impl\pipelines\_pipeline_logging.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 13 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `ensure_pipeline_logging` | () | 3 | ✓ | 無 |  | 無 |
+
+
+
+### `app\services_impl\pipelines\_task_runner.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 32 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `run_callable_task` | () | 18 | ✓ | 無 |  | 無 |
+
+
+
+### `app\services_impl\pipelines\bundle_service.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 33 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `run_bundling_service` | (input_root_dir, output_zip_path) | 17 | ✓ | 無 |  | 無 |
+
+
+
+### `app\services_impl\pipelines\extract_service.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 95 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `run_lang_extraction_service` | (mods_dir, output_dir, session) | 35 | ✓ | 無 |  | 無 |
+| `run_book_extraction_service` | (mods_dir, output_dir, session) | 36 | ✓ | 無 |  | 無 |
+
+
+
+### `app\services_impl\pipelines\ftb_service.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 39 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `run_ftb_translation_service` | (directory_path, session, output_dir, dry_run, step_export, step_clean, step_translate, step_inject, write_new_cache) | 33 | ✓ | 無 |  | 無 |
+
+
+
+### `app\services_impl\pipelines\kubejs_service.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 37 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `run_kubejs_tooltip_service` | (input_dir, session, output_dir, dry_run, step_extract, step_translate, step_inject, write_new_cache) | 31 | ✓ | 無 |  | 無 |
+
+
+
+### `app\services_impl\pipelines\lm_service.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 78 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `run_lm_translation_service` | (input_dir, output_dir, session, dry_run, export_lang, write_new_cache) | 58 | ✓ | 無 |  | 無 |
+
+
+
+### `app\services_impl\pipelines\lookup_service.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 76 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `run_manual_lookup_service` | (name) | 6 | ✓ | 無 |  | 無 |
+| `run_batch_lookup_service` | (json_text) | 50 | ✓ | JSON序列化寫入 |  | 無 |
+
+
+
+### `app\services_impl\pipelines\md_service.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 39 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `run_md_translation_service` | (input_dir, session, output_dir, dry_run, step_extract, step_translate, step_inject, write_new_cache, lang_mode) | 33 | ✓ | 無 |  | 無 |
+
+
+
+### `app\services_impl\pipelines\merge_service.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 86 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `run_merge_zip_batch_service` | (zip_paths, output_dir, session, only_process_lang) | 68 | ✓ | 無 |  | 無 |
+
+
+
+### `app\startup_tasks.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 24 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `rebuild_index_on_startup` | () | 7 | ✓ | 無 |  | 無 |
+| `start_background_startup_tasks` | () | 5 | ✓ | 無 |  | threading |
+
+
+
+### `app\task_session.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 12 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `app\ui\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 5 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `app\ui\keyboard_shortcuts.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 125 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 1 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `KeyboardShortcutHandler` | L26-120 | ✓ | __init__, set_search_field, set_search_callback, set_save_callback, handle_keyboard |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `create_keyboard_handler` | (page, view_registry, change_view_callback) | 3 | ✓ | 無 |  | 無 |
+
+
+
+### `app\ui\theme.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 74 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `app\ui\view_wrapper.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 58 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `wrap_view` | (content) | 23 | ✓ | 無 |  | 無 |
+
+
+
+### `app\view_registry.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 106 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 4 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_lazy_import_view` | (view_key, page, file_picker) | 17 | ✓ | 無 |  | 無 |
+| `build_view_registry` | (page, file_picker) | 27 | ✓ | 無 |  | 無 |
+| `get_window_size` | (view_key) | 10 | ✓ | 無 |  | 無 |
+| `build_navigation_destinations` | (registry) | 10 | ✓ | 無 |  | 無 |
+
+
+
+### `app\views\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 22 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `app\views\bundler_view.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 208 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `BundlerView` | L20-208 | ✓ | __init__, pick_path_with_tkinter, set_controls_disabled, start_bundling_clicked, bundling_worker |
+
+
+
+### `app\views\cache\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 14 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `app\views\cache\cache_query_view.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 169 |
+| 模組docstring | 無 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheQueryView` | L8-169 | ✓ | __init__, set_type_options |
+
+
+
+### `app\views\cache\cache_view_optimized.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 71 |
+| 模組docstring | 無 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheViewOptimized` | L8-71 | ✓ | __init__, mark_dirty |
+
+
+
+### `app\views\cache_manager\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 21 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `app\views\cache_manager\cache_actions.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 106 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `run_cache_action` | (view, reason, work_fn, success_msg, show_progress) | 90 | ✓ | 無 | ⚠️ | 無 |
+
+
+
+### `app\views\cache_manager\cache_controller.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 45 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheController` | L17-45 | ✓ | __init__, begin_action, is_current |
+
+
+
+### `app\views\cache_manager\cache_history_store.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 137 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 7 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `history_now_ts` | () | 3 | ✓ | 無 |  | 無 |
+| `history_dirs` | (cache_root, cache_type) | 14 | ✓ | 無 |  | 無 |
+| `history_active_default` | (cache_type) | 8 | ✓ | 無 |  | 無 |
+| `history_load_active` | (cache_root, cache_type) | 29 | ✓ | 檔案寫入 (.write), JSON序列化寫入 |  | 無 |
+| `history_save_active` | (active_path, active) | 3 | ✓ | 檔案寫入 (.write), JSON序列化寫入 |  | 無 |
+| `history_append_event` | (cache_root, cache_type, event) | 39 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write), JSON序列化寫入 |  | 無 |
+| `history_load_recent` | (cache_root, cache_type, key, limit) | 27 | ✓ | 無 |  | 無 |
+
+
+
+### `app\views\cache_manager\cache_log_panel.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 40 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `build_log_panel` | () | 28 | ✓ | 無 |  | 無 |
+
+
+
+### `app\views\cache_manager\cache_overview_panel.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 120 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `build_overview_page` | () | 107 | ✓ | 無 |  | 無 |
+
+
+
+### `app\views\cache_manager\cache_presenter.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 62 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CachePresenter` | L11-62 | ✓ | status_label, status_text, phase_label, action_trace, action_log |
+
+
+
+### `app\views\cache_manager\cache_shared_widgets.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 22 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `bordered_block` | () | 12 | ✓ | 無 |  | 無 |
+
+
+
+### `app\views\cache_manager\cache_state.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 33 |
+| 模組docstring | 無 |
+| 類別數 | 3 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheQueryState` | L6-12 | ✗ | 無 |
+| `CacheShardState` | L15-25 | ✗ | 無 |
+| `CacheHistoryState` | L28-33 | ✗ | 無 |
+
+
+
+### `app\views\cache_manager\cache_types.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 38 |
+| 模組docstring | 有 |
+| 類別數 | 2 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheUiState` | L19-27 | ✓ | 無 |
+| `ActionState` | L30-38 | ✓ | 無 |
+
+
+
+### `app\views\cache_manager\panels\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 11 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `app\views\cache_manager\panels\overview_panel.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 71 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheOverviewPanel` | L10-71 | ✓ | __init__ |
+
+
+
+### `app\views\cache_manager\panels\query_panel.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 54 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheQueryPanel` | L10-54 | ✓ | __init__ |
+
+
+
+### `app\views\cache_manager\panels\shard_panel.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 44 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheShardPanel` | L10-44 | ✓ | __init__ |
+
+
+
+### `app\views\cache_query_panel.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 630 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheQueryPanel` | L24-630 | ✓ | __init__, refresh_type_options |
+
+
+
+### `app\views\cache_shard_panel.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 577 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheShardPanel` | L24-577 | ✓ | __init__, refresh |
+
+
+
+### `app\views\cache_view.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 3517 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheView` | L59-3517 | ✓ | __init__, did_mount, commit_ui, set_ui_state |
+
+
+
+### `app\views\config\config_actions.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 113 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `load_config_into_view` | (view, config) | 57 | ✓ | 無 |  | 無 |
+| `save_config_from_view` | (view) | 51 | ✓ | 外部API呼叫 |  | 無 |
+
+
+
+### `app\views\config\config_form.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 58 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 5 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `build_card` | (view, title, controls_list) | 17 | ✓ | 無 |  | 無 |
+| `build_header` | (view) | 9 | ✓ | 無 |  | 無 |
+| `build_footer` | (view) | 15 | ✓ | 檔案/zip操作 |  | 無 |
+| `build_key_row` | (view, tf) | 4 | ✓ | 無 |  | 無 |
+| `build_key_field` | (value) | 3 | ✓ | 無 |  | 無 |
+
+
+
+### `app\views\config_view.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 646 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `ConfigView` | L23-646 | ✓ | __init__, add_model_row, move_model_row, remove_model_by_checkbox, on_add_model_clicked, add_key_row, remove_key_row, load_config, save_config_clicked |
+
+
+
+### `app\views\extractor\extractor_actions.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 307 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 6 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `update_stats_from_log` | (view, line) | 43 | ✓ | 無 |  | 無 |
+| `start_ui_poller` | (view, mode) | 47 | ✓ | 無 |  | threading |
+| `start_extraction` | (view, mode) | 42 | ✓ | 無 |  | threading |
+| `build_preview_result_dialog` | (view, result, mode) | 55 | ✓ | 無 |  | 無 |
+| `build_preview_error_dialog` | (view, error, mode) | 8 | ✓ | 無 |  | 無 |
+| `show_preview` | (view, mode) | 90 | ✓ | 無 | ⚠️ | threading |
+
+
+
+### `app\views\extractor\extractor_panels.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 103 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 3 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `build_pick_button` | (view, target) | 8 | ✓ | 無 |  | 無 |
+| `build_settings_card` | (view) | 73 | ✓ | 無 |  | 無 |
+| `build_logs_card` | (view) | 14 | ✓ | 無 |  | 無 |
+
+
+
+### `app\views\extractor\extractor_state.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 46 |
+| 模組docstring | 無 |
+| 類別數 | 2 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `ExtractionStats` | L6-26 | ✗ | reset, as_dict |
+| `PreviewState` | L29-46 | ✗ | as_dict |
+
+
+
+### `app\views\extractor_view.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 365 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `ExtractorView` | L31-364 | ✓ | __init__, pick_directory, set_controls_disabled, clear_output_path, start_extraction, show_preview |
+
+
+
+### `app\views\icon_preview_view.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 421 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 1 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `IconPreviewView` | L30-421 | ✓ | __init__ |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `to_halfwidth` | (text) | 9 | ✓ | 無 |  | 無 |
+
+
+
+### `app\views\lm_view.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 293 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `LMView` | L26-293 | ✓ | __init__, pick_input_directory, on_input_dir_picked, pick_output_directory, on_output_dir_picked, start_clicked, start_ui_timer |
+
+
+
+### `app\views\lookup_view.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 192 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `LookupView` | L18-192 | ✓ | __init__, single_lookup_clicked, single_lookup_worker, batch_lookup_clicked, batch_lookup_worker |
+
+
+
+### `app\views\merge_view.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 402 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `MergeView` | L18-402 | ✓ | __init__, pick_zips, pick_output_dir, start_merge |
+
+
+
+### `app\views\qc_base.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 84 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `QCBase` | L13-84 | ✓ | __init__, task_worker |
+
+
+
+### `app\views\qc_view.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 359 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `QCView` | L28-359 | ✓ | __init__, pick_file_or_directory_with_tkinter, set_controls_disabled, start_task |
+
+
+
+### `app\views\rules\rules_actions.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 76 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 6 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `translate_regex_error` | (err) | 14 | ✓ | 無 |  | 無 |
+| `validate_rule` | (view, src, dst, all_rules, current_index) | 21 | ✓ | 無 |  | 無 |
+| `perform_reload` | (view) | 7 | ✓ | 無 |  | 無 |
+| `start_reload_thread` | (view) | 6 | ✓ | 無 |  | threading |
+| `start_save_thread` | (view, clean_rules) | 12 | ✓ | 無 |  | threading |
+| `calc_total_pages` | (total_rules, page_size) | 3 | ✓ | 無 |  | 無 |
+
+
+
+### `app\views\rules\rules_state.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 10 |
+| 模組docstring | 無 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `RulesTableState` | L6-10 | ✗ | 無 |
+
+
+
+### `app\views\rules\rules_table.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 20 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `create_rule_row` | (view, from_text, to_text, rid, display_no) | 16 | ✓ | 無 |  | 無 |
+
+
+
+### `app\views\rules_view.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 749 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `RulesView` | L25-749 | ✓ | __init__, on_page_jump_submit, on_sort_change, on_search, validate_rule, translate_regex_error, on_text_change, validate_row_ui, create_rule_row, reload_rules_clicked, prev_page, next_page, save_rules_clicked, add_row_clicked, delete_row_clicked |
+
+
+
+### `app\views\translation\translation_actions.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 169 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 4 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `run_ftb` | (view) | 36 | ✓ | 無 |  | threading |
+| `run_kjs` | (view) | 36 | ✓ | 無 |  | threading |
+| `run_md` | (view) | 36 | ✓ | 無 |  | threading |
+| `start_ui_timer` | (view) | 46 | ✓ | 無 |  | threading |
+
+
+
+### `app\views\translation\translation_panels.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 75 |
+| 模組docstring | 無 |
+| 類別數 | 0 |
+| 函式數 | 5 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `build_path_row` | (view, field) | 14 | ✓ | 無 |  | 無 |
+| `build_action_row` | () | 10 | ✓ | 無 |  | 無 |
+| `build_ftb_tab` | (view) | 14 | ✓ | 無 |  | 無 |
+| `build_kjs_tab` | (view) | 13 | ✓ | 無 |  | 無 |
+| `build_md_tab` | (view) | 14 | ✓ | 無 |  | 無 |
+
+
+
+### `app\views\translation\translation_state.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 9 |
+| 模組docstring | 無 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `TranslationRunState` | L6-9 | ✗ | 無 |
+
+
+
+### `app\views\translation_view.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 324 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `TranslationView` | L52-324 | ✓ | __init__ |
+
+
+
+### `app\views\untranslated_checker.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 176 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `UntranslatedChecker` | L15-176 | ✓ | __init__ |
+
+
+
+--------------------------------------------------------------------------------
+📁 tools/ （3 個模組）
+--------------------------------------------------------------------------------
+
+### `tools\fix_test.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 55 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `tools\gap_analysis.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 91 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `tools\test_all_features.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 599 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 18 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `banner` | (title) | 4 | ✗ | 無 |  | 無 |
+| `result` | (name, ok, detail) | 6 | ✗ | 無 |  | 無 |
+| `warn` | (name, detail) | 4 | ✗ | 無 |  | 無 |
+| `fail` | (name, exc) | 5 | ✗ | 無 |  | 無 |
+| `test_config` | () | 21 | ✗ | 無 |  | 無 |
+| `test_rules` | () | 33 | ✗ | 檔案寫入 (open w/a) |  | 無 |
+| `test_cache` | () | 21 | ✗ | 無 |  | 無 |
+| `test_qc` | () | 43 | ✗ | 檔案寫入 (.write) |  | 無 |
+| `test_lookup` | () | 24 | ✗ | 無 |  | 無 |
+| `test_icon_preview` | () | 20 | ✗ | 無 |  | 無 |
+| `test_bundler` | () | 20 | ✗ | 檔案寫入 (.write) |  | 無 |
+| `test_translation_view` | () | 18 | ✗ | 無 |  | 無 |
+| `test_extractor` | () | 70 | ✗ | 無 |  | 無 |
+| `test_lm` | () | 29 | ✗ | 檔案寫入 (.write) |  | 無 |
+| `test_merge` | () | 44 | ✗ | 檔案寫入 (.write), 檔案/zip操作 |  | 無 |
+| `test_kubejs` | () | 35 | ✗ | 無 |  | 無 |
+| `test_ftb` | () | 33 | ✗ | 無 |  | 無 |
+| `main` | () | 48 | ✗ | 無 |  | 無 |
+
+
+
+--------------------------------------------------------------------------------
+📁 translation_tool/ （84 個模組）
+--------------------------------------------------------------------------------
+
+### `translation_tool\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 10 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `translation_tool\checkers\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 5 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `translation_tool\checkers\english_residue_checker.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 107 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `find_json_files` | (directory) | 8 | ✓ | 無 |  | 無 |
+| `check_english_residue_generator` | (input_dir, output_dir) | 78 | ✓ | 檔案寫入 (open w/a), JSON序列化寫入 |  | 無 |
+
+
+
+### `translation_tool\checkers\untranslated_checker.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 83 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `check_untranslated_generator` | (en_us_dir, zh_tw_dir, output_dir) | 68 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write), JSON序列化寫入 |  | 無 |
+
+
+
+### `translation_tool\checkers\variant_comparator.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 107 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `compare_variants_generator` | (zh_cn_dir, zh_tw_dir, output_dir) | 88 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write), JSON序列化寫入 |  | 無 |
+
+
+
+### `translation_tool\checkers\variant_comparator_tsv.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 88 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `compare_variants_tsv_generator` | (file_path, output_file) | 74 | ✓ | 無 | ⚠️ | 無 |
+
+
+
+### `translation_tool\core\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 5 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `translation_tool\core\ftb_translator.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 410 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 8 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_translate_single_file` | (file_path, input_dir, output_dir, rules, custom_translations) | 34 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write) |  | 無 |
+| `translate_directory_generator` | (input_dir) | 81 | ✓ | 檔案/zip操作 |  | 無 |
+| `deep_merge_3way` | (zh_tw, zh_cn, en_us) | 2 | ✗ | 無 |  | 無 |
+| `resolve_ftbquests_quests_root` | (base_dir) | 2 | ✗ | 無 |  | 無 |
+| `export_ftbquests_raw_json` | (base_dir) | 9 | ✗ | 無 |  | 無 |
+| `clean_ftbquests_from_raw` | (base_dir) | 8 | ✗ | 無 |  | 無 |
+| `prepare_ftbquests_lang_template_only` | (input_config_dir, output_config_dir) | 11 | ✗ | 無 |  | 無 |
+| `run_ftb_pipeline` | (directory_path, session, output_dir, dry_run, step_export, step_clean, step_translate, step_inject, write_new_cache) | 196 | ✓ | 外部API呼叫 | ⚠️ | 無 |
+
+
+
+### `translation_tool\core\ftb_translator_clean.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 172 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 5 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_is_filled_text` | (v) | 10 | ✓ | 無 |  | 無 |
+| `deep_merge_3way` | (zh_tw, zh_cn, en_us) | 25 | ✓ | 無 |  | 無 |
+| `prune_en_us_by_zh_tw` | (en_us, zh_tw) | 20 | ✓ | 無 |  | 無 |
+| `prune_flat_en_by_tw` | (en_map, tw_available) | 9 | ✓ | 無 |  | 無 |
+| `clean_ftbquests_from_raw_impl` | (base_dir) | 90 | ✓ | 檔案寫入 (open w/a) |  | 無 |
+
+
+
+### `translation_tool\core\ftb_translator_export.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 75 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `resolve_ftbquests_quests_root_impl` | (base_dir) | 21 | ✓ | 無 |  | 無 |
+| `export_ftbquests_raw_json_impl` | (base_dir) | 41 | ✓ | 檔案寫入 (open w/a) |  | 無 |
+
+
+
+### `translation_tool\core\ftb_translator_template.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 63 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `prepare_ftbquests_lang_template_only_impl` | (input_config_dir, output_config_dir) | 52 | ✓ | 檔案/zip操作 |  | 無 |
+
+
+
+### `translation_tool\core\icon_classifier.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 27 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `classify_no_icon_reason` | (lang_key) | 19 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\icon_preview_cache.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 45 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `generate_icon_preview` | (icon_path, preview_root) | 35 | ✓ | 檔案寫入 (open w/a), 檔案/zip操作 |  | 無 |
+
+
+
+### `translation_tool\core\icon_reason.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 32 |
+| 模組docstring | 有 |
+| 類別數 | 2 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `IconRisk` | L13-21 | ✓ | 無 |
+| `IconResult` | L24-32 | ✓ | 無 |
+
+
+
+### `translation_tool\core\icon_resolver.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 76 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 3 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_build_icon_index` | (mod_textures_root) | 17 | ✓ | 無 |  | 無 |
+| `resolve_icon_for_lang_key` | (lang_key, assets_root) | 28 | ✓ | 無 |  | 無 |
+| `resolve_icon_with_reason` | (lang_key, assets_root) | 17 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\jar_processor.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 154 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 7 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `get_lang_codes` | () | 10 | ✓ | 無 |  | 無 |
+| `build_lang_file_regex` | () | 8 | ✓ | 無 |  | 無 |
+| `_extract_from_jar` | (jar_path, output_root, target_regex) | 12 | ✓ | 無 |  | 無 |
+| `_run_extraction_process` | (mods_dir, output_dir, target_regex, process_name) | 22 | ✓ | 無 |  | 無 |
+| `extract_lang_files_generator` | (mods_dir, output_dir) | 17 | ✓ | 無 |  | 無 |
+| `extract_book_files_generator` | (mods_dir, output_dir) | 16 | ✓ | 無 |  | 無 |
+| `preview_extraction_generator` | (mods_dir, mode) | 16 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\jar_processor_discovery.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 23 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `find_jar_files` | (folder_path) | 9 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\jar_processor_extract.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 151 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 4 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `get_file_hash` | (data) | 2 | ✗ | 無 |  | 無 |
+| `_normalize_jar_base_name` | (jar_filename) | 14 | ✗ | 無 |  | 無 |
+| `extract_from_jar_impl` | (jar_path, output_root, target_regex) | 46 | ✗ | 檔案寫入 (open w/a), 檔案寫入 (.write), 檔案/zip操作 |  | 無 |
+| `run_extraction_process_impl` | (mods_dir, output_dir, target_regex, process_name) | 61 | ✗ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\jar_processor_preview.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 151 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 2 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `ExtractionSummary` | L19-44 | ✓ | __init__, add_success, add_warning, add_failure, get_summary |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `preview_extraction_generator_impl` | (mods_dir, mode) | 59 | ✗ | 檔案/zip操作 |  | 無 |
+| `generate_preview_report` | (result, mode, output_path) | 46 | ✗ | 檔案寫入 (open w/a), 檔案寫入 (.write) |  | 無 |
+
+
+
+### `translation_tool\core\kubejs_translator.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 445 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 11 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_is_filled_text` | (v) | 2 | ✗ | 無 |  | 無 |
+| `deep_merge_3way_flat` | (tw, cn, en) | 2 | ✗ | 無 |  | 無 |
+| `prune_en_by_tw_flat` | (en_map, tw_available) | 2 | ✗ | 無 |  | 無 |
+| `_read_json_dict_orjson` | (path) | 2 | ✗ | 無 |  | 無 |
+| `_write_json_orjson` | (path, data) | 2 | ✗ | 無 |  | 無 |
+| `clean_kubejs_from_raw` | (base_dir) | 20 | ✗ | 無 |  | 無 |
+| `resolve_kubejs_root` | (input_dir) | 2 | ✗ | 無 |  | 無 |
+| `step1_extract_and_clean` | () | 47 | ✗ | 無 |  | 無 |
+| `step2_translate_lm` | () | 69 | ✗ | 無 |  | 無 |
+| `step3_inject` | () | 22 | ✗ | 無 |  | 無 |
+| `run_kubejs_pipeline` | () | 216 | ✗ | JSON序列化寫入 | ⚠️ | 無 |
+
+
+
+### `translation_tool\core\kubejs_translator_clean.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 146 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 4 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `is_filled_text_impl` | (v) | 10 | ✓ | 無 |  | 無 |
+| `deep_merge_3way_flat_impl` | (tw, cn, en) | 21 | ✓ | 無 |  | 無 |
+| `prune_en_by_tw_flat_impl` | (en_map, tw_available) | 8 | ✓ | 無 |  | 無 |
+| `clean_kubejs_from_raw_impl` | (base_dir) | 90 | ✓ | 檔案寫入 (.write) |  | 無 |
+
+
+
+### `translation_tool\core\kubejs_translator_io.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 42 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `read_json_dict_orjson_impl` | (path) | 13 | ✓ | 無 |  | 無 |
+| `write_json_orjson_impl` | (path, data) | 14 | ✓ | 檔案寫入 (.write), JSON序列化寫入 |  | 無 |
+
+
+
+### `translation_tool\core\kubejs_translator_paths.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 42 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `resolve_kubejs_root_impl` | (input_dir) | 32 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\lang_codec.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 136 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 7 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `try_repair_lang_line` | (line) | 13 | ✓ | 無 |  | 無 |
+| `collapse_lang_lines` | (text) | 26 | ✓ | 無 |  | 無 |
+| `parse_lang_text` | (text) | 44 | ✓ | 無 |  | 無 |
+| `dump_lang_text` | (data) | 7 | ✓ | 無 |  | 無 |
+| `is_mc_standard_lang_path` | (path) | 9 | ✓ | 無 |  | 無 |
+| `pick_first_not_none` | () | 6 | ✓ | 無 |  | 無 |
+| `normalize_patchouli_book_root` | (path) | 9 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\lang_item_row.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 154 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 1 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `LangItemRow` | L22-154 | ✓ | __init__ |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `to_halfwidth` | (text) | 5 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\lang_merge_content.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 100 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 4 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_patch_localized_content_json` | (zf, cn_path, tw_output_path, rules, log_prefix, output_dir) | 20 | ✗ | 無 |  | 無 |
+| `_process_content_or_copy_file` | (zf, input_path, rules, output_dir, only_process_lang, all_files_cache, patchouli_eff_cache, patchouli_output_dir, other_output_dir) | 32 | ✗ | 無 |  | 無 |
+| `remove_empty_dirs` | (root_dir) | 2 | ✗ | 無 |  | 無 |
+| `export_filtered_pending` | (pending_root, output_root, min_count) | 7 | ✗ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\lang_merge_content_copy.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 477 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 3 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_compute_patchouli_lang_effectiveness` | (zf, book_root, threshold, json_module) | 75 | ✓ | 無 |  | 無 |
+| `_extract_all_strings` | (data) | 12 | ✓ | 無 |  | 無 |
+| `process_content_or_copy_file_impl` | (zf, input_path, rules, output_dir) | 359 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write), JSON序列化寫入, 檔案/zip操作 | ⚠️ | 無 |
+
+
+
+### `translation_tool\core\lang_merge_content_patchers.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 94 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `patch_localized_content_json_impl` | (zf, cn_path, tw_output_path, rules, log_prefix, output_dir) | 79 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write), JSON序列化寫入, 檔案/zip操作 | ⚠️ | 無 |
+
+
+
+### `translation_tool\core\lang_merge_pending.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 57 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `remove_empty_dirs_impl` | (root_dir) | 13 | ✓ | 無 |  | 無 |
+| `export_filtered_pending_impl` | (pending_root, output_root, min_count) | 30 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write), JSON序列化寫入 |  | 無 |
+
+
+
+### `translation_tool\core\lang_merge_pipeline.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 311 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_contains_cjk_str` | (s) | 3 | ✓ | 無 |  | 無 |
+| `_process_single_mod` | (zf, paths, rules, output_dir, must_translate_dir) | 271 | ✓ | 檔案寫入 (open w/a), 檔案/zip操作 | ⚠️ | 無 |
+
+
+
+### `translation_tool\core\lang_merge_zip_io.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 164 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 5 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_read_text_from_zip` | (zf, path) | 24 | ✓ | 檔案寫入 (open w/a), 檔案/zip操作 |  | 無 |
+| `_read_json_from_zip` | (zf, path) | 34 | ✓ | 檔案/zip操作 |  | 無 |
+| `_write_bytes_atomic` | (path, data) | 19 | ✓ | 檔案寫入 (open w/a) |  | 無 |
+| `_write_text_atomic` | (path, text) | 18 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write) |  | 無 |
+| `quarantine_copy_from_zip` | (zf, zip_path, output_dir, reason, extra_text) | 47 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write), 檔案/zip操作 |  | 無 |
+
+
+
+### `translation_tool\core\lang_merger.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 216 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `merge_zhcn_to_zhtw_from_zip` | (zip_file, output_dir, only_process_lang) | 196 | ✓ | 檔案/zip操作 | ⚠️ | 無 |
+
+
+
+### `translation_tool\core\lang_processing_format.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 290 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 10 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `get_converter` | () | 8 | ✓ | 無 |  | threading |
+| `convert_only_cjk_old` | (text, rules) | 16 | ✓ | 無 |  | 無 |
+| `convert_only_cjk` | (text, rules) | 32 | ✓ | 無 |  | 無 |
+| `opencc_markdown_safe` | (md, rules) | 54 | ✓ | 無 | ⚠️ | 無 |
+| `remove_translated_keys` | (en_dict, tw_dict) | 16 | ✓ | 無 |  | 無 |
+| `compare_and_remove_translated_from_en` | (en_source, tw_base) | 19 | ✓ | 無 |  | 無 |
+| `dump_json_bytes` | (obj) | 13 | ✓ | JSON序列化寫入 |  | 無 |
+| `translate_markdown` | (cn_content, translate_func, rules, file_path) | 53 | ✓ | 無 |  | 無 |
+| `translate_plain_text` | (cn_content, translate_func, rules, file_path) | 14 | ✓ | 無 |  | 無 |
+| `get_text_processor` | (ext) | 3 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\lm_api_client.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 70 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `call_gemini_requests` | () | 56 | ✓ | JSON序列化寫入, 網路呼叫, 外部API呼叫 |  | 無 |
+
+
+
+### `translation_tool\core\lm_config_rules.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 473 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 14 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `KeyIndexTracker` | L21-59 | ✓ | __init__, get_current, next, set_key_count, reset |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `get_current_key_index` | () | 3 | ✓ | 無 |  | 無 |
+| `rotate_key_index` | () | 3 | ✓ | 無 |  | 無 |
+| `reset_key_index` | () | 3 | ✓ | 無 |  | 無 |
+| `_get_all_keys` | () | 10 | ✓ | 無 |  | 無 |
+| `get_current_api_key` | () | 22 | ✓ | 外部API呼叫 |  | 無 |
+| `rotate_api_key` | () | 42 | ✓ | 外部API呼叫 |  | 無 |
+| `validate_api_keys` | () | 21 | ✓ | 外部API呼叫 |  | 無 |
+| `validate_api_keys_from_ui` | (keys) | 13 | ✓ | 外部API呼叫 |  | 無 |
+| `needs_translation_text` | (s) | 21 | ✓ | 無 |  | 無 |
+| `value_fully_translated` | (value) | 53 | ✓ | 無 |  | 無 |
+| `contains_cjk` | (s) | 34 | ✓ | 無 |  | 無 |
+| `build_skip_terms_pattern` | (terms) | 48 | ✓ | 無 |  | 無 |
+| `is_value_translatable` | (value) | 62 | ✓ | 無 |  | 無 |
+| `is_translatable_field` | (key) | 13 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\lm_response_parser.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 40 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `safe_json_loads` | (text) | 24 | ✓ | 無 |  | 無 |
+| `chunked` | (lst, size) | 4 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\lm_translator.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 671 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 3 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `get_formatted_duration` | (start_tick) | 24 | ✓ | 無 |  | 無 |
+| `format_duration_seconds` | (seconds) | 32 | ✓ | 無 |  | 無 |
+| `translate_directory_generator` | (input_dir, output_dir) | 567 | ✓ | 檔案寫入 (.write), JSON序列化寫入, 外部API呼叫 | ⚠️ | 無 |
+
+
+
+### `translation_tool\core\lm_translator_main.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 894 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 7 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `translate_batch_smart` | (batch_items, total, dry_run, export_cache_only) | 28 | ✓ | 無 |  | 無 |
+| `_validate_batch_items` | (items) | 29 | ✓ | 無 |  | 無 |
+| `_detect_batch_profile` | (items) | 50 | ✓ | 無 |  | 無 |
+| `_calculate_batch_size` | (profile) | 21 | ✓ | 無 |  | 無 |
+| `_execute_translation` | (items, batch_size, batch_profile, total, dry_run, export_cache_only) | 16 | ✓ | 無 |  | 無 |
+| `_process_output` | (results, status) | 19 | ✓ | 無 |  | 無 |
+| `translate_batch_smart_old` | (batch_items, total) | 672 | ✓ | 網路呼叫, 外部API呼叫 | ⚠️ | 無 |
+
+
+
+### `translation_tool\core\lm_translator_scan.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 103 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 3 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `is_plain_lang_json` | (data) | 14 | ✓ | 無 |  | 無 |
+| `scan_translatable_files` | (root) | 10 | ✓ | 無 |  | 無 |
+| `extract_items_parallel` | () | 55 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\lm_translator_shared.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 41 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `translation_tool\core\lm_translator_shared_cache.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 104 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 3 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheRule` | L16-27 | ✓ | make_key |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `get_default_cache_rules` | () | 9 | ✓ | 無 |  | 無 |
+| `_is_valid_hit` | (dst, entry, item) | 18 | ✓ | 無 |  | 無 |
+| `fast_split_items_by_cache` | (all_items) | 38 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\lm_translator_shared_loop.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 222 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 2 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `TranslateLoopResult` | L19-28 | ✓ | 無 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_get_default_batch_size` | (cache_type, batch_size_by_type) | 19 | ✓ | 無 |  | 無 |
+| `translate_items_with_cache_loop` | (items_to_translate) | 173 | ✓ | 無 | ⚠️ | 無 |
+
+
+
+### `translation_tool\core\lm_translator_shared_preview.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 79 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 2 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `TouchSet` | L15-27 | ✓ | touch, flush |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `write_dry_run_preview` | (out_dir, items) | 19 | ✓ | 檔案寫入 (.write), JSON序列化寫入 |  | 無 |
+| `write_cache_hit_preview` | (out_dir, cached_items) | 31 | ✓ | 檔案寫入 (.write), JSON序列化寫入 |  | 無 |
+
+
+
+### `translation_tool\core\lm_translator_shared_recording.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 64 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `TranslationRecorder` | L16-64 | ✓ | record, export_json, export_csv |
+
+
+
+### `translation_tool\core\md_translation_assembly.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 258 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 5 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_log_md_step2_stats` | (step2_res) | 2 | ✗ | 無 |  | 無 |
+| `step1_extract` | () | 26 | ✗ | 無 |  | 無 |
+| `step2_translate` | () | 22 | ✗ | 無 |  | 無 |
+| `step3_inject` | () | 22 | ✗ | 無 |  | 無 |
+| `run_md_pipeline` | (input_dir, session, output_dir, dry_run, step_extract, step_translate, step_inject, write_new_cache, lang_mode) | 121 | ✗ | 無 | ⚠️ | 無 |
+
+
+
+### `translation_tool\core\md_translation_progress.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 27 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `_ProgressProxy` | L11-27 | ✓ | __init__, set_progress |
+
+
+
+### `translation_tool\core\md_translation_stats.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 102 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 4 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `normalize_lang_mode` | (lang_mode) | 6 | ✓ | 無 |  | 無 |
+| `count_json_files` | (root) | 5 | ✓ | 無 |  | 無 |
+| `count_md_pending_docs` | (root) | 15 | ✓ | 無 |  | 無 |
+| `log_md_step2_stats` | (step2_res) | 52 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\core\md_translation_steps.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 338 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 3 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `step1_extract_impl` | () | 164 | ✓ | 檔案寫入 (.write), JSON序列化寫入 | ⚠️ | 無 |
+| `step2_translate_impl` | () | 43 | ✓ | 無 |  | 無 |
+| `step3_inject_impl` | () | 114 | ✓ | 檔案寫入 (.write) |  | 無 |
+
+
+
+### `translation_tool\core\output_bundler.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 115 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_add_folder_to_zip` | (zip_file, folder_path, base_path_in_zip) | 31 | ✓ | 檔案寫入 (.write), 檔案/zip操作 |  | 無 |
+| `bundle_outputs_generator` | (input_root_dir, output_zip_path) | 64 | ✓ | 檔案/zip操作 |  | 無 |
+
+
+
+### `translation_tool\core\translatable_extractor.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 152 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 4 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `find_patchouli_json` | (root, dir_names) | 23 | ✓ | 無 |  | 無 |
+| `find_lang_json` | (root) | 11 | ✓ | 無 |  | 無 |
+| `is_lang_file` | (file_path) | 11 | ✓ | 無 |  | 無 |
+| `extract_translatables` | (json_data, file_path) | 83 | ✓ | 無 | ⚠️ | 無 |
+
+
+
+### `translation_tool\core\translation_path_writer.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 112 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `map_lang_output_path` | (src) | 5 | ✓ | 無 |  | 無 |
+| `set_by_path` | (root, path, value) | 96 | ✓ | 無 | ⚠️ | 無 |
+
+
+
+### `translation_tool\plugins\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 5 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `translation_tool\plugins\ftbquests\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 5 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `translation_tool\plugins\ftbquests\ftbquests_lmtranslator.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 624 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 3 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `DryRunStats` | L128-142 | ✓ | 無 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `map_to_items` | (mapping, cache_type, file_hint) | 49 | ✓ | 無 |  | 無 |
+| `count_translatable_keys` | (mapping) | 14 | ✓ | 無 |  | 無 |
+| `translate_ftb_pending_to_zh_tw` | () | 478 | ✓ | 外部API呼叫 | ⚠️ | 無 |
+
+
+
+### `translation_tool\plugins\ftbquests\ftbquests_snbt_extractor.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 336 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 8 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `is_lang_key_ref` | (val) | 3 | ✓ | 無 |  | 無 |
+| `is_lang_key_ref_like` | (val) | 12 | ✓ | 無 |  | 無 |
+| `is_tag_condition_text` | (s) | 8 | ✓ | 無 |  | 無 |
+| `walk_snbt_file` | (path) | 8 | ✓ | 檔案寫入 (open w/a) |  | 無 |
+| `extract_lang_file` | (filename, root) | 28 | ✓ | 無 |  | 無 |
+| `extract_quest_file` | (filename, root) | 66 | ✓ | 無 |  | 無 |
+| `ensure_lang` | (store, lang) | 4 | ✓ | 無 |  | 無 |
+| `process_quest_folder` | (quests_root) | 107 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\plugins\ftbquests\ftbquests_snbt_inject.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 921 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 12 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_normalize_config_dir` | (path) | 12 | ✓ | 無 |  | 無 |
+| `_load_json_dict` | (path) | 6 | ✓ | 檔案寫入 (open w/a) |  | 無 |
+| `split_lang_by_source_file` | (lang_map) | 25 | ✓ | 無 |  | 無 |
+| `_walk_and_copy_template` | (template_dir, zh_tw_dir) | 20 | ✓ | 檔案/zip操作 |  | 無 |
+| `walk_and_copy_all_snbt` | (src_root_dir, dst_root_dir) | 20 | ✓ | 檔案/zip操作 |  | 無 |
+| `_read_snbt` | (path) | 10 | ✓ | 檔案寫入 (open w/a) |  | 無 |
+| `_write_snbt` | (path, root) | 5 | ✓ | 檔案寫入 (open w/a), JSON序列化寫入 |  | 無 |
+| `patch_lang_snbt_file` | (src_path, dst_path, updates) | 126 | ✓ | 無 |  | 無 |
+| `patch_quest_snbt_file` | (src_path, dst_path, updates) | 156 | ✓ | 無 |  | 無 |
+| `inject_ftbquests_zh_tw_from_json_old` | (base_config_dir, zh_tw_lang_json_path) | 81 | ✓ | 無 |  | 無 |
+| `inject_ftbquests_quests_from_zh_tw_json` | () | 103 | ✓ | 檔案/zip操作 |  | 無 |
+| `inject_ftbquests_zh_tw_from_jsons` | (base_config_dir, zh_tw_lang_json_path, zh_tw_quests_json_path) | 312 | ✓ | 檔案/zip操作 | ⚠️ | 無 |
+
+
+
+### `translation_tool\plugins\kubejs\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 5 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `translation_tool\plugins\kubejs\kubejs_tooltip_extract.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 695 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 15 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `resolve_kubejs_root` | (input_dir) | 63 | ✓ | 無 |  | 無 |
+| `to_json_name` | (filename) | 15 | ✓ | 無 |  | 無 |
+| `strip_quotes` | (s) | 11 | ✓ | 無 |  | 無 |
+| `split_js_args` | (s) | 50 | ✓ | 無 |  | 無 |
+| `extract_array_strings` | (arr) | 12 | ✓ | 無 |  | 無 |
+| `is_patchouli_command_only` | (s) | 24 | ✓ | 無 |  | 無 |
+| `is_lang_key_like` | (s) | 30 | ✓ | 無 |  | 無 |
+| `is_lang_key_ref_like` | (s) | 12 | ✓ | 無 |  | 無 |
+| `clean_text` | (s) | 20 | ✓ | 無 |  | 無 |
+| `should_skip_kubejs_tooltip_expr` | (expr) | 3 | ✓ | 無 |  | 無 |
+| `extract_js_string_call` | (text, start) | 56 | ✓ | 無 |  | 無 |
+| `should_skip_text` | (text) | 47 | ✓ | 無 |  | 無 |
+| `extract_call_args` | (text, start) | 30 | ✓ | 無 |  | 無 |
+| `extract_itemevents_tooltips` | (content, file_name, extracted, auto_id) | 72 | ✓ | 無 |  | 無 |
+| `extract` | (source_dir, output_dir) | 197 | ✓ | 檔案寫入 (open w/a), JSON序列化寫入 |  | 無 |
+
+
+
+### `translation_tool\plugins\kubejs\kubejs_tooltip_inject.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 482 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 9 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `resolve_kubejs_root` | (input_dir) | 36 | ✓ | 無 |  | 無 |
+| `split_js_args` | (s) | 34 | ✓ | 無 |  | 無 |
+| `strip_quotes` | (s) | 8 | ✓ | 無 |  | 無 |
+| `replace_text_in_text_obj` | (expr, new_text) | 8 | ✓ | 無 |  | 無 |
+| `extract_array_strings` | (expr) | 3 | ✓ | 無 |  | 無 |
+| `replace_array` | (expr, new_values) | 13 | ✓ | 無 |  | 無 |
+| `to_js_name` | (json_name) | 5 | ✓ | 無 |  | 無 |
+| `clean_text` | (s) | 9 | ✓ | 無 |  | 無 |
+| `inject` | (original_dir, translated_dir, final_output_dir) | 337 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write), JSON序列化寫入 |  | 無 |
+
+
+
+### `translation_tool\plugins\kubejs\kubejs_tooltip_lmtranslator.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 510 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 3 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `DryRunStats` | L95-106 | ✓ | 無 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `collect_items_from_mapping` | (mapping) | 25 | ✓ | 無 |  | 無 |
+| `count_translatable_keys` | (mapping) | 10 | ✓ | 無 |  | 無 |
+| `translate_kubejs_pending_to_zh_tw` | () | 400 | ✓ | 外部API呼叫, 修改全域狀態 | ⚠️ | 無 |
+
+
+
+### `translation_tool\plugins\md\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 5 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `translation_tool\plugins\md\md_extract_qa.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 520 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 16 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `BlockItem` | L88-97 | ✓ | 無 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `contains_cjk` | (s) | 3 | ✓ | 無 |  | 無 |
+| `pass_lang_filter` | (block_text, mode) | 13 | ✓ | 無 |  | 無 |
+| `normalize_for_dedupe` | (s) | 12 | ✓ | 無 |  | 無 |
+| `make_content_hash` | (text) | 4 | ✓ | 無 |  | 無 |
+| `is_splitter_line_old` | (line) | 12 | ✓ | 無 |  | 無 |
+| `is_splitter_line` | (line) | 18 | ✓ | 無 |  | 無 |
+| `is_translatable_text_line` | (line) | 32 | ✓ | 無 |  | 無 |
+| `normalize_blank_lines` | (text) | 7 | ✓ | 無 |  | 無 |
+| `extract_blocks` | (md_text, rel_file, lang_mode) | 93 | ✓ | 無 |  | 無 |
+| `build_pending_json` | (rel_md, abs_md, items, lang_mode) | 20 | ✓ | 無 |  | 無 |
+| `has_allowed_lang_segment` | (path) | 3 | ✗ | 無 |  | 無 |
+| `detect_lang_segment` | (parts) | 11 | ✓ | 無 |  | 無 |
+| `map_rel_lang_path` | (rel_path, src_lang, dst_lang) | 22 | ✓ | 無 |  | 無 |
+| `iter_md_files` | (root) | 18 | ✓ | 無 |  | 無 |
+| `safe_relpath` | (path, root) | 5 | ✓ | 無 |  | 無 |
+| `main` | () | 164 | ✓ | 檔案寫入 (.write), JSON序列化寫入 | ⚠️ | 無 |
+
+
+
+### `translation_tool\plugins\md\md_inject_qa.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 454 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 11 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `Item` | L218-228 | ✓ | 無 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `map_lang_in_rel_path` | (rel_path, src_lang, dst_lang) | 22 | ✓ | 無 |  | 無 |
+| `map_lang_in_rel_path_allow_zh` | (rel_path, src_lang, dst_lang) | 45 | ✓ | 無 |  | 無 |
+| `is_token_line` | (line) | 12 | ✓ | 無 |  | 無 |
+| `is_text_line_old` | (line) | 7 | ✓ | 無 |  | 無 |
+| `is_text_line` | (line) | 23 | ✓ | 無 |  | 無 |
+| `flatten_for_md` | (text) | 38 | ✓ | 無 |  | 無 |
+| `load_items_from_json` | (json_path) | 17 | ✓ | 無 |  | 無 |
+| `apply_item_to_md_lines_old` | (md_lines, item) | 37 | ✓ | 無 |  | 無 |
+| `apply_item_to_md_lines` | (md_lines, item) | 52 | ✓ | 無 |  | 無 |
+| `iter_json_files` | (root) | 7 | ✓ | 無 |  | 無 |
+| `main` | () | 97 | ✓ | 檔案寫入 (.write) |  | 無 |
+
+
+
+### `translation_tool\plugins\md\md_lmtranslator.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 465 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 7 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `PendingItem` | L73-84 | ✓ | 無 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `read_json` | (path) | 4 | ✓ | 檔案寫入 (open w/a) |  | 無 |
+| `write_json` | (path, data) | 5 | ✓ | 檔案寫入 (open w/a), JSON序列化寫入 |  | 無 |
+| `collect_pending_json_files` | (pending_root) | 6 | ✓ | 無 |  | 無 |
+| `load_pending_doc` | (path) | 18 | ✓ | 無 |  | 無 |
+| `compute_out_json_path` | (src_json, in_pending_root, out_root) | 6 | ✓ | 無 |  | 無 |
+| `translate_md_pending` | () | 323 | ✓ | 外部API呼叫 | ⚠️ | 無 |
+| `main` | () | 27 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\plugins\shared\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 27 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `translation_tool\plugins\shared\json_io.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 29 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 3 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `read_json_dict` | (path) | 7 | ✓ | 檔案寫入 (open w/a) |  | 無 |
+| `write_json_dict` | (path, data) | 5 | ✓ | 檔案寫入 (open w/a), JSON序列化寫入 |  | 無 |
+| `collect_json_files` | (input_dir) | 3 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\plugins\shared\lang_path_rules.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 48 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 4 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `should_rename_to_zh_tw` | (src_path, rename_langs) | 9 | ✓ | 無 |  | 無 |
+| `is_lang_code_segment` | (seg) | 9 | ✓ | 無 |  | 無 |
+| `replace_lang_folder_with_zh_tw` | (rel) | 10 | ✓ | 無 |  | 無 |
+| `compute_output_path` | (src_path, in_dir, out_dir, rename_langs) | 7 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\plugins\shared\lang_text_rules.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 27 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_strip_fmt` | (s) | 3 | ✓ | 無 |  | 無 |
+| `is_already_zh` | (s) | 10 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\utils\__init__.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 5 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 0 |
+
+
+
+### `translation_tool\utils\cache_loader.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 59 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `load_shard_file` | (path) | 7 | ✓ | 無 |  | 無 |
+| `load_cache_type` | (cache_type) | 36 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\utils\cache_manager.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 324 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 24 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_state` | () | 3 | ✓ | 無 |  | 無 |
+| `_get_cache_root` | () | 5 | ✓ | 無 |  | 無 |
+| `_load_cache_type` | (cache_type) | 12 | ✓ | 無 |  | 無 |
+| `initialize_translation_cache` | () | 11 | ✓ | 無 |  | 無 |
+| `is_cache_initialized` | () | 3 | ✓ | 無 |  | 無 |
+| `reload_translation_cache` | () | 6 | ✓ | 無 |  | 無 |
+| `reload_translation_cache_type` | (cache_type) | 11 | ✓ | 無 |  | 無 |
+| `_save_entries_to_active_shards` | (cache_type, entries, force_new_shard) | 15 | ✓ | 無 |  | 無 |
+| `save_translation_cache` | (cache_type, write_new_shard) | 26 | ✓ | 無 |  | 無 |
+| `_get_active_shard_path` | (cache_type) | 9 | ✓ | 無 |  | 無 |
+| `add_to_cache` | (cache_type, key, src, dst) | 28 | ✓ | 無 |  | 無 |
+| `get_from_cache` | (cache_type, key) | 9 | ✓ | 無 |  | 無 |
+| `get_cache_entry` | (cache_type, key) | 9 | ✓ | 無 |  | 無 |
+| `get_cache_dict_ref` | (cache_type) | 7 | ✓ | 無 |  | 無 |
+| `get_session_new_count` | (cache_type) | 7 | ✓ | 無 |  | 無 |
+| `get_active_shard_id` | (cache_type) | 6 | ✓ | 無 |  | 無 |
+| `get_cache_overview` | () | 18 | ✓ | 無 |  | 無 |
+| `force_rotate_shard` | (cache_type) | 17 | ✓ | 檔案寫入 (.write) |  | 無 |
+| `_get_search_facade` | () | 8 | ✓ | 修改全域狀態 |  | 無 |
+| `get_search_engine` | () | 3 | ✓ | 無 |  | 無 |
+| `rebuild_search_index` | () | 6 | ✓ | 無 |  | 無 |
+| `rebuild_search_index_for_type` | (cache_type) | 6 | ✓ | 無 |  | 無 |
+| `search_cache` | (query, cache_type, limit, use_fuzzy) | 7 | ✓ | 無 |  | 無 |
+| `find_similar_translations` | (text, cache_type, threshold, limit) | 7 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\utils\cache_overview.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 93 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `get_active_shard_id` | (cache_file_path, cache_type, active_shard_file) | 12 | ✓ | 無 |  | 無 |
+| `build_cache_overview` | () | 66 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\utils\cache_search.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 789 |
+| 模組docstring | 有 |
+| 類別數 | 3 |
+| 函式數 | 8 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheSearchEngine` | L36-370 | ✓ | __init__, index_cache_entry, index_batch, search, clear_index, clear_index_by_type, close, __enter__, __exit__ |
+| `FuzzyMatcher` | L376-456 | ✓ | similarity, find_similar, rank_results |
+| `SearchOrchestrator` | L627-789 | ✓ | __init__, get_engine, rebuild_search_index, rebuild_search_index_for_type, search_cache, find_similar_translations, close |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `search_cache` | (query, db_path, limit, fuzzy, threshold) | 16 | ✓ | 無 |  | 無 |
+| `_extract_path_from_composite_key` | (key, src) | 13 | ✓ | 無 |  | 無 |
+| `_infer_search_path` | (cache_type, key, entry) | 19 | ✓ | 無 |  | 無 |
+| `_infer_search_mod` | (cache_type, key, path, entry) | 32 | ✓ | 無 |  | 無 |
+| `_build_search_metadata` | (cache_type, key, entry) | 7 | ✓ | 無 |  | 無 |
+| `build_index_entries` | (cache_type, cache_dict) | 28 | ✓ | 無 |  | 無 |
+| `_build_single_entry` | (cache_type, key, entry) | 9 | ✓ | 無 |  | 無 |
+| `rebuild_from_cache_dicts` | (engine, cache_types, cache_state) | 29 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\utils\cache_search_facade.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 119 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheSearchFacade` | L16-119 | ✓ | __init__, get_search_engine, rebuild_search_index, rebuild_search_index_for_type, search_cache, find_similar_translations |
+
+
+
+### `translation_tool\utils\cache_shards.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 165 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 4 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_write_json_atomic` | (path, data) | 11 | ✓ | 檔案寫入 (.write), JSON序列化寫入 |  | 無 |
+| `_get_active_shard_path` | () | 26 | ✓ | 檔案寫入 (.write) |  | 無 |
+| `_rotate_shard_if_needed` | () | 29 | ✓ | 檔案寫入 (.write) |  | 無 |
+| `_save_entries_to_active_shards` | () | 82 | ✓ | 檔案寫入 (.write) |  | 無 |
+
+
+
+### `translation_tool\utils\cache_store.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 201 |
+| 模組docstring | 有 |
+| 類別數 | 2 |
+| 函式數 | 19 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `CacheMetrics` | L21-40 | ✓ | 無 |
+| `CacheRuntimeState` | L43-58 | ✓ | 無 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `get_metrics` | () | 3 | ✓ | 無 |  | 無 |
+| `record_hit` | (cache_type) | 4 | ✓ | 無 |  | 無 |
+| `record_miss` | (cache_type) | 4 | ✓ | 無 |  | 無 |
+| `record_add` | (cache_type) | 4 | ✓ | 無 |  | 無 |
+| `record_load_time` | (cache_type, ms) | 4 | ✓ | 無 |  | 無 |
+| `record_save_time` | (cache_type, ms) | 4 | ✓ | 檔案/zip操作 |  | 無 |
+| `record_file_size` | (cache_type, bytes) | 4 | ✓ | 無 |  | 無 |
+| `record_collision_suspect` | () | 4 | ✓ | 無 |  | 無 |
+| `get_runtime_state` | () | 7 | ✓ | 無 |  | 無 |
+| `reset_runtime_state` | (cache_types) | 16 | ✓ | 無 |  | 無 |
+| `ensure_runtime_maps` | (cache_types) | 21 | ✓ | 無 |  | 無 |
+| `get_cache_type_dict` | (cache_state, cache_type) | 9 | ✓ | 無 |  | 無 |
+| `get_entry` | (cache_dict, key) | 4 | ✓ | 無 |  | 無 |
+| `get_value` | (cache_dict, key) | 7 | ✓ | 無 |  | 無 |
+| `add_entry` | (cache_dict, key, entry) | 8 | ✓ | 無 |  | 無 |
+| `mark_dirty` | (is_dirty, cache_type) | 3 | ✓ | 無 |  | 無 |
+| `clear_dirty` | (is_dirty, cache_type) | 3 | ✓ | 無 |  | 無 |
+| `get_session_entries` | (session_new_entries, cache_type) | 5 | ✓ | 無 |  | 無 |
+| `flush_session_entries` | (session_new_entries, cache_type) | 8 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\utils\config_access.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 15 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 2 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `get_runtime_config` | () | 3 | ✓ | 無 |  | 無 |
+| `resolve_runtime_path` | (path_like) | 3 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\utils\config_manager.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 382 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 7 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `LazyConfigProxy` | L329-378 | ✓ | get, __getitem__, __contains__, __iter__, __len__, items, keys, values, copy, __repr__ |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `get_project_root` | () | 3 | ✓ | 無 |  | 無 |
+| `resolve_project_path` | (path_like) | 16 | ✓ | 無 |  | 無 |
+| `load_config` | (config_path) | 58 | ✓ | 檔案寫入 (open w/a) |  | 無 |
+| `save_config` | (config, config_path) | 24 | ✓ | 檔案寫入 (open w/a), JSON序列化寫入 |  | 無 |
+| `setup_logging` | (config) | 38 | ✓ | 無 |  | 無 |
+| `get_models_config` | (cfg) | 24 | ✓ | 無 |  | 無 |
+| `deep_merge` | (default, override) | 11 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\utils\exceptions.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 276 |
+| 模組docstring | 有 |
+| 類別數 | 7 |
+| 函式數 | 4 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `TranslationError` | L26-45 | ✓ | __init__, __str__ |
+| `APIError` | L47-50 | ✓ | 無 |
+| `RateLimitError` | L52-66 | ✓ | __init__ |
+| `OverloadError` | L68-77 | ✓ | __init__ |
+| `FileFormatError` | L79-82 | ✓ | 無 |
+| `CacheError` | L84-87 | ✓ | 無 |
+| `ConfigError` | L89-92 | ✓ | 無 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `handle_translation_errors` | (log_func, auto_retry, max_retries) | 106 | ✓ | 無 | ⚠️ | 無 |
+| `_log_error_to_file` | (error, func_name) | 33 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write) |  | 無 |
+| `raise_if_invalid_json` | (data, required_keys, source) | 17 | ✓ | 無 |  | 無 |
+| `raise_if_empty` | (value, name) | 12 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\utils\log_unit.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 158 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 9 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_get_caller_logger_name` | () | 20 | ✓ | 無 |  | 無 |
+| `_log` | (level, msg) | 18 | ✓ | 無 |  | 無 |
+| `log_info` | (msg) | 3 | ✓ | 無 |  | 無 |
+| `log_warning` | (msg) | 3 | ✓ | 無 |  | 無 |
+| `log_error` | (msg) | 3 | ✓ | 無 |  | 無 |
+| `log_debug` | (msg) | 3 | ✓ | 無 |  | 無 |
+| `log_exception` | (msg) | 25 | ✓ | 無 |  | 無 |
+| `progress` | () | 30 | ✓ | 無 |  | 無 |
+| `get_formatted_duration` | (start_tick) | 11 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\utils\safe_json_loader.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 34 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 1 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `load_json_auto_encoding` | (path) | 17 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\utils\species_cache.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 189 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 4 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `initialize_species_cache` | () | 53 | ✓ | 檔案寫入 (open w/a), 修改全域狀態 |  | 無 |
+| `is_potential_species_name` | (name) | 5 | ✓ | 無 |  | 無 |
+| `query_wikipedia_and_update_cache` | (species_name) | 40 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write) | ⚠️ | 無 |
+| `lookup_species_name` | (name) | 19 | ✓ | 無 |  | 無 |
+
+
+
+### `translation_tool\utils\text_processor.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 346 |
+| 模組docstring | 有 |
+| 類別數 | 0 |
+| 函式數 | 15 |
+
+**頂層函式：**
+
+| 函式名稱 | 參數 | 行數 | docstring | 副作用 | 複雜分支 | threading |
+|---------|------|------|-----------|--------|----------|----------|
+| `_resolve_rules_path` | (path) | 3 | ✓ | 無 |  | 無 |
+| `get_converter` | () | 5 | ✓ | 無 |  | 無 |
+| `_init_replace_rules_cache` | (rules) | 48 | ✓ | 修改全域狀態 |  | 無 |
+| `apply_replace_rules` | (text, rules) | 38 | ✓ | 無 |  | 無 |
+| `load_replace_rules` | (path) | 47 | ✓ | 檔案寫入 (open w/a) |  | 無 |
+| `save_replace_rules` | (path, rules) | 13 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write), JSON序列化寫入 |  | 無 |
+| `load_custom_translations` | (folder_path, filename) | 20 | ✓ | 無 |  | 無 |
+| `safe_convert_text` | (text) | 6 | ✓ | 無 |  | 無 |
+| `convert_text` | (text, rules) | 14 | ✓ | 無 |  | 無 |
+| `convert_snbt_file_inplace` | (path, rules) | 19 | ✓ | 檔案寫入 (open w/a), 檔案寫入 (.write) |  | 無 |
+| `convert_snbt_tree_inplace` | (root_dir, rules) | 16 | ✓ | 無 |  | 無 |
+| `recursive_translate_dict` | (data, rules) | 11 | ✓ | 無 |  | 無 |
+| `recursive_translate` | (data, rules, custom_translations) | 32 | ✓ | 無 |  | 無 |
+| `orjson_dump_file` | (obj, fp) | 14 | ✓ | 檔案寫入 (.write), JSON序列化寫入 |  | 無 |
+| `orjson_pretty_str` | (obj) | 12 | ✓ | JSON序列化寫入 |  | 無 |
+
+
+
+### `translation_tool\utils\ui_logging_handler.py`
+| 項目 | 值 |
+|------|-----|
+| 總行數 | 43 |
+| 模組docstring | 有 |
+| 類別數 | 1 |
+| 函式數 | 0 |
+
+**類別：**
+
+| 類別名稱 | 行數 | docstring | 公有方法 |
+|---------|------|-----------|----------|
+| `UISessionLogHandler` | L9-43 | ✓ | __init__, set_session, emit |
+
+
+
+================================================================================
+附錄：目錄別模組數量統計
+================================================================================
+  (root)/ — 11 個模組
+  app/ — 75 個模組
+  tools/ — 3 個模組
+  translation_tool/ — 84 個模組
