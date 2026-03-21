@@ -49,7 +49,7 @@ class TestZipPrefixAutoStrip:
             zf = _make_zip_with_prefix(prefix)
             paths = _paths_for(prefix)
             with patch("translation_tool.core.lang_merge_pipeline.log_warning") as mock_warn:
-                result = _process_single_mod(
+                _ = _process_single_mod(
                     zf=zf,
                     paths=paths,
                     rules=[],
