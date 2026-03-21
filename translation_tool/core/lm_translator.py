@@ -266,11 +266,22 @@ def translate_directory_generator(
         load_config().get("translator", {}).get("parallel_execution_workers", 4)
     )
 
-    file_cache, all_items = extract_items_parallel(
+    # 使用 generator 迭代， 每完成一個檔案就更新一次進度（從 0.0 → 0.2）
+    _prev_count = 0
+    for file_cache, all_items in extract_items_parallel(
         files=files,
         export_lang=export_lang,
         work_thread=work_thread,
-    )
+    ):
+        # 每處理 5% 的檔案，yield 一次 UI 進度
+        if len(files) > 0:
+            _pct = len(all_items) / len(files)
+            if _pct - _prev_count >= 0.05 or _pct >= 1.0:
+                _prev_count = _pct
+                yield {
+                    "progress": 0.2 * _pct,
+                    "log": f"✂️ 抽取中... ({len(all_items)}/{len(files)} 檔)",
+                }
 
     msg_extract = f"✂️ 抽取完成：共 {len(all_items)} 段文字"
     log_info(msg_extract)
