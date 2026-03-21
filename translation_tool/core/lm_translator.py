@@ -267,26 +267,26 @@ def translate_directory_generator(
     )
 
     # 使用 generator 迭代， 每完成一個檔案就更新一次進度（從 0.0 → 0.2）
-    _prev_count = 0
+    _prev_pct = 0.0
     for file_cache, all_items in extract_items_parallel(
         files=files,
         export_lang=export_lang,
         work_thread=work_thread,
     ):
-        # 每處理 5% 的檔案，yield 一次 UI 進度
+        # 每處理 5% 的檔案（根據已完成的檔案數，非 items 數），yield 一次 UI 進度
         if len(files) > 0:
-            _pct = len(all_items) / len(files)
-            if _pct - _prev_count >= 0.05 or _pct >= 1.0:
-                _prev_count = _pct
+            _pct = len(file_cache) / len(files)
+            if _pct - _prev_pct >= 0.05 or _pct >= 1.0:
+                _prev_pct = _pct
                 yield {
                     "progress": 0.2 * _pct,
-                    "log": f"✂️ 抽取中... ({len(all_items)}/{len(files)} 檔)",
+                    "log": f"✂️ 抽取中... ({len(file_cache)}/{len(files)} 檔)",
                 }
 
     msg_extract = f"✂️ 抽取完成：共 {len(all_items)} 段文字"
     log_info(msg_extract)
     yield {
-        "progress": 0.05,
+        "progress": 0.2,
         # "log": msg_extract,
     }
 
@@ -408,7 +408,7 @@ def translate_directory_generator(
                 )
 
     yield {
-        "progress": 0.1,
+        "progress": 0.2,
         # "log": msg_cache, # 如果 UI 需要顯示比對結果
     }
 
@@ -466,7 +466,7 @@ def translate_directory_generator(
 
         msg_cache_done = f"✅ 已輸出 Cache 命中內容（{len(touched_files)} 個檔案）"
         log_info(msg_cache_done)
-        yield {"progress": 0.15}
+        yield {"progress": 0.2}
 
         if DEFAULT_EXPORT_CACHE_ONLY and not items_to_translate and not dry_run:
             msg_cache_pass = "🎉 僅 Cache 命中，無需翻譯，流程結束"
