@@ -27,15 +27,31 @@ def run_merge_zip_batch_service(
     - ZIP 層級 progress
     - merge_zhcn_to_zhtw_from_zip 內部 progress 疊加
     - log / error 完整轉交給 session
+    - 批次完成時 yield 統計摘要
     """
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
     ensure_pipeline_logging()
     UI_LOG_HANDLER.set_session(session)
+
+    # 統計計數器
+    stats = {
+        "total_zips": len(zip_paths),
+        "success_zips": 0,
+        "failed_zips": 0,
+        "errored_files": 0,
+        "failed_zip_details": [],  # [(zip_name, error_message), ...]
+    }
+
     try:
         total = len(zip_paths)
         if total == 0:
             session.add_log("[系統] 未選擇任何 ZIP 檔案")
             session.finish()
+            yield {
+                "progress": 1.0,
+                "log": None,
+                "summary": stats,
+            }
             return
 
         for idx, zip_path in enumerate(zip_paths):
@@ -62,23 +78,50 @@ def run_merge_zip_batch_service(
                         return
 
                 session.add_log(f"[ZIP {idx + 1}/{total}] 完成：{zip_name}")
+                stats["success_zips"] += 1
 
             except Exception as e:
                 tb = traceback.format_exc()
                 logger.error(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
                 session.add_log(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
+                stats["failed_zips"] += 1
+                stats["failed_zip_details"].append((zip_name, str(e)))
                 session.set_error()
                 return
 
             # ZIP 完成後，至少推進一次 progress
             session.set_progress((idx + 1) / total)
 
+        # 產出統計摘要
+        yield {
+            "progress": 1.0,
+            "log": None,
+            "summary": {
+                "total_zips": stats["total_zips"],
+                "success_zips": stats["success_zips"],
+                "failed_zips": stats["failed_zips"],
+                "errored_files": stats["errored_files"],
+                "failed_zip_details": stats["failed_zip_details"],
+            },
+        }
         session.finish()
 
     except Exception as e:
         tb = traceback.format_exc()
         logger.error(f"[致命錯誤] ZIP 合併失敗：{e}\n{tb}")
         session.add_log(f"[致命錯誤] ZIP 合併失敗：{e}\n{tb}")
+        # 產出統計摘要（即使失敗也要回報）
+        yield {
+            "progress": 1.0,
+            "log": None,
+            "summary": {
+                "total_zips": stats["total_zips"],
+                "success_zips": stats["success_zips"],
+                "failed_zips": stats["failed_zips"],
+                "errored_files": stats["errored_files"],
+                "failed_zip_details": stats["failed_zip_details"],
+            },
+        }
         session.set_error()
 
     finally:
