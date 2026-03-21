@@ -84,10 +84,20 @@ def _read_json_from_zip(zf: zipfile.ZipFile, path: str) -> Dict[str, Any]:
         # 使用 orjson (你 alias 為 json) 解析
         return json.loads(cleaned_text)
     except Exception as e:
-        # 如果還是失敗，嘗試將錯誤資訊記錄下來，方便排查
-        log_warning(f"JSON 解析依然失敗 (路徑: {path}): {e}")
-        # 在某些極端情況下，檔案可能是編碼損毀，回傳空字典避免程式崩潰
-        return {}
+        # 如果失敗，檢查是否為未轉義控制字元問題，嘗試清理後重試
+        err_msg = str(e).lower()
+        if "invalid control character" in err_msg or "unexpected control character" in err_msg:
+            import re
+            # 清理未轉義的控制字元（C0 control characters）
+            cleaned2 = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', lambda m: {
+                '\t': '\\t', '\n': '\\n', '\r': '\\r'
+            }.get(m.group(), '\\n'), cleaned_text)
+            try:
+                return json.loads(cleaned2)
+            except Exception:
+                pass  # 清理後仍然失敗，進入 quarantine 流程
+        # 回報 exception 讓 quarantine 邏輯能夠啟動
+        raise
 
 
 def _write_bytes_atomic(path: str, data: bytes) -> None:
