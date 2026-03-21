@@ -5,6 +5,8 @@
 """
 
 
+import threading
+
 import flet as ft
 from app.ui import theme
 from translation_tool.utils.log_unit import log_info
