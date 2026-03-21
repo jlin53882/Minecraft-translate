@@ -232,7 +232,11 @@ def translate_directory_generator(
     # =========================
     # 掃描檔案
     # =========================
-    patchouli_files, lang_files, files = scan_translatable_files(root)
+    try:
+        patchouli_files, lang_files, files = scan_translatable_files(root)
+    except Exception as e:
+        log_warning(f"⚠️ 掃描可翻譯檔案失敗，已跳過本次掃描：{e}")
+        patchouli_files, lang_files, files = [], [], []
 
     msg_scan = f"🔍 掃描完成：Patchouli={len(patchouli_files)}，Lang={len(lang_files)}"
     log_info(msg_scan)  # 同步到日誌檔案 (log 檔)
@@ -614,22 +618,23 @@ def translate_directory_generator(
 
             # --- 第一步：登記到快取管理員 (這決定了存檔有沒有內容) ---
             # 2. 存入記憶體快取
-            if c_type == "patchouli":
-                # Patchouli 的文本可能隨 path 變動，故使用組合 Key
-                u_key = f"{path}|{src_text}"
-                add_to_cache("patchouli", u_key, src_text, text)
-                log_debug(
-                    "加入快取 [type=%s] key=%s",
-                    "patchouli",
-                    u_key,
-                )
-            else:
-                add_to_cache("lang", path, src_text, text)
-                log_debug(
-                    "加入快取 [type=%s] key=%s",
-                    "lang",
-                    path,
-                )
+            if src_text and src_text.strip():
+                if c_type == "patchouli":
+                    # Patchouli 的文本可能隨 path 變動，故使用組合 Key
+                    u_key = f"{path}|{src_text}"
+                    add_to_cache("patchouli", u_key, src_text, text)
+                    log_debug(
+                        "加入快取 [type=%s] key=%s",
+                        "patchouli",
+                        u_key,
+                    )
+                else:
+                    add_to_cache("lang", path, src_text, text)
+                    log_debug(
+                        "加入快取 [type=%s] key=%s",
+                        "lang",
+                        path,
+                    )
 
             # --- 第二步：更新準備輸出的遊戲 JSON 物件 ---
             set_by_path(file_cache[file], path, text)
