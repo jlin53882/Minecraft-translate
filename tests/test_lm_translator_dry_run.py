@@ -29,18 +29,20 @@ def test_translate_directory_generator_dry_run_writes_preview_files(tmp_path: Pa
     monkeypatch.setattr(
         lm_translator,
         "extract_items_parallel",
-        lambda **kwargs: (
-            {str(lang_file): {"a": "hello"}},
-            [
-                {
-                    "file": str(lang_file),
-                    "path": "a",
-                    "text": "hello",
-                    "source_text": "hello",
-                    "cache_type": "lang",
-                }
-            ],
-        ),
+        lambda **kw: [
+            (
+                {str(lang_file): {"a": "hello"}},
+                [
+                    {
+                        "file": str(lang_file),
+                        "path": "a",
+                        "text": "hello",
+                        "source_text": "hello",
+                        "cache_type": "lang",
+                    }
+                ],
+            )
+        ],
     )
 
     updates = list(

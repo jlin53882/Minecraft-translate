@@ -152,15 +152,14 @@ class TestExtractItemsParallel:
         
         mock_logger = MagicMock()
         
-        file_cache, all_items = extract_items_parallel(
+        # extract_items_parallel 現在是 generator，empty 列表無 yield
+        results = list(extract_items_parallel(
             files=[],
             export_lang=False,
             work_thread=2,
             logger=mock_logger
-        )
-        
-        assert file_cache == {}
-        assert all_items == []
+        ))
+        assert results == []
 
     def test_extract_items_parallel_with_json(self, tmp_path):
         """測試 JSON 檔案處理。"""
@@ -179,13 +178,15 @@ class TestExtractItemsParallel:
         
         mock_logger = MagicMock()
         
-        file_cache, all_items = extract_items_parallel(
+        # extract_items_parallel 現在是 generator，取第一次 yield
+        results = list(extract_items_parallel(
             files=[lang_file],
             export_lang=False,
             work_thread=2,
             logger=mock_logger
-        )
-        
+        ))
+        assert len(results) == 1
+        file_cache, all_items = results[0]
         assert len(file_cache) == 1
         assert str(lang_file) in file_cache
         assert len(all_items) >= 2
@@ -203,15 +204,14 @@ class TestExtractItemsParallel:
         
         mock_logger = MagicMock()
         
-        file_cache, all_items = extract_items_parallel(
+        # extract_items_parallel 現在是 generator；無效檔被跳過，無 yield
+        results = list(extract_items_parallel(
             files=[invalid_file],
             export_lang=False,
             work_thread=2,
             logger=mock_logger
-        )
-        
-        # 應該忽略無效檔案
-        assert len(file_cache) == 0
+        ))
+        assert results == []
 
     def test_extract_items_parallel_cache_type(self, tmp_path):
         """測試快取類型標記。"""
@@ -225,13 +225,14 @@ class TestExtractItemsParallel:
         
         mock_logger = MagicMock()
         
-        file_cache, all_items = extract_items_parallel(
+        # extract_items_parallel 現在是 generator，取第一次 yield
+        results = list(extract_items_parallel(
             files=[lang_file],
             export_lang=False,
             work_thread=2,
             logger=mock_logger
-        )
-        
+        ))
+        file_cache, all_items = results[0]
         # 至少應該有 lang 類型
         cache_types = set(item.get("cache_type") for item in all_items)
         assert "lang" in cache_types
