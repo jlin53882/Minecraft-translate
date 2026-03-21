@@ -136,7 +136,11 @@ class LogPresenter:
     def _entry_color(self, entry: LogEntry) -> str:
         """根據 entry 等級取得顏色。"""
         if not self.colorize:
-            return self.default_color
+            color = self.default_color
+            # 預防：若不是有效 hex 格式，主動加上 #
+            if not color.startswith("#"):
+                return f"#{color}"
+            return color
         return "#" + get_level_color(entry.level)
 
     def _truncate(self, list_view: ft.ListView) -> None:
