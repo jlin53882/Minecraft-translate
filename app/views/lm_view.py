@@ -88,8 +88,8 @@ class LMView(ft.Column):
         self.log_presenter = LogPresenter(
             mode="tail",
             tail_lines=ui_cfg.get("tail_lines", 250),
-            colorize=False,  # 目前 UI 只用灰底灰字，不做等级著色
-            default_color=str(theme.GREY_100),
+            colorize=True,  # 等級著色開啟
+            default_color="#F5F5F5",  # 浅灰色文字，深色背景看得清楚
         )
 
         # 按鈕（共用 primary style）
