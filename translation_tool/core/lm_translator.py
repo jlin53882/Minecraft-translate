@@ -51,7 +51,9 @@ BATCH_WRITE_INTERVAL = 5  # 每 N 個批次寫一次硬碟
 CHECKPOINT_FILE = "logs/translation_checkpoint.json"
 
 
-def save_checkpoint(batch_index: int, completed_count: int, total: int, remaining: list, output_dir: str):
+def save_checkpoint(
+    batch_index: int, completed_count: int, total: int, remaining: list, output_dir: str
+):
     """寫入 checkpoint（每批次完成後）。
 
     Args:
@@ -63,13 +65,19 @@ def save_checkpoint(batch_index: int, completed_count: int, total: int, remainin
     """
     os.makedirs(os.path.dirname(CHECKPOINT_FILE), exist_ok=True)
     with open(CHECKPOINT_FILE, "w", encoding="utf-8") as f:
-        json_std.dump({
-            "batch_index": batch_index,
-            "completed_count": completed_count,
-            "total": total,
-            "remaining_sample": remaining[:3] if remaining else [],  # 只保留前三筆範例，不存完整清單
-            "output_dir": output_dir
-        }, f, ensure_ascii=False)
+        json_std.dump(
+            {
+                "batch_index": batch_index,
+                "completed_count": completed_count,
+                "total": total,
+                "remaining_sample": remaining[:3]
+                if remaining
+                else [],  # 只保留前三筆範例，不存完整清單
+                "output_dir": output_dir,
+            },
+            f,
+            ensure_ascii=False,
+        )
 
 
 def load_checkpoint() -> dict | None:
@@ -118,6 +126,7 @@ def get_formatted_duration(start_tick: float) -> str:
     else:
         return f"{minutes} 分 {seconds} 秒"
 
+
 # 剩餘時間
 def format_duration_seconds(seconds: int) -> str:
     """
@@ -152,9 +161,11 @@ def format_duration_seconds(seconds: int) -> str:
     else:
         return f"{minutes} 分 {seconds} 秒"
 
+
 # ============================================================
 # 對外唯一入口（UI / CLI 共用）
 # ============================================================
+
 
 def translate_directory_generator(
     input_dir: str,
@@ -247,7 +258,9 @@ def translate_directory_generator(
     translation_log: list[dict] = []
 
     log_info(f"🚀 開始並行抽取文字 (檔案數量: {len(files)})")
-    work_thread = load_config().get("translator", {}).get("parallel_execution_workers", 4)
+    work_thread = (
+        load_config().get("translator", {}).get("parallel_execution_workers", 4)
+    )
 
     file_cache, all_items = extract_items_parallel(
         files=files,
@@ -530,13 +543,19 @@ def translate_directory_generator(
             # 從 items_to_translate 的正確偏移位置恢復剩餘清單
             remaining = items_to_translate[cp_completed:]
             batch_index = checkpoint.get("batch_index", 1)
-            log_info(f"✅ checkpoint 已載入，將從 Batch {batch_index} 繼續翻譯（remaining={len(remaining)} 筆）")
+            log_info(
+                f"✅ checkpoint 已載入，將從 Batch {batch_index} 繼續翻譯（remaining={len(remaining)} 筆）"
+            )
         elif cp_completed > total:
-            log_warning(f"⚠️ checkpoint 數量異常（已完成 {cp_completed} > 總數 {total}），忽略並重新開始")
+            log_warning(
+                f"⚠️ checkpoint 數量異常（已完成 {cp_completed} > 總數 {total}），忽略並重新開始"
+            )
             clear_checkpoint()
         else:
             # total 不一致，但 completed_count 合理，可能是檔案結構變更，仍從頭開始
-            log_warning(f"⚠️ checkpoint 與目前總數不一致（checkpoint total={cp_total}，current total={total}），忽略並重新開始")
+            log_warning(
+                f"⚠️ checkpoint 與目前總數不一致（checkpoint total={cp_total}，current total={total}），忽略並重新開始"
+            )
             clear_checkpoint()
 
     # B-3: 快取寫入頻率優化 - 批次計數器
@@ -674,10 +693,18 @@ def translate_directory_generator(
         if _batch_write_counter % BATCH_WRITE_INTERVAL == 0 or len(remaining) == 0:
             if is_lang:
                 save_translation_cache("lang", write_new_shard=write_new_cache)
-                log_debug("✅ lang 分片快取已寫入硬碟（每 {} 批次）".format(BATCH_WRITE_INTERVAL))
+                log_debug(
+                    "✅ lang 分片快取已寫入硬碟（每 {} 批次）".format(
+                        BATCH_WRITE_INTERVAL
+                    )
+                )
             else:
                 save_translation_cache("patchouli", write_new_shard=write_new_cache)
-                log_debug("✅ patchouli 分片快取已寫入硬碟（每 {} 批次）".format(BATCH_WRITE_INTERVAL))
+                log_debug(
+                    "✅ patchouli 分片快取已寫入硬碟（每 {} 批次）".format(
+                        BATCH_WRITE_INTERVAL
+                    )
+                )
             _batch_write_counter = 0  # 重置計數器
 
         # ============================================================

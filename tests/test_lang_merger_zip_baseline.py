@@ -110,7 +110,7 @@ def test_merge_zip_baseline_fixture_outputs_are_stable(
     assert updates[-1]["progress"] == 1.0
 
     # PR #24：輸出結構改為 lang_output/ 子目錄，zh_tw + 待翻譯 皆寫入 lang_output/
-    # pending_rel 剝離時使用與 final_output_rel 相同的 KNOWN_ZIP_PACKAGING_PREFIXES，
+    # pending_rel 剝離時使用自動前綴偵測（strip_wrapper），
     # 所以 assets/ 標準資源路徑會完整保留（不被當成包裝層剝離）
     # zh_cn.extra.json 是非 patchouli 的 localized 檔案，zh_cn→zh_tw 轉換後寫入 output_dir/assets/
     zh_tw_path = output_dir / "lang_output" / "assets" / "demo" / "lang" / "zh_tw.json"
