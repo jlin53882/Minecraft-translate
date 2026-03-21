@@ -85,7 +85,10 @@
                 "header",
                 "footer",
                 "heading",
-                "effects"
+                "effects",
+                "category",
+                "link_text",
+                "pages.title"
             ]
         },
         "patchouli": {
