@@ -13,7 +13,14 @@ from typing import List
 log = logging.getLogger(__name__)
 
 def find_jar_files(folder_path: str) -> List[str]:
-    """遞迴找出資料夾下所有 .jar 檔案。"""
+    """遞迴找出資料夾下所有 .jar 檔案。
+
+    Args:
+        folder_path: 要掃描的資料夾路徑。
+
+    Returns:
+        所有找到的 .jar 檔案之絕對路徑列表。
+    """
     jar_files: List[str] = []
     for root, _, files in os.walk(folder_path):
         for file in files:

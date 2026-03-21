@@ -52,6 +52,7 @@ from translation_tool.utils.log_unit import (
 )
 
 def _log_md_step2_stats(step2_res: Dict[str, Any]) -> None:
+    """包裝層：將 step2 翻譯結果的統計資料以格式化日誌寫出（包含快取命中率、批次預估與 ETA）。"""
     _log_md_step2_stats_impl(step2_res, log_info_fn=log_info)
 
 def step1_extract(
@@ -63,6 +64,7 @@ def step1_extract(
     progress_base: float = 0.0,
     progress_span: float = 0.33,
 ) -> Dict[str, Any]:
+    """第一步：掃描 Markdown 資料夾，依語言模式過濾後抽取可翻譯區塊，輸出為待翻譯 JSON 檔案。"""
     return step1_extract_impl(
         input_dir=input_dir,
         pending_dir=pending_dir,
@@ -91,6 +93,7 @@ def step2_translate(
     dry_run: bool = False,
     write_new_cache: bool = True,
 ) -> Dict[str, Any]:
+    """第二步：讀取待翻譯 JSON，透過 LM API 翻譯內容，輸出翻譯後 JSON（支援快取與 Dry-Run）。"""
     return step2_translate_impl(
         pending_dir=pending_dir,
         translated_dir=translated_dir,
@@ -113,6 +116,7 @@ def step3_inject(
     progress_base: float = 0.66,
     progress_span: float = 0.33,
 ) -> Dict[str, Any]:
+    """第三步：將翻譯 JSON 的內容注入回原始 Markdown，輸出翻譯完成的 Markdown 檔案。"""
     return step3_inject_impl(
         input_dir=input_dir,
         json_dir=json_dir,
@@ -138,6 +142,7 @@ def run_md_pipeline(
     write_new_cache: bool = True,
     lang_mode: str = "non_cjk_only",
 ) -> Dict[str, Any]:
+    """Markdown 翻譯完整管線：依序執行抽取→翻譯→注入三步（各步可单独啟用或略過）。"""
     start_tick = time.perf_counter()
     lang_mode = _normalize_lang_mode(lang_mode)
 

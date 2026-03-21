@@ -141,10 +141,7 @@ def opencc_markdown_safe(md: str, rules=None) -> str:
 def remove_translated_keys(
     en_dict: Dict[str, Any], tw_dict: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """
-    從 en_dict 中移除在 tw_dict 中已經被翻譯（存在且非空白）的 key，
-    回傳新的 en_dict（淺拷貝）
-    """
+    """從 en_dict 中移除在 tw_dict 中已存在且非空白的 key，回傳剩餘的 en_dict（淺拷貝）。"""
     result = {}
     for k, v in en_dict.items():
         tw_val = tw_dict.get(k)
@@ -158,21 +155,7 @@ def remove_translated_keys(
 def compare_and_remove_translated_from_en(
     en_source: Dict[str, Any], tw_base: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """
-    比較英文來源 (en_source) 和繁體中文基準 (tw_base) 字典，
-    並從 en_source 中移除所有 '已翻譯' (即 tw_base 中已存在的) 鍵值。
-
-    這個函式通常用於找出在來源語言中「尚未被翻譯」到目標語言的項目。
-
-    Args:
-        en_source (Dict[str, Any]): 英文來源字典 (完整的待翻譯鍵值)。
-        tw_base (Dict[str, Any]): 繁體中文基準字典 (已翻譯完成的鍵值集合)。
-
-    Returns:
-        Dict[str, Any]: 移除已翻譯鍵值後，en_source 剩餘的字典內容 (即「待翻譯」項目)。
-    """
-    # 實際執行移除操作，只保留 en_source 中尚未出現在 tw_base 的 key。
-    # 只移除在 tw_base 中已被翻譯的 key
+    """比較英文來源字典與繁體中文基準字典，從 en_source 中移除 tw_base 已翻譯的鍵值，回傳剩餘待翻譯項目（即「待翻譯」集合）。"""
     return remove_translated_keys(en_source, tw_base)
 
 def dump_json_bytes(obj: Any) -> bytes:
@@ -200,10 +183,11 @@ def translate_markdown(
     rules: Any,
     file_path: str = "",
 ) -> str:
-    """
-    處理 Markdown：
-    - Patchouli Book 的 .md 不經過 Markdown Parser（避免破壞 XML tag）
-    - 一般 Markdown 才使用 opencc_markdown_safe()
+    """處理 Markdown 內容的 S2TW 翻譯。
+
+    - 若檔案路徑包含 patchouli_books，僅做 S2TW 不走 Parser（避免破壞 XML tag）。
+    - 一般 Markdown 會先分離 YAML Front Matter，僅對 title 與內文進行翻譯，
+      並使用 opencc_markdown_safe() 保護程式碼區塊不被誤翻。
     """
 
     # === 1. Patchouli 書中特殊格式偵測 ===
@@ -254,12 +238,7 @@ def translate_plain_text(
     rules: Any,
     file_path: str,
 ) -> str:
-    """
-    通用純文字處理器：對整個文件內容進行 S2TW 轉換。
-    適用於非結構化 JSON (如 JSON/JSON5)、SNBT, .txt, .lang, .hl 檔案。
-    通用純文字處理器：對整個文件內容進行 S2TW 轉換。
-    file_path 目前不使用，但保留參數以統一 processor 介面。
-    """
+    """通用純文字處理器：對整個文件內容進行 S2TW 翻譯（透過 translate_func + rules）。適用於 JSON/JSON5、SNBT、.txt、.lang、.hl 等檔案。"""
     # 對整個文件內容進行 S2TW 轉換。
     return translate_func(cn_content, rules)
 
@@ -286,5 +265,5 @@ TEXT_FILE_PROCESSORS: Dict[
 }
 
 def get_text_processor(ext: str) -> Optional[Callable]:
-    """根據擴展名獲取對應的文字處理函式。"""
+    """根據副檔名取得對應的文字處理器函式（translate_markdown、translate_plain_text 等）。若副檔名無對應處理器則回傳 None。"""
     return TEXT_FILE_PROCESSORS.get(ext.lower())

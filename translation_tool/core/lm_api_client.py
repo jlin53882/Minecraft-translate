@@ -20,7 +20,7 @@ def call_gemini_requests(
     api_key: str,
     temperature: float,
 ) -> str:
-    """呼叫 Gemini API 進行翻譯。"""
+    """以同步 requests 方式呼叫 Gemini generateContent API，並回傳純文字回應。"""
     url = (
         "https://generativelanguage.googleapis.com/"
         f"v1beta/models/{model_name}:generateContent"

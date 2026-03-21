@@ -34,18 +34,55 @@ from translation_tool.utils.log_unit import (
 from translation_tool.utils.text_processor import safe_convert_text
 
 def _is_filled_text(v: Any) -> bool:
+    """判斷傳入值是否為有實質內容的文字（排除空字串與 {xxx} 格式的語言參考）。
+    
+    Args:
+        v: 任意型別的值。
+    Returns:
+        bool: 是有效文字內容則回傳 True，否則回傳 False。
+    """
     return is_filled_text_impl(v)
 
 def deep_merge_3way_flat(tw: dict, cn: dict, en: dict) -> dict:
+    """對三個語系的扁平鍵值字典做三方合併，優先順序：zh_tw > zh_cn（轉繁）> en_us。
+    
+    Args:
+        tw: 繁體中文鍵值對。
+        cn: 簡體中文鍵值對（會自動轉為繁體）。
+        en: 英文鍵值對（作為最後備選）。
+    Returns:
+        dict: 合併後的鍵值對字典。
+    """
     return deep_merge_3way_flat_impl(tw, cn, en, safe_convert_text_fn=safe_convert_text)
 
 def prune_en_by_tw_flat(en_map: dict, tw_available: dict) -> dict:
+    """從英文鍵值地圖中移除已有中文（繁體）內容的項目，產生待翻譯清單。
+    
+    Args:
+        en_map: 英文鍵值對。
+        tw_available: 可用的繁體中文鍵值對。
+    Returns:
+        dict: 過濾後只剩下尚無中文翻譯的英文鍵值對。
+    """
     return prune_en_by_tw_flat_impl(en_map, tw_available)
 
 def _read_json_dict_orjson(path: Path) -> dict:
+    """使用 orjson 讀取 JSON 檔案，自動處理 BOM 與結尾多餘逗號。
+    
+    Args:
+        path: 要讀取的 JSON 檔案路徑。
+    Returns:
+        dict: 解析後的字典，解析失敗時回傳空字典。
+    """
     return read_json_dict_orjson_impl(path)
 
 def _write_json_orjson(path: Path, data: dict) -> None:
+    """使用 orjson 將字典以格式化（縮排 2 層）寫入 JSON 檔案。
+    
+    Args:
+        path: 目標檔案路徑，父目錄不存在時會自動建立。
+        data: 要寫入的字典資料。
+    """
     write_json_orjson_impl(path, data)
 
 def clean_kubejs_from_raw(
@@ -56,6 +93,17 @@ def clean_kubejs_from_raw(
     pending_root: str | None = None,
     final_root: str | None = None,
 ) -> dict:
+    """將 KubeJS 原始提取資料進行清理與三方合併，產出待翻譯與完成品目錄。
+    
+    Args:
+        base_dir: Modpack 根目錄。
+        output_dir: 輸出根目錄（預設為 base_dir/Output）。
+        raw_dir: 原始 lang 檔案目錄（預設為 output_dir/kubejs/raw/kubejs）。
+        pending_root: 待翻譯檔案輸出目錄（預設為 output_dir/kubejs/待翻譯/kubejs）。
+        final_root: 完成品輸出目錄（預設為 output_dir/kubejs/完成/kubejs）。
+    Returns:
+        dict: 包含處理結果的摘要（群組數、寫入檔案數等）。
+    """
     return clean_kubejs_from_raw_impl(
         base_dir,
         output_dir=output_dir,
@@ -70,6 +118,14 @@ def clean_kubejs_from_raw(
     )
 
 def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> Path:
+    """自動解析 KubeJS 根目錄，優先傳回包含 client_scripts 的候選目錄。
+    
+    Args:
+        input_dir: 起始搜尋目錄（可為 modpack 根目錄或直接為 kubejs 目錄）。
+        max_depth: 最大搜尋深度（預設 4）。
+    Returns:
+        Path: 偵測到的 KubeJS 目錄路徑；若找不到則回傳起始目錄本身。
+    """
     return resolve_kubejs_root_impl(input_dir, max_depth=max_depth)
 
 def step1_extract_and_clean(
@@ -82,6 +138,19 @@ def step1_extract_and_clean(
     progress_base: float = 0.0,
     progress_span: float = 0.33,
 ) -> Dict[str, Any]:
+    """KubeJS Pipeline 步驟一：從 KubeJS 目錄提取文字並執行清理與三方合併。
+    
+    Args:
+        pack_or_kubejs_dir: Modpack 根目錄或直接為 kubejs 目錄的路徑。
+        raw_dir: 原始提取文字的輸出目錄。
+        pending_dir: 待翻譯檔案的輸出目錄。
+        final_dir: 已翻譯完成品的輸出目錄。
+        session: 進度 session（可為 None）。
+        progress_base: 進度條起始值（預設 0.0）。
+        progress_span: 進度條範圍（預設 0.33）。
+    Returns:
+        Dict[str, Any]: 包含 extract、clean、kubejs_dir、raw_dir、pending_dir、final_dir 的結果字典。
+    """
     kubejs_dir_path = Path(resolve_kubejs_root(pack_or_kubejs_dir))
     log_info(f"\n🔎 [KubeJS] 確定 KubeJS 目錄為: {kubejs_dir_path}")
 
@@ -131,6 +200,20 @@ def step2_translate_lm(
     dry_run: bool = False,
     write_new_cache: bool = True,
 ) -> Dict[str, Any]:
+    """KubeJS Pipeline 步驟二：呼叫 Gemini API 將待翻譯文字翻譯為繁體中文。
+    
+    Args:
+        pending_dir: 待翻譯檔案目錄（即 step1 的 pending_dir）。
+        output_dir: 翻譯結果輸出目錄（與 translated_dir 二選一）。
+        translated_dir: 翻譯結果輸出目錄（與 output_dir 二選一）。
+        session: 進度 session（可為 None）。
+        progress_base: 進度條起始值（預設 0.33）。
+        progress_span: 進度條範圍（預設 0.33）。
+        dry_run: 是否為僅分析不回傳 API 的測試模式（預設 False）。
+        write_new_cache: 是否寫入新的翻譯快取（預設 True）。
+    Returns:
+        Dict[str, Any]: 翻譯結果統計（檔案數、總 key 數、快取命中/未命中等）。
+    """
     out_arg = output_dir or translated_dir
     if not out_arg:
         raise ValueError("step2_translate_lm: 必須提供 output_dir 或 translated_dir")
@@ -199,6 +282,18 @@ def step3_inject(
     progress_base: float = 0.66,
     progress_span: float = 0.33,
 ) -> Dict[str, Any]:
+    """KubeJS Pipeline 步驟三：將翻譯後的 JSON 文字注入回 KubeJS 目錄。
+    
+    Args:
+        pack_or_kubejs_dir: Modpack 根目錄或 kubejs 目錄路徑。
+        src_dir: 翻譯後的 JSON 檔案來源目錄。
+        final_dir: 最終完成品輸出目錄。
+        session: 進度 session（可為 None）。
+        progress_base: 進度條起始值（預設 0.66）。
+        progress_span: 進度條範圍（預設 0.33）。
+    Returns:
+        Dict[str, Any]: 注入結果摘要。
+    """
     kubejs_dir = resolve_kubejs_root(pack_or_kubejs_dir)
     log_info(f"⚡[KubeJS] 步驟 3：開始注入翻譯 -> 目標目錄: {final_dir}")
 
@@ -225,6 +320,21 @@ def run_kubejs_pipeline(
     translator_fn: Optional[Callable[..., Dict[str, Any]]] = None,
     write_new_cache: bool = False,
 ) -> Dict[str, Any]:
+    """KubeJS 翻譯全流程 Pipeline，包含提取、清理、翻譯、注入四個階段。
+    
+    Args:
+        input_dir: KubeJS 模組根目錄（亦可傳入 modpack 根目錄）。
+        output_dir: 翻譯結果輸出根目錄（預設為 input_dir/Output）。
+        session: 進度 session（可為 None）。
+        dry_run: 是否為測試模式（翻譯階段不送 API，僅分析）。
+        step_extract: 是否執行步驟一：提取與清理（預設 True）。
+        step_translate: 是否執行步驟二：AI 翻譯（預設 True）。
+        step_inject: 是否執行步驟三：注入翻譯結果（預設 True）。
+        translator_fn: 自訂翻譯函式（預設使用 step2_translate_lm）。
+        write_new_cache: 是否在翻譯時寫入新快取（預設 False）。
+    Returns:
+        Dict[str, Any]: 各步驟執行結果與產出路徑。
+    """
     base = Path(input_dir).resolve()
     out_root = Path(output_dir).resolve() if output_dir else (base / "Output")
 

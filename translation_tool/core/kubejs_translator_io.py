@@ -27,7 +27,12 @@ def read_json_dict_orjson_impl(path: Path) -> dict:
         return {}
 
 def write_json_orjson_impl(path: Path, data: dict) -> None:
-    """使用 orjson pretty-print 寫回 JSON。"""
+    """將字典資料以 orjson 格式化（縮排 2 層）寫入 JSON 檔案。
+    
+    Args:
+        path: 目標檔案路徑，父目錄不存在時會自動建立。
+        data: 要寫入的字典資料，鍵會被轉為字串。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
 
     def _normalize_json_keys(obj: Any) -> Any:
