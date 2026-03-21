@@ -216,6 +216,7 @@ class LMView(ft.Column):
         self._set_status("執行中", theme.BLUE_200)
         self.progress_bar.value = 0
         self.log_view.controls.clear()
+        self.log_presenter.reset()
         self.page.update()
 
         output_dir = self.output_path.value or LM_translate_folder_name
