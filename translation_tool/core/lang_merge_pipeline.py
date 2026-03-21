@@ -148,19 +148,27 @@ def _process_single_mod(
         else:
             relative_tw_path = os.path.join(mod_name, "lang", "zh_tw.json")
 
-        # 新結構：主輸出剝離 ZIP 來源前綴（如 lang_out/），改寫到 lang_output/assets/.../
-        # 待翻譯路徑剝離與主輸出使用相同的 KNOWN_ZIP_PACKAGING_PREFIXES（前綴已提升至模組常數）
+        # 剝離 ZIP 包裝前綴層，避免多個 ZIP 時產生多餘的 {prefix}/ 子目錄。
+        # - 已知前綴（lang_out / book_out / patchouli_out）：直接剝離。
+        # - 未知前綴：只有當剩餘路徑以已知內容目錄開頭（assets/、book/、patchouli_books/）
+        #   時才認定為包裝前綴並剝離；其餘視為正常路徑組成，不剝離。
         _prefix = relative_tw_path.split("/")[0]
+        KNOWN_CONTENT_PREFIXES = ("assets/", "book/", "patchouli_books/")
         if _prefix in KNOWN_ZIP_PACKAGING_PREFIXES and relative_tw_path.startswith(
             _prefix + "/"
         ):
             final_output_rel = relative_tw_path[len(_prefix) + 1 :]
+        elif _prefix and not _prefix.startswith("."):
+            remaining = relative_tw_path[len(_prefix) + 1 :]
+            if remaining.startswith(KNOWN_CONTENT_PREFIXES):
+                final_output_rel = remaining
+                log_warning(
+                    f"未知 ZIP 包裝前綴 '{_prefix}'，已剝離。原始路徑：{relative_tw_path}"
+                )
+            else:
+                final_output_rel = relative_tw_path
         else:
             final_output_rel = relative_tw_path
-            if _prefix and not _prefix.startswith("."):
-                log_warning(
-                    f"未知 ZIP 包裝前綴 '{_prefix}'，輸出路徑可能包含非預期的前綴目錄。檔案：{relative_tw_path}"
-                )
         final_output_path = os.path.join(output_dir, final_output_rel)
         target_has_tw = os.path.exists(final_output_path)
 
@@ -251,12 +259,8 @@ def _process_single_mod(
         # =============================
         # Step 5 — 寫入 pending.json
         # =============================
-        # pending 路徑剝離 ZIP 包裝前綴，與 final_output_rel 使用相同的已知前綴集合
-        pending_rel = relative_tw_path.replace("zh_tw.json", "en_us.json")
-        if _prefix in KNOWN_ZIP_PACKAGING_PREFIXES and relative_tw_path.startswith(
-            _prefix + "/"
-        ):
-            pending_rel = pending_rel[len(_prefix) + 1 :]
+        # pending 路徑與 final_output_rel 使用相同的已剝離前綴邏輯
+        pending_rel = final_output_rel.replace("zh_tw.json", "en_us.json")
         pending_path = os.path.join(must_translate_dir, pending_rel)
         os.makedirs(os.path.dirname(pending_path), exist_ok=True)
 
