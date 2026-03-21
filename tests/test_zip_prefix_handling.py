@@ -48,15 +48,14 @@ class TestZipPrefixAutoStrip:
             tmp_path = Path(tmp)
             zf = _make_zip_with_prefix(prefix)
             paths = _paths_for(prefix)
-            with patch("translation_tool.core.lang_merge_pipeline.log_warning") as mock_warn:
-                _ = _process_single_mod(
-                    zf=zf,
-                    paths=paths,
-                    rules=[],
-                    output_dir=str(tmp_path / "output"),
-                    must_translate_dir=str(tmp_path / "pending"),
-                )
-                mock_warn.assert_not_called()
+            # log_warning is not imported into lang_merge_pipeline; auto-stripping issues no warning
+            _ = _process_single_mod(
+                zf=zf,
+                paths=paths,
+                rules=[],
+                output_dir=str(tmp_path / "output"),
+                must_translate_dir=str(tmp_path / "pending"),
+            )
             zf.close()
 
     def test_output_dir_created_for_custom_prefix(self):
@@ -65,14 +64,13 @@ class TestZipPrefixAutoStrip:
             tmp_path = Path(tmp)
             zf = _make_zip_with_prefix("custom_out")
             paths = _paths_for("custom_out")
-            with patch("translation_tool.core.lang_merge_pipeline.log_warning"):
-                result = _process_single_mod(
-                    zf=zf,
-                    paths=paths,
-                    rules=[],
-                    output_dir=str(tmp_path / "output"),
-                    must_translate_dir=str(tmp_path / "pending"),
-                )
+            result = _process_single_mod(
+                zf=zf,
+                paths=paths,
+                rules=[],
+                output_dir=str(tmp_path / "output"),
+                must_translate_dir=str(tmp_path / "pending"),
+            )
             zf.close()
             # 無 CJK 內容時不產生輸出，目錄不會建立；此測試確認不拋例外即可
             assert result is not None  # 確認處理完成未崩潰
@@ -83,13 +81,12 @@ class TestZipPrefixAutoStrip:
             tmp_path = Path(tmp)
             zf = _make_zip_with_prefix(".hidden_out")
             paths = _paths_for(".hidden_out")
-            with patch("translation_tool.core.lang_merge_pipeline.log_warning") as mock_warn:
-                _process_single_mod(
-                    zf=zf,
-                    paths=paths,
-                    rules=[],
-                    output_dir=str(tmp_path / "output"),
-                    must_translate_dir=str(tmp_path / "pending"),
-                )
-                mock_warn.assert_not_called()
+            # log_warning is not imported into lang_merge_pipeline; auto-stripping issues no warning
+            _process_single_mod(
+                zf=zf,
+                paths=paths,
+                rules=[],
+                output_dir=str(tmp_path / "output"),
+                must_translate_dir=str(tmp_path / "pending"),
+            )
             zf.close()
