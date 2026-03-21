@@ -346,3 +346,28 @@ def test_session_snapshot_returns_correct_structure(monkeypatch):
     assert len(snap["logs"]) == 2
     assert snap["logs"][0].text == "測試日誌一"
     assert snap["logs"][1].text == "測試日誌二"
+
+
+def test_start_clicked_resets_log_presenter(monkeypatch):
+    """驗證開始新任務時會 reset presenter，避免沿用上一輪 log 狀態。"""
+    page = _Page()
+    reset_calls = []
+
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type("T", (), {"start": lambda self: None})(),
+    )
+    monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
+
+    def fake_reset():
+        reset_calls.append(True)
+
+    view = lm_view.LMView(page, _FilePicker())
+    monkeypatch.setattr(view.log_presenter, "reset", fake_reset)
+    view.input_path.value = "C:/Assets"
+
+    view.start_clicked(None)
+
+    assert reset_calls == [True]
