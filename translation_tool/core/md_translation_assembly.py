@@ -11,8 +11,6 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import json
-import orjson
 
 from translation_tool.plugins.md.md_extract_qa import (
     build_pending_json,
@@ -34,7 +32,6 @@ from translation_tool.core.lm_translator_shared import _get_default_batch_size
 from translation_tool.core.md_translation_progress import _ProgressProxy
 from translation_tool.core.md_translation_stats import (
     _LANG_MODE_LABELS,
-    count_json_files as _count_json_files,
     count_md_pending_docs as _count_md_pending_docs,
     log_md_step2_stats as _log_md_step2_stats_impl,
     normalize_lang_mode as _normalize_lang_mode,

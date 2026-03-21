@@ -12,7 +12,7 @@ from typing import Any
 
 import orjson as json
 
-from ..utils.log_unit import log_info, log_error, log_debug, log_warning
+from ..utils.log_unit import log_info, log_warning, log_error
 from translation_tool.core.translatable_extractor import (
     extract_translatables,
     find_lang_json,
@@ -39,12 +39,16 @@ def scan_translatable_files(root: Path) -> tuple[list[Path], list[Path], list[Pa
     """掃描 root 下可翻譯 JSON 檔案。
 
     回傳：(patchouli_files, lang_files, files)
+    若掃描過程中發生錯誤，只 log warning 並繼續，回傳空結果。
     """
-
-    patchouli_files = find_patchouli_json(root)
-    lang_files = find_lang_json(root)
-    files = patchouli_files + lang_files
-    return patchouli_files, lang_files, files
+    try:
+        patchouli_files = find_patchouli_json(root)
+        lang_files = find_lang_json(root)
+        files = patchouli_files + lang_files
+        return patchouli_files, lang_files, files
+    except Exception as e:
+        log_warning(f"掃描 {root} 時失敗: {e}")
+        return [], [], []
 
 def extract_items_parallel(
     *,

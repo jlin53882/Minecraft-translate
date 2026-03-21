@@ -3,7 +3,6 @@
 用途：測試 jar_processor_preview.py 的 ExtractionSummary 與預覽報告生成功能。
 """
 
-import pytest
 import os
 import zipfile
 import re
@@ -152,6 +151,41 @@ class TestPreviewExtractionGeneratorImpl:
 
         last = results[-1]
         assert "result" in last
+
+    def test_failed_jars_records_failures_and_progress_below_one(self, tmp_path):
+        """驗證有 JAR 解析失敗時，failed_jars 非空且 progress < 1.0。
+
+        建立兩個 JAR：一個有效（含 JSON）、一個無效（會觸發 zipfile 異常）。
+        預期 failed_jars 有內容，且 final_progress = (2-1)/2 = 0.5。
+        """
+        mods_dir = tmp_path / "mods"
+        mods_dir.mkdir()
+
+        # 建立有效的 JAR（含一個正確的 lang JSON）
+        good_jar = mods_dir / "good.jar"
+        with zipfile.ZipFile(good_jar, "w") as zf:
+            zf.writestr("assets/mymod/lang/en_us.json", '{"key": "value"}')
+
+        # 建立無效的 JAR（內容損壞，zipfile 讀取時會拋例外）
+        bad_jar = mods_dir / "bad.jar"
+        bad_jar.write_bytes(b"PK\x03\x04" + b"\x00" * 8)  # 截斷的 ZIP 表頭
+
+        def find_jars(path):
+            return [str(good_jar), str(bad_jar)]
+
+        results = list(preview_extraction_generator_impl(
+            str(mods_dir),
+            "lang",
+            find_jar_files_fn=find_jars,
+            book_path_regex=re.compile(r".*")
+        ))
+
+        final = results[-1]
+        assert "result" in final, "最終結果應包含 result 欄位"
+        assert final["result"]["failed_jars"], "應記錄到失敗的 JAR"
+        assert final["progress"] < 1.0, "有失敗時 progress 應小於 1.0"
+        assert len(final["result"]["failed_jars"]) == 1, "應有 1 個失敗的 JAR"
+        assert final["result"]["failed_jars"][0]["jar"] == "bad.jar"
 
 
 class TestGeneratePreviewReportFiles:

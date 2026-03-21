@@ -20,14 +20,14 @@ from translation_tool.core.jar_processor_preview import (
 )
 
 BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
-    rf"(assets|data)/([^/]+)/"
-    rf"(patchouli_books|book|manual|guidebook)/"
-    rf"(?:([^/]+)/)?"
-    rf"(?:"
-    rf"(_?(?:en_us|zh_tw|zh_cn))(/.*)?"
-    rf"|"
-    rf"book\.json"
-    rf")$",
+    r"(assets|data)/([^/]+)/"
+    r"(patchouli_books|book|manual|guidebook)/"
+    r"(?:([^/]+)/)?"
+    r"(?:"
+    r"(_?(?:en_us|zh_tw|zh_cn))(/.*)?"
+    r"|"
+    r"book\.json"
+    r")$",
     re.IGNORECASE,
 )
 

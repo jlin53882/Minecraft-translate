@@ -86,18 +86,25 @@ def _read_json_from_zip(zf: zipfile.ZipFile, path: str) -> Dict[str, Any]:
     except Exception as e:
         # 如果失敗，檢查是否為未轉義控制字元問題，嘗試清理後重試
         err_msg = str(e).lower()
-        if "invalid control character" in err_msg or "unexpected control character" in err_msg:
+        if (
+            "invalid control character" in err_msg
+            or "unexpected control character" in err_msg
+        ):
             import re
+
             # 清理未轉義的控制字元（C0 control characters）
-            cleaned2 = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', lambda m: {
-                '\t': '\\t', '\n': '\\n', '\r': '\\r'
-            }.get(m.group(), '\\n'), cleaned_text)
+            cleaned2 = re.sub(
+                r"[\x00-\x08\x0b\x0c\x0e-\x1f]",
+                lambda m: {"\t": "\\t", "\n": "\\n", "\r": "\\r"}.get(m.group(), "\\n"),
+                cleaned_text,
+            )
             try:
                 return json.loads(cleaned2)
-            except Exception:
-                pass  # 清理後仍然失敗，進入 quarantine 流程
+            except Exception as inner_e:
+                # 清理後仍然失敗，進入 quarantine 流程
+                raise RuntimeError(f"無法讀取 ZIP 內 JSON 檔案: {path}") from inner_e
         # 回報 exception 讓 quarantine 邏輯能夠啟動
-        raise
+        raise RuntimeError(f"無法讀取 ZIP 內 JSON 檔案: {path}") from e
 
 
 def _write_bytes_atomic(path: str, data: bytes) -> None:

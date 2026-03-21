@@ -2,10 +2,9 @@
 
 用途：測試 Markdown 翻譯統計相關功能。
 """
-import pytest
 import json
 from pathlib import Path
-from unittest.mock import Mock, patch, mock_open
+from unittest.mock import Mock, patch
 from translation_tool.core.md_translation_stats import (
     _LANG_MODE_LABELS,
     normalize_lang_mode,

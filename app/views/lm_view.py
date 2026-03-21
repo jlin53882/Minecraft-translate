@@ -9,7 +9,7 @@ import time
 
 import flet as ft
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug
+from translation_tool.utils.log_unit import log_info, log_debug
 
 # UI 共用元件：統一卡片/按鈕樣式
 from app.ui.components import primary_button, styled_card

@@ -6,10 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
-import os
-import zipfile
 import re
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -154,7 +152,6 @@ class TestMockZipHandling:
         from translation_tool.core.lang_merge_content_copy import (
             process_content_or_copy_file_impl,
         )
-        from unittest.mock import MagicMock
         
         # 建立 mock
         mock_zf = MagicMock()
@@ -196,7 +193,6 @@ class TestMockZipHandling:
         from translation_tool.core.lang_merge_content_copy import (
             process_content_or_copy_file_impl,
         )
-        from unittest.mock import MagicMock
 
         def mock_load_config():
             return {
@@ -260,7 +256,6 @@ class TestMockZipHandling:
             process_content_or_copy_file_impl,
             _patchouli_eff_cache,
         )
-        from unittest.mock import MagicMock
 
         # 先清除 module-level cache，確保從乾淨狀態開始
         _patchouli_eff_cache.clear()

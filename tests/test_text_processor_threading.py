@@ -13,7 +13,6 @@ text_processor.py 已改用 threading.local() 實作執行緒隔離快取。
 
 import sys
 import threading
-import time
 from pathlib import Path
 
 # 確保 translation_tool 在 sys.path

@@ -2,9 +2,6 @@
 
 用途：測試語言處理格式相關功能。
 """
-import pytest
-import re
-from unittest.mock import patch, Mock
 
 
 class TestConvertOnlyCjk:
