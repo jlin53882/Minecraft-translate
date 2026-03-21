@@ -7,7 +7,17 @@
 from .icon_reason import IconRisk
 
 def classify_no_icon_reason(lang_key: str) -> tuple[str, IconRisk]:
-    """分類無圖示的原因。"""
+    """根據 lang key 分類「無圖示」的原因並回傳風險等級。
+
+    依關鍵字模式（如 banner、item.、block.、jei. 等）做启发式分類，
+    回傳對應的原因說明與 IconRisk 等級。
+
+    Args:
+        lang_key: 語言檔的翻譯 key（如 "item.diamond_sword"）。
+
+    Returns:
+        包含（原因說明, IconRisk）的元組。
+    """
     k = lang_key.lower()
 
     if "banner" in k or "pattern" in k:

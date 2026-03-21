@@ -15,7 +15,7 @@ def map_lang_output_path(src: Path) -> Path:
     return src
 
 def set_by_path(root: dict, path: str, value):
-    """依路徑設定值。"""
+    """根據點分隔與方括號混合的路徑（如 `a.b[0].c`），在多層巢狀 dict/list 結構中設定數值。"""
     current = root
     normalized_path = path.replace("][", "].[")
     parts = normalized_path.split(".")

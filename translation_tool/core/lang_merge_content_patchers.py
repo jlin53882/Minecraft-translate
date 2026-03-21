@@ -26,7 +26,7 @@ def patch_localized_content_json_impl(
     json_module,
     logger_override=None,
 ) -> Dict[str, Any]:
-    """處理本地化 JSON 的 patch / pretty-print / quarantine 流程。"""
+    """將本地化 JSON 檔案（zh_cn）讀取後套用 S2TW 翻譯規則，以格式化 JSON 寫入 tw_output_path；若解析失敗則隔離至 quarantine。"""
     # 使用 centralized logger
 
     try:

@@ -10,9 +10,7 @@ import json
 import re
 
 def safe_json_loads(text: str):
-    """
-
-    """
+    """將模型回傳的文字嘗試解析為 JSON，支援去除 Markdown code fence 並從雜訊文字中截取第一個合法 JSON 區塊。"""
     text = text.strip()
 
     if text.startswith("```"):
@@ -35,6 +33,6 @@ def safe_json_loads(text: str):
     raise RuntimeError("JSON 解析失敗：無法解析模型回傳內容")
 
 def chunked(lst, size):
-    """處理此 generator 並逐步回報進度（yield update dict）。"""
+    """將序列 lst 依指定大小 size 分塊，yield 每個 chunk（最後一塊可能較短）。"""
     for i in range(0, len(lst), size):
         yield lst[i : i + size]

@@ -33,7 +33,7 @@ def export_filtered_pending_impl(
     *,
     json_module,
 ) -> None:
-    """輸出符合門檻的 pending.json，並先清掉舊輸出。"""
+    """掃描 pending_root 找出條目數 >= min_count 的 pending.json 檔案，複製到 output_root（寫入前會先刪除舊 output_root）。"""
     if not os.path.isdir(pending_root):
         return
     if os.path.exists(output_root):
