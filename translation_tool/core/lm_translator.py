@@ -565,6 +565,9 @@ def translate_directory_generator(
 
     # B-3: 快取寫入頻率優化 - 批次計數器
     _batch_write_counter = 0
+    # 進度更新頻率：每 yield_every 筆翻譯更新一次（約 50 次 / 總任務）
+    yield_every = max(1, total // 50)
+    _item_idx = 0
 
     while remaining:
         is_lang = remaining[0]["cache_type"] == "lang"
@@ -597,6 +600,11 @@ def translate_directory_generator(
         }
 
         for item in safe_translated:
+            _item_idx += 1
+            processed += 1
+            # 每處理的 N 筆 yield 一次進度（約 50 次 / 總任務）
+            if _item_idx % yield_every == 0:
+                yield {"progress": min(0.2 + 0.8 * (processed / total), 1.0)}
             file = item["file"]
             path = item["path"]
             text = item["text"]
@@ -684,7 +692,6 @@ def translate_directory_generator(
         # 注意：如果中斷了，這批次可能只翻了部分，len(translated) 才是真正完成的數量
         # actual_processed = len(translated)
         actual_processed = len(safe_translated)
-        processed += actual_processed
 
         # ✅ 只移除真的翻過的
         # 移動剩餘指標
