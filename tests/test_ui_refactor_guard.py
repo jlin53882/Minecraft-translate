@@ -24,7 +24,7 @@ def test_views_use_shared_components_and_no_local_styled_card():
 
 
 def test_config_and_rules_use_shared_buttons():
-    config_src = _read("app/views/config_view.py")
+    config_src = _read("app/views/config/config_form.py")
     rules_src = _read("app/views/rules_view.py")
 
     assert "from app.ui.components import primary_button" in config_src
