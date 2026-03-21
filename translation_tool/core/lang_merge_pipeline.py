@@ -26,8 +26,6 @@ from .lang_merge_zip_io import (
 )
 from .lang_processing_format import dump_json_bytes
 
-# ZIP 包裝層前綴集合（避免每次呼叫重建 frozenset）
-KNOWN_ZIP_PACKAGING_PREFIXES = frozenset(["lang_out", "book_out", "patchouli_out"])
 
 CJK_RE = re.compile(
     r"[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002ebef\U00030000-\U0003134f]"
@@ -104,6 +102,7 @@ def _process_single_mod(
                         zip_path=path,
                         output_dir=output_dir,
                         reason="lang_partial_parse_error",
+                        errordata_dir=errordata_dir,
                         extra_text="\n".join(
                             f"[line {n}] {reason}: {raw}"
                             for n, raw, reason in bad_lines
@@ -157,32 +156,8 @@ def _process_single_mod(
         #   例：lang_output/mods_XXX/assets/... → lang_output/assets/...
         #       patchouli_out/patchouli_books/assets/... → patchouli_out/assets/...
         # - 未知前綴：只有當剩餘路徑以已知內容目錄開頭時才剝離；其餘不動。
-        _prefix = relative_tw_path.split("/")[0]
-        KNOWN_CONTENT_PREFIXES = ("assets/", "book/", "patchouli_books/")
-        if _prefix in KNOWN_ZIP_PACKAGING_PREFIXES and relative_tw_path.startswith(
-            _prefix + "/"
-        ):
-            stripped = relative_tw_path[len(_prefix) + 1 :]
-            # 若剝離後直接以 content 目錄開頭，再剝離第二層中間目錄
-            if stripped.startswith(KNOWN_CONTENT_PREFIXES):
-                second_slash = stripped.find("/")
-                if second_slash != -1:
-                    final_output_rel = stripped[second_slash + 1 :]
-                else:
-                    final_output_rel = stripped
-            else:
-                final_output_rel = stripped
-        elif _prefix and not _prefix.startswith("."):
-            remaining = relative_tw_path[len(_prefix) + 1 :]
-            if remaining.startswith(KNOWN_CONTENT_PREFIXES):
-                final_output_rel = remaining
-                log_warning(
-                    f"未知 ZIP 包裝前綴 '{_prefix}'，已剝離。原始路徑：{relative_tw_path}"
-                )
-            else:
-                final_output_rel = relative_tw_path
-        else:
-            final_output_rel = relative_tw_path
+        # 路徑已在 lang_merger.py 中由統一前綴偵測剝離乾淨，直接使用
+        final_output_rel = relative_tw_path
         final_output_path = os.path.join(output_dir, final_output_rel)
         target_has_tw = os.path.exists(final_output_path)
 

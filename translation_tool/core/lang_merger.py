@@ -72,6 +72,35 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
         with zipfile.ZipFile(zip_file, 'r') as zf:
             yield {"progress": 0.0, "log": f"分析 ZIP 檔案: {os.path.basename(zip_file)}"}
 
+            # ============================================================
+            # 統一前綴自動剝離（Universal Wrapper Prefix Stripping）
+            # 原則：不管前綴叫什麼名字，只要整個 ZIP 的所有路徑都被包在
+            # 同一個頂層資料夾下，就剝離它。不再使用白名單。
+            # ============================================================
+            all_names = zf.namelist()
+            strip_wrapper = None  # 預設不剝離
+
+            if all_names:
+                top_prefixes = set()
+                for name in all_names:
+                    parts = name.replace("\\", "/").split("/")
+                    if parts and parts[0]:
+                        top_prefixes.add(parts[0])
+
+                # 只有一個頂層前綴 → 代表整個 ZIP 被包了一層，剝離它
+                if len(top_prefixes) == 1:
+                    wrapper_prefix = list(top_prefixes)[0]
+                    prefix_to_strip = wrapper_prefix + "/"
+
+                    # 只在有實質內容時才剝離（避免空前綴或只有頂層目錄的情況）
+                    sample_stripped = all_names[0][len(prefix_to_strip):] if all_names[0].startswith(prefix_to_strip) else all_names[0]
+                    if sample_stripped and sample_stripped != all_names[0]:
+                        def strip_wrapper(path):
+                            if path.startswith(prefix_to_strip):
+                                return path[len(prefix_to_strip):]
+                            return path
+                        log_info(f"偵測到統一包裝前綴 '{wrapper_prefix}/'，已自動剝離。")
+
             # 建立模組索引：以 mod_key 為單位，收集該 mod 下的 zh_cn/zh_tw/en_us 路徑
             lang_files_by_mod = defaultdict(dict)
             other_files: List[str] = []
@@ -104,7 +133,11 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
                 normalized = file_path.replace("\\", "/")
                 if normalized.endswith("/") or not normalized:
                     continue
-                
+
+                # 套用統一前綴剝離（若已偵測到包裝前綴）
+                if strip_wrapper is not None:
+                    normalized = strip_wrapper(normalized)
+
                 norm_low = normalized.lower()
 
                 if "/lang/" in norm_low and (norm_low.endswith(".json") or norm_low.endswith(".lang")):

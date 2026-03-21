@@ -315,11 +315,37 @@ def process_content_or_copy_file_impl(
     try:
         if not is_localized_cn_file:
             if ext == ".json":
+                text = read_text_from_zip_fn(zf, input_path)
+
+                # ── Step 1: 先直接解析 ──────────────────────────────────────
+                source_data = None
+                parse_error: Exception | None = None
                 try:
-                    text = read_text_from_zip_fn(zf, input_path)
                     source_data = json_module.loads(text)
                 except Exception as e:
-                    error_detail = f"Exception: {type(e).__name__}\nMessage: {str(e)}\nPath: {input_path}"
+                    parse_error = e
+
+                # ── Step 2: 若失敗，檢查是否為未轉義控制字元問題 ─────────────
+                if source_data is None and parse_error is not None:
+                    err_msg = str(parse_error).lower()
+                    if "invalid control character" in err_msg or "unexpected control character" in err_msg:
+                        log_debug(f"{log_prefix} 偵測到未轉義控制字元，嘗試清理後重試解析…")
+                        # 清理未轉義的控制字元（Tab \t, 換行 \n, CR \r 等），
+                        # 只清理字串內容中的，保留 JSON 語法結構字元（: , { } [ ] "）
+                        cleaned = re.sub(r'(?<=["\'])[\t\n\r](?=["\'])', lambda m: "\\n" if m.group() == "\n" else ("\\r" if m.group() == "\r" else "\\t"), text)
+                        # 通用寫法：把所有在 JSON 字串內部的控制字元都做轉義
+                        # 符合 JSON 規範：value 中的控制字元必須是 \t \n \r
+                        cleaned = re.sub(r'(?<!\\)((?:\\\\)*)[\t\x01-\x1f](?=(?:[^\\"]*\\.)*[^\\"]*$)', r'\1\\n', text, flags=re.DOTALL)
+                        try:
+                            source_data = json_module.loads(cleaned)
+                            log_debug(f"{log_prefix} 控制字元清理後解析成功")
+                        except Exception as e2:
+                            parse_error = e2
+                            source_data = None
+
+                # ── Step 3: 真的失敗才隔離 ───────────────────────────────────
+                if source_data is None:
+                    error_detail = f"Exception: {type(parse_error).__name__}\nMessage: {str(parse_error)}\nPath: {input_path}"
                     lang = "unknown"
                     for possible_lang in ["zh_cn", "zh_tw", "en_us"]:
                         if possible_lang in normalized_path:
@@ -333,7 +359,7 @@ def process_content_or_copy_file_impl(
                         extra_text=error_detail,
                         errordata_dir=errordata_dir,
                     )
-                    log_warning(f"{log_prefix} JSON 無法解析，已跳過並隔離: {e}")
+                    log_warning(f"{log_prefix} JSON 無法解析，已跳過並隔離: {parse_error}")
                     return {"success": True}
 
                 if "/lang/" in normalized_path and file_name.lower() == "zh_tw.json":
