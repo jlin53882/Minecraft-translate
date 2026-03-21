@@ -393,3 +393,23 @@ def test_start_ui_timer_stops_when_page_update_fails(monkeypatch):
     lm_view.time.sleep(0.25)
 
     assert view._ui_timer_running is False
+
+
+def test_start_ui_timer_attempts_log_view_update(monkeypatch):
+    """驗證 timer 迴圈會嘗試刷新 log_view，避免日誌內容已 sync 但畫面未更新。"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = _Page()
+
+    view = lm_view.LMView(page, _FilePicker())
+    view.session = _Session()
+    view.session.start()
+    view.session.add_log("hello")
+    view.session.status = "DONE"
+
+    called = []
+    monkeypatch.setattr(view.log_view, "update", lambda: called.append(True))
+
+    view.start_ui_timer()
+    lm_view.time.sleep(0.25)
+
+    assert called, "log_view.update() 應至少被呼叫一次"

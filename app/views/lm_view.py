@@ -277,6 +277,12 @@ class LMView(ft.Column):
                 except Exception as e:
                     log_debug(f"LM log presenter sync failed: {e}")
 
+                # 強制刷新 ListView 內容變更，避免背景 thread 更新時畫面不同步
+                try:
+                    self.log_view.update()
+                except Exception:
+                    pass
+
                 status = (snap.get("status") or "").upper()
                 if status == "DONE":
                     self._set_status("任務完成", theme.GREEN_200)
