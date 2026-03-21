@@ -41,7 +41,7 @@ def _get_active_shard_path(
             if m:
                 existing_shards.append(int(m.group(1)))
 
-        latest_id = max(existing_shards) if existing_shards else 1
+        latest_id = max(existing_shards or [1])
         active_file.write_text(f"{latest_id:05d}", encoding="utf-8")
 
     shard_id_str = active_file.read_text(encoding="utf-8").strip()
