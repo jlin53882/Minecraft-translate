@@ -706,7 +706,7 @@ def translate_directory_generator(
         # 3. 回傳給 UI 或 CLI
         yield {
             "progress": min(0.2 + 0.8 * (processed / total), 1.0),
-            # "log": progress_msg,
+            "log": progress_msg,
         }
 
         # ⭐ 5. 如果中斷，發送最後訊息並跳出
@@ -757,5 +757,5 @@ def translate_directory_generator(
 
     yield {
         "progress": 1.0 if processed >= total else processed / total,
-        # "log": "\n".join(final_logs),
+        "log": "\n".join(final_logs),
     }

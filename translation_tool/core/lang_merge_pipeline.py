@@ -46,6 +46,7 @@ def _process_single_mod(
     rules: list,
     output_dir: str,
     must_translate_dir: str,
+    errordata_dir: str | None = None,
 ) -> Dict[str, Any]:
     """處理單一模組的語言合併。"""
 
@@ -121,6 +122,7 @@ def _process_single_mod(
                 zip_path=path,
                 output_dir=output_dir,
                 reason=f"lang_json_parse_failed: {e}",
+                errordata_dir=errordata_dir,
             )
             return {}
 
@@ -149,15 +151,27 @@ def _process_single_mod(
             relative_tw_path = os.path.join(mod_name, "lang", "zh_tw.json")
 
         # 剝離 ZIP 包裝前綴層，避免多個 ZIP 時產生多餘的 {prefix}/ 子目錄。
-        # - 已知前綴（lang_out / book_out / patchouli_out）：直接剝離。
-        # - 未知前綴：只有當剩餘路徑以已知內容目錄開頭（assets/、book/、patchouli_books/）
-        #   時才認定為包裝前綴並剝離；其餘視為正常路徑組成，不剝離。
+        # - 已知前綴（lang_out / book_out / patchouli_out）：直接剝離第一層前綴。
+        # - 剝離後若剩餘路徑以 assets/、book/、patchouli_books/ 開頭（表示有第二層
+        #   中間目錄），則再剝離一層，讓 content 目錄直接置於 {prefix}/ 下。
+        #   例：lang_output/mods_XXX/assets/... → lang_output/assets/...
+        #       patchouli_out/patchouli_books/assets/... → patchouli_out/assets/...
+        # - 未知前綴：只有當剩餘路徑以已知內容目錄開頭時才剝離；其餘不動。
         _prefix = relative_tw_path.split("/")[0]
         KNOWN_CONTENT_PREFIXES = ("assets/", "book/", "patchouli_books/")
         if _prefix in KNOWN_ZIP_PACKAGING_PREFIXES and relative_tw_path.startswith(
             _prefix + "/"
         ):
-            final_output_rel = relative_tw_path[len(_prefix) + 1 :]
+            stripped = relative_tw_path[len(_prefix) + 1 :]
+            # 若剝離後直接以 content 目錄開頭，再剝離第二層中間目錄
+            if stripped.startswith(KNOWN_CONTENT_PREFIXES):
+                second_slash = stripped.find("/")
+                if second_slash != -1:
+                    final_output_rel = stripped[second_slash + 1 :]
+                else:
+                    final_output_rel = stripped
+            else:
+                final_output_rel = stripped
         elif _prefix and not _prefix.startswith("."):
             remaining = relative_tw_path[len(_prefix) + 1 :]
             if remaining.startswith(KNOWN_CONTENT_PREFIXES):

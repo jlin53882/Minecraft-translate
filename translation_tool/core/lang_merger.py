@@ -41,9 +41,11 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
     lang_output_dir = os.path.join(output_dir, "lang_output")
     patchouli_output_dir = os.path.join(output_dir, "patchouli_output")
     other_output_dir = os.path.join(output_dir, "other_output")
+    errordata_output_dir = os.path.join(output_dir, "errordata_output")
     os.makedirs(lang_output_dir, exist_ok=True)
     os.makedirs(patchouli_output_dir, exist_ok=True)
     os.makedirs(other_output_dir, exist_ok=True)
+    os.makedirs(errordata_output_dir, exist_ok=True)
     must_translate_dir = os.path.join(lang_output_dir, load_config().get("lang_merger", {}).get("pending_folder_name", "待翻譯"))
     os.makedirs(must_translate_dir, exist_ok=True)
 
@@ -149,7 +151,7 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
                 
                 # 提交每個 mod 的處理（這裡每個 mod 的 paths 會包含 zh_cn/zh_tw/en_us 任一或多個）
                 for mod_key, paths in mods_to_process.items():
-                    futures.append(executor.submit(_process_single_mod, zf, paths, rules, lang_output_dir, must_translate_dir))
+                    futures.append(executor.submit(_process_single_mod, zf, paths, rules, lang_output_dir, must_translate_dir, errordata_output_dir))
 
                 # 提交其他檔案處理（例如圖片、md、json5、localized files 等）
                 for input_path in other_files:
@@ -161,6 +163,7 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
                             all_files_cache=all_files_cache,  # 傳遞快取
                             patchouli_output_dir=patchouli_output_dir,
                             other_output_dir=other_output_dir,
+                            errordata_dir=errordata_output_dir,
                         ))
 
                 completed = 0

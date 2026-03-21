@@ -132,22 +132,34 @@ def _write_text_atomic(path: str, text: str) -> None:
 
 
 def quarantine_copy_from_zip(
-    zf: zipfile.ZipFile, zip_path: str, output_dir: str, reason: str, extra_text=None
+    zf: zipfile.ZipFile,
+    zip_path: str,
+    output_dir: str,
+    reason: str,
+    extra_text=None,
+    *,
+    errordata_dir: str | None = None,
 ):
     """
-    將解析失敗的檔案原樣複製到：
-    output_dir/skipped_json/<zip 原始路徑>
+    將解析失敗的檔案原樣複製。
+
+    - errordata_dir 有值時：寫入 errordata_dir/<zip_path>（隔離的錯誤資料目錄）。
+      用於硬性解析失敗（如 JSON 完全無法解讀）。
+    - 否則：寫入 output_dir/quarantine_folder_name/<zip_path>
+      （部分解析失敗、格式問題等，仍屬正常流程的一部分）。
 
     目錄結構會與「待翻譯」完全一致，方便人工比對與修復。
     """
 
-    # skipped_json/ + 原始 zip 路徑（例如 assets/xxx）
-    quarantine_root_name = (
-        load_config()
-        .get("lang_merger", {})
-        .get("quarantine_folder_name", "skipped_json")
-    )
-    quarantine_root = os.path.join(output_dir, quarantine_root_name)
+    if errordata_dir:
+        quarantine_root = errordata_dir
+    else:
+        quarantine_root_name = (
+            load_config()
+            .get("lang_merger", {})
+            .get("quarantine_folder_name", "skipped_json")
+        )
+        quarantine_root = os.path.join(output_dir, quarantine_root_name)
     target_path = os.path.join(quarantine_root, zip_path)
 
     os.makedirs(os.path.dirname(target_path), exist_ok=True)

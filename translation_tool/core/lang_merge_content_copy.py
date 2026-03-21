@@ -137,6 +137,7 @@ def process_content_or_copy_file_impl(
     json_module,
     patchouli_output_dir: str | None = None,
     other_output_dir: str | None = None,
+    errordata_dir: str | None = None,
 ) -> Dict[str, Any]:
     """處理非標準 lang JSON / patchouli / 純文字內容的 copy-or-patch 流程。"""
     normalized_path = input_path.lower().replace("\\", "/")
@@ -252,12 +253,14 @@ def process_content_or_copy_file_impl(
 
         # 新結構：Patchouli 輸出到 patchouli_output_dir（而非 lang_output_dir）
         # zh_tw/zh_cn → 寫入主要目錄；en_us → 寫入待翻譯子目錄
+        # 注意：normalized_root 已包含 patchouli_root_dir（如 patchouli_books/book_id），
+        # 不需再重複拼接 patchouli_root_dir，否則會產生 patchouli_books/patchouli_books/ 雙層目錄。
         _pp_dir = patchouli_output_dir if patchouli_output_dir else output_dir
         if rel_low.startswith("en_us/"):
             # en_us 未翻譯內容 → 寫入待翻譯子目錄
-            target = os.path.join(_pp_dir, pending_name, patchouli_root_dir, normalized_root, rel_path)
+            target = os.path.join(_pp_dir, pending_name, normalized_root, rel_path)
         else:
-            target = os.path.join(_pp_dir, patchouli_root_dir, normalized_root, rel_path)
+            target = os.path.join(_pp_dir, normalized_root, rel_path)
         os.makedirs(os.path.dirname(target), exist_ok=True)
 
         ext = os.path.splitext(input_path)[1].lower()
@@ -328,6 +331,7 @@ def process_content_or_copy_file_impl(
                         output_dir=output_dir,
                         reason=f"JSON解析失敗 (語言: {lang})",
                         extra_text=error_detail,
+                        errordata_dir=errordata_dir,
                     )
                     log_warning(f"{log_prefix} JSON 無法解析，已跳過並隔離: {e}")
                     return {"success": True}

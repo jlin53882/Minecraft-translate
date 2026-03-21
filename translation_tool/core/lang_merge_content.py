@@ -55,6 +55,7 @@ def _process_content_or_copy_file(
     patchouli_eff_cache: dict | None = None,
     patchouli_output_dir: str | None = None,
     other_output_dir: str | None = None,
+    errordata_dir: str | None = None,
 ):
     return process_content_or_copy_file_impl(
         zf,
@@ -76,6 +77,7 @@ def _process_content_or_copy_file(
         json_module=json,
         patchouli_output_dir=patchouli_output_dir,
         other_output_dir=other_output_dir,
+        errordata_dir=errordata_dir,
     )
 
 def remove_empty_dirs(root_dir: str):
