@@ -24,9 +24,23 @@ VERSION_REGEX = re.compile(
 )
 
 def get_file_hash(data: bytes) -> str:
+    """計算資料的 SHA-256 雜湊值（16進位字串）。
+    
+    Args:
+        data: 原始位元組資料
+    Returns:
+        SHA-256 雜湊的 16 進位表示（64字元）
+    """
     return hashlib.sha256(data).hexdigest()
 
 def _normalize_jar_base_name(jar_filename: str) -> str:
+    """從 JAR 檔名提取乾淨的 Mod ID（去除版本號、forge/fabric 等前輈字）。
+    
+    Args:
+        jar_filename: JAR 檔案路徑或檔名
+    Returns:
+        乾淨的 Mod ID（如 "Botania"）
+    """
     base_full = os.path.splitext(os.path.basename(jar_filename))[0]
     clean_name = re.sub(
         r"[-_](neoforge|forge|fabric|quilt|build|release|alpha|beta)[-_]?",
@@ -48,6 +62,19 @@ def extract_from_jar_impl(
     *,
     get_file_hash_fn: Callable[[bytes], str] = get_file_hash,
 ) -> Dict[str, Any]:
+    """從單一 JAR 檔案中抽取符合正規表達式的檔案內容。
+    
+    僅處理 assets/ 開頭或非 assets 的普通資源檔，
+    輸出時保留原始目錄結構。HASH 相同者自動跳過（增量更新）。
+    
+    Args:
+        jar_path: JAR 檔案路徑
+        output_root: 輸出根目錄
+        target_regex: 用來過濾感興趣檔案的正規表達式
+        get_file_hash_fn: 檔案 HASH 計算函式（預設 SHA-256）
+    Returns:
+        包含 extracted/skipped 的統計字典
+    """
     extracted_count = 0
     skipped_count = 0
     jar_filename_base = _normalize_jar_base_name(jar_path)

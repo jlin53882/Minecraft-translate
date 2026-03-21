@@ -51,7 +51,17 @@ def _translate_single_file(
     rules: List[Dict[str, str]],
     custom_translations: Dict[str, str],
 ) -> str:
-    """翻譯單一檔案並寫入輸出目錄。"""
+    """翻譯單一檔案（JSON / SNBT / JS / MD）並寫入輸出目錄。
+    
+    Args:
+        file_path: 要翻譯的檔案完整路徑。
+        input_dir: 來源目錄（用於計算相對路徑）。
+        output_dir: 翻譯結果輸出目錄。
+        rules: 文字替換規則列表。
+        custom_translations: 自訂翻譯對照表。
+    Returns:
+        str: 翻譯操作的日誌訊息。
+    """
     relative_path = os.path.relpath(file_path, input_dir)
     output_path = os.path.join(output_dir, relative_path).replace("zh_cn", "zh_tw")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -162,12 +172,36 @@ def translate_directory_generator(input_dir: str) -> Generator[Dict[str, Any], N
     yield {"progress": 1.0}
 
 def deep_merge_3way(zh_tw: dict, zh_cn: dict, en_us: dict) -> dict:
+    """對 FTB Quests 語系字典（巢狀結構）做三方合併，優先順序：zh_tw > zh_cn（轉繁）> en_us。
+    
+    Args:
+        zh_tw: 繁體中文鍵值對（支援巢狀 dict）。
+        zh_cn: 簡體中文鍵值對（會自動轉為繁體）。
+        en_us: 英文鍵值對（作為最後備選）。
+    Returns:
+        dict: 合併後的鍵值對（支援巢狀結構）。
+    """
     return _deep_merge_3way_impl(zh_tw, zh_cn, en_us)
 
 def resolve_ftbquests_quests_root(base_dir: str) -> str:
+    """解析 FTB Quests 設定檔的根目錄。
+    
+    Args:
+        base_dir: FTB 模組目錄路徑。
+    Returns:
+        ftbquests 設定根目錄的路徑字串。
+    """
     return resolve_ftbquests_quests_root_impl(base_dir)
 
 def export_ftbquests_raw_json(base_dir: str, *, output_dir: str | None = None) -> dict:
+    """將 FTB Quests 設定匯出為原始 JSON 檔案。
+    
+    Args:
+        base_dir: FTB 模組目錄。
+        output_dir: 可選，自訂輸出目錄。
+    Returns:
+        包含成功/失敗數量的摘要字典。
+    """
     return export_ftbquests_raw_json_impl(
         base_dir,
         output_dir=output_dir,
@@ -178,6 +212,14 @@ def export_ftbquests_raw_json(base_dir: str, *, output_dir: str | None = None) -
     )
 
 def clean_ftbquests_from_raw(base_dir: str, *, output_dir: str | None = None) -> dict:
+    """清理 FTB Quests 原始設定，移除不需要的欄位。
+    
+    Args:
+        base_dir: FTB 模組目錄。
+        output_dir: 可選，自訂輸出目錄。
+    Returns:
+        處理結果摘要。
+    """
     return clean_ftbquests_from_raw_impl(
         base_dir,
         output_dir=output_dir,
@@ -192,6 +234,15 @@ def prepare_ftbquests_lang_template_only(
     *,
     prefer_lang: str = "zh_cn",
 ) -> dict:
+    """從 FTB Quests 設定目錄產生語言模板（僅含翻譯鍵名，不含翻譯內容）。
+    
+    Args:
+        input_config_dir: 來源設定目錄。
+        output_config_dir: 輸出設定目錄。
+        prefer_lang: 偏好語言（預設 zh_cn）。
+    Returns:
+        處理結果摘要。
+    """
     return prepare_ftbquests_lang_template_only_impl(
         input_config_dir,
         output_config_dir,

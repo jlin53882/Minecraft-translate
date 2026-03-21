@@ -9,7 +9,16 @@ from __future__ import annotations
 from pathlib import Path
 
 def resolve_kubejs_root_impl(input_dir: str, *, max_depth: int = 4) -> Path:
-    """自動解析 KubeJS 根目錄。"""
+    """實作：自動搜尋並解析 KubeJS 根目錄。
+    
+    優先傳回直接命名為 kubejs 的目錄；若有多個候選，則優先選擇包含 client_scripts 的目錄。
+    
+    Args:
+        input_dir: 起始搜尋目錄（可為 modpack 根目錄）。
+        max_depth: 最大搜尋深度（預設 4）。
+    Returns:
+        Path: 偵測到的 KubeJS 目錄路徑；若找不到則回傳 input_dir 本身。
+    """
     base = Path(input_dir).resolve()
 
     if base.is_dir() and base.name.lower() == "kubejs":

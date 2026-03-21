@@ -32,6 +32,7 @@ def _patch_localized_content_json(
     log_prefix: str,
     output_dir: str,
 ):
+    """包裝函式：將本地化 JSON 檔案（如 zh_cn）套用 S2TW 規則後寫入輸出路徑，並處理格式化與 quarantine 流程。"""
     return patch_localized_content_json_impl(
         zf,
         cn_path,
@@ -57,6 +58,7 @@ def _process_content_or_copy_file(
     other_output_dir: str | None = None,
     errordata_dir: str | None = None,
 ):
+    """包裝函式：處理 ZIP 中的內容檔案（lang JSON、Patchouli、純文字等），依檔案類型判斷要複製或 S2TW 翻譯後寫入。"""
     return process_content_or_copy_file_impl(
         zf,
         input_path,
@@ -81,9 +83,11 @@ def _process_content_or_copy_file(
     )
 
 def remove_empty_dirs(root_dir: str):
+    """包裝函式：遞迴刪除指定目錄下所有空的子資料夾。"""
     return remove_empty_dirs_impl(root_dir)
 
 def export_filtered_pending(pending_root: str, output_root: str, min_count: int):
+    """包裝函式：將 pending_root 中條目數 >= min_count 的 pending.json 複製到 output_root（輸出前會先清除舊輸出目錄）。"""
     return export_filtered_pending_impl(
         pending_root,
         output_root,

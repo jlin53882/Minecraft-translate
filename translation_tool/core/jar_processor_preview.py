@@ -50,6 +50,16 @@ def preview_extraction_generator_impl(
     find_jar_files_fn: Callable[[str], list[str]],
     book_path_regex: re.Pattern,
 ) -> Generator[Dict[str, Any], None, None]:
+    """產生 JAR 檔案預覽（不實際寫入檔案，僅掃描並回報找到的檔案）。
+    
+    Args:
+        mods_dir: Mod 目錄路徑。
+        mode: 模式（'lang' 或 'book'）。
+        find_jar_files_fn: 尋找 JAR 檔案的函式。
+        book_path_regex: Book 檔案路徑正則表達式。
+    Yields:
+        進度字典，含預覽結果（檔案數、大小等）。
+    """
     jar_files = find_jar_files_fn(mods_dir)
     total_jars = len(jar_files)
 

@@ -70,7 +70,7 @@ def fast_split_items_by_cache(
     cache_rules: Optional[Dict[str, CacheRule]] = None,
     is_valid_hit: Optional[ValidHitFn] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """直接用 cache dict 分流 items。"""
+    """依據快取規則將所有項目分為「已命中（可直接還原）」與「需要翻譯」兩類。"""
     if cache_rules is None:
         cache_rules = get_default_cache_rules()
 

@@ -30,7 +30,7 @@ class TranslateLoopResult:
 def _get_default_batch_size(
     cache_type: str, batch_size_by_type: Optional[Dict[str, int]]
 ) -> int:
-    """依 cache type 與設定檔決定批次大小。"""
+    """根據 cache type 從設定檔查詢對應的批次大小，若未設定則回傳該類型的預設值。"""
     if batch_size_by_type and cache_type in batch_size_by_type:
         return int(batch_size_by_type[cache_type])
 
@@ -63,7 +63,7 @@ def translate_items_with_cache_loop(
     cache_rules: Optional[Dict[str, CacheRule]] = None,
     sleep_seconds_between_batches: float = 0.0,
 ) -> TranslateLoopResult:
-    """帶 cache 與 ETA 的翻譯主迴圈。"""
+    """執行翻譯主迴圈，分批呼叫翻譯 API、寫入快取、回報進度與 ETA，支援中斷與額度耗盡處理。"""
     if cache_rules is None:
         cache_rules = get_default_cache_rules()
 

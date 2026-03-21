@@ -46,7 +46,11 @@ def _process_single_mod(
     must_translate_dir: str,
     errordata_dir: str | None = None,
 ) -> Dict[str, Any]:
-    """處理單一模組的語言合併。"""
+    """處理單一模組（mod）的語言合併流程。
+
+    讀取 ZIP 中的 zh_cn / zh_tw / en_us lang 檔案，依據來源優先順序產生最終的 zh_tw.json，
+    並將待翻譯（純英文）項目寫入 en_us.json 至 must_translate_dir。
+    """
 
     def _contains_cjk(v: Any) -> bool:
         """Check if value contains CJK characters. Dispatches to memoized str version."""
