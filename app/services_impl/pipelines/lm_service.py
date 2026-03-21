@@ -48,14 +48,17 @@ def run_lm_translation_service(
             export_lang=export_lang,
             write_new_cache=write_new_cache,
         ):
-            log = update_dict.get("log")
-            if log:
-                session.add_log(log)
+            filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
+            if filtered is None:
+                continue
 
-            if "progress" in update_dict and update_dict["progress"] is not None:
-                session.set_progress(update_dict["progress"])
+            if "log" in filtered and filtered["log"]:
+                session.add_log(filtered["log"])
 
-            if update_dict.get("error"):
+            if "progress" in filtered and filtered["progress"] is not None:
+                session.set_progress(filtered["progress"])
+
+            if filtered.get("error"):
                 session.set_error()
                 return
 
