@@ -51,6 +51,7 @@ class LogLimiter:
         self.log_queue = deque(maxlen=max_logs)
         self.pending_logs: list[str] = []
         self.last_flush = 0.0
+        self._cached_progress: Any = None  # 緩存最新 progress，節流時不丟失
 
     def filter(self, update_dict: Dict[str, Any]):
         """批次合併 log + 限制輸出頻率。
@@ -66,14 +67,22 @@ class LogLimiter:
         self.log_queue.append(log_text)
         self.pending_logs.append(log_text)
 
+        # progress 獨立快取：每次都更新，確保節流時不丟失
+        progress_val = update_dict.get("progress")
+        if progress_val is not None:
+            self._cached_progress = progress_val
+
         now = time.time()
         if now - self.last_flush < self.flush_interval:
+            # log 被節流時，只要有 progress 就單獨 forward
+            if progress_val is not None:
+                return {"progress": progress_val}
             return None
 
         self.last_flush = now
         merged = "\n".join(self.pending_logs)
         self.pending_logs.clear()
-        return {"log": merged, "progress": update_dict.get("progress")}
+        return {"log": merged, "progress": self._cached_progress}
 
     def flush(self):
         """強制輸出尚未送出的 pending logs。"""
@@ -83,7 +92,7 @@ class LogLimiter:
         merged = "\n".join(self.pending_logs)
         self.pending_logs.clear()
         self.last_flush = time.time()
-        return {"log": merged}
+        return {"log": merged, "progress": self._cached_progress}
 
 # 單例：全域節流器（維持與 services.py 過去行為一致）
 GLOBAL_LOG_LIMITER = LogLimiter(max_logs=5000, flush_interval=0.1)
