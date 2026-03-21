@@ -2,7 +2,6 @@
 
 用途：測試語言編碼相關功能。
 """
-import pytest
 from translation_tool.core.lang_codec import (
     try_repair_lang_line,
     collapse_lang_lines,

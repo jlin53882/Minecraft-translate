@@ -2,10 +2,8 @@
 
 用途：測試 LM 翻譯掃描相關功能。
 """
-import pytest
 import json
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 
 class TestIsPlainLangJson:
@@ -67,7 +65,6 @@ class TestScanTranslatableFiles:
     def test_scan_translatable_files_with_lang(self, tmp_path):
         """測試含 lang 檔案的掃描。"""
         from translation_tool.core.lm_translator_scan import scan_translatable_files
-        from translation_tool.core.translatable_extractor import find_lang_json
         
         # 建立測試目錄結構
         lang_dir = tmp_path / "lang"

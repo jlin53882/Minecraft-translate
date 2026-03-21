@@ -4,15 +4,13 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import threading
-import time
 
 import flet as ft
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
+from translation_tool.utils.log_unit import log_info
 
 # UI 共用元件：抽出重複的卡片/按鈕樣式，集中在 app.ui
-from app.ui.components import primary_button, secondary_button, styled_card
+from app.ui.components import styled_card
 from app.views.translation.translation_actions import (
     run_ftb,
     run_kjs,

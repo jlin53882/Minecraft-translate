@@ -6,9 +6,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 from translation_tool.core.md_translation_progress import _ProgressProxy
 from translation_tool.core.md_translation_steps import (

@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """High Priority Module Tests - lm_api_client, lm_response_parser"""
 
-import pytest
 
 
 # ==================== lm_api_client ====================

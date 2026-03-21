@@ -3,7 +3,6 @@
 用途：測試 LM 翻譯共享模組的 re-export 介面。
 測試重點：確認所有應該被 export 的項目都有正確導出。
 """
-import pytest
 
 
 class TestSharedModuleExports:

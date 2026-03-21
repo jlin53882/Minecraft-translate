@@ -3,7 +3,6 @@
 用途：測試 LM 回應解析器相關功能。
 """
 import pytest
-import json
 from translation_tool.core.lm_response_parser import (
     safe_json_loads,
     chunked,
