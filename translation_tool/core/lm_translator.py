@@ -358,42 +358,43 @@ def translate_directory_generator(
         for fname, file_hits in hit_by_file.items():
             log_debug("🎯 [CACHE HIT] %s (%d)", fname, len(file_hits))
 
-        for it in file_hits:
-            f = it["file"]
-            path = it["path"]
-            ctype = it.get("cache_type")
+            # 將每個檔案的 hits 處理邏輯內嵌到此迴圈，確保完整的檔案對應
+            for it in file_hits:
+                f = it["file"]
+                path = it["path"]
+                ctype = it.get("cache_type")
 
-            src_text = it.get("source_text") or it.get("text") or ""
-            dst_text = it.get("text") or ""
+                src_text = it.get("source_text") or it.get("text") or ""
+                dst_text = it.get("text") or ""
 
-            if ctype == "patchouli":
-                ukey = f"{path}|{src_text}"
-                entry = patch_cache.get(ukey)
-                key_info = f"patchouli:{ukey}"
-            else:
-                ukey = path
-                entry = lang_cache.get(ukey)
-                key_info = f"lang:{ukey}"
+                if ctype == "patchouli":
+                    ukey = f"{path}|{src_text}"
+                    entry = patch_cache.get(ukey)
+                    key_info = f"patchouli:{ukey}"
+                else:
+                    ukey = path
+                    entry = lang_cache.get(ukey)
+                    key_info = f"lang:{ukey}"
 
-            entry_src = entry.get("src") if isinstance(entry, dict) else None
-            entry_dst = entry.get("dst") if isinstance(entry, dict) else None
+                entry_src = entry.get("src") if isinstance(entry, dict) else None
+                entry_dst = entry.get("dst") if isinstance(entry, dict) else None
 
-            log_debug(
-                "   - [%s] %s | %s\n"
-                "     key=%s\n"
-                "     src=%r\n"
-                "     dst=%r\n"
-                "     cache.src=%r\n"
-                "     cache.dst=%r",
-                ctype,
-                Path(f).name,
-                path,
-                key_info,
-                src_text,
-                dst_text,
-                entry_src,
-                entry_dst,
-            )
+                log_debug(
+                    "   - [%s] %s | %s\n"
+                    "     key=%s\n"
+                    "     src=%r\n"
+                    "     dst=%r\n"
+                    "     cache.src=%r\n"
+                    "     cache.dst=%r",
+                    ctype,
+                    Path(f).name,
+                    path,
+                    key_info,
+                    src_text,
+                    dst_text,
+                    entry_src,
+                    entry_dst,
+                )
 
     yield {
         "progress": 0.1,
