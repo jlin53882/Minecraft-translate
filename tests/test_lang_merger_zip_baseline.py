@@ -110,14 +110,15 @@ def test_merge_zip_baseline_fixture_outputs_are_stable(
     assert updates[-1]["progress"] == 1.0
 
     # PR #24：輸出結構改為 lang_output/ 子目錄，zh_tw + 待翻譯 皆寫入 lang_output/
-    # `_process_single_mod` 會自動剝離 ZIP 內的單一頂層包裝目錄（assets/），
-    # 因此 lang 路徑實際輸出為 lang_output/demo/lang/（不含 assets/）
+    # `_process_single_mod` 不再剝離 assets/（標準 Minecraft 資源目錄），
+    # 因此 lang 路徑實際輸出為 lang_output/assets/demo/lang/（含 assets/）
     # localized 檔案則仍保留 output_dir/assets/（不經同一個 lang 剝離流程）
-    zh_tw_path = output_dir / "lang_output" / "demo" / "lang" / "zh_tw.json"
+    zh_tw_path = output_dir / "lang_output" / "assets" / "demo" / "lang" / "zh_tw.json"
     pending_path = (
         output_dir
         / "lang_output"
         / PENDING_DIR
+        / "assets"
         / "demo"
         / "lang"
         / "en_us.json"
@@ -126,6 +127,7 @@ def test_merge_zip_baseline_fixture_outputs_are_stable(
         output_dir
         / "lang_output"
         / FILTERED_DIR
+        / "assets"
         / "demo"
         / "lang"
         / "en_us.json"
@@ -152,9 +154,9 @@ def test_merge_zip_baseline_fixture_outputs_are_stable(
     }
     assert all_json_outputs == {
         "assets/demo/docs/zh_tw.extra.json",
-        "lang_output/demo/lang/zh_tw.json",
-        f"lang_output/{FILTERED_DIR}/demo/lang/en_us.json",
-        f"lang_output/{PENDING_DIR}/demo/lang/en_us.json",
+        f"lang_output/assets/demo/lang/zh_tw.json",
+        f"lang_output/{PENDING_DIR}/assets/demo/lang/en_us.json",
+        f"lang_output/{FILTERED_DIR}/assets/demo/lang/en_us.json",
     }
 
     assert not any(output_dir.rglob("*.reason.txt"))

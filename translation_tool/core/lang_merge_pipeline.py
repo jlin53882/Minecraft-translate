@@ -155,14 +155,17 @@ def _process_single_mod(
 
         # 自動偵測並剝離 ZIP 統一包裝前綴（任何名稱皆適用）
         # 讀取 ZIP 時用原始路徑，只在輸出路徑建構時剝離
+        # 已知標準資源目錄（這些目錄名稱本身就是有意義的結構，不剝離）
+        _STANDARD_RESOURCE_DIRS = {"assets", "book", "patchouli_books", "resources"}
         _all_names = zf.namelist()
         _wp = None
         if _all_names:
             _tops = set(n.replace("\\", "/").split("/")[0] for n in _all_names if n.replace("\\", "/").split("/")[0])
             if len(_tops) == 1:
-                _candidate = list(_tops)[0] + "/"
-                if _all_names[0].startswith(_candidate):
-                    _wp = _candidate
+                _candidate = list(_tops)[0]
+                # 標準資源目錄不剝離（它們是 Minecraft 標準結構的一部分）
+                if _candidate not in _STANDARD_RESOURCE_DIRS:
+                    _wp = _candidate + "/"
 
         def _strip(p):
             return p[len(_wp):] if _wp and p.startswith(_wp) else p
