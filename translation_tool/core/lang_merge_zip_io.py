@@ -94,10 +94,11 @@ def _read_json_from_zip(zf: zipfile.ZipFile, path: str) -> Dict[str, Any]:
             }.get(m.group(), '\\n'), cleaned_text)
             try:
                 return json.loads(cleaned2)
-            except Exception:
-                pass  # 清理後仍然失敗，進入 quarantine 流程
+            except Exception as inner_e:
+                # 清理後仍然失敗，進入 quarantine 流程
+                raise RuntimeError(f"無法讀取 ZIP 內 JSON 檔案: {path}") from inner_e
         # 回報 exception 讓 quarantine 邏輯能夠啟動
-        raise
+        raise RuntimeError(f"無法讀取 ZIP 內 JSON 檔案: {path}") from e
 
 
 def _write_bytes_atomic(path: str, data: bytes) -> None:
