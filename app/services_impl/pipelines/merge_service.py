@@ -92,18 +92,16 @@ def run_merge_zip_batch_service(
             # ZIP 完成後，至少推進一次 progress
             session.set_progress((idx + 1) / total)
 
-        # 產出統計摘要
-        yield {
-            "progress": 1.0,
-            "log": None,
-            "summary": {
-                "total_zips": stats["total_zips"],
-                "success_zips": stats["success_zips"],
-                "failed_zips": stats["failed_zips"],
-                "errored_files": stats["errored_files"],
-                "failed_zip_details": stats["failed_zip_details"],
-            },
+        # 產出統計摘要，並寫入 session 供 UI 取用
+        final_summary = {
+            "total_zips": stats["total_zips"],
+            "success_zips": stats["success_zips"],
+            "failed_zips": stats["failed_zips"],
+            "errored_files": stats["errored_files"],
+            "failed_zip_details": stats["failed_zip_details"],
         }
+        session.set_summary(final_summary)
+        yield {"progress": 1.0, "log": None, "summary": final_summary}
         session.finish()
 
     except Exception as e:
@@ -111,17 +109,15 @@ def run_merge_zip_batch_service(
         logger.error(f"[致命錯誤] ZIP 合併失敗：{e}\n{tb}")
         session.add_log(f"[致命錯誤] ZIP 合併失敗：{e}\n{tb}")
         # 產出統計摘要（即使失敗也要回報）
-        yield {
-            "progress": 1.0,
-            "log": None,
-            "summary": {
-                "total_zips": stats["total_zips"],
-                "success_zips": stats["success_zips"],
-                "failed_zips": stats["failed_zips"],
-                "errored_files": stats["errored_files"],
-                "failed_zip_details": stats["failed_zip_details"],
-            },
+        error_summary = {
+            "total_zips": stats["total_zips"],
+            "success_zips": stats["success_zips"],
+            "failed_zips": stats["failed_zips"],
+            "errored_files": stats["errored_files"],
+            "failed_zip_details": stats["failed_zip_details"],
         }
+        session.set_summary(error_summary)
+        yield {"progress": 1.0, "log": None, "summary": error_summary}
         session.set_error()
 
     finally:

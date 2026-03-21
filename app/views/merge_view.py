@@ -374,31 +374,30 @@ class MergeView(ft.Column):
                     self._set_status("執行中", theme.BLUE_200)
                 elif status == "DONE":
                     self._set_status("任務完成", theme.GREEN_200)
-                    # 統計成功/失敗 ZIP 數量（從 logs 解析）
-                    success_zips = 0
-                    failed_zips = 0
-                    failed_zip_details = []
-                    for log_line in logs:
-                        text = log_line.text if hasattr(log_line, "text") else str(log_line)
-                        if "[成功]" in text or "成功" in text:
-                            success_zips += 1
-                        elif "[失敗]" in text or "失敗" in text or "[ERROR]" in text:
-                            failed_zips += 1
-                            # 盡量抽出 ZIP 檔名
-                            for zp in self.selected_zips:
-                                if zp in text:
-                                    failed_zip_details.append(Path(zp).name)
-                                    break
-                    self._merge_stats = {
-                        "success_zips": success_zips,
-                        "failed_zips": failed_zips,
-                        "failed_zip_details": "、".join(failed_zip_details) if failed_zip_details else "無",
-                    }
-                    # SnackBar 先提示即將顯示摘要，確保 user 有回饋
-                    snack = ft.SnackBar(ft.Text("處理完成，正在顯示摘要..."), bgcolor=theme.GREEN_700)
-                    self.page.overlay.append(snack)
-                    snack.open = True
-                    self.page.update()
+                    # 直接從 session 取得 service 統計的 summary
+                    snap_summary = snap.get("summary")
+                    if snap_summary:
+                        self._merge_stats = snap_summary
+                    else:
+                        # fallback：從 logs 解析
+                        success_zips = 0
+                        failed_zips = 0
+                        failed_zip_details = []
+                        for log_line in logs:
+                            text = log_line.text if hasattr(log_line, "text") else str(log_line)
+                            if "[完成]" in text and "[錯誤]" not in text:
+                                success_zips += 1
+                            elif "[錯誤]" in text:
+                                failed_zips += 1
+                                for zp in self.selected_zips:
+                                    if zp in text:
+                                        failed_zip_details.append(Path(zp).name)
+                                        break
+                        self._merge_stats = {
+                            "success_zips": success_zips,
+                            "failed_zips": failed_zips,
+                            "failed_zip_details": failed_zip_details,
+                        }
                     self._show_merge_summary(self._merge_stats)
                 elif status == "ERROR":
                     self._set_status("任務發生錯誤", theme.RED_200)
@@ -433,25 +432,32 @@ class MergeView(ft.Column):
         self.page.update()
 
     def _show_merge_summary(self, summary: dict):
-        """顯示合併結果摘要（UI 風格對齊 jar 提取摘要 modal）。"""
+        """顯示合併結果摘要（使用 overlay 確保穩定顯示）。"""
+        # 失敗時顯示預設值，避免 KeyError
+        s_zips = summary.get("success_zips", 0)
+        f_zips = summary.get("failed_zips", 0)
+        f_details = summary.get("failed_zip_details", "無")
+        if isinstance(f_details, list):
+            f_details = "、".join(f_details)
+        elif not f_details:
+            f_details = "無"
+
         content = ft.Column([
             ft.Text("合併結果摘要", size=16, weight=ft.FontWeight.BOLD),
             ft.Divider(),
             ft.Row(
                 [ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=20),
-                 ft.Text(f"成功處理 ZIP：{summary['success_zips']} 個", size=14)],
+                 ft.Text(f"成功處理 ZIP：{s_zips} 個", size=14)],
                 spacing=8,
             ),
             ft.Row(
                 [ft.Icon(ft.Icons.ERROR, color=theme.RED, size=20),
-                 ft.Text(f"失敗 ZIP：{summary['failed_zips']} 個", size=14)],
+                 ft.Text(f"失敗 ZIP：{f_zips} 個", size=14)],
                 spacing=8,
             ),
             ft.Divider(),
-            ft.Text(
-                f"處理失敗的 ZIP：{summary['failed_zip_details']}",
-                size=13, color=ft.Colors.ORANGE_700,
-            ) if summary['failed_zips'] > 0 else ft.Container(),
+            ft.Text(f"處理失敗的 ZIP：{f_details}", size=13, color=ft.Colors.ORANGE_700)
+            if f_zips > 0 else ft.Container(),
             ft.Divider(),
             ft.Text("詳見上方日誌", size=12, color="#aaaaaa"),
         ], spacing=10, tight=True)
@@ -466,12 +472,10 @@ class MergeView(ft.Column):
             ],
         )
 
-        try:
-            self.page.open(dialog)
-        except Exception:
-            self.page.overlay.append(dialog)
-            dialog.open = True
-            self.page.update()
+        # 使用 overlay 方式，穩定性高於 page.open()
+        self.page.overlay.append(dialog)
+        dialog.open = True
+        self.page.update()
 
     def _open_output_folder(self):
         """開啟輸出資料夾（使用檔案總管）。"""
