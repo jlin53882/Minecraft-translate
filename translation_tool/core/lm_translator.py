@@ -51,20 +51,23 @@ BATCH_WRITE_INTERVAL = 5  # 每 N 個批次寫一次硬碟
 CHECKPOINT_FILE = "logs/translation_checkpoint.json"
 
 
-def save_checkpoint(batch_index: int, remaining: list, output_dir: str):
+def save_checkpoint(batch_index: int, completed_count: int, total: int, remaining: list, output_dir: str):
     """寫入 checkpoint（每批次完成後）。
 
     Args:
         batch_index: 目前處理的批次編號
-        remaining: 剩餘待翻譯項目清單
+        completed_count: 已完成的項目數量（用於恢復時計算正確的剩餘切片起點）
+        total: 總項目數量
+        remaining: 剩餘待翻譯項目清單（用於恢復時取樣比对）
         output_dir: 輸出目錄路徑
     """
     os.makedirs(os.path.dirname(CHECKPOINT_FILE), exist_ok=True)
     with open(CHECKPOINT_FILE, "w", encoding="utf-8") as f:
         json_std.dump({
             "batch_index": batch_index,
-            "remaining_count": len(remaining),
-            "remaining": remaining[:3],  # 只保留前三筆範例，不存完整清單
+            "completed_count": completed_count,
+            "total": total,
+            "remaining_sample": remaining[:3] if remaining else [],  # 只保留前三筆範例，不存完整清單
             "output_dir": output_dir
         }, f, ensure_ascii=False)
 
@@ -335,10 +338,10 @@ def translate_directory_generator(
             "🎯 [CACHE HIT] total=%d files=%d", len(cached_items), len(hit_by_file)
         )
 
-        for fname, items in hit_by_file.items():
-            log_debug("🎯 [CACHE HIT] %s (%d)", fname, len(items))
+        for fname, file_hits in hit_by_file.items():
+            log_debug("🎯 [CACHE HIT] %s (%d)", fname, len(file_hits))
 
-        for it in items:
+        for it in file_hits:
             f = it["file"]
             path = it["path"]
             ctype = it.get("cache_type")
@@ -519,19 +522,22 @@ def translate_directory_generator(
     # ============================================================
     checkpoint = load_checkpoint()
     if checkpoint:
-        cp_remaining = checkpoint.get("remaining_count", 0)
-        # 如果 checkpoint 的剩餘數量少於等於當前 total，代表是合理的中斷點
-        if cp_remaining <= total:
-            log_info(f"🔄 偵測到 checkpoint，恢复进度：剩餘 {cp_remaining} 筆")
-            # 注意：這裡只恢復 remaining 數量的追蹤，不實際還原 items_to_translate
-            # 因為翻譯結果是增量寫入，已翻過的項目會因為 cache 命中而快速完成
-            total = cp_remaining
-            remaining = remaining[-cp_remaining:] if cp_remaining <= len(remaining) else remaining
+        cp_completed = checkpoint.get("completed_count", 0)
+        cp_total = checkpoint.get("total", 0)
+        # 檢查 checkpoint 的 completed_count 是否合理（completed <= 原始 total）
+        if cp_completed <= total and cp_total == total:
+            log_info(f"🔄 偵測到 checkpoint，已完成 {cp_completed}/{total} 筆")
+            # 從 items_to_translate 的正確偏移位置恢復剩餘清單
+            remaining = items_to_translate[cp_completed:]
             batch_index = checkpoint.get("batch_index", 1)
-            clear_checkpoint()  # 清除 checkpoint，表示已成功恢復
-            log_info(f"✅ checkpoint 已清除，將從 Batch {batch_index} 繼續翻譯")
+            log_info(f"✅ checkpoint 已載入，將從 Batch {batch_index} 繼續翻譯（remaining={len(remaining)} 筆）")
+        elif cp_completed > total:
+            log_warning(f"⚠️ checkpoint 數量異常（已完成 {cp_completed} > 總數 {total}），忽略並重新開始")
+            clear_checkpoint()
         else:
-            log_warning(f"⚠️ checkpoint 數量異常（{cp_remaining} > {total}），忽略並重新開始")
+            # total 不一致，但 completed_count 合理，可能是檔案結構變更，仍從頭開始
+            log_warning(f"⚠️ checkpoint 與目前總數不一致（checkpoint total={cp_total}，current total={total}），忽略並重新開始")
+            clear_checkpoint()
 
     # B-3: 快取寫入頻率優化 - 批次計數器
     _batch_write_counter = 0
@@ -677,7 +683,7 @@ def translate_directory_generator(
         # ============================================================
         # B-4: 斷點續傳 - 每批次完成後寫入 checkpoint
         # ============================================================
-        save_checkpoint(batch_index, remaining, str(out_root))
+        save_checkpoint(batch_index, processed, total, remaining, str(out_root))
 
         # 計算 ETA
         elapsed = time.perf_counter() - start_time
