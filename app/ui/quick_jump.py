@@ -1,4 +1,4 @@
-﻿"""快速跳轉面板模組。
+"""快速跳轉面板模組。
 
 提供快速跳轉功能，讓使用者可以快速搜尋並跳轉到目標頁面。
 """
@@ -101,8 +101,8 @@ class QuickJumpPanel(ft.Container):
         self.results_list.controls.clear()
 
         for idx, item in enumerate(self.view_registry):
-            label = item.get('label', '')
-            key = item.get('key', '')
+            label = item.get("label", "")
+            key = item.get("key", "")
 
             # 計算快捷鍵（如果有）
             shortcut = ""
@@ -111,10 +111,12 @@ class QuickJumpPanel(ft.Container):
 
             # 建立列表項目
             list_item = ft.ListTile(
-                leading=ft.Icon(item.get('icon', ft.Icons.PAGEVIEW)),
+                leading=ft.Icon(item.get("icon", ft.Icons.PAGEVIEW)),
                 title=ft.Text(label),
                 subtitle=ft.Text(f"key: {key}", size=10),
-                trailing=ft.Text(shortcut, color=ft.Colors.PRIMARY) if shortcut else None,
+                trailing=ft.Text(shortcut, color=ft.Colors.PRIMARY)
+                if shortcut
+                else None,
                 on_click=lambda _, i=idx: self._jump_to(i),
                 data=idx,
             )
@@ -150,7 +152,7 @@ class QuickJumpPanel(ft.Container):
         # 跳轉到第一個結果
         if self.results_list.controls:
             first_item = self.results_list.controls[0]
-            if hasattr(first_item, 'data'):
+            if hasattr(first_item, "data"):
                 self._jump_to(first_item.data)
 
     def _jump_to(self, index: int):
@@ -206,7 +208,9 @@ def close_quick_jump_panel(page: ft.Page):
             if isinstance(page.overlay[i], ft.Container):
                 # 檢查是否是快速跳轉面板（透過 content 類型判斷）
                 overlay_item = page.overlay[i]
-                if hasattr(overlay_item, 'content') and isinstance(overlay_item.content, QuickJumpPanel):
+                if hasattr(overlay_item, "content") and isinstance(
+                    overlay_item.content, QuickJumpPanel
+                ):
                     page.overlay.pop(i)
                     break
 

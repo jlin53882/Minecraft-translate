@@ -17,7 +17,6 @@
     results = engine.search("你好", limit=50)
 """
 
-import os
 import sqlite3
 import threading
 import time
@@ -58,7 +57,7 @@ class CacheSearchEngine:
         # SQLite 效能優化（大幅提升大量寫入速度）
         with self._lock:
             self.conn.execute("PRAGMA journal_mode = WAL")
-            self.conn.execute("PRAGMA synchronous = OFF")
+            self.conn.execute("PRAGMA synchronous = NORMAL")  # ATK-011: OFF 會導致 daemon crash 後 WAL recovery corruption
             self.conn.execute("PRAGMA cache_size = 10000")
             self.conn.execute("PRAGMA temp_store = MEMORY")
         
@@ -663,7 +662,7 @@ class SearchOrchestrator:
         for attempt in range(max_retries):
             try:
                 return self._do_rebuild_search_index(db_path, cache_types, cache_state)
-            except PermissionError as e:
+            except PermissionError:
                 if attempt < max_retries - 1:
                     import time
                     time.sleep(retry_delay)
@@ -683,8 +682,6 @@ class SearchOrchestrator:
         old_engine: Optional[CacheSearchEngine] = None
         total_indexed = 0
         
-        import time
-        import shutil
         
         try:
             # 直接寫入目標資料庫（不使用 tmp 檔案，避免 Windows 檔案鎖問題）

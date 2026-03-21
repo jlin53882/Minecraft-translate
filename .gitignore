@@ -40,9 +40,7 @@ REBUILD_INDEX_NOW.py
 
 # === Temp/personal docs ===
 README_new.md
-Cache_mange*.md
 文件分析/
-設計檔案/
 
 # === Misc txt in core ===
 translation_tool/core/*.txt

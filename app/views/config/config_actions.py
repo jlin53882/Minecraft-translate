@@ -31,8 +31,8 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lm_translator.patchouli_system_prompt'].value = str(config.get('lm_translator', {}).get('patchouli_system_prompt', '你是專業的 Minecraft patchouli 手冊翻譯員，專精於《當個創世神》繁體中文（台灣）官方譯名或台灣用語的翻譯。'))
     view.controls_map['lm_translator.lang_system_prompt'].value = str(config.get('lm_translator', {}).get('lang_system_prompt', '你是專業的 Minecraft Lang翻譯員，你正在翻譯 Minecraft 語言檔案（JSON格式）。'))
     view.controls_map['lang_merger.quarantine_folder_name'].value = config.get('lang_merger', {}).get('quarantine_folder_name', 'skipped_json')
-    view.controls_map['lm_translator.iniital_batch_size_patchouli'].value = int(config.get('lm_translator', {}).get('iniital_batch_size_patchouli', 100))
-    view.controls_map['lm_translator.iniital_batch_size_lang'].value = int(config.get('lm_translator', {}).get('iniital_batch_size_lang', 300))
+    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = int(config.get('lm_translator', {}).get('initial_batch_size_patchouli', 100))
+    view.controls_map['lm_translator.initial_batch_size_lang'].value = int(config.get('lm_translator', {}).get('initial_batch_size_lang', 300))
     view.controls_map['lm_translator.initial_batch_size_ftb'].value = int(config.get('lm_translator', {}).get('initial_batch_size_ftb', 100))
     view.controls_map['lm_translator.initial_batch_size_kubejs'].value = int(config.get('lm_translator', {}).get('initial_batch_size_kubejs', 200))
     view.controls_map['lm_translator.initial_batch_size_md'].value = int(config.get('lm_translator', {}).get('initial_batch_size_md', 100))
@@ -85,8 +85,8 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
         new_config['lang_merger']['quarantine_folder_name'] = view.controls_map['lang_merger.quarantine_folder_name'].value
         new_config['lm_translator']['patchouli_system_prompt'] = view.controls_map['lm_translator.patchouli_system_prompt'].value
         new_config['lm_translator']['lang_system_prompt'] = view.controls_map['lm_translator.lang_system_prompt'].value
-        new_config['lm_translator']['iniital_batch_size_patchouli'] = int(view.controls_map['lm_translator.iniital_batch_size_patchouli'].value)
-        new_config['lm_translator']['iniital_batch_size_lang'] = int(view.controls_map['lm_translator.iniital_batch_size_lang'].value)
+        new_config['lm_translator']['initial_batch_size_patchouli'] = int(view.controls_map['lm_translator.initial_batch_size_patchouli'].value)
+        new_config['lm_translator']['initial_batch_size_lang'] = int(view.controls_map['lm_translator.initial_batch_size_lang'].value)
         new_config['lm_translator']['initial_batch_size_ftb'] = int(view.controls_map['lm_translator.initial_batch_size_ftb'].value)
         new_config['lm_translator']['initial_batch_size_kubejs'] = int(view.controls_map['lm_translator.initial_batch_size_kubejs'].value)
         new_config['lm_translator']['initial_batch_size_md'] = int(view.controls_map['lm_translator.initial_batch_size_md'].value)

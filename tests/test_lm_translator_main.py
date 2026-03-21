@@ -24,8 +24,8 @@ class TestTranslateBatchSmart:
 
         mock_config.return_value = {
             "lm_translator": {
-                "iniital_batch_size_lang": 300,
-                "iniital_batch_size_patchouli": 100,
+                "initial_batch_size_lang": 300,
+                "initial_batch_size_patchouli": 100,
                 "batch_shrink_factor": 0.75,
                 "min_batch_size": 50,
                 "models": {"gemini-pro": {"enabled": True}},
@@ -61,7 +61,7 @@ class TestTranslateBatchSmart:
 
         mock_config.return_value = {
             "lm_translator": {
-                "iniital_batch_size_lang": 300,
+                "initial_batch_size_lang": 300,
                 "models": {"gemini-pro": {"enabled": True}},
             }
         }
@@ -86,7 +86,7 @@ class TestTranslateBatchSmart:
 
         mock_config.return_value = {
             "lm_translator": {
-                "iniital_batch_size_lang": 300,
+                "initial_batch_size_lang": 300,
                 "models": {"gemini-pro": {"enabled": True}},
             }
         }
@@ -118,7 +118,7 @@ class TestBatchProfileDetection:
 
         mock_config.return_value = {
             "lm_translator": {
-                "iniital_batch_size_lang": 300,
+                "initial_batch_size_lang": 300,
                 "batch_shrink_factor": 0.75,
                 "min_batch_size": 50,
                 "models": {"gemini-pro": {"enabled": True}},

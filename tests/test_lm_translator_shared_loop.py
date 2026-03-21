@@ -86,7 +86,7 @@ class TestGetDefaultBatchSize:
         
         mock_load_config.return_value = {
             "lm_translator": {
-                "iniital_batch_size_patchouli": 120
+                "initial_batch_size_patchouli": 120
             }
         }
         
@@ -101,7 +101,7 @@ class TestGetDefaultBatchSize:
         
         mock_load_config.return_value = {
             "lm_translator": {
-                "iniital_batch_size_lang": 350
+                "initial_batch_size_lang": 350
             }
         }
         
@@ -116,7 +116,7 @@ class TestGetDefaultBatchSize:
         
         mock_load_config.return_value = {
             "lm_translator": {
-                "iniital_batch_size_md": 80
+                "initial_batch_size_md": 80
             }
         }
         

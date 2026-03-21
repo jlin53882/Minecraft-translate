@@ -4,29 +4,29 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-# /minecraft_translator_flet/translation_tool/utils/text_processor.py (最終完整版)
-
 import os
-import orjson
 import re
+import threading
 from typing import List, Dict, Any
+
+import orjson
 from opencc import OpenCC
 
 from .config_access import resolve_runtime_path
-from .log_unit import log_info, log_warning, log_error, log_debug
+from .log_unit import log_info, log_warning, log_error
 
 # legacy seam：保留給既有 monkeypatch/tests，用新 helper 實作
 resolve_project_path = resolve_runtime_path
-
-import threading
 
 
 def _resolve_rules_path(path: str):
     """將相對規則路徑解析為專案內的完整絕對路徑。"""
     return resolve_project_path(path)
 
+
 _thread_local = threading.local()
 _CJK_PATTERN = re.compile(r"([\u4e00-\u9fff]+)")
+
 
 def get_converter():
     """獲取當前執行緒專用的 OpenCC 實例"""
@@ -34,23 +34,33 @@ def get_converter():
         _thread_local.converter = OpenCC("s2twp")
     return _thread_local.converter
 
+
 # =========================
-# replace rules 快取
+# replace rules 快取（執行緒安全）
 # =========================
-_LITERAL_RULES = None  # List[Tuple[str, str]]
-_REGEX_RULES = None  # List[Tuple[re.Pattern, str]]
-_RULE_KEYWORDS = None  # set[str]
+_RULES_LOCAL = threading.local()  # 每執行緒獨立的規則快取
+
+
+def _get_rules_cache():
+    """取得目前執行緒的規則快取，確保已初始化。"""
+    if not hasattr(_RULES_LOCAL, "literal_rules"):
+        _RULES_LOCAL.literal_rules = []
+        _RULES_LOCAL.regex_rules = []
+        _RULES_LOCAL.rule_keywords = set()
+    return _RULES_LOCAL
+
 
 def _init_replace_rules_cache(rules: List[Dict[str, str]]):
-    """初始化替換規則快取。
+    """初始化替換規則快取（執行緒安全，每執行緒獨立）。
 
     參數：
         rules: 規則資料列表
     """
-    global _LITERAL_RULES, _REGEX_RULES, _RULE_KEYWORDS
+    cache = _get_rules_cache()
 
-    if _LITERAL_RULES is not None:
-        return  # 已初始化過
+    # 已初始化過，直接跳過
+    if cache.literal_rules or cache.regex_rules or cache.rule_keywords:
+        return
 
     literal_rules = []
     regex_rules = []
@@ -68,13 +78,11 @@ def _init_replace_rules_cache(rules: List[Dict[str, str]]):
         looks_like_regex = any(ch in src for ch in ".?*[]()\\")
         if looks_like_regex:
             try:
-                # ⭐ 保留你原本的轉義處理
                 dst_fixed = re.sub(r"\\\\(\d+)", r"\\\1", dst)
                 dst_fixed = re.sub(r"\$(\d+)", r"\\\1", dst_fixed)
                 pattern = re.compile(src)
                 regex_rules.append((pattern, dst_fixed))
             except re.error:
-                # regex 壞掉 → 當 literal
                 literal_rules.append((src, dst))
                 if src:
                     keywords.add(src[:2])
@@ -83,12 +91,12 @@ def _init_replace_rules_cache(rules: List[Dict[str, str]]):
             if src:
                 keywords.add(src[:2])
 
-    # ⭐ 長詞優先，避免「下界」吃掉「下界合金」
     literal_rules.sort(key=lambda x: len(x[0]), reverse=True)
 
-    _LITERAL_RULES = literal_rules
-    _REGEX_RULES = regex_rules
-    _RULE_KEYWORDS = keywords
+    cache.literal_rules = literal_rules
+    cache.regex_rules = regex_rules
+    cache.rule_keywords = keywords
+
 
 def apply_replace_rules(text: str, rules: List[Dict[str, str]]) -> str:
     """應用替換規則到給定的文字（舊介面，加速版）"""
@@ -105,29 +113,29 @@ def apply_replace_rules(text: str, rules: List[Dict[str, str]]) -> str:
 
     # ---------- 快路徑 2：不可能命中 ----------
     # 若 text 不含任何規則關鍵字，直接跳過
-    if _RULE_KEYWORDS:
+    cache = _get_rules_cache()
+
+    if cache.rule_keywords:
         hit = False
-        for k in _RULE_KEYWORDS:
+        for k in cache.rule_keywords:
             if k in text:
                 hit = True
                 break
-            # ⭐ 新增：忽略空白後再判斷
             if k.replace(" ", "") in text.replace(" ", ""):
                 hit = True
                 break
         if not hit:
             return text
 
-    # ---------- 第一階段：固定字串（長詞優先） ----------
-    for src, dst in _LITERAL_RULES:
+    for src, dst in cache.literal_rules:
         if src and src in text:
             text = text.replace(src, dst)
 
-    # ---------- 第二階段：正則規則（已預編譯） ----------
-    for pattern, repl in _REGEX_RULES:
+    for pattern, repl in cache.regex_rules:
         text = pattern.sub(repl, text)
 
     return text
+
 
 # --- 檔案讀寫與文字處理工具函式 ---
 def load_replace_rules(path: str) -> List[Dict[str, str]]:
@@ -178,6 +186,7 @@ def load_replace_rules(path: str) -> List[Dict[str, str]]:
     )
     return sorted_rules
 
+
 def save_replace_rules(path: str, rules: List[Dict[str, str]]):
     """將替換規則儲存到指定的 JSON 檔案（orjson 版）。"""
     resolved_path = _resolve_rules_path(path)
@@ -191,6 +200,7 @@ def save_replace_rules(path: str, rules: List[Dict[str, str]]):
             )
     except Exception as e:
         log_error("儲存替換規則到 %s 失敗: %s", resolved_path, e)
+
 
 def load_custom_translations(folder_path: str, filename="table.tsv") -> Dict[str, str]:
     """從指定資料夾載入自訂的翻譯表 (TSV 格式)。"""
@@ -213,12 +223,14 @@ def load_custom_translations(folder_path: str, filename="table.tsv") -> Dict[str
         log_error(f"讀取自訂翻譯檔 {file_path} 失敗: {e}")
     return custom_map
 
+
 def safe_convert_text(text: str) -> str:
     """安全的文字轉換，處理空值與例外。"""
     if not text:
         return text
     conv = get_converter()
     return _CJK_PATTERN.sub(lambda m: conv.convert(m.group(1)), text)
+
 
 def convert_text(text: str, rules: List[Dict[str, str]] | None = None) -> str:
     """
@@ -234,6 +246,7 @@ def convert_text(text: str, rules: List[Dict[str, str]] | None = None) -> str:
     if rules:
         out = apply_replace_rules(out, rules)
     return out
+
 
 def convert_snbt_file_inplace(
     path: str, rules: List[Dict[str, str]] | None = None
@@ -255,6 +268,7 @@ def convert_snbt_file_inplace(
         log_error("convert_snbt_file_inplace 失敗: %s (%s)", path, e)
         return False
 
+
 def convert_snbt_tree_inplace(
     root_dir: str, rules: List[Dict[str, str]] | None = None
 ) -> int:
@@ -272,6 +286,7 @@ def convert_snbt_tree_inplace(
                     changed += 1
     return changed
 
+
 def recursive_translate_dict(data: Any, rules: List[Dict[str, str]]) -> Any:
     """
     (僅用於簡轉繁) 遞迴地對一個字典或列表中的所有字串值進行 OpenCC 轉換和規則替換。
@@ -283,6 +298,7 @@ def recursive_translate_dict(data: Any, rules: List[Dict[str, str]]) -> Any:
     if isinstance(data, str):
         return apply_replace_rules(safe_convert_text(data), rules)
     return data
+
 
 def recursive_translate(
     data: Any, rules: List[Dict[str, str]], custom_translations: Dict[str, str]
@@ -317,6 +333,7 @@ def recursive_translate(
     else:
         return data
 
+
 def orjson_dump_file(obj, fp, *, indent2: bool = True, newline: bool = True):
     """
     用 orjson 寫入檔案物件 fp。
@@ -331,6 +348,7 @@ def orjson_dump_file(obj, fp, *, indent2: bool = True, newline: bool = True):
 
     data = orjson.dumps(obj, option=option)
     fp.write(data)
+
 
 def orjson_pretty_str(obj) -> str:
     """

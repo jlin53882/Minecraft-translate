@@ -14,7 +14,7 @@ from typing import Any, Dict
 
 import orjson as json
 
-from ..utils.log_unit import log_info, log_exception
+from ..utils.log_unit import log_info, log_warning, log_exception
 from ..utils.text_processor import recursive_translate_dict, apply_replace_rules
 from .lang_codec import dump_lang_text, parse_lang_text, pick_first_not_none
 from .lang_merge_zip_io import (
@@ -26,8 +26,6 @@ from .lang_merge_zip_io import (
 )
 from .lang_processing_format import dump_json_bytes
 
-# ZIP 包裝層前綴集合（避免每次呼叫重建 frozenset）
-KNOWN_ZIP_PACKAGING_PREFIXES = frozenset(["lang_out", "book_out", "patchouli_out"])
 
 CJK_RE = re.compile(
     r"[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002ebef\U00030000-\U0003134f]"
@@ -46,6 +44,7 @@ def _process_single_mod(
     rules: list,
     output_dir: str,
     must_translate_dir: str,
+    errordata_dir: str | None = None,
 ) -> Dict[str, Any]:
     """處理單一模組的語言合併。"""
 
@@ -103,6 +102,7 @@ def _process_single_mod(
                         zip_path=path,
                         output_dir=output_dir,
                         reason="lang_partial_parse_error",
+                        errordata_dir=errordata_dir,
                         extra_text="\n".join(
                             f"[line {n}] {reason}: {raw}"
                             for n, raw, reason in bad_lines
@@ -121,6 +121,7 @@ def _process_single_mod(
                 zip_path=path,
                 output_dir=output_dir,
                 reason=f"lang_json_parse_failed: {e}",
+                errordata_dir=errordata_dir,
             )
             return {}
 
@@ -148,15 +149,21 @@ def _process_single_mod(
         else:
             relative_tw_path = os.path.join(mod_name, "lang", "zh_tw.json")
 
-        # 新結構：主輸出剝離 ZIP 來源前綴（如 lang_out/），改寫到 lang_output/assets/.../
-        # 待翻譯路徑剝離與主輸出使用相同的 KNOWN_ZIP_PACKAGING_PREFIXES（前綴已提升至模組常數）
-        _prefix = relative_tw_path.split("/")[0]
-        if _prefix in KNOWN_ZIP_PACKAGING_PREFIXES and relative_tw_path.startswith(
-            _prefix + "/"
-        ):
-            final_output_rel = relative_tw_path[len(_prefix) + 1 :]
-        else:
-            final_output_rel = relative_tw_path
+        # 自動偵測並剝離 ZIP 統一包裝前綴（任何名稱皆適用）
+        # 讀取 ZIP 時用原始路徑，只在輸出路徑建構時剝離
+        _all_names = zf.namelist()
+        _wp = None
+        if _all_names:
+            _tops = set(n.replace("\\", "/").split("/")[0] for n in _all_names if n.replace("\\", "/").split("/")[0])
+            if len(_tops) == 1:
+                _candidate = list(_tops)[0] + "/"
+                if _all_names[0].startswith(_candidate):
+                    _wp = _candidate
+
+        def _strip(p):
+            return p[len(_wp):] if _wp and p.startswith(_wp) else p
+
+        final_output_rel = _strip(relative_tw_path)
         final_output_path = os.path.join(output_dir, final_output_rel)
         target_has_tw = os.path.exists(final_output_path)
 
@@ -247,12 +254,8 @@ def _process_single_mod(
         # =============================
         # Step 5 — 寫入 pending.json
         # =============================
-        # pending 路徑剝離 ZIP 包裝前綴，與 final_output_rel 使用相同的已知前綴集合
-        pending_rel = relative_tw_path.replace("zh_tw.json", "en_us.json")
-        if _prefix in KNOWN_ZIP_PACKAGING_PREFIXES and relative_tw_path.startswith(
-            _prefix + "/"
-        ):
-            pending_rel = pending_rel[len(_prefix) + 1 :]
+        # pending 路徑與 final_output_rel 使用相同的已剝離前綴邏輯
+        pending_rel = final_output_rel.replace("zh_tw.json", "en_us.json")
         pending_path = os.path.join(must_translate_dir, pending_rel)
         os.makedirs(os.path.dirname(pending_path), exist_ok=True)
 

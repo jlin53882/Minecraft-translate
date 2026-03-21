@@ -126,13 +126,17 @@ def start_extraction(view, mode: str):
         view._show_snack_bar('Mods 資料夾不存在')
         return
 
-    if not output_dir:
-        suffix = '_提取lang_輸出' if mode == 'lang' else '_提取book_輸出'
+    suffix = '_提取lang_輸出' if mode == 'lang' else '_提取book_輸出'
+    if output_dir:
+        # 使用者指定輸出目錄 → 自動再多包一層資料夾
+        output_dir = str(Path(output_dir) / suffix)
+    else:
+        # 未指定 → 以 mods 資料夾為基準自動產生
         output_dir = str(mods_path.with_name(mods_path.name + suffix))
-        view.output_dir_textfield.value = output_dir
-        view.page.update()
         view._append_log_line(f'[系統] 自動設定輸出路徑：{output_dir}')
 
+    view.output_dir_textfield.value = output_dir
+    view.page.update()
     out_path = Path(output_dir)
     try:
         out_path.mkdir(parents=True, exist_ok=True)

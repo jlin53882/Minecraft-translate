@@ -80,6 +80,11 @@ class TaskSession:
             self.error = True
             self.status = "ERROR"
 
+    def set_summary(self, summary: dict) -> None:
+        """設定任務摘要統計（供 DONE 時 UI 取用）。"""
+        with self._lock:
+            self.summary = summary
+
     def finish(self) -> None:
         """完成任務。"""
         with self._lock:
@@ -115,4 +120,5 @@ class TaskSession:
                 "log_texts": [e.text for e in self.logs],
                 "status": self.status,
                 "error": self.error,
+                "summary": getattr(self, "summary", None),
             }

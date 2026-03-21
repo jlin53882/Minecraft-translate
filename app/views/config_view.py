@@ -164,10 +164,10 @@ class ConfigView(ft.Column):
         )
 
         # LM Translator - Batch Sizes
-        self.controls_map["lm_translator.iniital_batch_size_patchouli"] = ft.TextField(
+        self.controls_map["lm_translator.initial_batch_size_patchouli"] = ft.TextField(
             label="Patchouli 請求大小", dense=True
         )
-        self.controls_map["lm_translator.iniital_batch_size_lang"] = ft.TextField(
+        self.controls_map["lm_translator.initial_batch_size_lang"] = ft.TextField(
             label="Lang 請求大小", dense=True
         )
         self.controls_map["lm_translator.initial_batch_size_ftb"] = ft.TextField(
@@ -316,11 +316,11 @@ class ConfigView(ft.Column):
         batch_row_1 = ft.Row(
             [
                 ft.Column(
-                    [self.controls_map["lm_translator.iniital_batch_size_patchouli"]],
+                    [self.controls_map["lm_translator.initial_batch_size_patchouli"]],
                     expand=1,
                 ),
                 ft.Column(
-                    [self.controls_map["lm_translator.iniital_batch_size_lang"]],
+                    [self.controls_map["lm_translator.initial_batch_size_lang"]],
                     expand=1,
                 ),
                 ft.Column(
