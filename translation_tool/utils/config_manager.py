@@ -335,6 +335,15 @@ def _validate_lm_translator_config(lm: dict) -> None:
     - initial_batch_size_*: 必須是 int（不接受 str）
     - parallel_execution_workers: 必須是 int > 0
     """
+    # ⚠️ iniital 棄用警告（iniital 是拼寫錯誤，正確為 initial）
+    iniital_keys = [k for k in lm if k.startswith("iniital_")]
+    if iniital_keys:
+        logging.warning(
+            f"[iniital-deprecation] ⚠️ 偵測到已棄用的 iniital_* 設定鍵：{iniital_keys}。"
+            f" 正確拼寫為 initial_batch_size_*，請更新 config.json。"
+            f" iniital_* 鍵已不再被翻譯引擎讀取，將使用內建預設值。"
+        )
+
     # 1. keys 必須是 list
     keys_val = lm.get("keys")
     if keys_val is not None and not isinstance(keys_val, list):

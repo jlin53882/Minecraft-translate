@@ -51,8 +51,8 @@ class TestAtk001DryRunParameter:
         # 模擬有效設定檔（避免 load_config 失敗）
         mock_config.return_value = {
             "lm_translator": {
-                "iniital_batch_size_lang": 300,
-                "iniital_batch_size_patchouli": 100,
+                "initial_batch_size_lang": 300,
+                "initial_batch_size_patchouli": 100,
                 "batch_shrink_factor": 0.75,
                 "min_batch_size": 50,
                 "models": {"gemini-pro": {"enabled": True}},
@@ -99,8 +99,8 @@ class TestAtk001DryRunParameter:
 
         mock_config.return_value = {
             "lm_translator": {
-                "iniital_batch_size_lang": 300,
-                "iniital_batch_size_patchouli": 100,
+                "initial_batch_size_lang": 300,
+                "initial_batch_size_patchouli": 100,
                 "models": {"gemini-pro": {"enabled": True}},
                 "temperature": 0.2,
                 "lang_system_prompt": "test",
@@ -144,8 +144,8 @@ class TestAtk001DryRunParameter:
 
         mock_config.return_value = {
             "lm_translator": {
-                "iniital_batch_size_lang": 300,
-                "iniital_batch_size_patchouli": 100,
+                "initial_batch_size_lang": 300,
+                "initial_batch_size_patchouli": 100,
                 "models": {"gemini-pro": {"enabled": True}},
                 "temperature": 0.2,
                 "lang_system_prompt": "test",
@@ -190,8 +190,8 @@ class TestAtk001DryRunParameter:
 
         mock_config.return_value = {
             "lm_translator": {
-                "iniital_batch_size_lang": 300,
-                "iniital_batch_size_patchouli": 100,
+                "initial_batch_size_lang": 300,
+                "initial_batch_size_patchouli": 100,
                 "models": {"gemini-pro": {"enabled": True}},
                 "temperature": 0.2,
                 "lang_system_prompt": "test",

@@ -21,8 +21,8 @@
     "lm_translator": {
         "temperature": 0.3,
         "lm_translate_folder_name": "LM翻譯後",
-        "iniital_batch_size_patchouli": 200,
-        "iniital_batch_size_lang": 200,
+        "initial_batch_size_patchouli": 100,
+        "initial_batch_size_lang": 300,
         "initial_batch_size_ftb": 200,
         "initial_batch_size_kubejs": 200,
         "initial_batch_size_md": 100,

@@ -18,7 +18,7 @@ def _safe_add_log(view, message: str):
     """執行緒安全地寫入 session log。view 已卸載時靜靜忽略。"""
     try:
         if hasattr(view, "session") and view.session is not None:
-            _safe_add_log(view, message)
+            view.session.add_log(message)
     except Exception:
         pass  # view 已卸載或 session 已 GC，忽略
 
@@ -27,7 +27,7 @@ def _safe_page_update(view):
     """執行緒安全地更新 page。view 已卸載時靜靜忽略。"""
     try:
         if hasattr(view, "page") and view.page is not None:
-            _safe_page_update(view)
+            view.page.update()
     except Exception:
         pass  # view 已卸載，忽略
 

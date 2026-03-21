@@ -156,8 +156,8 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
     if export_cache_only:
         return [], "EXPORT_CACHE_ONLY"
 
-    # 統一從 lm_cfg 讀取（iniital 拼寫已修正為 initial）
-    lm_cfg = load_config().get("lm_translator", {})  # ✅ 只讀一次
+    # 統一從 lm_cfg 讀取 batch size 設定
+    lm_cfg = load_config().get("lm_translator", {})
 
     # 起始 batch（Lang）
     INITIAL_BATCH_SIZE_LANG = lm_cfg.get("initial_batch_size_lang", 200)
