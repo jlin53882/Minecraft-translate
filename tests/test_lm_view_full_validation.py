@@ -346,3 +346,70 @@ def test_session_snapshot_returns_correct_structure(monkeypatch):
     assert len(snap["logs"]) == 2
     assert snap["logs"][0].text == "測試日誌一"
     assert snap["logs"][1].text == "測試日誌二"
+
+
+def test_start_clicked_resets_log_presenter(monkeypatch):
+    """驗證開始新任務時會 reset presenter，避免沿用上一輪 log 狀態。"""
+    page = _Page()
+    reset_calls = []
+
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type("T", (), {"start": lambda self: None})(),
+    )
+    monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
+
+    def fake_reset():
+        reset_calls.append(True)
+
+    view = lm_view.LMView(page, _FilePicker())
+    monkeypatch.setattr(view.log_presenter, "reset", fake_reset)
+    view.input_path.value = "C:/Assets"
+
+    view.start_clicked(None)
+
+    assert reset_calls == [True]
+
+
+def test_start_ui_timer_stops_when_page_update_fails(monkeypatch):
+    """驗證 page.update() 失敗時，LM UI timer 會安全停止，不再拋出背景執行緒例外。"""
+
+    class _FailingPage(_Page):
+        def update(self):
+            raise RuntimeError("Event loop is closed")
+
+    page = _FailingPage()
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+
+    view = lm_view.LMView(page, _FilePicker())
+    view.session = _Session()
+    view.session.start()
+    view.session.add_log("hello")
+    view.session.set_progress(0.3)
+
+    view.start_ui_timer()
+    lm_view.time.sleep(0.25)
+
+    assert view._ui_timer_running is False
+
+
+def test_start_ui_timer_attempts_log_view_update(monkeypatch):
+    """驗證 timer 迴圈會嘗試刷新 log_view，避免日誌內容已 sync 但畫面未更新。"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = _Page()
+
+    view = lm_view.LMView(page, _FilePicker())
+    view.session = _Session()
+    view.session.start()
+    view.session.add_log("hello")
+    view.session.status = "DONE"
+
+    called = []
+    monkeypatch.setattr(view.log_view, "update", lambda: called.append(True))
+
+    view.start_ui_timer()
+    lm_view.time.sleep(0.25)
+
+    assert called, "log_view.update() 應至少被呼叫一次"

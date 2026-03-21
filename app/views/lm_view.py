@@ -88,8 +88,8 @@ class LMView(ft.Column):
         self.log_presenter = LogPresenter(
             mode="tail",
             tail_lines=ui_cfg.get("tail_lines", 250),
-            colorize=False,  # 目前 UI 只用灰底灰字，不做等级著色
-            default_color=str(theme.GREY_100),
+            colorize=True,  # 等級著色開啟
+            default_color="#F5F5F5",  # 浅灰色文字，深色背景看得清楚
         )
 
         # 按鈕（共用 primary style）
@@ -216,6 +216,7 @@ class LMView(ft.Column):
         self._set_status("執行中", theme.BLUE_200)
         self.progress_bar.value = 0
         self.log_view.controls.clear()
+        self.log_presenter.reset()
         self.page.update()
 
         output_dir = self.output_path.value or LM_translate_folder_name
@@ -260,19 +261,42 @@ class LMView(ft.Column):
                 if not self.session:
                     continue
 
-                snap = self.session.snapshot()
-                self.progress_bar.value = snap["progress"]
+                try:
+                    snap = self.session.snapshot()
+                except Exception:
+                    continue
 
-                self.log_presenter.sync(self.log_view, snap["logs"])
+                try:
+                    self.progress_bar.value = float(snap.get("progress", 0) or 0)
+                except Exception:
+                    self.progress_bar.value = 0
 
-                if snap["status"] == "DONE":
+                logs = snap.get("logs", []) or []
+                try:
+                    self.log_presenter.sync(self.log_view, logs)
+                except Exception as e:
+                    log_debug(f"LM log presenter sync failed: {e}")
+
+                # 強制刷新 ListView 內容變更，避免背景 thread 更新時畫面不同步
+                try:
+                    self.log_view.update()
+                except Exception:
+                    pass
+
+                status = (snap.get("status") or "").upper()
+                if status == "DONE":
                     self._set_status("任務完成", theme.GREEN_200)
                     self._ui_timer_running = False
-                elif snap["status"] == "ERROR":
+                elif status == "ERROR":
                     self._set_status("任務發生錯誤", theme.RED_200)
                     self._ui_timer_running = False
 
-                self.page.update()
+                try:
+                    self.page.update()
+                except Exception as e:
+                    log_debug(f"LM page update failed: {e}")
+                    self._ui_timer_running = False
+                    break
 
         threading.Thread(target=loop, daemon=True).start()
 
