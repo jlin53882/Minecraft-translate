@@ -97,6 +97,21 @@ def run_extraction_process_impl(
     find_jar_files_fn: Callable[[str], list[str]],
     extract_from_jar_fn: Callable[[str, str, re.Pattern], Dict[str, Any]],
 ) -> Generator[Dict[str, Any], None, None]:
+    """實作：對 mods 目錄下所有 JAR 執行批量提取流程。
+
+    使用執行緒池並行處理，並在提取過程中回傳進度。
+
+    Args:
+        mods_dir: Mod 資料夾路徑。
+        output_dir: 輸出根目錄。
+        target_regex: 用以比對要提取之檔案路徑的正規表達式。
+        process_name: 處理類型名稱（如 "Lang"、"Patchouli Book"），用於日誌。
+        find_jar_files_fn: 用以掃描 JAR 檔案的函式（供測試替換用）。
+        extract_from_jar_fn: 用以對單一 JAR 提取檔案的函式（供測試替換用）。
+
+    Yields:
+        進度字典，包含 progress（0.0~1.0）欄位。
+    """
     os.makedirs(output_dir, exist_ok=True)
     jar_files = find_jar_files_fn(mods_dir)
     total_jars = len(jar_files)

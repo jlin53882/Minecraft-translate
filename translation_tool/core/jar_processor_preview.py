@@ -104,6 +104,18 @@ def preview_extraction_generator_impl(
     }
 
 def generate_preview_report(result: Dict[str, Any], mode: str, output_path: str) -> str:
+    """將預覽結果寫入 Markdown 報告檔案。
+
+    報告包含摘要統計與每個 JAR 的檔案清單（最多 50 筆）。
+
+    Args:
+        result: 預覽 generator 最終回傳的結果字典（包含 preview_results、total_jars 等）。
+        mode: 預覽模式（用於報告檔名）。
+        output_path: 報告檔案的輸出目錄。
+
+    Returns:
+        產生的報告檔案之完整路徑。
+    """
     output_dir = Path(output_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')

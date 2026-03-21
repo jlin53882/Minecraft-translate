@@ -58,7 +58,19 @@ def resolve_icon_for_lang_key(lang_key: str, assets_root: Path) -> Path | None:
     return index.get(key_tail)
 
 def resolve_icon_with_reason(lang_key: str, assets_root):
-    """解析圖示並回傳原因。"""
+    """解析 lang key 對應的圖示路徑，找不到時回傳分類原因與風險等級。
+
+    會先嘗試從 assets/<modid>/textures/ 中以檔名比對圖示；
+    找不到時則呼叫 classify_no_icon_reason 進行启发式分類。
+
+    Args:
+        lang_key: 語言檔的翻譯 key（如 "item.actuallyadditions.atomic_reconstructor"）。
+        assets_root: assets 資料夾的根目錄（Path 物件）。
+
+    Returns:
+        IconResult，圖示存在時 icon_path 有值、風險為 None；
+        找不到時 icon_path 為 None 並附帶 reason 與 risk。
+    """
     icon = resolve_icon_for_lang_key(lang_key, assets_root)
 
     if icon:
