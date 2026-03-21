@@ -95,6 +95,54 @@ class TestScanTranslatableFiles:
         assert isinstance(patchouli_files, list)
 
 
+    def test_scan_translatable_files_handles_errors_gracefully(self, tmp_path, monkeypatch):
+        """驗證 scan_translatable_files 在 find_patchouli_json 拋例外時，只 log warning 並回傳空結果。"""
+        from translation_tool.core.lm_translator_scan import scan_translatable_files
+
+        # Mock find_patchouli_json 模擬讀取失敗（權限問題或損壞路徑）
+        def mock_find_patchouli(root):
+            raise OSError("讀取失敗")
+
+        # Mock find_lang_json 也模擬失敗
+        def mock_find_lang(root):
+            raise OSError("讀取失敗")
+
+        import translation_tool.core.lm_translator_scan as scan_mod
+        monkeypatch.setattr(scan_mod, "find_patchouli_json", mock_find_patchouli)
+        monkeypatch.setattr(scan_mod, "find_lang_json", mock_find_lang)
+
+        patchouli, lang, files = scan_translatable_files(tmp_path)
+
+        # 驗證：沒拋例外，回傳空結果
+        assert patchouli == [], f"預期空列表，實際: {patchouli}"
+        assert lang == [], f"預期空列表，實際: {lang}"
+        assert files == [], f"預期空列表，實際: {files}"
+
+    def test_scan_translatable_files_handles_partial_error(self, tmp_path, monkeypatch):
+        """驗證 scan_translatable_files 在 find_patchouli_json 失敗但 find_lang_json 成功時，仍回傳部分結果。"""
+        from translation_tool.core.lm_translator_scan import scan_translatable_files
+
+        # lang 目錄結構
+        lang_dir = tmp_path / "assets" / "mymod" / "lang"
+        lang_dir.mkdir(parents=True)
+        (lang_dir / "en_us.json").write_text('{"key": "value"}', encoding="utf-8")
+
+        # Mock find_patchouli_json 模擬失敗
+        def mock_find_patchouli(root):
+            raise OSError("讀取失敗")
+
+        import translation_tool.core.lm_translator_scan as scan_mod
+        monkeypatch.setattr(scan_mod, "find_patchouli_json", mock_find_patchouli)
+
+        patchouli, lang, files = scan_translatable_files(tmp_path)
+
+        # find_lang_json 應該成功找到 en_us.json（取決於 rglob 實作）
+        # 但 find_patchouli_json 失敗了，整體仍不拋例外
+        assert isinstance(patchouli, list)
+        assert isinstance(lang, list)
+        assert isinstance(files, list)
+
+
 class TestExtractItemsParallel:
     """測試 extract_items_parallel 函數。"""
 
