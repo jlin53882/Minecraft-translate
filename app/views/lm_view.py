@@ -274,6 +274,7 @@ class LMView(ft.Column):
                 logs = snap.get("logs", []) or []
                 try:
                     self.log_presenter.sync(self.log_view, logs)
+                    self.log_view.scroll_to(end=True)
                 except Exception as e:
                     log_debug(f"LM log presenter sync failed: {e}")
 

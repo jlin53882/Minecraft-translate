@@ -225,6 +225,8 @@ def start_ui_timer(view):
             try:
                 # PR3：presenter.sync() 內部處理 tail rebuild + 顏色
                 presenter.sync(view.log_view, logs)
+                # sync() 會 clear() + 重新加入所有 item，手動滾到最底部
+                view.log_view.scroll_to(end=True)
             except Exception as e:
                 log_warning(f"更新日誌視圖失敗: {e}")
             status = (snap.get("status") or "").upper()
