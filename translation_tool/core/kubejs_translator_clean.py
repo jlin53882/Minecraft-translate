@@ -126,13 +126,22 @@ def clean_kubejs_from_raw_impl(
 
         if "client_scripts" in str(p):
             # 對 client_scripts/*.json 做三語合併比對過濾
+            # client_scripts JSON key 格式：tooltips.js|modid:item.tooltip.0
+            # zh_tw.json key 格式：modid:item（無 .tooltip.N 後綴）
+            # → 需剝除前綴與 .tooltip.N 後綴才能正確比對
             data = read_json_dict_fn(p)
             if data:
                 filtered = {}
                 for k, v in data.items():
+                    # 解析 key：去掉前綴 tooltips.js| 和 .tooltip.N 後綴
+                    lookup_key = k.split("|", 1)[-1] if "|" in k else k
+                    lookup_key = re.sub(r'\.tooltip\.\d+$', '', lookup_key)
+                    lookup_key = re.sub(r'\[.*?\]', '', lookup_key).strip()
                     # 有 zh_tw 翻譯 → skip（視為 cache hit）；無 → 保留
-                    if k not in tw_lookup:
-                        filtered[k] = v
+                    if lookup_key and lookup_key not in tw_lookup:
+                        # ✅ 對簡體中文值做 OpenCC 轉換（s2tw），轉為繁體中文
+                        v_converted = safe_convert_text_fn(v)
+                        filtered[k] = v_converted
                 if filtered:
                     dst.write_text(json.dumps(filtered, ensure_ascii=False), "utf-8")
                     copied_other += 1
