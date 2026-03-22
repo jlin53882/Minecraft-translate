@@ -204,7 +204,7 @@ def start_ui_timer(view):
         mode="tail",
         tail_lines=ui_cfg.get("tail_lines", 250),
         colorize=False,  # Translation 目前只有灰白色，保持現有外觀
-        default_color=str(ft.Colors.GREY_100),
+        default_color=ft.Colors.GREY_100,
     )
 
     def loop():
