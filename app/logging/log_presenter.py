@@ -137,9 +137,8 @@ class LogPresenter:
         """根據 entry 等級取得顏色。"""
         if not self.colorize:
             color = self.default_color
-            # 預防：若不是有效 hex 格式，主動加上 #
-            if not color.startswith("#"):
-                return f"#{color}"
+            # Colors enum 直接回傳（str() 回成 "Colors.GREY_100"，不能拿來拼接）
+            # Flet 接受 Colors enum 或 hex string
             return color
         return "#" + get_level_color(entry.level)
 
