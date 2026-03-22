@@ -75,10 +75,12 @@ class TranslationView(ft.Column):
         self.progress = ft.ProgressBar(
             value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
+        # 初始提示文字，避免 ListView 空白時透明顯現深灰背景
         self.log_view = ft.ListView(
             expand=True,
             spacing=4,
             auto_scroll=True,
+            controls=[ft.Text("等待翻譯開始...", size=13, color=theme.GREY_100)],
         )
 
         header = ft.Row(
