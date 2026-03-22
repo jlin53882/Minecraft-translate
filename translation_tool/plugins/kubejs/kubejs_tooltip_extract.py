@@ -340,47 +340,51 @@ def extract_js_string_call(text: str, start: int) -> str | None:
     log_warning(f"字串解析未完成（可能缺少結尾引號）。目前緩存: '{buf}'，起始位置: {start}")
     return None
 
-def should_skip_text(text: str) -> bool:
+def should_skip_text(text: str, *, skip_chinese: bool = True) -> bool:
     """
     判斷該段文字是否應該跳過翻譯流程。
-    
+
     此函式整合了多種過濾機制，包含：
     1. 空白/無內容過濾。
     2. Patchouli 指令過濾。
     3. Minecraft 翻譯鍵（Lang Key）過濾。
-    4. 已翻譯（包含中文字元）內容過濾。
-    
+    4. 已翻譯（包含中文字元）內容過濾（可透過 skip_chinese 參數控制）。
+
     :param text: 待檢查的原始字串。
+    :param skip_chinese: 是否跳過含中文的文字（預設 True）。
+        - True 時：含中文視為「已翻譯」而跳過（用於 en_us 來源檔案）
+        - False 時：保留中文（用於 KubeJS .js 檔案，需要三語合併比對）
     :return: bool, True 表示應跳過（不翻譯），False 表示需要翻譯。
     """
     # 進行初步清理
     t = clean_text(text)
-    
+
     # 情況 1：清理後為空
     if not t:
         # 這裡不特別紀錄 Log，因為空行很常見
         return True
-    
+
     log_debug(f"正在評估文字是否跳過: '{t}'")
-    
+
     # ✅ 情況 2：跳過純 Patchouli 指令 (如 $(br), $(img:...) )
     if is_patchouli_command_only(t):
         log_debug(f"跳過判定: 純指令段落 -> '{t}'")
         return True
-    
+
     # ✅ 情況 3：跳過看起來像翻譯 Key 的內容 (如 item.minecraft.dirt)
     if is_lang_key_like(t):
         log_debug(f"跳過判定: 翻譯鍵格式 (Key-like) -> '{t}'")
         return True
-    
+
     # ✅ 情況 4：跳過純引用格式（如 {xxx}\n{yyy}）
     if is_lang_key_ref_like(t):
         log_debug(f"跳過判定: 純引用格式 -> '{t}'")
         return True
 
-    # ✅ 情況 5：跳過已包含中文字元的文字（視為已翻譯完成）
-    # 使用 Unicode 範圍 \u4e00-\u9fff 判定常用漢字
-    if re.search(r"[\u4e00-\u9fff]", t):
+    # ✅ 情況 5：只有 skip_chinese=True 時才跳過含中文的文字
+    # - KubeJS .js 檔案（skip_chinese=False）：保留中文，用於三語合併比對
+    # - 一般 en_us 來源檔案（skip_chinese=True）：含中文視為「已翻譯」而跳過
+    if skip_chinese and re.search(r"[\u4e00-\u9fff]", t):
         log_debug(f"跳過判定: 偵測到中文字元（已翻譯） -> '{t}'")
         return True
 
@@ -472,7 +476,7 @@ def extract_itemevents_tooltips(content: str, file_name: str, extracted: dict, a
                 continue
             
             # ✅ 檢查是否符合跳過條件（空值、指令、Key、已翻譯等）
-            if should_skip_text(text_content):
+            if should_skip_text(text_content, skip_chinese=False):
                 idx += 1
                 continue
 
@@ -571,7 +575,7 @@ def extract(
                         # 過濾掉 Resource Location (mod:id)
                         if re.match(r"^[a-z0-9_.-]+:[a-z0-9_/.-]+$", text):
                             continue
-                        if should_skip_text(text):
+                        if should_skip_text(text, skip_chinese=False):
                             continue
                         
                         text = clean_text(text)
@@ -596,7 +600,7 @@ def extract(
                             m2 = re.search(r"['\"](.+?)['\"]", args[1])
                             if m2:
                                 raw = m2.group(1)
-                                if not should_skip_text(raw):
+                                if not should_skip_text(raw, skip_chinese=False):
                                     extracted[f"{file_name}|{item_id}.{n}"] = clean_text(raw)
 
                         # 若內容是陣列 [...]
@@ -605,13 +609,13 @@ def extract(
                                 idx = 0
                                 for tm in re.finditer(r"Text\.\w+\s*\(", args[1]):
                                     t = extract_js_string_call(args[1], tm.end())
-                                    if t and not should_skip_text(t):
+                                    if t and not should_skip_text(t, skip_chinese=False):
                                         extracted[f"{file_name}|{item_id}.{n}.{idx}"] = clean_text(t)
                                     idx += 1
                             else:
                                 # 純字串陣列
                                 for i, txt in enumerate(extract_array_strings(args[1])):
-                                    if not should_skip_text(txt):
+                                    if not should_skip_text(txt, skip_chinese=False):
                                         extracted[f"{file_name}|{item_id}.{n}.{i}"] = clean_text(txt)
 
                 # 2. 處理 Ponder 劇情文字 (scene.text)
@@ -624,7 +628,7 @@ def extract(
                             continue
 
                         text = strip_quotes(args[1])
-                        if not should_skip_text(text):
+                        if not should_skip_text(text, skip_chinese=False):
                             key = f"{file_name}|scene.{auto_id}"
                             if key not in extracted:
                                 extracted[key] = clean_text(text)
