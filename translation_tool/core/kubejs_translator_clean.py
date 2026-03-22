@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Callable
+import json
 import re
 
 _LANG_REF_RE = re.compile(r"^\{.+\}$")
@@ -101,13 +102,47 @@ def clean_kubejs_from_raw_impl(
         else:
             other_jsons.append(p)
 
+    # 建立 zh_tw lookup table：用於過濾 client_scripts/*.json
+    # 已翻譯的 key（有 zh_tw 對應）→ skip；未翻譯 → 保留到 pending
+    tw_lookup: dict[str, str] = {}
+    if final_root_p.exists():
+        for tw_file in final_root_p.rglob("zh_tw.json"):
+            tw_data = read_json_dict_fn(tw_file)
+            if tw_data:
+                tw_lookup.update(tw_data)
+    # 同時從 raw_root 的 lang/zh_tw.json 讀取（確保新翻譯也被納入）
+    for tw_file in raw_root.rglob("zh_tw.json"):
+        tw_data = read_json_dict_fn(tw_file)
+        if tw_data:
+            tw_lookup.update(
+                deep_merge_3way_flat_impl(tw_data, {}, {}, safe_convert_text_fn=safe_convert_text_fn)
+            )
+
     copied_other = 0
     for p in other_jsons:
         rel = p.relative_to(raw_root)
         dst = pending_root_p / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_bytes(p.read_bytes())
-        copied_other += 1
+
+        if "client_scripts" in str(p):
+            # 對 client_scripts/*.json 做三語合併比對過濾
+            data = read_json_dict_fn(p)
+            if data:
+                filtered = {}
+                for k, v in data.items():
+                    # 有 zh_tw 翻譯 → skip（視為 cache hit）；無 → 保留
+                    if k not in tw_lookup:
+                        filtered[k] = v
+                if filtered:
+                    dst.write_text(json.dumps(filtered, ensure_ascii=False), "utf-8")
+                    copied_other += 1
+                # else: 全部被過濾，不寫入也不計入 copied_other
+            else:
+                dst.write_bytes(p.read_bytes())
+                copied_other += 1
+        else:
+            dst.write_bytes(p.read_bytes())
+            copied_other += 1
 
     groups: dict[Path, dict[str, Path]] = {}
     for p in lang_files:
