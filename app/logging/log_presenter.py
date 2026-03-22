@@ -137,9 +137,10 @@ class LogPresenter:
         """根據 entry 等級取得顏色。"""
         if not self.colorize:
             color = self.default_color
-            # Colors enum 直接回傳（str() 回成 "Colors.GREY_100"，不能拿來拼接）
-            # Flet 接受 Colors enum 或 hex string
-            return color
+            # Colors enum → 取 .value；hex string 直接用；其他嘗試 str()
+            if hasattr(color, 'value'):
+                return color.value  # Colors enum → "grey100"
+            return str(color)
         return "#" + get_level_color(entry.level)
 
     def _truncate(self, list_view: ft.ListView) -> None:
