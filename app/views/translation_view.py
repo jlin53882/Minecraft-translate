@@ -79,7 +79,6 @@ class TranslationView(ft.Column):
             expand=True,
             spacing=4,
             auto_scroll=True,
-            bgcolor="#1e1e1e",  # 與 Container 背景一致，解決透明導致灰色圖塊問題
         )
 
         header = ft.Row(
