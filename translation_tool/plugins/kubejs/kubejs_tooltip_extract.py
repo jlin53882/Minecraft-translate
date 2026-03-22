@@ -381,7 +381,16 @@ def should_skip_text(text: str, *, skip_chinese: bool = True) -> bool:
         log_debug(f"跳過判定: 純引用格式 -> '{t}'")
         return True
 
-    # ✅ 情況 5：只有 skip_chinese=True 時才跳過含中文的文字
+    # ✅ 情況 5（通用）：跳過主要由 ASCII block art 字元組成的文字
+    # █ ▓ ▒ ░ ■ □ ● ○ 等視覺裝飾字元，不需要翻譯
+    # 此檢測無視 skip_chinese 設定（block art 與語言無關）
+    block_chars = set('█▓▒░▪▫●○◌■□▪▸▹◆◇★☆')
+    block_count = sum(1 for c in t if c in block_chars)
+    if block_count > 0 and block_count / max(len(t), 1) > 0.5:
+        log_debug(f"跳過判定: ASCII block art（{block_count}/{len(t)}） -> '{t}'")
+        return True
+
+    # ✅ 情況 6：只有 skip_chinese=True 時才跳過含中文的文字
     # - KubeJS .js 檔案（skip_chinese=False）：保留中文，用於三語合併比對
     # - 一般 en_us 來源檔案（skip_chinese=True）：含中文視為「已翻譯」而跳過
     if skip_chinese and re.search(r"[\u4e00-\u9fff]", t):
