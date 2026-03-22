@@ -293,7 +293,7 @@ def translate_ftb_pending_to_zh_tw(
         )
 
     if global_total_to_translate == 0:
-        set_prog(1.0)
+        set_prog(0.99)  # 避免瞬間跳 1.0，讓 UI 停留在即將完成的視覺效果
 
     # ---- Translate per file (shared loop + cache) ----
     translated_done = 0  # ✅ 只算 API 翻譯完成（主進度分子）
@@ -387,8 +387,8 @@ def translate_ftb_pending_to_zh_tw(
             if len(all_cached_items) < 2000:
                 all_cached_items.extend(cached_items[: 2000 - len(all_cached_items)])
 
-            translated_done += miss
-            set_prog(min(translated_done / max(global_total_to_translate, 1), 1.0))
+            # 以檔案數取代翻譯量為進度分母，避免翻譯量分佈不均造成視覺跳躍
+            set_prog(min(idx / len(per_file_counts), 1.0))
 
             log_info(
                 f"🧪 [測試模式] 進度：{idx}/{len(per_file_counts)}\n"
