@@ -124,17 +124,13 @@ class TranslationView(ft.Column):
                         spacing=10,
                     ),
                 ),
-                styled_card(
-                    title="執行日誌",
-                    icon=ft.Icons.RECEIPT_LONG,
+                ft.Container(
                     expand=True,
-                    content=ft.Container(
-                        expand=True,
-                        bgcolor="#1e1e1e",
-                        border_radius=8,
-                        padding=10,
-                        content=self.log_view,
-                    ),
+                    bgcolor="#1e1e1e",
+                    border_radius=8,
+                    border=ft.border.all(1, theme.GREY_800),
+                    padding=10,
+                    content=self.log_view,
                 ),
             ],
             expand=True,
