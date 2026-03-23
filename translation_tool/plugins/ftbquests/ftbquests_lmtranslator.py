@@ -49,6 +49,7 @@ from translation_tool.plugins.shared.lang_path_rules import (
     compute_output_path,
 )
 from translation_tool.plugins.shared.lang_text_rules import is_already_zh
+from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
 
 from translation_tool.utils.log_unit import (
     log_info,
@@ -466,14 +467,20 @@ def translate_ftb_pending_to_zh_tw(
             """處理翻譯結果並寫入映射。"""
             p = it.get("path")
             t = it.get("text")
+            src_text = str(it.get("source_text") or "")
             if isinstance(p, str) and isinstance(t, str):
+                try:
+                    shielded_src = shield_text(src_text)
+                    t = unshield_text(t, shielded_src)
+                except Exception:
+                    pass
                 out_map[p] = t
                 try:
                     rec.record(
                         cache_type="ftbquests",
                         file_id=rel_src,
                         path=p,
-                        src=str(it.get("source_text") or ""),
+                        src=src_text,
                         dst=t,
                         cache_hit=False,
                         extra={"dst_file": dst.relative_to(out_dir).as_posix()},

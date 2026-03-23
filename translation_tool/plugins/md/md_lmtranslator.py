@@ -38,6 +38,7 @@ from translation_tool.core.lm_translator_shared import (
     _is_valid_hit,  # ✅ 新增：cache hit 判斷
 )
 from translation_tool.plugins.shared.lang_text_rules import is_already_zh
+from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
 
 # -------------------------
 # basic io
@@ -280,7 +281,13 @@ def translate_md_pending(
         """處理翻譯結果。"""
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
+        src_text = str(it.get("source_text") or "")
         if h and dst:
+            try:
+                shielded_src = shield_text(src_text)
+                dst = unshield_text(dst, shielded_src)
+            except Exception:
+                pass
             hash_to_dst[h] = dst
         # 這裡 recorder 的 cache_type 用 md（方便你日後 QC）
         try:
@@ -288,7 +295,7 @@ def translate_md_pending(
                 cache_type="md",
                 file_id="md_pending_blocks",
                 path=h,
-                src=str(it.get("source_text") or ""),
+                src=src_text,
                 dst=dst,
                 cache_hit=False,
                 extra={},
