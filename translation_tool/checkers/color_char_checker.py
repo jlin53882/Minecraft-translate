@@ -19,6 +19,7 @@ COLOR_PATTERN = re.compile(r"&([^a-v0-9\s\\#])")
 @dataclass
 class ColorCharError:
     """單一顏色字元錯誤。"""
+
     file_path: str
     key: str
     value: str
@@ -40,15 +41,17 @@ def check_color_chars(value: str) -> list[ColorCharError] | None:
     for match in COLOR_PATTERN.finditer(value):
         illegal_char = match.group(1)
         pos = match.start()
-        errors.append(ColorCharError(
-            file_path="",
-            key="",
-            value=value,
-            illegal_char=illegal_char,
-            position=pos,
-            message=f"在位置 {pos} 發現非法顏色字元 '&{illegal_char}'，"
-                    f"& 後只能接 a-v（不含 w）、0-9、空格、\\、#。",
-        ))
+        errors.append(
+            ColorCharError(
+                file_path="",
+                key="",
+                value=value,
+                illegal_char=illegal_char,
+                position=pos,
+                message=f"在位置 {pos} 發現非法顏色字元 '&{illegal_char}'，"
+                f"& 後只能接 a-v（不含 w）、0-9、空格、\\、#。",
+            )
+        )
     return errors if errors else None
 
 
