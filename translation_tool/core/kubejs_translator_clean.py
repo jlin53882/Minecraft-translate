@@ -203,6 +203,37 @@ def clean_kubejs_from_raw_impl(
             else:
                 pending_en = en
 
+            # ── 雙軌去重（reverse_index dedup）───────────────────────────────
+            # 目的：若某英文文字（value）已出現在 final/zh_tw.json（不同 key），
+            #       表示該英文原文已有翻譯，不需要再送 pending。
+            # 建立 reverse_index：{英文文字: [key1, key2, ...]}
+            if pending_en and final_root_p.exists():
+                # 從 final/zh_tw.json 建立 final_tw_lookup（key → 原文）
+                final_tw_lookup: dict[str, str] = {}
+                for tw_file in final_root_p.rglob("zh_tw.json"):
+                    tw_data = read_json_dict_fn(tw_file)
+                    if tw_data:
+                        final_tw_lookup.update(tw_data)
+
+                if final_tw_lookup:
+                    # 建立 reverse_index（英文文字 → 對應 key 列表）
+                    reverse_index: dict[str, list[str]] = {}
+                    for k, v in final_tw_lookup.items():
+                        if is_filled_text_impl(v):
+                            reverse_index.setdefault(v, []).append(k)
+
+                    # 過濾 pending_en：跳過那些「英文文字已存在於 final」的 key
+                    pending_en = {
+                        k: v
+                        for k, v in pending_en.items()
+                        if not (
+                            is_filled_text_impl(v)
+                            and v in reverse_index
+                            and k != reverse_index[v][0]
+                        )
+                    }
+            # ── 雙軌去重 end ───────────────────────────────────────────────
+
             if pending_en:
                 dst_en = pending_root_p / rel_group / "en_us.json"
                 write_json_fn(dst_en, pending_en)
