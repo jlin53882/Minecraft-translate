@@ -29,9 +29,7 @@ HEX_COLOR_PATTERN = re.compile(r"&#[0-9A-Fa-f]{6}", re.IGNORECASE)
 URL_PATTERN = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
 
 # 圖片副檔名（純值跳過）
-IMAGE_PATTERN = re.compile(
-    r"\.(?:jpe?g|png|gif|bmp|webp|svg|ico)$", re.IGNORECASE
-)
+IMAGE_PATTERN = re.compile(r"\.(?:jpe?g|png|gif|bmp|webp|svg|ico)$", re.IGNORECASE)
 
 # 特殊事件 JSON 片段：{\" 開頭
 EVENT_JSON_PATTERN = re.compile(r'^\{\\"')
@@ -47,6 +45,7 @@ ESCAPED_AND_PATTERN = re.compile(r"\\&")
 # =============================================================================
 # ShieldPiece & ShieldedText
 # =============================================================================
+
 
 @dataclass
 class ShieldPiece:
@@ -177,14 +176,18 @@ def shield_text(text: str) -> ShieldedText:
     for match in reversed(list(ESCAPED_AND_PATTERN.finditer(result))):
         ph = _next_escaped_placeholder()
         original = match.group()
-        shields.append(ShieldPiece(placeholder=ph, original=original, category="escaped_and"))
+        shields.append(
+            ShieldPiece(placeholder=ph, original=original, category="escaped_and")
+        )
         result = result[: match.start()] + ph + result[match.end() :]
 
     # 6. &#RRGGBB 十六進位顏色
     for match in reversed(list(HEX_COLOR_PATTERN.finditer(result))):
         ph = _next_color_placeholder()
         original = match.group()
-        shields.append(ShieldPiece(placeholder=ph, original=original, category="hex_color"))
+        shields.append(
+            ShieldPiece(placeholder=ph, original=original, category="hex_color")
+        )
         result = result[: match.start()] + ph + result[match.end() :]
 
     # 7. &a~f 標準彩色碼
@@ -198,7 +201,9 @@ def shield_text(text: str) -> ShieldedText:
     for match in reversed(list(ITEM_ID_PATTERN.finditer(result))):
         ph = _next_item_placeholder()
         original = match.group()
-        shields.append(ShieldPiece(placeholder=ph, original=original, category="item_id"))
+        shields.append(
+            ShieldPiece(placeholder=ph, original=original, category="item_id")
+        )
         result = result[: match.start()] + ph + result[match.end() :]
 
     had_color = any(sp.category in ("color", "hex_color") for sp in shields)
@@ -217,6 +222,7 @@ def shield_text(text: str) -> ShieldedText:
 # Post-process（unshield）
 # =============================================================================
 
+
 def unshield_text(clean_translated: str, shield_pieces: list[ShieldPiece]) -> str:
     """
     將已翻譯的文本中的 Placeholder 還原為原始不應翻譯的內容。
@@ -232,7 +238,9 @@ def unshield_text(clean_translated: str, shield_pieces: list[ShieldPiece]) -> st
         return clean_translated
 
     # 按 placeholder 長度降序還原（避免部分匹配問題，如 $C0$ 包含在 $C10$ 中）
-    sorted_pieces = sorted(shield_pieces, key=lambda sp: len(sp.placeholder), reverse=True)
+    sorted_pieces = sorted(
+        shield_pieces, key=lambda sp: len(sp.placeholder), reverse=True
+    )
 
     result = clean_translated
     for sp in sorted_pieces:
@@ -244,6 +252,7 @@ def unshield_text(clean_translated: str, shield_pieces: list[ShieldPiece]) -> st
 # =============================================================================
 # JSON Escape 修補（移植自 FTBQL add_escape_quotes）
 # =============================================================================
+
 
 def add_escape_quotes(text: str) -> str:
     """
