@@ -190,13 +190,20 @@ def translate_md_pending(
         if is_already_zh(src):
             already_zh_skipped += 1
             continue
+
+        shielded = shield_text(src)
+        translate_text = shielded.clean
+        if shielded.skip_reason is not None:
+            translate_text = src
+
         all_unique_items.append(
             {
                 "cache_type": "md",
                 "file": "md_pending_blocks",
                 "path": h,  # ✅ 用 content_hash 當 path（去重 + 快取 key 的一部分）
                 "source_text": src,
-                "text": src,
+                "text": translate_text,
+                "_shielded": shielded,
             }
         )
 
@@ -267,6 +274,12 @@ def translate_md_pending(
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
         if h and dst:
+            shielded = it.get("_shielded")
+            if shielded is not None and getattr(shielded, "shields", None):
+                try:
+                    dst = unshield_text(dst, shielded.shields)
+                except Exception:
+                    pass
             hash_to_dst[h] = dst
 
     rec = TranslationRecorder()
@@ -283,11 +296,18 @@ def translate_md_pending(
         dst = str(it.get("text") or "")
         src_text = str(it.get("source_text") or "")
         if h and dst:
-            try:
-                shielded_src = shield_text(src_text)
-                dst = unshield_text(dst, shielded_src)
-            except Exception:
-                pass
+            shielded = it.get("_shielded")
+            if shielded is not None and getattr(shielded, "shields", None):
+                try:
+                    dst = unshield_text(dst, shielded.shields)
+                except Exception:
+                    pass
+            else:
+                try:
+                    shielded_src = shield_text(src_text)
+                    dst = unshield_text(dst, shielded_src.shields)
+                except Exception:
+                    pass
             hash_to_dst[h] = dst
         # 這裡 recorder 的 cache_type 用 md（方便你日後 QC）
         try:
