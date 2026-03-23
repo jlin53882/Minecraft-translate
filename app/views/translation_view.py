@@ -4,9 +4,6 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-
-import threading
-
 import flet as ft
 from app.ui import theme
 from translation_tool.utils.log_unit import log_info
@@ -49,6 +46,7 @@ try:
 except Exception:
     TaskSession = None
 
+
 class TranslationView(ft.Column):
     """翻譯工作台：FTB / KubeJS / Markdown 三流程統一入口。"""
 
@@ -69,9 +67,7 @@ class TranslationView(ft.Column):
         self._ui_timer_running = False
 
         # 右側共用狀態與日誌
-        self.status_chip = ft.Chip(
-            label=ft.Text("尚未開始"), bgcolor=theme.GREY_200
-        )
+        self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=theme.GREY_200)
         self.progress = ft.ProgressBar(
             value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
@@ -196,7 +192,13 @@ class TranslationView(ft.Column):
         trailing: list[ft.Control] | None = None,
     ) -> ft.Control:
         """建立操作按鈕列 UI"""
-        return build_action_row(view=self, on_start=on_start, on_dry_run=on_dry_run, on_reset=on_reset, trailing=trailing)
+        return build_action_row(
+            view=self,
+            on_start=on_start,
+            on_dry_run=on_dry_run,
+            on_reset=on_reset,
+            trailing=trailing,
+        )
 
     # ------------------------------------------------------------------
     # Tab builders
