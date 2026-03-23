@@ -1,0 +1,124 @@
+# PR10 B6：進度條顯示驗證報告
+
+## 任務
+確認翻譯工具在執行 FTB Quest 抽取時，UI 進度條是否有正確更新。
+
+---
+
+## 1. UI 進度條更新鏈路分析
+
+### 讀取端（UI 每 0.1 秒輪詢）
+
+**位置**：`app/views/translation/translation_actions.py` → `start_ui_timer()`
+
+```python
+def loop():
+    while view._ui_timer_running:
+        time.sleep(0.1)
+        snap = view.session.snapshot()
+        view.progress.value = float(snap.get("progress", 0) or 0)  # ← UI 更新點
+```
+
+- 輪詢頻率：每 0.1 秒
+- 進度值讀取：`session.snapshot()["progress"]`（float, 0.0～1.0）
+- UI 元件：`ft.ProgressBar(value=0, ...)`（`translation_view.py` 第 75 行）
+
+### 寫入端（各 Pipeline Step）
+
+**FTB Pipeline 4 步驟 → `session.set_progress()` 呼叫覆蓋率**：
+
+| 步驟 | 函式 | `set_progress` 呼叫 | 說明 |
+|------|------|--------|------|
+| Step 1 Export | `export_ftbquests_raw_json()` | ❌ 無 | 直接呼叫，無 progress 回報 |
+| Step 2 Clean | `clean_ftbquests_from_raw()` | ❌ 無 | 直接呼叫，無 progress 回報 |
+| Step 3 Translate | `translate_ftb_pending_to_zh_tw()` | ✅ 有 | 透過 `set_prog()` 每次 batch 更新 |
+| Step 4 Inject | inject 流程 | ❌ 無 | 無 `session` 參數，無 progress 回報 |
+
+---
+
+## 2. Step 3 翻譯進度機制（唯一有進度的步驟）
+
+**位置**：`translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py`
+
+```python
+def on_progress(p: float, msg: str, eta_sec: float):
+    log_info(f"⏳ [AI 翻譯中] {msg} | 預估剩餘時間：{eta_txt}")
+    set_prog(p)  # 每次 batch 完成時呼叫
+
+set_prog(min(translated_done / max(global_total_to_translate, 1), 1.0))
+```
+
+- `translate_items_with_cache_loop` 每個 batch 完成時呼叫 `on_progress`
+- `set_prog()` 內部呼叫 `session.set_progress(v)`（`v` 為 0.0～1.0 float）
+- 進度基於「已翻譯 key 數 / 總 key 數」計算，**平滑遞增**
+
+### 翻譯進度平滑度評估
+
+| 項目 | 評估 |
+|------|------|
+| 進度類型 | 增量式（每 batch 更新一次）|
+| 更新頻率 | 依 batch size 而定（通常每數十～數百 key 更新一次）|
+| 平滑程度 | 中等（相較於每檔更新有改善，但 batch 內仍是跳躍式）|
+
+---
+
+## 3. 其他步驟進度問題
+
+### Step 1 Export（`export_ftbquests_raw_json`）
+- 直接呼叫 `process_quest_folder()`，**無任何 progress 回報**
+- 706 個 .snbt 檔案解析期間，UI 進度條停在 0
+- 用戶看到：翻譯工具「無回應」或「卡住」
+
+### Step 2 Clean（`clean_ftbquests_from_raw`）
+- 同樣無 progress 回報
+- 涉及磁碟 I/O 和三方合併邏輯
+
+### Step 4 Inject（inject 流程）
+- 無 `session` 參數傳遞，**完全無法回報進度**
+- 706 個任務檔案修改，UI 完全無回應
+
+---
+
+## 4. 進度條根本問題
+
+### 問題 1：Step 1/2/4 完全沒有進度回報
+- **原因**：這些步驟沒有接收 `session` 參數，也沒有 `session.set_progress()` 呼叫
+- **影響**：70% 的 pipeline 時間（Step 1 + 2 + 4）進度條停在 0%
+
+### 問題 2：翻譯階段（Step 3）也非真正平滑
+- **原因**：`on_progress` 只在 `translate_items_with_cache_loop` 的 batch 完成後才觸發
+- batch size 固定時，每次更新間隔穩定；但 batch 內的每個 key 翻譯進度仍不透明
+
+---
+
+## 5. 建議行動
+
+### 高優先度
+1. **[Critical] 為 Step 1/2/4 加入 progress 回報**
+   - `export_ftbquests_raw_json`：解析每個 .snbt 檔案後呼叫一次 `session.set_progress()`
+   - `clean_ftbquests_from_raw`：每處理 N 個檔案後更新進度
+   - inject 流程：傳入 session，注入每個任務檔案後更新進度
+
+2. **[High] 統一 4 步驟的進度計算基礎**
+   - 建議：以「總步驟數」為分母（Step 1 = 25%, Step 2 = 25%, Step 3 = 40%, Step 4 = 10%）
+   - 或：讓各步驟自行回報 0.0～1.0，UI 依啟用的步驟加權計算
+
+### 中優先度
+3. **[Medium] Step 3 翻譯精細化**
+   - 可在 `translate_items_with_cache_loop` 內，每翻譯 N 個 key（非 batch 边界）就回報一次進度
+   - 目前最小更新顆粒度 = 1 batch
+
+---
+
+## 6. 結論
+
+| 評估項目 | 結果 |
+|---------|------|
+| 進度條是否有正確更新？ | ⚠️ **部分正確**：只有 Step 3（翻譯）有進度回報 |
+| 進度是否平滑？ | ⚠️ **中等**：翻譯階段每 batch 更新一次，非真正連續平滑 |
+| Step 1 Export 進度 | ❌ 停在 0% |
+| Step 2 Clean 進度 | ❌ 停在 0% |
+| Step 3 Translate 進度 | ✅ 有更新（但非完全平滑）|
+| Step 4 Inject 進度 | ❌ 停在 0% |
+
+**整體進度條覆蓋率：僅 Step 3（翻譯階段），約佔整個 pipeline 的 30～50% 時間，視資料量而定。**

@@ -23,6 +23,7 @@ LM_translate_folder_name = (
     load_config().get("lm_translator", {}).get("lm_translate_folder_name", "LM翻譯後")
 )
 
+
 class LMView(ft.Column):
     """LM 翻譯頁（風格對齊 Translation/Extractor）。"""
 
@@ -74,9 +75,7 @@ class LMView(ft.Column):
         )
 
         # 狀態與日誌
-        self.status_chip = ft.Chip(
-            label=ft.Text("尚未開始"), bgcolor=theme.GREY_200
-        )
+        self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=theme.GREY_200)
         self.progress_bar = ft.ProgressBar(
             value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
@@ -274,6 +273,7 @@ class LMView(ft.Column):
                 logs = snap.get("logs", []) or []
                 try:
                     self.log_presenter.sync(self.log_view, logs)
+                    self.log_view.scroll_to(offset=1.0)
                 except Exception as e:
                     log_debug(f"LM log presenter sync failed: {e}")
 

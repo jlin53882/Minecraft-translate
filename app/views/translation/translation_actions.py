@@ -204,7 +204,7 @@ def start_ui_timer(view):
         mode="tail",
         tail_lines=ui_cfg.get("tail_lines", 250),
         colorize=False,  # Translation 目前只有灰白色，保持現有外觀
-        default_color=str(ft.Colors.GREY_100),
+        default_color=ft.Colors.GREY_100,
     )
 
     def loop():
@@ -225,6 +225,8 @@ def start_ui_timer(view):
             try:
                 # PR3：presenter.sync() 內部處理 tail rebuild + 顏色
                 presenter.sync(view.log_view, logs)
+                # sync() 會 clear() + 重新加入所有 item，手動滾到最底部
+                view.log_view.scroll_to(offset=1.0)
             except Exception as e:
                 log_warning(f"更新日誌視圖失敗: {e}")
             status = (snap.get("status") or "").upper()
