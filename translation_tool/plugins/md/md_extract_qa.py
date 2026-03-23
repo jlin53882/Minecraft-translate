@@ -28,6 +28,19 @@ from pathlib import Path
 from typing import List, Optional
 import hashlib
 
+from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+
+def _shield_item(item: dict) -> dict:
+    """對單一 block item 的 text 進行 shield 保護，回傳含 _shields 的 dict。"""
+    shielded = shield_text(item["text"])
+    return {
+        **item,
+        "text": shielded.clean,
+        "_shields": [asdict(p) for p in shielded.shields],
+    }
+
+
 # ========= 你那套 § 指令行（遇到就切段，且本行不納入段落翻譯） =========
 # 你貼的內容常見：§align, §stack, §rule, §recipe, §entity
 RE_TOKEN_LINE = re.compile(r"^\s*§(align:|stack\[|rule\{|recipe\[|entity\[)", re.I)
@@ -273,7 +286,10 @@ def build_pending_json(
         "source_md": rel_md.replace("\\", "/"),
         "source_abs": str(abs_md),
         "lang_filter_mode": lang_mode,
-        "items": [asdict(it) for it in items],
+        "items": [
+            _shield_item(asdict(it))
+            for it in items
+        ],
         "stats": {
             "blocks": len(items),
         },

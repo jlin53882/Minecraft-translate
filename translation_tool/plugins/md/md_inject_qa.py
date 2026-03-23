@@ -48,6 +48,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple
 
+from translation_tool.plugins.shared.rich_text_shield import (
+    ShieldPiece,
+    unshield_text,
+)
+
 # ======== 跟抽取器一致：哪些行視為 token 行（不可翻、不可改） ========
 RE_HARD_SPLIT_LINE = re.compile(r"^\s*§(rule\{|recipe\[|entity\[)", re.I)
 RE_SOFT_SKIP_LINE = re.compile(r"^\s*§(align:|stack\[)", re.I)
@@ -226,6 +231,11 @@ class Item:
     start_line: int
     end_line: int
     text: str
+    _shields: list = None
+
+    def __post_init__(self):
+        if self._shields is None:
+            self._shields = []
 
 def load_items_from_json(json_path: Path) -> Tuple[str, List[Item]]:
     """
@@ -241,6 +251,7 @@ def load_items_from_json(json_path: Path) -> Tuple[str, List[Item]]:
                 start_line=int(it["start_line"]),
                 end_line=int(it["end_line"]),
                 text=str(it["text"]),
+                _shields=[ShieldPiece(**p) for p in it.get("_shields", [])],
             )
         )
     return source_md, items
@@ -319,7 +330,7 @@ def apply_item_to_md_lines(md_lines: List[str], item: Item) -> None:
     # 2) 直接使用翻譯後文本的換行（保留多行結構）
     #    - item.text 可能包含 \n（例如 Side note 三行）
     #    - 我們將其視為「要寫回的文字行序列」
-    new_text_lines = item.text.splitlines()
+    new_text_lines = unshield_text(item.text, item._shields).splitlines()
 
     # 3) 去掉空白行（空白行代表段落分隔；原 md 的空白行我們不動）
     #    這裡只處理要填回「文字行」的內容
