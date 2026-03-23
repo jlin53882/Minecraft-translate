@@ -5,7 +5,7 @@
 """
 
 import flet as ft
-import threading  # lint: keep (used by test)
+import threading  # noqa: F401
 
 from app.ui import theme
 from translation_tool.utils.log_unit import log_info
