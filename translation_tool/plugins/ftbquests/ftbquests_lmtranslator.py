@@ -59,6 +59,7 @@ from translation_tool.utils.log_unit import (
 # Smart 翻譯轉接器（資料格式轉換）
 # -------------------------
 
+
 def map_to_items(
     mapping: Dict[str, Any],
     cache_type: str,
@@ -109,6 +110,7 @@ def map_to_items(
 
     return items
 
+
 def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     """
     計算 mapping 中「實際可翻譯的字串數量」。
@@ -123,6 +125,7 @@ def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     - 作為 batch 翻譯的總量基準
     """
     return sum(1 for _, v in mapping.items() if isinstance(v, str) and v.strip())
+
 
 @dataclass
 class DryRunStats:
@@ -140,6 +143,7 @@ class DryRunStats:
     cache_hit: int = 0  # 快取命中數
     cache_miss: int = 0  # 實際需翻譯數
     per_file: list[dict] = None  # 每個檔案的明細
+
 
 # -------------------------
 # Public API (callable from pipeline)

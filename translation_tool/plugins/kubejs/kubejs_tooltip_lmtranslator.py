@@ -50,6 +50,7 @@ from translation_tool.plugins.shared.lang_path_rules import (
 
 from translation_tool.utils.log_unit import log_info, log_warning, progress
 
+
 # -------------------------
 # Smart item mapping
 # -------------------------
@@ -79,6 +80,7 @@ def collect_items_from_mapping(
         )
     return items
 
+
 def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     """計算 mapping 中『可翻譯字串』的數量。
 
@@ -90,10 +92,11 @@ def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     """
     return sum(1 for _, v in mapping.items() if isinstance(v, str) and v.strip())
 
+
 # -------------------------
 # 繁體中文偵測（用於跳過已翻譯的 tooltips）
 # -------------------------
-_TW_CJK_RE = re.compile(r'[\u4e00-\u9fff]')
+_TW_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _TW_CONVERTER = opencc.OpenCC("s2tw")
 
 
@@ -126,6 +129,7 @@ def _split_off_tw_items(
     items_to_translate.extend(remaining)
     return tw_items
 
+
 # -------------------------
 # Dry-run stats (optional)
 # -------------------------
@@ -142,6 +146,7 @@ class DryRunStats:
     cache_hit: int = 0
     cache_miss: int = 0
     per_file: Optional[list[dict]] = None
+
 
 # -------------------------
 # Public API (for UI/pipeline)
