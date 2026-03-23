@@ -11,7 +11,29 @@ from typing import Any, Callable
 import json
 import re
 
+from translation_tool.plugins.shared.rich_text_shield import (
+    shield_text,
+    unshield_text,
+)
+
 _LANG_REF_RE = re.compile(r"^\{.+\}$")
+
+
+def _shielded_convert(text: str, convert_fn: Callable[[str], str]) -> str:
+    """對 text 做 shield → convert_fn → unshield 保護。
+
+    用於 OpenCC s2t 轉換時，保護 KubeJS 格式標記（彩色碼、物品ID 等）
+    不被轉換破壞。
+    """
+    shielded = shield_text(text)
+    if shielded.skip_reason is not None:
+        # 不應翻譯的內容（空白/圖片/URL/事件），直接保留原文
+        return text
+    if not shielded.shields:
+        # 無需保護，直接轉換
+        return convert_fn(text)
+    converted = convert_fn(shielded.clean)
+    return unshield_text(converted, shielded.shields)
 
 
 def is_filled_text_impl(v: Any) -> bool:
@@ -41,7 +63,8 @@ def deep_merge_3way_flat_impl(
 
         v_cn = cn.get(k)
         if is_filled_text_impl(v_cn):
-            out[k] = safe_convert_text_fn(v_cn)
+            # ✅ Rich Text Shield：保護 zh_cn 值中的 KubeJS 格式後再做 s2t 轉換
+            out[k] = _shielded_convert(v_cn, safe_convert_text_fn)
             continue
 
         v_en = en.get(k)
@@ -158,7 +181,8 @@ def clean_kubejs_from_raw_impl(
                     # 有 zh_tw 翻譯 → skip（視為 cache hit）；無 → 保留
                     if lookup_key and lookup_key not in tw_lookup:
                         # ✅ 對簡體中文值做 OpenCC 轉換（s2tw），轉為繁體中文
-                        v_converted = safe_convert_text_fn(v)
+                        # ✅ Rich Text Shield：保護 KubeJS 格式後再做 s2t 轉換
+                        v_converted = _shielded_convert(v, safe_convert_text_fn)
                         filtered[k] = v_converted
                 if filtered:
                     dst.write_text(
