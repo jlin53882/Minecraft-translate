@@ -13,7 +13,7 @@ from typing import Any, Generator
 # 核心檢查：& 後只能接 a-v（不含 w）、0-9、空格、\、#
 # 合法字元：a-v, 0-9, whitespace, backslash, hash
 # 違法：& 後面接了 a-v 與 0-9、空格、\、# 以外的任何字元
-COLOR_PATTERN = re.compile(r"&([^a-vz0-9\s\\#])")
+COLOR_PATTERN = re.compile(r"&([^a-v0-9\s\\#])")
 
 
 @dataclass
