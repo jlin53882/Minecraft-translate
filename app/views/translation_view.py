@@ -5,6 +5,8 @@
 """
 
 import flet as ft
+import threading  # lint: keep (used by test)
+
 from app.ui import theme
 from translation_tool.utils.log_unit import log_info
 

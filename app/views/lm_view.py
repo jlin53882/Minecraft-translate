@@ -23,6 +23,7 @@ LM_translate_folder_name = (
     load_config().get("lm_translator", {}).get("lm_translate_folder_name", "LM翻譯後")
 )
 
+
 class LMView(ft.Column):
     """LM 翻譯頁（風格對齊 Translation/Extractor）。"""
 
@@ -74,9 +75,7 @@ class LMView(ft.Column):
         )
 
         # 狀態與日誌
-        self.status_chip = ft.Chip(
-            label=ft.Text("尚未開始"), bgcolor=theme.GREY_200
-        )
+        self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=theme.GREY_200)
         self.progress_bar = ft.ProgressBar(
             value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )

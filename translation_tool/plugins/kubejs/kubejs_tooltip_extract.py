@@ -10,28 +10,31 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-from translation_tool.utils.log_unit import( 
-    log_info, 
-    log_error, 
-    log_warning, 
-    log_debug, 
-    )
+from translation_tool.utils.log_unit import (
+    log_info,
+    log_error,
+    log_warning,
+    log_debug,
+)
+
 
 def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
     """
     自動解析並尋找 KubeJS 根目錄。
-    
+
     搜尋策略：
     1. 檢查輸入路徑是否本身就是 kubejs/。
     2. 檢查輸入路徑的正下方是否有 kubejs/。
     3. 遞迴搜尋子目錄（受限於 max_depth），尋找名為 kubejs 的目錄。
-    
+
     :param input_dir: 使用者選取的路徑。
     :param max_depth: 最大向下搜尋深度，避免掃描過多無關目錄（如大型模組包根目錄）。
     :return: 找到的 KubeJS 絕對路徑字串；若找不到則回傳原輸入路徑。
     """
-    log_debug(f"開始解析 KubeJS 根目錄，輸入路徑: '{input_dir}'，最大搜尋深度: {max_depth}")
-    
+    log_debug(
+        f"開始解析 KubeJS 根目錄，輸入路徑: '{input_dir}'，最大搜尋深度: {max_depth}"
+    )
+
     try:
         base = Path(input_dir).resolve()
     except Exception as e:
@@ -51,7 +54,7 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
 
     # 3) 情境 C：往下遞迴搜尋
     log_debug(f"直接路徑未匹配，開始在深度 {max_depth} 內搜尋子目錄...")
-    
+
     base_parts = len(base.parts)
     best_match = None
 
@@ -60,13 +63,13 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
         for p in base.rglob("*"):
             if not p.is_dir():
                 continue
-            
+
             # 計算目前深度 (相對於 base)
             current_depth = len(p.parts) - base_parts
-            
+
             if current_depth > max_depth:
                 continue
-                
+
             if p.name.lower() == "kubejs":
                 best_match = p
                 log_info(f"搜尋成功：在深度 {current_depth} 處找到 KubeJS -> {p}")
@@ -81,7 +84,9 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
     log_warning(f"在指定深度範圍內找不到 'kubejs' 目錄。回傳原始路徑: {base}")
     return str(base)
 
+
 # ---------- 工具 ----------
+
 
 def to_json_name(filename: str) -> str:
     """
@@ -95,9 +100,10 @@ def to_json_name(filename: str) -> str:
         result = filename
     else:
         result = filename + ".json"
-    
+
     log_debug(f"檔名轉換: '{filename}' -> '{result}'")
     return result
+
 
 def strip_quotes(s: str) -> str:
     """
@@ -105,21 +111,24 @@ def strip_quotes(s: str) -> str:
     """
     s = s.strip()
     if len(s) >= 2:
-        if (s.startswith("'") and s.endswith("'")) or (s.startswith('"') and s.endswith('"')):
+        if (s.startswith("'") and s.endswith("'")) or (
+            s.startswith('"') and s.endswith('"')
+        ):
             stripped = s[1:-1]
             log_debug(f"已脫殼引號: {s} -> {stripped}")
             return stripped
     return s
 
+
 def split_js_args(s: str) -> list[str]:
     """
     解析 JS 函式參數字串，能正確處理逗號分隔，並忽略括號 ()、中括號 []、大括號 {} 以及引號內的逗號。
-    
-    例如: 'item.of("mt:pipe", {lvl:1}), 5' 
+
+    例如: 'item.of("mt:pipe", {lvl:1}), 5'
     會被拆分為 ['item.of("mt:pipe", {lvl:1})', '5']
     """
     log_debug(f"開始拆解 JS 參數字串: {s}")
-    
+
     args = []
     buf = ""
     depth = 0
@@ -157,10 +166,13 @@ def split_js_args(s: str) -> list[str]:
         args.append(buf.strip())
 
     if depth != 0:
-        log_warning(f"JS 參數解析可能異常：括號未對齊 (剩餘深度: {depth})，原始字串: {s}")
+        log_warning(
+            f"JS 參數解析可能異常：括號未對齊 (剩餘深度: {depth})，原始字串: {s}"
+        )
 
     log_debug(f"參數拆解完成，取得 {len(args)} 個參數")
     return args
+
 
 def extract_array_strings(arr: str) -> list[str]:
     """
@@ -175,22 +187,24 @@ def extract_array_strings(arr: str) -> list[str]:
         log_error(f"提取陣列字串時發生錯誤: {str(e)}")
         return []
 
+
 # ---------- Patchouli 指令過濾 ----------
 _PATCHOULI_COMMAND_ONLY = re.compile(
     r"^\{[a-zA-Z0-9_:-]+(?::[^\s{}]+)?(?:\s+[a-zA-Z0-9_:-]+:[^{}\s]+)*\}$"
 )
 
+
 def is_patchouli_command_only(s: str) -> bool:
     """
     判斷字串是否整段僅由 Patchouli 指令組成（例如：$(br)、$(l:...)、$(img) 等）。
     這通常用於過濾不需要進行翻譯處理的文本行。
-    
+
     True  = 整段都是指令，無需翻譯。
     False = 包含一般文字或非指令內容。
     """
     # 預處理：去除空白並確保不是 None
     clean_s = (s or "").strip()
-    
+
     if not clean_s:
         # 空字串不視為指令
         return False
@@ -198,21 +212,23 @@ def is_patchouli_command_only(s: str) -> bool:
     # 進行全文匹配
     # 使用 fullmatch 確保字串從頭到尾都符合 Patchouli 指令格式
     is_match = bool(_PATCHOULI_COMMAND_ONLY.fullmatch(clean_s))
-    
+
     if is_match:
         # 如果整段都是指令，用 debug 紀錄即可，避免干擾主要資訊
         log_debug(f"偵測到純 Patchouli 指令段落，將跳過翻譯: '{clean_s}'")
-    
+
     return is_match
+
 
 # ---------- Lang Key 過濾 ----------
 # 例: tooltip.xxx.yyy / item.kubejs.fake_mob_masher / block.modid.name ...
 _LANG_KEY_LIKE = re.compile(r"^(?:[a-z0-9_]+)(?:\.[a-z0-9_]+)+$")
 
+
 def is_lang_key_like(s: str) -> bool:
     """
     判斷字串是否「像」一個 Minecraft 的翻譯鍵（Translation Key）。
-    
+
     目的：過濾掉如 'item.minecraft.iron_ingot' 這種 key，避免將其視為一般句子進行翻譯。
     判斷基準：
     1. 不得為空。
@@ -234,11 +250,12 @@ def is_lang_key_like(s: str) -> bool:
 
     # 進行正規表示式匹配
     is_key = bool(_LANG_KEY_LIKE.fullmatch(s))
-    
+
     if is_key:
         log_debug(f"跳過翻譯 Key: '{s}' (符合 Key 格式條件)")
-    
+
     return is_key
+
 
 def is_lang_key_ref_like(s: str) -> bool:
     """
@@ -253,10 +270,11 @@ def is_lang_key_ref_like(s: str) -> bool:
         return False
     return bool(re.fullmatch(r"\{[^{}]+\}(?:\n\{[^{}]+\})*", t))
 
+
 def clean_text(s: str) -> str:
     """
     清理文本中的雜質，主要針對 Minecraft 的特殊格式。
-    
+
     1. 移除 Minecraft 內建的顏色碼與格式碼（如 §a, §l, §r 等）。
     2. 移除字串前後的贅餘空白。
     """
@@ -271,38 +289,41 @@ def clean_text(s: str) -> str:
     # 只有在真的有變動時才紀錄 debug log，避免 Log 檔案過於混亂
     if original != cleaned:
         log_debug(f"文字清理完成: '{original}' -> '{cleaned}'")
-        
+
     return cleaned
+
 
 _RE_SKIP_KUBEJS_TOOLTIP_EXPR = re.compile(
     r"^\s*(Text\.translate|Text\.of|Component\.translatable|Component\.translate|Component\.literal)\s*\(",
     re.S,
 )
 
+
 def should_skip_kubejs_tooltip_expr(expr: str) -> bool:
     """第二參數如果是 Text.translate(...) 這種，代表語言 key 引用，不要抽去翻譯。"""
     return bool(_RE_SKIP_KUBEJS_TOOLTIP_EXPR.match((expr or "").strip()))
+
 
 def extract_js_string_call(text: str, start: int) -> str | None:
     """
     從指定的起始位置開始，解析並提取第一個出現的 JavaScript 字串內容。
     支援處理單引號、雙引號以及轉義字元（如 \\' 或 \\"）。
-    
+
     通常用於解析：Text.of( '內容' ) 或 Text.red( "內容" )
-    
+
     :param text: 原始腳本文字內容。
     :param start: 開始搜尋的索引位置（通常是左括號 '(' 的下一個位置）。
     :return: 提取到的字串內容（不含兩側引號）；若找不到完整字串則回傳 None。
     """
     log_debug(f"開始提取 JS 字串參數，起始索引: {start}")
-    
+
     i = start
     quote = None
     escaped = False
     buf = ""
 
     text_len = len(text)
-    
+
     # 檢查起始位置是否合法
     if start >= text_len:
         log_warning(f"提取位置超出範圍: start={start}, text_length={text_len}")
@@ -314,7 +335,7 @@ def extract_js_string_call(text: str, start: int) -> str | None:
         # 狀態 A: 已經進入引號範圍內
         if quote:
             buf += ch
-            
+
             if escaped:
                 # 前一個字元是 \，所以無論這個字元是什麼都當作一般文字處理
                 escaped = False
@@ -327,18 +348,21 @@ def extract_js_string_call(text: str, start: int) -> str | None:
                 result = buf[:-1]  # 去掉最後一個被加入 buf 的結尾引號
                 log_debug(f"成功提取字串參數: '{result}'")
                 return result
-        
+
         # 狀態 B: 還在尋找字串的開頭引號
         else:
             if ch in ("'", '"', "`"):
                 quote = ch
                 log_debug(f"偵測到字串起始引號: {quote}")
-        
+
         i += 1
 
     # 如果跑完迴圈都沒 return，代表字串沒閉合
-    log_warning(f"字串解析未完成（可能缺少結尾引號）。目前緩存: '{buf}'，起始位置: {start}")
+    log_warning(
+        f"字串解析未完成（可能缺少結尾引號）。目前緩存: '{buf}'，起始位置: {start}"
+    )
     return None
+
 
 def should_skip_text(text: str, *, skip_chinese: bool = True) -> bool:
     """
@@ -384,7 +408,7 @@ def should_skip_text(text: str, *, skip_chinese: bool = True) -> bool:
     # ✅ 情況 5（通用）：跳過主要由 ASCII block art 字元組成的文字
     # █ ▓ ▒ ░ ■ □ ● ○ 等視覺裝飾字元，不需要翻譯
     # 此檢測無視 skip_chinese 設定（block art 與語言無關）
-    block_chars = set('█▓▒░▪▫●○◌■□▪▸▹◆◇★☆')
+    block_chars = set("█▓▒░▪▫●○◌■□▪▸▹◆◇★☆")
     block_count = sum(1 for c in t if c in block_chars)
     if block_count > 0 and block_count / max(len(t), 1) > 0.5:
         log_debug(f"跳過判定: ASCII block art（{block_count}/{len(t)}） -> '{t}'")
@@ -401,11 +425,12 @@ def should_skip_text(text: str, *, skip_chinese: bool = True) -> bool:
     log_debug(f"確定需要翻譯: '{t}'")
     return False
 
+
 def extract_call_args(text: str, start: int) -> str | None:
     """
     從指定的起始位置開始，提取括號 '()' 內的所有內容。
     支援嵌套括號處理（例如：.add(item, Text.of(Text.red('...')))）。
-    
+
     :param text: 原始文字內容。
     :param start: 左括號 '(' 之後的第一個字元索引。
     :return: 括號內的完整字串；若括號未閉合則回傳 None。
@@ -432,14 +457,17 @@ def extract_call_args(text: str, start: int) -> str | None:
     log_warning(f"括號解析失敗：未找到匹配的閉合括號。起始位置: {start}")
     return None
 
-def extract_itemevents_tooltips(content: str, file_name: str, extracted: dict, auto_id: int) -> int:
+
+def extract_itemevents_tooltips(
+    content: str, file_name: str, extracted: dict, auto_id: int
+) -> int:
     """
     解析 KubeJS 的 ItemEvents.tooltip 腳本，提取其中的文字內容。
-    
+
     支援格式範例：
     - event.add('minecraft:dirt', Text.of('Hello'))
     - event.add(['item1', 'item2'], Text.red('Warning'))
-    
+
     :param content: 腳本檔案的全文內容。
     :param file_name: 目前處理的檔案名稱（用於生成 Key）。
     :param extracted: 存放提取結果的字典（Key-Value）。
@@ -447,7 +475,7 @@ def extract_itemevents_tooltips(content: str, file_name: str, extracted: dict, a
     :return: 更新後的 auto_id。
     """
     log_info(f"正在處理檔案: {file_name}，開始掃描 .add() 調用...")
-    
+
     match_count = 0
 
     # 搜尋所有 .add( 的位置
@@ -465,8 +493,9 @@ def extract_itemevents_tooltips(content: str, file_name: str, extracted: dict, a
         # 1. 處理 Item ID (第一個參數)
         raw_id = args[0].strip()
         # 使用 strip_quotes 邏輯簡化提取
-        if (raw_id.startswith("'") and raw_id.endswith("'")) or \
-           (raw_id.startswith('"') and raw_id.endswith('"')):
+        if (raw_id.startswith("'") and raw_id.endswith("'")) or (
+            raw_id.startswith('"') and raw_id.endswith('"')
+        ):
             item_id = raw_id[1:-1]
         else:
             # 如果是陣列或正則表達式，保留原樣作為 Key 的一部分
@@ -480,10 +509,10 @@ def extract_itemevents_tooltips(content: str, file_name: str, extracted: dict, a
         for tm in re.finditer(r"Text\.\w+\s*\(", tooltip_block):
             start_pos = tm.end()
             text_content = extract_js_string_call(tooltip_block, start_pos)
-            
+
             if text_content is None:
                 continue
-            
+
             # ✅ 檢查是否符合跳過條件（空值、指令、Key、已翻譯等）
             if should_skip_text(text_content, skip_chinese=False):
                 idx += 1
@@ -491,19 +520,20 @@ def extract_itemevents_tooltips(content: str, file_name: str, extracted: dict, a
 
             # 產生唯一的 Key 格式: 檔案名|物品ID.tooltip.序號
             key = f"{file_name}|{item_id}.tooltip.{idx}"
-            
+
             # 存入結果並清理 Minecraft 顏色代碼
             cleaned_val = clean_text(text_content)
             extracted[key] = cleaned_val
-            
+
             log_debug(f"成功提取內容 [{key}]: {cleaned_val}")
-            
+
             auto_id += 1
             idx += 1
             match_count += 1
 
     log_info(f"檔案 {file_name} 處理完畢，共提取 {match_count} 條文本。")
     return auto_id
+
 
 # ---------- 主流程 ----------
 def extract(
@@ -516,7 +546,7 @@ def extract(
 ) -> dict:
     """
     執行全文提取流程：將 KubeJS 腳本與 Lang JSON 中的待翻譯文字提取出來。
-    
+
     :param source_dir: 模組包根目錄或 kubejs 目錄。
     :param output_dir: 翻譯 JSON 的輸出目錄。
     :param session: UI 工作對話實體，用於更新進度條與日誌。
@@ -545,7 +575,7 @@ def extract(
     for root, _, files in os.walk(src_root):
         for f in files:
             all_files_path.append(os.path.join(root, f))
-    
+
     total_files = max(1, len(all_files_path))
     processed_count = 0
     extracted_files_count = 0
@@ -558,14 +588,16 @@ def extract(
     for file_path in all_files_path:
         file_name = os.path.basename(file_path)
         rel_dir = os.path.relpath(os.path.dirname(file_path), src_root)
-        
-        extracted = {} # 存放當前檔案提取出的 Key-Value
+
+        extracted = {}  # 存放當前檔案提取出的 Key-Value
         id_counters = defaultdict(int)
         auto_id = 1
 
         try:
             # --- A) 處理 KubeJS 腳本 (.js) ---
-            if file_name.endswith(".js") and "client_scripts" in file_path.replace("\\", "/"):
+            if file_name.endswith(".js") and "client_scripts" in file_path.replace(
+                "\\", "/"
+            ):
                 log_debug(f"正在分析 JS 腳本: {file_name}")
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
@@ -575,7 +607,7 @@ def extract(
                     arg_str = extract_call_args(content, m.end())
                     if not arg_str:
                         continue
-                    
+
                     args = split_js_args(arg_str)
 
                     # 單一參數情況：可能是字串直接添加
@@ -586,7 +618,7 @@ def extract(
                             continue
                         if should_skip_text(text, skip_chinese=False):
                             continue
-                        
+
                         text = clean_text(text)
                         if len(text) > 1:
                             key = f"{file_name}|auto.{auto_id}"
@@ -602,7 +634,7 @@ def extract(
                         # ✅ Text.translate(...) / Text.of(...) 等屬於語言 key 引用，不抽取
                         if should_skip_kubejs_tooltip_expr(args[1]):
                             continue
-                        
+
                         # 若內容包含 Text. 元件
                         if "Text." in args[1]:
                             # 嘗試簡單提取第一個引號內容
@@ -610,7 +642,9 @@ def extract(
                             if m2:
                                 raw = m2.group(1)
                                 if not should_skip_text(raw, skip_chinese=False):
-                                    extracted[f"{file_name}|{item_id}.{n}"] = clean_text(raw)
+                                    extracted[f"{file_name}|{item_id}.{n}"] = (
+                                        clean_text(raw)
+                                    )
 
                         # 若內容是陣列 [...]
                         elif args[1].startswith("["):
@@ -618,14 +652,20 @@ def extract(
                                 idx = 0
                                 for tm in re.finditer(r"Text\.\w+\s*\(", args[1]):
                                     t = extract_js_string_call(args[1], tm.end())
-                                    if t and not should_skip_text(t, skip_chinese=False):
-                                        extracted[f"{file_name}|{item_id}.{n}.{idx}"] = clean_text(t)
+                                    if t and not should_skip_text(
+                                        t, skip_chinese=False
+                                    ):
+                                        extracted[
+                                            f"{file_name}|{item_id}.{n}.{idx}"
+                                        ] = clean_text(t)
                                     idx += 1
                             else:
                                 # 純字串陣列
                                 for i, txt in enumerate(extract_array_strings(args[1])):
                                     if not should_skip_text(txt, skip_chinese=False):
-                                        extracted[f"{file_name}|{item_id}.{n}.{i}"] = clean_text(txt)
+                                        extracted[f"{file_name}|{item_id}.{n}.{i}"] = (
+                                            clean_text(txt)
+                                        )
 
                 # 2. 處理 Ponder 劇情文字 (scene.text)
                 for m in re.finditer(r"scene\.text\s*\((.+?)\)", content, re.S):
@@ -644,18 +684,26 @@ def extract(
                                 auto_id += 1
 
                 # 3. 處理 ItemEvents Tooltips (模組化調用)
-                auto_id = extract_itemevents_tooltips(content, file_name, extracted, auto_id)
+                auto_id = extract_itemevents_tooltips(
+                    content, file_name, extracted, auto_id
+                )
 
             # --- B) 處理語言檔 (.json) ---
-            elif file_name.endswith(".json") and "/lang/" in file_path.replace("\\", "/"):
+            elif file_name.endswith(".json") and "/lang/" in file_path.replace(
+                "\\", "/"
+            ):
                 log_debug(f"正在讀取 Lang JSON: {file_name}")
                 with open(file_path, "r", encoding="utf-8") as f:
-                    raw = f.read().lstrip("\ufeff") # 處理可能的 BOM
+                    raw = f.read().lstrip("\ufeff")  # 處理可能的 BOM
                     # 清除 JSON 中常見的結尾逗號錯誤
                     raw = re.sub(r",\s*([}\]])", r"\1", raw)
                     data = json.loads(raw)
                     for k, v in data.items():
-                        if isinstance(v, str) and v.strip() and not is_lang_key_ref_like(v):
+                        if (
+                            isinstance(v, str)
+                            and v.strip()
+                            and not is_lang_key_ref_like(v)
+                        ):
                             extracted[k] = v
 
         except Exception as e:
@@ -698,11 +746,16 @@ def extract(
     }
 
     if errors_count:
-        log_info(f"⚠ 提取完成（含 {errors_count} 筆錯誤）！共輸出 {extracted_files_count} 個檔案，提取 {extracted_keys_total} 條文本。")
+        log_info(
+            f"⚠ 提取完成（含 {errors_count} 筆錯誤）！共輸出 {extracted_files_count} 個檔案，提取 {extracted_keys_total} 條文本。"
+        )
     else:
-        log_info(f"🎊 提取完成！共輸出 {extracted_files_count} 個檔案，提取 {extracted_keys_total} 條文本。")
+        log_info(
+            f"🎊 提取完成！共輸出 {extracted_files_count} 個檔案，提取 {extracted_keys_total} 條文本。"
+        )
 
     return summary
+
 
 if __name__ == "__main__":
     extract()

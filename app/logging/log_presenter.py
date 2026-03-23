@@ -122,7 +122,7 @@ class LogPresenter:
         entries: Sequence[LogEntry],
     ) -> List[LogEntry]:
         """Tail 模式：全量替換為最後 N 筆。"""
-        tail = list(entries[-self.tail_lines:]) if entries else []
+        tail = list(entries[-self.tail_lines :]) if entries else []
         list_view.controls.clear()
         for entry in tail:
             color = self._entry_color(entry)
@@ -138,7 +138,7 @@ class LogPresenter:
         if not self.colorize:
             color = self.default_color
             # Colors enum → 取 .value；hex string 直接用；其他嘗試 str()
-            if hasattr(color, 'value'):
+            if hasattr(color, "value"):
                 return color.value  # Colors enum → "grey100"
             return str(color)
         return "#" + get_level_color(entry.level)
