@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import re
+import opencc
 
 from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_config_rules import validate_api_keys
@@ -47,6 +49,7 @@ from translation_tool.plugins.shared.lang_path_rules import (
 )
 
 from translation_tool.utils.log_unit import log_info, log_warning, progress
+
 
 # -------------------------
 # Smart item mapping
@@ -77,6 +80,7 @@ def collect_items_from_mapping(
         )
     return items
 
+
 def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     """計算 mapping 中『可翻譯字串』的數量。
 
@@ -87,6 +91,44 @@ def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     用途：顯示進度 / 估算翻譯總量。
     """
     return sum(1 for _, v in mapping.items() if isinstance(v, str) and v.strip())
+
+
+# -------------------------
+# 繁體中文偵測（用於跳過已翻譯的 tooltips）
+# -------------------------
+_TW_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_TW_CONVERTER = opencc.OpenCC("s2tw")
+
+
+def _is_tw_text(text: str) -> bool:
+    """判斷文字是否已經是繁體中文（OpenCC 轉換後不變 = 已是繁體）。"""
+    if not text or not isinstance(text, str):
+        return False
+    if not _TW_CJK_RE.search(text):
+        return False  # 無 CJK 字元，不是中文
+    # 簡體→繁體轉換後，如果等於原本的值，代表原本就是繁體
+    return _TW_CONVERTER.convert(text) == text
+
+
+def _split_off_tw_items(
+    cached_items: List[Dict[str, Any]],
+    items_to_translate: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """從 items_to_translate 移出已翻譯（繁體）的項目到 cached_items，回傳被移動的 items。"""
+    tw_items: List[Dict[str, Any]] = []
+    remaining: List[Dict[str, Any]] = []
+    for it in items_to_translate:
+        src_text = it.get("source_text", "") or ""
+        if _is_tw_text(src_text):
+            tw_items.append(it)
+        else:
+            remaining.append(it)
+    cached_items.extend(tw_items)
+    # 清除原本的並寫回剩餘（in-place 修改串列）
+    items_to_translate.clear()
+    items_to_translate.extend(remaining)
+    return tw_items
+
 
 # -------------------------
 # Dry-run stats (optional)
@@ -104,6 +146,7 @@ class DryRunStats:
     cache_hit: int = 0
     cache_miss: int = 0
     per_file: Optional[list[dict]] = None
+
 
 # -------------------------
 # Public API (for UI/pipeline)
@@ -218,6 +261,8 @@ def translate_kubejs_pending_to_zh_tw(
                 cache_rules=cache_rules,
                 is_valid_hit=_is_valid_hit,
             )
+            # ✅ 跳過值已經是繁體中文的 items（節省 API + 避免簡體當英文翻）
+            _split_off_tw_items(cached_items, items_to_translate)
             global_total_hit += len(cached_items)
             global_total_to_translate += len(items_to_translate)
         except Exception:
@@ -268,6 +313,9 @@ def translate_kubejs_pending_to_zh_tw(
             cache_rules=cache_rules,
             is_valid_hit=_is_valid_hit,
         )
+
+        # ✅ 跳過值已經是繁體中文的 items（從翻譯清單移至 cache hit）
+        _split_off_tw_items(cached_items, items_to_translate)
 
         # ✅ NEW：累積 hit items
         all_hit_items.extend(cached_items)

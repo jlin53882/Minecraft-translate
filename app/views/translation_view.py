@@ -4,10 +4,9 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-
-import threading
-
 import flet as ft
+import threading  # noqa: F401
+
 from app.ui import theme
 from translation_tool.utils.log_unit import log_info
 
@@ -49,6 +48,7 @@ try:
 except Exception:
     TaskSession = None
 
+
 class TranslationView(ft.Column):
     """翻譯工作台：FTB / KubeJS / Markdown 三流程統一入口。"""
 
@@ -69,17 +69,16 @@ class TranslationView(ft.Column):
         self._ui_timer_running = False
 
         # 右側共用狀態與日誌
-        self.status_chip = ft.Chip(
-            label=ft.Text("尚未開始"), bgcolor=theme.GREY_200
-        )
+        self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=theme.GREY_200)
         self.progress = ft.ProgressBar(
             value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
+        # 初始提示文字，避免 ListView 空白時透明顯現深灰背景
         self.log_view = ft.ListView(
             expand=True,
             spacing=4,
             auto_scroll=True,
-            bgcolor="#1e1e1e",  # 與 Container 背景一致，解決透明導致灰色圖塊問題
+            controls=[ft.Text("等待翻譯開始...", size=13, color=theme.GREY_100)],
         )
 
         header = ft.Row(
@@ -125,17 +124,13 @@ class TranslationView(ft.Column):
                         spacing=10,
                     ),
                 ),
-                styled_card(
-                    title="執行日誌",
-                    icon=ft.Icons.RECEIPT_LONG,
+                ft.Container(
                     expand=True,
-                    content=ft.Container(
-                        expand=True,
-                        bgcolor="#1e1e1e",
-                        border_radius=8,
-                        padding=10,
-                        content=self.log_view,
-                    ),
+                    bgcolor="#1e1e1e",
+                    border_radius=8,
+                    border=ft.border.all(1, theme.GREY_800),
+                    padding=10,
+                    content=self.log_view,
                 ),
             ],
             expand=True,
@@ -199,7 +194,13 @@ class TranslationView(ft.Column):
         trailing: list[ft.Control] | None = None,
     ) -> ft.Control:
         """建立操作按鈕列 UI"""
-        return build_action_row(view=self, on_start=on_start, on_dry_run=on_dry_run, on_reset=on_reset, trailing=trailing)
+        return build_action_row(
+            view=self,
+            on_start=on_start,
+            on_dry_run=on_dry_run,
+            on_reset=on_reset,
+            trailing=trailing,
+        )
 
     # ------------------------------------------------------------------
     # Tab builders
