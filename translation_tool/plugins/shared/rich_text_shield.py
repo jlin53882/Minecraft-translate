@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -88,26 +89,30 @@ class ShieldedText:
 _counter_color: int = 0
 _counter_item: int = 0
 _counter_escaped: int = 0
+_counter_lock = threading.Lock()  # 計數器執行緒安全鎖
 
 
 def _next_color_placeholder() -> str:
     global _counter_color
-    ph = f"$C{_counter_color}$"
-    _counter_color += 1
+    with _counter_lock:
+        ph = f"$C{_counter_color}$"
+        _counter_color += 1
     return ph
 
 
 def _next_item_placeholder() -> str:
     global _counter_item
-    ph = f"$P{_counter_item}$"
-    _counter_item += 1
+    with _counter_lock:
+        ph = f"$P{_counter_item}$"
+        _counter_item += 1
     return ph
 
 
 def _next_escaped_placeholder() -> str:
     global _counter_escaped
-    ph = f"$E{_counter_escaped}$"
-    _counter_escaped += 1
+    with _counter_lock:
+        ph = f"$E{_counter_escaped}$"
+        _counter_escaped += 1
     return ph
 
 
