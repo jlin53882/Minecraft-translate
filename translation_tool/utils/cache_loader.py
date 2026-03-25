@@ -13,12 +13,22 @@ from typing import Any
 
 import orjson as json
 
+logger = logging.getLogger(__name__)
+
 def load_shard_file(path: Path) -> dict[str, Any]:
-    """載入並解析單一分片（Shard）的 JSON 檔案，將其轉換為記憶體中的快取物件。"""
+    """載入並解析單一分片（Shard）的 JSON 檔案，將其轉換為記憶體中的快取物件。
+    
+    若 shard 檔案為空（0 bytes），會記錄警告並回傳空 dict。
+    """
     try:
+        file_size = path.stat().st_size
+        if file_size == 0:
+            logger.warning(f"空 shard 檔案（將跳過）: {path}")
+            return {}
         data = json.loads(path.read_bytes())
         return data if isinstance(data, dict) else {}
-    except Exception:
+    except Exception as e:
+        logger.warning(f"載入分片失敗 {path}: {e}")
         return {}
 
 def load_cache_type(
