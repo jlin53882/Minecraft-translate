@@ -24,13 +24,13 @@ class TestAPIKeyManagement:
         
         mock_load_config.return_value = {
             "lm_translator": {
-                "keys": ["AIzaTestKey123", "AIzaTestKey456"]
+                "keys": ["AIzaSyctest123456789012345678901234567890", "AIzaSydumm2222222222222222222222222222222222"]
             }
         }
         
         result = get_current_api_key()
         
-        assert result == "AIzaTestKey123"
+        assert result == "AIzaSyctest123456789012345678901234567890"
 
     @patch('translation_tool.core.lm_config_rules.load_config')
     def test_get_current_api_key_empty(self, mock_load_config):
@@ -50,7 +50,7 @@ class TestAPIKeyManagement:
         
         mock_load_config.return_value = {
             "lm_translator": {
-                "keys": ["AIzaTestKey123", "AIzaTestKey456"]
+                "keys": ["AIzaSyctest123456789012345678901234567890", "AIzaSydumm2222222222222222222222222222222222"]
             }
         }
         
@@ -69,7 +69,7 @@ class TestAPIKeyManagement:
         
         mock_load_config.return_value = {
             "lm_translator": {
-                "keys": ["AIzaTestKey123"]
+                "keys": ["AIzaSyctest123456789012345678901234567890"]
             }
         }
         
@@ -87,7 +87,7 @@ class TestAPIKeyManagement:
         
         mock_load_config.return_value = {
             "lm_translator": {
-                "keys": ["AIzaTestKey123", "AIzaTestKey456"]
+                "keys": ["AIzaSyctest123456789012345678901234567890", "AIzaSydumm2222222222222222222222222222222222"]
             }
         }
         
@@ -123,7 +123,7 @@ class TestAPIKeyManagement:
         from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
         
         # 不應該拋出異常
-        validate_api_keys_from_ui(["AIzaTestKey123"])
+        validate_api_keys_from_ui(["AIzaSyctest123456789012345678901234567890"])
 
     def test_validate_api_keys_from_ui_invalid(self):
         """測試 UI API Key 驗證（無效）。"""

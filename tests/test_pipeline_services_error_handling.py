@@ -38,6 +38,6 @@ def test_run_callable_task_sets_error_and_optional_session_log(monkeypatch):
 
     assert result is None
     assert session.calls[0] == 'start'
-    assert session.calls[-1] == 'set_error'
+    assert session.calls[-2] == 'set_error'  # set_error 在倒數第二，finally 的 finish() 在最後
     assert any(isinstance(c, tuple) and c[0] == 'add_log' for c in session.calls)
     assert seen == [session, None]

@@ -195,7 +195,7 @@ def validate_api_keys():
                 f"長度為 {len(k)}，正常應為 35-45 個字元，請檢查是否輸入正確。"
             )
         # 3. 檢查金鑰字元是否僅包含允許的字元（AIza + 英數字/ dash / underscore）
-        if not re.match(r"^AIza[_-a-zA-Z0-9]+$", k):
+        if not re.match(r"^AIza[a-zA-Z0-9_-]+$", k):
             log_error(f"❌ 偵測到包含無效字元的 API 金鑰: {k!r}")
             raise RuntimeError(
                 f"❌ API Key 包含無效字元：{k!r}\n"
@@ -226,7 +226,7 @@ def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
                 f"❌ API Key 長度異常：{k!r}\n"
                 f"長度為 {len(k)}，正常應為 35-45 個字元，請檢查是否輸入正確。"
             )
-        if not re.match(r"^AIza[_-a-zA-Z0-9]+$", k):
+        if not re.match(r"^AIza[a-zA-Z0-9_-]+$", k):
             raise RuntimeError(
                 f"❌ API Key 包含無效字元：{k!r}\n"
                 "僅允許 'AIza' 開頭後接英文字母、數字、 dash(-) 或 underscore(_)。"
