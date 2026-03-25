@@ -23,7 +23,8 @@ def safe_json_loads(text: str):
     except json.JSONDecodeError:
         pass
 
-    matches = re.findall(r"\{[\s\S]*\}", text)
+    # ✅ Issue #12 修復：使用 non-greedy regex 避免匹配無效的多重 JSON
+    matches = re.findall(r"\{[\s\S]*?\}", text)
     for m in matches:
         try:
             return json.loads(m)

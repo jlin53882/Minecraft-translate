@@ -57,7 +57,10 @@ class TranslationRecorder:
         cols = cols + extra_cols
 
         with out_path.open("w", encoding="utf-8", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=cols)
+            # ⭐ Use QUOTE_ALL to prevent CSV injection attacks
+            # All fields are quoted, preventing malicious values like
+            # "=cmd|'/C calc'!A0" or values with embedded newlines
+            w = csv.DictWriter(f, fieldnames=cols, quoting=csv.QUOTE_ALL)
             w.writeheader()
             for r in self.rows:
                 w.writerow({k: r.get(k, "") for k in cols})
