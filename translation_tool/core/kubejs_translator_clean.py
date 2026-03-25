@@ -232,7 +232,7 @@ def clean_kubejs_from_raw_impl(
             #       表示該英文原文已有翻譯，不需要再送 pending。
             # 建立 reverse_index：{英文文字: [key1, key2, ...]}
             if pending_en and final_root_p.exists():
-                # 從 final/zh_tw.json 建立 final_tw_lookup（key → 原文）
+                # 從 final/zh_tw.json 建立 final_tw_lookup（key → 翻譯值）
                 final_tw_lookup: dict[str, str] = {}
                 for tw_file in final_root_p.rglob("zh_tw.json"):
                     tw_data = read_json_dict_fn(tw_file)
@@ -241,10 +241,34 @@ def clean_kubejs_from_raw_impl(
 
                 if final_tw_lookup:
                     # 建立 reverse_index（英文文字 → 對應 key 列表）
-                    reverse_index: dict[str, list[str]] = {}
+                    # 由於 rglob 迭代順序不穩定，必須用穩定的選擇策略：
+                    #   1. 優先取「已翻譯的 key」（即 final_tw_lookup[k] != k，表示有正式翻譯）
+                    #   2. 若多個已翻譯，取字母序第一個（確定性 tiebreaker）
+                    #   3. 若無已翻譯，則取字母序第一個 key
+                    reverse_index: dict[str, str] = {}
+                    # 先收集：英文文字 → [(key, 是否已翻譯)]
+                    rev_candidates: dict[str, list[tuple[str, bool]]] = {}
                     for k, v in final_tw_lookup.items():
                         if is_filled_text_impl(v):
-                            reverse_index.setdefault(v, []).append(k)
+                            # 「已翻譯」定義：zh_tw 值與英文 key 名不同（意味著有真正翻譯）
+                            is_translated = bool(
+                                v.casefold() != k.casefold()
+                                if v.isascii() and k.isascii()
+                                else v != k
+                            )
+                            rev_candidates.setdefault(v, []).append((k, is_translated))
+
+                    for en_text, candidates in rev_candidates.items():
+                        # 優先取已翻譯的 key；同優先級則取字母序最小者（穩定 tiebreaker）
+                        translated = sorted(
+                            [k for k, t in candidates if t],
+                            key=lambda x: x,
+                        )
+                        untranslated = sorted(
+                            [k for k, t in candidates if not t],
+                            key=lambda x: x,
+                        )
+                        reverse_index[en_text] = (translated or untranslated)[0]
 
                     # 過濾 pending_en：跳過那些「英文文字已存在於 final」的 key
                     pending_en = {
@@ -253,7 +277,7 @@ def clean_kubejs_from_raw_impl(
                         if not (
                             is_filled_text_impl(v)
                             and v in reverse_index
-                            and k != reverse_index[v][0]
+                            and k != reverse_index[v]
                         )
                     }
             # ── 雙軌去重 end ───────────────────────────────────────────────
