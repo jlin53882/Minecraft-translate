@@ -209,8 +209,8 @@ class CacheSearchEngine:
             try:
                 try:
                     self.conn.execute("PRAGMA recursive_triggers = OFF")
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_debug(f"設定 PRAGMA recursive_triggers 失敗: {e}")
                 
                 write_start = time.time()
                 for i in range(0, len(data), batch_size):
@@ -575,8 +575,8 @@ def build_index_entries(
             idx = futures[future]
             try:
                 results[idx] = future.result()
-            except Exception:
-                pass
+            except Exception as e:
+                log_debug(f"建構索引條目失敗: {e}")
     
     elapsed = time.time() - t0
     log_debug(f"build_index_entries({cache_type}): {len(items)} entries in {elapsed:.2f}s")
@@ -702,15 +702,15 @@ class SearchOrchestrator:
                 if wal_file.exists():
                     try:
                         wal_file.unlink()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_debug(f"刪除 WAL/SHM 檔案失敗: {e}")
             
             # 刪除舊資料庫重新建立
             if db_path.exists():
                 try:
                     db_path.unlink()
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_debug(f"刪除舊資料庫檔案失敗: {e}")
             
             # 建立新引擎並直接寫入
             tmp_engine = CacheSearchEngine(str(db_path))

@@ -145,7 +145,8 @@ def translate_md_pending(
     for jp in json_files:
         try:
             _, items = load_pending_doc(jp)
-        except Exception:
+        except Exception as e:
+            log_warning(f"[MD-LM] 載入待翻譯文件失敗: {jp} ({e})")
             continue
 
         for it in items:
@@ -185,6 +186,7 @@ def translate_md_pending(
 
     all_unique_items: List[Dict[str, Any]] = []
     already_zh_skipped = 0
+    skip_skipped = 0  # 新增：統計因 skip_reason 跳過的項目
 
     for h, src in hash_to_src.items():
         if is_already_zh(src):
@@ -192,9 +194,23 @@ def translate_md_pending(
             continue
 
         shielded = shield_text(src)
-        translate_text = shielded.clean
         if shielded.skip_reason is not None:
-            translate_text = src
+            # 不應翻譯（圖片/URL/事件/空白），直接視為 cache hit
+            skip_skipped += 1
+            all_unique_items.append(
+                {
+                    "cache_type": "md",
+                    "file": "md_pending_blocks",
+                    "path": h,
+                    "source_text": src,
+                    "text": src,  # 保持原文
+                    "_shielded": shielded,
+                    "_skip_reason": shielded.skip_reason,
+                }
+            )
+            continue
+
+        translate_text = shielded.clean
 
         all_unique_items.append(
             {
@@ -216,7 +232,8 @@ def translate_md_pending(
     log_info(
         f"✅ [MD-LM][分析] cache hit：{len(cached_items)} | "
         f"需 AI 翻譯：{len(items_to_translate)} | "
-        f"已中文跳過：{already_zh_skipped}"
+        f"已中文跳過：{already_zh_skipped} | "
+        f"skip_reason 跳過：{skip_skipped}"
     )
 
     if dry_run:
@@ -226,6 +243,7 @@ def translate_md_pending(
             "unique_blocks": unique_blocks,
             "duplicate_blocks": dup_blocks,
             "already_zh_skipped": already_zh_skipped,
+            "skip_reason_skipped": skip_skipped,
             "cache_hit": len(cached_items),
             "cache_miss": len(items_to_translate),
         }
@@ -262,6 +280,7 @@ def translate_md_pending(
             "unique_blocks": unique_blocks,
             "duplicate_blocks": dup_blocks,
             "already_zh_skipped": already_zh_skipped,
+            "skip_reason_skipped": skip_skipped,
             "cache_hit": len(cached_items),
             "cache_miss": len(items_to_translate),
         }
@@ -278,8 +297,8 @@ def translate_md_pending(
             if shielded is not None and getattr(shielded, "shields", None):
                 try:
                     dst = unshield_text(dst, shielded.shields)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_warning(f"[MD-LM] unshield 失敗: {e}")
             hash_to_dst[h] = dst
 
     rec = TranslationRecorder()
@@ -300,14 +319,14 @@ def translate_md_pending(
             if shielded is not None and getattr(shielded, "shields", None):
                 try:
                     dst = unshield_text(dst, shielded.shields)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_warning(f"[MD-LM] unshield 失敗: {e}")
             else:
                 try:
                     shielded_src = shield_text(src_text)
                     dst = unshield_text(dst, shielded_src.shields)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_warning(f"[MD-LM] unshield (else branch) 失敗: {e}")
             hash_to_dst[h] = dst
         # 這裡 recorder 的 cache_type 用 md（方便你日後 QC）
         try:
@@ -320,16 +339,16 @@ def translate_md_pending(
                 cache_hit=False,
                 extra={},
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log_warning(f"[MD-LM] 記錄翻譯結果失敗: {e}")
 
     def on_batch_flushed() -> None:
         """刷新批次緩衝區。"""
         try:
             touch.touch("noop")
             touch.flush(_writer)
-        except Exception:
-            pass
+        except Exception as e:
+            log_warning(f"[MD-LM] 批次刷新失敗: {e}")
 
     def _fmt_eta(sec: float) -> str:
         """格式化剩餘時間。"""
@@ -423,6 +442,7 @@ def translate_md_pending(
                 "cache_hit_global": len(cached_items),
                 "cache_miss_global": len(items_to_translate),
                 "already_zh_skipped_global": already_zh_skipped,
+                "skip_reason_skipped_global": skip_skipped,
             }
         )
 
@@ -434,8 +454,8 @@ def translate_md_pending(
     try:
         rec.export_json(out_root / "LM翻譯後" / "translation_map_md.json")
         rec.export_csv(out_root / "LM翻譯後" / "translation_map_md.csv")
-    except Exception:
-        pass
+    except Exception as e:
+        log_warning(f"[MD-LM] 匯出 translation_map 失敗: {e}")
 
     if missing:
         log_warning(f"⚠️ [MD-LM] 有 {missing} 個 item 沒拿到翻譯結果（已保留原文）。")
@@ -443,7 +463,7 @@ def translate_md_pending(
     log_info(
         f"\n✅ [MD-LM] 完成：輸出檔案 {written_files} 個"
         f"\n📊 blocks：總 {total_blocks} | 唯一 {unique_blocks} | 重複 {dup_blocks}"
-        f"\n🧠 cache：hit {len(cached_items)} | miss {len(items_to_translate)} | 已中文跳過 {already_zh_skipped}"
+        f"\n🧠 cache：hit {len(cached_items)} | miss {len(items_to_translate)} | 已中文跳過 {already_zh_skipped} | skip_reason 跳過 {skip_skipped}"
         f"\n📁 out：{(out_root / 'LM翻譯後').as_posix()}"
     )
 
@@ -455,6 +475,7 @@ def translate_md_pending(
         "cache_hit": len(cached_items),
         "cache_miss": len(items_to_translate),
         "already_zh_skipped": already_zh_skipped,
+        "skip_reason_skipped": skip_skipped,
         "missing_hash": missing,
         "avg_batch_sec": avg_batch_sec,
         "out_dir": str(out_root),

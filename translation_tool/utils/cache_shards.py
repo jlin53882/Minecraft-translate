@@ -124,13 +124,19 @@ def _save_entries_to_active_shards(
     force_new_shard: bool = False,
     logger: logging.Logger | None = None,
 ):
-    """把多筆條目分段寫入 active shard，必要時自動切片。"""
+    """把多筆條目分段寫入 active shard，必要時自動切片。
+
+    使用檔案鎖確保讀取-修改-寫入循環的原子性，防止 TOCTOU race。
+    """
     if not entries:
         return
 
+    import msvcrt
+
     active_file = type_dir / active_shard_file
+    lock_file = type_dir / f"{active_shard_file}.lock"
+
     # 先確保 `.active` 指標檔存在，避免下方分支直接讀取時找不到檔案。
-    # 這裡只需要副作用，不使用回傳路徑。
     _get_active_shard_path(
         type_dir=type_dir,
         cache_type=cache_type,
@@ -146,55 +152,79 @@ def _save_entries_to_active_shards(
 
     pending_items = list(entries.items())
     while pending_items:
-        save_path = _get_active_shard_path(
-            type_dir=type_dir,
-            cache_type=cache_type,
-            active_shard_file=active_shard_file,
-        )
-
-        current_data: dict[str, Any] = {}
+        # 建立 lock 檔並取得獨占鎖，防止 TOCTOU race
+        type_dir.mkdir(parents=True, exist_ok=True)
+        lock_fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR)
+        rotated = False
         try:
-            old_data = json.loads(save_path.read_bytes())
-            if isinstance(old_data, dict):
-                current_data = old_data
-        except FileNotFoundError:
-            # 檔案在檢查與讀取之間被刪除，以空白分片續寫
-            current_data = {}
-        except Exception as e:
-            if logger:
-                logger.warning(f"⚠️ 讀取舊分片失敗，將以空白分片續寫: {e}")
+            msvcrt.locking(lock_fd, msvcrt.LK_LOCK, 1)
 
-        if _rotate_shard_if_needed(
-            type_dir=type_dir,
-            cache_type=cache_type,
-            data=current_data,
-            rolling_shard_size=rolling_shard_size,
-            active_shard_file=active_shard_file,
-            logger=logger,
-        ):
-            continue
-
-        capacity = max(0, rolling_shard_size - len(current_data))
-        chunk = pending_items[:capacity]
-
-        for k, v in chunk:
-            current_data[k] = v
-
-        _write_json_atomic(save_path, current_data)
-        if logger:
-            logger.info(
-                f"💾 {cache_type} saved: {save_path.name} (+{len(chunk)} / total={len(current_data)})"
-            )
-
-        pending_items = pending_items[capacity:]
-        if pending_items:
-            # 若目前分片已滿，先預轉到下一片，讓下次迴圈可直接續寫。
-            # 此處只依賴副作用，刻意忽略布林回傳值。
-            _ = _rotate_shard_if_needed(
+            # 在鎖保護下讀取 active shard path（避免 TOCTOU）
+            save_path = _get_active_shard_path(
                 type_dir=type_dir,
                 cache_type=cache_type,
-                data=current_data,
-                rolling_shard_size=rolling_shard_size,
                 active_shard_file=active_shard_file,
-                logger=logger,
             )
+
+            current_data: dict[str, Any] = {}
+            try:
+                old_data = json.loads(save_path.read_bytes())
+                if isinstance(old_data, dict):
+                    current_data = old_data
+            except FileNotFoundError:
+                current_data = {}
+            except Exception as e:
+                if logger:
+                    logger.warning(f"⚠️ 讀取舊分片失敗，將以空白分片續寫: {e}")
+
+            # 在鎖保護下檢查是否需要旋轉
+            if len(current_data) >= rolling_shard_size:
+                # 需要旋轉：釋放當前鎖，讓旋轉邏輯取得鎖
+                msvcrt.locking(lock_fd, msvcrt.LK_UNLCK, 1)
+                os.close(lock_fd)
+                lock_fd = -1
+
+                _rotate_shard_if_needed(
+                    type_dir=type_dir,
+                    cache_type=cache_type,
+                    data=current_data,
+                    rolling_shard_size=rolling_shard_size,
+                    active_shard_file=active_shard_file,
+                    logger=logger,
+                )
+                rotated = True
+                continue  # 重新取得路徑和資料
+
+        finally:
+            if lock_fd != -1:
+                try:
+                    msvcrt.locking(lock_fd, msvcrt.LK_UNLCK, 1)
+                except Exception:
+                    pass
+                os.close(lock_fd)
+
+        if not rotated:
+            capacity = max(0, rolling_shard_size - len(current_data))
+            chunk = pending_items[:capacity]
+
+            for k, v in chunk:
+                current_data[k] = v
+
+            _write_json_atomic(save_path, current_data)
+            if logger:
+                logger.info(
+                    f"💾 {cache_type} saved: {save_path.name} (+{len(chunk)} / total={len(current_data)})"
+                )
+
+            pending_items = pending_items[capacity:]
+
+            if pending_items:
+                # 若目前分片已滿，預旋轉到下一片
+                _rotate_shard_if_needed(
+                    type_dir=type_dir,
+                    cache_type=cache_type,
+                    data=current_data,
+                    rolling_shard_size=rolling_shard_size,
+                    active_shard_file=active_shard_file,
+                    logger=logger,
+                )

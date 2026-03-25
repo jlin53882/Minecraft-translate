@@ -94,8 +94,8 @@ def translate_items_with_cache_loop(
             else:
                 eta_sec = 0.0
             on_progress(progress, msg, eta_sec)
-        except Exception:
-            pass
+        except Exception as e:
+            log_info(f"[SharedLM] 進度回報失敗: {e}")
 
     emit_progress("🚀 [SharedLM] 準備開始翻譯工作...")
 
@@ -146,28 +146,28 @@ def translate_items_with_cache_loop(
             if on_translated_item is not None:
                 try:
                     on_translated_item(it)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_info(f"[SharedLM] 處理翻譯結果失敗: {e}")
 
             rule = cache_rules.get(ctype) or CacheRule("path|source_text")
             cache_key = rule.make_key({"path": pth, "source_text": src})
             try:
                 add_to_cache(ctype, cache_key, src, txt)
-            except Exception:
-                pass
+            except Exception as e:
+                log_info(f"[SharedLM] 新增快取失敗: {e}")
 
         remaining = remaining[actual_processed_in_this_batch:]
 
         try:
             save_translation_cache(cache_type, write_new_shard=write_new_cache)
-        except Exception:
-            pass
+        except Exception as e:
+            log_info(f"[SharedLM] 儲存快取失敗: {e}")
 
         if on_batch_flushed is not None:
             try:
                 on_batch_flushed()
-            except Exception:
-                pass
+            except Exception as e:
+                log_info(f"[SharedLM] 批次刷新回調失敗: {e}")
 
         emit_progress(
             f"✅ 批次完成 ({cache_type}) | 成功: {actual_processed_in_this_batch} | 總進度: {processed}/{total}"

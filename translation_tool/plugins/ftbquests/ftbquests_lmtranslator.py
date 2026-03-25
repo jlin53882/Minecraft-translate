@@ -177,8 +177,8 @@ def translate_ftb_pending_to_zh_tw(
         if session is not None and hasattr(session, "set_progress"):
             try:
                 session.set_progress(v)
-            except Exception:
-                pass
+            except Exception as e:
+                log_info(f"[FTB-LM] 進度設定失敗: {e}")
 
     # rename langs 預設沿用你 CLI 的清單（但 pending 通常只有 en_us，不太會用到）
     if rename_langs is None:
@@ -224,7 +224,8 @@ def translate_ftb_pending_to_zh_tw(
             mapping = read_json_dict(src)
             c = count_translatable_keys(mapping)
             return src, int(c)
-        except Exception:
+        except Exception as e:
+            log_info(f"[FTB-LM] 讀取 JSON 失敗 {src}: {e}")
             return src, 0
 
     # max_workers 你可以改成 config 的 parallel_execution_workers
@@ -284,8 +285,8 @@ def translate_ftb_pending_to_zh_tw(
             global_total_hit += len(cached_items)
             global_total_to_translate += len(real_to_translate)
 
-        except Exception:
-            pass
+        except Exception as e:
+            log_info(f"[FTB-LM] 預掃描失敗 {src}: {e}")
 
     log_info(
         f"\n🔎 [FTB-LM][掃描完畢] 發現待處理檔案：{len(json_files)} 個 | 文本總條目：{global_total_keys} 條"
@@ -430,8 +431,8 @@ def translate_ftb_pending_to_zh_tw(
                         cache_hit=True,
                         extra={"dst_file": dst.relative_to(out_dir).as_posix()},
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_info(f"[FTB-LM] 記錄快取命中失敗: {e}")
 
         # 全命中 cache：直接輸出
         if not items_to_translate:
@@ -471,9 +472,9 @@ def translate_ftb_pending_to_zh_tw(
             if isinstance(p, str) and isinstance(t, str):
                 try:
                     shielded_src = shield_text(src_text)
-                    t = unshield_text(t, shielded_src)
-                except Exception:
-                    pass
+                    t = unshield_text(t, shielded_src.shields)
+                except Exception as e:
+                    log_info(f"[FTB-LM] unshield 失敗: {e}")
                 out_map[p] = t
                 try:
                     rec.record(
@@ -485,8 +486,8 @@ def translate_ftb_pending_to_zh_tw(
                         cache_hit=False,
                         extra={"dst_file": dst.relative_to(out_dir).as_posix()},
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_info(f"[FTB-LM] 記錄翻譯結果失敗: {e}")
 
         # ✅ 確保此檔案在翻譯路徑也有 file_id
         file_id = dst.as_posix()
@@ -498,8 +499,8 @@ def translate_ftb_pending_to_zh_tw(
             try:
                 touch.touch(file_id)
                 touch.flush(_writer)  # 最小改動：每批也照樣寫，避免中斷損失
-            except Exception:
-                # fallback
+            except Exception as e:
+                log_info(f"[FTB-LM] 批次刷新失敗，使用 fallback 寫入: {e}")
                 write_json_dict(dst, out_map)
 
         def _fmt_eta(sec: float) -> str:
@@ -612,9 +613,8 @@ def translate_ftb_pending_to_zh_tw(
         rec.export_csv(out_dir / "translation_map.csv")
         log_info(f"✅ [FTB-LM] 已匯出 translation_map.json / .csv 到 {out_dir}")
 
-    except Exception:
-        log_error("⚠️ [FTB-LM] 匯出 translation_map 失敗")
-        pass
+    except Exception as e:
+        log_error(f"⚠️ [FTB-LM] 匯出 translation_map 失敗: {e}")
 
     log_info(f"✅ [任務翻譯完成] 已將 {total_written} 個翻譯檔案輸出至：{out_dir}")
     log_info("📊 提示：您可以在該目錄下查看 translation_map.csv 來核對翻譯條目細節。")
