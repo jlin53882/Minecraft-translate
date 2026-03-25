@@ -18,10 +18,22 @@ def _write_json_atomic(path: Path, data: dict[str, Any]):
     目前此函式沒有具語意的回傳值；
     呼叫端若選擇直接透傳回傳結果，可在未來新增成功/失敗回傳契約時
     免於同步調整外層包裝介面。
+
+    使用 fsync 確保資料寫入磁碟，避免作業系統緩衝區未 flush
+    就執行 os.replace() 導致資料遺失。
     """
+    import msvcrt
+
     tmp_path = path.with_suffix(".tmp")
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 寫入暫存檔
     tmp_path.write_bytes(json.dumps(data, option=json.OPT_INDENT_2))
+
+    # 確保資料寫入磁碟（Windows 使用 FlushFileBuffers）
+    with open(tmp_path, "r+b") as f:
+        os.fsync(f.fileno())
+
     os.replace(tmp_path, path)
 
 def _get_active_shard_path(
@@ -60,26 +72,47 @@ def _rotate_shard_if_needed(
     active_shard_file: str,
     logger: logging.Logger | None = None,
 ) -> bool:
-    """當目前分片容量達上限時切到下一片，並回傳是否有旋轉。"""
+    """當目前分片容量達上限時切到下一片，並回傳是否有旋轉。
+
+    使用檔案鎖確保旋轉操作的原子性，防止 TOCTOU Race Condition。
+    """
     if len(data) < rolling_shard_size:
         return False
 
     active_file = type_dir / active_shard_file
-    if not active_file.exists():
-        _get_active_shard_path(
-            type_dir=type_dir,
-            cache_type=cache_type,
-            active_shard_file=active_shard_file,
-        )
+    lock_file = type_dir / f"{active_shard_file}.lock"
 
-    cur_id = int((active_file.read_text(encoding="utf-8") or "1").strip())
-    new_id = f"{cur_id + 1:05d}"
-    active_file.write_text(new_id, encoding="utf-8")
+    # 建立 lock 檔並取得獨占鎖，防止 TOCTOU race
+    type_dir.mkdir(parents=True, exist_ok=True)
+    lock_fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR)
+    try:
+        # Windows: 使用 msvcrt.locking() 進行檔案鎖定
+        import msvcrt
+        msvcrt.locking(lock_fd, msvcrt.LK_LOCK, 1)
 
-    if logger:
-        logger.info(f"🔁 {cache_type} rolling shard rotate → {new_id}")
+        # 再次確認容量（防止鎖競爭期間已被其他程序旋轉）
+        if len(data) < rolling_shard_size:
+            return False
 
-    return True
+        if not active_file.exists():
+            _get_active_shard_path(
+                type_dir=type_dir,
+                cache_type=cache_type,
+                active_shard_file=active_shard_file,
+            )
+
+        cur_id = int((active_file.read_text(encoding="utf-8") or "1").strip())
+        new_id = f"{cur_id + 1:05d}"
+        active_file.write_text(new_id, encoding="utf-8")
+
+        if logger:
+            logger.info(f"🔁 {cache_type} rolling shard rotate → {new_id}")
+
+        return True
+    finally:
+        import msvcrt
+        msvcrt.locking(lock_fd, msvcrt.LK_UNLCK, 1)
+        os.close(lock_fd)
 
 def _save_entries_to_active_shards(
     *,
@@ -120,14 +153,16 @@ def _save_entries_to_active_shards(
         )
 
         current_data: dict[str, Any] = {}
-        if save_path.exists():
-            try:
-                old_data = json.loads(save_path.read_bytes())
-                if isinstance(old_data, dict):
-                    current_data = old_data
-            except Exception as e:
-                if logger:
-                    logger.warning(f"⚠️ 讀取舊分片失敗，將以空白分片續寫: {e}")
+        try:
+            old_data = json.loads(save_path.read_bytes())
+            if isinstance(old_data, dict):
+                current_data = old_data
+        except FileNotFoundError:
+            # 檔案在檢查與讀取之間被刪除，以空白分片續寫
+            current_data = {}
+        except Exception as e:
+            if logger:
+                logger.warning(f"⚠️ 讀取舊分片失敗，將以空白分片續寫: {e}")
 
         if _rotate_shard_if_needed(
             type_dir=type_dir,
