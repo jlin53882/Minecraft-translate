@@ -80,14 +80,15 @@ def _load_cache_type(cache_type: str):
 def initialize_translation_cache():
     """初始化翻譯快取系統。"""
     state = _state()
-    if state.initialized:
-        return
-    try:
-        for cache_type in CACHE_TYPES:
-            _load_cache_type(cache_type)
-        state.initialized = True
-    except Exception as e:
-        log.error(f"快取系統初始化失敗: {e}", exc_info=True)
+    with state.cache_lock:
+        if state.initialized:
+            return
+        try:
+            for cache_type in CACHE_TYPES:
+                _load_cache_type(cache_type)
+            state.initialized = True
+        except Exception as e:
+            log.error(f"快取系統初始化失敗: {e}", exc_info=True)
 
 def is_cache_initialized() -> bool:
     """檢查快取是否已初始化。"""

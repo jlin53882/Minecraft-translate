@@ -255,19 +255,22 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
     # 模型溫度
     MODEL_TEMP = load_config().get("lm_translator", {}).get("temperature", 0.2)
 
-    # 使用提示詞 手冊
-    PATCHOUI_SYSTEM_PROMPT = (
+    # 使用提示詞 手冊（確保為字串）
+    _patchouli_raw = (
         load_config()
         .get("lm_translator", {})
-        .get("patchouli_system_prompt", {"你是專業的 Minecraft Patchouli 手冊翻譯員"})
+        .get("patchouli_system_prompt", "你是專業的 Minecraft Patchouli 手冊翻譯員")
     )
+    PATCHOULI_SYSTEM_PROMPT = _patchouli_raw if isinstance(_patchouli_raw, str) else str(_patchouli_raw)
 
-    # 使用提示詞 lang
-    LANG_SYSTEM_PROMPT = (
+    # 使用提示詞 lang（確保為字串）
+    _lang_raw = (
         load_config()
         .get("lm_translator", {})
-        .get("lang_system_prompt", {"你正在翻譯 Minecraft 語言檔案（JSON格式）。"})
+        .get("lang_system_prompt", "你正在翻譯 Minecraft 語言檔案（JSON格式）。")
     )
+    LANG_SYSTEM_PROMPT = _lang_raw if isinstance(_lang_raw, str) else str(_lang_raw)
+
 
     pinned_model_index = None  # None = 正常模式，非 None = 鎖定指定模型
     # 進入動態 Batch 迴圈

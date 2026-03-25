@@ -24,10 +24,12 @@ def call_gemini_requests(
     url = (
         "https://generativelanguage.googleapis.com/"
         f"v1beta/models/{model_name}:generateContent"
-        f"?key={api_key}"
     )
 
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
 
     data = {
         "systemInstruction": {"parts": [{"text": system_prompt}]},
