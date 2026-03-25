@@ -84,8 +84,6 @@ def map_lang_in_rel_path(
     return "/".join(parts)
 
 # ======== 語言資料夾段落映射：允許 en_us -> zh_tw，也允許來源是 zh_tw ========
-RE_LANG_SEG = re.compile(r"^(_?)([a-z]{2}_[a-z]{2})$", re.IGNORECASE)
-
 def map_lang_in_rel_path_allow_zh(
     rel_path: str, src_lang: str = "en_us", dst_lang: str = "zh_tw"
 ) -> tuple[str, str]:
