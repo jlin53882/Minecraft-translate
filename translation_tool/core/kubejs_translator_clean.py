@@ -271,14 +271,14 @@ def clean_kubejs_from_raw_impl(
                         reverse_index[en_text] = (translated or untranslated)[0]
 
                     # 過濾 pending_en：跳過那些「英文文字已存在於 final」的 key
+                    # 修復 cross-namespace bug：原本 `k != reverse_index[v]` 比較不同命名空間
+                    # 的 key（raw/pending 的 k vs final/zh_tw 的 key），直接比對 key 幾乎
+                    # 不會成立，導致去重形同虛設。正確邏輯：若同一個翻譯結果 v 已出現在
+                    # final（即 v in reverse_index），就視為已處理，直接跳過不送 pending。
                     pending_en = {
                         k: v
                         for k, v in pending_en.items()
-                        if not (
-                            is_filled_text_impl(v)
-                            and v in reverse_index
-                            and k != reverse_index[v]
-                        )
+                        if not (is_filled_text_impl(v) and v in reverse_index)
                     }
             # ── 雙軌去重 end ───────────────────────────────────────────────
 
