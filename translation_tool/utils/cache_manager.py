@@ -157,15 +157,15 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
         data_to_save = cache_store.flush_session_entries(
             state.session_new_entries, cache_type
         )
-        cache_store.clear_dirty(state.is_dirty, cache_type)
-
     try:
         save_path = state.cache_file_path.get(cache_type)
         if not save_path:
+            cache_store.clear_dirty(state.is_dirty, cache_type)
             return
         _save_entries_to_active_shards(
             cache_type, data_to_save, force_new_shard=write_new_shard
         )
+        cache_store.clear_dirty(state.is_dirty, cache_type)
     except Exception as e:
         log.error(f"❌ 儲存 {cache_type} 失敗: {e}", exc_info=True)
 
