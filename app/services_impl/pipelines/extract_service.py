@@ -53,6 +53,7 @@ def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
         logger.error(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
         session.set_error()
+        GLOBAL_LOG_LIMITER.flush()
     finally:
         # ⭐ 避免 handler 留著舊 session
         UI_LOG_HANDLER.set_session(None)
@@ -89,6 +90,7 @@ def run_book_extraction_service(mods_dir: str, output_dir: str, session):
         logger.error(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
         session.set_error()
+        GLOBAL_LOG_LIMITER.flush()
 
     finally:
         # ⭐ 避免 handler 留著舊 session
