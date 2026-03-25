@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import cache_shards, cache_store
 from .cache_loader import load_cache_type
@@ -39,6 +39,7 @@ __all__ = [
     "reload_translation_cache_type",
     "save_translation_cache",
     "add_to_cache",
+    "add_to_cache_batch",
     "get_from_cache",
     "get_cache_entry",
     "get_cache_dict_ref",
@@ -94,10 +95,23 @@ def is_cache_initialized() -> bool:
 
 def reload_translation_cache():
     """重新載入翻譯快取。"""
-    state = cache_store.reset_runtime_state(CACHE_TYPES)
+    state = cache_store.get_runtime_state()
     with state.cache_lock:
-        pass
-    initialize_translation_cache()
+        cache_store.reset_runtime_state(CACHE_TYPES)
+        # re-fetch state after reset (reset_runtime_state modifies the global)
+        state = cache_store.get_runtime_state()
+        # 重新載入所有快取型別
+        translation_config = load_config().get("translator", {})
+        for cache_type in CACHE_TYPES:
+            load_cache_type(
+                cache_type,
+                translation_cache=state.translation_cache,
+                cache_file_path=state.cache_file_path,
+                cache_root=_get_cache_root(),
+                parallel_workers=translation_config.get("parallel_execution_workers", 4),
+                logger=log,
+            )
+        state.initialized = True
 
 def reload_translation_cache_type(cache_type: str):
     """重新載入指定類型的翻譯快取。"""
@@ -192,6 +206,50 @@ def add_to_cache(
             )
             session_entries[key] = entry
             cache_store.mark_dirty(state.is_dirty, cache_type)
+
+
+def add_to_cache_batch(
+    cache_type: str,
+    entries: List[Tuple[str, str, str]],
+    *,
+    mods: Optional[List[Optional[str]]] = None,
+    paths: Optional[List[Optional[str]]] = None,
+):
+    """批次新增翻譯到快取（單次鎖獲取，減少鎖競爭）。
+    
+    Args:
+        cache_type: 快取類型 (lang, patchouli, ftbquests, kubejs, md)
+        entries: List of (key, src, dst) tuples
+        mods: Optional list of mod names (same length as entries)
+        paths: Optional list of paths (same length as entries)
+    """
+    if not entries:
+        return
+
+    state = _state()
+    with state.cache_lock:
+        cache = cache_store.get_cache_type_dict(state.translation_cache, cache_type)
+        session_entries = cache_store.get_session_entries(
+            state.session_new_entries, cache_type
+        )
+        dirty = False
+
+        for i, (key, src, dst) in enumerate(entries):
+            if not key or not dst:
+                continue
+            entry = {"src": src, "dst": dst}
+            if mods and i < len(mods) and mods[i]:
+                entry["mod"] = mods[i]
+            if paths and i < len(paths) and paths[i]:
+                entry["path"] = paths[i]
+            changed = cache_store.add_entry(cache, key, entry)
+            if changed:
+                session_entries[key] = entry
+                dirty = True
+
+        if dirty:
+            cache_store.mark_dirty(state.is_dirty, cache_type)
+
 
 def get_from_cache(cache_type: str, key: str) -> Optional[str]:
     """從快取取得指定 key 的翻譯文字 (dst)。"""
