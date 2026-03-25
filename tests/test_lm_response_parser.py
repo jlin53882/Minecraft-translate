@@ -112,6 +112,82 @@ class TestChunked:
         assert result == [[{"a": 1}, {"b": 2}], [{"c": 3}]]
 
 
+class TestSafeJsonLoadsNonGreedy:
+    r"""測試 safe_json_loads 的 non-greedy regex 行為（Issue #12 修復）。
+
+    驗證重點：non-greedy regex 不會吃太多內容（trailing text），
+    能正確解析多重 JSON 區塊。
+
+    non-greedy `\{[\s\S]*?\}` 匹配規則：
+    - 從左到右找到第一個完整 {...} 就停止
+    - 不會 greedily 吃到 trailing text
+    - 若有多個巢狀 JSON，外層會被完整匹配（因為需要找配對的 }）
+    """
+
+    def test_json_with_trailing_text_non_greedy(self):
+        """測試 JSON 後有 trailing text 時，non-greedy 不會吃額外內容。
+
+        Issue #12 核心修復：greedy regex 吃到 "} extra text"，
+        導致 json.loads() 失敗。non-greedy 只匹配到第一個完整 {}。
+        """
+        text = '{"items": [{"id": "0", "value": "你好"}]} extra text after'
+        result = safe_json_loads(text)
+        assert result == {"items": [{"id": "0", "value": "你好"}]}
+
+    def test_json_surrounded_by_text_non_greedy(self):
+        """測試 JSON 被文字環繞時，non-greedy 只取第一個 JSON 區塊。"""
+        text = 'Some prefix {"key": "value"} some suffix'
+        result = safe_json_loads(text)
+        assert result == {"key": "value"}
+
+    def test_multiple_json_blocks_takes_first(self):
+        """測試有多個 JSON 區塊時，取第一個（而非 greedy 吃到底）。"""
+        text = '{"first": 1} and then {"second": 2}'
+        result = safe_json_loads(text)
+        assert result == {"first": 1}
+
+    def test_json_inside_code_fence_with_trailing_text(self):
+        """測試 Markdown code fence 中有多餘文字時，仍正確解析。"""
+        text = '```json\n{"key": "value"}\n```\nHere is some extra text'
+        result = safe_json_loads(text)
+        assert result == {"key": "value"}
+
+    def test_code_block_with_multiple_json_blocks(self):
+        """測試 code block 內有多個 JSON 區塊時，取第一個完整 JSON。
+
+        re.findall 返回所有匹配，迭代時第一個可解析的成功。
+        """
+        text = '```\n{"items": [{"a": 1}]}\n{"extra": "data"}\n```'
+        result = safe_json_loads(text)
+        # non-greedy 第一個完整 match 是 {"items": [{"a": 1}]}
+        assert result == {"items": [{"a": 1}]}
+
+    def test_deeply_nested_json_non_greedy(self):
+        """測試深度巢狀 JSON 能正確解析。
+
+        non-greedy `\{[\s\S]*?\}` 匹配時，regex engine 會擴展 `[\s\S]*?`
+        直到找到一組平衡的 {...}。因此第一個完整 match 是外層物件，
+        而非 inner（inner 雖然是完整 JSON，但需要更多 expansion 才能被確認）。
+        """
+        text = '{"outer": {"inner": {"deep": "value"}, "other": "skip"}} extra'
+        result = safe_json_loads(text)
+        # non-greedy 第一個完整 match 是外層物件（regex 擴展到所有內層都關閉）
+        assert result == {"outer": {"inner": {"deep": "value"}, "other": "skip"}}
+
+    def test_realistic_gemini_response(self):
+        """測試模擬真實 Gemini 回應（含多餘內容）。"""
+        text = '```json\n{"items": [{"id": "0", "value": "翻譯結果"}]}\n```\n我認為這個翻譯是正確的。'
+        result = safe_json_loads(text)
+        assert result == {"items": [{"id": "0", "value": "翻譯結果"}]}
+
+    def test_brace_balanced_nested_object(self):
+        """測試 brace-balanced 巢狀物件（最典型翻譯回應格式）。"""
+        # 這是最常見的 Gemini 回應格式：完整 JSON 物件
+        text = '{"items": [{"id": "0", "translations": {"zh_tw": "你好"}}]}'
+        result = safe_json_loads(text)
+        assert result == {"items": [{"id": "0", "translations": {"zh_tw": "你好"}}]}
+
+
 class TestModuleExports:
     """測試模組導出。"""
 

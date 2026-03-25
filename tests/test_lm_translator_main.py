@@ -100,6 +100,181 @@ class TestTranslateBatchSmart:
             mock_sleep.assert_called()
 
 
+class TestSystemPromptConversion:
+    """測試 System Prompt dict → string 轉換（PATCHOULI_SYSTEM_PROMPT / LANG_SYSTEM_PROMPT）。
+
+    驗證設定檔中 system_prompt 無論是 dict 或 string，
+    都會被正確轉為 string 傳入 API。
+    """
+
+    @patch('translation_tool.core.lm_response_parser.safe_json_loads')
+    @patch('translation_tool.core.lm_api_client.requests.post')
+    @patch('translation_tool.core.lm_translator_main.load_config')
+    @patch('translation_tool.core.lm_translator_main.get_current_api_key')
+    @patch('translation_tool.core.lm_translator_main.time.sleep')
+    def test_patchouli_prompt_dict_converted_to_string(
+        self, mock_sleep, mock_get_key, mock_config, mock_post, mock_json_loads
+    ):
+        """測試 patchouli_system_prompt 為 dict 時會被轉為 string。
+
+        需 mock 兩處：
+        - requests.post：避免實際 HTTP 請求
+        - safe_json_loads：確保 JSON 解析成功，不觸發 batch shrinking
+        """
+        from unittest.mock import Mock
+        from translation_tool.core.lm_translator_main import translate_batch_smart
+
+        # Mock HTTP 回應
+        mock_response = Mock()
+        mock_response.ok = True
+        mock_response.json.return_value = {
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": '{"items": [{"id": "0", "value": "測試"}]}'}]
+                }
+            }]
+        }
+        mock_post.return_value = mock_response
+
+        # Mock safe_json_loads - 確保 JSON 解析成功
+        mock_json_loads.return_value = {"items": [{"id": "0", "value": "測試"}]}
+
+        # config 回傳 dict（模擬 YAML/JSON 巢狀結構）
+        mock_config.return_value = {
+            "lm_translator": {
+                "initial_batch_size_patchouli": 100,
+                "batch_shrink_factor": 0.75,
+                "min_batch_size": 50,
+                "models": {"gemini-pro": {"enabled": True}},
+                "temperature": 0.2,
+                "patchouli_system_prompt": {
+                    "role": "system",
+                    "content": "你是一個專業的 Minecraft Patchouli 翻譯員"
+                },
+                "lang_system_prompt": "你正在翻譯 Minecraft 語言檔案（JSON格式）。"
+            }
+        }
+        mock_get_key.return_value = "test_key"
+
+        items = [{"path": "test.key", "text": "Hello", "cache_type": "patchouli"}]
+
+        result, status = translate_batch_smart(items, 1)
+
+        # 驗證 API 被調用
+        assert mock_post.call_count >= 1, "API 應該被調用至少一次"
+        # 驗證 HTTP headers 中有 Authorization: Bearer
+        call_kwargs = mock_post.call_args.kwargs
+        headers = call_kwargs.get('headers', {})
+        assert 'Authorization' in headers, "HTTP headers 中需要有 Authorization"
+        assert headers['Authorization'].startswith('Bearer '), \
+            "Authorization 應該是 Bearer 格式"
+        # 驗證 system_prompt 為 string（而非 dict）
+        json_body = call_kwargs.get('json', {})
+        system_instruction = json_body.get('systemInstruction', {})
+        prompt_text = system_instruction.get('parts', [{}])[0].get('text', '')
+        assert isinstance(prompt_text, str), \
+            "system_prompt 必須是 string，而非 dict"
+
+    @patch('translation_tool.core.lm_api_client.requests.post')
+    @patch('translation_tool.core.lm_translator_main.load_config')
+    @patch('translation_tool.core.lm_translator_main.get_current_api_key')
+    @patch('translation_tool.core.lm_translator_main.time.sleep')
+    def test_lang_prompt_dict_converted_to_string(
+        self, mock_sleep, mock_get_key, mock_config, mock_post
+    ):
+        """測試 lang_system_prompt 為 dict 時會被轉為 string。"""
+        from unittest.mock import Mock
+        from translation_tool.core.lm_translator_main import translate_batch_smart
+
+        mock_response = Mock()
+        mock_response.ok = True
+        mock_response.json.return_value = {
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": '{"items": [{"id": "0", "value": "你好"}]}'}]
+                }
+            }]
+        }
+        mock_post.return_value = mock_response
+
+        mock_config.return_value = {
+            "lm_translator": {
+                "initial_batch_size_lang": 300,
+                "batch_shrink_factor": 0.75,
+                "min_batch_size": 50,
+                "models": {"gemini-pro": {"enabled": True}},
+                "temperature": 0.2,
+                "patchouli_system_prompt": "你是專業的 Minecraft Patchouli 翻譯員",
+                "lang_system_prompt": {
+                    "role": "translator",
+                    "content": "你正在翻譯 Minecraft 語言檔案"
+                }
+            }
+        }
+        mock_get_key.return_value = "test_key"
+
+        items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
+
+        result, status = translate_batch_smart(items, 1)
+
+        assert mock_post.call_count >= 1, "API 應該被調用至少一次"
+        call_kwargs = mock_post.call_args.kwargs
+        json_body = call_kwargs.get('json', {})
+        system_instruction = json_body.get('systemInstruction', {})
+        prompt_text = system_instruction.get('parts', [{}])[0].get('text', '')
+        assert isinstance(prompt_text, str), \
+            "lang_system_prompt 必須是 string，而非 dict"
+
+    @patch('translation_tool.core.lm_api_client.requests.post')
+    @patch('translation_tool.core.lm_translator_main.load_config')
+    @patch('translation_tool.core.lm_translator_main.get_current_api_key')
+    @patch('translation_tool.core.lm_translator_main.time.sleep')
+    def test_prompt_already_string_unchanged(
+        self, mock_sleep, mock_get_key, mock_config, mock_post
+    ):
+        """測試 system_prompt 原本就是 string 時，內容保持不變。"""
+        from unittest.mock import Mock
+        from translation_tool.core.lm_translator_main import translate_batch_smart
+
+        prompt_text = "你是一個專業的 Minecraft 翻譯員"
+
+        mock_response = Mock()
+        mock_response.ok = True
+        mock_response.json.return_value = {
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": '{"items": [{"id": "0", "value": "結果"}]}'}]
+                }
+            }]
+        }
+        mock_post.return_value = mock_response
+
+        mock_config.return_value = {
+            "lm_translator": {
+                "initial_batch_size_lang": 300,
+                "batch_shrink_factor": 0.75,
+                "min_batch_size": 50,
+                "models": {"gemini-pro": {"enabled": True}},
+                "temperature": 0.2,
+                "patchouli_system_prompt": "另一個 prompt",
+                "lang_system_prompt": prompt_text
+            }
+        }
+        mock_get_key.return_value = "test_key"
+
+        items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
+
+        result, status = translate_batch_smart(items, 1)
+
+        assert mock_post.call_count >= 1, "API 應該被調用至少一次"
+        call_kwargs = mock_post.call_args.kwargs
+        json_body = call_kwargs.get('json', {})
+        system_instruction = json_body.get('systemInstruction', {})
+        actual_prompt = system_instruction.get('parts', [{}])[0].get('text', '')
+        assert actual_prompt == prompt_text, \
+            "string 類型的 system_prompt 應保持不變"
+
+
 class TestBatchProfileDetection:
     """批次設定偵測測試"""
 

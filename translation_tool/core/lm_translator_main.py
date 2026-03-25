@@ -261,7 +261,13 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
         .get("lm_translator", {})
         .get("patchouli_system_prompt", "你是專業的 Minecraft Patchouli 手冊翻譯員")
     )
-    PATCHOULI_SYSTEM_PROMPT = _patchouli_raw if isinstance(_patchouli_raw, str) else str(_patchouli_raw)
+    if isinstance(_patchouli_raw, str):
+        PATCHOULI_SYSTEM_PROMPT = _patchouli_raw
+    elif isinstance(_patchouli_raw, dict):
+        # 支援 {"content": "..."} 或 {"text": "..."} 格式的 dict
+        PATCHOULI_SYSTEM_PROMPT = _patchouli_raw.get("content") or _patchouli_raw.get("text") or str(_patchouli_raw)
+    else:
+        PATCHOULI_SYSTEM_PROMPT = str(_patchouli_raw)
 
     # 使用提示詞 lang（確保為字串）
     _lang_raw = (
@@ -269,7 +275,12 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
         .get("lm_translator", {})
         .get("lang_system_prompt", "你正在翻譯 Minecraft 語言檔案（JSON格式）。")
     )
-    LANG_SYSTEM_PROMPT = _lang_raw if isinstance(_lang_raw, str) else str(_lang_raw)
+    if isinstance(_lang_raw, str):
+        LANG_SYSTEM_PROMPT = _lang_raw
+    elif isinstance(_lang_raw, dict):
+        LANG_SYSTEM_PROMPT = _lang_raw.get("content") or _lang_raw.get("text") or str(_lang_raw)
+    else:
+        LANG_SYSTEM_PROMPT = str(_lang_raw)
 
 
     pinned_model_index = None  # None = 正常模式，非 None = 鎖定指定模型
