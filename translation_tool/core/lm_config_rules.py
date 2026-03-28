@@ -12,7 +12,6 @@ from ..utils.config_manager import load_config
 from ..utils.log_unit import log_info, log_error, log_debug
 
 
-
 # =========================
 # 1. 執行緒安全的 API Key 索引追蹤器
 # =========================
@@ -21,7 +20,7 @@ from ..utils.log_unit import log_info, log_error, log_debug
 class KeyIndexTracker:
     """
     執行緒安全的 API Key 索引追蹤器。
-    
+
     用於解決多執行緒環境下全域變數 _current_key_index 的 race condition 問題。
     透過 threading.Lock 確保並發存取的安全性。
     """
@@ -83,6 +82,7 @@ def reset_key_index() -> None:
 # 2. 提示詞與配置
 # =========================
 
+
 def _get_all_keys() -> list[str]:
     """
     私有輔助函式：統一代理從設定檔讀取並清理金鑰列表。
@@ -93,6 +93,7 @@ def _get_all_keys() -> list[str]:
         for key in config.get("lm_translator", {}).get("keys", [])
         if isinstance(key, str) and key.strip()
     ]
+
 
 def get_current_api_key() -> str:
     """
@@ -124,6 +125,7 @@ def get_current_api_key() -> str:
         if len(keys) > 0:
             _key_tracker._index = _key_tracker._index % len(keys)
         return key
+
 
 def rotate_api_key():
     """
@@ -168,6 +170,7 @@ def rotate_api_key():
     log_info(f"🔁 切換 API Key → index {new_index}")
     return True
 
+
 def validate_api_keys():
     """
     驗證 API 金鑰格式。
@@ -204,6 +207,7 @@ def validate_api_keys():
 
     log_info(f"✅ 金鑰格式驗證通過，共載入 {len(keys)} 組金鑰。")
 
+
 def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
     """驗證 API Key 格式（UI 專用）。
 
@@ -212,9 +216,7 @@ def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
     """
     for k in keys:
         if not k:
-            raise RuntimeError(
-                f"❌ API Key 不得為空，請輸入有效的 Gemini API Key。"
-            )
+            raise RuntimeError("❌ API Key 不得為空，請輸入有效的 Gemini API Key。")
         if not k.startswith("AIza"):
             raise RuntimeError(
                 f"❌ 無效的 API Key 格式：{k!r}\n"
@@ -231,6 +233,7 @@ def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
                 f"❌ API Key 包含無效字元：{k!r}\n"
                 "僅允許 'AIza' 開頭後接英文字母、數字、 dash(-) 或 underscore(_)。"
             )
+
 
 # =========================
 # 2. Regex 規則定義
@@ -266,10 +269,9 @@ TOKEN_PATTERN = re.compile(r"\$\([^)]+\)")
 # 需要跳過翻譯的文字（你指定的類型）
 HASH_PREFIX_PATTERN = re.compile(r"^\s*#")  # 任何 # 開頭（含前置空白）
 
-def needs_translation_text(s: str) -> bool:
-    """
 
-    """
+def needs_translation_text(s: str) -> bool:
+    """ """
     if not s or not isinstance(s, str):
         return False
 
@@ -287,6 +289,7 @@ def needs_translation_text(s: str) -> bool:
 
     # 還有英文 → 需要翻
     return True
+
 
 def value_fully_translated(value) -> bool:
     """
@@ -342,6 +345,7 @@ def value_fully_translated(value) -> bool:
     # 直接視為已完成翻譯
     return True
 
+
 def contains_cjk(s: str) -> bool:
     """
     檢查字串中是否包含 CJK（中 / 日 / 韓）文字。
@@ -376,6 +380,7 @@ def contains_cjk(s: str) -> bool:
             False → 不包含任何 CJK 字元
     """
     return isinstance(s, str) and CJK_RE.search(s) is not None
+
 
 def build_skip_terms_pattern(terms: list[str]) -> re.Pattern:
     """
@@ -426,12 +431,11 @@ def build_skip_terms_pattern(terms: list[str]) -> re.Pattern:
     # 編譯為不區分大小寫的正規表達式
     return re.compile(pattern, re.IGNORECASE)
 
+
 # =========================
 # 值是否值得翻譯（核心判斷）
 def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
-    """
-
-    """
+    """ """
     if not isinstance(value, str):
         return False
 
@@ -490,6 +494,7 @@ def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
         return False
 
     return True
+
 
 # =========================
 # 可翻譯欄位判斷

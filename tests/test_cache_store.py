@@ -1,4 +1,5 @@
 from pathlib import Path
+import threading
 
 from translation_tool.utils import cache_manager, cache_store
 
@@ -12,7 +13,9 @@ def test_cache_store_entry_and_value_crud():
     assert cache_store.get_entry(cache_dict, "k1") == {"src": "s1", "dst": "d1"}
     assert cache_store.get_value(cache_dict, "k1") == "d1"
 
-    changed_again = cache_store.add_entry(cache_dict, "k1", {"src": "s1-new", "dst": "d1"})
+    changed_again = cache_store.add_entry(
+        cache_dict, "k1", {"src": "s1-new", "dst": "d1"}
+    )
     assert changed_again is False
     # contract: dst 相同時不覆寫舊 entry
     assert cache_store.get_entry(cache_dict, "k1") == {"src": "s1", "dst": "d1"}
@@ -55,12 +58,16 @@ def test_manager_add_save_reload_smoke(monkeypatch, tmp_path: Path):
 
     saved = {}
 
-    def _fake_save_entries(_cache_type: str, entries: dict, force_new_shard: bool = False):
+    def _fake_save_entries(
+        _cache_type: str, entries: dict, force_new_shard: bool = False
+    ):
         saved["cache_type"] = _cache_type
         saved["entries"] = entries.copy()
         saved["force_new_shard"] = force_new_shard
 
-    monkeypatch.setattr(cache_manager, "_save_entries_to_active_shards", _fake_save_entries)
+    monkeypatch.setattr(
+        cache_manager, "_save_entries_to_active_shards", _fake_save_entries
+    )
 
     cache_manager.add_to_cache(cache_type, key, "Hello", "哈囉")
     assert cache_manager.get_from_cache(cache_type, key) == "哈囉"
@@ -79,14 +86,15 @@ def test_manager_add_save_reload_smoke(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(cache_manager, "_load_cache_type", _fake_load_cache_type)
     cache_manager.reload_translation_cache_type(cache_type)
 
-    assert cache_manager.get_cache_entry(cache_type, key) == {"src": "Hello", "dst": "哈囉"}
+    assert cache_manager.get_cache_entry(cache_type, key) == {
+        "src": "Hello",
+        "dst": "哈囉",
+    }
 
 
 # =============================================================================
 # 測試 3: add_entry() 執行緒安全保護
 # =============================================================================
-
-import threading
 
 
 def test_add_entry_thread_safety_different_keys():
@@ -180,4 +188,3 @@ def test_add_entry_thread_safety_same_key_race():
     assert isinstance(cache_dict["shared_key"], dict)
     assert "src" in cache_dict["shared_key"]
     assert "dst" in cache_dict["shared_key"]
-

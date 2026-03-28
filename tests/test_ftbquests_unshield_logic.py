@@ -5,6 +5,7 @@
 
 參考：PR #42 (pr/rich-text-shield) — 2026-03-23
 """
+
 from __future__ import annotations
 
 import sys
@@ -13,9 +14,10 @@ from unittest.mock import MagicMock, patch
 
 # 確保可以導入翻譯工具模組
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-from translation_tool.plugins.shared.rich_text_shield import (
+from translation_tool.plugins.shared.rich_text_shield import (  # noqa: E402
     ShieldedText,
     ShieldPiece,
 )
@@ -24,6 +26,7 @@ from translation_tool.plugins.shared.rich_text_shield import (
 # ---------------------------------------------------------------------------
 # 測試：ftbquests_lmtranslator.on_translated_item — unshield 使用 .shields
 # ---------------------------------------------------------------------------
+
 
 def test_ftb_on_translated_item_unshield_uses_shields_list():
     """
@@ -67,14 +70,17 @@ def test_ftb_on_translated_item_unshield_uses_shields_list():
         return text.replace("$C0$", "&c")
 
     # Patch 在 ftbquests_lmtranslator 命名空間中的 unshield_text
-    with patch.object(
-        ftbquests_lmtranslator,
-        "unshield_text",
-        side_effect=mock_unshield_text,
-    ), patch.object(
-        ftbquests_lmtranslator,
-        "shield_text",
-        return_value=fake_shielded,
+    with (
+        patch.object(
+            ftbquests_lmtranslator,
+            "unshield_text",
+            side_effect=mock_unshield_text,
+        ),
+        patch.object(
+            ftbquests_lmtranslator,
+            "shield_text",
+            return_value=fake_shielded,
+        ),
     ):
         # on_translated_item 是翻譯流程中的 nested callback，
         # 無法直接呼叫。我們透過翻譯流程觸發它。
@@ -144,15 +150,19 @@ def test_ftb_on_translated_item_unshield_rejects_whole_shielded_object():
         captured_second_arg_type.append(type(shields_arg).__name__)
         return text  # 不做還原
 
-    with patch.object(
-        ftbquests_lmtranslator,
-        "unshield_text",
-        side_effect=mock_unshield_text,
-    ), patch.object(
-        ftbquests_lmtranslator,
-        "shield_text",
-        return_value=fake_shielded,
+    with (
+        patch.object(
+            ftbquests_lmtranslator,
+            "unshield_text",
+            side_effect=mock_unshield_text,
+        ),
+        patch.object(
+            ftbquests_lmtranslator,
+            "shield_text",
+            return_value=fake_shielded,
+        ),
     ):
+
         def closure_under_test(it: dict):
             from translation_tool.plugins.ftbquests import ftbquests_lmtranslator as m
 
@@ -175,6 +185,7 @@ def test_ftb_on_translated_item_unshield_rejects_whole_shielded_object():
 # ---------------------------------------------------------------------------
 # 測試：md_lmtranslator.on_translated_item — unshield 使用 .shields
 # ---------------------------------------------------------------------------
+
 
 def test_md_on_translated_item_unshield_uses_shields_list():
     """
@@ -280,15 +291,19 @@ def test_md_on_translated_item_else_branch_uses_shields():
         captured_calls.append({"text": text, "shields_arg": shields_arg})
         return text.replace("$C1$", "&a")
 
-    with patch.object(
-        md_lmtranslator,
-        "unshield_text",
-        side_effect=mock_unshield_text,
-    ), patch.object(
-        md_lmtranslator,
-        "shield_text",
-        return_value=fake_shielded,
+    with (
+        patch.object(
+            md_lmtranslator,
+            "unshield_text",
+            side_effect=mock_unshield_text,
+        ),
+        patch.object(
+            md_lmtranslator,
+            "shield_text",
+            return_value=fake_shielded,
+        ),
     ):
+
         def closure_md_on_translated_item(it: dict):
             from translation_tool.plugins.md import md_lmtranslator as m
 

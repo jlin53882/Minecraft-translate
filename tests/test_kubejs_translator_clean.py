@@ -2,10 +2,11 @@
 
 用途：測試 kubejs_translator_clean 中的清理與合併邏輯。
 """
+
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import orjson
 import pytest
@@ -15,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from translation_tool.core.kubejs_translator_clean import (
+from translation_tool.core.kubejs_translator_clean import (  # noqa: E402
     is_filled_text_impl,
     deep_merge_3way_flat_impl,
     prune_en_by_tw_flat_impl,
@@ -115,7 +116,9 @@ class TestDeepMerge3WayFlatImpl:
 
     def test_empty_dicts(self):
         """測試空字典。"""
-        result = deep_merge_3way_flat_impl({}, {}, {}, safe_convert_text_fn=self._safe_convert)
+        result = deep_merge_3way_flat_impl(
+            {}, {}, {}, safe_convert_text_fn=self._safe_convert
+        )
         assert result == {}
 
 
@@ -161,12 +164,10 @@ class TestBuildReverseIndexImpl:
 
         # 類型驗證：每個 value 都應該是 str，不是 list
         for k, v in result.items():
-            assert isinstance(
-                k, str
-            ), f"key 應為 str，實際為 {type(k).__name__}"
-            assert isinstance(
-                v, str
-            ), f"value for key '{k}' 應為 str，實際為 {type(v).__name__}"
+            assert isinstance(k, str), f"key 應為 str，實際為 {type(k).__name__}"
+            assert isinstance(v, str), (
+                f"value for key '{k}' 應為 str，實際為 {type(v).__name__}"
+            )
 
     def test_prefers_translated_key_over_untranslated(self):
         """當多個 key 有相同翻譯值時，應優先選擇「已翻譯」的 key。
@@ -177,7 +178,7 @@ class TestBuildReverseIndexImpl:
         # key_b：翻譯值等於 key 名（未翻譯）
         final_tw_lookup = {
             "apple": "蘋果",  # 已翻譯（值 != key）
-            "蘋果": "蘋果",   # 未翻譯（值 == key）
+            "蘋果": "蘋果",  # 未翻譯（值 == key）
         }
         result = _build_reverse_index_impl(final_tw_lookup)
 
@@ -189,8 +190,8 @@ class TestBuildReverseIndexImpl:
         # 多個 key 都已翻譯（值 != key），取字母序最小
         final_tw_lookup = {
             "zebra": "動物",  # 已翻譯，但字母序較大
-            "ant": "動物",    # 已翻譯，字母序最小
-            "bee": "動物",    # 已翻譯，字母序居中
+            "ant": "動物",  # 已翻譯，字母序最小
+            "bee": "動物",  # 已翻譯，字母序居中
         }
         result = _build_reverse_index_impl(final_tw_lookup)
 
@@ -199,8 +200,8 @@ class TestBuildReverseIndexImpl:
     def test_mixed_translated_and_untranslated_chooses_correct(self):
         """混合場景：已翻譯優先於未翻譯。"""
         final_tw_lookup = {
-            "apple": "蘋果",    # 已翻譯
-            "banana": "香蕉",   # 未翻譯
+            "apple": "蘋果",  # 已翻譯
+            "banana": "香蕉",  # 未翻譯
             "cherry": "櫻桃",  # 已翻譯
         }
         result = _build_reverse_index_impl(final_tw_lookup)
@@ -251,9 +252,9 @@ class TestBuildReverseIndexImpl:
         """非填充文字值（如空字串、空白）不應進入 reverse_index。"""
         final_tw_lookup = {
             "key1": "有效翻譯",
-            "key2": "",          # 空字串，應忽略
-            "key3": "   ",       # 空白，應忽略
-            "key4": "{ref}",     # 語言參考，應忽略
+            "key2": "",  # 空字串，應忽略
+            "key3": "   ",  # 空白，應忽略
+            "key4": "{ref}",  # 語言參考，應忽略
         }
         result = _build_reverse_index_impl(final_tw_lookup)
 
@@ -267,8 +268,8 @@ class TestBuildReverseIndexImpl:
         # "Copper Ingot" vs "copper ingot"：casefold 後相同，視為已翻譯
         # "copper ingot" vs "copper ingot"：完全相同，視為未翻譯
         final_tw_lookup = {
-            "copper_ingot": "Copper Ingot",   # 已翻譯（casefold 不同）
-            "Copper Ingot": "Copper Ingot",    # 未翻譯（casefold 相同）
+            "copper_ingot": "Copper Ingot",  # 已翻譯（casefold 不同）
+            "Copper Ingot": "Copper Ingot",  # 未翻譯（casefold 相同）
         }
         result = _build_reverse_index_impl(final_tw_lookup)
 
@@ -278,8 +279,8 @@ class TestBuildReverseIndexImpl:
     def test_non_ascii_uses_direct_equality(self):
         """非 ASCII 翻譯使用直接相等判斷是否為「已翻譯」。"""
         final_tw_lookup = {
-            "蘋果": "蘋果",      # 未翻譯
-            "apple": "蘋果",    # 已翻譯
+            "蘋果": "蘋果",  # 未翻譯
+            "apple": "蘋果",  # 已翻譯
         }
         result = _build_reverse_index_impl(final_tw_lookup)
 
@@ -301,8 +302,8 @@ class TestDedupPendingEnImpl:
             "mod.item3": "Cherry",
         }
         reverse_index = {
-            "Apple": "final.apple",    # Apple 已在 final 中
-            "Banana": "final.banana", # Banana 已在 final 中
+            "Apple": "final.apple",  # Apple 已在 final 中
+            "Banana": "final.banana",  # Banana 已在 final 中
         }
 
         result = _dedup_pending_en_impl(pending_en, reverse_index)
@@ -321,9 +322,9 @@ class TestDedupPendingEnImpl:
         - 新邏輯：`v in reverse_index` → "Apple" in reverse_index → True → 去重 ✅
         """
         pending_en = {
-            "raw:item_a": "Apple",    # value: Apple
-            "raw:item_b": "Banana",   # value: Banana（不在 reverse_index）
-            "raw:item_c": "Cherry",   # value: Cherry
+            "raw:item_a": "Apple",  # value: Apple
+            "raw:item_b": "Banana",  # value: Banana（不在 reverse_index）
+            "raw:item_c": "Cherry",  # value: Cherry
         }
         reverse_index = {
             # final 中有不同的 key 名，但相同的翻譯值
@@ -340,16 +341,16 @@ class TestDedupPendingEnImpl:
     def test_dedup_non_filled_text_not_removed(self):
         """非填充文字（如空字串、空白、語言參考）不受去重邏輯影響。"""
         pending_en = {
-            "key1": "",          # 空字串，應保留（即使 "" 在 reverse_index）
-            "key2": "   ",       # 空白，應保留
-            "key3": "{ref}",     # 語言參考，應保留
-            "key4": "有效翻譯",   # 有效文字，在 reverse_index 中，應移除
+            "key1": "",  # 空字串，應保留（即使 "" 在 reverse_index）
+            "key2": "   ",  # 空白，應保留
+            "key3": "{ref}",  # 語言參考，應保留
+            "key4": "有效翻譯",  # 有效文字，在 reverse_index 中，應移除
         }
         reverse_index = {
-            "": "some_key",          # reverse_index 中有 ""
-            "   ": "some_key2",      # reverse_index 中有空白
-            "{ref}": "some_key3",    # reverse_index 中有 ref
-            "有效翻譯": "tw_key",     # 有效翻譯
+            "": "some_key",  # reverse_index 中有 ""
+            "   ": "some_key2",  # reverse_index 中有空白
+            "{ref}": "some_key3",  # reverse_index 中有 ref
+            "有效翻譯": "tw_key",  # 有效翻譯
         }
 
         result = _dedup_pending_en_impl(pending_en, reverse_index)
@@ -384,10 +385,7 @@ class TestDedupPendingEnImpl:
             "翻譯B": "final:key2",
         }
 
-        results = [
-            _dedup_pending_en_impl(pending_en, reverse_index)
-            for _ in range(10)
-        ]
+        results = [_dedup_pending_en_impl(pending_en, reverse_index) for _ in range(10)]
 
         expected = {"namespace:item3": "翻譯C"}
         for i, r in enumerate(results):
@@ -424,6 +422,7 @@ class TestCleanKubejsFromRawImpl:
 
     def test_clean_kubejs_from_raw_basic(self, mock_lang_files: Path):
         """測試基本清理功能。"""
+
         def read_json(path: Path) -> dict:
             if not path or not path.is_file():
                 return {}
@@ -487,7 +486,7 @@ class TestCleanKubejsFromRawImpl:
 
         # raw en_us.json：兩個 items
         en_data = {
-            "raw_ns:apple": "Apple",   # 會被 cn 覆蓋
+            "raw_ns:apple": "Apple",  # 會被 cn 覆蓋
             "raw_ns:cherry": "Cherry",  # 無 cn/tw，保留
         }
         (raw_root / "en_us.json").write_bytes(orjson.dumps(en_data))
@@ -531,7 +530,9 @@ class TestCleanKubejsFromRawImpl:
         # 讀取產出的 pending en_us.json
         # rel_group = "assets/test/lang"（相對於 raw_root/kubejs）
         pending_en_file = pending_root_p / "assets" / "test" / "lang" / "en_us.json"
-        assert pending_en_file.exists(), f"pending en_us.json 應存在，實際目錄內容：{list((pending_root_p / 'assets' / 'test' / 'lang').iterdir()) if (pending_root_p / 'assets' / 'test' / 'lang').exists() else '不存在'}"
+        assert pending_en_file.exists(), (
+            f"pending en_us.json 應存在，實際目錄內容：{list((pending_root_p / 'assets' / 'test' / 'lang').iterdir()) if (pending_root_p / 'assets' / 'test' / 'lang').exists() else '不存在'}"
+        )
 
         pending_data = read_json(pending_en_file)
 

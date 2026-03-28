@@ -8,7 +8,7 @@
 
 import threading
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
@@ -18,6 +18,7 @@ from translation_tool.utils import cache_manager, cache_store
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def fresh_state():
@@ -49,6 +50,7 @@ def mock_save_path(tmp_path: Path, fresh_state):
 # 測試 1: initialize_translation_cache() 的 cache_lock 保護
 # =============================================================================
 
+
 def test_initialize_translation_cache_uses_cache_lock(fresh_state):
     """驗證 initialize_translation_cache() 在 cache_lock 保護下執行。
 
@@ -57,24 +59,15 @@ def test_initialize_translation_cache_uses_cache_lock(fresh_state):
     不會造成重複載入。
     """
     call_count = 0
-    lock_enter_order = []
-    lock_exit_order = []
-
-    original_lock_class = type(fresh_state.cache_lock)
-
-    # 追蹤 lock 的進入/離開時間點
-    def _lock_enter():
-        lock_enter_order.append(len(lock_enter_order))
-
-    def _lock_exit():
-        lock_exit_order.append(len(lock_exit_order))
 
     # Patch _load_cache_type 來計數呼叫
     def _load_cache_type_track(cache_type):
         nonlocal call_count
         call_count += 1
 
-    with patch.object(cache_manager, "_load_cache_type", side_effect=_load_cache_type_track):
+    with patch.object(
+        cache_manager, "_load_cache_type", side_effect=_load_cache_type_track
+    ):
         # 模擬兩執行緒同時進入
         def call_init():
             cache_manager.initialize_translation_cache()
@@ -117,6 +110,7 @@ def test_initialize_translation_cache_no_double_load_on_concurrent_calls(fresh_s
 # 測試 2: save_translation_cache() 的 clear_dirty() 時機
 # =============================================================================
 
+
 def test_save_translation_cache_dirty_True_when_save_fails(mock_save_path):
     """驗證 save_translation_cache() 在寫入失敗後 dirty flag 仍為 True。
 
@@ -131,9 +125,7 @@ def test_save_translation_cache_dirty_True_when_save_fails(mock_save_path):
 
     state = cache_store.get_runtime_state()
     state.is_dirty[cache_type] = True
-    state.session_new_entries[cache_type] = {
-        "key1": {"src": "Hello", "dst": "哈囉"}
-    }
+    state.session_new_entries[cache_type] = {"key1": {"src": "Hello", "dst": "哈囉"}}
 
     with patch.object(
         cache_manager,
@@ -155,9 +147,7 @@ def test_save_translation_cache_dirty_cleared_when_save_succeeds(mock_save_path)
 
     state = cache_store.get_runtime_state()
     state.is_dirty[cache_type] = True
-    state.session_new_entries[cache_type] = {
-        "key1": {"src": "Hello", "dst": "哈囉"}
-    }
+    state.session_new_entries[cache_type] = {"key1": {"src": "Hello", "dst": "哈囉"}}
 
     saved_data = {}
 
@@ -186,9 +176,7 @@ def test_save_translation_cache_no_op_when_no_dirty_entries(mock_save_path):
     state.is_dirty[cache_type] = False
     state.session_new_entries[cache_type] = {}
 
-    with patch.object(
-        cache_manager, "_save_entries_to_active_shards"
-    ) as mock_save:
+    with patch.object(cache_manager, "_save_entries_to_active_shards") as mock_save:
         cache_manager.save_translation_cache(cache_type)
 
     # 驗證：無 session 資料時不呼叫儲存

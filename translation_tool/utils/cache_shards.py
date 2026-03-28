@@ -12,6 +12,31 @@ from typing import Any
 
 import orjson as json
 
+
+def _lock_file_fd(lock_fd: int) -> None:
+    """以跨平台方式鎖定 lock file descriptor。"""
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(lock_fd, msvcrt.LK_LOCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+
+def _unlock_file_fd(lock_fd: int) -> None:
+    """以跨平台方式解鎖 lock file descriptor。"""
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(lock_fd, msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+
+
 def _write_json_atomic(path: Path, data: dict[str, Any]):
     """以原子方式將 JSON 內容覆寫到 ``path``。
 
@@ -22,8 +47,6 @@ def _write_json_atomic(path: Path, data: dict[str, Any]):
     使用 fsync 確保資料寫入磁碟，避免作業系統緩衝區未 flush
     就執行 os.replace() 導致資料遺失。
     """
-    import msvcrt
-
     tmp_path = path.with_suffix(".tmp")
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -35,6 +58,7 @@ def _write_json_atomic(path: Path, data: dict[str, Any]):
         os.fsync(f.fileno())
 
     os.replace(tmp_path, path)
+
 
 def _get_active_shard_path(
     *,
@@ -63,6 +87,7 @@ def _get_active_shard_path(
 
     return type_dir / f"{cache_type}_{shard_id_str}.json"
 
+
 def _rotate_shard_if_needed(
     *,
     type_dir: Path,
@@ -86,9 +111,8 @@ def _rotate_shard_if_needed(
     type_dir.mkdir(parents=True, exist_ok=True)
     lock_fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR)
     try:
-        # Windows: 使用 msvcrt.locking() 進行檔案鎖定
-        import msvcrt
-        msvcrt.locking(lock_fd, msvcrt.LK_LOCK, 1)
+        # 以跨平台 file lock 進行檔案鎖定
+        _lock_file_fd(lock_fd)
 
         # 再次確認容量（防止鎖競爭期間已被其他程序旋轉）
         if len(data) < rolling_shard_size:
@@ -110,9 +134,9 @@ def _rotate_shard_if_needed(
 
         return True
     finally:
-        import msvcrt
-        msvcrt.locking(lock_fd, msvcrt.LK_UNLCK, 1)
+        _unlock_file_fd(lock_fd)
         os.close(lock_fd)
+
 
 def _save_entries_to_active_shards(
     *,
@@ -130,8 +154,6 @@ def _save_entries_to_active_shards(
     """
     if not entries:
         return
-
-    import msvcrt
 
     active_file = type_dir / active_shard_file
     lock_file = type_dir / f"{active_shard_file}.lock"
@@ -157,7 +179,7 @@ def _save_entries_to_active_shards(
         lock_fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR)
         rotated = False
         try:
-            msvcrt.locking(lock_fd, msvcrt.LK_LOCK, 1)
+            _lock_file_fd(lock_fd)
 
             # 在鎖保護下讀取 active shard path（避免 TOCTOU）
             save_path = _get_active_shard_path(
@@ -180,7 +202,7 @@ def _save_entries_to_active_shards(
             # 在鎖保護下檢查是否需要旋轉
             if len(current_data) >= rolling_shard_size:
                 # 需要旋轉：釋放當前鎖，讓旋轉邏輯取得鎖
-                msvcrt.locking(lock_fd, msvcrt.LK_UNLCK, 1)
+                _unlock_file_fd(lock_fd)
                 os.close(lock_fd)
                 lock_fd = -1
 
@@ -198,7 +220,7 @@ def _save_entries_to_active_shards(
         finally:
             if lock_fd != -1:
                 try:
-                    msvcrt.locking(lock_fd, msvcrt.LK_UNLCK, 1)
+                    _unlock_file_fd(lock_fd)
                 except Exception:
                     pass
                 os.close(lock_fd)
