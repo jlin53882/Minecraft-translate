@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 # 測試模組
-from translation_tool.plugins.kubejs import kubejs_tooltip_lmtranslator
+from translation_tool.plugins.kubejs import kubejs_tooltip_lmtranslator  # noqa: E402
 
 
 def test_collect_items_from_mapping_basic(tmp_path: Path) -> None:
@@ -40,13 +40,34 @@ def test_collect_items_from_mapping_filters_invalid(tmp_path: Path) -> None:
         123: "Invalid key",
         "empty.value": "",
     }
-    
+
     items = kubejs_tooltip_lmtranslator.collect_items_from_mapping(
         mapping,
         file_hint="output/kubejs/test.json",
     )
-    
+
     assert len(items) == 1
+
+
+def test_collect_items_from_mapping_marks_skip_reason() -> None:
+    """URL / 圖片等 skip_reason 項目應被明確標記。"""
+    mapping = {
+        "tooltip.url": "https://example.com",
+        "tooltip.normal": "Hello &aWorld",
+    }
+
+    items = kubejs_tooltip_lmtranslator.collect_items_from_mapping(
+        mapping,
+        file_hint="output/kubejs/test.json",
+    )
+
+    skip_item = next(it for it in items if it["path"] == "tooltip.url")
+    normal_item = next(it for it in items if it["path"] == "tooltip.normal")
+
+    assert skip_item["_skip_reason"] == "url"
+    assert skip_item["text"] == "https://example.com"
+    assert normal_item.get("_skip_reason") is None
+    assert normal_item["text"] != normal_item["source_text"]
 
 
 def test_count_translatable_keys(tmp_path: Path) -> None:

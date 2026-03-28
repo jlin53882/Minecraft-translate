@@ -85,15 +85,15 @@ def collect_items_from_mapping(
         shielded = shield_text(v)
 
         if shielded.skip_reason is not None:
-            # 不應翻譯（圖片/URL/事件/空白），直接寫入原文不經翻譯管線
+            # 不應翻譯（圖片/URL/事件/空白），直接保留原文並標記 skip。
             items.append(
                 {
                     "file": file_hint,
                     "path": k,
                     "source_text": v,
-                    "text": v,  # 保持原文
+                    "text": v,
                     "cache_type": "kubejs",
-                    "_shielded": shielded,  # 供 unshield 回查（此情境無需還原）
+                    "_shielded": shielded,
                     "_skip_reason": shielded.skip_reason,
                 }
             )
@@ -293,6 +293,12 @@ def translate_kubejs_pending_to_zh_tw(
                 cache_rules=cache_rules,
                 is_valid_hit=_is_valid_hit,
             )
+            skip_items = [it for it in items_to_translate if it.get("_skip_reason")]
+            if skip_items:
+                cached_items.extend(skip_items)
+                items_to_translate = [
+                    it for it in items_to_translate if not it.get("_skip_reason")
+                ]
             # ✅ 跳過值已經是繁體中文的 items（節省 API + 避免簡體當英文翻）
             _split_off_tw_items(cached_items, items_to_translate)
             global_total_hit += len(cached_items)
@@ -345,6 +351,13 @@ def translate_kubejs_pending_to_zh_tw(
             cache_rules=cache_rules,
             is_valid_hit=_is_valid_hit,
         )
+
+        skip_items = [it for it in items_to_translate if it.get("_skip_reason")]
+        if skip_items:
+            cached_items.extend(skip_items)
+            items_to_translate = [
+                it for it in items_to_translate if not it.get("_skip_reason")
+            ]
 
         # ✅ 跳過值已經是繁體中文的 items（從翻譯清單移至 cache hit）
         _split_off_tw_items(cached_items, items_to_translate)
@@ -419,7 +432,17 @@ def translate_kubejs_pending_to_zh_tw(
     # Dry-run: preview only (no API)
     # -------------------------
     if dry_run:
-        dry_preview_items = all_miss_items[:2000] if all_miss_items else []
+        def _strip_runtime_fields(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            """移除 dry-run preview 中不可 JSON 序列化的暫存欄位。"""
+            sanitized: List[Dict[str, Any]] = []
+            for it in items:
+                sanitized.append(
+                    {k: v for k, v in it.items() if k not in {"_shielded"}}
+                )
+            return sanitized
+
+        dry_preview_items = _strip_runtime_fields(all_miss_items[:2000]) if all_miss_items else []
+        dry_hit_items = _strip_runtime_fields(all_hit_items[:2000]) if all_hit_items else []
 
         preview_path = None
         try:
@@ -441,7 +464,7 @@ def translate_kubejs_pending_to_zh_tw(
             # ✅ NEW：cache hit preview
             hit_preview_path = write_cache_hit_preview(
                 out_dir,
-                all_hit_items[:2000],  # 或不切片
+                dry_hit_items,
                 filename="_kubejs_dry_run_cache_hit_preview.json",
                 meta=meta,
             )

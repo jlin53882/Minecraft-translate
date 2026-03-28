@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -19,8 +20,8 @@ from typing import Optional
 # 物品ID（#namespace:item 或 #namespace/item — 兩種都支援）
 ITEM_ID_PATTERN = re.compile(r"#[a-z0-9_.\-]+[:/][a-z0-9_.\-]+", re.IGNORECASE)
 
-# 標準彩色碼：&a ~ &o（不含 k 的 16 進位格式碼）
-COLOR_CODE_PATTERN = re.compile(r"&[a-f0-9k-o]", re.IGNORECASE)
+# 標準彩色碼：支援 Minecraft 格式化代碼 0-9, a-f, k-o, r
+COLOR_CODE_PATTERN = re.compile(r"&[0-9a-fk-or]", re.IGNORECASE)
 
 # &#RRGGBB 十六進位顏色
 HEX_COLOR_PATTERN = re.compile(r"&#[0-9A-Fa-f]{6}", re.IGNORECASE)
@@ -88,26 +89,30 @@ class ShieldedText:
 _counter_color: int = 0
 _counter_item: int = 0
 _counter_escaped: int = 0
+_counter_lock = threading.Lock()
 
 
 def _next_color_placeholder() -> str:
     global _counter_color
-    ph = f"$C{_counter_color}$"
-    _counter_color += 1
+    with _counter_lock:
+        ph = f"$C{_counter_color}$"
+        _counter_color += 1
     return ph
 
 
 def _next_item_placeholder() -> str:
     global _counter_item
-    ph = f"$P{_counter_item}$"
-    _counter_item += 1
+    with _counter_lock:
+        ph = f"$P{_counter_item}$"
+        _counter_item += 1
     return ph
 
 
 def _next_escaped_placeholder() -> str:
     global _counter_escaped
-    ph = f"$E{_counter_escaped}$"
-    _counter_escaped += 1
+    with _counter_lock:
+        ph = f"$E{_counter_escaped}$"
+        _counter_escaped += 1
     return ph
 
 

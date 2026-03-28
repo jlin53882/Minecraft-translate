@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 # 測試模組
-from translation_tool.plugins.md import md_lmtranslator
+from translation_tool.plugins.md import md_lmtranslator  # noqa: E402
 
 
 def test_read_json(tmp_path: Path) -> None:
@@ -137,9 +137,16 @@ def test_pending_item_dataclass(tmp_path: Path) -> None:
         start_line=1,
         end_line=2,
     )
-    
+
     assert item.id == "test:1-2"
     assert item.text == "Hello World"
     assert item.content_hash == "abc123"
     assert item.start_line == 1
     assert item.end_line == 2
+
+
+def test_md_skip_reason_item_stays_original_in_dry_run_inputs() -> None:
+    """skip_reason 項目在 MD 流程中應保留原文。"""
+    shielded = md_lmtranslator.shield_text("https://example.com")
+    assert shielded.skip_reason == "url"
+    assert shielded.clean == "https://example.com"

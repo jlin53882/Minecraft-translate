@@ -11,6 +11,7 @@ from translation_tool.plugins.shared.lang_path_rules import (
     is_lang_code_segment,
 )
 from translation_tool.plugins.shared.lang_text_rules import _strip_fmt, is_already_zh
+from translation_tool.plugins.shared.rich_text_shield import shield_text
 
 
 def test_compute_output_path_renames_lang_folder_and_filename() -> None:
@@ -90,3 +91,21 @@ def test_read_json_dict_raises_when_root_is_not_dict(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="object/dict"):
         read_json_dict(target)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected_skip_reason"),
+    [
+        ("https://example.com", "url"),
+        ("icon.png", "image"),
+        ("{@pagebreak}", "pagebreak"),
+    ],
+)
+def test_shield_text_skip_reason_samples(raw: str, expected_skip_reason: str) -> None:
+    shielded = shield_text(raw)
+    assert shielded.skip_reason == expected_skip_reason
+
+
+def test_shield_text_supports_reset_code_r() -> None:
+    shielded = shield_text("Hello &rWorld")
+    assert any(piece.original == "&r" for piece in shielded.shields)
