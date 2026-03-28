@@ -29,7 +29,7 @@ def call_gemini_requests(
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}",
+        "x-goog-api-key": api_key,
     }
 
     data = {

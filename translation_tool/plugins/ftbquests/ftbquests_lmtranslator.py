@@ -93,6 +93,9 @@ def map_to_items(
         if not isinstance(v, str) or not v.strip():
             continue
 
+        shielded = shield_text(v)
+        translate_text = v if shielded.skip_reason is not None else shielded.clean
+
         items.append(
             {
                 # 提供 smart translator 判斷用的檔案提示路徑
@@ -103,9 +106,11 @@ def map_to_items(
                 # 原始文字（快取與比對用）
                 "source_text": v,
                 # 當前文字（會被翻譯器覆寫）
-                "text": v,
+                "text": translate_text,
                 # 指定快取分類（對應 cache_rules）
-                "cache_type": cache_type,  # 例如 "ftbquests"
+                "cache_type": cache_type,
+                "_shielded": shielded,
+                "_skip_reason": shielded.skip_reason,
             }
         )
 
@@ -278,6 +283,13 @@ def translate_ftb_pending_to_zh_tw(
                 is_valid_hit=_is_valid_hit,
             )
 
+            skip_items = [it for it in items_to_translate if it.get("_skip_reason")]
+            if skip_items:
+                cached_items.extend(skip_items)
+                items_to_translate = [
+                    it for it in items_to_translate if not it.get("_skip_reason")
+                ]
+
             # ✅ 中文/已翻譯：不送 LM，也不算 cache_miss
             already_zh_items = []
             real_to_translate = []
@@ -351,6 +363,13 @@ def translate_ftb_pending_to_zh_tw(
             cache_rules=cache_rules,
             is_valid_hit=_is_valid_hit,
         )
+
+        skip_items = [it for it in items_to_translate if it.get("_skip_reason")]
+        if skip_items:
+            cached_items.extend(skip_items)
+            items_to_translate = [
+                it for it in items_to_translate if not it.get("_skip_reason")
+            ]
 
         already_zh_items = []
         real_to_translate = []
@@ -503,8 +522,10 @@ def translate_ftb_pending_to_zh_tw(
                 src_text = str(it.get("source_text") or "")
                 if isinstance(p, str) and isinstance(t, str):
                     try:
-                        shielded_src = shield_text(src_text)
-                        t = unshield_text(t, shielded_src.shields)
+                        shielded_src = it.get("_shielded") or shield_text(src_text)
+                        shields = getattr(shielded_src, "shields", [])
+                        if shields:
+                            t = unshield_text(t, shields)
                     except Exception:
                         pass
                     out_map[p] = t

@@ -333,12 +333,6 @@ def translate_md_pending(
                     dst = unshield_text(dst, shielded.shields)
                 except Exception as e:
                     log_warning(f"[MD-LM] unshield 失敗: {e}")
-            else:
-                try:
-                    shielded_src = shield_text(src_text)
-                    dst = unshield_text(dst, shielded_src.shields)
-                except Exception as e:
-                    log_warning(f"[MD-LM] unshield (else branch) 失敗: {e}")
             hash_to_dst[h] = dst
         # 這裡 recorder 的 cache_type 用 md（方便你日後 QC）
         try:
