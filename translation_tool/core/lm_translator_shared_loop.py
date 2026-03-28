@@ -11,9 +11,17 @@ from typing import Callable, Dict, List, Optional, Tuple, Any
 import time
 
 from translation_tool.utils.log_unit import log_info
-from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache, reload_translation_cache
+from translation_tool.utils.cache_manager import (
+    add_to_cache,
+    save_translation_cache,
+    reload_translation_cache,
+)
 from translation_tool.utils.config_manager import load_config
-from translation_tool.core.lm_translator_shared_cache import CacheRule, get_default_cache_rules
+from translation_tool.core.lm_translator_shared_cache import (
+    CacheRule,
+    get_default_cache_rules,
+)
+
 
 @dataclass
 class TranslateLoopResult:
@@ -26,6 +34,7 @@ class TranslateLoopResult:
     elapsed_sec: float
     exhausted: bool
     last_error: Optional[str] = None
+
 
 def _get_default_batch_size(
     cache_type: str, batch_size_by_type: Optional[Dict[str, int]]
@@ -46,6 +55,7 @@ def _get_default_batch_size(
     if cache_type == "md":
         return int(lm_cfg.get("initial_batch_size_md", 100) or 100)
     return int(lm_cfg.get("initial_batch_size_lang", 300) or 300)
+
 
 def translate_items_with_cache_loop(
     items_to_translate: List[Dict[str, Any]],

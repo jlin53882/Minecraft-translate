@@ -35,9 +35,7 @@ def _build_reverse_index_impl(final_tw_lookup: dict[str, str]) -> dict[str, str]
     for k, v in final_tw_lookup.items():
         if is_filled_text_impl(v):
             is_translated = bool(
-                v.casefold() != k.casefold()
-                if v.isascii() and k.isascii()
-                else v != k
+                v.casefold() != k.casefold() if v.isascii() and k.isascii() else v != k
             )
             rev_candidates.setdefault(v, []).append((k, is_translated))
 

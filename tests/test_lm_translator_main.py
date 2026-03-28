@@ -9,11 +9,11 @@ from unittest.mock import patch
 class TestTranslateBatchSmart:
     """translate_batch_smart 測試"""
 
-    @patch('translation_tool.core.lm_translator_main.safe_json_loads')
-    @patch('translation_tool.core.lm_translator_main.load_config')
-    @patch('translation_tool.core.lm_translator_main.get_current_api_key')
-    @patch('translation_tool.core.lm_translator_main.call_gemini_requests')
-    @patch('translation_tool.core.lm_translator_main.time.sleep')
+    @patch("translation_tool.core.lm_translator_main.safe_json_loads")
+    @patch("translation_tool.core.lm_translator_main.load_config")
+    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
+    @patch("translation_tool.core.lm_translator_main.time.sleep")
     def test_translate_batch_smart_lang_success(
         self, mock_sleep, mock_call_api, mock_get_key, mock_config, mock_json_loads
     ):
@@ -29,16 +29,14 @@ class TestTranslateBatchSmart:
                 "models": {"gemini-pro": {"enabled": True}},
                 "temperature": 0.2,
                 "lang_system_prompt": "test",
-                "patchouli_system_prompt": "test"
+                "patchouli_system_prompt": "test",
             }
         }
         mock_get_key.return_value = "test_key"
         mock_call_api.return_value = '{"items": [{"id": "0", "value": "你好"}]}'
         mock_json_loads.return_value = {"items": [{"id": "0", "value": "你好"}]}
 
-        items = [
-            {"path": "test.key", "text": "Hello", "cache_type": "lang"}
-        ]
+        items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
 
         result, status = translate_batch_smart(items, 1)
 
@@ -46,11 +44,11 @@ class TestTranslateBatchSmart:
         # 成功時 API 應該被調用一次
         mock_call_api.assert_called_once()
 
-    @patch('translation_tool.core.lm_translator_main.safe_json_loads')
-    @patch('translation_tool.core.lm_translator_main.load_config')
-    @patch('translation_tool.core.lm_translator_main.get_current_api_key')
-    @patch('translation_tool.core.lm_translator_main.call_gemini_requests')
-    @patch('translation_tool.core.lm_translator_main.time.sleep')
+    @patch("translation_tool.core.lm_translator_main.safe_json_loads")
+    @patch("translation_tool.core.lm_translator_main.load_config")
+    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
+    @patch("translation_tool.core.lm_translator_main.time.sleep")
     def test_translate_batch_smart_empty_batch(
         self, mock_sleep, mock_call_api, mock_get_key, mock_config, mock_json_loads
     ):
@@ -71,11 +69,11 @@ class TestTranslateBatchSmart:
         assert status == "AUTO"
         mock_call_api.assert_not_called()
 
-    @patch('translation_tool.core.lm_translator_main.safe_json_loads')
-    @patch('translation_tool.core.lm_translator_main.load_config')
-    @patch('translation_tool.core.lm_translator_main.get_current_api_key')
-    @patch('translation_tool.core.lm_translator_main.call_gemini_requests')
-    @patch('translation_tool.core.lm_translator_main.time.sleep')
+    @patch("translation_tool.core.lm_translator_main.safe_json_loads")
+    @patch("translation_tool.core.lm_translator_main.load_config")
+    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
+    @patch("translation_tool.core.lm_translator_main.time.sleep")
     def test_translate_batch_smart_api_error_with_retry(
         self, mock_sleep, mock_call_api, mock_get_key, mock_config, mock_json_loads
     ):
@@ -107,10 +105,10 @@ class TestSystemPromptConversion:
     都會被正確轉為 string 傳入 API。
     """
 
-    @patch('translation_tool.core.lm_api_client.requests.post')
-    @patch('translation_tool.core.lm_translator_main.load_config')
-    @patch('translation_tool.core.lm_translator_main.get_current_api_key')
-    @patch('translation_tool.core.lm_translator_main.time.sleep')
+    @patch("translation_tool.core.lm_api_client.requests.post")
+    @patch("translation_tool.core.lm_translator_main.load_config")
+    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_translator_main.time.sleep")
     def test_lang_prompt_dict_converted_to_string(
         self, mock_sleep, mock_get_key, mock_config, mock_post
     ):
@@ -121,11 +119,13 @@ class TestSystemPromptConversion:
         mock_response = Mock()
         mock_response.ok = True
         mock_response.json.return_value = {
-            "candidates": [{
-                "content": {
-                    "parts": [{"text": '{"items": [{"id": "0", "value": "你好"}]}'}]
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"text": '{"items": [{"id": "0", "value": "你好"}]}'}]
+                    }
                 }
-            }]
+            ]
         }
         mock_post.return_value = mock_response
 
@@ -139,8 +139,8 @@ class TestSystemPromptConversion:
                 "patchouli_system_prompt": "你是專業的 Minecraft Patchouli 翻譯員",
                 "lang_system_prompt": {
                     "role": "translator",
-                    "content": "你正在翻譯 Minecraft 語言檔案"
-                }
+                    "content": "你正在翻譯 Minecraft 語言檔案",
+                },
             }
         }
         mock_get_key.return_value = "test_key"
@@ -151,16 +151,17 @@ class TestSystemPromptConversion:
 
         assert mock_post.call_count >= 1, "API 應該被調用至少一次"
         call_kwargs = mock_post.call_args.kwargs
-        json_body = call_kwargs.get('json', {})
-        system_instruction = json_body.get('systemInstruction', {})
-        prompt_text = system_instruction.get('parts', [{}])[0].get('text', '')
-        assert isinstance(prompt_text, str), \
+        json_body = call_kwargs.get("json", {})
+        system_instruction = json_body.get("systemInstruction", {})
+        prompt_text = system_instruction.get("parts", [{}])[0].get("text", "")
+        assert isinstance(prompt_text, str), (
             "lang_system_prompt 必須是 string，而非 dict"
+        )
 
-    @patch('translation_tool.core.lm_api_client.requests.post')
-    @patch('translation_tool.core.lm_translator_main.load_config')
-    @patch('translation_tool.core.lm_translator_main.get_current_api_key')
-    @patch('translation_tool.core.lm_translator_main.time.sleep')
+    @patch("translation_tool.core.lm_api_client.requests.post")
+    @patch("translation_tool.core.lm_translator_main.load_config")
+    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_translator_main.time.sleep")
     def test_prompt_already_string_unchanged(
         self, mock_sleep, mock_get_key, mock_config, mock_post
     ):
@@ -173,11 +174,13 @@ class TestSystemPromptConversion:
         mock_response = Mock()
         mock_response.ok = True
         mock_response.json.return_value = {
-            "candidates": [{
-                "content": {
-                    "parts": [{"text": '{"items": [{"id": "0", "value": "結果"}]}'}]
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"text": '{"items": [{"id": "0", "value": "結果"}]}'}]
+                    }
                 }
-            }]
+            ]
         }
         mock_post.return_value = mock_response
 
@@ -189,7 +192,7 @@ class TestSystemPromptConversion:
                 "models": {"gemini-pro": {"enabled": True}},
                 "temperature": 0.2,
                 "patchouli_system_prompt": "另一個 prompt",
-                "lang_system_prompt": prompt_text
+                "lang_system_prompt": prompt_text,
             }
         }
         mock_get_key.return_value = "test_key"
@@ -200,21 +203,20 @@ class TestSystemPromptConversion:
 
         assert mock_post.call_count >= 1, "API 應該被調用至少一次"
         call_kwargs = mock_post.call_args.kwargs
-        json_body = call_kwargs.get('json', {})
-        system_instruction = json_body.get('systemInstruction', {})
-        actual_prompt = system_instruction.get('parts', [{}])[0].get('text', '')
-        assert actual_prompt == prompt_text, \
-            "string 類型的 system_prompt 應保持不變"
+        json_body = call_kwargs.get("json", {})
+        system_instruction = json_body.get("systemInstruction", {})
+        actual_prompt = system_instruction.get("parts", [{}])[0].get("text", "")
+        assert actual_prompt == prompt_text, "string 類型的 system_prompt 應保持不變"
 
 
 class TestBatchProfileDetection:
     """批次設定偵測測試"""
 
-    @patch('translation_tool.core.lm_translator_main.safe_json_loads')
-    @patch('translation_tool.core.lm_translator_main.load_config')
-    @patch('translation_tool.core.lm_translator_main.get_current_api_key')
-    @patch('translation_tool.core.lm_translator_main.call_gemini_requests')
-    @patch('translation_tool.core.lm_translator_main.time.sleep')
+    @patch("translation_tool.core.lm_translator_main.safe_json_loads")
+    @patch("translation_tool.core.lm_translator_main.load_config")
+    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
+    @patch("translation_tool.core.lm_translator_main.time.sleep")
     def test_detect_batch_profile_lang(
         self, mock_sleep, mock_call_api, mock_get_key, mock_config, mock_json_loads
     ):
@@ -233,7 +235,10 @@ class TestBatchProfileDetection:
         mock_call_api.return_value = '{"items": []}'
         mock_json_loads.return_value = {"items": []}
 
-        items = [{"path": f"key.{i}", "text": f"text{i}", "cache_type": "lang"} for i in range(10)]
+        items = [
+            {"path": f"key.{i}", "text": f"text{i}", "cache_type": "lang"}
+            for i in range(10)
+        ]
         result, status = translate_batch_smart(items, 1)
 
         assert status in ["AUTO", "PARTIAL", "FAILED"]

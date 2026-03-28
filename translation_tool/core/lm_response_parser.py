@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 
+
 def safe_json_loads(text: str):
     """將模型回傳的文字嘗試解析為 JSON，支援去除 Markdown code fence 並從雜訊文字中截取第一個合法 JSON 區塊。"""
     text = text.strip()
@@ -46,18 +47,18 @@ def _extract_json_blocks(text: str):
     i = 0
     n = len(text)
     while i < n:
-        if text[i] == '{':
+        if text[i] == "{":
             start = i
             depth = 0
             j = i
             while j < n:
                 c = text[j]
-                if c == '{' or c == '[':
+                if c == "{" or c == "[":
                     depth += 1
-                elif c == '}' or c == ']':
+                elif c == "}" or c == "]":
                     depth -= 1
                     if depth == 0:
-                        blocks.append(text[start:j + 1])
+                        blocks.append(text[start : j + 1])
                         i = j + 1
                         break
                 j += 1
@@ -67,6 +68,7 @@ def _extract_json_blocks(text: str):
         else:
             i += 1
     return blocks
+
 
 def chunked(lst, size):
     """將序列 lst 依指定大小 size 分塊，yield 每個 chunk（最後一塊可能較短）。"""

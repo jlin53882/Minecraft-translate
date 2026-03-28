@@ -1,26 +1,26 @@
 from pathlib import Path
 import re
 
-p = Path(r'translation_tool/plugins/md/md_lmtranslator.py')
-text = p.read_text(encoding='utf-8')
+p = Path(r"translation_tool/plugins/md/md_lmtranslator.py")
+text = p.read_text(encoding="utf-8")
 
 pattern = re.compile(
-    r'for h, src in hash_to_src\.items\(\):\n'
-    r'\s+if is_already_zh\(src\):\n'
-    r'\s+already_zh_skipped \+= 1\n'
-    r'\s+continue\n'
-    r'\s+all_unique_items\.append\(\n'
-    r'\s+\{\n'
+    r"for h, src in hash_to_src\.items\(\):\n"
+    r"\s+if is_already_zh\(src\):\n"
+    r"\s+already_zh_skipped \+= 1\n"
+    r"\s+continue\n"
+    r"\s+all_unique_items\.append\(\n"
+    r"\s+\{\n"
     r'\s+"cache_type": "md",\n'
     r'\s+"file": "md_pending_blocks",\n'
     r'\s+"path": h,  # .*?\n'
     r'\s+"source_text": src,\n'
     r'\s+"text": src,\n'
-    r'\s+\}\n'
-    r'\s+\)',
+    r"\s+\}\n"
+    r"\s+\)",
     re.S,
 )
-replacement = '''for h, src in hash_to_src.items():
+replacement = """for h, src in hash_to_src.items():
         if is_already_zh(src):
             already_zh_skipped += 1
             continue
@@ -39,20 +39,20 @@ replacement = '''for h, src in hash_to_src.items():
                 "text": translate_text,
                 "_shielded": shielded,
             }
-        )'''
+        )"""
 text, n = pattern.subn(replacement, text, count=1)
 if n != 1:
-    raise SystemExit(f'pattern replace 1 failed: {n}')
+    raise SystemExit(f"pattern replace 1 failed: {n}")
 
 text = text.replace(
-'''    hash_to_dst: Dict[str, str] = {}
+    """    hash_to_dst: Dict[str, str] = {}
     for it in cached_items:
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
         if h and dst:
             hash_to_dst[h] = dst
-''',
-'''    hash_to_dst: Dict[str, str] = {}
+""",
+    """    hash_to_dst: Dict[str, str] = {}
     for it in cached_items:
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
@@ -64,10 +64,11 @@ text = text.replace(
                 except Exception:
                     pass
             hash_to_dst[h] = dst
-''')
+""",
+)
 
 text = text.replace(
-'''    def on_translated_item(it: Dict[str, Any]) -> None:
+    '''    def on_translated_item(it: Dict[str, Any]) -> None:
         """處理翻譯結果。"""
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
@@ -80,7 +81,7 @@ text = text.replace(
                 pass
             hash_to_dst[h] = dst
 ''',
-'''    def on_translated_item(it: Dict[str, Any]) -> None:
+    '''    def on_translated_item(it: Dict[str, Any]) -> None:
         """處理翻譯結果。"""
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
@@ -99,7 +100,8 @@ text = text.replace(
                 except Exception:
                     pass
             hash_to_dst[h] = dst
-''')
+''',
+)
 
-p.write_text(text, encoding='utf-8')
-print('patched md_lmtranslator')
+p.write_text(text, encoding="utf-8")
+print("patched md_lmtranslator")

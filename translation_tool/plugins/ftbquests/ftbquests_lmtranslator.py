@@ -492,6 +492,7 @@ def translate_ftb_pending_to_zh_tw(
                 else:
                     log_info(f"🚀 [AI 翻譯中] {msg}")
                 set_prog(p)
+
             return on_progress
 
         def make_on_translated_item(rel_src, dst, out_map, rec, out_dir):
@@ -519,6 +520,7 @@ def translate_ftb_pending_to_zh_tw(
                         )
                     except Exception:
                         pass
+
             return on_translated_item
 
         def make_on_batch_flushed(file_id, touch, _writer, dst, out_map):
@@ -530,6 +532,7 @@ def translate_ftb_pending_to_zh_tw(
                 except Exception:
                     # fallback
                     write_json_dict(dst, out_map)
+
             return on_batch_flushed
 
         # ✅ 確保此檔案在翻譯路徑也有 file_id
@@ -537,7 +540,9 @@ def translate_ftb_pending_to_zh_tw(
         _file_write_table[file_id] = (dst, out_map)
 
         # ✅ Issue #8 修復：使用工廠函式創建 callbacks
-        on_translated_item = make_on_translated_item(rel_src, dst, out_map, rec, out_dir)
+        on_translated_item = make_on_translated_item(
+            rel_src, dst, out_map, rec, out_dir
+        )
         on_batch_flushed = make_on_batch_flushed(file_id, touch, _writer, dst, out_map)
         on_progress = make_on_progress(set_prog, _fmt_eta)
 

@@ -14,9 +14,12 @@ from app.services_impl.logging_service import (
     UI_LOG_HANDLER,
 )
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
-from translation_tool.core.lm_translator import translate_directory_generator as lm_translate_gen
+from translation_tool.core.lm_translator import (
+    translate_directory_generator as lm_translate_gen,
+)
 
 logger = logging.getLogger(__name__)
+
 
 def run_lm_translation_service(
     input_dir: str,

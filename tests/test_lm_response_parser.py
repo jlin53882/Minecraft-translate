@@ -2,6 +2,7 @@
 
 用途：測試 LM 回應解析器相關功能。
 """
+
 import pytest
 from translation_tool.core.lm_response_parser import (
     safe_json_loads,
@@ -51,7 +52,7 @@ class TestSafeJsonLoads:
 
     def test_invalid_json_raises_error(self):
         """測試無效 JSON 拋出錯誤。"""
-        text = 'this is not valid json at all'
+        text = "this is not valid json at all"
         with pytest.raises(RuntimeError):
             safe_json_loads(text)
 
@@ -197,5 +198,6 @@ class TestModuleExports:
             safe_json_loads,
             chunked,
         )
+
         assert callable(safe_json_loads)
         assert callable(chunked)
