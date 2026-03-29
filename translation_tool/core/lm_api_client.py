@@ -12,6 +12,7 @@ import requests
 
 from translation_tool.utils.config_manager import load_config
 
+
 def call_gemini_requests(
     *,
     model_name: str,
@@ -24,10 +25,12 @@ def call_gemini_requests(
     url = (
         "https://generativelanguage.googleapis.com/"
         f"v1beta/models/{model_name}:generateContent"
-        f"?key={api_key}"
     )
 
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key,
+    }
 
     data = {
         "systemInstruction": {"parts": [{"text": system_prompt}]},

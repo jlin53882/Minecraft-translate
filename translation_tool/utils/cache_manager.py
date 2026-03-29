@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import cache_shards, cache_store
 from .cache_loader import load_cache_type
@@ -39,6 +39,7 @@ __all__ = [
     "reload_translation_cache_type",
     "save_translation_cache",
     "add_to_cache",
+    "add_to_cache_batch",
     "get_from_cache",
     "get_cache_entry",
     "get_cache_dict_ref",
@@ -53,15 +54,18 @@ __all__ = [
     "find_similar_translations",
 ]
 
+
 def _state():
     """取得或建立快取執行期狀態實例"""
     return cache_store.ensure_runtime_maps(CACHE_TYPES)
+
 
 def _get_cache_root() -> Path:
     """從設定取得快取根目錄路徑"""
     translation_config = load_config().get("translator", {})
     cache_dir_name = translation_config.get("cache_directory", _CACHE_DIR_NAME)
     return resolve_project_path(cache_dir_name)
+
 
 def _load_cache_type(cache_type: str):
     """載入指定類型的快取。"""
@@ -76,28 +80,48 @@ def _load_cache_type(cache_type: str):
         logger=log,
     )
 
+
 def initialize_translation_cache():
     """初始化翻譯快取系統。"""
     state = _state()
-    if state.initialized:
-        return
-    try:
-        for cache_type in CACHE_TYPES:
-            _load_cache_type(cache_type)
-        state.initialized = True
-    except Exception as e:
-        log.error(f"快取系統初始化失敗: {e}", exc_info=True)
+    with state.cache_lock:
+        if state.initialized:
+            return
+        try:
+            for cache_type in CACHE_TYPES:
+                _load_cache_type(cache_type)
+            state.initialized = True
+        except Exception as e:
+            log.error(f"快取系統初始化失敗: {e}", exc_info=True)
+
 
 def is_cache_initialized() -> bool:
     """檢查快取是否已初始化。"""
     return bool(_state().initialized)
 
+
 def reload_translation_cache():
     """重新載入翻譯快取。"""
-    state = cache_store.reset_runtime_state(CACHE_TYPES)
+    state = cache_store.get_runtime_state()
     with state.cache_lock:
-        pass
-    initialize_translation_cache()
+        cache_store.reset_runtime_state(CACHE_TYPES)
+        # re-fetch state after reset (reset_runtime_state modifies the global)
+        state = cache_store.get_runtime_state()
+        # 重新載入所有快取型別
+        translation_config = load_config().get("translator", {})
+        for cache_type in CACHE_TYPES:
+            load_cache_type(
+                cache_type,
+                translation_cache=state.translation_cache,
+                cache_file_path=state.cache_file_path,
+                cache_root=_get_cache_root(),
+                parallel_workers=translation_config.get(
+                    "parallel_execution_workers", 4
+                ),
+                logger=log,
+            )
+        state.initialized = True
+
 
 def reload_translation_cache_type(cache_type: str):
     """重新載入指定類型的翻譯快取。"""
@@ -110,6 +134,7 @@ def reload_translation_cache_type(cache_type: str):
         cache_store.get_session_entries(state.session_new_entries, cache_type).clear()
         cache_store.clear_dirty(state.is_dirty, cache_type)
     _load_cache_type(cache_type)
+
 
 def _save_entries_to_active_shards(
     cache_type: str, entries: dict, force_new_shard: bool = False
@@ -127,6 +152,7 @@ def _save_entries_to_active_shards(
         logger=log,
     )
 
+
 def save_translation_cache(cache_type: str, write_new_shard: bool = True):
     """儲存翻譯快取。"""
     if not load_config().get("translator", {}).get("enable_cache_saving", True):
@@ -142,17 +168,18 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
         data_to_save = cache_store.flush_session_entries(
             state.session_new_entries, cache_type
         )
-        cache_store.clear_dirty(state.is_dirty, cache_type)
-
     try:
         save_path = state.cache_file_path.get(cache_type)
         if not save_path:
+            cache_store.clear_dirty(state.is_dirty, cache_type)
             return
         _save_entries_to_active_shards(
             cache_type, data_to_save, force_new_shard=write_new_shard
         )
+        cache_store.clear_dirty(state.is_dirty, cache_type)
     except Exception as e:
         log.error(f"❌ 儲存 {cache_type} 失敗: {e}", exc_info=True)
+
 
 def _get_active_shard_path(cache_type: str) -> Path:
     """取得目前作用中的分片檔案路徑"""
@@ -163,6 +190,7 @@ def _get_active_shard_path(cache_type: str) -> Path:
         cache_type=cache_type,
         active_shard_file=ACTIVE_SHARD_FILE,
     )
+
 
 def add_to_cache(
     cache_type: str,
@@ -193,6 +221,50 @@ def add_to_cache(
             session_entries[key] = entry
             cache_store.mark_dirty(state.is_dirty, cache_type)
 
+
+def add_to_cache_batch(
+    cache_type: str,
+    entries: List[Tuple[str, str, str]],
+    *,
+    mods: Optional[List[Optional[str]]] = None,
+    paths: Optional[List[Optional[str]]] = None,
+):
+    """批次新增翻譯到快取（單次鎖獲取，減少鎖競爭）。
+
+    Args:
+        cache_type: 快取類型 (lang, patchouli, ftbquests, kubejs, md)
+        entries: List of (key, src, dst) tuples
+        mods: Optional list of mod names (same length as entries)
+        paths: Optional list of paths (same length as entries)
+    """
+    if not entries:
+        return
+
+    state = _state()
+    with state.cache_lock:
+        cache = cache_store.get_cache_type_dict(state.translation_cache, cache_type)
+        session_entries = cache_store.get_session_entries(
+            state.session_new_entries, cache_type
+        )
+        dirty = False
+
+        for i, (key, src, dst) in enumerate(entries):
+            if not key or not dst:
+                continue
+            entry = {"src": src, "dst": dst}
+            if mods and i < len(mods) and mods[i]:
+                entry["mod"] = mods[i]
+            if paths and i < len(paths) and paths[i]:
+                entry["path"] = paths[i]
+            changed = cache_store.add_entry(cache, key, entry)
+            if changed:
+                session_entries[key] = entry
+                dirty = True
+
+        if dirty:
+            cache_store.mark_dirty(state.is_dirty, cache_type)
+
+
 def get_from_cache(cache_type: str, key: str) -> Optional[str]:
     """從快取取得指定 key 的翻譯文字 (dst)。"""
     state = _state()
@@ -202,6 +274,7 @@ def get_from_cache(cache_type: str, key: str) -> Optional[str]:
     if not isinstance(cache, dict):
         return None
     return cache_store.get_value(cache, key)
+
 
 def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
     """取得指定 key 的完整快取項目（包含 src、dst、mod、path）。"""
@@ -213,6 +286,7 @@ def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
         return None
     return cache_store.get_entry(cache, key)
 
+
 def get_cache_dict_ref(cache_type: str) -> Dict[str, Dict[str, Any]]:
     """取得指定類型的快取字典參照。"""
     state = _state()
@@ -220,6 +294,7 @@ def get_cache_dict_ref(cache_type: str) -> Dict[str, Dict[str, Any]]:
         return {}
     cache = state.translation_cache.get(cache_type)
     return cache if isinstance(cache, dict) else {}
+
 
 def get_session_new_count(cache_type: str) -> int:
     """取得本次 session 新增的項目數"""
@@ -229,12 +304,14 @@ def get_session_new_count(cache_type: str) -> int:
             cache_store.get_session_entries(state.session_new_entries, cache_type)
         )
 
+
 def get_active_shard_id(cache_type: str) -> str:
     """取得指定快取類型的目前作用中分片 ID"""
     state = _state()
     return _get_active_shard_id_impl(
         state.cache_file_path, cache_type, ACTIVE_SHARD_FILE
     )
+
 
 def get_cache_overview() -> Dict[str, Any]:
     """取得所有快取類型的概覽（包含項目數與狀態）"""
@@ -255,6 +332,7 @@ def get_cache_overview() -> Dict[str, Any]:
             resolve_project_path=resolve_project_path,
         )
 
+
 def force_rotate_shard(cache_type: str) -> bool:
     """強制輪轉至下一個分片。"""
     initialize_translation_cache()
@@ -273,6 +351,7 @@ def force_rotate_shard(cache_type: str) -> bool:
     except Exception:
         return False
 
+
 def _get_search_facade() -> CacheSearchFacade:
     """取得或建立快取搜尋外觀（惰性初始化）"""
     global _search_facade
@@ -282,9 +361,11 @@ def _get_search_facade() -> CacheSearchFacade:
                 _search_facade = CacheSearchFacade(_get_cache_root, log)
     return _search_facade
 
+
 def get_search_engine():
     """取得快取查詢用的搜尋引擎實例"""
     return _get_search_facade().get_search_engine()
+
 
 def rebuild_search_index():
     """重建所有快取類型的搜尋索引。"""
@@ -293,12 +374,14 @@ def rebuild_search_index():
         CACHE_TYPES, state.translation_cache
     )
 
+
 def rebuild_search_index_for_type(cache_type: str):
     """重建指定快取類型的搜尋索引"""
     state = _state()
     return _get_search_facade().rebuild_search_index_for_type(
         cache_type, CACHE_TYPES, state.translation_cache
     )
+
 
 def search_cache(
     query: str, cache_type: str = None, limit: int = 50, use_fuzzy: bool = True
@@ -308,6 +391,7 @@ def search_cache(
         query=query, cache_type=cache_type, limit=limit, use_fuzzy=use_fuzzy
     )
 
+
 def find_similar_translations(
     text: str, cache_type: str = None, threshold: float = 0.6, limit: int = 20
 ) -> list:
@@ -315,6 +399,7 @@ def find_similar_translations(
     return _get_search_facade().find_similar_translations(
         text=text, cache_type=cache_type, threshold=threshold, limit=limit
     )
+
 
 initialize_translation_cache()
 _state_obj = _state()

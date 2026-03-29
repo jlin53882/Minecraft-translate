@@ -11,9 +11,17 @@ from typing import Callable, Dict, List, Optional, Tuple, Any
 import time
 
 from translation_tool.utils.log_unit import log_info
-from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache, reload_translation_cache
+from translation_tool.utils.cache_manager import (
+    add_to_cache,
+    save_translation_cache,
+    reload_translation_cache,
+)
 from translation_tool.utils.config_manager import load_config
-from translation_tool.core.lm_translator_shared_cache import CacheRule, get_default_cache_rules
+from translation_tool.core.lm_translator_shared_cache import (
+    CacheRule,
+    get_default_cache_rules,
+)
+
 
 @dataclass
 class TranslateLoopResult:
@@ -26,6 +34,7 @@ class TranslateLoopResult:
     elapsed_sec: float
     exhausted: bool
     last_error: Optional[str] = None
+
 
 def _get_default_batch_size(
     cache_type: str, batch_size_by_type: Optional[Dict[str, int]]
@@ -46,6 +55,7 @@ def _get_default_batch_size(
     if cache_type == "md":
         return int(lm_cfg.get("initial_batch_size_md", 100) or 100)
     return int(lm_cfg.get("initial_batch_size_lang", 300) or 300)
+
 
 def translate_items_with_cache_loop(
     items_to_translate: List[Dict[str, Any]],
@@ -94,8 +104,8 @@ def translate_items_with_cache_loop(
             else:
                 eta_sec = 0.0
             on_progress(progress, msg, eta_sec)
-        except Exception:
-            pass
+        except Exception as e:
+            log_info(f"[SharedLM] 進度回報失敗: {e}")
 
     emit_progress("🚀 [SharedLM] 準備開始翻譯工作...")
 
@@ -146,28 +156,28 @@ def translate_items_with_cache_loop(
             if on_translated_item is not None:
                 try:
                     on_translated_item(it)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_info(f"[SharedLM] 處理翻譯結果失敗: {e}")
 
             rule = cache_rules.get(ctype) or CacheRule("path|source_text")
             cache_key = rule.make_key({"path": pth, "source_text": src})
             try:
                 add_to_cache(ctype, cache_key, src, txt)
-            except Exception:
-                pass
+            except Exception as e:
+                log_info(f"[SharedLM] 新增快取失敗: {e}")
 
         remaining = remaining[actual_processed_in_this_batch:]
 
         try:
             save_translation_cache(cache_type, write_new_shard=write_new_cache)
-        except Exception:
-            pass
+        except Exception as e:
+            log_info(f"[SharedLM] 儲存快取失敗: {e}")
 
         if on_batch_flushed is not None:
             try:
                 on_batch_flushed()
-            except Exception:
-                pass
+            except Exception as e:
+                log_info(f"[SharedLM] 批次刷新回調失敗: {e}")
 
         emit_progress(
             f"✅ 批次完成 ({cache_type}) | 成功: {actual_processed_in_this_batch} | 總進度: {processed}/{total}"

@@ -21,6 +21,7 @@ from translation_tool.core.jar_processor import (
 
 logger = logging.getLogger(__name__)
 
+
 def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
     """執行語言檔擷取服務。"""
     ensure_pipeline_logging()
@@ -53,9 +54,11 @@ def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
         logger.error(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
         session.set_error()
+        GLOBAL_LOG_LIMITER.flush()
     finally:
         # ⭐ 避免 handler 留著舊 session
         UI_LOG_HANDLER.set_session(None)
+
 
 def run_book_extraction_service(mods_dir: str, output_dir: str, session):
     """執行書本檔擷取服務。"""
@@ -89,6 +92,7 @@ def run_book_extraction_service(mods_dir: str, output_dir: str, session):
         logger.error(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
         session.set_error()
+        GLOBAL_LOG_LIMITER.flush()
 
     finally:
         # ⭐ 避免 handler 留著舊 session

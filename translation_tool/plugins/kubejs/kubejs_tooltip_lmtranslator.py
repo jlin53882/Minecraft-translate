@@ -247,7 +247,8 @@ def translate_kubejs_pending_to_zh_tw(
         try:
             mapping = read_json_dict(src)
             return src, int(count_translatable_keys(mapping))
-        except Exception:
+        except Exception as e:
+            log_warning(f"[KubeJS-LM] 讀取 JSON 失敗 {src}: {e}")
             return src, 0
 
     max_workers = int(
@@ -303,8 +304,8 @@ def translate_kubejs_pending_to_zh_tw(
             _split_off_tw_items(cached_items, items_to_translate)
             global_total_hit += len(cached_items)
             global_total_to_translate += len(items_to_translate)
-        except Exception:
-            pass
+        except Exception as e:
+            log_warning(f"[KubeJS-LM] 預掃描失敗 {src}: {e}")
 
     log_info(
         f"🔎 [KubeJS-LM] 待翻譯檔案數：{len(json_files)}；總 keys：{global_total_keys}\n"
@@ -397,6 +398,10 @@ def translate_kubejs_pending_to_zh_tw(
             p = it.get("path")
             t = it.get("text")
             if isinstance(p, str) and isinstance(t, str):
+                # ✅ Rich Text Shield：統一快取命中/miss 路徑
+                shielded = it.get("_shielded")
+                if shielded is not None and shielded.shields:
+                    t = unshield_text(t, shielded.shields)
                 out_map[p] = t
                 try:
                     rec.record(
@@ -408,8 +413,8 @@ def translate_kubejs_pending_to_zh_tw(
                         cache_hit=True,
                         extra={"dst_file": dst.relative_to(out_dir).as_posix()},
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_warning(f"[KubeJS-LM] 記錄快取命中失敗: {e}")
 
         file_id = dst.as_posix()
         _file_write_table[file_id] = (dst, out_map)
@@ -537,21 +542,21 @@ def translate_kubejs_pending_to_zh_tw(
                     cache_hit=False,
                     extra={"dst_file": st["dst"].relative_to(out_dir).as_posix()},
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log_warning(f"[KubeJS-LM] 記錄翻譯結果失敗: {e}")
 
             try:
                 touch.touch(st["file_id"])
-            except Exception:
-                pass
+            except Exception as e:
+                log_warning(f"[KubeJS-LM] touch 失敗: {e}")
 
         def on_batch_flushed() -> None:
             # write touched files each batch
             """批量寫入翻譯結果。"""
             try:
                 touch.flush(_writer)
-            except Exception:
-                # fallback: write all
+            except Exception as e:
+                log_warning(f"[KubeJS-LM] 批次刷新失敗，使用 fallback 寫入: {e}")
                 for fid, (dstp, data) in _file_write_table.items():
                     write_json_dict(dstp, data)
 

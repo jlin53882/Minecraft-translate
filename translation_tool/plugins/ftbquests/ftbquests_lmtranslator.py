@@ -219,18 +219,20 @@ def translate_ftb_pending_to_zh_tw(
     if not json_files:
         raise FileNotFoundError(f"找不到任何 .json：{in_dir}")
 
-    # ---- Global total keys (raw) ----
+    # ---- Global total keys (raw) + cache mappings ----
     per_file_counts: List[Tuple[Path, int]] = []
     global_total_keys = 0
+    # ✅ Issue #7 修復：緩存 JSON mapping 避免重複讀取
+    src_mapping_cache: Dict[Path, Dict[str, Any]] = {}
 
-    def _count_one(src: Path) -> Tuple[Path, int]:
-        """讀取指定的 JSON 檔案並統計其中可翻譯的鍵值數量，若發生錯誤則返回 0。"""
+    def _count_one(src: Path) -> Tuple[Path, int, Dict[str, Any]]:
+        """讀取 JSON 並統計可翻譯鍵值數量，同時快取 mapping。"""
         try:
             mapping = read_json_dict(src)
             c = count_translatable_keys(mapping)
-            return src, int(c)
+            return src, int(c), mapping
         except Exception:
-            return src, 0
+            return src, 0, {}
 
     # max_workers 你可以改成 config 的 parallel_execution_workers
 
@@ -241,9 +243,11 @@ def translate_ftb_pending_to_zh_tw(
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futs = [ex.submit(_count_one, src) for src in json_files]
         for fu in as_completed(futs):
-            src, c = fu.result()
+            src, c, mapping = fu.result()
             per_file_counts.append((src, c))
             global_total_keys += c
+            if mapping:  # ✅ 只緩存非空的 mapping
+                src_mapping_cache[src] = mapping
 
     # 保持穩定順序（避免多執行緒導致排序亂）
     per_file_counts.sort(key=lambda x: x[0].as_posix())
@@ -263,7 +267,10 @@ def translate_ftb_pending_to_zh_tw(
         if key_count == 0:
             continue
         try:
-            mapping = read_json_dict(src)
+            # ✅ Issue #7 修復：直接使用緩存的 mapping，不再重複讀取
+            mapping = src_mapping_cache.get(src, {})
+            if not mapping:
+                continue
             rel_src = src.relative_to(in_dir).as_posix()
             file_hint = f"config/ftbquests/quests/{rel_src}"
             all_items = map_to_items(
@@ -339,7 +346,11 @@ def translate_ftb_pending_to_zh_tw(
         if key_count == 0:
             continue
 
-        mapping = read_json_dict(src)
+        # ✅ Issue #7 修復：直接使用緩存的 mapping，不再重複讀取
+        mapping = src_mapping_cache.get(src, {})
+        if not mapping:
+            log_error(f"⚠️ [FTB-LM] 找不到快取的 mapping：{src}")
+            continue
 
         rel_src = src.relative_to(in_dir).as_posix()  # e.g. en_us/ftb_lang.json
         file_hint = (
@@ -532,14 +543,70 @@ def translate_ftb_pending_to_zh_tw(
                 return f"{m}m{s:02d}s"
             return f"{s}s"
 
-        def on_progress(p: float, msg: str, eta_sec: float) -> None:
-            """報告翻譯進度。"""
-            eta_txt = _fmt_eta(eta_sec)
-            if eta_txt:
-                log_info(f"⏳ [AI 翻譯中] {msg} | 預估剩餘時間：{eta_txt}")
-            else:
-                log_info(f"🚀 [AI 翻譯中] {msg}")
-            set_prog(p)
+        def make_on_progress(set_prog, _fmt_eta):
+            def on_progress(p: float, msg: str, eta_sec: float) -> None:
+                """報告翻譯進度。"""
+                eta_txt = _fmt_eta(eta_sec)
+                if eta_txt:
+                    log_info(f"⏳ [AI 翻譯中] {msg} | 預估剩餘時間：{eta_txt}")
+                else:
+                    log_info(f"🚀 [AI 翻譯中] {msg}")
+                set_prog(p)
+
+            return on_progress
+
+        def make_on_translated_item(rel_src, dst, out_map, rec, out_dir):
+            def on_translated_item(it: Dict[str, Any]) -> None:
+                """處理翻譯結果並寫入映射。"""
+                p = it.get("path")
+                t = it.get("text")
+                src_text = str(it.get("source_text") or "")
+                if isinstance(p, str) and isinstance(t, str):
+                    try:
+                        shielded_src = it.get("_shielded") or shield_text(src_text)
+                        shields = getattr(shielded_src, "shields", [])
+                        if shields:
+                            t = unshield_text(t, shields)
+                    except Exception:
+                        pass
+                    out_map[p] = t
+                    try:
+                        rec.record(
+                            cache_type="ftbquests",
+                            file_id=rel_src,
+                            path=p,
+                            src=src_text,
+                            dst=t,
+                            cache_hit=False,
+                            extra={"dst_file": dst.relative_to(out_dir).as_posix()},
+                        )
+                    except Exception:
+                        pass
+
+            return on_translated_item
+
+        def make_on_batch_flushed(file_id, touch, _writer, dst, out_map):
+            def on_batch_flushed() -> None:
+                """批量寫入翻譯結果。"""
+                try:
+                    touch.touch(file_id)
+                    touch.flush(_writer)  # 最小改動：每批也照樣寫，避免中斷損失
+                except Exception:
+                    # fallback
+                    write_json_dict(dst, out_map)
+
+            return on_batch_flushed
+
+        # ✅ 確保此檔案在翻譯路徑也有 file_id
+        file_id = dst.as_posix()
+        _file_write_table[file_id] = (dst, out_map)
+
+        # ✅ Issue #8 修復：使用工廠函式創建 callbacks
+        on_translated_item = make_on_translated_item(
+            rel_src, dst, out_map, rec, out_dir
+        )
+        on_batch_flushed = make_on_batch_flushed(file_id, touch, _writer, dst, out_map)
+        on_progress = make_on_progress(set_prog, _fmt_eta)
 
         res = translate_items_with_cache_loop(
             items_to_translate,

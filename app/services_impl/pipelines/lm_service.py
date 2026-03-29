@@ -14,9 +14,12 @@ from app.services_impl.logging_service import (
     UI_LOG_HANDLER,
 )
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
-from translation_tool.core.lm_translator import translate_directory_generator as lm_translate_gen
+from translation_tool.core.lm_translator import (
+    translate_directory_generator as lm_translate_gen,
+)
 
 logger = logging.getLogger(__name__)
+
 
 def run_lm_translation_service(
     input_dir: str,
@@ -76,6 +79,7 @@ def run_lm_translation_service(
         logger.error(f"LM 服務失敗: {e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] LM 翻譯服務失敗：{e}\n{full_traceback}")
         session.set_error()
+        GLOBAL_LOG_LIMITER.flush()
     finally:
         # ⭐ 避免 handler 留著舊 session
         UI_LOG_HANDLER.set_session(None)

@@ -114,6 +114,50 @@ class TestCallGeminiRequests:
         call_kwargs = mock_post.call_args.kwargs
         assert call_kwargs.get("timeout") == 120
 
+    @patch("translation_tool.core.lm_api_client.requests.post")
+    @patch("translation_tool.core.lm_api_client.load_config")
+    def test_api_key_not_in_url(self, mock_config, mock_post):
+        """測試 API Key 不出現在 URL 中，而是放在 x-goog-api-key header。"""
+        from translation_tool.core.lm_api_client import call_gemini_requests
+
+        # 使用假的 API key（長度 35-45 字，以 AIza 開頭）
+        fake_api_key = "AIza" + "a" * 37  # 共 41 字
+
+        mock_config.return_value = {"lm_translator": {"rate_limit": {"timeout": 60}}}
+
+        mock_response = Mock()
+        mock_response.ok = True
+        mock_response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": '{"result": "ok"}'}]}}]
+        }
+        mock_post.return_value = mock_response
+
+        call_gemini_requests(
+            model_name="gemini-pro",
+            system_prompt="test prompt",
+            payload={"key": "value"},
+            api_key=fake_api_key,
+            temperature=0.7,
+        )
+
+        # 驗證 URL 中不包含 API key
+        call_args = mock_post.call_args
+        called_url = (
+            call_args.args[0] if call_args.args else call_args.kwargs.get("url", "")
+        )
+        assert fake_api_key not in called_url, "API key 不應出現在 URL 中"
+
+        # 驗證 x-goog-api-key header 存在（對照 Google 官方 REST 範例）
+        headers = call_args.kwargs.get("headers", {})
+        assert "x-goog-api-key" in headers, "x-goog-api-key header 必須存在"
+        assert headers["x-goog-api-key"] == fake_api_key
+        assert "Authorization" not in headers, "不應再使用 Authorization: Bearer"
+
+        # 確保 URL 中沒有 key=... 之類的 query string
+        assert "?" not in called_url or "key=" not in called_url, (
+            "URL 中不應包含 key query parameter"
+        )
+
 
 class TestModuleImports:
     """測試模組導入。"""
