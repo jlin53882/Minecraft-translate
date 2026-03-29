@@ -492,7 +492,48 @@ def translate_ftb_pending_to_zh_tw(
             )
             continue
 
-        # ✅ Issue #8 修復：將 callbacks 定義在迴圈外部，改用工廠函式
+        # shared while-loop（includes add_to_cache + save_translation_cache + safe slicing）
+        def on_translated_item(it: Dict[str, Any]) -> None:
+            """處理翻譯結果並寫入映射。"""
+            p = it.get("path")
+            t = it.get("text")
+            src_text = str(it.get("source_text") or "")
+            if isinstance(p, str) and isinstance(t, str):
+                try:
+                    shielded_src = it.get("_shielded") or shield_text(src_text)
+                    shields = getattr(shielded_src, "shields", [])
+                    if shields:
+                        t = unshield_text(t, shields)
+                except Exception:
+                    pass
+                out_map[p] = t
+                try:
+                    rec.record(
+                        cache_type="ftbquests",
+                        file_id=rel_src,
+                        path=p,
+                        src=src_text,
+                        dst=t,
+                        cache_hit=False,
+                        extra={"dst_file": dst.relative_to(out_dir).as_posix()},
+                    )
+                except Exception:
+                    pass
+
+        # ✅ 確保此檔案在翻譯路徑也有 file_id
+        file_id = dst.as_posix()
+        _file_write_table[file_id] = (dst, out_map)
+
+        # 在這之前先確保 file_id/_file_write_table 設定好了（下面會說加在哪）
+        def on_batch_flushed() -> None:
+            """批量寫入翻譯結果。"""
+            try:
+                touch.touch(file_id)
+                touch.flush(_writer)  # 最小改動：每批也照樣寫，避免中斷損失
+            except Exception:
+                # fallback
+                write_json_dict(dst, out_map)
+
         def _fmt_eta(sec: float) -> str:
             """格式化剩餘時間。"""
             if sec <= 0:
@@ -609,6 +650,16 @@ def translate_ftb_pending_to_zh_tw(
 
     # ---- Dry-run 結尾摘要 ----
     if dry_run:
+
+        def _strip_runtime_fields(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            """移除 dry-run preview 中不可 JSON 序列化的暫存欄位。"""
+            sanitized: List[Dict[str, Any]] = []
+            for it in items:
+                sanitized.append(
+                    {k: v for k, v in it.items() if k not in {"_shielded"}}
+                )
+            return sanitized
+
         batch_size = _get_default_batch_size("ftbquests", None)
         est_batches = (
             math.ceil(global_total_to_translate / batch_size)
@@ -627,7 +678,7 @@ def translate_ftb_pending_to_zh_tw(
             # 原本：待翻譯 preview
             write_dry_run_preview(
                 out_dir,
-                dry_preview_items,
+                _strip_runtime_fields(dry_preview_items),
                 meta=meta,
                 filename="_ftbquests_dry_run_preview.json",  # 可選：明確檔名
             )
@@ -635,7 +686,7 @@ def translate_ftb_pending_to_zh_tw(
             # ✅ NEW：cache hit preview
             write_cache_hit_preview(
                 out_dir,
-                all_cached_items,
+                _strip_runtime_fields(all_cached_items),
                 filename="_ftbquests_dry_run_cache_hit_preview.json",
                 meta=meta,
             )

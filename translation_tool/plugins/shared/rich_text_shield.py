@@ -89,7 +89,7 @@ class ShieldedText:
 _counter_color: int = 0
 _counter_item: int = 0
 _counter_escaped: int = 0
-_counter_lock = threading.Lock()  # 計數器執行緒安全鎖
+_counter_lock = threading.Lock()
 
 
 def _next_color_placeholder() -> str:

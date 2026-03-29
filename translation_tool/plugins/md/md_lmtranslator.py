@@ -192,7 +192,7 @@ def translate_md_pending(
 
     all_unique_items: List[Dict[str, Any]] = []
     already_zh_skipped = 0
-    skip_skipped = 0  # 新增：統計因 skip_reason 跳過的項目
+    skip_skipped = 0
 
     for h, src in hash_to_src.items():
         if is_already_zh(src):
@@ -209,7 +209,7 @@ def translate_md_pending(
                     "file": "md_pending_blocks",
                     "path": h,
                     "source_text": src,
-                    "text": src,  # 保持原文
+                    "text": src,
                     "_shielded": shielded,
                     "_skip_reason": shielded.skip_reason,
                 }
@@ -224,7 +224,7 @@ def translate_md_pending(
                 "file": "md_pending_blocks",
                 "path": h,  # ✅ 用 content_hash 當 path（去重 + 快取 key 的一部分）
                 "source_text": src,
-                "text": translate_text,
+                "text": shielded.clean,
                 "_shielded": shielded,
             }
         )
@@ -309,8 +309,8 @@ def translate_md_pending(
             if shielded is not None and getattr(shielded, "shields", None):
                 try:
                     dst = unshield_text(dst, shielded.shields)
-                except Exception as e:
-                    log_warning(f"[MD-LM] unshield 失敗: {e}")
+                except Exception:
+                    pass
             hash_to_dst[h] = dst
 
     rec = TranslationRecorder()
@@ -331,8 +331,8 @@ def translate_md_pending(
             if shielded is not None and getattr(shielded, "shields", None):
                 try:
                     dst = unshield_text(dst, shielded.shields)
-                except Exception as e:
-                    log_warning(f"[MD-LM] unshield 失敗: {e}")
+                except Exception:
+                    pass
             hash_to_dst[h] = dst
         # 這裡 recorder 的 cache_type 用 md（方便你日後 QC）
         try:

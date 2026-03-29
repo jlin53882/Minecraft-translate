@@ -126,3 +126,19 @@ def test_dry_run_stats_with_values(tmp_path: Path) -> None:
     assert stats.total_keys == 100
     assert stats.cache_hit == 30
     assert stats.cache_miss == 70
+
+
+def test_ftb_dry_run_preview_items_can_drop_runtime_fields() -> None:
+    """dry-run preview 寫檔前應可移除 _shielded 等 runtime 欄位。"""
+    mapping = {"quest.title": "Hello &aWorld"}
+    items = ftbquests_lmtranslator.map_to_items(
+        mapping,
+        cache_type="ftbquests",
+        file_hint="config/ftbquests/quests/test.json",
+    )
+
+    sanitized = [{k: v for k, v in it.items() if k != "_shielded"} for it in items]
+
+    assert "_shielded" not in sanitized[0]
+    assert sanitized[0]["path"] == "quest.title"
+    assert sanitized[0]["text"] != sanitized[0]["source_text"]

@@ -77,16 +77,6 @@ def _shielded_convert(text: str, convert_fn: Callable[[str], str]) -> str:
     用於 OpenCC s2t 轉換時，保護 KubeJS 格式標記（彩色碼、物品ID 等）
     不被轉換破壞。
     """
-    # 注意：本函式依賴 translation_tool.plugins.shared.rich_text_shield。
-    # 若 rich_text_shield 尚未啟用，此函式退化成直接轉換。
-    try:
-        from translation_tool.plugins.shared.rich_text_shield import (
-            shield_text,
-            unshield_text,
-        )
-    except ImportError:
-        return convert_fn(text)
-
     shielded = shield_text(text)
     if shielded.skip_reason is not None:
         return text
@@ -292,7 +282,7 @@ def clean_kubejs_from_raw_impl(
             #       表示該英文原文已有翻譯，不需要再送 pending。
             # 建立 reverse_index：{英文文字: [key1, key2, ...]}
             if pending_en and final_root_p.exists():
-                # 從 final/zh_tw.json 建立 final_tw_lookup（key → 翻譯值）
+                # 從 final/zh_tw.json 建立 final_tw_lookup（key → 原文）
                 final_tw_lookup: dict[str, str] = {}
                 for tw_file in final_root_p.rglob("zh_tw.json"):
                     tw_data = read_json_dict_fn(tw_file)
@@ -300,7 +290,7 @@ def clean_kubejs_from_raw_impl(
                         final_tw_lookup.update(tw_data)
 
                 if final_tw_lookup:
-                    # 使用確定性 reverse_index 建構 + cross-namespace dedup
+                    # 使用 PR #40 的乾淨去重實作
                     reverse_index = _build_reverse_index_impl(final_tw_lookup)
                     pending_en = _dedup_pending_en_impl(pending_en, reverse_index)
             # ── 雙軌去重 end ───────────────────────────────────────────────
