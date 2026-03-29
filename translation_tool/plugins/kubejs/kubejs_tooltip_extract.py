@@ -99,7 +99,6 @@ def to_json_name(filename: str) -> str:
     log_debug(f"檔名轉換: '{filename}' -> '{result}'")
     return result
 
-
 def strip_quotes(s: str) -> str:
     """
     移除字串前後成對的單引號或雙引號。
@@ -111,7 +110,6 @@ def strip_quotes(s: str) -> str:
             log_debug(f"已脫殼引號: {s} -> {stripped}")
             return stripped
     return s
-
 
 def split_js_args(s: str) -> list[str]:
     """
@@ -164,7 +162,6 @@ def split_js_args(s: str) -> list[str]:
     log_debug(f"參數拆解完成，取得 {len(args)} 個參數")
     return args
 
-
 def extract_array_strings(arr: str) -> list[str]:
     """
     使用正則表達式從字串中提取所有被引號包圍的內容。
@@ -177,8 +174,6 @@ def extract_array_strings(arr: str) -> list[str]:
     except Exception as e:
         log_error(f"提取陣列字串時發生錯誤: {str(e)}")
         return []
-
-
 
 # ---------- Patchouli 指令過濾 ----------
 _PATCHOULI_COMMAND_ONLY = re.compile(
@@ -209,8 +204,6 @@ def is_patchouli_command_only(s: str) -> bool:
         log_debug(f"偵測到純 Patchouli 指令段落，將跳過翻譯: '{clean_s}'")
     
     return is_match
-
-
 
 # ---------- Lang Key 過濾 ----------
 # 例: tooltip.xxx.yyy / item.kubejs.fake_mob_masher / block.modid.name ...
@@ -247,7 +240,6 @@ def is_lang_key_like(s: str) -> bool:
     
     return is_key
 
-
 def is_lang_key_ref_like(s: str) -> bool:
     """
     過濾純引用格式：
@@ -260,7 +252,6 @@ def is_lang_key_ref_like(s: str) -> bool:
     if not t:
         return False
     return bool(re.fullmatch(r"\{[^{}]+\}(?:\n\{[^{}]+\})*", t))
-
 
 def clean_text(s: str) -> str:
     """
@@ -283,7 +274,6 @@ def clean_text(s: str) -> str:
         
     return cleaned
 
-
 _RE_SKIP_KUBEJS_TOOLTIP_EXPR = re.compile(
     r"^\s*(Text\.translate|Text\.of|Component\.translatable|Component\.translate|Component\.literal)\s*\(",
     re.S,
@@ -292,8 +282,6 @@ _RE_SKIP_KUBEJS_TOOLTIP_EXPR = re.compile(
 def should_skip_kubejs_tooltip_expr(expr: str) -> bool:
     """第二參數如果是 Text.translate(...) 這種，代表語言 key 引用，不要抽去翻譯。"""
     return bool(_RE_SKIP_KUBEJS_TOOLTIP_EXPR.match((expr or "").strip()))
-
-
 
 def extract_js_string_call(text: str, start: int) -> str | None:
     """
@@ -352,7 +340,6 @@ def extract_js_string_call(text: str, start: int) -> str | None:
     log_warning(f"字串解析未完成（可能缺少結尾引號）。目前緩存: '{buf}'，起始位置: {start}")
     return None
 
-
 def should_skip_text(text: str) -> bool:
     """
     判斷該段文字是否應該跳過翻譯流程。
@@ -401,8 +388,6 @@ def should_skip_text(text: str) -> bool:
     log_debug(f"確定需要翻譯: '{t}'")
     return False
 
-
-
 def extract_call_args(text: str, start: int) -> str | None:
     """
     從指定的起始位置開始，提取括號 '()' 內的所有內容。
@@ -433,7 +418,6 @@ def extract_call_args(text: str, start: int) -> str | None:
 
     log_warning(f"括號解析失敗：未找到匹配的閉合括號。起始位置: {start}")
     return None
-
 
 def extract_itemevents_tooltips(content: str, file_name: str, extracted: dict, auto_id: int) -> int:
     """
@@ -508,8 +492,6 @@ def extract_itemevents_tooltips(content: str, file_name: str, extracted: dict, a
     log_info(f"檔案 {file_name} 處理完畢，共提取 {match_count} 條文本。")
     return auto_id
 
-
-
 # ---------- 主流程 ----------
 def extract(
     source_dir: str | None = None,
@@ -541,7 +523,6 @@ def extract(
         if session:
             session.set_error()
         raise FileNotFoundError(msg)
-
 
     if session:
         log_info(f"🔎 識別到 KubeJS 目錄: {src_root}")
@@ -633,8 +614,6 @@ def extract(
                                     if not should_skip_text(txt):
                                         extracted[f"{file_name}|{item_id}.{n}.{i}"] = clean_text(txt)
 
-
-
                 # 2. 處理 Ponder 劇情文字 (scene.text)
                 for m in re.finditer(r"scene\.text\s*\((.+?)\)", content, re.S):
                     args = split_js_args(m.group(1))
@@ -711,7 +690,6 @@ def extract(
         log_info(f"🎊 提取完成！共輸出 {extracted_files_count} 個檔案，提取 {extracted_keys_total} 條文本。")
 
     return summary
-
 
 if __name__ == "__main__":
     extract()

@@ -92,9 +92,12 @@ def test_merge_zip_baseline_fixture_outputs_are_stable(tmp_path: Path, monkeypat
     assert all(not update.get("error", False) for update in updates)
     assert updates[-1]["progress"] == 1.0
 
-    zh_tw_path = output_dir / "assets" / "demo" / "lang" / "zh_tw.json"
-    pending_path = output_dir / PENDING_DIR / "assets" / "demo" / "lang" / "en_us.json"
-    filtered_pending_path = output_dir / FILTERED_DIR / "assets" / "demo" / "lang" / "en_us.json"
+    # PR #24：輸出結構改為 lang_output/ 子目錄，zh_tw + 待翻譯 皆寫入 lang_output/
+    # P4-B：pending_rel 剝離 ZIP 前綴（如 assets/），所以待翻譯目錄內的路徑無 assets/
+    # zh_cn.extra.json 是非 patchouli 的 localized 檔案，zh_cn→zh_tw 轉換後寫入 output_dir/assets/
+    zh_tw_path = output_dir / "lang_output" / "assets" / "demo" / "lang" / "zh_tw.json"
+    pending_path = output_dir / "lang_output" / PENDING_DIR / "demo" / "lang" / "en_us.json"
+    filtered_pending_path = output_dir / "lang_output" / FILTERED_DIR / "demo" / "lang" / "en_us.json"
     localized_json_path = output_dir / "assets" / "demo" / "docs" / "zh_tw.extra.json"
 
     assert zh_tw_path.exists()
@@ -115,9 +118,9 @@ def test_merge_zip_baseline_fixture_outputs_are_stable(tmp_path: Path, monkeypat
     all_json_outputs = {p.relative_to(output_dir).as_posix() for p in output_dir.rglob("*.json")}
     assert all_json_outputs == {
         "assets/demo/docs/zh_tw.extra.json",
-        "assets/demo/lang/zh_tw.json",
-        f"{FILTERED_DIR}/assets/demo/lang/en_us.json",
-        f"{PENDING_DIR}/assets/demo/lang/en_us.json",
+        f"lang_output/assets/demo/lang/zh_tw.json",
+        f"lang_output/{FILTERED_DIR}/demo/lang/en_us.json",
+        f"lang_output/{PENDING_DIR}/demo/lang/en_us.json",
     }
 
     assert not any(output_dir.rglob("*.reason.txt"))

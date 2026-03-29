@@ -6,35 +6,22 @@
 
 import logging
 
-
 class UISessionLogHandler(logging.Handler):
     """
     將 Python logging 訊息轉送到 TaskSession（UI）
     """
 
     def __init__(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`__init__`
-
-        回傳：None
-        """
+        """初始化 UISessionLogHandler。"""
         super().__init__()
         self._session = None
 
     def set_session(self, session):
-        """
-        動態綁定 TaskSession
-        """
+        """動態綁定 TaskSession。"""
         self._session = session
 
     def emit(self, record: logging.LogRecord):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`format`
-
-        回傳：None
-        """
+        """發送日誌記錄到 UI。"""
         if not self._session:
             return
 

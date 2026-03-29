@@ -20,26 +20,22 @@ from datetime import datetime
 from pathlib import Path
 import copy
 
-
 # PR27：統一路徑解析基準，避免 legacy cwd 依賴造成找不到 config / 資源檔。
 def get_project_root() -> Path:
-    """取得此函式的工作（細節以程式碼為準）。
-
-    回傳：依函式內 return path。
-    """
+    """取得專案根目錄路徑。"""
     return Path(__file__).resolve().parents[2]
-
 
 PROJECT_ROOT = get_project_root()
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 
-
 def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
-    """處理此函式的工作（細節以程式碼為準）。
+    """解析專案相對路徑為絕對路徑。
 
-    - 主要包裝：`Path`
+    參數：
+        path_like: 相對路徑字串或 None
 
-    回傳：依函式內 return path。
+    回傳：
+        Path: 絕對路徑
     """
     if path_like is None:
         return PROJECT_ROOT
@@ -48,7 +44,6 @@ def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
     if p.is_absolute():
         return p
     return PROJECT_ROOT / p
-
 
 # DEFAULT_CONFIG 是「缺檔或缺欄位時的保底值」，不是要取代使用者設定；
 # load_config() 會用它做深度合併，讓新欄位可以向後相容地補進舊 config.json。
@@ -74,8 +69,8 @@ DEFAULT_CONFIG = {
     "lm_translator": {
         "temperature": 0.2,
         "lm_translate_folder_name": "LM翻譯後",
-        "iniital_batch_size_patchouli": 100,  # ⭐ 新增（建議 80~150） patchouli 專用
-        "iniital_batch_size_lang": 300,  # 起始 batch（你 TPM 很夠） Lang 專用
+        "initial_batch_size_patchouli": 100,  # ⭐ 新增（建議 80~150） patchouli 專用
+        "initial_batch_size_lang": 300,  # 起始 batch（你 TPM 很夠） Lang 專用
         "initial_batch_size_ftb": 100,  # 起始 batch（FTB 專用）
         "initial_batch_size_kubejs": 200,  # 起始 batch（kubejs 專用）
         "initial_batch_size_md": 100,  # 起始 batch（Markdown 專用）
@@ -163,9 +158,13 @@ DEFAULT_CONFIG = {
         "pending_organized_folder_name": "待翻譯整理需翻譯",  # 專門用於 lang_merger 的設定
         "filtered_pending_min_count": 2,  # 專門用於 lang_merger 的設定
         "quarantine_folder_name": "skipped_json",  # 專門用於 lang_merger  zip 檔案合併錯誤處理的設定
+        # --- v3 新增 ---
+        "process_zh_cn_files": True,
+        "skip_zh_cn_when_only_process_lang": False,
+        "patchouli_skip_en_us_when_zh_cn_exists": False,
+        "patchouli_effective_translation_threshold": 0.5,
     },
 }
-
 
 def load_config(config_path: str | os.PathLike | None = None):
     """讀取設定檔並做向後相容合併。
@@ -226,7 +225,6 @@ def load_config(config_path: str | os.PathLike | None = None):
         print(f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。")
         return copy.deepcopy(DEFAULT_CONFIG)
 
-
 def save_config(config, config_path: str | os.PathLike | None = None):
     """
     儲存設定並檢查是否成功寫入。
@@ -251,7 +249,6 @@ def save_config(config, config_path: str | os.PathLike | None = None):
     except Exception as e:
         logging.error(f"錯誤：儲存或驗證設定檔失敗: {e}")
         return False
-
 
 def setup_logging(config):
     """根據設定檔配置 logging。"""
@@ -292,7 +289,6 @@ def setup_logging(config):
     logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
     logging.info("日誌系統已成功設定。")
 
-
 def get_models_config(cfg: dict) -> dict[str, dict]:
     """
     安全取得 models 設定
@@ -318,13 +314,9 @@ def get_models_config(cfg: dict) -> dict[str, dict]:
 
     return safe_models
 
-
 def deep_merge(default: dict, override: dict) -> dict:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
-    - 主要包裝：`copy`, `items`
-
-    回傳：依函式內 return path。
     """
     result = default.copy()
     for k, v in override.items():
@@ -334,7 +326,6 @@ def deep_merge(default: dict, override: dict) -> dict:
             result[k] = v
     return result
 
-
 class LazyConfigProxy:
     """延遲讀取 config，避免 module import 時就觸發 I/O 與 logging 初始化。"""
 
@@ -343,96 +334,48 @@ class LazyConfigProxy:
     # 但實際讀檔時機延後到真正取值的那一刻，而不是 import 當下。
 
     def _current(self) -> dict:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`load_config`
-
-        回傳：依函式內 return path。
-        """
+        """取得目前設定。"""
         return load_config()
 
     def get(self, key, default=None):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：依函式內 return path。
-        """
+        """取得指定鍵的值。"""
         return self._current().get(key, default)
 
     def __getitem__(self, key):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：依函式內 return path。
-        """
+        """取得鍵對應的值。"""
         return self._current()[key]
 
     def __contains__(self, key):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：依函式內 return path。
-        """
+        """檢查鍵是否存在。"""
         return key in self._current()
 
     def __iter__(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`iter`
-
-        回傳：依函式內 return path。
-        """
+        """回傳迭代器。"""
         return iter(self._current())
 
     def __len__(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：依函式內 return path。
-        """
+        """回傳鍵的數量。"""
         return len(self._current())
 
     def items(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`items`
-
-        回傳：依函式內 return path。
-        """
+        """回傳鍵值對。"""
         return self._current().items()
 
     def keys(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`keys`
-
-        回傳：依函式內 return path。
-        """
+        """回傳所有鍵。"""
         return self._current().keys()
 
     def values(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`values`
-
-        回傳：依函式內 return path。
-        """
+        """回傳所有值。"""
         return self._current().values()
 
     def copy(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`copy`
-
-        回傳：依函式內 return path。
-        """
+        """複製目前設定。"""
         return self._current().copy()
 
     def __repr__(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`repr`
-
-        回傳：依函式內 return path。
-        """
+        """回傳字串表示。"""
         return repr(self._current())
-
 
 # 對外仍維持 `config` 這個名稱，讓既有呼叫點不用一次大改；
 # 真正的目標是先移除 import-time side effect，再逐步收斂舊依賴。

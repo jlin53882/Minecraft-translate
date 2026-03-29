@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 @dataclass(slots=True)
 class CacheUiState:
     """CacheUiState 類別。
@@ -26,7 +25,6 @@ class CacheUiState:
     busy: bool = False
     reason: str = ""
     trace: str = "trace: init"
-
 
 @dataclass(slots=True)
 class ActionState:

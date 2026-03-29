@@ -5,20 +5,83 @@
 """
 
 import re
+import threading
 from typing import Any
+
 from ..utils.config_manager import load_config
-import logging
+from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
 
-logger = logging.getLogger(__name__)
 
 
 # =========================
-# 1. 提示詞與配置
+# 1. 執行緒安全的 API Key 索引追蹤器
 # =========================
 
-# 目前使用的 API Key 索引
-_current_key_index = 0
 
+class KeyIndexTracker:
+    """
+    執行緒安全的 API Key 索引追蹤器。
+    
+    用於解決多執行緒環境下全域變數 _current_key_index 的 race condition 問題。
+    透過 threading.Lock 確保並發存取的安全性。
+    """
+
+    def __init__(self, key_count: int = 0):
+        self._index = 0
+        self._key_count = key_count
+        self._lock = threading.Lock()
+
+    def get_current(self) -> int:
+        """取得目前索引（執行緒安全）。"""
+        with self._lock:
+            return self._index
+
+    def next(self) -> int:
+        """
+        輪替至下一個索引（執行緒安全，自動環繞）。
+        
+        當索引超過 key 數量時，會自動環繞回 0。
+        """
+        with self._lock:
+            self._index += 1
+            if self._key_count > 0:
+                self._index = self._index % self._key_count
+            return self._index
+
+    def set_key_count(self, count: int):
+        """設定 API Key 總數（用於 modulo 計算）。"""
+        with self._lock:
+            self._key_count = count
+
+    def reset(self) -> None:
+        """重置索引為 0（執行緒安全）。"""
+        with self._lock:
+            self._index = 0
+
+
+# 模組級單例
+_key_tracker = KeyIndexTracker()
+
+
+# 向後相容：保留舊 API（內部呼叫 _key_tracker）
+def get_current_key_index() -> int:
+    """取得目前索引（向後相容用）。"""
+    return _key_tracker.get_current()
+
+
+def rotate_key_index() -> int:
+    """輪替至下一個索引（向後相容用）。"""
+    return _key_tracker.next()
+
+
+def reset_key_index() -> None:
+    """重置索引（向後相容用）。"""
+    return _key_tracker.reset()
+
+
+# =========================
+# 2. 提示詞與配置
+# =========================
 
 def _get_all_keys() -> list[str]:
     """
@@ -31,12 +94,11 @@ def _get_all_keys() -> list[str]:
         if isinstance(key, str) and key.strip()
     ]
 
-
 def get_current_api_key() -> str:
     """
     從金鑰池中取得目前正在使用的 API 金鑰。
 
-    此函式依賴於全域索引變數 `_current_key_index`，
+    此函式依賴於執行緒安全的 KeyIndexTracker 類別 (_key_tracker)，
     確保在執行翻譯請求或進行輪替（Rotate）時，始終能獲取到當前設定的金鑰。
 
     回傳:
@@ -44,13 +106,16 @@ def get_current_api_key() -> str:
     """
     keys = _get_all_keys()
     if not keys:
-        logger.error("❌ 設定檔中沒有找到任何有效的 API Key")
+        log_error("❌ 設定檔中沒有找到任何有效的 API Key")
         return ""
 
-    # 加上一個防護：避免 index 越界
-    safe_index = min(_current_key_index, len(keys) - 1)
-    return keys[safe_index]
+    # 更新 key_count 以便正確環繞
+    _key_tracker.set_key_count(len(keys))
 
+    # 加上一個防護：避免 index 越界
+    current_index = _key_tracker.get_current()
+    safe_index = min(current_index, len(keys) - 1)
+    return keys[safe_index]
 
 def rotate_api_key():
     """
@@ -66,7 +131,7 @@ def rotate_api_key():
     - API Key 格式本身錯誤（例如 "token" 這種假 key）
 
     行為說明：
-    - 內部透過 _current_key_index 指向下一個 Key
+    - 內部透過 KeyIndexTracker (_key_tracker) 執行緒安全地切換
     - 若已經沒有下一個 Key，直接丟出 RuntimeError
       表示「所有 Key 都不可用，流程必須中止」
 
@@ -79,19 +144,21 @@ def rotate_api_key():
     切換至下一個可用的 API Key。
     回傳: True (切換成功) / False (已無可用 Key)
     """
-    global _current_key_index
     keys = _get_all_keys()
 
+    # 更新 key_count 以便正確環繞
+    _key_tracker.set_key_count(len(keys))
+
     # 檢查是否還有下一個 Key 可以切換
-    if _current_key_index + 1 >= len(keys):
-        logger.error("❌ 所有 API Key 已用盡（RPD exhausted）")
+    current_index = _key_tracker.get_current()
+    if current_index + 1 >= len(keys):
+        log_error("❌ 所有 API Key 已用盡（RPD exhausted）")
         return False
 
-    # 切換至下一個 API Key
-    _current_key_index += 1
-    logger.info(f"🔁 切換 API Key → index {_current_key_index}")
+    # 切換至下一個 API Key（執行緒安全）
+    new_index = _key_tracker.next()
+    log_info(f"🔁 切換 API Key → index {new_index}")
     return True
-
 
 def validate_api_keys():
     """
@@ -107,19 +174,19 @@ def validate_api_keys():
     for k in keys:
         # 1. 檢查金鑰是否符合 Google API Key 的標準前綴 "AIza"
         if not k.startswith("AIza"):
-            logger.error(f"❌ 偵測到無效格式金鑰: {k!r}")
+            log_error(f"❌ 偵測到無效格式金鑰: {k!r}")
             raise RuntimeError(
                 f"❌ 無效的 API Key 格式：{k!r}\n"
                 "Gemini API Key 應以 'AIza' 開頭，請檢查您的設定檔。"
             )
 
-    logger.info(f"✅ 金鑰格式驗證通過，共載入 {len(keys)} 組金鑰。")
-
+    log_info(f"✅ 金鑰格式驗證通過，共載入 {len(keys)} 組金鑰。")
 
 def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
-    """處理此函式的工作（細節以程式碼為準）。
+    """驗證 API Key 格式（UI 專用）。
 
-    回傳：None
+    參數：
+        keys: API Key 列表
     """
     for k in keys:
         if not k or not k.startswith("AIza"):
@@ -128,7 +195,6 @@ def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
                 "請使用 Google AI Studio 產生的 Gemini API Key，"
                 "通常應以 'AIza' 字樣開頭。"
             )
-
 
 # =========================
 # 2. Regex 規則定義
@@ -164,11 +230,9 @@ TOKEN_PATTERN = re.compile(r"\$\([^)]+\)")
 # 需要跳過翻譯的文字（你指定的類型）
 HASH_PREFIX_PATTERN = re.compile(r"^\s*#")  # 任何 # 開頭（含前置空白）
 
-
 def needs_translation_text(s: str) -> bool:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
-    回傳：依函式內 return path。
     """
     if not s or not isinstance(s, str):
         return False
@@ -187,7 +251,6 @@ def needs_translation_text(s: str) -> bool:
 
     # 還有英文 → 需要翻
     return True
-
 
 def value_fully_translated(value) -> bool:
     """
@@ -243,7 +306,6 @@ def value_fully_translated(value) -> bool:
     # 直接視為已完成翻譯
     return True
 
-
 def contains_cjk(s: str) -> bool:
     """
     檢查字串中是否包含 CJK（中 / 日 / 韓）文字。
@@ -278,7 +340,6 @@ def contains_cjk(s: str) -> bool:
             False → 不包含任何 CJK 字元
     """
     return isinstance(s, str) and CJK_RE.search(s) is not None
-
 
 def build_skip_terms_pattern(terms: list[str]) -> re.Pattern:
     """
@@ -329,15 +390,11 @@ def build_skip_terms_pattern(terms: list[str]) -> re.Pattern:
     # 編譯為不區分大小寫的正規表達式
     return re.compile(pattern, re.IGNORECASE)
 
-
 # =========================
 # 值是否值得翻譯（核心判斷）
 def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
-    """判斷此函式的工作（細節以程式碼為準）。
+    """
 
-    - 主要包裝：`strip`, `build_skip_terms_pattern`
-
-    回傳：依函式內 return path。
     """
     if not isinstance(value, str):
         return False
@@ -385,7 +442,7 @@ def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
     if (
         is_lang and SKIP_TERMS_PATTERN.search(s) and len(s) <= 5  # ⭐ 關鍵
     ):
-        logger.debug("SKIP[skip_terms] len=%d text=%r", len(s), s)
+        log_debug("SKIP[skip_terms] len=%d text=%r", len(s), s)
         return False
 
     # 避開羅馬數字
@@ -397,7 +454,6 @@ def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
         return False
 
     return True
-
 
 # =========================
 # 可翻譯欄位判斷

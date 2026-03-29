@@ -10,7 +10,6 @@ import flet as ft
 
 from .cache_shared_widgets import bordered_block
 
-
 def build_log_panel(
     *,
     sw_log_only_error: ft.Control,

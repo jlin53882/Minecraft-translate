@@ -13,18 +13,11 @@ from translation_tool.core.icon_preview_cache import generate_icon_preview
 from translation_tool.core.icon_resolver import resolve_icon_with_reason
 from translation_tool.core.icon_reason import IconRisk
 
-
 def to_halfwidth(text):
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`normalize`
-
-    回傳：依函式內 return path。
-    """
+    """將字串轉換為半形。"""
     if not isinstance(text, str):
         return text
     return unicodedata.normalize("NFKC", text)
-
 
 class LangItemRow(ft.Container):
     """LangItemRow 類別。
@@ -43,11 +36,15 @@ class LangItemRow(ft.Container):
         preview_root: Path,
         on_value_changed: Callable[[str, str], None],
     ):
-        """處理此函式的工作（細節以程式碼為準）。
+        """初始化 LangItemRow。
 
-        - 主要包裝：`__init__`, `resolve_icon_with_reason`, `Column`
-
-        回傳：None
+        參數：
+            lang_key: 語言 key
+            en_text: 英文原文
+            zh_text: 中文翻譯
+            assets_root: 資源根目錄
+            preview_root: 預覽根目錄
+            on_value_changed: 值變更回調函數
         """
         super().__init__(
             padding=ft.padding.symmetric(vertical=10, horizontal=8),

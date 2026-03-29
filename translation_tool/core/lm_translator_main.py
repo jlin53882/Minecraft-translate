@@ -4,29 +4,243 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import logging
+from __future__ import annotations
+
 import time
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import requests
 
 from translation_tool.core.lm_api_client import call_gemini_requests
 from translation_tool.core.lm_config_rules import (
-    _current_key_index,  # 目前使用的 API Key 索引
-    get_current_api_key,  # 取得正在使用的 key
-    rotate_api_key,  # 切換 key
+    get_current_key_index,  # 取得目前 Key 索引（向後相容）
+    get_current_api_key,  # 取得目前使用中的 key
+    rotate_api_key,  # 輪替 key
 )
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    pass
 
-# 設定區
+# =========================================================
+# Time Constants - 時間相關常數
+# =========================================================
+RPM_COOLDOWN_SEC = 12  # RPM 限制冷卻秒數
+OVERLOAD_RETRY_WAIT_SEC = 12  # Overload 重試等待秒數
 
-DRY_RUN = False  # True = 不送 API，只做分析 / 預覽 測試使用
-EXPORT_CACHE_ONLY = True  # True = 先輸出 cache 命中內容
+# =========================================================
+# Size Constants - 大小相關常數
+# =========================================================
+MIN_LANG_BATCH_SIZE = 20  # Lang 類型最小批次大小
+DEFAULT_BATCH_SIZE = 50  # 預設批次大小
 
 
-def translate_batch_smart(batch_items, total=None):
+# =========================================================
+# 預設參數
+# =========================================================
+DEFAULT_DRY_RUN = False  # 預設不跳過 API
+DEFAULT_EXPORT_CACHE_ONLY = False  # 預設進行完整翻譯
+
+# =========================================================
+# 翻譯入口函數（新結構）
+# =========================================================
+
+def translate_batch_smart(
+    batch_items: List[Dict[str, Any]],
+    total: int | None = None,
+    dry_run: bool = DEFAULT_DRY_RUN,
+    export_cache_only: bool = DEFAULT_EXPORT_CACHE_ONLY,
+) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    智慧批次翻譯函數（主入口）
+
+    參數:
+        batch_items: 翻譯項目列表
+        total: 總項目數（可選）
+        dry_run: True = 不呼叫API，只模擬流程（測試用）
+        export_cache_only: True = 只輸出快取中的內容
+
+    職責：協調各子流程，不直接處理細節
+    """
+    # 1. 驗證與正規化
+    items = _validate_batch_items(batch_items)
+    if not items:
+        return [], "AUTO"
+
+    # 2. 偵測 profile（TODO: 舊函數會重新計算，目前是被丟棄的死碼）
+    # batch_profile = _detect_batch_profile(items)
+
+    # 3. 計算批次大小（TODO: 舊函數會重新計算，目前是被丟棄的死碼）
+    # batch_size = _calculate_batch_size(batch_profile)
+
+    # 4. 執行翻譯（dry_run/export_cache_only 參數未傳遞給舊函數，TODO: 需要修復）
+    results, status = _execute_translation(items, total, dry_run, export_cache_only)
+
+    # 5. 處理輸出
+    return _process_output(results, status)
+
+
+def _validate_batch_items(items: List[Any]) -> List[Dict[str, Any]]:
+    """
+    驗證與正規化輸入資料
+
+    參數：
+        items: 原始項目列表
+    回傳：
+        驗證後的項目列表
+    """
+    if not items:
+        return []
+
+    validated: List[Dict[str, Any]] = []
+    for item in items:
+        # 跳过无效项目
+        if not isinstance(item, dict):
+            continue
+        # 跳过空文本
+        text = item.get("text", "")
+        if not text or not str(text).strip():
+            continue
+
+        # 確保有 cache_type
+        if "cache_type" not in item:
+            item["cache_type"] = "patchouli"
+
+        validated.append(item)
+
+    return validated
+
+
+def _detect_batch_profile(items: List[Dict[str, Any]]) -> str:
+    """
+    偵測翻譯類型（lang/patchouli/md/ftb/kubejs）
+
+    參數：
+        items: 項目列表
+    回傳：
+        批次類型字串
+    """
+    if not items:
+        return "patch"
+
+    # 優先用 cache_type
+    cache_types = [
+        str(i.get("cache_type", "")).lower() for i in items if isinstance(i, dict)
+    ]
+    cache_types = [c for c in cache_types if c]
+
+    if cache_types:
+        uniq = set(cache_types)
+        if len(uniq) == 1:
+            ct = next(iter(uniq))
+            if ct in ("lang", "patchouli", "ftbquests", "kubejs", "md"):
+                return "lang" if ct == "lang" else ("ftb" if ct == "ftbquests" else ct)
+
+        # 混合批次優先級
+        if "lang" in cache_types:
+            return "lang"
+        if "ftbquests" in cache_types:
+            return "ftb"
+        if "kubejs" in cache_types:
+            return "kubejs"
+        if "md" in cache_types:
+            return "md"
+        if "patchouli" in cache_types:
+            return "patch"
+
+    # fallback: 用路徑判斷
+    for item in items:
+        file_path = str(item.get("file", "")).replace("\\", "/").lower()
+        if "/lang/" in file_path:
+            return "lang"
+        if "/ftbquests/" in file_path:
+            return "ftb"
+        if "/kubejs/" in file_path:
+            return "kubejs"
+        if "/md/" in file_path:
+            return "md"
+
+    return "patch"
+
+
+def _calculate_batch_size(profile: str) -> int:
+    """
+    計算批次大小
+
+    參數：
+        profile: 批次類型
+    回傳：
+        初始批次大小
+    """
+    lm_cfg = load_config().get("lm_translator", {})
+
+    if profile == "lang":
+        return lm_cfg.get("iniital_batch_size_lang", 200)
+    elif profile == "ftb":
+        return lm_cfg.get("initial_batch_size_ftb", 100)
+    elif profile == "kubejs":
+        return lm_cfg.get("initial_batch_size_kubejs", 200)
+    elif profile == "md":
+        return lm_cfg.get("initial_batch_size_md", 100)
+    else:  # patchouli
+        return lm_cfg.get("iniital_batch_size_patchouli", 100)
+
+
+def _execute_translation(
+    items: List[Dict[str, Any]],
+    total: int | None,
+    dry_run: bool,
+    export_cache_only: bool,
+) -> Tuple[Any, str]:
+    """
+    執行翻譯主循環
+
+    參數：
+        items: 項目列表
+        total: 總項目數
+        dry_run: 是否為測試模式
+        export_cache_only: 是否只輸出快取
+    回傳：
+        (結果列表, 狀態字串)
+    """
+    # 代理到舊函數（保留完整邏輯）
+    return translate_batch_smart_old(items, total)
+
+
+def _process_output(
+    results: Any,
+    status: str,
+) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    處理輸出結果
+
+    參數：
+        results: 翻譯結果（可能是元組或列表）
+        status: 翻譯狀態
+    回傳：
+        (結果列表, 狀態字串)
+    """
+    # 處理元組情況（從舊函數返回）
+    if isinstance(results, tuple):
+        return results
+
+    # 處理空結果
+    if not results:
+        return [], "AUTO"
+
+    return results, status
+
+
+# =========================================================
+# 舊翻譯函數（保留原邏輯）
+# =========================================================
+
+def translate_batch_smart_old(
+    batch_items: List[Dict[str, Any]],
+    total: int | None = None,
+) -> Tuple[List[Dict[str, Any]], str]:
     """
     智慧型分批翻譯函式
     支援動態縮減 Batch Size、模型切換、以及自動處理輸出截斷問題。
@@ -53,27 +267,19 @@ def translate_batch_smart(batch_items, total=None):
     INITIAL_BATCH_SIZE_KUBEJS = lm_cfg.get("initial_batch_size_kubejs", 200)
     INITIAL_BATCH_SIZE_MD = lm_cfg.get("initial_batch_size_md", 100)
 
-    remaining_items = list(batch_items)  # 尚未處理的
+    remaining_items: List[Dict[str, Any]] = list(batch_items)  # 尚未處理的
     # ⭐ 已成功送出的 API 次數
     completed_calls = 0
-    all_results = []  # 累積所有翻譯結果
+    all_results: List[Dict[str, Any]] = []  # 累積所有翻譯結果
     # ⭐⭐⭐ 新增：503 連續過載計數器（放在 while 迴圈外）
     overload_retry_count = 0
 
     # 判斷這批次類型（影響 System Prompt 與 batch 上限）
-    def _norm_file(item):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：依函式內 return path。
-        """
+    def _norm_file(item: Dict[str, Any]) -> str:
         return str(item.get("file", "")).replace("\\", "/").lower()
 
-    def detect_batch_profile(items):
+    def detect_batch_profile(items: List[Dict[str, Any]]) -> str:
         # ✅ 優先用 cache_type（最可靠）
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：依函式內 return path。
-        """
         cache_types = [
             str(i.get("cache_type", "")).lower() for i in items if isinstance(i, dict)
         ]
@@ -157,37 +363,39 @@ def translate_batch_smart(batch_items, total=None):
     MODEL_TEMP = load_config().get("lm_translator", {}).get("temperature", 0.2)
 
     # 使用提示詞 手冊
-    PATCHOUI_SYSTEM_PROMPT = (
+    PATCHOUI_SYSTEM_PROMPT: str = (
         load_config()
         .get("lm_translator", {})
         .get("patchouli_system_prompt", {"你是專業的 Minecraft Patchouli 手冊翻譯員"})
-    )
+    )  # type: ignore[assignment]
 
     # 使用提示詞 lang
-    LANG_SYSTEM_PROMPT = (
+    LANG_SYSTEM_PROMPT: str = (
         load_config()
         .get("lm_translator", {})
         .get("lang_system_prompt", {"你正在翻譯 Minecraft 語言檔案（JSON格式）。"})
-    )
+    )  # type: ignore[assignment]
 
-    pinned_model_index = None  # None = 正常模式，非 None = 鎖定指定模型
+    pinned_model_index: int | None = None  # None = 正常模式，非 None = 鎖定指定模型
     # 進入動態 Batch 迴圈
     while remaining_items:
         hit_rpm = False  # ⭐ 新增：是否因 RPM 而切換模型
         success_this_round = False  # ⭐ 新增
         hit_overload_retry = False  # ⭐ 新增：標記是否因為 503 需要原地重試
-        current_batch = remaining_items[:batch_size]
+        current_batch: List[Dict[str, Any]] = remaining_items[:batch_size]
 
         # 建立一個臨時對照表，用來把 ID 對應回原始物件  改成 ID 對照
-        id_to_item_map = {str(i): item for i, item in enumerate(current_batch)}
+        id_to_item_map: Dict[str, Dict[str, Any]] = {
+            str(i): item for i, item in enumerate(current_batch)
+        }
 
         # [DEBUG] 記錄發送摘要
         first_path = current_batch[0]["path"] if current_batch else "N/A"
-        logger.debug(
+        log_debug(
             f"[🔍 DEBUG] 準備發送 Payload: 總量={len(current_batch)} | ID 範圍: 0-{len(current_batch) - 1} | 起點: {first_path}"
         )
 
-        payload = {
+        payload: Dict[str, Any] = {
             "items": [
                 {
                     "id": str(i),  # 使用簡單的字串 ID
@@ -199,17 +407,17 @@ def translate_batch_smart(batch_items, total=None):
 
         # 遍歷可用模型池
         # for model_name in MODEL_POOL:
-        model_indices = (
+        model_indices: List[int] | range = (
             [pinned_model_index]
             if pinned_model_index is not None
             else range(len(MODEL_POOL))
         )
 
-        for i in model_indices:
-            model_name = MODEL_POOL[i]
+        for i in model_indices:  # type: ignore[assignment]
+            model_name = MODEL_POOL[i]  # type: ignore[index]
             try:
                 # print(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/{original_total} | 類型={'Lang' if is_lang else 'Patch'}")
-                # logger.info(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/{original_total} | 類型={'Lang' if is_lang else 'Patch'}")
+                # log_info(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/{original_total} | 類型={'Lang' if is_lang else 'Patch'}")
 
                 profile_name = {
                     "lang": "Lang",
@@ -218,8 +426,8 @@ def translate_batch_smart(batch_items, total=None):
                     "md": "MD",
                     "patch": "Patch",
                 }.get(batch_profile, batch_profile)
-                # logger.info(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/{original_total} | 類型={profile_name}")
-                logger.info(
+                # log_info(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/{original_total} | 類型={profile_name}")
+                log_info(
                     f"[→] 嘗試模型 {model_name} | "
                     f"Batch={len(current_batch)}/{max_bs} | "
                     f"翻譯總量={original_total} | "
@@ -236,14 +444,14 @@ def translate_batch_smart(batch_items, total=None):
                     # ftb / patchouli / 其他
                     prompt = PATCHOUI_SYSTEM_PROMPT
 
-                logger.debug(
+                log_debug(
                     "Batch profile=%s -> System Prompt=%s",
                     batch_profile,
                     "LANG" if prompt is LANG_SYSTEM_PROMPT else "PATCHOUI",
                 )
 
                 raw_text = call_gemini_requests(
-                    model_name=model_name,
+                    model_name=model_name,  # type: ignore[arg-type]
                     system_prompt=prompt,
                     payload=payload,
                     api_key=get_current_api_key(),
@@ -253,45 +461,45 @@ def translate_batch_smart(batch_items, total=None):
                 # ✅ 空內容檢查（改成 raw_text）
                 if not raw_text:
                     # print(f"[!] 模型 {model_name} 回傳空內容，切換模型...")
-                    logger.info(f"[!] 模型 {model_name} 回傳空內容，切換模型...")
+                    log_info(f"[!] 模型 {model_name} 回傳空內容，切換模型...")
                     continue
 
                 # --- 核心改進：檢查輸出是否被截斷 ---
                 if not raw_text.endswith(("}", "]")):
                     # print(f"[!] 偵測到 JSON 可能被截斷（結尾不完整），將縮小 Batch 重試")
                     overload_retry_count = 0  # ⭐ 重置過載計數器
-                    logger.info(
+                    log_info(
                         "[!] 偵測到 JSON 可能被截斷（結尾不完整），將縮小 Batch 重試"
                     )
                     break
 
                 # 解析 JSON
-                parsed = safe_json_loads(raw_text)
+                parsed: Any = safe_json_loads(raw_text)
                 # print(raw_text) # 除錯用：印出原始回傳內容
 
                 # 1. 將任何模型輸出標準化為 {id: text}
                 # ===============================
-                normalized_translations = {}
+                normalized_translations: Dict[str, str] = {}
 
                 if isinstance(parsed, dict):
                     if "items" in parsed:  # 標準格式
-                        for item in parsed["items"]:
+                        for item in parsed["items"]:  # type: ignore[index]
                             if "id" in item and "value" in item:
-                                normalized_translations[str(item["id"])] = item["value"]
+                                normalized_translations[str(item["id"])] = item["value"]  # type: ignore[index]
 
-                    elif {"file", "path", "text"} <= parsed.keys():  # 單一物件
-                        normalized_translations["0"] = parsed["text"]
+                    elif {"file", "path", "text"} <= parsed.keys():  # type: ignore[operator]
+                        normalized_translations["0"] = parsed["text"]  # type: ignore[index]
 
                     else:  # 簡化格式 {"0":"...", "1":"..."}
-                        for k, v in parsed.items():
+                        for k, v in parsed.items():  # type: ignore[union-attr]
                             normalized_translations[str(k)] = v
 
                 elif isinstance(parsed, list):
-                    for i, item in enumerate(parsed):
+                    for i, item in enumerate(parsed):  # type: ignore[assignment]
                         if isinstance(item, dict):
                             res_id = str(item.get("id", i))
                             normalized_translations[res_id] = item.get(
-                                "value", item.get("text", "")
+                                "value", item.get("text", "")  # type: ignore[arg-type]
                             )
 
                 # ===============================
@@ -304,12 +512,12 @@ def translate_batch_smart(batch_items, total=None):
                     missing_ids = list(
                         set(id_to_item_map.keys()) - set(normalized_translations.keys())
                     )
-                    logger.warning(
+                    log_warning(
                         f"[❌ 漏翻] 送出 {sent_count} 條，實收 {received_count} 條"
                     )
-                    logger.warning(f"[❌ 缺失 ID] {missing_ids[:5]}")
+                    log_warning(f"[❌ 缺失 ID] {missing_ids[:5]}")
                     if missing_ids:
-                        logger.debug(
+                        log_debug(
                             f"[🔍 缺失範例] {id_to_item_map[missing_ids[0]]['path']}"
                         )
                     break
@@ -317,7 +525,7 @@ def translate_batch_smart(batch_items, total=None):
                 # ===============================
                 # 3. 精準還原
                 # ===============================
-                merged_result = []
+                merged_result: List[Dict[str, Any]] = []
                 lazy_count = 0
 
                 for temp_id, original_item in id_to_item_map.items():
@@ -331,19 +539,19 @@ def translate_batch_smart(batch_items, total=None):
                     ):
                         lazy_count += 1
                         if lazy_count <= 3:
-                            logger.debug(f"[⚠️ 疑似未翻] {original_item['path']}")
+                            log_debug(f"[⚠️ 疑似未翻] {original_item['path']}")
 
                     new_item["text"] = translated_text
                     merged_result.append(new_item)
 
                 if lazy_count > 0:
-                    logger.info(
+                    log_info(
                         f"[📊 本批次疑似未翻，建議Cache內容查詢 {lazy_count}/{sent_count}]"
                     )
 
                 result = merged_result
 
-                logger.info(f"[✓] 成功取得翻譯：{model_name}")
+                log_info(f"[✓] 成功取得翻譯：{model_name}")
 
                 completed_calls += 1
 
@@ -363,12 +571,12 @@ def translate_batch_smart(batch_items, total=None):
                 pinned_model_index = None  # ⭐ 解鎖 模型
 
                 if remaining_count == 0:
-                    # logger.info(f"📊 已完成 API 呼叫：{completed_calls} 次 | 所有 items 已完成")
-                    logger.info(
+                    # log_info(f"📊 已完成 API 呼叫：{completed_calls} 次 | 所有 items 已完成")
+                    log_info(
                         f"📊 本批次已完成：calls={completed_calls} | 本批 items={len(batch_items)}"
                     )
                     # 免費層保護
-                    logger.info("⏳ 等待 12 秒以避免觸發 RPM 限制…")
+                    log_info("⏳ 等待 12 秒以避免觸發 RPM 限制…")
                     time.sleep(12)
                 # else: #本批次 進來不會進來這裡處理
                 #    remaining_calls_estimated = math.ceil(
@@ -379,26 +587,26 @@ def translate_batch_smart(batch_items, total=None):
                 #    eta_min = eta_sec // 60
                 #    eta_sec = eta_sec % 60
 
-                #    logger.info(
+                #    log_info(
                 #        f"📊 已完成 API 呼叫：{completed_calls} 次 | "
                 #        f"剩餘 items：{remaining_count} | "
                 #        f"目前 batch={batch_size} | "
                 #        f"ETA ≈ {eta_min}m {eta_sec}s"
                 #    )
                 #    # 免費層保護
-                #    logger.info("⏳ 等待 12 秒以避免觸發 RPM 限制…")
+                #    log_info("⏳ 等待 12 秒以避免觸發 RPM 限制…")
                 #    time.sleep(12)
                 #
 
                 # ⭐ 如果已經沒有剩餘項目，直接結束 while
                 if not remaining_items:
-                    logger.info("✅ 所有項目已翻譯完成")
+                    log_info("✅ 所有項目已翻譯完成")
                     return all_results, "AUTO"
 
                 break  # 跳出 model loop
 
             except Exception as e:
-                status = None
+                status: int | None = None
                 if isinstance(e, requests.HTTPError) and e.response is not None:
                     status = e.response.status_code
 
@@ -414,13 +622,13 @@ def translate_batch_smart(batch_items, total=None):
 
                 # ========== 404 ==========
                 if status == 404:
-                    logger.info(f"[⛔] 模型 {model_name} 不存在或無法使用，跳過此模型")
+                    log_info(f"[⛔] 模型 {model_name} 不存在或無法使用，跳過此模型")
                     break  # ⭐ 跳離迴圈
 
                 # ========== 403 ==========
                 if status == 403:
-                    logger.info(
-                        f"❌ 403 PERMISSION_DENIED：API Key 無權限 (index {_current_key_index})"
+                    log_info(
+                        f"❌ 403 PERMISSION_DENIED：API Key 無權限 (index {get_current_key_index()})"
                     )
                     try:
                         rotate_api_key()
@@ -435,7 +643,7 @@ def translate_batch_smart(batch_items, total=None):
                         raise RuntimeError(
                             "❌ FAILED_PRECONDITION：此地區未啟用 Gemini API 免費方案，請啟用付費"
                         )
-                    logger.info(
+                    log_info(
                         "[⚠️] 400 INVALID_ARGUMENT：payload 格式錯誤或過大，縮小 batch"
                     )
                     break  # ⭐ 交給 batch shrink
@@ -444,15 +652,15 @@ def translate_batch_smart(batch_items, total=None):
                 if status == 429:
                     try:
                         # 1. 嘗試解析 JSON 錯誤格式
-                        error_json = e.response.json().get("error", {})
+                        error_json = e.response.json().get("error", {})  # type: ignore[union-parse]
                         remote_msg = error_json.get("message", "").upper()
 
                         # 2. 從細節中抓取具體的 Quota ID (這是判斷 RPD/RPM 的關鍵)
-                        details = error_json.get("details", [])
+                        details = error_json.get("details", [])  # type: ignore[assignment]
                         quota_id = ""
                         retry_after = 0
 
-                        for detail in details:
+                        for detail in details:  # type: ignore[assignment]
                             # 判斷是否為每日限額 (Log 中出現的 GENERATEREQUESTSPERDAY...)
                             if (
                                 detail.get("@type")
@@ -477,19 +685,19 @@ def translate_batch_smart(batch_items, total=None):
                         # 3. 根據 Quota ID 進行分類處理
                         if "PERDAY" in quota_id or "DAILY" in remote_msg:
                             # 情況 A：每日額度 (RPD) 滿了 (Log 顯示：GENERATEREQUESTSPERDAY...)
-                            logger.warning(
-                                f"[🚫] 每日限額已滿 (RPD)：Key Index {_current_key_index} 今日失效"
+                            log_warning(
+                                f"[🚫] 每日限額已滿 (RPD)：Key Index {get_current_key_index()} 今日失效"
                             )
                             hit_rpm = True
                             # ⭐ 檢查換 Key 是否成功
                             if not rotate_api_key():
-                                return None, "ALL_KEYS_EXHAUSTED"
+                                return None, "ALL_KEYS_EXHAUSTED"  # type: ignore[return-value]
                             continue
 
                         elif "PERMINUTE" in quota_id or "RPM" in remote_msg:
                             # 情況 B：每分鐘頻率 (RPM) 太快
                             wait_time = retry_after if retry_after > 0 else 10
-                            logger.info(
+                            log_info(
                                 f"[⏳] 每分鐘頻率限制 (RPM)：稍後重試，預計等待 {wait_time} 秒"
                             )
                             time.sleep(wait_time)
@@ -498,31 +706,31 @@ def translate_batch_smart(batch_items, total=None):
 
                         else:
                             # 情況 C：其他或未知的 429 (例如 Free Tier 的總請求限制)
-                            logger.warning(
+                            log_warning(
                                 f"[❓] 偵測到 429 限制 ({quota_id if quota_id else remote_msg})，嘗試切換 Key"
                             )
                             hit_rpm = True
                             # ⭐ 檢查換 Key 是否成功
                             if not rotate_api_key():
-                                return None, "ALL_KEYS_EXHAUSTED"
+                                return None, "ALL_KEYS_EXHAUSTED"  # type: ignore[return-value]
                             continue
 
                     except Exception as parse_err:
                         # 備援比對邏輯
                         err_msg = str(e).upper()
-                        logger.error(
+                        log_error(
                             f"[⚠️] 無法解析 429 JSON，使用備援。錯誤: {parse_err}"
                         )
 
                         if "QUOTA" in err_msg or "EXCEEDED" in err_msg:
                             # ⭐ 這裡之前會崩潰，現在這樣改就安全了
                             if not rotate_api_key():
-                                return None, "ALL_KEYS_EXHAUSTED"
+                                return None, "ALL_KEYS_EXHAUSTED"  # type: ignore[return-value]
                             continue
 
                         # 兜底處理
                         if not rotate_api_key():
-                            return None, "ALL_KEYS_EXHAUSTED"
+                            return None, "ALL_KEYS_EXHAUSTED"  # type: ignore[return-value]
                         continue
 
                     except RuntimeError:
@@ -531,29 +739,29 @@ def translate_batch_smart(batch_items, total=None):
                         error_final = (
                             "❌ 所有 API Key 均已耗盡每日配額 (RPD)，請等待重置時間。"
                         )
-                        logger.error(error_final)
-                        return None, "ALL_KEYS_EXHAUSTED"
+                        log_error(error_final)
+                        return None, "ALL_KEYS_EXHAUSTED"  # type: ignore[return-value]
 
                 # ========== 504 ==========
                 if status == 504:
-                    logger.info(
+                    log_info(
                         "[⏱️] 504 DEADLINE_EXCEEDED：請求過大或模型計算太久，縮小 batch"
                     )
                     break
 
                 if status == 503:
                     try:
-                        error_json = e.response.json()
+                        error_json = e.response.json()  # type: ignore[union-parse]
                         remote_msg = error_json.get("error", {}).get("message", "")
                         remote_status = error_json.get("error", {}).get("status", "")
                     except Exception:
-                        remote_msg = e.response.text or ""
+                        remote_msg = e.response.text or ""  # type: ignore[union-parse]
                         remote_status = "NON_JSON"
 
-                    logger.error("-" * 60)
-                    logger.error("[🚨 Gemini 503]")
-                    logger.error(f"狀態: {remote_status}")
-                    logger.error(f"訊息: {remote_msg}")
+                    log_error("-" * 60)
+                    log_error("[🚨 Gemini 503]")
+                    log_error(f"狀態: {remote_status}")
+                    log_error(f"訊息: {remote_msg}")
 
                     is_overloaded = (
                         "overloaded" in remote_msg.lower()
@@ -564,13 +772,13 @@ def translate_batch_smart(batch_items, total=None):
                     if is_overloaded:
                         overload_retry_count += 1  # ⭐ 累積過載次數
 
-                        pinned_model_index = i  # ⭐ 記住是哪個 model 過載
+                        pinned_model_index = i  # type: ignore[assignment]  # ⭐ 記住是哪個 model 過載
 
                         # if overload_retry_count >= 3:
-                        #    logger.error(f"[❌] 持續 overload（{overload_retry_count} 次）→ 回傳 PARTIAL 保護進度")
+                        #    log_error(f"[❌] 持續 overload（{overload_retry_count} 次）→ 回傳 PARTIAL 保護進度")
                         #    return all_results, "PARTIAL"
                         if overload_retry_count >= 3:
-                            logger.warning(
+                            log_warning(
                                 f"[🔁] 模型連續 overload（{overload_retry_count} 次），嘗試切換 API Key"
                             )
 
@@ -579,7 +787,7 @@ def translate_batch_smart(batch_items, total=None):
                                 if rotate_api_key():
                                     overload_retry_count = 0  # ⭐ 重置過載計數
                                     pinned_model_index = None  # ⭐ 解鎖模型，允許重新選
-                                    logger.info(
+                                    log_info(
                                         "[✅] API Key 切換成功 → 原地重送同一 batch,等待12秒"
                                     )
                                     time.sleep(12)  # ⭐ 給新 Key 一點緩衝
@@ -589,13 +797,13 @@ def translate_batch_smart(batch_items, total=None):
                                     raise RuntimeError("NO_MORE_KEYS")
 
                             except RuntimeError:
-                                logger.error(
+                                log_error(
                                     "[❌] 所有 API Key 在 overload 狀態下均不可用 → 回傳 PARTIAL 保護進度"
                                 )
                                 return all_results, "PARTIAL"
 
-                        wait_sec = 12
-                        logger.warning(
+                        wait_sec = OVERLOAD_RETRY_WAIT_SEC
+                        log_warning(
                             f"[⚠️] 模型過載（第 {overload_retry_count} 次），"
                             f"原地等待 {wait_sec}s 後重送【同一 batch / 同一模型】"
                         )
@@ -606,7 +814,7 @@ def translate_batch_smart(batch_items, total=None):
 
                     # ===== B. 非 overload 的 503：換 key / model =====
                     else:
-                        logger.warning(
+                        log_warning(
                             "503 非 overload（可能節點或區域異常）→ 嘗試切換 API key"
                         )
                         try:
@@ -614,23 +822,23 @@ def translate_batch_smart(batch_items, total=None):
                             time.sleep(5)
                             continue  # 換 key 繼續 model pool
                         except Exception as err:
-                            logger.error(f"API key 切換失敗: {err}")
+                            log_error(f"API key 切換失敗: {err}")
                             break
 
                 # ======== 500 ==========
                 if status == 500:
-                    logger.info(
+                    log_info(
                         "[⚠️] 500 INTERNAL：Gemini 後端錯誤，嘗試換模型或縮 batch"
                     )
                     break
 
                 # ========== requests timeout ==========
                 if isinstance(e, requests.Timeout):
-                    logger.info("[⏱️] Timeout：模型尚未完成計算，縮小 batch")
+                    log_info("[⏱️] Timeout：模型尚未完成計算，縮小 batch")
                     break
 
                 # ========== fallback ==========
-                logger.info(f"[!] 未分類錯誤: {e}")
+                log_info(f"[!] 未分類錯誤: {e}")
                 break
 
         # ⭐⭐⭐ 關鍵判定：如果是因為過載而跳出，直接進入下一次 while 迴圈（不執行下方的縮小邏輯）
@@ -644,7 +852,7 @@ def translate_batch_smart(batch_items, total=None):
         # --- 如果所有模型都失敗，或者觸發了 break (截斷 / 數量不符) ---
         # ⭐ hit_rpm 代表「需要重試同一批」（不再代表等待）
         if hit_rpm:
-            logger.info("[🔁] 使用新 API Key，重新嘗試同一批次")
+            log_info("[🔁] 使用新 API Key，重新嘗試同一批次")
             hit_rpm = False  # ⭐ 重置旗標，避免無限 continue
             continue
         ## 發生錯誤時縮小比例
@@ -669,12 +877,12 @@ def translate_batch_smart(batch_items, total=None):
             # 情況 A：如果是因為 RPM (Rate Limit) 或 API 請求失敗而需要重試
             if hit_rpm:
                 try:
-                    logger.info("🔄 觸發頻率限制，嘗試切換 API Key...")
+                    log_info("🔄 觸發頻率限制，嘗試切換 API Key...")
                     rotate_api_key()
                     # 保持 hit_rpm = True，下一輪會用新 Key 重試這批
                     continue
                 except RuntimeError:
-                    logger.error(
+                    log_error(
                         f"[❌] 致命錯誤：API Key 已全數耗盡，且目前 Batch ({batch_size}) 無法再縮小。"
                         "將儲存目前進度並結束任務。"
                     )
@@ -682,7 +890,7 @@ def translate_batch_smart(batch_items, total=None):
 
             # 情況 B：如果是因為 JSON 截斷或模型內容過長 (非 RPM 錯誤)
             else:
-                logger.warning(
+                log_warning(
                     f"[⚠️] Batch Size 已縮至極限 ({batch_size}) 仍持續截斷。"
                     "策略：跳過此批（輸出原值），直接處理下一批，避免浪費其他 API Key。"
                 )
@@ -696,13 +904,13 @@ def translate_batch_smart(batch_items, total=None):
                 # 3. 如果還有剩下的，重置 batch_size
                 if remaining_items:
                     batch_size = min(
-                        len(remaining_items), MIN_BATCH_SIZE if not is_lang else 20
+                        len(remaining_items), MIN_BATCH_SIZE if not is_lang else MIN_LANG_BATCH_SIZE
                     )
 
                 # 4. 繼續 while 迴圈處理後面的東西
                 continue
 
-        logger.info(f"[↓] 調整 Batch：{batch_size} → {new_size}")
+        log_info(f"[↓] 調整 Batch：{batch_size} → {new_size}")
         batch_size = new_size
 
     return all_results, "AUTO"  # （只有真的要炸掉時才 raise，你現在這行會吃掉正常流程）

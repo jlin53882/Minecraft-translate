@@ -4,20 +4,25 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import logging
+from __future__ import annotations
+
 import threading
 import time
+from typing import Any
 
 import flet as ft
+
+from app.ui import theme
+from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug
 
 # UI 共用元件：統一卡片/按鈕樣式
 from app.ui.components import primary_button, styled_card
 
 from app.services_impl.pipelines.lm_service import run_lm_translation_service
 from app.task_session import TaskSession
+from app.logging import LogPresenter, load_ui_logging_config
 from translation_tool.utils.config_manager import load_config
 
-logger = logging.getLogger(__name__)
 LM_translate_folder_name = (
     load_config().get("lm_translator", {}).get("lm_translate_folder_name", "LM翻譯後")
 )
@@ -26,12 +31,12 @@ LM_translate_folder_name = (
 class LMView(ft.Column):
     """LM 翻譯頁（風格對齊 Translation/Extractor）。"""
 
-    def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """處理此函式的工作（細節以程式碼為準）。
+    def __init__(self, page: ft.Page, file_picker: ft.FilePicker) -> None:
+        """初始化 LMView。
 
-        - 主要包裝：`__init__`, `TextField`
-
-        回傳：None
+        參數：
+            page: Flet Page 物件
+            file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=16)
         self.page = page
@@ -46,7 +51,7 @@ class LMView(ft.Column):
             hint_text="請選擇要進行 LM 翻譯的資料夾",
             expand=True,
             dense=True,
-            border_color=ft.Colors.OUTLINE,
+            border_color=theme.OUTLINE,
             text_size=14,
             content_padding=14,
             prefix_icon=ft.Icons.FOLDER,
@@ -56,7 +61,7 @@ class LMView(ft.Column):
             hint_text=f"留空會使用：{LM_translate_folder_name}",
             expand=True,
             dense=True,
-            border_color=ft.Colors.OUTLINE,
+            border_color=theme.OUTLINE,
             text_size=14,
             content_padding=14,
             prefix_icon=ft.Icons.FOLDER_COPY,
@@ -75,12 +80,22 @@ class LMView(ft.Column):
 
         # 狀態與日誌
         self.status_chip = ft.Chip(
-            label=ft.Text("尚未開始"), bgcolor=ft.Colors.GREY_200
+            label=ft.Text("尚未開始"), bgcolor=theme.GREY_200
         )
         self.progress_bar = ft.ProgressBar(
-            value=0, height=8, bgcolor=ft.Colors.GREY_200, color=ft.Colors.BLUE
+            value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
         self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
+
+        # LogPresenter：接管 log_view 的渲染，防止 UI controls 膨脹凍住
+        # tail 模式與既有的 [-250:] 行為一致
+        ui_cfg = load_ui_logging_config(load_config)
+        self.log_presenter = LogPresenter(
+            mode="tail",
+            tail_lines=ui_cfg.get("tail_lines", 250),
+            colorize=False,  # 目前 UI 只用灰底灰字，不做等级著色
+            default_color=str(theme.GREY_100),
+        )
 
         # 按鈕（共用 primary style）
         self.start_button = primary_button(
@@ -148,19 +163,14 @@ class LMView(ft.Column):
     # - 多頁共用一致樣式
     # - 之後調整 UI（padding/radius/border/divider）只要改一處
 
-    def _path_row(self, field: ft.TextField, on_pick) -> ft.Control:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`Row`
-
-        回傳：依函式內 return path。
-        """
+    def _path_row(self, field: ft.TextField, on_pick: Any) -> ft.Control:
+        """建立路徑輸入列"""
         return ft.Row(
             [
                 field,
                 ft.IconButton(
                     icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                    icon_color=ft.Colors.BLUE_GREY_700,
+                    icon_color=theme.BLUE_GREY_700,
                     tooltip="選擇資料夾",
                     on_click=on_pick,
                 ),
@@ -171,53 +181,32 @@ class LMView(ft.Column):
     # --------------------------------------------------
     # Events
     # --------------------------------------------------
-    def pick_input_directory(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`get_directory_path`
-
-        回傳：None
-        """
+    def pick_input_directory(self, e: ft.ControlEvent) -> None:
+        """開啟輸入目錄選擇對話框"""
         self.file_picker.on_result = self.on_input_dir_picked
         self.file_picker.get_directory_path()
 
-    def on_input_dir_picked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+    def on_input_dir_picked(self, e: ft.FilePickerResultEvent) -> None:
+        """處理輸入目錄選擇結果"""
         if e.path:
             self.input_path.value = e.path
             self.page.update()
 
-    def pick_output_directory(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`get_directory_path`
-
-        回傳：None
-        """
+    def pick_output_directory(self, e: ft.ControlEvent) -> None:
+        """開啟輸出目錄選擇對話框"""
         self.file_picker.on_result = self.on_output_dir_picked
         self.file_picker.get_directory_path()
 
-    def on_output_dir_picked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+    def on_output_dir_picked(self, e: ft.FilePickerResultEvent) -> None:
+        """處理輸出目錄選擇結果"""
         if e.path:
             self.output_path.value = e.path
             self.page.update()
 
-    def start_clicked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`TaskSession`, `start`, `_set_status`
-
-        回傳：None
-        """
+    def start_clicked(self, e: ft.ControlEvent) -> None:
+        """處理開始翻譯按鈕點擊事件"""
         if not (self.input_path.value or "").strip():
-            self._set_status("請先選擇輸入資料夾", ft.Colors.RED_200)
+            self._set_status("請先選擇輸入資料夾", theme.RED_200)
             self.page.update()
             return
 
@@ -229,7 +218,7 @@ class LMView(ft.Column):
                 f"[資訊] 未指定輸出，將使用預設：{LM_translate_folder_name}"
             )
 
-        self._set_status("執行中", ft.Colors.BLUE_200)
+        self._set_status("執行中", theme.BLUE_200)
         self.progress_bar.value = 0
         self.log_view.controls.clear()
         self.page.update()
@@ -239,7 +228,7 @@ class LMView(ft.Column):
         export_lang = self.export_lang_checkbox.value
         write_new_cache = self.write_new_cache_switch.value
 
-        logger.debug(
+        log_debug(
             "LM UI options: dry_run=%s export_lang=%s write_new_cache=%s",
             dry_run,
             export_lang,
@@ -264,22 +253,13 @@ class LMView(ft.Column):
     # --------------------------------------------------
     # UI Timer
     # --------------------------------------------------
-    def start_ui_timer(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`start`
-
-        回傳：None
-        """
+    def start_ui_timer(self) -> None:
+        """啟動 UI 更新定時器，定期刷新進度條與日誌。"""
         if self._ui_timer_running:
             return
         self._ui_timer_running = True
 
-        def loop():
-            """處理此函式的工作（細節以程式碼為準）。
-
-            回傳：None
-            """
+        def loop() -> None:
             while self._ui_timer_running:
                 time.sleep(0.1)
                 if not self.session:
@@ -288,17 +268,13 @@ class LMView(ft.Column):
                 snap = self.session.snapshot()
                 self.progress_bar.value = snap["progress"]
 
-                self.log_view.controls.clear()
-                for line in snap["logs"][-250:]:
-                    self.log_view.controls.append(
-                        ft.Text(line, size=13, color=ft.Colors.GREY_100)
-                    )
+                self.log_presenter.sync(self.log_view, snap["logs"])
 
                 if snap["status"] == "DONE":
-                    self._set_status("任務完成", ft.Colors.GREEN_200)
+                    self._set_status("任務完成", theme.GREEN_200)
                     self._ui_timer_running = False
                 elif snap["status"] == "ERROR":
-                    self._set_status("任務發生錯誤", ft.Colors.RED_200)
+                    self._set_status("任務發生錯誤", theme.RED_200)
                     self._ui_timer_running = False
 
                 self.page.update()
@@ -308,23 +284,14 @@ class LMView(ft.Column):
     # --------------------------------------------------
     # UI helpers
     # --------------------------------------------------
-    def _set_status(self, text: str, color: str):
-        """設定此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`Text`
-
-        回傳：None
-        """
+    def _set_status(self, text: str, color: str) -> None:
+        """更新狀態晶片顯示"""
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
-    def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`SnackBar`
-
-        回傳：None
-        """
+    def _show_snack_bar(self, message: str, color: str = theme.RED_600) -> None:
+        """顯示 SnackBar 訊息提示"""
+        log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

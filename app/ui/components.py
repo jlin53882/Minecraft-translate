@@ -1,4 +1,4 @@
-"""共用 UI 元件（可重用的小拼裝）。
+﻿"""共用 UI 元件（可重用的小拼裝）。
 
 原則
 - 只放純 UI / 樣式封裝，不碰任何 services / translation_tool 業務邏輯。
@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import flet as ft
-
+from app.ui import theme
 
 # -------------------------
 # 基礎視覺常數（集中管理）
@@ -23,7 +23,6 @@ CARD_RADIUS: int = 10
 CARD_BORDER_COLOR = ft.Colors.BLACK12
 CARD_BG_COLOR = ft.Colors.WHITE
 DIVIDER_COLOR = ft.Colors.GREY_200
-
 
 def section_header(
     title: str,
@@ -54,7 +53,6 @@ def section_header(
         spacing=8,
     )
 
-
 def styled_card(
     *,
     title: str,
@@ -62,8 +60,12 @@ def styled_card(
     content: ft.Control,
     expand: bool = False,
     icon_color: str = ft.Colors.BLUE_GREY_700,
+    collapsible: bool = False,
+    default_collapsed: bool = False,
+    quick_actions: list = None,
+    page: ft.Page = None,  # 新增：用於收合後刷新 UI
 ) -> ft.Container:
-    """統一的「區塊卡片」外觀。
+    """統一的「區塊卡片」外觀（支援收合）。
 
     這個元件用在大型 View 內，把每個區塊包成一致的白底卡片。
 
@@ -72,30 +74,77 @@ def styled_card(
         icon: 區塊 icon
         content: 內容控制項
         expand: 是否要讓卡片本身 expand
+        icon_color: 圖標顏色
+        collapsible: 是否支援收合
+        default_collapsed: 預設是否收合
+        quick_actions: 快速操作按鈕列表
+        page: Flet Page 物件（收合時需要）
 
     Returns:
         ft.Container
     """
+    # 內部狀態管理
+    is_collapsed = [default_collapsed]
 
-    body = ft.Container(expand=True, content=content) if expand else content
+    # 內容區域 - 始終使用 container 包裝以便控制可見性
+    content_container = ft.Container(
+        expand=expand,
+        content=content,
+        visible=not default_collapsed,  # 修正：default_collapsed=False 時 visible=True
+    )
 
-    return ft.Container(
+    # 建立卡片內容 - 始終使用 content_container 以確保收合功能正常
+    card_content = [
+        section_header(title, icon, icon_color=icon_color),
+        ft.Divider(height=1, color=DIVIDER_COLOR),
+        content_container,  # 始終使用 container 包裝
+    ]
+
+    if collapsible:
+        # 添加收合按鈕 - 使用 ref 確保可以從事件中訪問
+        collapse_btn = ft.IconButton(
+            icon=ft.Icons.EXPAND_MORE if default_collapsed else ft.Icons.EXPAND_LESS,
+            icon_size=20,
+            tooltip="收合/展開",
+        )
+
+        def on_collapse_click(e):
+            """處理收合按鈕點擊"""
+            is_collapsed[0] = not is_collapsed[0]
+            # 切換內容可見性：收合時隱藏，展開時顯示
+            content_container.visible = not is_collapsed[0]
+            # 切換按鈕圖標
+            collapse_btn.icon = ft.Icons.EXPAND_MORE if is_collapsed[0] else ft.Icons.EXPAND_LESS
+            # 刷新頁面
+            if page:
+                page.update()
+
+        collapse_btn.on_click = on_collapse_click
+
+        # 標題列加入收合按鈕
+        card_content[0] = ft.Row(
+            [
+                ft.Icon(icon, size=18, color=icon_color),
+                ft.Text(title, weight=ft.FontWeight.BOLD, size=16),
+                collapse_btn,
+            ],
+            spacing=8,
+        )
+
+    card = ft.Container(
         expand=expand,
         padding=CARD_PADDING,
         border_radius=CARD_RADIUS,
         bgcolor=CARD_BG_COLOR,
         border=ft.border.all(1, CARD_BORDER_COLOR),
         content=ft.Column(
-            [
-                section_header(title, icon, icon_color=icon_color),
-                ft.Divider(height=1, color=DIVIDER_COLOR),
-                body,
-            ],
+            card_content,
             spacing=12,
             expand=expand,
         ),
     )
 
+    return card
 
 def primary_button(
     text: str,
@@ -126,7 +175,6 @@ def primary_button(
         on_click=on_click,
     )
 
-
 def secondary_button(
     text: str,
     *,
@@ -144,4 +192,215 @@ def secondary_button(
         height=height,
         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=6), padding=16),
         on_click=on_click,
+    )
+
+# -------------------------
+# 通知元件
+# -------------------------
+
+def create_snackbar(
+    message: str,
+    color: str = ft.Colors.RED_400,
+) -> ft.SnackBar:
+    """建立 SnackBar 元件（統一的樣式）。
+
+    Args:
+        message: 顯示的文字內容
+        color: 背景顏色，預設紅色
+
+    Returns:
+        SnackBar 元件
+    """
+    return ft.SnackBar(
+        ft.Text(message),
+        bgcolor=color,
+    )
+
+
+# -------------------------
+# 進度條元件
+# -------------------------
+
+class ProgressCard(ft.Container):
+    """進度條卡片元件。
+
+    用於長時間操作的視覺反饋，顯示進度百分比和 ETA。
+
+    屬性：
+        current: 目前進度值
+        total: 總進度值
+    """
+
+    def __init__(
+        self,
+        title: str,
+        current: int = 0,
+        total: int = 100,
+        on_cancel=None,
+        **kwargs,
+    ):
+        self._current = current
+        self._total = total
+        self._start_time = None
+        self._on_cancel = on_cancel
+        self._progress_bar = ft.ProgressBar(
+            width=200,
+            value=current / total if total > 0 else 0,
+        )
+        self._percent_text = ft.Text(
+            f"{int(current / total * 100)}%" if total > 0 else "0%",
+            size=12,
+        )
+        self._eta_text = ft.Text("", size=12, color=theme.TEXT_SECONDARY)
+        self._status_text = ft.Text("", size=12)
+
+        # 取消按鈕
+        cancel_btn = None
+        if on_cancel:
+            cancel_btn = ft.TextButton(
+                text="取消",
+                on_click=lambda _: self._on_cancel() if self._on_cancel else None,
+            )
+
+        super().__init__(
+            padding=15,
+            border_radius=8,
+            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [ft.Text(title, weight=ft.FontWeight.BOLD), cancel_btn],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    self._progress_bar,
+                    ft.Row(
+                        [self._percent_text, self._status_text, self._eta_text],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                ],
+                spacing=8,
+            ),
+            **kwargs,
+        )
+
+    @property
+    def current(self) -> int:
+        return self._current
+
+    @current.setter
+    def current(self, value: int):
+        self._current = value
+        self._update_progress()
+
+    @property
+    def total(self) -> int:
+        return self._total
+
+    @total.setter
+    def total(self, value: int):
+        self._total = value
+        self._update_progress()
+
+    def _update_progress(self):
+        """更新進度條顯示"""
+        if self._total > 0:
+            ratio = self._current / self._total
+            self._progress_bar.value = ratio
+            self._percent_text.value = f"{int(ratio * 100)}%"
+            self._status_text.value = f"{self._current} / {self._total}"
+
+            # 計算 ETA
+            if self._start_time and self._current > 0:
+                import time
+                elapsed = time.time() - self._start_time
+                rate = self._current / elapsed
+                remaining = self._total - self._current
+                eta_seconds = remaining / rate if rate > 0 else 0
+
+                if eta_seconds < 60:
+                    self._eta_text.value = f"約 {int(eta_seconds)} 秒"
+                elif eta_seconds < 3600:
+                    self._eta_text.value = f"約 {int(eta_seconds / 60)} 分鐘"
+                else:
+                    self._eta_text.value = f"約 {int(eta_seconds / 3600)} 小時"
+        else:
+            self._progress_bar.value = None  # 不確定進度
+            self._percent_text.value = "處理中..."
+
+    def start(self):
+        """開始計時"""
+        import time
+        self._start_time = time.time()
+
+    def set_status(self, status: str):
+        """設定狀態文字"""
+        self._status_text.value = status
+
+
+# -------------------------
+# 統一狀態元件
+# -------------------------
+
+def loading_state(
+    message: str = "載入中...",
+    show_spinner: bool = True,
+) -> ft.Container:
+    """統一的載入狀態顯示。"""
+    spinner = ft.CupertinoActivityIndicator() if show_spinner else None
+
+    return ft.Container(
+        alignment=ft.alignment.center,
+        padding=40,
+        content=ft.Column(
+            [
+                spinner,
+                ft.Text(message, size=14, color=theme.TEXT_SECONDARY),
+            ] if spinner else [ft.Text(message, size=14, color=theme.TEXT_SECONDARY)],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=10,
+        ),
+    )
+
+
+def empty_state(
+    icon: str,
+    title: str,
+    message: str,
+    action_button: ft.Control | None = None,
+) -> ft.Container:
+    """統一的空資料狀態顯示。"""
+    return ft.Container(
+        alignment=ft.alignment.center,
+        padding=40,
+        content=ft.Column(
+            [
+                ft.Icon(icon, size=48, color=theme.TEXT_SECONDARY),
+                ft.Text(title, size=16, weight=ft.FontWeight.BOLD),
+                ft.Text(message, size=14, color=theme.TEXT_SECONDARY),
+            ] + ([action_button] if action_button else []),
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=10,
+        ),
+    )
+
+
+def error_state(
+    icon: str,
+    title: str,
+    message: str,
+    retry_button: ft.Control | None = None,
+) -> ft.Container:
+    """統一的錯誤狀態顯示。"""
+    return ft.Container(
+        alignment=ft.alignment.center,
+        padding=40,
+        content=ft.Column(
+            [
+                ft.Icon(icon, size=48, color=ft.Colors.ERROR),
+                ft.Text(title, size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ERROR),
+                ft.Text(message, size=14, color=theme.TEXT_SECONDARY),
+            ] + ([retry_button] if retry_button else []),
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=10,
+        ),
     )

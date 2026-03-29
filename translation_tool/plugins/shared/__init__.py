@@ -1,22 +1,27 @@
-"""Shared helpers for translation_tool.plugins.* modules."""
+"""Shared plugin helpers public API."""
 
-from .json_io import read_json_dict, write_json_dict, collect_json_files
-from .lang_path_rules import (
-    should_rename_to_zh_tw,
+from translation_tool.plugins.shared.json_io import (
+    collect_json_files,
+    read_json_dict,
+    write_json_dict,
+)
+from translation_tool.plugins.shared.lang_path_rules import (
+    compute_output_path,
     is_lang_code_segment,
     replace_lang_folder_with_zh_tw,
-    compute_output_path,
+    should_rename_to_zh_tw,
 )
-from .lang_text_rules import _strip_fmt, is_already_zh
+from translation_tool.plugins.shared.lang_text_rules import (
+    is_already_zh,
+)
 
 __all__ = [
+    "collect_json_files",
     "read_json_dict",
     "write_json_dict",
-    "collect_json_files",
-    "should_rename_to_zh_tw",
+    "compute_output_path",
     "is_lang_code_segment",
     "replace_lang_folder_with_zh_tw",
-    "compute_output_path",
-    "_strip_fmt",
+    "should_rename_to_zh_tw",
     "is_already_zh",
 ]

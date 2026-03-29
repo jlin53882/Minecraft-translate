@@ -22,7 +22,6 @@ from typing import Dict, Any, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
 
-
 from translation_tool.core.lm_translator_main import translate_batch_smart
 
 from translation_tool.core.lm_config_rules import validate_api_keys
@@ -59,7 +58,6 @@ from translation_tool.utils.log_unit import (
 # -------------------------
 # Smart 翻譯轉接器（資料格式轉換）
 # -------------------------
-
 
 def map_to_items(
     mapping: Dict[str, Any],
@@ -111,7 +109,6 @@ def map_to_items(
 
     return items
 
-
 def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     """
     計算 mapping 中「實際可翻譯的字串數量」。
@@ -126,7 +123,6 @@ def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     - 作為 batch 翻譯的總量基準
     """
     return sum(1 for _, v in mapping.items() if isinstance(v, str) and v.strip())
-
 
 @dataclass
 class DryRunStats:
@@ -144,7 +140,6 @@ class DryRunStats:
     cache_hit: int = 0  # 快取命中數
     cache_miss: int = 0  # 實際需翻譯數
     per_file: list[dict] = None  # 每個檔案的明細
-
 
 # -------------------------
 # Public API (callable from pipeline)
@@ -173,10 +168,7 @@ def translate_ftb_pending_to_zh_tw(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def set_prog(v: float):
-        """設定此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+        """設定翻譯進度。"""
         if session is not None and hasattr(session, "set_progress"):
             try:
                 session.set_progress(v)
@@ -222,12 +214,7 @@ def translate_ftb_pending_to_zh_tw(
     global_total_keys = 0
 
     def _count_one(src: Path) -> Tuple[Path, int]:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`read_json_dict`
-
-        回傳：依函式內 return path。
-        """
+        """讀取指定的 JSON 檔案並統計其中可翻譯的鍵值數量，若發生錯誤則返回 0。"""
         try:
             mapping = read_json_dict(src)
             c = count_translatable_keys(mapping)
@@ -327,12 +314,7 @@ def translate_ftb_pending_to_zh_tw(
     _file_write_table: dict[str, tuple[Path, Dict[str, str]]] = {}
 
     def _writer(file_id: str) -> None:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`write_json_dict`
-
-        回傳：None
-        """
+        """寫入翻譯結果到檔案。"""
         dst_path, data = _file_write_table[file_id]
         write_json_dict(dst_path, data)
 
@@ -477,10 +459,7 @@ def translate_ftb_pending_to_zh_tw(
 
         # shared while-loop（includes add_to_cache + save_translation_cache + safe slicing）
         def on_translated_item(it: Dict[str, Any]) -> None:
-            """處理此函式的工作（細節以程式碼為準）。
-
-            回傳：None
-            """
+            """處理翻譯結果並寫入映射。"""
             p = it.get("path")
             t = it.get("text")
             if isinstance(p, str) and isinstance(t, str):
@@ -504,12 +483,7 @@ def translate_ftb_pending_to_zh_tw(
 
         # 在這之前先確保 file_id/_file_write_table 設定好了（下面會說加在哪）
         def on_batch_flushed() -> None:
-            """處理此函式的工作（細節以程式碼為準）。
-
-            - 主要包裝：`touch`
-
-            回傳：None
-            """
+            """批量寫入翻譯結果。"""
             try:
                 touch.touch(file_id)
                 touch.flush(_writer)  # 最小改動：每批也照樣寫，避免中斷損失
@@ -518,12 +492,7 @@ def translate_ftb_pending_to_zh_tw(
                 write_json_dict(dst, out_map)
 
         def _fmt_eta(sec: float) -> str:
-            """處理此函式的工作（細節以程式碼為準）。
-
-            - 主要包裝：`divmod`
-
-            回傳：依函式內 return path。
-            """
+            """格式化剩餘時間。"""
             if sec <= 0:
                 return ""
             m, s = divmod(int(sec), 60)
@@ -532,12 +501,7 @@ def translate_ftb_pending_to_zh_tw(
             return f"{s}s"
 
         def on_progress(p: float, msg: str, eta_sec: float) -> None:
-            """處理此函式的工作（細節以程式碼為準）。
-
-            - 主要包裝：`_fmt_eta`, `set_prog`
-
-            回傳：None
-            """
+            """報告翻譯進度。"""
             eta_txt = _fmt_eta(eta_sec)
             if eta_txt:
                 log_info(f"⏳ [AI 翻譯中] {msg} | 預估剩餘時間：{eta_txt}")

@@ -18,7 +18,6 @@ from translation_tool.core.lm_translator import translate_directory_generator as
 
 logger = logging.getLogger(__name__)
 
-
 def run_lm_translation_service(
     input_dir: str,
     output_dir: str,

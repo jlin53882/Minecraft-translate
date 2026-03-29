@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import zipfile
 from typing import Any, Dict
@@ -14,8 +13,8 @@ from typing import Any, Dict
 import orjson as json
 
 from ..utils.config_manager import load_config
+from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
 
-logger = logging.getLogger(__name__)
 
 def _read_text_from_zip(zf: zipfile.ZipFile, path: str) -> str:
     """
@@ -73,7 +72,7 @@ def _read_json_from_zip(zf: zipfile.ZipFile, path: str) -> Dict[str, Any]:
         return json.loads(cleaned_text)
     except Exception as e:
         # 如果還是失敗，嘗試將錯誤資訊記錄下來，方便排查
-        logger.warning(f"JSON 解析依然失敗 (路徑: {path}): {e}")
+        log_warning(f"JSON 解析依然失敗 (路徑: {path}): {e}")
         # 在某些極端情況下，檔案可能是編碼損毀，回傳空字典避免程式崩潰
         return {}
 
@@ -130,7 +129,6 @@ def quarantine_copy_from_zip(
     目錄結構會與「待翻譯」完全一致，方便人工比對與修復。
     """
 
-
     # skipped_json/ + 原始 zip 路徑（例如 assets/xxx）
     quarantine_root_name= load_config().get("lang_merger", {}).get("quarantine_folder_name", "skipped_json")
     quarantine_root = os.path.join(output_dir, quarantine_root_name)
@@ -155,12 +153,12 @@ def quarantine_copy_from_zip(
             with open(detail_path, "w", encoding="utf-8") as f:
                 f.write(extra_text)
 
-        logger.warning(
+        log_warning(
             f"[隔離] 檔案已複製至 {target_path}（原因: {reason}）"
         )
 
     except Exception as e:
-        logger.error(
+        log_error(
             f"[隔離失敗] 無法複製檔案 {zip_path}: {e}",
             exc_info=True
         )

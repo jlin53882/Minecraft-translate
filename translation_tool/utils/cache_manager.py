@@ -53,36 +53,18 @@ __all__ = [
     "find_similar_translations",
 ]
 
-
 def _state():
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`ensure_runtime_maps`
-
-    回傳：依函式內 return path。
-    """
+    """取得或建立快取執行期狀態實例"""
     return cache_store.ensure_runtime_maps(CACHE_TYPES)
 
-
 def _get_cache_root() -> Path:
-    """取得此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`resolve_project_path`
-
-    回傳：依函式內 return path。
-    """
+    """從設定取得快取根目錄路徑"""
     translation_config = load_config().get("translator", {})
     cache_dir_name = translation_config.get("cache_directory", _CACHE_DIR_NAME)
     return resolve_project_path(cache_dir_name)
 
-
 def _load_cache_type(cache_type: str):
-    """載入此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`, `load_cache_type`
-
-    回傳：None
-    """
+    """載入指定類型的快取。"""
     state = _state()
     translation_config = load_config().get("translator", {})
     load_cache_type(
@@ -94,14 +76,8 @@ def _load_cache_type(cache_type: str):
         logger=log,
     )
 
-
 def initialize_translation_cache():
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`
-
-    回傳：None
-    """
+    """初始化翻譯快取系統。"""
     state = _state()
     if state.initialized:
         return
@@ -112,37 +88,19 @@ def initialize_translation_cache():
     except Exception as e:
         log.error(f"快取系統初始化失敗: {e}", exc_info=True)
 
-
 def is_cache_initialized() -> bool:
-    """判斷此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`bool`
-
-    回傳：依函式內 return path。
-    """
+    """檢查快取是否已初始化。"""
     return bool(_state().initialized)
 
-
 def reload_translation_cache():
-    """重新載入此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`reset_runtime_state`, `initialize_translation_cache`
-
-    回傳：None
-    """
+    """重新載入翻譯快取。"""
     state = cache_store.reset_runtime_state(CACHE_TYPES)
     with state.cache_lock:
         pass
     initialize_translation_cache()
 
-
 def reload_translation_cache_type(cache_type: str):
-    """重新載入此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`, `initialize_translation_cache`, `_load_cache_type`
-
-    回傳：None
-    """
+    """重新載入指定類型的翻譯快取。"""
     if cache_type not in CACHE_TYPES:
         return
     state = _state()
@@ -153,16 +111,10 @@ def reload_translation_cache_type(cache_type: str):
         cache_store.clear_dirty(state.is_dirty, cache_type)
     _load_cache_type(cache_type)
 
-
 def _save_entries_to_active_shards(
     cache_type: str, entries: dict, force_new_shard: bool = False
 ):
-    """保存此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`, `_save_entries_to_active_shards`
-
-    回傳：依函式內 return path。
-    """
+    """儲存項目到作用中分片，容量滿時自動輪轉"""
     state = _state()
     type_dir = state.cache_file_path[cache_type].parent
     return cache_shards._save_entries_to_active_shards(
@@ -175,14 +127,8 @@ def _save_entries_to_active_shards(
         logger=log,
     )
 
-
 def save_translation_cache(cache_type: str, write_new_shard: bool = True):
-    """保存此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`
-
-    回傳：None
-    """
+    """儲存翻譯快取。"""
     if not load_config().get("translator", {}).get("enable_cache_saving", True):
         return
 
@@ -208,14 +154,8 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
     except Exception as e:
         log.error(f"❌ 儲存 {cache_type} 失敗: {e}", exc_info=True)
 
-
 def _get_active_shard_path(cache_type: str) -> Path:
-    """取得此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`, `_get_active_shard_path`
-
-    回傳：依函式內 return path。
-    """
+    """取得目前作用中的分片檔案路徑"""
     state = _state()
     type_dir = state.cache_file_path[cache_type].parent
     return cache_shards._get_active_shard_path(
@@ -223,7 +163,6 @@ def _get_active_shard_path(cache_type: str) -> Path:
         cache_type=cache_type,
         active_shard_file=ACTIVE_SHARD_FILE,
     )
-
 
 def add_to_cache(
     cache_type: str,
@@ -234,12 +173,7 @@ def add_to_cache(
     mod: str | None = None,
     path: str | None = None,
 ):
-    """加入此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`
-
-    回傳：None
-    """
+    """新增翻譯到快取。"""
     if not key or not dst:
         return
 
@@ -259,14 +193,8 @@ def add_to_cache(
             session_entries[key] = entry
             cache_store.mark_dirty(state.is_dirty, cache_type)
 
-
 def get_from_cache(cache_type: str, key: str) -> Optional[str]:
-    """取得此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`, `get_value`
-
-    回傳：依函式內 return path。
-    """
+    """從快取取得指定 key 的翻譯文字 (dst)。"""
     state = _state()
     if not state.initialized:
         return None
@@ -275,14 +203,8 @@ def get_from_cache(cache_type: str, key: str) -> Optional[str]:
         return None
     return cache_store.get_value(cache, key)
 
-
 def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
-    """取得此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`, `get_entry`
-
-    回傳：依函式內 return path。
-    """
+    """取得指定 key 的完整快取項目（包含 src、dst、mod、path）。"""
     state = _state()
     if not state.initialized:
         return None
@@ -291,55 +213,31 @@ def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
         return None
     return cache_store.get_entry(cache, key)
 
-
 def get_cache_dict_ref(cache_type: str) -> Dict[str, Dict[str, Any]]:
-    """取得此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`
-
-    回傳：依函式內 return path。
-    """
+    """取得指定類型的快取字典參照。"""
     state = _state()
     if not state.initialized:
         return {}
     cache = state.translation_cache.get(cache_type)
     return cache if isinstance(cache, dict) else {}
 
-
 def get_session_new_count(cache_type: str) -> int:
-    """取得此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`
-
-    回傳：依函式內 return path。
-    """
+    """取得本次 session 新增的項目數"""
     state = _state()
     with state.cache_lock:
         return len(
             cache_store.get_session_entries(state.session_new_entries, cache_type)
         )
 
-
 def get_active_shard_id(cache_type: str) -> str:
-    """取得此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`, `_get_active_shard_id_impl`
-
-    回傳：依函式內 return path。
-    """
+    """取得指定快取類型的目前作用中分片 ID"""
     state = _state()
     return _get_active_shard_id_impl(
         state.cache_file_path, cache_type, ACTIVE_SHARD_FILE
     )
 
-
 def get_cache_overview() -> Dict[str, Any]:
-    """取得此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`initialize_translation_cache`, `_state`
-
-    回傳：依函式內 return path。
-    """
+    """取得所有快取類型的概覽（包含項目數與狀態）"""
     initialize_translation_cache()
     state = _state()
     with state.cache_lock:
@@ -357,14 +255,8 @@ def get_cache_overview() -> Dict[str, Any]:
             resolve_project_path=resolve_project_path,
         )
 
-
 def force_rotate_shard(cache_type: str) -> bool:
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`initialize_translation_cache`, `_state`
-
-    回傳：依函式內 return path。
-    """
+    """強制輪轉至下一個分片。"""
     initialize_translation_cache()
     state = _state()
     if cache_type not in CACHE_TYPES:
@@ -381,12 +273,8 @@ def force_rotate_shard(cache_type: str) -> bool:
     except Exception:
         return False
 
-
 def _get_search_facade() -> CacheSearchFacade:
-    """取得此函式的工作（細節以程式碼為準）。
-
-    回傳：依函式內 return path。
-    """
+    """取得或建立快取搜尋外觀（惰性初始化）"""
     global _search_facade
     if _search_facade is None:
         with _search_facade_lock:
@@ -394,70 +282,39 @@ def _get_search_facade() -> CacheSearchFacade:
                 _search_facade = CacheSearchFacade(_get_cache_root, log)
     return _search_facade
 
-
 def get_search_engine():
-    """取得此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`get_search_engine`
-
-    回傳：依函式內 return path。
-    """
+    """取得快取查詢用的搜尋引擎實例"""
     return _get_search_facade().get_search_engine()
 
-
 def rebuild_search_index():
-    """重建此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`, `rebuild_search_index`
-
-    回傳：依函式內 return path。
-    """
+    """重建所有快取類型的搜尋索引。"""
     state = _state()
     return _get_search_facade().rebuild_search_index(
         CACHE_TYPES, state.translation_cache
     )
 
-
 def rebuild_search_index_for_type(cache_type: str):
-    """重建此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`_state`, `rebuild_search_index_for_type`
-
-    回傳：依函式內 return path。
-    """
+    """重建指定快取類型的搜尋索引"""
     state = _state()
     return _get_search_facade().rebuild_search_index_for_type(
         cache_type, CACHE_TYPES, state.translation_cache
     )
 
-
 def search_cache(
     query: str, cache_type: str = None, limit: int = 50, use_fuzzy: bool = True
 ) -> list:
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`search_cache`
-
-    回傳：依函式內 return path。
-    """
+    """搜尋快取中符合查詢字的翻譯"""
     return _get_search_facade().search_cache(
         query=query, cache_type=cache_type, limit=limit, use_fuzzy=use_fuzzy
     )
 
-
 def find_similar_translations(
     text: str, cache_type: str = None, threshold: float = 0.6, limit: int = 20
 ) -> list:
-    """找出此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`find_similar_translations`
-
-    回傳：依函式內 return path。
-    """
+    """使用模糊比對找出相似的翻譯"""
     return _get_search_facade().find_similar_translations(
         text=text, cache_type=cache_type, threshold=threshold, limit=limit
     )
-
 
 initialize_translation_cache()
 _state_obj = _state()

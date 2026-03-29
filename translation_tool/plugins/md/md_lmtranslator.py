@@ -39,45 +39,27 @@ from translation_tool.core.lm_translator_shared import (
 )
 from translation_tool.plugins.shared.lang_text_rules import is_already_zh
 
-
 # -------------------------
 # basic io
 # -------------------------
 
-
 def read_json(path: Path) -> Dict[str, Any]:
-    """處理此函式的工作（細節以程式碼為準）。
-
-    回傳：依函式內 return path。
-    """
+    """讀取 JSON 檔案並回傳字典。"""
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
-
 def write_json(path: Path, data: Dict[str, Any]) -> None:
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`mkdir`
-
-    回傳：None
-    """
+    """寫入 JSON 檔案。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-
 def collect_pending_json_files(pending_root: Path) -> List[Path]:
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`sorted`
-
-    回傳：依函式內 return path。
-    """
+    """收集所有待翻譯的 JSON 檔案路徑。"""
     files = sorted(pending_root.rglob("*.json"))
     # 跳過 manifest
     files = [p for p in files if p.name.lower() != "_manifest.json"]
     return files
-
 
 # -------------------------
 # zh detection（避免已中文又送）
@@ -86,7 +68,6 @@ def collect_pending_json_files(pending_root: Path) -> List[Path]:
 # -------------------------
 # pending model
 # -------------------------
-
 
 @dataclass
 class PendingItem:
@@ -102,14 +83,8 @@ class PendingItem:
     start_line: int
     end_line: int
 
-
 def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
-    """載入此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`read_json`
-
-    回傳：依函式內 return path。
-    """
+    """載入待翻譯的 Markdown 文件。"""
     data = read_json(path)
     if data.get("schema") != "md_pending_blocks_v1":
         raise ValueError(f"schema 不符：{path}")
@@ -127,19 +102,12 @@ def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
         )
     return data, items
 
-
 def compute_out_json_path(
     src_json: Path, in_pending_root: Path, out_root: Path
 ) -> Path:
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`relative_to`
-
-    回傳：依函式內 return path。
-    """
+    """計算輸出 JSON 檔案的路徑。"""
     rel = src_json.relative_to(in_pending_root)
     return out_root / "LM翻譯後" / rel
-
 
 def translate_md_pending(
     *,
@@ -149,11 +117,8 @@ def translate_md_pending(
     dry_run: bool = False,
     session=None,
 ) -> Dict[str, Any]:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
-    - 主要包裝：`validate_api_keys`, `perf_counter`, `resolve`
-
-    回傳：依函式內 return path。
     """
     validate_api_keys()
     start_time = time.perf_counter()
@@ -308,19 +273,11 @@ def translate_md_pending(
 
     # md 是「最後一次寫出全部檔案」即可，所以 touched writer 這裡先做 noop
     def _writer(_fid: str) -> None:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+        """空寫入函數（MD 模式不需要即時寫入）。"""
         return
 
     def on_translated_item(it: Dict[str, Any]) -> None:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`record`
-
-        回傳：None
-        """
+        """處理翻譯結果。"""
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
         if h and dst:
@@ -340,12 +297,7 @@ def translate_md_pending(
             pass
 
     def on_batch_flushed() -> None:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`touch`
-
-        回傳：None
-        """
+        """刷新批次緩衝區。"""
         try:
             touch.touch("noop")
             touch.flush(_writer)
@@ -353,24 +305,14 @@ def translate_md_pending(
             pass
 
     def _fmt_eta(sec: float) -> str:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`divmod`
-
-        回傳：依函式內 return path。
-        """
+        """格式化剩餘時間。"""
         if sec <= 0:
             return ""
         m, s = divmod(int(sec), 60)
         return f"{m}m{s:02d}s" if m > 0 else f"{s}s"
 
     def on_progress(p: float, msg: str, eta_sec: float) -> None:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`_fmt_eta`, `log_info`, `progress`
-
-        回傳：None
-        """
+        """報告翻譯進度。"""
         eta_txt = _fmt_eta(eta_sec)
         log_info(
             "⏳ [MD-LM] %s%s",
@@ -491,14 +433,8 @@ def translate_md_pending(
         "out_dir": str(out_root),
     }
 
-
 def main():
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`log_info`, `strip`
-
-    回傳：None
-    """
+    """MD 翻譯工具主入口。"""
     log_info("=== MD Pending Blocks -> LM 翻譯（md cache 全接 + content_hash 去重）===")
 
     log_info("請輸入待翻譯根目錄（pending）")
@@ -524,7 +460,6 @@ def main():
     log_info("=== 結果 ===")
     for k, v in res.items():
         log_info("%s: %s", k, v)
-
 
 if __name__ == "__main__":
     main()

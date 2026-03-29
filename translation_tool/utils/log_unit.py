@@ -31,7 +31,6 @@ from typing import Any, Dict
 _THIS_MODULE = __name__
 _CALLER_LOGGER_CACHE: Dict[object, str] = {}
 
-
 def _get_caller_logger_name() -> str:
     """
     找到第一個不在 log_unit 模組內的呼叫 frame，回傳該模組 __name__ 作為 logger 名稱。
@@ -53,7 +52,6 @@ def _get_caller_logger_name() -> str:
         pass
     return _THIS_MODULE
 
-
 def _log(level: int, msg: str, *args: Any, **kwargs: Any) -> None:
     """
     內部統一入口：
@@ -73,26 +71,21 @@ def _log(level: int, msg: str, *args: Any, **kwargs: Any) -> None:
     except Exception:
         pass
 
-
 def log_info(msg: str, *args: Any, **kwargs: Any) -> None:
     """INFO：一般流程資訊。"""
     _log(logging.INFO, msg, *args, **kwargs)
-
 
 def log_warning(msg: str, *args: Any, **kwargs: Any) -> None:
     """WARNING：非致命但值得注意的狀態。"""
     _log(logging.WARNING, msg, *args, **kwargs)
 
-
 def log_error(msg: str, *args: Any, **kwargs: Any) -> None:
     """ERROR：錯誤狀態或例外。"""
     _log(logging.ERROR, msg, *args, **kwargs)
 
-
 def log_debug(msg: str, *args: Any, **kwargs: Any) -> None:
     """DEBUG：除錯資訊（通常只在 DEBUG level 顯示）。"""
     _log(logging.DEBUG, msg, *args, **kwargs)
-
 
 def log_exception(msg: str, *args: Any, **kwargs: Any) -> None:
     """
@@ -119,7 +112,6 @@ def log_exception(msg: str, *args: Any, **kwargs: Any) -> None:
         logger.exception(msg, *args, **kwargs)
     except Exception:
         pass
-
 
 def progress(*args, session=None, p: float | None = None) -> None:
     """
@@ -151,8 +143,6 @@ def progress(*args, session=None, p: float | None = None) -> None:
         session.set_progress(fp)
     except Exception:
         pass
-
-
 
 def get_formatted_duration(start_tick: float) -> str:
     """計算從 start_tick（perf_counter）到現在的耗時，回傳可讀字串。"""

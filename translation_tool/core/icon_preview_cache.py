@@ -4,9 +4,12 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-from pathlib import Path
-from PIL import Image, UnidentifiedImageError
+from __future__ import annotations
+
 import hashlib
+from pathlib import Path
+
+from PIL import Image, UnidentifiedImageError
 
 
 def generate_icon_preview(icon_path: Path, preview_root: Path) -> Path | None:

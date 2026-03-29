@@ -7,14 +7,12 @@
 # /minecraft_translator_flet/translation_tool/core/lang_processing_format.py
 import re
 from typing import Callable, Optional, Any, Dict
-import logging
 import opencc  # 導入 OpenCC 庫
 import orjson as json
 import threading
 
+from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
 from ..utils.text_processor import apply_replace_rules
-
-logger = logging.getLogger(__name__)
 
 
 # 初始化 OpenCC 實例
@@ -26,16 +24,14 @@ TRANSLATABLE_CODE_LANGUAGES = {"json", "yaml", "text"}
 # 建立執行緒本地存儲物件
 thread_local = threading.local()
 
-
 def get_converter():
     """私有方法：確保每個執行緒都有自己的 OpenCC 實例"""
     # 檢查這個 Thread 是否已經初始化過自己的 converter
     if not hasattr(thread_local, "converter"):
         # 如果沒有，才建立一個新的（這只會在每個 Thread 第一次執行時跑一次）
-        logger.debug(f"正在為執行緒 {threading.current_thread().name} 初始化 OpenCC...")
+        log_debug(f"正在為執行緒 {threading.current_thread().name} 初始化 OpenCC...")
         thread_local.converter = opencc.OpenCC("s2twp")
     return thread_local.converter
-
 
 def convert_only_cjk_old(text: str, rules=None) -> str:
     """只轉換中文（基本 CJK）＋ 套用自訂規則"""
@@ -54,7 +50,6 @@ def convert_only_cjk_old(text: str, rules=None) -> str:
 
     return result_text
 
-
 def convert_only_cjk(text: str, rules=None) -> str:
     """
     只轉換中文（基本 CJK）＋ 套用自訂規則
@@ -71,11 +66,9 @@ def convert_only_cjk(text: str, rules=None) -> str:
 
     def replacer(match):
         # 抓到的一整串中文字
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
-        - 主要包裝：`group`, `convert`
-
-        回傳：依函式內 return path。
+    
         """
         cjk_chunk = match.group(1)
         # 整串丟給 OpenCC，這樣「内存」才會變「記憶體」
@@ -89,7 +82,6 @@ def convert_only_cjk(text: str, rules=None) -> str:
         result_text = apply_replace_rules(result_text, rules)
 
     return result_text
-
 
 def opencc_markdown_safe(md: str, rules=None) -> str:
     """
@@ -146,7 +138,6 @@ def opencc_markdown_safe(md: str, rules=None) -> str:
 
     return "".join(output)
 
-
 def remove_translated_keys(
     en_dict: Dict[str, Any], tw_dict: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -163,7 +154,6 @@ def remove_translated_keys(
             # 已被翻譯 -> 忽略
             continue
     return result
-
 
 def compare_and_remove_translated_from_en(
     en_source: Dict[str, Any], tw_base: Dict[str, Any]
@@ -185,7 +175,6 @@ def compare_and_remove_translated_from_en(
     # 只移除在 tw_base 中已被翻譯的 key
     return remove_translated_keys(en_source, tw_base)
 
-
 def dump_json_bytes(obj: Any) -> bytes:
     """
     將 Python 物件序列化為帶有縮排的 JSON 格式位元組。
@@ -200,11 +189,9 @@ def dump_json_bytes(obj: Any) -> bytes:
     # OPT_INDENT_2 選項用於增加 2 個空格的縮排，使 JSON 易讀。
     return json.dumps(obj, option=json.OPT_INDENT_2)
 
-
 # --------------------------------------------------------------------------
 # I. 核心處理函式 (與 lang_merger.py 保持依賴性，需傳入翻譯規則/函式)
 # --------------------------------------------------------------------------
-
 
 # 調整 translate_markdown 函數簽名和邏輯
 def translate_markdown(
@@ -261,7 +248,6 @@ def translate_markdown(
         # 沒有前置 YAML：整個 body 走 markdown 解析
         return opencc_markdown_safe(cn_content)
 
-
 def translate_plain_text(
     cn_content: str,
     translate_func: Callable[[str, Any], str],
@@ -276,7 +262,6 @@ def translate_plain_text(
     """
     # 對整個文件內容進行 S2TW 轉換。
     return translate_func(cn_content, rules)
-
 
 # --------------------------------------------------------------------------
 # II. 檔案類型與處理器映射 (方便集中調用)
@@ -299,7 +284,6 @@ TEXT_FILE_PROCESSORS: Dict[
     ".hl": translate_plain_text,
     ".gui": translate_plain_text,
 }
-
 
 def get_text_processor(ext: str) -> Optional[Callable]:
     """根據擴展名獲取對應的文字處理函式。"""

@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import flet as ft
 
+from app.ui.components import styled_card
 from .cache_log_panel import build_log_panel
-from .cache_shared_widgets import bordered_block
-
 
 def build_overview_page(
     *,
@@ -25,13 +24,23 @@ def build_overview_page(
     btn_log_copy: ft.Control,
     btn_log_clear: ft.Control,
     log_list: ft.Control,
+    page: ft.Page = None,  # 用於 styled_card 收合功能
 ) -> ft.Control:
     """Cache 總覽頁（非查詢區）組裝。
 
     把大段 UI 結構從 cache_view.py 抽離，讓主檔更容易閱讀與維護。
+
+    PR3 試點：使用 styled_card 替換 bordered_block，支援卡片收合功能
     """
 
-    help_block = bordered_block(
+    # 試點：使用 styled_card 包裝說明區塊（PR3 產出，支援收合）
+    help_block = styled_card(
+        title="操作說明",
+        icon=ft.Icons.HELP_OUTLINE,
+        icon_color=ft.Colors.BLUE_GREY_700,
+        collapsible=True,
+        default_collapsed=False,
+        page=page,
         content=ft.Column(
             [
                 overview_status,
@@ -54,11 +63,17 @@ def build_overview_page(
         ),
     )
 
-    left_panel = bordered_block(
+    # 分類狀態列表 - 使用 styled_card 支援收合
+    left_panel = styled_card(
+        title="分類狀態清單",
+        icon=ft.Icons.LIST,
+        icon_color=ft.Colors.BLUE_GREY_700,
+        collapsible=True,
+        default_collapsed=False,
         expand=True,
+        page=page,
         content=ft.Column(
             [
-                ft.Text("分類狀態清單", weight=ft.FontWeight.BOLD),
                 ft.Text("卡片可捲動瀏覽，避免分類過多被截斷", size=11, color=ft.Colors.GREY_700),
                 type_list,
             ],
@@ -84,7 +99,16 @@ def build_overview_page(
         expand=True,
         spacing=10,
         controls=[
-            bordered_block(content=overview_text),
+            # 總覽狀態 - 使用 styled_card
+            styled_card(
+                title="總覽",
+                icon=ft.Icons.DASHBOARD,
+                icon_color=ft.Colors.BLUE_GREY_700,
+                collapsible=True,
+                default_collapsed=False,
+                page=page,
+                content=overview_text,
+            ),
             ft.ResponsiveRow(
                 expand=True,
                 controls=[

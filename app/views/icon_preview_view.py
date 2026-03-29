@@ -4,10 +4,16 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+from __future__ import annotations
+
 import flet as ft
+from typing import Any
+
 import json
 from pathlib import Path
 from collections import defaultdict
+from app.ui import theme
+from translation_tool.utils.log_unit import log_info, log_warning, log_error
 from types import SimpleNamespace
 
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
@@ -15,8 +21,7 @@ from translation_tool.core.lang_item_row import LangItemRow
 
 import unicodedata
 
-
-def to_halfwidth(text):
+def to_halfwidth(text: str) -> str:
     """
     將字串正規化為半形（NFKC）
     - 只處理 str
@@ -26,7 +31,6 @@ def to_halfwidth(text):
         return text
     return unicodedata.normalize("NFKC", text)
 
-
 class IconPreviewView(ft.Column):
     """
     Icon / 翻譯校對 View（模組分層版）
@@ -34,12 +38,11 @@ class IconPreviewView(ft.Column):
     - 第二層：單一模組翻譯 + icon 校對
     """
 
-    def __init__(self, page: ft.Page):
-        """處理此函式的工作（細節以程式碼為準）。
+    def __init__(self, page: ft.Page) -> None:
+        """初始化 IconPreviewView。
 
-        - 主要包裝：`__init__`, `FilePicker`
-
-        回傳：None
+        參數：
+            page: Flet Page 物件
         """
         super().__init__(expand=True, spacing=8)
         self.page = page
@@ -158,44 +161,30 @@ class IconPreviewView(ft.Column):
     # ==================================================
     # Folder picker callbacks
     # ==================================================
-    def _on_pick_source(self, e: ft.FilePickerResultEvent):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+    def _on_pick_source(self, e: ft.FilePickerResultEvent) -> None:
+        """處理來源目錄選擇結果"""
         if e.path:
             self.source_root = Path(e.path)
             self.source_label.value = f"原文資料夾：{self.source_root}"
             self._update_load_state()
 
-    def _on_pick_review(self, e: ft.FilePickerResultEvent):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+    def _on_pick_review(self, e: ft.FilePickerResultEvent) -> None:
+        """處理校對目錄選擇結果"""
         if e.path:
             self.review_root = Path(e.path)
             self.review_label.value = f"校對資料夾：{self.review_root}"
             self._update_load_state()
 
-    def _update_load_state(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+    def _update_load_state(self) -> None:
+        """更新載入按鈕的啟用狀態"""
         self.load_btn.disabled = not (self.source_root and self.review_root)
         self.update()
 
     # ==================================================
     # 載入 → 建立模組清單
     # ==================================================
-    def _on_load_clicked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`_load_entries`, `defaultdict`, `dict`
-
-        回傳：None
-        """
+    def _on_load_clicked(self, e: ft.ControlEvent) -> None:
+        """處理載入按鈕點擊事件"""
         entries = self._load_entries()
         mods = defaultdict(list)
 
@@ -208,13 +197,8 @@ class IconPreviewView(ft.Column):
     # ==================================================
     # 第一層：模組清單
     # ==================================================
-    def _render_mod_list(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`sorted`
-
-        回傳：None
-        """
+    def _render_mod_list(self) -> None:
+        """渲染模組清單畫面"""
         self.current_modid = None
         self.back_btn.visible = False
         self.save_btn.visible = False
@@ -251,21 +235,15 @@ class IconPreviewView(ft.Column):
         self.update()
 
     def _update_page_bar_for_mods(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+        """更新分頁資訊顯示"""
         self.page_info.value = (
             f"模組清單｜第 {self.mod_current_page + 1} / {self.mod_total_pages} 頁"
         )
         self.prev_page_btn.disabled = self.mod_current_page <= 0
         self.next_page_btn.disabled = self.mod_current_page >= self.mod_total_pages - 1
 
-    def _prev_page(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+    def _prev_page(self, e: ft.ControlEvent) -> None:
+        """處理上一頁按鈕點擊"""
         if self.current_modid:
             # 第二層（item）
             if self.current_page > 0:
@@ -277,11 +255,8 @@ class IconPreviewView(ft.Column):
                 self.mod_current_page -= 1
                 self._render_mod_list()
 
-    def _next_page(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+    def _next_page(self, e: ft.ControlEvent) -> None:
+        """處理下一頁按鈕點擊"""
         if self.current_modid:
             if self.current_page < self.total_pages - 1:
                 self.current_page += 1
@@ -294,13 +269,8 @@ class IconPreviewView(ft.Column):
     # ==================================================
     # 第二層：單一模組 detail
     # ==================================================
-    def _open_mod_detail(self, modid: str):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`list`, `_render_current_page`
-
-        回傳：None
-        """
+    def _open_mod_detail(self, modid: str) -> None:
+        """開啟模組詳情畫面"""
         self.current_modid = modid
         self.current_page = 0  # ⭐ 重設頁碼
         self.back_btn.visible = True
@@ -318,13 +288,8 @@ class IconPreviewView(ft.Column):
 
         self._render_current_page()
 
-    def _go_back(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`clear`, `_render_mod_list`
-
-        回傳：None
-        """
+    def _go_back(self, e: ft.ControlEvent) -> None:
+        """處理返回按鈕，返回模組清單"""
         self.current_modid = None
         self.current_page = 0
         self.page_info.value = ""
@@ -334,25 +299,15 @@ class IconPreviewView(ft.Column):
     # ==================================================
     # Row → 回報翻譯變更
     # ==================================================
-    def _on_value_changed(self, key: str, value: str):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`to_halfwidth`
-
-        回傳：None
-        """
+    def _on_value_changed(self, key: str, value: str) -> None:
+        """處理翻譯值變更事件"""
         self._zh_data[key] = to_halfwidth(value)
 
     # ==================================================
     # 儲存 zh_tw.json
     # ==================================================
-    def _save_current_zh(self, e):
-        """保存此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`mkdir`, `write_text`, `_show_snack`
-
-        回傳：None
-        """
+    def _save_current_zh(self, e: ft.ControlEvent) -> None:
+        """儲存目前的翻譯到 zh_tw.json"""
         if not self._current_zh_file:
             self._show_snack("❌ 找不到 zh_tw.json")
             return
@@ -371,14 +326,14 @@ class IconPreviewView(ft.Column):
     def _show_snack(
         self,
         message: str,
-        color: str = ft.Colors.GREEN_600,
-    ):
+        color: str = theme.GREEN_600,
+    ) -> None:
         """
         統一 SnackBar 顯示（Flet Desktop 穩定版）
         - 使用 page.overlay
         - 不會被 ListView / update 吃掉
         """
-
+        log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(
             content=ft.Text(message),
             bgcolor=color,
@@ -394,7 +349,7 @@ class IconPreviewView(ft.Column):
     # ==================================================
     # 核心資料載入（只處理 JSON）
     # ==================================================
-    def _load_entries(self):
+    def _load_entries(self) -> list[Any]:
         """
         - 以 source_root 的 en_us.json 為主
         - 對照 review_root 的 zh_tw.json
@@ -437,11 +392,8 @@ class IconPreviewView(ft.Column):
 
         return entries
 
-    def _render_current_page(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+    def _render_current_page(self) -> None:
+        """渲染當前頁面的項目列表"""
         entries = self.mods.get(self.current_modid, [])
         total = len(entries)
 

@@ -10,9 +10,7 @@ import os
 import pandas as pd
 from opencc import OpenCC
 from typing import Dict, Any, Generator
-import logging
 
-log = logging.getLogger(__name__)
 
 def compare_variants_tsv_generator(file_path: str, output_file: str) -> Generator[Dict[str, Any], None, None]:
     """
@@ -73,7 +71,6 @@ def compare_variants_tsv_generator(file_path: str, output_file: str) -> Generato
 
         except Exception as e:
              yield {"progress": progress, "log": f"處理第 {index + 1} 行時出錯: {e}", "error": True}
-
 
     if differences:
         total_diff = len(differences)

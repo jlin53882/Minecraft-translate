@@ -6,24 +6,17 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import Dict
 
-logger = logging.getLogger(__name__)
+from translation_tool.utils.log_unit import log_debug
 
 JSON_LINE = re.compile(r'^\s*"(.+?)"\s*:\s*"(.+?)"\s*,?\s*$')
 KEY_ZH = re.compile(r"^([a-zA-Z0-9_.-]+)([\u4e00-\u9fff].+)$")
 
-
 def try_repair_lang_line(line: str):
     # JSON 風格
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`match`
-
-    回傳：依函式內 return path。
-    """
+    """嘗試修復損壞的 lang 行。"""
     m = JSON_LINE.match(line)
     if m:
         return m.group(1), m.group(2)
@@ -34,7 +27,6 @@ def try_repair_lang_line(line: str):
         return m.group(1), m.group(2)
 
     return None
-
 
 def collapse_lang_lines(text: str):
     """
@@ -62,7 +54,6 @@ def collapse_lang_lines(text: str):
         out.append(buf)
 
     return out
-
 
 def parse_lang_text(text: str, *, on_error=None) -> Dict[str, str]:
     """
@@ -100,7 +91,7 @@ def parse_lang_text(text: str, *, on_error=None) -> Dict[str, str]:
             if last_key is not None:
                 # 將這行內容合併到上一個 key 的 value 中
                 data[last_key] += "\n" + line
-                logger.debug(f"已自動修復續行 (line {idx}): 合併至 {last_key}")
+                log_debug(f"已自動修復續行 (line {idx}): 合併至 {last_key}")
             else:
                 # 如果第一行就沒有 '=' 且不是註解，這才是真正的錯誤
                 if on_error:
@@ -109,7 +100,6 @@ def parse_lang_text(text: str, *, on_error=None) -> Dict[str, str]:
 
     return data
 
-
 def dump_lang_text(data: Dict[str, str]) -> str:
     """將字典轉換回 .lang 的文字格式"""
     lines = []
@@ -117,7 +107,6 @@ def dump_lang_text(data: Dict[str, str]) -> str:
     for key in sorted(data.keys()):
         lines.append(f"{key}={data[key]}")
     return "\n".join(lines)
-
 
 def is_mc_standard_lang_path(path: str) -> bool:
     """
@@ -129,17 +118,12 @@ def is_mc_standard_lang_path(path: str) -> bool:
     # 必須在 /lang/ 資料夾內且為 .lang 結尾
     return "/lang/" in p and p.endswith(".lang")
 
-
 def pick_first_not_none(*vals):
-    """處理此函式的工作（細節以程式碼為準）。
-
-    回傳：依函式內 return path。
-    """
+    """取得第一個非 None 值。"""
     for v in vals:
         if v is not None:
             return v
     return ""
-
 
 def normalize_patchouli_book_root(path: str) -> str:
     """

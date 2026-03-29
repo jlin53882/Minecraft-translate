@@ -17,18 +17,15 @@ log = logging.getLogger(__name__)
 # 英文檢查的正則 (來自 check_untranslated.py)
 ENGLISH_PATTERN = re.compile(r"[A-Za-z]")
 
-
 # 輔助函式：尋找 json 檔案
 def find_json_files(directory: str):
     """找出此 generator 並逐步回報進度（yield update dict）。
 
-    - 主要包裝：`walk`
     """
     for root, _, files in os.walk(directory):
         for file in files:
             if file.endswith(".json"):
                 yield os.path.join(root, file)
-
 
 def check_english_residue_generator(
     input_dir: str, output_dir: str

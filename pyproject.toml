@@ -31,3 +31,15 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = ["backups"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = ["tests/", "tools/", ".venv/"]
+
+[tool.ruff.lint]
+select = ["I", "E", "F", "W"]
+line-length = 120

@@ -19,52 +19,45 @@ from functools import wraps
 from pathlib import Path
 from datetime import datetime
 
-
 # =============================================================================
 # 自訂異常類別
 # =============================================================================
-
 
 class TranslationError(Exception):
     """翻譯相關錯誤的基底類別"""
 
     def __init__(self, message: str, context: dict = None):
-        """處理此函式的工作（細節以程式碼為準）。
+        """初始化翻譯錯誤。
 
-        - 主要包裝：`__init__`
-
-        回傳：None
+        參數：
+            message: 錯誤訊息
+            context: 額外上下文資料
         """
         self.message = message
         self.context = context or {}
         super().__init__(self.message)
 
     def __str__(self):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：依函式內 return path。
-        """
+        """取得錯誤訊息字串。"""
         if self.context:
             ctx = ", ".join(f"{k}={v}" for k, v in self.context.items())
             return f"{self.message} (context: {ctx})"
         return self.message
-
 
 class APIError(TranslationError):
     """API 相關錯誤"""
 
     pass
 
-
 class RateLimitError(APIError):
     """API 限流錯誤（429 Too Many Requests）"""
 
     def __init__(self, retry_after: int = 600, **context):
-        """處理此函式的工作（細節以程式碼為準）。
+        """初始化 RateLimitError。
 
-        - 主要包裝：`__init__`
-
-        回傳：None
+        參數：
+            retry_after: 重試秒數
+            context: 額外上下文
         """
         super().__init__(
             f"API 限流，建議 {retry_after} 秒後重試",
@@ -72,42 +65,35 @@ class RateLimitError(APIError):
         )
         self.retry_after = retry_after
 
-
 class OverloadError(APIError):
     """API 過載錯誤（503 Service Unavailable - overload）"""
 
     def __init__(self, **context):
-        """處理此函式的工作（細節以程式碼為準）。
+        """初始化 OverloadError。
 
-        - 主要包裝：`__init__`
-
-        回傳：None
+        參數：
+            context: 額外上下文
         """
         super().__init__("API 伺服器過載", context)
-
 
 class FileFormatError(TranslationError):
     """檔案格式錯誤（JSON、lang 等）"""
 
     pass
 
-
 class CacheError(TranslationError):
     """快取相關錯誤"""
 
     pass
-
 
 class ConfigError(TranslationError):
     """配置檔錯誤"""
 
     pass
 
-
 # =============================================================================
 # 錯誤處理裝飾器
 # =============================================================================
-
 
 def handle_translation_errors(log_func=None, auto_retry=True, max_retries=3):
     """統一的錯誤處理裝飾器
@@ -128,17 +114,11 @@ def handle_translation_errors(log_func=None, auto_retry=True, max_retries=3):
     """
 
     def decorator(func):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：依函式內 return path。
-        """
+        """翻譯錯誤處理的裝飾器。"""
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            """處理此函式的工作（細節以程式碼為準）。
-
-            回傳：依函式內 return path。
-            """
+            """執行翻譯並處理錯誤與重試。"""
             retry_count = 0
 
             while retry_count <= max_retries:
@@ -222,11 +202,9 @@ def handle_translation_errors(log_func=None, auto_retry=True, max_retries=3):
 
     return decorator
 
-
 # =============================================================================
 # 錯誤記錄
 # =============================================================================
-
 
 def _log_error_to_file(error: Exception, func_name: str):
     """將錯誤寫入日誌檔案
@@ -262,11 +240,9 @@ def _log_error_to_file(error: Exception, func_name: str):
         # 記錄失敗也不應該中斷主流程
         print(f"[WARN] 寫入錯誤日誌失敗: {log_error}")
 
-
 # =============================================================================
 # 便利函式
 # =============================================================================
-
 
 def raise_if_invalid_json(data: dict, required_keys: list, source: str = "unknown"):
     """檢查 JSON 資料是否包含必要欄位
@@ -285,7 +261,6 @@ def raise_if_invalid_json(data: dict, required_keys: list, source: str = "unknow
             f"JSON 格式錯誤：缺少必要欄位 {missing}",
             context={"source": source, "missing_keys": missing},
         )
-
 
 def raise_if_empty(value, name: str):
     """檢查值是否為空

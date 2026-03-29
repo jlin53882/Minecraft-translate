@@ -107,5 +107,8 @@
         "pending_organized_folder_name": "待翻譯整理需翻譯",
         "filtered_pending_min_count": 3,
         "quarantine_folder_name": "問題檔案skipped_json"
+    },
+    "jar_extractor": {
+        "lang_codes": ["en_us", "zh_cn", "zh_tw"]
     }
 }

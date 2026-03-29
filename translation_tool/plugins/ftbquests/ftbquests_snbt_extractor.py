@@ -28,17 +28,9 @@ LANG_PRIORITY = {lang: i for i, lang in enumerate(LANG_WHITELIST)}
 # 只解析語言字串 key
 LANG_KEY_SUFFIX = (".title", ".quest_desc")
 
-
 def is_lang_key_ref(val: str):
-    # 遇到 {ftbquests.xxx} 這種語言 reference 直接跳過
-    """判斷此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`bool`
-
-    回傳：依函式內 return path。
-    """
+    """判斷是否為 FTB 語系參考（{ftbquests.xxx} 格式）。"""
     return bool(re.match(r"^\{ftbquests\.", val))
-
 
 def is_lang_key_ref_like(val: str) -> bool:
     """
@@ -53,12 +45,10 @@ def is_lang_key_ref_like(val: str) -> bool:
         return False
     return bool(re.fullmatch(r"\{[^{}]+\}(?:\n\{[^{}]+\})*", s))
 
-
 TAG_CONDITION_PATTERN = re.compile(
     r"^\s*(any\s+of|any|all|no)\s*#",
     re.IGNORECASE,
 )
-
 
 def is_tag_condition_text(s: str) -> bool:
     """
@@ -69,7 +59,6 @@ def is_tag_condition_text(s: str) -> bool:
     """
     return bool(TAG_CONDITION_PATTERN.match(s))
 
-
 def walk_snbt_file(path: str) -> Compound | None:
     """讀取 SNBT 檔案"""
     try:
@@ -79,17 +68,11 @@ def walk_snbt_file(path: str) -> Compound | None:
         log_error(f"❌ SNBT 解析失敗: {path} -> {e}")
         return None
 
-
 # =========================
 # lang/*.snbt 抽取
 # =========================
 def extract_lang_file(filename: str, root: Compound) -> dict:
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`items`
-
-    回傳：依函式內 return path。
-    """
+    """從 SNBT 檔案抽取語系翻譯項目。"""
     out = {}
 
     for key, val in root.items():
@@ -117,24 +100,15 @@ def extract_lang_file(filename: str, root: Compound) -> dict:
 
     return out
 
-
 # =========================
 # quest 本體抽取（title）
 # =========================
 def extract_quest_file(filename: str, root: Compound) -> dict:
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`recurse`
-
-    回傳：依函式內 return path。
-    """
+    """從 Quest 檔案抽取任務翻譯項目。"""
     out = {}
 
     def _emit(obj: Compound, field: str, kind: str):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+        """發射翻譯項目。"""
         val = obj.get(field)
         if val is None:
             return
@@ -177,10 +151,7 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
         out[key] = text
 
     def recurse(obj, path):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+        """遞迴遍歷物件提取翻譯。"""
         if isinstance(obj, Compound):
             # ✅ 抽三種欄位
             _emit(obj, "title", "title")
@@ -199,26 +170,17 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
     recurse(root, "root")
     return out
 
-
 def ensure_lang(store: dict, lang: str):
-    """確保此函式的工作（細節以程式碼為準）。
-
-    回傳：None
-    """
+    """確保語系存在於儲存區。"""
     if lang not in store:
         store[lang] = {"lang": {}, "quests": {}}
-
 
 # =========================
 # 主流程
 # =========================
 def process_quest_folder(quests_root: str) -> dict:
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`join`, `set`, `walk`
-
-    回傳：依函式內 return path。
-    """
+    """處理任務資料夾並提取翻譯。"""
+    final_output = {}
     final_output = {}
     lang_dir = os.path.join(quests_root, "lang")
 
@@ -323,7 +285,6 @@ def process_quest_folder(quests_root: str) -> dict:
                 final_output[lang]["quests"].update(extracted)
 
     return final_output
-
 
 # =========================
 # CLI 入口

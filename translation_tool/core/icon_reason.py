@@ -4,12 +4,13 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+from __future__ import annotations
+
 from enum import Enum
 from dataclasses import dataclass
-"""
-IconResult = 診斷報告
-IconRisk = 緊急程度
-"""
+from typing import Any
+
+
 class IconRisk(Enum):
     """IconRisk 類別。
 
@@ -20,7 +21,6 @@ class IconRisk(Enum):
     WARN = "warn"
     DANGER = "danger"
 
-
 @dataclass
 class IconResult:
     """IconResult 類別。
@@ -28,6 +28,6 @@ class IconResult:
     用途：封裝與 IconResult 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
-    icon_path: object | None
+    icon_path: Any | None
     reason: str
     risk: IconRisk

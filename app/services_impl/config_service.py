@@ -31,7 +31,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = str(PROJECT_ROOT / "config.json")
 REPLACE_RULES_PATH = str(PROJECT_ROOT / "replace_rules.json")
 
-
 def _load_app_config() -> dict[str, Any]:
     """讀取 app 設定（service 層唯一入口）。
 
@@ -45,7 +44,6 @@ def _load_app_config() -> dict[str, Any]:
 
     return load_config(CONFIG_PATH)
 
-
 def _save_app_config(config: dict[str, Any]):
     """儲存 app 設定（service 層唯一入口）。
 
@@ -54,49 +52,46 @@ def _save_app_config(config: dict[str, Any]):
     - 之後若要加上寫入驗證/寫入鎖/異動通知，也集中在這裡處理。
     """
 
+    # Normalization: if process_zh_cn_files is False, force-dependent fields to False
+    # 防止不一致狀態寫入磁碟（例如 UI 只勾選「停用簡中處理」但忘記一併關閉相關選項）
+    if not config.get("process_zh_cn_files", True):
+        config["skip_zh_cn_when_only_process_lang"] = False
+        config["patchouli_skip_en_us_when_zh_cn_exists"] = False
+
     from translation_tool.utils.config_manager import save_config
 
     return save_config(config, CONFIG_PATH)
 
-
 # --- 檔案讀寫服務 ---
 
-
 def load_replace_rules():
-    """載入此函式的工作（細節以程式碼為準）。
+    """載入替換規則。
 
-    - 主要包裝：`load_rules_core`
-
-    回傳：依函式內 return path。
+    回傳：
+        dict: 規則資料
     """
     return load_rules_core(REPLACE_RULES_PATH)
 
-
 def save_replace_rules(rules):
-    """保存此函式的工作（細節以程式碼為準）。
+    """儲存替換規則。
 
-    - 主要包裝：`save_rules_core`
-
-    回傳：None
+    參數：
+        rules: 規則資料
     """
     save_rules_core(REPLACE_RULES_PATH, rules)
 
-
 def load_config_json():
-    """載入此函式的工作（細節以程式碼為準）。
+    """載入應用程式設定。
 
-    - 主要包裝：`_load_app_config`
-
-    回傳：依函式內 return path。
+    回傳：
+        dict: 設定資料
     """
     return _load_app_config()
 
-
 def save_config_json(config):
-    """保存此函式的工作（細節以程式碼為準）。
+    """儲存應用程式設定。
 
-    - 主要包裝：`_save_app_config`
-
-    回傳：None
+    參數：
+        config: 設定資料
     """
     _save_app_config(config)

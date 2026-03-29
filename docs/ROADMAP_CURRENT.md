@@ -1,5 +1,8 @@
 # ROADMAP_CURRENT
 # Minecraft_translator_flet 當前 Roadmap（2026-03-11）
+> **更新日期：2026-03-30**
+> **目前版本：v0.6.0-3-g7a6a8df（3 commits past v0.6.0 tag）**
+> **最新 PR：PR39C_2（main branch）**
 
 目的：整理目前已完成、已設計、待執行、與中期可能展開的 PR / 工作主題，讓後續規劃有一致參考，不需要每次重新回顧整段對話。
 
@@ -165,7 +168,211 @@
 
 ---
 
-# 4. 接下來的中期主線（重新編號）
+# 4. 已完成的中期主線（PR30–PR61，2026-03-12~03-13）
+
+> 以下 PR 已全部合併至 main branch（commit 8c61917 以後）
+
+## PR30 — 移除未使用 helpers 與 worktree noise
+狀態：✅ 已完成
+
+內容：
+- 移除 `unused helpers`（未使用的輔助函式）
+- 清理 worktree noise（工作區雜訊）
+
+類型：清理型
+
+---
+
+## PR31 — 提取 FTB/KubeJS 共用 helpers 到 plugins/shared
+狀態：✅ 已完成
+
+內容：
+- 將 FTB 與 KubeJS 的共用 helpers 提取至 `plugins/shared/`
+- 建立 `lang_detection_helper` 等共用元件
+
+類型：邊界型 + 重構型
+
+---
+
+## PR32 — 提取 FTB/MD lang text detection helpers
+狀態：✅ 已完成
+
+內容：
+- 將 FTB/Markdown 的語言文字偵測 helpers 進一步提取至 `plugins/shared/`
+
+類型：邊界型
+
+---
+
+## PR33 — Pipeline logging bootstrap deduplication
+狀態：✅ 已完成
+
+內容：
+- 將 pipeline logging bootstrap 去重，收斂至 `_pipeline_logging.py`
+- 消除跨 pipeline service 的重複 logging 初始化邏輯
+
+類型：重構型
+
+---
+
+## PR34 — Non-UI guard tests 擴展
+狀態：✅ 已完成
+
+內容：
+- 在核心重構前建立 guard tests
+- 確保非 UI 層級的功能有安全網
+
+類型：驗證型
+
+---
+
+## PR35 — LM Translator Main 模組拆分
+狀態：✅ 已完成
+
+內容：
+- 將 `lm_translator_main.py` 拆分為更專注的 core modules
+- 建立清晰的職責邊界
+
+類型：重構型
+
+---
+
+## PR36 — Lang Merger 模組拆分
+狀態：✅ 已完成
+
+內容：
+- 將 `lang_merger.py` 拆分為多個專注子模組
+- 包含 `lang_merge_*.py` 子流程
+
+類型：重構型
+
+---
+
+## PR37 — Cache Manager 薄 façade
+狀態：✅ 已完成
+
+內容：
+- 將 `cache_manager.py` 收斂為薄 façade
+- 保留向後相容性
+
+類型：邊界型 + 重構型
+
+---
+
+## PR38 — LM Callers 遷移到正規模組
+狀態：✅ 已完成
+
+內容：
+- 將 LM caller 遷移到 canonical modules
+- 脫離舊的 `app.services` façade
+
+類型：遷移型
+
+---
+
+## PR39A — 移除最終 lm/lang helper 相容性 re-exports
+狀態：✅ 已完成
+
+內容：
+- 清除最後的 lm/lang helper 相容性 re-exports
+- 完成 `app/services.py` façade 收斂
+
+類型：清理型
+
+---
+
+## PR39B — Cache Manager State 封裝
+狀態：✅ 已完成
+
+內容：
+- 將 cache manager state 封裝至 `cache_store`
+
+類型：邊界型
+
+---
+
+## PR39C — 維護性註解補充
+狀態：✅ 已完成
+
+內容：
+- 在非測試 Python 檔案中補充維護性註解
+- 建立 docstring 覆蓋範本
+
+類型：文件型
+
+---
+
+## PR39C_2 — Ruff fixes 與 Docstring 改進
+狀態：✅ 已完成
+
+內容：
+- Ruff fixes for PR39C_2
+- 改善 docstring 內容品質
+- 修正 placeholder docstrings
+
+類型：清理型 + 文件型
+
+---
+
+## PR40-58 — 大型結構重構收斂輪次（2026-03-12）
+狀態：✅ 已完成
+
+詳細內容見：[PR40-58_REFACTOR_SUMMARY.md](./PR40-58_REFACTOR_SUMMARY.md)
+
+---
+
+## PR59 — UI 文字主題樣式清理
+狀態：✅ 已完成
+
+內容：
+- UI 文字主題與樣式一致性清理
+- `app/ui/theme.py` 主題系統建立
+
+類型：UI 重構型
+
+---
+
+## PR60 — CI Workflow 修復
+狀態：✅ 已完成
+
+內容：
+- 修正 GitHub Actions CI workflow
+- 確保 `uv sync` / `pytest` / `ruff` 正確觸發
+
+類型：DevOps
+
+---
+
+## PR61 — Cache Import Canonicalize
+狀態：✅ 已完成
+
+內容：
+- 將 cache import 統一為 canonical 模組路徑
+
+類型：邊界型
+
+---
+
+# 5. PR62-71 設計藍圖（`origin/pr62-71-design-docs` branch）
+
+> 以下 PR 的設計檔已完成，但尚未合併至 main branch
+
+| PR | 名稱 | 狀態 |
+|----|------|------|
+| PR62 | 測試覆蓋率健檢 | 📋 Design Done |
+| PR63 | 測試基礎設施（fixtures） | 📋 Design Done |
+| PR64 | Docstring 補完 | 📋 Design Done |
+| PR65 | README 更新 | 📋 Design Done |
+| PR66-A | Cache 監控 | 📋 Design Done |
+| PR67 | Lazy Load 優化 | 📋 Design Done |
+| PR68 | UI Component 抽取 | 📋 Design Done |
+| PR69 | 主題系統建立（app/ui/theme.py） | 📋 Design Done |
+| PR70 | 廢棄程式碼清理 | 📋 Design Done |
+| PR71 | Exception 使用一致性評估 | 📋 Design Done |
+
+---
+
+# 6. 接下來的中期主線（重新編號）
 
 ## PR9 — `cache_manager.py` 分層重構（Phase 0 / 設計）
 狀態：🔵 尚未立項
@@ -201,7 +408,7 @@
 
 ---
 
-# 5. 建議執行順序
+# 7. 建議執行順序（歷史參考）
 
 ## 已完成
 1. PR6
@@ -214,7 +421,7 @@
 
 ---
 
-# 6. 目前工作的重點判讀
+# 8. 目前工作的重點判讀
 
 現在最值得做的不是再補零碎小修，而是：
 - PR6 已收掉 naming debt
@@ -245,7 +452,7 @@
 
 ---
 
-# 7. 一句話總結
+# 9. 一句話總結
 
 目前整體進度健康：
 - PR1～PR5 已收尾

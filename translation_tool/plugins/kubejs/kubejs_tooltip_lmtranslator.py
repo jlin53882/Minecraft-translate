@@ -48,7 +48,6 @@ from translation_tool.plugins.shared.lang_path_rules import (
 
 from translation_tool.utils.log_unit import log_info, log_warning, progress
 
-
 # -------------------------
 # Smart item mapping
 # -------------------------
@@ -58,8 +57,8 @@ def collect_items_from_mapping(
     file_hint: str,
 ) -> List[Dict[str, Any]]:
     """
-    Convert {path_key: source_text} mapping to translate_batch_smart items.
-    Must ensure smart detects KubeJS profile => item["file"] contains "/kubejs/".
+    將 {路徑鍵: 原文} 的映射轉換為翻譯批次項目。
+    需確保智慧偵測能識別 KubeJS 配置（item["file"] 包含 "/kubejs/"）。
     """
     items: List[Dict[str, Any]] = []
     for k, v in mapping.items():
@@ -69,7 +68,7 @@ def collect_items_from_mapping(
             continue
         items.append(
             {
-                "file": file_hint,  # important for smart profile detection
+                "file": file_hint,  # 智慧偵測用於識別 KubeJS 配置
                 "path": k,
                 "source_text": v,
                 "text": v,
@@ -77,7 +76,6 @@ def collect_items_from_mapping(
             }
         )
     return items
-
 
 def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     """計算 mapping 中『可翻譯字串』的數量。
@@ -89,7 +87,6 @@ def count_translatable_keys(mapping: Dict[str, Any]) -> int:
     用途：顯示進度 / 估算翻譯總量。
     """
     return sum(1 for _, v in mapping.items() if isinstance(v, str) and v.strip())
-
 
 # -------------------------
 # Dry-run stats (optional)
@@ -107,7 +104,6 @@ class DryRunStats:
     cache_hit: int = 0
     cache_miss: int = 0
     per_file: Optional[list[dict]] = None
-
 
 # -------------------------
 # Public API (for UI/pipeline)
@@ -172,12 +168,7 @@ def translate_kubejs_pending_to_zh_tw(
     global_total_keys = 0
 
     def _count_one(src: Path) -> Tuple[Path, int]:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`read_json_dict`
-
-        回傳：依函式內 return path。
-        """
+        """統計單一檔案的翻譯 key 數量。"""
         try:
             mapping = read_json_dict(src)
             return src, int(count_translatable_keys(mapping))
@@ -253,12 +244,7 @@ def translate_kubejs_pending_to_zh_tw(
     _file_write_table: dict[str, tuple[Path, Dict[str, str]]] = {}
 
     def _writer(file_id: str) -> None:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`write_json_dict`
-
-        回傳：None
-        """
+        """寫入翻譯結果到檔案。"""
         dst_path, data = _file_write_table[file_id]
         write_json_dict(dst_path, data)
 
@@ -412,10 +398,7 @@ def translate_kubejs_pending_to_zh_tw(
     else:
 
         def on_translated_item(it: Dict[str, Any]) -> None:
-            """處理此函式的工作（細節以程式碼為準）。
-
-            回傳：None
-            """
+            """處理翻譯結果。"""
             rel_src = it.get("file_rel")
             p = it.get("path")
             t = it.get("text")
@@ -449,12 +432,7 @@ def translate_kubejs_pending_to_zh_tw(
 
         def on_batch_flushed() -> None:
             # write touched files each batch
-            """處理此函式的工作（細節以程式碼為準）。
-
-            - 主要包裝：`flush`
-
-            回傳：None
-            """
+            """批量寫入翻譯結果。"""
             try:
                 touch.flush(_writer)
             except Exception:
@@ -463,12 +441,7 @@ def translate_kubejs_pending_to_zh_tw(
                     write_json_dict(dstp, data)
 
         def _fmt_eta(sec: float) -> str:
-            """處理此函式的工作（細節以程式碼為準）。
-
-            - 主要包裝：`divmod`
-
-            回傳：依函式內 return path。
-            """
+            """格式化剩餘時間。"""
             if sec <= 0:
                 return ""
             m, s = divmod(int(sec), 60)
@@ -480,12 +453,7 @@ def translate_kubejs_pending_to_zh_tw(
             return f"{s}s"
 
         def on_progress(p: float, msg: str, eta_sec: float) -> None:
-            """處理此函式的工作（細節以程式碼為準）。
-
-            - 主要包裝：`_fmt_eta`, `log_info`, `progress`
-
-            回傳：None
-            """
+            """報告翻譯進度。"""
             eta_txt = _fmt_eta(eta_sec)
             log_info(f"{msg}" + (f" | ETA ≈ {eta_txt}" if eta_txt else ""))
             progress(p)

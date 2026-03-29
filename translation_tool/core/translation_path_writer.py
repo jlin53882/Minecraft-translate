@@ -8,24 +8,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 def map_lang_output_path(src: Path) -> Path:
-    """處理此函式的工作（細節以程式碼為準）。
-
-    回傳：依函式內 return path。
-    """
+    """根據來源路徑自動判定翻譯輸出的目標路徑（例如將 en_us.json 映射至 zh_tw.json）。"""
     if src.name.lower() == "en_us.json" and "lang" in src.parts:
         return src.with_name("zh_tw.json")
     return src
 
-
 def set_by_path(root: dict, path: str, value):
-    """設定此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`replace`, `split`
-
-    回傳：依函式內 return path。
-    """
+    """依路徑設定值。"""
     current = root
     normalized_path = path.replace("][", "].[")
     parts = normalized_path.split(".")

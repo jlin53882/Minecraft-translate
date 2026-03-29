@@ -13,20 +13,13 @@ from typing import Any
 
 import orjson as json
 
-
 def load_shard_file(path: Path) -> dict[str, Any]:
-    """載入此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`loads`
-
-    回傳：依函式內 return path。
-    """
+    """載入並解析單一分片（Shard）的 JSON 檔案，將其轉換為記憶體中的快取物件。"""
     try:
         data = json.loads(path.read_bytes())
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
-
 
 def load_cache_type(
     cache_type: str,
@@ -37,12 +30,7 @@ def load_cache_type(
     parallel_workers: int,
     logger: logging.Logger,
 ) -> None:
-    """載入此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`mkdir`, `sorted`, `info`
-
-    回傳：None
-    """
+    """載入指定類型的快取。"""
     if cache_type not in translation_cache:
         translation_cache[cache_type] = {}
 

@@ -12,7 +12,6 @@ from collections import defaultdict
 from pathlib import Path
 from translation_tool.utils.log_unit import log_info, log_error
 
-
 def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
     """
     UI 可能傳：
@@ -50,15 +49,10 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
 
     return str(best) if best else str(base)
 
-
 # ---------------- 工具 ----------------
 
-
 def split_js_args(s):
-    """處理此函式的工作（細節以程式碼為準）。
-
-    回傳：依函式內 return path。
-    """
+    """解析 JavaScript 函式參數"""
     args = []
     buf = ""
     depth = 0
@@ -92,14 +86,8 @@ def split_js_args(s):
 
     return args
 
-
 def strip_quotes(s):
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`strip`
-
-    回傳：依函式內 return path。
-    """
+    """移除字串首尾的引號"""
     s = s.strip()
     if (s.startswith("'") and s.endswith("'")) or (
         s.startswith('"') and s.endswith('"')
@@ -107,14 +95,8 @@ def strip_quotes(s):
         return s[1:-1]
     return s
 
-
 def replace_text_in_text_obj(expr, new_text):
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`sub`
-
-    回傳：依函式內 return path。
-    """
+    """利用正規表示式將 Text 函數物件中的目標字串內容替換為新文字。"""
     return re.sub(
         r'(Text\.\w+\(\s*[\'"])(.+?)([\'"]\s*\))',
         lambda m: m.group(1) + new_text + m.group(3),
@@ -122,24 +104,12 @@ def replace_text_in_text_obj(expr, new_text):
         count=1,
     )
 
-
 def extract_array_strings(expr):
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`findall`
-
-    回傳：依函式內 return path。
-    """
+    """從表達式中擷取陣列字串"""
     return re.findall(r"[\"']([^\"']+)[\"']", expr)
 
-
 def replace_array(expr, new_values):
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`split_js_args`, `enumerate`
-
-    回傳：依函式內 return path。
-    """
+    """解析陣列表達式，將其中的字串元素依序替換為新的值。"""
     parts = split_js_args(expr[1:-1])
     out = []
 
@@ -152,16 +122,11 @@ def replace_array(expr, new_values):
 
     return "[" + ", ".join(out) + "]"
 
-
 def to_js_name(json_name):
-    """處理此函式的工作（細節以程式碼為準）。
-
-    回傳：依函式內 return path。
-    """
+    """將檔案名稱的副檔名從 .json 轉換為 .js。"""
     if json_name.endswith(".json"):
         return json_name[:-5] + ".js"
     return json_name
-
 
 def clean_text(s: str) -> str:
     """
@@ -173,9 +138,7 @@ def clean_text(s: str) -> str:
         return ""
     return str(s).replace("\\n", "\n").strip()
 
-
 # ---------------- 主流程 ----------------
-
 
 def inject(
     original_dir: str,
@@ -272,12 +235,7 @@ def inject(
         # 1) Patch event.add(...)
         # ----------------------------
         def repl_event_add(m: re.Match) -> str:
-            """處理此函式的工作（細節以程式碼為準）。
-
-            - 主要包裝：`group`, `split_js_args`, `list`
-
-            回傳：依函式內 return path。
-            """
+            """處理 event.add 事件中的翻譯。"""
             nonlocal auto_id
             arg_str = m.group(1)
             args = split_js_args(arg_str)
@@ -309,11 +267,11 @@ def inject(
                         idx = 0
 
                         def repl_text(mm: re.Match) -> str:
-                            """處理此函式的工作（細節以程式碼為準）。
+                            """
 
                             - 主要包裝：`group`
 
-                            回傳：依函式內 return path。
+
                             """
                             nonlocal idx
                             key = f"{original_js}|{item_id}.{n}.{idx}"
@@ -347,12 +305,7 @@ def inject(
         #    key: file|scene.{auto_id}  (✅ 接續 event.add 用掉的 auto_id)
         # ----------------------------
         def repl_scene_text(m: re.Match) -> str:
-            """處理此函式的工作（細節以程式碼為準）。
-
-            - 主要包裝：`group`, `split_js_args`, `strip`
-
-            回傳：依函式內 return path。
-            """
+            """處理 scene.text 事件中的翻譯。"""
             nonlocal auto_id
             arg_str = m.group(1)
             args = split_js_args(arg_str)
@@ -404,10 +357,7 @@ def inject(
             text: str, start: int
         ) -> tuple[str | None, int | None]:
             # start 指向 '(' 後面的位置
-            """處理此函式的工作（細節以程式碼為準）。
-
-            回傳：依函式內 return path。
-            """
+            """提取函數呼叫的參數。"""
             depth = 1
             i = start
             buf = ""
@@ -424,12 +374,7 @@ def inject(
             return None, None
 
         def patch_itemevents_tooltips(full: str) -> str:
-            """處理此函式的工作（細節以程式碼為準）。
-
-            - 主要包裝：`finditer`, `join`
-
-            回傳：依函式內 return path。
-            """
+            """修補 ItemEvents 的 Tooltip。"""
             out = []
             last = 0
 
@@ -460,12 +405,7 @@ def inject(
                 idx = 0
 
                 def repl_text_call(mm: re.Match) -> str:
-                    """處理此函式的工作（細節以程式碼為準）。
-
-                    - 主要包裝：`group`
-
-                    回傳：依函式內 return path。
-                    """
+                    """處理 Tooltip 文字替換。"""
                     nonlocal idx
                     key = f"{original_js}|{item_id}.tooltip.{idx}"
                     idx += 1
@@ -537,7 +477,6 @@ def inject(
         "patched_js_files": patched_js_files,
         "wrote_lang_files": wrote_lang_files,
     }
-
 
 if __name__ == "__main__":
     inject()

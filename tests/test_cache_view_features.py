@@ -121,6 +121,12 @@ def test_on_query_search_all_mode_deduplicates_per_type_key(monkeypatch):
     view.query_selected_result = None
     view.query_page = 1
 
+    # PR5-7: 新增屬性
+    view.query_change_hint = ft.Text(value="")
+
+    # 避免 update 錯誤
+    view.update = lambda: None
+
     view._notify = lambda *args, **kwargs: None
     view._render_query_results = lambda: None
     view._render_query_detail = lambda: None

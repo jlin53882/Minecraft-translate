@@ -6,10 +6,14 @@
 
 # /minecraft_translator_flet/app/views/lookup_view.py (加入「查詢中...」功能的修正版)
 
-# 待修待測試
+from __future__ import annotations
+
+import threading
 
 import flet as ft
-import threading
+
+from app.ui import theme
+from translation_tool.utils.log_unit import log_info, log_warning, log_error
 from app.services_impl.pipelines.lookup_service import (
     run_batch_lookup_service,
     run_manual_lookup_service,
@@ -23,12 +27,11 @@ class LookupView(ft.Column):
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
 
-    def __init__(self, page: ft.Page):
-        """處理此函式的工作（細節以程式碼為準）。
+    def __init__(self, page: ft.Page) -> None:
+        """初始化 LookupView。
 
-        - 主要包裝：`__init__`, `TextField`, `ElevatedButton`
-
-        回傳：None
+        參數：
+            page: Flet Page 物件
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
         self.page = page
@@ -73,7 +76,7 @@ class LookupView(ft.Column):
                     content=ft.Column(
                         [
                             ft.Text(
-                                "單筆學名查詢", style=ft.TextThemeStyle.TITLE_MEDIUM
+                                "單筆學名查詢", theme_style=ft.TextThemeStyle.TITLE_MEDIUM
                             ),
                             ft.Row([self.single_input, self.single_button]),
                             ft.Divider(),
@@ -95,7 +98,7 @@ class LookupView(ft.Column):
                     content=ft.Column(
                         [
                             ft.Text(
-                                "批次學名查詢", style=ft.TextThemeStyle.TITLE_MEDIUM
+                                "批次學名查詢", theme_style=ft.TextThemeStyle.TITLE_MEDIUM
                             ),
                             ft.Row(
                                 [self.batch_input, self.batch_result_textfield],
@@ -112,17 +115,12 @@ class LookupView(ft.Column):
         ]
 
     # --- 單筆查詢邏輯 ---
-    def single_lookup_clicked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`Thread`, `start`
-
-        回傳：None
-        """
+    def single_lookup_clicked(self, e: ft.ControlEvent) -> None:
+        """單筆查詢點擊事件。"""
         search_term = self.single_input.value
         if not search_term:
             self.single_result_text.value = "錯誤：請輸入要查詢的學名。"
-            self.single_result_text.color = ft.Colors.RED
+            self.single_result_text.color = theme.RED
             self.page.update()
             return
 
@@ -131,21 +129,16 @@ class LookupView(ft.Column):
         self.single_input.disabled = True
         self.single_progress_ring.visible = True
         self.single_result_text.value = "查詢中..."
-        self.single_result_text.color = ft.Colors.GREY_500
+        self.single_result_text.color = theme.GREY_500
         self.page.update()
 
         # 2. 在背景執行緒中執行查詢
         thread = threading.Thread(target=self.single_lookup_worker, args=(search_term,))
         thread.start()
 
-    def single_lookup_worker(self, name: str):
+    def single_lookup_worker(self, name: str) -> None:
         # 3. 呼叫後端服務
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`run_manual_lookup_service`
-
-        回傳：None
-        """
+        """執行單筆查詢工作。"""
         result = run_manual_lookup_service(name)
 
         # 4. 在 UI 執行緒中更新最終結果
@@ -159,13 +152,8 @@ class LookupView(ft.Column):
         self.page.update()
 
     # --- 批次查詢邏輯 ---
-    def batch_lookup_clicked(self, e):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`Thread`, `start`
-
-        回傳：None
-        """
+    def batch_lookup_clicked(self, e: ft.ControlEvent) -> None:
+        """處理批次查詢按鈕點擊事件"""
         json_text = self.batch_input.value
         if not json_text:
             self.batch_result_textfield.value = "錯誤：請貼上 JSON 內容"
@@ -181,13 +169,8 @@ class LookupView(ft.Column):
         thread = threading.Thread(target=self.batch_lookup_worker, args=(json_text,))
         thread.start()
 
-    def batch_lookup_worker(self, json_text):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`run_batch_lookup_service`
-
-        回傳：None
-        """
+    def batch_lookup_worker(self, json_text: str) -> None:
+        """執行批次查詢翻譯服務"""
         try:
             for update in run_batch_lookup_service(json_text):
                 if update.get("error"):
@@ -203,10 +186,11 @@ class LookupView(ft.Column):
             self.batch_progress_bar.visible = False
             self.page.update()
 
-    def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.RED_600) -> None:
         """
         (新) 統一的 SnackBar 觸發函式 (使用您提供的 Overlay 方案)
         """
+        log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True

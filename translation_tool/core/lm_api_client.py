@@ -12,7 +12,6 @@ import requests
 
 from translation_tool.utils.config_manager import load_config
 
-
 def call_gemini_requests(
     *,
     model_name: str,
@@ -21,12 +20,7 @@ def call_gemini_requests(
     api_key: str,
     temperature: float,
 ) -> str:
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`post`, `json`
-
-    回傳：依函式內 return path。
-    """
+    """呼叫 Gemini API 進行翻譯。"""
     url = (
         "https://generativelanguage.googleapis.com/"
         f"v1beta/models/{model_name}:generateContent"

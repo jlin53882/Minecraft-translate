@@ -32,7 +32,6 @@ from translation_tool.utils.log_unit import (
     log_debug,
 )
 
-
 def _normalize_config_dir(path: str) -> str:
     """
     容錯：避免出現 .../config/config 這種重複路徑。
@@ -46,17 +45,12 @@ def _normalize_config_dir(path: str) -> str:
         return os.path.dirname(norm)
     return norm
 
-
 def _load_json_dict(path: str) -> dict:
-    """載入此函式的工作（細節以程式碼為準）。
-
-    回傳：依函式內 return path。
-    """
+    """載入 JSON 檔案為字典。"""
     if not os.path.isfile(path):
         return {}
     with open(path, "rb") as f:
         return orjson.loads(f.read())
-
 
 def split_lang_by_source_file(lang_map: dict) -> Dict[str, Dict[str, str]]:
     """
@@ -84,7 +78,6 @@ def split_lang_by_source_file(lang_map: dict) -> Dict[str, Dict[str, str]]:
         out.setdefault(filename, {})[inner_key] = v
     return out
 
-
 def _walk_and_copy_template(template_dir: str, zh_tw_dir: str) -> int:
     """
     把 template_dir 下所有 .snbt 複製到 zh_tw_dir（保留相對路徑結構）
@@ -105,7 +98,6 @@ def _walk_and_copy_template(template_dir: str, zh_tw_dir: str) -> int:
             copied += 1
 
     return copied
-
 
 def walk_and_copy_all_snbt(src_root_dir: str, dst_root_dir: str) -> int:
     """
@@ -128,11 +120,9 @@ def walk_and_copy_all_snbt(src_root_dir: str, dst_root_dir: str) -> int:
 
     return copied
 
-
 def _read_snbt(path: str) -> Compound | None:
-    """處理此函式的工作（細節以程式碼為準）。
+    """
 
-    回傳：依函式內 return path。
     """
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -141,18 +131,11 @@ def _read_snbt(path: str) -> Compound | None:
         log_error("SNBT 讀取失敗: %s -> %s", path, e)
         return None
 
-
 def _write_snbt(path: str, root: Compound) -> None:
-    """處理此函式的工作（細節以程式碼為準）。
-
-    - 主要包裝：`makedirs`
-
-    回傳：None
-    """
+    """寫入 SNBT 檔案。"""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(snbt.dumps(root))
-
 
 def patch_lang_snbt_file(
     src_path: str,
@@ -209,10 +192,7 @@ def patch_lang_snbt_file(
     changed_keys: List[str] = []
 
     def _list_to_py(v):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：依函式內 return path。
-        """
+        """將 SnbtList 物件轉換為標準 Python 列表，並將內部元素格式化為字串。"""
         if isinstance(v, SnbtList):
             out = []
             for e in v:
@@ -284,7 +264,6 @@ def patch_lang_snbt_file(
     }
     return changed, candidates, details
 
-
 def patch_quest_snbt_file(
     src_path: str,
     dst_path: str,
@@ -348,10 +327,7 @@ def patch_quest_snbt_file(
     missing: list[str] = []
 
     def _coerce_to_list(new_val: Any) -> list[str] | None:
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：依函式內 return path。
-        """
+        """將輸入值強制轉換為字串列表；若為列表則篩選出字串，若為字串則依換行符分割。"""
         if isinstance(new_val, list):
             parts = [x for x in new_val if isinstance(x, str)]
             return parts
@@ -360,10 +336,7 @@ def patch_quest_snbt_file(
         return None
 
     def _apply_field(obj: Compound, kind: str, new_val: Any, tag_key: str):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+        """應用翻譯到欄位。"""
         nonlocal changed, candidates
 
         if kind not in ("title", "subtitle", "description"):
@@ -410,10 +383,7 @@ def patch_quest_snbt_file(
         skipped.append(tag_key)
 
     def _recurse(node):
-        """處理此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+        """遞迴應用翻譯到節點。"""
         if isinstance(node, Compound):
             id_val = node.get("id")
             if isinstance(id_val, snbt.String):
@@ -450,7 +420,6 @@ def patch_quest_snbt_file(
             "missing": missing,
         },
     )
-
 
 def inject_ftbquests_zh_tw_from_json_old(
     base_config_dir: str,
@@ -534,7 +503,6 @@ def inject_ftbquests_zh_tw_from_json_old(
         "missing_template_files": missing_template_files,
     }
 
-
 def inject_ftbquests_quests_from_zh_tw_json(
     *,
     input_config_dir: str,  # 原包 config（只讀）
@@ -573,12 +541,7 @@ def inject_ftbquests_quests_from_zh_tw_json(
         skipped_default = len(by_file["_default"])
 
     def _build_filename_index(root_dir: str) -> dict[str, list[str]]:
-        """建立此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`defaultdict`, `walk`, `dict`
-
-        回傳：依函式內 return path。
-        """
+        """掃描指定目錄及其子目錄，建立檔名到其完整路徑清單的映射索引（僅限 .snbt 檔案）。"""
         idx = defaultdict(list)
         for r, _, files in os.walk(root_dir):
             for fn in files:
@@ -643,7 +606,6 @@ def inject_ftbquests_quests_from_zh_tw_json(
         "missing_source_files": missing_source_files,
         "skipped_default_keys": skipped_default,
     }
-
 
 def inject_ftbquests_zh_tw_from_jsons(
     base_config_dir: str,

@@ -6,14 +6,19 @@
 
 # /minecraft_translator_flet/app/views/bundler_view.py (tkinter 修正版)
 
-import flet as ft
+from __future__ import annotations
+
+import tkinter as tk
 import threading
+from tkinter import filedialog
+from typing import Any
+
+import flet as ft
+
+from app.ui import theme
 from app.services_impl.config_service import load_config_json
 from app.services_impl.pipelines.bundle_service import run_bundling_service
-
-# --- 導入 tkinter ---
-import tkinter as tk
-from tkinter import filedialog
+from translation_tool.utils.log_unit import log_info, log_warning, log_error
 
 
 class BundlerView(ft.Column):
@@ -23,19 +28,19 @@ class BundlerView(ft.Column):
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
 
-    def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """處理此函式的工作（細節以程式碼為準）。
+    def __init__(self, page: ft.Page, file_picker: ft.FilePicker) -> None:
+        """初始化 BundlerView。
 
-        - 主要包裝：`__init__`, `TextField`
-
-        回傳：None
+        參數：
+            page: Flet Page 物件
+            file_picker: Flet FilePicker 物件
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
         self.page = page
         # 我們仍然保留 file_picker，以防萬一 (雖然現在主要用 tkinter)
         self.file_picker = file_picker
 
-        # --- UI 元件 (保持不變) ---
+        # --- UI 元件 ---
         self.root_dir_textfield = ft.TextField(
             label="翻譯專案根目錄",
             expand=True,
@@ -52,7 +57,7 @@ class BundlerView(ft.Column):
         self.progress_bar = ft.ProgressBar(value=0, visible=False)
         self.log_view = ft.ListView(expand=True, spacing=5, auto_scroll=True)
 
-        # --- UI 佈局 (保持不變) ---
+        # --- UI 佈局 ---
         self.controls = [
             ft.Card(
                 content=ft.Container(
@@ -60,7 +65,7 @@ class BundlerView(ft.Column):
                     content=ft.Column(
                         [
                             ft.Text(
-                                "打包成品資源包", style=ft.TextThemeStyle.TITLE_LARGE
+                                "打包成品資源包", theme_style=ft.TextThemeStyle.TITLE_LARGE
                             ),
                             ft.Row(
                                 [
@@ -85,10 +90,10 @@ class BundlerView(ft.Column):
                     ),
                 )
             ),
-            ft.Text("打包日誌", style=ft.TextThemeStyle.TITLE_MEDIUM),
+            ft.Text("打包日誌", theme_style=ft.TextThemeStyle.TITLE_MEDIUM),
             ft.Container(
                 content=self.log_view,
-                border=ft.border.all(1, ft.Colors.OUTLINE),
+                border=ft.border.all(1, theme.OUTLINE),
                 border_radius=ft.border_radius.all(5),
                 padding=10,
                 expand=True,
@@ -96,14 +101,8 @@ class BundlerView(ft.Column):
         ]
 
     # --- 輔助函式 ---
-    def _create_pick_button(self, target_textfield: ft.TextField, pick_type: str):
-        # (函式內容... 保持不變)
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`IconButton`
-
-        回傳：依函式內 return path。
-        """
+    def _create_pick_button(self, target_textfield: ft.TextField, pick_type: str) -> ft.IconButton:
+        """建立路徑選擇按鈕"""
         if pick_type == "dir":
             icon = ft.Icons.FOLDER_OPEN
             tooltip = "選擇資料夾"
@@ -118,20 +117,17 @@ class BundlerView(ft.Column):
             ),  # <-- 修改點
         )
 
-    def _show_snack_bar(self, message: str, color: str = ft.Colors.RED_600):
-        # (函式內容... 保持不變)
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`SnackBar`
-
-        回傳：None
-        """
+    def _show_snack_bar(self, message: str, color: str = theme.RED_600) -> None:
+        """顯示提示訊息"""
+        log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
 
-    def pick_path_with_tkinter(self, e, target_textfield: ft.TextField, pick_type: str):
+    def pick_path_with_tkinter(
+        self, e: ft.ControlEvent, target_textfield: ft.TextField, pick_type: str
+    ) -> None:
         """
         *** 全新的函式：使用 tkinter 來選擇資料夾或儲存檔案 ***
         """
@@ -161,19 +157,15 @@ class BundlerView(ft.Column):
                 target_textfield.value = path
                 self.page.update()
             else:
-                self._show_snack_bar("您已取消選擇", ft.Colors.BLUE_GREY_500)
+                self._show_snack_bar("您已取消選擇", theme.BLUE_GREY_500)
 
         except Exception as ex:
             self._show_snack_bar(f"開啟對話框失敗: {ex}")
 
     # (原有的 Flet FilePicker 相關函式 on_path_picked 已被 pick_path_with_tkinter 取代)
 
-    def set_controls_disabled(self, disabled: bool):
-        # (函式內容... 保持不變)
-        """設定此函式的工作（細節以程式碼為準）。
-
-        回傳：None
-        """
+    def set_controls_disabled(self, disabled: bool) -> None:
+        """設定控制項是否禁用"""
         for ctrl in [
             self.root_dir_textfield,
             self.output_zip_textfield,
@@ -182,14 +174,8 @@ class BundlerView(ft.Column):
             ctrl.disabled = disabled
         self.page.update()
 
-    def start_bundling_clicked(self, e):
-        # (函式內容... 保持不變)
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`set_controls_disabled`, `clear`
-
-        回傳：None
-        """
+    def start_bundling_clicked(self, e: ft.ControlEvent) -> None:
+        """點擊開始打包按鈕"""
         root_dir = self.root_dir_textfield.value
         output_zip = self.output_zip_textfield.value
 
@@ -199,7 +185,7 @@ class BundlerView(ft.Column):
 
         self.set_controls_disabled(True)
         self.progress_bar.value = 0
-        self.progress_bar.color = ft.Colors.PRIMARY
+        self.progress_bar.color = theme.PRIMARY
         self.progress_bar.visible = True
         self.log_view.controls.clear()
         self.log_view.controls.append(ft.Text("[系統] 開始執行打包..."))
@@ -210,14 +196,8 @@ class BundlerView(ft.Column):
         )
         thread.start()
 
-    def bundling_worker(self, root_dir, output_zip):
-        # (函式內容... 保持不變)
-        """處理此函式的工作（細節以程式碼為準）。
-
-        - 主要包裝：`run_bundling_service`
-
-        回傳：None
-        """
+    def bundling_worker(self, root_dir: str, output_zip: str) -> None:
+        """在背景執行打包工作"""
         try:
             for update in run_bundling_service(root_dir, output_zip):
                 log_msg = update.get("log", "")
@@ -227,7 +207,7 @@ class BundlerView(ft.Column):
                 if "progress" in update:
                     self.progress_bar.value = update["progress"]
                 if update.get("error"):
-                    self.progress_bar.color = ft.Colors.RED
+                    self.progress_bar.color = theme.RED
                 self.log_view.scroll_to(offset=-1, duration=100)
                 self.page.update()
         finally:

@@ -4,7 +4,7 @@ from app.views.cache_view import CacheView
 
 
 class FakePage:
-    def update(self):
+    def update(self, *args, **kwargs):
         return None
 
     def set_clipboard(self, _text):
@@ -45,6 +45,10 @@ def _build_test_view(monkeypatch):
     monkeypatch.setattr(view, "_render_logs", lambda: None)
     monkeypatch.setattr(view, "_show_snack_bar", lambda msg, color: None)
     monkeypatch.setattr(view, "_refresh_overview_ui", lambda data: None)
+    monkeypatch.setattr(view, "_refresh_query_type_options", lambda: None)
+    monkeypatch.setattr(view, "_render_query_type_shard_page", lambda: None)
+
+    view._last_overview_data = {"total": 0}
 
     return view
 

@@ -6,15 +6,16 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import re
 import zipfile
+from functools import lru_cache
 from typing import Any, Dict
 
 import orjson as json
 
-from ..utils.text_processor import apply_replace_rules, recursive_translate_dict
+from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
+from ..utils.text_processor import recursive_translate_dict, apply_replace_rules
 from .lang_codec import dump_lang_text, parse_lang_text, pick_first_not_none
 from .lang_merge_zip_io import (
     _read_json_from_zip,
@@ -25,7 +26,13 @@ from .lang_merge_zip_io import (
 )
 from .lang_processing_format import dump_json_bytes
 
-logger = logging.getLogger(__name__)
+CJK_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002ebef\U00030000-\U0003134f]')
+
+
+@lru_cache(maxsize=4096)
+def _contains_cjk_str(s: str) -> bool:
+    """Memoized CJK check for string input (module-level)."""
+    return bool(CJK_RE.search(s))
 
 
 def _process_single_mod(
@@ -35,30 +42,16 @@ def _process_single_mod(
     output_dir: str,
     must_translate_dir: str,
 ) -> Dict[str, Any]:
-    """處理此函式的工作（細節以程式碼為準）。
+    """處理單一模組的語言合併。"""
 
-    - 主要包裝：`compile`
-
-    回傳：依函式內 return path。
-    """
-    CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
-
-    # def contains_cjk(s: str) -> bool:
-    #    """是否包含任意 CJK（中文/日文/韓文）"""
-    #    return isinstance(s, str) and CJK_RE.search(s) is not None
-    #
-    # def is_pure_english(s: str) -> bool:
-    #    """判斷是否為純英文（不包含 CJK）"""
-    #    return isinstance(s, str) and not contains_cjk(s)
-
-    def contains_cjk(v: Any) -> bool:
-        """是否包含任意 CJK（支援 str / list / dict 遞迴）"""
+    def _contains_cjk(v: Any) -> bool:
+        """Check if value contains CJK characters. Dispatches to memoized str version."""
         if isinstance(v, str):
-            return CJK_RE.search(v) is not None
+            return _contains_cjk_str(v)
         if isinstance(v, list):
-            return any(contains_cjk(x) for x in v)
+            return any(_contains_cjk(x) for x in v)
         if isinstance(v, dict):
-            return any(contains_cjk(x) for x in v.values())
+            return any(_contains_cjk(x) for x in v.values())
         return False
 
     def has_any_text(v: Any) -> bool:
@@ -79,12 +72,12 @@ def _process_single_mod(
         """
         if not has_any_text(v):
             return False
-        return not contains_cjk(v)
+        return not _contains_cjk(v)
 
     def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
-        """處理此函式的工作（細節以程式碼為準）。
+        """
 
-        回傳：依函式內 return path。
+    
         """
         path = paths.get(lang_key)
         if not path:
@@ -97,10 +90,7 @@ def _process_single_mod(
                 bad_lines = []
 
                 def on_error(line_no, raw, reason):
-                    """處理此函式的工作（細節以程式碼為準）。
-
-                    回傳：None
-                    """
+                    """記錄解析錯誤。"""
                     bad_lines.append((line_no, raw, reason))
 
                 data = parse_lang_text(text, on_error=on_error)
@@ -136,8 +126,27 @@ def _process_single_mod(
         # =============================
         # 基本資訊
         # =============================
+        _wrapper_prefix = None
+        _zip_names = zf.namelist()
+        if _zip_names:
+            _top_prefixes = set(
+                p.replace("\\", "/").split("/")[0]
+                for p in _zip_names
+                if p.replace("\\", "/").split("/")[0]
+            )
+            if len(_top_prefixes) == 1:
+                _wp = list(_top_prefixes)[0]
+                _pt = _wp + "/"
+                if _zip_names[0].replace("\\", "/").startswith(_pt):
+                    _wrapper_prefix = _pt
+
+        def _strip_prefix(p: str) -> str:
+            if _wrapper_prefix and p.startswith(_wrapper_prefix):
+                return p[len(_wrapper_prefix):]
+            return p
+
         mod_key = paths.get("zh_cn") or paths.get("zh_tw") or paths.get("en_us")
-        mod_name = mod_key.split("/lang/")[0].split("/")[-1]
+        mod_name = _strip_prefix(mod_key).split("/lang/")[0].split("/")[-1]
         log_prefix = f"處理語言模組 '{mod_name}': "
 
         # =============================
@@ -150,13 +159,22 @@ def _process_single_mod(
         # =============================
         # Step 2 — 決定輸出路徑
         # =============================
-        base_path_hint = paths.get("zh_cn") or paths.get("zh_tw") or paths.get("en_us")
+        base_path_hint = _strip_prefix(paths.get("zh_cn") or paths.get("zh_tw") or paths.get("en_us"))
         if "/lang/" in base_path_hint:
             relative_tw_path = base_path_hint.split("/lang/")[0] + "/lang/zh_tw.json"
         else:
             relative_tw_path = os.path.join(mod_name, "lang", "zh_tw.json")
 
-        final_output_path = os.path.join(output_dir, relative_tw_path)
+        # 新結構：主輸出剝離 ZIP 來源前綴（如 lang_out/），改寫到 lang_output/assets/.../
+        # 待翻譯路徑 P4-B 修復在下方單獨處理（維持 assets/... 乾淨結構）
+        # 修正：只剝離已知的 ZIP 包裝層前綴；assets/ 等標準資源路徑應保留，不應被當成包裝層移除。
+        KNOWN_ZIP_PACKAGING_PREFIXES = frozenset(["lang_out", "book_out", "patchouli_out"])
+        _prefix = relative_tw_path.split("/")[0]
+        if _prefix in KNOWN_ZIP_PACKAGING_PREFIXES and relative_tw_path.startswith(_prefix + "/"):
+            final_output_rel = relative_tw_path[len(_prefix) + 1:]
+        else:
+            final_output_rel = relative_tw_path
+        final_output_path = os.path.join(output_dir, final_output_rel)
         target_has_tw = os.path.exists(final_output_path)
 
         # =============================
@@ -195,7 +213,7 @@ def _process_single_mod(
                 key in final_tw and target_has_tw  # 代表 output_dir 已存在 zh_tw.json
             )
 
-            if is_from_output_dir and contains_cjk(final_tw.get(key, "")):
+            if is_from_output_dir and _contains_cjk(final_tw.get(key, "")):
                 # ✔ 人工翻譯 → 不動
                 continue
 
@@ -209,7 +227,7 @@ def _process_single_mod(
             #    final_tw[key] = apply_replace_rules(tw_val, rules) # 進行規則處理
             #    continue
 
-            if contains_cjk(tw_val):
+            if _contains_cjk(tw_val):
                 if isinstance(tw_val, str):
                     final_tw[key] = apply_replace_rules(tw_val, rules)
                 else:
@@ -217,7 +235,7 @@ def _process_single_mod(
                 continue
 
             # 3. zh_cn 若含中文 → 用 S2TW 翻譯
-            if contains_cjk(cn_val):
+            if _contains_cjk(cn_val):
                 final_tw[key] = recursive_translate_dict(cn_val, rules)
                 continue
 
@@ -246,6 +264,7 @@ def _process_single_mod(
         # =============================
         # Step 5 — 寫入 pending.json
         # =============================
+        # P4-B 修復：pending 路徑剝離 ZIP 來源前綴，與主輸出保持一致
         pending_rel = relative_tw_path.replace("zh_tw.json", "en_us.json")
         pending_path = os.path.join(must_translate_dir, pending_rel)
         os.makedirs(os.path.dirname(pending_path), exist_ok=True)
@@ -292,7 +311,7 @@ def _process_single_mod(
             else:
                 _write_bytes_atomic(final_output_path, dump_json_bytes(final_tw))
 
-        logger.info(f"{log_prefix}完成，pending 條目: {pending_count}")
+        log_info(f"{log_prefix}完成，pending 條目: {pending_count}")
         return {
             "success": True,
             # "log": f"{log_prefix}完成，pending 條目: {pending_count}",
@@ -300,7 +319,7 @@ def _process_single_mod(
         }
 
     except Exception as exc:
-        logger.exception(f"{log_prefix}處理失敗: {exc}")
+        log_exception(f"{log_prefix}處理失敗: {exc}")
         return {
             "success": False,
             # "log": f"{log_prefix}處理失敗: {exc}",
