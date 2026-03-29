@@ -151,7 +151,8 @@ def translate_md_pending(
     for jp in json_files:
         try:
             _, items = load_pending_doc(jp)
-        except Exception:
+        except Exception as e:
+            log_warning(f"[MD-LM] 載入待翻譯文件失敗: {jp} ({e})")
             continue
 
         for it in items:
@@ -200,6 +201,7 @@ def translate_md_pending(
 
         shielded = shield_text(src)
         if shielded.skip_reason is not None:
+            # 不應翻譯（圖片/URL/事件/空白），直接視為 cache hit
             skip_skipped += 1
             all_unique_items.append(
                 {
@@ -213,6 +215,8 @@ def translate_md_pending(
                 }
             )
             continue
+
+        translate_text = shielded.clean
 
         all_unique_items.append(
             {
@@ -341,16 +345,16 @@ def translate_md_pending(
                 cache_hit=False,
                 extra={},
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log_warning(f"[MD-LM] 記錄翻譯結果失敗: {e}")
 
     def on_batch_flushed() -> None:
         """刷新批次緩衝區。"""
         try:
             touch.touch("noop")
             touch.flush(_writer)
-        except Exception:
-            pass
+        except Exception as e:
+            log_warning(f"[MD-LM] 批次刷新失敗: {e}")
 
     def _fmt_eta(sec: float) -> str:
         """格式化剩餘時間。"""
@@ -456,8 +460,8 @@ def translate_md_pending(
     try:
         rec.export_json(out_root / "LM翻譯後" / "translation_map_md.json")
         rec.export_csv(out_root / "LM翻譯後" / "translation_map_md.csv")
-    except Exception:
-        pass
+    except Exception as e:
+        log_warning(f"[MD-LM] 匯出 translation_map 失敗: {e}")
 
     if missing:
         log_warning(f"⚠️ [MD-LM] 有 {missing} 個 item 沒拿到翻譯結果（已保留原文）。")

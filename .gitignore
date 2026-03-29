@@ -54,3 +54,6 @@ translation_tool/core/*.txt
 # === OS ===
 Thumbs.db
 .DS_Store
+
+# === Local secrets ===
+config.json

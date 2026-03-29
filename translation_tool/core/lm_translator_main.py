@@ -41,32 +41,38 @@ DEFAULT_EXPORT_CACHE_ONLY = False  # 預設進行完整翻譯
 # 翻譯入口函數（新結構）
 # =========================================================
 
-def translate_batch_smart(batch_items, total=None, dry_run: bool = DEFAULT_DRY_RUN, export_cache_only: bool = DEFAULT_EXPORT_CACHE_ONLY):
+
+def translate_batch_smart(
+    batch_items,
+    total=None,
+    dry_run: bool = DEFAULT_DRY_RUN,
+    export_cache_only: bool = DEFAULT_EXPORT_CACHE_ONLY,
+):
     """
     智慧批次翻譯函數（主入口）
-    
+
     參數:
         batch_items: 翻譯項目列表
         total: 總項目數（可選）
         dry_run: True = 不呼叫API，只模擬流程（測試用）
         export_cache_only: True = 只輸出快取中的內容
-    
+
     職責：協調各子流程，不直接處理細節
     """
     # 1. 驗證與正規化
     items = _validate_batch_items(batch_items)
     if not items:
         return [], "AUTO"
-    
+
     # 2. 偵測 profile（TODO: 舊函數會重新計算，目前是被丟棄的死碼）
     # batch_profile = _detect_batch_profile(items)
-    
+
     # 3. 計算批次大小（TODO: 舊函數會重新計算，目前是被丟棄的死碼）
     # batch_size = _calculate_batch_size(batch_profile)
-    
+
     # 4. 執行翻譯
     results, status = _execute_translation(items, total, dry_run, export_cache_only)
-    
+
     # 5. 處理輸出
     return _process_output(results, status)
 
@@ -74,7 +80,7 @@ def translate_batch_smart(batch_items, total=None, dry_run: bool = DEFAULT_DRY_R
 def _validate_batch_items(items):
     """
     驗證與正規化輸入資料
-    
+
     參數：
         items: 原始項目列表
     回傳：
@@ -82,7 +88,7 @@ def _validate_batch_items(items):
     """
     if not items:
         return []
-    
+
     validated = []
     for item in items:
         # 跳过无效项目
@@ -92,13 +98,13 @@ def _validate_batch_items(items):
         text = item.get("text", "")
         if not text or not str(text).strip():
             continue
-        
+
         # 確保有 cache_type
         if "cache_type" not in item:
             item["cache_type"] = "patchouli"
-        
+
         validated.append(item)
-    
+
     return validated
 
 
@@ -121,7 +127,7 @@ def _execute_translation(items, total, dry_run=False, export_cache_only=False):
 def _process_output(results, status):
     """
     處理輸出結果
-    
+
     參數：
         results: 翻譯結果（可能是元組或列表）
         status: 翻譯狀態
@@ -131,11 +137,11 @@ def _process_output(results, status):
     # 處理元組情況（從舊函數返回）
     if isinstance(results, tuple):
         return results
-    
+
     # 處理空結果
     if not results:
         return [], "AUTO"
-    
+
     return results, status
 
 
@@ -143,7 +149,10 @@ def _process_output(results, status):
 # 舊翻譯函數（保留原邏輯）
 # =========================================================
 
-def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cache_only=False):
+
+def translate_batch_smart_old(
+    batch_items, total=None, dry_run=False, export_cache_only=False
+):
     """
     智慧型分批翻譯函式
     支援動態縮減 Batch Size、模型切換、以及自動處理輸出截斷問題。
@@ -255,19 +264,38 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
     # 模型溫度
     MODEL_TEMP = load_config().get("lm_translator", {}).get("temperature", 0.2)
 
-    # 使用提示詞 手冊
-    PATCHOUI_SYSTEM_PROMPT = (
+    # 使用提示詞 手冊（確保為字串）
+    _patchouli_raw = (
         load_config()
         .get("lm_translator", {})
-        .get("patchouli_system_prompt", {"你是專業的 Minecraft Patchouli 手冊翻譯員"})
+        .get("patchouli_system_prompt", "你是專業的 Minecraft Patchouli 手冊翻譯員")
     )
+    if isinstance(_patchouli_raw, str):
+        PATCHOULI_SYSTEM_PROMPT = _patchouli_raw
+    elif isinstance(_patchouli_raw, dict):
+        # 支援 {"content": "..."} 或 {"text": "..."} 格式的 dict
+        PATCHOULI_SYSTEM_PROMPT = (
+            _patchouli_raw.get("content")
+            or _patchouli_raw.get("text")
+            or str(_patchouli_raw)
+        )
+    else:
+        PATCHOULI_SYSTEM_PROMPT = str(_patchouli_raw)
 
-    # 使用提示詞 lang
-    LANG_SYSTEM_PROMPT = (
+    # 使用提示詞 lang（確保為字串）
+    _lang_raw = (
         load_config()
         .get("lm_translator", {})
-        .get("lang_system_prompt", {"你正在翻譯 Minecraft 語言檔案（JSON格式）。"})
+        .get("lang_system_prompt", "你正在翻譯 Minecraft 語言檔案（JSON格式）。")
     )
+    if isinstance(_lang_raw, str):
+        LANG_SYSTEM_PROMPT = _lang_raw
+    elif isinstance(_lang_raw, dict):
+        LANG_SYSTEM_PROMPT = (
+            _lang_raw.get("content") or _lang_raw.get("text") or str(_lang_raw)
+        )
+    else:
+        LANG_SYSTEM_PROMPT = str(_lang_raw)
 
     pinned_model_index = None  # None = 正常模式，非 None = 鎖定指定模型
     # 進入動態 Batch 迴圈
@@ -333,7 +361,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                     prompt = LANG_SYSTEM_PROMPT
                 else:
                     # ftb / patchouli / 其他
-                    prompt = PATCHOUI_SYSTEM_PROMPT
+                    prompt = PATCHOULI_SYSTEM_PROMPT
 
                 log_debug(
                     "Batch profile=%s -> System Prompt=%s",
@@ -366,6 +394,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                     """
                     try:
                         import json
+
                         json.loads(text)
                         return False  # 成功解析，代表沒截斷
                     except json.JSONDecodeError:
@@ -373,9 +402,9 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                     # 大括號平衡檢查
                     count = 0
                     for ch in text:
-                        if ch == '{':
+                        if ch == "{":
                             count += 1
-                        elif ch == '}':
+                        elif ch == "}":
                             count -= 1
                         if count < 0:
                             return True  # } 比 { 先出現，代表截斷
@@ -383,7 +412,9 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
 
                 if _is_truncated(raw_text):
                     overload_retry_count = 0  # 重置過載計數器
-                    log_info("[!] 偵測到 JSON 被截斷（結尾不完整或格式錯誤），將縮小 Batch 重試")
+                    log_info(
+                        "[!] 偵測到 JSON 被截斷（結尾不完整或格式錯誤），將縮小 Batch 重試"
+                    )
                     break
 
                 # 解析 JSON
@@ -457,11 +488,17 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                     # ATK-B-2: 翻譯品質驗證
                     # 1. 空翻譯
                     if not translated_text or translated_text.strip() == "":
-                        log_warning("[⚠️ 空翻譯] path=%s：原文='%s'", original_item["path"], original_item["text"])
+                        log_warning(
+                            "[⚠️ 空翻譯] path=%s：原文='%s'",
+                            original_item["path"],
+                            original_item["text"],
+                        )
                     # 2. 異常長度（翻譯後長度是原文 3 倍以上）
                     orig_len = len(original_item["text"])
                     if orig_len > 0 and len(translated_text) / orig_len > 3:
-                        log_warning(f"[⚠️ 異常長度] {original_item['path']}：原文 {orig_len} 字，翻譯 {len(translated_text)} 字")
+                        log_warning(
+                            f"[⚠️ 異常長度] {original_item['path']}：原文 {orig_len} 字，翻譯 {len(translated_text)} 字"
+                        )
 
                     new_item["text"] = translated_text
                     merged_result.append(new_item)
@@ -640,9 +677,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                     except Exception as parse_err:
                         # 備援比對邏輯
                         err_msg = str(e).upper()
-                        log_error(
-                            f"[⚠️] 無法解析 429 JSON，使用備援。錯誤: {parse_err}"
-                        )
+                        log_error(f"[⚠️] 無法解析 429 JSON，使用備援。錯誤: {parse_err}")
 
                         if "QUOTA" in err_msg or "EXCEEDED" in err_msg:
                             # ⭐ 這裡之前會崩潰，現在這樣改就安全了
@@ -712,7 +747,9 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                                     log_info(
                                         "[✅] API Key 切換成功 → 原地重送同一 batch,等待12秒"
                                     )
-                                    time.sleep(key_rotation_buffer_sec)  # ⭐ 給新 Key 一點緩衝
+                                    time.sleep(
+                                        key_rotation_buffer_sec
+                                    )  # ⭐ 給新 Key 一點緩衝
                                     hit_overload_retry = True  # ⭐ 重送同一 batch
                                     break  # ← 跳出 model loop，回 while
                                 else:
@@ -749,9 +786,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
 
                 # ======== 500 ==========
                 if status == 500:
-                    log_info(
-                        "[⚠️] 500 INTERNAL：Gemini 後端錯誤，嘗試換模型或縮 batch"
-                    )
+                    log_info("[⚠️] 500 INTERNAL：Gemini 後端錯誤，嘗試換模型或縮 batch")
                     break
 
                 # ========== requests timeout ==========
@@ -826,7 +861,8 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False, export_cac
                 # 3. 如果還有剩下的，重置 batch_size
                 if remaining_items:
                     batch_size = min(
-                        len(remaining_items), MIN_BATCH_SIZE if not is_lang else MIN_LANG_BATCH_SIZE
+                        len(remaining_items),
+                        MIN_BATCH_SIZE if not is_lang else MIN_LANG_BATCH_SIZE,
                     )
 
                 # 4. 繼續 while 迴圈處理後面的東西
