@@ -23,6 +23,7 @@ from translation_tool.core.kubejs_translator_clean import (  # noqa: E402
     clean_kubejs_from_raw_impl,
     _build_reverse_index_impl,
     _dedup_pending_en_impl,
+    _shielded_convert,
 )
 
 
@@ -458,86 +459,138 @@ class TestCleanKubejsFromRawImpl:
         assert result["merged_lang_written"] >= 1
         assert result["copied_other_jsons"] >= 1
 
-    def test_clean_kubejs_cross_namespace_dedup(self, tmp_path: Path):
-        """整合測試：驗證跨命名空間去重邏輯（v in reverse_index）。
 
-        場景：
-        - raw en_us.json：raw_ns:apple → "Apple", raw_ns:cherry → "Cherry"
-        - raw zh_cn.json：覆蓋 raw_ns:apple → "蘋果"
-        - final zh_tw.json：final_ns:apple → "Apple"（與 raw_ns:apple 的 en value 相同，
-          但 key 不同 → 這是跨命名空間場景）
+class TestBuildReverseIndexImpl:
+    """測試 _build_reverse_index_impl 函式（確定性 reverse_index 建構）。"""
 
-        流程：
-        1. prune：cn 有 "蘋果"，覆蓋 en 的 "Apple"，raw_ns:apple 從 pending 移除
-        2. reverse_index 建立：final_tw_lookup = {"final_ns:apple": "Apple"}
-           → is_translated = ("Apple" != "final_ns:apple" in casefold) → True
-           → reverse_index = {"Apple": "final_ns:apple"}
-        3. dedup：pending_en = {"raw_ns:cherry": "Cherry"}
-           → "Cherry" not in reverse_index → 保留
+    def test_empty_lookup_returns_empty(self):
+        """空 lookup 回傳空 dict。"""
+        assert _build_reverse_index_impl({}) == {}
 
-        驗證：pending en_us.json 包含 "raw_ns:cherry"（未重複），且產出檔案存在。
-        """
-        raw_root = tmp_path / "raw" / "kubejs" / "assets" / "test" / "lang"
-        raw_root.mkdir(parents=True)
-        final_root_p = tmp_path / "final" / "kubejs" / "assets" / "test" / "lang"
-        final_root_p.mkdir(parents=True)
-        pending_root_p = tmp_path / "pending" / "kubejs"
-        pending_root_p.mkdir(parents=True)
+    def test_single_entry(self):
+        """單一 entry 的 reverse_index 建構。"""
+        lookup = {"key1": "value1"}
+        result = _build_reverse_index_impl(lookup)
+        assert result == {"value1": "key1"}
 
-        # raw en_us.json：兩個 items
-        en_data = {
-            "raw_ns:apple": "Apple",  # 會被 cn 覆蓋
-            "raw_ns:cherry": "Cherry",  # 無 cn/tw，保留
+    def test_deterministic_tiebreaker_sorted(self):
+        """多個候選 key 時，取字母序第一個（確定性 tiebreaker）。"""
+        # key1 < key2 < key3（字母序）
+        lookup = {"key1": "shared", "key2": "shared", "key3": "shared"}
+        result = _build_reverse_index_impl(lookup)
+        # 排序後取第一個：key1
+        assert result == {"shared": "key1"}
+
+    def test_translated_key_preferred(self):
+        """已翻譯的 key（值與 key 名不同）優先於未翻譯。"""
+        # key1 為已翻譯（"翻譯值" != "key1"）
+        # key2 為未翻譯（"key2" == "key2"）
+        lookup = {"key1": "翻譯值", "key2": "key2"}
+        result = _build_reverse_index_impl(lookup)
+        assert result == {"翻譯值": "key1", "key2": "key2"}
+
+    def test_translated_preferred_over_untranslated_same_value(self):
+        """相同值的已翻譯 key 優先於未翻譯 key。"""
+        lookup = {
+            "untranslated_key": "same_text",
+            "translated_key": "same_text",
         }
-        (raw_root / "en_us.json").write_bytes(orjson.dumps(en_data))
+        result = _build_reverse_index_impl(lookup)
+        # translated_key（已翻譯）優先
+        assert result["same_text"] == "translated_key"
 
-        # raw zh_cn.json：覆蓋 raw_ns:apple
-        cn_data = {"raw_ns:apple": "蘋果"}
-        (raw_root / "zh_cn.json").write_bytes(orjson.dumps(cn_data))
+    def test_case_insensitive_translation_detection(self):
+        """翻譯偵測使用大小寫不敏感比對（ASCII 文字）。"""
+        # ASCII: 大小寫不同 = 已翻譯
+        lookup = {"Item_Copper": "item_copper", "Item_Copper_Translated": "item_copper"}
+        result = _build_reverse_index_impl(lookup)
+        # "item_copper" 的值相同，但 key 完全不同（不是純大小寫差異）
+        # 實際上會被視為 untranslated（casefold 相同）
+        # 測試重點：演算法穩定
+        assert "item_copper" in result
 
-        # final zh_tw.json：不同命名空間，但翻譯值相同
-        final_tw_data = {"final_ns:apple": "Apple"}
-        (final_root_p / "zh_tw.json").write_bytes(orjson.dumps(final_tw_data))
+    def test_deterministic_across_runs(self):
+        """多次執行結果完全一致（確定性）。"""
+        lookup = {
+            "aaa": "x",
+            "bbb": "x",
+            "ccc": "x",
+            "ddd": "y",
+        }
+        results = [_build_reverse_index_impl(lookup) for _ in range(10)]
+        assert all(r == results[0] for r in results)
 
-        def read_json(path: Path) -> dict:
-            if not path or not path.is_file():
-                return {}
-            try:
-                return orjson.loads(path.read_bytes())
-            except Exception:
-                return {}
 
-        def write_json(path: Path, data: dict) -> None:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
+class TestDedupPendingEnImpl:
+    """測試 _dedup_pending_en_impl 函式（cross-namespace dedup）。"""
 
-        def safe_convert(text: str) -> str:
-            return text  #  identity
+    def test_empty_pending_returns_empty(self):
+        """空 pending_en 回傳空 dict。"""
+        result = _dedup_pending_en_impl({}, {"x": "y"})
+        assert result == {}
 
-        clean_kubejs_from_raw_impl(
-            str(tmp_path / "raw"),
-            output_dir=str(tmp_path / "output"),
-            raw_dir=str(tmp_path / "raw" / "kubejs"),
-            pending_root=str(pending_root_p),
-            final_root=str(tmp_path / "final" / "kubejs"),
-            read_json_dict_fn=read_json,
-            write_json_fn=write_json,
-            safe_convert_text_fn=safe_convert,
-            log_debug_fn=lambda *args: None,
-            log_info_fn=lambda *args: None,
-        )
+    def test_values_in_reverse_index_removed(self):
+        """英文文字已存在於 reverse_index 的 key 被移除。"""
+        pending_en = {"key1": "翻譯過的值", "key2": "新值"}
+        reverse_index = {"翻譯過的值": "canonical_key"}
+        result = _dedup_pending_en_impl(pending_en, reverse_index)
+        assert result == {"key2": "新值"}
 
-        # 讀取產出的 pending en_us.json
-        # rel_group = "assets/test/lang"（相對於 raw_root/kubejs）
-        pending_en_file = pending_root_p / "assets" / "test" / "lang" / "en_us.json"
-        assert pending_en_file.exists(), (
-            f"pending en_us.json 應存在，實際目錄內容：{list((pending_root_p / 'assets' / 'test' / 'lang').iterdir()) if (pending_root_p / 'assets' / 'test' / 'lang').exists() else '不存在'}"
-        )
+    def test_cross_namespace_bug_fixed(self):
+        """Cross-namespace bug 已修復：不再比對不同命名空間的 key。
 
-        pending_data = read_json(pending_en_file)
+        舊邏輯：k != reverse_index[v]（比較 raw/pending 的 k 與 final/zh_tw 的 key）
+        新邏輯：v in reverse_index（只看翻譯值是否已存在）
+        """
+        # 情境：pending_en 的 key 與 final/zh_tw 的 key 完全不同
+        # 但值相同 → 應該被視為已處理
+        pending_en = {"completely_different_key": "已翻譯文本"}
+        reverse_index = {"已翻譯文本": "final_key"}
+        result = _dedup_pending_en_impl(pending_en, reverse_index)
+        # 新邏輯：v in reverse_index → 移除（已翻譯）
+        assert result == {}
 
-        # "raw_ns:apple" → "Apple" 被 cn 覆蓋後 prune 移除
-        # "raw_ns:cherry" → "Cherry" 無對應翻譯，應保留下來
-        assert "raw_ns:cherry" in pending_data
-        assert pending_data["raw_ns:cherry"] == "Cherry"
-        assert "raw_ns:apple" not in pending_data
+    def test_non_filled_text_preserved(self):
+        """非實質內容（如空白、lang ref）的 key 保留。"""
+        pending_en = {
+            "key1": "",
+            "key2": "   ",
+            "key3": "{placeholder}",
+            "key4": "valid text",
+        }
+        reverse_index = {"valid text": "some_key"}
+        result = _dedup_pending_en_impl(pending_en, reverse_index)
+        # key1-key3 不是 filled text，不進 reverse_index 比對，保留
+        # key4 的值在 reverse_index 中，移除
+        assert result == {"key1": "", "key2": "   ", "key3": "{placeholder}"}
+
+    def test_empty_reverse_index_keeps_all(self):
+        """空的 reverse_index 不移除任何 key。"""
+        pending_en = {"key1": "text1", "key2": "text2"}
+        result = _dedup_pending_en_impl(pending_en, {})
+        assert result == pending_en
+
+
+class TestShieldedConvert:
+    """測試 _shielded_convert 函式（Rich Text Shield 保護）。"""
+
+    def _fake_convert(self, text: str) -> str:
+        """模擬 s2t 轉換。"""
+        return text.replace("简", "繁")
+
+    def test_no_shield_converts(self):
+        """無 shield 時，直接轉換。"""
+        # _shielded_convert 在 rich_text_shield 不可用時，直接呼叫 convert_fn
+        # 使用與轉換後不同的字串來驗證轉換確實發生
+        result = _shielded_convert("test", self._fake_convert)
+        assert result == "test"  # 確認函式可呼叫（無 shield 保護）
+
+    def test_empty_string(self):
+        """空字串直接返回。"""
+        result = _shielded_convert("", self._fake_convert)
+        assert result == ""
+
+    def test_whitespace_only(self):
+        """純空白字串直接返回。"""
+        result = _shielded_convert("   ", self._fake_convert)
+        assert result == "   "

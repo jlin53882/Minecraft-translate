@@ -20,8 +20,8 @@ from typing import Optional
 # 物品ID（#namespace:item 或 #namespace/item — 兩種都支援）
 ITEM_ID_PATTERN = re.compile(r"#[a-z0-9_.\-]+[:/][a-z0-9_.\-]+", re.IGNORECASE)
 
-# 標準彩色碼：&a ~ &o（不含 k 的 16 進位格式碼）
-COLOR_CODE_PATTERN = re.compile(r"&[a-f0-9k-o]", re.IGNORECASE)
+# 標準彩色碼：支援 Minecraft 格式化代碼 0-9, a-f, k-o, r
+COLOR_CODE_PATTERN = re.compile(r"&[0-9a-fk-or]", re.IGNORECASE)
 
 # &#RRGGBB 十六進位顏色
 HEX_COLOR_PATTERN = re.compile(r"&#[0-9A-Fa-f]{6}", re.IGNORECASE)
