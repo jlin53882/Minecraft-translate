@@ -49,6 +49,7 @@ from translation_tool.plugins.shared.lang_path_rules import (
     compute_output_path,
 )
 from translation_tool.plugins.shared.lang_text_rules import is_already_zh
+from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
 
 from translation_tool.utils.log_unit import (
     log_info,
@@ -92,6 +93,9 @@ def map_to_items(
         if not isinstance(v, str) or not v.strip():
             continue
 
+        shielded = shield_text(v)
+        translate_text = v if shielded.skip_reason is not None else shielded.clean
+
         items.append(
             {
                 # 提供 smart translator 判斷用的檔案提示路徑
@@ -102,9 +106,11 @@ def map_to_items(
                 # 原始文字（快取與比對用）
                 "source_text": v,
                 # 當前文字（會被翻譯器覆寫）
-                "text": v,
+                "text": translate_text,
                 # 指定快取分類（對應 cache_rules）
-                "cache_type": cache_type,  # 例如 "ftbquests"
+                "cache_type": cache_type,
+                "_shielded": shielded,
+                "_skip_reason": shielded.skip_reason,
             }
         )
 
@@ -270,6 +276,13 @@ def translate_ftb_pending_to_zh_tw(
                 is_valid_hit=_is_valid_hit,
             )
 
+            skip_items = [it for it in items_to_translate if it.get("_skip_reason")]
+            if skip_items:
+                cached_items.extend(skip_items)
+                items_to_translate = [
+                    it for it in items_to_translate if not it.get("_skip_reason")
+                ]
+
             # ✅ 中文/已翻譯：不送 LM，也不算 cache_miss
             already_zh_items = []
             real_to_translate = []
@@ -339,6 +352,13 @@ def translate_ftb_pending_to_zh_tw(
             cache_rules=cache_rules,
             is_valid_hit=_is_valid_hit,
         )
+
+        skip_items = [it for it in items_to_translate if it.get("_skip_reason")]
+        if skip_items:
+            cached_items.extend(skip_items)
+            items_to_translate = [
+                it for it in items_to_translate if not it.get("_skip_reason")
+            ]
 
         already_zh_items = []
         real_to_translate = []
@@ -466,14 +486,22 @@ def translate_ftb_pending_to_zh_tw(
             """處理翻譯結果並寫入映射。"""
             p = it.get("path")
             t = it.get("text")
+            src_text = str(it.get("source_text") or "")
             if isinstance(p, str) and isinstance(t, str):
+                try:
+                    shielded_src = it.get("_shielded") or shield_text(src_text)
+                    shields = getattr(shielded_src, "shields", [])
+                    if shields:
+                        t = unshield_text(t, shields)
+                except Exception:
+                    pass
                 out_map[p] = t
                 try:
                     rec.record(
                         cache_type="ftbquests",
                         file_id=rel_src,
                         path=p,
-                        src=str(it.get("source_text") or ""),
+                        src=src_text,
                         dst=t,
                         cache_hit=False,
                         extra={"dst_file": dst.relative_to(out_dir).as_posix()},
@@ -555,6 +583,16 @@ def translate_ftb_pending_to_zh_tw(
 
     # ---- Dry-run 結尾摘要 ----
     if dry_run:
+
+        def _strip_runtime_fields(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            """移除 dry-run preview 中不可 JSON 序列化的暫存欄位。"""
+            sanitized: List[Dict[str, Any]] = []
+            for it in items:
+                sanitized.append(
+                    {k: v for k, v in it.items() if k not in {"_shielded"}}
+                )
+            return sanitized
+
         batch_size = _get_default_batch_size("ftbquests", None)
         est_batches = (
             math.ceil(global_total_to_translate / batch_size)
@@ -573,7 +611,7 @@ def translate_ftb_pending_to_zh_tw(
             # 原本：待翻譯 preview
             write_dry_run_preview(
                 out_dir,
-                dry_preview_items,
+                _strip_runtime_fields(dry_preview_items),
                 meta=meta,
                 filename="_ftbquests_dry_run_preview.json",  # 可選：明確檔名
             )
@@ -581,7 +619,7 @@ def translate_ftb_pending_to_zh_tw(
             # ✅ NEW：cache hit preview
             write_cache_hit_preview(
                 out_dir,
-                all_cached_items,
+                _strip_runtime_fields(all_cached_items),
                 filename="_ftbquests_dry_run_cache_hit_preview.json",
                 meta=meta,
             )
