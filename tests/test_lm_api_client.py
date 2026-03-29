@@ -105,7 +105,7 @@ class TestCallGeminiRequests:
         }
         mock_post.return_value = mock_response
         
-        result = call_gemini_requests(
+        call_gemini_requests(
             model_name="gemini-pro",
             system_prompt="test",
             payload={},

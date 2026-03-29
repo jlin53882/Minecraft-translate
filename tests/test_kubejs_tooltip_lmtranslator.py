@@ -2,6 +2,7 @@
 
 用途：測試 kubejs_tooltip_lmtranslator 模組的功能。
 """
+
 from __future__ import annotations
 
 import sys
@@ -21,12 +22,12 @@ def test_collect_items_from_mapping_basic(tmp_path: Path) -> None:
         "tooltip.1": "Hello",
         "tooltip.2": "World",
     }
-    
+
     items = kubejs_tooltip_lmtranslator.collect_items_from_mapping(
         mapping,
         file_hint="output/kubejs/test.json",
     )
-    
+
     assert len(items) == 2
     assert items[0]["cache_type"] == "kubejs"
     assert items[0]["path"] == "tooltip.1"
@@ -78,9 +79,9 @@ def test_count_translatable_keys(tmp_path: Path) -> None:
         "key3": "",  # 空值不計
         "key4": "   ",  # 空白不計
     }
-    
+
     count = kubejs_tooltip_lmtranslator.count_translatable_keys(mapping)
-    
+
     assert count == 2
 
 
@@ -91,16 +92,16 @@ def test_count_translatable_keys_non_string(tmp_path: Path) -> None:
         "key2": 123,
         "key3": None,
     }
-    
+
     count = kubejs_tooltip_lmtranslator.count_translatable_keys(mapping)
-    
+
     assert count == 1
 
 
 def test_dry_run_stats_default(tmp_path: Path) -> None:
     """測試 DryRunStats 預設值。"""
     stats = kubejs_tooltip_lmtranslator.DryRunStats()
-    
+
     assert stats.files == 0
     assert stats.total_keys == 0
     assert stats.cache_hit == 0
@@ -116,7 +117,7 @@ def test_dry_run_stats_with_values(tmp_path: Path) -> None:
         cache_hit=20,
         cache_miss=30,
     )
-    
+
     assert stats.files == 3
     assert stats.total_keys == 50
     assert stats.cache_hit == 20

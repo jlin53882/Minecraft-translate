@@ -432,6 +432,7 @@ def translate_kubejs_pending_to_zh_tw(
     # Dry-run: preview only (no API)
     # -------------------------
     if dry_run:
+
         def _strip_runtime_fields(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             """移除 dry-run preview 中不可 JSON 序列化的暫存欄位。"""
             sanitized: List[Dict[str, Any]] = []
@@ -441,8 +442,12 @@ def translate_kubejs_pending_to_zh_tw(
                 )
             return sanitized
 
-        dry_preview_items = _strip_runtime_fields(all_miss_items[:2000]) if all_miss_items else []
-        dry_hit_items = _strip_runtime_fields(all_hit_items[:2000]) if all_hit_items else []
+        dry_preview_items = (
+            _strip_runtime_fields(all_miss_items[:2000]) if all_miss_items else []
+        )
+        dry_hit_items = (
+            _strip_runtime_fields(all_hit_items[:2000]) if all_hit_items else []
+        )
 
         preview_path = None
         try:

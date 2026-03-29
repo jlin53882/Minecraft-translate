@@ -64,10 +64,10 @@ def test_strip_fmt_samples(raw: str, expected: str) -> None:
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("這是中文內容", True),      # 中文 -> True
+        ("這是中文內容", True),  # 中文 -> True
         ("This is english", False),  # 英文 -> False
-        ("獲得 3x Iron", False),     # 邊界：中英混合（英文字母較多）
-        ("§a獲得 3x 鐵", True),      # 邊界：有格式碼且主要為中文
+        ("獲得 3x Iron", False),  # 邊界：中英混合（英文字母較多）
+        ("§a獲得 3x 鐵", True),  # 邊界：有格式碼且主要為中文
     ],
 )
 def test_is_already_zh_samples(text: str, expected: bool) -> None:
@@ -82,7 +82,6 @@ def test_read_write_json_dict_roundtrip(tmp_path: Path) -> None:
     loaded = read_json_dict(target)
 
     assert loaded == payload
-
 
 
 def test_read_json_dict_raises_when_root_is_not_dict(tmp_path: Path) -> None:
