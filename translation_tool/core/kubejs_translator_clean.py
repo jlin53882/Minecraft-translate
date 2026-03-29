@@ -19,6 +19,58 @@ from translation_tool.plugins.shared.rich_text_shield import (
 _LANG_REF_RE = re.compile(r"^\{.+\}$")
 
 
+def _build_reverse_index_impl(final_tw_lookup: dict[str, str]) -> dict[str, str]:
+    """建立 reverse_index：{英文文字: 選擇的 canonical key}。
+
+    選擇策略（確定性）：
+    1. 優先取「已翻譯的 key」（即 zh_tw 值與英文 key 名不同，表示有真正翻譯）
+    2. 若多個已翻譯，取字母序第一個（確定性 tiebreaker）
+    3. 若無已翻譯，則取字母序第一個 key
+
+    Returns:
+        dict[str, str]: reverse_index，永遠是 str->str（而非 str->list）
+    """
+    reverse_index: dict[str, str] = {}
+    rev_candidates: dict[str, list[tuple[str, bool]]] = {}
+    for k, v in final_tw_lookup.items():
+        if is_filled_text_impl(v):
+            is_translated = bool(
+                v.casefold() != k.casefold() if v.isascii() and k.isascii() else v != k
+            )
+            rev_candidates.setdefault(v, []).append((k, is_translated))
+
+    for en_text, candidates in rev_candidates.items():
+        translated = sorted([k for k, t in candidates if t], key=lambda x: x)
+        untranslated = sorted([k for k, t in candidates if not t], key=lambda x: x)
+        reverse_index[en_text] = (translated or untranslated)[0]
+
+    return reverse_index
+
+
+def _dedup_pending_en_impl(
+    pending_en: dict[str, str], reverse_index: dict[str, str]
+) -> dict[str, str]:
+    """過濾 pending_en：跳過那些「英文文字已存在於 reverse_index」的 key。
+
+    修復 cross-namespace bug：原本 `k != reverse_index[v]` 比較不同命名空間
+    的 key（raw/pending 的 k vs final/zh_tw 的 key），直接比對 key 幾乎
+    不會成立。正確邏輯：若同一個翻譯結果 v 已出現在 final
+    （即 v in reverse_index），就視為已處理，直接跳過不送 pending。
+
+    Args:
+        pending_en: 待翻譯的 en_us 資料（key → 英文文字）
+        reverse_index: reverse_index（英文文字 → canonical key）
+
+    Returns:
+        dict[str, str]: 過濾後的 pending_en
+    """
+    return {
+        k: v
+        for k, v in pending_en.items()
+        if not (is_filled_text_impl(v) and v in reverse_index)
+    }
+
+
 def _shielded_convert(text: str, convert_fn: Callable[[str], str]) -> str:
     """對 text 做 shield → convert_fn → unshield 保護。
 
@@ -27,10 +79,8 @@ def _shielded_convert(text: str, convert_fn: Callable[[str], str]) -> str:
     """
     shielded = shield_text(text)
     if shielded.skip_reason is not None:
-        # 不應翻譯的內容（空白/圖片/URL/事件），直接保留原文
         return text
     if not shielded.shields:
-        # 無需保護，直接轉換
         return convert_fn(text)
     converted = convert_fn(shielded.clean)
     return unshield_text(converted, shielded.shields)
@@ -240,22 +290,9 @@ def clean_kubejs_from_raw_impl(
                         final_tw_lookup.update(tw_data)
 
                 if final_tw_lookup:
-                    # 建立 reverse_index（英文文字 → 對應 key 列表）
-                    reverse_index: dict[str, list[str]] = {}
-                    for k, v in final_tw_lookup.items():
-                        if is_filled_text_impl(v):
-                            reverse_index.setdefault(v, []).append(k)
-
-                    # 過濾 pending_en：跳過那些「英文文字已存在於 final」的 key
-                    pending_en = {
-                        k: v
-                        for k, v in pending_en.items()
-                        if not (
-                            is_filled_text_impl(v)
-                            and v in reverse_index
-                            and k != reverse_index[v][0]
-                        )
-                    }
+                    # 使用 PR #40 的乾淨去重實作
+                    reverse_index = _build_reverse_index_impl(final_tw_lookup)
+                    pending_en = _dedup_pending_en_impl(pending_en, reverse_index)
             # ── 雙軌去重 end ───────────────────────────────────────────────
 
             if pending_en:

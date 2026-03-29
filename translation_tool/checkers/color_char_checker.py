@@ -10,10 +10,10 @@ import re
 from dataclasses import dataclass
 from typing import Any, Generator
 
-# 核心檢查：& 後只能接 a-v（不含 w）、0-9、空格、\、#
-# 合法字元：a-v, 0-9, whitespace, backslash, hash
-# 違法：& 後面接了 a-v 與 0-9、空格、\、# 以外的任何字元
-COLOR_PATTERN = re.compile(r"&([^a-vz0-9\s\\#])")
+# 核心檢查：& 後只能接 Minecraft 合法的格式化代碼字元
+# 合法範圍：0-9（數字）, a-f（顏色代碼）, k-o（格式代碼）, r（重置）
+# 違法：& 後面接了合法範圍 0-9a-fk-or 以外的任何字元
+COLOR_PATTERN = re.compile(r"&([^0-9a-fk-or])")
 
 
 @dataclass
@@ -49,7 +49,7 @@ def check_color_chars(value: str) -> list[ColorCharError] | None:
                 illegal_char=illegal_char,
                 position=pos,
                 message=f"在位置 {pos} 發現非法顏色字元 '&{illegal_char}'，"
-                f"& 後只能接 a-v（不含 w）、0-9、空格、\\、#。",
+                f"& 後只能接 0-9, a-f, k-o, r。",
             )
         )
     return errors if errors else None
@@ -59,8 +59,26 @@ def _check_value(
     file_path: str,
     key: str,
     value: Any,
+    parent_path: str = "",
+    *,
+    include_current_key_in_parent: bool = False,
 ) -> Generator[ColorCharError, None, None]:
-    """遞迴檢查單一值，若為字串則檢查顏色字元。"""
+    """遞迴檢查單一值，若為字串則檢查顏色字元。
+
+    Args:
+        file_path: 檔案路徑。
+        key: 目前檢查的 key。
+        value: 目前檢查的值。
+        parent_path: 父層的完整路徑（用於 nested dict key path 報告）。
+    """
+    # 建立完整的 nested dict key path（用於 nested dict 巢狀回報）
+    if parent_path and include_current_key_in_parent:
+        full_key = f"{parent_path}.{key}"
+    elif parent_path:
+        full_key = parent_path
+    else:
+        full_key = key
+
     if isinstance(value, str):
         errors = check_color_chars(value)
         if errors:
@@ -68,7 +86,7 @@ def _check_value(
                 # 補足 file_path 與 key（從上層傳入）
                 yield ColorCharError(
                     file_path=err.file_path or file_path,
-                    key=err.key or key,
+                    key=full_key,
                     value=err.value,
                     illegal_char=err.illegal_char,
                     position=err.position,
@@ -76,10 +94,24 @@ def _check_value(
                 )
     elif isinstance(value, dict):
         for k, v in value.items():
-            yield from _check_value(file_path, k, v)
+            # 進入 nested dict：之後的子層 key 要接在目前完整路徑後面
+            yield from _check_value(
+                file_path,
+                k,
+                v,
+                parent_path=full_key,
+                include_current_key_in_parent=True,
+            )
     elif isinstance(value, list):
         for i, item in enumerate(value):
-            yield from _check_value(file_path, f"{key}[{i}]", item)
+            # list index 視為目前 key 的子路徑一部分
+            yield from _check_value(
+                file_path,
+                f"{key}[{i}]",
+                item,
+                parent_path=parent_path,
+                include_current_key_in_parent=True,
+            )
 
 
 def check_json_file(file_path: str) -> Generator[ColorCharError, None, None]:
@@ -100,7 +132,8 @@ def check_json_file(file_path: str) -> Generator[ColorCharError, None, None]:
 
     if isinstance(data, dict):
         for key, value in data.items():
-            yield from _check_value(file_path, key, value)
+            # 傳入空字串作為 initial key，避免頂層 key 被重複附加到 nested path
+            yield from _check_value(file_path, key, value, parent_path="")
 
 
 def check_directory(dir_path: str) -> Generator[ColorCharError, None, None]:
