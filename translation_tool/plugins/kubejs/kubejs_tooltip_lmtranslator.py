@@ -13,6 +13,8 @@
 數據導出 (TranslationRecorder)：支援將翻譯記錄導出為 JSON 或 CSV 格式，方便後續校對或二次開發。
 進度追蹤 (session.set_progress)：內建進度鉤子（Hook），可對接外部 UI 或日誌系統顯示翻譯百分比。
 路徑優化：自動處理語系資料夾轉換（例如將原本的 en_us 自動導向至 zh_tw 目錄）。
+Rich Text Shield：shield_text() / unshield_text() 保護 KubeJS 格式（彩色碼、物品ID、URL 等），
+在翻譯前抽出，翻譯後還原，避免 LM 誤翻格式標記。
 """
 
 from __future__ import annotations
@@ -47,6 +49,10 @@ from translation_tool.plugins.shared.json_io import (
 from translation_tool.plugins.shared.lang_path_rules import (
     compute_output_path,
 )
+from translation_tool.plugins.shared.rich_text_shield import (
+    shield_text,
+    unshield_text,
+)
 
 from translation_tool.utils.log_unit import log_info, log_warning, progress
 
@@ -62,6 +68,11 @@ def collect_items_from_mapping(
     """
     將 {路徑鍵: 原文} 的映射轉換為翻譯批次項目。
     需確保智慧偵測能識別 KubeJS 配置（item["file"] 包含 "/kubejs/"）。
+
+    Shield 整合：對每一個字串值執行 shield_text()，
+    - 若 skip_reason 非 None（圖片/URL/事件等），直接保留原文不翻譯。
+    - 若需要翻譯，用 shield 過的乾淨文字（clean）取代原文字。
+    - 同時在 item 字典中附加 _shielded，供 on_translated_item() 做 unshield 回填。
     """
     items: List[Dict[str, Any]] = []
     for k, v in mapping.items():
@@ -69,15 +80,36 @@ def collect_items_from_mapping(
             continue
         if not isinstance(v, str) or not v.strip():
             continue
-        items.append(
-            {
-                "file": file_hint,  # 智慧偵測用於識別 KubeJS 配置
-                "path": k,
-                "source_text": v,
-                "text": v,
-                "cache_type": "kubejs",
-            }
-        )
+
+        # ✅ Rich Text Shield：抽出不應翻譯的格式片段
+        shielded = shield_text(v)
+
+        if shielded.skip_reason is not None:
+            # 不應翻譯（圖片/URL/事件/空白），直接保留原文並標記 skip。
+            items.append(
+                {
+                    "file": file_hint,
+                    "path": k,
+                    "source_text": v,
+                    "text": v,
+                    "cache_type": "kubejs",
+                    "_shielded": shielded,
+                    "_skip_reason": shielded.skip_reason,
+                }
+            )
+        else:
+            # 需要翻譯：使用 shield 過的乾淨文字
+            items.append(
+                {
+                    "file": file_hint,
+                    "path": k,
+                    "source_text": v,
+                    "text": shielded.clean,  # ← 使用 shield 過的文字供翻譯
+                    "cache_type": "kubejs",
+                    "_shielded": shielded,  # 供 on_translated_item() 做 unshield
+                }
+            )
+
     return items
 
 
@@ -261,6 +293,12 @@ def translate_kubejs_pending_to_zh_tw(
                 cache_rules=cache_rules,
                 is_valid_hit=_is_valid_hit,
             )
+            skip_items = [it for it in items_to_translate if it.get("_skip_reason")]
+            if skip_items:
+                cached_items.extend(skip_items)
+                items_to_translate = [
+                    it for it in items_to_translate if not it.get("_skip_reason")
+                ]
             # ✅ 跳過值已經是繁體中文的 items（節省 API + 避免簡體當英文翻）
             _split_off_tw_items(cached_items, items_to_translate)
             global_total_hit += len(cached_items)
@@ -313,6 +351,13 @@ def translate_kubejs_pending_to_zh_tw(
             cache_rules=cache_rules,
             is_valid_hit=_is_valid_hit,
         )
+
+        skip_items = [it for it in items_to_translate if it.get("_skip_reason")]
+        if skip_items:
+            cached_items.extend(skip_items)
+            items_to_translate = [
+                it for it in items_to_translate if not it.get("_skip_reason")
+            ]
 
         # ✅ 跳過值已經是繁體中文的 items（從翻譯清單移至 cache hit）
         _split_off_tw_items(cached_items, items_to_translate)
@@ -387,7 +432,22 @@ def translate_kubejs_pending_to_zh_tw(
     # Dry-run: preview only (no API)
     # -------------------------
     if dry_run:
-        dry_preview_items = all_miss_items[:2000] if all_miss_items else []
+
+        def _strip_runtime_fields(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            """移除 dry-run preview 中不可 JSON 序列化的暫存欄位。"""
+            sanitized: List[Dict[str, Any]] = []
+            for it in items:
+                sanitized.append(
+                    {k: v for k, v in it.items() if k not in {"_shielded"}}
+                )
+            return sanitized
+
+        dry_preview_items = (
+            _strip_runtime_fields(all_miss_items[:2000]) if all_miss_items else []
+        )
+        dry_hit_items = (
+            _strip_runtime_fields(all_hit_items[:2000]) if all_hit_items else []
+        )
 
         preview_path = None
         try:
@@ -409,7 +469,7 @@ def translate_kubejs_pending_to_zh_tw(
             # ✅ NEW：cache hit preview
             hit_preview_path = write_cache_hit_preview(
                 out_dir,
-                all_hit_items[:2000],  # 或不切片
+                dry_hit_items,
                 filename="_kubejs_dry_run_cache_hit_preview.json",
                 meta=meta,
             )
@@ -457,8 +517,15 @@ def translate_kubejs_pending_to_zh_tw(
             if not (isinstance(p, str) and isinstance(t, str)):
                 return
 
+            # ✅ Rich Text Shield：翻譯後還原被保護的格式片段
+            shielded = it.get("_shielded")
+            if shielded is not None and shielded.shields:
+                final_text = unshield_text(t, shielded.shields)
+            else:
+                final_text = t
+
             st = file_states[rel_src]
-            st["out_map"][p] = t
+            st["out_map"][p] = final_text
 
             try:
                 rec.record(

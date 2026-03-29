@@ -38,21 +38,25 @@ from translation_tool.core.lm_translator_shared import (
     _is_valid_hit,  # ✅ 新增：cache hit 判斷
 )
 from translation_tool.plugins.shared.lang_text_rules import is_already_zh
+from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
 
 # -------------------------
 # basic io
 # -------------------------
+
 
 def read_json(path: Path) -> Dict[str, Any]:
     """讀取 JSON 檔案並回傳字典。"""
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
+
 def write_json(path: Path, data: Dict[str, Any]) -> None:
     """寫入 JSON 檔案。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 def collect_pending_json_files(pending_root: Path) -> List[Path]:
     """收集所有待翻譯的 JSON 檔案路徑。"""
@@ -61,6 +65,7 @@ def collect_pending_json_files(pending_root: Path) -> List[Path]:
     files = [p for p in files if p.name.lower() != "_manifest.json"]
     return files
 
+
 # -------------------------
 # zh detection（避免已中文又送）
 # -------------------------
@@ -68,6 +73,7 @@ def collect_pending_json_files(pending_root: Path) -> List[Path]:
 # -------------------------
 # pending model
 # -------------------------
+
 
 @dataclass
 class PendingItem:
@@ -82,6 +88,7 @@ class PendingItem:
     content_hash: str
     start_line: int
     end_line: int
+
 
 def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
     """載入待翻譯的 Markdown 文件。"""
@@ -102,12 +109,14 @@ def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
         )
     return data, items
 
+
 def compute_out_json_path(
     src_json: Path, in_pending_root: Path, out_root: Path
 ) -> Path:
     """計算輸出 JSON 檔案的路徑。"""
     rel = src_json.relative_to(in_pending_root)
     return out_root / "LM翻譯後" / rel
+
 
 def translate_md_pending(
     *,
@@ -117,9 +126,7 @@ def translate_md_pending(
     dry_run: bool = False,
     session=None,
 ) -> Dict[str, Any]:
-    """
-
-    """
+    """ """
     validate_api_keys()
     start_time = time.perf_counter()
 
@@ -184,18 +191,37 @@ def translate_md_pending(
 
     all_unique_items: List[Dict[str, Any]] = []
     already_zh_skipped = 0
+    skip_skipped = 0
 
     for h, src in hash_to_src.items():
         if is_already_zh(src):
             already_zh_skipped += 1
             continue
+
+        shielded = shield_text(src)
+        if shielded.skip_reason is not None:
+            skip_skipped += 1
+            all_unique_items.append(
+                {
+                    "cache_type": "md",
+                    "file": "md_pending_blocks",
+                    "path": h,
+                    "source_text": src,
+                    "text": src,
+                    "_shielded": shielded,
+                    "_skip_reason": shielded.skip_reason,
+                }
+            )
+            continue
+
         all_unique_items.append(
             {
                 "cache_type": "md",
                 "file": "md_pending_blocks",
                 "path": h,  # ✅ 用 content_hash 當 path（去重 + 快取 key 的一部分）
                 "source_text": src,
-                "text": src,
+                "text": shielded.clean,
+                "_shielded": shielded,
             }
         )
 
@@ -208,7 +234,8 @@ def translate_md_pending(
     log_info(
         f"✅ [MD-LM][分析] cache hit：{len(cached_items)} | "
         f"需 AI 翻譯：{len(items_to_translate)} | "
-        f"已中文跳過：{already_zh_skipped}"
+        f"已中文跳過：{already_zh_skipped} | "
+        f"skip_reason 跳過：{skip_skipped}"
     )
 
     if dry_run:
@@ -218,6 +245,7 @@ def translate_md_pending(
             "unique_blocks": unique_blocks,
             "duplicate_blocks": dup_blocks,
             "already_zh_skipped": already_zh_skipped,
+            "skip_reason_skipped": skip_skipped,
             "cache_hit": len(cached_items),
             "cache_miss": len(items_to_translate),
         }
@@ -226,7 +254,10 @@ def translate_md_pending(
             # A) 待翻譯 preview（list）
             p1 = write_dry_run_preview(
                 out_root,
-                items_to_translate,
+                [
+                    {k: v for k, v in it.items() if k != "_shielded"}
+                    for it in items_to_translate
+                ],
                 meta=meta,
                 filename="_md_dry_run_preview.json",
             )
@@ -234,7 +265,10 @@ def translate_md_pending(
             # B) cache hit preview（list）
             p2 = write_cache_hit_preview(
                 out_root,
-                cached_items,
+                [
+                    {k: v for k, v in it.items() if k != "_shielded"}
+                    for it in cached_items
+                ],
                 meta=meta,
                 filename="_md_dry_run_cache_hit_preview.json",
             )
@@ -254,6 +288,7 @@ def translate_md_pending(
             "unique_blocks": unique_blocks,
             "duplicate_blocks": dup_blocks,
             "already_zh_skipped": already_zh_skipped,
+            "skip_reason_skipped": skip_skipped,
             "cache_hit": len(cached_items),
             "cache_miss": len(items_to_translate),
         }
@@ -266,6 +301,12 @@ def translate_md_pending(
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
         if h and dst:
+            shielded = it.get("_shielded")
+            if shielded is not None and getattr(shielded, "shields", None):
+                try:
+                    dst = unshield_text(dst, shielded.shields)
+                except Exception:
+                    pass
             hash_to_dst[h] = dst
 
     rec = TranslationRecorder()
@@ -280,7 +321,14 @@ def translate_md_pending(
         """處理翻譯結果。"""
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
+        src_text = str(it.get("source_text") or "")
         if h and dst:
+            shielded = it.get("_shielded")
+            if shielded is not None and getattr(shielded, "shields", None):
+                try:
+                    dst = unshield_text(dst, shielded.shields)
+                except Exception:
+                    pass
             hash_to_dst[h] = dst
         # 這裡 recorder 的 cache_type 用 md（方便你日後 QC）
         try:
@@ -288,7 +336,7 @@ def translate_md_pending(
                 cache_type="md",
                 file_id="md_pending_blocks",
                 path=h,
-                src=str(it.get("source_text") or ""),
+                src=src_text,
                 dst=dst,
                 cache_hit=False,
                 extra={},
@@ -396,6 +444,7 @@ def translate_md_pending(
                 "cache_hit_global": len(cached_items),
                 "cache_miss_global": len(items_to_translate),
                 "already_zh_skipped_global": already_zh_skipped,
+                "skip_reason_skipped_global": skip_skipped,
             }
         )
 
@@ -416,7 +465,7 @@ def translate_md_pending(
     log_info(
         f"\n✅ [MD-LM] 完成：輸出檔案 {written_files} 個"
         f"\n📊 blocks：總 {total_blocks} | 唯一 {unique_blocks} | 重複 {dup_blocks}"
-        f"\n🧠 cache：hit {len(cached_items)} | miss {len(items_to_translate)} | 已中文跳過 {already_zh_skipped}"
+        f"\n🧠 cache：hit {len(cached_items)} | miss {len(items_to_translate)} | 已中文跳過 {already_zh_skipped} | skip_reason 跳過 {skip_skipped}"
         f"\n📁 out：{(out_root / 'LM翻譯後').as_posix()}"
     )
 
@@ -428,10 +477,12 @@ def translate_md_pending(
         "cache_hit": len(cached_items),
         "cache_miss": len(items_to_translate),
         "already_zh_skipped": already_zh_skipped,
+        "skip_reason_skipped": skip_skipped,
         "missing_hash": missing,
         "avg_batch_sec": avg_batch_sec,
         "out_dir": str(out_root),
     }
+
 
 def main():
     """MD 翻譯工具主入口。"""
@@ -460,6 +511,7 @@ def main():
     log_info("=== 結果 ===")
     for k, v in res.items():
         log_info("%s: %s", k, v)
+
 
 if __name__ == "__main__":
     main()

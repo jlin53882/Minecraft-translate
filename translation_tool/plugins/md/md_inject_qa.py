@@ -48,12 +48,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple
 
+from translation_tool.plugins.shared.rich_text_shield import (
+    ShieldPiece,
+    unshield_text,
+)
+
 # ======== 跟抽取器一致：哪些行視為 token 行（不可翻、不可改） ========
 RE_HARD_SPLIT_LINE = re.compile(r"^\s*§(rule\{|recipe\[|entity\[)", re.I)
 RE_SOFT_SKIP_LINE = re.compile(r"^\s*§(align:|stack\[)", re.I)
 
 # ======== 語言資料夾段落映射：en_us -> zh_tw（支援 _en_us、大小寫） ========
 RE_LANG_SEG = re.compile(r"^(_?)([a-z]{2}_[a-z]{2})$", re.IGNORECASE)
+
 
 def map_lang_in_rel_path(
     rel_path: str, src_lang: str = "en_us", dst_lang: str = "zh_tw"
@@ -78,8 +84,10 @@ def map_lang_in_rel_path(
 
     return "/".join(parts)
 
+
 # ======== 語言資料夾段落映射：允許 en_us -> zh_tw，也允許來源是 zh_tw ========
 RE_LANG_SEG = re.compile(r"^(_?)([a-z]{2}_[a-z]{2})$", re.IGNORECASE)
+
 
 def map_lang_in_rel_path_allow_zh(
     rel_path: str, src_lang: str = "en_us", dst_lang: str = "zh_tw"
@@ -127,8 +135,10 @@ def map_lang_in_rel_path_allow_zh(
         return mapped, "SRC_ZH"
     return mapped, "OTHER_LANG"
 
+
 # 若一整行幾乎都是 §token，也視為 token 行（避免誤判）
 RE_MOSTLY_TOKEN_LINE = re.compile(r"^\s*(§[0-9a-zA-Z]+\S*)\s*(§[0-9a-zA-Z]+\S*)*\s*$")
+
 
 def is_token_line(line: str) -> bool:
     """判斷行是否為 Minecraft 格式 token 行"""
@@ -143,6 +153,7 @@ def is_token_line(line: str) -> bool:
         return True
     return False
 
+
 def is_text_line_old(line: str) -> bool:
     """判斷是否為文字行（舊版）。
     判斷「原始 md」中的某一行是否視為可翻文字行：
@@ -150,6 +161,7 @@ def is_text_line_old(line: str) -> bool:
       - 非 token 行
     """
     return bool(line.strip()) and (not is_token_line(line))
+
 
 def is_text_line(line: str) -> bool:
     """
@@ -174,6 +186,7 @@ def is_text_line(line: str) -> bool:
         return False
 
     return True
+
 
 def flatten_for_md(text: str) -> str:
     """
@@ -214,6 +227,7 @@ def flatten_for_md(text: str) -> str:
 
     return "\n".join(out)
 
+
 @dataclass
 class Item:
     """Item 類別。
@@ -226,6 +240,12 @@ class Item:
     start_line: int
     end_line: int
     text: str
+    _shields: list = None
+
+    def __post_init__(self):
+        if self._shields is None:
+            self._shields = []
+
 
 def load_items_from_json(json_path: Path) -> Tuple[str, List[Item]]:
     """
@@ -241,9 +261,11 @@ def load_items_from_json(json_path: Path) -> Tuple[str, List[Item]]:
                 start_line=int(it["start_line"]),
                 end_line=int(it["end_line"]),
                 text=str(it["text"]),
+                _shields=[ShieldPiece(**p) for p in it.get("_shields", [])],
             )
         )
     return source_md, items
+
 
 def apply_item_to_md_lines_old(md_lines: List[str], item: Item) -> None:
     """
@@ -288,6 +310,7 @@ def apply_item_to_md_lines_old(md_lines: List[str], item: Item) -> None:
     #    之後你若想更進階：可把多的插到第一個空行前，但要小心 diff。
     #    目前先穩定為主。
 
+
 def apply_item_to_md_lines(md_lines: List[str], item: Item) -> None:
     """
     在 md_lines 上原地套用一個 item（只替換文字行，token/空行不動）
@@ -319,7 +342,7 @@ def apply_item_to_md_lines(md_lines: List[str], item: Item) -> None:
     # 2) 直接使用翻譯後文本的換行（保留多行結構）
     #    - item.text 可能包含 \n（例如 Side note 三行）
     #    - 我們將其視為「要寫回的文字行序列」
-    new_text_lines = item.text.splitlines()
+    new_text_lines = unshield_text(item.text, item._shields).splitlines()
 
     # 3) 去掉空白行（空白行代表段落分隔；原 md 的空白行我們不動）
     #    這裡只處理要填回「文字行」的內容
@@ -344,13 +367,13 @@ def apply_item_to_md_lines(md_lines: List[str], item: Item) -> None:
     # 6) 若翻譯行數多於原文字行數：多的先不插入（避免破壞原 md 結構）
     #    之後若要更進階，可考慮「在該區塊最後一個文字行後插入」，但要非常小心 token/排版。
 
-def iter_json_files(root: Path):
-    """處理此 generator 並逐步回報進度（yield update dict）。
 
-    """
+def iter_json_files(root: Path):
+    """處理此 generator 並逐步回報進度（yield update dict）。"""
     for p in root.rglob("*.json"):
         if p.is_file():
             yield p
+
 
 def main():
     """Markdown 寫回工具主入口。"""
@@ -449,6 +472,7 @@ def main():
     print(f"輸出根目錄：{out_done}")
     print(f"成功寫出：{wrote}")
     print(f"略過：{skipped}")
+
 
 if __name__ == "__main__":
     main()

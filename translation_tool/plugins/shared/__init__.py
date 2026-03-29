@@ -14,6 +14,13 @@ from translation_tool.plugins.shared.lang_path_rules import (
 from translation_tool.plugins.shared.lang_text_rules import (
     is_already_zh,
 )
+from translation_tool.plugins.shared.rich_text_shield import (
+    ShieldPiece,
+    ShieldedText,
+    shield_text,
+    unshield_text,
+    add_escape_quotes,
+)
 
 __all__ = [
     "collect_json_files",
@@ -24,4 +31,9 @@ __all__ = [
     "replace_lang_folder_with_zh_tw",
     "should_rename_to_zh_tw",
     "is_already_zh",
+    "ShieldPiece",
+    "ShieldedText",
+    "shield_text",
+    "unshield_text",
+    "add_escape_quotes",
 ]
