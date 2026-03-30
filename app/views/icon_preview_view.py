@@ -460,7 +460,10 @@ class IconPreviewView(ft.Column):
         """
         log_info(f"[UI] SnackBar: {message}")
         # 清除累積的舊 SnackBar，避免 overlay 無限膨脹
-        self.page.overlay = [o for o in self.page.overlay if not isinstance(o, ft.SnackBar)]
+        # Flet 0.28.3 的 page.overlay 是唯讀屬性（無 setter），需 in-place 修改
+        for i in range(len(self.page.overlay) - 1, -1, -1):
+            if isinstance(self.page.overlay[i], ft.SnackBar):
+                del self.page.overlay[i]
         snack = ft.SnackBar(
             content=ft.Text(message),
             bgcolor=color,
