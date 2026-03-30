@@ -4,33 +4,32 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+from typing import Any
 import logging
 
 class UISessionLogHandler(logging.Handler):
-    """
-    將 Python logging 訊息轉送到 TaskSession（UI）
-    """
+    """將 Python logging 訊息轉送到 TaskSession（UI）。"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化 UISessionLogHandler。"""
         super().__init__()
-        self._session = None
+        self._session: Any = None
 
-    def set_session(self, session):
+    def set_session(self, session: Any) -> None:
         """動態綁定 TaskSession。"""
         self._session = session
 
-    def emit(self, record: logging.LogRecord):
+    def emit(self, record: logging.LogRecord) -> None:
         """發送日誌記錄到 UI。"""
         if not self._session:
             return
 
         try:
-            msg = self.format(record)
+            msg: str = self.format(record)
 
             # 統一 UI log 前綴
             if record.levelno >= logging.ERROR:
-                ui_msg = f"[ERROR] {msg}"
+                ui_msg: str = f"[ERROR] {msg}"
             elif record.levelno >= logging.WARNING:
                 ui_msg = f"[WARN] {msg}"
             else:

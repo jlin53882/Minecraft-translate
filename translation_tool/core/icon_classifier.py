@@ -18,7 +18,7 @@ def classify_no_icon_reason(lang_key: str) -> tuple[str, IconRisk]:
     Returns:
         包含（原因說明, IconRisk）的元組。
     """
-    k = lang_key.lower()
+    k: str = lang_key.lower()
 
     if "banner" in k or "pattern" in k:
         return "旗幟 / 樣式為動態合成", IconRisk.IGNORE
