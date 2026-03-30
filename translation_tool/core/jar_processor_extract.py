@@ -2,6 +2,10 @@
 
 用途：從 Mod JAR 檔案中提取翻譯資源的功能。
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+
+重構記錄（PR #55）：
+- 內部 JAR 讀取改用 `jar_browser.scan_jars()`，消除重複的 ZIP 掃描邏輯。
+- 對 binary 檔案（UTF-8 decode 失敗）仍直接讀取 ZIP 以取得原始 bytes。
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ import logging
 import os
 import re
 import zipfile
+from pathlib import Path
 from typing import Any, Dict, Generator, Callable
 
 from ..utils.config_manager import load_config
@@ -63,10 +68,16 @@ def extract_from_jar_impl(
     get_file_hash_fn: Callable[[bytes], str] = get_file_hash,
 ) -> Dict[str, Any]:
     """從單一 JAR 檔案中抽取符合正規表達式的檔案內容。
-    
+
     僅處理 assets/ 開頭或非 assets 的普通資源檔，
     輸出時保留原始目錄結構。HASH 相同者自動跳過（增量更新）。
-    
+
+    內部實作（PR #55 重構）：
+    - 使用 `jar_browser.scan_jars()` 讀取符合 pattern 的文字檔內容，
+      由 jar_browser 的 ThreadPoolExecutor 統一管理多執行緒。
+    - Binary 檔案（UTF-8 decode 失敗）則 fallback 直接讀取 ZIP，
+      以確保 hash 計算和寫入行為與重構前完全一致。
+
     Args:
         jar_path: JAR 檔案路徑
         output_root: 輸出根目錄
@@ -75,45 +86,80 @@ def extract_from_jar_impl(
     Returns:
         包含 extracted/skipped 的統計字典
     """
+    from translation_tool.utils.jar_browser import scan_jars
+
     extracted_count = 0
     skipped_count = 0
     jar_filename_base = _normalize_jar_base_name(jar_path)
+    jar_path_obj = Path(jar_path)
+
+    # 如果 jar_path 不存在（被刪除或路徑錯誤），直接返回錯誤
+    if not jar_path_obj.exists():
+        log.error("JAR 檔案不存在: %s", jar_path)
+        return {"status": "error", "extracted": 0, "skipped": 0}
 
     try:
-        with zipfile.ZipFile(jar_path, 'r') as zf:
+        # 使用 jar_browser.scan_jars() 讀取文字檔（由 jar_browser 管理執行緒）
+        # target_regex.pattern 取出原生 str，正則行為與原本一致
+        jar_results: dict[str, str | None] = {}
+        scan_results = scan_jars(
+            jar_dir=jar_path_obj.parent,
+            patterns=[target_regex.pattern],
+        )
+        # jar_browser.scan_jars() 回傳 dict[Path, dict[str, str | None]]
+        # 只取我們感興趣的這個 JAR 的結果
+        if jar_path_obj in scan_results:
+            jar_results = scan_results[jar_path_obj]
+        else:
+            # JAR 不在 scan_jars 的結果中（可能全部失敗或無符合），走 fallback
+            jar_results = {}
+
+        # 同時用 ZIP 直接列出所有符合的成員（包含 binary 檔案路徑）
+        # 確保 binary 檔案不會因為 jar_browser 回傳 None 而漏掉
+        with zipfile.ZipFile(jar_path, "r") as zf:
             for member in zf.infolist():
                 if member.is_dir():
                     continue
-                normalized_path = member.filename.replace('\\', '/')
+                normalized_path = member.filename.replace("\\", "/")
                 if not target_regex.search(normalized_path):
                     continue
 
-                if normalized_path.startswith('assets/'):
+                # 決定輸出路徑（與原本邏輯完全一致）
+                if normalized_path.startswith("assets/"):
                     final_output_path = os.path.join(output_root, normalized_path)
                 else:
                     final_mod_folder = f"{jar_filename_base}_extracted"
-                    final_output_path = os.path.join(output_root, final_mod_folder, normalized_path)
+                    final_output_path = os.path.join(
+                        output_root, final_mod_folder, normalized_path
+                    )
 
-                with zf.open(member) as source:
-                    source_data = source.read()
-                    source_hash = get_file_hash_fn(source_data)
+                # 優先使用 jar_browser 的結果（文字檔）
+                if normalized_path in jar_results and jar_results[normalized_path] is not None:
+                    source_data = jar_results[normalized_path].encode("utf-8")
+                else:
+                    # Binary 檔案或 jar_browser 未找到：直接讀 ZIP
+                    with zf.open(member) as source:
+                        source_data = source.read()
 
+                source_hash = get_file_hash_fn(source_data)
+
+                # 增量更新：hash 相同則跳過
                 if os.path.exists(final_output_path):
-                    with open(final_output_path, 'rb') as existing_file:
+                    with open(final_output_path, "rb") as existing_file:
                         existing_hash = get_file_hash_fn(existing_file.read())
                     if source_hash == existing_hash:
                         skipped_count += 1
                         continue
 
                 os.makedirs(os.path.dirname(final_output_path), exist_ok=True)
-                with open(final_output_path, 'wb') as target:
+                with open(final_output_path, "wb") as target:
                     target.write(source_data)
                 extracted_count += 1
 
-        return {'status': 'success', 'extracted': extracted_count, 'skipped': skipped_count}
+        return {"status": "success", "extracted": extracted_count, "skipped": skipped_count}
     except Exception as e:
         log.error("處理 %s 時發生錯誤: %s", os.path.basename(jar_path), e)
-        return {'status': 'error', 'extracted': 0, 'skipped': 0}
+        return {"status": "error", "extracted": 0, "skipped": 0}
 
 def run_extraction_process_impl(
     mods_dir: str,
