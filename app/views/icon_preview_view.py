@@ -100,7 +100,7 @@ def _save_entries_cache_l2(source_root: Path, entries: list):
         "entries": serializable_entries,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.rename(cache_file)  # POSIX atomic on most systems
 
 
