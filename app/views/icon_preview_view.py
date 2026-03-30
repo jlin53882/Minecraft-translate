@@ -6,9 +6,13 @@
 
 import flet as ft
 import json
+import os
+import hashlib
+import platform
 import zipfile
 from pathlib import Path
 from collections import defaultdict
+from datetime import datetime, timezone
 from app.ui import theme
 from translation_tool.utils.log_unit import log_info, log_warning, log_error
 from types import SimpleNamespace
@@ -17,6 +21,126 @@ from translation_tool.utils.safe_json_loader import load_json_auto_encoding
 from translation_tool.core.lang_item_row import LangItemRow
 
 import unicodedata
+
+# ==================================================
+# L2 磁碟快取工具函式
+# ==================================================
+def _get_cache_dir() -> Path:
+    """取得 L2 快取目錄（平台專屬）。"""
+    if platform.system() == "Windows":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    elif platform.system() == "Darwin":
+        base = Path.home() / "Library" / "Caches"
+    else:
+        base = Path.home() / ".cache"
+    return base / "minecraft_translator" / "icon_preview"
+
+
+def _compute_cache_key(source_root: Path) -> str:
+    """計算快取 key：只看 JAR 檔案名稱，不算內容。
+
+    注意：key 只包含 JAR 的檔名。這樣：
+    - 新增/移除 JAR → key 改變 → 快取失效
+    - JAR 內容變了但檔名不變 → 不會自動失效（已知限制）
+    """
+    jar_files = sorted([j.name for j in source_root.glob("*.jar")])
+    key_str = str(source_root.resolve()) + ":" + ",".join(jar_files)
+    return hashlib.sha256(key_str.encode()).hexdigest()[:16]
+
+
+def _load_entries_cache_l2(source_root: Path) -> list | None:
+    """讀取 L2 磁碟快取。回傳 None 表示快取失效。
+
+    失效條件：
+    - 快取檔案不存在
+    - JSON 解析失敗
+    - version 不為 1
+    - source_root 不符
+    """
+    cache_dir = _get_cache_dir()
+    cache_file = cache_dir / f"{_compute_cache_key(source_root)}.json"
+
+    if not cache_file.exists():
+        return None
+
+    try:
+        with open(cache_file, encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return None  # 損壞的快取視為失效
+
+    # 版本檢查
+    if data.get("version") != 1:
+        return None
+
+    # 路徑檢查
+    if data.get("source_root") != str(source_root):
+        return None
+
+    return data.get("entries", [])
+
+
+def _save_entries_cache_l2(source_root: Path, entries: list):
+    """寫入 L2 磁碟快取（atomic write）。"""
+    import tempfile
+
+    cache_dir = _get_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / f"{_compute_cache_key(source_root)}.json"
+
+    # Atomic write：用 tmp 檔再 rename
+    tmp = cache_dir / f"{cache_file.stem}.tmp"
+    # 將 entries 轉為可序列化格式
+    serializable_entries = []
+    for e in entries:
+        if hasattr(e, "__dict__"):
+            serializable_entries.append(e.__dict__)
+        elif isinstance(e, dict):
+            serializable_entries.append(e)
+        else:
+            serializable_entries.append({"modid": str(e.modid), "key": str(e.key), "en": str(e.en), "zh_tw": str(e.zh_tw), "source_jar": getattr(e, "source_jar", "")})
+
+    data = {
+        "version": 1,
+        "source_root": str(source_root),
+        "entries": serializable_entries,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    tmp.rename(cache_file)  # POSIX atomic on most systems
+
+
+# ==================================================
+# Phase 進度條輔助
+# ==================================================
+def _make_progress_callback(obj, phase: str, total: int):
+    """建立 Phase 進度 callback。
+
+    參數：
+        obj: IconPreviewView 例項（需有 progress_bar, progress_text, update 方法）
+        phase: Phase 顯示文字
+        total: 總步數
+    """
+    def callback(processed: int, total: int):
+        # 安全檢查：測試環境或 UI 未初始化時不拋例外
+        if not hasattr(obj, 'progress_text') or not hasattr(obj, 'progress_bar'):
+            return
+        obj.progress_text.value = f"[{phase}] {processed} / {total}"
+        obj.progress_bar.value = processed / total if total > 0 else 0
+        obj.update()
+    return callback
+
+
+def _show_progress_phase(obj, phase: str, current: int, total: int):
+    """更新 Phase 進度顯示（並墊底一次）。"""
+    # 安全檢查：測試環境或 UI 未初始化時不拋例外
+    if not hasattr(obj, 'progress_text') or not hasattr(obj, 'progress_bar'):
+        return
+    obj.progress_text.value = f"[{phase}] {current} / {total}"
+    obj.progress_bar.value = current / total if total > 0 else 0
+    obj.progress_bar.visible = True
+    obj.update()
+
 
 def to_halfwidth(text):
     """
@@ -213,7 +337,7 @@ class IconPreviewView(ft.Column):
         mode = self._detect_source_mode()
         log_info(f"[IconPreview] 偵測到模式: {mode}")
 
-        # === 快取檢查 ===
+        # === 快取檢查（L1 in-memory）===
         cache_valid = (
             self._entries_cache is not None
             and self._cache_meta.get("source_root") == str(self.source_root)
@@ -221,7 +345,7 @@ class IconPreviewView(ft.Column):
         )
 
         if cache_valid:
-            log_info("[IconPreview] 使用快取！")
+            log_info("[IconPreview] 使用 L1 快取！")
             self._show_snack(f"✅ 使用快取（共 {len(self._entries_cache)} 筆）", color=theme.GREEN_600)
             # 用快取重建 mods dict（dict 轉回 SimpleNamespace，保持屬性存取相容）
             mods = defaultdict(list)
@@ -233,6 +357,29 @@ class IconPreviewView(ft.Column):
             self.mods = dict(mods)
             self._render_mod_list()
             return
+
+        # === L2 磁碟快取檢查（只在 jar_directory 模式）===
+        if mode == "jar_directory":
+            cached_entries = _load_entries_cache_l2(self.source_root)
+            if cached_entries is not None:
+                log_info("[IconPreview] 使用 L2 磁碟快取！")
+                self._show_snack(f"✅ 使用磁碟快取（共 {len(cached_entries)} 筆）", color=theme.GREEN_600)
+                self._entries_cache = cached_entries
+                self._cache_meta = {
+                    "source_root": str(self.source_root),
+                    "mode": mode,
+                }
+                # 重建 mods dict
+                mods = defaultdict(list)
+                for entry in cached_entries:
+                    if isinstance(entry, dict):
+                        mods[entry["modid"]].append(SimpleNamespace(**entry))
+                    else:
+                        mods[entry.modid].append(entry)
+                self.mods = dict(mods)
+                self._render_mod_list()
+                return
+
         # === 快取 miss ===
         
         # 顯示進度條
@@ -256,7 +403,12 @@ class IconPreviewView(ft.Column):
         if mode == "jar_directory":
             log_info("[IconPreview] 使用 JAR 目錄模式掃描")
             self._show_snack("📦 JAR 目錄模式：從 JAR 讀取 en_us.json...", color=theme.BLUE_600)
-            entries = self._load_entries_from_jar_directory(processed_callback=lambda: self._update_progress(processed, total_steps))
+            jar_files = list(self.source_root.glob("*.jar"))
+            total_steps = len(jar_files)
+            # Phase 3/3：實際讀取翻譯
+            entries = self._load_entries_from_jar_directory(
+                processed_callback=_make_progress_callback(self, "讀取翻譯內容", total_steps)
+            )
         elif mode == "extracted_folder":
             log_info("[IconPreview] 使用解包資料夾模式掃描")
             entries = self._load_entries()
@@ -582,17 +734,16 @@ class IconPreviewView(ft.Column):
         """從 JAR 目錄讀取所有 en_us.json（不改磁碟，直接讀 ZIP 內容）。
 
         流程：
-            1. 第一步：先掃描所有 JAR 收集 modid 清單
-            2. 建立 zh_tw 對照表（雙軌制）
-            3. 第二步：再次掃描所有 JAR 建立 entries
+            1. Phase 1/3：收集 modid 清單
+            2. Phase 2/3：建立 zh_tw 對照表（雙軌制）
+            3. Phase 3/3：建立 entries
         """
         jar_files = list(self.source_root.glob("*.jar"))
+        total_steps = len(jar_files)
         failed_jars = []
-        
-        # 進度追蹤
-        processed = 0
 
-        # ===== 第一步：收集所有 modid =====
+        # ===== Phase 1/3：收集所有 modid =====
+        _show_progress_phase(self, "收集模組資訊", 0, total_steps)
         all_modids = set()
         for jar_path in jar_files:
             try:
@@ -607,8 +758,10 @@ class IconPreviewView(ft.Column):
                         all_modids.add(modid)
             except Exception:
                 pass
+        _show_progress_phase(self, "收集模組資訊", total_steps, total_steps)
 
-        # ===== 建立 zh_tw 對照表（雙軌制）=====
+        # ===== Phase 2/3：建立 zh_tw 對照表（雙軌制）=====
+        _show_progress_phase(self, "建立翻譯對照表", 0, 1)
         zh_map = {}
         if self.review_root and all_modids:
             # Track 1：直接路徑
@@ -630,70 +783,85 @@ class IconPreviewView(ft.Column):
                         log_warning(f"[IconPreview] JAR雙軌-rglob補漏: {zh_file}")
 
             log_info(f"[IconPreview] 已建立 zh_tw 對照表，共 {len(zh_map)} 筆")
+        _show_progress_phase(self, "建立翻譯對照表", 1, 1)
 
-        # ===== 第二步：建立 entries =====
+        # ===== Phase 3/3：使用 jar_browser 多執行緒掃描 =====
         entries = []
         failed_jars = []
 
         # 墊底一次：讓使用者知道掃描啟動了
+        # 向後兼容：舊測試使用 0 參數 callback，新設計使用 2 參數 callback
         if processed_callback:
-            processed_callback()
-
-        for jar_path in jar_files:
             try:
-                with zipfile.ZipFile(jar_path, 'r') as zf:
-                    jar_entries_count = 0
-                    for name in zf.namelist():
-                        # 匹配 assets/modid/lang/en_us.json
-                        if not name.endswith("lang/en_us.json"):
-                            continue
-                        parts = name.split('/')
-                        if len(parts) < 3 or parts[-2] != 'lang' or parts[-1] != 'en_us.json':
-                            continue
+                processed_callback(0, total_steps)
+            except TypeError:
+                try:
+                    processed_callback()
+                except TypeError:
+                    pass  # 忽略不兼容的 callback
 
-                        modid = parts[1]  # assets → modid → lang → en_us.json
+        from translation_tool.utils.jar_browser import scan_jars
 
-                        # 讀取並解析 JSON
-                        content = zf.read(name).decode('utf-8')
-                        data = json.loads(content)
-
-                        if not isinstance(data, dict):
-                            continue
-
-                        for key, en_text in data.items():
-                            zh_tw_raw = zh_map.get(key, "")
-                            if not isinstance(zh_tw_raw, str):
-                                zh_tw_raw = ""
-                            entries.append(SimpleNamespace(
-                                modid=modid,
-                                key=key,
-                                en=en_text,
-                                zh_tw=zh_tw_raw.strip(),
-                                source_jar=jar_path.name,
-                            ))
-                            jar_entries_count += 1
-
-                    if jar_entries_count == 0:
-                        log_warning(f"[IconPreview] JAR 中無 en_us.json: {jar_path.name}")
-                    else:
-                        log_info(f"[IconPreview] {jar_path.name}: 找到 {jar_entries_count} 筆翻譯")
-
-            except zipfile.BadZipFile:
-                log_warning(f"[IconPreview] 不是有效的 ZIP/JAR 檔: {jar_path.name}")
-                failed_jars.append(jar_path.name)
-            except Exception as ex:
-                log_error(f"[IconPreview] 讀取 JAR 失敗: {jar_path.name} - {ex}")
-                failed_jars.append(jar_path.name)
-            
-            # 更新進度
-            processed += 1
+        # 包裝 callback：同時支援 0 參數（旧測試）和 2 參數（新設計）
+        def wrapped_callback(processed: int, total: int):
             if processed_callback:
-                processed_callback()
+                try:
+                    processed_callback(processed, total)
+                except TypeError:
+                    try:
+                        processed_callback()
+                    except TypeError:
+                        pass
 
-        if failed_jars:
-            log_warning(f"[IconPreview] 共 {len(failed_jars)} 個 JAR 讀取失敗: {', '.join(failed_jars)}")
+        results = scan_jars(
+            jar_dir=self.source_root,
+            patterns=[r"assets/([^/]+)/lang/en_us\.json"],
+            processed_callback=wrapped_callback,
+        )
 
-        log_info(f"[IconPreview] JAR 目錄掃描完成：共 {len(entries)} 筆翻譯，來自 {len(jar_files) - len(failed_jars)} 個 JAR")
+        # 建立 entries
+        for jar_path, files in results.items():
+            for name, content in files.items():
+                if not name.endswith("lang/en_us.json"):
+                    continue
+                if content is None:
+                    continue  # binary 檔案（不應該在這裡出現）
+
+                parts = name.split("/")
+                modid = parts[1]
+
+                try:
+                    data = json.loads(content)
+                except json.JSONDecodeError:
+                    log_warning(f"[IconPreview] JAR 解析 JSON 失敗: {jar_path.name} / {name}")
+                    failed_jars.append(jar_path.name)
+                    continue
+
+                if not isinstance(data, dict):
+                    continue
+
+                jar_entries_count = 0
+                for key, en_text in data.items():
+                    zh_tw_raw = zh_map.get(key, "")
+                    if not isinstance(zh_tw_raw, str):
+                        zh_tw_raw = ""
+                    entries.append(SimpleNamespace(
+                        modid=modid,
+                        key=key,
+                        en=en_text,
+                        zh_tw=zh_tw_raw.strip(),
+                        source_jar=jar_path.name,
+                    ))
+                    jar_entries_count += 1
+
+                log_info(f"[IconPreview] {jar_path.name}: 找到 {jar_entries_count} 筆翻譯")
+
+        log_info(f"[IconPreview] JAR 目錄掃描完成：共 {len(entries)} 筆翻譯")
+
+        # ===== 寫入 L2 磁碟快取 =====
+        _save_entries_cache_l2(self.source_root, entries)
+        log_info(f"[IconPreview] 已寫入 L2 磁碟快取")
+
         return entries
 
     def _render_current_page(self):
