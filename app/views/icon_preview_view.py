@@ -366,6 +366,135 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
 
 
 # ==================================================
+# 批次 Icon 提取（每個 JAR 只開一次 ZIP）
+# ==================================================
+
+def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: Path, source_root: Path, progress_cb=None) -> int:
+    """批次處理多個 JAR 的 icon 提取。
+
+    核心優化：每個 JAR 只開一次 ZIP，在記憶體內建立 model index，
+    將 icon 結果共享給同 JAR 的所有 entry。
+
+    流程（每個 JAR）：
+        1. 開啟 ZIP
+        2. 建立 names set（所有檔案列表）
+        3. 對每個 unique modid：
+            a. 嘗試 Model JSON 解析
+            b. 嘗試 fallback（icon.png / logo.png / NeoForge logoFile）
+            c. 將找到的 icon PNG 寫入磁碟（每個 modid 只寫一次）
+        4. 關閉 ZIP
+        5. 將 icon_path 寫回所有對應 entry
+
+    參數：
+        jar_to_entries: {jar_name: [entries]}，同一個 JAR 的所有 entry
+        icon_cache_root: icon 快取根目錄
+        source_root: 資料根目錄（JAR 所在位置）
+        progress_cb: 進度回呼（可選）
+
+    回傳：
+        處理的 JAR 數量
+    """
+    processed = 0
+    total = len(jar_to_entries)
+
+    for jar_name, entries in jar_to_entries.items():
+        jar_path = source_root / jar_name
+        if not jar_path.exists():
+            if progress_cb:
+                progress_cb(processed, total)
+            processed += 1
+            continue
+
+        # 同一個 JAR 的所有 modid（set，去重）
+        modids = list({e.modid for e in entries if hasattr(e, "modid") and hasattr(e, "key")})
+
+        # ===== 每個 modid 的 icon 結果 =====
+        # key: modid, value: icon_path (or None)
+        modid_icon_paths: dict[str, Path | None] = {}
+
+        try:
+            with zipfile.ZipFile(jar_path, "r") as zf:
+                names = set(zf.namelist())
+
+                for modid in modids:
+                    # 嘗試解析（使用 model index cache，ZIP 保持開啟）
+                    result = _try_extract_mod_icon_from_model(jar_path, modid, zf, names)
+
+                    if result:
+                        tex_val, png_path = result
+                        icon_data = zf.read(png_path)
+                        icon_cache_root.mkdir(parents=True, exist_ok=True)
+                        # 檔名：每個 modid 只有一個 icon（可被同 modid 的所有 entry 共用）
+                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}.png"
+                        out_path.write_bytes(icon_data)
+                        log_info(f"[IconPreview] Model icon: {modid} → {png_path} (tex={tex_val})")
+                        modid_icon_paths[modid] = out_path
+                        continue
+
+                    # Fallback: icon.png
+                    fabric_icon = f"assets/{modid}/icon.png"
+                    if fabric_icon in names:
+                        icon_data = zf.read(fabric_icon)
+                        icon_cache_root.mkdir(parents=True, exist_ok=True)
+                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}.png"
+                        out_path.write_bytes(icon_data)
+                        log_info(f"[IconPreview] 提取 Fabric icon.png: {modid}")
+                        modid_icon_paths[modid] = out_path
+                        continue
+
+                    # Fallback: logo.png
+                    logo_texture = f"assets/{modid}/textures/logo.png"
+                    if logo_texture in names:
+                        icon_data = zf.read(logo_texture)
+                        icon_cache_root.mkdir(parents=True, exist_ok=True)
+                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}.png"
+                        out_path.write_bytes(icon_data)
+                        log_info(f"[IconPreview] 提取 logo.png: {modid}")
+                        modid_icon_paths[modid] = out_path
+                        continue
+
+                    # Fallback: NeoForge logoFile
+                    neoforge_toml = "META-INF/neoforge.mods.toml"
+                    if neoforge_toml in names:
+                        try:
+                            toml_content = zf.read(neoforge_toml).decode("utf-8")
+                        except UnicodeDecodeError:
+                            toml_content = None
+
+                        if toml_content:
+                            logo_match = re.search(r'logoFile\s*=\s*"([^"]+\.png)"', toml_content)
+                            if logo_match:
+                                logo_path = logo_match.group(1)
+                                if logo_path in names:
+                                    icon_data = zf.read(logo_path)
+                                    icon_cache_root.mkdir(parents=True, exist_ok=True)
+                                    out_path = icon_cache_root / f"{modid}_{jar_path.stem}.png"
+                                    out_path.write_bytes(icon_data)
+                                    log_info(f"[IconPreview] 提取 NeoForge logoFile: {modid} → {logo_path}")
+                                    modid_icon_paths[modid] = out_path
+                                    continue
+
+                    # 完全找不到 icon
+                    modid_icon_paths[modid] = None
+
+        except Exception as ex:
+            log_warning(f"[IconPreview] 批次提取 JAR icon 失敗: {jar_name} → {ex}")
+
+        # ===== 將 icon_path 寫回所有對應 entry =====
+        for e in entries:
+            if hasattr(e, "modid") and e.modid in modid_icon_paths:
+                icon_path = modid_icon_paths[e.modid]
+                if icon_path:
+                    e.icon_path = str(icon_path)
+
+        if progress_cb:
+            progress_cb(processed + 1, total)
+        processed += 1
+
+    return processed
+
+
+# ==================================================
 # L2 磁碟快取工具函式
 # ==================================================
 def _get_cache_dir() -> Path:
@@ -1375,31 +1504,21 @@ class IconPreviewView(ft.Column):
 
         # ===== JAR Icon 掃描：提取 mod icons =====
         icon_cache_root = _get_icon_cache_dir()
-        # 按 source_jar 分組（減少重複開啟同一個 JAR）
-        jar_to_modids: dict[str, set[str]] = defaultdict(set)
-        for e in entries:
-            if hasattr(e, "source_jar") and e.source_jar:
-                jar_to_modids[e.source_jar].add(e.modid)
 
-        # ===== Phase 4/4：提取模組圖示（實驗性，預設關閉）=====
+        # ===== Phase 4/4：批次提取模組圖示（每個 JAR 只開一次 ZIP）=====
         if _ENABLE_JAR_ICON:
-            icon_total = len(entries)
-            icon_processed = 0
-            _show_progress_phase(self, "提取模組圖示", 0, icon_total)
-
+            # 按 source_jar 分組
+            jar_to_entries: dict[str, list] = defaultdict(list)
             for e in entries:
-                if not getattr(e, "source_jar", None) or not hasattr(e, "key"):
-                    icon_processed += 1
-                    continue
-                jar_path = self.source_root / e.source_jar
-                if not jar_path.exists():
-                    icon_processed += 1
-                    continue
-                icon_path = _extract_jar_icon(jar_path, e.modid, icon_cache_root, e.key)
-                if icon_path:
-                    e.icon_path = str(icon_path)
-                icon_processed += 1
-                _show_progress_phase(self, "提取模組圖示", icon_processed, icon_total)
+                if getattr(e, "source_jar", None):
+                    jar_to_entries[e.source_jar].append(e)
+
+            icon_total = len(jar_to_entries)
+
+            def _on_icon_progress(done: int, total: int):
+                _show_progress_phase(self, "提取模組圖示", done, total)
+
+            _batch_extract_jar_icons(jar_to_entries, icon_cache_root, self.source_root, _on_icon_progress)
 
         # ===== 寫入 L2 磁碟快取 =====
         _save_entries_cache_l2(self.source_root, entries)
