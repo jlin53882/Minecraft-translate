@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import traceback
-from typing import Any, Dict
+from typing import Any
 
 from app.services_impl.logging_service import (
     GLOBAL_LOG_LIMITER,
@@ -36,7 +36,7 @@ def run_lang_extraction_service(
         UI_LOG_HANDLER.set_session(session)
 
         for update in extract_lang_files_generator(mods_dir, output_dir):
-            filtered: Dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
+            filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
             if filtered is None:
                 continue
 
@@ -50,7 +50,7 @@ def run_lang_extraction_service(
                 session.set_error()
                 return
         # for loop 結束後
-        final: Dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
+        final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
         if final and "log" in final:
             session.add_log(final["log"])
         session.finish()
@@ -78,7 +78,7 @@ def run_book_extraction_service(
         UI_LOG_HANDLER.set_session(session)
 
         for update in extract_book_files_generator(mods_dir, output_dir):
-            filtered: Dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
+            filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
             if filtered is None:
                 continue
 
@@ -92,7 +92,7 @@ def run_book_extraction_service(
                 session.set_error()
                 return
 
-        final: Dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
+        final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
         if final and "log" in final:
             session.add_log(final["log"])
         session.finish()
