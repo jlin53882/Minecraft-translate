@@ -4,8 +4,8 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-from typing import Any
 import logging
+from typing import Any
 
 
 class UISessionLogHandler(logging.Handler):
