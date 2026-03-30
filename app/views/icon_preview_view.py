@@ -151,14 +151,15 @@ class IconPreviewView(ft.Column):
         self.progress_text = ft.Text("準備就緒", size=12, color=theme.GREY_600)
 
         self.controls = [
-            self.progress_bar,
-            self.progress_text,
             ft.Row([self.back_btn, self.header], alignment=ft.MainAxisAlignment.START),
             self.pick_source_btn,
             self.source_label,
             self.pick_review_btn,
             self.review_label,
             self.load_btn,
+            # 進度條：置於「載入模組清單」按鈕下方，掃描時才顯示
+            self.progress_bar,
+            self.progress_text,
             self.save_btn,
             self.page_bar,
             ft.Divider(),
@@ -633,6 +634,10 @@ class IconPreviewView(ft.Column):
         # ===== 第二步：建立 entries =====
         entries = []
         failed_jars = []
+
+        # 墊底一次：讓使用者知道掃描啟動了
+        if processed_callback:
+            processed_callback()
 
         for jar_path in jar_files:
             try:
