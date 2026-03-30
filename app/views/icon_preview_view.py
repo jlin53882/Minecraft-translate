@@ -149,7 +149,13 @@ class IconPreviewView(ft.Column):
 
         self.list_view = ft.ListView(expand=True, spacing=8)
 
+        # 進度條
+        self.progress_bar = ft.ProgressBar(visible=False, width=500)
+        self.progress_text = ft.Text("準備就緒", size=12, color=theme.GREY_600)
+
         self.controls = [
+            self.progress_bar,
+            self.progress_text,
             ft.Row([self.back_btn, self.header], alignment=ft.MainAxisAlignment.START),
             self.pick_source_btn,
             self.source_label,
@@ -230,11 +236,29 @@ class IconPreviewView(ft.Column):
             self._render_mod_list()
             return
         # === 快取 miss ===
+        
+        # 顯示進度條
+        if mode == "jar_directory":
+            jar_files = list(self.source_root.glob("*.jar"))
+            total_steps = len(jar_files)
+        elif mode == "extracted_folder":
+            en_files = list(self.source_root.rglob("en_us.json"))
+            total_steps = len(en_files)
+        else:
+            total_steps = 0
+
+        if total_steps > 0:
+            self.progress_bar.visible = True
+            self.progress_bar.value = 0
+            self.progress_text.value = f"正在掃描：0 / {total_steps}"
+            self.update()
+
+        processed = 0
 
         if mode == "jar_directory":
             log_info("[IconPreview] 使用 JAR 目錄模式掃描")
             self._show_snack("📦 JAR 目錄模式：從 JAR 讀取 en_us.json...", color=theme.BLUE_600)
-            entries = self._load_entries_from_jar_directory()
+            entries = self._load_entries_from_jar_directory(processed_callback=lambda: self._update_progress(processed, total_steps))
         elif mode == "extracted_folder":
             log_info("[IconPreview] 使用解包資料夾模式掃描")
             entries = self._load_entries()
@@ -268,7 +292,20 @@ class IconPreviewView(ft.Column):
         self.mods = dict(mods)
         log_info(f"[IconPreview] 載入完成，共 {len(self.mods)} 個模組，{len(entries)} 筆翻譯")
         self._show_snack(f"✅ 載入完成（共 {len(self.mods)} 個模組）", color=theme.GREEN_600)
+        
+        # 隱藏進度條
+        self.progress_bar.visible = False
+        self.progress_text.value = "準備就緒"
+        self.update()
+        
         self._render_mod_list()
+
+    def _update_progress(self, current: int, total: int):
+        """更新進度條"""
+        if total > 0:
+            self.progress_bar.value = current / total
+            self.progress_text.value = f"正在掃描：{current} / {total}"
+            self.update()
 
     def _render_mod_list(self):
         """渲染模組清單畫面"""
@@ -538,7 +575,7 @@ class IconPreviewView(ft.Column):
             log_warning(f"[IconPreview] 無法識別模式：JAR={jar_count}, en_us={extracted_count}")
             return "empty"
 
-    def _load_entries_from_jar_directory(self) -> list:
+    def _load_entries_from_jar_directory(self, processed_callback=None) -> list:
         """從 JAR 目錄讀取所有 en_us.json（不改磁碟，直接讀 ZIP 內容）。
 
         流程：
@@ -548,6 +585,10 @@ class IconPreviewView(ft.Column):
         """
         jar_files = list(self.source_root.glob("*.jar"))
         failed_jars = []
+        
+        # 進度追蹤
+        total_jars = len(jar_files)
+        processed = 0
 
         # ===== 第一步：收集所有 modid =====
         all_modids = set()
@@ -637,6 +678,11 @@ class IconPreviewView(ft.Column):
             except Exception as ex:
                 log_error(f"[IconPreview] 讀取 JAR 失敗: {jar_path.name} - {ex}")
                 failed_jars.append(jar_path.name)
+            
+            # 更新進度
+            processed += 1
+            if processed_callback:
+                processed_callback()
 
         if failed_jars:
             log_warning(f"[IconPreview] 共 {len(failed_jars)} 個 JAR 讀取失敗: {', '.join(failed_jars)}")
