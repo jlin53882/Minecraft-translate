@@ -57,18 +57,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # 使用 github.event.pull_request.head.sha（feature branch 真實 SHA）
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          BASE_REF="origin/${{ github.event.pull_request.base.ref }}"
+          HEAD_REF="${{ github.event.pull_request.head.ref }}"
 
-          echo "Diff: $BASE_SHA..$HEAD_SHA"
-          echo "BASE commit: $(git rev-parse --short $BASE_SHA 2>&1 || echo 'NOT FOUND')"
-          echo "HEAD commit: $(git rev-parse --short $HEAD_SHA 2>&1 || echo 'NOT FOUND')"
+          echo "BASE ref: $BASE_REF"
+          echo "HEAD ref: $HEAD_REF"
 
-          # 確保 fetch 了足夠的歷史
-          git fetch origin "$BASE_SHA" "$HEAD_SHA" --depth=1 2>/dev/null || true
-
-          FILES=$(git diff --name-only "$BASE_SHA..$HEAD_SHA" | grep -E '\.py$' || true)
+          FILES=$(git log --name-only --pretty=format: "$BASE_REF..origin/$HEAD_REF" | grep -E '\.py$' | sort -u || true)
           if [ -z "$FILES" ]; then
             echo "No Python files changed; skipping ruff."
             exit 0
