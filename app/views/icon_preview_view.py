@@ -26,14 +26,8 @@ import unicodedata
 # L2 磁碟快取工具函式
 # ==================================================
 def _get_cache_dir() -> Path:
-    """取得 L2 快取目錄（平台專屬）。"""
-    if platform.system() == "Windows":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    elif platform.system() == "Darwin":
-        base = Path.home() / "Library" / "Caches"
-    else:
-        base = Path.home() / ".cache"
-    return base / "minecraft_translator" / "icon_preview"
+    """取得 L2 快取目錄（專案根目錄）。"""
+    return Path(__file__).parent.parent.parent / ".icon_cache"
 
 
 def _compute_cache_key(source_root: Path) -> str:
@@ -106,7 +100,7 @@ def _save_entries_cache_l2(source_root: Path, entries: list):
         "entries": serializable_entries,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.rename(cache_file)  # POSIX atomic on most systems
 
 
