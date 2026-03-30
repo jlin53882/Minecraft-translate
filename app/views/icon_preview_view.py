@@ -17,9 +17,6 @@ from translation_tool.utils.safe_json_loader import load_json_auto_encoding
 from translation_tool.core.lang_item_row import LangItemRow
 
 import unicodedata
-import logging
-
-logger = logging.getLogger(__name__)
 
 def to_halfwidth(text):
     """
@@ -462,6 +459,8 @@ class IconPreviewView(ft.Column):
         - 不會被 ListView / update 吃掉
         """
         log_info(f"[UI] SnackBar: {message}")
+        # 清除累積的舊 SnackBar，避免 overlay 無限膨脹
+        self.page.overlay = [o for o in self.page.overlay if not isinstance(o, ft.SnackBar)]
         snack = ft.SnackBar(
             content=ft.Text(message),
             bgcolor=color,
