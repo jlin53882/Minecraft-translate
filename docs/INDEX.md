@@ -26,6 +26,8 @@
 
 [docs/PR_EXECUTION_TYPES.md](./PR_EXECUTION_TYPES.md) — PR 執行類型參考（盤點型/驗證型/邊界型/文件型）
 
+[docs/ITERATION_SOP.md](./ITERATION_SOP.md) — 疊代 SOP（Phase 0~2 框架、Validation checklist 標準、刪除說明六欄位）
+
 ---
 
 ## 架構文件
