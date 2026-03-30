@@ -11,7 +11,7 @@ import unicodedata
 
 from translation_tool.core.icon_preview_cache import generate_icon_preview
 from translation_tool.core.icon_resolver import resolve_icon_with_reason
-from translation_tool.core.icon_reason import IconRisk
+from translation_tool.core.icon_reason import IconRisk, IconResult
 
 def to_halfwidth(text):
     """將字串轉換為半形。"""
@@ -35,6 +35,7 @@ class LangItemRow(ft.Container):
         assets_root: Path,
         preview_root: Path,
         on_value_changed: Callable[[str, str], None],
+        icon_path: str | None = None,
     ):
         """初始化 LangItemRow。
 
@@ -45,6 +46,8 @@ class LangItemRow(ft.Container):
             assets_root: 資源根目錄
             preview_root: 預覽根目錄
             on_value_changed: 值變更回調函數
+            icon_path: 圖示路徑（可為 JAR 內的路徑 或已提取到磁碟的路徑）。
+                       若有值則直接使用，跳過 resolve_icon_with_reason。
         """
         super().__init__(
             padding=ft.padding.symmetric(vertical=10, horizontal=8),
@@ -58,7 +61,15 @@ class LangItemRow(ft.Container):
         # =========================
         # 🖼 Icon + 分類
         # =========================
-        icon_result = resolve_icon_with_reason(lang_key, assets_root)
+        # icon_path 有值（來自 JAR 掃描）：直接使用，跳過 resolve
+        if icon_path:
+            icon_result = IconResult(
+                icon_path=Path(icon_path),
+                reason="",
+                risk=None,
+            )
+        else:
+            icon_result = resolve_icon_with_reason(lang_key, assets_root)
         risk_label = None
 
         if icon_result.icon_path:

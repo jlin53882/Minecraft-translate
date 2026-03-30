@@ -220,11 +220,123 @@ class TestLoadEntriesFromJarDirectory:
         key2_entry = next(e for e in entries if e.key == "key2")
         assert key2_entry.zh_tw == ""  # zh_tw 沒有這個 key，回傳空字串
 
-    def test_jar_entries_source_root_none_raises(self, tmp_path):
-        """source_root 為 None 時，會炸 AttributeError（PR51 已知限制，待 P0-2 修復）
+    def test_dual_track_end_to_end_complete_flow(self, tmp_path):
+        """完整的 dual-track end-to-end 流程測試。
 
-        設計稿說應該回傳空 list，但 PR51 實作沒有這個 guard。
-        這個測試記錄預期行為，未來 PR53 重構時應加入此保護。
+        情境：JAR（含 en_us.json）+ zh_tw 對照表（磁碟）
+        驗證：
+        1. en_us 值從 JAR 正確讀取
+        2. zh_tw 值從磁碟對照表正確對照
+        3. 無翻譯的 key 正確回傳空字串
+        4. modid、source_jar 屬性正確
+        5. 多個 JAR 的 dual-track 各自獨立
+
+        這是比 test_jar_entries_with_zh_tw_dual_track 更完整的端對端驗證，
+        同時檢查 en 值與 zh_tw 值的正確性。
+        """
+        jar_dir = tmp_path / "mods"
+        jar_dir.mkdir()
+        review_dir = tmp_path / "review"
+
+        # JAR 1：含 en_us.json
+        create_test_jar(jar_dir, "actuallyadditions-1.20.jar", {
+            "assets/actuallyadditions/lang/en_us.json": json.dumps({
+                "item.actuallyadditions.atomic_reconstructor": "Atomic Reshaper",
+                "item.actuallyadditions.manual": "Manual",
+                "item.actuallyadditions.eye": "Eye of the Ancient",
+            }),
+        })
+
+        # JAR 2：另一個模組
+        create_test_jar(jar_dir, "jei-1.20.1.jar", {
+            "assets/jei/lang/en_us.json": json.dumps({
+                "jei.category.brewing": "Brewing",
+                "jei.category.smelting": "Smelting",
+            }),
+        })
+
+        # review_root 的 zh_tw.json（直接路徑）
+        zh_tw_dir_aa = review_dir / "actuallyadditions" / "lang"
+        zh_tw_dir_aa.mkdir(parents=True)
+        (zh_tw_dir_aa / "zh_tw.json").write_text(
+            json.dumps({
+                "item.actuallyadditions.atomic_reconstructor": "原子重塑器",
+                "item.actuallyadditions.manual": "手冊",
+                # "item.actuallyadditions.eye" → 故意留空，測無翻譯的 key
+            }),
+            encoding="utf-8",
+        )
+
+        zh_tw_dir_jei = review_dir / "jei" / "lang"
+        zh_tw_dir_jei.mkdir(parents=True)
+        (zh_tw_dir_jei / "zh_tw.json").write_text(
+            json.dumps({
+                "jei.category.brewing": "釀造",
+                # "jei.category.smelting" → 故意留空
+            }),
+            encoding="utf-8",
+        )
+
+        view = create_view(source_root=jar_dir, review_root=review_dir)
+        entries = view._load_entries_from_jar_directory()
+
+        # === 總數驗證 ===
+        assert len(entries) == 5, f"預期 5 個 entry，實際 {len(entries)}"
+
+        # === actuallyadditions 驗證 ===
+        aa_entries = [e for e in entries if e.modid == "actuallyadditions"]
+        assert len(aa_entries) == 3
+
+        # 有翻譯的 key
+        aa_reconstructor = next(e for e in aa_entries if e.key == "item.actuallyadditions.atomic_reconstructor")
+        assert aa_reconstructor.en == "Atomic Reshaper"
+        assert aa_reconstructor.zh_tw == "原子重塑器"
+        assert aa_reconstructor.source_jar == "actuallyadditions-1.20.jar"
+
+        aa_manual = next(e for e in aa_entries if e.key == "item.actuallyadditions.manual")
+        assert aa_manual.en == "Manual"
+        assert aa_manual.zh_tw == "手冊"
+        assert aa_manual.source_jar == "actuallyadditions-1.20.jar"
+
+        # 無翻譯的 key（zh_tw 為空字串）
+        aa_eye = next(e for e in aa_entries if e.key == "item.actuallyadditions.eye")
+        assert aa_eye.en == "Eye of the Ancient"
+        assert aa_eye.zh_tw == "", "無翻譯的 key 應回傳空字串"
+        assert aa_eye.source_jar == "actuallyadditions-1.20.jar"
+
+        # === jei 驗證 ===
+        jei_entries = [e for e in entries if e.modid == "jei"]
+        assert len(jei_entries) == 2
+
+        jei_brewing = next(e for e in jei_entries if e.key == "jei.category.brewing")
+        assert jei_brewing.en == "Brewing"
+        assert jei_brewing.zh_tw == "釀造"
+        assert jei_brewing.source_jar == "jei-1.20.1.jar"
+
+        # 無翻譯的 key
+        jei_smelting = next(e for e in jei_entries if e.key == "jei.category.smelting")
+        assert jei_smelting.en == "Smelting"
+        assert jei_smelting.zh_tw == "", "無翻譯的 key 應回傳空字串"
+        assert jei_smelting.source_jar == "jei-1.20.1.jar"
+
+    def test_load_entries_from_jar_directory_no_source_root(self, tmp_path):
+        """source_root 為 None 時，正確行為應回傳空 list（PR51 已知限制，待 PR53 修復）
+
+        PR51 實作缺少 source_root 的 None guard，導致：
+        - 錯誤：AttributeError: 'NoneType' object has no attribute 'glob'
+        - 正確：回傳 []
+
+        此測試記錄正確預期行為（回傳 []），在 PR53 修復前會失敗。
+        """
+        view = create_view(source_root=None, review_root=None)
+        entries = view._load_entries_from_jar_directory()
+        assert entries == [], "source_root=None 時應回傳空 list，而非拋出 AttributeError"
+
+    def test_jar_entries_source_root_none_raises_PR51_bug(self, tmp_path):
+        """source_root 為 None 時，會炸 AttributeError（PR51 已知限制，待 PR53 修復）
+
+        此測試記錄 PR51 的錯誤行為（AttributeError）。
+        PR53 修復後應改為回傳 []，並以 test_load_entries_from_jar_directory_no_source_root 取代本測試。
         """
         view = create_view(source_root=None, review_root=None)
         with pytest.raises(AttributeError, match="'NoneType' object has no attribute 'glob'"):

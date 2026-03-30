@@ -23,6 +23,68 @@ from translation_tool.core.lang_item_row import LangItemRow
 import unicodedata
 
 # ==================================================
+# JAR Icon 提取輔助函式
+# ==================================================
+def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path) -> Path | None:
+    """從 JAR 中提取 mod icon 並快取到磁碟。
+
+    支援：
+        - Fabric: assets/<modid>/icon.png
+        - NeoForge: neoforge.mods.toml → logoFile
+
+    參數：
+        jar_path: JAR 檔案路徑
+        modid: mod ID
+        icon_cache_root: icon 快取根目錄（如 _icon_preview/jar_icons）
+
+    回傳：
+        提取後的圖示路徑，或 None（找不到或提取失敗）
+    """
+    try:
+        with zipfile.ZipFile(jar_path, "r") as zf:
+            names = zf.namelist()
+
+            # ----- Fabric: assets/<modid>/icon.png -----
+            fabric_icon = f"assets/{modid}/icon.png"
+            if fabric_icon in names:
+                icon_data = zf.read(fabric_icon)
+                icon_cache_root.mkdir(parents=True, exist_ok=True)
+                # 檔名：<modid>_<jar名>.png（同一 modid 可能來自不同 JAR）
+                safe_jar_name = jar_path.stem  # 無副檔名
+                out_path = icon_cache_root / f"{modid}_{safe_jar_name}.png"
+                out_path.write_bytes(icon_data)
+                log_info(f"[IconPreview] 提取 Fabric icon: {modid} → {out_path.name}")
+                return out_path
+
+            # ----- NeoForge: neoforge.mods.toml → logoFile -----
+            neoforge_toml = "META-INF/neoforge.mods.toml"
+            if neoforge_toml in names:
+                try:
+                    toml_content = zf.read(neoforge_toml).decode("utf-8")
+                except UnicodeDecodeError:
+                    toml_content = None
+
+                if toml_content:
+                    import re
+                    # 解析 logoFile="xxx.png"（可能在 sections[[]] 裡）
+                    logo_match = re.search(r'logoFile\s*=\s*"([^"]+\.png)"', toml_content)
+                    if logo_match:
+                        logo_path = logo_match.group(1)
+                        # logoFile 通常相對於 JAR 根目錄
+                        if logo_path in names:
+                            icon_data = zf.read(logo_path)
+                            icon_cache_root.mkdir(parents=True, exist_ok=True)
+                            safe_jar_name = jar_path.stem
+                            out_path = icon_cache_root / f"{modid}_{safe_jar_name}.png"
+                            out_path.write_bytes(icon_data)
+                            log_info(f"[IconPreview] 提取 NeoForge logo: {modid} → {out_path.name}")
+                            return out_path
+    except Exception as ex:
+        log_warning(f"[IconPreview] 提取 JAR icon 失敗: {jar_path.name} / {modid} → {ex}")
+    return None
+
+
+# ==================================================
 # L2 磁碟快取工具函式
 # ==================================================
 def _get_cache_dir() -> Path:
@@ -852,6 +914,30 @@ class IconPreviewView(ft.Column):
 
         log_info(f"[IconPreview] JAR 目錄掃描完成：共 {len(entries)} 筆翻譯")
 
+        # ===== JAR Icon 掃描：提取 mod icons =====
+        icon_cache_root = self.source_root / "_icon_preview" / "jar_icons"
+        # 按 source_jar 分組（減少重複開啟同一個 JAR）
+        jar_to_modids: dict[str, set[str]] = defaultdict(set)
+        for e in entries:
+            if hasattr(e, "source_jar") and e.source_jar:
+                jar_to_modids[e.source_jar].add(e.modid)
+
+        for jar_name, modids in jar_to_modids.items():
+            jar_path = self.source_root / jar_name
+            if not jar_path.exists():
+                continue
+            for modid in modids:
+                # 避免同一 modid 重複提取（多個 JAR 可能有同名的 modid，以最後一個為準）
+                existing = next((e.icon_path for e in entries if e.modid == modid and hasattr(e, "icon_path") and e.icon_path), None)
+                if existing:
+                    continue  # 已有 icon，跳過
+                icon_path = _extract_jar_icon(jar_path, modid, icon_cache_root)
+                if icon_path:
+                    # 找到對應的 entry 並寫入 icon_path
+                    for e in entries:
+                        if e.modid == modid and getattr(e, "source_jar", "") == jar_name:
+                            e.icon_path = str(icon_path)
+
         # ===== 寫入 L2 磁碟快取 =====
         _save_entries_cache_l2(self.source_root, entries)
         log_info(f"[IconPreview] 已寫入 L2 磁碟快取")
@@ -879,6 +965,7 @@ class IconPreviewView(ft.Column):
                     assets_root=self.source_root / "assets",
                     preview_root=self.source_root / "_icon_preview",
                     on_value_changed=self._on_value_changed,
+                    icon_path=getattr(entry, "icon_path", None),
                 )
             )
 
