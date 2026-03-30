@@ -5,10 +5,10 @@
 - **測試分類**：
   - **單元測試**（unit）：`tests/test_*.py`
   - **表徵測試**（characterization test）：`tests/test_*_characterization.py`
-- **conftest.py 提供的 fixtures**：
-  - `temp_dir` — 臨時目錄，測試結束後自動清理
-  - `mock_config` — 測試用 mock 設定（`test_mode: True`）
-  - `mock_empty_config` — 空設定，用於測試預設值
+- **conftest.py 提供的 helper functions**：
+  - `temp_dir` — 臨時目錄 helper
+  - `mock_config` — 測試用 mock 設定 helper（`test_mode: True`）
+  - `mock_empty_config` — 空設定 helper，用於測試預設值
   - `slow` marker — 可用 `-m "not slow"` 排除慢速測試
 
 ## 各測試類型說明

@@ -41,7 +41,7 @@ Minecraft-translate/
 
 ### `tests/` — 測試
 
-105 個測試檔、834 個測試案例（pytest），覆蓋 app/、translation_tool/core/、translation_tool/utils/ 所有模組。
+146 個測試檔、1132 個測試案例（pytest），覆蓋 app/、translation_tool/core/、translation_tool/utils/ 所有模組。
 
 ### `tools/` — 開發工具
 
@@ -55,16 +55,16 @@ Minecraft-translate/
 
 | 模組 | 職責 | 關鍵類別/函式 |
 |---|---|---|
-| `core/lm_translator.py` | AI 翻譯主邏輯，支援 Gemini API、多 Key 輪替、批次翻譯 | `LMTranslator` |
-| `core/lang_merger.py` | 智慧合併 en_us / zh_cn / zh_tw，保留已翻譯內容 | `LangMerger` |
-| `core/jar_processor.py` | 從模組 JAR 提取語言檔與 Patchouli 手冊 | `JARProcessor` |
-| `plugins/ftbquests/` | FTB Quests SBNT 格式翻譯 | `FTBQuestsExtractor` / `FTBTranslator` |
-| `plugins/kubejs/` | KubeJS 提示文字翻譯，含路徑解析與注入 | `KubeJSTranslator` |
-| `plugins/md/` | Markdown 文件翻譯（含翻譯進度統計） | `MDTranslator` |
+| `core/lm_translator.py` | AI 翻譯主邏輯，支援 Gemini API、多 Key 輪替、批次翻譯 | `translate_directory_generator` |
+| `core/lang_merger.py` | 智慧合併 en_us / zh_cn / zh_tw，保留已翻譯內容 | `merge_zhcn_to_zhtw_from_zip` |
+| `core/jar_processor.py` | 從模組 JAR 提取語言檔與 Patchouli 手冊 | `extract_lang_files_generator` / `extract_book_files_generator` |
+| `plugins/ftbquests/` | FTB Quests SBNT 格式翻譯 | `translate_ftb_pending_to_zh_tw` / `DryRunStats` |
+| `plugins/kubejs/` | KubeJS 提示文字翻譯，含路徑解析與注入 | `translate_kubejs_pending_to_zh_tw` / `DryRunStats` |
+| `plugins/md/` | Markdown 文件翻譯（含翻譯進度統計） | `translate_md_pending` / `PendingItem` |
 | `checkers/untranslated_checker.py` | 偵測未翻譯條目 | `check_untranslated_generator` |
 | `checkers/english_residue_checker.py` | 偵測英文殘留 | `check_english_residue_generator` |
-| `utils/cache_manager.py` | SQLite 分片快取、全文搜尋、WAL 優化 | `CacheManager` |
+| `utils/cache_manager.py` | SQLite 分片快取、全文搜尋、WAL 優化 | module-level façade（無 class） |
 | `utils/config_manager.py` | 設定載入與驗證、Logging 初始化 | `load_config` / `setup_logging` |
 | `app/views/translation_view.py` | 任務翻譯工具主視圖（FTB / KubeJS / Markdown） | `TranslationView` |
 | `app/views/lm_view.py` | 機器翻譯設定與操作視圖 | `LMView` |
-| `app/ui/theme.py` | 主題系統（深色／淺色切換） | `ThemeManager` |
+| `app/ui/theme.py` | 主題系統（深色／淺色切換） | module-level constants（無 class） |

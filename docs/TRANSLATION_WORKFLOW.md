@@ -26,7 +26,7 @@ JAR 內的路徑會依正規表達式（`lang_codes` 設定值）篩選，只取
 
 ### 2. Translate
 
-- **入口**：`translation_tool/core/lm_translator_main.py` → `translate_batch_smart_old()`
+- **入口**：`translation_tool/core/lm_translator_main.py` → `translate_batch_smart()`
 - **流程**：以 profile（`lang` / `ftb` / `kubejs` / `md` / `patch`）判斷 System Prompt 與批次大小上限
 - **Prompt 模板**：從 `lm_translator` 設定區塊讀取 `lang_system_prompt` / `patchouli_system_prompt`，動態注入
 - **錯誤處理**：

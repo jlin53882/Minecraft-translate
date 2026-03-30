@@ -139,6 +139,6 @@ find_similar_translations(text, threshold=0.6)
 ## 注意事項
 
 - **永久保存**：cache 不會過期，設計上永久保留所有翻譯記錄
-- **Thread-safe**：所有操作透過 `cache_lock`（`RLock`）保護，可在 Flet UI 的背景執行緒中使用
+- **Thread-safe**：寫入操作透過 `cache_lock`（`RLock`）保護；讀取 API 直接存取 shared dict，可在 Flet UI 的背景執行緒中使用
 - **延遲寫入**：翻譯結果先寫記憶體（`session_new_entries`），session 結束才 flush 磁碟，避免大量小寫入
 - **效能監控**：`CacheMetrics` 追蹤 hit/miss/load_ms/save_ms，另有 PR66-A 專門對此做過優化
