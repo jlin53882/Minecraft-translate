@@ -222,11 +222,11 @@ class IconPreviewView(ft.Column):
         if cache_valid:
             log_info("[IconPreview] 使用快取！")
             self._show_snack(f"✅ 使用快取（共 {len(self._entries_cache)} 筆）", color=theme.GREEN_600)
-            # 用快取重建 mods dict
+            # 用快取重建 mods dict（dict 轉回 SimpleNamespace，保持屬性存取相容）
             mods = defaultdict(list)
             for entry in self._entries_cache:
                 if isinstance(entry, dict):
-                    mods[entry["modid"]].append(entry)
+                    mods[entry["modid"]].append(SimpleNamespace(**entry))
                 else:
                     mods[entry.modid].append(entry)
             self.mods = dict(mods)
