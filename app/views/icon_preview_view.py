@@ -813,6 +813,8 @@ class IconPreviewView(ft.Column):
             2. Phase 2/3：建立 zh_tw 對照表（雙軌制）
             3. Phase 3/3：建立 entries
         """
+        if self.source_root is None:
+            return []
         jar_files = list(self.source_root.glob("*.jar"))
         total_steps = len(jar_files)
         failed_jars = []
