@@ -1379,8 +1379,16 @@ class IconPreviewView(ft.Column):
         return entries
 
     def _render_current_page(self):
-        """渲染當前頁面的項目列表"""
-        entries = self.mods.get(self.current_modid, [])
+        """渲染當前頁面的項目列表（支援 detail 搜尋過濾）"""
+        # Phase 2：搜尋過濾邏輯
+        if self._detail_filtered_entries is not None:
+            # 有搜尋條件，使用過濾後的 entries
+            entries = self._detail_filtered_entries
+            search_active = True
+        else:
+            entries = self.mods.get(self.current_modid, [])
+            search_active = False
+
         total = len(entries)
 
         self.total_pages = max(1, (total + self.page_size - 1) // self.page_size)
