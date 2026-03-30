@@ -59,6 +59,10 @@ class IconPreviewView(ft.Column):
         self.mods: dict[str, list] = {}
         self.current_modid: str | None = None
 
+        # 快取（防止重複掃描 JAR）
+        self._entries_cache: list | None = None   # 緩存的 entries（dict 格式）
+        self._cache_meta: dict = {}              # source_root, mode
+
         self._current_zh_file: Path | None = None
         self._zh_data: dict[str, str] = {}
 
@@ -166,6 +170,9 @@ class IconPreviewView(ft.Column):
         if e.path:
             self.source_root = Path(e.path)
             self.source_label.value = f"原文資料夾：{self.source_root}"
+            # 快取失效：source_root 改變
+            self._entries_cache = None
+            self._cache_meta = {}
             self._update_load_state()
             log_info(f"[IconPreview] 原文資料夾已設定: {self.source_root}")
             self._show_snack(f"✅ 原文資料夾已設定", color=theme.GREEN_600)
@@ -202,6 +209,28 @@ class IconPreviewView(ft.Column):
         mode = self._detect_source_mode()
         log_info(f"[IconPreview] 偵測到模式: {mode}")
 
+        # === 快取檢查 ===
+        cache_valid = (
+            self._entries_cache is not None
+            and self._cache_meta.get("source_root") == str(self.source_root)
+            and self._cache_meta.get("mode") == mode
+        )
+
+        if cache_valid:
+            log_info("[IconPreview] 使用快取！")
+            self._show_snack(f"✅ 使用快取（共 {len(self._entries_cache)} 筆）", color=theme.GREEN_600)
+            # 用快取重建 mods dict
+            mods = defaultdict(list)
+            for entry in self._entries_cache:
+                if isinstance(entry, dict):
+                    mods[entry["modid"]].append(entry)
+                else:
+                    mods[entry.modid].append(entry)
+            self.mods = dict(mods)
+            self._render_mod_list()
+            return
+        # === 快取 miss ===
+
         if mode == "jar_directory":
             log_info("[IconPreview] 使用 JAR 目錄模式掃描")
             self._show_snack("📦 JAR 目錄模式：從 JAR 讀取 en_us.json...", color=theme.BLUE_600)
@@ -219,18 +248,28 @@ class IconPreviewView(ft.Column):
             self._show_snack("❌ 掃描結果為空，請確認 en_us.json 是否存在", color=theme.RED_700)
             return
 
+        # 寫入快取（dict 格式，脫離 SimpleNamespace）
+        cache_entries = []
+        for entry in entries:
+            if hasattr(entry, "__dict__"):
+                cache_entries.append(entry.__dict__)
+            else:
+                cache_entries.append(entry)
+        self._entries_cache = cache_entries
+        self._cache_meta = {
+            "source_root": str(self.source_root),
+            "mode": mode,
+        }
+
         mods = defaultdict(list)
         for entry in entries:
             mods[entry.modid].append(entry)
 
         self.mods = dict(mods)
         log_info(f"[IconPreview] 載入完成，共 {len(self.mods)} 個模組，{len(entries)} 筆翻譯")
-        self._show_snack(f"✅ 載入完成，共 {len(self.mods)} 個模組", color=theme.GREEN_600)
+        self._show_snack(f"✅ 載入完成（共 {len(self.mods)} 個模組）", color=theme.GREEN_600)
         self._render_mod_list()
 
-    # ==================================================
-    # 第一層：模組清單
-    # ==================================================
     def _render_mod_list(self):
         """渲染模組清單畫面"""
         self.current_modid = None
@@ -458,12 +497,15 @@ class IconPreviewView(ft.Column):
                 modid = "unknown"
 
             for key, en_text in data.items():
+                zh_tw_raw = zh_map.get(key, "")
+                if not isinstance(zh_tw_raw, str):
+                    zh_tw_raw = ""
                 entries.append(
                     SimpleNamespace(
                         modid=modid,
                         key=key,
                         en=en_text,
-                        zh_tw=zh_map.get(key, ""),
+                        zh_tw=zh_tw_raw.strip(),
                     )
                 )
 
@@ -500,22 +542,34 @@ class IconPreviewView(ft.Column):
         """從 JAR 目錄讀取所有 en_us.json（不改磁碟，直接讀 ZIP 內容）。
 
         流程：
-            1. 遍歷所有 .jar 檔
-            2. 用 zipfile 開啟，搜尋 assets/*/lang/en_us.json
-            3. 記憶體內解讀 JSON，回傳 SimpleNamespace 列表
+            1. 第一步：先掃描所有 JAR 收集 modid 清單
+            2. 建立 zh_tw 對照表（雙軌制）
+            3. 第二步：再次掃描所有 JAR 建立 entries
         """
-        entries = []
+        jar_files = list(self.source_root.glob("*.jar"))
+        failed_jars = []
+
+        # ===== 第一步：收集所有 modid =====
+        all_modids = set()
+        for jar_path in jar_files:
+            try:
+                with zipfile.ZipFile(jar_path, 'r') as zf:
+                    for name in zf.namelist():
+                        if not name.endswith("lang/en_us.json"):
+                            continue
+                        parts = name.split('/')
+                        if len(parts) < 3 or parts[-2] != 'lang' or parts[-1] != 'en_us.json':
+                            continue
+                        modid = parts[1]
+                        all_modids.add(modid)
+            except Exception:
+                pass
+
+        # ===== 建立 zh_tw 對照表（雙軌制）=====
         zh_map = {}
-
-        # 建立 zh_tw 對照（雙軌制）
-        if self.review_root:
-            # 在 JAR 掃描時，先建立 modid 清單，再做雙軌
-            modid_set = set()
-            for entry in entries:
-                modid_set.add(entry.modid)
-
+        if self.review_root and all_modids:
             # Track 1：直接路徑
-            for modid in modid_set:
+            for modid in all_modids:
                 direct = self.review_root / modid / "lang" / "zh_tw.json"
                 if direct.exists():
                     data = load_json_auto_encoding(direct)
@@ -524,7 +578,7 @@ class IconPreviewView(ft.Column):
                         log_info(f"[IconPreview] JAR雙軌-直接: {direct}")
 
             # Track 2：rglob fallback
-            found_paths = set(str(self.review_root / modid / "lang" / "zh_tw.json") for modid in modid_set)
+            found_paths = set(str(self.review_root / modid / "lang" / "zh_tw.json") for modid in all_modids)
             for zh_file in self.review_root.rglob("zh_tw.json"):
                 if str(zh_file) not in found_paths:
                     data = load_json_auto_encoding(zh_file)
@@ -534,7 +588,8 @@ class IconPreviewView(ft.Column):
 
             log_info(f"[IconPreview] 已建立 zh_tw 對照表，共 {len(zh_map)} 筆")
 
-        jar_files = list(self.source_root.glob("*.jar"))
+        # ===== 第二步：建立 entries =====
+        entries = []
         failed_jars = []
 
         for jar_path in jar_files:
@@ -559,11 +614,14 @@ class IconPreviewView(ft.Column):
                             continue
 
                         for key, en_text in data.items():
+                            zh_tw_raw = zh_map.get(key, "")
+                            if not isinstance(zh_tw_raw, str):
+                                zh_tw_raw = ""
                             entries.append(SimpleNamespace(
                                 modid=modid,
                                 key=key,
                                 en=en_text,
-                                zh_tw=zh_map.get(key, ""),
+                                zh_tw=zh_tw_raw.strip(),
                                 source_jar=jar_path.name,
                             ))
                             jar_entries_count += 1
