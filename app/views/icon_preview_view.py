@@ -827,6 +827,14 @@ class IconPreviewView(ft.Column):
         self.save_btn.visible = False
         self.header.value = "🧩 模組清單"
 
+        # Phase 2: 顯示 mod 清單搜尋框
+        self.mod_search_tf.visible = True
+        self.mod_search_status.visible = True
+        # 確保 detail 搜尋框隱藏
+        if hasattr(self, "detail_search_tf"):
+            self.detail_search_tf.visible = False
+            self.detail_search_status.visible = False
+
         mod_ids = sorted(self.mods.keys())
         total = len(mod_ids)
 
@@ -969,18 +977,37 @@ class IconPreviewView(ft.Column):
 
         if not keyword:
             self._detail_filtered_entries = None  # 無篩選，顯示全部
-            self.detail_search_status.value = ""
+            if hasattr(self, "detail_search_status"):
+                self.detail_search_status.value = ""
         else:
             filtered = [
                 e for e in entries
                 if keyword in e.key.lower() or keyword in (e.en or "").lower() or keyword in (e.zh_tw or "").lower()
             ]
             self._detail_filtered_entries = filtered
-            self.detail_search_status.value = f"符合 {len(filtered)} / {total} 筆"
+            if hasattr(self, "detail_search_status"):
+                self.detail_search_status.value = f"符合 {len(filtered)} / {total} 筆"
             if not filtered:
-                self.detail_search_status.value = f"無符合結果（{total} 筆）"
+                if hasattr(self, "detail_search_status"):
+                    self.detail_search_status.value = f"無符合結果（{total} 筆）"
 
+        # 重設到第一頁再渲染
+        self.current_page = 0
         self._render_current_page()
+
+    def _update_detail_search_controls(self, visible: bool):
+        """切換 detail 搜尋 UI 的顯示/隱藏"""
+        self._init_detail_search_widgets()
+        self.detail_search_tf.visible = visible
+        self.detail_search_status.visible = visible
+
+        # 從 controls 中移除再重新加入（確保順序正確：搜尋框在最上方）
+        self.controls = [c for c in self.controls if c not in [self.detail_search_tf, self.detail_search_status]]
+        if visible:
+            idx = self.controls.index(self.list_view) if self.list_view in self.controls else len(self.controls)
+            self.controls.insert(idx, self.detail_search_tf)
+            self.controls.insert(idx + 1, self.detail_search_status)
+        self.update()
 
     # ==================================================
     # 第二層：單一模組 detail
