@@ -26,14 +26,8 @@ import unicodedata
 # L2 磁碟快取工具函式
 # ==================================================
 def _get_cache_dir() -> Path:
-    """取得 L2 快取目錄（平台專屬）。"""
-    if platform.system() == "Windows":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    elif platform.system() == "Darwin":
-        base = Path.home() / "Library" / "Caches"
-    else:
-        base = Path.home() / ".cache"
-    return base / "minecraft_translator" / "icon_preview"
+    """取得 L2 快取目錄（專案根目錄）。"""
+    return Path(__file__).parent.parent.parent / ".icon_cache"
 
 
 def _compute_cache_key(source_root: Path) -> str:
