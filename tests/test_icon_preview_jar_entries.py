@@ -188,3 +188,68 @@ class TestLoadEntriesFromJarDirectory:
         assert len(entries) == 2
         modids = {e.modid for e in entries}
         assert modids == {"kubejs", "create"}
+
+    def test_jar_entries_with_zh_tw_dual_track(self, tmp_path):
+        """JAR + zh_tw 對照：en_us 讀自 JAR，zh_tw 讀自磁碟（雙軌）"""
+        jar_dir = tmp_path / "mods"
+        jar_dir.mkdir()
+        review_dir = tmp_path / "review"
+
+        # JAR 內的 en_us.json
+        create_test_jar(jar_dir, "mod1.jar", {
+            "assets/mod1/lang/en_us.json": json.dumps({
+                "key1": "English Value",
+                "key2": "Another Value",
+            }),
+        })
+
+        # review_root 的 zh_tw.json（直接路徑）
+        zh_tw_dir = review_dir / "mod1" / "lang"
+        zh_tw_dir.mkdir(parents=True)
+        (zh_tw_dir / "zh_tw.json").write_text(
+            json.dumps({"key1": "中文翻譯"}),
+            encoding="utf-8",
+        )
+
+        view = create_view(source_root=jar_dir, review_root=review_dir)
+        entries = view._load_entries_from_jar_directory()
+
+        assert len(entries) == 2
+        key1_entry = next(e for e in entries if e.key == "key1")
+        assert key1_entry.zh_tw == "中文翻譯"
+        key2_entry = next(e for e in entries if e.key == "key2")
+        assert key2_entry.zh_tw == ""  # zh_tw 沒有這個 key，回傳空字串
+
+    def test_jar_entries_source_root_none_raises(self, tmp_path):
+        """source_root 為 None 時，會炸 AttributeError（PR51 已知限制，待 P0-2 修復）
+
+        設計稿說應該回傳空 list，但 PR51 實作沒有這個 guard。
+        這個測試記錄預期行為，未來 PR53 重構時應加入此保護。
+        """
+        view = create_view(source_root=None, review_root=None)
+        with pytest.raises(AttributeError, match="'NoneType' object has no attribute 'glob'"):
+            view._load_entries_from_jar_directory()
+
+    def test_jar_entries_non_string_zh_tw(self, tmp_path):
+        """zh_tw 值是 list 而非 str 時，應該回傳空字串（防禦機制）"""
+        jar_dir = tmp_path / "mods"
+        jar_dir.mkdir()
+        review_dir = tmp_path / "review"
+
+        create_test_jar(jar_dir, "mod1.jar", {
+            "assets/mod1/lang/en_us.json": json.dumps({"key1": "English"}),
+        })
+
+        zh_tw_dir = review_dir / "mod1" / "lang"
+        zh_tw_dir.mkdir(parents=True)
+        (zh_tw_dir / "zh_tw.json").write_text(
+            json.dumps({"key1": ["這是", "list"]}),  # 錯誤：list 而非 str
+            encoding="utf-8",
+        )
+
+        view = create_view(source_root=jar_dir, review_root=review_dir)
+        entries = view._load_entries_from_jar_directory()
+
+        # 非 str 值應被轉為空字串，不應炸錯
+        assert len(entries) == 1
+        assert entries[0].zh_tw == ""

@@ -155,9 +155,11 @@ def _scan_single_jar(
                 for pattern in patterns:
                     if re.search(pattern, name):
                         try:
+                            try:
                             result[name] = zf.read(name).decode("utf-8")
                         except UnicodeDecodeError:
-                            result[name] = zf.read(name).decode("latin-1", errors="replace")
+                            # Binary 檔案（如 .png）：不解碼，設為 None 表示 caller 自行處理
+                            result[name] = None
                         break  # 一個檔案只讀一次
     except zipfile.BadZipFile:
         log_warning(f"[jar_browser] 不是有效的 ZIP/JAR: {jar_path.name}")
@@ -300,8 +302,10 @@ tests/test_jar_browser.py
 |------|------|
 | `zipfile` | 讀取 JAR 內容 |
 | `concurrent.futures` | ThreadPoolExecutor |
-| `translation_tool.core.config_loader` | 讀取 max_workers |
-| `translation_tool.utils.logging` | log_info / log_warning / log_error |
+| `translation_tool.utils.config_manager` | 讀取 max_workers |
+| `translation_tool.utils.log_unit` | log_info / log_warning / log_error |
+
+> ⚠️ 注意：binary 檔案（如 `.png`）解碼時不應使用 `latin-1`（會產生乱码）。`scan_jars` 預設只處理文字檔（`.json`、`.toml` 等），binary 檔案的路徑在結果中以 `None` 表示，由 caller 自行處理。
 
 ---
 
@@ -309,4 +313,4 @@ tests/test_jar_browser.py
 
 - **Pattern 可任意擴充**：只需在 `patterns` 清單新增正則，不需改核心
 - **新 JAR 類型支援**：只需在 `_scan_single_jar` 新增對應的 pattern
-- **不回傳 binary**：icon 等 binary 檔案回傳路徑或保持 binary string，不做額外處理（由 caller 決定如何呈現）
+- **Binary 檔案回傳 `None`**：binary 檔案（如 `.png`）嘗試 UTF-8 decode 失敗後設為 `None`，由 caller 自行處理（如讀取原始 binary 或跳過）
