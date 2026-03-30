@@ -181,7 +181,7 @@ class IconPreviewView(ft.Column):
             self._cache_meta = {}
             self._update_load_state()
             log_info(f"[IconPreview] 原文資料夾已設定: {self.source_root}")
-            self._show_snack(f"✅ 原文資料夾已設定", color=theme.GREEN_600)
+            self._show_snack("✅ 原文資料夾已設定", color=theme.GREEN_600)
         else:
             log_warning("[IconPreview] 原文資料夾選擇已取消")
             self._show_snack("⚠️ 原文資料夾選擇已取消", color=theme.ORANGE_700)
@@ -193,7 +193,7 @@ class IconPreviewView(ft.Column):
             self.review_label.value = f"校對資料夾：{self.review_root}"
             self._update_load_state()
             log_info(f"[IconPreview] 校對資料夾已設定: {self.review_root}")
-            self._show_snack(f"✅ 校對資料夾已設定", color=theme.GREEN_600)
+            self._show_snack("✅ 校對資料夾已設定", color=theme.GREEN_600)
         else:
             log_warning("[IconPreview] 校對資料夾選擇已取消")
             self._show_snack("⚠️ 校對資料夾選擇已取消", color=theme.ORANGE_700)
@@ -498,7 +498,7 @@ class IconPreviewView(ft.Column):
                 idx = parts.index("assets")
                 modid = parts[idx + 1]
                 modid_set.add(modid)
-            except:
+            except (ValueError, IndexError):
                 continue
 
         # Track 1：直接路徑（快速）
@@ -587,7 +587,6 @@ class IconPreviewView(ft.Column):
         failed_jars = []
         
         # 進度追蹤
-        total_jars = len(jar_files)
         processed = 0
 
         # ===== 第一步：收集所有 modid =====
