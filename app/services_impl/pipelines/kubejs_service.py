@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.services_impl.logging_service import UI_LOG_HANDLER
+from app.logging.task_session import TaskSession
+
 
 def run_kubejs_tooltip_service(
     input_dir: str,
-    session,
+    session: TaskSession,
     output_dir: str | None,
     dry_run: bool = False,
     step_extract: bool = True,
     step_translate: bool = True,
     step_inject: bool = True,
     write_new_cache: bool = True,
-):
+) -> Any:
     """執行 KubeJS 翻譯流程"""
     from app.services_impl.pipelines._task_runner import run_callable_task
     from translation_tool.core.kubejs_translator import run_kubejs_pipeline
