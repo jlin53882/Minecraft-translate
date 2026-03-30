@@ -1445,3 +1445,4 @@ class IconPreviewView(ft.Column):
         self.next_page_btn.disabled = self.current_page >= self.total_pages - 1
 
         self.update()
+
