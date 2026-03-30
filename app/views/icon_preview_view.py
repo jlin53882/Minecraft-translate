@@ -286,7 +286,7 @@ def _try_extract_mod_icon_from_model(
     return None
 
 
-def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path) -> Path | None:
+def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: str) -> Path | None:
     """從 JAR 中提取 mod icon 並快取到磁碟（Phase 1: Model JSON 解析）。
 
     支援（按優先順序）：
@@ -299,6 +299,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path) -> Path
         jar_path: JAR 檔案路徑
         modid: mod ID
         icon_cache_root: icon 快取根目錄（.icon_cache/jar_icons/）
+        key: lang key（用於產生 unique icon 檔名）
 
     回傳：
         提取後的圖示路徑，或 None（找不到或提取失敗）
@@ -313,7 +314,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path) -> Path
                 tex_val, png_path = result
                 icon_data = zf.read(png_path)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = icon_cache_root / f"{modid}_{jar_path.stem}.png"
+                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
                 out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] Model JSON icon: {modid} → {png_path} (tex={tex_val})")
                 return out_path
@@ -323,7 +324,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path) -> Path
             if fabric_icon in names:
                 icon_data = zf.read(fabric_icon)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = icon_cache_root / f"{modid}_{jar_path.stem}.png"
+                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
                 out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] 提取 Fabric icon.png: {modid}")
                 return out_path
@@ -333,7 +334,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path) -> Path
             if logo_texture in names:
                 icon_data = zf.read(logo_texture)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = icon_cache_root / f"{modid}_{jar_path.stem}.png"
+                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
                 out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] 提取 logo.png: {modid}")
                 return out_path
@@ -353,7 +354,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path) -> Path
                         if logo_path in names:
                             icon_data = zf.read(logo_path)
                             icon_cache_root.mkdir(parents=True, exist_ok=True)
-                            out_path = icon_cache_root / f"{modid}_{jar_path.stem}.png"
+                            out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
                             out_path.write_bytes(icon_data)
                             log_info(f"[IconPreview] 提取 NeoForge logoFile: {modid} → {logo_path}")
                             return out_path
@@ -1382,22 +1383,23 @@ class IconPreviewView(ft.Column):
 
         # ===== Phase 4/4：提取模組圖示（實驗性，預設關閉）=====
         if _ENABLE_JAR_ICON:
-            icon_total = sum(len(m) for m in jar_to_modids.values())
+            icon_total = len(entries)
             icon_processed = 0
             _show_progress_phase(self, "提取模組圖示", 0, icon_total)
 
-            for jar_name, modids in jar_to_modids.items():
-                jar_path = self.source_root / jar_name
-                if not jar_path.exists():
-                    continue
-                for modid in modids:
-                    icon_path = _extract_jar_icon(jar_path, modid, icon_cache_root)
-                    if icon_path:
-                        for e in entries:
-                            if e.modid == modid and getattr(e, "source_jar", "") == jar_name:
-                                e.icon_path = str(icon_path)
+            for e in entries:
+                if not getattr(e, "source_jar", None) or not hasattr(e, "key"):
                     icon_processed += 1
-                    _show_progress_phase(self, "提取模組圖示", icon_processed, icon_total)
+                    continue
+                jar_path = self.source_root / e.source_jar
+                if not jar_path.exists():
+                    icon_processed += 1
+                    continue
+                icon_path = _extract_jar_icon(jar_path, e.modid, icon_cache_root, e.key)
+                if icon_path:
+                    e.icon_path = str(icon_path)
+                icon_processed += 1
+                _show_progress_phase(self, "提取模組圖示", icon_processed, icon_total)
 
         # ===== 寫入 L2 磁碟快取 =====
         _save_entries_cache_l2(self.source_root, entries)
