@@ -3,15 +3,15 @@
 用途：測試 jar_processor_preview.py 的 ExtractionSummary 與預覽報告生成功能。
 """
 
-import pytest
 import os
-import zipfile
 import re
+import zipfile
 from pathlib import Path
+
 from translation_tool.core.jar_processor_preview import (
     ExtractionSummary,
-    preview_extraction_generator_impl,
     generate_preview_report,
+    preview_extraction_generator_impl,
 )
 
 

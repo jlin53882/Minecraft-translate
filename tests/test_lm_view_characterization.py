@@ -1,5 +1,5 @@
-from app.views import lm_view
 from app.logging import LogEntry
+from app.views import lm_view
 
 
 class _Page:

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import threading
-
-from translation_tool.utils.log_unit import log_warning
 import time
 from pathlib import Path
 
@@ -14,6 +12,8 @@ from app.services_impl.pipelines.extract_service import (
     run_lang_extraction_service,
 )
 from app.views.extractor.extractor_state import PreviewState
+from translation_tool.utils.log_unit import log_warning
+
 
 def update_stats_from_log(view, line: str):
     """根据日志行更新提取統計。

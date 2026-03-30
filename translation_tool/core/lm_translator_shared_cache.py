@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from translation_tool.core.lm_config_rules import value_fully_translated
 from translation_tool.utils.cache_manager import get_cache_dict_ref
 
+
 @dataclass(frozen=True)
 class CacheRule:
     """定義快取鍵值的生成規則。"""

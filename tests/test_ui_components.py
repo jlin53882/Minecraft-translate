@@ -1,12 +1,12 @@
 import flet as ft
 
 from app.ui.components import (
+    CARD_BG_COLOR,
     CARD_PADDING,
     CARD_RADIUS,
-    CARD_BG_COLOR,
-    styled_card,
     primary_button,
     secondary_button,
+    styled_card,
 )
 
 

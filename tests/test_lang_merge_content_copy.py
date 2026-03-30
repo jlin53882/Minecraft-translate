@@ -4,12 +4,10 @@
 """
 from __future__ import annotations
 
-from pathlib import Path
-import sys
-import os
-import zipfile
 import re
-from unittest.mock import patch, MagicMock, mock_open
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -24,14 +22,15 @@ class TestProcessContentOrCopyFileImpl:
 
     def test_function_signature(self):
         """測試函式簽名包含所有必要參數。"""
+        import inspect
+
         from translation_tool.core.lang_merge_content_copy import (
             process_content_or_copy_file_impl,
         )
-        import inspect
-        
+
         sig = inspect.signature(process_content_or_copy_file_impl)
         params = list(sig.parameters.keys())
-        
+
         required = ["zf", "input_path", "rules", "output_dir"]
         for req in required:
             assert req in params
@@ -41,7 +40,7 @@ class TestProcessContentOrCopyFileImpl:
         from translation_tool.core.lang_merge_content_copy import (
             process_content_or_copy_file_impl,
         )
-        
+
         # 這個測試驗證函式可以被定義（實際邏輯在內部）
         assert callable(process_content_or_copy_file_impl)
 
@@ -60,7 +59,7 @@ class TestLocalizedPathDetection:
             ("mods/test/lang/zh_cn.json", False),  # 結尾是 zh_cn.json，不是 /zh_cn/
             ("config/settings.json", False),
         ]
-        
+
         for path, expected in test_cases:
             normalized_path = path.lower().replace("\\", "/")
             result = "zh_cn/" in normalized_path
@@ -72,7 +71,7 @@ class TestLocalizedPathDetection:
             r"zh_cn.*?\.(lang|md|txt|snbt|json|properties|json5|gui|hl)$",
             re.IGNORECASE,
         )
-        
+
         test_cases = [
             ("zh_cn.lang", True),
             ("zh_cn.json", True),
@@ -81,7 +80,7 @@ class TestLocalizedPathDetection:
             ("en_us.json", False),
             ("zh_tw.json", False),
         ]
-        
+
         for filename, expected in test_cases:
             result = pattern.search(filename) is not None
             assert result == expected, f"Failed for {filename}"
@@ -93,7 +92,7 @@ class TestFileExtensionHandling:
     def test_force_s2tw_extensions(self):
         """測試需要強制 S2TW 轉換的副檔名列表。"""
         force_s2tw_extensions = {".md", ".json5", ".gui", ".lang", ".snbt", ".txt", ".properties", ".hl"}
-        
+
         assert ".md" in force_s2tw_extensions
         assert ".lang" in force_s2tw_extensions
         assert ".json" not in force_s2tw_extensions
@@ -109,11 +108,11 @@ class TestPathNormalization:
             "assets/minecraft/lang/en_us.json",
             "mods/somemod/assets/test/lang/zh_cn.json",
         ]
-        
+
         for path in test_paths:
             normalized = path.lower().replace("\\", "/")
             assets_idx = normalized.find("/assets/")
-            
+
             if assets_idx != -1:
                 result = normalized[assets_idx + 1:]
                 assert result.startswith("assets/")
@@ -126,19 +125,19 @@ class TestPathNormalization:
         # if is_path_localized:
         #     tw_path = input_path.replace("\\", "/").replace("zh_cn/", "zh_tw/")
         # tw_path = re.sub(r"zh_cn(\..*)$", r"zh_tw\1", tw_path, flags=re.IGNORECASE)
-        
+
         # 測試路徑包含 /zh_cn/ 的情況
         test_case_input = "mods/test/lang/zh_cn/file.json"
         expected = "mods/test/lang/zh_tw/file.json"
-        
+
         # 先做路徑替換
         result = test_case_input.replace("\\", "/").replace("zh_cn/", "zh_tw/")
         # 再做正規表達式替換（此時路徑已不包含 zh_cn/）
-        result2 = re.sub(r"zh_cn(\..*)$", r"zh_tw\1", result, flags=re.IGNORECASE)
-        
+        re.sub(r"zh_cn(\..*)$", r"zh_tw\1", result, flags=re.IGNORECASE)
+
         # 由於 /zh_cn/ 已被替換，正規表達式不會匹配
         assert result == expected
-        
+
         # 測試只修改檔名的情况
         test_case2 = "config/settings.zh_cn.json"
         # 這個情況需要先被 is_filename_localized 識別
@@ -154,18 +153,17 @@ class TestMockZipHandling:
         from translation_tool.core.lang_merge_content_copy import (
             process_content_or_copy_file_impl,
         )
-        from unittest.mock import MagicMock
-        
+
         # 建立 mock
         mock_zf = MagicMock()
-        
+
         # 模擬回傳結果
         def mock_load_config():
             return {
                 "lang_merger": {"pending_folder_name": "待翻譯"},
                 "lm_translator": {"patchouli": {"dir_names": ["patchouli_books"]}},
             }
-        
+
         result = process_content_or_copy_file_impl(
             zf=mock_zf,
             input_path="assets/test/config.json",
@@ -183,9 +181,9 @@ class TestMockZipHandling:
             normalize_patchouli_book_root_fn=lambda x: x,
             patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
             json_module=MagicMock(),
-            
+
         )
-        
+
         assert result.get("success") is True
 
     def test_patchouli_path_detection(self, tmp_path: Path):
@@ -196,7 +194,6 @@ class TestMockZipHandling:
         from translation_tool.core.lang_merge_content_copy import (
             process_content_or_copy_file_impl,
         )
-        from unittest.mock import MagicMock
 
         def mock_load_config():
             return {
@@ -257,10 +254,9 @@ class TestMockZipHandling:
     def test_patchouli_effectiveness_cache(self, tmp_path: Path):
         """驗證同一 book_root 第二次處理時直接用快取，不重算。"""
         from translation_tool.core.lang_merge_content_copy import (
-            process_content_or_copy_file_impl,
             _patchouli_eff_cache,
+            process_content_or_copy_file_impl,
         )
-        from unittest.mock import MagicMock
 
         # 先清除 module-level cache，確保從乾淨狀態開始
         _patchouli_eff_cache.clear()
@@ -318,7 +314,7 @@ class TestMockZipHandling:
         # 第一次應成功（未 skip，因為 zh_cn ratio >= 0.5 且 allow_zh_cn=True）
         assert result1.get("success") is True
         # zf.read 應被呼叫若干次（用於 ratio 計算）
-        first_call_count = len(read_calls)
+        len(read_calls)
 
         # 重置 call tracker，準備第二次處理
         read_calls.clear()
@@ -357,14 +353,14 @@ class TestJsonModuleHandling:
     def test_json_loads_with_fallback(self):
         """測試 JSON 解析失敗時的 fallback 行為。"""
         import orjson
-        
+
         valid_json = '{"key": "value"}'
         invalid_json = 'not valid json'
-        
+
         # 有效的 JSON
         result = orjson.loads(valid_json.encode("utf-8"))
         assert result == {"key": "value"}
-        
+
         # 無效的 JSON 會拋出異常
         with pytest.raises(orjson.JSONDecodeError):
             orjson.loads(invalid_json.encode("utf-8"))

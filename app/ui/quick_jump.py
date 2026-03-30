@@ -4,6 +4,7 @@
 """
 
 import flet as ft
+
 from app.ui import theme
 
 

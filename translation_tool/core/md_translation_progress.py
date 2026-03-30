@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+
 class _ProgressProxy:
     """把 step 內部 0~1 進度映射到 pipeline 區段。"""
 

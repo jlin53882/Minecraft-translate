@@ -4,14 +4,11 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import flet as ft
 import tkinter as tk
 from tkinter import filedialog
-from typing import Callable, Tuple, Any
+from typing import Any, Callable, Tuple
 
-# 導入 UI 主題
-from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
+import flet as ft
 
 # 導入我們需要的服務
 from app.services import (
@@ -20,9 +17,13 @@ from app.services import (
     run_variant_compare_tsv_service,
 )
 
+# 導入 UI 主題
+from app.ui import theme
+
 # 導入新的拆分元件
 from app.views.qc_base import QCBase
 from app.views.untranslated_checker import UntranslatedChecker
+from translation_tool.utils.log_unit import log_info
 
 
 class QCView(ft.Column):

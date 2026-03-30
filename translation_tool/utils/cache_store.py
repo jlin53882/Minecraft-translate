@@ -12,10 +12,11 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-import threading
 from typing import Any, Dict, Optional
+
 
 @dataclass
 class CacheMetrics:

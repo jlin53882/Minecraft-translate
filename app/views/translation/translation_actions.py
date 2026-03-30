@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import threading
-
-from translation_tool.utils.log_unit import log_error, log_warning
 import time
 
 import flet as ft
 
 from app.logging import LogPresenter, load_ui_logging_config
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_error, log_warning
+
 
 def run_ftb(view, *, dry_run: bool):
     """执行 FTB (Feed The Beast) 模组翻译流程"""

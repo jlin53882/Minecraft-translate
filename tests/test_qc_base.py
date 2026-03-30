@@ -3,9 +3,9 @@
 用途：驗證 QCBase 基礎類別的功能正確性。
 """
 
-import pytest
 import threading
 import time
+
 from app.views.qc_base import QCBase
 
 
@@ -145,7 +145,6 @@ def test_task_worker_updates_progress_bar():
 
 def test_task_worker_handles_error():
     """測試 task_worker 處理錯誤時設定顏色"""
-    from app.ui import theme as app_theme
 
     page = _MockPage()
     progress_bar = _MockProgressBar()

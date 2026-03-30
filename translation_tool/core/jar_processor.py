@@ -5,10 +5,9 @@
 """
 
 import re
-from typing import Dict, Any, Generator
+from typing import Any, Dict, Generator
 
 from translation_tool.core.jar_processor_discovery import find_jar_files
-from translation_tool.utils.config_manager import load_config
 from translation_tool.core.jar_processor_extract import (
     extract_from_jar_impl,
     run_extraction_process_impl,
@@ -18,22 +17,23 @@ from translation_tool.core.jar_processor_preview import (
     generate_preview_report,
     preview_extraction_generator_impl,
 )
+from translation_tool.utils.config_manager import load_config
 
 BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
-    rf"(assets|data)/([^/]+)/"
-    rf"(patchouli_books|book|manual|guidebook)/"
-    rf"(?:([^/]+)/)?"
-    rf"(?:"
-    rf"(_?(?:en_us|zh_tw|zh_cn))(/.*)?"
-    rf"|"
-    rf"book\.json"
-    rf")$",
+    r"(assets|data)/([^/]+)/"
+    r"(patchouli_books|book|manual|guidebook)/"
+    r"(?:([^/]+)/)?"
+    r"(?:"
+    r"(_?(?:en_us|zh_tw|zh_cn))(/.*)?"
+    r"|"
+    r"book\.json"
+    r")$",
     re.IGNORECASE,
 )
 
 def get_lang_codes() -> list[str]:
     """從 config 取得 jar_extractor.lang_codes，預設 ["en_us", "zh_tw", "zh_cn"]。
-    
+
     回傳值保證為非空 list。
     """
     cfg = load_config()
@@ -44,7 +44,7 @@ def get_lang_codes() -> list[str]:
 
 def build_lang_file_regex() -> re.Pattern:
     """根據 config 中的 lang_codes 動態建 lang file regex。
-    
+
     確保與 preview 使用的 regex 行為一致。
     """
     codes = get_lang_codes()

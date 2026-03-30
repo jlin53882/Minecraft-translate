@@ -2,16 +2,16 @@
 
 用途：測試 Markdown 翻譯統計相關功能。
 """
-import pytest
 import json
 from pathlib import Path
-from unittest.mock import Mock, patch, mock_open
+from unittest.mock import Mock, patch
+
 from translation_tool.core.md_translation_stats import (
     _LANG_MODE_LABELS,
-    normalize_lang_mode,
     count_json_files,
     count_md_pending_docs,
     log_md_step2_stats,
+    normalize_lang_mode,
 )
 
 
@@ -67,7 +67,7 @@ class TestCountJsonFiles:
         (tmp_path / "file1.json").touch()
         (tmp_path / "file2.json").touch()
         (tmp_path / "file3.txt").touch()
-        
+
         result = count_json_files(tmp_path)
         assert result == 2
 
@@ -75,10 +75,10 @@ class TestCountJsonFiles:
         """測試嵌套 JSON 檔案。"""
         subdir = tmp_path / "subdir"
         subdir.mkdir()
-        
+
         (tmp_path / "root.json").touch()
         (subdir / "nested.json").touch()
-        
+
         result = count_json_files(tmp_path)
         assert result == 2
 
@@ -102,10 +102,10 @@ class TestCountMdPendingDocs:
             "schema": "md_pending_blocks_v1",
             "blocks": ["test1", "test2"]
         }
-        
+
         file1 = tmp_path / "doc1.json"
         file1.write_text(json.dumps(pending_data), encoding="utf-8")
-        
+
         result = count_md_pending_docs(tmp_path)
         assert result == 1
 
@@ -115,15 +115,15 @@ class TestCountMdPendingDocs:
             "schema": "md_pending_blocks_v1",
             "blocks": ["test"]
         }
-        
+
         for i in range(3):
             file = tmp_path / f"doc{i}.json"
             file.write_text(json.dumps(pending_data), encoding="utf-8")
-        
+
         # 添加一個非 pending 格式的檔案
         other = tmp_path / "other.json"
         other.write_text('{"data": "value"}', encoding="utf-8")
-        
+
         result = count_md_pending_docs(tmp_path)
         assert result == 3
 
@@ -131,7 +131,7 @@ class TestCountMdPendingDocs:
         """測試無效的 JSON 檔案。"""
         file = tmp_path / "invalid.json"
         file.write_text("not valid json", encoding="utf-8")
-        
+
         result = count_md_pending_docs(tmp_path)
         assert result == 0
 
@@ -143,7 +143,7 @@ class TestCountMdPendingDocs:
         }
         file = tmp_path / "doc.json"
         file.write_text(json.dumps(data), encoding="utf-8")
-        
+
         result = count_md_pending_docs(tmp_path)
         assert result == 0
 
@@ -155,9 +155,9 @@ class TestLogMdStep2Stats:
         """測試略過的步驟。"""
         mock_log = Mock()
         step2_res = {"skipped": True, "reason": "no_pending_json"}
-        
+
         log_md_step2_stats(step2_res, log_info_fn=mock_log)
-        
+
         mock_log.assert_called_once()
         assert "已略過翻譯" in mock_log.call_args.args[0]
 
@@ -174,9 +174,9 @@ class TestLogMdStep2Stats:
             "cache_miss": 30,
             "already_zh_skipped": 10,
         }
-        
+
         log_md_step2_stats(step2_res, log_info_fn=mock_log)
-        
+
         assert mock_log.call_count > 0
 
     def test_full_stats(self):
@@ -194,21 +194,21 @@ class TestLogMdStep2Stats:
             "out_dir": "/output/path",
             "avg_batch_sec": 2.5,
         }
-        
+
         with patch('translation_tool.core.md_translation_stats._get_default_batch_size', return_value=10):
             log_md_step2_stats(step2_res, log_info_fn=mock_log)
-        
+
         # 驗證多個日誌被呼叫
         assert mock_log.call_count > 0
 
     def test_invalid_input(self):
         """測試無效輸入。"""
         mock_log = Mock()
-        
+
         # None 輸入
         log_md_step2_stats(None, log_info_fn=mock_log)
         mock_log.assert_not_called()
-        
+
         # 非字典輸入
         mock_log.reset_mock()
         log_md_step2_stats("not a dict", log_info_fn=mock_log)
@@ -238,10 +238,10 @@ class TestModuleExports:
         """測試導出的函數和常量。"""
         from translation_tool.core.md_translation_stats import (
             _LANG_MODE_LABELS,
-            normalize_lang_mode,
             count_json_files,
             count_md_pending_docs,
             log_md_step2_stats,
+            normalize_lang_mode,
         )
         assert callable(normalize_lang_mode)
         assert callable(count_json_files)

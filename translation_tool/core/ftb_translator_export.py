@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from typing import Callable
 
+
 def resolve_ftbquests_quests_root_impl(base_dir: str) -> str:
     """往下遞迴找 config/ftbquests/quests。"""
     base = Path(base_dir).expanduser().resolve()

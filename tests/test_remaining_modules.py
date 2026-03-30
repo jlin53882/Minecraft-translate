@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Remaining modules import tests - 9 modules"""
 
-import pytest
 
 
 # ==================== app ====================

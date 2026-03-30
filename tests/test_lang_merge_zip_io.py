@@ -8,8 +8,6 @@ import json
 import zipfile
 from pathlib import Path
 
-import pytest
-
 from translation_tool.core.lang_merge_zip_io import (
     _read_json_from_zip,
     _read_text_from_zip,

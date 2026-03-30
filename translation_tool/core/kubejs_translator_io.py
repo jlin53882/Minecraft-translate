@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
-import re
 
 import orjson
+
 
 def read_json_dict_orjson_impl(path: Path) -> dict:
     """使用 orjson 讀取 JSON 檔並容忍 BOM / trailing comma。"""

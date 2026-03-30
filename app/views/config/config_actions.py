@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import traceback
 
+
 def load_config_into_view(view, config: dict):
     """將 config 字典中的值填入 view 的各個 UI 控制項。"""
     log_cfg = config.get('logging', {})

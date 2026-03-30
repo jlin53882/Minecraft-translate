@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Medium Priority Module Tests - checkers, plugins, utils"""
 
-import pytest
 
 
 # ==================== checkers ====================

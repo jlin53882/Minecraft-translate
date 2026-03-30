@@ -13,21 +13,13 @@ from typing import Any, Dict, Generator, List
 
 import orjson
 
-from ..plugins.ftbquests.ftbquests_snbt_extractor import process_quest_folder
-from ..utils.config_manager import load_config
-from ..utils.text_processor import (
-    convert_text,
-    load_custom_translations,
-    load_replace_rules,
-    orjson_dump_file,
-    orjson_pretty_str,
-    recursive_translate,
-)
 from translation_tool.core.ftb_translator_clean import (
-    deep_merge_3way as _deep_merge_3way_impl,
     clean_ftbquests_from_raw_impl,
     prune_en_us_by_zh_tw,
     prune_flat_en_by_tw,
+)
+from translation_tool.core.ftb_translator_clean import (
+    deep_merge_3way as _deep_merge_3way_impl,
 )
 from translation_tool.core.ftb_translator_export import (
     export_ftbquests_raw_json_impl,
@@ -43,6 +35,18 @@ from translation_tool.utils.log_unit import (
     log_info,
     log_warning,
 )
+
+from ..plugins.ftbquests.ftbquests_snbt_extractor import process_quest_folder
+from ..utils.config_manager import load_config
+from ..utils.text_processor import (
+    convert_text,
+    load_custom_translations,
+    load_replace_rules,
+    orjson_dump_file,
+    orjson_pretty_str,
+    recursive_translate,
+)
+
 
 def _translate_single_file(
     file_path: str,

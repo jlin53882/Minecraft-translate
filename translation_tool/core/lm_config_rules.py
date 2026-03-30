@@ -9,9 +9,7 @@ import threading
 from typing import Any
 
 from ..utils.config_manager import load_config
-from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
-
-
+from ..utils.log_unit import log_debug, log_error, log_info
 
 # =========================
 # 1. 執行緒安全的 API Key 索引追蹤器
@@ -21,7 +19,7 @@ from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_ex
 class KeyIndexTracker:
     """
     執行緒安全的 API Key 索引追蹤器。
-    
+
     用於解決多執行緒環境下全域變數 _current_key_index 的 race condition 問題。
     透過 threading.Lock 確保並發存取的安全性。
     """
@@ -39,7 +37,7 @@ class KeyIndexTracker:
     def next(self) -> int:
         """
         輪替至下一個索引（執行緒安全，自動環繞）。
-        
+
         當索引超過 key 數量時，會自動環繞回 0。
         """
         with self._lock:

@@ -5,9 +5,7 @@
 from __future__ import annotations
 
 import sys
-import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 # 確保可以導入翻譯工具模組
 ROOT = Path(__file__).resolve().parents[2]
@@ -42,9 +40,9 @@ def test_is_tag_condition_text(tmp_path: Path) -> None:
 def test_ensure_lang(tmp_path: Path) -> None:
     """測試 ensure_lang 確保語系存在。"""
     store = {}
-    
+
     ftbquests_snbt_extractor.ensure_lang(store, "en_us")
-    
+
     assert "en_us" in store
     assert "lang" in store["en_us"]
     assert "quests" in store["en_us"]
@@ -53,9 +51,9 @@ def test_ensure_lang(tmp_path: Path) -> None:
 def test_ensure_lang_preserves_existing(tmp_path: Path) -> None:
     """測試 ensure_lang 保留現有資料。"""
     store = {"en_us": {"lang": {"existing": "value"}, "quests": {}}}
-    
+
     ftbquests_snbt_extractor.ensure_lang(store, "en_us")
-    
+
     assert "existing" in store["en_us"]["lang"]
 
 

@@ -15,18 +15,32 @@
 """
 
 from __future__ import annotations
+
 import json
 import re
+import threading
 import time
 import traceback
 from pathlib import Path
+from typing import Any, Callable
 
 import flet as ft
+
+from app.services_impl.cache.cache_services import (
+    cache_get_entry_service,
+    cache_get_overview_service,
+    cache_rebuild_index_service,  # A3 搜尋功能
+    cache_reload_service,
+    cache_reload_type_service,
+    cache_rotate_service,
+    cache_save_all_service,
+    cache_search_service,
+    cache_update_dst_service,
+)
 from app.ui import theme
 
 # UI 共用元件：統一按鈕樣式（先套用在總覽區，避免一次改動過大）
-from app.ui.components import primary_button, secondary_button, empty_state
-
+from app.ui.components import empty_state, primary_button, secondary_button
 from app.views.cache_manager.cache_actions import run_cache_action
 from app.views.cache_manager.cache_history_store import (
     history_active_default,
@@ -43,20 +57,7 @@ from app.views.cache_manager.cache_state import (
     CacheQueryState,
     CacheShardState,
 )
-from app.services_impl.cache.cache_services import (
-    cache_get_entry_service,
-    cache_get_overview_service,
-    cache_reload_service,
-    cache_reload_type_service,
-    cache_rotate_service,
-    cache_save_all_service,
-    cache_search_service,
-    cache_update_dst_service,
-    cache_rebuild_index_service,  # A3 搜尋功能
-)
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
-from typing import TYPE_CHECKING, Any, Callable, cast
-import threading
 
 
 class CacheView(ft.Column):
@@ -1912,7 +1913,10 @@ class CacheView(ft.Column):
         shard = target.get("active_shard_id", "-")
         shard_entries = int(target.get("active_shard_entries", 0) or 0)
         shard_capacity = int(target.get("shard_capacity", 2500) or 2500)
-        message = f"分析 {cache_type}：筆數={entries_count}，新增={new_count}，狀態={dirty}，分片={shard}，使用率={shard_entries}/{shard_capacity}"
+        message = (
+            f"分析 {cache_type}：筆數={entries_count}，新增={new_count}，"
+            f"狀態={dirty}，分片={shard}，使用率={shard_entries}/{shard_capacity}"
+        )
         self._append_log(f"[ANALYZE] {message}")
         self._notify(message, "info")
 
@@ -2117,7 +2121,10 @@ class CacheView(ft.Column):
             f"{self.shard_detail_selected_type} / {self.shard_detail_selected_file}"
         )
         if hasattr(self, "shard_workspace_meta"):
-            self.shard_workspace_meta.value = f"目前分片：{self.shard_detail_selected_type} / {self.shard_detail_selected_file}"
+            self.shard_workspace_meta.value = (
+                f"目前分片：{self.shard_detail_selected_type} / "
+                f"{self.shard_detail_selected_file}"
+            )
         if not page_keys:
             if keyword and all_keys:
                 self.shard_detail_key_list.controls.append(
@@ -2155,7 +2162,9 @@ class CacheView(ft.Column):
             f"第 {self.shard_detail_page} 頁 / 共 {self.shard_detail_total_pages} 頁"
         )
         if keyword:
-            self.shard_total_info.value = f"共 {total_filtered}/{len(all_keys)} keys | 每頁 {self.shard_detail_page_size}"
+            self.shard_total_info.value = (
+                f"共 {total_filtered}/{len(all_keys)} keys | 每頁 {self.shard_detail_page_size}"
+            )
         else:
             self.shard_total_info.value = (
                 f"共 {len(all_keys)} keys | 每頁 {self.shard_detail_page_size}"

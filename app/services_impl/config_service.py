@@ -21,6 +21,8 @@ from typing import Any
 
 from translation_tool.utils.text_processor import (
     load_replace_rules as load_rules_core,
+)
+from translation_tool.utils.text_processor import (
     save_replace_rules as save_rules_core,
 )
 

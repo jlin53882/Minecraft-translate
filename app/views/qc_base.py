@@ -4,9 +4,11 @@
 維護注意：本模組提供 task_worker 給各 QC 檢查器使用。
 """
 
-import flet as ft
 import threading
-from typing import Callable, Tuple, Any, Optional, List
+from typing import Any, Callable, List, Optional, Tuple
+
+import flet as ft
+
 from app.ui import theme
 
 

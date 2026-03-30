@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Callable
-import re
 
 _LANG_REF_RE = re.compile(r"^\{.+\}$")
 

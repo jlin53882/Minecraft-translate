@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+
 @dataclass
 class CacheQueryState:
     query_results: list[dict] = field(default_factory=list)

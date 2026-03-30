@@ -6,25 +6,25 @@
 
 from __future__ import annotations
 
-import flet as ft
 from typing import TYPE_CHECKING, Any
 
+import flet as ft
+
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
+from translation_tool.utils.log_unit import log_info
 
 if TYPE_CHECKING:
     from app.views.cache_manager.cache_state import CacheQueryState
 
 from app.services_impl.cache.cache_services import (
     cache_get_entry_service,
+    cache_save_all_service,
     cache_search_service,
     cache_update_dst_service,
-    cache_save_all_service,
 )
 from app.views.cache_manager.cache_history_store import (
-    history_now_ts,
     history_append_event,
-    history_load_recent,
+    history_now_ts,
 )
 
 

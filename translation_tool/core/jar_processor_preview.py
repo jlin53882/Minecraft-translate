@@ -12,7 +12,7 @@ import os
 import re
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, Generator, Callable
+from typing import Any, Callable, Dict, Generator
 
 log = logging.getLogger(__name__)
 

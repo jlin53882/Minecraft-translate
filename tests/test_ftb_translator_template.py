@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -172,7 +171,7 @@ class TestPrepareFtbquestsLangTemplateOnlyImpl:
         dst_ftb.mkdir(parents=True)
         (dst_ftb / "test.json").write_text('{"old": "data"}', encoding="utf-8")
 
-        result = prepare_ftbquests_lang_template_only_impl(
+        prepare_ftbquests_lang_template_only_impl(
             input_config_dir=str(input_config),
             output_config_dir=str(output_config),
             prefer_lang="en_us",

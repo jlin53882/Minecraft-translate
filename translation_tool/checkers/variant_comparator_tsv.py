@@ -7,9 +7,10 @@
 # translation_tool/checkers/variant_comparator_tsv.py
 
 import os
+from typing import Any, Dict, Generator
+
 import pandas as pd
 from opencc import OpenCC
-from typing import Dict, Any, Generator
 
 
 def compare_variants_tsv_generator(file_path: str, output_file: str) -> Generator[Dict[str, Any], None, None]:
@@ -25,7 +26,7 @@ def compare_variants_tsv_generator(file_path: str, output_file: str) -> Generato
     try:
         # 讀取 TSV 檔案
         # 保持與舊檔案 compare_zh_variants.py 的讀取邏輯一致
-        df = pd.read_csv(file_path, sep='\t', encoding='utf-8') 
+        df = pd.read_csv(file_path, sep='\t', encoding='utf-8')
     except Exception as e:
         yield {"progress": 1.0, "log": f"錯誤：讀取檔案失敗：{e}", "error": True}
         return
@@ -37,26 +38,26 @@ def compare_variants_tsv_generator(file_path: str, output_file: str) -> Generato
 
     try:
         # 初始化 OpenCC 轉換器 (s2twp.json 在新版 OpenCC 中改為 's2twp')
-        converter = OpenCC('s2twp') 
+        converter = OpenCC('s2twp')
     except Exception as e:
         yield {"progress": 1.0, "log": f"錯誤：初始化 OpenCC 失敗: {e}", "error": True}
         return
 
     differences = []
     total_rows = len(df)
-    
+
     yield {"progress": 0.0, "log": f"找到 {total_rows} 條記錄，開始逐條比對..."}
 
     for index, row in df.iterrows():
         progress = (index + 1) / total_rows
-        
+
         try:
             key = row['key']
             zh_cn_original = str(row['zh_cn']) if pd.notna(row['zh_cn']) else ""
             zh_tw_original = str(row['zh_tw']) if pd.notna(row['zh_tw']) else ""
 
             zh_cn_converted = converter.convert(zh_cn_original)
-            
+
             if zh_cn_converted != zh_tw_original:
                 differences.append({
                     'key': key,
@@ -65,7 +66,7 @@ def compare_variants_tsv_generator(file_path: str, output_file: str) -> Generato
                     'zh_tw_original': zh_tw_original
                 })
                 yield {"progress": progress, "log": f"[差異] Key: {key}"}
-            
+
             if (index + 1) % 100 == 0 or (index + 1) == total_rows:
                  yield {"progress": progress, "log": f"已處理 {index + 1}/{total_rows} 條記錄。"}
 
@@ -74,9 +75,9 @@ def compare_variants_tsv_generator(file_path: str, output_file: str) -> Generato
 
     if differences:
         total_diff = len(differences)
-        yield {"progress": 1.0, "log": f"\n--- 簡繁 TSV 比較完成 ---"}
+        yield {"progress": 1.0, "log": "\n--- 簡繁 TSV 比較完成 ---"}
         yield {"progress": 1.0, "log": f"總共發現 {total_diff} 條差異條目。"}
-        
+
         diff_df = pd.DataFrame(differences)
         try:
             os.makedirs(os.path.dirname(output_file) or '.', exist_ok=True)

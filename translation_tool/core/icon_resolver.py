@@ -4,10 +4,12 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-from pathlib import Path
 from functools import lru_cache
+from pathlib import Path
+
 from .icon_classifier import classify_no_icon_reason
 from .icon_reason import IconResult
+
 
 @lru_cache(maxsize=128)
 def _build_icon_index(mod_textures_root: Path) -> dict[str, Path]:

@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 import orjson as json
 
+
 def get_active_shard_id(
     cache_file_path: dict[str, Path], cache_type: str, active_shard_file: str
 ) -> str:

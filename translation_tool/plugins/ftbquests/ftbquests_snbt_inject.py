@@ -11,26 +11,29 @@ from __future__ import annotations
 
 import os
 import shutil
-from typing import Dict, Any, Tuple, Optional, List
 from collections import defaultdict
+from typing import Any, Dict, List, Optional, Tuple
 
-import orjson
 import ftb_snbt_lib as snbt
-from ftb_snbt_lib.tag import Compound, List as SnbtList  # 避免跟 typing.List 混淆
-from ...utils.text_processor import (
-    convert_snbt_tree_inplace,  # 轉換.snbt 資料夾檔案內容（就地修改）。
-    convert_snbt_file_inplace,  # 轉換.snbt（或任何純文字檔）內容。
-    load_replace_rules,  # 載入替換規則。
-)
-from ...utils.config_manager import load_config
+import orjson
+from ftb_snbt_lib.tag import Compound  # 避免跟 typing.List 混淆
+from ftb_snbt_lib.tag import List as SnbtList
 
 # 導入我們自訂的日誌工具
 from translation_tool.utils.log_unit import (
-    log_info,
-    log_error,
-    log_warning,
     log_debug,
+    log_error,
+    log_info,
+    log_warning,
 )
+
+from ...utils.config_manager import load_config
+from ...utils.text_processor import (
+    convert_snbt_file_inplace,  # 轉換.snbt（或任何純文字檔）內容。
+    convert_snbt_tree_inplace,  # 轉換.snbt 資料夾檔案內容（就地修改）。
+    load_replace_rules,  # 載入替換規則。
+)
+
 
 def _normalize_config_dir(path: str) -> str:
     """

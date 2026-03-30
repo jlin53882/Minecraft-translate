@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import flet as ft
 
+
 def create_rule_row(view, from_text, to_text, rid: int, display_no: int):
     """建立規則表格列"""
     from_field = ft.TextField(value=from_text, border=ft.InputBorder.UNDERLINE, expand=True, on_change=view.on_text_change, multiline=True, text_size=14)

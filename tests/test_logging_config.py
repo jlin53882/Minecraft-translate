@@ -5,8 +5,7 @@ PR1：Logging Core Foundation — log_config 單元測試。
 
 from __future__ import annotations
 
-import pytest
-from app.logging.log_config import load_ui_logging_config, DEFAULT_UI_LOGGING
+from app.logging.log_config import DEFAULT_UI_LOGGING, load_ui_logging_config
 
 
 class TestLoadUiLoggingConfig:

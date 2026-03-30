@@ -14,6 +14,7 @@ Cache UI 的「動作序號控制器」。
 
 from __future__ import annotations
 
+
 class CacheController:
     """CacheController 類別。
 

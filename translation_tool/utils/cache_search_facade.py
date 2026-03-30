@@ -13,6 +13,7 @@ from typing import Any, Callable, Optional
 
 from .cache_search import SearchOrchestrator
 
+
 class CacheSearchFacade:
     """CacheSearchFacade 類別。
 

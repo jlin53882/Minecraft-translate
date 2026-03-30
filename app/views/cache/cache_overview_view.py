@@ -8,21 +8,19 @@
 
 import time
 import traceback
-from datetime import datetime
 
 import flet as ft
 
-from app.ui.components import primary_button, secondary_button
-
-from app.views.cache_manager.cache_overview_panel import build_overview_page
 from app.services_impl.cache.cache_services import (
     cache_get_overview_service,
+    cache_rebuild_index_service,
     cache_reload_service,
     cache_reload_type_service,
     cache_rotate_service,
     cache_save_all_service,
-    cache_rebuild_index_service,
 )
+from app.ui.components import primary_button, secondary_button
+from app.views.cache_manager.cache_overview_panel import build_overview_page
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
 

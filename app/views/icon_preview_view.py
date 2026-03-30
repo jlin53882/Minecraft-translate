@@ -6,20 +6,20 @@
 
 from __future__ import annotations
 
-import flet as ft
+import json
+import unicodedata
+from collections import defaultdict
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
-import json
-from pathlib import Path
-from collections import defaultdict
+import flet as ft
+
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
-from types import SimpleNamespace
-
-from translation_tool.utils.safe_json_loader import load_json_auto_encoding
 from translation_tool.core.lang_item_row import LangItemRow
+from translation_tool.utils.log_unit import log_info
+from translation_tool.utils.safe_json_loader import load_json_auto_encoding
 
-import unicodedata
 
 def to_halfwidth(text: str) -> str:
     """

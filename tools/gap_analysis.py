@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Gap Analysis: 檢查前30個JAR的lang抽取完整性"""
-import sys, zipfile, re
+import re
+import sys
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))

@@ -4,6 +4,7 @@ import flet as ft
 
 from app.ui.components import styled_card
 
+
 def build_pick_button(view, target):
     """建立資料夾選擇按鈕，點擊後開啟資料夾選擇對話框。"""
     return ft.IconButton(

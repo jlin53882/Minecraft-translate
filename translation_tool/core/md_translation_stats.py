@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Any, Dict, Callable
+from typing import Any, Callable, Dict
 
 from translation_tool.core.lm_translator_shared import _get_default_batch_size
 

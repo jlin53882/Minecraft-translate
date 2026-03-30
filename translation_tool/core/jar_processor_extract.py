@@ -12,7 +12,7 @@ import logging
 import os
 import re
 import zipfile
-from typing import Any, Dict, Generator, Callable
+from typing import Any, Callable, Dict, Generator
 
 from ..utils.config_manager import load_config
 

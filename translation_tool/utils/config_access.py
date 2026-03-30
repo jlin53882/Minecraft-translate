@@ -6,6 +6,7 @@ from pathlib import Path
 
 from translation_tool.utils.config_manager import load_config, resolve_project_path
 
+
 def get_runtime_config() -> dict:
     """取得執行期設定。"""
     return load_config()

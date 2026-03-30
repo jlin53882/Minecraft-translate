@@ -6,23 +6,30 @@
 
 from __future__ import annotations
 
-import flet as ft
 from typing import Any
 
-from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
-from app.ui.components import primary_button  # guard: shared primary button seam remains explicit
+import flet as ft
+
 # guard: config_view still conceptually owns the primary_button(...) save action
 from app.services_impl.config_service import load_config_json, save_config_json
+from app.ui import theme
 from app.views.config.config_actions import load_config_into_view, save_config_from_view
 from app.views.config.config_form import (
     build_card as build_config_card,
+)
+from app.views.config.config_form import (
     build_footer as build_config_footer,
+)
+from app.views.config.config_form import (
     build_header as build_config_header,
+)
+from app.views.config.config_form import (
     build_key_field,
     build_key_row,
 )
 from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
+from translation_tool.utils.log_unit import log_info
+
 
 class ConfigView(ft.Column):
     """ConfigView 類別。

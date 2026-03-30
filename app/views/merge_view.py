@@ -13,11 +13,11 @@ from typing import Any
 import flet as ft
 
 from app.logging import LogPresenter
-from translation_tool.utils.log_unit import log_info
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
 from app.task_session import TaskSession
 from app.ui import theme
 from app.ui.components import primary_button, styled_card
+from translation_tool.utils.log_unit import log_info
 
 
 class MergeView(ft.Column):
@@ -159,7 +159,12 @@ class MergeView(ft.Column):
                             [
                                 ft.Row(
                                     [
-                                        ft.Text("只處理 lang 時跳過 zh_cn", weight=ft.FontWeight.W_500, size=14, expand=True),
+                                        ft.Text(
+                                            "只處理 lang 時跳過 zh_cn",
+                                            weight=ft.FontWeight.W_500,
+                                            size=14,
+                                            expand=True,
+                                        ),
                                         self.skip_zh_cn_switch,
                                     ],
                                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -178,7 +183,12 @@ class MergeView(ft.Column):
                             [
                                 ft.Row(
                                     [
-                                        ft.Text("允許 zh_cn 觸發跳過 en_us", weight=ft.FontWeight.W_500, size=14, expand=True),
+                                        ft.Text(
+                                            "允許 zh_cn 觸發跳過 en_us",
+                                            weight=ft.FontWeight.W_500,
+                                            size=14,
+                                            expand=True,
+                                        ),
                                         self.patchouli_skip_zh_cn_switch,
                                     ],
                                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,

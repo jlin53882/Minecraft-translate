@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
+import csv
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import csv
-import json
+
 
 @dataclass
 class TranslationRecorder:

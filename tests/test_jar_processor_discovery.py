@@ -4,11 +4,6 @@
 """
 
 import os
-import tempfile
-import shutil
-from pathlib import Path
-
-import pytest
 
 from translation_tool.core.jar_processor_discovery import find_jar_files
 
@@ -26,7 +21,7 @@ class TestFindJarFiles:
         # 建立一些非 JAR 檔案
         (tmp_path / "file.txt").write_text("content")
         (tmp_path / "file.zip").write_text("content")
-        
+
         result = find_jar_files(str(tmp_path))
         assert result == []
 
@@ -34,7 +29,7 @@ class TestFindJarFiles:
         """測試單一 JAR 檔案"""
         jar_path = tmp_path / "test.jar"
         jar_path.write_bytes(b"PK\x03\x04")  # 模擬 ZIP/JAR 檔案標頭
-        
+
         result = find_jar_files(str(tmp_path))
         assert len(result) == 1
         assert result[0] == str(jar_path)
@@ -44,7 +39,7 @@ class TestFindJarFiles:
         (tmp_path / "mod1.jar").write_bytes(b"PK\x03\x04")
         (tmp_path / "mod2.jar").write_bytes(b"PK\x03\x04")
         (tmp_path / "file.txt").write_text("content")
-        
+
         result = find_jar_files(str(tmp_path))
         assert len(result) == 2
         assert all(f.endswith(".jar") for f in result)
@@ -55,7 +50,7 @@ class TestFindJarFiles:
         sub_dir.mkdir(parents=True)
         (tmp_path / "root.jar").write_bytes(b"PK\x03\x04")
         (sub_dir / "nested.jar").write_bytes(b"PK\x03\x04")
-        
+
         result = find_jar_files(str(tmp_path))
         assert len(result) == 2
         jar_names = [os.path.basename(f) for f in result]
@@ -67,7 +62,7 @@ class TestFindJarFiles:
         (tmp_path / "test.JAR").write_bytes(b"PK\x03\x04")
         (tmp_path / "test.Jar").write_bytes(b"PK\x03\x04")
         (tmp_path / "normal.jar").write_bytes(b"PK\x03\x04")
-        
+
         result = find_jar_files(str(tmp_path))
         # os.walk 使用 endswith('.jar') 所以只會匹配小寫
         # 在 Windows 下可能會匹配
@@ -77,6 +72,6 @@ class TestFindJarFiles:
         """測試回傳絕對路徑"""
         jar_path = tmp_path / "test.jar"
         jar_path.write_bytes(b"PK\x03\x04")
-        
+
         result = find_jar_files(str(tmp_path))
         assert os.path.isabs(result[0])

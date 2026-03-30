@@ -14,8 +14,8 @@ from typing import Any, Dict
 
 import orjson as json
 
-from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
-from ..utils.text_processor import recursive_translate_dict, apply_replace_rules
+from ..utils.log_unit import log_exception, log_info
+from ..utils.text_processor import apply_replace_rules, recursive_translate_dict
 from .lang_codec import dump_lang_text, parse_lang_text, pick_first_not_none
 from .lang_merge_zip_io import (
     _read_json_from_zip,
@@ -77,7 +77,7 @@ def _process_single_mod(
     def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
         """
 
-    
+
         """
         path = paths.get(lang_key)
         if not path:

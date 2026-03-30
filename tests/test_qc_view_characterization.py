@@ -4,9 +4,9 @@
 維護注意：PR1 拆分後更新測試以匹配新結構。
 """
 
+from app.views.qc_base import QCBase
 from app.views.qc_view import QCView
 from app.views.untranslated_checker import UntranslatedChecker
-from app.views.qc_base import QCBase
 
 
 class _Page:

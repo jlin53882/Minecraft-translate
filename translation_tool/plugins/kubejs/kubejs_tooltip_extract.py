@@ -4,34 +4,35 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import os
 import json
+import os
 import re
 from collections import defaultdict
 from pathlib import Path
 
-from translation_tool.utils.log_unit import( 
-    log_info, 
-    log_error, 
-    log_warning, 
-    log_debug, 
-    )
+from translation_tool.utils.log_unit import (
+    log_debug,
+    log_error,
+    log_info,
+    log_warning,
+)
+
 
 def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
     """
     自動解析並尋找 KubeJS 根目錄。
-    
+
     搜尋策略：
     1. 檢查輸入路徑是否本身就是 kubejs/。
     2. 檢查輸入路徑的正下方是否有 kubejs/。
     3. 遞迴搜尋子目錄（受限於 max_depth），尋找名為 kubejs 的目錄。
-    
+
     :param input_dir: 使用者選取的路徑。
     :param max_depth: 最大向下搜尋深度，避免掃描過多無關目錄（如大型模組包根目錄）。
     :return: 找到的 KubeJS 絕對路徑字串；若找不到則回傳原輸入路徑。
     """
     log_debug(f"開始解析 KubeJS 根目錄，輸入路徑: '{input_dir}'，最大搜尋深度: {max_depth}")
-    
+
     try:
         base = Path(input_dir).resolve()
     except Exception as e:
@@ -51,7 +52,7 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
 
     # 3) 情境 C：往下遞迴搜尋
     log_debug(f"直接路徑未匹配，開始在深度 {max_depth} 內搜尋子目錄...")
-    
+
     base_parts = len(base.parts)
     best_match = None
 
@@ -60,13 +61,13 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
         for p in base.rglob("*"):
             if not p.is_dir():
                 continue
-            
+
             # 計算目前深度 (相對於 base)
             current_depth = len(p.parts) - base_parts
-            
+
             if current_depth > max_depth:
                 continue
-                
+
             if p.name.lower() == "kubejs":
                 best_match = p
                 log_info(f"搜尋成功：在深度 {current_depth} 處找到 KubeJS -> {p}")
@@ -95,7 +96,7 @@ def to_json_name(filename: str) -> str:
         result = filename
     else:
         result = filename + ".json"
-    
+
     log_debug(f"檔名轉換: '{filename}' -> '{result}'")
     return result
 
@@ -114,12 +115,12 @@ def strip_quotes(s: str) -> str:
 def split_js_args(s: str) -> list[str]:
     """
     解析 JS 函式參數字串，能正確處理逗號分隔，並忽略括號 ()、中括號 []、大括號 {} 以及引號內的逗號。
-    
-    例如: 'item.of("mt:pipe", {lvl:1}), 5' 
+
+    例如: 'item.of("mt:pipe", {lvl:1}), 5'
     會被拆分為 ['item.of("mt:pipe", {lvl:1})', '5']
     """
     log_debug(f"開始拆解 JS 參數字串: {s}")
-    
+
     args = []
     buf = ""
     depth = 0
@@ -184,13 +185,13 @@ def is_patchouli_command_only(s: str) -> bool:
     """
     判斷字串是否整段僅由 Patchouli 指令組成（例如：$(br)、$(l:...)、$(img) 等）。
     這通常用於過濾不需要進行翻譯處理的文本行。
-    
+
     True  = 整段都是指令，無需翻譯。
     False = 包含一般文字或非指令內容。
     """
     # 預處理：去除空白並確保不是 None
     clean_s = (s or "").strip()
-    
+
     if not clean_s:
         # 空字串不視為指令
         return False
@@ -198,11 +199,11 @@ def is_patchouli_command_only(s: str) -> bool:
     # 進行全文匹配
     # 使用 fullmatch 確保字串從頭到尾都符合 Patchouli 指令格式
     is_match = bool(_PATCHOULI_COMMAND_ONLY.fullmatch(clean_s))
-    
+
     if is_match:
         # 如果整段都是指令，用 debug 紀錄即可，避免干擾主要資訊
         log_debug(f"偵測到純 Patchouli 指令段落，將跳過翻譯: '{clean_s}'")
-    
+
     return is_match
 
 # ---------- Lang Key 過濾 ----------
@@ -212,7 +213,7 @@ _LANG_KEY_LIKE = re.compile(r"^(?:[a-z0-9_]+)(?:\.[a-z0-9_]+)+$")
 def is_lang_key_like(s: str) -> bool:
     """
     判斷字串是否「像」一個 Minecraft 的翻譯鍵（Translation Key）。
-    
+
     目的：過濾掉如 'item.minecraft.iron_ingot' 這種 key，避免將其視為一般句子進行翻譯。
     判斷基準：
     1. 不得為空。
@@ -234,10 +235,10 @@ def is_lang_key_like(s: str) -> bool:
 
     # 進行正規表示式匹配
     is_key = bool(_LANG_KEY_LIKE.fullmatch(s))
-    
+
     if is_key:
         log_debug(f"跳過翻譯 Key: '{s}' (符合 Key 格式條件)")
-    
+
     return is_key
 
 def is_lang_key_ref_like(s: str) -> bool:
@@ -256,7 +257,7 @@ def is_lang_key_ref_like(s: str) -> bool:
 def clean_text(s: str) -> str:
     """
     清理文本中的雜質，主要針對 Minecraft 的特殊格式。
-    
+
     1. 移除 Minecraft 內建的顏色碼與格式碼（如 §a, §l, §r 等）。
     2. 移除字串前後的贅餘空白。
     """
@@ -271,7 +272,7 @@ def clean_text(s: str) -> str:
     # 只有在真的有變動時才紀錄 debug log，避免 Log 檔案過於混亂
     if original != cleaned:
         log_debug(f"文字清理完成: '{original}' -> '{cleaned}'")
-        
+
     return cleaned
 
 _RE_SKIP_KUBEJS_TOOLTIP_EXPR = re.compile(
@@ -287,22 +288,22 @@ def extract_js_string_call(text: str, start: int) -> str | None:
     """
     從指定的起始位置開始，解析並提取第一個出現的 JavaScript 字串內容。
     支援處理單引號、雙引號以及轉義字元（如 \\' 或 \\"）。
-    
+
     通常用於解析：Text.of( '內容' ) 或 Text.red( "內容" )
-    
+
     :param text: 原始腳本文字內容。
     :param start: 開始搜尋的索引位置（通常是左括號 '(' 的下一個位置）。
     :return: 提取到的字串內容（不含兩側引號）；若找不到完整字串則回傳 None。
     """
     log_debug(f"開始提取 JS 字串參數，起始索引: {start}")
-    
+
     i = start
     quote = None
     escaped = False
     buf = ""
 
     text_len = len(text)
-    
+
     # 檢查起始位置是否合法
     if start >= text_len:
         log_warning(f"提取位置超出範圍: start={start}, text_length={text_len}")
@@ -314,7 +315,7 @@ def extract_js_string_call(text: str, start: int) -> str | None:
         # 狀態 A: 已經進入引號範圍內
         if quote:
             buf += ch
-            
+
             if escaped:
                 # 前一個字元是 \，所以無論這個字元是什麼都當作一般文字處理
                 escaped = False
@@ -327,13 +328,13 @@ def extract_js_string_call(text: str, start: int) -> str | None:
                 result = buf[:-1]  # 去掉最後一個被加入 buf 的結尾引號
                 log_debug(f"成功提取字串參數: '{result}'")
                 return result
-        
+
         # 狀態 B: 還在尋找字串的開頭引號
         else:
             if ch in ("'", '"', "`"):
                 quote = ch
                 log_debug(f"偵測到字串起始引號: {quote}")
-        
+
         i += 1
 
     # 如果跑完迴圈都沒 return，代表字串沒閉合
@@ -343,36 +344,36 @@ def extract_js_string_call(text: str, start: int) -> str | None:
 def should_skip_text(text: str) -> bool:
     """
     判斷該段文字是否應該跳過翻譯流程。
-    
+
     此函式整合了多種過濾機制，包含：
     1. 空白/無內容過濾。
     2. Patchouli 指令過濾。
     3. Minecraft 翻譯鍵（Lang Key）過濾。
     4. 已翻譯（包含中文字元）內容過濾。
-    
+
     :param text: 待檢查的原始字串。
     :return: bool, True 表示應跳過（不翻譯），False 表示需要翻譯。
     """
     # 進行初步清理
     t = clean_text(text)
-    
+
     # 情況 1：清理後為空
     if not t:
         # 這裡不特別紀錄 Log，因為空行很常見
         return True
-    
+
     log_debug(f"正在評估文字是否跳過: '{t}'")
-    
+
     # ✅ 情況 2：跳過純 Patchouli 指令 (如 $(br), $(img:...) )
     if is_patchouli_command_only(t):
         log_debug(f"跳過判定: 純指令段落 -> '{t}'")
         return True
-    
+
     # ✅ 情況 3：跳過看起來像翻譯 Key 的內容 (如 item.minecraft.dirt)
     if is_lang_key_like(t):
         log_debug(f"跳過判定: 翻譯鍵格式 (Key-like) -> '{t}'")
         return True
-    
+
     # ✅ 情況 4：跳過純引用格式（如 {xxx}\n{yyy}）
     if is_lang_key_ref_like(t):
         log_debug(f"跳過判定: 純引用格式 -> '{t}'")
@@ -392,7 +393,7 @@ def extract_call_args(text: str, start: int) -> str | None:
     """
     從指定的起始位置開始，提取括號 '()' 內的所有內容。
     支援嵌套括號處理（例如：.add(item, Text.of(Text.red('...')))）。
-    
+
     :param text: 原始文字內容。
     :param start: 左括號 '(' 之後的第一個字元索引。
     :return: 括號內的完整字串；若括號未閉合則回傳 None。
@@ -422,11 +423,11 @@ def extract_call_args(text: str, start: int) -> str | None:
 def extract_itemevents_tooltips(content: str, file_name: str, extracted: dict, auto_id: int) -> int:
     """
     解析 KubeJS 的 ItemEvents.tooltip 腳本，提取其中的文字內容。
-    
+
     支援格式範例：
     - event.add('minecraft:dirt', Text.of('Hello'))
     - event.add(['item1', 'item2'], Text.red('Warning'))
-    
+
     :param content: 腳本檔案的全文內容。
     :param file_name: 目前處理的檔案名稱（用於生成 Key）。
     :param extracted: 存放提取結果的字典（Key-Value）。
@@ -434,7 +435,7 @@ def extract_itemevents_tooltips(content: str, file_name: str, extracted: dict, a
     :return: 更新後的 auto_id。
     """
     log_info(f"正在處理檔案: {file_name}，開始掃描 .add() 調用...")
-    
+
     match_count = 0
 
     # 搜尋所有 .add( 的位置
@@ -467,10 +468,10 @@ def extract_itemevents_tooltips(content: str, file_name: str, extracted: dict, a
         for tm in re.finditer(r"Text\.\w+\s*\(", tooltip_block):
             start_pos = tm.end()
             text_content = extract_js_string_call(tooltip_block, start_pos)
-            
+
             if text_content is None:
                 continue
-            
+
             # ✅ 檢查是否符合跳過條件（空值、指令、Key、已翻譯等）
             if should_skip_text(text_content):
                 idx += 1
@@ -478,13 +479,13 @@ def extract_itemevents_tooltips(content: str, file_name: str, extracted: dict, a
 
             # 產生唯一的 Key 格式: 檔案名|物品ID.tooltip.序號
             key = f"{file_name}|{item_id}.tooltip.{idx}"
-            
+
             # 存入結果並清理 Minecraft 顏色代碼
             cleaned_val = clean_text(text_content)
             extracted[key] = cleaned_val
-            
+
             log_debug(f"成功提取內容 [{key}]: {cleaned_val}")
-            
+
             auto_id += 1
             idx += 1
             match_count += 1
@@ -503,7 +504,7 @@ def extract(
 ) -> dict:
     """
     執行全文提取流程：將 KubeJS 腳本與 Lang JSON 中的待翻譯文字提取出來。
-    
+
     :param source_dir: 模組包根目錄或 kubejs 目錄。
     :param output_dir: 翻譯 JSON 的輸出目錄。
     :param session: UI 工作對話實體，用於更新進度條與日誌。
@@ -532,7 +533,7 @@ def extract(
     for root, _, files in os.walk(src_root):
         for f in files:
             all_files_path.append(os.path.join(root, f))
-    
+
     total_files = max(1, len(all_files_path))
     processed_count = 0
     extracted_files_count = 0
@@ -545,7 +546,7 @@ def extract(
     for file_path in all_files_path:
         file_name = os.path.basename(file_path)
         rel_dir = os.path.relpath(os.path.dirname(file_path), src_root)
-        
+
         extracted = {} # 存放當前檔案提取出的 Key-Value
         id_counters = defaultdict(int)
         auto_id = 1
@@ -562,7 +563,7 @@ def extract(
                     arg_str = extract_call_args(content, m.end())
                     if not arg_str:
                         continue
-                    
+
                     args = split_js_args(arg_str)
 
                     # 單一參數情況：可能是字串直接添加
@@ -573,7 +574,7 @@ def extract(
                             continue
                         if should_skip_text(text):
                             continue
-                        
+
                         text = clean_text(text)
                         if len(text) > 1:
                             key = f"{file_name}|auto.{auto_id}"
@@ -589,7 +590,7 @@ def extract(
                         # ✅ Text.translate(...) / Text.of(...) 等屬於語言 key 引用，不抽取
                         if should_skip_kubejs_tooltip_expr(args[1]):
                             continue
-                        
+
                         # 若內容包含 Text. 元件
                         if "Text." in args[1]:
                             # 嘗試簡單提取第一個引號內容

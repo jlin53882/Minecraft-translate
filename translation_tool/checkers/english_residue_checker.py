@@ -6,11 +6,11 @@
 
 # translation_tool/checkers/english_residue_checker.py
 
-import os
 import json
 import logging
+import os
 import re
-from typing import Dict, Any, Generator
+from typing import Any, Dict, Generator
 
 log = logging.getLogger(__name__)
 

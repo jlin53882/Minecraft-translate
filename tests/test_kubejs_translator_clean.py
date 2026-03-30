@@ -4,9 +4,8 @@
 """
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
 import sys
+from pathlib import Path
 
 import orjson
 import pytest
@@ -17,10 +16,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from translation_tool.core.kubejs_translator_clean import (
-    is_filled_text_impl,
-    deep_merge_3way_flat_impl,
-    prune_en_by_tw_flat_impl,
     clean_kubejs_from_raw_impl,
+    deep_merge_3way_flat_impl,
+    is_filled_text_impl,
+    prune_en_by_tw_flat_impl,
 )
 
 

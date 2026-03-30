@@ -5,8 +5,6 @@
 from __future__ import annotations
 
 import sys
-import json
-import os
 from pathlib import Path
 
 # 確保可以導入翻譯工具模組
@@ -22,9 +20,9 @@ def test_resolve_kubejs_root_direct(tmp_path: Path) -> None:
     kubejs_dir = tmp_path / "kubejs"
     kubejs_dir.mkdir()
     (kubejs_dir / "test.js").write_text("// test")
-    
+
     result = kubejs_tooltip_extract.resolve_kubejs_root(str(kubejs_dir))
-    
+
     assert result == str(kubejs_dir)
 
 
@@ -35,9 +33,9 @@ def test_resolve_kubejs_root_nested(tmp_path: Path) -> None:
     kubejs_dir = root / "kubejs"
     kubejs_dir.mkdir()
     (kubejs_dir / "test.js").write_text("// test")
-    
+
     result = kubejs_tooltip_extract.resolve_kubejs_root(str(root))
-    
+
     assert result == str(kubejs_dir)
 
 
@@ -45,9 +43,9 @@ def test_resolve_kubejs_root_not_found(tmp_path: Path) -> None:
     """測試 resolve_kubejs_root 找不到時回傳原路徑。"""
     root = tmp_path / "empty"
     root.mkdir()
-    
+
     result = kubejs_tooltip_extract.resolve_kubejs_root(str(root))
-    
+
     assert result == str(root)
 
 
@@ -69,7 +67,7 @@ def test_strip_quotes(tmp_path: Path) -> None:
 def test_split_js_args_basic(tmp_path: Path) -> None:
     """測試 split_js_args 基本功能。"""
     result = kubejs_tooltip_extract.split_js_args('"a", "b"')
-    
+
     assert len(result) == 2
     assert '"a"' in result
     assert '"b"' in result
@@ -78,7 +76,7 @@ def test_split_js_args_basic(tmp_path: Path) -> None:
 def test_split_js_args_nested_brackets(tmp_path: Path) -> None:
     """測試 split_js_args 處理嵌套括號。"""
     result = kubejs_tooltip_extract.split_js_args('item.of("mt:pipe", {lvl:1}), 5')
-    
+
     assert len(result) == 2
     assert "item.of(\"mt:pipe\", {lvl:1})" in result[0]
     assert "5" in result[1]
@@ -87,7 +85,7 @@ def test_split_js_args_nested_brackets(tmp_path: Path) -> None:
 def test_extract_array_strings(tmp_path: Path) -> None:
     """測試 extract_array_strings 提取陣列字串。"""
     result = kubejs_tooltip_extract.extract_array_strings('["a", "b", "c"]')
-    
+
     assert result == ["a", "b", "c"]
 
 
@@ -152,9 +150,9 @@ def test_extract_call_args(tmp_path: Path) -> None:
     """測試 extract_call_args 提取括號內容。"""
     content = "event.add('item', Text.of('tooltip'))"
     start = content.index("(") + 1
-    
+
     result = kubejs_tooltip_extract.extract_call_args(content, start)
-    
+
     assert result is not None
     assert "'item'" in result
 
@@ -163,9 +161,9 @@ def test_extract_js_string_call(tmp_path: Path) -> None:
     """測試 extract_js_string_call 提取 JS 字串。"""
     content = "Text.of('Hello World')"
     start = content.index("(") + 1
-    
+
     result = kubejs_tooltip_extract.extract_js_string_call(content, start)
-    
+
     assert result == "Hello World"
 
 
@@ -173,9 +171,9 @@ def test_extract_js_string_call_double_quote(tmp_path: Path) -> None:
     """測試 extract_js_string_call 雙引號。"""
     content = 'Text.of("Hello World")'
     start = content.index("(") + 1
-    
+
     result = kubejs_tooltip_extract.extract_js_string_call(content, start)
-    
+
     assert result == "Hello World"
 
 
@@ -194,7 +192,7 @@ def test_resolve_kubejs_root_case_insensitive(tmp_path: Path) -> None:
     kubejs_dir = root / "kubejs"  # 必須是小寫
     kubejs_dir.mkdir()
     (kubejs_dir / "test.js").write_text("// test")
-    
+
     result = kubejs_tooltip_extract.resolve_kubejs_root(str(root))
-    
+
     assert result == str(kubejs_dir)

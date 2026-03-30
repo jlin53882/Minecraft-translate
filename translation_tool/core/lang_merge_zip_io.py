@@ -13,7 +13,7 @@ from typing import Any, Dict
 import orjson as json
 
 from ..utils.config_manager import load_config
-from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
+from ..utils.log_unit import log_error, log_warning
 
 
 def _read_text_from_zip(zf: zipfile.ZipFile, path: str) -> str:
@@ -25,7 +25,7 @@ def _read_text_from_zip(zf: zipfile.ZipFile, path: str) -> str:
     Returns:
         str: 解碼後的文字內容。
     """
-    
+
     # 1. 以位元組形式讀取檔案的原始內容
     with zf.open(path) as f:
         raw = f.read()
@@ -58,7 +58,7 @@ def _read_json_from_zip(zf: zipfile.ZipFile, path: str) -> Dict[str, Any]:
     text = _read_text_from_zip(zf, path)
     if not text:
             return {}
-    
+
     # 2. 事前處理：徹底移除 BOM 與所有不可見字元 (空格, \n, \r, \t)
     # .strip() 移除首尾空白，.lstrip('\ufeff') 移除 UTF-8 BOM
     cleaned_text = text.strip().lstrip('\ufeff')
@@ -91,7 +91,7 @@ def _write_bytes_atomic(path: str, data: bytes) -> None:
     tmp = path + ".tmp"
     # 3. 將資料寫入臨時檔案
     with open(tmp, "wb") as f:
-        f.write(data)  
+        f.write(data)
     # 4. 原子性替換：將完整的臨時檔案替換為目標檔案。
     #    這個操作在大多數 OS 上是原子的，防止在寫入過程中斷電或崩潰導致檔案損壞。
     os.replace(tmp, path)
@@ -106,9 +106,9 @@ def _write_text_atomic(path: str, text: str) -> None:
         text (str): 要寫入的文字內容。
     """
     # 1. 確保目標檔案路徑的資料夾存在
-    os.makedirs(os.path.dirname(path), exist_ok=True)    
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     # 2. 定義臨時檔案名稱
-    tmp = path + ".tmp"   
+    tmp = path + ".tmp"
     # 3. 將文字資料寫入臨時檔案，指定 UTF-8 編碼
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(text)
@@ -146,7 +146,7 @@ def quarantine_copy_from_zip(
         reason_path = target_path + ".reason.txt"
         with open(reason_path, "w", encoding="utf-8") as f:
             f.write(reason)
-        
+
         # ⭐ 新增：如果提供額外文本（如詳細報錯），則寫入 .detail.txt
         if extra_text:
             detail_path = target_path + ".detail.txt"

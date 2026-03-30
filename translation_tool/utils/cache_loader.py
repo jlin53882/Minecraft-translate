@@ -13,6 +13,7 @@ from typing import Any
 
 import orjson as json
 
+
 def load_shard_file(path: Path) -> dict[str, Any]:
     """載入並解析單一分片（Shard）的 JSON 檔案，將其轉換為記憶體中的快取物件。"""
     try:

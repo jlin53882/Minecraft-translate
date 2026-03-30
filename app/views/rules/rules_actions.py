@@ -6,6 +6,7 @@ import threading
 
 import flet as ft
 
+
 def translate_regex_error(err: re.error) -> str:
     """将 Python 正则表达式错误转换为中文用户提示"""
     msg = str(err)

@@ -4,6 +4,7 @@ import flet as ft
 
 from app.ui.components import primary_button, secondary_button, styled_card
 
+
 def build_path_row(view, field: ft.TextField) -> ft.Control:
     """建立路徑輸入欄位與資料夾選擇按鈕的橫向排列。"""
     return ft.Row(

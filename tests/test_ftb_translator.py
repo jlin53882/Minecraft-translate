@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import orjson
@@ -286,7 +285,7 @@ class TestPipelineOutputStructure:
 
         (lang_dir / "en_us.json").write_bytes(orjson.dumps({"key": "value"}))
 
-        result = ftb_translator.run_ftb_pipeline(
+        ftb_translator.run_ftb_pipeline(
             directory_path=str(tmp_path),
             output_dir=str(tmp_path / "Output"),
             step_export=True,

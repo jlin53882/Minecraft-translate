@@ -7,18 +7,18 @@
 # /minecraft_translator_flet/translation_tool/utils/text_processor.py (最終完整版)
 
 import os
-import orjson
 import re
-from typing import List, Dict, Any
+import threading
+from typing import Any, Dict, List
+
+import orjson
 from opencc import OpenCC
 
 from .config_access import resolve_runtime_path
-from .log_unit import log_info, log_warning, log_error, log_debug
+from .log_unit import log_error, log_info, log_warning
 
 # legacy seam：保留給既有 monkeypatch/tests，用新 helper 實作
 resolve_project_path = resolve_runtime_path
-
-import threading
 
 
 def _resolve_rules_path(path: str):

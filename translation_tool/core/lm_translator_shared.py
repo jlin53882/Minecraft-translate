@@ -7,8 +7,8 @@
 from __future__ import annotations
 
 from translation_tool.core.lm_translator_shared_cache import (
-    CacheRule,
     STRICT_SRC_TYPES,
+    CacheRule,
     ValidHitFn,
     _is_valid_hit,
     fast_split_items_by_cache,

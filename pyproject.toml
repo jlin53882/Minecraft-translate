@@ -40,6 +40,31 @@ warn_unused_configs = true
 ignore_missing_imports = true
 exclude = ["tests/", "tools/", ".venv/"]
 
+[tool.ruff]
+line-length = 120
+
 [tool.ruff.lint]
 select = ["I", "E", "F", "W"]
-line-length = 120
+
+# 預存檔的 E501（行太長）與 E402（import 順序）寬限
+[tool.ruff.lint.per-file-ignores]
+"app/views/config/*" = ["E501"]
+"app/views/translation/*" = ["E501"]
+"app/views/extractor/*" = ["E501"]
+"app/views/rules/*" = ["E501"]
+"app/views/cache_manager/*" = ["E501"]
+"app/views/cache/*.py" = ["E501"]
+"app/view_registry.py" = ["E501"]
+"app/logging/*" = ["E501", "E741"]
+"app/services_impl/**" = ["E501"]
+"app/views/qc_view.py" = ["E501"]
+"main.py" = ["E501", "E402"]
+"tests/*.py" = ["E501", "E402", "E701", "E702"]
+"tools/*.py" = ["E501", "E402", "E702", "E722"]
+"translation_tool/**" = ["E501"]
+"translation_tool/plugins/*" = ["E501"]
+"translation_tool/core/ftb_translator.py" = ["E501"]
+"translation_tool/core/kubejs_translator.py" = ["E501"]
+"translation_tool/core/lang_merger.py" = ["E501"]
+"translation_tool/core/jar_processor*.py" = ["E501"]
+"translation_tool/utils/*.py" = ["E501"]

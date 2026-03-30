@@ -8,8 +8,6 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 
 class TestStorageNormalization:
     """Tests for process_zh_cn_files聯動 normalization."""

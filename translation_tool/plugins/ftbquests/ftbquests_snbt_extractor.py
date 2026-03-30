@@ -6,16 +6,16 @@
 
 # ftbquests_snbt_extractor.py
 # FTB Quests SNBT 抽取工具
+import json
 import os
 import re
-import json
-import ftb_snbt_lib as snbt
 
+import ftb_snbt_lib as snbt
 from ftb_snbt_lib.tag import Compound, List
 
 from translation_tool.utils.log_unit import (
-    log_info,
     log_error,
+    log_info,
     log_warning,
 )
 

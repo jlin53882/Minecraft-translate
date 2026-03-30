@@ -3,14 +3,12 @@
 用途：測試 resolve_icon_for_lang_key 和 resolve_icon_with_reason 函數。
 """
 
-import pytest
-from pathlib import Path
+from translation_tool.core.icon_reason import IconRisk
 from translation_tool.core.icon_resolver import (
+    _build_icon_index,
     resolve_icon_for_lang_key,
     resolve_icon_with_reason,
-    _build_icon_index,
 )
-from translation_tool.core.icon_reason import IconRisk
 
 
 class TestBuildIconIndex:

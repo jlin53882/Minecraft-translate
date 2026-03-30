@@ -20,7 +20,7 @@ def test_strip_fmt_basic(tmp_path: Path) -> None:
     # § 格式碼
     assert lang_text_rules._strip_fmt("§aHello") == "Hello"
     assert lang_text_rules._strip_fmt("§lBold§r") == "Bold"
-    
+
     # & 格式碼
     assert lang_text_rules._strip_fmt("&cRed") == "Red"
     assert lang_text_rules._strip_fmt("&kMagic&r") == "Magic"
@@ -90,6 +90,6 @@ def test_is_already_zh_edge_cases(tmp_path: Path) -> None:
     """測試 is_already_zh 邊界情況。"""
     # 數字不計入英文字母計數
     assert lang_text_rules.is_already_zh("123 你好") is True
-    
+
     # 特殊符號不計入
     assert lang_text_rules.is_already_zh("!!! 你好") is True

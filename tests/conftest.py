@@ -1,6 +1,6 @@
+import shutil
 import sys
 import tempfile
-import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +23,7 @@ def pytest_configure(config):
 
 def temp_dir():
     """提供臨時目錄，測試結束後自動清理。
-    
+
     Yields:
         Path: 臨時目錄路徑
     """
@@ -38,7 +38,7 @@ def temp_dir():
 
 def mock_config():
     """提供測試用的 mock config。
-    
+
     Returns:
         dict: Mock 設定字典
     """
@@ -51,7 +51,7 @@ def mock_config():
 
 def mock_empty_config():
     """提供空的 mock config（用於測試預設值）。
-    
+
     Returns:
         dict: 空設定字典
     """

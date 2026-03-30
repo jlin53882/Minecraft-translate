@@ -4,11 +4,9 @@
 """
 from __future__ import annotations
 
-from pathlib import Path
 import sys
-
-import pytest
-from unittest.mock import patch, MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock
 
 # 確保可以導入 translation_tool
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,13 +22,13 @@ class TestLangMergeContentFacade:
         from translation_tool.core.lang_merge_content import (
             _patch_localized_content_json,
             _process_content_or_copy_file,
-            remove_empty_dirs,
+            apply_replace_rules,
             export_filtered_pending,
             load_config,
-            apply_replace_rules,
             recursive_translate_dict,
+            remove_empty_dirs,
         )
-        
+
         # 確認這些是可呼叫的
         assert callable(_patch_localized_content_json)
         assert callable(_process_content_or_copy_file)
@@ -47,7 +45,7 @@ class TestLangMergeContentExports:
     def test_all_exports_in_module(self):
         """測試 __all__ 列表是否正確。"""
         import translation_tool.core.lang_merge_content as module
-        
+
         expected_exports = [
             "_patch_localized_content_json",
             "_process_content_or_copy_file",
@@ -57,10 +55,10 @@ class TestLangMergeContentExports:
             "apply_replace_rules",
             "recursive_translate_dict",
         ]
-        
+
         for exp in expected_exports:
             assert hasattr(module, exp), f"Missing export: {exp}"
-        
+
         # 檢查 __all__ 是否存在
         assert hasattr(module, "__all__")
 
@@ -71,26 +69,27 @@ class TestLangMergeContentProxyFunctions:
     def test_remove_empty_dirs_calls_impl(self, tmp_path: Path):
         """測試 remove_empty_dirs 是否正確呼叫實作。"""
         from translation_tool.core.lang_merge_content import remove_empty_dirs
-        
+
         # 建立測試目錄結構
         test_dir = tmp_path / "test"
         test_dir.mkdir()
         (test_dir / "empty_sub").mkdir()
-        
+
         # 呼叫函式
         remove_empty_dirs(str(test_dir))
-        
+
         # 確認 logger 被呼叫（即使函式可能不做任何事）
         # 此測試驗證函式可執行而不報錯
 
     def test_export_filtered_pending_signature(self):
         """測試 export_filtered_pending 函式簽名。"""
-        from translation_tool.core.lang_merge_content import export_filtered_pending
         import inspect
-        
+
+        from translation_tool.core.lang_merge_content import export_filtered_pending
+
         sig = inspect.signature(export_filtered_pending)
         params = list(sig.parameters.keys())
-        
+
         assert "pending_root" in params
         assert "output_root" in params
         assert "min_count" in params
@@ -101,12 +100,13 @@ class TestLangMergeContentProcessContent:
 
     def test_process_content_function_signature(self):
         """測試 _process_content_or_copy_file 函式簽名。"""
-        from translation_tool.core.lang_merge_content import _process_content_or_copy_file
         import inspect
-        
+
+        from translation_tool.core.lang_merge_content import _process_content_or_copy_file
+
         sig = inspect.signature(_process_content_or_copy_file)
         params = list(sig.parameters.keys())
-        
+
         assert "zf" in params
         assert "input_path" in params
         assert "rules" in params
@@ -116,11 +116,10 @@ class TestLangMergeContentProcessContent:
     def test_process_content_with_mock_zip(self, tmp_path: Path):
         """測試使用 mock ZIP 呼叫 _process_content_or_copy_file。"""
         from translation_tool.core.lang_merge_content import _process_content_or_copy_file
-        from unittest.mock import MagicMock, patch
-        
+
         # 建立 mock ZIP 檔案
         mock_zf = MagicMock()
-        
+
         # 測試非 lang 檔案在 only_process_lang=True 時應被跳過
         result = _process_content_or_copy_file(
             mock_zf,
@@ -129,7 +128,7 @@ class TestLangMergeContentProcessContent:
             str(tmp_path / "output"),
             only_process_lang=True,
         )
-        
+
         assert result.get("success") is True
         assert result.get("log") is None  # 應該被跳過
 
@@ -139,12 +138,13 @@ class TestLangMergeContentPatchLocalied:
 
     def test_patch_function_signature(self):
         """測試 _patch_localized_content_json 函式簽名。"""
-        from translation_tool.core.lang_merge_content import _patch_localized_content_json
         import inspect
-        
+
+        from translation_tool.core.lang_merge_content import _patch_localized_content_json
+
         sig = inspect.signature(_patch_localized_content_json)
         params = list(sig.parameters.keys())
-        
+
         assert "zf" in params
         assert "cn_path" in params
         assert "tw_output_path" in params
@@ -155,10 +155,9 @@ class TestLangMergeContentPatchLocalied:
     def test_patch_with_mock_zip(self, tmp_path: Path):
         """測試使用 mock ZIP 呼叫 _patch_localized_content_json。"""
         from translation_tool.core.lang_merge_content import _patch_localized_content_json
-        from unittest.mock import MagicMock
-        
+
         mock_zf = MagicMock()
-        
+
         result = _patch_localized_content_json(
             mock_zf,
             "test/lang/zh_cn.json",
@@ -167,6 +166,6 @@ class TestLangMergeContentPatchLocalied:
             "Test:",
             str(tmp_path),
         )
-        
+
         # 應該回傳 dict
         assert isinstance(result, dict)

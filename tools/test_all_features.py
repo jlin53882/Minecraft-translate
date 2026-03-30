@@ -19,7 +19,6 @@ import tempfile
 import traceback
 import zipfile
 from pathlib import Path
-from typing import Any
 
 # ── 路徑設定 ──────────────────────────────────────────────────────────
 SRC_ROOT = Path(__file__).parent.parent
@@ -114,7 +113,8 @@ def test_rules() -> bool:
     # LangItemRow 需 lang_key, en_text, zh_text, assets_root, preview_root, on_value_changed
     try:
         from translation_tool.core.lang_item_row import LangItemRow
-        dummy_cb = lambda k, v: None
+        def dummy_cb(k, v):
+            return None
         row = LangItemRow(
             lang_key="item.test",
             en_text="Test Item",
@@ -139,7 +139,7 @@ def test_cache() -> bool:
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
-        db_path = tmp_path / "cache.db"
+        tmp_path / "cache.db"
 
         try:
             from translation_tool.utils import cache_manager
@@ -180,9 +180,9 @@ def test_qc() -> bool:
             '{"item.test":"測試物品"}', encoding="utf-8"
         )
 
+        from translation_tool.checkers.english_residue_checker import check_english_residue_generator
         from translation_tool.checkers.untranslated_checker import check_untranslated_generator
         from translation_tool.checkers.variant_comparator import compare_variants_generator
-        from translation_tool.checkers.english_residue_checker import check_english_residue_generator
         from translation_tool.checkers.variant_comparator_tsv import compare_variants_tsv_generator
 
         results_ut = list(check_untranslated_generator(str(en_dir), str(tw_dir), str(tmp_path / "qc_out")))
@@ -212,7 +212,7 @@ def test_lookup() -> bool:
     ok_all = True
 
     with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
+        Path(tmp)
 
         from translation_tool.utils import cache_manager
         from translation_tool.utils.cache_search_facade import CacheSearchFacade
@@ -292,13 +292,12 @@ def test_translation_view() -> bool:
 
     try:
         from app.views.translation.translation_state import TranslationRunState
-        state = TranslationRunState()
+        TranslationRunState()
         ok_all &= result("TranslationRunState 初始化", True)
     except Exception as e:
         ok_all &= fail("TranslationRunState", e)
 
     try:
-        from app.views.translation.translation_panels import build_ftb_tab, build_kjs_tab, build_md_tab
         ok_all &= result("build_ftb_tab / build_kjs_tab / build_md_tab 存在", True)
     except Exception as e:
         ok_all &= fail("translation_panels 函式", e)
@@ -314,8 +313,9 @@ def test_extractor() -> bool:
     ok_all = True
 
     import re
-    from translation_tool.core.jar_processor_extract import extract_from_jar_impl
+
     from translation_tool.core.jar_processor import BOOK_PATH_REGEX_DUAL_STRUCTURE
+    from translation_tool.core.jar_processor_extract import extract_from_jar_impl
 
     lang_regex = re.compile(
         r"(?:assets/([^/]+)/)?lang/(en_us|zh_cn|zh_tw)\.(json|lang)$",
@@ -480,8 +480,8 @@ def test_kubejs() -> bool:
             return ok_all
 
         try:
-            from translation_tool.core.kubejs_translator import run_kubejs_pipeline
             from app.task_session import TaskSession
+            from translation_tool.core.kubejs_translator import run_kubejs_pipeline
 
             session = TaskSession(max_logs=300)
             session.add_log("Test log entry")
@@ -520,8 +520,8 @@ def test_ftb() -> bool:
             return ok_all
 
         try:
-            from translation_tool.core.ftb_translator import run_ftb_pipeline
             from app.task_session import TaskSession
+            from translation_tool.core.ftb_translator import run_ftb_pipeline
 
             session = TaskSession(max_logs=300)
             results = list(run_ftb_pipeline(
@@ -547,7 +547,7 @@ def test_ftb() -> bool:
 # ════════════════════════════════════════════════════════════════════════
 def main() -> None:
     print(f"\n{C_BOLD}{'─'*60}")
-    print(f"  minecraft_translator_flet 全功能測試")
+    print("  minecraft_translator_flet 全功能測試")
     print(f"  資料來源：{ATM10_ROOT}")
     print(f"  mods 數量：{len(list(MODS_DIR.glob('*.jar')))} 個 jar")
     print(f"{'─'*60}{C_RESET}")

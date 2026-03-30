@@ -6,21 +6,20 @@
 
 from __future__ import annotations
 
-import threading
-import time
-from typing import Any, Callable
+from typing import Callable
 
 import flet as ft
 
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
 
 # UI 共用元件：抽出重複的卡片/按鈕樣式，集中在 app.ui
-from app.ui.components import primary_button, secondary_button, styled_card
+from app.ui.components import styled_card
 from app.views.translation.translation_actions import (
     run_ftb,
     run_kjs,
     run_md,
+)
+from app.views.translation.translation_actions import (
     start_ui_timer as start_translation_ui_timer,
 )
 from app.views.translation.translation_panels import (
@@ -31,6 +30,7 @@ from app.views.translation.translation_panels import (
     build_path_row,
 )
 from app.views.translation.translation_state import TranslationRunState
+from translation_tool.utils.log_unit import log_info
 
 # 可選匯入：避免某個 service 暫時不可用時，整頁無法開啟
 try:
@@ -199,7 +199,10 @@ class TranslationView(ft.Column):
         trailing: list[ft.Control] | None = None,
     ) -> ft.Control:
         """建立操作按鈕列 UI"""
-        return build_action_row(view=self, on_start=on_start, on_dry_run=on_dry_run, on_reset=on_reset, trailing=trailing)
+        return build_action_row(
+            view=self, on_start=on_start, on_dry_run=on_dry_run,
+            on_reset=on_reset, trailing=trailing
+        )
 
     # ------------------------------------------------------------------
     # Tab builders

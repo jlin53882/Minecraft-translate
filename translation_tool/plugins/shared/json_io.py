@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
+
 def read_json_dict(path: Path) -> Dict[str, Any]:
     """讀取 JSON 檔案並回傳頂層物件（字典）。"""
     with path.open("r", encoding="utf-8") as f:

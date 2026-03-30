@@ -8,35 +8,35 @@
 import math
 import time
 from pathlib import Path
-from typing import Dict, Any, Generator, Optional
+from typing import Any, Dict, Generator, Optional
 
 import orjson as json
 
-from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
-from translation_tool.utils.cache_manager import (
-    add_to_cache,
-    save_translation_cache,
-    reload_translation_cache,
-    get_cache_dict_ref,
+from translation_tool.core.lm_config_rules import (
+    validate_api_keys,
+    value_fully_translated,
 )
 from translation_tool.core.lm_translator_main import (
     DEFAULT_DRY_RUN,
     DEFAULT_EXPORT_CACHE_ONLY,
     translate_batch_smart,
 )
-from translation_tool.core.translation_path_writer import (
-    map_lang_output_path,
-    set_by_path,
-)
-from translation_tool.core.lm_config_rules import (
-    validate_api_keys,
-    value_fully_translated,
-)
 from translation_tool.core.lm_translator_scan import (
     extract_items_parallel,
     scan_translatable_files,
 )
+from translation_tool.core.translation_path_writer import (
+    map_lang_output_path,
+    set_by_path,
+)
+from translation_tool.utils.cache_manager import (
+    add_to_cache,
+    get_cache_dict_ref,
+    reload_translation_cache,
+    save_translation_cache,
+)
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 
 def get_formatted_duration(start_tick: float) -> str:

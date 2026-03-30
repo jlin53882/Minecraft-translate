@@ -11,9 +11,25 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import json
-import orjson
-
+from translation_tool.core.lm_translator_shared import _get_default_batch_size
+from translation_tool.core.md_translation_progress import _ProgressProxy
+from translation_tool.core.md_translation_stats import (
+    _LANG_MODE_LABELS,
+)
+from translation_tool.core.md_translation_stats import (
+    count_md_pending_docs as _count_md_pending_docs,
+)
+from translation_tool.core.md_translation_stats import (
+    log_md_step2_stats as _log_md_step2_stats_impl,
+)
+from translation_tool.core.md_translation_stats import (
+    normalize_lang_mode as _normalize_lang_mode,
+)
+from translation_tool.core.md_translation_steps import (
+    step1_extract_impl,
+    step2_translate_impl,
+    step3_inject_impl,
+)
 from translation_tool.plugins.md.md_extract_qa import (
     build_pending_json,
     contains_cjk,
@@ -30,26 +46,13 @@ from translation_tool.plugins.md.md_inject_qa import (
     map_lang_in_rel_path_allow_zh,
 )
 from translation_tool.plugins.md.md_lmtranslator import translate_md_pending
-from translation_tool.core.lm_translator_shared import _get_default_batch_size
-from translation_tool.core.md_translation_progress import _ProgressProxy
-from translation_tool.core.md_translation_stats import (
-    _LANG_MODE_LABELS,
-    count_json_files as _count_json_files,
-    count_md_pending_docs as _count_md_pending_docs,
-    log_md_step2_stats as _log_md_step2_stats_impl,
-    normalize_lang_mode as _normalize_lang_mode,
-)
-from translation_tool.core.md_translation_steps import (
-    step1_extract_impl,
-    step2_translate_impl,
-    step3_inject_impl,
-)
 from translation_tool.utils.log_unit import (
     get_formatted_duration,
     log_info,
     log_warning,
     progress,
 )
+
 
 def _log_md_step2_stats(step2_res: Dict[str, Any]) -> None:
     _log_md_step2_stats_impl(step2_res, log_info_fn=log_info)

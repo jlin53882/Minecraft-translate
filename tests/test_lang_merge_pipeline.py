@@ -7,9 +7,6 @@ from __future__ import annotations
 import json
 import zipfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from translation_tool.core.lang_merge_pipeline import _process_single_mod
 

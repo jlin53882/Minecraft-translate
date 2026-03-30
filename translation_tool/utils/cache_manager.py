@@ -14,6 +14,8 @@ from . import cache_shards, cache_store
 from .cache_loader import load_cache_type
 from .cache_overview import (
     build_cache_overview,
+)
+from .cache_overview import (
     get_active_shard_id as _get_active_shard_id_impl,
 )
 from .cache_search_facade import CacheSearchFacade

@@ -12,13 +12,15 @@ from typing import Any
 
 import orjson as json
 
-from ..utils.log_unit import log_info, log_error, log_debug, log_warning
 from translation_tool.core.translatable_extractor import (
     extract_translatables,
     find_lang_json,
     find_patchouli_json,
     is_lang_file,
 )
+
+from ..utils.log_unit import log_error, log_info
+
 
 def is_plain_lang_json(data: dict) -> bool:
     """判斷是否為純 lang JSON（key: str -> value: str）。

@@ -17,17 +17,16 @@
     results = engine.search("你好", limit=50)
 """
 
-import os
 import sqlite3
 import threading
 import time
-from pathlib import Path
-from difflib import SequenceMatcher
-from typing import List, Dict, Optional, Any, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from difflib import SequenceMatcher
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 from . import cache_store
-from .log_unit import log_info, log_warning, log_debug
+from .log_unit import log_debug, log_info, log_warning
 
 # =============================================================================
 # 全文搜尋引擎
@@ -54,14 +53,14 @@ class CacheSearchEngine:
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # 讓結果可以用欄位名稱存取
         self._lock = threading.RLock()
-        
+
         # SQLite 效能優化（大幅提升大量寫入速度）
         with self._lock:
             self.conn.execute("PRAGMA journal_mode = WAL")
             self.conn.execute("PRAGMA synchronous = OFF")
             self.conn.execute("PRAGMA cache_size = 10000")
             self.conn.execute("PRAGMA temp_store = MEMORY")
-        
+
         self._init_fts_table()
 
     def _init_fts_table(self):
@@ -189,9 +188,9 @@ class CacheSearchEngine:
         """
         if not entries:
             return
-        
+
         t0 = time.time()
-            
+
         data = [
             (
                 e.get("key", ""),
@@ -203,7 +202,7 @@ class CacheSearchEngine:
             )
             for e in entries
         ]
-        
+
         prepare_time = time.time() - t0
 
         with self._lock:
@@ -212,7 +211,7 @@ class CacheSearchEngine:
                     self.conn.execute("PRAGMA recursive_triggers = OFF")
                 except Exception:
                     pass
-                
+
                 write_start = time.time()
                 for i in range(0, len(data), batch_size):
                     batch = data[i:i + batch_size]
@@ -237,7 +236,7 @@ class CacheSearchEngine:
 
             write_time = time.time() - write_start
             self.conn.commit()
-        
+
         total_time = time.time() - t0
         log_debug(f"index_batch: {len(entries)} entries, prepare={prepare_time:.2f}s, write={write_time:.2f}s, total={total_time:.2f}s")
 
@@ -561,10 +560,10 @@ def build_index_entries(
     """把單一 cache_type 的記憶體字典轉成可批次索引的條目陣列（並行版本）。"""
     t0 = time.time()
     items = [(key, entry) for key, entry in cache_dict.items() if isinstance(entry, dict)]
-    
+
     if not items:
         return []
-    
+
     # 使用多執行緒並行處理 metadata 建立
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
@@ -578,10 +577,10 @@ def build_index_entries(
                 results[idx] = future.result()
             except Exception:
                 pass
-    
+
     elapsed = time.time() - t0
     log_debug(f"build_index_entries({cache_type}): {len(items)} entries in {elapsed:.2f}s")
-    
+
     return [r for r in results if r is not None]
 
 def _build_single_entry(cache_type: str, key: str, entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -601,7 +600,7 @@ def rebuild_from_cache_dicts(
 ) -> int:
     """依序重建多個類型的索引，回傳實際索引筆數（並行版本）。"""
     total_indexed = 0
-    
+
     # 先並行處理所有 cache_type 的 entries 建立
     all_entries: Dict[str, List[Dict[str, Any]]] = {}
     with ThreadPoolExecutor(max_workers=len(cache_types)) as executor:
@@ -614,14 +613,14 @@ def rebuild_from_cache_dicts(
             entries = future.result()
             if entries:
                 all_entries[cache_type] = entries
-    
+
     # 再依序寫入 SQLite（保持原有寫入邏輯）
     for cache_type in cache_types:
         entries = all_entries.get(cache_type, [])
         if entries:
             engine.index_batch(entries)
             total_indexed += len(entries)
-    
+
     return total_indexed
 
 class SearchOrchestrator:
@@ -663,7 +662,7 @@ class SearchOrchestrator:
         for attempt in range(max_retries):
             try:
                 return self._do_rebuild_search_index(db_path, cache_types, cache_state)
-            except PermissionError as e:
+            except PermissionError:
                 if attempt < max_retries - 1:
                     import time
                     time.sleep(retry_delay)
@@ -682,10 +681,8 @@ class SearchOrchestrator:
         tmp_engine: Optional[CacheSearchEngine] = None
         old_engine: Optional[CacheSearchEngine] = None
         total_indexed = 0
-        
-        import time
-        import shutil
-        
+
+
         try:
             # 直接寫入目標資料庫（不使用 tmp 檔案，避免 Windows 檔案鎖問題）
             # 先關閉舊引擎
@@ -694,11 +691,11 @@ class SearchOrchestrator:
                 if old_engine is not None:
                     old_engine.close()
                     self._engine = None
-            
+
             del old_engine
             import gc
             gc.collect()
-            
+
             # 清理 WAL/SHM 檔案
             for suffix in ["-wal", "-shm"]:
                 wal_file = db_path.with_name(db_path.name + suffix)
@@ -707,24 +704,24 @@ class SearchOrchestrator:
                         wal_file.unlink()
                     except Exception:
                         pass
-            
+
             # 刪除舊資料庫重新建立
             if db_path.exists():
                 try:
                     db_path.unlink()
                 except Exception:
                     pass
-            
+
             # 建立新引擎並直接寫入
             tmp_engine = CacheSearchEngine(str(db_path))
             total_indexed = rebuild_from_cache_dicts(
                 tmp_engine, cache_types, cache_state
             )
-            
+
             # 重新建立引擎
             with self._lock:
                 self._engine = CacheSearchEngine(str(db_path))
-            
+
             log_debug(f"索引重建完成: {total_indexed} 條")
             return total_indexed
         finally:

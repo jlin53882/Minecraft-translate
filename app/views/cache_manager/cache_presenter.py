@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from .cache_types import ActionState, CacheUiState
 
+
 class CachePresenter:
     """Cache UI 的顯示層轉換器（Presenter）。
 

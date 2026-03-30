@@ -2,9 +2,6 @@
 
 用途：測試語言處理格式相關功能。
 """
-import pytest
-import re
-from unittest.mock import patch, Mock
 
 
 class TestConvertOnlyCjk:
@@ -191,20 +188,20 @@ class TestTranslateMarkdown:
     def test_plain_markdown(self):
         """測試普通 Markdown。"""
         from translation_tool.core.lang_processing_format import translate_markdown
-        
+
         def mock_translate(text, rules):
             return text.replace("測試", "測試翻譯")
-        
+
         result = translate_markdown("# 標題\n\n這是測試內容", mock_translate, None)
         assert isinstance(result, str)
 
     def test_patchouli_books_preserved(self):
         """測試 Patchouli 書籍保留 XML 標籤。"""
         from translation_tool.core.lang_processing_format import translate_markdown
-        
+
         def mock_translate(text, rules):
             return text
-        
+
         md_content = "<page>測試內容</page>"
         result = translate_markdown(md_content, mock_translate, None, file_path="assets/mod/patchouli_books/book/test.md")
         assert "<page>" in result
@@ -212,10 +209,10 @@ class TestTranslateMarkdown:
     def test_yaml_front_matter(self):
         """測試 YAML 前置內容。"""
         from translation_tool.core.lang_processing_format import translate_markdown
-        
+
         def mock_translate(text, rules):
             return text.replace("標題", "標題翻譯")
-        
+
         md = "---\ntitle: 標題\n---\n內容"
         result = translate_markdown(md, mock_translate, None)
         assert "---" in result
@@ -227,10 +224,10 @@ class TestTranslatePlainText:
     def test_basic_translation(self):
         """測試基本翻譯。"""
         from translation_tool.core.lang_processing_format import translate_plain_text
-        
+
         def mock_translate(text, rules):
             return text.replace("測試", "測試翻譯")
-        
+
         result = translate_plain_text("這是測試", mock_translate, None, "test.txt")
         assert "測試翻譯" in result
 

@@ -24,8 +24,8 @@ log_exception() 封裝：自動擷取 Traceback 堆疊資訊，專門用於追�
 from __future__ import annotations
 
 import logging
-import time
 import sys
+import time
 from typing import Any, Dict
 
 _THIS_MODULE = __name__

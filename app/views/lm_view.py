@@ -12,16 +12,15 @@ from typing import Any
 
 import flet as ft
 
+from app.logging import LogPresenter, load_ui_logging_config
+from app.services_impl.pipelines.lm_service import run_lm_translation_service
+from app.task_session import TaskSession
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug
 
 # UI 共用元件：統一卡片/按鈕樣式
 from app.ui.components import primary_button, styled_card
-
-from app.services_impl.pipelines.lm_service import run_lm_translation_service
-from app.task_session import TaskSession
-from app.logging import LogPresenter, load_ui_logging_config
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_debug, log_info
 
 LM_translate_folder_name = (
     load_config().get("lm_translator", {}).get("lm_translate_folder_name", "LM翻譯後")

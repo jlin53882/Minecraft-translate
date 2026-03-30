@@ -3,9 +3,7 @@
 測試目標：翻譯批次處理函數。
 """
 
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 class TestTranslateBatchSmart:

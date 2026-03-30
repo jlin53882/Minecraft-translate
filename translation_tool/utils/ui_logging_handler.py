@@ -6,6 +6,7 @@
 
 import logging
 
+
 class UISessionLogHandler(logging.Handler):
     """
     將 Python logging 訊息轉送到 TaskSession（UI）

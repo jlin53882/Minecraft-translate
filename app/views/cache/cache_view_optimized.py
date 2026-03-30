@@ -1,8 +1,9 @@
 # Cache View 優化版本
 # 提供髒標記 + 批次更新機制
 
-import flet as ft
 import threading
+
+import flet as ft
 
 
 class CacheViewOptimized(ft.Column):

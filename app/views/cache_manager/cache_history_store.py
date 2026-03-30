@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-
-from translation_tool.utils.log_unit import log_warning
 from datetime import datetime
 from pathlib import Path
+
+from translation_tool.utils.log_unit import log_warning
+
 
 def history_now_ts() -> str:
     """取得目前的 ISO 時間戳字串（時區Aware）。"""

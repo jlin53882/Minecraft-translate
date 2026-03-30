@@ -4,6 +4,7 @@ import flet as ft
 
 from app.ui.components import primary_button
 
+
 def build_card(view, title, controls_list):
     """建立一個包含標題與控制項的卡片 UI 元件。"""
     return ft.Card(

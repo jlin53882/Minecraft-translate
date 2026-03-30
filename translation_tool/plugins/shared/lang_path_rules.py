@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+
 def should_rename_to_zh_tw(src_path: Path, rename_langs: set[str]) -> bool:
     """判斷檔名是否為語系代碼並需要轉換為 zh_tw.json。"""
     name = src_path.name.lower()

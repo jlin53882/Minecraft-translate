@@ -6,16 +6,17 @@
 
 from __future__ import annotations
 
-import flet as ft
+import re
+import threading
 from typing import TYPE_CHECKING, Any
 
+import flet as ft
+
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
 
 # UI 共用元件：統一按鈕樣式
 from app.ui.components import primary_button, secondary_button
-import threading
-import re
+from translation_tool.utils.log_unit import log_info
 
 if TYPE_CHECKING:
     from app.views.rules.rules_state import RulesTableState
@@ -25,10 +26,13 @@ from app.views.rules.rules_actions import (
     calc_total_pages,
     start_reload_thread,
     start_save_thread,
+)
+from app.views.rules.rules_actions import (
     translate_regex_error as rules_translate_regex_error,
 )
 from app.views.rules.rules_state import RulesTableState
 from app.views.rules.rules_table import create_rule_row as rules_create_row
+
 
 class RulesView(ft.Column):
     """RulesView 類別。
@@ -52,14 +56,14 @@ class RulesView(ft.Column):
         self.current_page = self._state.current_page
         self.all_rules_data = []
         self.total_pages = self._state.total_pages
-        
+
         # --- 搜尋狀態（進階版）---
         self.search_results = None  # 搜尋結果（符合的 rule 物件列表）
         self.search_keyword = ""   # 當前搜尋關鍵字
         self.search_case_sensitive = False  # 大小寫區分
         self.search_regex = False           # Regex 模式
         self.search_current_idx = 0         # 當前導航位置
-        
+
         # Debounce timer
         self._search_debounce_timer = None
 
@@ -359,28 +363,28 @@ class RulesView(ft.Column):
         """根據關鍵字搜尋規則並更新顯示（進階版：過濾顯示 + 多欄位 + Regex）"""
         # Debounce: 延遲搜尋
         keyword = e.control.value
-        
+
         # 取消之前的計時器
         if self._search_debounce_timer is not None:
             try:
                 self._search_debounce_timer.cancel()
             except Exception:
                 pass
-        
+
         if not keyword.strip():
             # 清除搜尋，回覆顯示全部
             self._do_search("")
             return
-        
+
         # 設定新的 debounce 計時器（300ms）
         import threading
         self._search_debounce_timer = threading.Timer(0.3, lambda: self._do_search(keyword))
         self._search_debounce_timer.start()
-    
+
     def _do_search(self, keyword: str) -> None:
         """執行實際搜尋（Debounce 觸發）"""
         keyword = keyword.strip()
-        
+
         if not keyword:
             # 清除搜尋
             self.search_results = None
@@ -392,52 +396,52 @@ class RulesView(ft.Column):
             self._render_current_page()
             self._show_snack_bar("已清除搜尋，顯示全部規則", theme.BLUE_GREY_700)
             return
-        
+
         # 檢測 Regex 模式（以 / 開頭和結尾）
         use_regex = False
         search_keyword = keyword
-        
+
         if keyword.startswith("/") and keyword.endswith("/") and len(keyword) > 2:
             use_regex = True
             search_keyword = keyword[1:-1]  # 移除 /
-        
+
         self.search_keyword = search_keyword
         self.search_regex = use_regex
-        
+
         # 執行搜尋
         matched_rules = []
-        
+
         for rule in self.all_rules_data:
             if self._rule_matches(rule, search_keyword, use_regex):
                 matched_rules.append(rule)
-        
+
         self.search_results = matched_rules
         self.search_current_idx = 0
-        
+
         if not self.search_results:
             self._show_snack_bar("找不到符合的規則", theme.AMBER_700)
             self._render_current_page()
             return
-        
+
         # 顯示結果數量
         count = len(self.search_results)
         mode_text = "（正則）" if use_regex else ""
         self._show_snack_bar(f"找到 {count} 筆符合的規則{mode_text}", theme.BLUE_700)
-        
+
         # 強制回到第一頁
         self.current_page = 1
         self._render_current_page()
-    
+
     def _rule_matches(self, rule: dict, keyword: str, use_regex: bool) -> bool:
         """檢查規則是否符合搜尋條件"""
         # 搜尋欄位
         fields = ["from", "to", "comment", "category"]
-        
+
         for field in fields:
             value = rule.get(field, "")
             if not value:
                 continue
-            
+
             # Regex 模式
             if use_regex:
                 try:
@@ -447,7 +451,7 @@ class RulesView(ft.Column):
                 except re.error:
                     # Regex 錯誤，回退到普通搜尋
                     pass
-            
+
             # 普通搜尋模式
             if not self.search_case_sensitive:
                 if keyword.lower() in value.lower():
@@ -455,14 +459,17 @@ class RulesView(ft.Column):
             else:
                 if keyword in value:
                     return True
-        
+
         return False
 
     # ---------------------------------------------
     # 規則驗證模組
     # ---------------------------------------------
 
-    def validate_rule(self, src: str, dst: str, all_rules: list[dict[str, Any]], current_index: int) -> tuple[bool, str]:
+    def validate_rule(
+        self, src: str, dst: str, all_rules: list[dict[str, Any]],
+        current_index: int
+    ) -> tuple[bool, str]:
         """
         驗證規則格式正確性，回傳 (is_valid: bool, msg: str)
         """
@@ -553,7 +560,7 @@ class RulesView(ft.Column):
             display_data = self.all_rules_data
             total_count = len(self.all_rules_data)
             self.total_pages = calc_total_pages(total_count, self.page_size)
-        
+
         # 計算當前頁的資料範圍
         start = (self.current_page - 1) * self.page_size
         end = start + self.page_size
@@ -568,12 +575,12 @@ class RulesView(ft.Column):
                 rule["_rid"] = self._new_rid()
 
             rid = rule["_rid"]
-            
+
             # 計算在 all_rules_data 中的索引（用於刪除操作）
             try:
-                all_idx = self.all_rules_data.index(rule)
+                self.all_rules_data.index(rule)
             except ValueError:
-                all_idx = -1
+                pass
 
             row = self.create_rule_row(
                 rule.get("from", ""),
@@ -589,7 +596,7 @@ class RulesView(ft.Column):
         # 顯示搜尋結果數或總數
         if self.search_results is not None:
             total_rules = len(self.search_results)
-            status_text = f"（搜尋結果）"
+            status_text = "（搜尋結果）"
         else:
             total_rules = len(self.all_rules_data)
             status_text = ""

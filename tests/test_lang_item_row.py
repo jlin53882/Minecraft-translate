@@ -2,9 +2,6 @@
 
 用途：測試 LangItemRow 類別相關功能。
 """
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from pathlib import Path
 
 
 class TestToHalfwidth:
@@ -49,15 +46,14 @@ class TestLangItemRow:
     def test_init_basic(self):
         """測試基本初始化。"""
         from translation_tool.core.lang_item_row import LangItemRow
-        
+
         # 由於 LangItemRow 是 Flet 控件，需要圖形環境，
         # 我們只驗證類別可以被導入和基本屬性存在
         assert hasattr(LangItemRow, '__init__')
 
     def test_resolve_icon_with_reason_called(self):
         """測試圖標解析是否被調用。"""
-        from translation_tool.core.lang_item_row import LangItemRow
-        
+
         # 驗證 resolve_icon_with_reason 被導入
         from translation_tool.core.lang_item_row import resolve_icon_with_reason
         assert callable(resolve_icon_with_reason)

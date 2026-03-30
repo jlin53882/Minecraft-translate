@@ -3,9 +3,8 @@
 用途：驗證 CacheQueryPanel 元件的功能正確性。
 """
 
-import pytest
-from app.views.cache_query_panel import CacheQueryPanel
 from app.views.cache_manager.cache_state import CacheQueryState
+from app.views.cache_query_panel import CacheQueryPanel
 
 
 class _MockPage:

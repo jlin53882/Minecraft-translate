@@ -4,12 +4,14 @@
 維護注意：本模組依賴 qc_base.QCBase 與 run_untranslated_check_service。
 """
 
-import flet as ft
 from typing import List
-from app.views.qc_base import QCBase
+
+import flet as ft
+
 from app.services import run_untranslated_check_service
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
+from app.views.qc_base import QCBase
+from translation_tool.utils.log_unit import log_info
 
 
 class UntranslatedChecker(ft.Container):

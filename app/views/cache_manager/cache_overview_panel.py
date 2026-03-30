@@ -9,7 +9,9 @@ from __future__ import annotations
 import flet as ft
 
 from app.ui.components import styled_card
+
 from .cache_log_panel import build_log_panel
+
 
 def build_overview_page(
     *,

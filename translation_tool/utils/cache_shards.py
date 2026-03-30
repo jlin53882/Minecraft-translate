@@ -12,6 +12,7 @@ from typing import Any
 
 import orjson as json
 
+
 def _write_json_atomic(path: Path, data: dict[str, Any]):
     """以原子方式將 JSON 內容覆寫到 ``path``。
 

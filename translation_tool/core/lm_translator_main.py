@@ -7,19 +7,19 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 import requests
 
 from translation_tool.core.lm_api_client import call_gemini_requests
 from translation_tool.core.lm_config_rules import (
-    get_current_key_index,  # 取得目前 Key 索引（向後相容）
     get_current_api_key,  # 取得目前使用中的 key
+    get_current_key_index,  # 取得目前 Key 索引（向後相容）
     rotate_api_key,  # 輪替 key
 )
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
+from translation_tool.utils.log_unit import log_debug, log_error, log_info, log_warning
 
 if TYPE_CHECKING:
     pass
@@ -392,7 +392,8 @@ def translate_batch_smart_old(
         # [DEBUG] 記錄發送摘要
         first_path = current_batch[0]["path"] if current_batch else "N/A"
         log_debug(
-            f"[🔍 DEBUG] 準備發送 Payload: 總量={len(current_batch)} | ID 範圍: 0-{len(current_batch) - 1} | 起點: {first_path}"
+            f"[🔍 DEBUG] 準備發送 Payload: 總量={len(current_batch)} | "
+            f"ID 範圍: 0-{len(current_batch) - 1} | 起點: {first_path}"
         )
 
         payload: Dict[str, Any] = {
@@ -416,8 +417,10 @@ def translate_batch_smart_old(
         for i in model_indices:  # type: ignore[assignment]
             model_name = MODEL_POOL[i]  # type: ignore[index]
             try:
-                # print(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/{original_total} | 類型={'Lang' if is_lang else 'Patch'}")
-                # log_info(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/{original_total} | 類型={'Lang' if is_lang else 'Patch'}")
+                # print(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/"  # noqa: E501
+                #     f"{original_total} | 類型={'Lang' if is_lang else 'Patch'}")  # noqa: E501
+                # log_info(f"[→] 嘗試模型 {model_name} | Batch={batch_size}/"  # noqa: E501
+                #     f"{original_total} | 類型={'Lang' if is_lang else 'Patch'}")  # noqa: E501
 
                 profile_name = {
                     "lang": "Lang",

@@ -6,14 +6,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple, Any
 import time
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from translation_tool.utils.log_unit import log_info
-from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache, reload_translation_cache
-from translation_tool.utils.config_manager import load_config
 from translation_tool.core.lm_translator_shared_cache import CacheRule, get_default_cache_rules
+from translation_tool.utils.cache_manager import add_to_cache, reload_translation_cache, save_translation_cache
+from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_info
+
 
 @dataclass
 class TranslateLoopResult:

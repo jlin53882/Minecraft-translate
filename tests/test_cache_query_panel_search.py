@@ -3,10 +3,8 @@
 用途：驗證 CacheQueryPanel 搜尋功能。
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
-from app.views.cache_query_panel import CacheQueryPanel
 from app.views.cache_manager.cache_state import CacheQueryState
+from app.views.cache_query_panel import CacheQueryPanel
 
 
 class _MockPage:

@@ -8,17 +8,16 @@
 
 from __future__ import annotations
 
-import tkinter as tk
 import threading
+import tkinter as tk
 from tkinter import filedialog
-from typing import Any
 
 import flet as ft
 
-from app.ui import theme
 from app.services_impl.config_service import load_config_json
 from app.services_impl.pipelines.bundle_service import run_bundling_service
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
+from app.ui import theme
+from translation_tool.utils.log_unit import log_info
 
 
 class BundlerView(ft.Column):

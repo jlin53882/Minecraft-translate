@@ -6,10 +6,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional, Callable, Dict, Any
-import time
 import math
+import time
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional
 
 import orjson
 
@@ -26,12 +26,13 @@ from translation_tool.core.kubejs_translator_io import (
 from translation_tool.core.kubejs_translator_paths import resolve_kubejs_root_impl
 from translation_tool.core.lm_translator_shared import _get_default_batch_size
 from translation_tool.utils.log_unit import (
-    log_info,
-    log_debug,
-    progress,
     get_formatted_duration,
+    log_debug,
+    log_info,
+    progress,
 )
 from translation_tool.utils.text_processor import safe_convert_text
+
 
 def _is_filled_text(v: Any) -> bool:
     return is_filled_text_impl(v)

@@ -3,9 +3,8 @@
 用途：驗證 UntranslatedChecker 元件的功能正確性。
 """
 
-import pytest
-from app.views.untranslated_checker import UntranslatedChecker
 from app.views.qc_base import QCBase
+from app.views.untranslated_checker import UntranslatedChecker
 
 
 class _MockPage:
@@ -92,7 +91,7 @@ def test_untranslated_checker_registers_file_picker():
     # file_picker 不在 overlay 中
     assert file_picker not in page.overlay
 
-    checker = UntranslatedChecker(page, file_picker, task_runner)
+    UntranslatedChecker(page, file_picker, task_runner)
 
     # 建立後 file_picker 應該在 overlay 中
     assert file_picker in page.overlay

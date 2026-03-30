@@ -2,14 +2,13 @@
 """PR1-6 UI 优化功能测试。"""
 
 import flet as ft
-import pytest
 
 from app.ui import theme
 from app.ui.components import (
-    styled_card,
-    loading_state,
     empty_state,
     error_state,
+    loading_state,
+    styled_card,
 )
 
 
@@ -42,8 +41,9 @@ def test_keyboard_handler_class():
 
 def test_keyboard_handler_has_view_registry_param():
     """Verify KeyboardShortcutHandler has view_registry parameter."""
-    from app.ui.keyboard_shortcuts import KeyboardShortcutHandler
     import inspect
+
+    from app.ui.keyboard_shortcuts import KeyboardShortcutHandler
     sig = inspect.signature(KeyboardShortcutHandler.__init__)
     params = list(sig.parameters.keys())
     # Should have page, view_registry, change_view_callback

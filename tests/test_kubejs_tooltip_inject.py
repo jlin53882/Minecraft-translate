@@ -4,9 +4,8 @@
 """
 from __future__ import annotations
 
-import sys
 import json
-import re
+import sys
 from pathlib import Path
 
 # 確保可以導入翻譯工具模組
@@ -22,9 +21,9 @@ def test_resolve_kubejs_root_direct(tmp_path: Path) -> None:
     kubejs_dir = tmp_path / "kubejs"
     kubejs_dir.mkdir()
     (kubejs_dir / "test.js").write_text("// test")
-    
+
     result = kubejs_tooltip_inject.resolve_kubejs_root(str(kubejs_dir))
-    
+
     assert result == str(kubejs_dir)
 
 
@@ -35,16 +34,16 @@ def test_resolve_kubejs_root_nested(tmp_path: Path) -> None:
     kubejs_dir = root / "kubejs"
     kubejs_dir.mkdir()
     (kubejs_dir / "test.js").write_text("// test")
-    
+
     result = kubejs_tooltip_inject.resolve_kubejs_root(str(root))
-    
+
     assert result == str(kubejs_dir)
 
 
 def test_split_js_args(tmp_path: Path) -> None:
     """測試 split_js_args 解析參數。"""
     result = kubejs_tooltip_inject.split_js_args('"a", "b"')
-    
+
     assert len(result) == 2
     assert '"a"' in result
     assert '"b"' in result
@@ -53,7 +52,7 @@ def test_split_js_args(tmp_path: Path) -> None:
 def test_split_js_args_nested(tmp_path: Path) -> None:
     """測試 split_js_args 嵌套括號。"""
     result = kubejs_tooltip_inject.split_js_args('item.of("mt:pipe", {lvl:1}), 5')
-    
+
     assert len(result) == 2
 
 
@@ -69,7 +68,7 @@ def test_replace_text_in_text_obj(tmp_path: Path) -> None:
     result = kubejs_tooltip_inject.replace_text_in_text_obj(
         "Text.of('old')", "new"
     )
-    
+
     assert "new" in result
     assert "Text.of" in result
 
@@ -79,14 +78,14 @@ def test_replace_text_in_text_obj_red(tmp_path: Path) -> None:
     result = kubejs_tooltip_inject.replace_text_in_text_obj(
         'Text.red("warning")', "警告"
     )
-    
+
     assert "警告" in result
 
 
 def test_extract_array_strings(tmp_path: Path) -> None:
     """測試 extract_array_strings 提取陣列字串。"""
     result = kubejs_tooltip_inject.extract_array_strings('["a", "b"]')
-    
+
     assert result == ["a", "b"]
 
 
@@ -95,7 +94,7 @@ def test_replace_array(tmp_path: Path) -> None:
     result = kubejs_tooltip_inject.replace_array(
         '["old1", "old2"]', ["new1", "new2"]
     )
-    
+
     assert "new1" in result
     assert "new2" in result
 
@@ -123,7 +122,7 @@ def test_inject_basic_flow(tmp_path: Path) -> None:
     js_file = orig_root / "client_scripts" / "test.js"
     js_file.parent.mkdir(parents=True)
     js_file.write_text("event.add('minecraft:dirt', Text.of('dirty'))")
-    
+
     # 建立翻譯後的 JSON
     trans_root = tmp_path / "translated"
     trans_root.mkdir()
@@ -131,17 +130,17 @@ def test_inject_basic_flow(tmp_path: Path) -> None:
     json_file.write_text(json.dumps({
         "test.js|minecraft:dirt.0": "髒"
     }))
-    
+
     # 建立輸出目錄
     out_root = tmp_path / "output"
-    
+
     # 執行 inject
     result = kubejs_tooltip_inject.inject(
         str(orig_root),
         str(trans_root),
         str(out_root),
     )
-    
+
     # 驗證輸出
     assert result["patched_js_files"] >= 0
     assert result["translated_dir"] == str(trans_root)
@@ -152,13 +151,13 @@ def test_inject_with_lang_file(tmp_path: Path) -> None:
     # 建立原始目錄結構
     orig_root = tmp_path / "kubejs"
     orig_root.mkdir()
-    
+
     # 建立 lang 目錄
     lang_dir = orig_root / "lang"
     lang_dir.mkdir(parents=True)
     lang_file = lang_dir / "en_us.json"
     lang_file.write_text(json.dumps({"key": "value"}))
-    
+
     # 建立翻譯目錄
     trans_root = tmp_path / "translated"
     trans_root.mkdir()
@@ -166,16 +165,16 @@ def test_inject_with_lang_file(tmp_path: Path) -> None:
     trans_lang_dir.mkdir(parents=True)
     trans_lang_file = trans_lang_dir / "en_us.json"
     trans_lang_file.write_text(json.dumps({"key": "翻譯"}))
-    
+
     # 輸出目錄
     out_root = tmp_path / "output"
-    
+
     result = kubejs_tooltip_inject.inject(
         str(orig_root),
         str(trans_root),
         str(out_root),
     )
-    
+
     # 驗證 lang 檔案被寫入
     assert result["wrote_lang_files"] >= 0
 
@@ -187,18 +186,18 @@ def test_inject_missing_js_file(tmp_path: Path) -> None:
     trans_root.mkdir()
     json_file = trans_root / "nonexistent.json"
     json_file.write_text(json.dumps({"key": "value"}))
-    
+
     # 原始目錄（沒有 JS 檔案）
     orig_root = tmp_path / "kubejs"
     orig_root.mkdir()
-    
+
     out_root = tmp_path / "output"
-    
+
     result = kubejs_tooltip_inject.inject(
         str(orig_root),
         str(trans_root),
         str(out_root),
     )
-    
+
     # 應該正常處理，不拋出例外
     assert result is not None

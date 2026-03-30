@@ -13,8 +13,9 @@
 
 from __future__ import annotations
 
-import flet as ft
 from typing import TYPE_CHECKING, Any
+
+import flet as ft
 
 from app.ui import theme
 from translation_tool.utils.log_unit import log_info
@@ -28,12 +29,19 @@ from app.task_session import TaskSession
 from app.views.extractor.extractor_actions import (
     build_preview_error_dialog,
     build_preview_result_dialog,
-    show_preview as run_preview_flow,
-    start_extraction as run_extraction_flow,
-    start_ui_poller as run_ui_poller,
     update_stats_from_log,
 )
-from app.views.extractor.extractor_panels import build_logs_card, build_settings_card, build_pick_button
+from app.views.extractor.extractor_actions import (
+    show_preview as run_preview_flow,
+)
+from app.views.extractor.extractor_actions import (
+    start_extraction as run_extraction_flow,
+)
+from app.views.extractor.extractor_actions import (
+    start_ui_poller as run_ui_poller,
+)
+from app.views.extractor.extractor_panels import build_logs_card, build_pick_button, build_settings_card
+
 
 class ExtractorView(ft.Column):
     """JAR 提取頁（UI）。

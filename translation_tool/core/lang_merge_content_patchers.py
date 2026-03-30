@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import os
 import zipfile
-from typing import Any, Dict, Callable
+from typing import Any, Callable, Dict
 
-from ..utils.log_unit import log_info, log_warning, log_error, log_debug
+from ..utils.log_unit import log_debug, log_error, log_info, log_warning
 
 
 def patch_localized_content_json_impl(

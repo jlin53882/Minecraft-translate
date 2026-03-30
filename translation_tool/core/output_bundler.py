@@ -6,11 +6,11 @@
 
 # /minecraft_translator_flet/translation_tool/core/output_bundler.py (新檔案)
 
-import os
-import zipfile
 import logging
+import os
 import time
-from typing import Dict, Any, Generator
+import zipfile
+from typing import Any, Dict, Generator
 
 # --- 導入我們自訂的工具 ---
 from ..utils.config_manager import load_config
@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 def _add_folder_to_zip(zip_file: zipfile.ZipFile, folder_path: str, base_path_in_zip: str) -> int:
     """
     將一個資料夾中的所有內容（含子資料夾）加入到 ZIP 檔案中。
-    
+
     :param zip_file: zipfile.ZipFile 物件
     :param folder_path: 要加入的來源資料夾 (例如 "output/zh_tw_generated")
     :param base_path_in_zip: 檔案在 ZIP 中應有的基礎路徑 (例如 "assets")
@@ -40,27 +40,27 @@ def _add_folder_to_zip(zip_file: zipfile.ZipFile, folder_path: str, base_path_in
             relative_path = os.path.relpath(file_path, folder_path)
             # 組合成最終在 ZIP 中的路徑
             archive_name = os.path.join(base_path_in_zip, relative_path)
-            
+
             # 將反斜線替換為正斜線，確保 ZIP 格式的相容性
             archive_name = archive_name.replace('\\', '/')
-            
+
             zip_file.write(file_path, archive_name)
             added_count += 1
-            
+
     return added_count
 
 def bundle_outputs_generator(input_root_dir: str, output_zip_path: str) -> Generator[Dict[str, Any], None, None]:
     """
-    (核心打包函式) 
+    (核心打包函式)
     根據 load_config().json 的設定，從多個來源資料夾收集檔案，
     並打包成一個單一的 .zip 檔案。
     """
     start_time = time.time()
-    
+
     # 讀取打包設定
     bundle_cfg = load_config().get("output_bundler", {})
     source_folders_map = bundle_cfg.get("source_folders", {})
-    
+
     if not source_folders_map:
         yield {"progress": 1.0, "log": "錯誤：load_config().json 中未定義 'output_bundler.source_folders'。無法打包。", "error": True}
         return
@@ -70,22 +70,22 @@ def bundle_outputs_generator(input_root_dir: str, output_zip_path: str) -> Gener
 
     try:
         with zipfile.ZipFile(output_zip_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-            
+
             total_steps = len(source_folders_map)
             step = 0
-            
+
             # 遍歷 config 中定義的所有來源
             # 例如: "assets": "zh_tw_generated"
             # "root_files": "pack_mcmeta"
             for base_path_in_zip, folder_name in source_folders_map.items():
                 step += 1
                 progress = step / total_steps
-                
+
                 # 來源資料夾的完整路徑
                 full_source_path = os.path.join(input_root_dir, folder_name)
-                
+
                 yield {"progress": progress - 0.1, "log": f"正在掃描來源: '{folder_name}'..."}
-                
+
                 if not os.path.exists(full_source_path):
                     log_msg = f"警告：找不到來源資料夾 '{folder_name}' (路徑: {full_source_path})，將略過。"
                     yield {"progress": progress, "log": log_msg}
@@ -96,7 +96,7 @@ def bundle_outputs_generator(input_root_dir: str, output_zip_path: str) -> Gener
                     base_path_in_zip = '' # 設為空字串
 
                 count = _add_folder_to_zip(zf, full_source_path, base_path_in_zip)
-                
+
                 if count > 0:
                     log_msg = f"成功從 '{folder_name}' 加入 {count} 個檔案到 '{base_path_in_zip}/'。"
                     total_files_added += count

@@ -21,12 +21,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import List, Optional
-import hashlib
 
 # ========= 你那套 § 指令行（遇到就切段，且本行不納入段落翻譯） =========
 # 你貼的內容常見：§align, §stack, §rule, §recipe, §entity

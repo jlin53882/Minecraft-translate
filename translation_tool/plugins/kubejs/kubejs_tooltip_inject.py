@@ -4,13 +4,14 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import os
 import json
+import os
 import re
 from collections import defaultdict
-
 from pathlib import Path
-from translation_tool.utils.log_unit import log_info, log_error
+
+from translation_tool.utils.log_unit import log_error, log_info
+
 
 def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
     """

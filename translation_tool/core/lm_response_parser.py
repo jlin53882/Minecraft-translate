@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 
+
 def safe_json_loads(text: str):
     """
 

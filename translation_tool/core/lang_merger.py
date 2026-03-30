@@ -13,10 +13,11 @@ from collections import defaultdict
 from typing import Any, Dict, Generator, List
 
 from ..utils.config_manager import load_config
-from ..utils.log_unit import log_error, log_info, log_warning, log_debug, log_exception
+from ..utils.log_unit import log_debug, log_error, log_exception, log_info, log_warning
 from ..utils.text_processor import load_replace_rules
 from .lang_merge_content import _process_content_or_copy_file, export_filtered_pending, remove_empty_dirs
 from .lang_merge_pipeline import _process_single_mod
+
 
 def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang: bool = False ) -> Generator[Dict[str, Any], None, None]:
     """將 ZIP 檔案中的簡體中文合併為繁體中文。
@@ -59,8 +60,8 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
         full_path = os.path.abspath(zip_file) # 取得絕對路徑，方便除錯
         log_warning(f"檔案不存在，已跳過: {full_path}")
         yield {
-            "progress": 1.0, 
-            #"log": f"跳過：找不到檔案 {full_path}", 
+            "progress": 1.0,
+            #"log": f"跳過：找不到檔案 {full_path}",
             "error": False  # 設為 False 是為了讓程式繼續執行下一個任務而不中斷
         }
         return # 直接結束這個產生器，不執行後面的 ZipFile 開啟動作
@@ -96,13 +97,13 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
             #        #    other_files.append(normalized)
             #    else:
             #        other_files.append(normalized)
-                    
+
 
             for file_path in zf.namelist():
                 normalized = file_path.replace("\\", "/")
                 if normalized.endswith("/") or not normalized:
                     continue
-                
+
                 norm_low = normalized.lower()
 
                 if "/lang/" in norm_low and (norm_low.endswith(".json") or norm_low.endswith(".lang")):
@@ -143,10 +144,10 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
 
             futures = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                
+
                 # ✅ 優化點：在啟動 ThreadPool 前，先完成一次性的路徑標準化快取
                 all_files_cache = [n.lower().replace("\\", "/") for n in zf.namelist()]
-                
+
                 # 提交每個 mod 的處理（這裡每個 mod 的 paths 會包含 zh_cn/zh_tw/en_us 任一或多個）
                 for mod_key, paths in mods_to_process.items():
                     futures.append(executor.submit(_process_single_mod, zf, paths, rules, lang_output_dir, must_translate_dir))

@@ -9,11 +9,11 @@ from __future__ import annotations
 import orjson as json
 
 from ..utils.config_manager import load_config
-from ..utils.log_unit import log_info, log_warning, log_error, log_debug
-from ..utils.text_processor import apply_replace_rules  # noqa: F401
-from ..utils.text_processor import recursive_translate_dict
+from ..utils.text_processor import (
+    apply_replace_rules,  # noqa: F401
+    recursive_translate_dict,
+)
 from .lang_codec import normalize_patchouli_book_root
-from .lang_processing_format import get_text_processor
 from .lang_merge_content_copy import process_content_or_copy_file_impl
 from .lang_merge_content_patchers import patch_localized_content_json_impl
 from .lang_merge_pending import export_filtered_pending_impl, remove_empty_dirs_impl
@@ -23,6 +23,8 @@ from .lang_merge_zip_io import (
     _write_text_atomic,
     quarantine_copy_from_zip,
 )
+from .lang_processing_format import get_text_processor
+
 
 def _patch_localized_content_json(
     zf,
@@ -42,7 +44,7 @@ def _patch_localized_content_json(
         recursive_translate_dict_fn=recursive_translate_dict,
         quarantine_copy_from_zip_fn=quarantine_copy_from_zip,
         json_module=json,
-        
+
     )
 
 def _process_content_or_copy_file(

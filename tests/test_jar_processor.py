@@ -3,23 +3,20 @@
 用途：測試 jar_processor.py 的主要導出函數與常數。
 """
 
-import pytest
-import re
 import os
+import re
 import zipfile
-import tempfile
 from pathlib import Path
 
 from translation_tool.core.jar_processor import (
-    find_jar_files,
-    extract_lang_files_generator,
-    extract_book_files_generator,
-    preview_extraction_generator,
-    ExtractionSummary,
-    generate_preview_report,
     BOOK_PATH_REGEX_DUAL_STRUCTURE,
-    get_lang_codes,
+    ExtractionSummary,
     build_lang_file_regex,
+    extract_book_files_generator,
+    extract_lang_files_generator,
+    generate_preview_report,
+    get_lang_codes,
+    preview_extraction_generator,
 )
 
 

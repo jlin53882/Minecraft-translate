@@ -19,8 +19,8 @@ import flet as ft
 from app.services_impl.cache.cache_services import (
     cache_get_entry_service,
     cache_get_overview_service,
-    cache_update_dst_service,
     cache_save_all_service,
+    cache_update_dst_service,
 )
 from translation_tool.utils.log_unit import log_error, log_warning
 
@@ -911,7 +911,7 @@ class CacheShardView(ft.Column):
             self._notify("請先選擇分片與 key", "warn")
             return
 
-        old_dst = str(self.shard_dst_original or "")
+        str(self.shard_dst_original or "")
         new_dst = str(self.shard_dst_field.value or "")
 
         try:

@@ -1,8 +1,7 @@
 import threading
 import time
 
-from translation_tool.utils import cache_manager
-from translation_tool.utils import cache_search, cache_store
+from translation_tool.utils import cache_manager, cache_search, cache_store
 
 
 def _reset_cache_state():

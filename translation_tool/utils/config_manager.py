@@ -13,12 +13,13 @@
 
 # /minecraft_translator_flet/translator_tool/utils/config_manager.py (最終修正版)
 
-import os
+import copy
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
-import copy
+
 
 # PR27：統一路徑解析基準，避免 legacy cwd 依賴造成找不到 config / 資源檔。
 def get_project_root() -> Path:

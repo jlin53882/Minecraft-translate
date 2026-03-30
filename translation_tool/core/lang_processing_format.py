@@ -6,14 +6,14 @@
 
 # /minecraft_translator_flet/translation_tool/core/lang_processing_format.py
 import re
-from typing import Callable, Optional, Any, Dict
+import threading
+from typing import Any, Callable, Dict, Optional
+
 import opencc  # 導入 OpenCC 庫
 import orjson as json
-import threading
 
-from ..utils.log_unit import log_info, log_warning, log_error, log_debug, log_exception
+from ..utils.log_unit import log_debug
 from ..utils.text_processor import apply_replace_rules
-
 
 # 初始化 OpenCC 實例
 converter = opencc.OpenCC("s2twp")
@@ -68,7 +68,7 @@ def convert_only_cjk(text: str, rules=None) -> str:
         # 抓到的一整串中文字
         """
 
-    
+
         """
         cjk_chunk = match.group(1)
         # 整串丟給 OpenCC，這樣「内存」才會變「記憶體」

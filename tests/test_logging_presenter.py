@@ -5,9 +5,8 @@ PR1：Logging Core Foundation — LogPresenter 單元測試。
 
 from __future__ import annotations
 
-import pytest
-from app.logging.task_session import TaskSession
 from app.logging.log_presenter import LogPresenter
+from app.logging.task_session import TaskSession
 
 
 class MockListView:

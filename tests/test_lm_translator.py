@@ -3,9 +3,7 @@
 測試目標：翻譯目錄生成器。
 """
 
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 class TestTranslateDirectoryGenerator:
@@ -32,7 +30,7 @@ class TestTranslateDirectoryGenerator:
         input_dir = tmp_path / "input"
         output_dir = tmp_path / "output"
         input_dir.mkdir()
-        
+
         lang_dir = input_dir / "lang"
         lang_dir.mkdir()
         lang_file = lang_dir / "en_us.json"
@@ -44,7 +42,7 @@ class TestTranslateDirectoryGenerator:
             {str(lang_file): {"test.key": "Hello"}},
             [{"path": "test.key", "text": "Hello", "source_text": "Hello", "cache_type": "lang", "file": str(lang_file)}]
         )
-        
+
         # Mock translate_batch_smart 避免真實 API 呼叫
         mock_translate.return_value = (
             [{"path": "test.key", "text": "你好", "file": str(lang_file), "source_text": "Hello", "cache_type": "lang"}],
@@ -70,14 +68,14 @@ class TestTranslateDirectoryGenerator:
 
         input_dir = tmp_path / "input"
         input_dir.mkdir()
-        
+
         lang_dir = input_dir / "lang"
         lang_dir.mkdir()
         lang_file = lang_dir / "en_us.json"
         lang_file.write_text("{}")
 
         mock_scan.return_value = ([], [lang_file], [lang_file])
-        
+
         result = scan_translatable_files(str(input_dir))
 
         assert len(result) == 3  # (books, lang_files, patchouli)
@@ -89,7 +87,7 @@ class TestFormatDuration:
     def test_format_duration_seconds_basic(self):
         """測試基本秒數格式化"""
         from translation_tool.core.lm_translator import format_duration_seconds
-        
+
         result = format_duration_seconds(75)
         assert "1 分" in result
         assert "15 秒" in result
@@ -97,6 +95,6 @@ class TestFormatDuration:
     def test_format_duration_seconds_hours(self):
         """測試小時格式化"""
         from translation_tool.core.lm_translator import format_duration_seconds
-        
+
         result = format_duration_seconds(3661)
         assert "1 小時" in result

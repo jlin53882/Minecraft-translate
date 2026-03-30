@@ -12,6 +12,7 @@ import requests
 
 from translation_tool.utils.config_manager import load_config
 
+
 def call_gemini_requests(
     *,
     model_name: str,

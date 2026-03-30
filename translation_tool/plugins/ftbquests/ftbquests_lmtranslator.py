@@ -16,43 +16,38 @@
 
 from __future__ import annotations
 
+import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import math
-
-from translation_tool.core.lm_translator_main import translate_batch_smart
+from typing import Any, Dict, List, Optional, Tuple
 
 from translation_tool.core.lm_config_rules import validate_api_keys
-
-from translation_tool.utils.config_manager import load_config
-
+from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_translator_shared import (
-    fast_split_items_by_cache,  # ✅ 新增：高速分流
-    translate_items_with_cache_loop,
     CacheRule,
     TouchSet,  # ✅ 新增：touched/flush
     TranslationRecorder,  # ✅ 新增：翻譯記錄
-    write_dry_run_preview,  # ✅ 新增：dry-run preview 檔
-    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
-    _is_valid_hit,  # ✅ 新增：cache hit 判斷
     _get_default_batch_size,
+    _is_valid_hit,  # ✅ 新增：cache hit 判斷
+    fast_split_items_by_cache,  # ✅ 新增：高速分流
+    translate_items_with_cache_loop,
+    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
+    write_dry_run_preview,  # ✅ 新增：dry-run preview 檔
 )
-
 from translation_tool.plugins.shared.json_io import (
+    collect_json_files,
     read_json_dict,
     write_json_dict,
-    collect_json_files,
 )
 from translation_tool.plugins.shared.lang_path_rules import (
     compute_output_path,
 )
 from translation_tool.plugins.shared.lang_text_rules import is_already_zh
-
+from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import (
-    log_info,
     log_error,
+    log_info,
 )
 
 # -------------------------

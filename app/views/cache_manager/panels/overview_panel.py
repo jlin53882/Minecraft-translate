@@ -4,6 +4,7 @@
 """
 
 import flet as ft
+
 from app.ui.components import styled_card
 
 

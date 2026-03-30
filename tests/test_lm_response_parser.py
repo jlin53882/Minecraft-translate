@@ -2,11 +2,12 @@
 
 用途：測試 LM 回應解析器相關功能。
 """
+
 import pytest
-import json
+
 from translation_tool.core.lm_response_parser import (
-    safe_json_loads,
     chunked,
+    safe_json_loads,
 )
 
 
@@ -119,8 +120,8 @@ class TestModuleExports:
     def test_exports(self):
         """測試導出的函數。"""
         from translation_tool.core.lm_response_parser import (
-            safe_json_loads,
             chunked,
+            safe_json_loads,
         )
         assert callable(safe_json_loads)
         assert callable(chunked)

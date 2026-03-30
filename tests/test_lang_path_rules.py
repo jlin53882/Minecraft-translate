@@ -20,7 +20,7 @@ def test_should_rename_to_zh_tw_true(tmp_path: Path) -> None:
     # 測試 en_us.json
     path = Path("en_us.json")
     rename_langs = {"en_us", "zh_cn", "zh_tw"}
-    
+
     assert lang_path_rules.should_rename_to_zh_tw(path, rename_langs) is True
 
 
@@ -28,7 +28,7 @@ def test_should_rename_to_zh_tw_false_not_json(tmp_path: Path) -> None:
     """測試 should_rename_to_zh_tw 不是 JSON 檔案的情況。"""
     path = Path("en_us.txt")
     rename_langs = {"en_us", "zh_cn", "zh_tw"}
-    
+
     assert lang_path_rules.should_rename_to_zh_tw(path, rename_langs) is False
 
 
@@ -36,7 +36,7 @@ def test_should_rename_to_zh_tw_false_not_lang_code(tmp_path: Path) -> None:
     """測試 should_rename_to_zh_tw 不是語系代碼的情況。"""
     path = Path("something.json")
     rename_langs = {"en_us", "zh_cn", "zh_tw"}
-    
+
     assert lang_path_rules.should_rename_to_zh_tw(path, rename_langs) is False
 
 
@@ -44,7 +44,7 @@ def test_should_rename_to_zh_tw_case_insensitive(tmp_path: Path) -> None:
     """測試 should_rename_to_zh_tw 大小寫不敏感。"""
     path = Path("EN_US.json")
     rename_langs = {"en_us", "zh_cn", "zh_tw"}
-    
+
     assert lang_path_rules.should_rename_to_zh_tw(path, rename_langs) is True
 
 
@@ -52,7 +52,7 @@ def test_should_rename_to_zh_tw_not_in_rename_langs(tmp_path: Path) -> None:
     """測試 should_rename_to_zh_tw 不在 rename_langs 中。"""
     path = Path("ru_ru.json")
     rename_langs = {"en_us", "zh_cn", "zh_tw"}
-    
+
     assert lang_path_rules.should_rename_to_zh_tw(path, rename_langs) is False
 
 
@@ -81,18 +81,18 @@ def test_is_lang_code_segment_case_insensitive(tmp_path: Path) -> None:
 def test_replace_lang_folder_with_zh_tw(tmp_path: Path) -> None:
     """測試 replace_lang_folder_with_zh_tw 替換語系資料夾。"""
     rel = Path("config") / "lang" / "en_us" / "file.json"
-    
+
     result = lang_path_rules.replace_lang_folder_with_zh_tw(rel)
-    
+
     assert result == Path("config") / "lang" / "zh_tw" / "file.json"
 
 
 def test_replace_lang_folder_with_zh_tw_multiple_segments(tmp_path: Path) -> None:
     """測試 replace_lang_folder_with_zh_tw 多個語系段落。"""
     rel = Path("en_us") / "sub" / "zh_cn" / "file.json"
-    
+
     result = lang_path_rules.replace_lang_folder_with_zh_tw(rel)
-    
+
     # 應該只替換第一個遇到的語系段落
     assert "zh_tw" in result.parts
 
@@ -100,9 +100,9 @@ def test_replace_lang_folder_with_zh_tw_multiple_segments(tmp_path: Path) -> Non
 def test_replace_lang_folder_with_zh_tw_no_lang(tmp_path: Path) -> None:
     """測試 replace_lang_folder_with_zh_tw 無語系資料夾。"""
     rel = Path("config") / "file.json"
-    
+
     result = lang_path_rules.replace_lang_folder_with_zh_tw(rel)
-    
+
     assert result == Path("config") / "file.json"
 
 
@@ -112,15 +112,15 @@ def test_compute_output_path_basic(tmp_path: Path) -> None:
     in_dir = tmp_path / "input"
     out_dir = tmp_path / "output"
     rename_langs = {"en_us"}
-    
+
     in_dir.mkdir(parents=True)
     (in_dir / src_path).parent.mkdir(parents=True)
     (in_dir / src_path).write_text("{}")
-    
+
     result = lang_path_rules.compute_output_path(
         in_dir / src_path, in_dir, out_dir, rename_langs
     )
-    
+
     # 應該替換語系資料夾和檔名
     result_str = str(result)
     assert "zh_tw" in result_str
@@ -132,16 +132,16 @@ def test_compute_output_path_preserve_structure(tmp_path: Path) -> None:
     in_dir = tmp_path / "input"
     out_dir = tmp_path / "output"
     rename_langs = {"en_us"}
-    
+
     in_dir.mkdir(parents=True)
     full_src = in_dir / src_path
     full_src.parent.mkdir(parents=True)
     full_src.write_text("{}")
-    
+
     result = lang_path_rules.compute_output_path(
         full_src, in_dir, out_dir, rename_langs
     )
-    
+
     assert "subdir1" in result.parts
     assert "subdir2" in result.parts
     assert "zh_tw.json" == result.name
@@ -153,15 +153,15 @@ def test_compute_output_path_no_rename_needed(tmp_path: Path) -> None:
     in_dir = tmp_path / "input"
     out_dir = tmp_path / "output"
     rename_langs = {"en_us"}
-    
+
     in_dir.mkdir(parents=True)
     full_src = in_dir / src_path
     full_src.parent.mkdir(parents=True)
     full_src.write_text("{}")
-    
+
     result = lang_path_rules.compute_output_path(
         full_src, in_dir, out_dir, rename_langs
     )
-    
+
     # 應該保留原檔名
     assert result.name == "custom.json"

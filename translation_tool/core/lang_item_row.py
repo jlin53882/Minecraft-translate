@@ -4,14 +4,16 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import flet as ft
+import unicodedata
 from pathlib import Path
 from typing import Callable
-import unicodedata
+
+import flet as ft
 
 from translation_tool.core.icon_preview_cache import generate_icon_preview
-from translation_tool.core.icon_resolver import resolve_icon_with_reason
 from translation_tool.core.icon_reason import IconRisk
+from translation_tool.core.icon_resolver import resolve_icon_with_reason
+
 
 def to_halfwidth(text):
     """將字串轉換為半形。"""

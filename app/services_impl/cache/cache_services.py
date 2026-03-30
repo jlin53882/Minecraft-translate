@@ -18,6 +18,7 @@ from typing import Any, Dict
 from translation_tool.utils import cache_manager
 from translation_tool.utils.log_unit import log_error, log_warning
 
+
 def cache_get_overview_service() -> Dict[str, Any]:
     """取得目前所有翻譯快取（cache）的整體概覽資訊。"""
 
