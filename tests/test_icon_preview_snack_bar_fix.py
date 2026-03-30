@@ -91,8 +91,8 @@ class TestSnackBarInPlaceModification:
         assert len(snackbars) == 1, f"預期 1 個，實際 {len(snackbars)} 個（accumulation bug）"
         assert snackbars[0].content.value == "message 4"  # 最後一個
 
-    def test_snack_bar_no_page_update_if_raised(self):
-        """_show_snack 不應在正常情況下 raise Exception"""
+    def test_snack_bar_calls_page_update_on_success(self):
+        """_show_snack 正常結束後應呼叫 page.update()"""
         page = MockPage()
 
         from app.views.icon_preview_view import IconPreviewView
@@ -101,6 +101,6 @@ class TestSnackBarInPlaceModification:
             view = IconPreviewView.__new__(IconPreviewView)
             view.page = page
 
-        # 不應 raise
+        # 不應 raise，page.update() 應該被呼叫
         view._show_snack("test", color=theme.GREEN_600)
         assert page.update_called is True

@@ -117,16 +117,16 @@ class TestZhTwDualTrack:
         """Track 2 應該補上 Track 1 找不到的項目"""
         review_dir = tmp_path / "review"
 
-        # Track 1：直接路徑只有 key1
-        direct_dir = review_dir / "assets" / "mod" / "lang"
+        # Track 1：直接路徑 review_root/modid/lang/zh_tw.json（無 assets 前綴）
+        direct_dir = review_dir / "actuallyadditions" / "lang"
         direct_dir.mkdir(parents=True)
         (direct_dir / "zh_tw.json").write_text(
             json.dumps({"key1": "value from direct"}),
             encoding="utf-8",
         )
 
-        # Track 2：在其他地方找到 key2
-        nested_dir = review_dir / "other" / "mod" / "lang"
+        # Track 2：在其他地方找到 key2（rglob fallback）
+        nested_dir = review_dir / "other" / "actuallyadditions" / "lang"
         nested_dir.mkdir(parents=True)
         (nested_dir / "zh_tw.json").write_text(
             json.dumps({"key2": "value from rglob fallback"}),
@@ -134,13 +134,16 @@ class TestZhTwDualTrack:
         )
 
         # 驗證：兩個來源都應該被找到
-        direct_file = review_dir / "mod" / "lang" / "zh_tw.json"
-        found_all = list(review_dir.rglob("zh_tw.json"))
+        # Track 1 直接路徑（無 assets 前綴）
+        modid = "actuallyadditions"
+        direct_file = review_dir / modid / "lang" / "zh_tw.json"
+        assert direct_file.exists() is True, "Track 1 直接路徑應該存在"
 
-        # 合併兩個來源
+        # 合併兩個來源（真實邏輯）
         zh_map = {}
         if direct_file.exists():
             zh_map.update(json.loads(direct_file.read_text(encoding="utf-8")))
+        # Track 2 rglob fallback（排除已讀取過的 direct_file）
         for zh_file in review_dir.rglob("zh_tw.json"):
             if zh_file != direct_file:
                 zh_map.update(json.loads(zh_file.read_text(encoding="utf-8")))

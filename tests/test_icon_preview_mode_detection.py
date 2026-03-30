@@ -101,8 +101,8 @@ class TestDetectSourceMode:
 
         # 邏輯：jar_count > 0 AND extracted_count == 0 → jar_directory
         # 由於 en_us.json 存在於 rglob，所以 extracted_count > 0
-        # 結果應該是 extracted_folder（因為兩者都有）
-        assert mode in ("jar_directory", "extracted_folder")
+        # 結果應該是 extracted_folder（rglob 有找到 en_us.json）
+        assert mode == "extracted_folder", f"en_us.json 存在，應為 extracted_folder，實際為 '{mode}'"
 
     def test_detect_both_jars_and_en_us(self, tmp_path):
         """同時有 JAR 和 en_us.json → extracted_folder（en_us 優先）"""
