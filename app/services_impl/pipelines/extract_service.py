@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import logging
 import traceback
+from typing import Any, Dict
 
 from app.services_impl.logging_service import (
     GLOBAL_LOG_LIMITER,
     UI_LOG_HANDLER,
 )
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
+from app.logging.task_session import TaskSession
 from translation_tool.core.jar_processor import (
     extract_book_files_generator,
     extract_lang_files_generator,
@@ -22,7 +24,11 @@ from translation_tool.core.jar_processor import (
 logger = logging.getLogger(__name__)
 
 
-def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
+def run_lang_extraction_service(
+    mods_dir: str,
+    output_dir: str,
+    session: TaskSession,
+) -> None:
     """執行語言檔擷取服務。"""
     ensure_pipeline_logging()
     try:
@@ -30,7 +36,7 @@ def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
         UI_LOG_HANDLER.set_session(session)
 
         for update in extract_lang_files_generator(mods_dir, output_dir):
-            filtered = GLOBAL_LOG_LIMITER.filter(update)
+            filtered: Dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
             if filtered is None:
                 continue
 
@@ -44,7 +50,7 @@ def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
                 session.set_error()
                 return
         # for loop 結束後
-        final = GLOBAL_LOG_LIMITER.flush()
+        final: Dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
         if final and "log" in final:
             session.add_log(final["log"])
         session.finish()
@@ -60,7 +66,11 @@ def run_lang_extraction_service(mods_dir: str, output_dir: str, session):
         UI_LOG_HANDLER.set_session(None)
 
 
-def run_book_extraction_service(mods_dir: str, output_dir: str, session):
+def run_book_extraction_service(
+    mods_dir: str,
+    output_dir: str,
+    session: TaskSession,
+) -> None:
     """執行書本檔擷取服務。"""
     ensure_pipeline_logging()
     try:
@@ -68,7 +78,7 @@ def run_book_extraction_service(mods_dir: str, output_dir: str, session):
         UI_LOG_HANDLER.set_session(session)
 
         for update in extract_book_files_generator(mods_dir, output_dir):
-            filtered = GLOBAL_LOG_LIMITER.filter(update)
+            filtered: Dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
             if filtered is None:
                 continue
 
@@ -82,7 +92,7 @@ def run_book_extraction_service(mods_dir: str, output_dir: str, session):
                 session.set_error()
                 return
 
-        final = GLOBAL_LOG_LIMITER.flush()
+        final: Dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
         if final and "log" in final:
             session.add_log(final["log"])
         session.finish()
