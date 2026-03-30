@@ -181,7 +181,7 @@ class IconPreviewView(ft.Column):
             self._show_snack("✅ 原文資料夾已設定", color=theme.GREEN_600)
         else:
             log_warning("[IconPreview] 原文資料夾選擇已取消")
-            self._show_snack("⚠️ 原文資料夾選擇已取消", color=theme.ORANGE_700)
+            self._show_snack("⚠️ 原文資料夾選擇已取消", color=theme.WARNING)
 
     def _on_pick_review(self, e: ft.FilePickerResultEvent):
         """處理校對目錄選擇結果"""
@@ -193,7 +193,7 @@ class IconPreviewView(ft.Column):
             self._show_snack("✅ 校對資料夾已設定", color=theme.GREEN_600)
         else:
             log_warning("[IconPreview] 校對資料夾選擇已取消")
-            self._show_snack("⚠️ 校對資料夾選擇已取消", color=theme.ORANGE_700)
+            self._show_snack("⚠️ 校對資料夾選擇已取消", color=theme.WARNING)
 
     def _update_load_state(self):
         """更新載入按鈕的啟用狀態"""
