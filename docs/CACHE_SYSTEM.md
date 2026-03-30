@@ -16,7 +16,9 @@
 |------|------|------|
 | CacheRuntimeState | `cache_store.py` | 持有翻譯快取本體（thread-safe dict） |
 | cache_manager | `cache_manager.py` | 公開 API façade，協調載入/儲存/查詢 |
-| cache_search | `cache_search.py` | SQLite FTS5 全文搜尋引擎 |
+| cache_search | `cache_search.py` | SQLite FTS5 全文搜尋引擎（低層實作） |
+| cache_search_facade | `cache_search_facade.py` | 搜尋 API façade，封裝 FTS5 / 模糊比對 |
+| cache_overview | `cache_overview.py` | cache 概覽（各 type 統計資訊）建構 |
 | cache_loader | `cache_loader.py` | 從磁碟讀取 cache 檔案 |
 | cache_shards | `cache_shards.py` | 滾動分片管理（每片 2500 筆） |
 
@@ -88,7 +90,15 @@ lm_translator_main 翻譯一個 key:
 
 ## 搜尋功能
 
-`cache_search.py` 提供兩種搜尋：
+`cache_search_facade.py` 封裝兩種搜尋，對外統一 API：
+
+| 功能 | 實作 | 用法 |
+|------|------|------|
+| 全文搜尋 | SQLite FTS5 | `search_cache(query, cache_type, limit)` |
+| 模糊比對 | difflib SequenceMatcher | `find_similar_translations(text, threshold=0.6)` |
+
+> 低層實作在 `cache_search.py`；一般呼叫端應使用 `cache_manager` façade 的
+> `search_cache()` / `find_similar_translations()`，而非直接引用 `cache_search.py`。
 
 | 功能 | 實作 | 用法 |
 |------|------|------|
@@ -118,9 +128,12 @@ save_translation_cache(cache_type)                  # 將 session_new_entries fl
 get_active_shard_id(cache_type) -> str
 force_rotate_shard(cache_type) -> bool
 
-# 搜尋
+# 搜尋（由 cache_search_facade 提供）
 search_cache(query, cache_type=None, limit=50)
 find_similar_translations(text, threshold=0.6)
+get_search_engine()                                 # 取得搜尋引擎實例
+rebuild_search_index()                               # 重建所有類型索引
+rebuild_search_index_for_type(cache_type)            # 重建指定類型索引
 ```
 
 ---
@@ -139,6 +152,10 @@ find_similar_translations(text, threshold=0.6)
 ## 注意事項
 
 - **永久保存**：cache 不會過期，設計上永久保留所有翻譯記錄
-- **Thread-safe**：寫入操作透過 `cache_lock`（`RLock`）保護；讀取 API 直接存取 shared dict，可在 Flet UI 的背景執行緒中使用
+- **寫入安全**：`add_to_cache()`、`add_to_cache_batch()`、`save_translation_cache()` 等寫入 API
+  內部透過 `cache_lock`（`threading.RLock`）保護，確保多執行緒安全。
+- **讀取安全**：`get_from_cache()`、`get_cache_entry()` 等讀取 API **不拿 lock**，直接讀取
+  `translation_cache` dict。Python GIL 使簡單 dict 讀取（`dict.get()`）具備原子性，
+  故在 Flet UI 背景執行緒中使用是安全的；但**不支援 read-then-write 的複合操作**。
 - **延遲寫入**：翻譯結果先寫記憶體（`session_new_entries`），session 結束才 flush 磁碟，避免大量小寫入
 - **效能監控**：`CacheMetrics` 追蹤 hit/miss/load_ms/save_ms，另有 PR66-A 專門對此做過優化

@@ -1,5 +1,22 @@
 # Minecraft 翻譯工作流 SOP
 
+## 第0步：翻譯工具鏈內部結構
+
+```
+lm_translator_main.py (入口調度)
+ ├─ lm_translator_shared_loop.py (批次迴圈)
+ │   ├─ lm_translator_shared_cache.py (cache 查詢)
+ │   └─ lm_translator_shared_preview.py (預覽)
+ ├─ lm_api_client.py (Gemini API 呼叫)
+ └─ lm_response_parser.py (回應解析)
+```
+
+說明：
+- **`translate_batch_smart()`** 是對外主入口，依 profile（`lang` / `ftb` / `kubejs` / `md` / `patch`）選用不同 System Prompt 與批次大小上限
+- **`lm_translator_shared_loop.translate_items_with_cache_loop()`** 執行實際批次迴圈，內部呼叫 cache 查詢與 API
+- **`lm_api_client.call_gemini_requests()`** 發送請求，自動處理 503 Overload / 429 Quota 錯誤並換 Key 重試
+- **`lm_response_parser.safe_json_loads()`** 解析 AI 回應，處理 JSON 截斷與 chunked 格式
+
 ## 流程總覽
 
 翻譯工作流分為四個主要階段：
@@ -15,6 +32,8 @@
 
 - **輸入**：mods 資料夾（內含多個 .jar）
 - **輸出**：按語言分類的 lang 檔與書籍檔
+- **資料格式**：JAR 內含標準 `assets/<modid>/lang/*.json`（Minecraft lang 格式），
+  以及 Patchouli 書籍的 `data/pack.mcmeta` / `book.json`；輸出為相同目錄結構的 JSON 檔案。
 - **關鍵程式碼**：`translation_tool/core/jar_processor.py`（入口） + `jar_processor_extract.py`（實作）
 - **觸發方式**：
   - UI：`ExtractorView` 頁面，選擇「Extract Lang」或「Extract Book」
@@ -26,7 +45,15 @@ JAR 內的路徑會依正規表達式（`lang_codes` 設定值）篩選，只取
 
 ### 2. Translate
 
-- **入口**：`translation_tool/core/lm_translator_main.py` → `translate_batch_smart()`
+- **入口**：`translation_tool/core/lm_translator_main.py` → `translate_batch_smart()`（新主入口）
+- **內部委託**：`translate_batch_smart()` 驗證輸入後，委託 `_execute_translation()` 執行，
+  `_execute_translation()` 再呼叫 `translate_batch_smart_old()`（舊版實作），
+  完成翻譯後由 `_process_output()` 包裝輸出。
+  兩者回傳格式相同：`List[dict] + status`，可互換使用。
+- **資料格式**：
+  - 傳入 `batch_items` 為 `List[dict]`，每項需含 `text`（原文）與 `path`（檔案路徑），
+    選填 `cache_type`（預設 `patchouli`）。
+  - 回傳 `List[dict]`，每項 `text` 欄位為譯後文字，`status` 為 `"AUTO"` / `"DRY_RUN"` 等。
 - **流程**：以 profile（`lang` / `ftb` / `kubejs` / `md` / `patch`）判斷 System Prompt 與批次大小上限
 - **Prompt 模板**：從 `lm_translator` 設定區塊讀取 `lang_system_prompt` / `patchouli_system_prompt`，動態注入
 - **錯誤處理**：
@@ -36,13 +63,15 @@ JAR 內的路徑會依正規表達式（`lang_codes` 設定值）篩選，只取
   - **漏翻**：記錄警告，保留原文
 - **觸發方式**：
   - UI：`TranslationView` 分頁（FTB Quests / KubeJS Tooltips / Markdown）
-  - CLI：直接呼叫 `translate_batch_smart()`
+  - CLI：直接呼叫 `translate_batch_smart()` 或 `translate_batch_smart_old()`
 
 ---
 
 ### 3. Merge
 
 - **入口**：`translation_tool/core/lang_merger.py` → `merge_zhcn_to_zhtw_from_zip()`
+- **資料格式**：輸入為 ZIP 內含 `lang/*.json`（Minecraft lang 格式）與 Patchouli JSON；
+  FTB Quests 為 `.snbt`（Stringified Named Binary Tag）格式；KubeJS 為 `.js` 指令稿。
 - **合併策略**：
   - 掃描 ZIP 內每個 mod 的 `zh_cn` / `zh_tw` / `en_us` lang 檔
   - 若有 `zh_tw`，以 `zh_tw` 為 base，將 `en_us` 缺失鍵補入
