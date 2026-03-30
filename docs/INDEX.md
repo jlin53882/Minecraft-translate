@@ -46,12 +46,12 @@
 
 ## PR 設計稿（`docs/pr/`）
 
-共 **163 個**設計檔，主要分類如下：
+共 **134 個**設計檔，主要分類如下：
 
 ### UI 重構
 - `2026-03-19_2118_merge_ui_layout_optimization_notes.md` — Merge View UI 布局優化
 - `2026-03-19_2128_merge_ui_responsive_layout_report.md` — Merge View 響應式佈局報告
-- `2026-03-19_2140_merge_ui_copy_layout_v2.md` — Merge UI 複製佈局 v2
+
 - `2026-03-19_2155_merge_ui_final_polish.md` — Merge UI 最終優化
 - `2026-03-16_2312_PR_cache_view_split_design.md` — Cache View 拆分設計
 - `20260316_view_refactor_design.md` — View 重構設計
