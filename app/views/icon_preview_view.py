@@ -23,6 +23,11 @@ from translation_tool.core.lang_item_row import LangItemRow
 import unicodedata
 
 # ==================================================
+# 實驗性功能開關
+# ==================================================
+_ENABLE_JAR_ICON = False  # TODO: 找回 icon→key 的對應方式後啟用
+
+# ==================================================
 # JAR Icon 提取輔助函式
 # ==================================================
 def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path) -> Path | None:
@@ -49,11 +54,25 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path) -> Path
             if fabric_icon in names:
                 icon_data = zf.read(fabric_icon)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                # 檔名：<modid>_<jar名>.png（同一 modid 可能來自不同 JAR）
-                safe_jar_name = jar_path.stem  # 無副檔名
+                safe_jar_name = jar_path.stem
                 out_path = icon_cache_root / f"{modid}_{safe_jar_name}.png"
                 out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] 提取 Fabric icon: {modid} → {out_path.name}")
+                return out_path
+
+            # ----- Fabric: assets/<modid>/textures/**/*.png -----
+            import re
+            textures_pattern = re.compile(r"^assets/" + re.escape(modid) + r"/textures/.+\.png$")
+            texture_files = sorted(n for n in names if textures_pattern.match(n))
+            if texture_files:
+                # 取第一個找到的 texture PNG
+                icon_path = texture_files[0]
+                icon_data = zf.read(icon_path)
+                icon_cache_root.mkdir(parents=True, exist_ok=True)
+                safe_jar_name = jar_path.stem
+                out_path = icon_cache_root / f"{modid}_{safe_jar_name}.png"
+                out_path.write_bytes(icon_data)
+                log_info(f"[IconPreview] 提取 Fabric texture icon: {modid} → {icon_path}")
                 return out_path
 
             # ----- NeoForge: neoforge.mods.toml → logoFile -----
@@ -922,21 +941,24 @@ class IconPreviewView(ft.Column):
             if hasattr(e, "source_jar") and e.source_jar:
                 jar_to_modids[e.source_jar].add(e.modid)
 
-        for jar_name, modids in jar_to_modids.items():
-            jar_path = self.source_root / jar_name
-            if not jar_path.exists():
-                continue
-            for modid in modids:
-                # 避免同一 modid 重複提取（多個 JAR 可能有同名的 modid，以最後一個為準）
-                existing = next((e.icon_path for e in entries if e.modid == modid and hasattr(e, "icon_path") and e.icon_path), None)
-                if existing:
-                    continue  # 已有 icon，跳過
-                icon_path = _extract_jar_icon(jar_path, modid, icon_cache_root)
-                if icon_path:
-                    # 找到對應的 entry 並寫入 icon_path
-                    for e in entries:
-                        if e.modid == modid and getattr(e, "source_jar", "") == jar_name:
-                            e.icon_path = str(icon_path)
+        # ===== Phase 4/4：提取模組圖示（實驗性，預設關閉）=====
+        if _ENABLE_JAR_ICON:
+            icon_total = sum(len(m) for m in jar_to_modids.values())
+            icon_processed = 0
+            _show_progress_phase(self, "提取模組圖示", 0, icon_total)
+
+            for jar_name, modids in jar_to_modids.items():
+                jar_path = self.source_root / jar_name
+                if not jar_path.exists():
+                    continue
+                for modid in modids:
+                    icon_path = _extract_jar_icon(jar_path, modid, icon_cache_root)
+                    if icon_path:
+                        for e in entries:
+                            if e.modid == modid and getattr(e, "source_jar", "") == jar_name:
+                                e.icon_path = str(icon_path)
+                    icon_processed += 1
+                    _show_progress_phase(self, "提取模組圖示", icon_processed, icon_total)
 
         # ===== 寫入 L2 磁碟快取 =====
         _save_entries_cache_l2(self.source_root, entries)
