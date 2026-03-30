@@ -275,7 +275,7 @@ def create_test_jar(tmp_path, jar_name, files):
 | `tests/test_icon_preview_dual_track.py` | 新增 |
 | `tests/test_icon_preview_snack_bar_fix.py` | 新增 |
 | `tests/test_icon_preview_cache_transform.py` | 新增 |
-| `tests/conftest.py` | 修改（新增共用 fixture）|
+> ℹ️ 設計稿原規劃修改 `tests/conftest.py` 新增共用 fixture，實作後發現每個測試檔皆用 `patch.object` 直接 mock，不需要共用 fixture，故 `tests/conftest.py` **未變動**。
 
 ---
 

@@ -1,7 +1,7 @@
 # PR #54 設計文件：icon_preview_view 重構（多執行緒 + L2 磁碟快取 + icon掃描）
 
 > 狀態：規劃中
-> 前提：PR #52（jar_browser.py）已合併
+> 前提：PR #53（jar_browser.py）已合併
 
 ---
 
@@ -255,18 +255,26 @@ def _find_fabric_icon(jar_path: Path, modid: str) -> str | None:
 
 ```python
 def _find_neoforge_icon(jar_path: Path) -> str | None:
-    """從 neoforge.mods.toml 解析 logoFile"""
+    """從 neoforge.mods.toml 解析 logoFile
+
+    ⚠️ 注意：neoforge.mods.toml 的位置不一定在 META-INF/ 目錄下，
+    需以 zf.namelist() 搜尋 "neoforge.mods.toml" 為準，而非假設固定路徑。
+    實作前請先用真實 JAR 驗證所有 neoforge 版本的路徑一致性和 logoFile 格式。
+    """
     with zipfile.ZipFile(jar_path, 'r') as zf:
-        for name in zf.namelist():
-            if name == "META-INF/neoforge.mods.toml":
-                content = zf.read(name).decode("utf-8")
-                # TOML 簡單解析：找 logoFile= 行
-                for line in content.splitlines():
-                    if line.strip().startswith("logoFile="):
-                        logo = line.split("=", 1)[1].strip().strip('"')
-                        if logo in zf.namelist():
-                            return logo
-                break
+        namelist_lower = {n.lower(): n for n in zf.namelist()}
+        neoforge_key = namelist_lower.get("neoforge.mods.toml")
+        if not neoforge_key:
+            return None
+
+        content = zf.read(neoforge_key).decode("utf-8")
+        for line in content.splitlines():
+            if line.strip().startswith("logoFile="):
+                logo = line.split("=", 1)[1].strip().strip('"')
+                # logo 可能是相對路徑，確認在 JAR 內存在
+                if logo in zf.namelist():
+                    return logo
+                return None
     return None
 ```
 
@@ -379,17 +387,31 @@ def _load_entries_from_jar_directory(self, processed_callback=None):
 
 ## 7. 單元測試
 
+> ⚠️ 注意：`test_icon_preview_snack_bar_fix.py` 已在 PR #52 實作，PR #54 若需修改該測試，應以更新（update）而非新增（create）。
+
 | 測試檔 | 測試數 | 說明 |
 |--------|-------|------|
 | `test_icon_preview_l2_cache.py` | 6 | L2 快取命中 / miss / version / atomic write |
 | `test_icon_preview_icon_scan.py` | 4 | Fabric / NeoForge icon 解析 |
 | `test_lang_item_row_icon_path.py` | 3 | icon_path 參數行為 |
 | `test_icon_preview_jar_browser_integration.py` | 3 | 確認使用 jar_browser |
-| `test_icon_preview_snack_bar_fix.py` | 2 | overlay in-place 修改 |
 
 ---
 
-## 8. 檔案變更
+## 8. 依賴
+
+| 模組 | 用途 |
+|------|------|
+| `orjson` | L2 快取 atomic write（取代 `json`，效能更好）|
+| `os` | CPU 核心數偵測（`os.cpu_count()`）|
+| `pathlib` | 路徑操作 |
+| `hashlib` | SHA256 快取 key 計算 |
+| `zipfile` | JAR icon 讀取 |
+| `translation_tool.utils.jar_browser` | PR #53 的多執行緒 JAR 掃描 |
+
+---
+
+## 9. 檔案變更
 
 | 檔案 | 變更類型 |
 |------|---------|
@@ -402,7 +424,7 @@ def _load_entries_from_jar_directory(self, processed_callback=None):
 
 ---
 
-## 9. 已知限制
+## 10. 已知限制
 
 | 限制 | 說明 | 未來改善方向 |
 |------|------|-------------|

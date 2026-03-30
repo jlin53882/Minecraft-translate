@@ -1,7 +1,7 @@
 # PR #55 設計文件：jar_processor_extract 重構（複用 jar_browser.py）
 
 > 狀態：規劃中
-> 前提：PR #52（jar_browser.py）已合併，PR #53 已合併
+> 前提：PR #53（jar_browser.py）已合併，PR #54 已合併
 
 ---
 
@@ -73,9 +73,11 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         ...
 
 # 新：用 jar_browser 讀取，用自己的方式寫入磁碟
+# 注意：jar_browser.scan_jars() 的 patterns 參數是 list[str]，
+# 現有 API 的 target_regex 是 str，需在包裝層做 [target_regex] 轉換
 results = scan_jars(
     jar_dir=jar_dir,
-    patterns=[target_regex],  # 動態傳入
+    patterns=[target_regex],  # str → list[str] 轉換
     processed_callback=processed_callback,
 )
 
@@ -97,17 +99,21 @@ for jar_path, files in results.items():
 ```python
 # extract_from_jar_fn 的新實作（保留檔案複製邏輯）：
 def extract_from_jar_to_disk(
+    jar_dir: Path,
     jar_path: Path,
     output_dir: Path,
-    target_pattern: str,
+    target_patterns: list[str],
 ) -> dict[str, Any]:
-    """從 JAR 讀取符合 pattern 的檔案，寫入磁碟。"""
+    """從 JAR 讀取符合 pattern 的檔案，寫入磁碟。
+
+    注意：jar_browser.scan_jars() 接收的是「JAR 目錄」（一次處理多個 JAR），
+    而非單一 JAR。max_workers 由 jar_browser 統一管理，不在包裝層設定。
+    """
     from translation_tool.utils.jar_browser import scan_jars
 
     results = scan_jars(
-        jar_dir=jar_path.parent,
-        patterns=[target_pattern],
-        max_workers=1,  # 單一 JAR，max_workers 無意義
+        jar_dir=jar_dir,
+        patterns=target_patterns,  # list[str]，與 jar_browser API 一致
     )
 
     jar_results = results.get(jar_path, {})
@@ -121,7 +127,7 @@ def extract_from_jar_to_disk(
     return {"jar": jar_path.name, "written": written}
 ```
 
-**注意**：`extract_from_jar_to_disk` 現在變成接收「整個 JAR 目錄」而非單一 JAR。這是 API 變更，需要確保向後相容。
+**注意**：`extract_from_jar_to_disk` 現在接收 `jar_dir`（JAR 目錄）作為第一個參數。這是 API 簽名變更，包裝層呼叫時需確保傳入正確參數。
 
 ---
 
@@ -205,3 +211,13 @@ tests/test_jar_processor_jar_browser_integration.py
 |------|------|
 | `translation_tool.utils.jar_browser` | 新增依賴 |
 | `concurrent.futures` | 仍然需要（用於非 JAR 的其他並行處理）|
+
+---
+
+## 8. 待實作前驗證事項
+
+| 項目 | 驗證目標 |
+|------|---------|
+| NeoForge logoFile 路徑 | 確認所有 neoforge 版本 JAR 內 `neoforge.mods.toml` 的位置（是否固定在 `META-INF/`）|
+| `target_regex` 轉 `list[str]` | 現有呼叫端傳入 `str`，包裝層轉 `[str]` 不應影響既有行為 |
+| API 向後相容 | `extract_jars()` 對外簽名（`jar_dir, output_dir, target_regex`）不改，只改內部實作 |
