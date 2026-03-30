@@ -6,6 +6,7 @@
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 import flet as ft
 
@@ -15,16 +16,38 @@ from app.services_impl.pipelines.merge_service import run_merge_zip_batch_servic
 from app.task_session import TaskSession
 from app.ui import theme
 from app.ui.components import primary_button, styled_card
+
+
 class MergeView(ft.Column):
     """ZIP 合併頁面（視覺風格對齊 Translation / Extractor）。"""
 
-    _zh_cn_disabled_note: ft.Text = None  # type: ignore[assignment]
+    page: ft.Page
+    file_picker: ft.FilePicker
+    session: TaskSession
+    _ui_stop: threading.Event
+    selected_zips: list[str]
+    _merge_stats: dict[str, Any]
+    log_presenter: LogPresenter
+    only_lang_checkbox: ft.Checkbox
+    process_zh_cn_switch: ft.Switch
+    skip_zh_cn_switch: ft.Switch
+    patchouli_skip_zh_cn_switch: ft.Switch
+    patchouli_threshold_field: ft.TextField
+    output_dir_field: ft.TextField
+    _zh_cn_disabled_note: ft.Text | None
+    zip_list_view: ft.ListView
+    status_chip: ft.Chip
+    progress_bar: ft.ProgressBar
+    log_view: ft.ListView
+    pick_zip_button: ft.ElevatedButton
+    start_button: ft.ElevatedButton
+    controls: list[ft.Control]
 
     def _skip_disabled_note(self) -> ft.Text:
         """回傳 zh_cn 關聯設定停用時的提示文字元件。"""
         return self._zh_cn_disabled_note
 
-    def _on_zh_cn_switch_changed(self, e):
+    def _on_zh_cn_switch_changed(self, e: ft.ControlEvent) -> None:
         """主開關互鎖：關閉 zh_cn 處理時，同步停用兩個相依設定。"""
         enabled = bool(e.control.value)
         self.skip_zh_cn_switch.disabled = not enabled
@@ -36,7 +59,7 @@ class MergeView(ft.Column):
             self.patchouli_skip_zh_cn_switch.value = False
         self.update()
 
-    def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
+    def __init__(self, page: ft.Page, file_picker: ft.FilePicker) -> None:
         """初始化 MergeView。"""
         super().__init__(expand=True, spacing=16, scroll=ft.ScrollMode.AUTO)
         self.page = page
@@ -46,7 +69,11 @@ class MergeView(ft.Column):
         self._ui_stop = threading.Event()
         self.selected_zips: list[str] = []
         # 合併統計（用於 DONE 時顯示摘要）
-        self._merge_stats = {"success_zips": 0, "failed_zips": 0, "failed_zip_details": ""}
+        self._merge_stats = {
+            "success_zips": 0,
+            "failed_zips": 0,
+            "failed_zip_details": "",
+        }
         # LogPresenter 接管 append 與 UI controls 數量控制
         self.log_presenter = LogPresenter(mode="append", max_ui_lines=2000)
 
@@ -93,7 +120,9 @@ class MergeView(ft.Column):
 
         self.zip_list_view = ft.ListView(height=160, spacing=4, auto_scroll=False)
         self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=theme.GREY_200)
-        self.progress_bar = ft.ProgressBar(value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE)
+        self.progress_bar = ft.ProgressBar(
+            value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
+        )
         self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
 
         self.pick_zip_button = primary_button(
@@ -156,13 +185,22 @@ class MergeView(ft.Column):
                             [
                                 ft.Row(
                                     [
-                                        ft.Text("只處理 lang 時跳過 zh_cn", weight=ft.FontWeight.W_500, size=14, expand=True),
+                                        ft.Text(
+                                            "只處理 lang 時跳過 zh_cn",
+                                            weight=ft.FontWeight.W_500,
+                                            size=14,
+                                            expand=True,
+                                        ),
                                         self.skip_zh_cn_switch,
                                     ],
                                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
-                                ft.Text("僅在「只處理 lang」模式生效。", size=12, color=theme.GREY_600),
+                                ft.Text(
+                                    "僅在「只處理 lang」模式生效。",
+                                    size=12,
+                                    color=theme.GREY_600,
+                                ),
                             ],
                             spacing=4,
                         ),
@@ -175,13 +213,22 @@ class MergeView(ft.Column):
                             [
                                 ft.Row(
                                     [
-                                        ft.Text("允許 zh_cn 觸發跳過 en_us", weight=ft.FontWeight.W_500, size=14, expand=True),
+                                        ft.Text(
+                                            "允許 zh_cn 觸發跳過 en_us",
+                                            weight=ft.FontWeight.W_500,
+                                            size=14,
+                                            expand=True,
+                                        ),
                                         self.patchouli_skip_zh_cn_switch,
                                     ],
                                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
-                                ft.Text("zh_cn 達門檻時，跳過對應 en_us。", size=12, color=theme.GREY_600),
+                                ft.Text(
+                                    "zh_cn 達門檻時，跳過對應 en_us。",
+                                    size=12,
+                                    color=theme.GREY_600,
+                                ),
                                 self._skip_disabled_note(),
                             ],
                             spacing=4,
@@ -195,13 +242,22 @@ class MergeView(ft.Column):
                             [
                                 ft.Row(
                                     [
-                                        ft.Text("en_us 跳過門檻", weight=ft.FontWeight.W_500, size=14, expand=True),
+                                        ft.Text(
+                                            "en_us 跳過門檻",
+                                            weight=ft.FontWeight.W_500,
+                                            size=14,
+                                            expand=True,
+                                        ),
                                         self.patchouli_threshold_field,
                                     ],
                                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
-                                ft.Text("預設 0.5，範圍 0.0 ~ 1.0。", size=12, color=theme.GREY_600),
+                                ft.Text(
+                                    "預設 0.5，範圍 0.0 ~ 1.0。",
+                                    size=12,
+                                    color=theme.GREY_600,
+                                ),
                             ],
                             spacing=4,
                         ),
@@ -226,7 +282,11 @@ class MergeView(ft.Column):
                         ft.Row(
                             [
                                 self.pick_zip_button,
-                                ft.Text("可加入多個 ZIP，會依序合併。", size=12, color=theme.GREY_600),
+                                ft.Text(
+                                    "可加入多個 ZIP，會依序合併。",
+                                    size=12,
+                                    color=theme.GREY_600,
+                                ),
                             ],
                             spacing=10,
                         ),
@@ -286,10 +346,14 @@ class MergeView(ft.Column):
             ),
         ]
 
-    def pick_zips(self, e):
+    def pick_zips(self, e: ft.ControlEvent) -> None:
         """開啟 ZIP 檔案選擇對話框。"""
         self.file_picker.on_result = self._on_zip_picked
-        self.file_picker.pick_files(dialog_title="選擇 ZIP 檔案", allow_multiple=True, allowed_extensions=["zip"])
+        self.file_picker.pick_files(
+            dialog_title="選擇 ZIP 檔案",
+            allow_multiple=True,
+            allowed_extensions=["zip"],
+        )
 
     def _on_zip_picked(self, e: ft.FilePickerResultEvent):
         """處理 ZIP 檔案選擇結果。"""
@@ -301,7 +365,7 @@ class MergeView(ft.Column):
         self._refresh_zip_list()
         self.page.update()
 
-    def _refresh_zip_list(self):
+    def _refresh_zip_list(self) -> None:
         """重新整理 ZIP 檔案清單顯示。"""
         self.zip_list_view.controls.clear()
         for path in self.selected_zips:
@@ -311,30 +375,34 @@ class MergeView(ft.Column):
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     controls=[
                         ft.Text(name, expand=True),
-                        ft.IconButton(icon=ft.Icons.CLOSE, tooltip="移除", on_click=lambda e, p=path: self._remove_zip(p)),
+                        ft.IconButton(
+                            icon=ft.Icons.CLOSE,
+                            tooltip="移除",
+                            on_click=lambda e, p=path: self._remove_zip(p),
+                        ),
                     ],
                 )
             )
 
-    def _remove_zip(self, path: str):
+    def _remove_zip(self, path: str) -> None:
         """移除指定的 ZIP 檔案。"""
         if path in self.selected_zips:
             self.selected_zips.remove(path)
             self._refresh_zip_list()
             self.page.update()
 
-    def pick_output_dir(self):
+    def pick_output_dir(self) -> None:
         """開啟輸出目錄選擇對話框。"""
         self.file_picker.on_result = self._on_output_picked
         self.file_picker.get_directory_path(dialog_title="選擇輸出資料夾")
 
-    def _on_output_picked(self, e: ft.FilePickerResultEvent):
+    def _on_output_picked(self, e: ft.FilePickerResultEvent) -> None:
         """處理輸出目錄選擇結果。"""
         if e.path:
             self.output_dir_field.value = e.path
             self.page.update()
 
-    def start_merge(self, e):
+    def start_merge(self, e: ft.ControlEvent) -> None:
         """處理開始合併按鈕事件。"""
         if not self.selected_zips or not (self.output_dir_field.value or "").strip():
             self._show_snack_bar("請先選擇 ZIP 與輸出資料夾")
@@ -352,13 +420,16 @@ class MergeView(ft.Column):
         def _run_merge():
             # ⚠️ generator 必須完整迭代，否則程式碼不會執行
             for _ in run_merge_zip_batch_service(
-                self.selected_zips, self.output_dir_field.value, self.session, self.only_lang_checkbox.value
+                self.selected_zips,
+                self.output_dir_field.value,
+                self.session,
+                self.only_lang_checkbox.value,
             ):
                 pass
 
         threading.Thread(target=_run_merge, daemon=True).start()
 
-    def _start_ui_poller(self):
+    def _start_ui_poller(self) -> None:
         """啟動 UI 輪詢器，定期同步進度與日誌。"""
         self._ui_stop.clear()
         self.log_presenter.reset()
@@ -384,7 +455,11 @@ class MergeView(ft.Column):
                         failed_zips = 0
                         failed_zip_details = []
                         for log_line in logs:
-                            text = log_line.text if hasattr(log_line, "text") else str(log_line)
+                            text = (
+                                log_line.text
+                                if hasattr(log_line, "text")
+                                else str(log_line)
+                            )
                             if "[完成]" in text and "[錯誤]" not in text:
                                 success_zips += 1
                             elif "[錯誤]" in text:
@@ -418,12 +493,12 @@ class MergeView(ft.Column):
 
         threading.Thread(target=poll, daemon=True).start()
 
-    def _set_status(self, text: str, color: str):
+    def _set_status(self, text: str, color: str) -> None:
         """更新狀態晶片顯示。"""
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
-    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.RED_600) -> None:
         """顯示 SnackBar 訊息。"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
@@ -431,7 +506,7 @@ class MergeView(ft.Column):
         snack.open = True
         self.page.update()
 
-    def _show_merge_summary(self, summary: dict):
+    def _show_merge_summary(self, summary: dict[str, Any]) -> None:
         """顯示合併結果摘要（使用 overlay 確保穩定顯示）。"""
         s_zips = summary.get("success_zips", 0)
         f_zips = summary.get("failed_zips", 0)
@@ -450,50 +525,71 @@ class MergeView(ft.Column):
             if count > 0:
                 oc_rows.append(ft.Text(f"├─ {label}：{count} 個", size=13))
         output_block = (
-            [ft.Divider(), ft.Text("📁 輸出統計", size=14, weight=ft.FontWeight.BOLD)] + oc_rows
-            if oc_rows else []
+            [ft.Divider(), ft.Text("📁 輸出統計", size=14, weight=ft.FontWeight.BOLD)]
+            + oc_rows
+            if oc_rows
+            else []
         )
 
         # 失敗 ZIP block
         failed_block = []
         if failed_list:
             for item in failed_list:
-                failed_block.append(ft.Text(
-                    f"├─ {item.get('Name', '?')}", size=13, color=ft.Colors.ORANGE_700
-                ))
+                failed_block.append(
+                    ft.Text(
+                        f"├─ {item.get('Name', '?')}",
+                        size=13,
+                        color=ft.Colors.ORANGE_700,
+                    )
+                )
                 err = item.get("error", "未知錯誤")
                 # 截斷過長錯誤訊息
                 if len(err) > 80:
                     err = err[:80] + "..."
                 failed_block.append(ft.Text(f"│  └─ {err}", size=12, color="#cccccc"))
-            failed_block = [ft.Divider(), ft.Text("📋 處理失敗的 ZIP", size=14, weight=ft.FontWeight.BOLD)] + failed_block
+            failed_block = [
+                ft.Divider(),
+                ft.Text("📋 處理失敗的 ZIP", size=14, weight=ft.FontWeight.BOLD),
+            ] + failed_block
 
-        content = ft.Column([
-            ft.Text("合併結果摘要", size=16, weight=ft.FontWeight.BOLD),
-            ft.Divider(),
-            ft.Row(
-                [ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=20),
-                 ft.Text(f"成功處理 ZIP：{s_zips} 個", size=14)],
-                spacing=8,
-            ),
-            ft.Row(
-                [ft.Icon(ft.Icons.ERROR, color=theme.RED, size=20),
-                 ft.Text(f"失敗 ZIP：{f_zips} 個", size=14)],
-                spacing=8,
-            ),
-            *output_block,
-            *failed_block,
-            ft.Divider(),
-            ft.Text("詳見上方日誌", size=12, color="#aaaaaa"),
-        ], spacing=10, tight=True)
+        content = ft.Column(
+            [
+                ft.Text("合併結果摘要", size=16, weight=ft.FontWeight.BOLD),
+                ft.Divider(),
+                ft.Row(
+                    [
+                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=20),
+                        ft.Text(f"成功處理 ZIP：{s_zips} 個", size=14),
+                    ],
+                    spacing=8,
+                ),
+                ft.Row(
+                    [
+                        ft.Icon(ft.Icons.ERROR, color=theme.RED, size=20),
+                        ft.Text(f"失敗 ZIP：{f_zips} 個", size=14),
+                    ],
+                    spacing=8,
+                ),
+                *output_block,
+                *failed_block,
+                ft.Divider(),
+                ft.Text("詳見上方日誌", size=12, color="#aaaaaa"),
+            ],
+            spacing=10,
+            tight=True,
+        )
 
         dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text("合併完成"),
             content=ft.Container(content=content, width=520),
             actions=[
-                ft.TextButton("開啟輸出資料夾", on_click=lambda e: self._open_output_folder()),
-                ft.TextButton("關閉", on_click=lambda e: self._close_dialog_overlay(dialog)),
+                ft.TextButton(
+                    "開啟輸出資料夾", on_click=lambda e: self._open_output_folder()
+                ),
+                ft.TextButton(
+                    "關閉", on_click=lambda e: self._close_dialog_overlay(dialog)
+                ),
             ],
         )
 
@@ -502,16 +598,17 @@ class MergeView(ft.Column):
         dialog.open = True
         self.page.update()
 
-    def _open_output_folder(self):
+    def _open_output_folder(self) -> None:
         """開啟輸出資料夾（使用檔案總管）。"""
         import subprocess
+
         snack = ft.SnackBar(ft.Text("正在開啟輸出資料夾..."), bgcolor=theme.BLUE_700)
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
         subprocess.Popen(["explorer", self.output_dir_field.value], shell=True)
 
-    def _close_dialog_overlay(self, dialog):
+    def _close_dialog_overlay(self, dialog: ft.AlertDialog) -> None:
         """關閉 overlay 對話框。"""
         try:
             self.page.close(dialog)
