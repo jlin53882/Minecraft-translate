@@ -43,7 +43,7 @@ class MergeView(ft.Column):
     start_button: ft.ElevatedButton
     controls: list[ft.Control]
 
-    def _skip_disabled_note(self) -> ft.Text:
+    def _skip_disabled_note(self) -> ft.Text | None:
         """回傳 zh_cn 關聯設定停用時的提示文字元件。"""
         return self._zh_cn_disabled_note
 
