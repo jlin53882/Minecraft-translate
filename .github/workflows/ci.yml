@@ -57,12 +57,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.sha }}"
+          PR_NUM="${{ github.event.pull_request.number }}"
 
-          echo "Diff: $BASE_SHA..$HEAD_SHA"
+          # 用 GitHub CLI 直接取 PR 變更的檔案清單（繞過 git diff 問題）
+          FILES=$(gh pr diff "$PR_NUM" --name-only | grep -E '\.py$' || true)
 
-          FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E '\.py$' || true)
           if [ -z "$FILES" ]; then
             echo "No Python files changed; skipping ruff."
             exit 0
