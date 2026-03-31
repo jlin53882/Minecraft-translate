@@ -9,6 +9,7 @@ import json
 import os
 import hashlib
 import platform
+import re
 import zipfile
 from pathlib import Path
 from collections import defaultdict
@@ -21,61 +22,378 @@ from translation_tool.utils.safe_json_loader import load_json_auto_encoding
 from translation_tool.core.lang_item_row import LangItemRow
 
 import unicodedata
+import threading
 
 # ==================================================
 # 實驗性功能開關
 # ==================================================
-_ENABLE_JAR_ICON = True  # 已啟用
+_ENABLE_JAR_ICON = True  # 已啟用（Model JSON 解析 + 批次 ZIP icon 提取）
 
 # ==================================================
-# JAR Icon 提取輔助函式
+# JAR Icon 提取輔助函式（Phase 1: Model JSON 解析）
 # ==================================================
-def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path) -> Path | None:
-    """從 JAR 中提取 mod icon 並快取到磁碟。
 
-    支援：
-        - Fabric: assets/<modid>/icon.png
-        - NeoForge: neoforge.mods.toml → logoFile
+def _get_icon_cache_dir() -> Path:
+    """取得 icon 快取根目錄（統一至 .icon_cache/jar_icons/）。"""
+    return Path(__file__).parent.parent.parent / ".icon_cache" / "jar_icons"
+
+
+def _get_model_index_cache_dir() -> Path:
+    """取得 model index 快取目錄（.icon_cache/model_index/）。"""
+    return Path(__file__).parent.parent.parent / ".icon_cache" / "model_index"
+
+
+def _get_jar_hash(jar_path: Path) -> str:
+    """計算 JAR 的 hash（mtime + size），用於 cache 失效判斷。"""
+    stat = jar_path.stat()
+    return f"mtime:{stat.st_mtime:.0f}_size:{stat.st_size}"
+
+
+def _migrate_old_icon_cache(source_root: Path) -> bool:
+    """向後相容：將舊路徑的 icon cache 搬移至新路徑。
+
+    舊路徑：source_root/_icon_preview/jar_icons/
+    新路徑：.icon_cache/jar_icons/
+
+    搬移條件：
+        - 舊路徑存在
+        - 新路徑尚不存在，或新路徑為空目錄
+
+    回傳：
+        True 表示有搬移，False 表示無需搬移
+    """
+    import shutil
+
+    old_path = source_root / "_icon_preview" / "jar_icons"
+    new_path = _get_icon_cache_dir()
+
+    if not old_path.exists():
+        # 舊路徑不存在，無需搬移
+        return False
+
+    # 新路徑已存在且有內容，不覆蓋
+    if new_path.exists() and any(new_path.iterdir()):
+        log_info(f"[IconPreview] 新 icon cache 已存在，放棄搬移舊路徑: {old_path}")
+        return False
+
+    # 確保新路徑的父目錄存在
+    new_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 搬移所有檔案
+    files_moved = 0
+    for old_file in old_path.glob("*.png"):
+        new_file = new_path / old_file.name
+        if not new_file.exists():
+            shutil.move(str(old_file), str(new_file))
+            files_moved += 1
+
+    log_info(f"[IconPreview] 已將 {files_moved} 個 icon 檔案從舊路徑搬移至新路徑: {old_path} → {new_path}")
+    return True
+
+
+_INVALID_FN_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _safe_filename_key(key: str) -> str:
+    """將 lang key 轉為可用於檔名的字串。
+
+    處理的問題：
+    - key 的最後一段可能含 Windows 不允許的字元（如 \\）
+    - key 可能含空白或 unicode 符號
+
+    處理方式：
+    - 移除 Windows 檔名禁用字元（\\ / : * ? " < > |）
+    - 將空白替換為底線
+    - 限制長度（最多 64 字）避免路徑過長
+    """
+    suffix = key.split(".")[-1]
+    safe = _INVALID_FN_CHARS.sub("_", suffix)
+    safe = safe.strip().replace(" ", "_")
+    # 避免路徑過長（Windows MAX_PATH 260）
+    return safe[:64] if len(safe) > 64 else safe
+
+
+def _load_model_index_from_cache(jar_path: Path, modid: str) -> dict | None:
+    """嘗試從磁碟讀取 model index cache。
+
+    失效條件：JAR 的 mtime/size 改變，或 cache 檔不存在/格式無效。
+
+    回傳：
+        model_index dict（name → [路徑列表]），或 None（cache miss）
+    """
+    cache_dir = _get_model_index_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    safe_jar_name = jar_path.stem  # stem 已剝除副檔名
+    cache_file = cache_dir / f"{safe_jar_name}.json"
+
+    if not cache_file.exists():
+        return None
+
+    try:
+        with open(cache_file, encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return None
+
+    # 檢查 jar_hash 是否匹配
+    current_hash = _get_jar_hash(jar_path)
+    if data.get("jar_hash") != current_hash:
+        return None
+
+    if data.get("modid") != modid:
+        return None
+
+    return data.get("index")
+
+
+def _save_model_index_to_cache(jar_path: Path, modid: str, model_index: dict):
+    """將 model index 寫入磁碟 cache（atomic write）。"""
+    cache_dir = _get_model_index_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    safe_jar_name = jar_path.stem  # stem 已剝除副檔名
+    cache_file = cache_dir / f"{safe_jar_name}.json"
+
+    data = {
+        "jar_name": jar_path.name,
+        "jar_hash": _get_jar_hash(jar_path),
+        "modid": modid,
+        "index": model_index,
+    }
+
+    tmp = cache_dir / f"{cache_file.stem}.tmp"
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(cache_file)
+
+
+def _build_model_index(names: list[str], modid: str) -> dict[str, list[str]]:
+    """動態掃描所有 .json model 檔，建立 name → [路徑列表] index。
+
+    name = 相對路徑（保留子目錄），例如 block/restonia_crystal_block。
+    同一個 name 可能來自不同子目錄（block/ vs item/），全部保留。
+    """
+    index: dict[str, list[str]] = {}
+    prefix = f"assets/{modid}/models/"
+
+    for n in names:
+        if not (n.startswith(prefix) and n.endswith(".json")):
+            continue
+        rel = n[len(prefix):]
+        name = rel.replace(".json", "")
+        # 保留子目錄前綴（例如 block/restonia_crystal_block）
+        # 這樣 _try_extract_mod_icon_from_model 可以用完整路徑做精準 lookup
+        if name not in index:
+            index[name] = []
+        index[name].append(n)
+
+    return index
+
+
+def _get_texture_value(model_data: dict) -> str | None:
+    """從 model JSON 的 textures 欄位取值（無白名單優先順序）。
+
+    邏輯：
+        - 只有 1 個 key → 直接取那個值
+        - 超過 1 個 key → 依序取：layer0 → front → particle → 任意第一個
+    """
+    textures = model_data.get("textures", {})
+    if not textures:
+        return None
+
+    if len(textures) == 1:
+        return list(textures.values())[0]
+
+    for key in ["layer0", "front", "particle"]:
+        if key in textures:
+            return textures[key]
+
+    return list(textures.values())[0]
+
+
+def _follow_parent_chain(
+    model_path: str,
+    names: set[str],
+    modid: str,
+    zf: zipfile.ZipFile,
+    visited: set[str] | None = None,
+) -> str | None:
+    """沿 parent chain 遞迴向上找，直到找到有 textures 的 model。
+
+    遇到 minecraft: 開頭的 parent 直接跳過（不處理 Minecraft 內建資源）。
+    """
+    if visited is None:
+        visited = set()
+
+    if model_path in visited or model_path not in names:
+        return None
+    visited.add(model_path)
+
+    try:
+        raw = zf.read(model_path).decode("utf-8", errors="replace")
+        data = json.loads(raw)
+    except Exception:
+        return None
+
+    tex_val = _get_texture_value(data)
+    if tex_val:
+        return tex_val
+
+    parent = data.get("parent")
+    if not parent:
+        return None
+
+    if ":" in parent:
+        ns, path = parent.split(":", 1)
+        if ns == modid:
+            parent_path = f"assets/{ns}/models/{path}.json"
+        elif ns == "minecraft":
+            return None  # 跳過 Minecraft 內建資源
+        else:
+            return None
+    else:
+        base = str(Path(model_path).parent).replace("\\", "/")
+        parent_path = f"{base}/{parent}.json"
+
+    return _follow_parent_chain(parent_path, names, modid, zf, visited)
+
+
+def _texture_to_png_path(tex_val: str) -> str | None:
+    """將 texture value（namespace:path）轉換為 JAR 內的 PNG 路徑。
+
+    格式：namespace:path → assets/namespace/textures/path.png
+    """
+    if not tex_val or ":" not in tex_val:
+        return None
+    ns, path = tex_val.split(":", 1)
+    return f"assets/{ns}/textures/{path}.png"
+
+
+def _try_extract_mod_icon_from_model(
+    jar_path: Path,
+    modid: str,
+    zf: zipfile.ZipFile,
+    names: set[str],
+    key: str | None = None,
+) -> tuple[str, str] | None:
+    """嘗試從 model JSON 解析 mod icon。
+
+    流程：
+        1. 建立/讀取 model index（使用 cache）
+        2. 如果有 key，先用 key 查 item 自己的 model texture（精準匹配）
+        3. 如果沒有 key 或 key 沒找到 texture，fallback 去找 icon/logo 模型
+        4. 使用 texture fallback 策略取值
+
+    回傳：
+        (texture_value, png_path) 或 None
+    """
+    model_index = _load_model_index_from_cache(jar_path, modid)
+    if model_index is None:
+        model_index = _build_model_index(list(names), modid)
+        _save_model_index_to_cache(jar_path, modid, model_index)
+
+    # ===== 優先：嘗試用 key 查 item 自己的 model texture =====
+    if key:
+        # 將 key 轉為 model name
+        # 例如：block.actuallyadditions.restonia_crystal_block → block/restonia_crystal_block
+        #       item.actuallyadditions.drill → item/drill
+        # 原理：key = "<prefix>.<modid>.<name>"，去掉 modid 前綴就是 model name
+        prefix = key.split(".")[0]  # "block" 或 "item" 等
+        rest = key[len(prefix) + 1 + len(modid) + 1:]  # "restonia_crystal_block"
+        model_name = f"{prefix}/{rest}"  # "block/restonia_crystal_block"
+
+        if model_name in model_index:
+            for model_path in model_index[model_name]:
+                tex_val = _follow_parent_chain(model_path, names, modid, zf)
+                if not tex_val:
+                    continue
+                png_path = _texture_to_png_path(tex_val)
+                if png_path and png_path in names:
+                    return tex_val, png_path
+
+    # ===== Fallback：找 icon/logo/item_icon/block_icon 模型 =====
+    icon_candidates = ["icon", "logo", "item_icon", "block_icon"]
+
+    for candidate in icon_candidates:
+        if candidate not in model_index:
+            continue
+
+        for model_path in model_index[candidate]:
+            tex_val = _follow_parent_chain(model_path, names, modid, zf)
+            if not tex_val:
+                continue
+
+            png_path = _texture_to_png_path(tex_val)
+            if png_path and png_path in names:
+                return tex_val, png_path
+
+    return None
+
+
+def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: str) -> Path | None:
+    """從 JAR 中提取 mod icon 並快取到磁碟（Phase 1: Model JSON 解析）。
+
+    支援（按優先順序）：
+        1. Model JSON 解析（layer0 > front > particle > 第一個）+ parent chain 遞迴
+        2. assets/<modid>/icon.png（Fabric 標準）
+        3. assets/<modid>/textures/logo.png（通用 mod logo）
+        4. NeoForge: neoforge.mods.toml → logoFile
 
     參數：
         jar_path: JAR 檔案路徑
         modid: mod ID
-        icon_cache_root: icon 快取根目錄（如 _icon_preview/jar_icons）
+        icon_cache_root: icon 快取根目錄（.icon_cache/jar_icons/）
+        key: lang key（用於產生 unique icon 檔名）
 
     回傳：
         提取後的圖示路徑，或 None（找不到或提取失敗）
     """
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
-            names = zf.namelist()
+            names = set(zf.namelist())
 
-            # ----- Fabric: assets/<modid>/icon.png -----
+            # ===== Phase 1: Model JSON 解析（最高優先）=====
+            result = _try_extract_mod_icon_from_model(jar_path, modid, zf, names, key=key)
+            if result:
+                tex_val, png_path = result
+                icon_data = zf.read(png_path)
+                icon_cache_root.mkdir(parents=True, exist_ok=True)
+                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                out_path.write_bytes(icon_data)
+                log_info(f"[IconPreview] Model JSON icon: {modid} → {png_path} (tex={tex_val})")
+                return out_path
+
+            # ===== Fallback: assets/<modid>/icon.png（Fabric 標準）=====
             fabric_icon = f"assets/{modid}/icon.png"
             if fabric_icon in names:
                 icon_data = zf.read(fabric_icon)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                safe_jar_name = jar_path.stem
-                out_path = icon_cache_root / f"{modid}_{safe_jar_name}.png"
+                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
                 out_path.write_bytes(icon_data)
-                log_info(f"[IconPreview] 提取 Fabric icon: {modid} → {out_path.name}")
+                log_info(f"[IconPreview] 提取 Fabric icon.png: {modid}")
                 return out_path
 
-            # ----- Fabric: assets/<modid>/textures/**/*.png -----
+            # ===== Fallback: assets/<modid>/textures/*.png（Fabric glob）=====
             import re
             textures_pattern = re.compile(r"^assets/" + re.escape(modid) + r"/textures/.+\.png$")
             texture_files = sorted(n for n in names if textures_pattern.match(n))
             if texture_files:
-                # 取第一個找到的 texture PNG
-                icon_path = texture_files[0]
-                icon_data = zf.read(icon_path)
+                icon_data = zf.read(texture_files[0])
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                safe_jar_name = jar_path.stem
-                out_path = icon_cache_root / f"{modid}_{safe_jar_name}.png"
+                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
                 out_path.write_bytes(icon_data)
-                log_info(f"[IconPreview] 提取 Fabric texture icon: {modid} → {icon_path}")
+                log_info(f"[IconPreview] 提取 Fabric texture icon: {modid} → {texture_files[0]}")
                 return out_path
 
-            # ----- NeoForge: neoforge.mods.toml → logoFile -----
+            # ===== Fallback: assets/<modid>/textures/logo.png =====
+            logo_texture = f"assets/{modid}/textures/logo.png"
+            if logo_texture in names:
+                icon_data = zf.read(logo_texture)
+                icon_cache_root.mkdir(parents=True, exist_ok=True)
+                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                out_path.write_bytes(icon_data)
+                log_info(f"[IconPreview] 提取 logo.png: {modid}")
+                return out_path
+
+            # ===== Fallback: NeoForge logoFile =====
             neoforge_toml = "META-INF/neoforge.mods.toml"
             if neoforge_toml in names:
                 try:
@@ -84,23 +402,156 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path) -> Path
                     toml_content = None
 
                 if toml_content:
-                    import re
-                    # 解析 logoFile="xxx.png"（可能在 sections[[]] 裡）
                     logo_match = re.search(r'logoFile\s*=\s*"([^"]+\.png)"', toml_content)
                     if logo_match:
                         logo_path = logo_match.group(1)
-                        # logoFile 通常相對於 JAR 根目錄
                         if logo_path in names:
                             icon_data = zf.read(logo_path)
                             icon_cache_root.mkdir(parents=True, exist_ok=True)
-                            safe_jar_name = jar_path.stem
-                            out_path = icon_cache_root / f"{modid}_{safe_jar_name}.png"
+                            out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
                             out_path.write_bytes(icon_data)
-                            log_info(f"[IconPreview] 提取 NeoForge logo: {modid} → {out_path.name}")
+                            log_info(f"[IconPreview] 提取 NeoForge logoFile: {modid} → {logo_path}")
                             return out_path
+
     except Exception as ex:
         log_warning(f"[IconPreview] 提取 JAR icon 失敗: {jar_path.name} / {modid} → {ex}")
+
     return None
+
+
+# ==================================================
+# 批次 Icon 提取（每個 JAR 只開一次 ZIP）
+# ==================================================
+
+def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: Path, source_root: Path, progress_cb=None) -> int:
+    """批次處理多個 JAR 的 icon 提取。
+
+    核心優化：每個 JAR 只開一次 ZIP，在記憶體內建立 model index，
+    將 icon 結果共享給同 JAR 的所有 entry。
+
+    流程（每個 JAR）：
+        1. 開啟 ZIP
+        2. 建立 names set（所有檔案列表）
+        3. 對每個 unique modid：
+            a. 嘗試 Model JSON 解析
+            b. 嘗試 fallback（icon.png / logo.png / NeoForge logoFile）
+            c. 將找到的 icon PNG 寫入磁碟（每個 modid 只寫一次）
+        4. 關閉 ZIP
+        5. 將 icon_path 寫回所有對應 entry
+
+    參數：
+        jar_to_entries: {jar_name: [entries]}，同一個 JAR 的所有 entry
+        icon_cache_root: icon 快取根目錄
+        source_root: 資料根目錄（JAR 所在位置）
+        progress_cb: 進度回呼（可選）
+
+    回傳：
+        處理的 JAR 數量
+    """
+    processed = 0
+    total = len(jar_to_entries)
+
+    for jar_name, entries in jar_to_entries.items():
+        jar_path = source_root / jar_name
+        if not jar_path.exists():
+            if progress_cb:
+                progress_cb(processed, total)
+            processed += 1
+            continue
+
+        # 同一個 JAR 的所有 modid（set，去重）
+        modids = list({e.modid for e in entries if hasattr(e, "modid") and hasattr(e, "key")})
+
+        # ===== 每個 entry 的 icon 結果 =====
+        # key: entry key, value: icon_path (or None)
+        entry_icon_paths: dict[str, Path | None] = {}
+
+        try:
+            with zipfile.ZipFile(jar_path, "r") as zf:
+                names = set(zf.namelist())
+
+                for e in entries:
+                    # 只處理有 modid 和 key 的 entry
+                    if not (hasattr(e, "modid") and hasattr(e, "key")):
+                        continue
+                    modid = e.modid
+                    key = e.key
+
+                    # 嘗試解析（使用 model index cache，ZIP 保持開啟）
+                    result = _try_extract_mod_icon_from_model(jar_path, modid, zf, names, key=key)
+
+                    if result:
+                        tex_val, png_path = result
+                        icon_data = zf.read(png_path)
+                        icon_cache_root.mkdir(parents=True, exist_ok=True)
+                        # 檔名：每個 entry 的 key 獨立（per-key icon，與 _extract_jar_icon 行為一致）
+                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                        out_path.write_bytes(icon_data)
+                        log_info(f"[IconPreview] Model icon: {modid}/{key} → {png_path} (tex={tex_val})")
+                        entry_icon_paths[key] = out_path
+                        continue
+
+                    # Fallback: icon.png
+                    fabric_icon = f"assets/{modid}/icon.png"
+                    if fabric_icon in names:
+                        icon_data = zf.read(fabric_icon)
+                        icon_cache_root.mkdir(parents=True, exist_ok=True)
+                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                        out_path.write_bytes(icon_data)
+                        log_info(f"[IconPreview] 提取 Fabric icon.png: {modid}/{key}")
+                        entry_icon_paths[key] = out_path
+                        continue
+
+                    # Fallback: logo.png
+                    logo_texture = f"assets/{modid}/textures/logo.png"
+                    if logo_texture in names:
+                        icon_data = zf.read(logo_texture)
+                        icon_cache_root.mkdir(parents=True, exist_ok=True)
+                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                        out_path.write_bytes(icon_data)
+                        log_info(f"[IconPreview] 提取 logo.png: {modid}/{key}")
+                        entry_icon_paths[key] = out_path
+                        continue
+
+                    # Fallback: NeoForge logoFile
+                    neoforge_toml = "META-INF/neoforge.mods.toml"
+                    if neoforge_toml in names:
+                        try:
+                            toml_content = zf.read(neoforge_toml).decode("utf-8")
+                        except UnicodeDecodeError:
+                            toml_content = None
+
+                        if toml_content:
+                            logo_match = re.search(r'logoFile\s*=\s*"([^"]+\.png)"', toml_content)
+                            if logo_match:
+                                logo_path = logo_match.group(1)
+                                if logo_path in names:
+                                    icon_data = zf.read(logo_path)
+                                    icon_cache_root.mkdir(parents=True, exist_ok=True)
+                                    out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                                    out_path.write_bytes(icon_data)
+                                    log_info(f"[IconPreview] 提取 NeoForge logoFile: {modid}/{key} → {logo_path}")
+                                    entry_icon_paths[key] = out_path
+                                    continue
+
+                    # 完全找不到 icon
+                    entry_icon_paths[key] = None
+
+        except Exception as ex:
+            log_warning(f"[IconPreview] 批次提取 JAR icon 失敗: {jar_name} → {ex}")
+
+        # ===== 將 icon_path 寫回所有對應 entry =====
+        for e in entries:
+            if hasattr(e, "key") and e.key in entry_icon_paths:
+                icon_path = entry_icon_paths[e.key]
+                if icon_path:
+                    e.icon_path = str(icon_path)
+
+        if progress_cb:
+            progress_cb(processed + 1, total)
+        processed += 1
+
+    return processed
 
 
 # ==================================================
@@ -182,7 +633,7 @@ def _save_entries_cache_l2(source_root: Path, entries: list):
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.rename(cache_file)  # POSIX atomic on most systems
+    tmp.replace(cache_file)  # 跨平台 atomic replace（Python 3.3+，自動覆蓋目標檔案）
 
 
 # ==================================================
@@ -263,6 +714,16 @@ class IconPreviewView(ft.Column):
         self._zh_data: dict[str, str] = {}
 
         # =========================
+        # 即時搜尋（Phase 2）
+        # =========================
+        self._mod_search_text: str = ""
+        self._mod_search_debounce_timer: threading.Timer | None = None
+
+        self._detail_search_text: str = ""
+        self._detail_search_debounce_timer: threading.Timer | None = None
+        self._detail_filtered_entries: list | None = None  # None 表示無搜尋，顯示全部
+
+        # =========================
         # Folder Picker
         # =========================
         self.source_picker = ft.FilePicker(on_result=self._on_pick_source)
@@ -306,6 +767,16 @@ class IconPreviewView(ft.Column):
         # UI 元件
         # =========================
         self.header = ft.Text("🧩 模組清單", size=20, weight=ft.FontWeight.BOLD)
+
+        # Mod 清單搜尋框（Phase 2）
+        self.mod_search_tf = ft.TextField(
+            label="搜尋模組",
+            hint_text="輸入 modid（大小寫不敏感）",
+            dense=True,
+            on_change=self._on_mod_search_change,
+            visible=False,
+        )
+        self.mod_search_status = ft.Text("", size=11, color=theme.GREY_600)
 
         self.back_btn = ft.IconButton(
             icon=ft.Icons.ARROW_BACK,
@@ -351,6 +822,9 @@ class IconPreviewView(ft.Column):
 
         self.controls = [
             ft.Row([self.back_btn, self.header], alignment=ft.MainAxisAlignment.START),
+            # Mod 清單搜尋（Phase 2）：搜尋框 + 狀態文字
+            self.mod_search_tf,
+            self.mod_search_status,
             self.pick_source_btn,
             self.source_label,
             self.pick_review_btn,
@@ -373,6 +847,10 @@ class IconPreviewView(ft.Column):
         if e.path:
             self.source_root = Path(e.path)
             self.source_label.value = f"原文資料夾：{self.source_root}"
+            # Phase 3: 向後相容搬移舊 icon cache
+            migrated = _migrate_old_icon_cache(self.source_root)
+            if migrated:
+                self._show_snack("🔄 已搬移舊 icon cache 至新路徑", color=theme.BLUE_600)
             # 快取失效：source_root 改變
             self._entries_cache = None
             self._cache_meta = {}
@@ -539,6 +1017,14 @@ class IconPreviewView(ft.Column):
         self.save_btn.visible = False
         self.header.value = "🧩 模組清單"
 
+        # Phase 2: 顯示 mod 清單搜尋框
+        self.mod_search_tf.visible = True
+        self.mod_search_status.visible = True
+        # 確保 detail 搜尋框隱藏
+        if hasattr(self, "detail_search_tf"):
+            self.detail_search_tf.visible = False
+            self.detail_search_status.visible = False
+
         mod_ids = sorted(self.mods.keys())
         total = len(mod_ids)
 
@@ -602,15 +1088,152 @@ class IconPreviewView(ft.Column):
                 self._render_mod_list()
 
     # ==================================================
+    # 即時搜尋（Phase 2）：Debounce 輔助
+    # ==================================================
+    def _cancel_mod_search_debounce(self):
+        """取消之前的 mod 搜尋 debounce timer"""
+        if self._mod_search_debounce_timer:
+            self._mod_search_debounce_timer.cancel()
+            self._mod_search_debounce_timer = None
+
+    def _cancel_detail_search_debounce(self):
+        """取消之前的 detail 搜尋 debounce timer"""
+        if self._detail_search_debounce_timer:
+            self._detail_search_debounce_timer.cancel()
+            self._detail_search_debounce_timer = None
+
+    def _on_mod_search_change(self, e: ft.ControlEvent):
+        """Mod 清單搜尋輸入 on_change（debounce 150ms）"""
+        self._mod_search_text = e.control.value or ""
+        self._cancel_mod_search_debounce()
+        self._mod_search_debounce_timer = threading.Timer(0.150, self._do_mod_search)
+        self._mod_search_debounce_timer.start()
+
+    def _do_mod_search(self):
+        """實際執行 mod 清單搜尋（在 debounce 延遲後執行）"""
+        keyword = self._mod_search_text.strip().lower()
+        if not keyword:
+            self.mod_search_status.value = ""
+            self._render_mod_list()
+            return
+
+        all_modids = sorted(self.mods.keys())
+        matched = [m for m in all_modids if keyword in m.lower()]
+        total = len(all_modids)
+
+        if not matched:
+            self.mod_search_status.value = "無符合結果"
+            self.list_view.controls.clear()
+            self.list_view.controls.append(
+                ft.ListTile(
+                    title=ft.Text("無符合結果", color=theme.GREY_600),
+                    subtitle=ft.Text(f"嘗試不同的關鍵字"),
+                )
+            )
+            self.page_info.value = ""
+            self.mod_current_page = 0
+        else:
+            self.mod_search_status.value = f"符合 {len(matched)} / {total} 個模組"
+            # 直接顯示所有符合結果（不支援分頁，簡化實作）
+            self.list_view.controls.clear()
+            for modid in matched:
+                entries = self.mods[modid]
+                total_count = len(entries)
+                untranslated = sum(1 for e in entries if not e.zh_tw.strip())
+                self.list_view.controls.append(
+                    ft.ListTile(
+                        title=ft.Text(modid, weight=ft.FontWeight.BOLD),
+                        subtitle=ft.Text(f"總數 {total_count} ｜ 未翻譯 {untranslated}"),
+                        trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT),
+                        on_click=lambda e, m=modid: self._open_mod_detail(m),
+                    )
+                )
+            self.page_info.value = f"搜尋結果：共 {len(matched)} 個模組"
+
+        self.update()
+
+    def _on_detail_search_change(self, e: ft.ControlEvent):
+        """Mod 詳情頁搜尋 on_change（debounce 150ms）"""
+        self._detail_search_text = e.control.value or ""
+        self._cancel_detail_search_debounce()
+        self._detail_search_debounce_timer = threading.Timer(0.150, self._do_detail_search)
+        self._detail_search_debounce_timer.start()
+
+    def _do_detail_search(self):
+        """實際執行 detail 搜尋（在 debounce 延遲後執行）"""
+        keyword = self._detail_search_text.strip().lower()
+        entries = self.mods.get(self.current_modid, [])
+        total = len(entries)
+
+        if not keyword:
+            self._detail_filtered_entries = None  # 無篩選，顯示全部
+            if hasattr(self, "detail_search_status"):
+                self.detail_search_status.value = ""
+        else:
+            filtered = [
+                e for e in entries
+                if keyword in e.key.lower() or keyword in (e.en or "").lower() or keyword in (e.zh_tw or "").lower()
+            ]
+            self._detail_filtered_entries = filtered
+            if hasattr(self, "detail_search_status"):
+                self.detail_search_status.value = f"符合 {len(filtered)} / {total} 筆"
+            if not filtered:
+                if hasattr(self, "detail_search_status"):
+                    self.detail_search_status.value = f"無符合結果（{total} 筆）"
+
+        # 重設到第一頁再渲染
+        self.current_page = 0
+        self._render_current_page()
+
+    def _update_detail_search_controls(self, visible: bool):
+        """切換 detail 搜尋 UI 的顯示/隱藏"""
+        self._init_detail_search_widgets()
+        self.detail_search_tf.visible = visible
+        self.detail_search_status.visible = visible
+
+        # 從 controls 中移除再重新加入（確保順序正確：搜尋框在最上方）
+        self.controls = [c for c in self.controls if c not in [self.detail_search_tf, self.detail_search_status]]
+        if visible:
+            idx = self.controls.index(self.list_view) if self.list_view in self.controls else len(self.controls)
+            self.controls.insert(idx, self.detail_search_tf)
+            self.controls.insert(idx + 1, self.detail_search_status)
+        self.update()
+
+    # ==================================================
     # 第二層：單一模組 detail
     # ==================================================
+
+    # Mod 詳情頁搜尋框（Phase 2）- 初始化於 __init__
+    def _init_detail_search_widgets(self):
+        """初始化 Mod 詳情頁的搜尋 UI（只在需要時建立）"""
+        if not hasattr(self, "detail_search_tf"):
+            self.detail_search_tf = ft.TextField(
+                label="搜尋 key + value",
+                hint_text="搜尋 key + value",
+                dense=True,
+                on_change=self._on_detail_search_change,
+                visible=False,
+            )
+            self.detail_search_status = ft.Text("", size=11, color=theme.GREY_600)
+
     def _open_mod_detail(self, modid: str):
         """開啟模組詳情畫面"""
         self.current_modid = modid
         self.current_page = 0  # ⭐ 重設頁碼
+        self._detail_search_text = ""  # 重設 detail 搜尋
+        self._detail_filtered_entries = None  # None = 無篩選，顯示全部
         self.back_btn.visible = True
         self.save_btn.visible = True
         self.header.value = f"📦 {modid}"
+
+        # ===== Phase 2：顯示 Mod 詳情頁搜尋框 =====
+        self._init_detail_search_widgets()
+        self.detail_search_tf.value = ""
+        self.detail_search_status.value = ""
+
+        # 更新 controls：將 detail 搜尋元件插入 list_view 前
+        self._update_detail_search_controls(visible=True)
+
         log_info(f"[IconPreview] 開啟模組詳情: {modid}")
 
         # Track 1：直接路徑（快速）
@@ -634,9 +1257,14 @@ class IconPreviewView(ft.Column):
 
     def _go_back(self, e):
         """處理返回按鈕，返回模組清單"""
+        self._cancel_detail_search_debounce()  # P1 fix: 取消 pending debounce timer，避免返回後覆蓋列表
         self.current_modid = None
         self.current_page = 0
         self.page_info.value = ""
+        self._detail_search_text = ""
+        self._detail_filtered_entries = None
+        # 隱藏 detail 搜尋 UI
+        self._update_detail_search_controls(visible=False)
         self.list_view.controls.clear()
         self._render_mod_list()
 
@@ -936,31 +1564,22 @@ class IconPreviewView(ft.Column):
         log_info(f"[IconPreview] JAR 目錄掃描完成：共 {len(entries)} 筆翻譯")
 
         # ===== JAR Icon 掃描：提取 mod icons =====
-        icon_cache_root = self.source_root / "_icon_preview" / "jar_icons"
-        # 按 source_jar 分組（減少重複開啟同一個 JAR）
-        jar_to_modids: dict[str, set[str]] = defaultdict(set)
-        for e in entries:
-            if hasattr(e, "source_jar") and e.source_jar:
-                jar_to_modids[e.source_jar].add(e.modid)
+        icon_cache_root = _get_icon_cache_dir()
 
-        # ===== Phase 4/4：提取模組圖示（實驗性，預設關閉）=====
+        # ===== Phase 4/4：批次提取模組圖示（每個 JAR 只開一次 ZIP）=====
         if _ENABLE_JAR_ICON:
-            icon_total = sum(len(m) for m in jar_to_modids.values())
-            icon_processed = 0
-            _show_progress_phase(self, "提取模組圖示", 0, icon_total)
+            # 按 source_jar 分組
+            jar_to_entries: dict[str, list] = defaultdict(list)
+            for e in entries:
+                if getattr(e, "source_jar", None):
+                    jar_to_entries[e.source_jar].append(e)
 
-            for jar_name, modids in jar_to_modids.items():
-                jar_path = self.source_root / jar_name
-                if not jar_path.exists():
-                    continue
-                for modid in modids:
-                    icon_path = _extract_jar_icon(jar_path, modid, icon_cache_root)
-                    if icon_path:
-                        for e in entries:
-                            if e.modid == modid and getattr(e, "source_jar", "") == jar_name:
-                                e.icon_path = str(icon_path)
-                    icon_processed += 1
-                    _show_progress_phase(self, "提取模組圖示", icon_processed, icon_total)
+            icon_total = len(jar_to_entries)
+
+            def _on_icon_progress(done: int, total: int):
+                _show_progress_phase(self, "提取模組圖示", done, total)
+
+            _batch_extract_jar_icons(jar_to_entries, icon_cache_root, self.source_root, _on_icon_progress)
 
         # ===== 寫入 L2 磁碟快取 =====
         _save_entries_cache_l2(self.source_root, entries)
@@ -969,8 +1588,16 @@ class IconPreviewView(ft.Column):
         return entries
 
     def _render_current_page(self):
-        """渲染當前頁面的項目列表"""
-        entries = self.mods.get(self.current_modid, [])
+        """渲染當前頁面的項目列表（支援 detail 搜尋過濾）"""
+        # Phase 2：搜尋過濾邏輯
+        if self._detail_filtered_entries is not None:
+            # 有搜尋條件，使用過濾後的 entries
+            entries = self._detail_filtered_entries
+            search_active = True
+        else:
+            entries = self.mods.get(self.current_modid, [])
+            search_active = False
+
         total = len(entries)
 
         self.total_pages = max(1, (total + self.page_size - 1) // self.page_size)
@@ -987,7 +1614,7 @@ class IconPreviewView(ft.Column):
                     en_text=entry.en,
                     zh_text=self._zh_data.get(entry.key, ""),
                     assets_root=self.source_root / "assets",
-                    preview_root=self.source_root / "_icon_preview",
+                    preview_root=_get_icon_cache_dir(),
                     on_value_changed=self._on_value_changed,
                     icon_path=getattr(entry, "icon_path", None),
                 )
@@ -1000,3 +1627,4 @@ class IconPreviewView(ft.Column):
         self.next_page_btn.disabled = self.current_page >= self.total_pages - 1
 
         self.update()
+

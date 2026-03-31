@@ -1,7 +1,7 @@
 # ITERATION_SOP.md
 # Claw 疊代作業標準流程
 
-版本：v1.3
+版本：v1.4（新增 PR 疊代管理章節）
 適用範圍：所有 OpenClaw 疊代任務
 狀態：repo 根目錄正式版；OpenClaw workspace 應與此檔同步
 
@@ -261,3 +261,111 @@ PR 文件中必須對**每一個刪除項目**逐項補上以下六個欄位，�
 ```
 
 沒有這個區塊，Claw 應停止並提示補上，不得自行決定驗證範圍。
+
+---
+
+## PR 疊代與分支管理
+
+### 核心原則：單人開發，一次只有一個 open PR 在同一區塊
+
+單人開發時，衝突的根因只有一個：**上一個相關 PR 還沒合併，就開始下一個並改到同一個檔案**。
+
+只要遵守以下原則，衝突機率趨近於零。
+
+---
+
+### 規則 1：同一區塊，先合併先贏
+
+目標檔案 / 功能區塊，在同一時間只能有一個 open PR。
+
+```
+✅ PR57 合併進 main → 再從最新 main 開 PR58
+❌ PR57 還沒合併，就開始做 PR58 並改同一個函式
+```
+
+---
+
+### 規則 2：開 branch 的正確時機
+
+**正確時機**：目標 PR 已經合併進 main，確定 base 是最新的。  
+**錯誤時機**：目標 PR 還在 open 狀態，你已經在本地改同一個檔案。
+
+如果需要「先規劃設計」再開 branch：
+1. 先在其他地方（Notion、Markdown 文件）做設計
+2. 目標 PR 合併後，再從最新 main 建立 branch，套用設計實作
+
+---
+
+### 規則 3：同一區塊內可以拆分，但不建議疊加
+
+**可以**：同一功能切成多個獨立的 PR，陸續合併（sequential stacking）
+
+```
+PR57a（底層）→ 合併進 main
+PR57b（依賴 a）→ 合併進 main
+PR57c（依賴 b）→ 合併進 main
+```
+
+**不建議**：同一功能做多層疊加（nested stacking）
+
+```
+feat/pr57-base → PR merge 後再合併
+  └── feat/pr57-search-ui  → PR merge 前就疊上去
+       └── feat/pr57-perf   → 最上層，等最久，風險最高
+```
+
+疊加風險：
+- 中間層 amend 後，上游需要手動更新 base
+- 容易忘記自己在哪一層，amend 錯 branch
+- 衝突時修復複雜度 O(n²)
+
+---
+
+### 規則 4：需要同時處理多個功能區塊時
+
+如果真的有兩個完全不相關的功能要同時做：
+
+```
+main
+  ├── feat/pr57-icon-refactor    # icon_view 改版
+  └── feat/pr58-settings-ui     # 設定頁改版（完全不同的檔案）
+```
+
+**前提**：兩個 PR 不能改到同一個檔案。若有交集，必須等其中一個合併後再做另一個。
+
+---
+
+### 規則 5：Branch 落後時的處理
+
+如果因為特殊原因，branch 落後了 main 超過 1 個 PR：
+
+**不要累積**，儘快 rebase：
+
+```bash
+git fetch origin
+git rebase origin/main
+# 解決衝突（通常是小範圍）
+git push --force-with-lease
+```
+
+**何時用 rebase vs merge**：
+- branch 落後不超過 3 個 commit → `git rebase origin/main`
+- branch 落後很多，或有大量複雜衝突 → `git merge origin/main`（保留歷史，衝突一次解完）
+
+---
+
+### 觸發條件速查
+
+| 情境 | 行動 |
+|------|------|
+| 想要開始新 PR，但上一個相關 PR 還沒合併 | 等合併後再開 branch |
+| 兩個 PR 改到同一個檔案 | 等其中一個合併，再做另一個 |
+| Branch 落後超過 1 個 PR | 儘快 rebase，不要累積 |
+| 需要同時做多個相關功能 | 拆成 sequential（a→b→c），不要 nested stacking |
+| 完全不相關的功能可以同時做 | 各自獨立的 branch，完全不重疊即可 |
+
+---
+
+### 簡短版（背誦用）
+
+> **一個區塊，一次一個 PR。上一個合併，才做下一個。Branch 落後就 rebase，不要累積。**
