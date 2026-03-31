@@ -9,7 +9,7 @@
 
 **實驗性參數**（`app/views/icon_preview_view.py` 第 24 行）：
 ```python
-_ENABLE_JAR_ICON = True  # 已啟用（icon→key 對應已透過 Model JSON 解析實作）
+_ENABLE_JAR_ICON = True  # 已啟用（Model JSON 解析處理 icon→key 對應）
 ```
 
 **實作完成的內容**：

@@ -27,7 +27,7 @@ import threading
 # ==================================================
 # 實驗性功能開關
 # ==================================================
-_ENABLE_JAR_ICON = True  # 已啟用
+_ENABLE_JAR_ICON = True  # 已啟用（Model JSON 解析 + 批次 ZIP icon 提取）
 
 # ==================================================
 # JAR Icon 提取輔助函式（Phase 1: Model JSON 解析）
@@ -327,6 +327,18 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
                 out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
                 out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] 提取 Fabric icon.png: {modid}")
+                return out_path
+
+            # ===== Fallback: assets/<modid>/textures/*.png（Fabric glob）=====
+            import re
+            textures_pattern = re.compile(r"^assets/" + re.escape(modid) + r"/textures/.+\.png$")
+            texture_files = sorted(n for n in names if textures_pattern.match(n))
+            if texture_files:
+                icon_data = zf.read(texture_files[0])
+                icon_cache_root.mkdir(parents=True, exist_ok=True)
+                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
+                out_path.write_bytes(icon_data)
+                log_info(f"[IconPreview] 提取 Fabric texture icon: {modid} → {texture_files[0]}")
                 return out_path
 
             # ===== Fallback: assets/<modid>/textures/logo.png =====
