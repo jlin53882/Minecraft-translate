@@ -98,11 +98,13 @@ class LangItemRow(ft.Container):
                 else:
                     preview_path = None
             else:
-                # 舊磁碟路徑（正常流程）
+                # 舊磁碟路徑（無法解析 jar://，走一般流程）
                 preview_path = generate_icon_preview(icon_result.icon_path, preview_root)
         else:
+            # icon_path 為 None，或無 _HAS_ICON_READER：嘗試用磁碟路徑生成預覽
             preview_path = generate_icon_preview(icon_result.icon_path, preview_root) if icon_result.icon_path else None
 
+        # 顯示 icon 或警告
         if preview_path:
             icon = ft.Image(
                 src=str(preview_path),
@@ -110,6 +112,12 @@ class LangItemRow(ft.Container):
                 height=128,
             )
         else:
+            # 無法取得 preview：顯示錯誤 icon + 根據 risk 等級上色
+            color_map = {
+                IconRisk.IGNORE: ft.Colors.GREEN_600,
+                IconRisk.WARN: ft.Colors.ORANGE_600,
+                IconRisk.DANGER: ft.Colors.RED_600,
+            }
             icon = ft.Container(
                 width=128,
                 height=128,
@@ -117,26 +125,6 @@ class LangItemRow(ft.Container):
                 bgcolor=ft.Colors.GREY_300,
                 content=ft.Icon(ft.Icons.IMAGE_NOT_SUPPORTED),
             )
-            risk_label = ft.Text(
-                "⚠ icon 無法解析",
-                size=12,
-                color=ft.Colors.RED_600,
-            )
-        else:
-            color_map = {
-                IconRisk.IGNORE: ft.Colors.GREEN_600,
-                IconRisk.WARN: ft.Colors.ORANGE_600,
-                IconRisk.DANGER: ft.Colors.RED_600,
-            }
-
-            icon = ft.Container(
-                width=128,
-                height=128,
-                alignment=ft.alignment.center,
-                bgcolor=ft.Colors.GREY_300,
-                content=ft.Text("No Icon", size=12),
-            )
-
             risk_label = ft.Text(
                 f"⚠ {icon_result.reason}",
                 size=12,
