@@ -424,7 +424,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
 # ==================================================
 
 def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: Path, source_root: Path, progress_cb=None) -> int:
-    """批次處理多個 JAR 的 icon 提取。
+    """批次處理多個 JAR 的 icon 提取（ZIP 直接讀取，無磁碟寫入）。
 
     核心優化：每個 JAR 只開一次 ZIP，在記憶體內建立 model index，
     將 icon 結果共享給同 JAR 的所有 entry。
@@ -435,19 +435,21 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
         3. 對每個 unique modid：
             a. 嘗試 Model JSON 解析
             b. 嘗試 fallback（icon.png / logo.png / NeoForge logoFile）
-            c. 將找到的 icon PNG 寫入磁碟（每個 modid 只寫一次）
+            c. 將 IconRef URI 寫入 entry_icon_paths（無磁碟寫入）
         4. 關閉 ZIP
         5. 將 icon_path 寫回所有對應 entry
 
     參數：
         jar_to_entries: {jar_name: [entries]}，同一個 JAR 的所有 entry
-        icon_cache_root: icon 快取根目錄
+        icon_cache_root: （已廢棄，參數保留但不再使用）
         source_root: 資料根目錄（JAR 所在位置）
         progress_cb: 進度回呼（可選）
 
     回傳：
         處理的 JAR 數量
     """
+    from app.icon_reader import IconRef
+
     processed = 0
     total = len(jar_to_entries)
 
@@ -462,9 +464,9 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
         # 同一個 JAR 的所有 modid（set，去重）
         modids = list({e.modid for e in entries if hasattr(e, "modid") and hasattr(e, "key")})
 
-        # ===== 每個 entry 的 icon 結果 =====
-        # key: entry key, value: icon_path (or None)
-        entry_icon_paths: dict[str, Path | None] = {}
+        # ===== 每個 entry 的 icon 結果（URI 字串，無磁碟寫入）=====
+        # key: entry key, value: IconRef URI string (or None)
+        entry_icon_paths: dict[str, str | None] = {}
 
         try:
             with zipfile.ZipFile(jar_path, "r") as zf:
@@ -482,35 +484,26 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
 
                     if result:
                         tex_val, png_path = result
-                        icon_data = zf.read(png_path)
-                        icon_cache_root.mkdir(parents=True, exist_ok=True)
-                        # 檔名：每個 entry 的 key 獨立（per-key icon，與 _extract_jar_icon 行為一致）
-                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
-                        out_path.write_bytes(icon_data)
-                        log_info(f"[IconPreview] Model icon: {modid}/{key} → {png_path} (tex={tex_val})")
-                        entry_icon_paths[key] = out_path
+                        # 無磁碟寫入，直接存 IconRef URI
+                        jar_rel_path = jar_name  # 相對於 source_root
+                        entry_icon_paths[key] = IconRef(Path(jar_rel_path), png_path).to_uri()
+                        log_info(f"[IconPreview] Model icon URI: {modid}/{key} → jar://{jar_rel_path}:{png_path} (tex={tex_val})")
                         continue
 
                     # Fallback: icon.png
                     fabric_icon = f"assets/{modid}/icon.png"
                     if fabric_icon in names:
-                        icon_data = zf.read(fabric_icon)
-                        icon_cache_root.mkdir(parents=True, exist_ok=True)
-                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
-                        out_path.write_bytes(icon_data)
-                        log_info(f"[IconPreview] 提取 Fabric icon.png: {modid}/{key}")
-                        entry_icon_paths[key] = out_path
+                        jar_rel_path = jar_name
+                        entry_icon_paths[key] = IconRef(Path(jar_rel_path), fabric_icon).to_uri()
+                        log_info(f"[IconPreview] Fabric icon.png URI: {modid}/{key} → jar://{jar_rel_path}:{fabric_icon}")
                         continue
 
                     # Fallback: logo.png
                     logo_texture = f"assets/{modid}/textures/logo.png"
                     if logo_texture in names:
-                        icon_data = zf.read(logo_texture)
-                        icon_cache_root.mkdir(parents=True, exist_ok=True)
-                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
-                        out_path.write_bytes(icon_data)
-                        log_info(f"[IconPreview] 提取 logo.png: {modid}/{key}")
-                        entry_icon_paths[key] = out_path
+                        jar_rel_path = jar_name
+                        entry_icon_paths[key] = IconRef(Path(jar_rel_path), logo_texture).to_uri()
+                        log_info(f"[IconPreview] logo.png URI: {modid}/{key} → jar://{jar_rel_path}:{logo_texture}")
                         continue
 
                     # Fallback: NeoForge logoFile
@@ -526,12 +519,9 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                             if logo_match:
                                 logo_path = logo_match.group(1)
                                 if logo_path in names:
-                                    icon_data = zf.read(logo_path)
-                                    icon_cache_root.mkdir(parents=True, exist_ok=True)
-                                    out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
-                                    out_path.write_bytes(icon_data)
-                                    log_info(f"[IconPreview] 提取 NeoForge logoFile: {modid}/{key} → {logo_path}")
-                                    entry_icon_paths[key] = out_path
+                                    jar_rel_path = jar_name
+                                    entry_icon_paths[key] = IconRef(Path(jar_rel_path), logo_path).to_uri()
+                                    log_info(f"[IconPreview] NeoForge logoFile URI: {modid}/{key} → jar://{jar_rel_path}:{logo_path}")
                                     continue
 
                     # 完全找不到 icon
@@ -540,12 +530,12 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
         except Exception as ex:
             log_warning(f"[IconPreview] 批次提取 JAR icon 失敗: {jar_name} → {ex}")
 
-        # ===== 將 icon_path 寫回所有對應 entry =====
+        # ===== 將 icon_path（URI）寫回所有對應 entry =====
         for e in entries:
             if hasattr(e, "key") and e.key in entry_icon_paths:
-                icon_path = entry_icon_paths[e.key]
-                if icon_path:
-                    e.icon_path = str(icon_path)
+                icon_uri = entry_icon_paths[e.key]
+                if icon_uri:
+                    e.icon_path = icon_uri
 
         if progress_cb:
             progress_cb(processed + 1, total)
