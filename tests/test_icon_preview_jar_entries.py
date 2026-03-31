@@ -332,16 +332,6 @@ class TestLoadEntriesFromJarDirectory:
         entries = view._load_entries_from_jar_directory()
         assert entries == [], "source_root=None 時應回傳空 list，而非拋出 AttributeError"
 
-    def test_jar_entries_source_root_none_raises_PR51_bug(self, tmp_path):
-        """source_root 為 None 時，會炸 AttributeError（PR51 已知限制，待 PR53 修復）
-
-        此測試記錄 PR51 的錯誤行為（AttributeError）。
-        PR53 修復後應改為回傳 []，並以 test_load_entries_from_jar_directory_no_source_root 取代本測試。
-        """
-        view = create_view(source_root=None, review_root=None)
-        with pytest.raises(AttributeError, match="'NoneType' object has no attribute 'glob'"):
-            view._load_entries_from_jar_directory()
-
     def test_jar_entries_non_string_zh_tw(self, tmp_path):
         """zh_tw 值是 list 而非 str 時，應該回傳空字串（防禦機制）"""
         jar_dir = tmp_path / "mods"

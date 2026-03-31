@@ -1,7 +1,36 @@
 # PR #54 設計文件：icon_preview_view 重構（多執行緒 + L2 磁碟快取 + icon掃描）
 
-> 狀態：規劃中
+> 狀態：✅ 已合併至 main（PR #55 / commit 9051498）
 > 前提：PR #53（jar_browser.py）已合併
+
+## 0. 目前狀態（2026-03-30 更新）
+
+### icon 掃描功能：已實作，預設關閉
+
+**實驗性參數**（`app/views/icon_preview_view.py` 第 24 行）：
+```python
+_ENABLE_JAR_ICON = False  # TODO: 找回 icon→key 的對應方式後啟用
+```
+
+**實作完成的內容**：
+- ✅ `LangItemRow` 新增 `icon_path` 參數
+- ✅ `_extract_jar_icon()` 支援：Fabric `assets/<modid>/icon.png`、Fabric `assets/<modid>/textures/**/*.png`、NeoForge `neoforge.mods.toml → logoFile`
+- ✅ Phase 4 進度條（`ENABLE_JAR_ICON=True` 時生效）
+- ✅ icon 重複覆蓋 bug 修復（每個 JAR 各自抓自己的 icon）
+- ✅ 合併進 Phase 3 的 `scan_jars()` 流程
+
+**未完成的內容**：
+- ⚠️ icon → lang key 的對應關係尚未確認
+  - icon 檔名不一定等於 lang key
+  - `assets/<modid>/textures/gui/xxx.png` 這類路徑，後面的子路徑是否就是 key？
+  - 需確認：icon 檔名 / 子路徑 → lang key 的映射邏輯
+
+**Icon 搜尋順序**：
+1. `assets/<modid>/icon.png`
+2. `assets/<modid>/textures/**/*.png`（取第一個找到的）
+3. NeoForge `logoFile`（從 `META-INF/neoforge.mods.toml` 解析）
+
+**開啟方式**：將 `_ENABLE_JAR_ICON` 改為 `True`
 
 ---
 
@@ -13,16 +42,16 @@
 |------|------|
 | **P0-1**：同步 JAR 掃描 | 目前 `_load_entries_from_jar_directory` 是同步 for 迴圈，500 JAR 需 60-150 秒 |
 | **P0-2**：無 L2 磁碟快取 | 目前只有 in-memory cache（L1），關程式後完全重跑 |
-| **P1-1**：JAR icon 未實作 | 目前 `LangItemRow` 只能解析磁碟上的 icon，無法從 JAR 讀取 |
-| **P1-2**：LangItemRow 無 icon_path | 沒有 `icon_path` 參數，無法傳入預先解析好的 icon 路徑 |
+| **P1-1**：JAR icon 未實作 | ✅ 已實作 `_ENABLE_JAR_ICON=False`，待找回 icon→key 對應後啟用 |
+| **P1-2**：LangItemRow 無 icon_path | ✅ 已實作（`icon_path` 參數已加入）|
 | **P1-3**：ProgressBar 無多 Phase | 使用者不知道內部在做什麼（收集 modid / 建立對照表 / 讀取翻譯）|
 
 ### 1.2 目標
 
 - 用 `jar_browser.py` 取代同步 JAR 掃描
 - 新增 L2 磁碟快取
-- 實作 JAR icon 掃描（Fabric + NeoForge）
-- 改造 `LangItemRow` 接收 `icon_path`
+- 實作 JAR icon 掃描（Fabric + NeoForge）✅ 已實作（預設關閉）
+- 改造 `LangItemRow` 接收 `icon_path` ✅ 已實作
 - 進度條顯示 Phase
 
 ---
