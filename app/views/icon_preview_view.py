@@ -101,7 +101,7 @@ def _load_model_index_from_cache(jar_path: Path, modid: str) -> dict | None:
     """
     cache_dir = _get_model_index_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
-    safe_jar_name = jar_path.stem.replace(".jar", "")
+    safe_jar_name = jar_path.stem  # stem 已剝除副檔名
     cache_file = cache_dir / f"{safe_jar_name}.json"
 
     if not cache_file.exists():
@@ -128,7 +128,7 @@ def _save_model_index_to_cache(jar_path: Path, modid: str, model_index: dict):
     """將 model index 寫入磁碟 cache（atomic write）。"""
     cache_dir = _get_model_index_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
-    safe_jar_name = jar_path.stem.replace(".jar", "")
+    safe_jar_name = jar_path.stem  # stem 已剝除副檔名
     cache_file = cache_dir / f"{safe_jar_name}.json"
 
     data = {
@@ -711,7 +711,7 @@ class IconPreviewView(ft.Column):
         # Mod 清單搜尋框（Phase 2）
         self.mod_search_tf = ft.TextField(
             label="搜尋模組",
-            hint_text="輸入 mod 名稱或 modid（大小寫不敏感）",
+            hint_text="輸入 modid（大小寫不敏感）",
             dense=True,
             on_change=self._on_mod_search_change,
             visible=False,
@@ -1197,6 +1197,7 @@ class IconPreviewView(ft.Column):
 
     def _go_back(self, e):
         """處理返回按鈕，返回模組清單"""
+        self._cancel_detail_search_debounce()  # P1 fix: 取消 pending debounce timer，避免返回後覆蓋列表
         self.current_modid = None
         self.current_page = 0
         self.page_info.value = ""
