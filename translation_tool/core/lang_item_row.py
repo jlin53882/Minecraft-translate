@@ -8,10 +8,18 @@ import flet as ft
 from pathlib import Path
 from typing import Callable
 import unicodedata
+import hashlib
 
 from translation_tool.core.icon_preview_cache import generate_icon_preview
 from translation_tool.core.icon_resolver import resolve_icon_with_reason
 from translation_tool.core.icon_reason import IconRisk, IconResult
+
+# Icon reader（PR59 新增）
+try:
+    from app.icon_reader import IconRef, read_icon_bytes
+    _HAS_ICON_READER = True
+except ImportError:
+    _HAS_ICON_READER = False
 
 def to_halfwidth(text):
     """將字串轉換為半形。"""
@@ -72,27 +80,48 @@ class LangItemRow(ft.Container):
             icon_result = resolve_icon_with_reason(lang_key, assets_root)
         risk_label = None
 
-        if icon_result.icon_path:
-            preview_path = generate_icon_preview(icon_result.icon_path, preview_root)
-            if preview_path:
-                icon = ft.Image(
-                    src=str(preview_path),
-                    width=128,
-                    height=128,
-                )
+        # PR59 fix：處理 jar:// URI（新格式）與舊磁碟路徑
+        _icon_ref: "IconRef | None" = None  # unused, kept for future extension
+        if icon_result.icon_path and _HAS_ICON_READER:
+            icon_ref = IconRef.parse(str(icon_result.icon_path))
+            if icon_ref is not None:
+                _icon_ref = icon_ref
+                # 從 ZIP 直接讀取 bytes，寫入 preview_root
+                png_bytes = read_icon_bytes(icon_ref.jar_path, icon_ref.png_path)
+                if png_bytes:
+                    digest = hashlib.sha256(png_bytes).hexdigest()[:16]
+                    preview_root.mkdir(parents=True, exist_ok=True)
+                    zip_preview_path = preview_root / f"zip_{digest}.png"
+                    if not zip_preview_path.exists():
+                        zip_preview_path.write_bytes(png_bytes)
+                    preview_path = zip_preview_path
+                else:
+                    preview_path = None
             else:
-                icon = ft.Container(
-                    width=128,
-                    height=128,
-                    alignment=ft.alignment.center,
-                    bgcolor=ft.Colors.GREY_300,
-                    content=ft.Icon(ft.Icons.IMAGE_NOT_SUPPORTED),
-                )
-                risk_label = ft.Text(
-                    "⚠ icon 無法解析",
-                    size=12,
-                    color=ft.Colors.RED_600,
-                )
+                # 舊磁碟路徑（正常流程）
+                preview_path = generate_icon_preview(icon_result.icon_path, preview_root)
+        else:
+            preview_path = generate_icon_preview(icon_result.icon_path, preview_root) if icon_result.icon_path else None
+
+        if preview_path:
+            icon = ft.Image(
+                src=str(preview_path),
+                width=128,
+                height=128,
+            )
+        else:
+            icon = ft.Container(
+                width=128,
+                height=128,
+                alignment=ft.alignment.center,
+                bgcolor=ft.Colors.GREY_300,
+                content=ft.Icon(ft.Icons.IMAGE_NOT_SUPPORTED),
+            )
+            risk_label = ft.Text(
+                "⚠ icon 無法解析",
+                size=12,
+                color=ft.Colors.RED_600,
+            )
         else:
             color_map = {
                 IconRisk.IGNORE: ft.Colors.GREEN_600,
