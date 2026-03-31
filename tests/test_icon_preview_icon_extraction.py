@@ -447,3 +447,98 @@ class TestToHalfwidth:
         """已是半形的內容不變"""
         from app.views.icon_preview_view import to_halfwidth
         assert to_halfwidth("hello 123") == "hello 123"
+
+
+# ==================================================
+# _safe_filename_key 測試
+# ==================================================
+
+class TestSafeFilenameKey:
+    """_safe_filename_key 的各種情境測試。"""
+
+    def test_backslash_removed(self):
+        """key 含反斜線時被移除"""
+        from app.views.icon_preview_view import _safe_filename_key
+        result = _safe_filename_key("Use \\locate structure betterjungletemples")
+        assert "\\" not in result
+        assert "locate" in result
+
+    def test_normal_key(self):
+        """正常 key 不變"""
+        from app.views.icon_preview_view import _safe_filename_key
+        assert _safe_filename_key("restonia_crystal_block") == "restonia_crystal_block"
+
+    def test_slash_replaced(self):
+        """斜線被替換為底線"""
+        from app.views.icon_preview_view import _safe_filename_key
+        result = _safe_filename_key("path/to/some_file")
+        assert "/" not in result
+        assert "some_file" in result
+
+    def test_spaces_replaced(self):
+        """空白被替換為底線"""
+        from app.views.icon_preview_view import _safe_filename_key
+        result = _safe_filename_key("some key with spaces")
+        assert " " not in result
+        assert "_" in result
+
+    def test_long_key_truncated(self):
+        """超長 key 被截斷"""
+        from app.views.icon_preview_view import _safe_filename_key
+        long_key = "a" * 100
+        result = _safe_filename_key(long_key)
+        assert len(result) <= 64
+
+    def test_icon_generated_from_sanitized_key(self, tmp_path):
+        """sanitized key 拿來當檔名時不應報錯"""
+        from app.views.icon_preview_view import _extract_jar_icon, _safe_filename_key
+        from app.views.icon_preview_view import _try_extract_mod_icon_from_model
+        import zipfile
+
+        # 建立含特殊字元的 key
+        jar = tmp_path / "test_mod-1.0.jar"
+        cache_root = tmp_path / "icon_cache"
+        with zipfile.ZipFile(jar, "w") as zf:
+            zf.writestr("assets/test_mod/icon.png", png_1x1())
+
+        # 含反斜線的 key
+        key_with_backslash = "Use \\locate structure"
+        safe = _safe_filename_key(key_with_backslash)
+
+        with patch("app.views.icon_preview_view._try_extract_mod_icon_from_model", return_value=None):
+            result = _extract_jar_icon(jar, "test_mod", cache_root, key_with_backslash)
+
+        assert result is not None, "含 \\ 的 key 應能產生 icon 檔"
+        assert safe in result.name, f"icon 檔名應包含 sanitized key: {safe}"
+
+
+# ==================================================
+# atomic write 測試（tmp.replace）
+# ==================================================
+
+class TestAtomicWrite:
+    """atomic write 使用 tmp.replace() 跨平台覆蓋目標檔案的測試。"""
+
+    def test_overwrite_existing_cache_file(self, tmp_path):
+        """寫入時目標檔案已存在，tmp.replace 應自動覆蓋不報錯"""
+        from app.views.icon_preview_view import _save_model_index_to_cache
+        import zipfile
+
+        jar = tmp_path / "test.jar"
+        with zipfile.ZipFile(jar, "w") as zf:
+            zf.writestr("assets/test_mod/lang/en_us.json", b"{}")
+
+        model_index = {"item/test": ["models/item/test.json"]}
+
+        with patch("app.views.icon_preview_view._get_jar_hash", return_value="abc123"):
+            with patch("app.views.icon_preview_view._get_model_index_cache_dir", return_value=tmp_path / "cache"):
+                # 第一次寫入
+                _save_model_index_to_cache(jar, "test_mod", model_index)
+                # 第二次寫入（目標檔案已存在）
+                _save_model_index_to_cache(jar, "test_mod", {"item/test2": ["models/item/test2.json"]})
+
+        # 不應報錯，且檔案內容為最新
+        cache_file = tmp_path / "cache" / "test.json"
+        assert cache_file.exists()
+        data = json.loads(cache_file.read_text())
+        assert data["index"] == {"item/test2": ["models/item/test2.json"]}

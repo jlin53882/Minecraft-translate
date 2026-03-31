@@ -91,6 +91,28 @@ def _migrate_old_icon_cache(source_root: Path) -> bool:
     return True
 
 
+_INVALID_FN_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _safe_filename_key(key: str) -> str:
+    """將 lang key 轉為可用於檔名的字串。
+
+    處理的問題：
+    - key 的最後一段可能含 Windows 不允許的字元（如 \\）
+    - key 可能含空白或 unicode 符號
+
+    處理方式：
+    - 移除 Windows 檔名禁用字元（\\ / : * ? " < > |）
+    - 將空白替換為底線
+    - 限制長度（最多 64 字）避免路徑過長
+    """
+    suffix = key.split(".")[-1]
+    safe = _INVALID_FN_CHARS.sub("_", suffix)
+    safe = safe.strip().replace(" ", "_")
+    # 避免路徑過長（Windows MAX_PATH 260）
+    return safe[:64] if len(safe) > 64 else safe
+
+
 def _load_model_index_from_cache(jar_path: Path, modid: str) -> dict | None:
     """嘗試從磁碟讀取 model index cache。
 
@@ -140,7 +162,7 @@ def _save_model_index_to_cache(jar_path: Path, modid: str, model_index: dict):
 
     tmp = cache_dir / f"{cache_file.stem}.tmp"
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.rename(cache_file)
+    tmp.replace(cache_file)
 
 
 def _build_model_index(names: list[str], modid: str) -> dict[str, list[str]]:
@@ -314,7 +336,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
                 tex_val, png_path = result
                 icon_data = zf.read(png_path)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
+                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
                 out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] Model JSON icon: {modid} → {png_path} (tex={tex_val})")
                 return out_path
@@ -324,7 +346,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
             if fabric_icon in names:
                 icon_data = zf.read(fabric_icon)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
+                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
                 out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] 提取 Fabric icon.png: {modid}")
                 return out_path
@@ -336,7 +358,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
             if texture_files:
                 icon_data = zf.read(texture_files[0])
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
+                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
                 out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] 提取 Fabric texture icon: {modid} → {texture_files[0]}")
                 return out_path
@@ -346,7 +368,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
             if logo_texture in names:
                 icon_data = zf.read(logo_texture)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
+                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
                 out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] 提取 logo.png: {modid}")
                 return out_path
@@ -366,7 +388,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
                         if logo_path in names:
                             icon_data = zf.read(logo_path)
                             icon_cache_root.mkdir(parents=True, exist_ok=True)
-                            out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
+                            out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
                             out_path.write_bytes(icon_data)
                             log_info(f"[IconPreview] 提取 NeoForge logoFile: {modid} → {logo_path}")
                             return out_path
@@ -443,7 +465,7 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                         icon_data = zf.read(png_path)
                         icon_cache_root.mkdir(parents=True, exist_ok=True)
                         # 檔名：每個 entry 的 key 獨立（per-key icon，與 _extract_jar_icon 行為一致）
-                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
+                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
                         out_path.write_bytes(icon_data)
                         log_info(f"[IconPreview] Model icon: {modid}/{key} → {png_path} (tex={tex_val})")
                         entry_icon_paths[key] = out_path
@@ -454,7 +476,7 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                     if fabric_icon in names:
                         icon_data = zf.read(fabric_icon)
                         icon_cache_root.mkdir(parents=True, exist_ok=True)
-                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
+                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
                         out_path.write_bytes(icon_data)
                         log_info(f"[IconPreview] 提取 Fabric icon.png: {modid}/{key}")
                         entry_icon_paths[key] = out_path
@@ -465,7 +487,7 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                     if logo_texture in names:
                         icon_data = zf.read(logo_texture)
                         icon_cache_root.mkdir(parents=True, exist_ok=True)
-                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
+                        out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
                         out_path.write_bytes(icon_data)
                         log_info(f"[IconPreview] 提取 logo.png: {modid}/{key}")
                         entry_icon_paths[key] = out_path
@@ -486,7 +508,7 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                                 if logo_path in names:
                                     icon_data = zf.read(logo_path)
                                     icon_cache_root.mkdir(parents=True, exist_ok=True)
-                                    out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{key.split('.')[-1]}.png"
+                                    out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
                                     out_path.write_bytes(icon_data)
                                     log_info(f"[IconPreview] 提取 NeoForge logoFile: {modid}/{key} → {logo_path}")
                                     entry_icon_paths[key] = out_path
@@ -591,7 +613,7 @@ def _save_entries_cache_l2(source_root: Path, entries: list):
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.rename(cache_file)  # POSIX atomic on most systems
+    tmp.replace(cache_file)  # 跨平台 atomic replace（Python 3.3+，自動覆蓋目標檔案）
 
 
 # ==================================================
