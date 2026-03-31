@@ -168,8 +168,8 @@ def _save_model_index_to_cache(jar_path: Path, modid: str, model_index: dict):
 def _build_model_index(names: list[str], modid: str) -> dict[str, list[str]]:
     """動態掃描所有 .json model 檔，建立 name → [路徑列表] index。
 
-    name = 純檔名（不含子目錄前綴），同一個 name 可能來自不同子目錄。
-    例如 models/block/drill.json 和 models/item/drill.json 都叫 "drill"。
+    name = 相對路徑（保留子目錄），例如 block/restonia_crystal_block。
+    同一個 name 可能來自不同子目錄（block/ vs item/），全部保留。
     """
     index: dict[str, list[str]] = {}
     prefix = f"assets/{modid}/models/"
@@ -179,9 +179,8 @@ def _build_model_index(names: list[str], modid: str) -> dict[str, list[str]]:
             continue
         rel = n[len(prefix):]
         name = rel.replace(".json", "")
-        # 純檔名：去掉子目錄前綴
-        if "/" in name:
-            name = name.split("/")[-1]
+        # 保留子目錄前綴（例如 block/restonia_crystal_block）
+        # 這樣 _try_extract_mod_icon_from_model 可以用完整路徑做精準 lookup
         if name not in index:
             index[name] = []
         index[name].append(n)
@@ -273,13 +272,15 @@ def _try_extract_mod_icon_from_model(
     modid: str,
     zf: zipfile.ZipFile,
     names: set[str],
+    key: str | None = None,
 ) -> tuple[str, str] | None:
     """嘗試從 model JSON 解析 mod icon。
 
     流程：
         1. 建立/讀取 model index（使用 cache）
-        2. 嘗試從 icon/logo 模型跟隨 parent chain 找 textures
-        3. 使用 texture fallback 策略取值
+        2. 如果有 key，先用 key 查 item 自己的 model texture（精準匹配）
+        3. 如果沒有 key 或 key 沒找到 texture，fallback 去找 icon/logo 模型
+        4. 使用 texture fallback 策略取值
 
     回傳：
         (texture_value, png_path) 或 None
@@ -289,7 +290,26 @@ def _try_extract_mod_icon_from_model(
         model_index = _build_model_index(list(names), modid)
         _save_model_index_to_cache(jar_path, modid, model_index)
 
-    # 嘗試的 icon model 名稱（按優先順序）
+    # ===== 優先：嘗試用 key 查 item 自己的 model texture =====
+    if key:
+        # 將 key 轉為 model name
+        # 例如：block.actuallyadditions.restonia_crystal_block → block/restonia_crystal_block
+        #       item.actuallyadditions.drill → item/drill
+        # 原理：key = "<prefix>.<modid>.<name>"，去掉 modid 前綴就是 model name
+        prefix = key.split(".")[0]  # "block" 或 "item" 等
+        rest = key[len(prefix) + 1 + len(modid) + 1:]  # "restonia_crystal_block"
+        model_name = f"{prefix}/{rest}"  # "block/restonia_crystal_block"
+
+        if model_name in model_index:
+            for model_path in model_index[model_name]:
+                tex_val = _follow_parent_chain(model_path, names, modid, zf)
+                if not tex_val:
+                    continue
+                png_path = _texture_to_png_path(tex_val)
+                if png_path and png_path in names:
+                    return tex_val, png_path
+
+    # ===== Fallback：找 icon/logo/item_icon/block_icon 模型 =====
     icon_candidates = ["icon", "logo", "item_icon", "block_icon"]
 
     for candidate in icon_candidates:
@@ -331,7 +351,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
             names = set(zf.namelist())
 
             # ===== Phase 1: Model JSON 解析（最高優先）=====
-            result = _try_extract_mod_icon_from_model(jar_path, modid, zf, names)
+            result = _try_extract_mod_icon_from_model(jar_path, modid, zf, names, key=key)
             if result:
                 tex_val, png_path = result
                 icon_data = zf.read(png_path)
@@ -458,7 +478,7 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                     key = e.key
 
                     # 嘗試解析（使用 model index cache，ZIP 保持開啟）
-                    result = _try_extract_mod_icon_from_model(jar_path, modid, zf, names)
+                    result = _try_extract_mod_icon_from_model(jar_path, modid, zf, names, key=key)
 
                     if result:
                         tex_val, png_path = result
