@@ -29,7 +29,9 @@ class IconRef:
         """從 URI 字串解析。舊磁碟路徑視為無 icon，回傳 None。"""
         if not uri.startswith("jar://"):
             return None
-        _, rest = uri.split("jar://", 1)
+        # 標準化：把路徑中的反斜線轉成正斜線（避免 Path 轉換後的 backslash 破壞解析）
+        normalized = uri.replace("\\", "/")
+        _, rest = normalized.split("jar://", 1)
         # Windows 路徑含 C:\，只能用 rsplit(":", 1) 取最後一個 :
         jar, png = rest.rsplit(":", 1)
         # 剝離 query string（如果有）

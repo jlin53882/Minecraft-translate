@@ -71,8 +71,10 @@ class LangItemRow(ft.Container):
         # =========================
         # icon_path 有值（來自 JAR 掃描）：直接使用，跳過 resolve
         if icon_path:
+            # jar:// URI 不能轉 Path（Windows 上 Path("jar://...") 會變成 jar:\C:\... 格式）
+            # 保持 string，讓 IconRef.parse 處理
             icon_result = IconResult(
-                icon_path=Path(icon_path),
+                icon_path=icon_path,  # 可能是 jar:// URI string 或磁碟 Path
                 reason="",
                 risk=None,
             )
