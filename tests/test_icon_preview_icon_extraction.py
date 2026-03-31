@@ -242,7 +242,10 @@ class TestBatchExtractJarIcons:
 
         assert entry1.icon_path is not None
         assert entry2.icon_path is not None
-        assert entry1.icon_path == entry2.icon_path  # 同一 modid 共用同一 icon
+        # 不同 key → 不同 icon（per-key icon，與 _extract_jar_icon 行為一致）
+        assert entry1.icon_path != entry2.icon_path
+        assert "one" in entry1.icon_path  # icon 檔名包含 key 後綴
+        assert "two" in entry2.icon_path
 
     def test_missing_jar_skipped(self, tmp_path):
         """JAR 檔案不存在時跳過，不拋例外"""
