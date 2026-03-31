@@ -30,7 +30,10 @@ class IconRef:
         if not uri.startswith("jar://"):
             return None
         _, rest = uri.split("jar://", 1)
-        jar, png = rest.split(":", 1)
+        # Windows 路徑含 C:\，只能用 rsplit(":", 1) 取最後一個 :
+        jar, png = rest.rsplit(":", 1)
+        # 剝離 query string（如果有）
+        png = png.split("?")[0]
         return IconRef(Path(jar), png)
 
     def to_uri(self) -> str:

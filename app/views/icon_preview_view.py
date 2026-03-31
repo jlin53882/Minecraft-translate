@@ -485,7 +485,7 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                     if result:
                         tex_val, png_path = result
                         # 無磁碟寫入，直接存 IconRef URI
-                        jar_rel_path = jar_name  # 相對於 source_root
+                        jar_rel_path = str(jar_path)  # 絕對路徑，讓 lang_item_row 能找到
                         entry_icon_paths[key] = IconRef(Path(jar_rel_path), png_path).to_uri()
                         log_info(f"[IconPreview] Model icon URI: {modid}/{key} → jar://{jar_rel_path}:{png_path} (tex={tex_val})")
                         continue
@@ -493,7 +493,7 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                     # Fallback: icon.png
                     fabric_icon = f"assets/{modid}/icon.png"
                     if fabric_icon in names:
-                        jar_rel_path = jar_name
+                        jar_rel_path = str(jar_path)
                         entry_icon_paths[key] = IconRef(Path(jar_rel_path), fabric_icon).to_uri()
                         log_info(f"[IconPreview] Fabric icon.png URI: {modid}/{key} → jar://{jar_rel_path}:{fabric_icon}")
                         continue
@@ -501,7 +501,7 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                     # Fallback: logo.png
                     logo_texture = f"assets/{modid}/textures/logo.png"
                     if logo_texture in names:
-                        jar_rel_path = jar_name
+                        jar_rel_path = str(jar_path)
                         entry_icon_paths[key] = IconRef(Path(jar_rel_path), logo_texture).to_uri()
                         log_info(f"[IconPreview] logo.png URI: {modid}/{key} → jar://{jar_rel_path}:{logo_texture}")
                         continue
@@ -519,7 +519,7 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                             if logo_match:
                                 logo_path = logo_match.group(1)
                                 if logo_path in names:
-                                    jar_rel_path = jar_name
+                                    jar_rel_path = str(jar_path)
                                     entry_icon_paths[key] = IconRef(Path(jar_rel_path), logo_path).to_uri()
                                     log_info(f"[IconPreview] NeoForge logoFile URI: {modid}/{key} → jar://{jar_rel_path}:{logo_path}")
                                     continue
