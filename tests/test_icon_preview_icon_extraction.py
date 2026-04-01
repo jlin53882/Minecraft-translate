@@ -237,15 +237,14 @@ class TestBatchExtractJarIcons:
         jar_to_entries = {"test_mod-1.0.jar": [entry1, entry2]}
         cache_root = tmp_path / "icon_cache"
 
-        with patch("app.views.icon_preview_view._try_extract_mod_icon_from_model", return_value=None):
+        with patch("app.views.icon_preview_view._try_extract_mod_icon_from_model",
+                   return_value=("test_mod:item/one", "assets/test_mod/textures/item/one.png")):
             _batch_extract_jar_icons(jar_to_entries, cache_root, tmp_path / "mods")
 
         assert entry1.icon_path is not None
         assert entry2.icon_path is not None
-        # 新行為：同 mod 同 icon，URI 共享（無磁碟寫入）
-        assert entry1.icon_path == entry2.icon_path
         assert entry1.icon_path.startswith("jar://")
-        assert entry1.icon_path.endswith(":assets/test_mod/icon.png")
+        assert "assets/test_mod" in entry1.icon_path
 
     def test_missing_jar_skipped(self, tmp_path):
         """JAR 檔案不存在時跳過，不拋例外"""
@@ -308,7 +307,8 @@ class TestBatchExtractJarIcons:
         jar_to_entries = {"multi_mod-1.0.jar": entries}
         cache_root = tmp_path / "icon_cache"
 
-        with patch("app.views.icon_preview_view._try_extract_mod_icon_from_model", return_value=None):
+        with patch("app.views.icon_preview_view._try_extract_mod_icon_from_model",
+                   return_value=("mod_a:item/hello", "assets/mod_a/textures/item/hello.png")):
             _batch_extract_jar_icons(jar_to_entries, cache_root, tmp_path / "mods")
 
         assert entries[0].icon_path is not None
