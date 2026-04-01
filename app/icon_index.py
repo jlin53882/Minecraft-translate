@@ -22,6 +22,11 @@ from translation_tool.utils.log_unit import log_info, log_warning
 # 核心資料結構
 # ==================================================
 
+# JAR 檔名 modid 截取 regex（module-level 常數，避免每次呼叫重建）
+# 抓「第一段不以數字結尾」當 modid（如 cofh-core-1.21.jar → cofh-core）
+# 不使用 bare \d，避免 appliedenergistics2-12.9.7 → appliedenergistics 的問題
+_JAR_MODID_RE = re.compile(r'^([a-zA-Z0-9_][a-zA-Z0-9_\-]*?)(?:-\d|$)')
+
 def _compute_modpack_hash(mods_dir: Path) -> str:
     """計算 modpack 的 stable hash（只用 JAR 檔名，忽略內容）。"""
     jar_files = sorted(j.name for j in mods_dir.glob("*.jar"))
@@ -162,9 +167,7 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
     """
     import os
 
-    # 找出所有 JAR 及其 modid
-    # 使用 regex：找「第一段連續非數字結尾」當 modid（避免 cofh-core-1.21 → cofh 的問題）
-    _JAR_MODID_RE = re.compile(r'^([a-zA-Z0-9_][a-zA-Z0-9_\-]*?)(?:\-\d|\d|$)')
+    # 找出所有 JAR 及其 modid（使用 module-level _JAR_MODID_RE）
     jars = sorted(mods_dir.glob("*.jar"))
     jar_modid_pairs: list[tuple[Path, str]] = []
     for jar in jars:
