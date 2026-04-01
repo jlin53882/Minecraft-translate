@@ -298,6 +298,7 @@ def _try_extract_mod_icon_from_model(
         1. 建立/讀取 model index（使用 cache）
         2. 如果有 key，先用 key 查 item 自己的 model texture（精準匹配）
         3. 如果沒有 key 或 key 沒找到 texture，fallback 去找 icon/logo 模型
+           （但只有當 key 的 namespace 與 modid 一致時才套用 fallback）
         4. 使用 texture fallback 策略取值
 
     回傳：
@@ -328,6 +329,19 @@ def _try_extract_mod_icon_from_model(
                     return tex_val, png_path
 
     # ===== Fallback：找 icon/logo/item_icon/block_icon 模型 =====
+    # 限制：只有當 key 的 namespace 與 modid 一致時才套用 fallback
+    # 原因：icon/logo 模型是該 mod 的專屬資源（如 assets/actuallyadditions/models/icon.json）
+    # 不該用在 minecraft 命名空間的 key（如 block.minecraft.banner.actuallyadditions.*）
+    # key 格式：<prefix>.<namespace>.<name> 或 <prefix>.<name>（vanilla 無 namespace portion）
+    # namespace portion = key.split(".")[1]
+    # 只有當有 namespace portion（key 有 >= 3 parts）且 namespace != modid 時才阻止
+    if key:
+        key_parts = key.split(".")
+        if len(key_parts) >= 3:
+            key_ns = key_parts[1]  # namespace portion
+            if key_ns != modid:
+                return None  # namespace 不一致，直接回 None，不做任何 fallback
+
     icon_candidates = ["icon", "logo", "item_icon", "block_icon"]
 
     for candidate in icon_candidates:
@@ -508,23 +522,29 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                         log_info(f"[IconPreview] Model icon URI: {modid}/{key} → jar://{jar_rel_path}:{png_path} (tex={tex_val})")
                         continue
 
-                    # Fallback: icon.png（只有 item/block 等遊戲內容才套用）
+                    # Fallback: icon.png（只有 item/block 等遊戲內容且 namespace 一致才套用）
+                    # icon.png 是該 mod 的專屬資源（assets/<modid>/icon.png）
+                    # 不該用在 namespace 不一致的 key（如 block.minecraft.banner.actuallyadditions.*）
+                    # key 格式：<prefix>.<namespace>.<name> 或 <prefix>.<name>（vanilla 無 namespace）
+                    # namespace portion = key.split(".")[1]
                     fabric_icon = f"assets/{modid}/icon.png"
-                    if fabric_icon in names and _key_needs_icon(key):
+                    key_parts = key.split(".")
+                    key_ns = key_parts[1] if len(key_parts) >= 2 else ""
+                    if fabric_icon in names and _key_needs_icon(key) and key_ns == modid:
                         jar_rel_path = str(jar_path)
                         entry_icon_paths[key] = IconRef(Path(jar_rel_path), fabric_icon).to_uri()
                         log_info(f"[IconPreview] Fabric icon.png URI: {modid}/{key} → jar://{jar_rel_path}:{fabric_icon}")
                         continue
 
-                    # Fallback: logo.png（只有 item/block 等遊戲內容且無自己的 icon 才套用）
+                    # Fallback: logo.png（只有 item/block 等遊戲內容、namespace 一致且無自己的 icon 才套用）
                     logo_texture = f"assets/{modid}/textures/logo.png"
-                    if logo_texture in names and _key_needs_icon(key):
+                    if logo_texture in names and _key_needs_icon(key) and key_ns == modid:
                         jar_rel_path = str(jar_path)
                         entry_icon_paths[key] = IconRef(Path(jar_rel_path), logo_texture).to_uri()
                         log_info(f"[IconPreview] logo.png URI: {modid}/{key} → jar://{jar_rel_path}:{logo_texture}")
                         continue
 
-                    # Fallback: NeoForge logoFile
+                    # Fallback: NeoForge logoFile（只有 namespace 一致才套用）
                     neoforge_toml = "META-INF/neoforge.mods.toml"
                     if neoforge_toml in names:
                         try:
@@ -536,7 +556,7 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                             logo_match = re.search(r'logoFile\s*=\s*"([^"]+\.png)"', toml_content)
                             if logo_match:
                                 logo_path = logo_match.group(1)
-                                if logo_path in names and _key_needs_icon(key):
+                                if logo_path in names and _key_needs_icon(key) and key_ns == modid:
                                     jar_rel_path = str(jar_path)
                                     entry_icon_paths[key] = IconRef(Path(jar_rel_path), logo_path).to_uri()
                                     log_info(f"[IconPreview] NeoForge logoFile URI: {modid}/{key} → jar://{jar_rel_path}:{logo_path}")
