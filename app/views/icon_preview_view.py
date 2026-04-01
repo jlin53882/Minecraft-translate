@@ -29,6 +29,24 @@ import threading
 # ==================================================
 _ENABLE_JAR_ICON = True  # 已啟用（Model JSON 解析 + 批次 ZIP icon 提取）
 
+# 真正需要遊戲圖示的 key 前綴（只有這些才 fallback 到 logo.png）
+# 不在清單裡的 key（如 _comment、advancements.*、recipe_type、jei.* 等）不該有 icon
+_CONTENT_ICON_PREFIXES = frozenset([
+    "item", "block", "entity", "enchantment", "effect", "potion", "biome",
+    "attribute", "tile", "-effect",
+])
+
+def _key_needs_icon(key: str) -> bool:
+    """判斷 key 是否為需要 icon 的遊戲內容。
+
+    只有 item/block/entity 等前綴才需要 icon。
+    metadata key（如 _comment、advancements.*、jei.*）完全不該有 icon。
+    """
+    if "." not in key:
+        return False  # 完全沒有 namespace，不可能是遊戲內容
+    prefix = key.split(".")[0]
+    return prefix in _CONTENT_ICON_PREFIXES
+
 # ==================================================
 # JAR Icon 提取輔助函式（Phase 1: Model JSON 解析）
 # ==================================================
@@ -490,17 +508,17 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                         log_info(f"[IconPreview] Model icon URI: {modid}/{key} → jar://{jar_rel_path}:{png_path} (tex={tex_val})")
                         continue
 
-                    # Fallback: icon.png
+                    # Fallback: icon.png（只有 item/block 等遊戲內容才套用）
                     fabric_icon = f"assets/{modid}/icon.png"
-                    if fabric_icon in names:
+                    if fabric_icon in names and _key_needs_icon(key):
                         jar_rel_path = str(jar_path)
                         entry_icon_paths[key] = IconRef(Path(jar_rel_path), fabric_icon).to_uri()
                         log_info(f"[IconPreview] Fabric icon.png URI: {modid}/{key} → jar://{jar_rel_path}:{fabric_icon}")
                         continue
 
-                    # Fallback: logo.png
+                    # Fallback: logo.png（只有 item/block 等遊戲內容且無自己的 icon 才套用）
                     logo_texture = f"assets/{modid}/textures/logo.png"
-                    if logo_texture in names:
+                    if logo_texture in names and _key_needs_icon(key):
                         jar_rel_path = str(jar_path)
                         entry_icon_paths[key] = IconRef(Path(jar_rel_path), logo_texture).to_uri()
                         log_info(f"[IconPreview] logo.png URI: {modid}/{key} → jar://{jar_rel_path}:{logo_texture}")
@@ -518,7 +536,7 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                             logo_match = re.search(r'logoFile\s*=\s*"([^"]+\.png)"', toml_content)
                             if logo_match:
                                 logo_path = logo_match.group(1)
-                                if logo_path in names:
+                                if logo_path in names and _key_needs_icon(key):
                                     jar_rel_path = str(jar_path)
                                     entry_icon_paths[key] = IconRef(Path(jar_rel_path), logo_path).to_uri()
                                     log_info(f"[IconPreview] NeoForge logoFile URI: {modid}/{key} → jar://{jar_rel_path}:{logo_path}")
@@ -614,7 +632,12 @@ def _save_entries_cache_l2(source_root: Path, entries: list):
         elif isinstance(e, dict):
             serializable_entries.append(e)
         else:
-            serializable_entries.append({"modid": str(e.modid), "key": str(e.key), "en": str(e.en), "zh_tw": str(e.zh_tw), "source_jar": getattr(e, "source_jar", "")})
+            serializable_entries.append({
+                "modid": str(e.modid), "key": str(e.key), 
+                "en": str(e.en), "zh_tw": str(e.zh_tw),
+                "source_jar": getattr(e, "source_jar", ""),
+                "icon_path": getattr(e, "icon_path", None),  # [FIX] 加入 icon_path
+            })
 
     data = {
         "version": 1,
