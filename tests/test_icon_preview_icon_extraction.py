@@ -286,8 +286,9 @@ class TestBatchExtractJarIcons:
         with patch("app.views.icon_preview_view._try_extract_mod_icon_from_model", return_value=None):
             _batch_extract_jar_icons(jar_to_entries, cache_root, tmp_path / "mods", progress_cb=progress)
 
-        # 應該有 2 次 callback（每個 JAR 一次）
-        assert len(progress_calls) >= 2
+        # 2 個 JAR 少於 50 → 只有最後一次 callback
+        assert len(progress_calls) >= 1
+        assert progress_calls[-1] == (2, 2)  # 最後一次是 complete
 
     def test_multiple_modids_same_jar(self, tmp_path):
         """同一個 JAR 含多個 modid，每個都嘗試提取"""
