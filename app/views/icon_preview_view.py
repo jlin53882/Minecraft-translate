@@ -762,10 +762,27 @@ class IconPreviewView(ft.Column):
                 self.next_page_btn,
             ],
         )
+        # 每頁顯示數量選擇器（PR61 Issue 1）
+        self.page_size_selector = ft.Dropdown(
+            label="每頁顯示",
+            options=[
+                ft.dropdown.Option("25", "25"),
+                ft.dropdown.Option("50", "50"),
+                ft.dropdown.Option("100", "100"),
+            ],
+            value="50",
+            width=120,
+            on_change=self._on_page_size_change,
+        )
         # ===== 模組清單分頁 =====
         self.mod_page_size = 50
         self.mod_current_page = 0
         self.mod_total_pages = 0
+
+        # ===== 模組搜尋分頁狀態（PR61 Issue 1） =====
+        self._mod_search_matched: list[str] = []   # 目前搜尋結果（所有 matched modid）
+        self._mod_search_page: int = 0             # 目前搜尋結果頁碼
+        self._mod_search_total: int = 0           # 搜尋結果總頁數
 
         # =========================
         # UI 元件
@@ -839,6 +856,7 @@ class IconPreviewView(ft.Column):
             self.progress_text,
             self.save_btn,
             self.page_bar,
+            self.page_size_selector,
             ft.Divider(),
             self.list_view,
         ]
@@ -889,6 +907,11 @@ class IconPreviewView(ft.Column):
         """處理載入按鈕點擊事件"""
         log_info("[IconPreview] 開始掃描模組...")
         self._show_snack("⏳ 掃描模組中...", color=theme.BLUE_600)
+        # PR61 Issue 1：載入新模組時清除搜尋狀態
+        self._mod_search_matched = []
+        self._mod_search_page = 0
+        self._mod_search_total = 0
+        self._mod_search_text = ""
         self.update()
 
         mode = self._detect_source_mode()
@@ -1016,6 +1039,11 @@ class IconPreviewView(ft.Column):
 
     def _render_mod_list(self):
         """渲染模組清單畫面"""
+        # PR61 Issue 1：清除搜尋結果狀態
+        self._mod_search_matched = []
+        self._mod_search_page = 0
+        self._mod_search_total = 0
+
         self.current_modid = None
         self.back_btn.visible = False
         self.save_btn.visible = False
@@ -1060,12 +1088,32 @@ class IconPreviewView(ft.Column):
         self.update()
 
     def _update_page_bar_for_mods(self):
-        """更新分頁資訊顯示"""
-        self.page_info.value = (
-            f"模組清單｜第 {self.mod_current_page + 1} / {self.mod_total_pages} 頁"
-        )
-        self.prev_page_btn.disabled = self.mod_current_page <= 0
-        self.next_page_btn.disabled = self.mod_current_page >= self.mod_total_pages - 1
+        """更新分頁資訊顯示（同時支援一般清單與搜尋結果分頁）"""
+        if self._mod_search_matched:
+            # 搜尋結果分頁模式（PR61 Issue 1）
+            self.page_info.value = (
+                f"搜尋結果｜第 {self._mod_search_page + 1} / {self._mod_search_total} 頁"
+            )
+            self.prev_page_btn.disabled = self._mod_search_page <= 0
+            self.next_page_btn.disabled = self._mod_search_page >= self._mod_search_total - 1
+        else:
+            # 一般模組清單分頁模式
+            self.page_info.value = (
+                f"模組清單｜第 {self.mod_current_page + 1} / {self.mod_total_pages} 頁"
+            )
+            self.prev_page_btn.disabled = self.mod_current_page <= 0
+            self.next_page_btn.disabled = self.mod_current_page >= self.mod_total_pages - 1
+
+    def _on_page_size_change(self, e: ft.ControlEvent):
+        """處理每頁顯示數量變更（PR61 Issue 1）"""
+        self.mod_page_size = int(e.control.value)
+        self.mod_current_page = 0  # 重設回第一頁
+        self._mod_search_page = 0  # 搜尋結果也重設
+        if self._mod_search_matched:
+            # 重新渲染搜尋結果的目前頁
+            self._render_mod_search_page()
+        else:
+            self._render_mod_list()
 
     def _prev_page(self, e):
         """處理上一頁按鈕點擊"""
@@ -1076,9 +1124,15 @@ class IconPreviewView(ft.Column):
                 self._render_current_page()
         else:
             # 第一層（模組）
-            if self.mod_current_page > 0:
-                self.mod_current_page -= 1
-                self._render_mod_list()
+            if self._mod_search_matched:
+                # 搜尋結果分頁模式（PR61 Issue 1）
+                if self._mod_search_page > 0:
+                    self._mod_search_page -= 1
+                    self._render_mod_search_page()
+            else:
+                if self.mod_current_page > 0:
+                    self.mod_current_page -= 1
+                    self._render_mod_list()
 
     def _next_page(self, e):
         """處理下一頁按鈕點擊"""
@@ -1087,9 +1141,15 @@ class IconPreviewView(ft.Column):
                 self.current_page += 1
                 self._render_current_page()
         else:
-            if self.mod_current_page < self.mod_total_pages - 1:
-                self.mod_current_page += 1
-                self._render_mod_list()
+            if self._mod_search_matched:
+                # 搜尋結果分頁模式（PR61 Issue 1）
+                if self._mod_search_page < self._mod_search_total - 1:
+                    self._mod_search_page += 1
+                    self._render_mod_search_page()
+            else:
+                if self.mod_current_page < self.mod_total_pages - 1:
+                    self.mod_current_page += 1
+                    self._render_mod_list()
 
     # ==================================================
     # 即時搜尋（Phase 2）：Debounce 輔助
@@ -1118,6 +1178,11 @@ class IconPreviewView(ft.Column):
         keyword = self._mod_search_text.strip().lower()
         if not keyword:
             self.mod_search_status.value = ""
+            self._mod_search_matched = []  # 清除搜尋結果
+            self._mod_search_page = 0
+            self._mod_search_total = 0
+            # 恢復模組清單搜尋框
+            self.mod_search_tf.visible = True
             self._render_mod_list()
             return
 
@@ -1127,6 +1192,9 @@ class IconPreviewView(ft.Column):
 
         if not matched:
             self.mod_search_status.value = "無符合結果"
+            self._mod_search_matched = []
+            self._mod_search_page = 0
+            self._mod_search_total = 0
             self.list_view.controls.clear()
             self.list_view.controls.append(
                 ft.ListTile(
@@ -1137,23 +1205,39 @@ class IconPreviewView(ft.Column):
             self.page_info.value = ""
             self.mod_current_page = 0
         else:
+            # PR61 Issue 1：儲存搜尋結果並計算分頁
+            self._mod_search_matched = matched
+            self._mod_search_page = 0
+            self._mod_search_total = max(1, (len(matched) + self.mod_page_size - 1) // self.mod_page_size)
             self.mod_search_status.value = f"符合 {len(matched)} / {total} 個模組"
-            # 直接顯示所有符合結果（不支援分頁，簡化實作）
-            self.list_view.controls.clear()
-            for modid in matched:
-                entries = self.mods[modid]
-                total_count = len(entries)
-                untranslated = sum(1 for e in entries if not e.zh_tw.strip())
-                self.list_view.controls.append(
-                    ft.ListTile(
-                        title=ft.Text(modid, weight=ft.FontWeight.BOLD),
-                        subtitle=ft.Text(f"總數 {total_count} ｜ 未翻譯 {untranslated}"),
-                        trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT),
-                        on_click=lambda e, m=modid: self._open_mod_detail(m),
-                    )
-                )
-            self.page_info.value = f"搜尋結果：共 {len(matched)} 個模組"
+            self._render_mod_search_page()
 
+        self.update()
+
+    def _render_mod_search_page(self):
+        """渲染搜尋結果的目前頁（PR61 Issue 1）"""
+        matched = self._mod_search_matched
+        total = len(matched)
+
+        start = self._mod_search_page * self.mod_page_size
+        end = start + self.mod_page_size
+        visible_mods = matched[start:end]
+
+        self.list_view.controls.clear()
+        for modid in visible_mods:
+            entries = self.mods[modid]
+            total_count = len(entries)
+            untranslated = sum(1 for e in entries if not e.zh_tw.strip())
+            self.list_view.controls.append(
+                ft.ListTile(
+                    title=ft.Text(modid, weight=ft.FontWeight.BOLD),
+                    subtitle=ft.Text(f"總數 {total_count} ｜ 未翻譯 {untranslated}"),
+                    trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT),
+                    on_click=lambda e, m=modid: self._open_mod_detail(m),
+                )
+            )
+
+        self._update_page_bar_for_mods()
         self.update()
 
     def _on_detail_search_change(self, e: ft.ControlEvent):
@@ -1238,6 +1322,10 @@ class IconPreviewView(ft.Column):
         # 更新 controls：將 detail 搜尋元件插入 list_view 前
         self._update_detail_search_controls(visible=True)
 
+        # ===== Phase 2：隱藏模組清單搜尋框，避免在 Detail View 中誤觸 =====
+        self.mod_search_tf.visible = False
+        self.mod_search_status.visible = False
+
         log_info(f"[IconPreview] 開啟模組詳情: {modid}")
 
         # Track 1：直接路徑（快速）
@@ -1270,7 +1358,24 @@ class IconPreviewView(ft.Column):
         # 隱藏 detail 搜尋 UI
         self._update_detail_search_controls(visible=False)
         self.list_view.controls.clear()
-        self._render_mod_list()
+
+        # ===== Phase 2：恢復模組清單搜尋框 =====
+        if hasattr(self, "mod_search_tf"):
+            self.mod_search_tf.visible = True
+        if hasattr(self, "_mod_search_text") and self._mod_search_text:
+            # 如果之前有搜尋文字，重新執行搜尋以顯示過濾後的結果
+            self._do_mod_search()
+        else:
+            # PR61 Issue 1：清除搜尋結果狀態
+            if hasattr(self, "_mod_search_matched"):
+                self._mod_search_matched = []
+            if hasattr(self, "_mod_search_page"):
+                self._mod_search_page = 0
+            if hasattr(self, "_mod_search_total"):
+                self._mod_search_total = 0
+            if hasattr(self, "mod_search_status"):
+                self.mod_search_status.visible = False
+            self._render_mod_list()
 
     # ==================================================
     # Row → 回報翻譯變更
