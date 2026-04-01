@@ -74,7 +74,7 @@ def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
         {'key': 'cache', 'icon': ft.Icons.STORAGE, 'label': '快取管理', 'view': wrap_view(_lazy_import_view('cache', page, file_picker))},
         {'key': 'qc', 'icon': ft.Icons.CHECK_CIRCLE, 'label': 'QC 檢驗', 'view': wrap_view(_lazy_import_view('qc', page, file_picker))},
         {'key': 'lookup', 'icon': ft.Icons.SEARCH, 'label': '查詢', 'view': wrap_view(_lazy_import_view('lookup', page, file_picker))},
-        {'key': 'icon_preview', 'icon': ft.Icons.IMAGE, 'label': '圖示預覽', 'view': wrap_view(_lazy_import_view('icon_preview', page, file_picker))},
+        {'key': 'icon_preview', 'icon': ft.Icons.IMAGE, 'label': 'JAR 圖示預覽', 'view': wrap_view(_lazy_import_view('icon_preview', page, file_picker))},
         {'key': 'bundler', 'icon': ft.Icons.FOLDER_ZIP, 'label': '打包', 'view': wrap_view(_lazy_import_view('bundler', page, file_picker))},
         {'key': 'translation', 'icon': ft.Icons.TRANSLATE, 'label': '任務 翻譯工具', 'view': wrap_view(_lazy_import_view('translation', page, file_picker))},
         {'key': 'extractor', 'icon': ft.Icons.UNARCHIVE, 'label': 'jar 提取', 'view': wrap_view(_lazy_import_view('extractor', page, file_picker))},

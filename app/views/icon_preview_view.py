@@ -770,7 +770,7 @@ class IconPreviewView(ft.Column):
         # =========================
         # UI 元件
         # =========================
-        self.header = ft.Text("🧩 模組清單", size=20, weight=ft.FontWeight.BOLD)
+        self.header = ft.Text("🧩 JAR 圖示預覽", size=20, weight=ft.FontWeight.BOLD)
 
         # Mod 清單搜尋框（Phase 2）
         self.mod_search_tf = ft.TextField(
@@ -790,19 +790,19 @@ class IconPreviewView(ft.Column):
         )
 
         self.pick_source_btn = ft.ElevatedButton(
-            "選擇原文資料夾（en_us + textures）",
+            "選擇模組資料夾（例：mods 資料夾）",
             icon=ft.Icons.FOLDER_OPEN,
             on_click=lambda e: self.source_picker.get_directory_path(),
         )
 
         self.pick_review_btn = ft.ElevatedButton(
-            "選擇校對資料夾（zh_tw）",
+            "選擇資源包路徑",
             icon=ft.Icons.FOLDER_OPEN,
             on_click=lambda e: self.review_picker.get_directory_path(),
         )
 
-        self.source_label = ft.Text("原文資料夾：尚未選擇", size=12)
-        self.review_label = ft.Text("校對資料夾：尚未選擇", size=12)
+        self.source_label = ft.Text("模組資料夾：尚未選擇", size=12)
+        self.review_label = ft.Text("資源包路徑：尚未選擇", size=12)
 
         self.load_btn = ft.ElevatedButton(
             "載入模組清單",
@@ -850,7 +850,7 @@ class IconPreviewView(ft.Column):
         """處理來源目錄選擇結果"""
         if e.path:
             self.source_root = Path(e.path)
-            self.source_label.value = f"原文資料夾：{self.source_root}"
+            self.source_label.value = f"模組資料夾：{self.source_root}"
             # Phase 3: 向後相容搬移舊 icon cache
             migrated = _migrate_old_icon_cache(self.source_root)
             if migrated:
@@ -859,23 +859,23 @@ class IconPreviewView(ft.Column):
             self._entries_cache = None
             self._cache_meta = {}
             self._update_load_state()
-            log_info(f"[IconPreview] 原文資料夾已設定: {self.source_root}")
-            self._show_snack("✅ 原文資料夾已設定", color=theme.GREEN_600)
+            log_info(f"[IconPreview] 模組資料夾已設定: {self.source_root}")
+            self._show_snack("✅ 模組資料夾已設定", color=theme.GREEN_600)
         else:
-            log_warning("[IconPreview] 原文資料夾選擇已取消")
-            self._show_snack("⚠️ 原文資料夾選擇已取消", color=theme.WARNING)
+            log_warning("[IconPreview] 模組資料夾選擇已取消")
+            self._show_snack("⚠️ 模組資料夾選擇已取消", color=theme.WARNING)
 
     def _on_pick_review(self, e: ft.FilePickerResultEvent):
         """處理校對目錄選擇結果"""
         if e.path:
             self.review_root = Path(e.path)
-            self.review_label.value = f"校對資料夾：{self.review_root}"
+            self.review_label.value = f"資源包路徑：{self.review_root}"
             self._update_load_state()
-            log_info(f"[IconPreview] 校對資料夾已設定: {self.review_root}")
-            self._show_snack("✅ 校對資料夾已設定", color=theme.GREEN_600)
+            log_info(f"[IconPreview] 資源包路徑已設定: {self.review_root}")
+            self._show_snack("✅ 資源包路徑已設定", color=theme.GREEN_600)
         else:
-            log_warning("[IconPreview] 校對資料夾選擇已取消")
-            self._show_snack("⚠️ 校對資料夾選擇已取消", color=theme.WARNING)
+            log_warning("[IconPreview] 資源包路徑選擇已取消")
+            self._show_snack("⚠️ 資源包路徑選擇已取消", color=theme.WARNING)
 
     def _update_load_state(self):
         """更新載入按鈕的啟用狀態"""
@@ -1019,7 +1019,7 @@ class IconPreviewView(ft.Column):
         self.current_modid = None
         self.back_btn.visible = False
         self.save_btn.visible = False
-        self.header.value = "🧩 模組清單"
+        self.header.value = "🧩 JAR 圖示預覽"
 
         # Phase 2: 顯示 mod 清單搜尋框
         self.mod_search_tf.visible = True
