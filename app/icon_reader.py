@@ -4,8 +4,8 @@
 維護注意：本模組為 ZIP icon 讀取的單一責任入口。
 """
 
+from collections import OrderedDict
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 import zipfile
 
@@ -43,20 +43,47 @@ class IconRef:
         return f"jar://{self.jar_path}:{self.png_path}"
 
 
-@lru_cache(maxsize=32)
-def _get_zipfile(jar_path: Path) -> zipfile.ZipFile:
-    """LRU cached ZIP handle（最多 32 個 open handles）。
+class _ZipCache:
+    """手動 LRU cache，確保 evicted handle 會被關閉避免 fd leak。
 
-    避免同一個 JAR 連續讀取時重複開關 ZIP。
-    Minecraft UI 行為：同 mod 的 icon 連續出現，LRU 自然命中率高。
+    實作：OrderedDict + move_to_end，LRU 條目 close 並移除後才加入新條目。
+    上限：MAX_SIZE 個 open ZipFile handles。
     """
-    return zipfile.ZipFile(jar_path, "r")
+
+    MAX_SIZE = 32
+
+    def __init__(self) -> None:
+        self._cache: OrderedDict[Path, zipfile.ZipFile] = OrderedDict()
+
+    def get(self, jar_path: Path) -> zipfile.ZipFile:
+        """取得 ZIP handle，LRU 熱點放在末端。"""
+        if jar_path in self._cache:
+            # 命中：移動到末端（most recently used）
+            self._cache.move_to_end(jar_path)
+            return self._cache[jar_path]
+
+        # 未命中：關閉最舊的條目（如果有）
+        while len(self._cache) >= self.MAX_SIZE:
+            _jar, zf = self._cache.popitem(last=False)  # pop oldest (least recently used)
+            try:
+                zf.close()
+            except Exception:
+                pass  # 關閉失敗不 blocking
+
+        # 開新 handle 並加入 cache
+        zf = zipfile.ZipFile(jar_path, "r")
+        self._cache[jar_path] = zf
+        return zf
+
+
+_zip_cache = _ZipCache()
 
 
 def read_icon_bytes(jar_path: Path, png_path: str) -> bytes | None:
     """從 JAR ZIP 讀取 icon PNG bytes。
 
     使用 LRU cache 管理 ZIP handle，確保同一個 JAR 只開一次 ZIP。
+    evict 時自動關閉 handle，避免 fd leak。
 
     參數：
         jar_path：JAR 檔案的絕對或相對路徑（Path 物件）
@@ -66,7 +93,7 @@ def read_icon_bytes(jar_path: Path, png_path: str) -> bytes | None:
         PNG bytes，或 None（讀取失敗）
     """
     try:
-        zf = _get_zipfile(jar_path)
+        zf = _zip_cache.get(jar_path)
         return zf.read(png_path)
     except Exception:
         return None
