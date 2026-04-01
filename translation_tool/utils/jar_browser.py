@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Callable
 
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
+from translation_tool.utils.log_unit import log_warning, log_error
 
 
 def _get_default_workers() -> int:

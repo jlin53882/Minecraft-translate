@@ -355,7 +355,7 @@ class MergeView(ft.Column):
             allowed_extensions=["zip"],
         )
 
-    def _on_zip_picked(self, e: ft.FilePickerResultEvent):
+    def _on_zip_picked(self, e: ft.FilePickerResultEvent) -> None:
         """處理 ZIP 檔案選擇結果。"""
         if not e.files:
             return

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -162,10 +163,13 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
     import os
 
     # 找出所有 JAR 及其 modid
+    # 使用 regex：找「第一段連續非數字結尾」當 modid（避免 cofh-core-1.21 → cofh 的問題）
+    _JAR_MODID_RE = re.compile(r'^([a-zA-Z0-9_][a-zA-Z0-9_\-]*?)(?:\-\d|\d|$)')
     jars = sorted(mods_dir.glob("*.jar"))
     jar_modid_pairs: list[tuple[Path, str]] = []
     for jar in jars:
-        modid = jar.stem.split("-")[0]
+        m = _JAR_MODID_RE.match(jar.stem)
+        modid = m.group(1) if m else jar.stem
         jar_modid_pairs.append((jar, modid))
 
     total = len(jar_modid_pairs)
