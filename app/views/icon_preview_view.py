@@ -297,7 +297,7 @@ def _try_extract_mod_icon_from_model(
     流程：
         1. 建立/讀取 model index（使用 cache）
         2. 如果有 key，先用 key 查 item 自己的 model texture（精準匹配）
-        3. 如果沒有 key 或 key 沒找到 texture，fallback 去找 icon/logo 模型
+        3. 移除 logo/icon.png fallback（錯誤的 icon 比沒有更糟）
            （但只有當 key 的 namespace 與 modid 一致時才套用 fallback）
         4. 使用 texture fallback 策略取值
 
@@ -342,21 +342,9 @@ def _try_extract_mod_icon_from_model(
             if key_ns != modid:
                 return None  # namespace 不一致，直接回 None，不做任何 fallback
 
-    icon_candidates = ["icon", "logo", "item_icon", "block_icon"]
-
-    for candidate in icon_candidates:
-        if candidate not in model_index:
-            continue
-
-        for model_path in model_index[candidate]:
-            tex_val = _follow_parent_chain(model_path, names, modid, zf)
-            if not tex_val:
-                continue
-
-            png_path = _texture_to_png_path(tex_val)
-            if png_path and png_path in names:
-                return tex_val, png_path
-
+    # 當 model lookup 失敗時，不做任何 logo/icon.png fallback，直接回 None 並警告
+    if key:
+        log_warning(f"[IconPreview] 沒有找到 icon: {modid}/{key}（model lookup 失敗）")
     return None
 
 
@@ -523,6 +511,8 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                         continue
 
                     # 完全找不到 icon
+                    if key:
+                        log_warning(f"[IconPreview] 沒有找到 icon: {modid}/{key}（無 model icon）")
                     entry_icon_paths[key] = None
 
         except Exception as ex:
