@@ -461,6 +461,9 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
     from app.icon_reader import IconRef
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    # ===== Phase 0: Per-batch in-memory cache：同一 (modid, key) 在同一批次內不重複解析 =====
+    _result_cache: dict[tuple[str, str], str | None] = {}
+
     # ===== Phase 1: 嘗試從預建立索引讀取（instant）=====
     icon_index = None
     try:
@@ -502,11 +505,22 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                         continue
                     modid = e.modid
                     key = e.key
+                    # 預先過濾：不需要 icon 的 key 直接跳過，不浪費 lookup 時間
+                    if not _key_needs_icon(key):
+                        continue
+                    # Per-(modid, key) cache：同 (modid, key) 在同批次不重複解析
+                    cache_key = (modid, key)
+                    if cache_key in _result_cache:
+                        result_map[key] = _result_cache[cache_key]
+                        continue
                     res = _try_extract_mod_icon_from_model(jar_path, modid, zf, names, key=key)
                     if res:
                         tex_val, png_path = res
-                        result_map[key] = IconRef(jar_path, png_path).to_uri()
+                        uri = IconRef(jar_path, png_path).to_uri()
+                        result_map[key] = uri
+                        _result_cache[cache_key] = uri
                     else:
+                        _result_cache[cache_key] = None
                         result_map[key] = None
         except Exception:
             pass
@@ -514,8 +528,9 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
 
     processed = 0
     total = len(jar_to_entries)
-    # 8 threads 平行處理
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    # Flet 環境限制：只允許 2 個執行緒真正並發，設 4 workers 減少排程開銷
+    # （不宜設太高，會加劇執行緒競爭）
+    with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {executor.submit(_process_jar, jar_name): jar_name for jar_name in jar_to_entries}
         for future in as_completed(futures):
             jar_name = futures[future]
@@ -529,10 +544,11 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
             except Exception:
                 pass
             processed += 1
-            if progress_cb:
+            # 每 50 個 JAR 才更新一次進度（避免過度 UI 更新），但最後一筆一定回報
+            if progress_cb and (processed == total or processed % 50 == 0):
                 progress_cb(processed, total)
-            if processed % 50 == 0:
-                log_info(f"[IconPreview] 處理進度：{processed}/{total} JARs")
+                if processed % 50 == 0:
+                    log_info(f"[IconPreview] 處理進度：{processed}/{total} JARs")
 
     log_info(f"[IconPreview] ThreadPoolExecutor 完成：{processed} 個 JAR")
     return processed
