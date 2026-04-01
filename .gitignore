@@ -19,6 +19,9 @@ config - *.json
 logs/
 backups/
 
+# === App cache ===
+.icon_cache/
+
 # === Cache & Data (user-specific) ===
 快取資料/
 學名資料庫/
