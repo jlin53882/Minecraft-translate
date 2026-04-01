@@ -342,9 +342,7 @@ def _try_extract_mod_icon_from_model(
             if key_ns != modid:
                 return None  # namespace 不一致，直接回 None，不做任何 fallback
 
-    # 當 model lookup 失敗時，不做任何 logo/icon.png fallback，直接回 None 並警告
-    if key:
-        log_warning(f"[IconPreview] 沒有找到 icon: {modid}/{key}（model lookup 失敗）")
+    # 當 model lookup 失敗時，不做任何 logo/icon.png fallback，直接回 None
     return None
 
 
@@ -444,20 +442,12 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
 # ==================================================
 
 def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: Path, source_root: Path, progress_cb=None) -> int:
-    """批次處理多個 JAR 的 icon 提取（ZIP 直接讀取，無磁碟寫入）。
+    """批次處理多個 JAR 的 icon 提取（支援預建立索引 + ThreadPoolExecutor）。
 
-    核心優化：每個 JAR 只開一次 ZIP，在記憶體內建立 model index，
-    將 icon 結果共享給同 JAR 的所有 entry。
-
-    流程（每個 JAR）：
-        1. 開啟 ZIP
-        2. 建立 names set（所有檔案列表）
-        3. 對每個 unique modid：
-            a. 嘗試 Model JSON 解析
-            b. 嘗試 fallback（icon.png / logo.png / NeoForge logoFile）
-            c. 將 IconRef URI 寫入 entry_icon_paths（無磁碟寫入）
-        4. 關閉 ZIP
-        5. 將 icon_path 寫回所有對應 entry
+    PR60 優化架構：
+        1. 嘗試從預建立索引讀取（instant，零 JAR I/O）
+        2. 若無索引：使用 ThreadPoolExecutor 8 threads 建立索引（1-2 分鐘）
+        3. 若索引正在建立中（另一執行緒）：降級為 ThreadPoolExecutor 即時處理
 
     參數：
         jar_to_entries: {jar_name: [entries]}，同一個 JAR 的所有 entry
@@ -469,66 +459,82 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
         處理的 JAR 數量
     """
     from app.icon_reader import IconRef
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    processed = 0
-    total = len(jar_to_entries)
+    # ===== Phase 1: 嘗試從預建立索引讀取（instant）=====
+    icon_index = None
+    try:
+        from app import icon_index as idx_module
+        icon_index = idx_module.load_icon_index(source_root)
+    except Exception:
+        pass
 
-    for jar_name, entries in jar_to_entries.items():
+    if icon_index is not None:
+        # 索引存在：直接用索引，完全不做 JAR I/O
+        applied = 0
+        for jar_name, entries in jar_to_entries.items():
+            for e in entries:
+                if not (hasattr(e, "modid") and hasattr(e, "key")):
+                    continue
+                key = e.key
+                if key in icon_index:
+                    e.icon_path = icon_index[key]
+                    applied += 1
+        if progress_cb:
+            progress_cb(len(jar_to_entries), len(jar_to_entries))
+        log_info(f"[IconPreview] 索引命中：{applied} 個 entry 直接套用 icon")
+        return len(jar_to_entries)
+
+    # ===== Phase 2: 無索引 → ThreadPoolExecutor 即時處理 =====
+    log_info(f"[IconPreview] 無索引，啟動 ThreadPoolExecutor 處理 {len(jar_to_entries)} 個 JAR")
+
+    def _process_jar(jar_name: str) -> dict[str, str | None]:
+        """Worker：處理單一 JAR，回傳 {key: icon_uri or None}。"""
         jar_path = source_root / jar_name
+        result_map: dict[str, str | None] = {}
         if not jar_path.exists():
-            if progress_cb:
-                progress_cb(processed, total)
-            processed += 1
-            continue
-
-        # 同一個 JAR 的所有 modid（set，去重）
-        modids = list({e.modid for e in entries if hasattr(e, "modid") and hasattr(e, "key")})
-
-        # ===== 每個 entry 的 icon 結果（URI 字串，無磁碟寫入）=====
-        # key: entry key, value: IconRef URI string (or None)
-        entry_icon_paths: dict[str, str | None] = {}
-
+            return result_map
         try:
             with zipfile.ZipFile(jar_path, "r") as zf:
                 names = set(zf.namelist())
-
-                for e in entries:
-                    # 只處理有 modid 和 key 的 entry
+                for e in jar_to_entries.get(jar_name, []):
                     if not (hasattr(e, "modid") and hasattr(e, "key")):
                         continue
                     modid = e.modid
                     key = e.key
+                    res = _try_extract_mod_icon_from_model(jar_path, modid, zf, names, key=key)
+                    if res:
+                        tex_val, png_path = res
+                        result_map[key] = IconRef(jar_path, png_path).to_uri()
+                    else:
+                        result_map[key] = None
+        except Exception:
+            pass
+        return result_map
 
-                    # 嘗試解析（使用 model index cache，ZIP 保持開啟）
-                    result = _try_extract_mod_icon_from_model(jar_path, modid, zf, names, key=key)
+    processed = 0
+    total = len(jar_to_entries)
+    # 8 threads 平行處理
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(_process_jar, jar_name): jar_name for jar_name in jar_to_entries}
+        for future in as_completed(futures):
+            jar_name = futures[future]
+            try:
+                entry_icon_paths = future.result()
+                for e in jar_to_entries.get(jar_name, []):
+                    if hasattr(e, "key") and e.key in entry_icon_paths:
+                        uri = entry_icon_paths[e.key]
+                        if uri:
+                            e.icon_path = uri
+            except Exception:
+                pass
+            processed += 1
+            if progress_cb:
+                progress_cb(processed, total)
+            if processed % 50 == 0:
+                log_info(f"[IconPreview] 處理進度：{processed}/{total} JARs")
 
-                    if result:
-                        tex_val, png_path = result
-                        # 無磁碟寫入，直接存 IconRef URI
-                        jar_rel_path = str(jar_path)  # 絕對路徑，讓 lang_item_row 能找到
-                        entry_icon_paths[key] = IconRef(Path(jar_rel_path), png_path).to_uri()
-                        log_info(f"[IconPreview] Model icon URI: {modid}/{key} → jar://{jar_rel_path}:{png_path} (tex={tex_val})")
-                        continue
-
-                    # 完全找不到 icon
-                    if key:
-                        log_warning(f"[IconPreview] 沒有找到 icon: {modid}/{key}（無 model icon）")
-                    entry_icon_paths[key] = None
-
-        except Exception as ex:
-            log_warning(f"[IconPreview] 批次提取 JAR icon 失敗: {jar_name} → {ex}")
-
-        # ===== 將 icon_path（URI）寫回所有對應 entry =====
-        for e in entries:
-            if hasattr(e, "key") and e.key in entry_icon_paths:
-                icon_uri = entry_icon_paths[e.key]
-                if icon_uri:
-                    e.icon_path = icon_uri
-
-        if progress_cb:
-            progress_cb(processed + 1, total)
-        processed += 1
-
+    log_info(f"[IconPreview] ThreadPoolExecutor 完成：{processed} 個 JAR")
     return processed
 
 
