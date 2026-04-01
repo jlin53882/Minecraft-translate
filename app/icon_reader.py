@@ -7,6 +7,7 @@
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+import threading
 import zipfile
 
 
@@ -54,26 +55,38 @@ class _ZipCache:
 
     def __init__(self) -> None:
         self._cache: OrderedDict[Path, zipfile.ZipFile] = OrderedDict()
+        self._lock = threading.Lock()
 
     def get(self, jar_path: Path) -> zipfile.ZipFile:
-        """取得 ZIP handle，LRU 熱點放在末端。"""
-        if jar_path in self._cache:
-            # 命中：移動到末端（most recently used）
-            self._cache.move_to_end(jar_path)
-            return self._cache[jar_path]
+        """取得 ZIP handle，LRU 熱點放在末端。執行緒安全。"""
+        with self._lock:
+            if jar_path in self._cache:
+                # 命中：移動到末端（most recently used）
+                self._cache.move_to_end(jar_path)
+                return self._cache[jar_path]
 
-        # 未命中：關閉最舊的條目（如果有）
-        while len(self._cache) >= self.MAX_SIZE:
-            _jar, zf = self._cache.popitem(last=False)  # pop oldest (least recently used)
-            try:
-                zf.close()
-            except Exception:
-                pass  # 關閉失敗不 blocking
+            # 未命中：關閉最舊的條目（如果有）
+            while len(self._cache) >= self.MAX_SIZE:
+                _jar, zf = self._cache.popitem(last=False)  # pop oldest (least recently used)
+                try:
+                    zf.close()
+                except Exception:
+                    pass  # 關閉失敗不 blocking
 
-        # 開新 handle 並加入 cache
-        zf = zipfile.ZipFile(jar_path, "r")
-        self._cache[jar_path] = zf
-        return zf
+            # 開新 handle 並加入 cache
+            zf = zipfile.ZipFile(jar_path, "r")
+            self._cache[jar_path] = zf
+            return zf
+
+    def close_all(self) -> None:
+        """關閉所有快取的 handles 並清除快取（用於測試重置或程式結束）。"""
+        with self._lock:
+            while self._cache:
+                _jar, zf = self._cache.popitem(last=False)
+                try:
+                    zf.close()
+                except Exception:
+                    pass
 
 
 _zip_cache = _ZipCache()
