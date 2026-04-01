@@ -27,13 +27,15 @@ def _ensure_icon_size(src_path: Path) -> Path:
           用 nearest neighbor 放大至 64x64 可保持像素風格外觀。
     """
     try:
-        with PILImage.open(src_path) as img:
-            w, h = img.size
+        img = PILImage.open(src_path)
+        w, h = img.size
         if w >= _ICON_UPSCALE_SIZE and h >= _ICON_UPSCALE_SIZE:
+            img.close()
             return src_path
 
         # nearest neighbor 放大，不走抗鋸齒
         upscaled = img.resize((_ICON_UPSCALE_SIZE, _ICON_UPSCALE_SIZE), PILImage.NEAREST)
+        img.close()
         # 寫入同目錄，檔名加上 _upscaled 後綴，避免覆蓋原始快取
         out_path = src_path.parent / f"{src_path.stem}_upscaled{src_path.suffix}"
         upscaled.save(out_path)
