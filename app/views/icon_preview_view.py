@@ -544,8 +544,7 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
             except Exception:
                 pass
             processed += 1
-            # 每 50 個 JAR 才更新一次進度（避免過度 UI 更新），但最後一筆一定回報
-            if progress_cb and (processed == total or processed % 50 == 0):
+            if progress_cb:
                 progress_cb(processed, total)
                 if processed % 50 == 0:
                     log_info(f"[IconPreview] 處理進度：{processed}/{total} JARs")
