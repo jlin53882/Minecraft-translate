@@ -114,11 +114,9 @@ class LangItemRow(ft.Container):
         risk_label = None
 
         # PR59 fix：處理 jar:// URI（新格式）與舊磁碟路徑
-        _icon_ref: "IconRef | None" = None  # unused, kept for future extension
         if icon_result.icon_path and _HAS_ICON_READER:
             icon_ref = IconRef.parse(str(icon_result.icon_path))
             if icon_ref is not None:
-                _icon_ref = icon_ref
                 # 從 ZIP 直接讀取 bytes，寫入 preview_root
                 png_bytes = read_icon_bytes(icon_ref.jar_path, icon_ref.png_path)
                 if png_bytes:

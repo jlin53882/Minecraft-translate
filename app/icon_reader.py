@@ -33,6 +33,9 @@ class IconRef:
         # 標準化：把路徑中的反斜線轉成正斜線（避免 Path 轉換後的 backslash 破壞解析）
         normalized = uri.replace("\\", "/")
         _, rest = normalized.split("jar://", 1)
+        # 防禦：沒有 ":" 就不是有效 URI
+        if ":" not in rest:
+            return None
         # Windows 路徑含 C:\，只能用 rsplit(":", 1) 取最後一個 :
         jar, png = rest.rsplit(":", 1)
         # 剝離 query string（如果有）
@@ -40,8 +43,8 @@ class IconRef:
         return IconRef(Path(jar), png)
 
     def to_uri(self) -> str:
-        """序列化為 URI 字串。"""
-        return f"jar://{self.jar_path}:{self.png_path}"
+        """序列化為 URI 字串（永遠輸出 forward-slash 路徑）。"""
+        return f"jar://{self.jar_path.as_posix()}:{self.png_path}"
 
 
 class _ZipCache:
