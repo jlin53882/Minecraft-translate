@@ -256,6 +256,18 @@ def clean_kubejs_from_raw_impl(
     merged_lang_written = 0
     pending_lang_written = 0
 
+    # ── 雙軌去重的前置建置（O(N) once, outside group loop）───────────────────
+    # 目的：避免每個 group 都重新 rglob("zh_tw.json")，將 O(N×G) 降至 O(N)
+    #      （G = group 數量，N = final_root 內 zh_tw.json 檔案數）
+    final_tw_lookup: dict[str, str] = {}
+    if final_root_p.exists():
+        for tw_file in final_root_p.rglob("zh_tw.json"):
+            tw_data = read_json_dict_fn(tw_file)
+            if tw_data:
+                final_tw_lookup.update(tw_data)
+    # 若有 final_tw_lookup，先建好 reverse_index（整個 function 只建一次）
+    reverse_index = _build_reverse_index_impl(final_tw_lookup) if final_tw_lookup else {}
+
     for group_dir, files_map in groups.items():
         en = read_json_dict_fn(files_map.get("en_us"))
         cn = read_json_dict_fn(files_map.get("zh_cn"))
@@ -278,21 +290,10 @@ def clean_kubejs_from_raw_impl(
                 pending_en = en
 
             # ── 雙軌去重（reverse_index dedup）───────────────────────────────
-            # 目的：若某英文文字（value）已出現在 final/zh_tw.json（不同 key），
-            #       表示該英文原文已有翻譯，不需要再送 pending。
-            # 建立 reverse_index：{英文文字: [key1, key2, ...]}
-            if pending_en and final_root_p.exists():
-                # 從 final/zh_tw.json 建立 final_tw_lookup（key → 原文）
-                final_tw_lookup: dict[str, str] = {}
-                for tw_file in final_root_p.rglob("zh_tw.json"):
-                    tw_data = read_json_dict_fn(tw_file)
-                    if tw_data:
-                        final_tw_lookup.update(tw_data)
-
-                if final_tw_lookup:
-                    # 使用 PR #40 的乾淨去重實作
-                    reverse_index = _build_reverse_index_impl(final_tw_lookup)
-                    pending_en = _dedup_pending_en_impl(pending_en, reverse_index)
+            # reverse_index 已於 group loop 外部建好（每個 group 複用同一份）
+            # 若英文文字已出現在 final/zh_tw.json（不同 key），不需要送 pending
+            if pending_en and reverse_index:
+                pending_en = _dedup_pending_en_impl(pending_en, reverse_index)
             # ── 雙軌去重 end ───────────────────────────────────────────────
 
             if pending_en:
