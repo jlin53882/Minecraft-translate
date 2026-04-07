@@ -134,6 +134,24 @@ def translate_items_with_cache_loop(
 
         completed_calls += 1
         safe_translated = translated or []
+
+        # C-1 修復：使用原始批次大小切片，而非實際處理的數量
+        # 若 API 回傳數量少於傳送量（截斷/配額），剩餘項目不會被遺漏
+        # C-1 增強：若翻譯 API 回傳多於預期（模型串接錯誤/JSON截斷污染），
+        #           在 loop 處理前就截斷，防止 callback 吃到多餘項目
+        expected = len(batch)
+        if len(safe_translated) > expected:
+            log_info(
+                f"[SharedLM] ⚠️ API 回傳數量異常多於預期 ({len(safe_translated)} > {expected})，"
+                f"拒絕處理以防資料遺失，只取前 {expected} 項"
+            )
+            safe_translated = safe_translated[:expected]
+        if len(safe_translated) < expected:
+            log_info(
+                f"[SharedLM] ⚠️ API 回傳數量低於預期（預期 {expected}，實際 {len(safe_translated)}）"
+                f"，剩餘 {expected - len(safe_translated)} 項將重新處理"
+            )
+
         actual_processed_in_this_batch = 0
 
         for it in safe_translated:
@@ -153,6 +171,12 @@ def translate_items_with_cache_loop(
             actual_processed_in_this_batch += 1
             processed += 1
 
+            # C-3 修復：對 _untranslated 標記的項目，跳過所有後續處理
+            # 包括：on_translated_item callback（防止原文被寫回輸出）+ cache 寫入
+            if it.get("_untranslated"):
+                log_info(f"[SharedLM] 略過未翻譯項目的所有處理（含 callback）: {pth}")
+                continue
+
             if on_translated_item is not None:
                 try:
                     on_translated_item(it)
@@ -161,30 +185,14 @@ def translate_items_with_cache_loop(
 
             rule = cache_rules.get(ctype) or CacheRule("path|source_text")
             cache_key = rule.make_key({"path": pth, "source_text": src})
-            # C-3 修復：若此項目被標記為未翻譯（批次縮減時的原項目），則跳過快取寫入
-            if it.get("_untranslated"):
-                log_info(f"[SharedLM] 略過未翻譯項目的快取寫入: {pth}")
-            else:
-                try:
-                    add_to_cache(ctype, cache_key, src, txt)
-                except Exception as e:
-                    log_info(f"[SharedLM] 新增快取失敗: {e}")
+            try:
+                add_to_cache(ctype, cache_key, src, txt)
+            except Exception as e:
+                log_info(f"[SharedLM] 新增快取失敗: {e}")
 
-        # C-1 修復：使用原始批次大小切片，而非實際處理的數量
-        # 若 API 回傳數量少於傳送量（截斷/配額），剩餘項目不會被遺漏
-        # C-1 增強：若翻譯 API 回傳多於預期（模型串接錯誤/JSON截斷污染），多出的項目會被永久跳過
-        expected = len(batch)
-        if len(safe_translated) > expected:
-            log_info(
-                f"[SharedLM] ⚠️ API 回傳數量異常多於預期 ({len(safe_translated)} > {expected})，"
-                f"拒絕處理以防資料遺失，只取前 {expected} 項"
-            )
-            safe_translated = safe_translated[:expected]
-        if actual_processed_in_this_batch < expected:
-            log_info(
-                f"[SharedLM] ⚠️ API 回傳數量低於預期（預期 {expected}，實際 {actual_processed_in_this_batch}）"
-                f"，剩餘 {expected - actual_processed_in_this_batch} 項將重新處理"
-            )
+
+
+        # C-1: 用原始批次大小切片（expected = len(batch)）
         remaining = remaining[expected:]
 
         try:
