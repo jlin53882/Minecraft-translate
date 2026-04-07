@@ -391,16 +391,21 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
                     raise RuntimeError(f"ZIP 成員 {name} 大小（{info.file_size/1024/1024:.1f}MB）超過上限（{max_sz/1024/1024:.1f}MB）")
 
             # ===== Phase 1: Model JSON 解析（最高優先）=====
-            result = _try_extract_mod_icon_from_model(jar_path, modid, zf, names, key=key)
-            if result:
-                tex_val, png_path = result
-                _check_size(zf, png_path, _MAX_ICON_SIZE)
-                icon_data = zf.read(png_path)
-                icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
-                out_path.write_bytes(icon_data)
-                log_info(f"[IconPreview] Model JSON icon: {modid} → {png_path} (tex={tex_val})")
-                return out_path
+            # P1 修復：若 PNG 大小超過限制，不拋錯而是用 continue 讓 Phase 2/3 接手
+            # 否則 Phase 1 的過大 PNG 會導致整個 extraction abort
+            try:
+                result = _try_extract_mod_icon_from_model(jar_path, modid, zf, names, key=key)
+                if result:
+                    tex_val, png_path = result
+                    _check_size(zf, png_path, _MAX_ICON_SIZE)
+                    icon_data = zf.read(png_path)
+                    icon_cache_root.mkdir(parents=True, exist_ok=True)
+                    out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                    out_path.write_bytes(icon_data)
+                    log_info(f"[IconPreview] Model JSON icon: {modid} → {png_path} (tex={tex_val})")
+                    return out_path
+            except RuntimeError as ex:
+                log_info(f"[IconPreview] Phase 1 失敗（{ex}），繼續 Phase 2...")
 
             # ===== Fallback: assets/<modid>/icon.png（Fabric 標準）=====
             fabric_icon = f"assets/{modid}/icon.png"

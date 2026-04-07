@@ -148,8 +148,23 @@ def extract_from_jar_impl(
                 else:
                     # Binary 檔案或 jar_browser 未找到：直接讀 ZIP
                     # C-6 修復：讀取前先檢查成員的 header file_size，防止大型 binary 檔案耗盡記憶體
+                    # P1 修復：若 jar_browser 因大小限制跳過了文字檔（path in jar_results but None），
+                    #          fallback 直接讀 ZIP 時也必須檢查大小（用保守的 10MB 閾值）
                     _MAX_BINARY_SIZE = 100 * 1024 * 1024  # 100MB
-                    if member.file_size > _MAX_BINARY_SIZE:
+                    _MAX_FALLBACK_SIZE = 10 * 1024 * 1024  # 10MB，fallback 保守限制
+                    # jar_browser 跳過的大型文字檔也會出現在 jar_results 中（值為 None）
+                    is_jar_browser_skipped = (
+                        normalized_path in jar_results and jar_results[normalized_path] is None
+                    )
+                    if is_jar_browser_skipped or normalized_path not in jar_results:
+                        # fallback 讀取：套用保守的 10MB 限制（適用於文字檔）
+                        if member.file_size > _MAX_FALLBACK_SIZE:
+                            log_warning(
+                                f"[jar_extract] ⚠️ 拒絕讀取過大檔案（fallback）：{normalized_path}"
+                                f"（{member.file_size / 1024 / 1024:.1f}MB > 10MB）"
+                            )
+                            continue
+                    elif member.file_size > _MAX_BINARY_SIZE:
                         log_warning(
                             f"[jar_extract] ⚠️ 拒絕讀取過大檔案：{normalized_path}"
                             f"（{member.file_size / 1024 / 1024:.1f}MB > 100MB）"
