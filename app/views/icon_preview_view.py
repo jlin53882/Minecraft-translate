@@ -245,6 +245,15 @@ def _follow_parent_chain(
         return None
     visited.add(model_path)
 
+    # C-9 修復：讀取前檢查 file_size，防止過大 JSON model 檔
+    try:
+        info = zf.getinfo(model_path)
+    except KeyError:
+        return None
+    _MAX_MODEL_SIZE = 10 * 1024 * 1024  # 10MB
+    if info.file_size > _MAX_MODEL_SIZE:
+        return None
+
     try:
         raw = zf.read(model_path).decode("utf-8", errors="replace")
         data = json.loads(raw)
@@ -368,10 +377,24 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
         with zipfile.ZipFile(jar_path, "r") as zf:
             names = set(zf.namelist())
 
+            # C-9 修復：所有 ZIP 讀取前檢查 file_size，防止 ZIP bomb
+            _MAX_ICON_SIZE = 512 * 1024  # 512KB icon 圖片上限
+            _MAX_TOML_SIZE = 10 * 1024 * 1024  # 10MB toml 上限
+
+            def _check_size(zf_obj, name, max_sz):
+                """讀取前檢查 ZIP 成員大小，超限拋例外。"""
+                try:
+                    info = zf_obj.getinfo(name)
+                except KeyError:
+                    raise RuntimeError(f"ZIP 成員 {name} 不存在")
+                if info.file_size > max_sz:
+                    raise RuntimeError(f"ZIP 成員 {name} 大小（{info.file_size/1024/1024:.1f}MB）超過上限（{max_sz/1024/1024:.1f}MB）")
+
             # ===== Phase 1: Model JSON 解析（最高優先）=====
             result = _try_extract_mod_icon_from_model(jar_path, modid, zf, names, key=key)
             if result:
                 tex_val, png_path = result
+                _check_size(zf, png_path, _MAX_ICON_SIZE)
                 icon_data = zf.read(png_path)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
                 out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
@@ -382,6 +405,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
             # ===== Fallback: assets/<modid>/icon.png（Fabric 標準）=====
             fabric_icon = f"assets/{modid}/icon.png"
             if fabric_icon in names:
+                _check_size(zf, fabric_icon, _MAX_ICON_SIZE)
                 icon_data = zf.read(fabric_icon)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
                 out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
@@ -394,6 +418,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
             textures_pattern = re.compile(r"^assets/" + re.escape(modid) + r"/textures/.+\.png$")
             texture_files = sorted(n for n in names if textures_pattern.match(n))
             if texture_files:
+                _check_size(zf, texture_files[0], _MAX_ICON_SIZE)
                 icon_data = zf.read(texture_files[0])
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
                 out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
@@ -404,6 +429,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
             # ===== Fallback: assets/<modid>/textures/logo.png =====
             logo_texture = f"assets/{modid}/textures/logo.png"
             if logo_texture in names:
+                _check_size(zf, logo_texture, _MAX_ICON_SIZE)
                 icon_data = zf.read(logo_texture)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
                 out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
@@ -414,6 +440,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
             # ===== Fallback: NeoForge logoFile =====
             neoforge_toml = "META-INF/neoforge.mods.toml"
             if neoforge_toml in names:
+                _check_size(zf, neoforge_toml, _MAX_TOML_SIZE)
                 try:
                     toml_content = zf.read(neoforge_toml).decode("utf-8")
                 except UnicodeDecodeError:
@@ -424,6 +451,7 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
                     if logo_match:
                         logo_path = logo_match.group(1)
                         if logo_path in names:
+                            _check_size(zf, logo_path, _MAX_ICON_SIZE)
                             icon_data = zf.read(logo_path)
                             icon_cache_root.mkdir(parents=True, exist_ok=True)
                             out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"

@@ -173,6 +173,7 @@ def _save_entries_to_active_shards(
             logger.info(f"🔁 {cache_type} 手動切新分片 -> {nxt:05d}")
 
     pending_items = list(entries.items())
+    no_progress_count = 0  # C-11 修復：追蹤是否原地踏步，防止無限期迴圈
     while pending_items:
         # 建立 lock 檔並取得獨占鎖，防止 TOCTOU race
         type_dir.mkdir(parents=True, exist_ok=True)
@@ -239,6 +240,19 @@ def _save_entries_to_active_shards(
                 )
 
             pending_items = pending_items[capacity:]
+
+            # C-11 修復：若沒有寫入任何資料（capacity == 0 或其他錯誤），計數器累加
+            if len(chunk) == 0:
+                no_progress_count += 1
+                if no_progress_count >= 3:
+                    if logger:
+                        logger.error(
+                            f"❌ {cache_type} 快取寫入停滯（连续 {no_progress_count} 次未寫入任何資料），"
+                            f"放棄寫入剩餘 {len(pending_items)} 項"
+                        )
+                    break
+            else:
+                no_progress_count = 0  # 有進展就重置計數
 
             if pending_items:
                 # 若目前分片已滿，預旋轉到下一片

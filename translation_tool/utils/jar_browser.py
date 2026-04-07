@@ -64,11 +64,23 @@ def _scan_single_jar(
           - binary 檔案（UTF-8 decode 失敗）：None（由 caller 自行處理）
     """
     result: dict[str, str | None] = {}
+    _MAX_TEXT_FILE_SIZE = 10 * 1024 * 1024  # C-7 修復：文字檔 10MB 上限，防止 ZIP bomb
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
             for name in zf.namelist():
                 for pattern in patterns:
                     if re.search(pattern, name):
+                        # C-7 修復：讀取前先檢查 file_size，防止大型壓縮 bomb
+                        try:
+                            info = zf.getinfo(name)
+                        except KeyError:
+                            break
+                        if info.file_size > _MAX_TEXT_FILE_SIZE:
+                            log_warning(
+                                f"[jar_browser] ⚠️ 跳過過大文字檔：{name}"
+                                f"（{info.file_size / 1024 / 1024:.1f}MB > 10MB）"
+                            )
+                            break
                         try:
                             result[name] = zf.read(name).decode("utf-8")
                         except UnicodeDecodeError:

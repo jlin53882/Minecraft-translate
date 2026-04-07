@@ -30,7 +30,8 @@ def _read_text_from_zip(zf: zipfile.ZipFile, path: str) -> str:
     Returns:
         str: 解碼後的文字內容。
     """
-    # 1. 先檢查解壓縮後大小（防止 ZIP bomb）
+    # C-5 修復：先用 header file_size 做初步檢查，
+    # 再以實際解壓縮並限速讀取的方式防止 ZIP bomb（header 可被欺騙）
     info = zf.getinfo(path)
     if info.file_size > _MAX_UNCOMPRESSED_SIZE:
         raise RuntimeError(
@@ -38,9 +39,22 @@ def _read_text_from_zip(zf: zipfile.ZipFile, path: str) -> str:
             f"超過安全上限（50MB），拒絕讀取以防止 ZIP bomb 攻擊。"
         )
 
-    # 2. 以位元組形式讀取檔案的原始內容
+    # C-5 修復：實際解壓縮時限速讀取，防止 compression ratio bomb
+    chunks = []
+    total_read = 0
     with zf.open(path) as f:
-        raw = f.read()
+        while True:
+            chunk = f.read(8192)
+            if not chunk:
+                break
+            total_read += len(chunk)
+            if total_read > _MAX_UNCOMPRESSED_SIZE:
+                raise RuntimeError(
+                    f"ZIP 檔案 {path} 實際解壓縮大小（>{total_read / 1024 / 1024:.1f}MB）"
+                    f"超過安全上限（50MB），拒絕讀取以防止 ZIP bomb 攻擊。"
+                )
+            chunks.append(chunk)
+    raw = b"".join(chunks)
     # 2. 嘗試使用 UTF-8 進行標準解碼
     # 優先使用 utf-8-sig，它會自動過濾掉 UTF-8 的 BOM (\ufeff)
     try:

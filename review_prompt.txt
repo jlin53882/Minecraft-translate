@@ -1,0 +1,16 @@
+你是一個對抗式 code reviewer。請檢查以下變更是否有任何問題：
+1. 每個修復是否真的解決了描述的問題？
+2. 修復本身是否引入了新的 bug？
+3. 是否有任何遺漏的 edge cases？
+
+請讀取以下檔案並給出具體的回饖：
+- translation_tool/core/lm_translator_shared_loop.py (C-1)
+- translation_tool/core/lm_api_client.py (C-2)
+- translation_tool/core/lm_translator_main.py (C-3)
+- translation_tool/core/jar_processor_extract.py (C-4, C-6)
+- translation_tool/core/lang_merge_zip_io.py (C-5)
+- translation_tool/utils/jar_browser.py (C-7)
+- app/icon_index.py (C-8)
+- app/views/icon_preview_view.py (C-9)
+- translation_tool/core/lang_merge_content_copy.py (C-10)
+- translation_tool/utils/cache_shards.py (C-11)
