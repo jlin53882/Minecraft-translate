@@ -536,7 +536,7 @@ class CacheQueryPanel(ft.Container):
         """跳到最後一頁"""
         self.state.query_page = self.state.query_total_pages
         self._render_query_results()
-        self.page.update()
+        self._page.update()
 
     def _on_page_jump(self, e):
         """跳轉到指定頁"""
@@ -546,7 +546,7 @@ class CacheQueryPanel(ft.Container):
             p = 1
         self.state.query_page = p
         self._render_query_results()
-        self.page.update()
+        self._page.update()
 
     def _on_page_size_change(self, e):
         """變更每頁數量"""
@@ -556,7 +556,7 @@ class CacheQueryPanel(ft.Container):
             self.state.query_page_size = 50
         self.state.query_page = 1
         self._render_query_results()
-        self.page.update()
+        self._page.update()
 
     # ==================== 編輯相關 ====================
     def _on_apply_dst(self, e):
