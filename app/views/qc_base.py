@@ -25,7 +25,7 @@ class QCBase:
             progress_bar: 共用的 ProgressBar 元件
             log_view: 共用的 ListView 用於顯示日誌
         """
-        self.page = page
+        self._page = page
         self.progress_bar = progress_bar
         self.log_view = log_view
 

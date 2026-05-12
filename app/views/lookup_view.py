@@ -29,7 +29,7 @@ class LookupView(ft.Column):
             page: Flet Page 物件
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
-        self.page = page
+        self._page = page
 
         # --- 單筆查詢 UI 元件 ---
         self.single_input = ft.TextField(

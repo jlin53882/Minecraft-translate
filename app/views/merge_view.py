@@ -62,7 +62,7 @@ class MergeView(ft.Column):
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker) -> None:
         """初始化 MergeView。"""
         super().__init__(expand=True, spacing=16, scroll=ft.ScrollMode.AUTO)
-        self.page = page
+        self._page = page
         self.file_picker = file_picker
 
         self.session = TaskSession(max_logs=2000)

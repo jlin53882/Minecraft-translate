@@ -40,7 +40,7 @@ class QCView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
-        self.page = page
+        self._page = page
         self.file_picker = file_picker
 
         # --- 共用的日誌 UI ---

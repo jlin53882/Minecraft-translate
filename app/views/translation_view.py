@@ -60,7 +60,7 @@ class TranslationView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=16)
-        self.page = page
+        self._page = page
         self.file_picker = file_picker
         self._state = TranslationRunState()
         self._picker_target_field: ft.TextField | None = None
