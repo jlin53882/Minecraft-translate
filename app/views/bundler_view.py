@@ -117,9 +117,9 @@ class BundlerView(ft.Column):
         """顯示提示訊息"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
+        self._page.overlay.append(snack)
         snack.open = True
-        self.page.update()
+        self._page.update()
 
     def pick_path_with_tkinter(self, e, target_textfield: ft.TextField, pick_type: str):
         """
