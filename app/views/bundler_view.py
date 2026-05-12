@@ -32,7 +32,7 @@ class BundlerView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
-        self.page = page
+        self._page = page
         # 我們仍然保留 file_picker，以防萬一 (雖然現在主要用 tkinter)
         self.file_picker = file_picker
 
@@ -89,8 +89,8 @@ class BundlerView(ft.Column):
             ft.Text("打包日誌", theme_style=ft.TextThemeStyle.TITLE_MEDIUM),
             ft.Container(
                 content=self.log_view,
-                border=ft.border.all(1, theme.OUTLINE),
-                border_radius=ft.border_radius.all(5),
+                border=ft.Border.all(width=1, color=theme.OUTLINE),
+                border_radius=ft.BorderRadius.all(5),
                 padding=10,
                 expand=True,
             ),
