@@ -696,7 +696,7 @@ class IconPreviewView(ft.Column):
             page: Flet Page 物件
         """
         super().__init__(expand=True, spacing=8)
-        self.page = page
+        self._page = page
 
         # =========================
         # 使用者選擇的資料夾
@@ -730,9 +730,9 @@ class IconPreviewView(ft.Column):
         # =========================
         # Folder Picker
         # =========================
-        self.source_picker = ft.FilePicker(on_result=self._on_pick_source)
-        self.review_picker = ft.FilePicker(on_result=self._on_pick_review)
-        self.page.overlay.extend([self.source_picker, self.review_picker])
+        self.source_picker = ft.FilePicker(on_upload=self._on_pick_source)
+        self.review_picker = ft.FilePicker(on_upload=self._on_pick_review)
+        self._page.overlay.extend([self.source_picker, self.review_picker])
 
         # ===== 分頁設定 =====
         self.page_size = 50
