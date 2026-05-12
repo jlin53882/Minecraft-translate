@@ -77,7 +77,7 @@ class CacheQueryPanel(ft.Container):
         )
 
         # 按鈕
-        self.btn_query_search = ft.ElevatedButton(
+        self.btn_query_search = ft.Button(
             "搜尋", icon=ft.Icons.SEARCH, on_click=self._on_query_search
         )
         self.btn_query_clear = ft.OutlinedButton(
@@ -144,7 +144,7 @@ class CacheQueryPanel(ft.Container):
         self.query_total_info = ft.Text("共 0 筆")
 
         # 套用/還原按鈕
-        self.btn_apply_dst = ft.ElevatedButton(
+        self.btn_apply_dst = ft.Button(
             "套用", icon=ft.Icons.SAVE, on_click=self._on_apply_dst
         )
         self.btn_revert_dst = ft.OutlinedButton(

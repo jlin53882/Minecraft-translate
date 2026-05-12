@@ -35,7 +35,7 @@ class LookupView(ft.Column):
         self.single_input = ft.TextField(
             label="輸入單一學名", expand=True, tooltip="例如：Felis catus"
         )
-        self.single_button = ft.ElevatedButton(
+        self.single_button = ft.Button(
             "查詢", icon=ft.Icons.SEARCH, on_click=self.single_lookup_clicked
         )
         self.single_result_text = ft.Text("查詢結果將顯示在這裡。", selectable=True)
@@ -58,7 +58,7 @@ class LookupView(ft.Column):
             read_only=True,
             expand=True,
         )
-        self.batch_button = ft.ElevatedButton(
+        self.batch_button = ft.Button(
             "批次查詢", icon=ft.Icons.SEARCH, on_click=self.batch_lookup_clicked
         )
         self.batch_progress_bar = ft.ProgressBar(visible=False)

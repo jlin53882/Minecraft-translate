@@ -806,13 +806,13 @@ class IconPreviewView(ft.Column):
             on_click=self._go_back,
         )
 
-        self.pick_source_btn = ft.ElevatedButton(
+        self.pick_source_btn = ft.Button(
             "選擇模組資料夾（例：mods 資料夾）",
             icon=ft.Icons.FOLDER_OPEN,
             on_click=lambda e: self.source_picker.get_directory_path(),
         )
 
-        self.pick_review_btn = ft.ElevatedButton(
+        self.pick_review_btn = ft.Button(
             "選擇資源包路徑",
             icon=ft.Icons.FOLDER_OPEN,
             on_click=lambda e: self.review_picker.get_directory_path(),
@@ -821,14 +821,14 @@ class IconPreviewView(ft.Column):
         self.source_label = ft.Text("模組資料夾：尚未選擇", size=12)
         self.review_label = ft.Text("資源包路徑：尚未選擇", size=12)
 
-        self.load_btn = ft.ElevatedButton(
+        self.load_btn = ft.Button(
             "載入模組清單",
             icon=ft.Icons.PLAY_ARROW,
             disabled=True,
             on_click=self._on_load_clicked,
         )
 
-        self.save_btn = ft.ElevatedButton(
+        self.save_btn = ft.Button(
             "💾 儲存翻譯",
             icon=ft.Icons.SAVE,
             visible=False,

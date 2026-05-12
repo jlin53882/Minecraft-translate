@@ -47,7 +47,7 @@ class BundlerView(ft.Column):
             expand=True,
             tooltip="選擇您要將 .zip 檔案儲存的位置和檔名",
         )
-        self.start_button = ft.ElevatedButton(
+        self.start_button = ft.Button(
             "開始打包", on_click=self.start_bundling_clicked, icon=ft.Icons.ARCHIVE
         )
         self.progress_bar = ft.ProgressBar(value=0, visible=False)

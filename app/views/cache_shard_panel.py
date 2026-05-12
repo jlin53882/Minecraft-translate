@@ -122,7 +122,7 @@ class CacheShardPanel(ft.Container):
             text_align=ft.TextAlign.LEFT,
             text_style=ft.TextStyle(font_family="Consolas", size=12, height=1.45),
         )
-        self.btn_shard_dst_apply = ft.ElevatedButton(
+        self.btn_shard_dst_apply = ft.Button(
             "套用 DST", icon=ft.Icons.SAVE, on_click=self._on_shard_dst_apply
         )
         self.btn_shard_dst_revert = ft.OutlinedButton(

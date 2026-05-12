@@ -187,7 +187,7 @@ class CacheView(ft.Column):
             options=[ft.dropdown.Option("ALL", "全部")],
             on_change=self._on_query_type_change,
         )
-        self.btn_query_search = ft.ElevatedButton(
+        self.btn_query_search = ft.Button(
             "搜尋", icon=ft.Icons.SEARCH, on_click=self._on_query_search
         )
         self.btn_query_clear = ft.OutlinedButton(
@@ -242,7 +242,7 @@ class CacheView(ft.Column):
             text_align=ft.TextAlign.LEFT,
             value="",
         )
-        self.btn_apply_history_old = ft.ElevatedButton(
+        self.btn_apply_history_old = ft.Button(
             "套用選取舊值",
             icon=ft.Icons.HISTORY,
             on_click=self._on_apply_selected_history,
@@ -393,7 +393,7 @@ class CacheView(ft.Column):
             text_align=ft.TextAlign.LEFT,
             value="",
         )
-        self.btn_shard_apply_history_old = ft.ElevatedButton(
+        self.btn_shard_apply_history_old = ft.Button(
             "套用選取舊值",
             icon=ft.Icons.HISTORY,
             on_click=self._on_shard_apply_selected_history,
@@ -556,7 +556,7 @@ class CacheView(ft.Column):
             ],
         )
 
-        self.btn_apply_dst = ft.ElevatedButton(
+        self.btn_apply_dst = ft.Button(
             "套用", icon=ft.Icons.SAVE, on_click=self._on_apply_dst
         )
         self.btn_revert_dst = ft.OutlinedButton(

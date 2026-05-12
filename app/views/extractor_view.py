@@ -89,7 +89,7 @@ class ExtractorView(ft.Column):
         )
 
         # 2. Action Buttons
-        self.lang_button = ft.ElevatedButton(
+        self.lang_button = ft.Button(
             "提取 Lang",
             icon=ft.Icons.LANGUAGE,
             style=ft.ButtonStyle(
@@ -100,7 +100,7 @@ class ExtractorView(ft.Column):
             ),
             on_click=lambda e: self.start_extraction("lang"),
         )
-        self.book_button = ft.ElevatedButton(
+        self.book_button = ft.Button(
             "提取 Book",
             icon=ft.Icons.BOOK,
             style=ft.ButtonStyle(
