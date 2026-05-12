@@ -138,7 +138,8 @@ class CacheQueryPanel(ft.Container):
                 ft.dropdown.Option("100", "100"),
                 ft.dropdown.Option("200", "200"),
             ],
-            on_change=self._on_page_size_change,
+        )
+        self.dd_page_size.on_change = self._on_page_size_change
         )
         self.query_page_info = ft.Text("第 1 頁 / 共 1 頁")
         self.query_total_info = ft.Text("共 0 筆")
