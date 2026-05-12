@@ -601,7 +601,7 @@ class CacheQueryPanel(ft.Container):
             self._render_query_results()
             self._render_query_detail()
             self._show_snack_bar("已套用並寫入快取", theme.BLUE_400)
-            self.page.update()
+            self._page.update()
         except Exception as ex:
             self._show_snack_bar(f"套用失敗：{ex}", theme.RED_400)
 
@@ -613,7 +613,7 @@ class CacheQueryPanel(ft.Container):
 
         self.query_detail_dst.value = str(self.state.query_original_dst or "")
         self._show_snack_bar("已還原到原始值", theme.BLUE_400)
-        self.page.update()
+        self._page.update()
 
     def _history_append_event(self, cache_type: str, event: dict):
         """新增歷史事件"""
@@ -624,6 +624,6 @@ class CacheQueryPanel(ft.Container):
         """顯示 SnackBar"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
+        self._page.overlay.append(snack)
         snack.open = True
         self.page.update()
