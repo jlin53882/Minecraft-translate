@@ -77,7 +77,7 @@ class CacheView(ft.Column):
             page: Flet Page 物件
         """
         super().__init__(expand=True, spacing=10)
-        self.page = page
+        self._page = page
 
         # -------------------- 效能優化：髒標記機制 --------------------
         # PR5-7 整合：減少 update() 呼叫次數，避免 UI 卡顿

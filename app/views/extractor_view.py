@@ -48,7 +48,7 @@ class ExtractorView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=15)
-        self.page = page
+        self._page = page
         self.file_picker = file_picker
 
         # ExtractorView 的長任務狀態全部收斂到 TaskSession。

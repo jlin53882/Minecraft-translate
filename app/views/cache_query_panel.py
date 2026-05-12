@@ -42,7 +42,7 @@ class CacheQueryPanel(ft.Container):
         super().__init__(content=self._build_content())
 
         # 再設定實例屬性
-        self.page = page
+        self._page = page
         self.state = state
         self.last_overview_data = last_overview_data
 
