@@ -384,7 +384,7 @@ class CacheQueryPanel(ft.Container):
         self.query_search_hint.color = theme.BLUE_700
         self._render_query_results()
         self._render_query_detail()
-        self.page.update()
+        self._page.update()
 
     def _on_query_clear(self, e):
         """清除搜尋條件與結果"""
@@ -396,7 +396,7 @@ class CacheQueryPanel(ft.Container):
         self.query_search_hint.color = theme.GREY_700
         self._render_query_results()
         self._render_query_detail()
-        self.page.update()
+        self._page.update()
 
     # ==================== 分頁相關 ====================
     def _set_query_page(self, page: int):
@@ -483,7 +483,7 @@ class CacheQueryPanel(ft.Container):
         self.state.query_selected_result = row
         self._render_query_results()
         self._render_query_detail()
-        self.page.update()
+        self._page.update()
 
     def _render_query_detail(self):
         """渲染查詢詳情面板"""
@@ -518,19 +518,19 @@ class CacheQueryPanel(ft.Container):
         """跳到第一頁"""
         self.state.query_page = 1
         self._render_query_results()
-        self.page.update()
+        self._page.update()
 
     def _on_page_prev(self, e):
         """上一頁"""
         self.state.query_page -= 1
         self._render_query_results()
-        self.page.update()
+        self._page.update()
 
     def _on_page_next(self, e):
         """下一頁"""
         self.state.query_page += 1
         self._render_query_results()
-        self.page.update()
+        self._page.update()
 
     def _on_page_last(self, e):
         """跳到最後一頁"""
