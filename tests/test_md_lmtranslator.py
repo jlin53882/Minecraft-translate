@@ -96,7 +96,7 @@ def test_load_pending_doc(tmp_path: Path) -> None:
 
     assert data["schema"] == "md_pending_blocks_v1"
     assert len(items) == 1
-    assert items[0].content == "Hello"
+    assert items[0].text == "Hello"
 
 
 def test_load_pending_doc_invalid_schema(tmp_path: Path) -> None:
@@ -138,7 +138,7 @@ def test_pending_item_dataclass(tmp_path: Path) -> None:
     )
 
     assert item.id == "test:1-2"
-    assert item.content == "Hello World"
+    assert item.text == "Hello World"
     assert item.content_hash == "abc123"
     assert item.start_line == 1
     assert item.end_line == 2

@@ -115,7 +115,7 @@ def test_load_items_from_json(tmp_path: Path) -> None:
     
     assert source_md == "test.md"
     assert len(items) == 1
-    assert items[0].content == "Hello"
+    assert items[0].text == "Hello"
 
 
 def test_apply_item_to_md_lines_basic(tmp_path: Path) -> None:
