@@ -16,7 +16,7 @@ class _FilePicker:
 def test_bundler_view_initializes_core_controls():
     view = BundlerView(_Page(), _FilePicker())
 
-    assert view.start_button.text == '開始打包'
+    assert view.start_button.content == '開始打包'
     assert view.progress_bar.visible is False
 
 
