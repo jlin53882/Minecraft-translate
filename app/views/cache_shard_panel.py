@@ -368,7 +368,7 @@ class CacheShardPanel(ft.Container):
         """key 篩選條件變更"""
         self.state.page = 1
         self._render_shard_detail_keys()
-        self.page.update()
+        self._page.update()
 
     # ==================== SRC/DST 面板 ====================
     def _load_shard_entry(self, cache_type: str, filename: str, key: str):
@@ -468,13 +468,13 @@ class CacheShardPanel(ft.Container):
         """切換到預覽模式"""
         self.state.src_mode = "preview"
         self._render_shard_src_panel()
-        self.page.update()
+        self._page.update()
 
     def _on_shard_src_raw_mode(self, e):
         """切換到原始碼模式"""
         self.state.src_mode = "raw"
         self._render_shard_src_panel()
-        self.page.update()
+        self._page.update()
 
     def _on_shard_page_first(self, e):
         """跳到第一頁"""

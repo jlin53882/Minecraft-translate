@@ -626,4 +626,4 @@ class CacheQueryPanel(ft.Container):
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self._page.overlay.append(snack)
         snack.open = True
-        self.page.update()
+        self._page.update()
