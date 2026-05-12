@@ -188,7 +188,7 @@ def show_quick_jump_panel(page: ft.Page, view_registry: list, change_view_callba
         bgcolor=ft.Colors.BLACK38,
         on_click=lambda _: close_quick_jump_panel(page),
         content=panel,
-        alignment=ft.alignment.center,
+        alignment=ft.alignment.Alignment.CENTER,
         width=400,
     )
 

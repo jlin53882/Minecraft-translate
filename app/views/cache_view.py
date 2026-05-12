@@ -180,15 +180,15 @@ class CacheView(ft.Column):
                 ft.dropdown.Option("DST", "DST"),
                 ft.dropdown.Option("ALL", "全部"),
             ],
-            on_change=self._on_query_mode_change,
         )
+        self.dd_query_mode.on_change = self._on_query_mode_change
         self.dd_query_type = ft.Dropdown(
             width=180,
             value="ALL",
             tooltip="選擇要查詢的分類（例如 lang / patchouli）",
             options=[ft.dropdown.Option("ALL", "全部")],
-            on_change=self._on_query_type_change,
         )
+        self.dd_query_type.on_change = self._on_query_type_change
         self.btn_query_search = ft.Button(
             "搜尋", icon=ft.Icons.SEARCH, on_click=self._on_query_search
         )
@@ -287,9 +287,7 @@ class CacheView(ft.Column):
                             ft.Container(
                                 bgcolor=theme.BLUE_50,
                                 padding=10,
-                                border_radius=ft.border_radius.only(
-                                    top_left=10, top_right=10
-                                ),
+                                border_radius=ft.BorderRadius(10, 10, 0, 0),
                                 content=ft.Row(
                                     [
                                         ft.GestureDetector(
@@ -431,9 +429,7 @@ class CacheView(ft.Column):
                             ft.Container(
                                 bgcolor=theme.BLUE_50,
                                 padding=10,
-                                border_radius=ft.border_radius.only(
-                                    top_left=10, top_right=10
-                                ),
+                                border_radius=ft.BorderRadius(10, 10, 0, 0),
                                 content=ft.Row(
                                     [
                                         ft.GestureDetector(
@@ -586,8 +582,8 @@ class CacheView(ft.Column):
                 ft.dropdown.Option("100", "100"),
                 ft.dropdown.Option("200", "200"),
             ],
-            on_change=self._on_page_size_change,
         )
+        self.dd_page_size.on_change = self._on_page_size_change
         self.query_page_info = ft.Text("第 1 頁 / 共 1 頁")
         self.query_total_info = ft.Text("共 0 筆")
 
@@ -845,7 +841,7 @@ class CacheView(ft.Column):
             text_align=ft.TextAlign.LEFT,
             text_style=ft.TextStyle(font_family="Consolas", size=12, height=1.45),
         )
-        self.btn_shard_dst_apply = ft.ElevatedButton(
+        self.btn_shard_dst_apply = ft.Button(
             "套用 DST", icon=ft.Icons.SAVE, on_click=self._on_shard_dst_apply
         )
         self.btn_shard_dst_revert = ft.OutlinedButton(
@@ -1046,14 +1042,17 @@ class CacheView(ft.Column):
         self.query_entry_page = self._build_query_entry_page()
 
         self.main_tabs = ft.Tabs(
+            content=[
+                ft.Tab(label="總覽 / 管理"),
+                ft.Tab(label="查詢"),
+            ],
+            length=2,
             selected_index=0,
             expand=True,
-            on_change=self._on_tab_change,  # 監聽 tab 切換，自動關閉歷史紀錄視窗
-            tabs=[
-                ft.Tab(text="總覽 / 管理", content=self.overview_page),
-                ft.Tab(text="查詢", content=self.query_entry_page),
-            ],
+            on_change=self._on_tab_change,
         )
+        self.main_tabs.content[0].content = self.overview_page
+        self.main_tabs.content[1].content = self.query_entry_page
 
         # PR5-7: Modal 入口按鈕（提供替代 Tab 的現代化體驗）
         # 主布局改成 Stack，支援浮動視窗
@@ -1568,15 +1567,18 @@ class CacheView(ft.Column):
     def _build_query_entry_page(self):
         """建立查詢頁面的 UI"""
         self.query_sub_tabs = ft.Tabs(
+            content=[
+                ft.Tab(label="查詢區"),
+                ft.Tab(label="分類/分片"),
+            ],
+            length=2,
             selected_index=0,
             animation_duration=200,
             expand=True,
             on_change=self._on_query_sub_tab_change,
-            tabs=[
-                ft.Tab(text="查詢區", content=self.query_search_card),
-                ft.Tab(text="分類/分片", content=self.query_type_shard_card),
-            ],
         )
+        self.query_sub_tabs.content[0].content = self.query_search_card
+        self.query_sub_tabs.content[1].content = self.query_type_shard_card
 
         return ft.Container(
             expand=True,

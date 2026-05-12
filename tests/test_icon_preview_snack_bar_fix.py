@@ -37,7 +37,7 @@ class TestSnackBarInPlaceModification:
 
         with patch.object(IconPreviewView, "__init__", lambda self, page: None):
             view = IconPreviewView.__new__(IconPreviewView)
-            view.page = page
+            view._page = page
             # 不呼叫真的 __init__（會觸發太多依賴）
 
         # 呼叫 _show_snack
@@ -63,7 +63,7 @@ class TestSnackBarInPlaceModification:
 
         with patch.object(IconPreviewView, "__init__", lambda self, page: None):
             view = IconPreviewView.__new__(IconPreviewView)
-            view.page = page
+            view._page = page
 
         view._show_snack("new message", color=theme.WARNING)
 
@@ -80,7 +80,7 @@ class TestSnackBarInPlaceModification:
 
         with patch.object(IconPreviewView, "__init__", lambda self, page: None):
             view = IconPreviewView.__new__(IconPreviewView)
-            view.page = page
+            view._page = page
 
         # 呼叫 5 次
         for i in range(5):
@@ -99,7 +99,7 @@ class TestSnackBarInPlaceModification:
 
         with patch.object(IconPreviewView, "__init__", lambda self, page: None):
             view = IconPreviewView.__new__(IconPreviewView)
-            view.page = page
+            view._page = page
 
         # 不應 raise，page.update() 應該被呼叫
         view._show_snack("test", color=theme.GREEN_600)

@@ -35,7 +35,7 @@ def test_translation_view_builds_three_tabs_and_shared_status_panel(monkeypatch)
 
     view = tv.TranslationView(page, picker)
 
-    assert len(view.tabs.tabs) == 3
+    assert len(view.tabs.content) == 3
     assert view.status_chip.label.value == '尚未開始'
     assert view.progress.value == 0
 

@@ -89,7 +89,7 @@ class LangItemRow(ft.Container):
                        若有值則直接使用，跳過 resolve_icon_with_reason。
         """
         super().__init__(
-            padding=ft.padding.symmetric(vertical=10, horizontal=8),
+            padding=ft.Padding.symmetric(vertical=10, horizontal=8),
             border_radius=8,
             bgcolor=ft.Colors.WHITE,
         )
@@ -156,7 +156,7 @@ class LangItemRow(ft.Container):
             icon_widget = ft.Container(
                 width=128,
                 height=128,
-                alignment=ft.alignment.center,
+                alignment=ft.alignment.Alignment.CENTER,
                 bgcolor=ft.Colors.GREY_300,
                 content=ft.Icon(ft.Icons.IMAGE_NOT_SUPPORTED),
             )

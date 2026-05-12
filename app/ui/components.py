@@ -159,14 +159,14 @@ def primary_button(
     on_click=None,
     height: int = 42,
     bgcolor: str = ft.Colors.BLUE_700,
-) -> ft.ElevatedButton:
+) -> ft.Button:
     """主動作按鈕（整個 App 統一的 primary style）。
 
     Args:
         bgcolor: 主色背景（預設藍色）。需要特殊語意（例如成功/危險）時可換色。
     """
 
-    return ft.ElevatedButton(
+    return ft.Button(
         text,
         icon=icon,
         tooltip=tooltip,

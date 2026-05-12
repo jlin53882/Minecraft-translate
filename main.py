@@ -149,11 +149,11 @@ def main(page: ft.Page):
                 spacing=5,
                 alignment=ft.MainAxisAlignment.CENTER,
             ),
-            margin=ft.margin.only(bottom=10),
+            margin=ft.Margin.only(bottom=10),
         ),
         trailing=ft.Container(
             content=toggle_icon_btn,
-            margin=ft.margin.only(top=10),
+            margin=ft.Margin.only(top=10),
         ),
     )
 

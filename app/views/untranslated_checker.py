@@ -45,7 +45,7 @@ class UntranslatedChecker(ft.Container):
             label="未翻譯報告 輸出資料夾",
             expand=True,
         )
-        self.start_button = ft.ElevatedButton(
+        self.start_button = ft.Button(
             "開始檢查",
             icon=ft.Icons.SEARCH_OFF,
             on_click=self._on_start,

@@ -95,15 +95,19 @@ class TranslationView(ft.Column):
         )
 
         self.tabs = ft.Tabs(
+            content=[
+                ft.Tab(label="FTB Quests"),
+                ft.Tab(label="KubeJS Tooltips"),
+                ft.Tab(label="Markdown"),
+            ],
+            length=3,
             selected_index=0,
             expand=True,
             animation_duration=180,
-            tabs=[
-                ft.Tab(text="FTB Quests", content=self._build_ftb_tab()),
-                ft.Tab(text="KubeJS Tooltips", content=self._build_kjs_tab()),
-                ft.Tab(text="Markdown", content=self._build_md_tab()),
-            ],
         )
+        self.tabs.content[0].content = self._build_ftb_tab()
+        self.tabs.content[1].content = self._build_kjs_tab()
+        self.tabs.content[2].content = self._build_md_tab()
 
         # action layer 讀取的相容 seam
         self.run_ftb_translation_service = run_ftb_translation_service

@@ -24,7 +24,7 @@ class DummyCheckbox:
 
 def _build_test_view(monkeypatch):
     view = CacheView.__new__(CacheView)
-    view.page = FakePage()
+    view._page = FakePage()
     view.ui_busy = False
     view.busy_reason = ""
     view._all_logs = []

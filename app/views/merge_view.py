@@ -39,8 +39,8 @@ class MergeView(ft.Column):
     status_chip: ft.Chip
     progress_bar: ft.ProgressBar
     log_view: ft.ListView
-    pick_zip_button: ft.ElevatedButton
-    start_button: ft.ElevatedButton
+    pick_zip_button: ft.Button
+    start_button: ft.Button
     controls: list[ft.Control]
 
     def _skip_disabled_note(self) -> ft.Text | None:

@@ -772,8 +772,8 @@ class IconPreviewView(ft.Column):
             ],
             value="50",
             width=120,
-            on_change=self._on_page_size_change,
         )
+        self.page_size_selector.on_change = self._on_page_size_change
         # ===== 模組清單分頁 =====
         self.mod_page_size = 50
         self.mod_current_page = 0

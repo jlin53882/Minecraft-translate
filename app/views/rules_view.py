@@ -85,13 +85,14 @@ class RulesView(ft.Column):
         return -1
 
     def _sync_page_jump_field(self):
-        # 確保欄位顯示跟 current_page 一致
         """同步分頁跳轉欄位。"""
         if hasattr(self, "page_jump_field"):
             self.page_jump_field.value = str(self.current_page)
-            # 只有當控制項已加入頁面時才執行 update，避免初始化時 crash
-            if self.page_jump_field.page:
-                self.page_jump_field.update()
+            try:
+                if self.page_jump_field.page:
+                    self.page_jump_field.update()
+            except RuntimeError:
+                pass
 
     def on_page_jump_submit(self, e):
         """驗證並執行頁碼跳轉"""

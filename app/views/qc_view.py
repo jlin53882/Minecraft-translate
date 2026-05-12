@@ -65,7 +65,7 @@ class QCView(ft.Column):
         self.compare_out_dir_textfield = ft.TextField(
             label="JSON 差異報告 輸出資料夾", expand=True
         )
-        self.compare_start_button = ft.ElevatedButton(
+        self.compare_start_button = ft.Button(
             "啟動：JSON 資料夾差異比對",
             icon=ft.Icons.COMPARE,
             on_click=lambda e: self.start_task("compare_json"),
@@ -78,7 +78,7 @@ class QCView(ft.Column):
         self.tsv_out_file_textfield = ft.TextField(
             label="TSV 差異報告 輸出檔案 (.csv)", expand=True
         )
-        self.compare_tsv_start_button = ft.ElevatedButton(
+        self.compare_tsv_start_button = ft.Button(
             "啟動：TSV 單檔案差異比對",
             icon=ft.Icons.FILE_PRESENT,
             on_click=lambda e: self.start_task("compare_tsv"),
@@ -193,7 +193,7 @@ class QCView(ft.Column):
             ft.Container(
                 content=self.log_view,
                 border=ft.Border.all(1, theme.OUTLINE),
-                border_radius=ft.border_radius.all(5),
+                border_radius=ft.BorderRadius.all(5),
                 padding=10,
                 expand=True,
             ),
