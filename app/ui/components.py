@@ -361,7 +361,7 @@ def loading_state(
     spinner = ft.CupertinoActivityIndicator() if show_spinner else None
 
     return ft.Container(
-        alignment=ft.alignment.center,
+        alignment=ft.alignment.Alignment(0, 0),
         padding=40,
         content=ft.Column(
             [
