@@ -192,7 +192,7 @@ class QCView(ft.Column):
             self.progress_bar,
             ft.Container(
                 content=self.log_view,
-                border=ft.border.all(1, theme.OUTLINE),
+                border=ft.Border.all(1, theme.OUTLINE),
                 border_radius=ft.border_radius.all(5),
                 padding=10,
                 expand=True,

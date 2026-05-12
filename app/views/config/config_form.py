@@ -25,7 +25,7 @@ def build_card(view, title, controls_list):
 def build_header(view):
     """建立設定頁面的頂部標題列（含圖示與標題文字）。"""
     return ft.Container(
-        padding=ft.padding.only(left=5, bottom=10),
+        padding=ft.Padding(left=5, bottom=10),
         content=ft.Row([
             ft.Icon(ft.Icons.SETTINGS_APPLICATIONS, size=28, color=ft.Colors.BLUE_GREY_800),
             ft.Text('全域設定 (Global Settings)', theme_style=ft.TextThemeStyle.HEADLINE_MEDIUM, color=ft.Colors.BLUE_GREY_900),
@@ -35,10 +35,10 @@ def build_header(view):
 def build_footer(view):
     """建立設定頁面的底部橫幅（含提示文字與儲存按鈕）。"""
     return ft.Container(
-        padding=ft.padding.symmetric(horizontal=20, vertical=10),
+        padding=ft.Padding(horizontal=20, vertical=10),
         bgcolor=ft.Colors.WHITE,
-        border=ft.border.only(top=ft.BorderSide(1, ft.Colors.GREY_300)),
-        shadow=ft.BoxShadow(spread_radius=1, blur_radius=5, color=ft.Colors.BLACK12, offset=ft.Offset(0, -1)),
+        border=ft.Border(top=ft.BorderSide(1, ft.Colors.GREY_300)),
+        shadow=ft.BoxShadow(spread_radius=1, blur_radius=5, color=ft.Colors.BLACK_12, offset=ft.Offset(0, -1)),
         content=ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             controls=[

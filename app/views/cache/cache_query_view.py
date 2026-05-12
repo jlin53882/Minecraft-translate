@@ -94,7 +94,7 @@ class CacheQueryView(ft.Container):
                 ft.Container(
                     expand=True,
                     content=self.query_result_list,
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
                     padding=4,
                 ),

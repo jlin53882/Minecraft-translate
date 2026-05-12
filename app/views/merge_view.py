@@ -337,7 +337,7 @@ class MergeView(ft.Column):
                 content=ft.Container(
                     height=280,
                     bgcolor="#2b2f36",
-                    border=ft.border.all(1, "#4b5563"),
+                    border=ft.Border.all(1, "#4b5563"),
                     border_radius=8,
                     padding=10,
                     clip_behavior=ft.ClipBehavior.HARD_EDGE,

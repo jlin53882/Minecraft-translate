@@ -226,7 +226,7 @@ class RulesView(ft.Column):
     def _build_header(self):
         """頁面標題區"""
         return ft.Container(
-            padding=ft.padding.only(left=5, bottom=5),
+            padding=ft.Padding(left=5, bottom=5),
             content=ft.Row(
                 [
                     ft.Icon(
@@ -310,7 +310,7 @@ class RulesView(ft.Column):
     def _build_footer(self):
         """底部狀態與分頁列"""
         return ft.Container(
-            padding=ft.padding.symmetric(horizontal=10, vertical=5),
+            padding=ft.Padding(horizontal=10, vertical=5),
             content=ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 controls=[

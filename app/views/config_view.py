@@ -544,10 +544,10 @@ class ConfigView(ft.Column):
         )
 
         row = ft.Container(
-            padding=ft.padding.symmetric(horizontal=12, vertical=8),
+            padding=ft.Padding(horizontal=12, vertical=8),
             border_radius=8,
             bgcolor=theme.WHITE,
-            border=ft.border.all(1, theme.GREY_200),
+            border=ft.Border.all(1, theme.GREY_200),
             content=ft.Row(
                 [
                     order_text,

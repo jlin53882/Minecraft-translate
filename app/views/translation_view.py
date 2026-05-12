@@ -128,7 +128,7 @@ class TranslationView(ft.Column):
                     expand=True,
                     bgcolor="#1e1e1e",
                     border_radius=8,
-                    border=ft.border.all(1, theme.GREY_800),
+                    border=ft.Border.all(1, theme.GREY_800),
                     padding=10,
                     content=self.log_view,
                 ),
@@ -158,7 +158,7 @@ class TranslationView(ft.Column):
             padding=14,
             border_radius=10,
             bgcolor=theme.WHITE,
-            border=ft.border.all(1, theme.BLACK12),
+            border=ft.Border.all(1, theme.BLACK12),
             content=ft.Row(
                 [
                     # ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color=theme.BLUE_GREY_700),

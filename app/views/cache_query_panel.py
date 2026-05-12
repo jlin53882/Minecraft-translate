@@ -140,7 +140,6 @@ class CacheQueryPanel(ft.Container):
             ],
         )
         self.dd_page_size.on_change = self._on_page_size_change
-        )
         self.query_page_info = ft.Text("第 1 頁 / 共 1 頁")
         self.query_total_info = ft.Text("共 0 筆")
 
@@ -189,7 +188,7 @@ class CacheQueryPanel(ft.Container):
                                         ft.Container(
                                             expand=True,
                                             padding=8,
-                                            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                                            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                                             border_radius=8,
                                             bgcolor=theme.WHITE,
                                             content=self.query_result_list,
@@ -212,10 +211,10 @@ class CacheQueryPanel(ft.Container):
                                         ft.Container(
                                             expand=True,
                                             padding=8,
-                                            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                                            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                                             border_radius=8,
                                             bgcolor=theme.WHITE,
-                                            alignment=ft.alignment.top_left,
+                                            alignment=ft.alignment.Alignment(-1,-1),
                                             content=ft.Column(
                                                 [
                                                     self.query_detail_key,
@@ -241,7 +240,7 @@ class CacheQueryPanel(ft.Container):
                     ),
                 ),
                 ft.Container(
-                    padding=ft.padding.only(top=4),
+                    padding=ft.Padding(top=4),
                     content=ft.Row(
                         [
                             self.btn_page_first,
@@ -437,7 +436,7 @@ class CacheQueryPanel(ft.Container):
                 self.query_result_list.controls.append(
                     ft.Container(
                         padding=8,
-                        border=ft.border.all(
+                        border=ft.Border.all(
                             1,
                             theme.BLUE_200 if selected else theme.OUTLINE_VARIANT,
                         ),

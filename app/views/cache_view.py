@@ -268,7 +268,7 @@ class CacheView(ft.Column):
             width=420,
             height=480,
             bgcolor=theme.WHITE,
-            border=ft.border.all(2, theme.BLUE_300),
+            border=ft.Border.all(2, theme.BLUE_300),
             border_radius=10,
             shadow=ft.BoxShadow(
                 spread_radius=1,
@@ -331,7 +331,7 @@ class CacheView(ft.Column):
                                         ft.Container(
                                             height=200,
                                             padding=6,
-                                            border=ft.border.all(
+                                            border=ft.Border.all(
                                                 1, theme.OUTLINE_VARIANT
                                             ),
                                             border_radius=8,
@@ -413,7 +413,7 @@ class CacheView(ft.Column):
             width=420,
             height=480,
             bgcolor=theme.WHITE,
-            border=ft.border.all(2, theme.BLUE_300),
+            border=ft.Border.all(2, theme.BLUE_300),
             border_radius=10,
             shadow=ft.BoxShadow(
                 spread_radius=1,
@@ -474,7 +474,7 @@ class CacheView(ft.Column):
                                         ft.Container(
                                             height=200,
                                             padding=6,
-                                            border=ft.border.all(
+                                            border=ft.Border.all(
                                                 1, theme.OUTLINE_VARIANT
                                             ),
                                             border_radius=8,
@@ -524,9 +524,9 @@ class CacheView(ft.Column):
             title=ft.Text("SRC（可展開）", weight=ft.FontWeight.BOLD),
             controls=[
                 ft.Container(
-                    alignment=ft.alignment.top_left,
+                    alignment=ft.alignment.Alignment(-1,-1),
                     padding=8,
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
                     content=ft.Column(
                         [self.query_detail_src],
@@ -542,9 +542,9 @@ class CacheView(ft.Column):
             title=ft.Text("DST（可展開，可編輯）", weight=ft.FontWeight.BOLD),
             controls=[
                 ft.Container(
-                    alignment=ft.alignment.top_left,
+                    alignment=ft.alignment.Alignment(-1,-1),
                     padding=8,
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
                     content=ft.Column(
                         [self.query_detail_dst],
@@ -592,10 +592,10 @@ class CacheView(ft.Column):
         self.query_search_card = ft.Container(
             expand=True,
             padding=14,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=10,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.top_left,
+            alignment=ft.alignment.Alignment(-1,-1),
             content=ft.Column(
                 [
                     ft.Text("查詢區塊（Explorer）", size=16, weight=ft.FontWeight.BOLD),
@@ -634,7 +634,7 @@ class CacheView(ft.Column):
                                             ft.Container(
                                                 expand=True,
                                                 padding=8,
-                                                border=ft.border.all(
+                                                border=ft.Border.all(
                                                     1, theme.OUTLINE_VARIANT
                                                 ),
                                                 border_radius=8,
@@ -665,12 +665,12 @@ class CacheView(ft.Column):
                                             ft.Container(
                                                 expand=True,
                                                 padding=8,
-                                                border=ft.border.all(
+                                                border=ft.Border.all(
                                                     1, theme.OUTLINE_VARIANT
                                                 ),
                                                 border_radius=8,
                                                 bgcolor=theme.WHITE,
-                                                alignment=ft.alignment.top_left,
+                                                alignment=ft.alignment.Alignment(-1,-1),
                                                 content=ft.Column(
                                                     [
                                                         self.query_detail_key,
@@ -696,7 +696,7 @@ class CacheView(ft.Column):
                         ),
                     ),
                     ft.Container(
-                        padding=ft.padding.only(top=4),
+                        padding=ft.Padding(top=4),
                         content=ft.Row(
                             [
                                 self.btn_page_first,
@@ -739,10 +739,10 @@ class CacheView(ft.Column):
         self.query_type_shard_list_container = ft.Container(
             expand=True,
             padding=8,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.top_left,
+            alignment=ft.alignment.Alignment(-1,-1),
             content=self.query_type_shard_col,
         )
 
@@ -794,10 +794,10 @@ class CacheView(ft.Column):
         self.shard_detail_key_list_container = ft.Container(
             expand=True,
             padding=6,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.top_left,
+            alignment=ft.alignment.Alignment(-1,-1),
             content=self.shard_detail_key_list,
         )
 
@@ -822,10 +822,10 @@ class CacheView(ft.Column):
         self.shard_src_container = ft.Container(
             expand=True,
             padding=6,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.top_left,
+            alignment=ft.alignment.Alignment(-1,-1),
             content=self.shard_src_field,
         )
 
@@ -862,10 +862,10 @@ class CacheView(ft.Column):
         self.shard_dst_container = ft.Container(
             expand=True,
             padding=6,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.top_left,
+            alignment=ft.alignment.Alignment(-1,-1),
             content=self.shard_dst_field,
         )
 
@@ -902,7 +902,7 @@ class CacheView(ft.Column):
         self.shard_key_column = ft.Container(
             width=self._dynamic_shard_key_panel_width(),
             padding=10,
-            border=ft.border.only(right=ft.border.BorderSide(1, theme.OUTLINE_VARIANT)),
+            border=ft.Border(right=ft.border.BorderSide(1, theme.OUTLINE_VARIANT)),
             content=ft.Column(
                 [
                     ft.Text("C1 KeyListCard", weight=ft.FontWeight.BOLD),
@@ -979,14 +979,14 @@ class CacheView(ft.Column):
             expand=True,
             visible=False,
             padding=0,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=10,
             bgcolor=theme.WHITE,
             content=ft.Column(
                 [
                     ft.Container(
-                        padding=ft.padding.symmetric(horizontal=10, vertical=8),
-                        border=ft.border.only(
+                        padding=ft.Padding(horizontal=10, vertical=8),
+                        border=ft.Border(
                             bottom=ft.border.BorderSide(1, theme.OUTLINE_VARIANT)
                         ),
                         content=ft.Row(
@@ -1030,7 +1030,7 @@ class CacheView(ft.Column):
         self.query_type_shard_card = ft.Container(
             expand=True,
             padding=0,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=10,
             bgcolor=theme.WHITE,
             content=ft.Column(
@@ -1064,7 +1064,7 @@ class CacheView(ft.Column):
                         expand=True,
                         controls=[
                             ft.Container(
-                                padding=ft.padding.only(bottom=6),
+                                padding=ft.Padding(bottom=6),
                                 content=ft.Row(
                                     [
                                         ft.Text(
@@ -1574,7 +1574,7 @@ class CacheView(ft.Column):
             expand=True,
             bgcolor=theme.WHITE,
             padding=8,
-            alignment=ft.alignment.top_left,
+            alignment=ft.alignment.Alignment(-1,-1),
             content=self.query_sub_tabs,
         )
 
@@ -1683,7 +1683,7 @@ class CacheView(ft.Column):
                 usage_text_color = theme.BLUE_700
 
             status_chip = ft.Container(
-                padding=ft.padding.symmetric(horizontal=8, vertical=2),
+                padding=ft.Padding(horizontal=8, vertical=2),
                 border_radius=20,
                 bgcolor=theme.AMBER_100 if dirty else theme.GREEN_100,
                 content=ft.Text("有變更" if dirty else "無變更", size=11),
@@ -1727,7 +1727,7 @@ class CacheView(ft.Column):
 
             self.type_list.controls.append(
                 ft.Container(
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=10,
                     padding=10,
                     content=ft.Column(
@@ -2162,7 +2162,7 @@ class CacheView(ft.Column):
                 self.shard_detail_key_list.controls.append(
                     ft.Container(
                         padding=6,
-                        border=ft.border.all(
+                        border=ft.Border.all(
                             1,
                             theme.BLUE_300 if selected else theme.OUTLINE_VARIANT,
                         ),
@@ -2546,7 +2546,7 @@ class CacheView(ft.Column):
             self.shard_history_list.controls.append(
                 ft.Container(
                     padding=6,
-                    border=ft.border.all(
+                    border=ft.Border.all(
                         1,
                         theme.BLUE_200 if is_selected else theme.OUTLINE_VARIANT,
                     ),
@@ -2753,7 +2753,7 @@ class CacheView(ft.Column):
                     shard_controls.append(
                         ft.Container(
                             padding=6,
-                            border=ft.border.all(
+                            border=ft.Border.all(
                                 1,
                                 theme.BLUE_300 if selected else theme.OUTLINE_VARIANT,
                             ),
@@ -2782,10 +2782,10 @@ class CacheView(ft.Column):
             shard_list_container = ft.Container(
                 height=shard_panel_height,
                 padding=4,
-                border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                 border_radius=8,
                 bgcolor=theme.WHITE,
-                alignment=ft.alignment.top_left,
+                alignment=ft.alignment.Alignment(-1,-1),
                 content=ft.ListView(
                     expand=True,
                     spacing=4,
@@ -2797,7 +2797,7 @@ class CacheView(ft.Column):
             self.query_type_shard_col.controls.append(
                 ft.Container(
                     padding=8,
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
                     bgcolor=theme.WHITE,
                     content=ft.Column(
@@ -2831,7 +2831,7 @@ class CacheView(ft.Column):
                                 ),
                                 controls=[
                                     ft.Container(
-                                        alignment=ft.alignment.top_left,
+                                        alignment=ft.alignment.Alignment(-1,-1),
                                         content=shard_list_container,
                                     )
                                 ],
@@ -2973,7 +2973,7 @@ class CacheView(ft.Column):
             self.query_history_list.controls.append(
                 ft.Container(
                     padding=6,
-                    border=ft.border.all(
+                    border=ft.Border.all(
                         1,
                         theme.BLUE_200 if is_selected else theme.OUTLINE_VARIANT,
                     ),
@@ -3234,7 +3234,7 @@ class CacheView(ft.Column):
                             ft.Container(
                                 expand=True,
                                 padding=8,
-                                border=ft.border.all(
+                                border=ft.Border.all(
                                     1,
                                     theme.BLUE_200
                                     if selected
