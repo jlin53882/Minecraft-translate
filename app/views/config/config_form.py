@@ -8,7 +8,6 @@ def build_card(view, title, controls_list):
     """建立一個包含標題與控制項的卡片 UI 元件。"""
     return ft.Card(
         elevation=2,
-        surface_tint_color=ft.Colors.WHITE,
         content=ft.Container(
             padding=15,
             content=ft.Column(
@@ -35,7 +34,7 @@ def build_header(view):
 def build_footer(view):
     """建立設定頁面的底部橫幅（含提示文字與儲存按鈕）。"""
     return ft.Container(
-        padding=ft.Padding(horizontal=20, vertical=10),
+        padding=ft.Padding(left=20, right=20, top=10, bottom=10),
         bgcolor=ft.Colors.WHITE,
         border=ft.Border(top=ft.BorderSide(1, ft.Colors.GREY_300)),
         shadow=ft.BoxShadow(spread_radius=1, blur_radius=5, color=ft.Colors.BLACK_12, offset=ft.Offset(0, -1)),

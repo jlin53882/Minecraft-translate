@@ -76,8 +76,10 @@ class CacheView(ft.Column):
         參數：
             page: Flet Page 物件
         """
-        super().__init__(expand=True, spacing=10)
+        # Initialize attributes BEFORE super().__init__() to avoid _notify errors
+        self._all_logs: list[str] = []
         self._page = page
+        super().__init__(expand=True, spacing=10)
 
         # -------------------- 效能優化：髒標記機制 --------------------
         # PR5-7 整合：減少 update() 呼叫次數，避免 UI 卡顿
@@ -985,7 +987,7 @@ class CacheView(ft.Column):
             content=ft.Column(
                 [
                     ft.Container(
-                        padding=ft.Padding(horizontal=10, vertical=8),
+                        padding=ft.Padding(left=10, right=10, top=8, bottom=8),
                         border=ft.Border(
                             bottom=ft.border.BorderSide(1, theme.OUTLINE_VARIANT)
                         ),
@@ -1521,6 +1523,12 @@ class CacheView(ft.Column):
 
     def _notify(self, message: str, level: str = "info"):
         """根據等級顯示訊息並記錄日誌"""
+        # Handle boolean level (when called as property setter callback in Flet 0.85+)
+        if isinstance(level, bool):
+            level = "info"
+        # Skip if not fully initialized (during __init__)
+        if not hasattr(self, '_all_logs') or not hasattr(self, 'log_list'):
+            return
         lv = (level or "info").lower()
         if lv == "error":
             self._append_log(f"[ERROR/錯誤] {message}")
@@ -1683,7 +1691,7 @@ class CacheView(ft.Column):
                 usage_text_color = theme.BLUE_700
 
             status_chip = ft.Container(
-                padding=ft.Padding(horizontal=8, vertical=2),
+                padding=ft.Padding(left=8, right=8, top=2, bottom=2),
                 border_radius=20,
                 bgcolor=theme.AMBER_100 if dirty else theme.GREEN_100,
                 content=ft.Text("有變更" if dirty else "無變更", size=11),

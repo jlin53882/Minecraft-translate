@@ -247,7 +247,6 @@ class RulesView(ft.Column):
         """工具與操作區 (搜尋/排序/按鈕)"""
         return ft.Card(
             elevation=2,
-            surface_tint_color=theme.WHITE,
             content=ft.Container(
                 padding=15,
                 content=ft.Row(
@@ -298,7 +297,6 @@ class RulesView(ft.Column):
         return ft.Card(
             expand=True,
             elevation=2,
-            surface_tint_color=theme.WHITE,
             content=ft.Container(
                 padding=10,
                 content=ft.ListView(
@@ -310,7 +308,7 @@ class RulesView(ft.Column):
     def _build_footer(self):
         """底部狀態與分頁列"""
         return ft.Container(
-            padding=ft.Padding(horizontal=10, vertical=5),
+            padding=ft.Padding(left=10, right=10, top=5, bottom=5),
             content=ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 controls=[
