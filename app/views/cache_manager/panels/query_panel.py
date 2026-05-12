@@ -11,7 +11,7 @@ class CacheQueryPanel(ft.Container):
     """快取查詢面板"""
 
     def __init__(self, page: ft.Page, cache_manager):
-        self.page = page
+        self._page = page
         self.cache_manager = cache_manager
         self.search_field = ft.TextField(
             hint_text="輸入關鍵字搜尋...",

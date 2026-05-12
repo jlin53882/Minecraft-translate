@@ -11,7 +11,7 @@ class CacheOverviewPanel(ft.Container):
     """快取總覵面板"""
 
     def __init__(self, page: ft.Page, cache_manager):
-        self.page = page
+        self._page = page
         self.cache_manager = cache_manager
         super().__init__(expand=True, content=self._build_content())
 
