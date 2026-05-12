@@ -362,7 +362,7 @@ class CacheShardPanel(ft.Container):
             self.state.dst_loaded_sig = None
         self.state.selected_key = key
         self._render_shard_detail_keys()
-        self.page.update()
+        self._page.update()
 
     def _on_shard_key_filter_change(self, e):
         """key 篩選條件變更"""
