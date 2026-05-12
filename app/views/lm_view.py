@@ -35,7 +35,7 @@ class LMView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=16)
-        self._page = page
+        self.page = page
         self.file_picker = file_picker
 
         self.session: TaskSession | None = None

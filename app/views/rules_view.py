@@ -36,7 +36,7 @@ class RulesView(ft.Column):
             page: Flet Page 物件
         """
         super().__init__(expand=True, spacing=15)
-        self._page = page
+        self.page = page
 
         # --- 分頁和數據狀態 ---
         self._state = RulesTableState()

@@ -16,7 +16,7 @@ class CacheQueryView(ft.Container):
             page: Flet Page
             cache_view: 主 CacheView 實例（用於回調）
         """
-        self._page = page
+        self.page = page
         self.cache_view = cache_view
 
         # 狀態

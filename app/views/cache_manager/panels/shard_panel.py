@@ -11,7 +11,7 @@ class CacheShardPanel(ft.Container):
     """快取分片面板"""
 
     def __init__(self, page: ft.Page, cache_manager):
-        self._page = page
+        self.page = page
         self.cache_manager = cache_manager
         super().__init__(expand=True, content=self._build_content())
 

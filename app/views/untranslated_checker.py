@@ -55,7 +55,7 @@ class UntranslatedChecker(ft.Container):
         super().__init__(content=self._build_content())
 
         # --- 再設定實例屬性 ---
-        self._page = page
+        self.page = page
         self.file_picker = file_picker
         self.task_runner = task_runner
 
