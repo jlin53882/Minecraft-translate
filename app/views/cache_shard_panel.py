@@ -557,7 +557,7 @@ class CacheShardPanel(ft.Container):
             return
 
         try:
-            self.page.set_clipboard(str(self.shard_dst_field.value or ""))
+            self._page.set_clipboard(str(self.shard_dst_field.value or ""))
             self._show_snack_bar("已複製 DST 內容", theme.BLUE_400)
         except Exception:
             self._show_snack_bar("複製失敗", theme.RED_400)
@@ -571,6 +571,6 @@ class CacheShardPanel(ft.Container):
         """顯示 SnackBar"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
+        self._page.overlay.append(snack)
         snack.open = True
-        self.page.update()
+        self._page.update()
