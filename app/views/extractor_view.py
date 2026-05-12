@@ -363,3 +363,6 @@ class ExtractorView(ft.Column):
         self._close_dialog_overlay(dialog)
         self.start_extraction(mode)
 
+    @property
+    def page(self):
+        return self._page

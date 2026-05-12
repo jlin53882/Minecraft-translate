@@ -620,3 +620,7 @@ class MergeView(ft.Column):
                 self.page.update()
             except Exception:
                 pass
+
+    @property
+    def page(self):
+        return self._page

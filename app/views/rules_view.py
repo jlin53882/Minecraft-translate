@@ -747,3 +747,7 @@ class RulesView(ft.Column):
             self._show_snack_bar(
                 f"🗑 已刪除：{src_preview} → {dst_preview}", theme.RED_400
             )
+
+    @property
+    def page(self):
+        return self._page

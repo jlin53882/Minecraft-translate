@@ -357,3 +357,7 @@ class QCView(ft.Column):
             args,
             on_complete=lambda: self.set_controls_disabled(False),
         )
+
+    @property
+    def page(self):
+        return self._page

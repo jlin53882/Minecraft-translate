@@ -3547,3 +3547,7 @@ class CacheView(ft.Column):
         self._render_query_results()
         self._render_query_detail()
         self.update()
+
+    @property
+    def page(self):
+        return self._page

@@ -237,7 +237,7 @@ def test_empty_state():
         message="Try another keyword"
     )
     assert isinstance(es, ft.Container)
-    assert es.alignment == ft.alignment.center
+    assert es.alignment == ft.alignment.Alignment(0,0)
 
 
 def test_empty_state_with_button():

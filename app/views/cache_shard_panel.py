@@ -574,3 +574,7 @@ class CacheShardPanel(ft.Container):
         self._page.overlay.append(snack)
         snack.open = True
         self._page.update()
+
+    @property
+    def page(self):
+        return self._page

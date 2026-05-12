@@ -643,3 +643,7 @@ class ConfigView(ft.Column):
             save_config_json_fn=save_config_json,
             validate_api_keys_from_ui_fn=validate_api_keys_from_ui,
         )
+
+    @property
+    def page(self):
+        return self._page

@@ -206,3 +206,7 @@ class BundlerView(ft.Column):
                 self._page.update()
         finally:
             self.set_controls_disabled(False)
+
+    @property
+    def page(self):
+        return self._page

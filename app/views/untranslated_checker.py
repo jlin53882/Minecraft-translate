@@ -174,3 +174,7 @@ class UntranslatedChecker(ft.Container):
             (en_dir, tw_dir, out_dir),
             controls_to_disable=controls,
         )
+
+    @property
+    def page(self):
+        return self._page

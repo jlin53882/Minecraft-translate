@@ -82,3 +82,7 @@ class QCBase:
                 on_complete()
 
         threading.Thread(target=run, daemon=True).start()
+
+    @property
+    def page(self):
+        return self._page

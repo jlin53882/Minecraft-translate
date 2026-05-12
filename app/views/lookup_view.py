@@ -190,3 +190,7 @@ class LookupView(ft.Column):
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
+
+    @property
+    def page(self):
+        return self._page
