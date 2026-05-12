@@ -149,7 +149,7 @@ class BundlerView(ft.Column):
 
             if path:
                 target_textfield.value = path
-                self.page.update()
+                self._page.update()
             else:
                 self._show_snack_bar("您已取消選擇", theme.BLUE_GREY_500)
 
@@ -166,7 +166,7 @@ class BundlerView(ft.Column):
             self.start_button,
         ]:
             ctrl.disabled = disabled
-        self.page.update()
+        self._page.update()
 
     def start_bundling_clicked(self, e):
         """點擊開始打包按鈕"""
@@ -183,7 +183,7 @@ class BundlerView(ft.Column):
         self.progress_bar.visible = True
         self.log_view.controls.clear()
         self.log_view.controls.append(ft.Text("[系統] 開始執行打包..."))
-        self.page.update()
+        self._page.update()
 
         thread = threading.Thread(
             target=self.bundling_worker, args=(root_dir, output_zip)
@@ -203,6 +203,6 @@ class BundlerView(ft.Column):
                 if update.get("error"):
                     self.progress_bar.color = theme.RED
                 self.log_view.scroll_to(offset=-1, duration=100)
-                self.page.update()
+                self._page.update()
         finally:
             self.set_controls_disabled(False)
