@@ -64,12 +64,12 @@ class QCBase:
                         self.progress_bar.color = theme.RED
 
                     self.log_view.scroll_to(offset=-1, duration=100)
-                    self.page.update()
+                    self._page.update()
             finally:
                 # 重置 ProgressBar
                 self.progress_bar.value = 0
                 self.progress_bar.color = None
-                self.page.update()
+                self._page.update()
 
                 # 恢復控制項
                 if controls_to_disable:
