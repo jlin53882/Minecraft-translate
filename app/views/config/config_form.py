@@ -8,7 +8,6 @@ def build_card(view, title, controls_list):
     """建立一個包含標題與控制項的卡片 UI 元件。"""
     return ft.Card(
         elevation=2,
-        surface_tint_color=ft.Colors.WHITE,
         content=ft.Container(
             padding=15,
             content=ft.Column(
@@ -25,7 +24,7 @@ def build_card(view, title, controls_list):
 def build_header(view):
     """建立設定頁面的頂部標題列（含圖示與標題文字）。"""
     return ft.Container(
-        padding=ft.padding.only(left=5, bottom=10),
+        padding=ft.Padding.only(left=5, bottom=10),
         content=ft.Row([
             ft.Icon(ft.Icons.SETTINGS_APPLICATIONS, size=28, color=ft.Colors.BLUE_GREY_800),
             ft.Text('全域設定 (Global Settings)', theme_style=ft.TextThemeStyle.HEADLINE_MEDIUM, color=ft.Colors.BLUE_GREY_900),
@@ -35,10 +34,10 @@ def build_header(view):
 def build_footer(view):
     """建立設定頁面的底部橫幅（含提示文字與儲存按鈕）。"""
     return ft.Container(
-        padding=ft.padding.symmetric(horizontal=20, vertical=10),
+        padding=ft.Padding.symmetric(horizontal=20, vertical=10),
         bgcolor=ft.Colors.WHITE,
-        border=ft.border.only(top=ft.BorderSide(1, ft.Colors.GREY_300)),
-        shadow=ft.BoxShadow(spread_radius=1, blur_radius=5, color=ft.Colors.BLACK12, offset=ft.Offset(0, -1)),
+        border=ft.Border.only(top=ft.BorderSide(1, ft.Colors.GREY_300)),
+        shadow=ft.BoxShadow(spread_radius=1, blur_radius=5, color=ft.Colors.BLACK_12, offset=ft.Offset(0, -1)),
         content=ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             controls=[

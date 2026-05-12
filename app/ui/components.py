@@ -20,7 +20,7 @@ from app.ui import theme
 
 CARD_PADDING: int = 16
 CARD_RADIUS: int = 10
-CARD_BORDER_COLOR = ft.Colors.BLACK12
+CARD_BORDER_COLOR = ft.Colors.BLACK_12
 CARD_BG_COLOR = ft.Colors.WHITE
 DIVIDER_COLOR = ft.Colors.GREY_200
 
@@ -140,7 +140,7 @@ def styled_card(
         padding=CARD_PADDING,
         border_radius=CARD_RADIUS,
         bgcolor=CARD_BG_COLOR,
-        border=ft.border.all(1, CARD_BORDER_COLOR),
+        border=ft.Border.all(1, CARD_BORDER_COLOR),
         content=ft.Column(
             card_content,
             spacing=12,
@@ -361,7 +361,7 @@ def loading_state(
     spinner = ft.CupertinoActivityIndicator() if show_spinner else None
 
     return ft.Container(
-        alignment=ft.alignment.center,
+        alignment=ft.alignment.Alignment(0, 0),
         padding=40,
         content=ft.Column(
             [
@@ -384,7 +384,7 @@ def empty_state(
 ) -> ft.Container:
     """統一的空資料狀態顯示。"""
     return ft.Container(
-        alignment=ft.alignment.center,
+        alignment=ft.alignment.Alignment(0, 0),
         padding=40,
         content=ft.Column(
             [
@@ -407,7 +407,7 @@ def error_state(
 ) -> ft.Container:
     """統一的錯誤狀態顯示。"""
     return ft.Container(
-        alignment=ft.alignment.center,
+        alignment=ft.alignment.Alignment(0, 0),
         padding=40,
         content=ft.Column(
             [

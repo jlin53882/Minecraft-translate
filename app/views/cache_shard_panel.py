@@ -42,7 +42,7 @@ class CacheShardPanel(ft.Container):
         super().__init__(content=self._build_content())
 
         # 再設定實例屬性
-        self.page = page
+        self._page = page
         self.state = state
         self.last_overview_data = last_overview_data
 
@@ -141,10 +141,10 @@ class CacheShardPanel(ft.Container):
                 ft.Container(
                     expand=True,
                     padding=8,
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
                     bgcolor=theme.WHITE,
-                    alignment=ft.alignment.top_left,
+                    alignment=ft.alignment.Alignment(-1, -1),
                     content=self.query_type_shard_col,
                 ),
                 ft.Divider(height=20),
@@ -176,10 +176,10 @@ class CacheShardPanel(ft.Container):
                 ft.Container(
                     expand=True,
                     padding=6,
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
                     bgcolor=theme.WHITE,
-                    alignment=ft.alignment.top_left,
+                    alignment=ft.alignment.Alignment(-1, -1),
                     content=self.shard_src_field,
                 ),
                 ft.Divider(height=20),
@@ -188,10 +188,10 @@ class CacheShardPanel(ft.Container):
                 ft.Container(
                     expand=True,
                     padding=6,
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
                     bgcolor=theme.WHITE,
-                    alignment=ft.alignment.top_left,
+                    alignment=ft.alignment.Alignment(-1, -1),
                     content=self.shard_dst_field,
                 ),
                 ft.Row(
@@ -255,7 +255,7 @@ class CacheShardPanel(ft.Container):
             self.query_type_shard_col.controls.append(
                 ft.Container(
                     padding=8,
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
                     bgcolor=theme.WHITE,
                     content=ft.Column(
@@ -324,7 +324,7 @@ class CacheShardPanel(ft.Container):
                 self.shard_detail_key_list.controls.append(
                     ft.Container(
                         padding=6,
-                        border=ft.border.all(
+                        border=ft.Border.all(
                             1,
                             theme.BLUE_300 if selected else theme.OUTLINE_VARIANT,
                         ),
@@ -362,13 +362,13 @@ class CacheShardPanel(ft.Container):
             self.state.dst_loaded_sig = None
         self.state.selected_key = key
         self._render_shard_detail_keys()
-        self.page.update()
+        self._page.update()
 
     def _on_shard_key_filter_change(self, e):
         """key 篩選條件變更"""
         self.state.page = 1
         self._render_shard_detail_keys()
-        self.page.update()
+        self._page.update()
 
     # ==================== SRC/DST 面板 ====================
     def _load_shard_entry(self, cache_type: str, filename: str, key: str):
@@ -468,37 +468,37 @@ class CacheShardPanel(ft.Container):
         """切換到預覽模式"""
         self.state.src_mode = "preview"
         self._render_shard_src_panel()
-        self.page.update()
+        self._page.update()
 
     def _on_shard_src_raw_mode(self, e):
         """切換到原始碼模式"""
         self.state.src_mode = "raw"
         self._render_shard_src_panel()
-        self.page.update()
+        self._page.update()
 
     def _on_shard_page_first(self, e):
         """跳到第一頁"""
         self.state.page = 1
         self._render_shard_detail_keys()
-        self.page.update()
+        self._page.update()
 
     def _on_shard_page_prev(self, e):
         """上一頁"""
         self.state.page -= 1
         self._render_shard_detail_keys()
-        self.page.update()
+        self._page.update()
 
     def _on_shard_page_next(self, e):
         """下一頁"""
         self.state.page += 1
         self._render_shard_detail_keys()
-        self.page.update()
+        self._page.update()
 
     def _on_shard_page_last(self, e):
         """跳到最後一頁"""
         self.state.page = self.state.total_pages
         self._render_shard_detail_keys()
-        self.page.update()
+        self._page.update()
 
     # ==================== 編輯 ====================
     def _on_shard_dst_apply(self, e):
@@ -536,7 +536,7 @@ class CacheShardPanel(ft.Container):
 
             self.state.dst_original = new_dst
             self._show_snack_bar("已套用 DST 並寫入快取", theme.BLUE_400)
-            self.page.update()
+            self._page.update()
         except Exception as ex:
             self._show_snack_bar(f"套用失敗：{ex}", theme.RED_400)
 
@@ -548,7 +548,7 @@ class CacheShardPanel(ft.Container):
 
         self.shard_dst_field.value = str(self.state.dst_original or "")
         self._show_snack_bar("已還原到原始值", theme.BLUE_400)
-        self.page.update()
+        self._page.update()
 
     def _on_shard_dst_copy(self, e):
         """複製 DST"""
@@ -557,7 +557,7 @@ class CacheShardPanel(ft.Container):
             return
 
         try:
-            self.page.set_clipboard(str(self.shard_dst_field.value or ""))
+            self._page.set_clipboard(str(self.shard_dst_field.value or ""))
             self._show_snack_bar("已複製 DST 內容", theme.BLUE_400)
         except Exception:
             self._show_snack_bar("複製失敗", theme.RED_400)
@@ -571,6 +571,6 @@ class CacheShardPanel(ft.Container):
         """顯示 SnackBar"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
+        self._page.overlay.append(snack)
         snack.open = True
-        self.page.update()
+        self._page.update()

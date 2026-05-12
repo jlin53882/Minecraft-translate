@@ -60,7 +60,7 @@ class TranslationView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=16)
-        self.page = page
+        self._page = page
         self.file_picker = file_picker
         self._state = TranslationRunState()
         self._picker_target_field: ft.TextField | None = None
@@ -128,7 +128,7 @@ class TranslationView(ft.Column):
                     expand=True,
                     bgcolor="#1e1e1e",
                     border_radius=8,
-                    border=ft.border.all(1, theme.GREY_800),
+                    border=ft.Border.all(1, theme.GREY_800),
                     padding=10,
                     content=self.log_view,
                 ),
@@ -158,7 +158,7 @@ class TranslationView(ft.Column):
             padding=14,
             border_radius=10,
             bgcolor=theme.WHITE,
-            border=ft.border.all(1, theme.BLACK12),
+            border=ft.Border.all(1, theme.BLACK_12),
             content=ft.Row(
                 [
                     # ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color=theme.BLUE_GREY_700),
@@ -170,8 +170,8 @@ class TranslationView(ft.Column):
 
         self.controls = [header, body, self.summary_card]
 
-        if self.file_picker not in self.page.overlay:
-            self.page.overlay.append(self.file_picker)
+        if self.file_picker not in self._page.overlay:
+            self._page.overlay.append(self.file_picker)
 
     # ------------------------------------------------------------------
     # 樣式 helper（集中到 app.ui.components）
@@ -218,21 +218,16 @@ class TranslationView(ft.Column):
         return build_md_tab(self)
 
     # ------------------------------------------------------------------
-    # directory picker
+    # directory picker (0.85.0+)
     # ------------------------------------------------------------------
     def _pick_directory_into(self, target: ft.TextField):
-        """開啟目錄選擇器並設定目標欄位"""
+        """開啟目錄選擇器並設定目標欄位（同步 API）"""
         self._picker_target_field = target
-        self.file_picker.on_result = self._on_dir_picked
-        self.file_picker.get_directory_path()
-
-    def _on_dir_picked(self, e: ft.FilePickerResultEvent):
-        """目錄選擇後更新目標欄位"""
-        if not e.path:
-            return
-        if self._picker_target_field is not None:
-            self._picker_target_field.value = e.path
-        self.page.update()
+        path = self.file_picker.get_directory_path()
+        if path and self._picker_target_field is not None:
+            self._picker_target_field.value = path
+        if self._page:
+            self._page.update()
 
     # ------------------------------------------------------------------
     # runners
@@ -263,19 +258,19 @@ class TranslationView(ft.Column):
         """更新狀態晶片的文字與顏色"""
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
-        self.page.update()
+        self._page.update()
 
     def _append_log(self, line: str):
         """新增一行日誌到日誌檢視區"""
         self.log_view.controls.append(ft.Text(line, size=13, color=theme.GREY_100))
         if len(self.log_view.controls) > 400:
             self.log_view.controls = self.log_view.controls[-300:]
-        self.page.update()
+        self._page.update()
 
     def _clear_logs(self):
         """清除日誌檢視區的所有內容"""
         self.log_view.controls.clear()
-        self.page.update()
+        self._page.update()
 
     # ------------------------------------------------------------------
     # reset actions
@@ -292,7 +287,7 @@ class TranslationView(ft.Column):
         self._set_status("尚未開始", theme.GREY_200)
         self.progress.value = 0
         self._append_log("[UI] 已重置：FTB Quests 輸入已清空")
-        self.page.update()
+        self._page.update()
 
     def _reset_kjs_inputs(self):
         """重置 KubeJS 翻譯的所有輸入欄位"""
@@ -305,7 +300,7 @@ class TranslationView(ft.Column):
         self._set_status("尚未開始", theme.GREY_200)
         self.progress.value = 0
         self._append_log("[UI] 已重置：KubeJS 輸入已清空")
-        self.page.update()
+        self._page.update()
 
     def _reset_md_inputs(self):
         """重置 Markdown 翻譯的所有輸入欄位"""
@@ -319,12 +314,12 @@ class TranslationView(ft.Column):
         self._set_status("尚未開始", theme.GREY_200)
         self.progress.value = 0
         self._append_log("[UI] 已重置：Markdown 輸入已清空")
-        self.page.update()
+        self._page.update()
 
     def _show_snack(self, message: str, color: str = theme.RED_600):
         """在頁面顯示 Snack Bar 提示訊息"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
+        self._page.overlay.append(snack)
         snack.open = True
-        self.page.update()
+        self._page.update()

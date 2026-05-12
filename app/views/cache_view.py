@@ -76,8 +76,11 @@ class CacheView(ft.Column):
         參數：
             page: Flet Page 物件
         """
+        # 必須先初始化属性，再調用父類別__init__（避免觸發回調時找不到屬性）
+        self._all_logs: list[str] = []
+        self.log_list = ft.ListView(expand=True, spacing=2, auto_scroll=True)
         super().__init__(expand=True, spacing=10)
-        self.page = page
+        self._page = page
 
         # -------------------- 效能優化：髒標記機制 --------------------
         # PR5-7 整合：減少 update() 呼叫次數，避免 UI 卡顿
@@ -92,7 +95,6 @@ class CacheView(ft.Column):
         # -------------------- Global state --------------------
         self.ui_busy = False
         self.busy_reason = ""
-        self._all_logs: list[str] = []
         self._only_error = True  # UI 預設只看 WARN+
         self._last_overview_data: dict = {}
 
@@ -268,7 +270,7 @@ class CacheView(ft.Column):
             width=420,
             height=480,
             bgcolor=theme.WHITE,
-            border=ft.border.all(2, theme.BLUE_300),
+            border=ft.Border.all(2, theme.BLUE_300),
             border_radius=10,
             shadow=ft.BoxShadow(
                 spread_radius=1,
@@ -285,7 +287,7 @@ class CacheView(ft.Column):
                             ft.Container(
                                 bgcolor=theme.BLUE_50,
                                 padding=10,
-                                border_radius=ft.border_radius.only(
+                                border_radius=ft.BorderRadius.only(
                                     top_left=10, top_right=10
                                 ),
                                 content=ft.Row(
@@ -331,7 +333,7 @@ class CacheView(ft.Column):
                                         ft.Container(
                                             height=200,
                                             padding=6,
-                                            border=ft.border.all(
+                                            border=ft.Border.all(
                                                 1, theme.OUTLINE_VARIANT
                                             ),
                                             border_radius=8,
@@ -413,7 +415,7 @@ class CacheView(ft.Column):
             width=420,
             height=480,
             bgcolor=theme.WHITE,
-            border=ft.border.all(2, theme.BLUE_300),
+            border=ft.Border.all(2, theme.BLUE_300),
             border_radius=10,
             shadow=ft.BoxShadow(
                 spread_radius=1,
@@ -429,7 +431,7 @@ class CacheView(ft.Column):
                             ft.Container(
                                 bgcolor=theme.BLUE_50,
                                 padding=10,
-                                border_radius=ft.border_radius.only(
+                                border_radius=ft.BorderRadius.only(
                                     top_left=10, top_right=10
                                 ),
                                 content=ft.Row(
@@ -474,7 +476,7 @@ class CacheView(ft.Column):
                                         ft.Container(
                                             height=200,
                                             padding=6,
-                                            border=ft.border.all(
+                                            border=ft.Border.all(
                                                 1, theme.OUTLINE_VARIANT
                                             ),
                                             border_radius=8,
@@ -524,9 +526,9 @@ class CacheView(ft.Column):
             title=ft.Text("SRC（可展開）", weight=ft.FontWeight.BOLD),
             controls=[
                 ft.Container(
-                    alignment=ft.alignment.top_left,
+                    alignment=ft.alignment.Alignment(-1, -1),
                     padding=8,
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
                     content=ft.Column(
                         [self.query_detail_src],
@@ -542,9 +544,9 @@ class CacheView(ft.Column):
             title=ft.Text("DST（可展開，可編輯）", weight=ft.FontWeight.BOLD),
             controls=[
                 ft.Container(
-                    alignment=ft.alignment.top_left,
+                    alignment=ft.alignment.Alignment(-1, -1),
                     padding=8,
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
                     content=ft.Column(
                         [self.query_detail_dst],
@@ -592,10 +594,10 @@ class CacheView(ft.Column):
         self.query_search_card = ft.Container(
             expand=True,
             padding=14,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=10,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.top_left,
+            alignment=ft.alignment.Alignment(-1, -1),
             content=ft.Column(
                 [
                     ft.Text("查詢區塊（Explorer）", size=16, weight=ft.FontWeight.BOLD),
@@ -634,7 +636,7 @@ class CacheView(ft.Column):
                                             ft.Container(
                                                 expand=True,
                                                 padding=8,
-                                                border=ft.border.all(
+                                                border=ft.Border.all(
                                                     1, theme.OUTLINE_VARIANT
                                                 ),
                                                 border_radius=8,
@@ -665,12 +667,12 @@ class CacheView(ft.Column):
                                             ft.Container(
                                                 expand=True,
                                                 padding=8,
-                                                border=ft.border.all(
+                                                border=ft.Border.all(
                                                     1, theme.OUTLINE_VARIANT
                                                 ),
                                                 border_radius=8,
                                                 bgcolor=theme.WHITE,
-                                                alignment=ft.alignment.top_left,
+                                                alignment=ft.alignment.Alignment(-1, -1),
                                                 content=ft.Column(
                                                     [
                                                         self.query_detail_key,
@@ -696,7 +698,7 @@ class CacheView(ft.Column):
                         ),
                     ),
                     ft.Container(
-                        padding=ft.padding.only(top=4),
+                        padding=ft.Padding.only(top=4),
                         content=ft.Row(
                             [
                                 self.btn_page_first,
@@ -739,10 +741,10 @@ class CacheView(ft.Column):
         self.query_type_shard_list_container = ft.Container(
             expand=True,
             padding=8,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.top_left,
+            alignment=ft.alignment.Alignment(-1, -1),
             content=self.query_type_shard_col,
         )
 
@@ -794,10 +796,10 @@ class CacheView(ft.Column):
         self.shard_detail_key_list_container = ft.Container(
             expand=True,
             padding=6,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.top_left,
+            alignment=ft.alignment.Alignment(-1, -1),
             content=self.shard_detail_key_list,
         )
 
@@ -822,10 +824,10 @@ class CacheView(ft.Column):
         self.shard_src_container = ft.Container(
             expand=True,
             padding=6,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.top_left,
+            alignment=ft.alignment.Alignment(-1, -1),
             content=self.shard_src_field,
         )
 
@@ -862,10 +864,10 @@ class CacheView(ft.Column):
         self.shard_dst_container = ft.Container(
             expand=True,
             padding=6,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.top_left,
+            alignment=ft.alignment.Alignment(-1, -1),
             content=self.shard_dst_field,
         )
 
@@ -902,7 +904,7 @@ class CacheView(ft.Column):
         self.shard_key_column = ft.Container(
             width=self._dynamic_shard_key_panel_width(),
             padding=10,
-            border=ft.border.only(right=ft.border.BorderSide(1, theme.OUTLINE_VARIANT)),
+            border=ft.Border.only(right=ft.BorderSide(1, theme.OUTLINE_VARIANT)),
             content=ft.Column(
                 [
                     ft.Text("C1 KeyListCard", weight=ft.FontWeight.BOLD),
@@ -979,15 +981,15 @@ class CacheView(ft.Column):
             expand=True,
             visible=False,
             padding=0,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=10,
             bgcolor=theme.WHITE,
             content=ft.Column(
                 [
-                    ft.Container(
-                        padding=ft.padding.symmetric(horizontal=10, vertical=8),
-                        border=ft.border.only(
-                            bottom=ft.border.BorderSide(1, theme.OUTLINE_VARIANT)
+ft.Container(
+                        padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+                        border=ft.Border.only(
+                            bottom=ft.BorderSide(1, theme.OUTLINE_VARIANT)
                         ),
                         content=ft.Row(
                             [
@@ -1030,7 +1032,7 @@ class CacheView(ft.Column):
         self.query_type_shard_card = ft.Container(
             expand=True,
             padding=0,
-            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=10,
             bgcolor=theme.WHITE,
             content=ft.Column(
@@ -1064,7 +1066,7 @@ class CacheView(ft.Column):
                         expand=True,
                         controls=[
                             ft.Container(
-                                padding=ft.padding.only(bottom=6),
+                                padding=ft.Padding.only(bottom=6),
                                 content=ft.Row(
                                     [
                                         ft.Text(
@@ -1154,7 +1156,7 @@ class CacheView(ft.Column):
             self._render_query_results()
             # 防護：確保 page 存在
             if self.page is not None:
-                self.page.on_resized = self._on_page_resized
+                self._page.on_resized = self._on_page_resized
             self._render_query_detail()
             self._refresh_disabled_state()
             # PR5-7: 使用批量刷新優化初始載入
@@ -1501,9 +1503,9 @@ class CacheView(ft.Column):
         # 記錄 snackbar 顯示到日誌
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
+        self._page.overlay.append(snack)
         snack.open = True
-        self.page.update()
+        self._page.update()
 
     def _append_log(self, text: str):
         """新增日誌訊息並根據等級記錄"""
@@ -1521,6 +1523,12 @@ class CacheView(ft.Column):
 
     def _notify(self, message: str, level: str = "info"):
         """根據等級顯示訊息並記錄日誌"""
+        # 確保 level 是字串，在 Flet 0.85 中可能會收到不同類型
+        if not isinstance(level, str):
+            level = "info"
+        # 如果屬性還沒初始化，跳過（避免在 super().__init__ 時出錯）
+        if not hasattr(self, '_only_error'):
+            return
         lv = (level or "info").lower()
         if lv == "error":
             self._append_log(f"[ERROR/錯誤] {message}")
@@ -1574,7 +1582,7 @@ class CacheView(ft.Column):
             expand=True,
             bgcolor=theme.WHITE,
             padding=8,
-            alignment=ft.alignment.top_left,
+            alignment=ft.alignment.Alignment(-1, -1),
             content=self.query_sub_tabs,
         )
 
@@ -1603,7 +1611,7 @@ class CacheView(ft.Column):
         """複製所有日誌到剪貼簿"""
         txt = "\n".join(self._all_logs)
         try:
-            self.page.set_clipboard(txt)
+            self._page.set_clipboard(txt)
             self._show_snack_bar("已複製日誌", theme.BLUE_400)
         except Exception:
             self._show_snack_bar("複製失敗", theme.RED_400)
@@ -1683,7 +1691,7 @@ class CacheView(ft.Column):
                 usage_text_color = theme.BLUE_700
 
             status_chip = ft.Container(
-                padding=ft.padding.symmetric(horizontal=8, vertical=2),
+                padding=ft.Padding.symmetric(horizontal=8, vertical=2),
                 border_radius=20,
                 bgcolor=theme.AMBER_100 if dirty else theme.GREEN_100,
                 content=ft.Text("有變更" if dirty else "無變更", size=11),
@@ -1727,7 +1735,7 @@ class CacheView(ft.Column):
 
             self.type_list.controls.append(
                 ft.Container(
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=10,
                     padding=10,
                     content=ft.Column(
@@ -2162,7 +2170,7 @@ class CacheView(ft.Column):
                 self.shard_detail_key_list.controls.append(
                     ft.Container(
                         padding=6,
-                        border=ft.border.all(
+                        border=ft.Border.all(
                             1,
                             theme.BLUE_300 if selected else theme.OUTLINE_VARIANT,
                         ),
@@ -2198,7 +2206,7 @@ class CacheView(ft.Column):
         self.shard_detail_page = 1
         self._render_shard_detail_keys()
         if self.page:
-            self.page.update()
+            self._page.update()
 
     def _set_shard_workspace_visible(self, visible: bool):
         """顯示或隱藏分片工作區面板"""
@@ -2210,7 +2218,7 @@ class CacheView(ft.Column):
         # 防護：確保 page 存在且已完全初始化
         if self.page is not None and hasattr(self, 'page'):
             try:
-                self.page.update()
+                self._page.update()
             except Exception:
                 pass
 
@@ -2418,7 +2426,7 @@ class CacheView(ft.Column):
             self._render_shard_dst_panel()
             self._notify("已套用 C3 DST 並寫入快取", "info")
             if self.page:
-                self.page.update()
+                self._page.update()
         except Exception as ex:
             self._notify(f"套用 DST 失敗：{ex}", "error")
 
@@ -2432,7 +2440,7 @@ class CacheView(ft.Column):
         self._show_snack_bar("已還原到原始值", theme.BLUE_400)
         self._refresh_disabled_state()
         if self.page:
-            self.page.update()
+            self._page.update()
 
     def _on_shard_dst_copy(self, e):
         """複製目標內容到剪貼簿"""
@@ -2441,7 +2449,7 @@ class CacheView(ft.Column):
             return
 
         try:
-            self.page.set_clipboard(str(self.shard_dst_field.value or ""))
+            self._page.set_clipboard(str(self.shard_dst_field.value or ""))
             self._notify("已複製 C3 DST 內容", "info")
         except Exception:
             self._notify("複製失敗", "error")
@@ -2473,7 +2481,7 @@ class CacheView(ft.Column):
             "已載入最新歷史紀錄到 DST（尚未寫入快取，請點「套用 DST」儲存）", "info"
         )
         if self.page:
-            self.page.update()
+            self._page.update()
 
     def _on_select_shard_history_event(self, event: dict):
         """選擇歷史事件"""
@@ -2546,7 +2554,7 @@ class CacheView(ft.Column):
             self.shard_history_list.controls.append(
                 ft.Container(
                     padding=6,
-                    border=ft.border.all(
+                    border=ft.Border.all(
                         1,
                         theme.BLUE_200 if is_selected else theme.OUTLINE_VARIANT,
                     ),
@@ -2650,7 +2658,7 @@ class CacheView(ft.Column):
             self._render_shard_history()
             self._notify("已套用選取舊值並寫入快取", "info")
             if self.page:
-                self.page.update()
+                self._page.update()
         except Exception as ex:
             self._notify(f"套用舊值失敗：{ex}", "error")
 
@@ -2753,7 +2761,7 @@ class CacheView(ft.Column):
                     shard_controls.append(
                         ft.Container(
                             padding=6,
-                            border=ft.border.all(
+                            border=ft.Border.all(
                                 1,
                                 theme.BLUE_300 if selected else theme.OUTLINE_VARIANT,
                             ),
@@ -2782,10 +2790,10 @@ class CacheView(ft.Column):
             shard_list_container = ft.Container(
                 height=shard_panel_height,
                 padding=4,
-                border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                 border_radius=8,
                 bgcolor=theme.WHITE,
-                alignment=ft.alignment.top_left,
+                alignment=ft.alignment.Alignment(-1, -1),
                 content=ft.ListView(
                     expand=True,
                     spacing=4,
@@ -2797,7 +2805,7 @@ class CacheView(ft.Column):
             self.query_type_shard_col.controls.append(
                 ft.Container(
                     padding=8,
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
                     bgcolor=theme.WHITE,
                     content=ft.Column(
@@ -2831,7 +2839,7 @@ class CacheView(ft.Column):
                                 ),
                                 controls=[
                                     ft.Container(
-                                        alignment=ft.alignment.top_left,
+                                        alignment=ft.alignment.Alignment(-1, -1),
                                         content=shard_list_container,
                                     )
                                 ],
@@ -2973,7 +2981,7 @@ class CacheView(ft.Column):
             self.query_history_list.controls.append(
                 ft.Container(
                     padding=6,
-                    border=ft.border.all(
+                    border=ft.Border.all(
                         1,
                         theme.BLUE_200 if is_selected else theme.OUTLINE_VARIANT,
                     ),
@@ -3033,14 +3041,14 @@ class CacheView(ft.Column):
             f"歷史紀錄視窗已打開（{source_text}，可拖曳標題列移動）", theme.BLUE_400
         )
         if self.page:
-            self.page.update()
+            self._page.update()
 
     def _on_close_history_window(self, e):
         """關閉歷史紀錄浮動視窗"""
         self.query_history_window.visible = False
         self.history_window_source = None
         if self.page:
-            self.page.update()
+            self._page.update()
 
     def _on_query_history_window_drag(self, e: ft.DragUpdateEvent):
         """拖曳歷史紀錄視窗"""
@@ -3234,7 +3242,7 @@ class CacheView(ft.Column):
                             ft.Container(
                                 expand=True,
                                 padding=8,
-                                border=ft.border.all(
+                                border=ft.Border.all(
                                     1,
                                     theme.BLUE_200
                                     if selected
@@ -3387,7 +3395,7 @@ class CacheView(ft.Column):
             self._render_query_detail()
             self._notify("已套用並寫入快取", "info")
             if self.page:
-                self.page.update()
+                self._page.update()
         except Exception as ex:
             self._notify(f"套用失敗：{ex}", "error")
 
@@ -3400,7 +3408,7 @@ class CacheView(ft.Column):
         self.query_detail_dst.value = str(self.query_original_dst or "")
         self._show_snack_bar("已還原到原始值", theme.BLUE_400)
         if self.page:
-            self.page.update()
+            self._page.update()
 
     def _on_restore_latest_query(self, e):
         """還原最新歷史紀錄（查詢區，不立即寫入快取）"""

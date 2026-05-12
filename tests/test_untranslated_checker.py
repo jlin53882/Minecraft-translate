@@ -79,7 +79,7 @@ def test_untranslated_checker_start_button_text():
 
     checker = UntranslatedChecker(page, file_picker, task_runner)
 
-    assert checker.start_button.text == "開始檢查"
+    assert checker.start_button.content == "開始檢查"
 
 
 def test_untranslated_checker_registers_file_picker():

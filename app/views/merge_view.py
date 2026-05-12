@@ -62,7 +62,7 @@ class MergeView(ft.Column):
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker) -> None:
         """初始化 MergeView。"""
         super().__init__(expand=True, spacing=16, scroll=ft.ScrollMode.AUTO)
-        self.page = page
+        self._page = page
         self.file_picker = file_picker
 
         self.session = TaskSession(max_logs=2000)
@@ -337,7 +337,7 @@ class MergeView(ft.Column):
                 content=ft.Container(
                     height=280,
                     bgcolor="#2b2f36",
-                    border=ft.border.all(1, "#4b5563"),
+                    border=ft.Border.all(1, "#4b5563"),
                     border_radius=8,
                     padding=10,
                     clip_behavior=ft.ClipBehavior.HARD_EDGE,
@@ -347,23 +347,20 @@ class MergeView(ft.Column):
         ]
 
     def pick_zips(self, e: ft.ControlEvent) -> None:
-        """開啟 ZIP 檔案選擇對話框。"""
-        self.file_picker.on_result = self._on_zip_picked
-        self.file_picker.pick_files(
+        """開啟 ZIP 檔案選擇對話框（0.85.0 同步 API）"""
+        files = self.file_picker.pick_files(
             dialog_title="選擇 ZIP 檔案",
             allow_multiple=True,
             allowed_extensions=["zip"],
         )
-
-    def _on_zip_picked(self, e: ft.FilePickerResultEvent) -> None:
-        """處理 ZIP 檔案選擇結果。"""
-        if not e.files:
+        if not files:
             return
-        for f in e.files:
-            if f.path and f.path not in self.selected_zips:
-                self.selected_zips.append(f.path)
+        for f in files:
+            path = getattr(f, 'path', None)
+            if path and path not in self.selected_zips:
+                self.selected_zips.append(path)
         self._refresh_zip_list()
-        self.page.update()
+        self._page.update()
 
     def _refresh_zip_list(self) -> None:
         """重新整理 ZIP 檔案清單顯示。"""
@@ -389,18 +386,14 @@ class MergeView(ft.Column):
         if path in self.selected_zips:
             self.selected_zips.remove(path)
             self._refresh_zip_list()
-            self.page.update()
+            self._page.update()
 
-    def pick_output_dir(self) -> None:
-        """開啟輸出目錄選擇對話框。"""
-        self.file_picker.on_result = self._on_output_picked
-        self.file_picker.get_directory_path(dialog_title="選擇輸出資料夾")
-
-    def _on_output_picked(self, e: ft.FilePickerResultEvent) -> None:
-        """處理輸出目錄選擇結果。"""
-        if e.path:
-            self.output_dir_field.value = e.path
-            self.page.update()
+    def pick_output_dir(self, e: ft.ControlEvent) -> None:
+        """開啟輸出目錄選擇對話框（0.85.0 同步 API）"""
+        path = self.file_picker.get_directory_path(dialog_title="選擇輸出資料夾")
+        if path:
+            self.output_dir_field.value = path
+            self._page.update()
 
     def start_merge(self, e: ft.ControlEvent) -> None:
         """處理開始合併按鈕事件。"""
@@ -485,10 +478,10 @@ class MergeView(ft.Column):
                 if status in ("DONE", "ERROR"):
                     self.start_button.disabled = False
                     self.zip_list_view.disabled = False
-                    self.page.update()
+                    self._page.update()
                     break
 
-                self.page.update()
+                self._page.update()
                 time.sleep(0.1)
 
         threading.Thread(target=poll, daemon=True).start()
@@ -502,9 +495,9 @@ class MergeView(ft.Column):
         """顯示 SnackBar 訊息。"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
+        self._page.overlay.append(snack)
         snack.open = True
-        self.page.update()
+        self._page.update()
 
     def _show_merge_summary(self, summary: dict[str, Any]) -> None:
         """顯示合併結果摘要（使用 overlay 確保穩定顯示）。"""
@@ -594,29 +587,29 @@ class MergeView(ft.Column):
         )
 
         # 使用 overlay 方式，穩定性高於 page.open()
-        self.page.overlay.append(dialog)
+        self._page.overlay.append(dialog)
         dialog.open = True
-        self.page.update()
+        self._page.update()
 
     def _open_output_folder(self) -> None:
         """開啟輸出資料夾（使用檔案總管）。"""
         import subprocess
 
         snack = ft.SnackBar(ft.Text("正在開啟輸出資料夾..."), bgcolor=theme.BLUE_700)
-        self.page.overlay.append(snack)
+        self._page.overlay.append(snack)
         snack.open = True
-        self.page.update()
+        self._page.update()
         subprocess.Popen(["explorer", self.output_dir_field.value], shell=True)
 
     def _close_dialog_overlay(self, dialog: ft.AlertDialog) -> None:
         """關閉 overlay 對話框。"""
         try:
-            self.page.close(dialog)
+            self._page.close(dialog)
         except Exception:
             dialog.open = False
-            if dialog in self.page.overlay:
-                self.page.overlay.remove(dialog)
+            if dialog in self._page.overlay:
+                self._page.overlay.remove(dialog)
             try:
-                self.page.update()
+                self._page.update()
             except Exception:
                 pass

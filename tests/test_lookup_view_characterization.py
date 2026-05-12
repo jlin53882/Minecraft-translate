@@ -12,8 +12,8 @@ class _Page:
 def test_lookup_view_initializes_single_and_batch_actions():
     view = LookupView(_Page())
 
-    assert view.single_button.text == '查詢'
-    assert view.batch_button.text == '批次查詢'
+    assert view.single_button.content == '查詢'
+    assert view.batch_button.content == '批次查詢'
     assert view.single_progress_ring.visible is False
     assert view.batch_progress_bar.visible is False
 
