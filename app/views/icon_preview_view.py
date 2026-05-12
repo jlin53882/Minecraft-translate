@@ -864,7 +864,7 @@ class IconPreviewView(ft.Column):
     # ==================================================
     # Folder picker callbacks
     # ==================================================
-    def _on_pick_source(self, e: ft.FilePickerResultEvent):
+    def _on_pick_source(self, e: ft.FilePickerUploadEvent):
         """處理來源目錄選擇結果"""
         if e.path:
             self.source_root = Path(e.path)
@@ -883,7 +883,7 @@ class IconPreviewView(ft.Column):
             log_warning("[IconPreview] 模組資料夾選擇已取消")
             self._show_snack("⚠️ 模組資料夾選擇已取消", color=theme.WARNING)
 
-    def _on_pick_review(self, e: ft.FilePickerResultEvent):
+    def _on_pick_review(self, e: ft.FilePickerUploadEvent):
         """處理校對目錄選擇結果"""
         if e.path:
             self.review_root = Path(e.path)
