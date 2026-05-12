@@ -344,8 +344,8 @@ def test_session_snapshot_returns_correct_structure(monkeypatch):
     assert snap["status"] == "RUNNING"
     assert snap["progress"] == 0.5
     assert len(snap["logs"]) == 2
-    assert snap["logs"][0].text == "測試日誌一"
-    assert snap["logs"][1].text == "測試日誌二"
+    assert snap["logs"][0].content == "測試日誌一"
+    assert snap["logs"][1].content == "測試日誌二"
 
 
 def test_start_clicked_resets_log_presenter(monkeypatch):
