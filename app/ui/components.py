@@ -384,7 +384,7 @@ def empty_state(
 ) -> ft.Container:
     """統一的空資料狀態顯示。"""
     return ft.Container(
-        alignment=ft.alignment.center,
+        alignment=ft.alignment.Alignment(0, 0),
         padding=40,
         content=ft.Column(
             [
@@ -407,7 +407,7 @@ def error_state(
 ) -> ft.Container:
     """統一的錯誤狀態顯示。"""
     return ft.Container(
-        alignment=ft.alignment.center,
+        alignment=ft.alignment.Alignment(0, 0),
         padding=40,
         content=ft.Column(
             [

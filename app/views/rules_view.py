@@ -179,13 +179,13 @@ class RulesView(ft.Column):
                 ft.dropdown.Option("from_asc", "依 From 字典序"),
                 ft.dropdown.Option("from_len", "依 From 長度"),
             ],
-            on_change=self.on_sort_change,
             dense=True,
             width=180,
             text_size=14,
             border_color=theme.OUTLINE,
             content_padding=10,
         )
+        self.sort_box.on_change = self.on_sort_change
 
         # 4. 表格
         self.rules_table = ft.DataTable(
