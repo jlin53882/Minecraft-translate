@@ -140,7 +140,7 @@ def styled_card(
         padding=CARD_PADDING,
         border_radius=CARD_RADIUS,
         bgcolor=CARD_BG_COLOR,
-        border=ft.border.all(1, CARD_BORDER_COLOR),
+        border=ft.Border.all(width=1, color=CARD_BORDER_COLOR),
         content=ft.Column(
             card_content,
             spacing=12,
