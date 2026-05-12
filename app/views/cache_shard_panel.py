@@ -480,25 +480,25 @@ class CacheShardPanel(ft.Container):
         """跳到第一頁"""
         self.state.page = 1
         self._render_shard_detail_keys()
-        self.page.update()
+        self._page.update()
 
     def _on_shard_page_prev(self, e):
         """上一頁"""
         self.state.page -= 1
         self._render_shard_detail_keys()
-        self.page.update()
+        self._page.update()
 
     def _on_shard_page_next(self, e):
         """下一頁"""
         self.state.page += 1
         self._render_shard_detail_keys()
-        self.page.update()
+        self._page.update()
 
     def _on_shard_page_last(self, e):
         """跳到最後一頁"""
         self.state.page = self.state.total_pages
         self._render_shard_detail_keys()
-        self.page.update()
+        self._page.update()
 
     # ==================== 編輯 ====================
     def _on_shard_dst_apply(self, e):
@@ -536,7 +536,7 @@ class CacheShardPanel(ft.Container):
 
             self.state.dst_original = new_dst
             self._show_snack_bar("已套用 DST 並寫入快取", theme.BLUE_400)
-            self.page.update()
+            self._page.update()
         except Exception as ex:
             self._show_snack_bar(f"套用失敗：{ex}", theme.RED_400)
 
@@ -548,7 +548,7 @@ class CacheShardPanel(ft.Container):
 
         self.shard_dst_field.value = str(self.state.dst_original or "")
         self._show_snack_bar("已還原到原始值", theme.BLUE_400)
-        self.page.update()
+        self._page.update()
 
     def _on_shard_dst_copy(self, e):
         """複製 DST"""
