@@ -48,7 +48,7 @@ class QCBase:
         if controls_to_disable:
             for ctrl in controls_to_disable:
                 ctrl.disabled = True
-            self.page.update()
+            self._page.update()
 
         def run():
             try:
