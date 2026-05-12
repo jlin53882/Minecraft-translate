@@ -106,7 +106,7 @@ def test_lm_view_initializes_primary_controls(monkeypatch):
     assert view.progress_bar.value == 0
 
     # --- 按鈕 ---
-    assert view.start_button.text == "開始翻譯"
+    assert view.start_button.content == "開始翻譯"
 
     # --- Log ---
     assert view.log_view is not None
