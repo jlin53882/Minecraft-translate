@@ -1041,18 +1041,21 @@ class CacheView(ft.Column):
         self.overview_page = self._build_overview_page()
         self.query_entry_page = self._build_query_entry_page()
 
+        main_tab_bar = ft.TabBar(tabs=[
+            ft.Tab(label="總覽 / 管理"),
+            ft.Tab(label="查詢"),
+        ])
+        main_tab_view = ft.TabBarView(controls=[
+            self.overview_page,
+            self.query_entry_page,
+        ])
         self.main_tabs = ft.Tabs(
-            content=[
-                ft.Tab(label="總覽 / 管理"),
-                ft.Tab(label="查詢"),
-            ],
+            content=[main_tab_bar, main_tab_view],
             length=2,
             selected_index=0,
             expand=True,
             on_change=self._on_tab_change,
         )
-        self.main_tabs.content[0].content = self.overview_page
-        self.main_tabs.content[1].content = self.query_entry_page
 
         # PR5-7: Modal 入口按鈕（提供替代 Tab 的現代化體驗）
         # 主布局改成 Stack，支援浮動視窗
@@ -1566,19 +1569,22 @@ class CacheView(ft.Column):
 
     def _build_query_entry_page(self):
         """建立查詢頁面的 UI"""
+        query_sub_tab_bar = ft.TabBar(tabs=[
+            ft.Tab(label="查詢區"),
+            ft.Tab(label="分類/分片"),
+        ])
+        query_sub_tab_view = ft.TabBarView(controls=[
+            self.query_search_card,
+            self.query_type_shard_card,
+        ])
         self.query_sub_tabs = ft.Tabs(
-            content=[
-                ft.Tab(label="查詢區"),
-                ft.Tab(label="分類/分片"),
-            ],
+            content=[query_sub_tab_bar, query_sub_tab_view],
             length=2,
             selected_index=0,
             animation_duration=200,
             expand=True,
             on_change=self._on_query_sub_tab_change,
         )
-        self.query_sub_tabs.content[0].content = self.query_search_card
-        self.query_sub_tabs.content[1].content = self.query_type_shard_card
 
         return ft.Container(
             expand=True,
