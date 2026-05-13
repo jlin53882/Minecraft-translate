@@ -174,9 +174,6 @@ class TranslationView(ft.Column):
 
         self.controls = [header, body, self.summary_card]
 
-        if self.file_picker not in self.page.overlay:
-            self.page.overlay.append(self.file_picker)
-
     # ------------------------------------------------------------------
     # 樣式 helper（集中到 app.ui.components）
     # ------------------------------------------------------------------

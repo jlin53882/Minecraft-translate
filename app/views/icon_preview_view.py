@@ -732,7 +732,7 @@ class IconPreviewView(ft.Column):
         # =========================
         self.source_picker = ft.FilePicker(on_upload=self._on_pick_source)
         self.review_picker = ft.FilePicker(on_upload=self._on_pick_review)
-        self._page.overlay.extend([self.source_picker, self.review_picker])
+        # FilePicker 是 Service，自動通過 init() 註冊，不需要添加到 page.overlay
 
         # ===== 分頁設定 =====
         self.page_size = 50

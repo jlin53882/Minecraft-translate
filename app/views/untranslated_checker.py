@@ -59,10 +59,6 @@ class UntranslatedChecker(ft.Container):
         self.file_picker = file_picker
         self.task_runner = task_runner
 
-        # 確保 file_picker 已加入 page.overlay
-        if file_picker not in page.overlay:
-            page.overlay.append(file_picker)
-
     def _build_content(self) -> ft.Column:
         """建立 UI 內容"""
         return ft.Column(
