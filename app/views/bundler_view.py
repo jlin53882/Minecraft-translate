@@ -110,7 +110,7 @@ class BundlerView(ft.Column):
             )
         for version_key in filtered:
             item = ft.TextButton(
-                content=ft.Text(version_key, size=13),
+                content=ft.Text(version_key, size=13, text_align=ft.TextAlign.START),
                 on_click=lambda e, v=version_key: self._select_version(v),
             )
             self.version_list.controls.append(item)
