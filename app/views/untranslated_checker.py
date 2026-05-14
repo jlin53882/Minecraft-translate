@@ -124,21 +124,40 @@ class UntranslatedChecker(ft.Container):
         title: str,
         folder_mode: bool,
     ):
-        """使用 FilePicker 選擇檔案或目錄"""
+        """使用 FilePicker 選擇檔案或目錄（同步包裝）。
+
+        Args:
+            e: Flet 事件物件（目前未使用）。
+            target_textfield: 選擇後要填入路徑的 TextField。
+            title: FilePicker 對話框標題。
+            folder_mode: True 為選擇資料夾，False 為選擇檔案。
+        """
+        self._page.run_task(self._async_pick_file_or_directory, target_textfield, title, folder_mode)
+
+    async def _async_pick_file_or_directory(
+        self,
+        target_textfield: ft.TextField,
+        title: str,
+        folder_mode: bool,
+    ):
+        """使用 FilePicker 選擇檔案或目錄（async 實作）。
+
+        Args:
+            target_textfield: 選擇後要填入路徑的 TextField。
+            title: FilePicker 對話框標題。
+            folder_mode: True 為選擇資料夾，False 為選擇檔案。
+        """
         if folder_mode:
-            self.file_picker.get_directory_path(title=title)
+            result = await self.file_picker.get_directory_path(dialog_title=title)
         else:
-            self.file_picker.pick_files(title=title)
+            result = await self.file_picker.pick_files(dialog_title=title)
 
-        # 設定回調以更新 TextField
-        def on_result(result):
-            if result.path:
-                target_textfield.value = result.path
-                self.page.update()
-            else:
-                self._show_snack_bar("您已取消選擇", theme.BLUE_GREY_500)
-
-        self.file_picker.on_result = on_result
+        if result:
+            path = result[0].path if hasattr(result[0], 'path') else result
+            target_textfield.value = path
+            self._page.update()
+        else:
+            self._show_snack_bar("您已取消選擇", theme.BLUE_GREY_500)
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """顯示 SnackBar 訊息提示"""

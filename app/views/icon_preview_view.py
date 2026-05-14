@@ -809,13 +809,13 @@ class IconPreviewView(ft.Column):
         self.pick_source_btn = ft.Button(
             "選擇模組資料夾（例：mods 資料夾）",
             icon=ft.Icons.FOLDER_OPEN,
-            on_click=lambda e: self.source_picker.get_directory_path(),
+            on_click=lambda e: self._page.run_task(self._async_pick_source_dir),
         )
 
         self.pick_review_btn = ft.Button(
             "選擇資源包路徑",
             icon=ft.Icons.FOLDER_OPEN,
-            on_click=lambda e: self.review_picker.get_directory_path(),
+            on_click=lambda e: self._page.run_task(self._async_pick_review_dir),
         )
 
         self.source_label = ft.Text("模組資料夾：尚未選擇", size=12)
@@ -864,16 +864,45 @@ class IconPreviewView(ft.Column):
     # ==================================================
     # Folder picker callbacks
     # ==================================================
+    async def _async_pick_source_dir(self):
+        """選擇模組資料夾（async 實作）。"""
+        result = await self.source_picker.get_directory_path()
+        if result:
+            self.source_root = Path(result)
+            self.source_label.value = f"模組資料夾：{self.source_root}"
+            migrated = _migrate_old_icon_cache(self.source_root)
+            if migrated:
+                self._show_snack("🔄 已搬移舊 icon cache 至新路徑", color=theme.BLUE_600)
+            self._entries_cache = None
+            self._cache_meta = {}
+            self._update_load_state()
+            log_info(f"[IconPreview] 模組資料夾已設定: {self.source_root}")
+            self._show_snack("✅ 模組資料夾已設定", color=theme.GREEN_600)
+        else:
+            log_warning("[IconPreview] 模組資料夾選擇已取消")
+            self._show_snack("⚠️ 模組資料夾選擇已取消", color=theme.WARNING)
+
+    async def _async_pick_review_dir(self):
+        """選擇資源包路徑（async 實作）。"""
+        result = await self.review_picker.get_directory_path()
+        if result:
+            self.review_root = Path(result)
+            self.review_label.value = f"資源包路徑：{self.review_root}"
+            self._update_load_state()
+            log_info(f"[IconPreview] 資源包路徑已設定: {self.review_root}")
+            self._show_snack("✅ 資源包路徑已設定", color=theme.GREEN_600)
+        else:
+            log_warning("[IconPreview] 資源包路徑選擇已取消")
+            self._show_snack("⚠️ 資源包路徑選擇已取消", color=theme.WARNING)
+
     def _on_pick_source(self, e: ft.FilePickerUploadEvent):
         """處理來源目錄選擇結果"""
         if e.path:
             self.source_root = Path(e.path)
             self.source_label.value = f"模組資料夾：{self.source_root}"
-            # Phase 3: 向後相容搬移舊 icon cache
             migrated = _migrate_old_icon_cache(self.source_root)
             if migrated:
                 self._show_snack("🔄 已搬移舊 icon cache 至新路徑", color=theme.BLUE_600)
-            # 快取失效：source_root 改變
             self._entries_cache = None
             self._cache_meta = {}
             self._update_load_state()

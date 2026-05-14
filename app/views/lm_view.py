@@ -177,22 +177,44 @@ class LMView(ft.Column):
     # --------------------------------------------------
     def pick_input_directory(self, e):
         """開啟輸入目錄選擇對話框"""
-        self.file_picker.on_result = self.on_input_dir_picked
-        self.file_picker.get_directory_path()
+        self._page.run_task(self._async_pick_input_directory)
+
+    async def _async_pick_input_directory(self):
+        """async 實作：選擇輸入目錄並觸發回調。"""
+        result = await self.file_picker.get_directory_path()
+        if result:
+            class FakeEvent:
+                path = result
+            self.on_input_dir_picked(FakeEvent())
+
+    def pick_output_directory(self, e):
+        """開啟輸出目錄選擇對話框。"""
+        self._page.run_task(self._async_pick_output_directory)
+
+    async def _async_pick_output_directory(self):
+        """async 實作：選擇輸出目錄並觸發回調。"""
+        result = await self.file_picker.get_directory_path()
+        if result:
+            class FakeEvent:
+                path = result
+            self.on_output_dir_picked(FakeEvent())
 
     def on_input_dir_picked(self, e):
-        """處理輸入目錄選擇結果"""
+        """處理輸入目錄選擇結果。
+
+        Args:
+            e: 具有 .path 屬性的事件物件。
+        """
         if e.path:
             self.input_path.value = e.path
             self.page.update()
 
-    def pick_output_directory(self, e):
-        """開啟輸出目錄選擇對話框"""
-        self.file_picker.on_result = self.on_output_dir_picked
-        self.file_picker.get_directory_path()
-
     def on_output_dir_picked(self, e):
-        """處理輸出目錄選擇結果"""
+        """處理輸出目錄選擇結果。
+
+        Args:
+            e: 具有 .path 屬性的事件物件。
+        """
         if e.path:
             self.output_path.value = e.path
             self.page.update()

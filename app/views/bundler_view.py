@@ -294,9 +294,10 @@ class BundlerView(ft.Column):
 
     async def _async_pick_root_dir(self):
         result = await self.file_picker.get_directory_path(dialog_title="選擇翻譯專案根目錄")
-        log_debug("_async_pick_root_dir result: {result}")
+        log_debug(f"_async_pick_root_dir result: {result}")
         if result:
-            self.root_dir_field.value = result
+            path = result[0].path if hasattr(result[0], 'path') else result
+            self.root_dir_field.value = path
             self._page.update()
 
     def _pick_output_zip(self, e: ft.ControlEvent):
