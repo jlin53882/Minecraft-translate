@@ -70,8 +70,6 @@ class ConfigView(ft.Column):
 
         self.controls = [self.scroll_container, self.footer]
 
-        self._rebuild_nav()
-
         self.load_config()
 
     def _init_controls(self):
