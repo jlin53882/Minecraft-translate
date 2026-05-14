@@ -1,0 +1,11 @@
+{
+  "1.12.2": {"min_format": 3, "max_format": 3},
+  "1.16.5": {"min_format": 6, "max_format": 6},
+  "1.17": {"min_format": 7, "max_format": 7},
+  "1.18": {"min_format": 8, "max_format": 8},
+  "1.19.4": {"min_format": 9, "max_format": 9},
+  "1.20.1": {"min_format": 15, "max_format": 15},
+  "1.20.2": {"min_format": 22, "max_format": 22},
+  "1.20.4": {"min_format": 26, "max_format": 26},
+  "1.21": {"min_format": 34, "max_format": 34}
+}
