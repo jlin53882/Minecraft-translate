@@ -14,20 +14,37 @@ class _Page:
         self.overlay = []
         self.updated = 0
         self.dialog = None
+        self._tasks = []
 
     def update(self):
         self.updated += 1
+
+    def run_task(self, coro, *args):
+        self._tasks.append((coro, args))
+
+    def _run_all_tasks(self):
+        for coro, args in self._tasks:
+            result = coro(*args)
+            if result is not None:
+                try:
+                    result.send(None)
+                except StopIteration:
+                    pass
 
 
 class _FilePicker:
     def __init__(self):
         self.on_result = None
+        self._mock_path = None
 
-    def get_directory_path(self, title: str = None):
-        pass
+    async def get_directory_path(self, dialog_title: str = None):
+        return self._mock_path
 
-    def pick_files(self, title: str = None):
-        pass
+    async def pick_files(self, dialog_title: str = None):
+        return [type('obj', (object,), {'path': self._mock_path})()] if self._mock_path else []
+
+    def set_mock_path(self, path):
+        self._mock_path = path
 
 
 class _ProgressBar:

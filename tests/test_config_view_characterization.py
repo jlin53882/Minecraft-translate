@@ -8,8 +8,22 @@ class _Page:
         self.overlay = []
         self.updated = 0
         self.loop = None
+        self._tasks = []
+
     def update(self):
         self.updated += 1
+
+    def run_task(self, coro, *args):
+        self._tasks.append((coro, args))
+
+    def _run_all_tasks(self):
+        for coro, args in self._tasks:
+            result = coro(*args)
+            if result is not None:
+                try:
+                    result.send(None)
+                except StopIteration:
+                    pass
 
 
 def test_config_view_loads_models_and_keys_from_config(monkeypatch):
