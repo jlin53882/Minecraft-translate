@@ -123,3 +123,157 @@ def test_reset_md_inputs_restores_defaults_and_appends_log(monkeypatch):
     assert view.md_write_new_cache.value is True
     assert view.md_lang_mode.value == 'non_cjk_only'
     assert view.log_view.controls[-1].value == '[UI] 已重置：Markdown 輸入已清空'
+
+
+def test_reset_kjs_inputs_restores_defaults_and_appends_log(monkeypatch):
+    """驗證 KubeJS 輸入重置行為"""
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    page = _Page()
+    picker = _FilePicker()
+    view = tv.TranslationView(page, picker)
+
+    view.kjs_in_dir.value = 'X'
+    view.kjs_out_dir.value = 'Y'
+    view.kjs_step_extract.value = False
+    view.kjs_step_translate.value = False
+    view.kjs_step_inject.value = False
+    view.kjs_write_new_cache.value = False
+
+    view._reset_kjs_inputs()
+
+    assert view.kjs_in_dir.value == ''
+    assert view.kjs_out_dir.value == ''
+    assert view.kjs_step_extract.value is True
+    assert view.kjs_step_translate.value is True
+    assert view.kjs_step_inject.value is True
+    assert view.kjs_write_new_cache.value is True
+    assert view.log_view.controls[-1].value == '[UI] 已重置：KubeJS 輸入已清空'
+
+
+def test_reset_ftb_inputs_restores_defaults(monkeypatch):
+    """驗證 FTB 輸入重置行為"""
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    page = _Page()
+    picker = _FilePicker()
+    view = tv.TranslationView(page, picker)
+
+    view.ftb_in_dir.value = 'X'
+    view.ftb_out_dir.value = 'Y'
+    view.ftb_step_export.value = False
+    view.ftb_step_clean.value = False
+    view.ftb_step_translate.value = False
+    view.ftb_step_inject.value = False
+    view.ftb_write_new_cache.value = False
+
+    view._reset_ftb_inputs()
+
+    assert view.ftb_in_dir.value == ''
+    assert view.ftb_out_dir.value == ''
+    assert view.ftb_step_export.value is True
+    assert view.ftb_step_clean.value is True
+    assert view.ftb_step_translate.value is True
+    assert view.ftb_step_inject.value is True
+    assert view.ftb_write_new_cache.value is True
+    assert view.log_view.controls[-1].value == '[UI] 已重置：FTB Quests 輸入已清空'
+
+
+def test_clear_logs_removes_all_controls(monkeypatch):
+    """驗證 _clear_logs 正確清除所有日誌"""
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    page = _Page()
+    picker = _FilePicker()
+    view = tv.TranslationView(page, picker)
+
+    view._append_log('line1')
+    view._append_log('line2')
+    assert len(view.log_view.controls) == 3  # initial + 2
+
+    view._clear_logs()
+
+    assert len(view.log_view.controls) == 0
+
+
+def test_append_log_trims_to_max_400_lines(monkeypatch):
+    """驗證 _append_log 不會无限增长"""
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    page = _Page()
+    picker = _FilePicker()
+    view = tv.TranslationView(page, picker)
+
+    for i in range(450):
+        view._append_log(f'log{i}')
+
+    assert len(view.log_view.controls) < 400
+
+
+def test_set_status_updates_chip_label_and_color(monkeypatch):
+    """驗證 _set_status 更新 status_chip 的文字與背景顏色"""
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    page = _Page()
+    picker = _FilePicker()
+    view = tv.TranslationView(page, picker)
+
+    view._set_status('工作中', '#FF0000')
+
+    assert view.status_chip.label.value == '工作中'
+    assert view.status_chip.bgcolor == '#FF0000'
+
+
+def test_pick_directory_into_sets_target_field(monkeypatch):
+    """驗證 _pick_directory_into 正確設定目標欄位"""
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    page = _Page()
+    picker = _FilePicker()
+    picker.set_mock_path('/test/path')
+    view = tv.TranslationView(page, picker)
+
+    target = tv.ft.TextField()
+    view._pick_directory_into(target)
+    page._run_all_tasks()
+
+    assert target.value == '/test/path'
+    assert page.updated >= 1
+
+
+def test_show_snack_adds_to_page_overlay(monkeypatch):
+    """驗證 _show_snack 正確將 SnackBar 加入 page.overlay"""
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    page = _Page()
+    picker = _FilePicker()
+    view = tv.TranslationView(page, picker)
+
+    view._show_snack('Test message', '#00FF00')
+
+    assert len(page.overlay) == 1
+    assert page.overlay[0].open is True
+
+
+def test_kjs_controls_accessible_and_resettable(monkeypatch):
+    """驗證 KJS 所有控件可存取且 Reset 正確"""
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    page = _Page()
+    picker = _FilePicker()
+    view = tv.TranslationView(page, picker)
+
+    assert hasattr(view, 'kjs_in_dir')
+    assert hasattr(view, 'kjs_out_dir')
+    assert hasattr(view, 'kjs_step_extract')
+    assert hasattr(view, 'kjs_step_translate')
+    assert hasattr(view, 'kjs_step_inject')
+    assert hasattr(view, 'kjs_write_new_cache')
+
+    view.kjs_in_dir.value = 'C:/KJS/In'
+    view.kjs_out_dir.value = 'C:/KJS/Out'
+    view.kjs_step_extract.value = False
+    view.kjs_step_translate.value = False
+    view.kjs_step_inject.value = False
+    view.kjs_write_new_cache.value = False
+
+    view._reset_kjs_inputs()
+
+    assert view.kjs_in_dir.value == ''
+    assert view.kjs_out_dir.value == ''
+    assert view.kjs_step_extract.value is True
+    assert view.kjs_step_translate.value is True
+    assert view.kjs_step_inject.value is True
+    assert view.kjs_write_new_cache.value is True

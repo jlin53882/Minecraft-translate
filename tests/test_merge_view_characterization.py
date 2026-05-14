@@ -1,3 +1,4 @@
+import flet as ft
 from app.views import merge_view
 
 
@@ -78,3 +79,104 @@ def test_remove_zip_updates_selected_list(monkeypatch):
     view._remove_zip('a.zip')
 
     assert view.selected_zips == ['b.zip']
+
+
+def test_merge_view_all_checkboxes_and_switches_exist(monkeypatch):
+    """驗證 MergeView 所有 checkbox/switch 控件存在"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    view = merge_view.MergeView(_Page(), _FilePicker())
+
+    assert view.only_lang_checkbox.label == '只處理 lang 檔案'
+    assert view.only_lang_checkbox.value is True
+
+    assert view.process_zh_cn_switch.label == '處理 zh_cn 檔案'
+    assert view.process_zh_cn_switch.value is True
+
+    assert view.skip_zh_cn_switch.label == '只處理 lang 時跳過 zh_cn'
+    assert view.skip_zh_cn_switch.value is False
+
+    assert view.patchouli_skip_zh_cn_switch.label == '允許 zh_cn 觸發跳過 en_us'
+    assert view.patchouli_skip_zh_cn_switch.value is False
+
+
+def test_merge_view_text_fields_and_listviews_exist(monkeypatch):
+    """驗證 MergeView 所有 TextField/ListView 控件存在"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    view = merge_view.MergeView(_Page(), _FilePicker())
+
+    assert view.patchouli_threshold_field.value == '0.5'
+    assert view.patchouli_threshold_field.width == 96
+    assert view.patchouli_threshold_field.text_align == ft.TextAlign.CENTER
+
+    assert view.output_dir_field.label == '輸出資料夾'
+    assert isinstance(view.zip_list_view, ft.ListView)
+    assert view.zip_list_view.height == 160
+    assert isinstance(view.log_view, ft.ListView)
+    assert isinstance(view.progress_bar, ft.ProgressBar)
+
+
+def test_merge_view_zh_cn_switch_callback_exists(monkeypatch):
+    """驗證 process_zh_cn_switch 的 on_change 回調已設定"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    page = _Page()
+    view = merge_view.MergeView(page, _FilePicker())
+
+    assert view.process_zh_cn_switch.on_change is not None
+
+
+def test_merge_view_refresh_zip_list_populates_controls(monkeypatch):
+    """驗證 _refresh_zip_list 正確將 selected_zips 顯示在 zip_list_view"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    page = _Page()
+    view = merge_view.MergeView(page, _FilePicker())
+    view.selected_zips = ['a.zip', 'b.zip']
+
+    view._refresh_zip_list()
+
+    assert len(view.zip_list_view.controls) == 2
+
+
+def test_merge_view_remove_zip_refreshes_and_updates_page(monkeypatch):
+    """驗證 _remove_zip 正確移除並更新頁面"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    page = _Page()
+    view = merge_view.MergeView(page, _FilePicker())
+    view.selected_zips = ['a.zip', 'b.zip']
+
+    view._remove_zip('a.zip')
+
+    assert view.selected_zips == ['b.zip']
+    assert page.updated >= 1
+
+
+def test_merge_view_async_pick_output_dir(monkeypatch):
+    """驗證 _async_pick_output_dir 正確更新 output_dir_field"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    page = _Page()
+    picker = _FilePicker()
+    picker.set_mock_path('/output/dir')
+    view = merge_view.MergeView(page, picker)
+
+    page.run_task(view._async_pick_output_dir)
+    page._run_all_tasks()
+
+    assert view.output_dir_field.value == '/output/dir'
+    assert page.updated >= 1
+
+
+def test_merge_view_progress_bar_and_status_chip(monkeypatch):
+    """驗證 progress_bar 和 status_chip 初始狀態"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    view = merge_view.MergeView(_Page(), _FilePicker())
+
+    assert view.progress_bar.value == 0
+    assert view.status_chip.label.value == '尚未開始'
+
+
+def test_merge_view_log_presenter_exists(monkeypatch):
+    """驗證 log_presenter 存在"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    view = merge_view.MergeView(_Page(), _FilePicker())
+
+    assert hasattr(view, 'log_presenter')
+    assert view.log_presenter is not None

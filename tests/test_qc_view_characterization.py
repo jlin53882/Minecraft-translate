@@ -7,6 +7,7 @@
 from app.views.qc_view import QCView
 from app.views.untranslated_checker import UntranslatedChecker
 from app.views.qc_base import QCBase
+import flet as ft
 
 
 class _Page:
@@ -149,3 +150,82 @@ def test_untranslated_checker_uses_task_runner():
 
     # 確認 UntranslatedChecker 使用 view.task_runner
     assert view.untranslated_checker.task_runner is view.task_runner
+
+
+def test_qc_view_all_textfields_exist(monkeypatch):
+    """測試 QCView 所有 TextField 控件存在"""
+    page = _Page()
+    view = QCView(page, _FilePicker())
+
+    assert view.cn_dir_textfield.label == '簡中 (zh_cn) 來源資料夾 (JSON)'
+    assert view.tw_dir_textfield_2.label == '繁中 (zh_tw) 來源資料夾 (JSON)'
+    assert view.compare_out_dir_textfield.label == 'JSON 差異報告 輸出資料夾'
+    assert view.tsv_file_textfield.label == '簡繁差異 TSV 檔案路徑'
+    assert view.tsv_out_file_textfield.label == 'TSV 差異報告 輸出檔案 (.csv)'
+
+
+def test_qc_view_all_buttons_exist(monkeypatch):
+    """測試 QCView 所有 Button 控件存在"""
+    page = _Page()
+    view = QCView(page, _FilePicker())
+
+    assert view.compare_start_button.content == '啟動：JSON 資料夾差異比對'
+    assert view.compare_tsv_start_button.content == '啟動：TSV 單檔案差異比對'
+
+
+def test_qc_view_progress_bar_and_log_view(monkeypatch):
+    """測試 QCView progress_bar 和 log_view 存在"""
+    page = _Page()
+    view = QCView(page, _FilePicker())
+
+    assert isinstance(view.progress_bar, ft.ProgressBar)
+    assert view.progress_bar.visible is False
+    assert isinstance(view.log_view, ft.ListView)
+
+
+def test_qc_view_set_controls_disabled_affects_all_inputs(monkeypatch):
+    """測試 set_controls_disabled 影響所有 TextField 和 Button"""
+    page = _Page()
+    view = QCView(page, _FilePicker())
+
+    view.set_controls_disabled(True)
+
+    assert view.cn_dir_textfield.disabled is True
+    assert view.tw_dir_textfield_2.disabled is True
+    assert view.compare_out_dir_textfield.disabled is True
+    assert view.compare_start_button.disabled is True
+    assert view.tsv_file_textfield.disabled is True
+    assert view.tsv_out_file_textfield.disabled is True
+    assert view.compare_tsv_start_button.disabled is True
+
+    view.set_controls_disabled(False)
+
+    assert view.cn_dir_textfield.disabled is False
+    assert view.tw_dir_textfield_2.disabled is False
+    assert view.compare_out_dir_textfield.disabled is False
+    assert view.compare_start_button.disabled is False
+    assert view.tsv_file_textfield.disabled is False
+    assert view.tsv_out_file_textfield.disabled is False
+    assert view.compare_tsv_start_button.disabled is False
+
+
+def test_qc_view_start_task_compare_json_requires_paths(monkeypatch):
+    """測試 compare_json 任務需要路徑"""
+    page = _Page()
+    view = QCView(page, _FilePicker())
+
+    view.start_task("compare_json")
+
+    assert page.overlay
+    assert "錯誤" in page.overlay[-1].content.value
+
+
+def test_qc_view_start_task_compare_tsv_requires_paths(monkeypatch):
+    """測試 compare_tsv 任務需要路徑"""
+    page = _Page()
+    view = QCView(page, _FilePicker())
+
+    view.start_task("compare_tsv")
+
+    assert page.overlay
+    assert "錯誤" in page.overlay[-1].content.value

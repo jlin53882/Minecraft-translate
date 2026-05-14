@@ -1,3 +1,4 @@
+import flet as ft
 from app.views.rules_view import RulesView
 
 
@@ -79,3 +80,76 @@ def test_rules_view_add_row_moves_to_last_page(monkeypatch):
 
     assert len(view.all_rules_data) == 1
     assert view.current_page == 1
+
+
+def test_rules_view_all_controls_exist(monkeypatch):
+    """測試 RulesView 所有 UI 控件存在"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+
+    assert isinstance(view.loading_indicator, ft.ProgressRing)
+    assert view.loading_indicator.visible is False
+
+    assert isinstance(view.page_info, ft.Text)
+    assert '頁面' in view.page_info.value
+
+    assert isinstance(view.total_count_text, ft.Text)
+    assert '共' in view.total_count_text.value
+
+    assert isinstance(view.prev_button, ft.IconButton)
+    assert view.prev_button.icon == ft.Icons.ARROW_BACK
+    assert view.prev_button.disabled is True
+
+    assert isinstance(view.next_button, ft.IconButton)
+    assert view.next_button.icon == ft.Icons.ARROW_FORWARD
+    assert view.next_button.disabled is True
+
+    assert isinstance(view.page_jump_field, ft.TextField)
+    assert view.page_jump_field.width == 70
+    assert view.page_jump_field.text_align == ft.TextAlign.CENTER
+
+    assert isinstance(view.search_box, ft.TextField)
+    assert view.search_box.label == '搜尋規則 (由/至)'
+
+    assert isinstance(view.sort_box, ft.Dropdown)
+    assert view.sort_box.label == '排序方式'
+
+    assert isinstance(view.rules_table, ft.DataTable)
+
+
+def test_rules_view_on_page_jump_submit_invalid_page(monkeypatch):
+    """測試頁碼跳轉無效時的處理"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [{'from': 'a', 'to': 'b'}] * 30)
+    page = _Page()
+    view = RulesView(page)
+
+    class E:
+        pass
+
+    e = E()
+    e.control = type('C', (), {'value': '9999'})()
+
+    view.on_page_jump_submit(e)
+
+    assert page.overlay
+
+
+def test_rules_view_prev_button_disabled_when_on_first_page(monkeypatch):
+    """測試第一頁時 prev_button 應該 disabled"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [{'from': 'a', 'to': 'b'}] * 30)
+    view = RulesView(_Page())
+
+    assert view.prev_button.disabled is True
+
+
+def test_rules_view_search_box_on_change_exists(monkeypatch):
+    """測試 search_box 的 on_change 回調"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+
+    assert view.search_box.on_change is not None
+    assert view.sort_box.on_change is not None
