@@ -10,106 +10,292 @@ import os
 import zipfile
 import logging
 import time
-from typing import Dict, Any, Generator
+import json
+from typing import Dict, Any, Generator, Optional, List
 
-# --- 導入我們自訂的工具 ---
 from ..utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_info, log_error, log_debug,log_warning
 
-log = logging.getLogger(__name__)
 
-def _add_folder_to_zip(zip_file: zipfile.ZipFile, folder_path: str, base_path_in_zip: str) -> int:
-    """
-    將一個資料夾中的所有內容（含子資料夾）加入到 ZIP 檔案中。
-    
-    :param zip_file: zipfile.ZipFile 物件
-    :param folder_path: 要加入的來源資料夾 (例如 "output/zh_tw_generated")
-    :param base_path_in_zip: 檔案在 ZIP 中應有的基礎路徑 (例如 "assets")
-    :return: 成功加入的檔案數量
+
+def _add_folder_to_zip(
+    zip_file: zipfile.ZipFile,
+    folder_path: str,
+    base_path_in_zip: str,
+    seen_files: Optional[dict] = None,
+) -> tuple[int, dict]:
+    """Add folder contents to ZIP with duplicate handling.
+
+    Returns (added_count, seen_files) where seen_files maps archive_name to count.
     """
     added_count = 0
+    if seen_files is None:
+        seen_files = {}
+
     if not os.path.exists(folder_path):
-        log.warning(f"打包時找不到來源資料夾: {folder_path}，將略過。")
-        return 0
+        log_warning(f"打包時找不到來源資料夾: {folder_path}，將略過。")
+        return 0, seen_files
 
     for root, _, files in os.walk(folder_path):
         for file in files:
             file_path = os.path.join(root, file)
-            # 計算檔案在 ZIP 檔案中的相對路徑
-            # 例如: "output/zh_tw_generated/assets/modid/lang/zh_tw.json"
-            # -> "assets/modid/lang/zh_tw.json"
             relative_path = os.path.relpath(file_path, folder_path)
-            # 組合成最終在 ZIP 中的路徑
-            archive_name = os.path.join(base_path_in_zip, relative_path)
-            
-            # 將反斜線替換為正斜線，確保 ZIP 格式的相容性
-            archive_name = archive_name.replace('\\', '/')
-            
+            archive_name = os.path.join(base_path_in_zip, relative_path).replace("\\", "/")
+
+            if archive_name in seen_files:
+                base, ext = os.path.splitext(archive_name)
+                counter = 1
+                while f"{base}_{counter}{ext}" in seen_files:
+                    counter += 1
+                archive_name = f"{base}_{counter}{ext}"
+
+            seen_files[archive_name] = 1
             zip_file.write(file_path, archive_name)
             added_count += 1
-            
-    return added_count
 
-def bundle_outputs_generator(input_root_dir: str, output_zip_path: str) -> Generator[Dict[str, Any], None, None]:
-    """
-    (核心打包函式) 
-    根據 load_config().json 的設定，從多個來源資料夾收集檔案，
-    並打包成一個單一的 .zip 檔案。
+    return added_count, seen_files
+
+
+def _write_pack_mcmeta(
+    zip_file: zipfile.ZipFile,
+    description: str,
+    min_format: int,
+    max_format: int,
+) -> None:
+    """Write pack.mcmeta file to ZIP root."""
+    pack_info = {
+        "pack": {
+            "description": description,
+            "min_format": str(min_format),
+            "max_format": str(max_format),
+        }
+    }
+
+    zip_file.writestr(
+        "pack.mcmeta",
+        json.dumps(pack_info, ensure_ascii=False, indent=2),
+    )
+
+
+def bundle_outputs_generator(
+    input_root_dir: str,
+    output_zip_path: str,
+    description: str = "",
+    min_format: int = 0,
+    max_format: int = 0,
+    pack_image_path: Optional[str] = None,
+    extra_folders: Optional[List[str]] = None,
+) -> Generator[Dict[str, Any], None, None]:
+    """Generator that bundles output folders into a ZIP archive.
+
+    Args:
+        input_root_dir: Root folder containing source subfolders
+        output_zip_path: Output path for ZIP file
+        description: pack.mcmeta description field
+        min_format: min_format for pack.mcmeta
+        max_format: max_format for pack.mcmeta
+        pack_image_path: Optional path to pack.png to copy into ZIP root
+        extra_folders: Optional list of extra folder paths to merge into ZIP root
     """
     start_time = time.time()
-    
-    # 讀取打包設定
-    bundle_cfg = load_config().get("output_bundler", {})
-    source_folders_map = bundle_cfg.get("source_folders", {})
-    
-    if not source_folders_map:
-        yield {"progress": 1.0, "log": "錯誤：load_config().json 中未定義 'output_bundler.source_folders'。無法打包。", "error": True}
+
+    if not os.path.exists(input_root_dir):
+        yield {"progress": 1.0, "log": f"錯誤：輸入目錄不存在: {input_root_dir}", "error": True}
+        return
+
+    subfolders = [d for d in os.listdir(input_root_dir)
+                  if os.path.isdir(os.path.join(input_root_dir, d))]
+    log_info(f"輸入目錄: {input_root_dir}，找到子資料夾: {subfolders}")
+    if not subfolders:
+        yield {"progress": 1.0, "log": f"錯誤：輸入目錄中沒有子資料夾: {input_root_dir}", "error": True}
+        log_error(f"輸入目錄中沒有子資料夾: {input_root_dir}")
         return
 
     total_files_added = 0
     yield {"progress": 0.0, "log": f"開始建立 ZIP 檔案於: {output_zip_path}"}
 
+    seen_files: dict = {}
+
     try:
-        with zipfile.ZipFile(output_zip_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-            
-            total_steps = len(source_folders_map)
+        # Pre-check for pack.png and pack.mcmeta in folders
+        skipped_pack_mcmeta = None
+        skipped_pack_png = None
+        pack_mcmeta_source = None
+        pack_png_source = None
+
+        # Check input_root_dir for pack.png/pack.mcmeta
+        for entry in os.listdir(input_root_dir):
+            full_path = os.path.join(input_root_dir, entry)
+            if os.path.isfile(full_path):
+                if entry.lower() == "pack.mcmeta":
+                    pack_mcmeta_source = full_path
+                elif entry.lower() == "pack.png":
+                    pack_png_source = full_path
+
+        # Check extra_folders for pack.png/pack.mcmeta
+        if extra_folders:
+            for extra_path in extra_folders:
+                if os.path.isfile(extra_path):
+                    entry = os.path.basename(extra_path)
+                    if entry.lower() == "pack.mcmeta":
+                        pack_mcmeta_source = extra_path
+                    elif entry.lower() == "pack.png":
+                        pack_png_source = extra_path
+
+        # If pack.png/pack.mcmeta found in folders, skip UI settings and warn
+        if pack_mcmeta_source:
+            skipped_pack_mcmeta = pack_mcmeta_source
+            yield {"progress": 0.01, "log": f"警告：pack.mcmeta 已存在於 '{pack_mcmeta_source}'，跳過 UI 設定"}
+            log_warning(f"pack.mcmeta 已存在於 '{pack_mcmeta_source}'，跳過 UI 設定")
+
+        if pack_png_source:
+            skipped_pack_png = pack_png_source
+            yield {"progress": 0.02, "log": f"警告：pack.png 已存在於 '{pack_png_source}'，跳過 UI 設定"}
+            log_warning(f"pack.png 已存在於 '{pack_png_source}'，跳過 UI 設定")
+
+        with zipfile.ZipFile(output_zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+            # Write pack.mcmeta from folder if exists, otherwise from UI
+            if pack_mcmeta_source:
+                try:
+                    with open(pack_mcmeta_source, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    seen_files["pack.mcmeta"] = 1
+                    zf.writestr("pack.mcmeta", content)
+                    total_files_added += 1
+                    yield {"progress": 0.05, "log": "已寫入 pack.mcmeta（來自資料夾）"}
+                    log_info(f"寫入 pack.mcmeta（來自：{pack_mcmeta_source}）")
+                except Exception as ex:
+                    yield {"progress": 0.05, "log": f"讀取 pack.mcmeta 失敗: {ex}"}
+            elif description or min_format > 0:
+                _write_pack_mcmeta(zf, description, min_format, max_format)
+                total_files_added += 1
+                yield {"progress": 0.05, "log": "已寫入 pack.mcmeta"}
+                log_info("已寫入 pack.mcmeta")
+
+            # Write pack.png from folder if exists, otherwise from UI
+            if pack_png_source:
+                try:
+                    ext = os.path.splitext(pack_png_source)[1].lower()
+                    if ext in (".png", ".jpg", ".jpeg"):
+                        seen_files["pack.png"] = 1
+                        with open(pack_png_source, "rb") as src:
+                            zf.writestr("pack.png", src.read())
+                        total_files_added += 1
+                        yield {"progress": 0.1, "log": "已寫入 pack.png（來自資料夾）"}
+                        log_info(f"寫入 pack.png（來自：{pack_png_source}）")
+                except Exception as ex:
+                    yield {"progress": 0.1, "log": f"讀取 pack.png 失敗: {ex}"}
+            elif pack_image_path and os.path.exists(pack_image_path):
+                try:
+                    ext = os.path.splitext(pack_image_path)[1].lower()
+                    if ext in (".png", ".jpg", ".jpeg"):
+                        dest_name = "pack.png"
+                        if dest_name in seen_files:
+                            dest_name = "pack_1.png"
+                        seen_files[dest_name] = 1
+                        with open(pack_image_path, "rb") as src:
+                            zf.writestr(dest_name, src.read())
+                        total_files_added += 1
+                        yield {"progress": 0.1, "log": f"已複製資源包圖片: {dest_name}"}
+                except Exception as ex:
+                    yield {"progress": 0.1, "log": f"複製 pack.png 失敗: {ex}"}
+
+            total_steps = len(subfolders) + (len(extra_folders) if extra_folders else 0)
             step = 0
-            
-            # 遍歷 config 中定義的所有來源
-            # 例如: "assets": "zh_tw_generated"
-            # "root_files": "pack_mcmeta"
-            for base_path_in_zip, folder_name in source_folders_map.items():
+
+            for folder_name in subfolders:
                 step += 1
-                progress = step / total_steps
-                
-                # 來源資料夾的完整路徑
+                progress = 0.15 + (step / total_steps) * 0.7
                 full_source_path = os.path.join(input_root_dir, folder_name)
-                
-                yield {"progress": progress - 0.1, "log": f"正在掃描來源: '{folder_name}'..."}
-                
-                if not os.path.exists(full_source_path):
-                    log_msg = f"警告：找不到來源資料夾 '{folder_name}' (路徑: {full_source_path})，將略過。"
-                    yield {"progress": progress, "log": log_msg}
-                    continue
+                yield {"progress": progress, "log": f"正在掃描來源: '{folder_name}'..."}
+                log_info(f"掃描資料夾: {full_source_path}")
 
-                # 'root' 是一個特殊鍵，表示裡面的檔案應放在 ZIP 的根目錄
-                if base_path_in_zip.lower() == 'root':
-                    base_path_in_zip = '' # 設為空字串
+                base = "" if folder_name.lower() == "root" else folder_name
+                count, seen_files = _add_folder_to_zip(zf, full_source_path, base, seen_files)
 
-                count = _add_folder_to_zip(zf, full_source_path, base_path_in_zip)
-                
                 if count > 0:
-                    log_msg = f"成功從 '{folder_name}' 加入 {count} 個檔案到 '{base_path_in_zip}/'。"
                     total_files_added += count
-                    yield {"progress": progress, "log": log_msg}
+                    yield {"progress": progress, "log": f"成功從 '{folder_name}' 加入 {count} 個檔案。"}
+                    log_info(f"從 '{folder_name}' 加入 {count} 個檔案")
                 else:
-                    yield {"progress": progress, "log": f"在 '{folder_name}' 中未找到可打包的檔案。"}
+                    yield {"progress": progress, "log": f"警告：'{folder_name}' 中沒有可打包的檔案。"}
+                    log_warning(f"'{folder_name}' 中沒有可打包的檔案")
+
+            for entry in os.listdir(input_root_dir):
+                full_path = os.path.join(input_root_dir, entry)
+                if os.path.isfile(full_path):
+                    archive_name = entry
+                    if archive_name in seen_files:
+                        base, ext = os.path.splitext(archive_name)
+                        counter = 1
+                        while f"{base}_{counter}{ext}" in seen_files:
+                            counter += 1
+                        archive_name = f"{base}_{counter}{ext}"
+                    seen_files[archive_name] = 1
+                    zf.write(full_path, archive_name)
+                    total_files_added += 1
+                    yield {"progress": 0.15 + ((step + 1) / total_steps) * 0.7, "log": f"額外檔案: +1 ({entry})"}
+                    log_debug(f"加入根目錄檔案: {entry}")
+
+            if extra_folders:
+                for extra_path in extra_folders:
+                    step += 1
+                    progress = 0.15 + (step / total_steps) * 0.7
+                    yield {"progress": progress, "log": f"正在處理額外項目: '{extra_path}'..."}
+                    log_debug(f"處理額外項目: {extra_path}")
+
+                    if not os.path.exists(extra_path):
+                        yield {"progress": progress, "log": f"額外項目不存在: '{extra_path}'"}
+                        log_warning(f"額外項目不存在: {extra_path}")
+                        continue
+
+                    if os.path.isfile(extra_path):
+                        file_name = os.path.basename(extra_path)
+                        archive_name = file_name
+                        if archive_name in seen_files:
+                            base, ext = os.path.splitext(archive_name)
+                            counter = 1
+                            while f"{base}_{counter}{ext}" in seen_files:
+                                counter += 1
+                            archive_name = f"{base}_{counter}{ext}"
+                        seen_files[archive_name] = 1
+                        zf.write(extra_path, archive_name)
+                        total_files_added += 1
+                        yield {"progress": progress, "log": f"額外檔案: +1 ({file_name})"}
+                        log_info(f"加入額外檔案: {file_name}")
+                    elif os.path.isdir(extra_path):
+                        parent_name = os.path.basename(extra_path.rstrip("/\\"))
+                        for entry in os.listdir(extra_path):
+                            src = os.path.join(extra_path, entry)
+                            if os.path.isdir(src):
+                                count, seen_files = _add_folder_to_zip(zf, src, "", seen_files)
+                                total_files_added += count
+                                yield {"progress": progress, "log": f"額外資料夾 '{parent_name}/{entry}': +{count} 個檔案"}
+                                log_debug(f"額外資料夾 '{parent_name}/{entry}': +{count} 個檔案")
+                            elif os.path.isfile(src):
+                                archive_name = entry
+                                if archive_name in seen_files:
+                                    base, ext = os.path.splitext(archive_name)
+                                    counter = 1
+                                    while f"{base}_{counter}{ext}" in seen_files:
+                                        counter += 1
+                                    archive_name = f"{base}_{counter}{ext}"
+                                seen_files[archive_name] = 1
+                                zf.write(src, archive_name)
+                                total_files_added += 1
+                                yield {"progress": progress, "log": f"額外檔案: +1 ({entry})"}
+                                log_debug(f"額外資料夾內檔案: {entry}")
 
         duration = time.time() - start_time
-        yield {"progress": 1.0, "log": f"--- 打包完成！總共 {total_files_added} 個檔案被加入 ZIP。耗時 {duration:.2f} 秒 ---"}
+        log_parts = [f"打包完成！總共 {total_files_added} 個檔案被加入 ZIP。耗時 {duration:.2f} 秒"]
+        if skipped_pack_mcmeta:
+            log_parts.append(f"跳過 pack.mcmeta（已存在於：{skipped_pack_mcmeta}）")
+        if skipped_pack_png:
+            log_parts.append(f"跳過 pack.png（已存在於：{skipped_pack_png}）")
+        yield {"progress": 1.0, "log": "--- " + "；".join(log_parts) + " ---"}
 
     except Exception as e:
-        log.error(f"打包時發生嚴重錯誤: {e}", exc_info=True)
+        log_error(f"打包時發生嚴重錯誤: {e}", exc_info=True)
         yield {"progress": 1.0, "log": f"錯誤：打包失敗: {e}", "error": True}
-        # 如果失敗，嘗試刪除不完整的 ZIP 檔案
         if os.path.exists(output_zip_path):
             os.remove(output_zip_path)
