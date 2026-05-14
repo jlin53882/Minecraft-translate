@@ -320,10 +320,16 @@ class BundlerView(ft.Column):
         self._page.run_task(self._async_pick_extra_folder)
 
     async def _async_pick_extra_folder(self):
-        result = await self.file_picker.get_directory_path(dialog_title="選擇其他資料夾")
+        result = await self.file_picker.pick_files(
+            dialog_title="選擇資料夾或檔案",
+            allow_multiple=True,
+        )
         log_debug("_async_pick_extra_folder result: {result}")
-        if result and result not in self.extra_folders:
-            self.extra_folders.append(result)
+        if result:
+            for file in result:
+                path = file.path
+                if path not in self.extra_folders:
+                    self.extra_folders.append(path)
             self._refresh_extra_folders()
             self._page.update()
 
@@ -333,11 +339,12 @@ class BundlerView(ft.Column):
     def _refresh_extra_folders(self):
         self.extra_folders_view.controls.clear()
         for path in self.extra_folders:
-            folder_name = os.path.basename(path.rstrip("/\\"))
+            is_file = os.path.isfile(path)
+            icon = ft.Icons.INSERT_DRIVE_FILE if is_file else ft.Icons.FOLDER
             self.extra_folders_view.controls.append(
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.FOLDER, size=16, color=theme.BLUE_GREY_500),
+                        ft.Icon(icon, size=16, color=theme.BLUE_GREY_500),
                         ft.Text(path, expand=True, size=13, text_align=ft.TextAlign.START),
                         ft.IconButton(
                             icon=ft.Icons.CLOSE,

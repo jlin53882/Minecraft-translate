@@ -159,31 +159,45 @@ def bundle_outputs_generator(
                 for extra_path in extra_folders:
                     step += 1
                     progress = 0.15 + (step / total_steps) * 0.7
-                    yield {"progress": progress, "log": f"正在處理額外資料夾: '{extra_path}'..."}
+                    yield {"progress": progress, "log": f"正在處理額外項目: '{extra_path}'..."}
 
                     if not os.path.exists(extra_path):
-                        yield {"progress": progress, "log": f"額外資料夾不存在: '{extra_path}'"}
+                        yield {"progress": progress, "log": f"額外項目不存在: '{extra_path}'"}
                         continue
 
-                    parent_name = os.path.basename(extra_path.rstrip("/\\"))
-                    for entry in os.listdir(extra_path):
-                        src = os.path.join(extra_path, entry)
-                        if os.path.isdir(src):
-                            count, seen_files = _add_folder_to_zip(zf, src, "", seen_files)
-                            total_files_added += count
-                            yield {"progress": progress, "log": f"額外資料夾 '{parent_name}/{entry}': +{count} 個檔案"}
-                        elif os.path.isfile(src):
-                            archive_name = entry
-                            if archive_name in seen_files:
-                                base, ext = os.path.splitext(archive_name)
-                                counter = 1
-                                while f"{base}_{counter}{ext}" in seen_files:
-                                    counter += 1
-                                archive_name = f"{base}_{counter}{ext}"
-                            seen_files[archive_name] = 1
-                            zf.write(src, archive_name)
-                            total_files_added += 1
-                            yield {"progress": progress, "log": f"額外檔案: +1 ({entry})"}
+                    if os.path.isfile(extra_path):
+                        file_name = os.path.basename(extra_path)
+                        archive_name = file_name
+                        if archive_name in seen_files:
+                            base, ext = os.path.splitext(archive_name)
+                            counter = 1
+                            while f"{base}_{counter}{ext}" in seen_files:
+                                counter += 1
+                            archive_name = f"{base}_{counter}{ext}"
+                        seen_files[archive_name] = 1
+                        zf.write(extra_path, archive_name)
+                        total_files_added += 1
+                        yield {"progress": progress, "log": f"額外檔案: +1 ({file_name})"}
+                    elif os.path.isdir(extra_path):
+                        parent_name = os.path.basename(extra_path.rstrip("/\\"))
+                        for entry in os.listdir(extra_path):
+                            src = os.path.join(extra_path, entry)
+                            if os.path.isdir(src):
+                                count, seen_files = _add_folder_to_zip(zf, src, "", seen_files)
+                                total_files_added += count
+                                yield {"progress": progress, "log": f"額外資料夾 '{parent_name}/{entry}': +{count} 個檔案"}
+                            elif os.path.isfile(src):
+                                archive_name = entry
+                                if archive_name in seen_files:
+                                    base, ext = os.path.splitext(archive_name)
+                                    counter = 1
+                                    while f"{base}_{counter}{ext}" in seen_files:
+                                        counter += 1
+                                    archive_name = f"{base}_{counter}{ext}"
+                                seen_files[archive_name] = 1
+                                zf.write(src, archive_name)
+                                total_files_added += 1
+                                yield {"progress": progress, "log": f"額外檔案: +1 ({entry})"}
 
         duration = time.time() - start_time
         yield {"progress": 1.0, "log": f"--- 打包完成！總共 {total_files_added} 個檔案被加入 ZIP。耗時 {duration:.2f} 秒 ---"}

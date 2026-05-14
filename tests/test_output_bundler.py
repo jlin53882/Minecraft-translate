@@ -351,7 +351,7 @@ class TestBundleOutputsGeneratorNewParams:
             extra_folders=[str(tmp_path / "nonexistent")],
         ))
 
-        assert any("額外資料夾不存在" in r.get("log", "") for r in results)
+        assert any("額外項目不存在" in r.get("log", "") for r in results)
 
 
 class TestOutputBundlerIntegration:
