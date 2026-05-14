@@ -7,7 +7,6 @@
 import flet as ft
 from app.ui import theme
 from translation_tool.utils.log_unit import log_info
-# guard: config_view still conceptually owns the primary_button(...) save action
 from app.services_impl.config_service import load_config_json, save_config_json
 from app.views.config.config_actions import load_config_into_view, save_config_from_view
 from app.views.config.config_form import (
@@ -20,24 +19,9 @@ from app.views.config.config_form import (
 from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
 
 NAV_ITEMS = [
-    {"id": "general", "label": "一般設定", "icon": ft.Icons.SETTINGS, "expanded": True, "sub": [
-        {"id": "logging", "label": "日誌設定"},
-        {"id": "translator", "label": "翻譯行為"},
-        {"id": "species", "label": "學名查詢"},
-        {"id": "bundler", "label": "成品打包"},
-    ]},
-    {"id": "lm", "label": "大型語言模型設定", "icon": ft.Icons.AUTO_AWESOME, "expanded": True, "sub": [
-        {"id": "lm_basic", "label": "基本設定"},
-        {"id": "lm_prompts", "label": "提示詞"},
-        {"id": "lm_batch", "label": "批次與限制"},
-        {"id": "lm_filter", "label": "過濾條件"},
-        {"id": "lm_models", "label": "模型清單"},
-        {"id": "lm_keys", "label": "API 金鑰"},
-    ]},
-    {"id": "merger", "label": "語言合併設定", "icon": ft.Icons.CALL_MERGE, "expanded": True, "sub": [
-        {"id": "merger_pending", "label": "待翻譯設定"},
-        {"id": "merger_quarantine", "label": "隔離設定"},
-    ]},
+    {"id": "general", "label": "一般設定", "icon": ft.Icons.SETTINGS},
+    {"id": "lm", "label": "大型語言模型設定", "icon": ft.Icons.AUTO_AWESOME},
+    {"id": "merger", "label": "語言合併設定", "icon": ft.Icons.CALL_MERGE},
 ]
 
 
@@ -61,8 +45,7 @@ class ConfigView(ft.Column):
         super().__init__(expand=True, spacing=0)
         self._page = page
         self.controls_map = {}
-        self.nav_state = {item["id"]: item["expanded"] for item in NAV_ITEMS}
-        self.nav_item_rows = {}
+        self._selected_nav = "general"
 
         self._init_controls()
 
@@ -75,7 +58,7 @@ class ConfigView(ft.Column):
                 ft.Row(
                     controls=[
                         self._build_nav_column(),
-                        self._build_content_column(),
+                        self._build_content_area(),
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.START,
                     spacing=15,
@@ -236,92 +219,52 @@ class ConfigView(ft.Column):
         self.keys_column = ft.Column(spacing=5)
         self.controls_map["lm_translator.keys"] = self.keys_column
 
-    def _build_nav_item(self, item: dict) -> ft.Column:
-        """建立導覽項目（含子項目可展開/收合）"""
-        item_id = item["id"]
-        is_expanded = self.nav_state.get(item_id, True)
+    def _build_nav_item(self, item: dict) -> ft.Container:
+        """建立導覽項目按鈕"""
+        is_selected = self._selected_nav == item["id"]
 
-        sub_rows = []
-        for sub in item.get("sub", []):
-            sub_id = sub["id"]
-            sub_btn = ft.Container(
-                padding=ft.Padding(left=28, right=12, top=4, bottom=4),
-                content=ft.TextButton(
-                    text=sub["label"],
-                    style=ft.ButtonStyle(
-                        text_style=ft.TextStyle(size=12, color=ft.Colors.BLUE_GREY_700),
-                    ),
-                    on_click=lambda e, sid=sub_id: self._scroll_to_section(sid),
-                ),
-            )
-            self.nav_item_rows[sub_id] = sub_btn
-            sub_rows.append(sub_btn)
-
-        expand_icon = ft.Icons.EXPAND_LESS if is_expanded else ft.Icons.EXPAND_MORE
-
-        def toggle_expand(e):
-            self.nav_state[item_id] = not self.nav_state[item_id]
-            self._rebuild_nav()
-
-        header_btn = ft.IconButton(
-            icon=expand_icon,
-            icon_size=16,
-            tooltip="展開/收合",
-            on_click=toggle_expand,
-        )
-
-        header_row = ft.Container(
-            padding=ft.Padding(left=8, right=8, top=8, bottom=8),
-            border_radius=6,
-            bgcolor=ft.Colors.BLUE_100 if is_expanded else ft.Colors.GREY_200,
+        btn = ft.Container(
+            padding=ft.Padding(left=12, right=12, top=10, bottom=10),
+            border_radius=8,
+            bgcolor=ft.Colors.BLUE_200 if is_selected else ft.Colors.GREY_100,
+            on_click=lambda e, iid=item["id"]: self._on_nav_click(iid),
             content=ft.Row(
                 [
-                    ft.Icon(item["icon"], size=16, color=ft.Colors.BLUE_800),
-                    ft.Text(item["label"], weight=ft.FontWeight.BOLD, size=13, color=ft.Colors.BLUE_900),
-                    header_btn,
+                    ft.Icon(item["icon"], size=18, color=ft.Colors.BLUE_800 if is_selected else ft.Colors.BLUE_GREY_600),
+                    ft.Text(item["label"], weight=ft.FontWeight.BOLD, size=13, color=ft.Colors.BLUE_900 if is_selected else ft.Colors.BLUE_GREY_700),
                 ],
-                spacing=6,
+                spacing=10,
                 alignment=ft.MainAxisAlignment.START,
             ),
         )
+        return btn
 
-        sub_content = ft.Column(
-            sub_rows if is_expanded else [],
-            spacing=0,
-            tight=True,
-        )
-
-        item_container = ft.Column(
-            [header_row, sub_content],
-            spacing=2,
-            tight=True,
-        )
-
-        return item_container
+    def _on_nav_click(self, nav_id: str):
+        """處理導覽點擊"""
+        self._selected_nav = nav_id
+        self._rebuild_nav()
+        self._show_content(nav_id)
 
     def _rebuild_nav(self):
-        """重新建構導覽列（收合/展開切換時）"""
+        """重新建構導覽列"""
         self.nav_column.controls = [self._build_nav_item(item) for item in NAV_ITEMS]
         self.nav_column.update()
 
-    def _scroll_to_section(self, section_id: str):
-        """滾動到指定區塊"""
-        target = self.section_anchors.get(section_id)
-        if target:
-            self.scroll_container.scroll_to(control=target, offset=-0.1)
+    def _show_content(self, nav_id: str):
+        """切換顯示內容"""
+        for cid, container in self._content_containers.items():
+            container.visible = (cid == nav_id)
+        self.content_scroll.update()
 
-    def _build_nav_column(self) -> ft.Column:
+    def _build_nav_column(self) -> ft.Container:
         """建立左側導覽列"""
-        self.nav_column = ft.Column(
-            spacing=6,
-            scroll=ft.ScrollMode.ADAPTIVE,
-        )
+        self.nav_column = ft.Column(spacing=6)
         nav_container = ft.Container(
-            width=220,
+            width=200,
             content=ft.Column(
                 [
                     ft.Text(
-                        "分類導覽",
+                        "設定分類",
                         weight=ft.FontWeight.BOLD,
                         size=14,
                         color=ft.Colors.BLUE_GREY_800,
@@ -337,59 +280,74 @@ class ConfigView(ft.Column):
         )
         return nav_container
 
-    def _section_anchor(self, section_id: str, content: ft.Control) -> ft.Container:
-        """建立帶有 section id 的錨點容器"""
-        self.section_anchors[section_id] = content
-        return content
+    def _build_content_area(self) -> ft.Column:
+        """建立右側內容區（所有分類內容）"""
+        self._content_containers = {}
 
-    def _build_content_column(self) -> ft.Column:
-        """建立右側內容區"""
-        self.section_anchors = {}
-
-        return ft.Column(
-            expand=2,
+        general_content = ft.Column(
             spacing=15,
             controls=[
-                self._section_anchor("logging", self._build_card(
-                    "日誌設定 (Logging)",
-                    [
-                        self.controls_map["logging.log_level"],
-                        self.controls_map["logging.log_dir"],
-                    ],
-                )),
-                self._section_anchor("translator", self._build_card(
-                    "翻譯與處理設定 (Translator)",
-                    [
-                        self.controls_map["translator.output_dir_name"],
-                        self.controls_map["translator.replace_rules_path"],
-                        self.controls_map["translator.cache_directory"],
-                        self.controls_map["translator.parallel_execution_workers"],
-                        self.controls_map["translator.enable_cache_saving"],
-                    ],
-                )),
-                self._section_anchor("species", self._build_card(
-                    "學名查詢設定 (Species Cache)",
-                    [
-                        self.controls_map["species_cache.cache_directory"],
-                        self.controls_map["species_cache.cache_filename"],
-                        self.controls_map["species_cache.wikipedia_language"],
-                        self.controls_map["species_cache.wikipedia_rate_limit_delay"],
-                    ],
-                )),
-                self._section_anchor("bundler", self._build_card(
-                    "成品打包器 (Output Bundler)",
-                    [self.controls_map["output_bundler.output_zip_name"]],
-                )),
-                self._section_anchor("lm_basic", self._build_lm_basic_card()),
-                self._section_anchor("lm_prompts", self._build_lm_prompts_card()),
-                self._section_anchor("lm_batch", self._build_lm_batch_card()),
-                self._section_anchor("lm_filter", self._build_lm_filter_card()),
-                self._section_anchor("lm_models", self._build_lm_models_card()),
-                self._section_anchor("lm_keys", self._build_lm_keys_card()),
-                self._section_anchor("merger_pending", self._build_lang_merger_card()),
-                ft.Container(height=20),
+                self._build_card("日誌設定 (Logging)", [
+                    self.controls_map["logging.log_level"],
+                    self.controls_map["logging.log_dir"],
+                ]),
+                self._build_card("翻譯與處理設定 (Translator)", [
+                    self.controls_map["translator.output_dir_name"],
+                    self.controls_map["translator.replace_rules_path"],
+                    self.controls_map["translator.cache_directory"],
+                    self.controls_map["translator.parallel_execution_workers"],
+                    self.controls_map["translator.enable_cache_saving"],
+                ]),
+                self._build_card("學名查詢設定 (Species Cache)", [
+                    self.controls_map["species_cache.cache_directory"],
+                    self.controls_map["species_cache.cache_filename"],
+                    self.controls_map["species_cache.wikipedia_language"],
+                    self.controls_map["species_cache.wikipedia_rate_limit_delay"],
+                ]),
+                self._build_card("成品打包器 (Output Bundler)", [
+                    self.controls_map["output_bundler.output_zip_name"],
+                ]),
             ],
         )
+
+        lm_content = ft.Column(
+            spacing=15,
+            controls=[
+                self._build_lm_basic_card(),
+                self._build_lm_prompts_card(),
+                self._build_lm_batch_card(),
+                self._build_lm_filter_card(),
+                self._build_lm_models_card(),
+                self._build_lm_keys_card(),
+            ],
+        )
+
+        merger_content = ft.Column(
+            spacing=15,
+            controls=[
+                self._build_lang_merger_card(),
+            ],
+        )
+
+        self._content_containers["general"] = general_content
+        self._content_containers["lm"] = lm_content
+        self._content_containers["merger"] = merger_content
+
+        self.content_scroll = ft.Container(
+            expand=True,
+            content=ft.Stack(
+                [
+                    general_content,
+                    lm_content,
+                    merger_content,
+                ]
+            ),
+        )
+
+        for cid, container in self._content_containers.items():
+            container.visible = (cid == self._selected_nav)
+
+        return self.content_scroll
 
     def _build_lm_basic_card(self) -> ft.Control:
         top_row = ft.Row(
@@ -458,7 +416,7 @@ class ConfigView(ft.Column):
                 [
                     ft.Row(
                         [
-                            ft.Text("Models List", weight=ft.FontWeight.BOLD),
+                            ft.Text("模型清單 (Models List)", weight=ft.FontWeight.BOLD),
                             self.new_model_field,
                             self.add_model_button,
                         ]
@@ -467,7 +425,7 @@ class ConfigView(ft.Column):
                 ]
             ),
         )
-        return self._build_card("模型清單", [models_section])
+        return self._build_card("模型設定", [models_section])
 
     def _build_lm_keys_card(self) -> ft.Control:
         keys_section = ft.Container(
@@ -478,7 +436,7 @@ class ConfigView(ft.Column):
                 [
                     ft.Row(
                         [
-                            ft.Text("API Keys", weight=ft.FontWeight.BOLD),
+                            ft.Text("API 金鑰 (API Keys)", weight=ft.FontWeight.BOLD),
                             self.add_key_button,
                         ]
                     ),
@@ -486,7 +444,7 @@ class ConfigView(ft.Column):
                 ]
             ),
         )
-        return self._build_card("API 金鑰", [keys_section])
+        return self._build_card("API 金鑰設定", [keys_section])
 
     def _build_lang_merger_card(self) -> ft.Control:
         return self._build_card(
