@@ -22,7 +22,7 @@ BUTTON_HEIGHT = 42
 BUTTON_RADIUS = 6
 
 # 額外常用顏色（過渡用）
-# 注意：Colors.BLACK12 在 Flet 0.28.3 中仍可用，無需修改
+# 注意：Colors.BLACK_12 在 Flet 0.85.0 中可用
 RED = Colors.RED
 RED_400 = Colors.RED_400
 RED_500 = Colors.RED_500
@@ -65,7 +65,7 @@ OUTLINE = Colors.OUTLINE
 OUTLINE_VARIANT = Colors.OUTLINE_VARIANT
 PRIMARY = Colors.PRIMARY
 BLACK = Colors.BLACK
-BLACK12 = Colors.BLACK12
+BLACK12 = Colors.BLACK_12
 WHITE = Colors.WHITE
 
 # 文字颜色（替代不存在的 ON_SURFACE_VARIANT）
