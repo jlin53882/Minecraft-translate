@@ -117,14 +117,74 @@ def bundle_outputs_generator(
     seen_files: dict = {}
 
     try:
+        # Pre-check for pack.png and pack.mcmeta in folders
+        skipped_pack_mcmeta = None
+        skipped_pack_png = None
+        pack_mcmeta_source = None
+        pack_png_source = None
+
+        # Check input_root_dir for pack.png/pack.mcmeta
+        for entry in os.listdir(input_root_dir):
+            full_path = os.path.join(input_root_dir, entry)
+            if os.path.isfile(full_path):
+                if entry.lower() == "pack.mcmeta":
+                    pack_mcmeta_source = full_path
+                elif entry.lower() == "pack.png":
+                    pack_png_source = full_path
+
+        # Check extra_folders for pack.png/pack.mcmeta
+        if extra_folders:
+            for extra_path in extra_folders:
+                if os.path.isfile(extra_path):
+                    entry = os.path.basename(extra_path)
+                    if entry.lower() == "pack.mcmeta":
+                        pack_mcmeta_source = extra_path
+                    elif entry.lower() == "pack.png":
+                        pack_png_source = extra_path
+
+        # If pack.png/pack.mcmeta found in folders, skip UI settings and warn
+        if pack_mcmeta_source:
+            skipped_pack_mcmeta = pack_mcmeta_source
+            yield {"progress": 0.01, "log": f"警告：pack.mcmeta 已存在於 '{pack_mcmeta_source}'，跳過 UI 設定"}
+            log_warning(f"pack.mcmeta 已存在於 '{pack_mcmeta_source}'，跳過 UI 設定")
+
+        if pack_png_source:
+            skipped_pack_png = pack_png_source
+            yield {"progress": 0.02, "log": f"警告：pack.png 已存在於 '{pack_png_source}'，跳過 UI 設定"}
+            log_warning(f"pack.png 已存在於 '{pack_png_source}'，跳過 UI 設定")
+
         with zipfile.ZipFile(output_zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-            if description or min_format > 0:
+            # Write pack.mcmeta from folder if exists, otherwise from UI
+            if pack_mcmeta_source:
+                try:
+                    with open(pack_mcmeta_source, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    zf.writestr("pack.mcmeta", content)
+                    total_files_added += 1
+                    yield {"progress": 0.05, "log": "已寫入 pack.mcmeta（來自資料夾）"}
+                    log_info(f"寫入 pack.mcmeta（來自：{pack_mcmeta_source}）")
+                except Exception as ex:
+                    yield {"progress": 0.05, "log": f"讀取 pack.mcmeta 失敗: {ex}"}
+            elif description or min_format > 0:
                 _write_pack_mcmeta(zf, description, min_format, max_format)
                 total_files_added += 1
                 yield {"progress": 0.05, "log": "已寫入 pack.mcmeta"}
                 log_info("已寫入 pack.mcmeta")
 
-            if pack_image_path and os.path.exists(pack_image_path):
+            # Write pack.png from folder if exists, otherwise from UI
+            if pack_png_source:
+                try:
+                    ext = os.path.splitext(pack_png_source)[1].lower()
+                    if ext in (".png", ".jpg", ".jpeg"):
+                        seen_files["pack.png"] = 1
+                        with open(pack_png_source, "rb") as src:
+                            zf.writestr("pack.png", src.read())
+                        total_files_added += 1
+                        yield {"progress": 0.1, "log": "已寫入 pack.png（來自資料夾）"}
+                        log_info(f"寫入 pack.png（來自：{pack_png_source}）")
+                except Exception as ex:
+                    yield {"progress": 0.1, "log": f"讀取 pack.png 失敗: {ex}"}
+            elif pack_image_path and os.path.exists(pack_image_path):
                 try:
                     ext = os.path.splitext(pack_image_path)[1].lower()
                     if ext in (".png", ".jpg", ".jpeg"):
@@ -226,7 +286,12 @@ def bundle_outputs_generator(
                                 log_debug(f"額外資料夾內檔案: {entry}")
 
         duration = time.time() - start_time
-        yield {"progress": 1.0, "log": f"--- 打包完成！總共 {total_files_added} 個檔案被加入 ZIP。耗時 {duration:.2f} 秒 ---"}
+        log_parts = [f"打包完成！總共 {total_files_added} 個檔案被加入 ZIP。耗時 {duration:.2f} 秒"]
+        if skipped_pack_mcmeta:
+            log_parts.append(f"跳過 pack.mcmeta（已存在於：{skipped_pack_mcmeta}）")
+        if skipped_pack_png:
+            log_parts.append(f"跳過 pack.png（已存在於：{skipped_pack_png}）")
+        yield {"progress": 1.0, "log": "--- " + "；".join(log_parts) + " ---"}
 
     except Exception as e:
         log_error(f"打包時發生嚴重錯誤: {e}", exc_info=True)

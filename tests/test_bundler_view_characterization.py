@@ -93,7 +93,7 @@ def test_bundler_view_hint_texts():
     view = BundlerView(page, _FilePicker())
 
     assert view.version_search.hint_text == "輸入版本關鍵字..."
-    assert view.description_field.hint_text == "支援 JSON 格式或 §顏色代碼"
+    assert view.description_field.hint_text == "直接輸入文字，或使用 § 顏色代碼"
     assert view.pack_image_field.hint_text == "選擇 pack.png 圖片（可選）"
     assert view.root_dir_field.hint_text == "包含所有翻譯產出的最上層資料夾"
     assert view.output_zip_field.hint_text == "輸出位置與檔名"
