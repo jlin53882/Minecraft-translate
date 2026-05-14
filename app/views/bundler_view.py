@@ -97,6 +97,17 @@ class BundlerView(ft.Column):
     def _refresh_version_list(self, search_text: str):
         self.version_list.controls.clear()
         filtered = [v for v in self.version_data.keys() if search_text.lower() in v.lower()]
+        if not filtered:
+            self.version_list.controls.append(
+                ft.Container(
+                    content=ft.Text(
+                        "請點擊或輸入關鍵字搜尋版本" if search_text else "無可用版本",
+                        size=12,
+                        color=theme.GREY_500,
+                    ),
+                    padding=8,
+                )
+            )
         for version_key in filtered:
             self.version_list.controls.append(
                 ft.Container(
@@ -113,8 +124,10 @@ class BundlerView(ft.Column):
         self._refresh_version_list(e.control.value or "")
 
     def _select_version(self, version: str):
+        log_debug(f"_select_version called: {version}")
         self.version_search.value = version
         self.version_expanded = False
+        log_debug(f"_select_version: search.value={self.version_search.value}, expanded={self.version_expanded}")
         self._page.update()
 
     def _toggle_version_expand(self, e: ft.ControlEvent):
