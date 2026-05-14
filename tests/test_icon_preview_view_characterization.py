@@ -8,8 +8,22 @@ class _Page:
     def __init__(self):
         self.overlay = []
         self.updated = 0
+        self._tasks = []
+
     def update(self, *args, **kwargs):
         self.updated += 1
+
+    def run_task(self, coro, *args):
+        self._tasks.append((coro, args))
+
+    def _run_all_tasks(self):
+        for coro, args in self._tasks:
+            result = coro(*args)
+            if result is not None:
+                try:
+                    result.send(None)
+                except StopIteration:
+                    pass
 
 
 def test_icon_preview_view_initializes_core_sections():

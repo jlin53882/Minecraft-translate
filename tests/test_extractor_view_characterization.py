@@ -19,20 +19,41 @@ class _Page:
         self.overlay = []
         self.dialog = None
         self.updated = 0
+        self._tasks = []
+
     def update(self):
         self.updated += 1
+
     def open(self, dialog):
         self.overlay.append(dialog)
         dialog.open = True
+
     def close(self, dialog):
         dialog.open = False
+
+    def run_task(self, coro, *args):
+        self._tasks.append((coro, args))
+
+    def _run_all_tasks(self):
+        for coro, args in self._tasks:
+            result = coro(*args)
+            if result is not None:
+                try:
+                    result.send(None)
+                except StopIteration:
+                    pass
 
 
 class _FilePicker:
     def __init__(self):
         self.on_result = None
-    def get_directory_path(self):
-        return None
+        self._mock_path = None
+
+    async def get_directory_path(self, dialog_title: str = None):
+        return self._mock_path
+
+    def set_mock_path(self, path):
+        self._mock_path = path
 
 
 def test_extractor_view_has_preview_and_extract_buttons(monkeypatch):

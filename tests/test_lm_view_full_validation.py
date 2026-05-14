@@ -20,17 +20,34 @@ class _Page:
     def __init__(self):
         self.overlay = []
         self.updated = 0
+        self._tasks = []
 
     def update(self):
         self.updated += 1
+
+    def run_task(self, coro, *args):
+        self._tasks.append((coro, args))
+
+    def _run_all_tasks(self):
+        for coro, args in self._tasks:
+            result = coro(*args)
+            if result is not None:
+                try:
+                    result.send(None)
+                except StopIteration:
+                    pass
 
 
 class _FilePicker:
     def __init__(self):
         self.on_result = None
+        self._mock_path = None
 
-    def get_directory_path(self):
-        pass
+    async def get_directory_path(self, dialog_title: str = None):
+        return self._mock_path
+
+    def set_mock_path(self, path):
+        self._mock_path = path
 
 
 class _Session:
@@ -214,6 +231,44 @@ def test_on_output_dir_picked_updates_output_field(monkeypatch):
 
     assert view.output_path.value == "E:/Output"
     assert page.updated >= 1, "page.update() should be called"
+
+
+# ============================================================
+# Test 5a: async pick_input_directory updates input_path
+# ============================================================
+
+def test_async_pick_input_directory_updates_input_field(monkeypatch):
+    """驗證 async 選擇輸入目錄後，正確更新 input_path。"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = _Page()
+    picker = _FilePicker()
+    picker.set_mock_path("D:/Game/assets")
+    view = lm_view.LMView(page, picker)
+
+    page.run_task(view._async_pick_input_directory)
+    page._run_all_tasks()
+
+    assert view.input_path.value == "D:/Game/assets"
+    assert page.updated >= 1
+
+
+# ============================================================
+# Test 5b: async pick_output_directory updates output_path
+# ============================================================
+
+def test_async_pick_output_directory_updates_output_field(monkeypatch):
+    """驗證 async 選擇輸出目錄後，正確更新 output_path。"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = _Page()
+    picker = _FilePicker()
+    picker.set_mock_path("E:/Output")
+    view = lm_view.LMView(page, picker)
+
+    page.run_task(view._async_pick_output_directory)
+    page._run_all_tasks()
+
+    assert view.output_path.value == "E:/Output"
+    assert page.updated >= 1
 
 
 # ============================================================
