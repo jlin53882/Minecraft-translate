@@ -244,13 +244,15 @@ class ConfigView(ft.Column):
         sub_rows = []
         for sub in item.get("sub", []):
             sub_id = sub["id"]
-            sub_btn = ft.TextButton(
-                text=sub["label"],
-                style=ft.ButtonStyle(
-                    padding=36,
-                    text_style=ft.TextStyle(size=13),
+            sub_btn = ft.Container(
+                padding=ft.Padding(left=28, right=12, top=4, bottom=4),
+                content=ft.TextButton(
+                    text=sub["label"],
+                    style=ft.ButtonStyle(
+                        text_style=ft.TextStyle(size=12, color=ft.Colors.BLUE_GREY_700),
+                    ),
+                    on_click=lambda e, sid=sub_id: self._scroll_to_section(sid),
                 ),
-                on_click=lambda e, sid=sub_id: self._scroll_to_section(sid),
             )
             self.nav_item_rows[sub_id] = sub_btn
             sub_rows.append(sub_btn)
@@ -263,33 +265,36 @@ class ConfigView(ft.Column):
 
         header_btn = ft.IconButton(
             icon=expand_icon,
-            icon_size=18,
+            icon_size=16,
             tooltip="展開/收合",
             on_click=toggle_expand,
-            padding=4,
         )
 
-        header = ft.Row(
-            [
-                ft.Icon(item["icon"], size=18, color=ft.Colors.BLUE_GREY_700),
-                ft.Text(item["label"], weight=ft.FontWeight.BOLD, size=14),
-                header_btn,
-            ],
-            spacing=8,
-            alignment=ft.MainAxisAlignment.START,
+        header_row = ft.Container(
+            padding=ft.Padding(left=8, right=8, top=8, bottom=8),
+            border_radius=6,
+            bgcolor=ft.Colors.BLUE_100 if is_expanded else ft.Colors.GREY_200,
+            content=ft.Row(
+                [
+                    ft.Icon(item["icon"], size=16, color=ft.Colors.BLUE_800),
+                    ft.Text(item["label"], weight=ft.FontWeight.BOLD, size=13, color=ft.Colors.BLUE_900),
+                    header_btn,
+                ],
+                spacing=6,
+                alignment=ft.MainAxisAlignment.START,
+            ),
         )
 
-        content_col = ft.Column(
-            [header] + (sub_rows if is_expanded else []),
-            spacing=2,
+        sub_content = ft.Column(
+            sub_rows if is_expanded else [],
+            spacing=0,
             tight=True,
         )
 
-        item_container = ft.Container(
-            border_radius=8,
-            bgcolor=ft.Colors.BLUE_GREY_50 if is_expanded else ft.Colors.GREY_100,
-            padding=8,
-            content=content_col,
+        item_container = ft.Column(
+            [header_row, sub_content],
+            spacing=2,
+            tight=True,
         )
 
         return item_container
