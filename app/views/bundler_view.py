@@ -32,7 +32,7 @@ class BundlerView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
-        self.page = page
+        self._page = page
         # 我們仍然保留 file_picker，以防萬一 (雖然現在主要用 tkinter)
         self.file_picker = file_picker
 
@@ -47,7 +47,7 @@ class BundlerView(ft.Column):
             expand=True,
             tooltip="選擇您要將 .zip 檔案儲存的位置和檔名",
         )
-        self.start_button = ft.ElevatedButton(
+        self.start_button = ft.Button(
             "開始打包", on_click=self.start_bundling_clicked, icon=ft.Icons.ARCHIVE
         )
         self.progress_bar = ft.ProgressBar(value=0, visible=False)
@@ -89,8 +89,8 @@ class BundlerView(ft.Column):
             ft.Text("打包日誌", theme_style=ft.TextThemeStyle.TITLE_MEDIUM),
             ft.Container(
                 content=self.log_view,
-                border=ft.border.all(1, theme.OUTLINE),
-                border_radius=ft.border_radius.all(5),
+                border=ft.Border.all(width=1, color=theme.OUTLINE),
+                border_radius=ft.BorderRadius.all(5),
                 padding=10,
                 expand=True,
             ),
@@ -117,9 +117,9 @@ class BundlerView(ft.Column):
         """顯示提示訊息"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
+        self._page.overlay.append(snack)
         snack.open = True
-        self.page.update()
+        self._page.update()
 
     def pick_path_with_tkinter(self, e, target_textfield: ft.TextField, pick_type: str):
         """
@@ -149,7 +149,7 @@ class BundlerView(ft.Column):
 
             if path:
                 target_textfield.value = path
-                self.page.update()
+                self._page.update()
             else:
                 self._show_snack_bar("您已取消選擇", theme.BLUE_GREY_500)
 
@@ -166,7 +166,7 @@ class BundlerView(ft.Column):
             self.start_button,
         ]:
             ctrl.disabled = disabled
-        self.page.update()
+        self._page.update()
 
     def start_bundling_clicked(self, e):
         """點擊開始打包按鈕"""
@@ -183,7 +183,7 @@ class BundlerView(ft.Column):
         self.progress_bar.visible = True
         self.log_view.controls.clear()
         self.log_view.controls.append(ft.Text("[系統] 開始執行打包..."))
-        self.page.update()
+        self._page.update()
 
         thread = threading.Thread(
             target=self.bundling_worker, args=(root_dir, output_zip)
@@ -203,6 +203,10 @@ class BundlerView(ft.Column):
                 if update.get("error"):
                     self.progress_bar.color = theme.RED
                 self.log_view.scroll_to(offset=-1, duration=100)
-                self.page.update()
+                self._page.update()
         finally:
             self.set_controls_disabled(False)
+
+    @property
+    def page(self):
+        return self._page

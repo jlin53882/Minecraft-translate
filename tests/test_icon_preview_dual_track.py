@@ -25,7 +25,7 @@ def create_view(
 
     with patch.object(IconPreviewView, "__init__", lambda self, page: None):
         view = IconPreviewView.__new__(IconPreviewView)
-        view.page = MockPage()
+        view._page = MockPage()
         view.source_root = source_root
         view.review_root = review_root
         view._entries_cache = None

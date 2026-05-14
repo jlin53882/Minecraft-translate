@@ -36,7 +36,7 @@ class RulesView(ft.Column):
             page: Flet Page 物件
         """
         super().__init__(expand=True, spacing=15)
-        self.page = page
+        self._page = page
 
         # --- 分頁和數據狀態 ---
         self._state = RulesTableState()
@@ -85,13 +85,14 @@ class RulesView(ft.Column):
         return -1
 
     def _sync_page_jump_field(self):
-        # 確保欄位顯示跟 current_page 一致
         """同步分頁跳轉欄位。"""
         if hasattr(self, "page_jump_field"):
             self.page_jump_field.value = str(self.current_page)
-            # 只有當控制項已加入頁面時才執行 update，避免初始化時 crash
-            if self.page_jump_field.page:
-                self.page_jump_field.update()
+            try:
+                if self.page_jump_field.page:
+                    self.page_jump_field.update()
+            except RuntimeError:
+                pass
 
     def on_page_jump_submit(self, e):
         """驗證並執行頁碼跳轉"""
@@ -179,13 +180,13 @@ class RulesView(ft.Column):
                 ft.dropdown.Option("from_asc", "依 From 字典序"),
                 ft.dropdown.Option("from_len", "依 From 長度"),
             ],
-            on_change=self.on_sort_change,
             dense=True,
             width=180,
             text_size=14,
             border_color=theme.OUTLINE,
             content_padding=10,
         )
+        self.sort_box.on_change = self.on_sort_change
 
         # 4. 表格
         self.rules_table = ft.DataTable(
@@ -226,7 +227,7 @@ class RulesView(ft.Column):
     def _build_header(self):
         """頁面標題區"""
         return ft.Container(
-            padding=ft.padding.only(left=5, bottom=5),
+            padding=ft.Padding(left=5, bottom=5),
             content=ft.Row(
                 [
                     ft.Icon(
@@ -247,7 +248,6 @@ class RulesView(ft.Column):
         """工具與操作區 (搜尋/排序/按鈕)"""
         return ft.Card(
             elevation=2,
-            surface_tint_color=theme.WHITE,
             content=ft.Container(
                 padding=15,
                 content=ft.Row(
@@ -298,7 +298,6 @@ class RulesView(ft.Column):
         return ft.Card(
             expand=True,
             elevation=2,
-            surface_tint_color=theme.WHITE,
             content=ft.Container(
                 padding=10,
                 content=ft.ListView(
@@ -310,7 +309,7 @@ class RulesView(ft.Column):
     def _build_footer(self):
         """底部狀態與分頁列"""
         return ft.Container(
-            padding=ft.padding.symmetric(horizontal=10, vertical=5),
+            padding=ft.Padding(left=10, right=10, top=5, bottom=5),
             content=ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 controls=[
@@ -747,3 +746,7 @@ class RulesView(ft.Column):
             self._show_snack_bar(
                 f"🗑 已刪除：{src_preview} → {dst_preview}", theme.RED_400
             )
+
+    @property
+    def page(self):
+        return self._page

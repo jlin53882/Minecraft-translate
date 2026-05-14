@@ -33,7 +33,7 @@ def test_lm_view_initializes_primary_controls(monkeypatch):
     monkeypatch.setattr(lm_view, 'TaskSession', _Session)
     view = lm_view.LMView(_Page(), _FilePicker())
 
-    assert view.start_button.text == '開始翻譯'
+    assert view.start_button.content == '開始翻譯'
     assert view.status_chip.label.value == '尚未開始'
 
 

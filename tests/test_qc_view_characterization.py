@@ -52,13 +52,13 @@ def test_qc_view_initializes_three_cards_and_shared_log_area():
 
     # 檢查新拆分的 UntranslatedChecker 元件
     assert isinstance(view.untranslated_checker, UntranslatedChecker)
-    assert view.untranslated_checker.start_button.text == "開始檢查"
+    assert view.untranslated_checker.start_button.content == "開始檢查"
 
     # 檢查 JSON 比較按鈕
-    assert view.compare_start_button.text == "啟動：JSON 資料夾差異比對"
+    assert view.compare_start_button.content == "啟動：JSON 資料夾差異比對"
 
     # 檢查 TSV 比較按鈕
-    assert view.compare_tsv_start_button.text == "啟動：TSV 單檔案差異比對"
+    assert view.compare_tsv_start_button.content == "啟動：TSV 單檔案差異比對"
 
     # 檢查共用日誌
     assert view.progress_bar.visible is False

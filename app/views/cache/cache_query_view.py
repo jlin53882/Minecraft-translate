@@ -53,8 +53,8 @@ class CacheQueryView(ft.Container):
                 ft.dropdown.Option("DST", "DST"),
                 ft.dropdown.Option("ALL", "全部"),
             ],
-            on_change=lambda e: self._on_mode_change(),
         )
+        self.dd_query_mode.on_change = lambda e: self._on_mode_change()
 
         # 分類選擇
         self.dd_query_type = ft.Dropdown(
@@ -62,11 +62,11 @@ class CacheQueryView(ft.Container):
             value="ALL",
             tooltip="選擇要查詢的分類",
             options=[ft.dropdown.Option("ALL", "全部")],
-            on_change=lambda e: self._on_type_change(),
         )
+        self.dd_query_type.on_change = lambda e: self._on_type_change()
 
         # 按鈕
-        self.btn_query_search = ft.ElevatedButton(
+        self.btn_query_search = ft.Button(
             "搜尋", icon=ft.Icons.SEARCH, on_click=lambda e: self._on_search()
         )
         self.btn_query_clear = ft.OutlinedButton(
@@ -94,7 +94,7 @@ class CacheQueryView(ft.Container):
                 ft.Container(
                     expand=True,
                     content=self.query_result_list,
-                    border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
                     padding=4,
                 ),

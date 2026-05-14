@@ -35,7 +35,7 @@ class LMView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=16)
-        self.page = page
+        self._page = page
         self.file_picker = file_picker
 
         self.session: TaskSession | None = None
@@ -273,7 +273,6 @@ class LMView(ft.Column):
                 logs = snap.get("logs", []) or []
                 try:
                     self.log_presenter.sync(self.log_view, logs)
-                    self.log_view.scroll_to(offset=1.0)
                 except Exception as e:
                     log_debug(f"LM log presenter sync failed: {e}")
 
@@ -315,3 +314,7 @@ class LMView(ft.Column):
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
+
+    @property
+    def page(self):
+        return self._page

@@ -45,7 +45,7 @@ class UntranslatedChecker(ft.Container):
             label="未翻譯報告 輸出資料夾",
             expand=True,
         )
-        self.start_button = ft.ElevatedButton(
+        self.start_button = ft.Button(
             "開始檢查",
             icon=ft.Icons.SEARCH_OFF,
             on_click=self._on_start,
@@ -55,13 +55,9 @@ class UntranslatedChecker(ft.Container):
         super().__init__(content=self._build_content())
 
         # --- 再設定實例屬性 ---
-        self.page = page
+        self._page = page
         self.file_picker = file_picker
         self.task_runner = task_runner
-
-        # 確保 file_picker 已加入 page.overlay
-        if file_picker not in page.overlay:
-            page.overlay.append(file_picker)
 
     def _build_content(self) -> ft.Column:
         """建立 UI 內容"""
@@ -174,3 +170,7 @@ class UntranslatedChecker(ft.Container):
             (en_dir, tw_dir, out_dir),
             controls_to_disable=controls,
         )
+
+    @property
+    def page(self):
+        return self._page

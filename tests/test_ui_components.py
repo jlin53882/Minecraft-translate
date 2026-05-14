@@ -31,7 +31,7 @@ def test_primary_button_has_click_handler_and_style():
         called["v"] = True
 
     b = primary_button("Go", icon=ft.Icons.PLAY_ARROW, on_click=on_click)
-    assert isinstance(b, ft.ElevatedButton)
+    assert isinstance(b, ft.Button)
     assert b.on_click is on_click
 
 

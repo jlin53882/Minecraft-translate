@@ -60,7 +60,7 @@ class TranslationView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=16)
-        self.page = page
+        self._page = page
         self.file_picker = file_picker
         self._state = TranslationRunState()
         self._picker_target_field: ft.TextField | None = None
@@ -94,15 +94,27 @@ class TranslationView(ft.Column):
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         )
 
+        self.ftb_tab_content = self._build_ftb_tab()
+        self.kjs_tab_content = self._build_kjs_tab()
+        self.md_tab_content = self._build_md_tab()
+
+        tab_bar = ft.TabBar(tabs=[
+            ft.Tab(label="FTB Quests"),
+            ft.Tab(label="KubeJS Tooltips"),
+            ft.Tab(label="Markdown"),
+        ])
+        tab_view = ft.TabBarView(controls=[
+            self.ftb_tab_content,
+            self.kjs_tab_content,
+            self.md_tab_content,
+        ], expand=True)
+        tab_content = ft.Column([tab_bar, tab_view], expand=True)
         self.tabs = ft.Tabs(
+            content=tab_content,
+            length=3,
             selected_index=0,
             expand=True,
             animation_duration=180,
-            tabs=[
-                ft.Tab(text="FTB Quests", content=self._build_ftb_tab()),
-                ft.Tab(text="KubeJS Tooltips", content=self._build_kjs_tab()),
-                ft.Tab(text="Markdown", content=self._build_md_tab()),
-            ],
         )
 
         # action layer 讀取的相容 seam
@@ -128,7 +140,7 @@ class TranslationView(ft.Column):
                     expand=True,
                     bgcolor="#1e1e1e",
                     border_radius=8,
-                    border=ft.border.all(1, theme.GREY_800),
+                    border=ft.Border.all(1, theme.GREY_800),
                     padding=10,
                     content=self.log_view,
                 ),
@@ -158,7 +170,7 @@ class TranslationView(ft.Column):
             padding=14,
             border_radius=10,
             bgcolor=theme.WHITE,
-            border=ft.border.all(1, theme.BLACK12),
+            border=ft.Border.all(1, theme.BLACK12),
             content=ft.Row(
                 [
                     # ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color=theme.BLUE_GREY_700),
@@ -169,9 +181,6 @@ class TranslationView(ft.Column):
         )
 
         self.controls = [header, body, self.summary_card]
-
-        if self.file_picker not in self.page.overlay:
-            self.page.overlay.append(self.file_picker)
 
     # ------------------------------------------------------------------
     # 樣式 helper（集中到 app.ui.components）
@@ -223,10 +232,10 @@ class TranslationView(ft.Column):
     def _pick_directory_into(self, target: ft.TextField):
         """開啟目錄選擇器並設定目標欄位"""
         self._picker_target_field = target
-        self.file_picker.on_result = self._on_dir_picked
+        self.file_picker.on_upload = self._on_dir_picked
         self.file_picker.get_directory_path()
 
-    def _on_dir_picked(self, e: ft.FilePickerResultEvent):
+    def _on_dir_picked(self, e: ft.FilePickerUploadEvent):
         """目錄選擇後更新目標欄位"""
         if not e.path:
             return
@@ -328,3 +337,7 @@ class TranslationView(ft.Column):
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
+
+    @property
+    def page(self):
+        return self._page

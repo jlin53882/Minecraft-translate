@@ -30,7 +30,7 @@ def create_view_for_navigation():
 
     with patch.object(IconPreviewView, "__init__", lambda self, page: None):
         view = IconPreviewView.__new__(IconPreviewView)
-        view.page = MockPage()
+        view._page = MockPage()
         view.current_modid = None
         view.current_page = 0
         view.page_info = MagicMock()

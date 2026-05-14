@@ -60,7 +60,6 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.LIGHT
 
     file_picker = ft.FilePicker()
-    page.overlay.append(file_picker)
 
     registry = build_view_registry(page, file_picker)
 
@@ -76,7 +75,6 @@ def main(page: ft.Page):
 
     content_area = ft.Container(content=registry[0]['view'], expand=True)
 
-    # 建立鍵盤快捷鍵處理器
     keyboard_handler = create_keyboard_handler(
         page, registry, lambda idx: change_view_by_index(idx)
     )
@@ -97,13 +95,12 @@ def main(page: ft.Page):
             rail.selected_index = index
             page.update()
 
-    # 註冊鍵盤事件處理
     page.on_keyboard_event = keyboard_handler.handle_keyboard
 
     def toggle_theme_mode(e):
         is_light = page.theme_mode == ft.ThemeMode.LIGHT
         page.theme_mode = ft.ThemeMode.DARK if is_light else ft.ThemeMode.LIGHT
-        toggle_icon_btn.icon = ft.Icons.LIGHT_MODE if is_light else ft.Icons.DARK_MODE
+        toggle_icon_btn.icon = ft.Icons.LIGHT_MODE if is_light else ft.ThemeMode.DARK
         toggle_icon_btn.tooltip = "切換為淺色模式" if is_light else "切換為深色模式"
         page.update()
 
@@ -113,12 +110,12 @@ def main(page: ft.Page):
         on_click=toggle_theme_mode,
     )
 
-    # 快速跳轉功能
     def on_quick_jump(e):
         show_quick_jump_panel(page, registry, change_view_by_index)
 
-    # 快捷鍵綁定搜尋功能
     keyboard_handler.set_search_callback(on_quick_jump)
+
+    destinations = build_navigation_destinations(registry)
 
     rail = ft.NavigationRail(
         selected_index=0,
@@ -127,7 +124,7 @@ def main(page: ft.Page):
         min_extended_width=200,
         extended=True,
         group_alignment=-0.95,
-        destinations=build_navigation_destinations(registry),
+        destinations=destinations,
         on_change=change_view,
         bgcolor=ft.Colors.SURFACE,
         leading=ft.Container(
@@ -149,11 +146,11 @@ def main(page: ft.Page):
                 spacing=5,
                 alignment=ft.MainAxisAlignment.CENTER,
             ),
-            margin=ft.margin.only(bottom=10),
+            margin=ft.Margin.only(bottom=10),
         ),
         trailing=ft.Container(
             content=toggle_icon_btn,
-            margin=ft.margin.only(top=10),
+            margin=ft.Margin.only(top=10),
         ),
     )
 

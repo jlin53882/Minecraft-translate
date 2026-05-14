@@ -237,12 +237,12 @@ def test_empty_state():
         message="Try another keyword"
     )
     assert isinstance(es, ft.Container)
-    assert es.alignment == ft.alignment.center
+    assert es.alignment == ft.alignment.Alignment(0,0)
 
 
 def test_empty_state_with_button():
     """Verify empty_state with action button."""
-    btn = ft.ElevatedButton("Retry")
+    btn = ft.Button("Retry")
     es = empty_state(
         icon=ft.Icons.ERROR_OUTLINE,
         title="Error",
@@ -264,7 +264,7 @@ def test_error_state():
 
 def test_error_state_with_retry():
     """Verify error_state with retry button."""
-    btn = ft.ElevatedButton("Retry")
+    btn = ft.Button("Retry")
     err = error_state(
         icon=ft.Icons.ERROR,
         title="Error",

@@ -42,7 +42,7 @@ class CacheQueryPanel(ft.Container):
         super().__init__(content=self._build_content())
 
         # 再設定實例屬性
-        self.page = page
+        self._page = page
         self.state = state
         self.last_overview_data = last_overview_data
 
@@ -77,7 +77,7 @@ class CacheQueryPanel(ft.Container):
         )
 
         # 按鈕
-        self.btn_query_search = ft.ElevatedButton(
+        self.btn_query_search = ft.Button(
             "搜尋", icon=ft.Icons.SEARCH, on_click=self._on_query_search
         )
         self.btn_query_clear = ft.OutlinedButton(
@@ -138,13 +138,13 @@ class CacheQueryPanel(ft.Container):
                 ft.dropdown.Option("100", "100"),
                 ft.dropdown.Option("200", "200"),
             ],
-            on_change=self._on_page_size_change,
         )
+        self.dd_page_size.on_change = self._on_page_size_change
         self.query_page_info = ft.Text("第 1 頁 / 共 1 頁")
         self.query_total_info = ft.Text("共 0 筆")
 
         # 套用/還原按鈕
-        self.btn_apply_dst = ft.ElevatedButton(
+        self.btn_apply_dst = ft.Button(
             "套用", icon=ft.Icons.SAVE, on_click=self._on_apply_dst
         )
         self.btn_revert_dst = ft.OutlinedButton(
@@ -188,7 +188,7 @@ class CacheQueryPanel(ft.Container):
                                         ft.Container(
                                             expand=True,
                                             padding=8,
-                                            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                                            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                                             border_radius=8,
                                             bgcolor=theme.WHITE,
                                             content=self.query_result_list,
@@ -211,10 +211,10 @@ class CacheQueryPanel(ft.Container):
                                         ft.Container(
                                             expand=True,
                                             padding=8,
-                                            border=ft.border.all(1, theme.OUTLINE_VARIANT),
+                                            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                                             border_radius=8,
                                             bgcolor=theme.WHITE,
-                                            alignment=ft.alignment.top_left,
+                                            alignment=ft.alignment.Alignment(-1,-1),
                                             content=ft.Column(
                                                 [
                                                     self.query_detail_key,
@@ -240,7 +240,7 @@ class CacheQueryPanel(ft.Container):
                     ),
                 ),
                 ft.Container(
-                    padding=ft.padding.only(top=4),
+                    padding=ft.Padding(top=4),
                     content=ft.Row(
                         [
                             self.btn_page_first,
@@ -384,7 +384,7 @@ class CacheQueryPanel(ft.Container):
         self.query_search_hint.color = theme.BLUE_700
         self._render_query_results()
         self._render_query_detail()
-        self.page.update()
+        self._page.update()
 
     def _on_query_clear(self, e):
         """清除搜尋條件與結果"""
@@ -396,7 +396,7 @@ class CacheQueryPanel(ft.Container):
         self.query_search_hint.color = theme.GREY_700
         self._render_query_results()
         self._render_query_detail()
-        self.page.update()
+        self._page.update()
 
     # ==================== 分頁相關 ====================
     def _set_query_page(self, page: int):
@@ -436,7 +436,7 @@ class CacheQueryPanel(ft.Container):
                 self.query_result_list.controls.append(
                     ft.Container(
                         padding=8,
-                        border=ft.border.all(
+                        border=ft.Border.all(
                             1,
                             theme.BLUE_200 if selected else theme.OUTLINE_VARIANT,
                         ),
@@ -483,7 +483,7 @@ class CacheQueryPanel(ft.Container):
         self.state.query_selected_result = row
         self._render_query_results()
         self._render_query_detail()
-        self.page.update()
+        self._page.update()
 
     def _render_query_detail(self):
         """渲染查詢詳情面板"""
@@ -518,25 +518,25 @@ class CacheQueryPanel(ft.Container):
         """跳到第一頁"""
         self.state.query_page = 1
         self._render_query_results()
-        self.page.update()
+        self._page.update()
 
     def _on_page_prev(self, e):
         """上一頁"""
         self.state.query_page -= 1
         self._render_query_results()
-        self.page.update()
+        self._page.update()
 
     def _on_page_next(self, e):
         """下一頁"""
         self.state.query_page += 1
         self._render_query_results()
-        self.page.update()
+        self._page.update()
 
     def _on_page_last(self, e):
         """跳到最後一頁"""
         self.state.query_page = self.state.query_total_pages
         self._render_query_results()
-        self.page.update()
+        self._page.update()
 
     def _on_page_jump(self, e):
         """跳轉到指定頁"""
@@ -546,7 +546,7 @@ class CacheQueryPanel(ft.Container):
             p = 1
         self.state.query_page = p
         self._render_query_results()
-        self.page.update()
+        self._page.update()
 
     def _on_page_size_change(self, e):
         """變更每頁數量"""
@@ -556,7 +556,7 @@ class CacheQueryPanel(ft.Container):
             self.state.query_page_size = 50
         self.state.query_page = 1
         self._render_query_results()
-        self.page.update()
+        self._page.update()
 
     # ==================== 編輯相關 ====================
     def _on_apply_dst(self, e):
@@ -601,7 +601,7 @@ class CacheQueryPanel(ft.Container):
             self._render_query_results()
             self._render_query_detail()
             self._show_snack_bar("已套用並寫入快取", theme.BLUE_400)
-            self.page.update()
+            self._page.update()
         except Exception as ex:
             self._show_snack_bar(f"套用失敗：{ex}", theme.RED_400)
 
@@ -613,7 +613,7 @@ class CacheQueryPanel(ft.Container):
 
         self.query_detail_dst.value = str(self.state.query_original_dst or "")
         self._show_snack_bar("已還原到原始值", theme.BLUE_400)
-        self.page.update()
+        self._page.update()
 
     def _history_append_event(self, cache_type: str, event: dict):
         """新增歷史事件"""
@@ -624,6 +624,10 @@ class CacheQueryPanel(ft.Container):
         """顯示 SnackBar"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
+        self._page.overlay.append(snack)
         snack.open = True
-        self.page.update()
+        self._page.update()
+
+    @property
+    def page(self):
+        return self._page

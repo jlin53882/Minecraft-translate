@@ -58,7 +58,7 @@ def test_format_shard_src_text_preview_and_raw_modes():
 
 def test_on_shard_dst_apply_updates_cache_and_history(monkeypatch):
     view = CacheView.__new__(CacheView)
-    view.page = FakePage()
+    view._page = FakePage()
     view.ui_busy = False
 
     view.shard_detail_selected_type = "lang"
@@ -102,7 +102,7 @@ def test_on_shard_dst_apply_updates_cache_and_history(monkeypatch):
 
 def test_on_query_search_all_mode_deduplicates_per_type_key(monkeypatch):
     view = CacheView.__new__(CacheView)
-    view.page = FakePage()
+    view._page = FakePage()
     view.ui_busy = False
 
     view.tf_query_input = ft.TextField(value="abc")
@@ -153,7 +153,7 @@ def test_on_query_search_all_mode_deduplicates_per_type_key(monkeypatch):
 
 def test_on_query_search_requires_input(monkeypatch):
     view = CacheView.__new__(CacheView)
-    view.page = FakePage()
+    view._page = FakePage()
     view.ui_busy = False
 
     view.tf_query_input = ft.TextField(value="")

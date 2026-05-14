@@ -29,13 +29,13 @@ class LookupView(ft.Column):
             page: Flet Page 物件
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
-        self.page = page
+        self._page = page
 
         # --- 單筆查詢 UI 元件 ---
         self.single_input = ft.TextField(
             label="輸入單一學名", expand=True, tooltip="例如：Felis catus"
         )
-        self.single_button = ft.ElevatedButton(
+        self.single_button = ft.Button(
             "查詢", icon=ft.Icons.SEARCH, on_click=self.single_lookup_clicked
         )
         self.single_result_text = ft.Text("查詢結果將顯示在這裡。", selectable=True)
@@ -58,7 +58,7 @@ class LookupView(ft.Column):
             read_only=True,
             expand=True,
         )
-        self.batch_button = ft.ElevatedButton(
+        self.batch_button = ft.Button(
             "批次查詢", icon=ft.Icons.SEARCH, on_click=self.batch_lookup_clicked
         )
         self.batch_progress_bar = ft.ProgressBar(visible=False)
@@ -190,3 +190,7 @@ class LookupView(ft.Column):
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
+
+    @property
+    def page(self):
+        return self._page

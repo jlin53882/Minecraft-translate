@@ -16,7 +16,7 @@ def bordered_block(*, content: ft.Control, padding: int = 10, radius: int = 10, 
     return ft.Container(
         expand=expand,
         padding=padding,
-        border=ft.border.all(1, ft.Colors.OUTLINE_VARIANT),
+        border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
         border_radius=radius,
         content=content,
     )

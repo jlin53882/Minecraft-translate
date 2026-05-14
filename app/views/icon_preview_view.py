@@ -696,7 +696,7 @@ class IconPreviewView(ft.Column):
             page: Flet Page 物件
         """
         super().__init__(expand=True, spacing=8)
-        self.page = page
+        self._page = page
 
         # =========================
         # 使用者選擇的資料夾
@@ -730,9 +730,9 @@ class IconPreviewView(ft.Column):
         # =========================
         # Folder Picker
         # =========================
-        self.source_picker = ft.FilePicker(on_result=self._on_pick_source)
-        self.review_picker = ft.FilePicker(on_result=self._on_pick_review)
-        self.page.overlay.extend([self.source_picker, self.review_picker])
+        self.source_picker = ft.FilePicker(on_upload=self._on_pick_source)
+        self.review_picker = ft.FilePicker(on_upload=self._on_pick_review)
+        # FilePicker 是 Service，自動通過 init() 註冊，不需要添加到 page.overlay
 
         # ===== 分頁設定 =====
         self.page_size = 50
@@ -772,8 +772,8 @@ class IconPreviewView(ft.Column):
             ],
             value="50",
             width=120,
-            on_change=self._on_page_size_change,
         )
+        self.page_size_selector.on_change = self._on_page_size_change
         # ===== 模組清單分頁 =====
         self.mod_page_size = 50
         self.mod_current_page = 0
@@ -806,13 +806,13 @@ class IconPreviewView(ft.Column):
             on_click=self._go_back,
         )
 
-        self.pick_source_btn = ft.ElevatedButton(
+        self.pick_source_btn = ft.Button(
             "選擇模組資料夾（例：mods 資料夾）",
             icon=ft.Icons.FOLDER_OPEN,
             on_click=lambda e: self.source_picker.get_directory_path(),
         )
 
-        self.pick_review_btn = ft.ElevatedButton(
+        self.pick_review_btn = ft.Button(
             "選擇資源包路徑",
             icon=ft.Icons.FOLDER_OPEN,
             on_click=lambda e: self.review_picker.get_directory_path(),
@@ -821,14 +821,14 @@ class IconPreviewView(ft.Column):
         self.source_label = ft.Text("模組資料夾：尚未選擇", size=12)
         self.review_label = ft.Text("資源包路徑：尚未選擇", size=12)
 
-        self.load_btn = ft.ElevatedButton(
+        self.load_btn = ft.Button(
             "載入模組清單",
             icon=ft.Icons.PLAY_ARROW,
             disabled=True,
             on_click=self._on_load_clicked,
         )
 
-        self.save_btn = ft.ElevatedButton(
+        self.save_btn = ft.Button(
             "💾 儲存翻譯",
             icon=ft.Icons.SAVE,
             visible=False,
@@ -864,7 +864,7 @@ class IconPreviewView(ft.Column):
     # ==================================================
     # Folder picker callbacks
     # ==================================================
-    def _on_pick_source(self, e: ft.FilePickerResultEvent):
+    def _on_pick_source(self, e: ft.FilePickerUploadEvent):
         """處理來源目錄選擇結果"""
         if e.path:
             self.source_root = Path(e.path)
@@ -883,7 +883,7 @@ class IconPreviewView(ft.Column):
             log_warning("[IconPreview] 模組資料夾選擇已取消")
             self._show_snack("⚠️ 模組資料夾選擇已取消", color=theme.WARNING)
 
-    def _on_pick_review(self, e: ft.FilePickerResultEvent):
+    def _on_pick_review(self, e: ft.FilePickerUploadEvent):
         """處理校對目錄選擇結果"""
         if e.path:
             self.review_root = Path(e.path)
@@ -1736,3 +1736,7 @@ class IconPreviewView(ft.Column):
         self.next_page_btn.disabled = self.current_page >= self.total_pages - 1
 
         self.update()
+
+    @property
+    def page(self):
+        return self._page

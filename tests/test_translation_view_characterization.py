@@ -35,7 +35,14 @@ def test_translation_view_builds_three_tabs_and_shared_status_panel(monkeypatch)
 
     view = tv.TranslationView(page, picker)
 
-    assert len(view.tabs.tabs) == 3
+    # Flet 0.85.0: tabs.content is a Column containing [TabBar, TabBarView]
+    # Structure: Column([TabBar(tabs=[3 tabs]), TabBarView(controls=[3 contents])])
+    content = view.tabs.content
+    assert hasattr(content, 'controls')  # Is a Column-like
+    assert len(content.controls) == 2  # TabBar + TabBarView
+    tab_bar = content.controls[0]
+    assert hasattr(tab_bar, 'tabs')  # Is a TabBar
+    assert len(tab_bar.tabs) == 3  # 3 tabs in TabBar
     assert view.status_chip.label.value == '尚未開始'
     assert view.progress.value == 0
 

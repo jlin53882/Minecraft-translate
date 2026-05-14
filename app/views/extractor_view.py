@@ -48,7 +48,7 @@ class ExtractorView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=15)
-        self.page = page
+        self._page = page
         self.file_picker = file_picker
 
         # ExtractorView 的長任務狀態全部收斂到 TaskSession。
@@ -89,7 +89,7 @@ class ExtractorView(ft.Column):
         )
 
         # 2. Action Buttons
-        self.lang_button = ft.ElevatedButton(
+        self.lang_button = ft.Button(
             "提取 Lang",
             icon=ft.Icons.LANGUAGE,
             style=ft.ButtonStyle(
@@ -100,7 +100,7 @@ class ExtractorView(ft.Column):
             ),
             on_click=lambda e: self.start_extraction("lang"),
         )
-        self.book_button = ft.ElevatedButton(
+        self.book_button = ft.Button(
             "提取 Book",
             icon=ft.Icons.BOOK,
             style=ft.ButtonStyle(
@@ -363,3 +363,6 @@ class ExtractorView(ft.Column):
         self._close_dialog_overlay(dialog)
         self.start_extraction(mode)
 
+    @property
+    def page(self):
+        return self._page

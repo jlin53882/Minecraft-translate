@@ -63,7 +63,7 @@ def build_settings_card(view):
                     ],
                 ),
                 ft.Container(
-                    margin=ft.margin.only(top=10),
+                    margin=ft.margin.Margin(0, 10, 0, 0),
                     content=ft.Column(
                         spacing=15,
                         controls=[

@@ -20,7 +20,7 @@ from app.ui import theme
 
 CARD_PADDING: int = 16
 CARD_RADIUS: int = 10
-CARD_BORDER_COLOR = ft.Colors.BLACK12
+CARD_BORDER_COLOR = ft.Colors.BLACK_12
 CARD_BG_COLOR = ft.Colors.WHITE
 DIVIDER_COLOR = ft.Colors.GREY_200
 
@@ -140,7 +140,7 @@ def styled_card(
         padding=CARD_PADDING,
         border_radius=CARD_RADIUS,
         bgcolor=CARD_BG_COLOR,
-        border=ft.border.all(1, CARD_BORDER_COLOR),
+        border=ft.Border.all(width=1, color=CARD_BORDER_COLOR),
         content=ft.Column(
             card_content,
             spacing=12,
@@ -159,14 +159,14 @@ def primary_button(
     on_click=None,
     height: int = 42,
     bgcolor: str = ft.Colors.BLUE_700,
-) -> ft.ElevatedButton:
+) -> ft.Button:
     """主動作按鈕（整個 App 統一的 primary style）。
 
     Args:
         bgcolor: 主色背景（預設藍色）。需要特殊語意（例如成功/危險）時可換色。
     """
 
-    return ft.ElevatedButton(
+    return ft.Button(
         text,
         icon=icon,
         tooltip=tooltip,
@@ -361,7 +361,7 @@ def loading_state(
     spinner = ft.CupertinoActivityIndicator() if show_spinner else None
 
     return ft.Container(
-        alignment=ft.alignment.center,
+        alignment=ft.alignment.Alignment(0, 0),
         padding=40,
         content=ft.Column(
             [
@@ -384,7 +384,7 @@ def empty_state(
 ) -> ft.Container:
     """統一的空資料狀態顯示。"""
     return ft.Container(
-        alignment=ft.alignment.center,
+        alignment=ft.alignment.Alignment(0, 0),
         padding=40,
         content=ft.Column(
             [
@@ -407,7 +407,7 @@ def error_state(
 ) -> ft.Container:
     """統一的錯誤狀態顯示。"""
     return ft.Container(
-        alignment=ft.alignment.center,
+        alignment=ft.alignment.Alignment(0, 0),
         padding=40,
         content=ft.Column(
             [

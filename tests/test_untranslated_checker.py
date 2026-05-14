@@ -79,11 +79,11 @@ def test_untranslated_checker_start_button_text():
 
     checker = UntranslatedChecker(page, file_picker, task_runner)
 
-    assert checker.start_button.text == "開始檢查"
+    assert checker.start_button.content == "開始檢查"
 
 
 def test_untranslated_checker_registers_file_picker():
-    """測試 UntranslatedChecker 將 file_picker 加入 page.overlay"""
+    """測試 UntranslatedChecker 建立 file_picker（自動通過 init() 註冊，不需添加到 page.overlay）"""
     page = _MockPage()
     file_picker = _MockFilePicker()
     task_runner = QCBase(page, _MockProgressBar(), _MockListView())
@@ -93,8 +93,9 @@ def test_untranslated_checker_registers_file_picker():
 
     checker = UntranslatedChecker(page, file_picker, task_runner)
 
-    # 建立後 file_picker 應該在 overlay 中
-    assert file_picker in page.overlay
+    # FilePicker 是 Service，自動註冊，不需要添加到 page.overlay
+    # 因此 file_picker 仍然不在 overlay 中（這是預期行為）
+    assert file_picker not in page.overlay
 
 
 def test_untranslated_checker_pick_directory():

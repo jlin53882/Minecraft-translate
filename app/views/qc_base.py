@@ -25,7 +25,7 @@ class QCBase:
             progress_bar: 共用的 ProgressBar 元件
             log_view: 共用的 ListView 用於顯示日誌
         """
-        self.page = page
+        self._page = page
         self.progress_bar = progress_bar
         self.log_view = log_view
 
@@ -48,7 +48,7 @@ class QCBase:
         if controls_to_disable:
             for ctrl in controls_to_disable:
                 ctrl.disabled = True
-            self.page.update()
+            self._page.update()
 
         def run():
             try:
@@ -64,12 +64,12 @@ class QCBase:
                         self.progress_bar.color = theme.RED
 
                     self.log_view.scroll_to(offset=-1, duration=100)
-                    self.page.update()
+                    self._page.update()
             finally:
                 # 重置 ProgressBar
                 self.progress_bar.value = 0
                 self.progress_bar.color = None
-                self.page.update()
+                self._page.update()
 
                 # 恢復控制項
                 if controls_to_disable:
@@ -82,3 +82,7 @@ class QCBase:
                 on_complete()
 
         threading.Thread(target=run, daemon=True).start()
+
+    @property
+    def page(self):
+        return self._page

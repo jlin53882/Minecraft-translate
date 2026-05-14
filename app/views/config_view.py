@@ -38,7 +38,7 @@ class ConfigView(ft.Column):
         """
         # 設定 Root Column 不滾動，為了做 Fixed Footer
         super().__init__(expand=True, spacing=0)
-        self.page = page
+        self._page = page
         self.controls_map = {}
 
         # --- 初始化所有控制項 (Controls) ---
@@ -544,10 +544,10 @@ class ConfigView(ft.Column):
         )
 
         row = ft.Container(
-            padding=ft.padding.symmetric(horizontal=12, vertical=8),
+            padding=ft.Padding(left=12, right=12, top=8, bottom=8),
             border_radius=8,
             bgcolor=theme.WHITE,
-            border=ft.border.all(1, theme.GREY_200),
+            border=ft.Border.all(1, theme.GREY_200),
             content=ft.Row(
                 [
                     order_text,
@@ -643,3 +643,7 @@ class ConfigView(ft.Column):
             save_config_json_fn=save_config_json,
             validate_api_keys_from_ui_fn=validate_api_keys_from_ui,
         )
+
+    @property
+    def page(self):
+        return self._page

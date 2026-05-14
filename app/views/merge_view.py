@@ -39,8 +39,8 @@ class MergeView(ft.Column):
     status_chip: ft.Chip
     progress_bar: ft.ProgressBar
     log_view: ft.ListView
-    pick_zip_button: ft.ElevatedButton
-    start_button: ft.ElevatedButton
+    pick_zip_button: ft.Button
+    start_button: ft.Button
     controls: list[ft.Control]
 
     def _skip_disabled_note(self) -> ft.Text | None:
@@ -62,7 +62,7 @@ class MergeView(ft.Column):
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker) -> None:
         """初始化 MergeView。"""
         super().__init__(expand=True, spacing=16, scroll=ft.ScrollMode.AUTO)
-        self.page = page
+        self._page = page
         self.file_picker = file_picker
 
         self.session = TaskSession(max_logs=2000)
@@ -337,7 +337,7 @@ class MergeView(ft.Column):
                 content=ft.Container(
                     height=280,
                     bgcolor="#2b2f36",
-                    border=ft.border.all(1, "#4b5563"),
+                    border=ft.Border.all(1, "#4b5563"),
                     border_radius=8,
                     padding=10,
                     clip_behavior=ft.ClipBehavior.HARD_EDGE,
@@ -348,14 +348,14 @@ class MergeView(ft.Column):
 
     def pick_zips(self, e: ft.ControlEvent) -> None:
         """開啟 ZIP 檔案選擇對話框。"""
-        self.file_picker.on_result = self._on_zip_picked
+        self.file_picker.on_upload = self._on_zip_picked
         self.file_picker.pick_files(
             dialog_title="選擇 ZIP 檔案",
             allow_multiple=True,
             allowed_extensions=["zip"],
         )
 
-    def _on_zip_picked(self, e: ft.FilePickerResultEvent) -> None:
+    def _on_zip_picked(self, e: ft.FilePickerUploadEvent) -> None:
         """處理 ZIP 檔案選擇結果。"""
         if not e.files:
             return
@@ -393,10 +393,10 @@ class MergeView(ft.Column):
 
     def pick_output_dir(self) -> None:
         """開啟輸出目錄選擇對話框。"""
-        self.file_picker.on_result = self._on_output_picked
+        self.file_picker.on_upload = self._on_output_picked
         self.file_picker.get_directory_path(dialog_title="選擇輸出資料夾")
 
-    def _on_output_picked(self, e: ft.FilePickerResultEvent) -> None:
+    def _on_output_picked(self, e: ft.FilePickerUploadEvent) -> None:
         """處理輸出目錄選擇結果。"""
         if e.path:
             self.output_dir_field.value = e.path
@@ -620,3 +620,7 @@ class MergeView(ft.Column):
                 self.page.update()
             except Exception:
                 pass
+
+    @property
+    def page(self):
+        return self._page
