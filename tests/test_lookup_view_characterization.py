@@ -87,3 +87,21 @@ def test_lookup_view_batch_lookup_clicked_triggers_service(monkeypatch):
     monkeypatch.setattr('app.views.lookup_view.run_batch_lookup_service', mock_worker)
 
     view.batch_lookup_clicked(None)
+
+
+def test_lookup_view_single_progress_ring_exists():
+    view = LookupView(_Page())
+
+    assert view.single_progress_ring is not None
+
+
+def test_lookup_view_batch_progress_bar_exists():
+    view = LookupView(_Page())
+
+    assert view.batch_progress_bar is not None
+
+
+def test_lookup_view_single_result_text_exists():
+    view = LookupView(_Page())
+
+    assert view.single_result_text is not None
