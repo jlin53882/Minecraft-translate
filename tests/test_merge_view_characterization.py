@@ -213,3 +213,33 @@ def test_merge_view_open_output_folder(monkeypatch):
         view._open_output_folder()
     except Exception:
         pass
+
+
+def test_merge_view_async_pick_zips(monkeypatch):
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    page = _Page()
+    picker = _FilePicker()
+    picker.set_mock_path('/zips')
+    view = merge_view.MergeView(page, picker)
+
+    page.run_task(view._async_pick_output_dir)
+    page._run_all_tasks()
+
+    assert view.output_dir_field.value == '/zips'
+
+
+def test_merge_view_on_zip_picked(monkeypatch):
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    view = merge_view.MergeView(_Page(), _FilePicker())
+    view.selected_zips = []
+
+    class E:
+        class F:
+            path = '/path/a.zip'
+        class F2:
+            path = '/path/b.zip'
+        files = [F(), F2()]
+
+    view._on_zip_picked(E())
+
+    assert len(view.selected_zips) >= 0

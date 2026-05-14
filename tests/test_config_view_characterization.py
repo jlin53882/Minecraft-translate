@@ -176,3 +176,30 @@ def test_config_view_load_config_updates_controls_map(monkeypatch):
     view = ConfigView(_Page())
 
     assert 'logging.log_level' in view.controls_map
+
+
+def test_config_view_on_add_model_clicked(monkeypatch):
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    view = ConfigView(_Page())
+    view.new_model_field = type('F', (), {'value': 'new_model'})()
+    start = len(view.models_column.controls)
+
+    view.on_add_model_clicked(None)
+
+    assert len(view.models_column.controls) == start + 1
+
+
+def test_config_view_success_color(monkeypatch):
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    view = ConfigView(_Page())
+
+    color = view._success_color()
+    assert color is not None
+
+
+def test_config_view_build_key_field(monkeypatch):
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    view = ConfigView(_Page())
+
+    field = view._build_key_field('test_key')
+    assert field is not None
