@@ -120,8 +120,7 @@ class BundlerView(ft.Column):
     def _toggle_version_expand(self, e: ft.ControlEvent):
         self.version_expanded = not self.version_expanded
         log_debug(f"_toggle_version_expand: version_expanded={self.version_expanded}")
-        if hasattr(self, 'version_dropdown_container_ref'):
-            self.version_dropdown_container_ref.visible = self.version_expanded
+        self.version_dropdown_container_ref.visible = self.version_expanded
         self._page.update()
 
     def _build_controls(self):
@@ -143,6 +142,7 @@ class BundlerView(ft.Column):
             border=ft.Border.all(1, theme.OUTLINE),
             border_radius=6,
             padding=4,
+            visible=False,
         )
         self.version_dropdown_container_ref = version_dropdown_container
         version_section = ft.Column([
