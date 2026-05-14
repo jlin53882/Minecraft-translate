@@ -396,6 +396,7 @@ class MergeView(ft.Column):
         self._page.run_task(self._async_pick_output_dir)
 
     async def _async_pick_output_dir(self):
+        """async 實作：選擇輸出資料夾並更新 output_dir_field。"""
         result = await self.file_picker.get_directory_path(dialog_title="選擇輸出資料夾")
         if result:
             self.output_dir_field.value = result

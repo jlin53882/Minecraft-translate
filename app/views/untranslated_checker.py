@@ -124,7 +124,14 @@ class UntranslatedChecker(ft.Container):
         title: str,
         folder_mode: bool,
     ):
-        """使用 FilePicker 選擇檔案或目錄"""
+        """使用 FilePicker 選擇檔案或目錄（同步包裝）。
+
+        Args:
+            e: Flet 事件物件（目前未使用）。
+            target_textfield: 選擇後要填入路徑的 TextField。
+            title: FilePicker 對話框標題。
+            folder_mode: True 為選擇資料夾，False 為選擇檔案。
+        """
         self._page.run_task(self._async_pick_file_or_directory, target_textfield, title, folder_mode)
 
     async def _async_pick_file_or_directory(
@@ -133,7 +140,13 @@ class UntranslatedChecker(ft.Container):
         title: str,
         folder_mode: bool,
     ):
-        """使用 FilePicker 選擇檔案或目錄（async）"""
+        """使用 FilePicker 選擇檔案或目錄（async 實作）。
+
+        Args:
+            target_textfield: 選擇後要填入路徑的 TextField。
+            title: FilePicker 對話框標題。
+            folder_mode: True 為選擇資料夾，False 為選擇檔案。
+        """
         if folder_mode:
             result = await self.file_picker.get_directory_path(dialog_title=title)
         else:

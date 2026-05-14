@@ -167,11 +167,20 @@ class ExtractorView(ft.Column):
         return build_pick_button(self, target)
 
     def pick_directory(self, target):
-        """開啟目錄選擇對話框"""
+        """開啟目錄選擇對話框。
+
+        Args:
+            target: 選擇後要填入路徑的 TextField。
+        """
         self._show_snack_bar("請選擇此欄位的資料夾", color=theme.BLUE_600)
         self._page.run_task(self._async_pick_directory, target)
 
     async def _async_pick_directory(self, target):
+        """async 實作：等待使用者選擇目錄後更新目標欄位。
+
+        Args:
+            target: 選擇後要填入路徑的 TextField。
+        """
         result = await self.file_picker.get_directory_path()
         if result:
             target.value = result

@@ -865,7 +865,7 @@ class IconPreviewView(ft.Column):
     # Folder picker callbacks
     # ==================================================
     async def _async_pick_source_dir(self):
-        """選擇模組資料夾"""
+        """選擇模組資料夾（async 實作）。"""
         result = await self.source_picker.get_directory_path()
         if result:
             self.source_root = Path(result)
@@ -883,7 +883,7 @@ class IconPreviewView(ft.Column):
             self._show_snack("⚠️ 模組資料夾選擇已取消", color=theme.WARNING)
 
     async def _async_pick_review_dir(self):
-        """選擇資源包路徑"""
+        """選擇資源包路徑（async 實作）。"""
         result = await self.review_picker.get_directory_path()
         if result:
             self.review_root = Path(result)

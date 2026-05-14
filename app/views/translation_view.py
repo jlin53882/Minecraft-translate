@@ -230,11 +230,16 @@ class TranslationView(ft.Column):
     # directory picker
     # ------------------------------------------------------------------
     def _pick_directory_into(self, target: ft.TextField):
-        """開啟目錄選擇器並設定目標欄位"""
+        """開啟目錄選擇器並設定目標欄位（同步包裝）。
+
+        Args:
+            target: 選擇後要填入路徑的 TextField。
+        """
         self._picker_target_field = target
         self._page.run_task(self._async_pick_directory_into)
 
     async def _async_pick_directory_into(self):
+        """async 實作：等待使用者選擇目錄後更新目標欄位。"""
         result = await self.file_picker.get_directory_path()
         if result:
             self._picker_target_field.value = result
