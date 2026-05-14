@@ -224,7 +224,7 @@ class ConfigView(ft.Column):
         is_selected = self._selected_nav == item["id"]
 
         btn = ft.Container(
-            padding=ft.Padding(left=12, right=12, top=10, bottom=10),
+            padding=12,
             border_radius=8,
             bgcolor=ft.Colors.BLUE_200 if is_selected else ft.Colors.GREY_100,
             on_click=lambda e, iid=item["id"]: self._on_nav_click(iid),
