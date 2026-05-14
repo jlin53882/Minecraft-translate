@@ -13,5 +13,6 @@
   "1.21.6~1.21.8": {"min_format": 55, "max_format": 64},
   "1.21.9~1.21.10": {"min_format": 65, "max_format": 69},
   "1.21.11 (25w41a)~1.21.11": {"min_format": 70, "max_format": 75},
-  "1.22.1~26.1.2": {"min_format": 76, "max_format": 84}
+  "1.22.1~26.1.2": {"min_format": 76, "max_format": 84},
+  "26.1.2~26.1.x": {"min_format": 84, "max_format": 9999}
 }
