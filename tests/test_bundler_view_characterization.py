@@ -49,13 +49,6 @@ def test_bundler_view_extra_folders_list_initialized():
     assert len(view.extra_folders_view.controls) == 0
 
 
-def test_bundler_view_pack_type_default():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
-
-    assert view.pack_type_dropdown.value == "翻譯資源包"
-
-
 def test_bundler_view_version_dropdown_options():
     page = _Page()
     view = BundlerView(page, _FilePicker())

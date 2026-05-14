@@ -30,22 +30,16 @@ class BundlerView(ft.Column):
             border_color=theme.OUTLINE,
             content_padding=10,
         )
-        self.pack_type_dropdown = ft.Dropdown(
-            label="選擇資源包類型",
-            expand=True,
-            border_color=theme.OUTLINE,
-            content_padding=10,
-        )
         self.description_field = ft.TextField(
             label="檔案敘述",
-            hint_text="資源包在遊戲中的描述文字",
+            hint_text="支援 JSON 格式或 §顏色代碼",
             expand=True,
             border_color=theme.OUTLINE,
             content_padding=10,
         )
         self.pack_image_field = ft.TextField(
             label="資源包圖片路徑",
-            hint_text="選擇 pack.png 圖片",
+            hint_text="選擇 pack.png 圖片（可選）",
             expand=True,
             border_color=theme.OUTLINE,
             content_padding=10,
@@ -59,7 +53,7 @@ class BundlerView(ft.Column):
         )
         self.output_zip_field = ft.TextField(
             label="最終 ZIP 檔案儲存路徑",
-            hint_text="選擇輸出位置與檔名",
+            hint_text="輸出位置與檔名",
             expand=True,
             border_color=theme.OUTLINE,
             content_padding=10,
@@ -89,13 +83,6 @@ class BundlerView(ft.Column):
             self.version_data = {}
 
     def _init_ui(self):
-        self.pack_type_dropdown.options = [
-            ft.dropdown.Option("翻譯資源包", "翻譯資源包"),
-            ft.dropdown.Option("材質包", "材質包"),
-            ft.dropdown.Option("其他", "其他"),
-        ]
-        self.pack_type_dropdown.value = "翻譯資源包"
-
         self.version_dropdown.options = [
             ft.dropdown.Option(v, v) for v in self.version_data.keys()
         ]
@@ -107,13 +94,6 @@ class BundlerView(ft.Column):
                     content=ft.Column([
                         ft.Text("選擇版本", size=12, color=theme.GREY_600),
                         self.version_dropdown,
-                    ], spacing=4),
-                    expand=True,
-                ),
-                ft.Container(
-                    content=ft.Column([
-                        ft.Text("選擇資源包類型", size=12, color=theme.GREY_600),
-                        self.pack_type_dropdown,
                     ], spacing=4),
                     expand=True,
                 ),
