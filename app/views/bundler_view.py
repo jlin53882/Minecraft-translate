@@ -41,7 +41,7 @@ class BundlerView(ft.Column):
         self.version_expanded = False
         self.description_field = ft.TextField(
             label="檔案敘述",
-            hint_text="支援 JSON 格式或 §顏色代碼",
+            hint_text="直接輸入文字，或使用 § 顏色代碼",
             expand=True,
             border_color=theme.OUTLINE,
             content_padding=10,
