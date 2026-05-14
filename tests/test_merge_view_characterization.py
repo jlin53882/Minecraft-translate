@@ -243,3 +243,21 @@ def test_merge_view_on_zip_picked(monkeypatch):
     view._on_zip_picked(E())
 
     assert len(view.selected_zips) >= 0
+
+
+def test_merge_view_skip_zh_cn_switch_exists(monkeypatch):
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    view = merge_view.MergeView(_Page(), _FilePicker())
+    assert view.skip_zh_cn_switch is not None
+
+
+def test_merge_view_patchouli_skip_zh_cn_switch_exists(monkeypatch):
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    view = merge_view.MergeView(_Page(), _FilePicker())
+    assert view.patchouli_skip_zh_cn_switch is not None
+
+
+def test_merge_view_patchouli_threshold_field_exists(monkeypatch):
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    view = merge_view.MergeView(_Page(), _FilePicker())
+    assert view.patchouli_threshold_field is not None

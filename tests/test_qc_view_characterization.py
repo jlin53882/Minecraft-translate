@@ -267,3 +267,23 @@ def test_qc_view_create_pick_button_returns_icon_button():
 
     assert btn is not None
     assert isinstance(btn, ft.IconButton)
+
+
+def test_qc_view_untranslated_checker_exists():
+    view = QCView(_Page(), _FilePicker())
+    assert view.untranslated_checker is not None
+
+
+def test_qc_view_compare_start_button_exists():
+    view = QCView(_Page(), _FilePicker())
+    assert view.compare_start_button is not None
+
+
+def test_qc_view_compare_tsv_start_button_exists():
+    view = QCView(_Page(), _FilePicker())
+    assert view.compare_tsv_start_button is not None
+
+
+def test_qc_view_log_view_exists():
+    view = QCView(_Page(), _FilePicker())
+    assert view.log_view is not None

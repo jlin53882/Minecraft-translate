@@ -1,5 +1,5 @@
+import pytest
 import flet as ft
-
 from app.views.config_view import ConfigView
 
 
@@ -24,6 +24,22 @@ class _Page:
                     result.send(None)
                 except StopIteration:
                     pass
+
+
+@pytest.fixture
+def cv():
+    import app.views.config_view as config_view
+    return config_view
+
+
+@pytest.fixture
+def page():
+    return _Page()
+
+
+@pytest.fixture
+def mock_controls_map():
+    return {}
 
 
 def test_config_view_loads_models_and_keys_from_config(monkeypatch):
@@ -203,3 +219,99 @@ def test_config_view_build_key_field(monkeypatch):
 
     field = view._build_key_field('test_key')
     assert field is not None
+
+
+def test_config_view_build_header(monkeypatch):
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    view = ConfigView(_Page())
+    header = view._build_header()
+    assert header is not None
+
+
+def test_config_view_build_footer(monkeypatch):
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    view = ConfigView(_Page())
+    footer = view._build_footer()
+    assert footer is not None
+
+
+def test_config_view_build_card(monkeypatch):
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    view = ConfigView(_Page())
+    card = view._build_card('Test', [])
+    assert card is not None
+
+
+def test_config_view_build_left_column(cv, page, mock_controls_map):
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    assert hasattr(view, '_build_left_column')
+    assert callable(view._build_left_column)
+
+
+def test_config_view_build_right_column(cv, page, mock_controls_map):
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    assert hasattr(view, '_build_right_column')
+    assert callable(view._build_right_column)
+
+
+def test_config_view_build_lang_merger_card(cv, page, mock_controls_map):
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    assert hasattr(view, '_build_lang_merger_card')
+    assert callable(view._build_lang_merger_card)
+
+
+def test_config_view_add_model_row(cv, page, mock_controls_map):
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    assert hasattr(view, 'add_model_row')
+    assert callable(view.add_model_row)
+
+
+def test_config_view_remove_model_by_checkbox(cv, page, mock_controls_map):
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    assert hasattr(view, 'remove_model_by_checkbox')
+    assert callable(view.remove_model_by_checkbox)
+
+
+def test_config_view_build_key_row(cv, page, mock_controls_map):
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    assert hasattr(view, '_build_key_row')
+    assert callable(view._build_key_row)
+
+
+def test_config_view_add_key_row(cv, page, mock_controls_map):
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    assert hasattr(view, 'add_key_row')
+    assert callable(view.add_key_row)
+
+
+def test_config_view_remove_key_row(cv, page, mock_controls_map):
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    assert hasattr(view, 'remove_key_row')
+    assert callable(view.remove_key_row)
+
+
+def test_config_view_refresh_model_order_labels(cv, page, mock_controls_map):
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    assert hasattr(view, '_refresh_model_order_labels')
+    assert callable(view._refresh_model_order_labels)
+
+
+def test_config_view_save_config_clicked(cv, page, mock_controls_map):
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    assert hasattr(view, 'save_config_clicked')
+    assert callable(view.save_config_clicked)
+
+
+def test_config_view_page_property(cv, page, mock_controls_map):
+    view = cv.ConfigView(page)
+    assert view.page is not None

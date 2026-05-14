@@ -221,3 +221,167 @@ def test_rules_view_search_box_exists(monkeypatch):
 
     assert view.search_box is not None
 
+
+
+def test_rules_view_new_rid_exists(monkeypatch):
+    """測試 _new_rid 方法存在"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+
+    assert hasattr(view, '_new_rid')
+    assert callable(view._new_rid)
+
+
+def test_rules_view_find_index_by_rid_exists(monkeypatch):
+    """測試 _find_index_by_rid 方法存在"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+
+    assert hasattr(view, '_find_index_by_rid')
+    assert callable(view._find_index_by_rid)
+
+
+def test_rules_view_do_search_exists(monkeypatch):
+    """測試 _do_search 方法存在"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+
+    assert hasattr(view, '_do_search')
+    assert callable(view._do_search)
+
+
+def test_rules_view_build_header(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, '_build_header')
+    assert callable(view._build_header)
+
+
+def test_rules_view_build_toolbar(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, '_build_toolbar')
+    assert callable(view._build_toolbar)
+
+
+def test_rules_view_build_rules_table_area(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, '_build_rules_table_area')
+    assert callable(view._build_rules_table_area)
+
+
+def test_rules_view_build_footer(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, '_build_footer')
+    assert callable(view._build_footer)
+
+
+def test_rules_view_load_rules_core(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, '_load_rules_core')
+    assert callable(view._load_rules_core)
+
+
+def test_rules_view_initial_load(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, '_initial_load')
+    assert callable(view._initial_load)
+
+
+def test_rules_view_render_current_page(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, '_render_current_page')
+    assert callable(view._render_current_page)
+
+
+def test_rules_view_handle_reload_success(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, '_handle_reload_success')
+    assert callable(view._handle_reload_success)
+
+
+def test_rules_view_handle_reload_failure(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, '_handle_reload_failure')
+    assert callable(view._handle_reload_failure)
+
+
+def test_rules_view_run_on_ui_thread(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, '_run_on_ui_thread')
+    assert callable(view._run_on_ui_thread)
+
+
+def test_rules_view_show_snack_bar(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, '_show_snack_bar')
+    assert callable(view._show_snack_bar)
+
+
+def test_rules_view_init_controls(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, '_init_controls')
+    assert callable(view._init_controls)
+
+
+def test_rules_view_total_count_text(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert view.total_count_text is not None
+
+
+def test_rules_view_loading_indicator(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert view.loading_indicator is not None
+
+
+def test_rules_view_on_sort_change(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, 'on_sort_change')
+    assert callable(view.on_sort_change)
+
+
+def test_rules_view_translate_regex_error(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, 'translate_regex_error')
+    assert callable(view.translate_regex_error)
+
+
+def test_rules_view_on_search(monkeypatch):
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    assert hasattr(view, 'on_search')
+    assert callable(view.on_search)

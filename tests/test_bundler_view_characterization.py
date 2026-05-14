@@ -334,3 +334,33 @@ def test_bundler_view_append_log_adds_control():
     view._append_log('test log entry')
 
     assert len(view.log_view.controls) >= 1
+
+def test_bundler_view_version_list_exists():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+    assert view.version_list is not None
+
+
+def test_bundler_view_version_search_exists():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+    assert view.version_search is not None
+
+
+def test_bundler_view_version_data_exists():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+    assert view.version_data is not None
+
+
+def test_bundler_view_pick_pack_image():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+    assert hasattr(view, '_pick_pack_image')
+
+
+def test_bundler_view_extra_folders_list():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+    assert view.extra_folders is not None
+    assert isinstance(view.extra_folders, list)

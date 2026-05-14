@@ -267,3 +267,52 @@ def test_icon_preview_view_back_btn_on_click():
 def test_icon_preview_view_load_btn_on_click():
     view = IconPreviewView(_Page())
     assert view.load_btn.on_click is not None
+
+
+def test_icon_preview_view_source_picker_exists():
+    view = IconPreviewView(_Page())
+    assert view.source_picker is not None
+
+
+def test_icon_preview_view_review_picker_exists():
+    view = IconPreviewView(_Page())
+    assert view.review_picker is not None
+
+
+def test_icon_preview_view_current_page_init():
+    view = IconPreviewView(_Page())
+    assert view.current_page == 0
+
+
+def test_icon_preview_view_total_pages_init():
+    view = IconPreviewView(_Page())
+    assert view.total_pages == 0
+
+
+def test_icon_preview_view_mods_init():
+    view = IconPreviewView(_Page())
+    assert view.mods is not None
+
+
+def test_icon_preview_view_detect_source_mode():
+    view = IconPreviewView(_Page())
+    assert hasattr(view, '_detect_source_mode')
+    assert callable(view._detect_source_mode)
+
+
+def test_icon_preview_view_load_entries_from_jar_directory():
+    view = IconPreviewView(_Page())
+    assert hasattr(view, '_load_entries_from_jar_directory')
+    assert callable(view._load_entries_from_jar_directory)
+
+
+def test_icon_preview_view_on_value_changed():
+    view = IconPreviewView(_Page())
+    assert hasattr(view, '_on_value_changed')
+    assert callable(view._on_value_changed)
+
+
+def test_icon_preview_view_cancel_detail_search_debounce():
+    view = IconPreviewView(_Page())
+    assert hasattr(view, '_cancel_detail_search_debounce')
+    assert callable(view._cancel_detail_search_debounce)

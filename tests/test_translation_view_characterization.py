@@ -523,3 +523,25 @@ def test_translation_view_action_row_exists():
     picker = _FilePicker()
     view = tv.TranslationView(page, picker)
     assert view._action_row is not None
+
+
+def test_translation_view_async_pick_directory_into_exists():
+    page = _Page()
+    picker = _FilePicker()
+    view = tv.TranslationView(page, picker)
+    assert hasattr(view, '_async_pick_directory_into')
+    assert callable(view._async_pick_directory_into)
+
+
+def test_translation_view_status_chip_exists():
+    page = _Page()
+    picker = _FilePicker()
+    view = tv.TranslationView(page, picker)
+    assert view.status_chip is not None
+
+
+def test_translation_view_progress_exists():
+    page = _Page()
+    picker = _FilePicker()
+    view = tv.TranslationView(page, picker)
+    assert view.progress is not None

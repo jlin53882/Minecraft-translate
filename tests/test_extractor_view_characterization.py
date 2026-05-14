@@ -239,3 +239,33 @@ def test_extractor_view_start_extraction_requires_output_dir(monkeypatch):
     view.start_extraction('lang')
 
     assert len(page.overlay) >= 1
+
+
+def test_extractor_view_build_settings_card(monkeypatch):
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(_Page(), _FilePicker())
+    assert hasattr(view, '_build_settings_card')
+
+
+def test_extractor_view_build_logs_card(monkeypatch):
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(_Page(), _FilePicker())
+    assert hasattr(view, '_build_logs_card')
+
+
+def test_extractor_view_pick_button_exists(monkeypatch):
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(_Page(), _FilePicker())
+    assert hasattr(view, '_pick_button')
+
+
+def test_extractor_view_start_ui_poller_exists(monkeypatch):
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(_Page(), _FilePicker())
+    assert hasattr(view, '_start_ui_poller')
+
+
+def test_extractor_view_show_extraction_summary_exists(monkeypatch):
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(_Page(), _FilePicker())
+    assert hasattr(view, '_show_extraction_summary')
