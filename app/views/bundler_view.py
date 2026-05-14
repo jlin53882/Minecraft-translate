@@ -320,16 +320,10 @@ class BundlerView(ft.Column):
         self._page.run_task(self._async_pick_extra_folder)
 
     async def _async_pick_extra_folder(self):
-        result = await self.file_picker.pick_files(
-            dialog_title="選擇資料夾或檔案",
-            allow_multiple=True,
-        )
+        result = await self.file_picker.get_directory_path(dialog_title="選擇資料夾")
         log_debug("_async_pick_extra_folder result: {result}")
-        if result:
-            for file in result:
-                path = file.path
-                if path not in self.extra_folders:
-                    self.extra_folders.append(path)
+        if result and result not in self.extra_folders:
+            self.extra_folders.append(result)
             self._refresh_extra_folders()
             self._page.update()
 

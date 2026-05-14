@@ -147,6 +147,7 @@ def bundle_outputs_generator(
                 progress = 0.15 + (step / total_steps) * 0.7
                 full_source_path = os.path.join(input_root_dir, folder_name)
                 yield {"progress": progress, "log": f"正在掃描來源: '{folder_name}'..."}
+                log_info(f"掃描資料夾: {full_source_path}")
 
                 base = "" if folder_name.lower() == "root" else folder_name
                 count, seen_files = _add_folder_to_zip(zf, full_source_path, base, seen_files)
@@ -154,8 +155,10 @@ def bundle_outputs_generator(
                 if count > 0:
                     total_files_added += count
                     yield {"progress": progress, "log": f"成功從 '{folder_name}' 加入 {count} 個檔案。"}
+                    log_info(f"從 '{folder_name}' 加入 {count} 個檔案")
                 else:
                     yield {"progress": progress, "log": f"警告：'{folder_name}' 中沒有可打包的檔案。"}
+                    log_warning(f"'{folder_name}' 中沒有可打包的檔案")
 
             for entry in os.listdir(input_root_dir):
                 full_path = os.path.join(input_root_dir, entry)
@@ -171,15 +174,18 @@ def bundle_outputs_generator(
                     zf.write(full_path, archive_name)
                     total_files_added += 1
                     yield {"progress": 0.15 + ((step + 1) / total_steps) * 0.7, "log": f"額外檔案: +1 ({entry})"}
+                    log_debug(f"加入根目錄檔案: {entry}")
 
             if extra_folders:
                 for extra_path in extra_folders:
                     step += 1
                     progress = 0.15 + (step / total_steps) * 0.7
                     yield {"progress": progress, "log": f"正在處理額外項目: '{extra_path}'..."}
+                    log_debug(f"處理額外項目: {extra_path}")
 
                     if not os.path.exists(extra_path):
                         yield {"progress": progress, "log": f"額外項目不存在: '{extra_path}'"}
+                        log_warning(f"額外項目不存在: {extra_path}")
                         continue
 
                     if os.path.isfile(extra_path):
@@ -195,6 +201,7 @@ def bundle_outputs_generator(
                         zf.write(extra_path, archive_name)
                         total_files_added += 1
                         yield {"progress": progress, "log": f"額外檔案: +1 ({file_name})"}
+                        log_info(f"加入額外檔案: {file_name}")
                     elif os.path.isdir(extra_path):
                         parent_name = os.path.basename(extra_path.rstrip("/\\"))
                         for entry in os.listdir(extra_path):
@@ -203,6 +210,7 @@ def bundle_outputs_generator(
                                 count, seen_files = _add_folder_to_zip(zf, src, "", seen_files)
                                 total_files_added += count
                                 yield {"progress": progress, "log": f"額外資料夾 '{parent_name}/{entry}': +{count} 個檔案"}
+                                log_debug(f"額外資料夾 '{parent_name}/{entry}': +{count} 個檔案")
                             elif os.path.isfile(src):
                                 archive_name = entry
                                 if archive_name in seen_files:
@@ -215,6 +223,7 @@ def bundle_outputs_generator(
                                 zf.write(src, archive_name)
                                 total_files_added += 1
                                 yield {"progress": progress, "log": f"額外檔案: +1 ({entry})"}
+                                log_debug(f"額外資料夾內檔案: {entry}")
 
         duration = time.time() - start_time
         yield {"progress": 1.0, "log": f"--- 打包完成！總共 {total_files_added} 個檔案被加入 ZIP。耗時 {duration:.2f} 秒 ---"}
