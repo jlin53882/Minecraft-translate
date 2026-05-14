@@ -25,9 +25,9 @@ class CacheShardPanel(ft.Container):
         # 操作按鈕
         actions = ft.Column([
             ft.Row([
-                ft.ElevatedButton("新增分片", icon=ft.Icons.ADD),
-                ft.ElevatedButton("補滿舊檔", icon=ft.Icons.EDIT),
-                ft.ElevatedButton("輪替分片", icon=ft.Icons.SWAP_HORIZ),
+                ft.Button("新增分片", icon=ft.Icons.ADD),
+                ft.Button("補滿舊檔", icon=ft.Icons.EDIT),
+                ft.Button("輪替分片", icon=ft.Icons.SWAP_HORIZ),
             ], spacing=10),
         ], spacing=10)
 

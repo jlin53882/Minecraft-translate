@@ -205,7 +205,7 @@ def build_preview_result_dialog(view, result: dict, mode: str):
         content=ft.Container(content=content, width=600, height=400),
         actions=[
             ft.TextButton('取消', on_click=lambda e: view._close_dialog_overlay(dialog)),
-            ft.ElevatedButton('確認提取', icon=ft.Icons.CHECK, on_click=lambda e: view._start_from_preview_overlay(dialog, mode)),
+            ft.Button('確認提取', icon=ft.Icons.CHECK, on_click=lambda e: view._start_from_preview_overlay(dialog, mode)),
         ],
     )
     return dialog

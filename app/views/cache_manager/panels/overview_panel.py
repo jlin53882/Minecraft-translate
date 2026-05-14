@@ -45,7 +45,7 @@ class CacheOverviewPanel(ft.Container):
         # 操作按鈕區塊內容
         actions_content = ft.Column([
             ft.Row([
-                ft.ElevatedButton("重新載入", icon=ft.Icons.REFRESH),
+                ft.Button("重新載入", icon=ft.Icons.REFRESH),
                 ft.OutlinedButton("儲存", icon=ft.Icons.SAVE),
             ], spacing=10),
         ], spacing=10)

@@ -66,7 +66,7 @@ class CacheQueryView(ft.Container):
         self.dd_query_type.on_change = lambda e: self._on_type_change()
 
         # 按鈕
-        self.btn_query_search = ft.ElevatedButton(
+        self.btn_query_search = ft.Button(
             "搜尋", icon=ft.Icons.SEARCH, on_click=lambda e: self._on_search()
         )
         self.btn_query_clear = ft.OutlinedButton(
