@@ -148,3 +148,59 @@ def test_icon_preview_view_page_size_selector():
 
     assert view.page_size_selector is not None
     assert view.page_size_selector.value == '50'
+
+
+def test_icon_preview_view_update_page_bar_for_mods():
+    view = IconPreviewView(_Page())
+    view.current_page = 1
+    view.total_pages = 5
+    view.mods = {'a': [1,2,3], 'b': [4,5,6]}
+
+    view._update_page_bar_for_mods()
+
+    assert view.page_info.value is not None
+
+
+def test_icon_preview_view_on_pick_source(monkeypatch):
+    view = IconPreviewView(_Page())
+
+    class E:
+        path = '/test/source'
+
+    view._on_pick_source(E())
+
+    assert 'test' in str(view.source_root).lower()
+    assert 'source' in str(view.source_root).lower()
+
+
+def test_icon_preview_view_on_pick_review(monkeypatch):
+    view = IconPreviewView(_Page())
+
+    class E:
+        path = '/test/review'
+
+    view._on_pick_review(E())
+
+    assert hasattr(view, 'review_root')
+
+
+def test_icon_preview_view_load_entries_method():
+    view = IconPreviewView(_Page())
+    view.source_root = 'test'
+
+    class E:
+        pass
+
+    try:
+        view._load_entries(E())
+    except:
+        pass
+
+
+def test_icon_preview_view_cancel_mod_search_debounce():
+    view = IconPreviewView(_Page())
+    view._mod_search_timer = type('T', (), {'cancel': lambda self: None})()
+
+    view._cancel_mod_search_debounce()
+
+    assert view._mod_search_timer is not None

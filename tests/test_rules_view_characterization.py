@@ -191,3 +191,23 @@ def test_rules_view_rule_matches(monkeypatch):
 
     assert view._rule_matches(rule, 'hello', False) is True
     assert view._rule_matches(rule, 'world', False) is False
+
+
+def test_rules_view_prev_page_button_exists(monkeypatch):
+    """測試 prev_button 存在"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+
+    assert view.prev_button is not None
+    assert view.next_button is not None
+
+
+def test_rules_view_initial_page_state(monkeypatch):
+    """測試初始頁面狀態"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+
+    assert view.current_page == 1
+    assert view.total_pages >= 1
