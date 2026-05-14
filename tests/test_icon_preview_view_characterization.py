@@ -121,3 +121,30 @@ def test_icon_preview_view_all_controls_exist():
 
     assert hasattr(view, 'source_picker')
     assert hasattr(view, 'review_picker')
+
+
+def test_icon_preview_view_show_snack_adds_to_overlay():
+    """測試 _show_snack 正確將 SnackBar 加入 page.overlay"""
+    page = _Page()
+    view = IconPreviewView(page)
+
+    view._show_snack('Test error', '#FF0000')
+
+    assert len(page.overlay) >= 1
+
+
+def test_icon_preview_view_page_controls_exist():
+    """測試分頁控制項存在"""
+    view = IconPreviewView(_Page())
+
+    assert view.prev_page_btn is not None
+    assert view.next_page_btn is not None
+    assert view.page_info is not None
+
+
+def test_icon_preview_view_page_size_selector():
+    """測試 page_size_selector 存在"""
+    view = IconPreviewView(_Page())
+
+    assert view.page_size_selector is not None
+    assert view.page_size_selector.value == '50'

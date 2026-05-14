@@ -177,3 +177,65 @@ def test_extractor_view_pick_directory_schedules_async_task(monkeypatch):
 
     assert target.value == '/test/dir'
     assert page.updated >= 1
+
+
+def test_extractor_view_show_snack_bar_adds_to_overlay(monkeypatch):
+    """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    page = _Page()
+    view = ExtractorView(page, _FilePicker())
+
+    view._show_snack_bar('Test error', '#FF0000')
+
+    assert len(page.overlay) >= 1
+
+
+def test_extractor_view_append_log_line_adds_control(monkeypatch):
+    """測試 _append_log_line 將日誌行加入 log_view"""
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(_Page(), _FilePicker())
+
+    view._append_log_line('Test log entry')
+
+    assert len(view.log_view.controls) >= 1
+
+
+def test_extractor_view_set_controls_disabled_toggles_inputs(monkeypatch):
+    """測試 set_controls_disabled 正確切換輸入控制項狀態"""
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(_Page(), _FilePicker())
+
+    view.set_controls_disabled(True)
+
+    assert view.mods_dir_textfield.disabled is True
+    assert view.output_dir_textfield.disabled is True
+    assert view.lang_button.disabled is True
+
+    view.set_controls_disabled(False)
+
+    assert view.mods_dir_textfield.disabled is False
+    assert view.output_dir_textfield.disabled is False
+
+
+def test_extractor_view_start_extraction_requires_mods_dir(monkeypatch):
+    """測試 start_extraction 需要填寫 mods 目錄"""
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    page = _Page()
+    view = ExtractorView(page, _FilePicker())
+    view.output_dir_textfield.value = 'C:/Out'
+
+    view.start_extraction('lang')
+
+    assert len(page.overlay) >= 1
+
+
+def test_extractor_view_start_extraction_requires_output_dir(monkeypatch):
+    """測試 start_extraction 需要填寫輸出目錄"""
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    page = _Page()
+    view = ExtractorView(page, _FilePicker())
+    view.mods_dir_textfield.value = 'C:/Mods'
+
+    view.start_extraction('lang')
+
+    assert len(page.overlay) >= 1

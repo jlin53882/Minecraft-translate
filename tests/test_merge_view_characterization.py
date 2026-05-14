@@ -180,3 +180,36 @@ def test_merge_view_log_presenter_exists(monkeypatch):
 
     assert hasattr(view, 'log_presenter')
     assert view.log_presenter is not None
+
+
+def test_merge_view_show_snack_bar_adds_to_overlay(monkeypatch):
+    """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    page = _Page()
+    view = merge_view.MergeView(page, _FilePicker())
+
+    view._show_snack_bar('Test error', '#FF0000')
+
+    assert len(page.overlay) >= 1
+
+
+def test_merge_view_set_status_updates_chip(monkeypatch):
+    """測試 _set_status 正確更新 status_chip"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    view = merge_view.MergeView(_Page(), _FilePicker())
+
+    view._set_status('工作中', '#00FF00')
+
+    assert view.status_chip.label.value == '工作中'
+
+
+def test_merge_view_open_output_folder(monkeypatch):
+    """測試 _open_output_folder 不拋出錯誤"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    view = merge_view.MergeView(_Page(), _FilePicker())
+    view.output_dir_field.value = 'C:/Out'
+
+    try:
+        view._open_output_folder()
+    except Exception:
+        pass

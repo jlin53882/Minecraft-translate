@@ -501,3 +501,25 @@ def test_pick_directory_into_without_page_update_when_no_result(monkeypatch):
 
     assert target.value == "original"
     assert page.updated == 0
+
+
+def test_translation_view_show_snack_adds_to_overlay():
+    page = _Page()
+    picker = _FilePicker()
+    view = tv.TranslationView(page, picker)
+    view._show_snack('Test error', '#FF0000')
+    assert len(page.overlay) >= 1
+
+
+def test_translation_view_path_row_exists():
+    page = _Page()
+    picker = _FilePicker()
+    view = tv.TranslationView(page, picker)
+    assert view._path_row is not None
+
+
+def test_translation_view_action_row_exists():
+    page = _Page()
+    picker = _FilePicker()
+    view = tv.TranslationView(page, picker)
+    assert view._action_row is not None
