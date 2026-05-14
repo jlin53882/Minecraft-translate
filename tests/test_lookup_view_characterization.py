@@ -71,3 +71,19 @@ def test_lookup_view_show_snack_bar_adds_to_overlay():
 
     assert len(page.overlay) == 1
     assert page.overlay[0].open is True
+
+
+def test_lookup_view_batch_lookup_clicked_triggers_service(monkeypatch):
+    """測試 batch_lookup_clicked 調用服務"""
+    page = _Page()
+    view = LookupView(page)
+    view.batch_input = type('F', (), {'value': '[]'})()
+
+    calls = []
+    def mock_worker(term):
+        calls.append(term)
+        return iter([])
+
+    monkeypatch.setattr('app.views.lookup_view.run_batch_lookup_service', mock_worker)
+
+    view.batch_lookup_clicked(None)

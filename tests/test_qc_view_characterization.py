@@ -242,6 +242,22 @@ def test_qc_view_show_snack_bar_adds_to_overlay():
     assert page.overlay[0].open is True
 
 
+def test_qc_view_pick_file_or_directory_with_tkinter_exists():
+    """測試 pick_file_or_directory_with_tkinter 方法存在"""
+    view = QCView(_Page(), _FilePicker())
+
+    assert hasattr(view, 'pick_file_or_directory_with_tkinter')
+    assert callable(view.pick_file_or_directory_with_tkinter)
+
+
+def test_qc_view_task_runner_exists():
+    """測試 task_runner 存在"""
+    view = QCView(_Page(), _FilePicker())
+
+    assert hasattr(view, 'task_runner')
+    assert view.task_runner is not None
+
+
 def test_qc_view_create_pick_button_returns_icon_button():
     """測試 _create_pick_button 返回帶有回調的 IconButton"""
     page = _Page()
