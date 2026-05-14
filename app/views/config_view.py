@@ -561,7 +561,7 @@ class ConfigView(ft.Column):
             padding=12,
             border_radius=8,
             bgcolor=theme.WHITE,
-            border=ft.border.all(1, theme.GREY_200),
+            border=ft.Border.all(1, theme.GREY_200),
             content=ft.Row(
                 [
                     order_text,
