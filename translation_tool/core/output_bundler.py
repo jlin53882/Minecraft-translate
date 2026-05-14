@@ -65,12 +65,11 @@ def _write_pack_mcmeta(
     """Write pack.mcmeta file to ZIP root."""
     pack_info = {
         "pack": {
-            "pack_format": min_format,
             "description": description,
+            "min_format": str(min_format),
+            "max_format": str(max_format),
         }
     }
-    if min_format != max_format:
-        pack_info["pack"]["supported_formats"] = [min_format, max_format]
 
     zip_file.writestr(
         "pack.mcmeta",
@@ -93,17 +92,22 @@ def bundle_outputs_generator(
         input_root_dir: Root folder containing source subfolders
         output_zip_path: Output path for ZIP file
         description: pack.mcmeta description field
-        min_format: pack_format for pack.mcmeta (also used as supported_formats[0])
-        max_format: Second value in supported_formats range (0 = use min_format only)
+        min_format: min_format for pack.mcmeta
+        max_format: max_format for pack.mcmeta
         pack_image_path: Optional path to pack.png to copy into ZIP root
         extra_folders: Optional list of extra folder paths to merge into ZIP root
     """
     start_time = time.time()
-    bundle_cfg = load_config().get("output_bundler", {})
-    source_folders_map = bundle_cfg.get("source_folders", {})
 
-    if not source_folders_map:
-        yield {"progress": 1.0, "log": "錯誤：load_config().json 中未定義 'output_bundler.source_folders'。無法打包。", "error": True}
+    if not os.path.exists(input_root_dir):
+        yield {"progress": 1.0, "log": f"錯誤：輸入目錄不存在: {input_root_dir}", "error": True}
+        return
+
+    subfolders = [d for d in os.listdir(input_root_dir)
+                  if os.path.isdir(os.path.join(input_root_dir, d))]
+
+    if not subfolders:
+        yield {"progress": 1.0, "log": f"錯誤：輸入目錄中沒有子資料夾: {input_root_dir}", "error": True}
         return
 
     total_files_added = 0
@@ -133,20 +137,16 @@ def bundle_outputs_generator(
                 except Exception as ex:
                     yield {"progress": 0.1, "log": f"複製 pack.png 失敗: {ex}"}
 
-            total_steps = len(source_folders_map) + (len(extra_folders) if extra_folders else 0)
+            total_steps = len(subfolders) + (len(extra_folders) if extra_folders else 0)
             step = 0
 
-            for base_path_in_zip, folder_name in source_folders_map.items():
+            for folder_name in subfolders:
                 step += 1
                 progress = 0.15 + (step / total_steps) * 0.7
                 full_source_path = os.path.join(input_root_dir, folder_name)
                 yield {"progress": progress, "log": f"正在掃描來源: '{folder_name}'..."}
 
-                if not os.path.exists(full_source_path):
-                    yield {"progress": progress, "log": f"警告：找不到來源資料夾 '{folder_name}'，將略過。"}
-                    continue
-
-                base = "" if base_path_in_zip.lower() == "root" else base_path_in_zip
+                base = "" if folder_name.lower() == "root" else folder_name
                 count, seen_files = _add_folder_to_zip(zf, full_source_path, base, seen_files)
 
                 if count > 0:

@@ -7,6 +7,7 @@ import flet as ft
 import threading
 import os
 import json
+from translation_tool.utils.log_unit import log_debug
 
 from app.ui import theme
 from app.ui.components import styled_card
@@ -23,13 +24,21 @@ class BundlerView(ft.Column):
         self.extra_folders: list[str] = []
         self.version_data: dict = {}
 
-        self.version_dropdown = ft.Dropdown(
-            label="選擇版本",
-            hint_text="請選擇資源包版本",
+        self.version_search = ft.TextField(
+            label="搜尋版本",
+            hint_text="輸入版本關鍵字...",
             expand=True,
             border_color=theme.OUTLINE,
             content_padding=10,
+            on_change=self._on_version_search_change,
         )
+        self.version_list = ft.ListView(
+            expand=True,
+            height=200,
+            spacing=4,
+            auto_scroll=False,
+        )
+        self.version_expanded = False
         self.description_field = ft.TextField(
             label="檔案敘述",
             hint_text="支援 JSON 格式或 §顏色代碼",
@@ -83,23 +92,64 @@ class BundlerView(ft.Column):
             self.version_data = {}
 
     def _init_ui(self):
-        self.version_dropdown.options = [
-            ft.dropdown.Option(v, v) for v in self.version_data.keys()
-        ]
+        self._refresh_version_list("")
+
+    def _refresh_version_list(self, search_text: str):
+        self.version_list.controls.clear()
+        filtered = [v for v in self.version_data.keys() if search_text.lower() in v.lower()]
+        for version_key in filtered:
+            self.version_list.controls.append(
+                ft.Container(
+                    content=ft.Text(version_key, size=13),
+                    padding=8,
+                    border=ft.Border.all(1, theme.OUTLINE),
+                    border_radius=6,
+                    on_click=lambda e, v=version_key: self._select_version(v),
+                )
+            )
+        self._page.update()
+
+    def _on_version_search_change(self, e: ft.ControlEvent):
+        self._refresh_version_list(e.control.value or "")
+
+    def _select_version(self, version: str):
+        self.version_search.value = version
+        self.version_expanded = False
+        self._page.update()
+
+    def _toggle_version_expand(self, e: ft.ControlEvent):
+        self.version_expanded = not self.version_expanded
+        log_debug(f"_toggle_version_expand: version_expanded={self.version_expanded}")
+        if hasattr(self, 'version_dropdown_container_ref'):
+            self.version_dropdown_container_ref.visible = self.version_expanded
+        self._page.update()
 
     def _build_controls(self):
-        version_row = ft.Row(
-            [
-                ft.Container(
-                    content=ft.Column([
-                        ft.Text("選擇版本", size=12, color=theme.GREY_600),
-                        self.version_dropdown,
-                    ], spacing=4),
-                    expand=True,
-                ),
-            ],
-            spacing=16,
+        log_debug(f"_build_controls: version_expanded={self.version_expanded}")
+        version_toggle = ft.Container(
+            content=ft.Row([
+                ft.Text("選擇版本", size=12, color=theme.GREY_600),
+                ft.Text(self.version_search.value or "", size=12, color=theme.GREY_800, expand=True),
+                ft.Icon(ft.Icons.EXPAND_MORE if self.version_expanded else ft.Icons.EXPAND_LESS, size=20),
+            ]),
+            on_click=self._toggle_version_expand,
+            padding=8,
+            border=ft.Border.all(1, theme.OUTLINE),
+            border_radius=6,
         )
+        version_dropdown_container = ft.Container(
+            content=self.version_list,
+            height=180,
+            border=ft.Border.all(1, theme.OUTLINE),
+            border_radius=6,
+            padding=4,
+        )
+        self.version_dropdown_container_ref = version_dropdown_container
+        version_section = ft.Column([
+            version_toggle,
+            version_dropdown_container,
+        ], spacing=4)
+        self._version_section = version_section
 
         description_row = ft.Row(
             [
@@ -191,7 +241,7 @@ class BundlerView(ft.Column):
                 title="打包設定",
                 icon=ft.Icons.ARCHIVE,
                 content=ft.Column([
-                    version_row,
+                    version_section,
                     description_row,
                     root_dir_row,
                     output_zip_row,
@@ -212,57 +262,59 @@ class BundlerView(ft.Column):
         self._page.run_task(self._async_pick_pack_image)
 
     async def _async_pick_pack_image(self):
-        await self.file_picker.pick_files(
+        result = await self.file_picker.pick_files(
             dialog_title="選擇資源包圖片",
             allow_multiple=False,
             allowed_extensions=["png", "jpg", "jpeg"],
         )
+        log_debug("_async_pick_pack_image result: {result}")
+        if result:
+            self.pack_image_field.value = result[0].path
+            self._page.update()
 
     def _on_pack_image_picked(self, e: ft.FilePickerUploadEvent):
-        if e.files and e.files[0].path:
-            self.pack_image_field.value = e.files[0].path
-            self.update()
+        pass
 
     def _pick_root_dir(self, e: ft.ControlEvent):
-        self.file_picker.on_upload = self._on_root_dir_picked
         self._page.run_task(self._async_pick_root_dir)
 
     async def _async_pick_root_dir(self):
-        await self.file_picker.get_directory_path(dialog_title="選擇翻譯專案根目錄")
-
-    def _on_root_dir_picked(self, e: ft.FilePickerUploadEvent):
-        if e.path:
-            self.root_dir_field.value = e.path
-            self.update()
+        result = await self.file_picker.get_directory_path(dialog_title="選擇翻譯專案根目錄")
+        log_debug("_async_pick_root_dir result: {result}")
+        if result:
+            self.root_dir_field.value = result
+            self._page.update()
 
     def _pick_output_zip(self, e: ft.ControlEvent):
-        self.file_picker.on_upload = self._on_output_zip_picked
         self._page.run_task(self._async_pick_output_zip)
 
     async def _async_pick_output_zip(self):
-        await self.file_picker.save_file(
+        result = await self.file_picker.save_file(
             dialog_title="選擇 ZIP 儲存位置",
             allowed_extensions=["zip"],
             file_name="output.zip",
         )
+        log_debug("_async_pick_output_zip result: {result}")
+        if result:
+            self.output_zip_field.value = result
+            self._page.update()
 
     def _on_output_zip_picked(self, e: ft.FilePickerUploadEvent):
-        if e.path:
-            self.output_zip_field.value = e.path
-            self.update()
+        pass
 
     def _pick_extra_folder(self, e: ft.ControlEvent):
-        self.file_picker.on_upload = self._on_extra_folder_picked
         self._page.run_task(self._async_pick_extra_folder)
 
     async def _async_pick_extra_folder(self):
-        await self.file_picker.get_directory_path(dialog_title="選擇其他資料夾")
+        result = await self.file_picker.get_directory_path(dialog_title="選擇其他資料夾")
+        log_debug("_async_pick_extra_folder result: {result}")
+        if result and result not in self.extra_folders:
+            self.extra_folders.append(result)
+            self._refresh_extra_folders()
+            self._page.update()
 
     def _on_extra_folder_picked(self, e: ft.FilePickerUploadEvent):
-        if e.path and e.path not in self.extra_folders:
-            self.extra_folders.append(e.path)
-            self._refresh_extra_folders()
-            self.update()
+        pass
 
     def _refresh_extra_folders(self):
         self.extra_folders_view.controls.clear()
@@ -288,7 +340,7 @@ class BundlerView(ft.Column):
         if path in self.extra_folders:
             self.extra_folders.remove(path)
             self._refresh_extra_folders()
-            self.update()
+            self._page.update()
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
@@ -304,7 +356,7 @@ class BundlerView(ft.Column):
             self._show_snack_bar("請填寫「翻譯專案根目錄」與「最終 ZIP 檔案儲存路徑」")
             return
 
-        version = self.version_dropdown.value or ""
+        version = self.version_search.value or ""
         description = self.description_field.value or ""
         pack_image = self.pack_image_field.value or ""
 

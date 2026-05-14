@@ -62,103 +62,37 @@ class TestAddFolderToZip:
 class TestBundleOutputsGenerator:
     """測試 bundle_outputs_generator 生成器函式"""
 
-    def test_bundle_with_missing_config(self, tmp_path, monkeypatch):
-        """測試缺少設定時的錯誤處理"""
-        from translation_tool.core.output_bundler import bundle_outputs_generator
-        
-        # Mock load_config 傳回空設定
-        class MockConfig:
-            def get(self, key, default=None):
-                if key == "output_bundler":
-                    return {}  # 沒有 source_folders
-                return default
-        
-        monkeypatch.setattr("translation_tool.core.output_bundler.load_config", lambda: MockConfig())
-        
-        output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(str(tmp_path), str(output_zip)))
-        
-        # 應該收到錯誤訊息
-        assert len(results) > 0
-        assert results[-1].get("error") is True
-        assert "錯誤" in results[-1].get("log", "")
-
-    def test_bundle_with_nonexistent_source_folder(self, tmp_path, monkeypatch):
+    def test_bundle_with_nonexistent_input_folder(self, tmp_path):
         """測試來源資料夾不存在時的處理"""
         from translation_tool.core.output_bundler import bundle_outputs_generator
-        
-        # Mock load_config 傳回設定但來源資料夾不存在
-        class MockConfig:
-            def get(self, key, default=None):
-                if key == "output_bundler":
-                    return {"source_folders": {"assets": "zh_tw_generated"}}
-                return default
-        
-        monkeypatch.setattr("translation_tool.core.output_bundler.load_config", lambda: MockConfig())
-        
-        output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(str(tmp_path), str(output_zip)))
-        
-        # 應該有警告但不是錯誤
-        assert len(results) > 0
 
-    def test_bundle_success_with_valid_folders(self, tmp_path, monkeypatch):
-        """測試正常打包場景"""
-        from translation_tool.core.output_bundler import bundle_outputs_generator
-        
-        # 建立有效的來源資料夾結構
-        source_folder = tmp_path / "zh_tw_generated" / "assets" / "modid" / "lang"
-        source_folder.mkdir(parents=True)
-        (source_folder / "zh_tw.json").write_text('{"key": "測試"}')
-        
-        # Mock load_config
-        class MockConfig:
-            def get(self, key, default=None):
-                if key == "output_bundler":
-                    return {"source_folders": {"assets": "zh_tw_generated"}}
-                return default
-        
-        monkeypatch.setattr("translation_tool.core.output_bundler.load_config", lambda: MockConfig())
-        
         output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(str(tmp_path), str(output_zip)))
-        
-        # 驗證結果
+        results = list(bundle_outputs_generator(
+            str(tmp_path / "nonexistent"),
+            str(output_zip)
+        ))
+
         assert len(results) > 0
-        assert results[-1].get("progress") == 1.0
-        assert "完成" in results[-1].get("log", "")
-        
-        # 驗證 ZIP 檔案存在且包含正確內容
+        assert results[-1].get("error") is True
+        assert "不存在" in results[-1].get("log", "")
+
+    def test_bundle_adds_all_files_from_root(self, tmp_path):
+        """測試直接打包 input_root_dir 下所有檔案"""
+        from translation_tool.core.output_bundler import bundle_outputs_generator
+
+        (tmp_path / "lang").mkdir()
+        (tmp_path / "lang" / "zh_tw.json").write_text('{"test": "value"}')
+
+        output_zip = tmp_path / "output.zip"
+        results = list(bundle_outputs_generator(
+            str(tmp_path),
+            str(output_zip)
+        ))
+
         assert output_zip.exists()
         with zipfile.ZipFile(output_zip, "r") as zf:
             names = zf.namelist()
-            assert any("zh_tw.json" in n for n in names)
-
-    def test_bundle_with_root_folder(self, tmp_path, monkeypatch):
-        """測試 root 資料夾映射到 ZIP 根目錄"""
-        from translation_tool.core.output_bundler import bundle_outputs_generator
-        
-        # 建立 pack.mcmeta 檔案
-        source_folder = tmp_path / "pack_mcmeta"
-        source_folder.mkdir()
-        (source_folder / "pack.mcmeta").write_text('{"pack": {}}')
-        
-        # Mock load_config，使用 root
-        class MockConfig:
-            def get(self, key, default=None):
-                if key == "output_bundler":
-                    return {"source_folders": {"root": "pack_mcmeta"}}
-                return default
-        
-        monkeypatch.setattr("translation_tool.core.output_bundler.load_config", lambda: MockConfig())
-        
-        output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(str(tmp_path), str(output_zip)))
-        
-        # 驗證檔案在 ZIP 根目錄
-        assert output_zip.exists()
-        with zipfile.ZipFile(output_zip, "r") as zf:
-            assert "pack.mcmeta" in zf.namelist()
+            assert any("lang/zh_tw.json" in n or n == "lang/zh_tw.json" for n in names)
 
 
 class TestWritePackMcmeta:
@@ -175,8 +109,8 @@ class TestWritePackMcmeta:
         with zipfile.ZipFile(zip_path, "r") as zf:
             content = json.loads(zf.read("pack.mcmeta").decode("utf-8"))
             assert content["pack"]["description"] == "Test Description"
-            assert content["pack"]["pack_format"] == 15
-            assert "supported_formats" not in content["pack"]
+            assert content["pack"]["min_format"] == "15"
+            assert content["pack"]["max_format"] == "15"
 
     def test_write_pack_mcmeta_with_supported_formats(self, tmp_path):
         """測試 pack.mcmeta 包含 supported_formats 範圍"""
@@ -189,8 +123,8 @@ class TestWritePackMcmeta:
         with zipfile.ZipFile(zip_path, "r") as zf:
             content = json.loads(zf.read("pack.mcmeta").decode("utf-8"))
             assert content["pack"]["description"] == "Range Description"
-            assert content["pack"]["pack_format"] == 9
-            assert content["pack"]["supported_formats"] == [9, 15]
+            assert content["pack"]["min_format"] == "9"
+            assert content["pack"]["max_format"] == "15"
 
 
 class TestAddFolderToZipDuplicateHandling:
@@ -224,21 +158,13 @@ class TestAddFolderToZipDuplicateHandling:
 class TestBundleOutputsGeneratorNewParams:
     """測試 bundle_outputs_generator 新參數"""
 
-    def test_bundle_with_description_and_format(self, tmp_path, monkeypatch):
+    def test_bundle_with_description_and_format(self, tmp_path):
         """測試 description 和 format 寫入 pack.mcmeta"""
         from translation_tool.core.output_bundler import bundle_outputs_generator
 
-        source_folder = tmp_path / "zh_tw_generated" / "assets"
+        source_folder = tmp_path / "assets"
         source_folder.mkdir(parents=True)
         (source_folder / "test.json").write_text('{"key": "value"}')
-
-        class MockConfig:
-            def get(self, key, default=None):
-                if key == "output_bundler":
-                    return {"source_folders": {"assets": "zh_tw_generated"}}
-                return default
-
-        monkeypatch.setattr("translation_tool.core.output_bundler.load_config", lambda: MockConfig())
 
         output_zip = tmp_path / "output.zip"
         results = list(bundle_outputs_generator(
@@ -252,7 +178,8 @@ class TestBundleOutputsGeneratorNewParams:
         with zipfile.ZipFile(output_zip, "r") as zf:
             content = json.loads(zf.read("pack.mcmeta").decode("utf-8"))
             assert content["pack"]["description"] == "My Translation Pack"
-            assert content["pack"]["pack_format"] == 15
+            assert content["pack"]["min_format"] == "15"
+            assert content["pack"]["max_format"] == "15"
 
     def test_bundle_with_pack_image(self, tmp_path, monkeypatch):
         """測試 pack_image_path 複製圖片到 ZIP"""
@@ -430,53 +357,31 @@ class TestBundleOutputsGeneratorNewParams:
 class TestOutputBundlerIntegration:
     """整合測試：OutputBundler 完整流程"""
 
-    def test_full_bundle_workflow(self, tmp_path, monkeypatch):
+    def test_full_bundle_workflow(self, tmp_path):
         """測試完整打包工作流程"""
         from translation_tool.core.output_bundler import bundle_outputs_generator
-        
-        # 建立多個來源資料夾
-        zh_tw_folder = tmp_path / "zh_tw_generated" / "assets" / "mod1" / "lang"
+
+        zh_tw_folder = tmp_path / "assets" / "mod1" / "lang"
         zh_tw_folder.mkdir(parents=True)
         (zh_tw_folder / "zh_tw.json").write_text('{"mod1": "內容1"}')
-        
-        pack_folder = tmp_path / "pack_mcmeta"
-        pack_folder.mkdir()
-        (pack_folder / "pack.mcmeta").write_text('{"pack": "info"}')
-        
-        # Mock load_config
-        class MockConfig:
-            def get(self, key, default=None):
-                if key == "output_bundler":
-                    return {
-                        "source_folders": {
-                            "assets": "zh_tw_generated",
-                            "root": "pack_mcmeta"
-                        }
-                    }
-                return default
-        
-        monkeypatch.setattr("translation_tool.core.output_bundler.load_config", lambda: MockConfig())
-        
+
         output_zip = tmp_path / "bundle.zip"
         results = list(bundle_outputs_generator(str(tmp_path), str(output_zip)))
-        
-        # 驗證結果
+
         assert output_zip.exists()
-        
+
         with zipfile.ZipFile(output_zip, "r") as zf:
             names = zf.namelist()
             assert any("zh_tw.json" in n for n in names)
-            assert "pack.mcmeta" in names
-        
-        # 驗證 progress 值
+
         progresses = [r.get("progress", 0) for r in results]
         assert progresses[-1] == 1.0
 
-    def test_full_bundle_with_all_new_features(self, tmp_path, monkeypatch):
+    def test_full_bundle_with_all_new_features(self, tmp_path):
         """測試完整流程包含所有新功能"""
         from translation_tool.core.output_bundler import bundle_outputs_generator
 
-        zh_tw = tmp_path / "zh_tw_generated" / "assets" / "mod1" / "lang"
+        zh_tw = tmp_path / "assets" / "mod1" / "lang"
         zh_tw.mkdir(parents=True)
         (zh_tw / "zh_tw.json").write_text('{"mod1": "中文"}')
 
@@ -486,14 +391,6 @@ class TestOutputBundlerIntegration:
 
         pack_img = tmp_path / "pack.png"
         pack_img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
-
-        class MockConfig:
-            def get(self, key, default=None):
-                if key == "output_bundler":
-                    return {"source_folders": {"assets": "zh_tw_generated"}}
-                return default
-
-        monkeypatch.setattr("translation_tool.core.output_bundler.load_config", lambda: MockConfig())
 
         output_zip = tmp_path / "output.zip"
         results = list(bundle_outputs_generator(
@@ -515,7 +412,7 @@ class TestOutputBundlerIntegration:
             assert "pack.png" in names
             assert "extra.json" in names
             assert content["pack"]["description"] == "Full Test Pack"
-            assert content["pack"]["pack_format"] == 9
-            assert content["pack"]["supported_formats"] == [9, 15]
+            assert content["pack"]["min_format"] == "9"
+            assert content["pack"]["max_format"] == "15"
 
         assert results[-1].get("progress") == 1.0

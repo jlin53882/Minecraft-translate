@@ -26,7 +26,8 @@ def test_bundler_view_initializes_core_controls():
     view = BundlerView(_Page(), _FilePicker())
 
     assert view.progress_bar.visible is False
-    assert hasattr(view, "version_dropdown")
+    assert hasattr(view, "version_search")
+    assert hasattr(view, "version_list")
     assert hasattr(view, "description_field")
     assert hasattr(view, "pack_image_field")
     assert hasattr(view, "root_dir_field")
@@ -49,12 +50,53 @@ def test_bundler_view_extra_folders_list_initialized():
     assert len(view.extra_folders_view.controls) == 0
 
 
-def test_bundler_view_version_dropdown_options():
+def test_bundler_view_version_list():
     page = _Page()
     view = BundlerView(page, _FilePicker())
 
-    assert hasattr(view, "version_dropdown")
+    assert hasattr(view, "version_search")
+    assert hasattr(view, "version_list")
     assert hasattr(view, "version_data")
+
+
+def test_bundler_view_version_list():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+
+    assert hasattr(view, "version_list")
+    assert hasattr(view, "version_expanded")
+    assert view.version_expanded is False
+
+
+def test_version_toggle_expand():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+
+    assert view.version_expanded is False
+    view._toggle_version_expand(None)
+    assert view.version_expanded is True
+    view._toggle_version_expand(None)
+    assert view.version_expanded is False
+
+
+def test_version_select():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+
+    view._select_version("1.20.1")
+    assert view.version_search.value == "1.20.1"
+    assert view.version_expanded is False
+
+
+def test_bundler_view_hint_texts():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+
+    assert view.version_search.hint_text == "輸入版本關鍵字..."
+    assert view.description_field.hint_text == "支援 JSON 格式或 §顏色代碼"
+    assert view.pack_image_field.hint_text == "選擇 pack.png 圖片（可選）"
+    assert view.root_dir_field.hint_text == "包含所有翻譯產出的最上層資料夾"
+    assert view.output_zip_field.hint_text == "輸出位置與檔名"
 
 
 def test_start_bundling_without_required_paths_shows_error():
@@ -215,35 +257,11 @@ def test_remove_extra_folder(monkeypatch):
     assert "C:/folder2" in view.extra_folders
 
 
-def test_on_extra_folder_picked_adds_folder(monkeypatch):
+def test_extra_folders_list_initially_empty():
     page = _Page()
     view = BundlerView(page, _FilePicker())
-    monkeypatch.setattr(view, "_refresh_extra_folders", lambda: None)
-    monkeypatch.setattr(view, "update", lambda: None)
-
-    class MockEvent:
-        def __init__(self):
-            self.path = "C:/new_folder"
-
-    view._on_extra_folder_picked(MockEvent())
-
-    assert "C:/new_folder" in view.extra_folders
-
-
-def test_on_extra_folder_picked_ignores_duplicates(monkeypatch):
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
-    view.extra_folders = ["C:/existing"]
-    monkeypatch.setattr(view, "_refresh_extra_folders", lambda: None)
-    monkeypatch.setattr(view, "update", lambda: None)
-
-    class MockEvent:
-        def __init__(self):
-            self.path = "C:/existing"
-
-    view._on_extra_folder_picked(MockEvent())
-
-    assert len(view.extra_folders) == 1
+    assert view.extra_folders == []
+    assert len(view.extra_folders_view.controls) == 0
 
 
 def test_show_snack_bar_adds_to_overlay(monkeypatch):
