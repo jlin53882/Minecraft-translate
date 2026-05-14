@@ -14,8 +14,8 @@ import json
 from typing import Dict, Any, Generator, Optional, List
 
 from ..utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_info, log_error, log_debug,log_warning
 
-log = logging.getLogger(__name__)
 
 
 def _add_folder_to_zip(
@@ -33,7 +33,7 @@ def _add_folder_to_zip(
         seen_files = {}
 
     if not os.path.exists(folder_path):
-        log.warning(f"打包時找不到來源資料夾: {folder_path}，將略過。")
+        log_warning(f"打包時找不到來源資料夾: {folder_path}，將略過。")
         return 0, seen_files
 
     for root, _, files in os.walk(folder_path):
@@ -105,9 +105,10 @@ def bundle_outputs_generator(
 
     subfolders = [d for d in os.listdir(input_root_dir)
                   if os.path.isdir(os.path.join(input_root_dir, d))]
-
+    log_info(f"輸入目錄: {input_root_dir}，找到子資料夾: {subfolders}")
     if not subfolders:
         yield {"progress": 1.0, "log": f"錯誤：輸入目錄中沒有子資料夾: {input_root_dir}", "error": True}
+        log_error(f"輸入目錄中沒有子資料夾: {input_root_dir}")
         return
 
     total_files_added = 0
@@ -121,6 +122,7 @@ def bundle_outputs_generator(
                 _write_pack_mcmeta(zf, description, min_format, max_format)
                 total_files_added += 1
                 yield {"progress": 0.05, "log": "已寫入 pack.mcmeta"}
+                log_info("已寫入 pack.mcmeta")
 
             if pack_image_path and os.path.exists(pack_image_path):
                 try:
@@ -153,7 +155,7 @@ def bundle_outputs_generator(
                     total_files_added += count
                     yield {"progress": progress, "log": f"成功從 '{folder_name}' 加入 {count} 個檔案。"}
                 else:
-                    yield {"progress": progress, "log": f"在 '{folder_name}' 中未找到可打包的檔案。"}
+                    yield {"progress": progress, "log": f"警告：'{folder_name}' 中沒有可打包的檔案。"}
 
             for entry in os.listdir(input_root_dir):
                 full_path = os.path.join(input_root_dir, entry)
@@ -218,7 +220,7 @@ def bundle_outputs_generator(
         yield {"progress": 1.0, "log": f"--- 打包完成！總共 {total_files_added} 個檔案被加入 ZIP。耗時 {duration:.2f} 秒 ---"}
 
     except Exception as e:
-        log.error(f"打包時發生嚴重錯誤: {e}", exc_info=True)
+        log_error(f"打包時發生嚴重錯誤: {e}", exc_info=True)
         yield {"progress": 1.0, "log": f"錯誤：打包失敗: {e}", "error": True}
         if os.path.exists(output_zip_path):
             os.remove(output_zip_path)
