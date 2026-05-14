@@ -147,6 +147,118 @@ def test_reset_kjs_inputs_restores_defaults_and_appends_log(monkeypatch):
     assert view.kjs_step_translate.value is True
     assert view.kjs_step_inject.value is True
     assert view.kjs_write_new_cache.value is True
+
+
+def test_run_kjs_calls_run_kjs_service(monkeypatch):
+    """驗證 _run_kjs 正確呼叫 run_kjs"""
+    page = _Page()
+    picker = _FilePicker()
+    calls = {}
+
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    monkeypatch.setattr(tv.threading, 'Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr(tv.TranslationView, '_start_ui_timer', lambda self: None)
+
+    def fake_service(in_dir, session, **kwargs):
+        calls['in_dir'] = in_dir
+        calls.update(kwargs)
+
+    monkeypatch.setattr(tv, 'run_kubejs_tooltip_service', fake_service)
+
+    view = tv.TranslationView(page, picker)
+    view.kjs_in_dir.value = 'C:/KJS/In'
+    view.kjs_out_dir.value = 'C:/KJS/Out'
+    view.kjs_step_extract.value = True
+    view.kjs_step_translate.value = False
+    view.kjs_step_inject.value = True
+    view.kjs_write_new_cache.value = True
+
+    view._run_kjs(dry_run=False)
+
+    assert calls['input_dir'] == 'C:/KJS/In'
+    assert calls['output_dir'] == 'C:/KJS/Out'
+    assert calls['dry_run'] is False
+    assert calls['step_translate'] is False
+    assert view.status_chip.label.value == '執行中'
+
+
+def test_run_md_calls_run_md_service(monkeypatch):
+    """驗證 _run_md 正確呼叫 run_md"""
+    page = _Page()
+    picker = _FilePicker()
+    calls = {}
+
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    monkeypatch.setattr(tv.threading, 'Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr(tv.TranslationView, '_start_ui_timer', lambda self: None)
+
+    def fake_service(in_dir, session, **kwargs):
+        calls['in_dir'] = in_dir
+        calls.update(kwargs)
+
+    monkeypatch.setattr(tv, 'run_md_translation_service', fake_service)
+
+    view = tv.TranslationView(page, picker)
+    view.md_in_dir.value = 'C:/MD/In'
+    view.md_out_dir.value = 'C:/MD/Out'
+    view.md_step_extract.value = True
+    view.md_step_translate.value = True
+    view.md_step_inject.value = False
+    view.md_write_new_cache.value = True
+
+    view._run_md(dry_run=True)
+
+    assert calls['input_dir'] == 'C:/MD/In'
+    assert calls['output_dir'] == 'C:/MD/Out'
+    assert calls['dry_run'] is True
+    assert calls['step_inject'] is False
+
+
+def test_run_ftb_calls_run_ftb_service(monkeypatch):
+    """驗證 _run_ftb 正確呼叫 run_ftb"""
+    page = _Page()
+    picker = _FilePicker()
+    calls = {}
+
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    monkeypatch.setattr(tv.threading, 'Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr(tv.TranslationView, '_start_ui_timer', lambda self: None)
+
+    def fake_service(in_dir, session, **kwargs):
+        calls['in_dir'] = in_dir
+        calls.update(kwargs)
+
+    monkeypatch.setattr(tv, 'run_ftb_translation_service', fake_service)
+
+    view = tv.TranslationView(page, picker)
+    view.ftb_in_dir.value = 'C:/FTB/In'
+    view.ftb_out_dir.value = 'C:/FTB/Out'
+    view.ftb_step_export.value = True
+    view.ftb_step_clean.value = True
+    view.ftb_step_translate.value = True
+    view.ftb_step_inject.value = True
+    view.ftb_write_new_cache.value = True
+
+    view._run_ftb(dry_run=False)
+
+    assert calls['in_dir'] == 'C:/FTB/In'
+    assert calls['output_dir'] == 'C:/FTB/Out'
+    assert calls['dry_run'] is False
+
+
+def test_pick_directory_into_without_page_update_when_no_result(monkeypatch):
+    """驗證 _pick_directory_into 在取消選擇時不更新"""
+    page = _Page()
+    picker = _FilePicker()
+    picker._mock_path = None
+    view = tv.TranslationView(page, picker)
+
+    target = tv.ft.TextField(value="original")
+    view._pick_directory_into(target)
+    page._run_all_tasks()
+
+    assert target.value == "original"
+    assert page.updated == 0
     assert view.log_view.controls[-1].value == '[UI] 已重置：KubeJS 輸入已清空'
 
 
@@ -277,3 +389,115 @@ def test_kjs_controls_accessible_and_resettable(monkeypatch):
     assert view.kjs_step_translate.value is True
     assert view.kjs_step_inject.value is True
     assert view.kjs_write_new_cache.value is True
+
+
+def test_run_kjs_calls_run_kjs_service(monkeypatch):
+    """驗證 _run_kjs 正確呼叫 run_kjs"""
+    page = _Page()
+    picker = _FilePicker()
+    calls = {}
+
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    monkeypatch.setattr(tv.threading, 'Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr(tv.TranslationView, '_start_ui_timer', lambda self: None)
+
+    def fake_service(input_dir, session, **kwargs):
+        calls['input_dir'] = input_dir
+        calls.update(kwargs)
+
+    monkeypatch.setattr(tv, 'run_kubejs_tooltip_service', fake_service)
+
+    view = tv.TranslationView(page, picker)
+    view.kjs_in_dir.value = 'C:/KJS/In'
+    view.kjs_out_dir.value = 'C:/KJS/Out'
+    view.kjs_step_extract.value = True
+    view.kjs_step_translate.value = False
+    view.kjs_step_inject.value = True
+    view.kjs_write_new_cache.value = True
+
+    view._run_kjs(dry_run=False)
+
+    assert calls['input_dir'] == 'C:/KJS/In'
+    assert calls['output_dir'] == 'C:/KJS/Out'
+    assert calls['dry_run'] is False
+    assert calls['step_translate'] is False
+    assert view.status_chip.label.value == '執行中'
+
+
+def test_run_md_calls_run_md_service(monkeypatch):
+    """驗證 _run_md 正確呼叫 run_md"""
+    page = _Page()
+    picker = _FilePicker()
+    calls = {}
+
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    monkeypatch.setattr(tv.threading, 'Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr(tv.TranslationView, '_start_ui_timer', lambda self: None)
+
+    def fake_service(input_dir, session, **kwargs):
+        calls['input_dir'] = input_dir
+        calls.update(kwargs)
+
+    monkeypatch.setattr(tv, 'run_md_translation_service', fake_service)
+
+    view = tv.TranslationView(page, picker)
+    view.md_in_dir.value = 'C:/MD/In'
+    view.md_out_dir.value = 'C:/MD/Out'
+    view.md_step_extract.value = True
+    view.md_step_translate.value = True
+    view.md_step_inject.value = False
+    view.md_write_new_cache.value = True
+
+    view._run_md(dry_run=True)
+
+    assert calls['input_dir'] == 'C:/MD/In'
+    assert calls['output_dir'] == 'C:/MD/Out'
+    assert calls['dry_run'] is True
+    assert calls['step_inject'] is False
+
+
+def test_run_ftb_calls_run_ftb_service(monkeypatch):
+    """驗證 _run_ftb 正確呼叫 run_ftb"""
+    page = _Page()
+    picker = _FilePicker()
+    calls = {}
+
+    monkeypatch.setattr(tv, 'TaskSession', _Session)
+    monkeypatch.setattr(tv.threading, 'Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr(tv.TranslationView, '_start_ui_timer', lambda self: None)
+
+    def fake_service(input_dir, session, **kwargs):
+        calls['input_dir'] = input_dir
+        calls.update(kwargs)
+
+    monkeypatch.setattr(tv, 'run_ftb_translation_service', fake_service)
+
+    view = tv.TranslationView(page, picker)
+    view.ftb_in_dir.value = 'C:/FTB/In'
+    view.ftb_out_dir.value = 'C:/FTB/Out'
+    view.ftb_step_export.value = True
+    view.ftb_step_clean.value = True
+    view.ftb_step_translate.value = True
+    view.ftb_step_inject.value = True
+    view.ftb_write_new_cache.value = True
+
+    view._run_ftb(dry_run=False)
+
+    assert calls['input_dir'] == 'C:/FTB/In'
+    assert calls['output_dir'] == 'C:/FTB/Out'
+    assert calls['dry_run'] is False
+
+
+def test_pick_directory_into_without_page_update_when_no_result(monkeypatch):
+    """驗證 _pick_directory_into 在取消選擇時不更新"""
+    page = _Page()
+    picker = _FilePicker()
+    picker._mock_path = None
+    view = tv.TranslationView(page, picker)
+
+    target = tv.ft.TextField(value="original")
+    view._pick_directory_into(target)
+    page._run_all_tasks()
+
+    assert target.value == "original"
+    assert page.updated == 0
