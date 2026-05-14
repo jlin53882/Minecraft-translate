@@ -334,7 +334,7 @@ class BundlerView(ft.Column):
             self.extra_folders_view.controls.append(
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.FOLDER, size=16, color=theme.BLUE_GREY_600),
+                        ft.Icon(ft.Icons.FOLDER, size=16, color=theme.BLUE_GREY_500),
                         ft.Text(folder_name or path, expand=True, size=13),
                         ft.IconButton(
                             icon=ft.Icons.CLOSE,
