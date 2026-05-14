@@ -258,7 +258,26 @@ class ConfigView(ft.Column):
 
     def _build_nav_column(self) -> ft.Container:
         """建立左側導覽列"""
-        self.nav_column = ft.Column(spacing=6)
+        nav_items = []
+        for item in NAV_ITEMS:
+            is_selected = self._selected_nav == item["id"]
+            btn = ft.Container(
+                padding=12,
+                border_radius=8,
+                bgcolor=ft.Colors.BLUE_200 if is_selected else ft.Colors.GREY_100,
+                on_click=lambda e, iid=item["id"]: self._on_nav_click(iid),
+                content=ft.Row(
+                    [
+                        ft.Icon(item["icon"], size=18, color=ft.Colors.BLUE_800 if is_selected else ft.Colors.BLUE_GREY_600),
+                        ft.Text(item["label"], weight=ft.FontWeight.BOLD, size=13, color=ft.Colors.BLUE_900 if is_selected else ft.Colors.BLUE_GREY_700),
+                    ],
+                    spacing=10,
+                    alignment=ft.MainAxisAlignment.START,
+                ),
+            )
+            nav_items.append(btn)
+
+        self.nav_column = ft.Column(nav_items, spacing=6)
         nav_container = ft.Container(
             width=200,
             content=ft.Column(
