@@ -204,3 +204,41 @@ def test_icon_preview_view_cancel_mod_search_debounce():
     view._cancel_mod_search_debounce()
 
     assert view._mod_search_timer is not None
+
+
+def test_icon_preview_view_progress_bar_exists():
+    view = IconPreviewView(_Page())
+
+    assert view.progress_bar is not None
+    assert view.progress_text is not None
+
+
+def test_icon_preview_view_load_btn_disabled_initially():
+    view = IconPreviewView(_Page())
+
+    assert view.load_btn.disabled is True
+
+
+def test_icon_preview_view_source_label_initially():
+    view = IconPreviewView(_Page())
+
+    assert '尚未選擇' in view.source_label.value
+
+
+def test_icon_preview_view_review_label_initially():
+    view = IconPreviewView(_Page())
+
+    assert '尚未選擇' in view.review_label.value
+
+
+def test_icon_preview_view_mod_search_tf_exists():
+    view = IconPreviewView(_Page())
+
+    assert view.mod_search_tf is not None
+    assert view.mod_search_tf.label == '搜尋模組'
+
+
+def test_icon_preview_view_save_btn_initially_hidden():
+    view = IconPreviewView(_Page())
+
+    assert view.save_btn.visible is False

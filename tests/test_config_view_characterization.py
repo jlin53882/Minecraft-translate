@@ -141,3 +141,38 @@ def test_config_view_init_controls_builds_ui(monkeypatch):
     assert view.models_column is not None
     assert view.keys_column is not None
     assert view.page is not None
+
+
+def test_config_view_controls_map_exists(monkeypatch):
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    view = ConfigView(_Page())
+
+    assert hasattr(view, 'controls_map')
+    assert view.controls_map is not None
+
+
+def test_config_view_move_model_row(monkeypatch):
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    view = ConfigView(_Page())
+    view.move_model_row(0, 1)
+
+
+def test_config_view_add_and_remove_model_row_integration(monkeypatch):
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    view = ConfigView(_Page())
+    start = len(view.models_column.controls)
+
+    view.add_model_row('test-model')
+    assert len(view.models_column.controls) == start + 1
+
+    cb = view.models_column.controls[-1]._checkbox
+    view.remove_model_by_checkbox(cb)
+    assert len(view.models_column.controls) == start
+
+
+def test_config_view_load_config_updates_controls_map(monkeypatch):
+    cfg = {'logging': {'log_level': 'INFO'}}
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: cfg)
+    view = ConfigView(_Page())
+
+    assert 'logging.log_level' in view.controls_map
