@@ -159,6 +159,7 @@ def bundle_outputs_generator(
                 try:
                     with open(pack_mcmeta_source, "r", encoding="utf-8") as f:
                         content = f.read()
+                    seen_files["pack.mcmeta"] = 1
                     zf.writestr("pack.mcmeta", content)
                     total_files_added += 1
                     yield {"progress": 0.05, "log": "已寫入 pack.mcmeta（來自資料夾）"}

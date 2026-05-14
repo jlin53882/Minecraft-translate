@@ -94,6 +94,66 @@ class TestBundleOutputsGenerator:
             names = zf.namelist()
             assert any("lang/zh_tw.json" in n or n == "lang/zh_tw.json" for n in names)
 
+    def test_bundle_pack_mcmeta_from_folder_overrides_ui(self, tmp_path):
+        """測試 input_root_dir 中有 pack.mcmeta 時優先使用，忽略 UI 設定"""
+        from translation_tool.core.output_bundler import bundle_outputs_generator
+
+        (tmp_path / "lang").mkdir()
+        (tmp_path / "lang" / "zh_tw.json").write_text('{"test": "value"}')
+
+        (tmp_path / "pack.mcmeta").write_text('{"pack":{"description":"FolderVersion","min_format":"10","max_format":"15"}}')
+
+        output_zip = tmp_path / "output.zip"
+        results = list(bundle_outputs_generator(
+            str(tmp_path),
+            str(output_zip),
+            description="UIVersion",
+            min_format=20,
+            max_format=25,
+        ))
+
+        assert output_zip.exists()
+        with zipfile.ZipFile(output_zip, "r") as zf:
+            content = json.loads(zf.read("pack.mcmeta").decode("utf-8"))
+            assert content["pack"]["description"] == "FolderVersion"
+            assert content["pack"]["min_format"] == "10"
+            assert content["pack"]["max_format"] == "15"
+
+        warning_logs = [r.get("log", "") for r in results if "警告" in r.get("log", "")]
+        assert any("pack.mcmeta" in log for log in warning_logs)
+
+    def test_bundle_pack_png_from_folder_overrides_ui(self, tmp_path):
+        """測試 input_root_dir 中有 pack.png 時優先使用，忽略 UI 設定"""
+        from translation_tool.core.output_bundler import bundle_outputs_generator
+
+        (tmp_path / "lang").mkdir()
+        (tmp_path / "lang" / "zh_tw.json").write_text('{"test": "value"}')
+
+        (tmp_path / "pack.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+
+        ui_pack_png = tmp_path / "ui_pack.png"
+        ui_pack_png.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 16)
+
+        output_zip = tmp_path / "output.zip"
+        results = list(bundle_outputs_generator(
+            str(tmp_path),
+            str(output_zip),
+            pack_image_path=str(ui_pack_png),
+        ))
+
+        assert output_zip.exists()
+        with zipfile.ZipFile(output_zip, "r") as zf:
+            names = zf.namelist()
+            assert "pack.png" in names
+
+        warning_logs = [r.get("log", "") for r in results if "警告" in r.get("log", "")]
+        assert any("pack.png" in log for log in warning_logs)
+
+        assert output_zip.exists()
+        with zipfile.ZipFile(output_zip, "r") as zf:
+            names = zf.namelist()
+            assert any("lang/zh_tw.json" in n or n == "lang/zh_tw.json" for n in names)
+
 
 class TestWritePackMcmeta:
     """測試 _write_pack_mcmeta 函式"""
