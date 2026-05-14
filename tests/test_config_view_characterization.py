@@ -118,3 +118,26 @@ def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
 
     assert saved['lm_translator']['keys'] == ['k1']
     assert saved['lm_translator']['models']['demo-model']['enabled'] is True
+
+
+def test_config_view_show_snack_bar_adds_to_overlay(monkeypatch):
+    """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    page = _Page()
+    view = ConfigView(page)
+
+    view._show_snack_bar('Test error', '#FF0000')
+
+    assert len(page.overlay) == 1
+    assert page.overlay[0].open is True
+
+
+def test_config_view_init_controls_builds_ui(monkeypatch):
+    """測試 _init_controls 構建所有 UI 控制項"""
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    view = ConfigView(_Page())
+
+    assert view.footer is not None
+    assert view.models_column is not None
+    assert view.keys_column is not None
+    assert view.page is not None

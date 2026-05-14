@@ -60,3 +60,14 @@ def test_batch_lookup_worker_updates_result_and_progress(monkeypatch):
     assert view.batch_result_textfield.value == '{"ok": true}'
     assert view.batch_progress_bar.visible is False
     assert view.batch_button.disabled is False
+
+
+def test_lookup_view_show_snack_bar_adds_to_overlay():
+    """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
+    page = _Page()
+    view = LookupView(page)
+
+    view._show_snack_bar('Test error', '#FF0000')
+
+    assert len(page.overlay) == 1
+    assert page.overlay[0].open is True

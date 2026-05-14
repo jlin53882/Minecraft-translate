@@ -229,3 +229,25 @@ def test_qc_view_start_task_compare_tsv_requires_paths(monkeypatch):
 
     assert page.overlay
     assert "錯誤" in page.overlay[-1].content.value
+
+
+def test_qc_view_show_snack_bar_adds_to_overlay():
+    """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
+    page = _Page()
+    view = QCView(page, _FilePicker())
+
+    view._show_snack_bar('Test error', '#FF0000')
+
+    assert len(page.overlay) == 1
+    assert page.overlay[0].open is True
+
+
+def test_qc_view_create_pick_button_returns_icon_button():
+    """測試 _create_pick_button 返回帶有回調的 IconButton"""
+    page = _Page()
+    view = QCView(page, _FilePicker())
+
+    btn = view._create_pick_button(view.cn_dir_textfield, 'Test', True)
+
+    assert btn is not None
+    assert isinstance(btn, ft.IconButton)

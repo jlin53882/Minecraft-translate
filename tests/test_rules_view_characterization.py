@@ -153,3 +153,41 @@ def test_rules_view_search_box_on_change_exists(monkeypatch):
 
     assert view.search_box.on_change is not None
     assert view.sort_box.on_change is not None
+
+
+def test_rules_view_show_snack_bar_adds_to_overlay(monkeypatch):
+    """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    page = _Page()
+    view = RulesView(page)
+
+    view._show_snack_bar('Test error', '#FF0000')
+
+    assert len(page.overlay) >= 1
+    assert any('Test error' in str(o.content.value) if hasattr(o, 'content') else False for o in page.overlay)
+
+
+def test_rules_view_validate_rule_accepts_valid_rule(monkeypatch):
+    """測試 validate_rule 接受有效規則"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+    rules = [{'from': 'a', 'to': 'x'}]
+
+    ok, msg = view.validate_rule('b', 'y', rules, 1)
+
+    assert ok is True
+    assert msg == ''
+
+
+def test_rules_view_rule_matches(monkeypatch):
+    """測試 _rule_matches 正確匹配規則"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+
+    rule = {'from': 'hello', 'to': '你好'}
+
+    assert view._rule_matches(rule, 'hello', False) is True
+    assert view._rule_matches(rule, 'world', False) is False

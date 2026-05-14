@@ -313,3 +313,24 @@ def test_bundling_worker_with_error(monkeypatch):
 
     assert view.progress_bar.color == "red"
     assert not view.progress_bar.visible
+
+
+def test_bundler_view_show_snack_bar_adds_to_overlay():
+    """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+
+    view._show_snack_bar('Test error', '#FF0000')
+
+    assert len(page.overlay) == 1
+    assert page.overlay[0].open is True
+
+
+def test_bundler_view_append_log_adds_control():
+    """測試 _append_log 正確將日誌行加入 log_view"""
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+
+    view._append_log('test log entry')
+
+    assert len(view.log_view.controls) >= 1
