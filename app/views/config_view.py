@@ -19,6 +19,28 @@ from app.views.config.config_form import (
 )
 from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
 
+NAV_ITEMS = [
+    {"id": "general", "label": "一般設定", "icon": ft.Icons.SETTINGS, "expanded": True, "sub": [
+        {"id": "logging", "label": "日誌設定"},
+        {"id": "translator", "label": "翻譯行為"},
+        {"id": "species", "label": "學名查詢"},
+        {"id": "bundler", "label": "成品打包"},
+    ]},
+    {"id": "lm", "label": "大型語言模型設定", "icon": ft.Icons.AUTO_AWESOME, "expanded": True, "sub": [
+        {"id": "lm_basic", "label": "基本設定"},
+        {"id": "lm_prompts", "label": "提示詞"},
+        {"id": "lm_batch", "label": "批次與限制"},
+        {"id": "lm_filter", "label": "過濾條件"},
+        {"id": "lm_models", "label": "模型清單"},
+        {"id": "lm_keys", "label": "API 金鑰"},
+    ]},
+    {"id": "merger", "label": "語言合併設定", "icon": ft.Icons.CALL_MERGE, "expanded": True, "sub": [
+        {"id": "merger_pending", "label": "待翻譯設定"},
+        {"id": "merger_quarantine", "label": "隔離設定"},
+    ]},
+]
+
+
 class ConfigView(ft.Column):
     """ConfigView 類別。
 
@@ -36,16 +58,14 @@ class ConfigView(ft.Column):
         參數：
             page: Flet Page 物件
         """
-        # 設定 Root Column 不滾動，為了做 Fixed Footer
         super().__init__(expand=True, spacing=0)
         self._page = page
         self.controls_map = {}
+        self.nav_state = {item["id"]: item["expanded"] for item in NAV_ITEMS}
+        self.nav_item_rows = {}
 
-        # --- 初始化所有控制項 (Controls) ---
         self._init_controls()
 
-        # --- 建立 UI 佈局 (Layout) ---
-        # 1. 滾動區域 (主要內容)
         self.scroll_container = ft.Column(
             scroll=ft.ScrollMode.ADAPTIVE,
             expand=True,
@@ -54,18 +74,15 @@ class ConfigView(ft.Column):
                 self._build_header(),
                 ft.Row(
                     controls=[
-                        self._build_left_column(),
-                        self._build_right_column(),
+                        self._build_nav_column(),
+                        self._build_content_column(),
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.START,
                     spacing=15,
                 ),
-                self._build_lang_merger_card(),  # Lang Merger 放底部全寬
-                ft.Container(height=20),  # 底部留白，避免內容被 Footer 遮住太緊
             ],
         )
 
-        # 2. 固定 Footer (Save Bar)
         self.footer = self._build_footer()
 
         self.controls = [self.scroll_container, self.footer]
@@ -74,7 +91,6 @@ class ConfigView(ft.Column):
 
     def _init_controls(self):
         """初始化所有輸入控制項"""
-        # Logging
         self.controls_map["logging.log_level"] = ft.Dropdown(
             label="日誌等級",
             options=[
@@ -87,7 +103,6 @@ class ConfigView(ft.Column):
             label="日誌資料夾名稱", dense=True
         )
 
-        # Translator
         self.controls_map["translator.output_dir_name"] = ft.TextField(
             label="主要輸出資料夾名稱", dense=True
         )
@@ -104,7 +119,6 @@ class ConfigView(ft.Column):
             label="檔案處理多執行緒數量", dense=True
         )
 
-        # Species Cache
         self.controls_map["species_cache.cache_directory"] = ft.TextField(
             label="學名快取資料夾", dense=True
         )
@@ -118,12 +132,10 @@ class ConfigView(ft.Column):
             label="查詢延遲(秒)", dense=True
         )
 
-        # Output Bundler
         self.controls_map["output_bundler.output_zip_name"] = ft.TextField(
             label="最終打包 ZIP 檔名", dense=True
         )
 
-        # Lang Merger
         self.controls_map["lang_merger.pending_folder_name"] = ft.TextField(
             label="待翻譯資料夾名稱", dense=True
         )
@@ -137,7 +149,6 @@ class ConfigView(ft.Column):
             label="語言合併器格式問題隔離資料夾名稱", dense=True
         )
 
-        # LM Translator - Basic
         self.controls_map["lm_translator.temperature"] = ft.TextField(
             label="模型溫度 (Temperature)", dense=True
         )
@@ -148,7 +159,6 @@ class ConfigView(ft.Column):
             label="LM 翻譯輸出資料夾", dense=True
         )
 
-        # LM Translator - Prompts (Fixed Height in UI)
         self.controls_map["lm_translator.patchouli_system_prompt"] = ft.TextField(
             label="Patchouli 提示詞 (System Prompt)",
             multiline=True,
@@ -162,7 +172,6 @@ class ConfigView(ft.Column):
             text_size=13,
         )
 
-        # LM Translator - Batch Sizes
         self.controls_map["lm_translator.initial_batch_size_patchouli"] = ft.TextField(
             label="Patchouli 請求大小", dense=True
         )
@@ -185,7 +194,6 @@ class ConfigView(ft.Column):
             label="錯誤縮小比例", dense=True
         )
 
-        # LM Translator - Lists
         self.controls_map["lm_translator.translator.skip_terms"] = ft.TextField(
             label="略過翻譯 (Skip Terms)",
             multiline=True,
@@ -210,7 +218,6 @@ class ConfigView(ft.Column):
             hint_text="每行一個資料夾名",
         )
 
-        # LM Translator - Models & Keys
         self.new_model_field = ft.TextField(
             label="新增模型名稱", hint_text="gemini-2.5-flash", expand=True, dense=True
         )
@@ -229,26 +236,123 @@ class ConfigView(ft.Column):
         self.keys_column = ft.Column(spacing=5)
         self.controls_map["lm_translator.keys"] = self.keys_column
 
-    # --- UI 建構區塊 ---
+    def _build_nav_item(self, item: dict) -> ft.Column:
+        """建立導覽項目（含子項目可展開/收合）"""
+        item_id = item["id"]
+        is_expanded = self.nav_state.get(item_id, True)
 
-    def _build_header(self):
-        """建立頁面標題"""
-        return build_config_header(self)
+        sub_rows = []
+        for sub in item.get("sub", []):
+            sub_id = sub["id"]
+            sub_btn = ft.TextButton(
+                text=sub["label"],
+                style=ft.ButtonStyle(
+                    padding=36,
+                    text_style=ft.TextStyle(size=13),
+                ),
+                on_click=lambda e, sid=sub_id: self._scroll_to_section(sid),
+            )
+            self.nav_item_rows[sub_id] = sub_btn
+            sub_rows.append(sub_btn)
 
-    def _build_left_column(self):
-        """建立左側欄位"""
+        expand_icon = ft.Icons.EXPAND_LESS if is_expanded else ft.Icons.EXPAND_MORE
+
+        def toggle_expand(e):
+            self.nav_state[item_id] = not self.nav_state[item_id]
+            self._rebuild_nav()
+
+        header_btn = ft.IconButton(
+            icon=expand_icon,
+            icon_size=18,
+            tooltip="展開/收合",
+            on_click=toggle_expand,
+            padding=4,
+        )
+
+        header = ft.Row(
+            [
+                ft.Icon(item["icon"], size=18, color=ft.Colors.BLUE_GREY_700),
+                ft.Text(item["label"], weight=ft.FontWeight.BOLD, size=14),
+                header_btn,
+            ],
+            spacing=8,
+            alignment=ft.MainAxisAlignment.START,
+        )
+
+        content_col = ft.Column(
+            [header] + (sub_rows if is_expanded else []),
+            spacing=2,
+            tight=True,
+        )
+
+        item_container = ft.Container(
+            border_radius=8,
+            bgcolor=ft.Colors.BLUE_GREY_50 if is_expanded else ft.Colors.GREY_100,
+            padding=8,
+            content=content_col,
+        )
+
+        return item_container
+
+    def _rebuild_nav(self):
+        """重新建構導覽列（收合/展開切換時）"""
+        self.nav_column.controls = [self._build_nav_item(item) for item in NAV_ITEMS]
+        self.nav_column.update()
+
+    def _scroll_to_section(self, section_id: str):
+        """滾動到指定區塊"""
+        target = self.section_anchors.get(section_id)
+        if target:
+            self.scroll_container.scroll_to(control=target, offset=-0.1)
+
+    def _build_nav_column(self) -> ft.Column:
+        """建立左側導覽列"""
+        self.nav_column = ft.Column(
+            spacing=6,
+            scroll=ft.ScrollMode.ADAPTIVE,
+        )
+        nav_container = ft.Container(
+            width=220,
+            content=ft.Column(
+                [
+                    ft.Text(
+                        "分類導覽",
+                        weight=ft.FontWeight.BOLD,
+                        size=14,
+                        color=ft.Colors.BLUE_GREY_800,
+                    ),
+                    ft.Divider(height=1, color=ft.Colors.GREY_300),
+                    self.nav_column,
+                ],
+                spacing=8,
+            ),
+            padding=10,
+            bgcolor=ft.Colors.GREY_50,
+            border_radius=10,
+        )
+        return nav_container
+
+    def _section_anchor(self, section_id: str, content: ft.Control) -> ft.Container:
+        """建立帶有 section id 的錨點容器"""
+        self.section_anchors[section_id] = content
+        return content
+
+    def _build_content_column(self) -> ft.Column:
+        """建立右側內容區"""
+        self.section_anchors = {}
+
         return ft.Column(
-            expand=1,
+            expand=2,
             spacing=15,
             controls=[
-                self._build_card(
+                self._section_anchor("logging", self._build_card(
                     "日誌設定 (Logging)",
                     [
                         self.controls_map["logging.log_level"],
                         self.controls_map["logging.log_dir"],
                     ],
-                ),
-                self._build_card(
+                )),
+                self._section_anchor("translator", self._build_card(
                     "翻譯與處理設定 (Translator)",
                     [
                         self.controls_map["translator.output_dir_name"],
@@ -257,8 +361,8 @@ class ConfigView(ft.Column):
                         self.controls_map["translator.parallel_execution_workers"],
                         self.controls_map["translator.enable_cache_saving"],
                     ],
-                ),
-                self._build_card(
+                )),
+                self._section_anchor("species", self._build_card(
                     "學名查詢設定 (Species Cache)",
                     [
                         self.controls_map["species_cache.cache_directory"],
@@ -266,115 +370,81 @@ class ConfigView(ft.Column):
                         self.controls_map["species_cache.wikipedia_language"],
                         self.controls_map["species_cache.wikipedia_rate_limit_delay"],
                     ],
-                ),
-                self._build_card(
+                )),
+                self._section_anchor("bundler", self._build_card(
                     "成品打包器 (Output Bundler)",
                     [self.controls_map["output_bundler.output_zip_name"]],
-                ),
+                )),
+                self._section_anchor("lm_basic", self._build_lm_basic_card()),
+                self._section_anchor("lm_prompts", self._build_lm_prompts_card()),
+                self._section_anchor("lm_batch", self._build_lm_batch_card()),
+                self._section_anchor("lm_filter", self._build_lm_filter_card()),
+                self._section_anchor("lm_models", self._build_lm_models_card()),
+                self._section_anchor("lm_keys", self._build_lm_keys_card()),
+                self._section_anchor("merger_pending", self._build_lang_merger_card()),
+                ft.Container(height=20),
             ],
         )
 
-    def _build_right_column(self):
-        # LM Translator Section content
-
-        # 1. Top Params
-        """建立右側欄位"""
+    def _build_lm_basic_card(self) -> ft.Control:
         top_row = ft.Row(
             [
                 ft.Column([self.controls_map["lm_translator.temperature"]], expand=1),
-                ft.Column(
-                    [self.controls_map["lm_translator.rate_limit.timeout"]], expand=1
-                ),
-                ft.Column(
-                    [self.controls_map["lm_translator.lm_translate_folder_name"]],
-                    expand=2,
-                ),
+                ft.Column([self.controls_map["lm_translator.rate_limit.timeout"]], expand=1),
+                ft.Column([self.controls_map["lm_translator.lm_translate_folder_name"]], expand=2),
             ]
         )
+        return self._build_card("基本設定", [top_row])
 
-        # 2. Prompts (Side-by-side with fixed height)
+    def _build_lm_prompts_card(self) -> ft.Control:
         prompts_row = ft.Container(
-            height=250,  # Fixed height to avoid explosion
+            height=250,
             content=ft.Row(
                 [
-                    ft.Column(
-                        [self.controls_map["lm_translator.patchouli_system_prompt"]],
-                        expand=1,
-                    ),
+                    ft.Column([self.controls_map["lm_translator.patchouli_system_prompt"]], expand=1),
                     ft.VerticalDivider(width=1),
-                    ft.Column(
-                        [self.controls_map["lm_translator.lang_system_prompt"]],
-                        expand=1,
-                    ),
+                    ft.Column([self.controls_map["lm_translator.lang_system_prompt"]], expand=1),
                 ],
                 spacing=10,
             ),
         )
+        return self._build_card("提示詞 (System Prompts)", [prompts_row])
 
-        # 3. Batch Sizes (2 Rows)
+    def _build_lm_batch_card(self) -> ft.Control:
         batch_row_1 = ft.Row(
             [
-                ft.Column(
-                    [self.controls_map["lm_translator.initial_batch_size_patchouli"]],
-                    expand=1,
-                ),
-                ft.Column(
-                    [self.controls_map["lm_translator.initial_batch_size_lang"]],
-                    expand=1,
-                ),
-                ft.Column(
-                    [self.controls_map["lm_translator.initial_batch_size_ftb"]],
-                    expand=1,
-                ),
+                ft.Column([self.controls_map["lm_translator.initial_batch_size_patchouli"]], expand=1),
+                ft.Column([self.controls_map["lm_translator.initial_batch_size_lang"]], expand=1),
+                ft.Column([self.controls_map["lm_translator.initial_batch_size_ftb"]], expand=1),
             ]
         )
         batch_row_2 = ft.Row(
             [
-                ft.Column(
-                    [self.controls_map["lm_translator.initial_batch_size_kubejs"]],
-                    expand=1,
-                ),
-                ft.Column(
-                    [self.controls_map["lm_translator.initial_batch_size_md"]], expand=1
-                ),
-                ft.Column(
-                    [self.controls_map["lm_translator.min_batch_size"]], expand=1
-                ),
-                ft.Column(
-                    [self.controls_map["lm_translator.batch_shrink_factor"]], expand=1
-                ),
+                ft.Column([self.controls_map["lm_translator.initial_batch_size_kubejs"]], expand=1),
+                ft.Column([self.controls_map["lm_translator.initial_batch_size_md"]], expand=1),
+                ft.Column([self.controls_map["lm_translator.min_batch_size"]], expand=1),
+                ft.Column([self.controls_map["lm_translator.batch_shrink_factor"]], expand=1),
             ]
         )
+        return self._build_card("批次大小與限制", [batch_row_1, batch_row_2])
 
-        # 4. Lists (Side-by-side with fixed height)
+    def _build_lm_filter_card(self) -> ft.Control:
         lists_row = ft.Container(
             height=200,
             content=ft.Row(
                 [
-                    ft.Column(
-                        [self.controls_map["lm_translator.translator.skip_terms"]],
-                        expand=1,
-                    ),
+                    ft.Column([self.controls_map["lm_translator.translator.skip_terms"]], expand=1),
                     ft.VerticalDivider(width=1),
-                    ft.Column(
-                        [
-                            self.controls_map[
-                                "lm_translator.translator.translatable_keywords"
-                            ]
-                        ],
-                        expand=1,
-                    ),
+                    ft.Column([self.controls_map["lm_translator.translator.translatable_keywords"]], expand=1),
                     ft.VerticalDivider(width=1),
-                    ft.Column(
-                        [self.controls_map["lm_translator.patchouli.dir_names"]],
-                        expand=1,
-                    ),
+                    ft.Column([self.controls_map["lm_translator.patchouli.dir_names"]], expand=1),
                 ],
                 spacing=5,
             ),
         )
+        return self._build_card("過濾條件與目錄", [lists_row])
 
-        # 5. Models & Keys
+    def _build_lm_models_card(self) -> ft.Control:
         models_section = ft.Container(
             bgcolor=theme.GREY_50,
             padding=10,
@@ -392,7 +462,9 @@ class ConfigView(ft.Column):
                 ]
             ),
         )
+        return self._build_card("模型清單", [models_section])
 
+    def _build_lm_keys_card(self) -> ft.Control:
         keys_section = ft.Container(
             bgcolor=theme.GREY_50,
             padding=10,
@@ -409,86 +481,30 @@ class ConfigView(ft.Column):
                 ]
             ),
         )
+        return self._build_card("API 金鑰", [keys_section])
 
-        return ft.Column(
-            expand=2,
-            controls=[
-                self._build_card(
-                    "大型語言模型設定 (LM Translator)",
-                    [
-                        top_row,
-                        ft.Divider(height=20, color=theme.GREY_200),
-                        ft.Text(
-                            "System Prompts",
-                            weight=ft.FontWeight.BOLD,
-                            size=14,
-                            color=theme.GREY_700,
-                        ),
-                        prompts_row,
-                        ft.Divider(height=20, color=theme.GREY_200),
-                        ft.Text(
-                            "Batch Sizes & Limits",
-                            weight=ft.FontWeight.BOLD,
-                            size=14,
-                            color=theme.GREY_700,
-                        ),
-                        batch_row_1,
-                        batch_row_2,
-                        ft.Divider(height=20, color=theme.GREY_200),
-                        ft.Text(
-                            "Filtering & Directories",
-                            weight=ft.FontWeight.BOLD,
-                            size=14,
-                            color=theme.GREY_700,
-                        ),
-                        lists_row,
-                        ft.Divider(height=20, color=theme.GREY_200),
-                        models_section,
-                        keys_section,
-                    ],
-                )
-            ],
-        )
-
-    def _build_lang_merger_card(self):
-        """建立語言合併器設定區塊"""
+    def _build_lang_merger_card(self) -> ft.Control:
         return self._build_card(
             "語言合併器設定 (Lang Merger)",
             [
                 ft.Row(
                     [
-                        ft.Column(
-                            [self.controls_map["lang_merger.pending_folder_name"]],
-                            expand=1,
-                        ),
-                        ft.Column(
-                            [
-                                self.controls_map[
-                                    "lang_merger.pending_organized_folder_name"
-                                ]
-                            ],
-                            expand=1,
-                        ),
+                        ft.Column([self.controls_map["lang_merger.pending_folder_name"]], expand=1),
+                        ft.Column([self.controls_map["lang_merger.pending_organized_folder_name"]], expand=1),
                     ]
                 ),
                 ft.Row(
                     [
-                        ft.Column(
-                            [
-                                self.controls_map[
-                                    "lang_merger.filtered_pending_min_count"
-                                ]
-                            ],
-                            expand=1,
-                        ),
-                        ft.Column(
-                            [self.controls_map["lang_merger.quarantine_folder_name"]],
-                            expand=1,
-                        ),
+                        ft.Column([self.controls_map["lang_merger.filtered_pending_min_count"]], expand=1),
+                        ft.Column([self.controls_map["lang_merger.quarantine_folder_name"]], expand=1),
                     ]
                 ),
             ],
         )
+
+    def _build_header(self):
+        """建立頁面標題"""
+        return build_config_header(self)
 
     def _build_footer(self):
         """建立底部儲存列"""
@@ -497,8 +513,6 @@ class ConfigView(ft.Column):
     def _build_card(self, title, controls_list):
         """建立設定卡片"""
         return build_config_card(self, title, controls_list)
-
-    # --- 邏輯功能 (與原程式碼相同，僅移動位置) ---
 
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
         """顯示 SnackBar 訊息提示"""
@@ -544,10 +558,10 @@ class ConfigView(ft.Column):
         )
 
         row = ft.Container(
-            padding=ft.Padding(left=12, right=12, top=8, bottom=8),
+            padding=12,
             border_radius=8,
             bgcolor=theme.WHITE,
-            border=ft.Border.all(1, theme.GREY_200),
+            border=ft.border.all(1, theme.GREY_200),
             content=ft.Row(
                 [
                     order_text,
