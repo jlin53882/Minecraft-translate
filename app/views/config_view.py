@@ -20,8 +20,11 @@ from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
 
 NAV_ITEMS = [
     {"id": "general", "label": "一般設定", "icon": ft.Icons.SETTINGS},
-    {"id": "lm", "label": "大型語言模型設定", "icon": ft.Icons.AUTO_AWESOME},
-    {"id": "merger", "label": "語言合併設定", "icon": ft.Icons.CALL_MERGE},
+    {"id": "api_models", "label": "API & 模型設定", "icon": ft.Icons.KEY},
+    {"id": "translation_behavior", "label": "翻譯行為設定", "icon": ft.Icons.TRANSLATE},
+    {"id": "prompts", "label": "提示詞管理", "icon": ft.Icons.MESSAGE},
+    {"id": "species_lookup", "label": "學名查詢管理", "icon": ft.Icons.SEARCH},
+    {"id": "batch_limits", "label": "批次與限制", "icon": ft.Icons.BATCH},
 ]
 
 
@@ -317,27 +320,51 @@ class ConfigView(ft.Column):
                     self.controls_map["translator.parallel_execution_workers"],
                     self.controls_map["translator.enable_cache_saving"],
                 ]),
-                self._build_card("學名查詢設定 (Species Cache)", [
-                    self.controls_map["species_cache.cache_directory"],
-                    self.controls_map["species_cache.cache_filename"],
-                    self.controls_map["species_cache.wikipedia_language"],
-                    self.controls_map["species_cache.wikipedia_rate_limit_delay"],
-                ]),
                 self._build_card("成品打包器 (Output Bundler)", [
                     self.controls_map["output_bundler.output_zip_name"],
                 ]),
             ],
         )
 
-        lm_content = ft.Column(
+        api_models_content = ft.Column(
+            spacing=15,
+            controls=[
+                self._build_lm_keys_card(),
+                self._build_lm_models_card(),
+            ],
+        )
+
+        translation_behavior_content = ft.Column(
             spacing=15,
             controls=[
                 self._build_lm_basic_card(),
-                self._build_lm_prompts_card(),
-                self._build_lm_batch_card(),
                 self._build_lm_filter_card(),
-                self._build_lm_models_card(),
-                self._build_lm_keys_card(),
+            ],
+        )
+
+        prompts_content = ft.Column(
+            spacing=15,
+            controls=[
+                self._build_lm_prompts_card(),
+            ],
+        )
+
+        species_lookup_content = ft.Column(
+            spacing=15,
+            controls=[
+                self._build_card("學名查詢設定 (Species Cache)", [
+                    self.controls_map["species_cache.cache_directory"],
+                    self.controls_map["species_cache.cache_filename"],
+                    self.controls_map["species_cache.wikipedia_language"],
+                    self.controls_map["species_cache.wikipedia_rate_limit_delay"],
+                ]),
+            ],
+        )
+
+        batch_limits_content = ft.Column(
+            spacing=15,
+            controls=[
+                self._build_lm_batch_card(),
             ],
         )
 
@@ -349,7 +376,11 @@ class ConfigView(ft.Column):
         )
 
         self._content_containers["general"] = general_content
-        self._content_containers["lm"] = lm_content
+        self._content_containers["api_models"] = api_models_content
+        self._content_containers["translation_behavior"] = translation_behavior_content
+        self._content_containers["prompts"] = prompts_content
+        self._content_containers["species_lookup"] = species_lookup_content
+        self._content_containers["batch_limits"] = batch_limits_content
         self._content_containers["merger"] = merger_content
 
         self.content_scroll = ft.Container(
@@ -357,7 +388,11 @@ class ConfigView(ft.Column):
             content=ft.Stack(
                 [
                     general_content,
-                    lm_content,
+                    api_models_content,
+                    translation_behavior_content,
+                    prompts_content,
+                    species_lookup_content,
+                    batch_limits_content,
                     merger_content,
                 ]
             ),
