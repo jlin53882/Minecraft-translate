@@ -1,211 +1,383 @@
 """app/views/bundler_view.py 模組。
 
-用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
-維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+用途：提供打包成品資源包的 UI 與執行流程。
 """
-
-# /minecraft_translator_flet/app/views/bundler_view.py (tkinter 修正版)
 
 import flet as ft
 import threading
-from app.ui import theme
-from app.services_impl.config_service import load_config_json
-from app.services_impl.pipelines.bundle_service import run_bundling_service
-from translation_tool.utils.log_unit import log_info
+import os
+import json
 
-# --- 導入 tkinter ---
-import tkinter as tk
-from tkinter import filedialog
+from app.ui import theme
+from app.ui.components import styled_card
+
 
 class BundlerView(ft.Column):
-    """BundlerView 類別。
-
-    用途：封裝與 BundlerView 相關的狀態與行為。
-    維護注意：修改公開方法前請確認外部呼叫點與相容性。
-    """
+    page: ft.Page
+    file_picker: ft.FilePicker
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
-        """初始化 BundlerView。
-
-        參數：
-            page: Flet Page 物件
-            file_picker: Flet FilePicker 物件
-        """
-        super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
+        super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=16)
         self._page = page
-        # 我們仍然保留 file_picker，以防萬一 (雖然現在主要用 tkinter)
         self.file_picker = file_picker
+        self.extra_folders: list[str] = []
+        self.version_data: dict = {}
 
-        # --- UI 元件 ---
-        self.root_dir_textfield = ft.TextField(
+        self.version_dropdown = ft.Dropdown(
+            label="選擇版本",
+            hint_text="請選擇資源包版本",
+            expand=True,
+            border_color=theme.OUTLINE,
+            content_padding=10,
+        )
+        self.pack_type_dropdown = ft.Dropdown(
+            label="選擇資源包類型",
+            expand=True,
+            border_color=theme.OUTLINE,
+            content_padding=10,
+        )
+        self.description_field = ft.TextField(
+            label="檔案敘述",
+            hint_text="資源包在遊戲中的描述文字",
+            expand=True,
+            border_color=theme.OUTLINE,
+            content_padding=10,
+        )
+        self.pack_image_field = ft.TextField(
+            label="資源包圖片路徑",
+            hint_text="選擇 pack.png 圖片",
+            expand=True,
+            border_color=theme.OUTLINE,
+            content_padding=10,
+        )
+        self.root_dir_field = ft.TextField(
             label="翻譯專案根目錄",
+            hint_text="包含所有翻譯產出的最上層資料夾",
             expand=True,
-            tooltip="包含所有翻譯產出資料夾 (如 zh_tw_generated) 的最上層資料夾",
+            border_color=theme.OUTLINE,
+            content_padding=10,
         )
-        self.output_zip_textfield = ft.TextField(
+        self.output_zip_field = ft.TextField(
             label="最終 ZIP 檔案儲存路徑",
+            hint_text="選擇輸出位置與檔名",
             expand=True,
-            tooltip="選擇您要將 .zip 檔案儲存的位置和檔名",
+            border_color=theme.OUTLINE,
+            content_padding=10,
         )
-        self.start_button = ft.Button(
-            "開始打包", on_click=self.start_bundling_clicked, icon=ft.Icons.ARCHIVE
-        )
-        self.progress_bar = ft.ProgressBar(value=0, visible=False)
-        self.log_view = ft.ListView(expand=True, spacing=5, auto_scroll=True)
+        self.extra_folders_view = ft.ListView(height=100, spacing=4, auto_scroll=False)
+        self.progress_bar = ft.ProgressBar(value=0, height=8, visible=False)
+        self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
 
-        # --- UI 佈局 ---
-        self.controls = [
-            ft.Card(
-                content=ft.Container(
-                    padding=15,
-                    content=ft.Column(
-                        [
-                            ft.Text(
-                                "打包成品資源包", theme_style=ft.TextThemeStyle.TITLE_LARGE
+        self._load_version_data()
+        self._init_ui()
+        self._build_controls()
+
+    def _load_version_data(self):
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "translation_tool",
+            "core",
+            "resource_pack_version.json",
+        )
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    self.version_data = json.load(f)
+            except Exception:
+                self.version_data = {}
+        else:
+            self.version_data = {}
+
+    def _init_ui(self):
+        self.pack_type_dropdown.options = [
+            ft.dropdown.Option("翻譯資源包", "翻譯資源包"),
+            ft.dropdown.Option("材質包", "材質包"),
+            ft.dropdown.Option("其他", "其他"),
+        ]
+        self.pack_type_dropdown.value = "翻譯資源包"
+
+        self.version_dropdown.options = [
+            ft.dropdown.Option(v, v) for v in self.version_data.keys()
+        ]
+
+    def _build_controls(self):
+        version_row = ft.Row(
+            [
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("選擇版本", size=12, color=theme.GREY_600),
+                        self.version_dropdown,
+                    ], spacing=4),
+                    expand=True,
+                ),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("選擇資源包類型", size=12, color=theme.GREY_600),
+                        self.pack_type_dropdown,
+                    ], spacing=4),
+                    expand=True,
+                ),
+            ],
+            spacing=16,
+        )
+
+        description_row = ft.Row(
+            [
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("檔案敘述", size=12, color=theme.GREY_600),
+                        self.description_field,
+                    ], spacing=4),
+                    expand=True,
+                ),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("資源包圖片", size=12, color=theme.GREY_600),
+                        ft.Row([
+                            self.pack_image_field,
+                            ft.IconButton(
+                                icon=ft.Icons.IMAGE_SEARCH,
+                                tooltip="選擇圖片",
+                                on_click=self._pick_pack_image,
                             ),
-                            ft.Row(
-                                [
-                                    self.root_dir_textfield,
-                                    self._create_pick_button(
-                                        self.root_dir_textfield, "dir"
-                                    ),
-                                ]
-                            ),
-                            ft.Row(
-                                [
-                                    self.output_zip_textfield,
-                                    self._create_pick_button(
-                                        self.output_zip_textfield, "save"
-                                    ),
-                                ]
-                            ),
-                            self.start_button,
-                            self.progress_bar,
-                        ],
-                        spacing=15,
+                        ], spacing=6),
+                    ], spacing=4),
+                    expand=True,
+                ),
+            ],
+            spacing=16,
+        )
+
+        root_dir_row = ft.Row(
+            [
+                self.root_dir_field,
+                ft.IconButton(
+                    icon=ft.Icons.FOLDER_OPEN,
+                    tooltip="選擇資料夾",
+                    on_click=self._pick_root_dir,
+                ),
+            ],
+            spacing=8,
+        )
+
+        output_zip_row = ft.Row(
+            [
+                self.output_zip_field,
+                ft.IconButton(
+                    icon=ft.Icons.SAVE_AS,
+                    tooltip="選擇儲存位置",
+                    on_click=self._pick_output_zip,
+                ),
+            ],
+            spacing=8,
+        )
+
+        extra_folder_section = ft.Column(
+            [
+                ft.Row([
+                    ft.Text("其他指定資料夾", size=13, weight=ft.FontWeight.W_500),
+                    ft.IconButton(
+                        icon=ft.Icons.ADD,
+                        icon_size=20,
+                        tooltip="新增資料夾",
+                        on_click=self._pick_extra_folder,
                     ),
-                )
+                ], spacing=8),
+                self.extra_folders_view,
+                ft.Text("從選擇資料夾的下一層開始打包進 ZIP", size=11, color=theme.GREY_500),
+            ],
+            spacing=8,
+        )
+
+        start_button = ft.Button(
+            "開始打包",
+            icon=ft.Icons.PLAY_ARROW,
+            on_click=self.start_bundling_clicked,
+            bgcolor=theme.GREEN_700,
+            color=ft.Colors.WHITE,
+        )
+
+        log_container = ft.Container(
+            content=self.log_view,
+            bgcolor="#2b2f36",
+            border=ft.Border.all(1, "#4b5563"),
+            border_radius=8,
+            padding=10,
+            height=200,
+        )
+
+        self.controls = [
+            styled_card(
+                title="打包設定",
+                icon=ft.Icons.ARCHIVE,
+                content=ft.Column([
+                    version_row,
+                    description_row,
+                    root_dir_row,
+                    output_zip_row,
+                    extra_folder_section,
+                    start_button,
+                    self.progress_bar,
+                ], spacing=12),
             ),
-            ft.Text("打包日誌", theme_style=ft.TextThemeStyle.TITLE_MEDIUM),
-            ft.Container(
-                content=self.log_view,
-                border=ft.Border.all(width=1, color=theme.OUTLINE),
-                border_radius=ft.BorderRadius.all(5),
-                padding=10,
-                expand=True,
+            styled_card(
+                title="打包日誌",
+                icon=ft.Icons.RECEIPT_LONG,
+                content=log_container,
             ),
         ]
 
-    # --- 輔助函式 ---
-    def _create_pick_button(self, target_textfield: ft.TextField, pick_type: str):
-        """建立路徑選擇按鈕"""
-        if pick_type == "dir":
-            icon = ft.Icons.FOLDER_OPEN
-            tooltip = "選擇資料夾"
-        else:  # 'save'
-            icon = ft.Icons.SAVE_AS
-            tooltip = "選擇儲存位置"
-        return ft.IconButton(
-            icon=icon,
-            tooltip=tooltip,
-            on_click=lambda e: self.pick_path_with_tkinter(
-                e, target_textfield, pick_type
-            ),  # <-- 修改點
+    def _pick_pack_image(self, e: ft.ControlEvent):
+        self.file_picker.on_upload = self._on_pack_image_picked
+        self._page.run_task(self._async_pick_pack_image)
+
+    async def _async_pick_pack_image(self):
+        await self.file_picker.pick_files(
+            dialog_title="選擇資源包圖片",
+            allow_multiple=False,
+            allowed_extensions=["png", "jpg", "jpeg"],
         )
 
+    def _on_pack_image_picked(self, e: ft.FilePickerUploadEvent):
+        if e.files and e.files[0].path:
+            self.pack_image_field.value = e.files[0].path
+            self.update()
+
+    def _pick_root_dir(self, e: ft.ControlEvent):
+        self.file_picker.on_upload = self._on_root_dir_picked
+        self._page.run_task(self._async_pick_root_dir)
+
+    async def _async_pick_root_dir(self):
+        await self.file_picker.get_directory_path(dialog_title="選擇翻譯專案根目錄")
+
+    def _on_root_dir_picked(self, e: ft.FilePickerUploadEvent):
+        if e.path:
+            self.root_dir_field.value = e.path
+            self.update()
+
+    def _pick_output_zip(self, e: ft.ControlEvent):
+        self.file_picker.on_upload = self._on_output_zip_picked
+        self._page.run_task(self._async_pick_output_zip)
+
+    async def _async_pick_output_zip(self):
+        await self.file_picker.save_file(
+            dialog_title="選擇 ZIP 儲存位置",
+            allowed_extensions=["zip"],
+            file_name="output.zip",
+        )
+
+    def _on_output_zip_picked(self, e: ft.FilePickerUploadEvent):
+        if e.path:
+            self.output_zip_field.value = e.path
+            self.update()
+
+    def _pick_extra_folder(self, e: ft.ControlEvent):
+        self.file_picker.on_upload = self._on_extra_folder_picked
+        self._page.run_task(self._async_pick_extra_folder)
+
+    async def _async_pick_extra_folder(self):
+        await self.file_picker.get_directory_path(dialog_title="選擇其他資料夾")
+
+    def _on_extra_folder_picked(self, e: ft.FilePickerUploadEvent):
+        if e.path and e.path not in self.extra_folders:
+            self.extra_folders.append(e.path)
+            self._refresh_extra_folders()
+            self.update()
+
+    def _refresh_extra_folders(self):
+        self.extra_folders_view.controls.clear()
+        for path in self.extra_folders:
+            folder_name = os.path.basename(path.rstrip("/\\"))
+            self.extra_folders_view.controls.append(
+                ft.Row(
+                    [
+                        ft.Icon(ft.Icons.FOLDER, size=16, color=theme.BLUE_GREY_600),
+                        ft.Text(folder_name or path, expand=True, size=13),
+                        ft.IconButton(
+                            icon=ft.Icons.CLOSE,
+                            icon_size=16,
+                            tooltip="移除",
+                            on_click=lambda e, p=path: self._remove_extra_folder(p),
+                        ),
+                    ],
+                    spacing=6,
+                )
+            )
+
+    def _remove_extra_folder(self, path: str):
+        if path in self.extra_folders:
+            self.extra_folders.remove(path)
+            self._refresh_extra_folders()
+            self.update()
+
     def _show_snack_bar(self, message: str, color: str = theme.RED_600):
-        """顯示提示訊息"""
-        log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self._page.overlay.append(snack)
         snack.open = True
         self._page.update()
 
-    def pick_path_with_tkinter(self, e, target_textfield: ft.TextField, pick_type: str):
-        """
-        *** 全新的函式：使用 tkinter 來選擇資料夾或儲存檔案 ***
-        """
-        path = ""
-        try:
-            root = tk.Tk()
-            root.withdraw()  # 隱藏主視窗
-            root.attributes("-topmost", True)  # 強制置頂
-
-            if pick_type == "dir":
-                path = filedialog.askdirectory(title="請選擇翻譯專案根目錄")
-            else:  # 'save'
-                config = load_config_json()
-                default_name = config.get("output_bundler", {}).get(
-                    "output_zip_name", "可使用翻譯.zip"
-                )
-                path = filedialog.asksaveasfilename(
-                    title="請選擇要儲存的 ZIP 檔案路徑",
-                    initialfile=default_name,
-                    defaultextension=".zip",
-                    filetypes=[("ZIP 壓縮檔", "*.zip"), ("所有檔案", "*.*")],
-                )
-
-            root.destroy()
-
-            if path:
-                target_textfield.value = path
-                self._page.update()
-            else:
-                self._show_snack_bar("您已取消選擇", theme.BLUE_GREY_500)
-
-        except Exception as ex:
-            self._show_snack_bar(f"開啟對話框失敗: {ex}")
-
-    # (原有的 Flet FilePicker 相關函式 on_path_picked 已被 pick_path_with_tkinter 取代)
-
-    def set_controls_disabled(self, disabled: bool):
-        """設定控制項是否禁用"""
-        for ctrl in [
-            self.root_dir_textfield,
-            self.output_zip_textfield,
-            self.start_button,
-        ]:
-            ctrl.disabled = disabled
-        self._page.update()
-
-    def start_bundling_clicked(self, e):
-        """點擊開始打包按鈕"""
-        root_dir = self.root_dir_textfield.value
-        output_zip = self.output_zip_textfield.value
+    def start_bundling_clicked(self, e: ft.ControlEvent):
+        root_dir = self.root_dir_field.value or ""
+        output_zip = self.output_zip_field.value or ""
 
         if not root_dir or not output_zip:
-            self._show_snack_bar("錯誤：請同時提供「專案根目錄」和「ZIP 儲存路徑」！")
+            self._show_snack_bar("請填寫「翻譯專案根目錄」與「最終 ZIP 檔案儲存路徑」")
             return
 
-        self.set_controls_disabled(True)
-        self.progress_bar.value = 0
-        self.progress_bar.color = theme.PRIMARY
+        version = self.version_dropdown.value or ""
+        description = self.description_field.value or ""
+        pack_image = self.pack_image_field.value or ""
+
         self.progress_bar.visible = True
+        self.progress_bar.value = 0
         self.log_view.controls.clear()
-        self.log_view.controls.append(ft.Text("[系統] 開始執行打包..."))
+        self._append_log("開始執行打包...")
         self._page.update()
 
         thread = threading.Thread(
-            target=self.bundling_worker, args=(root_dir, output_zip)
+            target=self._bundling_worker,
+            args=(root_dir, output_zip, version, description, pack_image),
         )
         thread.start()
 
-    def bundling_worker(self, root_dir, output_zip):
-        """在背景執行打包工作"""
+    def _append_log(self, msg: str):
+        self.log_view.controls.append(ft.Text(msg, size=12, color="cyan400"))
+
+    def _bundling_worker(self, root_dir, output_zip, version, description, pack_image):
+        from translation_tool.core.output_bundler import bundle_outputs_generator
+
         try:
-            for update in run_bundling_service(root_dir, output_zip):
+            version_info = self.version_data.get(version, {}) if version else {}
+            min_format = version_info.get("min_format", 0)
+            max_format = version_info.get("max_format", 0)
+
+            generator_kwargs = {
+                "input_root_dir": root_dir,
+                "output_zip_path": output_zip,
+                "description": description,
+                "min_format": min_format,
+                "max_format": max_format,
+                "pack_image_path": pack_image if pack_image else None,
+                "extra_folders": self.extra_folders.copy(),
+            }
+
+            for update in bundle_outputs_generator(**generator_kwargs):
                 log_msg = update.get("log", "")
                 for line in log_msg.split("\n"):
                     if line.strip():
-                        self.log_view.controls.append(ft.Text(line))
+                        self.log_view.controls.append(ft.Text(line, size=12, color="cyan400"))
                 if "progress" in update:
                     self.progress_bar.value = update["progress"]
                 if update.get("error"):
                     self.progress_bar.color = theme.RED
                 self.log_view.scroll_to(offset=-1, duration=100)
                 self._page.update()
+        except Exception as ex:
+            self._append_log(f"[錯誤] {ex}")
+            self.progress_bar.color = theme.RED
         finally:
-            self.set_controls_disabled(False)
+            self.progress_bar.visible = False
+            self._page.update()
 
     @property
     def page(self):

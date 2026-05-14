@@ -19,8 +19,8 @@ class TestAddFolderToZip:
         
         zip_path = tmp_path / "test.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
-            count = _add_folder_to_zip(zf, str(empty_folder), "assets")
-        
+            count, _ = _add_folder_to_zip(zf, str(empty_folder), "assets")
+
         assert count == 0
 
     def test_add_folder_to_zip_nonexistent_folder(self, tmp_path):
@@ -29,8 +29,8 @@ class TestAddFolderToZip:
         
         zip_path = tmp_path / "test.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
-            count = _add_folder_to_zip(zf, str(tmp_path / "nonexistent"), "assets")
-        
+            count, _ = _add_folder_to_zip(zf, str(tmp_path / "nonexistent"), "assets")
+
         assert count == 0
 
     def test_add_folder_to_zip_with_files(self, tmp_path):
@@ -47,8 +47,8 @@ class TestAddFolderToZip:
         
         zip_path = tmp_path / "test.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
-            count = _add_folder_to_zip(zf, str(source_folder), "assets")
-        
+            count, _ = _add_folder_to_zip(zf, str(source_folder), "assets")
+
         assert count == 2
         
         # 驗證 ZIP 內容
