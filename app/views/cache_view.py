@@ -1138,14 +1138,14 @@ class CacheView(ft.Column):
             # 控件尚未添加到 page，略過
             pass
         except Exception as e:
-            print(f"[CacheView] 更新失敗: {e}")
+            log_error(f"[CacheView] 更新失敗: {e}")
 
     def _batch_refresh(self):
         """批量刷新所有區域（用於初始載入）"""
         try:
             self.update()
         except Exception as e:
-            print(f"[CacheView] 批量刷新失敗: {e}")
+            log_error(f"[CacheView] 批量刷新失敗: {e}")
 
     # =========================================================
     # Lifecycle

@@ -3,6 +3,7 @@
 
 import flet as ft
 import threading
+from translation_tool.utils.log_unit import log_error
 
 
 class CacheViewOptimized(ft.Column):
@@ -47,7 +48,7 @@ class CacheViewOptimized(ft.Column):
             # 控件尚未添加到 page，略過
             pass
         except Exception as e:
-            print(f"[CacheViewOptimized] 更新失敗: {e}")
+            log_error(f"[CacheViewOptimized] 更新失敗: {e}")
 
     def _render_dirty_areas(self):
         """渲染所有髒區域（可覆寫）"""
