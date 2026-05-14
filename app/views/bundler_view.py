@@ -109,15 +109,11 @@ class BundlerView(ft.Column):
                 )
             )
         for version_key in filtered:
-            self.version_list.controls.append(
-                ft.Container(
-                    content=ft.Text(version_key, size=13),
-                    padding=8,
-                    border=ft.Border.all(1, theme.OUTLINE),
-                    border_radius=6,
-                    on_click=lambda e, v=version_key: self._select_version(v),
-                )
+            item = ft.TextButton(
+                content=ft.Text(version_key, size=13),
+                on_click=lambda e, v=version_key: self._select_version(v),
             )
+            self.version_list.controls.append(item)
         self._page.update()
 
     def _on_version_search_change(self, e: ft.ControlEvent):
@@ -127,7 +123,8 @@ class BundlerView(ft.Column):
         log_debug(f"_select_version called: {version}")
         self.version_search.value = version
         self.version_expanded = False
-        log_debug(f"_select_version: search.value={self.version_search.value}, expanded={self.version_expanded}")
+        self._version_toggle_label.value = version
+        log_debug(f"_select_version: toggle_label={self._version_toggle_label.value}, expanded={self.version_expanded}")
         self._page.update()
 
     def _toggle_version_expand(self, e: ft.ControlEvent):
@@ -138,10 +135,11 @@ class BundlerView(ft.Column):
 
     def _build_controls(self):
         log_debug(f"_build_controls: version_expanded={self.version_expanded}")
+        self._version_toggle_label = ft.Text(self.version_search.value or "", size=12, color=theme.GREY_800, expand=True)
         version_toggle = ft.Container(
             content=ft.Row([
                 ft.Text("選擇版本", size=12, color=theme.GREY_600),
-                ft.Text(self.version_search.value or "", size=12, color=theme.GREY_800, expand=True),
+                self._version_toggle_label,
                 ft.Icon(ft.Icons.EXPAND_MORE if self.version_expanded else ft.Icons.EXPAND_LESS, size=20),
             ]),
             on_click=self._toggle_version_expand,
