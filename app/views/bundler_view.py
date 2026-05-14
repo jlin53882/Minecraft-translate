@@ -109,8 +109,11 @@ class BundlerView(ft.Column):
                 )
             )
         for version_key in filtered:
-            item = ft.TextButton(
+            item = ft.Container(
                 content=ft.Text(version_key, size=13, text_align=ft.TextAlign.START),
+                padding=8,
+                border=ft.Border.all(1, theme.OUTLINE),
+                border_radius=6,
                 on_click=lambda e, v=version_key: self._select_version(v),
             )
             self.version_list.controls.append(item)
@@ -335,7 +338,7 @@ class BundlerView(ft.Column):
                 ft.Row(
                     [
                         ft.Icon(ft.Icons.FOLDER, size=16, color=theme.BLUE_GREY_500),
-                        ft.Text(folder_name or path, expand=True, size=13),
+                        ft.Text(path, expand=True, size=13, text_align=ft.TextAlign.START),
                         ft.IconButton(
                             icon=ft.Icons.CLOSE,
                             icon_size=16,
