@@ -1048,9 +1048,10 @@ class CacheView(ft.Column):
         main_tab_view = ft.TabBarView(controls=[
             self.overview_page,
             self.query_entry_page,
-        ])
+        ], expand=True)
+        main_tab_content = ft.Column([main_tab_bar, main_tab_view], expand=True)
         self.main_tabs = ft.Tabs(
-            content=[main_tab_bar, main_tab_view],
+            content=main_tab_content,
             length=2,
             selected_index=0,
             expand=True,
@@ -1576,9 +1577,10 @@ class CacheView(ft.Column):
         query_sub_tab_view = ft.TabBarView(controls=[
             self.query_search_card,
             self.query_type_shard_card,
-        ])
+        ], expand=True)
+        query_sub_tab_content = ft.Column([query_sub_tab_bar, query_sub_tab_view], expand=True)
         self.query_sub_tabs = ft.Tabs(
-            content=[query_sub_tab_bar, query_sub_tab_view],
+            content=query_sub_tab_content,
             length=2,
             selected_index=0,
             animation_duration=200,

@@ -107,9 +107,10 @@ class TranslationView(ft.Column):
             self.ftb_tab_content,
             self.kjs_tab_content,
             self.md_tab_content,
-        ])
+        ], expand=True)
+        tab_content = ft.Column([tab_bar, tab_view], expand=True)
         self.tabs = ft.Tabs(
-            content=[tab_bar, tab_view],
+            content=tab_content,
             length=3,
             selected_index=0,
             expand=True,
