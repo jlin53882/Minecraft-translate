@@ -11,9 +11,22 @@ class _MockPage:
     def __init__(self):
         self.overlay = []
         self.updated = 0
+        self._tasks = []
 
     def update(self):
         self.updated += 1
+
+    def run_task(self, coro, *args):
+        self._tasks.append((coro, args))
+
+    def _run_all_tasks(self):
+        for coro, args in self._tasks:
+            result = coro(*args)
+            if result is not None:
+                try:
+                    result.send(None)
+                except StopIteration:
+                    pass
 
 
 class _MockFilePicker:
@@ -21,12 +34,15 @@ class _MockFilePicker:
         self.on_result = None
         self.last_directory_path = None
         self.last_title = None
+        self._mock_path = "/mock/path"
 
-    def get_directory_path(self, title: str = None):
-        self.last_title = title
+    async def get_directory_path(self, dialog_title: str = None):
+        self.last_title = dialog_title
+        return self._mock_path
 
-    def pick_files(self, title: str = None):
-        self.last_title = title
+    async def pick_files(self, dialog_title: str = None):
+        self.last_title = dialog_title
+        return [type('obj', (object,), {'path': self._mock_path})()]
 
 
 class _MockProgressBar:
@@ -114,8 +130,13 @@ def test_untranslated_checker_pick_directory():
         folder_mode=True,
     )
 
+    # 執行所有排程的 async tasks
+    page._run_all_tasks()
+
     # 驗證 file_picker 被呼叫
     assert file_picker.last_title == "選擇目錄"
+    # 驗證 target_textfield 值被更新
+    assert checker.en_dir.value == "/mock/path"
 
 
 def test_untranslated_checker_shows_snackbar_on_cancel():

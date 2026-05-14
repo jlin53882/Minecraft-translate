@@ -232,16 +232,13 @@ class TranslationView(ft.Column):
     def _pick_directory_into(self, target: ft.TextField):
         """開啟目錄選擇器並設定目標欄位"""
         self._picker_target_field = target
-        self.file_picker.on_upload = self._on_dir_picked
-        self.file_picker.get_directory_path()
+        self._page.run_task(self._async_pick_directory_into)
 
-    def _on_dir_picked(self, e: ft.FilePickerUploadEvent):
-        """目錄選擇後更新目標欄位"""
-        if not e.path:
-            return
-        if self._picker_target_field is not None:
-            self._picker_target_field.value = e.path
-        self.page.update()
+    async def _async_pick_directory_into(self):
+        result = await self.file_picker.get_directory_path()
+        if result:
+            self._picker_target_field.value = result
+            self.page.update()
 
     # ------------------------------------------------------------------
     # runners

@@ -169,13 +169,12 @@ class ExtractorView(ft.Column):
     def pick_directory(self, target):
         """開啟目錄選擇對話框"""
         self._show_snack_bar("請選擇此欄位的資料夾", color=theme.BLUE_600)
-        self.file_picker.on_result = lambda e: self._on_dir_picked(e, target)
-        self.file_picker.get_directory_path()
+        self._page.run_task(self._async_pick_directory, target)
 
-    def _on_dir_picked(self, e, target):
-        """處理目錄選擇結果"""
-        if e.path:
-            target.value = e.path
+    async def _async_pick_directory(self, target):
+        result = await self.file_picker.get_directory_path()
+        if result:
+            target.value = result
             self.page.update()
         else:
             self._show_snack_bar("未選擇資料夾", color=theme.BLUE_600)
