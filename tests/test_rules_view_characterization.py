@@ -211,3 +211,13 @@ def test_rules_view_initial_page_state(monkeypatch):
 
     assert view.current_page == 1
     assert view.total_pages >= 1
+
+
+def test_rules_view_search_box_exists(monkeypatch):
+    """測試 search_box 存在"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
+    monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
+    view = RulesView(_Page())
+
+    assert view.search_box is not None
+

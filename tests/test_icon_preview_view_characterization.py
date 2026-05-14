@@ -242,3 +242,28 @@ def test_icon_preview_view_save_btn_initially_hidden():
     view = IconPreviewView(_Page())
 
     assert view.save_btn.visible is False
+
+
+def test_icon_preview_view_mod_search_tf_on_change():
+    view = IconPreviewView(_Page())
+    assert view.mod_search_tf.on_change is not None
+
+
+def test_icon_preview_view_page_size_selector_on_change():
+    view = IconPreviewView(_Page())
+    assert view.page_size_selector.on_change is not None
+
+
+def test_icon_preview_view_mod_search_status_exists():
+    view = IconPreviewView(_Page())
+    assert view.mod_search_status is not None
+
+
+def test_icon_preview_view_back_btn_on_click():
+    view = IconPreviewView(_Page())
+    assert view.back_btn.on_click is not None
+
+
+def test_icon_preview_view_load_btn_on_click():
+    view = IconPreviewView(_Page())
+    assert view.load_btn.on_click is not None
