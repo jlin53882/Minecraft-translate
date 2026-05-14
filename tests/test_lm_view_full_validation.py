@@ -602,3 +602,33 @@ def test_on_output_dir_picked_ignores_empty_path(monkeypatch):
     view.on_output_dir_picked(FakeEvent())
 
     assert view.output_path.value == "original"
+
+
+def test_lm_view_path_row_returns_control():
+    from app.views import lm_view
+
+    class _Page:
+        def __init__(self):
+            self.overlay = []
+            self.updated = 0
+            self._tasks = []
+        def update(self):
+            self.updated += 1
+        def run_task(self, coro, *args):
+            self._tasks.append((coro, args))
+
+    class _Session:
+        def __init__(self):
+            pass
+
+    class _FilePicker:
+        def __init__(self):
+            pass
+        async def get_directory_path(self, dialog_title=None):
+            return None
+
+    view = lm_view.LMView(_Page(), _FilePicker())
+    tf = lm_view.ft.TextField()
+    result = view._path_row(tf, lambda e: None)
+
+    assert result is not None
