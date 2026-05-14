@@ -155,6 +155,21 @@ def bundle_outputs_generator(
                 else:
                     yield {"progress": progress, "log": f"在 '{folder_name}' 中未找到可打包的檔案。"}
 
+            for entry in os.listdir(input_root_dir):
+                full_path = os.path.join(input_root_dir, entry)
+                if os.path.isfile(full_path):
+                    archive_name = entry
+                    if archive_name in seen_files:
+                        base, ext = os.path.splitext(archive_name)
+                        counter = 1
+                        while f"{base}_{counter}{ext}" in seen_files:
+                            counter += 1
+                        archive_name = f"{base}_{counter}{ext}"
+                    seen_files[archive_name] = 1
+                    zf.write(full_path, archive_name)
+                    total_files_added += 1
+                    yield {"progress": 0.15 + ((step + 1) / total_steps) * 0.7, "log": f"額外檔案: +1 ({entry})"}
+
             if extra_folders:
                 for extra_path in extra_folders:
                     step += 1
