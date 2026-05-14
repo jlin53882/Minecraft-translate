@@ -24,9 +24,21 @@ def _add_folder_to_zip(
     base_path_in_zip: str,
     seen_files: Optional[dict] = None,
 ) -> tuple[int, dict]:
-    """Add folder contents to ZIP with duplicate handling.
+    """將資料夾內容寫入 ZIP，並處理檔案名稱衝突。
 
-    Returns (added_count, seen_files) where seen_files maps archive_name to count.
+    Args:
+        zip_file: 目標 ZIP 檔案物件。
+        folder_path: 要打包的來源資料夾路徑。
+        base_path_in_zip: 檔案在 ZIP 內的根路徑（空字串表示直接放在根目錄）。
+        seen_files: 已存在於 ZIP 的檔案名稱對照表，用於偵測命名衝突。
+            若發生衝突，會自動在檔名後缀 `_1`、`_2`... 進行區分。
+            格式為 `{archive_name: 1}`。
+
+    Returns:
+        tuple[int, dict]: (新增檔案數量, 更新後的 seen_files)。
+
+    Raises:
+        不拋出例外，僅記錄警告。呼叫端負責處理例外的包裝。
     """
     added_count = 0
     if seen_files is None:
@@ -62,7 +74,14 @@ def _write_pack_mcmeta(
     min_format: int,
     max_format: int,
 ) -> None:
-    """Write pack.mcmeta file to ZIP root."""
+    """將 pack.mcmeta 寫入 ZIP 檔案根目錄。
+
+    Args:
+        zip_file: 目標 ZIP 檔案物件。
+        description: 資源包描述，會寫入 pack.mcmeta.description。
+        min_format: 支援的最低 Minecraft 版本格式。
+        max_format: 支援的最高 Minecraft 版本格式。
+    """
     pack_info = {
         "pack": {
             "description": description,
