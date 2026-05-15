@@ -66,6 +66,8 @@ def load_config_into_view(view, config: dict):
 def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, validate_api_keys_from_ui_fn):
     """從 view UI 控制項收集使用者輸入並儲存至 config.json。"""
     new_config = load_config_json_fn()
+    if 'ftb_translator' not in new_config:
+        new_config['ftb_translator'] = {}
     try:
         new_config['logging']['log_level'] = view.controls_map['logging.log_level'].value
         new_config['logging']['log_dir'] = view.controls_map['logging.log_dir'].value
