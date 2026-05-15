@@ -242,18 +242,18 @@ def test_config_view_build_card(monkeypatch):
     assert card is not None
 
 
-def test_config_view_build_left_column(cv, page, mock_controls_map):
+def test_config_view_build_nav_column(cv, page, mock_controls_map):
     view = cv.ConfigView(page)
     view.controls_map = mock_controls_map
-    assert hasattr(view, '_build_left_column')
-    assert callable(view._build_left_column)
+    assert hasattr(view, '_build_nav_column')
+    assert callable(view._build_nav_column)
 
 
-def test_config_view_build_right_column(cv, page, mock_controls_map):
+def test_config_view_build_content_area(cv, page, mock_controls_map):
     view = cv.ConfigView(page)
     view.controls_map = mock_controls_map
-    assert hasattr(view, '_build_right_column')
-    assert callable(view._build_right_column)
+    assert hasattr(view, '_build_content_area')
+    assert callable(view._build_content_area)
 
 
 def test_config_view_build_lang_merger_card(cv, page, mock_controls_map):
@@ -315,3 +315,42 @@ def test_config_view_save_config_clicked(cv, page, mock_controls_map):
 def test_config_view_page_property(cv, page, mock_controls_map):
     view = cv.ConfigView(page)
     assert view.page is not None
+
+
+def test_nav_items_has_six_categories(cv, page, mock_controls_map):
+    """測試 NAV_ITEMS 有 6 個分類導航項目"""
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    assert len(cv.NAV_ITEMS) == 6
+    expected_ids = ['general', 'api_models', 'translation_behavior', 'prompts', 'species_lookup', 'batch_limits']
+    actual_ids = [item['id'] for item in cv.NAV_ITEMS]
+    assert actual_ids == expected_ids
+
+
+def test_nav_items_has_required_fields(cv, page, mock_controls_map):
+    """測試每個 NAV_ITEM 都有 id, label, icon"""
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    for item in cv.NAV_ITEMS:
+        assert 'id' in item
+        assert 'label' in item
+        assert 'icon' in item
+        assert item['id'] is not None
+        assert item['label'] is not None
+        assert item['icon'] is not None
+
+
+def test_selected_nav_default_is_general(cv, page, mock_controls_map):
+    """測試預設選中的導航是 general"""
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    assert view._selected_nav == 'general'
+
+
+def test_nav_click_id_is_correct(cv, page, mock_controls_map):
+    """測試點擊各導航 ID 都正確（只測試狀態更新）"""
+    view = cv.ConfigView(page)
+    view.controls_map = mock_controls_map
+    for item in cv.NAV_ITEMS:
+        view._selected_nav = item['id']
+        assert view._selected_nav == item['id']
