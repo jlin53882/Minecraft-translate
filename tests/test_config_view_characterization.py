@@ -242,18 +242,18 @@ def test_config_view_build_card(monkeypatch):
     assert card is not None
 
 
-def test_config_view_build_left_column(cv, page, mock_controls_map):
+def test_config_view_build_nav_column(cv, page, mock_controls_map):
     view = cv.ConfigView(page)
     view.controls_map = mock_controls_map
-    assert hasattr(view, '_build_left_column')
-    assert callable(view._build_left_column)
+    assert hasattr(view, '_build_nav_column')
+    assert callable(view._build_nav_column)
 
 
-def test_config_view_build_right_column(cv, page, mock_controls_map):
+def test_config_view_build_content_area(cv, page, mock_controls_map):
     view = cv.ConfigView(page)
     view.controls_map = mock_controls_map
-    assert hasattr(view, '_build_right_column')
-    assert callable(view._build_right_column)
+    assert hasattr(view, '_build_content_area')
+    assert callable(view._build_content_area)
 
 
 def test_config_view_build_lang_merger_card(cv, page, mock_controls_map):
