@@ -11,6 +11,7 @@ from translation_tool.utils.log_unit import log_debug
 
 from app.ui import theme
 from app.ui.components import styled_card
+from app.services_impl.config_service import load_config_json
 
 
 class BundlerView(ft.Column):
@@ -59,21 +60,38 @@ class BundlerView(ft.Column):
             expand=True,
             border_color=theme.OUTLINE,
             content_padding=10,
+            on_change=self._on_root_dir_change,
         )
         self.output_zip_field = ft.TextField(
             label="最終 ZIP 檔案儲存路徑",
-            hint_text="輸出位置與檔名",
+            hint_text="留空則自動帶入翻譯專案根目錄+設定檔檔名",
             expand=True,
             border_color=theme.OUTLINE,
             content_padding=10,
         )
+        self._config_output_zip_name = "可使用翻譯.zip"
         self.extra_folders_view = ft.ListView(height=100, spacing=4, auto_scroll=False)
         self.progress_bar = ft.ProgressBar(value=0, height=8, visible=False)
         self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
 
         self._load_version_data()
         self._init_ui()
+        self._load_output_zip_from_config()
         self._build_controls()
+
+    def _load_output_zip_from_config(self):
+        """從 config 載入 output_zip_name 並設定 hint_text"""
+        config = load_config_json()
+        self._config_output_zip_name = config.get("output_bundler", {}).get("output_zip_name", "可使用翻譯.zip")
+        self.output_zip_field.hint_text = f"留空則自動帶入：{{root_dir}}\\{self._config_output_zip_name}"
+
+    def _on_root_dir_change(self, e: ft.ControlEvent):
+        """當翻譯專案根目錄變更時，更新 output_zip_field 的 hint_text"""
+        root_dir = self.root_dir_field.value or ""
+        if root_dir and not self.output_zip_field.value:
+            self.output_zip_field.hint_text = f"留空則自動帶入：{root_dir}\\{self._config_output_zip_name}"
+        elif not self.output_zip_field.value:
+            self.output_zip_field.hint_text = f"留空則自動帶入：{{root_dir}}\\{self._config_output_zip_name}"
 
     def _load_version_data(self):
         config_path = os.path.join(
@@ -368,9 +386,12 @@ class BundlerView(ft.Column):
         root_dir = self.root_dir_field.value or ""
         output_zip = self.output_zip_field.value or ""
 
-        if not root_dir or not output_zip:
-            self._show_snack_bar("請填寫「翻譯專案根目錄」與「最終 ZIP 檔案儲存路徑」")
+        if not root_dir:
+            self._show_snack_bar("請填寫「翻譯專案根目錄」")
             return
+
+        if not output_zip:
+            output_zip = os.path.join(root_dir, self._config_output_zip_name)
 
         version = self.version_search.value or ""
         description = self.description_field.value or ""
