@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 CACHE_TYPES = ["lang", "patchouli", "ftbquests", "kubejs", "md"]
 ROLLING_SHARD_SIZE = 2500
 ACTIVE_SHARD_FILE = ".active"
-_CACHE_DIR_NAME = "快取資料夾"
+_CACHE_DIR_NAME = "快取資料"
 
 _search_facade: CacheSearchFacade | None = None
 _search_facade_lock = threading.Lock()
