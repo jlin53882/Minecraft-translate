@@ -59,6 +59,7 @@ DEFAULT_CONFIG = {
         "cache_directory": "快取資料",
         "enable_cache_saving": True,
         "parallel_execution_workers": max(1, os.cpu_count() // 2),
+        "custom_translator_folder": "custom_translators",
     },
     "species_cache": {
         "cache_directory": "學名資料庫",

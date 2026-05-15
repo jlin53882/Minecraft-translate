@@ -10,6 +10,7 @@
     "cache_directory": "快取資料",
     "enable_cache_saving": true,
     "parallel_execution_workers": 4,
+    "custom_translator_folder": "custom_translators",
     "cjk_ratio_threshold": 0.7
   },
   "species_cache": {
