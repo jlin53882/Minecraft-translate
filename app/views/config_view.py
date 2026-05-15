@@ -361,6 +361,7 @@ class ConfigView(ft.Column):
                 ]),
                 self._build_card("翻譯與處理設定 (Translator)", [
                     self.controls_map["translator.output_dir_name"],
+                    self.controls_map["ftb_translator.output_dir_name"],
                     self.controls_map["translator.replace_rules_path"],
                     self.controls_map["translator.cache_directory"],
                     self.controls_map["translator.parallel_execution_workers"],
