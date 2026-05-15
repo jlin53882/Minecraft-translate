@@ -87,26 +87,26 @@ class ConfigView(ft.Column):
             helper_text="用於：logging module",
         )
         self.controls_map["logging.log_dir"] = ft.TextField(
-            label="日誌資料夾名稱", dense=True, helper_text="用於：logging module"
+            label="日誌資料夾名稱", dense=True, helper="用於：logging module"
         )
 
         self.controls_map["translator.output_dir_name"] = ft.TextField(
-            label="主要輸出資料夾名稱", dense=True, helper_text="用於：翻譯結果輸出"
+            label="主要輸出資料夾名稱", dense=True, helper="用於：翻譯結果輸出"
         )
         self.controls_map["ftb_translator.output_dir_name"] = ft.TextField(
-            label="FTB 任務輸出資料夾名稱", dense=True, helper_text="用於：FTB任務翻譯輸出"
+            label="FTB 任務輸出資料夾名稱", dense=True, helper="用於：FTB任務翻譯輸出"
         )
         self.controls_map["translator.replace_rules_path"] = ft.TextField(
-            label="替換規則檔案名稱", dense=True, helper_text="用於：replace_rules_loader"
+            label="替換規則檔案名稱", dense=True, helper="用於：replace_rules_loader"
         )
         self.controls_map["translator.cache_directory"] = ft.TextField(
-            label="快取資料夾名稱", dense=True, helper_text="用於：翻譯快取系統"
+            label="快取資料夾名稱", dense=True, helper="用於：翻譯快取系統"
         )
         self.controls_map["translator.enable_cache_saving"] = ft.Checkbox(
-            label="啟用通用翻譯快取", helper_text="用於：快取系統"
+            label="啟用通用翻譯快取"
         )
         self.controls_map["translator.parallel_execution_workers"] = ft.TextField(
-            label="檔案處理多執行緒數量", dense=True, helper_text="用於：平行執行器"
+            label="檔案處理多執行緒數量", dense=True, helper="用於：平行執行器"
         )
 
         self.controls_map["species_cache.cache_directory"] = ft.TextField(
@@ -150,43 +150,43 @@ class ConfigView(ft.Column):
         )
 
         self.controls_map["species_cache.cache_directory"] = ft.TextField(
-            label="學名快取資料夾", dense=True, helper_text="用於：學名查詢系統"
+            label="學名快取資料夾", dense=True, helper="用於：學名查詢系統"
         )
         self.controls_map["species_cache.cache_filename"] = ft.TextField(
-            label="學名存放檔案名稱", dense=True, helper_text="用於：學名TSV快取"
+            label="學名存放檔案名稱", dense=True, helper="用於：學名TSV快取"
         )
         self.controls_map["species_cache.wikipedia_language"] = ft.TextField(
-            label="Wiki 查詢語言", dense=True, helper_text="用於：維基百科API"
+            label="Wiki 查詢語言", dense=True, helper="用於：維基百科API"
         )
         self.controls_map["species_cache.wikipedia_rate_limit_delay"] = ft.TextField(
-            label="查詢延遲(秒)", dense=True, helper_text="用於：API速率限制"
+            label="查詢延遲(秒)", dense=True, helper="用於：API速率限制"
         )
 
         self.controls_map["output_bundler.output_zip_name"] = ft.TextField(
-            label="最終打包 ZIP 檔名", dense=True, helper_text="用於：BundlerView自動帶入"
+            label="最終打包 ZIP 檔名", dense=True, helper="用於：BundlerView自動帶入"
         )
 
         self.controls_map["lang_merger.pending_folder_name"] = ft.TextField(
-            label="待翻譯資料夾名稱", dense=True, helper_text="用於：語言合併器"
+            label="待翻譯資料夾名稱", dense=True, helper="用於：語言合併器"
         )
         self.controls_map["lang_merger.pending_organized_folder_name"] = ft.TextField(
-            label="待翻譯整理資料夾名稱", dense=True, helper_text="用於：lang_merger"
+            label="待翻譯整理資料夾名稱", dense=True, helper="用於：lang_merger"
         )
         self.controls_map["lang_merger.filtered_pending_min_count"] = ft.TextField(
-            label="待翻譯整理json筆數最小出現次數", dense=True, helper_text="用於：整理分類邏輯"
+            label="待翻譯整理json筆數最小出現次數", dense=True, helper="用於：整理分類邏輯"
         )
         self.controls_map["lang_merger.quarantine_folder_name"] = ft.TextField(
-            label="語言合併器格式問題隔離資料夾名稱", dense=True, helper_text="用於：格式錯誤隔離"
+            label="語言合併器格式問題隔離資料夾名稱", dense=True, helper="用於：格式錯誤隔離"
         )
 
         self.controls_map["lm_translator.temperature"] = ft.TextField(
-            label="模型溫度 (Temperature)", dense=True, helper_text="用於：LM翻譯請求"
+            label="模型溫度 (Temperature)", dense=True, helper="用於：LM翻譯請求"
         )
         self.controls_map["lm_translator.rate_limit.timeout"] = ft.TextField(
-            label="API 請求 Timeout", dense=True, keyboard_type=ft.KeyboardType.NUMBER, helper_text="用於：API超時控制"
+            label="API 請求 Timeout", dense=True, keyboard_type=ft.KeyboardType.NUMBER, helper="用於：API超時控制"
         )
         self.controls_map["lm_translator.lm_translate_folder_name"] = ft.TextField(
-            label="LM 翻譯輸出資料夾", dense=True, helper_text="用於：翻譯結果輸出"
+            label="LM 翻譯輸出資料夾", dense=True, helper="用於：翻譯結果輸出"
         )
 
         self.controls_map["lm_translator.patchouli_system_prompt"] = ft.TextField(
@@ -194,36 +194,36 @@ class ConfigView(ft.Column):
             multiline=True,
             expand=True,
             text_size=13,
-            helper_text="用於：Patchouli翻譯請求",
+            helper="用於：Patchouli翻譯請求",
         )
         self.controls_map["lm_translator.lang_system_prompt"] = ft.TextField(
             label="Lang 提示詞 (System Prompt)",
             multiline=True,
             expand=True,
             text_size=13,
-            helper_text="用於：Lang檔案翻譯請求",
+            helper="用於：Lang檔案翻譯請求",
         )
 
         self.controls_map["lm_translator.initial_batch_size_patchouli"] = ft.TextField(
-            label="Patchouli 請求大小", dense=True, helper_text="用於：批次翻譯請求"
+            label="Patchouli 請求大小", dense=True, helper="用於：批次翻譯請求"
         )
         self.controls_map["lm_translator.initial_batch_size_lang"] = ft.TextField(
-            label="Lang 請求大小", dense=True, helper_text="用於：批次翻譯請求"
+            label="Lang 請求大小", dense=True, helper="用於：批次翻譯請求"
         )
         self.controls_map["lm_translator.initial_batch_size_ftb"] = ft.TextField(
-            label="FTB Quests 請求大小", dense=True, helper_text="用於：批次翻譯請求"
+            label="FTB Quests 請求大小", dense=True, helper="用於：批次翻譯請求"
         )
         self.controls_map["lm_translator.initial_batch_size_kubejs"] = ft.TextField(
-            label="KubeJS 請求大小", dense=True, helper_text="用於：批次翻譯請求"
+            label="KubeJS 請求大小", dense=True, helper="用於：批次翻譯請求"
         )
         self.controls_map["lm_translator.initial_batch_size_md"] = ft.TextField(
-            label="MD 請求大小", dense=True, helper_text="用於：批次翻譯請求"
+            label="MD 請求大小", dense=True, helper="用於：批次翻譯請求"
         )
         self.controls_map["lm_translator.min_batch_size"] = ft.TextField(
-            label="最小錯誤請求大小", dense=True, helper_text="用於：錯誤時批次縮小"
+            label="最小錯誤請求大小", dense=True, helper="用於：錯誤時批次縮小"
         )
         self.controls_map["lm_translator.batch_shrink_factor"] = ft.TextField(
-            label="錯誤縮小比例", dense=True, helper_text="用於：批次失敗時縮小率"
+            label="錯誤縮小比例", dense=True, helper="用於：批次失敗時縮小率"
         )
 
         self.controls_map["lm_translator.translator.skip_terms"] = ft.TextField(
@@ -231,7 +231,7 @@ class ConfigView(ft.Column):
             multiline=True,
             expand=True,
             text_size=13,
-            helper_text="用於：翻譯時略過含關鍵字的項目",
+            helper="用於：翻譯時略過含關鍵字的項目",
         )
         self.controls_map["lm_translator.translator.translatable_keywords"] = (
             ft.TextField(
@@ -239,7 +239,7 @@ class ConfigView(ft.Column):
                 multiline=True,
                 expand=True,
                 text_size=13,
-                helper_text="用於：判斷哪些JSON欄位需翻譯",
+                helper="用於：判斷哪些JSON欄位需翻譯",
             )
         )
         self.controls_map["lm_translator.patchouli.dir_names"] = ft.TextField(
@@ -247,7 +247,7 @@ class ConfigView(ft.Column):
             multiline=True,
             expand=True,
             text_size=13,
-            helper_text="用於：find_patchouli_json 掃描目錄",
+            helper="用於：find_patchouli_json 掃描目錄",
         )
 
         self.new_model_field = ft.TextField(
