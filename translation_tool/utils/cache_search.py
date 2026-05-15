@@ -26,6 +26,7 @@ from typing import List, Dict, Optional, Any, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import cache_store
+from .config_manager import load_config
 from .log_unit import log_info, log_warning, log_debug
 
 # =============================================================================
@@ -571,6 +572,17 @@ def _build_search_metadata(
     return {"mod": mod, "path": path}
 
 
+def _get_workers_from_config() -> int:
+    """從 config 讀取 parallel_execution_workers"""
+    try:
+        config_workers = load_config().get("translator", {}).get("parallel_execution_workers")
+        if isinstance(config_workers, int) and config_workers > 0:
+            return config_workers
+    except Exception:
+        pass
+    return 4  # fallback to 4 if config unavailable
+
+
 def build_index_entries(
     cache_type: str, cache_dict: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
@@ -584,7 +596,8 @@ def build_index_entries(
         return []
 
     # 使用多執行緒並行處理 metadata 建立
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    max_workers = _get_workers_from_config()
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(_build_single_entry, cache_type, key, entry): idx
             for idx, (key, entry) in enumerate(items)

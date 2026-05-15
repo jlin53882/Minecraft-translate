@@ -126,7 +126,13 @@ def translate_directory_generator(input_dir: str) -> Generator[Dict[str, Any], N
         yield {"progress": 0.0}
 
         processed_count = 0
-        max_workers = min(2, os.cpu_count() or 1)
+        cpu_count = os.cpu_count() or 2
+        max_allowed_workers = max(1, cpu_count // 2)
+        config_workers = load_config().get("translator", {}).get("parallel_execution_workers")
+        if isinstance(config_workers, int) and config_workers > 0:
+            max_workers = min(config_workers, max_allowed_workers)
+        else:
+            max_workers = max_allowed_workers
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_file = {
