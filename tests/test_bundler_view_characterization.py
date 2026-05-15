@@ -89,7 +89,7 @@ def test_bundler_view_has_config_output_zip_name():
     assert view._config_output_zip_name == "可使用翻譯.zip"
 
 
-def test_on_root_dir_change_updates_hint_text(monkeypatch):
+def test_on_root_dir_change_updates_hint_text():
     """測試當 root_dir 改變時，hint_text 會更新"""
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
@@ -117,7 +117,7 @@ def test_start_bundling_without_required_paths_shows_error():
     assert "請填寫" in page.overlay[-1].content.value
 
 
-def test_bundling_without_output_zip_shows_no_error():
+def test_bundling_without_output_zip_shows_no_error(monkeypatch):
     """output_zip 留空時不應顯示錯誤，會自動帶入"""
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
