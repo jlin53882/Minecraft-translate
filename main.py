@@ -22,6 +22,7 @@ import logging
 import flet as ft
 
 from app.startup_tasks import start_background_startup_tasks
+from app.ui import theme
 from app.ui.keyboard_shortcuts import create_keyboard_handler
 from app.ui.quick_jump import show_quick_jump_panel
 from app.view_registry import build_navigation_destinations, build_view_registry, get_window_size
@@ -102,6 +103,7 @@ def main(page: ft.Page):
         page.theme_mode = ft.ThemeMode.DARK if is_light else ft.ThemeMode.LIGHT
         toggle_icon_btn.icon = ft.Icons.LIGHT_MODE if is_light else ft.Icons.DARK_MODE
         toggle_icon_btn.tooltip = "切換為淺色模式" if is_light else "切換為深色模式"
+        theme.manager.set_mode('dark' if is_light else 'light')
         page.update()
 
     toggle_icon_btn = ft.IconButton(
