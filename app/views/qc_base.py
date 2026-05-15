@@ -61,7 +61,7 @@ class QCBase:
                     if "progress" in update:
                         self.progress_bar.value = update["progress"]
                     if update.get("error"):
-                        self.progress_bar.color = theme.RED
+                        self.progress_bar.color = theme.ERROR
 
                     self.log_view.scroll_to(offset=-1, duration=100)
                     self._page.update()

@@ -181,7 +181,7 @@ class LookupView(ft.Column):
             self.batch_progress_bar.visible = False
             self.page.update()
 
-    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.ERROR):
         """
         (新) 統一的 SnackBar 觸發函式 (使用您提供的 Overlay 方案)
         """

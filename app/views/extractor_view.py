@@ -307,7 +307,7 @@ class ExtractorView(ft.Column):
         """启动 JAR 文件提取任务（lang 或 book 模式）"""
         return run_extraction_flow(self, mode)
 
-    def _show_snack_bar(self, message: str, color: str = theme.RED_400):
+    def _show_snack_bar(self, message: str, color: str = theme.ERROR):
         """
         顯示底部的快訊通知 (SnackBar)
 

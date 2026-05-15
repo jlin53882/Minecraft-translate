@@ -332,7 +332,7 @@ class TranslationView(ft.Column):
         self._append_log("[UI] 已重置：Markdown 輸入已清空")
         self.page.update()
 
-    def _show_snack(self, message: str, color: str = theme.RED_600):
+    def _show_snack(self, message: str, color: str = theme.ERROR):
         """在頁面顯示 Snack Bar 提示訊息"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)

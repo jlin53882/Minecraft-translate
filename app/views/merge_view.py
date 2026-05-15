@@ -104,7 +104,7 @@ class MergeView(ft.Column):
         self._zh_cn_disabled_note = ft.Text(
             "需先開啟「處理 zh_cn 檔案」",
             size=11,
-            color=theme.RED_400,
+            color=theme.ERROR,
             visible=False,
         )
         self.output_dir_field = ft.TextField(
@@ -130,14 +130,14 @@ class MergeView(ft.Column):
             icon=ft.Icons.ADD,
             tooltip="選擇要合併的 ZIP 檔案",
             on_click=self.pick_zips,
-            bgcolor=theme.BLUE_700,
+            bgcolor=theme.PRIMARY,
         )
         self.start_button = primary_button(
             "開始合併 ZIP",
             icon=ft.Icons.PLAY_ARROW,
             tooltip="開始執行 ZIP 合併流程",
             on_click=self.start_merge,
-            bgcolor=theme.GREEN_700,
+            bgcolor=theme.SUCCESS,
         )
 
         general_options_section = ft.Container(
@@ -498,7 +498,7 @@ class MergeView(ft.Column):
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
-    def _show_snack_bar(self, message: str, color: str = theme.RED_600) -> None:
+    def _show_snack_bar(self, message: str, color: str = theme.ERROR) -> None:
         """顯示 SnackBar 訊息。"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)

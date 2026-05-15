@@ -1497,7 +1497,7 @@ class CacheView(ft.Column):
             ]
         )
 
-    def _show_snack_bar(self, message: str, color: str = theme.RED_400):
+    def _show_snack_bar(self, message: str, color: str = theme.ERROR):
         """
         顯示底部的快訊通知 (SnackBar)
         :param message: 要顯示的文字訊息

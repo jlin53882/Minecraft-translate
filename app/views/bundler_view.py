@@ -255,7 +255,7 @@ class BundlerView(ft.Column):
             "開始打包",
             icon=ft.Icons.PLAY_ARROW,
             on_click=self.start_bundling_clicked,
-            bgcolor=theme.GREEN_700,
+            bgcolor=theme.SUCCESS,
             color=ft.Colors.WHITE,
         )
 
@@ -376,7 +376,7 @@ class BundlerView(ft.Column):
             self._refresh_extra_folders()
             self._page.update()
 
-    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.ERROR):
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self._page.overlay.append(snack)
         snack.open = True
@@ -438,7 +438,7 @@ class BundlerView(ft.Column):
                 if "progress" in update:
                     self.progress_bar.value = update["progress"]
                 if update.get("error"):
-                    self.progress_bar.color = theme.RED
+                    self.progress_bar.color = theme.ERROR
                 self._page.run_task(self._scroll_log)
                 self._page.update()
         except Exception as ex:
