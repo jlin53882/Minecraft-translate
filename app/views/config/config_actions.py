@@ -25,6 +25,7 @@ def load_config_into_view(view, config: dict):
     view.controls_map['species_cache.wikipedia_rate_limit_delay'].value = str(species_cfg.get('wikipedia_rate_limit_delay'))
     view.controls_map['lm_translator.temperature'].value = str(lm_cfg.get('temperature'))
     view.controls_map['lm_translator.rate_limit.timeout'].value = str(lm_cfg.get('rate_limit', {}).get('timeout', '600'))
+    view.controls_map['lm_translator.rate_limit.sleep_seconds_between_batches'].value = str(lm_cfg.get('rate_limit', {}).get('sleep_seconds_between_batches', '0.0'))
     view.controls_map['output_bundler.output_zip_name'].value = bundle_cfg.get('output_zip_name')
     view.controls_map['lang_merger.pending_folder_name'].value = config.get('lang_merger', {}).get('pending_folder_name', '待翻譯')
     view.controls_map['lang_merger.pending_organized_folder_name'].value = config.get('lang_merger', {}).get('pending_organized_folder_name', '待翻譯整理需翻譯')
@@ -80,6 +81,7 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
         new_config['species_cache']['wikipedia_rate_limit_delay'] = float(view.controls_map['species_cache.wikipedia_rate_limit_delay'].value)
         new_config['lm_translator']['temperature'] = float(view.controls_map['lm_translator.temperature'].value)
         new_config['lm_translator']['rate_limit']['timeout'] = int(view.controls_map['lm_translator.rate_limit.timeout'].value)
+        new_config['lm_translator']['rate_limit']['sleep_seconds_between_batches'] = float(view.controls_map['lm_translator.rate_limit.sleep_seconds_between_batches'].value)
         new_config['output_bundler']['output_zip_name'] = view.controls_map['output_bundler.output_zip_name'].value
         new_config['lang_merger']['pending_folder_name'] = view.controls_map['lang_merger.pending_folder_name'].value
         new_config['lang_merger']['pending_organized_folder_name'] = view.controls_map['lang_merger.pending_organized_folder_name'].value

@@ -40,7 +40,7 @@ def _get_default_workers() -> int:
     except Exception:
         # config 讀取失敗時不 blocking，直接用 fallback
         pass
-    return max(1, (os.cpu_count() or 2) // 2)
+    return max(1, os.cpu_count() // 2)
 
 
 def _scan_single_jar(

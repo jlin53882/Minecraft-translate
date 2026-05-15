@@ -81,7 +81,8 @@ DEFAULT_CONFIG = {
         "min_batch_size": 50,  # 最小 batch
         "batch_shrink_factor": 0.75,  # 發生錯誤時縮小比例
         "rate_limit": {
-            "timeout": 600  # request time out set
+            "timeout": 600,  # request time out set
+            "sleep_seconds_between_batches": 0.0,  # 批次間延遲秒數
         },
         "models": {
             "gemini-2.5-flash": {"enabled": True},
