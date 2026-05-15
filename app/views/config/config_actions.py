@@ -6,6 +6,7 @@ def load_config_into_view(view, config: dict):
     """將 config 字典中的值填入 view 的各個 UI 控制項。"""
     log_cfg = config.get('logging', {})
     trans_cfg = config.get('translator', {})
+    ftb_cfg = config.get('ftb_translator', {})
     species_cfg = config.get('species_cache', {})
     lm_cfg = config.get('lm_translator', {})
     bundle_cfg = config.get('output_bundler', {})
@@ -13,6 +14,7 @@ def load_config_into_view(view, config: dict):
     view.controls_map['logging.log_level'].value = log_cfg.get('log_level')
     view.controls_map['logging.log_dir'].value = log_cfg.get('log_dir')
     view.controls_map['translator.output_dir_name'].value = trans_cfg.get('output_dir_name', 'zh_tw_generated')
+    view.controls_map['ftb_translator.output_dir_name'].value = ftb_cfg.get('output_dir_name', 'FTB任務翻譯輸出')
     view.controls_map['translator.replace_rules_path'].value = trans_cfg.get('replace_rules_path', 'replace_rules.json')
     view.controls_map['translator.cache_directory'].value = trans_cfg.get('cache_directory', '快取資料')
     view.controls_map['translator.enable_cache_saving'].value = trans_cfg.get('enable_cache_saving')
@@ -67,6 +69,7 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
         new_config['logging']['log_level'] = view.controls_map['logging.log_level'].value
         new_config['logging']['log_dir'] = view.controls_map['logging.log_dir'].value
         new_config['translator']['output_dir_name'] = view.controls_map['translator.output_dir_name'].value
+        new_config['ftb_translator']['output_dir_name'] = view.controls_map['ftb_translator.output_dir_name'].value
         new_config['translator']['replace_rules_path'] = view.controls_map['translator.replace_rules_path'].value
         new_config['translator']['cache_directory'] = view.controls_map['translator.cache_directory'].value
         new_config['translator']['enable_cache_saving'] = view.controls_map['translator.enable_cache_saving'].value

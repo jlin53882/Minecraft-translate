@@ -91,7 +91,10 @@ class ConfigView(ft.Column):
         )
 
         self.controls_map["translator.output_dir_name"] = ft.TextField(
-            label="主要輸出資料夾名稱", dense=True, helper_text="用於：FTB翻譯輸出資料夾"
+            label="主要輸出資料夾名稱", dense=True, helper_text="用於：翻譯結果輸出"
+        )
+        self.controls_map["ftb_translator.output_dir_name"] = ft.TextField(
+            label="FTB 任務輸出資料夾名稱", dense=True, helper_text="用於：FTB任務翻譯輸出"
         )
         self.controls_map["translator.replace_rules_path"] = ft.TextField(
             label="替換規則檔案名稱", dense=True, helper_text="用於：replace_rules_loader"

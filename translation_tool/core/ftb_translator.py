@@ -92,7 +92,7 @@ def _translate_single_file(
 def translate_directory_generator(input_dir: str) -> Generator[Dict[str, Any], None, None]:
     """主翻譯流程，支援多執行緒處理。"""
     output_dir_name = (
-        load_config().get("translator", {}).get("output_dir_name", "zh_tw_generated")
+        load_config().get("ftb_translator", {}).get("output_dir_name", "FTB任務翻譯輸出")
     )
     output_dir = os.path.join(os.path.dirname(input_dir), output_dir_name)
     os.makedirs(output_dir, exist_ok=True)

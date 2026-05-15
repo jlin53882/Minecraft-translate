@@ -61,6 +61,9 @@ DEFAULT_CONFIG = {
         "parallel_execution_workers": max(1, os.cpu_count() // 2),
         "custom_translator_folder": "custom_translators",
     },
+    "ftb_translator": {
+        "output_dir_name": "FTB任務翻譯輸出",
+    },
     "species_cache": {
         "cache_directory": "學名資料庫",
         "cache_filename": "species_cache.tsv",
