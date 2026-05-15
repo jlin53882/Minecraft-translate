@@ -20,17 +20,34 @@ class _Page:
     def __init__(self):
         self.overlay = []
         self.updated = 0
+        self._tasks = []
 
     def update(self):
         self.updated += 1
+
+    def run_task(self, coro, *args):
+        self._tasks.append((coro, args))
+
+    def _run_all_tasks(self):
+        for coro, args in self._tasks:
+            result = coro(*args)
+            if result is not None:
+                try:
+                    result.send(None)
+                except StopIteration:
+                    pass
 
 
 class _FilePicker:
     def __init__(self):
         self.on_result = None
+        self._mock_path = None
 
-    def get_directory_path(self):
-        pass
+    async def get_directory_path(self, dialog_title: str = None):
+        return self._mock_path
+
+    def set_mock_path(self, path):
+        self._mock_path = path
 
 
 class _Session:
@@ -214,6 +231,44 @@ def test_on_output_dir_picked_updates_output_field(monkeypatch):
 
     assert view.output_path.value == "E:/Output"
     assert page.updated >= 1, "page.update() should be called"
+
+
+# ============================================================
+# Test 5a: async pick_input_directory updates input_path
+# ============================================================
+
+def test_async_pick_input_directory_updates_input_field(monkeypatch):
+    """驗證 async 選擇輸入目錄後，正確更新 input_path。"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = _Page()
+    picker = _FilePicker()
+    picker.set_mock_path("D:/Game/assets")
+    view = lm_view.LMView(page, picker)
+
+    page.run_task(view._async_pick_input_directory)
+    page._run_all_tasks()
+
+    assert view.input_path.value == "D:/Game/assets"
+    assert page.updated >= 1
+
+
+# ============================================================
+# Test 5b: async pick_output_directory updates output_path
+# ============================================================
+
+def test_async_pick_output_directory_updates_output_field(monkeypatch):
+    """驗證 async 選擇輸出目錄後，正確更新 output_path。"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = _Page()
+    picker = _FilePicker()
+    picker.set_mock_path("E:/Output")
+    view = lm_view.LMView(page, picker)
+
+    page.run_task(view._async_pick_output_directory)
+    page._run_all_tasks()
+
+    assert view.output_path.value == "E:/Output"
+    assert page.updated >= 1
 
 
 # ============================================================
@@ -413,3 +468,167 @@ def test_start_ui_timer_attempts_log_view_update(monkeypatch):
     lm_view.time.sleep(0.25)
 
     assert called, "log_view.update() 應至少被呼叫一次"
+
+
+# ============================================================
+# Test 10a: pick_input_directory schedules async task
+# ============================================================
+
+def test_pick_input_directory_schedules_async_task(monkeypatch):
+    """驗證 pick_input_directory 正確排程 _async_pick_input_directory"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = _Page()
+    picker = _FilePicker()
+    picker.set_mock_path("C:/Input")
+    view = lm_view.LMView(page, picker)
+
+    view.pick_input_directory(None)
+
+    assert len(page._tasks) == 1
+    page._run_all_tasks()
+
+    assert view.input_path.value == "C:/Input"
+    assert page.updated >= 1
+
+
+# ============================================================
+# Test 10b: pick_output_directory schedules async task
+# ============================================================
+
+def test_pick_output_directory_schedules_async_task(monkeypatch):
+    """驗證 pick_output_directory 正確排程 _async_pick_output_directory"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = _Page()
+    picker = _FilePicker()
+    picker.set_mock_path("D:/Output")
+    view = lm_view.LMView(page, picker)
+
+    view.pick_output_directory(None)
+
+    assert len(page._tasks) == 1
+    page._run_all_tasks()
+
+    assert view.output_path.value == "D:/Output"
+    assert page.updated >= 1
+
+
+# ============================================================
+# Test 10c: on_input_dir_picked updates field and calls update
+# ============================================================
+
+def test_on_input_dir_picked_updates_field_and_calls_update(monkeypatch):
+    """驗證 on_input_dir_picked 正確更新 input_path 並呼叫 page.update()"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = _Page()
+    view = lm_view.LMView(page, _FilePicker())
+
+    class FakeEvent:
+        path = "F:/Assets"
+
+    view.on_input_dir_picked(FakeEvent())
+
+    assert view.input_path.value == "F:/Assets"
+    assert page.updated >= 1
+
+
+# ============================================================
+# Test 10d: on_output_dir_picked updates field and calls update
+# ============================================================
+
+def test_on_output_dir_picked_updates_field_and_calls_update(monkeypatch):
+    """驗證 on_output_dir_picked 正確更新 output_path 並呼叫 page.update()"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = _Page()
+    view = lm_view.LMView(page, _FilePicker())
+
+    class FakeEvent:
+        path = "G:/Out"
+
+    view.on_output_dir_picked(FakeEvent())
+
+    assert view.output_path.value == "G:/Out"
+    assert page.updated >= 1
+
+
+# ============================================================
+# Test 10e: _show_snack_bar adds to overlay
+# ============================================================
+
+def test_show_snack_bar_adds_to_overlay(monkeypatch):
+    """驗證 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = _Page()
+    view = lm_view.LMView(page, _FilePicker())
+
+    view._show_snack_bar("Test message", lm_view.theme.RED_600)
+
+    assert len(page.overlay) == 1
+    assert page.overlay[0].open is True
+
+
+# ============================================================
+# Test 10f: on_input_dir_picked with empty path does not update
+# ============================================================
+
+def test_on_input_dir_picked_ignores_empty_path(monkeypatch):
+    """驗證 on_input_dir_picked 忽略空路徑"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = _Page()
+    view = lm_view.LMView(page, _FilePicker())
+
+    class FakeEvent:
+        path = ""
+
+    view.input_path.value = "original"
+    view.on_input_dir_picked(FakeEvent())
+
+    assert view.input_path.value == "original"
+
+
+# ============================================================
+# Test 10g: on_output_dir_picked with empty path does not update
+# ============================================================
+
+def test_on_output_dir_picked_ignores_empty_path(monkeypatch):
+    """驗證 on_output_dir_picked 忽略空路徑"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = _Page()
+    view = lm_view.LMView(page, _FilePicker())
+
+    class FakeEvent:
+        path = ""
+
+    view.output_path.value = "original"
+    view.on_output_dir_picked(FakeEvent())
+
+    assert view.output_path.value == "original"
+
+
+def test_lm_view_path_row_returns_control():
+    from app.views import lm_view
+
+    class _Page:
+        def __init__(self):
+            self.overlay = []
+            self.updated = 0
+            self._tasks = []
+        def update(self):
+            self.updated += 1
+        def run_task(self, coro, *args):
+            self._tasks.append((coro, args))
+
+    class _Session:
+        def __init__(self):
+            pass
+
+    class _FilePicker:
+        def __init__(self):
+            pass
+        async def get_directory_path(self, dialog_title=None):
+            return None
+
+    view = lm_view.LMView(_Page(), _FilePicker())
+    tf = lm_view.ft.TextField()
+    result = view._path_row(tf, lambda e: None)
+
+    assert result is not None

@@ -5,21 +5,43 @@ class _Page:
     def __init__(self):
         self.overlay = []
         self.updated = 0
-        self.run_task_called = []
+        self._tasks = []
 
     def update(self):
         self.updated += 1
 
-    def run_task(self, coroutine):
-        self.run_task_called.append(coroutine)
+    def run_task(self, coro, *args):
+        self._tasks.append((coro, args))
+
+    def _run_all_tasks(self):
+        for coro, args in self._tasks:
+            result = coro(*args)
+            if result is not None:
+                try:
+                    result.send(None)
+                except StopIteration:
+                    pass
 
 
 class _FilePicker:
     def __init__(self):
         self._callback = None
+        self._mock_path = None
 
     def on_upload(self, callback):
         self._callback = callback
+
+    async def get_directory_path(self, dialog_title: str = None):
+        return self._mock_path
+
+    async def pick_files(self, dialog_title: str = None, allowed_extensions: list = None):
+        return [type('obj', (object,), {'path': self._mock_path})()] if self._mock_path else []
+
+    async def save_file(self, dialog_title: str = None, allowed_extensions: list = None, file_name: str = None):
+        return self._mock_path
+
+    def set_mock_path(self, path):
+        self._mock_path = path
 
 
 def test_bundler_view_initializes_core_controls():
@@ -291,3 +313,54 @@ def test_bundling_worker_with_error(monkeypatch):
 
     assert view.progress_bar.color == "red"
     assert not view.progress_bar.visible
+
+
+def test_bundler_view_show_snack_bar_adds_to_overlay():
+    """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+
+    view._show_snack_bar('Test error', '#FF0000')
+
+    assert len(page.overlay) == 1
+    assert page.overlay[0].open is True
+
+
+def test_bundler_view_append_log_adds_control():
+    """測試 _append_log 正確將日誌行加入 log_view"""
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+
+    view._append_log('test log entry')
+
+    assert len(view.log_view.controls) >= 1
+
+def test_bundler_view_version_list_exists():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+    assert view.version_list is not None
+
+
+def test_bundler_view_version_search_exists():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+    assert view.version_search is not None
+
+
+def test_bundler_view_version_data_exists():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+    assert view.version_data is not None
+
+
+def test_bundler_view_pick_pack_image():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+    assert hasattr(view, '_pick_pack_image')
+
+
+def test_bundler_view_extra_folders_list():
+    page = _Page()
+    view = BundlerView(page, _FilePicker())
+    assert view.extra_folders is not None
+    assert isinstance(view.extra_folders, list)
