@@ -142,7 +142,7 @@ class ConfigView(ft.Column):
         self.controls_map["lm_translator.temperature"] = ft.TextField(
             label="模型溫度 (Temperature)", hint_text="用於：LM翻譯請求", dense=True
         )
-self.controls_map["lm_translator.rate_limit.timeout"] = ft.TextField(
+        self.controls_map["lm_translator.rate_limit.timeout"] = ft.TextField(
             label="API 請求 Timeout", helper="用於：API超時控制", dense=True, keyboard_type=ft.KeyboardType.NUMBER
         )
         self.controls_map["lm_translator.rate_limit.sleep_seconds_between_batches"] = ft.TextField(
@@ -150,9 +150,6 @@ self.controls_map["lm_translator.rate_limit.timeout"] = ft.TextField(
         )
         self.controls_map["lm_translator.lm_translate_folder_name"] = ft.TextField(
             label="LM 翻譯輸出資料夾", helper="用於：翻譯結果輸出", dense=True
-        )
-        self.controls_map["lm_translator.lm_translate_folder_name"] = ft.TextField(
-            label="LM 翻譯輸出資料夾", hint_text="用於：翻譯結果輸出", dense=True
         )
 
         self.controls_map["species_cache.cache_directory"] = ft.TextField(
