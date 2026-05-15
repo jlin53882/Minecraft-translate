@@ -24,7 +24,7 @@ NAV_ITEMS = [
     {"id": "translation_behavior", "label": "翻譯行為設定", "icon": ft.Icons.TRANSLATE},
     {"id": "prompts", "label": "提示詞管理", "icon": ft.Icons.MESSAGE},
     {"id": "species_lookup", "label": "學名查詢管理", "icon": ft.Icons.SEARCH},
-    {"id": "batch_limits", "label": "批次與限制", "icon": ft.Icons.BATCH},
+    {"id": "batch_limits", "label": "批次與限制", "icon": ft.Icons.DEVELOPER_BOARD},
 ]
 
 
