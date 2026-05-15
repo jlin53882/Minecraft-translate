@@ -3,18 +3,6 @@ from app.views import translation_view as tv
 from tests.conftest import mock_page, mock_filepicker
 
 
-class _FilePicker:
-    def __init__(self):
-        self.on_result = None
-        self._mock_path = None
-
-    async def get_directory_path(self, dialog_title: str = None):
-        return self._mock_path
-
-    def set_mock_path(self, path):
-        self._mock_path = path
-
-
 class _Session:
     def __init__(self):
         self.started = 0

@@ -1,39 +1,6 @@
 from app.views import lm_view
 from app.logging import LogEntry
-
-
-class _Page:
-    def __init__(self):
-        self.overlay = []
-        self.updated = 0
-        self._tasks = []
-
-    def update(self):
-        self.updated += 1
-
-    def run_task(self, coro, *args):
-        self._tasks.append((coro, args))
-
-    def _run_all_tasks(self):
-        for coro, args in self._tasks:
-            result = coro(*args)
-            if result is not None:
-                try:
-                    result.send(None)
-                except StopIteration:
-                    pass
-
-
-class _FilePicker:
-    def __init__(self):
-        self.on_result = None
-        self._mock_path = None
-
-    async def get_directory_path(self, dialog_title: str = None):
-        return self._mock_path
-
-    def set_mock_path(self, path):
-        self._mock_path = path
+from tests.conftest import mock_page, mock_filepicker
 
 
 class _Session:
@@ -50,7 +17,7 @@ class _Session:
 
 def test_lm_view_initializes_primary_controls(monkeypatch):
     monkeypatch.setattr(lm_view, 'TaskSession', _Session)
-    view = lm_view.LMView(_Page(), _FilePicker())
+    view = lm_view.LMView(mock_page(), mock_filepicker())
 
     assert view.start_button.content == '開始翻譯'
     assert view.status_chip.label.value == '尚未開始'
@@ -58,8 +25,8 @@ def test_lm_view_initializes_primary_controls(monkeypatch):
 
 def test_start_clicked_without_input_sets_error_status(monkeypatch):
     monkeypatch.setattr(lm_view, 'TaskSession', _Session)
-    page = _Page()
-    view = lm_view.LMView(page, _FilePicker())
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
 
     view.start_clicked(None)
 
@@ -67,7 +34,7 @@ def test_start_clicked_without_input_sets_error_status(monkeypatch):
 
 
 def test_start_clicked_launches_service_with_current_flags(monkeypatch):
-    page = _Page()
+    page = mock_page()
     calls = {}
     monkeypatch.setattr(lm_view, 'TaskSession', _Session)
     monkeypatch.setattr(lm_view.threading, 'Thread', lambda target=None, args=(), daemon=None: type('T', (), {'start': lambda self: target(*args)})())
@@ -85,7 +52,7 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
 
     monkeypatch.setattr(lm_view, 'run_lm_translation_service', fake_service)
 
-    view = lm_view.LMView(page, _FilePicker())
+    view = lm_view.LMView(page, mock_filepicker())
     view.input_path.value = 'C:/Assets'
     view.output_path.value = 'C:/Out'
     view.dry_run_switch.value = True
