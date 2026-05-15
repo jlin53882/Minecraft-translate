@@ -10,44 +10,7 @@ import flet as ft
 from unittest.mock import patch
 from app.views import lm_view
 from app.logging import LogEntry
-
-
-# ============================================================
-# Mock 基礎設施
-# ============================================================
-
-class _Page:
-    def __init__(self):
-        self.overlay = []
-        self.updated = 0
-        self._tasks = []
-
-    def update(self):
-        self.updated += 1
-
-    def run_task(self, coro, *args):
-        self._tasks.append((coro, args))
-
-    def _run_all_tasks(self):
-        for coro, args in self._tasks:
-            result = coro(*args)
-            if result is not None:
-                try:
-                    result.send(None)
-                except StopIteration:
-                    pass
-
-
-class _FilePicker:
-    def __init__(self):
-        self.on_result = None
-        self._mock_path = None
-
-    async def get_directory_path(self, dialog_title: str = None):
-        return self._mock_path
-
-    def set_mock_path(self, path):
-        self._mock_path = path
+from tests.conftest import mock_page, mock_filepicker
 
 
 class _Session:
@@ -92,8 +55,8 @@ class _Session:
 
 def make_view():
     """建立乾淨的 LMView + mock 基礎設施。"""
-    page = _Page()
-    fp = _FilePicker()
+    page = mock_page()
+    fp = mock_filepicker()
     # Mock TaskSession 避免啟動眻
     with patch.object(lm_view, "TaskSession", _Session):
         view = lm_view.LMView(page, fp)
@@ -107,7 +70,7 @@ def make_view():
 def test_lm_view_initializes_primary_controls(monkeypatch):
     """驗證 LMView 所有主要控制項都正確初始化。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    view = lm_view.LMView(_Page(), _FilePicker())
+    view = lm_view.LMView(mock_page(), mock_filepicker())
 
     # --- 路徑輸入 ---
     assert view.input_path.value == "", "input_path 初始為空"
@@ -130,7 +93,8 @@ def test_lm_view_initializes_primary_controls(monkeypatch):
     assert view.log_presenter is not None
 
     # --- File picker ---
-    assert isinstance(view.file_picker, _FilePicker)
+    assert hasattr(view.file_picker, 'get_directory_path')
+    assert hasattr(view.file_picker, 'set_mock_path')
 
 
 # ============================================================
@@ -140,8 +104,8 @@ def test_lm_view_initializes_primary_controls(monkeypatch):
 def test_start_clicked_without_input_sets_error_status(monkeypatch):
     """驗證未填輸入目錄時，回上錯誤狀態並跳過 service 呼叫。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    view = lm_view.LMView(page, _FilePicker())
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
 
     with patch.object(lm_view, "run_lm_translation_service") as svc:
         view.start_clicked(None)
@@ -158,7 +122,7 @@ def test_start_clicked_without_input_sets_error_status(monkeypatch):
 
 def test_start_clicked_launches_service_with_current_flags(monkeypatch):
     """驗證 start_clicked 把所有 UI flag 正確傳給 run_lm_translation_service。"""
-    page = _Page()
+    page = mock_page()
     captured = {}
 
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
@@ -179,7 +143,7 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
 
     monkeypatch.setattr(lm_view, "run_lm_translation_service", fake_service)
 
-    view = lm_view.LMView(page, _FilePicker())
+    view = lm_view.LMView(page, mock_filepicker())
     view.input_path.value = "C:/Assets"
     view.output_path.value = "C:/Out"
     view.dry_run_switch.value = True
@@ -202,8 +166,8 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
 def test_on_input_dir_picked_updates_input_field(monkeypatch):
     """驗證選擇輸入目錄後，正確更新 input_path。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    view = lm_view.LMView(page, _FilePicker())
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
 
     class FakeEvent:
         path = "D:/Game/assets"
@@ -221,8 +185,8 @@ def test_on_input_dir_picked_updates_input_field(monkeypatch):
 def test_on_output_dir_picked_updates_output_field(monkeypatch):
     """驗證選擇輸出目錄後，正確更新 output_path。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    view = lm_view.LMView(page, _FilePicker())
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
 
     class FakeEvent:
         path = "E:/Output"
@@ -240,8 +204,8 @@ def test_on_output_dir_picked_updates_output_field(monkeypatch):
 def test_async_pick_input_directory_updates_input_field(monkeypatch):
     """驗證 async 選擇輸入目錄後，正確更新 input_path。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     picker.set_mock_path("D:/Game/assets")
     view = lm_view.LMView(page, picker)
 
@@ -259,8 +223,8 @@ def test_async_pick_input_directory_updates_input_field(monkeypatch):
 def test_async_pick_output_directory_updates_output_field(monkeypatch):
     """驗證 async 選擇輸出目錄後，正確更新 output_path。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     picker.set_mock_path("E:/Output")
     view = lm_view.LMView(page, picker)
 
@@ -277,7 +241,7 @@ def test_async_pick_output_directory_updates_output_field(monkeypatch):
 
 def test_start_clicked_uses_default_output_dir_when_empty(monkeypatch):
     """驗證 output_path 為空時，service 收到預設 lm_translate_folder_name。"""
-    page = _Page()
+    page = mock_page()
     captured = {}
 
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
@@ -291,7 +255,7 @@ def test_start_clicked_uses_default_output_dir_when_empty(monkeypatch):
 
     monkeypatch.setattr(lm_view, "run_lm_translation_service", fake_service)
 
-    view = lm_view.LMView(page, _FilePicker())
+    view = lm_view.LMView(page, mock_filepicker())
     view.input_path.value = "C:/Assets"
     view.output_path.value = ""  # 留空
 
@@ -309,7 +273,7 @@ def test_start_clicked_uses_default_output_dir_when_empty(monkeypatch):
 def test_set_status_updates_chip_label_and_color(monkeypatch):
     """驗證 _set_status 正確更新 status_chip 的文字與背景色。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    view = lm_view.LMView(_Page(), _FilePicker())
+    view = lm_view.LMView(mock_page(), mock_filepicker())
 
     view._set_status("執行中", lm_view.theme.BLUE_200)
 
@@ -324,7 +288,7 @@ def test_set_status_updates_chip_label_and_color(monkeypatch):
 def test_controls_contains_all_sections(monkeypatch):
     """驗證 LMView.controls 包含 4 個 styled_card 區塊。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    view = lm_view.LMView(_Page(), _FilePicker())
+    view = lm_view.LMView(mock_page(), mock_filepicker())
 
     assert len(view.controls) == 4, "應有 4 個 styled_card 區塊"
 
@@ -340,7 +304,7 @@ def test_controls_contains_all_sections(monkeypatch):
 def test_log_presenter_initialized_with_tail_mode(monkeypatch):
     """驗證 LogPresenter 以 tail 模式正確初始化，tail_lines 為 250。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    view = lm_view.LMView(_Page(), _FilePicker())
+    view = lm_view.LMView(mock_page(), mock_filepicker())
 
     assert view.log_presenter is not None
     # tail mode 由 ui_cfg 決定，只驗證非 None
@@ -362,8 +326,8 @@ def test_folder_open_buttons_have_on_click(monkeypatch):
     → Column.controls[1] = 第二列路徑（output_path + icon_button）
     """
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    view = lm_view.LMView(page, _FilePicker())
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
 
     path_card = view.controls[0]
     # controls[2] = content_container (ft.Container wrapping the Column)
@@ -385,8 +349,8 @@ def test_folder_open_buttons_have_on_click(monkeypatch):
 def test_session_snapshot_returns_correct_structure(monkeypatch):
     """驗證 _Session.snapshot() 回傳正確結構（含 progress/logs/status）。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    view = lm_view.LMView(page, _FilePicker())
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
 
     session = _Session()
     session.start()
@@ -405,7 +369,7 @@ def test_session_snapshot_returns_correct_structure(monkeypatch):
 
 def test_start_clicked_resets_log_presenter(monkeypatch):
     """驗證開始新任務時會 reset presenter，避免沿用上一輪 log 狀態。"""
-    page = _Page()
+    page = mock_page()
     reset_calls = []
 
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
@@ -419,7 +383,7 @@ def test_start_clicked_resets_log_presenter(monkeypatch):
     def fake_reset():
         reset_calls.append(True)
 
-    view = lm_view.LMView(page, _FilePicker())
+    view = lm_view.LMView(page, mock_filepicker())
     monkeypatch.setattr(view.log_presenter, "reset", fake_reset)
     view.input_path.value = "C:/Assets"
 
@@ -431,14 +395,25 @@ def test_start_clicked_resets_log_presenter(monkeypatch):
 def test_start_ui_timer_stops_when_page_update_fails(monkeypatch):
     """驗證 page.update() 失敗時，LM UI timer 會安全停止，不再拋出背景執行緒例外。"""
 
-    class _FailingPage(_Page):
+    class _FailingPage:
+        def __init__(self):
+            self.overlay = []
+            self.updated = 0
+            self._tasks = []
+
         def update(self):
             raise RuntimeError("Event loop is closed")
+
+        def run_task(self, coro, *args):
+            self._tasks.append((coro, args))
+
+        def _run_all_tasks(self):
+            pass
 
     page = _FailingPage()
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
 
-    view = lm_view.LMView(page, _FilePicker())
+    view = lm_view.LMView(page, mock_filepicker())
     view.session = _Session()
     view.session.start()
     view.session.add_log("hello")
@@ -453,9 +428,9 @@ def test_start_ui_timer_stops_when_page_update_fails(monkeypatch):
 def test_start_ui_timer_attempts_log_view_update(monkeypatch):
     """驗證 timer 迴圈會嘗試刷新 log_view，避免日誌內容已 sync 但畫面未更新。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
+    page = mock_page()
 
-    view = lm_view.LMView(page, _FilePicker())
+    view = lm_view.LMView(page, mock_filepicker())
     view.session = _Session()
     view.session.start()
     view.session.add_log("hello")
@@ -477,8 +452,8 @@ def test_start_ui_timer_attempts_log_view_update(monkeypatch):
 def test_pick_input_directory_schedules_async_task(monkeypatch):
     """驗證 pick_input_directory 正確排程 _async_pick_input_directory"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     picker.set_mock_path("C:/Input")
     view = lm_view.LMView(page, picker)
 
@@ -498,8 +473,8 @@ def test_pick_input_directory_schedules_async_task(monkeypatch):
 def test_pick_output_directory_schedules_async_task(monkeypatch):
     """驗證 pick_output_directory 正確排程 _async_pick_output_directory"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     picker.set_mock_path("D:/Output")
     view = lm_view.LMView(page, picker)
 
@@ -519,8 +494,8 @@ def test_pick_output_directory_schedules_async_task(monkeypatch):
 def test_on_input_dir_picked_updates_field_and_calls_update(monkeypatch):
     """驗證 on_input_dir_picked 正確更新 input_path 並呼叫 page.update()"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    view = lm_view.LMView(page, _FilePicker())
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
 
     class FakeEvent:
         path = "F:/Assets"
@@ -538,8 +513,8 @@ def test_on_input_dir_picked_updates_field_and_calls_update(monkeypatch):
 def test_on_output_dir_picked_updates_field_and_calls_update(monkeypatch):
     """驗證 on_output_dir_picked 正確更新 output_path 並呼叫 page.update()"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    view = lm_view.LMView(page, _FilePicker())
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
 
     class FakeEvent:
         path = "G:/Out"
@@ -557,8 +532,8 @@ def test_on_output_dir_picked_updates_field_and_calls_update(monkeypatch):
 def test_show_snack_bar_adds_to_overlay(monkeypatch):
     """驗證 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    view = lm_view.LMView(page, _FilePicker())
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
 
     view._show_snack_bar("Test message", lm_view.theme.RED_600)
 
@@ -573,8 +548,8 @@ def test_show_snack_bar_adds_to_overlay(monkeypatch):
 def test_on_input_dir_picked_ignores_empty_path(monkeypatch):
     """驗證 on_input_dir_picked 忽略空路徑"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    view = lm_view.LMView(page, _FilePicker())
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
 
     class FakeEvent:
         path = ""
@@ -592,8 +567,8 @@ def test_on_input_dir_picked_ignores_empty_path(monkeypatch):
 def test_on_output_dir_picked_ignores_empty_path(monkeypatch):
     """驗證 on_output_dir_picked 忽略空路徑"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    page = _Page()
-    view = lm_view.LMView(page, _FilePicker())
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
 
     class FakeEvent:
         path = ""
@@ -607,27 +582,7 @@ def test_on_output_dir_picked_ignores_empty_path(monkeypatch):
 def test_lm_view_path_row_returns_control():
     from app.views import lm_view
 
-    class _Page:
-        def __init__(self):
-            self.overlay = []
-            self.updated = 0
-            self._tasks = []
-        def update(self):
-            self.updated += 1
-        def run_task(self, coro, *args):
-            self._tasks.append((coro, args))
-
-    class _Session:
-        def __init__(self):
-            pass
-
-    class _FilePicker:
-        def __init__(self):
-            pass
-        async def get_directory_path(self, dialog_title=None):
-            return None
-
-    view = lm_view.LMView(_Page(), _FilePicker())
+    view = lm_view.LMView(mock_page(), mock_filepicker())
     tf = lm_view.ft.TextField()
     result = view._path_row(tf, lambda e: None)
 

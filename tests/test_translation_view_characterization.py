@@ -1,28 +1,6 @@
 
 from app.views import translation_view as tv
-
-
-class _Page:
-    def __init__(self):
-        self.overlay = []
-        self.updated = 0
-        self.loop = None
-        self._tasks = []
-
-    def update(self):
-        self.updated += 1
-
-    def run_task(self, coro, *args):
-        self._tasks.append((coro, args))
-
-    def _run_all_tasks(self):
-        for coro, args in self._tasks:
-            result = coro(*args)
-            if result is not None:
-                try:
-                    result.send(None)
-                except StopIteration:
-                    pass
+from tests.conftest import mock_page, mock_filepicker
 
 
 class _FilePicker:
@@ -47,8 +25,8 @@ class _Session:
 
 def test_translation_view_builds_three_tabs_and_shared_status_panel(monkeypatch):
     monkeypatch.setattr(tv, 'TaskSession', _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
 
     view = tv.TranslationView(page, picker)
 
@@ -65,8 +43,8 @@ def test_translation_view_builds_three_tabs_and_shared_status_panel(monkeypatch)
 
 
 def test_run_ftb_dry_run_calls_service_with_current_flags(monkeypatch):
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     calls = {}
 
     monkeypatch.setattr(tv, 'TaskSession', _Session)
@@ -101,8 +79,8 @@ def test_run_ftb_dry_run_calls_service_with_current_flags(monkeypatch):
 
 def test_reset_md_inputs_restores_defaults_and_appends_log(monkeypatch):
     monkeypatch.setattr(tv, 'TaskSession', _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
 
     view.md_in_dir.value = 'X'
@@ -128,8 +106,8 @@ def test_reset_md_inputs_restores_defaults_and_appends_log(monkeypatch):
 def test_reset_kjs_inputs_restores_defaults_and_appends_log(monkeypatch):
     """驗證 KubeJS 輸入重置行為"""
     monkeypatch.setattr(tv, 'TaskSession', _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
 
     view.kjs_in_dir.value = 'X'
@@ -151,8 +129,8 @@ def test_reset_kjs_inputs_restores_defaults_and_appends_log(monkeypatch):
 
 def test_run_kjs_calls_run_kjs_service(monkeypatch):
     """驗證 _run_kjs 正確呼叫 run_kjs"""
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     calls = {}
 
     monkeypatch.setattr(tv, 'TaskSession', _Session)
@@ -184,8 +162,8 @@ def test_run_kjs_calls_run_kjs_service(monkeypatch):
 
 def test_run_md_calls_run_md_service(monkeypatch):
     """驗證 _run_md 正確呼叫 run_md"""
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     calls = {}
 
     monkeypatch.setattr(tv, 'TaskSession', _Session)
@@ -216,8 +194,8 @@ def test_run_md_calls_run_md_service(monkeypatch):
 
 def test_run_ftb_calls_run_ftb_service(monkeypatch):
     """驗證 _run_ftb 正確呼叫 run_ftb"""
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     calls = {}
 
     monkeypatch.setattr(tv, 'TaskSession', _Session)
@@ -248,8 +226,8 @@ def test_run_ftb_calls_run_ftb_service(monkeypatch):
 
 def test_pick_directory_into_without_page_update_when_no_result(monkeypatch):
     """驗證 _pick_directory_into 在取消選擇時不更新"""
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     picker._mock_path = None
     view = tv.TranslationView(page, picker)
 
@@ -265,8 +243,8 @@ def test_pick_directory_into_without_page_update_when_no_result(monkeypatch):
 def test_reset_ftb_inputs_restores_defaults(monkeypatch):
     """驗證 FTB 輸入重置行為"""
     monkeypatch.setattr(tv, 'TaskSession', _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
 
     view.ftb_in_dir.value = 'X'
@@ -292,8 +270,8 @@ def test_reset_ftb_inputs_restores_defaults(monkeypatch):
 def test_clear_logs_removes_all_controls(monkeypatch):
     """驗證 _clear_logs 正確清除所有日誌"""
     monkeypatch.setattr(tv, 'TaskSession', _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
 
     view._append_log('line1')
@@ -308,8 +286,8 @@ def test_clear_logs_removes_all_controls(monkeypatch):
 def test_append_log_trims_to_max_400_lines(monkeypatch):
     """驗證 _append_log 不會无限增长"""
     monkeypatch.setattr(tv, 'TaskSession', _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
 
     for i in range(450):
@@ -321,8 +299,8 @@ def test_append_log_trims_to_max_400_lines(monkeypatch):
 def test_set_status_updates_chip_label_and_color(monkeypatch):
     """驗證 _set_status 更新 status_chip 的文字與背景顏色"""
     monkeypatch.setattr(tv, 'TaskSession', _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
 
     view._set_status('工作中', '#FF0000')
@@ -334,8 +312,8 @@ def test_set_status_updates_chip_label_and_color(monkeypatch):
 def test_pick_directory_into_sets_target_field(monkeypatch):
     """驗證 _pick_directory_into 正確設定目標欄位"""
     monkeypatch.setattr(tv, 'TaskSession', _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     picker.set_mock_path('/test/path')
     view = tv.TranslationView(page, picker)
 
@@ -350,8 +328,8 @@ def test_pick_directory_into_sets_target_field(monkeypatch):
 def test_show_snack_adds_to_page_overlay(monkeypatch):
     """驗證 _show_snack 正確將 SnackBar 加入 page.overlay"""
     monkeypatch.setattr(tv, 'TaskSession', _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
 
     view._show_snack('Test message', '#00FF00')
@@ -363,8 +341,8 @@ def test_show_snack_adds_to_page_overlay(monkeypatch):
 def test_kjs_controls_accessible_and_resettable(monkeypatch):
     """驗證 KJS 所有控件可存取且 Reset 正確"""
     monkeypatch.setattr(tv, 'TaskSession', _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
 
     assert hasattr(view, 'kjs_in_dir')
@@ -393,8 +371,8 @@ def test_kjs_controls_accessible_and_resettable(monkeypatch):
 
 def test_run_kjs_calls_run_kjs_service(monkeypatch):
     """驗證 _run_kjs 正確呼叫 run_kjs"""
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     calls = {}
 
     monkeypatch.setattr(tv, 'TaskSession', _Session)
@@ -426,8 +404,8 @@ def test_run_kjs_calls_run_kjs_service(monkeypatch):
 
 def test_run_md_calls_run_md_service(monkeypatch):
     """驗證 _run_md 正確呼叫 run_md"""
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     calls = {}
 
     monkeypatch.setattr(tv, 'TaskSession', _Session)
@@ -458,8 +436,8 @@ def test_run_md_calls_run_md_service(monkeypatch):
 
 def test_run_ftb_calls_run_ftb_service(monkeypatch):
     """驗證 _run_ftb 正確呼叫 run_ftb"""
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     calls = {}
 
     monkeypatch.setattr(tv, 'TaskSession', _Session)
@@ -490,8 +468,8 @@ def test_run_ftb_calls_run_ftb_service(monkeypatch):
 
 def test_pick_directory_into_without_page_update_when_no_result(monkeypatch):
     """驗證 _pick_directory_into 在取消選擇時不更新"""
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     picker._mock_path = None
     view = tv.TranslationView(page, picker)
 
@@ -504,44 +482,44 @@ def test_pick_directory_into_without_page_update_when_no_result(monkeypatch):
 
 
 def test_translation_view_show_snack_adds_to_overlay():
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
     view._show_snack('Test error', '#FF0000')
     assert len(page.overlay) >= 1
 
 
 def test_translation_view_path_row_exists():
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
     assert view._path_row is not None
 
 
 def test_translation_view_action_row_exists():
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
     assert view._action_row is not None
 
 
 def test_translation_view_async_pick_directory_into_exists():
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
     assert hasattr(view, '_async_pick_directory_into')
     assert callable(view._async_pick_directory_into)
 
 
 def test_translation_view_status_chip_exists():
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
     assert view.status_chip is not None
 
 
 def test_translation_view_progress_exists():
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
     assert view.progress is not None

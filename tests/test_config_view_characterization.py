@@ -1,29 +1,7 @@
 import pytest
 import flet as ft
 from app.views.config_view import ConfigView
-
-
-class _Page:
-    def __init__(self):
-        self.overlay = []
-        self.updated = 0
-        self.loop = None
-        self._tasks = []
-
-    def update(self):
-        self.updated += 1
-
-    def run_task(self, coro, *args):
-        self._tasks.append((coro, args))
-
-    def _run_all_tasks(self):
-        for coro, args in self._tasks:
-            result = coro(*args)
-            if result is not None:
-                try:
-                    result.send(None)
-                except StopIteration:
-                    pass
+from tests.conftest import mock_page
 
 
 @pytest.fixture
@@ -34,7 +12,7 @@ def cv():
 
 @pytest.fixture
 def page():
-    return _Page()
+    return mock_page()
 
 
 @pytest.fixture
@@ -70,7 +48,7 @@ def test_config_view_loads_models_and_keys_from_config(monkeypatch):
     }
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: cfg)
 
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
 
     assert len(view.models_column.controls) == 2
     assert [tf.value for tf in view.key_fields] == ['k1', 'k2']
@@ -78,7 +56,7 @@ def test_config_view_loads_models_and_keys_from_config(monkeypatch):
 
 def test_config_view_add_and_remove_model_row(monkeypatch):
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
     start = len(view.models_column.controls)
 
     view.add_model_row('demo-model')
@@ -94,7 +72,7 @@ def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
     monkeypatch.setattr('app.views.config_view.save_config_json', lambda cfg: saved.update(cfg))
     monkeypatch.setattr('app.views.config_view.validate_api_keys_from_ui', lambda keys: None)
 
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
     view.controls_map['logging.log_level'].value = 'INFO'
     view.controls_map['logging.log_dir'].value = 'logs'
     view.controls_map['translator.output_dir_name'].value = 'out'
@@ -139,7 +117,7 @@ def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
 def test_config_view_show_snack_bar_adds_to_overlay(monkeypatch):
     """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
-    page = _Page()
+    page = mock_page()
     view = ConfigView(page)
 
     view._show_snack_bar('Test error', '#FF0000')
@@ -151,7 +129,7 @@ def test_config_view_show_snack_bar_adds_to_overlay(monkeypatch):
 def test_config_view_init_controls_builds_ui(monkeypatch):
     """測試 _init_controls 構建所有 UI 控制項"""
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
 
     assert view.footer is not None
     assert view.models_column is not None
@@ -161,7 +139,7 @@ def test_config_view_init_controls_builds_ui(monkeypatch):
 
 def test_config_view_controls_map_exists(monkeypatch):
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
 
     assert hasattr(view, 'controls_map')
     assert view.controls_map is not None
@@ -169,13 +147,13 @@ def test_config_view_controls_map_exists(monkeypatch):
 
 def test_config_view_move_model_row(monkeypatch):
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
     view.move_model_row(0, 1)
 
 
 def test_config_view_add_and_remove_model_row_integration(monkeypatch):
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
     start = len(view.models_column.controls)
 
     view.add_model_row('test-model')
@@ -189,14 +167,14 @@ def test_config_view_add_and_remove_model_row_integration(monkeypatch):
 def test_config_view_load_config_updates_controls_map(monkeypatch):
     cfg = {'logging': {'log_level': 'INFO'}}
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: cfg)
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
 
     assert 'logging.log_level' in view.controls_map
 
 
 def test_config_view_on_add_model_clicked(monkeypatch):
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
     view.new_model_field = type('F', (), {'value': 'new_model'})()
     start = len(view.models_column.controls)
 
@@ -207,7 +185,7 @@ def test_config_view_on_add_model_clicked(monkeypatch):
 
 def test_config_view_success_color(monkeypatch):
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
 
     color = view._success_color()
     assert color is not None
@@ -215,7 +193,7 @@ def test_config_view_success_color(monkeypatch):
 
 def test_config_view_build_key_field(monkeypatch):
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
 
     field = view._build_key_field('test_key')
     assert field is not None
@@ -223,21 +201,21 @@ def test_config_view_build_key_field(monkeypatch):
 
 def test_config_view_build_header(monkeypatch):
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
     header = view._build_header()
     assert header is not None
 
 
 def test_config_view_build_footer(monkeypatch):
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
     footer = view._build_footer()
     assert footer is not None
 
 
 def test_config_view_build_card(monkeypatch):
     monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
-    view = ConfigView(_Page())
+    view = ConfigView(mock_page())
     card = view._build_card('Test', [])
     assert card is not None
 

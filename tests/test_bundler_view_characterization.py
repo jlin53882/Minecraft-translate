@@ -1,51 +1,10 @@
+import pytest
 from app.views.bundler_view import BundlerView
-
-
-class _Page:
-    def __init__(self):
-        self.overlay = []
-        self.updated = 0
-        self._tasks = []
-
-    def update(self):
-        self.updated += 1
-
-    def run_task(self, coro, *args):
-        self._tasks.append((coro, args))
-
-    def _run_all_tasks(self):
-        for coro, args in self._tasks:
-            result = coro(*args)
-            if result is not None:
-                try:
-                    result.send(None)
-                except StopIteration:
-                    pass
-
-
-class _FilePicker:
-    def __init__(self):
-        self._callback = None
-        self._mock_path = None
-
-    def on_upload(self, callback):
-        self._callback = callback
-
-    async def get_directory_path(self, dialog_title: str = None):
-        return self._mock_path
-
-    async def pick_files(self, dialog_title: str = None, allowed_extensions: list = None):
-        return [type('obj', (object,), {'path': self._mock_path})()] if self._mock_path else []
-
-    async def save_file(self, dialog_title: str = None, allowed_extensions: list = None, file_name: str = None):
-        return self._mock_path
-
-    def set_mock_path(self, path):
-        self._mock_path = path
+from tests.conftest import mock_page, mock_filepicker
 
 
 def test_bundler_view_initializes_core_controls():
-    view = BundlerView(_Page(), _FilePicker())
+    view = BundlerView(mock_page(), mock_filepicker())
 
     assert view.progress_bar.visible is False
     assert hasattr(view, "version_search")
@@ -58,23 +17,23 @@ def test_bundler_view_initializes_core_controls():
 
 
 def test_bundler_view_loads_version_data():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
 
     assert isinstance(view.version_data, dict)
 
 
 def test_bundler_view_extra_folders_list_initialized():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
 
     assert view.extra_folders == []
     assert len(view.extra_folders_view.controls) == 0
 
 
 def test_bundler_view_version_list():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
 
     assert hasattr(view, "version_search")
     assert hasattr(view, "version_list")
@@ -82,8 +41,8 @@ def test_bundler_view_version_list():
 
 
 def test_bundler_view_version_list():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
 
     assert hasattr(view, "version_list")
     assert hasattr(view, "version_expanded")
@@ -91,8 +50,8 @@ def test_bundler_view_version_list():
 
 
 def test_version_toggle_expand():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
 
     assert view.version_expanded is False
     view._toggle_version_expand(None)
@@ -102,8 +61,8 @@ def test_version_toggle_expand():
 
 
 def test_version_select():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
 
     view._select_version("1.20.1")
     assert view.version_search.value == "1.20.1"
@@ -111,8 +70,8 @@ def test_version_select():
 
 
 def test_bundler_view_hint_texts():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
 
     assert view.version_search.hint_text == "輸入版本關鍵字..."
     assert view.description_field.hint_text == "直接輸入文字，或使用 § 顏色代碼"
@@ -122,8 +81,8 @@ def test_bundler_view_hint_texts():
 
 
 def test_start_bundling_without_required_paths_shows_error():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
 
     view.start_bundling_clicked(None)
 
@@ -132,8 +91,8 @@ def test_start_bundling_without_required_paths_shows_error():
 
 
 def test_start_bundling_without_output_zip_shows_error():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     view.root_dir_field.value = "C:/test"
 
     view.start_bundling_clicked(None)
@@ -143,8 +102,8 @@ def test_start_bundling_without_output_zip_shows_error():
 
 
 def test_start_bundling_without_root_dir_shows_error():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     view.output_zip_field.value = "C:/output.zip"
 
     view.start_bundling_clicked(None)
@@ -154,8 +113,8 @@ def test_start_bundling_without_root_dir_shows_error():
 
 
 def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
     def mock_generator(**kwargs):
@@ -175,8 +134,8 @@ def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
 
 
 def test_bundling_worker_with_version_info(monkeypatch):
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     view.version_data = {"1.20.1": {"min_format": 15, "max_format": 15}}
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
@@ -201,8 +160,8 @@ def test_bundling_worker_with_version_info(monkeypatch):
 
 
 def test_bundling_worker_passes_extra_folders(monkeypatch):
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     view.extra_folders = ["C:/extra1", "C:/extra2"]
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
@@ -223,8 +182,8 @@ def test_bundling_worker_passes_extra_folders(monkeypatch):
 
 
 def test_bundling_worker_passes_pack_image(monkeypatch):
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
     captured_kwargs = {}
@@ -244,8 +203,8 @@ def test_bundling_worker_passes_pack_image(monkeypatch):
 
 
 def test_bundling_worker_empty_pack_image(monkeypatch):
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     view.pack_image_field.value = ""
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
@@ -266,8 +225,8 @@ def test_bundling_worker_empty_pack_image(monkeypatch):
 
 
 def test_remove_extra_folder(monkeypatch):
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     view.extra_folders = ["C:/folder1", "C:/folder2"]
     monkeypatch.setattr(view, "_refresh_extra_folders", lambda: None)
     monkeypatch.setattr(view, "update", lambda: None)
@@ -280,15 +239,15 @@ def test_remove_extra_folder(monkeypatch):
 
 
 def test_extra_folders_list_initially_empty():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     assert view.extra_folders == []
     assert len(view.extra_folders_view.controls) == 0
 
 
 def test_show_snack_bar_adds_to_overlay(monkeypatch):
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
 
     view._show_snack_bar("Test message")
 
@@ -297,8 +256,8 @@ def test_show_snack_bar_adds_to_overlay(monkeypatch):
 
 
 def test_bundling_worker_with_error(monkeypatch):
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
     def mock_generator(**kwargs):
@@ -317,8 +276,8 @@ def test_bundling_worker_with_error(monkeypatch):
 
 def test_bundler_view_show_snack_bar_adds_to_overlay():
     """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
 
     view._show_snack_bar('Test error', '#FF0000')
 
@@ -328,39 +287,39 @@ def test_bundler_view_show_snack_bar_adds_to_overlay():
 
 def test_bundler_view_append_log_adds_control():
     """測試 _append_log 正確將日誌行加入 log_view"""
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
 
     view._append_log('test log entry')
 
     assert len(view.log_view.controls) >= 1
 
 def test_bundler_view_version_list_exists():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     assert view.version_list is not None
 
 
 def test_bundler_view_version_search_exists():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     assert view.version_search is not None
 
 
 def test_bundler_view_version_data_exists():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     assert view.version_data is not None
 
 
 def test_bundler_view_pick_pack_image():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     assert hasattr(view, '_pick_pack_image')
 
 
 def test_bundler_view_extra_folders_list():
-    page = _Page()
-    view = BundlerView(page, _FilePicker())
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
     assert view.extra_folders is not None
     assert isinstance(view.extra_folders, list)

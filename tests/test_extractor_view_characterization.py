@@ -1,6 +1,7 @@
 
 import flet as ft
 from app.views.extractor_view import ExtractorView
+from tests.conftest import mock_page, mock_filepicker
 
 
 class _Session:
@@ -9,57 +10,17 @@ class _Session:
         self._progress = 0
         self._logs = []
         self._error = False
+
     def start(self):
         self._status = 'RUNNING'
+
     def snapshot(self):
         return {'status': self._status, 'progress': self._progress, 'logs': self._logs, 'error': self._error}
 
 
-class _Page:
-    def __init__(self):
-        self.overlay = []
-        self.dialog = None
-        self.updated = 0
-        self._tasks = []
-
-    def update(self):
-        self.updated += 1
-
-    def open(self, dialog):
-        self.overlay.append(dialog)
-        dialog.open = True
-
-    def close(self, dialog):
-        dialog.open = False
-
-    def run_task(self, coro, *args):
-        self._tasks.append((coro, args))
-
-    def _run_all_tasks(self):
-        for coro, args in self._tasks:
-            result = coro(*args)
-            if result is not None:
-                try:
-                    result.send(None)
-                except StopIteration:
-                    pass
-
-
-class _FilePicker:
-    def __init__(self):
-        self.on_result = None
-        self._mock_path = None
-
-    async def get_directory_path(self, dialog_title: str = None):
-        return self._mock_path
-
-    def set_mock_path(self, path):
-        self._mock_path = path
-
-
 def test_extractor_view_has_preview_and_extract_buttons(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
 
     assert view.lang_button.content == '提取 Lang'
     assert view.book_button.content == '提取 Book'
@@ -69,7 +30,7 @@ def test_extractor_view_has_preview_and_extract_buttons(monkeypatch):
 
 def test_clear_output_path_appends_system_log(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
     view.output_dir_textfield.value = 'C:/Out'
 
     view.clear_output_path()
@@ -80,7 +41,7 @@ def test_clear_output_path_appends_system_log(monkeypatch):
 
 def test_update_stats_from_log_counts_success_warning_failure(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
 
     view._update_stats_from_log('成功提取 3 個新檔案')
     view._update_stats_from_log('跳過已存在檔案')
@@ -95,7 +56,7 @@ def test_update_stats_from_log_counts_success_warning_failure(monkeypatch):
 def test_extractor_view_mods_dir_textfield_exists(monkeypatch):
     """測試 mods_dir_textfield 存在且可設定"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
 
     view.mods_dir_textfield.value = 'C:/Mods'
     assert view.mods_dir_textfield.value == 'C:/Mods'
@@ -105,7 +66,7 @@ def test_extractor_view_mods_dir_textfield_exists(monkeypatch):
 def test_extractor_view_status_text_and_progress_bar(monkeypatch):
     """測試 status_text 和 progress_bar 存在"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
 
     assert view.status_text.value == '狀態：閒置'
     assert isinstance(view.progress_bar, ft.ProgressBar)
@@ -116,7 +77,7 @@ def test_extractor_view_status_text_and_progress_bar(monkeypatch):
 def test_extractor_view_output_dir_textfield_exists(monkeypatch):
     """測試 output_dir_textfield 存在"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
 
     view.output_dir_textfield.value = 'C:/Out'
     assert view.output_dir_textfield.value == 'C:/Out'
@@ -126,7 +87,7 @@ def test_extractor_view_output_dir_textfield_exists(monkeypatch):
 def test_extractor_view_log_view_exists(monkeypatch):
     """測試 log_view 存在且為 ListView"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
 
     assert isinstance(view.log_view, ft.ListView)
     assert view.log_view.auto_scroll is True
@@ -135,7 +96,7 @@ def test_extractor_view_log_view_exists(monkeypatch):
 def test_extractor_view_all_buttons_have_on_click(monkeypatch):
     """測試所有按鈕都有 on_click 回調"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
 
     assert view.lang_button.on_click is not None
     assert view.book_button.on_click is not None
@@ -146,7 +107,7 @@ def test_extractor_view_all_buttons_have_on_click(monkeypatch):
 def test_extractor_view_update_stats_resets_counters(monkeypatch):
     """測試 _update_stats_from_log 的計數邏輯"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
 
     view._extraction_stats = {"success": 0, "warnings": 0, "failures": 0, "total_files": 0}
 
@@ -164,8 +125,8 @@ def test_extractor_view_update_stats_resets_counters(monkeypatch):
 def test_extractor_view_pick_directory_schedules_async_task(monkeypatch):
     """測試 pick_directory 正確排程 async task"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    page = _Page()
-    picker = _FilePicker()
+    page = mock_page()
+    picker = mock_filepicker()
     picker.set_mock_path('/test/dir')
     view = ExtractorView(page, picker)
 
@@ -182,8 +143,8 @@ def test_extractor_view_pick_directory_schedules_async_task(monkeypatch):
 def test_extractor_view_show_snack_bar_adds_to_overlay(monkeypatch):
     """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    page = _Page()
-    view = ExtractorView(page, _FilePicker())
+    page = mock_page()
+    view = ExtractorView(page, mock_filepicker())
 
     view._show_snack_bar('Test error', '#FF0000')
 
@@ -193,7 +154,7 @@ def test_extractor_view_show_snack_bar_adds_to_overlay(monkeypatch):
 def test_extractor_view_append_log_line_adds_control(monkeypatch):
     """測試 _append_log_line 將日誌行加入 log_view"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
 
     view._append_log_line('Test log entry')
 
@@ -203,7 +164,7 @@ def test_extractor_view_append_log_line_adds_control(monkeypatch):
 def test_extractor_view_set_controls_disabled_toggles_inputs(monkeypatch):
     """測試 set_controls_disabled 正確切換輸入控制項狀態"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
 
     view.set_controls_disabled(True)
 
@@ -220,8 +181,8 @@ def test_extractor_view_set_controls_disabled_toggles_inputs(monkeypatch):
 def test_extractor_view_start_extraction_requires_mods_dir(monkeypatch):
     """測試 start_extraction 需要填寫 mods 目錄"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    page = _Page()
-    view = ExtractorView(page, _FilePicker())
+    page = mock_page()
+    view = ExtractorView(page, mock_filepicker())
     view.output_dir_textfield.value = 'C:/Out'
 
     view.start_extraction('lang')
@@ -232,8 +193,8 @@ def test_extractor_view_start_extraction_requires_mods_dir(monkeypatch):
 def test_extractor_view_start_extraction_requires_output_dir(monkeypatch):
     """測試 start_extraction 需要填寫輸出目錄"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    page = _Page()
-    view = ExtractorView(page, _FilePicker())
+    page = mock_page()
+    view = ExtractorView(page, mock_filepicker())
     view.mods_dir_textfield.value = 'C:/Mods'
 
     view.start_extraction('lang')
@@ -243,29 +204,29 @@ def test_extractor_view_start_extraction_requires_output_dir(monkeypatch):
 
 def test_extractor_view_build_settings_card(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
     assert hasattr(view, '_build_settings_card')
 
 
 def test_extractor_view_build_logs_card(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
     assert hasattr(view, '_build_logs_card')
 
 
 def test_extractor_view_pick_button_exists(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
     assert hasattr(view, '_pick_button')
 
 
 def test_extractor_view_start_ui_poller_exists(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
     assert hasattr(view, '_start_ui_poller')
 
 
 def test_extractor_view_show_extraction_summary_exists(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(_Page(), _FilePicker())
+    view = ExtractorView(mock_page(), mock_filepicker())
     assert hasattr(view, '_show_extraction_summary')
