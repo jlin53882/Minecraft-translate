@@ -2,32 +2,11 @@ import tempfile
 from pathlib import Path
 import flet as ft
 from app.views.icon_preview_view import IconPreviewView
-
-
-class _Page:
-    def __init__(self):
-        self.overlay = []
-        self.updated = 0
-        self._tasks = []
-
-    def update(self, *args, **kwargs):
-        self.updated += 1
-
-    def run_task(self, coro, *args):
-        self._tasks.append((coro, args))
-
-    def _run_all_tasks(self):
-        for coro, args in self._tasks:
-            result = coro(*args)
-            if result is not None:
-                try:
-                    result.send(None)
-                except StopIteration:
-                    pass
+from tests.conftest import mock_page
 
 
 def test_icon_preview_view_initializes_core_sections():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
 
     assert view.page_size == 50
     assert view.current_page == 0
@@ -36,7 +15,7 @@ def test_icon_preview_view_initializes_core_sections():
 
 
 def test_render_current_page_uses_current_page_size():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     view.current_modid = 'demo'
     view.mods = {
         'demo': [
@@ -54,7 +33,7 @@ def test_render_current_page_uses_current_page_size():
 
 
 def test_save_current_zh_writes_modified_json():
-    page = _Page()
+    page = mock_page()
     view = IconPreviewView(page)
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -70,7 +49,7 @@ def test_save_current_zh_writes_modified_json():
 
 def test_icon_preview_view_all_controls_exist():
     """測試 IconPreviewView 所有 UI 控件存在"""
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
 
     assert view.header.value == '🧩 JAR 圖示預覽'
     assert isinstance(view.header, ft.Text)
@@ -125,7 +104,7 @@ def test_icon_preview_view_all_controls_exist():
 
 def test_icon_preview_view_show_snack_adds_to_overlay():
     """測試 _show_snack 正確將 SnackBar 加入 page.overlay"""
-    page = _Page()
+    page = mock_page()
     view = IconPreviewView(page)
 
     view._show_snack('Test error', '#FF0000')
@@ -135,7 +114,7 @@ def test_icon_preview_view_show_snack_adds_to_overlay():
 
 def test_icon_preview_view_page_controls_exist():
     """測試分頁控制項存在"""
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
 
     assert view.prev_page_btn is not None
     assert view.next_page_btn is not None
@@ -144,14 +123,14 @@ def test_icon_preview_view_page_controls_exist():
 
 def test_icon_preview_view_page_size_selector():
     """測試 page_size_selector 存在"""
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
 
     assert view.page_size_selector is not None
     assert view.page_size_selector.value == '50'
 
 
 def test_icon_preview_view_update_page_bar_for_mods():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     view.current_page = 1
     view.total_pages = 5
     view.mods = {'a': [1,2,3], 'b': [4,5,6]}
@@ -162,7 +141,7 @@ def test_icon_preview_view_update_page_bar_for_mods():
 
 
 def test_icon_preview_view_on_pick_source(monkeypatch):
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
 
     class E:
         path = '/test/source'
@@ -174,7 +153,7 @@ def test_icon_preview_view_on_pick_source(monkeypatch):
 
 
 def test_icon_preview_view_on_pick_review(monkeypatch):
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
 
     class E:
         path = '/test/review'
@@ -185,7 +164,7 @@ def test_icon_preview_view_on_pick_review(monkeypatch):
 
 
 def test_icon_preview_view_load_entries_method():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     view.source_root = 'test'
 
     class E:
@@ -198,7 +177,7 @@ def test_icon_preview_view_load_entries_method():
 
 
 def test_icon_preview_view_cancel_mod_search_debounce():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     view._mod_search_timer = type('T', (), {'cancel': lambda self: None})()
 
     view._cancel_mod_search_debounce()
@@ -207,112 +186,112 @@ def test_icon_preview_view_cancel_mod_search_debounce():
 
 
 def test_icon_preview_view_progress_bar_exists():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
 
     assert view.progress_bar is not None
     assert view.progress_text is not None
 
 
 def test_icon_preview_view_load_btn_disabled_initially():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
 
     assert view.load_btn.disabled is True
 
 
 def test_icon_preview_view_source_label_initially():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
 
     assert '尚未選擇' in view.source_label.value
 
 
 def test_icon_preview_view_review_label_initially():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
 
     assert '尚未選擇' in view.review_label.value
 
 
 def test_icon_preview_view_mod_search_tf_exists():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
 
     assert view.mod_search_tf is not None
     assert view.mod_search_tf.label == '搜尋模組'
 
 
 def test_icon_preview_view_save_btn_initially_hidden():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
 
     assert view.save_btn.visible is False
 
 
 def test_icon_preview_view_mod_search_tf_on_change():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert view.mod_search_tf.on_change is not None
 
 
 def test_icon_preview_view_page_size_selector_on_change():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert view.page_size_selector.on_change is not None
 
 
 def test_icon_preview_view_mod_search_status_exists():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert view.mod_search_status is not None
 
 
 def test_icon_preview_view_back_btn_on_click():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert view.back_btn.on_click is not None
 
 
 def test_icon_preview_view_load_btn_on_click():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert view.load_btn.on_click is not None
 
 
 def test_icon_preview_view_source_picker_exists():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert view.source_picker is not None
 
 
 def test_icon_preview_view_review_picker_exists():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert view.review_picker is not None
 
 
 def test_icon_preview_view_current_page_init():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert view.current_page == 0
 
 
 def test_icon_preview_view_total_pages_init():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert view.total_pages == 0
 
 
 def test_icon_preview_view_mods_init():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert view.mods is not None
 
 
 def test_icon_preview_view_detect_source_mode():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert hasattr(view, '_detect_source_mode')
     assert callable(view._detect_source_mode)
 
 
 def test_icon_preview_view_load_entries_from_jar_directory():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert hasattr(view, '_load_entries_from_jar_directory')
     assert callable(view._load_entries_from_jar_directory)
 
 
 def test_icon_preview_view_on_value_changed():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert hasattr(view, '_on_value_changed')
     assert callable(view._on_value_changed)
 
 
 def test_icon_preview_view_cancel_detail_search_debounce():
-    view = IconPreviewView(_Page())
+    view = IconPreviewView(mock_page())
     assert hasattr(view, '_cancel_detail_search_debounce')
     assert callable(view._cancel_detail_search_debounce)

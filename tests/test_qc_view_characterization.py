@@ -8,44 +8,7 @@ from app.views.qc_view import QCView
 from app.views.untranslated_checker import UntranslatedChecker
 from app.views.qc_base import QCBase
 import flet as ft
-
-
-class _Page:
-    def __init__(self):
-        self.overlay = []
-        self.updated = 0
-        self.dialog = None
-        self._tasks = []
-
-    def update(self):
-        self.updated += 1
-
-    def run_task(self, coro, *args):
-        self._tasks.append((coro, args))
-
-    def _run_all_tasks(self):
-        for coro, args in self._tasks:
-            result = coro(*args)
-            if result is not None:
-                try:
-                    result.send(None)
-                except StopIteration:
-                    pass
-
-
-class _FilePicker:
-    def __init__(self):
-        self.on_result = None
-        self._mock_path = None
-
-    async def get_directory_path(self, dialog_title: str = None):
-        return self._mock_path
-
-    async def pick_files(self, dialog_title: str = None):
-        return [type('obj', (object,), {'path': self._mock_path})()] if self._mock_path else []
-
-    def set_mock_path(self, path):
-        self._mock_path = path
+from tests.conftest import mock_page, mock_filepicker
 
 
 class _ProgressBar:
@@ -66,7 +29,7 @@ class _ListView:
 
 def test_qc_view_initializes_three_cards_and_shared_log_area():
     """測試 QCView 初始化三個卡片與共用日誌區域"""
-    view = QCView(_Page(), _FilePicker())
+    view = QCView(mock_page(), mock_filepicker())
 
     # 檢查新拆分的 UntranslatedChecker 元件
     assert isinstance(view.untranslated_checker, UntranslatedChecker)
@@ -88,7 +51,7 @@ def test_qc_view_initializes_three_cards_and_shared_log_area():
 
 def test_set_controls_disabled_toggles_json_and_tsv_inputs():
     """測試 set_controls_disabled 只影響 JSON 和 TSV 輸入（不含 UntranslatedChecker）"""
-    view = QCView(_Page(), _FilePicker())
+    view = QCView(mock_page(), mock_filepicker())
 
     view.set_controls_disabled(True)
 
@@ -109,8 +72,8 @@ def test_set_controls_disabled_toggles_json_and_tsv_inputs():
 
 def test_start_task_untranslated_requires_all_paths():
     """測試未翻譯檢查需要填寫所有路徑"""
-    page = _Page()
-    view = QCView(page, _FilePicker())
+    page = mock_page()
+    view = QCView(page, mock_filepicker())
 
     # 嘗試啟動任務但路徑為空
     view.start_task("untranslated")
@@ -122,8 +85,8 @@ def test_start_task_untranslated_requires_all_paths():
 
 def test_task_runner_task_worker_exists_and_callable():
     """測試 task_runner.task_worker 方法存在且可呼叫"""
-    page = _Page()
-    view = QCView(page, _FilePicker())
+    page = mock_page()
+    view = QCView(page, mock_filepicker())
 
     # 確認 task_runner.task_worker 方法存在
     assert hasattr(view.task_runner, "task_worker")
@@ -144,8 +107,8 @@ def test_task_runner_task_worker_exists_and_callable():
 
 def test_untranslated_checker_uses_task_runner():
     """測試 UntranslatedChecker 使用傳入的 task_runner"""
-    page = _Page()
-    file_picker = _FilePicker()
+    page = mock_page()
+    file_picker = mock_filepicker()
     view = QCView(page, file_picker)
 
     # 確認 UntranslatedChecker 使用 view.task_runner
@@ -154,8 +117,8 @@ def test_untranslated_checker_uses_task_runner():
 
 def test_qc_view_all_textfields_exist(monkeypatch):
     """測試 QCView 所有 TextField 控件存在"""
-    page = _Page()
-    view = QCView(page, _FilePicker())
+    page = mock_page()
+    view = QCView(page, mock_filepicker())
 
     assert view.cn_dir_textfield.label == '簡中 (zh_cn) 來源資料夾 (JSON)'
     assert view.tw_dir_textfield_2.label == '繁中 (zh_tw) 來源資料夾 (JSON)'
@@ -166,8 +129,8 @@ def test_qc_view_all_textfields_exist(monkeypatch):
 
 def test_qc_view_all_buttons_exist(monkeypatch):
     """測試 QCView 所有 Button 控件存在"""
-    page = _Page()
-    view = QCView(page, _FilePicker())
+    page = mock_page()
+    view = QCView(page, mock_filepicker())
 
     assert view.compare_start_button.content == '啟動：JSON 資料夾差異比對'
     assert view.compare_tsv_start_button.content == '啟動：TSV 單檔案差異比對'
@@ -175,8 +138,8 @@ def test_qc_view_all_buttons_exist(monkeypatch):
 
 def test_qc_view_progress_bar_and_log_view(monkeypatch):
     """測試 QCView progress_bar 和 log_view 存在"""
-    page = _Page()
-    view = QCView(page, _FilePicker())
+    page = mock_page()
+    view = QCView(page, mock_filepicker())
 
     assert isinstance(view.progress_bar, ft.ProgressBar)
     assert view.progress_bar.visible is False
@@ -185,8 +148,8 @@ def test_qc_view_progress_bar_and_log_view(monkeypatch):
 
 def test_qc_view_set_controls_disabled_affects_all_inputs(monkeypatch):
     """測試 set_controls_disabled 影響所有 TextField 和 Button"""
-    page = _Page()
-    view = QCView(page, _FilePicker())
+    page = mock_page()
+    view = QCView(page, mock_filepicker())
 
     view.set_controls_disabled(True)
 
@@ -211,8 +174,8 @@ def test_qc_view_set_controls_disabled_affects_all_inputs(monkeypatch):
 
 def test_qc_view_start_task_compare_json_requires_paths(monkeypatch):
     """測試 compare_json 任務需要路徑"""
-    page = _Page()
-    view = QCView(page, _FilePicker())
+    page = mock_page()
+    view = QCView(page, mock_filepicker())
 
     view.start_task("compare_json")
 
@@ -222,8 +185,8 @@ def test_qc_view_start_task_compare_json_requires_paths(monkeypatch):
 
 def test_qc_view_start_task_compare_tsv_requires_paths(monkeypatch):
     """測試 compare_tsv 任務需要路徑"""
-    page = _Page()
-    view = QCView(page, _FilePicker())
+    page = mock_page()
+    view = QCView(page, mock_filepicker())
 
     view.start_task("compare_tsv")
 
@@ -233,8 +196,8 @@ def test_qc_view_start_task_compare_tsv_requires_paths(monkeypatch):
 
 def test_qc_view_show_snack_bar_adds_to_overlay():
     """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
-    page = _Page()
-    view = QCView(page, _FilePicker())
+    page = mock_page()
+    view = QCView(page, mock_filepicker())
 
     view._show_snack_bar('Test error', '#FF0000')
 
@@ -244,7 +207,7 @@ def test_qc_view_show_snack_bar_adds_to_overlay():
 
 def test_qc_view_pick_file_or_directory_with_tkinter_exists():
     """測試 pick_file_or_directory_with_tkinter 方法存在"""
-    view = QCView(_Page(), _FilePicker())
+    view = QCView(mock_page(), mock_filepicker())
 
     assert hasattr(view, 'pick_file_or_directory_with_tkinter')
     assert callable(view.pick_file_or_directory_with_tkinter)
@@ -252,7 +215,7 @@ def test_qc_view_pick_file_or_directory_with_tkinter_exists():
 
 def test_qc_view_task_runner_exists():
     """測試 task_runner 存在"""
-    view = QCView(_Page(), _FilePicker())
+    view = QCView(mock_page(), mock_filepicker())
 
     assert hasattr(view, 'task_runner')
     assert view.task_runner is not None
@@ -260,8 +223,8 @@ def test_qc_view_task_runner_exists():
 
 def test_qc_view_create_pick_button_returns_icon_button():
     """測試 _create_pick_button 返回帶有回調的 IconButton"""
-    page = _Page()
-    view = QCView(page, _FilePicker())
+    page = mock_page()
+    view = QCView(page, mock_filepicker())
 
     btn = view._create_pick_button(view.cn_dir_textfield, 'Test', True)
 
@@ -270,20 +233,20 @@ def test_qc_view_create_pick_button_returns_icon_button():
 
 
 def test_qc_view_untranslated_checker_exists():
-    view = QCView(_Page(), _FilePicker())
+    view = QCView(mock_page(), mock_filepicker())
     assert view.untranslated_checker is not None
 
 
 def test_qc_view_compare_start_button_exists():
-    view = QCView(_Page(), _FilePicker())
+    view = QCView(mock_page(), mock_filepicker())
     assert view.compare_start_button is not None
 
 
 def test_qc_view_compare_tsv_start_button_exists():
-    view = QCView(_Page(), _FilePicker())
+    view = QCView(mock_page(), mock_filepicker())
     assert view.compare_tsv_start_button is not None
 
 
 def test_qc_view_log_view_exists():
-    view = QCView(_Page(), _FilePicker())
+    view = QCView(mock_page(), mock_filepicker())
     assert view.log_view is not None

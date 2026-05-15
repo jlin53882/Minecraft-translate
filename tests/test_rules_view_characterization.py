@@ -1,5 +1,6 @@
 import flet as ft
 from app.views.rules_view import RulesView
+from tests.conftest import mock_page
 
 
 class _Loop:
@@ -7,34 +8,11 @@ class _Loop:
         func(*args, **kwargs)
 
 
-class _Page:
-    def __init__(self):
-        self.overlay = []
-        self.updated = 0
-        self.loop = _Loop()
-        self._tasks = []
-
-    def update(self):
-        self.updated += 1
-
-    def run_task(self, coro, *args):
-        self._tasks.append((coro, args))
-
-    def _run_all_tasks(self):
-        for coro, args in self._tasks:
-            result = coro(*args)
-            if result is not None:
-                try:
-                    result.send(None)
-                except StopIteration:
-                    pass
-
-
 def test_rules_view_initial_load_populates_data(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [{'from': 'a', 'to': 'b'}])
 
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
 
     assert len(view.all_rules_data) == 1
     assert view.total_pages >= 1
@@ -46,7 +24,7 @@ def test_rules_view_search_filters_and_moves_to_matching_page(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.threading.Timer', lambda delay, target: type('Tm', (), {'start': lambda self: target(), 'cancel': lambda self: None})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [{'from': 'aaa', 'to': 'bbb'}, {'from': 'ccc', 'to': 'ddd'}])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
 
     class E: pass
     e = E(); e.control = type('C', (), {'value': 'ccc'})()
@@ -62,7 +40,7 @@ def test_rules_view_search_filters_and_moves_to_matching_page(monkeypatch):
 def test_rules_view_validate_rule_catches_duplicate(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     rules = [{'from': 'a', 'to': 'x'}, {'from': 'a', 'to': 'y'}]
 
     ok, msg = view.validate_rule('a', 'y', rules, 1)
@@ -74,7 +52,7 @@ def test_rules_view_validate_rule_catches_duplicate(monkeypatch):
 def test_rules_view_add_row_moves_to_last_page(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
 
     view.add_row_clicked(None)
 
@@ -86,7 +64,7 @@ def test_rules_view_all_controls_exist(monkeypatch):
     """測試 RulesView 所有 UI 控件存在"""
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
 
     assert isinstance(view.loading_indicator, ft.ProgressRing)
     assert view.loading_indicator.visible is False
@@ -122,7 +100,7 @@ def test_rules_view_on_page_jump_submit_invalid_page(monkeypatch):
     """測試頁碼跳轉無效時的處理"""
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [{'from': 'a', 'to': 'b'}] * 30)
-    page = _Page()
+    page = mock_page()
     view = RulesView(page)
 
     class E:
@@ -140,7 +118,7 @@ def test_rules_view_prev_button_disabled_when_on_first_page(monkeypatch):
     """測試第一頁時 prev_button 應該 disabled"""
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [{'from': 'a', 'to': 'b'}] * 30)
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
 
     assert view.prev_button.disabled is True
 
@@ -149,7 +127,7 @@ def test_rules_view_search_box_on_change_exists(monkeypatch):
     """測試 search_box 的 on_change 回調"""
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
 
     assert view.search_box.on_change is not None
     assert view.sort_box.on_change is not None
@@ -159,7 +137,7 @@ def test_rules_view_show_snack_bar_adds_to_overlay(monkeypatch):
     """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    page = _Page()
+    page = mock_page()
     view = RulesView(page)
 
     view._show_snack_bar('Test error', '#FF0000')
@@ -172,7 +150,7 @@ def test_rules_view_validate_rule_accepts_valid_rule(monkeypatch):
     """測試 validate_rule 接受有效規則"""
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     rules = [{'from': 'a', 'to': 'x'}]
 
     ok, msg = view.validate_rule('b', 'y', rules, 1)
@@ -185,7 +163,7 @@ def test_rules_view_rule_matches(monkeypatch):
     """測試 _rule_matches 正確匹配規則"""
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
 
     rule = {'from': 'hello', 'to': '你好'}
 
@@ -197,7 +175,7 @@ def test_rules_view_prev_page_button_exists(monkeypatch):
     """測試 prev_button 存在"""
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
 
     assert view.prev_button is not None
     assert view.next_button is not None
@@ -207,7 +185,7 @@ def test_rules_view_initial_page_state(monkeypatch):
     """測試初始頁面狀態"""
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
 
     assert view.current_page == 1
     assert view.total_pages >= 1
@@ -217,7 +195,7 @@ def test_rules_view_search_box_exists(monkeypatch):
     """測試 search_box 存在"""
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
 
     assert view.search_box is not None
 
@@ -227,7 +205,7 @@ def test_rules_view_new_rid_exists(monkeypatch):
     """測試 _new_rid 方法存在"""
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
 
     assert hasattr(view, '_new_rid')
     assert callable(view._new_rid)
@@ -237,7 +215,7 @@ def test_rules_view_find_index_by_rid_exists(monkeypatch):
     """測試 _find_index_by_rid 方法存在"""
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
 
     assert hasattr(view, '_find_index_by_rid')
     assert callable(view._find_index_by_rid)
@@ -247,7 +225,7 @@ def test_rules_view_do_search_exists(monkeypatch):
     """測試 _do_search 方法存在"""
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
 
     assert hasattr(view, '_do_search')
     assert callable(view._do_search)
@@ -256,7 +234,7 @@ def test_rules_view_do_search_exists(monkeypatch):
 def test_rules_view_build_header(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, '_build_header')
     assert callable(view._build_header)
 
@@ -264,7 +242,7 @@ def test_rules_view_build_header(monkeypatch):
 def test_rules_view_build_toolbar(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, '_build_toolbar')
     assert callable(view._build_toolbar)
 
@@ -272,7 +250,7 @@ def test_rules_view_build_toolbar(monkeypatch):
 def test_rules_view_build_rules_table_area(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, '_build_rules_table_area')
     assert callable(view._build_rules_table_area)
 
@@ -280,7 +258,7 @@ def test_rules_view_build_rules_table_area(monkeypatch):
 def test_rules_view_build_footer(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, '_build_footer')
     assert callable(view._build_footer)
 
@@ -288,7 +266,7 @@ def test_rules_view_build_footer(monkeypatch):
 def test_rules_view_load_rules_core(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, '_load_rules_core')
     assert callable(view._load_rules_core)
 
@@ -296,7 +274,7 @@ def test_rules_view_load_rules_core(monkeypatch):
 def test_rules_view_initial_load(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, '_initial_load')
     assert callable(view._initial_load)
 
@@ -304,7 +282,7 @@ def test_rules_view_initial_load(monkeypatch):
 def test_rules_view_render_current_page(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, '_render_current_page')
     assert callable(view._render_current_page)
 
@@ -312,7 +290,7 @@ def test_rules_view_render_current_page(monkeypatch):
 def test_rules_view_handle_reload_success(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, '_handle_reload_success')
     assert callable(view._handle_reload_success)
 
@@ -320,7 +298,7 @@ def test_rules_view_handle_reload_success(monkeypatch):
 def test_rules_view_handle_reload_failure(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, '_handle_reload_failure')
     assert callable(view._handle_reload_failure)
 
@@ -328,7 +306,7 @@ def test_rules_view_handle_reload_failure(monkeypatch):
 def test_rules_view_run_on_ui_thread(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, '_run_on_ui_thread')
     assert callable(view._run_on_ui_thread)
 
@@ -336,7 +314,7 @@ def test_rules_view_run_on_ui_thread(monkeypatch):
 def test_rules_view_show_snack_bar(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, '_show_snack_bar')
     assert callable(view._show_snack_bar)
 
@@ -344,7 +322,7 @@ def test_rules_view_show_snack_bar(monkeypatch):
 def test_rules_view_init_controls(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, '_init_controls')
     assert callable(view._init_controls)
 
@@ -352,21 +330,21 @@ def test_rules_view_init_controls(monkeypatch):
 def test_rules_view_total_count_text(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert view.total_count_text is not None
 
 
 def test_rules_view_loading_indicator(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert view.loading_indicator is not None
 
 
 def test_rules_view_on_sort_change(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, 'on_sort_change')
     assert callable(view.on_sort_change)
 
@@ -374,7 +352,7 @@ def test_rules_view_on_sort_change(monkeypatch):
 def test_rules_view_translate_regex_error(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, 'translate_regex_error')
     assert callable(view.translate_regex_error)
 
@@ -382,6 +360,6 @@ def test_rules_view_translate_regex_error(monkeypatch):
 def test_rules_view_on_search(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
-    view = RulesView(_Page())
+    view = RulesView(mock_page())
     assert hasattr(view, 'on_search')
     assert callable(view.on_search)
