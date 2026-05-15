@@ -19,6 +19,7 @@ from translation_tool.utils.log_unit import log_info, log_warning, log_error
 from types import SimpleNamespace
 
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
+from translation_tool.utils.config_manager import load_config
 from translation_tool.core.lang_item_row import LangItemRow
 
 import unicodedata
@@ -528,9 +529,9 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
 
     processed = 0
     total = len(jar_to_entries)
-    # Flet 環境限制：只允許 2 個執行緒真正並發，設 4 workers 減少排程開銷
-    # （不宜設太高，會加劇執行緒競爭）
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    config_workers = load_config().get("translator", {}).get("parallel_execution_workers", 4)
+    max_workers = max(1, config_workers) if isinstance(config_workers, int) else 4
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(_process_jar, jar_name): jar_name for jar_name in jar_to_entries}
         for future in as_completed(futures):
             jar_name = futures[future]

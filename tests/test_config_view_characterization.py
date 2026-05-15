@@ -24,12 +24,13 @@ def test_config_view_loads_models_and_keys_from_config(monkeypatch):
     cfg = {
         'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
         'translator': {'output_dir_name': 'out', 'replace_rules_path': 'replace_rules.json', 'cache_directory': 'cache', 'enable_cache_saving': True, 'parallel_execution_workers': 4},
+        'ftb_translator': {'output_dir_name': 'FTB任務翻譯輸出'},
         'species_cache': {'cache_directory': 'sp', 'cache_filename': 'sp.tsv', 'wikipedia_language': 'zh', 'wikipedia_rate_limit_delay': 0.5},
         'output_bundler': {'output_zip_name': 'bundle.zip'},
         'lang_merger': {'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理', 'filtered_pending_min_count': 2, 'quarantine_folder_name': 'skip'},
         'lm_translator': {
             'temperature': 0.2,
-            'rate_limit': {'timeout': 600},
+            'rate_limit': {'timeout': 600, 'sleep_seconds_between_batches': 0.0},
             'lm_translate_folder_name': 'LM翻譯後',
             'patchouli_system_prompt': 'p',
             'lang_system_prompt': 'l',
@@ -55,7 +56,7 @@ def test_config_view_loads_models_and_keys_from_config(monkeypatch):
 
 
 def test_config_view_add_and_remove_model_row(monkeypatch):
-    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'ftb_translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
     view = ConfigView(mock_page())
     start = len(view.models_column.controls)
 
@@ -68,7 +69,7 @@ def test_config_view_add_and_remove_model_row(monkeypatch):
 
 def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
     saved = {}
-    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {'rate_limit': {}, 'patchouli': {}, 'translator': {}}, 'output_bundler': {}, 'lang_merger': {}})
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'ftb_translator': {}, 'species_cache': {}, 'lm_translator': {'rate_limit': {'sleep_seconds_between_batches': 0.0}, 'patchouli': {}, 'translator': {}}, 'output_bundler': {}, 'lang_merger': {}})
     monkeypatch.setattr('app.views.config_view.save_config_json', lambda cfg: saved.update(cfg))
     monkeypatch.setattr('app.views.config_view.validate_api_keys_from_ui', lambda keys: None)
 
@@ -112,11 +113,12 @@ def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
 
     assert saved['lm_translator']['keys'] == ['k1']
     assert saved['lm_translator']['models']['demo-model']['enabled'] is True
+    assert saved['lm_translator']['rate_limit']['sleep_seconds_between_batches'] == 0.0
 
 
 def test_config_view_show_snack_bar_adds_to_overlay(monkeypatch):
     """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
-    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'ftb_translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
     page = mock_page()
     view = ConfigView(page)
 
@@ -128,7 +130,7 @@ def test_config_view_show_snack_bar_adds_to_overlay(monkeypatch):
 
 def test_config_view_init_controls_builds_ui(monkeypatch):
     """測試 _init_controls 構建所有 UI 控制項"""
-    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'ftb_translator': {}, 'species_cache': {}, 'lm_translator': {}, 'output_bundler': {}, 'lang_merger': {}})
     view = ConfigView(mock_page())
 
     assert view.footer is not None

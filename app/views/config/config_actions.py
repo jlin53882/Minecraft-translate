@@ -6,6 +6,7 @@ def load_config_into_view(view, config: dict):
     """將 config 字典中的值填入 view 的各個 UI 控制項。"""
     log_cfg = config.get('logging', {})
     trans_cfg = config.get('translator', {})
+    ftb_cfg = config.get('ftb_translator', {})
     species_cfg = config.get('species_cache', {})
     lm_cfg = config.get('lm_translator', {})
     bundle_cfg = config.get('output_bundler', {})
@@ -13,8 +14,9 @@ def load_config_into_view(view, config: dict):
     view.controls_map['logging.log_level'].value = log_cfg.get('log_level')
     view.controls_map['logging.log_dir'].value = log_cfg.get('log_dir')
     view.controls_map['translator.output_dir_name'].value = trans_cfg.get('output_dir_name', 'zh_tw_generated')
+    view.controls_map['ftb_translator.output_dir_name'].value = ftb_cfg.get('output_dir_name', 'FTB任務翻譯輸出')
     view.controls_map['translator.replace_rules_path'].value = trans_cfg.get('replace_rules_path', 'replace_rules.json')
-    view.controls_map['translator.cache_directory'].value = trans_cfg.get('cache_directory', '快取資料夾')
+    view.controls_map['translator.cache_directory'].value = trans_cfg.get('cache_directory', '快取資料')
     view.controls_map['translator.enable_cache_saving'].value = trans_cfg.get('enable_cache_saving')
     view.controls_map['translator.parallel_execution_workers'].value = str(trans_cfg.get('parallel_execution_workers', '4'))
     view.controls_map['species_cache.cache_directory'].value = species_cfg.get('cache_directory', '學名資料庫')
@@ -23,6 +25,7 @@ def load_config_into_view(view, config: dict):
     view.controls_map['species_cache.wikipedia_rate_limit_delay'].value = str(species_cfg.get('wikipedia_rate_limit_delay'))
     view.controls_map['lm_translator.temperature'].value = str(lm_cfg.get('temperature'))
     view.controls_map['lm_translator.rate_limit.timeout'].value = str(lm_cfg.get('rate_limit', {}).get('timeout', '600'))
+    view.controls_map['lm_translator.rate_limit.sleep_seconds_between_batches'].value = str(lm_cfg.get('rate_limit', {}).get('sleep_seconds_between_batches', '0.0'))
     view.controls_map['output_bundler.output_zip_name'].value = bundle_cfg.get('output_zip_name')
     view.controls_map['lang_merger.pending_folder_name'].value = config.get('lang_merger', {}).get('pending_folder_name', '待翻譯')
     view.controls_map['lang_merger.pending_organized_folder_name'].value = config.get('lang_merger', {}).get('pending_organized_folder_name', '待翻譯整理需翻譯')
@@ -38,9 +41,9 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lm_translator.initial_batch_size_md'].value = int(config.get('lm_translator', {}).get('initial_batch_size_md', 100))
     view.controls_map['lm_translator.min_batch_size'].value = int(config.get('lm_translator', {}).get('min_batch_size', 50))
     view.controls_map['lm_translator.batch_shrink_factor'].value = float(config.get('lm_translator', {}).get('batch_shrink_factor', 0.75))
-    view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(config.get('lm_translator', {}).get('patchouli', {}).get('dir_names', 'patchouli_books'))
-    view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('skip_terms', ['api documentation']))
-    view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('translatable_keywords', 'text'))
+    view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(config.get('lm_translator', {}).get('patchouli', {}).get('dir_names', ['patchouli_books', 'book', 'manual', 'guidebook']))
+    view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('skip_terms', ['api documentation', 'api docs', 'documentation', 'discord', 'github', 'homepage', 'mod page', 'modpack', 'official website', 'patreon']))
+    view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('translatable_keywords', ['text', 'name', 'title', 'description', 'subtitle', 'hover', 'note', 'warning', 'quote', 'paragraph', 'body', 'header', 'footer', 'heading', 'effects']))
 
     view.models_column.controls.clear()
     models_cfg = lm_cfg.get('models')
@@ -63,10 +66,13 @@ def load_config_into_view(view, config: dict):
 def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, validate_api_keys_from_ui_fn):
     """從 view UI 控制項收集使用者輸入並儲存至 config.json。"""
     new_config = load_config_json_fn()
+    if 'ftb_translator' not in new_config:
+        new_config['ftb_translator'] = {}
     try:
         new_config['logging']['log_level'] = view.controls_map['logging.log_level'].value
         new_config['logging']['log_dir'] = view.controls_map['logging.log_dir'].value
         new_config['translator']['output_dir_name'] = view.controls_map['translator.output_dir_name'].value
+        new_config['ftb_translator']['output_dir_name'] = view.controls_map['ftb_translator.output_dir_name'].value
         new_config['translator']['replace_rules_path'] = view.controls_map['translator.replace_rules_path'].value
         new_config['translator']['cache_directory'] = view.controls_map['translator.cache_directory'].value
         new_config['translator']['enable_cache_saving'] = view.controls_map['translator.enable_cache_saving'].value
@@ -77,6 +83,7 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
         new_config['species_cache']['wikipedia_rate_limit_delay'] = float(view.controls_map['species_cache.wikipedia_rate_limit_delay'].value)
         new_config['lm_translator']['temperature'] = float(view.controls_map['lm_translator.temperature'].value)
         new_config['lm_translator']['rate_limit']['timeout'] = int(view.controls_map['lm_translator.rate_limit.timeout'].value)
+        new_config['lm_translator']['rate_limit']['sleep_seconds_between_batches'] = float(view.controls_map['lm_translator.rate_limit.sleep_seconds_between_batches'].value)
         new_config['output_bundler']['output_zip_name'] = view.controls_map['output_bundler.output_zip_name'].value
         new_config['lang_merger']['pending_folder_name'] = view.controls_map['lang_merger.pending_folder_name'].value
         new_config['lang_merger']['pending_organized_folder_name'] = view.controls_map['lang_merger.pending_organized_folder_name'].value

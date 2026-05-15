@@ -77,7 +77,34 @@ def test_bundler_view_hint_texts():
     assert view.description_field.hint_text == "直接輸入文字，或使用 § 顏色代碼"
     assert view.pack_image_field.hint_text == "選擇 pack.png 圖片（可選）"
     assert view.root_dir_field.hint_text == "包含所有翻譯產出的最上層資料夾"
-    assert view.output_zip_field.hint_text == "輸出位置與檔名"
+    assert "留空則自動帶入" in view.output_zip_field.hint_text
+
+
+def test_bundler_view_has_config_output_zip_name():
+    """測試 _config_output_zip_name 屬性存在且為預設值"""
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+
+    assert hasattr(view, "_config_output_zip_name")
+    assert view._config_output_zip_name == "可使用翻譯.zip"
+
+
+def test_on_root_dir_change_updates_hint_text():
+    """測試當 root_dir 改變時，hint_text 會更新"""
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+    view._config_output_zip_name = "可使用翻譯.zip"
+
+    view.root_dir_field.value = "C:\\Users\\test\\output"
+
+    class MockEvent:
+        def __init__(self):
+            self.control = view.root_dir_field
+
+    view._on_root_dir_change(MockEvent())
+
+    assert "C:\\Users\\test\\output" in view.output_zip_field.hint_text
+    assert "可使用翻譯.zip" in view.output_zip_field.hint_text
 
 
 def test_start_bundling_without_required_paths_shows_error():
@@ -90,26 +117,27 @@ def test_start_bundling_without_required_paths_shows_error():
     assert "請填寫" in page.overlay[-1].content.value
 
 
-def test_start_bundling_without_output_zip_shows_error():
+def test_bundling_without_output_zip_shows_no_error(monkeypatch):
+    """output_zip 留空時不應顯示錯誤，會自動帶入"""
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
+    view._config_output_zip_name = "可使用翻譯.zip"
+    monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
+
+    def mock_generator(**kwargs):
+        return iter([{"log": "done", "progress": 1.0}])
+
+    monkeypatch.setattr(
+        "translation_tool.core.output_bundler.bundle_outputs_generator",
+        mock_generator,
+    )
+
     view.root_dir_field.value = "C:/test"
+    view.output_zip_field.value = ""
 
     view.start_bundling_clicked(None)
 
-    assert page.overlay
-    assert "請填寫" in page.overlay[-1].content.value
-
-
-def test_start_bundling_without_root_dir_shows_error():
-    page = mock_page()
-    view = BundlerView(page, mock_filepicker())
-    view.output_zip_field.value = "C:/output.zip"
-
-    view.start_bundling_clicked(None)
-
-    assert page.overlay
-    assert "請填寫" in page.overlay[-1].content.value
+    assert len(page.overlay) == 0
 
 
 def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):

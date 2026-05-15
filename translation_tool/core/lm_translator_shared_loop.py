@@ -71,11 +71,17 @@ def translate_items_with_cache_loop(
     on_batch_flushed: Optional[Callable[[], None]] = None,
     on_progress: Optional[Callable[[float, str, float], None]] = None,
     cache_rules: Optional[Dict[str, CacheRule]] = None,
-    sleep_seconds_between_batches: float = 0.0,
+    sleep_seconds_between_batches: Optional[float] = None,
 ) -> TranslateLoopResult:
     """執行翻譯主迴圈，分批呼叫翻譯 API、寫入快取、回報進度與 ETA，支援中斷與額度耗盡處理。"""
     if cache_rules is None:
         cache_rules = get_default_cache_rules()
+
+    # 如果未指定 sleep_seconds_between_batches，從 config 讀取
+    if sleep_seconds_between_batches is None:
+        sleep_seconds_between_batches = load_config().get("lm_translator", {}).get(
+            "rate_limit", {}
+        ).get("sleep_seconds_between_batches", 0.0)
 
     reload_translation_cache()
     log_info("[Translator Gen]: 重新載入快取完成")

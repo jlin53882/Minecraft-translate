@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Iterator
 
 from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.config_manager import load_config
 
 
 # ==================================================
@@ -181,8 +182,9 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
     index: dict[str, str] = {}
     done = 0
 
-    # 8 threads，平行處理每個 JAR
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    config_workers = load_config().get("translator", {}).get("parallel_execution_workers", 8)
+    max_workers = max(1, config_workers) if isinstance(config_workers, int) else 8
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(_process_single_jar, (jar, modid)): (jar, modid)
             for jar, modid in jar_modid_pairs

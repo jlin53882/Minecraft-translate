@@ -10,7 +10,11 @@
     "cache_directory": "快取資料",
     "enable_cache_saving": true,
     "parallel_execution_workers": 4,
+    "custom_translator_folder": "custom_translators",
     "cjk_ratio_threshold": 0.7
+  },
+  "ftb_translator": {
+    "output_dir_name": "FTB任務翻譯輸出"
   },
   "species_cache": {
     "cache_directory": "學名資料庫",
@@ -30,7 +34,7 @@
     "batch_shrink_factor": 0.5,
     "rate_limit": {
       "timeout": 600,
-      "sleep_seconds": 600
+      "sleep_seconds_between_batches": 0.0
     },
     "models": {
       "gemini-2.5-flash": {

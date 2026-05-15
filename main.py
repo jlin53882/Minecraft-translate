@@ -100,7 +100,7 @@ def main(page: ft.Page):
     def toggle_theme_mode(e):
         is_light = page.theme_mode == ft.ThemeMode.LIGHT
         page.theme_mode = ft.ThemeMode.DARK if is_light else ft.ThemeMode.LIGHT
-        toggle_icon_btn.icon = ft.Icons.LIGHT_MODE if is_light else ft.ThemeMode.DARK
+        toggle_icon_btn.icon = ft.Icons.LIGHT_MODE if is_light else ft.Icons.DARK_MODE
         toggle_icon_btn.tooltip = "切換為淺色模式" if is_light else "切換為深色模式"
         page.update()
 

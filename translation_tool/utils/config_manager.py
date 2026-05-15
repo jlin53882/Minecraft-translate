@@ -59,6 +59,10 @@ DEFAULT_CONFIG = {
         "cache_directory": "快取資料",
         "enable_cache_saving": True,
         "parallel_execution_workers": max(1, os.cpu_count() // 2),
+        "custom_translator_folder": "custom_translators",
+    },
+    "ftb_translator": {
+        "output_dir_name": "FTB任務翻譯輸出",
     },
     "species_cache": {
         "cache_directory": "學名資料庫",
@@ -77,7 +81,8 @@ DEFAULT_CONFIG = {
         "min_batch_size": 50,  # 最小 batch
         "batch_shrink_factor": 0.75,  # 發生錯誤時縮小比例
         "rate_limit": {
-            "timeout": 600  # request time out set
+            "timeout": 600,  # request time out set
+            "sleep_seconds_between_batches": 0.0,  # 批次間延遲秒數
         },
         "models": {
             "gemini-2.5-flash": {"enabled": True},
