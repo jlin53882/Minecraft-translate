@@ -582,7 +582,7 @@ class ConfigView(ft.Column):
         """建立設定卡片"""
         return build_config_card(self, title, controls_list)
 
-    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.ERROR):
         """顯示 SnackBar 訊息提示"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
@@ -715,7 +715,7 @@ class ConfigView(ft.Column):
 
     def _success_color(self):
         """取得成功顏色"""
-        return theme.GREEN_600
+        return theme.SUCCESS
 
     def save_config_clicked(self, e):
         """儲存設定"""

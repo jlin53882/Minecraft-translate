@@ -20,9 +20,9 @@ from app.ui import theme
 
 CARD_PADDING: int = 16
 CARD_RADIUS: int = 10
-CARD_BORDER_COLOR = ft.Colors.BLACK12
+CARD_BORDER_COLOR = ft.Colors.BLACK_12
 CARD_BG_COLOR = ft.Colors.WHITE
-DIVIDER_COLOR = ft.Colors.GREY_200
+DIVIDER_COLOR = theme.GREY_200
 
 
 def section_header(
@@ -157,8 +157,8 @@ def primary_button(
     icon: str | None = None,
     tooltip: str | None = None,
     on_click=None,
-    height: int = 42,
-    bgcolor: str = ft.Colors.BLUE_700,
+    height: int = theme.BUTTON_HEIGHT,
+    bgcolor: str = theme.PRIMARY,
 ) -> ft.Button:
     """主動作按鈕（整個 App 統一的 primary style）。
 
@@ -174,7 +174,7 @@ def primary_button(
         style=ft.ButtonStyle(
             color=ft.Colors.WHITE,
             bgcolor=bgcolor,
-            shape=ft.RoundedRectangleBorder(radius=6),
+            shape=ft.RoundedRectangleBorder(radius=theme.BUTTON_RADIUS),
             padding=16,
         ),
         on_click=on_click,
@@ -187,7 +187,7 @@ def secondary_button(
     icon: str | None = None,
     tooltip: str | None = None,
     on_click=None,
-    height: int = 42,
+    height: int = theme.BUTTON_HEIGHT,
 ) -> ft.OutlinedButton:
     """次要按鈕（outlined）。"""
 
@@ -196,7 +196,7 @@ def secondary_button(
         icon=icon,
         tooltip=tooltip,
         height=height,
-        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=6), padding=16),
+        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=theme.BUTTON_RADIUS), padding=16),
         on_click=on_click,
     )
 
@@ -274,7 +274,7 @@ class ProgressCard(ft.Container):
         super().__init__(
             padding=15,
             border_radius=8,
-            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            bgcolor=theme.surface_variant,
             content=ft.Column(
                 [
                     ft.Row(

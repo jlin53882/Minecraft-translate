@@ -1443,11 +1443,7 @@ class IconPreviewView(ft.Column):
     # ==================================================
     # 輔助：SnackBar
     # ==================================================
-    def _show_snack(
-        self,
-        message: str,
-        color: str = theme.GREEN_600,
-    ):
+    def _show_snack(self, message: str, color: str = theme.ERROR, **kwargs):
         """
         統一 SnackBar 顯示（Flet Desktop 穩定版）
         - 使用 page.overlay

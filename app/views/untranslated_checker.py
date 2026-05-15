@@ -159,7 +159,7 @@ class UntranslatedChecker(ft.Container):
         else:
             self._show_snack_bar("您已取消選擇", theme.BLUE_GREY_500)
 
-    def _show_snack_bar(self, message: str, color: str = theme.RED_600):
+    def _show_snack_bar(self, message: str, color: str = theme.ERROR):
         """顯示 SnackBar 訊息提示"""
         log_info(f"[UI] SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
