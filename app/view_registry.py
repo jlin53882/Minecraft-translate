@@ -19,22 +19,24 @@ VIEW_WINDOW_SIZES = {
     'extractor': (1280, 900),
     'lm': (1280, 920),
     'merge': (1280, 920),
+    'arnold': (1000, 950),
 }
 
 # Lazy import map - 延遲載入 view 的對應表
 # 格式：{'key': (module_name, class_name, needs_file_picker)}
 _VIEW_IMPORT_MAP = {
-    'config': ('app.views.config_view', 'ConfigView', False),  # 不需要 file_picker
+    'config': ('app.views.config_view', 'ConfigView', False),
     'rules': ('app.views.rules_view', 'RulesView', False),
     'cache': ('app.views.cache_view', 'CacheView', False),
-    'qc': ('app.views.qc_view', 'QCView', True),  # 需要 file_picker
-    'lookup': ('app.views.lookup_view', 'LookupView', False),  # 不需要 file_picker
-    'icon_preview': ('app.views.icon_preview_view', 'IconPreviewView', False),  # 不需要 file_picker
-    'bundler': ('app.views.bundler_view', 'BundlerView', True),  # 需要 file_picker
-    'translation': ('app.views.translation_view', 'TranslationView', True),  # 需要 file_picker
+    'qc': ('app.views.qc_view', 'QCView', True),
+    'lookup': ('app.views.lookup_view', 'LookupView', False),
+    'icon_preview': ('app.views.icon_preview_view', 'IconPreviewView', False),
+    'bundler': ('app.views.bundler_view', 'BundlerView', True),
+    'translation': ('app.views.translation_view', 'TranslationView', True),
     'extractor': ('app.views.extractor_view', 'ExtractorView', True),
     'lm': ('app.views.lm_view', 'LMView', True),
     'merge': ('app.views.merge_view', 'MergeView', True),
+    'pipeline': ('app.views.pipeline_view', 'PipelineView', True),
 }
 
 def _lazy_import_view(view_key: str, page: ft.Page, file_picker: ft.FilePicker):
@@ -80,6 +82,7 @@ def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
         {'key': 'extractor', 'icon': ft.Icons.UNARCHIVE, 'label': 'jar 提取', 'view': wrap_view(_lazy_import_view('extractor', page, file_picker))},
         {'key': 'lm', 'icon': ft.Icons.AUTO_AWESOME, 'label': '機器翻譯', 'view': wrap_view(_lazy_import_view('lm', page, file_picker))},
         {'key': 'merge', 'icon': ft.Icons.CALL_MERGE, 'label': '檔案合併', 'view': wrap_view(_lazy_import_view('merge', page, file_picker))},
+        {'key': 'pipeline', 'icon': ft.Icons.TERMINAL, 'label': '模組流水線翻譯打包', 'view': wrap_view(_lazy_import_view('pipeline', page, file_picker))},
     ]
     return registry
 
