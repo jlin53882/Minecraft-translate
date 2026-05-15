@@ -38,7 +38,7 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lm_translator.initial_batch_size_md'].value = int(config.get('lm_translator', {}).get('initial_batch_size_md', 100))
     view.controls_map['lm_translator.min_batch_size'].value = int(config.get('lm_translator', {}).get('min_batch_size', 50))
     view.controls_map['lm_translator.batch_shrink_factor'].value = float(config.get('lm_translator', {}).get('batch_shrink_factor', 0.75))
-    view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(config.get('lm_translator', {}).get('patchouli', {}).get('dir_names', 'patchouli_books'))
+    view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(config.get('lm_translator', {}).get('patchouli', {}).get('dir_names', ['patchouli_books']))
     view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('skip_terms', ['api documentation']))
     view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('translatable_keywords', 'text'))
 

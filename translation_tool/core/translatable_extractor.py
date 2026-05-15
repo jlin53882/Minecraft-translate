@@ -27,8 +27,8 @@ def find_patchouli_json(root: Path, dir_names=None):
     回傳：
         Path 物件列表
     """
-    patchouli_dir_names = (
-        load_config().get("lm_translator", {}).get("patchouli", {}).get("dir_names", [])
+    patchouli_dir_names = load_config().get("lm_translator", {}).get("patchouli", {}).get(
+        "dir_names", ["patchouli_books", "book", "manual", "guidebook"]
     )
     if dir_names is None:
         dir_names = patchouli_dir_names
