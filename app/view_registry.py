@@ -81,7 +81,7 @@ def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
         {'key': 'translation', 'icon': ft.Icons.TRANSLATE, 'label': '任務 翻譯工具', 'view': wrap_view(_lazy_import_view('translation', page, file_picker))},
         {'key': 'extractor', 'icon': ft.Icons.UNARCHIVE, 'label': 'jar 提取', 'view': wrap_view(_lazy_import_view('extractor', page, file_picker))},
         {'key': 'lm', 'icon': ft.Icons.AUTO_AWESOME, 'label': '機器翻譯', 'view': wrap_view(_lazy_import_view('lm', page, file_picker))},
-        {'key': 'merge', 'icon': ft.Icons.CALL_MERGE, 'label': '檔案合併', 'view': wrap_view(_lazy_import_view('merge', page, file_picker))},
+        {'key': 'merge', 'icon': ft.Icons.CALL_MERGE, 'label': '語系比對合併', 'view': wrap_view(_lazy_import_view('merge', page, file_picker))},
         {'key': 'pipeline', 'icon': ft.Icons.TERMINAL, 'label': '模組流水線翻譯打包', 'view': wrap_view(_lazy_import_view('pipeline', page, file_picker))},
     ]
     return registry
