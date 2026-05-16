@@ -6,7 +6,7 @@
 
 import flet as ft
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info
+from app.ui.snack import show_snack
 from app.services_impl.config_service import load_config_json, save_config_json
 from app.views.config.config_actions import load_config_into_view, save_config_from_view
 from app.views.config.config_form import (
@@ -584,11 +584,7 @@ class ConfigView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = theme.ERROR):
         """顯示 SnackBar 訊息提示"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
+        show_snack(self.page, message, color)
 
     def add_model_row(self, model_name: str):
         """新增模型項目到列表"""

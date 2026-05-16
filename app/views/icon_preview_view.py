@@ -6,15 +6,14 @@
 
 import flet as ft
 import json
-import os
 import hashlib
-import platform
 import re
 import zipfile
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime, timezone
 from app.ui import theme
+from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_info, log_warning, log_error
 from types import SimpleNamespace
 
@@ -608,7 +607,6 @@ def _load_entries_cache_l2(source_root: Path) -> list | None:
 
 def _save_entries_cache_l2(source_root: Path, entries: list):
     """寫入 L2 磁碟快取（atomic write）。"""
-    import tempfile
 
     cache_dir = _get_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -1008,7 +1006,6 @@ class IconPreviewView(ft.Column):
             self.progress_text.value = f"正在掃描：0 / {total_steps}"
             self.update()
 
-        processed = 0
 
         if mode == "jar_directory":
             log_info("[IconPreview] 使用 JAR 目錄模式掃描")
@@ -1229,7 +1226,7 @@ class IconPreviewView(ft.Column):
             self.list_view.controls.append(
                 ft.ListTile(
                     title=ft.Text("無符合結果", color=theme.GREY_600),
-                    subtitle=ft.Text(f"嘗試不同的關鍵字"),
+                    subtitle=ft.Text("嘗試不同的關鍵字"),
                 )
             )
             self.page_info.value = ""
@@ -1247,7 +1244,7 @@ class IconPreviewView(ft.Column):
     def _render_mod_search_page(self):
         """渲染搜尋結果的目前頁（PR61 Issue 1）"""
         matched = self._mod_search_matched
-        total = len(matched)
+        len(matched)
 
         start = self._mod_search_page * self.mod_page_size
         end = start + self.mod_page_size
@@ -1449,23 +1446,7 @@ class IconPreviewView(ft.Column):
         - 使用 page.overlay
         - 不會被 ListView / update 吃掉
         """
-        log_info(f"[UI] SnackBar: {message}")
-        # 清除累積的舊 SnackBar，避免 overlay 無限膨脹
-        # Flet 0.28.3 的 page.overlay 是唯讀屬性（無 setter），需 in-place 修改
-        for i in range(len(self.page.overlay) - 1, -1, -1):
-            if isinstance(self.page.overlay[i], ft.SnackBar):
-                del self.page.overlay[i]
-        snack = ft.SnackBar(
-            content=ft.Text(message),
-            bgcolor=color,
-            duration=3000,
-        )
-
-        # ⚠️ 關鍵：一定要加在 overlay
-        self.page.overlay.append(snack)
-
-        snack.open = True
-        self.page.update()
+        show_snack(self.page, message, color, clear_existing=True, duration=3000)
 
     # ==================================================
     # 核心資料載入（只處理 JSON）
@@ -1709,7 +1690,7 @@ class IconPreviewView(ft.Column):
                 if getattr(e, "source_jar", None):
                     jar_to_entries[e.source_jar].append(e)
 
-            icon_total = len(jar_to_entries)
+            len(jar_to_entries)
 
             def _on_icon_progress(done: int, total: int):
                 _show_progress_phase(self, "提取模組圖示", done, total)
@@ -1718,7 +1699,7 @@ class IconPreviewView(ft.Column):
 
         # ===== 寫入 L2 磁碟快取 =====
         _save_entries_cache_l2(self.source_root, entries)
-        log_info(f"[IconPreview] 已寫入 L2 磁碟快取")
+        log_info("[IconPreview] 已寫入 L2 磁碟快取")
 
         return entries
 
@@ -1728,10 +1709,8 @@ class IconPreviewView(ft.Column):
         if self._detail_filtered_entries is not None:
             # 有搜尋條件，使用過濾後的 entries
             entries = self._detail_filtered_entries
-            search_active = True
         else:
             entries = self.mods.get(self.current_modid, [])
-            search_active = False
 
         total = len(entries)
 

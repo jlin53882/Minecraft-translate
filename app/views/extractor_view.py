@@ -14,7 +14,7 @@
 # /minecraft_translator_flet/app/views/extractor_view.py
 import flet as ft
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info
+from app.ui.snack import show_snack
 import threading
 
 from app.task_session import TaskSession
@@ -270,7 +270,7 @@ class ExtractorView(ft.Column):
         )
 
         try:
-            self.page.open(dialog)
+            self.page.show_dialog(dialog)
         except Exception:
             self.page.overlay.append(dialog)
             dialog.open = True
@@ -314,50 +314,36 @@ class ExtractorView(ft.Column):
         :param message: 要顯示的文字訊息
         :param color: SnackBar 的背景顏色，預設為淺紅色 (RED_400)
         """
-        log_info(f"[UI] SnackBar: {message}")
-        # 建立 SnackBar 元件，包含文字內容與背景顏色
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-
-        # 將 SnackBar 加入頁面的 overlay 層。
-        # 在現代 Flet 版本中，這是顯示彈出式元件（如 SnackBar, Dialog）的標準做法。
-        self.page.overlay.append(snack)
-
-        # 將 open 屬性設為 True 以觸發顯示動畫
-        snack.open = True
-
-        # 更新頁面，讓變更立即反映在 UI 上
-        self.page.update()
+        show_snack(self.page, message, color)
 
     # ==================================================
     # 預覽功能
     # ==================================================
     def show_preview(self, mode: str):
-        """显示提取预览对话框（lang 或 book 模式）"""
+        """顯示提取預覽對話框（lang 或 book 模式）"""
         return run_preview_flow(self, mode)
 
     def _show_preview_dialog_result_v2(self, result: dict, mode: str):
-        """显示预览结果对话框"""
+        """顯示預覽結果對話框"""
         dialog = build_preview_result_dialog(self, result, mode)
         try:
-            self.page.open(dialog)
+            self.page.show_dialog(dialog)
         except Exception as ex:
             self._append_log_line(f"[ERROR] 顯示對話框失敗: {ex}")
 
     def _show_preview_dialog_error_v2(self, error: str, mode: str):
-        """显示预览错误对话框"""
+        """顯示預覽錯誤對話框"""
         self._preview_error_dialog = build_preview_error_dialog(self, error, mode)
         try:
-            self.page.open(self._preview_error_dialog)
+            self.page.show_dialog(self._preview_error_dialog)
         except Exception as ex:
             self._append_log_line(f"[ERROR] 顯示錯誤對話框失敗: {ex}")
 
     def _close_dialog_overlay(self, dialog):
         """關閉 overlay 對話框"""
         try:
-            # 使用 Flet 官方推薦的關閉方式
-            self.page.close(dialog)
+            self.page.pop()
         except Exception:
-            # 如果 page.close() 失敗，改用手動方式
             dialog.open = False
             if dialog in self.page.overlay:
                 self.page.overlay.remove(dialog)

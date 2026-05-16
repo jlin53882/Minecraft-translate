@@ -6,7 +6,7 @@
 
 import flet as ft
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info
+from app.ui.snack import show_snack
 from app.views.cache_manager.cache_state import CacheQueryState
 from app.services_impl.cache.cache_services import (
     cache_get_entry_service,
@@ -622,11 +622,7 @@ class CacheQueryPanel(ft.Container):
 
     def _show_snack_bar(self, message: str, color: str):
         """顯示 SnackBar"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self._page.overlay.append(snack)
-        snack.open = True
-        self._page.update()
+        show_snack(self.page, message, color)
 
     @property
     def page(self):

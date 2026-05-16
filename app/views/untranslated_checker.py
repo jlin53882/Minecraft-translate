@@ -9,7 +9,7 @@ from typing import List
 from app.views.qc_base import QCBase
 from app.services import run_untranslated_check_service
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info
+from app.ui.snack import show_snack
 
 
 class UntranslatedChecker(ft.Container):
@@ -161,11 +161,7 @@ class UntranslatedChecker(ft.Container):
 
     def _show_snack_bar(self, message: str, color: str = theme.ERROR):
         """顯示 SnackBar 訊息提示"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
+        show_snack(self.page, message, color)
 
     def _on_start(self, e):
         """處理開始檢查任務"""

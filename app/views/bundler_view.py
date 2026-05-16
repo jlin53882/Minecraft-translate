@@ -11,6 +11,7 @@ from translation_tool.utils.log_unit import log_debug
 
 from app.ui import theme
 from app.ui.components import styled_card
+from app.ui.snack import show_snack
 from app.services_impl.config_service import load_config_json
 
 
@@ -377,10 +378,7 @@ class BundlerView(ft.Column):
             self._page.update()
 
     def _show_snack_bar(self, message: str, color: str = theme.ERROR):
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self._page.overlay.append(snack)
-        snack.open = True
-        self._page.update()
+        show_snack(self._page, message, color)
 
     def start_bundling_clicked(self, e: ft.ControlEvent):
         root_dir = self.root_dir_field.value or ""

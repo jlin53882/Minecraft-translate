@@ -11,11 +11,11 @@ from typing import Any
 import flet as ft
 
 from app.logging import LogPresenter
-from translation_tool.utils.log_unit import log_info
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
 from app.task_session import TaskSession
 from app.ui import theme
 from app.ui.components import primary_button, styled_card
+from app.ui.snack import show_snack
 
 
 class MergeView(ft.Column):
@@ -500,11 +500,7 @@ class MergeView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = theme.ERROR) -> None:
         """顯示 SnackBar 訊息。"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
+        show_snack(self.page, message, color)
 
     def _show_merge_summary(self, summary: dict[str, Any]) -> None:
         """顯示合併結果摘要（使用 overlay 確保穩定顯示）。"""
@@ -611,7 +607,7 @@ class MergeView(ft.Column):
     def _close_dialog_overlay(self, dialog: ft.AlertDialog) -> None:
         """關閉 overlay 對話框。"""
         try:
-            self.page.close(dialog)
+            self.page.pop()
         except Exception:
             dialog.open = False
             if dialog in self.page.overlay:

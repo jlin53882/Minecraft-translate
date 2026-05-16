@@ -53,6 +53,7 @@ from app.services_impl.cache.cache_services import (
     cache_update_dst_service,
     cache_rebuild_index_service,  # A3 搜尋功能
 )
+from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
 
@@ -1503,12 +1504,7 @@ class CacheView(ft.Column):
         :param message: 要顯示的文字訊息
         :param color: SnackBar 的背景顏色，預設為 RED_400
         """
-        # 記錄 snackbar 顯示到日誌
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
+        show_snack(self.page, message, color)
 
     def _append_log(self, text: str):
         """新增日誌訊息並根據等級記錄"""

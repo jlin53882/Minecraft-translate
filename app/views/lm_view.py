@@ -9,7 +9,8 @@ import time
 
 import flet as ft
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info, log_debug
+from app.ui.snack import show_snack
+from translation_tool.utils.log_unit import log_debug
 
 # UI 共用元件：統一卡片/按鈕樣式
 from app.ui.components import primary_button, styled_card
@@ -331,11 +332,7 @@ class LMView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = theme.ERROR):
         """顯示 SnackBar 訊息提示"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
+        show_snack(self.page, message, color)
 
     @property
     def page(self):

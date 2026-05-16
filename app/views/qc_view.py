@@ -11,7 +11,7 @@ from typing import Callable, Tuple, Any
 
 # 導入 UI 主題
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info
+from app.ui.snack import show_snack
 
 # 導入我們需要的服務
 from app.services import (
@@ -218,11 +218,7 @@ class QCView(ft.Column):
 
     def _show_snack_bar(self, message: str, color: str = theme.ERROR):
         """顯示 SnackBar 訊息提示"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
+        show_snack(self.page, message, color)
 
     def pick_file_or_directory_with_tkinter(
         self,
