@@ -274,7 +274,25 @@ class MergeView(ft.Column):
             border_radius=10,
         )
 
+        self._info_container = ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(ft.Icons.INFO_OUTLINE, color=theme.BLUE, size=18),
+                    ft.Text(
+                        "📁 輸出資料夾說明：請使用「整理」資料夾（key數≥閥值）送機器翻譯",
+                        size=12,
+                        color=theme.GREY_700,
+                    ),
+                ],
+                spacing=8,
+            ),
+            padding=10,
+            bgcolor=theme.BLUE_50,
+            border_radius=8,
+        )
+
         self.controls = [
+            self._info_container,
             styled_card(
                 title="ZIP 清單",
                 icon=ft.Icons.ARCHIVE,
