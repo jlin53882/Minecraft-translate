@@ -22,6 +22,7 @@ NAV_ITEMS = [
     {"id": "general", "label": "一般設定", "icon": ft.Icons.SETTINGS},
     {"id": "api_models", "label": "API & 模型設定", "icon": ft.Icons.KEY},
     {"id": "translation_behavior", "label": "翻譯行為設定", "icon": ft.Icons.TRANSLATE},
+    {"id": "merger", "label": "語言合併器設定", "icon": ft.Icons.MERGE_TYPE},
     {"id": "prompts", "label": "提示詞管理", "icon": ft.Icons.MESSAGE},
     {"id": "species_lookup", "label": "學名查詢管理", "icon": ft.Icons.SEARCH},
     {"id": "batch_limits", "label": "批次與限制", "icon": ft.Icons.DEVELOPER_BOARD},
