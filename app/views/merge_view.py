@@ -611,15 +611,10 @@ class MergeView(ft.Column):
     def _close_dialog_overlay(self, dialog: ft.AlertDialog) -> None:
         """關閉 overlay 對話框。"""
         try:
-            self.page.close(dialog)
-        except Exception:
             dialog.open = False
-            if dialog in self.page.overlay:
-                self.page.overlay.remove(dialog)
-            try:
-                self.page.update()
-            except Exception:
-                pass
+            self.page.update()
+        except Exception:
+            pass
 
     @property
     def page(self):
