@@ -22,10 +22,10 @@ def test_extractor_view_has_preview_and_extract_buttons(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
 
-    assert view.lang_button.content == '提取 Lang'
-    assert view.book_button.content == '提取 Book'
-    assert view.preview_lang_button.content == '預覽 Lang'
-    assert view.preview_book_button.content == '預覽 Book'
+    assert view.lang_button.text == '提取 Lang'
+    assert view.book_button.text == '提取 Book'
+    assert view.preview_lang_button.text == '預覽 Lang'
+    assert view.preview_book_button.text == '預覽 Book'
 
 
 def test_clear_output_path_appends_system_log(monkeypatch):

@@ -354,17 +354,10 @@ class ExtractorView(ft.Column):
     def _close_dialog_overlay(self, dialog):
         """關閉 overlay 對話框"""
         try:
-            # 使用 Flet 官方推薦的關閉方式
-            self.page.close(dialog)
-        except Exception:
-            # 如果 page.close() 失敗，改用手動方式
             dialog.open = False
-            if dialog in self.page.overlay:
-                self.page.overlay.remove(dialog)
-            try:
-                self.page.update()
-            except Exception:
-                pass
+            self.page.update()
+        except Exception:
+            pass
 
     def _start_from_preview_overlay(self, dialog, mode: str):
         """從預覽對話框開始提取（overlay 版本）"""
