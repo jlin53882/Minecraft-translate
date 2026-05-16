@@ -188,7 +188,7 @@ def run_extraction_process_impl(
     log.info("開始從 %s 個 .jar 檔案中提取 %s 檔案...", total_jars, process_name)
     yield {'progress': 0.0}
 
-    all_scan_results = scan_jars(jar_dir=mods_dir, patterns=[target_regex.pattern])
+    all_scan_results = scan_jars(jar_dir=Path(mods_dir), patterns=[target_regex.pattern])
 
     processed_count = 0
     total_extracted = 0
