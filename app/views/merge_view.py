@@ -12,6 +12,7 @@ import flet as ft
 
 from app.logging import LogPresenter
 from translation_tool.utils.log_unit import log_info
+from translation_tool.utils.config_manager import load_config
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
 from app.task_session import TaskSession
 from app.ui import theme
@@ -508,6 +509,11 @@ class MergeView(ft.Column):
 
     def _show_merge_summary(self, summary: dict[str, Any]) -> None:
         """顯示合併結果摘要（使用 overlay 確保穩定顯示）。"""
+        cfg = load_config()
+        lang_merger_cfg = cfg.get("lang_merger", {})
+        pending_name = lang_merger_cfg.get("pending_folder_name", "待翻譯")
+        organized_name = lang_merger_cfg.get("pending_organized_folder_name", "待翻譯整理需翻譯")
+
         s_zips = summary.get("success_zips", 0)
         f_zips = summary.get("failed_zips", 0)
         failed_list = summary.get("failed_zips_list", [])
@@ -517,7 +523,8 @@ class MergeView(ft.Column):
         oc_rows = []
         for label, count in [
             ("lang_output", oc.get("lang_output", 0)),
-            ("待翻譯", oc.get("待翻譯", 0)),
+            (pending_name, oc.get(pending_name, 0)),
+            (organized_name, oc.get(organized_name, 0)),
             ("patchouli_output", oc.get("patchouli_output", 0)),
             ("other_output", oc.get("other_output", 0)),
             ("errordata_output", oc.get("errordata_output", 0)),
