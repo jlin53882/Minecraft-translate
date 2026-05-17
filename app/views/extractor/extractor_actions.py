@@ -5,13 +5,16 @@ import threading
 from translation_tool.utils.log_unit import log_warning
 import time
 from pathlib import Path
+from typing import Any
 
 import flet as ft
 
-from app.logging import LogPresenter
-from app.services_impl.pipelines.extract_service import (
-    run_book_extraction_service,
-    run_lang_extraction_service,
+from app.logging import LogPresenter, LogEntry
+from app.logging.task_session import TaskSession
+from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
+from translation_tool.core.jar_processor import (
+    extract_book_files_generator,
+    extract_lang_files_generator,
 )
 from app.views.extractor.extractor_state import PreviewState
 
@@ -107,6 +110,57 @@ def start_ui_poller(view, mode: str = ''):
 
     threading.Thread(target=poll, daemon=True).start()
 
+def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
+    """方案 2：Worker 直接更新 UI（廢除 poller），與 BundlerView 架構一致。
+
+    每個 update：直接呼叫 view._append_log_line() + page.update()，
+    不再透過 session.snapshot() + poller 中轉。
+    """
+    view._extraction_stats = {'success': 0, 'warnings': 0, 'failures': 0, 'total_files': 0}
+
+    generator = extract_lang_files_generator(mods_dir, output_dir) if mode == 'lang' else extract_book_files_generator(mods_dir, output_dir)
+
+    for update in generator:
+        filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
+        if filtered is None:
+            continue
+
+        log_msg = filtered.get("log", "")
+        if log_msg:
+            view._append_log_line(log_msg)
+            update_stats_from_log(view, log_msg)
+
+        if "progress" in filtered:
+            progress = filtered["progress"]
+            view.status_text.value = f'狀態：提取 {mode} 中... ({int(progress * 100)}%)'
+            view.progress_bar.value = progress
+
+        is_error = filtered.get("error", False)
+        if is_error:
+            view.progress_bar.color = ft.Colors.RED
+
+        view.page.update()
+
+    final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
+    if final and "log" in final:
+        view._append_log_line(final["log"])
+        update_stats_from_log(view, final["log"])
+
+    snap = view.session.snapshot()
+    status = snap['status']
+
+    if status == 'DONE':
+        view.status_text.value = '狀態：完成'
+        view.progress_bar.value = 1.0
+        view._show_extraction_summary(mode)
+    elif status == 'ERROR':
+        view.status_text.value = '狀態：發生錯誤'
+        view.progress_bar.color = ft.Colors.RED
+
+    view.set_controls_disabled(False)
+    view.page.update()
+
+
 def start_extraction(view, mode: str):
     """启动 JAR 文件提取任务，根据 mode 选择 lang 或 book 提取服务"""
     snap = view.session.snapshot()
@@ -128,10 +182,8 @@ def start_extraction(view, mode: str):
 
     suffix = '_提取lang_輸出' if mode == 'lang' else '_提取book_輸出'
     if output_dir:
-        # 使用者指定輸出目錄 → 自動再多包一層資料夾
         output_dir = str(Path(output_dir) / suffix)
     else:
-        # 未指定 → 以 mods 資料夾為基準自動產生
         output_dir = str(mods_path.with_name(mods_path.name + suffix))
         view._append_log_line(f'[系統] 自動設定輸出路徑：{output_dir}')
 
@@ -149,10 +201,10 @@ def start_extraction(view, mode: str):
     view.log_view.controls.clear()
     view.session.start()
     view._append_log_line(f'[系統] 開始任務 ({mode})...')
-    start_ui_poller(view, mode=mode)
+    view.progress_bar.value = 0
+    view.progress_bar.color = ft.Colors.BLUE
 
-    target = run_lang_extraction_service if mode == 'lang' else run_book_extraction_service
-    threading.Thread(target=target, args=(mods_dir, str(out_path), view.session), daemon=True).start()
+    threading.Thread(target=_extraction_worker, args=(view, mode, mods_dir, str(out_path)), daemon=True).start()
 
 def build_preview_result_dialog(view, result: dict, mode: str):
     """构建提取预览结果对话框，显示找到的文件数量和大小"""

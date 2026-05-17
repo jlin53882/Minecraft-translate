@@ -2,6 +2,8 @@
 
 PR19：將 extract 類 service 從 app.services.py 抽離到 pipelines 子模組，
 由 app.services 持續做 façade / re-export，維持 UI import 相容。
+
+方案 2（廢除 poller）：worker 直接更新 UI，與 BundlerView 架構一致。
 """
 
 from __future__ import annotations
@@ -22,6 +24,36 @@ from translation_tool.core.jar_processor import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _run_extraction(
+    mods_dir: str,
+    output_dir: str,
+    session: TaskSession,
+    mode: str,
+) -> None:
+    """Worker 主體：直接更新 UI，不依賴 poller。"""
+    generator = extract_lang_files_generator(mods_dir, output_dir) if mode == 'lang' else extract_book_files_generator(mods_dir, output_dir)
+
+    for update in generator:
+        filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
+        if filtered is None:
+            continue
+
+        if "log" in filtered:
+            session.add_log(filtered["log"])
+
+        if "progress" in filtered:
+            session.set_progress(filtered["progress"])
+
+        if filtered.get("error"):
+            session.set_error()
+            return
+
+    final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
+    if final and "log" in final:
+        session.add_log(final["log"])
+    session.finish()
 
 
 def run_lang_extraction_service(
