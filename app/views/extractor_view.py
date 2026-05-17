@@ -94,13 +94,14 @@ class ExtractorView(ft.Column):
 
         self.output_dir_textfield = ft.TextField(
             hint_text="（未指定將自動產生）",
-            helper="未指定時自動產生（路徑 + 設定名稱）：\n路徑：C:\\games\\minecraft\\mods + _提取lang_輸出 = C:\\games\\minecraft\\mods_提取lang_輸出\n路徑：C:\\games\\minecraft\\mods + _預覽book_輸出 = C:\\games\\minecraft\\mods_預覽book_輸出\n路徑：C:\\games\\minecraft\\mods + _zh_tw_output = C:\\games\\minecraft\\mods_zh_tw_output\n\n預設抽取語系：zh_cn / zh_tw / en_us\n選項：可勾選「跳過 zh_cn 抽取」（預設關閉）",
             expand=True,
             dense=True,
             border_color=theme.OUTLINE,
             text_size=14,
             content_padding=15,
         )
+
+        self.output_dir_helper_text = ft.Text("", size=12, color=ft.Colors.GREY_600)
 
         self.skip_zh_cn_switch = ft.Switch(
             label="跳過 zh_cn 抽取",
@@ -185,6 +186,9 @@ class ExtractorView(ft.Column):
             self._build_logs_card(),
         ]
 
+        # 初始化 output_dir helper，動態讀取設定值
+        self._update_output_dir_helper()
+
     def _build_settings_card(self):
         """构建设置卡片 UI 组件"""
         # delegate to panel builder; actual card仍使用 shared styled_card(...)
@@ -224,6 +228,38 @@ class ExtractorView(ft.Column):
             self._show_snack_bar("未選擇資料夾", color=theme.BLUE_600)
 
     # 僅在按「預覽/提取」時自動填入輸出路徑，選擇資料夾時不自動填入
+    def _update_output_dir_helper(self):
+        """動態更新 output_dir_textfield 的 helper，顯示實際的資料夾命名設定。"""
+        from translation_tool.utils.config_manager import load_config
+        config = load_config()
+        folder_names = config.get("extractor", {}).get("output_folder_names", {})
+        lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
+        book_extract = folder_names.get("book_extract", "_提取book_輸出")
+        dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
+        lang_preview = folder_names.get("lang_preview", "_預覽lang_輸出")
+        book_preview = folder_names.get("book_preview", "_預覽book_輸出")
+
+        helper_text = (
+            f"未指定時自動產生（路徑 + 設定名稱）：\n"
+            f"  • Lang 提取：...mods + {lang_extract}\n"
+            f"  • Book 提取：...mods + {book_extract}\n"
+            f"  • Dual 提取：...mods + {dual_extract}\n"
+            f"  • Lang 預覽：...mods + {lang_preview}\n"
+            f"  • Book 預覽：...mods + {book_preview}\n\n"
+            f"預設抽取語系：zh_cn / zh_tw / en_us\n"
+            f"選項：可勾選「跳過 zh_cn 抽取」（預設關閉）"
+        )
+        self.output_dir_textfield.helper_text = (
+            f"未指定時自動產生（路徑 + 設定名稱）：\n"
+            f"  • Lang 提取：...mods + {lang_extract}\n"
+            f"  • Book 提取：...mods + {book_extract}\n"
+            f"  • Dual 提取：...mods + {dual_extract}\n"
+            f"  • Lang 預覽：...mods + {lang_preview}\n"
+            f"  • Book 預覽：...mods + {book_preview}\n\n"
+            f"預設抽取語系：zh_cn / zh_tw / en_us\n"
+            f"選項：可勾選「跳過 zh_cn 抽取」（預設關閉）"
+        )
+
     def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
         """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。"""
         from translation_tool.utils.config_manager import load_config
