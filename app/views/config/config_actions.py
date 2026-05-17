@@ -51,6 +51,8 @@ def load_config_into_view(view, config: dict):
     view.controls_map['extractor.output_folder_names.book_extract'].value = folder_names.get('book_extract', '_提取book_輸出')
     view.controls_map['extractor.output_folder_names.lang_preview'].value = folder_names.get('lang_preview', '_預覽lang_輸出')
     view.controls_map['extractor.output_folder_names.book_preview'].value = folder_names.get('book_preview', '_預覽book_輸出')
+    view.controls_map['extractor.output_folder_names.dual_extract'].value = folder_names.get('dual_extract', '_提取both_輸出')
+    view.controls_map['extractor.output_folder_names.dual_preview'].value = folder_names.get('dual_preview', '_預覽both_輸出')
 
     view.models_column.controls.clear()
     models_cfg = lm_cfg.get('models')
@@ -114,6 +116,8 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
             'book_extract': view.controls_map['extractor.output_folder_names.book_extract'].value,
             'lang_preview': view.controls_map['extractor.output_folder_names.lang_preview'].value,
             'book_preview': view.controls_map['extractor.output_folder_names.book_preview'].value,
+            'dual_extract': view.controls_map['extractor.output_folder_names.dual_extract'].value,
+            'dual_preview': view.controls_map['extractor.output_folder_names.dual_preview'].value,
         }
         api_keys = [key_field.value.strip() for key_field in view.key_fields if key_field.value and key_field.value.strip()]
         validate_api_keys_from_ui_fn(api_keys)

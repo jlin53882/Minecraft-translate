@@ -266,6 +266,12 @@ class ConfigView(ft.Column):
         self.controls_map["extractor.output_folder_names.book_preview"] = ft.TextField(
             label="Book 預覽輸出資料夾", helper="未填入輸出路徑時自動帶入此名稱", dense=True
         )
+        self.controls_map["extractor.output_folder_names.dual_extract"] = ft.TextField(
+            label="Dual 提取輸出資料夾", helper="Lang + Book 同時提取時使用", dense=True
+        )
+        self.controls_map["extractor.output_folder_names.dual_preview"] = ft.TextField(
+            label="Dual 預覽輸出資料夾", helper="Lang + Book 同時預覽時使用", dense=True
+        )
 
         self.new_model_field = ft.TextField(
             label="新增模型名稱", hint_text="gemini-2.5-flash", expand=True, dense=True
@@ -446,10 +452,12 @@ class ConfigView(ft.Column):
                     ft.Row([
                         ft.Column([self.controls_map["extractor.output_folder_names.lang_extract"]], expand=1),
                         ft.Column([self.controls_map["extractor.output_folder_names.book_extract"]], expand=1),
+                        ft.Column([self.controls_map["extractor.output_folder_names.dual_extract"]], expand=1),
                     ]),
                     ft.Row([
                         ft.Column([self.controls_map["extractor.output_folder_names.lang_preview"]], expand=1),
                         ft.Column([self.controls_map["extractor.output_folder_names.book_preview"]], expand=1),
+                        ft.Column([self.controls_map["extractor.output_folder_names.dual_preview"]], expand=1),
                     ]),
                 ]),
             ],

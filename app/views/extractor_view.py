@@ -13,6 +13,7 @@
 
 # /minecraft_translator_flet/app/views/extractor_view.py
 import flet as ft
+from pathlib import Path
 from app.ui import theme
 from translation_tool.utils.log_unit import log_info
 import threading
@@ -39,6 +40,18 @@ class ExtractorView(ft.Column):
     - 若新增新的提取模式，務必沿用同一套 session + poller 流程。
     - stats 欄位是 UI 顯示用途；不要在核心流程依賴它當正確性來源。
     """
+
+    def _load_target_language():
+        """從 config 動態讀取預設目標語系。"""
+        from translation_tool.utils.config_manager import load_config
+        config = load_config()
+        return config.get("extractor", {}).get("target_language", "zh_tw")
+
+    def _load_target_language():
+        """從 config 動態讀取預設目標語系。"""
+        from translation_tool.utils.config_manager import load_config
+        config = load_config()
+        return config.get("extractor", {}).get("target_language", "zh_tw")
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """初始化 ExtractorView。
@@ -81,12 +94,17 @@ class ExtractorView(ft.Column):
 
         self.output_dir_textfield = ft.TextField(
             hint_text="（未指定將自動產生）",
-            helper="未指定時自動產生（路徑 + 設定名稱）：\n路徑：C:\\games\\minecraft\\mods + _提取lang_輸出 = C:\\games\\minecraft\\mods_提取lang_輸出\n路徑：C:\\games\\minecraft\\mods + _預覽book_輸出 = C:\\games\\minecraft\\mods_預覽book_輸出\n路徑：C:\\games\\minecraft\\mods + _zh_tw_output = C:\\games\\minecraft\\mods_zh_tw_output",
+            helper="未指定時自動產生（路徑 + 設定名稱）：\n路徑：C:\\games\\minecraft\\mods + _提取lang_輸出 = C:\\games\\minecraft\\mods_提取lang_輸出\n路徑：C:\\games\\minecraft\\mods + _預覽book_輸出 = C:\\games\\minecraft\\mods_預覽book_輸出\n路徑：C:\\games\\minecraft\\mods + _zh_tw_output = C:\\games\\minecraft\\mods_zh_tw_output\n\n預設抽取語系：zh_cn / zh_tw / en_us\n選項：可勾選「跳過 zh_cn 抽取」（預設關閉）",
             expand=True,
             dense=True,
             border_color=theme.OUTLINE,
             text_size=14,
             content_padding=15,
+        )
+
+        self.skip_zh_cn_switch = ft.Switch(
+            label="跳過 zh_cn 抽取",
+            value=False,
         )
 
         # 2. Action Buttons
@@ -123,6 +141,22 @@ class ExtractorView(ft.Column):
             "預覽 Book",
             icon=ft.Icons.PREVIEW,
             on_click=lambda e: self.show_preview("book"),
+        )
+        self.dual_extract_button = ft.Button(
+            "提取 Lang + Book",
+            icon=ft.Icons.LANGUAGE,
+            style=ft.ButtonStyle(
+                color=theme.WHITE,
+                bgcolor="#7B1FA2",
+                shape=ft.RoundedRectangleBorder(radius=6),
+                padding=20,
+            ),
+            on_click=lambda e: self.start_extraction("dual"),
+        )
+        self.dual_preview_button = ft.OutlinedButton(
+            "預覽 Lang + Book",
+            icon=ft.Icons.PREVIEW,
+            on_click=lambda e: self.show_preview("dual"),
         )
 
         # 3. Status Display
@@ -186,8 +220,26 @@ class ExtractorView(ft.Column):
         if result:
             target.value = result
             self.page.update()
+            if target == self.mods_dir_textfield:
+                self._auto_fill_output_path(result)
         else:
             self._show_snack_bar("未選擇資料夾", color=theme.BLUE_600)
+
+    def _auto_fill_output_path(self, mods_dir: str):
+        """根據 Mods 資料夾自動產生並填入輸出路徑（使用 dual 模式設定）。"""
+        from translation_tool.utils.config_manager import load_config
+
+        config = load_config()
+        folder_names = config.get("extractor", {}).get("output_folder_names", {})
+        lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
+        book_extract = folder_names.get("book_extract", "_提取book_輸出")
+
+        mods_path = Path(mods_dir)
+        suffix = mods_path.name + "_提取lang_輸出"
+        output_path = str(mods_path.with_name(suffix))
+        self.output_dir_textfield.value = output_path
+        self.page.update()
+        self._append_log_line(f"[系統] 自動設定輸出路徑：{output_path}")
 
     def set_controls_disabled(self, disabled: bool):
         """設定控制項停用/啟用狀態"""

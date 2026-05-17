@@ -14,9 +14,10 @@ from app.logging import LogPresenter, LogEntry
 from app.logging.task_session import TaskSession
 from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
 from translation_tool.core.jar_processor import (
-    extract_book_files_generator,
-    extract_lang_files_generator,
-)
+        extract_lang_files_generator,
+        extract_book_files_generator,
+        extract_dual_files_generator,
+    )
 from app.views.extractor.extractor_state import PreviewState
 
 def update_stats_from_log(view, line: str):
@@ -124,7 +125,13 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
     session = view.session
     session.start()
 
-    generator = extract_lang_files_generator(mods_dir, output_dir) if mode == 'lang' else extract_book_files_generator(mods_dir, output_dir)
+    skip_zh_cn = getattr(view, 'skip_zh_cn_switch', None) and view.skip_zh_cn_switch.value
+    if mode == 'lang':
+        generator = extract_lang_files_generator(mods_dir, output_dir, skip_zh_cn=skip_zh_cn)
+    elif mode == 'book':
+        generator = extract_book_files_generator(mods_dir, output_dir)
+    elif mode == 'dual':
+        generator = extract_dual_files_generator(mods_dir, output_dir, skip_zh_cn=skip_zh_cn)
 
     try:
         for update in generator:
@@ -212,7 +219,13 @@ def start_extraction(view, mode: str):
     folder_names = config.get("extractor", {}).get("output_folder_names", {})
     lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
     book_extract = folder_names.get("book_extract", "_提取book_輸出")
-    suffix = lang_extract if mode == 'lang' else book_extract
+    dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
+    if mode == 'lang':
+        suffix = lang_extract
+    elif mode == 'book':
+        suffix = book_extract
+    elif mode == 'dual':
+        suffix = dual_extract
     if output_dir:
         output_dir = str(Path(output_dir) / suffix)
     else:

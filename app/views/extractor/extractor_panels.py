@@ -60,6 +60,7 @@ def build_settings_card(view):
                             ],
                             spacing=5,
                         ),
+                        ft.Container(content=view.skip_zh_cn_switch),
                     ],
                 ),
                 ft.Container(
@@ -67,8 +68,8 @@ def build_settings_card(view):
                     content=ft.Column(
                         spacing=15,
                         controls=[
-                            ft.Row(controls=[view.lang_button, view.book_button], spacing=15),
-                            ft.Row(controls=[view.preview_lang_button, view.preview_book_button], spacing=15),
+                            ft.Row(controls=[view.lang_button, view.book_button, view.dual_extract_button], spacing=15),
+                            ft.Row(controls=[view.preview_lang_button, view.preview_book_button, view.dual_preview_button], spacing=15),
                             ft.Column(
                                 spacing=5,
                                 controls=[

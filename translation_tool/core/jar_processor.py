@@ -31,23 +31,28 @@ BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
     re.IGNORECASE,
 )
 
-def get_lang_codes() -> list[str]:
+def get_lang_codes(*, skip_zh_cn: bool = False) -> list[str]:
     """從 config 取得 jar_extractor.lang_codes，預設 ["en_us", "zh_tw", "zh_cn"]。
+    
+    Args:
+        skip_zh_cn: 是否跳過 zh_cn（從 extractor.skip_zh_cn_extract 讀取）。
     
     回傳值保證為非空 list。
     """
     cfg = load_config()
     codes = cfg.get("jar_extractor", {}).get("lang_codes", ["en_us", "zh_tw", "zh_cn"])
+    if skip_zh_cn and "zh_cn" in codes:
+        codes = [c for c in codes if c != "zh_cn"]
     if not isinstance(codes, list) or not codes:
         codes = ["en_us", "zh_tw", "zh_cn"]
     return codes
 
-def build_lang_file_regex() -> re.Pattern:
+def build_lang_file_regex(*, skip_zh_cn: bool = False) -> re.Pattern:
     """根據 config 中的 lang_codes 動態建 lang file regex。
     
     確保與 preview 使用的 regex 行為一致。
     """
-    codes = get_lang_codes()
+    codes = get_lang_codes(skip_zh_cn=skip_zh_cn)
     codes_str = "|".join(map(re.escape, codes))
     return re.compile(rf"(?:assets/([^/]+)/)?lang/({codes_str})\.(json|lang)$", re.IGNORECASE)
 
@@ -87,17 +92,18 @@ def _run_extraction_process(
         extract_from_jar_fn=_extract_from_jar,
     )
 
-def extract_lang_files_generator(mods_dir: str, output_dir: str) -> Generator[Dict[str, Any], None, None]:
+def extract_lang_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: bool = False) -> Generator[Dict[str, Any], None, None]:
     """從 mods 目錄提取語言檔。
 
     Args:
         mods_dir: Mod 目錄路徑
         output_dir: 輸出目錄路徑
+        skip_zh_cn: 是否跳過 zh_cn 抽取
 
     Yields:
         進度字典
     """
-    lang_file_regex = build_lang_file_regex()
+    lang_file_regex = build_lang_file_regex(skip_zh_cn=skip_zh_cn)
     yield from _run_extraction_process(
         mods_dir=mods_dir,
         output_dir=output_dir,
@@ -115,6 +121,32 @@ def extract_book_files_generator(mods_dir: str, output_dir: str) -> Generator[Di
     Yields:
         進度字典
     """
+    yield from _run_extraction_process(
+        mods_dir,
+        output_dir,
+        BOOK_PATH_REGEX_DUAL_STRUCTURE,
+        "Patchouli Book",
+    )
+
+def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: bool = False) -> Generator[Dict[str, Any], None, None]:
+    """從 mods 目錄依序提取語言檔與書本檔（dual 模式）。
+
+    Args:
+        mods_dir: Mod 目錄路徑
+        output_dir: 輸出目錄路徑
+        skip_zh_cn: 是否跳過 zh_cn 抽取
+
+    Yields:
+        進度字典
+    """
+    lang_file_regex = build_lang_file_regex(skip_zh_cn=skip_zh_cn)
+    yield from _run_extraction_process(
+        mods_dir=mods_dir,
+        output_dir=output_dir,
+        target_regex=lang_file_regex,
+        process_name="Lang",
+    )
+    yield {"log": "[系統] Lang 提取完成，開始提取 Book..."}
     yield from _run_extraction_process(
         mods_dir,
         output_dir,
