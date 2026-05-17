@@ -340,14 +340,18 @@ class ExtractorView(ft.Column):
         dialog = build_preview_result_dialog(self, result, mode)
         self.page.overlay.append(dialog)
         dialog.open = True
-        self.page.update()
+        def _do_update(_):
+            self.page.update()
+        self.page.run_task(_do_update, None)
 
     def _show_preview_dialog_error_v2(self, error: str, mode: str):
         """显示预览错误对话框"""
         self._preview_error_dialog = build_preview_error_dialog(self, error, mode)
         self.page.overlay.append(self._preview_error_dialog)
         self._preview_error_dialog.open = True
-        self.page.update()
+        def _do_update(_):
+            self.page.update()
+        self.page.run_task(_do_update, None)
 
     def _close_dialog_overlay(self, dialog):
         """關閉 overlay 對話框"""
