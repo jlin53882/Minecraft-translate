@@ -302,11 +302,16 @@ def show_preview(view, mode: str):
     view._show_snack_bar(f'正在掃描 {mode.upper()} 檔案...', ft.Colors.BLUE_600)
     view._append_log_line('[系統] 開始預覽掃描...')
     view.set_controls_disabled(True)
+    from translation_tool.core.jar_processor import preview_extraction_generator, find_jar_files
+    jar_files = find_jar_files(mods_dir)
+    total_jars = len(jar_files)
+
     preview_state = PreviewState()
+    preview_state.total = total_jars
+    preview_state.current = 0
 
     def do_preview():
         """执行预览扫描生成器，收集提取结果"""
-        from translation_tool.core.jar_processor import preview_extraction_generator
         try:
             for update in preview_extraction_generator(mods_dir, mode):
                 if 'error' in update:
@@ -325,7 +330,7 @@ def show_preview(view, mode: str):
 
     threading.Thread(target=do_preview, daemon=True).start()
 
-def poll():
+    def poll():
         """轮询预览状态并更新 UI"""
         while not preview_state.done:
             view.progress_bar.value = preview_state.progress
