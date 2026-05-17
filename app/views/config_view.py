@@ -25,7 +25,7 @@ NAV_ITEMS = [
     {"id": "prompts", "label": "提示詞管理", "icon": ft.Icons.MESSAGE},
     {"id": "species_lookup", "label": "學名查詢管理", "icon": ft.Icons.SEARCH},
     {"id": "batch_limits", "label": "批次與限制", "icon": ft.Icons.DEVELOPER_BOARD},
-    {"id": "extractor", "label": "提取器設定", "icon": ft.Icons.FOLDER_OPEN},
+    {"id": "extractor", "label": "Jar 提取設定", "icon": ft.Icons.FOLDER_OPEN},
 ]
 
 
@@ -442,7 +442,7 @@ class ConfigView(ft.Column):
         extractor_content = ft.Column(
             spacing=15,
             controls=[
-                self._build_card("提取器輸出資料夾命名 (Extractor Output Folders)", [
+                self._build_card("JAR 輸出資料夾命名", [
                     ft.Row([
                         ft.Column([self.controls_map["extractor.output_folder_names.lang_extract"]], expand=1),
                         ft.Column([self.controls_map["extractor.output_folder_names.book_extract"]], expand=1),
