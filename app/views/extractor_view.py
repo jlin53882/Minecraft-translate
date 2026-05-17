@@ -337,7 +337,7 @@ class ExtractorView(ft.Column):
         """显示提取预览对话框（lang 或 book 模式）"""
         return run_preview_flow(self, mode)
 
-    def _show_preview_dialog_result_v2(self, result: dict, mode: str):
+    def _show_preview_dialog_result(self, result: dict, mode: str):
         """显示预览结果对话框"""
         dialog = build_preview_result_dialog(self, result, mode)
         self.page.overlay.append(dialog)
@@ -346,7 +346,7 @@ class ExtractorView(ft.Column):
             self.page.update()
         self.page.run_task(_do_update, None)
 
-    def _show_preview_dialog_error_v2(self, error: str, mode: str):
+    def _show_preview_dialog_error(self, error: str, mode: str):
         """显示预览错误对话框"""
         self._preview_error_dialog = build_preview_error_dialog(self, error, mode)
         self.page.overlay.append(self._preview_error_dialog)

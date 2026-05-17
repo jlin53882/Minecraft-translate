@@ -362,7 +362,7 @@ def show_preview(view, mode: str):
 
         if preview_state.error:
             view._append_log_line(f'[ERROR] 預覽錯誤：{preview_state.error}')
-            view._show_preview_dialog_error_v2(preview_state.error, mode)
+            view._show_preview_dialog_error(preview_state.error, mode)
         elif preview_state.result:
             result = preview_state.result
             view._append_log_line(f"[系統] 找到 {result.get('total_files', 0)} 個檔案，準備顯示預覽對話框")
@@ -385,7 +385,7 @@ def show_preview(view, mode: str):
                     view._append_log_line(f'[ERROR] {traceback.format_exc()}')
             else:
                 view._append_log_line('[系統] ⚠️ 未設定輸出路徑，跳過報告生成')
-            view._show_preview_dialog_result_v2(result, mode)
+            view._show_preview_dialog_result(result, mode)
         else:
             view._append_log_line('[WARN] 預覽無結果')
             view._show_snack_bar('預覽無結果', ft.Colors.ORANGE_400)
