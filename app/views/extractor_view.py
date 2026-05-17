@@ -358,9 +358,13 @@ class ExtractorView(ft.Column):
         self.page.run_task(_do_update, None)
 
     def _close_dialog_overlay(self, dialog):
-        """關閉 overlay 對話框"""
+        """關閉 overlay 對話框並重置 UI 狀態"""
         try:
             dialog.open = False
+            self.status_text.value = '狀態：閒置'
+            self.progress_bar.value = 0
+            self.progress_bar.color = ft.Colors.BLUE
+            self.set_controls_disabled(False)
             self.page.update()
         except Exception:
             pass
