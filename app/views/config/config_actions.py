@@ -45,6 +45,13 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('skip_terms', ['api documentation', 'api docs', 'documentation', 'discord', 'github', 'homepage', 'mod page', 'modpack', 'official website', 'patreon']))
     view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('translatable_keywords', ['text', 'name', 'title', 'description', 'subtitle', 'hover', 'note', 'warning', 'quote', 'paragraph', 'body', 'header', 'footer', 'heading', 'effects']))
 
+    extractor_cfg = config.get('extractor', {})
+    folder_names = extractor_cfg.get('output_folder_names', {})
+    view.controls_map['extractor.output_folder_names.lang_extract'].value = folder_names.get('lang_extract', '_提取lang_輸出')
+    view.controls_map['extractor.output_folder_names.book_extract'].value = folder_names.get('book_extract', '_提取book_輸出')
+    view.controls_map['extractor.output_folder_names.lang_preview'].value = folder_names.get('lang_preview', '_預覽lang_輸出')
+    view.controls_map['extractor.output_folder_names.book_preview'].value = folder_names.get('book_preview', '_預覽book_輸出')
+
     view.models_column.controls.clear()
     models_cfg = lm_cfg.get('models')
     if 'models' not in lm_cfg:
@@ -102,6 +109,12 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
         new_config['lm_translator']['patchouli']['dir_names'] = [line.strip() for line in view.controls_map['lm_translator.patchouli.dir_names'].value.splitlines() if line.strip()]
         new_config['lm_translator']['translator']['skip_terms'] = [line.strip() for line in view.controls_map['lm_translator.translator.skip_terms'].value.splitlines() if line.strip()]
         new_config['lm_translator']['translator']['translatable_keywords'] = [line.strip() for line in view.controls_map['lm_translator.translator.translatable_keywords'].value.splitlines() if line.strip()]
+        new_config['extractor']['output_folder_names'] = {
+            'lang_extract': view.controls_map['extractor.output_folder_names.lang_extract'].value,
+            'book_extract': view.controls_map['extractor.output_folder_names.book_extract'].value,
+            'lang_preview': view.controls_map['extractor.output_folder_names.lang_preview'].value,
+            'book_preview': view.controls_map['extractor.output_folder_names.book_preview'].value,
+        }
         api_keys = [key_field.value.strip() for key_field in view.key_fields if key_field.value and key_field.value.strip()]
         validate_api_keys_from_ui_fn(api_keys)
         new_config['lm_translator']['keys'] = api_keys
