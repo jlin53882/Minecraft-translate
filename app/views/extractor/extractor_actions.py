@@ -139,16 +139,23 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
 
             if "progress" in filtered:
                 progress = filtered["progress"]
-                view.status_text.value = f'提取 {mode} 中... ({int(progress * 100)}%)'
-                view.progress_bar.value = progress
+                status_text = f'提取 {mode} 中... ({int(progress * 100)}%)'
+
+                async def _do_update(_):
+                    view.status_text.value = status_text
+                    view.progress_bar.value = progress
+                    view.page.update()
+
+                view.page.run_task(_do_update, None)
 
             is_error = filtered.get("error", False)
             if is_error:
-                view.progress_bar.color = ft.Colors.RED
+                async def _do_error(_):
+                    view.progress_bar.color = ft.Colors.RED
+                    view.page.update()
+                view.page.run_task(_do_error, None)
                 session.set_error()
                 break
-
-            view.page.update()
 
         final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
         if final and "log" in final:
@@ -167,11 +174,11 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
         status = session.snapshot()['status']
 
         if status == 'DONE':
-            view.status_text.value = '狀態：完成'
+            view.status_text.value = '完成'
             view.progress_bar.value = 1.0
             view._show_extraction_summary(mode)
         elif status == 'ERROR':
-            view.status_text.value = '狀態：發生錯誤'
+            view.status_text.value = '發生錯誤'
             view.progress_bar.color = ft.Colors.RED
 
         view.set_controls_disabled(False)
