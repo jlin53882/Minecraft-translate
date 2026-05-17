@@ -255,16 +255,16 @@ class ConfigView(ft.Column):
         )
 
         self.controls_map["extractor.output_folder_names.lang_extract"] = ft.TextField(
-            label="Lang 提取輸出資料夾", dense=True
+            label="Lang 提取輸出資料夾", helper="未填入輸出路徑時自動帶入此名稱", dense=True
         )
         self.controls_map["extractor.output_folder_names.book_extract"] = ft.TextField(
-            label="Book 提取輸出資料夾", dense=True
+            label="Book 提取輸出資料夾", helper="未填入輸出路徑時自動帶入此名稱", dense=True
         )
         self.controls_map["extractor.output_folder_names.lang_preview"] = ft.TextField(
-            label="Lang 預覽輸出資料夾", dense=True
+            label="Lang 預覽輸出資料夾", helper="未填入輸出路徑時自動帶入此名稱", dense=True
         )
         self.controls_map["extractor.output_folder_names.book_preview"] = ft.TextField(
-            label="Book 預覽輸出資料夾", dense=True
+            label="Book 預覽輸出資料夾", helper="未填入輸出路徑時自動帶入此名稱", dense=True
         )
 
         self.new_model_field = ft.TextField(
