@@ -221,7 +221,9 @@ class ExtractorView(ft.Column):
 
     def _show_extraction_summary(self, mode: str):
         """顯示提取結果摘要（UI 風格對齊預覽 modal）。"""
+        print(f"[DEBUG] _show_extraction_summary called mode={mode}")
         stats = self._extraction_stats
+        print(f"[DEBUG] stats={stats}")
 
         content = ft.Column(
             [
@@ -270,11 +272,13 @@ class ExtractorView(ft.Column):
         )
 
         try:
-            self.page.open(dialog)
-        except Exception:
             self.page.overlay.append(dialog)
             dialog.open = True
-            self.page.update()
+            async def _do_update(_):
+                self.page.update()
+            self.page.run_task(_do_update, None)
+        except Exception:
+            pass
 
     def _append_log_line(self, entry_or_str):
         """新增日誌訊息到日誌檢視區。
