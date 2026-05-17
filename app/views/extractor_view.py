@@ -221,9 +221,7 @@ class ExtractorView(ft.Column):
 
     def _show_extraction_summary(self, mode: str):
         """顯示提取結果摘要（UI 風格對齊預覽 modal）。"""
-        print(f"[DEBUG] _show_extraction_summary called mode={mode}")
         stats = self._extraction_stats
-        print(f"[DEBUG] stats={stats}")
 
         content = ft.Column(
             [

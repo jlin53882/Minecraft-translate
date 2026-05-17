@@ -119,21 +119,16 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
     from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
     ensure_pipeline_logging()
 
-    print(f"[DEBUG] _extraction_worker START mode={mode}")
     view._extraction_stats = {'success': 0, 'warnings': 0, 'failures': 0, 'total_files': 0}
     session = view.session
     session.start()
-    print(f"[DEBUG] session.start() called, status={session.status}")
 
     generator = extract_lang_files_generator(mods_dir, output_dir) if mode == 'lang' else extract_book_files_generator(mods_dir, output_dir)
-    print(f"[DEBUG] generator created")
 
     try:
         for update in generator:
-            print(f"[DEBUG] generator yield: {update}")
             filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
             if filtered is None:
-                print("[DEBUG] filtered is None, skipping")
                 continue
 
             log_msg = filtered.get("log", "")
@@ -150,12 +145,10 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
             if is_error:
                 view.progress_bar.color = ft.Colors.RED
                 session.set_error()
-                print("[DEBUG] error detected, breaking")
                 break
 
             view.page.update()
 
-        print("[DEBUG] generator exhausted, flushing")
         final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
         if final and "log" in final:
             view._append_log_line(final["log"])
@@ -163,20 +156,16 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
 
     except Exception as e:
         import traceback
-        print(f"[DEBUG] exception: {e}")
         view._append_log_line(f"[ERROR] {e}")
         view._append_log_line(traceback.format_exc())
         session.set_error()
     finally:
-        print(f"[DEBUG] finally block, error={session.error}")
         if not session.error:
             session.finish()
 
         status = session.snapshot()['status']
-        print(f"[DEBUG] status after finish: {status}")
 
         if status == 'DONE':
-            print("[DEBUG] status=DONE, showing summary")
             view.status_text.value = '狀態：完成'
             view.progress_bar.value = 1.0
             view._show_extraction_summary(mode)
@@ -341,7 +330,10 @@ def show_preview(view, mode: str):
         while not preview_state.done:
             view.progress_bar.value = preview_state.progress
             view.progress_bar.color = ft.Colors.BLUE
-            view.status_text.value = f'狀態：預覽掃描中 ({preview_state.current}/{preview_state.total})...'
+            if preview_state.total > 0:
+                view.status_text.value = f'狀態：預覽掃描中 ({preview_state.current}/{preview_state.total})...'
+            else:
+                view.status_text.value = f'狀態：預覽掃描中 (掃描進度...)'
             try:
                 view.page.update()
             except Exception as e:
