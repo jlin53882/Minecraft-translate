@@ -217,14 +217,20 @@ def generate_preview_report(result: Dict[str, Any], mode: str, output_path: str)
     for idx, r in enumerate(preview_results, 1):
         report_lines.append(f"### {idx}. {r['jar']}")
         report_lines.append("")
-        report_lines.append(f"- **檔案數量：** {r['count']}")
+        if mode == "dual":
+            report_lines.append(f"- **Lang 檔案：** {r.get('lang_count', 0)}")
+            report_lines.append(f"- **Book 檔案：** {r.get('book_count', 0)}")
+            files = r.get('lang_files', []) + r.get('book_files', [])
+        else:
+            report_lines.append(f"- **檔案數量：** {r.get('count', 0)}")
+            files = r.get('files', [])
         report_lines.append(f"- **JAR 大小：** {r['size_mb']:.2f} MB")
         report_lines.append("- **檔案清單：**")
         report_lines.append("")
-        for file_path in r["files"][:50]:
+        for file_path in files[:50]:
             report_lines.append(f"  - `{file_path}`")
-        if len(r["files"]) > 50:
-            report_lines.append(f"  - ... 還有 {len(r['files']) - 50} 個檔案")
+        if len(files) > 50:
+            report_lines.append(f"  - ... 還有 {len(files) - 50} 個檔案")
         report_lines.append("")
 
     with open(report_path, "w", encoding="utf-8") as f:
