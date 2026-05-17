@@ -81,6 +81,7 @@ class ExtractorView(ft.Column):
 
         self.output_dir_textfield = ft.TextField(
             hint_text="（未指定將自動產生）",
+            helper="未指定輸出路徑時自動產生（Mods資料夾名稱 + 設定的資料夾名稱）",
             expand=True,
             dense=True,
             border_color=theme.OUTLINE,
