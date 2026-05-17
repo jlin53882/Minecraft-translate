@@ -141,10 +141,10 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
 
             log_msg = filtered.get("log", "")
             if log_msg:
-                print(f"[DEBUG] _extraction_worker: received log_msg={log_msg[:80]}...")
-                print(f"[DEBUG] _extraction_worker: calling view._append_log_line from thread={threading.current_thread().name}")
+                log_info(f"[DEBUG] _extraction_worker: received log_msg={log_msg[:80]}...")
+                log_info(f"[DEBUG] _extraction_worker: calling view._append_log_line from thread={threading.current_thread().name}")
                 view._append_log_line(log_msg)
-                print(f"[DEBUG] _extraction_worker: after _append_log_line, log_view.controls count={len(view.log_view.controls)}")
+                log_info(f"[DEBUG] _extraction_worker: after _append_log_line, log_view.controls count={len(view.log_view.controls)}")
                 update_stats_from_log(view, log_msg)
 
             if "progress" in filtered:
@@ -384,7 +384,7 @@ def show_preview(view, mode: str):
         view.status_text.value = '狀態：預覽完成'
         view.progress_bar.value = 1.0
         log_final = f"[系統] 預覽完成：error={preview_state.error is not None}, result={preview_state.result is not None}"
-        print(f"[DEBUG] poll: calling _append_log_line: {log_final[:80]}...")
+        log_info(f"[DEBUG] poll: calling _append_log_line: {log_final[:80]}...")
         view._append_log_line(log_final)
         try:
             view.page.update()
