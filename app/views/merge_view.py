@@ -274,17 +274,38 @@ class MergeView(ft.Column):
             border_radius=10,
         )
 
+        cfg = load_config()
+        lang_merger_cfg = cfg.get("lang_merger", {})
+        pending_name = lang_merger_cfg.get("pending_folder_name", "待翻譯")
+        organized_name = lang_merger_cfg.get("pending_organized_folder_name", "整理")
+        min_count = lang_merger_cfg.get("filtered_pending_min_count", 2)
         self._info_container = ft.Container(
-            content=ft.Row(
+            content=ft.Column(
                 [
-                    ft.Icon(ft.Icons.INFO_OUTLINE, color=theme.BLUE, size=18),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.INFO_OUTLINE, color=theme.BLUE, size=18),
+                            ft.Text(
+                                "📁 輸出資料夾說明",
+                                weight="bold",
+                                size=12,
+                                color=theme.GREY_700,
+                            ),
+                        ],
+                        spacing=8,
+                    ),
                     ft.Text(
-                        "📁 輸出資料夾說明：請使用「整理」資料夾（key數≥閥值）送機器翻譯",
+                        f"• 「{organized_name}」（key數≥{min_count}）→ 送機器翻譯",
+                        size=12,
+                        color=theme.GREY_700,
+                    ),
+                    ft.Text(
+                        f"• 「{pending_name}」（key數<{min_count}）→ 未過濾，跳過不要送翻譯",
                         size=12,
                         color=theme.GREY_700,
                     ),
                 ],
-                spacing=8,
+                spacing=4,
             ),
             padding=10,
             bgcolor=theme.BLUE_50,
