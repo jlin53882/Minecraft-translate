@@ -367,12 +367,22 @@ def show_preview(view, mode: str):
             result = preview_state.result
             view._append_log_line(f"[系統] 找到 {result.get('total_files', 0)} 個檔案，準備顯示預覽對話框")
             output_dir = (view.output_dir_textfield.value or '').strip()
+
+            if output_dir:
+                output_path = Path(output_dir)
+            else:
+                mods_path = Path((view.mods_dir_textfield.value or '').strip())
+                suffix = '_預覽lang_輸出' if mode == 'lang' else '_預覽book_輸出'
+                output_path = mods_path.with_name(mods_path.name + suffix) if mods_path.exists() else None
+                if output_path:
+                    output_dir = str(output_path)
+                    view._append_log_line(f'[系統] 自動設定輸出路徑：{output_dir}')
+
             if output_dir:
                 try:
                     from translation_tool.core.jar_processor import generate_preview_report
                     output_path = Path(output_dir)
                     if not output_path.exists():
-                        view._append_log_line(f'[系統] 輸出資料夾不存在，自動建立：{output_dir}')
                         output_path.mkdir(parents=True, exist_ok=True)
                         view._append_log_line('[系統] ✅ 資料夾建立成功')
                     report_path = generate_preview_report(result, mode, output_dir)
