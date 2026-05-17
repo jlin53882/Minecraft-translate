@@ -80,13 +80,13 @@ def start_ui_poller(view, mode: str = ''):
             is_error = snap['error']
 
             if status == 'RUNNING':
-                view.status_text.value = f'提取 {mode} 中... ({int(progress * 100)}%)'
+                view.status_text.value = f'狀態：提取 {mode} 中... ({int(progress * 100)}%)'
             elif status == 'DONE':
-                view.status_text.value = '完成'
+                view.status_text.value = '狀態：完成'
             elif status == 'ERROR':
-                view.status_text.value = '發生錯誤'
+                view.status_text.value = '狀態：發生錯誤'
             else:
-                view.status_text.value = '閒置'
+                view.status_text.value = '狀態：閒置'
 
             view.progress_bar.value = progress
             view.progress_bar.color = ft.Colors.RED if is_error else ft.Colors.BLUE
@@ -139,7 +139,10 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
 
             if "progress" in filtered:
                 progress = filtered["progress"]
-                status_text = f'提取 {mode} 中... ({int(progress * 100)}%)'
+                current = filtered.get("current", 0)
+                total = filtered.get("total", 0)
+                display_idx = current if current > 0 else 1
+                status_text = f'狀態：提取 {mode} 中 ({display_idx}/{total}) ({int(progress * 100)}%)'
 
                 async def _do_update(_):
                     view.status_text.value = status_text
@@ -174,11 +177,11 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
         status = session.snapshot()['status']
 
         if status == 'DONE':
-            view.status_text.value = '完成'
+            view.status_text.value = '狀態：完成'
             view.progress_bar.value = 1.0
             view._show_extraction_summary(mode)
         elif status == 'ERROR':
-            view.status_text.value = '發生錯誤'
+            view.status_text.value = '狀態：發生錯誤'
             view.progress_bar.color = ft.Colors.RED
 
         view.set_controls_disabled(False)
@@ -356,16 +359,16 @@ def show_preview(view, mode: str):
                 view.progress_bar.color = ft.Colors.BLUE
                 if total > 0:
                     display_idx = current if current > 0 else 1
-                    view.status_text.value = f'預覽掃描中 ({display_idx}/{total})'
+                    view.status_text.value = f'狀態：預覽掃描中 ({display_idx}/{total}) ({int(progress * 100)}%)'
                 else:
-                    view.status_text.value = '預覽掃描中...'
+                    view.status_text.value = '狀態：預覽掃描中...'
                 view.page.update()
 
             view.page.run_task(_do_update, None)
             time.sleep(0.1)
 
         view.set_controls_disabled(False)
-        view.status_text.value = '預覽完成'
+        view.status_text.value = '狀態：預覽完成'
         view.progress_bar.value = 1.0
         view._append_log_line(f"[系統] 預覽完成：error={preview_state.error is not None}, result={preview_state.result is not None}")
         try:

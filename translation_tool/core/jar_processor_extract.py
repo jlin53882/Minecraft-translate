@@ -216,10 +216,10 @@ def run_extraction_process_impl(
                     total_extracted += result['extracted']
                     total_skipped += result['skipped']
                 log.info("[%s/%s] %s", processed_count, total_jars, os.path.basename(jar_path))
-                yield {'progress': prog}
+                yield {'progress': prog, 'current': processed_count, 'total': total_jars}
             except Exception as exc:
                 log.error("提取 %s 時產生例外: %s", os.path.basename(jar_path), exc)
-                yield {'progress': prog}
+                yield {'progress': prog, 'current': processed_count, 'total': total_jars}
 
     log.info(
         "--- %s 提取完成！ ---\n已檢查 %s/%s 個 JAR 檔案。\n  - 新提取或更新的檔案: %s 個\n  - 因內容相同而跳過的檔案: %s 個",
