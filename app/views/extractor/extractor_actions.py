@@ -333,20 +333,17 @@ def show_preview(view, mode: str):
     def poll():
         """轮询预览状态并更新 UI"""
         while not preview_state.done:
-            progress = preview_state.progress
-            current = preview_state.current
-            total = preview_state.total
-            if total > 0:
-                display_idx = current if current > 0 else 1
-                status_val = f'預覽掃描中 ({display_idx}/{total})'
+            print(f"[POLL] progress={preview_state.progress}, current={preview_state.current}, total={preview_state.total}, done={preview_state.done}")
+            view.progress_bar.value = preview_state.progress
+            view.progress_bar.color = ft.Colors.BLUE
+            if preview_state.total > 0:
+                display_idx = preview_state.current if preview_state.current > 0 else 1
+                view.status_text.value = f'預覽掃描中 ({display_idx}/{preview_state.total})'
             else:
-                status_val = '預覽掃描中...'
-
-            async def _do_update(_):
-                view.progress_bar.value = progress
-                view.progress_bar.color = ft.Colors.BLUE
-                view.status_text.value = status_val
-            view.page.run_task(_do_update, None)
+                view.status_text.value = '預覽掃描中...'
+            print(f"[POLL] progress_bar.value set to {view.progress_bar.value}, calling page.update()")
+            view.page.update()
+            print(f"[POLL] page.update() done")
             time.sleep(0.1)
 
         view.set_controls_disabled(False)
