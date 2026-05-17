@@ -116,49 +116,65 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
     每個 update：直接呼叫 view._append_log_line() + page.update()，
     不再透過 session.snapshot() + poller 中轉。
     """
+    from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
+    ensure_pipeline_logging()
+
     view._extraction_stats = {'success': 0, 'warnings': 0, 'failures': 0, 'total_files': 0}
+    session = view.session
+    session.start()
 
     generator = extract_lang_files_generator(mods_dir, output_dir) if mode == 'lang' else extract_book_files_generator(mods_dir, output_dir)
 
-    for update in generator:
-        filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
-        if filtered is None:
-            continue
+    try:
+        for update in generator:
+            filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
+            if filtered is None:
+                continue
 
-        log_msg = filtered.get("log", "")
-        if log_msg:
-            view._append_log_line(log_msg)
-            update_stats_from_log(view, log_msg)
+            log_msg = filtered.get("log", "")
+            if log_msg:
+                view._append_log_line(log_msg)
+                update_stats_from_log(view, log_msg)
 
-        if "progress" in filtered:
-            progress = filtered["progress"]
-            view.status_text.value = f'狀態：提取 {mode} 中... ({int(progress * 100)}%)'
-            view.progress_bar.value = progress
+            if "progress" in filtered:
+                progress = filtered["progress"]
+                view.status_text.value = f'狀態：提取 {mode} 中... ({int(progress * 100)}%)'
+                view.progress_bar.value = progress
 
-        is_error = filtered.get("error", False)
-        if is_error:
+            is_error = filtered.get("error", False)
+            if is_error:
+                view.progress_bar.color = ft.Colors.RED
+                session.set_error()
+                break
+
+            view.page.update()
+
+        final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
+        if final and "log" in final:
+            view._append_log_line(final["log"])
+            update_stats_from_log(view, final["log"])
+
+    except Exception as e:
+        import traceback
+        view._append_log_line(f"[ERROR] {e}")
+        view._append_log_line(traceback.format_exc())
+        session.set_error()
+    finally:
+        if not session.error:
+            session.finish()
+
+        status = session.snapshot()['status']
+
+        if status == 'DONE':
+            view.status_text.value = '狀態：完成'
+            view.progress_bar.value = 1.0
+            view._show_extraction_summary(mode)
+        elif status == 'ERROR':
+            view.status_text.value = '狀態：發生錯誤'
             view.progress_bar.color = ft.Colors.RED
 
+        view.set_controls_disabled(False)
         view.page.update()
-
-    final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
-    if final and "log" in final:
-        view._append_log_line(final["log"])
-        update_stats_from_log(view, final["log"])
-
-    snap = view.session.snapshot()
-    status = snap['status']
-
-    if status == 'DONE':
-        view.status_text.value = '狀態：完成'
-        view.progress_bar.value = 1.0
-        view._show_extraction_summary(mode)
-    elif status == 'ERROR':
-        view.status_text.value = '狀態：發生錯誤'
-        view.progress_bar.color = ft.Colors.RED
-
-    view.set_controls_disabled(False)
-    view.page.update()
 
 
 def start_extraction(view, mode: str):
