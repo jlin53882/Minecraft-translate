@@ -243,9 +243,19 @@ def build_preview_result_dialog(view, result: dict, mode: str):
     controls = [
         ft.Text(f'預覽結果（{mode.upper()}）', size=16, weight=ft.FontWeight.BOLD),
         ft.Divider(),
-        ft.Text(f'共找到 {total_files} 個檔案', size=14, color=ft.Colors.BLUE_700),
-        ft.Text(f'總大小：{total_size_mb:.2f} MB', size=14, color=ft.Colors.BLUE_700),
     ]
+
+    if mode == "dual":
+        total_lang = sum(r.get('lang_count', 0) for r in preview_results)
+        total_book = sum(r.get('book_count', 0) for r in preview_results)
+        controls.append(ft.Text(f'Lang：{total_lang} 個', size=14, color=ft.Colors.BLUE_700))
+        controls.append(ft.Text(f'Book：{total_book} 個', size=14, color=ft.Colors.BLUE_700))
+    else:
+        controls.append(ft.Text(f'共找到 {total_files} 個檔案', size=14, color=ft.Colors.BLUE_700))
+
+    controls.extend([
+        ft.Text(f'總大小：{total_size_mb:.2f} MB', size=14, color=ft.Colors.BLUE_700),
+    ])
 
     if has_report:
         try:
