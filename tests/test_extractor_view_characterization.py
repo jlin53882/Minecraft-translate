@@ -130,13 +130,13 @@ def test_extractor_view_pick_directory_schedules_async_task(monkeypatch):
     picker.set_mock_path('/test/dir')
     view = ExtractorView(page, picker)
 
-    target = ft.TextField()
-    view.pick_directory(target)
+    view.pick_directory(view.mods_dir_textfield)
 
     assert len(page._tasks) == 1
     page._run_all_tasks()
 
-    assert target.value == '/test/dir'
+    assert view.mods_dir_textfield.value == '/test/dir'
+    assert '_提取lang_輸出' in view.output_dir_textfield.value
     assert page.updated >= 1
 
 

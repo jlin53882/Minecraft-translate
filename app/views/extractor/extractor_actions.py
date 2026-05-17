@@ -292,7 +292,11 @@ def build_preview_result_dialog(view, result: dict, mode: str):
     controls.extend([ft.Divider(), ft.Text(f'詳細清單（{len(preview_results)} 個 JAR）：', size=13, weight=ft.FontWeight.BOLD)])
     jar_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO)
     for r in preview_results:
-        jar_list.controls.append(ft.Text(f"📦 {r['jar']}: {r['count']} 個檔案 ({r['size_mb']:.1f} MB)", size=12))
+        if mode == "dual":
+            total_count = r.get('lang_count', 0) + r.get('book_count', 0)
+            jar_list.controls.append(ft.Text(f"📦 {r['jar']}: {total_count} 個檔案 (Lang: {r.get('lang_count', 0)}, Book: {r.get('book_count', 0)}) ({r['size_mb']:.1f} MB)", size=12))
+        else:
+            jar_list.controls.append(ft.Text(f"📦 {r['jar']}: {r['count']} 個檔案 ({r['size_mb']:.1f} MB)", size=12))
     list_container = ft.Container(content=jar_list, height=300, padding=5, bgcolor=ft.Colors.GREY_100, border_radius=8)
     controls.append(list_container)
 

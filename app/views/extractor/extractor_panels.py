@@ -50,12 +50,17 @@ def build_settings_card(view):
                         ft.Row(
                             controls=[
                                 ft.Container(content=view.output_dir_textfield, expand=True),
-                                build_pick_button(view, view.output_dir_textfield),
-                                ft.IconButton(
-                                    icon=ft.Icons.CLEAR,
-                                    icon_size=20,
-                                    tooltip='清除路徑',
-                                    on_click=view.clear_output_path,
+                                ft.Row(
+                                    controls=[
+                                        build_pick_button(view, view.output_dir_textfield),
+                                        ft.IconButton(
+                                            icon=ft.Icons.CLEAR,
+                                            icon_size=20,
+                                            tooltip='清除路徑',
+                                            on_click=view.clear_output_path,
+                                        ),
+                                    ],
+                                    spacing=0,
                                 ),
                             ],
                             spacing=5,
