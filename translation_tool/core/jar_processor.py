@@ -5,6 +5,7 @@
 """
 
 import re
+from pathlib import Path
 from typing import Dict, Any, Generator
 
 from translation_tool.core.jar_processor_discovery import find_jar_files
@@ -56,18 +57,21 @@ def build_lang_file_regex(*, skip_zh_cn: bool = False) -> re.Pattern:
     codes_str = "|".join(map(re.escape, codes))
     return re.compile(rf"(?:assets/([^/]+)/)?lang/({codes_str})\.(json|lang)$", re.IGNORECASE)
 
-def _extract_from_jar(jar_path: str, output_root: str, target_regex: re.Pattern) -> Dict[str, Any]:
+def _extract_from_jar(
+    jar_path: str,
+    output_root: str,
+    target_regex: re.Pattern,
+    all_scan_results: dict[Path, dict[str, str | None]] | None = None,
+) -> Dict[str, Any]:
     """從 JAR 檔案提取檔案。
 
     Args:
         jar_path: JAR 檔案路徑
         output_root: 輸出根目錄
         target_regex: 目標檔案正規表達式
-
-    Returns:
-        提取結果字典
+        all_scan_results: 預先掃描的 JAR 結果（由 caller 傳入）
     """
-    return extract_from_jar_impl(jar_path, output_root, target_regex)
+    return extract_from_jar_impl(jar_path, output_root, target_regex, scan_results=all_scan_results)
 
 def _run_extraction_process(
     mods_dir: str, output_dir: str, target_regex: re.Pattern, process_name: str
