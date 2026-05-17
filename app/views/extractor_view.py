@@ -81,7 +81,7 @@ class ExtractorView(ft.Column):
 
         self.output_dir_textfield = ft.TextField(
             hint_text="（未指定將自動產生）",
-            helper="未指定輸出路徑時自動產生（Mods資料夾名稱 + 設定的資料夾名稱）。例如：mods + _提取lang_輸出 = mods_提取lang_輸出",
+            helper="範例：\n• mods + _提取lang_輸出 = mods_提取lang_輸出\n• mods + _預覽book_輸出 = mods_預覽book_輸出\n• mods + _zh_tw_output = mods_zh_tw_output",
             expand=True,
             dense=True,
             border_color=theme.OUTLINE,
