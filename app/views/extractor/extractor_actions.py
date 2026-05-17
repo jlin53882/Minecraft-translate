@@ -203,7 +203,6 @@ def start_extraction(view, mode: str):
         return
 
     mods_dir = (view.mods_dir_textfield.value or '').strip()
-    output_dir = (view.output_dir_textfield.value or '').strip()
 
     if not mods_dir:
         view._show_snack_bar('請先選擇 Mods 資料夾')
@@ -214,26 +213,8 @@ def start_extraction(view, mode: str):
         view._show_snack_bar('Mods 資料夾不存在')
         return
 
-    suffix = '_提取lang_輸出' if mode == 'lang' else '_提取book_輸出'
-    config = load_config()
-    folder_names = config.get("extractor", {}).get("output_folder_names", {})
-    lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
-    book_extract = folder_names.get("book_extract", "_提取book_輸出")
-    dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
-    if mode == 'lang':
-        suffix = lang_extract
-    elif mode == 'book':
-        suffix = book_extract
-    elif mode == 'dual':
-        suffix = dual_extract
-    if output_dir:
-        output_dir = str(Path(output_dir) / suffix)
-    else:
-        output_dir = str(mods_path.with_name(mods_path.name + suffix))
-        view._append_log_line(f'[系統] 自動設定輸出路徑：{output_dir}')
-
-    view.output_dir_textfield.value = output_dir
-    view.page.update()
+    view._auto_fill_output_path(mods_dir, mode)
+    output_dir = (view.output_dir_textfield.value or '').strip()
     out_path = Path(output_dir)
     try:
         out_path.mkdir(parents=True, exist_ok=True)
@@ -332,6 +313,7 @@ def show_preview(view, mode: str):
         view._show_snack_bar('Mods 資料夾不存在')
         return
 
+    view._auto_fill_output_path(mods_dir, mode)
     view._show_snack_bar(f'正在掃描 {mode.upper()} 檔案...', ft.Colors.BLUE_600)
     view._append_log_line('[系統] 開始預覽掃描...')
     view.set_controls_disabled(True)

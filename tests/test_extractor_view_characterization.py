@@ -136,7 +136,6 @@ def test_extractor_view_pick_directory_schedules_async_task(monkeypatch):
     page._run_all_tasks()
 
     assert view.mods_dir_textfield.value == '/test/dir'
-    assert '_提取lang_輸出' in view.output_dir_textfield.value
     assert page.updated >= 1
 
 

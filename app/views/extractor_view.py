@@ -220,23 +220,30 @@ class ExtractorView(ft.Column):
         if result:
             target.value = result
             self.page.update()
-            if target == self.mods_dir_textfield:
-                self._auto_fill_output_path(result)
         else:
             self._show_snack_bar("未選擇資料夾", color=theme.BLUE_600)
 
-    def _auto_fill_output_path(self, mods_dir: str):
-        """根據 Mods 資料夾自動產生並填入輸出路徑（使用 dual 模式設定）。"""
+    def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
+        """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。"""
         from translation_tool.utils.config_manager import load_config
 
         config = load_config()
         folder_names = config.get("extractor", {}).get("output_folder_names", {})
         lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
         book_extract = folder_names.get("book_extract", "_提取book_輸出")
+        dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
+
+        if mode == "lang":
+            suffix = lang_extract
+        elif mode == "book":
+            suffix = book_extract
+        elif mode == "dual":
+            suffix = dual_extract
+        else:
+            suffix = lang_extract
 
         mods_path = Path(mods_dir)
-        suffix = mods_path.name + "_提取lang_輸出"
-        output_path = str(mods_path.with_name(suffix))
+        output_path = str(mods_path.with_name(mods_path.name + suffix))
         self.output_dir_textfield.value = output_path
         self.page.update()
         self._append_log_line(f"[系統] 自動設定輸出路徑：{output_path}")
