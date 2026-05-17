@@ -340,7 +340,7 @@ class ExtractorView(ft.Column):
         dialog = build_preview_result_dialog(self, result, mode)
         self.page.overlay.append(dialog)
         dialog.open = True
-        def _do_update(_):
+        async def _do_update(_):
             self.page.update()
         self.page.run_task(_do_update, None)
 
@@ -349,7 +349,7 @@ class ExtractorView(ft.Column):
         self._preview_error_dialog = build_preview_error_dialog(self, error, mode)
         self.page.overlay.append(self._preview_error_dialog)
         self._preview_error_dialog.open = True
-        def _do_update(_):
+        async def _do_update(_):
             self.page.update()
         self.page.run_task(_do_update, None)
 
