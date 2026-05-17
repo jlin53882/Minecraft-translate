@@ -25,6 +25,7 @@ NAV_ITEMS = [
     {"id": "prompts", "label": "提示詞管理", "icon": ft.Icons.MESSAGE},
     {"id": "species_lookup", "label": "學名查詢管理", "icon": ft.Icons.SEARCH},
     {"id": "batch_limits", "label": "批次與限制", "icon": ft.Icons.DEVELOPER_BOARD},
+    {"id": "extractor", "label": "提取器設定", "icon": ft.Icons.FOLDER_OPEN},
 ]
 
 
@@ -253,6 +254,19 @@ class ConfigView(ft.Column):
             helper="用於：find_patchouli_json 掃描目錄",
         )
 
+        self.controls_map["extractor.output_folder_names.lang_extract"] = ft.TextField(
+            label="Lang 提取輸出資料夾", dense=True
+        )
+        self.controls_map["extractor.output_folder_names.book_extract"] = ft.TextField(
+            label="Book 提取輸出資料夾", dense=True
+        )
+        self.controls_map["extractor.output_folder_names.lang_preview"] = ft.TextField(
+            label="Lang 預覽輸出資料夾", dense=True
+        )
+        self.controls_map["extractor.output_folder_names.book_preview"] = ft.TextField(
+            label="Book 預覽輸出資料夾", dense=True
+        )
+
         self.new_model_field = ft.TextField(
             label="新增模型名稱", hint_text="gemini-2.5-flash", expand=True, dense=True
         )
@@ -425,6 +439,22 @@ class ConfigView(ft.Column):
             ],
         )
 
+        extractor_content = ft.Column(
+            spacing=15,
+            controls=[
+                self._build_card("提取器輸出資料夾命名 (Extractor Output Folders)", [
+                    ft.Row([
+                        ft.Column([self.controls_map["extractor.output_folder_names.lang_extract"]], expand=1),
+                        ft.Column([self.controls_map["extractor.output_folder_names.book_extract"]], expand=1),
+                    ]),
+                    ft.Row([
+                        ft.Column([self.controls_map["extractor.output_folder_names.lang_preview"]], expand=1),
+                        ft.Column([self.controls_map["extractor.output_folder_names.book_preview"]], expand=1),
+                    ]),
+                ]),
+            ],
+        )
+
         self._content_containers["general"] = general_content
         self._content_containers["api_models"] = api_models_content
         self._content_containers["translation_behavior"] = translation_behavior_content
@@ -432,6 +462,7 @@ class ConfigView(ft.Column):
         self._content_containers["species_lookup"] = species_lookup_content
         self._content_containers["batch_limits"] = batch_limits_content
         self._content_containers["merger"] = merger_content
+        self._content_containers["extractor"] = extractor_content
 
         self.content_scroll = ft.Container(
             expand=True,
@@ -444,6 +475,7 @@ class ConfigView(ft.Column):
                     species_lookup_content,
                     batch_limits_content,
                     merger_content,
+                    extractor_content,
                 ]
             ),
         )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 
 from translation_tool.utils.log_unit import log_warning
+from translation_tool.utils.config_manager import load_config
 import time
 from pathlib import Path
 from typing import Any
@@ -197,6 +198,11 @@ def start_extraction(view, mode: str):
         return
 
     suffix = '_提取lang_輸出' if mode == 'lang' else '_提取book_輸出'
+    config = load_config()
+    folder_names = config.get("extractor", {}).get("output_folder_names", {})
+    lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
+    book_extract = folder_names.get("book_extract", "_提取book_輸出")
+    suffix = lang_extract if mode == 'lang' else book_extract
     if output_dir:
         output_dir = str(Path(output_dir) / suffix)
     else:
@@ -372,7 +378,11 @@ def show_preview(view, mode: str):
                 output_path = Path(output_dir)
             else:
                 mods_path = Path((view.mods_dir_textfield.value or '').strip())
-                suffix = '_預覽lang_輸出' if mode == 'lang' else '_預覽book_輸出'
+                config = load_config()
+                folder_names = config.get("extractor", {}).get("output_folder_names", {})
+                lang_preview = folder_names.get("lang_preview", "_預覽lang_輸出")
+                book_preview = folder_names.get("book_preview", "_預覽book_輸出")
+                suffix = lang_preview if mode == 'lang' else book_preview
                 output_path = mods_path.with_name(mods_path.name + suffix) if mods_path.exists() else None
                 if output_path:
                     output_dir = str(output_path)
