@@ -260,17 +260,17 @@ def build_preview_result_dialog(view, result: dict, mode: str):
             )
         )
 
-    controls.extend([ft.Divider(), ft.Text('詳細清單（前 20 項）：', size=13, weight=ft.FontWeight.BOLD)])
-    content = ft.Column(controls, spacing=8, scroll=ft.ScrollMode.AUTO)
-    for r in preview_results[:20]:
-        content.controls.append(ft.Text(f"📦 {r['jar']}: {r['count']} 個檔案 ({r['size_mb']:.1f} MB)", size=12))
-    if len(preview_results) > 20:
-        content.controls.append(ft.Text(f"... 還有 {len(preview_results) - 20} 個 JAR 檔案", size=12, color=ft.Colors.GREY_700))
+    controls.extend([ft.Divider(), ft.Text(f'詳細清單（{len(preview_results)} 個 JAR）：', size=13, weight=ft.FontWeight.BOLD)])
+    jar_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO)
+    for r in preview_results:
+        jar_list.controls.append(ft.Text(f"📦 {r['jar']}: {r['count']} 個檔案 ({r['size_mb']:.1f} MB)", size=12))
+    list_container = ft.Container(content=jar_list, height=300, padding=5, bgcolor=ft.Colors.GREY_100, border_radius=8)
+    controls.append(list_container)
 
     dialog = ft.AlertDialog(
         modal=True,
         title=ft.Text(f'提取預覽 - {mode.upper()}'),
-        content=ft.Container(content=content, width=600, height=400),
+        content=ft.Container(content=ft.Column(controls, spacing=8, scroll=ft.ScrollMode.AUTO), width=600, height=500),
         actions=[
             ft.TextButton('取消', on_click=lambda e: view._close_dialog_overlay(dialog)),
             ft.Button('確認提取', icon=ft.Icons.CHECK, on_click=lambda e: view._start_from_preview_overlay(dialog, mode)),
