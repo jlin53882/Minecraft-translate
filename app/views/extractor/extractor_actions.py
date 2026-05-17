@@ -331,7 +331,8 @@ def show_preview(view, mode: str):
             view.progress_bar.value = preview_state.progress
             view.progress_bar.color = ft.Colors.BLUE
             if preview_state.total > 0:
-                view.status_text.value = f'狀態：預覽掃描中 ({preview_state.current}/{preview_state.total})...'
+                display_idx = preview_state.current if preview_state.current > 0 else 1
+                view.status_text.value = f'狀態：預覽掃描中 ({display_idx}/{preview_state.total})...'
             else:
                 view.status_text.value = f'狀態：預覽掃描中 (掃描進度...)'
             try:
