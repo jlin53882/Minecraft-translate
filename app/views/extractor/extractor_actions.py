@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 
-from translation_tool.utils.log_unit import log_warning
+from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.config_manager import load_config
 import time
 from pathlib import Path
