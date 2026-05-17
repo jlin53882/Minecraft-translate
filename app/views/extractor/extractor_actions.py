@@ -334,7 +334,7 @@ def show_preview(view, mode: str):
                 display_idx = preview_state.current if preview_state.current > 0 else 1
                 view.status_text.value = f'狀態：預覽掃描中 ({display_idx}/{preview_state.total})...'
             else:
-                view.status_text.value = f'狀態：預覽掃描中 (掃描進度...)'
+                view.status_text.value = '狀態：預覽掃描中...'
             try:
                 view.page.update()
             except Exception as e:
