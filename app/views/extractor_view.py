@@ -338,18 +338,16 @@ class ExtractorView(ft.Column):
     def _show_preview_dialog_result_v2(self, result: dict, mode: str):
         """显示预览结果对话框"""
         dialog = build_preview_result_dialog(self, result, mode)
-        try:
-            self.page.open(dialog)
-        except Exception as ex:
-            self._append_log_line(f"[ERROR] 顯示對話框失敗: {ex}")
+        self.page.overlay.append(dialog)
+        dialog.open = True
+        self.page.update()
 
     def _show_preview_dialog_error_v2(self, error: str, mode: str):
         """显示预览错误对话框"""
         self._preview_error_dialog = build_preview_error_dialog(self, error, mode)
-        try:
-            self.page.open(self._preview_error_dialog)
-        except Exception as ex:
-            self._append_log_line(f"[ERROR] 顯示錯誤對話框失敗: {ex}")
+        self.page.overlay.append(self._preview_error_dialog)
+        self._preview_error_dialog.open = True
+        self.page.update()
 
     def _close_dialog_overlay(self, dialog):
         """關閉 overlay 對話框"""
