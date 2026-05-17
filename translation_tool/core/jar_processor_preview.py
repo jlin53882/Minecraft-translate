@@ -214,6 +214,7 @@ def generate_preview_report(result: Dict[str, Any], mode: str, output_path: str)
         "",
     ]
 
+    # dual mode 使用 lang_count/book_count，否則使用 count
     for idx, r in enumerate(preview_results, 1):
         report_lines.append(f"### {idx}. {r['jar']}")
         report_lines.append("")

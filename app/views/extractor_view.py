@@ -223,6 +223,7 @@ class ExtractorView(ft.Column):
         else:
             self._show_snack_bar("未選擇資料夾", color=theme.BLUE_600)
 
+    # 僅在按「預覽/提取」時自動填入輸出路徑，選擇資料夾時不自動填入
     def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
         """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。"""
         from translation_tool.utils.config_manager import load_config

@@ -245,6 +245,7 @@ def build_preview_result_dialog(view, result: dict, mode: str):
         ft.Divider(),
     ]
 
+    # dual mode 分開顯示 Lang/Book 數量，其他模式顯示總檔案數
     if mode == "dual":
         total_lang = sum(r.get('lang_count', 0) for r in preview_results)
         total_book = sum(r.get('book_count', 0) for r in preview_results)
