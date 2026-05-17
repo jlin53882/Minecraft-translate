@@ -294,7 +294,7 @@ def build_preview_result_dialog(view, result: dict, mode: str):
     for r in preview_results:
         if mode == "dual":
             total_count = r.get('lang_count', 0) + r.get('book_count', 0)
-            jar_list.controls.append(ft.Text(f"📦 {r['jar']}: {total_count} 個檔案 (Lang: {r.get('lang_count', 0)}, Book: {r.get('book_count', 0)}) ({r['size_mb']:.1f} MB)", size=12))
+            jar_list.controls.append(ft.Text(f"📦 {r['jar']}: Lang {r.get('lang_count', 0)}  Book {r.get('book_count', 0)}", size=12))
         else:
             jar_list.controls.append(ft.Text(f"📦 {r['jar']}: {r['count']} 個檔案 ({r['size_mb']:.1f} MB)", size=12))
     list_container = ft.Container(content=jar_list, height=300, padding=5, bgcolor=ft.Colors.GREY_100, border_radius=8)
