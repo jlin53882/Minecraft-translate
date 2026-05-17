@@ -69,7 +69,7 @@ def test_config_view_add_and_remove_model_row(monkeypatch):
 
 def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
     saved = {}
-monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {'rate_limit': {}, 'patchouli': {}, 'translator': {}}, 'output_bundler': {}, 'lang_merger': {}, 'extractor': {'output_folder_names': {'lang_extract': '', 'book_extract': '', 'lang_preview': '', 'book_preview': ''}}})
+    monkeypatch.setattr('app.views.config_view.load_config_json', lambda: {'logging': {}, 'translator': {}, 'species_cache': {}, 'lm_translator': {'rate_limit': {}, 'patchouli': {}, 'translator': {}}, 'output_bundler': {}, 'lang_merger': {}, 'extractor': {'output_folder_names': {'lang_extract': '', 'book_extract': '', 'lang_preview': '', 'book_preview': ''}}})
     monkeypatch.setattr('app.views.config_view.save_config_json', lambda cfg: saved.update(cfg))
     monkeypatch.setattr('app.views.config_view.validate_api_keys_from_ui', lambda keys: None)
 
