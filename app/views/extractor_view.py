@@ -255,7 +255,8 @@ class ExtractorView(ft.Column):
             f"  • Lang 預覽：...mods + {lang_preview}\n"
             f"  • Book 預覽：...mods + {book_preview}\n\n"
             f"預設抽取語系：zh_cn / zh_tw / en_us\n"
-            f"選項：可勾選「跳過 zh_cn 抽取」（預設關閉）"
+            f"選項：可勾選「跳過 zh_cn 抽取」（預設關閉）\n"
+            f"自動產生資料夾名稱可以在設定頁面調整"
         )
         self.output_dir_textfield.helper = helper_text
         self._page.update()
