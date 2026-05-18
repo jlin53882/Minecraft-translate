@@ -21,41 +21,26 @@ from translation_tool.core.jar_processor import (
 from app.views.extractor.extractor_state import PreviewState
 
 def update_stats_from_log(view, line: str):
-    """根据日志行更新提取統計。
+    """解析日誌行更新提取統計（已被 yield.stats 取代，保留给旧日志流）。
 
     規則：
     - 只在明確的「最終摘要」日誌上覆蓋 success / warnings / total_files
-    - 一般過程日誌不再用模糊關鍵字累加，避免 UI 摘要與真實 log 不一致
+    - 一般過程日誌不再用模糊關鍵字累加
     """
     stats = view._extraction_stats
     try:
         import re
 
         final_match = re.search(
-            r'已檢查\s+(\d+)/(\d+)\s+個\s+JAR\s+檔案。\s*\n\s*-\s*新提取或更新的檔案:\s*(\d+)\s*個\s*\n\s*-\s*因內容相同而跳過的檔案:\s*(\d+)\s*個',
+            r'已檢查\s+(\d+)/(\d+)\s+個\s+JAR\s+檔案。\s*\n\s*-\s*新提取或更新的檔案:\s*(\d+)\s+個\s*\n\s*-\s*因內容相同而跳過的檔案:\s*(\d+)\s+個',
             line,
             re.MULTILINE,
         )
         if final_match:
-            processed_jars = int(final_match.group(1))
-            total_jars = int(final_match.group(2))
-            extracted_files = int(final_match.group(3))
-            skipped_files = int(final_match.group(4))
-
-            stats['success'] = processed_jars
-            stats['warnings'] = skipped_files
-            stats['failures'] = 0 if processed_jars == total_jars else max(total_jars - processed_jars, 0)
-            stats['total_files'] = extracted_files
-            return
-
-        legacy_success = re.search(r'成功提取\s+(\d+)\s+個新檔案', line)
-        if legacy_success:
-            stats['success'] += 1
-            stats['total_files'] += int(legacy_success.group(1))
-            return
-
-        if '跳過' in line or '已存在' in line:
-            stats['warnings'] += 1
+            stats['success'] = int(final_match.group(1))
+            stats['warnings'] = int(final_match.group(4))
+            stats['failures'] = 0
+            stats['total_files'] = int(final_match.group(3))
             return
 
         error_match = re.search(r'提取\s+(.+?)\s+時產生例外', line)
@@ -146,7 +131,6 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
                 log_info(f"[DEBUG] _extraction_worker: received log_msg={log_msg[:80]}...")
                 async def _do_append_log(_):
                     view._append_log_line(log_msg)
-                    update_stats_from_log(view, log_msg)
                 view.page.run_task(_do_append_log, None)
 
             if "progress" in filtered:
@@ -182,7 +166,6 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
         if final and "log" in final:
             async def _do_append_final(_):
                 view._append_log_line(final["log"])
-                update_stats_from_log(view, final["log"])
             view.page.run_task(_do_append_final, None)
 
     except Exception as e:
