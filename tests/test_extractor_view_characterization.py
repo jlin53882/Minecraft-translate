@@ -1,4 +1,5 @@
 
+from pathlib import Path
 import flet as ft
 from app.views.extractor_view import ExtractorView
 from tests.conftest import mock_page, mock_filepicker
@@ -226,3 +227,81 @@ def test_extractor_view_show_extraction_summary_exists(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
     assert hasattr(view, '_show_extraction_summary')
+
+
+def test_auto_fill_output_path_lang_mode(monkeypatch):
+    """測試 _auto_fill_output_path 在 lang 模式下產生正確的輸出路徑"""
+    mock_cfg = {
+        "extractor": {
+            "output_folder_names": {
+                "lang_extract": "_lang_out",
+                "book_extract": "_book_out",
+                "dual_extract": "_dual_out",
+            }
+        }
+    }
+    monkeypatch.setattr('translation_tool.utils.config_manager.load_config', lambda: mock_cfg)
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(mock_page(), mock_filepicker())
+
+    view._auto_fill_output_path('/test/mods', mode='lang')
+
+    assert Path(view.output_dir_textfield.value).name == 'mods_lang_out'
+
+
+def test_auto_fill_output_path_book_mode(monkeypatch):
+    """測試 _auto_fill_output_path 在 book 模式下產生正確的輸出路徑"""
+    mock_cfg = {
+        "extractor": {
+            "output_folder_names": {
+                "lang_extract": "_lang_out",
+                "book_extract": "_book_out",
+                "dual_extract": "_dual_out",
+            }
+        }
+    }
+    monkeypatch.setattr('translation_tool.utils.config_manager.load_config', lambda: mock_cfg)
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(mock_page(), mock_filepicker())
+
+    view._auto_fill_output_path('/test/mods', mode='book')
+
+    assert Path(view.output_dir_textfield.value).name == 'mods_book_out'
+
+
+def test_auto_fill_output_path_dual_mode(monkeypatch):
+    """測試 _auto_fill_output_path 在 dual 模式下產生正確的輸出路徑"""
+    mock_cfg = {
+        "extractor": {
+            "output_folder_names": {
+                "lang_extract": "_lang_out",
+                "book_extract": "_book_out",
+                "dual_extract": "_dual_out",
+            }
+        }
+    }
+    monkeypatch.setattr('translation_tool.utils.config_manager.load_config', lambda: mock_cfg)
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(mock_page(), mock_filepicker())
+
+    view._auto_fill_output_path('/test/mods', mode='dual')
+
+    assert Path(view.output_dir_textfield.value).name == 'mods_dual_out'
+
+
+def test_auto_fill_output_path_falls_back_to_default_on_unknown_mode(monkeypatch):
+    """測試 _auto_fill_output_path 在未知模式時 fallback 到 lang_extract"""
+    mock_cfg = {
+        "extractor": {
+            "output_folder_names": {
+                "lang_extract": "_custom_lang",
+            }
+        }
+    }
+    monkeypatch.setattr('translation_tool.utils.config_manager.load_config', lambda: mock_cfg)
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(mock_page(), mock_filepicker())
+
+    view._auto_fill_output_path('/test/mods', mode='unknown_mode')
+
+    assert Path(view.output_dir_textfield.value).name == 'mods_custom_lang'
