@@ -169,6 +169,17 @@ DEFAULT_CONFIG = {
         "patchouli_skip_en_us_when_zh_cn_exists": False,
         "patchouli_effective_translation_threshold": 0.5,
     },
+    "extractor": {
+        "output_folder_names": {
+            "lang_extract": "_提取lang_輸出",
+            "book_extract": "_提取book_輸出",
+            "lang_preview": "_預覽lang_輸出",
+            "book_preview": "_預覽book_輸出",
+            "dual_extract": "_提取both_輸出",
+            "dual_preview": "_預覽both_輸出",
+        },
+        "skip_zh_cn_extract": False,
+    },
 }
 
 def load_config(config_path: str | os.PathLike | None = None):

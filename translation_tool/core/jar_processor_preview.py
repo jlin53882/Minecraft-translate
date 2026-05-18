@@ -83,6 +83,11 @@ def preview_extraction_generator_impl(
         target_regex = build_lang_file_regex()
     elif mode == "book":
         target_regex = book_path_regex
+    elif mode == "dual":
+        from translation_tool.core.jar_processor import build_lang_file_regex
+
+        lang_regex = build_lang_file_regex()
+        target_regex = None
     else:
         yield {"error": f"未知模式: {mode}"}
         return
@@ -90,36 +95,66 @@ def preview_extraction_generator_impl(
     preview_results = []
     total_files = 0
     total_size_bytes = 0
-    failed_jars = []  # 收集處理失敗的 JAR
+    failed_jars = []
+    total_jars = len(jar_files)
+    half_total = total_jars * 2
 
-    for idx, jar_path in enumerate(jar_files, 1):
+    for idx, jar_path in enumerate(jar_files):
         jar_name = os.path.basename(jar_path)
         jar_size = os.path.getsize(jar_path)
+        lang_matched = []
+        book_matched = []
         matched_files = []
+
         try:
             with zipfile.ZipFile(jar_path, "r") as zf:
                 for member in zf.infolist():
                     if member.is_dir():
                         continue
                     normalized_path = member.filename.replace("\\", "/")
-                    if target_regex.search(normalized_path):
-                        matched_files.append(normalized_path)
-                        total_size_bytes += member.file_size
-            if matched_files:
-                preview_results.append(
-                    {
+
+                    if mode == "dual":
+                        if lang_regex.search(normalized_path):
+                            lang_matched.append(normalized_path)
+                            total_size_bytes += member.file_size
+                        if book_path_regex.search(normalized_path):
+                            book_matched.append(normalized_path)
+                            total_size_bytes += member.file_size
+                    else:
+                        if target_regex.search(normalized_path):
+                            matched_files.append(normalized_path)
+                            total_size_bytes += member.file_size
+
+            if mode == "dual":
+                if lang_matched or book_matched:
+                    preview_results.append({
+                        "jar": jar_name,
+                        "lang_files": lang_matched,
+                        "book_files": book_matched,
+                        "lang_count": len(lang_matched),
+                        "book_count": len(book_matched),
+                        "size_mb": jar_size / (1024**2),
+                    })
+                    total_files += len(lang_matched) + len(book_matched)
+            else:
+                if matched_files:
+                    preview_results.append({
                         "jar": jar_name,
                         "files": matched_files,
                         "count": len(matched_files),
                         "size_mb": jar_size / (1024**2),
-                    }
-                )
-                total_files += len(matched_files)
+                    })
+                    total_files += len(matched_files)
         except Exception as e:
             log.warning("預覽 %s 時發生錯誤: %s", jar_name, e)
             failed_jars.append({"jar": jar_name, "error": str(e)})
 
-        yield {"progress": idx / total_jars, "current": idx, "total": total_jars}
+        current = idx + 1
+        if mode == "dual":
+            progress = current / total_jars
+        else:
+            progress = current / total_jars
+        yield {"progress": progress, "current": current, "total": total_jars}
 
     # 若有任何 JAR 失敗，progress 低於 1.0；UI 可依 failed_jars 判斷「有失敗但完成了」
     final_progress = (
@@ -179,17 +214,24 @@ def generate_preview_report(result: Dict[str, Any], mode: str, output_path: str)
         "",
     ]
 
+    # dual mode 使用 lang_count/book_count，否則使用 count
     for idx, r in enumerate(preview_results, 1):
         report_lines.append(f"### {idx}. {r['jar']}")
         report_lines.append("")
-        report_lines.append(f"- **檔案數量：** {r['count']}")
+        if mode == "dual":
+            report_lines.append(f"- **Lang 檔案：** {r.get('lang_count', 0)}")
+            report_lines.append(f"- **Book 檔案：** {r.get('book_count', 0)}")
+            files = r.get('lang_files', []) + r.get('book_files', [])
+        else:
+            report_lines.append(f"- **檔案數量：** {r.get('count', 0)}")
+            files = r.get('files', [])
         report_lines.append(f"- **JAR 大小：** {r['size_mb']:.2f} MB")
         report_lines.append("- **檔案清單：**")
         report_lines.append("")
-        for file_path in r["files"][:50]:
+        for file_path in files[:50]:
             report_lines.append(f"  - `{file_path}`")
-        if len(r["files"]) > 50:
-            report_lines.append(f"  - ... 還有 {len(r['files']) - 50} 個檔案")
+        if len(files) > 50:
+            report_lines.append(f"  - ... 還有 {len(files) - 50} 個檔案")
         report_lines.append("")
 
     with open(report_path, "w", encoding="utf-8") as f:

@@ -5,6 +5,7 @@
 """
 
 import re
+from pathlib import Path
 from typing import Dict, Any, Generator
 
 from translation_tool.core.jar_processor_discovery import find_jar_files
@@ -31,38 +32,46 @@ BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
     re.IGNORECASE,
 )
 
-def get_lang_codes() -> list[str]:
+def get_lang_codes(*, skip_zh_cn: bool = False) -> list[str]:
     """從 config 取得 jar_extractor.lang_codes，預設 ["en_us", "zh_tw", "zh_cn"]。
+    
+    Args:
+        skip_zh_cn: 是否跳過 zh_cn（從 extractor.skip_zh_cn_extract 讀取）。
     
     回傳值保證為非空 list。
     """
     cfg = load_config()
     codes = cfg.get("jar_extractor", {}).get("lang_codes", ["en_us", "zh_tw", "zh_cn"])
+    if skip_zh_cn and "zh_cn" in codes:
+        codes = [c for c in codes if c != "zh_cn"]
     if not isinstance(codes, list) or not codes:
         codes = ["en_us", "zh_tw", "zh_cn"]
     return codes
 
-def build_lang_file_regex() -> re.Pattern:
+def build_lang_file_regex(*, skip_zh_cn: bool = False) -> re.Pattern:
     """根據 config 中的 lang_codes 動態建 lang file regex。
     
     確保與 preview 使用的 regex 行為一致。
     """
-    codes = get_lang_codes()
+    codes = get_lang_codes(skip_zh_cn=skip_zh_cn)
     codes_str = "|".join(map(re.escape, codes))
     return re.compile(rf"(?:assets/([^/]+)/)?lang/({codes_str})\.(json|lang)$", re.IGNORECASE)
 
-def _extract_from_jar(jar_path: str, output_root: str, target_regex: re.Pattern) -> Dict[str, Any]:
+def _extract_from_jar(
+    jar_path: str,
+    output_root: str,
+    target_regex: re.Pattern,
+    all_scan_results: dict[Path, dict[str, str | None]] | None = None,
+) -> Dict[str, Any]:
     """從 JAR 檔案提取檔案。
 
     Args:
         jar_path: JAR 檔案路徑
         output_root: 輸出根目錄
         target_regex: 目標檔案正規表達式
-
-    Returns:
-        提取結果字典
+        all_scan_results: 預先掃描的 JAR 結果（由 caller 傳入）
     """
-    return extract_from_jar_impl(jar_path, output_root, target_regex)
+    return extract_from_jar_impl(jar_path, output_root, target_regex, scan_results=all_scan_results)
 
 def _run_extraction_process(
     mods_dir: str, output_dir: str, target_regex: re.Pattern, process_name: str
@@ -87,17 +96,18 @@ def _run_extraction_process(
         extract_from_jar_fn=_extract_from_jar,
     )
 
-def extract_lang_files_generator(mods_dir: str, output_dir: str) -> Generator[Dict[str, Any], None, None]:
+def extract_lang_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: bool = False) -> Generator[Dict[str, Any], None, None]:
     """從 mods 目錄提取語言檔。
 
     Args:
         mods_dir: Mod 目錄路徑
         output_dir: 輸出目錄路徑
+        skip_zh_cn: 是否跳過 zh_cn 抽取
 
     Yields:
         進度字典
     """
-    lang_file_regex = build_lang_file_regex()
+    lang_file_regex = build_lang_file_regex(skip_zh_cn=skip_zh_cn)
     yield from _run_extraction_process(
         mods_dir=mods_dir,
         output_dir=output_dir,
@@ -121,6 +131,59 @@ def extract_book_files_generator(mods_dir: str, output_dir: str) -> Generator[Di
         BOOK_PATH_REGEX_DUAL_STRUCTURE,
         "Patchouli Book",
     )
+
+def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: bool = False) -> Generator[Dict[str, Any], None, None]:
+    """從 mods 目錄依序提取語言檔與書本檔（dual 模式）。
+
+    Args:
+        mods_dir: Mod 目錄路徑
+        output_dir: 輸出目錄路徑
+        skip_zh_cn: 是否跳過 zh_cn 抽取
+
+    Yields:
+        進度字典
+    """
+    lang_file_regex = build_lang_file_regex(skip_zh_cn=skip_zh_cn)
+    lang_error = None
+    lang_stats = None
+    try:
+        for update in _run_extraction_process(
+            mods_dir=mods_dir,
+            output_dir=output_dir,
+            target_regex=lang_file_regex,
+            process_name="Lang",
+        ):
+            if "stats" in update:
+                lang_stats = update["stats"]
+            yield update
+    except Exception as e:
+        lang_error = str(e)
+    yield {"log": "[系統] Lang 提取完成，開始提取 Book..."}
+    book_error = None
+    try:
+        for update in _run_extraction_process(
+            mods_dir,
+            output_dir,
+            BOOK_PATH_REGEX_DUAL_STRUCTURE,
+            "Patchouli Book",
+        ):
+            if "stats" in update:
+                if lang_stats:
+                    merged_stats = {
+                        "success": lang_stats["success"] + update["stats"]["success"],
+                        "failures": lang_stats["failures"] + update["stats"]["failures"],
+                        "warnings": lang_stats["warnings"] + update["stats"]["warnings"],
+                        "total_files": lang_stats["total_files"] + update["stats"]["total_files"],
+                    }
+                    yield {**update, "stats": merged_stats}
+                else:
+                    yield update
+            else:
+                yield update
+    except Exception as e:
+        book_error = str(e)
+    if lang_error or book_error:
+        yield {"dual_errors": {"lang": lang_error, "book": book_error}}
 
 def preview_extraction_generator(mods_dir: str, mode: str) -> Generator[Dict[str, Any], None, None]:
     """預覽提取結果。

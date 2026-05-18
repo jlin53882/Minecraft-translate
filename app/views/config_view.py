@@ -25,6 +25,7 @@ NAV_ITEMS = [
     {"id": "prompts", "label": "提示詞管理", "icon": ft.Icons.MESSAGE},
     {"id": "species_lookup", "label": "學名查詢管理", "icon": ft.Icons.SEARCH},
     {"id": "batch_limits", "label": "批次與限制", "icon": ft.Icons.DEVELOPER_BOARD},
+    {"id": "extractor", "label": "Jar 提取設定", "icon": ft.Icons.FOLDER_OPEN},
 ]
 
 
@@ -47,6 +48,7 @@ class ConfigView(ft.Column):
         """
         super().__init__(expand=True, spacing=0)
         self._page = page
+        self._registry = None
         self.controls_map = {}
         self._selected_nav = "general"
 
@@ -253,6 +255,25 @@ class ConfigView(ft.Column):
             helper="用於：find_patchouli_json 掃描目錄",
         )
 
+        self.controls_map["extractor.output_folder_names.lang_extract"] = ft.TextField(
+            label="Lang 提取輸出資料夾", helper="未填入輸出路徑時自動帶入此名稱", dense=True
+        )
+        self.controls_map["extractor.output_folder_names.book_extract"] = ft.TextField(
+            label="Book 提取輸出資料夾", helper="未填入輸出路徑時自動帶入此名稱", dense=True
+        )
+        self.controls_map["extractor.output_folder_names.lang_preview"] = ft.TextField(
+            label="Lang 預覽輸出資料夾", helper="未填入輸出路徑時自動帶入此名稱", dense=True
+        )
+        self.controls_map["extractor.output_folder_names.book_preview"] = ft.TextField(
+            label="Book 預覽輸出資料夾", helper="未填入輸出路徑時自動帶入此名稱", dense=True
+        )
+        self.controls_map["extractor.output_folder_names.dual_extract"] = ft.TextField(
+            label="Dual 提取輸出資料夾", helper="Lang + Book 同時提取時使用", dense=True
+        )
+        self.controls_map["extractor.output_folder_names.dual_preview"] = ft.TextField(
+            label="Dual 預覽輸出資料夾", helper="Lang + Book 同時預覽時使用", dense=True
+        )
+
         self.new_model_field = ft.TextField(
             label="新增模型名稱", hint_text="gemini-2.5-flash", expand=True, dense=True
         )
@@ -425,6 +446,24 @@ class ConfigView(ft.Column):
             ],
         )
 
+        extractor_content = ft.Column(
+            spacing=15,
+            controls=[
+                self._build_card("JAR 輸出資料夾命名", [
+                    ft.Row([
+                        ft.Column([self.controls_map["extractor.output_folder_names.lang_extract"]], expand=1),
+                        ft.Column([self.controls_map["extractor.output_folder_names.book_extract"]], expand=1),
+                        ft.Column([self.controls_map["extractor.output_folder_names.dual_extract"]], expand=1),
+                    ]),
+                    ft.Row([
+                        ft.Column([self.controls_map["extractor.output_folder_names.lang_preview"]], expand=1),
+                        ft.Column([self.controls_map["extractor.output_folder_names.book_preview"]], expand=1),
+                        ft.Column([self.controls_map["extractor.output_folder_names.dual_preview"]], expand=1),
+                    ]),
+                ]),
+            ],
+        )
+
         self._content_containers["general"] = general_content
         self._content_containers["api_models"] = api_models_content
         self._content_containers["translation_behavior"] = translation_behavior_content
@@ -432,6 +471,7 @@ class ConfigView(ft.Column):
         self._content_containers["species_lookup"] = species_lookup_content
         self._content_containers["batch_limits"] = batch_limits_content
         self._content_containers["merger"] = merger_content
+        self._content_containers["extractor"] = extractor_content
 
         self.content_scroll = ft.Container(
             expand=True,
@@ -444,6 +484,7 @@ class ConfigView(ft.Column):
                     species_lookup_content,
                     batch_limits_content,
                     merger_content,
+                    extractor_content,
                 ]
             ),
         )
@@ -724,8 +765,13 @@ class ConfigView(ft.Column):
             load_config_json_fn=load_config_json,
             save_config_json_fn=save_config_json,
             validate_api_keys_from_ui_fn=validate_api_keys_from_ui,
+            registry=self._registry,
         )
 
     @property
     def page(self):
         return self._page
+
+    def set_registry(self, registry):
+        """儲存 registry 參考，讓 save_config_clicked 能廣播到其他 views"""
+        self._registry = registry

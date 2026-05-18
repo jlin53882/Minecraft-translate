@@ -64,25 +64,19 @@ def extract_from_jar_impl(
     jar_path: str,
     output_root: str,
     target_regex: re.Pattern,
-    *,
     get_file_hash_fn: Callable[[bytes], str] = get_file_hash,
-) -> Dict[str, Any]:
-    """從單一 JAR 檔案中抽取符合正規表達式的檔案內容。
+    scan_results: dict[Path, dict[str, str | None]] | None = None,
+) -> dict[str, Any]:
+    """從單一 JAR 檔案提取符合目標正規表達式的檔案。
 
-    僅處理 assets/ 開頭或非 assets 的普通資源檔，
-    輸出時保留原始目錄結構。HASH 相同者自動跳過（增量更新）。
-
-    內部實作（PR #55 重構）：
-    - 使用 `jar_browser.scan_jars()` 讀取符合 pattern 的文字檔內容，
-      由 jar_browser 的 ThreadPoolExecutor 統一管理多執行緒。
-    - Binary 檔案（UTF-8 decode 失敗）則 fallback 直接讀取 ZIP，
-      以確保 hash 計算和寫入行為與重構前完全一致。
+    效能優化：scan_results 由 caller 預先掃描後傳入，避免重複掃描目錄。
 
     Args:
         jar_path: JAR 檔案路徑
         output_root: 輸出根目錄
-        target_regex: 用來過濾感興趣檔案的正規表達式
+        target_regex: 目標檔案正規表達式
         get_file_hash_fn: 檔案 HASH 計算函式（預設 SHA-256）
+        scan_results: 預先掃描的 JAR 結果（由 run_extraction_process_impl 一次性掃描後傳入）
     Returns:
         包含 extracted/skipped 的統計字典
     """
@@ -93,26 +87,21 @@ def extract_from_jar_impl(
     jar_filename_base = _normalize_jar_base_name(jar_path)
     jar_path_obj = Path(jar_path)
 
-    # 如果 jar_path 不存在（被刪除或路徑錯誤），直接返回錯誤
     if not jar_path_obj.exists():
         log.error("JAR 檔案不存在: %s", jar_path)
         return {"status": "error", "extracted": 0, "skipped": 0}
 
     try:
-        # 使用 jar_browser.scan_jars() 讀取文字檔（由 jar_browser 管理執行緒）
-        # target_regex.pattern 取出原生 str，正則行為與原本一致
         jar_results: dict[str, str | None] = {}
-        scan_results = scan_jars(
-            jar_dir=jar_path_obj.parent,
-            patterns=[target_regex.pattern],
-        )
-        # jar_browser.scan_jars() 回傳 dict[Path, dict[str, str | None]]
-        # 只取我們感興趣的這個 JAR 的結果
-        if jar_path_obj in scan_results:
+        if scan_results is not None and jar_path_obj in scan_results:
             jar_results = scan_results[jar_path_obj]
         else:
-            # JAR 不在 scan_jars 的結果中（可能全部失敗或無符合），走 fallback
-            jar_results = {}
+            scan_results_fallback = scan_jars(
+                jar_dir=jar_path_obj.parent,
+                patterns=[target_regex.pattern],
+            )
+            if jar_path_obj in scan_results_fallback:
+                jar_results = scan_results_fallback[jar_path_obj]
 
         # 同時用 ZIP 直接列出所有符合的成員（包含 binary 檔案路徑）
         # 確保 binary 檔案不會因為 jar_browser 回傳 None 而漏掉
@@ -185,6 +174,8 @@ def run_extraction_process_impl(
     Yields:
         進度字典，包含 progress（0.0~1.0）欄位。
     """
+    from translation_tool.utils.jar_browser import scan_jars
+
     os.makedirs(output_dir, exist_ok=True)
     jar_files = find_jar_files_fn(mods_dir)
     total_jars = len(jar_files)
@@ -196,6 +187,8 @@ def run_extraction_process_impl(
 
     log.info("開始從 %s 個 .jar 檔案中提取 %s 檔案...", total_jars, process_name)
     yield {'progress': 0.0}
+
+    all_scan_results = scan_jars(jar_dir=Path(mods_dir), patterns=[target_regex.pattern])
 
     processed_count = 0
     total_extracted = 0
@@ -210,7 +203,7 @@ def run_extraction_process_impl(
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_jar = {
-            executor.submit(extract_from_jar_fn, jar, output_dir, target_regex): jar
+            executor.submit(extract_from_jar_fn, jar, output_dir, target_regex, all_scan_results): jar
             for jar in jar_files
         }
         for future in concurrent.futures.as_completed(future_to_jar):
@@ -223,10 +216,20 @@ def run_extraction_process_impl(
                     total_extracted += result['extracted']
                     total_skipped += result['skipped']
                 log.info("[%s/%s] %s", processed_count, total_jars, os.path.basename(jar_path))
-                yield {'progress': prog}
+                yield {
+                    'progress': prog,
+                    'current': processed_count,
+                    'total': total_jars,
+                    'log': f"[{processed_count}/{total_jars}] {os.path.basename(jar_path)}",
+                }
             except Exception as exc:
                 log.error("提取 %s 時產生例外: %s", os.path.basename(jar_path), exc)
-                yield {'progress': prog}
+                yield {
+                    'progress': prog,
+                    'current': processed_count,
+                    'total': total_jars,
+                    'log': f"[ERROR] 提取 {os.path.basename(jar_path)} 時產生例外",
+                }
 
     log.info(
         "--- %s 提取完成！ ---\n已檢查 %s/%s 個 JAR 檔案。\n  - 新提取或更新的檔案: %s 個\n  - 因內容相同而跳過的檔案: %s 個",
@@ -236,4 +239,15 @@ def run_extraction_process_impl(
         total_extracted,
         total_skipped,
     )
-    yield {'progress': 1.0}
+    yield {
+        'progress': 1.0,
+        'current': processed_count,
+        'total': total_jars,
+        'log': f"--- {process_name} 提取完成！ ---\n已檢查 {processed_count}/{total_jars} 個 JAR 檔案。\n  - 新提取或更新的檔案: {total_extracted} 個\n  - 因內容相同而跳過的檔案: {total_skipped} 個",
+        'stats': {
+            'success': processed_count,
+            'failures': 0,
+            'warnings': total_skipped,
+            'total_files': total_extracted,
+        },
+    }

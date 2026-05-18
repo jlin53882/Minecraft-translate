@@ -143,7 +143,7 @@ class TestGlobalSingleton:
     def test_global_log_limiter_defaults(self):
         """測試全域節流器預設值"""
         assert GLOBAL_LOG_LIMITER.max_logs == 5000
-        assert GLOBAL_LOG_LIMITER.flush_interval == 0.1
+        assert GLOBAL_LOG_LIMITER.flush_interval == 0.0
 
     def test_ui_log_handler_type(self):
         """測試 UI_LOG_HANDLER 類型"""

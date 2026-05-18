@@ -8,6 +8,30 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+# -----------------------------------------------------------------------------
+# Flet 0.85 Compatibility Helpers
+# -----------------------------------------------------------------------------
+
+def _border_all(width, color):
+    """Flet 0.85+ compatible Border.all() helper.
+
+    In flet >= 0.85, ft.Border no longer has the .all() class method.
+    This replicates the behavior using Border + BorderSide.
+    """
+    import flet as ft
+    return ft.Border(
+        top=ft.BorderSide(width, color),
+        right=ft.BorderSide(width, color),
+        bottom=ft.BorderSide(width, color),
+        left=ft.BorderSide(width, color),
+    )
+
+
+# Monkey-patch ft.Border.all for tests that expect the 0.28.3 API
+import flet as ft
+ft.Border.all = staticmethod(_border_all)
+
+
 # =============================================================================
 # 共用 Fixtures
 # =============================================================================

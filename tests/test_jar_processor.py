@@ -5,12 +5,15 @@
 
 import re
 import os
+import sys
 import zipfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from translation_tool.core.jar_processor import (
     extract_lang_files_generator,
     extract_book_files_generator,
+    extract_dual_files_generator,
     preview_extraction_generator,
     ExtractionSummary,
     generate_preview_report,
@@ -216,3 +219,101 @@ class TestGeneratePreviewReport:
         content = Path(report_path).read_text(encoding="utf-8")
         assert "JAR 提取預覽報告" in content
         assert "mod1.jar" in content
+
+
+class TestExtractDualFilesGenerator:
+    """測試 extract_dual_files_generator 錯誤處理"""
+
+    def test_dual_mode_no_errors_when_both_pass(self, tmp_path):
+        """測試兩個階段都成功時，沒有 dual_errors"""
+        mods_dir = tmp_path / "mods"
+        mods_dir.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        jar_path = mods_dir / "test_mod.jar"
+        with zipfile.ZipFile(jar_path, "w") as zf:
+            zf.writestr("assets/testmod/lang/en_us.json", '{"key": "value"}')
+            zf.writestr("assets/patchouli_books/guide/en_us/book.json", '{}')
+
+        results = list(extract_dual_files_generator(str(mods_dir), str(output_dir)))
+
+        dual_error_updates = [r for r in results if "dual_errors" in r]
+        assert len(dual_error_updates) == 0
+
+    def test_dual_mode_lang_error_captured(self, tmp_path, monkeypatch):
+        """測試 Lang 階段失敗時，dual_errors 包含 lang 錯誤，Book 階段繼續執行"""
+        from translation_tool.core.jar_processor_extract import run_extraction_process_impl
+
+        def mock_impl(mods_dir, output_dir, target_regex, process_name, **kwargs):
+            if process_name == "Lang":
+                raise RuntimeError("Lang extraction failed")
+            yield from run_extraction_process_impl(
+                mods_dir, output_dir, target_regex, "Patchouli Book",
+                find_jar_files_fn=lambda d: [],
+                extract_from_jar_fn=lambda *a, **kw: {},
+            )
+
+        monkeypatch.setattr(
+            "translation_tool.core.jar_processor._run_extraction_process",
+            mock_impl,
+        )
+
+        results = list(extract_dual_files_generator(str(tmp_path / "mods"), str(tmp_path / "output")))
+
+        dual_error_updates = [r for r in results if "dual_errors" in r]
+        assert len(dual_error_updates) == 1
+        assert dual_error_updates[0]["dual_errors"]["lang"] == "Lang extraction failed"
+        assert dual_error_updates[0]["dual_errors"]["book"] is None
+
+    def test_dual_mode_book_error_captured(self, tmp_path, monkeypatch):
+        """測試 Book 階段失敗時，dual_errors 包含 book 錯誤"""
+        from translation_tool.core.jar_processor_extract import run_extraction_process_impl
+
+        def mock_impl(mods_dir, output_dir, target_regex, process_name, **kwargs):
+            if process_name == "Patchouli Book":
+                raise RuntimeError("Book extraction failed")
+            yield from run_extraction_process_impl(
+                mods_dir, output_dir, target_regex, "Lang",
+                find_jar_files_fn=lambda d: [],
+                extract_from_jar_fn=lambda *a, **kw: {},
+            )
+
+        monkeypatch.setattr(
+            "translation_tool.core.jar_processor._run_extraction_process",
+            mock_impl,
+        )
+
+        results = list(extract_dual_files_generator(str(tmp_path / "mods"), str(tmp_path / "output")))
+
+        dual_error_updates = [r for r in results if "dual_errors" in r]
+        assert len(dual_error_updates) == 1
+        assert dual_error_updates[0]["dual_errors"]["lang"] is None
+        assert dual_error_updates[0]["dual_errors"]["book"] == "Book extraction failed"
+
+    def test_dual_mode_stats_are_merged(self, tmp_path, monkeypatch):
+        """測試 dual mode 完成時，stats 是 Lang + Book 的合併"""
+        from translation_tool.core.jar_processor_extract import run_extraction_process_impl
+
+        call_count = [0]
+
+        def mock_impl(mods_dir, output_dir, target_regex, process_name, **kwargs):
+            call_count[0] += 1
+            if process_name == "Lang":
+                yield {"progress": 1.0, "stats": {"success": 5, "failures": 0, "warnings": 2, "total_files": 5}}
+            elif process_name == "Patchouli Book":
+                yield {"progress": 1.0, "stats": {"success": 3, "failures": 0, "warnings": 1, "total_files": 3}}
+
+        monkeypatch.setattr(
+            "translation_tool.core.jar_processor._run_extraction_process",
+            mock_impl,
+        )
+
+        results = list(extract_dual_files_generator(str(tmp_path / "mods"), str(tmp_path / "output")))
+
+        stats_updates = [r for r in results if "stats" in r]
+        merged_stats = stats_updates[-1]["stats"]
+        assert merged_stats["success"] == 8  # 5 + 3
+        assert merged_stats["warnings"] == 3  # 2 + 1
+        assert merged_stats["failures"] == 0
+        assert merged_stats["total_files"] == 8  # 5 + 3

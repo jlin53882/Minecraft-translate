@@ -13,6 +13,7 @@
 
 # /minecraft_translator_flet/app/views/extractor_view.py
 import flet as ft
+from pathlib import Path
 from app.ui import theme
 from translation_tool.utils.log_unit import log_info
 import threading
@@ -39,6 +40,12 @@ class ExtractorView(ft.Column):
     - 若新增新的提取模式，務必沿用同一套 session + poller 流程。
     - stats 欄位是 UI 顯示用途；不要在核心流程依賴它當正確性來源。
     """
+
+    def _load_target_language():
+        """從 config 動態讀取預設目標語系。"""
+        from translation_tool.utils.config_manager import load_config
+        config = load_config()
+        return config.get("extractor", {}).get("target_language", "zh_tw")
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """初始化 ExtractorView。
@@ -86,6 +93,14 @@ class ExtractorView(ft.Column):
             border_color=theme.OUTLINE,
             text_size=14,
             content_padding=15,
+            helper="（請選擇或直接輸入輸出資料夾）",
+        )
+
+        self.output_dir_helper_text = ft.Text("", size=12, color=ft.Colors.GREY_600)
+
+        self.skip_zh_cn_switch = ft.Switch(
+            label="跳過 zh_cn 抽取",
+            value=False,
         )
 
         # 2. Action Buttons
@@ -123,6 +138,22 @@ class ExtractorView(ft.Column):
             icon=ft.Icons.PREVIEW,
             on_click=lambda e: self.show_preview("book"),
         )
+        self.dual_extract_button = ft.Button(
+            "提取 Lang + Book",
+            icon=ft.Icons.LANGUAGE,
+            style=ft.ButtonStyle(
+                color=theme.WHITE,
+                bgcolor="#7B1FA2",
+                shape=ft.RoundedRectangleBorder(radius=6),
+                padding=20,
+            ),
+            on_click=lambda e: self.start_extraction("dual"),
+        )
+        self.dual_preview_button = ft.OutlinedButton(
+            "預覽 Lang + Book",
+            icon=ft.Icons.PREVIEW,
+            on_click=lambda e: self.show_preview("dual"),
+        )
 
         # 3. Status Display
         self.status_text = ft.Text("狀態：閒置", size=14, color=theme.GREY_700)
@@ -149,6 +180,9 @@ class ExtractorView(ft.Column):
             self._build_settings_card(),
             self._build_logs_card(),
         ]
+
+        # 初始化 output_dir helper，動態讀取設定值
+        self._update_output_dir_helper()
 
     def _build_settings_card(self):
         """构建设置卡片 UI 组件"""
@@ -187,6 +221,64 @@ class ExtractorView(ft.Column):
             self.page.update()
         else:
             self._show_snack_bar("未選擇資料夾", color=theme.BLUE_600)
+
+    # 僅在按「預覽/提取」時自動填入輸出路徑，選擇資料夾時不自動填入
+    def refresh_output_dir_helper(self):
+        """重新讀取 config 並更新 output_dir_textfield 的 helper。
+
+        在設定頁儲存 extractor 設定後呼叫。
+        """
+        self._update_output_dir_helper()
+
+    def _update_output_dir_helper(self):
+        """動態更新 output_dir_textfield 的 helper，顯示實際的資料夾命名設定。"""
+        from translation_tool.utils.config_manager import load_config
+        config = load_config()
+        folder_names = config.get("extractor", {}).get("output_folder_names", {})
+        lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
+        book_extract = folder_names.get("book_extract", "_提取book_輸出")
+        dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
+        lang_preview = folder_names.get("lang_preview", "_預覽lang_輸出")
+        book_preview = folder_names.get("book_preview", "_預覽book_輸出")
+
+        helper_text = (
+            f"未指定時自動產生（路徑 + 設定名稱）：\n"
+            f"  • Lang 提取：...mods + {lang_extract}\n"
+            f"  • Book 提取：...mods + {book_extract}\n"
+            f"  • Dual 提取：...mods + {dual_extract}\n"
+            f"  • Lang 預覽：...mods + {lang_preview}\n"
+            f"  • Book 預覽：...mods + {book_preview}\n\n"
+            f"預設抽取語系：zh_cn / zh_tw / en_us\n"
+            f"選項：可勾選「跳過 zh_cn 抽取」（預設關閉）\n"
+            f"自動產生資料夾名稱可以在設定頁面調整"
+        )
+        self.output_dir_textfield.helper = helper_text
+        self._page.update()
+
+    def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
+        """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。"""
+        from translation_tool.utils.config_manager import load_config
+
+        config = load_config()
+        folder_names = config.get("extractor", {}).get("output_folder_names", {})
+        lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
+        book_extract = folder_names.get("book_extract", "_提取book_輸出")
+        dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
+
+        if mode == "lang":
+            suffix = lang_extract
+        elif mode == "book":
+            suffix = book_extract
+        elif mode == "dual":
+            suffix = dual_extract
+        else:
+            suffix = lang_extract
+
+        mods_path = Path(mods_dir)
+        output_path = str(mods_path.with_name(mods_path.name + suffix))
+        self.output_dir_textfield.value = output_path
+        self.page.update()
+        self._append_log_line(f"[系統] 自動設定輸出路徑：{output_path}")
 
     def set_controls_disabled(self, disabled: bool):
         """設定控制項停用/啟用狀態"""
@@ -237,7 +329,7 @@ class ExtractorView(ft.Column):
                 ft.Row(
                     [
                         ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=20),
-                        ft.Text(f"跳過檔案：{stats['warnings']} 個", size=14),
+                        ft.Text(f"因內容相同而跳過的檔案：{stats['warnings']} 個", size=14),
                     ],
                     spacing=8,
                 ),
@@ -270,11 +362,13 @@ class ExtractorView(ft.Column):
         )
 
         try:
-            self.page.open(dialog)
-        except Exception:
             self.page.overlay.append(dialog)
             dialog.open = True
-            self.page.update()
+            async def _do_update(_):
+                self.page.update()
+            self.page.run_task(_do_update, None)
+        except Exception:
+            pass
 
     def _append_log_line(self, entry_or_str):
         """新增日誌訊息到日誌檢視區。
@@ -282,6 +376,7 @@ class ExtractorView(ft.Column):
         支援傳入 LogEntry（PR2 後 poller 傳入）或 str（直接呼叫時）。
         """
         text = entry_or_str.text if hasattr(entry_or_str, "text") else entry_or_str
+        log_info(f"[DEBUG] _append_log_line called: thread={threading.current_thread().name}, text={text[:80]}...")
         color = "#e0e0e0"  # default logs are light grey
         if "[ERROR]" in text:
             color = "#ff6b6b"  # soft red
@@ -290,6 +385,7 @@ class ExtractorView(ft.Column):
         elif "Translation" in text or "完成" in text:
             color = "#74c0fc"  # soft blue
 
+        log_info(f"[DEBUG] _append_log_line: before append, log_view.controls count={len(self.log_view.controls)}")
         self.log_view.controls.append(
             ft.Text(
                 text,
@@ -299,6 +395,7 @@ class ExtractorView(ft.Column):
                 selectable=True,
             )
         )
+        log_info(f"[DEBUG] _append_log_line: after append, log_view.controls count={len(self.log_view.controls)}")
 
     # ==================================================
     # Worker Logic
@@ -335,36 +432,35 @@ class ExtractorView(ft.Column):
         """显示提取预览对话框（lang 或 book 模式）"""
         return run_preview_flow(self, mode)
 
-    def _show_preview_dialog_result_v2(self, result: dict, mode: str):
+    def _show_preview_dialog_result(self, result: dict, mode: str):
         """显示预览结果对话框"""
         dialog = build_preview_result_dialog(self, result, mode)
-        try:
-            self.page.open(dialog)
-        except Exception as ex:
-            self._append_log_line(f"[ERROR] 顯示對話框失敗: {ex}")
+        self.page.overlay.append(dialog)
+        dialog.open = True
+        async def _do_update(_):
+            self.page.update()
+        self.page.run_task(_do_update, None)
 
-    def _show_preview_dialog_error_v2(self, error: str, mode: str):
+    def _show_preview_dialog_error(self, error: str, mode: str):
         """显示预览错误对话框"""
         self._preview_error_dialog = build_preview_error_dialog(self, error, mode)
-        try:
-            self.page.open(self._preview_error_dialog)
-        except Exception as ex:
-            self._append_log_line(f"[ERROR] 顯示錯誤對話框失敗: {ex}")
+        self.page.overlay.append(self._preview_error_dialog)
+        self._preview_error_dialog.open = True
+        async def _do_update(_):
+            self.page.update()
+        self.page.run_task(_do_update, None)
 
     def _close_dialog_overlay(self, dialog):
-        """關閉 overlay 對話框"""
+        """關閉 overlay 對話框並重置 UI 狀態"""
         try:
-            # 使用 Flet 官方推薦的關閉方式
-            self.page.close(dialog)
-        except Exception:
-            # 如果 page.close() 失敗，改用手動方式
             dialog.open = False
-            if dialog in self.page.overlay:
-                self.page.overlay.remove(dialog)
-            try:
-                self.page.update()
-            except Exception:
-                pass
+            self.status_text.value = '狀態：閒置'
+            self.progress_bar.value = 0
+            self.progress_bar.color = ft.Colors.BLUE
+            self.set_controls_disabled(False)
+            self.page.update()
+        except Exception:
+            pass
 
     def _start_from_preview_overlay(self, dialog, mode: str):
         """從預覽對話框開始提取（overlay 版本）"""

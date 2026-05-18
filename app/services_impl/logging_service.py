@@ -95,7 +95,7 @@ class LogLimiter:
         return {"log": merged, "progress": self._cached_progress}
 
 # 單例：全域節流器（維持與 services.py 過去行為一致）
-GLOBAL_LOG_LIMITER = LogLimiter(max_logs=5000, flush_interval=0.1)
+GLOBAL_LOG_LIMITER = LogLimiter(max_logs=5000, flush_interval=0.0)
 
 # 單例：UI log handler（維持與 services.py 過去行為一致）
 UI_LOG_HANDLER = UISessionLogHandler()
