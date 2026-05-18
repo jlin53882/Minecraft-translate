@@ -115,6 +115,6 @@ def test_extractor_view_output_dir_helper_text():
         from app.views.extractor_view import ExtractorView
         view = ExtractorView(mock_page(), mock_filepicker())
 
-        helper_text = view.output_dir_textfield.helper_text
+        helper_text = view.output_dir_textfield.helper
         assert '未指定時自動產生' in helper_text
         assert '路徑 + 設定名稱' in helper_text

@@ -43,12 +43,11 @@ def test_update_stats_from_log_counts_success_warning_failure(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
 
-    view._update_stats_from_log('成功提取 3 個新檔案')
-    view._update_stats_from_log('跳過已存在檔案')
-    view._update_stats_from_log('[ERROR] boom')
+    view._update_stats_from_log('已檢查 10/10 個 JAR 檔案。\n  - 新提取或更新的檔案: 3 個\n  - 因內容相同而跳過的檔案: 5 個')
+    view._update_stats_from_log('[ERROR] 提取某個檔案時產生例外')
 
-    assert view._extraction_stats['success'] == 1
-    assert view._extraction_stats['warnings'] == 1
+    assert view._extraction_stats['success'] == 10
+    assert view._extraction_stats['warnings'] == 5
     assert view._extraction_stats['failures'] == 1
     assert view._extraction_stats['total_files'] == 3
 
@@ -111,13 +110,11 @@ def test_extractor_view_update_stats_resets_counters(monkeypatch):
 
     view._extraction_stats = {"success": 0, "warnings": 0, "failures": 0, "total_files": 0}
 
-    view._update_stats_from_log('成功提取 5 個新檔案')
-    view._update_stats_from_log('跳過已存在檔案')
-    view._update_stats_from_log('[WARN] 部分失敗')
+    view._update_stats_from_log('已檢查 8/8 個 JAR 檔案。\n  - 新提取或更新的檔案: 5 個\n  - 因內容相同而跳過的檔案: 2 個')
     view._update_stats_from_log('[ERROR] 嚴重錯誤')
 
-    assert view._extraction_stats['success'] == 1
-    assert view._extraction_stats['warnings'] == 1
+    assert view._extraction_stats['success'] == 8
+    assert view._extraction_stats['warnings'] == 2
     assert view._extraction_stats['failures'] == 1
     assert view._extraction_stats['total_files'] == 5
 
