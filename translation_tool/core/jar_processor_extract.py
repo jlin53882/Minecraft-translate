@@ -216,10 +216,20 @@ def run_extraction_process_impl(
                     total_extracted += result['extracted']
                     total_skipped += result['skipped']
                 log.info("[%s/%s] %s", processed_count, total_jars, os.path.basename(jar_path))
-                yield {'progress': prog, 'current': processed_count, 'total': total_jars}
+                yield {
+                    'progress': prog,
+                    'current': processed_count,
+                    'total': total_jars,
+                    'log': f"[{processed_count}/{total_jars}] {os.path.basename(jar_path)}",
+                }
             except Exception as exc:
                 log.error("提取 %s 時產生例外: %s", os.path.basename(jar_path), exc)
-                yield {'progress': prog, 'current': processed_count, 'total': total_jars}
+                yield {
+                    'progress': prog,
+                    'current': processed_count,
+                    'total': total_jars,
+                    'log': f"[ERROR] 提取 {os.path.basename(jar_path)} 時產生例外",
+                }
 
     log.info(
         "--- %s 提取完成！ ---\n已檢查 %s/%s 個 JAR 檔案。\n  - 新提取或更新的檔案: %s 個\n  - 因內容相同而跳過的檔案: %s 個",
@@ -233,6 +243,7 @@ def run_extraction_process_impl(
         'progress': 1.0,
         'current': processed_count,
         'total': total_jars,
+        'log': f"--- {process_name} 提取完成！ ---\n已檢查 {processed_count}/{total_jars} 個 JAR 檔案。\n  - 新提取或更新的檔案: {total_extracted} 個\n  - 因內容相同而跳過的檔案: {total_skipped} 個",
         'stats': {
             'success': processed_count,
             'failures': 0,
