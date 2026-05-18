@@ -144,19 +144,29 @@ def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: 
         進度字典
     """
     lang_file_regex = build_lang_file_regex(skip_zh_cn=skip_zh_cn)
-    yield from _run_extraction_process(
-        mods_dir=mods_dir,
-        output_dir=output_dir,
-        target_regex=lang_file_regex,
-        process_name="Lang",
-    )
+    lang_error = None
+    try:
+        yield from _run_extraction_process(
+            mods_dir=mods_dir,
+            output_dir=output_dir,
+            target_regex=lang_file_regex,
+            process_name="Lang",
+        )
+    except Exception as e:
+        lang_error = str(e)
     yield {"log": "[系統] Lang 提取完成，開始提取 Book..."}
-    yield from _run_extraction_process(
-        mods_dir,
-        output_dir,
-        BOOK_PATH_REGEX_DUAL_STRUCTURE,
-        "Patchouli Book",
-    )
+    book_error = None
+    try:
+        yield from _run_extraction_process(
+            mods_dir,
+            output_dir,
+            BOOK_PATH_REGEX_DUAL_STRUCTURE,
+            "Patchouli Book",
+        )
+    except Exception as e:
+        book_error = str(e)
+    if lang_error or book_error:
+        yield {"dual_errors": {"lang": lang_error, "book": book_error}}
 
 def preview_extraction_generator(mods_dir: str, mode: str) -> Generator[Dict[str, Any], None, None]:
     """預覽提取結果。
