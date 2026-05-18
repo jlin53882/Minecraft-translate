@@ -95,13 +95,12 @@ def test_config_save_extractor_folder_names():
             saved_config.update(cfg)
 
         from app.views.config.config_actions import save_config_from_view
-        from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
 
         save_config_from_view(
             view,
             load_config_json_fn=mock_load,
             save_config_json_fn=mock_save,
-            validate_api_keys_from_ui_fn=validate_api_keys_from_ui,
+            validate_api_keys_from_ui_fn=lambda keys: None,
         )
 
         assert saved_config['extractor']['output_folder_names']['lang_extract'] == '_測試lang_輸出'
