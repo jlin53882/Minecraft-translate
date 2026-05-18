@@ -259,6 +259,7 @@ class ExtractorView(ft.Column):
             f"預設抽取語系：zh_cn / zh_tw / en_us\n"
             f"選項：可勾選「跳過 zh_cn 抽取」（預設關閉）"
         )
+        self._page.update()
 
     def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
         """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。"""
