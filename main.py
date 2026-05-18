@@ -63,6 +63,7 @@ def main(page: ft.Page):
     file_picker = ft.FilePicker()
 
     registry = build_view_registry(page, file_picker)
+    registry[0]['view'].content.set_registry(registry)
 
     def resize_window_for_view(view_key: str):
         width, height = get_window_size(view_key)

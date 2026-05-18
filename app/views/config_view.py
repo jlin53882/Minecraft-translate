@@ -48,6 +48,7 @@ class ConfigView(ft.Column):
         """
         super().__init__(expand=True, spacing=0)
         self._page = page
+        self._registry = None
         self.controls_map = {}
         self._selected_nav = "general"
 
@@ -764,8 +765,13 @@ class ConfigView(ft.Column):
             load_config_json_fn=load_config_json,
             save_config_json_fn=save_config_json,
             validate_api_keys_from_ui_fn=validate_api_keys_from_ui,
+            registry=self._registry,
         )
 
     @property
     def page(self):
         return self._page
+
+    def set_registry(self, registry):
+        """儲存 registry 參考，讓 save_config_clicked 能廣播到其他 views"""
+        self._registry = registry

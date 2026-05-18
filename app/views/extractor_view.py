@@ -229,6 +229,13 @@ class ExtractorView(ft.Column):
             self._show_snack_bar("未選擇資料夾", color=theme.BLUE_600)
 
     # 僅在按「預覽/提取」時自動填入輸出路徑，選擇資料夾時不自動填入
+    def refresh_output_dir_helper(self):
+        """重新讀取 config 並更新 output_dir_textfield 的 helper。
+
+        在設定頁儲存 extractor 設定後呼叫。
+        """
+        self._update_output_dir_helper()
+
     def _update_output_dir_helper(self):
         """動態更新 output_dir_textfield 的 helper，顯示實際的資料夾命名設定。"""
         from translation_tool.utils.config_manager import load_config
@@ -327,7 +334,7 @@ class ExtractorView(ft.Column):
                 ft.Row(
                     [
                         ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=20),
-                        ft.Text(f"跳過檔案：{stats['warnings']} 個", size=14),
+                        ft.Text(f"因內容相同而跳過的檔案：{stats['warnings']} 個", size=14),
                     ],
                     spacing=8,
                 ),

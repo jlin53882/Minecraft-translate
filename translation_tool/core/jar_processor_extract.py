@@ -229,4 +229,14 @@ def run_extraction_process_impl(
         total_extracted,
         total_skipped,
     )
-    yield {'progress': 1.0}
+    yield {
+        'progress': 1.0,
+        'current': processed_count,
+        'total': total_jars,
+        'stats': {
+            'success': processed_count,
+            'failures': 0,
+            'warnings': total_skipped,
+            'total_files': total_extracted,
+        },
+    }

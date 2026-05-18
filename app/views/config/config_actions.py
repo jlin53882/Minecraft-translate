@@ -72,7 +72,7 @@ def load_config_into_view(view, config: dict):
         view.key_fields.append(tf)
         view.keys_column.controls.append(row)
 
-def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, validate_api_keys_from_ui_fn):
+def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, validate_api_keys_from_ui_fn, registry=None):
     """從 view UI 控制項收集使用者輸入並儲存至 config.json。"""
     new_config = load_config_json_fn()
     if 'ftb_translator' not in new_config:
@@ -133,5 +133,11 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
         return False
     save_config_json_fn(new_config)
     view.load_config()
+
+    if registry is not None:
+        for item in registry:
+            if item['key'] == 'extractor' and hasattr(item['view'].content, 'refresh_output_dir_helper'):
+                item['view'].content.refresh_output_dir_helper()
+
     view._show_snack_bar('✅ 設定已成功儲存！', view._success_color())
     return True
