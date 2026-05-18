@@ -99,7 +99,7 @@ class ExtractorView(ft.Column):
             border_color=theme.OUTLINE,
             text_size=14,
             content_padding=15,
-            helper_text="（請選擇或直接輸入輸出資料夾）",
+            helper="（請選擇或直接輸入輸出資料夾）",
         )
 
         self.output_dir_helper_text = ft.Text("", size=12, color=ft.Colors.GREY_600)
