@@ -99,6 +99,7 @@ class ExtractorView(ft.Column):
             border_color=theme.OUTLINE,
             text_size=14,
             content_padding=15,
+            helper_text="（請選擇或直接輸入輸出資料夾）",
         )
 
         self.output_dir_helper_text = ft.Text("", size=12, color=ft.Colors.GREY_600)
@@ -249,16 +250,7 @@ class ExtractorView(ft.Column):
             f"預設抽取語系：zh_cn / zh_tw / en_us\n"
             f"選項：可勾選「跳過 zh_cn 抽取」（預設關閉）"
         )
-        self.output_dir_textfield.helper_text = (
-            f"未指定時自動產生（路徑 + 設定名稱）：\n"
-            f"  • Lang 提取：...mods + {lang_extract}\n"
-            f"  • Book 提取：...mods + {book_extract}\n"
-            f"  • Dual 提取：...mods + {dual_extract}\n"
-            f"  • Lang 預覽：...mods + {lang_preview}\n"
-            f"  • Book 預覽：...mods + {book_preview}\n\n"
-            f"預設抽取語系：zh_cn / zh_tw / en_us\n"
-            f"選項：可勾選「跳過 zh_cn 抽取」（預設關閉）"
-        )
+        self.output_dir_textfield.helper_text = helper_text
         self._page.update()
 
     def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
