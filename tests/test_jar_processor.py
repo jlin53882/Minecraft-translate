@@ -290,3 +290,30 @@ class TestExtractDualFilesGenerator:
         assert len(dual_error_updates) == 1
         assert dual_error_updates[0]["dual_errors"]["lang"] is None
         assert dual_error_updates[0]["dual_errors"]["book"] == "Book extraction failed"
+
+    def test_dual_mode_stats_are_merged(self, tmp_path, monkeypatch):
+        """測試 dual mode 完成時，stats 是 Lang + Book 的合併"""
+        from translation_tool.core.jar_processor_extract import run_extraction_process_impl
+
+        call_count = [0]
+
+        def mock_impl(mods_dir, output_dir, target_regex, process_name, **kwargs):
+            call_count[0] += 1
+            if process_name == "Lang":
+                yield {"progress": 1.0, "stats": {"success": 5, "failures": 0, "warnings": 2, "total_files": 5}}
+            elif process_name == "Patchouli Book":
+                yield {"progress": 1.0, "stats": {"success": 3, "failures": 0, "warnings": 1, "total_files": 3}}
+
+        monkeypatch.setattr(
+            "translation_tool.core.jar_processor._run_extraction_process",
+            mock_impl,
+        )
+
+        results = list(extract_dual_files_generator(str(tmp_path / "mods"), str(tmp_path / "output")))
+
+        stats_updates = [r for r in results if "stats" in r]
+        merged_stats = stats_updates[-1]["stats"]
+        assert merged_stats["success"] == 8  # 5 + 3
+        assert merged_stats["warnings"] == 3  # 2 + 1
+        assert merged_stats["failures"] == 0
+        assert merged_stats["total_files"] == 8  # 5 + 3

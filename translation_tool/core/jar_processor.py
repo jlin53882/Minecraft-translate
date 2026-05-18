@@ -145,24 +145,41 @@ def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: 
     """
     lang_file_regex = build_lang_file_regex(skip_zh_cn=skip_zh_cn)
     lang_error = None
+    lang_stats = None
     try:
-        yield from _run_extraction_process(
+        for update in _run_extraction_process(
             mods_dir=mods_dir,
             output_dir=output_dir,
             target_regex=lang_file_regex,
             process_name="Lang",
-        )
+        ):
+            if "stats" in update:
+                lang_stats = update["stats"]
+            yield update
     except Exception as e:
         lang_error = str(e)
     yield {"log": "[系統] Lang 提取完成，開始提取 Book..."}
     book_error = None
     try:
-        yield from _run_extraction_process(
+        for update in _run_extraction_process(
             mods_dir,
             output_dir,
             BOOK_PATH_REGEX_DUAL_STRUCTURE,
             "Patchouli Book",
-        )
+        ):
+            if "stats" in update:
+                if lang_stats:
+                    merged_stats = {
+                        "success": lang_stats["success"] + update["stats"]["success"],
+                        "failures": lang_stats["failures"] + update["stats"]["failures"],
+                        "warnings": lang_stats["warnings"] + update["stats"]["warnings"],
+                        "total_files": lang_stats["total_files"] + update["stats"]["total_files"],
+                    }
+                    yield {**update, "stats": merged_stats}
+                else:
+                    yield update
+            else:
+                yield update
     except Exception as e:
         book_error = str(e)
     if lang_error or book_error:
