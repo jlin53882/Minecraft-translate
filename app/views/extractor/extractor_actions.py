@@ -142,9 +142,10 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
             log_msg = filtered.get("log", "")
             if log_msg:
                 log_info(f"[DEBUG] _extraction_worker: received log_msg={log_msg[:80]}...")
-                log_info(f"[DEBUG] _extraction_worker: calling view._append_log_line from thread={threading.current_thread().name}")
-                view._append_log_line(log_msg)
-                log_info(f"[DEBUG] _extraction_worker: after _append_log_line, log_view.controls count={len(view.log_view.controls)}")
+                async def _do_append_log(_):
+                    view._append_log_line(log_msg)
+                view.page.run_task(_do_append_log, None)
+                log_info(f"[DEBUG] _extraction_worker: after run_task _do_append_log")
                 update_stats_from_log(view, log_msg)
 
             if "progress" in filtered:
@@ -172,8 +173,10 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
 
         final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
         if final and "log" in final:
-            view._append_log_line(final["log"])
-            update_stats_from_log(view, final["log"])
+            async def _do_append_final(_):
+                view._append_log_line(final["log"])
+                update_stats_from_log(view, final["log"])
+            view.page.run_task(_do_append_final, None)
 
     except Exception as e:
         import traceback
