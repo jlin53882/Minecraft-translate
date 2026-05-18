@@ -250,7 +250,7 @@ class ExtractorView(ft.Column):
             f"預設抽取語系：zh_cn / zh_tw / en_us\n"
             f"選項：可勾選「跳過 zh_cn 抽取」（預設關閉）"
         )
-        self.output_dir_textfield.helper_text = helper_text
+        self.output_dir_textfield.helper = helper_text
         self._page.update()
 
     def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
