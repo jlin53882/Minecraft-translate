@@ -609,6 +609,7 @@ class PipelineView(ft.Column):
     def _on_one_click_click(self, e=None):
         input_val = (self.input_path_text.value or "").strip()
         output_val = (self.output_path_text.value or "").strip()
+        print(f"[DEBUG] one_click: input=[{input_val}], output=[{output_val}]")
         if not input_val:
             self._show_snack_bar("⚠️ 請輸入 Mod 來源路徑")
             return
@@ -628,11 +629,14 @@ class PipelineView(ft.Column):
                     ft.Text("1. 基礎與打包配置", weight="bold", color=BLUE_600),
                     ft.Row([
                         ft.Button("Mod 來源", icon=ft.Icons.FOLDER, on_click=lambda _: self._page.run_task(self._pick_input_dir)),
-                        ft.Container(content=self.input_path_text, expand=True)
+                        ft.Container(content=self.input_path_text, expand=True),
                     ]),
                     ft.Row([
                         ft.Button("輸出目錄", icon=ft.Icons.FOLDER_SPECIAL, on_click=lambda _: self._page.run_task(self._pick_output_dir)),
-                        ft.Container(content=self.output_path_text, expand=True)
+                        ft.Container(content=self.output_path_text, expand=True),
+                    ]),
+                            expand=True,
+                        ),
                     ]),
                 ], spacing=10),
                 bgcolor="surfaceContainerLow", padding=20, border_radius=15
