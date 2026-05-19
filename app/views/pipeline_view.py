@@ -263,14 +263,21 @@ class PipelineView(ft.Column):
             expand=True,
             border_color=BLUE_700,
         )
-        self._extract_mode = ft.RadioGroup(
-            content=ft.Column([
-                ft.Radio("提取 Lang", "lang"),
-                ft.Radio("提取 Book", "book"),
-                ft.Radio("全部執行（Lang + Book）", "both"),
-            ], spacing=4),
-            on_change=lambda e: print(f"[DEBUG] RadioGroup on_change: value={self._extract_mode.value}"),
-        )
+        self._extract_mode = "lang"
+
+        def on_radio_change(e=None):
+            print(f"[DEBUG] on_radio_change called: _extract_mode={self._extract_mode}")
+
+        self._extract_radio_lang = ft.Radio("提取 Lang", "lang", on_change=lambda e: setattr(self, '_extract_mode', 'lang') or on_radio_change(e))
+        self._extract_radio_book = ft.Radio("提取 Book", "book", on_change=lambda e: setattr(self, '_extract_mode', 'book') or on_radio_change(e))
+        self._extract_radio_both = ft.Radio("全部執行（Lang + Book）", "both", on_change=lambda e: setattr(self, '_extract_mode', 'both') or on_radio_change(e))
+
+        def start_extraction(dialog):
+            mods = (self._extract_mods_field.value or "").strip()
+            output = (self._extract_output_field.value or "").strip()
+            mode = self._extract_mode or "lang"
+
+            print(f"[DEBUG] start_extraction: mode={mode}")
 
         lang_code_checks = {}
         for code in lang_codes:
@@ -392,7 +399,7 @@ class PipelineView(ft.Column):
         def start_extraction(dialog):
             mods = (self._extract_mods_field.value or "").strip()
             output = (self._extract_output_field.value or "").strip()
-            mode = self._extract_mode.value or "lang"
+            mode = self._extract_mode or "lang"
 
             if not mods:
                 self._show_snack_bar("⚠️ Mod 來源為必填欄位")
@@ -430,7 +437,7 @@ class PipelineView(ft.Column):
             ft.Text("→ {output}/jar_mod_extract/_提取book_輸出/（Book 模式）", color=GREY_600, size=12),
             ft.Divider(),
             ft.Text("執行模式", weight="bold", size=13),
-            self._extract_mode,
+            ft.Column([self._extract_radio_lang, self._extract_radio_book, self._extract_radio_both], spacing=4),
             ft.Divider(),
             ft.Text("語言代碼（動態）", weight="bold", size=13),
             lang_codes_section,
