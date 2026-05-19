@@ -277,18 +277,27 @@ class PipelineView(ft.Column):
     # =============================================================================
 
     def _open_extract_dialog(self, e=None):
-        """打開抽取資源設定對話框"""
+        """打開抽取資源設定對話框。
+
+        對話框寬度根據視窗大小動態計算（60% 寬度）。
+        Mod 來源和輸出目錄預填外層 input_path_text / output_path_text。
+        執行模式預設 Lang，選擇 both 時內部轉換為 dual 传递给 service。
+        """
         dialog_width = int(self._page.width * 0.6)
         mods_dir = (self.input_path_text.value or "").strip()
         output_dir = (self.output_path_text.value or "").strip()
 
         cfg = load_config()
+        # 動態讀取 jar_extractor.lang_codes 列表，生成 Checkbox 供勾選
         lang_codes = cfg.get("jar_extractor", {}).get("lang_codes", ["en_us", "zh_cn", "zh_tw"])
+        # 動態讀取 output_folder_names，輸出說明使用對應名稱
         folder_names = cfg.get("extractor", {}).get("output_folder_names", {})
         lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
         book_extract = folder_names.get("book_extract", "_提取book_輸出")
         dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
 
+        # TextField：hint_text 顯示提示，value 儲存實際路徑
+        # 驗證時直接判斷 value 是否為空（hint_text 不影響 value）
         self._extract_mods_field = ft.TextField(
             label="Mod 來源",
             hint_text=f"自動帶入：{mods_dir}" if mods_dir else "留空使用上方設定的 Mod 來源",
@@ -304,8 +313,8 @@ class PipelineView(ft.Column):
             border_color=BLUE_700,
         )
 
-        self._extract_mode = "lang"
-
+        # RadioGroup 存放目前選擇的模式（lang/book/both）
+        # 注意：both 是 UI 的 value，service 層需要轉換為 dual
         self._extract_radio_group = ft.RadioGroup(
             content=ft.Column([
                 ft.Radio(label="提取 Lang", value="lang"),
@@ -316,19 +325,44 @@ class PipelineView(ft.Column):
         )
 
         def start_extraction(dialog):
+            """確定執行：收集所有欄位值，驗證後關閉對話框，啟動背景執行緒。
+
+            - 驗證 Mod 來源和輸出目錄是否填寫、是否為有效資料夾
+            - RadioGroup value="both" 需轉換為 service 的 mode="dual"
+            - 收集所有勾選的 lang_codes，傳入 _run_extraction()
+            """
             mods = (self._extract_mods_field.value or "").strip()
             output = (self._extract_output_field.value or "").strip()
+            # RadioGroup value="both"（全部執行）需轉換為 service 的 mode="dual"
             mode = self._extract_radio_group.value
             if mode == "both":
                 mode = "dual"
 
-            print(f"[DEBUG] start_extraction: mode={mode}")
+            if not mods:
+                self._show_snack_bar("⚠️ Mod 來源為必填欄位")
+                return
+            if not os.path.isdir(mods):
+                self._show_snack_bar("⚠️ Mod 來源資料夾不存在")
+                return
+            if not output:
+                self._show_snack_bar("⚠️ 輸出目錄為必填欄位")
+                return
+            if not os.path.isdir(output):
+                self._show_snack_bar("⚠️ 輸出目錄不存在")
+                return
 
+            # 收集所有勾選的 lang_codes，沒勾預設全部（value=True 表示勾選）
+            selected_codes = [code for code, cb in lang_code_checks.items() if cb.value]
+            close_dialog(dialog)
+            self._run_extraction(mods, output, mode, lang_codes=selected_codes)
+
+        # 動態生成 lang_codes Checkbox：從 config 讀取，預設全部勾選
         lang_code_checks = {}
         for code in lang_codes:
             lang_code_checks[code] = ft.Checkbox(label=code, value=True)
 
         def pick_mods_dir(e=None):
+            """選擇資料夾：開啟系統資料夾選擇器，填入路徑到 _extract_mods_field"""
             async def do_pick():
                 result = await self.file_picker.get_directory_path()
                 if result:
@@ -337,6 +371,7 @@ class PipelineView(ft.Column):
             self._page.run_task(do_pick)
 
         def browse_mods_dir(e=None):
+            """瀏覽：用系統檔案總管打開已選擇的路徑，不做選擇"""
             path = (self._extract_mods_field.value or "").strip()
             if path and os.path.isdir(path):
                 os.startfile(path)
@@ -346,6 +381,7 @@ class PipelineView(ft.Column):
                 self._show_snack_bar("⚠️ 路徑不存在")
 
         def pick_output_dir(e=None):
+            """選擇資料夾：開啟系統資料夾選擇器，填入路徑到 _extract_output_field"""
             async def do_pick():
                 result = await self.file_picker.get_directory_path()
                 if result:
@@ -354,6 +390,7 @@ class PipelineView(ft.Column):
             self._page.run_task(do_pick)
 
         def browse_output_dir(e=None):
+            """瀏覽：用系統檔案總管打開已選擇的路徑，不做選擇"""
             path = (self._extract_output_field.value or "").strip()
             if path and os.path.isdir(path):
                 os.startfile(path)
@@ -367,7 +404,12 @@ class PipelineView(ft.Column):
             self._page.update()
 
         def show_preview_result(dialog):
-            preview_dialog_width = int(self._page.width * 0.6)
+            """預覽結果：使用 preview_extraction_generator 掃描 JAR 檔案，動態顯示結果。
+
+            - 寬度響應式（60% 視窗寬度）
+            - 預覽結果顯示 JAR 數量、預計檔案數、詳細清單（ListView expand=True）
+            - 模式 both 轉換為 dual，與 start_extraction() 一致
+            """
             mods = (self._extract_mods_field.value or "").strip()
             if not mods or not os.path.isdir(mods):
                 self._show_snack_bar("⚠️ 請選擇有效的 Mod 來源")
@@ -544,7 +586,15 @@ class PipelineView(ft.Column):
         self._page.update()
 
     def _run_extraction(self, mods_dir: str, output_dir: str, mode: str, lang_codes: list[str] | None = None):
-        """執行抽取資源（背景執行緒）"""
+        """執行抽取資源（背景執行緒）。
+
+        Args:
+            mods_dir: Mod 來源目錄
+            output_dir: 輸出目錄
+            mode: 執行模式（lang / book / dual）
+            lang_codes: 語言代碼列表，傳入 extraction service
+                       若為 None，service 會從 config 讀取預設值
+        """
         session = TaskSession()
         self.progress_panel.set_step_running(1, "抽取資源")
         self.progress_panel.add_log(f"▶ 開始：抽取資源（{mode}）")

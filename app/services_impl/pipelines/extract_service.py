@@ -63,7 +63,14 @@ def run_lang_extraction_service(
     session: TaskSession,
     lang_codes: list[str] | None = None,
 ) -> None:
-    """執行語言檔擷取服務。"""
+    """執行語言檔擷取服務。
+
+    Args:
+        mods_dir: Mod 目錄路徑
+        output_dir: 輸出目錄路徑
+        session: 任務 Session
+        lang_codes: 指定要提取的語言代碼列表，若為 None 則從 config 讀取
+    """
     ensure_pipeline_logging()
     try:
         session.start()

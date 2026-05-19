@@ -105,8 +105,11 @@ def extract_lang_files_generator(mods_dir: str, output_dir: str, *, lang_codes: 
     Args:
         mods_dir: Mod 目錄路徑
         output_dir: 輸出目錄路徑
-        lang_codes: 指定語言代碼列表，若為 None則從 config 讀取。
+        lang_codes: 指定語言代碼列表，若為 None 則從 config 讀取。
         skip_zh_cn: 是否跳過 zh_cn（僅在 lang_codes=None 時生效）。
+
+    Yields:
+        進度字典（含 progress、log 等）
     """
     lang_file_regex = build_lang_file_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)
     yield from _run_extraction_process(
