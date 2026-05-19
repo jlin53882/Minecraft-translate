@@ -10,36 +10,57 @@ EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config.example.json
 
 # ============================================================================
 # Default values (mirrored from config.example.json)
+# 三層 fallback：config.json → config.example.json → 這裡的 DEFAULT_* 常數
 # ============================================================================
 
-DEFAULT_LOG_LEVEL = "INFO"
-DEFAULT_LOG_DIR = "logs"
-DEFAULT_OUTPUT_DIR_NAME = "zh_tw_generated"
-DEFAULT_FTB_OUTPUT_DIR = "FTB任務翻譯輸出"
-DEFAULT_REPLACE_RULES_PATH = "replace_rules.json"
-DEFAULT_CACHE_DIRECTORY = "快取資料"
-DEFAULT_PARALLEL_WORKERS = 4
-DEFAULT_SPECIES_CACHE_DIR = "學名資料庫"
-DEFAULT_SPECIES_CACHE_FILENAME = "species_cache.tsv"
-DEFAULT_WIKIPEDIA_LANGUAGE = "zh"
-DEFAULT_WIKIPEDIA_RATE_LIMIT_DELAY = 0.5
-DEFAULT_LM_TEMPERATURE = 0.3
-DEFAULT_LM_TRANSLATE_FOLDER = "LM翻譯後"
-DEFAULT_BATCH_PATCHOULI = 100
-DEFAULT_BATCH_LANG = 300
-DEFAULT_BATCH_FTB = 200
-DEFAULT_BATCH_KUBEJS = 200
-DEFAULT_BATCH_MD = 100
-DEFAULT_MIN_BATCH_SIZE = 50
-DEFAULT_BATCH_SHRINK_FACTOR = 0.5
-DEFAULT_RATE_LIMIT_TIMEOUT = 600
-DEFAULT_RATE_LIMIT_SLEEP = 0.0
-DEFAULT_OUTPUT_ZIP_NAME = "可使用翻譯.zip"
-DEFAULT_PENDING_FOLDER = "待翻譯"
-DEFAULT_ORGANIZED_FOLDER = "待翻譯整理需翻譯"
-DEFAULT_FILTERED_MIN_COUNT = 3
-DEFAULT_QUARANTINE_FOLDER = "問題檔案skipped_json"
+# logging
+DEFAULT_LOG_LEVEL = "INFO"              # config: logging.log_level
+DEFAULT_LOG_DIR = "logs"                # config: logging.log_dir
 
+# translator
+DEFAULT_OUTPUT_DIR_NAME = "zh_tw_generated"       # config: translator.output_dir_name
+DEFAULT_FTB_OUTPUT_DIR = "FTB任務翻譯輸出"        # config: ftb_translator.output_dir_name
+DEFAULT_REPLACE_RULES_PATH = "replace_rules.json"  # config: translator.replace_rules_path
+DEFAULT_CACHE_DIRECTORY = "快取資料"                # config: translator.cache_directory
+DEFAULT_PARALLEL_WORKERS = 4                       # config: translator.parallel_execution_workers
+
+# species_cache
+DEFAULT_SPECIES_CACHE_DIR = "學名資料庫"           # config: species_cache.cache_directory
+DEFAULT_SPECIES_CACHE_FILENAME = "species_cache.tsv"  # config: species_cache.cache_filename
+DEFAULT_WIKIPEDIA_LANGUAGE = "zh"                  # config: species_cache.wikipedia_language
+DEFAULT_WIKIPEDIA_RATE_LIMIT_DELAY = 0.5           # config: species_cache.wikipedia_rate_limit_delay
+
+# lm_translator
+DEFAULT_LM_TEMPERATURE = 0.3               # config: lm_translator.temperature
+DEFAULT_LM_TRANSLATE_FOLDER = "LM翻譯後"    # config: lm_translator.lm_translate_folder
+DEFAULT_BATCH_PATCHOULI = 100              # config: lm_translator.initial_batch_size_patchouli
+DEFAULT_BATCH_LANG = 300                   # config: lm_translator.initial_batch_size_lang
+DEFAULT_BATCH_FTB = 200                    # config: lm_translator.initial_batch_size_ftb
+DEFAULT_BATCH_KUBEJS = 200                 # config: lm_translator.initial_batch_size_kubejs
+DEFAULT_BATCH_MD = 100                    # config: lm_translator.initial_batch_size_md
+DEFAULT_MIN_BATCH_SIZE = 50                # config: lm_translator.min_batch_size
+DEFAULT_BATCH_SHRINK_FACTOR = 0.5          # config: lm_translator.batch_shrink_factor
+DEFAULT_RATE_LIMIT_TIMEOUT = 600           # config: lm_translator.rate_limit.timeout
+DEFAULT_RATE_LIMIT_SLEEP = 0.0             # config: lm_translator.rate_limit.sleep_seconds_between_batches
+
+# output_bundler
+DEFAULT_OUTPUT_ZIP_NAME = "可使用翻譯.zip"   # config: output_bundler.output_zip_name
+
+# lang_merger
+DEFAULT_PENDING_FOLDER = "待翻譯"            # config: lang_merger.pending_folder_name
+DEFAULT_ORGANIZED_FOLDER = "待翻譯整理需翻譯"  # config: lang_merger.pending_organized_folder_name
+DEFAULT_FILTERED_MIN_COUNT = 3              # config: lang_merger.filtered_pending_min_count
+DEFAULT_QUARANTINE_FOLDER = "問題檔案skipped_json"  # config: lang_merger.quarantine_folder_name
+
+# extractor
+DEFAULT_LANG_EXTRACT = "_提取lang_輸出"     # config: extractor.output_folder_names.lang_extract
+DEFAULT_BOOK_EXTRACT = "_提取book_輸出"      # config: extractor.output_folder_names.book_extract
+DEFAULT_LANG_PREVIEW = "_預覽lang_輸出"     # config: extractor.output_folder_names.lang_preview
+DEFAULT_BOOK_PREVIEW = "_預覽book_輸出"     # config: extractor.output_folder_names.book_preview
+DEFAULT_DUAL_EXTRACT = "_提取both_輸出"     # config: extractor.output_folder_names.dual_extract
+DEFAULT_DUAL_PREVIEW = "_預覽both_輸出"     # config: extractor.output_folder_names.dual_preview
+
+# lm_translator.prompt
 DEFAULT_PATCHOULI_SYSTEM_PROMPT = (
     "你是專業的 Minecraft Patchouli 手冊翻譯員。\r\n\r\n"
     "你正在翻譯一個「ID → Value 對照表」。\r\n\r\n"
@@ -66,6 +87,7 @@ DEFAULT_PATCHOULI_SYSTEM_PROMPT = (
     "12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石）"
 )
 
+# lm_translator.lang_system_prompt（lang 檔翻譯系統提示詞）
 DEFAULT_LANG_SYSTEM_PROMPT = (
     "你正在翻譯 Minecraft 語言檔案（JSON 格式）。\r\n\r\n"
     "你收到的是一個「ID → value 對照表」。\r\n\r\n"
@@ -90,6 +112,7 @@ DEFAULT_LANG_SYSTEM_PROMPT = (
     "12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石）"
 )
 
+# lm_translator.translator.skip_terms（跳過不翻譯的關鍵字）
 DEFAULT_SKIP_TERMS = [
     "api documentation", "api docs", "documentation", "discord", "github",
     "homepage", "mod page", "modpack", "official website", "patreon",
@@ -97,12 +120,14 @@ DEFAULT_SKIP_TERMS = [
     "Minecraft", "Forge", "YouTube", "Reddit", "Ko-fi", "Flattr",
 ]
 
+# lm_translator.translator.translatable_keywords（需要翻譯的關鍵字欄位）
 DEFAULT_TRANSLATABLE_KEYWORDS = [
     "text", "name", "title", "description", "subtitle", "hover", "note",
     "warning", "quote", "paragraph", "body", "header", "footer", "heading",
     "effects", "category", "link_text", "pages.title",
 ]
 
+# lm_translator.patchouli.dir_names（Patchouli 資料夾名稱）
 DEFAULT_PATHOULI_DIR_NAMES = ["patchouli_books", "book", "manual", "guidebook"]
 
 DEFAULT_LANG_EXTRACT = "_提取lang_輸出"
@@ -114,7 +139,10 @@ DEFAULT_DUAL_PREVIEW = "_預覽both_輸出"
 
 
 def _load_example_config() -> dict:
-    """載入 config.example.json 當作 fallback 預設值。"""
+    """
+    載入 config.example.json 當作第二層 fallback 預設值。
+    順序：config.json → config.example.json → DEFAULT_* 常數
+    """
     if EXAMPLE_CONFIG_PATH.exists():
         with EXAMPLE_CONFIG_PATH.open("r", encoding="utf-8") as f:
             return json.load(f)
@@ -122,7 +150,14 @@ def _load_example_config() -> dict:
 
 
 def load_config_into_view(view, config: dict):
-    """將 config 字典中的值填入 view 的各個 UI 控制項。"""
+    """
+    將 config 字典中的值填入 view 的各個 UI 控制項。
+
+    三層 fallback：
+    1. config.json（使用者實際設定）
+    2. config.example.json（文件的預設值）
+    3. DEFAULT_* 常數（程式碼中的最終 fallback，與 example.json 值一致）
+    """
     ex = _load_example_config()
 
     view.controls_map['logging.log_level'].value = config.get('logging', {}).get('log_level') or ex.get('logging', {}).get('log_level') or DEFAULT_LOG_LEVEL
