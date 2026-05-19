@@ -265,6 +265,7 @@ class PipelineView(ft.Column):
 
     def _open_extract_dialog(self, e=None):
         """打開抽取資源設定對話框"""
+        dialog_width = int(self._page.width * 0.6)
         mods_dir = (self.input_path_text.value or "").strip()
         output_dir = (self.output_path_text.value or "").strip()
 
@@ -300,7 +301,9 @@ class PipelineView(ft.Column):
         def start_extraction(dialog):
             mods = (self._extract_mods_field.value or "").strip()
             output = (self._extract_output_field.value or "").strip()
-            mode = self._extract_radio_group.value or "lang"
+            mode = self._extract_radio_group.value
+            if mode == "both":
+                mode = "dual"
 
             print(f"[DEBUG] start_extraction: mode={mode}")
 
@@ -350,7 +353,10 @@ class PipelineView(ft.Column):
                 self._show_snack_bar("⚠️ 請選擇有效的 Mod 來源")
                 return
 
-            mode = self._extract_radio_group.value or "lang"
+            mode = self._extract_radio_group.value
+            if mode == "both":
+                mode = "dual"
+
             jar_files = find_jar_files(mods)
             total_jars = len(jar_files)
 
@@ -408,12 +414,29 @@ class PipelineView(ft.Column):
                         result = preview_state.result
                         jar_count = total_jars
                         total_files = result.get('total_files', 0)
+                        preview_results = result.get('preview_results', [])
+                        total_size_mb = result.get('total_size_mb', 0)
+
+                        list_items = []
+                        for pr in preview_results:
+                            jar_name = pr.get('jar', 'unknown')
+                            if mode == "dual":
+                                lang_count = pr.get('lang_count', 0)
+                                book_count = pr.get('book_count', 0)
+                                list_items.append(ft.Text(f"  {jar_name}（Lang: {lang_count}, Book: {book_count}）", size=12))
+                            else:
+                                count = pr.get('count', 0)
+                                list_items.append(ft.Text(f"  {jar_name}（{count} 個檔案）", size=12))
+
                         preview_dialog.content = ft.Column([
                             ft.Text(f"JAR 數量：{jar_count} 個"),
-                            ft.Text(f"預計提取：{total_files} 個語言檔案"),
+                            ft.Text(f"預計提取：{total_files} 個檔案（約 {total_size_mb:.1f} MB）"),
                             ft.Divider(),
                             ft.Text("詳細清單：", weight="bold"),
-                            ft.ListView(height=200, expand=True),
+                            ft.ListView(
+                                controls=list_items,
+                                expand=True,
+                            ),
                         ], tight=False)
                     preview_dialog.actions = [ft.TextButton("確定", on_click=lambda e: close_preview_dialog(preview_dialog))]
                     self._page.update()
@@ -424,7 +447,9 @@ class PipelineView(ft.Column):
         def start_extraction(dialog):
             mods = (self._extract_mods_field.value or "").strip()
             output = (self._extract_output_field.value or "").strip()
-            mode = self._extract_radio_group.value or "lang"
+            mode = self._extract_radio_group.value
+            if mode == "both":
+                mode = "dual"
 
             if not mods:
                 self._show_snack_bar("⚠️ Mod 來源為必填欄位")
@@ -458,8 +483,8 @@ class PipelineView(ft.Column):
                 ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_output_dir),
             ]),
             ft.Text("輸出說明：", weight="bold", size=13),
-            ft.Text("→ {output}/jar_mod_extract/_提取lang_輸出/（Lang 模式）", color=GREY_600, size=12),
             ft.Text("→ {output}/jar_mod_extract/_提取book_輸出/（Book 模式）", color=GREY_600, size=12),
+            ft.Text("→ {output}/jar_mod_extract/_提取lang_輸出/ + _提取book_輸出/（Dual 模式）", color=GREY_600, size=12),
             ft.Divider(),
             ft.Text("執行模式", weight="bold", size=13),
             self._extract_radio_group,
@@ -471,7 +496,7 @@ class PipelineView(ft.Column):
         dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text("📦 抽取資源設定"),
-            content=ft.Container(content=content, width=550),
+            content=ft.Container(content=content, width=dialog_width),
             actions=[
                 ft.TextButton("取消", on_click=lambda e: close_dialog(dialog)),
                 ft.OutlinedButton("預覽結果", icon=ft.Icons.PREVIEW, on_click=lambda e: show_preview_result(dialog)),
@@ -495,14 +520,14 @@ class PipelineView(ft.Column):
                 os.makedirs(os.path.join(output_dir, "jar_mod_extract", "_提取lang_輸出"), exist_ok=True)
                 os.makedirs(os.path.join(output_dir, "jar_mod_extract", "_提取book_輸出"), exist_ok=True)
 
-                if mode in ("lang", "both"):
+                if mode in ("lang", "dual"):
                     lang_out = os.path.join(output_dir, "jar_mod_extract", "_提取lang_輸出")
                     run_lang_extraction_service(mods_dir, lang_out, session)
                     async def do_lang_log(_):
                         self.progress_panel.add_log("✅ Lang 抽取完成")
                     self._page.run_task(do_lang_log, None)
 
-                if mode in ("book", "both"):
+                if mode in ("book", "dual"):
                     book_out = os.path.join(output_dir, "jar_mod_extract", "_提取book_輸出")
                     run_book_extraction_service(mods_dir, book_out, session)
                     async def do_book_log(_):
