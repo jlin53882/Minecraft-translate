@@ -19,6 +19,9 @@ from app.services_impl.pipelines.extract_service import (
     run_lang_extraction_service,
     run_book_extraction_service,
 )
+from app.views.extractor.extractor_state import PreviewState
+from translation_tool.core.jar_processor import preview_extraction_generator, find_jar_files
+from translation_tool.core.jar_processor_preview import ExtractionSummary
 import threading
 import time
 import os
@@ -266,6 +269,7 @@ class PipelineView(ft.Column):
                 ft.Radio("提取 Book", "book"),
                 ft.Radio("全部執行（Lang + Book）", "both"),
             ], spacing=4),
+            on_change=lambda e: print(f"[DEBUG] RadioGroup on_change: value={self._extract_mode.value}"),
         )
 
         lang_code_checks = {}
@@ -314,28 +318,76 @@ class PipelineView(ft.Column):
                 self._show_snack_bar("⚠️ 請選擇有效的 Mod 來源")
                 return
 
-            jar_files = [f for f in os.listdir(mods) if f.endswith(".jar")] if os.path.isdir(mods) else []
-            jar_count = len(jar_files)
-            lang_checks = [c for c, cb in lang_code_checks.items() if cb.value]
-            est_files = jar_count * len(lang_checks)
+            mode = self._extract_mode.value or "lang"
+            jar_files = find_jar_files(mods)
+            total_jars = len(jar_files)
 
-            preview_text = f"JAR 數量：{jar_count} 個\n預計提取：{est_files} 個語言檔案\n({', '.join([f'{c} × {jar_count}' for c in lang_checks])})"
+            preview_state = PreviewState()
+            preview_state.total = total_jars
+            preview_state.current = 0
+
+            def do_preview():
+                try:
+                    for update in preview_extraction_generator(mods, mode):
+                        if 'error' in update:
+                            preview_state.error = update['error']
+                            preview_state.done = True
+                            break
+                        preview_state.progress = update.get('progress', 0)
+                        preview_state.current = update.get('current', 0)
+                        preview_state.total = update.get('total', 0)
+                        if 'result' in update:
+                            preview_state.result = update['result']
+                            preview_state.done = True
+                except Exception as ex:
+                    preview_state.error = str(ex)
+                    preview_state.done = True
+
+            threading.Thread(target=do_preview, daemon=True).start()
 
             preview_dialog = ft.AlertDialog(
                 modal=True,
                 title=ft.Text("預覽結果"),
-                content=ft.Text(preview_text),
-                actions=[ft.TextButton("確定", on_click=lambda e: preview_dialog.close() if hasattr(preview_dialog, 'close') else close_preview())],
+                content=ft.Text(f"預覽掃描中...（0/{total_jars}）"),
+                actions=[ft.TextButton("取消", on_click=lambda e: close_preview_dialog(preview_dialog))],
             )
 
-            def close_preview():
-                preview_dialog.open = False
+            def close_preview_dialog(d):
+                d.open = False
                 self._page.update()
 
-            preview_dialog.actions = [ft.TextButton("確定", on_click=lambda e: close_preview())]
             self._page.overlay.append(preview_dialog)
             preview_dialog.open = True
             self._page.update()
+
+            def poll_preview():
+                while not preview_state.done:
+                    time.sleep(0.2)
+                    async def do_update(_):
+                        pct = int(preview_state.progress * 100)
+                        preview_dialog.content = ft.Text(f"預覽掃描中...（{preview_state.current}/{preview_state.total}）{pct}%")
+                        self._page.update()
+                    self._page.run_task(do_update, None)
+
+                async def do_final(_):
+                    if preview_state.error:
+                        preview_dialog.content = ft.Text(f"預覽錯誤：{preview_state.error}")
+                    elif preview_state.result:
+                        result = preview_state.result
+                        jar_count = total_jars
+                        total_files = result.get('total_files', 0)
+                        preview_dialog.content = ft.Column([
+                            ft.Text(f"JAR 數量：{jar_count} 個"),
+                            ft.Text(f"預計提取：{total_files} 個語言檔案"),
+                            ft.Divider(),
+                            ft.Text("詳細清單：", weight="bold"),
+                            ft.ListView(height=200, expand=True),
+                        ], tight=False)
+                    preview_dialog.actions = [ft.TextButton("確定", on_click=lambda e: close_preview_dialog(preview_dialog))]
+                    self._page.update()
+                self._page.run_task(do_final, None)
+
+            threading.Thread(target=poll_preview, daemon=True).start()
 
         def start_extraction(dialog):
             mods = (self._extract_mods_field.value or "").strip()
