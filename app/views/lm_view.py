@@ -306,6 +306,7 @@ class LMView(ft.Column):
                         self.log_view.update()
                     except Exception:
                         pass
+                    self._page.update()
 
                 self._page.run_task(_do_update, None)
 

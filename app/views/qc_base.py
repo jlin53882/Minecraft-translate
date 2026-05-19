@@ -60,19 +60,22 @@ class QCBase:
                     log_msg = update.get("log", "")
                     for line in log_msg.split("\n"):
                         if line.strip():
-                            async def _do_append(line=line):
+                            async def _do_append(_=None):
                                 self.log_view.controls.append(ft.Text(line))
+                                self._page.update()
                             self._page.run_task(_do_append, None)
 
                     if "progress" in update:
                         progress = update["progress"]
-                        async def _do_progress(p=progress):
-                            self.progress_bar.value = p
+                        async def _do_progress(_=None):
+                            self.progress_bar.value = progress
+                            self._page.update()
                         self._page.run_task(_do_progress, None)
 
                     if update.get("error"):
                         async def _do_err(_=None):
                             self.progress_bar.color = theme.ERROR
+                            self._page.update()
                         self._page.run_task(_do_err, None)
 
                     async def _do_scroll(_=None):
@@ -80,7 +83,6 @@ class QCBase:
                             await self.log_view.scroll_to(offset=-1, duration=100)
                         except TypeError:
                             self.log_view.scroll_to(offset=-1, duration=100)
-                        self._page.update()
                     self._page.run_task(_do_scroll, None)
             finally:
                 async def _do_finish(_=None):
@@ -89,7 +91,6 @@ class QCBase:
                     if controls_to_disable:
                         for ctrl in controls_to_disable:
                             ctrl.disabled = False
-                    self._page.update()
 
                 self._page.run_task(_do_finish, None)
 
