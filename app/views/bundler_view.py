@@ -222,6 +222,7 @@ class BundlerView(ft.Column):
         root_dir_row = ft.Row(
             [
                 self.root_dir_field,
+                # 選擇翻譯專案根目錄
                 ft.IconButton(
                     icon=ft.Icons.FOLDER_OPEN,
                     tooltip="選擇資料夾",
@@ -234,6 +235,7 @@ class BundlerView(ft.Column):
         output_zip_row = ft.Row(
             [
                 self.output_zip_field,
+                # 選擇 ZIP 儲存位置
                 ft.IconButton(
                     icon=ft.Icons.SAVE_AS,
                     tooltip="選擇儲存位置",
@@ -247,6 +249,7 @@ class BundlerView(ft.Column):
             [
                 ft.Row([
                     ft.Text("其他指定資料夾", size=13, weight=ft.FontWeight.W_500),
+                    # 新增額外資料夾至打包清單
                     ft.IconButton(
                         icon=ft.Icons.ADD,
                         icon_size=20,
@@ -260,6 +263,8 @@ class BundlerView(ft.Column):
             spacing=8,
         )
 
+        # 開始打包按鈕：驗證輸入後啟動背景執行緒執行打包任務
+        # 執行緒完成後透過 page.run_task() 更新 progress_bar / log_view
         start_button = ft.Button(
             "開始打包",
             icon=ft.Icons.PLAY_ARROW,
@@ -392,6 +397,11 @@ class BundlerView(ft.Column):
         self._page.update()
 
     def start_bundling_clicked(self, e: ft.ControlEvent):
+        """開始打包按鈕事件處理。
+
+        驗證必填欄位後，啟動背景執行緒執行打包任務。
+        執行緒完成後透过 page.run_task() 更新 UI。
+        """
         root_dir = self.root_dir_field.value or ""
         output_zip = self.output_zip_field.value or ""
 
