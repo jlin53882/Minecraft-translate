@@ -229,6 +229,7 @@ def run_extraction_process_impl(
 
     all_scan_results = scan_results_local[0]
     log.info("[scan_jars] 完成，共 %s 個 JAR 被預掃描，耗時 %.1fs", len(all_scan_results), elapsed_total)
+    yield {'progress': 0.0, 'current': 0, 'total': total_jars, 'log': f'[提取階段] 開始提取 ({total_jars} 個 JAR)...'}
 
     processed_count = 0
     total_extracted = 0
