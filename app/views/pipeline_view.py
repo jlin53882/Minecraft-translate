@@ -414,19 +414,28 @@ class PipelineView(ft.Column):
                 if mode in ("lang", "both"):
                     lang_out = os.path.join(output_dir, "jar_mod_extract", "_提取lang_輸出")
                     run_lang_extraction_service(mods_dir, lang_out, session)
-                    self._page.run_task(lambda _: self.progress_panel.add_log("✅ Lang 抽取完成"))
+                    async def do_lang_log(_):
+                        self.progress_panel.add_log("✅ Lang 抽取完成")
+                    self._page.run_task(do_lang_log, None)
 
                 if mode in ("book", "both"):
                     book_out = os.path.join(output_dir, "jar_mod_extract", "_提取book_輸出")
                     run_book_extraction_service(mods_dir, book_out, session)
-                    self._page.run_task(lambda _: self.progress_panel.add_log("✅ Book 抽取完成"))
+                    async def do_book_log(_):
+                        self.progress_panel.add_log("✅ Book 抽取完成")
+                    self._page.run_task(do_book_log, None)
 
-                snap = session.snapshot()
-                self._page.run_task(lambda _: self.progress_panel.finish_step(1, not session.error))
+                async def do_finish(_):
+                    self.progress_panel.finish_step(1, not session.error)
+                self._page.run_task(do_finish, None)
 
             except Exception as ex:
-                self._page.run_task(lambda _: self.progress_panel.add_log(f"❌ 錯誤：{ex}", False))
-                self._page.run_task(lambda _: self.progress_panel.finish_step(1, False))
+                async def do_err_log(_):
+                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", False)
+                self._page.run_task(do_err_log, None)
+                async def do_err_finish(_):
+                    self.progress_panel.finish_step(1, False)
+                self._page.run_task(do_err_finish, None)
 
         threading.Thread(target=worker, daemon=True).start()
         self._poll_session(session)
@@ -438,11 +447,16 @@ class PipelineView(ft.Column):
                 time.sleep(0.5)
                 snap = session.snapshot()
                 progress = float(snap.get("progress", 0) or 0)
-                self._page.run_task(lambda _: self._update_progress(progress, f"{int(progress * 100)}%"))
+                async def do_progress(_):
+                    self._update_progress(progress, f"{int(progress * 100)}%")
+                self._page.run_task(do_progress, None)
                 for log_entry in snap.get("logs", []):
-                    self._page.run_task(lambda _, le=log_entry: self.progress_panel.add_log(le.text))
-            snap = session.snapshot()
-            self._page.run_task(lambda _: self._update_progress(1.0, "完成"))
+                    async def do_log(_, le=log_entry):
+                        self.progress_panel.add_log(le.text)
+                    self._page.run_task(do_log, None)
+            async def do_finish(_):
+                self._update_progress(1.0, "完成")
+            self._page.run_task(do_finish, None)
 
         threading.Thread(target=poll, daemon=True).start()
 
