@@ -635,9 +635,6 @@ class PipelineView(ft.Column):
                         ft.Button("輸出目錄", icon=ft.Icons.FOLDER_SPECIAL, on_click=lambda _: self._page.run_task(self._pick_output_dir)),
                         ft.Container(content=self.output_path_text, expand=True),
                     ]),
-                            expand=True,
-                        ),
-                    ]),
                 ], spacing=10),
                 bgcolor="surfaceContainerLow", padding=20, border_radius=15
             ),
