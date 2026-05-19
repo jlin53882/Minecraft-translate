@@ -66,7 +66,11 @@ def start_ui_poller(view, mode: str = ''):
             is_error = snap['error']
 
             if status == 'RUNNING':
-                view.status_text.value = f'狀態：提取 {mode} 中... ({int(progress * 100)}%)'
+                snap = view.session.snapshot()
+                current = snap.get('current', 0)
+                total = snap.get('total', 0)
+                display_idx = current if current > 0 else 1
+                view.status_text.value = f'狀態：提取 {mode} 中 ({display_idx}/{total}) ({int(progress * 100)}%)'
             elif status == 'DONE':
                 view.status_text.value = '狀態：完成'
             elif status == 'ERROR':
