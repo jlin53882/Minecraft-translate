@@ -100,10 +100,10 @@ def start_ui_poller(view, mode: str = ''):
     threading.Thread(target=poll, daemon=True).start()
 
 def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
-    """方案 2：Worker 直接更新 UI（廢除 poller），與 BundlerView 架構一致。
+    """方案 B：Worker 完成後一次更新 UI（廢除逐筆 run_task 更新）。
 
-    每個 update：直接呼叫 view._append_log_line() + page.update()，
-    不再透過 session.snapshot() + poller 中轉。
+    每個 update：只收集 log 和 stats，不做任何 UI 更新。
+    最後一次性 append 所有 log 並更新進度條。
     """
     from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
     ensure_pipeline_logging()
@@ -111,6 +111,11 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
     view._extraction_stats = {'success': 0, 'warnings': 0, 'failures': 0, 'total_files': 0}
     session = view.session
     session.start()
+
+    all_logs: list[str] = []
+    final_progress = 0.0
+    final_current = 0
+    final_total = 0
 
     skip_zh_cn = getattr(view, 'skip_zh_cn_switch', None) and view.skip_zh_cn_switch.value
     if mode == 'lang':
@@ -128,52 +133,28 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
 
             log_msg = filtered.get("log", "")
             if log_msg:
-                log_info(f"[DEBUG] _extraction_worker: received log_msg={log_msg[:80]}...")
-                async def _do_append_log(_):
-                    view._append_log_line(log_msg)
-                view.page.run_task(_do_append_log, None)
+                all_logs.append(log_msg)
 
             if "progress" in filtered:
-                progress = filtered["progress"]
-                current = filtered.get("current", 0)
-                total = filtered.get("total", 0)
-                display_idx = current if current > 0 else 1
-                status_text = f'狀態：提取 {mode} 中 ({display_idx}/{total}) ({int(progress * 100)}%)'
-
-                async def _do_update(_):
-                    view.status_text.value = status_text
-                    view.progress_bar.value = progress
-                    view.page.update()
-
-                view.page.run_task(_do_update, None)
+                final_progress = filtered["progress"]
+                final_current = filtered.get("current", 0)
+                final_total = filtered.get("total", 0)
 
             if "stats" in filtered:
-                stats = filtered["stats"]
-                async def _do_update_stats(_):
-                    view._extraction_stats = stats
-                view.page.run_task(_do_update_stats, None)
+                view._extraction_stats = filtered["stats"]
 
-            is_error = filtered.get("error", False)
-            if is_error:
-                async def _do_error(_):
-                    view.progress_bar.color = ft.Colors.RED
-                    view.page.update()
-                view.page.run_task(_do_error, None)
+            if filtered.get("error", False):
                 session.set_error()
                 break
 
         final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
         if final and "log" in final:
-            async def _do_append_final(_):
-                view._append_log_line(final["log"])
-            view.page.run_task(_do_append_final, None)
+            all_logs.append(final["log"])
 
     except Exception as e:
         import traceback
-        async def _do_error_log(_):
-            view._append_log_line(f"[ERROR] {e}")
-            view._append_log_line(traceback.format_exc())
-        view.page.run_task(_do_error_log, None)
+        all_logs.append(f"[ERROR] {e}")
+        all_logs.append(traceback.format_exc())
         session.set_error()
     finally:
         if not session.error:
@@ -181,20 +162,23 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
 
         status = session.snapshot()['status']
 
-        if status == 'DONE':
-            view.status_text.value = '狀態：完成'
-            view.progress_bar.value = 1.0
-
-            async def _do_show_summary(_):
+        def _do_final_update(_):
+            for msg in all_logs:
+                view._append_log_line(msg)
+            display_idx = final_current if final_current > 0 else 1
+            view.status_text.value = f'狀態：提取 {mode} 中 ({display_idx}/{final_total}) ({int(final_progress * 100)}%)'
+            view.progress_bar.value = final_progress
+            if status == 'DONE':
+                view.status_text.value = '狀態：完成'
+                view.progress_bar.value = 1.0
                 view._show_extraction_summary(mode)
+            elif status == 'ERROR':
+                view.status_text.value = '狀態：發生錯誤'
+                view.progress_bar.color = ft.Colors.RED
+            view.set_controls_disabled(False)
+            view.page.update()
 
-            view.page.run_task(_do_show_summary, None)
-        elif status == 'ERROR':
-            view.status_text.value = '狀態：發生錯誤'
-            view.progress_bar.color = ft.Colors.RED
-
-        view.set_controls_disabled(False)
-        view.page.update()
+        view.page.run_task(_do_final_update, None)
 
 
 def start_extraction(view, mode: str):
