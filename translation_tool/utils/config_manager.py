@@ -58,7 +58,7 @@ DEFAULT_CONFIG = {
         "replace_rules_path": "replace_rules.json",
         "cache_directory": "快取資料",
         "enable_cache_saving": True,
-        "parallel_execution_workers": max(1, os.cpu_count() // 2),
+        "parallel_execution_workers": 4,
         "custom_translator_folder": "custom_translators",
     },
     "ftb_translator": {
@@ -71,25 +71,25 @@ DEFAULT_CONFIG = {
         "wikipedia_rate_limit_delay": 0.5,
     },
     "lm_translator": {
-        "temperature": 0.2,
+        "temperature": 0.3,
         "lm_translate_folder_name": "LM翻譯後",
         "initial_batch_size_patchouli": 100,  # ⭐ 新增（建議 80~150） patchouli 專用
         "initial_batch_size_lang": 300,  # 起始 batch（你 TPM 很夠） Lang 專用
-        "initial_batch_size_ftb": 100,  # 起始 batch（FTB 專用）
+        "initial_batch_size_ftb": 200,  # 起始 batch（FTB 專用）
         "initial_batch_size_kubejs": 200,  # 起始 batch（kubejs 專用）
         "initial_batch_size_md": 100,  # 起始 batch（Markdown 專用）
         "min_batch_size": 50,  # 最小 batch
-        "batch_shrink_factor": 0.75,  # 發生錯誤時縮小比例
+        "batch_shrink_factor": 0.5,  # 發生錯誤時縮小比例
         "rate_limit": {
             "timeout": 600,  # request time out set
             "sleep_seconds_between_batches": 0.0,  # 批次間延遲秒數
         },
         "models": {
             "gemini-2.5-flash": {"enabled": True},
-            "gemini-3-flash-preview": {"enabled": False},
         },
         "keys": [
-            "token",
+            "YOUR_GEMINI_API_KEY_1",
+            "YOUR_GEMINI_API_KEY_2"
         ],
         "patchouli_system_prompt": (
             "你是專業的 Minecraft Patchouli 手冊翻譯員，專精於《當個創世神》繁體中文（台灣）官方譯名或台灣用語的翻譯。\n"
@@ -157,12 +157,15 @@ DEFAULT_CONFIG = {
             "root": "zh_tw_generated/pack_mcmeta",
         },
     },
+    "jar_extractor": {
+        "lang_codes": ["en_us", "zh_cn", "zh_tw"],
+    },
     # ★ 新增一個配置區塊或 Key ★
     "lang_merger": {
         "pending_folder_name": "待翻譯",  # 專門用於 lang_merger 的設定
         "pending_organized_folder_name": "待翻譯整理需翻譯",  # 專門用於 lang_merger 的設定
-        "filtered_pending_min_count": 2,  # 專門用於 lang_merger 的設定
-        "quarantine_folder_name": "skipped_json",  # 專門用於 lang_merger  zip 檔案合併錯誤處理的設定
+        "filtered_pending_min_count": 3,  # 專門用於 lang_merger 的設定
+        "quarantine_folder_name": "問題檔案skipped_json",  # 專門用於 lang_merger  zip 檔案合併錯誤處理的設定
         # --- v3 新增 ---
         "process_zh_cn_files": True,
         "skip_zh_cn_when_only_process_lang": False,
@@ -178,6 +181,7 @@ DEFAULT_CONFIG = {
             "dual_extract": "_提取both_輸出",
             "dual_preview": "_預覽both_輸出",
         },
+        "target_language": ["zh_tw"],
         "skip_zh_cn_extract": False,
     },
 }
