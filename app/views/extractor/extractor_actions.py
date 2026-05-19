@@ -137,10 +137,10 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
                     view._append_log_line(log_msg)
                 view.page.run_task(_do_append_log, None)
 
-            if "progress" in filtered:
-                progress = filtered["progress"]
-                current = filtered.get("current", 0)
-                total = filtered.get("total", 0)
+            if "progress" in filtered or "progress" in update:
+                progress = filtered.get("progress", update.get("progress", 0))
+                current = update.get("current", 0)
+                total = update.get("total", 0)
                 display_idx = current if current > 0 else 1
                 status_text = f'狀態：提取 {mode} 中 ({display_idx}/{total}) ({int(progress * 100)}%)'
 

@@ -27,6 +27,7 @@ from app.views.extractor.extractor_actions import (
     start_ui_poller as run_ui_poller,
     update_stats_from_log,
 )
+from app.views.extractor.extractor_state import ExtractionState
 from app.views.extractor.extractor_panels import build_logs_card, build_settings_card, build_pick_button
 
 class ExtractorView(ft.Column):
@@ -63,6 +64,7 @@ class ExtractorView(ft.Column):
         # 這樣提取流程與畫面狀態不會互相纏在一起。
         self.session = TaskSession(max_logs=2000)
         self._ui_poller_stop = threading.Event()
+        self._extraction_state = ExtractionState()
 
         # 提取統計
         self._extraction_stats = {
@@ -387,7 +389,7 @@ class ExtractorView(ft.Column):
         elif "Translation" in text or "完成" in text:
             color = "#74c0fc"  # soft blue
 
-        log_info(f"[DEBUG] _append_log_line: before append, log_view.controls count={len(self.log_view.controls)}")
+        #log_info(f"[DEBUG] _append_log_line: before append, log_view.controls count={len(self.log_view.controls)}")
         self.log_view.controls.append(
             ft.Text(
                 text,
@@ -397,7 +399,7 @@ class ExtractorView(ft.Column):
                 selectable=True,
             )
         )
-        log_info(f"[DEBUG] _append_log_line: after append, log_view.controls count={len(self.log_view.controls)}")
+        #log_info(f"[DEBUG] _append_log_line: after append, log_view.controls count={len(self.log_view.controls)}")
 
     # ==================================================
     # Worker Logic

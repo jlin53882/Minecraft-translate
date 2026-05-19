@@ -3,26 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 @dataclass
-class ExtractionStats:
-    success: int = 0
-    warnings: int = 0
-    failures: int = 0
-    total_files: int = 0
-
-    def reset(self) -> None:
-        """重置所有計數器為零（success/warnings/failures/total_files）。"""
-        self.success = 0
-        self.warnings = 0
-        self.failures = 0
-        self.total_files = 0
+class ExtractionState:
+    progress: float = 0.0
+    current: int = 0
+    total: int = 0
+    done: bool = False
+    error: bool = False
 
     def as_dict(self) -> dict:
-        """將 ExtractionStats 轉換為字典格式。"""
         return {
-            'success': self.success,
-            'warnings': self.warnings,
-            'failures': self.failures,
-            'total_files': self.total_files,
+            'progress': self.progress,
+            'current': self.current,
+            'total': self.total,
+            'done': self.done,
+            'error': self.error,
         }
 
 @dataclass
