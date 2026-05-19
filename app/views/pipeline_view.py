@@ -337,12 +337,13 @@ class PipelineView(ft.Column):
             self._page.run_task(do_pick)
 
         def browse_mods_dir(e=None):
-            async def do_pick():
-                result = await self.file_picker.get_directory_path()
-                if result:
-                    self._extract_mods_field.value = result
-                    self._page.update()
-            self._page.run_task(do_pick)
+            path = (self._extract_mods_field.value or "").strip()
+            if path and os.path.isdir(path):
+                os.startfile(path)
+            elif not path:
+                self._show_snack_bar("⚠️ 請先選擇資料夾")
+            else:
+                self._show_snack_bar("⚠️ 路徑不存在")
 
         def pick_output_dir(e=None):
             async def do_pick():
@@ -353,12 +354,13 @@ class PipelineView(ft.Column):
             self._page.run_task(do_pick)
 
         def browse_output_dir(e=None):
-            async def do_pick():
-                result = await self.file_picker.get_directory_path()
-                if result:
-                    self._extract_output_field.value = result
-                    self._page.update()
-            self._page.run_task(do_pick)
+            path = (self._extract_output_field.value or "").strip()
+            if path and os.path.isdir(path):
+                os.startfile(path)
+            elif not path:
+                self._show_snack_bar("⚠️ 請先選擇資料夾")
+            else:
+                self._show_snack_bar("⚠️ 路徑不存在")
 
         def close_dialog(dialog):
             dialog.open = False
