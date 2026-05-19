@@ -352,14 +352,14 @@ class PipelineView(ft.Column):
                 return
 
             # 收集所有勾選的 lang_codes，沒勾預設全部（value=True 表示勾選）
-            selected_codes = [code for code, cb in lang_code_checks.items() if cb.value]
+            selected_codes = [code for code, cb in self._lang_code_checks.items() if cb.value]
             close_dialog(dialog)
             self._run_extraction(mods, output, mode, lang_codes=selected_codes)
 
         # 動態生成 lang_codes Checkbox：從 config 讀取，預設全部勾選
-        lang_code_checks = {}
+        self._lang_code_checks = {}
         for code in lang_codes:
-            lang_code_checks[code] = ft.Checkbox(label=code, value=True)
+            self._lang_code_checks[code] = ft.Checkbox(label=code, value=True)
 
         def pick_mods_dir(e=None):
             """選擇資料夾：開啟系統資料夾選擇器，填入路徑到 _extract_mods_field"""
@@ -408,6 +408,7 @@ class PipelineView(ft.Column):
 
             - 寬度響應式（60% 視窗寬度）
             - 模式 both 轉換為 dual，與 start_extraction() 一致
+            - lang_codes 取自 _lang_code_checks（由 _open_extract_dialog 設定）
             """
             preview_dialog_width = int(self._page.width * 0.6)
             mods = (self._extract_mods_field.value or "").strip()
@@ -419,6 +420,7 @@ class PipelineView(ft.Column):
             if mode == "both":
                 mode = "dual"
 
+            selected_codes = [code for code, cb in self._lang_code_checks.items() if cb.value]
             jar_files = find_jar_files(mods)
             total_jars = len(jar_files)
 
@@ -428,7 +430,7 @@ class PipelineView(ft.Column):
 
             def do_preview():
                 try:
-                    for update in preview_extraction_generator(mods, mode):
+                    for update in preview_extraction_generator(mods, mode, lang_codes=selected_codes):
                         if 'error' in update:
                             preview_state.error = update['error']
                             preview_state.done = True
@@ -539,10 +541,10 @@ class PipelineView(ft.Column):
                 return
 
             close_dialog(dialog)
-            selected_codes = [code for code, cb in lang_code_checks.items() if cb.value]
+            selected_codes = [code for code, cb in self._lang_code_checks.items() if cb.value]
             self._run_extraction(mods, output, mode, lang_codes=selected_codes)
 
-        lang_codes_section = ft.Column([lang_code_checks[code] for code in lang_codes], spacing=2)
+        lang_codes_section = ft.Column([self._lang_code_checks[code] for code in lang_codes], spacing=2)
 
         content = ft.Column([
             ft.Text("Mod 來源", weight="bold", size=13),

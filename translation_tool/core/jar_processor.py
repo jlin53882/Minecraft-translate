@@ -189,12 +189,13 @@ def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: 
     if lang_error or book_error:
         yield {"dual_errors": {"lang": lang_error, "book": book_error}}
 
-def preview_extraction_generator(mods_dir: str, mode: str) -> Generator[Dict[str, Any], None, None]:
+def preview_extraction_generator(mods_dir: str, mode: str, lang_codes: list[str] | None = None) -> Generator[Dict[str, Any], None, None]:
     """預覽提取結果。
 
     Args:
         mods_dir: Mod 目錄路徑
         mode: 預覽模式
+        lang_codes: 指定語言代碼列表，若為 None 則從 config 讀取
 
     Yields:
         進度字典
@@ -204,6 +205,7 @@ def preview_extraction_generator(mods_dir: str, mode: str) -> Generator[Dict[str
         mode,
         find_jar_files_fn=find_jar_files,
         book_path_regex=BOOK_PATH_REGEX_DUAL_STRUCTURE,
+        lang_codes=lang_codes,
     )
 
 __all__ = [
