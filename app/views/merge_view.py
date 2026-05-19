@@ -353,12 +353,21 @@ class MergeView(ft.Column):
 
     def pick_zips(self, e: ft.ControlEvent) -> None:
         """開啟 ZIP 檔案選擇對話框。"""
-        self.file_picker.on_upload = self._on_zip_picked
-        self.file_picker.pick_files(
+        self._page.run_task(self._async_pick_zips)
+
+    async def _async_pick_zips(self) -> None:
+        """async 實作：選擇 ZIP 檔案。"""
+        result = await self.file_picker.pick_files(
             dialog_title="選擇 ZIP 檔案",
             allow_multiple=True,
             allowed_extensions=["zip"],
         )
+        if result:
+            for f in result:
+                if hasattr(f, 'path') and f.path and f.path not in self.selected_zips:
+                    self.selected_zips.append(f.path)
+            self._refresh_zip_list()
+            self.page.update()
 
     def _on_zip_picked(self, e: ft.FilePickerUploadEvent) -> None:
         """處理 ZIP 檔案選擇結果。"""
