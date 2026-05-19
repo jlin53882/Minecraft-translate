@@ -234,14 +234,13 @@ def run_extraction_process_impl(
     total_extracted = 0
     total_skipped = 0
     cpu_count = os.cpu_count() or 2
-    max_allowed_workers = max(1, cpu_count // 2)
     config_workers = load_config().get("translator", {}).get("parallel_execution_workers")
     if isinstance(config_workers, int) and config_workers > 0:
-        max_workers = min(config_workers, max_allowed_workers)
-        log.info("[workers] config=%s, allowed_max=%s, actual=%s (cpu_count=%s)", config_workers, max_allowed_workers, max_workers, cpu_count)
+        max_workers = config_workers
+        log.info("[workers] config=%s, actual=%s (cpu_count=%s, cap removed)", config_workers, max_workers, cpu_count)
     else:
-        max_workers = max_allowed_workers
-        log.info("[workers] default=%s (config invalid or missing, cpu_count=%s)", max_workers, cpu_count)
+        max_workers = max(1, cpu_count // 2)
+        log.info("[workers] default=%s (config invalid/missing, cpu_count=%s)", max_workers, cpu_count)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_jar = {
