@@ -65,6 +65,7 @@ class QCView(ft.Column):
         self.compare_out_dir_textfield = ft.TextField(
             label="JSON 差異報告 輸出資料夾", expand=True
         )
+        # 啟動 JSON 資料夾差異比對：disabled/enabled 由 worker 透過 page.run_task() 控制
         self.compare_start_button = ft.Button(
             "啟動：JSON 資料夾差異比對",
             icon=ft.Icons.COMPARE,
@@ -78,6 +79,7 @@ class QCView(ft.Column):
         self.tsv_out_file_textfield = ft.TextField(
             label="TSV 差異報告 輸出檔案 (.csv)", expand=True
         )
+        # 啟動 TSV 單檔案差異比對：disabled/enabled 由 worker 透過 page.run_task() 控制
         self.compare_tsv_start_button = ft.Button(
             "啟動：TSV 單檔案差異比對",
             icon=ft.Icons.FILE_PRESENT,

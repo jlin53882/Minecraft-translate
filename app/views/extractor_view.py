@@ -103,7 +103,7 @@ class ExtractorView(ft.Column):
             value=False,
         )
 
-        # 2. Action Buttons
+        # 提取 Lang 按鈕：disabled/enabled 由 worker 透過 page.run_task() 控制
         self.lang_button = ft.Button(
             "提取 Lang",
             icon=ft.Icons.LANGUAGE,
@@ -115,6 +115,7 @@ class ExtractorView(ft.Column):
             ),
             on_click=lambda e: self.start_extraction("lang"),
         )
+        # 提取 Book 按鈕：disabled/enabled 由 worker 透過 page.run_task() 控制
         self.book_button = ft.Button(
             "提取 Book",
             icon=ft.Icons.BOOK,
@@ -127,7 +128,7 @@ class ExtractorView(ft.Column):
             on_click=lambda e: self.start_extraction("book"),
         )
 
-        # 預覽按鈕
+        # 預覽按鈕（Lang）
         self.preview_lang_button = ft.OutlinedButton(
             "預覽 Lang",
             icon=ft.Icons.PREVIEW,
@@ -138,6 +139,7 @@ class ExtractorView(ft.Column):
             icon=ft.Icons.PREVIEW,
             on_click=lambda e: self.show_preview("book"),
         )
+        # 同時提取 Lang + Book，按下後啟動背景執行緒，UI 由 worker 透過 page.run_task() 更新
         self.dual_extract_button = ft.Button(
             "提取 Lang + Book",
             icon=ft.Icons.LANGUAGE,

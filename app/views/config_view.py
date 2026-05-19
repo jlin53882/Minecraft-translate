@@ -277,12 +277,14 @@ class ConfigView(ft.Column):
         self.new_model_field = ft.TextField(
             label="新增模型名稱", hint_text="gemini-2.5-flash", expand=True, dense=True
         )
+        # 新增模型至模型列表
         self.add_model_button = ft.IconButton(
             icon=ft.Icons.ADD, tooltip="新增模型", on_click=self.on_add_model_clicked
         )
         self.models_column = ft.Column(spacing=5)
         self.controls_map["lm_translator.models"] = self.models_column
 
+        # 新增 API Key 至 Key 列表
         self.add_key_button = ft.IconButton(
             icon=ft.Icons.ADD,
             tooltip="新增 API Key",
@@ -659,6 +661,7 @@ class ConfigView(ft.Column):
             icon_size=18,
             on_click=lambda e: self.move_model_row(cb, +1),
         )
+        # 刪除模型（依 checkbox 選中狀態）
         btn_delete = ft.IconButton(
             icon=ft.Icons.DELETE_OUTLINE,
             tooltip="刪除模型",

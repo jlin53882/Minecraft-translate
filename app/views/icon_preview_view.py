@@ -743,6 +743,7 @@ class IconPreviewView(ft.Column):
         # 設定頁數
         self.page_info = ft.Text("")
 
+        # 上一頁 / 下一頁（分頁導航 IconButton）
         self.prev_page_btn = ft.IconButton(
             icon=ft.Icons.CHEVRON_LEFT,
             tooltip="上一頁",
@@ -800,6 +801,7 @@ class IconPreviewView(ft.Column):
         )
         self.mod_search_status = ft.Text("", size=11, color=theme.GREY_600)
 
+        # 返回模組清單
         self.back_btn = ft.IconButton(
             icon=ft.Icons.ARROW_BACK,
             visible=False,
@@ -807,12 +809,14 @@ class IconPreviewView(ft.Column):
             on_click=self._go_back,
         )
 
+        # 選擇模組資料夾（mods 資料夾）
         self.pick_source_btn = ft.Button(
             "選擇模組資料夾（例：mods 資料夾）",
             icon=ft.Icons.FOLDER_OPEN,
             on_click=lambda e: self._page.run_task(self._async_pick_source_dir),
         )
 
+        # 選擇資源包路徑
         self.pick_review_btn = ft.Button(
             "選擇資源包路徑",
             icon=ft.Icons.FOLDER_OPEN,
@@ -822,6 +826,7 @@ class IconPreviewView(ft.Column):
         self.source_label = ft.Text("模組資料夾：尚未選擇", size=12)
         self.review_label = ft.Text("資源包路徑：尚未選擇", size=12)
 
+        # 載入模組清單：disabled/enabled 由 worker 透過 page.run_task() 控制
         self.load_btn = ft.Button(
             "載入模組清單",
             icon=ft.Icons.PLAY_ARROW,
@@ -829,6 +834,7 @@ class IconPreviewView(ft.Column):
             on_click=self._on_load_clicked,
         )
 
+        # 儲存翻譯：visible=False 至模組清單載入後才顯示
         self.save_btn = ft.Button(
             "💾 儲存翻譯",
             icon=ft.Icons.SAVE,
