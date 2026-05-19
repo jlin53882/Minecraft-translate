@@ -407,9 +407,9 @@ class PipelineView(ft.Column):
             """預覽結果：使用 preview_extraction_generator 掃描 JAR 檔案，動態顯示結果。
 
             - 寬度響應式（60% 視窗寬度）
-            - 預覽結果顯示 JAR 數量、預計檔案數、詳細清單（ListView expand=True）
             - 模式 both 轉換為 dual，與 start_extraction() 一致
             """
+            preview_dialog_width = int(self._page.width * 0.6)
             mods = (self._extract_mods_field.value or "").strip()
             if not mods or not os.path.isdir(mods):
                 self._show_snack_bar("⚠️ 請選擇有效的 Mod 來源")
