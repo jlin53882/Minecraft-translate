@@ -59,6 +59,9 @@ DEFAULT_LANG_PREVIEW = "_預覽lang_輸出"     # config: extractor.output_folde
 DEFAULT_BOOK_PREVIEW = "_預覽book_輸出"     # config: extractor.output_folder_names.book_preview
 DEFAULT_DUAL_EXTRACT = "_提取both_輸出"     # config: extractor.output_folder_names.dual_extract
 DEFAULT_DUAL_PREVIEW = "_預覽both_輸出"     # config: extractor.output_folder_names.dual_preview
+DEFAULT_TARGET_LANGUAGE = ["zh_tw"]          # config: extractor.target_language
+DEFAULT_CUSTOM_TRANSLATOR_FOLDER = "custom_translators"  # config: translator.custom_translator_folder
+DEFAULT_CJK_RATIO_THRESHOLD = 0.7           # config: translator.cjk_ratio_threshold
 
 # lm_translator.prompt
 DEFAULT_PATCHOULI_SYSTEM_PROMPT = (
