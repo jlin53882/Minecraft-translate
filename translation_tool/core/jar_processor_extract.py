@@ -91,11 +91,17 @@ def extract_from_jar_impl(
         log.error("JAR 檔案不存在: %s", jar_path)
         return {"status": "error", "extracted": 0, "skipped": 0}
 
+    log.debug("[extract_from_jar_impl] starting: %s, scan_results=%s (type=%s)",
+              jar_path_obj.name,
+              "provided" if scan_results else "None",
+              type(scan_results).__name__ if scan_results else "None")
     try:
         jar_results: dict[str, str | None] = {}
         if scan_results is not None and jar_path_obj in scan_results:
             jar_results = scan_results[jar_path_obj]
+            log.debug("[extract_from_jar_impl] reuse scan_results for %s (%d files)", jar_path_obj.name, len(jar_results))
         else:
+            log.debug("[extract_from_jar_impl] NO scan_results for %s, fallback to scan_jars", jar_path_obj.name)
             scan_results_fallback = scan_jars(
                 jar_dir=jar_path_obj.parent,
                 patterns=[target_regex.pattern],
@@ -186,9 +192,43 @@ def run_extraction_process_impl(
         return
 
     log.info("開始從 %s 個 .jar 檔案中提取 %s 檔案...", total_jars, process_name)
-    yield {'progress': 0.0}
+    yield {'progress': 0.0, 'log': '[掃描階段] 開始掃描 JAR 檔案...'}
 
-    all_scan_results = scan_jars(jar_dir=Path(mods_dir), patterns=[target_regex.pattern])
+    import threading
+    scan_done = threading.Event()
+    scan_error = [None]  # 利用 list 可變特性跨執行緒傳遞
+    scan_results_local = [{}]  # [0] = dict | None
+
+    def _scan_in_background():
+        try:
+            scan_results_local[0] = scan_jars(jar_dir=Path(mods_dir), patterns=[target_regex.pattern])
+        except Exception as e:
+            scan_error[0] = e
+        finally:
+            scan_done.set()
+
+    scan_thread = threading.Thread(target=_scan_in_background, name="scan-jars-bg")
+    scan_thread.start()
+
+    # 輪詢等待 scan 完成，每 0.2s 检查一次
+    import time
+    scan_start = time.time()
+    while not scan_done.is_set():
+        elapsed = time.time() - scan_start
+        log.info("[scan_jars] background scanning... elapsed=%.1fs, jar_count=%s", elapsed, total_jars)
+        yield {'progress': 0.0, 'current': 0, 'total': total_jars, 'log': f'[掃描階段] 已掃描 {total_jars} 個 JAR ({elapsed:.0f}s)...'}
+        scan_done.wait(timeout=0.5)
+
+    scan_thread.join()
+    elapsed_total = time.time() - scan_start
+
+    if scan_error[0]:
+        log.error("[scan_jars] background scan failed: %s", scan_error[0])
+        yield {'progress': 0.0, 'error': True, 'log': f'[錯誤] 掃描失敗: {scan_error[0]}'}
+        return
+
+    all_scan_results = scan_results_local[0]
+    log.info("[scan_jars] 完成，共 %s 個 JAR 被預掃描，耗時 %.1fs", len(all_scan_results), elapsed_total)
 
     processed_count = 0
     total_extracted = 0
@@ -198,8 +238,10 @@ def run_extraction_process_impl(
     config_workers = load_config().get("translator", {}).get("parallel_execution_workers")
     if isinstance(config_workers, int) and config_workers > 0:
         max_workers = min(config_workers, max_allowed_workers)
+        log.info("[workers] config=%s, allowed_max=%s, actual=%s (cpu_count=%s)", config_workers, max_allowed_workers, max_workers, cpu_count)
     else:
         max_workers = max_allowed_workers
+        log.info("[workers] default=%s (config invalid or missing, cpu_count=%s)", max_workers, cpu_count)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_jar = {
