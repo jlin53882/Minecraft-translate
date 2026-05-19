@@ -213,6 +213,37 @@ class PipelineView(ft.Column):
         self.keys_container.controls.append(new_row)
         self._page.update()
 
+    def _show_progress_panel(self):
+        """顯示進度面板並清除舊日誌"""
+        self.progress_panel.clear_logs()
+        self.progress_panel.start()
+        self._page.update()
+
+    def _on_extract_click(self, e=None):
+        self._show_progress_panel()
+        self.progress_panel.add_log("▶ 開始：抽取資源")
+        self.progress_panel.finish_step(1, True)
+
+    def _on_merge_click(self, e=None):
+        self._show_progress_panel()
+        self.progress_panel.add_log("▶ 開始：語系比對")
+        self.progress_panel.finish_step(2, True)
+
+    def _on_translate_click(self, e=None):
+        self._show_progress_panel()
+        self.progress_panel.add_log("▶ 開始：啟動翻譯")
+        self.progress_panel.finish_step(3, True)
+
+    def _on_bundle_click(self, e=None):
+        self._show_progress_panel()
+        self.progress_panel.add_log("▶ 開始：打包資源")
+        self.progress_panel.finish_step(4, True)
+
+    def _on_one_click_click(self, e=None):
+        self._show_progress_panel()
+        self.progress_panel.add_log("▶ 開始：一鍵製作")
+        self.progress_panel.set_step_running(1, "抽取資源")
+
     def _build_ui(self):
         self.workbench_view = ft.Column([
             ft.Text("翻譯工作台", size=24, weight="bold", color=BLUE_700),
@@ -237,10 +268,10 @@ class PipelineView(ft.Column):
             ft.Text("2. 執行任務", weight="bold", color=BLUE_600),
             ft.Column([
                 ft.Row([
-                    ft.Button("抽取資源", icon=ft.Icons.UNARCHIVE, expand=True, height=55, bgcolor=GREEN_700, color=WHITE),
-                    ft.Button("語系比對", icon=ft.Icons.SEARCH, expand=True, height=55, bgcolor=TEAL_700, color=WHITE),
-                    ft.Button("啟動翻譯", icon=ft.Icons.AUTO_AWESOME, expand=True, height=55, bgcolor=BLUE_700, color=WHITE),
-                    ft.Button("打包資源", icon=ft.Icons.INVENTORY_2, expand=True, height=55, bgcolor=PURPLE_700, color=WHITE),
+                    ft.Button("抽取資源", icon=ft.Icons.UNARCHIVE, expand=True, height=55, bgcolor=GREEN_700, color=WHITE, on_click=self._on_extract_click),
+                    ft.Button("語系比對", icon=ft.Icons.SEARCH, expand=True, height=55, bgcolor=TEAL_700, color=WHITE, on_click=self._on_merge_click),
+                    ft.Button("啟動翻譯", icon=ft.Icons.AUTO_AWESOME, expand=True, height=55, bgcolor=BLUE_700, color=WHITE, on_click=self._on_translate_click),
+                    ft.Button("打包資源", icon=ft.Icons.INVENTORY_2, expand=True, height=55, bgcolor=PURPLE_700, color=WHITE, on_click=self._on_bundle_click),
                 ], spacing=10),
 
                 ft.Container(
@@ -258,6 +289,7 @@ class PipelineView(ft.Column):
                     height=35,
                     bgcolor=YELLOW_900,
                     color=YELLOW,
+                    on_click=self._on_one_click_click,
                 ),
             ], spacing=15, expand=True)
         ])
