@@ -303,14 +303,6 @@ class PipelineView(ft.Column):
             on_click=lambda e: self._set_extract_mode("both"),
         )
         self._update_radio_style()
-        self._extract_mode = "lang"
-
-        def on_radio_change(e=None):
-            print(f"[DEBUG] on_radio_change called: _extract_mode={self._extract_mode}")
-
-        self._extract_radio_lang = ft.Radio("提取 Lang", "lang", on_change=lambda e: setattr(self, '_extract_mode', 'lang') or on_radio_change(e))
-        self._extract_radio_book = ft.Radio("提取 Book", "book", on_change=lambda e: setattr(self, '_extract_mode', 'book') or on_radio_change(e))
-        self._extract_radio_both = ft.Radio("全部執行（Lang + Book）", "both", on_change=lambda e: setattr(self, '_extract_mode', 'both') or on_radio_change(e))
 
         def start_extraction(dialog):
             mods = (self._extract_mods_field.value or "").strip()
