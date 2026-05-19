@@ -297,12 +297,12 @@ def test_config_view_page_property(cv, page, mock_controls_map):
     assert view.page is not None
 
 
-def test_nav_items_has_six_categories(cv, page, mock_controls_map):
-    """測試 NAV_ITEMS 有 6 個分類導航項目"""
+def test_nav_items_has_seven_categories(cv, page, mock_controls_map):
+    """測試 NAV_ITEMS 有 8 個分類導航項目"""
     view = cv.ConfigView(page)
     view.controls_map = mock_controls_map
-    assert len(cv.NAV_ITEMS) == 7
-    expected_ids = ['general', 'api_models', 'translation_behavior', 'prompts', 'species_lookup', 'batch_limits', 'extractor']
+    assert len(cv.NAV_ITEMS) == 8
+    expected_ids = ['general', 'api_models', 'translation_behavior', 'merger', 'prompts', 'species_lookup', 'batch_limits', 'extractor']
     actual_ids = [item['id'] for item in cv.NAV_ITEMS]
     assert actual_ids == expected_ids
 
