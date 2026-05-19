@@ -348,6 +348,7 @@ class PipelineView(ft.Column):
             self._page.update()
 
         def show_preview_result(dialog):
+            preview_dialog_width = int(self._page.width * 0.6)
             mods = (self._extract_mods_field.value or "").strip()
             if not mods or not os.path.isdir(mods):
                 self._show_snack_bar("⚠️ 請選擇有效的 Mod 來源")
@@ -386,7 +387,10 @@ class PipelineView(ft.Column):
             preview_dialog = ft.AlertDialog(
                 modal=True,
                 title=ft.Text("預覽結果"),
-                content=ft.Text(f"預覽掃描中...（0/{total_jars}）"),
+                content=ft.Container(
+                    content=ft.Text(f"預覽掃描中...（0/{total_jars}）"),
+                    width=preview_dialog_width,
+                ),
                 actions=[ft.TextButton("取消", on_click=lambda e: close_preview_dialog(preview_dialog))],
             )
 
@@ -403,13 +407,19 @@ class PipelineView(ft.Column):
                     time.sleep(0.2)
                     async def do_update(_):
                         pct = int(preview_state.progress * 100)
-                        preview_dialog.content = ft.Text(f"預覽掃描中...（{preview_state.current}/{preview_state.total}）{pct}%")
+                        preview_dialog.content = ft.Container(
+                            content=ft.Text(f"預覽掃描中...（{preview_state.current}/{preview_state.total}）{pct}%"),
+                            width=preview_dialog_width,
+                        )
                         self._page.update()
                     self._page.run_task(do_update, None)
 
                 async def do_final(_):
                     if preview_state.error:
-                        preview_dialog.content = ft.Text(f"預覽錯誤：{preview_state.error}")
+                        preview_dialog.content = ft.Container(
+                            content=ft.Text(f"預覽錯誤：{preview_state.error}"),
+                            width=preview_dialog_width,
+                        )
                     elif preview_state.result:
                         result = preview_state.result
                         jar_count = total_jars
@@ -428,16 +438,19 @@ class PipelineView(ft.Column):
                                 count = pr.get('count', 0)
                                 list_items.append(ft.Text(f"  {jar_name}（{count} 個檔案）", size=12))
 
-                        preview_dialog.content = ft.Column([
-                            ft.Text(f"JAR 數量：{jar_count} 個"),
-                            ft.Text(f"預計提取：{total_files} 個檔案（約 {total_size_mb:.1f} MB）"),
-                            ft.Divider(),
-                            ft.Text("詳細清單：", weight="bold"),
-                            ft.ListView(
-                                controls=list_items,
-                                expand=True,
-                            ),
-                        ], tight=False)
+                        preview_dialog.content = ft.Container(
+                            width=preview_dialog_width,
+                            content=ft.Column([
+                                ft.Text(f"JAR 數量：{jar_count} 個"),
+                                ft.Text(f"預計提取：{total_files} 個檔案（約 {total_size_mb:.1f} MB）"),
+                                ft.Divider(),
+                                ft.Text("詳細清單：", weight="bold"),
+                                ft.ListView(
+                                    controls=list_items,
+                                    expand=True,
+                                ),
+                            ], tight=False),
+                        )
                     preview_dialog.actions = [ft.TextButton("確定", on_click=lambda e: close_preview_dialog(preview_dialog))]
                     self._page.update()
                 self._page.run_task(do_final, None)
@@ -483,6 +496,7 @@ class PipelineView(ft.Column):
                 ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_output_dir),
             ]),
             ft.Text("輸出說明：", weight="bold", size=13),
+            ft.Text("→ {output}/jar_mod_extract/_提取lang_輸出/（Lang 模式）", color=GREY_600, size=12),
             ft.Text("→ {output}/jar_mod_extract/_提取book_輸出/（Book 模式）", color=GREY_600, size=12),
             ft.Text("→ {output}/jar_mod_extract/_提取lang_輸出/ + _提取book_輸出/（Dual 模式）", color=GREY_600, size=12),
             ft.Divider(),
