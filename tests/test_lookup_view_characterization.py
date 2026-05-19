@@ -42,7 +42,6 @@ def test_batch_lookup_worker_updates_result_and_progress(monkeypatch):
 
 
 def test_lookup_view_show_snack_bar_adds_to_overlay():
-    """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
     page = mock_page()
     view = LookupView(page)
 
@@ -53,7 +52,6 @@ def test_lookup_view_show_snack_bar_adds_to_overlay():
 
 
 def test_lookup_view_batch_lookup_clicked_triggers_service(monkeypatch):
-    """測試 batch_lookup_clicked 調用服務"""
     page = mock_page()
     view = LookupView(page)
     view.batch_input = type('F', (), {'value': '[]'})()

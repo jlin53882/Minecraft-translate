@@ -143,7 +143,9 @@ def test_bundling_without_output_zip_shows_no_error(monkeypatch):
 def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
-    monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
+
+    async def noop_scroll_to(**kwargs): return None
+    monkeypatch.setattr(view.log_view, "scroll_to", noop_scroll_to)
 
     def mock_generator(**kwargs):
         return iter([
