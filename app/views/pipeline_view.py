@@ -13,6 +13,15 @@ from app.ui.theme import (
     RED_400, ORANGE_700, WHITE, BLUE_50, GREY_200, BLUE_400,
     GREEN_600, GREEN_50, RED_50,
 )
+from app.logging.task_session import TaskSession
+from translation_tool.utils.config_manager import load_config
+from app.services_impl.pipelines.extract_service import (
+    run_lang_extraction_service,
+    run_book_extraction_service,
+)
+import threading
+import time
+import os
 
 
 # =============================================================================
@@ -219,10 +228,171 @@ class PipelineView(ft.Column):
         self.progress_panel.start()
         self._page.update()
 
+    def _show_snack_bar(self, message: str, color: str = RED_400):
+        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
+        self._page.overlay.append(snack)
+        snack.open = True
+        self._page.update()
+
+    # =============================================================================
+    # 抽取資源 Dialog
+    # =============================================================================
+
+    def _open_extract_dialog(self, e=None):
+        """打開抽取資源設定對話框"""
+        mods_dir = (self.input_path_text.value or "").strip()
+        output_dir = (self.output_path_text.value or "").strip()
+
+        self._extract_mods_field = ft.TextField(
+            label="Mod 來源",
+            hint_text="留空使用上方設定的 Mod 來源",
+            value=mods_dir,
+            expand=True,
+            border_color=BLUE_700,
+        )
+        self._extract_output_field = ft.TextField(
+            label="輸出目錄",
+            hint_text="留空使用上方設定的輸出目錄",
+            value=output_dir,
+            expand=True,
+            border_color=BLUE_700,
+        )
+        self._extract_mode = ft.RadioGroup(
+            content=ft.Column([
+                ft.Radio("提取 Lang", "lang"),
+                ft.Radio("提取 Book", "book"),
+                ft.Radio("全部執行（Lang + Book）", "both"),
+            ], spacing=4),
+        )
+        self._extract_lang_only = ft.Checkbox(
+            label="只處理 lang 檔案（跳過 book）",
+            value=True,
+        )
+
+        def pick_mods_dir(e=None):
+            async def do_pick():
+                result = await self.file_picker.get_directory_path()
+                if result:
+                    self._extract_mods_field.value = result
+                    self._page.update()
+            self._page.run_task(do_pick)
+
+        def pick_output_dir(e=None):
+            async def do_pick():
+                result = await self.file_picker.get_directory_path()
+                if result:
+                    self._extract_output_field.value = result
+                    self._page.update()
+            self._page.run_task(do_pick)
+
+        def close_dialog(dialog):
+            dialog.open = False
+            self._page.update()
+
+        def start_extraction(dialog):
+            mods = (self._extract_mods_field.value or "").strip()
+            output = (self._extract_output_field.value or "").strip()
+            mode = self._extract_mode.value or "lang"
+
+            if not mods:
+                self._show_snack_bar("⚠️ Mod 來源為必填欄位")
+                return
+            if not os.path.isdir(mods):
+                self._show_snack_bar("⚠️ Mod 來源資料夾不存在")
+                return
+            if not output:
+                self._show_snack_bar("⚠️ 輸出目錄為必填欄位")
+                return
+            if not os.path.isdir(output):
+                self._show_snack_bar("⚠️ 輸出目錄不存在")
+                return
+
+            close_dialog(dialog)
+            self._run_extraction(mods, output, mode)
+
+        content = ft.Column([
+            ft.Text("Mod 來源", weight="bold", size=13),
+            ft.Row([
+                self._extract_mods_field,
+                ft.Button("選擇資料夾", icon=ft.Icons.FOLDER, on_click=pick_mods_dir),
+            ]),
+            ft.Text("輸出目錄", weight="bold", size=13),
+            ft.Row([
+                self._extract_output_field,
+                ft.Button("選擇資料夾", icon=ft.Icons.FOLDER_SPECIAL, on_click=pick_output_dir),
+            ]),
+            ft.Text("輸出說明：", weight="bold", size=13),
+            ft.Text("→ {output}/jar_mod_extract/_提取lang_輸出/（Lang）", color=GREY_600, size=12),
+            ft.Text("→ {output}/jar_mod_extract/_提取book_輸出/（Book）", color=GREY_600, size=12),
+            ft.Divider(),
+            ft.Text("執行模式", weight="bold", size=13),
+            self._extract_mode,
+            self._extract_lang_only,
+        ], spacing=10, tight=False)
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("抽取資源設定"),
+            content=ft.Container(content=content, width=550),
+            actions=[
+                ft.TextButton("取消", on_click=lambda e: close_dialog(dialog)),
+                ft.Button("確定執行", icon=ft.Icons.CHECK, bgcolor=GREEN_700, color=WHITE,
+                          on_click=lambda e: start_extraction(dialog)),
+            ],
+        )
+
+        self._page.overlay.append(dialog)
+        dialog.open = True
+        self._page.update()
+
+    def _run_extraction(self, mods_dir: str, output_dir: str, mode: str):
+        """執行抽取資源（背景執行緒）"""
+        session = TaskSession()
+        self.progress_panel.set_step_running(1, "抽取資源")
+        self.progress_panel.add_log(f"▶ 開始：抽取資源（{mode}）")
+
+        def worker():
+            try:
+                os.makedirs(os.path.join(output_dir, "jar_mod_extract", "_提取lang_輸出"), exist_ok=True)
+                os.makedirs(os.path.join(output_dir, "jar_mod_extract", "_提取book_輸出"), exist_ok=True)
+
+                if mode in ("lang", "both"):
+                    lang_out = os.path.join(output_dir, "jar_mod_extract", "_提取lang_輸出")
+                    run_lang_extraction_service(mods_dir, lang_out, session)
+                    self._page.run_task(lambda _: self.progress_panel.add_log("✅ Lang 抽取完成"))
+
+                if mode in ("book", "both"):
+                    book_out = os.path.join(output_dir, "jar_mod_extract", "_提取book_輸出")
+                    run_book_extraction_service(mods_dir, book_out, session)
+                    self._page.run_task(lambda _: self.progress_panel.add_log("✅ Book 抽取完成"))
+
+                snap = session.snapshot()
+                self._page.run_task(lambda _: self.progress_panel.finish_step(1, not session.error))
+
+            except Exception as ex:
+                self._page.run_task(lambda _: self.progress_panel.add_log(f"❌ 錯誤：{ex}", False))
+                self._page.run_task(lambda _: self.progress_panel.finish_step(1, False))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._poll_session(session)
+
+    def _poll_session(self, session: TaskSession):
+        """輪詢 session 直到完成"""
+        def poll():
+            while session.status in ("RUNNING", "IDLE"):
+                time.sleep(0.5)
+                snap = session.snapshot()
+                progress = float(snap.get("progress", 0) or 0)
+                self._page.run_task(lambda _: self._update_progress(progress, f"{int(progress * 100)}%"))
+                for log_entry in snap.get("logs", []):
+                    self._page.run_task(lambda _, le=log_entry: self.progress_panel.add_log(le.text))
+            snap = session.snapshot()
+            self._page.run_task(lambda _: self._update_progress(1.0, "完成"))
+
+        threading.Thread(target=poll, daemon=True).start()
+
     def _on_extract_click(self, e=None):
-        self._show_progress_panel()
-        self.progress_panel.add_log("▶ 開始：抽取資源")
-        self.progress_panel.finish_step(1, True)
+        self._open_extract_dialog()
 
     def _on_merge_click(self, e=None):
         self._show_progress_panel()
