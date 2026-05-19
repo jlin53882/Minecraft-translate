@@ -31,9 +31,10 @@ def _run_extraction(
     output_dir: str,
     session: TaskSession,
     mode: str,
+    lang_codes: list[str] | None = None,
 ) -> None:
     """Worker 主體：直接更新 UI，不依賴 poller。"""
-    generator = extract_lang_files_generator(mods_dir, output_dir) if mode == 'lang' else extract_book_files_generator(mods_dir, output_dir)
+    generator = extract_lang_files_generator(mods_dir, output_dir, lang_codes=lang_codes) if mode == 'lang' else extract_book_files_generator(mods_dir, output_dir)
 
     for update in generator:
         filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
@@ -60,6 +61,7 @@ def run_lang_extraction_service(
     mods_dir: str,
     output_dir: str,
     session: TaskSession,
+    lang_codes: list[str] | None = None,
 ) -> None:
     """執行語言檔擷取服務。"""
     ensure_pipeline_logging()
@@ -67,7 +69,7 @@ def run_lang_extraction_service(
         session.start()
         UI_LOG_HANDLER.set_session(session)
 
-        for update in extract_lang_files_generator(mods_dir, output_dir):
+        for update in extract_lang_files_generator(mods_dir, output_dir, lang_codes=lang_codes):
             filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
             if filtered is None:
                 continue

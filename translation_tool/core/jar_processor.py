@@ -48,12 +48,15 @@ def get_lang_codes(*, skip_zh_cn: bool = False) -> list[str]:
         codes = ["en_us", "zh_tw", "zh_cn"]
     return codes
 
-def build_lang_file_regex(*, skip_zh_cn: bool = False) -> re.Pattern:
-    """根據 config 中的 lang_codes 動態建 lang file regex。
+def build_lang_file_regex(*, codes: list[str] | None = None, skip_zh_cn: bool = False) -> re.Pattern:
+    """根據 lang_codes 動態建 lang file regex。
     
-    確保與 preview 使用的 regex 行為一致。
+    Args:
+        codes: 指定語言代碼列表，若為 None則從 config 讀取。
+        skip_zh_cn: 是否跳過 zh_cn（僅在 codes=None 時生效）。
     """
-    codes = get_lang_codes(skip_zh_cn=skip_zh_cn)
+    if codes is None:
+        codes = get_lang_codes(skip_zh_cn=skip_zh_cn)
     codes_str = "|".join(map(re.escape, codes))
     return re.compile(rf"(?:assets/([^/]+)/)?lang/({codes_str})\.(json|lang)$", re.IGNORECASE)
 
@@ -96,18 +99,16 @@ def _run_extraction_process(
         extract_from_jar_fn=_extract_from_jar,
     )
 
-def extract_lang_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: bool = False) -> Generator[Dict[str, Any], None, None]:
+def extract_lang_files_generator(mods_dir: str, output_dir: str, *, lang_codes: list[str] | None = None, skip_zh_cn: bool = False) -> Generator[Dict[str, Any], None, None]:
     """從 mods 目錄提取語言檔。
 
     Args:
         mods_dir: Mod 目錄路徑
         output_dir: 輸出目錄路徑
-        skip_zh_cn: 是否跳過 zh_cn 抽取
-
-    Yields:
-        進度字典
+        lang_codes: 指定語言代碼列表，若為 None則從 config 讀取。
+        skip_zh_cn: 是否跳過 zh_cn（僅在 lang_codes=None 時生效）。
     """
-    lang_file_regex = build_lang_file_regex(skip_zh_cn=skip_zh_cn)
+    lang_file_regex = build_lang_file_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)
     yield from _run_extraction_process(
         mods_dir=mods_dir,
         output_dir=output_dir,

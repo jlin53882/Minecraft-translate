@@ -497,7 +497,8 @@ class PipelineView(ft.Column):
                 return
 
             close_dialog(dialog)
-            self._run_extraction(mods, output, mode)
+            selected_codes = [code for code, cb in lang_code_checks.items() if cb.value]
+            self._run_extraction(mods, output, mode, lang_codes=selected_codes)
 
         lang_codes_section = ft.Column([lang_code_checks[code] for code in lang_codes], spacing=2)
 
@@ -542,7 +543,7 @@ class PipelineView(ft.Column):
         dialog.open = True
         self._page.update()
 
-    def _run_extraction(self, mods_dir: str, output_dir: str, mode: str):
+    def _run_extraction(self, mods_dir: str, output_dir: str, mode: str, lang_codes: list[str] | None = None):
         """執行抽取資源（背景執行緒）"""
         session = TaskSession()
         self.progress_panel.set_step_running(1, "抽取資源")
@@ -555,7 +556,7 @@ class PipelineView(ft.Column):
 
                 if mode in ("lang", "dual"):
                     lang_out = os.path.join(output_dir, "jar_mod_extract", "_提取lang_輸出")
-                    run_lang_extraction_service(mods_dir, lang_out, session)
+                    run_lang_extraction_service(mods_dir, lang_out, session, lang_codes=lang_codes)
                     async def do_lang_log(_):
                         self.progress_panel.add_log("✅ Lang 抽取完成")
                     self._page.run_task(do_lang_log, None)
