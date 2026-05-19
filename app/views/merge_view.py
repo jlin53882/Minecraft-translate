@@ -498,11 +498,11 @@ class MergeView(ft.Column):
                         self.zip_list_view.disabled = False
 
                 self._page.run_task(_do_update)
-                self._page.update()
 
                 if status in ("DONE", "ERROR"):
                     break
 
+                self._page.update()
                 time.sleep(0.1)
 
         threading.Thread(target=poll, daemon=True).start()
