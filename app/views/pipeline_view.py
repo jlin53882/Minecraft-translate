@@ -29,9 +29,10 @@ class PipelineStepChip:
 
         self.chip = ft.Chip(
             label=ft.Text(f"{step_num}. {name}"),
-            avatar=ft.Icon(ft.Icons.CIRCLE, size=12),
             bgcolor=GREY_200,
         )
+        self.icon = ft.Icon(ft.Icons.CIRCLE, size=12, color=GREY_500)
+        self.chip.leading = self.icon
         self._update_chip()
 
     def _update_chip(self):
@@ -48,7 +49,8 @@ class PipelineStepChip:
             "failed": ft.Icons.ERROR,
         }
         color, bg = colors.get(self.status, (GREY_500, GREY_200))
-        self.chip.avatar = ft.Icon(icons[self.status], size=12, color=color)
+        self.icon.name = icons[self.status]
+        self.icon.color = color
         self.chip.bgcolor = bg
 
     def set_status(self, status: str):
