@@ -606,6 +606,14 @@ class PipelineView(ft.Column):
         self.progress_panel.finish_step(4, True)
 
     def _on_one_click_click(self, e=None):
+        input_val = (self.input_path_text.value or "").strip()
+        output_val = (self.output_path_text.value or "").strip()
+        if not input_val:
+            self._show_snack_bar("⚠️ 請輸入 Mod 來源路徑")
+            return
+        if not output_val:
+            self._show_snack_bar("⚠️ 請輸入輸出目錄路徑")
+            return
         self._show_progress_panel()
         self.progress_panel.add_log("▶ 開始：一鍵製作")
         self.progress_panel.set_step_running(1, "抽取資源")
