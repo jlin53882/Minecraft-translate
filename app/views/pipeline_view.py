@@ -287,27 +287,20 @@ class PipelineView(ft.Column):
         )
 
         self._extract_mode = "lang"
-        self._extract_radio_lang = ft.Container(
-            content=ft.Row([ft.Radio(value="lang", label="提取 Lang"), ft.Text("  (預設)", size=12, color=GREY_500)]),
-            bgcolor=ft.Colors.BLUE_50,
-            border_radius=8,
-            padding=5,
-            on_click=lambda e: self._set_extract_mode("lang"),
+        self._extract_radio_group = ft.RadioGroup(
+            content=ft.Column([
+                ft.Radio("提取 Lang", "lang"),
+                ft.Radio("提取 Book", "book"),
+                ft.Radio("全部執行（Lang + Book）", "both"),
+            ], spacing=4),
+            on_change=lambda e: print(f"[DEBUG] RadioGroup on_change: value={self._extract_radio_group.value}"),
+            value="lang",
         )
-        self._extract_radio_book = ft.Container(
-            content=ft.Radio(value="book", label="提取 Book"),
-            on_click=lambda e: self._set_extract_mode("book"),
-        )
-        self._extract_radio_both = ft.Container(
-            content=ft.Radio(value="both", label="全部執行（Lang + Book）"),
-            on_click=lambda e: self._set_extract_mode("both"),
-        )
-        self._update_radio_style()
 
         def start_extraction(dialog):
             mods = (self._extract_mods_field.value or "").strip()
             output = (self._extract_output_field.value or "").strip()
-            mode = self._extract_mode or "lang"
+            mode = self._extract_radio_group.value or "lang"
 
             print(f"[DEBUG] start_extraction: mode={mode}")
 
@@ -357,7 +350,7 @@ class PipelineView(ft.Column):
                 self._show_snack_bar("⚠️ 請選擇有效的 Mod 來源")
                 return
 
-            mode = self._extract_mode.value or "lang"
+            mode = self._extract_radio_group.value or "lang"
             jar_files = find_jar_files(mods)
             total_jars = len(jar_files)
 
@@ -431,7 +424,7 @@ class PipelineView(ft.Column):
         def start_extraction(dialog):
             mods = (self._extract_mods_field.value or "").strip()
             output = (self._extract_output_field.value or "").strip()
-            mode = self._extract_mode or "lang"
+            mode = self._extract_radio_group.value or "lang"
 
             if not mods:
                 self._show_snack_bar("⚠️ Mod 來源為必填欄位")
@@ -469,7 +462,7 @@ class PipelineView(ft.Column):
             ft.Text("→ {output}/jar_mod_extract/_提取book_輸出/（Book 模式）", color=GREY_600, size=12),
             ft.Divider(),
             ft.Text("執行模式", weight="bold", size=13),
-            ft.Column([self._extract_radio_lang, self._extract_radio_book, self._extract_radio_both], spacing=4),
+            self._extract_radio_group,
             ft.Divider(),
             ft.Text("語言代碼（動態）", weight="bold", size=13),
             lang_codes_section,
