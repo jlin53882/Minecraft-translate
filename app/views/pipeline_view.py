@@ -231,6 +231,28 @@ class PipelineView(ft.Column):
         self.progress_panel.start()
         self._page.update()
 
+    def _set_extract_mode(self, mode: str):
+        print(f"[DEBUG] _set_extract_mode: {mode}")
+        self._extract_mode = mode
+        self._update_radio_style()
+
+    def _update_radio_style(self):
+        active_color = ft.Colors.BLUE_50
+        inactive_color = None
+        if self._extract_mode == "lang":
+            self._extract_radio_lang.bgcolor = active_color
+            self._extract_radio_book.bgcolor = inactive_color
+            self._extract_radio_both.bgcolor = inactive_color
+        elif self._extract_mode == "book":
+            self._extract_radio_lang.bgcolor = inactive_color
+            self._extract_radio_book.bgcolor = active_color
+            self._extract_radio_both.bgcolor = inactive_color
+        else:
+            self._extract_radio_lang.bgcolor = inactive_color
+            self._extract_radio_book.bgcolor = inactive_color
+            self._extract_radio_both.bgcolor = active_color
+        self._page.update()
+
     def _show_snack_bar(self, message: str, color: str = RED_400):
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self._page.overlay.append(snack)
@@ -263,6 +285,24 @@ class PipelineView(ft.Column):
             expand=True,
             border_color=BLUE_700,
         )
+
+        self._extract_mode = "lang"
+        self._extract_radio_lang = ft.Container(
+            content=ft.Row([ft.Radio(value="lang", label="提取 Lang"), ft.Text("  (預設)", size=12, color=GREY_500)]),
+            bgcolor=ft.Colors.BLUE_50,
+            border_radius=8,
+            padding=5,
+            on_click=lambda e: self._set_extract_mode("lang"),
+        )
+        self._extract_radio_book = ft.Container(
+            content=ft.Radio(value="book", label="提取 Book"),
+            on_click=lambda e: self._set_extract_mode("book"),
+        )
+        self._extract_radio_both = ft.Container(
+            content=ft.Radio(value="both", label="全部執行（Lang + Book）"),
+            on_click=lambda e: self._set_extract_mode("both"),
+        )
+        self._update_radio_style()
         self._extract_mode = "lang"
 
         def on_radio_change(e=None):
