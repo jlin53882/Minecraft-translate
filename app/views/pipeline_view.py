@@ -243,16 +243,19 @@ class PipelineView(ft.Column):
         mods_dir = (self.input_path_text.value or "").strip()
         output_dir = (self.output_path_text.value or "").strip()
 
+        cfg = load_config()
+        lang_codes = cfg.get("jar_extractor", {}).get("lang_codes", ["en_us", "zh_cn", "zh_tw"])
+
         self._extract_mods_field = ft.TextField(
             label="Mod 來源",
-            hint_text="留空使用上方設定的 Mod 來源",
+            hint_text=f"自動帶入：{mods_dir}" if mods_dir else "留空使用上方設定的 Mod 來源",
             value=mods_dir,
             expand=True,
             border_color=BLUE_700,
         )
         self._extract_output_field = ft.TextField(
             label="輸出目錄",
-            hint_text="留空使用上方設定的輸出目錄",
+            hint_text=f"自動帶入：{output_dir}" if output_dir else "留空使用上方設定的輸出目錄",
             value=output_dir,
             expand=True,
             border_color=BLUE_700,
@@ -264,12 +267,20 @@ class PipelineView(ft.Column):
                 ft.Radio("全部執行（Lang + Book）", "both"),
             ], spacing=4),
         )
-        self._extract_lang_only = ft.Checkbox(
-            label="只處理 lang 檔案（跳過 book）",
-            value=True,
-        )
+
+        lang_code_checks = {}
+        for code in lang_codes:
+            lang_code_checks[code] = ft.Checkbox(label=code, value=True)
 
         def pick_mods_dir(e=None):
+            async def do_pick():
+                result = await self.file_picker.get_directory_path()
+                if result:
+                    self._extract_mods_field.value = result
+                    self._page.update()
+            self._page.run_task(do_pick)
+
+        def browse_mods_dir(e=None):
             async def do_pick():
                 result = await self.file_picker.get_directory_path()
                 if result:
@@ -285,8 +296,45 @@ class PipelineView(ft.Column):
                     self._page.update()
             self._page.run_task(do_pick)
 
+        def browse_output_dir(e=None):
+            async def do_pick():
+                result = await self.file_picker.get_directory_path()
+                if result:
+                    self._extract_output_field.value = result
+                    self._page.update()
+            self._page.run_task(do_pick)
+
         def close_dialog(dialog):
             dialog.open = False
+            self._page.update()
+
+        def show_preview_result(dialog):
+            mods = (self._extract_mods_field.value or "").strip()
+            if not mods or not os.path.isdir(mods):
+                self._show_snack_bar("⚠️ 請選擇有效的 Mod 來源")
+                return
+
+            jar_files = [f for f in os.listdir(mods) if f.endswith(".jar")] if os.path.isdir(mods) else []
+            jar_count = len(jar_files)
+            lang_checks = [c for c, cb in lang_code_checks.items() if cb.value]
+            est_files = jar_count * len(lang_checks)
+
+            preview_text = f"JAR 數量：{jar_count} 個\n預計提取：{est_files} 個語言檔案\n({', '.join([f'{c} × {jar_count}' for c in lang_checks])})"
+
+            preview_dialog = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("預覽結果"),
+                content=ft.Text(preview_text),
+                actions=[ft.TextButton("確定", on_click=lambda e: preview_dialog.close() if hasattr(preview_dialog, 'close') else close_preview())],
+            )
+
+            def close_preview():
+                preview_dialog.open = False
+                self._page.update()
+
+            preview_dialog.actions = [ft.TextButton("確定", on_click=lambda e: close_preview())]
+            self._page.overlay.append(preview_dialog)
+            preview_dialog.open = True
             self._page.update()
 
         def start_extraction(dialog):
@@ -310,32 +358,39 @@ class PipelineView(ft.Column):
             close_dialog(dialog)
             self._run_extraction(mods, output, mode)
 
+        lang_codes_section = ft.Column([lang_code_checks[code] for code in lang_codes], spacing=2)
+
         content = ft.Column([
             ft.Text("Mod 來源", weight="bold", size=13),
             ft.Row([
                 self._extract_mods_field,
                 ft.Button("選擇資料夾", icon=ft.Icons.FOLDER, on_click=pick_mods_dir),
+                ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_mods_dir),
             ]),
             ft.Text("輸出目錄", weight="bold", size=13),
             ft.Row([
                 self._extract_output_field,
                 ft.Button("選擇資料夾", icon=ft.Icons.FOLDER_SPECIAL, on_click=pick_output_dir),
+                ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_output_dir),
             ]),
             ft.Text("輸出說明：", weight="bold", size=13),
-            ft.Text("→ {output}/jar_mod_extract/_提取lang_輸出/（Lang）", color=GREY_600, size=12),
-            ft.Text("→ {output}/jar_mod_extract/_提取book_輸出/（Book）", color=GREY_600, size=12),
+            ft.Text("→ {output}/jar_mod_extract/_提取lang_輸出/（Lang 模式）", color=GREY_600, size=12),
+            ft.Text("→ {output}/jar_mod_extract/_提取book_輸出/（Book 模式）", color=GREY_600, size=12),
             ft.Divider(),
             ft.Text("執行模式", weight="bold", size=13),
             self._extract_mode,
-            self._extract_lang_only,
+            ft.Divider(),
+            ft.Text("語言代碼（動態）", weight="bold", size=13),
+            lang_codes_section,
         ], spacing=10, tight=False)
 
         dialog = ft.AlertDialog(
             modal=True,
-            title=ft.Text("抽取資源設定"),
+            title=ft.Text("📦 抽取資源設定"),
             content=ft.Container(content=content, width=550),
             actions=[
                 ft.TextButton("取消", on_click=lambda e: close_dialog(dialog)),
+                ft.OutlinedButton("預覽結果", icon=ft.Icons.PREVIEW, on_click=lambda e: show_preview_result(dialog)),
                 ft.Button("確定執行", icon=ft.Icons.CHECK, bgcolor=GREEN_700, color=WHITE,
                           on_click=lambda e: start_extraction(dialog)),
             ],
