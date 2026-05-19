@@ -38,6 +38,7 @@ class LookupView(ft.Column):
         self.single_input = ft.TextField(
             label="輸入單一學名", expand=True, tooltip="例如：Felis catus"
         )
+        # 單筆學名查詢按鈕： disabled/enabled 由 worker 透過 page.run_task() 控制
         self.single_button = ft.Button(
             "查詢", icon=ft.Icons.SEARCH, on_click=self.single_lookup_clicked
         )
@@ -61,6 +62,7 @@ class LookupView(ft.Column):
             read_only=True,
             expand=True,
         )
+        # 批次學名查詢按鈕： disabled/enabled 由 worker 透過 page.run_task() 控制
         self.batch_button = ft.Button(
             "批次查詢", icon=ft.Icons.SEARCH, on_click=self.batch_lookup_clicked
         )

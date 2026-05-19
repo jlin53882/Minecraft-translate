@@ -96,7 +96,7 @@ class LMView(ft.Column):
             default_color="#F5F5F5",  # 浅灰色文字，深色背景看得清楚
         )
 
-        # 按鈕（共用 primary style）
+        # 開始翻譯按鈕：點擊後在背景執行緒執行翻譯，UI 進度由 start_ui_timer() 定時更新
         self.start_button = primary_button(
             "開始翻譯",
             icon=ft.Icons.PLAY_ARROW,
@@ -163,7 +163,7 @@ class LMView(ft.Column):
     # - 之後調整 UI（padding/radius/border/divider）只要改一處
 
     def _path_row(self, field: ft.TextField, on_pick) -> ft.Control:
-        """建立路徑輸入列"""
+        """建立路徑輸入列（含資料夾選擇 IconButton）。"""
         return ft.Row(
             [
                 field,
