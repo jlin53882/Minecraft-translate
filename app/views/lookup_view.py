@@ -146,6 +146,7 @@ class LookupView(ft.Column):
             self.single_button.disabled = False
             self.single_input.disabled = False
             self.single_progress_ring.visible = False
+            self._page.update()
 
         self._page.run_task(_do_result, None)
 
@@ -173,20 +174,24 @@ class LookupView(ft.Column):
                 if update.get("error"):
                     async def _do_err(_=None):
                         self.batch_result_textfield.value = update.get("log")
+                        self._page.update()
                     self._page.run_task(_do_err, None)
                     break
                 if update.get("result"):
                     async def _do_result(_=None):
                         self.batch_result_textfield.value = update.get("result")
+                        self._page.update()
                     self._page.run_task(_do_result, None)
                 if update.get("progress"):
                     async def _do_progress(_=None):
                         self.batch_progress_bar.value = update.get("progress")
+                        self._page.update()
                     self._page.run_task(_do_progress, None)
         finally:
             async def _do_finish(_=None):
                 self.batch_button.disabled = False
                 self.batch_progress_bar.visible = False
+                self._page.update()
             self._page.run_task(_do_finish, None)
 
     def _show_snack_bar(self, message: str, color: str = theme.ERROR):

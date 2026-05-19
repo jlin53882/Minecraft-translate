@@ -522,13 +522,11 @@ class RulesView(ft.Column):
                 rules_data = self._load_rules_core()
                 async def _do_update(_=None):
                     self._handle_reload_success(rules_data)
-                    self.page.update()
                 self.page.run_task(_do_update, None)
             except Exception as err:
                 msg = f"初次載入規則失敗: {err}"
                 async def _do_err(_=None):
                     self._show_snack_bar(msg, theme.ERROR)
-                    self.page.update()
                 self.page.run_task(_do_err, None)
 
         threading.Thread(target=run, daemon=True).start()
