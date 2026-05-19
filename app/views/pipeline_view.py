@@ -89,7 +89,7 @@ class PipelineProgressPanel:
         )
 
         self.current_label = ft.Text("等待執行...", color=GREY_600, size=14)
-        self.log_view = ft.ListView(height=120, expand=True, spacing=3, auto_scroll=True)
+        self.log_view = ft.ListView(height=120, spacing=3, auto_scroll=True)
 
         self.container = ft.Container(
             content=ft.Column([
