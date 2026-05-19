@@ -1,6 +1,11 @@
 """app/views/merge_view.py 模組。
 用途：提供 ZIP 合併頁面 UI 與執行流程。
 維護注意：本檔案的 docstring 與中文註解用於維護說明，不代表行為變更。
+
+Flet 0.85 執行緒安全須知
+-----------------------
+背景執行緒直接修改 UI 組件會被 Flet 0.85 忽略。所有跨執行緒 UI 更新都必須透過
+page.run_task() 包裝為 async 閉包排程。
 """
 
 import threading

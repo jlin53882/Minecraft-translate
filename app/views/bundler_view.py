@@ -1,6 +1,15 @@
 """app/views/bundler_view.py 模組。
 
 用途：提供打包成品資源包的 UI 與執行流程。
+
+Flet 0.85 執行緒安全須知
+-----------------------
+背景執行緒（threading.Thread）直接修改 UI 組件（progress_bar.value、controls.append 等）
+會被 Flet 0.85 忽略。所有跨執行緒 UI 更新都必須包裝為 async 閉包，透過 page.run_task() 排程。
+模式：
+    async def _do_update(_=None):
+        self.some_control.property = value
+    self._page.run_task(_do_update)
 """
 
 import flet as ft
