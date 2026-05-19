@@ -169,8 +169,20 @@ class PipelineView(ft.Column):
         self._page = page
         self.file_picker = file_picker
 
-        self.input_path_text = ft.Text("尚未選擇讀取來源...", color=GREY_600, size=12)
-        self.output_path_text = ft.Text("尚未選擇輸出目的地...", color=GREY_600, size=12)
+        self.input_path_text = ft.TextField(
+            hint_text="尚未選擇讀取來源...",
+            expand=True,
+            border_color=BLUE_700,
+            text_size=12,
+            dense=True,
+        )
+        self.output_path_text = ft.TextField(
+            hint_text="尚未選擇輸出目的地...",
+            expand=True,
+            border_color=BLUE_700,
+            text_size=12,
+            dense=True,
+        )
         self.log_content = ft.ListView(expand=True, spacing=5, auto_scroll=True)
         self.progress_bar = ft.ProgressBar(width=float("inf"), height=8, value=0, color=CYAN_400, bgcolor="#E0E0E0")
         self.progress_status = ft.Text("等待任務啟動...", size=12, color=GREY_600)
