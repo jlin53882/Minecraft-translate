@@ -271,6 +271,10 @@ class PipelineView(ft.Column):
 
         cfg = load_config()
         lang_codes = cfg.get("jar_extractor", {}).get("lang_codes", ["en_us", "zh_cn", "zh_tw"])
+        folder_names = cfg.get("extractor", {}).get("output_folder_names", {})
+        lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
+        book_extract = folder_names.get("book_extract", "_提取book_輸出")
+        dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
 
         self._extract_mods_field = ft.TextField(
             label="Mod 來源",
@@ -496,9 +500,9 @@ class PipelineView(ft.Column):
                 ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_output_dir),
             ]),
             ft.Text("輸出說明：", weight="bold", size=13),
-            ft.Text("→ {output}/jar_mod_extract/_提取lang_輸出/（Lang 模式）", color=GREY_600, size=12),
-            ft.Text("→ {output}/jar_mod_extract/_提取book_輸出/（Book 模式）", color=GREY_600, size=12),
-            ft.Text("→ {output}/jar_mod_extract/_提取lang_輸出/ + _提取book_輸出/（Dual 模式）", color=GREY_600, size=12),
+            ft.Text(f"→ {{output}}/jar_mod_extract/{lang_extract}/（Lang 模式）", color=GREY_600, size=12),
+            ft.Text(f"→ {{output}}/jar_mod_extract/{book_extract}/（Book 模式）", color=GREY_600, size=12),
+            ft.Text(f"→ {{output}}/jar_mod_extract/{lang_extract}/ + {book_extract}/（Dual 模式）", color=GREY_600, size=12),
             ft.Divider(),
             ft.Text("執行模式", weight="bold", size=13),
             self._extract_radio_group,
