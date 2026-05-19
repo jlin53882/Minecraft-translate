@@ -2,9 +2,12 @@
 
 用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
-"""
 
-# /minecraft_translator_flet/app/views/lookup_view.py (加入「查詢中...」功能的修正版)
+Flet 0.85 執行緒安全須知
+-----------------------
+背景執行緒直接修改 UI 組件會被 Flet 0.85 忽略。所有跨執行緒 UI 更新都必須透過
+page.run_task() 包裝為 async 閉包排程。
+"""
 
 import flet as ft
 import threading

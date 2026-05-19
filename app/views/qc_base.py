@@ -2,6 +2,11 @@
 
 用途：QCView 共用的基礎類別，封裝執行緒任務與 UI 更新邏輯。
 維護注意：本模組提供 task_worker 給各 QC 檢查器使用。
+
+Flet 0.85 執行緒安全須知
+-----------------------
+背景執行緒直接修改 UI 組件會被 Flet 0.85 忽略。所有跨執行緒 UI 更新都必須透過
+page.run_task() 包裝為 async 閉包排程。
 """
 
 import flet as ft
