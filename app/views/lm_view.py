@@ -287,37 +287,33 @@ class LMView(ft.Column):
                 except Exception:
                     continue
 
-                try:
-                    self.progress_bar.value = float(snap.get("progress", 0) or 0)
-                except Exception:
-                    self.progress_bar.value = 0
-
+                progress = float(snap.get("progress", 0) or 0)
                 logs = snap.get("logs", []) or []
-                try:
-                    self.log_presenter.sync(self.log_view, logs)
-                except Exception as e:
-                    log_debug(f"LM log presenter sync failed: {e}")
-
-                # 強制刷新 ListView 內容變更，避免背景 thread 更新時畫面不同步
-                try:
-                    self.log_view.update()
-                except Exception:
-                    pass
-
                 status = (snap.get("status") or "").upper()
+
+                async def _do_update(_=None):
+                    self.progress_bar.value = progress
+                    try:
+                        self.log_presenter.sync(self.log_view, logs)
+                    except Exception as e:
+                        log_debug(f"LM log presenter sync failed: {e}")
+                    try:
+                        self.log_view.update()
+                    except Exception:
+                        pass
+
+                self._page.run_task(_do_update, None)
+
                 if status == "DONE":
-                    self._set_status("任務完成", theme.GREEN_200)
+                    async def _do_done(_=None):
+                        self._set_status("任務完成", theme.GREEN_200)
+                    self._page.run_task(_do_done, None)
                     self._ui_timer_running = False
                 elif status == "ERROR":
-                    self._set_status("任務發生錯誤", theme.RED_200)
+                    async def _do_err(_=None):
+                        self._set_status("任務發生錯誤", theme.RED_200)
+                    self._page.run_task(_do_err, None)
                     self._ui_timer_running = False
-
-                try:
-                    self.page.update()
-                except Exception as e:
-                    log_debug(f"LM page update failed: {e}")
-                    self._ui_timer_running = False
-                    break
 
         threading.Thread(target=loop, daemon=True).start()
 

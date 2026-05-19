@@ -434,19 +434,28 @@ class BundlerView(ft.Column):
                 log_msg = update.get("log", "")
                 for line in log_msg.split("\n"):
                     if line.strip():
-                        self.log_view.controls.append(ft.Text(line, size=12, color="cyan400"))
+                        async def _do_append(_=None):
+                            self.log_view.controls.append(ft.Text(line, size=12, color="cyan400"))
+                        self._page.run_task(_do_append)
                 if "progress" in update:
-                    self.progress_bar.value = update["progress"]
+                    progress = update["progress"]
+                    async def _do_progress(_=None):
+                        self.progress_bar.value = progress
+                    self._page.run_task(_do_progress)
                 if update.get("error"):
-                    self.progress_bar.color = theme.ERROR
+                    async def _do_error(_=None):
+                        self.progress_bar.color = theme.ERROR
+                    self._page.run_task(_do_error)
                 self._page.run_task(self._scroll_log)
-                self._page.update()
         except Exception as ex:
-            self._append_log(f"[錯誤] {ex}")
-            self.progress_bar.color = theme.RED
+            async def _do_error_log(_=None):
+                self.log_view.controls.append(ft.Text(f"[錯誤] {ex}", size=12, color="red"))
+                self.progress_bar.color = theme.RED
+            self._page.run_task(_do_error_log)
         finally:
-            self.progress_bar.visible = False
-            self._page.update()
+            async def _do_finish(_=None):
+                self.progress_bar.visible = False
+            self._page.run_task(_do_finish)
 
     async def _scroll_log(self):
         await self.log_view.scroll_to(offset=-1, duration=100)

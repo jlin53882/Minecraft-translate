@@ -441,54 +441,53 @@ class MergeView(ft.Column):
                 progress = snap["progress"]
                 logs = snap["logs"]
 
-                if status == "RUNNING":
-                    self._set_status("執行中", theme.BLUE_200)
-                elif status == "DONE":
-                    self._set_status("任務完成", theme.GREEN_200)
-                    # 直接從 session 取得 service 統計的 summary
-                    snap_summary = snap.get("summary")
-                    if snap_summary:
-                        self._merge_stats = snap_summary
-                    else:
-                        # fallback：從 logs 解析
-                        success_zips = 0
-                        failed_zips = 0
-                        failed_zip_details = []
-                        for log_line in logs:
-                            text = (
-                                log_line.text
-                                if hasattr(log_line, "text")
-                                else str(log_line)
-                            )
-                            if "[完成]" in text and "[錯誤]" not in text:
-                                success_zips += 1
-                            elif "[錯誤]" in text:
-                                failed_zips += 1
-                                for zp in self.selected_zips:
-                                    if zp in text:
-                                        failed_zip_details.append(Path(zp).name)
-                                        break
-                        self._merge_stats = {
-                            "success_zips": success_zips,
-                            "failed_zips": failed_zips,
-                            "failed_zip_details": failed_zip_details,
-                        }
-                    self._show_merge_summary(self._merge_stats)
-                elif status == "ERROR":
-                    self._set_status("任務發生錯誤", theme.RED_200)
+                async def _do_update(_=None):
+                    if status == "RUNNING":
+                        self._set_status("執行中", theme.BLUE_200)
+                    elif status == "DONE":
+                        self._set_status("任務完成", theme.GREEN_200)
+                        snap_summary = snap.get("summary")
+                        if snap_summary:
+                            self._merge_stats = snap_summary
+                        else:
+                            success_zips = 0
+                            failed_zips = 0
+                            failed_zip_details = []
+                            for log_line in logs:
+                                text = (
+                                    log_line.text
+                                    if hasattr(log_line, "text")
+                                    else str(log_line)
+                                )
+                                if "[完成]" in text and "[錯誤]" not in text:
+                                    success_zips += 1
+                                elif "[錯誤]" in text:
+                                    failed_zips += 1
+                                    for zp in self.selected_zips:
+                                        if zp in text:
+                                            failed_zip_details.append(Path(zp).name)
+                                            break
+                            self._merge_stats = {
+                                "success_zips": success_zips,
+                                "failed_zips": failed_zips,
+                                "failed_zip_details": failed_zip_details,
+                            }
+                        self._show_merge_summary(self._merge_stats)
+                    elif status == "ERROR":
+                        self._set_status("任務發生錯誤", theme.RED_200)
 
-                self.progress_bar.value = progress
+                    self.progress_bar.value = progress
+                    self.log_presenter.sync(self.log_view, logs)
 
-                # LogPresenter 接管 append + truncate + scroll
-                self.log_presenter.sync(self.log_view, logs)
+                    if status in ("DONE", "ERROR"):
+                        self.start_button.disabled = False
+                        self.zip_list_view.disabled = False
+
+                self._page.run_task(_do_update)
 
                 if status in ("DONE", "ERROR"):
-                    self.start_button.disabled = False
-                    self.zip_list_view.disabled = False
-                    self.page.update()
                     break
 
-                self.page.update()
                 time.sleep(0.1)
 
         threading.Thread(target=poll, daemon=True).start()

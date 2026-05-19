@@ -11,6 +11,25 @@ from app.views.qc_base import QCBase
 class _MockPage:
     def __init__(self):
         self.updated = 0
+        self._tasks = []
+
+    def run_task(self, coro, *args):
+        self._tasks.append((coro, args))
+        result = coro(*args)
+        if result is not None:
+            try:
+                result.send(None)
+            except StopIteration:
+                pass
+
+    def _run_all_tasks(self):
+        for coro, args in self._tasks:
+            result = coro(*args)
+            if result is not None:
+                try:
+                    result.send(None)
+                except StopIteration:
+                    pass
 
     def update(self):
         self.updated += 1
