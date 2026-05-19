@@ -542,6 +542,9 @@ class PipelineView(ft.Column):
 
             close_dialog(dialog)
             selected_codes = [code for code, cb in self._lang_code_checks.items() if cb.value]
+            if not selected_codes:
+                self._show_snack_bar("⚠️ 請至少選擇一個語言代碼")
+                return
             self._run_extraction(mods, output, mode, lang_codes=selected_codes)
 
         lang_codes_section = ft.Column([self._lang_code_checks[code] for code in lang_codes], spacing=2)
@@ -615,7 +618,7 @@ class PipelineView(ft.Column):
 
                 if mode in ("book", "dual"):
                     book_out = os.path.join(output_dir, "jar_mod_extract", "_提取book_輸出")
-                    run_book_extraction_service(mods_dir, book_out, session)
+                    run_book_extraction_service(mods_dir, book_out, session, lang_codes=lang_codes)
                     async def do_book_log(_):
                         self.progress_panel.add_log("✅ Book 抽取完成")
                     self._page.run_task(do_book_log, None)

@@ -84,7 +84,9 @@ def preview_extraction_generator_impl(
 
         target_regex = build_lang_file_regex(codes=lang_codes)
     elif mode == "book":
-        target_regex = book_path_regex
+        from translation_tool.core.jar_processor import build_book_path_regex
+
+        target_regex = build_book_path_regex(codes=lang_codes)
     elif mode == "dual":
         from translation_tool.core.jar_processor import build_lang_file_regex
 
