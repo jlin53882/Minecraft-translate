@@ -294,7 +294,6 @@ class PipelineView(ft.Column):
                 ft.Radio(label="提取 Book", value="book"),
                 ft.Radio(label="全部執行（Lang + Book）", value="both"),
             ], spacing=4),
-            on_change=lambda e: print(f"[DEBUG] RadioGroup on_change: self._extract_radio_group.value=[{self._extract_radio_group.value}]"),
             value="lang",
         )
 
