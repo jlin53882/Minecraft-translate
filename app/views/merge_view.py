@@ -497,13 +497,14 @@ class MergeView(ft.Column):
                         self.start_button.disabled = False
                         self.zip_list_view.disabled = False
 
+                    self._page.update()
+
                 self._page.run_task(_do_update)
 
                 if status in ("DONE", "ERROR"):
                     break
 
-                self._page.update()
-                time.sleep(0.1)
+                time.sleep(0.5)
 
         threading.Thread(target=poll, daemon=True).start()
 
