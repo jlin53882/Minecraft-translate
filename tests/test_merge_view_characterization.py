@@ -179,17 +179,20 @@ def test_merge_view_open_output_folder(monkeypatch):
         pass
 
 
-def test_merge_view_async_pick_zips(monkeypatch):
+def test_pick_zips_calls_run_task_with_async_pick_zips(monkeypatch):
     monkeypatch.setattr(merge_view, 'TaskSession', _Session)
     page = mock_page()
     picker = mock_filepicker()
-    picker.set_mock_path('/zips')
     view = merge_view.MergeView(page, picker)
 
-    page.run_task(view._async_pick_output_dir)
-    page._run_all_tasks()
+    captured = []
 
-    assert view.output_dir_field.value == '/zips'
+    monkeypatch.setattr(page, 'run_task', lambda coro, *args: captured.append(coro))
+
+    view.pick_zips(None)
+
+    coro_names = [c.__name__ if hasattr(c, '__name__') else str(c) for c in captured]
+    assert '_async_pick_zips' in coro_names
 
 
 def test_merge_view_on_zip_picked(monkeypatch):
