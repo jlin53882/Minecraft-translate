@@ -254,8 +254,10 @@ class PipelineView(ft.Column):
         self._page.update()
 
     def _show_snack_bar(self, message: str, color: str = RED_400):
-        self._page.snack_bar = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self._page.snack_bar.open = True
+        print(f"[DEBUG] SnackBar: {message}")
+        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
+        self._page.overlay.append(snack)
+        snack.open = True
         self._page.update()
 
     # =============================================================================
