@@ -6,11 +6,145 @@
 """
 
 import flet as ft
+
 from app.ui.theme import (
     BLUE_600, BLUE_700, GREEN_700, TEAL_700, PURPLE_700,
     YELLOW_900, YELLOW, CYAN_400, CYAN_700, GREY_500, GREY_600,
-    RED_400, ORANGE_700, WHITE,
+    RED_400, ORANGE_700, WHITE, BLUE_50, GREY_200, BLUE_400,
+    GREEN_600, GREEN_50, RED_50,
 )
+
+
+# =============================================================================
+# PipelineStepChip - 步驟狀態晶片
+# =============================================================================
+
+class PipelineStepChip:
+    """單一步驟狀態晶片"""
+
+    def __init__(self, name: str, step_num: int):
+        self.name = name
+        self.step_num = step_num
+        self.status = "waiting"
+
+        self.chip = ft.Chip(
+            label=ft.Text(f"{step_num}. {name}"),
+            avatar=ft.Icon(ft.Icons.CIRCLE, size=12),
+            bgcolor=GREY_200,
+        )
+        self._update_chip()
+
+    def _update_chip(self):
+        colors = {
+            "waiting": (GREY_500, GREY_200),
+            "running": (BLUE_400, BLUE_50),
+            "done": (GREEN_600, GREEN_50),
+            "failed": (RED_400, RED_50),
+        }
+        icons = {
+            "waiting": ft.Icons.CIRCLE,
+            "running": ft.Icons.PENDING,
+            "done": ft.Icons.CHECK_CIRCLE,
+            "failed": ft.Icons.ERROR,
+        }
+        color, bg = colors.get(self.status, (GREY_500, GREY_200))
+        self.chip.avatar = ft.Icon(icons[self.status], size=12, color=color)
+        self.chip.bgcolor = bg
+
+    def set_status(self, status: str):
+        self.status = status
+        self._update_chip()
+
+
+# =============================================================================
+# PipelineProgressPanel - 日誌+進度面板
+# =============================================================================
+
+class PipelineProgressPanel:
+    """日誌+進度面板，顯示步驟狀態晶片、進度條、即時日誌"""
+
+    def __init__(self, page: ft.Page):
+        self._page = page
+        self.steps = [
+            PipelineStepChip("抽取資源", 1),
+            PipelineStepChip("語系比對", 2),
+            PipelineStepChip("啟動翻譯", 3),
+            PipelineStepChip("打包資源", 4),
+        ]
+        self.current_step = None
+
+        self.step_row = ft.Row(
+            controls=[
+                ft.Container(content=self.steps[0].chip, padding=5),
+                ft.Icon(ft.Icons.ARROW_FORWARD, size=16, color=GREY_500),
+                ft.Container(content=self.steps[1].chip, padding=5),
+                ft.Icon(ft.Icons.ARROW_FORWARD, size=16, color=GREY_500),
+                ft.Container(content=self.steps[2].chip, padding=5),
+                ft.Icon(ft.Icons.ARROW_FORWARD, size=16, color=GREY_500),
+                ft.Container(content=self.steps[3].chip, padding=5),
+            ],
+            spacing=5,
+        )
+
+        self.current_label = ft.Text("等待執行...", color=GREY_600, size=14)
+        self.log_view = ft.ListView(height=120, expand=True, spacing=3, auto_scroll=True)
+
+        self.container = ft.Container(
+            content=ft.Column([
+                ft.Text("執行進度", weight="bold", color=BLUE_700),
+                self.step_row,
+                self.current_label,
+                ft.Divider(),
+                ft.Row([ft.Icon(ft.Icons.INFO, size=14, color=GREY_500),
+                        ft.Text("步驟日誌：", size=12, color=GREY_600)]),
+                self.log_view,
+            ], spacing=5),
+            padding=12,
+            bgcolor=BLUE_50,
+            border_radius=10,
+            visible=False,
+        )
+
+    def start(self):
+        self.container.visible = True
+        for step in self.steps:
+            step.set_status("waiting")
+
+    def set_step_running(self, step_num: int, name: str):
+        self.current_step = step_num - 1
+        for i, step in enumerate(self.steps):
+            if i < self.current_step:
+                step.set_status("done")
+            elif i == self.current_step:
+                step.set_status("running")
+            else:
+                step.set_status("waiting")
+        self.current_label.value = f"目前的：{name}"
+
+    def add_log(self, msg: str, is_success: bool | None = None):
+        color = GREEN_600 if is_success == True else (RED_400 if is_success == False else CYAN_700)
+        self.log_view.controls.append(
+            ft.Text(f">> {msg}", color=color, size=12, font_family="Consolas")
+        )
+        self._page.update()
+
+    def finish_step(self, step_num: int, success: bool):
+        self.steps[step_num - 1].set_status("done" if success else "failed")
+
+    def finish_all(self, success: bool):
+        if success:
+            self.current_label.value = "✅ 一鍵製作完成！"
+        else:
+            self.current_label.value = "❌ 流程失敗"
+        for step in self.steps:
+            if step.status == "running":
+                step.set_status("failed" if not success else "done")
+
+    def hide(self):
+        self.container.visible = False
+
+    def clear_logs(self):
+        self.log_view.controls.clear()
 
 
 class PipelineView(ft.Column):
@@ -27,6 +161,8 @@ class PipelineView(ft.Column):
         self.progress_bar = ft.ProgressBar(width=float("inf"), height=8, value=0, color=CYAN_400, bgcolor="#E0E0E0")
         self.progress_status = ft.Text("等待任務啟動...", size=12, color=GREY_600)
         self.keys_container = ft.Column(spacing=10)
+
+        self.progress_panel = PipelineProgressPanel(page)
 
         self._build_ui()
 
@@ -93,6 +229,8 @@ class PipelineView(ft.Column):
                 ], spacing=10),
                 bgcolor="surfaceContainerLow", padding=20, border_radius=15
             ),
+
+            self.progress_panel.container,
 
             ft.Text("2. 執行任務", weight="bold", color=BLUE_600),
             ft.Column([
