@@ -504,7 +504,8 @@ class MergeView(ft.Column):
                 if status in ("DONE", "ERROR"):
                     break
 
-                time.sleep(0)
+                self._page.update()
+                time.sleep(0.1)
 
         threading.Thread(target=poll, daemon=True).start()
 
