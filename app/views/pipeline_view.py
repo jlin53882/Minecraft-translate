@@ -601,19 +601,51 @@ class PipelineView(ft.Column):
         threading.Thread(target=poll, daemon=True).start()
 
     def _on_extract_click(self, e=None):
+        input_val = (self.input_path_text.value or "").strip()
+        output_val = (self.output_path_text.value or "").strip()
+        if not input_val:
+            self._show_snack_bar("⚠️ 請填寫 Mod 來源路徑")
+            return
+        if not output_val:
+            self._show_snack_bar("⚠️ 請填寫輸出目錄路徑")
+            return
         self._open_extract_dialog()
 
     def _on_merge_click(self, e=None):
+        input_val = (self.input_path_text.value or "").strip()
+        output_val = (self.output_path_text.value or "").strip()
+        if not input_val:
+            self._show_snack_bar("⚠️ 請填寫 Mod 來源路徑")
+            return
+        if not output_val:
+            self._show_snack_bar("⚠️ 請填寫輸出目錄路徑")
+            return
         self._show_progress_panel()
         self.progress_panel.add_log("▶ 開始：語系比對")
         self.progress_panel.finish_step(2, True)
 
     def _on_translate_click(self, e=None):
+        input_val = (self.input_path_text.value or "").strip()
+        output_val = (self.output_path_text.value or "").strip()
+        if not input_val:
+            self._show_snack_bar("⚠️ 請填寫 Mod 來源路徑")
+            return
+        if not output_val:
+            self._show_snack_bar("⚠️ 請填寫輸出目錄路徑")
+            return
         self._show_progress_panel()
         self.progress_panel.add_log("▶ 開始：啟動翻譯")
         self.progress_panel.finish_step(3, True)
 
     def _on_bundle_click(self, e=None):
+        input_val = (self.input_path_text.value or "").strip()
+        output_val = (self.output_path_text.value or "").strip()
+        if not input_val:
+            self._show_snack_bar("⚠️ 請填寫 Mod 來源路徑")
+            return
+        if not output_val:
+            self._show_snack_bar("⚠️ 請填寫輸出目錄路徑")
+            return
         self._show_progress_panel()
         self.progress_panel.add_log("▶ 開始：打包資源")
         self.progress_panel.finish_step(4, True)
