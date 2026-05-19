@@ -1,6 +1,21 @@
 from __future__ import annotations
 
+import json
 import traceback
+from pathlib import Path
+from translation_tool.utils.config_manager import load_config as load_config_default
+
+
+EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config.example.json"
+
+
+def _load_example_config() -> dict:
+    """載入 config.example.json 當作 fallback 預設值。"""
+    if EXAMPLE_CONFIG_PATH.exists():
+        with EXAMPLE_CONFIG_PATH.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
 
 def load_config_into_view(view, config: dict):
     """將 config 字典中的值填入 view 的各個 UI 控制項。"""
@@ -44,8 +59,8 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lm_translator.initial_batch_size_md'].value = int(config.get('lm_translator', {}).get('initial_batch_size_md', 100))
     view.controls_map['lm_translator.min_batch_size'].value = int(config.get('lm_translator', {}).get('min_batch_size', 50))
     view.controls_map['lm_translator.batch_shrink_factor'].value = float(config.get('lm_translator', {}).get('batch_shrink_factor', 0.5))
-    view.controls_map['lm_translator.patchouli_system_prompt'].value = str(config.get('lm_translator', {}).get('patchouli_system_prompt', ''))
-    view.controls_map['lm_translator.lang_system_prompt'].value = str(config.get('lm_translator', {}).get('lang_system_prompt', ''))
+    view.controls_map['lm_translator.patchouli_system_prompt'].value = str(config.get('lm_translator', {}).get('patchouli_system_prompt') or _load_example_config().get('lm_translator', {}).get('patchouli_system_prompt', ''))
+    view.controls_map['lm_translator.lang_system_prompt'].value = str(config.get('lm_translator', {}).get('lang_system_prompt') or _load_example_config().get('lm_translator', {}).get('lang_system_prompt', ''))
     view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(config.get('lm_translator', {}).get('patchouli', {}).get('dir_names', ['patchouli_books', 'book', 'manual', 'guidebook']))
     view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('skip_terms', ['api documentation', 'api docs', 'documentation', 'discord', 'github', 'homepage', 'mod page', 'modpack', 'official website', 'patreon', 'Twitter', 'Modrinth', 'CurseForge', 'Crowdin', 'Twitch', 'Wiki', 'Minecraft', 'Forge', 'YouTube', 'Reddit', 'Ko-fi', 'Flattr']))
     view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('translatable_keywords', ['text', 'name', 'title', 'description', 'subtitle', 'hover', 'note', 'warning', 'quote', 'paragraph', 'body', 'header', 'footer', 'heading', 'effects', 'category', 'link_text', 'pages.title']))
