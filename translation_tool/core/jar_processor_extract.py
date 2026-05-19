@@ -245,11 +245,12 @@ def run_extraction_process_impl(
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_jar = {
-            executor.submit(extract_from_jar_fn, jar, output_dir, target_regex, all_scan_results): jar
+            executor.submit(extract_from_jar_fn, jar, output_dir, target_regex, all_scan_results): (jar, time.time())
             for jar in jar_files
         }
         for future in concurrent.futures.as_completed(future_to_jar):
-            jar_path = future_to_jar[future]
+            jar_path, submit_time = future_to_jar[future]
+            elapsed = time.time() - submit_time
             processed_count += 1
             prog = processed_count / total_jars
             try:
@@ -257,7 +258,7 @@ def run_extraction_process_impl(
                 if result['status'] == 'success':
                     total_extracted += result['extracted']
                     total_skipped += result['skipped']
-                log.info("[%s/%s] %s", processed_count, total_jars, os.path.basename(jar_path))
+                log.info("[%s/%s] %s (%.1fs)", processed_count, total_jars, os.path.basename(jar_path), elapsed)
                 yield {
                     'progress': prog,
                     'current': processed_count,
@@ -265,7 +266,7 @@ def run_extraction_process_impl(
                     'log': f"[{processed_count}/{total_jars}] {os.path.basename(jar_path)}",
                 }
             except Exception as exc:
-                log.error("提取 %s 時產生例外: %s", os.path.basename(jar_path), exc)
+                log.error("提取 %s 時產生例外: %s (%.1fs)", os.path.basename(jar_path), exc, elapsed)
                 yield {
                     'progress': prog,
                     'current': processed_count,
