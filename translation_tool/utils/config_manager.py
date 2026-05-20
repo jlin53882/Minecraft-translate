@@ -28,6 +28,31 @@ def get_project_root() -> Path:
 PROJECT_ROOT = get_project_root()
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 
+def get_default_block(name: str):
+    """取得 DEFAULT_CONFIG 中指定區塊（如 'lang_merger', 'extractor'）。"""
+    return copy.deepcopy(DEFAULT_CONFIG.get(name, {}))
+
+def get_default(path: str, default=None):
+    """依路徑讀取 DEFAULT_CONFIG 中的值，例如 'lang_merger.pending_folder_name'。
+    
+    參數：
+        path: dot-separated path，如 'lang_merger.pending_folder_name'
+        default: 找不到時的回傳值
+    返回：
+        DEFAULT_CONFIG 中該路徑的值，或 default
+    """
+    keys = path.split(".")
+    val = DEFAULT_CONFIG
+    for k in keys:
+        if isinstance(val, dict):
+            val = val.get(k)
+        else:
+            return default
+        if val is None:
+            return default
+    return val
+
+
 def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
     """解析專案相對路徑為絕對路徑。
 
