@@ -260,8 +260,14 @@ class ExtractorView(ft.Column):
         self._page.update()
 
     def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
-        """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。"""
+        """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。
+
+        只有在輸出路徑為空時才自動填入，避免覆蓋使用者已自訂的路徑。
+        """
         from translation_tool.utils.config_manager import load_config
+
+        if self.output_dir_textfield.value and self.output_dir_textfield.value.strip():
+            return
 
         config = load_config()
         folder_names = config.get("extractor", {}).get("output_folder_names", {})
