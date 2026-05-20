@@ -49,7 +49,12 @@ class MergeView(ft.Column):
         return self._zh_cn_disabled_note
 
     def _on_zh_cn_switch_changed(self, e: ft.ControlEvent) -> None:
-        """主開關互鎖：關閉 zh_cn 處理時，同步停用兩個相依設定。"""
+        """主開關互鎖：process_zh_cn_switch 為其他設定的「主開關」。
+
+        - 關閉時：連動停用 skip_zh_cn_switch、patchouli_skip_zh_cn_switch，並將它們的值強制還原為 False
+        - 開啟時：解鎖讓它們可自行調整
+        - 原因：zh_cn 被全域略過時，下層的 Patchouli 設定無意義
+        """
         enabled = bool(e.control.value)
         self.skip_zh_cn_switch.disabled = not enabled
         self.patchouli_skip_zh_cn_switch.disabled = not enabled
@@ -78,23 +83,42 @@ class MergeView(ft.Column):
         # LogPresenter 接管 append 與 UI controls 數量控制
         self.log_presenter = LogPresenter(mode="append", max_ui_lines=2000)
 
+        # ── 一般選項 ──────────────────────────────────────────────────────────
+        # only_process_lang: 只處理 /lang/ 目錄下的 zh_cn/zh_tw/en_us 檔案，其他目錄全部跳過
         self.only_lang_checkbox = ft.Checkbox(
             label="只處理 lang 檔案",
             value=True,
         )
+
+        # ── zh_cn 全域處理 ─────────────────────────────────────────────────
+        # process_zh_cn_files: 全域開關，關閉時所有 /zh_cn/ 路徑都跳過（包含 lang/zh_cn.json 和 Patchouli 內的 zh_cn/）
+        # 此開關為其他設定的「主開關」，連動停用下方兩個設定
         self.process_zh_cn_switch = ft.Switch(
             label="處理 zh_cn 檔案",
             value=True,
             on_change=self._on_zh_cn_switch_changed,
         )
+
+        # ── Patchouli 進階設定 ─────────────────────────────────────────────
+        # 注意：skip_zh_cn_when_only_lang 只對 root-level 的 zh_cn.json / zh_cn.lang 生效
+        # 在 Patchouli 結構下沒有此類檔案，此開關實質無作用
+        # 真正影響 zh_cn 跳過的是上方的 process_zh_cn_switch（全域開關）
         self.skip_zh_cn_switch = ft.Switch(
             label="只處理 lang 時跳過 zh_cn",
             value=False,
         )
+
+        # patchouli_skip_en_us_when_zh_cn_exists: 當 en_us 對應的 zh_tw 或 zh_cn 有「有效翻譯」時，跳過 en_us
+        # - 有效翻譯由 patchouli_effective_translation_threshold（預設 0.5）判定：內容中日韓文字佔比超過此閾值
+        # - 此開關只影響 Patchouli Book 的 en_us 資料夾，不影響 root-level lang 檔案
+        # - 當 process_zh_cn_switch=False 時，此開關連動 Disabled（因 zh_cn 已被全域略過）
         self.patchouli_skip_zh_cn_switch = ft.Switch(
             label="允許 zh_cn 觸發跳過 en_us",
             value=False,
         )
+        # patchouli_effective_translation_threshold: 有效翻譯比例閾值（0.0~1.0）
+        # 用於判斷 Patchouli Book 的 zh 語言資料夾是否有「有效翻譯」
+        # 當 zh_tw 或 zh_cn 的有效翻譯比例 >= 此閾值時，會觸發跳過 en_us（如果 patchouli_skip_zh_cn_switch=True）
         self.patchouli_threshold_field = ft.TextField(
             value="0.5",
             width=96,
@@ -102,6 +126,8 @@ class MergeView(ft.Column):
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.CENTER,
         )
+        # _zh_cn_disabled_note: 提示文字，當 process_zh_cn_switch=False 時顯示
+        # 提醒使用者需要先開啟「處理 zh_cn 檔案」才能使用下方的 Patchouli 進階設定
         self._zh_cn_disabled_note = ft.Text(
             "需先開啟「處理 zh_cn 檔案」",
             size=11,
