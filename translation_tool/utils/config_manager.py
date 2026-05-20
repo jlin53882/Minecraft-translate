@@ -202,7 +202,7 @@ DEFAULT_CONFIG = {
         "pending_folder_name": "待翻譯",  # 專門用於 lang_merger 的設定
         "pending_organized_folder_name": "待翻譯整理需翻譯",  # 專門用於 lang_merger 的設定
         "filtered_pending_min_count": 3,  # 專門用於 lang_merger 的設定
-        "quarantine_folder_name": "問題檔案skipped_json",  # 專門用於 lang_merger  zip 檔案合併錯誤處理的設定
+        "quarantine_folder_name": "問題檔案skipped_json",  # ⚠️ BREAKING CHANGE: v2 為 "skipped_json"，升級後會重新命名目錄，相關自動化 script 需同步更新
         # --- v3 新增 ---
         "process_zh_cn_files": True,
         "skip_zh_cn_when_only_process_lang": False,
@@ -257,23 +257,14 @@ def load_config(config_path: str | os.PathLike | None = None):
             print(f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。")
             return base
 
-    # Merge user over example over default
-    config = {}
-    for key, default_value in base.items():
-        user_value = user_config.get(key)
+    # Merge: user (Layer 1) > example (Layer 2) > default (Layer 3)
+    # 全部用 deep_merge 一次搞定，確保 config.example.json 新增的 top-level key
+    # 也會被正確合併進來，不只限於 DEFAULT_CONFIG 定義的 keys。
+    config = deep_merge(base, user_config)
 
-        # 🚨 models 不允許 deep merge（使用者資料）
-        if key == "lm_translator" and isinstance(default_value, dict) and isinstance(user_value, dict):
-            lm = deep_merge(default_value, user_value)
-            if "models" in user_value:
-                lm["models"] = user_value["models"]
-            config[key] = lm
-            continue
-
-        if isinstance(default_value, dict) and isinstance(user_value, dict):
-            config[key] = deep_merge(default_value, user_value)
-        else:
-            config[key] = user_value if key in user_config else default_value
+    # lm_translator.models 不允許 deep merge（視為使用者資料，完全替換）
+    if "models" in user_config.get("lm_translator", {}):
+        config["lm_translator"]["models"] = user_config["lm_translator"]["models"]
 
     # ATK-C-2: 對最終結果做驗證
     _validate_lm_translator_config(config["lm_translator"])
