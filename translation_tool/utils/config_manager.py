@@ -27,6 +27,18 @@ def get_project_root() -> Path:
 
 PROJECT_ROOT = get_project_root()
 CONFIG_PATH = PROJECT_ROOT / "config.json"
+EXAMPLE_PATH = PROJECT_ROOT / "config.example.json"
+
+def load_config_example() -> dict:
+    """讀取 config.example.json，不存在或解析失敗時回傳空 dict。"""
+    if not EXAMPLE_PATH.exists():
+        return {}
+    try:
+        with EXAMPLE_PATH.open(encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {}
+
 
 def get_default_block(name: str):
     """取得 DEFAULT_CONFIG 中指定區塊（如 'lang_merger', 'extractor'）。"""
@@ -212,67 +224,62 @@ DEFAULT_CONFIG = {
 }
 
 def load_config(config_path: str | os.PathLike | None = None):
-    """讀取設定檔並做向後相容合併。
+    """讀取設定檔並做三層 fallback 合併。
 
-    行為：
-    - 若檔案不存在：回傳 DEFAULT_CONFIG（深拷貝/或原始結構）。
-    - 若檔案存在：讀取使用者設定，與 DEFAULT_CONFIG 做 deep merge，補齊新欄位。
+    三層 fallback（priority: user > example > default）：
+    1. config.json  — 用戶實際值（最高優先）
+    2. config.example.json — 文件預設值
+    3. DEFAULT_CONFIG — 程式碼 fallback（最終保底，唯一真相來源）
 
-    重要規則：
-    - `lm_translator.models` 不做 deep merge（視為使用者資料），避免預設值混入導致誤啟用。
+    合併策略：
+    - deep_merge(deep_merge(DEFAULT_CONFIG, example), user_config)
+    - `lm_translator.models` 不做 deep merge（視為使用者資料）
 
     回傳：合併後的新 dict（避免直接回傳 DEFAULT_CONFIG 物件被外部修改）。
     """
     resolved_config_path = resolve_project_path(config_path or CONFIG_PATH)
-    if not resolved_config_path.exists():
-        print(f"警告：找不到設定檔 {resolved_config_path}，將使用預設設定。")
-        return copy.deepcopy(DEFAULT_CONFIG)
 
-    try:
-        with resolved_config_path.open("r", encoding="utf-8") as f:
-            user_config = json.load(f)
+    # Layer 3: DEFAULT_CONFIG as base
+    base = copy.deepcopy(DEFAULT_CONFIG)
 
-        # 深度合併
-        config = {}
-        # for key, default_value in DEFAULT_CONFIG.items():
-        #    user_value = user_config.get(key)
-        #    if isinstance(default_value, dict) and isinstance(user_value, dict):
-        #        config[key] = deep_merge(default_value, user_value)
-        #    else:
-        #        config[key] = user_value if key in user_config else default_value
+    # Layer 2: config.example.json
+    example = load_config_example()
+    if example:
+        base = deep_merge(base, example)
 
-        for key, default_value in DEFAULT_CONFIG.items():
-            user_value = user_config.get(key)
+    # Layer 1: config.json (user values) — only if file exists
+    user_config = {}
+    if resolved_config_path.exists():
+        try:
+            with resolved_config_path.open("r", encoding="utf-8") as f:
+                user_config = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。")
+            return base
 
-            # 🚨 models 不允許 deep merge（使用者資料）
-            if (
-                key == "lm_translator"
-                and isinstance(default_value, dict)
-                and isinstance(user_value, dict)
-            ):
-                lm = deep_merge(default_value, user_value)
+    # Merge user over example over default
+    config = {}
+    for key, default_value in base.items():
+        user_value = user_config.get(key)
 
-                # 覆蓋 models（不使用 default）
-                if "models" in user_value:
-                    lm["models"] = user_value["models"]
+        # 🚨 models 不允許 deep merge（使用者資料）
+        if key == "lm_translator" and isinstance(default_value, dict) and isinstance(user_value, dict):
+            lm = deep_merge(default_value, user_value)
+            if "models" in user_value:
+                lm["models"] = user_value["models"]
+            config[key] = lm
+            continue
 
-                config[key] = lm
-                continue
+        if isinstance(default_value, dict) and isinstance(user_value, dict):
+            config[key] = deep_merge(default_value, user_value)
+        else:
+            config[key] = user_value if key in user_config else default_value
 
-            if isinstance(default_value, dict) and isinstance(user_value, dict):
-                config[key] = deep_merge(default_value, user_value)
-            else:
-                config[key] = user_value if key in user_config else default_value
-
-        # ATK-C-2: 對最終結果做驗證
-        _validate_lm_translator_config(config["lm_translator"])
-        if isinstance(config.get("translator"), dict):
-            _validate_translator_config(config["translator"])
-        return config
-
-    except (json.JSONDecodeError, IOError) as e:
-        print(f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。")
-        return copy.deepcopy(DEFAULT_CONFIG)
+    # ATK-C-2: 對最終結果做驗證
+    _validate_lm_translator_config(config["lm_translator"])
+    if isinstance(config.get("translator"), dict):
+        _validate_translator_config(config["translator"])
+    return config
 
 def save_config(config, config_path: str | os.PathLike | None = None):
     """
