@@ -12,7 +12,7 @@ import flet as ft
 
 from app.logging import LogPresenter
 from translation_tool.utils.log_unit import log_info
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import load_config, save_config
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
 from app.task_session import TaskSession
 from app.ui import theme
@@ -33,6 +33,7 @@ class MergeView(ft.Column):
     process_zh_cn_switch: ft.Switch
     patchouli_skip_zh_cn_switch: ft.Switch
     patchouli_threshold_field: ft.TextField
+    zh_en_letter_threshold_field: ft.TextField
     output_dir_field: ft.TextField
     _zh_cn_disabled_note: ft.Text | None
     zip_list_view: ft.ListView
@@ -61,6 +62,17 @@ class MergeView(ft.Column):
         if not enabled:
             self.patchouli_skip_zh_cn_switch.value = False
         self.update()
+
+    def _on_merge_field_changed(self, key: str, value: Any) -> None:
+        """寫入 lang_merger 單一欄位到 config.json，支援兩邊同步。"""
+        try:
+            cfg = load_config()
+            if "lang_merger" not in cfg:
+                cfg["lang_merger"] = {}
+            cfg["lang_merger"][key] = value
+            save_config(cfg)
+        except Exception:
+            pass
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker) -> None:
         """初始化 MergeView。"""
@@ -104,6 +116,7 @@ class MergeView(ft.Column):
         self.patchouli_skip_zh_cn_switch = ft.Switch(
             label="允許 zh_cn 觸發跳過 en_us",
             value=False,
+            on_change=lambda e: self._on_merge_field_changed("patchouli_skip_en_us_when_zh_cn_exists", e.control.value),
         )
         # patchouli_effective_translation_threshold: 有效翻譯比例閾值（0.0~1.0）
         # 用於判斷 Patchouli Book 的 zh 語言資料夾是否有「有效翻譯」
@@ -114,6 +127,21 @@ class MergeView(ft.Column):
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.CENTER,
+            on_change=lambda e: self._on_merge_field_changed(
+                "patchouli_effective_translation_threshold", float(e.control.value)
+            ),
+        )
+        # zh_en_letter_threshold: zh_tw 英文含量的閾值
+        # 用於 is_already_zh() 判斷：超過此數值的英文字母視為英文內容
+        self.zh_en_letter_threshold_field = ft.TextField(
+            value="2",
+            width=64,
+            dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            text_align=ft.TextAlign.CENTER,
+            on_change=lambda e: self._on_merge_field_changed(
+                "zh_en_letter_threshold", int(e.control.value)
+            ),
         )
         # _zh_cn_disabled_note: 提示文字，當 process_zh_cn_switch=False 時顯示
         # 提醒使用者需要先開啟「處理 zh_cn 檔案」才能使用下方的 Patchouli 進階設定
@@ -246,6 +274,25 @@ class MergeView(ft.Column):
                                     size=12,
                                     color=theme.GREY_600,
                                 ),
+                                ft.Container(height=6),
+                                ft.Row(
+                                    [
+                                        ft.Text(
+                                            "zh 英文含量閾值",
+                                            weight=ft.FontWeight.W_500,
+                                            size=14,
+                                            expand=True,
+                                        ),
+                                        self.zh_en_letter_threshold_field,
+                                    ],
+                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                                ft.Text(
+                                    "超過此數值判定為英文內容，預設 2。",
+                                    size=12,
+                                    color=theme.GREY_600,
+                                ),
                             ],
                             spacing=4,
                         ),
@@ -266,6 +313,9 @@ class MergeView(ft.Column):
         pending_name = lang_merger_cfg.get("pending_folder_name", "待翻譯")
         organized_name = lang_merger_cfg.get("pending_organized_folder_name", "整理")
         min_count = lang_merger_cfg.get("filtered_pending_min_count", 2)
+        self.patchouli_skip_zh_cn_switch.value = lang_merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False)
+        self.patchouli_threshold_field.value = str(lang_merger_cfg.get("patchouli_effective_translation_threshold", 0.5))
+        self.zh_en_letter_threshold_field.value = str(lang_merger_cfg.get("zh_en_letter_threshold", 2))
         self._info_container = ft.Container(
             content=ft.Column(
                 [

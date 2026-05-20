@@ -206,6 +206,7 @@ DEFAULT_CONFIG = {
         "skip_zh_cn_when_only_process_lang": False,
         "patchouli_skip_en_us_when_zh_cn_exists": False,
         "patchouli_effective_translation_threshold": 0.5,
+        "zh_en_letter_threshold": 2,
     },
     "extractor": {
         "output_folder_names": {

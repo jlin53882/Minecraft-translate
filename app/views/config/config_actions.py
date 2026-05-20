@@ -189,6 +189,9 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lang_merger.pending_organized_folder_name'].label = f"整理資料夾名稱（目前：{organized_name}）"
     view.controls_map['lang_merger.filtered_pending_min_count'].label = f"「{organized_name}」key最小出現次數（目前：{min_count}）"
     view.controls_map['lang_merger.quarantine_folder_name'].value = config.get('lang_merger', {}).get('quarantine_folder_name') or ex.get('lang_merger', {}).get('quarantine_folder_name') or DEFAULT_QUARANTINE_FOLDER
+    view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value = config.get('lang_merger', {}).get('patchouli_skip_en_us_when_zh_cn_exists') or ex.get('lang_merger', {}).get('patchouli_skip_en_us_when_zh_cn_exists') or False
+    view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value = str(config.get('lang_merger', {}).get('patchouli_effective_translation_threshold') or ex.get('lang_merger', {}).get('patchouli_effective_translation_threshold') or 0.5)
+    view.controls_map['lang_merger.zh_en_letter_threshold'].value = str(config.get('lang_merger', {}).get('zh_en_letter_threshold') or ex.get('lang_merger', {}).get('zh_en_letter_threshold') or 2)
     view.controls_map['lm_translator.initial_batch_size_patchouli'].value = int(config.get('lm_translator', {}).get('initial_batch_size_patchouli') or ex.get('lm_translator', {}).get('initial_batch_size_patchouli') or DEFAULT_BATCH_PATCHOULI)
     view.controls_map['lm_translator.initial_batch_size_lang'].value = int(config.get('lm_translator', {}).get('initial_batch_size_lang') or ex.get('lm_translator', {}).get('initial_batch_size_lang') or DEFAULT_BATCH_LANG)
     view.controls_map['lm_translator.initial_batch_size_ftb'].value = int(config.get('lm_translator', {}).get('initial_batch_size_ftb') or ex.get('lm_translator', {}).get('initial_batch_size_ftb') or DEFAULT_BATCH_FTB)
@@ -260,6 +263,9 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
         new_config['lang_merger']['filtered_pending_min_count'] = int(view.controls_map['lang_merger.filtered_pending_min_count'].value)
         new_config['lm_translator']['lm_translate_folder_name'] = str(view.controls_map['lm_translator.lm_translate_folder_name'].value)
         new_config['lang_merger']['quarantine_folder_name'] = view.controls_map['lang_merger.quarantine_folder_name'].value
+        new_config['lang_merger']['patchouli_skip_en_us_when_zh_cn_exists'] = view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value
+        new_config['lang_merger']['patchouli_effective_translation_threshold'] = float(view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value)
+        new_config['lang_merger']['zh_en_letter_threshold'] = int(view.controls_map['lang_merger.zh_en_letter_threshold'].value)
         new_config['lm_translator']['patchouli_system_prompt'] = view.controls_map['lm_translator.patchouli_system_prompt'].value
         new_config['lm_translator']['lang_system_prompt'] = view.controls_map['lm_translator.lang_system_prompt'].value
         new_config['lm_translator']['initial_batch_size_patchouli'] = int(view.controls_map['lm_translator.initial_batch_size_patchouli'].value)

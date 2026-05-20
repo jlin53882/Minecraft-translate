@@ -15,8 +15,13 @@ def _strip_fmt(s: str) -> str:
     """移除行內格式標記（如 &a / §l）。"""
     return _FMT_RE.sub("", s)
 
-def is_already_zh(s: str) -> bool:
-    """啟發式判斷：去除格式標記後，若有中日韓文字且几乎無英文，則視為已翻譯。"""
+def is_already_zh(s: str, letter_threshold: int = 2) -> bool:
+    """啟發式判斷：去除格式標記後，若有中日韓文字且几乎無英文，則視為已翻譯。
+
+    Args:
+        s: 輸入字串
+        letter_threshold: 英文字母數量閾值，超過此數值則判定為未翻譯（預設 2）
+    """
     t = _strip_fmt(s).strip()
     if not t:
         return True
@@ -24,4 +29,4 @@ def is_already_zh(s: str) -> bool:
     if not has_cjk:
         return False
     letters = len(re.findall(r"[A-Za-z]", t))
-    return letters <= 2
+    return letters <= letter_threshold

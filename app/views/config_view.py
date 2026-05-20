@@ -141,6 +141,17 @@ class ConfigView(ft.Column):
         self.controls_map["lang_merger.quarantine_folder_name"] = ft.TextField(
             label="語言合併器格式問題隔離資料夾名稱", hint_text="用於：格式錯誤隔離", dense=True
         )
+        self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"] = ft.Checkbox(
+            label="允許 zh_cn 觸發跳過 en_us", value=False
+        )
+        self.controls_map["lang_merger.patchouli_effective_translation_threshold"] = ft.TextField(
+            label="en_us 跳過門檻", hint_text="有效翻譯比例閾值 0.0~1.0", dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER
+        )
+        self.controls_map["lang_merger.zh_en_letter_threshold"] = ft.TextField(
+            label="zh 英文含量閾值", hint_text="超過此數值則判定為英文內容", dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER
+        )
 
         self.controls_map["lm_translator.temperature"] = ft.TextField(
             label="模型溫度 (Temperature)", hint_text="用於：LM翻譯請求", dense=True
@@ -607,6 +618,15 @@ class ConfigView(ft.Column):
                     [
                         ft.Column([self.controls_map["lang_merger.filtered_pending_min_count"]], expand=1),
                         ft.Column([self.controls_map["lang_merger.quarantine_folder_name"]], expand=1),
+                    ]
+                ),
+                ft.Container(height=8),
+                ft.Text("Patchouli 進階設定", weight=ft.FontWeight.W_600, size=14),
+                ft.Row(
+                    [
+                        ft.Column([self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"]], expand=1),
+                        ft.Column([self.controls_map["lang_merger.patchouli_effective_translation_threshold"]], expand=1),
+                        ft.Column([self.controls_map["lang_merger.zh_en_letter_threshold"]], expand=1),
                     ]
                 ),
             ],
