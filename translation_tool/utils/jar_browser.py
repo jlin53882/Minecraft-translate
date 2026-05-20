@@ -72,13 +72,12 @@ def _scan_single_jar(
                         try:
                             result[name] = zf.read(name).decode("utf-8")
                         except UnicodeDecodeError:
-                            # Binary 檔案（如 .png）：不解碼，設為 None 表示 caller 自行處理
                             result[name] = None
-                        break  # 一個檔案只讀一次
+                        break
     except zipfile.BadZipFile:
-        log_warning(f"[jar_browser] 不是有效的 ZIP/JAR: {jar_path.name}")
+        log_warning("[jar_browser] BadZipFile: %s", jar_path.name)
     except Exception as ex:
-        log_error(f"[jar_browser] 讀取失敗: {jar_path.name} - {ex}")
+        log_error("[jar_browser] Failed %s: %s", jar_path.name, ex)
     return jar_path, result
 
 

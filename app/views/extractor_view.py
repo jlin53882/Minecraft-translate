@@ -319,42 +319,99 @@ class ExtractorView(ft.Column):
         """顯示提取結果摘要（UI 風格對齊預覽 modal）。"""
         stats = self._extraction_stats
 
-        content = ft.Column(
-            [
-                ft.Text("提取結果摘要", size=16, weight=ft.FontWeight.BOLD),
-                ft.Divider(),
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=20),
-                        ft.Text(f"成功處理 JAR：{stats['success']} 個", size=14),
-                    ],
-                    spacing=8,
-                ),
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=20),
-                        ft.Text(f"因內容相同而跳過的檔案：{stats['warnings']} 個", size=14),
-                    ],
-                    spacing=8,
-                ),
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.ERROR, color=theme.RED, size=20),
-                        ft.Text(f"失敗項目：{stats['failures']} 個", size=14),
-                    ],
-                    spacing=8,
-                ),
-                ft.Divider(),
-                ft.Text(
-                    f"新提取或更新的檔案：{stats['total_files']} 個",
-                    size=14,
-                    color=ft.Colors.BLUE_700,
-                    weight=ft.FontWeight.BOLD,
-                ),
-            ],
-            spacing=10,
-            tight=True,
-        )
+        if mode == "dual":
+            content = ft.Column(
+                [
+                    ft.Text("提取結果摘要", size=16, weight=ft.FontWeight.BOLD),
+                    ft.Divider(),
+                    ft.Text("Lang", size=14, weight=ft.FontWeight.BOLD),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=18),
+                            ft.Text(f"成功處理 JAR：{stats.get('lang', {}).get('success', 0)} 個", size=13),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=18),
+                            ft.Text(f"因內容相同而跳過的檔案：{stats.get('lang', {}).get('warnings', 0)} 個", size=13),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.ERROR, color=theme.RED, size=18),
+                            ft.Text(f"失敗項目：{stats.get('lang', {}).get('failures', 0)} 個", size=13),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Text(f"新提取或更新的檔案：{stats.get('lang', {}).get('total_files', 0)} 個", size=13, color=ft.Colors.BLUE_700, weight=ft.FontWeight.BOLD),
+                    ft.Divider(),
+                    ft.Text("Book", size=14, weight=ft.FontWeight.BOLD),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=18),
+                            ft.Text(f"成功處理 JAR：{stats.get('book', {}).get('success', 0)} 個", size=13),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=18),
+                            ft.Text(f"因內容相同而跳過的檔案：{stats.get('book', {}).get('warnings', 0)} 個", size=13),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.ERROR, color=theme.RED, size=18),
+                            ft.Text(f"失敗項目：{stats.get('book', {}).get('failures', 0)} 個", size=13),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Text(f"新提取或更新的檔案：{stats.get('book', {}).get('total_files', 0)} 個", size=13, color=ft.Colors.BLUE_700, weight=ft.FontWeight.BOLD),
+                ],
+                spacing=8,
+                tight=True,
+            )
+        else:
+            content = ft.Column(
+                [
+                    ft.Text("提取結果摘要", size=16, weight=ft.FontWeight.BOLD),
+                    ft.Divider(),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=20),
+                            ft.Text(f"成功處理 JAR：{stats['success']} 個", size=14),
+                        ],
+                        spacing=8,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=20),
+                            ft.Text(f"因內容相同而跳過的檔案：{stats['warnings']} 個", size=14),
+                        ],
+                        spacing=8,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.ERROR, color=theme.RED, size=20),
+                            ft.Text(f"失敗項目：{stats['failures']} 個", size=14),
+                        ],
+                        spacing=8,
+                    ),
+                    ft.Divider(),
+                    ft.Text(
+                        f"新提取或更新的檔案：{stats['total_files']} 個",
+                        size=14,
+                        color=ft.Colors.BLUE_700,
+                        weight=ft.FontWeight.BOLD,
+                    ),
+                ],
+                spacing=10,
+                tight=True,
+            )
 
         dialog = ft.AlertDialog(
             modal=True,

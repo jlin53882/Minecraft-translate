@@ -20,14 +20,15 @@ from translation_tool.core.jar_processor import (
     )
 from app.views.extractor.extractor_state import PreviewState
 
-def update_stats_from_log(view, line: str):
-    """解析日誌行更新提取統計（已被 yield.stats 取代，保留给旧日志流）。
+def update_stats_from_log(view, line: str, phase: str = None):
+    """解析日誌行更新提取統計。
 
     規則：
     - 只在明確的「最終摘要」日誌上覆蓋 success / warnings / total_files
-    - 一般過程日誌不再用模糊關鍵字累加
+    - dual mode 時寫入對應 phase 的 sub-dict
     """
     stats = view._extraction_stats
+    target = stats if phase is None else stats.get(phase, stats)
     try:
         import re
 
@@ -37,15 +38,15 @@ def update_stats_from_log(view, line: str):
             re.MULTILINE,
         )
         if final_match:
-            stats['success'] = int(final_match.group(1))
-            stats['warnings'] = int(final_match.group(4))
-            stats['failures'] = 0
-            stats['total_files'] = int(final_match.group(3))
+            target['success'] = int(final_match.group(1))
+            target['warnings'] = int(final_match.group(4))
+            target['failures'] = 0
+            target['total_files'] = int(final_match.group(3))
             return
 
         error_match = re.search(r'提取\s+(.+?)\s+時產生例外', line)
         if error_match or '[ERROR]' in line or '[致命錯誤]' in line:
-            stats['failures'] += 1
+            target['failures'] = target.get('failures', 0) + 1
     except Exception as e:
         log_warning(f'解析統計數字失敗: {e}')
 
@@ -112,10 +113,18 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
     from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
     ensure_pipeline_logging()
 
-    view._extraction_stats = {'success': 0, 'warnings': 0, 'failures': 0, 'total_files': 0}
+    view._extraction_stats = {
+        'success': 0,
+        'warnings': 0,
+        'failures': 0,
+        'total_files': 0,
+        'lang': {'success': 0, 'warnings': 0, 'failures': 0, 'total_files': 0},
+        'book': {'success': 0, 'warnings': 0, 'failures': 0, 'total_files': 0},
+    }
     session = view.session
     session.start()
 
+    current_phase = "lang" if mode == "dual" else mode
     skip_zh_cn = getattr(view, 'skip_zh_cn_switch', None) and view.skip_zh_cn_switch.value
     if mode == 'lang':
         generator = extract_lang_files_generator(mods_dir, output_dir, skip_zh_cn=skip_zh_cn)
@@ -125,7 +134,17 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
         generator = extract_dual_files_generator(mods_dir, output_dir, skip_zh_cn=skip_zh_cn)
 
     try:
+        lang_stats_done = False
+        book_stats_done = False
         for update in generator:
+            # phase 切換要在 filter 前處理（filter 會移除 phase 欄位）
+            if "phase" in update:
+                current_phase = update["phase"]
+                if current_phase == "book":
+                    async def _do_reset_progress(_):
+                        view.progress_bar.value = 0.0
+                    view.page.run_task(_do_reset_progress, None)
+
             filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
             if filtered is None:
                 continue
@@ -133,31 +152,39 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
             log_msg = filtered.get("log", "")
             if log_msg:
                 log_info(f"[DEBUG] _extraction_worker: received log_msg={log_msg[:80]}...")
-                async def _do_append_log(_):
-                    view._append_log_line(log_msg)
+                msg_for_ui = log_msg
+                async def _do_append_log(_, m=msg_for_ui):
+                    view._append_log_line(m)
                 view.page.run_task(_do_append_log, None)
+                update_stats_from_log(view, log_msg, phase=current_phase)
 
             if "progress" in filtered or "progress" in update:
                 progress = filtered.get("progress", update.get("progress", 0))
                 current = update.get("current", 0)
                 total = update.get("total", 0)
                 display_idx = current if current > 0 else 1
-                status_text = f'狀態：提取 {mode} 中 ({display_idx}/{total}) ({int(progress * 100)}%)'
+                this_phase = current_phase
+                phase_label = f"[{this_phase.upper()}]" if mode == "dual" else ""
+                status_text = f'狀態：提取 {mode.upper()} {phase_label} 中 ({display_idx}/{total}) ({int(progress * 100)}%)'
 
-                async def _do_update(_):
-                    view.status_text.value = status_text
-                    view.progress_bar.value = progress
+                async def _do_update(_, p=progress, s=status_text):
+                    view.status_text.value = s
+                    view.progress_bar.value = p
                     view.page.update()
 
                 view.page.run_task(_do_update, None)
 
-            if "stats" in filtered:
-                stats = filtered["stats"]
-                async def _do_update_stats(_):
-                    view._extraction_stats = stats
+            if "stats" in update:
+                stats = update["stats"]
+                async def _do_update_stats(_, s=stats):
+                    view._extraction_stats = s
                 view.page.run_task(_do_update_stats, None)
+                if current_phase == "lang":
+                    lang_stats_done = True
+                elif current_phase == "book":
+                    book_stats_done = True
 
-            is_error = filtered.get("error", False)
+            is_error = update.get("error", False)
             if is_error:
                 async def _do_error(_):
                     view.progress_bar.color = ft.Colors.RED

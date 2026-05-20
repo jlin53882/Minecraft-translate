@@ -155,10 +155,12 @@ def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: 
         ):
             if "stats" in update:
                 lang_stats = update["stats"]
-            yield update
+                yield {**update, "phase": "lang"}
+            else:
+                yield update
     except Exception as e:
         lang_error = str(e)
-    yield {"log": "[系統] Lang 提取完成，開始提取 Book..."}
+    yield {"phase": "book", "log": "[系統] Lang 提取完成，開始提取 Book..."}
     book_error = None
     try:
         for update in _run_extraction_process(
@@ -168,16 +170,19 @@ def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: 
             "Patchouli Book",
         ):
             if "stats" in update:
+                book_stats = update["stats"]
                 if lang_stats:
-                    merged_stats = {
-                        "success": lang_stats["success"] + update["stats"]["success"],
-                        "failures": lang_stats["failures"] + update["stats"]["failures"],
-                        "warnings": lang_stats["warnings"] + update["stats"]["warnings"],
-                        "total_files": lang_stats["total_files"] + update["stats"]["total_files"],
+                    combined = {
+                        "success": lang_stats["success"] + book_stats["success"],
+                        "failures": lang_stats["failures"] + book_stats["failures"],
+                        "warnings": lang_stats["warnings"] + book_stats["warnings"],
+                        "total_files": lang_stats["total_files"] + book_stats["total_files"],
+                        "lang": lang_stats,
+                        "book": book_stats,
                     }
-                    yield {**update, "stats": merged_stats}
+                    yield {**update, "stats": combined, "phase": "book"}
                 else:
-                    yield update
+                    yield {**update, "phase": "book"}
             else:
                 yield update
     except Exception as e:

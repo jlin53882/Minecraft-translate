@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, Generator, Callable
 
 from ..utils.config_manager import load_config
+from ..utils.log_unit import log_info, log_error
 
 log = logging.getLogger(__name__)
 
@@ -74,43 +75,34 @@ def extract_from_jar_impl(
     Args:
         jar_path: JAR 檔案路徑
         output_root: 輸出根目錄
-        target_regex: 目標檔案正規表達式
+        target_regex: 目標正規表達式
         get_file_hash_fn: 檔案 HASH 計算函式（預設 SHA-256）
         scan_results: 預先掃描的 JAR 結果（由 run_extraction_process_impl 一次性掃描後傳入）
     Returns:
         包含 extracted/skipped 的統計字典
     """
-    from translation_tool.utils.jar_browser import scan_jars
-
     extracted_count = 0
     skipped_count = 0
     jar_filename_base = _normalize_jar_base_name(jar_path)
     jar_path_obj = Path(jar_path)
 
     if not jar_path_obj.exists():
-        log.error("JAR 檔案不存在: %s", jar_path)
+        log_error("JAR 檔案不存在: %s", jar_path)
         return {"status": "error", "extracted": 0, "skipped": 0}
 
-    log.debug("[extract_from_jar_impl] starting: %s, scan_results=%s (type=%s)",
-              jar_path_obj.name,
-              "provided" if scan_results else "None",
-              type(scan_results).__name__ if scan_results else "None")
     try:
         jar_results: dict[str, str | None] = {}
         if scan_results is not None and jar_path_obj in scan_results:
             jar_results = scan_results[jar_path_obj]
-            log.debug("[extract_from_jar_impl] reuse scan_results for %s (%d files)", jar_path_obj.name, len(jar_results))
         else:
-            log.debug("[extract_from_jar_impl] NO scan_results for %s, fallback to scan_jars", jar_path_obj.name)
-            scan_results_fallback = scan_jars(
-                jar_dir=jar_path_obj.parent,
-                patterns=[target_regex.pattern],
-            )
-            if jar_path_obj in scan_results_fallback:
-                jar_results = scan_results_fallback[jar_path_obj]
+            with zipfile.ZipFile(jar_path, "r") as zf:
+                for name in zf.namelist():
+                    if target_regex.search(name):
+                        try:
+                            jar_results[name] = zf.read(name).decode("utf-8")
+                        except UnicodeDecodeError:
+                            jar_results[name] = None
 
-        # 同時用 ZIP 直接列出所有符合的成員（包含 binary 檔案路徑）
-        # 確保 binary 檔案不會因為 jar_browser 回傳 None 而漏掉
         with zipfile.ZipFile(jar_path, "r") as zf:
             for member in zf.infolist():
                 if member.is_dir():
@@ -119,7 +111,6 @@ def extract_from_jar_impl(
                 if not target_regex.search(normalized_path):
                     continue
 
-                # 決定輸出路徑（與原本邏輯完全一致）
                 if normalized_path.startswith("assets/"):
                     final_output_path = os.path.join(output_root, normalized_path)
                 else:
@@ -128,17 +119,14 @@ def extract_from_jar_impl(
                         output_root, final_mod_folder, normalized_path
                     )
 
-                # 優先使用 jar_browser 的結果（文字檔）
                 if normalized_path in jar_results and jar_results[normalized_path] is not None:
                     source_data = jar_results[normalized_path].encode("utf-8")
                 else:
-                    # Binary 檔案或 jar_browser 未找到：直接讀 ZIP
                     with zf.open(member) as source:
                         source_data = source.read()
 
                 source_hash = get_file_hash_fn(source_data)
 
-                # 增量更新：hash 相同則跳過
                 if os.path.exists(final_output_path):
                     with open(final_output_path, "rb") as existing_file:
                         existing_hash = get_file_hash_fn(existing_file.read())
@@ -153,8 +141,10 @@ def extract_from_jar_impl(
 
         return {"status": "success", "extracted": extracted_count, "skipped": skipped_count}
     except Exception as e:
-        log.error("處理 %s 時發生錯誤: %s", os.path.basename(jar_path), e)
+        import traceback
+        log_error("[extract] %s >>> EXCEPTION: %s", jar_path_obj.name, e)
         return {"status": "error", "extracted": 0, "skipped": 0}
+
 
 def run_extraction_process_impl(
     mods_dir: str,
@@ -223,7 +213,7 @@ def run_extraction_process_impl(
     elapsed_total = time.time() - scan_start
 
     if scan_error[0]:
-        log.error("[scan_jars] background scan failed: %s", scan_error[0])
+        log_error("[scan_jars] background scan failed: %s", scan_error[0])
         yield {'progress': 0.0, 'error': True, 'log': f'[錯誤] 掃描失敗: {scan_error[0]}'}
         return
 
@@ -243,14 +233,20 @@ def run_extraction_process_impl(
         max_workers = max(1, cpu_count // 2)
         log.info("[workers] default=%s (config invalid/missing, cpu_count=%s)", max_workers, cpu_count)
 
+    import time as time_module
+    _ex_start = time_module.time()
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_jar = {
-            executor.submit(extract_from_jar_fn, jar, output_dir, target_regex, all_scan_results): (jar, time.time())
-            for jar in jar_files
-        }
+        future_to_jar = {}
+        for jar in jar_files:
+            _t_jar_submit = time_module.time()
+            future_to_jar[executor.submit(extract_from_jar_fn, jar, output_dir, target_regex, all_scan_results)] = (jar, _t_jar_submit)
+
         for future in concurrent.futures.as_completed(future_to_jar):
             jar_path, submit_time = future_to_jar[future]
-            elapsed = time.time() - submit_time
+            _t_done = time_module.time()
+            wall_time = _t_done - submit_time
+            queue_time = submit_time - _ex_start
             processed_count += 1
             prog = processed_count / total_jars
             try:
@@ -258,7 +254,8 @@ def run_extraction_process_impl(
                 if result['status'] == 'success':
                     total_extracted += result['extracted']
                     total_skipped += result['skipped']
-                log.info("[%s/%s] %s (%.1fs)", processed_count, total_jars, os.path.basename(jar_path), elapsed)
+                log.info("[%s/%s] %s queue=%.1fs wall=%.1fs",
+                         processed_count, total_jars, os.path.basename(jar_path), queue_time, wall_time)
                 yield {
                     'progress': prog,
                     'current': processed_count,
@@ -266,7 +263,7 @@ def run_extraction_process_impl(
                     'log': f"[{processed_count}/{total_jars}] {os.path.basename(jar_path)}",
                 }
             except Exception as exc:
-                log.error("提取 %s 時產生例外: %s (%.1fs)", os.path.basename(jar_path), exc, elapsed)
+                log_error("提取 %s 時產生例外: %s (%.1fs)", os.path.basename(jar_path), exc, elapsed)
                 yield {
                     'progress': prog,
                     'current': processed_count,
