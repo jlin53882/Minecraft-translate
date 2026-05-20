@@ -31,7 +31,6 @@ class MergeView(ft.Column):
     log_presenter: LogPresenter
     only_lang_checkbox: ft.Checkbox
     process_zh_cn_switch: ft.Switch
-    skip_zh_cn_switch: ft.Switch
     patchouli_skip_zh_cn_switch: ft.Switch
     patchouli_threshold_field: ft.TextField
     output_dir_field: ft.TextField
@@ -51,17 +50,15 @@ class MergeView(ft.Column):
     def _on_zh_cn_switch_changed(self, e: ft.ControlEvent) -> None:
         """主開關互鎖：process_zh_cn_switch 為其他設定的「主開關」。
 
-        - 關閉時：連動停用 skip_zh_cn_switch、patchouli_skip_zh_cn_switch，並將它們的值強制還原為 False
-        - 開啟時：解鎖讓它們可自行調整
-        - 原因：zh_cn 被全域略過時，下層的 Patchouli 設定無意義
+        - 關閉時：連動停用 patchouli_skip_zh_cn_switch，並將它的值強制還原為 False
+        - 開啟時：解鎖讓它可自行調整
+        - 原因：zh_cn 被全域略過時，Patchouli 的 en_us skip 設定無意義
         """
         enabled = bool(e.control.value)
-        self.skip_zh_cn_switch.disabled = not enabled
         self.patchouli_skip_zh_cn_switch.disabled = not enabled
         if self._zh_cn_disabled_note:
             self._zh_cn_disabled_note.visible = not enabled
         if not enabled:
-            self.skip_zh_cn_switch.value = False
             self.patchouli_skip_zh_cn_switch.value = False
         self.update()
 
@@ -100,14 +97,6 @@ class MergeView(ft.Column):
         )
 
         # ── Patchouli 進階設定 ─────────────────────────────────────────────
-        # 注意：skip_zh_cn_when_only_lang 只對 root-level 的 zh_cn.json / zh_cn.lang 生效
-        # 在 Patchouli 結構下沒有此類檔案，此開關實質無作用
-        # 真正影響 zh_cn 跳過的是上方的 process_zh_cn_switch（全域開關）
-        self.skip_zh_cn_switch = ft.Switch(
-            label="只處理 lang 時跳過 zh_cn",
-            value=False,
-        )
-
         # patchouli_skip_en_us_when_zh_cn_exists: 當 en_us 對應的 zh_tw 或 zh_cn 有「有效翻譯」時，跳過 en_us
         # - 有效翻譯由 patchouli_effective_translation_threshold（預設 0.5）判定：內容中日韓文字佔比超過此閾值
         # - 此開關只影響 Patchouli Book 的 en_us 資料夾，不影響 root-level lang 檔案
@@ -207,34 +196,6 @@ class MergeView(ft.Column):
             content=ft.Column(
                 [
                     ft.Text("Patchouli 進階設定", weight=ft.FontWeight.W_600, size=15),
-                    ft.Container(
-                        content=ft.Column(
-                            [
-                                ft.Row(
-                                    [
-                                        ft.Text(
-                                            "只處理 lang 時跳過 zh_cn",
-                                            weight=ft.FontWeight.W_500,
-                                            size=14,
-                                            expand=True,
-                                        ),
-                                        self.skip_zh_cn_switch,
-                                    ],
-                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                ),
-                                ft.Text(
-                                    "僅在「只處理 lang」模式生效。",
-                                    size=12,
-                                    color=theme.GREY_600,
-                                ),
-                            ],
-                            spacing=4,
-                        ),
-                        padding=10,
-                        bgcolor=theme.WHITE,
-                        border_radius=8,
-                    ),
                     ft.Container(
                         content=ft.Column(
                             [
