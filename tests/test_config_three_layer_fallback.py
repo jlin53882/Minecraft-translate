@@ -314,3 +314,188 @@ class TestGetDefaultHelpers:
         """get_default() 支援多層巢狀路徑。"""
         assert get_default("extractor.output_folder_names.lang_extract") == "_提取lang_輸出"
         assert get_default("lm_translator.patchouli.dir_names") == ["patchouli_books", "book", "manual", "guidebook"]
+
+
+# =============================================================================
+# load_config_into_view() UI layer tests
+# =============================================================================
+
+class TestLoadConfigIntoView:
+    """驗證 config_actions.load_config_into_view() 的 fallback 行為。"""
+
+    def _make_mock_view(self):
+        """建立帶有 controls_map 的 mock view。"""
+        class MockControl:
+            def __init__(self, value=None):
+                self.value = value
+
+        class MockView:
+            DEFAULT_MODELS = {"gemini-2.5-flash": True}
+
+            def __init__(self):
+                # Pre-register all controls that load_config_into_view() will set
+                self.controls_map = {
+                    'logging.log_level': MockControl(),
+                    'logging.log_dir': MockControl(),
+                    'translator.output_dir_name': MockControl(),
+                    'ftb_translator.output_dir_name': MockControl(),
+                    'translator.replace_rules_path': MockControl(),
+                    'translator.cache_directory': MockControl(),
+                    'translator.enable_cache_saving': MockControl(),
+                    'translator.parallel_execution_workers': MockControl(),
+                    'species_cache.cache_directory': MockControl(),
+                    'species_cache.cache_filename': MockControl(),
+                    'species_cache.wikipedia_language': MockControl(),
+                    'species_cache.wikipedia_rate_limit_delay': MockControl(),
+                    'lm_translator.temperature': MockControl(),
+                    'lm_translator.rate_limit.timeout': MockControl(),
+                    'lm_translator.rate_limit.sleep_seconds_between_batches': MockControl(),
+                    'output_bundler.output_zip_name': MockControl(),
+                    'lang_merger.pending_folder_name': MockControl(),
+                    'lang_merger.pending_organized_folder_name': MockControl(),
+                    'lang_merger.filtered_pending_min_count': MockControl(),
+                    'lm_translator.lm_translate_folder_name': MockControl(),
+                    'lm_translator.patchouli_system_prompt': MockControl(),
+                    'lm_translator.lang_system_prompt': MockControl(),
+                    'lang_merger.quarantine_folder_name': MockControl(),
+                    'lm_translator.initial_batch_size_patchouli': MockControl(),
+                    'lm_translator.initial_batch_size_lang': MockControl(),
+                    'lm_translator.initial_batch_size_ftb': MockControl(),
+                    'lm_translator.initial_batch_size_kubejs': MockControl(),
+                    'lm_translator.initial_batch_size_md': MockControl(),
+                    'lm_translator.min_batch_size': MockControl(),
+                    'lm_translator.batch_shrink_factor': MockControl(),
+                    'lm_translator.patchouli.dir_names': MockControl(),
+                    'lm_translator.translator.skip_terms': MockControl(),
+                    'lm_translator.translator.translatable_keywords': MockControl(),
+                    'extractor.output_folder_names.lang_extract': MockControl(),
+                    'extractor.output_folder_names.book_extract': MockControl(),
+                    'extractor.output_folder_names.lang_preview': MockControl(),
+                    'extractor.output_folder_names.book_preview': MockControl(),
+                    'extractor.output_folder_names.dual_extract': MockControl(),
+                    'extractor.output_folder_names.dual_preview': MockControl(),
+                }
+                self.models_column = MockColumn()
+                self.key_fields = []
+                self.keys_column = MockColumn()
+
+            def add_model_row(self, name):
+                class MockRow:
+                    _checkbox = MockControl()
+
+                self.models_column.controls.append(MockRow())
+
+            def _build_key_field(self, value=""):
+                fc = MockControl()
+                fc.value = value
+                return fc
+
+            def _build_key_row(self, tf):
+                return MockControl()
+
+            def _show_snack_bar(self, msg, color=None):
+                pass
+
+            def _success_color(self):
+                return None
+
+            def load_config(self):
+                pass
+
+        class MockColumn:
+            def __init__(self):
+                self.controls = []
+
+        return MockView()
+
+    def _load_into_view(self, config):
+        """協助函數：載入 config 到 mock view。"""
+        import translation_tool.utils.config_manager as cm_module
+        # Reload to pick up patched paths
+        import importlib
+        importlib.reload(cm_module)
+
+        from app.views.config.config_actions import load_config_into_view
+        view = self._make_mock_view()
+        load_config_into_view(view, config)
+        return view
+
+    def test_int_fields_fall_back_to_get_default_when_none(self, tmp_path):
+        """int() 欄位為 None 時，會 fallback 到 get_default() 而非 crash。"""
+        user_cfg = {
+            "lm_translator": {
+                # None for these fields - no user override
+                "initial_batch_size_patchouli": None,
+                "initial_batch_size_lang": None,
+                "initial_batch_size_ftb": None,
+                "initial_batch_size_kubejs": None,
+                "initial_batch_size_md": None,
+                "min_batch_size": None,
+                "batch_shrink_factor": None,
+            },
+            "logging": {},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {},
+            "extractor": {},
+        }
+        view = self._load_into_view(user_cfg)
+
+        # All should fall back to DEFAULT values, not crash
+        assert view.controls_map['lm_translator.initial_batch_size_patchouli'].value == 100
+        assert view.controls_map['lm_translator.initial_batch_size_lang'].value == 300
+        assert view.controls_map['lm_translator.initial_batch_size_ftb'].value == 200
+        assert view.controls_map['lm_translator.initial_batch_size_kubejs'].value == 200
+        assert view.controls_map['lm_translator.initial_batch_size_md'].value == 100
+        assert view.controls_map['lm_translator.min_batch_size'].value == 50
+        assert view.controls_map['lm_translator.batch_shrink_factor'].value == 0.5
+
+    def test_list_fields_preserve_empty_list_not_replaced_with_default(self, tmp_path):
+        """空清單 [] 是有效設定，會被保留，不會被 DEFAULT 值置換。"""
+        user_cfg = {
+            "lm_translator": {
+                "patchouli": {"dir_names": []},  # user explicitly sets empty
+                "translator": {
+                    "skip_terms": [],
+                    "translatable_keywords": [],
+                },
+                "temperature": 0.0,
+                "rate_limit": {"timeout": 600, "sleep_seconds_between_batches": 0.0},
+            },
+            "logging": {},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {},
+            "extractor": {},
+        }
+        view = self._load_into_view(user_cfg)
+
+        # Empty list should NOT be replaced with default
+        assert view.controls_map['lm_translator.patchouli.dir_names'].value == ""
+        assert view.controls_map['lm_translator.translator.skip_terms'].value == ""
+        assert view.controls_map['lm_translator.translator.translatable_keywords'].value == ""
+
+    def test_rate_limit_null_does_not_crash(self, tmp_path):
+        """rate_limit 為 null 時不會 crash，而是正確 fallback。"""
+        user_cfg = {
+            "lm_translator": {
+                "rate_limit": None,  # null - should not crash
+                "temperature": 0.0,
+            },
+            "logging": {},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {},
+            "extractor": {},
+        }
+        view = self._load_into_view(user_cfg)
+
+        # Should not crash, should use default values (600, 0.0)
+        assert view.controls_map['lm_translator.rate_limit.timeout'].value == "600"
+        assert view.controls_map['lm_translator.rate_limit.sleep_seconds_between_batches'].value == "0.0"

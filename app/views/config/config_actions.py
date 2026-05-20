@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import traceback
+from translation_tool.utils.config_manager import get_default
 
 def load_config_into_view(view, config: dict):
     """
@@ -33,8 +34,8 @@ def load_config_into_view(view, config: dict):
     view.controls_map['species_cache.wikipedia_language'].value = species_cfg.get('wikipedia_language')
     view.controls_map['species_cache.wikipedia_rate_limit_delay'].value = str(species_cfg.get('wikipedia_rate_limit_delay'))
     view.controls_map['lm_translator.temperature'].value = str(lm_cfg.get('temperature'))
-    view.controls_map['lm_translator.rate_limit.timeout'].value = str(lm_cfg.get('rate_limit', {}).get('timeout', 600))
-    view.controls_map['lm_translator.rate_limit.sleep_seconds_between_batches'].value = str(lm_cfg.get('rate_limit', {}).get('sleep_seconds_between_batches', 0.0))
+    view.controls_map['lm_translator.rate_limit.timeout'].value = str((lm_cfg.get('rate_limit') or {}).get('timeout', 600))
+    view.controls_map['lm_translator.rate_limit.sleep_seconds_between_batches'].value = str((lm_cfg.get('rate_limit') or {}).get('sleep_seconds_between_batches', 0.0))
     view.controls_map['output_bundler.output_zip_name'].value = bundle_cfg.get('output_zip_name')
     view.controls_map['lang_merger.pending_folder_name'].value = config.get('lang_merger', {}).get('pending_folder_name')
     view.controls_map['lang_merger.pending_organized_folder_name'].value = config.get('lang_merger', {}).get('pending_organized_folder_name')
@@ -43,13 +44,13 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lm_translator.patchouli_system_prompt'].value = str(config.get('lm_translator', {}).get('patchouli_system_prompt'))
     view.controls_map['lm_translator.lang_system_prompt'].value = str(config.get('lm_translator', {}).get('lang_system_prompt'))
     view.controls_map['lang_merger.quarantine_folder_name'].value = config.get('lang_merger', {}).get('quarantine_folder_name')
-    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = int(config.get('lm_translator', {}).get('initial_batch_size_patchouli'))
-    view.controls_map['lm_translator.initial_batch_size_lang'].value = int(config.get('lm_translator', {}).get('initial_batch_size_lang'))
-    view.controls_map['lm_translator.initial_batch_size_ftb'].value = int(config.get('lm_translator', {}).get('initial_batch_size_ftb'))
-    view.controls_map['lm_translator.initial_batch_size_kubejs'].value = int(config.get('lm_translator', {}).get('initial_batch_size_kubejs'))
-    view.controls_map['lm_translator.initial_batch_size_md'].value = int(config.get('lm_translator', {}).get('initial_batch_size_md'))
-    view.controls_map['lm_translator.min_batch_size'].value = int(config.get('lm_translator', {}).get('min_batch_size'))
-    view.controls_map['lm_translator.batch_shrink_factor'].value = float(config.get('lm_translator', {}).get('batch_shrink_factor'))
+    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = int(config.get('lm_translator', {}).get('initial_batch_size_patchouli') or get_default('lm_translator.initial_batch_size_patchouli'))
+    view.controls_map['lm_translator.initial_batch_size_lang'].value = int(config.get('lm_translator', {}).get('initial_batch_size_lang') or get_default('lm_translator.initial_batch_size_lang'))
+    view.controls_map['lm_translator.initial_batch_size_ftb'].value = int(config.get('lm_translator', {}).get('initial_batch_size_ftb') or get_default('lm_translator.initial_batch_size_ftb'))
+    view.controls_map['lm_translator.initial_batch_size_kubejs'].value = int(config.get('lm_translator', {}).get('initial_batch_size_kubejs') or get_default('lm_translator.initial_batch_size_kubejs'))
+    view.controls_map['lm_translator.initial_batch_size_md'].value = int(config.get('lm_translator', {}).get('initial_batch_size_md') or get_default('lm_translator.initial_batch_size_md'))
+    view.controls_map['lm_translator.min_batch_size'].value = int(config.get('lm_translator', {}).get('min_batch_size') or get_default('lm_translator.min_batch_size'))
+    view.controls_map['lm_translator.batch_shrink_factor'].value = float(config.get('lm_translator', {}).get('batch_shrink_factor') or get_default('lm_translator.batch_shrink_factor'))
     # dir_names、skip_terms、translatable_keywords：空清單 [] 是有效設定，直接保留
     view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(lm_cfg.get('patchouli', {}).get('dir_names', []))
     view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(lm_cfg.get('translator', {}).get('skip_terms', []))
