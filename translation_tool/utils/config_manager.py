@@ -222,18 +222,23 @@ DEFAULT_CONFIG = {
         "skip_zh_cn_extract": False,
     },
 }
+def load_config(config_path: str | os.PathLike | None = None) -> dict:
+    """
+    載入並合併設定檔，實作三層 fallback 機制。
 
-def load_config(config_path: str | os.PathLike | None = None):
-    """讀取設定檔並做三層 fallback 合併。
+    三層 priority（高 → 低）：
+      Layer 1: config.json       — 用戶實際值（最高優先，單一 json 檔）
+      Layer 2: config.example.json — 文件預設值（新版本補欄位用）
+      Layer 3: DEFAULT_CONFIG    — 程式碼 fallback（最終保底，唯一真相來源）
 
-    三層 fallback（priority: user > example > default）：
-    1. config.json  — 用戶實際值（最高優先）
-    2. config.example.json — 文件預設值
-    3. DEFAULT_CONFIG — 程式碼 fallback（最終保底，唯一真相來源）
+    合併順序：deep_merge(deep_merge(DEFAULT_CONFIG, example), user_config)
+    - user_config 覆蓋 example 覆蓋 DEFAULT_CONFIG
+    - `lm_translator.models` 不做 deep merge（視為使用者資料，完全替換）
 
-    合併策略：
-    - deep_merge(deep_merge(DEFAULT_CONFIG, example), user_config)
-    - `lm_translator.models` 不做 deep merge（視為使用者資料）
+    适用场景：
+    - 新安裝：config.json 不存在 → 吃到 example + default 的值
+    - 升級：config.json 少新欄位 → example 補上缺失欄位
+    - 使用者自訂：config.json 有值 → 以使用者為準
 
     回傳：合併後的新 dict（避免直接回傳 DEFAULT_CONFIG 物件被外部修改）。
     """

@@ -3,7 +3,16 @@ from __future__ import annotations
 import traceback
 
 def load_config_into_view(view, config: dict):
-    """將 config 字典中的值填入 view 的各個 UI 控制項。"""
+    """
+    將 config 字典中的值填入 view 的各個 UI 控制項。
+
+    注意：傳入的 `config` 已經是 load_config() 三層合併後的結果。
+    三層 priority：config.json（用戶）> config.example.json > DEFAULT_CONFIG。
+    因此這裡直接用 config.get() 取值，不需要額外的 or get_default() fallback。
+
+    對於 list 欄位（dir_names、skip_terms、translatable_keywords），
+    空清單 [] 是用戶的有效設定，會直接保留，不會被 DEFAULT 值置換。
+    """
     log_cfg = config.get('logging', {})
     trans_cfg = config.get('translator', {})
     ftb_cfg = config.get('ftb_translator', {})
@@ -41,6 +50,7 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lm_translator.initial_batch_size_md'].value = int(config.get('lm_translator', {}).get('initial_batch_size_md'))
     view.controls_map['lm_translator.min_batch_size'].value = int(config.get('lm_translator', {}).get('min_batch_size'))
     view.controls_map['lm_translator.batch_shrink_factor'].value = float(config.get('lm_translator', {}).get('batch_shrink_factor'))
+    # dir_names、skip_terms、translatable_keywords：空清單 [] 是有效設定，直接保留
     view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(lm_cfg.get('patchouli', {}).get('dir_names', []))
     view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(lm_cfg.get('translator', {}).get('skip_terms', []))
     view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(lm_cfg.get('translator', {}).get('translatable_keywords', []))
