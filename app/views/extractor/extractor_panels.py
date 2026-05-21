@@ -147,14 +147,7 @@ def _build_action_zone(
                 preview_label,
                 ft.Row(preview_row, spacing=10),
                 ft.Container(height=4),
-                ft.Row(
-                    controls=[
-                        view.skip_zh_cn_switch,
-                        ft.Text("跳過 zh_cn 抽取", size=12, color=theme.GREY_600),
-                    ],
-                    spacing=8,
-                    alignment=ft.MainAxisAlignment.START,
-                ),
+                view.skip_zh_cn_switch,
             ],
         ),
         padding=ft.Padding(left=12, top=10, right=12, bottom=10),
