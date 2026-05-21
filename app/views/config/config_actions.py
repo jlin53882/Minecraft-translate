@@ -151,15 +151,16 @@ def _load_example_config() -> dict:
             return json.load(f)
     return {}
 
-
 def load_config_into_view(view, config: dict):
     """
     將 config 字典中的值填入 view 的各個 UI 控制項。
 
-    三層 fallback：
-    1. config.json（使用者實際設定）
-    2. config.example.json（文件的預設值）
-    3. DEFAULT_* 常數（程式碼中的最終 fallback，與 example.json 值一致）
+    注意：傳入的 `config` 已經是 load_config() 三層合併後的結果。
+    三層 priority：config.json（用戶）> config.example.json > DEFAULT_CONFIG。
+    因此這裡直接用 config.get() 取值，不需要額外的 or get_default() fallback。
+
+    對於 list 欄位（dir_names、skip_terms、translatable_keywords），
+    空清單 [] 是用戶的有效設定，會直接保留，不會被 DEFAULT 值置換。
     """
     ex = _load_example_config()
 
@@ -213,6 +214,51 @@ def load_config_into_view(view, config: dict):
     view.controls_map['extractor.output_folder_names.dual_preview'].value = config.get('extractor', {}).get('output_folder_names', {}).get('dual_preview') or ex.get('extractor', {}).get('output_folder_names', {}).get('dual_preview') or DEFAULT_DUAL_PREVIEW
 
     lm_cfg = config.get('lm_translator', {})
+    bundle_cfg = config.get('output_bundler', {})
+
+    view.controls_map['logging.log_level'].value = log_cfg.get('log_level')
+    view.controls_map['logging.log_dir'].value = log_cfg.get('log_dir')
+    view.controls_map['translator.output_dir_name'].value = trans_cfg.get('output_dir_name')
+    view.controls_map['ftb_translator.output_dir_name'].value = ftb_cfg.get('output_dir_name')
+    view.controls_map['translator.replace_rules_path'].value = trans_cfg.get('replace_rules_path')
+    view.controls_map['translator.cache_directory'].value = trans_cfg.get('cache_directory')
+    view.controls_map['translator.enable_cache_saving'].value = trans_cfg.get('enable_cache_saving')
+    view.controls_map['translator.parallel_execution_workers'].value = str(trans_cfg.get('parallel_execution_workers'))
+    view.controls_map['species_cache.cache_directory'].value = species_cfg.get('cache_directory')
+    view.controls_map['species_cache.cache_filename'].value = species_cfg.get('cache_filename')
+    view.controls_map['species_cache.wikipedia_language'].value = species_cfg.get('wikipedia_language')
+    view.controls_map['species_cache.wikipedia_rate_limit_delay'].value = str(species_cfg.get('wikipedia_rate_limit_delay'))
+    view.controls_map['lm_translator.temperature'].value = str(lm_cfg.get('temperature'))
+    view.controls_map['lm_translator.rate_limit.timeout'].value = str((lm_cfg.get('rate_limit') or {}).get('timeout', 600))
+    view.controls_map['lm_translator.rate_limit.sleep_seconds_between_batches'].value = str((lm_cfg.get('rate_limit') or {}).get('sleep_seconds_between_batches', 0.0))
+    view.controls_map['output_bundler.output_zip_name'].value = bundle_cfg.get('output_zip_name')
+    view.controls_map['lang_merger.pending_folder_name'].value = config.get('lang_merger', {}).get('pending_folder_name')
+    view.controls_map['lang_merger.pending_organized_folder_name'].value = config.get('lang_merger', {}).get('pending_organized_folder_name')
+    view.controls_map['lang_merger.filtered_pending_min_count'].value = str(config.get('lang_merger', {}).get('filtered_pending_min_count'))
+    view.controls_map['lm_translator.lm_translate_folder_name'].value = str(config.get('lm_translator', {}).get('lm_translate_folder_name'))
+    view.controls_map['lm_translator.patchouli_system_prompt'].value = str(config.get('lm_translator', {}).get('patchouli_system_prompt'))
+    view.controls_map['lm_translator.lang_system_prompt'].value = str(config.get('lm_translator', {}).get('lang_system_prompt'))
+    view.controls_map['lang_merger.quarantine_folder_name'].value = config.get('lang_merger', {}).get('quarantine_folder_name')
+    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = int(config.get('lm_translator', {}).get('initial_batch_size_patchouli') or ex.get('lm_translator', {}).get('initial_batch_size_patchouli') or DEFAULT_BATCH_PATCHOULI)
+    view.controls_map['lm_translator.initial_batch_size_lang'].value = int(config.get('lm_translator', {}).get('initial_batch_size_lang') or ex.get('lm_translator', {}).get('initial_batch_size_lang') or DEFAULT_BATCH_LANG)
+    view.controls_map['lm_translator.initial_batch_size_ftb'].value = int(config.get('lm_translator', {}).get('initial_batch_size_ftb') or ex.get('lm_translator', {}).get('initial_batch_size_ftb') or DEFAULT_BATCH_FTB)
+    view.controls_map['lm_translator.initial_batch_size_kubejs'].value = int(config.get('lm_translator', {}).get('initial_batch_size_kubejs') or ex.get('lm_translator', {}).get('initial_batch_size_kubejs') or DEFAULT_BATCH_KUBEJS)
+    view.controls_map['lm_translator.initial_batch_size_md'].value = int(config.get('lm_translator', {}).get('initial_batch_size_md') or ex.get('lm_translator', {}).get('initial_batch_size_md') or DEFAULT_BATCH_MD)
+    view.controls_map['lm_translator.min_batch_size'].value = int(config.get('lm_translator', {}).get('min_batch_size') or ex.get('lm_translator', {}).get('min_batch_size') or DEFAULT_MIN_BATCH_SIZE)
+    view.controls_map['lm_translator.batch_shrink_factor'].value = float(config.get('lm_translator', {}).get('batch_shrink_factor') or ex.get('lm_translator', {}).get('batch_shrink_factor') or DEFAULT_BATCH_SHRINK_FACTOR)
+    view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(lm_cfg.get('patchouli', {}).get('dir_names', []) or ex.get('lm_translator', {}).get('patchouli', {}).get('dir_names') or DEFAULT_PATHOULI_DIR_NAMES)
+    view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(lm_cfg.get('translator', {}).get('skip_terms', []) or ex.get('lm_translator', {}).get('translator', {}).get('skip_terms') or DEFAULT_SKIP_TERMS)
+    view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(lm_cfg.get('translator', {}).get('translatable_keywords', []) or ex.get('lm_translator', {}).get('translator', {}).get('translatable_keywords') or DEFAULT_TRANSLATABLE_KEYWORDS)
+
+    extractor_cfg = config.get('extractor', {})
+    folder_names = extractor_cfg.get('output_folder_names', {})
+    view.controls_map['extractor.output_folder_names.lang_extract'].value = folder_names.get('lang_extract')
+    view.controls_map['extractor.output_folder_names.book_extract'].value = folder_names.get('book_extract')
+    view.controls_map['extractor.output_folder_names.lang_preview'].value = folder_names.get('lang_preview')
+    view.controls_map['extractor.output_folder_names.book_preview'].value = folder_names.get('book_preview')
+    view.controls_map['extractor.output_folder_names.dual_extract'].value = folder_names.get('dual_extract')
+    view.controls_map['extractor.output_folder_names.dual_preview'].value = folder_names.get('dual_preview')
+
     view.models_column.controls.clear()
     raw_models = lm_cfg.get('models')
     if raw_models:
@@ -237,7 +283,19 @@ def load_config_into_view(view, config: dict):
 
 
 def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, validate_api_keys_from_ui_fn, registry=None):
-    """從 view UI 控制項收集使用者輸入並儲存至 config.json。"""
+    """從 view UI 控制項收集使用者輸入並寫入 config.json。
+
+    寫入流程：
+      1. load_config_json_fn() → 取得三層合併後的設定（作為基底）
+      2. 從 view 控制項讀取新值，更新到基底 dict
+      3. save_config_json_fn(new_config) → 寫入 config.json（觸發 normalization）
+      4. view.load_config() → 重新讀取並刷新 UI（顯示寫入後的實際值）
+
+    注意：基底來自 load_config_json_fn()，代表：
+      - 如果 config.json 存在，會讀取使用者的實際設定（含自訂值）
+      - 如果 config.json 不存在，會拿到 DEFAULT_CONFIG 的值
+      → 按儲存後，使用者的「預設值」就會固化進 config.json（Layer 1 覆蓋 Layer 2/3）
+    """
     new_config = load_config_json_fn()
     if 'ftb_translator' not in new_config:
         new_config['ftb_translator'] = {}

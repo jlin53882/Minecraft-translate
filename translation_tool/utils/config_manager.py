@@ -27,6 +27,50 @@ def get_project_root() -> Path:
 
 PROJECT_ROOT = get_project_root()
 CONFIG_PATH = PROJECT_ROOT / "config.json"
+EXAMPLE_PATH = PROJECT_ROOT / "config.example.json"
+
+def load_config_example() -> dict:
+    """讀取 config.example.json，不存在或解析失敗時回傳空 dict。
+
+    注意：config.example.json 屬於 repo 原始碼的一部分，
+    不會被複製進使用者的實際工作目錄。只有 load_config() 在
+    Layer 2 fallback 時會嘗試讀取它。
+
+    用途：新版本安裝時補足 config.json 缺少的新欄位。
+    """
+    if not EXAMPLE_PATH.exists():
+        return {}
+    try:
+        with EXAMPLE_PATH.open(encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+
+def get_default_block(name: str):
+    """取得 DEFAULT_CONFIG 中指定區塊（如 'lang_merger', 'extractor'）。"""
+    return copy.deepcopy(DEFAULT_CONFIG.get(name, {}))
+
+def get_default(path: str, default=None):
+    """依路徑讀取 DEFAULT_CONFIG 中的值，例如 'lang_merger.pending_folder_name'。
+    
+    參數：
+        path: dot-separated path，如 'lang_merger.pending_folder_name'
+        default: 找不到時的回傳值
+    返回：
+        DEFAULT_CONFIG 中該路徑的值，或 default
+    """
+    keys = path.split(".")
+    val = DEFAULT_CONFIG
+    for k in keys:
+        if isinstance(val, dict):
+            val = val.get(k)
+        else:
+            return default
+        if val is None:
+            return default
+    return val
+
 
 def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
     """解析專案相對路徑為絕對路徑。
@@ -138,7 +182,6 @@ DEFAULT_CONFIG = {
             "9. Minecraft 請保持原文\n"
             "10. 每一筆 value 只依該筆原文翻譯\n"
             "11. 只要 value 包含人類語言就必須翻譯\n"
-            "12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石)"
         ),
         "translator": {
             "skip_terms": [
@@ -191,11 +234,10 @@ DEFAULT_CONFIG = {
         },
     },
     "output_bundler": {
-        "output_zip_name": "可使用翻譯.zip",
-        "source_folders": {
-            "assets": "zh_tw_generated/assets",
-            "root": "zh_tw_generated/pack_mcmeta",
-        },
+        "output_zip_name": "可使用翻譯.zip"
+    },
+    "jar_extractor": {
+        "lang_codes": ["en_us", "zh_cn", "zh_tw"],
     },
     "lang_merger": {
         "pending_folder_name": "待翻譯",
@@ -217,72 +259,67 @@ DEFAULT_CONFIG = {
             "dual_extract": "_提取both_輸出",
             "dual_preview": "_預覽both_輸出",
         },
+        "target_language": ["zh_tw"],
         "skip_zh_cn_extract": False,
     },
 }
+def load_config(config_path: str | os.PathLike | None = None) -> dict:
+    """
+    載入並合併設定檔，實作三層 fallback 機制。
 
-def load_config(config_path: str | os.PathLike | None = None):
-    """讀取設定檔並做向後相容合併。
+    三層 priority（高 → 低）：
+      Layer 1: config.json       — 用戶實際值（最高優先，單一 json 檔）
+      Layer 2: config.example.json — 文件預設值（新版本補欄位用）
+      Layer 3: DEFAULT_CONFIG    — 程式碼 fallback（最終保底，唯一真相來源）
 
-    行為：
-    - 若檔案不存在：回傳 DEFAULT_CONFIG（深拷貝/或原始結構）。
-    - 若檔案存在：讀取使用者設定，與 DEFAULT_CONFIG 做 deep merge，補齊新欄位。
+    合併順序：deep_merge(deep_merge(DEFAULT_CONFIG, example), user_config)
+    - user_config 覆蓋 example 覆蓋 DEFAULT_CONFIG
+    - `lm_translator.models` 不做 deep merge（視為使用者資料，完全替換）
 
-    重要規則：
-    - `lm_translator.models` 不做 deep merge（視為使用者資料），避免預設值混入導致誤啟用。
+    适用场景：
+    - 新安裝：config.json 不存在 → 吃到 example + default 的值
+    - 升級：config.json 少新欄位 → example 補上缺失欄位
+    - 使用者自訂：config.json 有值 → 以使用者為準
 
     回傳：合併後的新 dict（避免直接回傳 DEFAULT_CONFIG 物件被外部修改）。
     """
     resolved_config_path = resolve_project_path(config_path or CONFIG_PATH)
-    if not resolved_config_path.exists():
-        print(f"警告：找不到設定檔 {resolved_config_path}，將使用預設設定。")
-        return copy.deepcopy(DEFAULT_CONFIG)
 
-    try:
-        with resolved_config_path.open("r", encoding="utf-8") as f:
-            user_config = json.load(f)
+    # Layer 3: DEFAULT_CONFIG as base
+    # 為什麼用 DEFAULT_CONFIG 而不是空 dict 作為起點？
+    # 因為 DEFAULT_CONFIG 是「唯一真相來源」——所有欄位都應該有定義值，
+    # example 只是用來補新欄位（example 多的欄位），不是用來覆蓋 DEFAULT 已有的值。
+    base = copy.deepcopy(DEFAULT_CONFIG)
 
-        # 深度合併
-        config = {}
-        # for key, default_value in DEFAULT_CONFIG.items():
-        #    user_value = user_config.get(key)
-        #    if isinstance(default_value, dict) and isinstance(user_value, dict):
-        #        config[key] = deep_merge(default_value, user_value)
-        #    else:
-        #        config[key] = user_value if key in user_config else default_value
+    # Layer 2: config.example.json
+    example = load_config_example()
+    if example:
+        base = deep_merge(base, example)
 
-        for key, default_value in DEFAULT_CONFIG.items():
-            user_value = user_config.get(key)
+    # Layer 1: config.json (user values) — only if file exists
+    user_config = {}
+    if resolved_config_path.exists():
+        try:
+            with resolved_config_path.open("r", encoding="utf-8") as f:
+                user_config = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。")
+            return base
 
-            # 🚨 models 不允許 deep merge（使用者資料）
-            if (
-                key == "lm_translator"
-                and isinstance(default_value, dict)
-                and isinstance(user_value, dict)
-            ):
-                lm = deep_merge(default_value, user_value)
+    # Merge: user (Layer 1) > example (Layer 2) > default (Layer 3)
+    # 全部用 deep_merge 一次搞定，確保 config.example.json 新增的 top-level key
+    # 也會被正確合併進來，不只限於 DEFAULT_CONFIG 定義的 keys。
+    config = deep_merge(base, user_config)
 
-                # 覆蓋 models（不使用 default）
-                if "models" in user_value:
-                    lm["models"] = user_value["models"]
+    # lm_translator.models 不允許 deep merge（視為使用者資料，完全替換）
+    if "models" in user_config.get("lm_translator", {}):
+        config["lm_translator"]["models"] = user_config["lm_translator"]["models"]
 
-                config[key] = lm
-                continue
-
-            if isinstance(default_value, dict) and isinstance(user_value, dict):
-                config[key] = deep_merge(default_value, user_value)
-            else:
-                config[key] = user_value if key in user_config else default_value
-
-        # ATK-C-2: 對最終結果做驗證
-        _validate_lm_translator_config(config["lm_translator"])
-        if isinstance(config.get("translator"), dict):
-            _validate_translator_config(config["translator"])
-        return config
-
-    except (json.JSONDecodeError, IOError) as e:
-        print(f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。")
-        return copy.deepcopy(DEFAULT_CONFIG)
+    # ATK-C-2: 對最終結果做驗證
+    _validate_lm_translator_config(config["lm_translator"])
+    if isinstance(config.get("translator"), dict):
+        _validate_translator_config(config["translator"])
+    return config
 
 def save_config(config, config_path: str | os.PathLike | None = None):
     """

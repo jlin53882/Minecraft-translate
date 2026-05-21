@@ -50,12 +50,17 @@ def test_config_load_extractor_folder_names():
 
 
 def test_config_load_extractor_defaults_when_missing():
-    """Test load_config_into_view uses default values when extractor config is missing."""
+    """Test load_config_into_view uses default values when extractor config is missing.
+
+    Uses load_config() to produce a real three-layer merged config — same as production.
+    """
     with patch('app.task_session.TaskSession', _MockSession):
         from app.views.config_view import ConfigView
         view = ConfigView(mock_page())
 
-        config = {}
+        # Use load_config() to get the real three-layer merged config
+        from translation_tool.utils.config_manager import load_config
+        config = load_config()
 
         from app.views.config.config_actions import load_config_into_view
         load_config_into_view(view, config)
