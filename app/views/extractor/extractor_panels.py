@@ -251,15 +251,13 @@ def build_logs_panel(view) -> ft.Column:
     )
 
 
-def build_main_layout(view) -> ft.Row:
-    """雙欄主佈局：左=設定面板，右=日誌面板"""
-    return ft.Row(
+def build_main_layout(view) -> ft.Column:
+    """單欄垂直佈局：設定卡片在上，日誌卡片在下"""
+    return ft.Column(
         spacing=12,
-        vertical_alignment=ft.CrossAxisAlignment.START,
         controls=[
             ft.Container(
                 content=build_settings_panel(view),
-                expand=1,
                 padding=10,
                 border=ft.Border.all(1, theme.GREY_200),
                 border_radius=10,
@@ -267,11 +265,11 @@ def build_main_layout(view) -> ft.Row:
             ),
             ft.Container(
                 content=build_logs_panel(view),
-                expand=2,
                 padding=10,
                 border=ft.Border.all(1, theme.GREY_200),
                 border_radius=10,
                 bgcolor=theme.GREY_50,
+                expand=True,
             ),
         ],
     )
