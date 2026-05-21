@@ -81,6 +81,7 @@ def start_ui_poller(view, mode: str = ''):
 
             view.progress_bar.value = progress
             view.progress_bar.color = ft.Colors.RED if is_error else ft.Colors.BLUE
+            view._progress_pct.value = f"{int(progress * 100)}%"
 
             # LogPresenter 接管 append + truncate，回傳新增 entries
             # presenter.sync() 內部已直接 append 到 view.log_view.controls
@@ -172,6 +173,7 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
                 async def _do_update(_, p=progress, s=status_text):
                     view.status_text.value = s
                     view.progress_bar.value = p
+                    view._progress_pct.value = f"{int(p * 100)}%"
                     view.page.update()
 
                 view.page.run_task(_do_update, None)
@@ -180,6 +182,9 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
                 stats = update["stats"]
                 async def _do_update_stats(_, s=stats):
                     view._extraction_stats = s
+                    view._stats_success.value = str(s.get('success', 0))
+                    view._stats_warnings.value = str(s.get('warnings', 0))
+                    view._stats_failures.value = str(s.get('failures', 0))
                 view.page.run_task(_do_update_stats, None)
                 if current_phase == "lang":
                     lang_stats_done = True
@@ -217,6 +222,11 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
         if status == 'DONE':
             view.status_text.value = '狀態：完成'
             view.progress_bar.value = 1.0
+            view._progress_pct.value = "100%"
+            if hasattr(view, '_stats_success'):
+                view._stats_success.value = str(view._extraction_stats.get('success', 0))
+                view._stats_warnings.value = str(view._extraction_stats.get('warnings', 0))
+                view._stats_failures.value = str(view._extraction_stats.get('failures', 0))
 
             async def _do_show_summary(_):
                 view._show_extraction_summary(mode)
