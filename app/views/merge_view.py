@@ -31,6 +31,7 @@ class MergeView(ft.Column):
     log_presenter: LogPresenter
     only_lang_checkbox: ft.Checkbox
     process_zh_cn_switch: ft.Switch
+    _view_registry: list[dict] | None = None
     patchouli_skip_zh_cn_switch: ft.Switch
     patchouli_threshold_field: ft.TextField
     zh_en_letter_threshold_field: ft.TextField
@@ -77,6 +78,29 @@ class MergeView(ft.Column):
         except (ValueError, TypeError):
             return None
 
+    def set_view_registry(self, registry: list[dict]) -> None:
+        """讓 main.py 傳入 view registry，藉此廣播更新到 ConfigView。"""
+        self._view_registry = registry
+
+    def _broadcast_config_change_to_config_view(self) -> None:
+        """當 MergeView 改動 config 時，通知已存在的 ConfigView 重新讀取。"""
+        if self._view_registry is None:
+            return
+        for item in self._view_registry:
+            view = item.get('view')
+            if view is None:
+                continue
+            wrapped = view.content if hasattr(view, 'content') else view
+            inner = wrapped.content if hasattr(wrapped, 'content') else wrapped
+            if hasattr(inner, 'controls_map') and hasattr(inner, 'load_config'):
+                try:
+                    from translation_tool.utils.config_manager import load_config
+                    cfg = load_config()
+                    from app.views.config.config_actions import load_config_into_view
+                    load_config_into_view(inner, cfg)
+                except Exception:
+                    pass
+
     def _on_merge_field_changed(self, key: str, value: Any) -> None:
         """寫入 lang_merger 單一欄位到 config.json，支援兩邊同步。"""
         try:
@@ -85,6 +109,7 @@ class MergeView(ft.Column):
                 cfg["lang_merger"] = {}
             cfg["lang_merger"][key] = value
             save_config(cfg)
+            self._broadcast_config_change_to_config_view()
         except Exception:
             pass
 
