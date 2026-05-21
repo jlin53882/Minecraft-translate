@@ -335,7 +335,7 @@ def test_extractor_view_skip_zh_cn_switch_has_label(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
 
-    assert view.skip_zh_cn_switch.label == '跳過 zh_cn 抽取'
+    assert view.skip_zh_cn_switch.label == 'Lang 模式跳過 zh_cn'
     assert view.skip_zh_cn_switch.value is False
 
 

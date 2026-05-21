@@ -101,7 +101,7 @@ class ExtractorView(ft.Column):
         self.output_dir_helper_text = ft.Text("", size=12, color=ft.Colors.GREY_600)
 
         self.skip_zh_cn_switch = ft.Switch(
-            label="跳過 zh_cn 抽取",
+            label="Lang 模式跳過 zh_cn",
             value=False,
         )
 
