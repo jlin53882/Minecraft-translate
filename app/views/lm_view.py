@@ -313,11 +313,13 @@ class LMView(ft.Column):
                 if status == "DONE":
                     async def _do_done(_=None):
                         self._set_status("任務完成", theme.GREEN_200)
+                        self.progress_bar.value = 0
                     self._page.run_task(_do_done, None)
                     self._ui_timer_running = False
                 elif status == "ERROR":
                     async def _do_err(_=None):
                         self._set_status("任務發生錯誤", theme.RED_200)
+                        self.progress_bar.value = 0
                     self._page.run_task(_do_err, None)
                     self._ui_timer_running = False
 
