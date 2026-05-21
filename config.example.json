@@ -102,11 +102,7 @@
     }
   },
   "output_bundler": {
-    "output_zip_name": "可使用翻譯.zip",
-    "source_folders": {
-      "assets": "zh_tw_generated/assets",
-      "root": "zh_tw_generated/pack_mcmeta"
-    }
+        "output_zip_name": "可使用翻譯.zip"
   },
   "lang_merger": {
     "pending_folder_name": "待翻譯",

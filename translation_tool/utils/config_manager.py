@@ -230,11 +230,7 @@ DEFAULT_CONFIG = {
         },
     },
     "output_bundler": {
-        "output_zip_name": "可使用翻譯.zip",
-        "source_folders": {
-            "assets": "zh_tw_generated/assets",
-            "root": "zh_tw_generated/pack_mcmeta",
-        },
+        "output_zip_name": "可使用翻譯.zip"
     },
     "jar_extractor": {
         "lang_codes": ["en_us", "zh_cn", "zh_tw"],
