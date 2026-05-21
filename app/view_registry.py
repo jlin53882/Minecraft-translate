@@ -36,7 +36,7 @@ _VIEW_IMPORT_MAP = {
     'extractor': ('app.views.extractor_view', 'ExtractorView', True),
     'lm': ('app.views.lm_view', 'LMView', True),
     'merge': ('app.views.merge_view', 'MergeView', True),
-    'pipeline': ('app.views.pipeline_view', 'PipelineView', True),
+    'pipeline': ('app.views.pipeline.pipeline_view', 'PipelineView', True),
 }
 
 def _lazy_import_view(view_key: str, page: ft.Page, file_picker: ft.FilePicker):
