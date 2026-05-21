@@ -645,6 +645,7 @@ class PipelineView(ft.Column):
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.CENTER,
+            hint_text="空白用預設值",
         )
         self._merge_zh_en_threshold_field = ft.TextField(
             value=zh_en_threshold,
@@ -652,6 +653,7 @@ class PipelineView(ft.Column):
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.CENTER,
+            hint_text="空白用預設值",
         )
 
         def close_dialog(dialog):
@@ -663,7 +665,6 @@ class PipelineView(ft.Column):
             enabled = bool(self._merge_process_zh_cn_switch.value)
             self._merge_patchouli_skip_switch.disabled = not enabled
             self._merge_patchouli_threshold_field.disabled = not enabled
-            self._merge_zh_en_threshold_field.disabled = not enabled
             if not enabled:
                 self._merge_patchouli_skip_switch.value = False
 
@@ -787,6 +788,12 @@ class PipelineView(ft.Column):
                 ft.Text("（需開啟才能調整下方 Patchouli 設定）", size=11, color=GREY_600),
             ]),
             ft.Divider(),
+            ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=12),
+            ft.Row([
+                self._merge_zh_en_threshold_field,
+                ft.Text("超過此數值判定為英文，用於 lang 過濾，空白用預設值 2", size=10, color=GREY_600),
+            ]),
+            ft.Divider(),
             ft.Text("Patchouli 進階設定", weight="bold", size=13),
             ft.Row(
                 [
@@ -803,14 +810,6 @@ class PipelineView(ft.Column):
                             ft.Text("en_us 跳過門檻", weight=ft.FontWeight.W_500, size=12),
                             self._merge_patchouli_threshold_field,
                             ft.Text("有效翻譯比例 0.0~1.0，空白用預設值 0.5", size=10, color=GREY_600),
-                        ],
-                        expand=1,
-                    ),
-                    ft.Column(
-                        [
-                            ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=12),
-                            self._merge_zh_en_threshold_field,
-                            ft.Text("超過此數值判定為英文，空白用預設值 2", size=10, color=GREY_600),
                         ],
                         expand=1,
                     ),
