@@ -622,12 +622,22 @@ class ConfigView(ft.Column):
                 ),
                 ft.Container(height=8),
                 ft.Text("Patchouli 進階設定", weight=ft.FontWeight.W_600, size=14),
-                ft.Row(
+                ft.Column(
                     [
-                        ft.Column([self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"]], expand=1),
-                        ft.Column([self.controls_map["lang_merger.patchouli_effective_translation_threshold"]], expand=1),
-                        ft.Column([self.controls_map["lang_merger.zh_en_letter_threshold"]], expand=1),
-                    ]
+                        ft.Row(
+                            [
+                                ft.Column([self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"]], expand=1),
+                                ft.Column([self.controls_map["lang_merger.patchouli_effective_translation_threshold"]], expand=1),
+                                ft.Column([self.controls_map["lang_merger.zh_en_letter_threshold"]], expand=1),
+                            ]
+                        ),
+                        ft.Text(
+                            "允許 zh_cn 觸發跳過 en_us｜en_us 跳過門檻（0.0~1.0，預設 0.5）｜zh 英文含量閾值（預設 2，超過判定為英文）",
+                            size=11,
+                            color=theme.GREY_600,
+                        ),
+                    ],
+                    spacing=2,
                 ),
             ],
         )
