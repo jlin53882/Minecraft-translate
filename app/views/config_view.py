@@ -622,12 +622,34 @@ class ConfigView(ft.Column):
                 ),
                 ft.Container(height=8),
                 ft.Text("Patchouli 進階設定", weight=ft.FontWeight.W_600, size=14),
-                ft.Row(
+                ft.Column(
                     [
-                        ft.Column([self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"]], expand=1),
-                        ft.Column([self.controls_map["lang_merger.patchouli_effective_translation_threshold"]], expand=1),
-                        ft.Column([self.controls_map["lang_merger.zh_en_letter_threshold"]], expand=1),
-                    ]
+                        ft.Column(
+                            [
+                                ft.Text("允許 zh_cn 觸發跳過 en_us", weight=ft.FontWeight.W_500, size=13),
+                                self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"],
+                                ft.Text("當 zh_cn 翻譯足夠好時，跳過對應 en_us", size=11, color=theme.GREY_600),
+                            ],
+                            expand=1,
+                        ),
+                        ft.Column(
+                            [
+                                ft.Text("en_us 跳過門檻", weight=ft.FontWeight.W_500, size=13),
+                                self.controls_map["lang_merger.patchouli_effective_translation_threshold"],
+                                ft.Text("有效翻譯比例閾值 0.0~1.0，空白用預設值 0.5", size=11, color=theme.GREY_600),
+                            ],
+                            expand=1,
+                        ),
+                        ft.Column(
+                            [
+                                ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=13),
+                                self.controls_map["lang_merger.zh_en_letter_threshold"],
+                                ft.Text("超過此數值判定為英文，空白用預設值 2", size=11, color=theme.GREY_600),
+                            ],
+                            expand=1,
+                        ),
+                    ],
+                    spacing=4,
                 ),
             ],
         )
