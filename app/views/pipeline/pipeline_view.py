@@ -661,14 +661,10 @@ class PipelineView(ft.Column):
         self._set_buttons_disabled(False)
         self._page.update()
 
-    def _run_translate(self, input_dir: str, output_dir: str, dry_run: bool, write_new_cache: bool, api_keys: list[str]):
+    def _run_translate(self, input_dir: str, output_dir: str, dry_run: bool, write_new_cache: bool):
         session = TaskSession()
         self.progress_panel.set_step_running(3, "啟動翻譯")
         self.progress_panel.add_log(f"▶ 開始：啟動翻譯（{'Dry-Run' if dry_run else '正式'}）")
-
-        if api_keys:
-            import os as os_module
-            os_module.environ["API_KEYS"] = ",".join(api_keys)
 
         def worker():
             try:

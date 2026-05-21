@@ -109,15 +109,12 @@ def open_translate_dialog(
             show_snack_bar("⚠️ 翻譯目標資料夾不存在")
             return
 
-        keys = [tf.value.strip() for tf in api_keys if tf.value.strip()]
-
         close_dialog(dialog)
         on_start_translate(
             input_dir=input_dir or default_input,
             output_dir=output_dir or default_output,
             dry_run=dry_run_switch.value,
             write_new_cache=write_new_cache_switch.value,
-            api_keys=keys,
         )
 
     def pick_input_dir(e=None):
@@ -181,10 +178,6 @@ def open_translate_dialog(
         ft.Text("執行選項", weight="bold", size=13),
         dry_run_switch,
         write_new_cache_switch,
-        ft.Divider(),
-        ft.Text("API Keys（預設使用 Config 設定）", weight="bold", size=13),
-        ft.Container(content=api_keys_container),
-        ft.Button("+ 新增 Key", icon=ft.Icons.ADD, on_click=lambda e: add_key_field()),
     ], spacing=10, tight=False)
 
     dialog = ft.AlertDialog(
