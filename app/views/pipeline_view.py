@@ -272,6 +272,18 @@ class PipelineView(ft.Column):
         snack.open = True
         self._page.update()
 
+    def _safe_int(self, s: str) -> int | None:
+        try:
+            return int(s)
+        except (ValueError, TypeError):
+            return None
+
+    def _safe_float(self, s: str) -> float | None:
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return None
+
     # =============================================================================
     # 抽取資源 Dialog
     # =============================================================================
@@ -590,7 +602,275 @@ class PipelineView(ft.Column):
         dialog.open = True
         self._page.update()
 
-    def _run_extraction(self, mods_dir: str, output_dir: str, mode: str, lang_codes: list[str] | None = None):
+    def _open_merge_dialog(self, e=None):
+        """打開語系比對設定對話框。
+
+        對話框寬度根據視窗大小動態計算（60% 寬度）。
+        輸入來源預填外層 input_path_text（Step 1 輸出），輸出目錄預填 output_path_text。
+        實作互鎖邏輯：process_zh_cn_switch=False → 三個 Patchouli 控制項 Disabled。
+        """
+        dialog_width = int(self._page.width * 0.6)
+        input_source = (self.input_path_text.value or "").strip()
+        output_dir = (self.output_path_text.value or "").strip()
+
+        cfg = load_config()
+        lang_merger_cfg = cfg.get("lang_merger", {})
+        patchouli_skip = lang_merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False)
+        patchouli_threshold = str(lang_merger_cfg.get("patchouli_effective_translation_threshold", 0.5))
+        zh_en_threshold = str(lang_merger_cfg.get("zh_en_letter_threshold", 2))
+
+        self._merge_input_source_field = ft.TextField(
+            label="輸入來源",
+            hint_text=f"自動帶入：{input_source}" if input_source else "留空使用上方設定的路徑",
+            value=input_source,
+            expand=True,
+            border_color=TEAL_700,
+        )
+        self._merge_output_dir_field = ft.TextField(
+            label="輸出目錄",
+            hint_text=f"自動帶入：{output_dir}" if output_dir else "留空使用上方設定的輸出目錄",
+            value=output_dir,
+            expand=True,
+            border_color=TEAL_700,
+        )
+        self._merge_only_lang_checkbox = ft.Checkbox(label="只處理 lang 檔案", value=True)
+        self._merge_process_zh_cn_switch = ft.Switch(label="處理 zh_cn 檔案", value=True)
+        self._merge_patchouli_skip_switch = ft.Switch(
+            label="允許 zh_cn 觸發跳過 en_us",
+            value=patchouli_skip,
+        )
+        self._merge_patchouli_threshold_field = ft.TextField(
+            value=patchouli_threshold,
+            width=100,
+            dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            text_align=ft.TextAlign.CENTER,
+        )
+        self._merge_zh_en_threshold_field = ft.TextField(
+            value=zh_en_threshold,
+            width=80,
+            dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            text_align=ft.TextAlign.CENTER,
+        )
+
+        def close_dialog(dialog):
+            dialog.open = False
+            self._page.update()
+
+        def _update_patchouli_controls():
+            """根據 process_zh_cn_switch 更新 Patchouli 控制項的 Disabled 狀態。"""
+            enabled = bool(self._merge_process_zh_cn_switch.value)
+            self._merge_patchouli_skip_switch.disabled = not enabled
+            self._merge_patchouli_threshold_field.disabled = not enabled
+            self._merge_zh_en_threshold_field.disabled = not enabled
+            if not enabled:
+                self._merge_patchouli_skip_switch.value = False
+
+        def on_zh_cn_switch_changed(e):
+            _update_patchouli_controls()
+            self._page.update()
+
+        self._merge_process_zh_cn_switch.on_change = on_zh_cn_switch_changed
+        _update_patchouli_controls()
+
+        def pick_input_source(e=None):
+            async def do_pick():
+                result = await self.file_picker.get_directory_path()
+                if result:
+                    self._merge_input_source_field.value = result
+                    self._page.update()
+            self._page.run_task(do_pick)
+
+        def browse_input_source(e=None):
+            path = (self._merge_input_source_field.value or "").strip()
+            if path and os.path.isdir(path):
+                os.startfile(path)
+            elif not path:
+                self._show_snack_bar("⚠️ 請先選擇資料夾")
+            else:
+                self._show_snack_bar("⚠️ 路徑不存在")
+
+        def pick_output_dir(e=None):
+            async def do_pick():
+                result = await self.file_picker.get_directory_path()
+                if result:
+                    self._merge_output_dir_field.value = result
+                    self._page.update()
+            self._page.run_task(do_pick)
+
+        def browse_output_dir(e=None):
+            path = (self._merge_output_dir_field.value or "").strip()
+            if path and os.path.isdir(path):
+                os.startfile(path)
+            elif not path:
+                self._show_snack_bar("⚠️ 請先選擇資料夾")
+            else:
+                self._show_snack_bar("⚠️ 路徑不存在")
+
+        def show_preview_result(dialog):
+            input_src = (self._merge_input_source_field.value or "").strip()
+            output = (self._merge_output_dir_field.value or "").strip()
+            if not input_src:
+                self._show_snack_bar("⚠️ 請填寫輸入來源")
+                return
+            if not output:
+                self._show_snack_bar("⚠️ 請填寫輸出目錄")
+                return
+            self._show_snack_bar("🔍 預覽功能待實作")
+            close_dialog(dialog)
+
+        def start_merge(dialog):
+            input_src = (self._merge_input_source_field.value or "").strip()
+            output = (self._merge_output_dir_field.value or "").strip()
+            if not input_src:
+                self._show_snack_bar("⚠️ 輸入來源為必填欄位")
+                return
+            if not os.path.isdir(input_src):
+                self._show_snack_bar("⚠️ 輸入來源資料夾不存在")
+                return
+            if not output:
+                self._show_snack_bar("⚠️ 輸出目錄為必填欄位")
+                return
+            if not os.path.isdir(output):
+                self._show_snack_bar("⚠️ 輸出目錄不存在")
+                return
+
+            only_lang = self._merge_only_lang_checkbox.value
+            process_zh_cn = self._merge_process_zh_cn_switch.value
+            patchouli_skip = self._merge_patchouli_skip_switch.value
+            patchouli_threshold_val = self._safe_float(
+                (self._merge_patchouli_threshold_field.value or "").strip()
+            ) or 0.5
+            zh_en_val = self._safe_int(
+                (self._merge_zh_en_threshold_field.value or "").strip()
+            ) or 2
+
+            lang_codes = [code for code, cb in self._lang_code_checks.items() if cb.value]
+            if not lang_codes:
+                self._show_snack_bar("⚠️ 請至少選擇一個語言代碼")
+                return
+
+            cfg = load_config()
+            if "lang_merger" not in cfg:
+                cfg["lang_merger"] = {}
+            cfg["lang_merger"]["patchouli_skip_en_us_when_zh_cn_exists"] = patchouli_skip
+            cfg["lang_merger"]["patchouli_effective_translation_threshold"] = patchouli_threshold_val
+            cfg["lang_merger"]["zh_en_letter_threshold"] = zh_en_val
+            from translation_tool.utils.config_manager import save_config
+            save_config(cfg)
+
+            close_dialog(dialog)
+            self._show_progress_panel()
+            self.progress_panel.add_log(f"▶ 開始：語系比對（輸入：{input_src}）")
+            self._run_merge(input_src, output, only_lang, process_zh_cn, patchouli_skip,
+                            patchouli_threshold_val, zh_en_val, lang_codes)
+
+        content = ft.Column([
+            ft.Text("Mod 來源", weight="bold", size=13),
+            ft.Row([
+                self._merge_input_source_field,
+                ft.Button("選擇資料夾", icon=ft.Icons.FOLDER, on_click=pick_input_source),
+                ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_input_source),
+            ]),
+            ft.Text("輸出目錄", weight="bold", size=13),
+            ft.Row([
+                self._merge_output_dir_field,
+                ft.Button("選擇資料夾", icon=ft.Icons.FOLDER_SPECIAL, on_click=pick_output_dir),
+                ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_output_dir),
+            ]),
+            ft.Divider(),
+            ft.Text("語系過濾設定", weight="bold", size=13),
+            self._merge_only_lang_checkbox,
+            ft.Row([
+                self._merge_process_zh_cn_switch,
+                ft.Text("（需開啟才能調整下方 Patchouli 設定）", size=11, color=GREY_600),
+            ]),
+            ft.Divider(),
+            ft.Text("Patchouli 進階設定", weight="bold", size=13),
+            ft.Row(
+                [
+                    ft.Column(
+                        [
+                            ft.Text("允許 zh_cn 觸發跳過 en_us", weight=ft.FontWeight.W_500, size=12),
+                            self._merge_patchouli_skip_switch,
+                            ft.Text("當 zh_cn 翻譯足夠好時，跳過對應 en_us", size=10, color=GREY_600),
+                        ],
+                        expand=1,
+                    ),
+                    ft.Column(
+                        [
+                            ft.Text("en_us 跳過門檻", weight=ft.FontWeight.W_500, size=12),
+                            self._merge_patchouli_threshold_field,
+                            ft.Text("有效翻譯比例 0.0~1.0，空白用預設值 0.5", size=10, color=GREY_600),
+                        ],
+                        expand=1,
+                    ),
+                    ft.Column(
+                        [
+                            ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=12),
+                            self._merge_zh_en_threshold_field,
+                            ft.Text("超過此數值判定為英文，空白用預設值 2", size=10, color=GREY_600),
+                        ],
+                        expand=1,
+                    ),
+                ],
+                spacing=8,
+            ),
+        ], spacing=10, tight=False)
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("🔍 語系比對設定"),
+            content=ft.Container(content=content, width=dialog_width),
+            actions=[
+                ft.TextButton("取消", on_click=lambda e: close_dialog(dialog)),
+                ft.OutlinedButton("預覽結果", icon=ft.Icons.PREVIEW, on_click=lambda e: show_preview_result(dialog)),
+                ft.Button("確定執行", icon=ft.Icons.CHECK, bgcolor=TEAL_700, color=WHITE,
+                          on_click=lambda e: start_merge(dialog)),
+            ],
+        )
+
+        self._page.overlay.append(dialog)
+        dialog.open = True
+        self._page.update()
+
+    def _run_merge(self, input_dir: str, output_dir: str, only_lang: bool, process_zh_cn: bool,
+                   patchouli_skip: bool, patchouli_threshold: float, zh_en_threshold: int,
+                   lang_codes: list[str]):
+        """執行語系比對（背景執行緒）。"""
+        session = TaskSession()
+        self.progress_panel.set_step_running(2, "語系比對")
+        self.progress_panel.add_log(f"▶ 開始：語系比對（輸入：{input_dir}）")
+
+        def worker():
+            try:
+                os.makedirs(output_dir, exist_ok=True)
+                from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
+                run_merge_zip_batch_service(
+                    input_dir=input_dir,
+                    output_dir=output_dir,
+                    session=session,
+                    only_lang=only_lang,
+                    process_zh_cn=process_zh_cn,
+                    patchouli_skip_en_us_when_zh_cn_exists=patchouli_skip,
+                    patchouli_effective_translation_threshold=patchouli_threshold,
+                    zh_en_letter_threshold=zh_en_threshold,
+                    lang_codes=lang_codes,
+                )
+
+                async def do_finish(_):
+                    self.progress_panel.finish_step(2, not session.error)
+                    if not session.error:
+                        self.progress_panel.add_log("✅ 語系比對完成")
+                self._page.run_task(do_finish, None)
+            except Exception as ex:
+                async def do_err(_):
+                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", False)
+                self._page.run_task(do_err, None)
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._poll_session(session)
         """執行抽取資源（背景執行緒）。
 
         Args:
@@ -678,9 +958,7 @@ class PipelineView(ft.Column):
         if not output_val:
             self._show_snack_bar("⚠️ 請填寫輸出目錄路徑")
             return
-        self._show_progress_panel()
-        self.progress_panel.add_log("▶ 開始：語系比對")
-        self.progress_panel.finish_step(2, True)
+        self._open_merge_dialog()
 
     def _on_translate_click(self, e=None):
         input_val = (self.input_path_text.value or "").strip()
