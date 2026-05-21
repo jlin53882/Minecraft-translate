@@ -117,6 +117,7 @@ def _build_pick_button(view, target):
 
 
 def _build_action_zone(
+    view,
     extract_row: list[ft.Control],
     preview_row: list[ft.Control],
 ) -> ft.Container:
@@ -145,6 +146,15 @@ def _build_action_zone(
                 ft.Container(height=2),
                 preview_label,
                 ft.Row(preview_row, spacing=10),
+                ft.Container(height=4),
+                ft.Row(
+                    controls=[
+                        view.skip_zh_cn_switch,
+                        ft.Text("跳過 zh_cn 抽取", size=12, color=theme.GREY_600),
+                    ],
+                    spacing=8,
+                    alignment=ft.MainAxisAlignment.START,
+                ),
             ],
         ),
         padding=ft.Padding(left=12, top=10, right=12, bottom=10),
@@ -198,23 +208,9 @@ def build_settings_panel(view) -> ft.Column:
                 border_radius=8,
                 bgcolor=ft.Colors.WHITE,
             ),
-            # --- 跳過開關 ---
-            ft.Container(
-                content=ft.Row(
-                    controls=[
-                        view.skip_zh_cn_switch,
-                        ft.Text("跳過 zh_cn 抽取", size=13, color=theme.GREY_700),
-                    ],
-                    spacing=8,
-                    alignment=ft.MainAxisAlignment.START,
-                ),
-                padding=ft.Padding(left=10, top=8, right=10, bottom=8),
-                border=ft.Border.all(1, theme.GREY_200),
-                border_radius=6,
-                bgcolor=ft.Colors.WHITE,
-            ),
-            # --- 動作區 ---
+            # --- 動作區（包含跳過開關）---
             _build_action_zone(
+                view,
                 extract_row=[
                     view.lang_button,
                     view.book_button,
