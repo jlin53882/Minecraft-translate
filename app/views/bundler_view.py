@@ -466,6 +466,7 @@ class BundlerView(ft.Column):
                 if update.get("error"):
                     async def _do_error(_=None):
                         self.progress_bar.color = theme.ERROR
+                        self.progress_bar.value = 0
                         self._page.update()
                     self._page.run_task(_do_error)
                 self._page.run_task(self._scroll_log)
@@ -477,6 +478,7 @@ class BundlerView(ft.Column):
             self._page.run_task(_do_error_log)
         finally:
             async def _do_finish(_=None):
+                self.progress_bar.value = 0
                 self.progress_bar.visible = False
                 self._page.update()
             self._page.run_task(_do_finish)
