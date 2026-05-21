@@ -114,15 +114,15 @@ def open_one_click_dialog(
     wizard_content: ft.Container = None
 
     def rebuild_ui():
-        for d in dialogs:
+        for d in list(dialogs):
             d.open = False
             if d in page.overlay:
                 page.overlay.remove(d)
+        dialogs.clear()
 
         step = state["step"]
 
-        if step_label:
-            step_label.value = f"{step}/4"
+        step_label.value = f"{step}/4"
 
         dlg = build_dialog(step)
         dialogs.append(dlg)
@@ -131,7 +131,7 @@ def open_one_click_dialog(
         page.update()
 
     def close_all():
-        for d in dialogs:
+        for d in list(dialogs):
             d.open = False
             if d in page.overlay:
                 page.overlay.remove(d)
