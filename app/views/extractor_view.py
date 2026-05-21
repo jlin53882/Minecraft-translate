@@ -522,6 +522,7 @@ class ExtractorView(ft.Column):
             self.status_text.value = '狀態：閒置'
             self.progress_bar.value = 0
             self.progress_bar.color = ft.Colors.BLUE
+            self._progress_pct.value = "0%"
             self.set_controls_disabled(False)
             self.page.update()
         except Exception:

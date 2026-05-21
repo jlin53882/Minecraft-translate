@@ -305,3 +305,70 @@ def test_auto_fill_output_path_falls_back_to_default_on_unknown_mode(monkeypatch
     view._auto_fill_output_path('/test/mods', mode='unknown_mode')
 
     assert Path(view.output_dir_textfield.value).name == 'mods_custom_lang'
+
+
+def test_extractor_view_progress_pct_label(monkeypatch):
+    """測試 _progress_pct 百分比標籤存在且初始為 '0%'"""
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(mock_page(), mock_filepicker())
+
+    assert hasattr(view, '_progress_pct')
+    assert view._progress_pct.value == '0%'
+    assert isinstance(view._progress_pct, ft.Text)
+
+
+def test_extractor_view_stats_badge_texts(monkeypatch):
+    """測試統計徽章文字存在（_stats_success, _stats_warnings, _stats_failures）"""
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(mock_page(), mock_filepicker())
+
+    assert hasattr(view, '_stats_success')
+    assert hasattr(view, '_stats_warnings')
+    assert hasattr(view, '_stats_failures')
+    assert view._stats_success.value == '0'
+    assert view._stats_warnings.value == '0'
+    assert view._stats_failures.value == '0'
+
+
+def test_extractor_view_skip_zh_cn_switch_has_label(monkeypatch):
+    """測試 skip_zh_cn_switch 有 label 且文字為 '跳過 zh_cn 抽取'"""
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(mock_page(), mock_filepicker())
+
+    assert view.skip_zh_cn_switch.label == '跳過 zh_cn 抽取'
+    assert view.skip_zh_cn_switch.value is False
+
+
+def test_extractor_view_main_layout_is_column(monkeypatch):
+    """測試 build_main_layout 回傳 ft.Column（單欄垂直）"""
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(mock_page(), mock_filepicker())
+
+    from app.views.extractor.extractor_panels import build_main_layout
+    layout = build_main_layout(view)
+    assert isinstance(layout, ft.Column)
+    assert layout.scroll == ft.ScrollMode.ADAPTIVE
+
+
+def test_extractor_view_logs_panel_has_fixed_height(monkeypatch):
+    """測試日誌面板的 log_view Container 有固定高度 350"""
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(mock_page(), mock_filepicker())
+
+    from app.views.extractor.extractor_panels import build_logs_panel
+    panel = build_logs_panel(view)
+    log_container = panel.controls[1]
+    assert log_container.height == 350
+
+
+def test_extractor_view_status_bar_has_left_border(monkeypatch):
+    """測試狀態列有 4px 左側邊線"""
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(mock_page(), mock_filepicker())
+
+    from app.views.extractor.extractor_panels import build_logs_panel
+    panel = build_logs_panel(view)
+    status_bar = panel.controls[0]
+    assert status_bar.border is not None
+    assert status_bar.border.left.width == 4
+    assert status_bar.border.left.color == ft.Colors.GREY_400
