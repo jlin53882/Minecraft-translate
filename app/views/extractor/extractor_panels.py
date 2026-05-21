@@ -1,3 +1,29 @@
+"""extractor_panels.py - JAR 提取頁面面板建構器。
+
+本模組負責 ExtractorView 的 UI 面板組合，提供以下面板：
+
+Layout（最外層）：
+  - build_main_layout() → ft.Column（單欄垂直：設定在上，日誌在下）
+
+Settings（左欄）：
+  - build_settings_panel() → 路徑設定卡片 + 動作區卡片 + 統計徽章
+
+Logs（右欄）：
+  - build_logs_panel() → 狀態列 + 日誌檢視器（固定高度 350dp，可滾動）
+
+面板構建工具：
+  - _build_status_bar() → 狀態列（4px 左側彩色邊線 + status_text + 進度條 + 百分比）
+  - _build_stats_badge() → 統計徽章（成功/跳過/失敗即時計數）
+  - _build_path_row() → 路徑輸入列（icon 前綴 + TextField + 選擇按鈕）
+  - _build_action_zone() → 動作區卡片（執行按鈕 + 預覽按鈕 + 跳過開關）
+  - _build_pick_button() → 目錄選擇 IconButton
+
+設計原則：
+  - 所有面板皆使用 build_* 命名，內部工具用 _build_* 命名
+  - view 實例屬性（如 status_text、progress_bar）由面板函式直接注入
+  - 每個卡片獨立的邊框 + 灰底 radius=10 包裝，統一視覺一致性
+"""
+
 from __future__ import annotations
 
 import flet as ft

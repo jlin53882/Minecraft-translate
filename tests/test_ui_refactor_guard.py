@@ -12,7 +12,6 @@ def _read(rel: str) -> str:
 def test_views_use_shared_components_and_no_local_styled_card():
     targets = [
         "app/views/translation_view.py",
-        "app/views/extractor_view.py",
         "app/views/lm_view.py",
         "app/views/merge_view.py",
     ]
@@ -21,6 +20,11 @@ def test_views_use_shared_components_and_no_local_styled_card():
         src = _read(rel)
         assert "styled_card(" in src, f"{rel} should use styled_card"
         assert "def _styled_card(" not in src, f"{rel} should not keep local _styled_card"
+
+    # extractor_view.py 現在透過 extractor_panels.py 組裝，不直接使用 styled_card
+    extractor_src = _read("app/views/extractor_view.py")
+    assert "styled_card(" not in extractor_src
+    assert "def _styled_card(" not in extractor_src
 
 
 def test_config_and_rules_use_shared_buttons():
