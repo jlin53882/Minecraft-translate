@@ -54,9 +54,10 @@ def _save_app_config(config: dict[str, Any]):
 
     # Normalization: if process_zh_cn_files is False, force-dependent fields to False
     # 防止不一致狀態寫入磁碟（例如 UI 只勾選「停用簡中處理」但忘記一併關閉相關選項）
-    if not config.get("process_zh_cn_files", True):
-        config["skip_zh_cn_when_only_process_lang"] = False
-        config["patchouli_skip_en_us_when_zh_cn_exists"] = False
+    merger_cfg = config.get("lang_merger", {})
+    if not merger_cfg.get("process_zh_cn_files", True):
+        config.setdefault("lang_merger", merger_cfg)["skip_zh_cn_when_only_process_lang"] = False
+        config.setdefault("lang_merger", merger_cfg)["patchouli_skip_en_us_when_zh_cn_exists"] = False
 
     from translation_tool.utils.config_manager import save_config
 
