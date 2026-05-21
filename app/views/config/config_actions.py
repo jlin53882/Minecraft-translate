@@ -84,7 +84,19 @@ def load_config_into_view(view, config: dict):
         view.keys_column.controls.append(row)
 
 def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, validate_api_keys_from_ui_fn, registry=None):
-    """從 view UI 控制項收集使用者輸入並儲存至 config.json。"""
+    """從 view UI 控制項收集使用者輸入並寫入 config.json。
+
+    寫入流程：
+      1. load_config_json_fn() → 取得三層合併後的設定（作為基底）
+      2. 從 view 控制項讀取新值，更新到基底 dict
+      3. save_config_json_fn(new_config) → 寫入 config.json（觸發 normalization）
+      4. view.load_config() → 重新讀取並刷新 UI（顯示寫入後的實際值）
+
+    注意：基底來自 load_config_json_fn()，代表：
+      - 如果 config.json 存在，會讀取使用者的實際設定（含自訂值）
+      - 如果 config.json 不存在，會拿到 DEFAULT_CONFIG 的值
+      → 按儲存後，使用者的「預設值」就會固化進 config.json（Layer 1 覆蓋 Layer 2/3）
+    """
     new_config = load_config_json_fn()
     if 'ftb_translator' not in new_config:
         new_config['ftb_translator'] = {}

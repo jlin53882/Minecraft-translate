@@ -30,7 +30,14 @@ CONFIG_PATH = PROJECT_ROOT / "config.json"
 EXAMPLE_PATH = PROJECT_ROOT / "config.example.json"
 
 def load_config_example() -> dict:
-    """讀取 config.example.json，不存在或解析失敗時回傳空 dict。"""
+    """讀取 config.example.json，不存在或解析失敗時回傳空 dict。
+
+    注意：config.example.json 屬於 repo 原始碼的一部分，
+    不會被複製進使用者的實際工作目錄。只有 load_config() 在
+    Layer 2 fallback 時會嘗試讀取它。
+
+    用途：新版本安裝時補足 config.json 缺少的新欄位。
+    """
     if not EXAMPLE_PATH.exists():
         return {}
     try:
@@ -283,6 +290,9 @@ def load_config(config_path: str | os.PathLike | None = None) -> dict:
     resolved_config_path = resolve_project_path(config_path or CONFIG_PATH)
 
     # Layer 3: DEFAULT_CONFIG as base
+    # 為什麼用 DEFAULT_CONFIG 而不是空 dict 作為起點？
+    # 因為 DEFAULT_CONFIG 是「唯一真相來源」——所有欄位都應該有定義值，
+    # example 只是用來補新欄位（example 多的欄位），不是用來覆蓋 DEFAULT 已有的值。
     base = copy.deepcopy(DEFAULT_CONFIG)
 
     # Layer 2: config.example.json
