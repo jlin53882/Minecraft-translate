@@ -621,6 +621,16 @@ class ConfigView(ft.Column):
                     ]
                 ),
                 ft.Container(height=8),
+                ft.Text("語系過濾設定", weight=ft.FontWeight.W_600, size=14),
+                ft.Column(
+                    [
+                        ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=13),
+                        self.controls_map["lang_merger.zh_en_letter_threshold"],
+                        ft.Text("超過此數值判定為英文，用於 lang 過濾，空白用預設值 2", size=11, color=theme.GREY_600),
+                    ],
+                    spacing=2,
+                ),
+                ft.Container(height=8),
                 ft.Text("Patchouli 進階設定", weight=ft.FontWeight.W_600, size=14),
                 ft.Row(
                     [
@@ -637,14 +647,6 @@ class ConfigView(ft.Column):
                                 ft.Text("en_us 跳過門檻", weight=ft.FontWeight.W_500, size=13),
                                 self.controls_map["lang_merger.patchouli_effective_translation_threshold"],
                                 ft.Text("有效翻譯比例閾值 0.0~1.0，空白用預設值 0.5", size=11, color=theme.GREY_600),
-                            ],
-                            expand=1,
-                        ),
-                        ft.Column(
-                            [
-                                ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=13),
-                                self.controls_map["lang_merger.zh_en_letter_threshold"],
-                                ft.Text("超過此數值判定為英文，空白用預設值 2", size=11, color=theme.GREY_600),
                             ],
                             expand=1,
                         ),

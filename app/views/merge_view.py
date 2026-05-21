@@ -237,6 +237,25 @@ class MergeView(ft.Column):
                         size=12,
                         color=theme.GREY_600,
                     ),
+                    ft.Container(height=6),
+                    ft.Row(
+                        [
+                            ft.Text(
+                                "zh 英文含量閾值",
+                                weight=ft.FontWeight.W_500,
+                                size=14,
+                                expand=True,
+                            ),
+                            self.zh_en_letter_threshold_field,
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Text(
+                        "超過此數值判定為英文，用於 lang 過濾，預設 2。",
+                        size=12,
+                        color=theme.GREY_600,
+                    ),
                 ],
                 spacing=6,
             ),
@@ -314,25 +333,6 @@ class MergeView(ft.Column):
                                 ),
                                 ft.Text(
                                     "預設 0.5，範圍 0.0 ~ 1.0。",
-                                    size=12,
-                                    color=theme.GREY_600,
-                                ),
-                                ft.Container(height=6),
-                                ft.Row(
-                                    [
-                                        ft.Text(
-                                            "zh 英文含量閾值",
-                                            weight=ft.FontWeight.W_500,
-                                            size=14,
-                                            expand=True,
-                                        ),
-                                        self.zh_en_letter_threshold_field,
-                                    ],
-                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                ),
-                                ft.Text(
-                                    "超過此數值判定為英文內容，預設 2。",
                                     size=12,
                                     color=theme.GREY_600,
                                 ),
