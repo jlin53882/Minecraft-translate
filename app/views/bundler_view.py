@@ -469,11 +469,9 @@ class BundlerView(ft.Column):
                     self._page.update()
                 self._page.run_task(self._scroll_log)
         except Exception as ex:
-            async def _do_error_log(_=None):
-                self.log_view.controls.append(ft.Text(f"[錯誤] {ex}", size=12, color="red"))
-                self.progress_bar.color = theme.RED
-                self._page.update()
-            self._page.run_task(_do_error_log)
+            self.log_view.controls.append(ft.Text(f"[錯誤] {ex}", size=12, color="red"))
+            self.progress_bar.color = theme.RED
+            self._page.update()
         finally:
             self.progress_bar.value = 0
             self.progress_bar.visible = False
