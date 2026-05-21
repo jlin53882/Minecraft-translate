@@ -128,7 +128,7 @@ class MergeView(ft.Column):
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.CENTER,
             on_change=lambda e: self._on_merge_field_changed(
-                "patchouli_effective_translation_threshold", float(e.control.value)
+                "patchouli_effective_translation_threshold", float(e.control.value) if e.control.value.strip() else 0.5
             ),
         )
         # zh_en_letter_threshold: zh_tw 英文含量的閾值
@@ -140,7 +140,7 @@ class MergeView(ft.Column):
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.CENTER,
             on_change=lambda e: self._on_merge_field_changed(
-                "zh_en_letter_threshold", int(e.control.value)
+                "zh_en_letter_threshold", int(e.control.value) if e.control.value.strip() else 2
             ),
         )
         # _zh_cn_disabled_note: 提示文字，當 process_zh_cn_switch=False 時顯示
