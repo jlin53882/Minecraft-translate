@@ -622,7 +622,7 @@ class ConfigView(ft.Column):
                 ),
                 ft.Container(height=8),
                 ft.Text("Patchouli 進階設定", weight=ft.FontWeight.W_600, size=14),
-                ft.Column(
+                ft.Row(
                     [
                         ft.Column(
                             [
@@ -649,7 +649,7 @@ class ConfigView(ft.Column):
                             expand=1,
                         ),
                     ],
-                    spacing=4,
+                    spacing=8,
                 ),
             ],
         )
