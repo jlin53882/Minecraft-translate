@@ -162,6 +162,18 @@ DEFAULT_CONFIG = {
                 "modpack",
                 "official website",
                 "patreon",
+                "Twitter",
+                "Modrinth",
+                "CurseForge",
+                "Crowdin",
+                "Twitch",
+                "Wiki",
+                "Minecraft",
+                "Forge",
+                "YouTube",
+                "Reddit",
+                "Ko-fi",
+                "Flattr",
             ],
             # 要翻譯 key 相對名稱
             "translatable_keywords": [
@@ -180,6 +192,9 @@ DEFAULT_CONFIG = {
                 "footer",
                 "heading",
                 "effects",
+                "category",
+                "link_text",
+                "pages.title",
             ],
         },
         # patchouli 讀取資料夾路徑
