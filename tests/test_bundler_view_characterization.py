@@ -160,7 +160,7 @@ def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
 
     view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
 
-    assert view.progress_bar.value == 1.0
+    assert view.progress_bar.value == 0  # finally resets to 0 after completion
 
 
 def test_bundling_worker_with_version_info(monkeypatch):
