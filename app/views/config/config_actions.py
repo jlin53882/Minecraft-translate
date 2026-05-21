@@ -157,62 +157,15 @@ def load_config_into_view(view, config: dict):
 
     注意：傳入的 `config` 已經是 load_config() 三層合併後的結果。
     三層 priority：config.json（用戶）> config.example.json > DEFAULT_CONFIG。
-    因此這裡直接用 config.get() 取值，不需要額外的 or get_default() fallback。
+    因此這裡直接用 config.get() 取值，不需要額外的 fallback。
 
     對於 list 欄位（dir_names、skip_terms、translatable_keywords），
     空清單 [] 是用戶的有效設定，會直接保留，不會被 DEFAULT 值置換。
     """
-    ex = _load_example_config()
-
-    view.controls_map['logging.log_level'].value = config.get('logging', {}).get('log_level') or ex.get('logging', {}).get('log_level') or DEFAULT_LOG_LEVEL
-    view.controls_map['logging.log_dir'].value = config.get('logging', {}).get('log_dir') or ex.get('logging', {}).get('log_dir') or DEFAULT_LOG_DIR
-    view.controls_map['translator.output_dir_name'].value = config.get('translator', {}).get('output_dir_name') or ex.get('translator', {}).get('output_dir_name') or DEFAULT_OUTPUT_DIR_NAME
-    view.controls_map['ftb_translator.output_dir_name'].value = config.get('ftb_translator', {}).get('output_dir_name') or ex.get('ftb_translator', {}).get('output_dir_name') or DEFAULT_FTB_OUTPUT_DIR
-    view.controls_map['translator.replace_rules_path'].value = config.get('translator', {}).get('replace_rules_path') or ex.get('translator', {}).get('replace_rules_path') or DEFAULT_REPLACE_RULES_PATH
-    view.controls_map['translator.cache_directory'].value = config.get('translator', {}).get('cache_directory') or ex.get('translator', {}).get('cache_directory') or DEFAULT_CACHE_DIRECTORY
-    view.controls_map['translator.enable_cache_saving'].value = config.get('translator', {}).get('enable_cache_saving')
-    view.controls_map['translator.parallel_execution_workers'].value = str(config.get('translator', {}).get('parallel_execution_workers') or ex.get('translator', {}).get('parallel_execution_workers') or DEFAULT_PARALLEL_WORKERS)
-    view.controls_map['species_cache.cache_directory'].value = config.get('species_cache', {}).get('cache_directory') or ex.get('species_cache', {}).get('cache_directory') or DEFAULT_SPECIES_CACHE_DIR
-    view.controls_map['species_cache.cache_filename'].value = config.get('species_cache', {}).get('cache_filename') or ex.get('species_cache', {}).get('cache_filename') or DEFAULT_SPECIES_CACHE_FILENAME
-    view.controls_map['species_cache.wikipedia_language'].value = config.get('species_cache', {}).get('wikipedia_language') or ex.get('species_cache', {}).get('wikipedia_language') or DEFAULT_WIKIPEDIA_LANGUAGE
-    view.controls_map['species_cache.wikipedia_rate_limit_delay'].value = str(config.get('species_cache', {}).get('wikipedia_rate_limit_delay') or ex.get('species_cache', {}).get('wikipedia_rate_limit_delay') or DEFAULT_WIKIPEDIA_RATE_LIMIT_DELAY)
-    view.controls_map['lm_translator.temperature'].value = str(config.get('lm_translator', {}).get('temperature') or ex.get('lm_translator', {}).get('temperature') or DEFAULT_LM_TEMPERATURE)
-    view.controls_map['lm_translator.rate_limit.timeout'].value = str(config.get('lm_translator', {}).get('rate_limit', {}).get('timeout') or ex.get('lm_translator', {}).get('rate_limit', {}).get('timeout') or DEFAULT_RATE_LIMIT_TIMEOUT)
-    view.controls_map['lm_translator.rate_limit.sleep_seconds_between_batches'].value = str(config.get('lm_translator', {}).get('rate_limit', {}).get('sleep_seconds_between_batches') or ex.get('lm_translator', {}).get('rate_limit', {}).get('sleep_seconds_between_batches') or DEFAULT_RATE_LIMIT_SLEEP)
-    view.controls_map['output_bundler.output_zip_name'].value = config.get('output_bundler', {}).get('output_zip_name') or ex.get('output_bundler', {}).get('output_zip_name') or DEFAULT_OUTPUT_ZIP_NAME
-    view.controls_map['lang_merger.pending_folder_name'].value = config.get('lang_merger', {}).get('pending_folder_name') or ex.get('lang_merger', {}).get('pending_folder_name') or DEFAULT_PENDING_FOLDER
-    view.controls_map['lang_merger.pending_organized_folder_name'].value = config.get('lang_merger', {}).get('pending_organized_folder_name') or ex.get('lang_merger', {}).get('pending_organized_folder_name') or DEFAULT_ORGANIZED_FOLDER
-    view.controls_map['lang_merger.filtered_pending_min_count'].value = str(config.get('lang_merger', {}).get('filtered_pending_min_count') or ex.get('lang_merger', {}).get('filtered_pending_min_count') or DEFAULT_FILTERED_MIN_COUNT)
-    pending_name = config.get('lang_merger', {}).get('pending_folder_name') or ex.get('lang_merger', {}).get('pending_folder_name') or DEFAULT_PENDING_FOLDER
-    organized_name = config.get('lang_merger', {}).get('pending_organized_folder_name') or ex.get('lang_merger', {}).get('pending_organized_folder_name') or DEFAULT_ORGANIZED_FOLDER
-    min_count = config.get('lang_merger', {}).get('filtered_pending_min_count') or ex.get('lang_merger', {}).get('filtered_pending_min_count') or DEFAULT_FILTERED_MIN_COUNT
-    view.controls_map['lang_merger.pending_folder_name'].label = f"待翻譯資料夾名稱（目前：{pending_name}）"
-    view.controls_map['lang_merger.pending_organized_folder_name'].label = f"整理資料夾名稱（目前：{organized_name}）"
-    view.controls_map['lang_merger.filtered_pending_min_count'].label = f"「{organized_name}」key最小出現次數（目前：{min_count}）"
-    view.controls_map['lang_merger.quarantine_folder_name'].value = config.get('lang_merger', {}).get('quarantine_folder_name') or ex.get('lang_merger', {}).get('quarantine_folder_name') or DEFAULT_QUARANTINE_FOLDER
-    view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value = config.get('lang_merger', {}).get('patchouli_skip_en_us_when_zh_cn_exists') or ex.get('lang_merger', {}).get('patchouli_skip_en_us_when_zh_cn_exists') or False
-    view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value = str(config.get('lang_merger', {}).get('patchouli_effective_translation_threshold') or ex.get('lang_merger', {}).get('patchouli_effective_translation_threshold') or 0.5)
-    view.controls_map['lang_merger.zh_en_letter_threshold'].value = str(config.get('lang_merger', {}).get('zh_en_letter_threshold') or ex.get('lang_merger', {}).get('zh_en_letter_threshold') or 2)
-    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = int(config.get('lm_translator', {}).get('initial_batch_size_patchouli') or ex.get('lm_translator', {}).get('initial_batch_size_patchouli') or DEFAULT_BATCH_PATCHOULI)
-    view.controls_map['lm_translator.initial_batch_size_lang'].value = int(config.get('lm_translator', {}).get('initial_batch_size_lang') or ex.get('lm_translator', {}).get('initial_batch_size_lang') or DEFAULT_BATCH_LANG)
-    view.controls_map['lm_translator.initial_batch_size_ftb'].value = int(config.get('lm_translator', {}).get('initial_batch_size_ftb') or ex.get('lm_translator', {}).get('initial_batch_size_ftb') or DEFAULT_BATCH_FTB)
-    view.controls_map['lm_translator.initial_batch_size_kubejs'].value = int(config.get('lm_translator', {}).get('initial_batch_size_kubejs') or ex.get('lm_translator', {}).get('initial_batch_size_kubejs') or DEFAULT_BATCH_KUBEJS)
-    view.controls_map['lm_translator.initial_batch_size_md'].value = int(config.get('lm_translator', {}).get('initial_batch_size_md') or ex.get('lm_translator', {}).get('initial_batch_size_md') or DEFAULT_BATCH_MD)
-    view.controls_map['lm_translator.min_batch_size'].value = int(config.get('lm_translator', {}).get('min_batch_size') or ex.get('lm_translator', {}).get('min_batch_size') or DEFAULT_MIN_BATCH_SIZE)
-    view.controls_map['lm_translator.batch_shrink_factor'].value = float(config.get('lm_translator', {}).get('batch_shrink_factor') or ex.get('lm_translator', {}).get('batch_shrink_factor') or DEFAULT_BATCH_SHRINK_FACTOR)
-    view.controls_map['lm_translator.patchouli_system_prompt'].value = str(config.get('lm_translator', {}).get('patchouli_system_prompt') or ex.get('lm_translator', {}).get('patchouli_system_prompt') or DEFAULT_PATCHOULI_SYSTEM_PROMPT)
-    view.controls_map['lm_translator.lang_system_prompt'].value = str(config.get('lm_translator', {}).get('lang_system_prompt') or ex.get('lm_translator', {}).get('lang_system_prompt') or DEFAULT_LANG_SYSTEM_PROMPT)
-    view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(config.get('lm_translator', {}).get('patchouli', {}).get('dir_names') or ex.get('lm_translator', {}).get('patchouli', {}).get('dir_names') or DEFAULT_PATHOULI_DIR_NAMES)
-    view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('skip_terms') or ex.get('lm_translator', {}).get('translator', {}).get('skip_terms') or DEFAULT_SKIP_TERMS)
-    view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('translatable_keywords') or ex.get('lm_translator', {}).get('translator', {}).get('translatable_keywords') or DEFAULT_TRANSLATABLE_KEYWORDS)
-
-    view.controls_map['extractor.output_folder_names.lang_extract'].value = config.get('extractor', {}).get('output_folder_names', {}).get('lang_extract') or ex.get('extractor', {}).get('output_folder_names', {}).get('lang_extract') or DEFAULT_LANG_EXTRACT
-    view.controls_map['extractor.output_folder_names.book_extract'].value = config.get('extractor', {}).get('output_folder_names', {}).get('book_extract') or ex.get('extractor', {}).get('output_folder_names', {}).get('book_extract') or DEFAULT_BOOK_EXTRACT
-    view.controls_map['extractor.output_folder_names.lang_preview'].value = config.get('extractor', {}).get('output_folder_names', {}).get('lang_preview') or ex.get('extractor', {}).get('output_folder_names', {}).get('lang_preview') or DEFAULT_LANG_PREVIEW
-    view.controls_map['extractor.output_folder_names.book_preview'].value = config.get('extractor', {}).get('output_folder_names', {}).get('book_preview') or ex.get('extractor', {}).get('output_folder_names', {}).get('book_preview') or DEFAULT_BOOK_PREVIEW
-    view.controls_map['extractor.output_folder_names.dual_extract'].value = config.get('extractor', {}).get('output_folder_names', {}).get('dual_extract') or ex.get('extractor', {}).get('output_folder_names', {}).get('dual_extract') or DEFAULT_DUAL_EXTRACT
-    view.controls_map['extractor.output_folder_names.dual_preview'].value = config.get('extractor', {}).get('output_folder_names', {}).get('dual_preview') or ex.get('extractor', {}).get('output_folder_names', {}).get('dual_preview') or DEFAULT_DUAL_PREVIEW
-
+    log_cfg = config.get('logging', {})
+    trans_cfg = config.get('translator', {})
+    ftb_cfg = config.get('ftb_translator', {})
+    species_cfg = config.get('species_cache', {})
     lm_cfg = config.get('lm_translator', {})
     bundle_cfg = config.get('output_bundler', {})
 
@@ -232,23 +185,35 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lm_translator.rate_limit.timeout'].value = str((lm_cfg.get('rate_limit') or {}).get('timeout', 600))
     view.controls_map['lm_translator.rate_limit.sleep_seconds_between_batches'].value = str((lm_cfg.get('rate_limit') or {}).get('sleep_seconds_between_batches', 0.0))
     view.controls_map['output_bundler.output_zip_name'].value = bundle_cfg.get('output_zip_name')
-    view.controls_map['lang_merger.pending_folder_name'].value = config.get('lang_merger', {}).get('pending_folder_name')
-    view.controls_map['lang_merger.pending_organized_folder_name'].value = config.get('lang_merger', {}).get('pending_organized_folder_name')
-    view.controls_map['lang_merger.filtered_pending_min_count'].value = str(config.get('lang_merger', {}).get('filtered_pending_min_count'))
-    view.controls_map['lm_translator.lm_translate_folder_name'].value = str(config.get('lm_translator', {}).get('lm_translate_folder_name'))
-    view.controls_map['lm_translator.patchouli_system_prompt'].value = str(config.get('lm_translator', {}).get('patchouli_system_prompt'))
-    view.controls_map['lm_translator.lang_system_prompt'].value = str(config.get('lm_translator', {}).get('lang_system_prompt'))
-    view.controls_map['lang_merger.quarantine_folder_name'].value = config.get('lang_merger', {}).get('quarantine_folder_name')
-    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = int(config.get('lm_translator', {}).get('initial_batch_size_patchouli') or ex.get('lm_translator', {}).get('initial_batch_size_patchouli') or DEFAULT_BATCH_PATCHOULI)
-    view.controls_map['lm_translator.initial_batch_size_lang'].value = int(config.get('lm_translator', {}).get('initial_batch_size_lang') or ex.get('lm_translator', {}).get('initial_batch_size_lang') or DEFAULT_BATCH_LANG)
-    view.controls_map['lm_translator.initial_batch_size_ftb'].value = int(config.get('lm_translator', {}).get('initial_batch_size_ftb') or ex.get('lm_translator', {}).get('initial_batch_size_ftb') or DEFAULT_BATCH_FTB)
-    view.controls_map['lm_translator.initial_batch_size_kubejs'].value = int(config.get('lm_translator', {}).get('initial_batch_size_kubejs') or ex.get('lm_translator', {}).get('initial_batch_size_kubejs') or DEFAULT_BATCH_KUBEJS)
-    view.controls_map['lm_translator.initial_batch_size_md'].value = int(config.get('lm_translator', {}).get('initial_batch_size_md') or ex.get('lm_translator', {}).get('initial_batch_size_md') or DEFAULT_BATCH_MD)
-    view.controls_map['lm_translator.min_batch_size'].value = int(config.get('lm_translator', {}).get('min_batch_size') or ex.get('lm_translator', {}).get('min_batch_size') or DEFAULT_MIN_BATCH_SIZE)
-    view.controls_map['lm_translator.batch_shrink_factor'].value = float(config.get('lm_translator', {}).get('batch_shrink_factor') or ex.get('lm_translator', {}).get('batch_shrink_factor') or DEFAULT_BATCH_SHRINK_FACTOR)
-    view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(lm_cfg.get('patchouli', {}).get('dir_names', []) or ex.get('lm_translator', {}).get('patchouli', {}).get('dir_names') or DEFAULT_PATHOULI_DIR_NAMES)
-    view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(lm_cfg.get('translator', {}).get('skip_terms', []) or ex.get('lm_translator', {}).get('translator', {}).get('skip_terms') or DEFAULT_SKIP_TERMS)
-    view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(lm_cfg.get('translator', {}).get('translatable_keywords', []) or ex.get('lm_translator', {}).get('translator', {}).get('translatable_keywords') or DEFAULT_TRANSLATABLE_KEYWORDS)
+
+    lang_merger_cfg = config.get('lang_merger', {})
+    view.controls_map['lang_merger.pending_folder_name'].value = lang_merger_cfg.get('pending_folder_name')
+    view.controls_map['lang_merger.pending_organized_folder_name'].value = lang_merger_cfg.get('pending_organized_folder_name')
+    view.controls_map['lang_merger.filtered_pending_min_count'].value = str(lang_merger_cfg.get('filtered_pending_min_count'))
+    pending_name = lang_merger_cfg.get('pending_folder_name')
+    organized_name = lang_merger_cfg.get('pending_organized_folder_name')
+    min_count = lang_merger_cfg.get('filtered_pending_min_count')
+    view.controls_map['lang_merger.pending_folder_name'].label = f"待翻譯資料夾名稱（目前：{pending_name}）"
+    view.controls_map['lang_merger.pending_organized_folder_name'].label = f"整理資料夾名稱（目前：{organized_name}）"
+    view.controls_map['lang_merger.filtered_pending_min_count'].label = f"「{organized_name}」key最小出現次數（目前：{min_count}）"
+    view.controls_map['lang_merger.quarantine_folder_name'].value = lang_merger_cfg.get('quarantine_folder_name')
+    view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value = lang_merger_cfg.get('patchouli_skip_en_us_when_zh_cn_exists')
+    view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value = str(lang_merger_cfg.get('patchouli_effective_translation_threshold'))
+    view.controls_map['lang_merger.zh_en_letter_threshold'].value = str(lang_merger_cfg.get('zh_en_letter_threshold'))
+
+    view.controls_map['lm_translator.lm_translate_folder_name'].value = str(lm_cfg.get('lm_translate_folder_name'))
+    view.controls_map['lm_translator.patchouli_system_prompt'].value = str(lm_cfg.get('patchouli_system_prompt'))
+    view.controls_map['lm_translator.lang_system_prompt'].value = str(lm_cfg.get('lang_system_prompt'))
+    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = int(lm_cfg.get('initial_batch_size_patchouli'))
+    view.controls_map['lm_translator.initial_batch_size_lang'].value = int(lm_cfg.get('initial_batch_size_lang'))
+    view.controls_map['lm_translator.initial_batch_size_ftb'].value = int(lm_cfg.get('initial_batch_size_ftb'))
+    view.controls_map['lm_translator.initial_batch_size_kubejs'].value = int(lm_cfg.get('initial_batch_size_kubejs'))
+    view.controls_map['lm_translator.initial_batch_size_md'].value = int(lm_cfg.get('initial_batch_size_md'))
+    view.controls_map['lm_translator.min_batch_size'].value = int(lm_cfg.get('min_batch_size'))
+    view.controls_map['lm_translator.batch_shrink_factor'].value = float(lm_cfg.get('batch_shrink_factor'))
+    view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(lm_cfg.get('patchouli', {}).get('dir_names', []))
+    view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(lm_cfg.get('translator', {}).get('skip_terms', []))
+    view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(lm_cfg.get('translator', {}).get('translatable_keywords', []))
 
     extractor_cfg = config.get('extractor', {})
     folder_names = extractor_cfg.get('output_folder_names', {})
@@ -260,26 +225,22 @@ def load_config_into_view(view, config: dict):
     view.controls_map['extractor.output_folder_names.dual_preview'].value = folder_names.get('dual_preview')
 
     view.models_column.controls.clear()
-    raw_models = lm_cfg.get('models')
-    if raw_models:
-        models_cfg = raw_models
-    elif hasattr(view, 'DEFAULT_MODELS'):
+    models_cfg = lm_cfg.get('models')
+    if 'models' not in lm_cfg:
         models_cfg = {name: {'enabled': enabled} for name, enabled in view.DEFAULT_MODELS.items()}
     else:
-        models_cfg = {}
+        models_cfg = models_cfg or {}
     for name, cfg in models_cfg.items():
         view.add_model_row(name)
         view.models_column.controls[-1]._checkbox.value = bool(cfg.get('enabled', False))
 
     view.key_fields.clear()
     view.keys_column.controls.clear()
-    raw_keys = lm_cfg.get('keys')
-    if isinstance(raw_keys, list) and hasattr(view, '_build_key_field'):
-        for key in raw_keys:
-            tf = view._build_key_field(value=key)
-            row = view._build_key_row(tf)
-            view.key_fields.append(tf)
-            view.keys_column.controls.append(row)
+    for key in lm_cfg.get('keys', []):
+        tf = view._build_key_field(value=key)
+        row = view._build_key_row(tf)
+        view.key_fields.append(tf)
+        view.keys_column.controls.append(row)
 
 
 def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, validate_api_keys_from_ui_fn, registry=None):
