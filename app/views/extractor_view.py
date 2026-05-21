@@ -55,7 +55,7 @@ class ExtractorView(ft.Column):
             page: Flet Page 物件
             file_picker: Flet FilePicker 物件
         """
-        super().__init__(expand=True, spacing=15)
+        super().__init__(expand=True, spacing=15, scroll=ft.ScrollMode.ADAPTIVE)
         self._page = page
         self.file_picker = file_picker
 
