@@ -42,13 +42,13 @@ class BundlerView(ft.Column):
             content_padding=10,
             on_change=self._on_version_search_change,
         )
-        self.version_list = ft.ListView(
+        self.version_expanded = False
+        self._version_item_list = ft.ListView(
             expand=True,
-            height=200,
-            spacing=4,
+            height=140,
+            spacing=3,
             auto_scroll=False,
         )
-        self.version_expanded = False
         self.description_field = ft.TextField(
             label="檔案敘述",
             hint_text="直接輸入文字，或使用 § 顏色代碼",
@@ -121,29 +121,49 @@ class BundlerView(ft.Column):
     def _init_ui(self):
         self._refresh_version_list("")
 
+    def _version_in_range(self, search: str, key: str) -> bool:
+        """Check if search version (e.g., '1.13') falls within range_key (e.g., '1.11~1.14.4')."""
+        if "~" not in key:
+            return search.lower() in key.lower()
+        try:
+            parts = key.split("~")
+            lower = parts[0].strip()
+            upper = parts[1].strip()
+            l_parts = lower.split(".")
+            u_parts = upper.split(".")
+            s_parts = search.split(".")
+            lower_v = (int(l_parts[0]), int(l_parts[1]))
+            upper_v = (int(u_parts[0]), int(u_parts[1]))
+            search_v = (int(s_parts[0]), int(s_parts[1]))
+            return lower_v <= search_v <= upper_v
+        except (ValueError, IndexError):
+            return search.lower() in key.lower()
+
     def _refresh_version_list(self, search_text: str):
-        self.version_list.controls.clear()
-        filtered = [v for v in self.version_data.keys() if search_text.lower() in v.lower()]
+        self._version_item_list.controls.clear()
+        search = search_text.strip()
+        if not search:
+            filtered = list(self.version_data.keys())
+        else:
+            filtered = [v for v in self.version_data.keys() if self._version_in_range(search, v)]
         if not filtered:
-            self.version_list.controls.append(
-                ft.Container(
-                    content=ft.Text(
-                        "請點擊或輸入關鍵字搜尋版本" if search_text else "無可用版本",
-                        size=12,
-                        color=theme.GREY_500,
-                    ),
-                    padding=8,
+            self._version_item_list.controls.append(
+                ft.Text(
+                    "請輸入關鍵字搜尋版本" if search_text else "無可用版本",
+                    size=12,
+                    color=theme.GREY_500,
+                    italic=True,
                 )
             )
         for version_key in filtered:
             item = ft.Container(
-                content=ft.Text(version_key, size=13, text_align=ft.TextAlign.START),
-                padding=8,
-                border=ft.Border.all(1, theme.OUTLINE),
-                border_radius=6,
+                content=ft.Text(f"  {version_key}", size=12, text_align=ft.TextAlign.START),
+                padding=6,
+                border_radius=4,
+                bgcolor=theme.GREY_100,
                 on_click=lambda e, v=version_key: self._select_version(v),
             )
-            self.version_list.controls.append(item)
+            self._version_item_list.controls.append(item)
         self._page.update()
 
     def _on_version_search_change(self, e: ft.ControlEvent):
@@ -153,10 +173,14 @@ class BundlerView(ft.Column):
         log_debug(f"_select_version called: {version}")
         self.version_search.value = version
         self.version_expanded = False
-        self._version_toggle_label.value = version
+        self._version_selected_label.value = version
+        self._version_selected_label.color = theme.GREY_800
         self._version_toggle_icon.name = ft.Icons.EXPAND_LESS
+        self._version_toggle_bar.border = ft.Border(
+            left=ft.BorderSide(3, theme.GREY_400),
+        )
         self.version_dropdown_container_ref.visible = False
-        log_debug(f"_select_version: toggle_label={self._version_toggle_label.value}, expanded={self.version_expanded}")
+        log_debug(f"_select_version: selected_label={self._version_selected_label.value}, expanded={self.version_expanded}")
         self._page.update()
 
     def _toggle_version_expand(self, e: ft.ControlEvent):
@@ -164,36 +188,78 @@ class BundlerView(ft.Column):
         log_debug(f"_toggle_version_expand: version_expanded={self.version_expanded}")
         self.version_dropdown_container_ref.visible = self.version_expanded
         self._version_toggle_icon.name = ft.Icons.EXPAND_MORE if self.version_expanded else ft.Icons.EXPAND_LESS
+        self._version_toggle_bar.border = ft.Border(
+            left=ft.BorderSide(3, theme.BLUE if self.version_expanded else theme.GREY_400),
+        )
         self._page.update()
 
     def _build_controls(self):
         log_debug(f"_build_controls: version_expanded={self.version_expanded}")
-        self._version_toggle_label = ft.Text(self.version_search.value or "", size=12, color=theme.GREY_800, expand=True)
-        self._version_toggle_icon = ft.Icon(ft.Icons.EXPAND_MORE if self.version_expanded else ft.Icons.EXPAND_LESS, size=20)
-        version_toggle = ft.Container(
-            content=ft.Row([
-                ft.Text("選擇版本", size=12, color=theme.GREY_600),
-                self._version_toggle_label,
-                self._version_toggle_icon,
-            ]),
-            on_click=self._toggle_version_expand,
-            padding=8,
-            border=ft.Border.all(1, theme.OUTLINE),
-            border_radius=6,
+
+        self._version_selected_label = ft.Text(
+            "未選擇",
+            size=12,
+            color=theme.GREY_500,
+            expand=True,
         )
-        version_dropdown_container = ft.Container(
-            content=self.version_list,
-            height=180,
-            border=ft.Border.all(1, theme.OUTLINE),
+        self._version_toggle_icon = ft.Icon(
+            ft.Icons.EXPAND_MORE if self.version_expanded else ft.Icons.EXPAND_LESS,
+            size=18,
+        )
+
+        version_toggle_bar = ft.Container(
+            content=ft.Row(
+                [
+                    ft.Text("📦 版本", size=12, color=theme.GREY_600, width=70),
+                    self._version_selected_label,
+                    self._version_toggle_icon,
+                ],
+                spacing=6,
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            ),
+            on_click=self._toggle_version_expand,
+            padding=ft.Padding(left=10, top=8, right=10, bottom=8),
+            border=ft.Border(
+                left=ft.BorderSide(3, theme.BLUE if self.version_expanded else theme.GREY_400),
+            ),
             border_radius=6,
-            padding=4,
+            bgcolor=theme.GREY_50,
+        )
+        self._version_toggle_bar = version_toggle_bar
+
+        version_search_field = ft.TextField(
+            hint_text="🔍 搜尋版本...",
+            expand=True,
+            border_color=theme.OUTLINE,
+            content_padding=8,
+            on_change=self._on_version_search_change,
+        )
+        self._version_search_field = version_search_field
+
+        version_dropdown_body = ft.Column(
+            [
+                ft.Container(version_search_field, padding=ft.Padding(left=0, top=0, right=0, bottom=4)),
+                ft.Container(
+                    self._version_item_list,
+                    border=ft.Border.all(1, theme.GREY_200),
+                    border_radius=4,
+                    padding=4,
+                ),
+            ],
+            spacing=4,
+        )
+        self._version_dropdown_body = version_dropdown_body
+
+        version_dropdown_container = ft.Container(
+            content=version_dropdown_body,
             visible=False,
         )
         self.version_dropdown_container_ref = version_dropdown_container
-        version_section = ft.Column([
-            version_toggle,
-            version_dropdown_container,
-        ], spacing=4)
+
+        version_section = ft.Column(
+            [version_toggle_bar, version_dropdown_container],
+            spacing=2,
+        )
         self._version_section = version_section
 
         description_row = ft.Row(

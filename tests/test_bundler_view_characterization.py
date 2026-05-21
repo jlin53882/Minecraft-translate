@@ -8,7 +8,7 @@ def test_bundler_view_initializes_core_controls():
 
     assert view.progress_bar.visible is False
     assert hasattr(view, "version_search")
-    assert hasattr(view, "version_list")
+    assert hasattr(view, "_version_item_list")
     assert hasattr(view, "description_field")
     assert hasattr(view, "pack_image_field")
     assert hasattr(view, "root_dir_field")
@@ -31,20 +31,20 @@ def test_bundler_view_extra_folders_list_initialized():
     assert len(view.extra_folders_view.controls) == 0
 
 
-def test_bundler_view_version_list():
+def test_bundler_view__version_item_list():
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
 
     assert hasattr(view, "version_search")
-    assert hasattr(view, "version_list")
+    assert hasattr(view, "_version_item_list")
     assert hasattr(view, "version_data")
 
 
-def test_bundler_view_version_list():
+def test_bundler_view__version_item_list():
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
 
-    assert hasattr(view, "version_list")
+    assert hasattr(view, "_version_item_list")
     assert hasattr(view, "version_expanded")
     assert view.version_expanded is False
 
@@ -324,10 +324,10 @@ def test_bundler_view_append_log_adds_control():
 
     assert len(view.log_view.controls) >= 1
 
-def test_bundler_view_version_list_exists():
+def test_bundler_view__version_item_list_exists():
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
-    assert view.version_list is not None
+    assert view._version_item_list is not None
 
 
 def test_bundler_view_version_search_exists():
