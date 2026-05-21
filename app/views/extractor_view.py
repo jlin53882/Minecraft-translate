@@ -28,7 +28,7 @@ from app.views.extractor.extractor_actions import (
     update_stats_from_log,
 )
 from app.views.extractor.extractor_state import ExtractionState
-from app.views.extractor.extractor_panels import build_logs_card, build_settings_card, build_pick_button
+from app.views.extractor.extractor_panels import build_main_layout
 
 class ExtractorView(ft.Column):
     """JAR 提取頁（UI）。
@@ -159,15 +159,14 @@ class ExtractorView(ft.Column):
             on_click=lambda e: self.show_preview("dual"),
         )
 
-        # 3. Status Display
-        self.status_text = ft.Text("狀態：閒置", size=14, color=theme.GREY_700)
+        # 3. Status Display (now built in panels)
+        self.status_text = ft.Text("狀態：閒置", size=13, color=theme.GREY_700, weight=ft.FontWeight.W_500)
         self.progress_bar = ft.ProgressBar(
-            value=0,
-            visible=True,
-            height=8,
+            value=0, height=8, visible=True,
             bgcolor=theme.GREY_200,
             color=theme.BLUE,
         )
+        self._progress_pct = ft.Text("0%", size=12, color=theme.GREY_600, weight=ft.FontWeight.BOLD)
 
         # 4. Logs Console
         self.log_view = ft.ListView(
@@ -180,29 +179,28 @@ class ExtractorView(ft.Column):
         # ======================
         # Layout Composition
         # ======================
-        self.controls = [
-            self._build_settings_card(),
-            self._build_logs_card(),
-        ]
+        self.controls = [build_main_layout(self)]
 
         # 初始化 output_dir helper，動態讀取設定值
         self._update_output_dir_helper()
 
     def _build_settings_card(self):
-        """构建设置卡片 UI 组件"""
-        # delegate to panel builder; actual card仍使用 shared styled_card(...)
-        return build_settings_card(self)
+        """构建设置卡片 UI 组件（已由 build_main_layout 取代，保留以通過既有測試）"""
+        from app.views.extractor.extractor_panels import build_settings_panel
+        return build_settings_panel(self)
 
     def _build_logs_card(self):
-        """构建日志卡片 UI 组件"""
-        return build_logs_card(self)
+        """构建日志卡片 UI 组件（已由 build_main_layout 取代，保留以通過既有測試）"""
+        from app.views.extractor.extractor_panels import build_logs_panel
+        return build_logs_panel(self)
 
     # ==================================================
     # UI helpers
     # ==================================================
     def _pick_button(self, target):
         """构建目录选择按钮"""
-        return build_pick_button(self, target)
+        from app.views.extractor.extractor_panels import _build_pick_button
+        return _build_pick_button(self, target)
 
     def pick_directory(self, target):
         """開啟目錄選擇對話框。
