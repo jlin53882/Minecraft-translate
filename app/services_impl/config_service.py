@@ -34,10 +34,13 @@ REPLACE_RULES_PATH = str(PROJECT_ROOT / "replace_rules.json")
 def _load_app_config() -> dict[str, Any]:
     """讀取 app 設定（service 層唯一入口）。
 
+    回傳 load_config() 三層合併後的結果，而非原始 JSON。
+    這樣確保 UI 顯示的都是完整的設定值（即使 config.json 缺欄位）。
+
     維護目的：
     - 把 service 層對 config_manager 的依賴集中在單一地方。
     - 未來若要改設定來源（例如環境變數/多設定檔/快取），優先改這裡，
-      避免 service 各處散落 `load_config()` 呼叫點。
+      避免 service 各處散落 load_config() 呼叫點。
     """
 
     from translation_tool.utils.config_manager import load_config
@@ -52,11 +55,19 @@ def _save_app_config(config: dict[str, Any]):
     - 之後若要加上寫入驗證/寫入鎖/異動通知，也集中在這裡處理。
     """
 
-    # Normalization: if process_zh_cn_files is False, force-dependent fields to False
-    # 防止不一致狀態寫入磁碟（例如 UI 只勾選「停用簡中處理」但忘記一併關閉相關選項）
-    if not config.get("process_zh_cn_files", True):
-        config["skip_zh_cn_when_only_process_lang"] = False
-        config["patchouli_skip_en_us_when_zh_cn_exists"] = False
+    # Normalization: 當停用簡中處理時，強制關閉所有相依的子功能。
+    #
+    # 為什麼在 save 時做這件事？
+    # 因為 UI 的 Checkbox 是獨立的，使用者可能只打勾「停用簡中處理」，
+    # 但忘記一併關閉「簡中時跳過英文」或「patchouli 簡中優先」等子選項。
+    # normalize 確保這組相依功能的一致性不會被破壞。
+    #
+    # 邏輯：lang_merger.process_zh_cn_files = false → skip_zh_cn_* = false
+    # 這樣下次讀取時，不會因為某個子功能仍為 true 而產生矛盾的行為。
+    merger_cfg = config.get("lang_merger", {})
+    if not merger_cfg.get("process_zh_cn_files", True):
+        config.setdefault("lang_merger", merger_cfg)["skip_zh_cn_when_only_process_lang"] = False
+        config.setdefault("lang_merger", merger_cfg)["patchouli_skip_en_us_when_zh_cn_exists"] = False
 
     from translation_tool.utils.config_manager import save_config
 
@@ -80,11 +91,11 @@ def save_replace_rules(rules):
     """
     save_rules_core(REPLACE_RULES_PATH, rules)
 
-def load_config_json():
-    """載入應用程式設定。
+def load_config_json() -> dict:
+    """載入應用程式設定（UI 層專用包裝）。
 
-    回傳：
-        dict: 設定資料
+    包裝 _load_app_config()，讓 view 層不需要知道底層實作。
+    回傳的是 load_config() 三層合併後的結果。
     """
     return _load_app_config()
 
