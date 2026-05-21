@@ -154,6 +154,8 @@ class BundlerView(ft.Column):
         self.version_search.value = version
         self.version_expanded = False
         self._version_toggle_label.value = version
+        self._version_toggle_icon.name = ft.Icons.EXPAND_LESS
+        self.version_dropdown_container_ref.visible = False
         log_debug(f"_select_version: toggle_label={self._version_toggle_label.value}, expanded={self.version_expanded}")
         self._page.update()
 
@@ -161,16 +163,18 @@ class BundlerView(ft.Column):
         self.version_expanded = not self.version_expanded
         log_debug(f"_toggle_version_expand: version_expanded={self.version_expanded}")
         self.version_dropdown_container_ref.visible = self.version_expanded
+        self._version_toggle_icon.name = ft.Icons.EXPAND_MORE if self.version_expanded else ft.Icons.EXPAND_LESS
         self._page.update()
 
     def _build_controls(self):
         log_debug(f"_build_controls: version_expanded={self.version_expanded}")
         self._version_toggle_label = ft.Text(self.version_search.value or "", size=12, color=theme.GREY_800, expand=True)
+        self._version_toggle_icon = ft.Icon(ft.Icons.EXPAND_MORE if self.version_expanded else ft.Icons.EXPAND_LESS, size=20)
         version_toggle = ft.Container(
             content=ft.Row([
                 ft.Text("選擇版本", size=12, color=theme.GREY_600),
                 self._version_toggle_label,
-                ft.Icon(ft.Icons.EXPAND_MORE if self.version_expanded else ft.Icons.EXPAND_LESS, size=20),
+                self._version_toggle_icon,
             ]),
             on_click=self._toggle_version_expand,
             padding=8,
