@@ -93,6 +93,8 @@ def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
     view.controls_map['lang_merger.filtered_pending_min_count'].value = '2'
     view.controls_map['lm_translator.lm_translate_folder_name'].value = 'LM翻譯後'
     view.controls_map['lang_merger.quarantine_folder_name'].value = 'skip'
+    view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value = '0.5'
+    view.controls_map['lang_merger.zh_en_letter_threshold'].value = '2'
     view.controls_map['lm_translator.patchouli_system_prompt'].value = 'p'
     view.controls_map['lm_translator.lang_system_prompt'].value = 'l'
     view.controls_map['lm_translator.initial_batch_size_patchouli'].value = '1'

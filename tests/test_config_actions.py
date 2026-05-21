@@ -107,7 +107,11 @@ class TestLoadConfigIntoViewLangMergerLabels:
         cfg = {
             'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
             'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {},
+            'output_bundler': {}, 'lang_merger': {
+                'pending_folder_name': '待翻譯',
+                'pending_organized_folder_name': '待翻譯整理需翻譯',
+                'filtered_pending_min_count': 3,
+            },
             'lm_translator': {
                 'temperature': 0.3, 'rate_limit': {}, 'patchouli_system_prompt': 'p',
                 'lang_system_prompt': 'l', 'translator': {'skip_terms': [], 'translatable_keywords': []},
@@ -308,10 +312,12 @@ class TestLoadConfigIntoViewPatchouliSettings:
         cfg = {
             'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
             'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
+'output_bundler': {}, 'lang_merger': {
                 'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理',
                 'filtered_pending_min_count': 3, 'quarantine_folder_name': 'q',
                 'patchouli_skip_en_us_when_zh_cn_exists': True,
+                'patchouli_effective_translation_threshold': 0.5,
+                'zh_en_letter_threshold': 2,
             },
             'lm_translator': {
                 'temperature': 0.3, 'rate_limit': {},
@@ -407,6 +413,9 @@ class TestLoadConfigIntoViewPatchouliSettings:
             'output_bundler': {}, 'lang_merger': {
                 'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理',
                 'filtered_pending_min_count': 3, 'quarantine_folder_name': 'q',
+                'patchouli_skip_en_us_when_zh_cn_exists': False,
+                'patchouli_effective_translation_threshold': 0.5,
+                'zh_en_letter_threshold': 2,
             },
             'lm_translator': {
                 'temperature': 0.3, 'rate_limit': {},

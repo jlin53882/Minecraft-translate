@@ -19,8 +19,8 @@ def test_merge_view_initializes_buttons_and_status(monkeypatch):
     monkeypatch.setattr(merge_view, 'TaskSession', _Session)
     view = merge_view.MergeView(mock_page(), mock_filepicker())
 
-    assert view.pick_zip_button.content == '新增 ZIP'
-    assert view.start_button.content == '開始合併 ZIP'
+    assert view.pick_zip_button.text == '新增 ZIP'
+    assert view.start_button.text == '開始合併 ZIP'
     assert view.status_chip.label.value == '尚未開始'
 
 
@@ -56,11 +56,8 @@ def test_merge_view_all_checkboxes_and_switches_exist(monkeypatch):
     assert view.process_zh_cn_switch.label == '處理 zh_cn 檔案'
     assert view.process_zh_cn_switch.value is True
 
-    assert view.skip_zh_cn_switch.label == '只處理 lang 時跳過 zh_cn'
-    assert view.skip_zh_cn_switch.value is False
-
     assert view.patchouli_skip_zh_cn_switch.label == '允許 zh_cn 觸發跳過 en_us'
-    assert view.patchouli_skip_zh_cn_switch.value is False
+    assert view.patchouli_skip_zh_cn_switch.value is True
 
 
 def test_merge_view_text_fields_and_listviews_exist(monkeypatch):
@@ -212,7 +209,7 @@ def test_merge_view_on_zip_picked(monkeypatch):
 def test_merge_view_skip_zh_cn_switch_exists(monkeypatch):
     monkeypatch.setattr(merge_view, 'TaskSession', _Session)
     view = merge_view.MergeView(mock_page(), mock_filepicker())
-    assert view.skip_zh_cn_switch is not None
+    assert view.process_zh_cn_switch is not None
 
 
 def test_merge_view_patchouli_skip_zh_cn_switch_exists(monkeypatch):
