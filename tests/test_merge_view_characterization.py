@@ -74,7 +74,7 @@ def test_merge_view_text_fields_and_listviews_exist(monkeypatch):
 
     assert view.output_dir_field.label == '輸出資料夾'
     assert isinstance(view.zip_list_view, ft.ListView)
-    assert view.zip_list_view.height == 160
+    assert view.zip_list_view.height is None  # now expand=True, height is None
     assert isinstance(view.log_view, ft.ListView)
     assert isinstance(view.progress_bar, ft.ProgressBar)
 
