@@ -144,6 +144,7 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
                 if current_phase == "book":
                     async def _do_reset_progress(_):
                         view.progress_bar.value = 0.0
+                        view._progress_pct.value = "0%"
                     view.page.run_task(_do_reset_progress, None)
 
             filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
@@ -274,6 +275,7 @@ def start_extraction(view, mode: str):
     view._append_log_line(f'[系統] 開始任務 ({mode})...')
     view.progress_bar.value = 0
     view.progress_bar.color = ft.Colors.BLUE
+    view._progress_pct.value = "0%"
 
     threading.Thread(target=_extraction_worker, args=(view, mode, mods_dir, str(out_path)), daemon=True).start()
 
