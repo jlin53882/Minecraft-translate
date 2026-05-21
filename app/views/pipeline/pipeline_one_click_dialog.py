@@ -110,7 +110,7 @@ def open_one_click_dialog(
     }
 
     dialogs: list[ft.AlertDialog] = []
-    step_label: ft.Text = None
+    step_label = ft.Text(f"{state['step']}/4", size=12, color=GREY_600, weight=ft.FontWeight.W_500)
     wizard_content: ft.Container = None
 
     def rebuild_ui():
