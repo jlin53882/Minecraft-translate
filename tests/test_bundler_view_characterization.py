@@ -1,5 +1,7 @@
 import pytest
+import flet as ft
 from app.views.bundler_view import BundlerView
+from app.ui import theme
 from tests.conftest import mock_page, mock_filepicker
 
 
@@ -14,6 +16,12 @@ def test_bundler_view_initializes_core_controls():
     assert hasattr(view, "root_dir_field")
     assert hasattr(view, "output_zip_field")
     assert hasattr(view, "extra_folders_view")
+    assert hasattr(view, "_version_toggle_bar")
+    assert hasattr(view, "_version_toggle_icon")
+    assert hasattr(view, "_version_selected_label")
+    assert view._version_selected_label.value == "未選擇"
+    assert hasattr(view, "_version_search_field")
+    assert hasattr(view, "_version_dropdown_body")
 
 
 def test_bundler_view_loads_version_data():
@@ -60,13 +68,49 @@ def test_version_toggle_expand():
     assert view.version_expanded is False
 
 
-def test_version_select():
+def test_version_toggle_bar_border_changes_on_expand():
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
 
+    collapsed_border = view._version_toggle_bar.border
+    assert collapsed_border.left.width == 3
+    assert collapsed_border.left.color == theme.GREY_400
+
+    view._toggle_version_expand(None)
+    expanded_border = view._version_toggle_bar.border
+    assert expanded_border.left.width == 3
+    assert expanded_border.left.color == theme.BLUE
+
+    view._toggle_version_expand(None)
+
+
+def test_version_in_range_search_finds_range():
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+
+    assert view._version_in_range("1.13", "1.11~1.14.4") is True
+    assert view._version_in_range("1.11", "1.11~1.14.4") is True
+    assert view._version_in_range("1.14.4", "1.11~1.14.4") is True
+    assert view._version_in_range("1.10", "1.11~1.14.4") is False
+    assert view._version_in_range("1.15", "1.11~1.14.4") is False
+    assert view._version_in_range("1.20.1", "1.19~1.20.1") is True
+    assert view._version_in_range("1.20", "1.19~1.20.1") is True
+    assert view._version_in_range("foobar", "1.11~1.14.4") is False
+
+
+def test_version_select_updates_label_and_collapse():
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+
+    view._toggle_version_expand(None)
+    assert view.version_expanded is True
+
     view._select_version("1.20.1")
     assert view.version_search.value == "1.20.1"
+    assert view._version_selected_label.value == "1.20.1"
+    assert view._version_selected_label.color == theme.GREY_800
     assert view.version_expanded is False
+    assert view._version_toggle_icon.name == ft.Icons.EXPAND_LESS
 
 
 def test_bundler_view_hint_texts():
