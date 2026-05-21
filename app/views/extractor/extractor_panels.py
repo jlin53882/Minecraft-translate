@@ -233,9 +233,10 @@ def build_settings_panel(view) -> ft.Column:
 
 
 def build_logs_panel(view) -> ft.Column:
-    """右欄：狀態列 + 日誌檢視器"""
+    """日誌面板：狀態列 + 日誌檢視器（可滾動）"""
     return ft.Column(
         spacing=10,
+        scroll=ft.ScrollMode.ADAPTIVE,
         controls=[
             _build_status_bar(view),
             ft.Container(
@@ -252,8 +253,9 @@ def build_logs_panel(view) -> ft.Column:
 
 
 def build_main_layout(view) -> ft.Column:
-    """單欄垂直佈局：設定卡片在上，日誌卡片在下"""
+    """單欄垂直佈局：設定卡片在上，日誌卡片在下（均可滾動）"""
     return ft.Column(
+        scroll=ft.ScrollMode.ADAPTIVE,
         spacing=12,
         controls=[
             ft.Container(
