@@ -488,8 +488,10 @@ class MergeView(ft.Column):
                                 "failed_zip_details": failed_zip_details,
                             }
                         self._show_merge_summary(self._merge_stats)
+                        self.progress_bar.value = 0
                     elif status == "ERROR":
                         self._set_status("任務發生錯誤", theme.RED_200)
+                        self.progress_bar.value = 0
 
                     self.progress_bar.value = progress
                     self.log_presenter.sync(self.log_view, logs)
