@@ -81,6 +81,8 @@ class LMView(ft.Column):
 
         # 狀態與日誌
         self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=theme.GREY_200)
+        self._progress_label = ft.Text("📝 就緒", size=13, color="#9ca3af")
+        self._progress_pct = ft.Text("0%", size=13, color="#9ca3af")
         self.progress_bar = ft.ProgressBar(
             value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
@@ -135,6 +137,14 @@ class LMView(ft.Column):
                 content=ft.Column(
                     [
                         ft.Row([self.status_chip], wrap=True),
+                        ft.Row(
+                            [
+                                self._progress_label,
+                                ft.Text(""),
+                                self._progress_pct,
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        ),
                         self.progress_bar,
                     ],
                     spacing=10,
@@ -240,6 +250,10 @@ class LMView(ft.Column):
             )
 
         self._set_status("執行中", theme.BLUE_200)
+        self._progress_label.value = "📝 翻譯中"
+        self._progress_label.color = "#60a5fa"
+        self._progress_pct.value = "0%"
+        self._progress_pct.color = "#60a5fa"
         self.progress_bar.value = 0
         self.log_view.controls.clear()
         self.log_presenter.reset()
@@ -297,13 +311,26 @@ class LMView(ft.Column):
                 status = (snap.get("status") or "").upper()
 
                 async def _do_update(_=None):
+                    pct = int(progress * 100)
                     if status == "DONE":
                         self._set_status("任務完成", theme.GREEN_200)
+                        self._progress_label.value = "✅ 完成"
+                        self._progress_label.color = theme.GREEN
+                        self._progress_pct.value = "100%"
+                        self._progress_pct.color = theme.GREEN
                         self.progress_bar.value = 0
                     elif status == "ERROR":
                         self._set_status("任務發生錯誤", theme.RED_200)
+                        self._progress_label.value = "❌ 發生錯誤"
+                        self._progress_label.color = theme.RED
+                        self._progress_pct.value = "0%"
+                        self._progress_pct.color = theme.RED
                         self.progress_bar.value = 0
                     else:
+                        self._progress_label.value = "📝 翻譯中"
+                        self._progress_label.color = "#60a5fa"
+                        self._progress_pct.value = f"{pct}%"
+                        self._progress_pct.color = "#60a5fa"
                         self.progress_bar.value = progress
                     try:
                         self.log_presenter.sync(self.log_view, logs)
