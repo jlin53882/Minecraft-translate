@@ -63,6 +63,20 @@ class MergeView(ft.Column):
             self.patchouli_skip_zh_cn_switch.value = False
         self.update()
 
+    def _safe_int(self, s: str) -> int | None:
+        """安全轉 int，失敗回 None。"""
+        try:
+            return int(s)
+        except (ValueError, TypeError):
+            return None
+
+    def _safe_float(self, s: str) -> float | None:
+        """安全轉 float，失敗回 None。"""
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return None
+
     def _on_merge_field_changed(self, key: str, value: Any) -> None:
         """寫入 lang_merger 單一欄位到 config.json，支援兩邊同步。"""
         try:
@@ -128,7 +142,8 @@ class MergeView(ft.Column):
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.CENTER,
             on_change=lambda e: self._on_merge_field_changed(
-                "patchouli_effective_translation_threshold", float(e.control.value) if e.control.value.strip() else 0.5
+                "patchouli_effective_translation_threshold",
+                float(v) if (v := e.control.value.strip()) and self._safe_float(v) is not None else 0.5
             ),
         )
         # zh_en_letter_threshold: zh_tw 英文含量的閾值
@@ -140,7 +155,8 @@ class MergeView(ft.Column):
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.CENTER,
             on_change=lambda e: self._on_merge_field_changed(
-                "zh_en_letter_threshold", int(e.control.value) if e.control.value.strip() else 2
+                "zh_en_letter_threshold",
+                int(v) if (v := e.control.value.strip()) and self._safe_int(v) is not None else 2
             ),
         )
         # _zh_cn_disabled_note: 提示文字，當 process_zh_cn_switch=False 時顯示
