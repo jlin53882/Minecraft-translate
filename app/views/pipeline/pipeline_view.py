@@ -31,7 +31,62 @@ from app.views.pipeline.pipeline_extract_dialog import open_extract_dialog
 from app.views.pipeline.pipeline_merge_dialog import open_merge_dialog
 from app.views.pipeline.pipeline_translate_dialog import open_translate_dialog
 from app.views.pipeline.pipeline_bundle_dialog import open_bundle_dialog
-from app.views.pipeline.pipeline_one_click_dialog import open_one_click_dialog
+class PipelineConfig:
+    """一鍵製作路徑設定檔"""
+
+    def __init__(self, input_dir: str, output_dir: str):
+        cfg = load_config()
+        self.input_dir = input_dir
+        self.output_dir = output_dir
+
+        lang_merger = cfg.get("lang_merger", {})
+        bundler = cfg.get("output_bundler", {})
+
+        self.jar_mod_extract = "jar_mod_extract"
+        self.lang_output_subfolder = "_提取lang_輸出"
+        self.book_output_subfolder = "_提取book_輸出"
+
+        self.locale_sort = "locale_sort"
+        self.sort_output_subfolder = "_整理輸出"
+        self.pending_folder = lang_merger.get("pending_folder_name", "待翻譯")
+        self.organized_folder = lang_merger.get("pending_organized_folder_name", "待翻譯整理需翻譯")
+
+        self.lm_translate = "lm_translate"
+        self.translate_output_subfolder = "_翻譯輸出"
+
+        self.output_zip_name = bundler.get("output_zip_name", "可使用翻譯.zip")
+
+    @property
+    def extract_lang_output_dir(self):
+        return os.path.join(self.output_dir, self.jar_mod_extract, self.lang_output_subfolder)
+
+    @property
+    def extract_book_output_dir(self):
+        return os.path.join(self.output_dir, self.jar_mod_extract, self.book_output_subfolder)
+
+    @property
+    def merge_input_dir(self):
+        return os.path.join(self.output_dir, self.jar_mod_extract)
+
+    @property
+    def merge_output_dir(self):
+        return os.path.join(self.output_dir, self.locale_sort, self.sort_output_subfolder)
+
+    @property
+    def translate_input_dir(self):
+        return os.path.join(self.merge_output_dir, self.organized_folder)
+
+    @property
+    def translate_output_dir(self):
+        return os.path.join(self.output_dir, self.lm_translate, self.translate_output_subfolder)
+
+    @property
+    def bundle_input_dir(self):
+        return os.path.join(self.output_dir, self.lm_translate, self.translate_output_subfolder)
+
+    @property
+    def bundle_output_zip(self):
+        return os.path.join(self.output_dir, self.output_zip_name)
 
 
 # =============================================================================
@@ -467,7 +522,141 @@ class PipelineView(ft.Column):
         )
 
     def _on_one_click_execute(self, config: dict):
-        self._show_snack_bar("🔧 一鍵製作邏輯待實作", color=BLUE_700)
+        input_dir = (self.input_path_text.value or "").strip()
+        output_dir = (self.output_path_text.value or "").strip()
+
+        if not input_dir or not os.path.isdir(input_dir):
+            self._show_snack_bar("❌ Mod 來源不存在或未選擇")
+            return
+        if not output_dir or not os.path.isdir(output_dir):
+            self._show_snack_bar("❌ 輸出目錄不存在或未選擇")
+            return
+
+        cfg = PipelineConfig(input_dir, output_dir)
+        mode = config.get("mode", "lang")
+        lang_codes = config.get("lang_codes", [])
+
+        self._show_progress_panel()
+        self._set_buttons_disabled(True)
+
+        def worker():
+            try:
+                session = TaskSession()
+
+                def run_step(step_num, name, service_fn):
+                    self.progress_panel.set_step_running(step_num, name)
+                    self.progress_panel.add_log(f"▶ 開始：{name}")
+                    t = threading.Thread(target=_run_step_worker, args=(service_fn, session), daemon=True)
+                    t.start()
+                    self._poll_session(session)
+                    t.join()
+                    if session.error:
+                        self.progress_panel.add_log(f"❌ {name} 失敗", False)
+                        return False
+                    self.progress_panel.add_log(f"✅ {name} 完成")
+                    return True
+
+                def _run_step_worker(service_fn, session):
+                    try:
+                        service_fn()
+                    except Exception as ex:
+                        session.add_log(f"❌ 錯誤：{ex}")
+                        session.set_error()
+
+                if mode in ("lang", "dual"):
+                    ok = run_step(1, "抽取資源（Lang）", lambda: run_lang_extraction_service(
+                        cfg.input_dir, cfg.extract_lang_output_dir, session, lang_codes=lang_codes))
+                    if not ok:
+                        self._page.run_task(lambda _: self._reenable_buttons())
+                        return
+
+                if mode in ("book", "dual"):
+                    ok = run_step(1, "抽取資源（Book）", lambda: run_book_extraction_service(
+                        cfg.input_dir, cfg.extract_book_output_dir, session, lang_codes=lang_codes))
+                    if not ok:
+                        self._page.run_task(lambda _: self._reenable_buttons())
+                        return
+
+                ok = run_step(2, "語系比對", lambda: run_merge_zip_batch_service(
+                    zip_paths=[cfg.merge_input_dir],
+                    output_dir=output_dir,
+                    session=session,
+                    only_process_lang=True,
+                ))
+                if not ok:
+                    self._page.run_task(lambda _: self._reenable_buttons())
+                    return
+
+                ok = run_step(3, "啟動翻譯", lambda: run_lm_translation_service(
+                    input_dir=cfg.translate_input_dir,
+                    output_dir=cfg.translate_output_dir,
+                    session=session,
+                    dry_run=config.get("dry_run", False),
+                    export_lang=False,
+                    write_new_cache=config.get("write_new_cache", True),
+                ))
+                if not ok:
+                    self._page.run_task(lambda _: self._reenable_buttons())
+                    return
+
+                ok = run_step(4, "打包資源", lambda: self._do_bundle(
+                    input_root_dir=cfg.bundle_input_dir,
+                    output_zip_path=config.get("zip_output") or cfg.bundle_output_zip,
+                    description=config.get("description", ""),
+                    pack_image_path=config.get("pack_image"),
+                    extra_folders=config.get("extra_folders", []),
+                    session=session,
+                ))
+                if not ok:
+                    self._page.run_task(lambda _: self._reenable_buttons())
+                    return
+
+                self.progress_panel.finish_all(True)
+                async def done(_):
+                    self.progress_panel.add_log("✅ 一鍵製作完成！")
+                    self._reenable_buttons()
+                self._page.run_task(done, None)
+
+            except Exception as ex:
+                async def fail(_):
+                    self.progress_panel.add_log(f"❌ 流程失敗：{ex}", False)
+                    self._reenable_buttons()
+                self._page.run_task(fail, None)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _do_bundle(self, input_root_dir: str, output_zip_path: str, description: str,
+                   pack_image_path, extra_folders: list, session: TaskSession):
+        os.makedirs(os.path.dirname(output_zip_path), exist_ok=True)
+        for update_dict in run_bundling_service(
+            input_root_dir=input_root_dir,
+            output_zip_path=output_zip_path,
+            description=description,
+            min_format=0,
+            max_format=0,
+            pack_image_path=pack_image_path,
+            extra_folders=extra_folders or None,
+        ):
+            if update_dict.get("log"):
+                session.add_log(update_dict["log"])
+            if update_dict.get("progress") is not None:
+                session.set_progress(update_dict["progress"])
+            if update_dict.get("error"):
+                session.set_error()
+                return
+
+    def _set_buttons_disabled(self, disabled: bool):
+        for ctrl in self.workbench_view.controls:
+            if isinstance(ctrl, ft.Column):
+                for row in ctrl.controls:
+                    if isinstance(row, ft.Row) and row.spacing == 10:
+                        for btn in row.controls:
+                            if isinstance(btn, ft.Button) and btn.height == 55:
+                                btn.disabled = disabled
+
+    def _reenable_buttons(self, e=None):
+        self._set_buttons_disabled(False)
+        self._page.update()
 
     def _run_translate(self, input_dir: str, output_dir: str, dry_run: bool, write_new_cache: bool, api_keys: list[str]):
         session = TaskSession()
