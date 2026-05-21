@@ -31,6 +31,9 @@ from app.views.pipeline.pipeline_extract_dialog import open_extract_dialog
 from app.views.pipeline.pipeline_merge_dialog import open_merge_dialog
 from app.views.pipeline.pipeline_translate_dialog import open_translate_dialog
 from app.views.pipeline.pipeline_bundle_dialog import open_bundle_dialog
+from app.views.pipeline.pipeline_one_click_dialog import open_one_click_dialog
+
+
 class PipelineConfig:
     """一鍵製作路徑設定檔"""
 

@@ -300,7 +300,7 @@ def open_bundle_dialog(
         ]),
         ft.Text("其他指定資料夾", weight="bold", size=13),
         ft.Container(content=extra_folders_view, border=ft.Border.all(1, GREY_500), border_radius=8, padding=4),
-        ft.Button("+ 新增資料夾", icon=ft.Icons.FOLDER_ADD, on_click=add_extra_folder),
+        ft.Button("+ 新增資料夾", icon=ft.Icons.FOLDER_OPEN, on_click=add_extra_folder),
     ], spacing=10, tight=False)
 
     dialog = ft.AlertDialog(

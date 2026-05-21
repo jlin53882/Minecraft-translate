@@ -449,7 +449,7 @@ def open_one_click_dialog(
             ft.Row([pack_image_field]),
             ft.Text("其他指定資料夾", weight="bold", size=13),
             ft.Container(content=extra_view, border=ft.Border.all(1, GREY_500), border_radius=6, padding=4),
-            ft.Button("+ 新增資料夾", icon=ft.Icons.FOLDER_ADD, on_click=_add_extra),
+            ft.Button("+ 新增資料夾", icon=ft.Icons.FOLDER_OPEN, on_click=_add_extra),
         ], spacing=10, tight=False)
 
     dialog_width = int(page.width * 0.6)
