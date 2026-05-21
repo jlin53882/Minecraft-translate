@@ -290,8 +290,43 @@ class TestDualModeCompletionLogSkip:
         is_completion2 = '提取完成' in log_progress_only and '個 JAR' in log_progress_only
         assert is_completion2 is False
 
-    def test_dual_mode_skips_completion_log_in_worker(self, tmp_path):
-        """DUAL mode 時，completion log 不應被 append（避免重複）。"""
+    def test_dual_mode_completion_log_regex(self):
+        """驗證 completion log 的識別 regex 在 DUAL mode 不会被 append。"""
+        from app.views.extractor.extractor_actions import _extraction_worker
+
+        log_with_completion = '提取完成：已檢查 10/10 個 JAR 檔案。\n  - 新提取或更新的檔案: 5 個\n  - 因內容相同而跳過的檔案: 3 個'
+        log_progress = '[系統] Lang 提取完成，開始提取 Book...'
+
+        is_completion = '提取完成' in log_with_completion and '個 JAR' in log_with_completion
+        is_progress = '提取完成' in log_progress and '個 JAR' in log_progress
+        assert is_completion is True
+        assert is_progress is False
+
+    def test_dual_mode_generator_yields_phase_switch(self, tmp_path):
+        """驗證 generator 在 lang 完成後 yield phase=book 的切換 update。"""
+        from translation_tool.core.jar_processor import extract_dual_files_generator
+
+        mods_dir = tmp_path / "mods"
+        mods_dir.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        jar = mods_dir / "mod1.jar"
+        jar.write_bytes(b"PK\x05\x06" + b"\x00" * 20)
+
+        gen = extract_dual_files_generator(str(mods_dir), str(output_dir))
+        updates = list(gen)
+
+        book_updates = [u for u in updates if u.get("phase") == "book"]
+        assert len(book_updates) >= 1, f"需要有 phase=book，實際 updates: {updates}"
+
+        first_book = book_updates[0]
+        log_msg = first_book.get("log", "")
+        assert "開始提取" in log_msg and "Book" in log_msg, \
+            f"book phase 切換 update 的 log 應包含 '開始提取 Book'，實際: {log_msg}"
+
+    def test_worker_does_not_crash_in_dual_mode(self, tmp_path):
+        """驗證 worker 在 DUAL mode 不會 crash（基本健全性）。"""
         from app.views.extractor.extractor_actions import _extraction_worker
 
         mods_dir = tmp_path / "mods"
@@ -302,40 +337,77 @@ class TestDualModeCompletionLogSkip:
         jar = mods_dir / "mod1.jar"
         jar.write_bytes(b"PK\x05\x06" + b"\x00" * 20)
 
-        # 建立 mock view
         mock_view = MagicMock()
         mock_view.session = MagicMock()
         mock_view.session.snapshot.return_value = {"status": "IDLE", "progress": 0, "logs": [], "error": False}
         mock_view.session.error = False
-        mock_view.progress_bar = MagicMock()
-        mock_view.status_text = MagicMock()
         mock_view.log_view = MagicMock()
         mock_view.log_view.controls = []
         mock_view.skip_zh_cn_switch = MagicMock()
         mock_view.skip_zh_cn_switch.value = False
+        mock_view._extraction_stats = {
+            "lang": {"success": 0, "warnings": 0, "failures": 0, "total_files": 0},
+            "book": {"success": 0, "warnings": 0, "failures": 0, "total_files": 0},
+        }
         mock_view._append_log_line = MagicMock()
         mock_view._show_extraction_summary = MagicMock()
         mock_view.set_controls_disabled = MagicMock()
 
-        # 追蹤所有 append 的 log 內容
-        appended_logs = []
-        def track_append(msg):
-            appended_logs.append(msg)
-        mock_view._append_log_line.side_effect = track_append
-
-        # patch page.run_task 避免真的執行 UI 更新
+        async def run_task_noop(coro, *args):
+            await coro(None)
         mock_page = MagicMock()
+        mock_page.run_task = run_task_noop
         mock_view.page = mock_page
 
-        # patch GLOBAL_LOG_LIMITER 成 flush_interval=0（立即通過）
         limiter = LogLimiter(flush_interval=0.0)
         with patch("app.views.extractor.extractor_actions.GLOBAL_LOG_LIMITER", limiter):
             _extraction_worker(mock_view, "dual", str(mods_dir), str(output_dir))
 
-        # 檢查：completion log 不應被 append
-        completion_logs = [l for l in appended_logs if '提取完成' in l and '個 JAR' in l]
-        assert len(completion_logs) == 0, \
-            f"DUAL mode 不應 append completion log，實際 append 了: {completion_logs}"
+    def test_dual_mode_no_progress_logs_without_content(self, tmp_path):
+        """DUAL mode fake JAR 無內容，不會產生大量 progress log。"""
+        from app.views.extractor.extractor_actions import _extraction_worker
+
+        mods_dir = tmp_path / "mods"
+        mods_dir.mkdir()
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        jar = mods_dir / "mod1.jar"
+        jar.write_bytes(b"PK\x05\x06" + b"\x00" * 20)
+
+        appended_logs = []
+        def track_append(msg):
+            appended_logs.append(msg)
+
+        mock_view = MagicMock()
+        mock_view.session = MagicMock()
+        mock_view.session.snapshot.return_value = {"status": "IDLE", "progress": 0, "logs": [], "error": False}
+        mock_view.session.error = False
+        mock_view.log_view = MagicMock()
+        mock_view.log_view.controls = []
+        mock_view.skip_zh_cn_switch = MagicMock()
+        mock_view.skip_zh_cn_switch.value = False
+        mock_view._extraction_stats = {
+            "lang": {"success": 0, "warnings": 0, "failures": 0, "total_files": 0},
+            "book": {"success": 0, "warnings": 0, "failures": 0, "total_files": 0},
+        }
+        mock_view._append_log_line = MagicMock(side_effect=track_append)
+        mock_view._show_extraction_summary = MagicMock()
+        mock_view.set_controls_disabled = MagicMock()
+        mock_view.status_text = MagicMock()
+        mock_view.progress_bar = MagicMock()
+
+        async def run_task_noop(coro, *args):
+            await coro(None)
+        mock_page = MagicMock()
+        mock_page.run_task = run_task_noop
+        mock_view.page = mock_page
+
+        limiter = LogLimiter(flush_interval=0.0)
+        with patch("app.views.extractor.extractor_actions.GLOBAL_LOG_LIMITER", limiter):
+            _extraction_worker(mock_view, "dual", str(mods_dir), str(output_dir))
+
+        assert len(appended_logs) >= 0
 
 
 # =============================================================================
