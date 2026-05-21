@@ -425,6 +425,7 @@ class MergeView(ft.Column):
         self.start_button.disabled = True
         self.zip_list_view.disabled = True
         self.log_view.controls.clear()
+        self.progress_bar.value = 0
         self._set_status("執行中", theme.BLUE_200)
 
         self.session.start()
@@ -504,7 +505,7 @@ class MergeView(ft.Column):
                 if status in ("DONE", "ERROR"):
                     break
 
-                time.sleep(0)
+                time.sleep(0.05)
 
         threading.Thread(target=poll, daemon=True).start()
 
