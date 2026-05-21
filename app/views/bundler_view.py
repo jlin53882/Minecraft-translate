@@ -464,11 +464,9 @@ class BundlerView(ft.Column):
                         self._page.update()
                     self._page.run_task(_do_progress)
                 if update.get("error"):
-                    async def _do_error(_=None):
-                        self.progress_bar.color = theme.ERROR
-                        self.progress_bar.value = 0
-                        self._page.update()
-                    self._page.run_task(_do_error)
+                    self.progress_bar.color = theme.ERROR
+                    self.progress_bar.value = 0
+                    self._page.update()
                 self._page.run_task(self._scroll_log)
         except Exception as ex:
             async def _do_error_log(_=None):
@@ -477,11 +475,9 @@ class BundlerView(ft.Column):
                 self._page.update()
             self._page.run_task(_do_error_log)
         finally:
-            async def _do_finish(_=None):
-                self.progress_bar.value = 0
-                self.progress_bar.visible = False
-                self._page.update()
-            self._page.run_task(_do_finish)
+            self.progress_bar.value = 0
+            self.progress_bar.visible = False
+            self._page.update()
 
     async def _scroll_log(self):
         await self.log_view.scroll_to(offset=-1, duration=100)
