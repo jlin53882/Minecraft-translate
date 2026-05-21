@@ -411,9 +411,10 @@ class TestLoadConfigIntoView:
     def _load_into_view(self, config):
         """協助函數：載入 config 到 mock view。"""
         import translation_tool.utils.config_manager as cm_module
-        # Reload to pick up patched paths
         import importlib
-        importlib.reload(cm_module)
+        # Only reload if paths have been patched (test isolation)
+        if not cm_module.CONFIG_PATH.name.startswith('config'):
+            importlib.reload(cm_module)
 
         from app.views.config.config_actions import load_config_into_view
         view = self._make_mock_view()
@@ -425,6 +426,7 @@ class TestLoadConfigIntoView:
         user_cfg = {
             "lm_translator": {
                 # None for these fields - no user override
+                # (keys is intentionally omitted: defaults will fill it)
                 "initial_batch_size_patchouli": None,
                 "initial_batch_size_lang": None,
                 "initial_batch_size_ftb": None,
@@ -456,6 +458,7 @@ class TestLoadConfigIntoView:
         """空清單 [] 是有效設定，會被保留，不會被 DEFAULT 值置換。"""
         user_cfg = {
             "lm_translator": {
+                "keys": [],  # explicit empty to avoid validation catching test data
                 "patchouli": {"dir_names": []},  # user explicitly sets empty
                 "translator": {
                     "skip_terms": [],
@@ -483,6 +486,7 @@ class TestLoadConfigIntoView:
         """rate_limit 為 null 時不會 crash，而是正確 fallback。"""
         user_cfg = {
             "lm_translator": {
+                "keys": [],  # explicit empty to avoid validation catching test data
                 "rate_limit": None,  # null - should not crash
                 "temperature": 0.0,
             },
