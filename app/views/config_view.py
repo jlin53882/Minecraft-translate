@@ -145,11 +145,13 @@ class ConfigView(ft.Column):
             label="允許 zh_cn 觸發跳過 en_us", value=False
         )
         self.controls_map["lang_merger.patchouli_effective_translation_threshold"] = ft.TextField(
-            label="en_us 跳過門檻", hint_text="有效翻譯比例閾值 0.0~1.0", dense=True,
+            label="en_us 跳過門檻", hint_text="有效翻譯比例閾值 0.0~1.0",
+            helper_text="空白將使用預設值 0.5", dense=True,
             keyboard_type=ft.KeyboardType.NUMBER
         )
         self.controls_map["lang_merger.zh_en_letter_threshold"] = ft.TextField(
-            label="zh 英文含量閾值", hint_text="超過此數值則判定為英文內容", dense=True,
+            label="zh 英文含量閾值", hint_text="超過此數值則判定為英文內容",
+            helper_text="空白將使用預設值 2", dense=True,
             keyboard_type=ft.KeyboardType.NUMBER
         )
 

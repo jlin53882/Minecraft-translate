@@ -163,6 +163,7 @@ class MergeView(ft.Column):
         self.patchouli_threshold_field = ft.TextField(
             value="0.5",
             width=96,
+            hint_text="空白用預設值",
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.CENTER,
@@ -176,6 +177,7 @@ class MergeView(ft.Column):
         self.zh_en_letter_threshold_field = ft.TextField(
             value="2",
             width=64,
+            hint_text="空白用預設值",
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.CENTER,
