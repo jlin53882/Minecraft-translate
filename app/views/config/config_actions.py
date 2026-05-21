@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import traceback
 
+from translation_tool.utils.config_manager import get_default
+
 
 def load_config_into_view(view, config: dict):
     """
@@ -49,20 +51,28 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lang_merger.pending_organized_folder_name'].label = f"整理資料夾名稱（目前：{organized_name}）"
     view.controls_map['lang_merger.filtered_pending_min_count'].label = f"「{organized_name}」key最小出現次數（目前：{min_count}）"
     view.controls_map['lang_merger.quarantine_folder_name'].value = lang_merger_cfg.get('quarantine_folder_name')
-    view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value = lang_merger_cfg.get('patchouli_skip_en_us_when_zh_cn_exists')
+    if 'lang_merger.patchouli_skip_en_us_when_zh_cn_exists' in view.controls_map:
+        view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value = lang_merger_cfg.get('patchouli_skip_en_us_when_zh_cn_exists')
     view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value = str(lang_merger_cfg.get('patchouli_effective_translation_threshold'))
     view.controls_map['lang_merger.zh_en_letter_threshold'].value = str(lang_merger_cfg.get('zh_en_letter_threshold'))
 
     view.controls_map['lm_translator.lm_translate_folder_name'].value = str(lm_cfg.get('lm_translate_folder_name'))
     view.controls_map['lm_translator.patchouli_system_prompt'].value = str(lm_cfg.get('patchouli_system_prompt'))
     view.controls_map['lm_translator.lang_system_prompt'].value = str(lm_cfg.get('lang_system_prompt'))
-    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = int(lm_cfg.get('initial_batch_size_patchouli'))
-    view.controls_map['lm_translator.initial_batch_size_lang'].value = int(lm_cfg.get('initial_batch_size_lang'))
-    view.controls_map['lm_translator.initial_batch_size_ftb'].value = int(lm_cfg.get('initial_batch_size_ftb'))
-    view.controls_map['lm_translator.initial_batch_size_kubejs'].value = int(lm_cfg.get('initial_batch_size_kubejs'))
-    view.controls_map['lm_translator.initial_batch_size_md'].value = int(lm_cfg.get('initial_batch_size_md'))
-    view.controls_map['lm_translator.min_batch_size'].value = int(lm_cfg.get('min_batch_size'))
-    view.controls_map['lm_translator.batch_shrink_factor'].value = float(lm_cfg.get('batch_shrink_factor'))
+    _v = lm_cfg.get('initial_batch_size_patchouli')
+    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = _v if _v is not None else get_default('lm_translator.initial_batch_size_patchouli')
+    _v = lm_cfg.get('initial_batch_size_lang')
+    view.controls_map['lm_translator.initial_batch_size_lang'].value = _v if _v is not None else get_default('lm_translator.initial_batch_size_lang')
+    _v = lm_cfg.get('initial_batch_size_ftb')
+    view.controls_map['lm_translator.initial_batch_size_ftb'].value = _v if _v is not None else get_default('lm_translator.initial_batch_size_ftb')
+    _v = lm_cfg.get('initial_batch_size_kubejs')
+    view.controls_map['lm_translator.initial_batch_size_kubejs'].value = _v if _v is not None else get_default('lm_translator.initial_batch_size_kubejs')
+    _v = lm_cfg.get('initial_batch_size_md')
+    view.controls_map['lm_translator.initial_batch_size_md'].value = _v if _v is not None else get_default('lm_translator.initial_batch_size_md')
+    _v = lm_cfg.get('min_batch_size')
+    view.controls_map['lm_translator.min_batch_size'].value = _v if _v is not None else get_default('lm_translator.min_batch_size')
+    _v = lm_cfg.get('batch_shrink_factor')
+    view.controls_map['lm_translator.batch_shrink_factor'].value = _v if _v is not None else get_default('lm_translator.batch_shrink_factor')
     view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(lm_cfg.get('patchouli', {}).get('dir_names', []))
     view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(lm_cfg.get('translator', {}).get('skip_terms', []))
     view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(lm_cfg.get('translator', {}).get('translatable_keywords', []))
