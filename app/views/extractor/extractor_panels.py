@@ -255,6 +255,7 @@ def build_logs_panel(view) -> ft.Column:
 def build_main_layout(view) -> ft.Column:
     """單欄垂直佈局：設定卡片在上，日誌卡片在下"""
     return ft.Column(
+        scroll=ft.ScrollMode.ADAPTIVE,
         spacing=12,
         controls=[
             ft.Container(
