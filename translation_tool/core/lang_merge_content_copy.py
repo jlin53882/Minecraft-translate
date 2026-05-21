@@ -71,7 +71,20 @@ def _compute_patchouli_lang_effectiveness(
             continue
 
         effective_count = 0
+        # C-10 修復：讀取前檢查 file_size，防止 ZIP bomb 攻擊
+        _MAX_TEXT_SIZE = 10 * 1024 * 1024  # 10MB 文字檔上限
         for fname, ext in text_files:
+            try:
+                info = zf.getinfo(fname)
+            except KeyError:
+                continue
+            try:
+                file_size = int(info.file_size)
+            except (TypeError, ValueError):
+                file_size = 0
+            if file_size > _MAX_TEXT_SIZE:
+                log_debug(f"[Patchouli] 跳過過大文字檔：{fname}（{file_size/1024/1024:.1f}MB > 10MB）")
+                continue
             try:
                 raw = zf.read(fname).decode("utf-8", errors="replace")
                 if ext == ".json":

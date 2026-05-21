@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import random
+import time
 
 import requests
 
@@ -50,18 +52,32 @@ def call_gemini_requests(
         load_config().get("lm_translator", {}).get("rate_limit", {}).get("timeout", 600)
     )
 
-    response = requests.post(
-        url,
-        headers=headers,
-        json=data,
-        timeout=request_timeout,
-    )
+    # C-2 修復：新增指數退避重試機制（3次 + jitter），避免暫時性網路錯誤導致翻譯失敗
+    max_retries = 3
+    last_exception = None
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                json=data,
+                timeout=request_timeout,
+            )
 
-    if not response.ok:
-        raise requests.HTTPError(
-            f"{response.status_code} {response.text}",
-            response=response,
-        )
+            if not response.ok:
+                raise requests.HTTPError(
+                    f"{response.status_code} {response.text}",
+                    response=response,
+                )
+            break  # 成功，跳出重試迴圈
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.HTTPError) as e:
+            last_exception = e
+            if attempt < max_retries - 1:
+                wait_time = (2 ** attempt) + random.uniform(0, 1)
+                time.sleep(wait_time)
+                continue
+            # 最後一次失敗，直接拋出
+            raise
 
     result = response.json()
 

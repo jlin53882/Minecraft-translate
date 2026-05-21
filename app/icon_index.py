@@ -52,8 +52,17 @@ def _iter_entries_from_lang_files(zf: zipfile.ZipFile) -> Iterator[tuple[str, st
 
     Yields: (key, value) — 只 yield 有意義的 key（不含 .* wildcard）
     """
+    _MAX_LANG_SIZE = 10 * 1024 * 1024  # C-8 修復：lang 檔 10MB 上限
     for name in zf.namelist():
         if not (name.endswith(".lang") or "/lang/" in name or name.startswith("lang/")):
+            continue
+        # C-8 修復：讀取前檢查 file_size，防止 ZIP bomb
+        try:
+            info = zf.getinfo(name)
+        except KeyError:
+            continue
+        if info.file_size > _MAX_LANG_SIZE:
+            log_warning(f"[icon_index] ⚠️ 跳過過大 lang 檔：{name}（{info.file_size / 1024 / 1024:.1f}MB > 10MB）")
             continue
         try:
             content = zf.read(name).decode("utf-8", errors="ignore")
@@ -112,9 +121,18 @@ def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
             )
             from app.icon_reader import IconRef
 
+            _MAX_LANG_SIZE = 10 * 1024 * 1024  # C-8 修復：lang 檔 10MB 上限
             for name in zf.namelist():
                 # 只讀 lang 檔案
                 if not (name.endswith(".lang") or "/lang/" in name or name.startswith("lang/")):
+                    continue
+                # C-8 修復：讀取前檢查 file_size，防止 ZIP bomb
+                try:
+                    info = zf.getinfo(name)
+                except KeyError:
+                    continue
+                if info.file_size > _MAX_LANG_SIZE:
+                    log_warning(f"[icon_index] ⚠️ 跳過過大 lang 檔：{name}（{info.file_size / 1024 / 1024:.1f}MB > 10MB）")
                     continue
                 try:
                     content = zf.read(name).decode("utf-8", errors="ignore")

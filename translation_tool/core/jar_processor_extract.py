@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, Generator, Callable
 
 from ..utils.config_manager import load_config
+from ..utils.log_unit import log_info, log_warning, log_error
 
 log = logging.getLogger(__name__)
 
@@ -122,11 +123,43 @@ def extract_from_jar_impl(
                         output_root, final_mod_folder, normalized_path
                     )
 
+                # C-4 修復：路徑遍歷防護，拒絕試圖寫入 output_root 外的檔案
+                abs_output = os.path.abspath(final_output_path)
+                abs_root = os.path.abspath(output_root)
+                if not abs_output.startswith(abs_root + os.sep) and abs_output != abs_root:
+                    log_warning(
+                        f"[jar_extract] ⚠️ 路徑遍歷攻擊偵測：拒絕寫入 {abs_output}（位於 output_root 之外）"
+                    )
+                    continue
+
                 # 優先使用 jar_browser 的結果（文字檔）
                 if normalized_path in jar_results and jar_results[normalized_path] is not None:
                     source_data = jar_results[normalized_path].encode("utf-8")
                 else:
                     # Binary 檔案或 jar_browser 未找到：直接讀 ZIP
+                    # C-6 修復：讀取前先檢查成員的 header file_size，防止大型 binary 檔案耗盡記憶體
+                    # P1 修復：若 jar_browser 因大小限制跳過了文字檔（path in jar_results but None），
+                    #          fallback 直接讀 ZIP 時也必須檢查大小（用保守的 10MB 閾值）
+                    _MAX_BINARY_SIZE = 100 * 1024 * 1024  # 100MB
+                    _MAX_FALLBACK_SIZE = 10 * 1024 * 1024  # 10MB，fallback 保守限制
+                    # jar_browser 跳過的大型文字檔也會出現在 jar_results 中（值為 None）
+                    is_jar_browser_skipped = (
+                        normalized_path in jar_results and jar_results[normalized_path] is None
+                    )
+                    if is_jar_browser_skipped or normalized_path not in jar_results:
+                        # fallback 讀取：套用保守的 10MB 限制（適用於文字檔）
+                        if member.file_size > _MAX_FALLBACK_SIZE:
+                            log_warning(
+                                f"[jar_extract] ⚠️ 拒絕讀取過大檔案（fallback）：{normalized_path}"
+                                f"（{member.file_size / 1024 / 1024:.1f}MB > 10MB）"
+                            )
+                            continue
+                    elif member.file_size > _MAX_BINARY_SIZE:
+                        log_warning(
+                            f"[jar_extract] ⚠️ 拒絕讀取過大檔案：{normalized_path}"
+                            f"（{member.file_size / 1024 / 1024:.1f}MB > 100MB）"
+                        )
+                        continue
                     with zf.open(member) as source:
                         source_data = source.read()
 
