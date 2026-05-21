@@ -465,8 +465,6 @@ class PipelineView(ft.Column):
             lang_code_checks=self._lang_code_checks,
             on_run_merge=self._run_merge,
             show_snack_bar=self._show_snack_bar,
-            safe_int=self._safe_int,
-            safe_float=self._safe_float,
         )
 
     def _on_translate_click(self, e=None):

@@ -33,9 +33,21 @@ def open_merge_dialog(
     lang_code_checks: dict,
     on_run_merge,
     show_snack_bar,
-    safe_int,
-    safe_float,
+    safe_int=None,
+    safe_float=None,
 ):
+    if safe_int is None:
+        def safe_int(s):
+            try:
+                return int(s)
+            except (ValueError, TypeError):
+                return None
+    if safe_float is None:
+        def safe_float(s):
+            try:
+                return float(s)
+            except (ValueError, TypeError):
+                return None
     """打開語系比對設定對話框。
 
     Args:
