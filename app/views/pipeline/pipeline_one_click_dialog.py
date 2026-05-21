@@ -115,6 +115,7 @@ def open_one_click_dialog(
 
     def rebuild_ui():
         for d in dialogs:
+            d.open = False
             if d in page.overlay:
                 page.overlay.remove(d)
 
@@ -122,14 +123,19 @@ def open_one_click_dialog(
 
         if step_label:
             step_label.value = f"{step}/4"
-        if wizard_content:
-            wizard_content.content = _build_step_content(step)
+
+        dlg = build_dialog(step)
+        dialogs.append(dlg)
+        page.overlay.append(dlg)
+        dlg.open = True
         page.update()
 
     def close_all():
         for d in dialogs:
             d.open = False
-        page.overlay.clear()
+            if d in page.overlay:
+                page.overlay.remove(d)
+        dialogs.clear()
         page.update()
 
     def _build_step_content(step: int):
@@ -455,7 +461,6 @@ def open_one_click_dialog(
     dialog_width = int(page.width * 0.6)
 
     step_label = ft.Text(f"{state['step']}/4", size=12, color=GREY_600, weight=ft.FontWeight.W_500)
-    wizard_content = ft.Container(content=_build_step_content(1))
 
     def build_dialog(step: int):
         titles = {
@@ -489,7 +494,7 @@ def open_one_click_dialog(
                 ft.Text(titles[step], weight="bold"),
                 ft.Container(content=step_label, padding=5),
             ]),
-            content=ft.Container(content=wizard_content, width=dialog_width),
+            content=ft.Container(content=_build_step_content(step), width=dialog_width),
             actions=actions,
         )
         return dlg
