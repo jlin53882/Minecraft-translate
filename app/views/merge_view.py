@@ -42,6 +42,7 @@ class MergeView(ft.Column):
     _zh_cn_disabled_note: ft.Text | None
     zip_list_view: ft.ListView
     status_chip: ft.Chip
+    _progress_label: ft.Text
     progress_bar: ft.ProgressBar
     log_view: ft.ListView
     pick_zip_button: ft.Button
@@ -123,8 +124,10 @@ class MergeView(ft.Column):
             prefix_icon=ft.Icons.FOLDER_COPY,
         )
 
-        self.zip_list_view = ft.ListView(height=160, spacing=4, auto_scroll=False)
+        self.zip_list_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
         self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=theme.GREY_200)
+        self._progress_label = ft.Text("📦 0 個 ZIP", size=13, color="#9ca3af")
+        self._progress_pct = ft.Text("0%", size=13, color="#9ca3af")
         self.progress_bar = ft.ProgressBar(
             value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
@@ -142,7 +145,11 @@ class MergeView(ft.Column):
             icon=ft.Icons.PLAY_ARROW,
             tooltip="開始執行 ZIP 合併流程",
             on_click=self.start_merge,
-            bgcolor=theme.SUCCESS,
+        )
+        self._clear_zips_button = ft.Button(
+            "清除全部",
+            icon=ft.Icons.DELETE_OUTLINE,
+            on_click=lambda e: self._clear_all_zips(),
         )
 
         general_options_section = ft.Container(
@@ -287,6 +294,7 @@ class MergeView(ft.Column):
                         ft.Row(
                             [
                                 self.pick_zip_button,
+                                self._clear_zips_button,
                                 ft.Text(
                                     "可加入多個 ZIP，會依序合併。",
                                     size=12,
@@ -295,7 +303,19 @@ class MergeView(ft.Column):
                             ],
                             spacing=10,
                         ),
-                        self.zip_list_view,
+                        ft.Container(
+                            content=self.zip_list_view,
+                            height=180,
+                            border=ft.Border(
+                            top=ft.BorderSide(1, "#374151"),
+                            bottom=ft.BorderSide(1, "#374151"),
+                            left=ft.BorderSide(1, "#374151"),
+                            right=ft.BorderSide(1, "#374151"),
+                        ),
+                            border_radius=6,
+                            padding=6,
+                            clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                        ),
                     ],
                     spacing=10,
                 ),
@@ -330,6 +350,14 @@ class MergeView(ft.Column):
                 content=ft.Column(
                     [
                         ft.Row([self.status_chip], wrap=True),
+                        ft.Row(
+                            [
+                                self._progress_label,
+                                ft.Text(""),  # spacer
+                                self._progress_pct,
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        ),
                         self.progress_bar,
                         self.start_button,
                     ],
@@ -382,13 +410,18 @@ class MergeView(ft.Column):
     def _refresh_zip_list(self) -> None:
         """重新整理 ZIP 檔案清單顯示。"""
         self.zip_list_view.controls.clear()
-        for path in self.selected_zips:
-            name = Path(path).name
+        count = len(self.selected_zips)
+        self._progress_label.value = f"📦 {count} 個 ZIP"
+        self._progress_label.color = "#9ca3af"
+        self._progress_pct.value = "0%"
+        self._progress_pct.color = "#9ca3af"
+        for i, path in enumerate(self.selected_zips, start=1):
             self.zip_list_view.controls.append(
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     controls=[
-                        ft.Text(name, expand=True),
+                        ft.Text(f"{i}.", size=12, width=25),
+                        ft.Text(path, expand=True, tooltip=path, size=12),
                         ft.IconButton(
                             icon=ft.Icons.CLOSE,
                             tooltip="移除",
@@ -397,6 +430,12 @@ class MergeView(ft.Column):
                     ],
                 )
             )
+
+    def _clear_all_zips(self) -> None:
+        """清除所有已選的 ZIP 檔案。"""
+        self.selected_zips.clear()
+        self._refresh_zip_list()
+        self.page.update()
 
     def _remove_zip(self, path: str) -> None:
         """移除指定的 ZIP 檔案。"""
@@ -426,6 +465,10 @@ class MergeView(ft.Column):
         self.zip_list_view.disabled = True
         self.log_view.controls.clear()
         self.progress_bar.value = 0
+        self._progress_label.value = "📦 0 個 ZIP (0%)"
+        self._progress_label.color = "#60a5fa"
+        self._progress_pct.value = "0%"
+        self._progress_pct.color = "#60a5fa"
         self._set_status("執行中", theme.BLUE_200)
 
         self.session.start()
@@ -457,10 +500,23 @@ class MergeView(ft.Column):
                 logs = snap["logs"]
 
                 async def _do_update(_=None):
+                    total_zips = len(self.selected_zips)
+                    pct = int(progress * 100)
+
                     if status == "RUNNING":
                         self._set_status("執行中", theme.BLUE_200)
+                        cur = int(progress * total_zips) + 1 if total_zips > 0 else 0
+                        self._progress_label.value = f"📦 {cur}/{total_zips} ZIP ({pct}%)"
+                        self._progress_label.color = "#60a5fa"
+                        self._progress_pct.value = f"{pct}%"
+                        self._progress_pct.color = "#60a5fa"
                     elif status == "DONE":
                         self._set_status("任務完成", theme.GREEN_200)
+                        total_ok = self._merge_stats.get("success_zips", 0) if self._merge_stats else total_zips
+                        self._progress_label.value = f"✅ 完成 {total_ok} 個 ZIP"
+                        self._progress_label.color = theme.GREEN
+                        self._progress_pct.value = "100%"
+                        self._progress_pct.color = theme.GREEN
                         snap_summary = snap.get("summary")
                         if snap_summary:
                             self._merge_stats = snap_summary
@@ -491,6 +547,10 @@ class MergeView(ft.Column):
                         self.progress_bar.value = 0
                     elif status == "ERROR":
                         self._set_status("任務發生錯誤", theme.RED_200)
+                        self._progress_label.value = "❌ 處理失敗"
+                        self._progress_label.color = theme.RED
+                        self._progress_pct.value = "0%"
+                        self._progress_pct.color = theme.RED
                         self.progress_bar.value = 0
 
                     self.progress_bar.value = progress
@@ -628,11 +688,19 @@ class MergeView(ft.Column):
 
     def _close_dialog_overlay(self, dialog: ft.AlertDialog) -> None:
         """關閉 overlay 對話框。"""
+        log_info("[MERGE DIALOG] _close_dialog_overlay called, resetting UI state")
         try:
             dialog.open = False
+            self.progress_bar.value = 0
+            self._progress_label.value = f"📦 {len(self.selected_zips)} 個 ZIP"
+            self._progress_label.color = "#9ca3af"
+            self._progress_pct.value = "0%"
+            self._progress_pct.color = "#9ca3af"
+            self._set_status("就緒", theme.BLUE_GREY_200)
+            log_info(f"[MERGE DIALOG] bar reset to 0, status reset, page.update called")
             self.page.update()
-        except Exception:
-            pass
+        except Exception as ex:
+            log_error(f"[MERGE DIALOG] close failed: {ex}")
 
     @property
     def page(self):
