@@ -725,60 +725,36 @@ def translate_batch_smart_old(
                         or "too many requests" in remote_msg.lower()
                     )
 
-                    # ===== A. 真 overload：同一 batch 原地等 =====
-                    if is_overloaded:
-                        overload_retry_count += 1  # ⭐ 累積過載次數
+                    # ===== 503 處理：統一 count，count < 4 等候重試，count >= 4 換 key =====
+                    overload_retry_count += 1  # ⭐ 統一累積次數
 
-                        pinned_model_index = i  # ⭐ 記住是哪個 model 過載
-
-                        # if overload_retry_count >= 3:
-                        #    log_error(f"[❌] 持續 overload（{overload_retry_count} 次）→ 回傳 PARTIAL 保護進度")
-                        #    return all_results, "PARTIAL"
-                        if overload_retry_count >= 3:
-                            log_warning(
-                                f"[🔁] 模型連續 overload（{overload_retry_count} 次），嘗試切換 API Key"
-                            )
-
-                            try:
-                                # ⭐ 嘗試換 Key
-                                if rotate_api_key():
-                                    overload_retry_count = 0  # ⭐ 重置過載計數
-                                    pinned_model_index = None  # ⭐ 解鎖模型，允許重新選
-                                    log_info(
-                                        "[✅] API Key 切換成功 → 原地重送同一 batch,等待12秒"
-                                    )
-                                    time.sleep(
-                                        key_rotation_buffer_sec
-                                    )  # ⭐ 給新 Key 一點緩衝
-                                    hit_overload_retry = True  # ⭐ 重送同一 batch
-                                    break  # ← 跳出 model loop，回 while
-                                else:
-                                    raise RuntimeError("NO_MORE_KEYS")
-
-                            except RuntimeError:
-                                log_error(
-                                    "[❌] 所有 API Key 在 overload 狀態下均不可用 → 回傳 PARTIAL 保護進度"
-                                )
-                                return all_results, "PARTIAL"
-
-                        wait_sec = overload_retry_sec
+                    if overload_retry_count >= 4:
                         log_warning(
-                            f"[⚠️] 模型過載（第 {overload_retry_count} 次），"
-                            f"原地等待 {wait_sec}s 後重送【同一 batch / 同一模型】"
+                            f"[🔁] 503 連續重試（{overload_retry_count} 次）→ 嘗試切換 API Key"
                         )
+                        try:
+                            if rotate_api_key():
+                                overload_retry_count = 0  # 重置計數
+                                pinned_model_index = None  # 解鎖模型
+                                log_info("[✅] API Key 切換成功 → 等待後重送同一 batch")
+                                time.sleep(key_rotation_buffer_sec)
+                                hit_overload_retry = True
+                                break  # 回到 while 重送
+                            else:
+                                raise RuntimeError("NO_MORE_KEYS")
+                        except RuntimeError:
+                            log_error("[❌] 所有 API Key 已用盡 → 回傳 PARTIAL 保護進度")
+                            return all_results, "PARTIAL"
 
-                        time.sleep(wait_sec)
-                        hit_overload_retry = True
-                        break  # ← 跳出 model pool，回到 while 重新送
+                    wait_sec = request_interval_sec
+                    log_warning(
+                        f"[⚠️] 503 重試（第 {overload_retry_count} 次），等待 {wait_sec}s 後重送同一 batch"
+                    )
+                    time.sleep(wait_sec)
+                    hit_overload_retry = True
+                    break  # 回到 while 重新送同一 batch
 
-                    # ===== B. 非 overload 的 503：等待後重試同一批，不換 key =====
-                    else:
-                        log_warning(
-                            "503 非 overload（節點/區域異常）→ 等待 12s 後重送同一 batch"
-                        )
-                        hit_overload_retry = True
-                        time.sleep(12)
-                        break  # 回到 while 重新送同一 batch
+                    # ===== 舊 Section A（真 overload）等號移除，已整合到上方 =====
 
                 # ======== 500 ==========
                 if status == 500:
