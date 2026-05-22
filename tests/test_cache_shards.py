@@ -39,7 +39,7 @@ def test_rotate_shard_if_needed_when_full(tmp_path: Path):
     assert (type_dir / ".active").read_text(encoding="utf-8").strip() == "00008"
 
 
-def test_save_entries_force_new_shard_rotates_before_write(tmp_path: Path):
+def test_save_entries_force_new_shard_writes_timestamp_file(tmp_path: Path):
     type_dir = tmp_path / "lang"
     type_dir.mkdir(parents=True, exist_ok=True)
 
@@ -58,13 +58,18 @@ def test_save_entries_force_new_shard_rotates_before_write(tmp_path: Path):
         force_new_shard=True,
     )
 
-    assert (type_dir / ".active").read_text(encoding="utf-8").strip() == "00002"
+    # .active 不應被修改
+    assert (type_dir / ".active").read_text(encoding="utf-8").strip() == "00001"
 
+    # 應該寫入 timestamp 檔案 lang_{mmddHHss}.json（10個字）
+    timestamp_files = list(type_dir.glob("lang_??????????.json"))
+    assert len(timestamp_files) == 1, f"expected 1 timestamp file, got {timestamp_files}"
+    ts_shard = json.loads(timestamp_files[0].read_bytes())
+    assert set(ts_shard.keys()) == {"new1", "new2"}
+
+    # 舊的 lang_00001.json 不應被修改
     shard1 = json.loads((type_dir / "lang_00001.json").read_bytes())
-    shard2 = json.loads((type_dir / "lang_00002.json").read_bytes())
-
     assert "old" in shard1
-    assert set(shard2.keys()) == {"new1", "new2"}
 
 
 def test_write_json_atomic_tmp_to_target(tmp_path: Path):
