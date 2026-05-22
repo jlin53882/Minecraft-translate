@@ -171,8 +171,14 @@ def _save_entries_to_active_shards(
     if force_new_shard:
         from datetime import datetime as _dt
         ts = _dt.now().strftime("%m%d%H%M%S")
-        timestamp_path = type_dir / f"{cache_type}_{ts}.json"
-        # 直接寫入 timestamp 檔（不走 rolling 邏輯）
+        # 避免同一秒內多次寫入，遞增序號
+        seq = 1
+        while True:
+            timestamp_name = f"{cache_type}_{ts}-{seq}.json"
+            if not (type_dir / timestamp_name).exists():
+                break
+            seq += 1
+        timestamp_path = type_dir / timestamp_name
         _write_json_atomic(timestamp_path, entries)
         if logger:
             logger.info(f"💾 {cache_type} saved (timestamp): {timestamp_path.name} (+{len(entries)} / total={len(entries)})")
@@ -181,6 +187,21 @@ def _save_entries_to_active_shards(
     # ============================================================
     # force_new_shard=False: 正常 rolling shard 邏輯
     # ============================================================
+    # 防溢：如果一次寫入的 entries 數量超過 rolling_shard_size，強制建立新 timestamp shard
+    if len(entries) > rolling_shard_size:
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%m%d%H%M%S")
+        seq = 1
+        while True:
+            overflow_name = f"{cache_type}_{ts}-{seq}.json"
+            if not (type_dir / overflow_name).exists():
+                break
+            seq += 1
+        overflow_path = type_dir / overflow_name
+        _write_json_atomic(overflow_path, entries)
+        if logger:
+            logger.warning(f"⚠️ {cache_type} overflow ({len(entries)} > {rolling_shard_size}) → timestamp shard: {overflow_path.name}")
+        return
 
     pending_items = list(entries.items())
     while pending_items:

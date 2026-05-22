@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 import orjson as json
 
@@ -61,9 +62,10 @@ def test_save_entries_force_new_shard_writes_timestamp_file(tmp_path: Path):
     # .active 不應被修改
     assert (type_dir / ".active").read_text(encoding="utf-8").strip() == "00001"
 
-    # 應該寫入 timestamp 檔案 lang_{mmddHHss}.json（10個字）
-    timestamp_files = list(type_dir.glob("lang_??????????.json"))
+    # 應該寫入 timestamp 檔案 lang_{mmddHHss}-{N}.json
+    timestamp_files = list(type_dir.glob("lang_??????????-*.json"))
     assert len(timestamp_files) == 1, f"expected 1 timestamp file, got {timestamp_files}"
+    assert re.match(r"lang_\d{10}-1\.json", timestamp_files[0].name), f"unexpected name: {timestamp_files[0].name}"
     ts_shard = json.loads(timestamp_files[0].read_bytes())
     assert set(ts_shard.keys()) == {"new1", "new2"}
 
