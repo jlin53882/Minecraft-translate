@@ -155,6 +155,8 @@ def _save_entries_to_active_shards(
 
 def save_translation_cache(cache_type: str, write_new_shard: bool = True):
     """儲存翻譯快取。"""
+    import translation_tool.utils.log_unit as log_unit
+    log_unit.log_debug(f"[CACHE DEBUG] save_translation_cache called: cache_type={cache_type}, write_new_shard={write_new_shard}")
     if not load_config().get("translator", {}).get("enable_cache_saving", True):
         return
 
