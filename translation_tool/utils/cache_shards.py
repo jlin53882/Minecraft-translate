@@ -165,12 +165,22 @@ def _save_entries_to_active_shards(
         active_shard_file=active_shard_file,
     )
 
+    # ============================================================
+    # force_new_shard=True: 寫入 timestamp 分片，不碰 .active
+    # ============================================================
     if force_new_shard:
-        cur = int((active_file.read_text(encoding="utf-8") or "1").strip())
-        nxt = cur + 1
-        active_file.write_text(f"{nxt:05d}", encoding="utf-8")
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%m%d%H%M%S")
+        timestamp_path = type_dir / f"{cache_type}_{ts}.json"
+        # 直接寫入 timestamp 檔（不走 rolling 邏輯）
+        _write_json_atomic(timestamp_path, entries)
         if logger:
-            logger.info(f"🔁 {cache_type} 手動切新分片 -> {nxt:05d} (force_new_shard={force_new_shard})")
+            logger.info(f"💾 {cache_type} saved (timestamp): {timestamp_path.name} (+{len(entries)} / total={len(entries)})")
+        return
+
+    # ============================================================
+    # force_new_shard=False: 正常 rolling shard 邏輯
+    # ============================================================
 
     pending_items = list(entries.items())
     while pending_items:
