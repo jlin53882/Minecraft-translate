@@ -80,6 +80,7 @@ DEFAULT_CONFIG = {
         "initial_batch_size_md": 100,  # 起始 batch（Markdown 專用）
         "min_batch_size": 50,  # 最小 batch
         "batch_shrink_factor": 0.75,  # 發生錯誤時縮小比例
+        "batch_write_interval": 2,  # 每 N 個批次寫一次快取（避免超限觸發 overflow）
         "rate_limit": {
             "timeout": 600,  # request time out set
             "sleep_seconds_between_batches": 0.0,  # 批次間延遲秒數

@@ -43,7 +43,7 @@ from translation_tool.utils.config_manager import load_config
 # ============================================================
 # B-3: 快取寫入頻率優化（每 N 個批次才寫一次硬碟）
 # ============================================================
-BATCH_WRITE_INTERVAL = 2  # 每 N 個批次寫一次硬碟
+BATCH_WRITE_INTERVAL = load_config().get("lm_translator", {}).get("batch_write_interval", 2)  # 每 N 個批次寫一次硬碟
 
 # ============================================================
 # B-4: 斷點續傳機制
