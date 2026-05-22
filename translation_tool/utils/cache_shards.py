@@ -170,7 +170,7 @@ def _save_entries_to_active_shards(
         nxt = cur + 1
         active_file.write_text(f"{nxt:05d}", encoding="utf-8")
         if logger:
-            logger.info(f"🔁 {cache_type} 手動切新分片 -> {nxt:05d}")
+            logger.info(f"🔁 {cache_type} 手動切新分片 -> {nxt:05d} (force_new_shard={force_new_shard})")
 
     pending_items = list(entries.items())
     while pending_items:
