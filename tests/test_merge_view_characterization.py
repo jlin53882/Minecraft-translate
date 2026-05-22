@@ -57,7 +57,7 @@ def test_merge_view_all_checkboxes_and_switches_exist(monkeypatch):
     assert view.process_zh_cn_switch.value is True
 
     assert view.patchouli_skip_zh_cn_switch.label == '允許 zh_cn 觸發跳過 en_us'
-    assert view.patchouli_skip_zh_cn_switch.value is True
+    assert view.patchouli_skip_zh_cn_switch.value is False
 
 
 def test_merge_view_text_fields_and_listviews_exist(monkeypatch):
