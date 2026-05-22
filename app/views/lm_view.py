@@ -360,6 +360,11 @@ class LMView(ft.Column):
     # --------------------------------------------------
     # UI helpers
     # --------------------------------------------------
+    def refresh_batch_interval_info(self):
+        """Config save 後重新讀取 batch_write_interval 並更新顯示。"""
+        batch_interval = load_config().get("lm_translator", {}).get("batch_write_interval", 2)
+        self.batch_interval_info.value = f"快取寫入頻率: 每 {batch_interval} 批次寫入一次（由 Config 設定）"
+
     def _set_status(self, text: str, color: str):
         """更新狀態晶片顯示"""
         self.status_chip.label = ft.Text(text)

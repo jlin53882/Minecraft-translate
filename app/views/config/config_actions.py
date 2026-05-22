@@ -140,6 +140,8 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
         for item in registry:
             if item['key'] == 'extractor' and hasattr(item['view'].content, 'refresh_output_dir_helper'):
                 item['view'].content.refresh_output_dir_helper()
+            if item['key'] == 'lm' and hasattr(item['view'].content, 'refresh_batch_interval_info'):
+                item['view'].content.refresh_batch_interval_info()
 
     view._show_snack_bar('✅ 設定已成功儲存！', view._success_color())
     return True
