@@ -76,7 +76,8 @@ class LMView(ft.Column):
             label="輸出 .lang 檔案（不是 .json）", value=False
         )
         self.write_new_cache_switch = ft.Switch(
-            label="寫入新快取(每次回傳單獨快取)（write_new_cache）", value=False
+            label="寫入新快取(每次回傳單獨快取)（write_new_cache）", value=False,
+            on_change=lambda e: log_debug(f"[LM UI] write_new_cache_switch changed: {self.write_new_cache_switch.value}")
         )
 
         # 狀態與日誌
