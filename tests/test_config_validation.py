@@ -51,12 +51,12 @@ class TestConfigSchemaValidation:
             - 呼叫 load_config(路徑)
         Assert（預期行為）：
             - 應拋出 ConfigValidationError 或 TypeError
-            - （未來實作 schema 驗證後，應拋出 ConfigValidationError）
+            - （實作後：load_config 現在會拋出 ConfigValidationError）
 
-        目前狀態（預期 FAIL）：
-            - load_config 無驗證，直接回傳合併後的 dict
-            - 錯誤會在下游使用時才爆開（TypeError）
-            - 因此本測試目前會 FAIL（因為沒有任何例外被拋出）
+        修復記錄（2026-05-21）：
+            - Phase 3 新增三層 fallback 實作時，驗證同步鉤入 load_config() ATK-C-2
+            - 現在負向測試的行為是 PASS（驗證正常攔截錯誤）
+            - Docstring 已修正為「修復後：測試通過」
         """
         config_file = tmp_path / "config.json"
         config_file.write_text(
@@ -68,7 +68,7 @@ class TestConfigSchemaValidation:
         )
 
         # Act & Assert
-        # 預期：load_config 現在會拋出 ConfigValidationError
+        # 驗證已實作：load_config 會拋出 ConfigValidationError（測試通過）
         with pytest.raises(ConfigValidationError):
             load_config(str(config_file))
 
@@ -86,9 +86,8 @@ class TestConfigSchemaValidation:
         Assert（預期行為）：
             - 應拋出 ConfigValidationError 或 TypeError
 
-        目前狀態（預期 FAIL）：
-            - deep_merge 會保留該字串（因為非 dict，不觸發遞迴合併）
-            - load_config 正常回傳，TypeError 在下游數學運算時才發生
+        修復記錄（2026-05-21）：
+            - 驗證已鉤入 load_config() ATK-C-2，測試現為 PASS
         """
         config_file = tmp_path / "config.json"
         config_file.write_text(
@@ -100,7 +99,7 @@ class TestConfigSchemaValidation:
         )
 
         # Act & Assert
-        # 預期：load_config 現在會拋出 ConfigValidationError
+        # 驗證已實作：load_config 會拋出 ConfigValidationError
         with pytest.raises(ConfigValidationError):
             load_config(str(config_file))
 
@@ -154,9 +153,7 @@ class TestConfigSchemaValidation:
         Assert（預期行為）：
             - 應拋出 ConfigValidationError 或 TypeError
 
-        目前狀態（預期 FAIL）：
-            - deep_merge 會用 list 覆寫 default 的 dict
-            - load_config 正常回傳，錯誤在 get_models_config 處理時才發生
+        修復記錄（2026-05-21）：驗證已鉤入 ATK-C-2，測試現為 PASS
         """
         config_file = tmp_path / "config.json"
         config_file.write_text(
@@ -168,7 +165,7 @@ class TestConfigSchemaValidation:
         )
 
         # Act & Assert
-        # 預期：load_config 現在會拋出 ConfigValidationError
+        # 驗證已實作：load_config 會拋出 ConfigValidationError
         with pytest.raises(ConfigValidationError):
             load_config(str(config_file))
 

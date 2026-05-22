@@ -10,8 +10,7 @@
     "cache_directory": "快取資料",
     "enable_cache_saving": true,
     "parallel_execution_workers": 4,
-    "custom_translator_folder": "custom_translators",
-    "cjk_ratio_threshold": 0.7
+    "custom_translator_folder": "custom_translators"
   },
   "ftb_translator": {
     "output_dir_name": "FTB任務翻譯輸出"
@@ -104,17 +103,17 @@
     }
   },
   "output_bundler": {
-    "output_zip_name": "可使用翻譯.zip",
-    "source_folders": {
-      "assets": "zh_tw_generated/assets",
-      "root": "zh_tw_generated/pack_mcmeta"
-    }
+        "output_zip_name": "可使用翻譯.zip"
   },
   "lang_merger": {
     "pending_folder_name": "待翻譯",
     "pending_organized_folder_name": "待翻譯整理需翻譯",
     "filtered_pending_min_count": 3,
-    "quarantine_folder_name": "問題檔案skipped_json"
+    "quarantine_folder_name": "問題檔案skipped_json",
+    "process_zh_cn_files": true,
+    "skip_zh_cn_when_only_process_lang": false,
+    "patchouli_skip_en_us_when_zh_cn_exists": false,
+    "patchouli_effective_translation_threshold": 0.5
   },
   "jar_extractor": {
     "lang_codes": [
@@ -132,6 +131,7 @@
       "dual_extract": "_提取both_輸出",
       "dual_preview": "_預覽both_輸出"
     },
-    "target_language": ["zh_tw"]
+    "target_language": ["zh_tw"],
+    "skip_zh_cn_extract": false
   }
 }
