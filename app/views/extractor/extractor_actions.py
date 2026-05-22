@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 
-from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.log_unit import log_info, log_warning, log_debug
 from translation_tool.utils.config_manager import load_config
 import time
 from pathlib import Path
@@ -178,7 +178,7 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
             log_msg = filtered.get("log", "")
             is_completion = '提取完成' in log_msg and '個 JAR' in log_msg
             if log_msg and not (mode == "dual" and is_completion):
-                log_info(f"[DEBUG] _extraction_worker: received log_msg={log_msg[:80]}...")
+                log_debug(f"[DEBUG] _extraction_worker: received log_msg={log_msg[:80]}...")
                 msg_for_ui = log_msg
                 async def _do_append_log(_, m=msg_for_ui):
                     view._append_log_line(m)
@@ -502,7 +502,7 @@ def show_preview(view, mode: str):
         view.status_text.value = '狀態：預覽完成'
         view.progress_bar.value = 1.0
         log_final = f"[系統] 預覽完成：error={preview_state.error is not None}, result={preview_state.result is not None}"
-        log_info(f"[DEBUG] poll: calling _append_log_line: {log_final[:80]}...")
+        log_debug(f"[DEBUG] poll: calling _append_log_line: {log_final[:80]}...")
         view._append_log_line(log_final)
         try:
             view.page.update()
