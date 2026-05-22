@@ -314,10 +314,10 @@ class LMView(ft.Column):
                     pct = int(progress * 100)
                     if status == "DONE":
                         self._set_status("任務完成", theme.GREEN_200)
-                        self._progress_label.value = "✅ 完成"
-                        self._progress_label.color = theme.GREEN
-                        self._progress_pct.value = "100%"
-                        self._progress_pct.color = theme.GREEN
+                        self._progress_label.value = "📝 就緒"
+                        self._progress_label.color = theme.GREY_600
+                        self._progress_pct.value = "0%"
+                        self._progress_pct.color = theme.GREY_600
                         self.progress_bar.value = 0
                     elif status == "ERROR":
                         self._set_status("任務發生錯誤", theme.RED_200)
