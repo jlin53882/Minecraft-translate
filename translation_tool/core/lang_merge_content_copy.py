@@ -26,7 +26,7 @@ _patchouli_eff_cache: dict = {}
 # Helper: Patchouli 翻譯有效性 ratio 計算
 # ----------------------------------------------------------------------
 def _compute_patchouli_lang_effectiveness(
-    zf,
+    reader,
     book_root: str,
     threshold: float = 0.5,
     json_module=None,
@@ -45,7 +45,6 @@ def _compute_patchouli_lang_effectiveness(
     CJK_RE = _re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
     TEXT_EXTS = {".json", ".md", ".txt"}
 
-    # book_root 可能大小寫與 zf.namelist() 不一致，統一轉小寫後比對
     book_root_lower = book_root.lower()
     cache_key = (book_root_lower, threshold)
 
@@ -61,7 +60,7 @@ def _compute_patchouli_lang_effectiveness(
     for lang in ("zh_tw", "zh_cn"):
         prefix_lower = book_root_lower + lang + "/"
         text_files: list[str] = []
-        for name in zf.namelist():
+        for name in reader.list_all():
             if name.lower().startswith(prefix_lower):
                 ext = os.path.splitext(name)[1].lower()
                 if ext in TEXT_EXTS:
@@ -73,7 +72,7 @@ def _compute_patchouli_lang_effectiveness(
         effective_count = 0
         for fname, ext in text_files:
             try:
-                raw = zf.read(fname).decode("utf-8", errors="replace")
+                raw = reader.read_text(fname)
                 if ext == ".json":
                     try:
                         data = json_module.loads(raw)
@@ -95,7 +94,6 @@ def _compute_patchouli_lang_effectiveness(
         ratio = effective_count / len(text_files) if text_files else 0
         result[lang] = ratio >= threshold
 
-    # ── 2. Cache store ─────────────────────────────────────────────────
     _patchouli_eff_cache[cache_key] = result
     log_debug(f"[Patchouli Eff] cached result for {book_root!r} threshold={threshold}: {result}")
 
@@ -117,7 +115,7 @@ def _extract_all_strings(data) -> list[str]:
 
 
 def process_content_or_copy_file_impl(
-    zf: zipfile.ZipFile,
+    reader,
     input_path: str,
     rules: list,
     output_dir: str,
@@ -128,10 +126,9 @@ def process_content_or_copy_file_impl(
     load_config_fn: Callable[[], dict],
     recursive_translate_dict_fn: Callable[[Any, list], Any],
     get_text_processor_fn: Callable[[str], Any],
-    read_text_from_zip_fn: Callable[[zipfile.ZipFile, str], str],
     write_bytes_atomic_fn: Callable[[str, bytes], Any],
     write_text_atomic_fn: Callable[[str, str], Any],
-    quarantine_copy_from_zip_fn: Callable[..., Any],
+    quarantine_copy_fn: Callable[..., Any],
     normalize_patchouli_book_root_fn: Callable[[str], str],
     patch_localized_content_json_fn: Callable[..., Dict[str, Any]],
     json_module,
@@ -143,10 +140,13 @@ def process_content_or_copy_file_impl(
     patchouli_threshold: float | None = None,
     zh_en_threshold: int | None = None,
 ) -> Dict[str, Any]:
-    """處理非標準 lang JSON / patchouli / 純文字內容的 copy-or-patch 流程。"""
+    """處理非標準 lang JSON / patchouli / 純文字內容的 copy-or-patch 流程。
+
+    支援 ZIP 與資料夾兩種 reader。
+    """
     # 自動偵測並剝離 ZIP 統一包裝前綴（任何名稱皆適用）
     _wp = None
-    _all_names = zf.namelist()
+    _all_names = reader.list_all()
     if _all_names:
         _tops = set(n.replace("\\", "/").split("/")[0] for n in _all_names if n.replace("\\", "/").split("/")[0])
         if len(_tops) == 1:
@@ -238,7 +238,7 @@ def process_content_or_copy_file_impl(
             log_debug(f"[Patchouli Eff] 使用外部預掃描 cache for {book_root!r}: {eff}")
         else:
             eff = _compute_patchouli_lang_effectiveness(
-                zf,
+                reader,
                 book_root,
                 threshold=_threshold,
                 json_module=json_module,
@@ -279,17 +279,16 @@ def process_content_or_copy_file_impl(
         ext = os.path.splitext(input_path)[1].lower()
         if ext in [".json", ".md", ".txt"]:
             try:
-                raw_text = read_text_from_zip_fn(zf, input_path)
+                raw_text = reader.read_text(input_path)
                 tw_content = recursive_translate_dict_fn(raw_text, rules)
                 with open(target, "w", encoding="utf-8") as f:
                     f.write(tw_content)
             except Exception as e:
                 log_error(f"[Patchouli] 寫入失敗: {e}")
-                with zf.open(input_path) as src, open(target, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                with open(target, "wb") as dst:
+                    dst.write(reader.read_bytes(input_path))
         else:
-            with zf.open(input_path) as src, open(target, "wb") as dst:
-                shutil.copyfileobj(src, dst)
+            reader.copy_to(input_path, target)
 
         return {"success": True, "log": f"[Patchouli] {action_log}: {target}"}
 
@@ -326,7 +325,7 @@ def process_content_or_copy_file_impl(
     try:
         if not is_localized_cn_file:
             if ext == ".json":
-                text = read_text_from_zip_fn(zf, input_path)
+                text = reader.read_text(input_path)
 
                 # ── Step 1: 先直接解析 ──────────────────────────────────────
                 source_data = None
@@ -362,9 +361,9 @@ def process_content_or_copy_file_impl(
                         if possible_lang in normalized_path:
                             lang = possible_lang
                             break
-                    quarantine_copy_from_zip_fn(
-                        zf=zf,
-                        zip_path=input_path,
+                    quarantine_copy_fn(
+                        reader=reader,
+                        rel_path=input_path,
                         output_dir=output_dir,
                         reason=f"JSON解析失敗 (語言: {lang})",
                         extra_text=error_detail,
@@ -411,20 +410,22 @@ def process_content_or_copy_file_impl(
                 return {"success": True, "log": None}
 
             if ext == ".png":
-                with zf.open(input_path) as src, open(final_output_path, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                src_bytes = reader.read_bytes(input_path)
+                with open(final_output_path, "wb") as dst:
+                    dst.write(src_bytes)
                 log_debug(f"DEBUG: 本地化圖片檔案 {file_name} 複製完成: {final_output_path}")
                 log_info(f"{log_prefix} PNG 檔案直接複製。")
                 return {"success": True}
 
             if ext == ".mcmeta":
-                with zf.open(input_path) as src, open(final_output_path, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                src_bytes = reader.read_bytes(input_path)
+                with open(final_output_path, "wb") as dst:
+                    dst.write(src_bytes)
                 log_info(f"{log_prefix} .mcmeta 檔案複製完成: {final_output_path}")
                 return {"success": True}
 
             processor = get_text_processor_fn(ext)
-            raw = read_text_from_zip_fn(zf, input_path)
+            raw = reader.read_bytes(input_path)
             raw = raw.replace("\r\n", "\n").replace("\r", "\n")
             if processor:
                 tw_content = processor(raw, recursive_translate_dict_fn, rules, input_path)
@@ -450,11 +451,10 @@ def process_content_or_copy_file_impl(
             try:
                 log_msg = None
                 if not os.path.exists(final_output_path):
-                    with zf.open(input_path) as src, open(final_output_path, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
+                    reader.copy_to(input_path, final_output_path)
                     log_msg = f"{log_prefix} 圖片檔案 (.png) 複製完成 (新檔案)。"
                 else:
-                    input_content = zf.read(input_path)
+                    input_content = reader.read_bytes(input_path)
                     with open(final_output_path, "rb") as f:
                         output_content = f.read()
                     if input_content != output_content:
@@ -466,26 +466,22 @@ def process_content_or_copy_file_impl(
                 log_debug(f"DEBUG: 本地化圖片檔案 {file_name} 處理完成: {final_output_path}")
                 log_info(log_msg)
                 return {"success": True}
-            except (zipfile.BadZipFile, EOFError) as e:
-                log_error(f"跳過損毀的 ZIP 內檔案 {input_path}: {e}")
-                return {"success": False, "error": True}
             except Exception as e:
                 log_error(f"處理 {input_path} 時發生未預期錯誤: {e}")
                 return {"success": False, "error": True}
 
         if ext == ".json" and is_localized_cn_file:
-            return patch_localized_content_json_fn(zf, input_path, final_output_path, rules, log_prefix, output_dir)
+            return patch_localized_content_json_fn(reader, input_path, final_output_path, rules, log_prefix, output_dir)
 
         if ext == ".mcmeta":
-            with zf.open(input_path) as src, open(final_output_path, "wb") as dst:
-                shutil.copyfileobj(src, dst)
+            reader.copy_to(input_path, final_output_path)
             log_debug(f"DEBUG: 本地化 .mcmeta 檔案 {file_name} 複製完成: {final_output_path}")
             log_info(f"{log_prefix} 本地化檔案類型 ({ext}) 已被排除 S2TW 轉換，執行直接複製。")
             return {"success": True}
 
         processor = get_text_processor_fn(ext)
         if processor:
-            raw = read_text_from_zip_fn(zf, input_path)
+            raw = reader.read_bytes(input_path)
             raw = raw.replace("\r\n", "\n").replace("\r", "\n")
             tw_content = processor(raw, recursive_translate_dict_fn, rules, input_path)
             should_write = True
@@ -509,8 +505,7 @@ def process_content_or_copy_file_impl(
             log_info(log_msg)
             return {"success": True}
 
-        with zf.open(input_path) as src, open(final_output_path, "wb") as dst:
-            shutil.copyfileobj(src, dst)
+        reader.copy_to(input_path, final_output_path)
         log_info(f"{log_prefix} 未知本地化檔案類型 ({ext}) 直接複製完成。")
         return {"success": True}
     except Exception as exc:

@@ -106,7 +106,7 @@ class TestLangMergeContentProcessContent:
         sig = inspect.signature(_process_content_or_copy_file)
         params = list(sig.parameters.keys())
         
-        assert "zf" in params
+        assert "reader" in params
         assert "input_path" in params
         assert "rules" in params
         assert "output_dir" in params
@@ -116,12 +116,12 @@ class TestLangMergeContentProcessContent:
         """測試使用 mock ZIP 呼叫 _process_content_or_copy_file。"""
         from translation_tool.core.lang_merge_content import _process_content_or_copy_file
         
-        # 建立 mock ZIP 檔案
-        mock_zf = MagicMock()
+        # 建立 mock reader 檔案
+        mock_reader = MagicMock()
         
         # 測試非 lang 檔案在 only_process_lang=True 時應被跳過
         result = _process_content_or_copy_file(
-            mock_zf,
+            mock_reader,
             "assets/test/config.json",  # 不是 lang 檔案
             [],  # rules
             str(tmp_path / "output"),
@@ -143,7 +143,7 @@ class TestLangMergeContentPatchLocalied:
         sig = inspect.signature(_patch_localized_content_json)
         params = list(sig.parameters.keys())
         
-        assert "zf" in params
+        assert "reader" in params
         assert "cn_path" in params
         assert "tw_output_path" in params
         assert "rules" in params
@@ -154,10 +154,10 @@ class TestLangMergeContentPatchLocalied:
         """測試使用 mock ZIP 呼叫 _patch_localized_content_json。"""
         from translation_tool.core.lang_merge_content import _patch_localized_content_json
         
-        mock_zf = MagicMock()
+        mock_reader = MagicMock()
         
         result = _patch_localized_content_json(
-            mock_zf,
+            mock_reader,
             "test/lang/zh_cn.json",
             str(tmp_path / "output" / "zh_tw.json"),
             [],

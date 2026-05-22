@@ -5,6 +5,7 @@ from pathlib import Path
 
 import orjson
 
+from translation_tool.core.lang_merge_io import ZipReader, quarantine_copy as quarantine_copy_impl
 from translation_tool.core import lang_merge_content
 
 
@@ -19,8 +20,9 @@ def test_patch_localized_content_json_converts_zh_cn_json_to_pretty_zh_tw(tmp_pa
         )
 
     with zipfile.ZipFile(zip_path, "r") as zf:
+        reader = ZipReader(zf)
         result = lang_merge_content._patch_localized_content_json(
-            zf,
+            reader,
             "assets/demo/docs/zh_cn.extra.json",
             str(out_path),
             rules=[],
@@ -42,13 +44,14 @@ def test_patch_localized_content_json_quarantines_invalid_json(tmp_path: Path, m
 
     monkeypatch.setattr(
         lang_merge_content,
-        "quarantine_copy_from_zip",
+        "quarantine_copy",
         lambda **kwargs: calls.append(kwargs),
     )
 
     with zipfile.ZipFile(zip_path, "r") as zf:
+        reader = ZipReader(zf)
         result = lang_merge_content._patch_localized_content_json(
-            zf,
+            reader,
             "assets/demo/docs/zh_cn.extra.json",
             str(tmp_path / "out" / "assets" / "demo" / "docs" / "zh_tw.extra.json"),
             rules=[],
@@ -58,4 +61,4 @@ def test_patch_localized_content_json_quarantines_invalid_json(tmp_path: Path, m
 
     assert result == {"success": True, "pending_count": 0}
     assert len(calls) == 1
-    assert calls[0]["zip_path"] == "assets/demo/docs/zh_cn.extra.json"
+    assert calls[0]["rel_path"] == "assets/demo/docs/zh_cn.extra.json"

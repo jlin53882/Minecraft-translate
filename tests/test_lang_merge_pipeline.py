@@ -9,6 +9,7 @@ import zipfile
 from pathlib import Path
 
 
+from translation_tool.core.lang_merge_io import ZipReader
 from translation_tool.core.lang_merge_pipeline import _process_single_mod
 
 
@@ -46,7 +47,7 @@ class TestProcessSingleMod:
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             result = _process_single_mod(
-                zf=zf,
+                reader=ZipReader(zf),
                 paths=paths,
                 rules=[],  # 空規則
                 output_dir=str(output_dir),
@@ -79,7 +80,7 @@ class TestProcessSingleMod:
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             result = _process_single_mod(
-                zf=zf,
+                reader=ZipReader(zf),
                 paths=paths,
                 rules=[],
                 output_dir=str(output_dir),
@@ -124,7 +125,7 @@ class TestProcessSingleMod:
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             result = _process_single_mod(
-                zf=zf,
+                reader=ZipReader(zf),
                 paths=paths,
                 rules=[],
                 output_dir=str(output_dir),
@@ -156,7 +157,7 @@ class TestProcessSingleMod:
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             result = _process_single_mod(
-                zf=zf,
+                reader=ZipReader(zf),
                 paths=paths,
                 rules=[],
                 output_dir=str(output_dir),
@@ -192,7 +193,7 @@ class TestProcessSingleMod:
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             result = _process_single_mod(
-                zf=zf,
+                reader=ZipReader(zf),
                 paths=paths,
                 rules=[],
                 output_dir=str(output_dir),
@@ -228,7 +229,7 @@ class TestProcessSingleMod:
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             result = _process_single_mod(
-                zf=zf,
+                reader=ZipReader(zf),
                 paths=paths,
                 rules=[],  # 空規則
                 output_dir=str(output_dir),
@@ -263,7 +264,7 @@ class TestProcessSingleMod:
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             result = _process_single_mod(
-                zf=zf,
+                reader=ZipReader(zf),
                 paths=paths,
                 rules=[],
                 output_dir=str(output_dir),
@@ -291,7 +292,7 @@ class TestProcessSingleMod:
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             result = _process_single_mod(
-                zf=zf,
+                reader=ZipReader(zf),
                 paths=paths,
                 rules=[],
                 output_dir=str(output_dir),

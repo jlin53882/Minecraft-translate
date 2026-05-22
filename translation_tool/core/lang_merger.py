@@ -16,6 +16,7 @@ from ..utils.config_manager import load_config
 from ..utils.log_unit import log_error, log_info, log_warning, log_debug, log_exception
 from ..utils.text_processor import load_replace_rules
 from .lang_merge_content import _process_content_or_copy_file, export_filtered_pending, remove_empty_dirs
+from .lang_merge_io import ZipReader
 from .lang_merge_pipeline import _process_single_mod
 
 def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,
@@ -187,14 +188,14 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,
                 
                 # 提交每個 mod 的處理（這裡每個 mod 的 paths 會包含 zh_cn/zh_tw/en_us 任一或多個）
                 for mod_key, paths in mods_to_process.items():
-                    futures.append(executor.submit(_process_single_mod, zf, paths, rules, lang_output_dir, must_translate_dir, errordata_output_dir))
+                    futures.append(executor.submit(_process_single_mod, ZipReader(zf), paths, rules, lang_output_dir, must_translate_dir, errordata_output_dir))
 
                 # 提交其他檔案處理（例如圖片、md、json5、localized files 等）
                 for input_path in other_files:
                     futures.append(
                         executor.submit(
                             _process_content_or_copy_file,
-                            zf, input_path, rules,
+                            ZipReader(zf), input_path, rules,
                             output_dir, only_process_lang,
                             all_files_cache=all_files_cache,
                             patchouli_output_dir=patchouli_output_dir,

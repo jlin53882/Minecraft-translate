@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+from translation_tool.core.lang_merge_io import ZipReader
 from translation_tool.core.lang_merge_pipeline import _process_single_mod
 
 
@@ -50,7 +51,7 @@ class TestZipPrefixAutoStrip:
             paths = _paths_for(prefix)
             # log_warning is not imported into lang_merge_pipeline; auto-stripping issues no warning
             _ = _process_single_mod(
-                zf=zf,
+                reader=ZipReader(zf),
                 paths=paths,
                 rules=[],
                 output_dir=str(tmp_path / "output"),
@@ -65,7 +66,7 @@ class TestZipPrefixAutoStrip:
             zf = _make_zip_with_prefix("custom_out")
             paths = _paths_for("custom_out")
             result = _process_single_mod(
-                zf=zf,
+                reader=ZipReader(zf),
                 paths=paths,
                 rules=[],
                 output_dir=str(tmp_path / "output"),
@@ -83,7 +84,7 @@ class TestZipPrefixAutoStrip:
             paths = _paths_for(".hidden_out")
             # log_warning is not imported into lang_merge_pipeline; auto-stripping issues no warning
             _process_single_mod(
-                zf=zf,
+                reader=ZipReader(zf),
                 paths=paths,
                 rules=[],
                 output_dir=str(tmp_path / "output"),

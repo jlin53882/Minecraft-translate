@@ -16,15 +16,14 @@ from .lang_processing_format import get_text_processor
 from .lang_merge_content_copy import process_content_or_copy_file_impl
 from .lang_merge_content_patchers import patch_localized_content_json_impl
 from .lang_merge_pending import export_filtered_pending_impl, remove_empty_dirs_impl
+from .lang_merge_io import DirReader, quarantine_copy
 from .lang_merge_zip_io import (
-    _read_text_from_zip,
     _write_bytes_atomic,
     _write_text_atomic,
-    quarantine_copy_from_zip,
 )
 
 def _patch_localized_content_json(
-    zf,
+    reader,
     cn_path: str,
     tw_output_path: str,
     rules: list,
@@ -33,20 +32,19 @@ def _patch_localized_content_json(
 ):
     """包裝函式：將本地化 JSON 檔案（如 zh_cn）套用 S2TW 規則後寫入輸出路徑，並處理格式化與 quarantine 流程。"""
     return patch_localized_content_json_impl(
-        zf,
+        reader,
         cn_path,
         tw_output_path,
         rules,
         log_prefix,
         output_dir,
         recursive_translate_dict_fn=recursive_translate_dict,
-        quarantine_copy_from_zip_fn=quarantine_copy_from_zip,
+        quarantine_copy_fn=quarantine_copy,
         json_module=json,
-        
     )
 
 def _process_content_or_copy_file(
-    zf,
+    reader,
     input_path: str,
     rules: list,
     output_dir: str,
@@ -63,7 +61,7 @@ def _process_content_or_copy_file(
 ):
     """包裝函式：處理 ZIP 中的內容檔案（lang JSON、Patchouli、純文字等），依檔案類型判斷要複製或 S2TW 翻譯後寫入。"""
     return process_content_or_copy_file_impl(
-        zf,
+        reader,
         input_path,
         rules,
         output_dir,
@@ -73,10 +71,9 @@ def _process_content_or_copy_file(
         load_config_fn=load_config,
         recursive_translate_dict_fn=recursive_translate_dict,
         get_text_processor_fn=get_text_processor,
-        read_text_from_zip_fn=_read_text_from_zip,
         write_bytes_atomic_fn=_write_bytes_atomic,
         write_text_atomic_fn=_write_text_atomic,
-        quarantine_copy_from_zip_fn=quarantine_copy_from_zip,
+        quarantine_copy_fn=quarantine_copy,
         normalize_patchouli_book_root_fn=normalize_patchouli_book_root,
         patch_localized_content_json_fn=_patch_localized_content_json,
         json_module=json,
