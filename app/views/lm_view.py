@@ -260,7 +260,7 @@ class LMView(ft.Column):
         self.log_presenter.reset()
         self.page.update()
 
-        output_dir = self.output_path.value or LM_translate_folder_name
+        output_dir = (self.output_path.value or "").strip() or LM_translate_folder_name
         dry_run = self.dry_run_switch.value
         export_lang = self.export_lang_checkbox.value
         write_new_cache = self.write_new_cache_switch.value
@@ -275,7 +275,7 @@ class LMView(ft.Column):
         threading.Thread(
             target=run_lm_translation_service,
             args=(
-                self.input_path.value,
+                (self.input_path.value or "").strip(),
                 output_dir,
                 self.session,
                 dry_run,
