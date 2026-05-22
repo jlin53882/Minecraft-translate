@@ -313,7 +313,7 @@ class LMView(ft.Column):
                 async def _do_update(_=None):
                     pct = int(progress * 100)
                     if status == "DONE":
-                        self._set_status("任務完成", theme.GREEN_200)
+                        self._set_status("尚未開始", theme.GREY_200)
                         self._progress_label.value = "📝 就緒"
                         self._progress_label.color = theme.GREY_600
                         self._progress_pct.value = "0%"
