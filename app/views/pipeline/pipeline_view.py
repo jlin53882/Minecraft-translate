@@ -23,7 +23,7 @@ from app.services_impl.pipelines.extract_service import (
     run_lang_extraction_service,
     run_book_extraction_service,
 )
-from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
+from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service, run_merge_folder_batch_service
 from app.services_impl.pipelines.lm_service import run_lm_translation_service
 from app.services_impl.pipelines.bundle_service import run_bundling_service
 
@@ -373,7 +373,7 @@ class PipelineView(ft.Column):
         threading.Thread(target=worker, daemon=True).start()
         self._poll_session(session)
 
-    def _run_merge(self, input_src, output_dir: str, only_lang: bool, process_zh_cn: bool,
+    def _run_merge(self, input_src, output_dir: str, input_mode: str, only_lang: bool, process_zh_cn: bool,
                    patchouli_skip: bool, patchouli_threshold: float, zh_en_threshold: int,
                    lang_codes: list[str]):
         session = TaskSession()
@@ -384,17 +384,29 @@ class PipelineView(ft.Column):
         def worker():
             try:
                 os.makedirs(output_dir, exist_ok=True)
-                merge_input_list = input_src if isinstance(input_src, list) else [input_src]
-                run_merge_zip_batch_service(
-                    zip_paths=merge_input_list,
-                    output_dir=output_dir,
-                    session=session,
-                    only_process_lang=only_lang,
-                    process_zh_cn=process_zh_cn,
-                    patchouli_skip=patchouli_skip,
-                    patchouli_threshold=patchouli_threshold,
-                    zh_en_threshold=zh_en_threshold,
-                )
+                if input_mode == "folder":
+                    run_merge_folder_batch_service(
+                        input_dir=input_src,
+                        output_dir=output_dir,
+                        session=session,
+                        only_process_lang=only_lang,
+                        process_zh_cn=process_zh_cn,
+                        patchouli_skip=patchouli_skip,
+                        patchouli_threshold=patchouli_threshold,
+                        zh_en_threshold=zh_en_threshold,
+                    )
+                else:
+                    merge_input_list = input_src if isinstance(input_src, list) else [input_src]
+                    run_merge_zip_batch_service(
+                        zip_paths=merge_input_list,
+                        output_dir=output_dir,
+                        session=session,
+                        only_process_lang=only_lang,
+                        process_zh_cn=process_zh_cn,
+                        patchouli_skip=patchouli_skip,
+                        patchouli_threshold=patchouli_threshold,
+                        zh_en_threshold=zh_en_threshold,
+                    )
 
                 async def do_finish(_):
                     self.progress_panel.finish_step(2, not session.error)

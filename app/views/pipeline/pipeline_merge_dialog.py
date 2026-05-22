@@ -301,7 +301,7 @@ def open_merge_dialog(
             return
 
         close_dialog(dialog)
-        on_run_merge(merge_input, output, only_lang, process_zh_cn, patchouli_skip_val,
+        on_run_merge(merge_input, output, input_mode, only_lang, process_zh_cn, patchouli_skip_val,
                      patchouli_threshold_val, zh_en_val, lang_codes)
 
     folder_input_row = ft.Container(

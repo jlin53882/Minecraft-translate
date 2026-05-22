@@ -12,7 +12,7 @@ from pathlib import Path
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
-from translation_tool.core.lang_merger import merge_zhcn_to_zhtw_from_zip
+from translation_tool.core.lang_merger import merge_zhcn_to_zhtw_from_zip, merge_zhcn_to_zhtw_from_folder
 
 import os
 
@@ -160,4 +160,121 @@ def run_merge_zip_batch_service(
 
     finally:
         # ⭐ 避免 handler 留著舊 session
+        UI_LOG_HANDLER.set_session(None)
+
+
+def run_merge_folder_batch_service(
+    input_dir: str,
+    output_dir: str,
+    session,
+    only_process_lang,
+    process_zh_cn: bool | None = None,
+    patchouli_skip: bool | None = None,
+    patchouli_threshold: float | None = None,
+    zh_en_threshold: int | None = None,
+):
+    """以資料夾為單位進行合併（支援 generator merge）。
+
+    與 run_merge_zip_batch_service 結構相同，但使用 merge_zhcn_to_zhtw_from_folder。
+    """
+    ensure_pipeline_logging()
+    UI_LOG_HANDLER.set_session(session)
+
+    stats = {
+        "total_folders": 1,
+        "success_folders": 0,
+        "failed_folders": 0,
+        "errored_files": 0,
+        "failed_folders_list": [],
+    }
+
+    def _count_output_files(out_dir: str) -> dict:
+        """掃描各輸出子目錄的檔案數量。"""
+        result = {
+            "lang_output": 0,
+            "待翻譯": 0,
+            "patchouli_output": 0,
+            "other_output": 0,
+            "errordata_output": 0,
+        }
+        if not os.path.exists(out_dir):
+            return result
+        for root, dirs, files in os.walk(out_dir):
+            rel = os.path.relpath(root, out_dir)
+            if rel.startswith("lang_output"):
+                if "待翻譯" in rel:
+                    result["待翻譯"] += len(files)
+                else:
+                    result["lang_output"] += len(files)
+            elif rel.startswith("patchouli_output"):
+                result["patchouli_output"] += len(files)
+            elif rel.startswith("other_output"):
+                result["other_output"] += len(files)
+            elif rel.startswith("errordata_output"):
+                result["errordata_output"] += len(files)
+        return result
+
+    try:
+        session.add_log(f"[資料夾] 開始處理：{os.path.basename(input_dir)}")
+
+        try:
+            for update in merge_zhcn_to_zhtw_from_folder(
+                input_dir,
+                output_dir,
+                only_process_lang,
+                process_zh_cn=process_zh_cn,
+                patchouli_skip=patchouli_skip,
+                patchouli_threshold=patchouli_threshold,
+                zh_en_threshold=zh_en_threshold,
+            ):
+                if "log" in update and update["log"]:
+                    session.add_log(update["log"])
+
+                if "progress" in update and update["progress"] is not None:
+                    session.set_progress(update["progress"])
+
+                if update.get("error"):
+                    session.set_error()
+                    return
+
+            session.add_log(f"[資料夾] 完成：{os.path.basename(input_dir)}")
+            stats["success_folders"] += 1
+
+        except Exception as e:
+            tb = traceback.format_exc()
+            logger.error(f"[資料夾] 錯誤：{input_dir}\n{e}\n{tb}")
+            session.add_log(f"[資料夾] 錯誤：{input_dir}\n{e}\n{tb}")
+            stats["failed_folders"] += 1
+            stats["failed_folders_list"].append({"name": os.path.basename(input_dir), "error": str(e)})
+
+        output_counts = _count_output_files(output_dir)
+        final_summary = {
+            "total_folders": stats["total_folders"],
+            "success_folders": stats["success_folders"],
+            "failed_folders": stats["failed_folders"],
+            "errored_files": stats["errored_files"],
+            "failed_folders_list": stats["failed_folders_list"],
+            "output_counts": output_counts,
+        }
+        session.set_summary(final_summary)
+        yield {"progress": 1.0, "log": None, "summary": final_summary}
+        session.finish()
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(f"[致命錯誤] 資料夾合併失敗：{e}\n{tb}")
+        session.add_log(f"[致命錯誤] 資料夾合併失敗：{e}\n{tb}")
+        error_summary = {
+            "total_folders": stats["total_folders"],
+            "success_folders": stats["success_folders"],
+            "failed_folders": stats["failed_folders"],
+            "errored_files": stats["errored_files"],
+            "failed_folders_list": stats["failed_folders_list"],
+            "output_counts": _count_output_files(output_dir),
+        }
+        session.set_summary(error_summary)
+        yield {"progress": 1.0, "log": None, "summary": error_summary}
+        session.set_error()
+
+    finally:
         UI_LOG_HANDLER.set_session(None)

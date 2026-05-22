@@ -21,7 +21,7 @@ def test_merge_view_initializes_buttons_and_status(monkeypatch):
     view = merge_view.MergeView(mock_page(), mock_filepicker())
 
     assert view.pick_zip_button.content == '新增 ZIP'
-    assert view.start_button.content == '開始合併 ZIP'
+    assert view.start_button.content == '開始合併'
     assert view.status_chip.label.value == '尚未開始'
 
 
@@ -34,7 +34,7 @@ def test_start_merge_without_inputs_shows_snack(monkeypatch):
     view.start_merge(None)
 
     assert page.overlay
-    assert '請先選擇 ZIP 與輸出資料夾' in page.overlay[-1].content.value
+    assert '請先選擇來源資料夾' in page.overlay[-1].content.value
 
 
 def test_remove_zip_updates_selected_list(monkeypatch):

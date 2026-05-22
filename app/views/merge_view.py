@@ -13,7 +13,7 @@ import flet as ft
 from app.logging import LogPresenter
 from translation_tool.utils.log_unit import log_info
 from translation_tool.utils.config_manager import load_config, save_config
-from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
+from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service, run_merge_folder_batch_service
 from app.task_session import TaskSession
 from app.ui import theme
 from app.ui.components import primary_button, styled_card
@@ -220,12 +220,75 @@ class MergeView(ft.Column):
             bgcolor=theme.PRIMARY,
         )
         self.start_button = primary_button(
-            "開始合併 ZIP",
+            "開始合併",
             icon=ft.Icons.PLAY_ARROW,
-            tooltip="開始執行 ZIP 合併流程",
+            tooltip="開始執行合併流程",
             on_click=self.start_merge,
             bgcolor=theme.SUCCESS,
         )
+
+        self.input_mode_group = ft.RadioGroup(
+            content=ft.Row(
+                [
+                    ft.Radio(label="ZIP", value="zip"),
+                    ft.Radio(label="資料夾", value="folder"),
+                ],
+                spacing=15,
+            ),
+            value="folder",
+        )
+        self.folder_path_field = ft.TextField(
+            hint_text="選擇 Mod 來源資料夾",
+            expand=True,
+            dense=True,
+            border_color=theme.OUTLINE,
+            text_size=13,
+            content_padding=10,
+            prefix_icon=ft.Icons.FOLDER,
+        )
+        self.zip_panel = ft.Container(
+            visible=False,
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            self.pick_zip_button,
+                            ft.Text(
+                                "可加入多個 ZIP，會依序合併。",
+                                size=12,
+                                color=theme.GREY_600,
+                            ),
+                        ],
+                        spacing=10,
+                    ),
+                    self.zip_list_view,
+                ],
+                spacing=10,
+            ),
+        )
+        self.folder_panel = ft.Container(
+            visible=True,
+            content=ft.Row(
+                [
+                    self.folder_path_field,
+                    ft.IconButton(
+                        icon=ft.Icons.FOLDER_OPEN_OUTLINED,
+                        icon_color=theme.BLUE_GREY_700,
+                        tooltip="選擇資料夾",
+                        on_click=self.pick_folder_input,
+                    ),
+                ],
+                spacing=6,
+            ),
+        )
+
+        def on_input_mode_changed(e=None):
+            mode = self.input_mode_group.value
+            self.zip_panel.visible = mode == "zip"
+            self.folder_panel.visible = mode == "folder"
+            self.update()
+
+        self.input_mode_group.on_change = on_input_mode_changed
 
         general_options_section = ft.Container(
             content=ft.Column(
@@ -395,22 +458,14 @@ class MergeView(ft.Column):
         self.controls = [
             self._info_container,
             styled_card(
-                title="ZIP 清單",
+                title="輸入來源",
                 icon=ft.Icons.ARCHIVE,
                 content=ft.Column(
                     [
-                        ft.Row(
-                            [
-                                self.pick_zip_button,
-                                ft.Text(
-                                    "可加入多個 ZIP，會依序合併。",
-                                    size=12,
-                                    color=theme.GREY_600,
-                                ),
-                            ],
-                            spacing=10,
-                        ),
-                        self.zip_list_view,
+                        ft.Text("輸入模式", weight=ft.FontWeight.W_500, size=13),
+                        ft.Container(content=self.input_mode_group, padding=5),
+                        self.folder_panel,
+                        self.zip_panel,
                     ],
                     spacing=10,
                 ),
@@ -522,10 +577,30 @@ class MergeView(ft.Column):
             self.output_dir_field.value = result
             self.page.update()
 
+    def pick_folder_input(self, e: ft.ControlEvent) -> None:
+        """開啟資料夾選擇對話框。"""
+        self._page.run_task(self._async_pick_folder_input)
+
+    async def _async_pick_folder_input(self):
+        """async 實作：選擇輸入資料夾並更新 folder_path_field。"""
+        result = await self.file_picker.get_directory_path(dialog_title="選擇 Mod 來源資料夾")
+        if result:
+            self.folder_path_field.value = result
+            self.page.update()
+
     def start_merge(self, e: ft.ControlEvent) -> None:
         """處理開始合併按鈕事件。"""
-        if not self.selected_zips or not (self.output_dir_field.value or "").strip():
-            self._show_snack_bar("請先選擇 ZIP 與輸出資料夾")
+        input_mode = self.input_mode_group.value
+        if input_mode == "folder":
+            if not (self.folder_path_field.value or "").strip():
+                self._show_snack_bar("請先選擇來源資料夾")
+                return
+        else:
+            if not self.selected_zips:
+                self._show_snack_bar("請先選擇 ZIP 檔案")
+                return
+        if not (self.output_dir_field.value or "").strip():
+            self._show_snack_bar("請先選擇輸出資料夾")
             return
 
         self.start_button.disabled = True
@@ -534,22 +609,34 @@ class MergeView(ft.Column):
         self._set_status("執行中", theme.BLUE_200)
 
         self.session.start()
-        self.session.add_log("[系統] 開始 ZIP 合併任務")
+        self.session.add_log("[系統] 開始合併任務")
         self._start_ui_poller()
 
         def _run_merge():
-            # ⚠️ generator 必須完整迭代，否則程式碼不會執行
-            for _ in run_merge_zip_batch_service(
-                zip_paths=self.selected_zips,
-                output_dir=self.output_dir_field.value,
-                session=self.session,
-                only_process_lang=self.only_lang_checkbox.value,
-                process_zh_cn=self.process_zh_cn_switch.value,
-                patchouli_skip=self.patchouli_skip_zh_cn_switch.value,
-                patchouli_threshold=self._safe_float(self.patchouli_threshold_field.value or "") or 0.5,
-                zh_en_threshold=self._safe_int(self.zh_en_letter_threshold_field.value or "") or 2,
-            ):
-                pass
+            if input_mode == "folder":
+                for _ in run_merge_folder_batch_service(
+                    input_dir=self.folder_path_field.value,
+                    output_dir=self.output_dir_field.value,
+                    session=self.session,
+                    only_process_lang=self.only_lang_checkbox.value,
+                    process_zh_cn=self.process_zh_cn_switch.value,
+                    patchouli_skip=self.patchouli_skip_zh_cn_switch.value,
+                    patchouli_threshold=self._safe_float(self.patchouli_threshold_field.value or "") or 0.5,
+                    zh_en_threshold=self._safe_int(self.zh_en_letter_threshold_field.value or "") or 2,
+                ):
+                    pass
+            else:
+                for _ in run_merge_zip_batch_service(
+                    zip_paths=self.selected_zips,
+                    output_dir=self.output_dir_field.value,
+                    session=self.session,
+                    only_process_lang=self.only_lang_checkbox.value,
+                    process_zh_cn=self.process_zh_cn_switch.value,
+                    patchouli_skip=self.patchouli_skip_zh_cn_switch.value,
+                    patchouli_threshold=self._safe_float(self.patchouli_threshold_field.value or "") or 0.5,
+                    zh_en_threshold=self._safe_int(self.zh_en_letter_threshold_field.value or "") or 2,
+                ):
+                    pass
 
         threading.Thread(target=_run_merge, daemon=True).start()
 
