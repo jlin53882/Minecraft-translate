@@ -53,8 +53,12 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lang_merger.quarantine_folder_name'].value = lang_merger_cfg.get('quarantine_folder_name')
     if 'lang_merger.patchouli_skip_en_us_when_zh_cn_exists' in view.controls_map:
         view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value = lang_merger_cfg.get('patchouli_skip_en_us_when_zh_cn_exists')
-    view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value = str(lang_merger_cfg.get('patchouli_effective_translation_threshold'))
-    view.controls_map['lang_merger.zh_en_letter_threshold'].value = str(lang_merger_cfg.get('zh_en_letter_threshold'))
+    _v = lang_merger_cfg.get('patchouli_effective_translation_threshold')
+    view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value = \
+        str(_v if _v is not None else get_default('lang_merger.patchouli_effective_translation_threshold'))
+    _v = lang_merger_cfg.get('zh_en_letter_threshold')
+    view.controls_map['lang_merger.zh_en_letter_threshold'].value = \
+        str(_v if _v is not None else get_default('lang_merger.zh_en_letter_threshold'))
 
     view.controls_map['lm_translator.lm_translate_folder_name'].value = str(lm_cfg.get('lm_translate_folder_name'))
     view.controls_map['lm_translator.patchouli_system_prompt'].value = str(lm_cfg.get('patchouli_system_prompt'))
