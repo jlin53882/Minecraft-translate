@@ -19,8 +19,8 @@ def test_merge_view_initializes_buttons_and_status(monkeypatch):
     monkeypatch.setattr(merge_view, 'TaskSession', _Session)
     view = merge_view.MergeView(mock_page(), mock_filepicker())
 
-    assert view.pick_zip_button.text == '新增 ZIP'
-    assert view.start_button.text == '開始合併 ZIP'
+    assert view.pick_zip_button.content == '新增 ZIP'
+    assert view.start_button.content == '開始合併 ZIP'
     assert view.status_chip.label.value == '尚未開始'
 
 
