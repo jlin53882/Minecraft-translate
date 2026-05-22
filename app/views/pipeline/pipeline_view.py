@@ -390,6 +390,10 @@ class PipelineView(ft.Column):
                     output_dir=output_dir,
                     session=session,
                     only_process_lang=only_lang,
+                    process_zh_cn=process_zh_cn,
+                    patchouli_skip=patchouli_skip,
+                    patchouli_threshold=patchouli_threshold,
+                    zh_en_threshold=zh_en_threshold,
                 )
 
                 async def do_finish(_):
@@ -583,6 +587,10 @@ class PipelineView(ft.Column):
                     output_dir=output_dir,
                     session=session,
                     only_process_lang=True,
+                    process_zh_cn=config.get("process_zh_cn", True),
+                    patchouli_skip=config.get("patchouli_skip", False),
+                    patchouli_threshold=config.get("patchouli_threshold", 0.5),
+                    zh_en_threshold=config.get("zh_en_threshold", 2),
                 ))
                 if not ok:
                     self._page.run_task(lambda _: self._reenable_buttons())

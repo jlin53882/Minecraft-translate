@@ -18,7 +18,12 @@ from ..utils.text_processor import load_replace_rules
 from .lang_merge_content import _process_content_or_copy_file, export_filtered_pending, remove_empty_dirs
 from .lang_merge_pipeline import _process_single_mod
 
-def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang: bool = False ) -> Generator[Dict[str, Any], None, None]:
+def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,
+                                 only_process_lang: bool = False,
+                                 process_zh_cn: bool | None = None,
+                                 patchouli_skip: bool | None = None,
+                                 patchouli_threshold: float | None = None,
+                                 zh_en_threshold: int | None = None) -> Generator[Dict[str, Any], None, None]:
     """將 ZIP 檔案中的簡體中文合併為繁體中文。
 
     Args:
@@ -191,10 +196,14 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,only_process_lang
                             _process_content_or_copy_file,
                             zf, input_path, rules,
                             output_dir, only_process_lang,
-                            all_files_cache=all_files_cache,  # 傳遞快取
+                            all_files_cache=all_files_cache,
                             patchouli_output_dir=patchouli_output_dir,
                             other_output_dir=other_output_dir,
                             errordata_dir=errordata_output_dir,
+                            process_zh_cn=process_zh_cn,
+                            patchouli_skip=patchouli_skip,
+                            patchouli_threshold=patchouli_threshold,
+                            zh_en_threshold=zh_en_threshold,
                         ))
 
                 completed = 0

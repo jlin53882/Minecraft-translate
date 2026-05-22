@@ -56,6 +56,10 @@ def _process_content_or_copy_file(
     patchouli_output_dir: str | None = None,
     other_output_dir: str | None = None,
     errordata_dir: str | None = None,
+    process_zh_cn: bool | None = None,
+    patchouli_skip: bool | None = None,
+    patchouli_threshold: float | None = None,
+    zh_en_threshold: int | None = None,
 ):
     """包裝函式：處理 ZIP 中的內容檔案（lang JSON、Patchouli、純文字等），依檔案類型判斷要複製或 S2TW 翻譯後寫入。"""
     return process_content_or_copy_file_impl(
@@ -79,6 +83,10 @@ def _process_content_or_copy_file(
         patchouli_output_dir=patchouli_output_dir,
         other_output_dir=other_output_dir,
         errordata_dir=errordata_dir,
+        process_zh_cn=process_zh_cn,
+        patchouli_skip=patchouli_skip,
+        patchouli_threshold=patchouli_threshold,
+        zh_en_threshold=zh_en_threshold,
     )
 
 def remove_empty_dirs(root_dir: str):

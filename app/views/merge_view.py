@@ -540,10 +540,14 @@ class MergeView(ft.Column):
         def _run_merge():
             # ⚠️ generator 必須完整迭代，否則程式碼不會執行
             for _ in run_merge_zip_batch_service(
-                self.selected_zips,
-                self.output_dir_field.value,
-                self.session,
-                self.only_lang_checkbox.value,
+                zip_paths=self.selected_zips,
+                output_dir=self.output_dir_field.value,
+                session=self.session,
+                only_process_lang=self.only_lang_checkbox.value,
+                process_zh_cn=self.process_zh_cn_switch.value,
+                patchouli_skip=self.patchouli_skip_zh_cn_switch.value,
+                patchouli_threshold=self._safe_float(self.patchouli_threshold_field.value or "") or 0.5,
+                zh_en_threshold=self._safe_int(self.zh_en_letter_threshold_field.value or "") or 2,
             ):
                 pass
 

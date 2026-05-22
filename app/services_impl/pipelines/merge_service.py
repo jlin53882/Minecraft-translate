@@ -23,6 +23,10 @@ def run_merge_zip_batch_service(
     output_dir: str,
     session,
     only_process_lang,
+    process_zh_cn: bool | None = None,
+    patchouli_skip: bool | None = None,
+    patchouli_threshold: float | None = None,
+    zh_en_threshold: int | None = None,
 ):
     """
     以 ZIP 為單位進行合併（支援 generator merge）
@@ -90,7 +94,11 @@ def run_merge_zip_batch_service(
 
             try:
                 # ⚠️ 關鍵：一定要 iterate generator，否則 merge 不會執行
-                for update in merge_zhcn_to_zhtw_from_zip(zip_path, output_dir, only_process_lang):
+                for update in merge_zhcn_to_zhtw_from_zip(zip_path, output_dir, only_process_lang,
+                                                process_zh_cn=process_zh_cn,
+                                                patchouli_skip=patchouli_skip,
+                                                patchouli_threshold=patchouli_threshold,
+                                                zh_en_threshold=zh_en_threshold):
                     # ---- log ----
                     if "log" in update and update["log"]:
                         session.add_log(update["log"])

@@ -21,7 +21,7 @@ from app.ui.theme import (
     GREEN_50, RED_400, RED_50, RED_50,
 )
 from app.logging.task_session import TaskSession
-from translation_tool.utils.config_manager import load_config, save_config
+from translation_tool.utils.config_manager import load_config
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
 
 
@@ -299,14 +299,6 @@ def open_merge_dialog(
         if not lang_codes:
             show_snack_bar("⚠️ 請至少選擇一個語言代碼")
             return
-
-        cfg = load_config()
-        if "lang_merger" not in cfg:
-            cfg["lang_merger"] = {}
-        cfg["lang_merger"]["patchouli_skip_en_us_when_zh_cn_exists"] = patchouli_skip_val
-        cfg["lang_merger"]["patchouli_effective_translation_threshold"] = patchouli_threshold_val
-        cfg["lang_merger"]["zh_en_letter_threshold"] = zh_en_val
-        save_config(cfg)
 
         close_dialog(dialog)
         on_run_merge(merge_input, output, only_lang, process_zh_cn, patchouli_skip_val,

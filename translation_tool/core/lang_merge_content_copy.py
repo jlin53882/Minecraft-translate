@@ -138,6 +138,10 @@ def process_content_or_copy_file_impl(
     patchouli_output_dir: str | None = None,
     other_output_dir: str | None = None,
     errordata_dir: str | None = None,
+    process_zh_cn: bool | None = None,
+    patchouli_skip: bool | None = None,
+    patchouli_threshold: float | None = None,
+    zh_en_threshold: int | None = None,
 ) -> Dict[str, Any]:
     """處理非標準 lang JSON / patchouli / 純文字內容的 copy-or-patch 流程。"""
     # 自動偵測並剝離 ZIP 統一包裝前綴（任何名稱皆適用）
@@ -165,11 +169,11 @@ def process_content_or_copy_file_impl(
 
     # --- v3 新增：zh_cn skip logic (在 early return 判斷之前，先做全局開關檢查) ---
     merger_cfg = load_config_fn().get("lang_merger", {})
-    process_zh_cn = merger_cfg.get("process_zh_cn_files", True)
+    _process_zh_cn = process_zh_cn if process_zh_cn is not None else merger_cfg.get("process_zh_cn_files", True)
     skip_zh_cn_when_only_lang = merger_cfg.get("skip_zh_cn_when_only_process_lang", False)
     # 全局關閉 zh_cn 時，直接跳過所有 zh_cn 內容檔案（非 lang 也要檢查）
     norm_lower = input_path.lower().replace("\\", "/")
-    if not process_zh_cn:
+    if not _process_zh_cn:
         if "/zh_cn/" in norm_lower or "/zh_cn." in norm_lower:
             return {"success": True, "log": None}
 
@@ -180,7 +184,7 @@ def process_content_or_copy_file_impl(
         if file_stem not in ["zh_cn", "zh_tw", "en_us"]:
             return {"success": True, "log": None}
         # 只處理 lang + zh_cn 模式下，額外跳過 zh_cn.lang/zh_cn.json
-        if not process_zh_cn:
+        if not _process_zh_cn:
             return {"success": True, "log": None}
         if skip_zh_cn_when_only_lang:
             if "/lang/" in norm_lower and ("zh_cn.json" in norm_lower or "zh_cn.lang" in norm_lower):
@@ -223,16 +227,12 @@ def process_content_or_copy_file_impl(
     book_root, matched_dir_name = hit if hit else (None, None)
 
     if book_root:
-        merger_cfg = load_config_fn().get("lang_merger", {})
-        process_zh_cn = merger_cfg.get("process_zh_cn_files", True)
-        allow_zh_cn = False if not process_zh_cn else bool(
-            merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False)
-        )
-        threshold = float(merger_cfg.get("patchouli_effective_translation_threshold", 0.5))
+        _allow_zh_cn = False if not _process_zh_cn else bool(patchouli_skip if patchouli_skip is not None else merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False))
+        _threshold = patchouli_threshold if patchouli_threshold is not None else float(merger_cfg.get("patchouli_effective_translation_threshold", 0.5))
 
         # 優先使用外部傳入的預掃描 cache，否則走內部 _compute_patchouli_lang_effectiveness（自帶 module-level cache）
         book_root_lower = book_root.lower()
-        cache_key = (book_root_lower, threshold)
+        cache_key = (book_root_lower, _threshold)
         if patchouli_eff_cache is not None and cache_key in patchouli_eff_cache:
             eff = patchouli_eff_cache[cache_key]
             log_debug(f"[Patchouli Eff] 使用外部預掃描 cache for {book_root!r}: {eff}")
@@ -240,7 +240,7 @@ def process_content_or_copy_file_impl(
             eff = _compute_patchouli_lang_effectiveness(
                 zf,
                 book_root,
-                threshold=threshold,
+                threshold=_threshold,
                 json_module=json_module,
             )
         has_eff_zh_tw = bool(eff.get("zh_tw", False))
@@ -253,7 +253,7 @@ def process_content_or_copy_file_impl(
         patchouli_dirs_cfg = load_config_fn().get("lm_translator", {}).get("patchouli", {}).get("dir_names", ["patchouli_books"])
         patchouli_root_dir = matched_dir_name if isinstance(patchouli_dirs_cfg, list) and patchouli_dirs_cfg else patchouli_dirs_cfg
 
-        if rel_low.startswith("en_us/") and (has_eff_zh_tw or (allow_zh_cn and has_eff_zh_cn)):
+        if rel_low.startswith("en_us/") and (has_eff_zh_tw or (_allow_zh_cn and has_eff_zh_cn)):
             return {"success": True, "log": f"[Patchouli] 跳過已有有效翻譯的英文原件: {normalized_path}"}
 
         if rel_low.startswith("zh_cn/"):
