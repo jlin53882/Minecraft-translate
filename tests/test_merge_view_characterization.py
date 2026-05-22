@@ -48,6 +48,7 @@ def test_remove_zip_updates_selected_list(monkeypatch):
 def test_merge_view_all_checkboxes_and_switches_exist(monkeypatch):
     """驗證 MergeView 所有 checkbox/switch 控件存在"""
     monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
 
     assert view.only_lang_checkbox.label == '只處理 lang 檔案'
