@@ -51,7 +51,18 @@ def update_stats_from_log(view, line: str, phase: str = None):
         log_warning(f'解析統計數字失敗: {e}')
 
 def start_ui_poller(view, mode: str = ''):
-    """启动后台轮询线程，定期从 TaskSession 读取状态更新 UI"""
+    """啟動背景輪詢執行緒，定期從 TaskSession 讀取狀態更新 UI。
+
+    適用於 Lang 單一模式，用於定期輪詢 session 快照並更新：
+    - status_text：狀態文字
+    - progress_bar：進度條
+    - _progress_pct：百分比文字
+    - log_view：日誌內容
+
+    參數：
+        view: ExtractorView 實例
+        mode: 提取模式（'lang' / 'book' / 'dual'）
+    """
     view._ui_poller_stop.clear()
     view._extraction_stats = {'success': 0, 'warnings': 0, 'failures': 0, 'total_files': 0}
     presenter = LogPresenter(mode="append", max_ui_lines=2000)
@@ -106,10 +117,23 @@ def start_ui_poller(view, mode: str = ''):
     threading.Thread(target=poll, daemon=True).start()
 
 def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
-    """方案 2：Worker 直接更新 UI（廢除 poller），與 BundlerView 架構一致。
+    """背景執行緒：執行 JAR 提取並直接更新 UI（Dual 模式專用）。
 
-    每個 update：直接呼叫 view._append_log_line() + page.update()，
-    不再透過 session.snapshot() + poller 中轉。
+    適用於 Dual 模式，繞過 session.snapshot() + poller，
+    直接在 generator yield 時透過 page.run_task() 更新 UI。
+
+    流程：
+    1. 初始化 LogPresenter 和統計計數
+    2. 根據 mode 選擇對應的 generator（lang/book/dual）
+    3. 每個 update：呼叫 _do_update / _do_append_log / _do_update_stats
+    4. phase 切換時（book phase）重置進度條
+    5. 完成後顯示摘要對話框
+
+    參數：
+        view: ExtractorView 實例
+        mode: 提取模式（'lang' / 'book' / 'dual'）
+        mods_dir: Mods 資料夾路徑
+        output_dir: 輸出資料夾路徑
     """
     from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
     ensure_pipeline_logging()
@@ -242,7 +266,25 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
 
 
 def start_extraction(view, mode: str):
-    """启动 JAR 文件提取任务，根据 mode 选择 lang 或 book 提取服务"""
+    """啟動 JAR 檔案提取任務（Lang / Book / Dual 模式）。
+
+    流程：
+    1. 檢查是否已有任務執行中
+    2. 驗證 Mods 資料夾存在
+    3. 自動填入輸出路徑（根據 mode 選擇結尾資料夾）
+    4. 建立輸出資料夾
+    5. 清空日誌、停用控制項
+    6. 啟動 session 並根據 mode 選擇 Generator：
+       - 'lang'：extract_lang_files_generator
+       - 'book'：extract_book_files_generator
+       - 'dual'：extract_dual_files_generator
+    7. Dual 模式由 _extraction_worker 直接更新 UI
+       Lang/Book 模式由 start_ui_poller 輪詢更新 UI
+
+    參數：
+        view: ExtractorView 實例
+        mode: 提取模式（'lang' / 'book' / 'dual'）
+    """
     snap = view.session.snapshot()
     if snap.get('status') == 'RUNNING':
         view._show_snack_bar('任務進行中...')
@@ -280,7 +322,16 @@ def start_extraction(view, mode: str):
     threading.Thread(target=_extraction_worker, args=(view, mode, mods_dir, str(out_path)), daemon=True).start()
 
 def build_preview_result_dialog(view, result: dict, mode: str):
-    """构建提取预览结果对话框，显示找到的文件数量和大小"""
+    """建構提取預覽結果對話框，顯示找到的檔案數量和大小。
+
+    參數：
+        view: ExtractorView 實例
+        result: 預覽結果字典（包含 preview_results, total_files, total_size_mb）
+        mode: 模式（'lang' / 'book' / 'dual'）
+
+    Returns:
+        ft.AlertDialog 對話框
+    """
     preview_results = result.get('preview_results', [])
     total_files = result.get('total_files', 0)
     total_size_mb = result.get('total_size_mb', 0)
@@ -351,7 +402,16 @@ def build_preview_result_dialog(view, result: dict, mode: str):
     return dialog
 
 def build_preview_error_dialog(view, error: str, mode: str):
-    """构建预览失败错误对话框"""
+    """建構預覽失敗錯誤對話框。
+
+    參數：
+        view: ExtractorView 實例
+        error: 錯誤訊息
+        mode: 模式（'lang' / 'book' / 'dual'）
+
+    Returns:
+        ft.AlertDialog 對話框
+    """
     return ft.AlertDialog(
         modal=True,
         title=ft.Text('預覽失敗'),
@@ -359,8 +419,22 @@ def build_preview_error_dialog(view, error: str, mode: str):
         actions=[ft.TextButton('關閉', on_click=lambda e: view._close_dialog_overlay(view._preview_error_dialog))],
     )
 
+
 def show_preview(view, mode: str):
-    """执行预览扫描，显示将要提取的文件列表（不执行实际提取）"""
+    """執行預覽掃描，顯示將要提取的檔案列表（不執行實際提取）。
+
+    流程：
+    1. 驗證 Mods 資料夾存在
+    2. 自動填入輸出路徑
+    3. 停用控制項，顯示「掃描中」提示
+    4. 啟動背景執行緒執行掃描
+    5. 輪詢 session 狀態更新 progress_bar
+    6. 完成後顯示預覽結果對話框或錯誤對話框
+
+    參數：
+        view: ExtractorView 實例
+        mode: 模式（'lang' / 'book' / 'dual'）
+    """
     mods_dir = (view.mods_dir_textfield.value or '').strip()
     if not mods_dir:
         view._show_snack_bar('請先選擇 Mods 資料夾')

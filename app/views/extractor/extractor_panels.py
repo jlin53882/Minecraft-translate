@@ -111,7 +111,18 @@ def _build_stats_badge(view) -> ft.Container:
 
 
 def _build_path_row(view, icon, label, field, pick_target) -> ft.Container:
-    """路徑輸入列：前綴圖示 + TextField + 選擇按鈕"""
+    """路徑輸入列：前綴圖示 + TextField + 選擇按鈕。
+
+    參數：
+        view: ExtractorView 實例
+        icon: Flet 圖示（如 ft.Icons.DNS）
+        label: 輸入框標籤文字
+        field: TextField 控制項
+        pick_target: 點擊按鈕後填入路徑的 TextField
+
+    Returns:
+        ft.Container 包裝的路徑輸入列
+    """
     return ft.Column(
         spacing=4,
         controls=[
@@ -134,6 +145,15 @@ def _build_path_row(view, icon, label, field, pick_target) -> ft.Container:
 
 
 def _build_pick_button(view, target):
+    """目錄選擇 IconButton。
+
+    參數：
+        view: ExtractorView 實例
+        target: 選擇目錄後填入路徑的 TextField
+
+    Returns:
+        ft.IconButton 按鈕
+    """
     return ft.IconButton(
         icon=ft.Icons.FOLDER_OPEN_OUTLINED,
         icon_color=ft.Colors.BLUE_GREY_700,

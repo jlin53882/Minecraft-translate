@@ -233,7 +233,11 @@ class ExtractorView(ft.Column):
         self._update_output_dir_helper()
 
     def _update_output_dir_helper(self):
-        """動態更新 output_dir_textfield 的 helper，顯示實際的資料夾命名設定。"""
+        """動態更新 output_dir_textfield 的 helper，顯示實際的資料夾命名設定。
+
+        從翻譯工具設定讀取 output_folder_names，顯示各模式自動產生的資料夾名稱。
+        包含 Lang/Book/Dual 的提取和預覽資料夾命名。
+        """
         from translation_tool.utils.config_manager import load_config
         config = load_config()
         folder_names = config.get("extractor", {}).get("output_folder_names", {})
@@ -261,6 +265,10 @@ class ExtractorView(ft.Column):
         """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。
 
         只有在輸出路徑為空時才自動填入，避免覆蓋使用者已自訂的路徑。
+
+        參數：
+            mods_dir: Mods 資料夾路徑
+            mode: 模式（'lang' / 'book' / 'dual'），決定使用的資料夾命名尾碼
         """
         from translation_tool.utils.config_manager import load_config
 
@@ -289,7 +297,13 @@ class ExtractorView(ft.Column):
         self._append_log_line(f"[系統] 自動設定輸出路徑：{output_path}")
 
     def set_controls_disabled(self, disabled: bool):
-        """設定控制項停用/啟用狀態"""
+        """設定控制項停用/啟用狀態。
+
+        停用時 opacity 設為 0.5，避免使用者誤觸。
+
+        參數：
+            disabled: True 停用，False 啟用
+        """
         for ctrl in (
             self.mods_dir_textfield,
             self.output_dir_textfield,
@@ -301,7 +315,10 @@ class ExtractorView(ft.Column):
         self.page.update()
 
     def clear_output_path(self, e=None):
-        """清除輸出路徑欄位"""
+        """清除輸出路徑欄位。
+
+        清除後顯示系統日誌。防止清除已經為空的欄位。
+        """
         if not (self.output_dir_textfield.value or "").strip():
             return
         self.output_dir_textfield.value = ""
@@ -312,15 +329,35 @@ class ExtractorView(ft.Column):
     # TaskSession UI Poller
     # ==================================================
     def _start_ui_poller(self, mode: str = ""):
-        """启动 UI 轮询器以定期更新界面状态"""
+        """啟動 UI 輪詢器以定期更新介面狀態。
+
+        將 view 和 mode 傳遞給 start_ui_poller() 函式。
+
+        參數：
+            mode: 提取模式（'lang' / 'book'）
+        """
         return run_ui_poller(self, mode=mode)
 
     def _update_stats_from_log(self, line: str):
-        """根据日志内容更新提取统计信息"""
+        """根據日誌內容更新提取統計資訊。
+
+        將日誌行傳遞給 update_stats_from_log() 解析。
+
+        參數：
+            line: 日誌文字行
+        """
         return update_stats_from_log(self, line)
 
     def _show_extraction_summary(self, mode: str):
-        """顯示提取結果摘要（UI 風格對齊預覽 modal）。"""
+        """顯示提取結果摘要對話框（UI 風格對齊預覽 modal）。
+
+        根據 mode 顯示不同內容：
+        - 'dual'：顯示 Lang 和 Book 兩階段的統計
+        - 'lang' / 'book'：顯示單一模式的統計
+
+        參數：
+            mode: 模式（'lang' / 'book' / 'dual'）
+        """
         stats = self._extraction_stats
 
         if mode == "dual":
@@ -466,15 +503,23 @@ class ExtractorView(ft.Column):
     # Worker Logic
     # ==================================================
     def start_extraction(self, mode: str):
-        """启动 JAR 文件提取任务（lang 或 book 模式）"""
+        """啟動 JAR 檔案提取任務（Lang / Book / Dual 模式）。
+
+        委託给 extractor_actions.start_extraction() 處理。
+
+        參數：
+            mode: 提取模式（'lang' / 'book' / 'dual'）
+        """
         return run_extraction_flow(self, mode)
 
     def _show_snack_bar(self, message: str, color: str = theme.ERROR):
-        """
-        顯示底部的快訊通知 (SnackBar)
+        """顯示底部的快訊通知 (SnackBar)。
 
-        :param message: 要顯示的文字訊息
-        :param color: SnackBar 的背景顏色，預設為淺紅色 (RED_400)
+        將 SnackBar 加入 page.overlay 並設為 open。
+
+        參數：
+            message: 要顯示的文字訊息
+            color: SnackBar 的背景顏色，預設為 RED_400
         """
         log_info(f"[UI] SnackBar: {message}")
         # 建立 SnackBar 元件，包含文字內容與背景顏色
@@ -494,11 +539,24 @@ class ExtractorView(ft.Column):
     # 預覽功能
     # ==================================================
     def show_preview(self, mode: str):
-        """显示提取预览对话框（lang 或 book 模式）"""
+        """顯示提取預覽對話框（Lang / Book / Dual 模式）。
+
+        委託给 extractor_actions.show_preview() 處理。
+
+        參數：
+            mode: 模式（'lang' / 'book' / 'dual'）
+        """
         return run_preview_flow(self, mode)
 
     def _show_preview_dialog_result(self, result: dict, mode: str):
-        """显示预览结果对话框"""
+        """顯示預覽結果對話框。
+
+        將 build_preview_result_dialog() 的結果加入 overlay 並打開。
+
+        參數：
+            result: 預覽結果字典
+            mode: 模式（'lang' / 'book' / 'dual'）
+        """
         dialog = build_preview_result_dialog(self, result, mode)
         self.page.overlay.append(dialog)
         dialog.open = True
@@ -507,7 +565,14 @@ class ExtractorView(ft.Column):
         self.page.run_task(_do_update, None)
 
     def _show_preview_dialog_error(self, error: str, mode: str):
-        """显示预览错误对话框"""
+        """顯示預覽錯誤對話框。
+
+        將 build_preview_error_dialog() 的結果加入 overlay 並打開。
+
+        參數：
+            error: 錯誤訊息
+            mode: 模式（'lang' / 'book' / 'dual'）
+        """
         self._preview_error_dialog = build_preview_error_dialog(self, error, mode)
         self.page.overlay.append(self._preview_error_dialog)
         self._preview_error_dialog.open = True
@@ -516,7 +581,17 @@ class ExtractorView(ft.Column):
         self.page.run_task(_do_update, None)
 
     def _close_dialog_overlay(self, dialog):
-        """關閉 overlay 對話框並重置 UI 狀態"""
+        """關閉 overlay 對話框並重置 UI 狀態。
+
+        在關閉對話框後：
+        - 重置 status_text 為「閒置」
+        - 重置 progress_bar 為 0
+        - 重置 _progress_pct 為 "0%"
+        - 啟用所有控制項
+
+        參數：
+            dialog: 要關閉的 AlertDialog
+        """
         try:
             dialog.open = False
             self.status_text.value = '狀態：閒置'
