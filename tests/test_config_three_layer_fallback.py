@@ -365,6 +365,7 @@ class TestLoadConfigIntoView:
                     'lm_translator.initial_batch_size_md': MockControl(),
                     'lm_translator.min_batch_size': MockControl(),
                     'lm_translator.batch_shrink_factor': MockControl(),
+                    'lm_translator.batch_write_interval': MockControl(),
                     'lm_translator.patchouli.dir_names': MockControl(),
                     'lm_translator.translator.skip_terms': MockControl(),
                     'lm_translator.translator.translatable_keywords': MockControl(),
@@ -452,7 +453,8 @@ class TestLoadConfigIntoView:
         assert view.controls_map['lm_translator.initial_batch_size_kubejs'].value == 200
         assert view.controls_map['lm_translator.initial_batch_size_md'].value == 100
         assert view.controls_map['lm_translator.min_batch_size'].value == 50
-        assert view.controls_map['lm_translator.batch_shrink_factor'].value == 0.5
+        assert view.controls_map['lm_translator.batch_shrink_factor'].value == 0.75
+        assert view.controls_map['lm_translator.batch_write_interval'].value == 2
 
     def test_list_fields_preserve_empty_list_not_replaced_with_default(self, tmp_path):
         """空清單 [] 是有效設定，會被保留，不會被 DEFAULT 值置換。"""
