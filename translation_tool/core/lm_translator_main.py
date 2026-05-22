@@ -771,18 +771,14 @@ def translate_batch_smart_old(
                         hit_overload_retry = True
                         break  # ← 跳出 model pool，回到 while 重新送
 
-                    # ===== B. 非 overload 的 503：換 key / model =====
+                    # ===== B. 非 overload 的 503：等待後重試同一批，不換 key =====
                     else:
                         log_warning(
-                            "503 非 overload（可能節點或區域異常）→ 嘗試切換 API key"
+                            "503 非 overload（節點/區域異常）→ 等待 12s 後重送同一 batch"
                         )
-                        try:
-                            rotate_api_key()
-                            time.sleep(request_interval_sec)
-                            continue  # 換 key 繼續 model pool
-                        except Exception as err:
-                            log_error(f"API key 切換失敗: {err}")
-                            break
+                        hit_overload_retry = True
+                        time.sleep(12)
+                        break  # 回到 while 重新送同一 batch
 
                 # ======== 500 ==========
                 if status == 500:
