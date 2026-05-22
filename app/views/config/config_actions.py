@@ -41,6 +41,7 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lm_translator.initial_batch_size_md'].value = int(config.get('lm_translator', {}).get('initial_batch_size_md', 100))
     view.controls_map['lm_translator.min_batch_size'].value = int(config.get('lm_translator', {}).get('min_batch_size', 50))
     view.controls_map['lm_translator.batch_shrink_factor'].value = float(config.get('lm_translator', {}).get('batch_shrink_factor', 0.75))
+    view.controls_map['lm_translator.batch_write_interval'].value = int(config.get('lm_translator', {}).get('batch_write_interval', 2))
     view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(config.get('lm_translator', {}).get('patchouli', {}).get('dir_names', ['patchouli_books', 'book', 'manual', 'guidebook']))
     view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('skip_terms', ['api documentation', 'api docs', 'documentation', 'discord', 'github', 'homepage', 'mod page', 'modpack', 'official website', 'patreon']))
     view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('translatable_keywords', ['text', 'name', 'title', 'description', 'subtitle', 'hover', 'note', 'warning', 'quote', 'paragraph', 'body', 'header', 'footer', 'heading', 'effects']))
@@ -108,6 +109,7 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
         new_config['lm_translator']['initial_batch_size_md'] = int(view.controls_map['lm_translator.initial_batch_size_md'].value)
         new_config['lm_translator']['min_batch_size'] = int(view.controls_map['lm_translator.min_batch_size'].value)
         new_config['lm_translator']['batch_shrink_factor'] = float(view.controls_map['lm_translator.batch_shrink_factor'].value)
+        new_config['lm_translator']['batch_write_interval'] = int(view.controls_map['lm_translator.batch_write_interval'].value)
         new_config['lm_translator']['patchouli']['dir_names'] = [line.strip() for line in view.controls_map['lm_translator.patchouli.dir_names'].value.splitlines() if line.strip()]
         new_config['lm_translator']['translator']['skip_terms'] = [line.strip() for line in view.controls_map['lm_translator.translator.skip_terms'].value.splitlines() if line.strip()]
         new_config['lm_translator']['translator']['translatable_keywords'] = [line.strip() for line in view.controls_map['lm_translator.translator.translatable_keywords'].value.splitlines() if line.strip()]
