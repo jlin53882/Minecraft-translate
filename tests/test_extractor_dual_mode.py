@@ -779,6 +779,9 @@ class TestShowExtractionSummaryDualMode:
             # dialog 應被加到 overlay
             assert len(view.page.overlay) >= 1
 
+            # cleanup：關閉 dialog，避免殘留 page.overlay
+            view._close_dialog_overlay(view.page.overlay[-1])
+
 
 # =============================================================================
 # 11. ExtractionState 結構完整性
