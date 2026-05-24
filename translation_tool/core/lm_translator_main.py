@@ -725,36 +725,37 @@ def translate_batch_smart_old(
                         or "too many requests" in remote_msg.lower()
                     )
 
-                    # ===== 503 處理：統一 count，count < 4 等候重試，count >= 4 換 key =====
-                    overload_retry_count += 1  # ⭐ 統一累積次數
+                    # ===== 503 處理：原地重試 2 次（等 12s），第 3 次才換 key =====
+                    overload_retry_count += 1
+                    is_overloaded = (
+                        "overloaded" in remote_msg.lower()
+                        or "too many requests" in remote_msg.lower()
+                    )
 
-                    if overload_retry_count >= 4:
+                    if overload_retry_count >= 3:
+                        # 第 3 次：輪替 key
                         log_warning(
                             f"[🔁] 503 連續重試（{overload_retry_count} 次）→ 嘗試切換 API Key"
                         )
-                        try:
-                            if rotate_api_key():
-                                overload_retry_count = 0  # 重置計數
-                                pinned_model_index = None  # 解鎖模型
-                                log_info("[✅] API Key 切換成功 → 等待後重送同一 batch")
-                                time.sleep(key_rotation_buffer_sec)
-                                hit_overload_retry = True
-                                break  # 回到 while 重送
-                            else:
-                                raise RuntimeError("NO_MORE_KEYS")
-                        except RuntimeError:
+                        if not rotate_api_key():
                             log_error("[❌] 所有 API Key 已用盡 → 回傳 PARTIAL 保護進度")
                             return all_results, "PARTIAL"
+                        overload_retry_count = 0
+                        pinned_model_index = None
+                        log_info("[✅] API Key 切換成功 → 等待後重送同一 batch")
+                        time.sleep(key_rotation_buffer_sec)
+                        hit_overload_retry = True
+                        break  # 回到 while 重送
 
-                    wait_sec = request_interval_sec
+                    # 前 2 次：原地等待 overload_retry_sec（12s）後重試
+                    wait_sec = overload_retry_sec
                     log_warning(
-                        f"[⚠️] 503 重試（第 {overload_retry_count} 次），等待 {wait_sec}s 後重送同一 batch"
+                        f"[⚠️] 503 重試（第 {overload_retry_count} 次，is_overloaded={is_overloaded}），"
+                        f"等待 {wait_sec}s 後用同一 key 重送"
                     )
                     time.sleep(wait_sec)
                     hit_overload_retry = True
                     break  # 回到 while 重新送同一 batch
-
-                    # ===== 舊 Section A（真 overload）等號移除，已整合到上方 =====
 
                 # ======== 500 ==========
                 if status == 500:
