@@ -138,7 +138,11 @@ def _process_output(results, status):
     if isinstance(results, tuple):
         return results
 
-    # 處理空結果
+    # 處理 None（代表 ALL_KEYS_EXHAUSTED），不要被當成空結果
+    if results is None:
+        return [], status
+
+    # 處理空結果（真正沒有結果）
     if not results:
         return [], "AUTO"
 
