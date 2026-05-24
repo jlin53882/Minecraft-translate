@@ -60,8 +60,8 @@ class QCBase:
                     log_msg = update.get("log", "")
                     for line in log_msg.split("\n"):
                         if line.strip():
-                            async def _do_append(_=None):
-                                self.log_view.controls.append(ft.Text(line))
+                            async def _do_append(_=None, l=line):
+                                self.log_view.controls.append(ft.Text(l))
                                 self._page.update()
                             self._page.run_task(_do_append, None)
 

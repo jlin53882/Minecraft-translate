@@ -216,6 +216,15 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
                 elif current_phase == "book":
                     book_stats_done = True
 
+            if "dual_errors" in update:
+                errs = update["dual_errors"]
+                async def _do_show_dual_errors(_):
+                    if errs.get("lang"):
+                        view._append_log_line(f"[ERROR] Lang 提取失敗: {errs['lang']}")
+                    if errs.get("book"):
+                        view._append_log_line(f"[ERROR] Book 提取失敗: {errs['book']}")
+                view.page.run_task(_do_show_dual_errors, None)
+
             is_error = update.get("error", False)
             if is_error:
                 async def _do_error(_):
@@ -245,24 +254,23 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
         status = session.snapshot()['status']
 
         if status == 'DONE':
-            view.status_text.value = '狀態：完成'
-            view.progress_bar.value = 1.0
-            view._progress_pct.value = "100%"
-            if hasattr(view, '_stats_success'):
-                view._stats_success.value = str(view._extraction_stats.get('success', 0))
-                view._stats_warnings.value = str(view._extraction_stats.get('warnings', 0))
-                view._stats_failures.value = str(view._extraction_stats.get('failures', 0))
-
-            async def _do_show_summary(_):
+            async def _do_done(_):
+                view.status_text.value = '狀態：完成'
+                view.progress_bar.value = 1.0
+                view._progress_pct.value = "100%"
+                if hasattr(view, '_stats_success'):
+                    view._stats_success.value = str(view._extraction_stats.get('success', 0))
+                    view._stats_warnings.value = str(view._extraction_stats.get('warnings', 0))
+                    view._stats_failures.value = str(view._extraction_stats.get('failures', 0))
+                view.set_controls_disabled(False)
                 view._show_extraction_summary(mode)
-
-            view.page.run_task(_do_show_summary, None)
+            view.page.run_task(_do_done, None)
         elif status == 'ERROR':
-            view.status_text.value = '狀態：發生錯誤'
-            view.progress_bar.color = ft.Colors.RED
-
-        view.set_controls_disabled(False)
-        view.page.update()
+            async def _do_error(_):
+                view.status_text.value = '狀態：發生錯誤'
+                view.progress_bar.color = ft.Colors.RED
+                view.set_controls_disabled(False)
+            view.page.run_task(_do_error, None)
 
 
 def start_extraction(view, mode: str):
@@ -498,59 +506,64 @@ def show_preview(view, mode: str):
             view.page.run_task(_do_update, None)
             time.sleep(0.1)
 
-        view.set_controls_disabled(False)
-        view.status_text.value = '狀態：預覽完成'
-        view.progress_bar.value = 1.0
-        log_final = f"[系統] 預覽完成：error={preview_state.error is not None}, result={preview_state.result is not None}"
-        log_debug(f"[DEBUG] poll: calling _append_log_line: {log_final[:80]}...")
-        view._append_log_line(log_final)
-        try:
-            view.page.update()
-        except Exception as e:
-            log_warning(f'更新預覽完成 UI 失敗: {e}')
+        async def _do_preview_finish(_):
+            view.set_controls_disabled(False)
+            view.status_text.value = '狀態：預覽完成'
+            view.progress_bar.value = 1.0
+            log_final = f"[系統] 預覽完成：error={preview_state.error is not None}, result={preview_state.result is not None}"
+            log_debug(f"[DEBUG] poll: calling _append_log_line: {log_final[:80]}...")
+            view._append_log_line(log_final)
 
-        if preview_state.error:
-            view._append_log_line(f'[ERROR] 預覽錯誤：{preview_state.error}')
-            view._show_preview_dialog_error(preview_state.error, mode)
-        elif preview_state.result:
-            result = preview_state.result
-            view._append_log_line(f"[系統] 找到 {result.get('total_files', 0)} 個檔案，準備顯示預覽對話框")
-            output_dir = (view.output_dir_textfield.value or '').strip()
+        view.page.run_task(_do_preview_finish, None)
 
-            if output_dir:
-                output_path = Path(output_dir)
-            else:
-                mods_path = Path((view.mods_dir_textfield.value or '').strip())
-                config = load_config()
-                folder_names = config.get("extractor", {}).get("output_folder_names", {})
-                lang_preview = folder_names.get("lang_preview", "_預覽lang_輸出")
-                book_preview = folder_names.get("book_preview", "_預覽book_輸出")
-                suffix = lang_preview if mode == 'lang' else book_preview
-                output_path = mods_path.with_name(mods_path.name + suffix) if mods_path.exists() else None
-                if output_path:
-                    output_dir = str(output_path)
-                    view._append_log_line(f'[系統] 自動設定輸出路徑：{output_dir}')
+        async def _do_show_preview_result(_):
+            try:
+                view.page.update()
+            except Exception as e:
+                log_warning(f'更新預覽完成 UI 失敗: {e}')
 
-            if output_dir:
-                try:
-                    from translation_tool.core.jar_processor import generate_preview_report
+            if preview_state.error:
+                view._append_log_line(f'[ERROR] 預覽錯誤：{preview_state.error}')
+                view._show_preview_dialog_error(preview_state.error, mode)
+            elif preview_state.result:
+                result = preview_state.result
+                view._append_log_line(f"[系統] 找到 {result.get('total_files', 0)} 個檔案，準備顯示預覽對話框")
+                output_dir = (view.output_dir_textfield.value or '').strip()
+
+                if output_dir:
                     output_path = Path(output_dir)
-                    if not output_path.exists():
-                        output_path.mkdir(parents=True, exist_ok=True)
-                        view._append_log_line('[系統] ✅ 資料夾建立成功')
-                    report_path = generate_preview_report(result, mode, output_dir)
-                    view._append_log_line('[系統] ✅ 預覽報告已成功輸出')
-                    view._append_log_line(f'[系統] 📄 報告路徑：{report_path}')
-                    view._show_snack_bar('預覽報告已生成', ft.Colors.GREEN_600)
-                except Exception as ex:
-                    import traceback
-                    view._append_log_line(f'[ERROR] ❌ 生成預覽報告失敗：{ex}')
-                    view._append_log_line(f'[ERROR] {traceback.format_exc()}')
-            else:
-                view._append_log_line('[系統] ⚠️ 未設定輸出路徑，跳過報告生成')
-            view._show_preview_dialog_result(result, mode)
-        else:
-            view._append_log_line('[WARN] 預覽無結果')
-            view._show_snack_bar('預覽無結果', ft.Colors.ORANGE_400)
+                else:
+                    mods_path = Path((view.mods_dir_textfield.value or '').strip())
+                    config = load_config()
+                    folder_names = config.get("extractor", {}).get("output_folder_names", {})
+                    lang_preview = folder_names.get("lang_preview", "_預覽lang_輸出")
+                    book_preview = folder_names.get("book_preview", "_預覽book_輸出")
+                    suffix = lang_preview if mode == 'lang' else book_preview
+                    output_path = mods_path.with_name(mods_path.name + suffix) if mods_path.exists() else None
+                    if output_path:
+                        output_dir = str(output_path)
+                        view._append_log_line(f'[系統] 自動設定輸出路徑：{output_dir}')
 
-    threading.Thread(target=poll, daemon=True).start()
+                if output_dir:
+                    try:
+                        from translation_tool.core.jar_processor import generate_preview_report
+                        output_path = Path(output_dir)
+                        if not output_path.exists():
+                            output_path.mkdir(parents=True, exist_ok=True)
+                            view._append_log_line('[系統] ✅ 資料夾建立成功')
+                        report_path = generate_preview_report(result, mode, output_dir)
+                        view._append_log_line('[系統] ✅ 預覽報告已成功輸出')
+                        view._append_log_line(f'[系統] 📄 報告路徑：{report_path}')
+                        view._show_snack_bar('預覽報告已生成', ft.Colors.GREEN_600)
+                    except Exception as ex:
+                        import traceback
+                        view._append_log_line(f'[ERROR] ❌ 生成預覽報告失敗：{ex}')
+                        view._append_log_line(f'[ERROR] {traceback.format_exc()}')
+                else:
+                    view._append_log_line('[系統] ⚠️ 未設定輸出路徑，跳過報告生成')
+                view._show_preview_dialog_result(result, mode)
+            else:
+                view._append_log_line('[WARN] 預覽無結果')
+                view._show_snack_bar('預覽無結果', ft.Colors.ORANGE_400)
+
+        view.page.run_task(_do_show_preview_result, None)

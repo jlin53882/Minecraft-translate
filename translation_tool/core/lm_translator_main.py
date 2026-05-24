@@ -593,11 +593,10 @@ def translate_batch_smart_old(
                     log_info(
                         f"❌ 403 PERMISSION_DENIED：API Key 無權限 (index {get_current_key_index()})"
                     )
-                    try:
-                        rotate_api_key()
-                        continue  # 換模型
-                    except RuntimeError:
-                        raise RuntimeError("❌ 所有 API Key 均無權限")
+                    if not rotate_api_key():
+                        log_error("[❌] 所有 API Key 均無權限 → 回傳 PARTIAL 保護進度")
+                        return all_results, "PARTIAL"
+                    continue  # 換模型
 
                 # ========== 400 ==========
                 if status == 400:
