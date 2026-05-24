@@ -672,6 +672,7 @@ class MergeView(ft.Column):
         )
 
         # 使用 overlay 方式，穩定性高於 page.open()
+        self.page.overlay.clear()
         self.page.overlay.append(dialog)
         dialog.open = True
         self.page.update()

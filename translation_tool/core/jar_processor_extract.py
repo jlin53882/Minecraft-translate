@@ -197,7 +197,7 @@ def run_extraction_process_impl(
         finally:
             scan_done.set()
 
-    scan_thread = threading.Thread(target=_scan_in_background, name="scan-jars-bg")
+    scan_thread = threading.Thread(target=_scan_in_background, name="scan-jars-bg", daemon=True)
     scan_thread.start()
 
     # 輪詢等待 scan 完成，每 0.2s 检查一次
@@ -227,8 +227,8 @@ def run_extraction_process_impl(
     cpu_count = os.cpu_count() or 2
     config_workers = load_config().get("translator", {}).get("parallel_execution_workers")
     if isinstance(config_workers, int) and config_workers > 0:
-        max_workers = config_workers
-        log.info("[workers] config=%s, actual=%s (cpu_count=%s, cap removed)", config_workers, max_workers, cpu_count)
+        max_workers = min(config_workers, 32)
+        log.info("[workers] config=%s, actual=%s (cpu_count=%s, capped at 32)", config_workers, max_workers, cpu_count)
     else:
         max_workers = max(1, cpu_count // 2)
         log.info("[workers] default=%s (config invalid/missing, cpu_count=%s)", max_workers, cpu_count)
@@ -263,7 +263,7 @@ def run_extraction_process_impl(
                     'log': f"[{processed_count}/{total_jars}] {os.path.basename(jar_path)}",
                 }
             except Exception as exc:
-                log_error("提取 %s 時產生例外: %s (%.1fs)", os.path.basename(jar_path), exc, elapsed)
+                log_error("提取 %s 時產生例外: %s (wall=%.1fs)", os.path.basename(jar_path), exc, wall_time)
                 yield {
                     'progress': prog,
                     'current': processed_count,

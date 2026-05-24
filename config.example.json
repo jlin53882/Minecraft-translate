@@ -30,7 +30,7 @@
     "initial_batch_size_kubejs": 200,
     "initial_batch_size_md": 100,
     "min_batch_size": 50,
-    "batch_shrink_factor": 0.5,
+    "batch_shrink_factor": 0.75,
     "batch_write_interval": 2,
     "rate_limit": {
       "timeout": 600,

@@ -160,6 +160,8 @@ def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: 
                 yield update
     except Exception as e:
         lang_error = str(e)
+    if lang_stats:
+        yield {"phase": "lang", "stats": lang_stats}
     yield {"phase": "book", "log": "[系統] Lang 提取完成，開始提取 Book..."}
     book_error = None
     try:

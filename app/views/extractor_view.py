@@ -464,6 +464,7 @@ class ExtractorView(ft.Column):
         )
 
         try:
+            self.page.overlay.clear()
             self.page.overlay.append(dialog)
             dialog.open = True
             async def _do_update(_):
