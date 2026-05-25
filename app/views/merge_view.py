@@ -531,7 +531,6 @@ class MergeView(ft.Column):
                         else:
                             success_zips = 0
                             failed_zips = 0
-                            failed_zip_details = []
                             for log_line in logs:
                                 text = (
                                     log_line.text
@@ -542,14 +541,10 @@ class MergeView(ft.Column):
                                     success_zips += 1
                                 elif "[錯誤]" in text:
                                     failed_zips += 1
-                                    for zp in self.selected_zips:
-                                        if zp in text:
-                                            failed_zip_details.append(Path(zp).name)
-                                            break
                             self._merge_stats = {
                                 "success_zips": success_zips,
                                 "failed_zips": failed_zips,
-                                "failed_zip_details": failed_zip_details,
+                                "failed_zips_list": summary.get("failed_zips_list", []),
                             }
                         self._show_merge_summary(self._merge_stats)
                         self.progress_bar.value = 0
@@ -623,7 +618,7 @@ class MergeView(ft.Column):
             for item in failed_list:
                 failed_block.append(
                     ft.Text(
-                        f"├─ {item.get('Name', '?')}",
+                        f"├─ {item.get('name', '?')}",
                         size=13,
                         color=ft.Colors.ORANGE_700,
                     )

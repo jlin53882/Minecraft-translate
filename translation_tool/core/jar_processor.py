@@ -21,7 +21,7 @@ from translation_tool.core.jar_processor_preview import (
 )
 
 BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
-    r"(assets|data)/([^/]+)/"
+    r"^(assets|data)/([^/]+)/"
     r"(patchouli_books|book|manual|guidebook)/"
     r"(?:([^/]+)/)?"
     r"(?:"
