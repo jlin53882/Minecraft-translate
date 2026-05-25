@@ -838,3 +838,120 @@ class TestExtractionState:
         assert combined['total_files'] == 11
         assert combined['lang']['success'] == 10
         assert combined['book']['success'] == 5
+
+
+class TestExtractorActionsSessionStart:
+    """Regression tests for extractor_actions.py: session.start() double-call bug."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, monkeypatch):
+        class _Session:
+            def __init__(self, max_logs=2000):
+                self._status = 'IDLE'
+                self._error = False
+                self._logs = []
+            def start(self):
+                self._status = 'RUNNING'
+            def snapshot(self):
+                return {'status': self._status, 'progress': 0, 'logs': self._logs, 'error': self._error}
+            def set_error(self):
+                self._error = True
+            def finish(self):
+                self._status = 'DONE'
+
+        monkeypatch.setattr("app.views.extractor_view.TaskSession", _Session)
+
+    def _make_view(self, *, mods_dir="/test/mods", output_dir="/test/out"):
+        from app.views.extractor_view import ExtractorView
+        from tests.conftest import mock_page, mock_filepicker
+        page = mock_page()
+        picker = mock_filepicker()
+        view = ExtractorView(page, picker)
+        view.mods_dir_textfield.value = mods_dir
+        view.output_dir_textfield.value = output_dir
+        return view
+
+    def test_start_extraction_calls_session_start_exactly_once(self, monkeypatch, tmp_path):
+        """Regression: session.start() 不應被呼叫兩次。
+
+        Bug: start_extraction() 呼叫一次，_extraction_worker() 內又呼叫一次。
+        修復：移除 _extraction_worker 內的 session.start()。
+        """
+        from app.views.extractor.extractor_actions import start_extraction
+        import app.views.extractor.extractor_actions as ea
+
+        call_count = [0]
+        original_start = type('MockSession', (), {
+            '_status': 'IDLE',
+            '_error': False,
+            '_logs': [],
+            'start': lambda self: (setattr(self, '_status', 'RUNNING'), call_count.__setitem__(0, call_count[0] + 1)),
+            'snapshot': lambda self: {'status': self._status, 'progress': 0, 'logs': self._logs, 'error': self._error},
+            'set_error': lambda self: None,
+            'finish': lambda self: None,
+            'add_log': lambda self, text: None,
+            'set_progress': lambda self, p: None,
+        }).start
+
+        view = self._make_view(mods_dir=str(tmp_path), output_dir=str(tmp_path / "out"))
+        view.session.start = lambda: (setattr(view.session, '_status', 'RUNNING'), call_count.__setitem__(0, call_count[0] + 1))
+
+        monkeypatch.setattr(ea, '_extraction_worker', lambda v, m, d, o: None)
+
+        call_count[0] = 0
+        start_extraction(view, 'lang')
+
+        assert call_count[0] == 1, f"session.start() 應被呼叫 1 次，實際 {call_count[0]} 次"
+
+
+class TestShowPreviewPollOrder:
+    """Regression tests for extractor_actions.py: poll reference before definition bug."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, monkeypatch):
+        class _Session:
+            def __init__(self, max_logs=2000):
+                self._status = 'IDLE'
+                self._error = False
+                self._logs = []
+            def start(self):
+                self._status = 'RUNNING'
+            def snapshot(self):
+                return {'status': self._status, 'progress': 0, 'logs': self._logs, 'error': self._error}
+
+        monkeypatch.setattr("app.views.extractor_view.TaskSession", _Session)
+
+    def _make_view(self, *, mods_dir="/test/mods"):
+        from app.views.extractor_view import ExtractorView
+        from tests.conftest import mock_page, mock_filepicker
+        page = mock_page()
+        picker = mock_filepicker()
+        view = ExtractorView(page, picker)
+        view.mods_dir_textfield.value = mods_dir
+        view.output_dir_textfield.value = "/test/out"
+        return view
+
+    def test_show_preview_does_not_crash_with_nameerror(self, monkeypatch, tmp_path):
+        """Regression: show_preview() 曾在 poll 定義前就將其傳給 Thread，導致 NameError。
+
+        Bug: threading.Thread(target=poll) 在 poll() 定義之前執行。
+        修復：將 Thread(poll) 移到 poll() 定義之後。
+        """
+        from app.views.extractor.extractor_actions import show_preview
+
+        mods_dir = tmp_path / "mods"
+        mods_dir.mkdir()
+
+        view = self._make_view(mods_dir=str(mods_dir))
+
+        gen_started = [False]
+
+        def short_circuit_generator(mods_dir, mode):
+            gen_started[0] = True
+            yield {'result': {'preview_results': [], 'total_files': 0, 'total_size_mb': 0}, 'progress': 1.0}
+
+        monkeypatch.setattr("translation_tool.core.jar_processor.preview_extraction_generator", short_circuit_generator)
+
+        show_preview(view, 'lang')
+
+        assert gen_started[0], "generator 應被執行"

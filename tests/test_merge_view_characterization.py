@@ -3,6 +3,16 @@ from app.views import merge_view
 from tests.conftest import mock_page, mock_filepicker
 
 
+def _make_view(monkeypatch, *, selected_zips=None, page=None):
+    """建立 MergeView，自動 patch TaskSession。"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    p = page or mock_page()
+    view = merge_view.MergeView(p, mock_filepicker())
+    if selected_zips:
+        view.selected_zips = selected_zips
+    return view
+
+
 class _Session:
     def __init__(self, max_logs=2000):
         self.logs = []
@@ -228,3 +238,68 @@ def test_merge_view_patchouli_threshold_field_exists(monkeypatch):
     monkeypatch.setattr(merge_view, 'TaskSession', _Session)
     view = merge_view.MergeView(mock_page(), mock_filepicker())
     assert view.patchouli_threshold_field is not None
+
+
+def _collect_text_values(dialog):
+    """遞迴收集 dialog 內所有 ft.Text 的 value。"""
+    values = []
+    def walk(ctrl):
+        if hasattr(ctrl, 'value'):
+            values.append(ctrl.value)
+        if hasattr(ctrl, 'content'):
+            walk(ctrl.content)
+        if hasattr(ctrl, 'controls'):
+            for c in ctrl.controls:
+                walk(c)
+    walk(dialog.content)
+    return values
+
+
+def test_show_merge_summary_displays_failed_zips_from_failed_zips_list(monkeypatch):
+    """Regression: _show_merge_summary 必須讀取 failed_zips_list，不是 failed_zip_details。
+
+    之前 bug：寫入 failed_zips_list 但讀取 failed_zip_details，永遠顯示空。
+    """
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    page = mock_page()
+    view = merge_view.MergeView(page, mock_filepicker())
+
+    summary = {
+        "success_zips": 5,
+        "failed_zips": 2,
+        "failed_zips_list": [
+            {"name": "mod_a.zip", "error": "CRC mismatch"},
+            {"name": "mod_b.zip", "error": "File not found"},
+        ],
+        "output_counts": {},
+    }
+
+    view._show_merge_summary(summary)
+
+    dialog = page.overlay[-1]
+    text_values = _collect_text_values(dialog)
+
+    assert any('mod_a.zip' in v for v in text_values), f"mod_a.zip 應出現在摘要中: {text_values}"
+    assert any('mod_b.zip' in v for v in text_values), f"mod_b.zip 應出現在摘要中: {text_values}"
+    assert any('CRC mismatch' in v for v in text_values), f"錯誤訊息應出現在摘要中: {text_values}"
+
+
+def test_show_merge_summary_empty_failed_zips_list(monkeypatch):
+    """failed_zips_list 為空時，不應顯示失敗區塊。"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    page = mock_page()
+    view = merge_view.MergeView(page, mock_filepicker())
+
+    summary = {
+        "success_zips": 5,
+        "failed_zips": 0,
+        "failed_zips_list": [],
+        "output_counts": {},
+    }
+
+    view._show_merge_summary(summary)
+
+    dialog = page.overlay[-1]
+    text_values = _collect_text_values(dialog)
+
+    assert not any('mod_a.zip' in v for v in text_values), "空列表時不應顯示 ZIP 名稱"
