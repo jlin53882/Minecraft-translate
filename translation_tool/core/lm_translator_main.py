@@ -262,8 +262,11 @@ def translate_batch_smart_old(
 
     # 模型導入設定
     models_cfg = load_config().get("lm_translator", {}).get("models", {})
-    # 目前使用模型序列
     MODEL_POOL = [name for name, cfg in models_cfg.items() if cfg.get("enabled", False)]
+
+    if not MODEL_POOL:
+        log_error("[❌] MODEL_POOL 為空（無任何模型啟用），請在設定中啟用至少一個模型")
+        return [], "PARTIAL"
 
     # 模型溫度
     MODEL_TEMP = load_config().get("lm_translator", {}).get("temperature", 0.2)
@@ -602,9 +605,8 @@ def translate_batch_smart_old(
                 if status == 400:
                     msg = str(e).lower()
                     if "failed_precondition" in msg:
-                        raise RuntimeError(
-                            "❌ FAILED_PRECONDITION：此地區未啟用 Gemini API 免費方案，請啟用付費"
-                        )
+                        log_error("❌ FAILED_PRECONDITION：此地區未啟用 Gemini API 免費方案，請啟用付費")
+                        return all_results, "PARTIAL"
                     log_info(
                         "[⚠️] 400 INVALID_ARGUMENT：payload 格式錯誤或過大，縮小 batch"
                     )
@@ -734,14 +736,27 @@ def translate_batch_smart_old(
                         hit_overload_retry = True
                         break
 
-                    wait_sec = overload_retry_sec
-                    log_warning(
-                        f"[⚠️] 503 重試（第 {overload_retry_count} 次，is_overloaded={is_overloaded}），"
-                        f"等待 {wait_sec}s 後用同一 key 重送"
-                    )
-                    time.sleep(wait_sec)
-                    hit_overload_retry = True
-                    break
+                    if is_overloaded:
+                        wait_sec = overload_retry_sec
+                        log_warning(
+                            f"[⚠️] 503 重試（第 {overload_retry_count} 次，overload）→ 等待 {wait_sec}s 後用同一 key 重送"
+                        )
+                        time.sleep(wait_sec)
+                        hit_overload_retry = True
+                        break
+                    else:
+                        log_warning(
+                            f"[⚠️] 503 重試（第 {overload_retry_count} 次，非 overload）→ 立即切換 API Key"
+                        )
+                        if not rotate_api_key():
+                            log_error("[❌] 所有 API Key 已用盡 → 回傳 PARTIAL 保護進度")
+                            return all_results, "PARTIAL"
+                        overload_retry_count = 0
+                        pinned_model_index = None
+                        log_info("[✅] API Key 切換成功 → 等待後重送同一 batch")
+                        time.sleep(key_rotation_buffer_sec)
+                        hit_overload_retry = True
+                        break
 
                 # ======== 500 ==========
                 if status == 500:
