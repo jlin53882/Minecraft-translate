@@ -9,10 +9,14 @@ def load_config_into_view(view, config: dict):
 
     注意：傳入的 `config` 已經是 load_config() 三層合併後的結果。
     三層 priority：config.json（用戶）> config.example.json > DEFAULT_CONFIG。
-    因此這裡直接用 config.get() 取值，不需要額外的 or get_default() fallback。
 
     對於 list 欄位（dir_names、skip_terms、translatable_keywords），
     空清單 [] 是用戶的有效設定，會直接保留，不會被 DEFAULT 值置換。
+
+    內部 helper：
+    - _gv()：直接取值，None 就回 None，不自動取 default
+    - _gv_list()：None 時取 get_default()
+    - _fmt_scalar()：None 時取 get_default()，get_default() 也 None → ''（避免 UI 顯示 'None'）
     """
     log_cfg = config.get('logging', {})
     trans_cfg = config.get('translator', {})
