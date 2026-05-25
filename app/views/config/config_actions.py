@@ -37,24 +37,42 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lm_translator.rate_limit.timeout'].value = str((lm_cfg.get('rate_limit') or {}).get('timeout', 600))
     view.controls_map['lm_translator.rate_limit.sleep_seconds_between_batches'].value = str((lm_cfg.get('rate_limit') or {}).get('sleep_seconds_between_batches', 0.0))
     view.controls_map['output_bundler.output_zip_name'].value = bundle_cfg.get('output_zip_name')
-    view.controls_map['lang_merger.pending_folder_name'].value = config.get('lang_merger', {}).get('pending_folder_name', '待翻譯')
-    view.controls_map['lang_merger.pending_organized_folder_name'].value = config.get('lang_merger', {}).get('pending_organized_folder_name', '待翻譯整理需翻譯')
-    view.controls_map['lang_merger.filtered_pending_min_count'].value = str(config.get('lang_merger', {}).get('filtered_pending_min_count', 2))
-    view.controls_map['lm_translator.lm_translate_folder_name'].value = str(config.get('lm_translator', {}).get('lm_translate_folder_name', 'LM翻譯後'))
-    view.controls_map['lm_translator.patchouli_system_prompt'].value = str(config.get('lm_translator', {}).get('patchouli_system_prompt', '你是專業的 Minecraft patchouli 手冊翻譯員，專精於《當個創世神》繁體中文（台灣）官方譯名或台灣用語的翻譯。'))
-    view.controls_map['lm_translator.lang_system_prompt'].value = str(config.get('lm_translator', {}).get('lang_system_prompt', '你是專業的 Minecraft Lang翻譯員，你正在翻譯 Minecraft 語言檔案（JSON格式）。'))
-    view.controls_map['lang_merger.quarantine_folder_name'].value = config.get('lang_merger', {}).get('quarantine_folder_name', 'skipped_json')
-    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = int(config.get('lm_translator', {}).get('initial_batch_size_patchouli') or 100)
-    view.controls_map['lm_translator.initial_batch_size_lang'].value = int(config.get('lm_translator', {}).get('initial_batch_size_lang') or 300)
-    view.controls_map['lm_translator.initial_batch_size_ftb'].value = int(config.get('lm_translator', {}).get('initial_batch_size_ftb') or 200)
-    view.controls_map['lm_translator.initial_batch_size_kubejs'].value = int(config.get('lm_translator', {}).get('initial_batch_size_kubejs') or 200)
-    view.controls_map['lm_translator.initial_batch_size_md'].value = int(config.get('lm_translator', {}).get('initial_batch_size_md') or 100)
-    view.controls_map['lm_translator.min_batch_size'].value = int(config.get('lm_translator', {}).get('min_batch_size') or 50)
-    view.controls_map['lm_translator.batch_shrink_factor'].value = float(config.get('lm_translator', {}).get('batch_shrink_factor') or 0.75)
-    view.controls_map['lm_translator.batch_write_interval'].value = int(config.get('lm_translator', {}).get('batch_write_interval') or 2)
-    view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(config.get('lm_translator', {}).get('patchouli', {}).get('dir_names', ['patchouli_books', 'book', 'manual', 'guidebook']))
-    view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('skip_terms', ['api documentation', 'api docs', 'documentation', 'discord', 'github', 'homepage', 'mod page', 'modpack', 'official website', 'patreon']))
-    view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(config.get('lm_translator', {}).get('translator', {}).get('translatable_keywords', ['text', 'name', 'title', 'description', 'subtitle', 'hover', 'note', 'warning', 'quote', 'paragraph', 'body', 'header', 'footer', 'heading', 'effects']))
+    def _gv(cfg, path, default=None):
+        """取得 nested config 值，None 時用 get_default() fallback。空清單 [] 會被保留。"""
+        keys = path.split(".")
+        val = cfg
+        for k in keys:
+            if isinstance(val, dict):
+                val = val.get(k)
+            else:
+                return default
+            if val is None:
+                return default
+        return val if val is not None else default
+
+    def _gv_list(cfg, path):
+        """取得 nested config list 值，None 時用 get_default() fallback，空清單 [] 保留。"""
+        val = _gv(cfg, path)
+        return val if val is not None else get_default(path)
+
+    view.controls_map['lang_merger.pending_folder_name'].value = _gv(config, 'lang_merger.pending_folder_name') or get_default('lang_merger.pending_folder_name')
+    view.controls_map['lang_merger.pending_organized_folder_name'].value = _gv(config, 'lang_merger.pending_organized_folder_name') or get_default('lang_merger.pending_organized_folder_name')
+    view.controls_map['lang_merger.filtered_pending_min_count'].value = str(_gv(config, 'lang_merger.filtered_pending_min_count') or get_default('lang_merger.filtered_pending_min_count'))
+    view.controls_map['lm_translator.lm_translate_folder_name'].value = str(_gv(config, 'lm_translator.lm_translate_folder_name') or get_default('lm_translator.lm_translate_folder_name'))
+    view.controls_map['lm_translator.patchouli_system_prompt'].value = str(_gv(config, 'lm_translator.patchouli_system_prompt') or get_default('lm_translator.patchouli_system_prompt'))
+    view.controls_map['lm_translator.lang_system_prompt'].value = str(_gv(config, 'lm_translator.lang_system_prompt') or get_default('lm_translator.lang_system_prompt'))
+    view.controls_map['lang_merger.quarantine_folder_name'].value = _gv(config, 'lang_merger.quarantine_folder_name') or get_default('lang_merger.quarantine_folder_name')
+    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = int(_gv(config, 'lm_translator.initial_batch_size_patchouli') or get_default('lm_translator.initial_batch_size_patchouli'))
+    view.controls_map['lm_translator.initial_batch_size_lang'].value = int(_gv(config, 'lm_translator.initial_batch_size_lang') or get_default('lm_translator.initial_batch_size_lang'))
+    view.controls_map['lm_translator.initial_batch_size_ftb'].value = int(_gv(config, 'lm_translator.initial_batch_size_ftb') or get_default('lm_translator.initial_batch_size_ftb'))
+    view.controls_map['lm_translator.initial_batch_size_kubejs'].value = int(_gv(config, 'lm_translator.initial_batch_size_kubejs') or get_default('lm_translator.initial_batch_size_kubejs'))
+    view.controls_map['lm_translator.initial_batch_size_md'].value = int(_gv(config, 'lm_translator.initial_batch_size_md') or get_default('lm_translator.initial_batch_size_md'))
+    view.controls_map['lm_translator.min_batch_size'].value = int(_gv(config, 'lm_translator.min_batch_size') or get_default('lm_translator.min_batch_size'))
+    view.controls_map['lm_translator.batch_shrink_factor'].value = float(_gv(config, 'lm_translator.batch_shrink_factor') or get_default('lm_translator.batch_shrink_factor'))
+    view.controls_map['lm_translator.batch_write_interval'].value = int(_gv(config, 'lm_translator.batch_write_interval') or get_default('lm_translator.batch_write_interval'))
+    view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(_gv_list(config, 'lm_translator.patchouli.dir_names'))
+    view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(_gv_list(config, 'lm_translator.translator.skip_terms'))
+    view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(_gv_list(config, 'lm_translator.translator.translatable_keywords'))
 
     extractor_cfg = config.get('extractor', {})
     folder_names = extractor_cfg.get('output_folder_names', {})
