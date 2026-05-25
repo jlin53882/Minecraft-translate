@@ -144,7 +144,7 @@ def _process_output(results, status):
 
     # 處理空結果（真正沒有結果）
     if not results:
-        return [], "AUTO"
+        return [], status  # 保留原始 status，不強制改成 AUTO
 
     return results, status
 
