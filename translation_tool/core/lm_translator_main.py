@@ -753,6 +753,7 @@ def translate_batch_smart_old(
                         hit_overload_retry = True
                         break  # 回到 while 重送
 
+<<<<<<< HEAD
                     # 前 2 次：原地等待 overload_retry_sec（12s）後重試
                     wait_sec = overload_retry_sec
                     log_warning(
@@ -762,6 +763,29 @@ def translate_batch_smart_old(
                     time.sleep(wait_sec)
                     hit_overload_retry = True
                     break  # 回到 while 重新送同一 batch
+=======
+                    if is_overloaded:
+                        wait_sec = overload_retry_sec
+                        log_warning(
+                            f"[⚠️] 503 重試（第 {overload_retry_count} 次，overload）→ 等待 {wait_sec}s 後用同一 key 重送"
+                        )
+                        time.sleep(wait_sec)
+                        hit_overload_retry = True
+                        break
+                    else:
+                        log_warning(
+                            f"[⚠️] 503 重試（第 {overload_retry_count} 次，非 overload）→ 立即切換 API Key"
+                        )
+                        if not rotate_api_key():
+                            log_error("[❌] 所有 API Key 已用盡 → 回傳 PARTIAL 保護進度")
+                            return all_results, "PARTIAL"
+                        overload_retry_count = 0
+                        pinned_model_index = None
+                        log_info("[✅] API Key 切換成功 → 等待後重送同一 batch")
+                        time.sleep(key_rotation_buffer_sec)
+                        hit_overload_retry = True
+                        break
+>>>>>>> 86dea7c (fix(lm): NC3 - 503 按 is_overloaded 分叉處理)
 
                 # ======== 500 ==========
                 if status == 500:
