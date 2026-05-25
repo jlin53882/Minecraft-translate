@@ -81,7 +81,6 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
         'book': {'success': 0, 'warnings': 0, 'failures': 0, 'total_files': 0},
     }
     session = view.session
-    session.start()
 
     current_phase = "lang" if mode == "dual" else mode
     skip_zh_cn = getattr(view, 'skip_zh_cn_switch', None) and view.skip_zh_cn_switch.value
@@ -424,7 +423,6 @@ def show_preview(view, mode: str):
             preview_state.done = True
 
     threading.Thread(target=do_preview, daemon=True).start()
-    threading.Thread(target=poll, daemon=True).start()
 
     def poll():
         """轮询预览状态并更新 UI"""
@@ -508,3 +506,5 @@ def show_preview(view, mode: str):
                 view._show_snack_bar('預覽無結果', ft.Colors.ORANGE_400)
 
         view.page.run_task(_do_show_preview_result, None)
+
+    threading.Thread(target=poll, daemon=True).start()

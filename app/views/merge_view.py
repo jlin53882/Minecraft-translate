@@ -591,7 +591,7 @@ class MergeView(ft.Column):
         """顯示合併結果摘要（使用 overlay 確保穩定顯示）。"""
         s_zips = summary.get("success_zips", 0)
         f_zips = summary.get("failed_zips", 0)
-        failed_list = summary.get("failed_zip_details", [])
+        failed_list = summary.get("failed_zips_list", [])
         oc = summary.get("output_counts", {})
 
         # 輸出統計 block
