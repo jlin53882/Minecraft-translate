@@ -544,7 +544,7 @@ class MergeView(ft.Column):
                             self._merge_stats = {
                                 "success_zips": success_zips,
                                 "failed_zips": failed_zips,
-                                "failed_zips_list": summary.get("failed_zips_list", []),
+                                "failed_zips_list": [],
                             }
                         self._show_merge_summary(self._merge_stats)
                         self.progress_bar.value = 0
