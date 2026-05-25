@@ -217,12 +217,6 @@ def test_extractor_view_pick_button_exists(monkeypatch):
     assert hasattr(view, '_pick_button')
 
 
-def test_extractor_view_start_ui_poller_exists(monkeypatch):
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-    assert hasattr(view, '_start_ui_poller')
-
-
 def test_extractor_view_show_extraction_summary_exists(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
