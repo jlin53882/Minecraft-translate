@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import cache_shards, cache_store
+from .log_unit import log_info, log_warning
 from .cache_loader import load_cache_type
 from .cache_overview import (
     build_cache_overview,

@@ -185,6 +185,8 @@ def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: 
                     yield {**update, "stats": combined, "phase": "book"}
                 else:
                     yield {**update, "phase": "book"}
+            else:
+                yield {**update, "phase": "book"}
     except Exception as e:
         book_error = str(e)
     if lang_error or book_error:

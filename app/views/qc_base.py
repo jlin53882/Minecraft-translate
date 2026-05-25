@@ -67,8 +67,8 @@ class QCBase:
 
                     if "progress" in update:
                         progress = update["progress"]
-                        async def _do_progress(_=None):
-                            self.progress_bar.value = progress
+                        async def _do_progress(_=None, p=progress):
+                            self.progress_bar.value = p
                             self._page.update()
                         self._page.run_task(_do_progress, None)
 
