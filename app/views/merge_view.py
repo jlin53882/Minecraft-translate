@@ -481,6 +481,10 @@ class MergeView(ft.Column):
             _cfg.setdefault("lang_merger", {})["process_zh_cn_files"] = self.process_zh_cn_switch.value
             _cfg["lang_merger"]["skip_zh_cn_when_only_process_lang"] = self.skip_zh_cn_switch.value
             _cfg["lang_merger"]["patchouli_skip_en_us_when_zh_cn_exists"] = self.patchouli_skip_zh_cn_switch.value
+            try:
+                _cfg["lang_merger"]["patchouli_effective_translation_threshold"] = float(self.patchouli_threshold_field.value)
+            except (ValueError, TypeError):
+                _cfg["lang_merger"]["patchouli_effective_translation_threshold"] = 0.5
             for _ in run_merge_zip_batch_service(
                 self.selected_zips,
                 self.output_dir_field.value,
