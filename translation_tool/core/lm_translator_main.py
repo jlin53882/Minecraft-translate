@@ -262,11 +262,8 @@ def translate_batch_smart_old(
 
     # 模型導入設定
     models_cfg = load_config().get("lm_translator", {}).get("models", {})
+    # 目前使用模型序列
     MODEL_POOL = [name for name, cfg in models_cfg.items() if cfg.get("enabled", False)]
-
-    if not MODEL_POOL:
-        log_error("[❌] MODEL_POOL 為空（無任何模型啟用），請在設定中啟用至少一個模型")
-        return [], "PARTIAL"
 
     # 模型溫度
     MODEL_TEMP = load_config().get("lm_translator", {}).get("temperature", 0.2)
@@ -596,18 +593,18 @@ def translate_batch_smart_old(
                     log_info(
                         f"❌ 403 PERMISSION_DENIED：API Key 無權限 (index {get_current_key_index()})"
                     )
-                    try:
-                        rotate_api_key()
-                        continue  # 換模型
-                    except RuntimeError:
-                        raise RuntimeError("❌ 所有 API Key 均無權限")
+                    if not rotate_api_key():
+                        log_error("[❌] 所有 API Key 均無權限 → 回傳 PARTIAL 保護進度")
+                        return all_results, "PARTIAL"
+                    continue  # 換模型
 
                 # ========== 400 ==========
                 if status == 400:
                     msg = str(e).lower()
                     if "failed_precondition" in msg:
-                        log_error("❌ FAILED_PRECONDITION：此地區未啟用 Gemini API 免費方案，請啟用付費")
-                        return [], "PARTIAL"
+                        raise RuntimeError(
+                            "❌ FAILED_PRECONDITION：此地區未啟用 Gemini API 免費方案，請啟用付費"
+                        )
                     log_info(
                         "[⚠️] 400 INVALID_ARGUMENT：payload 格式錯誤或過大，縮小 batch"
                     )
@@ -696,15 +693,6 @@ def translate_batch_smart_old(
                             return None, "ALL_KEYS_EXHAUSTED"
                         continue
 
-                    except RuntimeError:
-                        # ⭐ 關鍵：當 rotate_api_key 拋出 RuntimeError，代表沒 Key 了
-                        # 不要只用 break，要直接 return 狀態給外層
-                        error_final = (
-                            "❌ 所有 API Key 均已耗盡每日配額 (RPD)，請等待重置時間。"
-                        )
-                        log_error(error_final)
-                        return None, "ALL_KEYS_EXHAUSTED"
-
                 # ========== 504 ==========
                 if status == 504:
                     log_info(
@@ -726,12 +714,6 @@ def translate_batch_smart_old(
                     log_error(f"狀態: {remote_status}")
                     log_error(f"訊息: {remote_msg}")
 
-                    is_overloaded = (
-                        "overloaded" in remote_msg.lower()
-                        or "too many requests" in remote_msg.lower()
-                    )
-
-                    # ===== 503 處理：原地重試 2 次（等 12s），第 3 次才換 key =====
                     overload_retry_count += 1
                     is_overloaded = (
                         "overloaded" in remote_msg.lower()
@@ -739,7 +721,6 @@ def translate_batch_smart_old(
                     )
 
                     if overload_retry_count >= 3:
-                        # 第 3 次：輪替 key
                         log_warning(
                             f"[🔁] 503 連續重試（{overload_retry_count} 次）→ 嘗試切換 API Key"
                         )
@@ -751,10 +732,8 @@ def translate_batch_smart_old(
                         log_info("[✅] API Key 切換成功 → 等待後重送同一 batch")
                         time.sleep(key_rotation_buffer_sec)
                         hit_overload_retry = True
-                        break  # 回到 while 重送
+                        break
 
-<<<<<<< HEAD
-                    # 前 2 次：原地等待 overload_retry_sec（12s）後重試
                     wait_sec = overload_retry_sec
                     log_warning(
                         f"[⚠️] 503 重試（第 {overload_retry_count} 次，is_overloaded={is_overloaded}），"
@@ -762,30 +741,7 @@ def translate_batch_smart_old(
                     )
                     time.sleep(wait_sec)
                     hit_overload_retry = True
-                    break  # 回到 while 重新送同一 batch
-=======
-                    if is_overloaded:
-                        wait_sec = overload_retry_sec
-                        log_warning(
-                            f"[⚠️] 503 重試（第 {overload_retry_count} 次，overload）→ 等待 {wait_sec}s 後用同一 key 重送"
-                        )
-                        time.sleep(wait_sec)
-                        hit_overload_retry = True
-                        break
-                    else:
-                        log_warning(
-                            f"[⚠️] 503 重試（第 {overload_retry_count} 次，非 overload）→ 立即切換 API Key"
-                        )
-                        if not rotate_api_key():
-                            log_error("[❌] 所有 API Key 已用盡 → 回傳 PARTIAL 保護進度")
-                            return all_results, "PARTIAL"
-                        overload_retry_count = 0
-                        pinned_model_index = None
-                        log_info("[✅] API Key 切換成功 → 等待後重送同一 batch")
-                        time.sleep(key_rotation_buffer_sec)
-                        hit_overload_retry = True
-                        break
->>>>>>> 86dea7c (fix(lm): NC3 - 503 按 is_overloaded 分叉處理)
+                    break
 
                 # ======== 500 ==========
                 if status == 500:
@@ -836,17 +792,12 @@ def translate_batch_smart_old(
         if new_size <= 0 or new_size == batch_size:
             # 情況 A：如果是因為 RPM (Rate Limit) 或 API 請求失敗而需要重試
             if hit_rpm:
-                try:
-                    log_info("🔄 觸發頻率限制，嘗試切換 API Key...")
-                    rotate_api_key()
-                    # 保持 hit_rpm = True，下一輪會用新 Key 重試這批
-                    continue
-                except RuntimeError:
-                    log_error(
-                        f"[❌] 致命錯誤：API Key 已全數耗盡，且目前 Batch ({batch_size}) 無法再縮小。"
-                        "將儲存目前進度並結束任務。"
-                    )
+                log_info("🔄 觸發頻率限制，嘗試切換 API Key...")
+                if not rotate_api_key():
+                    log_error("[❌] 致命錯誤：API Key 已全數耗盡，且目前 Batch 無法再縮小。將儲存目前進度並結束任務。")
                     return all_results, "PARTIAL"
+                hit_rpm = True
+                continue
 
             # 情況 B：如果是因為 JSON 截斷或模型內容過長 (非 RPM 錯誤)
             else:

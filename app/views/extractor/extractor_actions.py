@@ -357,6 +357,7 @@ def show_preview(view, mode: str):
             preview_state.done = True
 
     threading.Thread(target=do_preview, daemon=True).start()
+    threading.Thread(target=poll, daemon=True).start()
 
     def poll():
         """轮询预览状态并更新 UI"""

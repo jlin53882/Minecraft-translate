@@ -211,7 +211,7 @@ def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: 
     except Exception as e:
         book_error = str(e)
     if lang_error or book_error:
-        yield {"dual_errors": {"lang": lang_error, "book": book_error}}
+        yield {"dual_errors": {"lang": lang_error, "book": book_error}, "error": True}
 
 def preview_extraction_generator(mods_dir: str, mode: str, lang_codes: list[str] | None = None) -> Generator[Dict[str, Any], None, None]:
     """預覽提取結果。
