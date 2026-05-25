@@ -152,11 +152,11 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
 
             if "dual_errors" in update:
                 errs = update["dual_errors"]
-                async def _do_show_dual_errors(_):
-                    if errs.get("lang"):
-                        view._append_log_line(f"[ERROR] Lang 提取失敗: {errs['lang']}")
-                    if errs.get("book"):
-                        view._append_log_line(f"[ERROR] Book 提取失敗: {errs['book']}")
+                async def _do_show_dual_errors(_=None, e=errs):
+                    if e.get("lang"):
+                        view._append_log_line(f"[ERROR] Lang 提取失敗: {e['lang']}")
+                    if e.get("book"):
+                        view._append_log_line(f"[ERROR] Book 提取失敗: {e['book']}")
                 view.page.run_task(_do_show_dual_errors, None)
 
             is_error = update.get("error", False)
@@ -416,6 +416,9 @@ def show_preview(view, mode: str):
         except Exception as ex:
             preview_state.error = str(ex)
             preview_state.done = True
+
+    threading.Thread(target=do_preview, daemon=True).start()
+    threading.Thread(target=poll, daemon=True).start()
 
     def poll():
         """轮询预览状态并更新 UI"""

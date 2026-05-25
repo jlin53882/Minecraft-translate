@@ -168,14 +168,14 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
         )
         if not session_entries:
             return
-        data_to_save = cache_store.flush_session_entries(
-            state.session_new_entries, cache_type
-        )
     save_path = state.cache_file_path.get(cache_type)
     if not save_path:
         log_warning(f"[cache] save_path is None for {cache_type}, skipping (cache will be lost)")
         cache_store.clear_dirty(state.is_dirty, cache_type)
         return
+    data_to_save = cache_store.flush_session_entries(
+        state.session_new_entries, cache_type
+    )
     try:
         _save_entries_to_active_shards(
             cache_type, data_to_save, force_new_shard=write_new_shard

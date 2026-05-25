@@ -98,7 +98,9 @@ class QCBase:
                 self._page.run_task(_do_finish, None)
 
                 if on_complete:
-                    on_complete()
+                    async def _on_complete_task(_=None):
+                        on_complete()
+                    self._page.run_task(_on_complete_task, None)
 
         threading.Thread(target=run, daemon=True).start()
 
