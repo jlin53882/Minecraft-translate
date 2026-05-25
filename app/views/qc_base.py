@@ -94,6 +94,7 @@ class QCBase:
                     if controls_to_disable:
                         for ctrl in controls_to_disable:
                             ctrl.disabled = False
+                    self._page.update()
 
                 self._page.run_task(_do_finish, None)
 

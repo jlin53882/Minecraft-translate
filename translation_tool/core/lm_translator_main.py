@@ -606,7 +606,7 @@ def translate_batch_smart_old(
                     msg = str(e).lower()
                     if "failed_precondition" in msg:
                         log_error("❌ FAILED_PRECONDITION：此地區未啟用 Gemini API 免費方案，請啟用付費")
-                        return [], "PARTIAL"
+                        return all_results, "PARTIAL"
                     log_info(
                         "[⚠️] 400 INVALID_ARGUMENT：payload 格式錯誤或過大，縮小 batch"
                     )
