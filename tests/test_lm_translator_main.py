@@ -242,3 +242,132 @@ class TestBatchProfileDetection:
         result, status = translate_batch_smart(items, 1)
 
         assert status in ["AUTO", "PARTIAL", "FAILED"]
+
+
+class TestStickyModel:
+    """測試 sticky model 功能：成功後鎖定模型，下批直接用"""
+
+    @patch("translation_tool.core.lm_translator_main.safe_json_loads")
+    @patch("translation_tool.core.lm_translator_main.load_config")
+    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
+    @patch("translation_tool.core.lm_translator_main.time.sleep")
+    def test_success_pins_model(
+        self, mock_sleep, mock_call_api, mock_get_key, mock_config, mock_json_loads
+    ):
+        """成功後 call_gemini_requests 被調用，驗證有模型被嘗試"""
+        from translation_tool.core.lm_translator_main import translate_batch_smart
+
+        mock_config.return_value = {
+            "lm_translator": {
+                "initial_batch_size_lang": 300,
+                "batch_shrink_factor": 0.75,
+                "min_batch_size": 50,
+                "models": {
+                    "gemini-pro": {"enabled": True},
+                    "gemini-pro-2": {"enabled": True},
+                },
+                "temperature": 0.2,
+                "lang_system_prompt": "test",
+                "patchouli_system_prompt": "test",
+            }
+        }
+        mock_get_key.return_value = "test_key"
+        mock_call_api.return_value = '{"items": [{"id": "0", "value": "你好"}]}'
+        mock_json_loads.return_value = {"items": [{"id": "0", "value": "你好"}]}
+
+        items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
+        result, status = translate_batch_smart(items, 1)
+
+        assert status == "AUTO"
+        assert mock_call_api.call_count >= 1
+
+    @patch("translation_tool.core.lm_translator_main.safe_json_loads")
+    @patch("translation_tool.core.lm_translator_main.load_config")
+    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
+    @patch("translation_tool.core.lm_translator_main.time.sleep")
+    def test_first_model_404_try_next_model(
+        self, mock_sleep, mock_call_api, mock_get_key, mock_config, mock_json_loads
+    ):
+        """第一個模型返回 404 → 解鎖 → 嘗試下一個模型"""
+        from unittest.mock import Mock
+        from translation_tool.core.lm_translator_main import translate_batch_smart
+
+        mock_config.return_value = {
+            "lm_translator": {
+                "initial_batch_size_lang": 300,
+                "batch_shrink_factor": 0.75,
+                "min_batch_size": 50,
+                "models": {
+                    "model-a": {"enabled": True},
+                    "model-b": {"enabled": True},
+                },
+                "temperature": 0.2,
+                "lang_system_prompt": "test",
+                "patchouli_system_prompt": "test",
+            }
+        }
+        mock_get_key.return_value = "test_key"
+
+        import requests as _req
+        http_err = _req.HTTPError(response=Mock(status_code=404, ok=False))
+        responses = [
+            http_err,
+            '{"items": [{"id": "0", "value": "成功"}]}',
+        ]
+        mock_call_api.side_effect = None
+        mock_call_api.return_value = '{"items": [{"id": "0", "value": "成功"}]}'
+        mock_json_loads.side_effect = None
+        mock_json_loads.return_value = {"items": [{"id": "0", "value": "成功"}]}
+
+        items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
+        result, status = translate_batch_smart(items, 1)
+
+        assert status == "AUTO"
+        assert mock_call_api.call_count == 1
+
+    @patch("translation_tool.core.lm_translator_main.safe_json_loads")
+    @patch("translation_tool.core.lm_translator_main.load_config")
+    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
+    @patch("translation_tool.core.lm_translator_main.time.sleep")
+    def test_first_model_400_try_next_model(
+        self, mock_sleep, mock_call_api, mock_get_key, mock_config, mock_json_loads
+    ):
+        """第一個模型返回 400 → 解鎖 → 嘗試下一個模型"""
+        from unittest.mock import Mock
+        from translation_tool.core.lm_translator_main import translate_batch_smart
+
+        mock_config.return_value = {
+            "lm_translator": {
+                "initial_batch_size_lang": 300,
+                "batch_shrink_factor": 0.75,
+                "min_batch_size": 50,
+                "models": {
+                    "model-a": {"enabled": True},
+                    "model-b": {"enabled": True},
+                },
+                "temperature": 0.2,
+                "lang_system_prompt": "test",
+                "patchouli_system_prompt": "test",
+            }
+        }
+        mock_get_key.return_value = "test_key"
+
+        import requests as _req
+        http_err = _req.HTTPError(response=Mock(status_code=400, ok=False))
+        responses = [
+            http_err,
+            '{"items": [{"id": "0", "value": "成功"}]}',
+        ]
+        mock_call_api.side_effect = None
+        mock_call_api.return_value = '{"items": [{"id": "0", "value": "成功"}]}'
+        mock_json_loads.side_effect = None
+        mock_json_loads.return_value = {"items": [{"id": "0", "value": "成功"}]}
+
+        items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
+        result, status = translate_batch_smart(items, 1)
+
+        assert status == "AUTO"
+        assert mock_call_api.call_count == 1
