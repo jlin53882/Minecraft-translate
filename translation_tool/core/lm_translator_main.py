@@ -520,6 +520,7 @@ def translate_batch_smart_old(
                 log_info(f"[✓] 成功取得翻譯：{model_name}")
 
                 completed_calls += 1
+                pinned_model_index = i  # ⭐ 成功，鎖定這個模型，下個 batch 直接用
 
                 # ⭐ 累積結果
                 all_results.extend(result)
@@ -534,7 +535,6 @@ def translate_batch_smart_old(
                 batch_size = min(batch_size, remaining_count)
                 overload_retry_count = 0
                 success_this_round = True  # ⭐⭐⭐ 關鍵 ：標記本輪成功
-                pinned_model_index = None  # ⭐ 解鎖 模型
 
                 if remaining_count == 0:
                     # log_info(f"📊 已完成 API 呼叫：{completed_calls} 次 | 所有 items 已完成")
@@ -589,6 +589,7 @@ def translate_batch_smart_old(
                 # ========== 404 ==========
                 if status == 404:
                     log_info(f"[⛔] 模型 {model_name} 不存在或無法使用，跳過此模型")
+                    pinned_model_index = None  # ⭐ 解鎖
                     break  # ⭐ 跳離迴圈
 
                 # ========== 403 ==========
@@ -610,6 +611,7 @@ def translate_batch_smart_old(
                     log_info(
                         "[⚠️] 400 INVALID_ARGUMENT：payload 格式錯誤或過大，縮小 batch"
                     )
+                    pinned_model_index = None  # ⭐ 解鎖
                     break  # ⭐ 交給 batch shrink
 
                 # ========== 429 RESOURCE_EXHAUSTED ==========
