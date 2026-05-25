@@ -83,7 +83,7 @@ class QCBase:
                             await self.log_view.scroll_to(offset=-1, duration=100)
                         except Exception:
                             try:
-                                self.log_view.scroll_to(offset=-1, duration=100)
+                                await self._page.run_task(lambda _: self.log_view.scroll_to(offset=-1, duration=100), None)
                             except Exception:
                                 pass
                     self._page.run_task(_do_scroll, None)

@@ -92,8 +92,10 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
     elif mode == 'dual':
         generator = extract_dual_files_generator(mods_dir, output_dir, skip_zh_cn=skip_zh_cn)
     else:
-        view._append_log_line(f'[ERROR] 未知模式：{mode}')
-        view.set_controls_disabled(False)
+        def _do_error():
+            view._append_log_line(f'[ERROR] 未知模式：{mode}')
+            view.set_controls_disabled(False)
+        view.page.run_task(_do_error)
         return
 
     try:
