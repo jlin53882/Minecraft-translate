@@ -353,8 +353,13 @@ class TestDualModeCompletionLogSkip:
         mock_view._show_extraction_summary = MagicMock()
         mock_view.set_controls_disabled = MagicMock()
 
-        async def run_task_noop(coro, *args):
-            await coro(None)
+        def run_task_noop(coro, *args):
+            result = coro(None)
+            if result is not None:
+                try:
+                    result.send(None)
+                except StopIteration:
+                    pass
         mock_page = MagicMock()
         mock_page.run_task = run_task_noop
         mock_view.page = mock_page
@@ -397,8 +402,13 @@ class TestDualModeCompletionLogSkip:
         mock_view.status_text = MagicMock()
         mock_view.progress_bar = MagicMock()
 
-        async def run_task_noop(coro, *args):
-            await coro(None)
+        def run_task_noop(coro, *args):
+            result = coro(None)
+            if result is not None:
+                try:
+                    result.send(None)
+                except StopIteration:
+                    pass
         mock_page = MagicMock()
         mock_page.run_task = run_task_noop
         mock_view.page = mock_page
