@@ -24,7 +24,6 @@ from app.views.extractor.extractor_actions import (
     build_preview_result_dialog,
     show_preview as run_preview_flow,
     start_extraction as run_extraction_flow,
-    start_ui_poller as run_ui_poller,
     update_stats_from_log,
 )
 from app.views.extractor.extractor_state import ExtractionState
@@ -324,19 +323,6 @@ class ExtractorView(ft.Column):
         self.output_dir_textfield.value = ""
         self.page.update()
         self._append_log_line("[系統] 已清除輸出路徑")
-
-    # ==================================================
-    # TaskSession UI Poller
-    # ==================================================
-    def _start_ui_poller(self, mode: str = ""):
-        """啟動 UI 輪詢器以定期更新介面狀態。
-
-        將 view 和 mode 傳遞給 start_ui_poller() 函式。
-
-        參數：
-            mode: 提取模式（'lang' / 'book'）
-        """
-        return run_ui_poller(self, mode=mode)
 
     def _update_stats_from_log(self, line: str):
         """根據日誌內容更新提取統計資訊。

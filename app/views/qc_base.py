@@ -81,8 +81,11 @@ class QCBase:
                     async def _do_scroll(_=None):
                         try:
                             await self.log_view.scroll_to(offset=-1, duration=100)
-                        except TypeError:
-                            self.log_view.scroll_to(offset=-1, duration=100)
+                        except Exception:
+                            try:
+                                self.log_view.scroll_to(offset=-1, duration=100)
+                            except Exception:
+                                pass
                     self._page.run_task(_do_scroll, None)
             finally:
                 async def _do_finish(_=None):

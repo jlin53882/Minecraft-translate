@@ -2,6 +2,7 @@ import sys
 import tempfile
 import shutil
 from pathlib import Path
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -45,6 +46,7 @@ def pytest_configure(config):
 # Temp Directory Fixtures
 # -----------------------------------------------------------------------------
 
+@pytest.fixture
 def temp_dir():
     """提供臨時目錄，測試結束後自動清理。
 
@@ -56,10 +58,7 @@ def temp_dir():
     shutil.rmtree(tmp, ignore_errors=True)
 
 
-# -----------------------------------------------------------------------------
-# Mock Config Fixtures
-# -----------------------------------------------------------------------------
-
+@pytest.fixture
 def mock_config():
     """提供測試用的 mock config。
 
@@ -73,6 +72,7 @@ def mock_config():
     }
 
 
+@pytest.fixture
 def mock_empty_config():
     """提供空的 mock config（用於測試預設值）。
 

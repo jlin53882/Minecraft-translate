@@ -51,6 +51,10 @@ BATCH_WRITE_INTERVAL = load_config().get("lm_translator", {}).get("batch_write_i
 CHECKPOINT_FILE = "logs/translation_checkpoint.json"
 
 
+def _get_batch_write_interval():
+    return load_config().get("lm_translator", {}).get("batch_write_interval", 2)
+
+
 def save_checkpoint(
     batch_index: int, completed_count: int, total: int, remaining: list, output_dir: str
 ):
@@ -713,23 +717,15 @@ def translate_directory_generator(
         # B-3: 快取寫入頻率優化 - 每 N 個批次才寫一次硬碟
         # ============================================================
         _batch_write_counter += 1
-        # len(remaining) == 0 表示是最後一批，必須寫入
-        if _batch_write_counter % BATCH_WRITE_INTERVAL == 0 or len(remaining) == 0:
+        batch_write_interval = _get_batch_write_interval()
+        if _batch_write_counter % batch_write_interval == 0 or len(remaining) == 0:
             if is_lang:
                 save_translation_cache("lang", write_new_shard=write_new_cache)
-                log_debug(
-                    "✅ lang 分片快取已寫入硬碟（每 {} 批次）".format(
-                        BATCH_WRITE_INTERVAL
-                    )
-                )
+                log_debug("lang cache written every %d batches", batch_write_interval)
             else:
                 save_translation_cache("patchouli", write_new_shard=write_new_cache)
-                log_debug(
-                    "✅ patchouli 分片快取已寫入硬碟（每 {} 批次）".format(
-                        BATCH_WRITE_INTERVAL
-                    )
-                )
-            _batch_write_counter = 0  # 重置計數器
+                log_debug("patchouli cache written every %d batches", batch_write_interval)
+            _batch_write_counter = 0  # reset counter
 
         # ============================================================
         # B-4: 斷點續傳 - 每批次完成後寫入 checkpoint

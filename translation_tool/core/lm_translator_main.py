@@ -262,8 +262,11 @@ def translate_batch_smart_old(
 
     # 模型導入設定
     models_cfg = load_config().get("lm_translator", {}).get("models", {})
-    # 目前使用模型序列
     MODEL_POOL = [name for name, cfg in models_cfg.items() if cfg.get("enabled", False)]
+
+    if not MODEL_POOL:
+        log_error("[❌] MODEL_POOL 為空（無任何模型啟用），請在設定中啟用至少一個模型")
+        return [], "PARTIAL"
 
     # 模型溫度
     MODEL_TEMP = load_config().get("lm_translator", {}).get("temperature", 0.2)
