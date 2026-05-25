@@ -171,13 +171,15 @@ def _save_entries_to_active_shards(
     if force_new_shard:
         from datetime import datetime as _dt
         ts = _dt.now().strftime("%m%d%H%M%S")
-        # 避免同一秒內多次寫入，遞增序號
         seq = 1
         while True:
             timestamp_name = f"{cache_type}_{ts}-{seq}.json"
-            if not (type_dir / timestamp_name).exists():
+            try:
+                fd = os.open(str(type_dir / timestamp_name), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
                 break
-            seq += 1
+            except FileExistsError:
+                seq += 1
         timestamp_path = type_dir / timestamp_name
         _write_json_atomic(timestamp_path, entries)
         if logger:
@@ -194,9 +196,12 @@ def _save_entries_to_active_shards(
         seq = 1
         while True:
             overflow_name = f"{cache_type}_{ts}-{seq}.json"
-            if not (type_dir / overflow_name).exists():
+            try:
+                fd = os.open(str(type_dir / overflow_name), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
                 break
-            seq += 1
+            except FileExistsError:
+                seq += 1
         overflow_path = type_dir / overflow_name
         _write_json_atomic(overflow_path, entries)
         if logger:
