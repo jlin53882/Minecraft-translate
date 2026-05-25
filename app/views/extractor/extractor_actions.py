@@ -179,11 +179,12 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
                 view._append_log_line(final["log"])
             view.page.run_task(_do_append_final, None)
 
-    except Exception as e:
+    except Exception as exc:
         import traceback
-        async def _do_error_log(_):
+        tb = traceback.format_exc()
+        async def _do_error_log(_=None, e=exc, t=tb):
             view._append_log_line(f"[ERROR] {e}")
-            view._append_log_line(traceback.format_exc())
+            view._append_log_line(t)
         view.page.run_task(_do_error_log, None)
         session.set_error()
     finally:
