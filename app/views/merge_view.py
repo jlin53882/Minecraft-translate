@@ -17,6 +17,7 @@ import flet as ft
 
 from app.logging import LogPresenter
 from translation_tool.utils.log_unit import log_info, log_error
+from translation_tool.utils.config_manager import load_config
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
 from app.task_session import TaskSession
 from app.ui import theme
@@ -476,7 +477,10 @@ class MergeView(ft.Column):
         self._start_ui_poller()
 
         def _run_merge():
-            # ⚠️ generator 必須完整迭代，否則程式碼不會執行
+            _cfg = load_config()
+            _cfg.setdefault("lang_merger", {})["process_zh_cn_files"] = self.process_zh_cn_switch.value
+            _cfg["lang_merger"]["skip_zh_cn_when_only_process_lang"] = self.skip_zh_cn_switch.value
+            _cfg["lang_merger"]["patchouli_skip_en_us_when_zh_cn_exists"] = self.patchouli_skip_zh_cn_switch.value
             for _ in run_merge_zip_batch_service(
                 self.selected_zips,
                 self.output_dir_field.value,
