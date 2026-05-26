@@ -2,25 +2,61 @@
 
 用途：提供打包成品資源包的 UI 與執行流程。
 
-Flet 0.85 執行緒安全須知
------------------------
-背景執行緒（threading.Thread）直接修改 UI 組件（progress_bar.value、controls.append 等）
-會被 Flet 0.85 忽略。所有跨執行緒 UI 更新都必須包裝為 async 閉包，透過 page.run_task() 排程。
-模式：
-    async def _do_update(_=None):
-        self.some_control.property = value
-    self._page.run_task(_do_update)
+架構：方案B（Shared State + Poller）
+背景執行緒只寫入執行緒安全的共享狀態物件（BundleState），
+主執行緒的 Poller 定時讀取狀態並透過 page.run_task() 更新 UI。
+這樣確保所有 UI 更新都在主執行緒執行，徹底避免執行緒安全問題。
 """
 
 import flet as ft
 import threading
 import os
 import json
+import time
 from translation_tool.utils.log_unit import log_debug
 
 from app.ui import theme
 from app.ui.components import styled_card
 from app.services_impl.config_service import load_config_json
+
+
+class BundleState:
+    """執行緒安全的打包狀態容器（方案B）。"""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._progress: float = 0
+        self._log_lines: list[str] = []
+        self._error: bool = False
+        self._error_msg: str = ""
+        self._finished: bool = False
+
+    def set_progress(self, value: float):
+        with self._lock:
+            self._progress = value
+
+    def add_log(self, line: str):
+        with self._lock:
+            self._log_lines.append(line)
+
+    def set_error(self, msg: str):
+        with self._lock:
+            self._error = True
+            self._error_msg = msg
+
+    def finish(self):
+        with self._lock:
+            self._finished = True
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {
+                "progress": self._progress,
+                "log_lines": list(self._log_lines),
+                "error": self._error,
+                "error_msg": self._error_msg,
+                "finished": self._finished,
+            }
 
 
 class BundlerView(ft.Column):
@@ -82,6 +118,8 @@ class BundlerView(ft.Column):
         self.extra_folders_view = ft.ListView(height=100, spacing=4, auto_scroll=False)
         self.progress_bar = ft.ProgressBar(value=0, height=8, visible=False)
         self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
+        self._bundle_state: BundleState | None = None
+        self._bundle_poller_running: bool = False
 
         self._load_version_data()
         self._init_ui()
@@ -467,10 +505,10 @@ class BundlerView(ft.Column):
         self._page.update()
 
     def start_bundling_clicked(self, e: ft.ControlEvent):
-        """開始打包按鈕事件處理。
+        """開始打包按鈕事件處理（方案B）。
 
-        驗證必填欄位後，啟動背景執行緒執行打包任務。
-        執行緒完成後透过 page.run_task() 更新 UI。
+        驗證必填欄位後，初始化 BundleState 並啟動背景執行緒 + Poller。
+        背景執行緒只寫入執行緒安全的共享狀態，Poller 負責 UI 更新。
         """
         root_dir = self.root_dir_field.value or ""
         output_zip = self.output_zip_field.value or ""
@@ -488,9 +526,13 @@ class BundlerView(ft.Column):
 
         self.progress_bar.visible = True
         self.progress_bar.value = 0
+        self.progress_bar.color = theme.BLUE
         self.log_view.controls.clear()
         self._append_log("開始執行打包...")
         self._page.update()
+
+        self._bundle_state = BundleState()
+        self._bundle_poller_running = True
 
         thread = threading.Thread(
             target=self._bundling_worker,
@@ -498,10 +540,62 @@ class BundlerView(ft.Column):
         )
         thread.start()
 
+        self._start_bundling_poller()
+
+    def _start_bundling_poller(self):
+        """Poller：定時從 BundleState 讀取狀態並更新 UI（方案B）。"""
+
+        def poll():
+            while self._bundle_poller_running and self._bundle_state is not None:
+                time.sleep(0.1)
+                state = self._bundle_state.snapshot()
+
+                async def _do_update(_=None, s=state):
+                    progress = s["progress"]
+                    log_lines = s["log_lines"]
+                    error = s["error"]
+                    finished = s["finished"]
+
+                    self.progress_bar.value = progress
+                    for line in log_lines:
+                        self.log_view.controls.append(ft.Text(line, size=12, color="cyan400"))
+                    if log_lines:
+                        try:
+                            await self.log_view.scroll_to(offset=-1, duration=100)
+                        except Exception:
+                            pass
+
+                    if error:
+                        self.progress_bar.color = theme.ERROR
+                        self.progress_bar.value = 0
+                        self.log_view.controls.append(
+                            ft.Text(f"[錯誤] {s['error_msg']}", size=12, color="red")
+                        )
+
+                    if finished:
+                        self.progress_bar.value = 0
+                        self.progress_bar.visible = False
+                        if not error:
+                            self.progress_bar.color = theme.SUCCESS
+
+                    self._page.update()
+
+                self._page.run_task(_do_update)
+
+                if state["finished"]:
+                    self._bundle_poller_running = False
+                    break
+
+        threading.Thread(target=poll, daemon=True).start()
+
     def _append_log(self, msg: str):
         self.log_view.controls.append(ft.Text(msg, size=12, color="cyan400"))
 
     def _bundling_worker(self, root_dir, output_zip, version, description, pack_image):
+        """背景執行緒：寫入 BundleState（方案B）。"""
+        if self._bundle_state is None:
+            return
+
         from translation_tool.core.output_bundler import bundle_outputs_generator
 
         try:
@@ -523,32 +617,16 @@ class BundlerView(ft.Column):
                 log_msg = update.get("log", "")
                 for line in log_msg.split("\n"):
                     if line.strip():
-                        async def _do_append(_=None):
-                            self.log_view.controls.append(ft.Text(line, size=12, color="cyan400"))
-                            self._page.update()
-                        self._page.run_task(_do_append)
+                        self._bundle_state.add_log(line)
                 if "progress" in update:
-                    progress = update["progress"]
-                    async def _do_progress(_=None):
-                        self.progress_bar.value = progress
-                        self._page.update()
-                    self._page.run_task(_do_progress)
+                    self._bundle_state.set_progress(update["progress"])
                 if update.get("error"):
-                    self.progress_bar.color = theme.ERROR
-                    self.progress_bar.value = 0
-                    self._page.update()
-                self._page.run_task(self._scroll_log)
-        except Exception as ex:
-            self.log_view.controls.append(ft.Text(f"[錯誤] {ex}", size=12, color="red"))
-            self.progress_bar.color = theme.RED
-            self._page.update()
-        finally:
-            self.progress_bar.value = 0
-            self.progress_bar.visible = False
-            self._page.update()
+                    self._bundle_state.set_error(str(update.get("error")))
 
-    async def _scroll_log(self):
-        await self.log_view.scroll_to(offset=-1, duration=100)
+        except Exception as ex:
+            self._bundle_state.set_error(str(ex))
+        finally:
+            self._bundle_state.finish()
 
     @property
     def page(self):
