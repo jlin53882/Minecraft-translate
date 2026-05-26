@@ -1,3 +1,4 @@
+import pytest
 import flet as ft
 from app.views import merge_view
 from tests.conftest import mock_page, mock_filepicker
@@ -410,7 +411,6 @@ def test_show_merge_summary_truncates_long_error_message(monkeypatch):
 
     dialog = page.overlay[-1]
     text_values = _collect_text_values(dialog)
-    error_texts = [v for v in text_values if "A" * 80 in str(v)]
 
     assert any("..." in str(v) for v in text_values), "長錯誤訊息應被截斷並以 ... 結尾"
 
@@ -467,13 +467,11 @@ def test_close_dialog_overlay_resets_progress_bar_and_status(monkeypatch):
 
 def test_close_dialog_overlay_handles_exception(monkeypatch):
     """驗證 _close_dialog_overlay 在發生例外時不崩潰。"""
-    import logging
     monkeypatch.setattr(merge_view, "TaskSession", _Session)
     page = mock_page()
     view = merge_view.MergeView(page, mock_filepicker())
 
     class BadDialog:
-        open = True
         @property
         def open(self):
             raise RuntimeError("dialog error")
