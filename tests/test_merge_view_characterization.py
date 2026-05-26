@@ -178,15 +178,17 @@ def test_merge_view_set_status_updates_chip(monkeypatch):
 
 
 def test_merge_view_open_output_folder(monkeypatch):
-    """測試 _open_output_folder 不拋出錯誤"""
+    """測試 _open_output_folder 正確呼叫 explorer"""
+    from unittest.mock import MagicMock
     monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    mock_popen = MagicMock()
+    monkeypatch.setattr("subprocess.Popen", mock_popen)
+
     view = merge_view.MergeView(mock_page(), mock_filepicker())
     view.output_dir_field.value = 'C:/Out'
+    view._open_output_folder()
 
-    try:
-        view._open_output_folder()
-    except Exception:
-        pass
+    mock_popen.assert_called_once_with(["explorer", "C:/Out"], shell=True)
 
 
 def test_pick_zips_calls_run_task_with_async_pick_zips(monkeypatch):
