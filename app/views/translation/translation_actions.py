@@ -191,24 +191,23 @@ def run_md(view, *, dry_run: bool):
 
 
 def start_ui_timer(view):
-    """启动 UI 定时器，定期从 TaskSession 读取状态更新翻译进度界面
+    """启动 UI 定时器，定期从 TaskSession 读取状态更新翻译进度界面（方案B）。
 
-    PR3：改用 LogPresenter(mode="tail")，tail_lines 由 config 控制。
+    架構：背景執行緒只讀取 session.snapshot()，所有 UI 更新包裝為
+    async closure 透過 page.run_task() 執行，確保執行緒安全。
     """
     if view._ui_timer_running:
         return
     view._ui_timer_running = True
-    # PR3：使用 config 驅動的 tail_lines（預設 250，與舊行為一致）
     ui_cfg = load_ui_logging_config(load_config)
     presenter = LogPresenter(
         mode="tail",
         tail_lines=ui_cfg.get("tail_lines", 250),
-        colorize=False,  # Translation 目前只有灰白色，保持現有外觀
+        colorize=False,
         default_color=ft.Colors.GREY_100,
     )
 
     def loop():
-        """定时轮询 session 状态并更新 UI"""
         while view._ui_timer_running:
             time.sleep(0.1)
             if view.session is None:
@@ -217,25 +216,26 @@ def start_ui_timer(view):
                 snap = view.session.snapshot()
             except Exception:
                 continue
-            try:
-                view.progress.value = float(snap.get("progress", 0) or 0)
-            except Exception:
-                view.progress.value = 0
+
+            progress = float(snap.get("progress", 0) or 0)
             logs = snap.get("logs", []) or []
-            try:
-                # PR3：presenter.sync() 內部處理 tail rebuild + 顏色
-                presenter.sync(view.log_view, logs)
-                # sync() 會 clear() + 重新加入所有 item，手動滾到最底部
-                view.log_view.scroll_to(offset=1.0)
-            except Exception as e:
-                log_warning(f"更新日誌視圖失敗: {e}")
             status = (snap.get("status") or "").upper()
-            if status == "DONE":
-                view._set_status("任務完成", ft.Colors.GREEN_200)
-                view._ui_timer_running = False
-            elif status == "ERROR":
-                view._set_status("任務發生錯誤", ft.Colors.RED_200)
-                view._ui_timer_running = False
-            _safe_page_update(view)
+
+            async def _do_update(_=None, p=progress, l=logs, s=status, pr=presenter):
+                view.progress.value = p
+                try:
+                    pr.sync(view.log_view, l)
+                    view.log_view.scroll_to(offset=1.0)
+                except Exception as e:
+                    log_warning(f"更新日誌視圖失敗: {e}")
+                if s == "DONE":
+                    view._set_status("任務完成", ft.Colors.GREEN_200)
+                    view._ui_timer_running = False
+                elif s == "ERROR":
+                    view._set_status("任務發生錯誤", ft.Colors.RED_200)
+                    view._ui_timer_running = False
+                _safe_page_update(view)
+
+            view.page.run_task(_do_update)
 
     threading.Thread(target=loop, daemon=True).start()

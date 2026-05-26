@@ -1,6 +1,6 @@
 import pytest
 import flet as ft
-from app.views.bundler_view import BundlerView
+from app.views.bundler_view import BundlerView, BundleState
 from app.ui import theme
 from tests.conftest import mock_page, mock_filepicker
 
@@ -187,6 +187,7 @@ def test_bundling_without_output_zip_shows_no_error(monkeypatch):
 def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
+    view._bundle_state = BundleState()
 
     async def noop_scroll_to(**kwargs): return None
     monkeypatch.setattr(view.log_view, "scroll_to", noop_scroll_to)
@@ -204,12 +205,15 @@ def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
 
     view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
 
-    assert view.progress_bar.value == 0  # finally resets to 0 after completion
+    state = view._bundle_state.snapshot()
+    assert state["progress"] == 1.0
+    assert state["finished"] is True
 
 
 def test_bundling_worker_with_version_info(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
+    view._bundle_state = BundleState()
     view.version_data = {"1.20.1": {"min_format": 15, "max_format": 15}}
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
@@ -236,6 +240,7 @@ def test_bundling_worker_with_version_info(monkeypatch):
 def test_bundling_worker_passes_extra_folders(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
+    view._bundle_state = BundleState()
     view.extra_folders = ["C:/extra1", "C:/extra2"]
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
@@ -258,6 +263,7 @@ def test_bundling_worker_passes_extra_folders(monkeypatch):
 def test_bundling_worker_passes_pack_image(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
+    view._bundle_state = BundleState()
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
     captured_kwargs = {}
@@ -279,6 +285,7 @@ def test_bundling_worker_passes_pack_image(monkeypatch):
 def test_bundling_worker_empty_pack_image(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
+    view._bundle_state = BundleState()
     view.pack_image_field.value = ""
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
@@ -332,6 +339,7 @@ def test_show_snack_bar_adds_to_overlay(monkeypatch):
 def test_bundling_worker_with_error(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
+    view._bundle_state = BundleState()
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
     def mock_generator(**kwargs):
@@ -344,8 +352,10 @@ def test_bundling_worker_with_error(monkeypatch):
 
     view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
 
-    assert view.progress_bar.color == "red"
-    assert not view.progress_bar.visible
+    state = view._bundle_state.snapshot()
+    assert state["error"] is True
+    assert "Test error" in state["error_msg"]
+    assert state["finished"] is True
 
 
 def test_bundler_view_show_snack_bar_adds_to_overlay():
