@@ -21,6 +21,9 @@ def test_lm_view_initializes_primary_controls(monkeypatch):
 
     assert view.start_button.content == '開始翻譯'
     assert view.status_chip.label.value == '尚未開始'
+    assert view._progress_label.value == "📝 就緒"
+    assert view._progress_pct.value == "0%"
+    assert view._ui_timer_running is False
 
 
 def test_start_clicked_without_input_sets_error_status(monkeypatch):

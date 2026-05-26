@@ -2,34 +2,11 @@ import sys
 import tempfile
 import shutil
 from pathlib import Path
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-
-
-# -----------------------------------------------------------------------------
-# Flet 0.85 Compatibility Helpers
-# -----------------------------------------------------------------------------
-
-def _border_all(width, color):
-    """Flet 0.85+ compatible Border.all() helper.
-
-    In flet >= 0.85, ft.Border no longer has the .all() class method.
-    This replicates the behavior using Border + BorderSide.
-    """
-    import flet as ft
-    return ft.Border(
-        top=ft.BorderSide(width, color),
-        right=ft.BorderSide(width, color),
-        bottom=ft.BorderSide(width, color),
-        left=ft.BorderSide(width, color),
-    )
-
-
-# Monkey-patch ft.Border.all for tests that expect the 0.28.3 API
-import flet as ft
-ft.Border.all = staticmethod(_border_all)
 
 
 # =============================================================================
@@ -45,6 +22,7 @@ def pytest_configure(config):
 # Temp Directory Fixtures
 # -----------------------------------------------------------------------------
 
+@pytest.fixture
 def temp_dir():
     """提供臨時目錄，測試結束後自動清理。
 
@@ -56,10 +34,7 @@ def temp_dir():
     shutil.rmtree(tmp, ignore_errors=True)
 
 
-# -----------------------------------------------------------------------------
-# Mock Config Fixtures
-# -----------------------------------------------------------------------------
-
+@pytest.fixture
 def mock_config():
     """提供測試用的 mock config。
 
@@ -73,6 +48,7 @@ def mock_config():
     }
 
 
+@pytest.fixture
 def mock_empty_config():
     """提供空的 mock config（用於測試預設值）。
 
@@ -128,6 +104,12 @@ def _make_page(**overrides):
 
         def run_task(self, coro, *args):
             self._tasks.append((coro, args))
+            result = coro(*args)
+            if result is not None:
+                try:
+                    result.send(None)
+                except StopIteration:
+                    pass
 
         def _run_all_tasks(self):
             for coro, args in self._tasks:

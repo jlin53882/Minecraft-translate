@@ -230,6 +230,9 @@ class ConfigView(ft.Column):
         self.controls_map["lm_translator.batch_shrink_factor"] = ft.TextField(
             label="錯誤縮小比例", dense=True, helper="用於：批次失敗時縮小率"
         )
+        self.controls_map["lm_translator.batch_write_interval"] = ft.TextField(
+            label="快取寫入頻率", dense=True, helper="每 N 個批次寫入一次快取（建議 2）"
+        )
 
         self.controls_map["lm_translator.translator.skip_terms"] = ft.TextField(
             label="略過翻譯 (Skip Terms)",
@@ -277,12 +280,14 @@ class ConfigView(ft.Column):
         self.new_model_field = ft.TextField(
             label="新增模型名稱", hint_text="gemini-2.5-flash", expand=True, dense=True
         )
+        # 新增模型至模型列表
         self.add_model_button = ft.IconButton(
             icon=ft.Icons.ADD, tooltip="新增模型", on_click=self.on_add_model_clicked
         )
         self.models_column = ft.Column(spacing=5)
         self.controls_map["lm_translator.models"] = self.models_column
 
+        # 新增 API Key 至 Key 列表
         self.add_key_button = ft.IconButton(
             icon=ft.Icons.ADD,
             tooltip="新增 API Key",
@@ -533,6 +538,7 @@ class ConfigView(ft.Column):
                 ft.Column([self.controls_map["lm_translator.initial_batch_size_md"]], expand=1),
                 ft.Column([self.controls_map["lm_translator.min_batch_size"]], expand=1),
                 ft.Column([self.controls_map["lm_translator.batch_shrink_factor"]], expand=1),
+                ft.Column([self.controls_map["lm_translator.batch_write_interval"]], expand=1),
             ]
         )
         return self._build_card("批次大小與限制", [batch_row_1, batch_row_2])
@@ -659,6 +665,7 @@ class ConfigView(ft.Column):
             icon_size=18,
             on_click=lambda e: self.move_model_row(cb, +1),
         )
+        # 刪除模型（依 checkbox 選中狀態）
         btn_delete = ft.IconButton(
             icon=ft.Icons.DELETE_OUTLINE,
             tooltip="刪除模型",

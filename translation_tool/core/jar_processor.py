@@ -21,7 +21,7 @@ from translation_tool.core.jar_processor_preview import (
 )
 
 BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
-    r"(assets|data)/([^/]+)/"
+    r"^(assets|data)/([^/]+)/"
     r"(patchouli_books|book|manual|guidebook)/"
     r"(?:([^/]+)/)?"
     r"(?:"
@@ -155,10 +155,14 @@ def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: 
         ):
             if "stats" in update:
                 lang_stats = update["stats"]
-            yield update
+                yield {**update, "phase": "lang"}
+            else:
+                yield {**update, "phase": "lang"}
     except Exception as e:
         lang_error = str(e)
-    yield {"log": "[系統] Lang 提取完成，開始提取 Book..."}
+    if lang_stats:
+        yield {"phase": "lang", "stats": lang_stats}
+    yield {"phase": "book", "log": "[系統] Lang 提取完成，開始提取 Book..."}
     book_error = None
     try:
         for update in _run_extraction_process(
@@ -168,22 +172,25 @@ def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: 
             "Patchouli Book",
         ):
             if "stats" in update:
+                book_stats = update["stats"]
                 if lang_stats:
-                    merged_stats = {
-                        "success": lang_stats["success"] + update["stats"]["success"],
-                        "failures": lang_stats["failures"] + update["stats"]["failures"],
-                        "warnings": lang_stats["warnings"] + update["stats"]["warnings"],
-                        "total_files": lang_stats["total_files"] + update["stats"]["total_files"],
+                    combined = {
+                        "success": lang_stats["success"] + book_stats["success"],
+                        "failures": lang_stats["failures"] + book_stats["failures"],
+                        "warnings": lang_stats["warnings"] + book_stats["warnings"],
+                        "total_files": lang_stats["total_files"] + book_stats["total_files"],
+                        "lang": lang_stats,
+                        "book": book_stats,
                     }
-                    yield {**update, "stats": merged_stats}
+                    yield {**update, "stats": combined, "phase": "book"}
                 else:
-                    yield update
+                    yield {**update, "phase": "book"}
             else:
-                yield update
+                yield {**update, "phase": "book"}
     except Exception as e:
         book_error = str(e)
     if lang_error or book_error:
-        yield {"dual_errors": {"lang": lang_error, "book": book_error}}
+        yield {"dual_errors": {"lang": lang_error, "book": book_error}, "error": True}
 
 def preview_extraction_generator(mods_dir: str, mode: str) -> Generator[Dict[str, Any], None, None]:
     """預覽提取結果。

@@ -1,5 +1,6 @@
-import pytest
-from app.views.bundler_view import BundlerView
+import flet as ft
+from app.views.bundler_view import BundlerView, BundleState
+from app.ui import theme
 from tests.conftest import mock_page, mock_filepicker
 
 
@@ -8,12 +9,18 @@ def test_bundler_view_initializes_core_controls():
 
     assert view.progress_bar.visible is False
     assert hasattr(view, "version_search")
-    assert hasattr(view, "version_list")
+    assert hasattr(view, "_version_item_list")
     assert hasattr(view, "description_field")
     assert hasattr(view, "pack_image_field")
     assert hasattr(view, "root_dir_field")
     assert hasattr(view, "output_zip_field")
     assert hasattr(view, "extra_folders_view")
+    assert hasattr(view, "_version_toggle_bar")
+    assert hasattr(view, "_version_toggle_icon")
+    assert hasattr(view, "_version_selected_label")
+    assert view._version_selected_label.value == "未選擇"
+    assert hasattr(view, "_version_search_field")
+    assert hasattr(view, "_version_dropdown_body")
 
 
 def test_bundler_view_loads_version_data():
@@ -31,20 +38,11 @@ def test_bundler_view_extra_folders_list_initialized():
     assert len(view.extra_folders_view.controls) == 0
 
 
-def test_bundler_view_version_list():
+def test_bundler_view__version_item_list():
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
 
-    assert hasattr(view, "version_search")
-    assert hasattr(view, "version_list")
-    assert hasattr(view, "version_data")
-
-
-def test_bundler_view_version_list():
-    page = mock_page()
-    view = BundlerView(page, mock_filepicker())
-
-    assert hasattr(view, "version_list")
+    assert hasattr(view, "_version_item_list")
     assert hasattr(view, "version_expanded")
     assert view.version_expanded is False
 
@@ -60,13 +58,49 @@ def test_version_toggle_expand():
     assert view.version_expanded is False
 
 
-def test_version_select():
+def test_version_toggle_bar_border_changes_on_expand():
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
 
+    collapsed_border = view._version_toggle_bar.border
+    assert collapsed_border.left.width == 3
+    assert collapsed_border.left.color == theme.GREY_400
+
+    view._toggle_version_expand(None)
+    expanded_border = view._version_toggle_bar.border
+    assert expanded_border.left.width == 3
+    assert expanded_border.left.color == theme.BLUE
+
+    view._toggle_version_expand(None)
+
+
+def test_version_in_range_search_finds_range():
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+
+    assert view._version_in_range("1.13", "1.11~1.14.4") is True
+    assert view._version_in_range("1.11", "1.11~1.14.4") is True
+    assert view._version_in_range("1.14.4", "1.11~1.14.4") is True
+    assert view._version_in_range("1.10", "1.11~1.14.4") is False
+    assert view._version_in_range("1.15", "1.11~1.14.4") is False
+    assert view._version_in_range("1.20.1", "1.19~1.20.1") is True
+    assert view._version_in_range("1.20", "1.19~1.20.1") is True
+    assert view._version_in_range("foobar", "1.11~1.14.4") is False
+
+
+def test_version_select_updates_label_and_collapse():
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+
+    view._toggle_version_expand(None)
+    assert view.version_expanded is True
+
     view._select_version("1.20.1")
     assert view.version_search.value == "1.20.1"
+    assert view._version_selected_label.value == "1.20.1"
+    assert view._version_selected_label.color == theme.GREY_800
     assert view.version_expanded is False
+    assert view._version_toggle_icon.name == ft.Icons.EXPAND_LESS
 
 
 def test_bundler_view_hint_texts():
@@ -143,7 +177,10 @@ def test_bundling_without_output_zip_shows_no_error(monkeypatch):
 def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
-    monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
+    view._bundle_state = BundleState()
+
+    async def noop_scroll_to(**kwargs): return None
+    monkeypatch.setattr(view.log_view, "scroll_to", noop_scroll_to)
 
     def mock_generator(**kwargs):
         return iter([
@@ -158,12 +195,15 @@ def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
 
     view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
 
-    assert view.progress_bar.value == 1.0
+    state = view._bundle_state.snapshot()
+    assert state["progress"] == 1.0
+    assert state["finished"] is True
 
 
 def test_bundling_worker_with_version_info(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
+    view._bundle_state = BundleState()
     view.version_data = {"1.20.1": {"min_format": 15, "max_format": 15}}
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
@@ -190,6 +230,7 @@ def test_bundling_worker_with_version_info(monkeypatch):
 def test_bundling_worker_passes_extra_folders(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
+    view._bundle_state = BundleState()
     view.extra_folders = ["C:/extra1", "C:/extra2"]
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
@@ -212,6 +253,7 @@ def test_bundling_worker_passes_extra_folders(monkeypatch):
 def test_bundling_worker_passes_pack_image(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
+    view._bundle_state = BundleState()
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
     captured_kwargs = {}
@@ -233,6 +275,7 @@ def test_bundling_worker_passes_pack_image(monkeypatch):
 def test_bundling_worker_empty_pack_image(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
+    view._bundle_state = BundleState()
     view.pack_image_field.value = ""
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
@@ -286,6 +329,7 @@ def test_show_snack_bar_adds_to_overlay(monkeypatch):
 def test_bundling_worker_with_error(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
+    view._bundle_state = BundleState()
     monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
 
     def mock_generator(**kwargs):
@@ -298,8 +342,10 @@ def test_bundling_worker_with_error(monkeypatch):
 
     view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
 
-    assert view.progress_bar.color == "red"
-    assert not view.progress_bar.visible
+    state = view._bundle_state.snapshot()
+    assert state["error"] is True
+    assert "Test error" in state["error_msg"]
+    assert state["finished"] is True
 
 
 def test_bundler_view_show_snack_bar_adds_to_overlay():
@@ -322,10 +368,10 @@ def test_bundler_view_append_log_adds_control():
 
     assert len(view.log_view.controls) >= 1
 
-def test_bundler_view_version_list_exists():
+def test_bundler_view__version_item_list_exists():
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
-    assert view.version_list is not None
+    assert view._version_item_list is not None
 
 
 def test_bundler_view_version_search_exists():
@@ -351,3 +397,77 @@ def test_bundler_view_extra_folders_list():
     view = BundlerView(page, mock_filepicker())
     assert view.extra_folders is not None
     assert isinstance(view.extra_folders, list)
+
+
+def test_async_pick_root_dir_does_nothing_when_result_is_none(monkeypatch):
+    """驗證 _async_pick_root_dir 在無選擇目錄時不更新欄位。"""
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+    view.root_dir_field.value = "original"
+
+    class NonePicker:
+        async def get_directory_path(self, dialog_title=None):
+            return None
+
+    view.file_picker = NonePicker()
+
+    page.run_task(view._async_pick_root_dir)
+    page._run_all_tasks()
+
+    assert view.root_dir_field.value == "original"
+
+
+def test_async_pick_output_zip_does_nothing_when_result_is_none(monkeypatch):
+    """驗證 _async_pick_output_zip 在無選擇時不更新欄位。"""
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+    view.output_zip_field.value = "original"
+
+    class NonePicker:
+        async def save_file(self, dialog_title=None, allowed_extensions=None, file_name=None):
+            return None
+
+    view.file_picker = NonePicker()
+
+    page.run_task(view._async_pick_output_zip)
+    page._run_all_tasks()
+
+    assert view.output_zip_field.value == "original"
+
+
+def test_async_pick_extra_folder_skips_duplicate(monkeypatch):
+    """驗證 _async_pick_extra_folder 在目錄已存在時不新增。"""
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+    view.extra_folders = ["/existing"]
+
+    class DupPicker:
+        async def get_directory_path(self, dialog_title=None):
+            return "/existing"
+
+    view.file_picker = DupPicker()
+
+    page.run_task(view._async_pick_extra_folder)
+    page._run_all_tasks()
+
+    assert view.extra_folders == ["/existing"]
+
+
+def test_bundling_worker_with_empty_generator(monkeypatch):
+    """驗證 bundling_worker 在 generator 為空時不會崩潰。"""
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+    monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
+
+    def empty_generator(**kwargs):
+        return iter([])
+
+    monkeypatch.setattr(
+        "translation_tool.core.output_bundler.bundle_outputs_generator",
+        empty_generator,
+    )
+
+    view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
+
+    assert view.progress_bar.value == 0
+    assert view.progress_bar.visible is False

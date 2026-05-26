@@ -15,7 +15,7 @@
 import flet as ft
 from pathlib import Path
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info
+from translation_tool.utils.log_unit import log_info, log_debug
 import threading
 
 from app.task_session import TaskSession
@@ -24,10 +24,10 @@ from app.views.extractor.extractor_actions import (
     build_preview_result_dialog,
     show_preview as run_preview_flow,
     start_extraction as run_extraction_flow,
-    start_ui_poller as run_ui_poller,
     update_stats_from_log,
 )
-from app.views.extractor.extractor_panels import build_logs_card, build_settings_card, build_pick_button
+from app.views.extractor.extractor_state import ExtractionState
+from app.views.extractor.extractor_panels import build_main_layout
 
 class ExtractorView(ft.Column):
     """JAR 提取頁（UI）。
@@ -54,7 +54,7 @@ class ExtractorView(ft.Column):
             page: Flet Page 物件
             file_picker: Flet FilePicker 物件
         """
-        super().__init__(expand=True, spacing=15)
+        super().__init__(expand=True, spacing=15, scroll=ft.ScrollMode.ADAPTIVE)
         self._page = page
         self.file_picker = file_picker
 
@@ -63,6 +63,7 @@ class ExtractorView(ft.Column):
         # 這樣提取流程與畫面狀態不會互相纏在一起。
         self.session = TaskSession(max_logs=2000)
         self._ui_poller_stop = threading.Event()
+        self._extraction_state = ExtractionState()
 
         # 提取統計
         self._extraction_stats = {
@@ -99,11 +100,11 @@ class ExtractorView(ft.Column):
         self.output_dir_helper_text = ft.Text("", size=12, color=ft.Colors.GREY_600)
 
         self.skip_zh_cn_switch = ft.Switch(
-            label="跳過 zh_cn 抽取",
+            label="Lang 模式跳過 zh_cn",
             value=False,
         )
 
-        # 2. Action Buttons
+        # 提取 Lang 按鈕：disabled/enabled 由 worker 透過 page.run_task() 控制
         self.lang_button = ft.Button(
             "提取 Lang",
             icon=ft.Icons.LANGUAGE,
@@ -115,6 +116,7 @@ class ExtractorView(ft.Column):
             ),
             on_click=lambda e: self.start_extraction("lang"),
         )
+        # 提取 Book 按鈕：disabled/enabled 由 worker 透過 page.run_task() 控制
         self.book_button = ft.Button(
             "提取 Book",
             icon=ft.Icons.BOOK,
@@ -127,7 +129,7 @@ class ExtractorView(ft.Column):
             on_click=lambda e: self.start_extraction("book"),
         )
 
-        # 預覽按鈕
+        # 預覽按鈕（Lang）
         self.preview_lang_button = ft.OutlinedButton(
             "預覽 Lang",
             icon=ft.Icons.PREVIEW,
@@ -138,6 +140,7 @@ class ExtractorView(ft.Column):
             icon=ft.Icons.PREVIEW,
             on_click=lambda e: self.show_preview("book"),
         )
+        # 同時提取 Lang + Book，按下後啟動背景執行緒，UI 由 worker 透過 page.run_task() 更新
         self.dual_extract_button = ft.Button(
             "提取 Lang + Book",
             icon=ft.Icons.LANGUAGE,
@@ -155,15 +158,14 @@ class ExtractorView(ft.Column):
             on_click=lambda e: self.show_preview("dual"),
         )
 
-        # 3. Status Display
-        self.status_text = ft.Text("狀態：閒置", size=14, color=theme.GREY_700)
+        # 3. Status Display (now built in panels)
+        self.status_text = ft.Text("狀態：閒置", size=13, color=theme.GREY_700, weight=ft.FontWeight.W_500)
         self.progress_bar = ft.ProgressBar(
-            value=0,
-            visible=True,
-            height=8,
+            value=0, height=8, visible=True,
             bgcolor=theme.GREY_200,
             color=theme.BLUE,
         )
+        self._progress_pct = ft.Text("0%", size=12, color=theme.GREY_600, weight=ft.FontWeight.BOLD)
 
         # 4. Logs Console
         self.log_view = ft.ListView(
@@ -176,29 +178,28 @@ class ExtractorView(ft.Column):
         # ======================
         # Layout Composition
         # ======================
-        self.controls = [
-            self._build_settings_card(),
-            self._build_logs_card(),
-        ]
+        self.controls = [build_main_layout(self)]
 
         # 初始化 output_dir helper，動態讀取設定值
         self._update_output_dir_helper()
 
     def _build_settings_card(self):
-        """构建设置卡片 UI 组件"""
-        # delegate to panel builder; actual card仍使用 shared styled_card(...)
-        return build_settings_card(self)
+        """构建设置卡片 UI 组件（已由 build_main_layout 取代，保留以通過既有測試）"""
+        from app.views.extractor.extractor_panels import build_settings_panel
+        return build_settings_panel(self)
 
     def _build_logs_card(self):
-        """构建日志卡片 UI 组件"""
-        return build_logs_card(self)
+        """构建日志卡片 UI 组件（已由 build_main_layout 取代，保留以通過既有測試）"""
+        from app.views.extractor.extractor_panels import build_logs_panel
+        return build_logs_panel(self)
 
     # ==================================================
     # UI helpers
     # ==================================================
     def _pick_button(self, target):
         """构建目录选择按钮"""
-        return build_pick_button(self, target)
+        from app.views.extractor.extractor_panels import _build_pick_button
+        return _build_pick_button(self, target)
 
     def pick_directory(self, target):
         """開啟目錄選擇對話框。
@@ -231,7 +232,11 @@ class ExtractorView(ft.Column):
         self._update_output_dir_helper()
 
     def _update_output_dir_helper(self):
-        """動態更新 output_dir_textfield 的 helper，顯示實際的資料夾命名設定。"""
+        """動態更新 output_dir_textfield 的 helper，顯示實際的資料夾命名設定。
+
+        從翻譯工具設定讀取 output_folder_names，顯示各模式自動產生的資料夾名稱。
+        包含 Lang/Book/Dual 的提取和預覽資料夾命名。
+        """
         from translation_tool.utils.config_manager import load_config
         config = load_config()
         folder_names = config.get("extractor", {}).get("output_folder_names", {})
@@ -256,8 +261,18 @@ class ExtractorView(ft.Column):
         self._page.update()
 
     def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
-        """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。"""
+        """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。
+
+        只有在輸出路徑為空時才自動填入，避免覆蓋使用者已自訂的路徑。
+
+        參數：
+            mods_dir: Mods 資料夾路徑
+            mode: 模式（'lang' / 'book' / 'dual'），決定使用的資料夾命名尾碼
+        """
         from translation_tool.utils.config_manager import load_config
+
+        if self.output_dir_textfield.value and self.output_dir_textfield.value.strip():
+            return
 
         config = load_config()
         folder_names = config.get("extractor", {}).get("output_folder_names", {})
@@ -281,7 +296,13 @@ class ExtractorView(ft.Column):
         self._append_log_line(f"[系統] 自動設定輸出路徑：{output_path}")
 
     def set_controls_disabled(self, disabled: bool):
-        """設定控制項停用/啟用狀態"""
+        """設定控制項停用/啟用狀態。
+
+        停用時 opacity 設為 0.5，避免使用者誤觸。
+
+        參數：
+            disabled: True 停用，False 啟用
+        """
         for ctrl in (
             self.mods_dir_textfield,
             self.output_dir_textfield,
@@ -293,64 +314,131 @@ class ExtractorView(ft.Column):
         self.page.update()
 
     def clear_output_path(self, e=None):
-        """清除輸出路徑欄位"""
+        """清除輸出路徑欄位。
+
+        清除後顯示系統日誌。防止清除已經為空的欄位。
+        """
         if not (self.output_dir_textfield.value or "").strip():
             return
         self.output_dir_textfield.value = ""
         self.page.update()
         self._append_log_line("[系統] 已清除輸出路徑")
 
-    # ==================================================
-    # TaskSession UI Poller
-    # ==================================================
-    def _start_ui_poller(self, mode: str = ""):
-        """启动 UI 轮询器以定期更新界面状态"""
-        return run_ui_poller(self, mode=mode)
-
     def _update_stats_from_log(self, line: str):
-        """根据日志内容更新提取统计信息"""
+        """根據日誌內容更新提取統計資訊。
+
+        將日誌行傳遞給 update_stats_from_log() 解析。
+
+        參數：
+            line: 日誌文字行
+        """
         return update_stats_from_log(self, line)
 
     def _show_extraction_summary(self, mode: str):
-        """顯示提取結果摘要（UI 風格對齊預覽 modal）。"""
+        """顯示提取結果摘要對話框（UI 風格對齊預覽 modal）。
+
+        根據 mode 顯示不同內容：
+        - 'dual'：顯示 Lang 和 Book 兩階段的統計
+        - 'lang' / 'book'：顯示單一模式的統計
+
+        參數：
+            mode: 模式（'lang' / 'book' / 'dual'）
+        """
         stats = self._extraction_stats
 
-        content = ft.Column(
-            [
-                ft.Text("提取結果摘要", size=16, weight=ft.FontWeight.BOLD),
-                ft.Divider(),
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=20),
-                        ft.Text(f"成功處理 JAR：{stats['success']} 個", size=14),
-                    ],
-                    spacing=8,
-                ),
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=20),
-                        ft.Text(f"因內容相同而跳過的檔案：{stats['warnings']} 個", size=14),
-                    ],
-                    spacing=8,
-                ),
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.ERROR, color=theme.RED, size=20),
-                        ft.Text(f"失敗項目：{stats['failures']} 個", size=14),
-                    ],
-                    spacing=8,
-                ),
-                ft.Divider(),
-                ft.Text(
-                    f"新提取或更新的檔案：{stats['total_files']} 個",
-                    size=14,
-                    color=ft.Colors.BLUE_700,
-                    weight=ft.FontWeight.BOLD,
-                ),
-            ],
-            spacing=10,
-            tight=True,
-        )
+        if mode == "dual":
+            content = ft.Column(
+                [
+                    ft.Text("提取結果摘要", size=16, weight=ft.FontWeight.BOLD),
+                    ft.Divider(),
+                    ft.Text("Lang", size=14, weight=ft.FontWeight.BOLD),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=18),
+                            ft.Text(f"成功處理 JAR：{stats.get('lang', {}).get('success', 0)} 個", size=13),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=18),
+                            ft.Text(f"因內容相同而跳過的檔案：{stats.get('lang', {}).get('warnings', 0)} 個", size=13),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.ERROR, color=theme.RED, size=18),
+                            ft.Text(f"失敗項目：{stats.get('lang', {}).get('failures', 0)} 個", size=13),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Text(f"新提取或更新的檔案：{stats.get('lang', {}).get('total_files', 0)} 個", size=13, color=ft.Colors.BLUE_700, weight=ft.FontWeight.BOLD),
+                    ft.Divider(),
+                    ft.Text("Book", size=14, weight=ft.FontWeight.BOLD),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=18),
+                            ft.Text(f"成功處理 JAR：{stats.get('book', {}).get('success', 0)} 個", size=13),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=18),
+                            ft.Text(f"因內容相同而跳過的檔案：{stats.get('book', {}).get('warnings', 0)} 個", size=13),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.ERROR, color=theme.RED, size=18),
+                            ft.Text(f"失敗項目：{stats.get('book', {}).get('failures', 0)} 個", size=13),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Text(f"新提取或更新的檔案：{stats.get('book', {}).get('total_files', 0)} 個", size=13, color=ft.Colors.BLUE_700, weight=ft.FontWeight.BOLD),
+                ],
+                spacing=8,
+                tight=True,
+            )
+        else:
+            content = ft.Column(
+                [
+                    ft.Text("提取結果摘要", size=16, weight=ft.FontWeight.BOLD),
+                    ft.Divider(),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=20),
+                            ft.Text(f"成功處理 JAR：{stats['success']} 個", size=14),
+                        ],
+                        spacing=8,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=20),
+                            ft.Text(f"因內容相同而跳過的檔案：{stats['warnings']} 個", size=14),
+                        ],
+                        spacing=8,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.ERROR, color=theme.RED, size=20),
+                            ft.Text(f"失敗項目：{stats['failures']} 個", size=14),
+                        ],
+                        spacing=8,
+                    ),
+                    ft.Divider(),
+                    ft.Text(
+                        f"新提取或更新的檔案：{stats['total_files']} 個",
+                        size=14,
+                        color=ft.Colors.BLUE_700,
+                        weight=ft.FontWeight.BOLD,
+                    ),
+                ],
+                spacing=10,
+                tight=True,
+            )
 
         dialog = ft.AlertDialog(
             modal=True,
@@ -362,6 +450,7 @@ class ExtractorView(ft.Column):
         )
 
         try:
+            self.page.overlay.clear()
             self.page.overlay.append(dialog)
             dialog.open = True
             async def _do_update(_):
@@ -376,7 +465,7 @@ class ExtractorView(ft.Column):
         支援傳入 LogEntry（PR2 後 poller 傳入）或 str（直接呼叫時）。
         """
         text = entry_or_str.text if hasattr(entry_or_str, "text") else entry_or_str
-        log_info(f"[DEBUG] _append_log_line called: thread={threading.current_thread().name}, text={text[:80]}...")
+        log_debug(f"[DEBUG] _append_log_line called: thread={threading.current_thread().name}, text={text[:80]}...")
         color = "#e0e0e0"  # default logs are light grey
         if "[ERROR]" in text:
             color = "#ff6b6b"  # soft red
@@ -385,7 +474,7 @@ class ExtractorView(ft.Column):
         elif "Translation" in text or "完成" in text:
             color = "#74c0fc"  # soft blue
 
-        log_info(f"[DEBUG] _append_log_line: before append, log_view.controls count={len(self.log_view.controls)}")
+        #log_info(f"[DEBUG] _append_log_line: before append, log_view.controls count={len(self.log_view.controls)}")
         self.log_view.controls.append(
             ft.Text(
                 text,
@@ -395,21 +484,29 @@ class ExtractorView(ft.Column):
                 selectable=True,
             )
         )
-        log_info(f"[DEBUG] _append_log_line: after append, log_view.controls count={len(self.log_view.controls)}")
+        #log_info(f"[DEBUG] _append_log_line: after append, log_view.controls count={len(self.log_view.controls)}")
 
     # ==================================================
     # Worker Logic
     # ==================================================
     def start_extraction(self, mode: str):
-        """启动 JAR 文件提取任务（lang 或 book 模式）"""
+        """啟動 JAR 檔案提取任務（Lang / Book / Dual 模式）。
+
+        委託给 extractor_actions.start_extraction() 處理。
+
+        參數：
+            mode: 提取模式（'lang' / 'book' / 'dual'）
+        """
         return run_extraction_flow(self, mode)
 
     def _show_snack_bar(self, message: str, color: str = theme.ERROR):
-        """
-        顯示底部的快訊通知 (SnackBar)
+        """顯示底部的快訊通知 (SnackBar)。
 
-        :param message: 要顯示的文字訊息
-        :param color: SnackBar 的背景顏色，預設為淺紅色 (RED_400)
+        將 SnackBar 加入 page.overlay 並設為 open。
+
+        參數：
+            message: 要顯示的文字訊息
+            color: SnackBar 的背景顏色，預設為 RED_400
         """
         log_info(f"[UI] SnackBar: {message}")
         # 建立 SnackBar 元件，包含文字內容與背景顏色
@@ -429,11 +526,24 @@ class ExtractorView(ft.Column):
     # 預覽功能
     # ==================================================
     def show_preview(self, mode: str):
-        """显示提取预览对话框（lang 或 book 模式）"""
+        """顯示提取預覽對話框（Lang / Book / Dual 模式）。
+
+        委託给 extractor_actions.show_preview() 處理。
+
+        參數：
+            mode: 模式（'lang' / 'book' / 'dual'）
+        """
         return run_preview_flow(self, mode)
 
     def _show_preview_dialog_result(self, result: dict, mode: str):
-        """显示预览结果对话框"""
+        """顯示預覽結果對話框。
+
+        將 build_preview_result_dialog() 的結果加入 overlay 並打開。
+
+        參數：
+            result: 預覽結果字典
+            mode: 模式（'lang' / 'book' / 'dual'）
+        """
         dialog = build_preview_result_dialog(self, result, mode)
         self.page.overlay.append(dialog)
         dialog.open = True
@@ -442,7 +552,14 @@ class ExtractorView(ft.Column):
         self.page.run_task(_do_update, None)
 
     def _show_preview_dialog_error(self, error: str, mode: str):
-        """显示预览错误对话框"""
+        """顯示預覽錯誤對話框。
+
+        將 build_preview_error_dialog() 的結果加入 overlay 並打開。
+
+        參數：
+            error: 錯誤訊息
+            mode: 模式（'lang' / 'book' / 'dual'）
+        """
         self._preview_error_dialog = build_preview_error_dialog(self, error, mode)
         self.page.overlay.append(self._preview_error_dialog)
         self._preview_error_dialog.open = True
@@ -451,12 +568,23 @@ class ExtractorView(ft.Column):
         self.page.run_task(_do_update, None)
 
     def _close_dialog_overlay(self, dialog):
-        """關閉 overlay 對話框並重置 UI 狀態"""
+        """關閉 overlay 對話框並重置 UI 狀態。
+
+        在關閉對話框後：
+        - 重置 status_text 為「閒置」
+        - 重置 progress_bar 為 0
+        - 重置 _progress_pct 為 "0%"
+        - 啟用所有控制項
+
+        參數：
+            dialog: 要關閉的 AlertDialog
+        """
         try:
             dialog.open = False
             self.status_text.value = '狀態：閒置'
             self.progress_bar.value = 0
             self.progress_bar.color = ft.Colors.BLUE
+            self._progress_pct.value = "0%"
             self.set_controls_disabled(False)
             self.page.update()
         except Exception:

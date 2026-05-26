@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import cache_shards, cache_store
+from .log_unit import log_info, log_warning
 from .cache_loader import load_cache_type
 from .cache_overview import (
     build_cache_overview,
@@ -155,6 +156,8 @@ def _save_entries_to_active_shards(
 
 def save_translation_cache(cache_type: str, write_new_shard: bool = True):
     """儲存翻譯快取。"""
+    import translation_tool.utils.log_unit as log_unit
+    log_unit.log_debug(f"[CACHE DEBUG] save_translation_cache called: cache_type={cache_type}, write_new_shard={write_new_shard}")
     if not load_config().get("translator", {}).get("enable_cache_saving", True):
         return
 
@@ -165,14 +168,15 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
         )
         if not session_entries:
             return
-        data_to_save = cache_store.flush_session_entries(
-            state.session_new_entries, cache_type
-        )
+    save_path = state.cache_file_path.get(cache_type)
+    if not save_path:
+        log_warning(f"[cache] save_path is None for {cache_type}, skipping (cache will be lost)")
+        cache_store.clear_dirty(state.is_dirty, cache_type)
+        return
+    data_to_save = cache_store.flush_session_entries(
+        state.session_new_entries, cache_type
+    )
     try:
-        save_path = state.cache_file_path.get(cache_type)
-        if not save_path:
-            cache_store.clear_dirty(state.is_dirty, cache_type)
-            return
         _save_entries_to_active_shards(
             cache_type, data_to_save, force_new_shard=write_new_shard
         )

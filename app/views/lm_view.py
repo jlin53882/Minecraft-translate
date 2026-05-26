@@ -2,6 +2,11 @@
 
 用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+
+Flet 0.85 執行緒安全須知
+-----------------------
+背景執行緒直接修改 UI 組件會被 Flet 0.85 忽略。所有跨執行緒 UI 更新都必須透過
+page.run_task() 包裝為 async 閉包排程。
 """
 
 import threading
@@ -71,11 +76,20 @@ class LMView(ft.Column):
             label="輸出 .lang 檔案（不是 .json）", value=False
         )
         self.write_new_cache_switch = ft.Switch(
-            label="寫入新快取(每次回傳單獨快取)（write_new_cache）", value=False
+            label="寫入新快取(每次回傳單獨快取)（write_new_cache）", value=False,
+            on_change=lambda e: log_info(f"[LM UI] write_new_cache_switch changed: {self.write_new_cache_switch.value}")
+        )
+        batch_interval = load_config().get("lm_translator", {}).get("batch_write_interval", 2)
+        self.batch_interval_info = ft.Text(
+            f"快取寫入頻率: 每 {batch_interval} 批次寫入一次（由 Config 設定）",
+            size=11,
+            color=theme.GREY_600,
         )
 
         # 狀態與日誌
         self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=theme.GREY_200)
+        self._progress_label = ft.Text("📝 就緒", size=13, color="#9ca3af")
+        self._progress_pct = ft.Text("0%", size=13, color="#9ca3af")
         self.progress_bar = ft.ProgressBar(
             value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
@@ -91,7 +105,7 @@ class LMView(ft.Column):
             default_color="#F5F5F5",  # 浅灰色文字，深色背景看得清楚
         )
 
-        # 按鈕（共用 primary style）
+        # 開始翻譯按鈕：點擊後在背景執行緒執行翻譯，UI 進度由 start_ui_timer() 定時更新
         self.start_button = primary_button(
             "開始翻譯",
             icon=ft.Icons.PLAY_ARROW,
@@ -119,6 +133,7 @@ class LMView(ft.Column):
                         self.dry_run_switch,
                         self.export_lang_checkbox,
                         self.write_new_cache_switch,
+                        self.batch_interval_info,
                         ft.Row([self.start_button], spacing=10),
                     ],
                     spacing=8,
@@ -130,6 +145,14 @@ class LMView(ft.Column):
                 content=ft.Column(
                     [
                         ft.Row([self.status_chip], wrap=True),
+                        ft.Row(
+                            [
+                                self._progress_label,
+                                ft.Text(""),
+                                self._progress_pct,
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        ),
                         self.progress_bar,
                     ],
                     spacing=10,
@@ -158,7 +181,7 @@ class LMView(ft.Column):
     # - 之後調整 UI（padding/radius/border/divider）只要改一處
 
     def _path_row(self, field: ft.TextField, on_pick) -> ft.Control:
-        """建立路徑輸入列"""
+        """建立路徑輸入列（含資料夾選擇 IconButton）。"""
         return ft.Row(
             [
                 field,
@@ -235,12 +258,16 @@ class LMView(ft.Column):
             )
 
         self._set_status("執行中", theme.BLUE_200)
+        self._progress_label.value = "📝 翻譯中"
+        self._progress_label.color = "#60a5fa"
+        self._progress_pct.value = "0%"
+        self._progress_pct.color = "#60a5fa"
         self.progress_bar.value = 0
         self.log_view.controls.clear()
         self.log_presenter.reset()
         self.page.update()
 
-        output_dir = self.output_path.value or LM_translate_folder_name
+        output_dir = (self.output_path.value or "").strip() or LM_translate_folder_name
         dry_run = self.dry_run_switch.value
         export_lang = self.export_lang_checkbox.value
         write_new_cache = self.write_new_cache_switch.value
@@ -255,7 +282,7 @@ class LMView(ft.Column):
         threading.Thread(
             target=run_lm_translation_service,
             args=(
-                self.input_path.value,
+                (self.input_path.value or "").strip(),
                 output_dir,
                 self.session,
                 dry_run,
@@ -287,43 +314,57 @@ class LMView(ft.Column):
                 except Exception:
                     continue
 
-                try:
-                    self.progress_bar.value = float(snap.get("progress", 0) or 0)
-                except Exception:
-                    self.progress_bar.value = 0
-
+                progress = float(snap.get("progress", 0) or 0)
                 logs = snap.get("logs", []) or []
-                try:
-                    self.log_presenter.sync(self.log_view, logs)
-                except Exception as e:
-                    log_debug(f"LM log presenter sync failed: {e}")
-
-                # 強制刷新 ListView 內容變更，避免背景 thread 更新時畫面不同步
-                try:
-                    self.log_view.update()
-                except Exception:
-                    pass
-
                 status = (snap.get("status") or "").upper()
-                if status == "DONE":
-                    self._set_status("任務完成", theme.GREEN_200)
-                    self._ui_timer_running = False
-                elif status == "ERROR":
-                    self._set_status("任務發生錯誤", theme.RED_200)
-                    self._ui_timer_running = False
 
-                try:
-                    self.page.update()
-                except Exception as e:
-                    log_debug(f"LM page update failed: {e}")
+                async def _do_update(_=None):
+                    pct = int(progress * 100)
+                    if status == "DONE":
+                        self._set_status("尚未開始", theme.GREY_200)
+                        self._progress_label.value = "📝 就緒"
+                        self._progress_label.color = theme.GREY_600
+                        self._progress_pct.value = "0%"
+                        self._progress_pct.color = theme.GREY_600
+                        self.progress_bar.value = 0
+                    elif status == "ERROR":
+                        self._set_status("任務發生錯誤", theme.RED_200)
+                        self._progress_label.value = "❌ 發生錯誤"
+                        self._progress_label.color = theme.RED
+                        self._progress_pct.value = "0%"
+                        self._progress_pct.color = theme.RED
+                        self.progress_bar.value = 0
+                    else:
+                        self._progress_label.value = "📝 翻譯中"
+                        self._progress_label.color = "#60a5fa"
+                        self._progress_pct.value = f"{pct}%"
+                        self._progress_pct.color = "#60a5fa"
+                        self.progress_bar.value = progress
+                    try:
+                        self.log_presenter.sync(self.log_view, logs)
+                    except Exception as e:
+                        log_debug(f"LM log presenter sync failed: {e}")
+                    try:
+                        self.log_view.update()
+                    except Exception:
+                        pass
+                    self._page.update()
+
+                self._page.run_task(_do_update, None)
+
+                if status == "DONE" or status == "ERROR":
                     self._ui_timer_running = False
-                    break
 
         threading.Thread(target=loop, daemon=True).start()
 
     # --------------------------------------------------
     # UI helpers
     # --------------------------------------------------
+    def refresh_batch_interval_info(self):
+        """Config save 後重新讀取 batch_write_interval 並更新顯示。"""
+        batch_interval = load_config().get("lm_translator", {}).get("batch_write_interval", 2)
+        self.batch_interval_info.value = f"快取寫入頻率: 每 {batch_interval} 批次寫入一次（由 Config 設定）"
+
     def _set_status(self, text: str, color: str):
         """更新狀態晶片顯示"""
         self.status_chip.label = ft.Text(text)

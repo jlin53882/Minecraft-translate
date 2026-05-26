@@ -2,6 +2,11 @@
 
 用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+
+Flet 0.85 執行緒安全須知
+-----------------------
+背景執行緒直接修改 UI 組件會被 Flet 0.85 忽略。所有跨執行緒 UI 更新都必須透過
+page.run_task() 包裝為 async 閉包排程。
 """
 
 import flet as ft
@@ -515,12 +520,14 @@ class RulesView(ft.Column):
         def run():
             try:
                 rules_data = self._load_rules_core()
-                self._handle_reload_success(rules_data)
-                self.page.update()
+                async def _do_update(_=None):
+                    self._handle_reload_success(rules_data)
+                self.page.run_task(_do_update, None)
             except Exception as err:
                 msg = f"初次載入規則失敗: {err}"
-                self._show_snack_bar(msg, theme.ERROR)
-                self.page.update()
+                async def _do_err(_=None):
+                    self._show_snack_bar(msg, theme.ERROR)
+                self.page.run_task(_do_err, None)
 
         threading.Thread(target=run, daemon=True).start()
 

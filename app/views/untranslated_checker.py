@@ -45,6 +45,7 @@ class UntranslatedChecker(ft.Container):
             label="未翻譯報告 輸出資料夾",
             expand=True,
         )
+        # 開始檢查按鈕：disabled/enabled 由 worker 透過 page.run_task() 控制
         self.start_button = ft.Button(
             "開始檢查",
             icon=ft.Icons.SEARCH_OFF,
