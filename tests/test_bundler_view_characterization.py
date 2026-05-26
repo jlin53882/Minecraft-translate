@@ -1,4 +1,3 @@
-import pytest
 import flet as ft
 from app.views.bundler_view import BundlerView, BundleState
 from app.ui import theme
@@ -37,15 +36,6 @@ def test_bundler_view_extra_folders_list_initialized():
 
     assert view.extra_folders == []
     assert len(view.extra_folders_view.controls) == 0
-
-
-def test_bundler_view__version_item_list():
-    page = mock_page()
-    view = BundlerView(page, mock_filepicker())
-
-    assert hasattr(view, "version_search")
-    assert hasattr(view, "_version_item_list")
-    assert hasattr(view, "version_data")
 
 
 def test_bundler_view__version_item_list():
