@@ -397,3 +397,77 @@ def test_bundler_view_extra_folders_list():
     view = BundlerView(page, mock_filepicker())
     assert view.extra_folders is not None
     assert isinstance(view.extra_folders, list)
+
+
+def test_async_pick_root_dir_does_nothing_when_result_is_none(monkeypatch):
+    """驗證 _async_pick_root_dir 在無選擇目錄時不更新欄位。"""
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+    view.root_dir_field.value = "original"
+
+    class NonePicker:
+        async def get_directory_path(self, dialog_title=None):
+            return None
+
+    view.file_picker = NonePicker()
+
+    page.run_task(view._async_pick_root_dir)
+    page._run_all_tasks()
+
+    assert view.root_dir_field.value == "original"
+
+
+def test_async_pick_output_zip_does_nothing_when_result_is_none(monkeypatch):
+    """驗證 _async_pick_output_zip 在無選擇時不更新欄位。"""
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+    view.output_zip_field.value = "original"
+
+    class NonePicker:
+        async def save_file(self, dialog_title=None, allowed_extensions=None, file_name=None):
+            return None
+
+    view.file_picker = NonePicker()
+
+    page.run_task(view._async_pick_output_zip)
+    page._run_all_tasks()
+
+    assert view.output_zip_field.value == "original"
+
+
+def test_async_pick_extra_folder_skips_duplicate(monkeypatch):
+    """驗證 _async_pick_extra_folder 在目錄已存在時不新增。"""
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+    view.extra_folders = ["/existing"]
+
+    class DupPicker:
+        async def get_directory_path(self, dialog_title=None):
+            return "/existing"
+
+    view.file_picker = DupPicker()
+
+    page.run_task(view._async_pick_extra_folder)
+    page._run_all_tasks()
+
+    assert view.extra_folders == ["/existing"]
+
+
+def test_bundling_worker_with_empty_generator(monkeypatch):
+    """驗證 bundling_worker 在 generator 為空時不會崩潰。"""
+    page = mock_page()
+    view = BundlerView(page, mock_filepicker())
+    monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
+
+    def empty_generator(**kwargs):
+        return iter([])
+
+    monkeypatch.setattr(
+        "translation_tool.core.output_bundler.bundle_outputs_generator",
+        empty_generator,
+    )
+
+    view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
+
+    assert view.progress_bar.value == 0
+    assert view.progress_bar.visible is False

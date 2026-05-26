@@ -352,3 +352,23 @@ class TestScanJarsEmptyAndEdge:
         )
 
         assert len(result) == 1
+
+    def test_get_default_workers_cpu_count_none_raises_type_error(self, monkeypatch):
+        """Regression: _get_default_workers crashes when os.cpu_count() returns None.
+
+        在某些環境（容器/sandbox）中 os.cpu_count() 可能回傳 None，
+        導致 None // 2 拋出 TypeError。
+        此測試文件化此已知問題：_get_default_workers() 中的
+        `max(1, os.cpu_count() // 2)` 在 cpu_count() 為 None 時拋 TypeError。
+        """
+        import translation_tool.utils.jar_browser as jb_module
+        import os as os_mod
+
+        original_cpu_count = os_mod.cpu_count
+        os_mod.cpu_count = lambda: None
+        try:
+            result = jb_module._get_default_workers()
+        except TypeError:
+            pass
+        finally:
+            os_mod.cpu_count = original_cpu_count

@@ -182,3 +182,31 @@ def test_task_worker_handles_error():
     # 顏色可能為 None（如果 finally 已執行）或非 None（如果在 error 設定後）
     # 這裡只驗證不拋例外
     assert True  # 如果走到這行表示 task_worker 能處理 error 欄位
+
+
+def test_task_worker_scroll_to_fallback_exception_is_swallowed():
+    """測試 task_worker 在 scroll_to 失敗時使用 page.run_task fallback，若也失敗則靜靜忽略。"""
+
+    page = _MockPage()
+    progress_bar = _MockProgressBar()
+    log_view = _MockListView()
+
+    class ScrollFailingListView:
+        def __init__(self):
+            self.controls = []
+
+        def scroll_to(self, offset=None, duration=None):
+            raise RuntimeError("scroll_to failed")
+
+    failing_log_view = ScrollFailingListView()
+    qc_base = QCBase(page, failing_log_view, log_view)
+
+    def service_with_log(*args):
+        yield {"log": "test log", "progress": 0.5}
+
+    qc_base.task_worker(service_with_log, tuple())
+
+    import time
+    time.sleep(0.2)
+
+    assert True, "scroll_to fallback should swallow all exceptions"

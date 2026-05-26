@@ -303,3 +303,180 @@ def test_show_merge_summary_empty_failed_zips_list(monkeypatch):
     text_values = _collect_text_values(dialog)
 
     assert not any('mod_a.zip' in v for v in text_values), "空列表時不應顯示 ZIP 名稱"
+
+
+# ============================================================
+# Additional untested merge_view paths
+# ============================================================
+
+def test_async_pick_zips_does_nothing_when_result_is_none(monkeypatch):
+    """驗證 _async_pick_zips 在無選擇檔案時不更新清單。"""
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    page = mock_page()
+
+    class EmptyPicker:
+        async def pick_files(self, dialog_title=None, allow_multiple=None, allowed_extensions=None):
+            return []
+
+    view = merge_view.MergeView(page, EmptyPicker())
+
+    page.run_task(view._async_pick_zips)
+    page._run_all_tasks()
+
+    assert view.selected_zips == []
+
+
+def test_on_zip_picked_does_nothing_when_files_is_none(monkeypatch):
+    """驗證 _on_zip_picked 在 files 為 None 時不更新。"""
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    page = mock_page()
+    view = merge_view.MergeView(page, mock_filepicker())
+    view.selected_zips = ["existing.zip"]
+
+    class FakeEvent:
+        files = None
+
+    view._on_zip_picked(FakeEvent())
+
+    assert view.selected_zips == ["existing.zip"]
+
+
+def test_on_zip_picked_does_nothing_when_file_path_is_none(monkeypatch):
+    """驗證 _on_zip_picked 在檔案路徑為 None 時不新增。"""
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    page = mock_page()
+    view = merge_view.MergeView(page, mock_filepicker())
+    view.selected_zips = []
+
+    class FakeFile:
+        path = None
+
+    class FakeEvent:
+        files = [FakeFile()]
+
+    view._on_zip_picked(FakeEvent())
+
+    assert view.selected_zips == []
+
+
+def test_start_merge_with_invalid_patchouli_threshold_shows_snack(monkeypatch):
+    """驗證 start_merge 在 patchouli_threshold 為無效值時使用預設 0.5。"""
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    page = mock_page()
+    view = merge_view.MergeView(page, mock_filepicker())
+    view.selected_zips = ["/test/a.zip"]
+    view.output_dir_field.value = "/test/out"
+    view.patchouli_threshold_field.value = "not_a_number"
+
+    merge_called = []
+
+    def mock_run_merge(*args, **kwargs):
+        merge_called.append(args)
+        yield {"log": "done"}
+
+    def mock_log_presenter_sync(lv, logs):
+        pass
+
+    monkeypatch.setattr(merge_view, "run_merge_zip_batch_service", mock_run_merge)
+    monkeypatch.setattr(view.log_presenter, "sync", mock_log_presenter_sync)
+    monkeypatch.setattr(merge_view.threading, "Thread",
+                       lambda target=None, args=(), daemon=None:
+                           type("T", (), {"start": lambda self: target(*args)})())
+
+    view.start_merge(None)
+
+    assert len(merge_called) == 1
+
+
+def test_show_merge_summary_truncates_long_error_message(monkeypatch):
+    """驗證 _show_merge_summary 截斷超過 80 字元的錯誤訊息。"""
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    page = mock_page()
+    view = merge_view.MergeView(page, mock_filepicker())
+
+    long_error = "A" * 120
+    summary = {
+        "success_zips": 5,
+        "failed_zips": 1,
+        "failed_zips_list": [
+            {"name": "long_error.zip", "error": long_error},
+        ],
+        "output_counts": {},
+    }
+
+    view._show_merge_summary(summary)
+
+    dialog = page.overlay[-1]
+    text_values = _collect_text_values(dialog)
+    error_texts = [v for v in text_values if "A" * 80 in str(v)]
+
+    assert any("..." in str(v) for v in text_values), "長錯誤訊息應被截斷並以 ... 結尾"
+
+
+def test_show_merge_summary_skips_zero_output_counts(monkeypatch):
+    """驗證 _show_merge_summary 不顯示 count 為 0 的輸出統計列。"""
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    page = mock_page()
+    view = merge_view.MergeView(page, mock_filepicker())
+
+    summary = {
+        "success_zips": 3,
+        "failed_zips": 0,
+        "failed_zips_list": [],
+        "output_counts": {
+            "lang_output": 0,
+            "待翻譯": 0,
+            "patchouli_output": 5,
+        },
+    }
+
+    view._show_merge_summary(summary)
+
+    dialog = page.overlay[-1]
+    text_values = _collect_text_values(dialog)
+    lang_texts = [v for v in text_values if "lang_output" in str(v)]
+
+    assert len(lang_texts) == 0, "count 為 0 的輸出統計不應顯示"
+
+
+def test_close_dialog_overlay_resets_progress_bar_and_status(monkeypatch):
+    """驗證 _close_dialog_overlay 正確重置 progress_bar 和 status。"""
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    page = mock_page()
+    view = merge_view.MergeView(page, mock_filepicker())
+    view.selected_zips = ["a.zip", "b.zip"]
+    view.progress_bar.value = 0.75
+    view._progress_label.value = "50%"
+    view._progress_label.color = "#60a5fa"
+    view._progress_pct.value = "50%"
+    view._progress_pct.color = "#60a5fa"
+    view.status_chip.label = ft.Text("執行中")
+
+    class FakeDialog:
+        open = True
+
+    view._close_dialog_overlay(FakeDialog())
+
+    assert view.progress_bar.value == 0
+    assert "ZIP" in view._progress_label.value
+    assert view._progress_pct.value == "0%"
+    assert view.status_chip.label.value == "就緒"
+
+
+def test_close_dialog_overlay_handles_exception(monkeypatch):
+    """驗證 _close_dialog_overlay 在發生例外時不崩潰。"""
+    import logging
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    page = mock_page()
+    view = merge_view.MergeView(page, mock_filepicker())
+
+    class BadDialog:
+        open = True
+        @property
+        def open(self):
+            raise RuntimeError("dialog error")
+
+    try:
+        view._close_dialog_overlay(BadDialog())
+    except Exception:
+        pytest.fail("_close_dialog_overlay should handle exceptions gracefully")

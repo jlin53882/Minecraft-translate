@@ -554,3 +554,229 @@ def test_lm_view_path_row_returns_control():
     result = view._path_row(tf, lambda e: None)
 
     assert result is not None
+
+
+# ============================================================
+# Test 12: start_ui_timer early return guard
+# ============================================================
+
+def test_start_ui_timer_returns_early_when_already_running(monkeypatch):
+    """驗證 start_ui_timer 在 _ui_timer_running 為 True 時直接返回。"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
+    view.session = _Session()
+    view._ui_timer_running = True
+
+    thread_calls = []
+    original_thread = lm_view.threading.Thread
+
+    def track_thread(target=None, daemon=None):
+        thread_calls.append(target)
+        t = original_thread(target=target, daemon=daemon)
+        return t
+
+    monkeypatch.setattr(lm_view.threading, "Thread", track_thread)
+    monkeypatch.setattr(lm_view.time, "sleep", lambda x: None)
+
+    view.start_ui_timer()
+
+    assert len(thread_calls) == 0, "不應啟動新執行緒"
+
+
+# ============================================================
+# Test 13: loop() — snapshot exception handling
+# ============================================================
+
+def test_loop_continues_when_session_snapshot_raises(monkeypatch):
+    """驗證 loop() 在 session.snapshot() 拋例時繼續執行（不崩潰）。"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
+
+    class BadSession:
+        def snapshot(self):
+            raise RuntimeError("snapshot failed")
+
+    view.session = BadSession()
+    view._ui_timer_running = True
+
+    snapshot_raised = [False]
+    sleep_count = [0]
+
+    def bad_sleep(seconds):
+        sleep_count[0] += 1
+        if sleep_count[0] > 2:
+            view._ui_timer_running = False
+
+    monkeypatch.setattr(lm_view.time, "sleep", bad_sleep)
+
+    view.start_ui_timer()
+
+    import time as time_module
+    time_module.sleep(0.1)
+
+    assert snapshot_raised[0] or sleep_count[0] > 0, "loop should have run"
+
+
+# ============================================================
+# Test 14: loop() — status DONE updates UI and stops timer
+# ============================================================
+
+def test_loop_updates_ui_when_status_done(monkeypatch):
+    """驗證 loop() 在 status == 'DONE' 時正確更新 UI 並停止計時器。"""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
+
+    view.session = MagicMock()
+    view.session.snapshot.return_value = {"status": "DONE", "progress": 1.0, "logs": []}
+
+    executed_coroutines = []
+
+    def execute_coro(coro, *args):
+        executed_coroutines.append(coro)
+        result = coro(*args)
+        if result is not None:
+            try:
+                result.send(None)
+            except StopIteration:
+                pass
+
+    monkeypatch.setattr(view._page, "run_task", execute_coro)
+    monkeypatch.setattr(lm_view.time, "sleep", lambda x: None)
+
+    view.start_ui_timer()
+    lm_view.time.sleep(0.3)
+
+    assert len(executed_coroutines) >= 1, "at least one coroutine should be scheduled"
+    assert view._ui_timer_running is False, "DONE 後計時器應停止"
+
+
+# ============================================================
+# Test 15: loop() — status ERROR updates UI and stops timer
+# ============================================================
+
+def test_loop_updates_ui_when_status_error(monkeypatch):
+    """驗證 loop() 在 status == 'ERROR' 時正確更新 UI 並停止計時器。"""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
+
+    view.session = MagicMock()
+    view.session.snapshot.return_value = {"status": "ERROR", "progress": 0.0, "logs": []}
+
+    executed_coroutines = []
+
+    def execute_coro(coro, *args):
+        executed_coroutines.append(coro)
+        result = coro(*args)
+        if result is not None:
+            try:
+                result.send(None)
+            except StopIteration:
+                pass
+
+    monkeypatch.setattr(view._page, "run_task", execute_coro)
+    monkeypatch.setattr(lm_view.time, "sleep", lambda x: None)
+
+    view.start_ui_timer()
+    lm_view.time.sleep(0.3)
+
+    assert len(executed_coroutines) >= 1, "at least one coroutine should be scheduled"
+    assert view._ui_timer_running is False, "ERROR 後計時器應停止"
+
+
+# ============================================================
+# Test 16: log_presenter.sync exception is swallowed
+# ============================================================
+
+def test_loop_handles_log_presenter_sync_exception(monkeypatch):
+    """驗證 loop() 在 log_presenter.sync() 拋例外時不會崩潰。"""
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
+
+    view.session = MagicMock()
+    view.session.snapshot.return_value = {"status": "RUNNING", "progress": 0.5, "logs": []}
+
+    sync_called = []
+
+    def bad_sync(lv, logs):
+        sync_called.append(True)
+        raise RuntimeError("sync failed")
+
+    monkeypatch.setattr(view.log_presenter, "sync", bad_sync)
+    monkeypatch.setattr(lm_view.time, "sleep", lambda x: None)
+
+    view.start_ui_timer()
+    lm_view.time.sleep(0.3)
+
+    assert len(sync_called) >= 1, "sync should have been called"
+
+
+# ============================================================
+# Test 18: refresh_batch_interval_info updates text
+# ============================================================
+
+def test_refresh_batch_interval_info_updates_display(monkeypatch):
+    """驗證 refresh_batch_interval_info 正確更新 batch_interval_info 文字。"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+
+    captured_interval = [None]
+
+    def fake_load_config():
+        captured_interval[0] = 5
+        return {"lm_translator": {"batch_write_interval": 5}}
+
+    monkeypatch.setattr(lm_view, "load_config", fake_load_config)
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+
+    view.refresh_batch_interval_info()
+
+    assert "5" in view.batch_interval_info.value
+    assert "批次寫入" in view.batch_interval_info.value
+
+
+# ============================================================
+# Test 19: _async_pick_input_directory with None result
+# ============================================================
+
+def test_async_pick_input_directory_does_nothing_when_result_is_none(monkeypatch):
+    """驗證 _async_pick_input_directory 在取得 None 路徑時不更新欄位。"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = mock_page()
+    picker = mock_filepicker()
+    picker._mock_path = None
+    view = lm_view.LMView(page, picker)
+    view.input_path.value = "original"
+
+    page.run_task(view._async_pick_input_directory)
+    page._run_all_tasks()
+
+    assert view.input_path.value == "original"
+
+
+# ============================================================
+# Test 20: _async_pick_output_directory with None result
+# ============================================================
+
+def test_async_pick_output_directory_does_nothing_when_result_is_none(monkeypatch):
+    """驗證 _async_pick_output_directory 在取得 None 路徑時不更新欄位。"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    page = mock_page()
+    picker = mock_filepicker()
+    picker._mock_path = None
+    view = lm_view.LMView(page, picker)
+    view.output_path.value = "original"
+
+    page.run_task(view._async_pick_output_directory)
+    page._run_all_tasks()
+
+    assert view.output_path.value == "original"

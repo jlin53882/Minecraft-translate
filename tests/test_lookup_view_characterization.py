@@ -82,3 +82,49 @@ def test_lookup_view_single_result_text_exists():
     view = LookupView(mock_page())
 
     assert view.single_result_text is not None
+
+
+def test_single_lookup_worker_calls_run_task(monkeypatch):
+    """驗證 single_lookup_worker 正確呼叫 page.run_task 更新 UI。"""
+    page = mock_page()
+    view = LookupView(page)
+
+    view.single_input.value = "test_name"
+    view.single_button.disabled = True
+    view.single_progress_ring.visible = True
+
+    monkeypatch.setattr("app.views.lookup_view.run_manual_lookup_service", lambda n: "result_value")
+
+    view.single_lookup_worker("test_name")
+
+    assert len(page._tasks) == 1
+
+
+def test_batch_lookup_worker_error_branch_sets_error_text(monkeypatch):
+    """驗證 batch_lookup_worker 在收到 error update 時設定錯誤文字。"""
+    page = mock_page()
+    view = LookupView(page)
+
+    monkeypatch.setattr(
+        "app.views.lookup_view.run_batch_lookup_service",
+        lambda t: iter([{"error": True, "log": "Error occurred"}]),
+    )
+
+    view.batch_lookup_worker("[]")
+
+    assert "Error occurred" in view.batch_result_textfield.value
+
+
+def test_batch_lookup_worker_progress_branch_updates_progress(monkeypatch):
+    """驗證 batch_lookup_worker 在收到 progress update 時更新進度條。"""
+    page = mock_page()
+    view = LookupView(page)
+
+    monkeypatch.setattr(
+        "app.views.lookup_view.run_batch_lookup_service",
+        lambda t: iter([{"progress": 0.5}]),
+    )
+
+    view.batch_lookup_worker("[]")
+
+    assert view.batch_progress_bar.value == 0.5
