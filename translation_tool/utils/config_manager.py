@@ -125,6 +125,7 @@ DEFAULT_CONFIG = {
         "initial_batch_size_md": 100,
         "min_batch_size": 50,
         "batch_shrink_factor": 0.5,
+        "batch_write_interval": 2,  # 每 N 個批次寫一次快取（避免超限觸發 overflow）
         "rate_limit": {
             "timeout": 600,
             "sleep_seconds_between_batches": 0.0,
