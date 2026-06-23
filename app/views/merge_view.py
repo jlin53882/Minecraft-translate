@@ -12,7 +12,8 @@ import flet as ft
 
 from app.logging import LogPresenter
 from translation_tool.utils.log_unit import log_info
-from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
+from translation_tool.utils.config_manager import load_config, save_config
+from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service, run_merge_folder_batch_service
 from app.task_session import TaskSession
 from app.ui import theme
 from app.ui.components import primary_button, styled_card
@@ -30,9 +31,10 @@ class MergeView(ft.Column):
     log_presenter: LogPresenter
     only_lang_checkbox: ft.Checkbox
     process_zh_cn_switch: ft.Switch
-    skip_zh_cn_switch: ft.Switch
+    _view_registry: list[dict] | None = None
     patchouli_skip_zh_cn_switch: ft.Switch
     patchouli_threshold_field: ft.TextField
+    zh_en_letter_threshold_field: ft.TextField
     output_dir_field: ft.TextField
     _zh_cn_disabled_note: ft.Text | None
     zip_list_view: ft.ListView
@@ -48,16 +50,68 @@ class MergeView(ft.Column):
         return self._zh_cn_disabled_note
 
     def _on_zh_cn_switch_changed(self, e: ft.ControlEvent) -> None:
-        """主開關互鎖：關閉 zh_cn 處理時，同步停用兩個相依設定。"""
+        """主開關互鎖：process_zh_cn_switch 為其他設定的「主開關」。
+
+        - 關閉時：連動停用 patchouli_skip_zh_cn_switch，並將它的值強制還原為 False
+        - 開啟時：解鎖讓它可自行調整
+        - 原因：zh_cn 被全域略過時，Patchouli 的 en_us skip 設定無意義
+        """
         enabled = bool(e.control.value)
-        self.skip_zh_cn_switch.disabled = not enabled
         self.patchouli_skip_zh_cn_switch.disabled = not enabled
         if self._zh_cn_disabled_note:
             self._zh_cn_disabled_note.visible = not enabled
         if not enabled:
-            self.skip_zh_cn_switch.value = False
             self.patchouli_skip_zh_cn_switch.value = False
         self.update()
+
+    def _safe_int(self, s: str) -> int | None:
+        """安全轉 int，失敗回 None。"""
+        try:
+            return int(s)
+        except (ValueError, TypeError):
+            return None
+
+    def _safe_float(self, s: str) -> float | None:
+        """安全轉 float，失敗回 None。"""
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return None
+
+    def set_view_registry(self, registry: list[dict]) -> None:
+        """讓 main.py 傳入 view registry，藉此廣播更新到 ConfigView。"""
+        self._view_registry = registry
+
+    def _broadcast_config_change_to_config_view(self) -> None:
+        """當 MergeView 改動 config 時，通知已存在的 ConfigView 重新讀取。"""
+        if self._view_registry is None:
+            return
+        for item in self._view_registry:
+            view = item.get('view')
+            if view is None:
+                continue
+            wrapped = view.content if hasattr(view, 'content') else view
+            inner = wrapped.content if hasattr(wrapped, 'content') else wrapped
+            if hasattr(inner, 'controls_map') and hasattr(inner, 'load_config'):
+                try:
+                    from translation_tool.utils.config_manager import load_config
+                    cfg = load_config()
+                    from app.views.config.config_actions import load_config_into_view
+                    load_config_into_view(inner, cfg)
+                except Exception:
+                    pass
+
+    def _on_merge_field_changed(self, key: str, value: Any) -> None:
+        """寫入 lang_merger 單一欄位到 config.json，支援兩邊同步。"""
+        try:
+            cfg = load_config()
+            if "lang_merger" not in cfg:
+                cfg["lang_merger"] = {}
+            cfg["lang_merger"][key] = value
+            save_config(cfg)
+            self._broadcast_config_change_to_config_view()
+        except Exception:
+            pass
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker) -> None:
         """初始化 MergeView。"""
@@ -77,30 +131,63 @@ class MergeView(ft.Column):
         # LogPresenter 接管 append 與 UI controls 數量控制
         self.log_presenter = LogPresenter(mode="append", max_ui_lines=2000)
 
+        # ── 一般選項 ──────────────────────────────────────────────────────────
+        # only_process_lang: 只處理 /lang/ 目錄下的 zh_cn/zh_tw/en_us 檔案，其他目錄全部跳過
         self.only_lang_checkbox = ft.Checkbox(
             label="只處理 lang 檔案",
             value=True,
         )
+
+        # ── zh_cn 全域處理 ─────────────────────────────────────────────────
+        # process_zh_cn_files: 全域開關，關閉時所有 /zh_cn/ 路徑都跳過（包含 lang/zh_cn.json 和 Patchouli 內的 zh_cn/）
+        # 此開關為其他設定的「主開關」，連動停用下方兩個設定
         self.process_zh_cn_switch = ft.Switch(
             label="處理 zh_cn 檔案",
             value=True,
             on_change=self._on_zh_cn_switch_changed,
         )
-        self.skip_zh_cn_switch = ft.Switch(
-            label="只處理 lang 時跳過 zh_cn",
-            value=False,
-        )
+
+        # ── Patchouli 進階設定 ─────────────────────────────────────────────
+        # patchouli_skip_en_us_when_zh_cn_exists: 當 en_us 對應的 zh_tw 或 zh_cn 有「有效翻譯」時，跳過 en_us
+        # - 有效翻譯由 patchouli_effective_translation_threshold（預設 0.5）判定：內容中日韓文字佔比超過此閾值
+        # - 此開關只影響 Patchouli Book 的 en_us 資料夾，不影響 root-level lang 檔案
+        # - 當 process_zh_cn_switch=False 時，此開關連動 Disabled（因 zh_cn 已被全域略過）
         self.patchouli_skip_zh_cn_switch = ft.Switch(
             label="允許 zh_cn 觸發跳過 en_us",
             value=False,
+            on_change=lambda e: self._on_merge_field_changed("patchouli_skip_en_us_when_zh_cn_exists", e.control.value),
         )
+        # patchouli_effective_translation_threshold: 有效翻譯比例閾值（0.0~1.0）
+        # 用於判斷 Patchouli Book 的 zh 語言資料夾是否有「有效翻譯」
+        # 當 zh_tw 或 zh_cn 的有效翻譯比例 >= 此閾值時，會觸發跳過 en_us（如果 patchouli_skip_zh_cn_switch=True）
         self.patchouli_threshold_field = ft.TextField(
             value="0.5",
             width=96,
+            hint_text="空白用預設值",
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
             text_align=ft.TextAlign.CENTER,
+            on_change=lambda e: self._on_merge_field_changed(
+                "patchouli_effective_translation_threshold",
+                float(v) if (v := e.control.value.strip()) and self._safe_float(v) is not None else 0.5
+            ),
         )
+        # zh_en_letter_threshold: zh_tw 英文含量的閾值
+        # 用於 is_already_zh() 判斷：超過此數值的英文字母視為英文內容
+        self.zh_en_letter_threshold_field = ft.TextField(
+            value="2",
+            width=64,
+            hint_text="空白用預設值",
+            dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            text_align=ft.TextAlign.CENTER,
+            on_change=lambda e: self._on_merge_field_changed(
+                "zh_en_letter_threshold",
+                int(v) if (v := e.control.value.strip()) and self._safe_int(v) is not None else 2
+            ),
+        )
+        # _zh_cn_disabled_note: 提示文字，當 process_zh_cn_switch=False 時顯示
+        # 提醒使用者需要先開啟「處理 zh_cn 檔案」才能使用下方的 Patchouli 進階設定
         self._zh_cn_disabled_note = ft.Text(
             "需先開啟「處理 zh_cn 檔案」",
             size=11,
@@ -133,12 +220,75 @@ class MergeView(ft.Column):
             bgcolor=theme.PRIMARY,
         )
         self.start_button = primary_button(
-            "開始合併 ZIP",
+            "開始合併",
             icon=ft.Icons.PLAY_ARROW,
-            tooltip="開始執行 ZIP 合併流程",
+            tooltip="開始執行合併流程",
             on_click=self.start_merge,
             bgcolor=theme.SUCCESS,
         )
+
+        self.input_mode_group = ft.RadioGroup(
+            content=ft.Row(
+                [
+                    ft.Radio(label="ZIP", value="zip"),
+                    ft.Radio(label="資料夾", value="folder"),
+                ],
+                spacing=15,
+            ),
+            value="folder",
+        )
+        self.folder_path_field = ft.TextField(
+            hint_text="選擇 Mod 來源資料夾",
+            expand=True,
+            dense=True,
+            border_color=theme.OUTLINE,
+            text_size=13,
+            content_padding=10,
+            prefix_icon=ft.Icons.FOLDER,
+        )
+        self.zip_panel = ft.Container(
+            visible=False,
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            self.pick_zip_button,
+                            ft.Text(
+                                "可加入多個 ZIP，會依序合併。",
+                                size=12,
+                                color=theme.GREY_600,
+                            ),
+                        ],
+                        spacing=10,
+                    ),
+                    self.zip_list_view,
+                ],
+                spacing=10,
+            ),
+        )
+        self.folder_panel = ft.Container(
+            visible=True,
+            content=ft.Row(
+                [
+                    self.folder_path_field,
+                    ft.IconButton(
+                        icon=ft.Icons.FOLDER_OPEN_OUTLINED,
+                        icon_color=theme.BLUE_GREY_700,
+                        tooltip="選擇資料夾",
+                        on_click=self.pick_folder_input,
+                    ),
+                ],
+                spacing=6,
+            ),
+        )
+
+        def on_input_mode_changed(e=None):
+            mode = self.input_mode_group.value
+            self.zip_panel.visible = mode == "zip"
+            self.folder_panel.visible = mode == "folder"
+            self.update()
+
+        self.input_mode_group.on_change = on_input_mode_changed
 
         general_options_section = ft.Container(
             content=ft.Column(
@@ -147,6 +297,25 @@ class MergeView(ft.Column):
                     self.only_lang_checkbox,
                     ft.Text(
                         "開啟後，只處理語言檔；其他內容檔案會略過。",
+                        size=12,
+                        color=theme.GREY_600,
+                    ),
+                    ft.Container(height=6),
+                    ft.Row(
+                        [
+                            ft.Text(
+                                "zh 英文含量閾值",
+                                weight=ft.FontWeight.W_500,
+                                size=14,
+                                expand=True,
+                            ),
+                            self.zh_en_letter_threshold_field,
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Text(
+                        "超過此數值判定為英文，用於 lang 過濾，預設 2。",
                         size=12,
                         color=theme.GREY_600,
                     ),
@@ -180,34 +349,6 @@ class MergeView(ft.Column):
             content=ft.Column(
                 [
                     ft.Text("Patchouli 進階設定", weight=ft.FontWeight.W_600, size=15),
-                    ft.Container(
-                        content=ft.Column(
-                            [
-                                ft.Row(
-                                    [
-                                        ft.Text(
-                                            "只處理 lang 時跳過 zh_cn",
-                                            weight=ft.FontWeight.W_500,
-                                            size=14,
-                                            expand=True,
-                                        ),
-                                        self.skip_zh_cn_switch,
-                                    ],
-                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                ),
-                                ft.Text(
-                                    "僅在「只處理 lang」模式生效。",
-                                    size=12,
-                                    color=theme.GREY_600,
-                                ),
-                            ],
-                            spacing=4,
-                        ),
-                        padding=10,
-                        bgcolor=theme.WHITE,
-                        border_radius=8,
-                    ),
                     ft.Container(
                         content=ft.Column(
                             [
@@ -273,24 +414,58 @@ class MergeView(ft.Column):
             border_radius=10,
         )
 
+        cfg = load_config()
+        lang_merger_cfg = cfg.get("lang_merger", {})
+        pending_name = lang_merger_cfg.get("pending_folder_name", "待翻譯")
+        organized_name = lang_merger_cfg.get("pending_organized_folder_name", "整理")
+        min_count = lang_merger_cfg.get("filtered_pending_min_count", 2)
+        self.patchouli_skip_zh_cn_switch.value = lang_merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False)
+        self.patchouli_threshold_field.value = str(lang_merger_cfg.get("patchouli_effective_translation_threshold", 0.5))
+        self.zh_en_letter_threshold_field.value = str(lang_merger_cfg.get("zh_en_letter_threshold", 2))
+        self._info_container = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.INFO_OUTLINE, color=theme.BLUE, size=18),
+                            ft.Text(
+                                "📁 輸出資料夾說明",
+                                weight="bold",
+                                size=12,
+                                color=theme.GREY_700,
+                            ),
+                        ],
+                        spacing=8,
+                    ),
+                    ft.Text(
+                        f"• 「{organized_name}」（key數≥{min_count}）→ 送機器翻譯",
+                        size=12,
+                        color=theme.GREY_700,
+                    ),
+                    ft.Text(
+                        f"• 「{pending_name}」（key數<{min_count}）→ 未過濾，跳過不要送翻譯",
+                        size=12,
+                        color=theme.GREY_700,
+                    ),
+                ],
+                spacing=4,
+            ),
+            padding=10,
+            bgcolor=theme.BLUE_50,
+            border_radius=8,
+        )
+
         self.controls = [
+            self._info_container,
             styled_card(
-                title="ZIP 清單",
+                title="輸入來源",
                 icon=ft.Icons.ARCHIVE,
                 content=ft.Column(
                     [
-                        ft.Row(
-                            [
-                                self.pick_zip_button,
-                                ft.Text(
-                                    "可加入多個 ZIP，會依序合併。",
-                                    size=12,
-                                    color=theme.GREY_600,
-                                ),
-                            ],
-                            spacing=10,
-                        ),
-                        self.zip_list_view,
+                        ft.Text("輸入模式", weight=ft.FontWeight.W_500, size=13),
+                        ft.Container(content=self.input_mode_group, padding=5),
+                        self.folder_panel,
+                        self.zip_panel,
                     ],
                     spacing=10,
                 ),
@@ -402,10 +577,30 @@ class MergeView(ft.Column):
             self.output_dir_field.value = result
             self.page.update()
 
+    def pick_folder_input(self, e: ft.ControlEvent) -> None:
+        """開啟資料夾選擇對話框。"""
+        self._page.run_task(self._async_pick_folder_input)
+
+    async def _async_pick_folder_input(self):
+        """async 實作：選擇輸入資料夾並更新 folder_path_field。"""
+        result = await self.file_picker.get_directory_path(dialog_title="選擇 Mod 來源資料夾")
+        if result:
+            self.folder_path_field.value = result
+            self.page.update()
+
     def start_merge(self, e: ft.ControlEvent) -> None:
         """處理開始合併按鈕事件。"""
-        if not self.selected_zips or not (self.output_dir_field.value or "").strip():
-            self._show_snack_bar("請先選擇 ZIP 與輸出資料夾")
+        input_mode = self.input_mode_group.value
+        if input_mode == "folder":
+            if not (self.folder_path_field.value or "").strip():
+                self._show_snack_bar("請先選擇來源資料夾")
+                return
+        else:
+            if not self.selected_zips:
+                self._show_snack_bar("請先選擇 ZIP 檔案")
+                return
+        if not (self.output_dir_field.value or "").strip():
+            self._show_snack_bar("請先選擇輸出資料夾")
             return
 
         self.start_button.disabled = True
@@ -414,18 +609,34 @@ class MergeView(ft.Column):
         self._set_status("執行中", theme.BLUE_200)
 
         self.session.start()
-        self.session.add_log("[系統] 開始 ZIP 合併任務")
+        self.session.add_log("[系統] 開始合併任務")
         self._start_ui_poller()
 
         def _run_merge():
-            # ⚠️ generator 必須完整迭代，否則程式碼不會執行
-            for _ in run_merge_zip_batch_service(
-                self.selected_zips,
-                self.output_dir_field.value,
-                self.session,
-                self.only_lang_checkbox.value,
-            ):
-                pass
+            if input_mode == "folder":
+                for _ in run_merge_folder_batch_service(
+                    input_dir=self.folder_path_field.value,
+                    output_dir=self.output_dir_field.value,
+                    session=self.session,
+                    only_process_lang=self.only_lang_checkbox.value,
+                    process_zh_cn=self.process_zh_cn_switch.value,
+                    patchouli_skip=self.patchouli_skip_zh_cn_switch.value,
+                    patchouli_threshold=self._safe_float(self.patchouli_threshold_field.value or "") or 0.5,
+                    zh_en_threshold=self._safe_int(self.zh_en_letter_threshold_field.value or "") or 2,
+                ):
+                    pass
+            else:
+                for _ in run_merge_zip_batch_service(
+                    zip_paths=self.selected_zips,
+                    output_dir=self.output_dir_field.value,
+                    session=self.session,
+                    only_process_lang=self.only_lang_checkbox.value,
+                    process_zh_cn=self.process_zh_cn_switch.value,
+                    patchouli_skip=self.patchouli_skip_zh_cn_switch.value,
+                    patchouli_threshold=self._safe_float(self.patchouli_threshold_field.value or "") or 0.5,
+                    zh_en_threshold=self._safe_int(self.zh_en_letter_threshold_field.value or "") or 2,
+                ):
+                    pass
 
         threading.Thread(target=_run_merge, daemon=True).start()
 
@@ -508,6 +719,11 @@ class MergeView(ft.Column):
 
     def _show_merge_summary(self, summary: dict[str, Any]) -> None:
         """顯示合併結果摘要（使用 overlay 確保穩定顯示）。"""
+        cfg = load_config()
+        lang_merger_cfg = cfg.get("lang_merger", {})
+        pending_name = lang_merger_cfg.get("pending_folder_name", "待翻譯")
+        organized_name = lang_merger_cfg.get("pending_organized_folder_name", "待翻譯整理需翻譯")
+
         s_zips = summary.get("success_zips", 0)
         f_zips = summary.get("failed_zips", 0)
         failed_list = summary.get("failed_zips_list", [])
@@ -517,7 +733,8 @@ class MergeView(ft.Column):
         oc_rows = []
         for label, count in [
             ("lang_output", oc.get("lang_output", 0)),
-            ("待翻譯", oc.get("待翻譯", 0)),
+            (pending_name, oc.get(pending_name, 0)),
+            (organized_name, oc.get(organized_name, 0)),
             ("patchouli_output", oc.get("patchouli_output", 0)),
             ("other_output", oc.get("other_output", 0)),
             ("errordata_output", oc.get("errordata_output", 0)),

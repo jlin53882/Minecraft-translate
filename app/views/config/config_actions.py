@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import traceback
+
 from translation_tool.utils.config_manager import get_default
+
 
 def load_config_into_view(view, config: dict):
     """
@@ -9,7 +11,7 @@ def load_config_into_view(view, config: dict):
 
     注意：傳入的 `config` 已經是 load_config() 三層合併後的結果。
     三層 priority：config.json（用戶）> config.example.json > DEFAULT_CONFIG。
-    因此這裡直接用 config.get() 取值，不需要額外的 or get_default() fallback。
+    因此這裡直接用 config.get() 取值，不需要額外的 fallback。
 
     對於 list 欄位（dir_names、skip_terms、translatable_keywords），
     空清單 [] 是用戶的有效設定，會直接保留，不會被 DEFAULT 值置換。
@@ -37,21 +39,44 @@ def load_config_into_view(view, config: dict):
     view.controls_map['lm_translator.rate_limit.timeout'].value = str((lm_cfg.get('rate_limit') or {}).get('timeout', 600))
     view.controls_map['lm_translator.rate_limit.sleep_seconds_between_batches'].value = str((lm_cfg.get('rate_limit') or {}).get('sleep_seconds_between_batches', 0.0))
     view.controls_map['output_bundler.output_zip_name'].value = bundle_cfg.get('output_zip_name')
-    view.controls_map['lang_merger.pending_folder_name'].value = config.get('lang_merger', {}).get('pending_folder_name')
-    view.controls_map['lang_merger.pending_organized_folder_name'].value = config.get('lang_merger', {}).get('pending_organized_folder_name')
-    view.controls_map['lang_merger.filtered_pending_min_count'].value = str(config.get('lang_merger', {}).get('filtered_pending_min_count'))
-    view.controls_map['lm_translator.lm_translate_folder_name'].value = str(config.get('lm_translator', {}).get('lm_translate_folder_name'))
-    view.controls_map['lm_translator.patchouli_system_prompt'].value = str(config.get('lm_translator', {}).get('patchouli_system_prompt'))
-    view.controls_map['lm_translator.lang_system_prompt'].value = str(config.get('lm_translator', {}).get('lang_system_prompt'))
-    view.controls_map['lang_merger.quarantine_folder_name'].value = config.get('lang_merger', {}).get('quarantine_folder_name')
-    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = int(config.get('lm_translator', {}).get('initial_batch_size_patchouli') or get_default('lm_translator.initial_batch_size_patchouli'))
-    view.controls_map['lm_translator.initial_batch_size_lang'].value = int(config.get('lm_translator', {}).get('initial_batch_size_lang') or get_default('lm_translator.initial_batch_size_lang'))
-    view.controls_map['lm_translator.initial_batch_size_ftb'].value = int(config.get('lm_translator', {}).get('initial_batch_size_ftb') or get_default('lm_translator.initial_batch_size_ftb'))
-    view.controls_map['lm_translator.initial_batch_size_kubejs'].value = int(config.get('lm_translator', {}).get('initial_batch_size_kubejs') or get_default('lm_translator.initial_batch_size_kubejs'))
-    view.controls_map['lm_translator.initial_batch_size_md'].value = int(config.get('lm_translator', {}).get('initial_batch_size_md') or get_default('lm_translator.initial_batch_size_md'))
-    view.controls_map['lm_translator.min_batch_size'].value = int(config.get('lm_translator', {}).get('min_batch_size') or get_default('lm_translator.min_batch_size'))
-    view.controls_map['lm_translator.batch_shrink_factor'].value = float(config.get('lm_translator', {}).get('batch_shrink_factor') or get_default('lm_translator.batch_shrink_factor'))
-    # dir_names、skip_terms、translatable_keywords：空清單 [] 是有效設定，直接保留
+
+    lang_merger_cfg = config.get('lang_merger', {})
+    view.controls_map['lang_merger.pending_folder_name'].value = lang_merger_cfg.get('pending_folder_name')
+    view.controls_map['lang_merger.pending_organized_folder_name'].value = lang_merger_cfg.get('pending_organized_folder_name')
+    view.controls_map['lang_merger.filtered_pending_min_count'].value = str(lang_merger_cfg.get('filtered_pending_min_count'))
+    pending_name = lang_merger_cfg.get('pending_folder_name')
+    organized_name = lang_merger_cfg.get('pending_organized_folder_name')
+    min_count = lang_merger_cfg.get('filtered_pending_min_count')
+    view.controls_map['lang_merger.pending_folder_name'].label = f"待翻譯資料夾名稱（目前：{pending_name}）"
+    view.controls_map['lang_merger.pending_organized_folder_name'].label = f"整理資料夾名稱（目前：{organized_name}）"
+    view.controls_map['lang_merger.filtered_pending_min_count'].label = f"「{organized_name}」key最小出現次數（目前：{min_count}）"
+    view.controls_map['lang_merger.quarantine_folder_name'].value = lang_merger_cfg.get('quarantine_folder_name')
+    if 'lang_merger.patchouli_skip_en_us_when_zh_cn_exists' in view.controls_map:
+        view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value = lang_merger_cfg.get('patchouli_skip_en_us_when_zh_cn_exists')
+    _v = lang_merger_cfg.get('patchouli_effective_translation_threshold')
+    view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value = \
+        str(_v if _v is not None else get_default('lang_merger.patchouli_effective_translation_threshold'))
+    _v = lang_merger_cfg.get('zh_en_letter_threshold')
+    view.controls_map['lang_merger.zh_en_letter_threshold'].value = \
+        str(_v if _v is not None else get_default('lang_merger.zh_en_letter_threshold'))
+
+    view.controls_map['lm_translator.lm_translate_folder_name'].value = str(lm_cfg.get('lm_translate_folder_name'))
+    view.controls_map['lm_translator.patchouli_system_prompt'].value = str(lm_cfg.get('patchouli_system_prompt'))
+    view.controls_map['lm_translator.lang_system_prompt'].value = str(lm_cfg.get('lang_system_prompt'))
+    _v = lm_cfg.get('initial_batch_size_patchouli')
+    view.controls_map['lm_translator.initial_batch_size_patchouli'].value = _v if _v is not None else get_default('lm_translator.initial_batch_size_patchouli')
+    _v = lm_cfg.get('initial_batch_size_lang')
+    view.controls_map['lm_translator.initial_batch_size_lang'].value = _v if _v is not None else get_default('lm_translator.initial_batch_size_lang')
+    _v = lm_cfg.get('initial_batch_size_ftb')
+    view.controls_map['lm_translator.initial_batch_size_ftb'].value = _v if _v is not None else get_default('lm_translator.initial_batch_size_ftb')
+    _v = lm_cfg.get('initial_batch_size_kubejs')
+    view.controls_map['lm_translator.initial_batch_size_kubejs'].value = _v if _v is not None else get_default('lm_translator.initial_batch_size_kubejs')
+    _v = lm_cfg.get('initial_batch_size_md')
+    view.controls_map['lm_translator.initial_batch_size_md'].value = _v if _v is not None else get_default('lm_translator.initial_batch_size_md')
+    _v = lm_cfg.get('min_batch_size')
+    view.controls_map['lm_translator.min_batch_size'].value = _v if _v is not None else get_default('lm_translator.min_batch_size')
+    _v = lm_cfg.get('batch_shrink_factor')
+    view.controls_map['lm_translator.batch_shrink_factor'].value = _v if _v is not None else get_default('lm_translator.batch_shrink_factor')
     view.controls_map['lm_translator.patchouli.dir_names'].value = '\n'.join(lm_cfg.get('patchouli', {}).get('dir_names', []))
     view.controls_map['lm_translator.translator.skip_terms'].value = '\n'.join(lm_cfg.get('translator', {}).get('skip_terms', []))
     view.controls_map['lm_translator.translator.translatable_keywords'].value = '\n'.join(lm_cfg.get('translator', {}).get('translatable_keywords', []))
@@ -82,6 +107,7 @@ def load_config_into_view(view, config: dict):
         row = view._build_key_row(tf)
         view.key_fields.append(tf)
         view.keys_column.controls.append(row)
+
 
 def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, validate_api_keys_from_ui_fn, registry=None):
     """從 view UI 控制項收集使用者輸入並寫入 config.json。
@@ -122,6 +148,9 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
         new_config['lang_merger']['filtered_pending_min_count'] = int(view.controls_map['lang_merger.filtered_pending_min_count'].value)
         new_config['lm_translator']['lm_translate_folder_name'] = str(view.controls_map['lm_translator.lm_translate_folder_name'].value)
         new_config['lang_merger']['quarantine_folder_name'] = view.controls_map['lang_merger.quarantine_folder_name'].value
+        new_config['lang_merger']['patchouli_skip_en_us_when_zh_cn_exists'] = view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value
+        new_config['lang_merger']['patchouli_effective_translation_threshold'] = float(view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value)
+        new_config['lang_merger']['zh_en_letter_threshold'] = int(view.controls_map['lang_merger.zh_en_letter_threshold'].value)
         new_config['lm_translator']['patchouli_system_prompt'] = view.controls_map['lm_translator.patchouli_system_prompt'].value
         new_config['lm_translator']['lang_system_prompt'] = view.controls_map['lm_translator.lang_system_prompt'].value
         new_config['lm_translator']['initial_batch_size_patchouli'] = int(view.controls_map['lm_translator.initial_batch_size_patchouli'].value)

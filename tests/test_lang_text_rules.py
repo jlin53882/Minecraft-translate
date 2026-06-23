@@ -90,6 +90,38 @@ def test_is_already_zh_edge_cases(tmp_path: Path) -> None:
     """測試 is_already_zh 邊界情況。"""
     # 數字不計入英文字母計數
     assert lang_text_rules.is_already_zh("123 你好") is True
-    
+
     # 特殊符號不計入
     assert lang_text_rules.is_already_zh("!!! 你好") is True
+
+
+def test_is_already_zh_custom_letter_threshold(tmp_path: Path) -> None:
+    """測試 is_already_zh 使用自訂 letter_threshold 參數。"""
+    # threshold=3: 3 個以內英文字母視為已翻譯
+    assert lang_text_rules.is_already_zh("OK 你好", letter_threshold=3) is True
+    assert lang_text_rules.is_already_zh("YES 你好", letter_threshold=3) is True  # 3 個字母
+    assert lang_text_rules.is_already_zh("Hello 你好", letter_threshold=3) is False  # 5 個字母
+
+    # threshold=0: 任何英文字母都視為未翻譯
+    assert lang_text_rules.is_already_zh("你好", letter_threshold=0) is True  # 無英文字母
+    assert lang_text_rules.is_already_zh("A 你好", letter_threshold=0) is False  # 1 個字母
+
+    # threshold=1: 1 個以內字母視為已翻譯
+    assert lang_text_rules.is_already_zh("A 你好", letter_threshold=1) is True
+    assert lang_text_rules.is_already_zh("AB 你好", letter_threshold=1) is False
+
+    # threshold=5: 5 個以內字母視為已翻譯
+    assert lang_text_rules.is_already_zh("Hello 你好", letter_threshold=5) is True  # 5 個字母
+    assert lang_text_rules.is_already_zh("HelloWorld 你好", letter_threshold=5) is False  # 10 個字母
+
+    # 無中文時無論 threshold 多少都回傳 False
+    assert lang_text_rules.is_already_zh("Hello", letter_threshold=10) is False
+    assert lang_text_rules.is_already_zh("Hi", letter_threshold=1) is False
+
+
+def test_is_already_zh_letter_threshold_boundary(tmp_path: Path) -> None:
+    """測試 is_already_zh letter_threshold 邊界值。"""
+    text = "AB 你好"  # 2 個英文字母
+    assert lang_text_rules.is_already_zh(text, letter_threshold=1) is False  # 2 > 1
+    assert lang_text_rules.is_already_zh(text, letter_threshold=2) is True  # 2 <= 2
+    assert lang_text_rules.is_already_zh(text, letter_threshold=3) is True  # 2 <= 3

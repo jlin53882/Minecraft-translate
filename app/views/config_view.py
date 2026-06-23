@@ -22,6 +22,7 @@ NAV_ITEMS = [
     {"id": "general", "label": "一般設定", "icon": ft.Icons.SETTINGS},
     {"id": "api_models", "label": "API & 模型設定", "icon": ft.Icons.KEY},
     {"id": "translation_behavior", "label": "翻譯行為設定", "icon": ft.Icons.TRANSLATE},
+    {"id": "merger", "label": "語言合併器設定", "icon": ft.Icons.MERGE_TYPE},
     {"id": "prompts", "label": "提示詞管理", "icon": ft.Icons.MESSAGE},
     {"id": "species_lookup", "label": "學名查詢管理", "icon": ft.Icons.SEARCH},
     {"id": "batch_limits", "label": "批次與限制", "icon": ft.Icons.DEVELOPER_BOARD},
@@ -139,6 +140,17 @@ class ConfigView(ft.Column):
         )
         self.controls_map["lang_merger.quarantine_folder_name"] = ft.TextField(
             label="語言合併器格式問題隔離資料夾名稱", hint_text="用於：格式錯誤隔離", dense=True
+        )
+        self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"] = ft.Checkbox(
+            label="允許 zh_cn 觸發跳過 en_us", value=False
+        )
+        self.controls_map["lang_merger.patchouli_effective_translation_threshold"] = ft.TextField(
+            label="en_us 跳過門檻", hint_text="有效翻譯比例閾值 0.0~1.0，空白用預設值 0.5", dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER
+        )
+        self.controls_map["lang_merger.zh_en_letter_threshold"] = ft.TextField(
+            label="zh 英文含量閾值", hint_text="超過此數值判定為英文，空白用預設值 2", dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER
         )
 
         self.controls_map["lm_translator.temperature"] = ft.TextField(
@@ -607,6 +619,39 @@ class ConfigView(ft.Column):
                         ft.Column([self.controls_map["lang_merger.filtered_pending_min_count"]], expand=1),
                         ft.Column([self.controls_map["lang_merger.quarantine_folder_name"]], expand=1),
                     ]
+                ),
+                ft.Container(height=8),
+                ft.Text("語系過濾設定", weight=ft.FontWeight.W_600, size=14),
+                ft.Column(
+                    [
+                        ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=13),
+                        self.controls_map["lang_merger.zh_en_letter_threshold"],
+                        ft.Text("超過此數值判定為英文，用於 lang 過濾，空白用預設值 2", size=11, color=theme.GREY_600),
+                    ],
+                    spacing=2,
+                ),
+                ft.Container(height=8),
+                ft.Text("Patchouli 進階設定", weight=ft.FontWeight.W_600, size=14),
+                ft.Row(
+                    [
+                        ft.Column(
+                            [
+                                ft.Text("允許 zh_cn 觸發跳過 en_us", weight=ft.FontWeight.W_500, size=13),
+                                self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"],
+                                ft.Text("當 zh_cn 翻譯足夠好時，跳過對應 en_us", size=11, color=theme.GREY_600),
+                            ],
+                            expand=1,
+                        ),
+                        ft.Column(
+                            [
+                                ft.Text("en_us 跳過門檻", weight=ft.FontWeight.W_500, size=13),
+                                self.controls_map["lang_merger.patchouli_effective_translation_threshold"],
+                                ft.Text("有效翻譯比例閾值 0.0~1.0，空白用預設值 0.5", size=11, color=theme.GREY_600),
+                            ],
+                            expand=1,
+                        ),
+                    ],
+                    spacing=8,
                 ),
             ],
         )

@@ -51,6 +51,7 @@ def preview_extraction_generator_impl(
     *,
     find_jar_files_fn: Callable[[str], list[str]],
     book_path_regex: re.Pattern,
+    lang_codes: list[str] | None = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """產生 JAR 檔案預覽（不實際寫入檔案，僅掃描並回報找到的檔案）。
 
@@ -59,8 +60,9 @@ def preview_extraction_generator_impl(
         mode: 模式（'lang' 或 'book'）。
         find_jar_files_fn: 尋找 JAR 檔案的函式。
         book_path_regex: Book 檔案路徑正則表達式。
+        lang_codes: 指定語言代碼列表，若為 None 則從 config 讀取。
     Yields:
-        進度字典，含預覽結果（檔案數、大小等）。
+        進度字典，含預覽結果（檔案數，大小等）。
     """
     jar_files = find_jar_files_fn(mods_dir)
     total_jars = len(jar_files)
@@ -80,13 +82,15 @@ def preview_extraction_generator_impl(
     if mode == "lang":
         from translation_tool.core.jar_processor import build_lang_file_regex
 
-        target_regex = build_lang_file_regex()
+        target_regex = build_lang_file_regex(codes=lang_codes)
     elif mode == "book":
-        target_regex = book_path_regex
+        from translation_tool.core.jar_processor import build_book_path_regex
+
+        target_regex = build_book_path_regex(codes=lang_codes)
     elif mode == "dual":
         from translation_tool.core.jar_processor import build_lang_file_regex
 
-        lang_regex = build_lang_file_regex()
+        lang_regex = build_lang_file_regex(codes=lang_codes)
         target_regex = None
     else:
         yield {"error": f"未知模式: {mode}"}

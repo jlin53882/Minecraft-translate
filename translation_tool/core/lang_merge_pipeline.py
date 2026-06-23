@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import re
-import zipfile
 from functools import lru_cache
 from typing import Any, Dict
 
@@ -17,12 +16,10 @@ import orjson as json
 from ..utils.log_unit import log_info, log_exception
 from ..utils.text_processor import recursive_translate_dict, apply_replace_rules
 from .lang_codec import dump_lang_text, parse_lang_text, pick_first_not_none
+from .lang_merge_io import DirReader, quarantine_copy
 from .lang_merge_zip_io import (
-    _read_json_from_zip,
-    _read_text_from_zip,
     _write_bytes_atomic,
     _write_text_atomic,
-    quarantine_copy_from_zip,
 )
 from .lang_processing_format import dump_json_bytes
 
@@ -39,7 +36,7 @@ def _contains_cjk_str(s: str) -> bool:
 
 
 def _process_single_mod(
-    zf: zipfile.ZipFile,
+    reader,
     paths: Dict[str, str],
     rules: list,
     output_dir: str,
@@ -48,8 +45,10 @@ def _process_single_mod(
 ) -> Dict[str, Any]:
     """處理單一模組（mod）的語言合併流程。
 
-    讀取 ZIP 中的 zh_cn / zh_tw / en_us lang 檔案，依據來源優先順序產生最終的 zh_tw.json，
+    讀取 zh_cn / zh_tw / en_us lang 檔案，依據來源優先順序產生最終的 zh_tw.json，
     並將待翻譯（純英文）項目寫入 en_us.json 至 must_translate_dir。
+
+    支援 ZIP 與資料夾兩種 reader。
     """
 
     def _contains_cjk(v: Any) -> bool:
@@ -90,7 +89,7 @@ def _process_single_mod(
 
         try:
             if path.lower().endswith(".lang"):
-                text = _read_text_from_zip(zf, path)
+                text = reader.read_text(path)
 
                 bad_lines = []
 
@@ -101,9 +100,9 @@ def _process_single_mod(
                 data = parse_lang_text(text, on_error=on_error)
 
                 if bad_lines:
-                    quarantine_copy_from_zip(
-                        zf=zf,
-                        zip_path=path,
+                    quarantine_copy(
+                        reader=reader,
+                        rel_path=path,
                         output_dir=output_dir,
                         reason="lang_partial_parse_error",
                         errordata_dir=errordata_dir,
@@ -116,13 +115,12 @@ def _process_single_mod(
                 return data
 
             else:
-                # JSON 是結構化的，只要壞 → 整檔隔離
-                return _read_json_from_zip(zf, path)
+                return reader.read_json(path)
 
         except Exception as e:
-            quarantine_copy_from_zip(
-                zf=zf,
-                zip_path=path,
+            quarantine_copy(
+                reader=reader,
+                rel_path=path,
                 output_dir=output_dir,
                 reason=f"lang_json_parse_failed: {e}",
                 errordata_dir=errordata_dir,
@@ -157,13 +155,12 @@ def _process_single_mod(
         # 讀取 ZIP 時用原始路徑，只在輸出路徑建構時剝離
         # 已知標準資源目錄（這些目錄名稱本身就是有意義的結構，不剝離）
         _STANDARD_RESOURCE_DIRS = {"assets", "book", "patchouli_books", "resources"}
-        _all_names = zf.namelist()
+        _all_names = reader.list_all()
         _wp = None
         if _all_names:
             _tops = set(n.replace("\\", "/").split("/")[0] for n in _all_names if n.replace("\\", "/").split("/")[0])
             if len(_tops) == 1:
                 _candidate = list(_tops)[0]
-                # 標準資源目錄不剝離（它們是 Minecraft 標準結構的一部分）
                 if _candidate not in _STANDARD_RESOURCE_DIRS:
                     _wp = _candidate + "/"
 

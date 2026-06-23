@@ -14,7 +14,7 @@ from ..utils.log_unit import log_info, log_warning, log_error, log_debug
 
 
 def patch_localized_content_json_impl(
-    zf: zipfile.ZipFile,
+    reader,
     cn_path: str,
     tw_output_path: str,
     rules: list,
@@ -22,24 +22,21 @@ def patch_localized_content_json_impl(
     output_dir: str,
     *,
     recursive_translate_dict_fn: Callable[[Any, list], Any],
-    quarantine_copy_from_zip_fn: Callable[..., Any],
+    quarantine_copy_fn: Callable[..., Any],
     json_module,
     logger_override=None,
 ) -> Dict[str, Any]:
     """將本地化 JSON 檔案（zh_cn）讀取後套用 S2TW 翻譯規則，以格式化 JSON 寫入 tw_output_path；若解析失敗則隔離至 quarantine。"""
-    # 使用 centralized logger
-
     try:
-        with zf.open(cn_path) as f:
-            raw_text = f.read().decode("utf-8")
+        raw_text = reader.read_text(cn_path)
 
         try:
             cn_data = json_module.loads(raw_text)
         except Exception as e:
             log_warning(f"{log_prefix} zh_cn JSON 無法解析，已跳過該檔案: {e}")
-            quarantine_copy_from_zip_fn(
-                zf=zf,
-                zip_path=cn_path,
+            quarantine_copy_fn(
+                reader=reader,
+                rel_path=cn_path,
                 output_dir=output_dir,
                 reason=f"json_parse_failed: {type(e).__name__}: {e}",
             )

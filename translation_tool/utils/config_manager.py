@@ -104,6 +104,7 @@ DEFAULT_CONFIG = {
         "enable_cache_saving": True,
         "parallel_execution_workers": 4,
         "custom_translator_folder": "custom_translators",
+        "cjk_ratio_threshold": 0.7,
     },
     "ftb_translator": {
         "output_dir_name": "FTB任務翻譯輸出",
@@ -117,74 +118,72 @@ DEFAULT_CONFIG = {
     "lm_translator": {
         "temperature": 0.3,
         "lm_translate_folder_name": "LM翻譯後",
-        "initial_batch_size_patchouli": 100,  # ⭐ 新增（建議 80~150） patchouli 專用
-        "initial_batch_size_lang": 300,  # 起始 batch（你 TPM 很夠） Lang 專用
-        "initial_batch_size_ftb": 200,  # 起始 batch（FTB 專用）
-        "initial_batch_size_kubejs": 200,  # 起始 batch（kubejs 專用）
-        "initial_batch_size_md": 100,  # 起始 batch（Markdown 專用）
-        "min_batch_size": 50,  # 最小 batch
-        "batch_shrink_factor": 0.5,  # 發生錯誤時縮小比例
+        "initial_batch_size_patchouli": 100,
+        "initial_batch_size_lang": 300,
+        "initial_batch_size_ftb": 200,
+        "initial_batch_size_kubejs": 200,
+        "initial_batch_size_md": 100,
+        "min_batch_size": 50,
+        "batch_shrink_factor": 0.5,
         "rate_limit": {
-            "timeout": 600,  # request time out set
-            "sleep_seconds_between_batches": 0.0,  # 批次間延遲秒數
+            "timeout": 600,
+            "sleep_seconds_between_batches": 0.0,
         },
         "models": {
             "gemini-2.5-flash": {"enabled": True},
         },
         "keys": [
             "YOUR_GEMINI_API_KEY_1",
-            "YOUR_GEMINI_API_KEY_2"
+            "YOUR_GEMINI_API_KEY_2",
         ],
         "patchouli_system_prompt": (
-            "你是專業的 Minecraft Patchouli 手冊翻譯員。\r\n\r\n"
-            "你正在翻譯一個「ID → Value 對照表」。\r\n\r\n"
-            "⚠️【極重要規則 — ID 不可變】⚠️\r\n"
-            "- items[].id 是不可變的識別符號\r\n"
-            "- id 不具有任何語意，也不對應任何 JSON 結構\r\n"
-            "- id 只能被視為純文字索引\r\n"
-            "- 絕對禁止：\r\n"
-            "  - 修改、重寫、補零、轉型、排序、重編任何 id\r\n"
-            "  - 新增或刪除任何 id\r\n"
-            "  - 嘗試推測 id 與內容的關聯\r\n\r\n"
-            "📌 任務規則：\r\n"
-            "1. 只允許修改 items[].value 的字串內容\r\n"
-            "2. items[].id 必須與輸入完全一字不差\r\n"
-            "3. items 的數量與順序必須與輸入完全一致\r\n"
-            "4. 如果你不確定如何翻譯，請原樣回傳 value\r\n"
-            "5. 回傳必須是合法 JSON，且格式與輸入完全一致\r\n"
-            "6. 僅翻譯為繁體中文（台灣用語）\r\n"
-            "7. 保留 §, %, {}, $(...) 等所有符號與格式\r\n"
-            "8. 單位（mb、tick 等）請保留原文\r\n"
-            "9. Minecraft 請保持原文，不要翻譯成「當個創世神」\r\n"
-            "10. 每一筆 value 必須只根據該筆原文自身內容翻譯\r\n"
-            "11. 只要 value 包含人類語言就必須翻譯\r\n"
+            "你是專業的 Minecraft Patchouli 手冊翻譯員。\n\n"
+            "你正在翻譯一個「ID → Value 對照表」。\n\n"
+            "⚠️【極重要規則 — ID 不可變】⚠️\n"
+            "- items[].id 是不可變的識別符號\n"
+            "- id 不具有任何語意，也不對應任何 JSON 結構\n"
+            "- id 只能被視為純文字索引\n"
+            "- 絕對禁止：\n"
+            "  - 修改、重寫、補零、轉型、排序、重編任何 id\n"
+            "  - 新增或刪除任何 id\n"
+            "  - 嘗試推測 id 與內容的關聯\n\n"
+            "📌 任務規則：\n"
+            "1. 只允許修改 items[].value 的字串內容\n"
+            "2. items[].id 必須與輸入完全一字不差\n"
+            "3. items 的數量與順序必須與輸入完全一致\n"
+            "4. 如果你不確定如何翻譯，請原樣回傳 value\n"
+            "5. 回傳必須是合法 JSON，且格式與輸入完全一致\n"
+            "6. 僅翻譯為繁體中文（台灣用語）\n"
+            "7. 保留 §, %, {}, $(...) 等所有符號與格式\n"
+            "8. 單位（mb、tick 等）請保留原文\n"
+            "9. Minecraft 請保持原文，不要翻譯成「當個創世神」\n"
+            "10. 每一筆 value 必須只根據該筆原文自身內容翻譯\n"
+            "11. 只要 value 包含人類語言就必須翻譯\n"
             "12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石)"
         ),
         "lang_system_prompt": (
-            "你正在翻譯 Minecraft 語言檔案（JSON 格式）。\r\n\r\n"
-            "你收到的是一個「ID → value 對照表」。\r\n\r\n"
-            "⚠️【極重要規則 — ID 不可變】⚠️\r\n"
-            "- items[].id 是唯一識別符號\r\n"
-            "- id 不具有任何語意\r\n"
-            "- 絕對禁止：\r\n"
-            "  - 修改、轉型、補零、重排、推測或重寫任何 id\r\n"
-            "  - 新增或刪除任何 item\r\n\r\n"
-            "📌 任務規則：\r\n"
-            "1. 只允許修改 items[].value 的字串內容\r\n"
-            "2. items[].id 必須與輸入完全一字不差\r\n"
-            "3. items 的數量與順序必須與輸入完全一致\r\n"
-            "4. 如果你不確定如何翻譯，請原樣回傳 value\r\n"
-            "5. 回傳必須是合法 JSON，格式必須為 {\"items\":[{\"id\":...,\"value\":...}, ...]}\r\n"
-            "6. 僅翻譯為繁體中文（台灣用語）\r\n"
-            "7. 保留 §, %, {}, $(...) 等所有符號與格式\r\n"
-            "8. 單位（mb、tick 等）請保留原文\r\n"
-            "9. Minecraft 請保持原文\r\n"
-            "10. 每一筆 value 只依該筆原文翻譯\r\n"
-            "11. 只要 value 包含人類語言就必須翻譯\r\n"
-            "12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石)"
+            "你正在翻譯 Minecraft 語言檔案（JSON 格式）。\n\n"
+            "你收到的是一個「ID → value 對照表」。\n\n"
+            "⚠️【極重要規則 — ID 不可變】⚠️\n"
+            "- items[].id 是唯一識別符號\n"
+            "- id 不具有任何語意\n"
+            "- 絕對禁止：\n"
+            "  - 修改、轉型、補零、重排、推測或重寫任何 id\n"
+            "  - 新增或刪除任何 item\n\n"
+            "📌 任務規則：\n"
+            "1. 只允許修改 items[].value 的字串內容\n"
+            "2. items[].id 必須與輸入完全一字不差\n"
+            "3. items 的數量與順序必須與輸入完全一致\n"
+            "4. 如果你不確定如何翻譯，請原樣回傳 value\n"
+            "5. 回傳必須是合法 JSON，格式必須為 {\"items\":[{\"id\":...,\"value\":...}, ...]}\n"
+            "6. 僅翻譯為繁體中文（台灣用語）\n"
+            "7. 保留 §, %, {}, $(...) 等所有符號與格式\n"
+            "8. 單位（mb、tick 等）請保留原文\n"
+            "9. Minecraft 請保持原文\n"
+            "10. 每一筆 value 只依該筆原文翻譯\n"
+            "11. 只要 value 包含人類語言就必須翻譯\n"
         ),
         "translator": {
-            # 跳過名稱
             "skip_terms": [
                 "api documentation",
                 "api docs",
@@ -209,7 +208,6 @@ DEFAULT_CONFIG = {
                 "Ko-fi",
                 "Flattr",
             ],
-            # 要翻譯 key 相對名稱
             "translatable_keywords": [
                 "text",
                 "name",
@@ -231,7 +229,6 @@ DEFAULT_CONFIG = {
                 "pages.title",
             ],
         },
-        # patchouli 讀取資料夾路徑
         "patchouli": {
             "dir_names": ["patchouli_books", "book", "manual", "guidebook"],
         },
@@ -242,17 +239,16 @@ DEFAULT_CONFIG = {
     "jar_extractor": {
         "lang_codes": ["en_us", "zh_cn", "zh_tw"],
     },
-    # ★ 新增一個配置區塊或 Key ★
     "lang_merger": {
-        "pending_folder_name": "待翻譯",  # 專門用於 lang_merger 的設定
-        "pending_organized_folder_name": "待翻譯整理需翻譯",  # 專門用於 lang_merger 的設定
-        "filtered_pending_min_count": 3,  # 專門用於 lang_merger 的設定
-        "quarantine_folder_name": "問題檔案skipped_json",  # ⚠️ BREAKING CHANGE: v2 為 "skipped_json"，升級後會重新命名目錄，相關自動化 script 需同步更新
-        # --- v3 新增 ---
+        "pending_folder_name": "待翻譯",
+        "pending_organized_folder_name": "待翻譯整理需翻譯",
+        "filtered_pending_min_count": 3,
+        "quarantine_folder_name": "問題檔案skipped_json",
         "process_zh_cn_files": True,
         "skip_zh_cn_when_only_process_lang": False,
         "patchouli_skip_en_us_when_zh_cn_exists": False,
         "patchouli_effective_translation_threshold": 0.5,
+        "zh_en_letter_threshold": 2,
     },
     "extractor": {
         "output_folder_names": {

@@ -48,14 +48,39 @@ def get_lang_codes(*, skip_zh_cn: bool = False) -> list[str]:
         codes = ["en_us", "zh_tw", "zh_cn"]
     return codes
 
-def build_lang_file_regex(*, skip_zh_cn: bool = False) -> re.Pattern:
-    """根據 config 中的 lang_codes 動態建 lang file regex。
-    
-    確保與 preview 使用的 regex 行為一致。
+def build_lang_file_regex(*, codes: list[str] | None = None, skip_zh_cn: bool = False) -> re.Pattern:
+    """根據 lang_codes 動態建 lang file regex。
+
+    Args:
+        codes: 指定語言代碼列表，若為 None則從 config 讀取。
+        skip_zh_cn: 是否跳過 zh_cn（僅在 codes=None 時生效）。
     """
-    codes = get_lang_codes(skip_zh_cn=skip_zh_cn)
+    if codes is None:
+        codes = get_lang_codes(skip_zh_cn=skip_zh_cn)
     codes_str = "|".join(map(re.escape, codes))
     return re.compile(rf"(?:assets/([^/]+)/)?lang/({codes_str})\.(json|lang)$", re.IGNORECASE)
+
+
+def build_book_path_regex(*, codes: list[str] | None = None) -> re.Pattern:
+    """根據 lang_codes 動態建 Book 檔案 regex。
+
+    Args:
+        codes: 指定語言代碼列表，若為 None 則從 config 讀取。
+    """
+    if codes is None:
+        codes = get_lang_codes()
+    codes_str = "|".join(map(re.escape, codes))
+    return re.compile(
+        rf"(?:(?:assets|data)/([^/]+)/"
+        rf"(?:patchouli_books|book|manual|guidebook)/"
+        rf"(?:([^/]+)/)?"
+        rf"(?:"
+        rf"(_?(?:{codes_str}))(?:/.*)?"
+        rf"|"
+        rf"book\.json"
+        rf")$)",
+        re.IGNORECASE,
+    )
 
 def _extract_from_jar(
     jar_path: str,
@@ -96,18 +121,19 @@ def _run_extraction_process(
         extract_from_jar_fn=_extract_from_jar,
     )
 
-def extract_lang_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: bool = False) -> Generator[Dict[str, Any], None, None]:
+def extract_lang_files_generator(mods_dir: str, output_dir: str, *, lang_codes: list[str] | None = None, skip_zh_cn: bool = False) -> Generator[Dict[str, Any], None, None]:
     """從 mods 目錄提取語言檔。
 
     Args:
         mods_dir: Mod 目錄路徑
         output_dir: 輸出目錄路徑
-        skip_zh_cn: 是否跳過 zh_cn 抽取
+        lang_codes: 指定語言代碼列表，若為 None 則從 config 讀取。
+        skip_zh_cn: 是否跳過 zh_cn（僅在 lang_codes=None 時生效）。
 
     Yields:
-        進度字典
+        進度字典（含 progress、log 等）
     """
-    lang_file_regex = build_lang_file_regex(skip_zh_cn=skip_zh_cn)
+    lang_file_regex = build_lang_file_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)
     yield from _run_extraction_process(
         mods_dir=mods_dir,
         output_dir=output_dir,
@@ -115,20 +141,22 @@ def extract_lang_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: 
         process_name="Lang",
     )
 
-def extract_book_files_generator(mods_dir: str, output_dir: str) -> Generator[Dict[str, Any], None, None]:
+def extract_book_files_generator(mods_dir: str, output_dir: str, *, lang_codes: list[str] | None = None) -> Generator[Dict[str, Any], None, None]:
     """從 mods 目錄提取 Patchouli 書本檔。
 
     Args:
         mods_dir: Mod 目錄路徑
         output_dir: 輸出目錄路徑
+        lang_codes: 指定語言代碼列表，若為 None 則從 config 讀取。
 
     Yields:
         進度字典
     """
+    book_regex = build_book_path_regex(codes=lang_codes)
     yield from _run_extraction_process(
         mods_dir,
         output_dir,
-        BOOK_PATH_REGEX_DUAL_STRUCTURE,
+        book_regex,
         "Patchouli Book",
     )
 
@@ -185,12 +213,13 @@ def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: 
     if lang_error or book_error:
         yield {"dual_errors": {"lang": lang_error, "book": book_error}}
 
-def preview_extraction_generator(mods_dir: str, mode: str) -> Generator[Dict[str, Any], None, None]:
+def preview_extraction_generator(mods_dir: str, mode: str, lang_codes: list[str] | None = None) -> Generator[Dict[str, Any], None, None]:
     """預覽提取結果。
 
     Args:
         mods_dir: Mod 目錄路徑
         mode: 預覽模式
+        lang_codes: 指定語言代碼列表，若為 None 則從 config 讀取
 
     Yields:
         進度字典
@@ -200,6 +229,7 @@ def preview_extraction_generator(mods_dir: str, mode: str) -> Generator[Dict[str
         mode,
         find_jar_files_fn=find_jar_files,
         book_path_regex=BOOK_PATH_REGEX_DUAL_STRUCTURE,
+        lang_codes=lang_codes,
     )
 
 __all__ = [
