@@ -119,6 +119,10 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
         generator = extract_book_files_generator(mods_dir, output_dir)
     elif mode == 'dual':
         generator = extract_dual_files_generator(mods_dir, output_dir, skip_zh_cn=skip_zh_cn)
+    else:
+        view._append_log_line(f'[ERROR] 未知模式：{mode}')
+        view.set_controls_disabled(False)
+        return
 
     try:
         for update in generator:
