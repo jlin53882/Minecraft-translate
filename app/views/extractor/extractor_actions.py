@@ -249,7 +249,9 @@ def start_extraction(view, mode: str):
         view._show_snack_bar('Mods 資料夾不存在')
         return
 
-    view._auto_fill_output_path(mods_dir, mode)
+    # 只有在輸出路徑為空時才自動填入，避免覆寫使用者已輸入的自訂路徑
+    if not (view.output_dir_textfield.value or '').strip():
+        view._auto_fill_output_path(mods_dir, mode)
     output_dir = (view.output_dir_textfield.value or '').strip()
     out_path = Path(output_dir)
     try:
@@ -393,7 +395,9 @@ def show_preview(view, mode: str):
         view._show_snack_bar('Mods 資料夾不存在')
         return
 
-    view._auto_fill_output_path(mods_dir, mode)
+    # 只有在輸出路徑為空時才自動填入，避免覆寫使用者已輸入的自訂路徑
+    if not (view.output_dir_textfield.value or '').strip():
+        view._auto_fill_output_path(mods_dir, mode)
     view._show_snack_bar(f'正在掃描 {mode.upper()} 檔案...', ft.Colors.BLUE_600)
     view._append_log_line('[系統] 開始預覽掃描...')
     view.set_controls_disabled(True)

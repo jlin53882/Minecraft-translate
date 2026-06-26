@@ -24,10 +24,9 @@ from app.views.extractor.extractor_actions import (
     build_preview_result_dialog,
     show_preview as run_preview_flow,
     start_extraction as run_extraction_flow,
-    start_ui_poller as run_ui_poller,
     update_stats_from_log,
 )
-from app.views.extractor.extractor_panels import build_logs_card, build_settings_card, build_pick_button
+from app.views.extractor.extractor_panels import build_logs_panel, build_settings_panel, _build_pick_button
 
 class ExtractorView(ft.Column):
     """JAR 提取頁（UI）。
@@ -187,18 +186,18 @@ class ExtractorView(ft.Column):
     def _build_settings_card(self):
         """构建设置卡片 UI 组件"""
         # delegate to panel builder; actual card仍使用 shared styled_card(...)
-        return build_settings_card(self)
+        return build_settings_panel(self)
 
     def _build_logs_card(self):
         """构建日志卡片 UI 组件"""
-        return build_logs_card(self)
+        return build_logs_panel(self)
 
     # ==================================================
     # UI helpers
     # ==================================================
     def _pick_button(self, target):
         """构建目录选择按钮"""
-        return build_pick_button(self, target)
+        return _build_pick_button(self, target)
 
     def pick_directory(self, target):
         """開啟目錄選擇對話框。
@@ -301,12 +300,8 @@ class ExtractorView(ft.Column):
         self._append_log_line("[系統] 已清除輸出路徑")
 
     # ==================================================
-    # TaskSession UI Poller
+    # Worker Logic
     # ==================================================
-    def _start_ui_poller(self, mode: str = ""):
-        """启动 UI 轮询器以定期更新界面状态"""
-        return run_ui_poller(self, mode=mode)
-
     def _update_stats_from_log(self, line: str):
         """根据日志内容更新提取统计信息"""
         return update_stats_from_log(self, line)
