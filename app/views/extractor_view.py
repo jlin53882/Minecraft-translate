@@ -273,6 +273,9 @@ class ExtractorView(ft.Column):
         else:
             suffix = lang_extract
 
+        # 只有在輸出路徑為空時才自動填入，避免覆寫使用者已輸入的自訂路徑
+        if (self.output_dir_textfield.value or '').strip():
+            return
         mods_path = Path(mods_dir)
         output_path = str(mods_path.with_name(mods_path.name + suffix))
         self.output_dir_textfield.value = output_path

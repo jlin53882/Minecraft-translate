@@ -126,6 +126,14 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
     new_config = load_config_json_fn()
     if 'ftb_translator' not in new_config:
         new_config['ftb_translator'] = {}
+    if 'lm_translator' not in new_config:
+        new_config['lm_translator'] = {}
+    if 'rate_limit' not in new_config['lm_translator']:
+        new_config['lm_translator']['rate_limit'] = {}
+    if 'patchouli' not in new_config['lm_translator']:
+        new_config['lm_translator']['patchouli'] = {}
+    if 'translator' not in new_config['lm_translator']:
+        new_config['lm_translator']['translator'] = {}
     try:
         new_config['logging']['log_level'] = view.controls_map['logging.log_level'].value
         new_config['logging']['log_dir'] = view.controls_map['logging.log_dir'].value
