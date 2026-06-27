@@ -184,7 +184,7 @@ class ExtractorView(ft.Column):
             ),
             styled_card(
                 title="日誌",
-                icon=ft.Icons.CONSOLE,
+                icon=ft.Icons.RECEIPT_LONG,
                 content=build_logs_panel(self),
                 expand=True,
             ),
