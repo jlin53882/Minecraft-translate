@@ -399,7 +399,7 @@ class ExtractorView(ft.Column):
         支援傳入 LogEntry（PR2 後 poller 傳入）或 str（直接呼叫時）。
         """
         text = entry_or_str.text if hasattr(entry_or_str, "text") else entry_or_str
-        log_info(f"[DEBUG] _append_log_line called: thread={threading.current_thread().name}, text={text[:80]}...")
+        log_info(f"_append_log_line called: thread={threading.current_thread().name}, text={text[:80]}...")
         color = "#e0e0e0"  # default logs are light grey
         if "[ERROR]" in text:
             color = "#ff6b6b"  # soft red
@@ -408,7 +408,7 @@ class ExtractorView(ft.Column):
         elif "Translation" in text or "完成" in text:
             color = "#74c0fc"  # soft blue
 
-        log_info(f"[DEBUG] _append_log_line: before append, log_view.controls count={len(self.log_view.controls)}")
+        log_info(f"_append_log_line: before append, log_view.controls count={len(self.log_view.controls)}")
         self.log_view.controls.append(
             ft.Text(
                 text,
@@ -418,7 +418,7 @@ class ExtractorView(ft.Column):
                 selectable=True,
             )
         )
-        log_info(f"[DEBUG] _append_log_line: after append, log_view.controls count={len(self.log_view.controls)}")
+        log_info(f"_append_log_line: after append, log_view.controls count={len(self.log_view.controls)}")
 
     # ==================================================
     # Worker Logic

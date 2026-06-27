@@ -19,6 +19,7 @@ from app.ui.theme import (
 )
 from app.logging.task_session import TaskSession
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_info
 from app.services_impl.pipelines.extract_service import (
     run_lang_extraction_service,
     run_book_extraction_service,
@@ -315,7 +316,7 @@ class PipelineView(ft.Column):
         self._page.update()
 
     def _show_snack_bar(self, message: str, color: str = RED_400):
-        print(f"[DEBUG] SnackBar: {message}")
+        log_info(f"Pipeline SnackBar: {message}")
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
         self._page.overlay.append(snack)
         snack.open = True
@@ -522,7 +523,7 @@ class PipelineView(ft.Column):
     def _on_one_click_click(self, e=None):
         input_val = (self.input_path_text.value or "").strip()
         output_val = (self.output_path_text.value or "").strip()
-        print(f"[DEBUG] one_click: input=[{input_val}], output=[{output_val}]")
+        log_info(f"Pipeline one_click: input=[{input_val}], output=[{output_val}]")
         if not input_val:
             self._show_snack_bar("⚠️ 請輸入 Mod 來源路徑")
             return
