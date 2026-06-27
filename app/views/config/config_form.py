@@ -37,7 +37,7 @@ def build_footer(view):
         padding=20,
         bgcolor=ft.Colors.WHITE,
         border=ft.Border(top=ft.BorderSide(1, ft.Colors.GREY_300)),
-        shadow=ft.BoxShadow(spread_radius=1, blur_radius=5, color=ft.Colors.BLACK12, offset=ft.Offset(0, -1)),
+        shadow=ft.BoxShadow(spread_radius=1, blur_radius=5, color=ft.Colors.BLACK_12, offset=ft.Offset(0, -1)),
         content=ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             controls=[

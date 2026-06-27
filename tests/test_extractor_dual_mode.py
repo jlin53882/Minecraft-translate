@@ -784,7 +784,9 @@ class TestShowExtractionSummaryDualMode:
 
             view.page._tasks.clear()
             import asyncio
-            asyncio.get_event_loop().run_until_complete(run_summary())
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(run_summary())
+            loop.close()
 
             # dialog 應被加到 overlay
             assert len(view.page.overlay) >= 1

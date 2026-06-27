@@ -20,7 +20,7 @@ from app.ui import theme
 
 CARD_PADDING: int = 16
 CARD_RADIUS: int = 10
-CARD_BORDER_COLOR = ft.Colors.BLACK12
+CARD_BORDER_COLOR = ft.Colors.BLACK_12
 CARD_BG_COLOR = ft.Colors.WHITE
 DIVIDER_COLOR = theme.GREY_200
 
