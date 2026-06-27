@@ -205,12 +205,12 @@ def test_qc_view_show_snack_bar_adds_to_overlay():
     assert page.overlay[0].open is True
 
 
-def test_qc_view_pick_file_or_directory_with_tkinter_exists():
-    """測試 pick_file_or_directory_with_tkinter 方法存在"""
+def test_qc_view_pick_file_or_directory():
+    """測試 _pick_file_or_directory 方法存在（已移除 tkinter）。"""
     view = QCView(mock_page(), mock_filepicker())
 
-    assert hasattr(view, 'pick_file_or_directory_with_tkinter')
-    assert callable(view.pick_file_or_directory_with_tkinter)
+    assert hasattr(view, '_pick_file_or_directory')
+    assert callable(view._pick_file_or_directory)
 
 
 def test_qc_view_task_runner_exists():
