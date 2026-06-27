@@ -5,8 +5,6 @@
 """
 
 import flet as ft
-import tkinter as tk
-from tkinter import filedialog
 from typing import Callable, Tuple, Any
 
 # 導入 UI 主題
@@ -207,11 +205,11 @@ class QCView(ft.Column):
         folder_mode: bool,
         file_filter: str = None,
     ):
-        """建立檔案/資料夾選擇按鈕"""
+        """建立檔案/資料夾選擇按鈕（使用 Flet FilePicker，無 tkinter）。"""
         return ft.IconButton(
             icon=ft.Icons.FOLDER_OPEN if folder_mode else ft.Icons.FILE_PRESENT,
             tooltip=title,
-            on_click=lambda e: self.pick_file_or_directory_with_tkinter(
+            on_click=lambda e: self._pick_file_or_directory(
                 e, target_textfield, title, folder_mode, file_filter
             ),
         )
@@ -224,53 +222,49 @@ class QCView(ft.Column):
         snack.open = True
         self.page.update()
 
-    def pick_file_or_directory_with_tkinter(
+    def _pick_file_or_directory(
         self,
-        e,
+        e: ft.ControlEvent,
         target_textfield: ft.TextField,
         title: str,
         folder_mode: bool,
         file_filter: str = None,
     ):
-        """使用 tkinter 選擇檔案或目錄。"""
+        """使用 Flet FilePicker 選擇檔案或目錄（無 tkinter，不會彈出 Windows 視窗）。"""
+        self._pending_pick = {
+            "target": target_textfield,
+            "title": title,
+            "folder_mode": folder_mode,
+            "file_filter": file_filter,
+        }
+        self._page.run_task(self._async_pick_file_or_directory)
+
+    async def _async_pick_file_or_directory(self):
+        """非同步選擇Callback。"""
+        pick = getattr(self, "_pending_pick", None)
+        if not pick:
+            return
+        target: ft.TextField = pick["target"]
+        title: str = pick["title"]
+        folder_mode: bool = pick["folder_mode"]
+        file_filter: str = pick["file_filter"]
+
         path = ""
         try:
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-
             if folder_mode:
-                path = filedialog.askdirectory(title=title)
+                result = await self.file_picker.get_directory_path(dialog_title=title)
+                if result:
+                    path = result
             else:
-                # 輸出檔案用 asksaveasfilename
-                if "CSV" in file_filter or "JSON" in file_filter:
-                    path = filedialog.asksaveasfilename(
-                        title=title,
-                        defaultextension=file_filter.split("(")[1]
-                        .strip(")")
-                        .replace("*", "."),
-                        filetypes=[
-                            (
-                                file_filter.split("(")[0].strip(),
-                                file_filter.split("(")[1].strip(")"),
-                            )
-                        ],
-                    )
-                # 輸入檔案用 askopenfilename
-                else:
-                    path = filedialog.askopenfilename(
-                        title=title,
-                        filetypes=[
-                            (
-                                file_filter.split("(")[0].strip(),
-                                file_filter.split("(")[1].strip(")"),
-                            )
-                        ],
-                    )
+                result = await self.file_picker.pick_files(
+                    dialog_title=title,
+                    allow_multiple=False,
+                )
+                if result:
+                    path = result[0].path
 
-            root.destroy()
             if path:
-                target_textfield.value = path
+                target.value = path
                 self.page.update()
             else:
                 self._show_snack_bar("您已取消選擇", theme.BLUE_GREY_500)
