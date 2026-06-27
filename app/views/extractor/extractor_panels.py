@@ -167,7 +167,16 @@ def _build_action_zone(
     extract_row: list[ft.Control],
     preview_row: list[ft.Control],
 ) -> ft.Container:
-    """動作區卡片：Extract Zone + Preview Zone 分組"""
+    """動作區卡片：包含「執行」與「預覽」兩組按鈕列，以及跳過開關。
+
+    參數：
+        view：ExtractorView 實例（需具備 skip_zh_cn_switch 屬性）。
+        extract_row：執行按鈕列（Lang / Book / Dual Extract）。
+        preview_row：預覽按鈕列（Lang / Book / Dual Preview）。
+
+    回傳：
+        ft.Container 包裝的動作區卡片，含灰白邊框與半透明背景。
+    """
     extract_label = ft.Row(
         controls=[
             ft.Icon(ft.Icons.PLAY_ARROW, size=14, color=theme.BLUE_700),
@@ -204,7 +213,21 @@ def _build_action_zone(
 
 
 def build_settings_panel(view) -> ft.Column:
-    """左欄：路徑設定 + 跳過開關 + 按鈕區 + 統計"""
+    """左側設定面板：包含路徑輸入區、動作按鈕區、以及統計徽章。
+
+    面板組合：
+        1. 路徑卡片：Mods 資料夾 + 輸出資料夾（含清除按鈕）
+        2. 動作卡片：執行區（Lang / Book / Dual Extract）+
+                     預覽區（Lang / Book / Dual Preview）+
+                     跳過 zh_cn 開關
+        3. 統計徽章：成功 / 跳過 / 失敗計數（即時更新）
+
+    參數：
+        view：ExtractorView 實例。
+
+    回傳：
+        ft.Column，可直接加入 ExtractorView 的 controls。
+    """
     return ft.Column(
         scroll=ft.ScrollMode.ADAPTIVE,
         spacing=16,
@@ -268,7 +291,18 @@ def build_settings_panel(view) -> ft.Column:
 
 
 def build_logs_panel(view) -> ft.Column:
-    """日誌面板：狀態列 + 日誌檢視器（可滾動）"""
+    """右側日誌面板：包含狀態列與日誌檢視器。
+
+    面板組合：
+        1. 狀態列（_build_status_bar）：左側彩色邊線 + 狀態文字 + 進度條 + 百分比。
+        2. 日誌檢視器（view.log_view）：固定高度 350dp，深色背景，可滾動。
+
+    參數：
+        view：ExtractorView 實例。
+
+    回傳：
+        ft.Column，可直接加入 ExtractorView 的 controls。
+    """
     return ft.Column(
         spacing=10,
         scroll=ft.ScrollMode.ADAPTIVE,
@@ -288,7 +322,18 @@ def build_logs_panel(view) -> ft.Column:
 
 
 def build_main_layout(view) -> ft.Column:
-    """單欄垂直佈局：設定卡片在上，日誌卡片在下"""
+    """ExtractorView 最外層垂直佈局：設定面板在上，日誌面板在下。
+
+    面板組合：
+        1. 設定面板（build_settings_panel）：灰底圓角包裝。
+        2. 日誌面板（build_logs_panel）：灰底圓角包裝，expand=True 填滿剩餘空間。
+
+    參數：
+        view：ExtractorView 實例。
+
+    回傳：
+        ft.Column，寬度 expand=True，包含兩個包裝過的面板。
+    """
     return ft.Column(
         scroll=ft.ScrollMode.ADAPTIVE,
         spacing=12,

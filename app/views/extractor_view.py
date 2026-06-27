@@ -184,19 +184,30 @@ class ExtractorView(ft.Column):
         self._update_output_dir_helper()
 
     def _build_settings_card(self):
-        """构建设置卡片 UI 组件"""
-        # delegate to panel builder; actual card仍使用 shared styled_card(...)
+        """代理至 build_settings_panel，回傳設定面板元件。
+
+        回傳：
+            ft.Column，ExtractorView 的設定面板。
+        """
         return build_settings_panel(self)
 
     def _build_logs_card(self):
-        """构建日志卡片 UI 组件"""
+        """代理至 build_logs_panel，回傳日誌面板元件。
+
+        回傳：
+            ft.Column，ExtractorView 的日誌面板。
+        """
         return build_logs_panel(self)
 
     # ==================================================
     # UI helpers
     # ==================================================
     def _pick_button(self, target):
-        """构建目录选择按钮"""
+        """代理至 _build_pick_button，產生目錄選擇 IconButton。
+
+        參數：
+            target：選擇目錄後填入路徑的 TextField。
+        """
         return _build_pick_button(self, target)
 
     def pick_directory(self, target):
@@ -283,7 +294,11 @@ class ExtractorView(ft.Column):
         self._append_log_line(f"[系統] 自動設定輸出路徑：{output_path}")
 
     def set_controls_disabled(self, disabled: bool):
-        """設定控制項停用/啟用狀態"""
+        """停用或啟用所有輸入框與按鈕（執行期間呼叫，防止重複點擊）。
+
+        參數：
+            disabled：True 為停用（淡化 50%），False 為啟用。
+        """
         for ctrl in (
             self.mods_dir_textfield,
             self.output_dir_textfield,
@@ -295,7 +310,7 @@ class ExtractorView(ft.Column):
         self.page.update()
 
     def clear_output_path(self, e=None):
-        """清除輸出路徑欄位"""
+        """清除輸出路徑文字欄位，並寫入系統日誌。"""
         if not (self.output_dir_textfield.value or "").strip():
             return
         self.output_dir_textfield.value = ""
@@ -399,7 +414,10 @@ class ExtractorView(ft.Column):
     # Worker Logic
     # ==================================================
     def start_extraction(self, mode: str):
-        """启动 JAR 文件提取任务（lang 或 book 模式）"""
+        """啟動 JAR 提取任務（lang / book / dual）。
+
+        實際工作代理至 extractor_actions.start_extraction（run_extraction_flow）。
+        """
         return run_extraction_flow(self, mode)
 
     def _show_snack_bar(self, message: str, color: str = theme.ERROR):
@@ -427,11 +445,19 @@ class ExtractorView(ft.Column):
     # 預覽功能
     # ==================================================
     def show_preview(self, mode: str):
-        """显示提取预览对话框（lang 或 book 模式）"""
+        """顯示提取預覽對話框（lang / book / dual）。
+
+        實際工作代理至 extractor_actions.show_preview（run_preview_flow）。
+        """
         return run_preview_flow(self, mode)
 
     def _show_preview_dialog_result(self, result: dict, mode: str):
-        """显示预览结果对话框"""
+        """顯示預覽成功結果對話框（包含檔案數量、大小、詳細清單）。
+
+        參數：
+            result：預覽結果字典（來自 PreviewState.result）。
+            mode：預覽模式（'lang' / 'book' / 'dual'）。
+        """
         dialog = build_preview_result_dialog(self, result, mode)
         self.page.overlay.append(dialog)
         dialog.open = True
@@ -440,7 +466,12 @@ class ExtractorView(ft.Column):
         self.page.run_task(_do_update, None)
 
     def _show_preview_dialog_error(self, error: str, mode: str):
-        """显示预览错误对话框"""
+        """顯示預覽失敗錯誤對話框。
+
+        參數：
+            error：錯誤訊息字串。
+            mode：預覽模式（'lang' / 'book' / 'dual'）。
+        """
         self._preview_error_dialog = build_preview_error_dialog(self, error, mode)
         self.page.overlay.append(self._preview_error_dialog)
         self._preview_error_dialog.open = True
@@ -449,7 +480,11 @@ class ExtractorView(ft.Column):
         self.page.run_task(_do_update, None)
 
     def _close_dialog_overlay(self, dialog):
-        """關閉 overlay 對話框並重置 UI 狀態"""
+        """關閉 overlay 對話框，重置 UI 狀態（進度條、狀態文字、控制項）。
+
+        參數：
+            dialog：要關閉的 ft.AlertDialog 實例。
+        """
         try:
             dialog.open = False
             self.status_text.value = '狀態：閒置'
@@ -461,7 +496,12 @@ class ExtractorView(ft.Column):
             pass
 
     def _start_from_preview_overlay(self, dialog, mode: str):
-        """從預覽對話框開始提取（overlay 版本）"""
+        """從預覽對話框點擊「確認提取」時，先關閉對話框再啟動提取任務。
+
+        參數：
+            dialog：要被關閉的預覽對話框。
+            mode：提取模式（'lang' / 'book' / 'dual'）。
+        """
         self._close_dialog_overlay(dialog)
         self.start_extraction(mode)
 
