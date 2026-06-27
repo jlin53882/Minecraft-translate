@@ -29,6 +29,7 @@ from __future__ import annotations
 import flet as ft
 
 from app.ui import theme
+from app.ui.components import styled_card
 
 
 def _build_status_bar(view) -> ft.Container:
@@ -233,7 +234,9 @@ def build_settings_panel(view) -> ft.Column:
         spacing=16,
         controls=[
             # --- 路徑設定 ---
-            ft.Container(
+            styled_card(
+                title="路徑設定",
+                icon=ft.Icons.FOLDER_OPEN,
                 content=ft.Column(
                     spacing=12,
                     controls=[
@@ -265,10 +268,6 @@ def build_settings_panel(view) -> ft.Column:
                         ),
                     ],
                 ),
-                padding=14,
-                border=ft.Border.all(1, theme.GREY_200),
-                border_radius=8,
-                bgcolor=ft.Colors.WHITE,
             ),
             # --- 動作區（包含跳過開關）---
             _build_action_zone(
@@ -338,19 +337,16 @@ def build_main_layout(view) -> ft.Column:
         scroll=ft.ScrollMode.ADAPTIVE,
         spacing=12,
         controls=[
-            ft.Container(
+            styled_card(
+                title="設定",
+                icon=ft.Icons.SETTINGS,
                 content=build_settings_panel(view),
-                padding=10,
-                border=ft.Border.all(1, theme.GREY_200),
-                border_radius=10,
-                bgcolor=theme.GREY_50,
             ),
-            ft.Container(
+            styled_card(
+                title="日誌",
+                icon=ft.Icons.CONSOLE,
                 content=build_logs_panel(view),
-                padding=10,
-                border=ft.Border.all(1, theme.GREY_200),
-                border_radius=10,
-                bgcolor=theme.GREY_50,
+                expand=True,
             ),
         ],
     )

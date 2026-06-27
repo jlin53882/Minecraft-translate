@@ -27,6 +27,7 @@ from app.views.extractor.extractor_actions import (
     update_stats_from_log,
 )
 from app.views.extractor.extractor_panels import build_logs_panel, build_settings_panel, _build_pick_button
+from app.ui.components import styled_card
 
 class ExtractorView(ft.Column):
     """JAR 提取頁（UI）。
@@ -173,11 +174,20 @@ class ExtractorView(ft.Column):
         )
 
         # ======================
-        # Layout Composition
+        # Layout Composition（使用 styled_card 統一外觀）
         # ======================
         self.controls = [
-            self._build_settings_card(),
-            self._build_logs_card(),
+            styled_card(
+                title="設定",
+                icon=ft.Icons.SETTINGS,
+                content=build_settings_panel(self),
+            ),
+            styled_card(
+                title="日誌",
+                icon=ft.Icons.CONSOLE,
+                content=build_logs_panel(self),
+                expand=True,
+            ),
         ]
 
         # 初始化 output_dir helper，動態讀取設定值
