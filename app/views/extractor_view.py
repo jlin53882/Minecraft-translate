@@ -155,17 +155,8 @@ class ExtractorView(ft.Column):
             on_click=lambda e: self.show_preview("dual"),
         )
 
-        # 3. Status Display
-        self.status_text = ft.Text("狀態：閒置", size=14, color=theme.GREY_700)
-        self.progress_bar = ft.ProgressBar(
-            value=0,
-            visible=True,
-            height=8,
-            bgcolor=theme.GREY_200,
-            color=theme.BLUE,
-        )
-
-        # 4. Logs Console
+        # 3. Status Display（由 _build_status_bar 在 build_logs_panel 中統一建立）
+        # 4. Logs Console（由 build_logs_panel 中的 _build_status_bar 統一建立）
         self.log_view = ft.ListView(
             expand=True,
             spacing=2,
