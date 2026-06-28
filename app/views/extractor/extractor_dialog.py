@@ -152,8 +152,6 @@ def open_extractor_dialog(
         log_view.controls.append(
             ft.Text(f">> {msg}", color=color, size=12, font_family="Consolas")
         )
-        # 使用 run_task 確保在主執行緒執行
-        page.run_task(_do_update)
 
     async def _do_update():
         page.update()
@@ -222,8 +220,10 @@ def open_extractor_dialog(
                     pct = update.get("progress", 0)
                     # 優先使用 log 欄位，若無則使用 current
                     log_msg = update.get("log", f"正在處理 {current}/{total}")
-                    update_progress(pct, log_msg)
+
+                    # 每次都 append log + 觸發 UI 更新（沿用原本簡單做法）
                     add_log(log_msg)
+                    update_progress(pct, log_msg)
 
                     # 檢查是否完成（progress=1.0 或有 stats 欄位）
                     if pct >= 1.0 or "stats" in update:
