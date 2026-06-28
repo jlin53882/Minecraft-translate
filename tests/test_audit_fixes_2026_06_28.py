@@ -5,6 +5,7 @@
 - jar_processor_extract.py throttles scan progress yields (P1 #7)
 - main.py uses named lookup instead of registry[10] magic number (P2 #10)
 """
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
 
@@ -96,7 +97,7 @@ def test_scan_progress_throttled_to_5s_interval():
     Source-level 檢查：確認節流邏輯存在於 jar_processor_extract.py。
     """
     src = open(
-        r"C:\Users\Jlin5\OneDrive\桌面\Minecraft-translate\translation_tool\core\jar_processor_extract.py",
+        Path(__file__).resolve().parent.parent / "translation_tool" / "core" / "jar_processor_extract.py",
         encoding="utf-8",
     ).read()
     assert "YIELD_INTERVAL = 5.0" in src, "YIELD_INTERVAL throttle must be 5.0s"
@@ -118,7 +119,7 @@ def test_main_uses_named_pipeline_lookup():
     """
     import re
     main_src = open(
-        r"C:\Users\Jlin5\OneDrive\桌面\Minecraft-translate\main.py",
+        Path(__file__).resolve().parent.parent / "main.py",
         encoding="utf-8",
     ).read()
     # 移除所有 docstring + 註解行（保留執行語句）
@@ -147,7 +148,7 @@ def test_main_pipeline_missing_raises_runtime_error():
     # 載入 main module（不真的執行 page setup，只驗證 import 路徑）
     # main() 需要 flet page，無法直接呼叫，改為驗證原始碼有 raise 邏輯
     main_src = open(
-        r"C:\Users\Jlin5\OneDrive\桌面\Minecraft-translate\main.py",
+        Path(__file__).resolve().parent.parent / "main.py",
         encoding="utf-8",
     ).read()
     assert "RuntimeError" in main_src, "main must raise RuntimeError on missing pipeline view"
@@ -161,7 +162,7 @@ def test_main_pipeline_missing_raises_runtime_error():
 def test_show_preview_uses_threading_event():
     """Regression: show_preview poll 必須使用 threading.Event 控制生命週期。"""
     src = open(
-        r"C:\Users\Jlin5\OneDrive\桌面\Minecraft-translate\app\views\extractor\extractor_actions.py",
+        Path(__file__).resolve().parent.parent / "app" / "views" / "extractor" / "extractor_actions.py",
         encoding="utf-8",
     ).read()
     assert "stop_event = threading.Event()" in src, "show_preview must create stop_event"
