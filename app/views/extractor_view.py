@@ -103,7 +103,12 @@ class ExtractorView(ft.Column):
             value=False,
         )
 
-        # 2. Action Buttons
+        # 2. Action Buttons - 改为打开对话框
+        from app.views.extractor.extractor_dialog import open_extractor_dialog, open_preview_dialog
+
+        # 获取 file_picker
+        file_picker = self.file_picker
+
         self.lang_button = ft.Button(
             "提取 Lang",
             icon=ft.Icons.LANGUAGE,
@@ -113,7 +118,13 @@ class ExtractorView(ft.Column):
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
-            on_click=lambda e: self.start_extraction("lang"),
+            on_click=lambda e: open_extractor_dialog(
+                self.page,
+                file_picker,
+                input_path=(self.mods_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip(),
+                mode="lang",
+            ),
         )
         self.book_button = ft.Button(
             "提取 Book",
@@ -124,19 +135,37 @@ class ExtractorView(ft.Column):
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
-            on_click=lambda e: self.start_extraction("book"),
+            on_click=lambda e: open_extractor_dialog(
+                self.page,
+                file_picker,
+                input_path=(self.mods_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip(),
+                mode="book",
+            ),
         )
 
         # 預覽按鈕
         self.preview_lang_button = ft.OutlinedButton(
             "預覽 Lang",
             icon=ft.Icons.PREVIEW,
-            on_click=lambda e: self.show_preview("lang"),
+            on_click=lambda e: open_preview_dialog(
+                self.page,
+                file_picker,
+                input_path=(self.mods_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip(),
+                mode="lang",
+            ),
         )
         self.preview_book_button = ft.OutlinedButton(
             "預覽 Book",
             icon=ft.Icons.PREVIEW,
-            on_click=lambda e: self.show_preview("book"),
+            on_click=lambda e: open_preview_dialog(
+                self.page,
+                file_picker,
+                input_path=(self.mods_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip(),
+                mode="book",
+            ),
         )
         self.dual_extract_button = ft.Button(
             "提取 Lang + Book",
@@ -147,12 +176,24 @@ class ExtractorView(ft.Column):
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
-            on_click=lambda e: self.start_extraction("dual"),
+            on_click=lambda e: open_extractor_dialog(
+                self.page,
+                file_picker,
+                input_path=(self.mods_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip(),
+                mode="dual",
+            ),
         )
         self.dual_preview_button = ft.OutlinedButton(
             "預覽 Lang + Book",
             icon=ft.Icons.PREVIEW,
-            on_click=lambda e: self.show_preview("dual"),
+            on_click=lambda e: open_preview_dialog(
+                self.page,
+                file_picker,
+                input_path=(self.mods_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip(),
+                mode="dual",
+            ),
         )
 
         # 3. Status Display（由 _build_status_bar 在 build_logs_panel 中統一建立）

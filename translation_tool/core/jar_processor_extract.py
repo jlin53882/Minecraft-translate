@@ -290,14 +290,13 @@ def run_extraction_process_impl(
         total_skipped,
     )
     yield {
-        'progress': 1.0,
-        'current': processed_count,
-        'total': total_jars,
-        'log': f"--- {process_name} 提取完成！ ---\n已檢查 {processed_count}/{total_jars} 個 JAR 檔案。\n  - 新提取或更新的檔案: {total_extracted} 個\n  - 因內容相同而跳過的檔案: {total_skipped} 個",
-        'stats': {
-            'success': processed_count,
-            'failures': 0,
-            'warnings': total_skipped,
-            'total_files': total_extracted,
-        },
-    }
+            'progress': 1.0,
+            'current': processed_count,
+            'total': total_jars,
+            'log': f"--- {process_name} 提取完成！ ---\n已檢查 {processed_count}/{total_jars} 個 JAR 檔案。\n  - 新提取或更新的檔案: {total_extracted} 個\n  - 因內容相同而跳過的檔案: {total_skipped} 個",
+            'stats': {
+                'success': total_extracted,
+                'warnings': total_skipped,
+                'failures': 0,
+            },
+        }
