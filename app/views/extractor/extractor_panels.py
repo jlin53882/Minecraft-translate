@@ -304,7 +304,6 @@ def build_logs_panel(view) -> ft.Column:
     """
     return ft.Column(
         spacing=10,
-        scroll=ft.ScrollMode.ADAPTIVE,
         controls=[
             _build_status_bar(view),
             ft.Container(
