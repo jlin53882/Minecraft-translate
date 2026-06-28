@@ -407,6 +407,9 @@ def show_preview(view, mode: str):
     preview_state.total = total_jars
     preview_state.current = 0
 
+    # 執行緒生命週期控制：避免連點預覽時舊執行緒仍嘗試訪問 detached view.page。
+    stop_event = threading.Event()
+
     def do_preview():
         """执行预览扫描生成器，收集提取结果"""
         try:
@@ -428,8 +431,8 @@ def show_preview(view, mode: str):
     threading.Thread(target=do_preview, daemon=True).start()
 
     def poll():
-        """轮询预览状态并更新 UI"""
-        while not preview_state.done:
+        """轮询预览状态并更新 UI。透過 stop_event 控制執行緒生命週期。"""
+        while not preview_state.done and not stop_event.is_set():
             progress = preview_state.progress
             current = preview_state.current
             total = preview_state.total
@@ -446,7 +449,9 @@ def show_preview(view, mode: str):
                 view.page.update()
 
             view.page.run_task(_do_update, None)
-            time.sleep(0.1)
+            # 檢查 stop_event 而不是固定 sleep，新請求時舊 poll 可即時退出
+            if stop_event.wait(timeout=0.1):
+                return
 
         async def _do_preview_finish(_):
             view.set_controls_disabled(False)

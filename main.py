@@ -93,10 +93,22 @@ def main(page: ft.Page):
     #   { 'key': str, 'view': ft.Control }  （key 用於 get_window_size 查表）
     registry = build_view_registry(page, file_picker)
 
-    # 讓第一個 view（通常是翻譯頁）和第十個 view 保有 registry 參考，
+    # 讓首頁（translation）和 pipeline 頁保有 registry 參考，
     # 以便它們能夠主動切換到其他 view（set_registry / set_view_registry）。
-    registry[0]['view'].content.set_registry(registry)
-    registry[10]['view'].content.set_view_registry(registry)
+    # 用 named lookup 取代 registry[10] 魔數，未來 view 順序變更時自動跟著調整。
+    _first_view = registry[0]
+    _pipeline_view = next(
+        (item for item in registry if item.get('key') == 'pipeline'),
+        None,
+    )
+    _first_view['view'].content.set_registry(registry)
+    if _pipeline_view is None:
+        raise RuntimeError(
+            "pipeline view not found in registry — "
+            "check build_view_registry() keys. "
+            f"Available keys: {[item.get('key') for item in registry]}"
+        )
+    _pipeline_view['view'].content.set_view_registry(registry)
 
     # ----------------------------------------------------------
     # Helper：根據 view key 調整視窗尺寸

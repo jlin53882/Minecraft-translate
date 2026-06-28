@@ -297,6 +297,9 @@ class ExtractorView(ft.Column):
     def set_controls_disabled(self, disabled: bool):
         """停用或啟用所有輸入框與按鈕（執行期間呼叫，防止重複點擊）。
 
+        包含 dual 按鈕在內的所有動作按鈕都會被停用，避免多執行緒競爭
+        _extraction_stats 寫入（Lang 提取中點 dual_extract 會造成 stats 覆蓋）。
+
         參數：
             disabled：True 為停用（淡化 50%），False 為啟用。
         """
@@ -305,6 +308,10 @@ class ExtractorView(ft.Column):
             self.output_dir_textfield,
             self.lang_button,
             self.book_button,
+            self.dual_extract_button,
+            self.dual_preview_button,
+            self.preview_lang_button,
+            self.preview_book_button,
         ):
             ctrl.disabled = disabled
             ctrl.opacity = 0.5 if disabled else 1.0

@@ -212,7 +212,9 @@ def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: 
                     }
                     yield {**update, "stats": combined, "phase": "book"}
                 else:
-                    yield {**update, "phase": "book"}
+                    # Lang 階段無 stats（空 JAR 目錄無 lang 檔），Book 仍要 yield book stats，
+                    # 否則 UI 統計徽章永遠顯示 0/0/0
+                    yield {**update, "stats": book_stats, "phase": "book"}
             else:
                 yield {**update, "phase": "book"}
     except Exception as e:
