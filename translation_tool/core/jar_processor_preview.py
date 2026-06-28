@@ -69,6 +69,7 @@ def _scan_single_jar_for_preview(
     jar_name = os.path.basename(jar_path)
     jar_size = os.path.getsize(jar_path)
 
+    matched_bytes = 0
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
             if mode == "dual":
@@ -78,17 +79,22 @@ def _scan_single_jar_for_preview(
                     if member.is_dir():
                         continue
                     normalized_path = member.filename.replace("\\", "/")
-                    if lang_regex.search(normalized_path):
+                    matched_lang = lang_regex.search(normalized_path)
+                    matched_book = book_path_regex.search(normalized_path)
+                    if matched_lang:
                         lang_matched.append(normalized_path)
-                    if book_path_regex.search(normalized_path):
+                        matched_bytes += member.file_size
+                    if matched_book:
                         book_matched.append(normalized_path)
+                        matched_bytes += member.file_size
                 return {
                     "jar": jar_name,
                     "lang_matched": lang_matched,
                     "book_matched": book_matched,
                     "lang_count": len(lang_matched),
                     "book_count": len(book_matched),
-                    "size_mb": jar_size / (1024**2),
+                    "size_mb": matched_bytes / (1024**2),
+                    "jar_size_mb": jar_size / (1024**2),
                     "error": None,
                 }
             else:
@@ -99,11 +105,13 @@ def _scan_single_jar_for_preview(
                     normalized_path = member.filename.replace("\\", "/")
                     if target_regex.search(normalized_path):
                         matched_files.append(normalized_path)
+                        matched_bytes += member.file_size
                 return {
                     "jar": jar_name,
                     "matched_files": matched_files,
                     "count": len(matched_files),
-                    "size_mb": jar_size / (1024**2),
+                    "size_mb": matched_bytes / (1024**2),
+                    "jar_size_mb": jar_size / (1024**2),
                     "error": None,
                 }
     except Exception as e:
@@ -185,8 +193,8 @@ def preview_extraction_generator_impl(
         - 所有 JAR 完成後（最終）：{'progress': float, 'current': int, 'total': int,
                   'result': {...}, 'log': str}，其中 result 包含
                   total_jars, preview_results, total_files, total_size_mb, failed_jars。
-                  注意：total_size_mb 是所有被掃描 JAR 的總大小（bytes sum），
-                  不是 matched 檔案大小——用來預估輸出空間。
+                  注意：total_size_mb 是所有 matched 檔案大小的總和（bytes sum），
+                  不是整個 JAR 大小——反映實際抽取量。
         - 目錄為空時：{'progress': 1.0, 'result': {...}}（直接結束）。
         - mode 無效時：{'error': str}（直接結束）。
     """
