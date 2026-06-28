@@ -238,7 +238,8 @@ class PipelineView(ft.Column):
         super().__init__(expand=True, spacing=15)
         self._page = page
         self.file_picker = file_picker
-
+        self.registry = None  # 預留給外部注入
+        
         self.input_path_text = ft.TextField(
             hint_text="尚未選擇讀取來源...",
             expand=True,
@@ -264,7 +265,14 @@ class PipelineView(ft.Column):
 
         self._build_ui()
 
-    def _add_log(self, msg, is_err=False):
+    def set_view_registry(self, registry):
+        """將全域視圖註冊表注入視圖內。"""
+        self.registry = registry
+        self._page.update()
+
+    def set_registry(self, registry):
+        """將全域視圖註冊表注入視圖內（相容舊代碼）。"""
+        self.set_view_registry(registry)
         self.log_content.controls.append(
             ft.Text(f">> {msg}", color=RED_400 if is_err else CYAN_700, size=12, font_family="Consolas")
         )
