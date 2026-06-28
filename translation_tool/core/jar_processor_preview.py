@@ -183,8 +183,10 @@ def preview_extraction_generator_impl(
         各階段進度字典：
         - 每個 JAR 完成時：{'progress': float, 'current': int, 'total': int, 'log': str}
         - 所有 JAR 完成後（最終）：{'progress': float, 'current': int, 'total': int,
-          'result': {...}, 'log': str}，其中 result 包含
-          total_jars, preview_results, total_files, total_size_mb, failed_jars。
+                  'result': {...}, 'log': str}，其中 result 包含
+                  total_jars, preview_results, total_files, total_size_mb, failed_jars。
+                  注意：total_size_mb 是所有被掃描 JAR 的總大小（bytes sum），
+                  不是 matched 檔案大小——用來預估輸出空間。
         - 目錄為空時：{'progress': 1.0, 'result': {...}}（直接結束）。
         - mode 無效時：{'error': str}（直接結束）。
     """

@@ -22,6 +22,7 @@
     "wikipedia_rate_limit_delay": 0.5
   },
   "lm_translator": {
+    "_comment": "大型語言模型 (LLM) 翻譯設定：批次大小、API keys、模型清單與 system prompt。詳見 docs/lm_translator.md",
     "temperature": 0.3,
     "lm_translate_folder_name": "LM翻譯後",
     "initial_batch_size_patchouli": 100,
@@ -102,7 +103,7 @@
     }
   },
   "output_bundler": {
-        "output_zip_name": "可使用翻譯.zip"
+    "output_zip_name": "可使用翻譯.zip"
   },
   "lang_merger": {
     "pending_folder_name": "待翻譯",

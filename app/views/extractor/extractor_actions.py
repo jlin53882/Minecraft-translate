@@ -28,7 +28,9 @@ def update_stats_from_log(view, line: str, phase: str = None):
     - dual mode 時寫入對應 phase 的 sub-dict
     """
     stats = view._extraction_stats
-    target = stats if phase is None else stats.get(phase, stats)
+    # 只有 phase 存在於 stats 時才 sub-dict 寫入；否則直接寫頂層 stats。
+    # 避免 phase 名稱拼錯時意外覆寫頂層 stats 整個 dict。
+    target = stats[phase] if phase is not None and phase in stats else stats
     try:
         import re
 
@@ -156,13 +158,13 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
                     book_stats_done = True
 
             if "dual_errors" in update:
-                errs = update["dual_errors"]
-                async def _do_show_dual_errors(_=None, e=errs):
-                    if e.get("lang"):
-                        view._append_log_line(f"[ERROR] Lang 提取失敗: {e['lang']}")
-                    if e.get("book"):
-                        view._append_log_line(f"[ERROR] Book 提取失敗: {e['book']}")
-                view.page.run_task(_do_show_dual_errors, None)
+                            errs = update["dual_errors"]
+                            async def _do_show_dual_errors(_=None, errs=errs):
+                                if errs.get("lang"):
+                                    view._append_log_line(f"[ERROR] Lang 提取失敗: {errs['lang']}")
+                                if errs.get("book"):
+                                    view._append_log_line(f"[ERROR] Book 提取失敗: {errs['book']}")
+                            view.page.run_task(_do_show_dual_errors, None)
 
             is_error = update.get("error", False)
             if is_error:
