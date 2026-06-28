@@ -37,6 +37,7 @@ def open_extractor_dialog(
     output_path: str = "",
     on_complete=None,
     mode: str = "lang",  # "lang", "book", "dual"
+    auto_start: bool = False,  # 若 True，自動啟動提取（不需點擊「開始提取」）
 ):
     """打開完整的提取對話框（進度+日誌+結果）。
 
@@ -68,7 +69,7 @@ def open_extractor_dialog(
     book_extract = folder_names.get("book_extract", "_提取book_輸出")
     dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
 
-    # 根據 mode 產生輸出目錄
+    # 根據 mode 產生輸出子資料夾
     if mode == "lang":
         output_subdir = lang_extract
     elif mode == "book":
@@ -76,7 +77,12 @@ def open_extractor_dialog(
     else:  # dual
         output_subdir = dual_extract
 
-    final_output = os.path.join(output_dir, output_subdir) if output_dir else ""
+    # 始終補上子資料夾名稱（讓輸出結構清晰）
+    if output_dir:
+        final_output = os.path.join(output_dir, output_subdir)
+    else:
+        # 若未指定，使用 mods_dir 作為基礎
+        final_output = os.path.join(mods_dir, output_subdir) if mods_dir else ""
 
     # 狀態變數
     state = {
@@ -374,6 +380,10 @@ def open_extractor_dialog(
     dialog.open = True
     page.update()
 
+    # 如果指定了 auto_start，則自動啟動提取
+    if auto_start:
+        on_start_click(None)
+
     return dialog
 
 
@@ -386,6 +396,8 @@ def open_preview_dialog(
 ):
     """打開預覽對話框。
 
+    直接呼叫原本的 extractor_actions.show_preview（沿用原本的 polling + 結果對話框實作）。
+
     Args:
         page: Flet Page 實例
         file_picker: Flet FilePicker 實例
@@ -393,79 +405,279 @@ def open_preview_dialog(
         output_path: 輸出目錄路徑
         mode: 預設模式
     """
+    from translation_tool.core.jar_processor import preview_extraction_generator, find_jar_files
     from app.views.extractor.extractor_state import PreviewState
 
     dialog_width = max(500, int(page.width * 0.5))
 
-    # 狀態
-    preview_state = PreviewState()
-
-    # 預覽結果區域
-    result_text = ft.Text("點擊「預覽」開始掃描...", size=13)
-    result_list = ft.ListView(height=200, spacing=2)
-
-    # 按鈕
-    def do_preview():
-        mods = input_path
-        if not mods or not os.path.isdir(mods):
-            result_text.value = "⚠️ 請選擇有效的 Mod 來源"
-            page.update()
-            return
-
-        result_text.value = "正在掃描..."
-        page.update()
-
-        try:
-            jar_files = find_jar_files(mods)
-            preview_state.total = len(jar_files)
-
-            for update in preview_extraction_generator(mods, mode):
-                if "error" in update:
-                    result_text.value = f"錯誤: {update['error']}"
-                    break
-                preview_state.progress = update.get("progress", 0)
-                preview_state.current = update.get("current", 0)
-                result_text.value = f"進度：{preview_state.current}/{preview_state.total}"
-                page.update()
-
-            if preview_state.total > 0:
-                result_text.value = f"完成！找到 {preview_state.total} 個 JAR 檔案"
-        except Exception as ex:
-            result_text.value = f"錯誤: {ex}"
-
-        page.update()
-
-    preview_button = ft.Button("開始預覽", icon=ft.Icons.SEARCH, on_click=lambda e: do_preview())
-
-    dialog = ft.AlertDialog(
-        modal=False,
-        title=ft.Row(
-            [
-                ft.Icon(ft.Icons.SEARCH, size=24, color=theme.BLUE_700),
-                ft.Text(f"預覽 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD),
-            ],
-            spacing=10,
-        ),
-        content=ft.Container(
-            content=ft.Column(
-                [
-                    ft.Text(f"來源：{input_path}", size=12, color=theme.GREY_600),
-                    ft.Text(f"輸出：{output_path}", size=12, color=theme.GREY_600),
-                    ft.Text(f"模式：{mode}", size=12, color=theme.GREY_600),
-                    ft.Divider(),
-                    result_text,
-                    result_list,
-                ],
-                spacing=10,
-            ),
-            width=dialog_width,
-            height=350,
-        ),
-        actions=[preview_button],
+    # ========== UI 元件 ==========
+    info_text = ft.Text(
+        f"來源：{input_path}\n輸出：{output_path}\n模式：{mode}",
+        size=12,
+        color=ft.Colors.GREY_600,
     )
 
-    page.overlay.append(dialog)
-    dialog.open = True
+    # 進度區
+    status_text = ft.Text("正在掃描...", size=13, color=ft.Colors.GREY_600)
+    progress_pct = ft.Text("0%", size=12, color=ft.Colors.GREY_600, weight=ft.FontWeight.BOLD)
+    progress_bar = ft.ProgressBar(value=0, height=8)
+
+    # 日誌區
+    log_view = ft.ListView(
+        height=200,
+        spacing=2,
+        auto_scroll=True,
+        padding=10,
+    )
+
+    def add_log(msg, color=None):
+        if color is None:
+            color = ft.Colors.CYAN_700
+        log_view.controls.append(
+            ft.Text(f">> {msg}", color=color, size=12, font_family="Consolas")
+        )
+
+    async def _do_update():
+        page.update()
+
+    def update_progress(pct, text):
+        progress_bar.value = pct
+        progress_pct.value = f"{int(pct * 100)}%"
+        if text:
+            status_text.value = text
+        page.run_task(_do_update)
+
+    def show_result_dialog(result):
+        """顯示預覽結果對話框（包含『確認執行』按鈕）"""
+        preview_results = result.get("preview_results", [])
+        total_files = result.get("total_files", 0)
+        total_size_mb = result.get("total_size_mb", 0)
+
+        controls = [
+            ft.Text(f"預覽結果（{mode.upper()}）", size=16, weight=ft.FontWeight.BOLD),
+            ft.Divider(),
+        ]
+
+        if mode == "dual":
+            total_lang = sum(r.get("lang_count", 0) for r in preview_results)
+            total_book = sum(r.get("book_count", 0) for r in preview_results)
+            controls.append(ft.Text(f"Lang：{total_lang} 個", size=14, color=ft.Colors.BLUE_700))
+            controls.append(ft.Text(f"Book：{total_book} 個", size=14, color=ft.Colors.BLUE_700))
+        else:
+            controls.append(ft.Text(f"共找到 {total_files} 個檔案", size=14, color=ft.Colors.BLUE_700))
+
+        controls.append(ft.Text(f"總大小：{total_size_mb:.2f} MB", size=14, color=ft.Colors.BLUE_700))
+        controls.extend([ft.Divider(), ft.Text(f"詳細清單（{len(preview_results)} 個 JAR）：", size=13, weight=ft.FontWeight.BOLD)])
+
+        jar_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO)
+        for r in preview_results:
+            if mode == "dual":
+                jar_list.controls.append(
+                    ft.Text(f"📦 {r['jar']}: Lang {r.get('lang_count', 0)} 個 / Book {r.get('book_count', 0)} 個", size=12)
+                )
+            else:
+                jar_list.controls.append(
+                    ft.Text(f"📦 {r['jar']}: {r['count']} 個檔案 ({r['size_mb']:.1f} MB)", size=12)
+                )
+
+        list_container = ft.Container(
+            content=jar_list, height=300, padding=5, bgcolor=ft.Colors.GREY_100, border_radius=8
+        )
+        controls.append(list_container)
+
+        def start_extraction(e):
+            """確認執行：關閉結果對話框，直接啟動提取"""
+            result_dialog.open = False
+            preview_dialog.open = False
+            page.update()
+            # 直接開啟提取對話框並自動啟動（不需點擊「開始提取」）
+            open_extractor_dialog(
+                page, file_picker,
+                input_path=input_path,
+                output_path=output_path,
+                mode=mode,
+                auto_start=True,
+            )
+
+        result_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text(f"提取預覽 - {mode.upper()}"),
+            content=ft.Container(
+                content=ft.Column(controls, spacing=8, scroll=ft.ScrollMode.AUTO),
+                width=600,
+                height=500,
+            ),
+            actions=[
+                ft.TextButton("取消", on_click=lambda e: setattr(result_dialog, "open", False) or page.update()),
+                ft.Button("確認執行", icon=ft.Icons.CHECK, on_click=start_extraction),
+            ],
+        )
+
+        page.overlay.append(result_dialog)
+        result_dialog.open = True
+        page.update()
+
+    # ========== 執行掃描 ==========
+    state = {"running": False, "cancelled": False, "done": False}
+    preview_state = PreviewState()
+
+    def start_scan():
+        """按鈕：開始預覽掃描"""
+        if state["running"]:
+            return
+
+        nonlocal output_path
+        # 若輸出路徑是空的，自動設定
+        actual_output = output_path
+        if not actual_output:
+            from translation_tool.utils.config_manager import load_config
+            config = load_config()
+            folder_names = config.get("extractor", {}).get("output_folder_names", {})
+            lang_preview = folder_names.get("lang_preview", "_預覽lang_輸出")
+            book_preview = folder_names.get("book_preview", "_預覽book_輸出")
+            if mode == "lang":
+                actual_output = str(Path(input_path).with_name(Path(input_path).name + lang_preview))
+            elif mode == "book":
+                actual_output = str(Path(input_path).with_name(Path(input_path).name + book_preview))
+            else:
+                actual_output = str(Path(input_path).with_name(Path(input_path).name + "_預覽_dual_輸出"))
+            # 更新 info_text
+            info_text.value = f"來源：{input_path}\n輸出：{actual_output}\n模式：{mode}"
+            output_path = actual_output
+            page.update()
+
+        state["running"] = True
+        state["cancelled"] = False
+        state["done"] = False
+        preview_state.progress = 0
+        preview_state.current = 0
+        preview_state.total = 0
+        preview_state.result = None
+        preview_state.error = None
+
+        # 重置 UI
+        log_view.controls.clear()
+        progress_bar.value = 0
+        progress_pct.value = "0%"
+        status_text.value = "正在掃描..."
+        start_button.disabled = True
+        page.update()
+
+        add_log(f"[系統] 開始預覽 {mode.upper()} 掃描...")
+
+        def do_scan():
+            """背景執行緒：跑 generator，更新 preview_state"""
+            try:
+                for update in preview_extraction_generator(input_path, mode):
+                    if state["cancelled"]:
+                        break
+                    if "progress" in update:
+                        preview_state.progress = update.get("progress", 0)
+                        preview_state.current = update.get("current", 0)
+                        preview_state.total = update.get("total", 0)
+                        # 動態設定 log 屬性
+                        try:
+                            preview_state.log = update.get("log", "")
+                        except Exception:
+                            pass
+                    if "error" in update:
+                        preview_state.error = update["error"]
+                        preview_state.done = True
+                        break
+                    if "result" in update:
+                        preview_state.result = update["result"]
+                        preview_state.done = True
+            except Exception as ex:
+                preview_state.error = str(ex)
+                preview_state.done = True
+
+        def ui_poller():
+            """主執行緒輪詢：更新 UI 進度條 + log"""
+            import time
+
+            last_log = [None]  # 用 list 讓 closure 可以修改
+
+            async def _do_update():
+                progress_bar.value = preview_state.progress
+                progress_pct.value = f"{int(preview_state.progress * 100)}%"
+                cur_log = getattr(preview_state, 'log', None)
+                if cur_log:
+                    status_text.value = cur_log
+                    if cur_log != last_log[0]:
+                        add_log(cur_log)
+                        last_log[0] = cur_log
+                page.update()
+
+            while not preview_state.done and not state["cancelled"]:
+                try:
+                    page.run_task(_do_update)
+                except Exception:
+                    pass
+                time.sleep(0.1)
+
+            # 完成後的 UI 更新
+            final_result = preview_state.result
+            final_error = preview_state.error
+
+            async def _do_finalize():
+                progress_bar.value = 1.0
+                progress_pct.value = "100%"
+                status_text.value = "預覽完成"
+                start_button.disabled = False
+                state["running"] = False
+
+                if final_result:
+                    results = final_result.get("preview_results", [])
+                    add_log(f"[完成] 找到 {len(results)} 個 JAR", ft.Colors.GREEN_700)
+                    page.update()
+                    show_result_dialog(final_result)
+                elif final_error:
+                    add_log(f"[ERROR] {final_error}", ft.Colors.RED_400)
+                    status_text.value = f"預覽失敗：{final_error}"
+                    page.update()
+
+            try:
+                page.run_task(_do_finalize)
+            except Exception:
+                pass
+
+        threading.Thread(target=do_scan, daemon=True).start()
+        threading.Thread(target=ui_poller, daemon=True).start()
+
+    # ========== 建立對話框 ==========
+    start_button = ft.Button(
+        "開始預覽",
+        icon=ft.Icons.SEARCH,
+        on_click=lambda e: start_scan(),
+    )
+
+    preview_dialog = ft.AlertDialog(
+        modal=False,
+        title=ft.Row([
+            ft.Icon(ft.Icons.SEARCH, size=24, color=ft.Colors.BLUE_700),
+            ft.Text(f"預覽 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD),
+        ]),
+        content=ft.Container(
+            content=ft.Column([
+                info_text,
+                ft.Divider(),
+                ft.Row([status_text, progress_pct], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                progress_bar,
+                ft.Container(
+                    content=log_view,
+                    bgcolor="#1e1e1e",
+                    border_radius=8,
+                    padding=0,
+                ),
+            ], spacing=10),
+            width=dialog_width,
+            height=500,
+        ),
+        actions=[start_button],
+    )
+
+    page.overlay.append(preview_dialog)
+    preview_dialog.open = True
     page.update()
 
-    return dialog
+    return preview_dialog

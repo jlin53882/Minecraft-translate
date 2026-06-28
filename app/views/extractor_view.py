@@ -122,7 +122,7 @@ class ExtractorView(ft.Column):
                 self.page,
                 file_picker,
                 input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip() if (self.output_dir_textfield.value or "").strip() else (self._auto_fill_output_path(self.mods_dir_textfield.value or "", "lang") if self.mods_dir_textfield.value else ""),
                 mode="lang",
             ),
         )
@@ -139,7 +139,7 @@ class ExtractorView(ft.Column):
                 self.page,
                 file_picker,
                 input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip() if (self.output_dir_textfield.value or "").strip() else (self._auto_fill_output_path(self.mods_dir_textfield.value or "", "book") if self.mods_dir_textfield.value else ""),
                 mode="book",
             ),
         )
@@ -180,7 +180,7 @@ class ExtractorView(ft.Column):
                 self.page,
                 file_picker,
                 input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip() if (self.output_dir_textfield.value or "").strip() else (self._auto_fill_output_path(self.mods_dir_textfield.value or "", "dual") if self.mods_dir_textfield.value else ""),
                 mode="dual",
             ),
         )
