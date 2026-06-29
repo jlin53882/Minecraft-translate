@@ -22,6 +22,7 @@ from app.ui.theme import (
 )
 from app.logging.task_session import TaskSession
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_info
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
 
 
@@ -173,7 +174,7 @@ def open_merge_dialog(
 
         def on_zip_picked(e: ft.FilePickerUploadEvent):
             import sys
-            print(f"[DEBUG] on_zip_picked fired! files={e.files}", flush=True, file=sys.stderr)
+            log_info(f"on_zip_picked fired! files={e.files}")
             if not e.files:
                 return
             for f in e.files:
@@ -194,11 +195,11 @@ def open_merge_dialog(
         page.run_task(_async_pick_zip)
 
     def refresh_zip_list():
-        print(f"[Step2] Refresh zip list, count={len(merge_selected_zips)}, list={merge_selected_zips}", flush=True, file=sys.stderr)
+        log_info(f"Refresh zip list, count={len(merge_selected_zips)}, list={merge_selected_zips}")
         merge_zip_list_view.controls.clear()
         for path in merge_selected_zips:
             name = Path(path).name
-            print(f"[Step2] Adding zip row: {name}", flush=True, file=sys.stderr)
+            log_info(f"Adding zip row: {name}")
             merge_zip_list_view.controls.append(
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,

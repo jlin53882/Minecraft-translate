@@ -31,3 +31,4 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = ["backups"]
+pythonpath = ["."]

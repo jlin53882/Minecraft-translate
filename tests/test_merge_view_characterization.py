@@ -179,15 +179,16 @@ def test_merge_view_set_status_updates_chip(monkeypatch):
 
 def test_merge_view_open_output_folder(monkeypatch):
     """測試 _open_output_folder 不拋出錯誤"""
+    import subprocess
+
     monkeypatch.setattr(merge_view, 'TaskSession', _Session)
     monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(subprocess, 'Popen', lambda *a, **kw: None)
+
     view = merge_view.MergeView(mock_page(), mock_filepicker())
     view.output_dir_field.value = 'C:/Out'
 
-    try:
-        view._open_output_folder()
-    except Exception:
-        pass
+    view._open_output_folder()
 
 
 def test_merge_view_async_pick_zips(monkeypatch):

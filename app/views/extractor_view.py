@@ -24,17 +24,18 @@ from app.views.extractor.extractor_actions import (
     build_preview_result_dialog,
     show_preview as run_preview_flow,
     start_extraction as run_extraction_flow,
-    start_ui_poller as run_ui_poller,
     update_stats_from_log,
 )
-from app.views.extractor.extractor_panels import build_logs_card, build_settings_card, build_pick_button
+from app.views.extractor.extractor_panels import build_logs_panel, build_settings_panel, _build_pick_button
+from app.ui.components import styled_card
 
 class ExtractorView(ft.Column):
     """JAR 提取頁（UI）。
 
     設計概念：
     - 長任務全部寫入 TaskSession（log/progress/status）。
-    - UI 只渲染 session 的快照，避免跨執行緒操作 UI 造成不穩定。
+    - UI 只渲染 session 的快照，避免背景執行緒直接操作 UI 控制項，
+    - 這樣提取流程與畫面狀態不會互相纏在一起。
 
     維護注意：
     - 若新增新的提取模式，務必沿用同一套 session + poller 流程。
@@ -103,7 +104,12 @@ class ExtractorView(ft.Column):
             value=False,
         )
 
-        # 2. Action Buttons
+        # 2. Action Buttons - 改为打开对话框
+        from app.views.extractor.extractor_dialog import open_extractor_dialog, open_preview_dialog
+
+        # 获取 file_picker
+        file_picker = self.file_picker
+
         self.lang_button = ft.Button(
             "提取 Lang",
             icon=ft.Icons.LANGUAGE,
@@ -113,7 +119,13 @@ class ExtractorView(ft.Column):
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
-            on_click=lambda e: self.start_extraction("lang"),
+            on_click=lambda e: open_extractor_dialog(
+                self.page,
+                file_picker,
+                input_path=(self.mods_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip() if (self.output_dir_textfield.value or "").strip() else (self._auto_fill_output_path(self.mods_dir_textfield.value or "", "lang") if self.mods_dir_textfield.value else ""),
+                mode="lang",
+            ),
         )
         self.book_button = ft.Button(
             "提取 Book",
@@ -124,19 +136,37 @@ class ExtractorView(ft.Column):
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
-            on_click=lambda e: self.start_extraction("book"),
+            on_click=lambda e: open_extractor_dialog(
+                self.page,
+                file_picker,
+                input_path=(self.mods_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip() if (self.output_dir_textfield.value or "").strip() else (self._auto_fill_output_path(self.mods_dir_textfield.value or "", "book") if self.mods_dir_textfield.value else ""),
+                mode="book",
+            ),
         )
 
         # 預覽按鈕
         self.preview_lang_button = ft.OutlinedButton(
             "預覽 Lang",
             icon=ft.Icons.PREVIEW,
-            on_click=lambda e: self.show_preview("lang"),
+            on_click=lambda e: open_preview_dialog(
+                self.page,
+                file_picker,
+                input_path=(self.mods_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip(),
+                mode="lang",
+            ),
         )
         self.preview_book_button = ft.OutlinedButton(
             "預覽 Book",
             icon=ft.Icons.PREVIEW,
-            on_click=lambda e: self.show_preview("book"),
+            on_click=lambda e: open_preview_dialog(
+                self.page,
+                file_picker,
+                input_path=(self.mods_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip(),
+                mode="book",
+            ),
         )
         self.dual_extract_button = ft.Button(
             "提取 Lang + Book",
@@ -147,25 +177,28 @@ class ExtractorView(ft.Column):
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
-            on_click=lambda e: self.start_extraction("dual"),
+            on_click=lambda e: open_extractor_dialog(
+                self.page,
+                file_picker,
+                input_path=(self.mods_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip() if (self.output_dir_textfield.value or "").strip() else (self._auto_fill_output_path(self.mods_dir_textfield.value or "", "dual") if self.mods_dir_textfield.value else ""),
+                mode="dual",
+            ),
         )
         self.dual_preview_button = ft.OutlinedButton(
             "預覽 Lang + Book",
             icon=ft.Icons.PREVIEW,
-            on_click=lambda e: self.show_preview("dual"),
+            on_click=lambda e: open_preview_dialog(
+                self.page,
+                file_picker,
+                input_path=(self.mods_dir_textfield.value or "").strip(),
+                output_path=(self.output_dir_textfield.value or "").strip(),
+                mode="dual",
+            ),
         )
 
-        # 3. Status Display
-        self.status_text = ft.Text("狀態：閒置", size=14, color=theme.GREY_700)
-        self.progress_bar = ft.ProgressBar(
-            value=0,
-            visible=True,
-            height=8,
-            bgcolor=theme.GREY_200,
-            color=theme.BLUE,
-        )
-
-        # 4. Logs Console
+        # 3. Status Display（由 _build_status_bar 在 build_logs_panel 中統一建立）
+        # 4. Logs Console（由 build_logs_panel 中的 _build_status_bar 統一建立）
         self.log_view = ft.ListView(
             expand=True,
             spacing=2,
@@ -174,31 +207,62 @@ class ExtractorView(ft.Column):
         )
 
         # ======================
-        # Layout Composition
+        # Layout Composition（使用 styled_card 統一外觀）
         # ======================
+        # 即使日誌區塊不在主 UI 上顯示，我們仍然呼叫 build_logs_panel
+        # 來建立 status_text / progress_bar / log_view 等必要屬性。
+        # 日誌面板已不再加到 controls 裡（隱藏）。
+        # 透過 .visible = False 雙重保險，避免意外被渲染。
+        # 注意：這個呼叫同時會建立 _stats_success / _stats_warnings / _stats_failures
+        # 等屬性（在 build_settings_panel 內）。
+        self._logs_panel = build_logs_panel(self)
+        self._logs_panel.visible = False  # 隱藏日誌面板，不顯示在主 UI
+
         self.controls = [
-            self._build_settings_card(),
-            self._build_logs_card(),
+            styled_card(
+                title="設定",
+                icon=ft.Icons.SETTINGS,
+                content=build_settings_panel(self),
+            ),
         ]
 
         # 初始化 output_dir helper，動態讀取設定值
-        self._update_output_dir_helper()
+        # 用 try-except 避免 __init__ 階段 self.page.update() 觸發 Control must be added to the page first
+        try:
+            self._update_output_dir_helper()
+        except RuntimeError as e:
+            if "Control must be added to the page first" in str(e):
+                # 在 __init__ 階段元件還沒被加到 page，跳過 update 即可
+                pass
+            else:
+                raise
 
     def _build_settings_card(self):
-        """构建设置卡片 UI 组件"""
-        # delegate to panel builder; actual card仍使用 shared styled_card(...)
-        return build_settings_card(self)
+        """代理至 build_settings_panel，回傳設定面板元件。
+
+        回傳：
+            ft.Column，ExtractorView 的設定面板。
+        """
+        return build_settings_panel(self)
 
     def _build_logs_card(self):
-        """构建日志卡片 UI 组件"""
-        return build_logs_card(self)
+        """代理至 build_logs_panel，回傳日誌面板元件。
+
+        回傳：
+            ft.Column，ExtractorView 的日誌面板。
+        """
+        return build_logs_panel(self)
 
     # ==================================================
     # UI helpers
     # ==================================================
     def _pick_button(self, target):
-        """构建目录选择按钮"""
-        return build_pick_button(self, target)
+        """代理至 _build_pick_button，產生目錄選擇 IconButton。
+
+        參數：
+            target：選擇目錄後填入路徑的 TextField。
+        """
+        return _build_pick_button(self, target)
 
     def pick_directory(self, target):
         """開啟目錄選擇對話框。
@@ -253,7 +317,7 @@ class ExtractorView(ft.Column):
             f"自動產生資料夾名稱可以在設定頁面調整"
         )
         self.output_dir_textfield.helper = helper_text
-        self._page.update()
+        self.page.update()
 
     def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
         """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。"""
@@ -274,26 +338,56 @@ class ExtractorView(ft.Column):
         else:
             suffix = lang_extract
 
-        mods_path = Path(mods_dir)
-        output_path = str(mods_path.with_name(mods_path.name + suffix))
+        # 保護機制：只有輸出路徑為空時才自動填入，避免覆寫使用者已輸入的自訂路徑
+        if (self.output_dir_textfield.value or '').strip():
+            return
+
+        # 修正邏輯：處理路徑末尾斜線並正確合併名稱
+        # 注意：必須先轉成 str 才能呼叫 rstrip，否則會觸發 AttributeError
+        mods_path = Path(str(mods_dir).rstrip('\\/'))
+        
+        # 智慧判斷：如果名稱已經包含 suffix，則直接使用原路徑（避免重複疊加）
+        # 如果是「mods」目錄，則在 mods 旁邊產生新的資料夾
+        # 其他情況，則把 suffix 加在最後一級目錄名後面
+        if mods_path.name.lower() == "mods":
+            # 輸入是 .../mods，產生 .../mods_提取XX
+            output_path = str(mods_path.parent / (mods_path.name + suffix))
+        elif suffix in mods_path.name:
+            # 已經包含 suffix（例如使用者已經手動輸入過），直接使用原路徑
+            output_path = str(mods_path)
+        else:
+            # 其他自訂路徑，則在最後一級目錄下合併
+            output_path = str(mods_path.with_name(mods_path.name + suffix))
+
         self.output_dir_textfield.value = output_path
         self.page.update()
         self._append_log_line(f"[系統] 自動設定輸出路徑：{output_path}")
 
     def set_controls_disabled(self, disabled: bool):
-        """設定控制項停用/啟用狀態"""
+        """停用或啟用所有輸入框與按鈕（執行期間呼叫，防止重複點擊）。
+
+        包含 dual 按鈕在內的所有動作按鈕都會被停用，避免多執行緒競爭
+        _extraction_stats 寫入（Lang 提取中點 dual_extract 會造成 stats 覆蓋）。
+
+        參數：
+            disabled：True 為停用（淡化 50%），False 為啟用。
+        """
         for ctrl in (
             self.mods_dir_textfield,
             self.output_dir_textfield,
             self.lang_button,
             self.book_button,
+            self.dual_extract_button,
+            self.dual_preview_button,
+            self.preview_lang_button,
+            self.preview_book_button,
         ):
             ctrl.disabled = disabled
             ctrl.opacity = 0.5 if disabled else 1.0
         self.page.update()
 
     def clear_output_path(self, e=None):
-        """清除輸出路徑欄位"""
+        """清除輸出路徑文字欄位，並寫入系統日誌。"""
         if not (self.output_dir_textfield.value or "").strip():
             return
         self.output_dir_textfield.value = ""
@@ -301,12 +395,8 @@ class ExtractorView(ft.Column):
         self._append_log_line("[系統] 已清除輸出路徑")
 
     # ==================================================
-    # TaskSession UI Poller
+    # Worker Logic
     # ==================================================
-    def _start_ui_poller(self, mode: str = ""):
-        """启动 UI 轮询器以定期更新界面状态"""
-        return run_ui_poller(self, mode=mode)
-
     def _update_stats_from_log(self, line: str):
         """根据日志内容更新提取统计信息"""
         return update_stats_from_log(self, line)
@@ -370,13 +460,29 @@ class ExtractorView(ft.Column):
         except Exception:
             pass
 
+    def _close_dialog_overlay(self, dialog):
+        """關閉指定的 dialog 並從 page.overlay 移除。
+
+        用於：
+        - _show_extraction_summary 中「關閉」按鈕的回調
+        - 測試中清理殘留的 dialog
+        """
+        try:
+            if dialog in self.page.overlay:
+                self.page.overlay.remove(dialog)
+            dialog.open = False
+            self.page.update()
+        except Exception:
+            pass
+
+
     def _append_log_line(self, entry_or_str):
         """新增日誌訊息到日誌檢視區。
 
         支援傳入 LogEntry（PR2 後 poller 傳入）或 str（直接呼叫時）。
         """
         text = entry_or_str.text if hasattr(entry_or_str, "text") else entry_or_str
-        log_info(f"[DEBUG] _append_log_line called: thread={threading.current_thread().name}, text={text[:80]}...")
+        log_info(f"_append_log_line called: thread={threading.current_thread().name}, text={text[:80]}...")
         color = "#e0e0e0"  # default logs are light grey
         if "[ERROR]" in text:
             color = "#ff6b6b"  # soft red
@@ -385,7 +491,7 @@ class ExtractorView(ft.Column):
         elif "Translation" in text or "完成" in text:
             color = "#74c0fc"  # soft blue
 
-        log_info(f"[DEBUG] _append_log_line: before append, log_view.controls count={len(self.log_view.controls)}")
+        log_info(f"_append_log_line: before append, log_view.controls count={len(self.log_view.controls)}")
         self.log_view.controls.append(
             ft.Text(
                 text,
@@ -395,13 +501,16 @@ class ExtractorView(ft.Column):
                 selectable=True,
             )
         )
-        log_info(f"[DEBUG] _append_log_line: after append, log_view.controls count={len(self.log_view.controls)}")
+        log_info(f"_append_log_line: after append, log_view.controls count={len(self.log_view.controls)}")
 
     # ==================================================
     # Worker Logic
     # ==================================================
     def start_extraction(self, mode: str):
-        """启动 JAR 文件提取任务（lang 或 book 模式）"""
+        """啟動 JAR 提取任務（lang / book / dual）。
+
+        實際工作代理至 extractor_actions.start_extraction（run_extraction_flow）。
+        """
         return run_extraction_flow(self, mode)
 
     def _show_snack_bar(self, message: str, color: str = theme.ERROR):
@@ -429,44 +538,8 @@ class ExtractorView(ft.Column):
     # 預覽功能
     # ==================================================
     def show_preview(self, mode: str):
-        """显示提取预览对话框（lang 或 book 模式）"""
+        """顯示提取預覽對話框（lang / book / dual）。
+
+        實際工作代理至 extractor_actions.show_preview（run_preview_flow）。
+        """
         return run_preview_flow(self, mode)
-
-    def _show_preview_dialog_result(self, result: dict, mode: str):
-        """显示预览结果对话框"""
-        dialog = build_preview_result_dialog(self, result, mode)
-        self.page.overlay.append(dialog)
-        dialog.open = True
-        async def _do_update(_):
-            self.page.update()
-        self.page.run_task(_do_update, None)
-
-    def _show_preview_dialog_error(self, error: str, mode: str):
-        """显示预览错误对话框"""
-        self._preview_error_dialog = build_preview_error_dialog(self, error, mode)
-        self.page.overlay.append(self._preview_error_dialog)
-        self._preview_error_dialog.open = True
-        async def _do_update(_):
-            self.page.update()
-        self.page.run_task(_do_update, None)
-
-    def _close_dialog_overlay(self, dialog):
-        """關閉 overlay 對話框並重置 UI 狀態"""
-        try:
-            dialog.open = False
-            self.status_text.value = '狀態：閒置'
-            self.progress_bar.value = 0
-            self.progress_bar.color = ft.Colors.BLUE
-            self.set_controls_disabled(False)
-            self.page.update()
-        except Exception:
-            pass
-
-    def _start_from_preview_overlay(self, dialog, mode: str):
-        """從預覽對話框開始提取（overlay 版本）"""
-        self._close_dialog_overlay(dialog)
-        self.start_extraction(mode)
-
-    @property
-    def page(self):
-        return self._page

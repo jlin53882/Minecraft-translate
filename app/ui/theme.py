@@ -323,7 +323,7 @@ YELLOW_900 = Colors.YELLOW_900
 
 # Basic
 BLACK = Colors.BLACK
-BLACK12 = Colors.BLACK12
+BLACK12 = Colors.BLACK_12
 WHITE = Colors.WHITE
 
 # Outline

@@ -2,6 +2,18 @@ import sys
 import tempfile
 import shutil
 from pathlib import Path
+import pytest
+
+# 移除 hermes-agent/tests 從 sys.path，避免它跟我們的 tests 套件命名衝突
+# 這是 hermes-agent 自身 conftest 注入的，但對於我們專案的測試會造成問題
+# （`from tests.conftest import mock_page` 會去 hermes-agent/tests 找 mock_page 而失敗）
+_hermes_agent_tests = Path.home() / "AppData" / "Local" / "hermes" / "hermes-agent" / "tests"
+if _hermes_agent_tests.exists():
+    _hermes_agent_tests_resolved = _hermes_agent_tests.resolve()
+    sys.path = [
+        p for p in sys.path
+        if not (Path(p).resolve() == _hermes_agent_tests_resolved)
+    ]
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -39,6 +51,66 @@ ft.Border.all = staticmethod(_border_all)
 def pytest_configure(config):
     """Pytest 配置。"""
     config.addinivalue_line("markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')")
+
+
+@pytest.fixture(autouse=True)
+def _patch_flet_page_property():
+    """自動 patch Flet 的 BaseControl.page 屬性。
+
+    Flet 的 BaseControl.page 是個 property，會從 self.parent 一路往上找到 Page 物件。
+    在測試環境中，view 沒有真的被加到 page tree，所以這個 getter 會拋
+    `RuntimeError: Control must be added to the page first`。
+
+    這個 autouse fixture 會暫時把 BaseControl.page 換成一個會回傳 mock_page 的 property，
+    這樣 view.page.update() / view.page.overlay.append() 等操作就不會失敗。
+
+    這個 patch 在每個測試結束後會自動還原（yield 後的程式碼）。
+    """
+    import flet as ft
+    from flet.controls.base_control import BaseControl
+
+    # 暫存原本的 page property
+    _original_page = BaseControl.page
+
+    # 給每個 control instance 自己的 mock page 物件
+    # 用 instance attribute 來儲存
+    def _mock_page_getter(self):
+        # 優先用 self._test_page（測試可手動設定）
+        if hasattr(self, "_test_page"):
+            return self._test_page
+        # 否則用 self._page 屬性（很多地方會設定）
+        if hasattr(self, "_page"):
+            return self._page
+        # 都沒有就回傳一個空的 mock
+        return _EmptyPage()
+
+    class _EmptyPage:
+        """最簡單的 mock page，避免 view.page 拋 RuntimeError。"""
+        def __init__(self):
+            self.overlay = []
+            self.updated = 0
+            self._tasks = []
+
+        def update(self, *args, **kwargs):
+            self.updated += 1
+
+        def open(self, dialog):
+            self.overlay.append(dialog)
+            dialog.open = True
+
+        def close(self, dialog):
+            dialog.open = False
+
+        def run_task(self, coro, *args):
+            self._tasks.append((coro, args))
+
+    # patch BaseControl.page
+    BaseControl.page = property(_mock_page_getter)
+
+    yield
+
+    # 還原
+    BaseControl.page = _original_page
 
 
 # -----------------------------------------------------------------------------
