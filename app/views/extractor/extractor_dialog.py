@@ -13,10 +13,8 @@
 import flet as ft
 import threading
 import os
-from pathlib import Path
 
 from app.ui import theme
-from translation_tool.utils.config_manager import load_config
 from app.services_impl.pipelines.extract_service import (
     prepare_extraction_paths,
     prepare_preview_paths,

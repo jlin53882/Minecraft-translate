@@ -24,8 +24,6 @@ Logs（右欄）：
   - 每個卡片獨立的邊框 + 灰底 radius=10 包裝，統一視覺一致性
 """
 
-from __future__ import annotations
-
 import flet as ft
 
 from app.ui import theme

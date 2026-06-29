@@ -11,8 +11,6 @@ PR19：將 extract 類 service 從 app.services.py 抽離到 pipelines 子模組
 - 透過 TaskSession 統一管理任務狀態、日誌、進度
 """
 
-from __future__ import annotations
-
 import logging
 import os
 import traceback

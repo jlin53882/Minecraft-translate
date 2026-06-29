@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import threading
 
 from translation_tool.utils.log_unit import log_warning, log_debug
