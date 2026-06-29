@@ -18,6 +18,7 @@ from pathlib import Path
 from app.ui import theme
 from translation_tool.utils.config_manager import load_config
 from app.services_impl.pipelines.extract_service import (
+    prepare_extraction_paths,
     run_lang_extraction_service,
     run_book_extraction_service,
 )
@@ -57,32 +58,14 @@ def open_extractor_dialog(
     mods_dir = input_path
     output_dir = output_path  # 可為空
 
-    # 如果未指定輸出目錄，使用 Mod 來源目錄
-    if not output_dir:
-        output_dir = mods_dir
+    # ✅ 第一階段重構：路徑拼接邏輯已抽離至 Service 層
+    # 由 prepare_extraction_paths 統一處理 config 讀取與子資料夾命名
+    final_output = prepare_extraction_paths(mods_dir, mode, output_dir)
 
-    # 讀取配置
+    # 讀取 lang_codes（保留在 dialog 內，因為這是 Generator 參數，不屬於路徑規則）
+    from translation_tool.utils.config_manager import load_config
     cfg = load_config()
     lang_codes = cfg.get("jar_extractor", {}).get("lang_codes", ["en_us", "zh_cn", "zh_tw"])
-    folder_names = cfg.get("extractor", {}).get("output_folder_names", {})
-    lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
-    book_extract = folder_names.get("book_extract", "_提取book_輸出")
-    dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
-
-    # 根據 mode 產生輸出子資料夾
-    if mode == "lang":
-        output_subdir = lang_extract
-    elif mode == "book":
-        output_subdir = book_extract
-    else:  # dual
-        output_subdir = dual_extract
-
-    # 始終補上子資料夾名稱（讓輸出結構清晰）
-    if output_dir:
-        final_output = os.path.join(output_dir, output_subdir)
-    else:
-        # 若未指定，使用 mods_dir 作為基礎
-        final_output = os.path.join(mods_dir, output_subdir) if mods_dir else ""
 
     # 狀態變數
     state = {
