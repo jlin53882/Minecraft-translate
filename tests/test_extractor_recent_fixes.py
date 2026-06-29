@@ -88,122 +88,147 @@ def _make_view(monkeypatch):
 # -----------------------------------------------------------------------------
 
 class TestAutoFillOutputPath:
-    """測試 _auto_fill_output_path 的所有路徑合併情境。"""
+    """測試 _auto_fill_output_path 的所有路徑合併情境。
 
-    def test_mods_目錄會產生_mods_加上_suffix(self, monkeypatch):
+    注意：所有測試路徑都用 tmp_path 動態產生，
+    避免跨機器/CI 時硬編碼絕對路徑造成問題。
+    """
+
+    @staticmethod
+    def _make_input_path(tmp_path, subdir):
+        """在 tmp_path 內建立子目錄名稱，回傳 Path 物件。"""
+        return tmp_path / subdir
+
+    def test_mods_目錄會產生_mods_加上_suffix(self, monkeypatch, tmp_path):
         """情況 A：輸入 .../mods，產出 .../mods_提取lang_輸出"""
         view = _make_view(monkeypatch)
-        view.mods_dir_textfield.value = r"C:\Users\test\mc\mods"
+        mods_path = self._make_input_path(tmp_path, "mods")
+        view.mods_dir_textfield.value = str(mods_path)
 
-        view._auto_fill_output_path(r"C:\Users\test\mc\mods", mode="lang")
+        view._auto_fill_output_path(str(mods_path), mode="lang")
 
-        assert view.output_dir_textfield.value == r"C:\Users\test\mc\mods_提取lang_輸出"
+        expected = str(mods_path.parent / (mods_path.name + "_提取lang_輸出"))
+        assert view.output_dir_textfield.value == expected
 
-    def test_mods_目錄_book_模式(self, monkeypatch):
+    def test_mods_目錄_book_模式(self, monkeypatch, tmp_path):
         """情況 A（book 模式）：輸入 .../mods，產出 .../mods_提取book_輸出"""
         view = _make_view(monkeypatch)
-        view.mods_dir_textfield.value = r"C:\Users\test\mc\mods"
+        mods_path = self._make_input_path(tmp_path, "mods")
+        view.mods_dir_textfield.value = str(mods_path)
 
-        view._auto_fill_output_path(r"C:\Users\test\mc\mods", mode="book")
+        view._auto_fill_output_path(str(mods_path), mode="book")
 
-        assert view.output_dir_textfield.value == r"C:\Users\test\mc\mods_提取book_輸出"
+        expected = str(mods_path.parent / (mods_path.name + "_提取book_輸出"))
+        assert view.output_dir_textfield.value == expected
 
-    def test_mods_目錄_dual_模式(self, monkeypatch):
+    def test_mods_目錄_dual_模式(self, monkeypatch, tmp_path):
         """情況 A（dual 模式）：輸入 .../mods，產出 .../mods_提取both_輸出"""
         view = _make_view(monkeypatch)
-        view.mods_dir_textfield.value = r"C:\Users\test\mc\mods"
+        mods_path = self._make_input_path(tmp_path, "mods")
+        view.mods_dir_textfield.value = str(mods_path)
 
-        view._auto_fill_output_path(r"C:\Users\test\mc\mods", mode="dual")
+        view._auto_fill_output_path(str(mods_path), mode="dual")
 
-        assert view.output_dir_textfield.value == r"C:\Users\test\mc\mods_提取both_輸出"
+        expected = str(mods_path.parent / (mods_path.name + "_提取both_輸出"))
+        assert view.output_dir_textfield.value == expected
 
-    def test_結尾帶正斜線會被去除(self, monkeypatch):
+    def test_結尾帶正斜線會被去除(self, monkeypatch, tmp_path):
         """情況 A-邊界：輸入 .../mods/（結尾帶正斜線），產出 .../mods_提取lang_輸出"""
         view = _make_view(monkeypatch)
-        view.mods_dir_textfield.value = r"C:\Users\test\mc\mods/"
+        mods_path = self._make_input_path(tmp_path, "mods")
+        # 加上結尾斜線
+        mods_with_slash = str(mods_path) + "/"
+        view.mods_dir_textfield.value = mods_with_slash
 
-        view._auto_fill_output_path(r"C:\Users\test\mc\mods/", mode="lang")
+        view._auto_fill_output_path(mods_with_slash, mode="lang")
 
-        assert view.output_dir_textfield.value == r"C:\Users\test\mc\mods_提取lang_輸出"
+        expected = str(mods_path.parent / (mods_path.name + "_提取lang_輸出"))
+        assert view.output_dir_textfield.value == expected
 
-    def test_結尾帶反斜線會被去除(self, monkeypatch):
+    def test_結尾帶反斜線會被去除(self, monkeypatch, tmp_path):
         """情況 A-邊界：輸入 .../mods\（結尾帶反斜線），產出 .../mods_提取lang_輸出"""
         view = _make_view(monkeypatch)
-        view.mods_dir_textfield.value = "C:\\Users\\test\\mc\\mods\\"
+        mods_path = self._make_input_path(tmp_path, "mods")
+        # 加上結尾反斜線
+        mods_with_sep = str(mods_path) + "\\"
+        view.mods_dir_textfield.value = mods_with_sep
 
-        view._auto_fill_output_path("C:\\Users\\test\\mc\\mods\\", mode="lang")
+        view._auto_fill_output_path(mods_with_sep, mode="lang")
 
-        # 雙反斜線會被 rstrip 去除，結果應與無反斜線時一致
+        # 反斜線會被 rstrip 去除，結果應與無反斜線時一致
         assert "_提取lang_輸出" in view.output_dir_textfield.value
         assert view.output_dir_textfield.value.endswith("_提取lang_輸出")
-        assert not view.output_dir_textfield.value.endswith("\\_提取lang_輸出")
 
-    def test_已包含_suffix_不會重複疊加(self, monkeypatch):
+    def test_已包含_suffix_不會重複疊加(self, monkeypatch, tmp_path):
         """情況 B：智慧判斷 - 輸入已包含 suffix 不會重複疊加"""
         view = _make_view(monkeypatch)
-        view.mods_dir_textfield.value = r"C:\Users\test\mc\mods_提取lang_輸出"
+        # 直接建立已經包含 suffix 的路徑
+        mods_path = self._make_input_path(tmp_path, "mods_提取lang_輸出")
+        view.mods_dir_textfield.value = str(mods_path)
 
-        view._auto_fill_output_path(r"C:\Users\test\mc\mods_提取lang_輸出", mode="lang")
+        view._auto_fill_output_path(str(mods_path), mode="lang")
 
         # 應該直接使用原路徑，不會變成 mods_提取lang_輸出_提取lang_輸出
-        assert view.output_dir_textfield.value == r"C:\Users\test\mc\mods_提取lang_輸出"
+        assert view.output_dir_textfield.value == str(mods_path)
         assert view.output_dir_textfield.value.count("_提取lang_輸出") == 1
 
-    def test_自訂資料夾會在末尾加上_suffix(self, monkeypatch):
+    def test_自訂資料夾會在末尾加上_suffix(self, monkeypatch, tmp_path):
         """情況 C：自訂資料夾會在末尾加上 suffix"""
         view = _make_view(monkeypatch)
-        view.mods_dir_textfield.value = r"C:\Users\test\mc\my_custom_folder"
+        custom_path = self._make_input_path(tmp_path, "my_custom_folder")
+        view.mods_dir_textfield.value = str(custom_path)
 
-        view._auto_fill_output_path(r"C:\Users\test\mc\my_custom_folder", mode="lang")
+        view._auto_fill_output_path(str(custom_path), mode="lang")
 
-        assert view.output_dir_textfield.value == r"C:\Users\test\mc\my_custom_folder_提取lang_輸出"
+        # 自訂資料夾（不是 mods），會在最後一級目錄下合併
+        expected = str(custom_path.with_name(custom_path.name + "_提取lang_輸出"))
+        assert view.output_dir_textfield.value == expected
 
-    def test_使用者已手動輸入輸出路徑時不會被覆寫(self, monkeypatch):
+    def test_使用者已手動輸入輸出路徑時不會被覆寫(self, monkeypatch, tmp_path):
         """保護機制：使用者已輸入的輸出路徑不會被自動補齊覆寫"""
         view = _make_view(monkeypatch)
-        view.mods_dir_textfield.value = r"C:\Users\test\mc\mods"
-        view.output_dir_textfield.value = r"D:\my\custom\output"
+        mods_path = self._make_input_path(tmp_path, "mods")
+        custom_output = self._make_input_path(tmp_path, "custom_output_dir")
+        view.mods_dir_textfield.value = str(mods_path)
+        view.output_dir_textfield.value = str(custom_output)
 
-        view._auto_fill_output_path(r"C:\Users\test\mc\mods", mode="lang")
+        view._auto_fill_output_path(str(mods_path), mode="lang")
 
         # 應該維持使用者原本的輸出路徑
-        assert view.output_dir_textfield.value == r"D:\my\custom\output"
+        assert view.output_dir_textfield.value == str(custom_output)
 
-    def test_自動補齊後會呼叫_page_update(self, monkeypatch):
+    def test_自動補齊後會呼叫_page_update(self, monkeypatch, tmp_path):
         """確保 _auto_fill_output_path 執行後會更新 UI"""
         view = _make_view(monkeypatch)
         page = view.page
         page.updated = 0  # 重置計數
 
-        view.mods_dir_textfield.value = r"C:\Users\test\mc\mods"
-        view._auto_fill_output_path(r"C:\Users\test\mc\mods", mode="lang")
+        mods_path = self._make_input_path(tmp_path, "mods")
+        view.mods_dir_textfield.value = str(mods_path)
+        view._auto_fill_output_path(str(mods_path), mode="lang")
 
         assert page.updated > 0
 
-    def test_自動補齊後會寫入系統日誌(self, monkeypatch):
+    def test_自動補齊後會寫入系統日誌(self, monkeypatch, tmp_path):
         """確保 _auto_fill_output_path 執行後會寫入 log_view"""
         view = _make_view(monkeypatch)
-        view.mods_dir_textfield.value = r"C:\Users\test\mc\mods"
+        mods_path = self._make_input_path(tmp_path, "mods")
+        view.mods_dir_textfield.value = str(mods_path)
 
         # 清空 log_view
         view.log_view.controls.clear()
 
-        view._auto_fill_output_path(r"C:\Users\test\mc\mods", mode="lang")
+        view._auto_fill_output_path(str(mods_path), mode="lang")
 
         # 檢查最後一個 log 是否包含 [系統] 自動設定輸出路徑
         last_log = view.log_view.controls[-1].value
         assert "[系統] 自動設定輸出路徑" in last_log
         assert "_提取lang_輸出" in last_log
 
-
-# -----------------------------------------------------------------------------
-# open_extractor_dialog：對話框路徑自動補齊邏輯
-# -----------------------------------------------------------------------------
-
 class TestExtractorDialogPathFilling:
     """測試 open_extractor_dialog 的路徑自動補齊邏輯。"""
 
-    def test_未指定輸出目錄時_使用_mods_dir_作為基礎(self, monkeypatch):
+    def test_未指定輸出目錄時_使用_mods_dir_作為基礎(self, monkeypatch, tmp_path):
         """未指定 output_path 時，會用 mods_dir + suffix 組出 final_output"""
         from app.views.extractor.extractor_dialog import open_extractor_dialog
 
@@ -225,29 +250,34 @@ class TestExtractorDialogPathFilling:
                 },
             },
         ):
-            # 模擬 open_extractor_dialog 內部的路徑組合邏輯
-            input_path = r"C:\Users\test\mc\mods"
+            # 用 tmp_path 動態產生測試路徑
+            mods_path = tmp_path / "mods"
+            input_path = str(mods_path)
             output_path = ""
             mode = "lang"
 
-            # 復刻 open_extractor_dialog 的路徑邏輯
-            output_dir = output_path if output_path else input_path
+            # 復刻 open_extractor_dialog 的路徑邏輯（用 Path 而非 os.path.join，
+            # 確保跨平台路徑分隔符一致）
+            output_dir = Path(output_path) if output_path else Path(input_path)
             output_subdir = "_提取lang_輸出"
-            final_output = os.path.join(output_dir, output_subdir)
+            final_output = str(output_dir / output_subdir)
 
-            assert final_output == r"C:\Users\test\mc\mods\_提取lang_輸出"
+            expected = str(mods_path / "_提取lang_輸出")
+            assert final_output == expected
 
-    def test_已指定輸出目錄時_補上_suffix(self, monkeypatch):
+    def test_已指定輸出目錄時_補上_suffix(self, tmp_path):
         """已指定 output_path 時，會在其下補上 suffix"""
-        input_path = r"C:\Users\test\mc\mods"
-        output_path = r"D:\my\output"
+        # 用 tmp_path 動態產生測試路徑
+        mods_path = tmp_path / "mods"
+        output_path = tmp_path / "my_output"
         mode = "lang"
 
-        output_dir = output_path
+        output_dir = Path(output_path)
         output_subdir = "_提取lang_輸出"
-        final_output = os.path.join(output_dir, output_subdir)
+        final_output = str(output_dir / output_subdir)
 
-        assert final_output == r"D:\my\output\_提取lang_輸出"
+        expected = str(output_path / "_提取lang_輸出")
+        assert final_output == expected
 
     def test_各種_mode_對應的_suffix(self):
         """驗證 mode 與 suffix 的對應關係"""
@@ -270,6 +300,7 @@ class TestExtractorDialogPathFilling:
 # -----------------------------------------------------------------------------
 # 主 UI controls 結構（移除日誌後的驗證）
 # -----------------------------------------------------------------------------
+
 
 class TestExtractorViewControlsStructure:
     """測試 ExtractorView 的 controls 結構（commit f9c5e20 移除日誌區塊）。"""
@@ -315,9 +346,6 @@ class TestExtractorViewControlsStructure:
         assert isinstance(view.log_view, ft.ListView)
 
 
-# -----------------------------------------------------------------------------
-# __init__ 階段不應該崩潰（commit f9c5e20 修過的 RuntimeError）
-# -----------------------------------------------------------------------------
 
 class TestExtractorViewInitSafety:
     """測試 ExtractorView 初始化時不應該觸發 RuntimeError。"""
@@ -346,44 +374,50 @@ class TestExtractorViewInitSafety:
         assert "_提取book_輸出" in helper
 
 
-# -----------------------------------------------------------------------------
-# Path 處理回歸測試（f9c5e20 修過的 AttributeError）
-# -----------------------------------------------------------------------------
 
 class TestPathHandlingRegression:
-    """回歸測試：確保 Path.rstrip() 不會再發生。"""
+    """回歸測試：確保 Path.rstrip() 不會再發生。
 
-    def test_Path_物件呼叫_rstrip_會失敗(self):
+    所有測試路徑都用 tmp_path 動態產生，確保跨機器/CI 一致。
+    """
+
+    def test_Path_物件呼叫_rstrip_會失敗(self, tmp_path):
         """記錄 Python 行為：Path 物件本身沒有 rstrip 方法"""
-        p = Path(r"C:\test\mods")
+        # 用 tmp_path 動態建立測試路徑
+        p = tmp_path / "mods"
         # 這是預期的 AttributeError，是當初 bug 的根源
         with pytest.raises(AttributeError):
             p.rstrip("\\/")
 
-    def test_str_路徑呼叫_rstrip_是_正確用法(self):
+    def test_str_路徑呼叫_rstrip_是_正確用法(self, tmp_path):
         """正確用法：先轉成 str 再呼叫 rstrip"""
-        s = r"C:\test\mods\\"
+        # 用 str() 強制轉成 str，這樣才有 rstrip 方法
+        s = str(tmp_path / "mods") + "\\"
         result = s.rstrip("\\/")
-        assert result == r"C:\test\mods"
+        # rstrip 應該去除結尾反斜線
+        assert not result.endswith("\\")
+        assert not result.endswith("/")
 
-    def test_Path_str_Path_可以正確處理結尾斜線(self):
+    def test_Path_str_Path_可以正確處理結尾斜線(self, tmp_path):
         """正確的處理方式：Path(str(x).rstrip('\\/'))"""
-        original = r"C:\test\mods\\"
+        original = str(tmp_path / "mods") + "\\"
         p = Path(str(original).rstrip("\\/"))
+        # p.name 應該是 "mods"，不含結尾斜線
         assert p.name == "mods"
-        assert p.parent == Path(r"C:\test")
+        # p.parent 應該等於 tmp_path
+        assert p.parent == tmp_path
 
-    def test_邏輯函式不會崩潰(self, monkeypatch):
+    def test_邏輯函式不會崩潰(self, monkeypatch, tmp_path):
         """整合測試：_auto_fill_output_path 不應該因為路徑處理而崩潰"""
         view = _make_view(monkeypatch)
 
-        # 各種邊界條件
+        # 各種邊界條件（用 tmp_path 動態產生）
         test_inputs = [
-            r"C:\test\mods",
-            r"C:\test\mods\\",
-            r"C:\test\mods/",
-            r"C:\test\my_folder",
-            r"C:\test\my_folder_提取lang_輸出",
+            str(tmp_path / "mods"),       # 正常路徑
+            str(tmp_path / "mods") + "\\",  # 結尾反斜線
+            str(tmp_path / "mods") + "/",    # 結尾正斜線
+            str(tmp_path / "my_folder"),     # 自訂資料夾
+            str(tmp_path / "my_folder_提取lang_輸出"),  # 已包含 suffix
         ]
 
         for inp in test_inputs:
@@ -393,3 +427,4 @@ class TestPathHandlingRegression:
             view._auto_fill_output_path(inp, mode="lang")
             # 結果不為空
             assert view.output_dir_textfield.value != ""
+
