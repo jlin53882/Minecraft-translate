@@ -96,10 +96,7 @@ def test_scan_progress_throttled_to_5s_interval():
 
     Source-level 檢查：確認節流邏輯存在於 jar_processor_extract.py。
     """
-    src = open(
-        Path(__file__).resolve().parent.parent / "translation_tool" / "core" / "jar_processor_extract.py",
-        encoding="utf-8",
-    ).read()
+    src = (Path(__file__).resolve().parent.parent / "translation_tool" / "core" / "jar_processor_extract.py").read_text(encoding="utf-8")
     assert "YIELD_INTERVAL = 5.0" in src, "YIELD_INTERVAL throttle must be 5.0s"
     assert "last_yielded_at" in src, "last_yielded_at throttle state must exist"
     # 確認 yield 是 conditional（在 if 條件內）
@@ -118,10 +115,7 @@ def test_main_uses_named_pipeline_lookup():
     註解內提及 registry[10]（歷史說明）允許存在；只檢查實際執行語句。
     """
     import re
-    main_src = open(
-        Path(__file__).resolve().parent.parent / "main.py",
-        encoding="utf-8",
-    ).read()
+    main_src = (Path(__file__).resolve().parent.parent / "main.py").read_text(encoding="utf-8")
     # 移除所有 docstring + 註解行（保留執行語句）
     # 1. 移除 docstring
     no_doc = re.sub(r'"""[\s\S]*?"""', "", main_src)
@@ -147,10 +141,7 @@ def test_main_pipeline_missing_raises_runtime_error():
 
     # 載入 main module（不真的執行 page setup，只驗證 import 路徑）
     # main() 需要 flet page，無法直接呼叫，改為驗證原始碼有 raise 邏輯
-    main_src = open(
-        Path(__file__).resolve().parent.parent / "main.py",
-        encoding="utf-8",
-    ).read()
+    main_src = (Path(__file__).resolve().parent.parent / "main.py").read_text(encoding="utf-8")
     assert "RuntimeError" in main_src, "main must raise RuntimeError on missing pipeline view"
     assert "pipeline view not found" in main_src or "Available keys" in main_src
 
@@ -161,10 +152,7 @@ def test_main_pipeline_missing_raises_runtime_error():
 
 def test_show_preview_uses_threading_event():
     """Regression: show_preview poll 必須使用 threading.Event 控制生命週期。"""
-    src = open(
-        Path(__file__).resolve().parent.parent / "app" / "views" / "extractor" / "extractor_actions.py",
-        encoding="utf-8",
-    ).read()
+    src = (Path(__file__).resolve().parent.parent / "app" / "views" / "extractor" / "extractor_actions.py").read_text(encoding="utf-8")
     assert "stop_event = threading.Event()" in src, "show_preview must create stop_event"
     assert "stop_event.is_set()" in src, "poll loop must check stop_event"
     assert "stop_event.wait(timeout=0.1)" in src, "poll must use wait(timeout=...) not time.sleep"

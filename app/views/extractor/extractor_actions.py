@@ -448,7 +448,11 @@ def show_preview(view, mode: str):
                     view.status_text.value = '狀態：預覽掃描中...'
                 view.page.update()
 
-            view.page.run_task(_do_update, None)
+            try:
+                view.page.run_task(_do_update, None)
+            except Exception:
+                # view 可能已經脫離 page tree（測試情境），直接退出
+                return
             # 檢查 stop_event 而不是固定 sleep，新請求時舊 poll 可即時退出
             if stop_event.wait(timeout=0.1):
                 return
@@ -461,7 +465,10 @@ def show_preview(view, mode: str):
             log_debug(f"[DEBUG] poll: calling _append_log_line: {log_final[:80]}...")
             view._append_log_line(log_final)
 
-        view.page.run_task(_do_preview_finish, None)
+        try:
+            view.page.run_task(_do_preview_finish, None)
+        except Exception:
+            pass
 
         async def _do_show_preview_result(_):
             try:
@@ -513,6 +520,9 @@ def show_preview(view, mode: str):
                 view._append_log_line('[WARN] 預覽無結果')
                 view._show_snack_bar('預覽無結果', ft.Colors.ORANGE_400)
 
-        view.page.run_task(_do_show_preview_result, None)
+        try:
+            view.page.run_task(_do_show_preview_result, None)
+        except Exception:
+            pass
 
     threading.Thread(target=poll, daemon=True).start()
