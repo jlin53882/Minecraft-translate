@@ -133,7 +133,7 @@ class TestAutoFillOutputPathGuard:
                 }
             }
         }
-        with patch("translation_tool.utils.config_manager.load_config", return_value=mock_cfg):
+        with patch("app.services_impl.pipelines.extract_service.load_config", return_value=mock_cfg):
             view = self._make_view(output_value="C:/user/custom/path")
             original_value = view.output_dir_textfield.value
 
@@ -154,7 +154,7 @@ class TestAutoFillOutputPathGuard:
                 }
             }
         }
-        with patch("translation_tool.utils.config_manager.load_config", return_value=mock_cfg):
+        with patch("app.services_impl.pipelines.extract_service.load_config", return_value=mock_cfg):
             view = self._make_view(output_value="")
             assert view.output_dir_textfield.value == ""
 
@@ -172,7 +172,7 @@ class TestAutoFillOutputPathGuard:
                 }
             }
         }
-        with patch("translation_tool.utils.config_manager.load_config", return_value=mock_cfg):
+        with patch("app.services_impl.pipelines.extract_service.load_config", return_value=mock_cfg):
             view = self._make_view(output_value="   ")
             assert (view.output_dir_textfield.value or "").strip() == ""
 
@@ -192,7 +192,7 @@ class TestAutoFillOutputPathGuard:
                 }
             }
         }
-        with patch("translation_tool.utils.config_manager.load_config", return_value=mock_cfg):
+        with patch("app.services_impl.pipelines.extract_service.load_config", return_value=mock_cfg):
             for mode, expected_suffix in [("lang", "_LANG"), ("book", "_BOOK"), ("dual", "_DUAL")]:
                 view = self._make_view(output_value="")
                 view._auto_fill_output_path("/test/mods", mode=mode)

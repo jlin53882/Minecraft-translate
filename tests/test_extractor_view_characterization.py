@@ -234,7 +234,7 @@ def test_auto_fill_output_path_lang_mode(monkeypatch):
             }
         }
     }
-    monkeypatch.setattr('translation_tool.utils.config_manager.load_config', lambda: mock_cfg)
+    monkeypatch.setattr('app.services_impl.pipelines.extract_service.load_config', lambda: mock_cfg)
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
 
@@ -254,7 +254,7 @@ def test_auto_fill_output_path_book_mode(monkeypatch):
             }
         }
     }
-    monkeypatch.setattr('translation_tool.utils.config_manager.load_config', lambda: mock_cfg)
+    monkeypatch.setattr('app.services_impl.pipelines.extract_service.load_config', lambda: mock_cfg)
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
 
@@ -274,7 +274,7 @@ def test_auto_fill_output_path_dual_mode(monkeypatch):
             }
         }
     }
-    monkeypatch.setattr('translation_tool.utils.config_manager.load_config', lambda: mock_cfg)
+    monkeypatch.setattr('app.services_impl.pipelines.extract_service.load_config', lambda: mock_cfg)
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
 
@@ -292,7 +292,7 @@ def test_auto_fill_output_path_falls_back_to_default_on_unknown_mode(monkeypatch
             }
         }
     }
-    monkeypatch.setattr('translation_tool.utils.config_manager.load_config', lambda: mock_cfg)
+    monkeypatch.setattr('app.services_impl.pipelines.extract_service.load_config', lambda: mock_cfg)
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
 

@@ -87,6 +87,28 @@ def prepare_extraction_paths(mods_dir: str, mode: str, output_path: str = "") ->
     return ""
 
 
+def get_output_folder_names() -> dict[str, str]:
+    """取得 config 中的 output_folder_names 設定（含預設值）。
+
+    取代 View 層內直接呼叫 load_config() + folder_names.get() 的樣板程式碼。
+    讓 View 層只需呼叫此函數即可取得所有命名規則。
+
+    Returns:
+        dict 包含以下 key：
+        - lang_extract / book_extract / dual_extract（提取模式的子資料夾名）
+        - lang_preview / book_preview（預覽模式的子資料夾名）
+    """
+    cfg = load_config()
+    folder_names = cfg.get("extractor", {}).get("output_folder_names", {})
+    return {
+        "lang_extract": folder_names.get("lang_extract", "_提取lang_輸出"),
+        "book_extract": folder_names.get("book_extract", "_提取book_輸出"),
+        "dual_extract": folder_names.get("dual_extract", "_提取both_輸出"),
+        "lang_preview": folder_names.get("lang_preview", "_預覽lang_輸出"),
+        "book_preview": folder_names.get("book_preview", "_預覽book_輸出"),
+    }
+
+
 def _run_extraction_with_session(
     generator,
     session: TaskSession,
