@@ -19,6 +19,8 @@ from app.ui import theme
 from translation_tool.utils.config_manager import load_config
 from app.services_impl.pipelines.extract_service import (
     prepare_extraction_paths,
+    prepare_preview_paths,
+    get_lang_codes,
     run_lang_extraction_service,
     run_book_extraction_service,
     run_extraction_loop,
@@ -64,10 +66,8 @@ def open_extractor_dialog(
     # 由 prepare_extraction_paths 統一處理 config 讀取與子資料夾命名
     final_output = prepare_extraction_paths(mods_dir, mode, output_dir)
 
-    # 讀取 lang_codes（保留在 dialog 內，因為這是 Generator 參數，不屬於路徑規則）
-    from translation_tool.utils.config_manager import load_config
-    cfg = load_config()
-    lang_codes = cfg.get("jar_extractor", {}).get("lang_codes", ["en_us", "zh_cn", "zh_tw"])
+    # ✅ 階段 B-2 重構：lang_codes 讀取已抽離至 extract_service.get_lang_codes()
+    lang_codes = get_lang_codes()
 
     # 狀態變數
     state = {
@@ -527,17 +527,8 @@ def open_preview_dialog(
         # 若輸出路徑是空的，自動設定
         actual_output = output_path
         if not actual_output:
-            from translation_tool.utils.config_manager import load_config
-            config = load_config()
-            folder_names = config.get("extractor", {}).get("output_folder_names", {})
-            lang_preview = folder_names.get("lang_preview", "_預覽lang_輸出")
-            book_preview = folder_names.get("book_preview", "_預覽book_輸出")
-            if mode == "lang":
-                actual_output = str(Path(input_path).with_name(Path(input_path).name + lang_preview))
-            elif mode == "book":
-                actual_output = str(Path(input_path).with_name(Path(input_path).name + book_preview))
-            else:
-                actual_output = str(Path(input_path).with_name(Path(input_path).name + "_預覽_dual_輸出"))
+            # ✅ 階段 B-2 重構：preview 路徑拼接已抽離至 extract_service.prepare_preview_paths()
+            actual_output = prepare_preview_paths(input_path, mode)
             # 更新 info_text
             info_text.value = f"來源：{input_path}\n輸出：{actual_output}\n模式：{mode}"
             output_path = actual_output

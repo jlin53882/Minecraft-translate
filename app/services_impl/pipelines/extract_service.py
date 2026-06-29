@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import traceback
+from pathlib import Path
 from typing import Any
 
 from app.services_impl.logging_service import (
@@ -121,6 +122,50 @@ def get_target_language() -> str:
     """
     cfg = load_config()
     return cfg.get("extractor", {}).get("target_language", "zh_tw")
+
+
+def get_lang_codes() -> list[str]:
+    """從 config 讀取 JAR 提取的預設語系代碼列表。
+
+    取代 View/Dialog 內直接呼叫 load_config() + get("jar_extractor") 的反模式。
+
+    Returns:
+        語系代碼列表，預設為 ["en_us", "zh_cn", "zh_tw"]
+    """
+    cfg = load_config()
+    return cfg.get("jar_extractor", {}).get("lang_codes", ["en_us", "zh_cn", "zh_tw"])
+
+
+def prepare_preview_paths(mods_dir: str, mode: str) -> str:
+    """根據模式產生預覽用的輸出路徑（含子資料夾後綴）。
+
+    與 prepare_extraction_paths 對稱，但用於 preview 模式。
+    取代 extractor_dialog.py 與 extractor_actions.py 中重複的「
+    lang_preview / book_preview 拼接邏輯。
+
+    Args:
+        mods_dir: Mod 來源資料夾路徑
+        mode: 預覽模式（'lang' / 'book' / 'dual'）
+
+    Returns:
+        預覽輸出路徑（mods_dir 同層目錄，加上 preview 子資料夾後綴）
+        若 mods_dir 不存在則回傳空字串
+    """
+    folder_names = get_output_folder_names()
+    lang_preview = folder_names["lang_preview"]
+    book_preview = folder_names["book_preview"]
+
+    if mode == "lang":
+        suffix = lang_preview
+    elif mode == "book":
+        suffix = book_preview
+    else:  # dual 預覽使用統一的 _預覽_dual_輸出 後綴
+        suffix = "_預覽_dual_輸出"
+
+    mods_path = Path(mods_dir)
+    if not mods_path.exists():
+        return ""
+    return str(mods_path.with_name(mods_path.name + suffix))
 
 
 def _run_extraction_with_session(
