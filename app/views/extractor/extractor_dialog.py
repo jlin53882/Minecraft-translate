@@ -407,9 +407,16 @@ def open_preview_dialog(
     )
 
     # 進度區
-    status_text = ft.Text("正在掃描...", size=13, color=ft.Colors.GREY_600)
-    progress_pct = ft.Text("0%", size=12, color=ft.Colors.GREY_600, weight=ft.FontWeight.BOLD)
-    progress_bar = ft.ProgressBar(value=0, height=8)
+    # 🐛 Bug 修復：初始狀態文字應為「等待開始」而非「正在掃描」
+    status_text = ft.Text("等待開始預覽...", size=13, color=ft.Colors.GREY_600)
+    progress_pct = ft.Text("--", size=12, color=ft.Colors.GREY_600, weight=ft.FontWeight.BOLD)
+    # 🐛 Bug 修復：明確設定 progress_bar 的顏色與背景色，避免渲染不明顯
+    progress_bar = ft.ProgressBar(
+        value=0,
+        height=8,
+        bgcolor=theme.GREY_200,
+        color=theme.BLUE,
+    )
 
     # 日誌區
     log_view = ft.ListView(
