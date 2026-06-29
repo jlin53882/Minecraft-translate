@@ -43,10 +43,12 @@ class ExtractorView(ft.Column):
     """
 
     def _load_target_language():
-        """從 config 動態讀取預設目標語系。"""
-        from translation_tool.utils.config_manager import load_config
-        config = load_config()
-        return config.get("extractor", {}).get("target_language", "zh_tw")
+        """從 config 動態讀取預設目標語系。
+
+        ✅ 重構：config 讀取改由 Service 統一管理
+        """
+        from app.services_impl.pipelines.extract_service import get_target_language
+        return get_target_language()
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """初始化 ExtractorView。

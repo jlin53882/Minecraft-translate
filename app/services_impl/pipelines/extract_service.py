@@ -111,6 +111,18 @@ def get_output_folder_names() -> dict[str, str]:
     }
 
 
+def get_target_language() -> str:
+    """從 config 讀取預設目標語系。
+
+    取代 View 層內直接呼叫 load_config() 的反模式。
+
+    Returns:
+        目標語系代碼，預設為 "zh_tw"
+    """
+    cfg = load_config()
+    return cfg.get("extractor", {}).get("target_language", "zh_tw")
+
+
 def _run_extraction_with_session(
     generator,
     session: TaskSession,
