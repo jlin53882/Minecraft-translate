@@ -298,5 +298,6 @@ def run_extraction_process_impl(
                 'success': total_extracted,
                 'warnings': total_skipped,
                 'failures': 0,
+                'total_files': total_extracted,
             },
         }

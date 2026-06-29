@@ -460,6 +460,22 @@ class ExtractorView(ft.Column):
         except Exception:
             pass
 
+    def _close_dialog_overlay(self, dialog):
+        """關閉指定的 dialog 並從 page.overlay 移除。
+
+        用於：
+        - _show_extraction_summary 中「關閉」按鈕的回調
+        - 測試中清理殘留的 dialog
+        """
+        try:
+            if dialog in self.page.overlay:
+                self.page.overlay.remove(dialog)
+            dialog.open = False
+            self.page.update()
+        except Exception:
+            pass
+
+
     def _append_log_line(self, entry_or_str):
         """新增日誌訊息到日誌檢視區。
 
