@@ -34,7 +34,8 @@ class ExtractorView(ft.Column):
 
     設計概念：
     - 長任務全部寫入 TaskSession（log/progress/status）。
-    - UI 只渲染 session 的快照，避免跨執行緒操作 UI 造成不穩定。
+    - UI 只渲染 session 的快照，避免背景執行緒直接操作 UI 控制項，
+    - 這樣提取流程與畫面狀態不會互相纏在一起。
 
     維護注意：
     - 若新增新的提取模式，務必沿用同一套 session + poller 流程。
@@ -214,16 +215,18 @@ class ExtractorView(ft.Column):
                 icon=ft.Icons.SETTINGS,
                 content=build_settings_panel(self),
             ),
-            styled_card(
-                title="日誌",
-                icon=ft.Icons.RECEIPT_LONG,
-                content=build_logs_panel(self),
-                expand=True,
-            ),
         ]
 
         # 初始化 output_dir helper，動態讀取設定值
-        self._update_output_dir_helper()
+        # 用 try-except 避免 __init__ 階段 self.page.update() 觸發 Control must be added to the page first
+        try:
+            self._update_output_dir_helper()
+        except RuntimeError as e:
+            if "Control must be added to the page first" in str(e):
+                # 在 __init__ 階段元件還沒被加到 page，跳過 update 即可
+                pass
+            else:
+                raise
 
     def _build_settings_card(self):
         """代理至 build_settings_panel，回傳設定面板元件。
@@ -305,7 +308,7 @@ class ExtractorView(ft.Column):
             f"自動產生資料夾名稱可以在設定頁面調整"
         )
         self.output_dir_textfield.helper = helper_text
-        self._page.update()
+        self.page.update()
 
     def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
         """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。"""
@@ -326,11 +329,23 @@ class ExtractorView(ft.Column):
         else:
             suffix = lang_extract
 
-        # 只有在輸出路徑為空時才自動填入，避免覆寫使用者已輸入的自訂路徑
-        if (self.output_dir_textfield.value or '').strip():
-            return
-        mods_path = Path(mods_dir)
-        output_path = str(mods_path.with_name(mods_path.name + suffix))
+        # 修正邏輯：處理路徑末尾斜線並正確合併名稱
+        # 注意：必須先轉成 str 才能呼叫 rstrip，否則會觸發 AttributeError
+        mods_path = Path(str(mods_dir).rstrip('\\/'))
+        
+        # 智慧判斷：如果名稱已經包含 suffix，則直接使用原路徑（避免重複疊加）
+        # 如果是「mods」目錄，則在 mods 旁邊產生新的資料夾
+        # 其他情況，則把 suffix 加在最後一級目錄名後面
+        if mods_path.name.lower() == "mods":
+            # 輸入是 .../mods，產生 .../mods_提取XX
+            output_path = str(mods_path.parent / (mods_path.name + suffix))
+        elif suffix in mods_path.name:
+            # 已經包含 suffix（例如使用者已經手動輸入過），直接使用原路徑
+            output_path = str(mods_path)
+        else:
+            # 其他自訂路徑，則在最後一級目錄下合併
+            output_path = str(mods_path.with_name(mods_path.name + suffix))
+
         self.output_dir_textfield.value = output_path
         self.page.update()
         self._append_log_line(f"[系統] 自動設定輸出路徑：{output_path}")
@@ -499,61 +514,3 @@ class ExtractorView(ft.Column):
         實際工作代理至 extractor_actions.show_preview（run_preview_flow）。
         """
         return run_preview_flow(self, mode)
-
-    def _show_preview_dialog_result(self, result: dict, mode: str):
-        """顯示預覽成功結果對話框（包含檔案數量、大小、詳細清單）。
-
-        參數：
-            result：預覽結果字典（來自 PreviewState.result）。
-            mode：預覽模式（'lang' / 'book' / 'dual'）。
-        """
-        dialog = build_preview_result_dialog(self, result, mode)
-        self.page.overlay.append(dialog)
-        dialog.open = True
-        async def _do_update(_):
-            self.page.update()
-        self.page.run_task(_do_update, None)
-
-    def _show_preview_dialog_error(self, error: str, mode: str):
-        """顯示預覽失敗錯誤對話框。
-
-        參數：
-            error：錯誤訊息字串。
-            mode：預覽模式（'lang' / 'book' / 'dual'）。
-        """
-        self._preview_error_dialog = build_preview_error_dialog(self, error, mode)
-        self.page.overlay.append(self._preview_error_dialog)
-        self._preview_error_dialog.open = True
-        async def _do_update(_):
-            self.page.update()
-        self.page.run_task(_do_update, None)
-
-    def _close_dialog_overlay(self, dialog):
-        """關閉 overlay 對話框，重置 UI 狀態（進度條、狀態文字、控制項）。
-
-        參數：
-            dialog：要關閉的 ft.AlertDialog 實例。
-        """
-        try:
-            dialog.open = False
-            self.status_text.value = '狀態：閒置'
-            self.progress_bar.value = 0
-            self.progress_bar.color = ft.Colors.BLUE
-            self.set_controls_disabled(False)
-            self.page.update()
-        except Exception:
-            pass
-
-    def _start_from_preview_overlay(self, dialog, mode: str):
-        """從預覽對話框點擊「確認提取」時，先關閉對話框再啟動提取任務。
-
-        參數：
-            dialog：要被關閉的預覽對話框。
-            mode：提取模式（'lang' / 'book' / 'dual'）。
-        """
-        self._close_dialog_overlay(dialog)
-        self.start_extraction(mode)
-
-    @property
-    def page(self):
-        return self._page
