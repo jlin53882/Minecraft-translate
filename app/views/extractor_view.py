@@ -209,6 +209,15 @@ class ExtractorView(ft.Column):
         # ======================
         # Layout Composition（使用 styled_card 統一外觀）
         # ======================
+        # 即使日誌區塊不在主 UI 上顯示，我們仍然呼叫 build_logs_panel
+        # 來建立 status_text / progress_bar / log_view 等必要屬性。
+        # 日誌面板已不再加到 controls 裡（隱藏）。
+        # 透過 .visible = False 雙重保險，避免意外被渲染。
+        # 注意：這個呼叫同時會建立 _stats_success / _stats_warnings / _stats_failures
+        # 等屬性（在 build_settings_panel 內）。
+        self._logs_panel = build_logs_panel(self)
+        self._logs_panel.visible = False  # 隱藏日誌面板，不顯示在主 UI
+
         self.controls = [
             styled_card(
                 title="設定",
