@@ -164,7 +164,7 @@ class TestSafeJsonLoadsNonGreedy:
         assert result == {"items": [{"a": 1}]}
 
     def test_deeply_nested_json_non_greedy(self):
-        """測試深度巢狀 JSON 能正確解析。
+        r"""測試深度巢狀 JSON 能正確解析。
 
         non-greedy `\{[\s\S]*?\}` 匹配時，regex engine 會擴展 `[\s\S]*?`
         直到找到一組平衡的 {...}。因此第一個完整 match 是外層物件，

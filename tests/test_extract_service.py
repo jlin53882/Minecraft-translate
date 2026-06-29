@@ -303,70 +303,102 @@ class TestOpenOutputFolder:
 # Generator selection
 # =============================================================================
 class TestSelectExtractionGenerator:
-    """Tests for _select_extraction_generator()."""
+    """Tests for _select_extraction_generator().
 
-    def test_lang_mode_returns_lang_generator(self):
-        """lang mode should select the lang generator."""
-        from app.services_impl.pipelines.extract_service import _select_extraction_generator
-        from translation_tool.core.jar_processor import (
-            extract_lang_files_generator,
-            extract_book_files_generator,
-            extract_dual_files_generator,
+    ✅ CI fix: Mock the underlying generator functions so we test the
+    selection logic without triggering real filesystem side effects
+    (`os.makedirs` on `/out`, etc.) which fail on Linux CI with
+    PermissionError.
+    """
+
+    def _install_mocks(self, monkeypatch):
+        """Patch the three underlying generator functions.
+
+        Returns a dict `call_log` that captures which generator was called
+        and with which arguments.
+        """
+        from app.services_impl.pipelines import extract_service
+
+        call_log = {}
+
+        def make_recorder(name):
+            def factory(*args, **kwargs):
+                call_log["name"] = name
+                call_log["args"] = args
+                call_log["kwargs"] = kwargs
+                # Return an empty generator (so callers can iterate without error)
+                def gen():
+                    return
+                    yield  # unreachable, makes this a generator function
+                gen.__name__ = name
+                return gen()
+            return factory
+
+        monkeypatch.setattr(
+            extract_service, "extract_lang_files_generator",
+            make_recorder("extract_lang_files_generator"),
+        )
+        monkeypatch.setattr(
+            extract_service, "extract_book_files_generator",
+            make_recorder("extract_book_files_generator"),
+        )
+        monkeypatch.setattr(
+            extract_service, "extract_dual_files_generator",
+            make_recorder("extract_dual_files_generator"),
         )
 
-        gen = _select_extraction_generator("lang", "/mods", "/out")
-        # Verify it's a generator and matches the expected function
-        assert gen is not None
-        # Generator functions return generator objects; we can verify by
-        # checking the function attribute
-        assert gen.__name__ == extract_lang_files_generator.__name__
-        # Cleanup the generator
-        for _ in gen:
-            break
+        return call_log
 
-    def test_book_mode_returns_book_generator(self):
-        """book mode should select the book generator."""
+    def test_lang_mode_invokes_lang_generator(self, monkeypatch):
+        """lang mode should invoke the lang generator."""
         from app.services_impl.pipelines.extract_service import _select_extraction_generator
-        from translation_tool.core.jar_processor import extract_book_files_generator
 
-        gen = _select_extraction_generator("book", "/mods", "/out")
-        assert gen.__name__ == extract_book_files_generator.__name__
-        for _ in gen:
-            break
+        log = self._install_mocks(monkeypatch)
+        _select_extraction_generator("lang", "/mods", "/out")
 
-    def test_dual_mode_returns_dual_generator(self):
-        """dual mode should select the dual generator."""
+        assert log["name"] == "extract_lang_files_generator"
+        assert log["args"] == ("/mods", "/out")
+
+    def test_book_mode_invokes_book_generator(self, monkeypatch):
+        """book mode should invoke the book generator."""
         from app.services_impl.pipelines.extract_service import _select_extraction_generator
-        from translation_tool.core.jar_processor import extract_dual_files_generator
 
-        gen = _select_extraction_generator("dual", "/mods", "/out")
-        assert gen.__name__ == extract_dual_files_generator.__name__
-        for _ in gen:
-            break
+        log = self._install_mocks(monkeypatch)
+        _select_extraction_generator("book", "/mods", "/out")
 
-    def test_unknown_mode_falls_back_to_dual(self):
+        assert log["name"] == "extract_book_files_generator"
+        assert log["args"] == ("/mods", "/out")
+
+    def test_dual_mode_invokes_dual_generator(self, monkeypatch):
+        """dual mode should invoke the dual generator."""
+        from app.services_impl.pipelines.extract_service import _select_extraction_generator
+
+        log = self._install_mocks(monkeypatch)
+        _select_extraction_generator("dual", "/mods", "/out")
+
+        assert log["name"] == "extract_dual_files_generator"
+        assert log["args"] == ("/mods", "/out")
+
+    def test_unknown_mode_falls_back_to_dual(self, monkeypatch):
         """Unknown mode (e.g. 'foo') falls back to dual generator."""
         from app.services_impl.pipelines.extract_service import _select_extraction_generator
-        from translation_tool.core.jar_processor import extract_dual_files_generator
 
-        gen = _select_extraction_generator("foo", "/mods", "/out")
-        # The helper does not raise; it returns dual as fallback
-        assert gen.__name__ == extract_dual_files_generator.__name__
-        for _ in gen:
-            break
+        log = self._install_mocks(monkeypatch)
+        _select_extraction_generator("foo", "/mods", "/out")
 
-    def test_lang_codes_passed_to_lang_generator(self):
+        assert log["name"] == "extract_dual_files_generator"
+
+    def test_lang_codes_passed_to_lang_generator(self, monkeypatch):
         """When lang_codes is provided, it should be passed to the generator."""
         from app.services_impl.pipelines.extract_service import _select_extraction_generator
 
-        gen = _select_extraction_generator("lang", "/mods", "/out", lang_codes=["en_us"])
-        # Exhaust the generator
-        list(gen)
+        log = self._install_mocks(monkeypatch)
+        _select_extraction_generator("lang", "/mods", "/out", lang_codes=["en_us"])
+
+        assert log["name"] == "extract_lang_files_generator"
+        assert log["kwargs"].get("lang_codes") == ["en_us"]
 
 
-# =============================================================================
-# Loop helper
-# =============================================================================
 class TestRunExtractionLoop:
     """Tests for run_extraction_loop()."""
 
