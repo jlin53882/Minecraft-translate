@@ -34,14 +34,15 @@ from translation_tool.utils.config_manager import load_config
 logger = logging.getLogger(__name__)
 
 
-def _select_extraction_generator(mode: str, mods_dir: str, output_dir: str, lang_codes):
+def _select_extraction_generator(mode: str, mods_dir: str, output_dir: str, lang_codes=None, skip_zh_cn=False):
     """根據 mode 選擇對應的提取 Generator。
 
     Args:
         mode: 提取模式（'lang' / 'book' / 'dual'）
         mods_dir: Mod 目錄路徑
         output_dir: 輸出目錄路徑
-        lang_codes: 指定要提取的語言代碼列表
+        lang_codes: 指定要提取的語言代碼列表（lang/book 模式使用）
+        skip_zh_cn: 是否跳過 zh_cn（dual 模式使用）
 
     Returns:
         對應模式的 Generator 物件
@@ -49,8 +50,9 @@ def _select_extraction_generator(mode: str, mods_dir: str, output_dir: str, lang
     if mode == "lang":
         return extract_lang_files_generator(mods_dir, output_dir, lang_codes=lang_codes)
     if mode == "book":
-        return extract_book_files_generator(mods_dir, output_dir, lang_codes=lang_codes)
-    return extract_dual_files_generator(mods_dir, output_dir, lang_codes=lang_codes)
+        return extract_book_files_generator(mods_dir, output_dir)
+    # dual 模式使用 skip_zh_cn 參數
+    return extract_dual_files_generator(mods_dir, output_dir, skip_zh_cn=skip_zh_cn)
 
 
 def prepare_extraction_paths(mods_dir: str, mode: str, output_path: str = "") -> str:
@@ -279,3 +281,33 @@ def run_dual_extraction_service(
     finally:
         # ⭐ 避免 handler 留著舊 session
         UI_LOG_HANDLER.set_session(None)
+
+
+def open_output_folder(path: str) -> bool:
+    """用系統預設檔案管理員開啟資料夾。
+
+    取代 UI 層直接呼叫 os.startfile 的反模式。
+    UI 層不應處理 OS 層級的操作。
+
+    Args:
+        path: 資料夾路徑
+
+    Returns:
+        True 表示成功開啟，False 表示失敗（路徑不存在或平台不支援）
+    """
+    import os
+    if not path or not os.path.isdir(path):
+        return False
+
+    try:
+        if os.name == "nt":  # Windows
+            os.startfile(path)
+        elif os.uname().sysname == "Darwin":  # macOS
+            import subprocess
+            subprocess.run(["open", path], check=True)
+        else:  # Linux
+            import subprocess
+            subprocess.run(["xdg-open", path], check=True)
+        return True
+    except Exception:
+        return False

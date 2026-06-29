@@ -22,6 +22,7 @@ from app.services_impl.pipelines.extract_service import (
     run_lang_extraction_service,
     run_book_extraction_service,
     run_extraction_loop,
+    open_output_folder,
 )
 from translation_tool.core.jar_processor import (
     preview_extraction_generator,
@@ -281,8 +282,8 @@ def open_extractor_dialog(
         page.update()
 
     def on_browse_click(e):
-        if final_output and os.path.isdir(final_output):
-            os.startfile(final_output)
+        # ✅ 階段 C 重構：os.startfile 已抽離至 Service 層
+        open_output_folder(final_output)
 
     # ========== 資訊顯示 ==========
     info_text = ft.Text(
