@@ -21,6 +21,7 @@ from app.services_impl.pipelines.extract_service import (
     prepare_extraction_paths,
     run_lang_extraction_service,
     run_book_extraction_service,
+    run_extraction_loop,
 )
 from translation_tool.core.jar_processor import (
     preview_extraction_generator,
@@ -186,6 +187,8 @@ def open_extractor_dialog(
         # 統計數據
         stats = {"success": 0, "warnings": 0, "failures": 0}
 
+        # ✅ 第三階段重構：使用 Service 層的 run_extraction_loop 處理 Generator
+        # 將 Generator 選擇、cancelled 檢查、stats 解析等樣板程式碼抽離到 Service
         try:
             if selected_mode == "lang":
                 gen = extract_lang_files_generator(mods_dir, final_output, lang_codes=selected_codes)
@@ -194,41 +197,42 @@ def open_extractor_dialog(
             else:
                 gen = extract_dual_files_generator(mods_dir, final_output, selected_codes)
 
-            total = 0
-            current = 0
+            # 使用 cancelled_flag list 作為執行緒間通訊（與 Service 介面一致）
+            cancelled_flag = [False]
 
-            for update in gen:
-                if state["cancelled"]:
-                    add_log("[系統] 任務已取消", theme.ORANGE_700)
-                    break
-
-                # 解析更新
+            # 定義 UI 更新回調（仍由 dialog 處理 UI，但 Generator 邏輯已抽離）
+            def on_update(update):
                 if "progress" in update:
                     total = update.get("total", 1)
                     current = update.get("current", 0)
                     pct = update.get("progress", 0)
-                    # 優先使用 log 欄位，若無則使用 current
                     log_msg = update.get("log", f"正在處理 {current}/{total}")
-
-                    # 每次都 append log + 觸發 UI 更新（沿用原本簡單做法）
                     add_log(log_msg)
                     update_progress(pct, log_msg)
 
-                    # 檢查是否完成（progress=1.0 或有 stats 欄位）
+                    # 檢查是否完成
                     if pct >= 1.0 or "stats" in update:
-                        result = update.get("stats", {})
-                        stats["success"] = result.get("success", 0)
-                        stats["warnings"] = result.get("warnings", 0)
-                        stats["failures"] = result.get("failures", 0)
                         state["done"] = True
+                        add_log(
+                            f"[完成] 成功 {stats['success']} / 跳過 {stats['warnings']} / 失敗 {stats['failures']}",
+                            theme.GREEN_700,
+                        )
+                        update_progress(1.0, "任務完成")
+                        update_stats(stats["success"], stats["warnings"], stats["failures"])
 
                 elif "error" in update:
                     add_log(f"[ERROR] {update['error']}", theme.RED_400)
-                    stats["failures"] += 1
+
+            # 透過 Service 統一處理 Generator 迭代
+            result_stats = run_extraction_loop(gen, cancelled_flag=cancelled_flag, on_update=on_update)
+            stats.update(result_stats)
+
+            # 同步 cancelled_flag 到 state（讓 on_cancel_click 仍能正常運作）
+            if cancelled_flag[0]:
+                state["cancelled"] = True
+                add_log("[系統] 任務已取消", theme.ORANGE_700)
 
             if state["done"]:
-                add_log(f"[完成] 成功 {stats['success']} / 跳過 {stats['warnings']} / 失敗 {stats['failures']}", theme.GREEN_700)
-                update_progress(1.0, "任務完成")
                 update_stats(stats["success"], stats["warnings"], stats["failures"])
 
         except Exception as ex:
@@ -266,9 +270,11 @@ def open_extractor_dialog(
         threading.Thread(target=run_extraction, daemon=True).start()
 
     def on_cancel_click(e):
-        state["cancelled"] = True
-        status_text.value = "正在取消..."
-        page.update()
+            # ✅ 第三階段：透過 cancelled_flag list 與 Service 通訊
+            # 這裡仍設置 state["cancelled"] 以保持向後相容
+            state["cancelled"] = True
+            status_text.value = "正在取消..."
+            page.update()
 
     def on_close_click(e):
         dialog.open = False

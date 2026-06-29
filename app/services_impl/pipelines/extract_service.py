@@ -125,6 +125,47 @@ def _run_extraction_with_session(
     session.finish()
 
 
+def run_extraction_loop(
+    generator,
+    cancelled_flag=None,
+    on_update=None,
+):
+    """從 Generator 中提取更新並調用回調函數（適用於 Dialog 等不需 TaskSession 的場景）。
+
+    此函數供 extractor_dialog.py 等 UI 層使用，讓 Dialog 仍保有
+    「直接處理 Generator yield + 立即更新 UI」的彈性，但不必重複
+    Generator 過濾與 cancelled 檢查的樣板程式碼。
+
+    Args:
+        generator: 對應模式的 Generator（lang/book/dual）
+        cancelled_flag: 長度為 1 的 list，用於執行緒間通訊取消（[False]）
+                       None 表示不可取消
+        on_update: 收到 update 時的回調函數 (update_dict) -> None
+
+    Returns:
+        統計 dict，包含 success / warnings / failures
+    """
+    stats = {"success": 0, "warnings": 0, "failures": 0}
+
+    for update in generator:
+        if cancelled_flag is not None and cancelled_flag[0]:
+            return stats
+
+        if "stats" in update:
+            result = update["stats"]
+            stats["success"] = result.get("success", 0)
+            stats["warnings"] = result.get("warnings", 0)
+            stats["failures"] = result.get("failures", 0)
+
+        if update.get("error"):
+            stats["failures"] += 1
+
+        if on_update is not None:
+            on_update(update)
+
+    return stats
+
+
 def run_lang_extraction_service(
     mods_dir: str,
     output_dir: str,
