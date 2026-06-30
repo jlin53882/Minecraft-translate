@@ -42,14 +42,6 @@ class ExtractorView(ft.Column):
     - stats 欄位是 UI 顯示用途；不要在核心流程依賴它當正確性來源。
     """
 
-    def _load_target_language():
-        """從 config 動態讀取預設目標語系。
-
-        ✅ 重構：config 讀取改由 Service 統一管理
-        """
-        from app.services_impl.pipelines.extract_service import get_target_language
-        return get_target_language()
-
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """初始化 ExtractorView。
 
