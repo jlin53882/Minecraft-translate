@@ -13,13 +13,16 @@
 import flet as ft
 import threading
 import os
-from pathlib import Path
 
 from app.ui import theme
-from translation_tool.utils.config_manager import load_config
 from app.services_impl.pipelines.extract_service import (
+    prepare_extraction_paths,
+    prepare_preview_paths,
+    get_lang_codes,
     run_lang_extraction_service,
     run_book_extraction_service,
+    run_extraction_loop,
+    open_output_folder,
 )
 from translation_tool.core.jar_processor import (
     preview_extraction_generator,
@@ -57,32 +60,12 @@ def open_extractor_dialog(
     mods_dir = input_path
     output_dir = output_path  # 可為空
 
-    # 如果未指定輸出目錄，使用 Mod 來源目錄
-    if not output_dir:
-        output_dir = mods_dir
+    # ✅ 第一階段重構：路徑拼接邏輯已抽離至 Service 層
+    # 由 prepare_extraction_paths 統一處理 config 讀取與子資料夾命名
+    final_output = prepare_extraction_paths(mods_dir, mode, output_dir)
 
-    # 讀取配置
-    cfg = load_config()
-    lang_codes = cfg.get("jar_extractor", {}).get("lang_codes", ["en_us", "zh_cn", "zh_tw"])
-    folder_names = cfg.get("extractor", {}).get("output_folder_names", {})
-    lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
-    book_extract = folder_names.get("book_extract", "_提取book_輸出")
-    dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
-
-    # 根據 mode 產生輸出子資料夾
-    if mode == "lang":
-        output_subdir = lang_extract
-    elif mode == "book":
-        output_subdir = book_extract
-    else:  # dual
-        output_subdir = dual_extract
-
-    # 始終補上子資料夾名稱（讓輸出結構清晰）
-    if output_dir:
-        final_output = os.path.join(output_dir, output_subdir)
-    else:
-        # 若未指定，使用 mods_dir 作為基礎
-        final_output = os.path.join(mods_dir, output_subdir) if mods_dir else ""
+    # ✅ 階段 B-2 重構：lang_codes 讀取已抽離至 extract_service.get_lang_codes()
+    lang_codes = get_lang_codes()
 
     # 狀態變數
     state = {
@@ -203,6 +186,8 @@ def open_extractor_dialog(
         # 統計數據
         stats = {"success": 0, "warnings": 0, "failures": 0}
 
+        # ✅ 第三階段重構：使用 Service 層的 run_extraction_loop 處理 Generator
+        # 將 Generator 選擇、cancelled 檢查、stats 解析等樣板程式碼抽離到 Service
         try:
             if selected_mode == "lang":
                 gen = extract_lang_files_generator(mods_dir, final_output, lang_codes=selected_codes)
@@ -211,41 +196,42 @@ def open_extractor_dialog(
             else:
                 gen = extract_dual_files_generator(mods_dir, final_output, selected_codes)
 
-            total = 0
-            current = 0
+            # 使用 cancelled_flag list 作為執行緒間通訊（與 Service 介面一致）
+            cancelled_flag = [False]
 
-            for update in gen:
-                if state["cancelled"]:
-                    add_log("[系統] 任務已取消", theme.ORANGE_700)
-                    break
-
-                # 解析更新
+            # 定義 UI 更新回調（仍由 dialog 處理 UI，但 Generator 邏輯已抽離）
+            def on_update(update):
                 if "progress" in update:
                     total = update.get("total", 1)
                     current = update.get("current", 0)
                     pct = update.get("progress", 0)
-                    # 優先使用 log 欄位，若無則使用 current
                     log_msg = update.get("log", f"正在處理 {current}/{total}")
-
-                    # 每次都 append log + 觸發 UI 更新（沿用原本簡單做法）
                     add_log(log_msg)
                     update_progress(pct, log_msg)
 
-                    # 檢查是否完成（progress=1.0 或有 stats 欄位）
+                    # 檢查是否完成
                     if pct >= 1.0 or "stats" in update:
-                        result = update.get("stats", {})
-                        stats["success"] = result.get("success", 0)
-                        stats["warnings"] = result.get("warnings", 0)
-                        stats["failures"] = result.get("failures", 0)
                         state["done"] = True
+                        add_log(
+                            f"[完成] 成功 {stats['success']} / 跳過 {stats['warnings']} / 失敗 {stats['failures']}",
+                            theme.GREEN_700,
+                        )
+                        update_progress(1.0, "任務完成")
+                        update_stats(stats["success"], stats["warnings"], stats["failures"])
 
                 elif "error" in update:
                     add_log(f"[ERROR] {update['error']}", theme.RED_400)
-                    stats["failures"] += 1
+
+            # 透過 Service 統一處理 Generator 迭代
+            result_stats = run_extraction_loop(gen, cancelled_flag=cancelled_flag, on_update=on_update)
+            stats.update(result_stats)
+
+            # 同步 cancelled_flag 到 state（讓 on_cancel_click 仍能正常運作）
+            if cancelled_flag[0]:
+                state["cancelled"] = True
+                add_log("[系統] 任務已取消", theme.ORANGE_700)
 
             if state["done"]:
-                add_log(f"[完成] 成功 {stats['success']} / 跳過 {stats['warnings']} / 失敗 {stats['failures']}", theme.GREEN_700)
-                update_progress(1.0, "任務完成")
                 update_stats(stats["success"], stats["warnings"], stats["failures"])
 
         except Exception as ex:
@@ -283,17 +269,19 @@ def open_extractor_dialog(
         threading.Thread(target=run_extraction, daemon=True).start()
 
     def on_cancel_click(e):
-        state["cancelled"] = True
-        status_text.value = "正在取消..."
-        page.update()
+            # ✅ 第三階段：透過 cancelled_flag list 與 Service 通訊
+            # 這裡仍設置 state["cancelled"] 以保持向後相容
+            state["cancelled"] = True
+            status_text.value = "正在取消..."
+            page.update()
 
     def on_close_click(e):
         dialog.open = False
         page.update()
 
     def on_browse_click(e):
-        if final_output and os.path.isdir(final_output):
-            os.startfile(final_output)
+        # ✅ 階段 C 重構：os.startfile 已抽離至 Service 層
+        open_output_folder(final_output)
 
     # ========== 資訊顯示 ==========
     info_text = ft.Text(
@@ -418,9 +406,16 @@ def open_preview_dialog(
     )
 
     # 進度區
-    status_text = ft.Text("正在掃描...", size=13, color=ft.Colors.GREY_600)
-    progress_pct = ft.Text("0%", size=12, color=ft.Colors.GREY_600, weight=ft.FontWeight.BOLD)
-    progress_bar = ft.ProgressBar(value=0, height=8)
+    # 🐛 Bug 修復：初始狀態文字應為「等待開始」而非「正在掃描」
+    status_text = ft.Text("等待開始預覽...", size=13, color=ft.Colors.GREY_600)
+    progress_pct = ft.Text("--", size=12, color=ft.Colors.GREY_600, weight=ft.FontWeight.BOLD)
+    # 🐛 Bug 修復：明確設定 progress_bar 的顏色與背景色，避免渲染不明顯
+    progress_bar = ft.ProgressBar(
+        value=0,
+        height=8,
+        bgcolor=theme.GREY_200,
+        color=theme.BLUE,
+    )
 
     # 日誌區
     log_view = ft.ListView(
@@ -530,17 +525,8 @@ def open_preview_dialog(
         # 若輸出路徑是空的，自動設定
         actual_output = output_path
         if not actual_output:
-            from translation_tool.utils.config_manager import load_config
-            config = load_config()
-            folder_names = config.get("extractor", {}).get("output_folder_names", {})
-            lang_preview = folder_names.get("lang_preview", "_預覽lang_輸出")
-            book_preview = folder_names.get("book_preview", "_預覽book_輸出")
-            if mode == "lang":
-                actual_output = str(Path(input_path).with_name(Path(input_path).name + lang_preview))
-            elif mode == "book":
-                actual_output = str(Path(input_path).with_name(Path(input_path).name + book_preview))
-            else:
-                actual_output = str(Path(input_path).with_name(Path(input_path).name + "_預覽_dual_輸出"))
+            # ✅ 階段 B-2 重構：preview 路徑拼接已抽離至 extract_service.prepare_preview_paths()
+            actual_output = prepare_preview_paths(input_path, mode)
             # 更新 info_text
             info_text.value = f"來源：{input_path}\n輸出：{actual_output}\n模式：{mode}"
             output_path = actual_output

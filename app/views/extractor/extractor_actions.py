@@ -1,23 +1,21 @@
-from __future__ import annotations
-
 import threading
 
-from translation_tool.utils.log_unit import log_info, log_warning, log_debug
-from translation_tool.utils.config_manager import load_config
-import time
+from translation_tool.utils.log_unit import log_warning, log_debug
 from pathlib import Path
 from typing import Any
 
 import flet as ft
 
-from app.logging import LogPresenter, LogEntry
-from app.logging.task_session import TaskSession
 from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
 from translation_tool.core.jar_processor import (
         extract_lang_files_generator,
         extract_book_files_generator,
         extract_dual_files_generator,
     )
+from app.services_impl.pipelines.extract_service import (
+    _select_extraction_generator,
+    prepare_preview_paths,
+)
 from app.views.extractor.extractor_state import PreviewState
 
 def update_stats_from_log(view, line: str, phase: str = None):
@@ -86,18 +84,18 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
 
     current_phase = "lang" if mode == "dual" else mode
     skip_zh_cn = getattr(view, 'skip_zh_cn_switch', None) and view.skip_zh_cn_switch.value
-    if mode == 'lang':
-        generator = extract_lang_files_generator(mods_dir, output_dir, skip_zh_cn=skip_zh_cn)
-    elif mode == 'book':
-        generator = extract_book_files_generator(mods_dir, output_dir)
-    elif mode == 'dual':
-        generator = extract_dual_files_generator(mods_dir, output_dir, skip_zh_cn=skip_zh_cn)
-    else:
+    # ✅ 階段 A 重構：使用 Service 的 _select_extraction_generator 統一 Generator 選擇
+    if mode not in ('lang', 'book', 'dual'):
         def _do_error():
             view._append_log_line(f'[ERROR] 未知模式：{mode}')
             view.set_controls_disabled(False)
         view.page.run_task(_do_error)
         return
+    # ✅ 修正：lang/book 模式不需要 lang_codes 過濾，dual 模式才需要 skip_zh_cn
+    if mode == "dual":
+        generator = _select_extraction_generator(mode, mods_dir, output_dir, skip_zh_cn=skip_zh_cn)
+    else:
+        generator = _select_extraction_generator(mode, mods_dir, output_dir)
 
     try:
         lang_stats_done = False
@@ -487,13 +485,10 @@ def show_preview(view, mode: str):
                 if output_dir:
                     output_path = Path(output_dir)
                 else:
+                    # ✅ 階段 B-3 重構：preview 路徑拼接已抽離至 Service
                     mods_path = Path((view.mods_dir_textfield.value or '').strip())
-                    config = load_config()
-                    folder_names = config.get("extractor", {}).get("output_folder_names", {})
-                    lang_preview = folder_names.get("lang_preview", "_預覽lang_輸出")
-                    book_preview = folder_names.get("book_preview", "_預覽book_輸出")
-                    suffix = lang_preview if mode == 'lang' else book_preview
-                    output_path = mods_path.with_name(mods_path.name + suffix) if mods_path.exists() else None
+                    prepared = prepare_preview_paths(str(mods_path) if mods_path.exists() else "", mode)
+                    output_path = Path(prepared) if prepared else None
                     if output_path:
                         output_dir = str(output_path)
                         view._append_log_line(f'[系統] 自動設定輸出路徑：{output_dir}')

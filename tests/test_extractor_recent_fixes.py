@@ -237,18 +237,10 @@ class TestExtractorDialogPathFilling:
 
         # 由於 open_extractor_dialog 內部會建立 UI 與背景執行緒，
         # 這裡只測試 final_output 的邏輯（從原始碼讀取後模擬）
+        # ✅ 重構：mock 對象改為 Service 層的 get_lang_codes
         with patch(
-            "app.views.extractor.extractor_dialog.load_config",
-            return_value={
-                "jar_extractor": {"lang_codes": ["zh_tw"]},
-                "extractor": {
-                    "output_folder_names": {
-                        "lang_extract": "_提取lang_輸出",
-                        "book_extract": "_提取book_輸出",
-                        "dual_extract": "_提取both_輸出",
-                    }
-                },
-            },
+            "app.services_impl.pipelines.extract_service.get_lang_codes",
+            return_value=["zh_tw"],
         ):
             # 用 tmp_path 動態產生測試路徑
             mods_path = tmp_path / "mods"

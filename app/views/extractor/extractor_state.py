@@ -7,8 +7,6 @@
   - PreviewState：預覽任務的進度狀態
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 

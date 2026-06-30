@@ -42,12 +42,6 @@ class ExtractorView(ft.Column):
     - stats 欄位是 UI 顯示用途；不要在核心流程依賴它當正確性來源。
     """
 
-    def _load_target_language():
-        """從 config 動態讀取預設目標語系。"""
-        from translation_tool.utils.config_manager import load_config
-        config = load_config()
-        return config.get("extractor", {}).get("target_language", "zh_tw")
-
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         """初始化 ExtractorView。
 
@@ -295,15 +289,17 @@ class ExtractorView(ft.Column):
         self._update_output_dir_helper()
 
     def _update_output_dir_helper(self):
-        """動態更新 output_dir_textfield 的 helper，顯示實際的資料夾命名設定。"""
-        from translation_tool.utils.config_manager import load_config
-        config = load_config()
-        folder_names = config.get("extractor", {}).get("output_folder_names", {})
-        lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
-        book_extract = folder_names.get("book_extract", "_提取book_輸出")
-        dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
-        lang_preview = folder_names.get("lang_preview", "_預覽lang_輸出")
-        book_preview = folder_names.get("book_preview", "_預覽book_輸出")
+        """動態更新 output_dir_textfield 的 helper，顯示實際的資料夾命名設定。
+
+        ✅ 階段 B 重構：config 讀取已抽離至 extract_service.get_output_folder_names()
+        """
+        from app.services_impl.pipelines.extract_service import get_output_folder_names
+        folder_names = get_output_folder_names()
+        lang_extract = folder_names["lang_extract"]
+        book_extract = folder_names["book_extract"]
+        dual_extract = folder_names["dual_extract"]
+        lang_preview = folder_names["lang_preview"]
+        book_preview = folder_names["book_preview"]
 
         helper_text = (
             f"未指定時自動產生（路徑 + 設定名稱）：\n"
@@ -320,14 +316,16 @@ class ExtractorView(ft.Column):
         self.page.update()
 
     def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
-        """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。"""
-        from translation_tool.utils.config_manager import load_config
+        """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。
 
-        config = load_config()
-        folder_names = config.get("extractor", {}).get("output_folder_names", {})
-        lang_extract = folder_names.get("lang_extract", "_提取lang_輸出")
-        book_extract = folder_names.get("book_extract", "_提取book_輸出")
-        dual_extract = folder_names.get("dual_extract", "_提取both_輸出")
+        ✅ 階段 B 重構：config 讀取已抽離至 extract_service.get_output_folder_names()
+        """
+        from app.services_impl.pipelines.extract_service import get_output_folder_names
+
+        folder_names = get_output_folder_names()
+        lang_extract = folder_names["lang_extract"]
+        book_extract = folder_names["book_extract"]
+        dual_extract = folder_names["dual_extract"]
 
         if mode == "lang":
             suffix = lang_extract
