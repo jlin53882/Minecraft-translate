@@ -11,6 +11,7 @@ from translation_tool.utils.log_unit import log_debug
 
 from app.ui import theme
 from app.ui.components import styled_card
+from app.views._log import LogView
 from app.services_impl.config_service import load_config_json
 
 
@@ -72,7 +73,12 @@ class BundlerView(ft.Column):
         self._config_output_zip_name = "可使用翻譯.zip"
         self.extra_folders_view = ft.ListView(height=100, spacing=4, auto_scroll=False)
         self.progress_bar = ft.ProgressBar(value=0, height=8, visible=False)
-        self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
+        # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器 + cyan400 bug）
+        self.log_view = LogView(
+            page=self._page,
+            mode="tail",
+            tail_lines=250,
+        )
 
         self._load_version_data()
         self._init_ui()
@@ -259,12 +265,10 @@ class BundlerView(ft.Column):
             color=ft.Colors.WHITE,
         )
 
+        # LogView 自帶深色容器 + 圓角 + 等寬字（從 theme）
+        # 用 height=200 保留原本高度限制
         log_container = ft.Container(
             content=self.log_view,
-            bgcolor="#2b2f36",
-            border=ft.Border.all(1, "#4b5563"),
-            border_radius=8,
-            padding=10,
             height=200,
         )
 
@@ -399,8 +403,8 @@ class BundlerView(ft.Column):
 
         self.progress_bar.visible = True
         self.progress_bar.value = 0
-        self.log_view.controls.clear()
-        self._append_log("開始執行打包...")
+        self.log_view.clear()
+        self._append_log("開始執行打包...", level="info")
         self._page.update()
 
         thread = threading.Thread(
@@ -409,8 +413,13 @@ class BundlerView(ft.Column):
         )
         thread.start()
 
-    def _append_log(self, msg: str):
-        self.log_view.controls.append(ft.Text(msg, size=12, color="cyan400"))
+    def _append_log(self, msg: str, level: str = "info"):
+        """新增一行日誌（直接走 LogView.add）。
+
+        PR refactor/unified-log-view: 取代原本的 color='cyan400' bug。
+        顏色由 LogView 根據 level 自動從 theme 取。
+        """
+        self.log_view.add(msg, level=level)
 
     def _bundling_worker(self, root_dir, output_zip, version, description, pack_image):
         from translation_tool.core.output_bundler import bundle_outputs_generator
@@ -434,7 +443,7 @@ class BundlerView(ft.Column):
                 log_msg = update.get("log", "")
                 for line in log_msg.split("\n"):
                     if line.strip():
-                        self.log_view.controls.append(ft.Text(line, size=12, color="cyan400"))
+                        self.log_view.add(line, level="info")  # PR refactor/unified-log-view: 修 cyan400 bug
                 if "progress" in update:
                     self.progress_bar.value = update["progress"]
                 if update.get("error"):
@@ -442,7 +451,7 @@ class BundlerView(ft.Column):
                 self._page.run_task(self._scroll_log)
                 self._page.update()
         except Exception as ex:
-            self._append_log(f"[錯誤] {ex}")
+            self._append_log(f"[錯誤] {ex}", level="error")
             self.progress_bar.color = theme.RED
         finally:
             self.progress_bar.visible = False

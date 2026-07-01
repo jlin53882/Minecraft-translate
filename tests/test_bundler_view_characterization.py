@@ -122,7 +122,7 @@ def test_bundling_without_output_zip_shows_no_error(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
     view._config_output_zip_name = "可使用翻譯.zip"
-    monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
+    monkeypatch.setattr(view.log_view._list_view, "scroll_to", lambda **kwargs: None)
 
     def mock_generator(**kwargs):
         return iter([{"log": "done", "progress": 1.0}])
@@ -143,7 +143,7 @@ def test_bundling_without_output_zip_shows_no_error(monkeypatch):
 def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
-    monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
+    monkeypatch.setattr(view.log_view._list_view, "scroll_to", lambda **kwargs: None)
 
     def mock_generator(**kwargs):
         return iter([
@@ -165,7 +165,7 @@ def test_bundling_worker_with_version_info(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
     view.version_data = {"1.20.1": {"min_format": 15, "max_format": 15}}
-    monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
+    monkeypatch.setattr(view.log_view._list_view, "scroll_to", lambda **kwargs: None)
 
     captured_kwargs = {}
 
@@ -191,7 +191,7 @@ def test_bundling_worker_passes_extra_folders(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
     view.extra_folders = ["C:/extra1", "C:/extra2"]
-    monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
+    monkeypatch.setattr(view.log_view._list_view, "scroll_to", lambda **kwargs: None)
 
     captured_kwargs = {}
 
@@ -212,7 +212,7 @@ def test_bundling_worker_passes_extra_folders(monkeypatch):
 def test_bundling_worker_passes_pack_image(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
-    monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
+    monkeypatch.setattr(view.log_view._list_view, "scroll_to", lambda **kwargs: None)
 
     captured_kwargs = {}
 
@@ -234,7 +234,7 @@ def test_bundling_worker_empty_pack_image(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
     view.pack_image_field.value = ""
-    monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
+    monkeypatch.setattr(view.log_view._list_view, "scroll_to", lambda **kwargs: None)
 
     captured_kwargs = {}
 
@@ -258,7 +258,7 @@ def test_remove_extra_folder(monkeypatch):
     view.extra_folders = ["C:/folder1", "C:/folder2"]
     monkeypatch.setattr(view, "_refresh_extra_folders", lambda: None)
     monkeypatch.setattr(view, "update", lambda: None)
-    monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
+    monkeypatch.setattr(view.log_view._list_view, "scroll_to", lambda **kwargs: None)
 
     view._remove_extra_folder("C:/folder1")
 
@@ -286,7 +286,7 @@ def test_show_snack_bar_adds_to_overlay(monkeypatch):
 def test_bundling_worker_with_error(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
-    monkeypatch.setattr(view.log_view, "scroll_to", lambda **kwargs: None)
+    monkeypatch.setattr(view.log_view._list_view, "scroll_to", lambda **kwargs: None)
 
     def mock_generator(**kwargs):
         raise RuntimeError("Test error")
@@ -320,7 +320,8 @@ def test_bundler_view_append_log_adds_control():
 
     view._append_log('test log entry')
 
-    assert len(view.log_view.controls) >= 1
+    # PR refactor/unified-log-view: log_view 內部 ListView 透過 _list_view 存取
+    assert len(view.log_view._list_view.controls) >= 1
 
 def test_bundler_view_version_list_exists():
     page = mock_page()
