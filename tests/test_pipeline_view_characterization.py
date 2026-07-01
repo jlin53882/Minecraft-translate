@@ -287,10 +287,15 @@ def test_pipeline_progress_panel_add_log():
 
     panel.add_log("測試訊息")
 
-    assert len(panel.log_view.controls) == 1
-    text_ctrl = panel.log_view.controls[0]
+    # PR refactor/unified-log-view: log_view 改為 LogView widget（ft.Container）
+    # 內部 ListView 透過 _list_view 存取
+    assert len(panel.log_view._list_view.controls) == 1
+    text_ctrl = panel.log_view._list_view.controls[0]
     assert "測試訊息" in text_ctrl.value
-    assert text_ctrl.color == ft.Colors.CYAN_700
+    # PR refactor/unified-log-view: 預設顏色從 CYAN_700 改為 theme.TEXT_LOG_INFO
+    # (LogView 把無前綴的 info 等級對應到 INFO 顏色，不再是 DEFAULT)
+    from app.ui import theme
+    assert text_ctrl.color == theme.TEXT_LOG_INFO
 
 
 def test_pipeline_progress_panel_add_log_success():
@@ -300,7 +305,8 @@ def test_pipeline_progress_panel_add_log_success():
 
     panel.add_log("成功", is_success=True)
 
-    text_ctrl = panel.log_view.controls[0]
+    # PR refactor/unified-log-view: log_view 改為 LogView widget
+    text_ctrl = panel.log_view._list_view.controls[0]
     assert text_ctrl.color != 0x00  # not default
 
 
@@ -311,7 +317,8 @@ def test_pipeline_progress_panel_add_log_failure():
 
     panel.add_log("失敗", is_success=False)
 
-    text_ctrl = panel.log_view.controls[0]
+    # PR refactor/unified-log-view: log_view 改為 LogView widget
+    text_ctrl = panel.log_view._list_view.controls[0]
     assert text_ctrl.color != 0x00
 
 
