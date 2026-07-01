@@ -17,6 +17,7 @@ import flet as ft
 import pytest
 
 from app.views.extractor_view import ExtractorView
+from app.views._log import LogView
 # 避免 tests 套件命名衝突（hermes-agent/tests 在 sys.path 前面）
 # 直接用 importlib 從專案的 conftest.py 載入 mock_page / mock_filepicker
 import importlib.util as _importlib_util
@@ -216,12 +217,14 @@ class TestAutoFillOutputPath:
         view.mods_dir_textfield.value = str(mods_path)
 
         # 清空 log_view
-        view.log_view.controls.clear()
+        # PR refactor/unified-log-view: log_view 改為 LogView widget（ft.Container）
+        # 內部 ListView 透過 _list_view 存取
+        view.log_view.clear()
 
         view._auto_fill_output_path(str(mods_path), mode="lang")
 
         # 檢查最後一個 log 是否包含 [系統] 自動設定輸出路徑
-        last_log = view.log_view.controls[-1].value
+        last_log = view.log_view._list_view.controls[-1].value
         assert "[系統] 自動設定輸出路徑" in last_log
         assert "_提取lang_輸出" in last_log
 
@@ -335,7 +338,8 @@ class TestExtractorViewControlsStructure:
         view = _make_view(monkeypatch)
         # log_view 屬性還是存在（避免破壞其他依賴此屬性的程式碼）
         assert hasattr(view, "log_view")
-        assert isinstance(view.log_view, ft.ListView)
+        # PR refactor/unified-log-view: log_view 改為 LogView widget
+        assert isinstance(view.log_view, LogView)
 
 
 
