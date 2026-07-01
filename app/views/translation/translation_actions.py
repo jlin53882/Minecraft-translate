@@ -7,7 +7,6 @@ import time
 
 import flet as ft
 
-from app.logging import LogPresenter, load_ui_logging_config
 from translation_tool.utils.config_manager import load_config
 
 
@@ -50,7 +49,7 @@ def run_ftb(view, *, dry_run: bool):
         ft.Colors.AMBER_200 if dry_run else ft.Colors.BLUE_200,
     )
     view.progress.value = 0
-    view.log_view.controls.clear()
+    view.log_view.clear()
     _safe_page_update(view)
     view.session = view.TaskSession()
     try:
@@ -103,7 +102,7 @@ def run_kjs(view, *, dry_run: bool):
         ft.Colors.AMBER_200 if dry_run else ft.Colors.BLUE_200,
     )
     view.progress.value = 0
-    view.log_view.controls.clear()
+    view.log_view.clear()
     _safe_page_update(view)
     view.session = view.TaskSession()
     try:
@@ -155,7 +154,7 @@ def run_md(view, *, dry_run: bool):
         ft.Colors.AMBER_200 if dry_run else ft.Colors.BLUE_200,
     )
     view.progress.value = 0
-    view.log_view.controls.clear()
+    view.log_view.clear()
     _safe_page_update(view)
     view.session = view.TaskSession()
     try:
@@ -193,19 +192,14 @@ def run_md(view, *, dry_run: bool):
 def start_ui_timer(view):
     """启动 UI 定时器，定期从 TaskSession 读取状态更新翻译进度界面
 
-    PR3：改用 LogPresenter(mode="tail")，tail_lines 由 config 控制。
+    PR refactor/unified-log-view: 改用 LogView 取代 LogPresenter。
+    LogView 內部仍包 LogPresenter 給 sync 使用。
     """
     if view._ui_timer_running:
         return
     view._ui_timer_running = True
-    # PR3：使用 config 驅動的 tail_lines（預設 250，與舊行為一致）
-    ui_cfg = load_ui_logging_config(load_config)
-    presenter = LogPresenter(
-        mode="tail",
-        tail_lines=ui_cfg.get("tail_lines", 250),
-        colorize=False,  # Translation 目前只有灰白色，保持現有外觀
-        default_color=ft.Colors.GREY_100,
-    )
+    # tail_lines 由 config 控制（PR3）
+    # presenter 在 LogView 內部初始化，這裡不再單獨管理
 
     def loop():
         """定时轮询 session 状态并更新 UI"""
@@ -223,9 +217,9 @@ def start_ui_timer(view):
                 view.progress.value = 0
             logs = snap.get("logs", []) or []
             try:
-                # PR3：presenter.sync() 內部處理 tail rebuild + 顏色
-                presenter.sync(view.log_view, logs)
-                # sync() 會 clear() + 重新加入所有 item，手動滾到最底部
+                # LogView 接管 tail rebuild + 顏色（內部走 LogPresenter.sync）
+                view.log_view.sync_entries(logs)
+                # sync_entries 會 clear() + 重新加入所有 item，手動滾到最底部
                 view.log_view.scroll_to(offset=1.0)
             except Exception as e:
                 log_warning(f"更新日誌視圖失敗: {e}")

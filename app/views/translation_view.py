@@ -8,6 +8,7 @@ import flet as ft
 import threading  # noqa: F401
 
 from app.ui import theme
+from app.views._log import LogView
 from translation_tool.utils.log_unit import log_info
 
 # UI 共用元件：抽出重複的卡片/按鈕樣式，集中在 app.ui
@@ -73,12 +74,12 @@ class TranslationView(ft.Column):
         self.progress = ft.ProgressBar(
             value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
-        # 初始提示文字，避免 ListView 空白時透明顯現深灰背景
-        self.log_view = ft.ListView(
-            expand=True,
-            spacing=4,
-            auto_scroll=True,
-            controls=[ft.Text("等待翻譯開始...", size=13, color=theme.GREY_100)],
+        # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器）
+        # tail 模式與既有的「最後 N 筆整批重建」行為一致
+        self.log_view = LogView(
+            page=self._page,
+            mode="tail",
+            tail_lines=250,
         )
 
         header = ft.Row(
@@ -277,15 +278,16 @@ class TranslationView(ft.Column):
         self.page.update()
 
     def _append_log(self, line: str):
-        """新增一行日誌到日誌檢視區"""
-        self.log_view.controls.append(ft.Text(line, size=13, color=theme.GREY_100))
-        if len(self.log_view.controls) > 400:
-            self.log_view.controls = self.log_view.controls[-300:]
-        self.page.update()
+        """新增一行日誌到日誌檢視區（直接走 LogView.add）。
+
+        取代原本的裸 controls.append + manual truncate 邏輯。
+        LogView 內部已有 show_levels 過濾、max_lines 截斷、等寬字與等級顏色。
+        """
+        self.log_view.add(line, level="system")
 
     def _clear_logs(self):
         """清除日誌檢視區的所有內容"""
-        self.log_view.controls.clear()
+        self.log_view.clear()
         self.page.update()
 
     # ------------------------------------------------------------------

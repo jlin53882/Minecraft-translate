@@ -260,7 +260,7 @@ def start_extraction(view, mode: str):
         return
 
     view.set_controls_disabled(True)
-    view.log_view.controls.clear()
+    view.log_view.clear()
     view.session.start()
     view._append_log_line(f'[系統] 開始任務 ({mode})...')
     view.progress_bar.value = 0

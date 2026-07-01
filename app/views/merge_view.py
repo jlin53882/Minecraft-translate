@@ -10,7 +10,7 @@ from typing import Any
 
 import flet as ft
 
-from app.logging import LogPresenter
+from app.views._log import LogView
 from translation_tool.utils.log_unit import log_info
 from translation_tool.utils.config_manager import load_config, save_config
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service, run_merge_folder_batch_service
@@ -28,7 +28,7 @@ class MergeView(ft.Column):
     _ui_stop: threading.Event
     selected_zips: list[str]
     _merge_stats: dict[str, Any]
-    log_presenter: LogPresenter
+    log_view: LogView
     only_lang_checkbox: ft.Checkbox
     process_zh_cn_switch: ft.Switch
     _view_registry: list[dict] | None = None
@@ -128,8 +128,8 @@ class MergeView(ft.Column):
             "failed_zips": 0,
             "failed_zip_details": "",
         }
-        # LogPresenter 接管 append 與 UI controls 數量控制
-        self.log_presenter = LogPresenter(mode="append", max_ui_lines=2000)
+        # LogView widget 接管 append + UI controls 數量控制（取代 LogPresenter）
+        # 設定在下面 line ~213 統一處理
 
         # ── 一般選項 ──────────────────────────────────────────────────────────
         # only_process_lang: 只處理 /lang/ 目錄下的 zh_cn/zh_tw/en_us 檔案，其他目錄全部跳過
@@ -210,7 +210,12 @@ class MergeView(ft.Column):
         self.progress_bar = ft.ProgressBar(
             value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
-        self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
+        # LogView widget 接管 append + UI controls 數量控制（取代 LogPresenter）
+        self.log_view = LogView(
+            page=self._page,
+            mode="append",
+            max_lines=2000,
+        )
 
         self.pick_zip_button = primary_button(
             "新增 ZIP",
@@ -509,14 +514,11 @@ class MergeView(ft.Column):
             styled_card(
                 title="執行日誌",
                 icon=ft.Icons.RECEIPT_LONG,
+                # LogView widget 自帶深色容器 + 圓角 + 等寬字（從 theme）
+                # 用 height=280 保留原本的高度限制
                 content=ft.Container(
-                    height=280,
-                    bgcolor="#2b2f36",
-                    border=ft.Border.all(1, "#4b5563"),
-                    border_radius=8,
-                    padding=10,
-                    clip_behavior=ft.ClipBehavior.HARD_EDGE,
                     content=self.log_view,
+                    height=280,
                 ),
             ),
         ]
@@ -643,7 +645,7 @@ class MergeView(ft.Column):
     def _start_ui_poller(self) -> None:
         """啟動 UI 輪詢器，定期同步進度與日誌。"""
         self._ui_stop.clear()
-        self.log_presenter.reset()
+        self.log_view.clear()
 
         def poll():
             while not self._ui_stop.is_set():
@@ -690,8 +692,8 @@ class MergeView(ft.Column):
 
                 self.progress_bar.value = progress
 
-                # LogPresenter 接管 append + truncate + scroll
-                self.log_presenter.sync(self.log_view, logs)
+                # LogView 接管 append + truncate + scroll
+                self.log_view.sync_from_session(self.session)
 
                 if status in ("DONE", "ERROR"):
                     self.start_button.disabled = False

@@ -15,6 +15,7 @@
 import flet as ft
 from pathlib import Path
 from app.ui import theme
+from app.views._log import LogView
 from translation_tool.utils.log_unit import log_info
 import threading
 
@@ -193,11 +194,11 @@ class ExtractorView(ft.Column):
 
         # 3. Status Display（由 _build_status_bar 在 build_logs_panel 中統一建立）
         # 4. Logs Console（由 build_logs_panel 中的 _build_status_bar 統一建立）
-        self.log_view = ft.ListView(
-            expand=True,
-            spacing=2,
-            auto_scroll=True,
-            padding=10,
+        # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器 + 字串比對判 level）
+        self.log_view = LogView(
+            page=self._page,
+            mode="append",
+            max_lines=2000,
         )
 
         # ======================
@@ -475,31 +476,22 @@ class ExtractorView(ft.Column):
 
 
     def _append_log_line(self, entry_or_str):
-        """新增日誌訊息到日誌檢視區。
+        """新增日誌訊息到日誌檢視區（直接走 LogView.add）。
 
-        支援傳入 LogEntry（PR2 後 poller 傳入）或 str（直接呼叫時）。
+        PR refactor/unified-log-view: 取代原本的字串比對判斷 level + 寫死 hex 顏色。
+        LogView 內部會從 entry 的 level 自動取對應顏色。
+
+        支援傳入 LogEntry（取 .level 與 .text）或 str（預設 level="system"）。
         """
-        text = entry_or_str.text if hasattr(entry_or_str, "text") else entry_or_str
-        log_info(f"_append_log_line called: thread={threading.current_thread().name}, text={text[:80]}...")
-        color = "#e0e0e0"  # default logs are light grey
-        if "[ERROR]" in text:
-            color = "#ff6b6b"  # soft red
-        elif "[系統]" in text:
-            color = "#69db7c"  # soft green
-        elif "Translation" in text or "完成" in text:
-            color = "#74c0fc"  # soft blue
-
-        log_info(f"_append_log_line: before append, log_view.controls count={len(self.log_view.controls)}")
-        self.log_view.controls.append(
-            ft.Text(
-                text,
-                font_family="Consolas,Monospace",
-                size=13,
-                color=color,
-                selectable=True,
-            )
-        )
-        log_info(f"_append_log_line: after append, log_view.controls count={len(self.log_view.controls)}")
+        if hasattr(entry_or_str, "text") and hasattr(entry_or_str, "level"):
+            # LogEntry 物件
+            text = entry_or_str.text
+            level = entry_or_str.level
+        else:
+            # 純字串（reset / auto-fill 等純事件 log），預設 system 等級
+            text = str(entry_or_str)
+            level = "system"
+        self.log_view.add(text, level=level)
 
     # ==================================================
     # Worker Logic

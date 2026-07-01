@@ -16,7 +16,8 @@ from app.ui.components import primary_button, styled_card
 
 from app.services_impl.pipelines.lm_service import run_lm_translation_service
 from app.task_session import TaskSession
-from app.logging import LogPresenter, load_ui_logging_config
+from app.logging import load_ui_logging_config
+from app.views._log import LogView
 from translation_tool.utils.config_manager import load_config
 
 LM_translate_folder_name = (
@@ -79,16 +80,13 @@ class LMView(ft.Column):
         self.progress_bar = ft.ProgressBar(
             value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
-        self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
-
-        # LogPresenter：接管 log_view 的渲染，防止 UI controls 膨脹凍住
+        # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器）
         # tail 模式與既有的 [-250:] 行為一致
         ui_cfg = load_ui_logging_config(load_config)
-        self.log_presenter = LogPresenter(
+        self.log_view = LogView(
+            page=self._page,
             mode="tail",
             tail_lines=ui_cfg.get("tail_lines", 250),
-            colorize=True,  # 等級著色開啟
-            default_color="#F5F5F5",  # 浅灰色文字，深色背景看得清楚
         )
 
         # 按鈕（共用 primary style）
@@ -139,13 +137,8 @@ class LMView(ft.Column):
                 title="執行日誌",
                 icon=ft.Icons.RECEIPT_LONG,
                 expand=True,
-                content=ft.Container(
-                    expand=True,
-                    bgcolor="#1e1e1e",
-                    border_radius=8,
-                    padding=10,
-                    content=self.log_view,
-                ),
+                # self.log_view 已是 LogView widget（自帶深色容器 + 等寬字）
+                content=self.log_view,
             ),
         ]
 
@@ -236,8 +229,7 @@ class LMView(ft.Column):
 
         self._set_status("執行中", theme.BLUE_200)
         self.progress_bar.value = 0
-        self.log_view.controls.clear()
-        self.log_presenter.reset()
+        self.log_view.clear()
         self.page.update()
 
         output_dir = self.output_path.value or LM_translate_folder_name
@@ -294,13 +286,13 @@ class LMView(ft.Column):
 
                 logs = snap.get("logs", []) or []
                 try:
-                    self.log_presenter.sync(self.log_view, logs)
+                    self.log_view.sync_entries(logs)
                 except Exception as e:
                     log_debug(f"LM log presenter sync failed: {e}")
 
-                # 強制刷新 ListView 內容變更，避免背景 thread 更新時畫面不同步
+                # 強制刷新頁面（sync_entries 內部已呼叫 page.update()）
                 try:
-                    self.log_view.update()
+                    self.page.update()
                 except Exception:
                     pass
 
