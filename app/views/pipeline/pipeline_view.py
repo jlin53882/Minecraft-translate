@@ -278,7 +278,7 @@ class PipelineView(ft.Column):
             text_size=12,
             dense=True,
         )
-        self.log_content = ft.ListView(expand=True, spacing=5, auto_scroll=True)
+        self.log_content = ft.ListView(expand=True, spacing=5, auto_scroll=True)  # PR refactor/unified-log-view: dead widget, 將在下個 commit 移除
         self.progress_bar = ft.ProgressBar(width=float("inf"), height=8, value=0, color=CYAN_400, bgcolor="#E0E0E0")
         self.progress_status = ft.Text("等待任務啟動...", size=12, color=GREY_600)
         self.keys_container = ft.Column(spacing=10)
@@ -297,10 +297,6 @@ class PipelineView(ft.Column):
     def set_registry(self, registry):
         """將全域視圖註冊表注入視圖內（相容舊代碼）。"""
         self.set_view_registry(registry)
-        self.log_content.controls.append(
-            ft.Text(f">> {msg}", color=RED_400 if is_err else CYAN_700, size=12, font_family="Consolas")
-        )
-        self._page.update()
 
     def _update_progress(self, val, text):
         self.progress_bar.value = val
