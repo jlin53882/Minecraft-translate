@@ -19,6 +19,7 @@ from app.services import (
 )
 
 # 導入新的拆分元件
+from app.views._log import LogView
 from app.views.qc_base import QCBase
 from app.views.untranslated_checker import UntranslatedChecker
 
@@ -43,7 +44,12 @@ class QCView(ft.Column):
 
         # --- 共用的日誌 UI ---
         self.progress_bar = ft.ProgressBar(value=0, visible=False)
-        self.log_view = ft.ListView(expand=True, spacing=5, auto_scroll=True)
+        # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器）
+        self.log_view = LogView(
+            page=self._page,
+            mode="append",
+            max_lines=2000,
+        )
 
         # --- 建立 QCBase 任務執行器 ---
         self.task_runner = QCBase(page, self.progress_bar, self.log_view)
@@ -188,13 +194,8 @@ class QCView(ft.Column):
             # 共用日誌
             ft.Text("處理日誌", theme_style=ft.TextThemeStyle.TITLE_MEDIUM),
             self.progress_bar,
-            ft.Container(
-                content=self.log_view,
-                border=ft.Border.all(1, theme.OUTLINE),
-                border_radius=ft.BorderRadius.all(5),
-                padding=10,
-                expand=True,
-            ),
+            # self.log_view 已是 LogView widget（自帶深色容器 + 等寬字）
+            self.log_view,
         ]
 
     # --- 輔助函式 (已修改以支援檔案/資料夾選擇和過濾) ---
@@ -290,7 +291,7 @@ class QCView(ft.Column):
 
     def start_task(self, task_type: str):
         """處理開始品質檢查任務"""
-        self.log_view.controls.clear()
+        self.log_view.clear()
         self.progress_bar.value = 0
         self.progress_bar.color = theme.PRIMARY
         self.progress_bar.visible = True
@@ -309,7 +310,7 @@ class QCView(ft.Column):
                 self._show_snack_bar("錯誤：請填寫所有「Key 缺失檢查」的路徑！")
                 self.set_controls_disabled(False)
                 return
-            self.log_view.controls.append(ft.Text("[系統] 開始執行 Key 缺失檢查..."))
+            self.log_view.add("[系統] 開始執行 Key 缺失檢查...", level="system")
             target_func = run_untranslated_check_service
             args = (en_dir, tw_dir, out_dir)
 
@@ -322,9 +323,7 @@ class QCView(ft.Column):
                 self._show_snack_bar("錯誤：請填寫所有「JSON 資料夾差異比對」的路徑！")
                 self.set_controls_disabled(False)
                 return
-            self.log_view.controls.append(
-                ft.Text("[系統] 開始執行 JSON 資料夾簡繁差異比較...")
-            )
+            self.log_view.add("[系統] 開始執行 JSON 資料夾簡繁差異比較...", level="system")
             target_func = run_variant_compare_service
             args = (cn_dir, tw_dir, out_dir)
 
@@ -336,9 +335,7 @@ class QCView(ft.Column):
                 self._show_snack_bar("錯誤：請填寫所有「TSV 單檔案差異比對」的路徑！")
                 self.set_controls_disabled(False)
                 return
-            self.log_view.controls.append(
-                ft.Text("[系統] 開始執行 TSV 單檔案簡繁差異比較...")
-            )
+            self.log_view.add("[系統] 開始執行 TSV 單檔案簡繁差異比較...", level="system")
             target_func = run_variant_compare_tsv_service
             args = (tsv_path, out_csv_path)
 

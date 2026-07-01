@@ -28,6 +28,7 @@ import flet as ft
 
 from app.ui import theme
 from app.ui.components import styled_card
+from app.views._log import LogView
 
 
 def _build_status_bar(view) -> ft.Container:
@@ -304,13 +305,11 @@ def build_logs_panel(view) -> ft.Column:
         spacing=10,
         controls=[
             _build_status_bar(view),
+            # PR refactor/unified-log-view: view.log_view 已是 LogView widget
+            # 自帶深色容器 + 圓角 + 等寬字（從 theme）；用 height=350 保留原本高度
             ft.Container(
                 content=view.log_view,
-                bgcolor='#1e1e1e',
-                border_radius=8,
                 height=350,
-                padding=10,
-                clip_behavior=ft.ClipBehavior.HARD_EDGE,
             ),
         ],
         expand=True,
