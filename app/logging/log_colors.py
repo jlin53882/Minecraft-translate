@@ -1,37 +1,16 @@
-"""app/logging/log_colors.py
+"""app.logging.log_colors 向後兼容 re-export。
 
-日誌等級 → 顏色對應規則。
+新 code 請從 app.views._log.log_colors import。
 
-把所有 view 散落的顏色判斷收斂到同一個地方。
+PR refactor/unified-log-view: 把實作搬到 app.views._log.log_colors，
+這裡保留 stub 避免破壞既有 from app.logging.log_colors import get_level_color 等。
 """
 
-from __future__ import annotations
+from app.views._log.log_colors import (
+    COLOR_MAP,
+    LEVEL_PREFIX,
+    get_level_color,
+    get_level_prefix,
+)
 
-# Flet 可用的顏色常量（theme 常見值）
-# 這裡用 hex 或基本顏色名稱，view 層再依據 theme 轉換
-COLOR_MAP = {
-    "system": "4CAF50",   # 綠
-    "info": "90CAF9",    # 淺藍
-    "warning": "FF9800",  # 橙
-    "error": "F44336",    # 紅
-    "debug": "9E9E9E",    # 灰
-}
-
-# 等級標記前綴（當無顏色時用於裝飾）
-LEVEL_PREFIX = {
-    "system": "[SYS]",
-    "info": "",
-    "warning": "[WARN]",
-    "error": "[ERR]",
-    "debug": "[DBG]",
-}
-
-
-def get_level_color(level: str) -> str:
-    """取得指定等級對應的 hex 顏色。"""
-    return COLOR_MAP.get(str(level).lower(), COLOR_MAP["info"])
-
-
-def get_level_prefix(level: str) -> str:
-    """取得指定等級的前綴文字。"""
-    return LEVEL_PREFIX.get(str(level).lower(), "")
+__all__ = ["COLOR_MAP", "LEVEL_PREFIX", "get_level_color", "get_level_prefix"]
