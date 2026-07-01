@@ -63,6 +63,19 @@ class ColorTokens:
     button_height: int
     button_radius: int
 
+    # ─── Log 區塊專用（新增於 PR refactor/unified-log-view）───
+    bg_log_panel: str           # log 容器底色
+    border_log_panel: str       # log 容器邊框
+    text_log_default: str       # log 一般文字
+    text_log_error: str         # log error 等級
+    text_log_warning: str       # log warning 等級
+    text_log_info: str          # log info 等級
+    text_log_system: str        # log system 等級
+    text_log_debug: str         # log debug 等級
+
+    # ─── Progress Bar（獨立群組）───
+    bg_progress_track: str      # progress bar 底色
+
 
 # Light Mode Tokens
 LIGHT_TOKENS = ColorTokens(
@@ -84,6 +97,17 @@ LIGHT_TOKENS = ColorTokens(
     outline_variant=Colors.OUTLINE_VARIANT,
     button_height=42,
     button_radius=6,
+    # Log 區塊專用（淺色主題）
+    bg_log_panel="#F5F5F5",
+    border_log_panel="#D0D0D0",
+    text_log_default="#212121",
+    text_log_error="#C62828",
+    text_log_warning="#E65100",
+    text_log_info="#1565C0",
+    text_log_system="#2E7D32",
+    text_log_debug="#616161",
+    # Progress Bar
+    bg_progress_track="#E0E0E0",
 )
 
 # Dark Mode Tokens
@@ -106,6 +130,17 @@ DARK_TOKENS = ColorTokens(
     outline_variant=Colors.GREY_700,
     button_height=42,
     button_radius=6,
+    # Log 區塊專用（深色主題——目前所有 view 都用這組）
+    bg_log_panel="#1e1e1e",
+    border_log_panel="#4b5563",
+    text_log_default="#e0e0e0",
+    text_log_error="#ff6b6b",
+    text_log_warning="#FFB74D",
+    text_log_info="#90CAF9",
+    text_log_system="#69db7c",
+    text_log_debug="#9E9E9E",
+    # Progress Bar
+    bg_progress_track="#E0E0E0",
 )
 
 
@@ -250,7 +285,6 @@ BLUE_800 = Colors.BLUE_800
 
 # Grey
 GREY = Colors.GREY
-ORANGE = Colors.ORANGE
 AMBER_100 = Colors.AMBER_100
 AMBER_500 = Colors.AMBER_500
 AMBER_700 = Colors.AMBER_700
@@ -332,3 +366,25 @@ OUTLINE_VARIANT = Colors.OUTLINE_VARIANT
 
 # Primary (alias)
 PRIMARY_COLOR = Colors.PRIMARY
+
+# ============================================================
+# Log 區塊專用 alias（PR refactor/unified-log-view 新增）
+# ============================================================
+# ⚠️ dark mode 接通待辦（不在這次 PR 範圍）：
+# 目前 alias 綁死 DARK_TOKENS 值。若要讓 theme.manager.set_mode('light')
+# 真的切換 log 顏色，需要在 set_mode() 內重新綁 module-level alias
+# （module-level mutating）。
+# 這次 PR 只完成「token 定義」+「view 使用」，不接通切換邏輯。
+
+# ─── Log 區塊專用 alias ───
+BG_LOG_PANEL = DARK_TOKENS.bg_log_panel           # ← 用 DARK 當預設（符合現有 view）
+BORDER_LOG_PANEL = DARK_TOKENS.border_log_panel
+TEXT_LOG_DEFAULT = DARK_TOKENS.text_log_default
+TEXT_LOG_ERROR = DARK_TOKENS.text_log_error
+TEXT_LOG_WARNING = DARK_TOKENS.text_log_warning
+TEXT_LOG_INFO = DARK_TOKENS.text_log_info
+TEXT_LOG_SYSTEM = DARK_TOKENS.text_log_system
+TEXT_LOG_DEBUG = DARK_TOKENS.text_log_debug
+
+# ─── Progress Bar（獨立群組，不在 Log 範圍）───
+BG_PROGRESS_TRACK = DARK_TOKENS.bg_progress_track
