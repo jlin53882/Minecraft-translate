@@ -1,5 +1,6 @@
 
 from app.views import translation_view as tv
+from app.views._log import LogView
 from tests.conftest import mock_page, mock_filepicker
 
 
@@ -88,7 +89,7 @@ def test_reset_md_inputs_restores_defaults_and_appends_log(monkeypatch):
     assert view.md_step_inject.value is True
     assert view.md_write_new_cache.value is True
     assert view.md_lang_mode.value == 'non_cjk_only'
-    assert view.log_view.controls[-1].value == '[UI] 已重置：Markdown 輸入已清空'
+    assert view.log_view._list_view.controls[-1].value == '[UI] 已重置：Markdown 輸入已清空'  # PR refactor/unified-log-view
 
 
 def test_reset_kjs_inputs_restores_defaults_and_appends_log(monkeypatch):
@@ -225,7 +226,7 @@ def test_pick_directory_into_without_page_update_when_no_result(monkeypatch):
 
     assert target.value == "original"
     assert page.updated == 0
-    assert view.log_view.controls[-1].value == '[UI] 已重置：KubeJS 輸入已清空'
+    assert view.log_view._list_view.controls[-1].value == '[UI] 已重置：KubeJS 輸入已清空'  # PR refactor/unified-log-view
 
 
 def test_reset_ftb_inputs_restores_defaults(monkeypatch):
@@ -252,7 +253,7 @@ def test_reset_ftb_inputs_restores_defaults(monkeypatch):
     assert view.ftb_step_translate.value is True
     assert view.ftb_step_inject.value is True
     assert view.ftb_write_new_cache.value is True
-    assert view.log_view.controls[-1].value == '[UI] 已重置：FTB Quests 輸入已清空'
+    assert view.log_view._list_view.controls[-1].value == '[UI] 已重置：FTB Quests 輸入已清空'  # PR refactor/unified-log-view
 
 
 def test_clear_logs_removes_all_controls(monkeypatch):
@@ -264,11 +265,13 @@ def test_clear_logs_removes_all_controls(monkeypatch):
 
     view._append_log('line1')
     view._append_log('line2')
-    assert len(view.log_view.controls) == 3  # initial + 2
+    # PR refactor/unified-log-view: log_view 內部 ListView 透過 _list_view 存取
+    # LogView 預設沒初始 placeholder（不像舊裸 ListView 加 "等待翻譯開始..."）
+    assert len(view.log_view._list_view.controls) == 2
 
     view._clear_logs()
 
-    assert len(view.log_view.controls) == 0
+    assert len(view.log_view._list_view.controls) == 0
 
 
 def test_append_log_trims_to_max_400_lines(monkeypatch):
@@ -281,7 +284,8 @@ def test_append_log_trims_to_max_400_lines(monkeypatch):
     for i in range(450):
         view._append_log(f'log{i}')
 
-    assert len(view.log_view.controls) < 400
+    # PR refactor/unified-log-view: LogView 內部 max_lines 截斷（250 default tail_lines）
+    assert len(view.log_view._list_view.controls) <= 250
 
 
 def test_set_status_updates_chip_label_and_color(monkeypatch):

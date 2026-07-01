@@ -2,6 +2,7 @@
 from pathlib import Path
 import flet as ft
 from app.views.extractor_view import ExtractorView
+from app.views._log import LogView
 from tests.conftest import mock_page, mock_filepicker
 
 
@@ -37,7 +38,9 @@ def test_clear_output_path_appends_system_log(monkeypatch):
     view.clear_output_path()
 
     assert view.output_dir_textfield.value == ''
-    assert view.log_view.controls[-1].value == '[系統] 已清除輸出路徑'
+    # PR refactor/unified-log-view: log_view 改為 LogView widget（ft.Container）
+    # 內部 ListView 透過 _list_view 存取
+    assert view.log_view._list_view.controls[-1].value == '[系統] 已清除輸出路徑'
 
 
 def test_update_stats_from_log_counts_success_warning_failure(monkeypatch):
@@ -85,12 +88,14 @@ def test_extractor_view_output_dir_textfield_exists(monkeypatch):
 
 
 def test_extractor_view_log_view_exists(monkeypatch):
-    """測試 log_view 存在且為 ListView"""
+    """測試 log_view 存在且為 LogView widget（ft.Container 包 ft.ListView）。"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
 
-    assert isinstance(view.log_view, ft.ListView)
-    assert view.log_view.auto_scroll is True
+    # PR refactor/unified-log-view: log_view 改為 LogView widget（ft.Container）
+    assert isinstance(view.log_view, LogView)
+    # 內部 ListView 仍有 auto_scroll
+    assert view.log_view._list_view.auto_scroll is True
 
 
 def test_extractor_view_all_buttons_have_on_click(monkeypatch):
@@ -155,7 +160,9 @@ def test_extractor_view_append_log_line_adds_control(monkeypatch):
 
     view._append_log_line('Test log entry')
 
-    assert len(view.log_view.controls) >= 1
+    # PR refactor/unified-log-view: _append_log_line 內部走 LogView.add()
+    # LogView 的內部 ListView 透過 _list_view 存取
+    assert len(view.log_view._list_view.controls) >= 1
 
 
 def test_extractor_view_set_controls_disabled_toggles_inputs(monkeypatch):
