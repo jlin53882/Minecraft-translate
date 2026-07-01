@@ -15,6 +15,7 @@ import threading
 import os
 
 from app.ui import theme
+from app.views._log import LogView
 from app.services_impl.pipelines.extract_service import (
     prepare_extraction_paths,
     prepare_preview_paths,
@@ -85,11 +86,12 @@ def open_extractor_dialog(
     progress_pct = ft.Text("0%", size=12, color=theme.GREY_600, weight=ft.FontWeight.BOLD)
 
     # ========== UI 元件 - 日誌 ==========
-    log_view = ft.ListView(
-        expand=True,
-        spacing=2,
-        auto_scroll=True,
-        padding=10,
+    # PR refactor/unified-log-view: 改用 LogView widget
+    # 統一深色容器 + 等寬字 + 等級顏色（從 theme）
+    log_view = LogView(
+        page=page,
+        mode="append",
+        max_lines=2000,
     )
 
     # ========== UI 元件 - 結果統計 ==========
@@ -135,12 +137,21 @@ def open_extractor_dialog(
     )
 
     # ========== 輔助函式 ==========
-    def add_log(msg: str, color=None):
-        if color is None:
-            color = theme.CYAN_700
-        log_view.controls.append(
-            ft.Text(f">> {msg}", color=color, size=12, font_family="Consolas")
-        )
+    def add_log(msg: str, level: str = "info"):
+        """PR refactor/unified-log-view: 改用 LogView.add() 統一處理等級顏色。
+
+        level: debug/info/warning/error/system，預設 info
+        從 msg 字串前綴（[系統 / [ERROR / [完成）也能推斷 level
+        """
+        # 從 msg 前綴推斷 level（向後兼容既有呼叫）
+        if level == "info":
+            if msg.startswith("[系統"):
+                level = "system"
+            elif msg.startswith("[ERROR"):
+                level = "error"
+            elif msg.startswith("[完成"):
+                level = "system"
+        log_view.add(f">> {msg}", level=level)
 
     async def _do_update():
         page.update()
@@ -176,9 +187,9 @@ def open_extractor_dialog(
             cancel_button.visible = True
             progress_bar.visible = True
             update_progress(0, "開始任務...")
-            add_log(f"[系統] 開始提取 ({selected_mode})...")
-            add_log(f"[系統] 來源：{mods_dir}")
-            add_log(f"[系統] 輸出：{final_output}")
+            add_log(f"[系統] 開始提取 ({selected_mode})...", level="system")
+            add_log(f"[系統] 來源：{mods_dir}", level="system")
+            add_log(f"[系統] 輸出：{final_output}", level="system")
 
         # 直接呼叫 UI 更新（無需 run_task）
         ui_start()
@@ -214,13 +225,13 @@ def open_extractor_dialog(
                         state["done"] = True
                         add_log(
                             f"[完成] 成功 {stats['success']} / 跳過 {stats['warnings']} / 失敗 {stats['failures']}",
-                            theme.GREEN_700,
+                            level="system",
                         )
                         update_progress(1.0, "任務完成")
                         update_stats(stats["success"], stats["warnings"], stats["failures"])
 
                 elif "error" in update:
-                    add_log(f"[ERROR] {update['error']}", theme.RED_400)
+                    add_log(f"[ERROR] {update['error']}", level="error")
 
             # 透過 Service 統一處理 Generator 迭代
             result_stats = run_extraction_loop(gen, cancelled_flag=cancelled_flag, on_update=on_update)
@@ -235,7 +246,7 @@ def open_extractor_dialog(
                 update_stats(stats["success"], stats["warnings"], stats["failures"])
 
         except Exception as ex:
-            add_log(f"[ERROR] {ex}", theme.RED_400)
+            add_log(f"[ERROR] {ex}", level="error")
             stats["failures"] += 1
             update_stats(stats["success"], stats["warnings"], stats["failures"])
 
@@ -418,19 +429,30 @@ def open_preview_dialog(
     )
 
     # 日誌區
-    log_view = ft.ListView(
+    # PR refactor/unified-log-view: 改用 LogView widget
+    # 統一深色容器 + 等寬字 + 等級顏色（從 theme）
+    log_view = LogView(
+        page=page,
+        mode="append",
+        max_lines=2000,
         height=200,
-        spacing=2,
-        auto_scroll=True,
-        padding=10,
     )
 
-    def add_log(msg, color=None):
-        if color is None:
-            color = ft.Colors.CYAN_700
-        log_view.controls.append(
-            ft.Text(f">> {msg}", color=color, size=12, font_family="Consolas")
-        )
+    def add_log(msg, level: str = "info"):
+        """PR refactor/unified-log-view: 改用 LogView.add() 統一處理等級顏色。
+
+        level: debug/info/warning/error/system，預設 info
+        從 msg 字串前綴（[系統 / [ERROR / [完成）也能推斷 level
+        """
+        # 從 msg 前綴推斷 level（向後兼容既有呼叫）
+        if level == "info":
+            if msg.startswith("[系統"):
+                level = "system"
+            elif msg.startswith("[ERROR"):
+                level = "error"
+            elif msg.startswith("[完成"):
+                level = "system"
+        log_view.add(f">> {msg}", level=level)
 
     async def _do_update():
         page.update()
@@ -542,14 +564,14 @@ def open_preview_dialog(
         preview_state.error = None
 
         # 重置 UI
-        log_view.controls.clear()
+        log_view.clear()
         progress_bar.value = 0
         progress_pct.value = "0%"
         status_text.value = "正在掃描..."
         start_button.disabled = True
         page.update()
 
-        add_log(f"[系統] 開始預覽 {mode.upper()} 掃描...")
+        add_log(f"[系統] 開始預覽 {mode.upper()} 掃描...", level="system")
 
         def do_scan():
             """背景執行緒：跑 generator，更新 preview_state"""
@@ -614,11 +636,11 @@ def open_preview_dialog(
 
                 if final_result:
                     results = final_result.get("preview_results", [])
-                    add_log(f"[完成] 找到 {len(results)} 個 JAR", ft.Colors.GREEN_700)
+                    add_log(f"[完成] 找到 {len(results)} 個 JAR", level="system")
                     page.update()
                     show_result_dialog(final_result)
                 elif final_error:
-                    add_log(f"[ERROR] {final_error}", ft.Colors.RED_400)
+                    add_log(f"[ERROR] {final_error}", level="error")
                     status_text.value = f"預覽失敗：{final_error}"
                     page.update()
 
@@ -649,12 +671,8 @@ def open_preview_dialog(
                 ft.Divider(),
                 ft.Row([status_text, progress_pct], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 progress_bar,
-                ft.Container(
-                    content=log_view,
-                    bgcolor="#1e1e1e",
-                    border_radius=8,
-                    padding=0,
-                ),
+                # log_view 已是 LogView widget（自帶深色容器 + 圓角）
+                log_view,
             ], spacing=10),
             width=dialog_width,
             height=500,
