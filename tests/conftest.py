@@ -46,10 +46,16 @@ def reset_checkpoint_dir_flag():
     logs/ directory mid-suite would fail because save_checkpoint assumes the
     directory is still ready.
 
+    Implementation note: import lm_translator lazily and skip reset if import
+    fails. This prevents tests that don't actually exercise lm_translator
+    (e.g. tests/test_lm_config_rules.py) from triggering orjson import chain.
+
     Refs: PR #92 audit report v5, Tier A step 5 (A5 [M4])
     """
-    from translation_tool.core import lm_translator
-    lm_translator._checkpoint_dir_ready = False
+    import sys
+    mod = sys.modules.get("translation_tool.core.lm_translator")
+    if mod is not None and hasattr(mod, "_checkpoint_dir_ready"):
+        mod._checkpoint_dir_ready = False
     yield
 
 
