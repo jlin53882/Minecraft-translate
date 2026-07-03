@@ -37,6 +37,22 @@ ft.Border.all = staticmethod(_border_all)
 # 共用 Fixtures
 # =============================================================================
 
+@pytest.fixture(autouse=True)
+def reset_checkpoint_dir_flag():
+    """Reset _checkpoint_dir_ready flag before each test (isolation).
+
+    Why: lm_translator.save_checkpoint sets a module-level flag on first call
+    to skip os.makedirs() syscall. Without reset, tests that mock or delete the
+    logs/ directory mid-suite would fail because save_checkpoint assumes the
+    directory is still ready.
+
+    Refs: PR #92 audit report v5, Tier A step 5 (A5 [M4])
+    """
+    from translation_tool.core import lm_translator
+    lm_translator._checkpoint_dir_ready = False
+    yield
+
+
 def pytest_configure(config):
     """Pytest 配置。"""
     config.addinivalue_line("markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')")

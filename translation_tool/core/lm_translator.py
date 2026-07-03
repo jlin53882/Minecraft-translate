@@ -50,6 +50,7 @@ BATCH_WRITE_INTERVAL = 5  # 每 N 個批次寫一次硬碟
 # B-4: 斷點續傳機制
 # ============================================================
 CHECKPOINT_FILE = "logs/translation_checkpoint.json"
+_checkpoint_dir_ready = False
 
 
 def _get_batch_write_interval():
@@ -68,7 +69,10 @@ def save_checkpoint(
         remaining: 剩餘待翻譯項目清單（用於恢復時取樣比对）
         output_dir: 輸出目錄路徑
     """
-    os.makedirs(os.path.dirname(CHECKPOINT_FILE), exist_ok=True)
+    global _checkpoint_dir_ready
+    if not _checkpoint_dir_ready:
+        os.makedirs(os.path.dirname(CHECKPOINT_FILE), exist_ok=True)
+        _checkpoint_dir_ready = True
     with open(CHECKPOINT_FILE, "w", encoding="utf-8") as f:
         json_std.dump(
             {
