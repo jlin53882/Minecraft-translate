@@ -131,11 +131,10 @@ def _process_output(results, status):
     if isinstance(results, tuple):
         return results
 
-    # 處理 None（代表 ALL_KEYS_EXHAUSTED），不要被當成空結果
-    if results is None:
-        return [], status
-
     # 處理空結果（真正沒有結果）
+    # 註: A7 修完後 translate_batch_smart_old 不再 return None
+    # 所以原本的 "if results is None" defensive 已變 unreachable dead code
+    # 已於 A7 commit 一併移除 (M5 連動)
     if not results:
         return [], status  # 保留原始 status，不強制改成 AUTO
 
@@ -645,7 +644,7 @@ def translate_batch_smart_old(
                             hit_rpm = True
                             # ⭐ 檢查換 Key 是否成功
                             if not rotate_api_key():
-                                return None, "ALL_KEYS_EXHAUSTED"
+                                return [], "ALL_KEYS_EXHAUSTED"
                             continue
 
                         elif "PERMINUTE" in quota_id or "RPM" in remote_msg:
@@ -666,7 +665,7 @@ def translate_batch_smart_old(
                             hit_rpm = True
                             # ⭐ 檢查換 Key 是否成功
                             if not rotate_api_key():
-                                return None, "ALL_KEYS_EXHAUSTED"
+                                return [], "ALL_KEYS_EXHAUSTED"
                             continue
 
                     except Exception as parse_err:
@@ -677,12 +676,12 @@ def translate_batch_smart_old(
                         if "QUOTA" in err_msg or "EXCEEDED" in err_msg:
                             # ⭐ 這裡之前會崩潰，現在這樣改就安全了
                             if not rotate_api_key():
-                                return None, "ALL_KEYS_EXHAUSTED"
+                                return [], "ALL_KEYS_EXHAUSTED"
                             continue
 
                         # 兜底處理
                         if not rotate_api_key():
-                            return None, "ALL_KEYS_EXHAUSTED"
+                            return [], "ALL_KEYS_EXHAUSTED"
                         continue
 
                 # ========== 504 ==========
