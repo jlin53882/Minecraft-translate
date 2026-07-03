@@ -690,6 +690,7 @@ def translate_batch_smart_old(
                     log_info(
                         "[⏱️] 504 DEADLINE_EXCEEDED：請求過大或模型計算太久，縮小 batch"
                     )
+                    pinned_model_index = None  # ⭐ 解鎖，避免 stale lock 死亡迴圈
                     break
 
                 if status == 503:
