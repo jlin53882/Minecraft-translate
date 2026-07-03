@@ -9,6 +9,7 @@ import json as json_std
 import math
 import os
 import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Any, Generator, Optional
 
@@ -357,9 +358,7 @@ def translate_directory_generator(
     # =========================
     # DEBUG：列出 Cache 命中來源
     # =========================
-    if True and cached_items:
-        from collections import defaultdict
-
+    if cached_items:
         hit_by_file = defaultdict(list)
 
         # 先把命中按檔名聚合，避免 log 太長
