@@ -28,7 +28,6 @@ OVERLOAD_RETRY_WAIT_SEC = 12  # Overload 重試等待秒數
 # Size Constants - 大小相關常數
 # =========================================================
 MIN_LANG_BATCH_SIZE = 20  # Lang 類型最小批次大小
-DEFAULT_BATCH_SIZE = 50  # 預設批次大小
 
 
 # =========================================================
@@ -63,12 +62,6 @@ def translate_batch_smart(
     items = _validate_batch_items(batch_items)
     if not items:
         return [], "AUTO"
-
-    # 2. 偵測 profile（TODO: 舊函數會重新計算，目前是被丟棄的死碼）
-    # batch_profile = _detect_batch_profile(items)
-
-    # 3. 計算批次大小（TODO: 舊函數會重新計算，目前是被丟棄的死碼）
-    # batch_size = _calculate_batch_size(batch_profile)
 
     # 4. 執行翻譯
     results, status = _execute_translation(items, total, dry_run, export_cache_only)
@@ -580,11 +573,6 @@ def translate_batch_smart_old(
                 if status != 503:
                     overload_retry_count = 0  # 重置過載計數器
                     pinned_model_index = None  # ⭐ 解除鎖定
-
-                """
-                只有「連續的 overloaded」才累積
-                中間只要出現別的錯誤就要歸零
-                """
 
                 # ========== 404 ==========
                 if status == 404:

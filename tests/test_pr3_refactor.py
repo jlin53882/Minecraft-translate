@@ -118,16 +118,9 @@ class TestBatchSizeConstants:
     def test_min_lang_batch_size_constant(self):
         """測試 MIN_LANG_BATCH_SIZE 常數存在"""
         from translation_tool.core.lm_translator_main import MIN_LANG_BATCH_SIZE
-        
+
         assert MIN_LANG_BATCH_SIZE == 20
         assert isinstance(MIN_LANG_BATCH_SIZE, int)
-
-    def test_default_batch_size_constant(self):
-        """測試 DEFAULT_BATCH_SIZE 常數存在"""
-        from translation_tool.core.lm_translator_main import DEFAULT_BATCH_SIZE
-        
-        assert DEFAULT_BATCH_SIZE == 50
-        assert isinstance(DEFAULT_BATCH_SIZE, int)
 
     def test_overload_retry_wait_constant(self):
         """測試 OVERLOAD_RETRY_WAIT_SEC 常數存在"""
