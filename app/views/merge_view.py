@@ -607,7 +607,11 @@ class MergeView(ft.Column):
 
         self.start_button.disabled = True
         self.zip_list_view.disabled = True
-        self.log_view.controls.clear()
+        # PR refactor/unified-log-view: LogView widget API 不暴露 .controls
+        # (LogView 是 ft.Container,內部有 _list_view 控制項)。
+        # 必須走公開的 .clear() 才能清空現有 log 行,
+        # 否則會 AttributeError: 'LogView' object has no attribute 'controls'。
+        self.log_view.clear()
         self._set_status("執行中", theme.BLUE_200)
 
         self.session.start()
