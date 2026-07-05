@@ -194,11 +194,15 @@ def open_extractor_dialog(
         # 直接呼叫 UI 更新（無需 run_task）
         ui_start()
 
-        # 統計數據
-        stats = {"success": 0, "warnings": 0, "failures": 0}
-
         # ✅ 第三階段重構：使用 Service 層的 run_extraction_loop 處理 Generator
         # 將 Generator 選擇、cancelled 檢查、stats 解析等樣板程式碼抽離到 Service
+        #
+        # ⚠️ Bug fix (PR-unified-log-view): 不要在 on_update 裡判斷 "整段完成"。
+        # Generator 會逐 jar yield stats (例: 「已檢查 N/393 個 JAR 檔案」)，
+        # 也會在整段結束時 yield stats。這兩種 yield 都帶 "stats" key，
+        # 舊邏輯用 `pct >= 1.0 or "stats" in update` 判斷會逐 jar 誤觸發
+        # 「[完成] 成功 0 / 跳過 0 / 失敗 0」,真正的彙總行是在 dialog 的
+        # run_extraction_loop 返回後才用 result_stats 發。
         try:
             if selected_mode == "lang":
                 gen = extract_lang_files_generator(mods_dir, final_output, lang_codes=selected_codes)
@@ -220,35 +224,32 @@ def open_extractor_dialog(
                     add_log(log_msg)
                     update_progress(pct, log_msg)
 
-                    # 檢查是否完成
-                    if pct >= 1.0 or "stats" in update:
-                        state["done"] = True
-                        add_log(
-                            f"[完成] 成功 {stats['success']} / 跳過 {stats['warnings']} / 失敗 {stats['failures']}",
-                            level="system",
-                        )
-                        update_progress(1.0, "任務完成")
-                        update_stats(stats["success"], stats["warnings"], stats["failures"])
-
                 elif "error" in update:
                     add_log(f"[ERROR] {update['error']}", level="error")
 
             # 透過 Service 統一處理 Generator 迭代
+            # result_stats 是整段任務最終的累計（Service 在 generator 跑完時 yield 最後一次 stats）
             result_stats = run_extraction_loop(gen, cancelled_flag=cancelled_flag, on_update=on_update)
-            stats.update(result_stats)
 
             # 同步 cancelled_flag 到 state（讓 on_cancel_click 仍能正常運作）
             if cancelled_flag[0]:
                 state["cancelled"] = True
                 add_log("[系統] 任務已取消", theme.ORANGE_700)
 
-            if state["done"]:
-                update_stats(stats["success"], stats["warnings"], stats["failures"])
+            # ✅ 真正的「整段完成」只在這裡發生（用 Service 回傳的累計 stats）
+            # 避免逐 jar 誤觸發「[完成] 0/0/0」假訊息。
+            state["done"] = True
+            add_log(
+                f"[完成] 成功 {result_stats['success']} / 跳過 {result_stats['warnings']} / 失敗 {result_stats['failures']}",
+                level="system",
+            )
+            update_progress(1.0, "任務完成")
+            update_stats(result_stats["success"], result_stats["warnings"], result_stats["failures"])
 
         except Exception as ex:
             add_log(f"[ERROR] {ex}", level="error")
-            stats["failures"] += 1
-            update_stats(stats["success"], stats["warnings"], stats["failures"])
+            state["done"] = True
+            update_stats(0, 0, 1)
 
         finally:
             state["running"] = False
