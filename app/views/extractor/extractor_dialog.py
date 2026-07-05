@@ -504,11 +504,29 @@ def open_preview_dialog(
         controls.append(list_container)
 
         def start_extraction(e):
-            """確認執行：關閉結果對話框，直接啟動提取"""
+            """確認執行：關閉結果對話框，直接啟動提取
+
+            Bug fix (PR-unified-log-view):
+                舊實作只設定 `preview_dialog.open = False` + `result_dialog.open = False`,
+                但 dialog 物件仍留在 `page.overlay` list 內,
+                當後續 `open_extractor_dialog(...)` 加入新 dialog 並觸發 page.update() 時,
+                Flet 內部可能把殘留在 overlay 的「已關閉」對話框重新打開,
+                結果 extractor dialog 完成並被 close 後,preview dialog 又跑回畫面。
+
+                修正:
+                    同時呼叫 `page.overlay.remove(...)` 把 dialog 從 overlay 徹底移除,
+                    確保 Flet 不會在後續 update 把它「復活」。
+            """
+            # 1️⃣ 關閉 + 從 overlay 移除 result_dialog
             result_dialog.open = False
+            if result_dialog in page.overlay:
+                page.overlay.remove(result_dialog)
+            # 2️⃣ 關閉 + 從 overlay 移除 preview_dialog
             preview_dialog.open = False
+            if preview_dialog in page.overlay:
+                page.overlay.remove(preview_dialog)
             page.update()
-            # 直接開啟提取對話框並自動啟動（不需點擊「開始提取」）
+            # 3️⃣ 開啟提取對話框並自動啟動（不需點擊「開始提取」）
             open_extractor_dialog(
                 page, file_picker,
                 input_path=input_path,
