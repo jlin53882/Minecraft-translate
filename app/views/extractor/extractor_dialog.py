@@ -13,6 +13,7 @@
 import flet as ft
 import threading
 import os
+import sys
 
 from app.ui import theme
 from app.views._log import LogView
@@ -34,6 +35,21 @@ from translation_tool.core.jar_processor import (
 )
 
 
+# ============================================================
+# Debug log helper (2026-07-11 規格重整)
+# ============================================================
+# 為什麼:user 2026-07-11 實機測試發現「預覽 → 提取」流程有幾個 dialog
+# 生命週期 bug (問題 1/3/6),但 mock page 驗證無法重現真實 Flet GUI
+# 行為,需要 console log 才能診斷「按鈕 click 是否真的觸發 handler」。
+#
+# 用法:預設永遠輸出(debug 階段用),透過 stderr 印出。
+# 輸出:stderr,每行帶 [EXTRACTOR][tag] prefix 方便 grep。
+# 為什麼寫 stderr:stderr 是 logging 預設 stream,不被 page 攔截,
+# 在 thread / async context 都能正常印出。
+def _extractor_debug_log(tag, msg):
+    print(f"[EXTRACTOR][{tag}] {msg}", file=sys.stderr, flush=True)
+
+
 def open_extractor_dialog(
     page: ft.Page,
     file_picker: ft.FilePicker,
@@ -43,6 +59,7 @@ def open_extractor_dialog(
     mode: str = "lang",  # "lang", "book", "dual"
     auto_start: bool = False,  # 若 True，自動啟動提取（不需點擊「開始提取」）
 ):
+    _extractor_debug_log("OPEN", f"open_extractor_dialog mode={mode!r} auto_start={auto_start}")
     """打開完整的提取對話框（進度+日誌+結果）。
 
     直接使用外部傳入的設定，無需重新設定。
@@ -183,6 +200,7 @@ def open_extractor_dialog(
 
     # ========== 提取工作執行緒 ==========
     def run_extraction():
+        _extractor_debug_log("THREAD", "run_extraction thread STARTED")
         selected_mode = mode
         selected_codes = lang_codes  # 使用配置中的所有語系
 
@@ -267,6 +285,7 @@ def open_extractor_dialog(
             update_stats(0, 0, 1)
 
         finally:
+            _extractor_debug_log("THREAD", f"run_extraction finally: running=False, done={state['done']}, cancelled={state['cancelled']}")
             state["running"] = False
 
             def ui_done():
@@ -279,20 +298,25 @@ def open_extractor_dialog(
                 page.update()
 
             # 直接呼叫 UI 更新
+            _extractor_debug_log("THREAD", "ui_done() called → close button visible, stats_row visible")
             ui_done()
 
     def on_start_click(e):
+        _extractor_debug_log("BTN", "on_start_click CALLED")
         # 驗證輸入
         if not mods_dir:
+            _extractor_debug_log("BTN", "on_start_click rejected: mods_dir empty")
             status_text.value = "⚠️ 請先設定 Mod 來源"
             page.update()
             return
         if not os.path.isdir(mods_dir):
+            _extractor_debug_log("BTN", f"on_start_click rejected: {mods_dir} not a dir")
             status_text.value = "⚠️ Mod 來源資料夾不存在"
             page.update()
             return
 
         # 啟動執行緒
+        _extractor_debug_log("BTN", f"on_start_click spawning run_extraction thread (mode={mode!r})")
         threading.Thread(target=run_extraction, daemon=True).start()
 
     def on_cancel_click(e):
@@ -307,12 +331,14 @@ def open_extractor_dialog(
             以及 state["cancelled"] = True (UI 顯示用的狀態)。
             兩份都要設是為了 UI 與 Service 同步。
         """
+        _extractor_debug_log("BTN", "on_cancel_click CALLED, setting cancel flags")
         extraction_cancel_flag[0] = True
         state["cancelled"] = True
         status_text.value = "正在取消..."
         page.update()
 
     def on_close_click(e):
+        _extractor_debug_log("BTN", "on_close_click CALLED")
         dialog.open = False
         page.update()
 
@@ -403,6 +429,7 @@ def open_extractor_dialog(
     # 顯示對話框
     page.overlay.append(dialog)
     dialog.open = True
+    _extractor_debug_log("OPEN", "dialog appended to overlay, open=True")
     page.update()
 
     # 如果指定了 auto_start，則自動啟動提取
@@ -419,6 +446,7 @@ def open_preview_dialog(
     output_path: str = "",
     mode: str = "lang",
 ):
+    _extractor_debug_log("PREVIEW", f"open_preview_dialog mode={mode!r}")
     """打開預覽對話框。
 
     直接呼叫原本的 extractor_actions.show_preview（沿用原本的 polling + 結果對話框實作）。
@@ -492,6 +520,7 @@ def open_preview_dialog(
 
     def show_result_dialog(result):
         """顯示預覽結果對話框（包含『確認執行』按鈕）"""
+        _extractor_debug_log("PREVIEW", f"show_result_dialog: {len(result.get('preview_results', []))} JARs found")
         preview_results = result.get("preview_results", [])
         total_files = result.get("total_files", 0)
         total_size_mb = result.get("total_size_mb", 0)
@@ -529,11 +558,15 @@ def open_preview_dialog(
         controls.append(list_container)
 
         def start_extraction(e):
+            _extractor_debug_log("PREVIEW", "start_extraction CALLED (確認執行 clicked)")
             """確認執行：關閉結果對話框，直接啟動提取"""
             result_dialog.open = False
+            _extractor_debug_log("PREVIEW", "start_extraction: result_dialog.open=False")
             preview_dialog.open = False
+            _extractor_debug_log("PREVIEW", "start_extraction: preview_dialog.open=False")
             page.update()
             # 直接開啟提取對話框並自動啟動（不需點擊「開始提取」）
+            _extractor_debug_log("PREVIEW", "start_extraction: calling open_extractor_dialog auto_start=True")
             open_extractor_dialog(
                 page, file_picker,
                 input_path=input_path,
@@ -541,6 +574,7 @@ def open_preview_dialog(
                 mode=mode,
                 auto_start=True,
             )
+            _extractor_debug_log("PREVIEW", "start_extraction: open_extractor_dialog returned")
 
         result_dialog = ft.AlertDialog(
             modal=True,
@@ -551,7 +585,14 @@ def open_preview_dialog(
                 height=500,
             ),
             actions=[
-                ft.TextButton("取消", on_click=lambda e: setattr(result_dialog, "open", False) or page.update()),
+                ft.TextButton(
+                    "取消",
+                    on_click=lambda e: (
+                        _extractor_debug_log("PREVIEW", "result_dialog 取消 CALLED"),
+                        setattr(result_dialog, "open", False),
+                        page.update(),
+                    ),
+                ),
                 ft.Button("確認執行", icon=ft.Icons.CHECK, on_click=start_extraction),
             ],
         )
