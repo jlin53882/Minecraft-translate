@@ -77,6 +77,19 @@ def open_extractor_dialog(
         "progress": 0,
         "current_file": "",
     }
+    # ⭐ extraction_cancel_flag (Bug fix 2026-07-05 問題 4):
+    #   提取進行中按「取消」按鈕真的中斷 Service 的關鍵。
+    #   原本 on_cancel_click 只設 state["cancelled"]=True,但
+    #   run_extraction_loop 是用另一份 cancelled_flag list 來偵測取消,
+    #   所以舊版本按「取消」背景線程繼續跑,只是 UI 顯示「正在取消...」。
+    #
+    #   修法:outer-scope list 讓 on_cancel_click 能修改同一份 reference,
+    #   Service run_extraction_loop 會在每次 for update in generator:
+    #   檢查 cancelled_flag[0],看到 True 就 return stats 結束任務。
+    #
+    #   為什麼不用 page.overlay.remove:這個修法完全不動 overlay,
+    #   只動 closure 變數,按鈕 event binding 不會受影響。
+    extraction_cancel_flag = [False]
 
     # ========== UI 元件 - 進度條 ==========
     progress_bar = ft.ProgressBar(
@@ -211,8 +224,10 @@ def open_extractor_dialog(
             else:
                 gen = extract_dual_files_generator(mods_dir, final_output, selected_codes)
 
-            # 使用 cancelled_flag list 作為執行緒間通訊（與 Service 介面一致）
-            cancelled_flag = [False]
+            # ⭐ 每次開新任務先 reset outer-scope cancel flag,然後傳 reference 給 Service
+            # (on_cancel_click closure 用 outer-scope extraction_cancel_flag)
+            extraction_cancel_flag[0] = False
+            cancelled_flag = extraction_cancel_flag
 
             # 定義 UI 更新回調（仍由 dialog 處理 UI，但 Generator 邏輯已抽離）
             def on_update(update):
@@ -281,11 +296,21 @@ def open_extractor_dialog(
         threading.Thread(target=run_extraction, daemon=True).start()
 
     def on_cancel_click(e):
-            # ✅ 第三階段：透過 cancelled_flag list 與 Service 通訊
-            # 這裡仍設置 state["cancelled"] 以保持向後相容
-            state["cancelled"] = True
-            status_text.value = "正在取消..."
-            page.update()
+        """提取進行中按「取消」按鈕處理。
+
+        Bug fix (2026-07-05 問題 4):
+            舊實作只設 state["cancelled"]=True,但 run_extraction_loop
+            是用另一份 cancelled_flag list 來偵測取消信號,舊版本按「取消」
+            背景線程繼續跑,只是 UI 顯示「正在取消...」。
+
+            修法:同時設 extraction_cancel_flag[0] = True (Service 用的那份),
+            以及 state["cancelled"] = True (UI 顯示用的狀態)。
+            兩份都要設是為了 UI 與 Service 同步。
+        """
+        extraction_cancel_flag[0] = True
+        state["cancelled"] = True
+        status_text.value = "正在取消..."
+        page.update()
 
     def on_close_click(e):
         dialog.open = False
