@@ -607,9 +607,10 @@ def open_preview_dialog(
 
     def start_scan():
         """按鈕：開始預覽掃描"""
+        _extractor_debug_log("PREVIEW", f"start_scan CALLED (mode={mode!r}, state.running={state['running']})")
         if state["running"]:
+            _extractor_debug_log("PREVIEW", "start_scan rejected: state.running=True")
             return
-
         nonlocal output_path
         # 若輸出路徑是空的，自動設定
         actual_output = output_path
@@ -624,6 +625,12 @@ def open_preview_dialog(
         state["running"] = True
         state["cancelled"] = False
         state["done"] = False
+        # ⭐ Bug fix (2026-07-11 問題 6): 必須重設 preview_state.done = False,
+        # 否則上一次掃描完成的 done=True 會讓這次的 ui_poller thread
+        # 進入 while 迴圈後立刻退出 (line 683 `while not preview_state.done and ...`),
+        # 導致 _do_finalize 看到 final_result=None 什麼都不做,
+        # user 看到「按了開始預覽沒反應」但 generator 確實有跑。
+        preview_state.done = False
         preview_state.progress = 0
         preview_state.current = 0
         preview_state.total = 0
