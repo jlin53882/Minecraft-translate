@@ -339,8 +339,8 @@ def open_extractor_dialog(
 
     def on_close_click(e):
         _extractor_debug_log("BTN", "on_close_click CALLED")
-        dialog.open = False
-        page.update()
+        # Flet 0.85 內建 API: 用 pop_dialog 關閉頂層 dialog (topmost)
+        page.pop_dialog()
 
     def on_browse_click(e):
         # ✅ 階段 C 重構：os.startfile 已抽離至 Service 層
@@ -426,11 +426,9 @@ def open_extractor_dialog(
     close_button.on_click = on_close_click
     browse_button.on_click = on_browse_click
 
-    # 顯示對話框
-    page.overlay.append(dialog)
-    dialog.open = True
-    _extractor_debug_log("OPEN", "dialog appended to overlay, open=True")
-    page.update()
+    # 顯示對話框 (Flet 0.85 內建 dialog lifecycle API — show_dialog 自動管理 overlay + open + 父層)
+    page.show_dialog(dialog)
+    _extractor_debug_log("OPEN", "dialog shown via page.show_dialog()")
 
     # 如果指定了 auto_start，則自動啟動提取
     if auto_start:
@@ -559,12 +557,11 @@ def open_preview_dialog(
 
         def start_extraction(e):
             _extractor_debug_log("PREVIEW", "start_extraction CALLED (確認執行 clicked)")
-            """確認執行：關閉結果對話框，直接啟動提取"""
-            result_dialog.open = False
-            _extractor_debug_log("PREVIEW", "start_extraction: result_dialog.open=False")
-            preview_dialog.open = False
-            _extractor_debug_log("PREVIEW", "start_extraction: preview_dialog.open=False")
-            page.update()
+            """確認執行：關閉結果對話框與預覽對話框，直接啟動提取"""
+            page.pop_dialog()  # 關閉 result_dialog (topmost)
+            _extractor_debug_log("PREVIEW", "start_extraction: result_dialog closed via pop_dialog")
+            page.pop_dialog()  # 關閉 preview_dialog
+            _extractor_debug_log("PREVIEW", "start_extraction: preview_dialog closed via pop_dialog")
             # 直接開啟提取對話框並自動啟動（不需點擊「開始提取」）
             _extractor_debug_log("PREVIEW", "start_extraction: calling open_extractor_dialog auto_start=True")
             open_extractor_dialog(
@@ -588,18 +585,16 @@ def open_preview_dialog(
                 ft.TextButton(
                     "取消",
                     on_click=lambda e: (
-                        _extractor_debug_log("PREVIEW", "result_dialog 取消 CALLED"),
-                        setattr(result_dialog, "open", False),
-                        page.update(),
+                        _extractor_debug_log("PREVIEW", "result_dialog 取消 CALLED → pop result + preview dialogs"),
+                        page.pop_dialog(),  # 關閉 result_dialog (topmost)
+                        page.pop_dialog(),  # 關閉 preview_dialog
                     ),
                 ),
                 ft.Button("確認執行", icon=ft.Icons.CHECK, on_click=start_extraction),
             ],
         )
 
-        page.overlay.append(result_dialog)
-        result_dialog.open = True
-        page.update()
+        page.show_dialog(result_dialog)
 
     # ========== 執行掃描 ==========
     state = {"running": False, "cancelled": False, "done": False}
@@ -754,8 +749,6 @@ def open_preview_dialog(
         actions=[start_button],
     )
 
-    page.overlay.append(preview_dialog)
-    preview_dialog.open = True
-    page.update()
+    page.show_dialog(preview_dialog)
 
     return preview_dialog
