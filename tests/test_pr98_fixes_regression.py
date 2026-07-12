@@ -513,6 +513,59 @@ class TestFixPreviewDialogModalLock:
 
 
 # =============================================================================
+# User 2026-07-12 review 補 bug:add_log 第二位置參數被傳 color 字串
+# =============================================================================
+class TestFixAddLogArgType:
+    """User 2026-07-12 review 補發現:line 279 `add_log("[系統] 任務已取消", theme.ORANGE_700)`
+    把 color 字串傳進 add_log 的 `level` 參數(簽名是 level: str)。
+    LogView.add() 看到不在 show_levels 白名單的字串就 silent return,整行 log 不顯示。
+
+    修法:用 keyword arg `level="warning"` 對應原本想要的橘色語意。
+    """
+
+    def test_no_add_log_with_color_string_as_level(self):
+        """add_log(...) 第二位置參數不能傳 color 字串(theme.* 等)。"""
+        # 讀檔找所有 add_log(... call
+        src = _read(EXTRACTOR_DIALOG)
+        # 找函式位置
+        tree = _ast_parse(EXTRACTOR_DIALOG)
+        bad_calls = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            # 找 _extractor_dialog 內的 add_log(...)
+            if not (isinstance(node.func, ast.Name) and node.func.id == "add_log"):
+                continue
+            # 兩種傳法:add_log(msg, color) OR add_log(msg, level="warning", ...)
+            # 檢查第二位置參數是 theme.* 開頭的 attribute(例如 theme.ORANGE_700)
+            if len(node.args) >= 2:
+                second_arg = node.args[1]
+                # 找 theme.SOMETHING pattern
+                if (
+                    isinstance(second_arg, ast.Attribute)
+                    and isinstance(second_arg.value, ast.Name)
+                    and second_arg.value.id == "theme"
+                ):
+                    bad_calls.append(
+                        f"add_log(... , theme.{second_arg.attr}) at line {node.lineno}"
+                    )
+        assert not bad_calls, (
+            "回歸:add_log 的 level 參數傳了 color 字串 (theme.*),會被 LogView silent return。\n"
+            "應改成 keyword arg level=\"warning\" 對應原本的橘色語意。\n"
+            "找到的錯誤:\n" + "\n".join(bad_calls)
+        )
+
+    def test_cancelled_log_uses_warning_level(self):
+        """「任務已取消」log 必須用 level=\"warning\"(不是 color string)。"""
+        src = _read(EXTRACTOR_DIALOG)
+        # AST-level:找 "任務已取消" 字串後面有 level="warning"
+        assert 'add_log("[系統] 任務已取消", level="warning")' in src, (
+            "回歸:[系統] 任務已取消 沒用 level=warning "
+            "(原本傳 theme.ORANGE_700 color 字串,LogView 會 silent return)"
+        )
+
+
+# =============================================================================
 # commit b86f911 + e232788 — 改用 log_unit
 # =============================================================================
 class TestFixB86f911_LogUnit:

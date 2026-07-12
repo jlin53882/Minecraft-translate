@@ -276,7 +276,12 @@ def open_extractor_dialog(
             # 同步 cancelled_flag 到 state（讓 on_cancel_click 仍能正常運作）
             if cancelled_flag[0]:
                 state["cancelled"] = True
-                add_log("[系統] 任務已取消", theme.ORANGE_700)
+                # 🐛 Bug fix (2026-07-12 user review): 之前傳 theme.ORANGE_700
+                # (color 字串) 給 add_log 的 level 參數,會被 LogView.add() 判斷
+                # 為不在 show_levels 白名單 → silent return,整行 log 不顯示
+                # 並且 prefix 自動判斷(["[系統" → "system"]) 失效。
+                # 改用 level="warning" 對應原本想要的橘色語意。
+                add_log("[系統] 任務已取消", level="warning")
 
             # ✅ 真正的「整段完成」只在這裡發生（用 Service 回傳的累計 stats）
             # 避免逐 jar 誤觸發「[完成] 0/0/0」假訊息。
