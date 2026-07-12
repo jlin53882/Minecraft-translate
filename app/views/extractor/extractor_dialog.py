@@ -517,7 +517,18 @@ def open_preview_dialog(
         page.run_task(_do_update)
 
     def show_result_dialog(result):
-        """顯示預覽結果對話框（包含『確認執行』按鈕）"""
+        """「確認執行」流程改用單一 dialog(沿用 preview_dialog),換內容呈現結果清單。
+
+        治本作法 (2026-07-11 由 user 提出):
+        過去用「疊 result_dialog 在 preview_dialog 上」的模式,在 modal=False
+        的 preview_dialog 可能被使用者點外側提前 dismiss 後,「疊兩層」
+        的假設就會被打破,留下 / 誤 pop dialog。
+
+        改成只留 preview_dialog 一個 dialog,掃描完成時直接把它的 title /
+        content / actions 換成「結果清單」畫面。Stack 永遠深度 ≤ 1,
+        pop_dialog() 呼叫一次就足夠(就算 preview_dialog 已被使用者提前
+        dismiss,pop 找不到東西會靜默 return None,不會波及其他 dialog)。
+        """
         _extractor_debug_log("PREVIEW", f"show_result_dialog: {len(result.get('preview_results', []))} JARs found")
         preview_results = result.get("preview_results", [])
         total_files = result.get("total_files", 0)
@@ -556,13 +567,11 @@ def open_preview_dialog(
         controls.append(list_container)
 
         def start_extraction(e):
+            """確認執行 — 沿用合併後的單一 dialog,只 pop 一次。"""
             _extractor_debug_log("PREVIEW", "start_extraction CALLED (確認執行 clicked)")
-            """確認執行：關閉結果對話框與預覽對話框，直接啟動提取"""
-            page.pop_dialog()  # 關閉 result_dialog (topmost)
-            _extractor_debug_log("PREVIEW", "start_extraction: result_dialog closed via pop_dialog")
-            page.pop_dialog()  # 關閉 preview_dialog
-            _extractor_debug_log("PREVIEW", "start_extraction: preview_dialog closed via pop_dialog")
-            # 直接開啟提取對話框並自動啟動（不需點擊「開始提取」）
+            page.pop_dialog()  # 只有 preview_dialog 一個 dialog,pop 一次就乾淨
+            _extractor_debug_log("PREVIEW", "start_extraction: preview_dialog closed via pop_dialog (single)")
+            # 直接開啟提取對話框並自動啟動(不需點擊「開始提取」)
             _extractor_debug_log("PREVIEW", "start_extraction: calling open_extractor_dialog auto_start=True")
             open_extractor_dialog(
                 page, file_picker,
@@ -573,28 +582,29 @@ def open_preview_dialog(
             )
             _extractor_debug_log("PREVIEW", "start_extraction: open_extractor_dialog returned")
 
-        result_dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text(f"提取預覽 - {mode.upper()}"),
-            content=ft.Container(
-                content=ft.Column(controls, spacing=8, scroll=ft.ScrollMode.AUTO),
-                width=600,
-                height=500,
-            ),
-            actions=[
-                ft.TextButton(
-                    "取消",
-                    on_click=lambda e: (
-                        _extractor_debug_log("PREVIEW", "result_dialog 取消 CALLED → pop result + preview dialogs"),
-                        page.pop_dialog(),  # 關閉 result_dialog (topmost)
-                        page.pop_dialog(),  # 關閉 preview_dialog
-                    ),
-                ),
-                ft.Button("確認執行", icon=ft.Icons.CHECK, on_click=start_extraction),
-            ],
+        # 在原本的 preview_dialog 上 mutate title/content/actions,而不是開新 dialog
+        _extractor_debug_log("PREVIEW", "show_result_dialog: mutating preview_dialog in-place (single-dialog mode)")
+        preview_dialog.title = ft.Row([
+            ft.Icon(ft.Icons.CHECK_CIRCLE, size=24, color=ft.Colors.GREEN_700),
+            ft.Text(f"提取預覽 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD),
+        ])
+        preview_dialog.content = ft.Container(
+            content=ft.Column(controls, spacing=8, scroll=ft.ScrollMode.AUTO),
+            width=600,
+            height=500,
         )
-
-        page.show_dialog(result_dialog)
+        preview_dialog.actions = [
+            ft.TextButton(
+                "取消",
+                on_click=lambda e: (
+                    _extractor_debug_log("PREVIEW", "取消 CALLED → pop_dialog (single)"),
+                    page.pop_dialog(),  # 只有一個 dialog,pop 一次就夠
+                ),
+            ),
+            ft.Button("確認執行", icon=ft.Icons.CHECK, on_click=start_extraction),
+        ]
+        page.update()  # ← 重新 paint preview_dialog,內容現在是「結果列表」
+        _extractor_debug_log("PREVIEW", "show_result_dialog: preview_dialog mutated, page.update() done")
 
     # ========== 執行掃描 ==========
     state = {"running": False, "cancelled": False, "done": False}
