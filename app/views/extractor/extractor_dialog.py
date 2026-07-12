@@ -42,12 +42,15 @@ from translation_tool.core.jar_processor import (
 # 生命週期 bug (問題 1/3/6),但 mock page 驗證無法重現真實 Flet GUI
 # 行為,需要 console log 才能診斷「按鈕 click 是否真的觸發 handler」。
 #
-# 用法:預設永遠輸出(debug 階段用),透過 stderr 印出。
-# 輸出:stderr,每行帶 [EXTRACTOR][tag] prefix 方便 grep。
-# 為什麼寫 stderr:stderr 是 logging 預設 stream,不被 page 攔截,
-# 在 thread / async context 都能正常印出。
-def _extractor_debug_log(tag, msg):
-    print(f"[EXTRACTOR][{tag}] {msg}", file=sys.stderr, flush=True)
+# 改用 translation_tool.utils.log_unit 提供的 log_info / log_debug /
+# log_warning(已統一用 Python logging module,設定於 app 啟動時)。每行
+# 透過 f"[tag] msg" prefix 維持 grep 友善(原本 print 的 [EXTRACTOR]
+# prefix 由 logging formatter 統一加,這裡只負責 tag 分類)。
+#
+# tag → log function 對應:
+#   THREAD / OPEN / PREVIEW / DIALOG → log_info (流程節點)
+#   BTN                              → log_debug (按鈕觸發細節,訊息量大)
+#   WARN                             → log_warning (安全網觸發需注意)
 
 
 def open_extractor_dialog(
@@ -59,7 +62,7 @@ def open_extractor_dialog(
     mode: str = "lang",  # "lang", "book", "dual"
     auto_start: bool = False,  # 若 True，自動啟動提取（不需點擊「開始提取」）
 ):
-    _extractor_debug_log("OPEN", f"open_extractor_dialog mode={mode!r} auto_start={auto_start}")
+    log_info(f"[OPEN] open_extractor_dialog mode={mode!r} auto_start={auto_start}")
     """打開完整的提取對話框（進度+日誌+結果）。
 
     直接使用外部傳入的設定，無需重新設定。
@@ -200,7 +203,7 @@ def open_extractor_dialog(
 
     # ========== 提取工作執行緒 ==========
     def run_extraction():
-        _extractor_debug_log("THREAD", "run_extraction thread STARTED")
+        log_info(f"[THREAD] run_extraction thread STARTED")
         selected_mode = mode
         selected_codes = lang_codes  # 使用配置中的所有語系
 
@@ -220,7 +223,7 @@ def open_extractor_dialog(
             # 提取進行中鎖成 modal=True，禁止點外側關掉
             # (避免 background thread 變孤兒跑完但 UI 消失)
             dialog.modal = True
-            _extractor_debug_log("THREAD", "ui_start: dialog.modal=True (extraction running)")
+            log_info(f"[THREAD] ui_start: dialog.modal=True (extraction running)")
             update_progress(0, "開始任務...")
             add_log(f"[系統] 開始提取 ({selected_mode})...", level="system")
             add_log(f"[系統] 來源：{mods_dir}", level="system")
@@ -289,7 +292,7 @@ def open_extractor_dialog(
             update_stats(0, 0, 1)
 
         finally:
-            _extractor_debug_log("THREAD", f"run_extraction finally: running=False, done={state['done']}, cancelled={state['cancelled']}")
+            log_info(f"[THREAD] run_extraction finally: running=False, done={state['done']}, cancelled={state['cancelled']}")
             state["running"] = False
 
             def ui_done():
@@ -300,31 +303,31 @@ def open_extractor_dialog(
                 # 任務結束，恢復成使用者可點外側關閉
                 # (modal=True 區間已過，沒有背景 thread 風險)
                 dialog.modal = False
-                _extractor_debug_log("THREAD", "ui_done: dialog.modal=False (extraction finished)")
+                log_info(f"[THREAD] ui_done: dialog.modal=False (extraction finished)")
                 if on_complete:
                     on_complete(state["done"], state["stats"])
                 page.update()
 
             # 直接呼叫 UI 更新
-            _extractor_debug_log("THREAD", "ui_done() called → close button visible, stats_row visible")
+            log_info(f"[THREAD] ui_done() called → close button visible, stats_row visible")
             ui_done()
 
     def on_start_click(e):
-        _extractor_debug_log("BTN", "on_start_click CALLED")
+        log_debug(f"[BTN] on_start_click CALLED")
         # 驗證輸入
         if not mods_dir:
-            _extractor_debug_log("BTN", "on_start_click rejected: mods_dir empty")
+            log_debug(f"[BTN] on_start_click rejected: mods_dir empty")
             status_text.value = "⚠️ 請先設定 Mod 來源"
             page.update()
             return
         if not os.path.isdir(mods_dir):
-            _extractor_debug_log("BTN", f"on_start_click rejected: {mods_dir} not a dir")
+            log_debug(f"[BTN] on_start_click rejected: {mods_dir} not a dir")
             status_text.value = "⚠️ Mod 來源資料夾不存在"
             page.update()
             return
 
         # 啟動執行緒
-        _extractor_debug_log("BTN", f"on_start_click spawning run_extraction thread (mode={mode!r})")
+        log_debug(f"[BTN] on_start_click spawning run_extraction thread (mode={mode!r})")
         threading.Thread(target=run_extraction, daemon=True).start()
 
     def on_cancel_click(e):
@@ -339,14 +342,14 @@ def open_extractor_dialog(
             以及 state["cancelled"] = True (UI 顯示用的狀態)。
             兩份都要設是為了 UI 與 Service 同步。
         """
-        _extractor_debug_log("BTN", "on_cancel_click CALLED, setting cancel flags")
+        log_debug(f"[BTN] on_cancel_click CALLED, setting cancel flags")
         extraction_cancel_flag[0] = True
         state["cancelled"] = True
         status_text.value = "正在取消..."
         page.update()
 
     def on_close_click(e):
-        _extractor_debug_log("BTN", "on_close_click CALLED")
+        log_debug(f"[BTN] on_close_click CALLED")
         # Flet 0.85 內建 API: 用 pop_dialog 關閉頂層 dialog (topmost)
         page.pop_dialog()
 
@@ -441,14 +444,12 @@ def open_extractor_dialog(
     #   2. 設 extraction_cancel_flag[0]=True,讓 background thread 在下一個 jar 檢查點提早結束,
     #      而不是空跑完 393 個 jar 沒人看結果。
     def on_dialog_dismiss(e):
-        _extractor_debug_log(
-            "DIALOG",
-            f"dialog on_dismiss fired! running={state['running']}, done={state['done']}",
+        log_info(
+            f"[DIALOG] dialog on_dismiss fired! running={state['running']}, done={state['done']}",
         )
         if state["running"]:
-            _extractor_debug_log(
-                "WARN",
-                "dialog 在提取進行中被 dismiss,background thread 會收到 cancel flag 提早結束"
+            log_warning(
+                "[WARN] dialog 在提取進行中被 dismiss,background thread 會收到 cancel flag 提早結束"
                 "(避免空跑到底沒人看結果)",
             )
             # 設 cancel flag — 不 mutate state(worker thread 在 finally 內自己管理 state)
@@ -458,7 +459,7 @@ def open_extractor_dialog(
 
     # 顯示對話框 (Flet 0.85 內建 dialog lifecycle API — show_dialog 自動管理 overlay + open + 父層)
     page.show_dialog(dialog)
-    _extractor_debug_log("OPEN", "dialog shown via page.show_dialog()")
+    log_info(f"[OPEN] dialog shown via page.show_dialog()")
 
     # 如果指定了 auto_start，則自動啟動提取
     if auto_start:
@@ -474,7 +475,7 @@ def open_preview_dialog(
     output_path: str = "",
     mode: str = "lang",
 ):
-    _extractor_debug_log("PREVIEW", f"open_preview_dialog mode={mode!r}")
+    log_info(f"[PREVIEW] open_preview_dialog mode={mode!r}")
     """打開預覽對話框。
 
     直接呼叫原本的 extractor_actions.show_preview（沿用原本的 polling + 結果對話框實作）。
@@ -559,7 +560,7 @@ def open_preview_dialog(
         pop_dialog() 呼叫一次就足夠(就算 preview_dialog 已被使用者提前
         dismiss,pop 找不到東西會靜默 return None,不會波及其他 dialog)。
         """
-        _extractor_debug_log("PREVIEW", f"show_result_dialog: {len(result.get('preview_results', []))} JARs found")
+        log_info(f"[PREVIEW] show_result_dialog: {len(result.get('preview_results', []))} JARs found")
         preview_results = result.get("preview_results", [])
         total_files = result.get("total_files", 0)
         total_size_mb = result.get("total_size_mb", 0)
@@ -598,11 +599,11 @@ def open_preview_dialog(
 
         def start_extraction(e):
             """確認執行 — 沿用合併後的單一 dialog,只 pop 一次。"""
-            _extractor_debug_log("PREVIEW", "start_extraction CALLED (確認執行 clicked)")
+            log_info(f"[PREVIEW] start_extraction CALLED (確認執行 clicked)")
             page.pop_dialog()  # 只有 preview_dialog 一個 dialog,pop 一次就乾淨
-            _extractor_debug_log("PREVIEW", "start_extraction: preview_dialog closed via pop_dialog (single)")
+            log_info(f"[PREVIEW] start_extraction: preview_dialog closed via pop_dialog (single)")
             # 直接開啟提取對話框並自動啟動(不需點擊「開始提取」)
-            _extractor_debug_log("PREVIEW", "start_extraction: calling open_extractor_dialog auto_start=True")
+            log_info(f"[PREVIEW] start_extraction: calling open_extractor_dialog auto_start=True")
             open_extractor_dialog(
                 page, file_picker,
                 input_path=input_path,
@@ -610,10 +611,10 @@ def open_preview_dialog(
                 mode=mode,
                 auto_start=True,
             )
-            _extractor_debug_log("PREVIEW", "start_extraction: open_extractor_dialog returned")
+            log_info(f"[PREVIEW] start_extraction: open_extractor_dialog returned")
 
         # 在原本的 preview_dialog 上 mutate title/content/actions,而不是開新 dialog
-        _extractor_debug_log("PREVIEW", "show_result_dialog: mutating preview_dialog in-place (single-dialog mode)")
+        log_info(f"[PREVIEW] show_result_dialog: mutating preview_dialog in-place (single-dialog mode)")
         preview_dialog.title = ft.Row([
             ft.Icon(ft.Icons.CHECK_CIRCLE, size=24, color=ft.Colors.GREEN_700),
             ft.Text(f"提取預覽 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD),
@@ -627,14 +628,14 @@ def open_preview_dialog(
             ft.TextButton(
                 "取消",
                 on_click=lambda e: (
-                    _extractor_debug_log("PREVIEW", "取消 CALLED → pop_dialog (single)"),
+                    log_info(f"[PREVIEW] 取消 CALLED → pop_dialog (single)"),
                     page.pop_dialog(),  # 只有一個 dialog,pop 一次就夠
                 ),
             ),
             ft.Button("確認執行", icon=ft.Icons.CHECK, on_click=start_extraction),
         ]
         page.update()  # ← 重新 paint preview_dialog,內容現在是「結果列表」
-        _extractor_debug_log("PREVIEW", "show_result_dialog: preview_dialog mutated, page.update() done")
+        log_info(f"[PREVIEW] show_result_dialog: preview_dialog mutated, page.update() done")
 
     # ========== 執行掃描 ==========
     state = {"running": False, "cancelled": False, "done": False}
@@ -642,9 +643,9 @@ def open_preview_dialog(
 
     def start_scan():
         """按鈕：開始預覽掃描"""
-        _extractor_debug_log("PREVIEW", f"start_scan CALLED (mode={mode!r}, state.running={state['running']})")
+        log_info(f"[PREVIEW] start_scan CALLED (mode={mode!r}, state.running={state['running']})")
         if state["running"]:
-            _extractor_debug_log("PREVIEW", "start_scan rejected: state.running=True")
+            log_info(f"[PREVIEW] start_scan rejected: state.running=True")
             return
         nonlocal output_path
         # 若輸出路徑是空的，自動設定
