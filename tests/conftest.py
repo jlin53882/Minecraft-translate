@@ -101,6 +101,19 @@ def _patch_flet_page_property():
         def close(self, dialog):
             dialog.open = False
 
+        # 🐛 2026-07-12 user review: ExtractorView._show_extraction_summary 改用
+        # Flet 0.85 內建 show_dialog API 後,連 _EmptyPage fallback 也需對應方法。
+        def show_dialog(self, dialog):
+            self.overlay.append(dialog)
+            dialog.open = True
+
+        def pop_dialog(self):
+            if self.overlay:
+                dlg = self.overlay[-1]
+                dlg.open = False
+                return dlg
+            return None
+
         def run_task(self, coro, *args):
             self._tasks.append((coro, args))
 
@@ -197,6 +210,22 @@ def _make_page(**overrides):
 
         def close(self, dialog):
             dialog.open = False
+
+        # 🐛 2026-07-12 user review: ExtractorView._show_extraction_summary 改用
+        # Flet 0.85 內建 show_dialog API 後,mock 也需要對應方法才能驗證。
+        def show_dialog(self, dialog):
+            # 模擬 Flet 0.85 把 dialog 加入 _dialogs.controls。
+            # 我們用簡化的 overlay append 模擬(mock 不需還原真正 stack 機制)。
+            self.overlay.append(dialog)
+            dialog.open = True
+
+        def pop_dialog(self):
+            # 模擬 Flet 0.85 從 stack topmost pop,沒東西 return None。
+            if self.overlay:
+                dlg = self.overlay[-1]
+                dlg.open = False
+                return dlg
+            return None
 
         def run_task(self, coro, *args):
             self._tasks.append((coro, args))

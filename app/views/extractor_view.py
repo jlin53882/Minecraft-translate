@@ -16,7 +16,7 @@ import flet as ft
 from pathlib import Path
 from app.ui import theme
 from app.views._log import LogView
-from translation_tool.utils.log_unit import log_info
+from translation_tool.utils.log_unit import log_info, log_warning
 import threading
 
 from app.task_session import TaskSession
@@ -446,33 +446,43 @@ class ExtractorView(ft.Column):
             title=ft.Text(f"提取完成 - {mode.upper()}"),
             content=ft.Container(content=content, width=520),
             actions=[
-                ft.TextButton("關閉", on_click=lambda e: self._close_dialog_overlay(dialog)),
+                # 🐛 2026-07-12 user review: 從 page.overlay.append + open=True 改為
+                # Flet 0.85 內建的 page.show_dialog() / page.pop_dialog() API,
+                # 跟 extractor_dialog.py 一致的手動 dialog lifecycle 寫法。
+                ft.TextButton("關閉", on_click=lambda e: self.page.pop_dialog()),
             ],
         )
 
+        # 2026-07-12 user review: 改用 Flet 0.85 內建 show_dialog API,
+        # 取代手動 page.overlay.append + open=True + run_task(update) pattern。
+        # 並把 except Exception: pass 改成至少 log_warning,留下 traceback 證據。
         try:
-            self.page.overlay.append(dialog)
-            dialog.open = True
-            async def _do_update(_):
-                self.page.update()
-            self.page.run_task(_do_update, None)
-        except Exception:
-            pass
+            self.page.show_dialog(dialog)
+        except Exception as ex:
+            log_warning(
+                f"[SUMMARY] _show_extraction_summary failed to show_dialog: {ex!r}",
+            )
 
     def _close_dialog_overlay(self, dialog):
         """關閉指定的 dialog 並從 page.overlay 移除。
 
-        用於：
-        - _show_extraction_summary 中「關閉」按鈕的回調
+        用於:
         - 測試中清理殘留的 dialog
+        - `extractor_actions.py` / `merge_view.py` 等仍走手動 overlay 的 caller
+          (這些仍是 legacy 模式,留為 known issue,未來 follow-up PR 統一改)
+
+        注意:_show_extraction_summary 在本 commit 已改用 Flet 0.85 內建
+        show_dialog/pop_dialog,不再呼叫這個 helper。
         """
         try:
             if dialog in self.page.overlay:
                 self.page.overlay.remove(dialog)
             dialog.open = False
             self.page.update()
-        except Exception:
-            pass
+        except Exception as ex:
+            log_warning(
+                f"[SUMMARY] _close_dialog_overlay failed: {ex!r}",
+            )
 
 
     def _append_log_line(self, entry_or_str):

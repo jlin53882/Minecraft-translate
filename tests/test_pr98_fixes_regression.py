@@ -566,6 +566,104 @@ class TestFixAddLogArgType:
 
 
 # =============================================================================
+# User 2026-07-12 review 補發現:extractor_view._show_extraction_summary 也用手動 overlay
+# =============================================================================
+class TestFixExtractionSummaryDialogAPI:
+    """User 2026-07-12 review 補發現:ExtractorView._show_extraction_summary
+    仍用手動 page.overlay.append + open=True pattern,沒用 Flet 0.85 內建
+    page.show_dialog API。而且兩處 except Exception: pass 完全吞錯沒 log。
+
+    修法:
+    1. _show_extraction_summary 改用 page.show_dialog(dialog)
+    2. 「關閉」按鈕改用 page.pop_dialog()(不要 _close_dialog_overlay)
+    3. 兩個 except 都補 log_warning,留 traceback 證據
+    """
+
+    def test_show_extraction_summary_uses_show_dialog(self):
+        """_show_extraction_summary 必須呼叫 page.show_dialog,不是 page.overlay.append。"""
+        extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
+        src = _read(extractor_view)
+        # 找 _show_extraction_summary 函式範圍
+        tree = _ast_parse(extractor_view)
+        found_show_dialog = False
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.FunctionDef)
+                and node.name == "_show_extraction_summary"
+            ):
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Attribute)
+                        and sub.func.attr == "show_dialog"
+                    ):
+                        found_show_dialog = True
+                break
+        assert found_show_dialog, (
+            "回歸:_show_extraction_summary 沒呼叫 page.show_dialog "
+            "(User 2026-07-12 review 補發現,應改用 Flet 0.85 內建 API)"
+        )
+
+    def test_show_extraction_summary_no_overlay_append(self):
+        """_show_extraction_summary 內不應再 page.overlay.append(dialog)。"""
+        extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
+        # 找 _show_extraction_summary 函式範圍內
+        tree = _ast_parse(extractor_view)
+        bad_calls = []
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.FunctionDef)
+                and node.name == "_show_extraction_summary"
+            ):
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Attribute)
+                        and sub.func.attr == "append"
+                        and isinstance(sub.func.value, ast.Attribute)
+                        and sub.func.value.attr == "overlay"
+                    ):
+                        bad_calls.append(
+                            f".overlay.append(...) at line {sub.lineno}"
+                        )
+                break
+        assert not bad_calls, (
+            "回歸:_show_extraction_summary 仍在用 page.overlay.append:\n"
+            + "\n".join(bad_calls)
+        )
+
+    def test_extractor_view_imports_log_warning(self):
+        """extractor_view 必須 import log_warning(供 except 內用)。"""
+        extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
+        tree = _ast_parse(extractor_view)
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom) and node.module == "translation_tool.utils.log_unit":
+                imported = {alias.name for alias in node.names}
+                if "log_warning" in imported:
+                    return
+        pytest.fail(
+            "回歸:extractor_view.py 沒有 from translation_tool.utils.log_unit import log_warning "
+            "(except handler 內需要 log_warning 留下 traceback 證據)"
+        )
+
+    def test_no_bare_except_pass_in_extractor_view(self):
+        """extractor_view 不應該再有 `except Exception: pass`(吞錯沒 log)。"""
+        extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
+        src = _read(extractor_view)
+        # 找 `except Exception:` 然後緊接一行是 `pass` 的 pattern
+        # 用 regex: except Exception:\n     pass
+        bad_blocks = re.findall(
+            r"except\s+Exception(?:\s+as\s+\w+)?:\s*\n\s+pass\b",
+            src,
+        )
+        assert not bad_blocks, (
+            "回歸:extractor_view.py 仍有 `except Exception: pass` 區塊 "
+            "(例外吞錯沒 log,應改成 except Exception as ex: log_warning(...))\n"
+            f"找到 {len(bad_blocks)} 處"
+        )
+
+
+# =============================================================================
 # commit b86f911 + e232788 — 改用 log_unit
 # =============================================================================
 class TestFixB86f911_LogUnit:
