@@ -313,7 +313,18 @@ def open_extractor_dialog(
                 log_info(f"[THREAD] ui_done: dialog.modal=False (extraction finished)")
                 if on_complete:
                     on_complete(state["done"], state["stats"])
-                page.update()
+                #page.update()
+                # ⚠️ Bug fix (2026-07-13 回歸): 這裡是背景 thread (run_extraction 的
+                # finally)，過去只改 visible 這種簡單屬性，直接呼叫 page.update() 剛好
+                # 撐得住；但加了 dialog.modal 這種會影響 dialog barrier 重新協調的屬性後，
+                # 背景 thread 直接呼叫 page.update() 不會確實同步到前端，變成要使用者
+                # 再點一下(觸發一次走事件迴圈的 update)才會把已經算好的狀態畫出來。
+                # 改用 page.run_task 讓這次 update 排進事件迴圈，跟 update_progress/
+                # update_stats 等其他背景更新用的模式一致。
+                async def _do_final_update():
+                    page.update()
+                page.run_task(_do_final_update)
+
 
             # 直接呼叫 UI 更新
             log_info(f"[THREAD] ui_done() called → close button visible, stats_row visible")
