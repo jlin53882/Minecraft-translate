@@ -217,6 +217,10 @@ def open_extractor_dialog(
             start_button.visible = False
             cancel_button.visible = True
             progress_bar.visible = True
+            # 提取進行中鎖成 modal=True，禁止點外側關掉
+            # (避免 background thread 變孤兒跑完但 UI 消失)
+            dialog.modal = True
+            _extractor_debug_log("THREAD", "ui_start: dialog.modal=True (extraction running)")
             update_progress(0, "開始任務...")
             add_log(f"[系統] 開始提取 ({selected_mode})...", level="system")
             add_log(f"[系統] 來源：{mods_dir}", level="system")
@@ -293,6 +297,10 @@ def open_extractor_dialog(
                 close_button.visible = True
                 browse_button.visible = True
                 stats_row.visible = True
+                # 任務結束，恢復成使用者可點外側關閉
+                # (modal=True 區間已過，沒有背景 thread 風險)
+                dialog.modal = False
+                _extractor_debug_log("THREAD", "ui_done: dialog.modal=False (extraction finished)")
                 if on_complete:
                     on_complete(state["done"], state["stats"])
                 page.update()
@@ -425,6 +433,28 @@ def open_extractor_dialog(
     cancel_button.on_click = on_cancel_click
     close_button.on_click = on_close_click
     browse_button.on_click = on_browse_click
+
+    # 防呆安全網（2026-07-11 user 提出,modal lock 的最後一道防線）:
+    # 理論上 ui_start() 內 dialog.modal=True 期間不該被外側 dismiss 觸發。
+    # 但若 ESC 鍵 / 未來 Flet 版本行為變動 / 程式錯誤 真的觸發 dismiss,至少要:
+    #   1. 留下 log 證據,不要讓「UI 消失但背景 thread 還在跑」完全無跡可查。
+    #   2. 設 extraction_cancel_flag[0]=True,讓 background thread 在下一個 jar 檢查點提早結束,
+    #      而不是空跑完 393 個 jar 沒人看結果。
+    def on_dialog_dismiss(e):
+        _extractor_debug_log(
+            "DIALOG",
+            f"dialog on_dismiss fired! running={state['running']}, done={state['done']}",
+        )
+        if state["running"]:
+            _extractor_debug_log(
+                "WARN",
+                "dialog 在提取進行中被 dismiss,background thread 會收到 cancel flag 提早結束"
+                "(避免空跑到底沒人看結果)",
+            )
+            # 設 cancel flag — 不 mutate state(worker thread 在 finally 內自己管理 state)
+            extraction_cancel_flag[0] = True
+
+    dialog.on_dismiss = on_dialog_dismiss
 
     # 顯示對話框 (Flet 0.85 內建 dialog lifecycle API — show_dialog 自動管理 overlay + open + 父層)
     page.show_dialog(dialog)
