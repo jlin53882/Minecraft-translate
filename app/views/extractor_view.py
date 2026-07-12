@@ -448,7 +448,8 @@ class ExtractorView(ft.Column):
                 # 🐛 2026-07-12 user review: 從 page.overlay.append + open=True 改為
                 # Flet 0.85 內建的 page.show_dialog() / page.pop_dialog() API,
                 # 跟 extractor_dialog.py 一致的手動 dialog lifecycle 寫法。
-                ft.TextButton("關閉", on_click=lambda e: self.page.pop_dialog()),
+                #ft.TextButton("關閉", on_click=lambda e: self.page.pop_dialog()),
+                ft.TextButton("關閉", on_click=lambda e: self._close_dialog_overlay(dialog)),
             ],
         )
 
