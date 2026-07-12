@@ -403,6 +403,116 @@ class TestFixCa01a14_ModalLockAndDismiss:
 
 
 # =============================================================================
+# User 2026-07-12 補發現:preview_dialog 也需要同樣 modal lock + on_dismiss 防呆
+# =============================================================================
+class TestFixPreviewDialogModalLock:
+    """User 2026-07-12 review 時補發現:preview_dialog 在掃描中也要鎖 modal=True,
+    並掛 on_dismiss handler 設 state["cancelled"] = True 觸發 do_scan break。
+
+    比照主 dialog(commit ca01a14)的模式,但用 state["cancelled"] 而不是
+    extraction_cancel_flag[0],因為 preview 流程本就靠 state dict 管理取消,
+    do_scan() 的 for 迴圈每個 generator yield 都 check state["cancelled"]。
+    """
+
+    def test_start_scan_locks_preview_dialog_modal(self):
+        """start_scan() 內必須 preview_dialog.modal = True。"""
+        tree = _ast_parse(EXTRACTOR_DIALOG)
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "start_scan":
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.Assign)
+                        and len(sub.targets) == 1
+                        and isinstance(sub.targets[0], ast.Attribute)
+                        and sub.targets[0].attr == "modal"
+                        and isinstance(sub.targets[0].value, ast.Name)
+                        and sub.targets[0].value.id == "preview_dialog"
+                        and isinstance(sub.value, ast.Constant)
+                        and sub.value.value is True
+                    ):
+                        found = True
+                break
+        assert found, (
+            "回歸:start_scan 內沒有 preview_dialog.modal = True "
+            "(User 2026-07-12 補發現,預覽掃描時必須鎖定避免 dismiss 後 thread 變孤兒)"
+        )
+
+    def test_show_result_dialog_unlocks_preview_dialog_modal(self):
+        """show_result_dialog mutate 結束時,必須 preview_dialog.modal = False 解除鎖定。"""
+        tree = _ast_parse(EXTRACTOR_DIALOG)
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "show_result_dialog":
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.Assign)
+                        and len(sub.targets) == 1
+                        and isinstance(sub.targets[0], ast.Attribute)
+                        and sub.targets[0].attr == "modal"
+                        and isinstance(sub.targets[0].value, ast.Name)
+                        and sub.targets[0].value.id == "preview_dialog"
+                        and isinstance(sub.value, ast.Constant)
+                        and sub.value.value is False
+                    ):
+                        found = True
+                break
+        assert found, (
+            "回歸:show_result_dialog 內 mutate 結束時沒設 preview_dialog.modal = False "
+            "(掃描結束應解鎖,讓使用者可點外側關閉結果 dialog)"
+        )
+
+    def test_on_preview_dismiss_handler_exists(self):
+        """必須有 on_preview_dismiss handler 提供 ESC / 程式錯誤時的安全網。"""
+        tree = _ast_parse(EXTRACTOR_DIALOG)
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "on_preview_dismiss":
+                found = True
+                break
+        assert found, (
+            "回歸:on_preview_dismiss handler 不存在 "
+            "(User 2026-07-12 補發現,preview dialog 需要類同主 dialog 的 dismiss 防呆)"
+        )
+
+    def test_on_preview_dismiss_sets_cancelled_flag(self):
+        """on_preview_dismiss 內必須 state["cancelled"] = True — do_scan / ui_poller 都會 check。"""
+        tree = _ast_parse(EXTRACTOR_DIALOG)
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "on_preview_dismiss":
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.Assign)
+                        and len(sub.targets) == 1
+                        and isinstance(sub.targets[0], ast.Subscript)
+                        and isinstance(sub.targets[0].value, ast.Name)
+                        and sub.targets[0].value.id == "state"
+                        and isinstance(sub.value, ast.Constant)
+                        and sub.value.value is True
+                    ):
+                        # 確認是 state["cancelled"] (不是 state["running"])
+                        if isinstance(sub.targets[0].slice, ast.Constant):
+                            key = sub.targets[0].slice.value
+                            if key == "cancelled":
+                                found = True
+                                break
+                break
+        assert found, (
+            "回歸:on_preview_dismiss 內沒設 state['cancelled'] = True "
+            "(do_scan for 迴圈與 ui_poller while 都 check 這個旗標來中斷)"
+        )
+
+    def test_preview_dialog_on_dismiss_attached(self):
+        """preview_dialog.on_dismiss 必須被 hook 到 on_preview_dismiss function。"""
+        src = _read(EXTRACTOR_DIALOG)
+        assert "preview_dialog.on_dismiss = on_preview_dismiss" in src, (
+            "回歸:preview_dialog.on_dismiss 沒有 hook on_preview_dismiss "
+            "(User 2026-07-12 補發現,確保 dismiss 觸發時能進入 cancel 防呆)"
+        )
+
+
+# =============================================================================
 # commit b86f911 + e232788 — 改用 log_unit
 # =============================================================================
 class TestFixB86f911_LogUnit:

@@ -636,6 +636,10 @@ def open_preview_dialog(
             ),
             ft.Button("確認執行", icon=ft.Icons.CHECK, on_click=start_extraction),
         ]
+        # 2026-07-12:解鎖 preview_dialog modal(掃描已結束,沒有 background thread 風險)。
+        # 對應 start_scan() 內的 preview_dialog.modal = True 鎖定。
+        preview_dialog.modal = False
+        log_info("[PREVIEW] show_result_dialog: preview_dialog.modal=False (scan finished)")
         page.update()  # ← 重新 paint preview_dialog,內容現在是「結果列表」
         log_info(f"[PREVIEW] show_result_dialog: preview_dialog mutated, page.update() done")
 
@@ -674,6 +678,12 @@ def open_preview_dialog(
         preview_state.total = 0
         preview_state.result = None
         preview_state.error = None
+
+        # 2026-07-12 user 建議:預覽掃描進行中鎖 modal=True,避免點外側 dismiss 後
+        # dialog 變孤兒(do_scan / ui_poller thread 仍繼續跑,但 UI 已不在)。
+        # 解鎖時機在 show_result_dialog() mutate 完之後(backgound thread 已結束)。
+        preview_dialog.modal = True
+        log_info(f"[PREVIEW] start_scan: preview_dialog.modal=True (scanning)")
 
         # 重置 UI
         log_view.clear()
@@ -791,6 +801,24 @@ def open_preview_dialog(
         ),
         actions=[start_button],
     )
+
+    # 2026-07-12 user 建議:預覽 dialog 防呆安全網(與主 dialog 的 on_dialog_dismiss 對稱設計)。
+    # 理論上 start_scan() 內 preview_dialog.modal=True 期間,使用者不該能點外側 dismiss。
+    # 但萬一 (ESC 鍵 / Flet 行為改變 / 程式錯誤) 真的觸發 dismiss,至少要:
+    #   1. 留下 log 證據
+    #   2. 設 state["cancelled"] = True — do_scan() 的 for 迴圈本來就有檢查這個旗標,
+    #      下一個 generator yield 就 break,background thread 提早結束而非空跑到底。
+    def on_preview_dismiss(e):
+        log_info(
+            f"[PREVIEW] preview_dialog on_dismiss fired! state.running={state['running']}, cancelled={state['cancelled']}",
+        )
+        if state["running"]:
+            log_warning(
+                "[WARN] preview_dialog 在掃描中被 dismiss,do_scan / ui_poller thread 會收到 cancel 旗標提早結束",
+            )
+            state["cancelled"] = True
+
+    preview_dialog.on_dismiss = on_preview_dismiss
 
     page.show_dialog(preview_dialog)
 
