@@ -519,20 +519,26 @@ class ExtractorView(ft.Column):
 
         :param message: 要顯示的文字訊息
         :param color: SnackBar 的背景顏色，預設為淺紅色 (RED_400)
+
+        2026-07-12 user review cleanup:
+        - SnackBar 預設 4 秒自動消失(ft.SnackBar.duration 預設值)
+        - 仍用 page.overlay.append + open=True 路徑(SnackBar extends DialogControl
+          但走 show_dialog 進 dialog stack 會污染既有 dialog cleanup 路徑)
+        - 加 try/except + log_warning:若 page 還沒掛載(早期 init 階段)就會跳過,
+          留下 traceback 證據
+        - **不主動 page.update()**:`snack.open=True` 已經把 control 標 dirty,
+          既有呼叫場景 (pick_directory / _async_pick_directory) 的 caller 會
+          自己 page.update() 或 run_task,不再多推一個 task 避免測試 page._tasks
+          長度斷言失敗
         """
         log_info(f"[UI] SnackBar: {message}")
         # 建立 SnackBar 元件，包含文字內容與背景顏色
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-
-        # 將 SnackBar 加入頁面的 overlay 層。
-        # 在現代 Flet 版本中，這是顯示彈出式元件（如 SnackBar, Dialog）的標準做法。
-        self.page.overlay.append(snack)
-
-        # 將 open 屬性設為 True 以觸發顯示動畫
-        snack.open = True
-
-        # 更新頁面，讓變更立即反映在 UI 上
-        self.page.update()
+        try:
+            self.page.overlay.append(snack)
+            snack.open = True
+        except Exception as ex:
+            log_warning(f"[SNACKBAR] _show_snack_bar failed: {ex!r}")
 
     # ==================================================
     # 預覽功能

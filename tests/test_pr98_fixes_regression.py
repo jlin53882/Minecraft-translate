@@ -664,6 +664,105 @@ class TestFixExtractionSummaryDialogAPI:
 
 
 # =============================================================================
+# User 2026-07-12 review 補發現 第四個:_show_snack_bar 不該直接 page.update()
+# =============================================================================
+class TestFixSnackBarExceptWrapper:
+    """User 2026-07-12 review 補發現:ExtractorView._show_snack_bar 內直接呼叫
+    self.page.update()(從 click handler 內同步),且沒有 try/except 把例外吞掉。
+
+    修法:
+    1. 不主動 page.update():page.update 由 caller 觸發(pick_directory 等路徑
+       自己的 async task 已經會順便 update),避免額外塞進 page._tasks 干擾測試。
+       設 snack.open=True 已經把 control 標 dirty,Flet internal mutation 追蹤會
+       在下一次 page.update() 時 render。
+    2. 用 try/except 包起來,補 log_warning 留 traceback。
+    """
+
+    def test_show_snack_bar_has_try_except(self):
+        """_show_snack_bar 必須有 try/except 包核心程式碼。"""
+        extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
+        tree = _ast_parse(extractor_view)
+        found = False
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.FunctionDef)
+                and node.name == "_show_snack_bar"
+            ):
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.Try)
+                        and any(
+                            isinstance(h, ast.ExceptHandler)
+                            for h in sub.handlers
+                        )
+                    ):
+                        found = True
+                break
+        assert found, (
+            "回歸:_show_snack_bar 沒有 try/except "
+            "(User 2026-07-12 review 補發現,沒有 traceback 證據)"
+        )
+
+    def test_show_snack_bar_logs_warning_on_failure(self):
+        """_show_snack_bar 的 except handler 必須呼叫 log_warning。"""
+        extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
+        src = _read(extractor_view)
+        # AST-level:找 _show_snack_bar 內有 log_warning 呼叫
+        tree = _ast_parse(extractor_view)
+        found = False
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.FunctionDef)
+                and node.name == "_show_snack_bar"
+            ):
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Name)
+                        and sub.func.id == "log_warning"
+                    ):
+                        found = True
+                break
+        assert found, (
+            "回歸:_show_snack_bar 的 except handler 沒呼叫 log_warning "
+            "(吞錯沒 log,跟 commit b6c958b 的 extractor_view 修法要對稱)"
+        )
+
+    def test_show_snack_bar_no_direct_page_update(self):
+        """_show_snack_bar 不應直接呼叫 page.update()。"""
+        extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
+        tree = _ast_parse(extractor_view)
+        bad_calls = []
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.FunctionDef)
+                and node.name == "_show_snack_bar"
+            ):
+                # 找 self.page.update() 同步呼叫
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Attribute)
+                        and sub.func.attr == "update"
+                    ):
+                        # 檢查是否 self.page.update()
+                        if (
+                            isinstance(sub.func.value, ast.Attribute)
+                            and sub.func.value.attr == "page"
+                        ):
+                            bad_calls.append(
+                                f"self.page.update() at line {sub.lineno}"
+                            )
+                break
+        assert not bad_calls, (
+            "回歸:_show_snack_bar 直接 self.page.update() "
+            "(User 2026-07-12 review 補發現,page.update 由 caller 負責,"
+            "避免額外塞 task 干擾測試 page._tasks 長度斷言)\n"
+            + "\n".join(bad_calls)
+        )
+
+
+# =============================================================================
 # commit b86f911 + e232788 — 改用 log_unit
 # =============================================================================
 class TestFixB86f911_LogUnit:
