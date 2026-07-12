@@ -50,6 +50,23 @@ def update_stats_from_log(view, line: str, phase: str = None):
     except Exception as e:
         log_warning(f'解析統計數字失敗: {e}')
 
+# =============================================================================
+# DEAD CODE (production): _extraction_worker — 改用 extractor_dialog.py 內的 Service 層邏輯
+# =============================================================================
+# 2026-07-12 對話 audit 結果:此 function 在 production code 無任何呼叫路徑
+# (extractor_view.py 內按鈕全部直連 open_extractor_dialog()/open_preview_dialog())。
+#
+# 目前僅被 tests/test_extractor_dual_mode.py 的對應測試呼叫(已加 @pytest.mark.skip)。
+# 若決定物理刪除,需要:
+#   1. 刪除本檔中的 4 個函式(_extraction_worker / start_extraction /
+#      build_preview_result_dialog / show_preview)
+#   2. 同步移除 tests/test_extractor_dual_mode.py 內已 skip 的對應測試
+#   3. 移除 extractor_view.py 中對 build_preview_result_dialog /
+#      show_preview / start_extraction (as run_*_flow) 的 import
+#
+# 注意:`update_stats_from_log` 函式(本檔 line 1-52)是共用邏輯,
+# extractor_view._update_stats_from_log instance method 也用它,絕對不能動。
+# =============================================================================
 def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
     """背景執行緒：執行 JAR 提取並直接更新 UI（Dual 模式專用）。
 
@@ -213,6 +230,8 @@ def _extraction_worker(view, mode: str, mods_dir: str, output_dir: str):
             view.page.run_task(_do_error, None)
 
 
+# DEAD CODE (production): start_extraction — 改用 extractor_dialog.open_extractor_dialog()
+# 2026-07-12 audit。見 _extraction_worker 上方的 DEAD CODE 區塊。
 def start_extraction(view, mode: str):
     """啟動 JAR 檔案提取任務（Lang / Book / Dual 模式）。
 
@@ -269,6 +288,8 @@ def start_extraction(view, mode: str):
 
     threading.Thread(target=_extraction_worker, args=(view, mode, mods_dir, str(out_path)), daemon=True).start()
 
+# DEAD CODE (production): build_preview_result_dialog — 改用 extractor_dialog.open_preview_dialog()
+# 2026-07-12 audit。見 _extraction_worker 上方的 DEAD CODE 區塊。
 def build_preview_result_dialog(view, result: dict, mode: str):
     """建構提取預覽結果對話框，顯示找到的檔案數量和大小。
 
@@ -349,25 +370,9 @@ def build_preview_result_dialog(view, result: dict, mode: str):
     )
     return dialog
 
-def build_preview_error_dialog(view, error: str, mode: str):
-    """建構預覽失敗錯誤對話框。
 
-    參數：
-        view: ExtractorView 實例
-        error: 錯誤訊息
-        mode: 模式（'lang' / 'book' / 'dual'）
-
-    Returns:
-        ft.AlertDialog 對話框
-    """
-    return ft.AlertDialog(
-        modal=True,
-        title=ft.Text('預覽失敗'),
-        content=ft.Text(f'無法預覽 {mode.upper()} 提取：{error}'),
-        actions=[ft.TextButton('關閉', on_click=lambda e: view._close_dialog_overlay(view._preview_error_dialog))],
-    )
-
-
+# DEAD CODE (production): show_preview — 改用 extractor_dialog.open_preview_dialog()
+# 2026-07-12 audit。見 _extraction_worker 上方的 DEAD CODE 區塊。
 def show_preview(view, mode: str):
     """執行預覽掃描，顯示將要提取的檔案列表（不執行實際提取）。
 

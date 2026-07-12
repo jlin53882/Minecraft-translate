@@ -1,6 +1,7 @@
 
 from pathlib import Path
 import flet as ft
+import pytest
 from app.views.extractor_view import ExtractorView
 from app.views._log import LogView
 from tests.conftest import mock_page, mock_filepicker
@@ -184,6 +185,11 @@ def test_extractor_view_set_controls_disabled_toggles_inputs(monkeypatch):
 
 def test_extractor_view_start_extraction_requires_mods_dir(monkeypatch):
     """測試 start_extraction 需要填寫 mods 目錄"""
+    # SKIPPED 2026-07-12: view.start_extraction 走 legacy run_extraction_flow alias
+    # 呼叫已被 mark DEAD CODE 的 extractor_actions.start_extraction。
+    # 等 legacy code 物理移除時,這條測試就能刪。
+    # (見 extractor_actions.py 頂部 DEAD CODE 區塊的 audit)
+    pytest.skip("Legacy view.start_extraction path superseded by extractor_dialog.py PR #98")
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     page = mock_page()
     view = ExtractorView(page, mock_filepicker())
@@ -196,6 +202,8 @@ def test_extractor_view_start_extraction_requires_mods_dir(monkeypatch):
 
 def test_extractor_view_start_extraction_requires_output_dir(monkeypatch):
     """測試 start_extraction 需要填寫輸出目錄"""
+    # SKIPPED 2026-07-12: 同上, view.start_extraction → run_extraction_flow → legacy start_extraction。
+    pytest.skip("Legacy view.start_extraction path superseded by extractor_dialog.py PR #98")
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     page = mock_page()
     view = ExtractorView(page, mock_filepicker())

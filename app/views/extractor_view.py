@@ -21,7 +21,6 @@ import threading
 
 from app.task_session import TaskSession
 from app.views.extractor.extractor_actions import (
-    build_preview_error_dialog,
     build_preview_result_dialog,
     show_preview as run_preview_flow,
     start_extraction as run_extraction_flow,

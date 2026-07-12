@@ -273,6 +273,7 @@ class TestExtractDualFilesGeneratorPhase:
 # 4. DUAL mode completion log skip
 # =============================================================================
 
+@pytest.mark.skip(reason="Tests legacy extractor_actions._extraction_worker, superseded by extractor_dialog.py PR #98. See audit in DEAD CODE block at top of extractor_actions.py (2026-07-12).")
 class TestDualModeCompletionLogSkip:
     """驗證 _extraction_worker 在 DUAL mode 跳過 completion log block。"""
 
@@ -513,6 +514,7 @@ class TestDualModeStatsSource:
 # 6. Lambda closure phase 標籤 capture 值而非 reference
 # =============================================================================
 
+@pytest.mark.skip(reason="Tests legacy extractor_actions._extraction_worker lambda closure semantics, superseded by extractor_dialog.py PR #98. See audit in DEAD CODE block at top of extractor_actions.py (2026-07-12).")
 class TestLambdaClosurePhaseCapture:
     """驗證 lambda 以 this_phase=current_phase 捕獲值，而非直接捕獲 loop 變數。"""
 
@@ -583,6 +585,7 @@ class TestLambdaClosurePhaseCapture:
 # 7. `current_phase` 初始化為 "lang"（非 "dual"）
 # =============================================================================
 
+@pytest.mark.skip(reason="Tests legacy extractor_actions._extraction_worker current_phase init, superseded by extractor_dialog.py PR #98. See audit in DEAD CODE block at top of extractor_actions.py (2026-07-12).")
 class TestCurrentPhaseInitialization:
     """驗證 mode=="dual" 時 current_phase 初始值為 "lang"。"""
 
@@ -610,6 +613,7 @@ class TestCurrentPhaseInitialization:
 # 8. progress_bar.value 在 phase 切換時重置為 0.0
 # =============================================================================
 
+@pytest.mark.skip(reason="Tests legacy extractor_actions._extraction_worker progress_bar phase reset, superseded by extractor_dialog.py PR #98. See audit in DEAD CODE block at top of extractor_actions.py (2026-07-12).")
 class TestProgressBarPhaseReset:
     """驗證 Book phase 抵達時 progress_bar.value 重置為 0.0。"""
 
@@ -799,6 +803,7 @@ class TestShowExtractionSummaryDualMode:
 # 11. ExtractionState 結構完整性
 # =============================================================================
 
+@pytest.mark.skip(reason="Tests legacy extractor_actions extraction_state, superseded by extractor_dialog.py PR #98. See audit in DEAD CODE block at top of extractor_actions.py (2026-07-12).")
 class TestExtractionState:
     """驗證 ExtractionState dataclass 結構正確。
 
@@ -842,6 +847,7 @@ class TestExtractionState:
         assert combined['book']['success'] == 5
 
 
+@pytest.mark.skip(reason="Regression test for legacy session.start double-call bug. Superseded by extractor_dialog.py PR #98. See audit in DEAD CODE block at top of extractor_actions.py (2026-07-12).")
 class TestExtractorActionsSessionStart:
     """Regression tests for extractor_actions.py: session.start() double-call bug."""
 
@@ -906,6 +912,7 @@ class TestExtractorActionsSessionStart:
         assert call_count[0] == 1, f"session.start() 應被呼叫 1 次，實際 {call_count[0]} 次"
 
 
+@pytest.mark.skip(reason="Regression test for legacy poll reference before definition bug. Superseded by extractor_dialog.py PR #98. See audit in DEAD CODE block at top of extractor_actions.py (2026-07-12).")
 class TestShowPreviewPollOrder:
     """Regression tests for extractor_actions.py: poll reference before definition bug."""
 
@@ -1020,6 +1027,7 @@ class TestUpdateStatsFromLog:
 # 13. build_preview_result_dialog — dual mode jar list branch
 # =============================================================================
 
+@pytest.mark.skip(reason="Tests legacy extractor_actions.build_preview_result_dialog, superseded by extractor_dialog.py PR #98. See audit in DEAD CODE block at top of extractor_actions.py (2026-07-12).")
 class TestBuildPreviewResultDialog:
     """驗證 build_preview_result_dialog 的分支覆蓋率。"""
 
@@ -1076,6 +1084,7 @@ class TestBuildPreviewResultDialog:
 # 14. start_extraction — early return branches
 # =============================================================================
 
+@pytest.mark.skip(reason="Tests legacy extractor_actions.start_extraction early-return branches, superseded by extractor_dialog.py PR #98. See audit in DEAD CODE block at top of extractor_actions.py (2026-07-12).")
 class TestStartExtractionBranches:
     """驗證 start_extraction 的所有 early-return 分支。"""
 
@@ -1137,6 +1146,7 @@ class TestStartExtractionBranches:
 # 15. show_preview — output_dir auto-fill paths
 # =============================================================================
 
+@pytest.mark.skip(reason="Tests legacy extractor_actions.show_preview output_path branches, superseded by extractor_dialog.py PR #98. See audit in DEAD CODE block at top of extractor_actions.py (2026-07-12).")
 class TestShowPreviewOutputPaths:
     """驗證 show_preview 的 output_dir fallback 邏輯。"""
 
@@ -1214,6 +1224,7 @@ class TestShowPreviewOutputPaths:
 # 16. _extraction_worker — dual_errors and error/ERROR branches
 # =============================================================================
 
+@pytest.mark.skip(reason="Tests legacy extractor_actions._extraction_worker branches, superseded by extractor_dialog.py PR #98. See audit in DEAD CODE block at top of extractor_actions.py (2026-07-12).")
 class TestExtractionWorkerBranches:
     """驗證 _extraction_worker 的 error/dual_errors 分支。"""
 
