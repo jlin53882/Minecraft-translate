@@ -15,6 +15,8 @@ import threading
 import os
 import sys
 
+from translation_tool.utils.log_unit import log_info, log_debug, log_warning
+
 from app.ui import theme
 from app.views._log import LogView
 from app.services_impl.pipelines.extract_service import (
