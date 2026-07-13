@@ -160,18 +160,25 @@ def extract_book_files_generator(mods_dir: str, output_dir: str, *, lang_codes: 
         "Patchouli Book",
     )
 
-def extract_dual_files_generator(mods_dir: str, output_dir: str, *, skip_zh_cn: bool = False) -> Generator[Dict[str, Any], None, None]:
+def extract_dual_files_generator(
+    mods_dir: str,
+    output_dir: str,
+    *,
+    lang_codes: list[str] | None = None,
+    skip_zh_cn: bool = False,
+) -> Generator[Dict[str, Any], None, None]:
     """從 mods 目錄依序提取語言檔與書本檔（dual 模式）。
 
     Args:
         mods_dir: Mod 目錄路徑
         output_dir: 輸出目錄路徑
-        skip_zh_cn: 是否跳過 zh_cn 抽取
+        lang_codes: 指定語言代碼列表,若為 None 則從 config 讀取。
+        skip_zh_cn: 是否跳過 zh_cn 抽取（僅在 lang_codes=None 時生效）。
 
     Yields:
         進度字典
     """
-    lang_file_regex = build_lang_file_regex(skip_zh_cn=skip_zh_cn)
+    lang_file_regex = build_lang_file_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)
     lang_error = None
     lang_stats = None
     try:
