@@ -13,6 +13,7 @@
 
 # /minecraft_translator_flet/app/views/extractor_view.py
 import flet as ft
+import os
 from pathlib import Path
 from app.ui import theme
 from app.views._log import LogView
@@ -113,13 +114,7 @@ class ExtractorView(ft.Column):
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
-            on_click=lambda e: open_extractor_dialog(
-                self.page,
-                file_picker,
-                input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip() if (self.output_dir_textfield.value or "").strip() else (self._auto_fill_output_path(self.mods_dir_textfield.value or "", "lang") if self.mods_dir_textfield.value else ""),
-                mode="lang",
-            ),
+            on_click=self._handle_extract_lang_click,
         )
         self.book_button = ft.Button(
             "提取 Book",
@@ -130,37 +125,19 @@ class ExtractorView(ft.Column):
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
-            on_click=lambda e: open_extractor_dialog(
-                self.page,
-                file_picker,
-                input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip() if (self.output_dir_textfield.value or "").strip() else (self._auto_fill_output_path(self.mods_dir_textfield.value or "", "book") if self.mods_dir_textfield.value else ""),
-                mode="book",
-            ),
+            on_click=self._handle_extract_book_click,
         )
 
         # 預覽按鈕
         self.preview_lang_button = ft.OutlinedButton(
             "預覽 Lang",
             icon=ft.Icons.PREVIEW,
-            on_click=lambda e: open_preview_dialog(
-                self.page,
-                file_picker,
-                input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip(),
-                mode="lang",
-            ),
+            on_click=self._handle_preview_lang_click,
         )
         self.preview_book_button = ft.OutlinedButton(
             "預覽 Book",
             icon=ft.Icons.PREVIEW,
-            on_click=lambda e: open_preview_dialog(
-                self.page,
-                file_picker,
-                input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip(),
-                mode="book",
-            ),
+            on_click=self._handle_preview_book_click,
         )
         self.dual_extract_button = ft.Button(
             "提取 Lang + Book",
@@ -171,24 +148,12 @@ class ExtractorView(ft.Column):
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
-            on_click=lambda e: open_extractor_dialog(
-                self.page,
-                file_picker,
-                input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip() if (self.output_dir_textfield.value or "").strip() else (self._auto_fill_output_path(self.mods_dir_textfield.value or "", "dual") if self.mods_dir_textfield.value else ""),
-                mode="dual",
-            ),
+            on_click=self._handle_extract_dual_click,
         )
         self.dual_preview_button = ft.OutlinedButton(
             "預覽 Lang + Book",
             icon=ft.Icons.PREVIEW,
-            on_click=lambda e: open_preview_dialog(
-                self.page,
-                file_picker,
-                input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip(),
-                mode="dual",
-            ),
+            on_click=self._handle_preview_dual_click,
         )
 
         # 3. Status Display（由 _build_status_bar 在 build_logs_panel 中統一建立）
@@ -360,6 +325,127 @@ class ExtractorView(ft.Column):
         self.output_dir_textfield.value = output_path
         self.page.update()
         self._append_log_line(f"[系統] 自動設定輸出路徑：{output_path}")
+
+    def _check_mods_dir_or_snack(self, mods_dir: str, action_label: str) -> bool:
+        """按鈕 click handler 的前置驗證。
+
+        :param mods_dir: 已經 strip 後的 mods 路徑字串。
+        :param action_label: 動作說明(例如 "提取 Lang"、"預覽 Book")，
+                             用於 SnackBar 文案(如 "無法提取 Lang: ...")。
+        :return: True 表示 mods_dir 合法,可以繼續執行(進 dialog);
+                 False 表示已 SnackBar 提示,handler 應早 return。
+
+        UX 改進 (2026-07-13 user review):
+            原先 extractor_dialog.py:on_start_click 內早 return + SnackBar
+            顯示「請先選擇 Mods 資料夾」,但 user 已付出「按按鈕 + 進 dialog」
+            的代價才看到提示。
+
+            把驗證提前到按鈕 click handler 內,user 按按鈕後若沒設 mods_dir,
+            直接 SnackBar 提示「請先選擇資料夾」並 return,不進 dialog。
+        """
+        if not mods_dir:
+            self._show_snack_bar(f"⚠️ 請先選擇 Mods 資料夾才能{action_label}", color=theme.AMBER_700)
+            return False
+        if not os.path.isdir(mods_dir):
+            self._show_snack_bar(f"⚠️ Mods 資料夾不存在,無法{action_label}", color=theme.AMBER_700)
+            return False
+        return True
+
+    def _handle_extract_lang_click(self, e):
+        """提取 Lang 按鈕 click handler。提早在按鈕層驗證 mods_dir。"""
+        mods_dir = (self.mods_dir_textfield.value or "").strip()
+        if not self._check_mods_dir_or_snack(mods_dir, "提取 Lang"):
+            return
+        output_path = (self.output_dir_textfield.value or "").strip()
+        if not output_path:
+            output_path = self._auto_fill_output_path(mods_dir, "lang")
+        from app.views.extractor.extractor_dialog import open_extractor_dialog
+        open_extractor_dialog(
+            self.page,
+            self.file_picker,
+            input_path=mods_dir,
+            output_path=output_path,
+            mode="lang",
+        )
+
+    def _handle_extract_book_click(self, e):
+        """提取 Book 按鈕 click handler。"""
+        mods_dir = (self.mods_dir_textfield.value or "").strip()
+        if not self._check_mods_dir_or_snack(mods_dir, "提取 Book"):
+            return
+        output_path = (self.output_dir_textfield.value or "").strip()
+        if not output_path:
+            output_path = self._auto_fill_output_path(mods_dir, "book")
+        from app.views.extractor.extractor_dialog import open_extractor_dialog
+        open_extractor_dialog(
+            self.page,
+            self.file_picker,
+            input_path=mods_dir,
+            output_path=output_path,
+            mode="book",
+        )
+
+    def _handle_extract_dual_click(self, e):
+        """提取 Lang + Book 按鈕 click handler。"""
+        mods_dir = (self.mods_dir_textfield.value or "").strip()
+        if not self._check_mods_dir_or_snack(mods_dir, "提取 Lang + Book"):
+            return
+        output_path = (self.output_dir_textfield.value or "").strip()
+        if not output_path:
+            output_path = self._auto_fill_output_path(mods_dir, "dual")
+        from app.views.extractor.extractor_dialog import open_extractor_dialog
+        open_extractor_dialog(
+            self.page,
+            self.file_picker,
+            input_path=mods_dir,
+            output_path=output_path,
+            mode="dual",
+        )
+
+    def _handle_preview_lang_click(self, e):
+        """預覽 Lang 按鈕 click handler。"""
+        mods_dir = (self.mods_dir_textfield.value or "").strip()
+        if not self._check_mods_dir_or_snack(mods_dir, "預覽 Lang"):
+            return
+        output_path = (self.output_dir_textfield.value or "").strip()
+        from app.views.extractor.extractor_dialog import open_preview_dialog
+        open_preview_dialog(
+            self.page,
+            self.file_picker,
+            input_path=mods_dir,
+            output_path=output_path,
+            mode="lang",
+        )
+
+    def _handle_preview_book_click(self, e):
+        """預覽 Book 按鈕 click handler。"""
+        mods_dir = (self.mods_dir_textfield.value or "").strip()
+        if not self._check_mods_dir_or_snack(mods_dir, "預覽 Book"):
+            return
+        output_path = (self.output_dir_textfield.value or "").strip()
+        from app.views.extractor.extractor_dialog import open_preview_dialog
+        open_preview_dialog(
+            self.page,
+            self.file_picker,
+            input_path=mods_dir,
+            output_path=output_path,
+            mode="book",
+        )
+
+    def _handle_preview_dual_click(self, e):
+        """預覽 Lang + Book 按鈕 click handler。"""
+        mods_dir = (self.mods_dir_textfield.value or "").strip()
+        if not self._check_mods_dir_or_snack(mods_dir, "預覽 Lang + Book"):
+            return
+        output_path = (self.output_dir_textfield.value or "").strip()
+        from app.views.extractor.extractor_dialog import open_preview_dialog
+        open_preview_dialog(
+            self.page,
+            self.file_picker,
+            input_path=mods_dir,
+            output_path=output_path,
+            mode="dual",
+        )
 
     def set_controls_disabled(self, disabled: bool):
         """停用或啟用所有輸入框與按鈕（執行期間呼叫，防止重複點擊）。

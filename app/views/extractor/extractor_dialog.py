@@ -335,11 +335,24 @@ def open_extractor_dialog(
         # 驗證輸入
         if not mods_dir:
             log_debug(f"[BTN] on_start_click rejected: mods_dir empty")
+            # 🐛 UX 改進 (2026-07-13 user review):除了 dialog 內 status_text 提示,
+            # 額外彈出 SnackBar 提醒 user。原因:user 按按鈕時視線多在按鈕
+            # 與 textfield 上,dialog 內 status_text 在 dialog 底部容易被忽略。
+            # SnackBar 從畫面底部彈出 4 秒,user 更可能注意到。
+            # Modal=False 期間 SnackBar 可見(還沒進 ui_start 鎖 modal)。
+            page.show_dialog(ft.SnackBar(
+                ft.Text("⚠️ 請先選擇 Mods 資料夾"),
+                open=True,
+            ))
             status_text.value = "⚠️ 請先設定 Mod 來源"
             page.update()
             return
         if not os.path.isdir(mods_dir):
             log_debug(f"[BTN] on_start_click rejected: {mods_dir} not a dir")
+            page.show_dialog(ft.SnackBar(
+                ft.Text("⚠️ Mods 資料夾不存在"),
+                open=True,
+            ))
             status_text.value = "⚠️ Mod 來源資料夾不存在"
             page.update()
             return

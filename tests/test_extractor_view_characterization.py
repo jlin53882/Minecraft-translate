@@ -183,37 +183,6 @@ def test_extractor_view_set_controls_disabled_toggles_inputs(monkeypatch):
     assert view.output_dir_textfield.disabled is False
 
 
-def test_extractor_view_start_extraction_requires_mods_dir(monkeypatch):
-    """測試 start_extraction 需要填寫 mods 目錄"""
-    # SKIPPED 2026-07-12: view.start_extraction 走 legacy run_extraction_flow alias
-    # 呼叫已被 mark DEAD CODE 的 extractor_actions.start_extraction。
-    # 等 legacy code 物理移除時,這條測試就能刪。
-    # (見 extractor_actions.py 頂部 DEAD CODE 區塊的 audit)
-    pytest.skip("Legacy view.start_extraction path superseded by extractor_dialog.py PR #98")
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    page = mock_page()
-    view = ExtractorView(page, mock_filepicker())
-    view.output_dir_textfield.value = 'C:/Out'
-
-    view.start_extraction('lang')
-
-    assert len(page.overlay) >= 1
-
-
-def test_extractor_view_start_extraction_requires_output_dir(monkeypatch):
-    """測試 start_extraction 需要填寫輸出目錄"""
-    # SKIPPED 2026-07-12: 同上, view.start_extraction → run_extraction_flow → legacy start_extraction。
-    pytest.skip("Legacy view.start_extraction path superseded by extractor_dialog.py PR #98")
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    page = mock_page()
-    view = ExtractorView(page, mock_filepicker())
-    view.mods_dir_textfield.value = 'C:/Mods'
-
-    view.start_extraction('lang')
-
-    assert len(page.overlay) >= 1
-
-
 def test_extractor_view_build_settings_card(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())

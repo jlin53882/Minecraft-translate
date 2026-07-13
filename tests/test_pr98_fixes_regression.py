@@ -32,6 +32,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXTRACTOR_DIALOG = REPO_ROOT / "app" / "views" / "extractor" / "extractor_dialog.py"
+EXTRACTOR_VIEW = REPO_ROOT / "app" / "views" / "extractor_view.py"
 MERGE_VIEW = REPO_ROOT / "app" / "views" / "merge_view.py"
 
 
@@ -765,6 +766,183 @@ class TestFixSnackBarExceptWrapper:
 # =============================================================================
 # commit b86f911 + e232788 — 改用 log_unit
 # =============================================================================
+class TestFixButtonLevelModsValidation:
+    """按鈕層級 mods_dir 提早驗證 (2026-07-13 user review)。
+
+    User 在按 [提取 Lang] 等 6 個按鈕時,如果 mods_dir 未設,提早在按鈕層
+    SnackBar 提示而不進 dialog。這把原先 extractor_dialog.py:on_start_click
+    內的 SnackBar 早 return 邏輯提到按鈕層,user UX 提早回饋。
+
+    設計:
+    - 抽出 _check_mods_dir_or_snack() helper (ExtractorView 內)
+    - 6 個按鈕 on_click 改為 instance method (_handle_*_click) 呼叫 helper
+    - 通過驗證才呼叫 open_extractor_dialog / open_preview_dialog
+    """
+
+    def test_has_check_mods_dir_helper(self):
+        """_check_mods_dir_or_snack helper 必須存在於 ExtractorView。"""
+        src = _read(EXTRACTOR_VIEW)
+        assert "def _check_mods_dir_or_snack(self" in src, (
+            "回歸:_check_mods_dir_or_snack helper 不存在 (button-level mods_dir "
+            "驗證核心,2026-07-13 user review 要求按鈕層提早驗證)"
+        )
+
+    def test_check_helper_checks_mods_dir_empty(self):
+        """_check_mods_dir_or_snack 必須檢查 mods_dir 是否為空。"""
+        src = _read(EXTRACTOR_VIEW)
+        # 找 _check_mods_dir_or_snack 函式主體
+        m = re.search(
+            r"def _check_mods_dir_or_snack\(self, [^)]*\) -> bool:(.*?)(?=\n    def |\nclass |\Z)",
+            src, re.DOTALL,
+        )
+        assert m is not None, "找不到 _check_mods_dir_or_snack 函式"
+        body = m.group(1)
+        assert "if not mods_dir" in body, (
+            "回歸:_check_mods_dir_or_snack 內缺 `if not mods_dir` 檢查"
+        )
+
+    def test_check_helper_checks_mods_dir_not_dir(self):
+        """_check_mods_dir_or_snack 必須檢查 mods_dir 是否存在資料夾。"""
+        src = _read(EXTRACTOR_VIEW)
+        m = re.search(
+            r"def _check_mods_dir_or_snack\(self, [^)]*\) -> bool:(.*?)(?=\n    def |\nclass |\Z)",
+            src, re.DOTALL,
+        )
+        assert m is not None
+        body = m.group(1)
+        assert "os.path.isdir" in body, (
+            "回歸:_check_mods_dir_or_snack 內缺 `os.path.isdir(mods_dir)` 檢查"
+        )
+
+    def test_check_helper_calls_show_snack_bar(self):
+        """_check_mods_dir_or_snack 驗證失敗時必須呼叫 _show_snack_bar。"""
+        src = _read(EXTRACTOR_VIEW)
+        m = re.search(
+            r"def _check_mods_dir_or_snack\(self, [^)]*\) -> bool:(.*?)(?=\n    def |\nclass |\Z)",
+            src, re.DOTALL,
+        )
+        assert m is not None
+        body = m.group(1)
+        assert "self._show_snack_bar" in body, (
+            "回歸:_check_mods_dir_or_snack 驗證失敗時應該呼叫 _show_snack_bar 提示"
+        )
+
+    def test_six_button_handle_methods_exist(self):
+        """6 個 click handler instance method 都必須存在於 ExtractorView。"""
+        src = _read(EXTRACTOR_VIEW)
+        expected_methods = [
+            "_handle_extract_lang_click",
+            "_handle_extract_book_click",
+            "_handle_extract_dual_click",
+            "_handle_preview_lang_click",
+            "_handle_preview_book_click",
+            "_handle_preview_dual_click",
+        ]
+        for m in expected_methods:
+            assert f"def {m}" in src, (
+                f"回歸:{m} 不存在 (button-level validation 缺少對應 handler)"
+            )
+
+    def test_button_defs_use_instance_methods(self):
+        """6 個按鈕 on_click 必須改為 instance method (不是 lambda 直接呼叫 open_extractor_dialog)。"""
+        src = _read(EXTRACTOR_VIEW)
+        # __init__ 範圍內不能有 `on_click=lambda e: open_extractor_dialog` 或 open_preview_dialog
+        m = re.search(
+            r"def __init__\(self[^)]*\):(.*?)(?=\n    def \(self\)\)\n|\Z)",
+            src, re.DOTALL,
+        )
+        assert m is not None
+        init_body = m.group(1)
+        assert "on_click=lambda e: open_extractor_dialog" not in init_body, (
+            "回歸:button on_click 還是用 lambda 直接呼叫 open_extractor_dialog "
+            "(2026-07-13 user review 後應改為 instance method 走 _check_mods_dir_or_snack)"
+        )
+        assert "on_click=lambda e: open_preview_dialog" not in init_body, (
+            "回歸:button on_click 還是用 lambda 直接呼叫 open_preview_dialog"
+        )
+
+    def test_handle_methods_call_check_helper(self):
+        """6 個 click handler 內必須先呼叫 _check_mods_dir_or_snack。"""
+        src = _read(EXTRACTOR_VIEW)
+        expected_methods = [
+            "_handle_extract_lang_click",
+            "_handle_extract_book_click",
+            "_handle_extract_dual_click",
+            "_handle_preview_lang_click",
+            "_handle_preview_book_click",
+            "_handle_preview_dual_click",
+        ]
+        for m in expected_methods:
+            idx = src.find(f"def {m}")
+            assert idx > 0, f"找不到 {m}"
+            # 抓後續函式主體(下一個 def 或 class 之前)
+            next_def = re.search(r"\n    def |\nclass ", src[idx+1:])
+            end = idx + 1 + next_def.start() if next_def else len(src)
+            body = src[idx:end]
+            assert "_check_mods_dir_or_snack" in body, (
+                f"回歸:{m} 內缺 _check_mods_dir_or_snack 呼叫"
+            )
+            assert "return" in body, (
+                f"回歸:{m} 內缺 `return` (helper False 時不該繼續呼叫 open_extractor_dialog)"
+            )
+
+    def test_extractor_view_imports_os(self):
+        """ExtractorView 必須 import os 才能用 os.path.isdir。"""
+        src = _read(EXTRACTOR_VIEW)
+        assert "^import os$" in src or "^import os\n" in src or src.startswith("import os") or "\nimport os\n" in src, (
+            "回歸:ExtractorView 沒 import os (但用 os.path.isdir 會 crash)"
+        )
+
+
+class TestFixOnStartClickSnackbar:
+    """extractor_dialog.py:on_start_click 內早 return SnackBar (2026-07-13 UX 改進)。
+
+    User review 後 extractor_dialog.py:on_start_click 內兩個早 return 都加
+    SnackBar。雖然按鈕層已經提早攔截,extractor_dialog.py 內仍保留 SnackBar
+    作為 第二線防呆 (例如 programmatic 呼叫或未來 bypass button layer)。
+    """
+
+    def test_on_start_click_first_rejection_has_snackbar(self):
+        """on_start_click 第一個早 return (mods_dir 空) 必須有 SnackBar。"""
+        src = _read(EXTRACTOR_DIALOG)
+        m = re.search(
+            r"def on_start_click\(e\):(.*?)(?=\n    def |\ndef |\nclass |\Z)",
+            src, re.DOTALL,
+        )
+        assert m is not None, "找不到 on_start_click 函式"
+        body = m.group(1)
+        # 第一個 if not mods_dir 區塊:到 if not os.path.isdir 之前
+        idx_isdir = body.find("if not os.path.isdir")
+        first_block = body[:idx_isdir] if idx_isdir > 0 else body
+        assert "SnackBar" in first_block, (
+            "回歸:on_start_click 第一個早 return 缺 SnackBar"
+        )
+        assert "page.show_dialog" in first_block, (
+            "回歸:on_start_click 第一個早 return 缺 page.show_dialog"
+        )
+
+    def test_on_start_click_second_rejection_has_snackbar(self):
+        """on_start_click 第二個早 return (mods_dir 不是資料夾) 必須有 SnackBar。"""
+        src = _read(EXTRACTOR_DIALOG)
+        m = re.search(
+            r"def on_start_click\(e\):(.*?)(?=\n    def |\ndef |\nclass |\Z)",
+            src, re.DOTALL,
+        )
+        assert m is not None
+        body = m.group(1)
+        idx_isdir = body.find("if not os.path.isdir")
+        assert idx_isdir > 0
+        second_block = body[idx_isdir:]
+        assert "SnackBar" in second_block, (
+            "回歸:on_start_click 第二個早 return 缺 SnackBar"
+        )
+        assert "page.show_dialog" in second_block, (
+            "回歸:on_start_click 第二個早 return 缺 page.show_dialog"
+        )
+
+
+
+
 class TestFixB86f911_LogUnit:
     """移除自寫 _extractor_debug_log(print 版),改用 project 既有的 log_unit。"""
 
