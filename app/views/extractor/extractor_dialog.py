@@ -14,6 +14,7 @@ import flet as ft
 import threading
 import os
 import sys
+import traceback
 
 from translation_tool.utils.log_unit import log_info, log_debug, log_warning
 
@@ -249,7 +250,7 @@ def open_extractor_dialog(
             elif selected_mode == "book":
                 gen = extract_book_files_generator(mods_dir, final_output)
             else:
-                gen = extract_dual_files_generator(mods_dir, final_output, selected_codes)
+                gen = extract_dual_files_generator(mods_dir, final_output, lang_codes=selected_codes)
 
             # ⭐ 每次開新任務先 reset outer-scope cancel flag,然後傳 reference 給 Service
             # (on_cancel_click closure 用 outer-scope extraction_cancel_flag)
@@ -294,7 +295,11 @@ def open_extractor_dialog(
             update_stats(result_stats["success"], result_stats["warnings"], result_stats["failures"])
 
         except Exception as ex:
+            # 🐛 UX 改進 (2026-07-13 user review): 原本只印 str(ex),遇到 TypeError 等
+            # exception 時缺少堆疊追蹤,debug 不便。
+            # 改用 traceback.format_exc() 印完整堆疊,讓 user 看到錯誤根因。
             add_log(f"[ERROR] {ex}", level="error")
+            add_log(f"[TRACEBACK]\n{traceback.format_exc()}", level="error")
             state["done"] = True
             update_stats(0, 0, 1)
 
@@ -507,9 +512,12 @@ def open_preview_dialog(
     mode: str = "lang",
 ):
     log_info(f"[PREVIEW] open_preview_dialog mode={mode!r}")
-    """打開預覽對話框。
+    """打開預覽對話框（lang / book / dual）。
 
-    直接呼叫原本的 extractor_actions.show_preview（沿用原本的 polling + 結果對話框實作）。
+    預覽流程完全在本模組內實現，不依賴 extractor_actions 模組的 legacy show_preview：
+    - 透過 start_scan + do_scan + ui_poller 背景執行緒跑預覽掃描
+    - 結果 mutate preview_dialog 的 title/content/actions（單一 dialog 模式）
+    - 掃描完成進度達 100% 時，自動展開「確認執行 / 取消」按鈕
 
     Args:
         page: Flet Page 實例

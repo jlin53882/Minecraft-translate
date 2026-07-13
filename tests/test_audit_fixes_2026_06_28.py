@@ -145,14 +145,3 @@ def test_main_pipeline_missing_raises_runtime_error():
     assert "RuntimeError" in main_src, "main must raise RuntimeError on missing pipeline view"
     assert "pipeline view not found" in main_src or "Available keys" in main_src
 
-
-# ---------------------------------------------------------------------------
-# #2: poll daemon uses threading.Event (smoke test — verify source)
-# ---------------------------------------------------------------------------
-
-def test_show_preview_uses_threading_event():
-    """Regression: show_preview poll 必須使用 threading.Event 控制生命週期。"""
-    src = (Path(__file__).resolve().parent.parent / "app" / "views" / "extractor" / "extractor_actions.py").read_text(encoding="utf-8")
-    assert "stop_event = threading.Event()" in src, "show_preview must create stop_event"
-    assert "stop_event.is_set()" in src, "poll loop must check stop_event"
-    assert "stop_event.wait(timeout=0.1)" in src, "poll must use wait(timeout=...) not time.sleep"

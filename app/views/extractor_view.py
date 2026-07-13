@@ -22,9 +22,6 @@ import threading
 
 from app.task_session import TaskSession
 from app.views.extractor.extractor_actions import (
-    build_preview_result_dialog,
-    show_preview as run_preview_flow,
-    start_extraction as run_extraction_flow,
     update_stats_from_log,
 )
 from app.views.extractor.extractor_panels import build_logs_panel, build_settings_panel, _build_pick_button
@@ -592,13 +589,6 @@ class ExtractorView(ft.Column):
     # ==================================================
     # Worker Logic
     # ==================================================
-    def start_extraction(self, mode: str):
-        """啟動 JAR 提取任務（lang / book / dual）。
-
-        實際工作代理至 extractor_actions.start_extraction（run_extraction_flow）。
-        """
-        return run_extraction_flow(self, mode)
-
     def _show_snack_bar(self, message: str, color: str = theme.ERROR):
         """
         顯示底部的快訊通知 (SnackBar)
@@ -625,13 +615,3 @@ class ExtractorView(ft.Column):
             snack.open = True
         except Exception as ex:
             log_warning(f"[SNACKBAR] _show_snack_bar failed: {ex!r}")
-
-    # ==================================================
-    # 預覽功能
-    # ==================================================
-    def show_preview(self, mode: str):
-        """顯示提取預覽對話框（lang / book / dual）。
-
-        實際工作代理至 extractor_actions.show_preview（run_preview_flow）。
-        """
-        return run_preview_flow(self, mode)
