@@ -478,10 +478,6 @@ class ExtractorView(ft.Column):
     # ==================================================
     # Worker Logic
     # ==================================================
-    def _update_stats_from_log(self, line: str):
-        """根据日志内容更新提取统计信息"""
-        return update_stats_from_log(self, line)
-
     def _show_extraction_summary(self, mode: str):
         """顯示提取結果摘要（UI 風格對齊預覽 modal）。"""
         stats = self._extraction_stats

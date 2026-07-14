@@ -48,8 +48,11 @@ def test_update_stats_from_log_counts_success_warning_failure(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
 
-    view._update_stats_from_log('已檢查 10/10 個 JAR 檔案。\n  - 新提取或更新的檔案: 3 個\n  - 因內容相同而跳過的檔案: 5 個')
-    view._update_stats_from_log('[ERROR] 提取某個檔案時產生例外')
+    # Phase 3 partial (2026-07-13) 物理刪除 _update_stats_from_log wrapper,
+    # 直接呼叫共用 helper extractor_actions.update_stats_from_log。
+    from app.views.extractor.extractor_actions import update_stats_from_log
+    update_stats_from_log(view, '已檢查 10/10 個 JAR 檔案。\n  - 新提取或更新的檔案: 3 個\n  - 因內容相同而跳過的檔案: 5 個')
+    update_stats_from_log(view, '[ERROR] 提取某個檔案時產生例外')
 
     assert view._extraction_stats['success'] == 10
     assert view._extraction_stats['warnings'] == 5
@@ -111,14 +114,16 @@ def test_extractor_view_all_buttons_have_on_click(monkeypatch):
 
 
 def test_extractor_view_update_stats_resets_counters(monkeypatch):
-    """測試 _update_stats_from_log 的計數邏輯"""
+    """測試 update_stats_from_log 的計數邏輯"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
 
     view._extraction_stats = {"success": 0, "warnings": 0, "failures": 0, "total_files": 0}
 
-    view._update_stats_from_log('已檢查 8/8 個 JAR 檔案。\n  - 新提取或更新的檔案: 5 個\n  - 因內容相同而跳過的檔案: 2 個')
-    view._update_stats_from_log('[ERROR] 嚴重錯誤')
+    # Phase 3 partial (2026-07-13) 改用直接呼叫共用 helper
+    from app.views.extractor.extractor_actions import update_stats_from_log
+    update_stats_from_log(view, '已檢查 8/8 個 JAR 檔案。\n  - 新提取或更新的檔案: 5 個\n  - 因內容相同而跳過的檔案: 2 個')
+    update_stats_from_log(view, '[ERROR] 嚴重錯誤')
 
     assert view._extraction_stats['success'] == 8
     assert view._extraction_stats['warnings'] == 2

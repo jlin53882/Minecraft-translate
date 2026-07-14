@@ -32,6 +32,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXTRACTOR_DIALOG = REPO_ROOT / "app" / "views" / "extractor" / "extractor_dialog.py"
+EXTRACTOR_ACTIONS = REPO_ROOT / "app" / "views" / "extractor" / "extractor_actions.py"
 EXTRACTOR_VIEW = REPO_ROOT / "app" / "views" / "extractor_view.py"
 MERGE_VIEW = REPO_ROOT / "app" / "views" / "merge_view.py"
 
@@ -938,6 +939,266 @@ class TestFixOnStartClickSnackbar:
         )
         assert "page.show_dialog" in second_block, (
             "回歸:on_start_click 第二個早 return 缺 page.show_dialog"
+        )
+
+
+
+
+class TestFixPhase3DeadCodeRemoval:
+    """Phase 3 (2026-07-13) 物理刪除 legacy code & test 的 source-level 斷言。
+
+    確保以下項目被物理刪除後,未來不會被偷偷加回:
+    - extractor_actions.py 的 4 個 legacy 函式
+    - extractor_view.py 的 2 個 dead method
+    - extractor_view.py 的 3 個 import
+    - 11 個 legacy test class 在 test_extractor_dual_mode.py
+    - 1 條 source-grep 測試 test_show_preview_uses_threading_event
+    """
+
+    def test_extractor_actions_no_dead_code_audit_block(self):
+        """extractor_actions.py 頂部 DEAD CODE audit 區塊應已被物理刪除。"""
+        src = _read(EXTRACTOR_ACTIONS)
+        assert "# =============================================================================" not in src or src.count("# DEAD CODE") == 0, (
+            "回歸:extractor_actions.py 又有 DEAD CODE 區塊 "
+            "(Phase 3 commit af66bce 應物理刪除 4 個 legacy 函式 + 區塊註解)"
+        )
+
+    def test_extractor_actions_no_extraction_worker(self):
+        """_extraction_worker 函式應已被物理刪除(legacy code)。"""
+        src = _read(EXTRACTOR_ACTIONS)
+        assert "def _extraction_worker" not in src, (
+            "回歸:_extraction_worker 函式重新出現 "
+            "(Phase 3 commit af66bce 已物理刪除)"
+        )
+
+    def test_extractor_actions_no_extraction_start_extraction_function(self):
+        """extractor_actions.start_extraction 函式應已被物理刪除(legacy code)。"""
+        src = _read(EXTRACTOR_ACTIONS)
+        assert "def start_extraction(view, mode: str):" not in src, (
+            "回歸:extractor_actions.start_extraction 函式重新出現 "
+            "(Phase 3 commit af66bce 已物理刪除,改名為 nested def start_extraction(e) "
+            "在 extractor_dialog.py:631,signature 完全不同)"
+        )
+
+    def test_extractor_actions_no_show_preview_function(self):
+        """extractor_actions.show_preview 函式應已被物理刪除(legacy code)。"""
+        src = _read(EXTRACTOR_ACTIONS)
+        assert "def show_preview(view, mode: str):" not in src, (
+            "回歸:extractor_actions.show_preview 函式重新出現 "
+            "(Phase 3 commit af66bce 已物理刪除,改名為 nested def show_preview(e) "
+            "在 extractor_dialog.py)"
+        )
+
+    def test_extractor_actions_no_build_preview_result_dialog(self):
+        """build_preview_result_dialog 函式應已被物理刪除(legacy code)。"""
+        src = _read(EXTRACTOR_ACTIONS)
+        assert "def build_preview_result_dialog" not in src, (
+            "回歸:build_preview_result_dialog 函式重新出現 "
+            "(Phase 3 commit af66bce 已物理刪除)"
+        )
+
+    def test_extractor_view_no_legacy_start_extraction_method(self):
+        """extractor_view.start_extraction method 應已被物理刪除(legacy code)。"""
+        src = _read(EXTRACTOR_VIEW)
+        # 必須存在 nested def start_extraction(e) 在 extractor_dialog.py,不在 extractor_view
+        assert "    def start_extraction(self, mode: str):" not in src, (
+            "回歸:extractor_view.start_extraction(self, mode) method 重新出現 "
+            "(Phase 3 commit af66bce 已物理刪除,它是 _run_extraction_flow 的死代理 wrapper)"
+        )
+
+    def test_extractor_view_no_legacy_show_preview_method(self):
+        """extractor_view.show_preview method 應已被物理刪除(legacy code)。"""
+        src = _read(EXTRACTOR_VIEW)
+        assert "    def show_preview(self, mode: str):" not in src, (
+            "回歸:extractor_view.show_preview(self, mode) method 重新出現 "
+            "(Phase 3 commit af66bce 已物理刪除,它是 _run_preview_flow 的死代理 wrapper)"
+        )
+
+    def test_extractor_view_no_legacy_imports(self):
+        """extractor_view.py 不應 import legacy 的 build_preview_result_dialog / show_preview / start_extraction。"""
+        src = _read(EXTRACTOR_VIEW)
+        assert "build_preview_result_dialog" not in src, (
+            "回歸:build_preview_result_dialog 又被 import "
+            "(Phase 3 commit af66bce 已從 import 移除)"
+        )
+        assert "run_extraction_flow" not in src, (
+            "回歸:run_extraction_flow alias 又被 import "
+            "(Phase 3 commit af66bce 已從 import 移除)"
+        )
+        assert "run_preview_flow" not in src, (
+            "回歸:run_preview_flow alias 又被 import "
+            "(Phase 3 commit af66bce 已從 import 移除)"
+        )
+
+    def test_extractor_dialog_docstring_no_legacy_reference(self):
+        """extractor_dialog.open_preview_dialog docstring 不應引用舊 extractor_actions.show_preview。"""
+        src = _read(EXTRACTOR_DIALOG)
+        # 找 open_preview_dialog 函式範圍
+        m = re.search(
+            "def open_preview_dialog\([^)]*\):(.*?)(?=\ndef |\nclass |\Z)",
+            src, re.DOTALL,
+        )
+        assert m is not None
+        body = m.group(1)
+        assert "extractor_actions.show_preview" not in body, (
+            "回歸:open_preview_dialog docstring 又引用已刪除的 extractor_actions.show_preview "
+            "(Phase 3 commit af66bce 已修正 docstring)"
+        )
+
+    def test_no_legacy_test_class_in_test_extractor_dual_mode(self):
+        """test_extractor_dual_mode.py 不應有被 Phase 3 物理刪除的 11 個 legacy test class。"""
+        src = _read(REPO_ROOT / "tests" / "test_extractor_dual_mode.py")
+        legacy_classes = [
+            "TestDualModeCompletionLogSkip",
+            "TestDualModeStatsSource",
+            "TestLambdaClosurePhaseCapture",
+            "TestCurrentPhaseInitialization",
+            "TestExtractionState",
+            "TestExtractorActionsSessionStart",
+            "TestShowPreviewPollOrder",
+            "TestBuildPreviewResultDialog",
+            "TestStartExtractionBranches",
+            "TestShowPreviewOutputPaths",
+            "TestExtractionWorkerBranches",
+        ]
+        # 排除 TestProgressBarPhaseReset(保留,測現役共用 generator)
+        # 排除 TestUpdateStatsFromLog(共用 regex parser,保留)
+        for cname in legacy_classes:
+            assert f"class {cname}" not in src, (
+                f"回歸:{cname} legacy test class 重新出現 "
+                f"(Phase 3 commit af66bce 已物理刪除)"
+            )
+
+    def test_no_show_preview_threading_event_test(self):
+        """test_show_preview_uses_threading_event 應已被物理刪除(source-level grep 測試)。"""
+        src = _read(REPO_ROOT / "tests" / "test_audit_fixes_2026_06_28.py")
+        assert "def test_show_preview_uses_threading_event" not in src, (
+            "回歸:test_show_preview_uses_threading_event 重新出現 "
+            "(Phase 3 commit af66bce 已物理刪除,show_preview 已刪)"
+        )
+
+    def test_extractor_view_no_update_stats_from_log_wrapper(self):
+        """extractor_view._update_stats_from_log wrapper 應已被物理刪除(Phase 3 partial)。"""
+        src = _read(EXTRACTOR_VIEW)
+        assert "def _update_stats_from_log" not in src, (
+            "回歸:extractor_view._update_stats_from_log wrapper 重新出現 "
+            "(Phase 3 partial 物理刪除,_extraction_worker 已刪後無 caller)"
+        )
+
+
+class TestFixDUALSignatureBug:
+    """Bug 1 fix (2026-07-13): extract_dual_files_generator 加 lang_codes keyword arg。
+
+    User 實機測試 DUAL 模式發現:
+    `extract_dual_files_generator() takes 2 positional arguments but 3 were given`
+
+    Root cause:
+    - extractor_dialog.py 原本呼叫 `extract_dual_files_generator(mods_dir, final_output, selected_codes)`
+    - 但 generator signature 是 `extract_dual_files_generator(mods_dir, output_dir, *, skip_zh_cn=False)`
+    - selected_codes 不是 skip_zh_cn(型別不同,語意不同),TypeError
+
+    修法:
+    1. extract_dual_files_generator signature 加 `lang_codes: list[str] | None = None`
+    2. extractor_dialog.py 改用 keyword arg `lang_codes=selected_codes`
+    """
+
+    def test_extract_dual_files_generator_has_lang_codes(self):
+        """extract_dual_files_generator signature 必須有 lang_codes keyword arg。"""
+        src = _read(REPO_ROOT / "translation_tool" / "core" / "jar_processor.py")
+        # 找 def extract_dual_files_generator
+        m = re.search(
+            r"def extract_dual_files_generator\([\s\S]*?\):",
+            src, re.MULTILINE,
+        )
+        assert m is not None, "找不到 extract_dual_files_generator"
+        sig = m.group(0)
+        assert "lang_codes" in sig, (
+            "回歸:extract_dual_files_generator signature 沒有 lang_codes "
+            "(Bug 1 fix d28d636 commit 應加此 keyword arg)"
+        )
+
+    def test_extract_dual_files_generator_passes_lang_codes_to_regex(self):
+        """extract_dual_files_generator 內部 build_lang_file_regex 必須傳 codes=lang_codes。"""
+        src = _read(REPO_ROOT / "translation_tool" / "core" / "jar_processor.py")
+        # 直接在整個 source 找函式 signature 範圍內的 build_lang_file_regex 呼叫
+        # (因為 multiline signature regex 太複雜,改用單獨存在性檢查)
+        assert "build_lang_file_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)" in src, (
+            "回歸:jar_processor.py 內沒有 `build_lang_file_regex(codes=lang_codes, "
+            "skip_zh_cn=skip_zh_cn)` 呼叫 "
+            "(Bug 1 fix 應讓 lang_codes 過濾真正生效,此斷言鎖定真正的 source pattern)"
+        )
+
+    def test_extractor_dialog_uses_lang_codes_keyword_arg(self):
+        """extractor_dialog.py 對 extract_dual_files_generator 必須用 lang_codes=selected_codes keyword arg。"""
+        src = _read(EXTRACTOR_DIALOG)
+        # 找 open_extractor_dialog 函式範圍
+        m = re.search(
+            "def open_extractor_dialog\([^)]*\):(.*?)(?=\ndef |\nclass |\Z)",
+            src, re.DOTALL,
+        )
+        assert m is not None
+        body = m.group(1)
+        # 必須有 keyword arg 呼叫,不能 positional 3 args
+        assert "extract_dual_files_generator(mods_dir, final_output, lang_codes=selected_codes)" in body, (
+            "回歸:extractor_dialog 沒用 lang_codes=selected_codes keyword arg 呼叫 "
+            "(Bug 1 fix 應避免 TypeError)"
+        )
+        # 不能用錯誤的 positional 3 args 呼叫
+        assert "extract_dual_files_generator(mods_dir, final_output, selected_codes)" not in body, (
+            "回歸:extractor_dialog 還是用錯誤的 positional 3 args 呼叫 "
+            "(這會引起 TypeError: takes 2 positional arguments but 3 were given)"
+        )
+
+
+class TestFixExceptionTraceback:
+    """Bug 2 fix (2026-07-13): exception handler 加 traceback.format_exc()。
+
+    User 報告: 實機測試遇到 exception 時,log 後台只有 `[ERROR] {ex}` 訊息,
+    沒有堆疊追蹤,debug 不便。
+
+    Root cause:
+    extractor_dialog.py exception handler 只印 str(ex),沒用 traceback.format_exc()。
+
+    修法:
+    1. 加 `import traceback`
+    2. exception handler 加 `add_log(f"[TRACEBACK]\n{traceback.format_exc()}", level="error")`
+    """
+
+    def test_extractor_dialog_imports_traceback(self):
+        """extractor_dialog.py 必須 import traceback。"""
+        src = _read(EXTRACTOR_DIALOG)
+        assert "^import traceback$" in src or "\nimport traceback\n" in src or src.startswith("import traceback"), (
+            "回歸:extractor_dialog.py 沒 import traceback "
+            "(Bug 2 fix 應加 import 才能用 traceback.format_exc())"
+        )
+
+    def test_extractor_dialog_exception_handler_includes_traceback(self):
+        """exception handler 必須用 traceback.format_exc()。"""
+        src = _read(EXTRACTOR_DIALOG)
+        # 找 except Exception as ex: 範圍
+        m = re.search(
+            "except Exception as ex:(.*?)(?=\n        (?:state\[\"running\"\]|except |finally))",
+            src, re.DOTALL,
+        )
+        assert m is not None, "找不到 except Exception as ex:"
+        body = m.group(1)
+        assert "traceback.format_exc()" in body, (
+            "回歸:exception handler 沒用 traceback.format_exc() "
+            "(Bug 2 fix 應加完整堆疊追蹤,user 實機 debug 不便)"
+        )
+
+    def test_extractor_dialog_exception_handler_includes_tracking_label(self):
+        """exception handler 必須有 [TRACEBACK] 標籤區分主錯誤訊息與堆疊。"""
+        src = _read(EXTRACTOR_DIALOG)
+        m = re.search(
+            "except Exception as ex:(.*?)(?=\n        (?:state\[\"running\"\]|except |finally))",
+            src, re.DOTALL,
+        )
+        assert m is not None
+        body = m.group(1)
+        assert "[TRACEBACK]" in body, (
+            "回歸:exception handler 沒加 [TRACEBACK] 標籤 "
+            "(區分主錯誤訊息 [ERROR] 跟堆疊追蹤)"
         )
 
 

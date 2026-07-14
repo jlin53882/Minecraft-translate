@@ -398,8 +398,16 @@ class TestUpdateStatsFromLog:
 class TestShowExtractionSummaryDualMode:
     """驗證 _show_extraction_summary 在 DUAL mode 正確顯示 Lang/Book 分開的數字。
 
-    注意：lang/book sub-dict 是在 _extraction_worker 啟動時賦值到 view._extraction_stats，
-    不是 ExtractorView.__init__ 時就有的。這是正確行為（stats 由 pipeline 驅動）。
+    注意:view._extraction_stats 結構在 ExtractorView.__init__ 時只有頂層
+    4 個 key (success/warnings/failures/total_files),沒有 lang/book sub-dict。
+    TestUpdateStatsFromLog 那 4 條測試用 mock 物件製造 sub-dict 假象,
+    但 production 永遠不會有 sub-dict(因為 update_stats_from_log line 31 在
+    phase 不在 stats 時 fall through 寫頂層 stats)。
+
+    Phase 3 之後若要真正分 Lang/Book 顯示,需要:
+    1. 在 ExtractorView.__init__ 加 lang/book sub-dict 初始化
+    2. 在 run_extraction_loop 拆解 lang_stats / book_stats
+    3. 在 _show_extraction_summary 加 Lang/Book 分區顯示
     """
 
     def _make_view(self):
