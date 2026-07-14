@@ -13,7 +13,6 @@ Logs（右欄）：
 
 面板構建工具：
   - _build_status_bar() → 狀態列（4px 左側彩色邊線 + status_text + 進度條 + 百分比）
-  - _build_stats_badge() → 統計徽章（成功/跳過/失敗即時計數）
   - _build_path_row() → 路徑輸入列（icon 前綴 + TextField + 選擇按鈕）
   - _build_action_zone() → 動作區卡片（執行按鈕 + 預覽按鈕 + 跳過開關）
   - _build_pick_button() → 目錄選擇 IconButton
@@ -76,37 +75,6 @@ def _build_status_bar(view) -> ft.Container:
         ),
         border_radius=8,
         bgcolor=theme.GREY_50,
-    )
-
-
-def _build_stats_badge(view) -> ft.Container:
-    """統計徽章：成功 / 警告 / 失敗計數"""
-    view._stats_success = ft.Text("0", size=14, weight=ft.FontWeight.BOLD, color=theme.GREEN)
-    view._stats_warnings = ft.Text("0", size=14, weight=ft.FontWeight.BOLD, color=theme.ORANGE)
-    view._stats_failures = ft.Text("0", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.ERROR)
-
-    return ft.Container(
-        content=ft.Row(
-            controls=[
-                ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=16),
-                ft.Text("成功: ", size=12, color=theme.GREY_600),
-                view._stats_success,
-                ft.Container(width=20),
-                ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=16),
-                ft.Text("跳過: ", size=12, color=theme.GREY_600),
-                view._stats_warnings,
-                ft.Container(width=20),
-                ft.Icon(ft.Icons.ERROR, color=ft.Colors.ERROR, size=16),
-                ft.Text("失敗: ", size=12, color=theme.GREY_600),
-                view._stats_failures,
-            ],
-            spacing=4,
-            alignment=ft.MainAxisAlignment.START,
-        ),
-        padding=ft.Padding(left=10, top=8, right=10, bottom=8),
-        border=ft.Border.all(1, theme.GREY_200),
-        border_radius=6,
-        bgcolor=ft.Colors.WHITE,
     )
 
 
@@ -282,8 +250,6 @@ def build_settings_panel(view) -> ft.Column:
                     view.dual_preview_button,
                 ],
             ),
-            # --- 統計 Badge ---
-            _build_stats_badge(view),
         ],
     )
 

@@ -300,19 +300,6 @@ def test_extractor_view_progress_pct_label(monkeypatch):
     assert isinstance(view._progress_pct, ft.Text)
 
 
-def test_extractor_view_stats_badge_texts(monkeypatch):
-    """測試統計徽章文字存在（_stats_success, _stats_warnings, _stats_failures）"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    assert hasattr(view, '_stats_success')
-    assert hasattr(view, '_stats_warnings')
-    assert hasattr(view, '_stats_failures')
-    assert view._stats_success.value == '0'
-    assert view._stats_warnings.value == '0'
-    assert view._stats_failures.value == '0'
-
-
 def test_extractor_view_skip_zh_cn_switch_has_label(monkeypatch):
     """測試 skip_zh_cn_switch 有 label 且文字為 '跳過 zh_cn 抽取'"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
