@@ -44,22 +44,6 @@ def test_clear_output_path_appends_system_log(monkeypatch):
     assert view.log_view._list_view.controls[-1].value == '[系統] 已清除輸出路徑'
 
 
-def test_update_stats_from_log_counts_success_warning_failure(monkeypatch):
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    # Phase 3 partial (2026-07-13) 物理刪除 _update_stats_from_log wrapper,
-    # 直接呼叫共用 helper extractor_actions.update_stats_from_log。
-    from app.views.extractor.extractor_actions import update_stats_from_log
-    update_stats_from_log(view, '已檢查 10/10 個 JAR 檔案。\n  - 新提取或更新的檔案: 3 個\n  - 因內容相同而跳過的檔案: 5 個')
-    update_stats_from_log(view, '[ERROR] 提取某個檔案時產生例外')
-
-    assert view._extraction_stats['success'] == 10
-    assert view._extraction_stats['warnings'] == 5
-    assert view._extraction_stats['failures'] == 1
-    assert view._extraction_stats['total_files'] == 3
-
-
 def test_extractor_view_mods_dir_textfield_exists(monkeypatch):
     """測試 mods_dir_textfield 存在且可設定"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
@@ -111,24 +95,6 @@ def test_extractor_view_all_buttons_have_on_click(monkeypatch):
     assert view.book_button.on_click is not None
     assert view.preview_lang_button.on_click is not None
     assert view.preview_book_button.on_click is not None
-
-
-def test_extractor_view_update_stats_resets_counters(monkeypatch):
-    """測試 update_stats_from_log 的計數邏輯"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    view._extraction_stats = {"success": 0, "warnings": 0, "failures": 0, "total_files": 0}
-
-    # Phase 3 partial (2026-07-13) 改用直接呼叫共用 helper
-    from app.views.extractor.extractor_actions import update_stats_from_log
-    update_stats_from_log(view, '已檢查 8/8 個 JAR 檔案。\n  - 新提取或更新的檔案: 5 個\n  - 因內容相同而跳過的檔案: 2 個')
-    update_stats_from_log(view, '[ERROR] 嚴重錯誤')
-
-    assert view._extraction_stats['success'] == 8
-    assert view._extraction_stats['warnings'] == 2
-    assert view._extraction_stats['failures'] == 1
-    assert view._extraction_stats['total_files'] == 5
 
 
 def test_extractor_view_pick_directory_schedules_async_task(monkeypatch):
@@ -204,12 +170,6 @@ def test_extractor_view_pick_button_exists(monkeypatch):
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
     assert hasattr(view, '_pick_button')
-
-
-def test_extractor_view_show_extraction_summary_exists(monkeypatch):
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-    assert hasattr(view, '_show_extraction_summary')
 
 
 def test_auto_fill_output_path_lang_mode(monkeypatch):

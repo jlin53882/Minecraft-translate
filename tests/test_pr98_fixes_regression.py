@@ -571,67 +571,44 @@ class TestFixAddLogArgType:
 # User 2026-07-12 review 補發現:extractor_view._show_extraction_summary 也用手動 overlay
 # =============================================================================
 class TestFixExtractionSummaryDialogAPI:
-    """User 2026-07-12 review 補發現:ExtractorView._show_extraction_summary
-    仍用手動 page.overlay.append + open=True pattern,沒用 Flet 0.85 內建
-    page.show_dialog API。而且兩處 except Exception: pass 完全吞錯沒 log。
+    """2026-07-14 user review 補發現:ExtractorView._show_extraction_summary
+    完全是 dead code — production 零 caller、零測試保護(測試名不符實,
+    只驗 dialog 有沒有彈出沒驗內容)、永遠顯示 0/0/0 永遠跑不起來。
 
-    修法:
-    1. _show_extraction_summary 改用 page.show_dialog(dialog)
-    2. 「關閉」按鈕改用 page.pop_dialog()(不要 _close_dialog_overlay)
-    3. 兩個 except 都補 log_warning,留 traceback 證據
+    修法(2026-07-14):
+    1. 物理刪除 _show_extraction_summary 函式本身
+    2. 物理刪除測試 test_extractor_view_show_extraction_summary_exists
+       跟 test_show_extraction_summary_dialog_has_lang_and_book_sections
+    3. 保留 _close_dialog_overlay (merge_view.py 仍使用)
+    4. extractor_dialog.py 內的 update_stats + add_log("[完成]...") 才是真正
+       的 summary 顯示路徑,這已在 phase 3 處理
+
+    source-level 斷言改寫成驗證「函式不存在」,防止 future commit
+    偷偷加回 dead code 還自以為活著。
     """
 
-    def test_show_extraction_summary_uses_show_dialog(self):
-        """_show_extraction_summary 必須呼叫 page.show_dialog,不是 page.overlay.append。"""
+    def test_show_extraction_summary_function_physically_deleted(self):
+        """_show_extraction_summary 函式必須已被物理刪除(2026-07-14 dead code cleanup)。"""
         extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
         src = _read(extractor_view)
-        # 找 _show_extraction_summary 函式範圍
-        tree = _ast_parse(extractor_view)
-        found_show_dialog = False
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.FunctionDef)
-                and node.name == "_show_extraction_summary"
-            ):
-                for sub in ast.walk(node):
-                    if (
-                        isinstance(sub, ast.Call)
-                        and isinstance(sub.func, ast.Attribute)
-                        and sub.func.attr == "show_dialog"
-                    ):
-                        found_show_dialog = True
-                break
-        assert found_show_dialog, (
-            "回歸:_show_extraction_summary 沒呼叫 page.show_dialog "
-            "(User 2026-07-12 review 補發現,應改用 Flet 0.85 內建 API)"
+        assert "def _show_extraction_summary" not in src, (
+            "回歸:ExtractorView._show_extraction_summary 重新出現 "
+            "(2026-07-14 user review 已物理刪除,因為 production 零 caller)"
         )
 
-    def test_show_extraction_summary_no_overlay_append(self):
-        """_show_extraction_summary 內不應再 page.overlay.append(dialog)。"""
-        extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
-        # 找 _show_extraction_summary 函式範圍內
-        tree = _ast_parse(extractor_view)
-        bad_calls = []
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.FunctionDef)
-                and node.name == "_show_extraction_summary"
-            ):
-                for sub in ast.walk(node):
-                    if (
-                        isinstance(sub, ast.Call)
-                        and isinstance(sub.func, ast.Attribute)
-                        and sub.func.attr == "append"
-                        and isinstance(sub.func.value, ast.Attribute)
-                        and sub.func.value.attr == "overlay"
-                    ):
-                        bad_calls.append(
-                            f".overlay.append(...) at line {sub.lineno}"
-                        )
-                break
-        assert not bad_calls, (
-            "回歸:_show_extraction_summary 仍在用 page.overlay.append:\n"
-            + "\n".join(bad_calls)
+    def test_extractor_dialog_no_overlay_append_for_summary(self):
+        """extractor_dialog.py 的 update_stats 路徑不應再 page.overlay.append。"""
+        src = _read(EXTRACTOR_DIALOG)
+        # 找 update_stats 函式範圍
+        # update_stats 不是 def,是 closure 內部 helper
+        # 我們改檢查整個 extractor_dialog 內 overlay.append 用法
+        # production 真實 summary 顯示路徑是 dialog 內 stats_row,不需要 overlay.append
+        # 所以這斷言期望 extract_dialog 內沒有 page.overlay.append
+        # (跟 _show_extraction_summary 原本錯誤做法形成對照)
+        # 移除過嚴的具體行數斷言,只檢查沒有 page.overlay.append(隨時錯誤)
+        assert "page.overlay.append" not in src, (
+            "回歸:extractor_dialog 又有 page.overlay.append "
+            "(production 摘要顯示應該在 dialog 內 stats_row,不需要額外 dialog)"
         )
 
     def test_extractor_view_imports_log_warning(self):

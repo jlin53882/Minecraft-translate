@@ -18,35 +18,10 @@ from app.services_impl.pipelines.extract_service import (
 )
 from app.views.extractor.extractor_state import PreviewState
 
-def update_stats_from_log(view, line: str, phase: str = None):
-    """解析日誌行更新提取統計。
-
-    規則：
-    - 只在明確的「最終摘要」日誌上覆蓋 success / warnings / total_files
-    - dual mode 時寫入對應 phase 的 sub-dict
-    """
-    stats = view._extraction_stats
-    # 只有 phase 存在於 stats 時才 sub-dict 寫入；否則直接寫頂層 stats。
-    # 避免 phase 名稱拼錯時意外覆寫頂層 stats 整個 dict。
-    target = stats[phase] if phase is not None and phase in stats else stats
-    try:
-        import re
-
-        final_match = re.search(
-            r'已檢查\s+(\d+)/(\d+)\s+個\s+JAR\s+檔案。\s*\n\s*-\s*新提取或更新的檔案:\s*(\d+)\s+個\s*\n\s*-\s*因內容相同而跳過的檔案:\s*(\d+)\s+個',
-            line,
-            re.MULTILINE,
-        )
-        if final_match:
-            target['success'] = int(final_match.group(1))
-            target['warnings'] = int(final_match.group(4))
-            target['failures'] = 0
-            target['total_files'] = int(final_match.group(3))
-            return
-
-        error_match = re.search(r'提取\s+(.+?)\s+時產生例外', line)
-        if error_match or '[ERROR]' in line or '[致命錯誤]' in line:
-            target['failures'] = target.get('failures', 0) + 1
-    except Exception as e:
-        log_warning(f'解析統計數字失敗: {e}')
-
+# 🐛 2026-07-14 user review: 物理刪除 update_stats_from_log 函式
+# 4 層 grep 確認:production code 零 caller(Phase 3 partial 刪除
+# _update_stats_from_log wrapper 後,_extraction_stats 從未被 production 寫入)。
+# view._extraction_stats 沒有 lang/book sub-dict(只有 4 個頂層 key),
+# phase="lang"/"book" 永遠走 "else stats" branch(line 31),實際不寫 sub-dict。
+# 對應測試 test_extractor_dual_mode.py TestUpdateStatsFromLog 4 條
+# 跟 test_extractor_view_characterization.py 2 條 一併物理刪除。

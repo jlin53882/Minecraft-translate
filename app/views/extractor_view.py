@@ -21,9 +21,9 @@ from translation_tool.utils.log_unit import log_info, log_warning
 import threading
 
 from app.task_session import TaskSession
-from app.views.extractor.extractor_actions import (
-    update_stats_from_log,
-)
+# 🐛 2026-07-14 user review: 物理刪除 from app.views.extractor.extractor_actions import
+# (Phase 3 partial 刪 _update_stats_from_log wrapper 後,
+# update_stats_from_log 本體函式也無 caller,本 commit 一起清掉)
 from app.views.extractor.extractor_panels import build_logs_panel, build_settings_panel, _build_pick_button
 from app.ui.components import styled_card
 
@@ -489,70 +489,6 @@ class ExtractorView(ft.Column):
     # ==================================================
     # Worker Logic
     # ==================================================
-    def _show_extraction_summary(self, mode: str):
-        """顯示提取結果摘要（UI 風格對齊預覽 modal）。"""
-        stats = self._extraction_stats
-
-        content = ft.Column(
-            [
-                ft.Text("提取結果摘要", size=16, weight=ft.FontWeight.BOLD),
-                ft.Divider(),
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=20),
-                        ft.Text(f"成功處理 JAR：{stats['success']} 個", size=14),
-                    ],
-                    spacing=8,
-                ),
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=20),
-                        ft.Text(f"因內容相同而跳過的檔案：{stats['warnings']} 個", size=14),
-                    ],
-                    spacing=8,
-                ),
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.ERROR, color=theme.RED, size=20),
-                        ft.Text(f"失敗項目：{stats['failures']} 個", size=14),
-                    ],
-                    spacing=8,
-                ),
-                ft.Divider(),
-                ft.Text(
-                    f"新提取或更新的檔案：{stats['total_files']} 個",
-                    size=14,
-                    color=ft.Colors.BLUE_700,
-                    weight=ft.FontWeight.BOLD,
-                ),
-            ],
-            spacing=10,
-            tight=True,
-        )
-
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text(f"提取完成 - {mode.upper()}"),
-            content=ft.Container(content=content, width=520),
-            actions=[
-                # 🐛 2026-07-12 user review: 從 page.overlay.append + open=True 改為
-                # Flet 0.85 內建的 page.show_dialog() / page.pop_dialog() API,
-                # 跟 extractor_dialog.py 一致的手動 dialog lifecycle 寫法。
-                #ft.TextButton("關閉", on_click=lambda e: self.page.pop_dialog()),
-                ft.TextButton("關閉", on_click=lambda e: self._close_dialog_overlay(dialog)),
-            ],
-        )
-
-        # 2026-07-12 user review: 改用 Flet 0.85 內建 show_dialog API,
-        # 取代手動 page.overlay.append + open=True + run_task(update) pattern。
-        # 並把 except Exception: pass 改成至少 log_warning,留下 traceback 證據。
-        try:
-            self.page.show_dialog(dialog)
-        except Exception as ex:
-            log_warning(
-                f"[SUMMARY] _show_extraction_summary failed to show_dialog: {ex!r}",
-            )
-
     def _close_dialog_overlay(self, dialog):
         """關閉指定的 dialog 並從 page.overlay 移除。
 
