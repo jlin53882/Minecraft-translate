@@ -199,6 +199,7 @@ def extract_dual_files_generator(
         yield {"phase": "lang", "stats": lang_stats}
     yield {"phase": "book", "log": "[系統] Lang 提取完成，開始提取 Book..."}
     book_error = None
+    last_book_stats = None
     try:
         for update in _run_extraction_process(
             mods_dir,
@@ -208,16 +209,14 @@ def extract_dual_files_generator(
         ):
             if "stats" in update:
                 book_stats = update["stats"]
+                last_book_stats = book_stats
                 if lang_stats:
-                    combined = {
-                        "success": lang_stats["success"] + book_stats["success"],
-                        "failures": lang_stats["failures"] + book_stats["failures"],
-                        "warnings": lang_stats["warnings"] + book_stats["warnings"],
-                        "total_files": lang_stats["total_files"] + book_stats["total_files"],
-                        "lang": lang_stats,
-                        "book": book_stats,
-                    }
-                    yield {**update, "stats": combined, "phase": "book"}
+                    # 🐛 Phase 3 (2026-07-13 user 選項 B fix): 原本 yield combined
+                    # (lang+book 加總),但這讓 run_extraction_loop 把 combined 寫進
+                    # stats["book"] sub-dict,user 看到「BOOK 成功 13」其實是 lang+book 合計,
+                    # 誤導。
+                    # 改成 yield 純 book_stats 給 phase sub-dict,頂層合計由最終 combined yield 處理。
+                    yield {**update, "stats": book_stats, "phase": "book"}
                 else:
                     # Lang 階段無 stats（空 JAR 目錄無 lang 檔），Book 仍要 yield book stats，
                     # 否則 UI 統計徽章永遠顯示 0/0/0
@@ -226,6 +225,21 @@ def extract_dual_files_generator(
                 yield {**update, "phase": "book"}
     except Exception as e:
         book_error = str(e)
+    # Phase 3 fix: book phase 結束後補一個 combined yield(無 phase,不污染 sub-dict),
+    # 確保 run_extraction_loop 頂層 stats["success"] 是 lang+book 合計。
+    if lang_stats and last_book_stats:
+        combined = {
+            "success": lang_stats["success"] + last_book_stats["success"],
+            "failures": lang_stats["failures"] + last_book_stats["failures"],
+            "warnings": lang_stats["warnings"] + last_book_stats["warnings"],
+            "total_files": lang_stats["total_files"] + last_book_stats["total_files"],
+            "lang": lang_stats,
+            "book": last_book_stats,
+        }
+        # 🐛 Phase 3 (2026-07-13 user 選項 B fix): phase="book_final" 不在 run_extraction_loop
+        # 拆解範圍 ("lang","book"),所以 combined 只更新頂層 stats["success"] 等,
+        # 不會覆寫 stats["book"] sub-dict,避免 BOOK row 顯示 lang+book 合計。
+        yield {"stats": combined, "phase": "book_final"}
     if lang_error or book_error:
         yield {"dual_errors": {"lang": lang_error, "book": book_error}, "error": True}
 

@@ -210,7 +210,14 @@ class TestServiceAccumulatesFinalStats:
         assert received_per_call[0] == {"success": 0, "warnings": 0, "failures": 0}
         assert received_per_call[1] == {"success": 0, "warnings": 0, "failures": 0}
         assert received_per_call[2] == {"success": 3129, "warnings": 2, "failures": 0}
-        assert stats == {"success": 3129, "warnings": 2, "failures": 0}
+        # Phase 3 (2026-07-13) user 選項 B: lang/book sub-dict 加入 stats
+        assert stats["success"] == 3129
+        assert stats["warnings"] == 2
+        assert stats["failures"] == 0
+        # 此測試 yield "phase": "lang" line 200, 所以 lang sub-dict 應被填入
+        assert stats["lang"] == {"success": 3129, "warnings": 2, "failures": 0}
+        # 沒 yield "phase": "book",book sub-dict 維持 default
+        assert stats["book"] == {"success": 0, "warnings": 0, "failures": 0}
 
     def test_dual_mode_two_phases_accumulate_correctly(self):
         """Dual 模式 (lang phase + book phase) 最終 stats 為兩 phase 合計。
@@ -244,15 +251,26 @@ class TestServiceAccumulatesFinalStats:
             yield {"phase": "book", "stats": COMBINED}
 
         stats = run_extraction_loop(gen())
-        assert stats == COMBINED
-        assert stats == {"success": 3129, "warnings": 2, "failures": 0}
+        assert stats["success"] == 3129
+        assert stats["warnings"] == 2
+        assert stats["failures"] == 0
+        # Phase 3 (2026-07-13) user 選項 B: DUAL mode 拆解 phase stats
+        # lang sub-dict 應跟 LANG_FINAL 一致 (此測試 yield {"phase": "lang", "stats": LANG_FINAL})
+        assert stats["lang"] == LANG_FINAL
+        # book sub-dict 應等於 generator yield {"phase": "book", "stats": COMBINED} 內的 stats
+        assert stats["book"] == COMBINED
 
     def test_empty_generator_returns_zero_stats(self):
         """Generator 一個 yield 都沒有 → 回傳 {0, 0, 0},不會讓 dialog 崩潰。"""
         from app.services_impl.pipelines.extract_service import run_extraction_loop
 
         stats = run_extraction_loop(iter([]))
-        assert stats == {"success": 0, "warnings": 0, "failures": 0}
+        assert stats["success"] == 0
+        assert stats["warnings"] == 0
+        assert stats["failures"] == 0
+        # Phase 3 (2026-07-13) sub-dict default
+        assert stats["lang"] == {"success": 0, "warnings": 0, "failures": 0}
+        assert stats["book"] == {"success": 0, "warnings": 0, "failures": 0}
 
 
 # =============================================================================

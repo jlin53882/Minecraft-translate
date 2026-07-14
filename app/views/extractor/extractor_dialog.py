@@ -204,6 +204,57 @@ def open_extractor_dialog(
         stats_failures.value = str(failures)
         page.run_task(_do_update)
 
+    # 🐛 2026-07-13 Phase 3 (user 選項 B): DUAL mode 結果顯示 LANG/BOOK 分區。
+    # 為什麼:user 實機測試發現 DUAL 結果只顯示合計,看不到 LANG/BOOK 各別數字。
+    # 顯示在 stats_row 下方 (只 DUAL mode 才顯示),獨立的 lang_row / book_row。
+    # lang_row / book_row UI 元件在 DUAL mode 開始時(before ui_start)visible=True,
+    # 結束時用 stats_data 更新文字。
+    lang_row = ft.Row(
+        [
+            ft.Text("LANG：", size=13, color=theme.BLUE_700, weight=ft.FontWeight.BOLD),
+            ft.Text("成功 ", size=13),
+            ft.Text("0", size=13, color=theme.GREEN_700, weight=ft.FontWeight.BOLD, key="lang_success"),
+            ft.Text(" / 跳過 ", size=13),
+            ft.Text("0", size=13, color=theme.ORANGE_700, weight=ft.FontWeight.BOLD, key="lang_warnings"),
+        ],
+        spacing=2,
+        visible=False,  # DUAL mode 才顯示
+    )
+    book_row = ft.Row(
+        [
+            ft.Text("BOOK：", size=13, color=theme.PURPLE_700, weight=ft.FontWeight.BOLD),
+            ft.Text("成功 ", size=13),
+            ft.Text("0", size=13, color=theme.GREEN_700, weight=ft.FontWeight.BOLD, key="book_success"),
+            ft.Text(" / 跳過 ", size=13),
+            ft.Text("0", size=13, color=theme.ORANGE_700, weight=ft.FontWeight.BOLD, key="book_warnings"),
+        ],
+        spacing=2,
+        visible=False,  # DUAL mode 才顯示
+    )
+
+    def update_dual_stats(result_stats):
+        """DUAL mode 完成時,把 lang / book sub-dict 寫進各自的 Text。
+
+        :param result_stats: run_extraction_loop 回傳的完整 stats dict,
+                              含 lang / book sub-dict。
+        """
+        lang = result_stats.get("lang") or {}
+        book = result_stats.get("book") or {}
+        # 找對應的 Text 元件(透過 key 屬性)
+        for row in (lang_row, book_row):
+            for ctrl in row.controls:
+                if getattr(ctrl, "key", None) == "lang_success" and row is lang_row:
+                    ctrl.value = str(lang.get("success", 0))
+                elif getattr(ctrl, "key", None) == "lang_warnings" and row is lang_row:
+                    ctrl.value = str(lang.get("warnings", 0))
+                elif getattr(ctrl, "key", None) == "book_success" and row is book_row:
+                    ctrl.value = str(book.get("success", 0))
+                elif getattr(ctrl, "key", None) == "book_warnings" and row is book_row:
+                    ctrl.value = str(book.get("warnings", 0))
+        lang_row.visible = True
+        book_row.visible = True
+        page.run_task(_do_update)
+
     # ========== 提取工作執行緒 ==========
     def run_extraction():
         log_info(f"[THREAD] run_extraction thread STARTED")
@@ -293,6 +344,9 @@ def open_extractor_dialog(
             )
             update_progress(1.0, "任務完成")
             update_stats(result_stats["success"], result_stats["warnings"], result_stats["failures"])
+            # Phase 3 (2026-07-13) user 選項 B: DUAL mode 顯示 LANG/BOOK 分區
+            if selected_mode == "dual":
+                update_dual_stats(result_stats)
 
         except Exception as ex:
             # 🐛 UX 改進 (2026-07-13 user review): 原本只印 str(ex),遇到 TypeError 等
@@ -451,6 +505,9 @@ def open_extractor_dialog(
                     log_section,
                     # 結果統計
                     stats_row,
+                    # Phase 3 (2026-07-13) DUAL mode LANG/BOOK 分區
+                    lang_row,
+                    book_row,
                 ],
                 spacing=10,
                 scroll=ft.ScrollMode.AUTO,

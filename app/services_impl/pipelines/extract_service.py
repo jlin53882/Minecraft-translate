@@ -223,8 +223,12 @@ def run_extraction_loop(
 
     Returns:
         統計 dict，包含 success / warnings / failures
+        Phase 3 (2026-07-13): DUAL mode 也會拆出 lang / book sub-dict,
+        給 extractor_dialog.update_stats 顯示 LANG/BOOK 分區用。
     """
-    stats = {"success": 0, "warnings": 0, "failures": 0}
+    stats = {"success": 0, "warnings": 0, "failures": 0,
+             "lang": {"success": 0, "warnings": 0, "failures": 0},
+             "book": {"success": 0, "warnings": 0, "failures": 0}}
 
     for update in generator:
         if cancelled_flag is not None and cancelled_flag[0]:
@@ -235,6 +239,12 @@ def run_extraction_loop(
             stats["success"] = result.get("success", 0)
             stats["warnings"] = result.get("warnings", 0)
             stats["failures"] = result.get("failures", 0)
+            # Phase 3: DUAL mode 時,generator yield {"phase": "lang"/"book", "stats": {...}},
+            # 把 phase stats 拆出來,讓 update_stats 顯示 LANG/BOOK 分區。
+            phase = update.get("phase")
+            if phase in ("lang", "book"):
+                # 即使 sub-dict 已 init (line 227),仍要 dict() 拷貝,避免外部改 result 影響 stats
+                stats[phase] = dict(result)
 
         if update.get("error"):
             stats["failures"] += 1

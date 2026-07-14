@@ -1204,6 +1204,155 @@ class TestFixExceptionTraceback:
 
 
 
+class TestFixDUALResultSection:
+    """Phase 3 (2026-07-13) DUAL mode 結果區顯示 LANG/BOOK 分區的 source-level 斷言。
+
+    User 選項 B: DUAL mode 完成時,結果區除了合計還要分 LANG/BOOK 兩行顯示。
+    鎖住:
+    - run_extraction_loop 回傳的 stats 必須有 lang/book sub-dict
+    - update_dual_stats helper 必須存在於 extractor_dialog.py
+    - lang_row / book_row UI 元件必須存在,visible 預設 False
+    - extractor_dialog.py 必須在 selected_mode == "dual" 時呼叫 update_dual_stats
+    """
+
+    def test_run_extraction_loop_returns_lang_book_subdicts(self):
+        """run_extraction_loop 回傳的 stats dict 必須有 lang / book sub-dict 初始化。"""
+        src = _read(REPO_ROOT / "app" / "services_impl" / "pipelines" / "extract_service.py")
+        # 找 run_extraction_loop 函式
+        m = re.search(
+            r"def run_extraction_loop\([\s\S]*?\):",
+            src,
+        )
+        assert m is not None
+        # 從 sig end 往後找 1000 字元內的 body
+        body = src[m.end():m.end() + 1500]
+        assert '"lang":' in body, (
+            "回歸:run_extraction_loop 內 stats dict 沒有 lang sub-dict 初始化 "
+            "(Phase 3 應加,給 DUAL mode 顯示 LANG 分區用)"
+        )
+        assert '"book":' in body, (
+            "回歸:run_extraction_loop 內 stats dict 沒有 book sub-dict 初始化 "
+            "(Phase 3 應加,給 DUAL mode 顯示 BOOK 分區用)"
+        )
+
+    def test_run_extraction_loop_extracts_phase_stats(self):
+        """run_extraction_loop 必須把 generator yield 的 phase=lang/book stats 拆解到對應 sub-dict。"""
+        src = _read(REPO_ROOT / "app" / "services_impl" / "pipelines" / "extract_service.py")
+        m = re.search(
+            r"def run_extraction_loop\([\s\S]*?\):",
+            src,
+        )
+        assert m is not None
+        # 從 sig end 往後找 3000 字元(擴大,確保 capture 到 dict(result))
+        body = src[m.end():m.end() + 3000]
+        assert 'phase = update.get("phase")' in body or 'phase in ("lang", "book")' in body, (
+            "回歸:run_extraction_loop 沒拆解 phase stats "
+            "(Phase 3 應把 yield 帶 'phase' 的 stats 寫到對應 sub-dict)"
+        )
+        assert "stats[phase] = dict(result)" in body or "stats[phase] = dict(result)" in body, (
+            "回歸:run_extraction_loop 沒把 phase stats 寫入 sub-dict"
+        )
+
+    def test_extract_dual_files_generator_yields_pure_book_stats(self):
+        """extract_dual_files_generator book phase 必須 yield 純 book_stats (不是 combined)。
+
+        Phase 3 (2026-07-13) user 選項 B fix: 原本 book phase loop 內 yield combined,
+        run_extraction_loop 會把 combined 寫進 stats["book"] sub-dict,
+        user 看到「BOOK 成功 13」其實是 lang+book 合計,誤導。
+        改成 yield 純 book_stats,頂層合計由最終 combined yield (book phase 結束後) 提供,
+        且必須用 phase="book_final" (不在 run_extraction_loop 拆解範圍)避免覆寫 sub-dict。
+        """
+        src = _read(REPO_ROOT / "translation_tool" / "core" / "jar_processor.py")
+        # 找 extract_dual_files_generator 函式
+        m = re.search(
+            r"def extract_dual_files_generator\([\s\S]*?\):",
+            src,
+        )
+        assert m is not None, "找不到 extract_dual_files_generator"
+        body = src[m.end():m.end() + 3000]
+        # 1. book phase loop 必須 yield 純 book_stats,不是 combined
+        assert 'yield {**update, "stats": book_stats, "phase": "book"}' in body, (
+            "回歸:extract_dual_files_generator book phase 還在 yield combined "
+            "(Phase 3 fix 應 yield 純 book_stats 給 sub-dict,避免把 combined 寫到 stats['book'])"
+        )
+        # 2. book phase 結束後必須 yield 一個 combined 給頂層合計
+        assert "last_book_stats = None" in body, (
+            "回歸:extract_dual_files_generator 沒追蹤 last_book_stats "
+            "(Phase 3 fix 應在 book phase 結束後 yield combined 給頂層合計)"
+        )
+        # 3. 不應該再有舊的 combined 在 loop 內 yield
+        assert 'yield {**update, "stats": combined, "phase": "book"}' not in body, (
+            "回歸:extract_dual_files_generator book phase loop 內又 yield combined "
+            "(Phase 3 fix 應改 yield 純 book_stats)"
+        )
+        # 4. 最終的 combined yield 必須用 phase="book_final" (不入 run_extraction_loop 拆解範圍),
+        #    否則 stats["book"] 會被覆寫成 combined,user 看到 BOOK row = lang+book 合計
+        assert 'yield {"stats": combined, "phase": "book_final"}' in body, (
+            "回歸:最終 combined yield 用 phase='book' 會被 run_extraction_loop 當 sub-dict 拆解,"
+            "覆寫 stats['book'] = combined,讓 BOOK row 顯示 lang+book 合計,誤導 user。"
+            "Phase 3 fix 必須用 phase='book_final' 不在 ('lang','book') 範圍"
+        )
+
+    def test_extractor_dialog_has_update_dual_stats_helper(self):
+        """extractor_dialog.py 必須有 update_dual_stats helper。"""
+        src = _read(EXTRACTOR_DIALOG)
+        assert "def update_dual_stats(" in src, (
+            "回歸:extractor_dialog.py 沒有 update_dual_stats helper "
+            "(Phase 3 應加,給 DUAL mode LANG/BOOK 分區顯示用)"
+        )
+
+    def test_extractor_dialog_has_lang_row_ui(self):
+        """extractor_dialog.py 必須有 lang_row UI 元件。"""
+        src = _read(EXTRACTOR_DIALOG)
+        assert "lang_row = ft.Row(" in src, (
+            "回歸:extractor_dialog.py 沒有 lang_row UI 元件 "
+            "(Phase 3 應加,顯示 LANG 提取完成 XXX)"
+        )
+        assert "ft.Text(\"LANG：" in src, (
+            "回歸:lang_row label 應顯示 LANG：文字"
+        )
+
+    def test_extractor_dialog_has_book_row_ui(self):
+        """extractor_dialog.py 必須有 book_row UI 元件。"""
+        src = _read(EXTRACTOR_DIALOG)
+        assert "book_row = ft.Row(" in src, (
+            "回歸:extractor_dialog.py 沒有 book_row UI 元件 "
+            "(Phase 3 應加,顯示 BOOK 提取完成 XXX)"
+        )
+        assert "ft.Text(\"BOOK：" in src, (
+            "回歸:book_row label 應顯示 BOOK：文字"
+        )
+
+    def test_lang_book_row_added_to_dialog_column(self):
+        """lang_row / book_row 必須加進 dialog content column 才會 render。"""
+        src = _read(EXTRACTOR_DIALOG)
+        # 找 stats_row 後面是否有 lang_row, book_row 加進 column
+        assert "stats_row," in src and "lang_row," in src and "book_row," in src, (
+            "回歸:lang_row / book_row 沒加進 dialog content column "
+            "(Phase 3 應放在 stats_row 後面,讓 Flet 渲染)"
+        )
+
+    def test_run_extraction_calls_update_dual_stats_for_dual_mode(self):
+        """extractor_dialog.run_extraction 必須在 selected_mode == 'dual' 時呼叫 update_dual_stats。"""
+        src = _read(EXTRACTOR_DIALOG)
+        # 找 run_extraction 函式範圍
+        m = re.search(
+            r"def run_extraction\(\):[\s\S]*?(?=\n        except Exception as ex:|\n    def [a-zA-Z]|\Z)",
+            src,
+        )
+        assert m is not None
+        body = m.group(0)
+        assert "if selected_mode == \"dual\":" in body, (
+            "回歸:run_extraction 沒在 selected_mode == dual 時呼叫 update_dual_stats "
+            "(Phase 3 應只在 DUAL mode 才顯示 LANG/BOOK 分區)"
+        )
+        assert "update_dual_stats(result_stats)" in body, (
+            "回歸:run_extraction 沒呼叫 update_dual_stats(result_stats)"
+        )
+
+
+
+
 class TestFixB86f911_LogUnit:
     """移除自寫 _extractor_debug_log(print 版),改用 project 既有的 log_unit。"""
 

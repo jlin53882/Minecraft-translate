@@ -115,7 +115,12 @@ class TestServiceRespectsCancellation:
             f"run_extraction_loop 應該在 cancellation 後 early return, "
             f"但 on_update 被呼叫 {call_count[0]} 次"
         )
-        assert stats == {"success": 0, "warnings": 0, "failures": 0}
+        assert stats["success"] == 0
+        assert stats["warnings"] == 0
+        assert stats["failures"] == 0
+        # Phase 3 (2026-07-13) sub-dict default
+        assert stats["lang"] == {"success": 0, "warnings": 0, "failures": 0}
+        assert stats["book"] == {"success": 0, "warnings": 0, "failures": 0}
 
 
 class TestPathConvention:
