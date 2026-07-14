@@ -169,8 +169,6 @@ class ExtractorView(ft.Column):
         # 來建立 status_text / progress_bar / log_view 等必要屬性。
         # 日誌面板已不再加到 controls 裡（隱藏）。
         # 透過 .visible = False 雙重保險，避免意外被渲染。
-        # 注意：這個呼叫同時會建立 _stats_success / _stats_warnings / _stats_failures
-        # 等屬性（在 build_settings_panel 內）。
         self._logs_panel = build_logs_panel(self)
         self._logs_panel.visible = False  # 隱藏日誌面板，不顯示在主 UI
 
@@ -363,10 +361,19 @@ class ExtractorView(ft.Column):
             input_path=mods_dir,
             output_path=output_path,
             mode="lang",
+            # 🐛 2026-07-14 user review: 把主 UI skip_zh_cn_switch 串接到 generator,
+            # 開關打開時真正過濾 zh_cn.json 檔案 (見 tests/test_skip_zh_cn.py)
+            skip_zh_cn=self.skip_zh_cn_switch.value,
         )
 
     def _handle_extract_book_click(self, e):
-        """提取 Book 按鈕 click handler。"""
+        """提取 Book 按鈕 click handler。
+
+        Book 模式 skip_zh_cn 不適用:
+        extract_book_files_generator 不接收 skip_zh_cn 參數
+        (book extraction 用 build_book_path_regex,跟 lang extraction 不同邏輯)。
+        為了語意一致,仍然傳 False 給 open_extractor_dialog,但 generator 內部忽略。
+        """
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "提取 Book"):
             return
@@ -380,6 +387,7 @@ class ExtractorView(ft.Column):
             input_path=mods_dir,
             output_path=output_path,
             mode="book",
+            skip_zh_cn=False,  # book mode 不適用,但保持 API 一致
         )
 
     def _handle_extract_dual_click(self, e):
@@ -397,6 +405,9 @@ class ExtractorView(ft.Column):
             input_path=mods_dir,
             output_path=output_path,
             mode="dual",
+            # 🐛 2026-07-14 user review: DUAL mode 也串接 skip_zh_cn_switch,
+            # 影響 Lang phase 的 regex (Book phase 不受影響)
+            skip_zh_cn=self.skip_zh_cn_switch.value,
         )
 
     def _handle_preview_lang_click(self, e):

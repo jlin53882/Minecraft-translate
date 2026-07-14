@@ -1127,19 +1127,19 @@ class TestFixDUALSignatureBug:
             "skip_zh_cn=skip_zh_cn)` 呼叫 "
             "(Bug 1 fix 應讓 lang_codes 過濾真正生效,此斷言鎖定真正的 source pattern)"
         )
-
     def test_extractor_dialog_uses_lang_codes_keyword_arg(self):
         """extractor_dialog.py 對 extract_dual_files_generator 必須用 lang_codes=selected_codes keyword arg。"""
         src = _read(EXTRACTOR_DIALOG)
         # 找 open_extractor_dialog 函式範圍
         m = re.search(
-            "def open_extractor_dialog\([^)]*\):(.*?)(?=\ndef |\nclass |\Z)",
+            "def open_extractor_dialog\\([^)]*\\):(.*?)(?=\\ndef |\\nclass |\\Z)",
             src, re.DOTALL,
         )
         assert m is not None
-        body = m.group(1)
-        # 必須有 keyword arg 呼叫,不能 positional 3 args
-        assert "extract_dual_files_generator(mods_dir, final_output, lang_codes=selected_codes)" in body, (
+        body = m.group(0)
+        # 必須有 keyword arg 呼叫 (multiline 也支援:查 「lang_codes=selected_codes」字串)
+        # 🐛 2026-07-14 user review: 改成 multiline 呼叫 (加 skip_zh_cn)
+        assert "lang_codes=selected_codes" in body, (
             "回歸:extractor_dialog 沒用 lang_codes=selected_codes keyword arg 呼叫 "
             "(Bug 1 fix 應避免 TypeError)"
         )
@@ -1147,6 +1147,11 @@ class TestFixDUALSignatureBug:
         assert "extract_dual_files_generator(mods_dir, final_output, selected_codes)" not in body, (
             "回歸:extractor_dialog 還是用錯誤的 positional 3 args 呼叫 "
             "(這會引起 TypeError: takes 2 positional arguments but 3 were given)"
+        )
+        # 🐛 2026-07-14 Phase 2 fix: skip_zh_cn 也用 keyword arg
+        assert "skip_zh_cn=selected_skip_zh_cn" in body, (
+            "回歸:extract_dual_files_generator 沒傳 skip_zh_cn=selected_skip_zh_cn "
+            "(Phase 2 user review 應讓主 UI skip_zh_cn_switch 生效)"
         )
 
 
@@ -1348,6 +1353,167 @@ class TestFixDUALResultSection:
         )
         assert "update_dual_stats(result_stats)" in body, (
             "回歸:run_extraction 沒呼叫 update_dual_stats(result_stats)"
+        )
+
+
+
+
+class TestFixStatsBadgeRemoved:
+    """2026-07-14 user review: 移除底部統計徽章(成功/跳過/失敗)。
+
+    User 截圖顯示主頁底部有 stats badge 顯示「成功 X / 跳過 Y / 失敗 Z」,但這個
+    即時計數其實跟 dialog 內的 stats_row 重複顯示,而且不應該放在主 UI 的 settings
+    card 上(user 從 dialog 才能完整看見 DUAL mode LANG/BOOK 分區)。
+    物理刪除:
+    - _build_stats_badge 函式 (extractor_panels.py:82)
+    - _build_stats_badge(view) 呼叫 (extractor_panels.py:286)
+    - _stats_success / _stats_warnings / _stats_failures view 屬性
+    - docstring 內關於 _build_stats_badge 的條目
+    - test_extractor_view_stats_badge_texts 測試
+    """
+
+    def test_no_stats_badge_function_in_extractor_panels(self):
+        """_build_stats_badge 函式必須已被物理刪除(2026-07-14 user UX 改進)。"""
+        src = _read(REPO_ROOT / "app" / "views" / "extractor" / "extractor_panels.py")
+        assert "def _build_stats_badge" not in src, (
+            "回歸:extractor_panels.py 又出現 _build_stats_badge 函式 "
+            "(2026-07-14 user review 應物理刪除,不在主 UI 顯示即時計數徽章)"
+        )
+
+    def test_no_stats_badge_caller_in_extractor_panels(self):
+        """_build_stats_badge(view) 呼叫必須已被物理刪除。"""
+        src = _read(REPO_ROOT / "app" / "views" / "extractor" / "extractor_panels.py")
+        assert "_build_stats_badge(view)" not in src, (
+            "回歸:extractor_panels.py 又呼叫 _build_stats_badge(view) "
+            "(2026-07-14 user review 應從 settings column 移除)"
+        )
+
+    def test_no_stats_attributes_in_extractor_panels(self):
+        """_stats_success / _stats_warnings / _stats_failures view 屬性必須已被物理刪除。"""
+        src = _read(REPO_ROOT / "app" / "views" / "extractor" / "extractor_panels.py")
+        assert "_stats_success" not in src, (
+            "回歸:extractor_panels.py 又建立 _stats_success view 屬性"
+        )
+        assert "_stats_warnings" not in src, (
+            "回歸:extractor_panels.py 又建立 _stats_warnings view 屬性"
+        )
+        assert "_stats_failures" not in src, (
+            "回歸:extractor_panels.py 又建立 _stats_failures view 屬性"
+        )
+
+    def test_no_stats_badge_docstring_in_extractor_panels(self):
+        """extractor_panels.py 模塊 docstring 內 _build_stats_badge 條目必須已被物理刪除。"""
+        src = _read(REPO_ROOT / "app" / "views" / "extractor" / "extractor_panels.py")
+        assert "_build_stats_badge() → 統計徽章" not in src, (
+            "回歸:extractor_panels.py 模塊 docstring 又提到 _build_stats_badge "
+            "(2026-07-14 user review 應從 docstring 移除)"
+        )
+
+    def test_no_stats_badge_test_in_test_file(self):
+        """test_extractor_view_stats_badge_texts 測試必須已被物理刪除。"""
+        src = _read(REPO_ROOT / "tests" / "test_extractor_view_characterization.py")
+        assert "def test_extractor_view_stats_badge_texts" not in src, (
+            "回歸:test_extractor_view_characterization.py 又出現 stats badge 測試 "
+            "(2026-07-14 user review 應物理刪除對應測試)"
+        )
+
+    def test_extractor_view_no_stats_comment(self):
+        """extractor_view.py 不應再提到 _stats_success / _stats_warnings / _stats_failures。"""
+        src = _read(EXTRACTOR_VIEW)
+        assert "_stats_success" not in src, (
+            "回歸:extractor_view.py 註解又提到 _stats_success "
+            "(2026-07-14 user review 應從註解刪除過時描述)"
+        )
+        assert "_stats_warnings" not in src, (
+            "回歸:extractor_view.py 註解又提到 _stats_warnings"
+        )
+        assert "_stats_failures" not in src, (
+            "回歸:extractor_view.py 註解又提到 _stats_failures"
+        )
+
+
+class TestFixSkipZhCnSwitchWiring:
+    """2026-07-14 user review: 主 UI skip_zh_cn_switch 必須真的接到 generator。
+
+    User audit 發現:extractor_view.py 內的 skip_zh_cn_switch 純 dead code,
+    open_extractor_dialog 的呼叫都沒傳 skip_zh_cn,user 開啟切換沒效果。
+
+    修法:
+    - _handle_extract_lang_click / _handle_extract_dual_click 讀 self.skip_zh_cn_switch.value
+    - open_extractor_dialog 新增 skip_zh_cn 參數
+    - run_extraction 內 selected_skip_zh_cn 傳到 extract_*_files_generator
+
+    此 class 鎖住 wiring pattern,防止 future commit 偷偷斷掉
+    skip_zh_cn_switch 跟 generator 的連線。
+    """
+
+    def test_extractor_dialog_open_extractor_dialog_has_skip_zh_cn_param(self):
+        """open_extractor_dialog signature 必須有 skip_zh_cn 參數。"""
+        src = _read(EXTRACTOR_DIALOG)
+        m = re.search(
+            "def open_extractor_dialog\\([^)]*\\):",
+            src,
+        )
+        assert m is not None
+        sig = m.group(0)
+        assert "skip_zh_cn" in sig, (
+            "回歸:open_extractor_dialog signature 沒有 skip_zh_cn 參數 "
+            "(2026-07-14 user review 應加此 keyword 參數)"
+        )
+
+    def test_extractor_view_handle_lang_click_passes_skip_zh_cn(self):
+        """_handle_extract_lang_click 必須傳 skip_zh_cn=self.skip_zh_cn_switch.value。"""
+        src = _read(EXTRACTOR_VIEW)
+        m = re.search(
+            "def _handle_extract_lang_click\\([^)]*\\):",
+            src,
+        )
+        assert m is not None
+        next_def = re.search(
+            "\\ndef [a-zA-Z]",
+            src[m.end():],
+        )
+        end = m.end() + next_def.start() if next_def else len(src)
+        body = src[m.start():end]
+        assert "skip_zh_cn=self.skip_zh_cn_switch.value" in body, (
+            "回歸:_handle_extract_lang_click 沒傳 skip_zh_cn=self.skip_zh_cn_switch.value "
+            "(2026-07-14 user review 主 UI 開關應生效)"
+        )
+
+    def test_extractor_view_handle_dual_click_passes_skip_zh_cn(self):
+        """_handle_extract_dual_click 必須傳 skip_zh_cn=self.skip_zh_cn_switch.value。"""
+        src = _read(EXTRACTOR_VIEW)
+        m = re.search(
+            "def _handle_extract_dual_click\\([^)]*\\):",
+            src,
+        )
+        assert m is not None
+        next_def = re.search(
+            "\\ndef [a-zA-Z]",
+            src[m.end():],
+        )
+        end = m.end() + next_def.start() if next_def else len(src)
+        body = src[m.start():end]
+        assert "skip_zh_cn=self.skip_zh_cn_switch.value" in body, (
+            "回歸:_handle_extract_dual_click 沒傳 skip_zh_cn=self.skip_zh_cn_switch.value"
+        )
+
+    def test_extractor_dialog_run_extraction_passes_skip_zh_cn_to_dual(self):
+        """run_extraction 內 extract_dual_files_generator 必須用 skip_zh_cn=selected_skip_zh_cn。"""
+        src = _read(EXTRACTOR_DIALOG)
+        assert "extract_dual_files_generator(" in src
+        assert "skip_zh_cn=selected_skip_zh_cn" in src, (
+            "回歸:extract_dual_files_generator 沒傳 skip_zh_cn=selected_skip_zh_cn "
+            "(Phase 2 user review 應串接 skip_zh_cn)"
+        )
+
+    def test_extractor_dialog_run_extraction_passes_skip_zh_cn_to_lang(self):
+        """run_extraction 內 extract_lang_files_generator 必須也傳 skip_zh_cn。"""
+        src = _read(EXTRACTOR_DIALOG)
+        assert "extract_lang_files_generator(" in src
+        assert "skip_zh_cn=selected_skip_zh_cn" in src, (
+            "回歸:extract_lang_files_generator 沒傳 skip_zh_cn "
+            "(Phase 2 user review 應在 lang mode 也生效)"
         )
 
 

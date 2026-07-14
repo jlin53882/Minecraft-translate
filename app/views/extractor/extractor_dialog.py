@@ -64,8 +64,9 @@ def open_extractor_dialog(
     on_complete=None,
     mode: str = "lang",  # "lang", "book", "dual"
     auto_start: bool = False,  # 若 True，自動啟動提取（不需點擊「開始提取」）
+    skip_zh_cn: bool = False,  # 🐛 2026-07-14 user review: 串接 skip_zh_cn_switch,主 UI 開關生效
 ):
-    log_info(f"[OPEN] open_extractor_dialog mode={mode!r} auto_start={auto_start}")
+    log_info(f"[OPEN] open_extractor_dialog mode={mode!r} auto_start={auto_start} skip_zh_cn={skip_zh_cn}")
     """打開完整的提取對話框（進度+日誌+結果）。
 
     直接使用外部傳入的設定，無需重新設定。
@@ -77,6 +78,8 @@ def open_extractor_dialog(
         output_path: 輸出目錄路徑
         on_complete: 完成後的回調函式 (可選)
         mode: 提取模式 ("lang", "book", "dual")
+        skip_zh_cn: 是否跳過 zh_cn 抽取(從主 UI skip_zh_cn_switch 讀取)
+                     只有 lang 跟 dual 模式會用到,book 模式忽略。
     """
     dialog_width = max(600, int(page.width * 0.7))
 
@@ -260,6 +263,7 @@ def open_extractor_dialog(
         log_info(f"[THREAD] run_extraction thread STARTED")
         selected_mode = mode
         selected_codes = lang_codes  # 使用配置中的所有語系
+        selected_skip_zh_cn = skip_zh_cn  # 🐛 2026-07-14 user review: 串接主 UI skip_zh_cn_switch,closure 內才能用
 
         # 建立輸出目錄
         os.makedirs(final_output, exist_ok=True)
@@ -297,11 +301,19 @@ def open_extractor_dialog(
         # run_extraction_loop 返回後才用 result_stats 發。
         try:
             if selected_mode == "lang":
-                gen = extract_lang_files_generator(mods_dir, final_output, lang_codes=selected_codes)
+                gen = extract_lang_files_generator(
+                    mods_dir, final_output,
+                    lang_codes=selected_codes,
+                    skip_zh_cn=selected_skip_zh_cn,
+                )
             elif selected_mode == "book":
                 gen = extract_book_files_generator(mods_dir, final_output)
             else:
-                gen = extract_dual_files_generator(mods_dir, final_output, lang_codes=selected_codes)
+                gen = extract_dual_files_generator(
+                    mods_dir, final_output,
+                    lang_codes=selected_codes,
+                    skip_zh_cn=selected_skip_zh_cn,
+                )
 
             # ⭐ 每次開新任務先 reset outer-scope cancel flag,然後傳 reference 給 Service
             # (on_cancel_click closure 用 outer-scope extraction_cancel_flag)
