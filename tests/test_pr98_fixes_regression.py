@@ -1493,6 +1493,89 @@ class TestFixSkipZhCnSwitchWiring:
             "(Phase 2 user review 應在 lang mode 也生效)"
         )
 
+    def test_extractor_dialog_open_preview_dialog_has_skip_zh_cn_param(self):
+        """open_preview_dialog signature 必須有 skip_zh_cn 參數(2026-07-14 user review 補發現 preview 路徑)。"""
+        src = _read(EXTRACTOR_DIALOG)
+        m = re.search(
+            "def open_preview_dialog\\([^)]*\\):",
+            src,
+        )
+        assert m is not None
+        sig = m.group(0)
+        assert "skip_zh_cn" in sig, (
+            "回歸:open_preview_dialog signature 沒有 skip_zh_cn 參數 "
+            "(2026-07-14 user review preview 路徑也應串接 skip_zh_cn_switch)"
+        )
+
+    def test_extractor_view_handle_preview_lang_click_passes_skip_zh_cn(self):
+        """_handle_preview_lang_click 必須傳 skip_zh_cn=self.skip_zh_cn_switch.value。"""
+        src = _read(EXTRACTOR_VIEW)
+        m = re.search(
+            "def _handle_preview_lang_click\\([^)]*\\):",
+            src,
+        )
+        assert m is not None
+        next_def = re.search(
+            "\\ndef [a-zA-Z]",
+            src[m.end():],
+        )
+        end = m.end() + next_def.start() if next_def else len(src)
+        body = src[m.start():end]
+        assert "skip_zh_cn=self.skip_zh_cn_switch.value" in body, (
+            "回歸:_handle_preview_lang_click 沒傳 skip_zh_cn=self.skip_zh_cn_switch.value "
+            "(2026-07-14 user review preview 路徑也應生效)"
+        )
+
+    def test_extractor_view_handle_preview_dual_click_passes_skip_zh_cn(self):
+        """_handle_preview_dual_click 必須傳 skip_zh_cn=self.skip_zh_cn_switch.value。"""
+        src = _read(EXTRACTOR_VIEW)
+        m = re.search(
+            "def _handle_preview_dual_click\\([^)]*\\):",
+            src,
+        )
+        assert m is not None
+        next_def = re.search(
+            "\\ndef [a-zA-Z]",
+            src[m.end():],
+        )
+        end = m.end() + next_def.start() if next_def else len(src)
+        body = src[m.start():end]
+        assert "skip_zh_cn=self.skip_zh_cn_switch.value" in body, (
+            "回歸:_handle_preview_dual_click 沒傳 skip_zh_cn=self.skip_zh_cn_switch.value"
+        )
+
+    def test_preview_extraction_generator_passes_skip_zh_cn(self):
+        """preview_extraction_generator wrapper yield from preview_extraction_generator_impl 必須傳 skip_zh_cn。"""
+        src = _read(REPO_ROOT / "translation_tool" / "core" / "jar_processor.py")
+        # 簡化斷言:找 yield from preview_extraction_generator_impl(...) 內有 skip_zh_cn=skip_zh_cn
+        m = re.search(
+            r"yield from preview_extraction_generator_impl\([\s\S]*?skip_zh_cn=skip_zh_cn[\s\S]*?\)",
+            src,
+        )
+        assert m is not None, (
+            "回歸:preview_extraction_generator wrapper yield from preview_extraction_generator_impl "
+            "沒傳 skip_zh_cn=skip_zh_cn (2026-07-14 user review preview 路徑也應生效)"
+        )
+
+    def test_preview_extraction_generator_impl_uses_skip_zh_cn(self):
+        """preview_extraction_generator_impl 必須把 skip_zh_cn 傳給 build_lang_file_regex。"""
+        src = _read(REPO_ROOT / "translation_tool" / "core" / "jar_processor_preview.py")
+        # 找 build_lang_file_regex calls
+        # 在 jar_processor_preview.py 內 build_lang_file_regex 應傳 skip_zh_cn
+        pattern_calls = re.findall(
+            r"build_lang_file_regex\([^)]*\)",
+            src,
+        )
+        assert len(pattern_calls) >= 2, (
+            f"找不到預期數量的 build_lang_file_regex calls: {pattern_calls}"
+        )
+        for call in pattern_calls:
+            assert "skip_zh_cn" in call, (
+                f"回歸:build_lang_file_regex 呼叫 {call!r} 沒傳 skip_zh_cn "
+                f"(2026-07-14 user review preview 路徑也應生效)"
+            )
+
+
 
 
 

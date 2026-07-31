@@ -273,7 +273,24 @@ class ExtractorView(ft.Column):
             f"自動產生資料夾名稱可以在設定頁面調整"
         )
         self.output_dir_textfield.helper = helper_text
-        self.page.update()
+        # 🐛 2026-08-01 user review: 修 config 儲存觸發 RuntimeError
+        # 原因:config_actions.save_config_from_view iterate registry,
+        # 會對 'extractor' view call refresh_output_dir_helper(),
+        # 但 user 可能還沒切到 extractor 頁(view 還沒 mount 到 page),
+        # self.page.update() 內部 self.page getter raise RuntimeError。
+        # 修法:try/except 包裹,若 view not in page 就 skip update。
+        # (helper_text 已經設好,下次 mount 到 page 會自然 render)
+        try:
+            self.page.update()
+        except RuntimeError as ex:
+            if "Control must be added to the page first" in str(ex):
+                # view 尚未 mount,defer update
+                log_info(
+                    f"[OUTPUT_HELPER] _update_output_dir_helper skipped: "
+                    f"view not mounted to page yet ({ex})"
+                )
+                return
+            raise
 
     def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
         """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。
@@ -369,10 +386,10 @@ class ExtractorView(ft.Column):
     def _handle_extract_book_click(self, e):
         """提取 Book 按鈕 click handler。
 
-        Book 模式 skip_zh_cn 不適用:
-        extract_book_files_generator 不接收 skip_zh_cn 參數
-        (book extraction 用 build_book_path_regex,跟 lang extraction 不同邏輯)。
-        為了語意一致,仍然傳 False 給 open_extractor_dialog,但 generator 內部忽略。
+        Book 模式 skip_zh_cn (2026-07-14 user review):
+        原本以為 book 模式不適用 skip_zh_cn,但 build_book_path_regex
+        也用 caller 傳的 lang_codes (跟 lang 模式同樣的 bug pattern)。
+        修法跟 lang 模式對稱,book 也接 self.skip_zh_cn_switch.value。
         """
         mods_dir = (self.mods_dir_textfield.value or "").strip()
         if not self._check_mods_dir_or_snack(mods_dir, "提取 Book"):
@@ -387,7 +404,8 @@ class ExtractorView(ft.Column):
             input_path=mods_dir,
             output_path=output_path,
             mode="book",
-            skip_zh_cn=False,  # book mode 不適用,但保持 API 一致
+            # 🐛 2026-07-14 user review:book 模式也串接 skip_zh_cn_switch
+            skip_zh_cn=self.skip_zh_cn_switch.value,
         )
 
     def _handle_extract_dual_click(self, e):
@@ -423,6 +441,8 @@ class ExtractorView(ft.Column):
             input_path=mods_dir,
             output_path=output_path,
             mode="lang",
+            # 🐛 2026-07-14 user review: preview 路徑也串接 skip_zh_cn_switch
+            skip_zh_cn=self.skip_zh_cn_switch.value,
         )
 
     def _handle_preview_book_click(self, e):
@@ -438,6 +458,8 @@ class ExtractorView(ft.Column):
             input_path=mods_dir,
             output_path=output_path,
             mode="book",
+            # 🐛 2026-07-14 user review:book preview 也串接 skip_zh_cn_switch
+            skip_zh_cn=self.skip_zh_cn_switch.value,
         )
 
     def _handle_preview_dual_click(self, e):
@@ -453,6 +475,9 @@ class ExtractorView(ft.Column):
             input_path=mods_dir,
             output_path=output_path,
             mode="dual",
+            # 🐛 2026-07-14 user review: DUAL preview 也串接 skip_zh_cn_switch,
+            # 影響 Lang phase 的 regex (Book phase 不受影響)
+            skip_zh_cn=self.skip_zh_cn_switch.value,
         )
 
     def set_controls_disabled(self, disabled: bool):

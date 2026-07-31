@@ -170,6 +170,7 @@ def preview_extraction_generator_impl(
     find_jar_files_fn: Callable[[str], list[str]],
     book_path_regex: re.Pattern,
     lang_codes: list[str] | None = None,
+    skip_zh_cn: bool = False,
 ) -> Generator[Dict[str, Any], None, None]:
     """產生 JAR 檔案預覽（多執行緒平行掃描版本）。
 
@@ -186,6 +187,9 @@ def preview_extraction_generator_impl(
         find_jar_files_fn：回傳 JAR 路徑列表的無參函式。
         book_path_regex：Book 檔案路徑正則表達式（用於 dual 模式）。
         lang_codes：指定語言代碼列表，若為 None 則從 config 讀取。
+        skip_zh_cn：是否跳過 zh_cn（preview 路徑也支援,
+            跟 extract 路徑行為一致 — 2026-07-14 user review 補發現）。
+            注意:book mode 不受 skip_zh_cn 影響(跟 extract 一致)。
 
     Yields：
         各階段進度字典：
@@ -215,15 +219,15 @@ def preview_extraction_generator_impl(
 
     if mode == "lang":
         from translation_tool.core.jar_processor import build_lang_file_regex
-        target_regex = build_lang_file_regex(codes=lang_codes)
+        target_regex = build_lang_file_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)
         lang_regex = None
     elif mode == "book":
         from translation_tool.core.jar_processor import build_book_path_regex
-        target_regex = build_book_path_regex(codes=lang_codes)
+        target_regex = build_book_path_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)
         lang_regex = None
     elif mode == "dual":
         from translation_tool.core.jar_processor import build_lang_file_regex
-        lang_regex = build_lang_file_regex(codes=lang_codes)
+        lang_regex = build_lang_file_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)
         target_regex = None
     else:
         yield {"error": f"未知模式: {mode}"}

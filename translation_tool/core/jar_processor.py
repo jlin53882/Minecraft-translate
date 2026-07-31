@@ -53,32 +53,53 @@ def build_lang_file_regex(*, codes: list[str] | None = None, skip_zh_cn: bool = 
 
     Args:
         codes: 指定語言代碼列表，若為 None則從 config 讀取。
-        skip_zh_cn: 是否跳過 zh_cn（僅在 codes=None 時生效）。
+        skip_zh_cn: 是否跳過 zh_cn（兩個路徑都生效,不只是 codes=None）。
+            設計說明:2026-07-14 user review 發現 production caller
+            (extract_lang_files_generator / extract_dual_files_generator)
+            總是傳 codes=get_lang_codes() 結果 + skip_zh_cn=True,
+            原本只在 codes=None 生效的設計 bug — production 路徑
+            完全沒生效。修法:else branch 也尊重 skip_zh_cn,跟 get_lang_codes
+            對稱。
     """
     if codes is None:
         codes = get_lang_codes(skip_zh_cn=skip_zh_cn)
+    elif skip_zh_cn and "zh_cn" in codes:
+        # 🐛 修法:即使 caller 傳了 codes,skip_zh_cn 也要生效
+        # (跟 codes=None 路徑的 get_lang_codes(skip_zh_cn=True) 對稱)
+        codes = [c for c in codes if c != "zh_cn"]
     codes_str = "|".join(map(re.escape, codes))
-    return re.compile(rf"(?:assets/([^/]+)/)?lang/({codes_str})\.(json|lang)$", re.IGNORECASE)
+    regex = re.compile(rf"(?:assets/([^/]+)/)?lang/({codes_str})\.(json|lang)$", re.IGNORECASE)
+    return regex
 
 
-def build_book_path_regex(*, codes: list[str] | None = None) -> re.Pattern:
+def build_book_path_regex(*, codes: list[str] | None = None, skip_zh_cn: bool = False) -> re.Pattern:
     """根據 lang_codes 動態建 Book 檔案 regex。
 
     Args:
         codes: 指定語言代碼列表，若為 None 則從 config 讀取。
+        skip_zh_cn: 是否跳過 zh_cn（兩個路徑都生效,不只是 codes=None）。
+            設計說明:2026-07-14 user review 補發現 — book 模式也需要跟 lang 模式對稱,
+            extract_book_files_generator / preview 內部 caller 總是傳 codes=get_lang_codes() 結果
+            + skip_zh_cn=True,跟 build_lang_file_regex 同樣 bug pattern。
+            修法:跟 build_lang_file_regex 一致,兩個路徑都尊重 skip_zh_cn。
     """
     if codes is None:
-        codes = get_lang_codes()
+        codes = get_lang_codes(skip_zh_cn=skip_zh_cn)
+    elif skip_zh_cn and "zh_cn" in codes:
+        # 🐛 修法:即使 caller 傳了 codes,skip_zh_cn 也要生效
+        # (跟 codes=None 路徑對稱,跟 build_lang_file_regex 一致)
+        codes = [c for c in codes if c != "zh_cn"]
     codes_str = "|".join(map(re.escape, codes))
     return re.compile(
         rf"(?:(?:assets|data)/([^/]+)/"
         rf"(?:patchouli_books|book|manual|guidebook)/"
         rf"(?:([^/]+)/)?"
-        rf"(?:"
+        # 🐛 2026-07-14 user review 修法:移除 |book\.json fallback
+        # 之前 fallback 是讓 <modid>/book.json (沒 lang code) 也算 book,
+        # 但 user 明確說「zh_cn 資料夾 後面全部的內容」要跳過 — 既然 fallback 會讓
+        # zh_cn/book.json 還是 match,就跟 user 期望衝突。修法後 lang code 必須匹配。
         rf"(_?(?:{codes_str}))(?:/.*)?"
-        rf"|"
-        rf"book\.json"
-        rf")$)",
+        rf"$)",
         re.IGNORECASE,
     )
 
@@ -141,18 +162,20 @@ def extract_lang_files_generator(mods_dir: str, output_dir: str, *, lang_codes: 
         process_name="Lang",
     )
 
-def extract_book_files_generator(mods_dir: str, output_dir: str, *, lang_codes: list[str] | None = None) -> Generator[Dict[str, Any], None, None]:
+def extract_book_files_generator(mods_dir: str, output_dir: str, *, lang_codes: list[str] | None = None, skip_zh_cn: bool = False) -> Generator[Dict[str, Any], None, None]:
     """從 mods 目錄提取 Patchouli 書本檔。
 
     Args:
         mods_dir: Mod 目錄路徑
         output_dir: 輸出目錄路徑
         lang_codes: 指定語言代碼列表，若為 None 則從 config 讀取。
+        skip_zh_cn: 是否跳過 zh_cn（2026-07-14 user review 補發現,
+            book 模式也支援跟 lang 模式對稱的 skip_zh_cn 過濾）。
 
     Yields:
         進度字典
     """
-    book_regex = build_book_path_regex(codes=lang_codes)
+    book_regex = build_book_path_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)
     yield from _run_extraction_process(
         mods_dir,
         output_dir,
@@ -243,13 +266,20 @@ def extract_dual_files_generator(
     if lang_error or book_error:
         yield {"dual_errors": {"lang": lang_error, "book": book_error}, "error": True}
 
-def preview_extraction_generator(mods_dir: str, mode: str, lang_codes: list[str] | None = None) -> Generator[Dict[str, Any], None, None]:
+def preview_extraction_generator(
+    mods_dir: str,
+    mode: str,
+    lang_codes: list[str] | None = None,
+    skip_zh_cn: bool = False,
+) -> Generator[Dict[str, Any], None, None]:
     """預覽提取結果。
 
     Args:
         mods_dir: Mod 目錄路徑
         mode: 預覽模式
         lang_codes: 指定語言代碼列表，若為 None 則從 config 讀取
+        skip_zh_cn: 是否跳過 zh_cn（preview 路徑也支援,
+            跟 extract 路徑行為一致 — 2026-07-14 user review 補發現）
 
     Yields:
         進度字典
@@ -260,6 +290,7 @@ def preview_extraction_generator(mods_dir: str, mode: str, lang_codes: list[str]
         find_jar_files_fn=find_jar_files,
         book_path_regex=BOOK_PATH_REGEX_DUAL_STRUCTURE,
         lang_codes=lang_codes,
+        skip_zh_cn=skip_zh_cn,
     )
 
 __all__ = [

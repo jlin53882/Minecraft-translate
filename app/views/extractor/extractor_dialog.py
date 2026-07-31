@@ -307,7 +307,11 @@ def open_extractor_dialog(
                     skip_zh_cn=selected_skip_zh_cn,
                 )
             elif selected_mode == "book":
-                gen = extract_book_files_generator(mods_dir, final_output)
+                # 🐛 2026-07-14 user review:book 模式也接 skip_zh_cn(跟 lang 模式對稱)
+                gen = extract_book_files_generator(
+                    mods_dir, final_output,
+                    skip_zh_cn=selected_skip_zh_cn,
+                )
             else:
                 gen = extract_dual_files_generator(
                     mods_dir, final_output,
@@ -579,8 +583,9 @@ def open_preview_dialog(
     input_path: str = "",
     output_path: str = "",
     mode: str = "lang",
+    skip_zh_cn: bool = False,  # 🐛 2026-07-14 user review: 串接 skip_zh_cn_switch,preview 路徑也生效
 ):
-    log_info(f"[PREVIEW] open_preview_dialog mode={mode!r}")
+    log_info(f"[PREVIEW] open_preview_dialog mode={mode!r} skip_zh_cn={skip_zh_cn}")
     """打開預覽對話框（lang / book / dual）。
 
     預覽流程完全在本模組內實現，不依賴 extractor_actions 模組的 legacy show_preview：
@@ -696,8 +701,11 @@ def open_preview_dialog(
                     ft.Text(f"📦 {r['jar']}: Lang {r.get('lang_count', 0)} 個 / Book {r.get('book_count', 0)} 個", size=12)
                 )
             else:
+                # 🐛 2026-07-14 user review:小檔案顯示 0.0 MB(user 看不出來)
+                # 改用 format_size helper 自動選擇單位 (MB / KB / B)
+                from app.views.extractor.extractor_dialog_helpers import format_size
                 jar_list.controls.append(
-                    ft.Text(f"📦 {r['jar']}: {r['count']} 個檔案 ({r['size_mb']:.1f} MB)", size=12)
+                    ft.Text(f"📦 {r['jar']}: {r['count']} 個檔案 ({format_size(r['size_mb'])})", size=12)
                 )
 
         list_container = ft.Container(
@@ -804,7 +812,7 @@ def open_preview_dialog(
         def do_scan():
             """背景執行緒：跑 generator，更新 preview_state"""
             try:
-                for update in preview_extraction_generator(input_path, mode):
+                for update in preview_extraction_generator(input_path, mode, skip_zh_cn=skip_zh_cn):
                     if state["cancelled"]:
                         break
                     if "progress" in update:

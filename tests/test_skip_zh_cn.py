@@ -18,6 +18,7 @@ from unittest.mock import patch
 from translation_tool.core.jar_processor import (
     get_lang_codes,
     build_lang_file_regex,
+    build_book_path_regex,
     extract_lang_files_generator,
     extract_dual_files_generator,
 )
@@ -129,6 +130,50 @@ class TestBuildLangFileRegexSkipZhCn:
         assert regex.search("assets/mymod/lang/zh_tw.json"), (
             "回歸:build_lang_file_regex(skip_zh_cn=True) 連 zh_tw 都不匹配"
         )
+
+    def test_build_lang_file_regex_with_codes_and_skip_zh_cn(self):
+        """build_lang_file_regex(codes=[...], skip_zh_cn=True) 必須過濾 zh_cn。
+
+        🐛 2026-07-14 user review bug fix:
+        原本 build_lang_file_regex 只在 codes=None 路徑生效 skip_zh_cn,
+        但 production caller (extract_lang_files_generator /
+        extract_dual_files_generator) 都傳 codes=get_lang_codes() 結果 + skip_zh_cn=True,
+        所以走 else 路徑 skip_zh_cn 被忽略。
+        修法:else branch 也尊重 skip_zh_cn。
+
+        此測試覆蓋 production 走的 bug 路徑,防止 future refactor 偷偷把
+        elif skip_zh_cn 拿掉。
+        """
+        regex = build_lang_file_regex(
+            codes=["en_us", "zh_tw", "zh_cn"],
+            skip_zh_cn=True,
+        )
+        assert isinstance(regex, re.Pattern)
+        assert not regex.search("assets/mymod/lang/zh_cn.json"), (
+            "回歸:build_lang_file_regex(codes=[...], skip_zh_cn=True) 還是匹配 zh_cn "
+            "(production 路徑 skip_zh_cn 開關無效)"
+        )
+        assert regex.search("assets/mymod/lang/en_us.json"), (
+            "回歸:build_lang_file_regex(codes=[...], skip_zh_cn=True) 連 en_us 都不匹配 "
+            "(過濾過頭,把 en_us 也拿掉)"
+        )
+        assert regex.search("assets/mymod/lang/zh_tw.json"), (
+            "回歸:build_lang_file_regex(codes=[...], skip_zh_cn=True) 連 zh_tw 都不匹配"
+        )
+
+    def test_build_lang_file_regex_with_codes_skip_zh_cn_false_keeps_all(self):
+        """build_lang_file_regex(codes=[...], skip_zh_cn=False) 必須保留所有 codes。"""
+        regex = build_lang_file_regex(
+            codes=["en_us", "zh_tw", "zh_cn"],
+            skip_zh_cn=False,
+        )
+        assert regex.search("assets/mymod/lang/zh_cn.json"), (
+            "回歸:build_lang_file_regex(codes=[...], skip_zh_cn=False) 不匹配 zh_cn"
+        )
+        assert regex.search("assets/mymod/lang/en_us.json")
+        assert regex.search("assets/mymod/lang/zh_tw.json")
+
+
 
 
 class TestExtractLangGeneratorSkipZhCn:
@@ -277,3 +322,111 @@ class TestExtractDualGeneratorSkipZhCn:
             "回歸:extract_dual_files_generator(skip_zh_cn=False) "
             "Lang phase regex 連 zh_cn 都不匹配,誤過濾"
         )
+
+
+class TestBuildBookPathRegexSkipZhCn:
+    """build_book_path_regex(skip_zh_cn=...) 行為斷言。
+
+    2026-07-14 user review 補發現:book 模式也需要 skip_zh_cn 過濾
+    (跟 build_lang_file_regex 同樣 bug pattern)。
+    """
+
+    def test_skip_zh_cn_false_book_regex_matches_zh_cn(self):
+        """skip_zh_cn=False:book regex 匹配 zh_cn (預設行為)。"""
+        regex = build_book_path_regex(skip_zh_cn=False)
+        assert isinstance(regex, re.Pattern)
+        assert regex.search("assets/mymod/patchouli_books/zh_cn/book.json"), (
+            "回歸:build_book_path_regex(skip_zh_cn=False) book regex 不匹配 zh_cn"
+        )
+
+    def test_skip_zh_cn_true_book_regex_excludes_zh_cn(self):
+        """skip_zh_cn=True:book regex 不匹配 zh_cn (行為保證)。
+
+        🐛 2026-07-14 user review 補發現:book 模式也需要 skip_zh_cn 過濾。
+        book 檔案的 lang code 在 patchouli_books/<lang>/ 路徑下,
+        跟 lang 模式一樣有 zh_cn 處理需求。
+        """
+        regex = build_book_path_regex(skip_zh_cn=True)
+        assert isinstance(regex, re.Pattern)
+        assert not regex.search("assets/mymod/patchouli_books/zh_cn/book.json"), (
+            "回歸:build_book_path_regex(skip_zh_cn=True) book regex 還是匹配 zh_cn "
+            "(book 模式 skip_zh_cn 開關無效)"
+        )
+
+    def test_skip_zh_cn_true_book_regex_still_matches_other_codes(self):
+        """skip_zh_cn=True:book regex 仍匹配 en_us 跟 zh_tw book 檔。"""
+        regex = build_book_path_regex(skip_zh_cn=True)
+        assert regex.search("assets/mymod/patchouli_books/en_us/book.json"), (
+            "回歸:build_book_path_regex(skip_zh_cn=True) book regex 連 en_us 都不匹配"
+        )
+        assert regex.search("assets/mymod/patchouli_books/zh_tw/book.json"), (
+            "回歸:build_book_path_regex(skip_zh_cn=True) book regex 連 zh_tw 都不匹配"
+        )
+
+    def test_build_book_path_regex_with_codes_and_skip_zh_cn(self):
+        """build_book_path_regex(codes=[...], skip_zh_cn=True) 必須過濾 zh_cn (production 路徑)。
+
+        🐛 2026-07-14 user review:跟 build_lang_file_regex 同樣 bug pattern —
+        caller 傳 codes=get_lang_codes() 結果 + skip_zh_cn=True,
+        走 else 路徑 skip_zh_cn 被忽略。修法:else branch 也尊重 skip_zh_cn。
+        """
+        regex = build_book_path_regex(
+            codes=["en_us", "zh_tw", "zh_cn"],
+            skip_zh_cn=True,
+        )
+        assert isinstance(regex, re.Pattern)
+        assert not regex.search("assets/mymod/patchouli_books/zh_cn/book.json"), (
+            "回歸:build_book_path_regex(codes=[...], skip_zh_cn=True) 還是匹配 zh_cn "
+            "(production 路徑 book mode skip_zh_cn 開關無效)"
+        )
+        assert regex.search("assets/mymod/patchouli_books/en_us/book.json")
+        assert regex.search("assets/mymod/patchouli_books/zh_tw/book.json")
+
+    def test_build_book_path_regex_with_codes_skip_zh_cn_false_keeps_all(self):
+        """build_book_path_regex(codes=[...], skip_zh_cn=False) 必須保留所有 codes。"""
+        regex = build_book_path_regex(
+            codes=["en_us", "zh_tw", "zh_cn"],
+            skip_zh_cn=False,
+        )
+        assert regex.search("assets/mymod/patchouli_books/zh_cn/book.json"), (
+            "回歸:build_book_path_regex(codes=[...], skip_zh_cn=False) 不匹配 zh_cn"
+        )
+
+
+class TestFormatSize:
+    """format_size helper 行為斷言。
+
+    🐛 2026-07-14 user review:預覽結果裡小檔案用 r['size_mb']:.1f
+    顯示成 0.0 MB(user 看不出來)。改用 format_size 自動選擇單位。
+    """
+
+    def test_format_size_large_value_uses_mb(self):
+        """size_mb >= 1.0 → 顯示 MB。"""
+        from app.views.extractor.extractor_dialog_helpers import format_size
+        assert format_size(1.0) == "1.0 MB"
+        assert format_size(5.5) == "5.5 MB"
+
+    def test_format_size_small_value_uses_kb(self):
+        """size_mb 在 0.001~1.0 → 顯示 KB。"""
+        from app.views.extractor.extractor_dialog_helpers import format_size
+        assert format_size(0.0293) == "30.0 KB"  # 0.0293 * 1024 = 30.0
+        assert format_size(0.5) == "512.0 KB"  # 0.5 * 1024 = 512
+
+    def test_format_size_tiny_value_uses_bytes(self):
+        """size_mb < 0.001 → 顯示 B。"""
+        from app.views.extractor.extractor_dialog_helpers import format_size
+        assert format_size(0.0001) == "105 B"  # 0.0001 * 1024^2 ≈ 105
+
+    def test_format_size_book_jar_with_small_files(self):
+        """實際 book 檔案場景:6 個檔案每個 800 bytes,小於 1 MB。"""
+        from app.views.extractor.extractor_dialog_helpers import format_size
+        # 800 bytes = 0.000763 MB
+        size_mb = 6 * 800 / (1024**2)
+        result = format_size(size_mb)
+        # 不應該是 "0.0 MB"
+        assert "0.0 MB" not in result, (
+            "回歸:format_size 把小檔案仍顯示 0.0 MB "
+            "(user 看不出檔案大小)"
+        )
+        # 應該顯示 KB
+        assert "KB" in result or "B" in result
