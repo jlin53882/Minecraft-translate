@@ -2,6 +2,11 @@
 
 用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+
+Flet 0.85 執行緒安全須知
+-----------------------
+背景執行緒直接修改 UI 組件會被 Flet 0.85 忽略。所有跨執行緒 UI 更新都必須透過
+page.run_task() 包裝為 async 閉包排程。
 """
 
 import threading
@@ -91,7 +96,7 @@ class LMView(ft.Column):
             default_color="#F5F5F5",  # 浅灰色文字，深色背景看得清楚
         )
 
-        # 按鈕（共用 primary style）
+        # 開始翻譯按鈕：點擊後在背景執行緒執行翻譯，UI 進度由 start_ui_timer() 定時更新
         self.start_button = primary_button(
             "開始翻譯",
             icon=ft.Icons.PLAY_ARROW,
@@ -158,7 +163,7 @@ class LMView(ft.Column):
     # - 之後調整 UI（padding/radius/border/divider）只要改一處
 
     def _path_row(self, field: ft.TextField, on_pick) -> ft.Control:
-        """建立路徑輸入列"""
+        """建立路徑輸入列（含資料夾選擇 IconButton）。"""
         return ft.Row(
             [
                 field,
@@ -287,37 +292,34 @@ class LMView(ft.Column):
                 except Exception:
                     continue
 
-                try:
-                    self.progress_bar.value = float(snap.get("progress", 0) or 0)
-                except Exception:
-                    self.progress_bar.value = 0
-
+                progress = float(snap.get("progress", 0) or 0)
                 logs = snap.get("logs", []) or []
-                try:
-                    self.log_presenter.sync(self.log_view, logs)
-                except Exception as e:
-                    log_debug(f"LM log presenter sync failed: {e}")
-
-                # 強制刷新 ListView 內容變更，避免背景 thread 更新時畫面不同步
-                try:
-                    self.log_view.update()
-                except Exception:
-                    pass
-
                 status = (snap.get("status") or "").upper()
+
+                async def _do_update(_=None):
+                    self.progress_bar.value = progress
+                    try:
+                        self.log_presenter.sync(self.log_view, logs)
+                    except Exception as e:
+                        log_debug(f"LM log presenter sync failed: {e}")
+                    try:
+                        self.log_view.update()
+                    except Exception:
+                        pass
+                    self._page.update()
+
+                self._page.run_task(_do_update, None)
+
                 if status == "DONE":
-                    self._set_status("任務完成", theme.GREEN_200)
+                    async def _do_done(_=None):
+                        self._set_status("任務完成", theme.GREEN_200)
+                    self._page.run_task(_do_done, None)
                     self._ui_timer_running = False
                 elif status == "ERROR":
-                    self._set_status("任務發生錯誤", theme.RED_200)
+                    async def _do_err(_=None):
+                        self._set_status("任務發生錯誤", theme.RED_200)
+                    self._page.run_task(_do_err, None)
                     self._ui_timer_running = False
-
-                try:
-                    self.page.update()
-                except Exception as e:
-                    log_debug(f"LM page update failed: {e}")
-                    self._ui_timer_running = False
-                    break
 
         threading.Thread(target=loop, daemon=True).start()
 

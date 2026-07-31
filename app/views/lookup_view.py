@@ -2,9 +2,12 @@
 
 用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
-"""
 
-# /minecraft_translator_flet/app/views/lookup_view.py (加入「查詢中...」功能的修正版)
+Flet 0.85 執行緒安全須知
+-----------------------
+背景執行緒直接修改 UI 組件會被 Flet 0.85 忽略。所有跨執行緒 UI 更新都必須透過
+page.run_task() 包裝為 async 閉包排程。
+"""
 
 import flet as ft
 import threading
@@ -35,6 +38,7 @@ class LookupView(ft.Column):
         self.single_input = ft.TextField(
             label="輸入單一學名", expand=True, tooltip="例如：Felis catus"
         )
+        # 單筆學名查詢按鈕： disabled/enabled 由 worker 透過 page.run_task() 控制
         self.single_button = ft.Button(
             "查詢", icon=ft.Icons.SEARCH, on_click=self.single_lookup_clicked
         )
@@ -58,6 +62,7 @@ class LookupView(ft.Column):
             read_only=True,
             expand=True,
         )
+        # 批次學名查詢按鈕： disabled/enabled 由 worker 透過 page.run_task() 控制
         self.batch_button = ft.Button(
             "批次查詢", icon=ft.Icons.SEARCH, on_click=self.batch_lookup_clicked
         )
@@ -132,21 +137,19 @@ class LookupView(ft.Column):
         thread.start()
 
     def single_lookup_worker(self, name: str):
-        # 3. 呼叫後端服務
         """執行單筆查詢工作。"""
         result = run_manual_lookup_service(name)
 
-        # 4. 在 UI 執行緒中更新最終結果
-        self.single_result_text.value = result
-        self.single_result_text.color = None  # 恢復預設顏色
+        async def _do_result(_=None):
+            self.single_result_text.value = result
+            self.single_result_text.color = None
+            self.single_button.disabled = False
+            self.single_input.disabled = False
+            self.single_progress_ring.visible = False
+            self._page.update()
 
-        # 5. 在 finally 區塊中恢復 UI 狀態，確保無論成功或失敗都會執行
-        self.single_button.disabled = False
-        self.single_input.disabled = False
-        self.single_progress_ring.visible = False
-        self.page.update()
+        self._page.run_task(_do_result, None)
 
-    # --- 批次查詢邏輯 ---
     def batch_lookup_clicked(self, e):
         """處理批次查詢按鈕點擊事件"""
         json_text = self.batch_input.value
@@ -157,7 +160,7 @@ class LookupView(ft.Column):
 
         self.batch_button.disabled = True
         self.batch_progress_bar.visible = True
-        self.batch_progress_bar.value = None  # 不確定進度
+        self.batch_progress_bar.value = None
         self.batch_result_textfield.value = "批次查詢中，請稍候..."
         self.page.update()
 
@@ -169,17 +172,27 @@ class LookupView(ft.Column):
         try:
             for update in run_batch_lookup_service(json_text):
                 if update.get("error"):
-                    self.batch_result_textfield.value = update.get("log")
+                    async def _do_err(_=None):
+                        self.batch_result_textfield.value = update.get("log")
+                        self._page.update()
+                    self._page.run_task(_do_err, None)
                     break
                 if update.get("result"):
-                    self.batch_result_textfield.value = update.get("result")
+                    async def _do_result(_=None):
+                        self.batch_result_textfield.value = update.get("result")
+                        self._page.update()
+                    self._page.run_task(_do_result, None)
                 if update.get("progress"):
-                    self.batch_progress_bar.value = update.get("progress")
-                self.page.update()
+                    async def _do_progress(_=None):
+                        self.batch_progress_bar.value = update.get("progress")
+                        self._page.update()
+                    self._page.run_task(_do_progress, None)
         finally:
-            self.batch_button.disabled = False
-            self.batch_progress_bar.visible = False
-            self.page.update()
+            async def _do_finish(_=None):
+                self.batch_button.disabled = False
+                self.batch_progress_bar.visible = False
+                self._page.update()
+            self._page.run_task(_do_finish, None)
 
     def _show_snack_bar(self, message: str, color: str = theme.ERROR):
         """

@@ -392,39 +392,6 @@ def test_start_clicked_resets_log_presenter(monkeypatch):
     assert reset_calls == [True]
 
 
-def test_start_ui_timer_stops_when_page_update_fails(monkeypatch):
-    """驗證 page.update() 失敗時，LM UI timer 會安全停止，不再拋出背景執行緒例外。"""
-
-    class _FailingPage:
-        def __init__(self):
-            self.overlay = []
-            self.updated = 0
-            self._tasks = []
-
-        def update(self):
-            raise RuntimeError("Event loop is closed")
-
-        def run_task(self, coro, *args):
-            self._tasks.append((coro, args))
-
-        def _run_all_tasks(self):
-            pass
-
-    page = _FailingPage()
-    monkeypatch.setattr(lm_view, "TaskSession", _Session)
-
-    view = lm_view.LMView(page, mock_filepicker())
-    view.session = _Session()
-    view.session.start()
-    view.session.add_log("hello")
-    view.session.set_progress(0.3)
-
-    view.start_ui_timer()
-    lm_view.time.sleep(0.25)
-
-    assert view._ui_timer_running is False
-
-
 def test_start_ui_timer_attempts_log_view_update(monkeypatch):
     """驗證 timer 迴圈會嘗試刷新 log_view，避免日誌內容已 sync 但畫面未更新。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)

@@ -200,6 +200,12 @@ def _make_page(**overrides):
 
         def run_task(self, coro, *args):
             self._tasks.append((coro, args))
+            result = coro(*args)
+            if result is not None:
+                try:
+                    result.send(None)
+                except StopIteration:
+                    pass
 
         def _run_all_tasks(self):
             for coro, args in self._tasks:

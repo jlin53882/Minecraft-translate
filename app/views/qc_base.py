@@ -2,6 +2,11 @@
 
 用途：QCView 共用的基礎類別，封裝執行緒任務與 UI 更新邏輯。
 維護注意：本模組提供 task_worker 給各 QC 檢查器使用。
+
+Flet 0.85 執行緒安全須知
+-----------------------
+背景執行緒直接修改 UI 組件會被 Flet 0.85 忽略。所有跨執行緒 UI 更新都必須透過
+page.run_task() 包裝為 async 閉包排程。
 """
 
 import flet as ft
@@ -44,7 +49,6 @@ class QCBase:
             on_complete: 任務完成後的回調函式
             controls_to_disable: 任務執行期間要禁用的控制項列表
         """
-        # 禁用控制項
         if controls_to_disable:
             for ctrl in controls_to_disable:
                 ctrl.disabled = True
@@ -56,30 +60,42 @@ class QCBase:
                     log_msg = update.get("log", "")
                     for line in log_msg.split("\n"):
                         if line.strip():
-                            self.log_view.controls.append(ft.Text(line))
+                            async def _do_append(_=None):
+                                self.log_view.controls.append(ft.Text(line))
+                                self._page.update()
+                            self._page.run_task(_do_append, None)
 
                     if "progress" in update:
-                        self.progress_bar.value = update["progress"]
+                        progress = update["progress"]
+                        async def _do_progress(_=None):
+                            self.progress_bar.value = progress
+                            self._page.update()
+                        self._page.run_task(_do_progress, None)
+
                     if update.get("error"):
-                        self.progress_bar.color = theme.ERROR
+                        async def _do_err(_=None):
+                            self.progress_bar.color = theme.ERROR
+                            self._page.update()
+                        self._page.run_task(_do_err, None)
 
-                    self.log_view.scroll_to(offset=-1, duration=100)
-                    self._page.update()
+                    async def _do_scroll(_=None):
+                        try:
+                            await self.log_view.scroll_to(offset=-1, duration=100)
+                        except TypeError:
+                            self.log_view.scroll_to(offset=-1, duration=100)
+                    self._page.run_task(_do_scroll, None)
             finally:
-                # 重置 ProgressBar
-                self.progress_bar.value = 0
-                self.progress_bar.color = None
-                self._page.update()
+                async def _do_finish(_=None):
+                    self.progress_bar.value = 0
+                    self.progress_bar.color = None
+                    if controls_to_disable:
+                        for ctrl in controls_to_disable:
+                            ctrl.disabled = False
 
-                # 恢復控制項
-                if controls_to_disable:
-                    for ctrl in controls_to_disable:
-                        ctrl.disabled = False
-                    self.page.update()
+                self._page.run_task(_do_finish, None)
 
-            # 執行完成回調
-            if on_complete:
-                on_complete()
+                if on_complete:
+                    on_complete()
 
         threading.Thread(target=run, daemon=True).start()
 

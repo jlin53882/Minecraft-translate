@@ -1,17 +1,62 @@
 """app/views/bundler_view.py 模組。
 
 用途：提供打包成品資源包的 UI 與執行流程。
+
+架構：方案B（Shared State + Poller）
+背景執行緒只寫入執行緒安全的共享狀態物件（BundleState），
+主執行緒的 Poller 定時讀取狀態並透過 page.run_task() 更新 UI。
+這樣確保所有 UI 更新都在主執行緒執行，徹底避免執行緒安全問題。
 """
 
 import flet as ft
 import threading
 import os
 import json
+import time
 from translation_tool.utils.log_unit import log_debug
 
 from app.ui import theme
 from app.ui.components import styled_card
 from app.services_impl.config_service import load_config_json
+
+
+class BundleState:
+    """執行緒安全的打包狀態容器（方案B）。"""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._progress: float = 0
+        self._log_lines: list[str] = []
+        self._error: bool = False
+        self._error_msg: str = ""
+        self._finished: bool = False
+
+    def set_progress(self, value: float):
+        with self._lock:
+            self._progress = value
+
+    def add_log(self, line: str):
+        with self._lock:
+            self._log_lines.append(line)
+
+    def set_error(self, msg: str):
+        with self._lock:
+            self._error = True
+            self._error_msg = msg
+
+    def finish(self):
+        with self._lock:
+            self._finished = True
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {
+                "progress": self._progress,
+                "log_lines": list(self._log_lines),
+                "error": self._error,
+                "error_msg": self._error_msg,
+                "finished": self._finished,
+            }
 
 
 class BundlerView(ft.Column):
@@ -33,13 +78,13 @@ class BundlerView(ft.Column):
             content_padding=10,
             on_change=self._on_version_search_change,
         )
-        self.version_list = ft.ListView(
+        self.version_expanded = False
+        self._version_item_list = ft.ListView(
             expand=True,
-            height=200,
-            spacing=4,
+            height=140,
+            spacing=3,
             auto_scroll=False,
         )
-        self.version_expanded = False
         self.description_field = ft.TextField(
             label="檔案敘述",
             hint_text="直接輸入文字，或使用 § 顏色代碼",
@@ -73,6 +118,8 @@ class BundlerView(ft.Column):
         self.extra_folders_view = ft.ListView(height=100, spacing=4, auto_scroll=False)
         self.progress_bar = ft.ProgressBar(value=0, height=8, visible=False)
         self.log_view = ft.ListView(expand=True, spacing=4, auto_scroll=True)
+        self._bundle_state: BundleState | None = None
+        self._bundle_poller_running: bool = False
 
         self._load_version_data()
         self._init_ui()
@@ -112,29 +159,49 @@ class BundlerView(ft.Column):
     def _init_ui(self):
         self._refresh_version_list("")
 
+    def _version_in_range(self, search: str, key: str) -> bool:
+        """Check if search version (e.g., '1.13') falls within range_key (e.g., '1.11~1.14.4')."""
+        if "~" not in key:
+            return search.lower() in key.lower()
+        try:
+            parts = key.split("~")
+            lower = parts[0].strip()
+            upper = parts[1].strip()
+            l_parts = lower.split(".")
+            u_parts = upper.split(".")
+            s_parts = search.split(".")
+            lower_v = (int(l_parts[0]), int(l_parts[1]))
+            upper_v = (int(u_parts[0]), int(u_parts[1]))
+            search_v = (int(s_parts[0]), int(s_parts[1]))
+            return lower_v <= search_v <= upper_v
+        except (ValueError, IndexError):
+            return search.lower() in key.lower()
+
     def _refresh_version_list(self, search_text: str):
-        self.version_list.controls.clear()
-        filtered = [v for v in self.version_data.keys() if search_text.lower() in v.lower()]
+        self._version_item_list.controls.clear()
+        search = search_text.strip()
+        if not search:
+            filtered = list(self.version_data.keys())
+        else:
+            filtered = [v for v in self.version_data.keys() if self._version_in_range(search, v)]
         if not filtered:
-            self.version_list.controls.append(
-                ft.Container(
-                    content=ft.Text(
-                        "請點擊或輸入關鍵字搜尋版本" if search_text else "無可用版本",
-                        size=12,
-                        color=theme.GREY_500,
-                    ),
-                    padding=8,
+            self._version_item_list.controls.append(
+                ft.Text(
+                    "請輸入關鍵字搜尋版本" if search_text else "無可用版本",
+                    size=12,
+                    color=theme.GREY_500,
+                    italic=True,
                 )
             )
         for version_key in filtered:
             item = ft.Container(
-                content=ft.Text(version_key, size=13, text_align=ft.TextAlign.START),
-                padding=8,
-                border=ft.Border.all(1, theme.OUTLINE),
-                border_radius=6,
+                content=ft.Text(f"  {version_key}", size=12, text_align=ft.TextAlign.START),
+                padding=6,
+                border_radius=4,
+                bgcolor=theme.GREY_100,
                 on_click=lambda e, v=version_key: self._select_version(v),
             )
-            self.version_list.controls.append(item)
+            self._version_item_list.controls.append(item)
         self._page.update()
 
     def _on_version_search_change(self, e: ft.ControlEvent):
@@ -144,43 +211,93 @@ class BundlerView(ft.Column):
         log_debug(f"_select_version called: {version}")
         self.version_search.value = version
         self.version_expanded = False
-        self._version_toggle_label.value = version
-        log_debug(f"_select_version: toggle_label={self._version_toggle_label.value}, expanded={self.version_expanded}")
+        self._version_selected_label.value = version
+        self._version_selected_label.color = theme.GREY_800
+        self._version_toggle_icon.name = ft.Icons.EXPAND_LESS
+        self._version_toggle_bar.border = ft.Border(
+            left=ft.BorderSide(3, theme.GREY_400),
+        )
+        self.version_dropdown_container_ref.visible = False
+        log_debug(f"_select_version: selected_label={self._version_selected_label.value}, expanded={self.version_expanded}")
         self._page.update()
 
     def _toggle_version_expand(self, e: ft.ControlEvent):
         self.version_expanded = not self.version_expanded
         log_debug(f"_toggle_version_expand: version_expanded={self.version_expanded}")
         self.version_dropdown_container_ref.visible = self.version_expanded
+        self._version_toggle_icon.name = ft.Icons.EXPAND_MORE if self.version_expanded else ft.Icons.EXPAND_LESS
+        self._version_toggle_bar.border = ft.Border(
+            left=ft.BorderSide(3, theme.BLUE if self.version_expanded else theme.GREY_400),
+        )
         self._page.update()
 
     def _build_controls(self):
         log_debug(f"_build_controls: version_expanded={self.version_expanded}")
-        self._version_toggle_label = ft.Text(self.version_search.value or "", size=12, color=theme.GREY_800, expand=True)
-        version_toggle = ft.Container(
-            content=ft.Row([
-                ft.Text("選擇版本", size=12, color=theme.GREY_600),
-                self._version_toggle_label,
-                ft.Icon(ft.Icons.EXPAND_MORE if self.version_expanded else ft.Icons.EXPAND_LESS, size=20),
-            ]),
-            on_click=self._toggle_version_expand,
-            padding=8,
-            border=ft.Border.all(1, theme.OUTLINE),
-            border_radius=6,
+
+        self._version_selected_label = ft.Text(
+            "未選擇",
+            size=12,
+            color=theme.GREY_500,
+            expand=True,
         )
-        version_dropdown_container = ft.Container(
-            content=self.version_list,
-            height=180,
-            border=ft.Border.all(1, theme.OUTLINE),
+        self._version_toggle_icon = ft.Icon(
+            ft.Icons.EXPAND_MORE if self.version_expanded else ft.Icons.EXPAND_LESS,
+            size=18,
+        )
+
+        version_toggle_bar = ft.Container(
+            content=ft.Row(
+                [
+                    ft.Text("📦 版本", size=12, color=theme.GREY_600, width=70),
+                    self._version_selected_label,
+                    self._version_toggle_icon,
+                ],
+                spacing=6,
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            ),
+            on_click=self._toggle_version_expand,
+            padding=ft.Padding(left=10, top=8, right=10, bottom=8),
+            border=ft.Border(
+                left=ft.BorderSide(3, theme.BLUE if self.version_expanded else theme.GREY_400),
+            ),
             border_radius=6,
-            padding=4,
+            bgcolor=theme.GREY_50,
+        )
+        self._version_toggle_bar = version_toggle_bar
+
+        version_search_field = ft.TextField(
+            hint_text="🔍 搜尋版本...",
+            expand=True,
+            border_color=theme.OUTLINE,
+            content_padding=8,
+            on_change=self._on_version_search_change,
+        )
+        self._version_search_field = version_search_field
+
+        version_dropdown_body = ft.Column(
+            [
+                ft.Container(version_search_field, padding=ft.Padding(left=0, top=0, right=0, bottom=4)),
+                ft.Container(
+                    self._version_item_list,
+                    border=ft.Border.all(1, theme.GREY_200),
+                    border_radius=4,
+                    padding=4,
+                ),
+            ],
+            spacing=4,
+        )
+        self._version_dropdown_body = version_dropdown_body
+
+        version_dropdown_container = ft.Container(
+            content=version_dropdown_body,
             visible=False,
         )
         self.version_dropdown_container_ref = version_dropdown_container
-        version_section = ft.Column([
-            version_toggle,
-            version_dropdown_container,
-        ], spacing=4)
+
+        version_section = ft.Column(
+            [version_toggle_bar, version_dropdown_container],
+            spacing=2,
+        )
         self._version_section = version_section
 
         description_row = ft.Row(
@@ -213,6 +330,7 @@ class BundlerView(ft.Column):
         root_dir_row = ft.Row(
             [
                 self.root_dir_field,
+                # 選擇翻譯專案根目錄
                 ft.IconButton(
                     icon=ft.Icons.FOLDER_OPEN,
                     tooltip="選擇資料夾",
@@ -225,6 +343,7 @@ class BundlerView(ft.Column):
         output_zip_row = ft.Row(
             [
                 self.output_zip_field,
+                # 選擇 ZIP 儲存位置
                 ft.IconButton(
                     icon=ft.Icons.SAVE_AS,
                     tooltip="選擇儲存位置",
@@ -238,6 +357,7 @@ class BundlerView(ft.Column):
             [
                 ft.Row([
                     ft.Text("其他指定資料夾", size=13, weight=ft.FontWeight.W_500),
+                    # 新增額外資料夾至打包清單
                     ft.IconButton(
                         icon=ft.Icons.ADD,
                         icon_size=20,
@@ -251,6 +371,8 @@ class BundlerView(ft.Column):
             spacing=8,
         )
 
+        # 開始打包按鈕：驗證輸入後啟動背景執行緒執行打包任務
+        # 執行緒完成後透過 page.run_task() 更新 progress_bar / log_view
         start_button = ft.Button(
             "開始打包",
             icon=ft.Icons.PLAY_ARROW,
@@ -383,6 +505,11 @@ class BundlerView(ft.Column):
         self._page.update()
 
     def start_bundling_clicked(self, e: ft.ControlEvent):
+        """開始打包按鈕事件處理（方案B）。
+
+        驗證必填欄位後，初始化 BundleState 並啟動背景執行緒 + Poller。
+        背景執行緒只寫入執行緒安全的共享狀態，Poller 負責 UI 更新。
+        """
         root_dir = self.root_dir_field.value or ""
         output_zip = self.output_zip_field.value or ""
 
@@ -399,9 +526,13 @@ class BundlerView(ft.Column):
 
         self.progress_bar.visible = True
         self.progress_bar.value = 0
+        self.progress_bar.color = theme.BLUE
         self.log_view.controls.clear()
         self._append_log("開始執行打包...")
         self._page.update()
+
+        self._bundle_state = BundleState()
+        self._bundle_poller_running = True
 
         thread = threading.Thread(
             target=self._bundling_worker,
@@ -409,10 +540,62 @@ class BundlerView(ft.Column):
         )
         thread.start()
 
+        self._start_bundling_poller()
+
+    def _start_bundling_poller(self):
+        """Poller：定時從 BundleState 讀取狀態並更新 UI（方案B）。"""
+
+        def poll():
+            while self._bundle_poller_running and self._bundle_state is not None:
+                time.sleep(0.1)
+                state = self._bundle_state.snapshot()
+
+                async def _do_update(_=None, s=state):
+                    progress = s["progress"]
+                    log_lines = s["log_lines"]
+                    error = s["error"]
+                    finished = s["finished"]
+
+                    self.progress_bar.value = progress
+                    for line in log_lines:
+                        self.log_view.controls.append(ft.Text(line, size=12, color="cyan400"))
+                    if log_lines:
+                        try:
+                            await self.log_view.scroll_to(offset=-1, duration=100)
+                        except Exception:
+                            pass
+
+                    if error:
+                        self.progress_bar.color = theme.ERROR
+                        self.progress_bar.value = 0
+                        self.log_view.controls.append(
+                            ft.Text(f"[錯誤] {s['error_msg']}", size=12, color="red")
+                        )
+
+                    if finished:
+                        self.progress_bar.value = 0
+                        self.progress_bar.visible = False
+                        if not error:
+                            self.progress_bar.color = theme.SUCCESS
+
+                    self._page.update()
+
+                self._page.run_task(_do_update)
+
+                if state["finished"]:
+                    self._bundle_poller_running = False
+                    break
+
+        threading.Thread(target=poll, daemon=True).start()
+
     def _append_log(self, msg: str):
         self.log_view.controls.append(ft.Text(msg, size=12, color="cyan400"))
 
     def _bundling_worker(self, root_dir, output_zip, version, description, pack_image):
+        """背景執行緒：寫入 BundleState（方案B）。"""
+        if self._bundle_state is None:
+            return
+
         from translation_tool.core.output_bundler import bundle_outputs_generator
 
         try:
@@ -434,22 +617,16 @@ class BundlerView(ft.Column):
                 log_msg = update.get("log", "")
                 for line in log_msg.split("\n"):
                     if line.strip():
-                        self.log_view.controls.append(ft.Text(line, size=12, color="cyan400"))
+                        self._bundle_state.add_log(line)
                 if "progress" in update:
-                    self.progress_bar.value = update["progress"]
+                    self._bundle_state.set_progress(update["progress"])
                 if update.get("error"):
-                    self.progress_bar.color = theme.ERROR
-                self._page.run_task(self._scroll_log)
-                self._page.update()
-        except Exception as ex:
-            self._append_log(f"[錯誤] {ex}")
-            self.progress_bar.color = theme.RED
-        finally:
-            self.progress_bar.visible = False
-            self._page.update()
+                    self._bundle_state.set_error(str(update.get("error")))
 
-    async def _scroll_log(self):
-        await self.log_view.scroll_to(offset=-1, duration=100)
+        except Exception as ex:
+            self._bundle_state.set_error(str(ex))
+        finally:
+            self._bundle_state.finish()
 
     @property
     def page(self):
