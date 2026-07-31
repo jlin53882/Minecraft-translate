@@ -32,12 +32,28 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXTRACTOR_DIALOG = REPO_ROOT / "app" / "views" / "extractor" / "extractor_dialog.py"
+# 🐛 2026-07-14 user review:extractor_actions.py 已物理刪除 (跟 update_stats_from_log 一樣)
+# 這檔案原本裝 4 個 legacy 函式 + DEAD CODE 註解,Phase 3 commit af66bce
+# 已經把函式物理刪除,檔案剩空殼,沒 production caller。
+# 跟之前 update_stats_from_log 一樣物理刪除,測試改成驗證檔案不存在。
 EXTRACTOR_ACTIONS = REPO_ROOT / "app" / "views" / "extractor" / "extractor_actions.py"
 EXTRACTOR_VIEW = REPO_ROOT / "app" / "views" / "extractor_view.py"
 MERGE_VIEW = REPO_ROOT / "app" / "views" / "merge_view.py"
 
 
 def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _read_if_exists(path: Path) -> str:
+    """讀取檔案內容,檔案不存在時回傳空字串。
+
+    2026-07-14 user review:用於驗證物理刪除的 dead code 檔案 — 
+    檔案不存在時 grep "def xxx" not in "" 永遠 True,
+    確保 legacy 函式不會在 dead code 檔案重新加回時偷偷回來。
+    """
+    if not path.exists():
+        return ""
     return path.read_text(encoding="utf-8")
 
 
@@ -934,15 +950,29 @@ class TestFixPhase3DeadCodeRemoval:
 
     def test_extractor_actions_no_dead_code_audit_block(self):
         """extractor_actions.py 頂部 DEAD CODE audit 區塊應已被物理刪除。"""
-        src = _read(EXTRACTOR_ACTIONS)
+        src = _read_if_exists(EXTRACTOR_ACTIONS)
         assert "# =============================================================================" not in src or src.count("# DEAD CODE") == 0, (
             "回歸:extractor_actions.py 又有 DEAD CODE 區塊 "
             "(Phase 3 commit af66bce 應物理刪除 4 個 legacy 函式 + 區塊註解)"
         )
 
+
+    def test_extractor_actions_file_physically_deleted(self):
+        """extractor_actions.py 檔案已被物理刪除(2026-07-14 user review)。
+
+        跟 update_stats_from_log (commit 7e06a2e) 一樣處理:
+        - Phase 3 commit af66bce 物理刪除 4 個 legacy 函式
+        - 檔案剩空殼(只有 imports + 1 段註解),沒 production caller
+        - 2026-07-14 user review 確認整個檔案物理刪除更乾淨
+        """
+        assert not EXTRACTOR_ACTIONS.exists(), (
+            "回歸:extractor_actions.py 重新出現 "
+            "(2026-07-14 user review 已物理刪除整個檔案)"
+        )
+
     def test_extractor_actions_no_extraction_worker(self):
         """_extraction_worker 函式應已被物理刪除(legacy code)。"""
-        src = _read(EXTRACTOR_ACTIONS)
+        src = _read_if_exists(EXTRACTOR_ACTIONS)
         assert "def _extraction_worker" not in src, (
             "回歸:_extraction_worker 函式重新出現 "
             "(Phase 3 commit af66bce 已物理刪除)"
@@ -950,7 +980,7 @@ class TestFixPhase3DeadCodeRemoval:
 
     def test_extractor_actions_no_extraction_start_extraction_function(self):
         """extractor_actions.start_extraction 函式應已被物理刪除(legacy code)。"""
-        src = _read(EXTRACTOR_ACTIONS)
+        src = _read_if_exists(EXTRACTOR_ACTIONS)
         assert "def start_extraction(view, mode: str):" not in src, (
             "回歸:extractor_actions.start_extraction 函式重新出現 "
             "(Phase 3 commit af66bce 已物理刪除,改名為 nested def start_extraction(e) "
@@ -959,7 +989,7 @@ class TestFixPhase3DeadCodeRemoval:
 
     def test_extractor_actions_no_show_preview_function(self):
         """extractor_actions.show_preview 函式應已被物理刪除(legacy code)。"""
-        src = _read(EXTRACTOR_ACTIONS)
+        src = _read_if_exists(EXTRACTOR_ACTIONS)
         assert "def show_preview(view, mode: str):" not in src, (
             "回歸:extractor_actions.show_preview 函式重新出現 "
             "(Phase 3 commit af66bce 已物理刪除,改名為 nested def show_preview(e) "
@@ -968,7 +998,7 @@ class TestFixPhase3DeadCodeRemoval:
 
     def test_extractor_actions_no_build_preview_result_dialog(self):
         """build_preview_result_dialog 函式應已被物理刪除(legacy code)。"""
-        src = _read(EXTRACTOR_ACTIONS)
+        src = _read_if_exists(EXTRACTOR_ACTIONS)
         assert "def build_preview_result_dialog" not in src, (
             "回歸:build_preview_result_dialog 函式重新出現 "
             "(Phase 3 commit af66bce 已物理刪除)"
