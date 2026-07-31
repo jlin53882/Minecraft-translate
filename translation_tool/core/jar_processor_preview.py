@@ -217,16 +217,18 @@ def preview_extraction_generator_impl(
         }
         return
 
+    # 🐛 2026-07-14 user review:從頂部 import 移走避免循環引入
+    # (jar_processor 從 jar_processor_preview 頂部 import,所以不能反向 import)
+    # 函數內 lazy import 是處理循環引入的標準做法,效能影響極小
+    # (只在呼叫 preview_extraction_generator_impl 時才執行)
+    from translation_tool.core.jar_processor import build_lang_file_regex, build_book_path_regex
     if mode == "lang":
-        from translation_tool.core.jar_processor import build_lang_file_regex
         target_regex = build_lang_file_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)
         lang_regex = None
     elif mode == "book":
-        from translation_tool.core.jar_processor import build_book_path_regex
         target_regex = build_book_path_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)
         lang_regex = None
     elif mode == "dual":
-        from translation_tool.core.jar_processor import build_lang_file_regex
         lang_regex = build_lang_file_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)
         target_regex = None
     else:

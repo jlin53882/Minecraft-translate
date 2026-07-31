@@ -14,12 +14,15 @@ import flet as ft
 import threading
 import os
 import sys
+import time
 import traceback
 
 from translation_tool.utils.log_unit import log_info, log_debug, log_warning
 
 from app.ui import theme
 from app.views._log import LogView
+from app.views.extractor.extractor_state import PreviewState
+from app.views.extractor.extractor_dialog_helpers import format_size
 from app.services_impl.pipelines.extract_service import (
     prepare_extraction_paths,
     prepare_preview_paths,
@@ -600,9 +603,6 @@ def open_preview_dialog(
         output_path: 輸出目錄路徑
         mode: 預設模式
     """
-    from translation_tool.core.jar_processor import preview_extraction_generator, find_jar_files
-    from app.views.extractor.extractor_state import PreviewState
-
     dialog_width = max(500, int(page.width * 0.5))
 
     # ========== UI 元件 ==========
@@ -703,7 +703,7 @@ def open_preview_dialog(
             else:
                 # 🐛 2026-07-14 user review:小檔案顯示 0.0 MB(user 看不出來)
                 # 改用 format_size helper 自動選擇單位 (MB / KB / B)
-                from app.views.extractor.extractor_dialog_helpers import format_size
+                # format_size 從頂部 import(extractor_dialog_helpers)
                 jar_list.controls.append(
                     ft.Text(f"📦 {r['jar']}: {r['count']} 個檔案 ({format_size(r['size_mb'])})", size=12)
                 )
@@ -837,8 +837,7 @@ def open_preview_dialog(
 
         def ui_poller():
             """主執行緒輪詢：更新 UI 進度條 + log"""
-            import time
-
+            # time 從頂部 import
             last_log = [None]  # 用 list 讓 closure 可以修改
 
             async def _do_update():

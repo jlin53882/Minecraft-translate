@@ -26,6 +26,8 @@ from app.task_session import TaskSession
 # update_stats_from_log 本體函式也無 caller,本 commit 一起清掉)
 from app.views.extractor.extractor_panels import build_logs_panel, build_settings_panel, _build_pick_button
 from app.ui.components import styled_card
+from app.views.extractor.extractor_dialog import open_extractor_dialog, open_preview_dialog
+from app.services_impl.pipelines.extract_service import get_output_folder_names
 
 class ExtractorView(ft.Column):
     """JAR 提取頁（UI）。
@@ -97,8 +99,7 @@ class ExtractorView(ft.Column):
         )
 
         # 2. Action Buttons - 改为打开对话框
-        from app.views.extractor.extractor_dialog import open_extractor_dialog, open_preview_dialog
-
+        # open_extractor_dialog / open_preview_dialog 從頂部 import
         # 获取 file_picker
         file_picker = self.file_picker
 
@@ -253,7 +254,7 @@ class ExtractorView(ft.Column):
 
         ✅ 階段 B 重構：config 讀取已抽離至 extract_service.get_output_folder_names()
         """
-        from app.services_impl.pipelines.extract_service import get_output_folder_names
+        # get_output_folder_names 從頂部 import
         folder_names = get_output_folder_names()
         lang_extract = folder_names["lang_extract"]
         book_extract = folder_names["book_extract"]
@@ -297,8 +298,7 @@ class ExtractorView(ft.Column):
 
         ✅ 階段 B 重構：config 讀取已抽離至 extract_service.get_output_folder_names()
         """
-        from app.services_impl.pipelines.extract_service import get_output_folder_names
-
+        # get_output_folder_names 從頂部 import
         folder_names = get_output_folder_names()
         lang_extract = folder_names["lang_extract"]
         book_extract = folder_names["book_extract"]
@@ -371,7 +371,7 @@ class ExtractorView(ft.Column):
         output_path = (self.output_dir_textfield.value or "").strip()
         if not output_path:
             output_path = self._auto_fill_output_path(mods_dir, "lang")
-        from app.views.extractor.extractor_dialog import open_extractor_dialog
+        # open_extractor_dialog 從頂部 import
         open_extractor_dialog(
             self.page,
             self.file_picker,
@@ -397,7 +397,7 @@ class ExtractorView(ft.Column):
         output_path = (self.output_dir_textfield.value or "").strip()
         if not output_path:
             output_path = self._auto_fill_output_path(mods_dir, "book")
-        from app.views.extractor.extractor_dialog import open_extractor_dialog
+        # open_extractor_dialog 從頂部 import
         open_extractor_dialog(
             self.page,
             self.file_picker,
@@ -416,7 +416,7 @@ class ExtractorView(ft.Column):
         output_path = (self.output_dir_textfield.value or "").strip()
         if not output_path:
             output_path = self._auto_fill_output_path(mods_dir, "dual")
-        from app.views.extractor.extractor_dialog import open_extractor_dialog
+        # open_extractor_dialog 從頂部 import
         open_extractor_dialog(
             self.page,
             self.file_picker,
@@ -434,7 +434,7 @@ class ExtractorView(ft.Column):
         if not self._check_mods_dir_or_snack(mods_dir, "預覽 Lang"):
             return
         output_path = (self.output_dir_textfield.value or "").strip()
-        from app.views.extractor.extractor_dialog import open_preview_dialog
+        # open_preview_dialog 從頂部 import
         open_preview_dialog(
             self.page,
             self.file_picker,
@@ -451,7 +451,7 @@ class ExtractorView(ft.Column):
         if not self._check_mods_dir_or_snack(mods_dir, "預覽 Book"):
             return
         output_path = (self.output_dir_textfield.value or "").strip()
-        from app.views.extractor.extractor_dialog import open_preview_dialog
+        # open_preview_dialog 從頂部 import
         open_preview_dialog(
             self.page,
             self.file_picker,
@@ -468,7 +468,7 @@ class ExtractorView(ft.Column):
         if not self._check_mods_dir_or_snack(mods_dir, "預覽 Lang + Book"):
             return
         output_path = (self.output_dir_textfield.value or "").strip()
-        from app.views.extractor.extractor_dialog import open_preview_dialog
+        # open_preview_dialog 從頂部 import
         open_preview_dialog(
             self.page,
             self.file_picker,
