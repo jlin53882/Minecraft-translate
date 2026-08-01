@@ -10,6 +10,7 @@ import json
 from translation_tool.utils.log_unit import log_debug
 
 from app.ui import theme
+from app.ui.snack import show_snack
 from app.ui.components import styled_card
 from app.views._log import LogView
 from app.services_impl.config_service import load_config_json
@@ -380,18 +381,13 @@ class BundlerView(ft.Column):
             self._refresh_extra_folders()
             self._page.update()
 
-    def _show_snack_bar(self, message: str, color: str = theme.ERROR):
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self._page.overlay.append(snack)
-        snack.open = True
-        self._page.update()
 
     def start_bundling_clicked(self, e: ft.ControlEvent):
         root_dir = self.root_dir_field.value or ""
         output_zip = self.output_zip_field.value or ""
 
         if not root_dir:
-            self._show_snack_bar("請填寫「翻譯專案根目錄」")
+            show_snack(self.page, "請填寫「翻譯專案根目錄」")
             return
 
         if not output_zip:

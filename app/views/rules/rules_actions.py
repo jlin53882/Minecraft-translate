@@ -1,3 +1,4 @@
+from app.ui.snack import show_snack
 from __future__ import annotations
 
 import math
@@ -55,7 +56,7 @@ def start_reload_thread(view):
     """在后台线程启动规则重新加载流程"""
     view.loading_indicator.visible = True
     view.page.update()
-    view._show_snack_bar('🔄 正在重新載入規則…', ft.Colors.BLUE_700)
+    show_snack(view.page('🔄 正在重新載入規則…', ft.Colors.BLUE_700))
     threading.Thread(target=lambda: perform_reload(view), daemon=True).start()
 
 def start_save_thread(view, clean_rules):
@@ -65,10 +66,10 @@ def start_save_thread(view, clean_rules):
         try:
             from app.services_impl.config_service import save_replace_rules
             save_replace_rules(clean_rules)
-            view._run_on_ui_thread(lambda: view._show_snack_bar('規則已成功儲存！', ft.Colors.GREEN_700))
+            view._run_on_ui_thread(lambda: show_snack(view.page('規則已成功儲存！', ft.Colors.GREEN_700)))
         except Exception as err:
             msg = f'儲存規則時發生錯誤: {err}'
-            view._run_on_ui_thread(lambda msg=msg: view._show_snack_bar(msg, ft.Colors.RED_600))
+            view._run_on_ui_thread(lambda msg=msg: show_snack(view.page(msg, ft.Colors.RED_600)))
     threading.Thread(target=worker, daemon=True).start()
 
 def calc_total_pages(total_rules: int, page_size: int) -> int:

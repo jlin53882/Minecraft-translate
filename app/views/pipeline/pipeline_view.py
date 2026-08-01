@@ -11,6 +11,8 @@ import threading
 import time
 import os
 
+from app.ui.snack import show_snack
+
 from app.ui.theme import (
     BLUE_600, BLUE_700, GREEN_700, TEAL_700, PURPLE_700,
     YELLOW_900, YELLOW, CYAN_400, CYAN_700, GREY_500, GREY_600,
@@ -343,12 +345,6 @@ class PipelineView(ft.Column):
         self.progress_panel.start()
         self._page.update()
 
-    def _show_snack_bar(self, message: str, color: str = RED_400):
-        log_info(f"Pipeline SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self._page.overlay.append(snack)
-        snack.open = True
-        self._page.update()
 
     # =============================================================================
     # Background Workers
@@ -478,10 +474,10 @@ class PipelineView(ft.Column):
         input_val = (self.input_path_text.value or "").strip()
         output_val = (self.output_path_text.value or "").strip()
         if not input_val:
-            self._show_snack_bar("⚠️ 請填寫 Mod 來源路徑")
+            show_snack(self._page, "⚠️ 請填寫 Mod 來源路徑")
             return
         if not output_val:
-            self._show_snack_bar("⚠️ 請填寫輸出目錄路徑")
+            show_snack(self._page, "⚠️ 請填寫輸出目錄路徑")
             return
         open_extract_dialog(
             page=self._page,
@@ -497,10 +493,10 @@ class PipelineView(ft.Column):
         input_val = (self.input_path_text.value or "").strip()
         output_val = (self.output_path_text.value or "").strip()
         if not input_val:
-            self._show_snack_bar("⚠️ 請填寫 Mod 來源路徑")
+            show_snack(self._page, "⚠️ 請填寫 Mod 來源路徑")
             return
         if not output_val:
-            self._show_snack_bar("⚠️ 請填寫輸出目錄路徑")
+            show_snack(self._page, "⚠️ 請填寫輸出目錄路徑")
             return
         open_merge_dialog(
             page=self._page,
@@ -516,10 +512,10 @@ class PipelineView(ft.Column):
         input_val = (self.input_path_text.value or "").strip()
         output_val = (self.output_path_text.value or "").strip()
         if not input_val:
-            self._show_snack_bar("⚠️ 請填寫 Mod 來源路徑")
+            show_snack(self._page, "⚠️ 請填寫 Mod 來源路徑")
             return
         if not output_val:
-            self._show_snack_bar("⚠️ 請填寫輸出目錄路徑")
+            show_snack(self._page, "⚠️ 請填寫輸出目錄路徑")
             return
         open_translate_dialog(
             page=self._page,
@@ -534,10 +530,10 @@ class PipelineView(ft.Column):
         input_val = (self.input_path_text.value or "").strip()
         output_val = (self.output_path_text.value or "").strip()
         if not input_val:
-            self._show_snack_bar("⚠️ 請填寫 Mod 來源路徑")
+            show_snack(self._page, "⚠️ 請填寫 Mod 來源路徑")
             return
         if not output_val:
-            self._show_snack_bar("⚠️ 請填寫輸出目錄路徑")
+            show_snack(self._page, "⚠️ 請填寫輸出目錄路徑")
             return
         open_bundle_dialog(
             page=self._page,
@@ -553,10 +549,10 @@ class PipelineView(ft.Column):
         output_val = (self.output_path_text.value or "").strip()
         log_info(f"Pipeline one_click: input=[{input_val}], output=[{output_val}]")
         if not input_val:
-            self._show_snack_bar("⚠️ 請輸入 Mod 來源路徑")
+            show_snack(self._page, "⚠️ 請輸入 Mod 來源路徑")
             return
         if not output_val:
-            self._show_snack_bar("⚠️ 請輸入輸出目錄路徑")
+            show_snack(self._page, "⚠️ 請輸入輸出目錄路徑")
             return
         open_one_click_dialog(
             page=self._page,
@@ -572,10 +568,10 @@ class PipelineView(ft.Column):
         output_dir = (self.output_path_text.value or "").strip()
 
         if not input_dir or not os.path.isdir(input_dir):
-            self._show_snack_bar("❌ Mod 來源不存在或未選擇")
+            show_snack(self._page, "❌ Mod 來源不存在或未選擇")
             return
         if not output_dir or not os.path.isdir(output_dir):
-            self._show_snack_bar("❌ 輸出目錄不存在或未選擇")
+            show_snack(self._page, "❌ 輸出目錄不存在或未選擇")
             return
 
         cfg = PipelineConfig(input_dir, output_dir)

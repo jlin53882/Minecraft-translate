@@ -16,6 +16,7 @@ from translation_tool.utils.config_manager import load_config, save_config
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service, run_merge_folder_batch_service
 from app.task_session import TaskSession
 from app.ui import theme
+from app.ui.snack import show_snack
 from app.ui.components import primary_button, styled_card
 
 
@@ -595,14 +596,14 @@ class MergeView(ft.Column):
         input_mode = self.input_mode_group.value
         if input_mode == "folder":
             if not (self.folder_path_field.value or "").strip():
-                self._show_snack_bar("請先選擇來源資料夾")
+                show_snack(self.page, "請先選擇來源資料夾")
                 return
         else:
             if not self.selected_zips:
-                self._show_snack_bar("請先選擇 ZIP 檔案")
+                show_snack(self.page, "請先選擇 ZIP 檔案")
                 return
         if not (self.output_dir_field.value or "").strip():
-            self._show_snack_bar("請先選擇輸出資料夾")
+            show_snack(self.page, "請先選擇輸出資料夾")
             return
 
         self.start_button.disabled = True
@@ -715,13 +716,6 @@ class MergeView(ft.Column):
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
-    def _show_snack_bar(self, message: str, color: str = theme.ERROR) -> None:
-        """顯示 SnackBar 訊息。"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
 
     def _show_merge_summary(self, summary: dict[str, Any]) -> None:
         """顯示合併結果摘要（使用 overlay 確保穩定顯示）。"""

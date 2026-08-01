@@ -6,6 +6,7 @@
 
 import flet as ft
 from app.ui import theme
+from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_info
 from app.views.cache_manager.cache_state import CacheQueryState
 from app.services_impl.cache.cache_services import (
@@ -317,7 +318,7 @@ class CacheQueryPanel(ft.Container):
         """執行關鍵字搜尋"""
         query = (self.tf_query_input.value or "").strip()
         if not query:
-            self._show_snack_bar("請輸入查詢內容", theme.AMBER_700)
+            show_snack(self.page, "請輸入查詢內容", theme.AMBER_700)
             return
 
         mode = (self.dd_query_mode.value or "ALL").upper()
@@ -562,7 +563,7 @@ class CacheQueryPanel(ft.Container):
     def _on_apply_dst(self, e):
         """套用目標翻譯"""
         if not self.state.query_selected_result:
-            self._show_snack_bar("請先選擇一筆資料", theme.AMBER_700)
+            show_snack(self.page, "請先選擇一筆資料", theme.AMBER_700)
             return
 
         ctype = str(self.state.query_selected_result.get("cache_type", ""))
@@ -574,7 +575,7 @@ class CacheQueryPanel(ft.Container):
         try:
             done = cache_update_dst_service(ctype, key, new_dst)
             if not done:
-                self._show_snack_bar("套用失敗：找不到目標 key", theme.RED_400)
+                show_snack(self.page, "套用失敗：找不到目標 key", theme.RED_400)
                 return
 
             cache_save_all_service(write_new_shard=False, only_types=[ctype])
@@ -600,19 +601,19 @@ class CacheQueryPanel(ft.Container):
 
             self._render_query_results()
             self._render_query_detail()
-            self._show_snack_bar("已套用並寫入快取", theme.BLUE_400)
+            show_snack(self.page, "已套用並寫入快取", theme.BLUE_400)
             self._page.update()
         except Exception as ex:
-            self._show_snack_bar(f"套用失敗：{ex}", theme.RED_400)
+            show_snack(self.page, f"套用失敗：{ex}", theme.RED_400)
 
     def _on_revert_dst(self, e):
         """還原 DST 到原始值"""
         if not self.state.query_selected_result:
-            self._show_snack_bar("請先選擇一筆資料", theme.AMBER_700)
+            show_snack(self.page, "請先選擇一筆資料", theme.AMBER_700)
             return
 
         self.query_detail_dst.value = str(self.state.query_original_dst or "")
-        self._show_snack_bar("已還原到原始值", theme.BLUE_400)
+        show_snack(self.page, "已還原到原始值", theme.BLUE_400)
         self._page.update()
 
     def _history_append_event(self, cache_type: str, event: dict):
@@ -620,13 +621,6 @@ class CacheQueryPanel(ft.Container):
         root = str((self.last_overview_data or {}).get("cache_root", "") or "").strip()
         history_append_event(root, cache_type, event)
 
-    def _show_snack_bar(self, message: str, color: str):
-        """顯示 SnackBar"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self._page.overlay.append(snack)
-        snack.open = True
-        self._page.update()
 
     @property
     def page(self):

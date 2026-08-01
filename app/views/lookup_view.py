@@ -9,6 +9,7 @@
 import flet as ft
 import threading
 from app.ui import theme
+from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_info
 from app.services_impl.pipelines.lookup_service import (
     run_batch_lookup_service,
@@ -181,15 +182,6 @@ class LookupView(ft.Column):
             self.batch_progress_bar.visible = False
             self.page.update()
 
-    def _show_snack_bar(self, message: str, color: str = theme.ERROR):
-        """
-        (新) 統一的 SnackBar 觸發函式 (使用您提供的 Overlay 方案)
-        """
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
 
     @property
     def page(self):

@@ -22,6 +22,7 @@ from pathlib import Path
 
 import flet as ft
 from app.ui import theme
+from app.ui.snack import show_snack
 
 # UI 共用元件：統一按鈕樣式（先套用在總覽區，避免一次改動過大）
 from app.ui.components import primary_button, secondary_button, empty_state
@@ -1497,18 +1498,6 @@ class CacheView(ft.Column):
             ]
         )
 
-    def _show_snack_bar(self, message: str, color: str = theme.ERROR):
-        """
-        顯示底部的快訊通知 (SnackBar)
-        :param message: 要顯示的文字訊息
-        :param color: SnackBar 的背景顏色，預設為 RED_400
-        """
-        # 記錄 snackbar 顯示到日誌
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
 
     def _append_log(self, text: str):
         """新增日誌訊息並根據等級記錄"""
@@ -1535,13 +1524,13 @@ class CacheView(ft.Column):
         lv = (level or "info").lower()
         if lv == "error":
             self._append_log(f"[ERROR/錯誤] {message}")
-            self._show_snack_bar(message, theme.RED_400)
+            show_snack(self.page, message, theme.RED_400)
         elif lv == "warn":
             self._append_log(f"[WARN/警告] {message}")
-            self._show_snack_bar(message, theme.AMBER_700)
+            show_snack(self.page, message, theme.AMBER_700)
         else:
             self._append_log(f"[INFO/資訊] {message}")
-            self._show_snack_bar(message, theme.BLUE_400)
+            show_snack(self.page, message, theme.BLUE_400)
 
     # =========================================================
     # Overview page
@@ -1634,9 +1623,9 @@ class CacheView(ft.Column):
         txt = "\n".join(self._all_logs)
         try:
             self.page.set_clipboard(txt)
-            self._show_snack_bar("已複製日誌", theme.BLUE_400)
+            show_snack(self.page, "已複製日誌", theme.BLUE_400)
         except Exception:
-            self._show_snack_bar("複製失敗", theme.RED_400)
+            show_snack(self.page, "複製失敗", theme.RED_400)
 
     def _iter_type_states(self, data: dict):
         """迭代所有快取類型與其狀態。
@@ -2455,11 +2444,11 @@ class CacheView(ft.Column):
     def _on_shard_dst_revert(self, e):
         """還原 DST 到原始值（分類分片）"""
         if not self.shard_detail_selected_key:
-            self._show_snack_bar("請先選擇 key", theme.AMBER_700)
+            show_snack(self.page, "請先選擇 key", theme.AMBER_700)
             return
 
         self.shard_dst_field.value = str(self.shard_dst_original or "")
-        self._show_snack_bar("已還原到原始值", theme.BLUE_400)
+        show_snack(self.page, "已還原到原始值", theme.BLUE_400)
         self._refresh_disabled_state()
         if self.page:
             self.page.update()
@@ -3059,7 +3048,7 @@ class CacheView(ft.Column):
             self.shard_history_window.visible = True
             source_text = "分片區"
 
-        self._show_snack_bar(
+        show_snack(self.page,
             f"歷史紀錄視窗已打開（{source_text}，可拖曳標題列移動）", theme.BLUE_400
         )
         if self.page:
@@ -3424,34 +3413,34 @@ class CacheView(ft.Column):
     def _on_revert_dst(self, e):
         """還原 DST 到原始值（查詢區）"""
         if not self.query_selected_result:
-            self._show_snack_bar("請先選擇一筆資料", theme.AMBER_700)
+            show_snack(self.page, "請先選擇一筆資料", theme.AMBER_700)
             return
 
         self.query_detail_dst.value = str(self.query_original_dst or "")
-        self._show_snack_bar("已還原到原始值", theme.BLUE_400)
+        show_snack(self.page, "已還原到原始值", theme.BLUE_400)
         if self.page:
             self.page.update()
 
     def _on_restore_latest_query(self, e):
         """還原最新歷史紀錄（查詢區，不立即寫入快取）"""
         if self.ui_busy:
-            self._show_snack_bar("目前忙碌中，暫停還原", theme.AMBER_700)
+            show_snack(self.page, "目前忙碌中，暫停還原", theme.AMBER_700)
             return
 
         if not self.query_selected_result:
-            self._show_snack_bar("請先選擇一筆資料", theme.AMBER_700)
+            show_snack(self.page, "請先選擇一筆資料", theme.AMBER_700)
             return
 
         ctype = str(self.query_selected_result.get("cache_type", ""))
         key = str(self.query_selected_result.get("key", ""))
         if not ctype or not key:
-            self._show_snack_bar("無法取得 cache_type 或 key", theme.RED_400)
+            show_snack(self.page, "無法取得 cache_type 或 key", theme.RED_400)
             return
 
         # 載入最新歷史紀錄
         records = self._history_load_recent(ctype, key, limit=1)
         if not records:
-            self._show_snack_bar("此 key 目前沒有歷史紀錄", theme.AMBER_700)
+            show_snack(self.page, "此 key 目前沒有歷史紀錄", theme.AMBER_700)
             return
 
         latest = records[0]
@@ -3459,7 +3448,7 @@ class CacheView(ft.Column):
 
         # 只填入 DST 輸入框，不寫入快取
         self.query_detail_dst.value = old_dst
-        self._show_snack_bar(
+        show_snack(self.page,
             "已載入最新歷史紀錄到 DST（尚未寫入快取，請點「套用」儲存）",
             theme.BLUE_400,
         )

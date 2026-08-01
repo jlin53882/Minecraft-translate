@@ -9,6 +9,7 @@ from typing import List
 from app.views.qc_base import QCBase
 from app.services import run_untranslated_check_service
 from app.ui import theme
+from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_info
 
 
@@ -157,15 +158,8 @@ class UntranslatedChecker(ft.Container):
             target_textfield.value = path
             self._page.update()
         else:
-            self._show_snack_bar("您已取消選擇", theme.BLUE_GREY_500)
+            show_snack(self.page, "您已取消選擇", theme.BLUE_GREY_500)
 
-    def _show_snack_bar(self, message: str, color: str = theme.ERROR):
-        """顯示 SnackBar 訊息提示"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
 
     def _on_start(self, e):
         """處理開始檢查任務"""
@@ -174,7 +168,7 @@ class UntranslatedChecker(ft.Container):
         out_dir = self.out_dir.value
 
         if not en_dir or not tw_dir or not out_dir:
-            self._show_snack_bar("錯誤：請填寫所有路徑！")
+            show_snack(self.page, "錯誤：請填寫所有路徑！")
             return
 
         controls: List[ft.Control] = [

@@ -1,3 +1,4 @@
+from app.ui.snack import show_snack
 from __future__ import annotations
 
 import traceback
@@ -189,7 +190,7 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
         new_config['lm_translator']['models'] = models
     except (ValueError, TypeError, RuntimeError) as err:
         traceback.print_exc()
-        view._show_snack_bar(f'❌ 發生錯誤：{type(err).__name__}: {err}')
+        show_snack(view.page(f'❌ 發生錯誤：{type(err)).__name__}: {err}')
         return False
     save_config_json_fn(new_config)
     view.load_config()
@@ -199,5 +200,5 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
             if item['key'] == 'extractor' and hasattr(item['view'].content, 'refresh_output_dir_helper'):
                 item['view'].content.refresh_output_dir_helper()
 
-    view._show_snack_bar('✅ 設定已成功儲存！', view._success_color())
+    show_snack(view.page('✅ 設定已成功儲存！', view._success_color()))
     return True
