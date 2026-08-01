@@ -595,7 +595,9 @@ class TestFixExtractionSummaryDialogAPI:
     1. 物理刪除 _show_extraction_summary 函式本身
     2. 物理刪除測試 test_extractor_view_show_extraction_summary_exists
        跟 test_show_extraction_summary_dialog_has_lang_and_book_sections
-    3. 保留 _close_dialog_overlay (merge_view.py 仍使用)
+    3. 🐛 2026-08-01 user review:extractor_view._close_dialog_overlay 也物理刪除
+       (B+C 組 dead code cleanup part)。merge_view.py 內有自己的 _close_dialog_overlay
+       (merge_view.py:834),完全獨立,可繼續使用
     4. extractor_dialog.py 內的 update_stats + add_log("[完成]...") 才是真正
        的 summary 顯示路徑,這已在 phase 3 處理
 

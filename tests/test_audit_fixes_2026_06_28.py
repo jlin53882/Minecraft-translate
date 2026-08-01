@@ -14,41 +14,6 @@ import pytest
 # #1: dual buttons must be in the disabled list
 # ---------------------------------------------------------------------------
 
-def test_set_controls_disabled_includes_dual_buttons():
-    """Regression: dual_extract_button / dual_preview_button 必須被停用，避免 stats 競爭。"""
-    from tests.conftest import mock_page, mock_filepicker
-    from app.views.extractor_view import ExtractorView
-
-    view = ExtractorView(mock_page(), mock_filepicker())
-    view.set_controls_disabled(True)
-
-    assert view.dual_extract_button.disabled is True
-    assert view.dual_preview_button.disabled is True
-    assert view.preview_lang_button.disabled is True
-    assert view.preview_book_button.disabled is True
-    assert view.lang_button.disabled is True
-    assert view.book_button.disabled is True
-
-
-def test_set_controls_disabled_re_enables_dual_buttons():
-    """停用旗標解除後 dual 按鈕應恢復。"""
-    from tests.conftest import mock_page, mock_filepicker
-    from app.views.extractor_view import ExtractorView
-
-    view = ExtractorView(mock_page(), mock_filepicker())
-    view.set_controls_disabled(True)
-    view.set_controls_disabled(False)
-
-    assert view.dual_extract_button.disabled is False
-    assert view.dual_preview_button.disabled is False
-    assert view.preview_lang_button.disabled is False
-    assert view.preview_book_button.disabled is False
-
-
-# ---------------------------------------------------------------------------
-# #5/#6: DUAL mode yields book stats even if lang_stats is None
-# ---------------------------------------------------------------------------
-
 def test_dual_extract_yields_book_stats_when_lang_stats_none(monkeypatch):
     """Regression: lang_stats=None 時，book 階段仍要 yield book_stats。
     否則 dual 模式 UI 統計徽章永遠顯示 0/0/0。

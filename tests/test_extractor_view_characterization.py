@@ -177,41 +177,6 @@ def test_extractor_view_logs_panel_visible(monkeypatch):
     )
 
 
-def test_extractor_view_set_controls_disabled_toggles_inputs(monkeypatch):
-    """測試 set_controls_disabled 正確切換輸入控制項狀態"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    view.set_controls_disabled(True)
-
-    assert view.mods_dir_textfield.disabled is True
-    assert view.output_dir_textfield.disabled is True
-    assert view.lang_button.disabled is True
-
-    view.set_controls_disabled(False)
-
-    assert view.mods_dir_textfield.disabled is False
-    assert view.output_dir_textfield.disabled is False
-
-
-def test_extractor_view_build_settings_card(monkeypatch):
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-    assert hasattr(view, '_build_settings_card')
-
-
-def test_extractor_view_build_logs_card(monkeypatch):
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-    assert hasattr(view, '_build_logs_card')
-
-
-def test_extractor_view_pick_button_exists(monkeypatch):
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-    assert hasattr(view, '_pick_button')
-
-
 def test_auto_fill_output_path_lang_mode(monkeypatch):
     """測試 _auto_fill_output_path 在 lang 模式下產生正確的輸出路徑"""
     mock_cfg = {

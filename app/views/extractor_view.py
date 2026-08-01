@@ -188,33 +188,6 @@ class ExtractorView(ft.Column):
             else:
                 raise
 
-    def _build_settings_card(self):
-        """代理至 build_settings_panel，回傳設定面板元件。
-
-        回傳：
-            ft.Column，ExtractorView 的設定面板。
-        """
-        return build_settings_panel(self)
-
-    def _build_logs_card(self):
-        """代理至 build_logs_panel，回傳日誌面板元件。
-
-        回傳：
-            ft.Column，ExtractorView 的日誌面板。
-        """
-        return build_logs_panel(self)
-
-    # ==================================================
-    # UI helpers
-    # ==================================================
-    def _pick_button(self, target):
-        """代理至 _build_pick_button，產生目錄選擇 IconButton。
-
-        參數：
-            target：選擇目錄後填入路徑的 TextField。
-        """
-        return _build_pick_button(self, target)
-
     def pick_directory(self, target):
         """開啟目錄選擇對話框。
 
@@ -476,29 +449,6 @@ class ExtractorView(ft.Column):
             skip_zh_cn=self.skip_zh_cn_switch.value,
         )
 
-    def set_controls_disabled(self, disabled: bool):
-        """停用或啟用所有輸入框與按鈕（執行期間呼叫，防止重複點擊）。
-
-        包含 dual 按鈕在內的所有動作按鈕都會被停用，避免多執行緒競爭
-        _extraction_stats 寫入（Lang 提取中點 dual_extract 會造成 stats 覆蓋）。
-
-        參數：
-            disabled：True 為停用（淡化 50%），False 為啟用。
-        """
-        for ctrl in (
-            self.mods_dir_textfield,
-            self.output_dir_textfield,
-            self.lang_button,
-            self.book_button,
-            self.dual_extract_button,
-            self.dual_preview_button,
-            self.preview_lang_button,
-            self.preview_book_button,
-        ):
-            ctrl.disabled = disabled
-            ctrl.opacity = 0.5 if disabled else 1.0
-        self.page.update()
-
     def clear_output_path(self, e=None):
         """清除輸出路徑文字欄位，並寫入系統日誌。"""
         if not (self.output_dir_textfield.value or "").strip():
@@ -510,28 +460,6 @@ class ExtractorView(ft.Column):
     # ==================================================
     # Worker Logic
     # ==================================================
-    def _close_dialog_overlay(self, dialog):
-        """關閉指定的 dialog 並從 page.overlay 移除。
-
-        用於:
-        - 測試中清理殘留的 dialog
-        - `extractor_actions.py` / `merge_view.py` 等仍走手動 overlay 的 caller
-          (這些仍是 legacy 模式,留為 known issue,未來 follow-up PR 統一改)
-
-        注意:_show_extraction_summary 在本 commit 已改用 Flet 0.85 內建
-        show_dialog/pop_dialog,不再呼叫這個 helper。
-        """
-        try:
-            if dialog in self.page.overlay:
-                self.page.overlay.remove(dialog)
-            dialog.open = False
-            self.page.update()
-        except Exception as ex:
-            log_warning(
-                f"[SUMMARY] _close_dialog_overlay failed: {ex!r}",
-            )
-
-
     def _append_log_line(self, entry_or_str):
         """新增日誌訊息到日誌檢視區（直接走 LogView.add）。
 
