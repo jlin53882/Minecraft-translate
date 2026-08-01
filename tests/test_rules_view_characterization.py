@@ -1,5 +1,6 @@
 import flet as ft
 from app.views.rules_view import RulesView
+from app.ui.snack import show_snack
 from tests.conftest import mock_page
 
 
@@ -140,7 +141,7 @@ def test_rules_view_show_snack_bar_adds_to_overlay(monkeypatch):
     page = mock_page()
     view = RulesView(page)
 
-    view._show_snack_bar('Test error', '#FF0000')
+    show_snack(view.page, 'Test error', '#FF0000')
 
     assert len(page.overlay) >= 1
     assert any('Test error' in str(o.content.value) if hasattr(o, 'content') else False for o in page.overlay)
@@ -315,8 +316,10 @@ def test_rules_view_show_snack_bar(monkeypatch):
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [])
     view = RulesView(mock_page())
-    assert hasattr(view, '_show_snack_bar')
-    assert callable(view._show_snack_bar)
+    # _show_snack_bar 物理刪除 (PR #85 重構),SnackBar 透過 show_snack helper 顯示
+    # view 本身不再有 _show_snack_bar method,改為驗 show_snack helper 已 import + 可用
+    from app.ui.snack import show_snack
+    assert callable(show_snack)
 
 
 def test_rules_view_init_controls(monkeypatch):

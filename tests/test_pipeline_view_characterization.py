@@ -6,6 +6,7 @@
 import os
 import flet as ft
 from app.views.pipeline import pipeline_view
+from app.ui.snack import show_snack
 from app.views.pipeline.pipeline_view import (
     PipelineView,
     PipelineConfig,
@@ -589,7 +590,7 @@ def test_show_snack_bar_adds_to_overlay(monkeypatch):
     page = mock_page()
     view = PipelineView(page, mock_filepicker())
 
-    view._show_snack_bar("測試訊息")
+    show_snack(view.page, "測試訊息")
 
     assert len(page.overlay) == 1
     snack = page.overlay[0]

@@ -7,6 +7,7 @@
 import flet as ft
 from app.ui import theme
 from app.ui.snack import show_snack
+import threading
 from translation_tool.utils.log_unit import log_info
 
 # UI 共用元件：統一按鈕樣式
@@ -365,7 +366,6 @@ class RulesView(ft.Column):
             return
         
         # 設定新的 debounce 計時器（300ms）
-        import threading
         self._search_debounce_timer = threading.Timer(0.3, lambda: self._do_search(keyword))
         self._search_debounce_timer.start()
     

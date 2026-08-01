@@ -7,6 +7,7 @@ import flet as ft
 import threading
 import os
 import json
+from translation_tool.core.output_bundler import bundle_outputs_generator
 from translation_tool.utils.log_unit import log_debug
 
 from app.ui import theme
@@ -418,7 +419,6 @@ class BundlerView(ft.Column):
         self.log_view.add(msg, level=level)
 
     def _bundling_worker(self, root_dir, output_zip, version, description, pack_image):
-        from translation_tool.core.output_bundler import bundle_outputs_generator
 
         try:
             version_info = self.version_data.get(version, {}) if version else {}

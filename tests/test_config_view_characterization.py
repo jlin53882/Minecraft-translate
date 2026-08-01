@@ -1,6 +1,7 @@
 import pytest
 import flet as ft
 from app.views.config_view import ConfigView
+from app.ui.snack import show_snack
 from tests.conftest import mock_page
 
 
@@ -124,7 +125,7 @@ def test_config_view_show_snack_bar_adds_to_overlay(monkeypatch):
     page = mock_page()
     view = ConfigView(page)
 
-    view._show_snack_bar('Test error', '#FF0000')
+    show_snack(view.page, 'Test error', '#FF0000')
 
     assert len(page.overlay) == 1
     assert page.overlay[0].open is True

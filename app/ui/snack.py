@@ -1,5 +1,16 @@
 """共用 SnackBar 工具。
 
+設計目的 (PR #85 重構, 2026-08-01):
+    14 個 view 各自有 _show_snack_bar / _show_snack wrapper method (~95% 重複 ~140 行),
+    PR #85 抽共用 helper 取代所有重複。
+    User 訊息「純呼叫策略」: 物理刪除 view 內 wrapper,所有 caller 改成
+    show_snack(self.page, ...) 直接呼叫,不要保留 1 行 wrapper。
+
+設計對齊 (避免之前 PR #85 commit 0798022 在 extractor_view 的修法重複):
+    - try/except + log_warning (避免 page 沒 mount 時 crash)
+    - page.update() 主動推 render (SnackBar 真的跳出)
+    - page.show_dialog() + fallback (Flet 0.82.2+ 官方推薦)
+
 Flet 0.85.0 SnackBar API: https://flet.dev/docs/controls/snackbar
 
 使用方法:
@@ -13,6 +24,12 @@ Flet 0.85.0 SnackBar API: https://flet.dev/docs/controls/snackbar
 
     # 帶 action 按鈕
     show_snack(page, "已刪除", action_label="復原", on_action=lambda e: restore())
+
+    # 帶文字顏色 (e.g. rules_view.py: theme.WHITE 文字)
+    show_snack(page, "已跳至第 1 頁", theme.PRIMARY, text_color=theme.WHITE)
+
+    # 清除已存在的 SnackBar (預設行為,避免 overlay 累積)
+    # icon_preview_view.py 用 clear_existing=True 顯式指定 (預設已 True)
 """
 
 from __future__ import annotations
@@ -34,7 +51,7 @@ def show_snack(
     text_color: str | None = None,
     show_close_icon: bool = False,
     close_icon_color: str | None = None,
-    clear_existing: bool = False,
+    clear_existing: bool = True,
     **kwargs,
 ) -> ft.SnackBar:
     """統一的 SnackBar 顯示。

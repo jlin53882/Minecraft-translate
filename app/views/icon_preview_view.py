@@ -11,6 +11,13 @@ import hashlib
 import platform
 import re
 import zipfile
+from app import icon_index
+from app.icon_reader import IconRef
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from translation_tool.utils.jar_browser import scan_jars
+import re
+import shutil
+import tempfile
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -392,7 +399,6 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
                 return out_path
 
             # ===== Fallback: assets/<modid>/textures/*.png（Fabric glob）=====
-            import re
             textures_pattern = re.compile(r"^assets/" + re.escape(modid) + r"/textures/.+\.png$")
             texture_files = sorted(n for n in names if textures_pattern.match(n))
             if texture_files:
@@ -1618,7 +1624,6 @@ class IconPreviewView(ft.Column):
                 except TypeError:
                     pass  # 忽略不兼容的 callback
 
-        from translation_tool.utils.jar_browser import scan_jars
 
         # 包裝 callback：同時支援 0 參數（旧測試）和 2 參數（新設計）
         def wrapped_callback(processed: int, total: int):

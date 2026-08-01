@@ -43,7 +43,9 @@ def _build_test_view(monkeypatch):
     view.log_list = type("Dummy", (), {"controls": []})()
 
     monkeypatch.setattr(view, "_render_logs", lambda: None)
-    monkeypatch.setattr(view, "_show_snack_bar", lambda msg, color: None)
+    # 2026-08-01 (PR #85):view._show_snack_bar 物理刪除,改用 show_snack helper
+    # monkeypatch module-level show_snack 函式(因為 view 不再有 _show_snack_bar method)
+    monkeypatch.setattr("app.ui.snack.show_snack", lambda *args, **kwargs: None)
     monkeypatch.setattr(view, "_refresh_overview_ui", lambda data: None)
     monkeypatch.setattr(view, "_refresh_query_type_options", lambda: None)
     monkeypatch.setattr(view, "_render_query_type_shard_page", lambda: None)

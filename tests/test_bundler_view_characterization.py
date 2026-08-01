@@ -1,5 +1,6 @@
 import pytest
 from app.views.bundler_view import BundlerView
+from app.ui.snack import show_snack
 from tests.conftest import mock_page, mock_filepicker
 
 
@@ -128,7 +129,7 @@ def test_bundling_without_output_zip_shows_no_error(monkeypatch):
         return iter([{"log": "done", "progress": 1.0}])
 
     monkeypatch.setattr(
-        "translation_tool.core.output_bundler.bundle_outputs_generator",
+        "app.views.bundler_view.bundle_outputs_generator",
         mock_generator,
     )
 
@@ -152,7 +153,7 @@ def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
         ])
 
     monkeypatch.setattr(
-        "translation_tool.core.output_bundler.bundle_outputs_generator",
+        "app.views.bundler_view.bundle_outputs_generator",
         mock_generator,
     )
 
@@ -176,7 +177,7 @@ def test_bundling_worker_with_version_info(monkeypatch):
         ])
 
     monkeypatch.setattr(
-        "translation_tool.core.output_bundler.bundle_outputs_generator",
+        "app.views.bundler_view.bundle_outputs_generator",
         mock_generator,
     )
 
@@ -200,7 +201,7 @@ def test_bundling_worker_passes_extra_folders(monkeypatch):
         return iter([{"log": "done", "progress": 1.0}])
 
     monkeypatch.setattr(
-        "translation_tool.core.output_bundler.bundle_outputs_generator",
+        "app.views.bundler_view.bundle_outputs_generator",
         mock_generator,
     )
 
@@ -221,7 +222,7 @@ def test_bundling_worker_passes_pack_image(monkeypatch):
         return iter([{"log": "done", "progress": 1.0}])
 
     monkeypatch.setattr(
-        "translation_tool.core.output_bundler.bundle_outputs_generator",
+        "app.views.bundler_view.bundle_outputs_generator",
         mock_generator,
     )
 
@@ -243,7 +244,7 @@ def test_bundling_worker_empty_pack_image(monkeypatch):
         return iter([{"log": "done", "progress": 1.0}])
 
     monkeypatch.setattr(
-        "translation_tool.core.output_bundler.bundle_outputs_generator",
+        "app.views.bundler_view.bundle_outputs_generator",
         mock_generator,
     )
 
@@ -277,7 +278,7 @@ def test_show_snack_bar_adds_to_overlay(monkeypatch):
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
 
-    view._show_snack_bar("Test message")
+    show_snack(view.page, "Test message")
 
     assert len(page.overlay) == 1
     assert page.overlay[-1].content.value == "Test message"
@@ -292,7 +293,7 @@ def test_bundling_worker_with_error(monkeypatch):
         raise RuntimeError("Test error")
 
     monkeypatch.setattr(
-        "translation_tool.core.output_bundler.bundle_outputs_generator",
+        "app.views.bundler_view.bundle_outputs_generator",
         mock_generator,
     )
 
@@ -307,7 +308,7 @@ def test_bundler_view_show_snack_bar_adds_to_overlay():
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
 
-    view._show_snack_bar('Test error', '#FF0000')
+    show_snack(view.page, 'Test error', '#FF0000')
 
     assert len(page.overlay) == 1
     assert page.overlay[0].open is True

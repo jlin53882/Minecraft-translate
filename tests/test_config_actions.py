@@ -9,6 +9,7 @@ def make_full_view():
     class MinimalView:
         pass
     view = MinimalView()
+    view.page = MagicMock()  # 2026-08-01 (PR #85 重構):show_snack(view.page, ...) 需要 view.page
     view.controls_map = {}
     view.DEFAULT_MODELS = {'gemini-2.5-flash': True}
     view.add_model_row = MagicMock()
@@ -451,7 +452,7 @@ def _make_full_save_view():
     view = make_full_view()
     view.load_config = MagicMock()
     view.models_column.controls = []
-    view._show_snack_bar = MagicMock()
+    # view 刪除 _show_snack_bar,SnackBar 顯示由 show_snack 函式處理
     view._success_color = MagicMock(return_value='green')
     return view
 

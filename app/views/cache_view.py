@@ -18,6 +18,7 @@ import json
 import re
 import time
 import traceback
+import threading
 from pathlib import Path
 
 import flet as ft
@@ -1107,7 +1108,6 @@ class CacheView(ft.Column):
         # 防呆：確保已在 page 上
         if not hasattr(self, "page") or self.page is None:
             return
-        import threading
 
         if self._update_timer:
             self._update_timer.cancel()

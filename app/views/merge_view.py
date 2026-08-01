@@ -5,6 +5,9 @@
 
 import threading
 import time
+from app.views.config.config_actions import load_config_into_view
+from translation_tool.utils.config_manager import load_config
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -95,10 +98,8 @@ class MergeView(ft.Column):
             inner = wrapped.content if hasattr(wrapped, 'content') else wrapped
             if hasattr(inner, 'controls_map') and hasattr(inner, 'load_config'):
                 try:
-                    from translation_tool.utils.config_manager import load_config
-                    cfg = load_config()
-                    from app.views.config.config_actions import load_config_into_view
-                    load_config_into_view(inner, cfg)
+                                cfg = load_config()
+                                load_config_into_view(inner, cfg)
                 except Exception:
                     pass
 
@@ -817,7 +818,6 @@ class MergeView(ft.Column):
 
     def _open_output_folder(self) -> None:
         """開啟輸出資料夾（使用檔案總管）。"""
-        import subprocess
 
         snack = ft.SnackBar(ft.Text("正在開啟輸出資料夾..."), bgcolor=theme.BLUE_700)
         self.page.overlay.append(snack)

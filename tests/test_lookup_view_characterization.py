@@ -1,4 +1,5 @@
 from app.views.lookup_view import LookupView
+from app.ui.snack import show_snack
 from tests.conftest import mock_page
 
 
@@ -46,7 +47,7 @@ def test_lookup_view_show_snack_bar_adds_to_overlay():
     page = mock_page()
     view = LookupView(page)
 
-    view._show_snack_bar('Test error', '#FF0000')
+    show_snack(view.page, 'Test error', '#FF0000')
 
     assert len(page.overlay) == 1
     assert page.overlay[0].open is True

@@ -5,6 +5,8 @@
 """
 
 import flet as ft
+from pathlib import Path
+import json
 
 from translation_tool.utils.log_unit import log_info, log_warning
 from app.ui import theme
@@ -374,8 +376,6 @@ class CacheShardPanel(ft.Container):
     # ==================== SRC/DST 面板 ====================
     def _load_shard_entry(self, cache_type: str, filename: str, key: str):
         """從分片檔案載入單一 entry"""
-        import json
-        from pathlib import Path
 
         root = str((self.last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
@@ -571,4 +571,11 @@ class CacheShardPanel(ft.Container):
 
     @property
     def page(self):
+        """回傳 Flet Page 實例 (2026-08-01 PR #85 重構補 @property)。
+
+        之前 def page(self) 沒 @property decorator,變成 bound method reference,
+        PR #85 改用 show_snack(self.page, ...) 直接呼叫時,
+        self.page 是 method object 而非 Page 實例,SnackBar 永遠跳不出來。
+        加 @property 後 self.page 才是 Page 實例。
+        """
         return self._page

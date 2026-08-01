@@ -3,6 +3,7 @@ from pathlib import Path
 import flet as ft
 import pytest
 from app.views.extractor_view import ExtractorView
+from app.ui.snack import show_snack
 from app.views._log import LogView
 from tests.conftest import mock_page, mock_filepicker
 
@@ -129,7 +130,7 @@ def test_extractor_view_show_snack_bar_adds_to_overlay(monkeypatch):
     page = mock_page()
     view = ExtractorView(page, mock_filepicker())
 
-    view._show_snack_bar('Test error', '#FF0000')
+    show_snack(view.page, 'Test error', '#FF0000')
 
     assert len(page.overlay) >= 1
 

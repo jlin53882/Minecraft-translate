@@ -12,6 +12,8 @@
 """
 
 # /minecraft_translator_flet/app/views/extractor_view.py
+# 2026-08-01 (PR #85): view 內 _show_snack_bar wrapper 物理刪除,
+# 所有 caller 改成 show_snack(self.page, ...) 直接呼叫 app/ui/snack.py helper
 import flet as ft
 import os
 from pathlib import Path
