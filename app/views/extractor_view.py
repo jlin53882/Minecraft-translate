@@ -298,7 +298,9 @@ class ExtractorView(ft.Column):
 
         self.output_dir_textfield.value = output_path
         self.page.update()
-        self._append_log_line(f"[系統] 自動設定輸出路徑：{output_path}")
+        # 🐛 2026-08-01 user review: 改用 SnackBar 跳出提示,不掛 log UI
+        # (原本 _append_log_line 寫進 self.log_view,但 S1 撤回後 user 看不到任何 log)
+        self._show_snack_bar(f"[系統] 已自動設定輸出路徑：{output_path}", color=theme.GREEN_600)
 
     def _check_mods_dir_or_snack(self, mods_dir: str, action_label: str) -> bool:
         """按鈕 click handler 的前置驗證。
@@ -443,12 +445,14 @@ class ExtractorView(ft.Column):
         )
 
     def clear_output_path(self, e=None):
-        """清除輸出路徑文字欄位，並寫入系統日誌。"""
+        """清除輸出資料夾路徑文字欄位，並跳出 SnackBar 提示。"""
         if not (self.output_dir_textfield.value or "").strip():
             return
         self.output_dir_textfield.value = ""
         self.page.update()
-        self._append_log_line("[系統] 已清除輸出路徑")
+        # 🐛 2026-08-01 user review: 改用 SnackBar 跳出提示,不掛 log UI
+        # (原本 _append_log_line 寫進 self.log_view,但 S1 撤回後 user 看不到任何 log)
+        self._show_snack_bar("[系統] 已清除輸出路徑", color=theme.BLUE_600)
 
     # ==================================================
     # Worker Logic

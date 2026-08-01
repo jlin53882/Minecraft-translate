@@ -210,23 +210,34 @@ class TestAutoFillOutputPath:
 
         assert page.updated > 0
 
-    def test_自動補齊後會寫入系統日誌(self, monkeypatch, tmp_path):
-        """確保 _auto_fill_output_path 執行後會寫入 log_view"""
+    def test_自動補齊後會跳出_snackbar(self, monkeypatch, tmp_path):
+        # 🐛 2026-08-01 user review: 改用 SnackBar 跳出提示,不再寫 log_view
+        # user 決定系統訊息走 SnackBar 跳出提示 (而不是掛到 log UI)
         view = _make_view(monkeypatch)
         mods_path = self._make_input_path(tmp_path, "mods")
         view.mods_dir_textfield.value = str(mods_path)
 
-        # 清空 log_view
-        # PR refactor/unified-log-view: log_view 改為 LogView widget（ft.Container）
-        # 內部 ListView 透過 _list_view 存取
-        view.log_view.clear()
+        # Snapshot SnackBar 之前 overlay (因為 _show_snack_bar 會 append)
+        overlay_before = view.page.overlay.copy()
 
         view._auto_fill_output_path(str(mods_path), mode="lang")
 
-        # 檢查最後一個 log 是否包含 [系統] 自動設定輸出路徑
-        last_log = view.log_view._list_view.controls[-1].value
-        assert "[系統] 自動設定輸出路徑" in last_log
-        assert "_提取lang_輸出" in last_log
+        # 驗證有 SnackBar 被 append 到 page.overlay
+        added_snackbars = [
+            c for c in view.page.overlay[len(overlay_before):]
+            if isinstance(c, ft.SnackBar)
+        ]
+        assert len(added_snackbars) >= 1, (
+            f"回歸:_auto_fill_output_path 應該呼叫 _show_snack_bar 但 page.overlay 沒新增 SnackBar"
+        )
+        # 驗證 SnackBar 內容含「自動設定輸出路徑」
+        last_snackbar = added_snackbars[-1]
+        assert hasattr(last_snackbar.content, 'value'), (
+            f"回歸:SnackBar 內應是 ft.Text,但 {type(last_snackbar.content).__name__} 沒 value 屬性"
+        )
+        assert "自動設定輸出路徑" in last_snackbar.content.value, (
+            f"回歸:SnackBar 內容應該含「自動設定輸出路徑」,實際 {last_snackbar.content.value!r}"
+        )
 
 class TestExtractorDialogPathFilling:
     """測試 open_extractor_dialog 的路徑自動補齊邏輯。"""

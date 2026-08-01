@@ -31,17 +31,37 @@ def test_extractor_view_has_preview_and_extract_buttons(monkeypatch):
     assert view.preview_book_button.content == '預覽 Book'
 
 
-def test_clear_output_path_appends_system_log(monkeypatch):
+def test_clear_output_path_shows_snackbar(monkeypatch):
+    # 🐛 2026-08-01 user review: 改用 SnackBar,不再寫 log_view
+    # user 決定系統訊息走 SnackBar 跳出提示 (而不是掛到 log UI)
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
     view.output_dir_textfield.value = 'C:/Out'
 
+    # Snapshot SnackBar 之前 overlay (因為 _show_snack_bar 會 append)
+    overlay_before = view.page.overlay.copy()
+
     view.clear_output_path()
 
     assert view.output_dir_textfield.value == ''
-    # PR refactor/unified-log-view: log_view 改為 LogView widget（ft.Container）
-    # 內部 ListView 透過 _list_view 存取
-    assert view.log_view._list_view.controls[-1].value == '[系統] 已清除輸出路徑'
+    # 驗證有 SnackBar 被 append 到 page.overlay
+    added_snackbars = [
+        c for c in view.page.overlay[len(overlay_before):]
+        if isinstance(c, ft.SnackBar)
+    ]
+    assert len(added_snackbars) >= 1, (
+        f"回歸:clear_output_path 應該呼叫 _show_snack_bar 但 page.overlay 沒新增 SnackBar"
+    )
+    # 驗證 SnackBar 內容含「已清除輸出路徑」
+    last_snackbar = added_snackbars[-1]
+    # SnackBar 內部 content 結構是 ft.Text(message),.value 才是文字
+    snack_text = last_snackbar.content
+    assert hasattr(snack_text, 'value'), (
+        f"回歸:SnackBar 內應是 ft.Text,但 {type(snack_text).__name__} 沒 value 屬性"
+    )
+    assert '已清除輸出路徑' in snack_text.value, (
+        f"回歸:SnackBar 內容應該含「已清除輸出路徑」,實際 {snack_text.value!r}"
+    )
 
 
 def test_extractor_view_mods_dir_textfield_exists(monkeypatch):
