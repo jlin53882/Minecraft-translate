@@ -327,13 +327,13 @@ class TestExtractorViewControlsStructure:
         all_texts = self._get_all_text_in_controls(view.controls)
         assert "設定" in all_texts
 
-    # 🐛 2026-08-01 user review (S1 修復):改這個 test —
-    # S1 修復後 view.controls 有 2 個 (設定 + 日誌)
-    def test_主_UI_包含_兩個_區塊(self, monkeypatch):
-        """確認主 UI 有 2 個區塊 (設定 + 日誌) — S1 修復後"""
+    # 🐛 2026-08-01 user review (撤回 S1):改回 test_主_UI_只包含_一個_區塊
+    # user 改變主意,日誌面板不再掛回主 UI (commit 2 掛回但實測擠壓主畫面)
+    def test_主_UI_只包含_一個_區塊(self, monkeypatch):
+        """確認主 UI 只剩一個區塊（設定）— 撤回 S1 後"""
         view = _make_view(monkeypatch)
-        # S1 修復後 controls 應有 2 個 (設定 + 日誌)
-        assert len(view.controls) == 2
+        # 撤回 S1 後 controls 只剩 1 個 (設定)
+        assert len(view.controls) == 1
 
     def test_log_view_屬性仍存在但不顯示(self, monkeypatch):
         """雖然主 UI 不再顯示日誌，但 log_view 屬性應該還在（供對話框使用）"""

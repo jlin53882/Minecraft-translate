@@ -153,27 +153,20 @@ class ExtractorView(ft.Column):
         # ======================
         # Layout Composition（使用 styled_card 統一外觀）
         # ======================
-        # 🐛 2026-08-01 user review (S1 修復):日誌面板加入 controls,讓使用者
-        # 看到「自動設定輸出路徑」/「已清除輸出路徑」兩條系統訊息
-        # (原本 .visible=False 但 self._append_log_line 寫進 self.log_view,
-        # user 看不到任何 log)。用 inline LogView 取代 build_logs_panel,
-        # 移除 status_text / progress_bar / _progress_pct 3 個佔空間屬性。
-        self._logs_panel = ft.Column(
-            [self.log_view],
-            height=350,
-            expand=True,
-        )
+        # 🐛 2026-08-01 user review:不掛日誌面板到主 UI
+        # user 之前 base 設計是「日誌不顯示在主畫面」,規格書原本 S1 修復
+        # 要把日誌掛回 (確認 commit a3189f9),但 user 之後實測發現
+        # 會擠壓主畫面,改變主意不顯示。
+        # 日誌 self.log_view 仍建構 (供 _append_log_line 寫入跟 dialog 用),
+        # 但 self._logs_panel 不掛進 self.controls (user 看到的「主畫面」)。
+        self._logs_panel = ft.Container(content=ft.Column([self.log_view], height=350))
+        self._logs_panel.visible = False  # 隱藏 — 日誌只在 dialog 內顯示
 
         self.controls = [
             styled_card(
                 title="設定",
                 icon=ft.Icons.SETTINGS,
                 content=build_settings_panel(self),
-            ),
-            styled_card(
-                title="日誌",
-                icon=ft.Icons.RECEIPT_LONG,
-                content=self._logs_panel,
             ),
         ]
 

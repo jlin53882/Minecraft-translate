@@ -128,52 +128,37 @@ def test_extractor_view_append_log_line_adds_control(monkeypatch):
     assert view.log_view._list_view.controls[-1].value == 'Test log entry'
 
 
-def test_extractor_view_logs_panel_visible(monkeypatch):
-    """S1 修復 (2026-08-01 user review):日誌面板在主 UI 上可見
+def test_extractor_view_logs_panel_hidden(monkeypatch):
+    """2026-08-01 user review (撤回 S1):日誌面板不渲染到主畫面
 
-    2026-08-01 user review 之前:view._logs_panel 用 .visible=False 隱藏,
-    所以 _append_log_line 寫進 self.log_view 但使用者看不到任何 log。
-    S1 修復:把 _logs_panel 從 .visible=False 改成 .visible=True 並加進 self.controls。
+    規格書原本 S1 修復要把日誌面板掛回主 UI,但 user 之後實測確認
+    日誌面板擠壓主畫面,改變主意撤回 S1。
+    改用狀態:
+    - view._logs_panel 屬性仍存在 (供 _append_log_line 跟 dialog 用)
+    - 但 view.controls 只有 1 個 styled_card (設定)
+    - view._logs_panel.visible = False (不渲染到主畫面)
+    - self.log_view 屬性仍存在
 
-    驗證:
-    - view.controls 有 2 個 styled_card
-    - 第 2 個卡片是「日誌」卡片
-    - 日誌卡片內含 LogView widget
+    重要:此測試防止 future commit 偷偷掛回日誌面板 (再次擠壓主畫面)。
     """
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
 
-    # S1 修復 (2026-08-01 user review):日誌面板從 .visible=False 改成 visible=True,
-    # 加上 controls 內 2 個 styled_card (設定 + 日誌)。
-    # 直接驗證關鍵狀態:
-    # 1. view.controls 有 2 個
-    # 2. 第 2 個 cards title = '日誌'
-    # 3. view._logs_panel.visible = True (S1 修復核心)
-    # 4. view._logs_panel 內含 self.log_view (LogView widget)
-    
-    # S1 修復 (2026-08-01 user review):日誌面板從 .visible=False 改成 visible=True,
-    # 加上 view.controls 內 2 個 (設定 + 日誌)。
-    # 直接驗證 view._logs_panel 結構 (S1 修復核心):view._logs_panel 應該存在、
-    # 內含 ft.Column([self.log_view]) 並 visible=True。
-
-    assert len(view.controls) == 2, (
-        f"回歸:S1 修復後 view.controls 應有 2 個 (設定 + 日誌),實際 {len(view.controls)} 個"
+    # 主畫面只應有 1 個 styled_card (設定),不是 2 個 (無日誌卡片)
+    assert len(view.controls) == 1, (
+        f"回歸:主畫面不應有日誌卡片 (user 撤回 S1),實際 view.controls 有 {len(view.controls)} 個"
     )
-    # S1 修復核心:_logs_panel 改為 visible=True (原本 False 隱藏)
-    assert view._logs_panel.visible is True, (
-        "回歸:view._logs_panel.visible=True (S1 修復沒生效,還被 .visible=False 隱藏)"
+    # view._logs_panel 屬性還在
+    assert hasattr(view, '_logs_panel'), (
+        "回歸:view._logs_panel 屬性應還存在 (供 dialog 內用)"
     )
-    # view._logs_panel 應該是 ft.Column([self.log_view])
-    from app.views._log import LogView
-    assert isinstance(view._logs_panel, ft.Column), (
-        f"回歸:view._logs_panel 應是 ft.Column,實際 {type(view._logs_panel).__name__}"
+    # 但 _logs_panel.visible = False (不渲染到主畫面)
+    assert view._logs_panel.visible is False, (
+        "回歸:view._logs_panel.visible=False (撤回 S1,不渲染到主畫面)"
     )
-    assert len(view._logs_panel.controls) >= 1, (
-        f"回歸:view._logs_panel 沒裝 LogView widget,實際 {len(view._logs_panel.controls)} 個 controls"
-    )
-    # 第一個 control 應是 LogView (S1 修復:ft.Column([self.log_view]))
-    assert isinstance(view._logs_panel.controls[0], LogView), (
-        f"回歸:view._logs_panel 第一個 control 應是 LogView widget,實際 {type(view._logs_panel.controls[0]).__name__}"
+    # self.log_view 仍建構 (供 _append_log_line 跟 dialog 用)
+    assert hasattr(view, 'log_view'), (
+        "回歸:view.log_view 屬性應存在 (供 _append_log_line 跟 dialog 用)"
     )
 
 
