@@ -1,7 +1,9 @@
 
 from pathlib import Path
 import flet as ft
+import pytest
 from app.views.extractor_view import ExtractorView
+from app.views._log import LogView
 from tests.conftest import mock_page, mock_filepicker
 
 
@@ -29,28 +31,37 @@ def test_extractor_view_has_preview_and_extract_buttons(monkeypatch):
     assert view.preview_book_button.content == '預覽 Book'
 
 
-def test_clear_output_path_appends_system_log(monkeypatch):
+def test_clear_output_path_shows_snackbar(monkeypatch):
+    # 🐛 2026-08-01 user review: 改用 SnackBar,不再寫 log_view
+    # user 決定系統訊息走 SnackBar 跳出提示 (而不是掛到 log UI)
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
     view.output_dir_textfield.value = 'C:/Out'
 
+    # Snapshot SnackBar 之前 overlay (因為 _show_snack_bar 會 append)
+    overlay_before = view.page.overlay.copy()
+
     view.clear_output_path()
 
     assert view.output_dir_textfield.value == ''
-    assert view.log_view.controls[-1].value == '[系統] 已清除輸出路徑'
-
-
-def test_update_stats_from_log_counts_success_warning_failure(monkeypatch):
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    view._update_stats_from_log('已檢查 10/10 個 JAR 檔案。\n  - 新提取或更新的檔案: 3 個\n  - 因內容相同而跳過的檔案: 5 個')
-    view._update_stats_from_log('[ERROR] 提取某個檔案時產生例外')
-
-    assert view._extraction_stats['success'] == 10
-    assert view._extraction_stats['warnings'] == 5
-    assert view._extraction_stats['failures'] == 1
-    assert view._extraction_stats['total_files'] == 3
+    # 驗證有 SnackBar 被 append 到 page.overlay
+    added_snackbars = [
+        c for c in view.page.overlay[len(overlay_before):]
+        if isinstance(c, ft.SnackBar)
+    ]
+    assert len(added_snackbars) >= 1, (
+        f"回歸:clear_output_path 應該呼叫 _show_snack_bar 但 page.overlay 沒新增 SnackBar"
+    )
+    # 驗證 SnackBar 內容含「已清除輸出路徑」
+    last_snackbar = added_snackbars[-1]
+    # SnackBar 內部 content 結構是 ft.Text(message),.value 才是文字
+    snack_text = last_snackbar.content
+    assert hasattr(snack_text, 'value'), (
+        f"回歸:SnackBar 內應是 ft.Text,但 {type(snack_text).__name__} 沒 value 屬性"
+    )
+    assert '已清除輸出路徑' in snack_text.value, (
+        f"回歸:SnackBar 內容應該含「已清除輸出路徑」,實際 {snack_text.value!r}"
+    )
 
 
 def test_extractor_view_mods_dir_textfield_exists(monkeypatch):
@@ -61,17 +72,6 @@ def test_extractor_view_mods_dir_textfield_exists(monkeypatch):
     view.mods_dir_textfield.value = 'C:/Mods'
     assert view.mods_dir_textfield.value == 'C:/Mods'
     assert view.mods_dir_textfield.hint_text == './mods 或 %USERPROFILE%/Mods'
-
-
-def test_extractor_view_status_text_and_progress_bar(monkeypatch):
-    """測試 status_text 和 progress_bar 存在"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    assert view.status_text.value == '狀態：閒置'
-    assert isinstance(view.progress_bar, ft.ProgressBar)
-    assert view.progress_bar.visible is True
-    assert view.progress_bar.value == 0
 
 
 def test_extractor_view_output_dir_textfield_exists(monkeypatch):
@@ -85,12 +85,14 @@ def test_extractor_view_output_dir_textfield_exists(monkeypatch):
 
 
 def test_extractor_view_log_view_exists(monkeypatch):
-    """測試 log_view 存在且為 ListView"""
+    """測試 log_view 存在且為 LogView widget（ft.Container 包 ft.ListView）。"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
 
-    assert isinstance(view.log_view, ft.ListView)
-    assert view.log_view.auto_scroll is True
+    # PR refactor/unified-log-view: log_view 改為 LogView widget（ft.Container）
+    assert isinstance(view.log_view, LogView)
+    # 內部 ListView 仍有 auto_scroll
+    assert view.log_view._list_view.auto_scroll is True
 
 
 def test_extractor_view_all_buttons_have_on_click(monkeypatch):
@@ -102,22 +104,6 @@ def test_extractor_view_all_buttons_have_on_click(monkeypatch):
     assert view.book_button.on_click is not None
     assert view.preview_lang_button.on_click is not None
     assert view.preview_book_button.on_click is not None
-
-
-def test_extractor_view_update_stats_resets_counters(monkeypatch):
-    """測試 _update_stats_from_log 的計數邏輯"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    view._extraction_stats = {"success": 0, "warnings": 0, "failures": 0, "total_files": 0}
-
-    view._update_stats_from_log('已檢查 8/8 個 JAR 檔案。\n  - 新提取或更新的檔案: 5 個\n  - 因內容相同而跳過的檔案: 2 個')
-    view._update_stats_from_log('[ERROR] 嚴重錯誤')
-
-    assert view._extraction_stats['success'] == 8
-    assert view._extraction_stats['warnings'] == 2
-    assert view._extraction_stats['failures'] == 1
-    assert view._extraction_stats['total_files'] == 5
 
 
 def test_extractor_view_pick_directory_schedules_async_task(monkeypatch):
@@ -155,72 +141,45 @@ def test_extractor_view_append_log_line_adds_control(monkeypatch):
 
     view._append_log_line('Test log entry')
 
-    assert len(view.log_view.controls) >= 1
+    # PR refactor/unified-log-view: _append_log_line 內部走 LogView.add()
+    # LogView 的內部 ListView 透過 _list_view 存取
+    # 🐛 2026-08-01 user review:更精確斷言 - 確認最後一個 control 是 'Test log entry'
+    # (原本 len(...) >= 1 太弱,任何 add log 都通過)
+    assert view.log_view._list_view.controls[-1].value == 'Test log entry'
 
 
-def test_extractor_view_set_controls_disabled_toggles_inputs(monkeypatch):
-    """測試 set_controls_disabled 正確切換輸入控制項狀態"""
+def test_extractor_view_logs_panel_hidden(monkeypatch):
+    """2026-08-01 user review (撤回 S1):日誌面板不渲染到主畫面
+
+    規格書原本 S1 修復要把日誌面板掛回主 UI,但 user 之後實測確認
+    日誌面板擠壓主畫面,改變主意撤回 S1。
+    改用狀態:
+    - view._logs_panel 屬性仍存在 (供 _append_log_line 跟 dialog 用)
+    - 但 view.controls 只有 1 個 styled_card (設定)
+    - view._logs_panel.visible = False (不渲染到主畫面)
+    - self.log_view 屬性仍存在
+
+    重要:此測試防止 future commit 偷偷掛回日誌面板 (再次擠壓主畫面)。
+    """
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
     view = ExtractorView(mock_page(), mock_filepicker())
 
-    view.set_controls_disabled(True)
-
-    assert view.mods_dir_textfield.disabled is True
-    assert view.output_dir_textfield.disabled is True
-    assert view.lang_button.disabled is True
-
-    view.set_controls_disabled(False)
-
-    assert view.mods_dir_textfield.disabled is False
-    assert view.output_dir_textfield.disabled is False
-
-
-def test_extractor_view_start_extraction_requires_mods_dir(monkeypatch):
-    """測試 start_extraction 需要填寫 mods 目錄"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    page = mock_page()
-    view = ExtractorView(page, mock_filepicker())
-    view.output_dir_textfield.value = 'C:/Out'
-
-    view.start_extraction('lang')
-
-    assert len(page.overlay) >= 1
-
-
-def test_extractor_view_start_extraction_requires_output_dir(monkeypatch):
-    """測試 start_extraction 需要填寫輸出目錄"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    page = mock_page()
-    view = ExtractorView(page, mock_filepicker())
-    view.mods_dir_textfield.value = 'C:/Mods'
-
-    view.start_extraction('lang')
-
-    assert len(page.overlay) >= 1
-
-
-def test_extractor_view_build_settings_card(monkeypatch):
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-    assert hasattr(view, '_build_settings_card')
-
-
-def test_extractor_view_build_logs_card(monkeypatch):
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-    assert hasattr(view, '_build_logs_card')
-
-
-def test_extractor_view_pick_button_exists(monkeypatch):
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-    assert hasattr(view, '_pick_button')
-
-
-def test_extractor_view_show_extraction_summary_exists(monkeypatch):
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-    assert hasattr(view, '_show_extraction_summary')
+    # 主畫面只應有 1 個 styled_card (設定),不是 2 個 (無日誌卡片)
+    assert len(view.controls) == 1, (
+        f"回歸:主畫面不應有日誌卡片 (user 撤回 S1),實際 view.controls 有 {len(view.controls)} 個"
+    )
+    # view._logs_panel 屬性還在
+    assert hasattr(view, '_logs_panel'), (
+        "回歸:view._logs_panel 屬性應還存在 (供 dialog 內用)"
+    )
+    # 但 _logs_panel.visible = False (不渲染到主畫面)
+    assert view._logs_panel.visible is False, (
+        "回歸:view._logs_panel.visible=False (撤回 S1,不渲染到主畫面)"
+    )
+    # self.log_view 仍建構 (供 _append_log_line 跟 dialog 用)
+    assert hasattr(view, 'log_view'), (
+        "回歸:view.log_view 屬性應存在 (供 _append_log_line 跟 dialog 用)"
+    )
 
 
 def test_auto_fill_output_path_lang_mode(monkeypatch):
@@ -301,29 +260,6 @@ def test_auto_fill_output_path_falls_back_to_default_on_unknown_mode(monkeypatch
     assert Path(view.output_dir_textfield.value).name == 'mods_custom_lang'
 
 
-def test_extractor_view_progress_pct_label(monkeypatch):
-    """測試 _progress_pct 百分比標籤存在且初始為 '0%'"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    assert hasattr(view, '_progress_pct')
-    assert view._progress_pct.value == '0%'
-    assert isinstance(view._progress_pct, ft.Text)
-
-
-def test_extractor_view_stats_badge_texts(monkeypatch):
-    """測試統計徽章文字存在（_stats_success, _stats_warnings, _stats_failures）"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    assert hasattr(view, '_stats_success')
-    assert hasattr(view, '_stats_warnings')
-    assert hasattr(view, '_stats_failures')
-    assert view._stats_success.value == '0'
-    assert view._stats_warnings.value == '0'
-    assert view._stats_failures.value == '0'
-
-
 def test_extractor_view_skip_zh_cn_switch_has_label(monkeypatch):
     """測試 skip_zh_cn_switch 有 label 且文字為 '跳過 zh_cn 抽取'"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
@@ -333,36 +269,3 @@ def test_extractor_view_skip_zh_cn_switch_has_label(monkeypatch):
     assert view.skip_zh_cn_switch.value is False
 
 
-def test_extractor_view_main_layout_is_column(monkeypatch):
-    """測試 build_main_layout 回傳 ft.Column（單欄垂直）"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    from app.views.extractor.extractor_panels import build_main_layout
-    layout = build_main_layout(view)
-    assert isinstance(layout, ft.Column)
-    assert layout.scroll == ft.ScrollMode.ADAPTIVE
-
-
-def test_extractor_view_logs_panel_has_fixed_height(monkeypatch):
-    """測試日誌面板的 log_view Container 有固定高度 350"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    from app.views.extractor.extractor_panels import build_logs_panel
-    panel = build_logs_panel(view)
-    log_container = panel.controls[1]
-    assert log_container.height == 350
-
-
-def test_extractor_view_status_bar_has_left_border(monkeypatch):
-    """測試狀態列有 4px 左側邊線"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    from app.views.extractor.extractor_panels import build_logs_panel
-    panel = build_logs_panel(view)
-    status_bar = panel.controls[0]
-    assert status_bar.border is not None
-    assert status_bar.border.left.width == 4
-    assert status_bar.border.left.color == ft.Colors.GREY_400

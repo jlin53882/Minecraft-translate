@@ -23,8 +23,24 @@ class _MockProgressBar:
 
 
 class _MockListView:
+    """Mock LogView widget（PR refactor/unified-log-view）。
+
+    介面要符合 LogView API（add / clear / _list_view.scroll_to）。
+    """
+
     def __init__(self):
         self.controls = []
+        self._list_view = self  # Mock 內部 ListView（測試用）
+        self.added_count = 0  # 追蹤 add() 呼叫次數
+
+    def add(self, text, level="info", source="ui"):
+        # PR refactor/unified-log-view: 對應 LogView.add() 介面
+        self.added_count += 1
+        # 模擬行為：把 log text append 進 controls
+        self.controls.append(text)
+
+    def clear(self):
+        self.controls.clear()
 
     def scroll_to(self, offset=None, duration=None):
         pass

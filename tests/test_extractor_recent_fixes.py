@@ -17,6 +17,7 @@ import flet as ft
 import pytest
 
 from app.views.extractor_view import ExtractorView
+from app.views._log import LogView
 # 避免 tests 套件命名衝突（hermes-agent/tests 在 sys.path 前面）
 # 直接用 importlib 從專案的 conftest.py 載入 mock_page / mock_filepicker
 import importlib.util as _importlib_util
@@ -209,21 +210,34 @@ class TestAutoFillOutputPath:
 
         assert page.updated > 0
 
-    def test_自動補齊後會寫入系統日誌(self, monkeypatch, tmp_path):
-        """確保 _auto_fill_output_path 執行後會寫入 log_view"""
+    def test_自動補齊後會跳出_snackbar(self, monkeypatch, tmp_path):
+        # 🐛 2026-08-01 user review: 改用 SnackBar 跳出提示,不再寫 log_view
+        # user 決定系統訊息走 SnackBar 跳出提示 (而不是掛到 log UI)
         view = _make_view(monkeypatch)
         mods_path = self._make_input_path(tmp_path, "mods")
         view.mods_dir_textfield.value = str(mods_path)
 
-        # 清空 log_view
-        view.log_view.controls.clear()
+        # Snapshot SnackBar 之前 overlay (因為 _show_snack_bar 會 append)
+        overlay_before = view.page.overlay.copy()
 
         view._auto_fill_output_path(str(mods_path), mode="lang")
 
-        # 檢查最後一個 log 是否包含 [系統] 自動設定輸出路徑
-        last_log = view.log_view.controls[-1].value
-        assert "[系統] 自動設定輸出路徑" in last_log
-        assert "_提取lang_輸出" in last_log
+        # 驗證有 SnackBar 被 append 到 page.overlay
+        added_snackbars = [
+            c for c in view.page.overlay[len(overlay_before):]
+            if isinstance(c, ft.SnackBar)
+        ]
+        assert len(added_snackbars) >= 1, (
+            f"回歸:_auto_fill_output_path 應該呼叫 _show_snack_bar 但 page.overlay 沒新增 SnackBar"
+        )
+        # 驗證 SnackBar 內容含「自動設定輸出路徑」
+        last_snackbar = added_snackbars[-1]
+        assert hasattr(last_snackbar.content, 'value'), (
+            f"回歸:SnackBar 內應是 ft.Text,但 {type(last_snackbar.content).__name__} 沒 value 屬性"
+        )
+        assert "自動設定輸出路徑" in last_snackbar.content.value, (
+            f"回歸:SnackBar 內容應該含「自動設定輸出路徑」,實際 {last_snackbar.content.value!r}"
+        )
 
 class TestExtractorDialogPathFilling:
     """測試 open_extractor_dialog 的路徑自動補齊邏輯。"""
@@ -312,11 +326,11 @@ class TestExtractorViewControlsStructure:
                     texts.extend(self._get_all_text_in_controls(ctrl.content.controls))
         return texts
 
-    def test_主_UI_不包含日誌區塊(self, monkeypatch):
-        """主 UI 不應該再包含 '日誌' 標題"""
-        view = _make_view(monkeypatch)
-        all_texts = self._get_all_text_in_controls(view.controls)
-        assert "日誌" not in all_texts
+    # 🐛 2026-08-01 user review (S1 修復):移除這個 test —
+    # S1 修復後 view.controls 確實包含 '日誌' 標題 (因為 view._logs_panel.visible=True 並掛進 controls)。
+    # 之前該 test 是「日誌不應該在主 UI」的舊設計,現在 S1 修復把日誌掛回 UI。
+    # 刪除:test_主_UI_不包含日誌區塊
+    pass
 
     def test_主_UI_包含設定區塊(self, monkeypatch):
         """主 UI 應該包含 '設定' 標題"""
@@ -324,10 +338,12 @@ class TestExtractorViewControlsStructure:
         all_texts = self._get_all_text_in_controls(view.controls)
         assert "設定" in all_texts
 
+    # 🐛 2026-08-01 user review (撤回 S1):改回 test_主_UI_只包含_一個_區塊
+    # user 改變主意,日誌面板不再掛回主 UI (commit 2 掛回但實測擠壓主畫面)
     def test_主_UI_只包含_一個_區塊(self, monkeypatch):
-        """確認主 UI 只剩一個區塊（設定）"""
+        """確認主 UI 只剩一個區塊（設定）— 撤回 S1 後"""
         view = _make_view(monkeypatch)
-        # 移除日誌後，controls 應該只剩 1 個
+        # 撤回 S1 後 controls 只剩 1 個 (設定)
         assert len(view.controls) == 1
 
     def test_log_view_屬性仍存在但不顯示(self, monkeypatch):
@@ -335,7 +351,8 @@ class TestExtractorViewControlsStructure:
         view = _make_view(monkeypatch)
         # log_view 屬性還是存在（避免破壞其他依賴此屬性的程式碼）
         assert hasattr(view, "log_view")
-        assert isinstance(view.log_view, ft.ListView)
+        # PR refactor/unified-log-view: log_view 改為 LogView widget
+        assert isinstance(view.log_view, LogView)
 
 
 

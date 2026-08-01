@@ -14,41 +14,6 @@ import pytest
 # #1: dual buttons must be in the disabled list
 # ---------------------------------------------------------------------------
 
-def test_set_controls_disabled_includes_dual_buttons():
-    """Regression: dual_extract_button / dual_preview_button 必須被停用，避免 stats 競爭。"""
-    from tests.conftest import mock_page, mock_filepicker
-    from app.views.extractor_view import ExtractorView
-
-    view = ExtractorView(mock_page(), mock_filepicker())
-    view.set_controls_disabled(True)
-
-    assert view.dual_extract_button.disabled is True
-    assert view.dual_preview_button.disabled is True
-    assert view.preview_lang_button.disabled is True
-    assert view.preview_book_button.disabled is True
-    assert view.lang_button.disabled is True
-    assert view.book_button.disabled is True
-
-
-def test_set_controls_disabled_re_enables_dual_buttons():
-    """停用旗標解除後 dual 按鈕應恢復。"""
-    from tests.conftest import mock_page, mock_filepicker
-    from app.views.extractor_view import ExtractorView
-
-    view = ExtractorView(mock_page(), mock_filepicker())
-    view.set_controls_disabled(True)
-    view.set_controls_disabled(False)
-
-    assert view.dual_extract_button.disabled is False
-    assert view.dual_preview_button.disabled is False
-    assert view.preview_lang_button.disabled is False
-    assert view.preview_book_button.disabled is False
-
-
-# ---------------------------------------------------------------------------
-# #5/#6: DUAL mode yields book stats even if lang_stats is None
-# ---------------------------------------------------------------------------
-
 def test_dual_extract_yields_book_stats_when_lang_stats_none(monkeypatch):
     """Regression: lang_stats=None 時，book 階段仍要 yield book_stats。
     否則 dual 模式 UI 統計徽章永遠顯示 0/0/0。
@@ -145,14 +110,3 @@ def test_main_pipeline_missing_raises_runtime_error():
     assert "RuntimeError" in main_src, "main must raise RuntimeError on missing pipeline view"
     assert "pipeline view not found" in main_src or "Available keys" in main_src
 
-
-# ---------------------------------------------------------------------------
-# #2: poll daemon uses threading.Event (smoke test — verify source)
-# ---------------------------------------------------------------------------
-
-def test_show_preview_uses_threading_event():
-    """Regression: show_preview poll 必須使用 threading.Event 控制生命週期。"""
-    src = (Path(__file__).resolve().parent.parent / "app" / "views" / "extractor" / "extractor_actions.py").read_text(encoding="utf-8")
-    assert "stop_event = threading.Event()" in src, "show_preview must create stop_event"
-    assert "stop_event.is_set()" in src, "poll loop must check stop_event"
-    assert "stop_event.wait(timeout=0.1)" in src, "poll must use wait(timeout=...) not time.sleep"

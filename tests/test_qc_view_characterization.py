@@ -4,6 +4,7 @@
 維護注意：PR1 拆分後更新測試以匹配新結構。
 """
 
+from app.views._log import LogView
 from app.views.qc_view import QCView
 from app.views.untranslated_checker import UntranslatedChecker
 from app.views.qc_base import QCBase
@@ -143,7 +144,8 @@ def test_qc_view_progress_bar_and_log_view(monkeypatch):
 
     assert isinstance(view.progress_bar, ft.ProgressBar)
     assert view.progress_bar.visible is False
-    assert isinstance(view.log_view, ft.ListView)
+    # PR refactor/unified-log-view: log_view 改為 LogView widget
+    assert isinstance(view.log_view, LogView)
 
 
 def test_qc_view_set_controls_disabled_affects_all_inputs(monkeypatch):

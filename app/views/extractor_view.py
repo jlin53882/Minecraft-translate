@@ -13,21 +13,21 @@
 
 # /minecraft_translator_flet/app/views/extractor_view.py
 import flet as ft
+import os
 from pathlib import Path
 from app.ui import theme
-from translation_tool.utils.log_unit import log_info
+from app.views._log import LogView
+from translation_tool.utils.log_unit import log_info, log_warning
 import threading
 
 from app.task_session import TaskSession
-from app.views.extractor.extractor_actions import (
-    build_preview_error_dialog,
-    build_preview_result_dialog,
-    show_preview as run_preview_flow,
-    start_extraction as run_extraction_flow,
-    update_stats_from_log,
-)
-from app.views.extractor.extractor_panels import build_logs_panel, build_settings_panel, _build_pick_button
+# 🐛 2026-07-14 user review: 物理刪除 from app.views.extractor.extractor_actions import
+# (Phase 3 partial 刪 _update_stats_from_log wrapper 後,
+# update_stats_from_log 本體函式也無 caller,本 commit 一起清掉)
+from app.views.extractor.extractor_panels import build_settings_panel, _build_pick_button
 from app.ui.components import styled_card
+from app.views.extractor.extractor_dialog import open_extractor_dialog, open_preview_dialog
+from app.services_impl.pipelines.extract_service import get_output_folder_names
 
 class ExtractorView(ft.Column):
     """JAR 提取頁（UI）。
@@ -54,19 +54,6 @@ class ExtractorView(ft.Column):
         self.file_picker = file_picker
 
         # ExtractorView 的長任務狀態全部收斂到 TaskSession。
-        # 背景執行緒只寫 session，UI 端靠 poller 讀快照更新畫面，
-        # 這樣提取流程與畫面狀態不會互相纏在一起。
-        self.session = TaskSession(max_logs=2000)
-        self._ui_poller_stop = threading.Event()
-
-        # 提取統計
-        self._extraction_stats = {
-            "success": 0,
-            "warnings": 0,
-            "failures": 0,
-            "total_files": 0,
-        }
-
         # ======================
         # UI Components
         # ======================
@@ -99,8 +86,7 @@ class ExtractorView(ft.Column):
         )
 
         # 2. Action Buttons - 改为打开对话框
-        from app.views.extractor.extractor_dialog import open_extractor_dialog, open_preview_dialog
-
+        # open_extractor_dialog / open_preview_dialog 從頂部 import
         # 获取 file_picker
         file_picker = self.file_picker
 
@@ -113,13 +99,7 @@ class ExtractorView(ft.Column):
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
-            on_click=lambda e: open_extractor_dialog(
-                self.page,
-                file_picker,
-                input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip() if (self.output_dir_textfield.value or "").strip() else (self._auto_fill_output_path(self.mods_dir_textfield.value or "", "lang") if self.mods_dir_textfield.value else ""),
-                mode="lang",
-            ),
+            on_click=self._handle_extract_lang_click,
         )
         self.book_button = ft.Button(
             "提取 Book",
@@ -130,37 +110,19 @@ class ExtractorView(ft.Column):
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
-            on_click=lambda e: open_extractor_dialog(
-                self.page,
-                file_picker,
-                input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip() if (self.output_dir_textfield.value or "").strip() else (self._auto_fill_output_path(self.mods_dir_textfield.value or "", "book") if self.mods_dir_textfield.value else ""),
-                mode="book",
-            ),
+            on_click=self._handle_extract_book_click,
         )
 
         # 預覽按鈕
         self.preview_lang_button = ft.OutlinedButton(
             "預覽 Lang",
             icon=ft.Icons.PREVIEW,
-            on_click=lambda e: open_preview_dialog(
-                self.page,
-                file_picker,
-                input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip(),
-                mode="lang",
-            ),
+            on_click=self._handle_preview_lang_click,
         )
         self.preview_book_button = ft.OutlinedButton(
             "預覽 Book",
             icon=ft.Icons.PREVIEW,
-            on_click=lambda e: open_preview_dialog(
-                self.page,
-                file_picker,
-                input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip(),
-                mode="book",
-            ),
+            on_click=self._handle_preview_book_click,
         )
         self.dual_extract_button = ft.Button(
             "提取 Lang + Book",
@@ -171,46 +133,34 @@ class ExtractorView(ft.Column):
                 shape=ft.RoundedRectangleBorder(radius=6),
                 padding=20,
             ),
-            on_click=lambda e: open_extractor_dialog(
-                self.page,
-                file_picker,
-                input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip() if (self.output_dir_textfield.value or "").strip() else (self._auto_fill_output_path(self.mods_dir_textfield.value or "", "dual") if self.mods_dir_textfield.value else ""),
-                mode="dual",
-            ),
+            on_click=self._handle_extract_dual_click,
         )
         self.dual_preview_button = ft.OutlinedButton(
             "預覽 Lang + Book",
             icon=ft.Icons.PREVIEW,
-            on_click=lambda e: open_preview_dialog(
-                self.page,
-                file_picker,
-                input_path=(self.mods_dir_textfield.value or "").strip(),
-                output_path=(self.output_dir_textfield.value or "").strip(),
-                mode="dual",
-            ),
+            on_click=self._handle_preview_dual_click,
         )
 
-        # 3. Status Display（由 _build_status_bar 在 build_logs_panel 中統一建立）
-        # 4. Logs Console（由 build_logs_panel 中的 _build_status_bar 統一建立）
-        self.log_view = ft.ListView(
-            expand=True,
-            spacing=2,
-            auto_scroll=True,
-            padding=10,
+        # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器 + 字串比對判 level）
+        # 注意:此 LogView 必須先建立 (在 Day 3-4 區段),因 _append_log_line()
+        # 在 _auto_fill_output_path() 內依賴它
+        self.log_view = LogView(
+            page=self._page,
+            mode="append",
+            max_lines=2000,
         )
 
         # ======================
         # Layout Composition（使用 styled_card 統一外觀）
         # ======================
-        # 即使日誌區塊不在主 UI 上顯示，我們仍然呼叫 build_logs_panel
-        # 來建立 status_text / progress_bar / log_view 等必要屬性。
-        # 日誌面板已不再加到 controls 裡（隱藏）。
-        # 透過 .visible = False 雙重保險，避免意外被渲染。
-        # 注意：這個呼叫同時會建立 _stats_success / _stats_warnings / _stats_failures
-        # 等屬性（在 build_settings_panel 內）。
-        self._logs_panel = build_logs_panel(self)
-        self._logs_panel.visible = False  # 隱藏日誌面板，不顯示在主 UI
+        # 🐛 2026-08-01 user review:不掛日誌面板到主 UI
+        # user 之前 base 設計是「日誌不顯示在主畫面」,規格書原本 S1 修復
+        # 要把日誌掛回 (確認 commit a3189f9),但 user 之後實測發現
+        # 會擠壓主畫面,改變主意不顯示。
+        # 日誌 self.log_view 仍建構 (供 _append_log_line 寫入跟 dialog 用),
+        # 但 self._logs_panel 不掛進 self.controls (user 看到的「主畫面」)。
+        self._logs_panel = ft.Container(content=ft.Column([self.log_view], height=350))
+        self._logs_panel.visible = False  # 隱藏 — 日誌只在 dialog 內顯示
 
         self.controls = [
             styled_card(
@@ -230,33 +180,6 @@ class ExtractorView(ft.Column):
                 pass
             else:
                 raise
-
-    def _build_settings_card(self):
-        """代理至 build_settings_panel，回傳設定面板元件。
-
-        回傳：
-            ft.Column，ExtractorView 的設定面板。
-        """
-        return build_settings_panel(self)
-
-    def _build_logs_card(self):
-        """代理至 build_logs_panel，回傳日誌面板元件。
-
-        回傳：
-            ft.Column，ExtractorView 的日誌面板。
-        """
-        return build_logs_panel(self)
-
-    # ==================================================
-    # UI helpers
-    # ==================================================
-    def _pick_button(self, target):
-        """代理至 _build_pick_button，產生目錄選擇 IconButton。
-
-        參數：
-            target：選擇目錄後填入路徑的 TextField。
-        """
-        return _build_pick_button(self, target)
 
     def pick_directory(self, target):
         """開啟目錄選擇對話框。
@@ -293,7 +216,7 @@ class ExtractorView(ft.Column):
 
         ✅ 階段 B 重構：config 讀取已抽離至 extract_service.get_output_folder_names()
         """
-        from app.services_impl.pipelines.extract_service import get_output_folder_names
+        # get_output_folder_names 從頂部 import
         folder_names = get_output_folder_names()
         lang_extract = folder_names["lang_extract"]
         book_extract = folder_names["book_extract"]
@@ -313,15 +236,31 @@ class ExtractorView(ft.Column):
             f"自動產生資料夾名稱可以在設定頁面調整"
         )
         self.output_dir_textfield.helper = helper_text
-        self.page.update()
+        # 🐛 2026-08-01 user review: 修 config 儲存觸發 RuntimeError
+        # 原因:config_actions.save_config_from_view iterate registry,
+        # 會對 'extractor' view call refresh_output_dir_helper(),
+        # 但 user 可能還沒切到 extractor 頁(view 還沒 mount 到 page),
+        # self.page.update() 內部 self.page getter raise RuntimeError。
+        # 修法:try/except 包裹,若 view not in page 就 skip update。
+        # (helper_text 已經設好,下次 mount 到 page 會自然 render)
+        try:
+            self.page.update()
+        except RuntimeError as ex:
+            if "Control must be added to the page first" in str(ex):
+                # view 尚未 mount,defer update
+                log_info(
+                    f"[OUTPUT_HELPER] _update_output_dir_helper skipped: "
+                    f"view not mounted to page yet ({ex})"
+                )
+                return
+            raise
 
     def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
         """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。
 
         ✅ 階段 B 重構：config 讀取已抽離至 extract_service.get_output_folder_names()
         """
-        from app.services_impl.pipelines.extract_service import get_output_folder_names
-
+        # get_output_folder_names 從頂部 import
         folder_names = get_output_folder_names()
         lang_extract = folder_names["lang_extract"]
         book_extract = folder_names["book_extract"]
@@ -359,185 +298,214 @@ class ExtractorView(ft.Column):
 
         self.output_dir_textfield.value = output_path
         self.page.update()
-        self._append_log_line(f"[系統] 自動設定輸出路徑：{output_path}")
+        # 🐛 2026-08-01 user review: 改用 SnackBar 跳出提示,不掛 log UI
+        # (原本 _append_log_line 寫進 self.log_view,但 S1 撤回後 user 看不到任何 log)
+        self._show_snack_bar(f"[系統] 已自動設定輸出路徑：{output_path}", color=theme.GREEN_600)
 
-    def set_controls_disabled(self, disabled: bool):
-        """停用或啟用所有輸入框與按鈕（執行期間呼叫，防止重複點擊）。
+    def _check_mods_dir_or_snack(self, mods_dir: str, action_label: str) -> bool:
+        """按鈕 click handler 的前置驗證。
 
-        包含 dual 按鈕在內的所有動作按鈕都會被停用，避免多執行緒競爭
-        _extraction_stats 寫入（Lang 提取中點 dual_extract 會造成 stats 覆蓋）。
+        :param mods_dir: 已經 strip 後的 mods 路徑字串。
+        :param action_label: 動作說明(例如 "提取 Lang"、"預覽 Book")，
+                             用於 SnackBar 文案(如 "無法提取 Lang: ...")。
+        :return: True 表示 mods_dir 合法,可以繼續執行(進 dialog);
+                 False 表示已 SnackBar 提示,handler 應早 return。
 
-        參數：
-            disabled：True 為停用（淡化 50%），False 為啟用。
+        UX 改進 (2026-07-13 user review):
+            原先 extractor_dialog.py:on_start_click 內早 return + SnackBar
+            顯示「請先選擇 Mods 資料夾」,但 user 已付出「按按鈕 + 進 dialog」
+            的代價才看到提示。
+
+            把驗證提前到按鈕 click handler 內,user 按按鈕後若沒設 mods_dir,
+            直接 SnackBar 提示「請先選擇資料夾」並 return,不進 dialog。
         """
-        for ctrl in (
-            self.mods_dir_textfield,
-            self.output_dir_textfield,
-            self.lang_button,
-            self.book_button,
-            self.dual_extract_button,
-            self.dual_preview_button,
-            self.preview_lang_button,
-            self.preview_book_button,
-        ):
-            ctrl.disabled = disabled
-            ctrl.opacity = 0.5 if disabled else 1.0
-        self.page.update()
+        if not mods_dir:
+            self._show_snack_bar(f"⚠️ 請先選擇 Mods 資料夾才能{action_label}", color=theme.AMBER_700)
+            return False
+        if not os.path.isdir(mods_dir):
+            self._show_snack_bar(f"⚠️ Mods 資料夾不存在,無法{action_label}", color=theme.AMBER_700)
+            return False
+        return True
+
+    def _handle_extract_lang_click(self, e):
+        """提取 Lang 按鈕 click handler。提早在按鈕層驗證 mods_dir。"""
+        mods_dir = (self.mods_dir_textfield.value or "").strip()
+        if not self._check_mods_dir_or_snack(mods_dir, "提取 Lang"):
+            return
+        output_path = (self.output_dir_textfield.value or "").strip()
+        if not output_path:
+            output_path = self._auto_fill_output_path(mods_dir, "lang")
+        # open_extractor_dialog 從頂部 import
+        open_extractor_dialog(
+            self.page,
+            self.file_picker,
+            input_path=mods_dir,
+            output_path=output_path,
+            mode="lang",
+            # 🐛 2026-07-14 user review: 把主 UI skip_zh_cn_switch 串接到 generator,
+            # 開關打開時真正過濾 zh_cn.json 檔案 (見 tests/test_skip_zh_cn.py)
+            skip_zh_cn=self.skip_zh_cn_switch.value,
+        )
+
+    def _handle_extract_book_click(self, e):
+        """提取 Book 按鈕 click handler。
+
+        Book 模式 skip_zh_cn (2026-07-14 user review):
+        原本以為 book 模式不適用 skip_zh_cn,但 build_book_path_regex
+        也用 caller 傳的 lang_codes (跟 lang 模式同樣的 bug pattern)。
+        修法跟 lang 模式對稱,book 也接 self.skip_zh_cn_switch.value。
+        """
+        mods_dir = (self.mods_dir_textfield.value or "").strip()
+        if not self._check_mods_dir_or_snack(mods_dir, "提取 Book"):
+            return
+        output_path = (self.output_dir_textfield.value or "").strip()
+        if not output_path:
+            output_path = self._auto_fill_output_path(mods_dir, "book")
+        # open_extractor_dialog 從頂部 import
+        open_extractor_dialog(
+            self.page,
+            self.file_picker,
+            input_path=mods_dir,
+            output_path=output_path,
+            mode="book",
+            # 🐛 2026-07-14 user review:book 模式也串接 skip_zh_cn_switch
+            skip_zh_cn=self.skip_zh_cn_switch.value,
+        )
+
+    def _handle_extract_dual_click(self, e):
+        """提取 Lang + Book 按鈕 click handler。"""
+        mods_dir = (self.mods_dir_textfield.value or "").strip()
+        if not self._check_mods_dir_or_snack(mods_dir, "提取 Lang + Book"):
+            return
+        output_path = (self.output_dir_textfield.value or "").strip()
+        if not output_path:
+            output_path = self._auto_fill_output_path(mods_dir, "dual")
+        # open_extractor_dialog 從頂部 import
+        open_extractor_dialog(
+            self.page,
+            self.file_picker,
+            input_path=mods_dir,
+            output_path=output_path,
+            mode="dual",
+            # 🐛 2026-07-14 user review: DUAL mode 也串接 skip_zh_cn_switch,
+            # 影響 Lang phase 的 regex (Book phase 不受影響)
+            skip_zh_cn=self.skip_zh_cn_switch.value,
+        )
+
+    def _handle_preview_lang_click(self, e):
+        """預覽 Lang 按鈕 click handler。"""
+        mods_dir = (self.mods_dir_textfield.value or "").strip()
+        if not self._check_mods_dir_or_snack(mods_dir, "預覽 Lang"):
+            return
+        output_path = (self.output_dir_textfield.value or "").strip()
+        # open_preview_dialog 從頂部 import
+        open_preview_dialog(
+            self.page,
+            self.file_picker,
+            input_path=mods_dir,
+            output_path=output_path,
+            mode="lang",
+            # 🐛 2026-07-14 user review: preview 路徑也串接 skip_zh_cn_switch
+            skip_zh_cn=self.skip_zh_cn_switch.value,
+        )
+
+    def _handle_preview_book_click(self, e):
+        """預覽 Book 按鈕 click handler。"""
+        mods_dir = (self.mods_dir_textfield.value or "").strip()
+        if not self._check_mods_dir_or_snack(mods_dir, "預覽 Book"):
+            return
+        output_path = (self.output_dir_textfield.value or "").strip()
+        # open_preview_dialog 從頂部 import
+        open_preview_dialog(
+            self.page,
+            self.file_picker,
+            input_path=mods_dir,
+            output_path=output_path,
+            mode="book",
+            # 🐛 2026-07-14 user review:book preview 也串接 skip_zh_cn_switch
+            skip_zh_cn=self.skip_zh_cn_switch.value,
+        )
+
+    def _handle_preview_dual_click(self, e):
+        """預覽 Lang + Book 按鈕 click handler。"""
+        mods_dir = (self.mods_dir_textfield.value or "").strip()
+        if not self._check_mods_dir_or_snack(mods_dir, "預覽 Lang + Book"):
+            return
+        output_path = (self.output_dir_textfield.value or "").strip()
+        # open_preview_dialog 從頂部 import
+        open_preview_dialog(
+            self.page,
+            self.file_picker,
+            input_path=mods_dir,
+            output_path=output_path,
+            mode="dual",
+            # 🐛 2026-07-14 user review: DUAL preview 也串接 skip_zh_cn_switch,
+            # 影響 Lang phase 的 regex (Book phase 不受影響)
+            skip_zh_cn=self.skip_zh_cn_switch.value,
+        )
 
     def clear_output_path(self, e=None):
-        """清除輸出路徑文字欄位，並寫入系統日誌。"""
+        """清除輸出資料夾路徑文字欄位，並跳出 SnackBar 提示。"""
         if not (self.output_dir_textfield.value or "").strip():
             return
         self.output_dir_textfield.value = ""
         self.page.update()
-        self._append_log_line("[系統] 已清除輸出路徑")
+        # 🐛 2026-08-01 user review: 改用 SnackBar 跳出提示,不掛 log UI
+        # (原本 _append_log_line 寫進 self.log_view,但 S1 撤回後 user 看不到任何 log)
+        self._show_snack_bar("[系統] 已清除輸出路徑", color=theme.BLUE_600)
 
     # ==================================================
     # Worker Logic
     # ==================================================
-    def _update_stats_from_log(self, line: str):
-        """根据日志内容更新提取统计信息"""
-        return update_stats_from_log(self, line)
-
-    def _show_extraction_summary(self, mode: str):
-        """顯示提取結果摘要（UI 風格對齊預覽 modal）。"""
-        stats = self._extraction_stats
-
-        content = ft.Column(
-            [
-                ft.Text("提取結果摘要", size=16, weight=ft.FontWeight.BOLD),
-                ft.Divider(),
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=20),
-                        ft.Text(f"成功處理 JAR：{stats['success']} 個", size=14),
-                    ],
-                    spacing=8,
-                ),
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=20),
-                        ft.Text(f"因內容相同而跳過的檔案：{stats['warnings']} 個", size=14),
-                    ],
-                    spacing=8,
-                ),
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.ERROR, color=theme.RED, size=20),
-                        ft.Text(f"失敗項目：{stats['failures']} 個", size=14),
-                    ],
-                    spacing=8,
-                ),
-                ft.Divider(),
-                ft.Text(
-                    f"新提取或更新的檔案：{stats['total_files']} 個",
-                    size=14,
-                    color=ft.Colors.BLUE_700,
-                    weight=ft.FontWeight.BOLD,
-                ),
-            ],
-            spacing=10,
-            tight=True,
-        )
-
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text(f"提取完成 - {mode.upper()}"),
-            content=ft.Container(content=content, width=520),
-            actions=[
-                ft.TextButton("關閉", on_click=lambda e: self._close_dialog_overlay(dialog)),
-            ],
-        )
-
-        try:
-            self.page.overlay.append(dialog)
-            dialog.open = True
-            async def _do_update(_):
-                self.page.update()
-            self.page.run_task(_do_update, None)
-        except Exception:
-            pass
-
-    def _close_dialog_overlay(self, dialog):
-        """關閉指定的 dialog 並從 page.overlay 移除。
-
-        用於：
-        - _show_extraction_summary 中「關閉」按鈕的回調
-        - 測試中清理殘留的 dialog
-        """
-        try:
-            if dialog in self.page.overlay:
-                self.page.overlay.remove(dialog)
-            dialog.open = False
-            self.page.update()
-        except Exception:
-            pass
-
-
     def _append_log_line(self, entry_or_str):
-        """新增日誌訊息到日誌檢視區。
+        """新增日誌訊息到日誌檢視區（直接走 LogView.add）。
 
-        支援傳入 LogEntry（PR2 後 poller 傳入）或 str（直接呼叫時）。
+        PR refactor/unified-log-view: 取代原本的字串比對判斷 level + 寫死 hex 顏色。
+        LogView 內部會從 entry 的 level 自動取對應顏色。
+
+        支援傳入 LogEntry（取 .level 與 .text）或 str（預設 level="system"）。
         """
-        text = entry_or_str.text if hasattr(entry_or_str, "text") else entry_or_str
-        log_info(f"_append_log_line called: thread={threading.current_thread().name}, text={text[:80]}...")
-        color = "#e0e0e0"  # default logs are light grey
-        if "[ERROR]" in text:
-            color = "#ff6b6b"  # soft red
-        elif "[系統]" in text:
-            color = "#69db7c"  # soft green
-        elif "Translation" in text or "完成" in text:
-            color = "#74c0fc"  # soft blue
-
-        log_info(f"_append_log_line: before append, log_view.controls count={len(self.log_view.controls)}")
-        self.log_view.controls.append(
-            ft.Text(
-                text,
-                font_family="Consolas,Monospace",
-                size=13,
-                color=color,
-                selectable=True,
-            )
-        )
-        log_info(f"_append_log_line: after append, log_view.controls count={len(self.log_view.controls)}")
+        if hasattr(entry_or_str, "text") and hasattr(entry_or_str, "level"):
+            # LogEntry 物件
+            text = entry_or_str.text
+            level = entry_or_str.level
+        else:
+            # 純字串（reset / auto-fill 等純事件 log），預設 system 等級
+            text = str(entry_or_str)
+            level = "system"
+        self.log_view.add(text, level=level)
 
     # ==================================================
     # Worker Logic
     # ==================================================
-    def start_extraction(self, mode: str):
-        """啟動 JAR 提取任務（lang / book / dual）。
-
-        實際工作代理至 extractor_actions.start_extraction（run_extraction_flow）。
-        """
-        return run_extraction_flow(self, mode)
-
     def _show_snack_bar(self, message: str, color: str = theme.ERROR):
         """
         顯示底部的快訊通知 (SnackBar)
 
         :param message: 要顯示的文字訊息
         :param color: SnackBar 的背景顏色，預設為淺紅色 (RED_400)
+
+        2026-07-12 user review cleanup:
+        - SnackBar 預設 4 秒自動消失(ft.SnackBar.duration 預設值)
+        - 仍用 page.overlay.append + open=True 路徑(SnackBar extends DialogControl
+          但走 show_dialog 進 dialog stack 會污染既有 dialog cleanup 路徑)
+        - 加 try/except + log_warning:若 page 還沒掛載(早期 init 階段)就會跳過,
+          留下 traceback 證據
+        - **不主動 page.update()**:`snack.open=True` 已經把 control 標 dirty,
+          既有呼叫場景 (pick_directory / _async_pick_directory) 的 caller 會
+          自己 page.update() 或 run_task,不再多推一個 task 避免測試 page._tasks
+          長度斷言失敗
         """
         log_info(f"[UI] SnackBar: {message}")
         # 建立 SnackBar 元件，包含文字內容與背景顏色
         snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-
-        # 將 SnackBar 加入頁面的 overlay 層。
-        # 在現代 Flet 版本中，這是顯示彈出式元件（如 SnackBar, Dialog）的標準做法。
-        self.page.overlay.append(snack)
-
-        # 將 open 屬性設為 True 以觸發顯示動畫
-        snack.open = True
-
-        # 更新頁面，讓變更立即反映在 UI 上
-        self.page.update()
-
-    # ==================================================
-    # 預覽功能
-    # ==================================================
-    def show_preview(self, mode: str):
-        """顯示提取預覽對話框（lang / book / dual）。
-
-        實際工作代理至 extractor_actions.show_preview（run_preview_flow）。
-        """
-        return run_preview_flow(self, mode)
+        try:
+            self.page.overlay.append(snack)
+            snack.open = True
+            # 🐛 2026-08-01 user review: 主動 page.update() 讓 SnackBar 真的跳出
+            # 原本 caller 自己 page.update() 之後呼叫 _show_snack_bar,
+            # 但 snack.open=True 已經在那一幀 render 後設定,需再 update 才能讓 SnackBar 渲染。
+            # 改為主動 update (2026-08-01 user review):測試 page._tasks 長度改用其他斷言
+            self.page.update()
+        except Exception as ex:
+            log_warning(f"[SNACKBAR] _show_snack_bar failed: {ex!r}")

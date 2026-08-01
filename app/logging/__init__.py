@@ -1,20 +1,23 @@
 """app/logging/
 
-Logging System Unification — 統一日誌系統模組。
+向後兼容層：re-export 從 app.views._log。
 
-本模組提供：
-- LogEntry: 結構化日誌事件
-- TaskSession: 支援 LogEntry 的任務狀態容器
-- LogPresenter: 兩種渲染模式（append / tail）
-- log_config: ui_logging 設定讀取與 normalize
-- log_colors: 等級 → 顏色對應
+PR refactor/unified-log-view: log 相關實作全部搬到 app.views._log，
+這裡保留薄殼 re-export 讓既有 from app.logging import ... 仍可用。
+
+新 code 請從 app.views._log import。
 """
 
-from .log_entry import LogEntry, LogLevel
-from .task_session import TaskSession
-from .log_presenter import LogPresenter
-from .log_config import load_ui_logging_config, DEFAULT_UI_LOGGING
-from .log_colors import get_level_color, get_level_prefix
+from app.views._log.log_entry import LogEntry, LogLevel
+from app.views._log.task_session import TaskSession
+from app.views._log.log_presenter import LogPresenter
+from app.views._log.log_config import load_ui_logging_config, DEFAULT_UI_LOGGING
+from app.views._log.log_colors import (
+    COLOR_MAP,
+    LEVEL_PREFIX,
+    get_level_color,
+    get_level_prefix,
+)
 
 __all__ = [
     # Core
@@ -27,6 +30,8 @@ __all__ = [
     "load_ui_logging_config",
     "DEFAULT_UI_LOGGING",
     # Colors
+    "COLOR_MAP",
+    "LEVEL_PREFIX",
     "get_level_color",
     "get_level_prefix",
 ]

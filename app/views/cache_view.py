@@ -1602,8 +1602,20 @@ class CacheView(ft.Column):
         rows = self._all_logs
         if self._only_error:
             rows = [x for x in rows if ("[ERROR" in x or "[WARN" in x)]
+        # PR refactor/unified-log-view: 用 theme token 統一顏色
+        # 從字串前綴判 level（cache_view 保留 event-driven 架構，不接 LogView）
         for line in rows[-800:]:
-            self.log_list.controls.append(ft.Text(line, size=12, selectable=True))
+            if line.startswith("[ERROR"):
+                text_color = theme.TEXT_LOG_ERROR
+            elif line.startswith("[WARN"):
+                text_color = theme.TEXT_LOG_WARNING
+            elif line.startswith("[系統") or line.startswith("[SYS"):
+                text_color = theme.TEXT_LOG_SYSTEM
+            else:
+                text_color = theme.TEXT_LOG_DEFAULT
+            self.log_list.controls.append(
+                ft.Text(line, size=12, color=text_color, selectable=True)
+            )
         # PR5-7: 使用局部更新替代全頁更新
         self.update()
 

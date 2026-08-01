@@ -8,6 +8,7 @@ import flet as ft
 import threading
 from typing import Callable, Tuple, Any, Optional, List
 from app.ui import theme
+from app.views._log import LogView
 
 
 class QCBase:
@@ -15,15 +16,18 @@ class QCBase:
 
     用途：封裝執行緒任務執行與 UI 更新邏輯，供各 QC 檢查器重用。
     維護注意：修改此類會影響所有使用 task_worker 的 QC 檢查器。
+
+    PR refactor/unified-log-view: log_view 改為 LogView widget（統一深色容器 + 等寬字）。
+    LogView.add() 內部處理 show_levels 過濾 + max_lines 截斷 + 等級顏色。
     """
 
-    def __init__(self, page: ft.Page, progress_bar: ft.ProgressBar, log_view: ft.ListView):
+    def __init__(self, page: ft.Page, progress_bar: ft.ProgressBar, log_view: LogView):
         """初始化 QCBase。
 
         參數：
             page: Flet Page 物件
             progress_bar: 共用的 ProgressBar 元件
-            log_view: 共用的 ListView 用於顯示日誌
+            log_view: LogView widget（取代裸 ft.ListView）
         """
         self._page = page
         self.progress_bar = progress_bar
@@ -56,14 +60,17 @@ class QCBase:
                     log_msg = update.get("log", "")
                     for line in log_msg.split("\n"):
                         if line.strip():
-                            self.log_view.controls.append(ft.Text(line))
+                            # PR refactor/unified-log-view: 透過 LogView.add
+                            # 顏色由 LogView 根據 level 從 theme 取
+                            self.log_view.add(line, level="info")
 
                     if "progress" in update:
                         self.progress_bar.value = update["progress"]
                     if update.get("error"):
                         self.progress_bar.color = theme.ERROR
 
-                    self.log_view.scroll_to(offset=-1, duration=100)
+                    # LogView 是 ft.Container，scroll_to 在內部 _list_view 上
+                    self.log_view._list_view.scroll_to(offset=-1, duration=100)
                     self._page.update()
             finally:
                 # 重置 ProgressBar

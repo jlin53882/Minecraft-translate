@@ -407,7 +407,12 @@ class TestRunExtractionLoop:
         from app.services_impl.pipelines.extract_service import run_extraction_loop
 
         stats = run_extraction_loop(iter([]))
-        assert stats == {"success": 0, "warnings": 0, "failures": 0}
+        assert stats["success"] == 0
+        assert stats["warnings"] == 0
+        assert stats["failures"] == 0
+        # Phase 3 (2026-07-13) sub-dict default
+        assert stats["lang"] == {"success": 0, "warnings": 0, "failures": 0}
+        assert stats["book"] == {"success": 0, "warnings": 0, "failures": 0}
 
     def test_extracts_final_stats_from_update(self):
         """Final update with 'stats' field is extracted into the returned stats."""
@@ -417,8 +422,14 @@ class TestRunExtractionLoop:
             yield {"progress": 0.5, "log": "halfway"}
             yield {"progress": 1.0, "stats": {"success": 10, "warnings": 2, "failures": 1}}
 
+
         stats = run_extraction_loop(gen())
-        assert stats == {"success": 10, "warnings": 2, "failures": 1}
+        assert stats["success"] == 10
+        assert stats["warnings"] == 2
+        assert stats["failures"] == 1
+        # Phase 3 (2026-07-13) 此 generator 沒 yield phase,sub-dict 維持 default
+        assert stats["lang"] == {"success": 0, "warnings": 0, "failures": 0}
+        assert stats["book"] == {"success": 0, "warnings": 0, "failures": 0}
 
     def test_error_in_update_increments_failures(self):
         """An update with 'error' field increments failures by 1."""

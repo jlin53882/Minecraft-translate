@@ -27,6 +27,7 @@ from app.services_impl.pipelines.extract_service import (
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service, run_merge_folder_batch_service
 from app.services_impl.pipelines.lm_service import run_lm_translation_service
 from app.services_impl.pipelines.bundle_service import run_bundling_service
+from app.views._log import LogView
 
 from app.views.pipeline.pipeline_extract_dialog import open_extract_dialog
 from app.views.pipeline.pipeline_merge_dialog import open_merge_dialog
@@ -167,7 +168,15 @@ class PipelineProgressPanel:
         )
 
         self.current_label = ft.Text("等待執行...", color=GREY_600, size=14)
-        self.log_view = ft.ListView(height=120, spacing=3, auto_scroll=True)
+        # PR refactor/unified-log-view: 改用 LogView widget
+        # 統一深色容器 + 等寬字 + 等級顏色（從 theme）
+        # 保留 height=120 限制
+        self.log_view = LogView(
+            page=page,
+            mode="append",
+            max_lines=500,
+            height=120,
+        )
 
         self.container = ft.Container(
             content=ft.Column([
@@ -201,12 +210,26 @@ class PipelineProgressPanel:
                 step.set_status("waiting")
         self.current_label.value = f"目前的：{name}"
 
-    def add_log(self, msg: str, is_success: bool | None = None):
-        color = GREEN_600 if is_success == True else (RED_400 if is_success == False else CYAN_700)
-        self.log_view.controls.append(
-            ft.Text(f">> {msg}", color=color, size=12, font_family="Consolas")
-        )
-        self._page.update()
+    def add_log(self, msg: str, level: str = "info", is_success: bool | None = None):
+        """PR refactor/unified-log-view: 改用 LogView.add() 統一處理等級顏色。
+
+        Args:
+            msg: log 文字
+            level: debug/info/warning/error/system（從字串前綴自動推斷）
+            is_success: 保留向後兼容（True=success、False=error、None=預設）
+        """
+        # 向後兼容 is_success 參數（map 到 level）
+        if is_success is not None and level == "info":
+            level = "system" if is_success else "error"
+        # 從 msg 字串前綴推斷 level（向後兼容既有呼叫）
+        if level == "info":
+            if msg.startswith("▶"):
+                level = "system"
+            elif msg.startswith("✅"):
+                level = "system"
+            elif msg.startswith("❌"):
+                level = "error"
+        self.log_view.add(f">> {msg}", level=level)
 
     def finish_step(self, step_num: int, success: bool):
         self.steps[step_num - 1].set_status("done" if success else "failed")
@@ -224,7 +247,8 @@ class PipelineProgressPanel:
         self.container.visible = False
 
     def clear_logs(self):
-        self.log_view.controls.clear()
+        # PR refactor/unified-log-view: log_view 改用 LogView
+        self.log_view.clear()
 
 
 # =============================================================================
@@ -254,7 +278,7 @@ class PipelineView(ft.Column):
             text_size=12,
             dense=True,
         )
-        self.log_content = ft.ListView(expand=True, spacing=5, auto_scroll=True)
+        self.log_content = ft.ListView(expand=True, spacing=5, auto_scroll=True)  # PR refactor/unified-log-view: dead widget, 將在下個 commit 移除
         self.progress_bar = ft.ProgressBar(width=float("inf"), height=8, value=0, color=CYAN_400, bgcolor="#E0E0E0")
         self.progress_status = ft.Text("等待任務啟動...", size=12, color=GREY_600)
         self.keys_container = ft.Column(spacing=10)
@@ -273,10 +297,6 @@ class PipelineView(ft.Column):
     def set_registry(self, registry):
         """將全域視圖註冊表注入視圖內（相容舊代碼）。"""
         self.set_view_registry(registry)
-        self.log_content.controls.append(
-            ft.Text(f">> {msg}", color=RED_400 if is_err else CYAN_700, size=12, font_family="Consolas")
-        )
-        self._page.update()
 
     def _update_progress(self, val, text):
         self.progress_bar.value = val
@@ -373,7 +393,7 @@ class PipelineView(ft.Column):
 
             except Exception as ex:
                 async def do_err_log(_):
-                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", False)
+                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", level="error")
                 self._page.run_task(do_err_log, None)
                 async def do_err_finish(_):
                     self.progress_panel.finish_step(1, False)
@@ -424,7 +444,7 @@ class PipelineView(ft.Column):
                 self._page.run_task(do_finish, None)
             except Exception as ex:
                 async def do_err(_):
-                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", False)
+                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", level="error")
                 self._page.run_task(do_err, None)
 
         threading.Thread(target=worker, daemon=True).start()
@@ -577,7 +597,7 @@ class PipelineView(ft.Column):
                     self._poll_session(session)
                     t.join()
                     if session.error:
-                        self.progress_panel.add_log(f"❌ {name} 失敗", False)
+                        self.progress_panel.add_log(f"❌ {name} 失敗", level="error")
                         return False
                     self.progress_panel.add_log(f"✅ {name} 完成")
                     return True
@@ -649,7 +669,7 @@ class PipelineView(ft.Column):
 
             except Exception as ex:
                 async def fail(_):
-                    self.progress_panel.add_log(f"❌ 流程失敗：{ex}", False)
+                    self.progress_panel.add_log(f"❌ 流程失敗：{ex}", level="error")
                     self._reenable_buttons()
                 self._page.run_task(fail, None)
 
@@ -711,7 +731,7 @@ class PipelineView(ft.Column):
                 self._page.run_task(do_finish, None)
             except Exception as ex:
                 async def do_err(_):
-                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", False)
+                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", level="error")
                 self._page.run_task(do_err, None)
                 async def do_err_finish(_):
                     self.progress_panel.finish_step(3, False)
@@ -755,7 +775,7 @@ class PipelineView(ft.Column):
                 self._page.run_task(do_finish, None)
             except Exception as ex:
                 async def do_err(_):
-                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", False)
+                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", level="error")
                 self._page.run_task(do_err, None)
                 async def do_err_finish(_):
                     self.progress_panel.finish_step(4, False)

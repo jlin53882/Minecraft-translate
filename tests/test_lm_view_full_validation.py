@@ -10,6 +10,7 @@ import flet as ft
 from unittest.mock import patch
 from app.views import lm_view
 from app.logging import LogEntry
+from app.views._log import LogView
 from tests.conftest import mock_page, mock_filepicker
 
 
@@ -89,8 +90,11 @@ def test_lm_view_initializes_primary_controls(monkeypatch):
     assert view.start_button.content == "開始翻譯"
 
     # --- Log ---
+    # PR refactor/unified-log-view: log_view 是 LogView widget
+    # LogPresenter 已內建在 LogView 內（_presenter），不存 view.log_presenter
     assert view.log_view is not None
-    assert view.log_presenter is not None
+    assert isinstance(view.log_view, LogView)
+    assert view.log_view._presenter is not None
 
     # --- File picker ---
     assert hasattr(view.file_picker, 'get_directory_path')
@@ -302,13 +306,16 @@ def test_controls_contains_all_sections(monkeypatch):
 # ============================================================
 
 def test_log_presenter_initialized_with_tail_mode(monkeypatch):
-    """驗證 LogPresenter 以 tail 模式正確初始化，tail_lines 為 250。"""
+    """驗證 LogPresenter 以 tail 模式正確初始化，tail_lines 為 250。
+
+    PR refactor/unified-log-view: LogPresenter 已內建在 LogView 內（_presenter）。
+    """
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     view = lm_view.LMView(mock_page(), mock_filepicker())
 
-    assert view.log_presenter is not None
+    assert view.log_view._presenter is not None
     # tail mode 由 ui_cfg 決定，只驗證非 None
-    assert hasattr(view.log_presenter, "mode")
+    assert hasattr(view.log_view._presenter, "mode")
 
 
 # ============================================================
@@ -384,7 +391,8 @@ def test_start_clicked_resets_log_presenter(monkeypatch):
         reset_calls.append(True)
 
     view = lm_view.LMView(page, mock_filepicker())
-    monkeypatch.setattr(view.log_presenter, "reset", fake_reset)
+    # PR refactor/unified-log-view: LogPresenter 內建在 LogView 內
+    monkeypatch.setattr(view.log_view._presenter, "reset", fake_reset)
     view.input_path.value = "C:/Assets"
 
     view.start_clicked(None)
@@ -437,12 +445,14 @@ def test_start_ui_timer_attempts_log_view_update(monkeypatch):
     view.session.status = "DONE"
 
     called = []
-    monkeypatch.setattr(view.log_view, "update", lambda: called.append(True))
+    # PR refactor/unified-log-view: LogView.sync_entries() 內部呼叫 page.update()
+    # （不再直接呼叫 _list_view.update()，因為 LogView 是 ft.Container）
+    monkeypatch.setattr(view.page, "update", lambda: called.append(True))
 
     view.start_ui_timer()
     lm_view.time.sleep(0.25)
 
-    assert called, "log_view.update() 應至少被呼叫一次"
+    assert called, "page.update() 應至少被呼叫一次（透過 sync_entries 內部）"
 
 
 # ============================================================

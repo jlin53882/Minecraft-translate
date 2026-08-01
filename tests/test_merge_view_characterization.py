@@ -1,5 +1,6 @@
 import flet as ft
 from app.views import merge_view
+from app.views._log import LogView
 from tests.conftest import mock_page, mock_filepicker
 
 
@@ -77,7 +78,8 @@ def test_merge_view_text_fields_and_listviews_exist(monkeypatch):
     assert view.output_dir_field.label == '輸出資料夾'
     assert isinstance(view.zip_list_view, ft.ListView)
     assert view.zip_list_view.height == 160
-    assert isinstance(view.log_view, ft.ListView)
+    # PR refactor/unified-log-view: log_view 改為 LogView widget（ft.Container）
+    assert isinstance(view.log_view, LogView)
     assert isinstance(view.progress_bar, ft.ProgressBar)
 
 
@@ -145,13 +147,17 @@ def test_merge_view_progress_bar_and_status_chip(monkeypatch):
 
 
 def test_merge_view_log_presenter_exists(monkeypatch):
-    """驗證 log_presenter 存在"""
+    """驗證 LogView widget 存在（取代舊的 LogPresenter 屬性）。
+
+    PR refactor/unified-log-view: LogPresenter 已內建在 LogView 內，
+    view 不再單獨管理 log_presenter。
+    """
     monkeypatch.setattr(merge_view, 'TaskSession', _Session)
     monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
 
-    assert hasattr(view, 'log_presenter')
-    assert view.log_presenter is not None
+    assert hasattr(view, 'log_view')
+    assert isinstance(view.log_view, LogView)
 
 
 def test_merge_view_show_snack_bar_adds_to_overlay(monkeypatch):

@@ -2,21 +2,18 @@
 
 本模組負責 ExtractorView 的 UI 面板組合，提供以下面板：
 
-Layout（最外層）：
-  - build_main_layout() → ft.Column（單欄垂直：設定在上，日誌在下）
-
 Settings（左欄）：
-  - build_settings_panel() → 路徑設定卡片 + 動作區卡片 + 統計徽章
-
-Logs（右欄）：
-  - build_logs_panel() → 狀態列 + 日誌檢視器（固定高度 350dp，可滾動）
+  - build_settings_panel() → 路徑設定卡片 + 動作區卡片 + 跳過開關
 
 面板構建工具：
-  - _build_status_bar() → 狀態列（4px 左側彩色邊線 + status_text + 進度條 + 百分比）
-  - _build_stats_badge() → 統計徽章（成功/跳過/失敗即時計數）
   - _build_path_row() → 路徑輸入列（icon 前綴 + TextField + 選擇按鈕）
-  - _build_action_zone() → 動作區卡片（執行按鈕 + 預覽按鈕 + 跳過開關）
+  - _build_action_zone() → 動作區卡片（執行按鈕 + 預覽按鈕）
   - _build_pick_button() → 目錄選擇 IconButton
+
+🐛 2026-08-01 user review 物理刪除 (commit 14b823e 系列):
+  - build_logs_panel → 移至 extractor_view.py 內聯 (S1 修復)
+  - _build_status_bar → 內聯到 build_logs_panel 裡，刪除
+  - build_main_layout → 沒用上，由 ExtractorView.__init__ 直接組裝
 
 設計原則：
   - 所有面板皆使用 build_* 命名，內部工具用 _build_* 命名
@@ -28,85 +25,8 @@ import flet as ft
 
 from app.ui import theme
 from app.ui.components import styled_card
+from app.views._log import LogView
 
-
-def _build_status_bar(view) -> ft.Container:
-    """狀態列：左側彩色邊線 + 狀態文字 + 進度條 + 百分比"""
-    view.status_text = ft.Text(
-        "狀態：閒置",
-        size=13,
-        color=theme.GREY_700,
-        weight=ft.FontWeight.W_500,
-    )
-    view.progress_bar = ft.ProgressBar(
-        value=0, height=8, visible=True,
-        bgcolor=theme.GREY_200,
-        color=theme.BLUE,
-    )
-    view._progress_pct = ft.Text(
-        "0%",
-        size=12,
-        color=theme.GREY_600,
-        weight=ft.FontWeight.BOLD,
-    )
-
-    return ft.Container(
-        content=ft.Column(
-            controls=[
-                ft.Row(
-                    controls=[
-                        view.status_text,
-                        view._progress_pct,
-                    ],
-                    spacing=12,
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                ),
-                ft.Container(
-                    content=view.progress_bar,
-                    border_radius=4,
-                    clip_behavior=ft.ClipBehavior.HARD_EDGE,
-                ),
-            ],
-            spacing=6,
-        ),
-        padding=ft.Padding(left=12, top=10, right=12, bottom=10),
-        border=ft.Border(
-            left=ft.BorderSide(4, theme.GREY_400),
-        ),
-        border_radius=8,
-        bgcolor=theme.GREY_50,
-    )
-
-
-def _build_stats_badge(view) -> ft.Container:
-    """統計徽章：成功 / 警告 / 失敗計數"""
-    view._stats_success = ft.Text("0", size=14, weight=ft.FontWeight.BOLD, color=theme.GREEN)
-    view._stats_warnings = ft.Text("0", size=14, weight=ft.FontWeight.BOLD, color=theme.ORANGE)
-    view._stats_failures = ft.Text("0", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.ERROR)
-
-    return ft.Container(
-        content=ft.Row(
-            controls=[
-                ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=16),
-                ft.Text("成功: ", size=12, color=theme.GREY_600),
-                view._stats_success,
-                ft.Container(width=20),
-                ft.Icon(ft.Icons.WARNING, color=theme.ORANGE, size=16),
-                ft.Text("跳過: ", size=12, color=theme.GREY_600),
-                view._stats_warnings,
-                ft.Container(width=20),
-                ft.Icon(ft.Icons.ERROR, color=ft.Colors.ERROR, size=16),
-                ft.Text("失敗: ", size=12, color=theme.GREY_600),
-                view._stats_failures,
-            ],
-            spacing=4,
-            alignment=ft.MainAxisAlignment.START,
-        ),
-        padding=ft.Padding(left=10, top=8, right=10, bottom=8),
-        border=ft.Border.all(1, theme.GREY_200),
-        border_radius=6,
-        bgcolor=ft.Colors.WHITE,
-    )
 
 
 def _build_path_row(view, icon, label, field, pick_target) -> ft.Container:
@@ -281,69 +201,8 @@ def build_settings_panel(view) -> ft.Column:
                     view.dual_preview_button,
                 ],
             ),
-            # --- 統計 Badge ---
-            _build_stats_badge(view),
         ],
     )
 
 
-def build_logs_panel(view) -> ft.Column:
-    """右側日誌面板：包含狀態列與日誌檢視器。
 
-    面板組合：
-        1. 狀態列（_build_status_bar）：左側彩色邊線 + 狀態文字 + 進度條 + 百分比。
-        2. 日誌檢視器（view.log_view）：固定高度 350dp，深色背景，可滾動。
-
-    參數：
-        view：ExtractorView 實例。
-
-    回傳：
-        ft.Column，可直接加入 ExtractorView 的 controls。
-    """
-    return ft.Column(
-        spacing=10,
-        controls=[
-            _build_status_bar(view),
-            ft.Container(
-                content=view.log_view,
-                bgcolor='#1e1e1e',
-                border_radius=8,
-                height=350,
-                padding=10,
-                clip_behavior=ft.ClipBehavior.HARD_EDGE,
-            ),
-        ],
-        expand=True,
-    )
-
-
-def build_main_layout(view) -> ft.Column:
-    """ExtractorView 最外層垂直佈局：設定面板在上，日誌面板在下。
-
-    面板組合：
-        1. 設定面板（build_settings_panel）：灰底圓角包裝。
-        2. 日誌面板（build_logs_panel）：灰底圓角包裝，expand=True 填滿剩餘空間。
-
-    參數：
-        view：ExtractorView 實例。
-
-    回傳：
-        ft.Column，寬度 expand=True，包含兩個包裝過的面板。
-    """
-    return ft.Column(
-        scroll=ft.ScrollMode.ADAPTIVE,
-        spacing=12,
-        controls=[
-            styled_card(
-                title="設定",
-                icon=ft.Icons.SETTINGS,
-                content=build_settings_panel(view),
-            ),
-            styled_card(
-                title="日誌",
-                icon=ft.Icons.RECEIPT_LONG,
-                content=build_logs_panel(view),
-                expand=True,
-            ),
-        ],
-    )
