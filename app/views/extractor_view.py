@@ -54,19 +54,6 @@ class ExtractorView(ft.Column):
         self.file_picker = file_picker
 
         # ExtractorView 的長任務狀態全部收斂到 TaskSession。
-        # 背景執行緒只寫 session，UI 端靠 poller 讀快照更新畫面，
-        # 這樣提取流程與畫面狀態不會互相纏在一起。
-        self.session = TaskSession(max_logs=2000)
-        self._ui_poller_stop = threading.Event()
-
-        # 提取統計
-        self._extraction_stats = {
-            "success": 0,
-            "warnings": 0,
-            "failures": 0,
-            "total_files": 0,
-        }
-
         # ======================
         # UI Components
         # ======================
