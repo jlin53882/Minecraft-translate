@@ -667,12 +667,18 @@ class TestFixSnackBarExceptWrapper:
     """User 2026-07-12 review 補發現:ExtractorView._show_snack_bar 內直接呼叫
     self.page.update()(從 click handler 內同步),且沒有 try/except 把例外吞掉。
 
-    修法:
+    修法(2026-07-12):
     1. 不主動 page.update():page.update 由 caller 觸發(pick_directory 等路徑
        自己的 async task 已經會順便 update),避免額外塞進 page._tasks 干擾測試。
        設 snack.open=True 已經把 control 標 dirty,Flet internal mutation 追蹤會
        在下一次 page.update() 時 render。
     2. 用 try/except 包起來,補 log_warning 留 traceback。
+
+    🐛 2026-08-01 user review 改變設計:
+    1. 重新加 self.page.update() — 因為 user 實測發現 clear_output_path / _auto_fill_output_path
+       已經自己 page.update() 過後才呼叫 _show_snack_bar,SnackBar 沒主動 update 就看不到。
+       改為主動 page.update() (雖然可能多一次 _tasks push,但 user 體驗優先)
+    2. try/except 仍保留(對應 test 仍有效)
     """
 
     def test_show_snack_bar_has_try_except(self):
@@ -725,11 +731,14 @@ class TestFixSnackBarExceptWrapper:
             "(吞錯沒 log,跟 commit b6c958b 的 extractor_view 修法要對稱)"
         )
 
-    def test_show_snack_bar_no_direct_page_update(self):
-        """_show_snack_bar 不應直接呼叫 page.update()。"""
+    def test_show_snack_bar_calls_page_update(self):
+        # 🐛 2026-08-01 user review (改期待):_show_snack_bar 應該主動 page.update()
+        # 原因:user 發現清空 output_dir 後 SnackBar 沒跳出 (caller 已經 page.update 過
+        # 文字欄位,但 SnackBar 在那幀後才加進 overlay,沒更新就看不到)。
+        # 從原本「不主動 page.update」(2026-07-12) 改成「主動 page.update」(2026-08-01)。
         extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
         tree = _ast_parse(extractor_view)
-        bad_calls = []
+        has_update = False
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.FunctionDef)
@@ -747,15 +756,11 @@ class TestFixSnackBarExceptWrapper:
                             isinstance(sub.func.value, ast.Attribute)
                             and sub.func.value.attr == "page"
                         ):
-                            bad_calls.append(
-                                f"self.page.update() at line {sub.lineno}"
-                            )
+                            has_update = True
                 break
-        assert not bad_calls, (
-            "回歸:_show_snack_bar 直接 self.page.update() "
-            "(User 2026-07-12 review 補發現,page.update 由 caller 負責,"
-            "避免額外塞 task 干擾測試 page._tasks 長度斷言)\n"
-            + "\n".join(bad_calls)
+        assert has_update, (
+            "回歸:_show_snack_bar 沒呼叫 self.page.update() "            "(User 2026-08-01 review 補發現,caller 自己 page.update 過文字欄位,"
+            "SnackBar 必須自己再 update 一次才能跳出)"
         )
 
 

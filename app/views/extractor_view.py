@@ -502,5 +502,10 @@ class ExtractorView(ft.Column):
         try:
             self.page.overlay.append(snack)
             snack.open = True
+            # 🐛 2026-08-01 user review: 主動 page.update() 讓 SnackBar 真的跳出
+            # 原本 caller 自己 page.update() 之後呼叫 _show_snack_bar,
+            # 但 snack.open=True 已經在那一幀 render 後設定,需再 update 才能讓 SnackBar 渲染。
+            # 改為主動 update (2026-08-01 user review):測試 page._tasks 長度改用其他斷言
+            self.page.update()
         except Exception as ex:
             log_warning(f"[SNACKBAR] _show_snack_bar failed: {ex!r}")
