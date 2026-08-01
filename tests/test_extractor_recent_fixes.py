@@ -315,11 +315,11 @@ class TestExtractorViewControlsStructure:
                     texts.extend(self._get_all_text_in_controls(ctrl.content.controls))
         return texts
 
-    def test_主_UI_不包含日誌區塊(self, monkeypatch):
-        """主 UI 不應該再包含 '日誌' 標題"""
-        view = _make_view(monkeypatch)
-        all_texts = self._get_all_text_in_controls(view.controls)
-        assert "日誌" not in all_texts
+    # 🐛 2026-08-01 user review (S1 修復):移除這個 test —
+    # S1 修復後 view.controls 確實包含 '日誌' 標題 (因為 view._logs_panel.visible=True 並掛進 controls)。
+    # 之前該 test 是「日誌不應該在主 UI」的舊設計,現在 S1 修復把日誌掛回 UI。
+    # 刪除:test_主_UI_不包含日誌區塊
+    pass
 
     def test_主_UI_包含設定區塊(self, monkeypatch):
         """主 UI 應該包含 '設定' 標題"""
@@ -327,11 +327,13 @@ class TestExtractorViewControlsStructure:
         all_texts = self._get_all_text_in_controls(view.controls)
         assert "設定" in all_texts
 
-    def test_主_UI_只包含_一個_區塊(self, monkeypatch):
-        """確認主 UI 只剩一個區塊（設定）"""
+    # 🐛 2026-08-01 user review (S1 修復):改這個 test —
+    # S1 修復後 view.controls 有 2 個 (設定 + 日誌)
+    def test_主_UI_包含_兩個_區塊(self, monkeypatch):
+        """確認主 UI 有 2 個區塊 (設定 + 日誌) — S1 修復後"""
         view = _make_view(monkeypatch)
-        # 移除日誌後，controls 應該只剩 1 個
-        assert len(view.controls) == 1
+        # S1 修復後 controls 應有 2 個 (設定 + 日誌)
+        assert len(view.controls) == 2
 
     def test_log_view_屬性仍存在但不顯示(self, monkeypatch):
         """雖然主 UI 不再顯示日誌，但 log_view 屬性應該還在（供對話框使用）"""

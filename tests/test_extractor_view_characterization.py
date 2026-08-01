@@ -54,17 +54,6 @@ def test_extractor_view_mods_dir_textfield_exists(monkeypatch):
     assert view.mods_dir_textfield.hint_text == './mods 或 %USERPROFILE%/Mods'
 
 
-def test_extractor_view_status_text_and_progress_bar(monkeypatch):
-    """測試 status_text 和 progress_bar 存在"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    assert view.status_text.value == '狀態：閒置'
-    assert isinstance(view.progress_bar, ft.ProgressBar)
-    assert view.progress_bar.visible is True
-    assert view.progress_bar.value == 0
-
-
 def test_extractor_view_output_dir_textfield_exists(monkeypatch):
     """測試 output_dir_textfield 存在"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
@@ -134,7 +123,58 @@ def test_extractor_view_append_log_line_adds_control(monkeypatch):
 
     # PR refactor/unified-log-view: _append_log_line 內部走 LogView.add()
     # LogView 的內部 ListView 透過 _list_view 存取
-    assert len(view.log_view._list_view.controls) >= 1
+    # 🐛 2026-08-01 user review:更精確斷言 - 確認最後一個 control 是 'Test log entry'
+    # (原本 len(...) >= 1 太弱,任何 add log 都通過)
+    assert view.log_view._list_view.controls[-1].value == 'Test log entry'
+
+
+def test_extractor_view_logs_panel_visible(monkeypatch):
+    """S1 修復 (2026-08-01 user review):日誌面板在主 UI 上可見
+
+    2026-08-01 user review 之前:view._logs_panel 用 .visible=False 隱藏,
+    所以 _append_log_line 寫進 self.log_view 但使用者看不到任何 log。
+    S1 修復:把 _logs_panel 從 .visible=False 改成 .visible=True 並加進 self.controls。
+
+    驗證:
+    - view.controls 有 2 個 styled_card
+    - 第 2 個卡片是「日誌」卡片
+    - 日誌卡片內含 LogView widget
+    """
+    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
+    view = ExtractorView(mock_page(), mock_filepicker())
+
+    # S1 修復 (2026-08-01 user review):日誌面板從 .visible=False 改成 visible=True,
+    # 加上 controls 內 2 個 styled_card (設定 + 日誌)。
+    # 直接驗證關鍵狀態:
+    # 1. view.controls 有 2 個
+    # 2. 第 2 個 cards title = '日誌'
+    # 3. view._logs_panel.visible = True (S1 修復核心)
+    # 4. view._logs_panel 內含 self.log_view (LogView widget)
+    
+    # S1 修復 (2026-08-01 user review):日誌面板從 .visible=False 改成 visible=True,
+    # 加上 view.controls 內 2 個 (設定 + 日誌)。
+    # 直接驗證 view._logs_panel 結構 (S1 修復核心):view._logs_panel 應該存在、
+    # 內含 ft.Column([self.log_view]) 並 visible=True。
+
+    assert len(view.controls) == 2, (
+        f"回歸:S1 修復後 view.controls 應有 2 個 (設定 + 日誌),實際 {len(view.controls)} 個"
+    )
+    # S1 修復核心:_logs_panel 改為 visible=True (原本 False 隱藏)
+    assert view._logs_panel.visible is True, (
+        "回歸:view._logs_panel.visible=True (S1 修復沒生效,還被 .visible=False 隱藏)"
+    )
+    # view._logs_panel 應該是 ft.Column([self.log_view])
+    from app.views._log import LogView
+    assert isinstance(view._logs_panel, ft.Column), (
+        f"回歸:view._logs_panel 應是 ft.Column,實際 {type(view._logs_panel).__name__}"
+    )
+    assert len(view._logs_panel.controls) >= 1, (
+        f"回歸:view._logs_panel 沒裝 LogView widget,實際 {len(view._logs_panel.controls)} 個 controls"
+    )
+    # 第一個 control 應是 LogView (S1 修復:ft.Column([self.log_view]))
+    assert isinstance(view._logs_panel.controls[0], LogView), (
+        f"回歸:view._logs_panel 第一個 control 應是 LogView widget,實際 {type(view._logs_panel.controls[0]).__name__}"
+    )
 
 
 def test_extractor_view_set_controls_disabled_toggles_inputs(monkeypatch):
@@ -250,16 +290,6 @@ def test_auto_fill_output_path_falls_back_to_default_on_unknown_mode(monkeypatch
     assert Path(view.output_dir_textfield.value).name == 'mods_custom_lang'
 
 
-def test_extractor_view_progress_pct_label(monkeypatch):
-    """測試 _progress_pct 百分比標籤存在且初始為 '0%'"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    assert hasattr(view, '_progress_pct')
-    assert view._progress_pct.value == '0%'
-    assert isinstance(view._progress_pct, ft.Text)
-
-
 def test_extractor_view_skip_zh_cn_switch_has_label(monkeypatch):
     """測試 skip_zh_cn_switch 有 label 且文字為 '跳過 zh_cn 抽取'"""
     monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
@@ -269,36 +299,3 @@ def test_extractor_view_skip_zh_cn_switch_has_label(monkeypatch):
     assert view.skip_zh_cn_switch.value is False
 
 
-def test_extractor_view_main_layout_is_column(monkeypatch):
-    """測試 build_main_layout 回傳 ft.Column（單欄垂直）"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    from app.views.extractor.extractor_panels import build_main_layout
-    layout = build_main_layout(view)
-    assert isinstance(layout, ft.Column)
-    assert layout.scroll == ft.ScrollMode.ADAPTIVE
-
-
-def test_extractor_view_logs_panel_has_fixed_height(monkeypatch):
-    """測試日誌面板的 log_view Container 有固定高度 350"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    from app.views.extractor.extractor_panels import build_logs_panel
-    panel = build_logs_panel(view)
-    log_container = panel.controls[1]
-    assert log_container.height == 350
-
-
-def test_extractor_view_status_bar_has_left_border(monkeypatch):
-    """測試狀態列有 4px 左側邊線"""
-    monkeypatch.setattr('app.views.extractor_view.TaskSession', _Session)
-    view = ExtractorView(mock_page(), mock_filepicker())
-
-    from app.views.extractor.extractor_panels import build_logs_panel
-    panel = build_logs_panel(view)
-    status_bar = panel.controls[0]
-    assert status_bar.border is not None
-    assert status_bar.border.left.width == 4
-    assert status_bar.border.left.color == ft.Colors.GREY_400

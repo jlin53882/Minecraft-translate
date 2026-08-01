@@ -24,7 +24,7 @@ from app.task_session import TaskSession
 # 🐛 2026-07-14 user review: 物理刪除 from app.views.extractor.extractor_actions import
 # (Phase 3 partial 刪 _update_stats_from_log wrapper 後,
 # update_stats_from_log 本體函式也無 caller,本 commit 一起清掉)
-from app.views.extractor.extractor_panels import build_logs_panel, build_settings_panel, _build_pick_button
+from app.views.extractor.extractor_panels import build_settings_panel, _build_pick_button
 from app.ui.components import styled_card
 from app.views.extractor.extractor_dialog import open_extractor_dialog, open_preview_dialog
 from app.services_impl.pipelines.extract_service import get_output_folder_names
@@ -141,9 +141,9 @@ class ExtractorView(ft.Column):
             on_click=self._handle_preview_dual_click,
         )
 
-        # 3. Status Display（由 _build_status_bar 在 build_logs_panel 中統一建立）
-        # 4. Logs Console（由 build_logs_panel 中的 _build_status_bar 統一建立）
         # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器 + 字串比對判 level）
+        # 注意:此 LogView 必須先建立 (在 Day 3-4 區段),因 _append_log_line()
+        # 在 _auto_fill_output_path() 內依賴它
         self.log_view = LogView(
             page=self._page,
             mode="append",
@@ -153,18 +153,27 @@ class ExtractorView(ft.Column):
         # ======================
         # Layout Composition（使用 styled_card 統一外觀）
         # ======================
-        # 即使日誌區塊不在主 UI 上顯示，我們仍然呼叫 build_logs_panel
-        # 來建立 status_text / progress_bar / log_view 等必要屬性。
-        # 日誌面板已不再加到 controls 裡（隱藏）。
-        # 透過 .visible = False 雙重保險，避免意外被渲染。
-        self._logs_panel = build_logs_panel(self)
-        self._logs_panel.visible = False  # 隱藏日誌面板，不顯示在主 UI
+        # 🐛 2026-08-01 user review (S1 修復):日誌面板加入 controls,讓使用者
+        # 看到「自動設定輸出路徑」/「已清除輸出路徑」兩條系統訊息
+        # (原本 .visible=False 但 self._append_log_line 寫進 self.log_view,
+        # user 看不到任何 log)。用 inline LogView 取代 build_logs_panel,
+        # 移除 status_text / progress_bar / _progress_pct 3 個佔空間屬性。
+        self._logs_panel = ft.Column(
+            [self.log_view],
+            height=350,
+            expand=True,
+        )
 
         self.controls = [
             styled_card(
                 title="設定",
                 icon=ft.Icons.SETTINGS,
                 content=build_settings_panel(self),
+            ),
+            styled_card(
+                title="日誌",
+                icon=ft.Icons.RECEIPT_LONG,
+                content=self._logs_panel,
             ),
         ]
 
