@@ -73,6 +73,14 @@ def _scan_extracted_lang_files(lang_output_dir: Path) -> dict[str, dict[str, lis
 
     退出 assets/ 子資料夾 (存為是階段 2 目標,不是來源)。
 
+    2026-08-02 user 修正:
+        寬掃兩個位置:
+        1. lang_output_dir/{XX_extracted}/{modid}/lang/*.json
+           - zh_tw.json 從 stage 1 寫的 (zh_cn → zh_tw 翻譯完成)
+        2. lang_output_dir/待翻譯/{XX_extracted}/{modid}/lang/*.json
+           - en_us.json 從 stage 1 寫的 (en_us-only mod 的原文)
+        因為 stage 1 將 en_us-only mod 的 en_us 搬到 待翻譯/,而不是 _extracted/。
+
     Returns:
         {modid: {lang_code: [source_paths]}}
         `assets` 不會是 modid (它是被寫目標)。
@@ -82,45 +90,52 @@ def _scan_extracted_lang_files(lang_output_dir: Path) -> dict[str, dict[str, lis
     if not lang_output_dir.exists():
         return dict(result)
 
-    scanned_dirs = []  # 2026-08-02 user 確認:加 log 確認掃到哪些 _extracted
+    # 2026-08-02 user 確認:寬掃兩個位置
+    scan_roots = [lang_output_dir, lang_output_dir / "待翻譯"]
+    scanned_dirs: list[str] = []  # 2026-08-02 user 確認:加 log 確認掃到哪些 _extracted
     skipped_dirs = []
-    for entry in lang_output_dir.iterdir():
-        if not entry.is_dir():
-            continue
-        # 跳過 assets/ (目標資料夾)與 待翻譯整理/待翻譯 (階段 1 已寫的東西)
-        if entry.name in ("assets", "待翻譯整理", "待翻譯"):
-            continue
-        # 只處理符合 *_extracted 結尾 (含可選版本後綴) 的子資料夾
-        if not _EXTRACTED_NAME_RE.match(entry.name):
-            continue
 
-        file_count = sum(1 for _ in entry.rglob(_LANG_FILE_GLOB) if _.is_file())
-        if file_count == 0:
-            # 2026-08-02:log 哪些 _extracted 沒找到 lang 檔案(為什麼沒處理)
-            log_warning(
-                f"[MergeExt→Assets] {entry.name}/* 內找不到 lang/*.json,"
-                f" 跳過(階段1可能把 en_us-only 檔案搬到 待翻譯/)"
+    for scan_root in scan_roots:
+        if not scan_root.exists():
+            continue
+        for entry in scan_root.iterdir():
+            if not entry.is_dir():
+                continue
+            # 跳過 assets/ (目標資料夾)與 待翻譯整理/待翻譯 (待翻譯 已在 scan_root handle)
+            if entry.name in ("assets", "待翻譯整理", "待翻譯"):
+                continue
+            # 只處理符合 *_extracted 結尾 (含可選版本後綴) 的子資料夾
+            if not _EXTRACTED_NAME_RE.match(entry.name):
+                continue
+
+            file_count = sum(
+                1 for _ in entry.rglob(_LANG_FILE_GLOB) if _.is_file()
             )
-            skipped_dirs.append(entry.name)
-            continue
+            if file_count == 0:
+                # 2026-08-02:log 哪些 _extracted 沒找到 lang 檔案(為什麼沒處理)
+                log_warning(
+                    f"[MergeExt→Assets] {entry.name}/* 內找不到 lang/*.json, 跳過"
+                )
+                skipped_dirs.append(entry.name)
+                continue
 
-        scanned_dirs.append(entry.name)
-        for lang_file in entry.rglob(_LANG_FILE_GLOB):
-            if not lang_file.is_file():
-                continue
-            modid = _infer_modid_from_lang_file(lang_file)
-            if not modid:
-                log_warning(
-                    f"[MergeExt→Assets] 推不出 modid: {lang_file}, 跳過"
-                )
-                continue
-            lang_code = lang_file.stem
-            if not _LANG_CODE_STEM.match(lang_code):
-                log_warning(
-                    f"[MergeExt→Assets] 推不出 lang_code: {lang_file}, 跳過"
-                )
-                continue
-            result[modid][lang_code].append(lang_file)
+            scanned_dirs.append(entry.name)
+            for lang_file in entry.rglob(_LANG_FILE_GLOB):
+                if not lang_file.is_file():
+                    continue
+                modid = _infer_modid_from_lang_file(lang_file)
+                if not modid:
+                    log_warning(
+                        f"[MergeExt→Assets] 推不出 modid: {lang_file}, 跳過"
+                    )
+                    continue
+                lang_code = lang_file.stem
+                if not _LANG_CODE_STEM.match(lang_code):
+                    log_warning(
+                        f"[MergeExt→Assets] 推不出 lang_code: {lang_file}, 跳過"
+                    )
+                    continue
+                result[modid][lang_code].append(lang_file)
 
     # 2026-08-02:加彙總 log 讓 user 知道實際掃到的 _extracted dirs
     if scanned_dirs:

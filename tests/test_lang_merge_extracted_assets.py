@@ -137,9 +137,48 @@ class TestScanExtractedLangFiles:
                     content = f.read_text(encoding="utf-8")
                     assert "this_should_NOT_be_scanned" not in content
 
+    def test_scan_from_pending_dir_for_en_us_only_mods(self, tmp_path: Path):
+        """2026-08-02 user 確認:Stage 2 應寬掃 待翻譯/ 內的 _extracted 子資料夾。
+
+        因為 stage 1 將 en_us-only mod 的 en_us 寫到 待翻譯/{XX_extracted}/{modid}/lang/en_us.json,
+        Stage 2 必掃兩個位置才能完整處理。
+        """
+        # 建立 fixtures:3 個 only-en-us mod 寫到 待翻譯/ 內
+        for dirname in ["compactmachines_extracted", "CodeChickenLib_extracted", "Cobblemon-1.7.3+1.21.1_extracted"]:
+            # 待翻譯/{XX_extracted}/{modid}/lang/en_us.json
+            if dirname == "compactmachines_extracted":
+                lang = tmp_path / "待翻譯" / dirname / "data" / "compactmachines" / "datapacks" / "basic_templates" / "assets" / "compactmachines" / "lang"
+                lang.mkdir(parents=True)
+                (lang / "en_us.json").write_text(
+                    '{"k_c": "v_c"}', encoding="utf-8"
+                )
+            elif dirname == "CodeChickenLib_extracted":
+                lang = tmp_path / "待翻譯" / dirname / "data" / "codechickenlib" / "lang"
+                lang.mkdir(parents=True)
+                (lang / "en_us.json").write_text(
+                    '{"k_lib": "v_lib"}', encoding="utf-8"
+                )
+            elif dirname == "Cobblemon-1.7.3+1.21.1_extracted":
+                lang = tmp_path / "待翻譯" / dirname / "resourcepacks" / "adorncompatibility" / "assets" / "adorn" / "lang"
+                lang.mkdir(parents=True)
+                (lang / "en_us.json").write_text(
+                    '{"k_ad": "v_ad"}', encoding="utf-8"
+                )
+
+        result = _scan_extracted_lang_files(tmp_path)
+
+        # 全部 3 個 modid 都應該被掃到
+        assert "compactmachines" in result
+        assert "codechickenlib" in result
+        assert "adorn" in result
+        # 都只有 en_us
+        assert result["compactmachines"]["en_us"]
+        assert result["codechickenlib"]["en_us"]
+        assert result["adorn"]["en_us"]
+
 
 # ──────────────────────────────────────────────────────────────────────────
-# 3. _load_existing_assets
+# 5. is_pure 行為 - 使用者確認規則
 # ──────────────────────────────────────────────────────────────────────────
 class TestLoadExistingAssets:
     def test_loads_only_assets_dir(self, tmp_path: Path):
