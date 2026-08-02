@@ -4,6 +4,7 @@
 """
 
 from app.views.untranslated_checker import UntranslatedChecker
+from app.ui.snack import show_snack
 from app.views.qc_base import QCBase
 
 
@@ -151,7 +152,7 @@ def test_untranslated_checker_shows_snackbar_on_cancel():
     file_picker.on_result = None
 
     # 呼叫 snackbar（應該不崩潰）
-    checker._show_snack_bar("測試訊息")
+    show_snack(checker.page, "測試訊息")
 
     # 驗證 snackbar 被加入 overlay
     assert len(page.overlay) >= 1

@@ -5,9 +5,12 @@
 """
 
 import flet as ft
+from pathlib import Path
+import json
 
 from translation_tool.utils.log_unit import log_info, log_warning
 from app.ui import theme
+from app.ui.snack import show_snack
 from app.views.cache_manager.cache_state import CacheShardState
 from app.services_impl.cache.cache_services import (
     cache_get_entry_service,
@@ -373,8 +376,6 @@ class CacheShardPanel(ft.Container):
     # ==================== SRC/DST 面板 ====================
     def _load_shard_entry(self, cache_type: str, filename: str, key: str):
         """從分片檔案載入單一 entry"""
-        import json
-        from pathlib import Path
 
         root = str((self.last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
@@ -504,7 +505,7 @@ class CacheShardPanel(ft.Container):
     def _on_shard_dst_apply(self, e):
         """套用 DST"""
         if not self.state.selected_key:
-            self._show_snack_bar("請先選擇 key", theme.AMBER_700)
+            show_snack(self.page, "請先選擇 key", theme.AMBER_700)
             return
 
         ctype = str(self.state.selected_type or "")
@@ -516,7 +517,7 @@ class CacheShardPanel(ft.Container):
         try:
             done = cache_update_dst_service(ctype, key, new_dst)
             if not done:
-                self._show_snack_bar("套用失敗：找不到 key", theme.RED_400)
+                show_snack(self.page, "套用失敗：找不到 key", theme.RED_400)
                 return
 
             cache_save_all_service(write_new_shard=False, only_types=[ctype])
@@ -535,46 +536,46 @@ class CacheShardPanel(ft.Container):
             self._history_append_event(ctype, history_event)
 
             self.state.dst_original = new_dst
-            self._show_snack_bar("已套用 DST 並寫入快取", theme.BLUE_400)
+            show_snack(self.page, "已套用 DST 並寫入快取", theme.BLUE_400)
             self._page.update()
         except Exception as ex:
-            self._show_snack_bar(f"套用失敗：{ex}", theme.RED_400)
+            show_snack(self.page, f"套用失敗：{ex}", theme.RED_400)
 
     def _on_shard_dst_revert(self, e):
         """還原 DST"""
         if not self.state.selected_key:
-            self._show_snack_bar("請先選擇 key", theme.AMBER_700)
+            show_snack(self.page, "請先選擇 key", theme.AMBER_700)
             return
 
         self.shard_dst_field.value = str(self.state.dst_original or "")
-        self._show_snack_bar("已還原到原始值", theme.BLUE_400)
+        show_snack(self.page, "已還原到原始值", theme.BLUE_400)
         self._page.update()
 
     def _on_shard_dst_copy(self, e):
         """複製 DST"""
         if not self.state.selected_key:
-            self._show_snack_bar("請先選擇 key", theme.AMBER_700)
+            show_snack(self.page, "請先選擇 key", theme.AMBER_700)
             return
 
         try:
             self._page.set_clipboard(str(self.shard_dst_field.value or ""))
-            self._show_snack_bar("已複製 DST 內容", theme.BLUE_400)
+            show_snack(self.page, "已複製 DST 內容", theme.BLUE_400)
         except Exception:
-            self._show_snack_bar("複製失敗", theme.RED_400)
+            show_snack(self.page, "複製失敗", theme.RED_400)
 
     def _history_append_event(self, cache_type: str, event: dict):
         """新增歷史事件"""
         root = str((self.last_overview_data or {}).get("cache_root", "") or "").strip()
         history_append_event(root, cache_type, event)
 
-    def _show_snack_bar(self, message: str, color: str):
-        """顯示 SnackBar"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self._page.overlay.append(snack)
-        snack.open = True
-        self._page.update()
 
     @property
     def page(self):
+        """回傳 Flet Page 實例 (2026-08-01 PR #85 重構補 @property)。
+
+        之前 def page(self) 沒 @property decorator,變成 bound method reference,
+        PR #85 改用 show_snack(self.page, ...) 直接呼叫時,
+        self.page 是 method object 而非 Page 實例,SnackBar 永遠跳不出來。
+        加 @property 後 self.page 才是 Page 實例。
+        """
         return self._page

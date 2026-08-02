@@ -9,6 +9,7 @@ from typing import Callable, Tuple, Any
 
 # 導入 UI 主題
 from app.ui import theme
+from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_info
 
 # 導入我們需要的服務
@@ -215,13 +216,6 @@ class QCView(ft.Column):
             ),
         )
 
-    def _show_snack_bar(self, message: str, color: str = theme.ERROR):
-        """顯示 SnackBar 訊息提示"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
 
     def _pick_file_or_directory(
         self,
@@ -268,9 +262,9 @@ class QCView(ft.Column):
                 target.value = path
                 self.page.update()
             else:
-                self._show_snack_bar("您已取消選擇", theme.BLUE_GREY_500)
+                show_snack(self.page, "您已取消選擇", theme.BLUE_GREY_500)
         except Exception as ex:
-            self._show_snack_bar(f"開啟對話框失敗: {ex}")
+            show_snack(self.page, f"開啟對話框失敗: {ex}")
 
     def set_controls_disabled(self, disabled: bool):
         """設定控制項是否禁用。"""
@@ -307,7 +301,7 @@ class QCView(ft.Column):
             tw_dir = self.untranslated_checker.tw_dir.value
             out_dir = self.untranslated_checker.out_dir.value
             if not en_dir or not tw_dir or not out_dir:
-                self._show_snack_bar("錯誤：請填寫所有「Key 缺失檢查」的路徑！")
+                show_snack(self.page, "錯誤：請填寫所有「Key 缺失檢查」的路徑！")
                 self.set_controls_disabled(False)
                 return
             self.log_view.add("[系統] 開始執行 Key 缺失檢查...", level="system")
@@ -320,7 +314,7 @@ class QCView(ft.Column):
             tw_dir = self.tw_dir_textfield_2.value
             out_dir = self.compare_out_dir_textfield.value
             if not cn_dir or not tw_dir or not out_dir:
-                self._show_snack_bar("錯誤：請填寫所有「JSON 資料夾差異比對」的路徑！")
+                show_snack(self.page, "錯誤：請填寫所有「JSON 資料夾差異比對」的路徑！")
                 self.set_controls_disabled(False)
                 return
             self.log_view.add("[系統] 開始執行 JSON 資料夾簡繁差異比較...", level="system")
@@ -332,7 +326,7 @@ class QCView(ft.Column):
             tsv_path = self.tsv_file_textfield.value
             out_csv_path = self.tsv_out_file_textfield.value
             if not tsv_path or not out_csv_path:
-                self._show_snack_bar("錯誤：請填寫所有「TSV 單檔案差異比對」的路徑！")
+                show_snack(self.page, "錯誤：請填寫所有「TSV 單檔案差異比對」的路徑！")
                 self.set_controls_disabled(False)
                 return
             self.log_view.add("[系統] 開始執行 TSV 單檔案簡繁差異比較...", level="system")

@@ -12,10 +12,13 @@
 """
 
 # /minecraft_translator_flet/app/views/extractor_view.py
+# 2026-08-01 (PR #85): view 內 _show_snack_bar wrapper 物理刪除,
+# 所有 caller 改成 show_snack(self.page, ...) 直接呼叫 app/ui/snack.py helper
 import flet as ft
 import os
 from pathlib import Path
 from app.ui import theme
+from app.ui.snack import show_snack
 from app.views._log import LogView
 from translation_tool.utils.log_unit import log_info, log_warning
 import threading
@@ -187,7 +190,7 @@ class ExtractorView(ft.Column):
         Args:
             target: 選擇後要填入路徑的 TextField。
         """
-        self._show_snack_bar("請選擇此欄位的資料夾", color=theme.BLUE_600)
+        show_snack(self.page, "請選擇此欄位的資料夾", color=theme.BLUE_600)
         self._page.run_task(self._async_pick_directory, target)
 
     async def _async_pick_directory(self, target):
@@ -201,7 +204,7 @@ class ExtractorView(ft.Column):
             target.value = result
             self.page.update()
         else:
-            self._show_snack_bar("未選擇資料夾", color=theme.BLUE_600)
+            show_snack(self.page, "未選擇資料夾", color=theme.BLUE_600)
 
     # 僅在按「預覽/提取」時自動填入輸出路徑，選擇資料夾時不自動填入
     def refresh_output_dir_helper(self):
@@ -300,7 +303,7 @@ class ExtractorView(ft.Column):
         self.page.update()
         # 🐛 2026-08-01 user review: 改用 SnackBar 跳出提示,不掛 log UI
         # (原本 _append_log_line 寫進 self.log_view,但 S1 撤回後 user 看不到任何 log)
-        self._show_snack_bar(f"[系統] 已自動設定輸出路徑：{output_path}", color=theme.GREEN_600)
+        show_snack(self.page, f"[系統] 已自動設定輸出路徑：{output_path}", color=theme.GREEN_600)
 
     def _check_mods_dir_or_snack(self, mods_dir: str, action_label: str) -> bool:
         """按鈕 click handler 的前置驗證。
@@ -320,10 +323,10 @@ class ExtractorView(ft.Column):
             直接 SnackBar 提示「請先選擇資料夾」並 return,不進 dialog。
         """
         if not mods_dir:
-            self._show_snack_bar(f"⚠️ 請先選擇 Mods 資料夾才能{action_label}", color=theme.AMBER_700)
+            show_snack(self.page, f"⚠️ 請先選擇 Mods 資料夾才能{action_label}", color=theme.AMBER_700)
             return False
         if not os.path.isdir(mods_dir):
-            self._show_snack_bar(f"⚠️ Mods 資料夾不存在,無法{action_label}", color=theme.AMBER_700)
+            show_snack(self.page, f"⚠️ Mods 資料夾不存在,無法{action_label}", color=theme.AMBER_700)
             return False
         return True
 
@@ -452,7 +455,7 @@ class ExtractorView(ft.Column):
         self.page.update()
         # 🐛 2026-08-01 user review: 改用 SnackBar 跳出提示,不掛 log UI
         # (原本 _append_log_line 寫進 self.log_view,但 S1 撤回後 user 看不到任何 log)
-        self._show_snack_bar("[系統] 已清除輸出路徑", color=theme.BLUE_600)
+        show_snack(self.page, "[系統] 已清除輸出路徑", color=theme.BLUE_600)
 
     # ==================================================
     # Worker Logic
@@ -478,34 +481,3 @@ class ExtractorView(ft.Column):
     # ==================================================
     # Worker Logic
     # ==================================================
-    def _show_snack_bar(self, message: str, color: str = theme.ERROR):
-        """
-        顯示底部的快訊通知 (SnackBar)
-
-        :param message: 要顯示的文字訊息
-        :param color: SnackBar 的背景顏色，預設為淺紅色 (RED_400)
-
-        2026-07-12 user review cleanup:
-        - SnackBar 預設 4 秒自動消失(ft.SnackBar.duration 預設值)
-        - 仍用 page.overlay.append + open=True 路徑(SnackBar extends DialogControl
-          但走 show_dialog 進 dialog stack 會污染既有 dialog cleanup 路徑)
-        - 加 try/except + log_warning:若 page 還沒掛載(早期 init 階段)就會跳過,
-          留下 traceback 證據
-        - **不主動 page.update()**:`snack.open=True` 已經把 control 標 dirty,
-          既有呼叫場景 (pick_directory / _async_pick_directory) 的 caller 會
-          自己 page.update() 或 run_task,不再多推一個 task 避免測試 page._tasks
-          長度斷言失敗
-        """
-        log_info(f"[UI] SnackBar: {message}")
-        # 建立 SnackBar 元件，包含文字內容與背景顏色
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        try:
-            self.page.overlay.append(snack)
-            snack.open = True
-            # 🐛 2026-08-01 user review: 主動 page.update() 讓 SnackBar 真的跳出
-            # 原本 caller 自己 page.update() 之後呼叫 _show_snack_bar,
-            # 但 snack.open=True 已經在那一幀 render 後設定,需再 update 才能讓 SnackBar 渲染。
-            # 改為主動 update (2026-08-01 user review):測試 page._tasks 長度改用其他斷言
-            self.page.update()
-        except Exception as ex:
-            log_warning(f"[SNACKBAR] _show_snack_bar failed: {ex!r}")

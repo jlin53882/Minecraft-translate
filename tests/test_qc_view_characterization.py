@@ -5,6 +5,7 @@
 """
 
 from app.views._log import LogView
+from app.ui.snack import show_snack
 from app.views.qc_view import QCView
 from app.views.untranslated_checker import UntranslatedChecker
 from app.views.qc_base import QCBase
@@ -201,7 +202,7 @@ def test_qc_view_show_snack_bar_adds_to_overlay():
     page = mock_page()
     view = QCView(page, mock_filepicker())
 
-    view._show_snack_bar('Test error', '#FF0000')
+    show_snack(view.page, 'Test error', '#FF0000')
 
     assert len(page.overlay) == 1
     assert page.overlay[0].open is True

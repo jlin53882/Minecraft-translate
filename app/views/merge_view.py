@@ -5,6 +5,9 @@
 
 import threading
 import time
+from app.views.config.config_actions import load_config_into_view
+from translation_tool.utils.config_manager import load_config
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +19,7 @@ from translation_tool.utils.config_manager import load_config, save_config
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service, run_merge_folder_batch_service
 from app.task_session import TaskSession
 from app.ui import theme
+from app.ui.snack import show_snack
 from app.ui.components import primary_button, styled_card
 
 
@@ -94,10 +98,8 @@ class MergeView(ft.Column):
             inner = wrapped.content if hasattr(wrapped, 'content') else wrapped
             if hasattr(inner, 'controls_map') and hasattr(inner, 'load_config'):
                 try:
-                    from translation_tool.utils.config_manager import load_config
-                    cfg = load_config()
-                    from app.views.config.config_actions import load_config_into_view
-                    load_config_into_view(inner, cfg)
+                                cfg = load_config()
+                                load_config_into_view(inner, cfg)
                 except Exception:
                     pass
 
@@ -595,14 +597,14 @@ class MergeView(ft.Column):
         input_mode = self.input_mode_group.value
         if input_mode == "folder":
             if not (self.folder_path_field.value or "").strip():
-                self._show_snack_bar("請先選擇來源資料夾")
+                show_snack(self.page, "請先選擇來源資料夾")
                 return
         else:
             if not self.selected_zips:
-                self._show_snack_bar("請先選擇 ZIP 檔案")
+                show_snack(self.page, "請先選擇 ZIP 檔案")
                 return
         if not (self.output_dir_field.value or "").strip():
-            self._show_snack_bar("請先選擇輸出資料夾")
+            show_snack(self.page, "請先選擇輸出資料夾")
             return
 
         self.start_button.disabled = True
@@ -715,13 +717,6 @@ class MergeView(ft.Column):
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
 
-    def _show_snack_bar(self, message: str, color: str = theme.ERROR) -> None:
-        """顯示 SnackBar 訊息。"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
 
     def _show_merge_summary(self, summary: dict[str, Any]) -> None:
         """顯示合併結果摘要（使用 overlay 確保穩定顯示）。"""
@@ -823,7 +818,6 @@ class MergeView(ft.Column):
 
     def _open_output_folder(self) -> None:
         """開啟輸出資料夾（使用檔案總管）。"""
-        import subprocess
 
         snack = ft.SnackBar(ft.Text("正在開啟輸出資料夾..."), bgcolor=theme.BLUE_700)
         self.page.overlay.append(snack)

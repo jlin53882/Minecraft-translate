@@ -8,6 +8,7 @@ import flet as ft
 import threading  # noqa: F401
 
 from app.ui import theme
+from app.ui.snack import show_snack
 from app.views._log import LogView
 from translation_tool.utils.log_unit import log_info
 
@@ -334,14 +335,14 @@ class TranslationView(ft.Column):
         self._append_log("[UI] 已重置：Markdown 輸入已清空")
         self.page.update()
 
-    def _show_snack(self, message: str, color: str = theme.ERROR):
-        """在頁面顯示 Snack Bar 提示訊息"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
 
     @property
     def page(self):
+        """回傳 Flet Page 實例 (2026-08-01 PR #85 重構補 @property)。
+
+        之前 def page(self) 沒 @property decorator,變成 bound method reference,
+        PR #85 改用 show_snack(self.page, ...) 直接呼叫時,
+        self.page 是 method object 而非 Page 實例,SnackBar 永遠跳不出來。
+        加 @property 後 self.page 才是 Page 實例。
+        """
         return self._page

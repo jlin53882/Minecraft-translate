@@ -11,10 +11,18 @@ import hashlib
 import platform
 import re
 import zipfile
+from app import icon_index
+from app.icon_reader import IconRef
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from translation_tool.utils.jar_browser import scan_jars
+import re
+import shutil
+import tempfile
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime, timezone
 from app.ui import theme
+from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_info, log_warning, log_error
 from types import SimpleNamespace
 
@@ -391,7 +399,6 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
                 return out_path
 
             # ===== Fallback: assets/<modid>/textures/*.png（Fabric glob）=====
-            import re
             textures_pattern = re.compile(r"^assets/" + re.escape(modid) + r"/textures/.+\.png$")
             texture_files = sorted(n for n in names if textures_pattern.match(n))
             if texture_files:
@@ -873,15 +880,15 @@ class IconPreviewView(ft.Column):
             self.source_label.value = f"模組資料夾：{self.source_root}"
             migrated = _migrate_old_icon_cache(self.source_root)
             if migrated:
-                self._show_snack("🔄 已搬移舊 icon cache 至新路徑", color=theme.BLUE_600)
+                show_snack(self.page, "🔄 已搬移舊 icon cache 至新路徑", color=theme.BLUE_600, clear_existing=True, duration=3000)
             self._entries_cache = None
             self._cache_meta = {}
             self._update_load_state()
             log_info(f"[IconPreview] 模組資料夾已設定: {self.source_root}")
-            self._show_snack("✅ 模組資料夾已設定", color=theme.GREEN_600)
+            show_snack(self.page, "✅ 模組資料夾已設定", color=theme.GREEN_600, clear_existing=True, duration=3000)
         else:
             log_warning("[IconPreview] 模組資料夾選擇已取消")
-            self._show_snack("⚠️ 模組資料夾選擇已取消", color=theme.WARNING)
+            show_snack(self.page, "⚠️ 模組資料夾選擇已取消", color=theme.WARNING, clear_existing=True, duration=3000)
 
     async def _async_pick_review_dir(self):
         """選擇資源包路徑（async 實作）。"""
@@ -891,10 +898,10 @@ class IconPreviewView(ft.Column):
             self.review_label.value = f"資源包路徑：{self.review_root}"
             self._update_load_state()
             log_info(f"[IconPreview] 資源包路徑已設定: {self.review_root}")
-            self._show_snack("✅ 資源包路徑已設定", color=theme.GREEN_600)
+            show_snack(self.page, "✅ 資源包路徑已設定", color=theme.GREEN_600, clear_existing=True, duration=3000)
         else:
             log_warning("[IconPreview] 資源包路徑選擇已取消")
-            self._show_snack("⚠️ 資源包路徑選擇已取消", color=theme.WARNING)
+            show_snack(self.page, "⚠️ 資源包路徑選擇已取消", color=theme.WARNING, clear_existing=True, duration=3000)
 
     def _on_pick_source(self, e: ft.FilePickerUploadEvent):
         """處理來源目錄選擇結果"""
@@ -903,15 +910,15 @@ class IconPreviewView(ft.Column):
             self.source_label.value = f"模組資料夾：{self.source_root}"
             migrated = _migrate_old_icon_cache(self.source_root)
             if migrated:
-                self._show_snack("🔄 已搬移舊 icon cache 至新路徑", color=theme.BLUE_600)
+                show_snack(self.page, "🔄 已搬移舊 icon cache 至新路徑", color=theme.BLUE_600, clear_existing=True, duration=3000)
             self._entries_cache = None
             self._cache_meta = {}
             self._update_load_state()
             log_info(f"[IconPreview] 模組資料夾已設定: {self.source_root}")
-            self._show_snack("✅ 模組資料夾已設定", color=theme.GREEN_600)
+            show_snack(self.page, "✅ 模組資料夾已設定", color=theme.GREEN_600, clear_existing=True, duration=3000)
         else:
             log_warning("[IconPreview] 模組資料夾選擇已取消")
-            self._show_snack("⚠️ 模組資料夾選擇已取消", color=theme.WARNING)
+            show_snack(self.page, "⚠️ 模組資料夾選擇已取消", color=theme.WARNING, clear_existing=True, duration=3000)
 
     def _on_pick_review(self, e: ft.FilePickerUploadEvent):
         """處理校對目錄選擇結果"""
@@ -920,10 +927,10 @@ class IconPreviewView(ft.Column):
             self.review_label.value = f"資源包路徑：{self.review_root}"
             self._update_load_state()
             log_info(f"[IconPreview] 資源包路徑已設定: {self.review_root}")
-            self._show_snack("✅ 資源包路徑已設定", color=theme.GREEN_600)
+            show_snack(self.page, "✅ 資源包路徑已設定", color=theme.GREEN_600, clear_existing=True, duration=3000)
         else:
             log_warning("[IconPreview] 資源包路徑選擇已取消")
-            self._show_snack("⚠️ 資源包路徑選擇已取消", color=theme.WARNING)
+            show_snack(self.page, "⚠️ 資源包路徑選擇已取消", color=theme.WARNING, clear_existing=True, duration=3000)
 
     def _update_load_state(self):
         """更新載入按鈕的啟用狀態"""
@@ -936,7 +943,7 @@ class IconPreviewView(ft.Column):
     def _on_load_clicked(self, e):
         """處理載入按鈕點擊事件"""
         log_info("[IconPreview] 開始掃描模組...")
-        self._show_snack("⏳ 掃描模組中...", color=theme.BLUE_600)
+        show_snack(self.page, "⏳ 掃描模組中...", color=theme.BLUE_600, clear_existing=True, duration=3000)
         # PR61 Issue 1：載入新模組時清除搜尋狀態
         self._mod_search_matched = []
         self._mod_search_page = 0
@@ -956,7 +963,7 @@ class IconPreviewView(ft.Column):
 
         if cache_valid:
             log_info("[IconPreview] 使用 L1 快取！")
-            self._show_snack(f"✅ 使用快取（共 {len(self._entries_cache)} 筆）", color=theme.GREEN_600)
+            show_snack(self.page, f"✅ 使用快取（共 {len(self._entries_cache)} 筆）", color=theme.GREEN_600, clear_existing=True, duration=3000)
             # 用快取重建 mods dict（dict 轉回 SimpleNamespace，保持屬性存取相容）
             mods = defaultdict(list)
             for entry in self._entries_cache:
@@ -973,7 +980,7 @@ class IconPreviewView(ft.Column):
             cached_entries = _load_entries_cache_l2(self.source_root)
             if cached_entries is not None:
                 log_info("[IconPreview] 使用 L2 磁碟快取！")
-                self._show_snack(f"✅ 使用磁碟快取（共 {len(cached_entries)} 筆）", color=theme.GREEN_600)
+                show_snack(self.page, f"✅ 使用磁碟快取（共 {len(cached_entries)} 筆）", color=theme.GREEN_600, clear_existing=True, duration=3000)
                 self._entries_cache = cached_entries
                 self._cache_meta = {
                     "source_root": str(self.source_root),
@@ -1012,7 +1019,7 @@ class IconPreviewView(ft.Column):
 
         if mode == "jar_directory":
             log_info("[IconPreview] 使用 JAR 目錄模式掃描")
-            self._show_snack("📦 JAR 目錄模式：從 JAR 讀取 en_us.json...", color=theme.BLUE_600)
+            show_snack(self.page, "📦 JAR 目錄模式：從 JAR 讀取 en_us.json...", color=theme.BLUE_600, clear_existing=True, duration=3000)
             jar_files = list(self.source_root.glob("*.jar"))
             total_steps = len(jar_files)
             # Phase 3/3：實際讀取翻譯
@@ -1024,12 +1031,12 @@ class IconPreviewView(ft.Column):
             entries = self._load_entries()
         else:
             log_warning("[IconPreview] 無法識別資料夾模式，或資料夾為空")
-            self._show_snack("❌ 無法識別模式，請確認資料夾內容", color=theme.RED_700)
+            show_snack(self.page, "❌ 無法識別模式，請確認資料夾內容", color=theme.RED_700, clear_existing=True, duration=3000)
             entries = []
 
         if not entries:
             log_warning("[IconPreview] 掃描結果為空，確認 en_us.json 是否存在")
-            self._show_snack("❌ 掃描結果為空，請確認 en_us.json 是否存在", color=theme.RED_700)
+            show_snack(self.page, "❌ 掃描結果為空，請確認 en_us.json 是否存在", color=theme.RED_700, clear_existing=True, duration=3000)
             return
 
         # 寫入快取（dict 格式，脫離 SimpleNamespace）
@@ -1051,7 +1058,7 @@ class IconPreviewView(ft.Column):
 
         self.mods = dict(mods)
         log_info(f"[IconPreview] 載入完成，共 {len(self.mods)} 個模組，{len(entries)} 筆翻譯")
-        self._show_snack(f"✅ 載入完成（共 {len(self.mods)} 個模組）", color=theme.GREEN_600)
+        show_snack(self.page, f"✅ 載入完成（共 {len(self.mods)} 個模組）", color=theme.GREEN_600, clear_existing=True, duration=3000)
         
         # 隱藏進度條
         self.progress_bar.visible = False
@@ -1420,12 +1427,12 @@ class IconPreviewView(ft.Column):
     def _save_current_zh(self, e):
         """儲存目前的翻譯到 zh_tw.json"""
         log_info(f"[IconPreview] 開始儲存翻譯: {self._current_zh_file}")
-        self._show_snack("💾 儲存翻譯中...", color=theme.BLUE_600)
+        show_snack(self.page, "💾 儲存翻譯中...", color=theme.BLUE_600, clear_existing=True, duration=3000)
         self.update()
 
         if not self._current_zh_file:
             log_error(f"[IconPreview] 儲存失敗：找不到 zh_tw.json (modid={self.current_modid})")
-            self._show_snack("❌ 找不到 zh_tw.json", color=theme.RED_700)
+            show_snack(self.page, "❌ 找不到 zh_tw.json", color=theme.RED_700, clear_existing=True, duration=3000)
             return
 
         try:
@@ -1435,37 +1442,14 @@ class IconPreviewView(ft.Column):
                 encoding="utf-8",
             )
             log_info(f"[IconPreview] 儲存成功：{self._current_zh_file} ({len(self._zh_data)} 筆翻譯)")
-            self._show_snack(f"✅ 翻譯已儲存 ({len(self._zh_data)} 筆)", color=theme.GREEN_600)
+            show_snack(self.page, f"✅ 翻譯已儲存 ({len(self._zh_data)} 筆)", color=theme.GREEN_600, clear_existing=True, duration=3000)
         except Exception as ex:
             log_error(f"[IconPreview] 儲存失敗：{ex}")
-            self._show_snack(f"❌ 儲存失敗：{ex}", color=theme.RED_700)
+            show_snack(self.page, f"❌ 儲存失敗：{ex}", color=theme.RED_700, clear_existing=True, duration=3000)
 
     # ==================================================
     # 輔助：SnackBar
     # ==================================================
-    def _show_snack(self, message: str, color: str = theme.ERROR, **kwargs):
-        """
-        統一 SnackBar 顯示（Flet Desktop 穩定版）
-        - 使用 page.overlay
-        - 不會被 ListView / update 吃掉
-        """
-        log_info(f"[UI] SnackBar: {message}")
-        # 清除累積的舊 SnackBar，避免 overlay 無限膨脹
-        # Flet 0.28.3 的 page.overlay 是唯讀屬性（無 setter），需 in-place 修改
-        for i in range(len(self.page.overlay) - 1, -1, -1):
-            if isinstance(self.page.overlay[i], ft.SnackBar):
-                del self.page.overlay[i]
-        snack = ft.SnackBar(
-            content=ft.Text(message),
-            bgcolor=color,
-            duration=3000,
-        )
-
-        # ⚠️ 關鍵：一定要加在 overlay
-        self.page.overlay.append(snack)
-
-        snack.open = True
-        self.page.update()
 
     # ==================================================
     # 核心資料載入（只處理 JSON）
@@ -1640,7 +1624,6 @@ class IconPreviewView(ft.Column):
                 except TypeError:
                     pass  # 忽略不兼容的 callback
 
-        from translation_tool.utils.jar_browser import scan_jars
 
         # 包裝 callback：同時支援 0 參數（旧測試）和 2 參數（新設計）
         def wrapped_callback(processed: int, total: int):

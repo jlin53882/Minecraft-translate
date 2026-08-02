@@ -663,33 +663,28 @@ class TestFixExtractionSummaryDialogAPI:
 # =============================================================================
 # User 2026-07-12 review 補發現 第四個:_show_snack_bar 不該直接 page.update()
 # =============================================================================
-class TestFixSnackBarExceptWrapper:
-    """User 2026-07-12 review 補發現:ExtractorView._show_snack_bar 內直接呼叫
-    self.page.update()(從 click handler 內同步),且沒有 try/except 把例外吞掉。
+class TestFixShowSnackHelper:
+    """PR #85 重構後:show_snack helper 取代 14 個 view 的 _show_snack_bar method。
 
-    修法(2026-07-12):
-    1. 不主動 page.update():page.update 由 caller 觸發(pick_directory 等路徑
-       自己的 async task 已經會順便 update),避免額外塞進 page._tasks 干擾測試。
-       設 snack.open=True 已經把 control 標 dirty,Flet internal mutation 追蹤會
-       在下一次 page.update() 時 render。
-    2. 用 try/except 包起來,補 log_warning 留 traceback。
+    測試對象:app/ui/snack.py::show_snack() 函式(不是 view 內 _show_snack_bar method)。
 
-    🐛 2026-08-01 user review 改變設計:
-    1. 重新加 self.page.update() — 因為 user 實測發現 clear_output_path / _auto_fill_output_path
-       已經自己 page.update() 過後才呼叫 _show_snack_bar,SnackBar 沒主動 update 就看不到。
-       改為主動 page.update() (雖然可能多一次 _tasks push,但 user 體驗優先)
-    2. try/except 仍保留(對應 test 仍有效)
+    修法(2026-08-01 PR #85):
+    1. 抽 show_snack(page, message, color, *, ...) helper 到 app/ui/snack.py
+    2. 刪除 14 個 view 內的 _show_snack_bar / _show_snack method(避免雙重呼叫鏈)
+    3. 所有 caller 改成 show_snack(self.page, message, color) 直接呼叫
+    4. try/except + log_warning 邏輯統一到 helper
+    5. page.update() 統一在 helper 內呼叫
     """
 
-    def test_show_snack_bar_has_try_except(self):
-        """_show_snack_bar 必須有 try/except 包核心程式碼。"""
-        extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
-        tree = _ast_parse(extractor_view)
+    def test_show_snack_helper_has_try_except(self):
+        """show_snack 必須有 try/except 包核心程式碼。"""
+        snack_module = REPO_ROOT / "app" / "ui" / "snack.py"
+        tree = _ast_parse(snack_module)
         found = False
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.FunctionDef)
-                and node.name == "_show_snack_bar"
+                and node.name == "show_snack"
             ):
                 for sub in ast.walk(node):
                     if (
@@ -702,21 +697,19 @@ class TestFixSnackBarExceptWrapper:
                         found = True
                 break
         assert found, (
-            "回歸:_show_snack_bar 沒有 try/except "
-            "(User 2026-07-12 review 補發現,沒有 traceback 證據)"
+            "回歸:show_snack 沒有 try/except "
+            "(避免 page 沒 mount 時 crash,跟 PR #98 0798022 修法對齊)"
         )
 
-    def test_show_snack_bar_logs_warning_on_failure(self):
-        """_show_snack_bar 的 except handler 必須呼叫 log_warning。"""
-        extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
-        src = _read(extractor_view)
-        # AST-level:找 _show_snack_bar 內有 log_warning 呼叫
-        tree = _ast_parse(extractor_view)
+    def test_show_snack_helper_logs_warning_on_failure(self):
+        """show_snack 的 except handler 必須呼叫 log_warning。"""
+        snack_module = REPO_ROOT / "app" / "ui" / "snack.py"
+        tree = _ast_parse(snack_module)
         found = False
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.FunctionDef)
-                and node.name == "_show_snack_bar"
+                and node.name == "show_snack"
             ):
                 for sub in ast.walk(node):
                     if (
@@ -727,41 +720,58 @@ class TestFixSnackBarExceptWrapper:
                         found = True
                 break
         assert found, (
-            "回歸:_show_snack_bar 的 except handler 沒呼叫 log_warning "
-            "(吞錯沒 log,跟 commit b6c958b 的 extractor_view 修法要對稱)"
+            "回歸:show_snack 的 except handler 沒呼叫 log_warning "
+            "(吞錯沒 log,跟 PR #98 0798022 修法要對稱)"
         )
 
-    def test_show_snack_bar_calls_page_update(self):
-        # 🐛 2026-08-01 user review (改期待):_show_snack_bar 應該主動 page.update()
-        # 原因:user 發現清空 output_dir 後 SnackBar 沒跳出 (caller 已經 page.update 過
-        # 文字欄位,但 SnackBar 在那幀後才加進 overlay,沒更新就看不到)。
-        # 從原本「不主動 page.update」(2026-07-12) 改成「主動 page.update」(2026-08-01)。
-        extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
-        tree = _ast_parse(extractor_view)
+    def test_show_snack_helper_calls_page_update(self):
+        """show_snack 必須主動 page.update()(PR #98 0798022 對齊)。
+
+        原因:user 發現清空 output_dir 後 SnackBar 沒跳出 (caller 已經 page.update 過
+        文字欄位,但 SnackBar 在那幀後才加進 overlay,沒更新就看不到)。
+        """
+        snack_module = REPO_ROOT / "app" / "ui" / "snack.py"
+        tree = _ast_parse(snack_module)
         has_update = False
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.FunctionDef)
-                and node.name == "_show_snack_bar"
+                and node.name == "show_snack"
             ):
-                # 找 self.page.update() 同步呼叫
+                # 找 page.update() 同步呼叫 (在 try 內)
                 for sub in ast.walk(node):
                     if (
                         isinstance(sub, ast.Call)
                         and isinstance(sub.func, ast.Attribute)
                         and sub.func.attr == "update"
                     ):
-                        # 檢查是否 self.page.update()
                         if (
-                            isinstance(sub.func.value, ast.Attribute)
-                            and sub.func.value.attr == "page"
+                            isinstance(sub.func.value, ast.Name)
+                            and sub.func.value.id == "page"
                         ):
                             has_update = True
                 break
         assert has_update, (
-            "回歸:_show_snack_bar 沒呼叫 self.page.update() "            "(User 2026-08-01 review 補發現,caller 自己 page.update 過文字欄位,"
+            "回歸:show_snack 沒呼叫 page.update() "
+            "(PR #98 0798022 補發現,caller 自己 page.update 過文字欄位,"
             "SnackBar 必須自己再 update 一次才能跳出)"
         )
+
+    def test_views_no_show_snack_bar_method(self):
+        """防 future 寫新 _show_snack_bar 自己實作(必須用 show_snack helper)"""
+        views_dir = REPO_ROOT / "app" / "views"
+        for view_file in views_dir.glob("*.py"):
+            tree = _ast_parse(view_file)
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.FunctionDef)
+                    and node.name in ("_show_snack_bar", "_show_snack")
+                ):
+                    raise AssertionError(
+                        f"回歸:{view_file.name} 仍有 {node.name} method。"
+                        f"  PR #85 重構後所有 view 應改用 show_snack helper,"
+                        f"  不應有 _show_snack_bar / _show_snack wrapper method。"
+                    )
 
 
 # =============================================================================
@@ -815,8 +825,10 @@ class TestFixButtonLevelModsValidation:
             "回歸:_check_mods_dir_or_snack 內缺 `os.path.isdir(mods_dir)` 檢查"
         )
 
-    def test_check_helper_calls_show_snack_bar(self):
-        """_check_mods_dir_or_snack 驗證失敗時必須呼叫 _show_snack_bar。"""
+    def test_check_helper_calls_show_snack(self):
+        # 🐛 2026-08-01 user review (PR #85 重構):
+        # _check_mods_dir_or_snack 改用 show_snack(self.page, ...) 直接呼叫,
+        # 不再透過 self._show_snack_bar wrapper method。
         src = _read(EXTRACTOR_VIEW)
         m = re.search(
             r"def _check_mods_dir_or_snack\(self, [^)]*\) -> bool:(.*?)(?=\n    def |\nclass |\Z)",
@@ -824,8 +836,8 @@ class TestFixButtonLevelModsValidation:
         )
         assert m is not None
         body = m.group(1)
-        assert "self._show_snack_bar" in body, (
-            "回歸:_check_mods_dir_or_snack 驗證失敗時應該呼叫 _show_snack_bar 提示"
+        assert "show_snack(self.page" in body, (
+            "回歸:_check_mods_dir_or_snack 驗證失敗時應該呼叫 show_snack 提示"
         )
 
     def test_six_button_handle_methods_exist(self):

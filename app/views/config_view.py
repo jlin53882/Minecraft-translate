@@ -6,6 +6,7 @@
 
 import flet as ft
 from app.ui import theme
+from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_info
 from app.services_impl.config_service import load_config_json, save_config_json
 from app.views.config.config_actions import load_config_into_view, save_config_from_view
@@ -668,13 +669,6 @@ class ConfigView(ft.Column):
         """建立設定卡片"""
         return build_config_card(self, title, controls_list)
 
-    def _show_snack_bar(self, message: str, color: str = theme.ERROR):
-        """顯示 SnackBar 訊息提示"""
-        log_info(f"[UI] SnackBar: {message}")
-        snack = ft.SnackBar(ft.Text(message), bgcolor=color)
-        self.page.overlay.append(snack)
-        snack.open = True
-        self.page.update()
 
     def add_model_row(self, model_name: str):
         """新增模型項目到列表"""
@@ -754,10 +748,10 @@ class ConfigView(ft.Column):
         """處理新增模型按鈕點擊事件"""
         name = self.new_model_field.value.strip()
         if not name:
-            self._show_snack_bar("模型名稱不能為空")
+            show_snack(self.page, "模型名稱不能為空")
             return
         if any(r._checkbox.label == name for r in self.models_column.controls):
-            self._show_snack_bar("此模型已存在")
+            show_snack(self.page, "此模型已存在")
             return
         self.add_model_row(name)
         self.new_model_field.value = ""

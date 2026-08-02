@@ -1,5 +1,6 @@
 
 from app.views import translation_view as tv
+from app.ui.snack import show_snack
 from app.views._log import LogView
 from tests.conftest import mock_page, mock_filepicker
 
@@ -324,7 +325,7 @@ def test_show_snack_adds_to_page_overlay(monkeypatch):
     picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
 
-    view._show_snack('Test message', '#00FF00')
+    show_snack(view.page, 'Test message', '#00FF00')
 
     assert len(page.overlay) == 1
     assert page.overlay[0].open is True
@@ -477,7 +478,7 @@ def test_translation_view_show_snack_adds_to_overlay():
     page = mock_page()
     picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
-    view._show_snack('Test error', '#FF0000')
+    show_snack(view.page, 'Test error', '#FF0000')
     assert len(page.overlay) >= 1
 
 

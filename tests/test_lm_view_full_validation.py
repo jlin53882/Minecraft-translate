@@ -9,6 +9,7 @@ LM View 完整模組驗證。
 import flet as ft
 from unittest.mock import patch
 from app.views import lm_view
+from app.ui.snack import show_snack
 from app.logging import LogEntry
 from app.views._log import LogView
 from tests.conftest import mock_page, mock_filepicker
@@ -545,7 +546,7 @@ def test_show_snack_bar_adds_to_overlay(monkeypatch):
     page = mock_page()
     view = lm_view.LMView(page, mock_filepicker())
 
-    view._show_snack_bar("Test message", lm_view.theme.RED_600)
+    show_snack(view.page, "Test message", lm_view.theme.RED_600)
 
     assert len(page.overlay) == 1
     assert page.overlay[0].open is True
