@@ -14,7 +14,7 @@ from typing import Any
 import flet as ft
 
 from app.views._log import LogView
-from translation_tool.utils.log_unit import log_info
+from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.config_manager import load_config, save_config
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service, run_merge_folder_batch_service
 from app.task_session import TaskSession
@@ -706,12 +706,17 @@ class MergeView(ft.Column):
         threading.Thread(target=_run_merge, daemon=True).start()
 
     def _start_ui_poller(self) -> None:
-        """啟動 UI 輪詢器，定期同步進度與日誌。"""
+        """啟動 UI 輪詢器，定期同步進度與日誌。
+
+        2026-08-02 修正:daemon thread 內不能直接 page.update()(Flet 0.85 限制)。
+        所有 update 都透過 page.run_task() 推到 UI thread。
+        """
         self._ui_stop.clear()
         self.log_view.clear()
 
-        def poll():
-            while not self._ui_stop.is_set():
+        async def _sync_ui():
+            """在 UI thread 內執行 update。"""
+            try:
                 snap = self.session.snapshot()
                 status = snap["status"]
                 progress = snap["progress"]
@@ -721,7 +726,6 @@ class MergeView(ft.Column):
                     self._set_status("執行中", theme.BLUE_200)
                 elif status == "DONE":
                     self._set_status("任務完成", theme.GREEN_200)
-                    # 直接從 session 取得 service 統計的 summary
                     snap_summary = snap.get("summary")
                     if snap_summary:
                         self._merge_stats = snap_summary
@@ -756,15 +760,23 @@ class MergeView(ft.Column):
                 self.progress_bar.value = progress
 
                 # LogView 接管 append + truncate + scroll
+                # 內部會自己 page.update()
                 self.log_view.sync_from_session(self.session)
 
                 if status in ("DONE", "ERROR"):
                     self.start_button.disabled = False
                     self.zip_list_view.disabled = False
-                    self.page.update()
-                    break
+                # 不在這裡 page.update() — sync_from_session 已做
+            except Exception as e:
+                log_warning(f"[MergeView] _sync_ui 錯誤: {e!r}")
 
-                self.page.update()
+        def poll():
+            while not self._ui_stop.is_set():
+                # 透過 page.run_task() 推到 UI thread
+                try:
+                    self.page.run_task(_sync_ui)
+                except Exception as e:
+                    log_warning(f"[MergeView] run_task 錯誤: {e!r}")
                 time.sleep(0.1)
 
         threading.Thread(target=poll, daemon=True).start()

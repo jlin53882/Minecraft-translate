@@ -240,6 +240,9 @@ def run_merge_folder_batch_service(
                     return
 
             session.add_log(f"[資料夾] 完成：{os.path.basename(input_dir)}")
+            session.add_log(
+                "[階段 1/2 完成] zh_cn → zh_tw 翻譯已完成"
+            )
             stats["success_folders"] += 1
 
             # 階段 2 (2026-08-02 PR-XX merge-asset-integration):
@@ -252,7 +255,9 @@ def run_merge_folder_batch_service(
                     "lang_merger", {}
                 ).get("enable_extracted_to_assets_merge", True)
                 if enable_extracted_merge:
-                    session.add_log("[階段2] 合併 XX_extracted → assets/")
+                    session.add_log(
+                        "[階段 2/2 開始] XX_extracted → assets 整合"
+                    )
                     lang_output_dir = os.path.join(output_dir, "lang_output")
                     for update in merge_extracted_to_assets(
                         lang_output_dir=lang_output_dir,
@@ -267,13 +272,13 @@ def run_merge_folder_batch_service(
                             session.set_progress(update["progress"])
                         if update.get("error"):
                             session.add_log(
-                                "[階段2] 錯誤,assets 合併中止"
+                                "[階段 2/2 錯誤] assets 合併中止"
                             )
                             return
-                    session.add_log("[階段2] 完成")
+                    session.add_log("[階段 2/2 完成]")
             except Exception as stage2_err:
                 logger.warning(f"[階段2] 錯誤(不中断階段1): {stage2_err}")
-                session.add_log(f"[階段2] 錯誤: {stage2_err}")
+                session.add_log(f"[階段 2/2 錯誤]: {stage2_err}")
 
         except Exception as e:
             tb = traceback.format_exc()

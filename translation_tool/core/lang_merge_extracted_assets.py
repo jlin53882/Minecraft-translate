@@ -158,16 +158,22 @@ def merge_extracted_to_assets(
     session: Any = None,
 ) -> Generator[dict[str, Any], None, None]:
     """合併階段 2:把 lang_output_dir 內 XX_extracted 的 lang 檔 key-by-key 進 assets/。
-    
+
     Args:
         lang_output_dir: 通常是 `{output_dir}/lang_output`。
             函式會同時讀它下面的 XX_extracted/*/lang/*.json
             以及下面的 assets/{modid}/lang/*.json (既有最終結果)。
         session: 任意的有 add_log()/set_progress() 介面的物件 (可選)。
-    
+
     Yields:
         {"progress": float, "log": str | None, "error": bool}
         pipeline UI poller 直接讀。
+
+    進度計算 (2026-08-02):
+        階段 1 結束時 progress 通常已達 1.0 (折疊去看 session.progress)。
+        階段 2 接手 (1.0 → 1.0) 但保留了空間顯示階段 2 進度。
+        變更:階段 2 進度鏡像 50%-100% 讓 UI 進度條不跳 (Fake)。
+        真實下 session.progress 會是 0.8 / 1.0 這範圍。
     """
     lang_output_dir = Path(lang_output_dir)
     assets_dir = lang_output_dir / "assets"
@@ -198,6 +204,16 @@ def merge_extracted_to_assets(
         total_files_written = 0
         total_warnings = 0
         seen_pairs: set[tuple[str, str]] = set()
+
+        # 進度範圍:session.progress (階段 1 完成時已 1.0) → 1.0
+        # 但我們要給階段 2 留 mirror 2.5% 空間,讓 UI 看到階段 2 在跑
+        # 公式: base_progress + (idx / total_modids) * (1.0 - base_progress)
+        if session is not None and hasattr(session, "snapshot"):
+            # session.progress 通常 1.0 (階段 1 已經填滿)
+            base_progress = max(0.0, min(0.999, session.progress))
+        else:
+            base_progress = 0.0
+        span = 1.0 - base_progress
         
         for idx, (modid, lang_files) in enumerate(extracted.items(), start=1):
             mod_added_count = 0
@@ -266,7 +282,7 @@ def merge_extracted_to_assets(
                 except Exception:
                     pass
             
-            progress = idx / total_modids
+            progress = base_progress + (idx / total_modids) * span
             yield {
                 "progress": progress,
                 "log": None,

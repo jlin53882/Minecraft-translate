@@ -295,6 +295,8 @@ class TestMergeExtractedToAssets:
         from unittest.mock import MagicMock
 
         session = MagicMock()
+        # 模擬階段 1 完成的 session.progress = 1.0
+        session.progress = 1.0
         lang_output_dir = self._setup_fixture(
             tmp_path,
             existing_assets=None,
