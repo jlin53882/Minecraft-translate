@@ -878,15 +878,15 @@ class MergeView(ft.Column):
                     "開啟輸出資料夾", on_click=lambda e: self._open_output_folder()
                 ),
                 ft.TextButton(
-                    "關閉", on_click=lambda e: self._close_dialog_overlay(dialog)
+                    "關閉", on_click=lambda e: self._close_dialog_overlay()
                 ),
             ],
         )
 
-        # 使用 overlay 方式，穩定性高於 page.open()
-        self.page.overlay.append(dialog)
-        dialog.open = True
-        self.page.update()
+        # 2026-08-02 修正:
+        #   不再用 page.overlay.append + dialog.open = True (Flet 0.85 不能可靠關閉)
+        #   改用 Flet 0.85 內建 page.show_dialog() 完整管理 dialog lifecycle
+        self.page.show_dialog(dialog)
 
     def _open_output_folder(self) -> None:
         """開啟輸出資料夾（使用檔案總管）。"""
@@ -897,25 +897,23 @@ class MergeView(ft.Column):
         self.page.update()
         subprocess.Popen(["explorer", self.output_dir_field.value], shell=True)
 
-    def _close_dialog_overlay(self, dialog: ft.AlertDialog) -> None:
-        """關閉 overlay 對話框。
+    def _close_dialog_overlay(self) -> None:
+        """關閉頂層 dialog (跟 _show_merge_summary 用 page.show_dialog 對稱)。
 
         2026-08-02 修正:
-            - 不用 page.overlay.remove()(會破壞 Flet dialog 內部狀態)
-            - 改用 page.pop_dialog() (Flet 0.82.2+ 標準關閉 API)
+            - 用 Flet 0.85 內建 page.pop_dialog() (對稱 page.show_dialog)
+            - 不再用 page.overlay.remove()(會破壞 Flet dialog 內部狀態)
+            - 不直接設 dialog.open=False (無法可靠觸發 close)
 
-        Args:
-            dialog: 要關閉的 AlertDialog 實例
+        Notes:
+            page.pop_dialog() 接受可選參數 (specific dialog),
+            無參數會關閉最頂層 (topmost)。
+            確保對應 _show_merge_summary 內 page.show_dialog(dialog) 開啟的 dialog。
         """
         try:
-            dialog.open = False
-            # 用 pop_dialog 才是 Flet 0.82.2+ 標準關閉方式
-            # 對應 _show_merge_summary 內 page.show_dialog(dialog) 開啟
-            # 因為我們用 page.overlay.append + open=True,page.pop_dialog 也能處理
             self.page.pop_dialog()
-            self.page.update()
         except Exception as e:
-            log_warning(f"[MergeView] _close_dialog_overlay 錯誤: {e!r}")
+            log_warning(f"[MergeView] pop_dialog 錯誤: {e!r}")
 
     @property
     def page(self):

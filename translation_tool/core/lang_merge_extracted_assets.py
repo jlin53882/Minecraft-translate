@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import shutil  # noqa: F401  shutil 用於 _cleanup_extracted_dirs 刪除整個 _extracted 子資料夾
 import os
 import re
 import traceback
@@ -69,18 +70,20 @@ def _infer_modid_from_lang_file(lang_file: Path) -> str | None:
 
 def _scan_extracted_lang_files(lang_output_dir: Path) -> dict[str, dict[str, list[Path]]]:
     """掃描 lang_output_dir 內 XX_extracted 子資料夾的 lang 檔案。
-    
+
     退出 assets/ 子資料夾 (存為是階段 2 目標,不是來源)。
-    
+
     Returns:
         {modid: {lang_code: [source_paths]}}
         `assets` 不會是 modid (它是被寫目標)。
     """
     result: dict[str, dict[str, list[Path]]] = defaultdict(lambda: defaultdict(list))
-    
+
     if not lang_output_dir.exists():
         return dict(result)
-    
+
+    scanned_dirs = []  # 2026-08-02 user 確認:加 log 確認掃到哪些 _extracted
+    skipped_dirs = []
     for entry in lang_output_dir.iterdir():
         if not entry.is_dir():
             continue
@@ -90,7 +93,18 @@ def _scan_extracted_lang_files(lang_output_dir: Path) -> dict[str, dict[str, lis
         # 只處理符合 *_extracted 結尾 (含可選版本後綴) 的子資料夾
         if not _EXTRACTED_NAME_RE.match(entry.name):
             continue
-        
+
+        file_count = sum(1 for _ in entry.rglob(_LANG_FILE_GLOB) if _.is_file())
+        if file_count == 0:
+            # 2026-08-02:log 哪些 _extracted 沒找到 lang 檔案(為什麼沒處理)
+            log_warning(
+                f"[MergeExt→Assets] {entry.name}/* 內找不到 lang/*.json,"
+                f" 跳過(階段1可能把 en_us-only 檔案搬到 待翻譯/)"
+            )
+            skipped_dirs.append(entry.name)
+            continue
+
+        scanned_dirs.append(entry.name)
         for lang_file in entry.rglob(_LANG_FILE_GLOB):
             if not lang_file.is_file():
                 continue
@@ -107,7 +121,19 @@ def _scan_extracted_lang_files(lang_output_dir: Path) -> dict[str, dict[str, lis
                 )
                 continue
             result[modid][lang_code].append(lang_file)
-    
+
+    # 2026-08-02:加彙總 log 讓 user 知道實際掃到的 _extracted dirs
+    if scanned_dirs:
+        log_info(
+            f"[MergeExt→Assets] 掃描 _extracted dirs: {len(scanned_dirs)} 個"
+            f" ({', '.join(scanned_dirs)})"
+        )
+    if skipped_dirs:
+        log_info(
+            f"[MergeExt→Assets] 跳過 (沒找到 lang/*.json): {len(skipped_dirs)} 個"
+            f" ({', '.join(skipped_dirs)})"
+        )
+
     return dict(result)
 
 
@@ -151,6 +177,47 @@ def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
         json.dump(data, f, ensure_ascii=False, indent=4)
         f.write("\n")
     os.replace(tmp_path, path)
+
+
+def _cleanup_extracted_dirs(lang_output_dir: Path, session: Any = None) -> int:
+    """Stage 2 完成後,刪除 lang_output_dir 下所有 *_extracted 子資料夾。
+
+    目的 (2026-08-02 user 確認):
+        防止下次 merge 時,_scan_extracted_lang_files 又掃到這些已合併的 ext 目錄,
+        造成重複處理或不預期的 side effect。
+
+    Args:
+        lang_output_dir: 通常是 `{output_dir}/lang_output`。
+        session: 任意有 add_log() 介面的物件 (可選)。
+
+    Returns:
+        刪除的子資料夾數量。
+    """
+    if not lang_output_dir.exists():
+        return 0
+
+    cleaned = 0
+    for entry in list(lang_output_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        if not _EXTRACTED_NAME_RE.match(entry.name):
+            continue
+        try:
+            shutil.rmtree(entry)
+            cleaned += 1
+            log_info(f"[MergeExt→Assets] 已清理 _extracted 子資料夾: {entry.name}")
+            if session is not None:
+                try:
+                    session.add_log(
+                        f"[清理] 已刪除 {entry.name}/ (內容已併入 assets/)"
+                    )
+                except Exception:
+                    pass
+        except Exception as exc:
+            log_warning(
+                f"[MergeExt→Assets] 無法刪除 {entry}: {exc!r}"
+            )
+    return cleaned
 
 
 def merge_extracted_to_assets(
@@ -302,6 +369,17 @@ def merge_extracted_to_assets(
                 )
             except Exception:
                 pass
+        # 2026-08-02 user 確認:
+        #   Stage 2 完成後刪除 *_extracted 子資料夾,
+        #   防止下次 merge 時 _scan 又掃到這些已經合併的目錄。
+        try:
+            cleaned = _cleanup_extracted_dirs(lang_output_dir, session=session)
+            if cleaned > 0:
+                log_info(
+                    f"[MergeExt→Assets] 清理完成:刪除 {cleaned} 個 _extracted 子資料夾"
+                )
+        except Exception as exc:
+            log_warning(f"[MergeExt→Assets] 清理 _extracted 失敗: {exc!r}")
         yield {"progress": 1.0, "log": None, "error": False}
     
     except Exception as exc:
