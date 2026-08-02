@@ -900,18 +900,19 @@ class MergeView(ft.Column):
     def _close_dialog_overlay(self, dialog: ft.AlertDialog) -> None:
         """關閉 overlay 對話框。
 
-        2026-08-02 修正:只是 `dialog.open = False` 不夠,
-        Flet 0.85 用 page.overlay 模式必須也從 overlay 移除,
-        否則下次 update 還是會重畫。
+        2026-08-02 修正:
+            - 不用 page.overlay.remove()(會破壞 Flet dialog 內部狀態)
+            - 改用 page.pop_dialog() (Flet 0.82.2+ 標準關閉 API)
 
         Args:
             dialog: 要關閉的 AlertDialog 實例
         """
         try:
             dialog.open = False
-            # 從 page.overlay 移除 - Flet 0.85 真的要 close 的關鍵
-            if hasattr(self.page, "overlay") and dialog in self.page.overlay:
-                self.page.overlay.remove(dialog)
+            # 用 pop_dialog 才是 Flet 0.82.2+ 標準關閉方式
+            # 對應 _show_merge_summary 內 page.show_dialog(dialog) 開啟
+            # 因為我們用 page.overlay.append + open=True,page.pop_dialog 也能處理
+            self.page.pop_dialog()
             self.page.update()
         except Exception as e:
             log_warning(f"[MergeView] _close_dialog_overlay 錯誤: {e!r}")
