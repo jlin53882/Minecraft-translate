@@ -230,6 +230,18 @@ class TestLoadExistingAssets:
 # 4. merge_extracted_to_assets (整合測試)
 # ──────────────────────────────────────────────────────────────────────────
 class TestMergeExtractedToAssets:
+    """2026-08-02 重構:Stage 2 改用 Stage 1 拆出來的 merge_lang_dicts helper。
+
+    行為:
+    - _extracted/{modid}/lang/{zh_cn,zh_tw,en_us}.json 跑 merge_lang_dicts
+    - 產出 final_tw → assets/{modid}/lang/zh_tw.json
+    - 產出 pending (en_us only) → assets/{modid}/lang/en_us.json
+    - zh_cn 不直接 copy 到 assets (Stage 1 翻譯結果 = zh_tw)
+
+    注意:舊 test 期待 self-key-by-key (zh_cn → assets/zh_cn.json 直接 copy),
+    已全部重寫成新行為。
+    """
+
     def _setup_fixture(
         self,
         tmp_path: Path,
@@ -241,17 +253,17 @@ class TestMergeExtractedToAssets:
         lang_output_dir = tmp_path / "lang_output"
         lang_output_dir.mkdir()
 
-        # 建立 assets/{modid}/lang/{file}
         if existing_assets:
             for modid, lang_files in existing_assets.items():
                 for lang_code, data in lang_files.items():
-                    target = lang_output_dir / "assets" / modid / "lang" / f"{lang_code}.json"
+                    target = (
+                        lang_output_dir / "assets" / modid / "lang" / f"{lang_code}.json"
+                    )
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(
                         json.dumps(data, ensure_ascii=False), encoding="utf-8"
                     )
 
-        # 建立 {something}_extracted/{modid}/lang/{file}
         if extracted_data:
             for ext_folder_name, lang_files in extracted_data.items():
                 ext_dir = lang_output_dir / ext_folder_name
@@ -265,52 +277,101 @@ class TestMergeExtractedToAssets:
 
         return lang_output_dir
 
-    def test_assets_wins_supplements_missing(self, tmp_path: Path):
-        """assets 已有 key 不被覆寫,extracted 補缺的 key"""
-        lang_output_dir = self._setup_fixture(
-            tmp_path,
-            existing_assets={
-                "ae2ct": {
-                    "zh_cn": {"old_k": "old_v_assets_should_keep"},
-                }
-            },
-            extracted_data={
-                "ae2ct_extracted": {
-                    "ae2ct": {
-                        "zh_cn": {
-                            "old_k": "new_v_extracted_should_be_ignored",
-                            "new_k": "new_v_extracted_should_be_added",
-                        },
-                    },
-                },
-            },
-        )
-
-        list(merge_extracted_to_assets(lang_output_dir))
-        target = lang_output_dir / "assets" / "ae2ct" / "lang" / "zh_cn.json"
-        result = json.loads(target.read_text(encoding="utf-8"))
-        assert result["old_k"] == "old_v_assets_should_keep"  # assets wins
-        assert result["new_k"] == "new_v_extracted_should_be_added"  # 補充
-
-    def test_extracted_data_written_when_no_assets(self, tmp_path: Path):
-        """沒 assets 從 extracted 建立新 assets"""
+    def test_zh_cn_only_writes_to_zh_tw_after_merge(self, tmp_path: Path):
+        """_extracted 內 zh_cn.json 經 merge 後寫到 assets/zh_tw.json(不寫 zh_cn)。"""
         lang_output_dir = self._setup_fixture(
             tmp_path,
             existing_assets=None,
             extracted_data={
                 "ae2ct_extracted": {
                     "ae2ct": {
-                        "zh_cn": {"k1": "v1"},
+                        "zh_cn": {"k_zh": "原文_zh"},
                     },
                 },
             },
         )
 
         list(merge_extracted_to_assets(lang_output_dir))
-        target = lang_output_dir / "assets" / "ae2ct" / "lang" / "zh_cn.json"
-        assert target.exists()
+        # 應該寫 zh_tw.json(Stage 1 merge 邏輯)
+        zh_tw_path = lang_output_dir / "assets" / "ae2ct" / "lang" / "zh_tw.json"
+        assert zh_tw_path.exists()
+        result = json.loads(zh_tw_path.read_text(encoding="utf-8"))
+        # merge_lang_dicts 看到 zh_cn 有 CJK → 試 apply_replace_rules,
+        # 因為沒 rules 跟沒 CJK 處理,實際值會被 setdefault
+        # 注意:Stage 2 rules=[] 給 helper,apply 規則不做事,值可能是原文
+        # 但 helper 行為:zh_cn 含 CJK → recursive_translate_dict(無 rules 也是原值)
+        assert "k_zh" in result
+        # zh_cn 不應直接寫
+        zh_cn_path = lang_output_dir / "assets" / "ae2ct" / "lang" / "zh_cn.json"
+        assert not zh_cn_path.exists()
+
+    def test_zh_tw_extracted_wins_via_assets_protection(self, tmp_path: Path):
+        """既有 assets/zh_tw.json 含 CJK,被 _extracted/zh_tw.json 補滿 key,不覆寫 CJK。
+
+        既有: {k_old: "舊翻譯_zh"}
+        _extracted: {k_old: "新翻譯_zh", k_new: "新key_zh"}
+        期望 assets/zh_tw.json:
+          - k_old = 舊翻譯 (assets wins - 有人工翻譯)
+          - k_new = 新key_zh (新 key 補進去)
+        """
+        lang_output_dir = self._setup_fixture(
+            tmp_path,
+            existing_assets={
+                "ae2ct": {
+                    "zh_tw": {"k_old": "舊翻譯_zh"},
+                }
+            },
+            extracted_data={
+                "ae2ct_extracted": {
+                    "ae2ct": {
+                        "zh_tw": {
+                            "k_old": "新翻譯_zh",
+                            "k_new": "新key_zh",
+                        },
+                        "en_us": {},  # 缺 zh_cn 來源,純英文 key 才進 pending
+                    },
+                },
+            },
+        )
+
+        list(merge_extracted_to_assets(lang_output_dir))
+        target = lang_output_dir / "assets" / "ae2ct" / "lang" / "zh_tw.json"
         result = json.loads(target.read_text(encoding="utf-8"))
-        assert result == {"k1": "v1"}
+        assert result["k_old"] == "舊翻譯_zh"  # assets wins
+        assert result["k_new"] == "新key_zh"  # 新 key 補充
+
+    def test_en_us_only_mod_writes_en_us_to_assets(self, tmp_path: Path):
+        """en_us-only mod:全部 key 純英文 → assets/zh_tw.json(空 key)+ assets/en_us.json(原文)。
+
+        因為 zh_cn 跟 zh_tw 都沒有,merge_lang_dicts 算全部純英文,進 pending。
+        """
+        lang_output_dir = self._setup_fixture(
+            tmp_path,
+            existing_assets=None,
+            extracted_data={
+                "codechickenlib_extracted": {
+                    "codechickenlib": {
+                        "en_us": {"k_en": "v_en"},
+                    },
+                },
+            },
+        )
+
+        list(merge_extracted_to_assets(lang_output_dir))
+        # zh_tw.json 應該被建 (merge 結果)
+        zh_tw_path = (
+            lang_output_dir / "assets" / "codechickenlib" / "lang" / "zh_tw.json"
+        )
+        assert zh_tw_path.exists()
+        zh_tw_data = json.loads(zh_tw_path.read_text(encoding="utf-8"))
+        # pending 應被寫到 en_us.json
+        en_us_path = (
+            lang_output_dir / "assets" / "codechickenlib" / "lang" / "en_us.json"
+        )
+        assert en_us_path.exists()
+        en_us_data = json.loads(en_us_path.read_text(encoding="utf-8"))
+        # 所有 key 進 en_us (純英文)
+        assert "k_en" in en_us_data
 
     def test_no_extracted_no_error(self, tmp_path: Path):
         """沒 XX_extracted 不報錯,只是空跑"""
@@ -321,7 +382,7 @@ class TestMergeExtractedToAssets:
         assert any(u.get("progress") == 1.0 for u in updates)
 
     def test_multi_source_logs_warning(self, tmp_path: Path):
-        """多個 source 同 modid 同 lang_code,應該 log warning"""
+        """多個 source 同 modid 應該 log warning 並採第一個。"""
         lang_output_dir = tmp_path / "lang_output"
         lang_output_dir.mkdir()
 
@@ -329,7 +390,7 @@ class TestMergeExtractedToAssets:
         for ext_name in ("ae2ct_extracted_v1", "ae2ct_extracted_v2"):
             ext_dir = lang_output_dir / ext_name / "ae2ct" / "lang"
             ext_dir.mkdir(parents=True)
-            (ext_dir / "zh_cn.json").write_text(
+            (ext_dir / "en_us.json").write_text(
                 json.dumps({"k": "v"}, ensure_ascii=False), encoding="utf-8"
             )
 
@@ -350,7 +411,7 @@ class TestMergeExtractedToAssets:
 
         # 應有 log "多個來源"
         assert any(
-            "多個來源" in msg and "assets wins" in msg
+            "多個來源" in msg and "採第一個" in msg
             for msg in captured
         ), f"沒有 multi-source warning,實際 log: {captured}"
 
@@ -380,7 +441,10 @@ class TestMergeExtractedToAssets:
         assert any("✓" in m for m in msgs)
 
     def test_files_cleanly_written(self, tmp_path: Path):
-        """JSON 是 UTF-8 + indent=4 + ensure_ascii=False"""
+        """JSON 是 UTF-8 + indent=4 + ensure_ascii=False
+
+        2026-08-02 重構:Stage 2 改成寫 zh_tw.json (不是 zh_cn.json)。
+        """
         lang_output_dir = self._setup_fixture(
             tmp_path,
             existing_assets=None,
@@ -392,7 +456,8 @@ class TestMergeExtractedToAssets:
         )
 
         list(merge_extracted_to_assets(lang_output_dir))
-        target = lang_output_dir / "assets" / "ae2ct" / "lang" / "zh_cn.json"
+        # Stage 2 寫 zh_tw.json (Stage 1 merge 邏輯)
+        target = lang_output_dir / "assets" / "ae2ct" / "lang" / "zh_tw.json"
         content = target.read_text(encoding="utf-8")
         # 中文不應被 escape 為 \uXXXX
         assert "中文_key" in content

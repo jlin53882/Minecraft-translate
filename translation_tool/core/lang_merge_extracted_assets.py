@@ -5,14 +5,16 @@
     input_dir 內 XX_extracted/{modid}/lang/{xx_yy}.json 並未推到 minecraft 認得的
     `assets/{modid}/lang/{xx_yy}.json`。本 module 負責這個局勢:
     掃描 output_dir/lang_output/{XX_extracted,...}/ 內所有 lang 檔,
-    key-by-key 合併進 output_dir/lang_output/assets/{modid}/lang/{xx_yy}.json。
+    用 Stage 1 的 merge_lang_dicts 邏輯產出 zh_tw.json,
+    寫到 output_dir/lang_output/assets/{modid}/lang/zh_tw.json。
 
 設計:
-    - 抽共用 SRP:階段 1 只翻譯,階段 2 只合併。
-    - user-asset priority 一律 (assets wins):只在 key 不存在時加进去。
-    - 多 source 同 modid 同 lang_code:第 1 個 wins + log warning。
-    - yield `{"log", "progress"}` 與 lang_merger 的協定對齊,pipeline UI 直接讀。
-    - 失败 log 不污染階段 1 結果 (語言翻譯已完成在硬碟)。
+    - 抽共用 SRP:階段 1 只翻譯,階段 2 只搬 zh_tw 結果到 assets
+    - user-asset priority 一律 (assets wins):zh_tw 用 merge_lang_dicts 的規則,
+      人工翻譯的 zh_tw 不被覆寫
+    - 失敗隔離:階段 2 錯誤不中断階段 1 結果 (語言翻譯已完成在硬碟)
+    - 寬掃 _extracted/ 跟 待翻譯/ 兩個位置:en_us-only mod 的檔案
+      會被 Stage 1 搬到 待翻譯/,寬掃確保全部 modid 都進 assets
 """
 from __future__ import annotations
 
@@ -23,10 +25,19 @@ import re
 import traceback
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any, Generator, Callable
 
 from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
+from translation_tool.utils.text_processor import (
+    apply_replace_rules,
+    recursive_translate_dict,
+)
+from translation_tool.core.lang_merge_dict import (
+    merge_lang_dicts,
+    contains_cjk as stage2_contains_cjk,
+    is_pure_english as stage2_is_pure_english,
+)
 
 
 # 任何 *_extracted 結尾 (含可選版本後綴) 算會被這個 pattern 挑到
@@ -298,72 +309,120 @@ def merge_extracted_to_assets(
         span = 1.0 - base_progress
         
         for idx, (modid, lang_files) in enumerate(extracted.items(), start=1):
-            mod_added_count = 0
+            # 2026-08-02 重構:Stage 2 不再走 self-written key-by-key merge,
+            # 改用 Stage 1 拆出來的 merge_lang_dicts helper (reused),
+            # 但 output 寫 assets/{modid}/lang/zh_tw.json (跟 Stage 1 不同)。
+
+            # 收集 3 個來源 (zh_cn, zh_tw, en_us) 從寬掃結果
+            cn_data: dict = {}
+            tw_src_data: dict = {}
+            en_data: dict = {}
+
+            # 多 source 時,以第一個 source 為主(同 Stage 1 _process_single_mod 行為)
             for lang_code, source_paths in lang_files.items():
-                target_key = (modid, lang_code)
-                target_path = assets_dir / modid / "lang" / f"{lang_code}.json"
-                
-                # target_data = 既有 assets (若有)
-                target_data = dict(existing.get(target_key, {}))
-                before_keys = set(target_data.keys())
-                
-                # 多 source:第 1 個 wins,後面撞到同 key log warning
-                for source_idx, source_path in enumerate(source_paths):
-                    source_data = load_json_auto_encoding(source_path)
-                    if source_data is None:
-                        source_data = {}
-                    if not isinstance(source_data, dict):
-                        log_warning(
-                            f"[MergeExt→Assets] {source_path} 不是 dict 格式, 跳過"
-                        )
-                        total_warnings += 1
-                        continue
-                    
-                    for key, val in source_data.items():
-                        if key in target_data:
-                            # assets wins:跳過不覆寫
-                            continue
-                        # assets wins 對應:查 XX_extracted 是不是也有同名 key
-                        if key not in target_data:
-                            target_data[key] = val
-                            mod_added_count += 1
-                
-                # 寫回 (whenever 有變動)
-                added_this_file = len(target_data) - len(before_keys)
-                if added_this_file > 0:
-                    try:
-                        _write_json_atomic(target_path, target_data)
-                        total_files_written += 1
-                        if session is not None:
-                            try:
-                                session.add_log(
-                                    f"  ✓ {modid}/{lang_code}.json: +{added_this_file} 個 key"
-                                )
-                            except Exception:
-                                pass
-                    except Exception as exc:
-                        log_warning(
-                            f"[MergeExt→Assets] 寫入失敗 {target_path}: {exc}"
-                        )
-                        total_warnings += 1
-                
-                existing[target_key] = target_data
-                seen_pairs.add(target_key)
-                
-                # multi source warning
+                # 取第一個 source (Stage 1 _process_single_mod 也只看 1 個 lang per file)
+                if not source_paths:
+                    continue
+                source_path = source_paths[0]
                 if len(source_paths) > 1:
                     log_warning(
                         f"[MergeExt→Assets] {modid}/{lang_code}: 多個來源 {len(source_paths)} 個,"
-                        f" assets wins 只補缺。"
+                        f" 採第一個 ({source_path.name})"
                     )
-            
-            total_added += mod_added_count
-            if session is not None:
+                data = load_json_auto_encoding(source_path)
+                if data is None:
+                    data = {}
+                if not isinstance(data, dict):
+                    log_warning(
+                        f"[MergeExt→Assets] {source_path} 不是 dict 格式, 跳過"
+                    )
+                    total_warnings += 1
+                    continue
+                if lang_code == "zh_cn":
+                    cn_data = data
+                elif lang_code == "zh_tw":
+                    tw_src_data = data
+                elif lang_code == "en_us":
+                    en_data = data
+
+            # 既有 assets/{modid}/lang/zh_tw.json (人工翻譯保護)
+            existing_tw = existing.get((modid, "zh_tw"), {})
+
+            # 跑 Stage 1 拆出來的 merge 邏輯 - 行為 1:1 一致
+            try:
+                final_tw, pending = merge_lang_dicts(
+                    cn_data=cn_data,
+                    tw_src_data=tw_src_data,
+                    en_data=en_data,
+                    existing_tw=existing_tw,
+                    rules=[],  # Stage 2 不套 replace rules,這些是 Stage 1 翻譯階段用
+                    apply_replace_rules=apply_replace_rules,
+                    recursive_translate_dict=recursive_translate_dict,
+                    contains_cjk=stage2_contains_cjk,
+                    is_pure_english=stage2_is_pure_english,
+                    is_from_output_dir=bool(existing_tw),
+                )
+            except Exception as exc:
+                log_warning(
+                    f"[MergeExt→Assets] merge 失敗 ({modid}): {exc}"
+                )
+                total_warnings += 1
+                continue
+
+            # 寫 assets/{modid}/lang/zh_tw.json (翻譯完成的結果)
+            target_path = assets_dir / modid / "lang" / "zh_tw.json"
+            mod_added_count = 0
+            try:
+                _write_json_atomic(target_path, final_tw)
+                total_files_written += 1
+                mod_added_count = len(final_tw) - len(existing_tw)
+                if mod_added_count > 0:
+                    total_added += mod_added_count
+                if session is not None:
+                    try:
+                        session.add_log(
+                            f"  ✓ {modid}/zh_tw.json: {len(final_tw)} keys"
+                            + (f" (+{mod_added_count} 新)" if mod_added_count > 0 else "")
+                        )
+                    except Exception:
+                        pass
+            except Exception as exc:
+                log_warning(
+                    f"[MergeExt→Assets] 寫入失敗 {target_path}: {exc}"
+                )
+                total_warnings += 1
+
+            # 寫 assets/{modid}/lang/en_us.json (pending - 待 user LM 翻譯)
+            if pending:
+                en_us_path = assets_dir / modid / "lang" / "en_us.json"
                 try:
-                    session.add_log(f"  ✓ {modid}: +{mod_added_count} 個 key")
+                    # pending 排好順序
+                    pending_sorted = dict(
+                        sorted(pending.items(), key=lambda item: item[0])
+                    )
+                    _write_json_atomic(en_us_path, pending_sorted)
+                    total_files_written += 1
+                    if session is not None:
+                        try:
+                            session.add_log(
+                                f"  ✓ {modid}/en_us.json: {len(pending_sorted)} pending 給 LM 翻"
+                            )
+                        except Exception:
+                            pass
+                except Exception as exc:
+                    log_warning(
+                        f"[MergeExt→Assets] 寫入 en_us 失敗 {en_us_path}: {exc}"
+                    )
+                    total_warnings += 1
+
+            if session is not None and mod_added_count > 0:
+                try:
+                    session.add_log(
+                        f"  ✓ {modid}: +{mod_added_count} 個 key 進 assets/"
+                    )
                 except Exception:
                     pass
-            
+
             progress = base_progress + (idx / total_modids) * span
             yield {
                 "progress": progress,

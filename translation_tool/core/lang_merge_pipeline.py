@@ -21,6 +21,10 @@ from .lang_merge_zip_io import (
     _write_bytes_atomic,
     _write_text_atomic,
 )
+from .lang_merge_dict import (
+    contains_cjk as _contains_cjk,
+    is_pure_english as _is_pure_english,
+)
 from .lang_processing_format import dump_json_bytes
 
 
@@ -51,35 +55,10 @@ def _process_single_mod(
     支援 ZIP 與資料夾兩種 reader。
     """
 
-    def _contains_cjk(v: Any) -> bool:
-        """Check if value contains CJK characters. Dispatches to memoized str version."""
-        if isinstance(v, str):
-            return _contains_cjk_str(v)
-        if isinstance(v, list):
-            return any(_contains_cjk(x) for x in v)
-        if isinstance(v, dict):
-            return any(_contains_cjk(x) for x in v.values())
-        return False
-
-    def has_any_text(v: Any) -> bool:
-        """結構內是否至少有一段可用的文字（避免空結構被當 pending）"""
-        if isinstance(v, str):
-            return v.strip() != ""
-        if isinstance(v, list):
-            return any(has_any_text(x) for x in v)
-        if isinstance(v, dict):
-            return any(has_any_text(x) for x in v.values())
-        return False
-
-    def is_pure_english(v: Any) -> bool:
-        """
-        判斷是否為「不包含 CJK」的內容（支援結構）。
-        - 需要至少有一段字串
-        - 且所有字串都不含 CJK
-        """
-        if not has_any_text(v):
-            return False
-        return not _contains_cjk(v)
+    # 2026-08-02 重構: _contains_cjk / has_any_text / is_pure_english
+    # 從 _process_single_mod nested 抽出到 lang_merge_dict 模組,
+    # 跟 Stage 2 共用同一個實作避免重複維護。
+    # 在這裡只 import 別名,不重新定義 nested function。
 
     def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
         """ """
@@ -187,73 +166,24 @@ def _process_single_mod(
         # =============================
         # Step 4 — 逐條判斷合併來源（重點修改）
         # =============================
-        pending = {}
+        # 2026-08-02 重構:把原本 60+ 行的 merge loop 換成單一 helper 函式
+        # merge_lang_dicts 是從 _process_single_mod 拆出來的純函式,
+        # Stage 2 (merge_extracted_to_assets) 會重用同一 helper,
+        # 確保 Stage 1 跟 Stage 2 邏輯一致。
+        from .lang_merge_dict import merge_lang_dicts
 
-        # 所有 key 的集合
-        all_keys = set(cn_data.keys()) | set(tw_src_data.keys()) | set(en_data.keys())
-
-        for key in all_keys:
-            # 1. 若 final_tw 已有人工翻譯（含 CJK），不覆蓋
-            # if key in final_tw and contains_cjk(final_tw[key]):
-            #    continue
-
-            # -----------------------------
-            # 人工 zh_tw 保護（來源感知）
-            # -----------------------------
-            # 只有「已存在於 output_dir 的 zh_tw」才視為人工翻譯並保護
-            # 外部 zip 內的 zh_tw（tw_src_data）仍允許再處理（套規則）
-
-            is_from_output_dir = (
-                key in final_tw and target_has_tw  # 代表 output_dir 已存在 zh_tw.json
-            )
-
-            if is_from_output_dir and _contains_cjk(final_tw.get(key, "")):
-                # ✔ 人工翻譯 → 不動
-                continue
-
-            tw_val = tw_src_data.get(key)
-            cn_val = cn_data.get(key)
-            en_val = en_data.get(key)
-
-            # 2. zh_tw（ZIP）若含中文 → 優先使用
-            # if contains_cjk(tw_val):
-            #    #final_tw[key] = tw_val # 直接使用 ZIP 內的 zh_tw
-            #    final_tw[key] = apply_replace_rules(tw_val, rules) # 進行規則處理
-            #    continue
-
-            if _contains_cjk(tw_val):
-                if isinstance(tw_val, str):
-                    final_tw[key] = apply_replace_rules(tw_val, rules)
-                else:
-                    final_tw[key] = recursive_translate_dict(tw_val, rules)
-                continue
-
-            # 3. zh_cn 若含中文 → 用 S2TW 翻譯
-            if _contains_cjk(cn_val):
-                final_tw[key] = recursive_translate_dict(cn_val, rules)
-                continue
-
-            # 4. zh_tw 與 zh_cn 皆為英文 → 視為未翻完，寫入 pending
-            # english_source = en_val or cn_val or tw_val
-            english_source = pick_first_not_none(en_val, cn_val, tw_val)
-            if english_source is None:
-                english_source = ""
-
-            # -----------------------------
-            # 過濾空字串（來源本來就是 ""）
-            # -----------------------------
-            if isinstance(english_source, str) and english_source.strip() == "":
-                # 空字串不是待翻譯內容，直接跳過
-                continue
-
-            if is_pure_english(english_source):
-                pending[key] = english_source
-                continue
-
-            # 5. fallback 保護
-            if english_source is None:
-                english_source = ""
-            final_tw.setdefault(key, english_source)
+        final_tw, pending = merge_lang_dicts(
+            cn_data=cn_data,
+            tw_src_data=tw_src_data,
+            en_data=en_data,
+            existing_tw=final_tw,
+            rules=rules,
+            apply_replace_rules=apply_replace_rules,
+            recursive_translate_dict=recursive_translate_dict,
+            contains_cjk=_contains_cjk,
+            is_pure_english=_is_pure_english,
+            is_from_output_dir=target_has_tw,
+        )
 
         # =============================
         # Step 5 — 寫入 pending.json
