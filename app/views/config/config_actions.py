@@ -61,6 +61,10 @@ def load_config_into_view(view, config: dict):
     _v = lang_merger_cfg.get('zh_en_letter_threshold')
     view.controls_map['lang_merger.zh_en_letter_threshold'].value = \
         str(_v if _v is not None else get_default('lang_merger.zh_en_letter_threshold'))
+    # 2026-08-02 (PR-XX merge-asset-integration):階段 2 開關載入
+    if 'lang_merger.enable_extracted_to_assets_merge' in view.controls_map:
+        view.controls_map['lang_merger.enable_extracted_to_assets_merge'].value = \
+            lang_merger_cfg.get('enable_extracted_to_assets_merge', True)
 
     view.controls_map['lm_translator.lm_translate_folder_name'].value = str(lm_cfg.get('lm_translate_folder_name'))
     view.controls_map['lm_translator.patchouli_system_prompt'].value = str(lm_cfg.get('patchouli_system_prompt'))
@@ -161,6 +165,11 @@ def save_config_from_view(view, *, load_config_json_fn, save_config_json_fn, val
         new_config['lang_merger']['patchouli_skip_en_us_when_zh_cn_exists'] = view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value
         new_config['lang_merger']['patchouli_effective_translation_threshold'] = float(view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value)
         new_config['lang_merger']['zh_en_letter_threshold'] = int(view.controls_map['lang_merger.zh_en_letter_threshold'].value)
+        # 2026-08-02 (PR-XX merge-asset-integration):階段 2 開關儲存
+        if 'lang_merger.enable_extracted_to_assets_merge' in view.controls_map:
+            new_config['lang_merger']['enable_extracted_to_assets_merge'] = bool(
+                view.controls_map['lang_merger.enable_extracted_to_assets_merge'].value
+            )
         new_config['lm_translator']['patchouli_system_prompt'] = view.controls_map['lm_translator.patchouli_system_prompt'].value
         new_config['lm_translator']['lang_system_prompt'] = view.controls_map['lm_translator.lang_system_prompt'].value
         new_config['lm_translator']['initial_batch_size_patchouli'] = int(view.controls_map['lm_translator.initial_batch_size_patchouli'].value)

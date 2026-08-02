@@ -13,6 +13,8 @@ from pathlib import Path
 from app.services_impl.logging_service import UI_LOG_HANDLER
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
 from translation_tool.core.lang_merger import merge_zhcn_to_zhtw_from_zip, merge_zhcn_to_zhtw_from_folder
+from translation_tool.core.lang_merge_extracted_assets import merge_extracted_to_assets
+from translation_tool.utils.config_manager import load_config
 
 import os
 
@@ -239,6 +241,39 @@ def run_merge_folder_batch_service(
 
             session.add_log(f"[資料夾] 完成：{os.path.basename(input_dir)}")
             stats["success_folders"] += 1
+
+            # 階段 2 (2026-08-02 PR-XX merge-asset-integration):
+            # 從 input_dir 內 XX_extracted/ 的 lang 檔 key-by-key 合併進
+            # output_dir/lang_output/assets/{modid}/lang/{xx_yy}.json
+            # config flag "enable_extracted_to_assets_merge" 控制是否跑。
+            try:
+                cfg = load_config()
+                enable_extracted_merge = cfg.get(
+                    "lang_merger", {}
+                ).get("enable_extracted_to_assets_merge", True)
+                if enable_extracted_merge:
+                    session.add_log("[階段2] 合併 XX_extracted → assets/")
+                    lang_output_dir = os.path.join(output_dir, "lang_output")
+                    for update in merge_extracted_to_assets(
+                        lang_output_dir=lang_output_dir,
+                        session=session,
+                    ):
+                        if "log" in update and update["log"]:
+                            session.add_log(update["log"])
+                        if (
+                            "progress" in update
+                            and update["progress"] is not None
+                        ):
+                            session.set_progress(update["progress"])
+                        if update.get("error"):
+                            session.add_log(
+                                "[階段2] 錯誤,assets 合併中止"
+                            )
+                            return
+                    session.add_log("[階段2] 完成")
+            except Exception as stage2_err:
+                logger.warning(f"[階段2] 錯誤(不中断階段1): {stage2_err}")
+                session.add_log(f"[階段2] 錯誤: {stage2_err}")
 
         except Exception as e:
             tb = traceback.format_exc()

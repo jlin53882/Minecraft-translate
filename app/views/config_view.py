@@ -153,6 +153,12 @@ class ConfigView(ft.Column):
             label="zh 英文含量閾值", hint_text="超過此數值判定為英文，空白用預設值 2", dense=True,
             keyboard_type=ft.KeyboardType.NUMBER
         )
+        # 2026-08-02 (PR-XX merge-asset-integration):階段 2 開關
+        # - 把 {XX_extracted}/{modid}/lang/* 併入 assets/{modid}/lang/*
+        # - merge_view 也有對應的 switch
+        self.controls_map["lang_merger.enable_extracted_to_assets_merge"] = ft.Checkbox(
+            label="合併 XX_extracted → assets/(merge 階段2)", value=True
+        )
 
         self.controls_map["lm_translator.temperature"] = ft.TextField(
             label="模型溫度 (Temperature)", hint_text="用於：LM翻譯請求", dense=True
@@ -648,6 +654,33 @@ class ConfigView(ft.Column):
                                 ft.Text("en_us 跳過門檻", weight=ft.FontWeight.W_500, size=13),
                                 self.controls_map["lang_merger.patchouli_effective_translation_threshold"],
                                 ft.Text("有效翻譯比例閾值 0.0~1.0，空白用預設值 0.5", size=11, color=theme.GREY_600),
+                            ],
+                            expand=1,
+                        ),
+                    ],
+                    spacing=8,
+                ),
+                ft.Container(height=8),
+                ft.Text(
+                    "資產整合(階段 2)", weight=ft.FontWeight.W_600, size=14
+                ),
+                ft.Row(
+                    [
+                        ft.Column(
+                            [
+                                ft.Text(
+                                    "合併 XX_extracted → assets/",
+                                    weight=ft.FontWeight.W_500,
+                                    size=13,
+                                ),
+                                self.controls_map[
+                                    "lang_merger.enable_extracted_to_assets_merge"
+                                ],
+                                ft.Text(
+                                    "merge 後跑階段 2,把 {XX_extracted}/{modid}/lang/* 補入 assets/{modid}/lang/*",
+                                    size=11,
+                                    color=theme.GREY_600,
+                                ),
                             ],
                             expand=1,
                         ),

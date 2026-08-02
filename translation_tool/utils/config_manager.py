@@ -249,6 +249,11 @@ DEFAULT_CONFIG = {
         "patchouli_skip_en_us_when_zh_cn_exists": False,
         "patchouli_effective_translation_threshold": 0.5,
         "zh_en_letter_threshold": 2,
+        # 2026-08-02 (PR-XX merge-asset-整):把 lang_output/{XX_extracted,...}/ 內 lang 檔
+        # key-by-key 合併進 lang_output/assets/{modid}/lang/{xx_yy}.json,
+        # 這樣 minecraft 才能抓到從 JAR 內建抽出的 mod lang
+        # (預設 True,符合 user 期望流程)
+        "enable_extracted_to_assets_merge": True,
     },
     "extractor": {
         "output_folder_names": {

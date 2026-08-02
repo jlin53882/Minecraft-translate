@@ -20,6 +20,7 @@ from app.services_impl.pipelines.merge_service import run_merge_zip_batch_servic
 from app.task_session import TaskSession
 from app.ui import theme
 from app.ui.snack import show_snack
+from translation_tool.utils.config_manager import load_config
 from app.ui.components import primary_button, styled_card
 
 
@@ -39,6 +40,7 @@ class MergeView(ft.Column):
     patchouli_skip_zh_cn_switch: ft.Switch
     patchouli_threshold_field: ft.TextField
     zh_en_letter_threshold_field: ft.TextField
+    extracted_merge_switch: ft.Switch
     output_dir_field: ft.TextField
     _zh_cn_disabled_note: ft.Text | None
     zip_list_view: ft.ListView
@@ -429,6 +431,60 @@ class MergeView(ft.Column):
         self.patchouli_skip_zh_cn_switch.value = lang_merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False)
         self.patchouli_threshold_field.value = str(lang_merger_cfg.get("patchouli_effective_translation_threshold", 0.5))
         self.zh_en_letter_threshold_field.value = str(lang_merger_cfg.get("zh_en_letter_threshold", 2))
+        self.extracted_merge_switch = ft.Switch(
+            label="合併 XX_extracted → assets/(階段 2)",
+            value=True,
+            on_change=lambda e: self._on_merge_field_changed(
+                "enable_extracted_to_assets_merge", e.control.value
+            ),
+        )
+
+        extracted_section = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text(
+                        "資產整合(階段 2)", weight=ft.FontWeight.W_600, size=15
+                    ),
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Row(
+                                    [
+                                        ft.Text(
+                                            "合併 XX_extracted → assets/",
+                                            weight=ft.FontWeight.W_500,
+                                            size=14,
+                                            expand=True,
+                                        ),
+                                        self.extracted_merge_switch,
+                                    ],
+                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                                ft.Text(
+                                    "把 {XX_extracted}/{modid}/lang/*.json 的 key 補到 assets/{modid}/lang/*.json,"
+                                    " 關閉不動(內部未變)。",
+                                    size=12,
+                                    color=theme.GREY_600,
+                                ),
+                            ],
+                            spacing=4,
+                        ),
+                        padding=10,
+                        bgcolor=theme.WHITE,
+                        border_radius=8,
+                    ),
+                ],
+                spacing=10,
+            ),
+            padding=12,
+            bgcolor=theme.GREY_50,
+            border_radius=10,
+        )
+
+        self.extracted_merge_switch.value = lang_merger_cfg.get(
+            "enable_extracted_to_assets_merge", True
+        )
         self._info_container = ft.Container(
             content=ft.Column(
                 [
@@ -497,6 +553,7 @@ class MergeView(ft.Column):
                         general_options_section,
                         zh_cn_section,
                         patchouli_section,
+                        extracted_section,
                     ],
                     spacing=12,
                 ),
