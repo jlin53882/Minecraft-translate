@@ -176,6 +176,31 @@ class TestScanExtractedLangFiles:
         assert result["codechickenlib"]["en_us"]
         assert result["adorn"]["en_us"]
 
+    def test_scan_all_three_lang_codes_zipped(self, tmp_path: Path):
+        """XX_extracted 同時含 zh_cn / zh_tw / en_us 時全部處理。
+
+        2026-08-02 user 確認:Stage 2 對所有 3 種 lang file 都處理,
+        不單獨挑 en_us 跳過 zh_cn/zh_tw。
+        """
+        # XX_extracted/{modid}/lang/{zh_cn,zh_tw,en_us}.json 都寫
+        modid = "ae2ct"
+        lang_dir = tmp_path / "ae2ct_extracted" / modid / "lang"
+        lang_dir.mkdir(parents=True)
+        (lang_dir / "zh_cn.json").write_text('{"k_zh": "原文_zh"}', encoding="utf-8")
+        (lang_dir / "zh_tw.json").write_text('{"k_tw": "翻譯_tw"}', encoding="utf-8")
+        (lang_dir / "en_us.json").write_text('{"k_en": "原文_en"}', encoding="utf-8")
+
+        result = _scan_extracted_lang_files(tmp_path)
+        assert modid in result
+        # 3 個 lang code 都要被掃到
+        assert "zh_cn" in result[modid]
+        assert "zh_tw" in result[modid]
+        assert "en_us" in result[modid]
+        # 位置正確 (在 language dir 內)
+        assert result[modid]["zh_cn"][0].name == "zh_cn.json"
+        assert result[modid]["zh_tw"][0].name == "zh_tw.json"
+        assert result[modid]["en_us"][0].name == "en_us.json"
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # 5. is_pure 行為 - 使用者確認規則
