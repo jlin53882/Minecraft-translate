@@ -373,47 +373,48 @@ def merge_extracted_to_assets(
             target_path = assets_dir / modid / "lang" / "zh_tw.json"
             mod_added_count = 0
             try:
-                _write_json_atomic(target_path, final_tw)
-                total_files_written += 1
-                mod_added_count = len(final_tw) - len(existing_tw)
-                if mod_added_count > 0:
-                    total_added += mod_added_count
-                if session is not None:
-                    try:
-                        session.add_log(
-                            f"  ✓ {modid}/zh_tw.json: {len(final_tw)} keys"
-                            + (f" (+{mod_added_count} 新)" if mod_added_count > 0 else "")
-                        )
-                    except Exception:
-                        pass
+                # 只寫有內容的 zh_tw.json (沒資料的 mod 不寫空檔案)
+                if final_tw:
+                    _write_json_atomic(target_path, final_tw)
+                    total_files_written += 1
+                    mod_added_count = len(final_tw) - len(existing_tw)
+                    if mod_added_count > 0:
+                        total_added += mod_added_count
+                    if session is not None:
+                        try:
+                            session.add_log(
+                                f"  ✓ {modid}/zh_tw.json: {len(final_tw)} keys"
+                                + (f" (+{mod_added_count} 新)" if mod_added_count > 0 else "")
+                            )
+                        except Exception:
+                            pass
+                else:
+                    # 沒 zh_tw 內容,不寫空檔案(避免污染 assets/)
+                    if session is not None:
+                        try:
+                            session.add_log(
+                                f"  - {modid}: 沒 zh_tw 內容,跳過寫 assets/"
+                            )
+                        except Exception:
+                            pass
             except Exception as exc:
                 log_warning(
                     f"[MergeExt→Assets] 寫入失敗 {target_path}: {exc}"
                 )
                 total_warnings += 1
 
-            # 寫 assets/{modid}/lang/en_us.json (pending - 待 user LM 翻譯)
-            if pending:
-                en_us_path = assets_dir / modid / "lang" / "en_us.json"
+            # 2026-08-02 修正: pending 不寫到 assets/{modid}/lang/en_us.json
+            # 來源已在 待翻譯/{XX_extracted}/{modid}/lang/en_us.json,
+            # Stage 2 不重複寫到 assets/(會污染 minecraft 認得的位置)。
+            # LM 翻譯完成後,user 再跑一次 merge,Stage 1 會讀 zh_tw.json
+            # 並寫到 assets/{modid}/lang/zh_tw.json。
+            if pending and session is not None:
                 try:
-                    # pending 排好順序
-                    pending_sorted = dict(
-                        sorted(pending.items(), key=lambda item: item[0])
+                    session.add_log(
+                        f"  → {modid}: {len(pending)} pending 在 待翻譯/,等 LM 翻"
                     )
-                    _write_json_atomic(en_us_path, pending_sorted)
-                    total_files_written += 1
-                    if session is not None:
-                        try:
-                            session.add_log(
-                                f"  ✓ {modid}/en_us.json: {len(pending_sorted)} pending 給 LM 翻"
-                            )
-                        except Exception:
-                            pass
-                except Exception as exc:
-                    log_warning(
-                        f"[MergeExt→Assets] 寫入 en_us 失敗 {en_us_path}: {exc}"
-                    )
-                    total_warnings += 1
+                except Exception:
+                    pass
 
             if session is not None and mod_added_count > 0:
                 try:

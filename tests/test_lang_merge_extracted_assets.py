@@ -340,10 +340,14 @@ class TestMergeExtractedToAssets:
         assert result["k_old"] == "舊翻譯_zh"  # assets wins
         assert result["k_new"] == "新key_zh"  # 新 key 補充
 
-    def test_en_us_only_mod_writes_en_us_to_assets(self, tmp_path: Path):
-        """en_us-only mod:全部 key 純英文 → assets/zh_tw.json(空 key)+ assets/en_us.json(原文)。
+    def test_en_us_only_mod_skips_empty_zh_tw_and_does_not_write_en_us(self, tmp_path: Path):
+        """en_us-only mod:不寫空 zh_tw.json,也不寫 assets/en_us.json。
 
-        因為 zh_cn 跟 zh_tw 都沒有,merge_lang_dicts 算全部純英文,進 pending。
+        2026-08-02 修正:
+        - 沒 zh_cn 來源 → final_tw 是空 dict → 不寫空檔案(避免污染 assets/)
+        - pending 來源已在 待翻譯/ → Stage 2 不重複寫到 assets/
+
+        期望:assets/{modid}/lang/ 內 沒有任何檔案被建立
         """
         lang_output_dir = self._setup_fixture(
             tmp_path,
@@ -358,20 +362,22 @@ class TestMergeExtractedToAssets:
         )
 
         list(merge_extracted_to_assets(lang_output_dir))
-        # zh_tw.json 應該被建 (merge 結果)
+
+        # zh_tw.json 不應該被建 (final_tw 是空 dict)
         zh_tw_path = (
             lang_output_dir / "assets" / "codechickenlib" / "lang" / "zh_tw.json"
         )
-        assert zh_tw_path.exists()
-        zh_tw_data = json.loads(zh_tw_path.read_text(encoding="utf-8"))
-        # pending 應被寫到 en_us.json
+        assert not zh_tw_path.exists(), (
+            f"en_us-only mod 不該寫空 zh_tw.json,但檔案存在: {zh_tw_path}"
+        )
+
+        # assets/en_us.json 也不該被建 (pending 在 待翻譯/)
         en_us_path = (
             lang_output_dir / "assets" / "codechickenlib" / "lang" / "en_us.json"
         )
-        assert en_us_path.exists()
-        en_us_data = json.loads(en_us_path.read_text(encoding="utf-8"))
-        # 所有 key 進 en_us (純英文)
-        assert "k_en" in en_us_data
+        assert not en_us_path.exists(), (
+            f"pending 不該寫到 assets/,但檔案存在: {en_us_path}"
+        )
 
     def test_no_extracted_no_error(self, tmp_path: Path):
         """沒 XX_extracted 不報錯,只是空跑"""
@@ -427,7 +433,8 @@ class TestMergeExtractedToAssets:
             existing_assets=None,
             extracted_data={
                 "ae2ct_extracted": {
-                    "ae2ct": {"zh_cn": {"k1": "v1"}},
+                    # 用中文 fixture 確保 final_tw 有內容(會跑 zh_cn → recursive_translate_dict)
+                    "ae2ct": {"zh_cn": {"k1": "車輛"}},
                 },
             },
         )
@@ -436,9 +443,9 @@ class TestMergeExtractedToAssets:
 
         # 驗證 session.add_log 被呼叫
         assert session.add_log.called
-        # 至少 1 個 add_log 訊息含 ✓
+        # 至少 1 個 add_log 訊息含 ✓ (有 zh_tw 內容才會有 ✓)
         msgs = [call.args[0] for call in session.add_log.call_args_list if call.args]
-        assert any("✓" in m for m in msgs)
+        assert any("✓" in m for m in msgs), f"沒有 ✓ log,實際: {msgs}"
 
     def test_files_cleanly_written(self, tmp_path: Path):
         """JSON 是 UTF-8 + indent=4 + ensure_ascii=False
