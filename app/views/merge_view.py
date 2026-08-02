@@ -754,8 +754,11 @@ class MergeView(ft.Column):
                             "failed_zip_details": failed_zip_details,
                         }
                     self._show_merge_summary(self._merge_stats)
+                    # 2026-08-02:DONE/ERROR 後停止 poller,避免無限 background update
+                    self._ui_stop.set()
                 elif status == "ERROR":
                     self._set_status("任務發生錯誤", theme.RED_200)
+                    self._ui_stop.set()
 
                 self.progress_bar.value = progress
 
@@ -895,12 +898,23 @@ class MergeView(ft.Column):
         subprocess.Popen(["explorer", self.output_dir_field.value], shell=True)
 
     def _close_dialog_overlay(self, dialog: ft.AlertDialog) -> None:
-        """關閉 overlay 對話框。"""
+        """關閉 overlay 對話框。
+
+        2026-08-02 修正:只是 `dialog.open = False` 不夠,
+        Flet 0.85 用 page.overlay 模式必須也從 overlay 移除,
+        否則下次 update 還是會重畫。
+
+        Args:
+            dialog: 要關閉的 AlertDialog 實例
+        """
         try:
             dialog.open = False
+            # 從 page.overlay 移除 - Flet 0.85 真的要 close 的關鍵
+            if hasattr(self.page, "overlay") and dialog in self.page.overlay:
+                self.page.overlay.remove(dialog)
             self.page.update()
-        except Exception:
-            pass
+        except Exception as e:
+            log_warning(f"[MergeView] _close_dialog_overlay 錯誤: {e!r}")
 
     @property
     def page(self):
