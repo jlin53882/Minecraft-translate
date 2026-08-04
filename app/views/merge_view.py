@@ -590,11 +590,13 @@ class MergeView(ft.Column):
             allow_multiple=True,
             allowed_extensions=["zip"],
         )
-        if not result or not result.files:
+        if not result:
             return
-        for f in result.files:
-            if f.path and f.path not in self.selected_zips:
-                self.selected_zips.append(f.path)
+        # 桌面版回傳 list[FilePickerFile] (每個有 .path)
+        for f in (result if isinstance(result, list) else [result]):
+            path = f.path if hasattr(f, 'path') else str(f)
+            if path and path not in self.selected_zips:
+                self.selected_zips.append(path)
         self._refresh_zip_list()
         self.page.update()
 
