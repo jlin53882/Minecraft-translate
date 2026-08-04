@@ -578,20 +578,25 @@ class TestWriteJsonAtomic:
         assert not tmp_file.exists(), f".tmp 應被清理,但存在: {tmp_file}"
 
     def test_tmp_file_cleaned_up_on_error(self, tmp_path: Path):
-        """寫入失敗時 .tmp 檔案也應被清理。"""
+        """寫入失敗時 .tmp 檔案也應被清理。monkeypatch os.replace 使其拋錯。"""
+        import os as _os
+        from unittest.mock import patch
         from translation_tool.core.lang_merge_extracted_assets import _write_json_atomic
 
-        # 建立一個唯讀目錄,讓 os.replace 失敗
-        target = tmp_path / "readonly" / "test.json"
+        target = tmp_path / "subdir" / "test.json"
         target.parent.mkdir(parents=True)
-        target.write_text("existing", encoding="utf-8")
-        # 把 parent 改為唯讀
-        target.parent.chmod(0o444)
 
-        try:
-            _write_json_atomic(target, {"key": "value"})
-        except Exception:
-            pass
+        _orig_replace = _os.replace
+
+        def _fail_replace(src, dst, **kwargs):
+            _orig_replace(src, dst)  # 讓檔案確實被寫入
+            raise OSError("模擬 os.replace 失敗")
+
+        with patch("os.replace", side_effect=_fail_replace):
+            try:
+                _write_json_atomic(target, {"key": "value"})
+            except Exception:
+                pass
 
         tmp_file = target.with_suffix(target.suffix + ".tmp")
         assert not tmp_file.exists(), f".tmp 應被清理,但存在: {tmp_file}"
