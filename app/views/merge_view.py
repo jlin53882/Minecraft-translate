@@ -762,14 +762,15 @@ class MergeView(ft.Column):
 
                 self.progress_bar.value = progress
 
-                # LogView 接管 append + truncate + scroll
-                # 內部會自己 page.update()
-                self.log_view.sync_from_session(self.session)
-
+                # 2026-08-04 修正: 先 re-enable 按鈕，再 call sync_from_session (內部 page.update())
+                # 否則按鈕 disabled=False 在 page.update() 之後才設，UI 永遠看不到
                 if status in ("DONE", "ERROR"):
                     self.start_button.disabled = False
                     self.zip_list_view.disabled = False
-                # 不在這裡 page.update() — sync_from_session 已做
+
+                # LogView 接管 append + truncate + scroll
+                # 內部會自己 page.update()
+                self.log_view.sync_from_session(self.session)
             except Exception as e:
                 log_warning(f"[MergeView] _sync_ui 錯誤: {e!r}")
 
