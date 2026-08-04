@@ -46,6 +46,7 @@ def _process_single_mod(
     output_dir: str,
     must_translate_dir: str,
     errordata_dir: str | None = None,
+    all_files_cache: list[str] | None = None,  # 2026-08-04: 預先算好的檔案列表
 ) -> Dict[str, Any]:
     """處理單一模組（mod）的語言合併流程。
 
@@ -134,7 +135,8 @@ def _process_single_mod(
         # 讀取 ZIP 時用原始路徑，只在輸出路徑建構時剝離
         # 已知標準資源目錄（這些目錄名稱本身就是有意義的結構，不剝離）
         _STANDARD_RESOURCE_DIRS = {"assets", "book", "patchouli_books", "resources"}
-        _all_names = reader.list_all()
+        # 2026-08-04 性能優化: 用 caller 預先算好的 all_files_cache
+        _all_names = all_files_cache if all_files_cache is not None else reader.list_all()
         _wp = None
         if _all_names:
             _tops = set(n.replace("\\", "/").split("/")[0] for n in _all_names if n.replace("\\", "/").split("/")[0])

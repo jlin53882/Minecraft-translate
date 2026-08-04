@@ -188,7 +188,7 @@ def merge_zhcn_to_zhtw_from_zip(zip_file: str, output_dir: str,
                 
                 # 提交每個 mod 的處理（這裡每個 mod 的 paths 會包含 zh_cn/zh_tw/en_us 任一或多個）
                 for mod_key, paths in mods_to_process.items():
-                    futures.append(executor.submit(_process_single_mod, ZipReader(zf), paths, rules, lang_output_dir, must_translate_dir, errordata_output_dir))
+                    futures.append(executor.submit(_process_single_mod, ZipReader(zf), paths, rules, lang_output_dir, must_translate_dir, errordata_output_dir, all_files_cache=all_files_cache))
 
                 # 提交其他檔案處理（例如圖片、md、json5、localized files 等）
                 for input_path in other_files:
@@ -393,6 +393,7 @@ def merge_zhcn_to_zhtw_from_folder(
                         lang_output_dir,
                         must_translate_dir,
                         errordata_output_dir,
+                        all_files_cache=all_files_cache,
                     )
                 )
 
