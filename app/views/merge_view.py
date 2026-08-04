@@ -149,12 +149,12 @@ class MergeView(ft.Column):
         )
 
         # ── Patchouli 進階設定 ─────────────────────────────────────────────
-        # patchouli_skip_en_us_when_zh_cn_exists: 當 en_us 對應的 zh_tw 或 zh_cn 有「有效翻譯」時，跳過 en_us
+        # patchouli_skip_en_us_when_zh_cn_exists: 優先 zh_tw，無則信任 zh_cn（達門檻時跳過 en_us）
         # - 有效翻譯由 patchouli_effective_translation_threshold（預設 0.5）判定：內容中日韓文字佔比超過此閾值
         # - 此開關只影響 Patchouli Book 的 en_us 資料夾，不影響 root-level lang 檔案
         # - 當 process_zh_cn_switch=False 時，此開關連動 Disabled（因 zh_cn 已被全域略過）
         self.patchouli_skip_zh_cn_switch = ft.Switch(
-            label="當 zh_cn 翻譯足夠好時，跳過對應 en_us",
+            label="優先使用已有繁中，無則信任簡中（跳過英文）",
             value=False,
             on_change=lambda e: self._on_merge_field_changed("patchouli_skip_en_us_when_zh_cn_exists", e.control.value),
         )
@@ -376,7 +376,7 @@ class MergeView(ft.Column):
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
                                 ft.Text(
-                                    "當 zh_cn 內容中日韓文字佔比達門檻時，跳過對應的英文原文",
+                                    "優先使用已有繁中 zh_tw。若無繁中，且簡中 zh_cn 內容達門檻，則簡轉繁並跳過英文",
                                     size=12,
                                     color=theme.GREY_600,
                                 ),
