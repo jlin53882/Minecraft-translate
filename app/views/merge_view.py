@@ -365,7 +365,7 @@ class MergeView(ft.Column):
                                 ft.Row(
                                     [
                                         ft.Text(
-                                            "當 zh_cn 翻譯足夠好時，跳過對應 en_us",
+                                            "翻譯來源優先級：繁中 > 簡中(達門檻) > 英文",
                                             weight=ft.FontWeight.W_500,
                                             size=14,
                                             expand=True,
