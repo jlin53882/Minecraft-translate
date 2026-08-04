@@ -354,3 +354,66 @@ class TestContainsCjkLruCache:
         assert _contains_cjk_str.cache_info().misses == 2
         _contains_cjk_str("hello")
         assert _contains_cjk_str.cache_info().hits == 1
+
+
+class TestAllFilesCacheInProcessSingleMod:
+    """2026-08-04 性能優化: _process_single_mod list_all() 改用 all_files_cache。"""
+
+    def test_all_files_cache_avoids_list_all(self, tmp_path):
+        """驗證傳入 all_files_cache 時，不呼叫 reader.list_all()。"""
+        from unittest.mock import MagicMock, patch
+        from translation_tool.core.lang_merge_pipeline import _process_single_mod
+
+        mock_reader = MagicMock()
+        mock_reader.list_all.return_value = ["modid/lang/zh_cn.json", "modid/lang/en_us.json"]
+        mock_reader.read_text.return_value = '{"key": "value"}'
+        mock_reader.read_json.return_value = {"key": "value"}
+
+        paths = {
+            "zh_cn": "modid/lang/zh_cn.json",
+            "en_us": "modid/lang/en_us.json",
+        }
+
+        # 傳入 all_files_cache
+        result = _process_single_mod(
+            mock_reader,
+            paths,
+            rules=[],
+            output_dir=str(tmp_path / "output"),
+            must_translate_dir=str(tmp_path / "pending"),
+            errordata_dir=str(tmp_path / "errors"),
+            all_files_cache=["modid/lang/zh_cn.json", "modid/lang/en_us.json"],
+        )
+
+        # reader.list_all() 不應被呼叫
+        mock_reader.list_all.assert_not_called()
+        assert isinstance(result, dict)
+
+    def test_no_all_files_cache_falls_back_to_list_all(self, tmp_path):
+        """驗證不傳 all_files_cache 時，仍呼叫 reader.list_all() (向後相容)。"""
+        from unittest.mock import MagicMock
+        from translation_tool.core.lang_merge_pipeline import _process_single_mod
+
+        mock_reader = MagicMock()
+        mock_reader.list_all.return_value = ["modid/lang/zh_cn.json", "modid/lang/en_us.json"]
+        mock_reader.read_text.return_value = '{"key": "value"}'
+        mock_reader.read_json.return_value = {"key": "value"}
+
+        paths = {
+            "zh_cn": "modid/lang/zh_cn.json",
+            "en_us": "modid/lang/en_us.json",
+        }
+
+        # 不傳 all_files_cache
+        result = _process_single_mod(
+            mock_reader,
+            paths,
+            rules=[],
+            output_dir=str(tmp_path / "output"),
+            must_translate_dir=str(tmp_path / "pending"),
+            errordata_dir=str(tmp_path / "errors"),
+        )
+
+        # reader.list_all() 應被呼叫
+        mock_reader.list_all.assert_called_once()
+        assert isinstance(result, dict)
