@@ -37,10 +37,9 @@ class TestMergePipelineE2E:
 
         session = MagicMock()
         session.progress = 1.0
-        # 讓 hasattr(session, "snapshot") 回 False (MagicMock 預設 True)
         del session.snapshot
-        # 讓 MagicMock 的 __lt__ 行為正常
-        session.progress = 1.0  # float, not MagicMock
+        # 補足 session 所需方法，避免 daemon thread 拋出 UnhandledThreadException
+        session.progress = 1.0
         results = list(
             run_merge_folder_batch_service(
                 input_dir=str(input_dir),
@@ -83,10 +82,9 @@ class TestMergePipelineE2E:
 
         session = MagicMock()
         session.progress = 1.0
-        # 讓 hasattr(session, "snapshot") 回 False (MagicMock 預設 True)
         del session.snapshot
-        # 讓 MagicMock 的 __lt__ 行為正常
-        session.progress = 1.0  # float, not MagicMock
+        # 補足 session 所需方法，避免 daemon thread 拋出 UnhandledThreadException
+        session.progress = 1.0
         results = list(
             run_merge_folder_batch_service(
                 input_dir=str(input_dir),
@@ -126,10 +124,9 @@ class TestMergePipelineE2E:
 
         session = MagicMock()
         session.progress = 1.0
-        # 讓 hasattr(session, "snapshot") 回 False (MagicMock 預設 True)
         del session.snapshot
-        # 讓 MagicMock 的 __lt__ 行為正常
-        session.progress = 1.0  # float, not MagicMock
+        # 補足 session 所需方法，避免 daemon thread 拋出 UnhandledThreadException
+        session.progress = 1.0
         results = list(
             run_merge_folder_batch_service(
                 input_dir=str(input_dir),
