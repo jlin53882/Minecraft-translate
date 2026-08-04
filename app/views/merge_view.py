@@ -670,6 +670,7 @@ class MergeView(ft.Column):
         # 必須走公開的 .clear() 才能清空現有 log 行,
         # 否則會 AttributeError: 'LogView' object has no attribute 'controls'。
         self.log_view.clear()
+        self.progress_bar.value = 0.0
         self._set_status("執行中", theme.BLUE_200)
 
         self.session.start()
@@ -922,9 +923,9 @@ class MergeView(ft.Column):
         """
         try:
             self.page.pop_dialog()
-            # 2026-08-04: 手動關閉時立即 reset UI (_set_status 自帶 page.update)
-            self._set_status("尚未開始", theme.GREY_400)
+            # 2026-08-04: 先改 progress_bar 再 call _set_status (內部 page.update)
             self.progress_bar.value = 0.0
+            self._set_status("尚未開始", theme.GREY_400)
         except Exception as e:
             log_warning(f"[MergeView] pop_dialog 錯誤: {e!r}")
 
