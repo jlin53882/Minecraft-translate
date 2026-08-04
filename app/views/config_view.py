@@ -143,7 +143,7 @@ class ConfigView(ft.Column):
             label="語言合併器格式問題隔離資料夾名稱", hint_text="用於：格式錯誤隔離", dense=True
         )
         self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"] = ft.Checkbox(
-            label="優先使用已有繁中 zh_tw。若無繁中，且簡中 zh_cn 內容達門檻（旁邊設定），則直接簡轉繁並跳過英文；若關閉或未達門檻，則從英文 en_us 翻譯。", value=False
+            label="優先使用已有繁中，無則信任簡中（跳過英文）", value=False
         )
         self.controls_map["lang_merger.patchouli_effective_translation_threshold"] = ft.TextField(
             label="en_us 跳過門檻", hint_text="有效翻譯比例閾值 0.0~1.0，空白用預設值 0.5", dense=True,
@@ -643,7 +643,7 @@ class ConfigView(ft.Column):
                     [
                         ft.Column(
                             [
-                                ft.Text("優先使用已有繁中 zh_tw。若無繁中，且簡中 zh_cn 內容達門檻（旁邊設定），則直接簡轉繁並跳過英文；若關閉或未達門檻，則從英文 en_us 翻譯。", weight=ft.FontWeight.W_500, size=13),
+                                ft.Text("翻譯來源優先級：繁中 > 簡中(達門檻) > 英文", weight=ft.FontWeight.W_500, size=13),
                                 self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"],
                                 ft.Text("內容中日韓文字佔比達此值時視為有效翻譯", size=11, color=theme.GREY_600),
                             ],
