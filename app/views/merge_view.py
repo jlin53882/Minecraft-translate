@@ -727,8 +727,6 @@ class MergeView(ft.Column):
                     self._set_status("執行中", theme.BLUE_200)
                 elif status == "DONE":
                     self._set_status("任務完成", theme.GREEN_200)
-                    # 2026-08-04: 延遲 reset UI 狀態為「尚未開始」(等 dialog 顯示後再清)
-                    self.page.run_task(self._reset_status_after_done())
                     snap_summary = snap.get("summary")
                     if snap_summary:
                         self._merge_stats = snap_summary
@@ -761,7 +759,6 @@ class MergeView(ft.Column):
                     self._ui_stop.set()
                 elif status == "ERROR":
                     self._set_status("任務發生錯誤", theme.RED_200)
-                    self.page.run_task(self._reset_status_after_done())
                     self._ui_stop.set()
 
                 self.progress_bar.value = progress
@@ -930,19 +927,6 @@ class MergeView(ft.Column):
             self.progress_bar.value = 0.0
         except Exception as e:
             log_warning(f"[MergeView] pop_dialog 錯誤: {e!r}")
-
-    async def _reset_status_after_done(self) -> None:
-        """2026-08-04: 延遲 reset UI 狀態，避免 dialog 關閉後仍顯示「任務完成」。
-        
-        _set_status 內部已含 page.update()，此處只需設定值。
-        """
-        import asyncio
-        await asyncio.sleep(1.0)  # 等 dialog 顯示完
-        try:
-            self._set_status("尚未開始", theme.GREY_400)
-            self.progress_bar.value = 0.0
-        except Exception:
-            pass
 
     @property
     def page(self):
