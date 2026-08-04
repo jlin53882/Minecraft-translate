@@ -244,6 +244,10 @@ def run_merge_folder_batch_service(
                     session.add_log(
                         "[階段 2/2 開始] XX_extracted → assets 合併"
                     )
+                else:
+                    session.add_log(
+                        "[階段 2/2 略過] 檔案合併(階段 2) 未啟用，跳過"
+                    )
                     lang_output_dir = os.path.join(output_dir, "lang_output")
                     for update in merge_extracted_to_assets(
                         lang_output_dir=lang_output_dir,

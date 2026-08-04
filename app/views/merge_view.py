@@ -376,7 +376,7 @@ class MergeView(ft.Column):
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
                                 ft.Text(
-                                    "優先使用已有繁中 zh_tw。若無繁中，且簡中 zh_cn 內容達門檻，則簡轉繁並跳過英文",
+                                    "內容中日韓文字佔比達門檻時，視為有效翻譯並跳過英文",
                                     size=12,
                                     color=theme.GREY_600,
                                 ),

@@ -645,7 +645,7 @@ class ConfigView(ft.Column):
                             [
                                 ft.Text("優先使用已有繁中 zh_tw。若無繁中，且簡中 zh_cn 內容達門檻（旁邊設定），則直接簡轉繁並跳過英文；若關閉或未達門檻，則從英文 en_us 翻譯。", weight=ft.FontWeight.W_500, size=13),
                                 self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"],
-                                ft.Text("優先使用已有繁中 zh_tw。若無繁中，且簡中 zh_cn 內容達門檻（旁邊設定），則直接簡轉繁並跳過英文；若關閉或未達門檻，則從英文 en_us 翻譯。", size=11, color=theme.GREY_600),
+                                ft.Text("內容中日韓文字佔比達此值時視為有效翻譯", size=11, color=theme.GREY_600),
                             ],
                             expand=1,
                         ),
