@@ -240,3 +240,30 @@ def test_merge_view_patchouli_threshold_field_exists(monkeypatch):
     monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
     assert view.patchouli_threshold_field is not None
+
+
+def test_show_merge_summary_handles_large_failed_list(monkeypatch):
+    """2026-08-05: _show_merge_summary 在 472 個失敗 ZIP 時不應 crash。"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    view = merge_view.MergeView(mock_page(), mock_filepicker())
+
+    # 模擬 472 個失敗
+    large_failed = []
+    for i in range(472):
+        large_failed.append({"Name": f"mod_{i}.zip", "error": f"Error {i}"})
+
+    summary = {
+        "success_zips": 5,
+        "failed_zips": 472,
+        "failed_zips_list": large_failed,
+        "output_counts": {"lang_output": 100},
+    }
+
+    # 不應拋異常
+    error = None
+    try:
+        view._show_merge_summary(summary)
+    except Exception as e:
+        error = e
+    assert error is None, f"_show_merge_summary crashed with 472 failures: {error}"

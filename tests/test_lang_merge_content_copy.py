@@ -580,3 +580,94 @@ class TestPatchouliEffectivenessAllNames:
         # reader.list_all() 應被呼叫 (zh_tw 和 zh_cn 各一次)
         assert mock_reader.list_all.call_count == 2
         assert "zh_tw" in result
+
+
+class TestBytesHandling:
+    """2026-08-05: reader.read_bytes() 回傳 bytes 時，process_content_or_copy_file_impl 必須 decode。"""
+
+    def test_read_bytes_is_decoded_before_str_replace(self, tmp_path):
+        """模擬 reader.read_bytes() 回傳 bytes，確認不拋 TypeError。"""
+        from unittest.mock import MagicMock
+        from translation_tool.core.lang_merge_content_copy import (
+            process_content_or_copy_file_impl,
+        )
+
+        mock_reader = MagicMock()
+        mock_reader.list_all.return_value = ["LICENSE_Test"]
+        # read_bytes 回傳 bytes（模擬 LICENSE 檔案）
+        mock_reader.read_bytes.return_value = b"License text\nwith newlines\n"
+
+        def mock_load_config():
+            return {
+                "lang_merger": {"pending_folder_name": "待翻譯"},
+                "lm_translator": {"patchouli": {"dir_names": ["patchouli_books"]}},
+            }
+
+        output_dir = str(tmp_path / "output")
+        result = process_content_or_copy_file_impl(
+            mock_reader,
+            input_path="LICENSE_Test",
+            rules=[],
+            output_dir=output_dir,
+            only_process_lang=False,
+            all_files_cache=["LICENSE_Test"],
+            load_config_fn=mock_load_config,
+            recursive_translate_dict_fn=lambda x, rules: x,
+            get_text_processor_fn=lambda ext: None,
+            write_bytes_atomic_fn=lambda path, data: None,
+            write_text_atomic_fn=lambda path, data: None,
+            quarantine_copy_fn=lambda **kwargs: None,
+            normalize_patchouli_book_root_fn=lambda x: x,
+            patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
+            json_module=MagicMock(),
+        )
+
+        # 不應拋 TypeError
+        assert result.get("success") is True
+
+    def test_read_bytes_with_processor_handles_bytes(self, tmp_path):
+        """模擬 processor 路徑：read_bytes 回傳 bytes → decode 後傳給 processor。"""
+        from unittest.mock import MagicMock
+        from translation_tool.core.lang_merge_content_copy import (
+            process_content_or_copy_file_impl,
+        )
+
+        processed_content = []
+
+        def mock_processor(raw, translate_fn, rules, path):
+            processed_content.append(raw)
+            return f"processed: {raw}"
+
+        mock_reader = MagicMock()
+        mock_reader.list_all.return_value = ["assets/test/data.txt"]
+        mock_reader.read_bytes.return_value = "中文\r\n內容\r\n".encode("utf-8")
+
+        def mock_load_config():
+            return {
+                "lang_merger": {"pending_folder_name": "待翻譯"},
+                "lm_translator": {"patchouli": {"dir_names": ["patchouli_books"]}},
+            }
+
+        output_dir = str(tmp_path / "output")
+        result = process_content_or_copy_file_impl(
+            mock_reader,
+            input_path="assets/test/data.txt",
+            rules=[],
+            output_dir=output_dir,
+            only_process_lang=False,
+            all_files_cache=["assets/test/data.txt"],
+            load_config_fn=mock_load_config,
+            recursive_translate_dict_fn=lambda x, rules: x,
+            get_text_processor_fn=lambda ext: mock_processor,
+            write_bytes_atomic_fn=lambda path, data: None,
+            write_text_atomic_fn=lambda path, data: None,
+            quarantine_copy_fn=lambda **kwargs: None,
+            normalize_patchouli_book_root_fn=lambda x: x,
+            patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
+            json_module=MagicMock(),
+        )
+
+        assert result.get("success") is True
+        # processor 應該收到 decode 後的 str
+        assert len(processed_content) > 0
+        assert isinstance(processed_content[0], str), f"Expected str, got {type(processed_content[0])}"
