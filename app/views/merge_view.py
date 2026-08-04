@@ -830,11 +830,12 @@ class MergeView(ft.Column):
             else []
         )
 
-        # 失敗 ZIP block
+        # 失敗 ZIP block (2026-08-05: 用獨立 scroll area，避免 472 個失敗超出畫面)
         failed_block = []
         if failed_list:
+            failed_rows = []
             for item in failed_list:
-                failed_block.append(
+                failed_rows.append(
                     ft.Text(
                         f"├─ {item.get('Name', '?')}",
                         size=13,
@@ -842,14 +843,23 @@ class MergeView(ft.Column):
                     )
                 )
                 err = item.get("error", "未知錯誤")
-                # 截斷過長錯誤訊息
                 if len(err) > 80:
                     err = err[:80] + "..."
-                failed_block.append(ft.Text(f"│  └─ {err}", size=12, color="#cccccc"))
+                failed_rows.append(ft.Text(f"│  └─ {err}", size=12, color="#cccccc"))
             failed_block = [
                 ft.Divider(),
                 ft.Text("📋 處理失敗的 ZIP", size=14, weight=ft.FontWeight.BOLD),
-            ] + failed_block
+                ft.Container(
+                    content=ft.ListView(
+                        controls=failed_rows,
+                        height=200,  # 固定高度，獨立捲軸
+                        spacing=2,
+                    ),
+                    border=ft.border.all(1, "#333333"),
+                    border_radius=4,
+                    padding=5,
+                ),
+            ]
 
         content = ft.Column(
             [
