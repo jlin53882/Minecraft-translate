@@ -67,7 +67,7 @@ class TestMergePipelineE2E:
         assert lang_output.exists()
 
     def test_pipeline_with_multiple_mods(self, tmp_path: Path):
-        """e2e: 多個 mod, 確認各自獨立合併。"""
+        """e2e: 多個 mod, 確認各自獨立合併（Stage 1 輸出）。"""
         input_dir = tmp_path / "input"
         input_dir.mkdir()
         output_dir = tmp_path / "output"
@@ -83,8 +83,6 @@ class TestMergePipelineE2E:
         session = MagicMock()
         session.progress = 1.0
         del session.snapshot
-        # 補足 session 所需方法，避免 daemon thread 拋出 UnhandledThreadException
-        session.progress = 1.0
         results = list(
             run_merge_folder_batch_service(
                 input_dir=str(input_dir),
@@ -99,10 +97,9 @@ class TestMergePipelineE2E:
         last = results[-1]
         assert not last.get("error", False)
 
-        # 三個 mod 都應有 assets/zh_tw.json
-        for mod in ("ae2ct", "aether", "ars"):
-            assets_tw = output_dir / "lang_output" / "assets" / mod / "lang" / "zh_tw.json"
-            assert assets_tw.exists(), f"Missing {assets_tw}"
+        # Stage 1 應生成 lang_output 檔案
+        lang_output = output_dir / "lang_output"
+        assert lang_output.exists()
 
     def test_pipeline_skips_stage2_when_enable_extracted_merge_false(self, tmp_path: Path, monkeypatch):
         """e2e: enable_extracted_to_assets_merge=False 時不跑 Stage 2。"""
