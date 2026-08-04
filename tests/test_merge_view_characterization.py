@@ -212,22 +212,13 @@ def test_merge_view_async_pick_zips(monkeypatch):
     assert view.output_dir_field.value == '/zips'
 
 
-def test_merge_view_on_zip_picked(monkeypatch):
+def test_merge_view_pick_zips_is_async(monkeypatch):
+    """2026-08-04: pick_zips 改為 async/await (桌面版 FilePicker)。"""
+    import asyncio
     monkeypatch.setattr(merge_view, 'TaskSession', _Session)
     monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
-    view.selected_zips = []
-
-    class E:
-        class F:
-            path = '/path/a.zip'
-        class F2:
-            path = '/path/b.zip'
-        files = [F(), F2()]
-
-    view._on_zip_picked(E())
-
-    assert len(view.selected_zips) >= 0
+    assert asyncio.iscoroutinefunction(view.pick_zips)
 
 
 def test_merge_view_skip_zh_cn_switch_exists(monkeypatch):

@@ -583,20 +583,16 @@ class MergeView(ft.Column):
             ),
         ]
 
-    def pick_zips(self, e: ft.ControlEvent) -> None:
-        """開啟 ZIP 檔案選擇對話框。"""
-        self.file_picker.on_upload = self._on_zip_picked
-        self.file_picker.pick_files(
+    async def pick_zips(self, e: ft.ControlEvent) -> None:
+        """開啟 ZIP 檔案選擇對話框。2026-08-04: 改用 await (桌面版)。"""
+        result = await self.file_picker.pick_files(
             dialog_title="選擇 ZIP 檔案",
             allow_multiple=True,
             allowed_extensions=["zip"],
         )
-
-    def _on_zip_picked(self, e: ft.FilePickerUploadEvent) -> None:
-        """處理 ZIP 檔案選擇結果。"""
-        if not e.files:
+        if not result or not result.files:
             return
-        for f in e.files:
+        for f in result.files:
             if f.path and f.path not in self.selected_zips:
                 self.selected_zips.append(f.path)
         self._refresh_zip_list()
