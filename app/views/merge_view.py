@@ -442,7 +442,7 @@ class MergeView(ft.Column):
             content=ft.Column(
                 [
                     ft.Text(
-                        "資產整合(階段 2)", weight=ft.FontWeight.W_600, size=15
+                        "檔案合併(階段 2)", weight=ft.FontWeight.W_600, size=15
                     ),
                     ft.Container(
                         content=ft.Column(

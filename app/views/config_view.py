@@ -662,7 +662,7 @@ class ConfigView(ft.Column):
                 ),
                 ft.Container(height=8),
                 ft.Text(
-                    "資產整合(階段 2)", weight=ft.FontWeight.W_600, size=14
+                    "檔案合併(階段 2)", weight=ft.FontWeight.W_600, size=14
                 ),
                 ft.Row(
                     [

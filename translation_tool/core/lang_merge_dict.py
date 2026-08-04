@@ -8,7 +8,7 @@
 - 純函式:不直接呼叫 helper 模組,改用 dependency injection
   (apply_replace_rules, recursive_translate_dict, contains_cjk, is_pure_english
    從 caller 傳入,讓 unit test 可以傳 mock)
-- 行為 1:1 跟 _process_single_mod 一致 — Stage 1 整合進 helper 後
+- 行為 1:1 跟 _process_single_mod 一致 — Stage 1 合併進 helper 後
   行為應該一模一樣(既有 1863+ 個 test 都通過)
 - 為什麼拆:原本 Stage 2 自己寫 key-by-key merge 邏輯,
   user 講「要像 Stage 1 處理」,所以 helper 抽出共用。

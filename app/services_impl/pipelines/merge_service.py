@@ -242,7 +242,7 @@ def run_merge_folder_batch_service(
                 ).get("enable_extracted_to_assets_merge", True)
                 if enable_extracted_merge:
                     session.add_log(
-                        "[階段 2/2 開始] XX_extracted → assets 整合"
+                        "[階段 2/2 開始] XX_extracted → assets 合併"
                     )
                     lang_output_dir = os.path.join(output_dir, "lang_output")
                     for update in merge_extracted_to_assets(
