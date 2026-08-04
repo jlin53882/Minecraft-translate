@@ -855,8 +855,6 @@ class MergeView(ft.Column):
                         height=200,  # 固定高度，獨立捲軸
                         spacing=2,
                     ),
-                    border=ft.border.all(1, "#333333"),
-                    border_radius=4,
                     padding=5,
                 ),
             ]
