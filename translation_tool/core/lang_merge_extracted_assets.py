@@ -163,6 +163,34 @@ def _scan_extracted_lang_files(lang_output_dir: Path) -> dict[str, dict[str, lis
     return dict(result)
 
 
+class _LazyExistingAssets:
+    """2026-08-04 B1: lazy load assets/{modid}/lang/{xx_yy}.json on-demand。
+
+    避免 Stage 2 開始時就把幾百個 mod 的 assets 全載入記憶體。
+    """
+    def __init__(self, assets_dir: Path):
+        self._assets_dir = assets_dir
+        self._cache: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def get(self, key: tuple[str, str], default=None) -> dict[str, Any]:
+        if key not in self._cache:
+            modid, lang_code = key
+            lang_file = self._assets_dir / modid / "lang" / f"{lang_code}.json"
+            if lang_file.exists():
+                data = load_json_auto_encoding(lang_file)
+                self._cache[key] = dict(data) if data else {}
+            else:
+                self._cache[key] = {}
+        return self._cache[key]
+
+    def __contains__(self, key):
+        modid, lang_code = key
+        return (self._assets_dir / modid / "lang" / f"{lang_code}.json").exists()
+
+    def __len__(self):
+        return len(self._cache)
+
+
 def _load_existing_assets(assets_dir: Path) -> dict[tuple[str, str], dict[str, Any]]:
     """讀取 assets/{modid}/lang/{xx_yy}.json 全部現有資料。
     
@@ -306,7 +334,8 @@ def merge_extracted_to_assets(
         return
     
     try:
-        existing = _load_existing_assets(assets_dir)
+        # 2026-08-04 B1: lazy load 取代全量 _load_existing_assets
+        existing = _LazyExistingAssets(assets_dir)
         extracted = _scan_extracted_lang_files(lang_output_dir)
         
         if not extracted:

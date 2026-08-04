@@ -20,6 +20,37 @@ import os
 
 logger = logging.getLogger(__name__)
 
+
+def _count_output_files(out_dir: str) -> dict:
+    """掃描各輸出子目錄的檔案數量。2026-08-04: 抽到 module-level 共用。"""
+    result = {
+        "lang_output": 0,
+        "assets": 0,
+        "待翻譯": 0,
+        "patchouli_output": 0,
+        "other_output": 0,
+        "errordata_output": 0,
+    }
+    if not os.path.exists(out_dir):
+        return result
+    for root, dirs, files in os.walk(out_dir):
+        rel = os.path.relpath(root, out_dir)
+        if rel.startswith("lang_output/assets"):
+            result["assets"] += len(files)
+        elif rel.startswith("lang_output"):
+            if "待翻譯" in rel:
+                result["待翻譯"] += len(files)
+            else:
+                result["lang_output"] += len(files)
+        elif rel.startswith("patchouli_output"):
+            result["patchouli_output"] += len(files)
+        elif rel.startswith("other_output"):
+            result["other_output"] += len(files)
+        elif rel.startswith("errordata_output"):
+            result["errordata_output"] += len(files)
+    return result
+
+
 def run_merge_zip_batch_service(
     zip_paths: list[str],
     output_dir: str,
@@ -49,36 +80,6 @@ def run_merge_zip_batch_service(
         "errored_files": 0,
         "failed_zips_list": [],  # [{"name": str, "error": str}, ...]
     }
-
-    def _count_output_files(out_dir: str) -> dict:
-        """掃描各輸出子目錄的檔案數量。"""
-        result = {
-            "lang_output": 0,
-            "assets": 0,  # 2026-08-04 C3: 獨立顯示 Stage 2 寫入的 assets/
-            "待翻譯": 0,
-            "patchouli_output": 0,
-            "other_output": 0,
-            "errordata_output": 0,
-        }
-        if not os.path.exists(out_dir):
-            return result
-        for root, dirs, files in os.walk(out_dir):
-            rel = os.path.relpath(root, out_dir)
-            # 2026-08-04 C3: assets/ 必須在 lang_output 之前比對,否則被 lang_output 攔截
-            if rel.startswith("lang_output/assets"):
-                result["assets"] += len(files)
-            elif rel.startswith("lang_output"):
-                if "待翻譯" in rel:
-                    result["待翻譯"] += len(files)
-                else:
-                    result["lang_output"] += len(files)
-            elif rel.startswith("patchouli_output"):
-                result["patchouli_output"] += len(files)
-            elif rel.startswith("other_output"):
-                result["other_output"] += len(files)
-            elif rel.startswith("errordata_output"):
-                result["errordata_output"] += len(files)
-        return result
 
     try:
         total = len(zip_paths)
@@ -198,36 +199,6 @@ def run_merge_folder_batch_service(
         "failed_folders_list": [],
     }
 
-    def _count_output_files(out_dir: str) -> dict:
-        """掃描各輸出子目錄的檔案數量。"""
-        result = {
-            "lang_output": 0,
-            "assets": 0,  # 2026-08-04 C3: 獨立顯示 Stage 2 寫入的 assets/
-            "待翻譯": 0,
-            "patchouli_output": 0,
-            "other_output": 0,
-            "errordata_output": 0,
-        }
-        if not os.path.exists(out_dir):
-            return result
-        for root, dirs, files in os.walk(out_dir):
-            rel = os.path.relpath(root, out_dir)
-            # 2026-08-04 C3: assets/ 必須在 lang_output 之前比對,否則被 lang_output 攔截
-            if rel.startswith("lang_output/assets"):
-                result["assets"] += len(files)
-            elif rel.startswith("lang_output"):
-                if "待翻譯" in rel:
-                    result["待翻譯"] += len(files)
-                else:
-                    result["lang_output"] += len(files)
-            elif rel.startswith("patchouli_output"):
-                result["patchouli_output"] += len(files)
-            elif rel.startswith("other_output"):
-                result["other_output"] += len(files)
-            elif rel.startswith("errordata_output"):
-                result["errordata_output"] += len(files)
-        return result
-
     try:
         session.add_log(f"[資料夾] 開始處理：{os.path.basename(input_dir)}")
 
@@ -284,7 +255,9 @@ def run_merge_folder_batch_service(
                             "progress" in update
                             and update["progress"] is not None
                         ):
-                            session.set_progress(update["progress"])
+                            # 2026-08-04 A3: Stage 2 進度合成 (0.5~1.0),避免從 1.0 跳回 0.0
+                            stage2_progress = 0.5 + update["progress"] * 0.5
+                            session.set_progress(min(stage2_progress, 0.999))
                         if update.get("error"):
                             session.add_log(
                                 "[階段 2/2 錯誤] assets 合併中止"
