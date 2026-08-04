@@ -154,7 +154,7 @@ class MergeView(ft.Column):
         # - 此開關只影響 Patchouli Book 的 en_us 資料夾，不影響 root-level lang 檔案
         # - 當 process_zh_cn_switch=False 時，此開關連動 Disabled（因 zh_cn 已被全域略過）
         self.patchouli_skip_zh_cn_switch = ft.Switch(
-            label="允許 zh_cn 觸發跳過 en_us",
+            label="當 zh_cn 翻譯足夠好時，跳過對應 en_us",
             value=False,
             on_change=lambda e: self._on_merge_field_changed("patchouli_skip_en_us_when_zh_cn_exists", e.control.value),
         )
@@ -365,7 +365,7 @@ class MergeView(ft.Column):
                                 ft.Row(
                                     [
                                         ft.Text(
-                                            "允許 zh_cn 觸發跳過 en_us",
+                                            "當 zh_cn 翻譯足夠好時，跳過對應 en_us",
                                             weight=ft.FontWeight.W_500,
                                             size=14,
                                             expand=True,
@@ -376,7 +376,7 @@ class MergeView(ft.Column):
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
                                 ft.Text(
-                                    "zh_cn 達門檻時，跳過對應 en_us。",
+                                    "當 zh_cn 內容中日韓文字佔比達門檻時，跳過對應的英文原文",
                                     size=12,
                                     color=theme.GREY_600,
                                 ),

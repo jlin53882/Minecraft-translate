@@ -143,7 +143,7 @@ class ConfigView(ft.Column):
             label="語言合併器格式問題隔離資料夾名稱", hint_text="用於：格式錯誤隔離", dense=True
         )
         self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"] = ft.Checkbox(
-            label="允許 zh_cn 觸發跳過 en_us", value=False
+            label="當 zh_cn 翻譯足夠好時，跳過對應 en_us", value=False
         )
         self.controls_map["lang_merger.patchouli_effective_translation_threshold"] = ft.TextField(
             label="en_us 跳過門檻", hint_text="有效翻譯比例閾值 0.0~1.0，空白用預設值 0.5", dense=True,
@@ -643,7 +643,7 @@ class ConfigView(ft.Column):
                     [
                         ft.Column(
                             [
-                                ft.Text("允許 zh_cn 觸發跳過 en_us", weight=ft.FontWeight.W_500, size=13),
+                                ft.Text("當 zh_cn 翻譯足夠好時，跳過對應 en_us", weight=ft.FontWeight.W_500, size=13),
                                 self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"],
                                 ft.Text("當 zh_cn 翻譯足夠好時，跳過對應 en_us", size=11, color=theme.GREY_600),
                             ],
