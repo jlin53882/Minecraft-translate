@@ -244,10 +244,6 @@ def run_merge_folder_batch_service(
                     session.add_log(
                         "[階段 2/2 開始] XX_extracted → assets 合併"
                     )
-                else:
-                    session.add_log(
-                        "[階段 2/2 略過] 檔案合併(階段 2) 未啟用，跳過"
-                    )
                     lang_output_dir = os.path.join(output_dir, "lang_output")
                     for update in merge_extracted_to_assets(
                         lang_output_dir=lang_output_dir,
@@ -268,6 +264,10 @@ def run_merge_folder_batch_service(
                             )
                             return
                     session.add_log("[階段 2/2 完成]")
+                else:
+                    session.add_log(
+                        "[階段 2/2 略過] 檔案合併(階段 2) 未啟用，跳過"
+                    )
             except Exception as stage2_err:
                 logger.warning(f"[階段2] 錯誤(不中断階段1): {stage2_err}")
                 session.add_log(f"[階段 2/2 錯誤]: {stage2_err}")
