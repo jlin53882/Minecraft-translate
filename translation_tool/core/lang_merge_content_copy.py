@@ -431,6 +431,8 @@ def process_content_or_copy_file_impl(
 
             processor = get_text_processor_fn(ext)
             raw = reader.read_bytes(input_path)
+            # 2026-08-05: decode bytes before str operations (LICENSE/.txt files)
+            raw = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
             raw = raw.replace("\r\n", "\n").replace("\r", "\n")
             if processor:
                 tw_content = processor(raw, recursive_translate_dict_fn, rules, input_path)
@@ -487,6 +489,8 @@ def process_content_or_copy_file_impl(
         processor = get_text_processor_fn(ext)
         if processor:
             raw = reader.read_bytes(input_path)
+            # 2026-08-05: decode bytes before str operations
+            raw = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
             raw = raw.replace("\r\n", "\n").replace("\r", "\n")
             tw_content = processor(raw, recursive_translate_dict_fn, rules, input_path)
             should_write = True
