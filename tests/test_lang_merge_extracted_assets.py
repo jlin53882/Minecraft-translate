@@ -22,6 +22,10 @@ from translation_tool.core.lang_merge_extracted_assets import (
     merge_extracted_to_assets,
 )
 
+from translation_tool.core.lang_merge_extracted_assets import _write_json_atomic
+import os as _os
+from unittest.mock import patch
+from translation_tool.core.lang_merge_extracted_assets import _cleanup_single_mod_extracted
 
 # ──────────────────────────────────────────────────────────────────────────
 # 1. _infer_modid_from_lang_file
@@ -50,7 +54,6 @@ class TestInferModidFromLangFile:
         """無 lang/ parent → None"""
         p = Path("lang_output/ae2ct_extracted/ae2ct/zh_cn.json")
         assert _infer_modid_from_lang_file(p) is None
-
 
 # ──────────────────────────────────────────────────────────────────────────
 # 2. _scan_extracted_lang_files
@@ -201,7 +204,6 @@ class TestScanExtractedLangFiles:
         assert result[modid]["zh_tw"][0].name == "zh_tw.json"
         assert result[modid]["en_us"][0].name == "en_us.json"
 
-
 # ──────────────────────────────────────────────────────────────────────────
 # 5. is_pure 行為 - 使用者確認規則
 # ──────────────────────────────────────────────────────────────────────────
@@ -224,7 +226,6 @@ class TestLoadExistingAssets:
         """沒 assets 就回空 dict"""
         result = _load_existing_assets(tmp_path / "nonexistent")
         assert result == {}
-
 
 # ──────────────────────────────────────────────────────────────────────────
 # 4. merge_extracted_to_assets (整合測試)
@@ -472,7 +473,6 @@ class TestMergeExtractedToAssets:
         # 應有 indent=4
         assert "\n    " in content
 
-
 # ──────────────────────────────────────────────────────────────────────────
 # 5. is_pure 行為 - 使用者確認規則
 # ──────────────────────────────────────────────────────────────────────────
@@ -562,13 +562,11 @@ class TestMergeExtractedConfigFlag:
         # 階段 2 不應該被呼叫
         assert len(called) == 0, "stage 2 不應該被呼叫"
 
-
 class TestWriteJsonAtomic:
     """2026-08-04 B2: _write_json_atomic crash cleanup 行為。"""
 
     def test_tmp_file_cleaned_up_after_success(self, tmp_path: Path):
         """寫入成功後 .tmp 檔案應被清理。"""
-        from translation_tool.core.lang_merge_extracted_assets import _write_json_atomic
 
         target = tmp_path / "test.json"
         _write_json_atomic(target, {"key": "value"})
@@ -579,9 +577,6 @@ class TestWriteJsonAtomic:
 
     def test_tmp_file_cleaned_up_on_error(self, tmp_path: Path):
         """寫入失敗時 .tmp 檔案也應被清理。monkeypatch os.replace 使其拋錯。"""
-        import os as _os
-        from unittest.mock import patch
-        from translation_tool.core.lang_merge_extracted_assets import _write_json_atomic
 
         target = tmp_path / "subdir" / "test.json"
         target.parent.mkdir(parents=True)
@@ -601,13 +596,11 @@ class TestWriteJsonAtomic:
         tmp_file = target.with_suffix(target.suffix + ".tmp")
         assert not tmp_file.exists(), f".tmp 應被清理,但存在: {tmp_file}"
 
-
 class TestCleanupSingleModExtracted:
     """2026-08-04 B3: per-mod cleanup 行為。"""
 
     def test_cleanup_single_mod_deletes_only_target_mod(self, tmp_path: Path):
         """只刪除指定的 modid,_extracted 目錄下其他 mod 不受影響。"""
-        from translation_tool.core.lang_merge_extracted_assets import _cleanup_single_mod_extracted
 
         # 建立兩個 mod 的 _extracted 結構
         extracted_dir = tmp_path / "ae2ct_extracted"
@@ -627,7 +620,6 @@ class TestCleanupSingleModExtracted:
 
     def test_cleanup_removes_empty_extracted_dir(self, tmp_path: Path):
         """當 _extracted 目錄只剩一個 mod 且被刪除後,整個 _extracted 目錄也應被刪。"""
-        from translation_tool.core.lang_merge_extracted_assets import _cleanup_single_mod_extracted
 
         extracted_dir = tmp_path / "ae2ct_extracted"
         mod_dir = extracted_dir / "ae2ct" / "lang"
@@ -640,7 +632,6 @@ class TestCleanupSingleModExtracted:
 
     def test_cleanup_nonexistent_mod_does_nothing(self, tmp_path: Path):
         """不存在的 modid 不會 crash。"""
-        from translation_tool.core.lang_merge_extracted_assets import _cleanup_single_mod_extracted
 
         _cleanup_single_mod_extracted(tmp_path, "nonexistent")
         # 不 crash 即成功
