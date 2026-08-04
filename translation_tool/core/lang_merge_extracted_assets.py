@@ -250,8 +250,9 @@ def _cleanup_single_mod_extracted(lang_output_dir: Path, modid: str) -> bool:
                 if not any(entry.iterdir()):
                     shutil.rmtree(entry)
                 return True
-            except Exception:
-                pass
+            except Exception as e:
+                # 2026-08-04: log warning instead of silent pass
+                log_warning(f"[MergeExt→Assets] cleanup 失敗 ({modid}): {e}")
     return False
 
 
@@ -496,17 +497,7 @@ def merge_extracted_to_assets(
                 )
             except Exception:
                 pass
-        # 2026-08-02 user 確認:
-        #   Stage 2 完成後刪除 *_extracted 子資料夾,
-        #   防止下次 merge 時 _scan 又掃到這些已經合併的目錄。
-        try:
-            cleaned = _cleanup_extracted_dirs(lang_output_dir, session=session)
-            if cleaned > 0:
-                log_info(
-                    f"[MergeExt→Assets] 清理完成:刪除 {cleaned} 個 _extracted 子資料夾"
-                )
-        except Exception as exc:
-            log_warning(f"[MergeExt→Assets] 清理 _extracted 失敗: {exc!r}")
+        # 2026-08-04: per-mod cleanup 已在 loop 內處理,不再需要 batch cleanup
         yield {"progress": 1.0, "log": None, "error": False}
     
     except Exception as exc:

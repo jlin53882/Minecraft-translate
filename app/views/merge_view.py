@@ -124,13 +124,11 @@ class MergeView(ft.Column):
 
         self.session = TaskSession(max_logs=2000)
         self._ui_stop = threading.Event()
+        self._run_output_dir: str | None = None  # 2026-08-04: snapshot for _open_output_folder
         self.selected_zips: list[str] = []
         # 合併統計（用於 DONE 時顯示摘要）
-        self._merge_stats = {
-            "success_zips": 0,
-            "failed_zips": 0,
-            "failed_zip_details": "",
-        }
+        # 2026-08-04: 兼容 ZIP + Folder 兩種模式
+        self._merge_stats: dict[str, Any] = {}
         # LogView widget 接管 append + UI controls 數量控制（取代 LogPresenter）
         # 設定在下面 line ~213 統一處理
 
@@ -292,6 +290,10 @@ class MergeView(ft.Column):
 
         def on_input_mode_changed(e=None):
             mode = self.input_mode_group.value
+            if mode == "folder":
+                self.zip_list_view.disabled = True
+            else:
+                self.zip_list_view.disabled = False
             self.zip_panel.visible = mode == "zip"
             self.folder_panel.visible = mode == "folder"
             self.update()
