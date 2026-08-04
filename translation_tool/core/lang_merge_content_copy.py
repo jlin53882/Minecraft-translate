@@ -30,6 +30,7 @@ def _compute_patchouli_lang_effectiveness(
     book_root: str,
     threshold: float = 0.5,
     json_module=None,
+    all_names: list[str] | None = None,  # 2026-08-04: 預先算好的檔案列表,避免重複 reader.list_all()
 ) -> dict[str, bool]:
     """Compute effective translation status for zh_tw and zh_cn in a book_root.
 
@@ -60,7 +61,9 @@ def _compute_patchouli_lang_effectiveness(
     for lang in ("zh_tw", "zh_cn"):
         prefix_lower = book_root_lower + lang + "/"
         text_files: list[str] = []
-        for name in reader.list_all():
+        # 2026-08-04 性能優化:用預先算好的 all_names,避免每次呼叫 reader.list_all()
+        _names = all_names if all_names is not None else reader.list_all()
+        for name in _names:
             if name.lower().startswith(prefix_lower):
                 ext = os.path.splitext(name)[1].lower()
                 if ext in TEXT_EXTS:
@@ -146,7 +149,8 @@ def process_content_or_copy_file_impl(
     """
     # 自動偵測並剝離 ZIP 統一包裝前綴（任何名稱皆適用）
     _wp = None
-    _all_names = reader.list_all()
+    # 2026-08-04 性能優化:用 caller 預先算好的 all_files_cache,避免每次呼叫 reader.list_all() (os.walk)
+    _all_names = all_files_cache if all_files_cache else reader.list_all()
     if _all_names:
         _tops = set(n.replace("\\", "/").split("/")[0] for n in _all_names if n.replace("\\", "/").split("/")[0])
         if len(_tops) == 1:
@@ -242,6 +246,7 @@ def process_content_or_copy_file_impl(
                 book_root,
                 threshold=_threshold,
                 json_module=json_module,
+                all_names=_all_names,  # 2026-08-04: 傳入預先算好的檔案列表
             )
         has_eff_zh_tw = bool(eff.get("zh_tw", False))
         has_eff_zh_cn = bool(eff.get("zh_cn", False))
