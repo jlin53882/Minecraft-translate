@@ -790,9 +790,10 @@ class MergeView(ft.Column):
         threading.Thread(target=poll, daemon=True).start()
 
     def _set_status(self, text: str, color: str) -> None:
-        """更新狀態晶片顯示。"""
+        """更新狀態晶片顯示。2026-08-04: 加 page.update() 確保 UI 即時反映。"""
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
+        self.page.update()
 
 
     def _show_merge_summary(self, summary: dict[str, Any]) -> None:
@@ -924,21 +925,22 @@ class MergeView(ft.Column):
         """
         try:
             self.page.pop_dialog()
-            # 2026-08-04: 手動關閉 dialog 時也 reset UI 狀態
+            # 2026-08-04: 手動關閉時立即 reset UI (_set_status 自帶 page.update)
             self._set_status("尚未開始", theme.GREY_400)
             self.progress_bar.value = 0.0
-            self.page.update()
         except Exception as e:
             log_warning(f"[MergeView] pop_dialog 錯誤: {e!r}")
 
     async def _reset_status_after_done(self) -> None:
-        """2026-08-04: 延遲 reset UI 狀態，避免 dialog 關閉後仍顯示「任務完成」。"""
+        """2026-08-04: 延遲 reset UI 狀態，避免 dialog 關閉後仍顯示「任務完成」。
+        
+        _set_status 內部已含 page.update()，此處只需設定值。
+        """
         import asyncio
         await asyncio.sleep(1.0)  # 等 dialog 顯示完
         try:
             self._set_status("尚未開始", theme.GREY_400)
             self.progress_bar.value = 0.0
-            self.page.update()
         except Exception:
             pass
 
