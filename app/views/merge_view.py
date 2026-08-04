@@ -6,7 +6,6 @@
 import threading
 import time
 from app.views.config.config_actions import load_config_into_view
-from translation_tool.utils.config_manager import load_config
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -692,7 +691,7 @@ class MergeView(ft.Column):
                     pass
             else:
                 for _ in run_merge_zip_batch_service(
-                    zip_paths=self.selected_zips,
+                    zip_paths=list(self.selected_zips),  # 2026-08-04 A4: 傳副本避免 race condition
                     output_dir=self.output_dir_field.value,
                     session=self.session,
                     only_process_lang=self.only_lang_checkbox.value,
@@ -713,6 +712,8 @@ class MergeView(ft.Column):
         """
         self._ui_stop.clear()
         self.log_view.clear()
+        # 2026-08-04 B6: 快照 output_dir,避免合併期間使用者改欄位導致開錯資料夾
+        self._run_output_dir = self.output_dir_field.value
 
         async def _sync_ui():
             """在 UI thread 內執行 update。"""
@@ -798,9 +799,14 @@ class MergeView(ft.Column):
         pending_name = lang_merger_cfg.get("pending_folder_name", "待翻譯")
         organized_name = lang_merger_cfg.get("pending_organized_folder_name", "待翻譯整理需翻譯")
 
-        s_zips = summary.get("success_zips", 0)
-        f_zips = summary.get("failed_zips", 0)
-        failed_list = summary.get("failed_zips_list", [])
+        # 2026-08-04 修正 A1: 兼容 ZIP (success_zips) 與 Folder (success_folders) 兩種 key
+        s_zips = summary.get("success_zips") or summary.get("success_folders", 0)
+        f_zips = summary.get("failed_zips") or summary.get("failed_folders", 0)
+        failed_list = (
+            summary.get("failed_zips_list")
+            or summary.get("failed_folders_list")
+            or summary.get("failed_zip_details", [])
+        )
         oc = summary.get("output_counts", {})
 
         # 輸出統計 block
@@ -896,7 +902,9 @@ class MergeView(ft.Column):
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
-        subprocess.Popen(["explorer", self.output_dir_field.value], shell=True)
+        # 2026-08-04 B6: 用合併開始時的快照,避免使用者中途改欄位導致開錯資料夾
+        target = getattr(self, "_run_output_dir", None) or self.output_dir_field.value
+        subprocess.Popen(["explorer", target], shell=True)
 
     def _close_dialog_overlay(self) -> None:
         """關閉頂層 dialog (跟 _show_merge_summary 用 page.show_dialog 對稱)。

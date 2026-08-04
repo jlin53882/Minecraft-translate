@@ -561,3 +561,81 @@ class TestMergeExtractedConfigFlag:
 
         # 階段 2 不應該被呼叫
         assert len(called) == 0, "stage 2 不應該被呼叫"
+
+
+class TestWriteJsonAtomic:
+    """2026-08-04 B2: _write_json_atomic crash cleanup 行為。"""
+
+    def test_tmp_file_cleaned_up_after_success(self, tmp_path: Path):
+        """寫入成功後 .tmp 檔案應被清理。"""
+        from translation_tool.core.lang_merge_extracted_assets import _write_json_atomic
+
+        target = tmp_path / "test.json"
+        _write_json_atomic(target, {"key": "value"})
+
+        assert target.exists()
+        tmp_file = target.with_suffix(target.suffix + ".tmp")
+        assert not tmp_file.exists(), f".tmp 應被清理,但存在: {tmp_file}"
+
+    def test_tmp_file_cleaned_up_on_error(self, tmp_path: Path):
+        """寫入失敗時 .tmp 檔案也應被清理。"""
+        from translation_tool.core.lang_merge_extracted_assets import _write_json_atomic
+
+        # 建立一個唯讀目錄,讓 os.replace 失敗
+        target = tmp_path / "readonly" / "test.json"
+        target.parent.mkdir(parents=True)
+        target.write_text("existing", encoding="utf-8")
+        # 把 parent 改為唯讀
+        target.parent.chmod(0o444)
+
+        try:
+            _write_json_atomic(target, {"key": "value"})
+        except Exception:
+            pass
+
+        tmp_file = target.with_suffix(target.suffix + ".tmp")
+        assert not tmp_file.exists(), f".tmp 應被清理,但存在: {tmp_file}"
+
+
+class TestCleanupSingleModExtracted:
+    """2026-08-04 B3: per-mod cleanup 行為。"""
+
+    def test_cleanup_single_mod_deletes_only_target_mod(self, tmp_path: Path):
+        """只刪除指定的 modid,_extracted 目錄下其他 mod 不受影響。"""
+        from translation_tool.core.lang_merge_extracted_assets import _cleanup_single_mod_extracted
+
+        # 建立兩個 mod 的 _extracted 結構
+        extracted_dir = tmp_path / "ae2ct_extracted"
+        mod_a = extracted_dir / "ae2ct" / "lang"
+        mod_a.mkdir(parents=True)
+        (mod_a / "zh_cn.json").write_text('{"k1":"v1"}')
+        mod_b = extracted_dir / "other_mod" / "lang"
+        mod_b.mkdir(parents=True)
+        (mod_b / "zh_cn.json").write_text('{"k2":"v2"}')
+
+        _cleanup_single_mod_extracted(tmp_path, "ae2ct")
+
+        # ae2ct 應被刪除
+        assert not (extracted_dir / "ae2ct").exists()
+        # other_mod 應保留
+        assert (extracted_dir / "other_mod").exists()
+
+    def test_cleanup_removes_empty_extracted_dir(self, tmp_path: Path):
+        """當 _extracted 目錄只剩一個 mod 且被刪除後,整個 _extracted 目錄也應被刪。"""
+        from translation_tool.core.lang_merge_extracted_assets import _cleanup_single_mod_extracted
+
+        extracted_dir = tmp_path / "ae2ct_extracted"
+        mod_dir = extracted_dir / "ae2ct" / "lang"
+        mod_dir.mkdir(parents=True)
+        (mod_dir / "zh_cn.json").write_text('{"k1":"v1"}')
+
+        assert extracted_dir.exists()
+        _cleanup_single_mod_extracted(tmp_path, "ae2ct")
+        assert not extracted_dir.exists(), "空的 _extracted 目錄應被刪除"
+
+    def test_cleanup_nonexistent_mod_does_nothing(self, tmp_path: Path):
+        """不存在的 modid 不會 crash。"""
+        from translation_tool.core.lang_merge_extracted_assets import _cleanup_single_mod_extracted
+
+        _cleanup_single_mod_extracted(tmp_path, "nonexistent")
+        # 不 crash 即成功

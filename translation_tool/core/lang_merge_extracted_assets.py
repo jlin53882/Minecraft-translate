@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import json
-import shutil  # noqa: F401  shutil 用於 _cleanup_extracted_dirs 刪除整個 _extracted 子資料夾
+import shutil  # 用於 _cleanup_extracted_dirs 刪除整個 _extracted 子資料夾
 import os
 import re
 import traceback
@@ -205,6 +205,28 @@ def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
     os.replace(tmp_path, path)
 
 
+def _cleanup_single_mod_extracted(lang_output_dir: Path, modid: str) -> bool:
+    """2026-08-04 B3: 只刪除指定 modid 的 _extracted 目錄 (per-mod commit)。
+
+    只有該 mod 寫入成功後才呼叫,避免寫失敗時 source 已被刪。
+    """
+    for entry in lang_output_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        if not _EXTRACTED_NAME_RE.match(entry.name):
+            continue
+        mod_dir = entry / modid
+        if mod_dir.exists() and mod_dir.is_dir():
+            try:
+                shutil.rmtree(mod_dir)
+                if not any(entry.iterdir()):
+                    shutil.rmtree(entry)
+                return True
+            except Exception:
+                pass
+    return False
+
+
 def _cleanup_extracted_dirs(lang_output_dir: Path, session: Any = None) -> int:
     """Stage 2 完成後,刪除 lang_output_dir 下所有 *_extracted 子資料夾。
 
@@ -296,7 +318,6 @@ def merge_extracted_to_assets(
         total_added = 0
         total_files_written = 0
         total_warnings = 0
-        seen_pairs: set[tuple[str, str]] = set()
 
         # 進度範圍:session.progress (階段 1 完成時已 1.0) → 1.0
         # 但我們要給階段 2 留 mirror 2.5% 空間,讓 UI 看到階段 2 在跑
@@ -377,6 +398,8 @@ def merge_extracted_to_assets(
                 if final_tw:
                     _write_json_atomic(target_path, final_tw)
                     total_files_written += 1
+                    # 2026-08-04 B3: 寫成功才刪該 mod 的 _extracted source (per-mod commit)
+                    _cleanup_single_mod_extracted(lang_output_dir, modid)
                     mod_added_count = len(final_tw) - len(existing_tw)
                     if mod_added_count > 0:
                         total_added += mod_added_count

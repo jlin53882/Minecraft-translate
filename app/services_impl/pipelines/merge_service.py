@@ -54,6 +54,7 @@ def run_merge_zip_batch_service(
         """掃描各輸出子目錄的檔案數量。"""
         result = {
             "lang_output": 0,
+            "assets": 0,  # 2026-08-04 C3: 獨立顯示 Stage 2 寫入的 assets/
             "待翻譯": 0,
             "patchouli_output": 0,
             "other_output": 0,
@@ -63,7 +64,10 @@ def run_merge_zip_batch_service(
             return result
         for root, dirs, files in os.walk(out_dir):
             rel = os.path.relpath(root, out_dir)
-            if rel.startswith("lang_output"):
+            # 2026-08-04 C3: assets/ 必須在 lang_output 之前比對,否則被 lang_output 攔截
+            if rel.startswith("lang_output/assets"):
+                result["assets"] += len(files)
+            elif rel.startswith("lang_output"):
                 if "待翻譯" in rel:
                     result["待翻譯"] += len(files)
                 else:
@@ -111,9 +115,13 @@ def run_merge_zip_batch_service(
                         session.set_progress(min(merged_progress, 0.999))
 
                     # ---- error ----
+                    # 2026-08-04 修正 A2: 軟性 error 不中止整批,繼續處理下一個 ZIP
                     if update.get("error"):
-                        session.set_error()
-                        return
+                        session.add_log(f"[ZIP {idx+1}/{total}] 軟性錯誤: {zip_name}")
+                        stats["failed_zips"] += 1
+                        stats["failed_zips_list"].append({"name": zip_name, "error": "內部軟性錯誤"})
+                        # 不 return,繼續處理下一個 ZIP
+                        continue
 
                 session.add_log(f"[ZIP {idx + 1}/{total}] 完成：{zip_name}")
                 stats["success_zips"] += 1
@@ -194,6 +202,7 @@ def run_merge_folder_batch_service(
         """掃描各輸出子目錄的檔案數量。"""
         result = {
             "lang_output": 0,
+            "assets": 0,  # 2026-08-04 C3: 獨立顯示 Stage 2 寫入的 assets/
             "待翻譯": 0,
             "patchouli_output": 0,
             "other_output": 0,
@@ -203,7 +212,10 @@ def run_merge_folder_batch_service(
             return result
         for root, dirs, files in os.walk(out_dir):
             rel = os.path.relpath(root, out_dir)
-            if rel.startswith("lang_output"):
+            # 2026-08-04 C3: assets/ 必須在 lang_output 之前比對,否則被 lang_output 攔截
+            if rel.startswith("lang_output/assets"):
+                result["assets"] += len(files)
+            elif rel.startswith("lang_output"):
                 if "待翻譯" in rel:
                     result["待翻譯"] += len(files)
                 else:
@@ -235,9 +247,12 @@ def run_merge_folder_batch_service(
                 if "progress" in update and update["progress"] is not None:
                     session.set_progress(update["progress"])
 
+                # 2026-08-04 修正 A2: 軟性 error 不中止,繼續處理
                 if update.get("error"):
-                    session.set_error()
-                    return
+                    session.add_log(f"[資料夾] 軟性錯誤: {os.path.basename(input_dir)}")
+                    stats["failed_folders"] += 1
+                    stats["failed_folders_list"].append({"name": os.path.basename(input_dir), "error": "內部軟性錯誤"})
+                    continue
 
             session.add_log(f"[資料夾] 完成：{os.path.basename(input_dir)}")
             session.add_log(
