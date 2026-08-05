@@ -73,6 +73,13 @@ while session.status in ("RUNNING", "IDLE"):
 完成 → _update_progress(1.0, "完成")
 ```
 
+## Service 層契約（pipelines/*_service.py）
+
+- 每個 `run_*_service` 都是 generator wrapper：迭代 core 的 generator，經 `GLOBAL_LOG_LIMITER.filter()` 過濾高頻日誌後 yield update dict
+- 例外 → yield `{log: 完整 traceback, error: True, progress: 0}`
+- core generator 的 update dict 契約：`progress` / `log` / `error?`（`bundle_outputs_generator`、`translate_directory_generator`、各 merge/extract generator 皆同）
+- 一鍵製作依賴此契約：`run_step` 迭代 service 的 yield 寫入 TaskSession（session.add_log / set_progress / set_error），`_poll_session` 再從 snapshot 讀出更新 UI
+
 ## API 金鑰管理（api_view）
 
 `keys_container` 動態增刪 API Key 列（`_add_key_field` / `_delete_key_field`）+ 儲存設定按鈕。
