@@ -75,6 +75,24 @@ CacheView（主入口）
 
 > 底層 cache 資料結構與分片格式見 `CACHE_SYSTEM.md`；關鍵字搜尋的效能設計見 `cache_search_optimization.md`。
 
+## Cache 系統邏輯細節
+
+### 分片（cache_shards.py）
+- **分片命名**：`{cache_type}_{id:05d}.json`（如 `lang_00001.json`），`.active` 指標檔記錄目前 active 分片 id
+- **`_get_active_shard_path`**：`.active` 不存在時自動掃描現有分片、取最大 id 初始化指標（無分片時預設 `00001`）
+- **`_rotate_shard_if_needed`**：`len(data) >= rolling_shard_size`（config `cache.rolling_shard_size`，預設 **2500**）時切到下一片（`cur_id + 1`）
+- **跨行程安全**：旋轉與寫入都用 `.active.lock` 檔案鎖（Windows `msvcrt` / POSIX `fcntl`），鎖內**再次確認容量**防止 TOCTOU race
+- **`_save_entries_to_active_shards`**：分段寫入，容量不足時釋鎖 → 旋轉 → 重新讀取 active path 續寫；`force_new_shard=True` 時（「新分片」動作）先手動 +1
+- **原子寫入 `_write_json_atomic`**：寫 `.tmp` → `fsync` → `os.replace`（避免資料遺失）
+
+### 總覽統計（cache_overview.py:build_cache_overview）
+- 每 cache_type：`entries_count`（該型別總條目）、`is_dirty`、`session_new`（本次 session 新增條目數）、`active_shard_entries`
+- 頂層：`total_entries`、`dirty_type_count`（有未存變更的型別數）
+
+### 查詢（cache_search.py:search_cache）
+- 命中判定以 entry 的 `src` / `dst` / `key` / `mod` / `path` / `type` 欄位匹配（`search_cache` 由 `cache_search_service` 驅動）
+- `similarity` 供模糊比對（src/dst 相似度），全文索引查詢走 `cache_rebuild_index_service` 重建的索引
+
 ## 維護注意
 
 1. 大量事件回呼觸發背景操作；避免舊任務覆蓋新狀態時需配合 action 序號機制（草案中有 CacheController，但尚未接線，目前靠 `run_cache_action` 的 busy 鎖）。
