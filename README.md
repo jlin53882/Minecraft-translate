@@ -26,10 +26,6 @@
   - LSP 類型修復
   - **結果：重建時間 49秒 → 4秒（提升91%）**
 
-> 詳細變更請看 `docs/pr/2026-03-12_0204_PR_pr28a-low-risk-caller-migration-design.md`、
-> `docs/pr/2026-03-12_0205_PR_pr28b-high-risk-caller-migration-design.md`、
-> `docs/pr/2026-03-12_1003_PR_pr29-services-facade-non-qc-cleanup.md`。
-
 ## UI 對照（啟用狀態，依 `main.py`）
 
 ### 已啟用（目前會出現在左側選單）- 11 個主 View
@@ -252,7 +248,7 @@ uv run pytest -q --basetemp=.pytest-tmp\full -o cache_dir=.pytest-cache\full
 │       └── ui_logging_handler.py
 │
 ├── tests/                               # 834 個單元測試
-├── docs/pr/
+├── docs/
 ├── config.example.json
 ├── main.py
 ├── pyproject.toml
