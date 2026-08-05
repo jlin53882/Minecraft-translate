@@ -23,7 +23,7 @@ Minecraft-translate/
 | `views/*.py` | 12 個主視圖：config / rules / cache / qc / lookup / icon_preview / bundler / translation / extractor / lm / merge / pipeline |
 | `views/cache_manager/` | 快取視圖 MVC 子模組（panels/overview、query、shard + actions/state/controller） |
 | `views/cache/` | 舊版快取視圖實驗碼（未接線，待清理） |
-| `views/pipeline/` | 一鍵批次翻譯子模組（pipeline_view + 5 個 dialog） |
+| `views/pipeline/` | 一鍵批次翻譯子模組（pipeline_view + 5 個 dialog：extract/merge/translate/bundle/one_click） |
 | `views/config/`、`views/extractor/`、`views/rules/`、`views/translation/` | 各主視圖的 panels/actions/state 子模組 |
 | `services_impl/` | 服務實作（pipeline 業務邏輯），不含 QC/checkers |
 | `services.py` | façade：僅保留 QC/checkers 暂緩線的 re-export |
@@ -70,6 +70,10 @@ Minecraft-translate/
 ### `tools/` — 開發工具
 
 分析腳本（覆蓋率分析、間隙分析）、修補腳本、驗證腳本。
+
+### `docs/` — 專案文件
+
+每個主視圖一份架構文件（`*_VIEW_ARCHITECTURE.md`），涵蓋 UI 元件、呼叫鏈與 service 層關係；相關文件一覽見 `PROJECT_INDEX.md` §10。
 
 ## 入口點
 

@@ -34,7 +34,7 @@ Minecraft-translate/
 │   │   ├── lm_view.py             # LM 翻譯頁
 │   │   ├── lookup_view.py         # 查詢頁
 │   │   ├── merge_view.py          # 合併頁
-│   │   ├── pipeline_view.py       # 一鍵批次翻譯頁
+│   │   ├── pipeline/              # 一鍵批次翻譯（pipeline_view + 5 dialogs）
 │   │   ├── qc_base.py             # QC 基礎
 │   │   ├── qc_view.py             # QC 檢查頁
 │   │   ├── rules_view.py          # 規則頁
@@ -291,9 +291,31 @@ app/
 | `docs/PR_WORKFLOW.md` | PR 工作流程規範 |
 | `docs/PROJECT_STRUCTURE.md` | 專案結構與模組職責 |
 
+## 10. View 架構文件（docs/）
+
+每個主視圖一份架構文件，說明 UI 元件、呼叫鏈、與 service 層關係：
+
+| 文件 | 對應 View |
+|------|-----------|
+| `docs/EXTRACTOR_VIEW_ARCHITECTURE.md` | ExtractorView（`app/views/extractor/`） |
+| `docs/BUNDLER_VIEW_ARCHITECTURE.md` | BundlerView（`app/views/bundler_view.py`） |
+| `docs/CACHE_VIEW_ARCHITECTURE.md` | CacheView（`app/views/cache_view.py`） |
+| `docs/CONFIG_VIEW_ARCHITECTURE.md` | ConfigView（`app/views/config/`） |
+| `docs/ICON_VIEW_ARCHITECTURE.md` | IconPreviewView（`app/views/icon_preview_view.py`） |
+| `docs/LM_VIEW_ARCHITECTURE.md` | LMView（`app/views/lm_view.py`） |
+| `docs/LOOKUP_VIEW_ARCHITECTURE.md` | LookupView（`app/views/lookup_view.py`） |
+| `docs/MERGE_VIEW_ARCHITECTURE.md` | MergeView（`app/views/merge_view.py`） |
+| `docs/PIPELINE_VIEW_ARCHITECTURE.md` | PipelineView（`app/views/pipeline/`） |
+| `docs/QC_VIEW_ARCHITECTURE.md` | QCView（`app/views/qc_view.py` + `qc_base.py`） |
+| `docs/RULES_VIEW_ARCHITECTURE.md` | RulesView（`app/views/rules/`） |
+| `docs/TRANSLATION_VIEW_ARCHITECTURE.md` | TranslationView（`app/views/translation/`） |
+| `docs/UNTRANSLATED_CHECKER_ARCHITECTURE.md` | UntranslatedChecker（`app/views/untranslated_checker.py`） |
+
+相關系統文件：`JAR_PIPELINE.md`（抽取流程）、`CACHE_SYSTEM.md`（快取資料結構）、`cache_search_optimization.md`（搜尋效能）、`TRANSLATION_WORKFLOW.md`（翻譯流程）。
+
 ---
 
-## 10. 依賴套件
+## 11. 依賴套件
 
 | 套件 | 版本 | 用途 |
 |------|------|------|
