@@ -20,7 +20,7 @@ translation_tool/core/
   ├─ icon_resolver.py                 ← resolve_icon_with_reason() / resolve_icon_for_lang_key()
   ├─ icon_reason.py                   ← IconRisk / IconResult 資料結構
   ├─ icon_preview_cache.py            ← generate_icon_preview()（64×64 快取）
-  └─ icon_classifier.py               ← ⚠️ 死程式碼：classify_no_icon_reason 無任何 caller
+  └─ icon_classifier.py               ← classify_no_icon_reason：無直接 caller，但經 icon_resolver.py:83 被調用（非死碼）
 ```
 
 ## 主要流程
@@ -59,6 +59,20 @@ translation_tool/core/
 4. `generate_icon_preview()`（icon_preview_cache.py）→ 64×64 PNG
 5. 失敗 → 灰色 placeholder（不中斷 UI）
 
+## icon_resolver.py 決策鏈（extracted_folder 模式）
+
+`resolve_icon_for_lang_key(lang_key, assets_root)` 的解析規則（不假設目錄結構）：
+
+1. **取 key 末段**：`lang_key.split(".")[-1]`（如 `item.actuallyadditions.atomic_reconstructor` → `atomic_reconstructor`）
+2. **取 modid**：`lang_key.split(".")[1]`（index 越界 → 回 None）
+3. **定位 textures 根**：`assets/<modid>/textures`；不存在 → 回 None
+4. **檔名比對**：`_build_icon_index(textures_root)` 以 **png 檔名（不含副檔名）為 key** 建索引（`rglob("*.png")`，重名保留第一個；`@lru_cache(128)` 以 textures root 為快取 key），再 `index.get(key_tail)`
+
+`resolve_icon_with_reason(lang_key, assets_root)`：
+- 命中 → `IconResult(icon_path=..., reason="", risk=None)`
+- 未命中 → `classify_no_icon_reason(lang_key)`（icon_classifier.py，启发式分類）→ `IconResult(icon_path=None, reason, risk)`
+- ⚠️ 注意：`classify_no_icon_reason` 本身**無任何 caller**（死程式碼，見下方差異節），但 `resolve_icon_with_reason` 仍會呼叫它回填 reason/risk
+
 ## JAR 模式 icon 提取（app/icon_index.py + view 內 helpers）
 
 - `build_icon_index(mods_dir)` → `{key: jar://.../texture.png}` 索引，以 modpack hash 做版本快取（`_compute_modpack_hash` / `get_index_path` / `save_icon_index` / `load_icon_index`）
@@ -85,7 +99,7 @@ translation_tool/core/
 舊版 ICON_VIEW_ARCHITECTURE 描述的流程（`_load_entries` → `LangItemRow.__init__` 直接 `resolve_icon_with_reason` + `classify_no_icon_reason` → IconRisk 標籤）**已過時**：
 
 1. icon 解析核心仍走 `icon_resolver` / `icon_reason` / `icon_preview_cache`（由 `lang_item_row.py` 使用）✓
-2. `icon_classifier.classify_no_icon_reason` **已無任何 caller**（死程式碼）
+2. `icon_classifier.classify_no_icon_reason` 無直接 caller，但仍被 `icon_resolver.resolve_icon_with_reason` 呼叫（回填未命中原因）— 非死碼
 3. 新增 JAR 目錄模式（`app/icon_index.py` + `app/icon_reader.py` + `scan_jars`）與 L2 快取
 4. 新增兩層即時搜尋（模組清單 / 詳情列）
 
