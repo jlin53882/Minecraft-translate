@@ -66,6 +66,32 @@ app/views/config/
 - **三層 config 合併**：儲存基底來自 `load_config_json()`（config.json > config.example.json > DEFAULT_CONFIG），儲存後使用者的「預設值」固化進 config.json。
 - **API keys 驗證**：儲存前由 `translation_tool/core/lm_config_rules.py:validate_api_keys_from_ui` 驗證格式。
 
+## 三層合併細節（config_manager.py:load_config）
+
+合併順序：`deep_merge(deep_merge(DEFAULT_CONFIG, example), user_config)` — user 覆蓋 example 覆蓋 DEFAULT_CONFIG：
+
+- **Layer 3** `DEFAULT_CONFIG`：程式碼內建的「唯一真相來源」保底（所有欄位都有定義值）
+- **Layer 2** `config.example.json`：repo 原始碼一部分（新版本補欄位用），不存在或解析失敗回傳 `{}`
+- **Layer 1** `config.json`：使用者實際值；檔案不存在時跳過，JSON 解析失敗時直接回傳 base（用預設）
+
+**例外規則**：`lm_translator.models` 刻意**不做 deep merge**（視為使用者資料，完全替換），避免預設模型列表與使用者設定混在一起誤啟用。
+
+`deep_merge` 本身：key 已存在且兩側皆 dict → 遞迴合併；否則 override 值直接取代（list/str 整組覆蓋）。
+
+## 載入驗證（ATK-C-2，啟動即爆炸）
+
+`load_config` 最後對合併結果做型別驗證，失敗拋 `ConfigValidationError`：
+
+- `lm_translator.keys` 必須是 list（不接受 str）
+- `lm_translator.initial_batch_size_*` 必須是 int
+- `lm_translator.parallel_execution_workers` 必須 int > 0
+- `lm_translator.temperature` 必須 0.0~2.0 數字
+- `lm_translator.models` 必須是 dict
+- `translator.parallel_execution_workers` 必須 int > 0
+- 偵測 `iniital_*`（拼錯）舊鍵 → 僅 warn deprecation（不再被引擎讀取）
+
+`save_config`：寫入後**重新讀檔驗證**（可 dump 即代表結構乾淨）；`get_models_config` 只回傳 `{model: {"enabled": bool}}`，外部亂寫 list/str 被忽略。
+
 ## 維護注意
 
 1. 新增 config 欄位時，需同步更新：`_init_controls`（建立控制項）、`load_config_into_view`（載入）、`save_config_from_view`（儲存）三處。
