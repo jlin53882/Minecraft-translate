@@ -56,8 +56,11 @@ BundlerView.start_bundling_clicked()
 
 ### generator 行為細節
 - **pack.mcmeta / pack.png 來源優先序**：若 root_dir 或 extra_folders 內已存在實際檔案 → 用檔案、跳過 UI 設定並 warn；否則用 UI 欄位。
+  - pack.mcmeta 僅在 `description` 非空**或** `min_format > 0` 時寫入（`_write_pack_mcmeta`，含 `min_format`/`max_format` 字串化）
+  - pack.png 僅接受 `.png/.jpg/.jpeg` 副檔名；UI 來源若與已寫入的 `pack.png` 衝突 → 改名 `pack_1.png`
+- ZIP 壓縮：`ZIP_DEFLATED` + `compresslevel=9`。
 - 子資料夾名為 `root` 時直接放 ZIP 根目錄，其餘以資料夾名為根路徑。
-- root_dir 下的散檔（非資料夾）也打包進 ZIP 根目錄。
+- root_dir 下的散檔（非資料夾）也打包進 ZIP 根目錄（與既有檔名衝突時同樣 `_N` 後綴）。
 - 進度：0.0~0.15 為 pack 檔階段，0.15~0.85 為子資料夾/額外項目階段，1.0 完成。
 - 失敗時移除半成品 ZIP。
 
