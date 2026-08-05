@@ -1,33 +1,21 @@
-# UntranslatedChecker 架構文件
+# UNTRANSLATED_CHECKER_ARCHITECTURE.md
 
 ## 定位與功能
 
-**定位**：翻譯品質把關工具，檢測 en_us 與 zh_tw 之间未翻譯的翻譯鍵（Key）。
+**定位**：翻譯品質把關工具，檢測 en_us 與 zh_tw 之間未翻譯的翻譯鍵（Key），屬 QC 環節（翻譯完成後、打包前）。
 
-**功能**：
-- 比較 en_us 與 zh_tw 兩組 JSON 語言檔
-- 找出 zh_tw 中缺失的翻譯鍵
-- 輸出未翻譯報告至指定資料夾
+**功能**：比較 en_us 與 zh_tw JSON 語言檔 → 找出 zh_tw 中缺失的翻譯鍵 → 輸出未翻譯報告至指定資料夾。
 
-**使用時機**：翻譯完成後執行翻譯結果審查，確認沒有漏譯的 Key。
+## 檔案結構
 
----
+- `app/views/untranslated_checker.py` — `UntranslatedChecker` 元件（約 172 行，`ft.Container`）
+- `app/views/qc_base.py` — 依賴 `QCBase.task_worker()` 執行執行緒任務
+- `app/services.py` — `run_untranslated_check_service(en_dir, tw_dir, out_dir)`（generator）
 
-## 與 Translation Workflow 的關係
+## 與 QCView 的關係
 
-```
-Translation Workflow（翻譯執行）
-        │
-        ▼
-UntranslatedChecker（QC 把關）──→ 發現漏譯 Key ──→ 修補後重新翻譯
-        │
-        ▼
-Output Bundler（打包成品）
-```
-
-UntranslatedChecker 屬於 Quality Control（QC）環節，位於翻譯完成後、打包前，用於確保翻譯完整性。
-
----
+- `UntranslatedChecker(page, file_picker, task_runner)` 由 QCView 建立並佈局在**第一張 Card**（PR1 拆分）
+- QCView 的 `start_task("untranslated")` 仍保留 `run_untranslated_check_service` 作為備用分派（讀 `self.untranslated_checker.en_dir/tw_dir/out_dir`）
 
 ## 主要 UI 元件
 
@@ -36,7 +24,35 @@ UntranslatedChecker 屬於 Quality Control（QC）環節，位於翻譯完成後
 | `en_dir` (TextField) | 英文來源資料夾路徑 |
 | `tw_dir` (TextField) | 繁中來源資料夾路徑 |
 | `out_dir` (TextField) | 報告輸出資料夾路徑 |
-| `start_button` (ElevatedButton) | 開始檢查 |
-| `FilePicker` (on page.overlay) | 資料夾選擇器 |
+| `start_button` (ft.Button) | 開始檢查（SEARCH_OFF icon） |
 
-**任務執行**：依賴 `QCBase.task_worker()`，傳入 `run_untranslated_check_service` 函式與資料夾參數。
+每列路徑欄配 `_create_pick_button(folder_mode=True)`（FOLDER_OPEN icon）。
+
+## 任務執行（_on_start）
+
+```
+_on_start(e)
+  ├─ 驗證三路徑非空（缺漏 → snack「錯誤：請填寫所有路徑！」）
+  └─ task_runner.task_worker(
+         run_untranslated_check_service, (en_dir, tw_dir, out_dir),
+         controls_to_disable=[start_button, en_dir, tw_dir, out_dir],
+     )
+```
+`controls_to_disable` 任務期間禁用，`finally` 自動恢復（由 QCBase 處理）。
+
+## FilePicker 流程
+
+`_pick_file_or_directory` → `_page.run_task(_async_pick_file_or_directory, ...)`（async 包裝）：
+- folder_mode → `get_directory_path()`；否則 `pick_files()`
+- 結果寫回 target_textfield + update；取消 → snack「您已取消選擇」
+
+## 與 Translation Workflow 的關係
+
+```
+Translation Workflow（翻譯執行） → UntranslatedChecker（QC 把關）→ 修補漏譯 Key → Output Bundler（打包）
+```
+
+## 維護注意
+
+1. 此元件**不自己開執行緒**；一律透過注入的 `task_runner`（QCBase）執行，沿用 QC 共用 progress_bar + log_view。
+2. service 必須是 generator；逐筆 yield 的 log 會寫入 QCView 的 LogView（level="info"）。
