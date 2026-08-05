@@ -46,6 +46,17 @@ _on_start(e)
 - folder_mode → `get_directory_path()`；否則 `pick_files()`
 - 結果寫回 target_textfield + update；取消 → snack「您已取消選擇」
 
+## 檢查邏輯（check_untranslated_generator）
+
+1. 掃描 `en_us_dir` 所有 `.json`（`os.walk`），無任何 en_us 檔 → error 結束
+2. 對每個 en_us 檔找 `zh_tw_dir/<相同相對路徑>`（**不替換檔名**，路徑直接對應）：
+   - **找不到對應繁中檔案** → 整個 en_us 檔內容視為未翻譯，**原樣寫入 out_dir**（`total_untranslated_keys += len(en_data)`）
+   - 找到 → `untranslated_keys = en_data.keys() - tw_data.keys()`（**只比 key 集合**，不做值比對）
+3. 有未翻譯 key → 寫報告（僅含未翻譯 key 的 en value）至 out_dir 同相對路徑
+4. 輸出統計：`files_with_missing`（有缺漏的檔案數）+ `total_untranslated_keys`
+
+**注意**：此檢查只偵測「key 缺失」，不偵測「值為空/仍為英文」——那是 `english_residue_checker` 的職責。
+
 ## 與 Translation Workflow 的關係
 
 ```
