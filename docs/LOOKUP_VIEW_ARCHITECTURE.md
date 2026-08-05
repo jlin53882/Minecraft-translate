@@ -57,6 +57,24 @@ batch_lookup_clicked(e)
   - 完成 yield `{log: "--- 批次查詢完成 ---", result: json.dumps(...)}`
   - JSONDecodeError / 其他例外 → yield `{log, error: True}`
 
+## species_cache 查詢邏輯（species_cache.py）
+
+### 格式判定
+- `_SPECIES_NAME_REGEX = ^[A-Z][a-z]+ [a-z]+$`：大寫開頭 + 空格 + 小寫（如 `Felis catus`）
+- `is_potential_species_name(name)`：非 str 或格式不符 → False
+
+### lookup_species_name(name) 決策鏈
+1. 未初始化 → `initialize_species_cache()`（失敗回 None）
+2. **快取命中**（`name in _species_cache_data`）→ 回傳快取值；**空值快取**（`""`，先前查詢失敗標記）→ 回 None（避免重複查詢）
+3. 未命中且格式合法 → `query_wikipedia_and_update_cache(name)` 線上查詢
+4. 格式不合法 → None（不發請求）
+
+### 線上查詢（wikipedia，`_WIKIPEDIA_AVAILABLE`）
+- 查詢前 `time.sleep(_RATE_LIMIT_DELAY)`（config `wikipedia_rate_limit_delay`，預設 0.5s）做 rate limit
+- `wikipedia.page(name, auto_suggest=False)`，取 `page.title.split("(")[0]`（去括號註記）為俗名
+- **成功才寫檔**：記憶體快取 + `species_cache.tsv` append（TSV：`學名\t俗名`）；失敗僅更新記憶體為 `""`（不重複查詢、不寫檔）
+- `PageError` → 回 None；`DisambiguationError` → 取第一個選項遞迴查詢；其他例外 → 回 None
+
 ## 檔案結構
 
 - `app/views/lookup_view.py` — UI（約 195 行）
