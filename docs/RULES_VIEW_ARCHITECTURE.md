@@ -69,6 +69,21 @@ _render_current_page()
 - 合法 → 清除紅框與 error_text
 - 不合法 → `from`/`to` 欄位紅框 + `error_text`（如「正則表達式缺少結尾括號「)」。」）
 
+## 驗證決策鏈（rules_actions.py:validate_rule）
+
+依序檢查，任一失敗即回 `(False, 錯誤訊息)`：
+1. `src.strip()` 為空 → `'from 欄位不可為空'`
+2. `re.compile(src)` 拋 `re.error` → `translate_regex_error`（missing `)` / bad escape / multiple repeat / unterminated char set / unknown extension 對應中文提示）
+3. **重複檢查**：與其他列（`idx != current_index`）的 `from` 相同 → `'⚠ 與第 N 條規則重複'`
+4. **群組引用**：`dst` 中 `\N` / `$N` 引用數 > `compiled.groups` → `'引用群組 \N 超出群組數 M'`
+5. **無效跳脫**：`dst` 含 `\\` 且後非數字（`\\\\(?!\\d)`）→ `'可能存在無效跳脫（\）'`
+
+## 資料載入/儲存核心（config_service.py）
+
+- `load_replace_rules()` / `save_replace_rules()`：包裝 `load_rules_core` / `save_rules_core`，路徑 `REPLACE_RULES_PATH = PROJECT_ROOT / "replace_rules.json"`
+- 載入失敗或檔案不存在時回傳空 list（UI 顯示空表格）；儲存由 `start_save_thread` 背景執行緒呼叫
+- 替換規則最終流向翻譯引擎：`text_processor.load_replace_rules` / `convert_text` / `recursive_translate` 在翻譯時套用
+
 ## 與 lm_config_rules.py 的關係
 
 - RulesView **不直接依賴** `lm_config_rules.py`；後者屬翻譯引擎層（API Key 輪替與提示詞管理）
