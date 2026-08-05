@@ -52,6 +52,41 @@ run_lm_translation_service()               [lm_service.py]
 
 LMView 本身不直接操作 cache_manager，只透過 `write_new_cache_switch` 控制是否寫入快取；實際快取讀寫在 `lm_translator.py` 內部。
 
+## 核心翻譯邏輯（`translate_directory_generator`）
+
+流程階段與進度：
+1. **初始化**（progress 0.0）：`validate_api_keys()` → `reload_translation_cache()`（每次重新讀取分片，手動改快取立即生效）
+2. **掃描**（0.0）：`scan_translatable_files` 分出 patchouli / lang（掃描失敗僅 warn，不中斷）
+3. **抽取**（0.0→0.2）：`extract_items_parallel` 並行抽取，每完成 5% 檔案 yield 一次
+4. **Cache 命中比對**（0.2）：分流兩類，`value_fully_translated()` 判定完整譯文
+5. **批次翻譯**：`translate_items_with_cache_loop`（shared_loop）→ `translate_batch_smart`（main）→ 寫回輸出檔
+
+### Cache 命中判定（lang vs patchouli key 不同）
+
+| 類型 | Key | 命中條件 |
+|------|-----|----------|
+| patchouli | `{path}\|{source_text}` | `dst` 存在 + `value_fully_translated(dst)` |
+| lang | `path`（無 src 複合） | `dst` 存在 + `value_fully_translated(dst)` **且 `entry_src == src_text`**（src 一致才命中） |
+
+- patchouli 無 `source_text` → 直接當待翻譯
+- 命中 → `item["text"] = cached_value`，不送 API
+
+### 批次與速率限制（`lm_translator_main.py`）
+
+- 常數：`RPM_COOLDOWN_SEC=12`、`OVERLOAD_RETRY_WAIT_SEC=12`、`MIN_LANG_BATCH_SIZE=20`、`DEFAULT_BATCH_SIZE=50`、`DEFAULT_DRY_RUN=False`
+- **各 cache_type 預設批次**（`_get_default_batch_size`）：ftbquests=100、kubejs=200、patchouli=100、md=100、lang=300（可被 config `initial_batch_size_*` 覆寫）
+- 每批結束 `batch_size = min(batch_size, remaining_count)` 動態縮小；全部完成時 `time.sleep(rpm_cooldown_sec)`（免費層 RPM 保護）
+- 批次內也支援縮小（400 或 429 相關錯誤 → break 交給 batch shrink）
+
+### 錯誤處理與 Key 輪替（`translate_batch_smart`）
+
+- **只有連續 503（overloaded）才累積 `overload_retry_count`**；其他錯誤重置計數器
+- `overload_retry_count >= 3` → 換 API Key（`rotate_api_key`），成功後重置計數
+- **404** → 模型不存在，跳過該模型
+- **403** → Key 無權限，`rotate_api_key`，無 Key 可換 → RuntimeError「所有 API Key 均無權限」
+- **400** FAILED_PRECONDITION → 此地區未啟用 Gemini 免費方案；否則縮小 batch
+- **429 RESOURCE_EXHAUSTED** → 解析 Quota ID（RPD/RPM）→ 依情況等 retry_after / 換 Key；所有 Key 耗盡回傳 `"ALL_KEYS_EXHAUSTED"`
+
 ## 檔案結構
 
 - `app/views/lm_view.py` — UI（約 335 行）
