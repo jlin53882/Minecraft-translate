@@ -152,6 +152,14 @@ ExtractorView._handle_preview_*_click()
 
 ---
 
+## Mod 檔名清理與增量更新（jar_processor_extract.py）
+
+- **`_normalize_jar_base_name(jar_filename)`**：從 JAR 檔名提取乾淨 Mod ID
+  - 去除 `.jar` 副檔名後，依序：(1) 移除 `-_(neoforge|forge|fabric|quilt|build|release|alpha|beta)_?` 前綴/標記 → 取代為 `-`；(2) `VERSION_REGEX`（`[-_](?:[a-zA-Z]+-)?\d+(?:\.\d+)+(?:[-_.][a-zA-Z0-9]+)*$`）匹配到版本號時截斷其前段；(3) 去除前後 `-_`，結果為空則回退原始檔名
+  - 例：`Botania-1.20.1-443-Forge.jar` → `Botania`
+- **`get_file_hash(data)`**：SHA-256 hexdigest。`extract_from_jar_impl` 用 ZIP entry 的 hash 與既有輸出檔比較，**相同則跳過**（增量更新，重跑不重寫）
+- **`scan_results` 快取**：`run_extraction_process_impl` 先在背景 thread 用 `scan_jars` 預掃所有 JAR 的 zip entry 清單，再傳入 `extract_from_jar_impl` 避免每個 JAR 重複掃描目錄（效能優化）
+
 ## 常見陷阱（維護注意）
 
 1. **不要在 on_update 裡判斷「整段完成」**：generator 會逐 JAR yield 帶 `stats` 的 update，舊邏輯 `pct >= 1.0 or "stats" in update` 會逐 JAR 誤觸發「[完成] 0/0/0」。真正的完成只能等 `run_extraction_loop` 返回後用回傳的累計 stats。
