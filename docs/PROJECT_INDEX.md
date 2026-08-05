@@ -1,6 +1,6 @@
 # Minecraft Translator Flet — 專案索引
 
-> 版本：0.6.0｜最後更新：2026-08-05｜路徑：`C:\Users\admin\Minecraft-translate`
+> 版本：0.6.0｜最後更新：2026-08-05
 
 ---
 
