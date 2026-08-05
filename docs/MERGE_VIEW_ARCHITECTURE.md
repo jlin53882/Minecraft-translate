@@ -33,6 +33,32 @@ MergeView 位於翻譯流程**第二步**（Translate → **Merge** → 寫回 J
 
 欄位即時寫入：`patchouli_skip_en_us_when_zh_cn_exists`、`patchouli_effective_translation_threshold`、`zh_en_letter_threshold`。
 
+## 合併決策邏輯（`lang_merge_pipeline.py:_process_single_mod`）
+
+對每個模組，逐 key 決定最終 zh_tw 值與是否列為待翻譯。優先序如下：
+
+1. **人工 zh_tw 保護**：key 已存在於 output_dir 的 zh_tw.json 且值含 CJK → 直接保留（外部 ZIP 內的 zh_tw 視為普通來源，仍會套用替換規則再處理）。
+2. **zh_tw（ZIP 來源）含中文** → `apply_replace_rules()`（字串）或 `recursive_translate_dict()`（結構）後採用。
+3. **zh_cn 含中文** → 以 `recursive_translate_dict`（內部走 S2TW 轉繁）後採用。
+4. **皆非中文（或 zh_tw/zh_cn 缺值）** → 以 `pick_first_not_none(en_val, cn_val, tw_val)` 取英文來源：
+   - 空字串（來源本身就是 `""`）→ **跳過**（非待翻譯內容）
+   - `is_pure_english()`（有文字且全不含 CJK）→ 寫入 **pending**（`en_us.json` → must_translate_dir）
+   - 含 CJK 但非純英文 → fallback `final_tw.setdefault(key, english_source)` 保留原值
+
+輸出細節：
+- final zh_tw.json **依 key 字典序排序**後寫出（JSON 用 `_write_bytes_atomic`，`.lang` 用 `_write_text_atomic` + `dump_lang_text`）
+- pending 同樣排序後寫入 `must_translate_dir` 的 `en_us.json`（路徑與 final 相同、僅檔名替換）；pending 為空時刪除舊檔
+- 輸出路徑自動剝離 ZIP 統一包裝前綴（單一頂層資料夾且非 assets/book/patchouli_books/resources 時）
+- 檔案格式：來源為 `.lang` → 輸出 `.lang`，否則 `.json`（依 `base_path_hint` 判斷）
+- 單 key 決策含 CJK 判斷：`_contains_cjk`（`CJK_RE` 中日韓，lru_cache(4096) memoize）；純英文判斷 `is_pure_english` 需「至少一段文字」且「全部不含 CJK」
+
+## Patchouli 有效翻譯判定（`lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness`）
+
+- 計算方式：掃描 book 目錄所有檔案的**字串值 CJK 比例**，`ratio >= threshold`（預設 **0.5**）即「effective」
+- 結果以 `(book_root_lower, threshold)` 為 key 存 `_patchouli_eff_cache`（module-level，process 存活期間有效）
+- 用途：`patchouli_skip_zh_cn_switch` 開啟時，zh_cn 已達 effective 的 book 對應 en_us 才跳過
+- **注意**：threshold 同時是 service 的 `patchouli_threshold` 與 UI `patchouli_threshold_field` 的連動值（config `patchouli_effective_translation_threshold`，預設 0.5）
+
 ## Merge 呼叫鏈
 
 ```
