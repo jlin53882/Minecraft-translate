@@ -57,6 +57,23 @@ task_worker(service_func, args_tuple, on_complete, controls_to_disable)
 - folder_mode → `file_picker.get_directory_path()`；否則 `file_picker.pick_files(allow_multiple=False)`
 - 結果寫回 target_textfield；取消 → snack「您已取消選擇」
 
+## 三種檢查服務的比較邏輯
+
+### 簡繁差異比較（JSON 資料夾模式，`variant_comparator.py:compare_variants_generator`）
+- 初始化 `OpenCC('s2twp')` + `load_replace_rules`（與 ftb_translator 相同的轉換鏈）
+- 掃描 `zh_cn_dir` 所有 `.json`，對應 `zh_tw_dir` 中 `zh_cn.json → zh_tw.json` 相對路徑；**找不到對應繁中檔 → 跳過**
+- 逐 key：只比較**兩側皆為 str** 的鍵；`converter.convert(cn_value)` → `apply_replace_rules()` 後與 `tw_value` 比對
+- 有差異 → 寫報告 JSON（`key` / `zh_cn_original` / `zh_cn_converted_to_tw` / `zh_tw_actual`）至 output_dir 同相對路徑
+
+### TSV 簡繁差異（`variant_comparator_tsv.py:compare_variants_tsv_generator`）
+- 單檔模式：讀 TSV，用 `OpenCC('s2twp')` 轉換簡中欄位，輸出 CSV（含 `zh_cn_converted_by_opencc` 欄位）
+
+### 未翻譯檢查（`untranslated_checker.py:check_untranslated_generator`）
+- 掃 `en_dir` 的 en_us 檔，找 `tw_dir` 對應 zh_tw；**找不到對應繁中檔案 → 整檔標記未翻譯**
+- 逐 key：`zh_tw` 缺失或空的 key → 記為未翻譯；寫入 out_dir 報告
+
+三個 service 都包一層 `GLOBAL_LOG_LIMITER.filter()` 過濾高頻日誌，例外時 yield `{log, error: True, progress: 0}`。
+
 ## 維護注意
 
 1. 新增檢查類型：加 UI 元件 + `start_task` 分派分支 + `set_controls_disabled` 清單。
