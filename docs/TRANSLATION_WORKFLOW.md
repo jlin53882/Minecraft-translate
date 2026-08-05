@@ -22,8 +22,8 @@ lm_translator_main.py (入口調度)
 翻譯工作流分為四個主要階段：
 
 1. **JAR Extract** — 從 mod JAR 抽出語言檔（lang / Patchouli / FTB / KubeJS）
-2. **Translate** — 將待翻譯內容批次送入 LLM，产出翻译结果
-3. **Merge** — 将翻譯結果與現有繁體中文合併，產出待翻譯清單
+2. **Translate** — 將待翻譯內容批次送入 LLM，產生翻譯結果
+3. **Merge** — 將翻譯結果與現有繁體中文合併，產出待翻譯清單
 4. **Writeback** — 將合併後的檔案寫回輸出目錄
 
 ## 各階段說明

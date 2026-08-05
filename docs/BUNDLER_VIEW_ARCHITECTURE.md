@@ -26,7 +26,7 @@ BundlerView.start_bundling_clicked()
 - `start_button`：觸發打包
 - `progress_bar` + `log_view`：進度與日誌顯示
 
-路徑選擇使用 **tkinter**（`filedialog`）而非 Flet FilePicker，預設 ZIP 檔名由 `config.json` 的 `output_bundler.output_zip_name` 取得（預設：`可使用翻譯.zip`）。
+路徑選擇使用 **Flet FilePicker**（`file_picker`），預設 ZIP 檔名由 `config.json` 的 `output_bundler.output_zip_name` 取得（預設：`可使用翻譯.zip`）。
 
 ---
 

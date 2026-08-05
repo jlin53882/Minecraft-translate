@@ -51,9 +51,9 @@ mods/ → [Discovery: find_jar_files] → JAR列表
 
 | 元件 | 職責 |
 |------|------|
-| `TaskSession` | 所有長任務的 log / progress / status 集中管理 |
-| `start_extraction(mode)` | 點擊「提取 Lang/Book」→ 觸發對應 generator |
-| `show_preview(mode)` | 點擊「預覽 Lang/Book」→ 觸發 preview generator |
-| UI Poller | 每隔一段時間讀取 session snapshot 更新 progress bar / log |
+| `extractor_view.py` | 按鈕 / 路徑欄位 / 入口分派（`_handle_*_click`） |
+| `extractor_dialog.py` | `open_extractor_dialog()` / `open_preview_dialog()` — 進度+日誌+統計 |
+| `extractor_panels.py` | 左側設定面板組合（路徑 + 動作區） |
+| `extract_service.py` | Service 層：路徑準備 + `run_extraction_loop` 驅動 generator |
 
-ExtractorView 不直接操作核心模組，而是透過 `run_extraction_flow` / `run_preview_flow`（在 `extractor_actions.py`）串接背後的 generator。
+ExtractorView 不直接操作核心模組。詳細架構（含狀態管理 / 取消機制 / dual 統計 / 常見陷阱）見 [`EXTRACTOR_VIEW_ARCHITECTURE.md`](./EXTRACTOR_VIEW_ARCHITECTURE.md)。

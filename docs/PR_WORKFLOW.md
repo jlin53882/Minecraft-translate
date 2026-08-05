@@ -41,7 +41,7 @@
 ## 執行範例：PR62 測試覆蓋率健檢
 
 🚀 **PR62 測試覆蓋率健檢**
-對應 PR： PR62（設計稿：`docs/pr/2026-03-13_1800_PR62_test_coverage_health_check.md`）
+對應 PR： PR62（測試覆蓋率健檢）
 
 ### 1. 執行摘要
 - 目的：確認 PR61 後沒有 guard test 漏掉
@@ -64,9 +64,6 @@
 
 ### 5. 下一步
 - PR62 完成，可進入 PR63（依賴 PR62）或 PR66（依賴 PR62）
-
-> 適用版本：v0.6.0+  
-> 更新日期：2026-03-13
 
 ---
 
@@ -154,16 +151,20 @@
 ## 4. PR 命名規範
 
 ```
-docs/pr/YYYY-MM-DD_HHmm_PR<數字>_<主題>.md
+docs/YYYY-MM-DD_HHmm_PR<數字>_<主題>.md
 ```
 
 範例：
 - `2026-03-13_1800_PR62_test_coverage_health_check.md`
 - `2026-03-13_1900_PR67_lazy_load_optimization.md`
 
+> 註：過去的 PR 設計稿存放於 `docs/pr/`，已於 2026-08 清理刪除；歷史設計決策以 git history 為準。
+
 ---
 
-## 5. 執行順序
+## 5. 執行順序（歷史，已全部完成）
+
+### 第一批（PR62-66）
 
 ### 第一批（PR62-66）
 | PR | 主題 | 依賴 |
@@ -218,9 +219,8 @@ gh release create vX.Y.Z --title "vX.Y.Z" --notes-file release_notes_vX.Y.Z.md
 |------|------|
 | `ITERATION_SOP.md` | 疊代規範 |
 | `docs/GH_WORKFLOW.md` | GitHub 操作流程 |
-| `docs/RELEASE_STRATEGY.md` | Release 策略 |
+| `docs/RELEASE_WORKFLOW.md` | Release 流程 |
 | `docs/DOCSTRING_SPEC.md` | Docstring 規範 |
-| `docs/PR_ROADMAP_FUTURE.md` | 未來 PR 規劃 |
 
 ---
 

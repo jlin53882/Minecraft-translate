@@ -1,7 +1,7 @@
 # 測試策略說明
 
 ## 測試組織
-- **總數量**：1132 個測試（collect-only 收集結果）
+- **總數量**：1905 個測試（collect-only 收集結果）
 - **測試分類**：
   - **單元測試**（unit）：`tests/test_*.py`
   - **表徵測試**（characterization test）：`tests/test_*_characterization.py`
@@ -35,7 +35,7 @@
 ## 如何執行測試
 
 ```bash
-uv run pytest                    # 全部（1132 個）
+uv run pytest                    # 全部（1905 個）
 uv run pytest tests/test_xxx.py  # 單一檔案
 uv run pytest -k "cache"        # 只跑含 "cache" 的測試
 uv run pytest -m "not slow"     # 排除 slow marker 的測試
@@ -60,4 +60,3 @@ uv run pytest --cov=translation_tool --cov=app
 - **不要 mock 太多層次**：unit test 應隔離，專注單一函式邏輯
 - **characterization test 用 `-x`**：遇錯即停，防止意外通過
 - **測試失敗時**：第一步先確認是否為 CI 環境差異（如 `charset_normalizer` 的虛擬環境問題）
-- **現有 11 個 collect 錯誤**：為 `.venv` 依賴問題，非測試本身失敗，不影響本地 `uv run pytest` 執行

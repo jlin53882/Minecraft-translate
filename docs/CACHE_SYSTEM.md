@@ -63,7 +63,7 @@ CacheRuntimeState:
 
 - 每個 cache_type 的資料寫入**分片檔案**（shard）
 - 分片容量：**2500 筆/片**
-- 檔案命名：`.cache_{type}_00123`（遞增流水號）
+- 檔案命名：`{cache_type}_{流水號}.json`（例如 `lang_00001.json`，遞增流水號）
 - 活躍分片標記：`cache_dir/.active`（目前使用中的分片編號）
 
 容量滿時自動輪轉（`force_rotate_shard()` 可強制新建分片）。
@@ -99,11 +99,6 @@ lm_translator_main 翻譯一個 key:
 
 > 低層實作在 `cache_search.py`；一般呼叫端應使用 `cache_manager` façade 的
 > `search_cache()` / `find_similar_translations()`，而非直接引用 `cache_search.py`。
-
-| 功能 | 實作 | 用法 |
-|------|------|------|
-| 全文搜尋 | SQLite FTS5 | `search_cache(query, cache_type, limit)` |
-| 模糊比對 | difflib SequenceMatcher | `find_similar_translations(text, threshold=0.6)` |
 
 ---
 

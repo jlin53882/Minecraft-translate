@@ -1,7 +1,7 @@
 # Cache View 架構
 
 ## 現況說明
-同時存在舊版（`cache_view.py` 3549行 monolithic）和新版的 MVC 架構（`cache_manager/`）。
+同時存在舊版（`cache_view.py` 約 3200 行 monolithic）和新版的 MVC 架構（`cache_manager/`）。
 本文件說明目標架構（即 MVC 版本），以及與舊版的過渡關係。
 
 ## MVC 架構圖（文字版）
@@ -45,7 +45,7 @@ CacheManager（邏輯協調，非類別）
 - `cache_rebuild_index_service` — 重建全文索引
 
 ## 過渡狀態說明
-- **舊版** `cache_view.py`（3549行）：仍是 UI 主入口，繼承 `ft.Column`
+- **舊版** `cache_view.py`（約 3200 行）：仍是 UI 主入口，繼承 `ft.Column`
 - **新版** `cache_manager/`：職責陸續抽離中，目前現況：
   - `cache_overview_panel.py` 已從舊版抽出「總覽頁組裝」
   - `panels/` 下三個面板類別為新 UI 元件

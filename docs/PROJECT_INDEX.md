@@ -1,6 +1,6 @@
 # Minecraft Translator Flet — 專案索引
 
-> 版本：0.6.0｜最後更新：2026-03-22｜路徑：`C:\Users\admin\Desktop\minecraft_translator_flet`
+> 版本：0.6.0｜最後更新：2026-08-05｜路徑：`C:\Users\admin\Minecraft-translate`
 
 ---
 
@@ -15,7 +15,7 @@
 ## 2. 目錄結構
 
 ```
-minecraft_translator_flet/
+Minecraft-translate/
 ├── app/                      # Flet 桌面應用程式（本體）
 │   ├── ui/                   # UI 元件
 │   │   ├── components.py    # 通用元件
@@ -34,6 +34,7 @@ minecraft_translator_flet/
 │   │   ├── lm_view.py             # LM 翻譯頁
 │   │   ├── lookup_view.py         # 查詢頁
 │   │   ├── merge_view.py          # 合併頁
+│   │   ├── pipeline_view.py       # 一鍵批次翻譯頁
 │   │   ├── qc_base.py             # QC 基礎
 │   │   ├── qc_view.py             # QC 檢查頁
 │   │   ├── rules_view.py          # 規則頁
@@ -108,7 +109,7 @@ minecraft_translator_flet/
 │       ├── text_processor.py    # 文字處理
 │       └── ui_logging_handler.py
 │
-├── tests/                     # 測試（160+ 個測試檔）
+├── tests/                     # 測試（178 個測試檔、1905 個測試）
 │   ├── conftest.py            # pytest 全域 fixture
 │   ├── fixtures/              # 測試資料
 │   ├── test_ftb*.py           # FTB 翻譯器測試
@@ -121,10 +122,7 @@ minecraft_translator_flet/
 │   ├── test_icon*.py          # 圖示處理測試
 │   └── test_view_*.py         # View 介面測試
 │
-├── docs/                      # 文件
-│   ├── pr/                    # PR 設計文件
-│   ├── changelog/             # 變更日誌
-│   └── *.md                   # 各種技術文件
+├── docs/                      # 文件（架構／流程／規範）
 │
 ├── workspace/                 # OpenClaw agent 工作區
 ├── tools/                     # 工具腳本
@@ -157,6 +155,7 @@ minecraft_translator_flet/
 | `cache_view.py` | 翻譯快取管理與查詢 |
 | `lm_view.py` | LM 翻譯執行與進度追蹤 |
 | `merge_view.py` | 多語系合併管理 |
+| `pipeline_view.py` | 一鍵批次翻譯（Pipeline 自動化流程） |
 | `extractor_view.py` | JAR/模組內容擷取 |
 | `bundler_view.py` | 翻譯產出打包輸出 |
 | `icon_preview_view.py` | 遊戲道具圖示預覽 |
@@ -270,7 +269,7 @@ app/
 
 ## 8. 測試覆蓋
 
-- **160+ 測試檔**（`tests/test_*.py`）
+- **178 個測試檔**（`tests/test_*.py`，共 1905 個測試）
 - **主要測試分類**：
   - `test_kubejs_*.py` — KubeJS 流程
   - `test_ftbquests_*.py` — FTB Quests 流程
@@ -290,7 +289,7 @@ app/
 | `translation_tool/core/lm_config_rules.py` | LM API 行為設定（batch size / temperature 等）|
 | `translation_tool/utils/config_manager.py` | 應用程式設定管理 |
 | `docs/PR_WORKFLOW.md` | PR 工作流程規範 |
-| `docs/AI_WORKFLOW_MANUAL.md` | AI 代理工作手冊 |
+| `docs/PROJECT_STRUCTURE.md` | 專案結構與模組職責 |
 
 ---
 
@@ -307,4 +306,4 @@ app/
 
 ---
 
-*本文件由 agent 自動維護，最後更新：2026-03-22*
+*本文件由 agent 自動維護，最後更新：2026-08-05*
