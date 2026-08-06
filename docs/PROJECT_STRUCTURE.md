@@ -11,7 +11,7 @@ Minecraft-translate/
 ├── pyproject.toml         # 專案設定與依賴
 ├── app/                   # UI 層（Flet）
 ├── translation_tool/      # 核心翻譯引擎（不含 UI）
-├── tests/                 # 單元測試（178 檔、1905 tests）
+├── tests/                 # 單元測試（176 檔、1905 tests）
 ├── tools/                 # 開發輔助腳本
 └── docs/                  # 專案文件
 ```
@@ -65,7 +65,7 @@ Minecraft-translate/
 
 ### `tests/` — 測試
 
-178 個測試檔、1905 個測試案例（pytest），覆蓋 app/、translation_tool/core/、translation_tool/utils/ 所有模組。
+176 個測試檔、1905 個測試案例（pytest），覆蓋 app/、translation_tool/core/、translation_tool/utils/ 所有模組。
 
 ### `tools/` — 開發工具
 

@@ -8,7 +8,7 @@
 
 **用途**：Minecraft 模組翻譯工具，支援 KubeJS、FTB Quests、Patchouli、Markdown 等多種格式的翻譯 pipeline。提供 Flet 桌面 GUI 介面。
 
-**技術棧**：Python 3.12+｜Flet 0.28.3｜Google Gemini API｜OpenCC
+**技術棧**：Python 3.12+｜Flet 0.85.0+｜Google Gemini API｜OpenCC
 
 ---
 
@@ -35,6 +35,12 @@ Minecraft-translate/
 │   │   ├── lookup_view.py         # 查詢頁
 │   │   ├── merge_view.py          # 合併頁
 │   │   ├── pipeline/              # 一鍵批次翻譯（pipeline_view + 5 dialogs）
+│   │   ├── cache/                 # 舊版快取視圖實驗碼（未接線，待清理）
+│   │   ├── cache_manager/         # 快取視圖抽離模組（actions/state/history/overview，實際被引用）
+│   │   ├── config/                # 設定視圖子模組（config_actions/config_form）
+│   │   ├── extractor/             # 擷取視圖子模組（dialog/panels/state）
+│   │   ├── rules/                 # 規則視圖子模組（rules_actions/state/table）
+│   │   ├── translation/           # 翻譯視圖子模組（translation_actions/panels/state）
 │   │   ├── qc_base.py             # QC 基礎
 │   │   ├── qc_view.py             # QC 檢查頁
 │   │   ├── rules_view.py          # 規則頁
@@ -42,7 +48,6 @@ Minecraft-translate/
 │   │   └── untranslated_checker.py # 未翻譯檢查
 │   ├── logging/              # 日誌模組
 │   ├── services_impl/        # 服務實作
-│   ├── views/                # View 子模組（見上方）
 │   ├── services.py           # 服務協調
 │   ├── startup_tasks.py      # 啟動任務
 │   ├── task_session.py       # 任務 session
@@ -109,7 +114,7 @@ Minecraft-translate/
 │       ├── text_processor.py    # 文字處理
 │       └── ui_logging_handler.py
 │
-├── tests/                     # 測試（178 個測試檔、1905 個測試）
+├── tests/                     # 測試（176 個測試檔、1905 個測試）
 │   ├── conftest.py            # pytest 全域 fixture
 │   ├── fixtures/              # 測試資料
 │   ├── test_ftb*.py           # FTB 翻譯器測試
@@ -161,6 +166,10 @@ Minecraft-translate/
 | `icon_preview_view.py` | 遊戲道具圖示預覽 |
 | `config_view.py` | 全域設定頁面 |
 | `rules_view.py` | 翻譯規則管理 |
+| `lookup_view.py` | 生物/物品名稱查詢 |
+| `qc_view.py` | 翻譯品質檢查（QC） |
+| `translation_view.py` | 翻譯執行與批次控制 |
+| `untranslated_checker.py` | 未翻譯條目檢查 |
 
 ### 4.2 Core 模組（`translation_tool/core/`）
 
@@ -269,7 +278,7 @@ app/
 
 ## 8. 測試覆蓋
 
-- **178 個測試檔**（`tests/test_*.py`，共 1905 個測試）
+- **176 個測試檔**（`tests/test_*.py`，共 1905 個測試）
 - **主要測試分類**：
   - `test_kubejs_*.py` — KubeJS 流程
   - `test_ftbquests_*.py` — FTB Quests 流程
@@ -311,7 +320,7 @@ app/
 | `docs/TRANSLATION_VIEW_ARCHITECTURE.md` | TranslationView（`app/views/translation/`） |
 | `docs/UNTRANSLATED_CHECKER_ARCHITECTURE.md` | UntranslatedChecker（`app/views/untranslated_checker.py`） |
 
-相關系統文件：`JAR_PIPELINE.md`（抽取流程）、`CACHE_SYSTEM.md`（快取資料結構）、`cache_search_optimization.md`（搜尋效能）、`TRANSLATION_WORKFLOW.md`（翻譯流程）。
+相關系統文件：`JAR_PIPELINE.md`（抽取流程）、`CACHE_SYSTEM.md`（快取資料結構）、`cache_search_optimization.md`（搜尋效能）、`TRANSLATION_WORKFLOW.md`（翻譯流程）、`DOCSTRING_SPEC.md`（docstring 規範）、`GH_WORKFLOW.md`（GitHub 操作流程）、`PR_EXECUTION_TYPES.md`（PR 執行類型對照）、`RELEASE_WORKFLOW.md`（Release 操作流程）、`TEST_STRATEGY.md`（測試策略）。
 
 ---
 
@@ -319,7 +328,7 @@ app/
 
 | 套件 | 版本 | 用途 |
 |------|------|------|
-| flet-cli / flet | 0.28.3 | 桌面 GUI |
+| flet-cli / flet | ≥0.85.0 | 桌面 GUI |
 | ftb-snbt-lib | ≥0.4.1 | SNBT 格式解析 |
 | google-genai | ≥1.56.0 | Gemini API |
 | opencc-python-reimplemented | ≥0.1.7 | 簡繁轉換 |
@@ -328,4 +337,4 @@ app/
 
 ---
 
-*本文件由 agent 自動維護，最後更新：2026-08-05*
+*本文件由 agent 自動維護，最後更新：2026-08-06*
