@@ -17,11 +17,14 @@
 
 ---
 
-## Proposed Milestone Tags
-依你提供的 PR 範圍切版：
-- **v0.6.0** → PR1 – PR39（建立可用產品線 + 大量重構/測試護欄）
-- **v0.7.0** → PR40 – PR58（依 roadmap 進一步 pipeline/core/view 拆分；測試先行）
-- **v0.8.0** → next feature improvements（新增功能，不破壞既有契約）
+## Milestones
+
+已發布：
+- **v0.6.0** ✅ → PR1 – PR39（建立可用產品線 + 大量重構/測試護欄）
+- **v0.7.0** ✅ → PR40 – PR58（依 roadmap 進一步 pipeline/core/view 拆分；測試先行）
+- **v0.8.0** ✅ → 後續功能改善（新增功能，不破壞既有契約）
+
+規劃中：
 - **v1.0.0** → first stable release（對外介面/設定格式相對穩定、文件齊全、CI 成熟）
 
 ---
@@ -34,17 +37,6 @@
   3) 在該 commit 上打 tag：`v0.6.0`
   4) 推 tag：`git push origin v0.6.0`
   5) GitHub Release 用同一個 tag（可由 Actions 自動建立）
-
----
-
-## Suggested Labeling for PRs (optional but recommended)
-用 label 讓 release notes 更乾淨：
-- `type:feature`
-- `type:improvement`
-- `type:refactor`
-- `type:tests`
-- `type:docs`
-- `breaking`（若有）
 
 ---
 
