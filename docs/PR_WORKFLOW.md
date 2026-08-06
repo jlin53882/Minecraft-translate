@@ -1,7 +1,7 @@
 # PR 工作流模板
 
 > 適用版本：v0.6.0+  
-> 更新日期：2026-03-13
+> 更新日期：2026-08-06
 
 ---
 
@@ -24,7 +24,7 @@
 ## 3. 測試驗證 (Verification & Quality)
 | 測試項目 | 狀態 | 驗證數據/結果 |
 |----------|------|----------------|
-| Full Regression | [✅/❌] | [例如：171 passed] |
+| Full Regression | [✅/❌] | [例如：1905 passed] |
 | Targeted Tests | [✅/❌] | [例如：42 passed] |
 | Static Analysis | [⚠️/✅] | [例如：F401 警告數] |
 
@@ -54,7 +54,7 @@
 ### 3. 測試驗證
 | 測試項目 | 狀態 | 驗證數據 |
 |----------|------|----------|
-| Full Regression | ✅ | 171 passed |
+| Full Regression | ✅ | 1905 passed |
 | Targeted Tests (cache) | ✅ | 42 passed |
 | Static Analysis (F401) | ⚠️ | 20 個警告（PR70 處理）|
 
@@ -150,23 +150,28 @@
 
 ## 4. PR 命名規範
 
+採用 Conventional Commits 風格，branch / commit / PR title 統一使用 `type(scope): 描述`：
+
 ```
-docs/YYYY-MM-DD_HHmm_PR<數字>_<主題>.md
+分支：   type/scope-description
+Commit： type(scope): 描述
+PR 標題：type(scope): 描述
 ```
+
+type 常用值：`feat` / `fix` / `refactor` / `docs` / `perf` / `test` / `chore` / `ci`
 
 範例：
-- `2026-03-13_1800_PR62_test_coverage_health_check.md`
-- `2026-03-13_1900_PR67_lazy_load_optimization.md`
+- 分支：`docs/extractor-architecture`
+- Commit：`docs: MERGE 補合併決策邏輯（人工 zh_tw 保護 / 優先序）`
+- PR 標題：`docs: 新增 Extractor View 架構文件並修正過時 docs`
 
-> 註：過去的 PR 設計稿存放於 `docs/pr/`，已於 2026-08 清理刪除；歷史設計決策以 git history 為準。
+> 註：過去的 PR 設計稿存放於 `docs/pr/`，已於 2026-08 清理刪除；歷史設計決策以 git history 為準（不再使用 `YYYY-MM-DD_HHmm_PR<數字>_<主題>.md` 命名）。
 
 ---
 
 ## 5. 執行順序（歷史，已全部完成）
 
-### 第一批（PR62-66）
-
-### 第一批（PR62-66）
+以下為 2026-03 的早期批次規劃，已全數完成；現行開發以 GitHub Issue / 需求為準，不再以固定批次編號（PR<數字>）作為命名依據。
 | PR | 主題 | 依賴 |
 |----|------|------|
 | PR62 | 測試覆蓋率健檢 | 獨立 |
@@ -192,18 +197,22 @@ docs/YYYY-MM-DD_HHmm_PR<數字>_<主題>.md
 
 ### 標準 PR 流程
 ```powershell
-# 1. 建立分支
-git checkout -b pr<數字>-<主題>
+# 1. 建立分支（type/ 前綴，見第 4 節）
+git checkout -b docs/extractor-architecture
 
-# 2. 開發與 commit
+# 2. 開發與 commit（Conventional Commits）
 git add .
-git commit -m "PR<數字>: <描述>"
+git commit -m "docs: 補齊 EXTRACTOR 邏輯細節"
 
 # 3. 推送
-git push -u origin pr<數字>-<主題>
+git push -u origin docs/extractor-architecture
 
-# 4. 建立 PR（使用 gh CLI）
-gh pr create --title "PR<數字>: <標題>" --body-file $env:TEMP\pr-body.md
+# 4. 建立 PR（使用 gh CLI，完整路徑與細節見 GH_WORKFLOW.md）
+& "C:\Program Files\GitHub CLI\gh.exe" pr create `
+  --base main `
+  --head docs/extractor-architecture `
+  --title "docs: 新增 Extractor View 架構文件" `
+  --body-file "$env:TEMP\pr-body.md"
 ```
 
 ### Release 流程
