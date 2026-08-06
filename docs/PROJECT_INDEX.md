@@ -1,6 +1,6 @@
 # Minecraft Translator Flet — 專案索引
 
-> 版本：0.6.0｜最後更新：2026-08-05
+> 版本：0.8.0｜最後更新：2026-08-06
 
 ---
 
@@ -285,7 +285,7 @@ app/
 
 | 檔案 | 用途 |
 |------|------|
-| `pyproject.toml` | 專案依賴與版本（v0.6.0）|
+| `pyproject.toml` | 專案依賴與版本（v0.8.0）|
 | `translation_tool/core/lm_config_rules.py` | LM API 行為設定（batch size / temperature 等）|
 | `translation_tool/utils/config_manager.py` | 應用程式設定管理 |
 | `docs/PR_WORKFLOW.md` | PR 工作流程規範 |
