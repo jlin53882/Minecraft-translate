@@ -169,29 +169,7 @@ type 常用值：`feat` / `fix` / `refactor` / `docs` / `perf` / `test` / `chore
 
 ---
 
-## 5. 執行順序（歷史，已全部完成）
-
-以下為 2026-03 的早期批次規劃，已全數完成；現行開發以 GitHub Issue / 需求為準，不再以固定批次編號（PR<數字>）作為命名依據。
-| PR | 主題 | 依賴 |
-|----|------|------|
-| PR62 | 測試覆蓋率健檢 | 獨立 |
-| PR63 | 測試基礎設施建立 | PR62 |
-| PR64 | Docstring 補完 | 獨立 |
-| PR65 | README 更新 | 獨立 |
-| PR66 | Cache 效能優化 | PR62 |
-
-### 第二批（PR67-71）
-| PR | 主題 |
-|----|------|
-| PR67 | Lazy Load 優化 |
-| PR68 | UI Component 抽取 |
-| PR69 | 主題系統建立 |
-| PR70 | 移除廢棄程式碼 |
-| PR71 | Exception 使用一致性評估 |
-
----
-
-## 6. GitHub 操作（Windows）
+## 5. GitHub 操作（Windows）
 
 參考：`docs/GH_WORKFLOW.md`
 
@@ -222,7 +200,7 @@ gh release create vX.Y.Z --title "vX.Y.Z" --notes-file release_notes_vX.Y.Z.md
 
 ---
 
-## 7. 相關檔案
+## 6. 相關檔案
 
 | 檔案 | 用途 |
 |------|------|
@@ -233,7 +211,7 @@ gh release create vX.Y.Z --title "vX.Y.Z" --notes-file release_notes_vX.Y.Z.md
 
 ---
 
-## 8. 注意事項
+## 7. 注意事項
 
 1. **設計前必做現狀分析**：禁止只依賴記憶
 2. **PR 文件用 .md 保存**：設計稿、設計討論、PR 文件都要
