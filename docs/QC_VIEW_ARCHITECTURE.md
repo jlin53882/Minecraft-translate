@@ -2,41 +2,80 @@
 
 ## 定位
 
-QCView 是 **Quality Check（品質檢查）頁**，用於在翻譯完成後進行多種品質驗證。並非翻譯管線的必要環節，而是獨立輔助工具。
+QCView 是 **Quality Check（品質檢查）頁**，翻譯完成後的品質驗證工具，非翻譯管線必要環節。三張 Card 各自獨立，共用同一組 `progress_bar` + `log_view`。
 
----
+## 檔案結構
 
-## QCBase 提供的基底類別
+- `app/views/qc_view.py` — 主視圖（約 348 行）
+- `app/views/qc_base.py` — QCBase 共用執行緒任務執行器（約 95 行）
+- `app/views/untranslated_checker.py` — UntranslatedChecker 元件（PR1 拆分）
+- `app/services.py` — `run_untranslated_check_service` / `run_variant_compare_service` / `run_variant_compare_tsv_service`
 
-`QCBase`（`qc_base.py`）封裝所有 QC 任務共用的執行緒邏輯：
+## QCBase（task_worker）
 
-```
+```python
+QCBase(page, progress_bar, log_view)   # 注入共用 progress_bar + LogView
 task_worker(service_func, args_tuple, on_complete, controls_to_disable)
   → run() [thread]
-      → for update in service_func(*args_tuple): yield update
+      → for update in service_func(*args_tuple):
+            ├─ update["log"] 逐行 → log_view.add(line, level="info")
+            ├─ update["progress"] → progress_bar.value
+            ├─ update["error"] → progress_bar.color = theme.ERROR
+            └─ log_view._list_view.scroll_to(-1) + page.update()
+      finally: 重置 progress_bar、恢復 disabled 控制項
+      完成 → on_complete()
 ```
 
-特點：
-- 統一的 ProgressBar + LogView 更新
-- `controls_to_disable` 列表：任務期間自動禁用指定的 UI 控制項
-- `on_complete` 回調：任務結束後恢復控制項
+- `service_func` 須為 **generator**（逐步 yield update dict）
+- `controls_to_disable` 任務期間自動禁用 UI；`on_complete` 回調恢復
+- LogView 已統一為 LogView widget（level 顏色由 LogView 從 theme 取）
 
-QCView 及子元件（如 `UntranslatedChecker`）都透過 `task_runner.task_worker()` 執行任務。
+## 主要檢查項目（start_task 分派表）
 
----
+| task_type | 服務函式 | 輸入 | 輸出 |
+|-----------|----------|------|------|
+| `untranslated`（備用） | `run_untranslated_check_service` | en_dir / tw_dir / out_dir | Key 缺失檢查報告 |
+| `compare_json` | `run_variant_compare_service` | cn_dir / tw_dir / out_dir | JSON 資料夾簡繁差異報告 |
+| `compare_tsv` | `run_variant_compare_tsv_service` | tsv_path / out_csv_path | TSV 簡繁差異 CSV |
 
-## 主要檢查項目
-
-| 檢查類型 | 服務函式 | 說明 |
-|----------|----------|------|
-| Key 缺失檢查 | `run_untranslated_check_service` | 比對 en_us 與 zh_tw，找出翻譯 key 缺失 |
-| 簡繁差異比較（JSON） | `run_variant_compare_service` | 比對 zh_cn 與 zh_tw JSON 資料夾差異，輸出 JSON 報告 |
-| 簡繁差異比較（TSV） | `run_variant_compare_tsv_service` | 比對 TSV 檔中 zh_cn/zh_tw 欄位差異，輸出 CSV |
-
----
+`start_task(task_type)` 流程：
+1. 清空 log、重置 progress_bar、`set_controls_disabled(True)`
+2. 依 task_type 收集路徑（缺漏 → snack 錯誤 + 復原控制項）
+3. `task_runner.task_worker(target_func, args, on_complete=復原控制項)`
 
 ## UI 架構
 
-三個 `ft.Card` 各自獨立，各自擁有路徑輸入 + 啟動按鈕，共用同一組 `progress_bar` + `log_view`。
+- **Card 1**：`untranslated_checker` 元件（Key 缺失檢查，`UntranslatedChecker(page, file_picker, task_runner)`）
+- **Card 2**：簡繁差異比較 JSON 資料夾模式（`cn_dir_textfield` / `tw_dir_textfield_2` / `compare_out_dir_textfield` / `compare_start_button`）
+- **Card 3**：簡繁差異比較 TSV 單檔案模式（`tsv_file_textfield` / `tsv_out_file_textfield` / `compare_tsv_start_button`）
+- 共用：`progress_bar` + `log_view`（LogView widget，`mode="append"`、`max_lines=2000`）
 
-`UntranslatedChecker` 已拆分為獨立元件（PR1），其實例由 QCView持有並佈局在第一張卡片中。
+## FilePicker 流程
+
+`_create_pick_button(target_textfield, title, folder_mode, file_filter)` → `_pick_file_or_directory()`：
+- 把目標寫入 `self._pending_pick` → `_page.run_task(_async_pick_file_or_directory)`
+- folder_mode → `file_picker.get_directory_path()`；否則 `file_picker.pick_files(allow_multiple=False)`
+- 結果寫回 target_textfield；取消 → snack「您已取消選擇」
+
+## 三種檢查服務的比較邏輯
+
+### 簡繁差異比較（JSON 資料夾模式，`variant_comparator.py:compare_variants_generator`）
+- 初始化 `OpenCC('s2twp')` + `load_replace_rules`（與 ftb_translator 相同的轉換鏈）
+- 掃描 `zh_cn_dir` 所有 `.json`，對應 `zh_tw_dir` 中 `zh_cn.json → zh_tw.json` 相對路徑；**找不到對應繁中檔 → 跳過**
+- 逐 key：只比較**兩側皆為 str** 的鍵；`converter.convert(cn_value)` → `apply_replace_rules()` 後與 `tw_value` 比對
+- 有差異 → 寫報告 JSON（`key` / `zh_cn_original` / `zh_cn_converted_to_tw` / `zh_tw_actual`）至 output_dir 同相對路徑
+
+### TSV 簡繁差異（`variant_comparator_tsv.py:compare_variants_tsv_generator`）
+- 單檔模式：讀 TSV，用 `OpenCC('s2twp')` 轉換簡中欄位，輸出 CSV（含 `zh_cn_converted_by_opencc` 欄位）
+
+### 未翻譯檢查（`untranslated_checker.py:check_untranslated_generator`）
+- 掃 `en_dir` 的 en_us 檔，找 `tw_dir` 對應 zh_tw；**找不到對應繁中檔案 → 整檔標記未翻譯**
+- 逐 key：`zh_tw` 缺失或空的 key → 記為未翻譯；寫入 out_dir 報告
+
+三個 service 都包一層 `GLOBAL_LOG_LIMITER.filter()` 過濾高頻日誌，例外時 yield `{log, error: True, progress: 0}`。
+
+## 維護注意
+
+1. 新增檢查類型：加 UI 元件 + `start_task` 分派分支 + `set_controls_disabled` 清單。
+2. `task_worker` 的 service 必須是 generator；若回傳 list 會 `TypeError: 'list' object is not iterable`。
+3. `log_view._list_view.scroll_to` 直接碰內部屬性（LogView 為 ft.Container）。

@@ -11,7 +11,7 @@ Minecraft-translate/
 ├── pyproject.toml         # 專案設定與依賴
 ├── app/                   # UI 層（Flet）
 ├── translation_tool/      # 核心翻譯引擎（不含 UI）
-├── tests/                 # 單元測試（834 passed）
+├── tests/                 # 單元測試（176 檔、1905 tests）
 ├── tools/                 # 開發輔助腳本
 └── docs/                  # 專案文件
 ```
@@ -20,9 +20,11 @@ Minecraft-translate/
 
 | 子目錄／檔案 | 職責 |
 |---|---|
-| `views/*.py` | 11 個主視圖：config / rules / cache / qc / lookup / icon_preview / bundler / translation / extractor / lm / merge |
-| `views/cache/` | 快取查詢子視圖（QueryPanel / ShardPanel） |
-| `views/translation/` | 翻譯子視圖 |
+| `views/*.py` | 12 個主視圖：config / rules / cache / qc / lookup / icon_preview / bundler / translation / extractor / lm / merge / pipeline |
+| `views/cache_manager/` | 快取視圖 MVC 子模組（panels/overview、query、shard + actions/state/controller） |
+| `views/cache/` | 舊版快取視圖實驗碼（未接線，待清理） |
+| `views/pipeline/` | 一鍵批次翻譯子模組（pipeline_view + 5 個 dialog：extract/merge/translate/bundle/one_click） |
+| `views/config/`、`views/extractor/`、`views/rules/`、`views/translation/` | 各主視圖的 panels/actions/state 子模組 |
 | `services_impl/` | 服務實作（pipeline 業務邏輯），不含 QC/checkers |
 | `services.py` | façade：僅保留 QC/checkers 暂緩線的 re-export |
 | `ui/` | 通用 UI 元件：theme.py（主題）、view_wrapper.py、components.py、keyboard_shortcuts.py、quick_jump.py |
@@ -63,11 +65,15 @@ Minecraft-translate/
 
 ### `tests/` — 測試
 
-146 個測試檔、1132 個測試案例（pytest），覆蓋 app/、translation_tool/core/、translation_tool/utils/ 所有模組。
+176 個測試檔、1905 個測試案例（pytest），覆蓋 app/、translation_tool/core/、translation_tool/utils/ 所有模組。
 
 ### `tools/` — 開發工具
 
 分析腳本（覆蓋率分析、間隙分析）、修補腳本、驗證腳本。
+
+### `docs/` — 專案文件
+
+每個主視圖一份架構文件（`*_VIEW_ARCHITECTURE.md`），涵蓋 UI 元件、呼叫鏈與 service 層關係；相關文件一覽見 `PROJECT_INDEX.md` §10。
 
 ## 入口點
 

@@ -1,65 +1,111 @@
 # Icon Preview 系統架構
 
 ## 定位
-隸屬 **Merge 階段**（第3步）：翻譯完成後，用於校對譯文與對照原版 icon 的視覺化介面。
 
-## 系統組成
+IconPreviewView（`app/views/icon_preview_view.py`，約 1750 行）是**翻譯校對頁**：載入 en_us（原文）＋ zh_tw（譯文）後，以「模組清單 → 單一模組詳情」兩層 UI 逐筆校對翻譯，並顯示每筆 key 對應的 mod icon。
 
-| 模組 | 用途 | 主要函式 |
-|------|------|---------|
-| `icon_classifier.py` | 启发式分類「無 icon」的原因 | `classify_no_icon_reason(lang_key)` → 回傳 (原因, IconRisk) |
-| `icon_reason.py` | 定義診斷結果的資料結構 | `IconRisk` 列舉（IGNORE/WARN/DANGER）、`IconResult` 資料類別 |
-| `icon_resolver.py` | 將 lang key 解析為實際 icon 圖檔路徑 | `resolve_icon_for_lang_key()`、`resolve_icon_with_reason()`（含快取） |
-| `icon_preview_cache.py` | 將原始 icon 放大快取為 64×64 PNG | `generate_icon_preview(icon_path, preview_root)` |
-| `icon_preview_view.py` | Flet 雙層 UI：模組清單 → 翻譯校對 | `IconPreviewView` 繼承 `ft.Column`，含分頁與儲存 |
+支援兩種來源模式（`_detect_source_mode()`）：
+- `jar_directory`：來源是 mods 資料夾（.jar 檔優先）— 直接讀 ZIP 內容，不改磁碟
+- `extracted_folder`：傳統解包資料夾（存在 en_us.json）
+- `empty`：無法識別
 
-## Icon 流程
+## 檔案結構
 
 ```
-翻譯完成（zh_tw.json + en_us.json）
-        │
-        ▼
-IconPreviewView._load_entries()
-  → 掃 en_us.json，逐 key 建立 LangItemRow
-        │
-        ▼
-  LangItemRow.__init__
-    → resolve_icon_with_reason(key, assets_root)
-        ├── resolve_icon_for_lang_key() → 查詢 _build_icon_index()（LRU 快取）
-        └── 查無時 → classify_no_icon_reason() → IconRisk 等級
-        │
-        ▼
-    → generate_icon_preview(icon_path, preview_root)
-        ├── SHA256 前 16 字元作為快取檔名
-        └── 失敗則回傳 None（不中斷 UI）
-        │
-        ▼
-    Flet Image(64×64) 或 灰色 placeholder + 風險標籤
-        │
-        ▼
-使用者校對翻譯 → _on_value_changed → _zh_data[key] 更新
-        │
-        ▼
-_save_current_zh() → 寫入 zh_tw.json
+app/views/icon_preview_view.py        ← 主視圖（雙層 UI + 載入/搜尋/儲存）
+app/icon_index.py                     ← JAR 模式：建立/快取 modid → icon 路徑索引
+app/icon_reader.py                    ← JAR 模式：IconRef 解析 + 從 ZIP 讀 icon bytes
+translation_tool/core/
+  ├─ lang_item_row.py                 ← 單筆 key 列（icon 解析 + 翻譯輸入框）
+  ├─ icon_resolver.py                 ← resolve_icon_with_reason() / resolve_icon_for_lang_key()
+  ├─ icon_reason.py                   ← IconRisk / IconResult 資料結構
+  ├─ icon_preview_cache.py            ← generate_icon_preview()（64×64 快取）
+  └─ icon_classifier.py               ← classify_no_icon_reason：無直接 caller，但經 icon_resolver.py:83 被調用（非死碼）
 ```
 
-## IconPreviewView 架構
+## 主要流程
 
 ```
-IconPreviewView (ft.Column)
-├── 第一層：模組清單（_render_mod_list）
-│   ├── ListTile × N（modid、總數、未翻譯數）
-│   └── 分頁控制（prev / page_info / next）
-│
-└── 第二層：單一模組詳情（_open_mod_detail）
-    ├── back_btn / header
-    ├── LangItemRow × N（核心 UI 元件）
-    │   ├── 左側：ft.Image（icon 預覽 128×128）或灰色 placeholder
-    │   └── 右側：ft.Column
-    │       ├── TextField（繁中翻譯，可編輯）
-    │       ├── TextField（lang key，唯讀）
-    │       ├── TextField（英文原文，唯讀）
-    │       └── Text（風險提示或 icon 解析失敗警告）
-    ├── page_bar（翻譯項目分頁）
-    └── save_btn → _save_current_zh() 寫入 zh_tw.json
+[載入] _on_load_clicked()
+  ├─ _detect_source_mode()
+  │    ├─ extracted_folder → _load_entries()
+  │    │      ├─ 掃 source_root 的 en_us.json → modid 清單
+  │    │      ├─ zh_map：Track1 直接路徑（review_root/<modid>/lang/zh_tw.json）
+  │    │      │          Track2 rglob 補漏（容錯）
+  │    │      └─ 建立 entries（modid/key/en/zh_tw）
+  │    └─ jar_directory → _load_entries_from_jar_directory()
+  │           ├─ Phase 1/3：收集 modid（掃 JAR 內 lang/en_us.json）
+  │           ├─ Phase 2/3：zh_tw 對照表（雙軌制）
+  │           ├─ Phase 3/3：建立 entries + 批次提取 icon（_batch_extract_jar_icons）
+  │           └─ L2 快取（_compute_cache_key + _load_entries_cache_l2 / _save_entries_cache_l2）
+  ├─ _render_mod_list() → 第一層
+  └─ 分頁 + 搜尋（_on_mod_search_change → debounce 300ms）
+
+[校對] _open_mod_detail(modid) → 第二層
+  ├─ _render_current_page()
+  │    ├─ 依 _detail_filtered_entries（搜尋）或 mods[current_modid] 分頁
+  │    └─ 每筆 → LangItemRow(key, en, zh, assets_root, preview_root, icon_path)
+  ├─ 即時搜尋：_on_detail_search_change → debounce（_do_detail_search）
+  └─ _on_value_changed(key, value) → _zh_data 更新
+
+[儲存] _save_current_zh() → 寫入 zh_tw.json
 ```
+
+## Icon 解析（LangItemRow 內）
+
+1. `icon_path` 已提供（JAR 模式 pre-extract）→ 直接使用，跳過 resolve
+2. 否則 `resolve_icon_with_reason(lang_key, assets_root)`（icon_resolver.py，含 LRU 快取）
+3. `_HAS_ICON_READER` 且解析成功 → `IconRef.parse()` + `read_icon_bytes()`（從 ZIP 讀 bytes）→ 寫 preview_root 快取
+4. `generate_icon_preview()`（icon_preview_cache.py）→ 64×64 PNG
+5. 失敗 → 灰色 placeholder（不中斷 UI）
+
+## icon_resolver.py 決策鏈（extracted_folder 模式）
+
+`resolve_icon_for_lang_key(lang_key, assets_root)` 的解析規則（不假設目錄結構）：
+
+1. **取 key 末段**：`lang_key.split(".")[-1]`（如 `item.actuallyadditions.atomic_reconstructor` → `atomic_reconstructor`）
+2. **取 modid**：`lang_key.split(".")[1]`（index 越界 → 回 None）
+3. **定位 textures 根**：`assets/<modid>/textures`；不存在 → 回 None
+4. **檔名比對**：`_build_icon_index(textures_root)` 以 **png 檔名（不含副檔名）為 key** 建索引（`rglob("*.png")`，重名保留第一個；`@lru_cache(128)` 以 textures root 為快取 key），再 `index.get(key_tail)`
+
+`resolve_icon_with_reason(lang_key, assets_root)`：
+- 命中 → `IconResult(icon_path=..., reason="", risk=None)`
+- 未命中 → `classify_no_icon_reason(lang_key)`（icon_classifier.py，启发式分類）→ `IconResult(icon_path=None, reason, risk)`
+- ⚠️ 注意：`classify_no_icon_reason` 本身**無任何 caller**（死程式碼，見下方差異節），但 `resolve_icon_with_reason` 仍會呼叫它回填 reason/risk
+
+## JAR 模式 icon 提取（app/icon_index.py + view 內 helpers）
+
+- `build_icon_index(mods_dir)` → `{key: jar://.../texture.png}` 索引，以 modpack hash 做版本快取（`_compute_modpack_hash` / `get_index_path` / `save_icon_index` / `load_icon_index`）
+- `_try_extract_mod_icon_from_model(jar, modid, zf, names, key)`：解析 model JSON
+  - model index 快取（`_load_model_index_from_cache` / `_build_model_index` / `_save_model_index_to_cache`）
+  - 優先：用 key 轉 model name（`block.<modid>.<name>` → `block/<name>`）精準匹配
+  - fallback：icon/logo/item_icon/block_icon 模型 — **僅當 key namespace 與 modid 一致時**（`block.minecraft.*` 等 vanilla namespace 不套用）
+  - **不做 logo/icon.png 最終 fallback**（錯誤的 icon 比沒有更糟）
+- `_extract_jar_icon` / `_batch_extract_jar_icons`：並行（ThreadPoolExecutor）批次提取並快取
+- `_migrate_old_icon_cache`：舊版快取搬遷
+
+## 主要 UI 元件
+
+| 元件 | 說明 |
+|------|------|
+| `source_root` / `review_root` | 原文（en_us + textures）/ 校對（zh_tw）資料夾 |
+| `mods` dict | modid → entries 列表 |
+| `_entries_cache` / `_cache_meta` | L2 快取（source_root + mode 驗證） |
+| `_mod_search_*` / `_detail_search_*` | 兩層即時搜尋（debounce Timer） |
+| `LangItemRow` | 單筆 key：TextField（繁中可編輯）+ lang key + 英文原文 + icon 預覽 |
+
+## 與舊版文件的差異（2026-08-05 確認）
+
+舊版 ICON_VIEW_ARCHITECTURE 描述的流程（`_load_entries` → `LangItemRow.__init__` 直接 `resolve_icon_with_reason` + `classify_no_icon_reason` → IconRisk 標籤）**已過時**：
+
+1. icon 解析核心仍走 `icon_resolver` / `icon_reason` / `icon_preview_cache`（由 `lang_item_row.py` 使用）✓
+2. `icon_classifier.classify_no_icon_reason` 無直接 caller，但仍被 `icon_resolver.resolve_icon_with_reason` 呼叫（回填未命中原因）— 非死碼
+3. 新增 JAR 目錄模式（`app/icon_index.py` + `app/icon_reader.py` + `scan_jars`）與 L2 快取
+4. 新增兩層即時搜尋（模組清單 / 詳情列）
+
+## 維護注意
+
+1. 新增 icon 解析策略時，優先改 `icon_index.py` / `icon_resolver.py`，不要塞進 view。
+2. `_render_current_page` 每次重建 LangItemRow；entry 需帶 `icon_path` 避免重複解析。
+3. 舊快取檔名以 SHA256 前 16 字元為 key；`_migrate_old_icon_cache` 負責搬遷。
+4. `to_halfwidth()` 是全形轉半形工具（檔名正規化用）。

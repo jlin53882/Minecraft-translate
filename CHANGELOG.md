@@ -23,29 +23,27 @@
 
 ---
 
-## [0.6.0] - 2026-03-12
+## [0.8.0] - 2026-04-02
 
-> 範圍：PR1 ~ PR39（以你目前的 PR 編號切版）
+> 範圍：PR40 ~ PR63
 
 ### Features
-- Flet 桌面 GUI：提供設定、規則、快取管理、翻譯任務（FTB/KubeJS/Markdown）、JAR 提取、機器翻譯、檔案合併等頁面入口。
-- JAR 提取：從模組 JAR 中提取語言檔與 Patchouli 手冊內容（含預覽與報表）。
-- 語言合併：支援 `en_us.json` / `zh_cn.json` / `zh_tw.json` 的保守合併策略，並提供 pending export / quarantine 機制。
-- AI 翻譯（Gemini）：支援批次翻譯、自動重試、縮批、換 key、節流等策略（以不改行為為原則持續重構）。
-- 快取管理：快取分片儲存、全文搜尋索引、歷史版本檢視與套用。
-- 品管/檢查：未翻譯條目、簡繁差異、英文殘留、TSV 版簡繁比較等檢查工具（目前 UI 功能線有凍結/暫緩策略）。
+- **KubeJS reverse_index**：實作雙軌 reverse_index 去重（#40）。
+- **顏色字元校驗**：新增 `color_char_checker` 工具（#41）。
+- **Rich Text Shield**：新增 `rich_text_shield` 脫殼模組（#42）。
+- **Type annotations**：分批補齊 `icon_classifier` / `ui_logging_handler` / `merge_view` / pipeline services（#46 / #48 / #49）。
+- **Icon Preview 重構**：JAR 目錄模式、雙軌 zh_tw 讀取、SnackBar feedback（#51）。
+- **JAR 掃描**：新增多執行緒 `jar_browser` 工具（#53），`jar_processor` 內部改用之（#54）。
+- **Icon 快取**：L2 磁碟快取（#55 / #56）、Icon Model 解析重構 + 即時搜尋 UI（#58）。
+- **ZIP Reader 重構 + 效能**：PR59 ZIP Reader 重構；PR60 ThreadPoolExecutor + 預建立 icon 索引（5 分 → 1-2 分）。
 
-### Improvements
-- 設定與路徑解析：以 project root 為基準，降低 cwd 漂移造成的找不到 config/資源/快取路徑問題。
-- logging：集中化並讓 pipeline 在每次任務啟動時重新同步 logging 設定（維持舊行為、降低 UI 卡頓）。
-- 文件：repo 內已有 `ITERATION_SOP.md`、`docs/`、`docs/pr/` 與長期測試風格筆記（例如 `docs/testing-style-note.md`）。
-
-### Refactoring
-- Service 分層：主線 canonical services 逐步收斂到 `app/services_impl/*`，並讓 `app/services.py` 退為 QC/checkers 暫緩線 façade（避免主線被歷史包袱綁死）。
-- Plugin shared helpers：引入/強化 `translation_tool/plugins/shared/*`，降低多條 pipeline 重複 helper 的風險。
+### Bug Fixes
+- Code Review 全量修復（28 issues，#43）。
+- Icon Preview 覆蓋 bug + Phase4 進度條（#57）；模組搜尋分頁修復（#61）。
+- Audit：LRU ZipFile fd leak、KubeJS O(N²) 優化、py.typed（#62）；L2-L9 LOW/P2 修復（#63）。
 
 ### Tests
-- 建立一批 pytest 測試與 guard tests，用於保護：import contract、path resolution、cache/search 契約、以及 refactor 的關鍵回歸點。
+- Icon Preview 單元測試補寫 30 tests（#52）。
 
 ---
 
@@ -73,3 +71,25 @@
 ---
 
 ## [0.6.0] - 2026-03-12
+
+> 範圍：PR1 ~ PR39（以你目前的 PR 編號切版）
+
+### Features
+- Flet 桌面 GUI：提供設定、規則、快取管理、翻譯任務（FTB/KubeJS/Markdown）、JAR 提取、機器翻譯、檔案合併等頁面入口。
+- JAR 提取：從模組 JAR 中提取語言檔與 Patchouli 手冊內容（含預覽與報表）。
+- 語言合併：支援 `en_us.json` / `zh_cn.json` / `zh_tw.json` 的保守合併策略，並提供 pending export / quarantine 機制。
+- AI 翻譯（Gemini）：支援批次翻譯、自動重試、縮批、換 key、節流等策略（以不改行為為原則持續重構）。
+- 快取管理：快取分片儲存、全文搜尋索引、歷史版本檢視與套用。
+- 品管/檢查：未翻譯條目、簡繁差異、英文殘留、TSV 版簡繁比較等檢查工具（目前 UI 功能線有凍結/暫緩策略）。
+
+### Improvements
+- 設定與路徑解析：以 project root 為基準，降低 cwd 漂移造成的找不到 config/資源/快取路徑問題。
+- logging：集中化並讓 pipeline 在每次任務啟動時重新同步 logging 設定（維持舊行為、降低 UI 卡頓）。
+- 文件：repo 內已有 `ITERATION_SOP.md`、`docs/`、`docs/pr/` 與長期測試風格筆記（例如 `docs/testing-style-note.md`）。
+
+### Refactoring
+- Service 分層：主線 canonical services 逐步收斂到 `app/services_impl/*`，並讓 `app/services.py` 退為 QC/checkers 暫緩線 façade（避免主線被歷史包袱綁死）。
+- Plugin shared helpers：引入/強化 `translation_tool/plugins/shared/*`，降低多條 pipeline 重複 helper 的風險。
+
+### Tests
+- 建立一批 pytest 測試與 guard tests，用於保護：import contract、path resolution、cache/search 契約、以及 refactor 的關鍵回歸點。
