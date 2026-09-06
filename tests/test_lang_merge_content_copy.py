@@ -369,3 +369,305 @@ class TestJsonModuleHandling:
         # 無效的 JSON 會拋出異常
         with pytest.raises(orjson.JSONDecodeError):
             orjson.loads(invalid_json.encode("utf-8"))
+
+
+class TestAllFilesCacheOptimization:
+    """2026-08-04 性能優化: reader.list_all() 改用 all_files_cache 的單元測試。"""
+
+    def test_uses_all_files_cache_when_provided(self, tmp_path):
+        """驗證 process_content_or_copy_file_impl 有 all_files_cache 時，不呼叫 reader.list_all()。"""
+        from unittest.mock import MagicMock
+        from translation_tool.core.lang_merge_content_copy import (
+            process_content_or_copy_file_impl,
+        )
+
+        mock_reader = MagicMock()
+        mock_reader.list_all.return_value = ["assets/test/config.json"]
+
+        def mock_load_config():
+            return {
+                "lang_merger": {"pending_folder_name": "待翻譯"},
+                "lm_translator": {"patchouli": {"dir_names": ["patchouli_books"]}},
+            }
+
+        # 傳入 all_files_cache
+        result = process_content_or_copy_file_impl(
+            mock_reader,
+            input_path="assets/test/config.json",
+            rules=[],
+            output_dir=str(tmp_path / "output"),
+            only_process_lang=False,
+            all_files_cache=["assets/test/config.json"],
+            load_config_fn=mock_load_config,
+            recursive_translate_dict_fn=lambda x, rules: x,
+            get_text_processor_fn=lambda ext: None,
+            write_bytes_atomic_fn=lambda path, data: None,
+            write_text_atomic_fn=lambda path, data: None,
+            quarantine_copy_fn=lambda **kwargs: None,
+            normalize_patchouli_book_root_fn=lambda x: x,
+            patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
+            json_module=MagicMock(),
+        )
+
+        # reader.list_all() 不應被呼叫
+        mock_reader.list_all.assert_not_called()
+        assert result.get("success") is True
+
+    def test_falls_back_to_list_all_when_cache_is_none(self, tmp_path):
+        """驗證 all_files_cache=None 時，仍走 reader.list_all()。"""
+        from unittest.mock import MagicMock
+        from translation_tool.core.lang_merge_content_copy import (
+            process_content_or_copy_file_impl,
+        )
+
+        mock_reader = MagicMock()
+        mock_reader.list_all.return_value = ["assets/test/config.json"]
+
+        def mock_load_config():
+            return {
+                "lang_merger": {"pending_folder_name": "待翻譯"},
+                "lm_translator": {"patchouli": {"dir_names": ["patchouli_books"]}},
+            }
+
+        result = process_content_or_copy_file_impl(
+            mock_reader,
+            input_path="assets/test/config.json",
+            rules=[],
+            output_dir=str(tmp_path / "output"),
+            only_process_lang=False,
+            all_files_cache=None,  # ← None，應 fallback 到 list_all()
+            load_config_fn=mock_load_config,
+            recursive_translate_dict_fn=lambda x, rules: x,
+            get_text_processor_fn=lambda ext: None,
+            write_bytes_atomic_fn=lambda path, data: None,
+            write_text_atomic_fn=lambda path, data: None,
+            quarantine_copy_fn=lambda **kwargs: None,
+            normalize_patchouli_book_root_fn=lambda x: x,
+            patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
+            json_module=MagicMock(),
+        )
+
+        # reader.list_all() 應被呼叫
+        mock_reader.list_all.assert_called_once()
+        assert result.get("success") is True
+
+    def test_all_files_cache_identity_with_list_all(self, tmp_path):
+        """驗證 all_files_cache 與 reader.list_all() 對 ZIP wrapper 偵測行為一致。"""
+        from unittest.mock import MagicMock
+        from translation_tool.core.lang_merge_content_copy import (
+            process_content_or_copy_file_impl,
+        )
+
+        # ZIP 場景: 所有檔案共享一個 wrapper prefix
+        wrapper_files = [
+            "modpack/assets/modid/lang/zh_cn.json",
+            "modpack/assets/modid/lang/en_us.json",
+        ]
+
+        def mock_load_config():
+            return {
+                "lang_merger": {"pending_folder_name": "待翻譯"},
+                "lm_translator": {"patchouli": {"dir_names": ["patchouli_books"]}},
+            }
+
+        # 用 all_files_cache
+        mock1 = MagicMock()
+        mock1.list_all.return_value = wrapper_files
+        result1 = process_content_or_copy_file_impl(
+            mock1,
+            input_path="modpack/assets/modid/textures/icon.png",
+            rules=[],
+            output_dir=str(tmp_path / "output1"),
+            only_process_lang=False,
+            all_files_cache=wrapper_files,
+            load_config_fn=mock_load_config,
+            recursive_translate_dict_fn=lambda x, rules: x,
+            get_text_processor_fn=lambda ext: None,
+            write_bytes_atomic_fn=lambda path, data: None,
+            write_text_atomic_fn=lambda path, data: None,
+            quarantine_copy_fn=lambda **kwargs: None,
+            normalize_patchouli_book_root_fn=lambda x: x,
+            patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
+            json_module=MagicMock(),
+        )
+        # 用 reader.list_all()
+        mock2 = MagicMock()
+        mock2.list_all.return_value = wrapper_files
+        result2 = process_content_or_copy_file_impl(
+            mock2,
+            input_path="modpack/assets/modid/textures/icon.png",
+            rules=[],
+            output_dir=str(tmp_path / "output2"),
+            only_process_lang=False,
+            all_files_cache=None,
+            load_config_fn=mock_load_config,
+            recursive_translate_dict_fn=lambda x, rules: x,
+            get_text_processor_fn=lambda ext: None,
+            write_bytes_atomic_fn=lambda path, data: None,
+            write_text_atomic_fn=lambda path, data: None,
+            quarantine_copy_fn=lambda **kwargs: None,
+            normalize_patchouli_book_root_fn=lambda x: x,
+            patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
+            json_module=MagicMock(),
+        )
+
+        # 兩種方式的結果應該一致
+        assert result1.get("success") == result2.get("success")
+
+
+class TestPatchouliEffectivenessAllNames:
+    """2026-08-04: _compute_patchouli_lang_effectiveness 接受 all_names 參數。"""
+
+    def test_all_names_avoids_list_all(self):
+        """驗證傳入 all_names 時，不呼叫 reader.list_all()。"""
+        from unittest.mock import MagicMock
+        from translation_tool.core.lang_merge_content_copy import (
+            _compute_patchouli_lang_effectiveness,
+            _patchouli_eff_cache
+        )
+        import orjson
+
+        _patchouli_eff_cache.clear()
+
+        mock_reader = MagicMock()
+        mock_reader.list_all.return_value = [
+            "assets/patchouli_books/test_book/zh_cn/category.json",
+            "assets/patchouli_books/test_book/en_us/category.json",
+        ]
+        mock_reader.read_text.return_value = "這是中文內容"
+
+        # 傳入 all_names
+        result = _compute_patchouli_lang_effectiveness(
+            mock_reader,
+            book_root="assets/patchouli_books/test_book/",
+            threshold=0.5,
+            json_module=orjson,
+            all_names=[
+                "assets/patchouli_books/test_book/zh_cn/category.json",
+                "assets/patchouli_books/test_book/en_us/category.json",
+            ],
+        )
+
+        # reader.list_all() 不應被呼叫
+        mock_reader.list_all.assert_not_called()
+        assert "zh_tw" in result
+        assert "zh_cn" in result
+
+    def test_no_all_names_falls_back_to_list_all(self):
+        """驗證不傳 all_names 時，仍呼叫 reader.list_all() (向後相容)。"""
+        from unittest.mock import MagicMock
+        from translation_tool.core.lang_merge_content_copy import (
+            _compute_patchouli_lang_effectiveness,
+            _patchouli_eff_cache
+        )
+        import orjson
+
+        _patchouli_eff_cache.clear()
+
+        mock_reader = MagicMock()
+        mock_reader.list_all.return_value = [
+            "assets/patchouli_books/test_book/zh_cn/category.json",
+        ]
+        mock_reader.read_text.return_value = "這是中文內容"
+
+        result = _compute_patchouli_lang_effectiveness(
+            mock_reader,
+            book_root="assets/patchouli_books/test_book/",
+            threshold=0.5,
+            json_module=orjson,
+        )
+
+        # reader.list_all() 應被呼叫 (zh_tw 和 zh_cn 各一次)
+        assert mock_reader.list_all.call_count == 2
+        assert "zh_tw" in result
+
+
+class TestBytesHandling:
+    """2026-08-05: reader.read_bytes() 回傳 bytes 時，process_content_or_copy_file_impl 必須 decode。"""
+
+    def test_read_bytes_is_decoded_before_str_replace(self, tmp_path):
+        """模擬 reader.read_bytes() 回傳 bytes，確認不拋 TypeError。"""
+        from unittest.mock import MagicMock
+        from translation_tool.core.lang_merge_content_copy import (
+            process_content_or_copy_file_impl,
+        )
+
+        mock_reader = MagicMock()
+        mock_reader.list_all.return_value = ["LICENSE_Test"]
+        # read_bytes 回傳 bytes（模擬 LICENSE 檔案）
+        mock_reader.read_bytes.return_value = b"License text\nwith newlines\n"
+
+        def mock_load_config():
+            return {
+                "lang_merger": {"pending_folder_name": "待翻譯"},
+                "lm_translator": {"patchouli": {"dir_names": ["patchouli_books"]}},
+            }
+
+        output_dir = str(tmp_path / "output")
+        result = process_content_or_copy_file_impl(
+            mock_reader,
+            input_path="LICENSE_Test",
+            rules=[],
+            output_dir=output_dir,
+            only_process_lang=False,
+            all_files_cache=["LICENSE_Test"],
+            load_config_fn=mock_load_config,
+            recursive_translate_dict_fn=lambda x, rules: x,
+            get_text_processor_fn=lambda ext: None,
+            write_bytes_atomic_fn=lambda path, data: None,
+            write_text_atomic_fn=lambda path, data: None,
+            quarantine_copy_fn=lambda **kwargs: None,
+            normalize_patchouli_book_root_fn=lambda x: x,
+            patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
+            json_module=MagicMock(),
+        )
+
+        # 不應拋 TypeError
+        assert result.get("success") is True
+
+    def test_read_bytes_with_processor_handles_bytes(self, tmp_path):
+        """模擬 processor 路徑：read_bytes 回傳 bytes → decode 後傳給 processor。"""
+        from unittest.mock import MagicMock
+        from translation_tool.core.lang_merge_content_copy import (
+            process_content_or_copy_file_impl,
+        )
+
+        processed_content = []
+
+        def mock_processor(raw, translate_fn, rules, path):
+            processed_content.append(raw)
+            return f"processed: {raw}"
+
+        mock_reader = MagicMock()
+        mock_reader.list_all.return_value = ["assets/test/data.txt"]
+        mock_reader.read_bytes.return_value = "中文\r\n內容\r\n".encode("utf-8")
+
+        def mock_load_config():
+            return {
+                "lang_merger": {"pending_folder_name": "待翻譯"},
+                "lm_translator": {"patchouli": {"dir_names": ["patchouli_books"]}},
+            }
+
+        output_dir = str(tmp_path / "output")
+        result = process_content_or_copy_file_impl(
+            mock_reader,
+            input_path="assets/test/data.txt",
+            rules=[],
+            output_dir=output_dir,
+            only_process_lang=False,
+            all_files_cache=["assets/test/data.txt"],
+            load_config_fn=mock_load_config,
+            recursive_translate_dict_fn=lambda x, rules: x,
+            get_text_processor_fn=lambda ext: mock_processor,
+            write_bytes_atomic_fn=lambda path, data: None,
+            write_text_atomic_fn=lambda path, data: None,
+            quarantine_copy_fn=lambda **kwargs: None,
+            normalize_patchouli_book_root_fn=lambda x: x,
+            patch_localized_content_json_fn=lambda *args, **kwargs: {"success": True},
+            json_module=MagicMock(),
+        )
+
+        assert result.get("success") is True
+        # processor 應該收到 decode 後的 str
+        assert len(processed_content) > 0
+        assert isinstance(processed_content[0], str), f"Expected str, got {type(processed_content[0])}"

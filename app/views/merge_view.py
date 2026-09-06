@@ -6,7 +6,6 @@
 import threading
 import time
 from app.views.config.config_actions import load_config_into_view
-from translation_tool.utils.config_manager import load_config
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -14,12 +13,13 @@ from typing import Any
 import flet as ft
 
 from app.views._log import LogView
-from translation_tool.utils.log_unit import log_info
+from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.config_manager import load_config, save_config
 from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service, run_merge_folder_batch_service
 from app.task_session import TaskSession
 from app.ui import theme
 from app.ui.snack import show_snack
+from translation_tool.utils.config_manager import load_config
 from app.ui.components import primary_button, styled_card
 
 
@@ -39,6 +39,7 @@ class MergeView(ft.Column):
     patchouli_skip_zh_cn_switch: ft.Switch
     patchouli_threshold_field: ft.TextField
     zh_en_letter_threshold_field: ft.TextField
+    extracted_merge_switch: ft.Switch
     output_dir_field: ft.TextField
     _zh_cn_disabled_note: ft.Text | None
     zip_list_view: ft.ListView
@@ -123,13 +124,11 @@ class MergeView(ft.Column):
 
         self.session = TaskSession(max_logs=2000)
         self._ui_stop = threading.Event()
+        self._run_output_dir: str | None = None  # 2026-08-04: snapshot for _open_output_folder
         self.selected_zips: list[str] = []
         # 合併統計（用於 DONE 時顯示摘要）
-        self._merge_stats = {
-            "success_zips": 0,
-            "failed_zips": 0,
-            "failed_zip_details": "",
-        }
+        # 2026-08-04: 兼容 ZIP + Folder 兩種模式
+        self._merge_stats: dict[str, Any] = {}
         # LogView widget 接管 append + UI controls 數量控制（取代 LogPresenter）
         # 設定在下面 line ~213 統一處理
 
@@ -150,12 +149,12 @@ class MergeView(ft.Column):
         )
 
         # ── Patchouli 進階設定 ─────────────────────────────────────────────
-        # patchouli_skip_en_us_when_zh_cn_exists: 當 en_us 對應的 zh_tw 或 zh_cn 有「有效翻譯」時，跳過 en_us
+        # patchouli_skip_en_us_when_zh_cn_exists: 優先 zh_tw，無則信任 zh_cn（達門檻時跳過 en_us）
         # - 有效翻譯由 patchouli_effective_translation_threshold（預設 0.5）判定：內容中日韓文字佔比超過此閾值
         # - 此開關只影響 Patchouli Book 的 en_us 資料夾，不影響 root-level lang 檔案
         # - 當 process_zh_cn_switch=False 時，此開關連動 Disabled（因 zh_cn 已被全域略過）
         self.patchouli_skip_zh_cn_switch = ft.Switch(
-            label="允許 zh_cn 觸發跳過 en_us",
+            label="優先使用已有繁中，無則信任簡中（跳過英文）",
             value=False,
             on_change=lambda e: self._on_merge_field_changed("patchouli_skip_en_us_when_zh_cn_exists", e.control.value),
         )
@@ -291,6 +290,10 @@ class MergeView(ft.Column):
 
         def on_input_mode_changed(e=None):
             mode = self.input_mode_group.value
+            if mode == "folder":
+                self.zip_list_view.disabled = True
+            else:
+                self.zip_list_view.disabled = False
             self.zip_panel.visible = mode == "zip"
             self.folder_panel.visible = mode == "folder"
             self.update()
@@ -362,7 +365,7 @@ class MergeView(ft.Column):
                                 ft.Row(
                                     [
                                         ft.Text(
-                                            "允許 zh_cn 觸發跳過 en_us",
+                                            "翻譯來源優先級：繁中 > 簡中(達門檻) > 英文",
                                             weight=ft.FontWeight.W_500,
                                             size=14,
                                             expand=True,
@@ -373,7 +376,7 @@ class MergeView(ft.Column):
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
                                 ft.Text(
-                                    "zh_cn 達門檻時，跳過對應 en_us。",
+                                    "內容中日韓文字佔比達門檻時，視為有效翻譯並跳過英文",
                                     size=12,
                                     color=theme.GREY_600,
                                 ),
@@ -429,6 +432,60 @@ class MergeView(ft.Column):
         self.patchouli_skip_zh_cn_switch.value = lang_merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False)
         self.patchouli_threshold_field.value = str(lang_merger_cfg.get("patchouli_effective_translation_threshold", 0.5))
         self.zh_en_letter_threshold_field.value = str(lang_merger_cfg.get("zh_en_letter_threshold", 2))
+        self.extracted_merge_switch = ft.Switch(
+            label="合併 XX_extracted → assets/(階段 2)",
+            value=True,
+            on_change=lambda e: self._on_merge_field_changed(
+                "enable_extracted_to_assets_merge", e.control.value
+            ),
+        )
+
+        extracted_section = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text(
+                        "檔案合併(階段 2)", weight=ft.FontWeight.W_600, size=15
+                    ),
+                    ft.Container(
+                        content=ft.Column(
+                            [
+                                ft.Row(
+                                    [
+                                        ft.Text(
+                                            "合併 XX_extracted → assets/",
+                                            weight=ft.FontWeight.W_500,
+                                            size=14,
+                                            expand=True,
+                                        ),
+                                        self.extracted_merge_switch,
+                                    ],
+                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                                ft.Text(
+                                    "把 {XX_extracted}/{modid}/lang/*.json 的 key 補到 assets/{modid}/lang/*.json,"
+                                    " 關閉不動(內部未變)。",
+                                    size=12,
+                                    color=theme.GREY_600,
+                                ),
+                            ],
+                            spacing=4,
+                        ),
+                        padding=10,
+                        bgcolor=theme.WHITE,
+                        border_radius=8,
+                    ),
+                ],
+                spacing=10,
+            ),
+            padding=12,
+            bgcolor=theme.GREY_50,
+            border_radius=10,
+        )
+
+        self.extracted_merge_switch.value = lang_merger_cfg.get(
+            "enable_extracted_to_assets_merge", True
+        )
         self._info_container = ft.Container(
             content=ft.Column(
                 [
@@ -497,6 +554,7 @@ class MergeView(ft.Column):
                         general_options_section,
                         zh_cn_section,
                         patchouli_section,
+                        extracted_section,
                     ],
                     spacing=12,
                 ),
@@ -525,22 +583,20 @@ class MergeView(ft.Column):
             ),
         ]
 
-    def pick_zips(self, e: ft.ControlEvent) -> None:
-        """開啟 ZIP 檔案選擇對話框。"""
-        self.file_picker.on_upload = self._on_zip_picked
-        self.file_picker.pick_files(
+    async def pick_zips(self, e: ft.ControlEvent) -> None:
+        """開啟 ZIP 檔案選擇對話框。2026-08-04: 改用 await (桌面版)。"""
+        result = await self.file_picker.pick_files(
             dialog_title="選擇 ZIP 檔案",
             allow_multiple=True,
             allowed_extensions=["zip"],
         )
-
-    def _on_zip_picked(self, e: ft.FilePickerUploadEvent) -> None:
-        """處理 ZIP 檔案選擇結果。"""
-        if not e.files:
+        if not result:
             return
-        for f in e.files:
-            if f.path and f.path not in self.selected_zips:
-                self.selected_zips.append(f.path)
+        # 桌面版回傳 list[FilePickerFile] (每個有 .path)
+        for f in (result if isinstance(result, list) else [result]):
+            path = f.path if hasattr(f, 'path') else str(f)
+            if path and path not in self.selected_zips:
+                self.selected_zips.append(path)
         self._refresh_zip_list()
         self.page.update()
 
@@ -614,6 +670,7 @@ class MergeView(ft.Column):
         # 必須走公開的 .clear() 才能清空現有 log 行,
         # 否則會 AttributeError: 'LogView' object has no attribute 'controls'。
         self.log_view.clear()
+        self.progress_bar.value = 0.0
         self._set_status("執行中", theme.BLUE_200)
 
         self.session.start()
@@ -635,7 +692,7 @@ class MergeView(ft.Column):
                     pass
             else:
                 for _ in run_merge_zip_batch_service(
-                    zip_paths=self.selected_zips,
+                    zip_paths=list(self.selected_zips),  # 2026-08-04 A4: 傳副本避免 race condition
                     output_dir=self.output_dir_field.value,
                     session=self.session,
                     only_process_lang=self.only_lang_checkbox.value,
@@ -649,12 +706,19 @@ class MergeView(ft.Column):
         threading.Thread(target=_run_merge, daemon=True).start()
 
     def _start_ui_poller(self) -> None:
-        """啟動 UI 輪詢器，定期同步進度與日誌。"""
+        """啟動 UI 輪詢器，定期同步進度與日誌。
+
+        2026-08-02 修正:daemon thread 內不能直接 page.update()(Flet 0.85 限制)。
+        所有 update 都透過 page.run_task() 推到 UI thread。
+        """
         self._ui_stop.clear()
         self.log_view.clear()
+        # 2026-08-04 B6: 快照 output_dir,避免合併期間使用者改欄位導致開錯資料夾
+        self._run_output_dir = self.output_dir_field.value
 
-        def poll():
-            while not self._ui_stop.is_set():
+        async def _sync_ui():
+            """在 UI thread 內執行 update。"""
+            try:
                 snap = self.session.snapshot()
                 status = snap["status"]
                 progress = snap["progress"]
@@ -664,7 +728,6 @@ class MergeView(ft.Column):
                     self._set_status("執行中", theme.BLUE_200)
                 elif status == "DONE":
                     self._set_status("任務完成", theme.GREEN_200)
-                    # 直接從 session 取得 service 統計的 summary
                     snap_summary = snap.get("summary")
                     if snap_summary:
                         self._merge_stats = snap_summary
@@ -693,29 +756,42 @@ class MergeView(ft.Column):
                             "failed_zip_details": failed_zip_details,
                         }
                     self._show_merge_summary(self._merge_stats)
+                    # 2026-08-02:DONE/ERROR 後停止 poller,避免無限 background update
+                    self._ui_stop.set()
                 elif status == "ERROR":
                     self._set_status("任務發生錯誤", theme.RED_200)
+                    self._ui_stop.set()
 
                 self.progress_bar.value = progress
 
-                # LogView 接管 append + truncate + scroll
-                self.log_view.sync_from_session(self.session)
-
+                # 2026-08-04 修正: 先 re-enable 按鈕，再 call sync_from_session (內部 page.update())
+                # 否則按鈕 disabled=False 在 page.update() 之後才設，UI 永遠看不到
                 if status in ("DONE", "ERROR"):
                     self.start_button.disabled = False
                     self.zip_list_view.disabled = False
-                    self.page.update()
-                    break
 
-                self.page.update()
+                # LogView 接管 append + truncate + scroll
+                # 內部會自己 page.update()
+                self.log_view.sync_from_session(self.session)
+            except Exception as e:
+                log_warning(f"[MergeView] _sync_ui 錯誤: {e!r}")
+
+        def poll():
+            while not self._ui_stop.is_set():
+                # 透過 page.run_task() 推到 UI thread
+                try:
+                    self.page.run_task(_sync_ui)
+                except Exception as e:
+                    log_warning(f"[MergeView] run_task 錯誤: {e!r}")
                 time.sleep(0.1)
 
         threading.Thread(target=poll, daemon=True).start()
 
     def _set_status(self, text: str, color: str) -> None:
-        """更新狀態晶片顯示。"""
+        """更新狀態晶片顯示。2026-08-04: 加 page.update() 確保 UI 即時反映。"""
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
+        self.page.update()
 
 
     def _show_merge_summary(self, summary: dict[str, Any]) -> None:
@@ -725,9 +801,14 @@ class MergeView(ft.Column):
         pending_name = lang_merger_cfg.get("pending_folder_name", "待翻譯")
         organized_name = lang_merger_cfg.get("pending_organized_folder_name", "待翻譯整理需翻譯")
 
-        s_zips = summary.get("success_zips", 0)
-        f_zips = summary.get("failed_zips", 0)
-        failed_list = summary.get("failed_zips_list", [])
+        # 2026-08-04 修正 A1: 兼容 ZIP (success_zips) 與 Folder (success_folders) 兩種 key
+        s_zips = summary.get("success_zips") or summary.get("success_folders", 0)
+        f_zips = summary.get("failed_zips") or summary.get("failed_folders", 0)
+        failed_list = (
+            summary.get("failed_zips_list")
+            or summary.get("failed_folders_list")
+            or summary.get("failed_zip_details", [])
+        )
         oc = summary.get("output_counts", {})
 
         # 輸出統計 block
@@ -749,11 +830,12 @@ class MergeView(ft.Column):
             else []
         )
 
-        # 失敗 ZIP block
+        # 失敗 ZIP block (2026-08-05: 用獨立 scroll area，避免 472 個失敗超出畫面)
         failed_block = []
         if failed_list:
+            failed_rows = []
             for item in failed_list:
-                failed_block.append(
+                failed_rows.append(
                     ft.Text(
                         f"├─ {item.get('Name', '?')}",
                         size=13,
@@ -761,14 +843,21 @@ class MergeView(ft.Column):
                     )
                 )
                 err = item.get("error", "未知錯誤")
-                # 截斷過長錯誤訊息
                 if len(err) > 80:
                     err = err[:80] + "..."
-                failed_block.append(ft.Text(f"│  └─ {err}", size=12, color="#cccccc"))
+                failed_rows.append(ft.Text(f"│  └─ {err}", size=12, color="#cccccc"))
             failed_block = [
                 ft.Divider(),
                 ft.Text("📋 處理失敗的 ZIP", size=14, weight=ft.FontWeight.BOLD),
-            ] + failed_block
+                ft.Container(
+                    content=ft.ListView(
+                        controls=failed_rows,
+                        height=200,  # 固定高度，獨立捲軸
+                        spacing=2,
+                    ),
+                    padding=5,
+                ),
+            ]
 
         content = ft.Column(
             [
@@ -806,15 +895,15 @@ class MergeView(ft.Column):
                     "開啟輸出資料夾", on_click=lambda e: self._open_output_folder()
                 ),
                 ft.TextButton(
-                    "關閉", on_click=lambda e: self._close_dialog_overlay(dialog)
+                    "關閉", on_click=lambda e: self._close_dialog_overlay()
                 ),
             ],
         )
 
-        # 使用 overlay 方式，穩定性高於 page.open()
-        self.page.overlay.append(dialog)
-        dialog.open = True
-        self.page.update()
+        # 2026-08-02 修正:
+        #   不再用 page.overlay.append + dialog.open = True (Flet 0.85 不能可靠關閉)
+        #   改用 Flet 0.85 內建 page.show_dialog() 完整管理 dialog lifecycle
+        self.page.show_dialog(dialog)
 
     def _open_output_folder(self) -> None:
         """開啟輸出資料夾（使用檔案總管）。"""
@@ -823,15 +912,30 @@ class MergeView(ft.Column):
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
-        subprocess.Popen(["explorer", self.output_dir_field.value], shell=True)
+        # 2026-08-04 B6: 用合併開始時的快照,避免使用者中途改欄位導致開錯資料夾
+        target = getattr(self, "_run_output_dir", None) or self.output_dir_field.value
+        subprocess.Popen(["explorer", target], shell=True)
 
-    def _close_dialog_overlay(self, dialog: ft.AlertDialog) -> None:
-        """關閉 overlay 對話框。"""
+    def _close_dialog_overlay(self) -> None:
+        """關閉頂層 dialog (跟 _show_merge_summary 用 page.show_dialog 對稱)。
+
+        2026-08-02 修正:
+            - 用 Flet 0.85 內建 page.pop_dialog() (對稱 page.show_dialog)
+            - 不再用 page.overlay.remove()(會破壞 Flet dialog 內部狀態)
+            - 不直接設 dialog.open=False (無法可靠觸發 close)
+
+        Notes:
+            page.pop_dialog() 接受可選參數 (specific dialog),
+            無參數會關閉最頂層 (topmost)。
+            確保對應 _show_merge_summary 內 page.show_dialog(dialog) 開啟的 dialog。
+        """
         try:
-            dialog.open = False
-            self.page.update()
-        except Exception:
-            pass
+            self.page.pop_dialog()
+            # 2026-08-04: 先改 progress_bar 再 call _set_status (內部 page.update)
+            self.progress_bar.value = 0.0
+            self._set_status("尚未開始", theme.GREY_400)
+        except Exception as e:
+            log_warning(f"[MergeView] pop_dialog 錯誤: {e!r}")
 
     @property
     def page(self):

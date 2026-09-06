@@ -62,7 +62,7 @@ def test_merge_view_all_checkboxes_and_switches_exist(monkeypatch):
     assert view.process_zh_cn_switch.label == '處理 zh_cn 檔案'
     assert view.process_zh_cn_switch.value is True
 
-    assert view.patchouli_skip_zh_cn_switch.label == '允許 zh_cn 觸發跳過 en_us'
+    assert view.patchouli_skip_zh_cn_switch.label == '優先使用已有繁中，無則信任簡中（跳過英文）'
     assert view.patchouli_skip_zh_cn_switch.value is False
 
 
@@ -212,22 +212,13 @@ def test_merge_view_async_pick_zips(monkeypatch):
     assert view.output_dir_field.value == '/zips'
 
 
-def test_merge_view_on_zip_picked(monkeypatch):
+def test_merge_view_pick_zips_is_async(monkeypatch):
+    """2026-08-04: pick_zips 改為 async/await (桌面版 FilePicker)。"""
+    import asyncio
     monkeypatch.setattr(merge_view, 'TaskSession', _Session)
     monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
-    view.selected_zips = []
-
-    class E:
-        class F:
-            path = '/path/a.zip'
-        class F2:
-            path = '/path/b.zip'
-        files = [F(), F2()]
-
-    view._on_zip_picked(E())
-
-    assert len(view.selected_zips) >= 0
+    assert asyncio.iscoroutinefunction(view.pick_zips)
 
 
 def test_merge_view_skip_zh_cn_switch_exists(monkeypatch):
@@ -249,3 +240,30 @@ def test_merge_view_patchouli_threshold_field_exists(monkeypatch):
     monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
     assert view.patchouli_threshold_field is not None
+
+
+def test_show_merge_summary_handles_large_failed_list(monkeypatch):
+    """2026-08-05: _show_merge_summary 在 472 個失敗 ZIP 時不應 crash。"""
+    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
+    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    view = merge_view.MergeView(mock_page(), mock_filepicker())
+
+    # 模擬 472 個失敗
+    large_failed = []
+    for i in range(472):
+        large_failed.append({"Name": f"mod_{i}.zip", "error": f"Error {i}"})
+
+    summary = {
+        "success_zips": 5,
+        "failed_zips": 472,
+        "failed_zips_list": large_failed,
+        "output_counts": {"lang_output": 100},
+    }
+
+    # 不應拋異常
+    error = None
+    try:
+        view._show_merge_summary(summary)
+    except Exception as e:
+        error = e
+    assert error is None, f"_show_merge_summary crashed with 472 failures: {error}"
