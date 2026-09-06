@@ -165,12 +165,48 @@ def _save_entries_to_active_shards(
         active_shard_file=active_shard_file,
     )
 
+    # ============================================================
+    # force_new_shard=True: 寫入 timestamp 分片，不碰 .active
+    # ============================================================
     if force_new_shard:
-        cur = int((active_file.read_text(encoding="utf-8") or "1").strip())
-        nxt = cur + 1
-        active_file.write_text(f"{nxt:05d}", encoding="utf-8")
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%m%d%H%M%S")
+        seq = 1
+        while True:
+            timestamp_name = f"{cache_type}_{ts}-{seq}.json"
+            try:
+                fd = os.open(str(type_dir / timestamp_name), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
+                break
+            except FileExistsError:
+                seq += 1
+        timestamp_path = type_dir / timestamp_name
+        _write_json_atomic(timestamp_path, entries)
         if logger:
-            logger.info(f"🔁 {cache_type} 手動切新分片 -> {nxt:05d}")
+            logger.info(f"💾 {cache_type} saved (timestamp): {timestamp_path.name} (+{len(entries)} / total={len(entries)})")
+        return
+
+    # ============================================================
+    # force_new_shard=False: 正常 rolling shard 邏輯
+    # ============================================================
+    # 防溢：如果一次寫入的 entries 數量超過 rolling_shard_size，強制建立新 timestamp shard
+    if len(entries) > rolling_shard_size:
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%m%d%H%M%S")
+        seq = 1
+        while True:
+            overflow_name = f"{cache_type}_{ts}-{seq}.json"
+            try:
+                fd = os.open(str(type_dir / overflow_name), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
+                break
+            except FileExistsError:
+                seq += 1
+        overflow_path = type_dir / overflow_name
+        _write_json_atomic(overflow_path, entries)
+        if logger:
+            logger.warning(f"⚠️ {cache_type} overflow ({len(entries)} > {rolling_shard_size}) → timestamp shard: {overflow_path.name}")
+        return
 
     pending_items = list(entries.items())
     while pending_items:
