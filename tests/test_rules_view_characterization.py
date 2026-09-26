@@ -391,3 +391,76 @@ def test_rules_view_defers_ui_calls_until_mounted(monkeypatch):
 
     view.did_mount()
     assert calls == [1]
+
+
+def test_save_validation_is_linear_and_reports_duplicate(monkeypatch):
+    """B1：3 萬條規則驗證要在合理時間內完成，並正確指出重複的規則。"""
+    import time as _time
+
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: None})())
+    view = RulesView(mock_page())
+    rules = [{'from': f'詞{i}', 'to': f'字{i}'} for i in range(30000)]
+    rules.append({'from': '詞123', 'to': 'dup'})
+
+    t0 = _time.perf_counter()
+    failure = view._validate_all(rules)
+    assert _time.perf_counter() - t0 < 5
+    assert failure is not None and failure[0] == 123
+    assert '第 30001 條' in failure[1]
+
+
+def test_save_runs_validation_off_event_loop(monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(RulesView, '_initial_load', lambda self: None)
+    page = mock_page()
+    view = RulesView(page)
+    view.all_rules_data = [{'from': 'a', 'to': 'b', '_rid': 1}]
+    saved = []
+    monkeypatch.setattr('app.views.rules_view.start_save_thread', lambda v, rules: saved.append(rules))
+
+    view.save_rules_clicked(None)
+    assert saved == []  # 點擊當下不在 event loop 上驗證
+    for handler, args in page._tasks:
+        asyncio.run(handler(*args))
+    assert saved == [[{'from': 'a', 'to': 'b'}]]
+
+
+def test_render_page_does_not_scan_all_rules(monkeypatch):
+    """B14：渲染一頁不可對整個規則清單做 list.index（3 萬條時每頁要數秒）。"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: None})())
+    view = RulesView(mock_page())
+
+    class _NoIndexList(list):
+        def index(self, *a, **k):
+            raise AssertionError("不應呼叫 list.index")
+
+    view.all_rules_data = _NoIndexList({'from': f'a{i}', 'to': 'b'} for i in range(500))
+    view.current_page = 5
+    view._render_current_page()
+    visible = [r for r in view.rules_table.rows if r.visible is not False]
+    assert len(visible) == view.page_size
+
+
+def test_render_reuses_rows_and_hides_extras(monkeypatch):
+    """換頁 / 搜尋時重用表格列，只更新內容；多出的列隱藏而非刪除。"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: None})())
+    view = RulesView(mock_page())
+    view.all_rules_data = [{'from': f'a{i}', 'to': f'b{i}'} for i in range(120)]
+    view.current_page = 1
+    view._render_current_page()
+    first_rows = list(view.rules_table.rows)
+
+    view.search_results = view.all_rules_data[:3]
+    view._render_current_page()
+    assert view.rules_table.rows == first_rows  # 同一批控制項
+    shown = [r for r in view.rules_table.rows if r.visible is not False]
+    assert [r.cells[1].content.value for r in shown] == ['a0', 'a1', 'a2']
+
+    view.search_results = None
+    view.current_page = 2
+    view._render_current_page()
+    shown = [r for r in view.rules_table.rows if r.visible is not False]
+    assert len(shown) == view.page_size
+    assert shown[0].cells[1].content.value == f'a{view.page_size}'
+    assert shown[0].cells[0].content.value == str(view.page_size + 1)

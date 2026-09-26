@@ -4,6 +4,8 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+import asyncio
+
 import flet as ft
 from app.ui import theme
 from app.ui.debounce import Debouncer
@@ -451,9 +453,12 @@ class RulesView(ft.Column):
     # 規則驗證模組
     # ---------------------------------------------
 
-    def validate_rule(self, src: str, dst: str, all_rules, current_index):
+    def validate_rule(self, src: str, dst: str, all_rules, current_index, from_index=None):
         """
         驗證規則格式正確性，回傳 (is_valid: bool, msg: str)
+
+        from_index：可選的 {from: [索引...]}（由 _build_from_index 建立）。
+        批次驗證全部規則時傳入，重複檢查就不必每條都掃過整個清單（O(n²) → O(n)）。
         """
         if not src.strip():
             return False, "from 欄位不可為空"
@@ -463,8 +468,14 @@ class RulesView(ft.Column):
         except re.error as err:
             return False, self.translate_regex_error(err)
 
-        for idx, rule in enumerate(all_rules):
-            if idx != current_index and rule.get("from") == src:
+        if from_index is not None:
+            candidates = from_index.get(src, ())
+        else:
+            candidates = (
+                idx for idx, rule in enumerate(all_rules) if rule.get("from") == src
+            )
+        for idx in candidates:
+            if idx != current_index:
                 return False, f"⚠ 與第 {idx + 1} 條規則重複"
 
         group_refs = re.findall(r"(?:\\+(\d+)|\$(\d+))", dst)
@@ -555,32 +566,29 @@ class RulesView(ft.Column):
         end = start + self.page_size
         current_page_data = display_data[start:end]
 
-        self.rules_table.rows.clear()
-        rows_to_display = []
+        # 重用既有的表格列，只更新內容：
+        # 每次都清空重建 50 列（各含兩個多行 TextField）時，Flet 需移除並重新序列化
+        # 所有控制項，3 萬條規則下排序 / 清除搜尋單次約 2 秒；重用後只送出變更的值。
+        # 多出來的列（例如搜尋結果較少時）只隱藏不刪除，清除搜尋時不必重建。
+        rows = self.rules_table.rows
+        needed = len(current_page_data)
+        while len(rows) < needed:
+            rows.append(self.create_rule_row("", "", 0, 0))
+        for extra in rows[needed:]:
+            extra.visible = False
+            extra.data = None
 
-        for rule in current_page_data:
+        for offset, rule in enumerate(current_page_data):
             # 確保有 RID
             if "_rid" not in rule:
                 rule["_rid"] = self._new_rid()
-
-            rid = rule["_rid"]
-            
-            # 計算在 all_rules_data 中的索引（用於刪除操作）
-            try:
-                self.all_rules_data.index(rule)
-            except ValueError:
-                pass
-
-            row = self.create_rule_row(
+            self._fill_rule_row(
+                rows[offset],
                 rule.get("from", ""),
                 rule.get("to", ""),
-                rid,
-                display_no=start + len(rows_to_display) + 1,
+                rule["_rid"],
+                display_no=start + offset + 1,
             )
-            # 搜尋結果不需標記顏色（已過濾顯示）
-            rows_to_display.append(row)
-
-        self.rules_table.rows.extend(rows_to_display)
 
         # 顯示搜尋結果數或總數
         if self.search_results is not None:
@@ -598,7 +606,11 @@ class RulesView(ft.Column):
         self.prev_button.disabled = self.current_page == 1
         self.next_button.disabled = self.current_page == self.total_pages
 
-        self.page.update()
+        # 只刷新規則頁本身（而非整頁 diff）；尚未掛載時退回整頁更新
+        try:
+            self.update()
+        except (AssertionError, RuntimeError):
+            self.page.update()
 
     # --- 互動事件處理 ---
 
@@ -643,6 +655,23 @@ class RulesView(ft.Column):
 
         from_field.update()
         to_field.update()
+
+    @staticmethod
+    def _fill_rule_row(row, from_text, to_text, rid: int, display_no: int):
+        """把既有的表格列改成顯示指定規則（清除先前的驗證錯誤樣式）。"""
+        row.visible = True
+        row.data = rid
+        number_cell, from_cell, to_cell, delete_cell = row.cells
+        number_cell.content.value = str(display_no)
+        for field, name, value in (
+            (from_cell.content, "from", from_text),
+            (to_cell.content, "to", to_text),
+        ):
+            field.value = value
+            field.data = {"rid": rid, "field": name}
+            field.border_color = None
+            field.error_text = None
+        delete_cell.content.data = rid
 
     def create_rule_row(self, from_text, to_text, rid: int, display_no: int):
         """建立規則編輯列 UI 元件"""
@@ -690,29 +719,72 @@ class RulesView(ft.Column):
         else:
             show_snack(self.page, "已在最後一頁", theme.PRIMARY, text_color=theme.WHITE)
 
-    def save_rules_clicked(self, e):
-        # 先驗證
-        """儲存規則點擊事件。"""
-        for idx, rule in enumerate(self.all_rules_data):
+    @staticmethod
+    def _build_from_index(all_rules) -> dict:
+        """建立 {from: [索引...]}，供批次驗證時 O(1) 查重複。"""
+        index: dict = {}
+        for idx, rule in enumerate(all_rules):
+            index.setdefault(rule.get("from"), []).append(idx)
+        return index
+
+    def _validate_all(self, rules):
+        """驗證全部規則；回傳 (錯誤索引, 訊息) 或 None。可在背景執行緒執行。"""
+        from_index = self._build_from_index(rules)
+        for idx, rule in enumerate(rules):
             ok, msg = self.validate_rule(
-                rule["from"], rule["to"], self.all_rules_data, idx
+                rule["from"], rule["to"], rules, idx, from_index=from_index
             )
             if not ok:
-                show_snack(self.page, 
+                return idx, msg
+        return None
+
+    def save_rules_clicked(self, e):
+        """儲存規則點擊事件：驗證（背景執行緒）→ 儲存。
+
+        3 萬條規則時舊版逐條掃描整個清單查重複（O(n²)），UI 約 87 秒無回應。
+        """
+        if getattr(self, "_saving", False):
+            return
+        snapshot = [dict(r) for r in self.all_rules_data]
+
+        def finish(failure):
+            self._saving = False
+            if failure is not None:
+                idx, msg = failure
+                show_snack(self.page,
                     f"第 {idx + 1} 條規則錯誤：{msg}", theme.ERROR
                 , text_color=theme.WHITE)
                 self.current_page = idx // self.page_size + 1
                 self._render_current_page()
                 return
 
-        # 移除 _rid 並過濾
-        clean_rules = [
-            {"from": r.get("from", ""), "to": r.get("to", "")}
-            for r in self.all_rules_data
-            if r.get("from", "").strip()
-        ]
-        show_snack(self.page, "✅ 驗證通過，正在儲存規則…", theme.PRIMARY, text_color=theme.WHITE)
-        return start_save_thread(self, clean_rules)
+            # 移除 _rid 並過濾
+            clean_rules = [
+                {"from": r.get("from", ""), "to": r.get("to", "")}
+                for r in snapshot
+                if r.get("from", "").strip()
+            ]
+            show_snack(self.page, "✅ 驗證通過，正在儲存規則…", theme.PRIMARY, text_color=theme.WHITE)
+            start_save_thread(self, clean_rules)
+
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            finish(self._validate_all(snapshot))
+            return
+
+        self._saving = True
+        show_snack(self.page, "🔎 正在驗證規則…", theme.PRIMARY, text_color=theme.WHITE)
+
+        async def _validate_then_save():
+            try:
+                failure = await asyncio.to_thread(self._validate_all, snapshot)
+            except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
+                self._saving = False
+                show_snack(self.page, f"驗證規則時發生錯誤：{ex}", theme.ERROR, text_color=theme.WHITE)
+                return
+            finish(failure)
+
+        run_task(_validate_then_save)
 
     def add_row_clicked(self, e):
         """新增一列空白規則並跳轉至最後一頁"""
