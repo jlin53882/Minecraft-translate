@@ -15,11 +15,15 @@ import orjson as json
 
 from ..utils.log_unit import log_info, log_exception
 from ..utils.text_processor import recursive_translate_dict, apply_replace_rules
-from .lang_codec import dump_lang_text, parse_lang_text, pick_first_not_none
-from .lang_merge_io import DirReader, quarantine_copy
+from .lang_codec import dump_lang_text, parse_lang_text
+from .lang_merge_io import quarantine_copy
 from .lang_merge_zip_io import (
     _write_bytes_atomic,
     _write_text_atomic,
+)
+from .lang_merge_dict import (
+    contains_cjk as _contains_cjk,
+    is_pure_english as _is_pure_english,
 )
 from .lang_processing_format import dump_json_bytes
 
@@ -35,6 +39,34 @@ def _contains_cjk_str(s: str) -> bool:
     return bool(CJK_RE.search(s))
 
 
+_STANDARD_RESOURCE_DIRS = {"assets", "book", "patchouli_books", "resources"}
+_UNSET = object()
+
+
+def detect_mod_wrapper_prefix(all_names: list[str] | None) -> str | None:
+    """偵測統一包裝前綴（例如 ``MyPack/``），供 _process_single_mod 剝離輸出路徑。
+
+    規則:所有檔名只有一個頂層目錄,且該目錄不是已知標準資源目錄時,
+    回傳 ``"<頂層目錄>/"``;否則回傳 None。
+
+    需傳入原始大小寫的檔名,結果才會和 relative_tw_path 對得上。
+    這是 O(檔案數) 的掃描,呼叫端應只算一次再用 ``wrapper_prefix`` 傳入,
+    避免每個 mod 各掃一次變成 O(mod 數 × 檔案數)。
+    """
+    if not all_names:
+        return None
+    tops = set(
+        n.replace("\\", "/").split("/")[0]
+        for n in all_names
+        if n.replace("\\", "/").split("/")[0]
+    )
+    if len(tops) == 1:
+        candidate = next(iter(tops))
+        if candidate not in _STANDARD_RESOURCE_DIRS:
+            return candidate + "/"
+    return None
+
+
 def _process_single_mod(
     reader,
     paths: Dict[str, str],
@@ -42,6 +74,8 @@ def _process_single_mod(
     output_dir: str,
     must_translate_dir: str,
     errordata_dir: str | None = None,
+    all_files_cache: list[str] | None = None,  # 2026-08-04: 預先算好的檔案列表
+    wrapper_prefix: str | None | object = _UNSET,
 ) -> Dict[str, Any]:
     """處理單一模組（mod）的語言合併流程。
 
@@ -51,35 +85,10 @@ def _process_single_mod(
     支援 ZIP 與資料夾兩種 reader。
     """
 
-    def _contains_cjk(v: Any) -> bool:
-        """Check if value contains CJK characters. Dispatches to memoized str version."""
-        if isinstance(v, str):
-            return _contains_cjk_str(v)
-        if isinstance(v, list):
-            return any(_contains_cjk(x) for x in v)
-        if isinstance(v, dict):
-            return any(_contains_cjk(x) for x in v.values())
-        return False
-
-    def has_any_text(v: Any) -> bool:
-        """結構內是否至少有一段可用的文字（避免空結構被當 pending）"""
-        if isinstance(v, str):
-            return v.strip() != ""
-        if isinstance(v, list):
-            return any(has_any_text(x) for x in v)
-        if isinstance(v, dict):
-            return any(has_any_text(x) for x in v.values())
-        return False
-
-    def is_pure_english(v: Any) -> bool:
-        """
-        判斷是否為「不包含 CJK」的內容（支援結構）。
-        - 需要至少有一段字串
-        - 且所有字串都不含 CJK
-        """
-        if not has_any_text(v):
-            return False
-        return not _contains_cjk(v)
+    # 2026-08-02 重構: _contains_cjk / has_any_text / is_pure_english
+    # 從 _process_single_mod nested 抽出到 lang_merge_dict 模組,
+    # 跟 Stage 2 共用同一個實作避免重複維護。
+    # 在這裡只 import 別名,不重新定義 nested function。
 
     def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
         """ """
@@ -154,18 +163,18 @@ def _process_single_mod(
         # 自動偵測並剝離 ZIP 統一包裝前綴（任何名稱皆適用）
         # 讀取 ZIP 時用原始路徑，只在輸出路徑建構時剝離
         # 已知標準資源目錄（這些目錄名稱本身就是有意義的結構，不剝離）
-        _STANDARD_RESOURCE_DIRS = {"assets", "book", "patchouli_books", "resources"}
-        _all_names = reader.list_all()
-        _wp = None
-        if _all_names:
-            _tops = set(n.replace("\\", "/").split("/")[0] for n in _all_names if n.replace("\\", "/").split("/")[0])
-            if len(_tops) == 1:
-                _candidate = list(_tops)[0]
-                if _candidate not in _STANDARD_RESOURCE_DIRS:
-                    _wp = _candidate + "/"
+        # 2026-08-04 性能優化: 用 caller 預先算好的 all_files_cache / wrapper_prefix,
+        # 避免每個 mod 都重新掃描全部檔名
+        if wrapper_prefix is _UNSET:
+            _all_names = (
+                all_files_cache if all_files_cache is not None else reader.list_all()
+            )
+            _wp = detect_mod_wrapper_prefix(_all_names)
+        else:
+            _wp = wrapper_prefix
 
         def _strip(p):
-            return p[len(_wp):] if _wp and p.startswith(_wp) else p
+            return p[len(_wp) :] if _wp and p.startswith(_wp) else p
 
         final_output_rel = _strip(relative_tw_path)
         final_output_path = os.path.join(output_dir, final_output_rel)
@@ -187,73 +196,24 @@ def _process_single_mod(
         # =============================
         # Step 4 — 逐條判斷合併來源（重點修改）
         # =============================
-        pending = {}
+        # 2026-08-02 重構:把原本 60+ 行的 merge loop 換成單一 helper 函式
+        # merge_lang_dicts 是從 _process_single_mod 拆出來的純函式,
+        # Stage 2 (merge_extracted_to_assets) 會重用同一 helper,
+        # 確保 Stage 1 跟 Stage 2 邏輯一致。
+        from .lang_merge_dict import merge_lang_dicts
 
-        # 所有 key 的集合
-        all_keys = set(cn_data.keys()) | set(tw_src_data.keys()) | set(en_data.keys())
-
-        for key in all_keys:
-            # 1. 若 final_tw 已有人工翻譯（含 CJK），不覆蓋
-            # if key in final_tw and contains_cjk(final_tw[key]):
-            #    continue
-
-            # -----------------------------
-            # 人工 zh_tw 保護（來源感知）
-            # -----------------------------
-            # 只有「已存在於 output_dir 的 zh_tw」才視為人工翻譯並保護
-            # 外部 zip 內的 zh_tw（tw_src_data）仍允許再處理（套規則）
-
-            is_from_output_dir = (
-                key in final_tw and target_has_tw  # 代表 output_dir 已存在 zh_tw.json
-            )
-
-            if is_from_output_dir and _contains_cjk(final_tw.get(key, "")):
-                # ✔ 人工翻譯 → 不動
-                continue
-
-            tw_val = tw_src_data.get(key)
-            cn_val = cn_data.get(key)
-            en_val = en_data.get(key)
-
-            # 2. zh_tw（ZIP）若含中文 → 優先使用
-            # if contains_cjk(tw_val):
-            #    #final_tw[key] = tw_val # 直接使用 ZIP 內的 zh_tw
-            #    final_tw[key] = apply_replace_rules(tw_val, rules) # 進行規則處理
-            #    continue
-
-            if _contains_cjk(tw_val):
-                if isinstance(tw_val, str):
-                    final_tw[key] = apply_replace_rules(tw_val, rules)
-                else:
-                    final_tw[key] = recursive_translate_dict(tw_val, rules)
-                continue
-
-            # 3. zh_cn 若含中文 → 用 S2TW 翻譯
-            if _contains_cjk(cn_val):
-                final_tw[key] = recursive_translate_dict(cn_val, rules)
-                continue
-
-            # 4. zh_tw 與 zh_cn 皆為英文 → 視為未翻完，寫入 pending
-            # english_source = en_val or cn_val or tw_val
-            english_source = pick_first_not_none(en_val, cn_val, tw_val)
-            if english_source is None:
-                english_source = ""
-
-            # -----------------------------
-            # 過濾空字串（來源本來就是 ""）
-            # -----------------------------
-            if isinstance(english_source, str) and english_source.strip() == "":
-                # 空字串不是待翻譯內容，直接跳過
-                continue
-
-            if is_pure_english(english_source):
-                pending[key] = english_source
-                continue
-
-            # 5. fallback 保護
-            if english_source is None:
-                english_source = ""
-            final_tw.setdefault(key, english_source)
+        final_tw, pending = merge_lang_dicts(
+            cn_data=cn_data,
+            tw_src_data=tw_src_data,
+            en_data=en_data,
+            existing_tw=final_tw,
+            rules=rules,
+            apply_replace_rules=apply_replace_rules,
+            recursive_translate_dict=recursive_translate_dict,
+            contains_cjk=_contains_cjk,
+            is_pure_english=_is_pure_english,
+            is_from_output_dir=target_has_tw,
+        )
 
         # =============================
         # Step 5 — 寫入 pending.json

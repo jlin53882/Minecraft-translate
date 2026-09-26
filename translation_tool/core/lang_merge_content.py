@@ -9,18 +9,19 @@ from __future__ import annotations
 import orjson as json
 
 from ..utils.config_manager import load_config
-from ..utils.text_processor import apply_replace_rules  # noqa: F401
+from ..utils.text_processor import apply_replace_rules
 from ..utils.text_processor import recursive_translate_dict
 from .lang_codec import normalize_patchouli_book_root
 from .lang_processing_format import get_text_processor
-from .lang_merge_content_copy import process_content_or_copy_file_impl
+from .lang_merge_content_copy import _UNSET, process_content_or_copy_file_impl
 from .lang_merge_content_patchers import patch_localized_content_json_impl
 from .lang_merge_pending import export_filtered_pending_impl, remove_empty_dirs_impl
-from .lang_merge_io import DirReader, quarantine_copy
+from .lang_merge_io import quarantine_copy
 from .lang_merge_zip_io import (
     _write_bytes_atomic,
     _write_text_atomic,
 )
+
 
 def _patch_localized_content_json(
     reader,
@@ -43,6 +44,7 @@ def _patch_localized_content_json(
         json_module=json,
     )
 
+
 def _process_content_or_copy_file(
     reader,
     input_path: str,
@@ -50,6 +52,7 @@ def _process_content_or_copy_file(
     output_dir: str,
     only_process_lang: bool = False,
     all_files_cache=None,
+    wrapper_prefix=_UNSET,
     patchouli_eff_cache: dict | None = None,
     patchouli_output_dir: str | None = None,
     other_output_dir: str | None = None,
@@ -67,6 +70,7 @@ def _process_content_or_copy_file(
         output_dir,
         only_process_lang=only_process_lang,
         all_files_cache=all_files_cache,
+        wrapper_prefix=wrapper_prefix,
         patchouli_eff_cache=patchouli_eff_cache,
         load_config_fn=load_config,
         recursive_translate_dict_fn=recursive_translate_dict,
@@ -86,9 +90,11 @@ def _process_content_or_copy_file(
         zh_en_threshold=zh_en_threshold,
     )
 
+
 def remove_empty_dirs(root_dir: str):
     """包裝函式：遞迴刪除指定目錄下所有空的子資料夾。"""
     return remove_empty_dirs_impl(root_dir)
+
 
 def export_filtered_pending(pending_root: str, output_root: str, min_count: int):
     """包裝函式：將 pending_root 中條目數 >= min_count 的 pending.json 複製到 output_root（輸出前會先清除舊輸出目錄）。"""
@@ -98,6 +104,7 @@ def export_filtered_pending(pending_root: str, output_root: str, min_count: int)
         min_count,
         json_module=json,
     )
+
 
 __all__ = [
     "_patch_localized_content_json",
