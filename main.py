@@ -55,7 +55,7 @@ def bootstrap_runtime():
 
 def main(page: ft.Page):
     """
-    Flet 應用程式的主要 entry point，由 ft.app(target=main) 觸發。
+    Flet 應用程式的主要 entry point，由 ft.run(main) 觸發。
 
     職責依序：
     1. 設定視窗外觀（標題、尺寸、顏色主題）
@@ -296,4 +296,4 @@ if __name__ == "__main__":
         # 印出訊息後仍嘗試啟動（讓使用者能看到 GUI 介面）
         print(f"致命錯誤：配置或日誌系統初始化失敗！錯誤: {e}")
 
-    ft.app(target=main)
+    ft.run(main)
