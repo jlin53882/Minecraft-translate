@@ -4,16 +4,17 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+import heapq
 import os
 import re
 import threading
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 import orjson
 from opencc import OpenCC
 
 from .config_access import resolve_runtime_path
-from .log_unit import log_info, log_warning, log_error
+from .log_unit import log_error, log_info, log_warning
 
 # legacy seam：保留給既有 monkeypatch/tests，用新 helper 實作
 resolve_project_path = resolve_runtime_path
@@ -38,100 +39,155 @@ def get_converter():
 # =========================
 # replace rules 快取（執行緒安全）
 # =========================
-_RULES_LOCAL = threading.local()  # 每執行緒獨立的規則快取
+_RULES_CACHE_LOCK = threading.Lock()
+# id(規則清單) → (規則清單本身, 長度, 編譯結果)；保留清單參考避免 id 被重用
+_RULES_CACHE: dict[int, tuple[list, int, "_CompiledRules"]] = {}
+_RULES_CACHE_MAX = 4
 
 
-def _get_rules_cache():
-    """取得目前執行緒的規則快取，確保已初始化。"""
-    if not hasattr(_RULES_LOCAL, "literal_rules"):
-        _RULES_LOCAL.literal_rules = []
-        _RULES_LOCAL.regex_rules = []
-        _RULES_LOCAL.rule_keywords = set()
-    return _RULES_LOCAL
+class _CompiledRules:
+    """預先整理好的替換規則（依規則清單建立一次，所有執行緒共用、唯讀）。
 
-
-def _init_replace_rules_cache(rules: List[Dict[str, str]]):
-    """初始化替換規則快取（執行緒安全，每執行緒獨立）。
-
-    參數：
-        rules: 規則資料列表
+    固定字串規則維持原本「依序（長詞優先）逐條 replace」的語意，
+    但只檢查「前兩個字（單字規則為該字）出現在目前文字中」的規則：
+    - by_prefix：規則前綴 → 規則索引（遞增）
+    - 套用一條規則後，重新計算文字中新出現的前綴並把對應（索引較後）的規則加入候選，
+      因此串接替換（dst 內含其他規則的 src）結果與逐條檢查完全相同。
     """
-    cache = _get_rules_cache()
 
-    # 已初始化過，直接跳過
-    if cache.literal_rules or cache.regex_rules or cache.rule_keywords:
-        return
+    def __init__(self, rules: List[Dict[str, str]]):
+        literal_rules: list[tuple[str, str]] = []
+        regex_rules: list[tuple[re.Pattern, str]] = []
+        keywords: set[str] = set()
 
-    literal_rules = []
-    regex_rules = []
-    keywords = set()
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            if "from" not in rule or "to" not in rule:
+                continue
 
-    for rule in rules:
-        if not isinstance(rule, dict):
-            continue
-        if "from" not in rule or "to" not in rule:
-            continue
+            src = rule["from"]
+            dst = rule["to"]
 
-        src = rule["from"]
-        dst = rule["to"]
-
-        looks_like_regex = any(ch in src for ch in ".?*[]()\\")
-        if looks_like_regex:
-            try:
-                dst_fixed = re.sub(r"\\\\(\d+)", r"\\\1", dst)
-                dst_fixed = re.sub(r"\$(\d+)", r"\\\1", dst_fixed)
-                pattern = re.compile(src)
-                regex_rules.append((pattern, dst_fixed))
-            except re.error:
+            looks_like_regex = any(ch in src for ch in ".?*[]()\\")
+            if looks_like_regex:
+                try:
+                    dst_fixed = re.sub(r"\\\\(\d+)", r"\\\1", dst)
+                    dst_fixed = re.sub(r"\$(\d+)", r"\\\1", dst_fixed)
+                    pattern = re.compile(src)
+                    regex_rules.append((pattern, dst_fixed))
+                except re.error:
+                    literal_rules.append((src, dst))
+                    if src:
+                        keywords.add(src[:2])
+            else:
                 literal_rules.append((src, dst))
                 if src:
                     keywords.add(src[:2])
-        else:
-            literal_rules.append((src, dst))
+
+        literal_rules.sort(key=lambda x: len(x[0]), reverse=True)
+
+        self.literal_rules = literal_rules
+        self.regex_rules = regex_rules
+        # 與舊版相同的「是否可能命中」預檢：規則前兩字（去空白後）出現在去空白的文字中
+        self.spaceless_keywords = {k.replace(" ", "") for k in keywords}
+        self.keyword_lengths = sorted({len(k) for k in self.spaceless_keywords})
+        by_prefix: dict[str, list[int]] = {}
+        for idx, (src, _dst) in enumerate(literal_rules):
             if src:
-                keywords.add(src[:2])
+                by_prefix.setdefault(src[:2], []).append(idx)
+        self.by_prefix = by_prefix
 
-    literal_rules.sort(key=lambda x: len(x[0]), reverse=True)
+    def may_hit(self, text: str) -> bool:
+        """等同舊版逐條 `k in text or k 去空白 in text 去空白` 的預檢（O(文字長度)）。"""
+        if not self.spaceless_keywords:
+            return True
+        if "" in self.spaceless_keywords:
+            return True
+        compact = text.replace(" ", "")
+        keys = self.spaceless_keywords
+        for n in self.keyword_lengths:
+            for i in range(len(compact) - n + 1):
+                if compact[i : i + n] in keys:
+                    return True
+        return False
 
-    cache.literal_rules = literal_rules
-    cache.regex_rules = regex_rules
-    cache.rule_keywords = keywords
+    @staticmethod
+    def _grams(text: str) -> set[str]:
+        """文字中所有單字與相鄰兩字（規則前綴只可能是其中之一）。"""
+        grams = set(text)
+        grams.update(text[i : i + 2] for i in range(len(text) - 1))
+        return grams
+
+    def apply_literals(self, text: str) -> str:
+        literal_rules = self.literal_rules
+        by_prefix = self.by_prefix
+        seen = self._grams(text)
+        heap: list[int] = []
+        queued: set[int] = set()
+        for gram in seen:
+            for idx in by_prefix.get(gram, ()):
+                queued.add(idx)
+                heap.append(idx)
+        heapq.heapify(heap)
+        while heap:
+            idx = heapq.heappop(heap)
+            src, dst = literal_rules[idx]
+            if src not in text:
+                continue
+            text = text.replace(src, dst)
+            # 取代後可能出現新的前綴（dst 內部或與前後文相接處）→ 之後的規則也列入候選
+            for gram in self._grams(text) - seen:
+                seen.add(gram)
+                for later in by_prefix.get(gram, ()):
+                    if later > idx and later not in queued:
+                        queued.add(later)
+                        heapq.heappush(heap, later)
+        return text
+
+
+def _get_compiled_rules(rules: List[Dict[str, str]]) -> _CompiledRules:
+    """依規則清單取得（或建立）編譯好的規則。
+
+    以清單物件本身與長度判斷：規則變更後重新載入（新清單）或就地增刪時
+    都會自動重建（舊版每個執行緒只建立一次，之後規則改了也不會生效）。
+    不同執行緒使用不同規則清單時各自取得對應結果，互不污染。
+    """
+    entry = _RULES_CACHE.get(id(rules))
+    if entry is not None and entry[0] is rules and entry[1] == len(rules):
+        return entry[2]
+    compiled = _CompiledRules(rules)
+    with _RULES_CACHE_LOCK:
+        if len(_RULES_CACHE) >= _RULES_CACHE_MAX:
+            _RULES_CACHE.pop(next(iter(_RULES_CACHE)))
+        _RULES_CACHE[id(rules)] = (rules, len(rules), compiled)
+    return compiled
 
 
 def apply_replace_rules(text: str, rules: List[Dict[str, str]]) -> str:
-    """應用替換規則到給定的文字（舊介面，加速版）"""
+    """應用替換規則到給定的文字。
+
+    語意與舊版相同（固定字串依長詞優先逐條套用、可串接；正則最後套用；
+    文字不含任何規則前兩字時整段略過），但只檢查可能命中的規則：
+    3 萬條規則時不再對每段文字掃過全部規則。
+    """
 
     if not isinstance(text, str):
         return text
 
-    # 初始化快取（只會做一次）
-    _init_replace_rules_cache(rules)
+    compiled = _get_compiled_rules(rules)
 
     # ---------- 快路徑 1：極短字串 ----------
     if len(text) < 2:
         return text
 
     # ---------- 快路徑 2：不可能命中 ----------
-    # 若 text 不含任何規則關鍵字，直接跳過
-    cache = _get_rules_cache()
+    if not compiled.may_hit(text):
+        return text
 
-    if cache.rule_keywords:
-        hit = False
-        for k in cache.rule_keywords:
-            if k in text:
-                hit = True
-                break
-            if k.replace(" ", "") in text.replace(" ", ""):
-                hit = True
-                break
-        if not hit:
-            return text
+    text = compiled.apply_literals(text)
 
-    for src, dst in cache.literal_rules:
-        if src and src in text:
-            text = text.replace(src, dst)
-
-    for pattern, repl in cache.regex_rules:
+    for pattern, repl in compiled.regex_rules:
         text = pattern.sub(repl, text)
 
     return text
