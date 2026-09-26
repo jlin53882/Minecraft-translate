@@ -8,6 +8,7 @@
 
 import flet as ft
 import threading
+from functools import partial
 import time
 import os
 
@@ -486,7 +487,7 @@ class PipelineView(ft.Column):
             output_path=output_val,
             on_run_extraction=self._run_extraction,
             lang_code_checks=self._lang_code_checks,
-            show_snack_bar=self._show_snack_bar,
+            show_snack_bar=partial(show_snack, self._page),
         )
 
     def _on_merge_click(self, e=None):
@@ -505,7 +506,7 @@ class PipelineView(ft.Column):
             output_path=output_val,
             lang_code_checks=self._lang_code_checks,
             on_run_merge=self._run_merge,
-            show_snack_bar=self._show_snack_bar,
+            show_snack_bar=partial(show_snack, self._page),
         )
 
     def _on_translate_click(self, e=None):
@@ -523,7 +524,7 @@ class PipelineView(ft.Column):
             input_path=input_val,
             output_path=output_val,
             on_start_translate=self._run_translate,
-            show_snack_bar=self._show_snack_bar,
+            show_snack_bar=partial(show_snack, self._page),
         )
 
     def _on_bundle_click(self, e=None):
@@ -541,7 +542,7 @@ class PipelineView(ft.Column):
             input_path=input_val,
             output_path=output_val,
             on_start_bundle=self._run_bundle,
-            show_snack_bar=self._show_snack_bar,
+            show_snack_bar=partial(show_snack, self._page),
         )
 
     def _on_one_click_click(self, e=None):
@@ -560,7 +561,7 @@ class PipelineView(ft.Column):
             input_path=input_val,
             output_path=output_val,
             on_execute=self._on_one_click_execute,
-            show_snack_bar=self._show_snack_bar,
+            show_snack_bar=partial(show_snack, self._page),
         )
 
     def _on_one_click_execute(self, config: dict):

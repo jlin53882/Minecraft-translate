@@ -191,7 +191,7 @@ class LangItemRow(ft.Container):
                     value=to_halfwidth(lang_key),
                     label="lang key:",
                     read_only=True,
-                    border=ft.InputBorder.NONE,
+                    border=ft.NoInputBorder(),
                     text_size=12,
                 ),
                 # 英文原文（可選取）
@@ -200,7 +200,7 @@ class LangItemRow(ft.Container):
                     label="英文原文:",
                     read_only=True,
                     multiline=True,
-                    border=ft.InputBorder.NONE,
+                    border=ft.NoInputBorder(),
                     text_size=14,
                 ),
                 risk_label if risk_label else ft.Container(),
