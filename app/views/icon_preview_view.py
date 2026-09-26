@@ -4,6 +4,10 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+import asyncio
+import threading
+import time
+
 import flet as ft
 import json
 import os
@@ -140,14 +144,37 @@ def _safe_filename_key(key: str) -> str:
     return safe[:64] if len(safe) > 64 else safe
 
 
+# 程序內 model index 快取：(jar 路徑, modid) → (jar_hash, index)
+# 同一個 JAR 的每個物品都會查 model index；原本每次都重新讀取並解析 JSON 快取檔
+# （40 個 JAR 就讀了 9,179 次），改為每個 JAR 只讀一次。
+_MODEL_INDEX_MEMO: dict[tuple[str, str], tuple[str, dict]] = {}
+_MODEL_INDEX_MEMO_LOCK = threading.Lock()
+
+
 def _load_model_index_from_cache(jar_path: Path, modid: str) -> dict | None:
-    """嘗試從磁碟讀取 model index cache。
+    """嘗試讀取 model index cache（先查程序內快取，再查磁碟）。
 
     失效條件：JAR 的 mtime/size 改變，或 cache 檔不存在/格式無效。
 
     回傳：
         model_index dict（name → [路徑列表]），或 None（cache miss）
     """
+    memo_key = (str(jar_path), modid)
+    current_hash = _get_jar_hash(jar_path)
+    with _MODEL_INDEX_MEMO_LOCK:
+        memo = _MODEL_INDEX_MEMO.get(memo_key)
+    if memo is not None and memo[0] == current_hash:
+        return memo[1]
+
+    index = _load_model_index_from_disk(jar_path, modid, current_hash)
+    if index is not None:
+        with _MODEL_INDEX_MEMO_LOCK:
+            _MODEL_INDEX_MEMO[memo_key] = (current_hash, index)
+    return index
+
+
+def _load_model_index_from_disk(jar_path: Path, modid: str, current_hash: str) -> dict | None:
+    """從磁碟讀取 model index cache；hash 或 modid 不符時回傳 None。"""
     cache_dir = _get_model_index_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
     safe_jar_name = jar_path.stem  # stem 已剝除副檔名
@@ -163,7 +190,6 @@ def _load_model_index_from_cache(jar_path: Path, modid: str) -> dict | None:
         return None
 
     # 檢查 jar_hash 是否匹配
-    current_hash = _get_jar_hash(jar_path)
     if data.get("jar_hash") != current_hash:
         return None
 
@@ -190,6 +216,8 @@ def _save_model_index_to_cache(jar_path: Path, modid: str, model_index: dict):
     tmp = cache_dir / f"{cache_file.stem}.tmp"
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(cache_file)
+    with _MODEL_INDEX_MEMO_LOCK:
+        _MODEL_INDEX_MEMO[(str(jar_path), modid)] = (data["jar_hash"], model_index)
 
 
 def _build_model_index(names: list[str], modid: str) -> dict[str, list[str]]:
@@ -665,8 +693,17 @@ def _make_progress_callback(obj, phase: str, total: int):
             return
         obj.progress_text.value = f"[{phase}] {processed} / {total}"
         obj.progress_bar.value = processed / total if total > 0 else 0
-        obj.update()
+        _refresh_progress(obj)
     return callback
+
+
+def _refresh_progress(obj) -> None:
+    """刷新進度顯示；掃描在背景執行緒時改由 view 節流後交給 event loop。"""
+    refresh = getattr(obj, "_refresh_progress", None)
+    if refresh is not None:
+        refresh()
+    else:
+        obj.update()
 
 
 def _show_progress_phase(obj, phase: str, current: int, total: int):
@@ -677,7 +714,7 @@ def _show_progress_phase(obj, phase: str, current: int, total: int):
     obj.progress_text.value = f"[{phase}] {current} / {total}"
     obj.progress_bar.value = current / total if total > 0 else 0
     obj.progress_bar.visible = True
-    obj.update()
+    _refresh_progress(obj)
 
 
 def to_halfwidth(text):
@@ -705,6 +742,8 @@ class IconPreviewView(ft.Column):
         """
         super().__init__(expand=True, spacing=8)
         self._page = page
+        self._loading = False  # 掃描進行中（避免重複點擊載入）
+        self._last_progress_refresh = 0.0
 
         # =========================
         # 使用者選擇的資料夾
@@ -935,7 +974,9 @@ class IconPreviewView(ft.Column):
 
     def _update_load_state(self):
         """更新載入按鈕的啟用狀態"""
-        self.load_btn.disabled = not (self.source_root and self.review_root)
+        self.load_btn.disabled = bool(getattr(self, "_loading", False)) or not (
+            self.source_root and self.review_root
+        )
         self.update()
 
     # ==================================================
@@ -943,6 +984,8 @@ class IconPreviewView(ft.Column):
     # ==================================================
     def _on_load_clicked(self, e):
         """處理載入按鈕點擊事件"""
+        if getattr(self, "_loading", False):
+            return
         log_info("[IconPreview] 開始掃描模組...")
         show_snack(self.page, "⏳ 掃描模組中...", color=theme.BLUE_600, clear_existing=True, duration=3000)
         # PR61 Issue 1：載入新模組時清除搜尋狀態
@@ -999,7 +1042,7 @@ class IconPreviewView(ft.Column):
                 return
 
         # === 快取 miss ===
-        
+
         # 顯示進度條
         if mode == "jar_directory":
             jar_files = list(self.source_root.glob("*.jar"))
@@ -1016,28 +1059,77 @@ class IconPreviewView(ft.Column):
             self.progress_text.value = f"正在掃描：0 / {total_steps}"
             self.update()
 
-        processed = 0
-
         if mode == "jar_directory":
             log_info("[IconPreview] 使用 JAR 目錄模式掃描")
             show_snack(self.page, "📦 JAR 目錄模式：從 JAR 讀取 en_us.json...", color=theme.BLUE_600, clear_existing=True, duration=3000)
-            jar_files = list(self.source_root.glob("*.jar"))
-            total_steps = len(jar_files)
-            # Phase 3/3：實際讀取翻譯
-            entries = self._load_entries_from_jar_directory(
-                processed_callback=_make_progress_callback(self, "讀取翻譯內容", total_steps)
-            )
         elif mode == "extracted_folder":
             log_info("[IconPreview] 使用解包資料夾模式掃描")
-            entries = self._load_entries()
-        else:
+
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            self._finish_load(self._scan_entries(mode, total_steps), mode)
+            return
+
+        # 掃描（讀 JAR、建 model index、提取圖示）在執行緒執行：
+        # 406 個 JAR 首次載入原本會在 event loop 上同步執行約 60 秒，整個 UI 凍結
+        self._loading = True
+        self.load_btn.disabled = True
+        self.update()
+
+        async def _scan():
+            try:
+                entries = await asyncio.to_thread(self._scan_entries, mode, total_steps)
+            except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
+                log_error(f"[IconPreview] 掃描失敗: {ex}")
+                show_snack(self.page, f"❌ 掃描失敗：{ex}", color=theme.RED_700, clear_existing=True, duration=4000)
+                entries = []
+            finally:
+                self._loading = False
+                self._update_load_state()
+            self._finish_load(entries, mode)
+
+        run_task(_scan)
+
+    def _refresh_progress(self):
+        """（可在背景執行緒呼叫）節流後由 event loop 刷新進度顯示。"""
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            self.update()
+            return
+        now = time.monotonic()
+        if now - self._last_progress_refresh < 0.2:
+            return
+        self._last_progress_refresh = now
+
+        async def _update():
+            self.update()
+
+        run_task(_update)
+
+    def _scan_entries(self, mode: str, total_steps: int) -> list:
+        """讀取翻譯與圖示（不直接刷新畫面，可在背景執行緒執行）。"""
+        if mode == "jar_directory":
+            return self._load_entries_from_jar_directory(
+                processed_callback=_make_progress_callback(self, "讀取翻譯內容", total_steps)
+            )
+        if mode == "extracted_folder":
+            return self._load_entries()
+        return []
+
+    def _finish_load(self, entries: list, mode: str):
+        """（event loop 上）套用掃描結果並渲染模組清單。"""
+        if mode not in ("jar_directory", "extracted_folder"):
             log_warning("[IconPreview] 無法識別資料夾模式，或資料夾為空")
             show_snack(self.page, "❌ 無法識別模式，請確認資料夾內容", color=theme.RED_700, clear_existing=True, duration=3000)
-            entries = []
+            self.progress_bar.visible = False
+            self.update()
+            return
 
         if not entries:
             log_warning("[IconPreview] 掃描結果為空，確認 en_us.json 是否存在")
             show_snack(self.page, "❌ 掃描結果為空，請確認 en_us.json 是否存在", color=theme.RED_700, clear_existing=True, duration=3000)
+            self.progress_bar.visible = False
+            self.update()
             return
 
         # 寫入快取（dict 格式，脫離 SimpleNamespace）
@@ -1060,12 +1152,12 @@ class IconPreviewView(ft.Column):
         self.mods = dict(mods)
         log_info(f"[IconPreview] 載入完成，共 {len(self.mods)} 個模組，{len(entries)} 筆翻譯")
         show_snack(self.page, f"✅ 載入完成（共 {len(self.mods)} 個模組）", color=theme.GREEN_600, clear_existing=True, duration=3000)
-        
+
         # 隱藏進度條
         self.progress_bar.visible = False
         self.progress_text.value = "準備就緒"
         self.update()
-        
+
         self._render_mod_list()
 
     def _update_progress(self, current: int, total: int):
