@@ -4,10 +4,21 @@ from app import startup_tasks
 def test_rebuild_index_on_startup_calls_service(monkeypatch):
     seen = []
     monkeypatch.setattr(startup_tasks, 'cache_rebuild_index_service', lambda: seen.append('rebuilt'))
+    monkeypatch.setattr(startup_tasks.cache_manager, 'is_search_index_current', lambda: False)
 
     startup_tasks.rebuild_index_on_startup()
 
     assert seen == ['rebuilt']
+
+
+def test_rebuild_index_on_startup_skips_when_index_current(monkeypatch):
+    seen = []
+    monkeypatch.setattr(startup_tasks, 'cache_rebuild_index_service', lambda: seen.append('rebuilt'))
+    monkeypatch.setattr(startup_tasks.cache_manager, 'is_search_index_current', lambda: True)
+
+    startup_tasks.rebuild_index_on_startup()
+
+    assert seen == []
 
 
 def test_start_background_startup_tasks_starts_thread(monkeypatch):

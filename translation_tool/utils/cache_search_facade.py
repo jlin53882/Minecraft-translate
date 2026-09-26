@@ -48,6 +48,14 @@ class CacheSearchFacade:
             self._logger.error(f"搜尋引擎初始化失敗: {e}", exc_info=True)
             return None
 
+    def is_search_index_current(self, cache_types: list[str]) -> bool:
+        """索引是否仍對應磁碟上的快取分片（啟動時用來略過重建）。"""
+        try:
+            return self._get_orchestrator().is_index_current(cache_types)
+        except Exception as e:  # noqa: BLE001 - 判斷失敗就當作需要重建
+            self._logger.debug(f"檢查搜尋索引狀態失敗: {e}")
+            return False
+
     def rebuild_search_index(
         self, cache_types: list[str], translation_cache: dict[str, dict[str, Any]]
     ) -> None:

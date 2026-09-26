@@ -20,6 +20,8 @@ import time
 import traceback
 from pathlib import Path
 
+import asyncio
+
 import flet as ft
 from app.ui import theme
 from app.ui.debounce import Debouncer
@@ -1149,15 +1151,50 @@ class CacheView(ft.Column):
     # Lifecycle
     # =========================================================
     def did_mount(self):
-        """元件載入完成後初始化資料與 UI"""
+        """元件載入完成後初始化資料與 UI。
+
+        總覽需要載入整個快取（大量資料時數秒），有 event loop 時改在執行緒讀取，
+        頁面先顯示「載入中」，不再阻塞切換頁面。
+        """
+        if self.page is not None:
+            self.page.on_resized = self._on_page_resized
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            self._finish_mount(self._fetch_overview())
+            return
+
+        self.overview_status.value = "狀態：載入中…"
+        self.overview_status.color = theme.GREY_700
+        self._refresh_disabled_state()
         try:
-            self._load_overview()
+            self.update()
+        except Exception:  # noqa: BLE001, S110 - 尚未完成掛載時略過
+            pass
+
+        async def _load():
+            fetched = await asyncio.to_thread(self._fetch_overview)
+            self._finish_mount(fetched)
+
+        run_task(_load)
+
+    def _fetch_overview(self):
+        """讀取快取總覽（可在背景執行緒執行）；回傳 (data, error, traceback)。"""
+        try:
+            return cache_get_overview_service(), None, None
+        except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
+            return {}, ex, traceback.format_exc()
+
+    def _finish_mount(self, fetched):
+        """（event loop 上）套用總覽並渲染頁面。"""
+        try:
+            data, error, tb = fetched
+            if error is not None:
+                self._append_log(f"[WARN] 讀取總覽失敗：{error}")
+                self._append_log(tb)
+            self._refresh_overview_ui(data)
             self._refresh_query_type_options()
             self._render_query_type_shard_page()
             self._render_query_results()
-            # 防護：確保 page 存在
-            if self.page is not None:
-                self.page.on_resized = self._on_page_resized
             self._render_query_detail()
             self._refresh_disabled_state()
             # PR5-7: 使用批量刷新優化初始載入
@@ -1871,25 +1908,40 @@ class CacheView(ft.Column):
 
         self._set_state(True, "INDEXING", "trace: 正在重建搜尋索引...")
 
-        try:
-            result = cache_rebuild_index_service()
+        def work():
+            try:
+                return cache_rebuild_index_service(), None
+            except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
+                return None, (ex, traceback.format_exc())
 
-            if result.get("success"):
-                msg = result.get("message", "重建完成")
-                self._append_log(f"[INFO] {msg}")
-                self._notify(msg, "info")
-            else:
-                error = result.get("error", "未知錯誤")
-                self._append_log(f"[ERROR] 重建索引失敗: {error}")
-                self._notify(f"重建失敗: {error}", "error")
+        def finish(result, error):
+            try:
+                if error is not None:
+                    ex, tb = error
+                    self._append_log(f"[ERROR] 重建索引異常: {ex}")
+                    self._append_log(tb)
+                    self._notify(f"重建失敗: {ex}", "error")
+                elif result.get("success"):
+                    msg = result.get("message", "重建完成")
+                    self._append_log(f"[INFO] {msg}")
+                    self._notify(msg, "info")
+                else:
+                    err = result.get("error", "未知錯誤")
+                    self._append_log(f"[ERROR] 重建索引失敗: {err}")
+                    self._notify(f"重建失敗: {err}", "error")
+            finally:
+                self._set_state(False, "READY", "trace: 重建完成")
 
-        except Exception as ex:
-            self._append_log(f"[ERROR] 重建索引異常: {ex}")
-            self._append_log(traceback.format_exc())
-            self._notify(f"重建失敗: {ex}", "error")
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            finish(*work())
+            return
 
-        finally:
-            self._set_state(False, "READY", "trace: 重建完成")
+        async def _rebuild():
+            # 大量快取重建需數秒，改在執行緒執行，避免凍結 UI
+            finish(*(await asyncio.to_thread(work)))
+
+        run_task(_rebuild)
 
     # overview 集中操作已移除，功能保留在分類卡按鈕
 
@@ -3455,11 +3507,12 @@ class CacheView(ft.Column):
     def _on_query_input_change(self, e):
         """偵測輸入框變更"""
         current = self.tf_query_input.value or ""
-        if current != self._last_query_value:
-            # 有變更
-            self.query_change_hint.value = "⚠️ 偵測到變更，請重新搜尋"
-            self.query_change_hint.color = theme.WARNING
-            self.update()
+        hint = "⚠️ 偵測到變更，請重新搜尋" if current != self._last_query_value else ""
+        if self.query_change_hint.value == hint:
+            return  # 提示沒變就不刷新（原本每按一鍵都整個快取頁 diff）
+        self.query_change_hint.value = hint
+        self.query_change_hint.color = theme.WARNING
+        self.query_change_hint.update()
 
     def _on_query_mode_change(self, e):
         """偵測搜尋模式變更"""
@@ -3494,6 +3547,32 @@ class CacheView(ft.Column):
             ]
         )
 
+        self.query_search_hint.value = f"搜尋中：{query} …"
+        self.query_search_hint.color = theme.GREY_700
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            self._apply_query_results(self._compute_query_results(query, mode, targets))
+            return
+
+        seq = self._query_seq = getattr(self, "_query_seq", 0) + 1
+        self.query_search_hint.update()
+
+        async def _search():
+            # 大量快取時搜尋需數秒，改在執行緒執行，避免凍結 UI
+            try:
+                dedup = await asyncio.to_thread(
+                    self._compute_query_results, query, mode, targets
+                )
+            except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
+                self._notify(f"搜尋失敗：{ex}", "error")
+                return
+            if seq == self._query_seq:  # 只套用最後一次搜尋
+                self._apply_query_results(dedup)
+
+        run_task(_search)
+
+    def _compute_query_results(self, query: str, mode: str, targets: list) -> list:
+        """查詢快取（可在背景執行緒執行；不修改任何控制項）。"""
         out = []
         for ctype in targets:
             if mode in ("KEY", "ALL"):
@@ -3536,6 +3615,10 @@ class CacheView(ft.Column):
             seen.add(k)
             dedup.append(row)
 
+        return dedup
+
+    def _apply_query_results(self, dedup: list) -> None:
+        """（event loop 上）套用搜尋結果。"""
         self.query_results = dedup
         self.query_page = 1
         self.query_selected_result = (
@@ -3551,6 +3634,7 @@ class CacheView(ft.Column):
         self._render_query_results()
         self._render_query_detail()
         self.update()
+
 
     def _on_query_clear(self, e):
         """清除搜尋條件與結果"""

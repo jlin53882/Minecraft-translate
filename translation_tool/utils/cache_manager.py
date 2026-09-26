@@ -358,13 +358,18 @@ def _get_search_facade() -> CacheSearchFacade:
     if _search_facade is None:
         with _search_facade_lock:
             if _search_facade is None:
-                _search_facade = CacheSearchFacade(_get_cache_root, log)
+                _search_facade = CacheSearchFacade(lambda: _get_cache_root(), log)
     return _search_facade
 
 
 def get_search_engine():
     """取得快取查詢用的搜尋引擎實例"""
     return _get_search_facade().get_search_engine()
+
+
+def is_search_index_current() -> bool:
+    """搜尋索引是否與磁碟上的快取分片一致（不需載入快取內容）。"""
+    return _get_search_facade().is_search_index_current(CACHE_TYPES)
 
 
 def rebuild_search_index():

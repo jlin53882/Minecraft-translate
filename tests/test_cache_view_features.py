@@ -175,3 +175,49 @@ def test_on_query_search_requires_input(monkeypatch):
 
     assert calls and calls[0][0] == "warn"
     assert "請輸入查詢內容" in calls[0][1]
+
+
+def test_on_query_search_runs_in_thread_and_applies_latest_only(monkeypatch):
+    """B12：有 event loop 時搜尋在執行緒執行；連續搜尋只套用最後一次。"""
+    import asyncio
+    import threading
+
+    tasks = []
+
+    class LoopPage(FakePage):
+        def run_task(self, handler, *args):
+            tasks.append(handler)
+
+    view = CacheView.__new__(CacheView)
+    view._page = LoopPage()
+    view.ui_busy = False
+    view.tf_query_input = ft.TextField(value="abc")
+    view.dd_query_mode = ft.Dropdown(value="DST")
+    view.dd_query_type = ft.Dropdown(value="lang")
+    view.query_search_hint = ft.Text(value="")
+    view.query_search_hint.update = lambda: None
+    view.query_change_hint = ft.Text(value="")
+    view._last_overview_data = {"types": {"lang": {}}}
+    view.query_results = []
+    view.update = lambda: None
+    view._notify = lambda *a, **k: None
+    view._render_query_results = lambda: None
+    view._render_query_detail = lambda: None
+
+    threads = []
+
+    def fake_search(cache_type, query, mode, limit):
+        threads.append(threading.current_thread())
+        return {"items": [{"key": query, "preview": "p"}]}
+
+    monkeypatch.setattr(cache_view_module, "cache_search_service", fake_search)
+
+    CacheView._on_query_search(view, None)
+    view.tf_query_input.value = "xyz"
+    CacheView._on_query_search(view, None)
+    assert threads == []  # 點擊當下不在 event loop 上搜尋
+    for t in tasks:
+        asyncio.run(t())
+
+    assert all(t is not threading.main_thread() for t in threads)
+    assert [r["key"] for r in view.query_results] == ["xyz"]

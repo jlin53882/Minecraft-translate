@@ -5,10 +5,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor
-from typing import Callable
+from collections.abc import Callable
 
 import flet as ft
 
@@ -48,58 +49,84 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
         view.page.update()
 
         # 進度回調函式
-        def progress_callback(current: int, total: int, msg: str = None):
-            if not hasattr(view, 'page') or view.page is None:
-                return
+        def progress_callback(current: int, total: int, msg: str | None = None):
+            # 由背景執行緒呼叫：只改數值，畫面由 event loop 刷新
             progress_bar.value = current / total if total > 0 else 0
-            view.page.update()
+            _run_on_ui(view, lambda: None)
     else:
         progress_callback = None
 
     view._set_state(True, reason, f"trace: ACTION#{action_id} start {reason}")
 
-    # 使用线程池执行，避免阻塞 UI
     def execute_work():
+        """在背景執行緒執行工作；只呼叫 work_fn 一次（原本 TypeError 時會重跑）。"""
         try:
-            # 執行操作，傳入進度回調
-            # 注意：service 函數目前不支持 on_progress，會被忽略
-            try:
-                data = work_fn(on_progress=progress_callback)
-            except TypeError:
-                try:
-                    data = work_fn(progress_callback)
-                except (TypeError, Exception):
-                    data = work_fn()
-            return data, None
-        except Exception as ex:
-            return None, ex
+            if progress_callback is not None and _accepts_on_progress(work_fn):
+                return work_fn(on_progress=progress_callback), None
+            return work_fn(), None
+        except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
+            return None, (ex, traceback.format_exc())
 
-    # 在線程池中執行
-    executor = ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(execute_work)
+    def finish(data, error):
+        """（event loop 上）套用結果並恢復就緒狀態。"""
+        if error:
+            ex, tb = error
+            view._append_log(f"[ACTION#{action_id}] error {reason}: {ex}")
+            view._append_log(tb)
+            view._notify(f"{reason} 失敗: {ex}", "error")
+        else:
+            view._refresh_overview_ui(data)
+            view._refresh_query_type_options()
+            view._render_query_type_shard_page()
+            view._append_log(f"[ACTION#{action_id}] success {reason}")
+            view._notify(success_msg, "info")
 
-    # 等待結果
-    data, error = future.result()
-    executor.shutdown(wait=True)
+        view._append_log(f"[ACTION#{action_id}] finish READY")
+        view._set_state(False, "READY", f"trace: ACTION#{action_id} ready")
+        view._append_log(f"[STATE] {view.overview_status.value}")
 
-    # 處理結果
-    if error:
-        view._append_log(f"[ACTION#{action_id}] error {reason}: {error}")
-        view._append_log(traceback.format_exc())
-        view._notify(f"{reason} 失敗: {error}", "error")
-    else:
-        view._refresh_overview_ui(data)
-        view._refresh_query_type_options()
-        view._render_query_type_shard_page()
-        view._append_log(f"[ACTION#{action_id}] success {reason}")
-        view._notify(success_msg, "info")
+        if snack_bar is not None:
+            snack_bar.open = False
+            view.page.update()
 
-    # 清理
-    view._append_log(f"[ACTION#{action_id}] finish READY")
-    view._set_state(False, "READY", f"trace: ACTION#{action_id} ready")
-    view._append_log(f"[STATE] {view.overview_status.value}")
+    run_task = getattr(_get_page(view), "run_task", None)
+    if run_task is None:
+        # 沒有 event loop（測試用假 page）：同步執行
+        finish(*execute_work())
+        return
 
-    # 關閉 SnackBar
-    if snack_bar and hasattr(view, 'page') and view.page:
-        snack_bar.open = False
-        view.page.update()
+    async def _run():
+        # 重新載入 / 重建索引可能要數十秒，改在執行緒執行，
+        # 不再以 future.result() 在 event loop 上同步等待（原本整個 UI 凍結）
+        data, error = await asyncio.to_thread(execute_work)
+        finish(data, error)
+
+    run_task(_run)
+
+
+def _get_page(view):
+    try:
+        return view.page
+    except (AttributeError, RuntimeError):
+        return None
+
+
+def _run_on_ui(view, fn: Callable[[], None]) -> None:
+    """在 event loop 上執行 fn 並刷新畫面（供背景執行緒呼叫）。"""
+    page = _get_page(view)
+    run_task = getattr(page, "run_task", None)
+    if run_task is None:
+        return
+
+    async def _apply():
+        fn()
+        page.update()
+
+    run_task(_apply)
+
+
+def _accepts_on_progress(fn: Callable) -> bool:
+    try:
+        return "on_progress" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
