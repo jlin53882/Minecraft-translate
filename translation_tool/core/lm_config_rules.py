@@ -437,8 +437,12 @@ def build_skip_terms_pattern(terms: list[str]) -> re.Pattern:
 _RULES_CACHE: dict = {"config": None, "rules": None}
 
 
-def _translator_rules() -> tuple[re.Pattern, tuple[str, ...]]:
-    """回傳 (skip_terms pattern, translatable_keywords)。
+def _short_text_skip_len() -> int:
+    return _translator_rules()[2]
+
+
+def _translator_rules() -> tuple[re.Pattern, tuple[str, ...], int]:
+    """回傳 (skip_terms pattern, translatable_keywords, short_text_skip_len)。
 
     每筆資料都會呼叫；設定未變動時（load_config_shared 回傳同一物件）
     直接使用已編譯的 pattern，不再逐筆讀設定檔與重新編譯 regex。
@@ -448,9 +452,14 @@ def _translator_rules() -> tuple[re.Pattern, tuple[str, ...]]:
     if cached["config"] is config and cached["rules"] is not None:
         return cached["rules"]
     tr_cfg = config.get("lm_translator", {}).get("translator", {})
+    try:
+        short_len = max(0, int(tr_cfg.get("short_text_skip_len", 3)))
+    except (TypeError, ValueError):
+        short_len = 3
     rules = (
         build_skip_terms_pattern(tr_cfg.get("skip_terms", [])),
         tuple(tr_cfg.get("translatable_keywords", [])),
+        short_len,
     )
     _RULES_CACHE.update(config=config, rules=rules)
     return rules
@@ -481,8 +490,9 @@ def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
     if TECH_PATTERN.fullmatch(s):
         return False
 
-    # 太短且無空白，通常不是顯示文字
-    if is_lang and len(s) <= 3 and " " not in s:
+    # 太短且無空白，通常不是顯示文字（長度門檻可在設定調整；0 = 不略過，
+    # 例如 Axe / Ore / Rod 這類短名稱也會送翻譯）
+    if is_lang and len(s) <= _short_text_skip_len() and " " not in s:
         return False
 
         # 避開 #...（#heading、#title）
@@ -490,7 +500,7 @@ def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
         return False
 
     # 需要跳過翻譯的關鍵字（可在設定頁擴充；pattern 依設定版本快取）
-    SKIP_TERMS_PATTERN, _ = _translator_rules()
+    SKIP_TERMS_PATTERN, _, _ = _translator_rules()
 
     # 避開指定關鍵字（API documentation / Discord）
     if (
@@ -519,5 +529,5 @@ def is_translatable_field(key: str) -> bool:
     """
     key_lower = key.lower()
     # 允許翻譯的欄位（包含你自訂的各種文字欄位） 關鍵字版本
-    _, TRANSLATABLE_KEYWORDS = _translator_rules()
+    _, TRANSLATABLE_KEYWORDS, _ = _translator_rules()
     return any(keyword in key_lower for keyword in TRANSLATABLE_KEYWORDS)

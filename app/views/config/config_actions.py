@@ -172,6 +172,13 @@ def load_config_into_view(view, config: dict):
     view.controls_map[
         "lm_translator.translator.translatable_keywords"
     ].value = "\n".join(lm_cfg.get("translator", {}).get("translatable_keywords", []))
+    if "lm_translator.translator.short_text_skip_len" in view.controls_map:
+        _v = lm_cfg.get("translator", {}).get("short_text_skip_len")
+        view.controls_map["lm_translator.translator.short_text_skip_len"].value = str(
+            _v
+            if _v is not None
+            else get_default("lm_translator.translator.short_text_skip_len", 3)
+        )
 
     extractor_cfg = config.get("extractor", {})
     folder_names = extractor_cfg.get("output_folder_names", {})
@@ -386,6 +393,11 @@ def save_config_from_view(
             ].value.splitlines()
             if line.strip()
         ]
+        if "lm_translator.translator.short_text_skip_len" in view.controls_map:
+            raw = view.controls_map["lm_translator.translator.short_text_skip_len"].value
+            new_config["lm_translator"]["translator"]["short_text_skip_len"] = max(
+                0, int(raw or 0)
+            )
         new_config["extractor"]["output_folder_names"] = {
             "lang_extract": view.controls_map[
                 "extractor.output_folder_names.lang_extract"

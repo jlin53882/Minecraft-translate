@@ -191,6 +191,8 @@ DEFAULT_CONFIG = {
             "11. 只要 value 包含人類語言就必須翻譯\n"
         ),
         "translator": {
+            # lang 值長度 ≤ 此值且不含空白時視為非顯示文字而略過（0 = 不略過）
+            "short_text_skip_len": 3,
             "skip_terms": [
                 "api documentation",
                 "api docs",

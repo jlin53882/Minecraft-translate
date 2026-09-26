@@ -296,6 +296,11 @@ class ConfigView(ft.Column):
                 helper="用於：判斷哪些JSON欄位需翻譯",
             )
         )
+        self.controls_map["lm_translator.translator.short_text_skip_len"] = ft.TextField(
+            label="短字串略過長度",
+            dense=True,
+            helper="lang 值 ≤ 此長度且無空白時不翻譯（0 = 不略過，例如 Axe、Ore 也會翻）",
+        )
         self.controls_map["lm_translator.patchouli.dir_names"] = ft.TextField(
             label="Patchouli 資料夾",
             multiline=True,
@@ -754,7 +759,16 @@ class ConfigView(ft.Column):
                 spacing=5,
             ),
         )
-        return self._build_card("過濾條件與目錄", [lists_row])
+        short_row = ft.Row(
+            [
+                ft.Column(
+                    [self.controls_map["lm_translator.translator.short_text_skip_len"]],
+                    expand=2,
+                ),
+                ft.Column([], expand=2),
+            ]
+        )
+        return self._build_card("過濾條件與目錄", [lists_row, short_row])
 
     def _build_lm_models_card(self) -> ft.Control:
         models_section = ft.Container(

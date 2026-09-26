@@ -426,3 +426,17 @@ def test_translator_rules_follow_config_changes(monkeypatch):
     current["cfg"] = cfg_b
     assert rules.is_translatable_field("item_text") is False
     assert rules.is_translatable_field("item_lore") is True
+
+
+def test_short_text_skip_len_is_configurable(monkeypatch):
+    """C9：短名稱（Axe / Ore）是否略過可由設定決定；預設維持 3。"""
+    from translation_tool.core import lm_config_rules as rules
+
+    base = {"lm_translator": {"translator": {"skip_terms": [], "translatable_keywords": []}}}
+    monkeypatch.setattr(rules, "load_config_shared", lambda: base)
+    assert rules.is_value_translatable("Axe", is_lang=True) is False
+
+    cfg0 = {"lm_translator": {"translator": {"skip_terms": [], "translatable_keywords": [], "short_text_skip_len": 0}}}
+    monkeypatch.setattr(rules, "load_config_shared", lambda: cfg0)
+    assert rules.is_value_translatable("Axe", is_lang=True) is True
+    assert rules.is_value_translatable("Ore", is_lang=True) is True
