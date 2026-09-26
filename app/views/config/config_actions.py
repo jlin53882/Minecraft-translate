@@ -426,11 +426,15 @@ def save_config_from_view(
     view.load_config()
 
     if registry is not None:
+        from app.view_registry import built_view
+
         for item in registry:
-            if item["key"] == "extractor" and hasattr(
-                item["view"].content, "refresh_output_dir_helper"
+            # 只通知已建立的頁面；尚未建立的頁面建立時會讀取最新設定
+            view_obj = built_view(item)
+            if item["key"] == "extractor" and view_obj is not None and hasattr(
+                view_obj.content, "refresh_output_dir_helper"
             ):
-                item["view"].content.refresh_output_dir_helper()
+                view_obj.content.refresh_output_dir_helper()
 
     show_snack(view.page, "✅ 設定已成功儲存！", view._success_color())
     return True

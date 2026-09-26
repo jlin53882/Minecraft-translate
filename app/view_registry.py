@@ -57,34 +57,94 @@ def _lazy_import_view(view_key: str, page: ft.Page, file_picker: ft.FilePicker):
         return view_class(page, file_picker)
     return view_class(page)
 
-def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
-    """建立 view 註冊表（Lazy import 優化）。
+class LazyViewItem(dict):
+    """registry 項目：第一次取用 item["view"] 時才建立頁面。
 
-    使用 lazy import 按需載入 view，減少啟動時間。
+    原本啟動時一次建立全部 12 個頁面（main() 阻塞約 1.2 秒）；
+    改為切換到該頁（或其他程式需要它）時才建立。
+    """
+
+    def __init__(self, builder, **fields):
+        super().__init__(**fields)
+        self._builder = builder
+        self._build_hooks: list = []
+
+    @property
+    def is_built(self) -> bool:
+        return dict.__contains__(self, "view")
+
+    def built_view(self):
+        """已建立的頁面；尚未建立時回傳 None（不會觸發建立）。"""
+        return dict.get(self, "view")
+
+    def on_build(self, hook) -> None:
+        """頁面建立後呼叫 hook(view)；已建立時立即呼叫。"""
+        if self.is_built:
+            hook(dict.__getitem__(self, "view"))
+        else:
+            self._build_hooks.append(hook)
+
+    def _ensure_built(self):
+        if not self.is_built:
+            view = self._builder()
+            dict.__setitem__(self, "view", view)
+            hooks, self._build_hooks = self._build_hooks, []
+            for hook in hooks:
+                hook(view)
+        return dict.__getitem__(self, "view")
+
+    def __getitem__(self, key):
+        if key == "view":
+            return self._ensure_built()
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        if key == "view":
+            return self._ensure_built()
+        return super().get(key, default)
+
+
+def built_view(item):
+    """取得 registry 項目「已建立」的頁面；尚未建立時回傳 None。"""
+    if isinstance(item, LazyViewItem):
+        return item.built_view()
+    return item.get("view")
+
+
+_VIEW_NAV = [
+    ('config', ft.Icons.SETTINGS, '設定'),
+    ('rules', ft.Icons.RULE, '規則'),
+    ('cache', ft.Icons.STORAGE, '快取管理'),
+    ('qc', ft.Icons.CHECK_CIRCLE, 'QC 檢驗'),
+    ('lookup', ft.Icons.SEARCH, '查詢'),
+    ('icon_preview', ft.Icons.IMAGE, 'JAR 圖示預覽'),
+    ('bundler', ft.Icons.FOLDER_ZIP, '打包'),
+    ('translation', ft.Icons.TRANSLATE, '任務 翻譯工具'),
+    ('extractor', ft.Icons.UNARCHIVE, 'jar 提取'),
+    ('lm', ft.Icons.AUTO_AWESOME, '機器翻譯'),
+    ('merge', ft.Icons.CALL_MERGE, '語系比對合併'),
+    ('pipeline', ft.Icons.TERMINAL, '模組流水線翻譯打包'),
+]
+
+
+def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
+    """建立 view 註冊表（頁面在第一次取用時才建立）。
 
     Args:
         page: Flet Page 物件
         file_picker: Flet FilePicker 物件
 
     Returns:
-        View 註冊表列表
+        View 註冊表列表（LazyViewItem）
     """
-    # Lazy import all views
-    registry = [
-        {'key': 'config', 'icon': ft.Icons.SETTINGS, 'label': '設定', 'view': wrap_view(_lazy_import_view('config', page, file_picker))},
-        {'key': 'rules', 'icon': ft.Icons.RULE, 'label': '規則', 'view': wrap_view(_lazy_import_view('rules', page, file_picker))},
-        {'key': 'cache', 'icon': ft.Icons.STORAGE, 'label': '快取管理', 'view': wrap_view(_lazy_import_view('cache', page, file_picker))},
-        {'key': 'qc', 'icon': ft.Icons.CHECK_CIRCLE, 'label': 'QC 檢驗', 'view': wrap_view(_lazy_import_view('qc', page, file_picker))},
-        {'key': 'lookup', 'icon': ft.Icons.SEARCH, 'label': '查詢', 'view': wrap_view(_lazy_import_view('lookup', page, file_picker))},
-        {'key': 'icon_preview', 'icon': ft.Icons.IMAGE, 'label': 'JAR 圖示預覽', 'view': wrap_view(_lazy_import_view('icon_preview', page, file_picker))},
-        {'key': 'bundler', 'icon': ft.Icons.FOLDER_ZIP, 'label': '打包', 'view': wrap_view(_lazy_import_view('bundler', page, file_picker))},
-        {'key': 'translation', 'icon': ft.Icons.TRANSLATE, 'label': '任務 翻譯工具', 'view': wrap_view(_lazy_import_view('translation', page, file_picker))},
-        {'key': 'extractor', 'icon': ft.Icons.UNARCHIVE, 'label': 'jar 提取', 'view': wrap_view(_lazy_import_view('extractor', page, file_picker))},
-        {'key': 'lm', 'icon': ft.Icons.AUTO_AWESOME, 'label': '機器翻譯', 'view': wrap_view(_lazy_import_view('lm', page, file_picker))},
-        {'key': 'merge', 'icon': ft.Icons.CALL_MERGE, 'label': '語系比對合併', 'view': wrap_view(_lazy_import_view('merge', page, file_picker))},
-        {'key': 'pipeline', 'icon': ft.Icons.TERMINAL, 'label': '模組流水線翻譯打包', 'view': wrap_view(_lazy_import_view('pipeline', page, file_picker))},
+
+    def _builder(key):
+        return lambda: wrap_view(_lazy_import_view(key, page, file_picker))
+
+    return [
+        LazyViewItem(_builder(key), key=key, icon=icon, label=label)
+        for key, icon, label in _VIEW_NAV
     ]
-    return registry
 
 def get_window_size(view_key: str) -> tuple:
     """取得 view 的視窗大小。

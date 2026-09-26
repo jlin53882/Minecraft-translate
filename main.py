@@ -108,7 +108,8 @@ def main(page: ft.Page):
             "check build_view_registry() keys. "
             f"Available keys: {[item.get('key') for item in registry]}"
         )
-    _pipeline_view['view'].content.set_view_registry(registry)
+    # pipeline 頁在第一次切換到它時才建立；建立後再交給它 registry
+    _pipeline_view.on_build(lambda view: view.content.set_view_registry(registry))
 
     # ----------------------------------------------------------
     # Helper：根據 view key 調整視窗尺寸

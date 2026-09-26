@@ -93,8 +93,11 @@ class MergeView(ft.Column):
         """當 MergeView 改動 config 時，通知已存在的 ConfigView 重新讀取。"""
         if self._view_registry is None:
             return
+        from app.view_registry import built_view
+
         for item in self._view_registry:
-            view = item.get("view")
+            # 只通知已建立的頁面（尚未建立的頁面建立時會讀取最新設定）
+            view = built_view(item)
             if view is None:
                 continue
             wrapped = view.content if hasattr(view, "content") else view
