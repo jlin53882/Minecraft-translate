@@ -87,10 +87,14 @@ class TaskSession:
             self.summary = summary
 
     def finish(self) -> None:
-        """完成任務。"""
+        """完成任務。
+
+        已標記錯誤的任務維持 ERROR（service 常在 finally 呼叫 finish()，
+        不可把失敗覆蓋成 DONE，否則 UI 會顯示「任務完成」）。
+        """
         with self._lock:
             self.progress = 1.0
-            self.status = "DONE"
+            self.status = "ERROR" if self.error else "DONE"
 
     def request_cancel(self) -> None:
         """要求取消任務；worker 會在下一個檢查點（例如批次之間）停止。"""

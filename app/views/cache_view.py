@@ -18,11 +18,11 @@ import json
 import re
 import time
 import traceback
-import threading
 from pathlib import Path
 
 import flet as ft
 from app.ui import theme
+from app.ui.debounce import Debouncer
 from app.ui.snack import show_snack
 
 # UI 共用元件：統一按鈕樣式（先套用在總覽區，避免一次改動過大）
@@ -91,7 +91,7 @@ class CacheView(ft.Column):
             "shard": False,
             "logs": False,
         }
-        self._update_timer = None
+        self._update_debouncer = Debouncer(lambda: self.page, 0.1)
 
         # -------------------- Global state --------------------
         self.ui_busy = False
@@ -1109,10 +1109,7 @@ class CacheView(ft.Column):
         if not hasattr(self, "page") or self.page is None:
             return
 
-        if self._update_timer:
-            self._update_timer.cancel()
-        self._update_timer = threading.Timer(0.1, self._do_update)
-        self._update_timer.start()
+        self._update_debouncer.call(self._do_update)
 
     def _do_update(self):
         """批次更新所有髒區域"""

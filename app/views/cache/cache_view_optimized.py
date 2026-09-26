@@ -2,7 +2,7 @@
 # 提供髒標記 + 批次更新機制
 
 import flet as ft
-import threading
+from app.ui.debounce import Debouncer
 from translation_tool.utils.log_unit import log_error
 
 
@@ -16,7 +16,7 @@ class CacheViewOptimized(ft.Column):
             "shard": False,
             "overview": False,
         }
-        self._update_timer = None
+        self._update_debouncer = Debouncer(lambda: self._page_ref, 0.1)
         super().__init__()
 
     def mark_dirty(self, area: str):
@@ -30,10 +30,7 @@ class CacheViewOptimized(ft.Column):
 
     def _schedule_update(self):
         """Debounce 更新（100ms）"""
-        if self._update_timer:
-            self._update_timer.cancel()
-        self._update_timer = threading.Timer(0.1, self._do_update)
-        self._update_timer.start()
+        self._update_debouncer.call(self._do_update)
 
     def _do_update(self):
         """批次更新所有髒區域"""

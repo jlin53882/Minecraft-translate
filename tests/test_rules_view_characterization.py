@@ -23,13 +23,21 @@ def test_rules_view_search_filters_and_moves_to_matching_page(monkeypatch):
     
     # Mock threading.Thread and Timer for tests
     monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: target()})())
-    monkeypatch.setattr('app.views.rules_view.threading.Timer', lambda delay, target: type('Tm', (), {'start': lambda self: target(), 'cancel': lambda self: None})())
     monkeypatch.setattr('app.views.rules_view.load_replace_rules', lambda: [{'from': 'aaa', 'to': 'bbb'}, {'from': 'ccc', 'to': 'ddd'}])
-    view = RulesView(mock_page())
+    page = mock_page()
+    view = RulesView(page)
+    view._search_debouncer.delay = 0
 
     class E: pass
-    e = E(); e.control = type('C', (), {'value': 'ccc'})()
+    e = E(); e.control = type('C', (), {'value': 'cc'})()
     view.on_search(e)
+    e.control = type('C', (), {'value': 'ccc'})()
+    view.on_search(e)
+    # debounce 在 event loop 上執行；只有最後一次輸入會真的搜尋
+    assert view.search_results is None
+    import asyncio
+    for handler, args in page._tasks:
+        asyncio.run(handler(*args))
 
     # 搜尋結果應該是 rule 物件列表（不是 index 列表）
     assert view.search_results is not None
@@ -366,3 +374,20 @@ def test_rules_view_on_search(monkeypatch):
     view = RulesView(mock_page())
     assert hasattr(view, 'on_search')
     assert callable(view.on_search)
+
+
+def test_rules_view_defers_ui_calls_until_mounted(monkeypatch):
+    """背景載入比掛載早完成時，UI 更新要延後到 did_mount，不可在背景執行緒執行。"""
+    monkeypatch.setattr('app.views.rules_view.threading.Thread', lambda target=None, daemon=None: type('T', (), {'start': lambda self: None})())
+    view = RulesView(mock_page())
+
+    def _unmounted(_self):
+        raise RuntimeError("not mounted")
+
+    monkeypatch.setattr(RulesView, "page", property(_unmounted))
+    calls = []
+    view._run_on_ui_thread(calls.append, 1)
+    assert calls == []
+
+    view.did_mount()
+    assert calls == [1]

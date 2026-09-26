@@ -6,6 +6,7 @@
 
 import flet as ft
 from app.ui import theme
+from app.ui.debounce import Debouncer
 from app.ui.snack import show_snack
 import threading
 from translation_tool.utils.log_unit import log_info
@@ -54,8 +55,11 @@ class RulesView(ft.Column):
         self.search_regex = False           # Regex 模式
         self.search_current_idx = 0         # 當前導航位置
         
-        # Debounce timer
-        self._search_debounce_timer = None
+        # 背景執行緒 → UI 的暫存佇列（掛載前完成的載入）
+        self._ui_lock = threading.Lock()
+        self._pending_ui_calls: list = []
+        # debounce 在 event loop 上執行（threading.Timer 會在背景執行緒改控制項）
+        self._search_debouncer = Debouncer(lambda: self.page, 0.3)
 
         # RID 序號生成器 (UI 專用 ID)
         self._rid_seq = self._state.rid_seq
@@ -72,7 +76,7 @@ class RulesView(ft.Column):
         ]
 
         # 啟動背景載入
-        threading.Thread(target=self._initial_load, daemon=True).start()
+        self._initial_load()
 
     def _new_rid(self) -> int:
         """生成一個新的唯一 RID"""
@@ -353,21 +357,14 @@ class RulesView(ft.Column):
         # Debounce: 延遲搜尋
         keyword = e.control.value
         
-        # 取消之前的計時器
-        if self._search_debounce_timer is not None:
-            try:
-                self._search_debounce_timer.cancel()
-            except Exception:
-                pass
-        
-        if not keyword.strip():
-            # 清除搜尋，回覆顯示全部
+        if not (keyword or "").strip():
+            # 清除搜尋，回覆顯示全部（並取消尚未執行的搜尋）
+            self._search_debouncer.cancel()
             self._do_search("")
             return
-        
-        # 設定新的 debounce 計時器（300ms）
-        self._search_debounce_timer = threading.Timer(0.3, lambda: self._do_search(keyword))
-        self._search_debounce_timer.start()
+
+        # 300ms 內的連續輸入只搜尋最後一次
+        self._search_debouncer.call(self._do_search, keyword)
     
     def _do_search(self, keyword: str):
         """執行實際搜尋（Debounce 觸發）"""
@@ -490,9 +487,28 @@ class RulesView(ft.Column):
     # --- 執行緒輔助與載入 ---
 
     def _run_on_ui_thread(self, func, *args, **kwargs):
-        """在 UI 執行緒上安全執行函式"""
-        if self.page and self.page.loop:
-            self.page.loop.call_soon_threadsafe(func, *args, **kwargs)
+        """在 UI 執行緒（Flet event loop）上安全執行函式。
+
+        尚未掛上頁面時先暫存，等 did_mount 再執行，避免背景載入比掛載更早完成時
+        結果被丟掉或在背景執行緒直接改控制項。
+        """
+        with self._ui_lock:
+            try:
+                page = self.page
+            except RuntimeError:
+                page = None
+            loop = getattr(page, "loop", None) if page else None
+            if loop is None:
+                self._pending_ui_calls.append((func, args, kwargs))
+                return
+        loop.call_soon_threadsafe(lambda: func(*args, **kwargs))
+
+    def did_mount(self):
+        """掛上頁面後執行在掛載前排入的 UI 更新。"""
+        with self._ui_lock:
+            pending, self._pending_ui_calls = self._pending_ui_calls, []
+        for func, args, kwargs in pending:
+            func(*args, **kwargs)
 
 
     def _load_rules_core(self):
@@ -503,14 +519,13 @@ class RulesView(ft.Column):
         """初次啟動時從檔案載入規則並渲染"""
 
         def run():
+            # 背景執行緒只負責讀檔；渲染與 page.update() 交給 event loop
             try:
                 rules_data = self._load_rules_core()
-                self._handle_reload_success(rules_data)
-                self.page.update()
-            except Exception as err:
-                msg = f"初次載入規則失敗: {err}"
-                show_snack(self.page, msg, theme.ERROR, text_color=theme.WHITE)
-                self.page.update()
+            except Exception as err:  # noqa: BLE001 - 失敗要顯示在 UI
+                self._run_on_ui_thread(self._handle_reload_failure, err)
+                return
+            self._run_on_ui_thread(self._handle_reload_success, rules_data)
 
         threading.Thread(target=run, daemon=True).start()
 

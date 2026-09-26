@@ -3,15 +3,14 @@
 測試 icon_preview_view 的導航相關功能（P1 review 反饋）。
 
 覆蓋：
-- _cancel_detail_search_debounce()：取消 detail 搜尋 debounce timer
+- _cancel_detail_search_debounce()：取消 detail 搜尋 debounce（event loop 上的 Debouncer）
 - _go_back()：返回模組清單（含 P1 race condition 修復驗證）
 """
 
-import pytest
-import threading
-import time
-from pathlib import Path
+import asyncio
 from unittest.mock import MagicMock, patch
+
+from app.ui.debounce import Debouncer
 
 
 class MockPage:
@@ -19,9 +18,19 @@ class MockPage:
     def __init__(self):
         self.overlay = []
         self.update_count = 0
+        self.tasks = []
 
     def update(self):
         self.update_count += 1
+
+    def run_task(self, handler, *args):
+        self.tasks.append((handler, args))
+
+    def run_pending_tasks(self):
+        """模擬 event loop 執行所有排程中的 task（含 debounce 延遲）。"""
+        tasks, self.tasks = self.tasks, []
+        for handler, args in tasks:
+            asyncio.run(handler(*args))
 
 
 def create_view_for_navigation():
@@ -39,8 +48,7 @@ def create_view_for_navigation():
         view.back_btn = MagicMock()
         view.save_btn = MagicMock()
         view.header = MagicMock()
-        # 搜尋 debounce timer 初始為 None
-        view._detail_search_debounce_timer: threading.Timer | None = None
+        view._detail_search_debouncer = Debouncer(lambda: view._page, 0.01)
         # Mock detail search UI widgets
         view.detail_search_tf = MagicMock()
         view.detail_search_status = MagicMock()
@@ -65,46 +73,39 @@ def create_view_for_navigation():
 class TestCancelDetailSearchDebounce:
     """_cancel_detail_search_debounce 的各種情境測試。"""
 
-    def test_cancel_with_no_timer(self):
-        """沒有 active timer 時，cancel 不報錯"""
+    def test_cancel_with_no_pending_call(self):
+        """沒有排程中的 debounce 時，cancel 不報錯"""
         view = create_view_for_navigation()
-        view._detail_search_debounce_timer = None
-
-        # 不應拋出例外
         view._cancel_detail_search_debounce()
-        assert view._detail_search_debounce_timer is None
+        assert view._page.tasks == []
 
-    def test_cancel_cancels_active_timer(self):
-        """有 active timer 時，cancel 會呼叫 Timer.cancel() 並清除參考"""
+    def test_cancel_prevents_pending_call(self):
+        """有排程中的 debounce 時，cancel 後 callback 不會被執行"""
         view = create_view_for_navigation()
         executed = []
-
-        def on_timer_fire():
-            executed.append(True)
-
-        timer = threading.Timer(0.5, on_timer_fire)  # 0.5 秒後執行
-        timer.start()
-        view._detail_search_debounce_timer = timer
+        view._detail_search_debouncer.call(lambda: executed.append(True))
 
         view._cancel_detail_search_debounce()
-        # timer 參考應清除
-        assert view._detail_search_debounce_timer is None
-        # 等待原本的 timer 窗口過去
-        time.sleep(0.7)
-        # 函式不應被執行（已被取消）
-        assert len(executed) == 0
+        view._page.run_pending_tasks()
+
+        assert executed == []
+
+    def test_latest_call_wins(self):
+        """連續輸入只執行最後一次"""
+        view = create_view_for_navigation()
+        executed = []
+        view._detail_search_debouncer.call(executed.append, "a")
+        view._detail_search_debouncer.call(executed.append, "ab")
+        view._page.run_pending_tasks()
+        assert executed == ["ab"]
 
     def test_cancel_twice_is_safe(self):
         """連續呼叫兩次 cancel 不報錯"""
         view = create_view_for_navigation()
-        timer = threading.Timer(10.0, lambda: None)
-        timer.start()
-        view._detail_search_debounce_timer = timer
-
+        view._detail_search_debouncer.call(lambda: None)
         view._cancel_detail_search_debounce()
         view._cancel_detail_search_debounce()  # 第二次應該安全
-
-        assert view._detail_search_debounce_timer is None
+        view._page.run_pending_tasks()
 
 
 # ==================================================
@@ -123,9 +124,7 @@ class TestGoBack:
         view._detail_search_text = "test"
         view._detail_filtered_entries = []
         debounce_called = []
-        detail_timer = threading.Timer(5.0, lambda: debounce_called.append(True))
-        detail_timer.start()
-        view._detail_search_debounce_timer = detail_timer
+        view._detail_search_debouncer.call(lambda: debounce_called.append(True))
 
         # Mock _update_detail_search_controls and _render_mod_list to avoid Flet dependency
         view._update_detail_search_controls = MagicMock()
@@ -133,10 +132,7 @@ class TestGoBack:
 
         view._go_back(MagicMock())
 
-        # Timer 應該已被取消且參考清除
-        assert view._detail_search_debounce_timer is None
-        # 等待原本的 timer 窗口過去
-        time.sleep(0.3)
+        view._page.run_pending_tasks()
         assert len(debounce_called) == 0, "debounce 應被取消，不應執行"
 
     def test_go_back_resets_state(self):
@@ -147,7 +143,6 @@ class TestGoBack:
         view.current_page = 5
         view._detail_search_text = "some search"
         view._detail_filtered_entries = ["item.test"]
-        view._detail_search_debounce_timer = None  # 已取消
         view._update_detail_search_controls = MagicMock()
         view._render_mod_list = MagicMock()
 
@@ -165,7 +160,6 @@ class TestGoBack:
     def test_go_back_calls_update_detail_search_controls(self):
         """_go_back 會隱藏 detail 搜尋 UI"""
         view = create_view_for_navigation()
-        view._detail_search_debounce_timer = None
         view._update_detail_search_controls = MagicMock()
         view._render_mod_list = MagicMock()
 
@@ -176,7 +170,6 @@ class TestGoBack:
     def test_go_back_clears_list_view(self):
         """_go_back 會清除 list_view controls"""
         view = create_view_for_navigation()
-        view._detail_search_debounce_timer = None
         view._update_detail_search_controls = MagicMock()
         view._render_mod_list = MagicMock()
 
@@ -187,7 +180,6 @@ class TestGoBack:
     def test_go_back_renders_mod_list(self):
         """_go_back 最後會呼叫 _render_mod_list"""
         view = create_view_for_navigation()
-        view._detail_search_debounce_timer = None
         view._update_detail_search_controls = MagicMock()
         view._render_mod_list = MagicMock()
 
@@ -219,7 +211,6 @@ class TestRaceCondition:
         view.current_modid = "actuallyadditions"
         view._detail_search_text = "atomic"
         view._detail_filtered_entries = []
-        view._detail_search_debounce_timer = None
 
         # Mock _do_detail_search 來追蹤是否被呼叫
         call_log = []
@@ -235,17 +226,12 @@ class TestRaceCondition:
         view._update_detail_search_controls = MagicMock()
         view._render_mod_list = MagicMock()
 
-        # 建立一個 150ms 後才執行的 detail timer（模擬用戶打字後的 debounce）
-        view._detail_search_debounce_timer = threading.Timer(0.150, fake_do_detail_search)
-        view._detail_search_debounce_timer.start()
-
-        # 用戶在 100ms 時按 Back
-        time.sleep(0.05)
+        # 模擬用戶打字後排程 debounce，尚未觸發前按 Back
+        view._detail_search_debouncer.call(view._do_detail_search)
         view._go_back(MagicMock())
-        # timer 應該已取消，不會執行 fake_do_detail_search
 
-        # 等待原本的 150ms 窗口過去
-        time.sleep(0.15)
+        # event loop 執行到 debounce 時應該已被取消
+        view._page.run_pending_tasks()
 
         # 驗證：_do_detail_search 不應該被呼叫（timer 已取消）
         assert len(call_log) == 0, f"debounce 應在 _go_back 時取消，不應執行。實際呼叫了：{call_log}"

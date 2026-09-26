@@ -5,7 +5,6 @@
 """
 
 import threading
-import time
 import traceback
 from collections.abc import Callable
 from typing import Any
@@ -13,6 +12,7 @@ from typing import Any
 import flet as ft
 
 from app.ui import theme
+from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from translation_tool.utils.log_unit import log_error
 
@@ -71,16 +71,14 @@ class QCBase:
                 ctrl.disabled = True
             self._page.update()
 
-        pending: list[tuple[str, str]] = []
-        state: dict = {"progress": None, "error": False, "last_flush": 0.0}
-
-        def apply_ui(lines, progress, error, done=False):
+        def apply_ui(lines, state):
             if lines:
                 self.log_view.add_many(lines)
-            if progress is not None:
-                self.progress_bar.value = progress
-            if error:
+            if state.get("progress") is not None:
+                self.progress_bar.value = state["progress"]
+            if state.get("error"):
                 self.progress_bar.color = theme.ERROR
+            done = state.get("done", False)
             if done:
                 self.progress_bar.value = 0
                 self.progress_bar.color = None
@@ -91,47 +89,33 @@ class QCBase:
             if done and on_complete:
                 on_complete()
 
-        def flush(done=False):
-            lines = pending[:]
-            pending.clear()
-            progress, error = state["progress"], state["error"]
-            state["progress"] = None
-            state["last_flush"] = time.monotonic()
-            self._run_on_ui(apply_ui, lines, progress, error, done)
+        # 節流 + 背壓：背景任務可能每秒產生上千行，只定期交給 event loop 刷新
+        batcher = UiBatcher(self._page, apply_ui, interval=_UI_FLUSH_INTERVAL_SEC)
 
         def run():
             try:
                 for update in service_func(*args_tuple):
-                    for line in str(update.get("log") or "").split("\n"):
-                        if line.strip():
-                            pending.append((line, _guess_level(line)))
+                    lines = [
+                        (line, _guess_level(line))
+                        for line in str(update.get("log") or "").split("\n")
+                        if line.strip()
+                    ]
+                    if lines:
+                        batcher.add_lines(lines)
                     if "progress" in update:
-                        state["progress"] = update["progress"]
+                        batcher.set_state(progress=update["progress"])
                     if update.get("error"):
-                        state["error"] = True
-                    # 節流：背景任務可能每秒產生上千行，只定期交給 UI 執行緒刷新
-                    if time.monotonic() - state["last_flush"] >= _UI_FLUSH_INTERVAL_SEC:
-                        flush()
+                        batcher.set_state(error=True)
+                    batcher.flush()
             except Exception as ex:  # noqa: BLE001 - 背景執行緒需把錯誤回報到 UI
                 log_error(f"QC 任務失敗: {ex}\n{traceback.format_exc()}")
-                pending.append((f"[錯誤] 任務執行失敗：{ex}", "error"))
-                state["error"] = True
+                batcher.add_lines([(f"[錯誤] 任務執行失敗：{ex}", "error")])
+                batcher.set_state(error=True)
             finally:
-                flush(done=True)
+                batcher.set_state(done=True)
+                batcher.flush(force=True)
 
         threading.Thread(target=run, daemon=True).start()
-
-    def _run_on_ui(self, fn: Callable[..., None], *args: Any) -> None:
-        """把 UI 更新排到 Flet event loop（背景執行緒直接 page.update 不安全）。"""
-        run_task = getattr(self._page, "run_task", None)
-        if run_task is None:
-            fn(*args)
-            return
-
-        async def _apply():
-            fn(*args)
-
-        run_task(_apply)
 
     @property
     def page(self):

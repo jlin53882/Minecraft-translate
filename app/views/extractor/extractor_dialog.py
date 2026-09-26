@@ -10,6 +10,8 @@
     open_extractor_dialog(page, file_picker, input_path="...", output_path="...", on_complete=..., mode="lang")
 """
 
+import asyncio
+
 import flet as ft
 import threading
 import os
@@ -20,6 +22,7 @@ import traceback
 from translation_tool.utils.log_unit import log_info, log_debug, log_warning
 
 from app.ui import theme
+from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from app.views.extractor.extractor_state import PreviewState
 from app.views.extractor.extractor_dialog_helpers import format_size
@@ -58,6 +61,9 @@ from translation_tool.core.jar_processor import (
 #   BTN                              → log_debug (按鈕觸發細節,訊息量大)
 #   WARN                             → log_warning (安全網觸發需注意)
 
+
+# 背景任務 → UI 的刷新間隔（秒）
+_UI_FLUSH_INTERVAL_SEC = 0.2
 
 def open_extractor_dialog(
     page: ft.Page,
@@ -200,8 +206,41 @@ def open_extractor_dialog(
     )
 
     # ========== 輔助函式 ==========
+    # 背景執行緒只把 log / 進度寫進緩衝區；實際修改控制項與 page.update()
+    # 一律排到 Flet event loop（page.run_task），並以 _UI_FLUSH_INTERVAL_SEC 節流。
+    # 避免 worker 執行緒與 event loop 同時改控制項（object_patch IndexError），
+    # 也避免數百個 JAR 各觸發一次整頁 diff。
+    def run_on_ui(fn):
+        """把 fn 排到 Flet event loop 執行（run_task 需要 coroutine function）。"""
+
+        async def _apply():
+            fn()
+
+        page.run_task(_apply)
+
+    def apply_batch(lines, state):
+        """在 event loop 上一次套用累積的 log / 進度。"""
+        if lines:
+            log_view.add_many(lines)
+        if "progress" in state:
+            val, text = state["progress"]
+            progress_bar.value = val
+            status_text.value = text
+            progress_pct.value = f"{int(val * 100)}%"
+        page.update()
+        if state.get("on_done"):
+            # 最後一批 log 畫完後才切換完成狀態
+            state["on_done"]()
+
+    # 節流 + 背壓：上一批還沒畫完就不再排新的刷新，避免 run_task 佇列堆積
+    batcher = UiBatcher(page, apply_batch, interval=_UI_FLUSH_INTERVAL_SEC)
+
+    def flush_ui(force: bool = False):
+        """把累積的 log / 進度交給 event loop（節流；force=True 一定送出）。"""
+        batcher.flush(force=force)
+
     def add_log(msg: str, level: str = "info"):
-        """PR refactor/unified-log-view: 改用 LogView.add() 統一處理等級顏色。
+        """PR refactor/unified-log-view: 改用 LogView 統一處理等級顏色。
 
         level: debug/info/warning/error/system，預設 info
         從 msg 字串前綴（[系統 / [ERROR / [完成）也能推斷 level
@@ -214,28 +253,18 @@ def open_extractor_dialog(
                 level = "error"
             elif msg.startswith("[完成"):
                 level = "system"
-        log_view.add(f">> {msg}", level=level)
-
-    async def _do_update():
-        """異步觸發 Flet UI 更新 (執行緒安全)。
-
-        因為 progress_bar / status_text 等更新都來自 background thread,
-        不能直接呼叫 page.update()(會 race condition),
-        用 page.run_task 把更新丟到 Flet event loop。
-        """
-        page.update()
+        batcher.add_lines([(f">> {msg}", level)])
+        flush_ui()
 
     def update_progress(val: float, text: str):
-        """更新 progress_bar / status_text / progress_pct 三個 UI 元件。
+        """更新 progress_bar / status_text / progress_pct 三個 UI 元件（節流批次）。
 
         Args:
             val: 進度百分比 (0.0 ~ 1.0)
             text: 狀態文字 (顯示在 progress_pct 上方)
         """
-        progress_bar.value = val
-        status_text.value = text
-        progress_pct.value = f"{int(val * 100)}%"
-        page.run_task(_do_update)
+        batcher.set_state(progress=(val, text))
+        flush_ui()
 
     def update_stats(success, warnings, failures):
         """更新 stats_success / stats_warnings / stats_failures 文字。
@@ -245,10 +274,14 @@ def open_extractor_dialog(
             warnings: 跳過數
             failures: 失敗數
         """
-        stats_success.value = str(success)
-        stats_warnings.value = str(warnings)
-        stats_failures.value = str(failures)
-        page.run_task(_do_update)
+
+        def apply():
+            stats_success.value = str(success)
+            stats_warnings.value = str(warnings)
+            stats_failures.value = str(failures)
+            page.update()
+
+        run_on_ui(apply)
 
     # 🐛 2026-07-13 Phase 3 (user 選項 B): DUAL mode 結果顯示 LANG/BOOK 分區。
     # 為什麼:user 實機測試發現 DUAL 結果只顯示合計,看不到 LANG/BOOK 各別數字。
@@ -284,22 +317,25 @@ def open_extractor_dialog(
         :param result_stats: run_extraction_loop 回傳的完整 stats dict,
                               含 lang / book sub-dict。
         """
-        lang = result_stats.get("lang") or {}
-        book = result_stats.get("book") or {}
-        # 找對應的 Text 元件(透過 key 屬性)
-        for row in (lang_row, book_row):
-            for ctrl in row.controls:
-                if getattr(ctrl, "key", None) == "lang_success" and row is lang_row:
-                    ctrl.value = str(lang.get("success", 0))
-                elif getattr(ctrl, "key", None) == "lang_warnings" and row is lang_row:
-                    ctrl.value = str(lang.get("warnings", 0))
-                elif getattr(ctrl, "key", None) == "book_success" and row is book_row:
-                    ctrl.value = str(book.get("success", 0))
-                elif getattr(ctrl, "key", None) == "book_warnings" and row is book_row:
-                    ctrl.value = str(book.get("warnings", 0))
-        lang_row.visible = True
-        book_row.visible = True
-        page.run_task(_do_update)
+        def apply():
+            lang = result_stats.get("lang") or {}
+            book = result_stats.get("book") or {}
+            # 找對應的 Text 元件(透過 key 屬性)
+            for row in (lang_row, book_row):
+                for ctrl in row.controls:
+                    if getattr(ctrl, "key", None) == "lang_success" and row is lang_row:
+                        ctrl.value = str(lang.get("success", 0))
+                    elif getattr(ctrl, "key", None) == "lang_warnings" and row is lang_row:
+                        ctrl.value = str(lang.get("warnings", 0))
+                    elif getattr(ctrl, "key", None) == "book_success" and row is book_row:
+                        ctrl.value = str(book.get("success", 0))
+                    elif getattr(ctrl, "key", None) == "book_warnings" and row is book_row:
+                        ctrl.value = str(book.get("warnings", 0))
+            lang_row.visible = True
+            book_row.visible = True
+            page.update()
+
+        run_on_ui(apply)
 
     # ========== 提取工作執行緒 ==========
     def run_extraction():
@@ -331,19 +367,12 @@ def open_extractor_dialog(
             """任務開始 UI 切換:隱藏 start_button,顯示 cancel_button 跟 progress_bar,
             把 dialog 鎖成 modal=True 防止 user 提早 dismiss 後 background thread 孤兒。
             """
-            start_button.visible = False
-            cancel_button.visible = True
-            progress_bar.visible = True
-            # 提取進行中鎖成 modal=True，禁止點外側關掉
-            # (避免 background thread 變孤兒跑完但 UI 消失)
-            dialog.modal = True
-            log_info(f"[THREAD] ui_start: dialog.modal=True (extraction running)")
+            # 按鈕 / modal 切換已在 on_start_click（UI 執行緒）完成，這裡只送 log
             update_progress(0, "開始任務...")
             add_log(f"[系統] 開始提取 ({selected_mode})...", level="system")
             add_log(f"[系統] 來源：{mods_dir}", level="system")
             add_log(f"[系統] 輸出：{final_output}", level="system")
 
-        # 直接呼叫 UI 更新（無需 run_task）
         ui_start()
 
         # ✅ 第三階段重構：使用 Service 層的 run_extraction_loop 處理 Generator
@@ -449,27 +478,15 @@ def open_extractor_dialog(
                 # 任務結束，恢復成使用者可點外側關閉
                 # (modal=True 區間已過，沒有背景 thread 風險)
                 dialog.modal = False
-                log_info(f"[THREAD] ui_done: dialog.modal=False (extraction finished)")
+                log_info("[THREAD] ui_done: dialog.modal=False (extraction finished)")
                 if on_complete:
                     on_complete(state["done"], state["stats"])
-                #page.update()
-                # ⚠️ Bug fix (2026-07-13 回歸): 這裡是背景 thread (run_extraction 的
-                # finally)，過去只改 visible 這種簡單屬性，直接呼叫 page.update() 剛好
-                # 撐得住；但加了 dialog.modal 這種會影響 dialog barrier 重新協調的屬性後，
-                # 背景 thread 直接呼叫 page.update() 不會確實同步到前端，變成要使用者
-                # 再點一下(觸發一次走事件迴圈的 update)才會把已經算好的狀態畫出來。
-                # 改用 page.run_task 讓這次 update 排進事件迴圈，跟 update_progress/
-                # update_stats 等其他背景更新用的模式一致。
-                async def _do_final_update():
-                    """異步觸發 Flet UI 更新(ui_done 用,確保 cancel_button 等 visibility 改變生效)。
-                    """
-                    page.update()
-                page.run_task(_do_final_update)
+                page.update()
 
-
-            # 直接呼叫 UI 更新
-            log_info(f"[THREAD] ui_done() called → close button visible, stats_row visible")
-            ui_done()
+            # 與剩餘的 log / 進度同一批在 event loop 上套用，確保順序
+            # (背景 thread 直接改 dialog.modal + page.update() 不會確實同步到前端)
+            batcher.set_state(on_done=ui_done)
+            flush_ui(force=True)
 
     def on_start_click(e):
         """「開始提取」按鈕 click handler。
@@ -508,6 +525,18 @@ def open_extractor_dialog(
             status_text.value = "⚠️ Mod 來源資料夾不存在"
             page.update()
             return
+
+        if state["running"]:
+            # 已在執行中（例如連點），不重複啟動
+            return
+        state["running"] = True
+        start_button.visible = False
+        cancel_button.visible = True
+        progress_bar.visible = True
+        # 提取進行中鎖成 modal=True，禁止點外側關掉
+        # (避免 background thread 變孤兒跑完但 UI 消失)
+        dialog.modal = True
+        page.update()
 
         # 啟動執行緒
         log_debug(f"[BTN] on_start_click spawning run_extraction thread (mode={mode!r})")
@@ -747,7 +776,7 @@ def open_preview_dialog(
         height=200,
     )
 
-    def add_log(msg, level: str = "info"):
+    def add_log(msg, level: str = "info", update: bool = True):
         """PR refactor/unified-log-view: 改用 LogView.add() 統一處理等級顏色。
 
         level: debug/info/warning/error/system，預設 info
@@ -761,24 +790,7 @@ def open_preview_dialog(
                 level = "error"
             elif msg.startswith("[完成"):
                 level = "system"
-        log_view.add(f">> {msg}", level=level)
-
-    async def _do_update():
-        """(preview 內)異步觸發 Flet UI 更新(執行緒安全)。跟 extract 的 _do_update 用途一樣但範圍是 preview dialog。"""
-        page.update()
-
-    def update_progress(pct, text):
-        """(preview 內)更新 progress_bar / progress_pct / status_text。
-
-        Args:
-            pct: 進度百分比 (0.0 ~ 1.0)
-            text: 狀態文字 (只有非空才更新 status_text)
-        """
-        progress_bar.value = pct
-        progress_pct.value = f"{int(pct * 100)}%"
-        if text:
-            status_text.value = text
-        page.run_task(_do_update)
+        log_view.add(f">> {msg}", level=level, update=update)
 
     def show_result_dialog(result):
         """「確認執行」流程改用單一 dialog(沿用 preview_dialog),換內容呈現結果清單。
@@ -912,6 +924,7 @@ def open_preview_dialog(
         preview_state.total = 0
         preview_state.result = None
         preview_state.error = None
+        preview_state.log = ""
 
         # 2026-07-12 user 建議:預覽掃描進行中鎖 modal=True,避免點外側 dismiss 後
         # dialog 變孤兒(do_scan / ui_poller thread 仍繼續跑,但 UI 已不在)。
@@ -930,7 +943,7 @@ def open_preview_dialog(
         add_log(f"[系統] 開始預覽 {mode.upper()} 掃描...", level="system")
 
         def do_scan():
-            """背景執行緒：跑 generator，更新 preview_state"""
+            """背景執行緒：跑 generator，只寫入 preview_state（不碰任何控制項）。"""
             try:
                 for update in preview_extraction_generator(input_path, mode, skip_zh_cn=skip_zh_cn):
                     if state["cancelled"]:
@@ -939,81 +952,62 @@ def open_preview_dialog(
                         preview_state.progress = update.get("progress", 0)
                         preview_state.current = update.get("current", 0)
                         preview_state.total = update.get("total", 0)
-                        # 動態設定 log 屬性
-                        try:
-                            preview_state.log = update.get("log", "")
-                        except Exception:
-                            pass
+                        preview_state.log = update.get("log", "")
                     if "error" in update:
                         preview_state.error = update["error"]
-                        preview_state.done = True
                         break
                     if "result" in update:
                         preview_state.result = update["result"]
-                        preview_state.done = True
-            except Exception as ex:
+            except Exception as ex:  # noqa: BLE001 - 錯誤要回報到 UI
                 preview_state.error = str(ex)
+            finally:
+                # 不論成功、失敗或取消都要標記完成，避免 UI poller 永遠等待
                 preview_state.done = True
 
-        def ui_poller():
-            """主執行緒輪詢：更新 UI 進度條 + log"""
-            # time 從頂部 import
-            last_log = [None]  # 用 list 讓 closure 可以修改
+        async def ui_poller():
+            """在 Flet event loop 上輪詢 preview_state，節流更新進度與 log。
 
-            async def _do_update():
-                """(scan 內)異步更新 preview_dialog 的 UI:把 preview_state 反映到 progress_bar / status_text / log_view。
-
-                用 last_log 避免重複 add_log (同樣的 log 訊息只加一次)。
-                """
+            只在 event loop 上改控制項，背景執行緒不直接呼叫 page.update()。
+            """
+            last_log = None
+            while True:
+                finished = preview_state.done or state["cancelled"]
                 progress_bar.value = preview_state.progress
                 progress_pct.value = f"{int(preview_state.progress * 100)}%"
-                cur_log = getattr(preview_state, 'log', None)
+                cur_log = getattr(preview_state, "log", None)
                 if cur_log:
                     status_text.value = cur_log
-                    if cur_log != last_log[0]:
-                        add_log(cur_log)
-                        last_log[0] = cur_log
+                    if cur_log != last_log:
+                        add_log(cur_log, update=False)
+                        last_log = cur_log
+                if finished:
+                    break
                 page.update()
+                await asyncio.sleep(_UI_FLUSH_INTERVAL_SEC)
 
-            while not preview_state.done and not state["cancelled"]:
-                try:
-                    page.run_task(_do_update)
-                except Exception:
-                    pass
-                time.sleep(0.1)
-
-            # 完成後的 UI 更新
             final_result = preview_state.result
             final_error = preview_state.error
+            progress_bar.value = 1.0
+            progress_pct.value = "100%"
+            status_text.value = "預覽完成"
+            start_button.disabled = False
+            state["running"] = False
 
-            async def _do_finalize():
-                """(scan 結束時)異步更新 UI:progress 100%、status 顯示「預覽完成」、start_button 重新啟用、state 標記結束。
-
-                完整 result 顯示由後續 show_result_dialog() 處理,這裡只更新基本狀態。
-                """
-                progress_bar.value = 1.0
-                progress_pct.value = "100%"
-                status_text.value = "預覽完成"
-                start_button.disabled = False
-                state["running"] = False
-
-                if final_result:
-                    results = final_result.get("preview_results", [])
-                    add_log(f"[完成] 找到 {len(results)} 個 JAR", level="system")
-                    page.update()
-                    show_result_dialog(final_result)
-                elif final_error:
-                    add_log(f"[ERROR] {final_error}", level="error")
-                    status_text.value = f"預覽失敗：{final_error}"
-                    page.update()
-
-            try:
-                page.run_task(_do_finalize)
-            except Exception:
-                pass
+            if final_error:
+                add_log(f"[ERROR] {final_error}", level="error", update=False)
+                status_text.value = f"預覽失敗：{final_error}"
+                page.update()
+            elif final_result:
+                results = final_result.get("preview_results", [])
+                add_log(f"[完成] 找到 {len(results)} 個 JAR", level="system", update=False)
+                show_result_dialog(final_result)
+            else:
+                if state["cancelled"]:
+                    status_text.value = "已取消"
+                page.update()
 
         threading.Thread(target=do_scan, daemon=True).start()
-        threading.Thread(target=ui_poller, daemon=True).start()
+        page.run_task(ui_poller)
 
     # ========== 建立對話框 ==========
     start_button = ft.Button(

@@ -325,7 +325,7 @@ class LMView(ft.Column):
             self.progress_bar.value = float(snap.get("progress", 0) or 0)
         except (TypeError, ValueError):
             self.progress_bar.value = 0
-        self.log_view.sync_entries(snap.get("logs", []) or [])
+        self.log_view.sync_entries(snap.get("logs", []) or [], update=False)
 
         status = (snap.get("status") or "").upper()
         if status in ("DONE", "ERROR"):

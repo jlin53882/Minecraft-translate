@@ -238,8 +238,8 @@ def _sync_from_session(view):
         view.progress.value = float(snap.get("progress", 0) or 0)
     except (TypeError, ValueError):
         view.progress.value = 0
-    # LogView 內建 auto_scroll，sync_entries 會刷新畫面
-    view.log_view.sync_entries(snap.get("logs", []) or [])
+    # LogView 內建 auto_scroll；畫面由下方 page.update() 一次刷新
+    view.log_view.sync_entries(snap.get("logs", []) or [], update=False)
     status = (snap.get("status") or "").upper()
     if status == "DONE":
         view._set_status("任務完成", ft.Colors.GREEN_200)

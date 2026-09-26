@@ -340,12 +340,15 @@ class TestFixCa01a14_ModalLockAndDismiss:
     """提取中 dialog.modal=True;ui_done 解鎖回 False;on_dismiss 防呆 + 設 cancel flag。"""
 
     def test_ui_start_locks_modal_true(self):
-        """ui_start 內必須 dialog.modal = True。"""
+        """開始提取時必須 dialog.modal = True。
+
+        Task 4 後改在 on_start_click（UI 執行緒）鎖定，避免背景執行緒改 dialog 屬性。
+        """
         src = _read(EXTRACTOR_DIALOG)
         tree = _ast_parse(EXTRACTOR_DIALOG)
         found = False
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "ui_start":
+            if isinstance(node, ast.FunctionDef) and node.name == "on_start_click":
                 for sub in ast.walk(node):
                     if (
                         isinstance(sub, ast.Assign)
@@ -359,7 +362,7 @@ class TestFixCa01a14_ModalLockAndDismiss:
                         found = True
                 break
         assert found, (
-            "回歸:ui_start 內沒有 dialog.modal = True "
+            "回歸:on_start_click 內沒有 dialog.modal = True "
             "(commit ca01a14 修法,提取進行中必須 modal=True 阻擋外側 dismiss)"
         )
 

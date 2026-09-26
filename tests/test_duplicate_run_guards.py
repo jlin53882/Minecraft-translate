@@ -1,5 +1,7 @@
 """長任務執行中不可重複啟動（避免重複送出 API、同時寫入同一輸出/快取）。"""
 
+import asyncio
+
 from app.views import bundler_view as bv
 from app.views import translation_view as tv
 from app.views.translation import translation_actions as ta
@@ -73,6 +75,13 @@ def test_bundler_worker_restores_button_and_batches_ui(monkeypatch):
 
     view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
     assert view._bundling_running is False
+    # 背景執行緒不直接改控制項；51 次更新被節流/背壓成少量 event loop 任務
+    ran = 0
+    while page._tasks:
+        handler, args = page._tasks.pop(0)
+        asyncio.run(handler(*args))
+        ran += 1
+    assert 1 <= ran < 10
     assert view.progress_bar.value == 1.0
-    # 51 次更新被節流成少量 UI 更新（不是每行一次 page.update）
-    assert 1 <= len(page._tasks) < 10
+    assert view.start_button.disabled is False
+    assert view.progress_bar.visible is False

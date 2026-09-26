@@ -6,12 +6,12 @@
 import json
 import os
 import threading
-import time
 
 import flet as ft
 
 from app.services_impl.config_service import load_config_json
 from app.ui import theme
+from app.ui.ui_batcher import UiBatcher
 from app.ui.components import styled_card
 from app.ui.snack import show_snack
 from app.views._log import LogView
@@ -431,34 +431,24 @@ class BundlerView(ft.Column):
     # 背景打包時，日誌/進度以此間隔批次推到畫面
     _UI_FLUSH_INTERVAL_SEC = 0.2
 
-    def _run_on_ui(self, fn, *args):
-        """把 UI 更新排到 Flet event loop（背景執行緒不可直接呼叫 page.update）。"""
-
-        async def _run():
-            fn(*args)
-
-        self._page.run_task(_run)
-
-    def _apply_bundling_ui(self, lines: list[tuple[str, str]]):
-        """（event loop 上）套用一批日誌並刷新畫面。"""
+    def _apply_bundling_ui(self, lines: list[tuple[str, str]], state: dict):
+        """（event loop 上）套用一批日誌與進度並刷新畫面。"""
         if lines:
             self.log_view.add_many(lines)
+        if state.get("progress") is not None:
+            self.progress_bar.value = state["progress"]
+        if state.get("error_color"):
+            self.progress_bar.color = state["error_color"]
+        if state.get("done"):
+            self.progress_bar.visible = False
         self.start_button.disabled = self._bundling_running
         self._page.update()
 
     def _bundling_worker(self, root_dir, output_zip, version, description, pack_image):
-        pending: list[tuple[str, str]] = []
-        last_flush = 0.0
-
-        def flush(force: bool = False):
-            nonlocal pending, last_flush
-            now = time.monotonic()
-            if not force and now - last_flush < self._UI_FLUSH_INTERVAL_SEC:
-                return
-            batch, pending = pending, []
-            last_flush = now
-            self._run_on_ui(self._apply_bundling_ui, batch)
-
+        # 節流 + 背壓：背景執行緒只累積資料，UI 更新交給 event loop
+        batcher = UiBatcher(
+            self._page, self._apply_bundling_ui, interval=self._UI_FLUSH_INTERVAL_SEC
+        )
         try:
             version_info = self.version_data.get(version, {}) if version else {}
             min_format = version_info.get("min_format", 0)
@@ -476,21 +466,21 @@ class BundlerView(ft.Column):
 
             for update in bundle_outputs_generator(**generator_kwargs):
                 log_msg = update.get("log", "")
-                pending.extend(
-                    (line, "info") for line in log_msg.split("\n") if line.strip()
+                batcher.add_lines(
+                    [(line, "info") for line in log_msg.split("\n") if line.strip()]
                 )
                 if "progress" in update:
-                    self.progress_bar.value = update["progress"]
+                    batcher.set_state(progress=update["progress"])
                 if update.get("error"):
-                    self.progress_bar.color = theme.ERROR
-                flush()
+                    batcher.set_state(error_color=theme.ERROR)
+                batcher.flush()
         except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，錯誤顯示於日誌
-            pending.append((f"[錯誤] {ex}", "error"))
-            self.progress_bar.color = theme.RED
+            batcher.add_lines([(f"[錯誤] {ex}", "error")])
+            batcher.set_state(error_color=theme.RED)
         finally:
-            self.progress_bar.visible = False
             self._bundling_running = False
-            flush(force=True)
+            batcher.set_state(done=True)
+            batcher.flush(force=True)
 
     @property
     def page(self):

@@ -32,6 +32,13 @@ from .log_entry import LogEntry
 from .log_presenter import LogPresenter
 from .task_session import TaskSession
 
+_LEVEL_COLORS = {
+    "error": theme.TEXT_LOG_ERROR,
+    "warning": theme.TEXT_LOG_WARNING,
+    "info": theme.TEXT_LOG_INFO,
+    "system": theme.TEXT_LOG_SYSTEM,
+    "debug": theme.TEXT_LOG_DEBUG,
+}
 
 class LogView(ft.Container):
     """統一的 log 顯示 widget。
@@ -81,18 +88,20 @@ class LogView(ft.Container):
         self.tail_lines = tail_lines
         self.show_levels = show_levels or ["system", "info", "warning", "error"]
 
+        # append 模式允許暫時超出 max_lines 的緩衝量；超過時一次換成新的 ListView。
+        # 原因：Flet 的 keyed list diff 每刪除開頭一筆就重排整個清單（O(刪除數×行數)），
+        # 2000 行的 log 每次刷新都從開頭截斷時，單次 diff 可達 0.3～0.8 秒並卡住 UI。
+        self._trim_slack = max_lines // 4
+
         # 內部 ListView
-        self._list_view = ft.ListView(
-            expand=True,
-            spacing=self.DEFAULT_SPACING,
-            auto_scroll=True,
-        )
+        self._list_view = self._new_list_view()
 
         # 內建 LogPresenter（保留供 sync_from_session / sync_entries 使用，
         # add() 不走 presenter 因為 append 模式用 seq dedup，手動 add 用 seq=0 會被吃掉）
         self._presenter = LogPresenter(
             mode=mode,
-            max_ui_lines=max_lines,
+            # 截斷交給 LogView._compact()；presenter 的上限只作為保險
+            max_ui_lines=max_lines + 2 * self._trim_slack,
             tail_lines=tail_lines,
             show_levels=self.show_levels,
             colorize=True,
@@ -142,45 +151,8 @@ class LogView(ft.Container):
         if level not in self.show_levels:
             return
 
-        # 取對應等級的顏色（從 theme token）
-        color = theme.TEXT_LOG_DEFAULT
-        if level == "error":
-            color = theme.TEXT_LOG_ERROR
-        elif level == "warning":
-            color = theme.TEXT_LOG_WARNING
-        elif level == "info":
-            color = theme.TEXT_LOG_INFO
-        elif level == "system":
-            color = theme.TEXT_LOG_SYSTEM
-        elif level == "debug":
-            color = theme.TEXT_LOG_DEBUG
-
-        if self.mode == "tail":
-            # tail 模式：保留最後 tail_lines 筆
-            self._list_view.controls.append(
-                ft.Text(
-                    text,
-                    size=self.DEFAULT_TEXT_SIZE,
-                    color=color,
-                    font_family=self.DEFAULT_FONT,
-                )
-            )
-            if len(self._list_view.controls) > self.tail_lines:
-                overflow = len(self._list_view.controls) - self.tail_lines
-                del self._list_view.controls[:overflow]
-        else:
-            # append 模式：超過 max_lines 時自動截斷
-            self._list_view.controls.append(
-                ft.Text(
-                    text,
-                    size=self.DEFAULT_TEXT_SIZE,
-                    color=color,
-                    font_family=self.DEFAULT_FONT,
-                )
-            )
-            if len(self._list_view.controls) > self.max_lines:
-                overflow = len(self._list_view.controls) - self.max_lines
-                del self._list_view.controls[:overflow]
+        self._list_view.controls.append(self._make_text(text, level))
+        self._compact()
 
         if update:
             self.refresh()
@@ -188,13 +160,55 @@ class LogView(ft.Container):
     def add_many(self, items: Sequence[tuple[str, str]]) -> None:
         """批次新增多行 log，只刷新一次畫面。
 
+        只保留批次中最後 max_lines（tail 模式為 tail_lines）筆，並一次截斷，
+        避免大量 log 時逐行建立控制項與逐行搬移清單。
+
         Args:
             items: (text, level) 序列
         """
-        for text, level in items:
-            self.add(text, level=level, update=False)
-        if items:
-            self.refresh()
+        limit = self._line_limit()
+        kept = [(t, lv) for t, lv in items if t and lv in self.show_levels][-limit:]
+        if not kept:
+            return
+        self._list_view.controls.extend(self._make_text(t, lv) for t, lv in kept)
+        self._compact()
+        self.refresh()
+
+    def _new_list_view(self, controls: list | None = None) -> ft.ListView:
+        return ft.ListView(
+            controls=controls or [],
+            expand=True,
+            spacing=self.DEFAULT_SPACING,
+            auto_scroll=True,
+        )
+
+    def _compact(self) -> None:
+        """行數超過上限時截斷。
+
+        tail 模式行數少，直接刪除開頭。append 模式在超過 max_lines + 緩衝量時，
+        把最後 max_lines 行搬到新的 ListView（diff 成本為線性），
+        避免每次刷新都從開頭刪除造成的高成本 diff。
+        """
+        controls = self._list_view.controls
+        if self.mode == "tail":
+            if len(controls) > self.tail_lines:
+                del controls[: len(controls) - self.tail_lines]
+            return
+        if len(controls) > self.max_lines + self._trim_slack:
+            self._list_view = self._new_list_view(controls[-self.max_lines :])
+            self.content = self._list_view
+
+    def _line_limit(self) -> int:
+        return self.tail_lines if self.mode == "tail" else self.max_lines
+
+    def _make_text(self, text: str, level: str) -> ft.Text:
+        """依等級建立 log 行（顏色取自 theme token）。"""
+        return ft.Text(
+            text,
+            size=self.DEFAULT_TEXT_SIZE,
+            color=_LEVEL_COLORS.get(level, theme.TEXT_LOG_DEFAULT),
+            font_family=self.DEFAULT_FONT,
+        )
 
     def refresh(self) -> None:
         """只刷新本元件（而非整頁 diff）；尚未掛上頁面時退回整頁更新。"""
@@ -239,24 +253,29 @@ class LogView(ft.Container):
         """
         snapshot = session.snapshot()
         new_entries = self._presenter.sync(self._list_view, snapshot["logs"])
+        self._compact()
         if self._page:
             self._page.update()
         return new_entries
 
-    def sync_entries(self, entries: Sequence[LogEntry]) -> list[LogEntry]:
+    def sync_entries(
+        self, entries: Sequence[LogEntry], update: bool = True
+    ) -> list[LogEntry]:
         """從 logs list 同步（給沒用 TaskSession 的 caller，如 bundler_view）。
 
         走 LogPresenter.sync，會處理 dedup 與顏色。
 
         Args:
             entries: LogEntry list
+            update: 有新 entries 時是否立即刷新（caller 之後會自行 page.update 時傳 False）
 
         Returns:
             新增的 entries list
         """
         new_entries = self._presenter.sync(self._list_view, entries)
-        if self._page:
-            self._page.update()
+        self._compact()
+        if new_entries and update:
+            self.refresh()
         return new_entries
 
     # ──── 設定變更（給 settings 頁用）────────────────────────────

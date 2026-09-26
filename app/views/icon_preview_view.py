@@ -22,6 +22,7 @@ from pathlib import Path
 from collections import defaultdict
 from datetime import datetime, timezone
 from app.ui import theme
+from app.ui.debounce import Debouncer
 from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_info, log_warning, log_error
 from types import SimpleNamespace
@@ -31,7 +32,6 @@ from translation_tool.utils.config_manager import load_config
 from translation_tool.core.lang_item_row import LangItemRow
 
 import unicodedata
-import threading
 
 # ==================================================
 # 實驗性功能開關
@@ -729,10 +729,11 @@ class IconPreviewView(ft.Column):
         # 即時搜尋（Phase 2）
         # =========================
         self._mod_search_text: str = ""
-        self._mod_search_debounce_timer: threading.Timer | None = None
+        # debounce 在 event loop 上執行（threading.Timer 會在背景執行緒改控制項）
+        self._mod_search_debouncer = Debouncer(lambda: self._page, 0.150)
 
         self._detail_search_text: str = ""
-        self._detail_search_debounce_timer: threading.Timer | None = None
+        self._detail_search_debouncer = Debouncer(lambda: self._page, 0.150)
         self._detail_filtered_entries: list | None = None  # None 表示無搜尋，顯示全部
 
         # =========================
@@ -1193,22 +1194,16 @@ class IconPreviewView(ft.Column):
     # ==================================================
     def _cancel_mod_search_debounce(self):
         """取消之前的 mod 搜尋 debounce timer"""
-        if self._mod_search_debounce_timer:
-            self._mod_search_debounce_timer.cancel()
-            self._mod_search_debounce_timer = None
+        self._mod_search_debouncer.cancel()
 
     def _cancel_detail_search_debounce(self):
         """取消之前的 detail 搜尋 debounce timer"""
-        if self._detail_search_debounce_timer:
-            self._detail_search_debounce_timer.cancel()
-            self._detail_search_debounce_timer = None
+        self._detail_search_debouncer.cancel()
 
     def _on_mod_search_change(self, e: ft.ControlEvent):
         """Mod 清單搜尋輸入 on_change（debounce 150ms）"""
         self._mod_search_text = e.control.value or ""
-        self._cancel_mod_search_debounce()
-        self._mod_search_debounce_timer = threading.Timer(0.150, self._do_mod_search)
-        self._mod_search_debounce_timer.start()
+        self._mod_search_debouncer.call(self._do_mod_search)
 
     def _do_mod_search(self):
         """實際執行 mod 清單搜尋（在 debounce 延遲後執行）"""
@@ -1280,9 +1275,7 @@ class IconPreviewView(ft.Column):
     def _on_detail_search_change(self, e: ft.ControlEvent):
         """Mod 詳情頁搜尋 on_change（debounce 150ms）"""
         self._detail_search_text = e.control.value or ""
-        self._cancel_detail_search_debounce()
-        self._detail_search_debounce_timer = threading.Timer(0.150, self._do_detail_search)
-        self._detail_search_debounce_timer.start()
+        self._detail_search_debouncer.call(self._do_detail_search)
 
     def _do_detail_search(self):
         """實際執行 detail 搜尋（在 debounce 延遲後執行）"""

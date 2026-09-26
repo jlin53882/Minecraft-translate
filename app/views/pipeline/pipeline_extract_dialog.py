@@ -8,9 +8,10 @@
 - 執行實際抽取（背景執行緒 + 進度輪詢）
 """
 
+import asyncio
+
 import flet as ft
 import threading
-import time
 import os
 import sys
 from pathlib import Path
@@ -178,16 +179,16 @@ def open_extract_dialog(
                 for update in preview_extraction_generator(mods, mode, lang_codes=selected_codes):
                     if 'error' in update:
                         preview_state.error = update['error']
-                        preview_state.done = True
                         break
                     preview_state.progress = update.get('progress', 0)
                     preview_state.current = update.get('current', 0)
                     preview_state.total = update.get('total', 0)
                     if 'result' in update:
                         preview_state.result = update['result']
-                        preview_state.done = True
-            except Exception as ex:
+            except Exception as ex:  # noqa: BLE001 - 錯誤要顯示在對話框
                 preview_state.error = str(ex)
+            finally:
+                # 不論結果如何都標記完成，避免輪詢永遠不結束
                 preview_state.done = True
 
         threading.Thread(target=do_preview, daemon=True).start()
@@ -210,17 +211,17 @@ def open_extract_dialog(
         preview_dialog.open = True
         page.update()
 
-        def poll_preview():
+        async def poll_preview():
+            # 在 event loop 上輪詢，背景執行緒不直接碰控制項
             while not preview_state.done:
-                time.sleep(0.2)
-                async def do_update(_):
-                    pct = int(preview_state.progress * 100)
-                    preview_dialog.content = ft.Container(
-                        content=ft.Text(f"預覽掃描中...（{preview_state.current}/{preview_state.total}）{pct}%"),
-                        width=preview_dialog_width,
-                    )
-                    page.update()
-                page.run_task(do_update, None)
+                await asyncio.sleep(0.2)
+                pct = int(preview_state.progress * 100)
+                preview_dialog.content = ft.Container(
+                    content=ft.Text(f"預覽掃描中...（{preview_state.current}/{preview_state.total}）{pct}%"),
+                    width=preview_dialog_width,
+                )
+                page.update()
+            await do_final(None)
 
             async def do_final(_):
                 if preview_state.error:
@@ -229,7 +230,7 @@ def open_extract_dialog(
                         width=preview_dialog_width,
                     )
                 else:
-                    result = preview_state.result
+                    result = preview_state.result or {}
                     jar_count = total_jars
                     total_files = result.get('total_files', 0)
                     preview_results = result.get('preview_results', [])
@@ -261,9 +262,8 @@ def open_extract_dialog(
                     )
                 preview_dialog.actions = [ft.TextButton("確定", on_click=lambda e: close_preview_dialog(preview_dialog))]
                 page.update()
-            page.run_task(do_final, None)
 
-        threading.Thread(target=poll_preview, daemon=True).start()
+        page.run_task(poll_preview)
 
     lang_codes_section = ft.Column([lang_code_checks_local[code] for code in lang_codes], spacing=2)
 

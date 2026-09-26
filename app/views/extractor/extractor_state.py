@@ -53,6 +53,7 @@ class PreviewState:
         done: 是否已完成
         result: 預覽結果資料（完成的話）
         error: 錯誤訊息（有的話）
+        log: 最新一筆進度訊息
     """
     progress: float = 0.0
     current: int = 0
@@ -60,6 +61,7 @@ class PreviewState:
     done: bool = False
     result: dict | None = None
     error: str | None = None
+    log: str = ""
 
     def as_dict(self) -> dict:
         """將 PreviewState 轉換為字典格式。

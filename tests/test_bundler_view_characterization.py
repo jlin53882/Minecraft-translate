@@ -4,6 +4,15 @@ from app.ui.snack import show_snack
 from tests.conftest import mock_page, mock_filepicker
 
 
+def _drain_ui_tasks(page):
+    """執行背景 worker 排入 event loop 的 UI 更新（run_task）。"""
+    import asyncio
+
+    while page._tasks:
+        handler, args = page._tasks.pop(0)
+        asyncio.run(handler(*args))
+
+
 def test_bundler_view_initializes_core_controls():
     view = BundlerView(mock_page(), mock_filepicker())
 
@@ -158,6 +167,7 @@ def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
     )
 
     view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
+    _drain_ui_tasks(page)
 
     assert view.progress_bar.value == 1.0
 
@@ -298,6 +308,7 @@ def test_bundling_worker_with_error(monkeypatch):
     )
 
     view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
+    _drain_ui_tasks(page)
 
     assert view.progress_bar.color == "red"
     assert not view.progress_bar.visible
