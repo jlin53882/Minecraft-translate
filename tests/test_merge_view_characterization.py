@@ -362,3 +362,29 @@ def test_show_merge_summary_zip_mode_keeps_zip_label(monkeypatch):
     assert "成功處理 ZIP：0 個" in texts
     assert "失敗 ZIP：2 個" in texts
     assert "📋 處理失敗的 ZIP" in texts
+
+
+def test_show_merge_summary_failed_list_shows_names(monkeypatch):
+    """失敗清單應顯示 service 寫入的小寫 "name",相容 "Name" 與純字串項目。"""
+    texts = _show_summary_texts(
+        monkeypatch,
+        {
+            "success_zips": 0,
+            "failed_zips": 3,
+            "failed_zips_list": [
+                {"name": "a.zip", "error": "boom"},
+                {"Name": "legacy.zip", "error": "old"},
+            ],
+            "output_counts": {},
+        },
+    )
+    assert "├─ a.zip" in texts
+    assert "├─ legacy.zip" in texts
+    assert "├─ ?" not in texts
+
+    texts = _show_summary_texts(
+        monkeypatch,
+        {"success_zips": 0, "failed_zips": 1, "failed_zip_details": ["b.zip"]},
+    )
+    assert "├─ b.zip" in texts
+    assert "│  └─ 未知錯誤" in texts

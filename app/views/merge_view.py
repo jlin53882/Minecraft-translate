@@ -879,14 +879,20 @@ class MergeView(ft.Column):
         if failed_list:
             failed_rows = []
             for item in failed_list:
+                # service 寫入的 key 是小寫 "name";"Name" 保留相容舊資料。
+                # log fallback (failed_zip_details) 則是純檔名字串。
+                if isinstance(item, dict):
+                    name = item.get("name") or item.get("Name") or "?"
+                    err = str(item.get("error") or "未知錯誤")
+                else:
+                    name, err = str(item), "未知錯誤"
                 failed_rows.append(
                     ft.Text(
-                        f"├─ {item.get('Name', '?')}",
+                        f"├─ {name}",
                         size=13,
                         color=ft.Colors.ORANGE_700,
                     )
                 )
-                err = item.get("error", "未知錯誤")
                 if len(err) > 80:
                     err = err[:80] + "..."
                 failed_rows.append(ft.Text(f"│  └─ {err}", size=12, color="#cccccc"))
