@@ -61,7 +61,7 @@ def build_kjs_tab(view) -> ft.Control:
 
 def build_md_tab(view) -> ft.Control:
     """建立 Markdown (Patchouli) 翻譯面板的完整 UI。"""
-    view.md_in_dir = ft.TextField(label='輸入資料夾（遞迴掃描 .md）', hint_text='例如：./config/patchouli_books', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER)
+    view.md_in_dir = ft.TextField(label='輸入資料夾（遞迴掃描 .md）', hint_text='例如：./config/patchouli_books', helper='只處理路徑中含 en_us / zh_tw 資料夾的 .md（例如 docs/en_us/intro.md）；程式碼區塊不會送翻譯', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER)
     view.md_out_dir = ft.TextField(label='輸出資料夾（可選）', hint_text='留空使用 <input>/Output/md', expand=True, dense=True, border_color=ft.Colors.OUTLINE, text_size=14, content_padding=14, prefix_icon=ft.Icons.FOLDER_COPY)
     view.md_step_extract = ft.Checkbox(label='Step 1：Extract（產生待翻譯）', value=True)
     view.md_step_translate = ft.Checkbox(label='Step 2：LM 翻譯（待翻譯 JSON）', value=True)

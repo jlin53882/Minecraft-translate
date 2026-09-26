@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Callable
 
+from translation_tool.utils.log_unit import log_warning
+
 
 def step1_extract_impl(
     *,
@@ -42,6 +44,12 @@ def step1_extract_impl(
 
     md_files = list(iter_md_files_fn(in_root))
     if not md_files:
+        # 常見原因：.md 不在 en_us / zh_tw 資料夾下，會被略過；要讓使用者知道，而非靜默成功
+        log_warning(
+            "[MD] ⚠️ 找不到可處理的 .md：只處理路徑中含 en_us / zh_tw 資料夾的 Markdown"
+            "（例如 docs/en_us/intro.md），請確認輸入資料夾：%s",
+            in_root,
+        )
         manifest_path = pending_root / "_manifest.json"
         manifest = {
             "schema": "md_pending_manifest_blocks_v1",

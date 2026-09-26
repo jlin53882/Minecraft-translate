@@ -58,6 +58,9 @@ RE_HEADING_N = re.compile(
 # 這行也是「文字」，要納入段落（但 § 前綴要保留）
 RE_FORMAT_PREFIX = re.compile(r"^(?P<prefix>\s*§[0-9a-zA-Z]+)(?P<text>.+)$")
 
+# Markdown 程式碼區塊圍欄（至多 3 個空白縮排，``` 或 ~~~ 三個以上）
+RE_CODE_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
 # 語言過濾（漢字）
 RE_CJK = re.compile(r"[\u4e00-\u9fff]")
 
@@ -200,6 +203,8 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockIte
     - 空行視為段落邊界
     - 標題（# 開頭）獨立成一個 block
     - YAML frontmatter（--- ... ---）整段不翻譯
+    - 程式碼區塊（``` 或 ~~~ 圍起來的內容）整段不翻譯（避免 LLM 改動程式碼；
+      區塊內的 # 註解也不會被當成標題）
     - Markdown 圖片行不翻譯
     - 純 component / tag 行（<ItemImage ...> 等）不翻譯
     - § 指令 / token 行不翻譯
@@ -209,6 +214,7 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockIte
     buf: List[str] = []
     start_ln: Optional[int] = None
     in_frontmatter = False
+    code_fence: Optional[str] = None  # 目前所在程式碼區塊的圍欄字元（``` 或 ~~~）
 
     def flush(end_ln: int):
         """將目前 buffer 內容輸出成一個翻譯 block"""
@@ -235,6 +241,17 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockIte
     for i, line in enumerate(lines):
         ln = i + 1
         stripped = line.strip()
+
+        # 0) 程式碼區塊（``` / ~~~）：整段原樣保留，不送翻譯
+        fence = RE_CODE_FENCE.match(line)
+        if code_fence is not None:
+            if fence and fence.group(1)[0] == code_fence[0] and len(fence.group(1)) >= len(code_fence):
+                code_fence = None
+            continue
+        if fence:
+            flush(end_ln=ln - 1)
+            code_fence = fence.group(1)
+            continue
 
         # 1) YAML frontmatter 處理（--- ... ---）
         # 進入或離開 frontmatter 區段，整段不翻譯
