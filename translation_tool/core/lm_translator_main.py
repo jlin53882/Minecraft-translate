@@ -21,7 +21,9 @@ from translation_tool.utils.log_unit import log_info, log_warning, log_error, lo
 # =========================================================
 # Time Constants - 時間相關常數
 # =========================================================
-RPM_COOLDOWN_SEC = 12  # RPM 限制冷卻秒數
+# 每批完成後的固定等待秒數（預設不等待；遇到 429 會依 API 建議秒數重試）。
+# 免費層若常遇到 429，可在設定頁把「每批翻譯後等待秒數」調高。
+RPM_COOLDOWN_SEC = 0
 OVERLOAD_RETRY_WAIT_SEC = 12  # Overload 重試等待秒數
 
 # =========================================================
@@ -180,7 +182,10 @@ def translate_batch_smart_old(
     INITIAL_BATCH_SIZE_MD = lm_cfg.get("initial_batch_size_md", 100)
 
     # ATK-A-6: 動態 RPM 等待時間（可從 config 設定，預設用 module-level 常數）
-    rpm_cooldown_sec = lm_cfg.get("rpm_cooldown_sec", RPM_COOLDOWN_SEC)
+    try:
+        rpm_cooldown_sec = max(0.0, float(lm_cfg.get("rpm_cooldown_sec", RPM_COOLDOWN_SEC)))
+    except (TypeError, ValueError):
+        rpm_cooldown_sec = float(RPM_COOLDOWN_SEC)
     key_rotation_buffer_sec = lm_cfg.get("key_rotation_buffer_sec", 5)
     overload_retry_sec = lm_cfg.get("overload_retry_sec", OVERLOAD_RETRY_WAIT_SEC)
     request_interval_sec = lm_cfg.get("request_interval_sec", 4)
@@ -534,9 +539,10 @@ def translate_batch_smart_old(
                     log_info(
                         f"📊 本批次已完成：calls={completed_calls} | 本批 items={len(batch_items)}"
                     )
-                    # 免費層保護
-                    log_info("⏳ 等待 12 秒以避免觸發 RPM 限制…")
-                    time.sleep(rpm_cooldown_sec)
+                    # 免費層保護（可在設定調整；預設 0 = 不等待）
+                    if rpm_cooldown_sec > 0:
+                        log_info(f"⏳ 等待 {rpm_cooldown_sec:g} 秒以避免觸發 RPM 限制…")
+                        time.sleep(rpm_cooldown_sec)
                 # else: #本批次 進來不會進來這裡處理
                 #    remaining_calls_estimated = math.ceil(
                 #        remaining_count / max(batch_size, 1)
@@ -745,7 +751,7 @@ def translate_batch_smart_old(
                                     overload_retry_count = 0  # ⭐ 重置過載計數
                                     pinned_model_index = None  # ⭐ 解鎖模型，允許重新選
                                     log_info(
-                                        "[✅] API Key 切換成功 → 原地重送同一 batch,等待12秒"
+                                        f"[✅] API Key 切換成功 → 原地重送同一 batch，等待 {key_rotation_buffer_sec} 秒"
                                     )
                                     time.sleep(
                                         key_rotation_buffer_sec

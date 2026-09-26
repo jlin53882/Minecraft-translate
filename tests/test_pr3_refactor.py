@@ -137,10 +137,10 @@ class TestBatchSizeConstants:
         assert isinstance(OVERLOAD_RETRY_WAIT_SEC, int)
 
     def test_rpm_cooldown_constant(self):
-        """測試 RPM_COOLDOWN_SEC 常數存在"""
+        """測試 RPM_COOLDOWN_SEC 常數存在（預設不固定等待，遇 429 才依 API 建議重試）"""
         from translation_tool.core.lm_translator_main import RPM_COOLDOWN_SEC
         
-        assert RPM_COOLDOWN_SEC == 12
+        assert RPM_COOLDOWN_SEC == 0
         assert isinstance(RPM_COOLDOWN_SEC, int)
 
 

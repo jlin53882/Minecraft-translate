@@ -158,6 +158,11 @@ def load_config_into_view(view, config: dict):
     view.controls_map["lm_translator.batch_shrink_factor"].value = (
         _v if _v is not None else get_default("lm_translator.batch_shrink_factor")
     )
+    if "lm_translator.rpm_cooldown_sec" in view.controls_map:
+        _v = lm_cfg.get("rpm_cooldown_sec")
+        view.controls_map["lm_translator.rpm_cooldown_sec"].value = str(
+            _v if _v is not None else get_default("lm_translator.rpm_cooldown_sec", 0)
+        )
     view.controls_map["lm_translator.patchouli.dir_names"].value = "\n".join(
         lm_cfg.get("patchouli", {}).get("dir_names", [])
     )
@@ -355,6 +360,11 @@ def save_config_from_view(
         new_config["lm_translator"]["batch_shrink_factor"] = float(
             view.controls_map["lm_translator.batch_shrink_factor"].value
         )
+        if "lm_translator.rpm_cooldown_sec" in view.controls_map:
+            new_config["lm_translator"]["rpm_cooldown_sec"] = max(
+                0.0,
+                float(view.controls_map["lm_translator.rpm_cooldown_sec"].value or 0),
+            )
         new_config["lm_translator"]["patchouli"]["dir_names"] = [
             line.strip()
             for line in view.controls_map[

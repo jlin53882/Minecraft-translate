@@ -16,6 +16,7 @@
 import os
 import json
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 import copy
@@ -130,6 +131,7 @@ DEFAULT_CONFIG = {
         "initial_batch_size_md": 100,
         "min_batch_size": 50,
         "batch_shrink_factor": 0.5,
+        "rpm_cooldown_sec": 0,
         "rate_limit": {
             "timeout": 600,
             "sleep_seconds_between_batches": 0.0,
@@ -273,6 +275,48 @@ DEFAULT_CONFIG = {
 }
 
 
+# load_config 快取：以設定檔的 (mtime_ns, size) 判斷是否需要重新讀取。
+# 翻譯流程每筆資料都會讀設定（11 萬筆約多花 100 秒），檔案未變就直接用快取。
+_CONFIG_CACHE: dict = {"key": None, "config": None}
+_CONFIG_CACHE_LOCK = threading.Lock()
+
+
+def _file_sig(path: Path):
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def clear_config_cache() -> None:
+    """清除 load_config 快取（寫入設定後呼叫）。"""
+    with _CONFIG_CACHE_LOCK:
+        _CONFIG_CACHE["key"] = None
+        _CONFIG_CACHE["config"] = None
+
+
+def load_config_shared(config_path: str | os.PathLike | None = None) -> dict:
+    """回傳快取中的設定物件（唯讀，呼叫端不可修改）；供高頻讀取使用。"""
+    resolved_config_path = resolve_project_path(config_path or CONFIG_PATH)
+    key = (
+        str(resolved_config_path),
+        _file_sig(resolved_config_path),
+        str(EXAMPLE_PATH),
+        _file_sig(EXAMPLE_PATH),
+        id(DEFAULT_CONFIG),
+    )
+    with _CONFIG_CACHE_LOCK:
+        if _CONFIG_CACHE["key"] == key:
+            return _CONFIG_CACHE["config"]
+    config, cacheable = _load_config_uncached(resolved_config_path)
+    if cacheable:
+        with _CONFIG_CACHE_LOCK:
+            _CONFIG_CACHE["key"] = key
+            _CONFIG_CACHE["config"] = config
+    return config
+
+
 def load_config(config_path: str | os.PathLike | None = None) -> dict:
     """
     載入並合併設定檔，實作三層 fallback 機制。
@@ -292,9 +336,13 @@ def load_config(config_path: str | os.PathLike | None = None) -> dict:
     - 使用者自訂：config.json 有值 → 以使用者為準
 
     回傳：合併後的新 dict（避免直接回傳 DEFAULT_CONFIG 物件被外部修改）。
+    檔案未變動時使用快取，並回傳複本讓呼叫端可自由修改。
     """
-    resolved_config_path = resolve_project_path(config_path or CONFIG_PATH)
+    return copy.deepcopy(load_config_shared(config_path))
 
+
+def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
+    """實際讀檔與合併；回傳 (config, 是否可快取)。"""
     # Layer 3: DEFAULT_CONFIG as base
     # 為什麼用 DEFAULT_CONFIG 而不是空 dict 作為起點？
     # 因為 DEFAULT_CONFIG 是「唯一真相來源」——所有欄位都應該有定義值，
@@ -316,7 +364,7 @@ def load_config(config_path: str | os.PathLike | None = None) -> dict:
             print(
                 f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。"
             )
-            return base
+            return base, False
 
     # Merge: user (Layer 1) > example (Layer 2) > default (Layer 3)
     # 全部用 deep_merge 一次搞定，確保 config.example.json 新增的 top-level key
@@ -331,7 +379,7 @@ def load_config(config_path: str | os.PathLike | None = None) -> dict:
     _validate_lm_translator_config(config["lm_translator"])
     if isinstance(config.get("translator"), dict):
         _validate_translator_config(config["translator"])
-    return config
+    return config, True
 
 
 def save_config(config, config_path: str | os.PathLike | None = None):
@@ -341,6 +389,8 @@ def save_config(config, config_path: str | os.PathLike | None = None):
           False = 寫入失敗
     """
     resolved_config_path = resolve_project_path(config_path or CONFIG_PATH)
+    # 同一秒內連續寫入時 mtime 可能不變，直接清掉快取
+    clear_config_cache()
     try:
         resolved_config_path.parent.mkdir(parents=True, exist_ok=True)
         with resolved_config_path.open("w", encoding="utf-8") as f:
@@ -352,6 +402,7 @@ def save_config(config, config_path: str | os.PathLike | None = None):
         # 能 dump 代表結構是乾淨的
         json.dumps(written_data, sort_keys=True)
 
+        clear_config_cache()
         logging.info(f"設定已成功儲存並驗證至 {resolved_config_path}")
         return True
 

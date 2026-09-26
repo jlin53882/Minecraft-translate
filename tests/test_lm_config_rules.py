@@ -294,7 +294,7 @@ class TestBuildSkipTermsPattern:
 class TestIsValueTranslatable:
     """測試值是否可翻譯的判斷。"""
 
-    @patch("translation_tool.core.lm_config_rules.load_config")
+    @patch("translation_tool.core.lm_config_rules.load_config_shared")
     def test_is_value_translatable_lang_true(self, mock_load_config):
         """測試 lang 值可翻譯。"""
         from translation_tool.core.lm_config_rules import is_value_translatable
@@ -310,7 +310,7 @@ class TestIsValueTranslatable:
 
         assert is_value_translatable("Hello World", is_lang=True) is True
 
-    @patch("translation_tool.core.lm_config_rules.load_config")
+    @patch("translation_tool.core.lm_config_rules.load_config_shared")
     def test_is_value_translatable_cjk(self, mock_load_config):
         """測試含 CJK 的值不可翻譯。"""
         from translation_tool.core.lm_config_rules import is_value_translatable
@@ -323,7 +323,7 @@ class TestIsValueTranslatable:
 
         assert is_value_translatable("你好", is_lang=True) is False
 
-    @patch("translation_tool.core.lm_config_rules.load_config")
+    @patch("translation_tool.core.lm_config_rules.load_config_shared")
     def test_is_value_translatable_tech_pattern(self, mock_load_config):
         """測試技術模式不可翻譯。"""
         from translation_tool.core.lm_config_rules import is_value_translatable
@@ -337,7 +337,7 @@ class TestIsValueTranslatable:
         # minecraft:xxx 格式
         assert is_value_translatable("minecraft:diamond", is_lang=True) is False
 
-    @patch("translation_tool.core.lm_config_rules.load_config")
+    @patch("translation_tool.core.lm_config_rules.load_config_shared")
     def test_is_value_translatable_empty(self, mock_load_config):
         """測試空值不可翻譯。"""
         from translation_tool.core.lm_config_rules import is_value_translatable
@@ -350,7 +350,7 @@ class TestIsValueTranslatable:
 
         assert is_value_translatable("", is_lang=True) is False
 
-    @patch("translation_tool.core.lm_config_rules.load_config")
+    @patch("translation_tool.core.lm_config_rules.load_config_shared")
     def test_is_value_translatable_roman_numeral(self, mock_load_config):
         """測試羅馬數字不可翻譯。"""
         from translation_tool.core.lm_config_rules import is_value_translatable
@@ -363,7 +363,7 @@ class TestIsValueTranslatable:
 
         assert is_value_translatable("III", is_lang=True) is False
 
-    @patch("translation_tool.core.lm_config_rules.load_config")
+    @patch("translation_tool.core.lm_config_rules.load_config_shared")
     def test_is_value_translatable_digit(self, mock_load_config):
         """測試純數字不可翻譯。"""
         from translation_tool.core.lm_config_rules import is_value_translatable
@@ -380,7 +380,7 @@ class TestIsValueTranslatable:
 class TestIsTranslatableField:
     """測試欄位是否可翻譯的判斷。"""
 
-    @patch("translation_tool.core.lm_config_rules.load_config")
+    @patch("translation_tool.core.lm_config_rules.load_config_shared")
     def test_is_translatable_field_true(self, mock_load_config):
         """測試可翻譯欄位。"""
         from translation_tool.core.lm_config_rules import is_translatable_field
@@ -394,7 +394,7 @@ class TestIsTranslatableField:
         assert is_translatable_field("item_text") is True
         assert is_translatable_field("display_name") is True
 
-    @patch("translation_tool.core.lm_config_rules.load_config")
+    @patch("translation_tool.core.lm_config_rules.load_config_shared")
     def test_is_translatable_field_false(self, mock_load_config):
         """測試不可翻譯欄位。"""
         from translation_tool.core.lm_config_rules import is_translatable_field
@@ -405,3 +405,24 @@ class TestIsTranslatableField:
 
         assert is_translatable_field("id") is False
         assert is_translatable_field("damage") is False
+
+
+def test_translator_rules_follow_config_changes(monkeypatch):
+    """B9：設定未變時重用已編譯的規則；設定物件換掉後立即套用新值。"""
+    from translation_tool.core import lm_config_rules as rules
+
+    cfg_a = {"lm_translator": {"translator": {"translatable_keywords": ["text"], "skip_terms": []}}}
+    cfg_b = {"lm_translator": {"translator": {"translatable_keywords": ["lore"], "skip_terms": []}}}
+    current = {"cfg": cfg_a}
+    calls = []
+    orig_build = rules.build_skip_terms_pattern
+    monkeypatch.setattr(rules, "load_config_shared", lambda: current["cfg"])
+    monkeypatch.setattr(rules, "build_skip_terms_pattern", lambda t: calls.append(t) or orig_build(t))
+
+    for _ in range(100):
+        assert rules.is_translatable_field("item_text") is True
+    assert len(calls) == 1  # 只編譯一次
+
+    current["cfg"] = cfg_b
+    assert rules.is_translatable_field("item_text") is False
+    assert rules.is_translatable_field("item_lore") is True

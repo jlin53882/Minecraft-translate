@@ -274,6 +274,11 @@ class ConfigView(ft.Column):
         self.controls_map["lm_translator.batch_shrink_factor"] = ft.TextField(
             label="錯誤縮小比例", dense=True, helper="用於：批次失敗時縮小率"
         )
+        self.controls_map["lm_translator.rpm_cooldown_sec"] = ft.TextField(
+            label="每批翻譯後等待秒數",
+            dense=True,
+            helper="0 = 不等待；免費層常遇 429 時可調高",
+        )
 
         self.controls_map["lm_translator.translator.skip_terms"] = ft.TextField(
             label="略過翻譯 (Skip Terms)",
@@ -710,7 +715,17 @@ class ConfigView(ft.Column):
                 ),
             ]
         )
-        return self._build_card("批次大小與限制", [batch_row_1, batch_row_2])
+        batch_row_3 = ft.Row(
+            [
+                ft.Column(
+                    [self.controls_map["lm_translator.rpm_cooldown_sec"]], expand=1
+                ),
+                ft.Column([], expand=3),
+            ]
+        )
+        return self._build_card(
+            "批次大小與限制", [batch_row_1, batch_row_2, batch_row_3]
+        )
 
     def _build_lm_filter_card(self) -> ft.Control:
         lists_row = ft.Container(

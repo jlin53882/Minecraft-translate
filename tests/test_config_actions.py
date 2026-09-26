@@ -528,3 +528,47 @@ class TestSaveConfigFromViewPatchouliFields:
         )
 
         assert saved['lang_merger']['zh_en_letter_threshold'] == 5
+
+class TestRpmCooldownSetting:
+    """B8：每批翻譯後等待秒數可在設定頁調整（預設 0 = 不等待）。"""
+
+    def _view(self):
+        view = _make_full_save_view()
+        view.controls_map['lm_translator.rpm_cooldown_sec'] = MagicMock()
+        return view
+
+    def test_load_defaults_to_zero(self):
+        from app.views.config.config_actions import load_config_into_view
+
+        view = self._view()
+        cfg = {
+            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
+            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
+            'output_bundler': {}, 'lang_merger': {'pending_folder_name': '待翻譯'},
+            'lm_translator': {
+                'temperature': 0.3, 'rate_limit': {}, 'patchouli_system_prompt': 'p',
+                'lang_system_prompt': 'l', 'translator': {'skip_terms': [], 'translatable_keywords': []},
+                'patchouli': {'dir_names': []}, 'models': {},
+            },
+        }
+        load_config_into_view(view, cfg)
+        assert view.controls_map['lm_translator.rpm_cooldown_sec'].value == '0'
+
+        cfg['lm_translator']['rpm_cooldown_sec'] = 12
+        load_config_into_view(view, cfg)
+        assert view.controls_map['lm_translator.rpm_cooldown_sec'].value == '12'
+
+    @pytest.mark.parametrize('raw, expected', [('3.5', 3.5), ('-2', 0.0), ('', 0.0)])
+    def test_save(self, raw, expected):
+        from app.views.config.config_actions import save_config_from_view
+
+        view = self._view()
+        view.controls_map['lm_translator.rpm_cooldown_sec'].value = raw
+        saved = {}
+        save_config_from_view(
+            view,
+            load_config_json_fn=_make_base_config,
+            save_config_json_fn=saved.update,
+            validate_api_keys_from_ui_fn=lambda keys: None,
+        )
+        assert saved['lm_translator']['rpm_cooldown_sec'] == expected
