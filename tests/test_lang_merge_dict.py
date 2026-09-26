@@ -2,7 +2,11 @@
 
 import pytest
 
-from translation_tool.core.lang_merge_dict import merge_lang_dicts, contains_cjk, is_pure_english
+from translation_tool.core.lang_merge_dict import (
+    merge_lang_dicts,
+    contains_cjk,
+    is_pure_english,
+)
 
 
 # 假的 helper (代替 text_processor 的 callable)
@@ -137,6 +141,7 @@ class TestMergeLangDicts:
 
     def test_english_source_falls_back_only_when_value_is_none(self):
         """英文來源為 None 時依序使用簡中、繁中，最後才用空字串。"""
+
         def merge(en_value, cn_value=None, tw_value=None):
             return merge_lang_dicts(
                 cn_data={"k": cn_value} if cn_value is not None else {},

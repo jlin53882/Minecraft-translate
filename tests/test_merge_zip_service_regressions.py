@@ -1,4 +1,5 @@
 """Merge ZIP batch regression tests for per-item soft-error accounting."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -18,19 +19,23 @@ def test_zip_multiple_soft_error_updates_count_one_failure_and_no_success(monkey
     monkeypatch.setattr(
         merge_service,
         "merge_zhcn_to_zhtw_from_zip",
-        lambda *args, **kwargs: iter([
-            {"error": True, "log": "first decode error"},
-            {"error": True, "log": "second write error"},
-        ]),
+        lambda *args, **kwargs: iter(
+            [
+                {"error": True, "log": "first decode error"},
+                {"error": True, "log": "second write error"},
+            ]
+        ),
     )
     session = MagicMock()
 
-    results = list(merge_service.run_merge_zip_batch_service(
-        zip_paths=["broken.zip"],
-        output_dir="output",
-        session=session,
-        only_process_lang=True,
-    ))
+    results = list(
+        merge_service.run_merge_zip_batch_service(
+            zip_paths=["broken.zip"],
+            output_dir="output",
+            session=session,
+            only_process_lang=True,
+        )
+    )
 
     summary = results[-1]["summary"]
     assert summary["total_zips"] == 1

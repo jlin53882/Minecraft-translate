@@ -13,6 +13,7 @@
 - 為什麼拆:原本 Stage 2 自己寫 key-by-key merge 邏輯,
   user 講「要像 Stage 1 處理」,所以 helper 抽出共用。
 """
+
 from __future__ import annotations
 
 import logging
@@ -134,9 +135,7 @@ def merge_lang_dicts(
 
     for key in all_keys:
         # 1. 人工 zh_tw 保護 (既有 output_dir 來的)
-        is_from_output = (
-            key in existing_tw and is_from_output_dir
-        )
+        is_from_output = key in existing_tw and is_from_output_dir
         if is_from_output and contains_cjk(final_tw.get(key, "")):
             continue
 

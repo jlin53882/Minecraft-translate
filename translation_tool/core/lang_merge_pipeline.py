@@ -15,8 +15,8 @@ import orjson as json
 
 from ..utils.log_unit import log_info, log_exception
 from ..utils.text_processor import recursive_translate_dict, apply_replace_rules
-from .lang_codec import dump_lang_text, parse_lang_text, pick_first_not_none
-from .lang_merge_io import DirReader, quarantine_copy
+from .lang_codec import dump_lang_text, parse_lang_text
+from .lang_merge_io import quarantine_copy
 from .lang_merge_zip_io import (
     _write_bytes_atomic,
     _write_text_atomic,
@@ -136,17 +136,23 @@ def _process_single_mod(
         # 已知標準資源目錄（這些目錄名稱本身就是有意義的結構，不剝離）
         _STANDARD_RESOURCE_DIRS = {"assets", "book", "patchouli_books", "resources"}
         # 2026-08-04 性能優化: 用 caller 預先算好的 all_files_cache
-        _all_names = all_files_cache if all_files_cache is not None else reader.list_all()
+        _all_names = (
+            all_files_cache if all_files_cache is not None else reader.list_all()
+        )
         _wp = None
         if _all_names:
-            _tops = set(n.replace("\\", "/").split("/")[0] for n in _all_names if n.replace("\\", "/").split("/")[0])
+            _tops = set(
+                n.replace("\\", "/").split("/")[0]
+                for n in _all_names
+                if n.replace("\\", "/").split("/")[0]
+            )
             if len(_tops) == 1:
                 _candidate = list(_tops)[0]
                 if _candidate not in _STANDARD_RESOURCE_DIRS:
                     _wp = _candidate + "/"
 
         def _strip(p):
-            return p[len(_wp):] if _wp and p.startswith(_wp) else p
+            return p[len(_wp) :] if _wp and p.startswith(_wp) else p
 
         final_output_rel = _strip(relative_tw_path)
         final_output_path = os.path.join(output_dir, final_output_rel)

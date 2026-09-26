@@ -9,74 +9,80 @@ class _Session:
     def __init__(self, max_logs=2000):
         self.logs = []
         self.started = 0
+
     def start(self):
         self.started += 1
+
     def add_log(self, text):
         self.logs.append(text)
+
     def snapshot(self):
-        return {'status': 'DONE', 'progress': 1.0, 'logs': self.logs}
+        return {"status": "DONE", "progress": 1.0, "logs": self.logs}
 
 
 def test_merge_view_initializes_buttons_and_status(monkeypatch):
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
 
-    assert view.pick_zip_button.content == '新增 ZIP'
-    assert view.start_button.content == '開始合併'
-    assert view.status_chip.label.value == '尚未開始'
+    assert view.pick_zip_button.content == "新增 ZIP"
+    assert view.start_button.content == "開始合併"
+    assert view.status_chip.label.value == "尚未開始"
 
 
 def test_start_merge_without_inputs_shows_snack(monkeypatch):
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     page = mock_page()
     view = merge_view.MergeView(page, mock_filepicker())
 
     view.start_merge(None)
 
     assert page.overlay
-    assert '請先選擇來源資料夾' in page.overlay[-1].content.value
+    assert "請先選擇來源資料夾" in page.overlay[-1].content.value
 
 
 def test_remove_zip_updates_selected_list(monkeypatch):
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
-    view.selected_zips = ['a.zip', 'b.zip']
+    view.selected_zips = ["a.zip", "b.zip"]
 
-    view._remove_zip('a.zip')
+    view._remove_zip("a.zip")
 
-    assert view.selected_zips == ['b.zip']
+    assert view.selected_zips == ["b.zip"]
 
 
 def test_merge_view_all_checkboxes_and_switches_exist(monkeypatch):
     """驗證 MergeView 所有 checkbox/switch 控件存在"""
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
 
-    assert view.only_lang_checkbox.label == '只處理 lang 檔案'
+    assert view.only_lang_checkbox.label == "只處理 lang 檔案"
     assert view.only_lang_checkbox.value is True
 
-    assert view.process_zh_cn_switch.label == '處理 zh_cn 檔案'
+    assert view.process_zh_cn_switch.label == "處理 zh_cn 檔案"
     assert view.process_zh_cn_switch.value is True
 
-    assert view.patchouli_skip_zh_cn_switch.label == '優先使用已有繁中，無則信任簡中（跳過英文）'
+    assert (
+        view.patchouli_skip_zh_cn_switch.label
+        == "優先使用已有繁中，無則信任簡中（跳過英文）"
+    )
     assert view.patchouli_skip_zh_cn_switch.value is False
 
 
 def test_merge_view_text_fields_and_listviews_exist(monkeypatch):
     """驗證 MergeView 所有 TextField/ListView 控件存在"""
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
 
-    assert view.patchouli_threshold_field.value == '0.5'
+    assert view.patchouli_threshold_field.value == "0.5"
     assert view.patchouli_threshold_field.width == 96
     assert view.patchouli_threshold_field.text_align == ft.TextAlign.CENTER
 
-    assert view.output_dir_field.label == '輸出資料夾'
+    assert view.output_dir_field.label == "輸出資料夾"
     assert isinstance(view.zip_list_view, ft.ListView)
     assert view.zip_list_view.height == 160
     # PR refactor/unified-log-view: log_view 改為 LogView widget（ft.Container）
@@ -86,8 +92,8 @@ def test_merge_view_text_fields_and_listviews_exist(monkeypatch):
 
 def test_merge_view_zh_cn_switch_callback_exists(monkeypatch):
     """驗證 process_zh_cn_switch 的 on_change 回調已設定"""
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     page = mock_page()
     view = merge_view.MergeView(page, mock_filepicker())
 
@@ -96,11 +102,11 @@ def test_merge_view_zh_cn_switch_callback_exists(monkeypatch):
 
 def test_merge_view_refresh_zip_list_populates_controls(monkeypatch):
     """驗證 _refresh_zip_list 正確將 selected_zips 顯示在 zip_list_view"""
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     page = mock_page()
     view = merge_view.MergeView(page, mock_filepicker())
-    view.selected_zips = ['a.zip', 'b.zip']
+    view.selected_zips = ["a.zip", "b.zip"]
 
     view._refresh_zip_list()
 
@@ -109,42 +115,42 @@ def test_merge_view_refresh_zip_list_populates_controls(monkeypatch):
 
 def test_merge_view_remove_zip_refreshes_and_updates_page(monkeypatch):
     """驗證 _remove_zip 正確移除並更新頁面"""
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     page = mock_page()
     view = merge_view.MergeView(page, mock_filepicker())
-    view.selected_zips = ['a.zip', 'b.zip']
+    view.selected_zips = ["a.zip", "b.zip"]
 
-    view._remove_zip('a.zip')
+    view._remove_zip("a.zip")
 
-    assert view.selected_zips == ['b.zip']
+    assert view.selected_zips == ["b.zip"]
     assert page.updated >= 1
 
 
 def test_merge_view_async_pick_output_dir(monkeypatch):
     """驗證 _async_pick_output_dir 正確更新 output_dir_field"""
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     page = mock_page()
     picker = mock_filepicker()
-    picker.set_mock_path('/output/dir')
+    picker.set_mock_path("/output/dir")
     view = merge_view.MergeView(page, picker)
 
     page.run_task(view._async_pick_output_dir)
     page._run_all_tasks()
 
-    assert view.output_dir_field.value == '/output/dir'
+    assert view.output_dir_field.value == "/output/dir"
     assert page.updated >= 1
 
 
 def test_merge_view_progress_bar_and_status_chip(monkeypatch):
     """驗證 progress_bar 和 status_chip 初始狀態"""
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
 
     assert view.progress_bar.value == 0
-    assert view.status_chip.label.value == '尚未開始'
+    assert view.status_chip.label.value == "尚未開始"
 
 
 def test_merge_view_log_presenter_exists(monkeypatch):
@@ -153,99 +159,100 @@ def test_merge_view_log_presenter_exists(monkeypatch):
     PR refactor/unified-log-view: LogPresenter 已內建在 LogView 內，
     view 不再單獨管理 log_presenter。
     """
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
 
-    assert hasattr(view, 'log_view')
+    assert hasattr(view, "log_view")
     assert isinstance(view.log_view, LogView)
 
 
 def test_merge_view_show_snack_bar_adds_to_overlay(monkeypatch):
     """測試 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     page = mock_page()
     view = merge_view.MergeView(page, mock_filepicker())
 
-    show_snack(view.page, 'Test error', '#FF0000')
+    show_snack(view.page, "Test error", "#FF0000")
 
     assert len(page.overlay) >= 1
 
 
 def test_merge_view_set_status_updates_chip(monkeypatch):
     """測試 _set_status 正確更新 status_chip"""
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
 
-    view._set_status('工作中', '#00FF00')
+    view._set_status("工作中", "#00FF00")
 
-    assert view.status_chip.label.value == '工作中'
+    assert view.status_chip.label.value == "工作中"
 
 
 def test_merge_view_open_output_folder(monkeypatch):
     """測試 _open_output_folder 不拋出錯誤"""
     import subprocess
 
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
-    monkeypatch.setattr(subprocess, 'Popen', lambda *a, **kw: None)
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: None)
 
     view = merge_view.MergeView(mock_page(), mock_filepicker())
-    view.output_dir_field.value = 'C:/Out'
+    view.output_dir_field.value = "C:/Out"
 
     view._open_output_folder()
 
 
 def test_merge_view_async_pick_zips(monkeypatch):
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     page = mock_page()
     picker = mock_filepicker()
-    picker.set_mock_path('/zips')
+    picker.set_mock_path("/zips")
     view = merge_view.MergeView(page, picker)
 
     page.run_task(view._async_pick_output_dir)
     page._run_all_tasks()
 
-    assert view.output_dir_field.value == '/zips'
+    assert view.output_dir_field.value == "/zips"
 
 
 def test_merge_view_pick_zips_is_async(monkeypatch):
     """2026-08-04: pick_zips 改為 async/await (桌面版 FilePicker)。"""
     import asyncio
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
     assert asyncio.iscoroutinefunction(view.pick_zips)
 
 
 def test_merge_view_skip_zh_cn_switch_exists(monkeypatch):
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
     assert view.process_zh_cn_switch is not None
 
 
 def test_merge_view_patchouli_skip_zh_cn_switch_exists(monkeypatch):
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
     assert view.patchouli_skip_zh_cn_switch is not None
 
 
 def test_merge_view_patchouli_threshold_field_exists(monkeypatch):
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
     assert view.patchouli_threshold_field is not None
 
 
 def test_show_merge_summary_handles_large_failed_list(monkeypatch):
     """2026-08-05: _show_merge_summary 在 472 個失敗 ZIP 時不應 crash。"""
-    monkeypatch.setattr(merge_view, 'TaskSession', _Session)
-    monkeypatch.setattr(merge_view, 'load_config', lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
 
     # 模擬 472 個失敗

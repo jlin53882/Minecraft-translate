@@ -7,7 +7,7 @@
 import flet as ft
 from app.ui import theme
 from app.ui.snack import show_snack
-from translation_tool.utils.log_unit import log_info
+
 from app.services_impl.config_service import load_config_json, save_config_json
 from app.views.config.config_actions import load_config_into_view, save_config_from_view
 from app.views.config.config_form import (
@@ -137,21 +137,31 @@ class ConfigView(ft.Column):
             label="待翻譯整理資料夾名稱", hint_text="用於：lang_merger", dense=True
         )
         self.controls_map["lang_merger.filtered_pending_min_count"] = ft.TextField(
-            label="待翻譯整理json筆數最小出現次數", hint_text="用於：整理分類邏輯", dense=True
+            label="待翻譯整理json筆數最小出現次數",
+            hint_text="用於：整理分類邏輯",
+            dense=True,
         )
         self.controls_map["lang_merger.quarantine_folder_name"] = ft.TextField(
-            label="語言合併器格式問題隔離資料夾名稱", hint_text="用於：格式錯誤隔離", dense=True
+            label="語言合併器格式問題隔離資料夾名稱",
+            hint_text="用於：格式錯誤隔離",
+            dense=True,
         )
-        self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"] = ft.Checkbox(
-            label="優先使用已有繁中，無則信任簡中（跳過英文）", value=False
+        self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"] = (
+            ft.Checkbox(label="優先使用已有繁中，無則信任簡中（跳過英文）", value=False)
         )
-        self.controls_map["lang_merger.patchouli_effective_translation_threshold"] = ft.TextField(
-            label="en_us 跳過門檻", hint_text="有效翻譯比例閾值 0.0~1.0，空白用預設值 0.5", dense=True,
-            keyboard_type=ft.KeyboardType.NUMBER
+        self.controls_map["lang_merger.patchouli_effective_translation_threshold"] = (
+            ft.TextField(
+                label="en_us 跳過門檻",
+                hint_text="有效翻譯比例閾值 0.0~1.0，空白用預設值 0.5",
+                dense=True,
+                keyboard_type=ft.KeyboardType.NUMBER,
+            )
         )
         self.controls_map["lang_merger.zh_en_letter_threshold"] = ft.TextField(
-            label="zh 英文含量閾值", hint_text="超過此數值判定為英文，空白用預設值 2", dense=True,
-            keyboard_type=ft.KeyboardType.NUMBER
+            label="zh 英文含量閾值",
+            hint_text="超過此數值判定為英文，空白用預設值 2",
+            dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER,
         )
         # 2026-08-02 (PR-XX merge-asset-integration):階段 2 開關
         # - 把 {XX_extracted}/{modid}/lang/* 併入 assets/{modid}/lang/*
@@ -164,10 +174,18 @@ class ConfigView(ft.Column):
             label="模型溫度 (Temperature)", hint_text="用於：LM翻譯請求", dense=True
         )
         self.controls_map["lm_translator.rate_limit.timeout"] = ft.TextField(
-            label="API 請求 Timeout", helper="用於：API超時控制", dense=True, keyboard_type=ft.KeyboardType.NUMBER
+            label="API 請求 Timeout",
+            helper="用於：API超時控制",
+            dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER,
         )
-        self.controls_map["lm_translator.rate_limit.sleep_seconds_between_batches"] = ft.TextField(
-            label="批次間延遲 (秒)", helper="用於：翻譯批次間延遲", dense=True, keyboard_type=ft.KeyboardType.NUMBER
+        self.controls_map["lm_translator.rate_limit.sleep_seconds_between_batches"] = (
+            ft.TextField(
+                label="批次間延遲 (秒)",
+                helper="用於：翻譯批次間延遲",
+                dense=True,
+                keyboard_type=ft.KeyboardType.NUMBER,
+            )
         )
         self.controls_map["lm_translator.lm_translate_folder_name"] = ft.TextField(
             label="LM 翻譯輸出資料夾", helper="用於：翻譯結果輸出", dense=True
@@ -197,17 +215,24 @@ class ConfigView(ft.Column):
             label="待翻譯整理資料夾名稱", dense=True, helper="用於：lang_merger"
         )
         self.controls_map["lang_merger.filtered_pending_min_count"] = ft.TextField(
-            label="待翻譯整理json筆數最小出現次數", dense=True, helper="用於：整理分類邏輯"
+            label="待翻譯整理json筆數最小出現次數",
+            dense=True,
+            helper="用於：整理分類邏輯",
         )
         self.controls_map["lang_merger.quarantine_folder_name"] = ft.TextField(
-            label="語言合併器格式問題隔離資料夾名稱", dense=True, helper="用於：格式錯誤隔離"
+            label="語言合併器格式問題隔離資料夾名稱",
+            dense=True,
+            helper="用於：格式錯誤隔離",
         )
 
         self.controls_map["lm_translator.temperature"] = ft.TextField(
             label="模型溫度 (Temperature)", dense=True, helper="用於：LM翻譯請求"
         )
         self.controls_map["lm_translator.rate_limit.timeout"] = ft.TextField(
-            label="API 請求 Timeout", dense=True, keyboard_type=ft.KeyboardType.NUMBER, helper="用於：API超時控制"
+            label="API 請求 Timeout",
+            dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            helper="用於：API超時控制",
         )
         self.controls_map["lm_translator.lm_translate_folder_name"] = ft.TextField(
             label="LM 翻譯輸出資料夾", dense=True, helper="用於：翻譯結果輸出"
@@ -275,16 +300,24 @@ class ConfigView(ft.Column):
         )
 
         self.controls_map["extractor.output_folder_names.lang_extract"] = ft.TextField(
-            label="Lang 提取輸出資料夾", helper="未填入輸出路徑時自動帶入此名稱", dense=True
+            label="Lang 提取輸出資料夾",
+            helper="未填入輸出路徑時自動帶入此名稱",
+            dense=True,
         )
         self.controls_map["extractor.output_folder_names.book_extract"] = ft.TextField(
-            label="Book 提取輸出資料夾", helper="未填入輸出路徑時自動帶入此名稱", dense=True
+            label="Book 提取輸出資料夾",
+            helper="未填入輸出路徑時自動帶入此名稱",
+            dense=True,
         )
         self.controls_map["extractor.output_folder_names.lang_preview"] = ft.TextField(
-            label="Lang 預覽輸出資料夾", helper="未填入輸出路徑時自動帶入此名稱", dense=True
+            label="Lang 預覽輸出資料夾",
+            helper="未填入輸出路徑時自動帶入此名稱",
+            dense=True,
         )
         self.controls_map["extractor.output_folder_names.book_preview"] = ft.TextField(
-            label="Book 預覽輸出資料夾", helper="未填入輸出路徑時自動帶入此名稱", dense=True
+            label="Book 預覽輸出資料夾",
+            helper="未填入輸出路徑時自動帶入此名稱",
+            dense=True,
         )
         self.controls_map["extractor.output_folder_names.dual_extract"] = ft.TextField(
             label="Dual 提取輸出資料夾", helper="Lang + Book 同時提取時使用", dense=True
@@ -322,8 +355,21 @@ class ConfigView(ft.Column):
             on_click=lambda e, iid=item["id"]: self._on_nav_click(iid),
             content=ft.Row(
                 [
-                    ft.Icon(item["icon"], size=18, color=ft.Colors.BLUE_800 if is_selected else ft.Colors.BLUE_GREY_600),
-                    ft.Text(item["label"], weight=ft.FontWeight.BOLD, size=13, color=ft.Colors.BLUE_900 if is_selected else ft.Colors.BLUE_GREY_700),
+                    ft.Icon(
+                        item["icon"],
+                        size=18,
+                        color=ft.Colors.BLUE_800
+                        if is_selected
+                        else ft.Colors.BLUE_GREY_600,
+                    ),
+                    ft.Text(
+                        item["label"],
+                        weight=ft.FontWeight.BOLD,
+                        size=13,
+                        color=ft.Colors.BLUE_900
+                        if is_selected
+                        else ft.Colors.BLUE_GREY_700,
+                    ),
                 ],
                 spacing=10,
                 alignment=ft.MainAxisAlignment.START,
@@ -345,7 +391,7 @@ class ConfigView(ft.Column):
     def _show_content(self, nav_id: str):
         """切換顯示內容"""
         for cid, container in self._content_containers.items():
-            container.visible = (cid == nav_id)
+            container.visible = cid == nav_id
         self.content_scroll.update()
 
     def _build_nav_column(self) -> ft.Container:
@@ -360,8 +406,21 @@ class ConfigView(ft.Column):
                 on_click=lambda e, iid=item["id"]: self._on_nav_click(iid),
                 content=ft.Row(
                     [
-                        ft.Icon(item["icon"], size=18, color=ft.Colors.BLUE_800 if is_selected else ft.Colors.BLUE_GREY_600),
-                        ft.Text(item["label"], weight=ft.FontWeight.BOLD, size=13, color=ft.Colors.BLUE_900 if is_selected else ft.Colors.BLUE_GREY_700),
+                        ft.Icon(
+                            item["icon"],
+                            size=18,
+                            color=ft.Colors.BLUE_800
+                            if is_selected
+                            else ft.Colors.BLUE_GREY_600,
+                        ),
+                        ft.Text(
+                            item["label"],
+                            weight=ft.FontWeight.BOLD,
+                            size=13,
+                            color=ft.Colors.BLUE_900
+                            if is_selected
+                            else ft.Colors.BLUE_GREY_700,
+                        ),
                     ],
                     spacing=10,
                     alignment=ft.MainAxisAlignment.START,
@@ -398,21 +457,30 @@ class ConfigView(ft.Column):
         general_content = ft.Column(
             spacing=15,
             controls=[
-                self._build_card("日誌設定 (Logging)", [
-                    self.controls_map["logging.log_level"],
-                    self.controls_map["logging.log_dir"],
-                ]),
-                self._build_card("翻譯與處理設定 (Translator)", [
-                    self.controls_map["translator.output_dir_name"],
-                    self.controls_map["ftb_translator.output_dir_name"],
-                    self.controls_map["translator.replace_rules_path"],
-                    self.controls_map["translator.cache_directory"],
-                    self.controls_map["translator.parallel_execution_workers"],
-                    self.controls_map["translator.enable_cache_saving"],
-                ]),
-                self._build_card("成品打包器 (Output Bundler)", [
-                    self.controls_map["output_bundler.output_zip_name"],
-                ]),
+                self._build_card(
+                    "日誌設定 (Logging)",
+                    [
+                        self.controls_map["logging.log_level"],
+                        self.controls_map["logging.log_dir"],
+                    ],
+                ),
+                self._build_card(
+                    "翻譯與處理設定 (Translator)",
+                    [
+                        self.controls_map["translator.output_dir_name"],
+                        self.controls_map["ftb_translator.output_dir_name"],
+                        self.controls_map["translator.replace_rules_path"],
+                        self.controls_map["translator.cache_directory"],
+                        self.controls_map["translator.parallel_execution_workers"],
+                        self.controls_map["translator.enable_cache_saving"],
+                    ],
+                ),
+                self._build_card(
+                    "成品打包器 (Output Bundler)",
+                    [
+                        self.controls_map["output_bundler.output_zip_name"],
+                    ],
+                ),
             ],
         )
 
@@ -442,12 +510,15 @@ class ConfigView(ft.Column):
         species_lookup_content = ft.Column(
             spacing=15,
             controls=[
-                self._build_card("學名查詢設定 (Species Cache)", [
-                    self.controls_map["species_cache.cache_directory"],
-                    self.controls_map["species_cache.cache_filename"],
-                    self.controls_map["species_cache.wikipedia_language"],
-                    self.controls_map["species_cache.wikipedia_rate_limit_delay"],
-                ]),
+                self._build_card(
+                    "學名查詢設定 (Species Cache)",
+                    [
+                        self.controls_map["species_cache.cache_directory"],
+                        self.controls_map["species_cache.cache_filename"],
+                        self.controls_map["species_cache.wikipedia_language"],
+                        self.controls_map["species_cache.wikipedia_rate_limit_delay"],
+                    ],
+                ),
             ],
         )
 
@@ -468,18 +539,67 @@ class ConfigView(ft.Column):
         extractor_content = ft.Column(
             spacing=15,
             controls=[
-                self._build_card("JAR 輸出資料夾命名", [
-                    ft.Row([
-                        ft.Column([self.controls_map["extractor.output_folder_names.lang_extract"]], expand=1),
-                        ft.Column([self.controls_map["extractor.output_folder_names.book_extract"]], expand=1),
-                        ft.Column([self.controls_map["extractor.output_folder_names.dual_extract"]], expand=1),
-                    ]),
-                    ft.Row([
-                        ft.Column([self.controls_map["extractor.output_folder_names.lang_preview"]], expand=1),
-                        ft.Column([self.controls_map["extractor.output_folder_names.book_preview"]], expand=1),
-                        ft.Column([self.controls_map["extractor.output_folder_names.dual_preview"]], expand=1),
-                    ]),
-                ]),
+                self._build_card(
+                    "JAR 輸出資料夾命名",
+                    [
+                        ft.Row(
+                            [
+                                ft.Column(
+                                    [
+                                        self.controls_map[
+                                            "extractor.output_folder_names.lang_extract"
+                                        ]
+                                    ],
+                                    expand=1,
+                                ),
+                                ft.Column(
+                                    [
+                                        self.controls_map[
+                                            "extractor.output_folder_names.book_extract"
+                                        ]
+                                    ],
+                                    expand=1,
+                                ),
+                                ft.Column(
+                                    [
+                                        self.controls_map[
+                                            "extractor.output_folder_names.dual_extract"
+                                        ]
+                                    ],
+                                    expand=1,
+                                ),
+                            ]
+                        ),
+                        ft.Row(
+                            [
+                                ft.Column(
+                                    [
+                                        self.controls_map[
+                                            "extractor.output_folder_names.lang_preview"
+                                        ]
+                                    ],
+                                    expand=1,
+                                ),
+                                ft.Column(
+                                    [
+                                        self.controls_map[
+                                            "extractor.output_folder_names.book_preview"
+                                        ]
+                                    ],
+                                    expand=1,
+                                ),
+                                ft.Column(
+                                    [
+                                        self.controls_map[
+                                            "extractor.output_folder_names.dual_preview"
+                                        ]
+                                    ],
+                                    expand=1,
+                                ),
+                            ]
+                        ),
+                    ],
+                ),
             ],
         )
 
@@ -509,7 +629,7 @@ class ConfigView(ft.Column):
         )
 
         for cid, container in self._content_containers.items():
-            container.visible = (cid == self._selected_nav)
+            container.visible = cid == self._selected_nav
 
         return self.content_scroll
 
@@ -517,9 +637,21 @@ class ConfigView(ft.Column):
         top_row = ft.Row(
             [
                 ft.Column([self.controls_map["lm_translator.temperature"]], expand=1),
-                ft.Column([self.controls_map["lm_translator.rate_limit.timeout"]], expand=1),
-                ft.Column([self.controls_map["lm_translator.rate_limit.sleep_seconds_between_batches"]], expand=1),
-                ft.Column([self.controls_map["lm_translator.lm_translate_folder_name"]], expand=2),
+                ft.Column(
+                    [self.controls_map["lm_translator.rate_limit.timeout"]], expand=1
+                ),
+                ft.Column(
+                    [
+                        self.controls_map[
+                            "lm_translator.rate_limit.sleep_seconds_between_batches"
+                        ]
+                    ],
+                    expand=1,
+                ),
+                ft.Column(
+                    [self.controls_map["lm_translator.lm_translate_folder_name"]],
+                    expand=2,
+                ),
             ]
         )
         return self._build_card("基本設定", [top_row])
@@ -529,9 +661,15 @@ class ConfigView(ft.Column):
             height=250,
             content=ft.Row(
                 [
-                    ft.Column([self.controls_map["lm_translator.patchouli_system_prompt"]], expand=1),
+                    ft.Column(
+                        [self.controls_map["lm_translator.patchouli_system_prompt"]],
+                        expand=1,
+                    ),
                     ft.VerticalDivider(width=1),
-                    ft.Column([self.controls_map["lm_translator.lang_system_prompt"]], expand=1),
+                    ft.Column(
+                        [self.controls_map["lm_translator.lang_system_prompt"]],
+                        expand=1,
+                    ),
                 ],
                 spacing=10,
             ),
@@ -541,17 +679,35 @@ class ConfigView(ft.Column):
     def _build_lm_batch_card(self) -> ft.Control:
         batch_row_1 = ft.Row(
             [
-                ft.Column([self.controls_map["lm_translator.initial_batch_size_patchouli"]], expand=1),
-                ft.Column([self.controls_map["lm_translator.initial_batch_size_lang"]], expand=1),
-                ft.Column([self.controls_map["lm_translator.initial_batch_size_ftb"]], expand=1),
+                ft.Column(
+                    [self.controls_map["lm_translator.initial_batch_size_patchouli"]],
+                    expand=1,
+                ),
+                ft.Column(
+                    [self.controls_map["lm_translator.initial_batch_size_lang"]],
+                    expand=1,
+                ),
+                ft.Column(
+                    [self.controls_map["lm_translator.initial_batch_size_ftb"]],
+                    expand=1,
+                ),
             ]
         )
         batch_row_2 = ft.Row(
             [
-                ft.Column([self.controls_map["lm_translator.initial_batch_size_kubejs"]], expand=1),
-                ft.Column([self.controls_map["lm_translator.initial_batch_size_md"]], expand=1),
-                ft.Column([self.controls_map["lm_translator.min_batch_size"]], expand=1),
-                ft.Column([self.controls_map["lm_translator.batch_shrink_factor"]], expand=1),
+                ft.Column(
+                    [self.controls_map["lm_translator.initial_batch_size_kubejs"]],
+                    expand=1,
+                ),
+                ft.Column(
+                    [self.controls_map["lm_translator.initial_batch_size_md"]], expand=1
+                ),
+                ft.Column(
+                    [self.controls_map["lm_translator.min_batch_size"]], expand=1
+                ),
+                ft.Column(
+                    [self.controls_map["lm_translator.batch_shrink_factor"]], expand=1
+                ),
             ]
         )
         return self._build_card("批次大小與限制", [batch_row_1, batch_row_2])
@@ -561,11 +717,24 @@ class ConfigView(ft.Column):
             height=200,
             content=ft.Row(
                 [
-                    ft.Column([self.controls_map["lm_translator.translator.skip_terms"]], expand=1),
+                    ft.Column(
+                        [self.controls_map["lm_translator.translator.skip_terms"]],
+                        expand=1,
+                    ),
                     ft.VerticalDivider(width=1),
-                    ft.Column([self.controls_map["lm_translator.translator.translatable_keywords"]], expand=1),
+                    ft.Column(
+                        [
+                            self.controls_map[
+                                "lm_translator.translator.translatable_keywords"
+                            ]
+                        ],
+                        expand=1,
+                    ),
                     ft.VerticalDivider(width=1),
-                    ft.Column([self.controls_map["lm_translator.patchouli.dir_names"]], expand=1),
+                    ft.Column(
+                        [self.controls_map["lm_translator.patchouli.dir_names"]],
+                        expand=1,
+                    ),
                 ],
                 spacing=5,
             ),
@@ -581,7 +750,9 @@ class ConfigView(ft.Column):
                 [
                     ft.Row(
                         [
-                            ft.Text("模型清單 (Models List)", weight=ft.FontWeight.BOLD),
+                            ft.Text(
+                                "模型清單 (Models List)", weight=ft.FontWeight.BOLD
+                            ),
                             self.new_model_field,
                             self.add_model_button,
                         ]
@@ -617,14 +788,34 @@ class ConfigView(ft.Column):
             [
                 ft.Row(
                     [
-                        ft.Column([self.controls_map["lang_merger.pending_folder_name"]], expand=1),
-                        ft.Column([self.controls_map["lang_merger.pending_organized_folder_name"]], expand=1),
+                        ft.Column(
+                            [self.controls_map["lang_merger.pending_folder_name"]],
+                            expand=1,
+                        ),
+                        ft.Column(
+                            [
+                                self.controls_map[
+                                    "lang_merger.pending_organized_folder_name"
+                                ]
+                            ],
+                            expand=1,
+                        ),
                     ]
                 ),
                 ft.Row(
                     [
-                        ft.Column([self.controls_map["lang_merger.filtered_pending_min_count"]], expand=1),
-                        ft.Column([self.controls_map["lang_merger.quarantine_folder_name"]], expand=1),
+                        ft.Column(
+                            [
+                                self.controls_map[
+                                    "lang_merger.filtered_pending_min_count"
+                                ]
+                            ],
+                            expand=1,
+                        ),
+                        ft.Column(
+                            [self.controls_map["lang_merger.quarantine_folder_name"]],
+                            expand=1,
+                        ),
                     ]
                 ),
                 ft.Container(height=8),
@@ -633,7 +824,11 @@ class ConfigView(ft.Column):
                     [
                         ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=13),
                         self.controls_map["lang_merger.zh_en_letter_threshold"],
-                        ft.Text("超過此數值判定為英文，用於 lang 過濾，空白用預設值 2", size=11, color=theme.GREY_600),
+                        ft.Text(
+                            "超過此數值判定為英文，用於 lang 過濾，空白用預設值 2",
+                            size=11,
+                            color=theme.GREY_600,
+                        ),
                     ],
                     spacing=2,
                 ),
@@ -643,17 +838,37 @@ class ConfigView(ft.Column):
                     [
                         ft.Column(
                             [
-                                ft.Text("翻譯來源優先級：繁中 > 簡中(達門檻) > 英文", weight=ft.FontWeight.W_500, size=13),
-                                self.controls_map["lang_merger.patchouli_skip_en_us_when_zh_cn_exists"],
-                                ft.Text("內容中日韓文字佔比達此值時視為有效翻譯", size=11, color=theme.GREY_600),
+                                ft.Text(
+                                    "翻譯來源優先級：繁中 > 簡中(達門檻) > 英文",
+                                    weight=ft.FontWeight.W_500,
+                                    size=13,
+                                ),
+                                self.controls_map[
+                                    "lang_merger.patchouli_skip_en_us_when_zh_cn_exists"
+                                ],
+                                ft.Text(
+                                    "內容中日韓文字佔比達此值時視為有效翻譯",
+                                    size=11,
+                                    color=theme.GREY_600,
+                                ),
                             ],
                             expand=1,
                         ),
                         ft.Column(
                             [
-                                ft.Text("en_us 跳過門檻", weight=ft.FontWeight.W_500, size=13),
-                                self.controls_map["lang_merger.patchouli_effective_translation_threshold"],
-                                ft.Text("有效翻譯比例閾值 0.0~1.0，空白用預設值 0.5", size=11, color=theme.GREY_600),
+                                ft.Text(
+                                    "en_us 跳過門檻",
+                                    weight=ft.FontWeight.W_500,
+                                    size=13,
+                                ),
+                                self.controls_map[
+                                    "lang_merger.patchouli_effective_translation_threshold"
+                                ],
+                                ft.Text(
+                                    "有效翻譯比例閾值 0.0~1.0，空白用預設值 0.5",
+                                    size=11,
+                                    color=theme.GREY_600,
+                                ),
                             ],
                             expand=1,
                         ),
@@ -661,9 +876,7 @@ class ConfigView(ft.Column):
                     spacing=8,
                 ),
                 ft.Container(height=8),
-                ft.Text(
-                    "檔案合併(階段 2)", weight=ft.FontWeight.W_600, size=14
-                ),
+                ft.Text("檔案合併(階段 2)", weight=ft.FontWeight.W_600, size=14),
                 ft.Row(
                     [
                         ft.Column(
@@ -701,7 +914,6 @@ class ConfigView(ft.Column):
     def _build_card(self, title, controls_list):
         """建立設定卡片"""
         return build_config_card(self, title, controls_list)
-
 
     def add_model_row(self, model_name: str):
         """新增模型項目到列表"""
@@ -790,7 +1002,7 @@ class ConfigView(ft.Column):
         self.new_model_field.value = ""
         self.page.update()
 
-    def _build_key_field(self, value: str = ''):
+    def _build_key_field(self, value: str = ""):
         """建立 API Key 輸入欄位"""
         return build_key_field(value=value)
 

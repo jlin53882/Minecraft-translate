@@ -20,14 +20,17 @@ from datetime import datetime
 from pathlib import Path
 import copy
 
+
 # PR27：統一路徑解析基準，避免 legacy cwd 依賴造成找不到 config / 資源檔。
 def get_project_root() -> Path:
     """取得專案根目錄路徑。"""
     return Path(__file__).resolve().parents[2]
 
+
 PROJECT_ROOT = get_project_root()
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 EXAMPLE_PATH = PROJECT_ROOT / "config.example.json"
+
 
 def load_config_example() -> dict:
     """讀取 config.example.json，不存在或解析失敗時回傳空 dict。
@@ -51,9 +54,10 @@ def get_default_block(name: str):
     """取得 DEFAULT_CONFIG 中指定區塊（如 'lang_merger', 'extractor'）。"""
     return copy.deepcopy(DEFAULT_CONFIG.get(name, {}))
 
+
 def get_default(path: str, default=None):
     """依路徑讀取 DEFAULT_CONFIG 中的值，例如 'lang_merger.pending_folder_name'。
-    
+
     參數：
         path: dot-separated path，如 'lang_merger.pending_folder_name'
         default: 找不到時的回傳值
@@ -88,6 +92,7 @@ def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
     if p.is_absolute():
         return p
     return PROJECT_ROOT / p
+
 
 # DEFAULT_CONFIG 是「缺檔或缺欄位時的保底值」，不是要取代使用者設定；
 # load_config() 會用它做深度合併，讓新欄位可以向後相容地補進舊 config.json。
@@ -175,7 +180,7 @@ DEFAULT_CONFIG = {
             "2. items[].id 必須與輸入完全一字不差\n"
             "3. items 的數量與順序必須與輸入完全一致\n"
             "4. 如果你不確定如何翻譯，請原樣回傳 value\n"
-            "5. 回傳必須是合法 JSON，格式必須為 {\"items\":[{\"id\":...,\"value\":...}, ...]}\n"
+            '5. 回傳必須是合法 JSON，格式必須為 {"items":[{"id":...,"value":...}, ...]}\n'
             "6. 僅翻譯為繁體中文（台灣用語）\n"
             "7. 保留 §, %, {}, $(...) 等所有符號與格式\n"
             "8. 單位（mb、tick 等）請保留原文\n"
@@ -233,9 +238,7 @@ DEFAULT_CONFIG = {
             "dir_names": ["patchouli_books", "book", "manual", "guidebook"],
         },
     },
-    "output_bundler": {
-        "output_zip_name": "可使用翻譯.zip"
-    },
+    "output_bundler": {"output_zip_name": "可使用翻譯.zip"},
     "jar_extractor": {
         "lang_codes": ["en_us", "zh_cn", "zh_tw"],
     },
@@ -268,6 +271,8 @@ DEFAULT_CONFIG = {
         "skip_zh_cn_extract": False,
     },
 }
+
+
 def load_config(config_path: str | os.PathLike | None = None) -> dict:
     """
     載入並合併設定檔，實作三層 fallback 機制。
@@ -308,7 +313,9 @@ def load_config(config_path: str | os.PathLike | None = None) -> dict:
             with resolved_config_path.open("r", encoding="utf-8") as f:
                 user_config = json.load(f)
         except (json.JSONDecodeError, IOError) as e:
-            print(f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。")
+            print(
+                f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。"
+            )
             return base
 
     # Merge: user (Layer 1) > example (Layer 2) > default (Layer 3)
@@ -325,6 +332,7 @@ def load_config(config_path: str | os.PathLike | None = None) -> dict:
     if isinstance(config.get("translator"), dict):
         _validate_translator_config(config["translator"])
     return config
+
 
 def save_config(config, config_path: str | os.PathLike | None = None):
     """
@@ -350,6 +358,7 @@ def save_config(config, config_path: str | os.PathLike | None = None):
     except Exception as e:
         logging.error(f"錯誤：儲存或驗證設定檔失敗: {e}")
         return False
+
 
 def setup_logging(config):
     """根據設定檔配置 logging。"""
@@ -390,6 +399,7 @@ def setup_logging(config):
     logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
     logging.info("日誌系統已成功設定。")
 
+
 def get_models_config(cfg: dict) -> dict[str, dict]:
     """
     安全取得 models 設定
@@ -415,8 +425,10 @@ def get_models_config(cfg: dict) -> dict[str, dict]:
 
     return safe_models
 
+
 class ConfigValidationError(ValueError):
     """Config 欄位驗證失敗時拋出。"""
+
     pass
 
 
@@ -484,8 +496,7 @@ def _validate_lm_translator_config(lm: dict) -> None:
     models_val = lm.get("models")
     if models_val is not None and not isinstance(models_val, dict):
         raise ConfigValidationError(
-            f"lm_translator.models 必須為 dict，"
-            f"目前為 {type(models_val).__name__}"
+            f"lm_translator.models 必須為 dict，目前為 {type(models_val).__name__}"
         )
 
 
@@ -499,11 +510,8 @@ def _validate_translator_config(translator: dict) -> None:
         )
 
 
-
 def deep_merge(default: dict, override: dict) -> dict:
-    """
-
-    """
+    """ """
     result = default.copy()
     for k, v in override.items():
         if k in result and isinstance(result[k], dict) and isinstance(v, dict):
@@ -511,6 +519,7 @@ def deep_merge(default: dict, override: dict) -> dict:
         else:
             result[k] = v
     return result
+
 
 class LazyConfigProxy:
     """延遲讀取 config，避免 module import 時就觸發 I/O 與 logging 初始化。"""
@@ -562,6 +571,7 @@ class LazyConfigProxy:
     def __repr__(self):
         """回傳字串表示。"""
         return repr(self._current())
+
 
 # 對外仍維持 `config` 這個名稱，讓既有呼叫點不用一次大改；
 # 真正的目標是先移除 import-time side effect，再逐步收斂舊依賴。

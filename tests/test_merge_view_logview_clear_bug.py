@@ -28,6 +28,7 @@ User 報錯 (line 依版本會變動,但方法名稱 .controls.clear() 不變):
     1. Source-level: start_merge 不再含舊 buggy pattern
     2. Behavior-level: 真的呼叫 start_merge 到 log_view.clear() 那行後,內部 list 是空的
 """
+
 from __future__ import annotations
 
 import ast
@@ -48,9 +49,12 @@ def _read_code_only(source_text: str) -> str:
         if isinstance(
             node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
         ):
-            if (node.body and isinstance(node.body[0], ast.Expr)
-                    and isinstance(node.body[0].value, ast.Constant)
-                    and isinstance(node.body[0].value.value, str)):
+            if (
+                node.body
+                and isinstance(node.body[0], ast.Expr)
+                and isinstance(node.body[0].value, ast.Constant)
+                and isinstance(node.body[0].value.value, str)
+            ):
                 for ln in range(node.body[0].lineno, node.body[0].end_lineno + 1):
                     mask.add(ln)
     out = []
@@ -66,6 +70,7 @@ def _read_code_only(source_text: str) -> str:
 # =============================================================================
 # Source-level — 確保舊 buggy pattern 不再回來
 # =============================================================================
+
 
 class TestStartMergeUsesLogViewClearApi:
     """merge_view.start_merge 必須用 self.log_view.clear(),不能直接 .controls.clear()。"""
@@ -83,7 +88,7 @@ class TestStartMergeUsesLogViewClearApi:
                 lines = src.splitlines()
                 start_idx = node.lineno
                 end_idx = node.end_lineno
-                return "\n".join(lines[start_idx - 1: end_idx])
+                return "\n".join(lines[start_idx - 1 : end_idx])
         raise AssertionError("找不到 start_merge function")
 
     def test_start_merge_block_does_not_call_log_view_controls_clear(self):
@@ -119,6 +124,7 @@ class TestStartMergeUsesLogViewClearApi:
 # Behavior-level — 真的跑 start_merge 路徑
 # =============================================================================
 
+
 class TestStartMergeActuallyClearsLogView:
     """模擬「user 選好 folder + output → 按開始合併」,確認 log_view 真的被清空。"""
 
@@ -138,6 +144,18 @@ class TestStartMergeActuallyClearsLogView:
 
             def add_log(self, text):
                 self.logs.append(text)
+
+            def set_progress(self, _progress):
+                pass
+
+            def set_summary(self, _summary):
+                pass
+
+            def set_error(self):
+                pass
+
+            def finish(self):
+                pass
 
             def snapshot(self):
                 return {"status": "DONE", "progress": 1.0, "logs": self.logs}
@@ -194,6 +212,7 @@ class TestStartMergeActuallyClearsLogView:
 # 路徑慣例 — 不要寫死使用者路徑
 # =============================================================================
 
+
 class TestNoHardcodedPaths:
     """測試本身不應寫死 Windows 使用者目錄絕對路徑。"""
 
@@ -204,8 +223,7 @@ class TestNoHardcodedPaths:
         forbidden.extend(re.findall(r"/Users/[A-Za-z]", code))
         forbidden.extend(re.findall(r"/home/[A-Za-z]", code))
         assert not forbidden, (
-            f"測試不應寫死使用者路徑:{forbidden}\n"
-            "請用 tmp_path 或 monkeypatch"
+            f"測試不應寫死使用者路徑:{forbidden}\n請用 tmp_path 或 monkeypatch"
         )
 
     def test_test_setup_uses_synthetic_paths_only(self):
@@ -213,10 +231,10 @@ class TestNoHardcodedPaths:
         text = Path(__file__).read_text(encoding="utf-8")
         all_drive_paths = re.findall(r"[A-Za-z]:\\\\[A-Za-z0-9_]+", text)
         forbidden_real = [
-            p for p in all_drive_paths
+            p
+            for p in all_drive_paths
             if not p.split("\\")[2].startswith(("fake", "test", "temp"))
         ]
         assert not forbidden_real, (
-            f"測試使用真實驅動槽路徑:{forbidden_real}\n"
-            "只允許 D:\\fake\\... 或 tmp_path"
+            f"測試使用真實驅動槽路徑:{forbidden_real}\n只允許 D:\\fake\\... 或 tmp_path"
         )

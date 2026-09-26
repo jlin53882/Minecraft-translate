@@ -8,6 +8,7 @@
 - 階段 1 已寫的 assets 不被覆寫(原本的 key 保留)
 - enable_extracted_to_assets_merge=False 時不跑
 """
+
 from __future__ import annotations
 
 import json
@@ -24,9 +25,11 @@ from translation_tool.core.lang_merge_extracted_assets import (
 )
 
 from translation_tool.core.lang_merge_extracted_assets import _write_json_atomic
-import os as _os
 from unittest.mock import patch
-from translation_tool.core.lang_merge_extracted_assets import _cleanup_single_mod_extracted
+from translation_tool.core.lang_merge_extracted_assets import (
+    _cleanup_single_mod_extracted,
+)
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # 1. _infer_modid_from_lang_file
@@ -55,6 +58,7 @@ class TestInferModidFromLangFile:
         """無 lang/ parent → None"""
         p = Path("lang_output/ae2ct_extracted/ae2ct/zh_cn.json")
         assert _infer_modid_from_lang_file(p) is None
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # 2. _scan_extracted_lang_files
@@ -85,7 +89,9 @@ class TestScanExtractedLangFiles:
 
         result = _scan_extracted_lang_files(tmp_path)
         assert "ae2ct" in result
-        assert result["ae2ct"]["zh_cn"] == [ae2ct_extracted / "ae2ct" / "lang" / "zh_cn.json"]
+        assert result["ae2ct"]["zh_cn"] == [
+            ae2ct_extracted / "ae2ct" / "lang" / "zh_cn.json"
+        ]
         # k_assets / k_pending 不應在 result 內
         for lang_file_list in result.values():
             for file_list in lang_file_list.values():
@@ -98,7 +104,9 @@ class TestScanExtractedLangFiles:
         """非 *_extracted 子資料夾完全跳過"""
         random_dir = tmp_path / "random"
         (random_dir / "ae2ct" / "lang").mkdir(parents=True)
-        (random_dir / "ae2ct" / "lang" / "zh_cn.json").write_text("{}", encoding="utf-8")
+        (random_dir / "ae2ct" / "lang" / "zh_cn.json").write_text(
+            "{}", encoding="utf-8"
+        )
 
         result = _scan_extracted_lang_files(tmp_path)
         assert result == {}
@@ -106,10 +114,10 @@ class TestScanExtractedLangFiles:
     def test_extracted_name_pattern_variants(self, tmp_path: Path):
         """*_extracted 結尾的各種變體都應該被接受 (re.match: .*_extracted(_\\w+)?$)"""
         variants_should_match = [
-            "ae2ct_extracted",                           # 標準
-            "Cobblemon-1.7.3+1.21.1_extracted",         # 含版本
-            "compactmachines_extracted_v2",              # 含版本後綴
-            "_cache_ae2ct_extracted",                    # 含前綴
+            "ae2ct_extracted",  # 標準
+            "Cobblemon-1.7.3+1.21.1_extracted",  # 含版本
+            "compactmachines_extracted_v2",  # 含版本後綴
+            "_cache_ae2ct_extracted",  # 含前綴
         ]
         for name in variants_should_match:
             folder = tmp_path / name / "ae2ct" / "lang"
@@ -117,16 +125,16 @@ class TestScanExtractedLangFiles:
             (folder / "zh_cn.json").write_text("{}", encoding="utf-8")
 
         variants_should_skip = [
-            "random",                # 沒 _extracted
-            "extracted",             # 沒前綴
-            "ae2ct_extract",         # 拼錯
-            "ae2ct_extracteded",     # 太長
+            "random",  # 沒 _extracted
+            "extracted",  # 沒前綴
+            "ae2ct_extract",  # 拼錯
+            "ae2ct_extracteded",  # 太長
         ]
         for name in variants_should_skip:
             folder = tmp_path / name / "ae2ct" / "lang"
             folder.mkdir(parents=True, exist_ok=True)
             (folder / "zh_cn.json").write_text(
-                "{\"this_should_NOT_be_scanned\": true}", encoding="utf-8"
+                '{"this_should_NOT_be_scanned": true}', encoding="utf-8"
             )
 
         result = _scan_extracted_lang_files(tmp_path)
@@ -148,26 +156,46 @@ class TestScanExtractedLangFiles:
         Stage 2 必掃兩個位置才能完整處理。
         """
         # 建立 fixtures:3 個 only-en-us mod 寫到 待翻譯/ 內
-        for dirname in ["compactmachines_extracted", "CodeChickenLib_extracted", "Cobblemon-1.7.3+1.21.1_extracted"]:
+        for dirname in [
+            "compactmachines_extracted",
+            "CodeChickenLib_extracted",
+            "Cobblemon-1.7.3+1.21.1_extracted",
+        ]:
             # 待翻譯/{XX_extracted}/{modid}/lang/en_us.json
             if dirname == "compactmachines_extracted":
-                lang = tmp_path / "待翻譯" / dirname / "data" / "compactmachines" / "datapacks" / "basic_templates" / "assets" / "compactmachines" / "lang"
-                lang.mkdir(parents=True)
-                (lang / "en_us.json").write_text(
-                    '{"k_c": "v_c"}', encoding="utf-8"
+                lang = (
+                    tmp_path
+                    / "待翻譯"
+                    / dirname
+                    / "data"
+                    / "compactmachines"
+                    / "datapacks"
+                    / "basic_templates"
+                    / "assets"
+                    / "compactmachines"
+                    / "lang"
                 )
+                lang.mkdir(parents=True)
+                (lang / "en_us.json").write_text('{"k_c": "v_c"}', encoding="utf-8")
             elif dirname == "CodeChickenLib_extracted":
-                lang = tmp_path / "待翻譯" / dirname / "data" / "codechickenlib" / "lang"
-                lang.mkdir(parents=True)
-                (lang / "en_us.json").write_text(
-                    '{"k_lib": "v_lib"}', encoding="utf-8"
+                lang = (
+                    tmp_path / "待翻譯" / dirname / "data" / "codechickenlib" / "lang"
                 )
+                lang.mkdir(parents=True)
+                (lang / "en_us.json").write_text('{"k_lib": "v_lib"}', encoding="utf-8")
             elif dirname == "Cobblemon-1.7.3+1.21.1_extracted":
-                lang = tmp_path / "待翻譯" / dirname / "resourcepacks" / "adorncompatibility" / "assets" / "adorn" / "lang"
-                lang.mkdir(parents=True)
-                (lang / "en_us.json").write_text(
-                    '{"k_ad": "v_ad"}', encoding="utf-8"
+                lang = (
+                    tmp_path
+                    / "待翻譯"
+                    / dirname
+                    / "resourcepacks"
+                    / "adorncompatibility"
+                    / "assets"
+                    / "adorn"
+                    / "lang"
                 )
+                lang.mkdir(parents=True)
+                (lang / "en_us.json").write_text('{"k_ad": "v_ad"}', encoding="utf-8")
 
         result = _scan_extracted_lang_files(tmp_path)
 
@@ -205,6 +233,7 @@ class TestScanExtractedLangFiles:
         assert result[modid]["zh_tw"][0].name == "zh_tw.json"
         assert result[modid]["en_us"][0].name == "en_us.json"
 
+
 # ──────────────────────────────────────────────────────────────────────────
 # 5. is_pure 行為 - 使用者確認規則
 # ──────────────────────────────────────────────────────────────────────────
@@ -227,6 +256,7 @@ class TestLoadExistingAssets:
         """沒 assets 就回空 dict"""
         result = _load_existing_assets(tmp_path / "nonexistent")
         assert result == {}
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # 4. merge_extracted_to_assets (整合測試)
@@ -259,7 +289,11 @@ class TestMergeExtractedToAssets:
             for modid, lang_files in existing_assets.items():
                 for lang_code, data in lang_files.items():
                     target = (
-                        lang_output_dir / "assets" / modid / "lang" / f"{lang_code}.json"
+                        lang_output_dir
+                        / "assets"
+                        / modid
+                        / "lang"
+                        / f"{lang_code}.json"
                     )
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(
@@ -342,7 +376,9 @@ class TestMergeExtractedToAssets:
         assert result["k_old"] == "舊翻譯_zh"  # assets wins
         assert result["k_new"] == "新key_zh"  # 新 key 補充
 
-    def test_en_us_only_mod_skips_empty_zh_tw_and_does_not_write_en_us(self, tmp_path: Path):
+    def test_en_us_only_mod_skips_empty_zh_tw_and_does_not_write_en_us(
+        self, tmp_path: Path
+    ):
         """en_us-only mod:不寫空 zh_tw.json,也不寫 assets/en_us.json。
 
         2026-08-02 修正:
@@ -404,6 +440,7 @@ class TestMergeExtractedToAssets:
 
         # 用 captureWarnings() 抓 stdlib logging.WARNING
         import logging
+
         captured = []
 
         class _CaptureHandler(logging.Handler):
@@ -418,10 +455,9 @@ class TestMergeExtractedToAssets:
             logging.getLogger().removeHandler(handler)
 
         # 應有 log "多個來源"
-        assert any(
-            "多個來源" in msg and "採第一個" in msg
-            for msg in captured
-        ), f"沒有 multi-source warning,實際 log: {captured}"
+        assert any("多個來源" in msg and "採第一個" in msg for msg in captured), (
+            f"沒有 multi-source warning,實際 log: {captured}"
+        )
 
     def test_session_receives_progress_updates(self, tmp_path: Path):
         """session 物件收到 add_log 跟 set_progress 呼叫"""
@@ -474,6 +510,7 @@ class TestMergeExtractedToAssets:
         # 應有 indent=4
         assert "\n    " in content
 
+
 # ──────────────────────────────────────────────────────────────────────────
 # 5. is_pure 行為 - 使用者確認規則
 # ──────────────────────────────────────────────────────────────────────────
@@ -482,7 +519,7 @@ class TestMergeExtractedConfigFlag:
 
     def test_merge_service_phase2_invoked_when_enabled(self, tmp_path, monkeypatch):
         """config enable_extracted_to_assets_merge=True 時,merge_service 呼叫 merge_extracted_to_assets"""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import MagicMock
         from app.services_impl.pipelines import merge_service
 
         # mock merge_extracted_to_assets
@@ -563,6 +600,7 @@ class TestMergeExtractedConfigFlag:
         # 階段 2 不應該被呼叫
         assert len(called) == 0, "stage 2 不應該被呼叫"
 
+
 class TestWriteJsonAtomic:
     """2026-08-04 B2: _write_json_atomic crash cleanup 行為。"""
 
@@ -582,14 +620,18 @@ class TestWriteJsonAtomic:
         target = tmp_path / "subdir" / "test.json"
         target.parent.mkdir(parents=True)
 
-        with patch(
-            "translation_tool.core.lang_merge_extracted_assets.os.replace",
-            side_effect=OSError("replace failed"),
-        ), pytest.raises(OSError, match="replace failed"):
+        with (
+            patch(
+                "translation_tool.core.lang_merge_extracted_assets.os.replace",
+                side_effect=OSError("replace failed"),
+            ),
+            pytest.raises(OSError, match="replace failed"),
+        ):
             _write_json_atomic(target, {"key": "value"})
 
         tmp_file = target.with_suffix(target.suffix + ".tmp")
         assert not tmp_file.exists(), f".tmp 應被清理,但存在: {tmp_file}"
+
 
 class TestCleanupSingleModExtracted:
     """2026-08-04 B3: per-mod cleanup 行為。"""
@@ -634,7 +676,9 @@ class TestCleanupSingleModExtracted:
     def test_cleanup_preserves_pending_source_and_other_mod(self, tmp_path: Path):
         """清理 primary extracted 後保留待翻譯來源及其他 mod。"""
         primary = tmp_path / "demo_extracted" / "demo" / "lang" / "zh_cn.json"
-        pending = tmp_path / "待翻譯" / "demo_extracted" / "demo" / "lang" / "en_us.json"
+        pending = (
+            tmp_path / "待翻譯" / "demo_extracted" / "demo" / "lang" / "en_us.json"
+        )
         other = tmp_path / "other_extracted" / "other" / "lang" / "zh_cn.json"
         for source in (primary, pending, other):
             source.parent.mkdir(parents=True, exist_ok=True)
@@ -646,18 +690,106 @@ class TestCleanupSingleModExtracted:
         assert pending.exists()
         assert other.exists()
 
-    def test_stage2_write_failure_preserves_extracted_source(self, tmp_path: Path, monkeypatch):
-        """assets 寫入失敗時不清除 extracted source。"""
+    def test_stage2_write_failure_is_reported_and_other_mods_continue(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """單一 mod 寫入失敗要回報錯誤、保留 source 並繼續處理其他 mod。"""
+        real_write = extracted_assets._write_json_atomic
+        sources = {}
+        for modid in ("good_a", "bad_b", "good_c"):
+            source = tmp_path / f"{modid}_extracted" / modid / "lang" / "zh_cn.json"
+            source.parent.mkdir(parents=True)
+            source.write_text('{"key": "中文"}', encoding="utf-8")
+            sources[modid] = source
+
+        def fake_write(path, data):
+            if "bad_b" in str(path):
+                raise OSError("simulated write failure")
+            real_write(path, data)
+
+        monkeypatch.setattr(extracted_assets, "_write_json_atomic", fake_write)
+
+        updates = list(merge_extracted_to_assets(tmp_path))
+
+        assert updates[-1]["error"] is True
+        assert "bad_b" in updates[-1]["message"]
+        assert "write failed" in updates[-1]["message"]
+        for modid in ("good_a", "good_c"):
+            target = tmp_path / "assets" / modid / "lang" / "zh_tw.json"
+            assert target.exists()
+            assert not sources[modid].exists()
+        bad_target = tmp_path / "assets" / "bad_b" / "lang" / "zh_tw.json"
+        assert not bad_target.exists()
+        assert sources["bad_b"].exists()
+
+    def test_stage2_cleanup_failure_is_warning_after_successful_write(
+        self, tmp_path: Path, monkeypatch, caplog
+    ):
+        """寫入成功後 cleanup 失敗只記警告，不影響 Stage 2 成功狀態。"""
         source = tmp_path / "demo_extracted" / "demo" / "lang" / "zh_cn.json"
         source.parent.mkdir(parents=True)
         source.write_text('{"key": "中文"}', encoding="utf-8")
         monkeypatch.setattr(
-            extracted_assets,
-            "_write_json_atomic",
-            lambda *args, **kwargs: (_ for _ in ()).throw(OSError("write failed")),
+            extracted_assets.shutil,
+            "rmtree",
+            lambda *args, **kwargs: (_ for _ in ()).throw(OSError("cleanup failed")),
         )
 
-        list(merge_extracted_to_assets(tmp_path))
+        updates = list(merge_extracted_to_assets(tmp_path))
 
+        target = tmp_path / "assets" / "demo" / "lang" / "zh_tw.json"
+        assert target.exists()
         assert source.exists()
-        assert not (tmp_path / "assets" / "demo" / "lang" / "zh_tw.json").exists()
+        assert updates[-1]["error"] is False
+        assert "cleanup 失敗" in caplog.text
+
+    def test_stage2_invalid_source_is_reported_and_other_mod_continues(
+        self, tmp_path: Path
+    ):
+        """無效來源 JSON 視為 read failure，但不阻止其他 mod 完成。"""
+        sources = {}
+        for modid in ("good_a", "bad_b", "good_c"):
+            source = tmp_path / f"{modid}_extracted" / modid / "lang" / "zh_cn.json"
+            source.parent.mkdir(parents=True)
+            content = "{invalid json" if modid == "bad_b" else '{"key": "中文"}'
+            source.write_text(content, encoding="utf-8")
+            sources[modid] = source
+
+        updates = list(merge_extracted_to_assets(tmp_path))
+
+        assert updates[-1]["error"] is True
+        assert "bad_b" in updates[-1]["message"]
+        assert "read failed" in updates[-1]["message"]
+        for modid in ("good_a", "good_c"):
+            assert (tmp_path / "assets" / modid / "lang" / "zh_tw.json").exists()
+            assert not sources[modid].exists()
+        assert sources["bad_b"].exists()
+
+    def test_stage2_merge_failure_is_reported_and_other_mod_continues(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """merge helper 失敗需回報 Stage 2 error 並保留該 mod source。"""
+        real_merge = extracted_assets.merge_lang_dicts
+        sources = {}
+        for modid in ("good_a", "bad_b", "good_c"):
+            source = tmp_path / f"{modid}_extracted" / modid / "lang" / "zh_cn.json"
+            source.parent.mkdir(parents=True)
+            source.write_text(json.dumps({modid: "中文"}), encoding="utf-8")
+            sources[modid] = source
+
+        def fail_bad_mod_merge(**kwargs):
+            if "bad_b" in kwargs["cn_data"]:
+                raise RuntimeError("simulated merge failure")
+            return real_merge(**kwargs)
+
+        monkeypatch.setattr(extracted_assets, "merge_lang_dicts", fail_bad_mod_merge)
+
+        updates = list(merge_extracted_to_assets(tmp_path))
+
+        assert updates[-1]["error"] is True
+        assert "bad_b" in updates[-1]["message"]
+        assert "merge failed" in updates[-1]["message"]
+        for modid in ("good_a", "good_c"):
+            assert (tmp_path / "assets" / modid / "lang" / "zh_tw.json").exists()
+            assert not sources[modid].exists()
+        assert sources["bad_b"].exists()

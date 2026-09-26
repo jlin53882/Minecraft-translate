@@ -13,13 +13,15 @@ from typing import Any
 import flet as ft
 
 from app.views._log import LogView
-from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.log_unit import log_warning
 from translation_tool.utils.config_manager import load_config, save_config
-from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service, run_merge_folder_batch_service
+from app.services_impl.pipelines.merge_service import (
+    run_merge_zip_batch_service,
+    run_merge_folder_batch_service,
+)
 from app.task_session import TaskSession
 from app.ui import theme
 from app.ui.snack import show_snack
-from translation_tool.utils.config_manager import load_config
 from app.ui.components import primary_button, styled_card
 
 
@@ -92,15 +94,15 @@ class MergeView(ft.Column):
         if self._view_registry is None:
             return
         for item in self._view_registry:
-            view = item.get('view')
+            view = item.get("view")
             if view is None:
                 continue
-            wrapped = view.content if hasattr(view, 'content') else view
-            inner = wrapped.content if hasattr(wrapped, 'content') else wrapped
-            if hasattr(inner, 'controls_map') and hasattr(inner, 'load_config'):
+            wrapped = view.content if hasattr(view, "content") else view
+            inner = wrapped.content if hasattr(wrapped, "content") else wrapped
+            if hasattr(inner, "controls_map") and hasattr(inner, "load_config"):
                 try:
-                                cfg = load_config()
-                                load_config_into_view(inner, cfg)
+                    cfg = load_config()
+                    load_config_into_view(inner, cfg)
                 except Exception:
                     pass
 
@@ -124,7 +126,9 @@ class MergeView(ft.Column):
 
         self.session = TaskSession(max_logs=2000)
         self._ui_stop = threading.Event()
-        self._run_output_dir: str | None = None  # 2026-08-04: snapshot for _open_output_folder
+        self._run_output_dir: str | None = (
+            None  # 2026-08-04: snapshot for _open_output_folder
+        )
         self.selected_zips: list[str] = []
         # 合併統計（用於 DONE 時顯示摘要）
         # 2026-08-04: 兼容 ZIP + Folder 兩種模式
@@ -156,7 +160,9 @@ class MergeView(ft.Column):
         self.patchouli_skip_zh_cn_switch = ft.Switch(
             label="優先使用已有繁中，無則信任簡中（跳過英文）",
             value=False,
-            on_change=lambda e: self._on_merge_field_changed("patchouli_skip_en_us_when_zh_cn_exists", e.control.value),
+            on_change=lambda e: self._on_merge_field_changed(
+                "patchouli_skip_en_us_when_zh_cn_exists", e.control.value
+            ),
         )
         # patchouli_effective_translation_threshold: 有效翻譯比例閾值（0.0~1.0）
         # 用於判斷 Patchouli Book 的 zh 語言資料夾是否有「有效翻譯」
@@ -170,7 +176,9 @@ class MergeView(ft.Column):
             text_align=ft.TextAlign.CENTER,
             on_change=lambda e: self._on_merge_field_changed(
                 "patchouli_effective_translation_threshold",
-                float(v) if (v := e.control.value.strip()) and self._safe_float(v) is not None else 0.5
+                float(v)
+                if (v := e.control.value.strip()) and self._safe_float(v) is not None
+                else 0.5,
             ),
         )
         # zh_en_letter_threshold: zh_tw 英文含量的閾值
@@ -184,7 +192,9 @@ class MergeView(ft.Column):
             text_align=ft.TextAlign.CENTER,
             on_change=lambda e: self._on_merge_field_changed(
                 "zh_en_letter_threshold",
-                int(v) if (v := e.control.value.strip()) and self._safe_int(v) is not None else 2
+                int(v)
+                if (v := e.control.value.strip()) and self._safe_int(v) is not None
+                else 2,
             ),
         )
         # _zh_cn_disabled_note: 提示文字，當 process_zh_cn_switch=False 時顯示
@@ -429,9 +439,15 @@ class MergeView(ft.Column):
         pending_name = lang_merger_cfg.get("pending_folder_name", "待翻譯")
         organized_name = lang_merger_cfg.get("pending_organized_folder_name", "整理")
         min_count = lang_merger_cfg.get("filtered_pending_min_count", 2)
-        self.patchouli_skip_zh_cn_switch.value = lang_merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False)
-        self.patchouli_threshold_field.value = str(lang_merger_cfg.get("patchouli_effective_translation_threshold", 0.5))
-        self.zh_en_letter_threshold_field.value = str(lang_merger_cfg.get("zh_en_letter_threshold", 2))
+        self.patchouli_skip_zh_cn_switch.value = lang_merger_cfg.get(
+            "patchouli_skip_en_us_when_zh_cn_exists", False
+        )
+        self.patchouli_threshold_field.value = str(
+            lang_merger_cfg.get("patchouli_effective_translation_threshold", 0.5)
+        )
+        self.zh_en_letter_threshold_field.value = str(
+            lang_merger_cfg.get("zh_en_letter_threshold", 2)
+        )
         self.extracted_merge_switch = ft.Switch(
             label="合併 XX_extracted → assets/(階段 2)",
             value=True,
@@ -443,9 +459,7 @@ class MergeView(ft.Column):
         extracted_section = ft.Container(
             content=ft.Column(
                 [
-                    ft.Text(
-                        "檔案合併(階段 2)", weight=ft.FontWeight.W_600, size=15
-                    ),
+                    ft.Text("檔案合併(階段 2)", weight=ft.FontWeight.W_600, size=15),
                     ft.Container(
                         content=ft.Column(
                             [
@@ -593,8 +607,8 @@ class MergeView(ft.Column):
         if not result:
             return
         # 桌面版回傳 list[FilePickerFile] (每個有 .path)
-        for f in (result if isinstance(result, list) else [result]):
-            path = f.path if hasattr(f, 'path') else str(f)
+        for f in result if isinstance(result, list) else [result]:
+            path = f.path if hasattr(f, "path") else str(f)
             if path and path not in self.selected_zips:
                 self.selected_zips.append(path)
         self._refresh_zip_list()
@@ -632,7 +646,9 @@ class MergeView(ft.Column):
 
     async def _async_pick_output_dir(self):
         """async 實作：選擇輸出資料夾並更新 output_dir_field。"""
-        result = await self.file_picker.get_directory_path(dialog_title="選擇輸出資料夾")
+        result = await self.file_picker.get_directory_path(
+            dialog_title="選擇輸出資料夾"
+        )
         if result:
             self.output_dir_field.value = result
             self.page.update()
@@ -643,7 +659,9 @@ class MergeView(ft.Column):
 
     async def _async_pick_folder_input(self):
         """async 實作：選擇輸入資料夾並更新 folder_path_field。"""
-        result = await self.file_picker.get_directory_path(dialog_title="選擇 Mod 來源資料夾")
+        result = await self.file_picker.get_directory_path(
+            dialog_title="選擇 Mod 來源資料夾"
+        )
         if result:
             self.folder_path_field.value = result
             self.page.update()
@@ -686,20 +704,34 @@ class MergeView(ft.Column):
                     only_process_lang=self.only_lang_checkbox.value,
                     process_zh_cn=self.process_zh_cn_switch.value,
                     patchouli_skip=self.patchouli_skip_zh_cn_switch.value,
-                    patchouli_threshold=self._safe_float(self.patchouli_threshold_field.value or "") or 0.5,
-                    zh_en_threshold=self._safe_int(self.zh_en_letter_threshold_field.value or "") or 2,
+                    patchouli_threshold=self._safe_float(
+                        self.patchouli_threshold_field.value or ""
+                    )
+                    or 0.5,
+                    zh_en_threshold=self._safe_int(
+                        self.zh_en_letter_threshold_field.value or ""
+                    )
+                    or 2,
                 ):
                     pass
             else:
                 for _ in run_merge_zip_batch_service(
-                    zip_paths=list(self.selected_zips),  # 2026-08-04 A4: 傳副本避免 race condition
+                    zip_paths=list(
+                        self.selected_zips
+                    ),  # 2026-08-04 A4: 傳副本避免 race condition
                     output_dir=self.output_dir_field.value,
                     session=self.session,
                     only_process_lang=self.only_lang_checkbox.value,
                     process_zh_cn=self.process_zh_cn_switch.value,
                     patchouli_skip=self.patchouli_skip_zh_cn_switch.value,
-                    patchouli_threshold=self._safe_float(self.patchouli_threshold_field.value or "") or 0.5,
-                    zh_en_threshold=self._safe_int(self.zh_en_letter_threshold_field.value or "") or 2,
+                    patchouli_threshold=self._safe_float(
+                        self.patchouli_threshold_field.value or ""
+                    )
+                    or 0.5,
+                    zh_en_threshold=self._safe_int(
+                        self.zh_en_letter_threshold_field.value or ""
+                    )
+                    or 2,
                 ):
                     pass
 
@@ -793,13 +825,14 @@ class MergeView(ft.Column):
         self.status_chip.bgcolor = color
         self.page.update()
 
-
     def _show_merge_summary(self, summary: dict[str, Any]) -> None:
         """顯示合併結果摘要（使用 overlay 確保穩定顯示）。"""
         cfg = load_config()
         lang_merger_cfg = cfg.get("lang_merger", {})
         pending_name = lang_merger_cfg.get("pending_folder_name", "待翻譯")
-        organized_name = lang_merger_cfg.get("pending_organized_folder_name", "待翻譯整理需翻譯")
+        organized_name = lang_merger_cfg.get(
+            "pending_organized_folder_name", "待翻譯整理需翻譯"
+        )
 
         # 2026-08-04 修正 A1: 兼容 ZIP (success_zips) 與 Folder (success_folders) 兩種 key
         s_zips = summary.get("success_zips") or summary.get("success_folders", 0)
@@ -894,9 +927,7 @@ class MergeView(ft.Column):
                 ft.TextButton(
                     "開啟輸出資料夾", on_click=lambda e: self._open_output_folder()
                 ),
-                ft.TextButton(
-                    "關閉", on_click=lambda e: self._close_dialog_overlay()
-                ),
+                ft.TextButton("關閉", on_click=lambda e: self._close_dialog_overlay()),
             ],
         )
 

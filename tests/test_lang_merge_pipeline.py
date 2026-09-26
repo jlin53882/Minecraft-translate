@@ -2,6 +2,7 @@
 
 用途：測試語言合併流水線的核心函式。
 """
+
 from __future__ import annotations
 
 import json
@@ -35,11 +36,12 @@ class TestProcessSingleMod:
         output_dir.mkdir()
         must_translate_dir.mkdir()
 
-        zip_path = _create_test_zip(tmp_path, {
-            "assets/demo/lang/zh_cn.json": json.dumps({
-                "item.demo": "簡體內容"
-            }),
-        })
+        zip_path = _create_test_zip(
+            tmp_path,
+            {
+                "assets/demo/lang/zh_cn.json": json.dumps({"item.demo": "簡體內容"}),
+            },
+        )
 
         paths = {
             "zh_cn": "assets/demo/lang/zh_cn.json",
@@ -64,14 +66,13 @@ class TestProcessSingleMod:
         output_dir.mkdir()
         must_translate_dir.mkdir()
 
-        zip_path = _create_test_zip(tmp_path, {
-            "demo/lang/zh_cn.json": json.dumps({
-                "item.demo": "簡體內容"
-            }),
-            "demo/lang/en_us.json": json.dumps({
-                "item.demo": "English Content"
-            }),
-        })
+        zip_path = _create_test_zip(
+            tmp_path,
+            {
+                "demo/lang/zh_cn.json": json.dumps({"item.demo": "簡體內容"}),
+                "demo/lang/en_us.json": json.dumps({"item.demo": "English Content"}),
+            },
+        )
 
         paths = {
             "zh_cn": "demo/lang/zh_cn.json",
@@ -105,18 +106,17 @@ class TestProcessSingleMod:
         existing_tw = output_dir / "lang"
         existing_tw.mkdir(parents=True)
         existing_tw_file = existing_tw / "zh_tw.json"
-        existing_tw_file.write_text(json.dumps({
-            "item.demo": "現有翻譯"
-        }), encoding="utf-8")
+        existing_tw_file.write_text(
+            json.dumps({"item.demo": "現有翻譯"}), encoding="utf-8"
+        )
 
-        zip_path = _create_test_zip(tmp_path, {
-            "demo/lang/zh_cn.json": json.dumps({
-                "item.demo": "新簡體內容"
-            }),
-            "demo/lang/en_us.json": json.dumps({
-                "item.demo": "New English"
-            }),
-        })
+        zip_path = _create_test_zip(
+            tmp_path,
+            {
+                "demo/lang/zh_cn.json": json.dumps({"item.demo": "新簡體內容"}),
+                "demo/lang/en_us.json": json.dumps({"item.demo": "New English"}),
+            },
+        )
 
         paths = {
             "zh_cn": "demo/lang/zh_cn.json",
@@ -145,10 +145,13 @@ class TestProcessSingleMod:
         must_translate_dir.mkdir()
 
         # 測試同時有 zh_cn 和 en_us 的 lang 格式
-        zip_path = _create_test_zip(tmp_path, {
-            "demo/lang/zh_cn.lang": "item.demo=簡體\nitem.new=新項目",
-            "demo/lang/en_us.lang": "item.demo=English\nitem.new=New Item",
-        })
+        zip_path = _create_test_zip(
+            tmp_path,
+            {
+                "demo/lang/zh_cn.lang": "item.demo=簡體\nitem.new=新項目",
+                "demo/lang/en_us.lang": "item.demo=English\nitem.new=New Item",
+            },
+        )
 
         paths = {
             "zh_cn": "demo/lang/zh_cn.lang",
@@ -179,13 +182,18 @@ class TestProcessSingleMod:
         output_dir.mkdir()
         must_translate_dir.mkdir()
 
-        zip_path = _create_test_zip(tmp_path, {
-            "assets/demo/lang/en_us.json": json.dumps({
-                "item.demo": "English",
-                "empty.item": "",
-                "null.item": None,
-            }),
-        })
+        zip_path = _create_test_zip(
+            tmp_path,
+            {
+                "assets/demo/lang/en_us.json": json.dumps(
+                    {
+                        "item.demo": "English",
+                        "empty.item": "",
+                        "null.item": None,
+                    }
+                ),
+            },
+        )
 
         paths = {
             "en_us": "assets/demo/lang/en_us.json",
@@ -209,18 +217,25 @@ class TestProcessSingleMod:
         output_dir.mkdir()
         must_translate_dir.mkdir()
 
-        zip_path = _create_test_zip(tmp_path, {
-            "demo/lang/zh_cn.json": json.dumps({
-                "item.cjk": "這是中文",
-                "item.eng": "This is English",
-                "item.mixed": "Hello 你好",
-            }),
-            "demo/lang/en_us.json": json.dumps({
-                "item.cjk": "Chinese",
-                "item.eng": "English",
-                "item.mixed": "Mixed",
-            }),
-        })
+        zip_path = _create_test_zip(
+            tmp_path,
+            {
+                "demo/lang/zh_cn.json": json.dumps(
+                    {
+                        "item.cjk": "這是中文",
+                        "item.eng": "This is English",
+                        "item.mixed": "Hello 你好",
+                    }
+                ),
+                "demo/lang/en_us.json": json.dumps(
+                    {
+                        "item.cjk": "Chinese",
+                        "item.eng": "English",
+                        "item.mixed": "Mixed",
+                    }
+                ),
+            },
+        )
 
         paths = {
             "zh_cn": "demo/lang/zh_cn.json",
@@ -248,14 +263,13 @@ class TestProcessSingleMod:
         output_dir.mkdir()
         must_translate_dir.mkdir()
 
-        zip_path = _create_test_zip(tmp_path, {
-            "assets/demo/lang/zh_tw.json": json.dumps({
-                "item.demo": "現有翻譯"
-            }),
-            "assets/demo/lang/en_us.json": json.dumps({
-                "item.demo": "English"
-            }),
-        })
+        zip_path = _create_test_zip(
+            tmp_path,
+            {
+                "assets/demo/lang/zh_tw.json": json.dumps({"item.demo": "現有翻譯"}),
+                "assets/demo/lang/en_us.json": json.dumps({"item.demo": "English"}),
+            },
+        )
 
         paths = {
             "zh_tw": "assets/demo/lang/zh_tw.json",
@@ -280,11 +294,14 @@ class TestProcessSingleMod:
         output_dir.mkdir()
         must_translate_dir.mkdir()
 
-        zip_path = _create_test_zip(tmp_path, {
-            "assets/mods/somemod/lang/en_us.json": json.dumps({
-                "item.demo": "English"
-            }),
-        })
+        zip_path = _create_test_zip(
+            tmp_path,
+            {
+                "assets/mods/somemod/lang/en_us.json": json.dumps(
+                    {"item.demo": "English"}
+                ),
+            },
+        )
 
         paths = {
             "en_us": "assets/mods/somemod/lang/en_us.json",
@@ -361,11 +378,14 @@ class TestAllFilesCacheInProcessSingleMod:
 
     def test_all_files_cache_avoids_list_all(self, tmp_path):
         """驗證傳入 all_files_cache 時，不呼叫 reader.list_all()。"""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import MagicMock
         from translation_tool.core.lang_merge_pipeline import _process_single_mod
 
         mock_reader = MagicMock()
-        mock_reader.list_all.return_value = ["modid/lang/zh_cn.json", "modid/lang/en_us.json"]
+        mock_reader.list_all.return_value = [
+            "modid/lang/zh_cn.json",
+            "modid/lang/en_us.json",
+        ]
         mock_reader.read_text.return_value = '{"key": "value"}'
         mock_reader.read_json.return_value = {"key": "value"}
 
@@ -395,7 +415,10 @@ class TestAllFilesCacheInProcessSingleMod:
         from translation_tool.core.lang_merge_pipeline import _process_single_mod
 
         mock_reader = MagicMock()
-        mock_reader.list_all.return_value = ["modid/lang/zh_cn.json", "modid/lang/en_us.json"]
+        mock_reader.list_all.return_value = [
+            "modid/lang/zh_cn.json",
+            "modid/lang/en_us.json",
+        ]
         mock_reader.read_text.return_value = '{"key": "value"}'
         mock_reader.read_json.return_value = {"key": "value"}
 

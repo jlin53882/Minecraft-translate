@@ -16,6 +16,7 @@
     - 寬掃 _extracted/ 跟 待翻譯/ 兩個位置:en_us-only mod 的檔案
       會被 Stage 1 搬到 待翻譯/,寬掃確保全部 modid 都進 assets
 """
+
 from __future__ import annotations
 
 import json
@@ -25,7 +26,7 @@ import re
 import traceback
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Generator, Callable
+from typing import Any, Generator
 
 from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
@@ -56,11 +57,11 @@ _LANG_CODE_STEM = re.compile(r"^[A-Za-z_]+$")  # en_us, zh_cn, zh_tw, ru_ru ...
 
 def _infer_modid_from_lang_file(lang_file: Path) -> str | None:
     """從 lang_file 路徑推導出 modid。
-    
+
     規則:
       1. 若路徑含 assets/{modid}/lang/ → modid = {modid}。
       2. 否则 取 lang/ parent 的名稱 ── 包含兜底情形「{modid}/lang/」。
-    
+
     Returns:
         推導出的 modid,path 推不出來則 None。
     """
@@ -70,16 +71,18 @@ def _infer_modid_from_lang_file(lang_file: Path) -> str | None:
         lang_idx = len(path_parts) - 1 - path_parts[::-1].index("lang")
     except ValueError:
         return None
-    
+
     if lang_idx < 1:
         return None
-    
+
     modid_dir = path_parts[lang_idx - 1]  # .../{modid}/lang
     # 若是 .../assets/{modid}/lang/ → 用 {modid} (其實都同)
     return modid_dir
 
 
-def _scan_extracted_lang_files(lang_output_dir: Path) -> dict[str, dict[str, list[Path]]]:
+def _scan_extracted_lang_files(
+    lang_output_dir: Path,
+) -> dict[str, dict[str, list[Path]]]:
     """掃描 lang_output_dir 內 XX_extracted 子資料夾的 lang 檔案。
 
     退出 assets/ 子資料夾 (存為是階段 2 目標,不是來源)。
@@ -119,9 +122,7 @@ def _scan_extracted_lang_files(lang_output_dir: Path) -> dict[str, dict[str, lis
             if not _EXTRACTED_NAME_RE.match(entry.name):
                 continue
 
-            file_count = sum(
-                1 for _ in entry.rglob(_LANG_FILE_GLOB) if _.is_file()
-            )
+            file_count = sum(1 for _ in entry.rglob(_LANG_FILE_GLOB) if _.is_file())
             if file_count == 0:
                 # 2026-08-02:log 哪些 _extracted 沒找到 lang 檔案(為什麼沒處理)
                 log_warning(
@@ -136,9 +137,7 @@ def _scan_extracted_lang_files(lang_output_dir: Path) -> dict[str, dict[str, lis
                     continue
                 modid = _infer_modid_from_lang_file(lang_file)
                 if not modid:
-                    log_warning(
-                        f"[MergeExt→Assets] 推不出 modid: {lang_file}, 跳過"
-                    )
+                    log_warning(f"[MergeExt→Assets] 推不出 modid: {lang_file}, 跳過")
                     continue
                 lang_code = lang_file.stem
                 if not _LANG_CODE_STEM.match(lang_code):
@@ -168,6 +167,7 @@ class _LazyExistingAssets:
 
     避免 Stage 2 開始時就把幾百個 mod 的 assets 全載入記憶體。
     """
+
     def __init__(self, assets_dir: Path):
         self._assets_dir = assets_dir
         self._cache: dict[tuple[str, str], dict[str, Any]] = {}
@@ -193,14 +193,14 @@ class _LazyExistingAssets:
 
 def _load_existing_assets(assets_dir: Path) -> dict[tuple[str, str], dict[str, Any]]:
     """讀取 assets/{modid}/lang/{xx_yy}.json 全部現有資料。
-    
+
     Returns:
         {(modid, lang_code): {key: value}}
     """
     result: dict[tuple[str, str], dict[str, Any]] = {}
     if not assets_dir.exists():
         return result
-    
+
     for modid_dir in assets_dir.iterdir():
         if not modid_dir.is_dir():
             continue
@@ -221,7 +221,7 @@ def _load_existing_assets(assets_dir: Path) -> dict[tuple[str, str], dict[str, A
 
 def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
     """原子寫入 JSON dict 到 path。
-    
+
     使用 UTF-8 + ensure_ascii=False + indent=4 + \n 換行符號,
     跟階段 1 lang_merger 的 dump_json_bytes 對齊。
     """
@@ -291,15 +291,11 @@ def _cleanup_extracted_dirs(lang_output_dir: Path, session: Any = None) -> int:
             log_info(f"[MergeExt→Assets] 已清理 _extracted 子資料夾: {entry.name}")
             if session is not None:
                 try:
-                    session.add_log(
-                        f"[清理] 已刪除 {entry.name}/ (內容已併入 assets/)"
-                    )
+                    session.add_log(f"[清理] 已刪除 {entry.name}/ (內容已併入 assets/)")
                 except Exception:
                     pass
         except Exception as exc:
-            log_warning(
-                f"[MergeExt→Assets] 無法刪除 {entry}: {exc!r}"
-            )
+            log_warning(f"[MergeExt→Assets] 無法刪除 {entry}: {exc!r}")
     return cleaned
 
 
@@ -327,33 +323,35 @@ def merge_extracted_to_assets(
     """
     lang_output_dir = Path(lang_output_dir)
     assets_dir = lang_output_dir / "assets"
-    
+
     log_info(f"[MergeExt→Assets] 開始,掃描 {lang_output_dir}")
     if session is not None:
         try:
             session.add_log("[MergeExt→Assets] 開始掃描 XX_extracted/")
         except Exception:
             pass
-    
+
     if not lang_output_dir.exists():
         log_warning(f"[MergeExt→Assets] 不存在: {lang_output_dir}")
         yield {"progress": 1.0, "log": None, "error": False}
         return
-    
+
     try:
         # 2026-08-04 B1: lazy load 取代全量 _load_existing_assets
         existing = _LazyExistingAssets(assets_dir)
         extracted = _scan_extracted_lang_files(lang_output_dir)
-        
+
         if not extracted:
             log_info("[MergeExt→Assets] 沒找到 XX_extracted/*, 跳過 (無源可合併)")
             yield {"progress": 1.0, "log": None, "error": False}
             return
-        
+
         total_modids = len(extracted)
         total_added = 0
         total_files_written = 0
         total_warnings = 0
+        had_errors = False
+        error_details: list[str] = []
 
         # 進度範圍:session.progress (階段 1 完成時已 1.0) → 1.0
         # 但我們要給階段 2 留 mirror 2.5% 空間,讓 UI 看到階段 2 在跑
@@ -364,7 +362,7 @@ def merge_extracted_to_assets(
         else:
             base_progress = 0.0
         span = 1.0 - base_progress
-        
+
         for idx, (modid, lang_files) in enumerate(extracted.items(), start=1):
             # 2026-08-02 重構:Stage 2 不再走 self-written key-by-key merge,
             # 改用 Stage 1 拆出來的 merge_lang_dicts helper (reused),
@@ -374,6 +372,7 @@ def merge_extracted_to_assets(
             cn_data: dict = {}
             tw_src_data: dict = {}
             en_data: dict = {}
+            mod_error = None
 
             # 多 source 時,以第一個 source 為主(同 Stage 1 _process_single_mod 行為)
             for lang_code, source_paths in lang_files.items():
@@ -386,15 +385,15 @@ def merge_extracted_to_assets(
                         f"[MergeExt→Assets] {modid}/{lang_code}: 多個來源 {len(source_paths)} 個,"
                         f" 採第一個 ({source_path.name})"
                     )
-                data = load_json_auto_encoding(source_path)
-                if data is None:
-                    data = {}
-                if not isinstance(data, dict):
-                    log_warning(
-                        f"[MergeExt→Assets] {source_path} 不是 dict 格式, 跳過"
-                    )
+                try:
+                    data = load_json_auto_encoding(source_path)
+                    if data is None or not isinstance(data, dict):
+                        raise ValueError("來源 JSON 無法讀取或不是 dict 格式")
+                except Exception as exc:
+                    mod_error = f"{modid}: read failed ({source_path}): {exc}"
+                    log_warning(f"[MergeExt→Assets] {mod_error}")
                     total_warnings += 1
-                    continue
+                    break
                 if lang_code == "zh_cn":
                     cn_data = data
                 elif lang_code == "zh_tw":
@@ -402,10 +401,23 @@ def merge_extracted_to_assets(
                 elif lang_code == "en_us":
                     en_data = data
 
-            # 既有 assets/{modid}/lang/zh_tw.json (人工翻譯保護)
-            existing_tw = existing.get((modid, "zh_tw"), {})
+            if mod_error:
+                had_errors = True
+                error_details.append(mod_error)
+                continue
 
             # 跑 Stage 1 拆出來的 merge 邏輯 - 行為 1:1 一致
+            try:
+                # 既有 assets/{modid}/lang/zh_tw.json (人工翻譯保護)
+                existing_tw = existing.get((modid, "zh_tw"), {})
+            except Exception as exc:
+                mod_error = f"{modid}: read failed (existing assets): {exc}"
+                log_warning(f"[MergeExt→Assets] {mod_error}")
+                total_warnings += 1
+                had_errors = True
+                error_details.append(mod_error)
+                continue
+
             try:
                 final_tw, pending = merge_lang_dicts(
                     cn_data=cn_data,
@@ -420,10 +432,11 @@ def merge_extracted_to_assets(
                     is_from_output_dir=bool(existing_tw),
                 )
             except Exception as exc:
-                log_warning(
-                    f"[MergeExt→Assets] merge 失敗 ({modid}): {exc}"
-                )
+                mod_error = f"{modid}: merge failed: {exc}"
+                log_warning(f"[MergeExt→Assets] {mod_error}")
                 total_warnings += 1
+                had_errors = True
+                error_details.append(mod_error)
                 continue
 
             # 寫 assets/{modid}/lang/zh_tw.json (翻譯完成的結果)
@@ -435,7 +448,10 @@ def merge_extracted_to_assets(
                     _write_json_atomic(target_path, final_tw)
                     total_files_written += 1
                     # 2026-08-04 B3: 寫成功才刪該 mod 的 _extracted source (per-mod commit)
-                    _cleanup_single_mod_extracted(lang_output_dir, modid)
+                    try:
+                        _cleanup_single_mod_extracted(lang_output_dir, modid)
+                    except Exception as exc:
+                        log_warning(f"[MergeExt→Assets] cleanup 失敗 ({modid}): {exc}")
                     mod_added_count = len(final_tw) - len(existing_tw)
                     if mod_added_count > 0:
                         total_added += mod_added_count
@@ -443,7 +459,11 @@ def merge_extracted_to_assets(
                         try:
                             session.add_log(
                                 f"  ✓ {modid}/zh_tw.json: {len(final_tw)} keys"
-                                + (f" (+{mod_added_count} 新)" if mod_added_count > 0 else "")
+                                + (
+                                    f" (+{mod_added_count} 新)"
+                                    if mod_added_count > 0
+                                    else ""
+                                )
                             )
                         except Exception:
                             pass
@@ -457,10 +477,14 @@ def merge_extracted_to_assets(
                         except Exception:
                             pass
             except Exception as exc:
-                log_warning(
-                    f"[MergeExt→Assets] 寫入失敗 {target_path}: {exc}"
-                )
+                mod_error = f"{modid}: write failed ({target_path}): {exc}"
+                log_warning(f"[MergeExt→Assets] {mod_error}")
                 total_warnings += 1
+                had_errors = True
+                error_details.append(mod_error)
+                progress = base_progress + (idx / total_modids) * span
+                yield {"progress": progress, "log": None, "error": False}
+                continue
 
             # 2026-08-02 修正: pending 不寫到 assets/{modid}/lang/en_us.json
             # 來源已在 待翻譯/{XX_extracted}/{modid}/lang/en_us.json,
@@ -489,7 +513,7 @@ def merge_extracted_to_assets(
                 "log": None,
                 "error": False,
             }
-        
+
         log_info(
             f"[MergeExt→Assets] 完成: {total_modids} 個 modid,"
             f" {total_added} 個 key 並入,"
@@ -504,8 +528,13 @@ def merge_extracted_to_assets(
             except Exception:
                 pass
         # 2026-08-04: per-mod cleanup 已在 loop 內處理,不再需要 batch cleanup
-        yield {"progress": 1.0, "log": None, "error": False}
-    
+        yield {
+            "progress": 1.0,
+            "log": None,
+            "error": had_errors,
+            "message": "; ".join(error_details) if error_details else None,
+        }
+
     except Exception as exc:
         tb = traceback.format_exc()
         log_warning(f"[MergeExt→Assets] 錯誤: {exc}\n{tb}")

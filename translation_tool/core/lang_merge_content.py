@@ -16,11 +16,12 @@ from .lang_processing_format import get_text_processor
 from .lang_merge_content_copy import process_content_or_copy_file_impl
 from .lang_merge_content_patchers import patch_localized_content_json_impl
 from .lang_merge_pending import export_filtered_pending_impl, remove_empty_dirs_impl
-from .lang_merge_io import DirReader, quarantine_copy
+from .lang_merge_io import quarantine_copy
 from .lang_merge_zip_io import (
     _write_bytes_atomic,
     _write_text_atomic,
 )
+
 
 def _patch_localized_content_json(
     reader,
@@ -42,6 +43,7 @@ def _patch_localized_content_json(
         quarantine_copy_fn=quarantine_copy,
         json_module=json,
     )
+
 
 def _process_content_or_copy_file(
     reader,
@@ -86,9 +88,11 @@ def _process_content_or_copy_file(
         zh_en_threshold=zh_en_threshold,
     )
 
+
 def remove_empty_dirs(root_dir: str):
     """包裝函式：遞迴刪除指定目錄下所有空的子資料夾。"""
     return remove_empty_dirs_impl(root_dir)
+
 
 def export_filtered_pending(pending_root: str, output_root: str, min_count: int):
     """包裝函式：將 pending_root 中條目數 >= min_count 的 pending.json 複製到 output_root（輸出前會先清除舊輸出目錄）。"""
@@ -98,6 +102,7 @@ def export_filtered_pending(pending_root: str, output_root: str, min_count: int)
         min_count,
         json_module=json,
     )
+
 
 __all__ = [
     "_patch_localized_content_json",

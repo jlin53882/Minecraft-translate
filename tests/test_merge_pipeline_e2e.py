@@ -4,13 +4,12 @@
 1. Stage 1: zh_cn → zh_tw 翻譯
 2. Stage 2: _extracted → assets/ 合併
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from unittest.mock import MagicMock
-
-import pytest
 
 from app.services_impl.pipelines.merge_service import run_merge_folder_batch_service
 from app.services_impl.pipelines import merge_service
@@ -77,12 +76,22 @@ class TestMergePipelineE2E:
         for mod in ("ae2ct", "aether", "ars"):
             extracted = input_dir / f"{mod}_extracted" / mod / "lang"
             extracted.mkdir(parents=True)
-            (extracted / "zh_cn.json").write_text(json.dumps({
-                f"key.{mod}": f"中文_{mod}",
-            }), encoding="utf-8")
-            (extracted / "en_us.json").write_text(json.dumps({
-                f"key.{mod}.pending": f"English {mod}",
-            }), encoding="utf-8")
+            (extracted / "zh_cn.json").write_text(
+                json.dumps(
+                    {
+                        f"key.{mod}": f"中文_{mod}",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (extracted / "en_us.json").write_text(
+                json.dumps(
+                    {
+                        f"key.{mod}.pending": f"English {mod}",
+                    }
+                ),
+                encoding="utf-8",
+            )
 
         monkeypatch.setattr(
             merge_service,
@@ -112,17 +121,28 @@ class TestMergePipelineE2E:
         assert summary["failed_folders"] == 0
 
         for mod in ("ae2ct", "aether", "ars"):
-            assets_tw = output_dir / "lang_output" / "assets" / mod / "lang" / "zh_tw.json"
+            assets_tw = (
+                output_dir / "lang_output" / "assets" / mod / "lang" / "zh_tw.json"
+            )
             assert assets_tw.exists(), f"Stage 2 未產生 {assets_tw}"
-            assert json.loads(assets_tw.read_text(encoding="utf-8")), f"{assets_tw} 不可為空"
+            assert json.loads(assets_tw.read_text(encoding="utf-8")), (
+                f"{assets_tw} 不可為空"
+            )
 
             pending = (
-                output_dir / "lang_output" / "待翻譯"
-                / f"{mod}_extracted" / mod / "lang" / "en_us.json"
+                output_dir
+                / "lang_output"
+                / "待翻譯"
+                / f"{mod}_extracted"
+                / mod
+                / "lang"
+                / "en_us.json"
             )
             assert pending.exists(), f"Stage 2 cleanup 誤刪 pending source: {pending}"
 
-    def test_pipeline_skips_stage2_when_enable_extracted_merge_false(self, tmp_path: Path, monkeypatch):
+    def test_pipeline_skips_stage2_when_enable_extracted_merge_false(
+        self, tmp_path: Path, monkeypatch
+    ):
         """e2e: enable_extracted_to_assets_merge=False 時不跑 Stage 2。"""
         input_dir = tmp_path / "input"
         input_dir.mkdir()
@@ -135,9 +155,13 @@ class TestMergePipelineE2E:
 
         # Mock load_config to disable Stage 2
         from translation_tool.utils import config_manager
+
         monkeypatch.setattr(
-            config_manager, "load_config",
-            lambda *args, **kwargs: {"lang_merger": {"enable_extracted_to_assets_merge": False}}
+            config_manager,
+            "load_config",
+            lambda *args, **kwargs: {
+                "lang_merger": {"enable_extracted_to_assets_merge": False}
+            },
         )
 
         session = MagicMock()
@@ -145,7 +169,7 @@ class TestMergePipelineE2E:
         del session.snapshot
         # 補足 session 所需方法，避免 daemon thread 拋出 UnhandledThreadException
         session.progress = 1.0
-        results = list(
+        list(
             run_merge_folder_batch_service(
                 input_dir=str(input_dir),
                 output_dir=str(output_dir),
@@ -156,4 +180,6 @@ class TestMergePipelineE2E:
 
         # Stage 2 不應生成 assets/
         assets_dir = output_dir / "lang_output" / "assets"
-        assert not assets_dir.exists(), f"Stage 2 should be skipped, but {assets_dir} exists"
+        assert not assets_dir.exists(), (
+            f"Stage 2 should be skipped, but {assets_dir} exists"
+        )

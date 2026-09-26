@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
-import zipfile
+
 from typing import Any, Callable, Dict, List
 
 from ..utils.log_unit import log_info, log_warning, log_error, log_debug
@@ -30,7 +29,8 @@ def _compute_patchouli_lang_effectiveness(
     book_root: str,
     threshold: float = 0.5,
     json_module=None,
-    all_names: list[str] | None = None,  # 2026-08-04: 預先算好的檔案列表,避免重複 reader.list_all()
+    all_names: list[str]
+    | None = None,  # 2026-08-04: 預先算好的檔案列表,避免重複 reader.list_all()
 ) -> dict[str, bool]:
     """Compute effective translation status for zh_tw and zh_cn in a book_root.
 
@@ -51,10 +51,14 @@ def _compute_patchouli_lang_effectiveness(
 
     # ── 1. Cache lookup ────────────────────────────────────────────────
     if cache_key in _patchouli_eff_cache:
-        log_debug(f"[Patchouli Eff] cache hit for book_root={book_root!r} threshold={threshold}")
+        log_debug(
+            f"[Patchouli Eff] cache hit for book_root={book_root!r} threshold={threshold}"
+        )
         return _patchouli_eff_cache[cache_key]
 
-    log_debug(f"[Patchouli Eff] cache miss for book_root={book_root!r} threshold={threshold}, computing…")
+    log_debug(
+        f"[Patchouli Eff] cache miss for book_root={book_root!r} threshold={threshold}, computing…"
+    )
 
     result: dict[str, bool] = {"zh_tw": False, "zh_cn": False}
 
@@ -88,7 +92,9 @@ def _compute_patchouli_lang_effectiveness(
                 total = sum(len(s) for s in strings if isinstance(s, str))
                 if total == 0:
                     continue
-                cjk_chars = sum(len(CJK_RE.findall(s)) for s in strings if isinstance(s, str))
+                cjk_chars = sum(
+                    len(CJK_RE.findall(s)) for s in strings if isinstance(s, str)
+                )
                 if total > 0 and cjk_chars / total >= 0.5:
                     effective_count += 1
             except Exception:
@@ -98,7 +104,9 @@ def _compute_patchouli_lang_effectiveness(
         result[lang] = ratio >= threshold
 
     _patchouli_eff_cache[cache_key] = result
-    log_debug(f"[Patchouli Eff] cached result for {book_root!r} threshold={threshold}: {result}")
+    log_debug(
+        f"[Patchouli Eff] cached result for {book_root!r} threshold={threshold}: {result}"
+    )
 
     return result
 
@@ -152,14 +160,18 @@ def process_content_or_copy_file_impl(
     # 2026-08-04 性能優化:用 caller 預先算好的 all_files_cache,避免每次呼叫 reader.list_all() (os.walk)
     _all_names = all_files_cache if all_files_cache else reader.list_all()
     if _all_names:
-        _tops = set(n.replace("\\", "/").split("/")[0] for n in _all_names if n.replace("\\", "/").split("/")[0])
+        _tops = set(
+            n.replace("\\", "/").split("/")[0]
+            for n in _all_names
+            if n.replace("\\", "/").split("/")[0]
+        )
         if len(_tops) == 1:
             _candidate = list(_tops)[0] + "/"
             if _all_names[0].startswith(_candidate):
                 _wp = _candidate
 
     def _strip(p):
-        return p[len(_wp):] if _wp and p.startswith(_wp) else p
+        return p[len(_wp) :] if _wp and p.startswith(_wp) else p
 
     normalized_path = input_path.lower().replace("\\", "/")
     log_debug(f"[Patchouli DEBUG] 原始 input_path = {input_path}")
@@ -173,8 +185,14 @@ def process_content_or_copy_file_impl(
 
     # --- v3 新增：zh_cn skip logic (在 early return 判斷之前，先做全局開關檢查) ---
     merger_cfg = load_config_fn().get("lang_merger", {})
-    _process_zh_cn = process_zh_cn if process_zh_cn is not None else merger_cfg.get("process_zh_cn_files", True)
-    skip_zh_cn_when_only_lang = merger_cfg.get("skip_zh_cn_when_only_process_lang", False)
+    _process_zh_cn = (
+        process_zh_cn
+        if process_zh_cn is not None
+        else merger_cfg.get("process_zh_cn_files", True)
+    )
+    skip_zh_cn_when_only_lang = merger_cfg.get(
+        "skip_zh_cn_when_only_process_lang", False
+    )
     # 全局關閉 zh_cn 時，直接跳過所有 zh_cn 內容檔案（非 lang 也要檢查）
     norm_lower = input_path.lower().replace("\\", "/")
     if not _process_zh_cn:
@@ -191,7 +209,9 @@ def process_content_or_copy_file_impl(
         if not _process_zh_cn:
             return {"success": True, "log": None}
         if skip_zh_cn_when_only_lang:
-            if "/lang/" in norm_lower and ("zh_cn.json" in norm_lower or "zh_cn.lang" in norm_lower):
+            if "/lang/" in norm_lower and (
+                "zh_cn.json" in norm_lower or "zh_cn.lang" in norm_lower
+            ):
                 return {"success": True, "log": None}
 
     def get_patchouli_book_root(path: str):
@@ -203,9 +223,12 @@ def process_content_or_copy_file_impl(
         idx = p_lower.find("/assets/")
         if idx == -1:
             return None
-        p_sub = p_lower[idx + 1:]  # 只用於找到 marker 相對位置，book_root 從原始建構
+        p_sub = p_lower[idx + 1 :]  # 只用於找到 marker 相對位置，book_root 從原始建構
         patchouli_dirs = (
-            load_config_fn().get("lm_translator", {}).get("patchouli", {}).get("dir_names", ["patchouli_books"])
+            load_config_fn()
+            .get("lm_translator", {})
+            .get("patchouli", {})
+            .get("dir_names", ["patchouli_books"])
         )
         if not isinstance(patchouli_dirs, list):
             patchouli_dirs = [patchouli_dirs]
@@ -214,7 +237,7 @@ def process_content_or_copy_file_impl(
             marker_lower = f"/{dir_name}/"
             if marker_lower in p_sub:
                 # 用原始路徑的對應切片重建 book_root（保留大小寫）
-                orig_sub = p_orig[idx + 1:]
+                orig_sub = p_orig[idx + 1 :]
                 parts_orig = orig_sub.split("/" + dir_name + "/", 1)
                 rest = parts_orig[1].lstrip("/") if len(parts_orig) > 1 else ""
                 first = rest.split("/", 1)[0] if rest else ""
@@ -231,8 +254,20 @@ def process_content_or_copy_file_impl(
     book_root, matched_dir_name = hit if hit else (None, None)
 
     if book_root:
-        _allow_zh_cn = False if not _process_zh_cn else bool(patchouli_skip if patchouli_skip is not None else merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False))
-        _threshold = patchouli_threshold if patchouli_threshold is not None else float(merger_cfg.get("patchouli_effective_translation_threshold", 0.5))
+        _allow_zh_cn = (
+            False
+            if not _process_zh_cn
+            else bool(
+                patchouli_skip
+                if patchouli_skip is not None
+                else merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False)
+            )
+        )
+        _threshold = (
+            patchouli_threshold
+            if patchouli_threshold is not None
+            else float(merger_cfg.get("patchouli_effective_translation_threshold", 0.5))
+        )
 
         # 優先使用外部傳入的預掃描 cache，否則走內部 _compute_patchouli_lang_effectiveness（自帶 module-level cache）
         book_root_lower = book_root.lower()
@@ -251,18 +286,21 @@ def process_content_or_copy_file_impl(
         has_eff_zh_tw = bool(eff.get("zh_tw", False))
         has_eff_zh_cn = bool(eff.get("zh_cn", False))
 
-        rel_path = normalized_path[len(book_root):]
+        rel_path = normalized_path[len(book_root) :]
         rel_low = rel_path.lower()
         normalized_root = normalize_patchouli_book_root_fn(book_root).strip("/")
         pending_name = merger_cfg.get("pending_folder_name", "待翻譯")
-        patchouli_dirs_cfg = load_config_fn().get("lm_translator", {}).get("patchouli", {}).get("dir_names", ["patchouli_books"])
-        patchouli_root_dir = matched_dir_name if isinstance(patchouli_dirs_cfg, list) and patchouli_dirs_cfg else patchouli_dirs_cfg
 
-        if rel_low.startswith("en_us/") and (has_eff_zh_tw or (_allow_zh_cn and has_eff_zh_cn)):
-            return {"success": True, "log": f"[Patchouli] 跳過已有有效翻譯的英文原件: {normalized_path}"}
+        if rel_low.startswith("en_us/") and (
+            has_eff_zh_tw or (_allow_zh_cn and has_eff_zh_cn)
+        ):
+            return {
+                "success": True,
+                "log": f"[Patchouli] 跳過已有有效翻譯的英文原件: {normalized_path}",
+            }
 
         if rel_low.startswith("zh_cn/"):
-            rel_path = "zh_tw/" + rel_path[len("zh_cn/"):]
+            rel_path = "zh_tw/" + rel_path[len("zh_cn/") :]
             action_log = "轉換中文化"
         elif rel_low.startswith("zh_tw/"):
             action_log = "寫入譯文"
@@ -301,17 +339,31 @@ def process_content_or_copy_file_impl(
     file_name = os.path.basename(input_path)
     ext = os.path.splitext(file_name)[1].lower()
     is_path_localized = "zh_cn/" in normalized_path
-    is_filename_localized = re.search(
-        r"zh_cn.*?\.(lang|md|txt|snbt|json|properties|json5|gui|hl)$",
-        file_name,
-        re.IGNORECASE,
-    ) is not None
+    is_filename_localized = (
+        re.search(
+            r"zh_cn.*?\.(lang|md|txt|snbt|json|properties|json5|gui|hl)$",
+            file_name,
+            re.IGNORECASE,
+        )
+        is not None
+    )
     is_localized_cn_file = is_path_localized or is_filename_localized
-    force_s2tw_extensions = {".md", ".json5", ".gui", ".lang", ".snbt", ".txt", ".properties", ".hl"}
+    force_s2tw_extensions = {
+        ".md",
+        ".json5",
+        ".gui",
+        ".lang",
+        ".snbt",
+        ".txt",
+        ".properties",
+        ".hl",
+    }
     is_forced_s2tw = ext in force_s2tw_extensions
 
     log_debug(f"DEBUG: 進入處理函數，檔案: {input_path}")
-    log_debug(f"DEBUG: 檔案 '{input_path}' 是否為本地化 (zh_cn/ 或 zh_cn.*.ext): {is_localized_cn_file}")
+    log_debug(
+        f"DEBUG: 檔案 '{input_path}' 是否為本地化 (zh_cn/ 或 zh_cn.*.ext): {is_localized_cn_file}"
+    )
     log_debug(f"DEBUG: 檔案 '{input_path}' 是否為強制 S2TW: {is_forced_s2tw}")
 
     tw_path = input_path
@@ -343,14 +395,32 @@ def process_content_or_copy_file_impl(
                 # ── Step 2: 若失敗，檢查是否為未轉義控制字元問題 ─────────────
                 if source_data is None and parse_error is not None:
                     err_msg = str(parse_error).lower()
-                    if "invalid control character" in err_msg or "unexpected control character" in err_msg:
-                        log_debug(f"{log_prefix} 偵測到未轉義控制字元，嘗試清理後重試解析…")
+                    if (
+                        "invalid control character" in err_msg
+                        or "unexpected control character" in err_msg
+                    ):
+                        log_debug(
+                            f"{log_prefix} 偵測到未轉義控制字元，嘗試清理後重試解析…"
+                        )
                         # 清理未轉義的控制字元（Tab \t, 換行 \n, CR \r 等），
                         # 只清理字串內容中的，保留 JSON 語法結構字元（: , { } [ ] "）
-                        cleaned = re.sub(r'(?<=["\'])[\t\n\r](?=["\'])', lambda m: "\\n" if m.group() == "\n" else ("\\r" if m.group() == "\r" else "\\t"), text)
+                        cleaned = re.sub(
+                            r'(?<=["\'])[\t\n\r](?=["\'])',
+                            lambda m: (
+                                "\\n"
+                                if m.group() == "\n"
+                                else ("\\r" if m.group() == "\r" else "\\t")
+                            ),
+                            text,
+                        )
                         # 通用寫法：把所有在 JSON 字串內部的控制字元都做轉義
                         # 符合 JSON 規範：value 中的控制字元必須是 \t \n \r
-                        cleaned = re.sub(r'(?<!\\)((?:\\\\)*)[\t\x01-\x1f](?=(?:[^\\"]*\\.)*[^\\"]*$)', r'\1\\n', text, flags=re.DOTALL)
+                        cleaned = re.sub(
+                            r'(?<!\\)((?:\\\\)*)[\t\x01-\x1f](?=(?:[^\\"]*\\.)*[^\\"]*$)',
+                            r"\1\\n",
+                            text,
+                            flags=re.DOTALL,
+                        )
                         try:
                             source_data = json_module.loads(cleaned)
                             log_debug(f"{log_prefix} 控制字元清理後解析成功")
@@ -374,7 +444,9 @@ def process_content_or_copy_file_impl(
                         extra_text=error_detail,
                         errordata_dir=errordata_dir,
                     )
-                    log_warning(f"{log_prefix} JSON 無法解析，已跳過並隔離: {parse_error}")
+                    log_warning(
+                        f"{log_prefix} JSON 無法解析，已跳過並隔離: {parse_error}"
+                    )
                     return {"success": True}
 
                 if "/lang/" in normalized_path and file_name.lower() == "zh_tw.json":
@@ -393,16 +465,22 @@ def process_content_or_copy_file_impl(
                     log_message = f"{log_prefix} 非本地化 zh_tw JSON 增量補缺 (新內容已 S2TW) 與格式化完成。"
                 else:
                     final_data = recursive_translate_dict_fn(source_data, rules)
-                    log_message = f"{log_prefix} JSON 檔案已 S2TW 轉換、格式化並複製完成。"
+                    log_message = (
+                        f"{log_prefix} JSON 檔案已 S2TW 轉換、格式化並複製完成。"
+                    )
 
-                final_bytes = json_module.dumps(final_data, option=json_module.OPT_INDENT_2)
+                final_bytes = json_module.dumps(
+                    final_data, option=json_module.OPT_INDENT_2
+                )
                 should_write = True
                 if os.path.exists(final_output_path):
                     try:
                         with open(final_output_path, "rb") as f:
                             existing_bytes = f.read()
                         existing_normalized_data = json_module.loads(existing_bytes)
-                        existing_normalized_bytes = json_module.dumps(existing_normalized_data, option=json_module.OPT_INDENT_2)
+                        existing_normalized_bytes = json_module.dumps(
+                            existing_normalized_data, option=json_module.OPT_INDENT_2
+                        )
                         if existing_normalized_bytes == final_bytes:
                             should_write = False
                     except Exception:
@@ -418,7 +496,9 @@ def process_content_or_copy_file_impl(
                 src_bytes = reader.read_bytes(input_path)
                 with open(final_output_path, "wb") as dst:
                     dst.write(src_bytes)
-                log_debug(f"DEBUG: 本地化圖片檔案 {file_name} 複製完成: {final_output_path}")
+                log_debug(
+                    f"DEBUG: 本地化圖片檔案 {file_name} 複製完成: {final_output_path}"
+                )
                 log_info(f"{log_prefix} PNG 檔案直接複製。")
                 return {"success": True}
 
@@ -432,17 +512,23 @@ def process_content_or_copy_file_impl(
             processor = get_text_processor_fn(ext)
             raw = reader.read_bytes(input_path)
             # 2026-08-05: decode bytes before str operations (LICENSE/.txt files)
-            raw = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+            raw = (
+                raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+            )
             raw = raw.replace("\r\n", "\n").replace("\r", "\n")
             if processor:
-                tw_content = processor(raw, recursive_translate_dict_fn, rules, input_path)
+                tw_content = processor(
+                    raw, recursive_translate_dict_fn, rules, input_path
+                )
             else:
                 tw_content = recursive_translate_dict_fn(raw, rules)
             should_write = True
             if os.path.exists(final_output_path):
                 try:
                     with open(final_output_path, "r", encoding="utf-8") as f:
-                        existing_content = f.read().replace("\r\n", "\n").replace("\r", "\n")
+                        existing_content = (
+                            f.read().replace("\r\n", "\n").replace("\r", "\n")
+                        )
                     if existing_content == tw_content:
                         should_write = False
                 except Exception:
@@ -470,7 +556,9 @@ def process_content_or_copy_file_impl(
                         log_msg = f"{log_prefix} 圖片檔案 (.png) 內容不同，執行覆蓋。"
                     else:
                         log_msg = f"{log_prefix} 圖片檔案 (.png) 內容相同，跳過複製。"
-                log_debug(f"DEBUG: 本地化圖片檔案 {file_name} 處理完成: {final_output_path}")
+                log_debug(
+                    f"DEBUG: 本地化圖片檔案 {file_name} 處理完成: {final_output_path}"
+                )
                 log_info(log_msg)
                 return {"success": True}
             except Exception as e:
@@ -478,19 +566,27 @@ def process_content_or_copy_file_impl(
                 return {"success": False, "error": True}
 
         if ext == ".json" and is_localized_cn_file:
-            return patch_localized_content_json_fn(reader, input_path, final_output_path, rules, log_prefix, output_dir)
+            return patch_localized_content_json_fn(
+                reader, input_path, final_output_path, rules, log_prefix, output_dir
+            )
 
         if ext == ".mcmeta":
             reader.copy_to(input_path, final_output_path)
-            log_debug(f"DEBUG: 本地化 .mcmeta 檔案 {file_name} 複製完成: {final_output_path}")
-            log_info(f"{log_prefix} 本地化檔案類型 ({ext}) 已被排除 S2TW 轉換，執行直接複製。")
+            log_debug(
+                f"DEBUG: 本地化 .mcmeta 檔案 {file_name} 複製完成: {final_output_path}"
+            )
+            log_info(
+                f"{log_prefix} 本地化檔案類型 ({ext}) 已被排除 S2TW 轉換，執行直接複製。"
+            )
             return {"success": True}
 
         processor = get_text_processor_fn(ext)
         if processor:
             raw = reader.read_bytes(input_path)
             # 2026-08-05: decode bytes before str operations
-            raw = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+            raw = (
+                raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+            )
             raw = raw.replace("\r\n", "\n").replace("\r", "\n")
             tw_content = processor(raw, recursive_translate_dict_fn, rules, input_path)
             should_write = True
@@ -498,10 +594,14 @@ def process_content_or_copy_file_impl(
             if os.path.exists(final_output_path):
                 try:
                     with open(final_output_path, "r", encoding="utf-8") as f:
-                        existing_content = f.read().replace("\r\n", "\n").replace("\r", "\n")
+                        existing_content = (
+                            f.read().replace("\r\n", "\n").replace("\r", "\n")
+                        )
                     if existing_content == tw_content:
                         should_write = False
-                        log_debug(f"{log_prefix} 內容檔案 ({ext}) S2TW 轉換後內容無變動，略過寫入。")
+                        log_debug(
+                            f"{log_prefix} 內容檔案 ({ext}) S2TW 轉換後內容無變動，略過寫入。"
+                        )
                 except Exception:
                     should_write = True
             if should_write:
