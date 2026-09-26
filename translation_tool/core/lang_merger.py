@@ -20,8 +20,9 @@ from .lang_merge_content import (
     export_filtered_pending,
     remove_empty_dirs,
 )
+from .lang_merge_content_copy import detect_content_wrapper_prefix
 from .lang_merge_io import ZipReader, FolderReader
-from .lang_merge_pipeline import _process_single_mod
+from .lang_merge_pipeline import _process_single_mod, detect_mod_wrapper_prefix
 
 
 def merge_zhcn_to_zhtw_from_zip(
@@ -224,6 +225,9 @@ def merge_zhcn_to_zhtw_from_zip(
                 # ✅ 優化點：在啟動 ThreadPool 前，先完成一次性的路徑標準化快取
                 all_names_raw = zf.namelist()
                 all_files_cache = [n.lower().replace("\\", "/") for n in all_names_raw]
+                # 包裝前綴只算一次,避免每個 mod / 內容檔各掃一次全部檔名
+                mod_wrapper_prefix = detect_mod_wrapper_prefix(all_names_raw)
+                content_wrapper_prefix = detect_content_wrapper_prefix(all_files_cache)
 
                 # 提交每個 mod 的處理（這裡每個 mod 的 paths 會包含 zh_cn/zh_tw/en_us 任一或多個）
                 for mod_key, paths in mods_to_process.items():
@@ -239,6 +243,7 @@ def merge_zhcn_to_zhtw_from_zip(
                             # 需保留原始大小寫：用於偵測/剝離包裝前綴，
                             # 小寫版 all_files_cache 會讓 startswith 比對失敗
                             all_files_cache=all_names_raw,
+                            wrapper_prefix=mod_wrapper_prefix,
                         )
                     )
 
@@ -253,6 +258,7 @@ def merge_zhcn_to_zhtw_from_zip(
                             output_dir,
                             only_process_lang,
                             all_files_cache=all_files_cache,
+                            wrapper_prefix=content_wrapper_prefix,
                             patchouli_output_dir=patchouli_output_dir,
                             other_output_dir=other_output_dir,
                             errordata_dir=errordata_output_dir,
@@ -464,6 +470,9 @@ def merge_zhcn_to_zhtw_from_folder(
         futures = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             all_files_cache = [n.lower().replace("\\", "/") for n in all_names]
+            # 包裝前綴只算一次,避免每個 mod / 內容檔各掃一次全部檔名
+            mod_wrapper_prefix = detect_mod_wrapper_prefix(all_names)
+            content_wrapper_prefix = detect_content_wrapper_prefix(all_files_cache)
 
             for mod_key, paths in mods_to_process.items():
                 futures.append(
@@ -477,6 +486,7 @@ def merge_zhcn_to_zhtw_from_folder(
                         errordata_output_dir,
                         # 需保留原始大小寫（同 ZIP 模式說明）
                         all_files_cache=all_names,
+                        wrapper_prefix=mod_wrapper_prefix,
                     )
                 )
 
@@ -490,6 +500,7 @@ def merge_zhcn_to_zhtw_from_folder(
                         output_dir,
                         only_process_lang,
                         all_files_cache=all_files_cache,
+                        wrapper_prefix=content_wrapper_prefix,
                         patchouli_output_dir=patchouli_output_dir,
                         other_output_dir=other_output_dir,
                         errordata_dir=errordata_output_dir,

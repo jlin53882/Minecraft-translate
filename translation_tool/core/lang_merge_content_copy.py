@@ -125,6 +125,32 @@ def _extract_all_strings(data) -> list[str]:
     return strings
 
 
+_UNSET = object()
+
+
+def detect_content_wrapper_prefix(all_names: List[str] | None) -> str | None:
+    """偵測統一包裝前綴,供 process_content_or_copy_file_impl 剝離輸出路徑。
+
+    規則:所有檔名只有一個頂層目錄,且第一個檔名以 ``"<頂層目錄>/"`` 開頭時,
+    回傳該前綴;否則回傳 None。
+
+    這是 O(檔案數) 的掃描,呼叫端應只算一次再用 ``wrapper_prefix`` 傳入,
+    避免每個內容檔各掃一次變成 O(檔案數²)。
+    """
+    if not all_names:
+        return None
+    tops = set(
+        n.replace("\\", "/").split("/")[0]
+        for n in all_names
+        if n.replace("\\", "/").split("/")[0]
+    )
+    if len(tops) == 1:
+        candidate = next(iter(tops)) + "/"
+        if all_names[0].startswith(candidate):
+            return candidate
+    return None
+
+
 def process_content_or_copy_file_impl(
     reader,
     input_path: str,
@@ -133,6 +159,7 @@ def process_content_or_copy_file_impl(
     *,
     only_process_lang: bool = False,
     all_files_cache: List[str] | None = None,
+    wrapper_prefix: str | None | object = _UNSET,
     patchouli_eff_cache: dict | None = None,
     load_config_fn: Callable[[], dict],
     recursive_translate_dict_fn: Callable[[Any, list], Any],
@@ -156,19 +183,15 @@ def process_content_or_copy_file_impl(
     支援 ZIP 與資料夾兩種 reader。
     """
     # 自動偵測並剝離 ZIP 統一包裝前綴（任何名稱皆適用）
-    _wp = None
     # 2026-08-04 性能優化:用 caller 預先算好的 all_files_cache,避免每次呼叫 reader.list_all() (os.walk)
     _all_names = all_files_cache if all_files_cache else reader.list_all()
-    if _all_names:
-        _tops = set(
-            n.replace("\\", "/").split("/")[0]
-            for n in _all_names
-            if n.replace("\\", "/").split("/")[0]
-        )
-        if len(_tops) == 1:
-            _candidate = list(_tops)[0] + "/"
-            if _all_names[0].startswith(_candidate):
-                _wp = _candidate
+    # 2026-09-26 性能優化:包裝前綴由 caller 算一次傳入 (wrapper_prefix),
+    # 否則每個內容檔都掃一次全部檔名,整體變成 O(檔案數²)
+    _wp = (
+        detect_content_wrapper_prefix(_all_names)
+        if wrapper_prefix is _UNSET
+        else wrapper_prefix
+    )
 
     def _strip(p):
         return p[len(_wp) :] if _wp and p.startswith(_wp) else p

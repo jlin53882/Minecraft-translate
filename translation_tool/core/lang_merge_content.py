@@ -13,7 +13,7 @@ from ..utils.text_processor import apply_replace_rules
 from ..utils.text_processor import recursive_translate_dict
 from .lang_codec import normalize_patchouli_book_root
 from .lang_processing_format import get_text_processor
-from .lang_merge_content_copy import process_content_or_copy_file_impl
+from .lang_merge_content_copy import _UNSET, process_content_or_copy_file_impl
 from .lang_merge_content_patchers import patch_localized_content_json_impl
 from .lang_merge_pending import export_filtered_pending_impl, remove_empty_dirs_impl
 from .lang_merge_io import quarantine_copy
@@ -52,6 +52,7 @@ def _process_content_or_copy_file(
     output_dir: str,
     only_process_lang: bool = False,
     all_files_cache=None,
+    wrapper_prefix=_UNSET,
     patchouli_eff_cache: dict | None = None,
     patchouli_output_dir: str | None = None,
     other_output_dir: str | None = None,
@@ -69,6 +70,7 @@ def _process_content_or_copy_file(
         output_dir,
         only_process_lang=only_process_lang,
         all_files_cache=all_files_cache,
+        wrapper_prefix=wrapper_prefix,
         patchouli_eff_cache=patchouli_eff_cache,
         load_config_fn=load_config,
         recursive_translate_dict_fn=recursive_translate_dict,

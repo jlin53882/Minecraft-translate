@@ -39,6 +39,34 @@ def _contains_cjk_str(s: str) -> bool:
     return bool(CJK_RE.search(s))
 
 
+_STANDARD_RESOURCE_DIRS = {"assets", "book", "patchouli_books", "resources"}
+_UNSET = object()
+
+
+def detect_mod_wrapper_prefix(all_names: list[str] | None) -> str | None:
+    """偵測統一包裝前綴（例如 ``MyPack/``），供 _process_single_mod 剝離輸出路徑。
+
+    規則:所有檔名只有一個頂層目錄,且該目錄不是已知標準資源目錄時,
+    回傳 ``"<頂層目錄>/"``;否則回傳 None。
+
+    需傳入原始大小寫的檔名,結果才會和 relative_tw_path 對得上。
+    這是 O(檔案數) 的掃描,呼叫端應只算一次再用 ``wrapper_prefix`` 傳入,
+    避免每個 mod 各掃一次變成 O(mod 數 × 檔案數)。
+    """
+    if not all_names:
+        return None
+    tops = set(
+        n.replace("\\", "/").split("/")[0]
+        for n in all_names
+        if n.replace("\\", "/").split("/")[0]
+    )
+    if len(tops) == 1:
+        candidate = next(iter(tops))
+        if candidate not in _STANDARD_RESOURCE_DIRS:
+            return candidate + "/"
+    return None
+
+
 def _process_single_mod(
     reader,
     paths: Dict[str, str],
@@ -47,6 +75,7 @@ def _process_single_mod(
     must_translate_dir: str,
     errordata_dir: str | None = None,
     all_files_cache: list[str] | None = None,  # 2026-08-04: 預先算好的檔案列表
+    wrapper_prefix: str | None | object = _UNSET,
 ) -> Dict[str, Any]:
     """處理單一模組（mod）的語言合併流程。
 
@@ -134,22 +163,15 @@ def _process_single_mod(
         # 自動偵測並剝離 ZIP 統一包裝前綴（任何名稱皆適用）
         # 讀取 ZIP 時用原始路徑，只在輸出路徑建構時剝離
         # 已知標準資源目錄（這些目錄名稱本身就是有意義的結構，不剝離）
-        _STANDARD_RESOURCE_DIRS = {"assets", "book", "patchouli_books", "resources"}
-        # 2026-08-04 性能優化: 用 caller 預先算好的 all_files_cache
-        _all_names = (
-            all_files_cache if all_files_cache is not None else reader.list_all()
-        )
-        _wp = None
-        if _all_names:
-            _tops = set(
-                n.replace("\\", "/").split("/")[0]
-                for n in _all_names
-                if n.replace("\\", "/").split("/")[0]
+        # 2026-08-04 性能優化: 用 caller 預先算好的 all_files_cache / wrapper_prefix,
+        # 避免每個 mod 都重新掃描全部檔名
+        if wrapper_prefix is _UNSET:
+            _all_names = (
+                all_files_cache if all_files_cache is not None else reader.list_all()
             )
-            if len(_tops) == 1:
-                _candidate = list(_tops)[0]
-                if _candidate not in _STANDARD_RESOURCE_DIRS:
-                    _wp = _candidate + "/"
+            _wp = detect_mod_wrapper_prefix(_all_names)
+        else:
+            _wp = wrapper_prefix
 
         def _strip(p):
             return p[len(_wp) :] if _wp and p.startswith(_wp) else p
