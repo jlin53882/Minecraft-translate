@@ -33,7 +33,7 @@ class _Session:
     def start(self):
         self.started += 1
 
-    def add_log(self, text):
+    def add_log(self, text, level="info", source="ui"):
         self.logs.append(text)
 
     def set_error(self):
@@ -132,7 +132,13 @@ def test_pipeline_config_translate_paths(monkeypatch):
     })
     cfg = PipelineConfig("C:/input", "C:/output")
 
-    assert cfg.translate_input_dir == os.path.join("C:/output", "locale_sort", "_整理輸出", "待翻譯整理需翻譯")
+    # 語系合併的待翻譯清單輸出在 lang_output/ 底下（一鍵流程需讀同一路徑）
+    assert cfg.translate_input_dir == os.path.join(
+        "C:/output", "locale_sort", "_整理輸出", "lang_output", "待翻譯整理需翻譯"
+    )
+    assert cfg.patchouli_pending_dir == os.path.join(
+        "C:/output", "locale_sort", "_整理輸出", "patchouli_output", "待翻譯"
+    )
     assert cfg.translate_output_dir == os.path.join("C:/output", "lm_translate", "_翻譯輸出")
 
 
@@ -520,27 +526,31 @@ def test_run_bundle_calls_service_with_all_args(monkeypatch):
 # _do_bundle Service Call Tests
 # -----------------------------------------------------------------------------
 
-def test_do_bundle_calls_run_bundling_service(monkeypatch):
-    """驗證 _do_bundle 正確傳遞所有參數到 run_bundling_service"""
+def test_bundle_into_session_calls_run_bundling_service(monkeypatch):
+    """驗證 _bundle_into_session 正確傳遞所有參數到 run_bundling_service"""
     monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
     calls = {}
 
     def fake_bundle(**kwargs):
         calls.update(kwargs)
-        yield {"progress": 1.0}
+        yield {"progress": 1.0, "log": "done"}
 
     monkeypatch.setattr(pipeline_view, "run_bundling_service", fake_bundle)
 
     session = _Session()
     view = pipeline_view.PipelineView(mock_page(), mock_filepicker())
 
-    view._do_bundle(
-        input_root_dir="C:/bundle_in",
-        output_zip_path="C:/out/bundle.zip",
-        description="mydesc",
-        pack_image_path="C:/pack.png",
-        extra_folders=["C:/extra"],
-        session=session,
+    list(
+        view._bundle_into_session(
+            session,
+            input_root_dir="C:/bundle_in",
+            output_zip_path="C:/out/bundle.zip",
+            description="mydesc",
+            min_format=0,
+            max_format=0,
+            pack_image_path="C:/pack.png",
+            extra_folders=["C:/extra"],
+        )
     )
 
     assert calls["input_root_dir"] == "C:/bundle_in"
@@ -548,6 +558,7 @@ def test_do_bundle_calls_run_bundling_service(monkeypatch):
     assert calls["description"] == "mydesc"
     assert calls["pack_image_path"] == "C:/pack.png"
     assert calls["extra_folders"] == ["C:/extra"]
+    assert session.logs == ["done"]
 
 
 # -----------------------------------------------------------------------------

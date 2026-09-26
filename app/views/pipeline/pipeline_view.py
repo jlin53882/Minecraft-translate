@@ -6,37 +6,67 @@
 - 各步驟對話框已拆分至 app/views/pipeline/ 目錄
 """
 
-import flet as ft
-import threading
-from functools import partial
-import time
+import asyncio
+import concurrent.futures
+import inspect
 import os
+import threading
+import traceback
+from functools import partial
 
-from app.ui.snack import show_snack
+import flet as ft
 
-from app.ui.theme import (
-    BLUE_600, BLUE_700, GREEN_700, TEAL_700, PURPLE_700,
-    YELLOW_900, YELLOW, CYAN_400, CYAN_700, GREY_500, GREY_600,
-    RED_400, ORANGE_700, WHITE, BLUE_50, GREY_200, BLUE_400,
-    GREEN_600, GREEN_50, RED_50,
-)
 from app.logging.task_session import TaskSession
-from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_info
-from app.services_impl.pipelines.extract_service import (
-    run_lang_extraction_service,
-    run_book_extraction_service,
+from app.services_impl.pipelines.bundle_service import (
+    build_bundle_staging,
+    run_bundling_service,
 )
-from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service, run_merge_folder_batch_service
+from app.services_impl.pipelines.extract_service import (
+    run_book_extraction_service,
+    run_lang_extraction_service,
+)
 from app.services_impl.pipelines.lm_service import run_lm_translation_service
-from app.services_impl.pipelines.bundle_service import run_bundling_service
+from app.services_impl.pipelines.merge_service import (
+    run_merge_folder_batch_service,
+    run_merge_zip_batch_service,
+)
+from app.ui.snack import show_snack
+from app.ui.theme import (
+    BLUE_50,
+    BLUE_400,
+    BLUE_600,
+    BLUE_700,
+    CYAN_400,
+    GREEN_50,
+    GREEN_600,
+    GREEN_700,
+    GREY_200,
+    GREY_500,
+    GREY_600,
+    ORANGE_700,
+    PURPLE_700,
+    RED_50,
+    RED_400,
+    TEAL_700,
+    WHITE,
+    YELLOW,
+    YELLOW_900,
+)
 from app.views._log import LogView
-
+from app.views.pipeline.pipeline_bundle_dialog import open_bundle_dialog
 from app.views.pipeline.pipeline_extract_dialog import open_extract_dialog
 from app.views.pipeline.pipeline_merge_dialog import open_merge_dialog
-from app.views.pipeline.pipeline_translate_dialog import open_translate_dialog
-from app.views.pipeline.pipeline_bundle_dialog import open_bundle_dialog
 from app.views.pipeline.pipeline_one_click_dialog import open_one_click_dialog
+from app.views.pipeline.pipeline_translate_dialog import open_translate_dialog
+from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_error, log_info, log_warning
+
+
+def _has_files(path: str) -> bool:
+    """資料夾存在且至少含有一個檔案。"""
+    if not os.path.isdir(path):
+        return False
+    return any(files for _, _, files in os.walk(path))
 
 
 class PipelineConfig:
@@ -57,7 +87,9 @@ class PipelineConfig:
         self.locale_sort = "locale_sort"
         self.sort_output_subfolder = "_整理輸出"
         self.pending_folder = lang_merger.get("pending_folder_name", "待翻譯")
-        self.organized_folder = lang_merger.get("pending_organized_folder_name", "待翻譯整理需翻譯")
+        self.organized_folder = lang_merger.get(
+            "pending_organized_folder_name", "待翻譯整理需翻譯"
+        )
 
         self.lm_translate = "lm_translate"
         self.translate_output_subfolder = "_翻譯輸出"
@@ -66,11 +98,15 @@ class PipelineConfig:
 
     @property
     def extract_lang_output_dir(self):
-        return os.path.join(self.output_dir, self.jar_mod_extract, self.lang_output_subfolder)
+        return os.path.join(
+            self.output_dir, self.jar_mod_extract, self.lang_output_subfolder
+        )
 
     @property
     def extract_book_output_dir(self):
-        return os.path.join(self.output_dir, self.jar_mod_extract, self.book_output_subfolder)
+        return os.path.join(
+            self.output_dir, self.jar_mod_extract, self.book_output_subfolder
+        )
 
     @property
     def merge_input_dir(self):
@@ -78,19 +114,50 @@ class PipelineConfig:
 
     @property
     def merge_output_dir(self):
-        return os.path.join(self.output_dir, self.locale_sort, self.sort_output_subfolder)
+        return os.path.join(
+            self.output_dir, self.locale_sort, self.sort_output_subfolder
+        )
 
     @property
     def translate_input_dir(self):
-        return os.path.join(self.merge_output_dir, self.organized_folder)
+        """語言檔待翻譯清單（語系合併輸出於 lang_output/ 底下）。"""
+        return os.path.join(self.merge_output_dir, "lang_output", self.organized_folder)
+
+    @property
+    def patchouli_pending_dir(self):
+        """Patchouli 書本的待翻譯內容。"""
+        return os.path.join(
+            self.merge_output_dir, "patchouli_output", self.pending_folder
+        )
+
+    @property
+    def translate_input_dirs(self):
+        return [self.translate_input_dir, self.patchouli_pending_dir]
 
     @property
     def translate_output_dir(self):
-        return os.path.join(self.output_dir, self.lm_translate, self.translate_output_subfolder)
+        return os.path.join(
+            self.output_dir, self.lm_translate, self.translate_output_subfolder
+        )
 
     @property
     def bundle_input_dir(self):
-        return os.path.join(self.output_dir, self.lm_translate, self.translate_output_subfolder)
+        return os.path.join(
+            self.output_dir, self.lm_translate, self.translate_output_subfolder
+        )
+
+    @property
+    def bundle_staging_dir(self):
+        return os.path.join(self.output_dir, "_打包暫存")
+
+    @property
+    def bundle_sources(self):
+        """打包來源（優先序由低到高）：合併後的既有譯文 → LLM 新譯文。"""
+        return [
+            os.path.join(self.merge_output_dir, "lang_output"),
+            os.path.join(self.merge_output_dir, "patchouli_output"),
+            self.translate_output_dir,
+        ]
 
     @property
     def bundle_output_zip(self):
@@ -100,6 +167,7 @@ class PipelineConfig:
 # =============================================================================
 # PipelineStepChip - 步驟狀態晶片
 # =============================================================================
+
 
 class PipelineStepChip:
     """單一步驟狀態晶片"""
@@ -144,6 +212,7 @@ class PipelineStepChip:
 # PipelineProgressPanel - 日誌+進度面板
 # =============================================================================
 
+
 class PipelineProgressPanel:
     """日誌+進度面板，顯示步驟狀態晶片、進度條、即時日誌"""
 
@@ -182,15 +251,22 @@ class PipelineProgressPanel:
         )
 
         self.container = ft.Container(
-            content=ft.Column([
-                ft.Text("執行進度", weight="bold", color=BLUE_700),
-                self.step_row,
-                self.current_label,
-                ft.Divider(),
-                ft.Row([ft.Icon(ft.Icons.INFO, size=14, color=GREY_500),
-                        ft.Text("步驟日誌：", size=12, color=GREY_600)]),
-                self.log_view,
-            ], spacing=5),
+            content=ft.Column(
+                [
+                    ft.Text("執行進度", weight="bold", color=BLUE_700),
+                    self.step_row,
+                    self.current_label,
+                    ft.Divider(),
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.INFO, size=14, color=GREY_500),
+                            ft.Text("步驟日誌：", size=12, color=GREY_600),
+                        ]
+                    ),
+                    self.log_view,
+                ],
+                spacing=5,
+            ),
             padding=12,
             bgcolor=BLUE_50,
             border_radius=10,
@@ -226,9 +302,7 @@ class PipelineProgressPanel:
             level = "system" if is_success else "error"
         # 從 msg 字串前綴推斷 level（向後兼容既有呼叫）
         if level == "info":
-            if msg.startswith("▶"):
-                level = "system"
-            elif msg.startswith("✅"):
+            if msg.startswith(("▶", "✅")):
                 level = "system"
             elif msg.startswith("❌"):
                 level = "error"
@@ -258,6 +332,7 @@ class PipelineProgressPanel:
 # PipelineView - 流水線主視圖
 # =============================================================================
 
+
 class PipelineView(ft.Column):
     """模組流水線翻譯打包工作台視圖"""
 
@@ -266,7 +341,7 @@ class PipelineView(ft.Column):
         self._page = page
         self.file_picker = file_picker
         self.registry = None  # 預留給外部注入
-        
+
         self.input_path_text = ft.TextField(
             hint_text="尚未選擇讀取來源...",
             expand=True,
@@ -281,14 +356,19 @@ class PipelineView(ft.Column):
             text_size=12,
             dense=True,
         )
-        self.log_content = ft.ListView(expand=True, spacing=5, auto_scroll=True)  # PR refactor/unified-log-view: dead widget, 將在下個 commit 移除
-        self.progress_bar = ft.ProgressBar(width=float("inf"), height=8, value=0, color=CYAN_400, bgcolor="#E0E0E0")
+        self.log_content = ft.ListView(
+            expand=True, spacing=5, auto_scroll=True
+        )  # PR refactor/unified-log-view: dead widget, 將在下個 commit 移除
+        self.progress_bar = ft.ProgressBar(
+            width=float("inf"), height=8, value=0, color=CYAN_400, bgcolor="#E0E0E0"
+        )
         self.progress_status = ft.Text("等待任務啟動...", size=12, color=GREY_600)
         self.keys_container = ft.Column(spacing=10)
 
         self.progress_panel = PipelineProgressPanel(page)
 
         self._lang_code_checks = {}
+        self._one_click_button = None
 
         self._build_ui()
 
@@ -329,12 +409,12 @@ class PipelineView(ft.Column):
             label=f"API Key {len(self.keys_container.controls) + 1}",
             expand=True,
             text_size=12,
-            border_color=BLUE_700
+            border_color=BLUE_700,
         )
         del_btn = ft.IconButton(
             icon=ft.Icons.DELETE,
             icon_color=RED_400,
-            on_click=lambda _: self._delete_key_field(new_row)
+            on_click=lambda _: self._delete_key_field(new_row),
         )
         new_row.controls = [key_tf, del_btn]
         self.keys_container.controls.append(new_row)
@@ -346,126 +426,171 @@ class PipelineView(ft.Column):
         self.progress_panel.start()
         self._page.update()
 
-
     # =============================================================================
     # Background Workers
     # =============================================================================
 
-    def _run_extraction(self, mods_dir: str, output_dir: str, mode: str, lang_codes: list[str]):
-        """執行抽取資源（背景執行緒）。
+    # 輪詢間隔：背景任務的日誌/進度以這個頻率批次推到畫面
+    _POLL_INTERVAL_SEC = 0.2
 
-        Args:
-            mods_dir: Mod 來源目錄
-            output_dir: 輸出目錄
-            mode: 執行模式（lang / book / dual）
-            lang_codes: 語言代碼列表，傳入 extraction service
-                       若為 None，service 會從 config 讀取預設值
+    def _ui(self, fn, *args, **kwargs):
+        """在 Flet event loop 上執行 UI 更新（背景執行緒不可直接呼叫 page.update）。"""
+
+        async def _run():
+            fn(*args, **kwargs)
+
+        return self._page.run_task(_run)
+
+    async def _watch_session(self, session: TaskSession, done: threading.Event):
+        """在 event loop 上輪詢 session，依 seq 只取新日誌並批次刷新畫面。"""
+        last_seq = -1
+        while True:
+            finished = done.is_set()
+            snap = session.snapshot()
+            logs = snap.get("logs", [])
+            if logs and logs[-1].seq < last_seq:  # session.start() 會重置 seq
+                last_seq = -1
+            new_items = [(e.text, e.level) for e in logs if e.seq > last_seq]
+            if logs:
+                last_seq = logs[-1].seq
+            if new_items:
+                self.progress_panel.log_view.add_many(
+                    [(f">> {text}", level) for text, level in new_items]
+                )
+            progress = float(snap.get("progress", 0) or 0)
+            self._update_progress(progress, f"{int(progress * 100)}%")
+            if finished:
+                return
+            await asyncio.sleep(self._POLL_INTERVAL_SEC)
+
+    @staticmethod
+    def _session_failed(session: TaskSession) -> bool:
+        """任務失敗：session 標記錯誤，或摘要中有失敗項目。"""
+        if session.error:
+            return True
+        summary = session.snapshot().get("summary") or {}
+        return any(
+            summary.get(key, 0)
+            for key in ("failed_zips", "failed_folders", "errored_files")
+        )
+
+    def _run_session_step(self, step_num: int, name: str, service_fn) -> bool:
+        """在目前（背景）執行緒執行一個步驟，回傳是否成功。
+
+        每個步驟使用獨立 TaskSession；service 回傳 generator 時會完整迭代
+        （merge / bundle service 都是 generator，未迭代就不會執行）。
         """
         session = TaskSession()
-        self.progress_panel.set_step_running(1, "抽取資源")
-        self.progress_panel.add_log(f"▶ 開始：抽取資源（{mode}）")
+        done = threading.Event()
+        self._ui(self.progress_panel.set_step_running, step_num, name)
+        self._ui(self.progress_panel.add_log, f"▶ 開始：{name}")
+        watcher = self._page.run_task(self._watch_session, session, done)
+        try:
+            result = service_fn(session)
+            if inspect.isgenerator(result):
+                for _ in result:
+                    pass
+        except Exception as ex:  # noqa: BLE001 - 背景步驟邊界：任何錯誤都轉成步驟失敗
+            log_error(f"[Pipeline] {name} 失敗：{ex}\n{traceback.format_exc()}")
+            session.add_log(f"❌ 錯誤：{ex}", level="error")
+            session.set_error()
+        finally:
+            done.set()
+        try:
+            if watcher is not None:
+                watcher.result(timeout=30)
+        except (
+            concurrent.futures.TimeoutError,
+            concurrent.futures.CancelledError,
+        ) as ex:
+            log_warning(f"[Pipeline] {name} 日誌同步未完成：{ex!r}")
+
+        ok = not self._session_failed(session)
+
+        def _finish():
+            self.progress_panel.finish_step(step_num, ok)
+            self.progress_panel.add_log(f"✅ {name} 完成" if ok else f"❌ {name} 失敗")
+            self._update_progress(1.0, "完成" if ok else "失敗")
+
+        self._ui(_finish)
+        return ok
+
+    def _start_single_step(self, step_num: int, name: str, service_fn):
+        """單一步驟按鈕：顯示進度面板、停用按鈕，並在背景執行。"""
+        self._show_progress_panel()
+        self._set_buttons_disabled(True)
+        self._page.update()
 
         def worker():
             try:
-                os.makedirs(os.path.join(output_dir, "jar_mod_extract", "_提取lang_輸出"), exist_ok=True)
-                os.makedirs(os.path.join(output_dir, "jar_mod_extract", "_提取book_輸出"), exist_ok=True)
-
-                if mode in ("lang", "dual"):
-                    lang_out = os.path.join(output_dir, "jar_mod_extract", "_提取lang_輸出")
-                    run_lang_extraction_service(mods_dir, lang_out, session, lang_codes=lang_codes)
-                    async def do_lang_log(_):
-                        self.progress_panel.add_log("✅ Lang 抽取完成")
-                    self._page.run_task(do_lang_log, None)
-
-                if mode in ("book", "dual"):
-                    book_out = os.path.join(output_dir, "jar_mod_extract", "_提取book_輸出")
-                    run_book_extraction_service(mods_dir, book_out, session, lang_codes=lang_codes)
-                    async def do_book_log(_):
-                        self.progress_panel.add_log("✅ Book 抽取完成")
-                    self._page.run_task(do_book_log, None)
-
-                async def do_finish(_):
-                    self.progress_panel.finish_step(1, not session.error)
-                self._page.run_task(do_finish, None)
-
-            except Exception as ex:
-                async def do_err_log(_):
-                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", level="error")
-                self._page.run_task(do_err_log, None)
-                async def do_err_finish(_):
-                    self.progress_panel.finish_step(1, False)
-                self._page.run_task(do_err_finish, None)
+                self._run_session_step(step_num, name, service_fn)
+            finally:
+                self._ui(self._reenable_buttons)
 
         threading.Thread(target=worker, daemon=True).start()
-        self._poll_session(session)
 
-    def _run_merge(self, input_src, output_dir: str, input_mode: str, only_lang: bool, process_zh_cn: bool,
-                   patchouli_skip: bool, patchouli_threshold: float, zh_en_threshold: int,
-                   lang_codes: list[str]):
-        session = TaskSession()
-        self.progress_panel.set_step_running(2, "語系比對")
-        display_input = ",".join(input_src) if isinstance(input_src, list) else input_src
-        self.progress_panel.add_log(f"▶ 開始：語系比對（輸入：{display_input}）")
+    def _run_extraction(
+        self, mods_dir: str, output_dir: str, mode: str, lang_codes: list[str]
+    ):
+        """執行抽取資源（背景執行緒）。"""
+        cfg = PipelineConfig(mods_dir, output_dir)
 
-        def worker():
-            try:
-                os.makedirs(output_dir, exist_ok=True)
-                if input_mode == "folder":
-                    run_merge_folder_batch_service(
-                        input_dir=input_src,
-                        output_dir=output_dir,
-                        session=session,
-                        only_process_lang=only_lang,
-                        process_zh_cn=process_zh_cn,
-                        patchouli_skip=patchouli_skip,
-                        patchouli_threshold=patchouli_threshold,
-                        zh_en_threshold=zh_en_threshold,
-                    )
-                else:
-                    merge_input_list = input_src if isinstance(input_src, list) else [input_src]
-                    run_merge_zip_batch_service(
-                        zip_paths=merge_input_list,
-                        output_dir=output_dir,
-                        session=session,
-                        only_process_lang=only_lang,
-                        process_zh_cn=process_zh_cn,
-                        patchouli_skip=patchouli_skip,
-                        patchouli_threshold=patchouli_threshold,
-                        zh_en_threshold=zh_en_threshold,
-                    )
+        def service(session):
+            if mode in ("lang", "dual"):
+                os.makedirs(cfg.extract_lang_output_dir, exist_ok=True)
+                run_lang_extraction_service(
+                    mods_dir,
+                    cfg.extract_lang_output_dir,
+                    session,
+                    lang_codes=lang_codes,
+                )
+                if session.error:
+                    return
+            if mode in ("book", "dual"):
+                os.makedirs(cfg.extract_book_output_dir, exist_ok=True)
+                run_book_extraction_service(
+                    mods_dir,
+                    cfg.extract_book_output_dir,
+                    session,
+                    lang_codes=lang_codes,
+                )
 
-                async def do_finish(_):
-                    self.progress_panel.finish_step(2, not session.error)
-                    if not session.error:
-                        self.progress_panel.add_log("✅ 語系比對完成")
-                self._page.run_task(do_finish, None)
-            except Exception as ex:
-                async def do_err(_):
-                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", level="error")
-                self._page.run_task(do_err, None)
+        self._start_single_step(1, f"抽取資源（{mode}）", service)
 
-        threading.Thread(target=worker, daemon=True).start()
-        self._poll_session(session)
+    def _run_merge(
+        self,
+        input_src,
+        output_dir: str,
+        input_mode: str,
+        only_lang: bool,
+        process_zh_cn: bool,
+        patchouli_skip: bool,
+        patchouli_threshold: float,
+        zh_en_threshold: int,
+        lang_codes: list[str],
+    ):
+        """執行語系比對（背景執行緒）。"""
+        options = {
+            "output_dir": output_dir,
+            "only_process_lang": only_lang,
+            "process_zh_cn": process_zh_cn,
+            "patchouli_skip": patchouli_skip,
+            "patchouli_threshold": patchouli_threshold,
+            "zh_en_threshold": zh_en_threshold,
+        }
 
-    def _poll_session(self, session: TaskSession):
-        """輪詢 session 直到完成"""
-        def poll():
-            while session.status in ("RUNNING", "IDLE"):
-                time.sleep(0.5)
-                snap = session.snapshot()
-                progress = float(snap.get("progress", 0) or 0)
-                async def do_progress(_):
-                    self._update_progress(progress, f"{int(progress * 100)}%")
-                self._page.run_task(do_progress, None)
-                for log_entry in snap.get("logs", []):
-                    async def do_log(_, le=log_entry):
-                        self.progress_panel.add_log(le.text)
-                    self._page.run_task(do_log, None)
-            async def do_finish(_):
-                self._update_progress(1.0, "完成")
-            self._page.run_task(do_finish, None)
+        def service(session):
+            os.makedirs(output_dir, exist_ok=True)
+            if input_mode == "folder":
+                return run_merge_folder_batch_service(
+                    input_dir=input_src, session=session, **options
+                )
+            zip_paths = input_src if isinstance(input_src, list) else [input_src]
+            return run_merge_zip_batch_service(
+                zip_paths=zip_paths, session=session, **options
+            )
 
-        threading.Thread(target=poll, daemon=True).start()
+        self._start_single_step(2, "語系比對", service)
 
     # =============================================================================
     # Button Handlers
@@ -575,115 +700,134 @@ class PipelineView(ft.Column):
             show_snack(self._page, "❌ 輸出目錄不存在或未選擇")
             return
 
-        cfg = PipelineConfig(input_dir, output_dir)
         mode = config.get("mode", "lang")
         lang_codes = config.get("lang_codes", [])
+        if not lang_codes:
+            show_snack(self._page, "⚠️ 請至少勾選一個語系代碼")
+            return
+
+        cfg = PipelineConfig(input_dir, output_dir)
+        merge_options = {
+            "output_dir": cfg.merge_output_dir,
+            "process_zh_cn": config.get("process_zh_cn", True),
+            "patchouli_skip": config.get("patchouli_skip", False),
+            "patchouli_threshold": config.get("patchouli_threshold", 0.5),
+            "zh_en_threshold": config.get("zh_en_threshold", 2),
+        }
 
         self._show_progress_panel()
         self._set_buttons_disabled(True)
+        self._page.update()
 
-        def worker():
-            try:
-                session = TaskSession()
+        def extract(session):
+            if mode in ("lang", "dual"):
+                os.makedirs(cfg.extract_lang_output_dir, exist_ok=True)
+                run_lang_extraction_service(
+                    cfg.input_dir,
+                    cfg.extract_lang_output_dir,
+                    session,
+                    lang_codes=lang_codes,
+                )
+                if session.error:
+                    return
+            if mode in ("book", "dual"):
+                os.makedirs(cfg.extract_book_output_dir, exist_ok=True)
+                run_book_extraction_service(
+                    cfg.input_dir,
+                    cfg.extract_book_output_dir,
+                    session,
+                    lang_codes=lang_codes,
+                )
 
-                def run_step(step_num, name, service_fn):
-                    self.progress_panel.set_step_running(step_num, name)
-                    self.progress_panel.add_log(f"▶ 開始：{name}")
-                    t = threading.Thread(target=_run_step_worker, args=(service_fn, session), daemon=True)
-                    t.start()
-                    self._poll_session(session)
-                    t.join()
-                    if session.error:
-                        self.progress_panel.add_log(f"❌ {name} 失敗", level="error")
-                        return False
-                    self.progress_panel.add_log(f"✅ {name} 完成")
-                    return True
-
-                def _run_step_worker(service_fn, session):
-                    try:
-                        service_fn()
-                    except Exception as ex:
-                        session.add_log(f"❌ 錯誤：{ex}")
-                        session.set_error()
-
-                if mode in ("lang", "dual"):
-                    ok = run_step(1, "抽取資源（Lang）", lambda: run_lang_extraction_service(
-                        cfg.input_dir, cfg.extract_lang_output_dir, session, lang_codes=lang_codes))
-                    if not ok:
-                        self._page.run_task(lambda _: self._reenable_buttons())
-                        return
-
-                if mode in ("book", "dual"):
-                    ok = run_step(1, "抽取資源（Book）", lambda: run_book_extraction_service(
-                        cfg.input_dir, cfg.extract_book_output_dir, session, lang_codes=lang_codes))
-                    if not ok:
-                        self._page.run_task(lambda _: self._reenable_buttons())
-                        return
-
-                ok = run_step(2, "語系比對", lambda: run_merge_zip_batch_service(
-                    zip_paths=[cfg.merge_input_dir],
-                    output_dir=output_dir,
+        def merge(session):
+            # 各抽取結果分別合併（lang 只處理語言檔，book 需處理 Patchouli 內容）
+            os.makedirs(cfg.merge_output_dir, exist_ok=True)
+            sources = []
+            if mode in ("lang", "dual"):
+                sources.append((cfg.extract_lang_output_dir, True))
+            if mode in ("book", "dual"):
+                sources.append((cfg.extract_book_output_dir, False))
+            for src, only_lang in sources:
+                yield from run_merge_folder_batch_service(
+                    input_dir=src,
                     session=session,
-                    only_process_lang=True,
-                    process_zh_cn=config.get("process_zh_cn", True),
-                    patchouli_skip=config.get("patchouli_skip", False),
-                    patchouli_threshold=config.get("patchouli_threshold", 0.5),
-                    zh_en_threshold=config.get("zh_en_threshold", 2),
-                ))
-                if not ok:
-                    self._page.run_task(lambda _: self._reenable_buttons())
+                    only_process_lang=only_lang,
+                    **merge_options,
+                )
+                if self._session_failed(session):
                     return
 
-                ok = run_step(3, "啟動翻譯", lambda: run_lm_translation_service(
-                    input_dir=cfg.translate_input_dir,
+        def translate(session):
+            inputs = [d for d in cfg.translate_input_dirs if _has_files(d)]
+            if not inputs:
+                session.add_log("[系統] 沒有待翻譯內容，略過翻譯")
+                return
+            os.makedirs(cfg.translate_output_dir, exist_ok=True)
+            for src in inputs:
+                run_lm_translation_service(
+                    input_dir=src,
                     output_dir=cfg.translate_output_dir,
                     session=session,
                     dry_run=config.get("dry_run", False),
                     export_lang=False,
                     write_new_cache=config.get("write_new_cache", True),
-                ))
-                if not ok:
-                    self._page.run_task(lambda _: self._reenable_buttons())
+                )
+                if session.error:
                     return
 
-                ok = run_step(4, "打包資源", lambda: self._do_bundle(
-                    input_root_dir=cfg.bundle_input_dir,
-                    output_zip_path=config.get("zip_output") or cfg.bundle_output_zip,
-                    description=config.get("description", ""),
-                    pack_image_path=config.get("pack_image"),
-                    extra_folders=config.get("extra_folders", []),
-                    session=session,
-                ))
-                if not ok:
-                    self._page.run_task(lambda _: self._reenable_buttons())
-                    return
+        def bundle(session):
+            stats = build_bundle_staging(cfg.bundle_sources, cfg.bundle_staging_dir)
+            session.add_log(
+                f"[系統] 打包暫存完成：複製 {stats['copied']} 個、合併 {stats['merged']} 個檔案"
+            )
+            if not stats["copied"] and not stats["merged"]:
+                session.add_log("❌ 沒有可打包的翻譯檔案", level="error")
+                session.set_error()
+                return
+            yield from self._bundle_into_session(
+                session,
+                input_root_dir=cfg.bundle_staging_dir,
+                output_zip_path=config.get("zip_output") or cfg.bundle_output_zip,
+                description=config.get("description", ""),
+                min_format=0,
+                max_format=0,
+                pack_image_path=config.get("pack_image"),
+                extra_folders=config.get("extra_folders", []),
+            )
 
-                self.progress_panel.finish_all(True)
-                async def done(_):
-                    self.progress_panel.add_log("✅ 一鍵製作完成！")
-                    self._reenable_buttons()
-                self._page.run_task(done, None)
+        steps = [
+            (1, "抽取資源", extract),
+            (2, "語系比對", merge),
+            (3, "啟動翻譯", translate),
+            (4, "打包資源", bundle),
+        ]
 
-            except Exception as ex:
-                async def fail(_):
-                    self.progress_panel.add_log(f"❌ 流程失敗：{ex}", level="error")
+        def worker():
+            success = False
+            try:
+                for step_num, name, fn in steps:
+                    if not self._run_session_step(step_num, name, fn):
+                        return
+                success = True
+            except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，確保按鈕會恢復
+                log_error(f"[Pipeline] 一鍵製作失敗：{ex}\n{traceback.format_exc()}")
+                self._ui(self.progress_panel.add_log, f"❌ 流程失敗：{ex}", "error")
+            finally:
+
+                def _done():
+                    self.progress_panel.finish_all(success)
+                    if success:
+                        self.progress_panel.add_log("✅ 一鍵製作完成！")
                     self._reenable_buttons()
-                self._page.run_task(fail, None)
+
+                self._ui(_done)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _do_bundle(self, input_root_dir: str, output_zip_path: str, description: str,
-                   pack_image_path, extra_folders: list, session: TaskSession):
-        os.makedirs(os.path.dirname(output_zip_path), exist_ok=True)
-        for update_dict in run_bundling_service(
-            input_root_dir=input_root_dir,
-            output_zip_path=output_zip_path,
-            description=description,
-            min_format=0,
-            max_format=0,
-            pack_image_path=pack_image_path,
-            extra_folders=extra_folders or None,
-        ):
+    def _bundle_into_session(self, session: TaskSession, **kwargs):
+        """執行打包 generator，並把日誌/進度/錯誤寫入 session。"""
+        os.makedirs(os.path.dirname(kwargs["output_zip_path"]) or ".", exist_ok=True)
+        for update_dict in run_bundling_service(**kwargs):
             if update_dict.get("log"):
                 session.add_log(update_dict["log"])
             if update_dict.get("progress") is not None:
@@ -691,6 +835,7 @@ class PipelineView(ft.Column):
             if update_dict.get("error"):
                 session.set_error()
                 return
+            yield update_dict
 
     def _set_buttons_disabled(self, disabled: bool):
         for ctrl in self.workbench_view.controls:
@@ -700,145 +845,200 @@ class PipelineView(ft.Column):
                         for btn in row.controls:
                             if isinstance(btn, ft.Button) and btn.height == 55:
                                 btn.disabled = disabled
+        if self._one_click_button is not None:
+            self._one_click_button.disabled = disabled
 
     def _reenable_buttons(self, e=None):
         self._set_buttons_disabled(False)
         self._page.update()
 
-    def _run_translate(self, input_dir: str, output_dir: str, dry_run: bool, write_new_cache: bool):
-        session = TaskSession()
-        self.progress_panel.set_step_running(3, "啟動翻譯")
-        self.progress_panel.add_log(f"▶ 開始：啟動翻譯（{'Dry-Run' if dry_run else '正式'}）")
+    def _run_translate(
+        self, input_dir: str, output_dir: str, dry_run: bool, write_new_cache: bool
+    ):
+        """執行啟動翻譯（背景執行緒）。"""
 
-        def worker():
-            try:
-                os.makedirs(output_dir, exist_ok=True)
-                run_lm_translation_service(
-                    input_dir=input_dir,
-                    output_dir=output_dir,
-                    session=session,
-                    dry_run=dry_run,
-                    export_lang=False,
-                    write_new_cache=write_new_cache,
-                )
-                async def do_finish(_):
-                    self.progress_panel.finish_step(3, not session.error)
-                    if not session.error:
-                        self.progress_panel.add_log("✅ 翻譯完成")
-                self._page.run_task(do_finish, None)
-            except Exception as ex:
-                async def do_err(_):
-                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", level="error")
-                self._page.run_task(do_err, None)
-                async def do_err_finish(_):
-                    self.progress_panel.finish_step(3, False)
-                self._page.run_task(do_err_finish, None)
+        def service(session):
+            os.makedirs(output_dir, exist_ok=True)
+            run_lm_translation_service(
+                input_dir=input_dir,
+                output_dir=output_dir,
+                session=session,
+                dry_run=dry_run,
+                export_lang=False,
+                write_new_cache=write_new_cache,
+            )
 
-        threading.Thread(target=worker, daemon=True).start()
-        self._poll_session(session)
+        self._start_single_step(
+            3, f"啟動翻譯（{'Dry-Run' if dry_run else '正式'}）", service
+        )
 
-    def _run_bundle(self, input_root_dir: str, output_zip_path: str, description: str,
-                    min_format, max_format, pack_image_path: str | None, extra_folders: list[str]):
-        session = TaskSession()
-        self.progress_panel.set_step_running(4, "打包資源")
-        self.progress_panel.add_log(f"▶ 開始：打包資源（{os.path.basename(output_zip_path)}）")
+    def _run_bundle(
+        self,
+        input_root_dir: str,
+        output_zip_path: str,
+        description: str,
+        min_format,
+        max_format,
+        pack_image_path: str | None,
+        extra_folders: list[str],
+    ):
+        """執行打包資源（背景執行緒）。"""
 
-        def worker():
-            try:
-                os.makedirs(os.path.dirname(output_zip_path), exist_ok=True)
-                for update_dict in run_bundling_service(
-                    input_root_dir=input_root_dir,
-                    output_zip_path=output_zip_path,
-                    description=description,
-                    min_format=min_format or 0,
-                    max_format=max_format or 0,
-                    pack_image_path=pack_image_path,
-                    extra_folders=extra_folders or None,
-                ):
-                    if "log" in update_dict:
-                        self.progress_panel.add_log(update_dict["log"])
-                    if "progress" in update_dict and update_dict["progress"] is not None:
-                        async def do_p(_):
-                            self._update_progress(update_dict["progress"], f"{int(update_dict['progress'] * 100)}%")
-                        self._page.run_task(do_p, None)
-                    if update_dict.get("error"):
-                        async def do_err(_):
-                            self.progress_panel.finish_step(4, False)
-                        self._page.run_task(do_err, None)
-                        return
-                async def do_finish(_):
-                    self.progress_panel.finish_step(4, True)
-                    self.progress_panel.add_log(f"✅ 打包完成：{os.path.basename(output_zip_path)}")
-                self._page.run_task(do_finish, None)
-            except Exception as ex:
-                async def do_err(_):
-                    self.progress_panel.add_log(f"❌ 錯誤：{ex}", level="error")
-                self._page.run_task(do_err, None)
-                async def do_err_finish(_):
-                    self.progress_panel.finish_step(4, False)
-                self._page.run_task(do_err_finish, None)
+        def service(session):
+            return self._bundle_into_session(
+                session,
+                input_root_dir=input_root_dir,
+                output_zip_path=output_zip_path,
+                description=description,
+                min_format=min_format or 0,
+                max_format=max_format or 0,
+                pack_image_path=pack_image_path,
+                extra_folders=extra_folders or None,
+            )
 
-        threading.Thread(target=worker, daemon=True).start()
-        self._poll_session(session)
+        self._start_single_step(
+            4, f"打包資源（{os.path.basename(output_zip_path)}）", service
+        )
 
     # =============================================================================
     # UI Layout
     # =============================================================================
 
+    def _build_one_click_button(self):
+        self._one_click_button = ft.Button(
+            "一鍵製作 (自動執行所有流程)",
+            icon=ft.Icons.FLASH_ON,
+            width=float("inf"),
+            height=35,
+            bgcolor=YELLOW_900,
+            color=YELLOW,
+            on_click=self._on_one_click_click,
+        )
+        return self._one_click_button
+
     def _build_ui(self):
-        self.workbench_view = ft.Column([
-            ft.Text("翻譯工作台", size=24, weight="bold", color=BLUE_700),
-
-            ft.Container(
-                content=ft.Column([
-                    ft.Text("1. 基礎與打包配置", weight="bold", color=BLUE_600),
-                    ft.Row([
-                        ft.Button("Mod 來源", icon=ft.Icons.FOLDER, on_click=lambda _: self._page.run_task(self._pick_input_dir)),
-                        ft.Container(content=self.input_path_text, expand=True),
-                    ]),
-                    ft.Row([
-                        ft.Button("輸出目錄", icon=ft.Icons.FOLDER_SPECIAL, on_click=lambda _: self._page.run_task(self._pick_output_dir)),
-                        ft.Container(content=self.output_path_text, expand=True),
-                    ]),
-                ], spacing=10),
-                bgcolor="surfaceContainerLow", padding=20, border_radius=15
-            ),
-
-            self.progress_panel.container,
-
-            ft.Text("2. 執行任務", weight="bold", color=BLUE_600),
-            ft.Column([
-                ft.Row([
-                    ft.Button("抽取資源", icon=ft.Icons.UNARCHIVE, expand=True, height=55, bgcolor=GREEN_700, color=WHITE, on_click=self._on_extract_click),
-                    ft.Button("語系比對", icon=ft.Icons.SEARCH, expand=True, height=55, bgcolor=TEAL_700, color=WHITE, on_click=self._on_merge_click),
-                    ft.Button("啟動翻譯", icon=ft.Icons.AUTO_AWESOME, expand=True, height=55, bgcolor=BLUE_700, color=WHITE, on_click=self._on_translate_click),
-                    ft.Button("打包資源", icon=ft.Icons.INVENTORY_2, expand=True, height=55, bgcolor=PURPLE_700, color=WHITE, on_click=self._on_bundle_click),
-                ], spacing=10),
-
+        self.workbench_view = ft.Column(
+            [
+                ft.Text("翻譯工作台", size=24, weight="bold", color=BLUE_700),
                 ft.Container(
-                    content=ft.Column([
-                        ft.Row([ft.Icon(ft.Icons.INFO, size=14, color=GREY_500), self.progress_status]),
-                        self.progress_bar
-                    ], spacing=5),
-                    padding=5,
+                    content=ft.Column(
+                        [
+                            ft.Text("1. 基礎與打包配置", weight="bold", color=BLUE_600),
+                            ft.Row(
+                                [
+                                    ft.Button(
+                                        "Mod 來源",
+                                        icon=ft.Icons.FOLDER,
+                                        on_click=lambda _: self._page.run_task(
+                                            self._pick_input_dir
+                                        ),
+                                    ),
+                                    ft.Container(
+                                        content=self.input_path_text, expand=True
+                                    ),
+                                ]
+                            ),
+                            ft.Row(
+                                [
+                                    ft.Button(
+                                        "輸出目錄",
+                                        icon=ft.Icons.FOLDER_SPECIAL,
+                                        on_click=lambda _: self._page.run_task(
+                                            self._pick_output_dir
+                                        ),
+                                    ),
+                                    ft.Container(
+                                        content=self.output_path_text, expand=True
+                                    ),
+                                ]
+                            ),
+                        ],
+                        spacing=10,
+                    ),
+                    bgcolor="surfaceContainerLow",
+                    padding=20,
+                    border_radius=15,
                 ),
+                self.progress_panel.container,
+                ft.Text("2. 執行任務", weight="bold", color=BLUE_600),
+                ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.Button(
+                                    "抽取資源",
+                                    icon=ft.Icons.UNARCHIVE,
+                                    expand=True,
+                                    height=55,
+                                    bgcolor=GREEN_700,
+                                    color=WHITE,
+                                    on_click=self._on_extract_click,
+                                ),
+                                ft.Button(
+                                    "語系比對",
+                                    icon=ft.Icons.SEARCH,
+                                    expand=True,
+                                    height=55,
+                                    bgcolor=TEAL_700,
+                                    color=WHITE,
+                                    on_click=self._on_merge_click,
+                                ),
+                                ft.Button(
+                                    "啟動翻譯",
+                                    icon=ft.Icons.AUTO_AWESOME,
+                                    expand=True,
+                                    height=55,
+                                    bgcolor=BLUE_700,
+                                    color=WHITE,
+                                    on_click=self._on_translate_click,
+                                ),
+                                ft.Button(
+                                    "打包資源",
+                                    icon=ft.Icons.INVENTORY_2,
+                                    expand=True,
+                                    height=55,
+                                    bgcolor=PURPLE_700,
+                                    color=WHITE,
+                                    on_click=self._on_bundle_click,
+                                ),
+                            ],
+                            spacing=10,
+                        ),
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    ft.Row(
+                                        [
+                                            ft.Icon(
+                                                ft.Icons.INFO, size=14, color=GREY_500
+                                            ),
+                                            self.progress_status,
+                                        ]
+                                    ),
+                                    self.progress_bar,
+                                ],
+                                spacing=5,
+                            ),
+                            padding=5,
+                        ),
+                        self._build_one_click_button(),
+                    ],
+                    spacing=15,
+                    expand=True,
+                ),
+            ]
+        )
 
+        self.api_view = ft.Column(
+            [
+                ft.Text("API 金鑰管理", size=24, weight="bold", color=ORANGE_700),
+                ft.Container(content=self.keys_container, expand=True),
                 ft.Button(
-                    "一鍵製作 (自動執行所有流程)",
-                    icon=ft.Icons.FLASH_ON,
-                    width=float("inf"),
-                    height=35,
-                    bgcolor=YELLOW_900,
-                    color=YELLOW,
-                    on_click=self._on_one_click_click,
+                    "儲存設定", icon=ft.Icons.SAVE, bgcolor=BLUE_700, color=WHITE
                 ),
-            ], spacing=15, expand=True)
-        ])
-
-        self.api_view = ft.Column([
-            ft.Text("API 金鑰管理", size=24, weight="bold", color=ORANGE_700),
-            ft.Container(content=self.keys_container, expand=True),
-            ft.Button("儲存設定", icon=ft.Icons.SAVE, bgcolor=BLUE_700, color=WHITE),
-        ], spacing=10, expand=True)
+            ],
+            spacing=10,
+            expand=True,
+        )
 
         self.controls.append(self.workbench_view)

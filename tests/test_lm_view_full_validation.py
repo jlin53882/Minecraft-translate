@@ -401,8 +401,16 @@ def test_start_clicked_resets_log_presenter(monkeypatch):
     assert reset_calls == [True]
 
 
+def _drive_poller(page):
+    """執行 start_ui_timer 排入的 async poller（mock page 只記錄 run_task）。"""
+    import asyncio
+
+    for coro, args in list(page._tasks):
+        asyncio.run(asyncio.wait_for(coro(*args), timeout=2))
+
+
 def test_start_ui_timer_stops_when_page_update_fails(monkeypatch):
-    """驗證 page.update() 失敗時，LM UI timer 會安全停止，不再拋出背景執行緒例外。"""
+    """驗證 page.update() 失敗時（例如頁面已關閉），LM UI 輪詢會安全停止。"""
 
     class _FailingPage:
         def __init__(self):
@@ -416,9 +424,6 @@ def test_start_ui_timer_stops_when_page_update_fails(monkeypatch):
         def run_task(self, coro, *args):
             self._tasks.append((coro, args))
 
-        def _run_all_tasks(self):
-            pass
-
     page = _FailingPage()
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
 
@@ -429,13 +434,13 @@ def test_start_ui_timer_stops_when_page_update_fails(monkeypatch):
     view.session.set_progress(0.3)
 
     view.start_ui_timer()
-    lm_view.time.sleep(0.25)
+    _drive_poller(page)
 
     assert view._ui_timer_running is False
 
 
 def test_start_ui_timer_attempts_log_view_update(monkeypatch):
-    """驗證 timer 迴圈會嘗試刷新 log_view，避免日誌內容已 sync 但畫面未更新。"""
+    """驗證輪詢會刷新畫面，並在任務完成時恢復按鈕狀態。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     page = mock_page()
 
@@ -444,16 +449,61 @@ def test_start_ui_timer_attempts_log_view_update(monkeypatch):
     view.session.start()
     view.session.add_log("hello")
     view.session.status = "DONE"
+    view._set_running(True)
 
     called = []
-    # PR refactor/unified-log-view: LogView.sync_entries() 內部呼叫 page.update()
-    # （不再直接呼叫 _list_view.update()，因為 LogView 是 ft.Container）
     monkeypatch.setattr(view.page, "update", lambda: called.append(True))
 
     view.start_ui_timer()
-    lm_view.time.sleep(0.25)
+    _drive_poller(page)
 
-    assert called, "page.update() 應至少被呼叫一次（透過 sync_entries 內部）"
+    assert called, "page.update() 應至少被呼叫一次"
+    assert view._ui_timer_running is False
+    assert view.start_button.disabled is False
+    assert view.cancel_button.disabled is True
+
+
+def test_start_clicked_ignored_while_running(monkeypatch):
+    """任務執行中再次按「開始翻譯」不會啟動第二個翻譯執行緒（避免 API 用量加倍）。"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    started = []
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type(
+            "T", (), {"start": lambda self: started.append(target)}
+        )(),
+    )
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
+    view.input_path.value = "C:/Assets"
+
+    view.start_clicked(None)
+    view.start_clicked(None)
+
+    assert len(started) == 1
+    assert view.start_button.disabled is True
+
+
+def test_cancel_clicked_requests_session_cancel(monkeypatch):
+    """按「取消」會要求 session 取消（翻譯迴圈在批次之間停止）。"""
+    from app.logging.task_session import TaskSession
+
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type("T", (), {"start": lambda self: None})(),
+    )
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
+    view.input_path.value = "C:/Assets"
+    view.start_clicked(None)
+    assert isinstance(view.session, TaskSession)
+
+    view.cancel_clicked(None)
+
+    assert view.session.cancel_requested is True
+    assert view.cancel_button.disabled is True
 
 
 # ============================================================

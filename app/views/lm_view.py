@@ -4,22 +4,22 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+import asyncio
 import threading
-import time
 
 import flet as ft
-from app.ui import theme
-from app.ui.snack import show_snack
-from translation_tool.utils.log_unit import log_info, log_debug
 
-# UI 共用元件：統一卡片/按鈕樣式
-from app.ui.components import primary_button, styled_card
-
+from app.logging import load_ui_logging_config
 from app.services_impl.pipelines.lm_service import run_lm_translation_service
 from app.task_session import TaskSession
-from app.logging import load_ui_logging_config
+from app.ui import theme
+
+# UI 共用元件：統一卡片/按鈕樣式
+from app.ui.components import primary_button, secondary_button, styled_card
+from app.ui.snack import show_snack
 from app.views._log import LogView
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_debug
 
 LM_translate_folder_name = (
     load_config().get("lm_translator", {}).get("lm_translate_folder_name", "LM翻譯後")
@@ -97,6 +97,13 @@ class LMView(ft.Column):
             tooltip="開始執行 LM 翻譯流程",
             on_click=self.start_clicked,
         )
+        self.cancel_button = secondary_button(
+            "取消",
+            icon=ft.Icons.STOP,
+            tooltip="在目前批次完成後停止翻譯（已完成的部分會保留）",
+            on_click=self.cancel_clicked,
+        )
+        self.cancel_button.disabled = True
 
         self.controls = [
             styled_card(
@@ -118,7 +125,7 @@ class LMView(ft.Column):
                         self.dry_run_switch,
                         self.export_lang_checkbox,
                         self.write_new_cache_switch,
-                        ft.Row([self.start_button], spacing=10),
+                        ft.Row([self.start_button, self.cancel_button], spacing=10),
                     ],
                     spacing=8,
                 ),
@@ -177,8 +184,10 @@ class LMView(ft.Column):
         """async 實作：選擇輸入目錄並觸發回調。"""
         result = await self.file_picker.get_directory_path()
         if result:
+
             class FakeEvent:
                 path = result
+
             self.on_input_dir_picked(FakeEvent())
 
     def pick_output_directory(self, e):
@@ -189,8 +198,10 @@ class LMView(ft.Column):
         """async 實作：選擇輸出目錄並觸發回調。"""
         result = await self.file_picker.get_directory_path()
         if result:
+
             class FakeEvent:
                 path = result
+
             self.on_output_dir_picked(FakeEvent())
 
     def on_input_dir_picked(self, e):
@@ -215,6 +226,10 @@ class LMView(ft.Column):
 
     def start_clicked(self, e):
         """處理開始翻譯按鈕點擊事件"""
+        if self._ui_timer_running:
+            # 任務執行中：避免重複啟動（會重複送出 API 並同時寫入同一輸出/快取）
+            show_snack(self.page, "翻譯正在執行中，請等待完成或先取消", theme.WARNING)
+            return
         if not (self.input_path.value or "").strip():
             self._set_status("請先選擇輸入資料夾", theme.RED_200)
             self.page.update()
@@ -229,6 +244,7 @@ class LMView(ft.Column):
             )
 
         self._set_status("執行中", theme.BLUE_200)
+        self._set_running(True)
         self.progress_bar.value = 0
         self.log_view.clear()
         self.page.update()
@@ -260,59 +276,68 @@ class LMView(ft.Column):
 
         self.start_ui_timer()
 
+    def cancel_clicked(self, e):
+        """要求取消翻譯；會在目前批次完成後停止。"""
+        if self.session is None or not self._ui_timer_running:
+            return
+        self.session.request_cancel()
+        self.cancel_button.disabled = True
+        self._set_status("取消中…", theme.AMBER_200)
+        self.page.update()
+
+    def _set_running(self, running: bool):
+        """執行中停用「開始」、啟用「取消」。"""
+        self.start_button.disabled = running
+        self.cancel_button.disabled = not running
+
     # --------------------------------------------------
     # UI Timer
     # --------------------------------------------------
+    _POLL_INTERVAL_SEC = 0.2
+
     def start_ui_timer(self):
-        """啟動 UI 更新定時器，定期刷新進度條與日誌。"""
+        """啟動 UI 輪詢（在 Flet event loop 上執行，避免背景執行緒直接更新 UI）。"""
         if self._ui_timer_running:
             return
         self._ui_timer_running = True
+        self._page.run_task(self._poll_session)
 
-        def loop():
-            while self._ui_timer_running:
-                time.sleep(0.1)
-                if not self.session:
-                    continue
+    async def _poll_session(self):
+        """定期把 session 的進度與日誌同步到畫面，直到任務結束。"""
+        while self._ui_timer_running:
+            try:
+                self._sync_from_session()
+            except RuntimeError as e:
+                # 例如頁面已關閉（session 中斷）：停止輪詢，背景任務照常完成
+                log_debug(f"LM UI poll stopped: {e}")
+                self._ui_timer_running = False
+                break
+            if self._ui_timer_running:
+                await asyncio.sleep(self._POLL_INTERVAL_SEC)
 
-                try:
-                    snap = self.session.snapshot()
-                except Exception:
-                    continue
+    def _sync_from_session(self):
+        """同步一次進度/日誌/狀態；任務結束時停止輪詢並恢復按鈕。"""
+        session = self.session
+        if session is None:
+            return
+        snap = session.snapshot()
+        try:
+            self.progress_bar.value = float(snap.get("progress", 0) or 0)
+        except (TypeError, ValueError):
+            self.progress_bar.value = 0
+        self.log_view.sync_entries(snap.get("logs", []) or [])
 
-                try:
-                    self.progress_bar.value = float(snap.get("progress", 0) or 0)
-                except Exception:
-                    self.progress_bar.value = 0
-
-                logs = snap.get("logs", []) or []
-                try:
-                    self.log_view.sync_entries(logs)
-                except Exception as e:
-                    log_debug(f"LM log presenter sync failed: {e}")
-
-                # 強制刷新頁面（sync_entries 內部已呼叫 page.update()）
-                try:
-                    self.page.update()
-                except Exception:
-                    pass
-
-                status = (snap.get("status") or "").upper()
-                if status == "DONE":
-                    self._set_status("任務完成", theme.GREEN_200)
-                    self._ui_timer_running = False
-                elif status == "ERROR":
-                    self._set_status("任務發生錯誤", theme.RED_200)
-                    self._ui_timer_running = False
-
-                try:
-                    self.page.update()
-                except Exception as e:
-                    log_debug(f"LM page update failed: {e}")
-                    self._ui_timer_running = False
-                    break
-
-        threading.Thread(target=loop, daemon=True).start()
+        status = (snap.get("status") or "").upper()
+        if status in ("DONE", "ERROR"):
+            if status == "ERROR":
+                self._set_status("任務發生錯誤", theme.RED_200)
+            elif getattr(session, "cancel_requested", False):
+                self._set_status("已取消", theme.AMBER_200)
+            else:
+                self._set_status("任務完成", theme.GREEN_200)
+            self._ui_timer_running = False
+            self._set_running(False)
+        self.page.update()
 
     # --------------------------------------------------
     # UI helpers
@@ -321,7 +346,6 @@ class LMView(ft.Column):
         """更新狀態晶片顯示"""
         self.status_chip.label = ft.Text(text)
         self.status_chip.bgcolor = color
-
 
     @property
     def page(self):

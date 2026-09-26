@@ -50,6 +50,7 @@ def run_lm_translation_service(
             dry_run=dry_run,
             export_lang=export_lang,
             write_new_cache=write_new_cache,
+            should_cancel=lambda: bool(getattr(session, "cancel_requested", False)),
         ):
             filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
             if filtered is None:

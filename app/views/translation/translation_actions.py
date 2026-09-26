@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import threading
-
-from translation_tool.utils.log_unit import log_error, log_warning
-import time
 
 import flet as ft
 
-from translation_tool.utils.config_manager import load_config
+from app.ui.snack import show_snack
+from translation_tool.utils.log_unit import log_error, log_warning
 
 
 # =========================================================
@@ -31,17 +30,25 @@ def _safe_page_update(view):
         pass  # view 已卸載，忽略
 
 
+def _is_running(view) -> bool:
+    """同一頁同時只允許一個翻譯任務（避免重複送出 API、同時寫入同一輸出/快取）。"""
+    return bool(getattr(view, "_ui_timer_running", False))
+
+
 def run_ftb(view, *, dry_run: bool):
     """执行 FTB (Feed The Beast) 模组翻译流程"""
+    if _is_running(view):
+        show_snack(view.page, "已有翻譯任務執行中，請等待完成", ft.Colors.AMBER_700)
+        return
     in_dir = (view.ftb_in_dir.value or "").strip()
     if not in_dir:
-        view._show_snack("請先選擇輸入資料夾", ft.Colors.RED_600)
+        show_snack(view.page, "請先選擇輸入資料夾", ft.Colors.RED_600)
         return
     if view.run_ftb_translation_service is None:
-        view._show_snack("FTB service 尚未可用", ft.Colors.RED_600)
+        show_snack(view.page, "FTB service 尚未可用", ft.Colors.RED_600)
         return
     if view.TaskSession is None:
-        view._show_snack("TaskSession 尚未可用", ft.Colors.RED_600)
+        show_snack(view.page, "TaskSession 尚未可用", ft.Colors.RED_600)
         return
     out_dir = (view.ftb_out_dir.value or "").strip() or None
     view._set_status(
@@ -76,7 +83,7 @@ def run_ftb(view, *, dry_run: bool):
                 if hasattr(view.session, "add_log"):
                     _safe_add_log(view, f"[UI] 服務執行失敗：{ex}")
                 if hasattr(view.session, "set_error"):
-                    view.session.set_error(str(ex))
+                    view.session.set_error()
             except Exception as e:
                 log_error(f"記錄 FTB 執行失敗時發生錯誤: {e}")
 
@@ -86,15 +93,18 @@ def run_ftb(view, *, dry_run: bool):
 
 def run_kjs(view, *, dry_run: bool):
     """执行 KubeJS (KubeJavaScript) 工具提示翻译流程"""
+    if _is_running(view):
+        show_snack(view.page, "已有翻譯任務執行中，請等待完成", ft.Colors.AMBER_700)
+        return
     in_dir = (view.kjs_in_dir.value or "").strip()
     if not in_dir:
-        view._show_snack("請先選擇輸入資料夾", ft.Colors.RED_600)
+        show_snack(view.page, "請先選擇輸入資料夾", ft.Colors.RED_600)
         return
     if view.run_kubejs_tooltip_service is None:
-        view._show_snack("KubeJS service 尚未可用", ft.Colors.RED_600)
+        show_snack(view.page, "KubeJS service 尚未可用", ft.Colors.RED_600)
         return
     if view.TaskSession is None:
-        view._show_snack("TaskSession 尚未可用", ft.Colors.RED_600)
+        show_snack(view.page, "TaskSession 尚未可用", ft.Colors.RED_600)
         return
     out_dir = (view.kjs_out_dir.value or "").strip() or None
     view._set_status(
@@ -128,7 +138,7 @@ def run_kjs(view, *, dry_run: bool):
                 if hasattr(view.session, "add_log"):
                     _safe_add_log(view, f"[UI] 服務執行失敗：{ex}")
                 if hasattr(view.session, "set_error"):
-                    view.session.set_error(str(ex))
+                    view.session.set_error()
             except Exception as e:
                 log_error(f"記錄 KubeJS 執行失敗時發生錯誤: {e}")
 
@@ -138,15 +148,18 @@ def run_kjs(view, *, dry_run: bool):
 
 def run_md(view, *, dry_run: bool):
     """执行 Markdown 文档翻译流程"""
+    if _is_running(view):
+        show_snack(view.page, "已有翻譯任務執行中，請等待完成", ft.Colors.AMBER_700)
+        return
     in_dir = (view.md_in_dir.value or "").strip()
     if not in_dir:
-        view._show_snack("請先選擇輸入資料夾", ft.Colors.RED_600)
+        show_snack(view.page, "請先選擇輸入資料夾", ft.Colors.RED_600)
         return
     if view.run_md_translation_service is None:
-        view._show_snack("MD service 尚未可用", ft.Colors.RED_600)
+        show_snack(view.page, "MD service 尚未可用", ft.Colors.RED_600)
         return
     if view.TaskSession is None:
-        view._show_snack("TaskSession 尚未可用", ft.Colors.RED_600)
+        show_snack(view.page, "TaskSession 尚未可用", ft.Colors.RED_600)
         return
     out_dir = (view.md_out_dir.value or "").strip() or None
     view._set_status(
@@ -181,7 +194,7 @@ def run_md(view, *, dry_run: bool):
                 if hasattr(view.session, "add_log"):
                     _safe_add_log(view, f"[UI] 服務執行失敗：{ex}")
                 if hasattr(view.session, "set_error"):
-                    view.session.set_error(str(ex))
+                    view.session.set_error()
             except Exception as e:
                 log_error(f"記錄 MD 執行失敗時發生錯誤: {e}")
 
@@ -189,47 +202,49 @@ def run_md(view, *, dry_run: bool):
     view._start_ui_timer()
 
 
-def start_ui_timer(view):
-    """启动 UI 定时器，定期从 TaskSession 读取状态更新翻译进度界面
+_POLL_INTERVAL_SEC = 0.2
 
-    PR refactor/unified-log-view: 改用 LogView 取代 LogPresenter。
-    LogView 內部仍包 LogPresenter 給 sync 使用。
+
+def start_ui_timer(view):
+    """啟動 UI 輪詢，定期把 TaskSession 的進度與日誌同步到畫面。
+
+    輪詢在 Flet event loop 上執行（page.run_task），背景執行緒不直接更新 UI。
     """
     if view._ui_timer_running:
         return
     view._ui_timer_running = True
-    # tail_lines 由 config 控制（PR3）
-    # presenter 在 LogView 內部初始化，這裡不再單獨管理
+    view.page.run_task(_poll_session, view)
 
-    def loop():
-        """定时轮询 session 状态并更新 UI"""
-        while view._ui_timer_running:
-            time.sleep(0.1)
-            if view.session is None:
-                continue
-            try:
-                snap = view.session.snapshot()
-            except Exception:
-                continue
-            try:
-                view.progress.value = float(snap.get("progress", 0) or 0)
-            except Exception:
-                view.progress.value = 0
-            logs = snap.get("logs", []) or []
-            try:
-                # LogView 接管 tail rebuild + 顏色（內部走 LogPresenter.sync）
-                view.log_view.sync_entries(logs)
-                # sync_entries 會 clear() + 重新加入所有 item，手動滾到最底部
-                view.log_view.scroll_to(offset=1.0)
-            except Exception as e:
-                log_warning(f"更新日誌視圖失敗: {e}")
-            status = (snap.get("status") or "").upper()
-            if status == "DONE":
-                view._set_status("任務完成", ft.Colors.GREEN_200)
-                view._ui_timer_running = False
-            elif status == "ERROR":
-                view._set_status("任務發生錯誤", ft.Colors.RED_200)
-                view._ui_timer_running = False
-            _safe_page_update(view)
 
-    threading.Thread(target=loop, daemon=True).start()
+async def _poll_session(view):
+    """定期同步 session 狀態，直到任務結束或頁面已關閉。"""
+    while view._ui_timer_running:
+        try:
+            _sync_from_session(view)
+        except RuntimeError as e:
+            log_warning(f"翻譯頁 UI 輪詢停止：{e}")
+            view._ui_timer_running = False
+            break
+        if view._ui_timer_running:
+            await asyncio.sleep(_POLL_INTERVAL_SEC)
+
+
+def _sync_from_session(view):
+    """同步一次進度/日誌/狀態。"""
+    if view.session is None:
+        return
+    snap = view.session.snapshot()
+    try:
+        view.progress.value = float(snap.get("progress", 0) or 0)
+    except (TypeError, ValueError):
+        view.progress.value = 0
+    # LogView 內建 auto_scroll，sync_entries 會刷新畫面
+    view.log_view.sync_entries(snap.get("logs", []) or [])
+    status = (snap.get("status") or "").upper()
+    if status == "DONE":
+        view._set_status("任務完成", ft.Colors.GREEN_200)
+        view._ui_timer_running = False
+    elif status == "ERROR":
+        view._set_status("任務發生錯誤", ft.Colors.RED_200)
+        view._ui_timer_running = False
+    view.page.update()

@@ -21,7 +21,8 @@
 
 from __future__ import annotations
 
-from typing import List, Literal, Optional, Sequence
+from collections.abc import Sequence
+from typing import Literal
 
 import flet as ft
 
@@ -66,8 +67,8 @@ class LogView(ft.Container):
         mode: Literal["append", "tail"] = "append",
         max_lines: int = 2000,
         tail_lines: int = 250,
-        show_levels: Optional[List[str]] = None,
-        height: Optional[int] = None,
+        show_levels: list[str] | None = None,
+        height: int | None = None,
         expand: bool = True,
     ):
         # ⚠️ 必須先設定所有 attribute，最後才呼叫 super().__init__()
@@ -118,6 +119,7 @@ class LogView(ft.Container):
         text: str,
         level: str = "info",
         source: str = "ui",
+        update: bool = True,
     ) -> None:
         """新增一行 log（給 reset 動作、純事件用）。
 
@@ -131,6 +133,7 @@ class LogView(ft.Container):
             text: log 文字
             level: 等級（debug/info/warning/error/system）
             source: 來源標記
+            update: 是否立即刷新畫面；批次新增時傳 False，最後再呼叫 refresh()
         """
         if not text:
             return
@@ -179,8 +182,27 @@ class LogView(ft.Container):
                 overflow = len(self._list_view.controls) - self.max_lines
                 del self._list_view.controls[:overflow]
 
-        if self._page:
-            self._page.update()
+        if update:
+            self.refresh()
+
+    def add_many(self, items: Sequence[tuple[str, str]]) -> None:
+        """批次新增多行 log，只刷新一次畫面。
+
+        Args:
+            items: (text, level) 序列
+        """
+        for text, level in items:
+            self.add(text, level=level, update=False)
+        if items:
+            self.refresh()
+
+    def refresh(self) -> None:
+        """只刷新本元件（而非整頁 diff）；尚未掛上頁面時退回整頁更新。"""
+        try:
+            self.update()
+        except (AssertionError, RuntimeError):
+            if self._page:
+                self._page.update()
 
     def add_error(self, text: str) -> None:
         """快速新增 error 等級 log。"""
@@ -207,7 +229,7 @@ class LogView(ft.Container):
         if self._page:
             self._page.update()
 
-    def sync_from_session(self, session: TaskSession) -> List[LogEntry]:
+    def sync_from_session(self, session: TaskSession) -> list[LogEntry]:
         """從 TaskSession 同步 log（給 poller 用）。
 
         走 LogPresenter.sync，會處理 dedup 與顏色。
@@ -221,7 +243,7 @@ class LogView(ft.Container):
             self._page.update()
         return new_entries
 
-    def sync_entries(self, entries: Sequence[LogEntry]) -> List[LogEntry]:
+    def sync_entries(self, entries: Sequence[LogEntry]) -> list[LogEntry]:
         """從 logs list 同步（給沒用 TaskSession 的 caller，如 bundler_view）。
 
         走 LogPresenter.sync，會處理 dedup 與顏色。
@@ -239,7 +261,7 @@ class LogView(ft.Container):
 
     # ──── 設定變更（給 settings 頁用）────────────────────────────
 
-    def set_show_levels(self, levels: List[str]) -> None:
+    def set_show_levels(self, levels: list[str]) -> None:
         """更新要顯示的等級白名單。"""
         self.show_levels = levels
         self._presenter.show_levels = levels

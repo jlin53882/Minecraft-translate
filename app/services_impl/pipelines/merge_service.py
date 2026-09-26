@@ -174,7 +174,13 @@ def run_merge_zip_batch_service(
         }
         session.set_summary(final_summary)
         yield {"progress": 1.0, "log": None, "summary": final_summary}
-        session.finish()
+        # 部分失敗維持批次語意（DONE + failed_zips_list）；全部失敗才視為任務失敗，
+        # 避免呼叫端（例如一鍵流程）把「沒有任何 ZIP 成功」當成完成。
+        if stats["success_zips"] == 0:
+            session.add_log("[系統] 所有 ZIP 皆處理失敗")
+            session.set_error()
+        else:
+            session.finish()
 
     except Exception as e:
         tb = traceback.format_exc()

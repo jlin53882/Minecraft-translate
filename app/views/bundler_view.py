@@ -3,18 +3,20 @@
 用途：提供打包成品資源包的 UI 與執行流程。
 """
 
-import flet as ft
-import threading
-import os
 import json
+import os
+import threading
+import time
+
+import flet as ft
+
+from app.services_impl.config_service import load_config_json
+from app.ui import theme
+from app.ui.components import styled_card
+from app.ui.snack import show_snack
+from app.views._log import LogView
 from translation_tool.core.output_bundler import bundle_outputs_generator
 from translation_tool.utils.log_unit import log_debug
-
-from app.ui import theme
-from app.ui.snack import show_snack
-from app.ui.components import styled_card
-from app.views._log import LogView
-from app.services_impl.config_service import load_config_json
 
 
 class BundlerView(ft.Column):
@@ -27,6 +29,7 @@ class BundlerView(ft.Column):
         self.file_picker = file_picker
         self.extra_folders: list[str] = []
         self.version_data: dict = {}
+        self._bundling_running = False
 
         self.version_search = ft.TextField(
             label="搜尋版本",
@@ -259,7 +262,7 @@ class BundlerView(ft.Column):
             spacing=8,
         )
 
-        start_button = ft.Button(
+        self.start_button = start_button = ft.Button(
             "開始打包",
             icon=ft.Icons.PLAY_ARROW,
             on_click=self.start_bundling_clicked,
@@ -384,6 +387,10 @@ class BundlerView(ft.Column):
 
 
     def start_bundling_clicked(self, e: ft.ControlEvent):
+        if self._bundling_running:
+            show_snack(self.page, "打包正在執行中，請等待完成")
+            return
+
         root_dir = self.root_dir_field.value or ""
         output_zip = self.output_zip_field.value or ""
 
@@ -398,6 +405,8 @@ class BundlerView(ft.Column):
         description = self.description_field.value or ""
         pack_image = self.pack_image_field.value or ""
 
+        self._bundling_running = True
+        self.start_button.disabled = True
         self.progress_bar.visible = True
         self.progress_bar.value = 0
         self.log_view.clear()
@@ -407,6 +416,7 @@ class BundlerView(ft.Column):
         thread = threading.Thread(
             target=self._bundling_worker,
             args=(root_dir, output_zip, version, description, pack_image),
+            daemon=True,
         )
         thread.start()
 
@@ -418,7 +428,36 @@ class BundlerView(ft.Column):
         """
         self.log_view.add(msg, level=level)
 
+    # 背景打包時，日誌/進度以此間隔批次推到畫面
+    _UI_FLUSH_INTERVAL_SEC = 0.2
+
+    def _run_on_ui(self, fn, *args):
+        """把 UI 更新排到 Flet event loop（背景執行緒不可直接呼叫 page.update）。"""
+
+        async def _run():
+            fn(*args)
+
+        self._page.run_task(_run)
+
+    def _apply_bundling_ui(self, lines: list[tuple[str, str]]):
+        """（event loop 上）套用一批日誌並刷新畫面。"""
+        if lines:
+            self.log_view.add_many(lines)
+        self.start_button.disabled = self._bundling_running
+        self._page.update()
+
     def _bundling_worker(self, root_dir, output_zip, version, description, pack_image):
+        pending: list[tuple[str, str]] = []
+        last_flush = 0.0
+
+        def flush(force: bool = False):
+            nonlocal pending, last_flush
+            now = time.monotonic()
+            if not force and now - last_flush < self._UI_FLUSH_INTERVAL_SEC:
+                return
+            batch, pending = pending, []
+            last_flush = now
+            self._run_on_ui(self._apply_bundling_ui, batch)
 
         try:
             version_info = self.version_data.get(version, {}) if version else {}
@@ -437,24 +476,21 @@ class BundlerView(ft.Column):
 
             for update in bundle_outputs_generator(**generator_kwargs):
                 log_msg = update.get("log", "")
-                for line in log_msg.split("\n"):
-                    if line.strip():
-                        self.log_view.add(line, level="info")  # PR refactor/unified-log-view: 修 cyan400 bug
+                pending.extend(
+                    (line, "info") for line in log_msg.split("\n") if line.strip()
+                )
                 if "progress" in update:
                     self.progress_bar.value = update["progress"]
                 if update.get("error"):
                     self.progress_bar.color = theme.ERROR
-                self._page.run_task(self._scroll_log)
-                self._page.update()
-        except Exception as ex:
-            self._append_log(f"[錯誤] {ex}", level="error")
+                flush()
+        except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，錯誤顯示於日誌
+            pending.append((f"[錯誤] {ex}", "error"))
             self.progress_bar.color = theme.RED
         finally:
             self.progress_bar.visible = False
-            self._page.update()
-
-    async def _scroll_log(self):
-        await self.log_view.scroll_to(offset=-1, duration=100)
+            self._bundling_running = False
+            flush(force=True)
 
     @property
     def page(self):
