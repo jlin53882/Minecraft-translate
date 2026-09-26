@@ -839,8 +839,14 @@ class MergeView(ft.Column):
         )
 
         # 2026-08-04 修正 A1: 兼容 ZIP (success_zips) 與 Folder (success_folders) 兩種 key
-        s_zips = summary.get("success_zips") or summary.get("success_folders", 0)
-        f_zips = summary.get("failed_zips") or summary.get("failed_folders", 0)
+        is_folder = "success_folders" in summary or "failed_folders" in summary
+        unit = "資料夾" if is_folder else "ZIP"
+        if is_folder:
+            s_zips = summary.get("success_folders", 0)
+            f_zips = summary.get("failed_folders", 0)
+        else:
+            s_zips = summary.get("success_zips", 0)
+            f_zips = summary.get("failed_zips", 0)
         failed_list = (
             summary.get("failed_zips_list")
             or summary.get("failed_folders_list")
@@ -852,6 +858,7 @@ class MergeView(ft.Column):
         oc_rows = []
         for label, count in [
             ("lang_output", oc.get("lang_output", 0)),
+            ("assets", oc.get("assets", 0)),
             (pending_name, oc.get(pending_name, 0)),
             (organized_name, oc.get(organized_name, 0)),
             ("patchouli_output", oc.get("patchouli_output", 0)),
@@ -885,7 +892,7 @@ class MergeView(ft.Column):
                 failed_rows.append(ft.Text(f"│  └─ {err}", size=12, color="#cccccc"))
             failed_block = [
                 ft.Divider(),
-                ft.Text("📋 處理失敗的 ZIP", size=14, weight=ft.FontWeight.BOLD),
+                ft.Text(f"📋 處理失敗的 {unit}", size=14, weight=ft.FontWeight.BOLD),
                 ft.Container(
                     content=ft.ListView(
                         controls=failed_rows,
@@ -903,14 +910,14 @@ class MergeView(ft.Column):
                 ft.Row(
                     [
                         ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=20),
-                        ft.Text(f"成功處理 ZIP：{s_zips} 個", size=14),
+                        ft.Text(f"成功處理 {unit}：{s_zips} 個", size=14),
                     ],
                     spacing=8,
                 ),
                 ft.Row(
                     [
                         ft.Icon(ft.Icons.ERROR, color=theme.RED, size=20),
-                        ft.Text(f"失敗 ZIP：{f_zips} 個", size=14),
+                        ft.Text(f"失敗 {unit}：{f_zips} 個", size=14),
                     ],
                     spacing=8,
                 ),

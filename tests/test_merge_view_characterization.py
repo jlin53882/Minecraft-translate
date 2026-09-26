@@ -304,3 +304,61 @@ def test_ui_poller_shows_summary_once_when_sync_tasks_queue_up(monkeypatch):
 
     assert len(shown) == 1
     assert view._ui_stop.is_set()
+
+
+def _dialog_texts(control) -> list[str]:
+    """遞迴收集 dialog 內所有 ft.Text 的文字。"""
+    texts = []
+    if isinstance(control, ft.Text) and isinstance(control.value, str):
+        texts.append(control.value)
+    for attr in ("content", "title"):
+        child = getattr(control, attr, None)
+        if child is not None and not isinstance(child, str):
+            texts.extend(_dialog_texts(child))
+    for child in getattr(control, "controls", None) or []:
+        texts.extend(_dialog_texts(child))
+    return texts
+
+
+def _show_summary_texts(monkeypatch, summary) -> list[str]:
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
+    page = mock_page()
+    view = merge_view.MergeView(page, mock_filepicker())
+    view._show_merge_summary(summary)
+    return _dialog_texts(page.overlay[-1])
+
+
+def test_show_merge_summary_folder_mode_uses_folder_label_and_assets(monkeypatch):
+    """資料夾模式摘要應顯示「資料夾」而非「ZIP」,並列出 assets 數量。"""
+    texts = _show_summary_texts(
+        monkeypatch,
+        {
+            "success_folders": 1,
+            "failed_folders": 0,
+            "failed_folders_list": [],
+            "output_counts": {"assets": 31, "待翻譯": 31},
+        },
+    )
+
+    assert "成功處理 資料夾：1 個" in texts
+    assert "失敗 資料夾：0 個" in texts
+    assert not any("ZIP" in t for t in texts)
+    assert "├─ assets：31 個" in texts
+
+
+def test_show_merge_summary_zip_mode_keeps_zip_label(monkeypatch):
+    """ZIP 模式摘要維持「ZIP」字樣,且 success_zips=0 時不誤讀 folder key。"""
+    texts = _show_summary_texts(
+        monkeypatch,
+        {
+            "success_zips": 0,
+            "failed_zips": 2,
+            "failed_zips_list": [{"name": "a.zip", "error": "boom"}],
+            "output_counts": {"lang_output": 3},
+        },
+    )
+
+    assert "成功處理 ZIP：0 個" in texts
+    assert "失敗 ZIP：2 個" in texts
+    assert "📋 處理失敗的 ZIP" in texts
