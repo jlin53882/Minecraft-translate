@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, Generator, Optional
 
 import orjson as json
 
+from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
 from translation_tool.utils.log_unit import log_info, log_warning, log_debug
 from translation_tool.utils.cache_manager import (
     add_to_cache,
@@ -621,7 +622,7 @@ def translate_directory_generator(
 
     cancelled = False
     while remaining:
-        if should_cancel is not None and should_cancel():
+        if (should_cancel is not None and should_cancel()) or is_cancelled():
             # 在批次之間停止：已完成的批次照常寫出，並走下方的收尾流程
             cancelled = True
             log_warning(f"⏹ 已取消翻譯，剩餘 {len(remaining)} 筆未翻譯")
@@ -634,7 +635,14 @@ def translate_directory_generator(
         batch = remaining[:batch_size]
 
         # ⭐ 1. 接收 status (原本是 _, 現在改為 status)
-        translated, status = translate_batch_smart(batch, total)
+        try:
+            translated, status = translate_batch_smart(batch, total)
+        except TaskCancelled:
+            # 等待 API 限流時被取消：已完成的批次照常寫出
+            cancelled = True
+            log_warning(f"⏹ 已取消翻譯，剩餘 {len(remaining)} 筆未翻譯")
+            yield {"log": f"⏹ 已取消翻譯，剩餘 {len(remaining)} 筆未翻譯"}
+            break
         log_debug("翻譯結果：%s", translated)
         log_debug("翻譯狀態：%s", status)
 

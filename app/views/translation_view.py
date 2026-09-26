@@ -13,7 +13,7 @@ from app.views._log import LogView
 from translation_tool.utils.log_unit import log_info
 
 # UI 共用元件：抽出重複的卡片/按鈕樣式，集中在 app.ui
-from app.ui.components import styled_card
+from app.ui.components import secondary_button, styled_card
 from app.views.translation.translation_actions import (
     run_ftb,
     run_kjs,
@@ -72,6 +72,13 @@ class TranslationView(ft.Column):
 
         # 右側共用狀態與日誌
         self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=theme.GREY_200)
+        self.cancel_button = secondary_button(
+            "取消",
+            icon=ft.Icons.STOP_CIRCLE_OUTLINED,
+            tooltip="在目前批次完成後停止（已翻譯的部分會保留並寫出）",
+            on_click=lambda e: self._on_cancel(),
+        )
+        self.cancel_button.disabled = True
         self.progress = ft.ProgressBar(
             value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
         )
@@ -132,7 +139,7 @@ class TranslationView(ft.Column):
                     icon=ft.Icons.TIMELINE,
                     content=ft.Column(
                         [
-                            ft.Row([self.status_chip], wrap=True),
+                            ft.Row([self.status_chip, self.cancel_button], wrap=True),
                             self.progress,
                         ],
                         spacing=10,
@@ -267,7 +274,21 @@ class TranslationView(ft.Column):
     # ------------------------------------------------------------------
     def _start_ui_timer(self):
         """啟動 UI 更新計時器"""
+        self.cancel_button.disabled = False
         return start_translation_ui_timer(self)
+
+    def _on_cancel(self):
+        """要求取消目前的翻譯任務（在批次之間或等待 API 限流時停止）。"""
+        session = self.session
+        if session is None or not self._ui_timer_running:
+            return
+        request = getattr(session, "request_cancel", None)
+        if request is None:
+            return
+        request()
+        self.cancel_button.disabled = True
+        self._set_status("正在取消…", theme.AMBER_200)
+        self.page.update()
 
     # ------------------------------------------------------------------
     # UI helpers

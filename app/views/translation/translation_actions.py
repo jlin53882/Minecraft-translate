@@ -241,10 +241,15 @@ def _sync_from_session(view):
     # LogView 內建 auto_scroll；畫面由下方 page.update() 一次刷新
     view.log_view.sync_entries(snap.get("logs", []) or [], update=False)
     status = (snap.get("status") or "").upper()
-    if status == "DONE":
-        view._set_status("任務完成", ft.Colors.GREEN_200)
+    if status in ("DONE", "ERROR"):
+        if status == "ERROR":
+            view._set_status("任務發生錯誤", ft.Colors.RED_200)
+        elif getattr(view.session, "cancel_requested", False):
+            view._set_status("已取消", ft.Colors.AMBER_200)
+        else:
+            view._set_status("任務完成", ft.Colors.GREEN_200)
         view._ui_timer_running = False
-    elif status == "ERROR":
-        view._set_status("任務發生錯誤", ft.Colors.RED_200)
-        view._ui_timer_running = False
+        cancel_button = getattr(view, "cancel_button", None)
+        if cancel_button is not None:
+            cancel_button.disabled = True
     view.page.update()

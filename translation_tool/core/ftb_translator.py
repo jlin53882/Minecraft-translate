@@ -4,6 +4,7 @@
 維護注意：主要 helper 已拆到 ftb_translator_export / clean / template 子模組；新邏輯優先落子模組。
 """
 
+from translation_tool.utils.cancellation import raise_if_cancelled
 import concurrent.futures
 import math
 import os
@@ -289,6 +290,7 @@ def run_ftb_pipeline(
         )
 
     if step_translate:
+        raise_if_cancelled()  # 前面步驟期間已要求取消時，不開始送 API
         clean_paths = result.get("clean_paths") if isinstance(result.get("clean_paths"), dict) else {}
         en_pending_dir = (clean_paths or {}).get("en_pending_dir")
 

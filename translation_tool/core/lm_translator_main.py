@@ -6,6 +6,8 @@
 
 import time
 
+from translation_tool.utils.cancellation import interruptible_sleep
+
 import requests
 
 from translation_tool.core.lm_api_client import call_gemini_requests
@@ -542,7 +544,7 @@ def translate_batch_smart_old(
                     # 免費層保護（可在設定調整；預設 0 = 不等待）
                     if rpm_cooldown_sec > 0:
                         log_info(f"⏳ 等待 {rpm_cooldown_sec:g} 秒以避免觸發 RPM 限制…")
-                        time.sleep(rpm_cooldown_sec)
+                        interruptible_sleep(rpm_cooldown_sec)
                 # else: #本批次 進來不會進來這裡處理
                 #    remaining_calls_estimated = math.ceil(
                 #        remaining_count / max(batch_size, 1)
@@ -665,7 +667,7 @@ def translate_batch_smart_old(
                             log_info(
                                 f"[⏳] 每分鐘頻率限制 (RPM)：稍後重試，預計等待 {wait_time} 秒"
                             )
-                            time.sleep(wait_time)
+                            interruptible_sleep(wait_time)
                             hit_rpm = True
                             continue
 
@@ -753,7 +755,7 @@ def translate_batch_smart_old(
                                     log_info(
                                         f"[✅] API Key 切換成功 → 原地重送同一 batch，等待 {key_rotation_buffer_sec} 秒"
                                     )
-                                    time.sleep(
+                                    interruptible_sleep(
                                         key_rotation_buffer_sec
                                     )  # ⭐ 給新 Key 一點緩衝
                                     hit_overload_retry = True  # ⭐ 重送同一 batch
@@ -773,7 +775,7 @@ def translate_batch_smart_old(
                             f"原地等待 {wait_sec}s 後重送【同一 batch / 同一模型】"
                         )
 
-                        time.sleep(wait_sec)
+                        interruptible_sleep(wait_sec)
                         hit_overload_retry = True
                         break  # ← 跳出 model pool，回到 while 重新送
 
@@ -784,7 +786,7 @@ def translate_batch_smart_old(
                         )
                         try:
                             rotate_api_key()
-                            time.sleep(request_interval_sec)
+                            interruptible_sleep(request_interval_sec)
                             continue  # 換 key 繼續 model pool
                         except Exception as err:
                             log_error(f"API key 切換失敗: {err}")

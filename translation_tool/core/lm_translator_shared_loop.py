@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, Any
 import time
 
+from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
 from translation_tool.utils.log_unit import log_info
 from translation_tool.utils.cache_manager import (
     add_to_cache,
@@ -115,7 +116,22 @@ def translate_items_with_cache_loop(
 
     emit_progress("🚀 [SharedLM] 準備開始翻譯工作...")
 
+    def cancelled_result() -> TranslateLoopResult:
+        emit_progress(f"⏹ 已取消翻譯，剩餘 {len(remaining)} 筆未翻譯（已完成的批次已寫入快取）")
+        return TranslateLoopResult(
+            status="CANCELLED",
+            processed=processed,
+            total=total,
+            completed_calls=completed_calls,
+            elapsed_sec=time.time() - start_time,
+            exhausted=False,
+            last_error=None,
+        )
+
     while remaining:
+        # 取消檢查點：在批次之間停止，已完成的批次照常保留
+        if is_cancelled():
+            return cancelled_result()
         cache_type = str(remaining[0].get("cache_type") or "lang")
         batch_size = _get_default_batch_size(cache_type, batch_size_by_type)
         if batch_size <= 0:
@@ -125,6 +141,9 @@ def translate_items_with_cache_loop(
 
         try:
             translated, status = translate_batch_smart(batch, total_for_smart)
+        except TaskCancelled:
+            # 等待 API 限流時被取消
+            return cancelled_result()
         except Exception as e:
             last_error = str(e)
             emit_progress(f"❌ [SharedLM] 翻譯發生異常: {e}")

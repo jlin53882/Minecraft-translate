@@ -5,6 +5,7 @@
 """
 
 from __future__ import annotations
+from translation_tool.utils.cancellation import is_cancelled, raise_if_cancelled
 
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any
@@ -27,6 +28,7 @@ from translation_tool.core.kubejs_translator_paths import resolve_kubejs_root_im
 from translation_tool.core.lm_translator_shared import _get_default_batch_size
 from translation_tool.utils.log_unit import (
     log_info,
+    log_warning,
     log_debug,
     progress,
     get_formatted_duration,
@@ -461,6 +463,7 @@ def run_kubejs_pipeline(
         result["step2"] = {"skipped": True, "reason": "pending lang keys = 0"}
         progress(session, 0.66)
     elif step_translate:
+        raise_if_cancelled()  # 前面步驟期間已要求取消時，不開始送 API
         if translator_fn is None:
             translator_fn = step2_translate_lm
 
@@ -536,7 +539,10 @@ def run_kubejs_pipeline(
                 est_batches,
             )
 
-    log_info(f"🎉 [KubeJS] 任務完成！ {duration}")
+    if is_cancelled():
+        log_warning(f"⏹ [KubeJS] 已取消（已翻譯的部分已寫出） {duration}")
+    else:
+        log_info(f"🎉 [KubeJS] 任務完成！ {duration}")
     progress(session, 0.999)
     return result
 

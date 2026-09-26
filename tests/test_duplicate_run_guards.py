@@ -85,3 +85,25 @@ def test_bundler_worker_restores_button_and_batches_ui(monkeypatch):
     assert view.progress_bar.value == 1.0
     assert view.start_button.disabled is False
     assert view.progress_bar.visible is False
+
+
+def test_translation_cancel_button_requests_cancel_and_shows_cancelled():
+    from app.logging.task_session import TaskSession
+
+    page = mock_page()
+    view = tv.TranslationView(page, mock_filepicker())
+    assert view.cancel_button.disabled is True
+
+    view.session = TaskSession()
+    view.session.start()
+    view._start_ui_timer()
+    assert view.cancel_button.disabled is False
+
+    view._on_cancel()
+    assert view.session.cancel_requested is True
+    assert view.cancel_button.disabled is True
+
+    view.session.finish()
+    ta._sync_from_session(view)
+    assert view.status_chip.label.value == "已取消"
+    assert view._ui_timer_running is False

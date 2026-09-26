@@ -30,6 +30,7 @@ from app.services_impl.pipelines.merge_service import (
     run_merge_folder_batch_service,
     run_merge_zip_batch_service,
 )
+from app.ui import theme
 from app.ui.snack import show_snack
 from app.ui.theme import (
     BLUE_50,
@@ -58,6 +59,7 @@ from app.views.pipeline.pipeline_extract_dialog import open_extract_dialog
 from app.views.pipeline.pipeline_merge_dialog import open_merge_dialog
 from app.views.pipeline.pipeline_one_click_dialog import open_one_click_dialog
 from app.views.pipeline.pipeline_translate_dialog import open_translate_dialog
+from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
@@ -191,12 +193,14 @@ class PipelineStepChip:
             "running": (BLUE_400, BLUE_50),
             "done": (GREEN_600, GREEN_50),
             "failed": (RED_400, RED_50),
+            "cancelled": (theme.AMBER_700, theme.AMBER_50),
         }
         icons = {
             "waiting": ft.Icons.CIRCLE,
             "running": ft.Icons.PENDING,
             "done": ft.Icons.CHECK_CIRCLE,
             "failed": ft.Icons.ERROR,
+            "cancelled": ft.Icons.STOP_CIRCLE,
         }
         color, bg = colors.get(self.status, (GREY_500, GREY_200))
         self.icon.name = icons[self.status]
@@ -216,8 +220,15 @@ class PipelineStepChip:
 class PipelineProgressPanel:
     """日誌+進度面板，顯示步驟狀態晶片、進度條、即時日誌"""
 
-    def __init__(self, page: ft.Page):
+    def __init__(self, page: ft.Page, on_cancel=None):
         self._page = page
+        self.cancel_button = ft.OutlinedButton(
+            "取消",
+            icon=ft.Icons.STOP_CIRCLE_OUTLINED,
+            tooltip="在目前步驟的檢查點停止（已完成的輸出會保留）",
+            on_click=(lambda e: on_cancel()) if on_cancel else None,
+            visible=False,
+        )
         self.steps = [
             PipelineStepChip("抽取資源", 1),
             PipelineStepChip("語系比對", 2),
@@ -255,7 +266,10 @@ class PipelineProgressPanel:
                 [
                     ft.Text("執行進度", weight="bold", color=BLUE_700),
                     self.step_row,
-                    self.current_label,
+                    ft.Row(
+                        [self.current_label, self.cancel_button],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
                     ft.Divider(),
                     ft.Row(
                         [
@@ -308,17 +322,28 @@ class PipelineProgressPanel:
                 level = "error"
         self.log_view.add(f">> {msg}", level=level)
 
-    def finish_step(self, step_num: int, success: bool):
-        self.steps[step_num - 1].set_status("done" if success else "failed")
+    def finish_step(self, step_num: int, success: bool, cancelled: bool = False):
+        if cancelled:
+            self.steps[step_num - 1].set_status("cancelled")
+        else:
+            self.steps[step_num - 1].set_status("done" if success else "failed")
 
-    def finish_all(self, success: bool):
+    def set_running(self, running: bool):
+        """任務執行中才顯示取消按鈕。"""
+        self.cancel_button.visible = running
+        self.cancel_button.disabled = not running
+
+    def finish_all(self, success: bool, cancelled: bool = False):
         if success:
             self.current_label.value = "✅ 一鍵製作完成！"
+        elif cancelled:
+            self.current_label.value = "⏹ 已取消"
         else:
             self.current_label.value = "❌ 流程失敗"
         for step in self.steps:
             if step.status == "running":
                 step.set_status("failed" if not success else "done")
+        self.set_running(False)
 
     def hide(self):
         self.container.visible = False
@@ -365,7 +390,9 @@ class PipelineView(ft.Column):
         self.progress_status = ft.Text("等待任務啟動...", size=12, color=GREY_600)
         self.keys_container = ft.Column(spacing=10)
 
-        self.progress_panel = PipelineProgressPanel(page)
+        self._cancel_event = threading.Event()
+        self._current_session: TaskSession | None = None
+        self.progress_panel = PipelineProgressPanel(page, on_cancel=self._on_cancel)
 
         self._lang_code_checks = {}
         self._one_click_button = None
@@ -480,21 +507,33 @@ class PipelineView(ft.Column):
         每個步驟使用獨立 TaskSession；service 回傳 generator 時會完整迭代
         （merge / bundle service 都是 generator，未迭代就不會執行）。
         """
+        if self._cancel_event.is_set():
+            return False
         session = TaskSession()
+        self._current_session = session
         done = threading.Event()
         self._ui(self.progress_panel.set_step_running, step_num, name)
         self._ui(self.progress_panel.add_log, f"▶ 開始：{name}")
         watcher = self._page.run_task(self._watch_session, session, done)
         try:
-            result = service_fn(session)
-            if inspect.isgenerator(result):
-                for _ in result:
-                    pass
+            # 取消檢查：翻譯在批次之間 / 等待限流時、提取在 JAR 之間停止
+            with cancel_scope(self._cancel_event.is_set):
+                result = service_fn(session)
+                if inspect.isgenerator(result):
+                    for _ in result:
+                        if self._cancel_event.is_set():
+                            result.close()
+                            break
+        except TaskCancelled:
+            pass
         except Exception as ex:  # noqa: BLE001 - 背景步驟邊界：任何錯誤都轉成步驟失敗
             log_error(f"[Pipeline] {name} 失敗：{ex}\n{traceback.format_exc()}")
             session.add_log(f"❌ 錯誤：{ex}", level="error")
             session.set_error()
         finally:
+            self._current_session = None
+            if self._cancel_event.is_set():
+                session.add_log(f"⏹ {name} 已取消", level="warning")
             done.set()
         try:
             if watcher is not None:
@@ -505,10 +544,15 @@ class PipelineView(ft.Column):
         ) as ex:
             log_warning(f"[Pipeline] {name} 日誌同步未完成：{ex!r}")
 
-        ok = not self._session_failed(session)
+        cancelled = self._cancel_event.is_set()
+        ok = not cancelled and not self._session_failed(session)
 
         def _finish():
-            self.progress_panel.finish_step(step_num, ok)
+            self.progress_panel.finish_step(step_num, ok, cancelled=cancelled)
+            if cancelled:
+                self.progress_panel.add_log(f"⏹ {name} 已取消", "warning")
+                self._update_progress(1.0, "已取消")
+                return
             self.progress_panel.add_log(f"✅ {name} 完成" if ok else f"❌ {name} 失敗")
             self._update_progress(1.0, "完成" if ok else "失敗")
 
@@ -518,14 +562,13 @@ class PipelineView(ft.Column):
     def _start_single_step(self, step_num: int, name: str, service_fn):
         """單一步驟按鈕：顯示進度面板、停用按鈕，並在背景執行。"""
         self._show_progress_panel()
-        self._set_buttons_disabled(True)
-        self._page.update()
+        self._begin_run()
 
         def worker():
             try:
                 self._run_session_step(step_num, name, service_fn)
             finally:
-                self._ui(self._reenable_buttons)
+                self._ui(self._end_run)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -716,8 +759,7 @@ class PipelineView(ft.Column):
         }
 
         self._show_progress_panel()
-        self._set_buttons_disabled(True)
-        self._page.update()
+        self._begin_run()
 
         def extract(session):
             if mode in ("lang", "dual"):
@@ -815,10 +857,13 @@ class PipelineView(ft.Column):
             finally:
 
                 def _done():
-                    self.progress_panel.finish_all(success)
+                    cancelled = self._cancel_event.is_set()
+                    self.progress_panel.finish_all(success, cancelled=cancelled)
                     if success:
                         self.progress_panel.add_log("✅ 一鍵製作完成！")
-                    self._reenable_buttons()
+                    elif cancelled:
+                        self.progress_panel.add_log("⏹ 一鍵製作已取消", "warning")
+                    self._end_run()
 
                 self._ui(_done)
 
@@ -847,6 +892,29 @@ class PipelineView(ft.Column):
                                 btn.disabled = disabled
         if self._one_click_button is not None:
             self._one_click_button.disabled = disabled
+
+    def _begin_run(self):
+        """開始執行：重設取消狀態、停用按鈕、顯示取消按鈕（UI 執行緒）。"""
+        self._cancel_event.clear()
+        self._set_buttons_disabled(True)
+        self.progress_panel.set_running(True)
+        self._page.update()
+
+    def _end_run(self):
+        self.progress_panel.set_running(False)
+        self._reenable_buttons()
+
+    def _on_cancel(self):
+        """要求取消：目前步驟在下一個檢查點停止，其餘步驟不再執行。"""
+        if self._cancel_event.is_set():
+            return
+        self._cancel_event.set()
+        session = self._current_session
+        if session is not None:
+            session.request_cancel()
+        self.progress_panel.cancel_button.disabled = True
+        self.progress_panel.add_log("⏹ 正在取消…（等待目前的檢查點）", "warning")
+        self._page.update()
 
     def _reenable_buttons(self, e=None):
         self._set_buttons_disabled(False)

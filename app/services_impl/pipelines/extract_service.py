@@ -11,6 +11,7 @@ PR19：將 extract 類 service 從 app.services.py 抽離到 pipelines 子模組
 - 透過 TaskSession 統一管理任務狀態、日誌、進度
 """
 
+from translation_tool.utils.cancellation import is_cancelled
 import logging
 import os
 import traceback
@@ -184,6 +185,10 @@ def _run_extraction_with_session(
         mode_label: 模式標籤，用於錯誤訊息（'Lang' / 'Book' / 'Dual'）
     """
     for update in generator:
+        if is_cancelled():
+            # 在 JAR 之間停止（一鍵流水線的取消）
+            session.add_log(f"⏹ {mode_label} 提取已取消", level="warning")
+            return
         filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
         if filtered is None:
             continue

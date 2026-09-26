@@ -5,6 +5,7 @@
 """
 
 from __future__ import annotations
+from translation_tool.utils.cancellation import raise_if_cancelled
 
 import math
 import time
@@ -186,6 +187,7 @@ def run_md_pipeline(
 
     pending_json_count = _count_md_pending_docs(pending_dir)
     if step_translate:
+        raise_if_cancelled()  # 前面步驟期間已要求取消時，不開始送 API
         if pending_json_count == 0:
             log_info("[MD] [2/3] 已略過翻譯：沒有可翻譯 JSON")
             result["step2"] = {"skipped": True, "reason": "no_pending_json"}
