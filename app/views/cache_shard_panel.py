@@ -551,14 +551,14 @@ class CacheShardPanel(ft.Container):
         show_snack(self.page, "已還原到原始值", theme.BLUE_400)
         self._page.update()
 
-    def _on_shard_dst_copy(self, e):
+    async def _on_shard_dst_copy(self, e):
         """複製 DST"""
         if not self.state.selected_key:
             show_snack(self.page, "請先選擇 key", theme.AMBER_700)
             return
 
         try:
-            self._page.set_clipboard(str(self.shard_dst_field.value or ""))
+            await ft.Clipboard().set(str(self.shard_dst_field.value or ""))
             show_snack(self.page, "已複製 DST 內容", theme.BLUE_400)
         except Exception:
             show_snack(self.page, "複製失敗", theme.RED_400)

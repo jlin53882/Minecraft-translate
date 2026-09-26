@@ -136,7 +136,7 @@ class CacheView(ft.Column):
             "清空", icon=ft.Icons.DELETE_SWEEP, on_click=lambda e: self._clear_logs()
         )
         self.btn_log_copy = ft.TextButton(
-            "複製全部", icon=ft.Icons.CONTENT_COPY, on_click=lambda e: self._copy_logs()
+            "複製全部", icon=ft.Icons.CONTENT_COPY, on_click=self._copy_logs
         )
         self.sw_log_only_error = ft.Switch(
             label="只看警告以上", value=True, on_change=self._on_log_filter_changed
@@ -1618,11 +1618,11 @@ class CacheView(ft.Column):
         self._all_logs.clear()
         self._render_logs()
 
-    def _copy_logs(self):
+    async def _copy_logs(self, e=None):
         """複製所有日誌到剪貼簿"""
         txt = "\n".join(self._all_logs)
         try:
-            self.page.set_clipboard(txt)
+            await ft.Clipboard().set(txt)
             show_snack(self.page, "已複製日誌", theme.BLUE_400)
         except Exception:
             show_snack(self.page, "複製失敗", theme.RED_400)
@@ -2453,14 +2453,14 @@ class CacheView(ft.Column):
         if self.page:
             self.page.update()
 
-    def _on_shard_dst_copy(self, e):
+    async def _on_shard_dst_copy(self, e):
         """複製目標內容到剪貼簿"""
         if not self.shard_detail_selected_key:
             self._notify("請先選擇 key", "warn")
             return
 
         try:
-            self.page.set_clipboard(str(self.shard_dst_field.value or ""))
+            await ft.Clipboard().set(str(self.shard_dst_field.value or ""))
             self._notify("已複製 C3 DST 內容", "info")
         except Exception:
             self._notify("複製失敗", "error")

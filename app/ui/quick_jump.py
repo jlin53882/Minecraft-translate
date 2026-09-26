@@ -25,7 +25,7 @@ class QuickJumpPanel(ft.Container):
             on_jump_callback: 跳轉回調函數，接收 view_index
             on_close_callback: 關閉面板回調函數
         """
-        self.page = page
+        self._page = page
         self.view_registry = view_registry
         self.on_jump = on_jump_callback
         self.on_close = on_close_callback
@@ -124,7 +124,7 @@ class QuickJumpPanel(ft.Container):
             self.all_items.append(list_item)
             self.results_list.controls.append(list_item)
 
-        self.page.update()
+        self._page.update()
 
     def _on_search_change(self, e):
         """搜尋文字變更處理"""
@@ -145,7 +145,7 @@ class QuickJumpPanel(ft.Container):
                 if query in title or query in subtitle:
                     self.results_list.controls.append(item)
 
-        self.page.update()
+        self._page.update()
 
     def _on_submit(self, e):
         """按下 Enter 鍵"""
@@ -163,7 +163,8 @@ class QuickJumpPanel(ft.Container):
     def focus(self):
         """聚焦搜尋框"""
         if self.search_field:
-            self.search_field.focus()
+            # Flet 1.0 起 focus() 為 coroutine，需交由 page.run_task 排程
+            self._page.run_task(self.search_field.focus)
 
 
 def show_quick_jump_panel(page: ft.Page, view_registry: list, change_view_callback):
@@ -185,7 +186,7 @@ def show_quick_jump_panel(page: ft.Page, view_registry: list, change_view_callba
     # 建立背景遮罩
     overlay = ft.Container(
         expand=True,
-        bgcolor=ft.Colors.BLACK38,
+        bgcolor=ft.Colors.BLACK_38,
         on_click=lambda _: close_quick_jump_panel(page),
         content=panel,
         alignment=ft.alignment.Alignment.CENTER,
