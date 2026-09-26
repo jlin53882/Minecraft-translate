@@ -28,7 +28,6 @@ from app.views.extractor.extractor_state import PreviewState
 from app.views.extractor.extractor_dialog_helpers import format_size
 from app.services_impl.pipelines.extract_service import (
     prepare_extraction_paths,
-    prepare_preview_paths,
     get_lang_codes,
     run_lang_extraction_service,
     run_book_extraction_service,
@@ -703,6 +702,13 @@ def open_extractor_dialog(
     return dialog
 
 
+def _preview_file_count(result: dict, mode: str) -> int:
+    """預覽結果中單一 JAR 的可提取檔案數。"""
+    if mode == "dual":
+        return int(result.get("lang_count", 0) or 0) + int(result.get("book_count", 0) or 0)
+    return int(result.get("count", 0) or 0)
+
+
 def open_preview_dialog(
     page: ft.Page,
     file_picker: ft.FilePicker,
@@ -723,7 +729,7 @@ def open_preview_dialog(
         page: Flet Page 實例
         file_picker: Flet FilePicker 實例
         input_path: Mod 來源路徑
-        output_path: 輸出目錄路徑 (留空會自動用 prepare_preview_paths 推算)
+        output_path: 提取輸出目錄 (留空則由 prepare_extraction_paths 推算)
         mode: 預覽模式 ("lang" / "book" / "dual")
         skip_zh_cn: 是否跳過 zh_cn,從主 UI skip_zh_cn_switch 讀取 (跟 extract 模式對齊)
 
@@ -824,10 +830,19 @@ def open_preview_dialog(
             controls.append(ft.Text(f"共找到 {total_files} 個檔案", size=14, color=ft.Colors.BLUE_700))
 
         controls.append(ft.Text(f"總大小：{total_size_mb:.2f} MB", size=14, color=ft.Colors.BLUE_700))
-        controls.extend([ft.Divider(), ft.Text(f"詳細清單（{len(preview_results)} 個 JAR）：", size=13, weight=ft.FontWeight.BOLD)])
+
+        # 只列出有可提取檔案的 JAR（406 個 JAR 時大多是 0 個檔案，清單會被淹沒）
+        with_files = [r for r in preview_results if _preview_file_count(r, mode) > 0]
+        empty_count = len(preview_results) - len(with_files)
+        header = f"詳細清單（{len(with_files)} 個 JAR 有可提取檔案）："
+        controls.extend([ft.Divider(), ft.Text(header, size=13, weight=ft.FontWeight.BOLD)])
+        if empty_count:
+            controls.append(
+                ft.Text(f"另有 {empty_count} 個 JAR 沒有可提取的檔案，已略過不列出", size=12, color=ft.Colors.GREY_700)
+            )
 
         jar_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO)
-        for r in preview_results:
+        for r in with_files:
             if mode == "dual":
                 jar_list.controls.append(
                     ft.Text(f"📦 {r['jar']}: Lang {r.get('lang_count', 0)} 個 / Book {r.get('book_count', 0)} 個", size=12)
@@ -899,15 +914,14 @@ def open_preview_dialog(
         if state["running"]:
             log_info(f"[PREVIEW] start_scan rejected: state.running=True")
             return
-        nonlocal output_path
-        # 若輸出路徑是空的，自動設定
-        actual_output = output_path
-        if not actual_output:
-            # ✅ 階段 B-2 重構：preview 路徑拼接已抽離至 extract_service.prepare_preview_paths()
-            actual_output = prepare_preview_paths(input_path, mode)
-            # 更新 info_text
-            info_text.value = f"來源：{input_path}\n輸出：{actual_output}\n模式：{mode}"
-            output_path = actual_output
+        # 預覽只掃描不寫檔；顯示「確認執行」後實際的提取輸出位置
+        # （原本把預覽資料夾當成提取輸出，導致結果多一層或寫進預覽資料夾）
+        if not output_path:
+            info_text.value = (
+                f"來源：{input_path}\n"
+                f"輸出（確認執行後）：{prepare_extraction_paths(input_path, mode, output_path)}\n"
+                f"模式：{mode}"
+            )
             page.update()
 
         state["running"] = True

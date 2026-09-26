@@ -64,10 +64,10 @@ def prepare_extraction_paths(mods_dir: str, mode: str, output_path: str = "") ->
     Args:
         mods_dir: Mod 來源資料夾路徑
         mode: 提取模式（'lang' / 'book' / 'dual'）
-        output_path: 外部指定的輸出路徑（可為空）
+        output_path: 外部指定的輸出路徑（可為空；有值時直接使用，不再加子資料夾）
 
     Returns:
-        最終輸出路徑（含子資料夾名稱）
+        最終輸出路徑
     """
     cfg = load_config()
     folder_names = cfg.get("extractor", {}).get("output_folder_names", {})
@@ -82,10 +82,13 @@ def prepare_extraction_paths(mods_dir: str, mode: str, output_path: str = "") ->
     else:  # dual
         output_subdir = dual_extract
 
-    # 若未指定輸出目錄，使用 mods_dir 作為基礎
-    base_dir = output_path or mods_dir
-    if base_dir:
-        return os.path.join(base_dir, output_subdir)
+    # 已指定輸出目錄（使用者輸入或頁面自動補齊的「mods_提取lang_輸出」）時直接使用；
+    # 原本會再多加一層子資料夾，變成 .../mods_提取lang_輸出/_提取lang_輸出
+    if output_path:
+        return output_path
+    # 未指定時，在 mods_dir 下建立對應模式的子資料夾
+    if mods_dir:
+        return os.path.join(mods_dir, output_subdir)
     return ""
 
 

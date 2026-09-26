@@ -142,43 +142,32 @@ class TestGetLangCodes:
 class TestPrepareExtractionPaths:
     """Tests for prepare_extraction_paths()."""
 
-    def test_lang_mode_with_explicit_output(self):
-        """lang mode + explicit output_path should use lang suffix."""
+    def test_explicit_output_is_used_as_is(self):
+        """C14：已指定輸出目錄時直接使用，不再多加一層子資料夾。"""
         from app.services_impl.pipelines.extract_service import prepare_extraction_paths
 
         with patch(
             "app.services_impl.pipelines.extract_service.load_config",
             return_value={},
         ):
-            result = prepare_extraction_paths("/mods", "lang", "/output")
+            for mode in ("lang", "book", "dual"):
+                assert prepare_extraction_paths("/mods", mode, "/output") == "/output"
+            # 頁面自動補齊的路徑已含 suffix，不可再疊一層
+            assert (
+                prepare_extraction_paths("/x/mods", "lang", "/x/mods_提取lang_輸出")
+                == "/x/mods_提取lang_輸出"
+            )
 
-        # Should contain both /output and the lang suffix
-        assert "output" in result
-        assert "_提取lang_輸出" in result
-
-    def test_book_mode_uses_book_suffix(self):
-        """book mode should use book_extract suffix."""
+    def test_empty_output_uses_mode_suffix(self):
+        """未指定輸出目錄時，依模式使用對應的子資料夾名稱。"""
         from app.services_impl.pipelines.extract_service import prepare_extraction_paths
 
         with patch(
             "app.services_impl.pipelines.extract_service.load_config",
             return_value={},
         ):
-            result = prepare_extraction_paths("/mods", "book", "/output")
-
-        assert "_提取book_輸出" in result
-
-    def test_dual_mode_uses_dual_suffix(self):
-        """dual mode should use dual_extract suffix."""
-        from app.services_impl.pipelines.extract_service import prepare_extraction_paths
-
-        with patch(
-            "app.services_impl.pipelines.extract_service.load_config",
-            return_value={},
-        ):
-            result = prepare_extraction_paths("/mods", "dual", "/output")
-
-        assert "_提取both_輸出" in result
+            assert prepare_extraction_paths("/mods", "book", "").endswith("_提取book_輸出")
+            assert prepare_extraction_paths("/mods", "dual", "").endswith("_提取both_輸出")
 
     def test_empty_output_falls_back_to_mods_dir(self):
         """When output_path is empty, mods_dir is used as base."""
@@ -787,3 +776,12 @@ class TestRunExtractionWithSession:
         assert "first" in session.logs
         assert "filtered" not in session.logs
         assert "last" in session.logs
+
+def test_preview_file_count_by_mode():
+    """N3：預覽清單只列出有可提取檔案的 JAR。"""
+    from app.views.extractor.extractor_dialog import _preview_file_count
+
+    assert _preview_file_count({"count": 0}, "lang") == 0
+    assert _preview_file_count({"count": 3}, "book") == 3
+    assert _preview_file_count({"lang_count": 0, "book_count": 2}, "dual") == 2
+    assert _preview_file_count({}, "dual") == 0

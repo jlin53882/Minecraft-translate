@@ -237,6 +237,18 @@ def open_extract_dialog(
                     total_size_mb = result.get('total_size_mb', 0)
 
                     list_items = []
+                    # 只列出有可提取檔案的 JAR
+                    def _count(pr):
+                        if mode == "dual":
+                            return (pr.get('lang_count', 0) or 0) + (pr.get('book_count', 0) or 0)
+                        return pr.get('count', 0) or 0
+
+                    empty_count = sum(1 for pr in preview_results if _count(pr) == 0)
+                    preview_results = [pr for pr in preview_results if _count(pr) > 0]
+                    if empty_count:
+                        list_items.append(
+                            ft.Text(f"  另有 {empty_count} 個 JAR 沒有可提取的檔案，已略過不列出", size=12, color=GREY_600)
+                        )
                     for pr in preview_results:
                         jar_name = pr.get('jar', 'unknown')
                         if mode == "dual":
