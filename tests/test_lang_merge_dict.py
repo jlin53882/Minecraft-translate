@@ -112,6 +112,57 @@ class TestMergeLangDicts:
         # 純英文進 pending
         assert "k_mix" in pending
 
+    @pytest.mark.parametrize("english_value", ["", [], {}, False])
+    def test_english_source_uses_first_non_none_even_when_falsy(self, english_value):
+        """英文來源選擇須保留舊版 first-not-None 語意。"""
+        final_tw, pending = merge_lang_dicts(
+            cn_data={"k": "Fallback"},
+            tw_src_data=None,
+            en_data={"k": english_value},
+            existing_tw=None,
+            rules=[],
+            apply_replace_rules=fake_replace_rules,
+            recursive_translate_dict=fake_recursive_translate_dict,
+            contains_cjk=contains_cjk,
+            is_pure_english=is_pure_english,
+            is_from_output_dir=False,
+        )
+
+        if english_value == "":
+            assert "k" not in final_tw
+            assert "k" not in pending
+        else:
+            assert final_tw["k"] == english_value
+            assert "k" not in pending
+
+    def test_english_source_falls_back_only_when_value_is_none(self):
+        """英文來源為 None 時依序使用簡中、繁中，最後才用空字串。"""
+        def merge(en_value, cn_value=None, tw_value=None):
+            return merge_lang_dicts(
+                cn_data={"k": cn_value} if cn_value is not None else {},
+                tw_src_data={"k": tw_value} if tw_value is not None else {},
+                en_data={"k": en_value},
+                existing_tw=None,
+                rules=[],
+                apply_replace_rules=fake_replace_rules,
+                recursive_translate_dict=fake_recursive_translate_dict,
+                contains_cjk=contains_cjk,
+                is_pure_english=is_pure_english,
+                is_from_output_dir=False,
+            )
+
+        final_tw, pending = merge(None, "CN fallback", "TW fallback")
+        assert pending["k"] == "CN fallback"
+        assert "k" not in final_tw
+
+        final_tw, pending = merge(None, None, "TW fallback")
+        assert pending["k"] == "TW fallback"
+        assert "k" not in final_tw
+
+        final_tw, pending = merge(None)
+        assert "k" not in final_tw
+        assert "k" not in pending
+
 
 class TestContainsCjk:
     """測 contains_cjk 正確辨識 CJK 字元。"""

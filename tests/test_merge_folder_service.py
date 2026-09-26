@@ -18,6 +18,7 @@ class _FakeSession:
         self.progress = 0.0
         self.error = False
         self._summary = None
+        self.finish_called = False
 
     def start(self):
         pass
@@ -35,7 +36,7 @@ class _FakeSession:
         self._summary = d
 
     def finish(self):
-        pass
+        self.finish_called = True
 
     def snapshot(self):
         return {"status": "IDLE", "progress": 0.0, "logs": self.logs}
@@ -175,3 +176,91 @@ def test_summary_success_folders_key_compatible(tmp_path: Path):
     assert "success_folders" in summary, f"summary 缺少 success_folders: {list(summary.keys())}"
     assert summary["success_folders"] == 1
     assert summary["failed_folders"] == 0
+
+
+def test_stage1_soft_errors_fail_folder_and_skip_stage2(tmp_path: Path, monkeypatch):
+    """Stage 1 有錯誤時只計一次失敗、略過 Stage 2 並結束為 ERROR。"""
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    session = _FakeSession()
+    stage2_called = []
+
+    def unexpected_stage2(*args, **kwargs):
+        stage2_called.append(True)
+        yield {"progress": 1.0}
+
+    monkeypatch.setattr(merge_service, "ensure_pipeline_logging", lambda: None)
+    monkeypatch.setattr(merge_service, "UI_LOG_HANDLER", _FakeUIHandler())
+    monkeypatch.setattr(
+        merge_service,
+        "merge_zhcn_to_zhtw_from_folder",
+        lambda *args, **kwargs: iter([
+            {"error": True, "log": "first stage error"},
+            {"error": True, "log": "second stage error"},
+        ]),
+    )
+    monkeypatch.setattr(merge_service, "merge_extracted_to_assets", unexpected_stage2)
+    monkeypatch.setattr(
+        merge_service, "load_config",
+        lambda: {"lang_merger": {"enable_extracted_to_assets_merge": True}},
+    )
+
+    results = list(merge_service.run_merge_folder_batch_service(
+        str(input_dir), str(output_dir), session, only_process_lang=True
+    ))
+
+    summary = results[-1]["summary"]
+    assert summary["success_folders"] == 0
+    assert summary["failed_folders"] == summary["total_folders"] == 1
+    assert "first stage error" in summary["failed_folders_list"][0]["error"]
+    assert "second stage error" in summary["failed_folders_list"][0]["error"]
+    assert results[-1]["error"] is True
+    assert session.error is True
+    assert session._summary == summary
+    assert session.finish_called is False
+    assert not stage2_called
+
+
+def test_stage2_soft_error_yields_final_error_lifecycle(tmp_path: Path, monkeypatch):
+    """Stage 2 失敗仍須摘要、ERROR 狀態及最後一筆 yield。"""
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    session = _FakeSession()
+
+    monkeypatch.setattr(merge_service, "ensure_pipeline_logging", lambda: None)
+    monkeypatch.setattr(merge_service, "UI_LOG_HANDLER", _FakeUIHandler())
+    monkeypatch.setattr(
+        merge_service,
+        "merge_zhcn_to_zhtw_from_folder",
+        lambda *args, **kwargs: iter([{"progress": 1.0}]),
+    )
+    monkeypatch.setattr(
+        merge_service,
+        "merge_extracted_to_assets",
+        lambda *args, **kwargs: iter([
+            {"progress": 0.5},
+            {"progress": 1.0, "error": True, "log": "assets write failed"},
+        ]),
+    )
+    monkeypatch.setattr(
+        merge_service, "load_config",
+        lambda: {"lang_merger": {"enable_extracted_to_assets_merge": True}},
+    )
+
+    results = list(merge_service.run_merge_folder_batch_service(
+        str(input_dir), str(output_dir), session, only_process_lang=True
+    ))
+
+    assert results[-1]["progress"] == 1.0
+    assert results[-1]["error"] is True
+    summary = results[-1]["summary"]
+    assert summary["success_folders"] == 0
+    assert summary["failed_folders"] == 1
+    assert "assets write failed" in summary["failed_folders_list"][0]["error"]
+    assert session.error is True
+    assert session._summary == summary
+    assert session.finish_called is False

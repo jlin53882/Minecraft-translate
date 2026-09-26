@@ -227,10 +227,16 @@ def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-        f.write("\n")
-    os.replace(tmp_path, path)
+    try:
+        with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+            f.write("\n")
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError as cleanup_error:
+            log_warning(f"[MergeExt→Assets] 無法清理暫存檔 {tmp_path}: {cleanup_error}")
 
 
 def _cleanup_single_mod_extracted(lang_output_dir: Path, modid: str) -> bool:

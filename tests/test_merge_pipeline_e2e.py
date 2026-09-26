@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.services_impl.pipelines.merge_service import run_merge_folder_batch_service
+from app.services_impl.pipelines import merge_service
 
 
 class TestMergePipelineE2E:
@@ -66,8 +67,8 @@ class TestMergePipelineE2E:
         lang_output = output_dir / "lang_output"
         assert lang_output.exists()
 
-    def test_pipeline_with_multiple_mods(self, tmp_path: Path):
-        """e2e: 多個 mod, 確認各自獨立合併（Stage 1 輸出）。"""
+    def test_pipeline_with_multiple_mods(self, tmp_path: Path, monkeypatch):
+        """e2e: 多個 mod 完整經過 Stage 1/2 並輸出非空 assets。"""
         input_dir = tmp_path / "input"
         input_dir.mkdir()
         output_dir = tmp_path / "output"
@@ -76,9 +77,18 @@ class TestMergePipelineE2E:
         for mod in ("ae2ct", "aether", "ars"):
             extracted = input_dir / f"{mod}_extracted" / mod / "lang"
             extracted.mkdir(parents=True)
-            (extracted / "zh_cn.json").write_text(
-                json.dumps({f"key.{mod}": f"中文_{mod}"}), encoding="utf-8"
-            )
+            (extracted / "zh_cn.json").write_text(json.dumps({
+                f"key.{mod}": f"中文_{mod}",
+            }), encoding="utf-8")
+            (extracted / "en_us.json").write_text(json.dumps({
+                f"key.{mod}.pending": f"English {mod}",
+            }), encoding="utf-8")
+
+        monkeypatch.setattr(
+            merge_service,
+            "load_config",
+            lambda: {"lang_merger": {"enable_extracted_to_assets_merge": True}},
+        )
 
         session = MagicMock()
         session.progress = 1.0
@@ -97,9 +107,20 @@ class TestMergePipelineE2E:
         last = results[-1]
         assert not last.get("error", False)
 
-        # Stage 1 應生成 lang_output 檔案
-        lang_output = output_dir / "lang_output"
-        assert lang_output.exists()
+        summary = last["summary"]
+        assert summary["success_folders"] == 1
+        assert summary["failed_folders"] == 0
+
+        for mod in ("ae2ct", "aether", "ars"):
+            assets_tw = output_dir / "lang_output" / "assets" / mod / "lang" / "zh_tw.json"
+            assert assets_tw.exists(), f"Stage 2 未產生 {assets_tw}"
+            assert json.loads(assets_tw.read_text(encoding="utf-8")), f"{assets_tw} 不可為空"
+
+            pending = (
+                output_dir / "lang_output" / "待翻譯"
+                / f"{mod}_extracted" / mod / "lang" / "en_us.json"
+            )
+            assert pending.exists(), f"Stage 2 cleanup 誤刪 pending source: {pending}"
 
     def test_pipeline_skips_stage2_when_enable_extracted_merge_false(self, tmp_path: Path, monkeypatch):
         """e2e: enable_extracted_to_assets_merge=False 時不跑 Stage 2。"""

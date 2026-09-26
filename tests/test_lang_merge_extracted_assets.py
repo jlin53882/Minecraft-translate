@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from translation_tool.core import lang_merge_extracted_assets as extracted_assets
 from translation_tool.core.lang_merge_extracted_assets import (
     _infer_modid_from_lang_file,
     _load_existing_assets,
@@ -581,17 +582,11 @@ class TestWriteJsonAtomic:
         target = tmp_path / "subdir" / "test.json"
         target.parent.mkdir(parents=True)
 
-        _orig_replace = _os.replace
-
-        def _fail_replace(src, dst, **kwargs):
-            _orig_replace(src, dst)  # 讓檔案確實被寫入
-            raise OSError("模擬 os.replace 失敗")
-
-        with patch("os.replace", side_effect=_fail_replace):
-            try:
-                _write_json_atomic(target, {"key": "value"})
-            except Exception:
-                pass
+        with patch(
+            "translation_tool.core.lang_merge_extracted_assets.os.replace",
+            side_effect=OSError("replace failed"),
+        ), pytest.raises(OSError, match="replace failed"):
+            _write_json_atomic(target, {"key": "value"})
 
         tmp_file = target.with_suffix(target.suffix + ".tmp")
         assert not tmp_file.exists(), f".tmp 應被清理,但存在: {tmp_file}"
@@ -635,3 +630,34 @@ class TestCleanupSingleModExtracted:
 
         _cleanup_single_mod_extracted(tmp_path, "nonexistent")
         # 不 crash 即成功
+
+    def test_cleanup_preserves_pending_source_and_other_mod(self, tmp_path: Path):
+        """清理 primary extracted 後保留待翻譯來源及其他 mod。"""
+        primary = tmp_path / "demo_extracted" / "demo" / "lang" / "zh_cn.json"
+        pending = tmp_path / "待翻譯" / "demo_extracted" / "demo" / "lang" / "en_us.json"
+        other = tmp_path / "other_extracted" / "other" / "lang" / "zh_cn.json"
+        for source in (primary, pending, other):
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("{}", encoding="utf-8")
+
+        assert _cleanup_single_mod_extracted(tmp_path, "demo") is True
+
+        assert not primary.exists()
+        assert pending.exists()
+        assert other.exists()
+
+    def test_stage2_write_failure_preserves_extracted_source(self, tmp_path: Path, monkeypatch):
+        """assets 寫入失敗時不清除 extracted source。"""
+        source = tmp_path / "demo_extracted" / "demo" / "lang" / "zh_cn.json"
+        source.parent.mkdir(parents=True)
+        source.write_text('{"key": "中文"}', encoding="utf-8")
+        monkeypatch.setattr(
+            extracted_assets,
+            "_write_json_atomic",
+            lambda *args, **kwargs: (_ for _ in ()).throw(OSError("write failed")),
+        )
+
+        list(merge_extracted_to_assets(tmp_path))
+
+        assert source.exists()
+        assert not (tmp_path / "assets" / "demo" / "lang" / "zh_tw.json").exists()

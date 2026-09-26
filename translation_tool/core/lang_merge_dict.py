@@ -158,9 +158,10 @@ def merge_lang_dicts(
             continue
 
         # 4. 全英文 → pending
-        english_source = en_val or cn_val or tw_val
-        if english_source is None:
-            english_source = ""
+        english_source = next(
+            (value for value in (en_val, cn_val, tw_val) if value is not None),
+            "",
+        )
         # 空字串不是待翻譯,跳過
         if isinstance(english_source, str) and english_source.strip() == "":
             continue
@@ -168,9 +169,7 @@ def merge_lang_dicts(
             pending[key] = english_source
             continue
 
-        # 5. fallback - 如果都不是 CJK,設為 english_source
-        if english_source is None:
-            english_source = ""
+        # 5. fallback - 保留第一個非 None 的來源值
         final_tw.setdefault(key, english_source)
 
     return final_tw, pending
