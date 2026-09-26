@@ -718,9 +718,9 @@ class ConfigView(ft.Column):
         batch_row_3 = ft.Row(
             [
                 ft.Column(
-                    [self.controls_map["lm_translator.rpm_cooldown_sec"]], expand=1
+                    [self.controls_map["lm_translator.rpm_cooldown_sec"]], expand=2
                 ),
-                ft.Column([], expand=3),
+                ft.Column([], expand=2),
             ]
         )
         return self._build_card(
