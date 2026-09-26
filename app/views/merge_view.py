@@ -750,6 +750,10 @@ class MergeView(ft.Column):
 
         async def _sync_ui():
             """在 UI thread 內執行 update。"""
+            # poller 可能已排入多個 _sync_ui；DONE/ERROR 處理過後的就直接略過，
+            # 避免摘要視窗重複跳出
+            if self._ui_stop.is_set():
+                return
             try:
                 snap = self.session.snapshot()
                 status = snap["status"]

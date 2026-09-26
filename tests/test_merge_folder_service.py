@@ -350,3 +350,23 @@ def test_production_stage2_write_failure_reaches_error_lifecycle(
         assert not sources[modid].exists()
     assert not (lang_output_dir / "assets" / "bad_b" / "lang" / "zh_tw.json").exists()
     assert sources["bad_b"].exists()
+
+
+def test_count_output_files_handles_windows_separators(tmp_path: Path, monkeypatch):
+    """Windows relpath 回傳反斜線時,assets/ 仍應計入 assets 而非 lang_output。"""
+    assets_lang = tmp_path / "lang_output" / "assets" / "foo" / "lang"
+    assets_lang.mkdir(parents=True)
+    (assets_lang / "zh_tw.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "lang_output" / "other.json").write_text("{}", encoding="utf-8")
+
+    real_relpath = merge_service.os.path.relpath
+    monkeypatch.setattr(
+        merge_service.os.path,
+        "relpath",
+        lambda p, start: real_relpath(p, start).replace("/", "\\"),
+    )
+
+    counts = merge_service._count_output_files(str(tmp_path))
+
+    assert counts["assets"] == 1
+    assert counts["lang_output"] == 1

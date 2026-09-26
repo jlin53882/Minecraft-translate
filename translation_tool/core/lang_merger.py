@@ -222,7 +222,8 @@ def merge_zhcn_to_zhtw_from_zip(
                 max_workers=max_workers
             ) as executor:
                 # ✅ 優化點：在啟動 ThreadPool 前，先完成一次性的路徑標準化快取
-                all_files_cache = [n.lower().replace("\\", "/") for n in zf.namelist()]
+                all_names_raw = zf.namelist()
+                all_files_cache = [n.lower().replace("\\", "/") for n in all_names_raw]
 
                 # 提交每個 mod 的處理（這裡每個 mod 的 paths 會包含 zh_cn/zh_tw/en_us 任一或多個）
                 for mod_key, paths in mods_to_process.items():
@@ -235,7 +236,9 @@ def merge_zhcn_to_zhtw_from_zip(
                             lang_output_dir,
                             must_translate_dir,
                             errordata_output_dir,
-                            all_files_cache=all_files_cache,
+                            # 需保留原始大小寫：用於偵測/剝離包裝前綴，
+                            # 小寫版 all_files_cache 會讓 startswith 比對失敗
+                            all_files_cache=all_names_raw,
                         )
                     )
 
@@ -472,7 +475,8 @@ def merge_zhcn_to_zhtw_from_folder(
                         lang_output_dir,
                         must_translate_dir,
                         errordata_output_dir,
-                        all_files_cache=all_files_cache,
+                        # 需保留原始大小寫（同 ZIP 模式說明）
+                        all_files_cache=all_names,
                     )
                 )
 

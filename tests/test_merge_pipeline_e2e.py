@@ -183,3 +183,47 @@ class TestMergePipelineE2E:
         assert not assets_dir.exists(), (
             f"Stage 2 should be skipped, but {assets_dir} exists"
         )
+
+
+class TestWrapperPrefixCasePreserved:
+    """回歸:all_files_cache 小寫化後,含大寫的包裝資料夾前綴不再被剝離。
+
+    Stage 1 應把 `MyPack/assets/foo/lang/zh_cn.json` 輸出到
+    `lang_output/assets/foo/lang/zh_tw.json`(剝掉唯一頂層包裝資料夾)。
+    """
+
+    @staticmethod
+    def _make_source(root: Path) -> Path:
+        lang_dir = root / "MyPack" / "assets" / "foo" / "lang"
+        lang_dir.mkdir(parents=True)
+        src = lang_dir / "zh_cn.json"
+        src.write_text(json.dumps({"a": "苹果"}, ensure_ascii=False), encoding="utf-8")
+        return src
+
+    def test_folder_mode_strips_mixed_case_wrapper(self, tmp_path: Path):
+        from translation_tool.core.lang_merger import merge_zhcn_to_zhtw_from_folder
+
+        input_dir = tmp_path / "in"
+        self._make_source(input_dir)
+        out = tmp_path / "out"
+        for _ in merge_zhcn_to_zhtw_from_folder(str(input_dir), str(out)):
+            pass
+
+        assert (out / "lang_output" / "assets" / "foo" / "lang" / "zh_tw.json").exists()
+        assert not (out / "lang_output" / "MyPack").exists()
+
+    def test_zip_mode_strips_mixed_case_wrapper(self, tmp_path: Path):
+        import zipfile
+
+        from translation_tool.core.lang_merger import merge_zhcn_to_zhtw_from_zip
+
+        src = self._make_source(tmp_path / "src")
+        zip_path = tmp_path / "pack.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.write(src, "MyPack/assets/foo/lang/zh_cn.json")
+        out = tmp_path / "out"
+        for _ in merge_zhcn_to_zhtw_from_zip(str(zip_path), str(out)):
+            pass
+
+        assert (out / "lang_output" / "assets" / "foo" / "lang" / "zh_tw.json").exists()
+        assert not (out / "lang_output" / "MyPack").exists()

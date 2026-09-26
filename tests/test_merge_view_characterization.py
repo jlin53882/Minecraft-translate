@@ -274,3 +274,33 @@ def test_show_merge_summary_handles_large_failed_list(monkeypatch):
     except Exception as e:
         error = e
     assert error is None, f"_show_merge_summary crashed with 472 failures: {error}"
+
+
+def test_ui_poller_shows_summary_once_when_sync_tasks_queue_up(monkeypatch):
+    """poller 排入多個 _sync_ui 時,DONE 後的摘要視窗只應跳出一次。"""
+    import asyncio
+    import threading
+
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
+    page = mock_page()
+    queued = []
+    enough = threading.Event()
+
+    def _run_task(fn):
+        queued.append(fn)
+        if len(queued) >= 3:
+            enough.set()
+
+    page.run_task = _run_task
+    view = merge_view.MergeView(page, mock_filepicker())
+    shown = []
+    monkeypatch.setattr(view, "_show_merge_summary", lambda s: shown.append(s))
+
+    view._start_ui_poller()
+    assert enough.wait(timeout=5)
+    for fn in list(queued):
+        asyncio.run(fn())
+
+    assert len(shown) == 1
+    assert view._ui_stop.is_set()

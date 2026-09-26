@@ -37,7 +37,8 @@ def _count_output_files(out_dir: str) -> dict:
     if not os.path.exists(out_dir):
         return result
     for root, dirs, files in os.walk(out_dir):
-        rel = os.path.relpath(root, out_dir)
+        # Windows 的 relpath 用反斜線，統一成 "/" 再比對
+        rel = os.path.relpath(root, out_dir).replace("\\", "/")
         if rel.startswith("lang_output/assets"):
             result["assets"] += len(files)
         elif rel.startswith("lang_output"):
