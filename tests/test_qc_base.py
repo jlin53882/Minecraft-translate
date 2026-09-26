@@ -39,6 +39,10 @@ class _MockListView:
         # 模擬行為：把 log text append 進 controls
         self.controls.append(text)
 
+    def add_many(self, items):
+        for text, level in items:
+            self.add(text, level=level)
+
     def clear(self):
         self.controls.clear()
 
@@ -179,3 +183,63 @@ def test_task_worker_handles_error():
     # 顏色可能為 None（如果 finally 已執行）或非 None（如果在 error 設定後）
     # 這裡只驗證不拋例外
     assert True  # 如果走到這行表示 task_worker 能處理 error 欄位
+
+
+class _LoopPage(_MockPage):
+    """模擬 Flet：UI 更新只能透過 run_task 交給 event loop。"""
+
+    def __init__(self):
+        super().__init__()
+        self.tasks = []
+
+    def run_task(self, handler, *args):
+        import asyncio
+        import inspect
+
+        assert inspect.iscoroutinefunction(handler)
+        self.tasks.append(handler)
+        asyncio.run(handler(*args))
+
+
+def test_task_worker_batches_ui_updates_and_levels():
+    """大量 log 不可每行 page.update；錯誤行要標成 error 等級。"""
+    page = _LoopPage()
+    progress_bar = _MockProgressBar()
+    log_view = _MockListView()
+    levels = []
+    log_view.add = lambda text, level="info", source="ui": levels.append(level)
+    qc_base = QCBase(page, progress_bar, log_view)
+    done = threading.Event()
+
+    def many_lines(*args):
+        for i in range(2000):
+            yield {"log": f"line {i}", "progress": i / 2000}
+        yield {"log": "❌ 錯誤：找不到檔案"}
+
+    qc_base.task_worker(many_lines, tuple(), on_complete=done.set)
+
+    assert done.wait(timeout=5.0)
+    assert len(levels) == 2001
+    assert levels[-1] == "error"
+    assert page.updated < 50
+
+
+def test_task_worker_reports_exception_and_restores_controls():
+    page = _LoopPage()
+    progress_bar = _MockProgressBar()
+    log_view = _MockListView()
+    qc_base = QCBase(page, progress_bar, log_view)
+    control = _MockControl()
+    done = threading.Event()
+
+    def broken(*args):
+        yield {"log": "start"}
+        raise ValueError("boom")
+
+    qc_base.task_worker(
+        broken, tuple(), on_complete=done.set, controls_to_disable=[control]
+    )
+
+    assert done.wait(timeout=5.0)
+    assert control.disabled is False
+    assert any("boom" in c for c in log_view.controls)

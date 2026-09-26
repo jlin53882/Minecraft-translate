@@ -54,7 +54,7 @@ class CacheQueryView(ft.Container):
                 ft.dropdown.Option("ALL", "全部"),
             ],
         )
-        self.dd_query_mode.on_change = lambda e: self._on_mode_change()
+        self.dd_query_mode.on_select = lambda e: self._on_mode_change()
 
         # 分類選擇
         self.dd_query_type = ft.Dropdown(
@@ -63,7 +63,7 @@ class CacheQueryView(ft.Container):
             tooltip="選擇要查詢的分類",
             options=[ft.dropdown.Option("ALL", "全部")],
         )
-        self.dd_query_type.on_change = lambda e: self._on_type_change()
+        self.dd_query_type.on_select = lambda e: self._on_type_change()
 
         # 按鈕
         self.btn_query_search = ft.Button(

@@ -188,7 +188,7 @@ class RulesView(ft.Column):
             border_color=theme.OUTLINE,
             content_padding=10,
         )
-        self.sort_box.on_change = self.on_sort_change
+        self.sort_box.on_select = self.on_sort_change
 
         # 4. 表格
         self.rules_table = ft.DataTable(

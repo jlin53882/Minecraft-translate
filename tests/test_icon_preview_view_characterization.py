@@ -229,9 +229,9 @@ def test_icon_preview_view_mod_search_tf_on_change():
     assert view.mod_search_tf.on_change is not None
 
 
-def test_icon_preview_view_page_size_selector_on_change():
+def test_icon_preview_view_page_size_selector_on_select():
     view = IconPreviewView(mock_page())
-    assert view.page_size_selector.on_change is not None
+    assert view.page_size_selector.on_select is not None
 
 
 def test_icon_preview_view_mod_search_status_exists():

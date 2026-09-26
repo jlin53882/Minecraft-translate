@@ -79,3 +79,36 @@ def test_extract_from_jar_writes_non_assets_under_extracted_folder(tmp_path: Pat
 
     assert result == {'status': 'success', 'extracted': 1, 'skipped': 0}
     assert (tmp_path / 'out' / 'demo_extracted' / 'lang' / 'en_us.json').exists()
+
+
+def test_corrupted_jar_is_counted_as_failure(tmp_path: Path):
+    """損毀的 JAR 不可被靜默跳過：最終 stats 的 failures 與 log 都要反映。"""
+    import re
+
+    from translation_tool.core.jar_processor_extract import run_extraction_process_impl
+
+    mods = tmp_path / "mods"
+    mods.mkdir()
+    good = mods / "good-1.0.jar"
+    with zipfile.ZipFile(good, "w") as zf:
+        zf.writestr("assets/good/lang/en_us.json", '{"a": "b"}')
+    bad = mods / "broken-1.0.jar"
+    bad.write_bytes(b"not a zip file at all")
+
+    regex = re.compile(r"assets/[^/]+/lang/en_us\.json$")
+    updates = list(
+        run_extraction_process_impl(
+            str(mods),
+            str(tmp_path / "out"),
+            regex,
+            "Lang",
+            find_jar_files_fn=lambda d: [str(good), str(bad)],
+            extract_from_jar_fn=jar_processor._extract_from_jar,
+        )
+    )
+
+    final = updates[-1]
+    assert final["stats"]["failures"] == 1
+    assert final["stats"]["success"] == 1
+    assert "broken-1.0.jar" in final["log"]
+    assert any("[ERROR]" in (u.get("log") or "") and "broken-1.0.jar" in u["log"] for u in updates)

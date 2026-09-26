@@ -88,7 +88,8 @@ class KeyboardShortcutHandler:
         # F 鍵：搜尋
         if key == "f":
             if self._search_field:
-                self._search_field.focus()
+                # Flet 1.0 的 focus() 是 coroutine，需交給 event loop 執行
+                self.page.run_task(self._search_field.focus)
             return
 
         # S 鍵：儲存

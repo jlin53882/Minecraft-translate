@@ -234,6 +234,7 @@ def run_extraction_process_impl(
     processed_count = 0
     total_extracted = 0
     total_skipped = 0
+    failed_jars: list[str] = []
     cpu_count = os.cpu_count() or 2
     config_workers = load_config().get("translator", {}).get("parallel_execution_workers")
     if isinstance(config_workers, int) and config_workers > 0:
@@ -261,9 +262,19 @@ def run_extraction_process_impl(
             prog = processed_count / total_jars
             try:
                 result = future.result()
-                if result['status'] == 'success':
-                    total_extracted += result['extracted']
-                    total_skipped += result['skipped']
+                jar_name = os.path.basename(jar_path)
+                if result['status'] != 'success':
+                    # 損毀或無法讀取的 JAR 必須計入失敗，不能被當成成功
+                    failed_jars.append(jar_name)
+                    yield {
+                        'progress': prog,
+                        'current': processed_count,
+                        'total': total_jars,
+                        'log': f"[ERROR] 無法提取 {jar_name}（JAR 可能已損毀或無法讀取）",
+                    }
+                    continue
+                total_extracted += result['extracted']
+                total_skipped += result['skipped']
                 log.info("[%s/%s] %s queue=%.1fs wall=%.1fs",
                          processed_count, total_jars, os.path.basename(jar_path), queue_time, wall_time)
                 yield {
@@ -273,6 +284,7 @@ def run_extraction_process_impl(
                     'log': f"[{processed_count}/{total_jars}] {os.path.basename(jar_path)}",
                 }
             except Exception as exc:
+                failed_jars.append(os.path.basename(jar_path))
                 log_error("提取 %s 時產生例外: %s (wall=%.1fs)", os.path.basename(jar_path), exc, wall_time)
                 yield {
                     'progress': prog,
@@ -281,23 +293,25 @@ def run_extraction_process_impl(
                     'log': f"[ERROR] 提取 {os.path.basename(jar_path)} 時產生例外",
                 }
 
-    log.info(
-        "--- %s 提取完成！ ---\n已檢查 %s/%s 個 JAR 檔案。\n  - 新提取或更新的檔案: %s 個\n  - 因內容相同而跳過的檔案: %s 個",
-        process_name,
-        processed_count,
-        total_jars,
-        total_extracted,
-        total_skipped,
+    summary = (
+        f"--- {process_name} 提取完成！ ---\n已檢查 {processed_count}/{total_jars} 個 JAR 檔案。\n"
+        f"  - 新提取或更新的檔案: {total_extracted} 個\n"
+        f"  - 因內容相同而跳過的檔案: {total_skipped} 個"
     )
-    yield {
-            'progress': 1.0,
-            'current': processed_count,
-            'total': total_jars,
-            'log': f"--- {process_name} 提取完成！ ---\n已檢查 {processed_count}/{total_jars} 個 JAR 檔案。\n  - 新提取或更新的檔案: {total_extracted} 個\n  - 因內容相同而跳過的檔案: {total_skipped} 個",
-            'stats': {
-                'success': total_extracted,
-                'warnings': total_skipped,
-                'failures': 0,
-                'total_files': total_extracted,
-            },
-        }
+    if failed_jars:
+        summary += f"\n  - 無法提取的 JAR: {len(failed_jars)} 個（{', '.join(failed_jars[:10])}"
+        summary += "…）" if len(failed_jars) > 10 else "）"
+    log.info(summary)
+    final = {
+        'progress': 1.0,
+        'current': processed_count,
+        'total': total_jars,
+        'log': summary,
+        'stats': {
+            'success': total_extracted,
+            'warnings': total_skipped,
+            'failures': len(failed_jars),
+            'total_files': total_extracted,
+        },
+    }
+    yield final

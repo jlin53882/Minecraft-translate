@@ -183,14 +183,14 @@ class CacheView(ft.Column):
                 ft.dropdown.Option("ALL", "全部"),
             ],
         )
-        self.dd_query_mode.on_change = self._on_query_mode_change
+        self.dd_query_mode.on_select = self._on_query_mode_change
         self.dd_query_type = ft.Dropdown(
             width=180,
             value="ALL",
             tooltip="選擇要查詢的分類（例如 lang / patchouli）",
             options=[ft.dropdown.Option("ALL", "全部")],
         )
-        self.dd_query_type.on_change = self._on_query_type_change
+        self.dd_query_type.on_select = self._on_query_type_change
         self.btn_query_search = ft.Button(
             "搜尋", icon=ft.Icons.SEARCH, on_click=self._on_query_search
         )
@@ -585,7 +585,7 @@ class CacheView(ft.Column):
                 ft.dropdown.Option("200", "200"),
             ],
         )
-        self.dd_page_size.on_change = self._on_page_size_change
+        self.dd_page_size.on_select = self._on_page_size_change
         self.query_page_info = ft.Text("第 1 頁 / 共 1 頁")
         self.query_total_info = ft.Text("共 0 筆")
 
@@ -3231,8 +3231,8 @@ class CacheView(ft.Column):
             self.query_result_list.controls.append(
                 empty_state(
                     icon=ft.Icons.SEARCH_OFF,
-                    title="无搜索结果",
-                    message="请尝试其他关键词或调整筛选条件",
+                    title="沒有搜尋結果",
+                    message="請嘗試其他關鍵字或調整篩選條件",
                 )
             )
         else:

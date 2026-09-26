@@ -4,11 +4,28 @@
 維護注意：本模組提供 task_worker 給各 QC 檢查器使用。
 """
 
-import flet as ft
 import threading
-from typing import Callable, Tuple, Any, Optional, List
+import time
+import traceback
+from collections.abc import Callable
+from typing import Any
+
+import flet as ft
+
 from app.ui import theme
 from app.views._log import LogView
+from translation_tool.utils.log_unit import log_error
+
+_UI_FLUSH_INTERVAL_SEC = 0.2
+
+
+def _guess_level(line: str) -> str:
+    """依訊息內容推測 log 等級（service 只回傳字串）。"""
+    if "錯誤" in line or "失敗" in line or "ERROR" in line or "❌" in line:
+        return "error"
+    if "警告" in line or "WARN" in line or "⚠" in line:
+        return "warning"
+    return "info"
 
 
 class QCBase:
@@ -36,9 +53,9 @@ class QCBase:
     def task_worker(
         self,
         service_func: Callable[..., Any],
-        args_tuple: Tuple[Any, ...],
-        on_complete: Optional[Callable[[], None]] = None,
-        controls_to_disable: Optional[List[ft.Control]] = None,
+        args_tuple: tuple[Any, ...],
+        on_complete: Callable[[], None] | None = None,
+        controls_to_disable: list[ft.Control] | None = None,
     ):
         """執行品質檢查服務工作執行緒。
 
@@ -54,41 +71,67 @@ class QCBase:
                 ctrl.disabled = True
             self._page.update()
 
-        def run():
-            try:
-                for update in service_func(*args_tuple):
-                    log_msg = update.get("log", "")
-                    for line in log_msg.split("\n"):
-                        if line.strip():
-                            # PR refactor/unified-log-view: 透過 LogView.add
-                            # 顏色由 LogView 根據 level 從 theme 取
-                            self.log_view.add(line, level="info")
+        pending: list[tuple[str, str]] = []
+        state: dict = {"progress": None, "error": False, "last_flush": 0.0}
 
-                    if "progress" in update:
-                        self.progress_bar.value = update["progress"]
-                    if update.get("error"):
-                        self.progress_bar.color = theme.ERROR
-
-                    # LogView 是 ft.Container，scroll_to 在內部 _list_view 上
-                    self.log_view._list_view.scroll_to(offset=-1, duration=100)
-                    self._page.update()
-            finally:
-                # 重置 ProgressBar
+        def apply_ui(lines, progress, error, done=False):
+            if lines:
+                self.log_view.add_many(lines)
+            if progress is not None:
+                self.progress_bar.value = progress
+            if error:
+                self.progress_bar.color = theme.ERROR
+            if done:
                 self.progress_bar.value = 0
                 self.progress_bar.color = None
-                self._page.update()
-
-                # 恢復控制項
                 if controls_to_disable:
                     for ctrl in controls_to_disable:
                         ctrl.disabled = False
-                    self.page.update()
-
-            # 執行完成回調
-            if on_complete:
+            self._page.update()
+            if done and on_complete:
                 on_complete()
 
+        def flush(done=False):
+            lines = pending[:]
+            pending.clear()
+            progress, error = state["progress"], state["error"]
+            state["progress"] = None
+            state["last_flush"] = time.monotonic()
+            self._run_on_ui(apply_ui, lines, progress, error, done)
+
+        def run():
+            try:
+                for update in service_func(*args_tuple):
+                    for line in str(update.get("log") or "").split("\n"):
+                        if line.strip():
+                            pending.append((line, _guess_level(line)))
+                    if "progress" in update:
+                        state["progress"] = update["progress"]
+                    if update.get("error"):
+                        state["error"] = True
+                    # 節流：背景任務可能每秒產生上千行，只定期交給 UI 執行緒刷新
+                    if time.monotonic() - state["last_flush"] >= _UI_FLUSH_INTERVAL_SEC:
+                        flush()
+            except Exception as ex:  # noqa: BLE001 - 背景執行緒需把錯誤回報到 UI
+                log_error(f"QC 任務失敗: {ex}\n{traceback.format_exc()}")
+                pending.append((f"[錯誤] 任務執行失敗：{ex}", "error"))
+                state["error"] = True
+            finally:
+                flush(done=True)
+
         threading.Thread(target=run, daemon=True).start()
+
+    def _run_on_ui(self, fn: Callable[..., None], *args: Any) -> None:
+        """把 UI 更新排到 Flet event loop（背景執行緒直接 page.update 不安全）。"""
+        run_task = getattr(self._page, "run_task", None)
+        if run_task is None:
+            fn(*args)
+            return
+
+        async def _apply():
+            fn(*args)
+
+        run_task(_apply)
 
     @property
     def page(self):

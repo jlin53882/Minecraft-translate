@@ -131,7 +131,7 @@ def test_rules_view_search_box_on_change_exists(monkeypatch):
     view = RulesView(mock_page())
 
     assert view.search_box.on_change is not None
-    assert view.sort_box.on_change is not None
+    assert view.sort_box.on_select is not None
 
 
 def test_rules_view_show_snack_bar_adds_to_overlay(monkeypatch):
