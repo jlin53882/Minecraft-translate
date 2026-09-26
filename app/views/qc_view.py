@@ -10,7 +10,7 @@ from typing import Callable, Tuple, Any
 # 導入 UI 主題
 from app.ui import theme
 from app.ui.snack import show_snack
-from translation_tool.utils.log_unit import log_info
+from translation_tool.utils.log_unit import log_debug, log_info
 
 # 導入我們需要的服務
 from app.services import (
@@ -46,10 +46,13 @@ class QCView(ft.Column):
         # --- 共用的日誌 UI ---
         self.progress_bar = ft.ProgressBar(value=0, visible=False)
         # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器）
+        # 本頁可捲動；日誌給固定高度（原本 expand 在捲動欄內只剩一行高）
         self.log_view = LogView(
             page=self._page,
             mode="append",
             max_lines=2000,
+            height=360,
+            expand=False,
         )
 
         # --- 建立 QCBase 任務執行器 ---
@@ -283,6 +286,12 @@ class QCView(ft.Column):
             ctrl.disabled = disabled
         self.page.update()
 
+    async def _scroll_to_log(self):
+        try:
+            await self.scroll_to(offset=-1, duration=300)
+        except Exception as ex:  # noqa: BLE001 - 捲動失敗不影響任務
+            log_debug(f"[QC] 捲動到日誌失敗: {ex}")
+
     def start_task(self, task_type: str):
         """處理開始品質檢查任務"""
         self.log_view.clear()
@@ -291,6 +300,10 @@ class QCView(ft.Column):
         self.progress_bar.visible = True
         self.set_controls_disabled(True)
         self.page.update()
+        # 日誌在頁面最下方：開始任務時自動捲到底，讓使用者看得到進度
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is not None:
+            run_task(self._scroll_to_log)
 
         target_func: Callable[..., Any] | None = None
         args: Tuple[str, ...] = tuple()

@@ -1163,11 +1163,8 @@ class CacheView(ft.Column):
             self._finish_mount(self._fetch_overview())
             return
 
-        self.overview_status.value = "狀態：載入中…"
-        self.overview_status.color = theme.GREY_700
-        self._refresh_disabled_state()
         try:
-            self.update()
+            self._set_state(True, "LOADING", "trace: 載入快取總覽…")
         except Exception:  # noqa: BLE001, S110 - 尚未完成掛載時略過
             pass
 
@@ -1191,6 +1188,12 @@ class CacheView(ft.Column):
             if error is not None:
                 self._append_log(f"[WARN] 讀取總覽失敗：{error}")
                 self._append_log(tb)
+            if self.ui_busy and self.busy_reason == "LOADING":
+                self.ui_busy = False
+                self.busy_reason = "READY"
+                self.overview_status.value = "狀態：就緒"
+                self.overview_status.color = theme.GREEN_700
+                self.overview_trace.value = "trace: 總覽載入完成"
             self._refresh_overview_ui(data)
             self._refresh_query_type_options()
             self._render_query_type_shard_page()
@@ -1341,6 +1344,8 @@ class CacheView(ft.Column):
                 label = "儲存中"
             elif reason == "ROTATING":
                 label = "輪替分片中"
+            elif reason == "LOADING":
+                label = "載入中"
             else:
                 label = "處理中"
             self.overview_status.value = f"狀態：{label}..."

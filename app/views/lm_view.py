@@ -117,29 +117,43 @@ class LMView(ft.Column):
                     spacing=10,
                 ),
             ),
-            styled_card(
-                title="翻譯選項",
-                icon=ft.Icons.FACT_CHECK,
-                content=ft.Column(
-                    [
-                        self.dry_run_switch,
-                        self.export_lang_checkbox,
-                        self.write_new_cache_switch,
-                        ft.Row([self.start_button, self.cancel_button], spacing=10),
-                    ],
-                    spacing=8,
-                ),
-            ),
-            styled_card(
-                title="執行狀態",
-                icon=ft.Icons.TIMELINE,
-                content=ft.Column(
-                    [
-                        ft.Row([self.status_chip], wrap=True),
-                        self.progress_bar,
-                    ],
-                    spacing=10,
-                ),
+            # 選項與狀態並排：1280×900 下原本垂直堆疊，日誌只剩約 4 行
+            ft.ResponsiveRow(
+                [
+                    ft.Container(
+                        col={"xs": 12, "md": 7},
+                        content=styled_card(
+                            title="翻譯選項",
+                            icon=ft.Icons.FACT_CHECK,
+                            content=ft.Column(
+                                [
+                                    self.dry_run_switch,
+                                    self.export_lang_checkbox,
+                                    self.write_new_cache_switch,
+                                    ft.Row(
+                                        [self.start_button, self.cancel_button],
+                                        spacing=10,
+                                    ),
+                                ],
+                                spacing=8,
+                            ),
+                        ),
+                    ),
+                    ft.Container(
+                        col={"xs": 12, "md": 5},
+                        content=styled_card(
+                            title="執行狀態",
+                            icon=ft.Icons.TIMELINE,
+                            content=ft.Column(
+                                [
+                                    ft.Row([self.status_chip], wrap=True),
+                                    self.progress_bar,
+                                ],
+                                spacing=10,
+                            ),
+                        ),
+                    ),
+                ],
             ),
             styled_card(
                 title="執行日誌",

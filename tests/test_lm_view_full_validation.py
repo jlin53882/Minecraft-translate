@@ -291,15 +291,20 @@ def test_set_status_updates_chip_label_and_color(monkeypatch):
 # ============================================================
 
 def test_controls_contains_all_sections(monkeypatch):
-    """驗證 LMView.controls 包含 4 個 styled_card 區塊。"""
+    """驗證 LMView 版面：路徑設定 / （翻譯選項 + 執行狀態 並排）/ 執行日誌。
+
+    Task 10 / C3：選項與狀態並排，讓日誌在 1280×900 下有足夠高度。
+    """
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     view = lm_view.LMView(mock_page(), mock_filepicker())
 
-    assert len(view.controls) == 4, "應有 4 個 styled_card 區塊"
-
-    # 確認每個都是 ft.Container（styled_card 回傳 Container）
-    for ctrl in view.controls:
-        assert isinstance(ctrl, ft.Container), f"每個 section 應為 ft.Container，實際: {type(ctrl)}"
+    assert len(view.controls) == 3
+    path_card, options_row, log_card = view.controls
+    assert isinstance(path_card, ft.Container)
+    assert isinstance(options_row, ft.ResponsiveRow)
+    assert len(options_row.controls) == 2  # 翻譯選項、執行狀態
+    assert isinstance(log_card, ft.Container)
+    assert log_card.expand
 
 
 # ============================================================

@@ -33,21 +33,32 @@ def build_overview_page(
     PR3 試點：使用 styled_card 替換 bordered_block，支援卡片收合功能
     """
 
-    # 試點：使用 styled_card 包裝說明區塊（PR3 產出，支援收合）
-    help_block = styled_card(
-        title="操作說明",
-        icon=ft.Icons.HELP_OUTLINE,
+    # 狀態與全域操作按鈕（常駐顯示）
+    actions_block = styled_card(
+        title="操作",
+        icon=ft.Icons.TUNE,
         icon_color=ft.Colors.BLUE_GREY_700,
-        collapsible=True,
-        default_collapsed=False,
         page=page,
         content=ft.Column(
             [
                 overview_status,
                 overview_trace,
                 ft.Row([btn_reload_all, btn_refresh_stats, btn_rebuild_index], wrap=True),
-                ft.Divider(height=8),
-                ft.Text("按鈕說明", weight=ft.FontWeight.BOLD),
+            ],
+            spacing=8,
+        ),
+    )
+
+    # 按鈕說明預設收合：展開時內容很長，會把下方日誌擠到看不見（1280×900 只剩標題列）
+    help_block = styled_card(
+        title="按鈕說明",
+        icon=ft.Icons.HELP_OUTLINE,
+        icon_color=ft.Colors.BLUE_GREY_700,
+        collapsible=True,
+        default_collapsed=True,
+        page=page,
+        content=ft.Column(
+            [
                 ft.Text("重新載入：重新讀取全部分類快取（記憶體重建）", size=11, color=ft.Colors.GREY_700),
                 ft.Text("刷新統計：只刷新 UI 顯示數據，不做寫入", size=11, color=ft.Colors.GREY_700),
                 ft.Text("🔍 重建搜尋索引：建立全文搜尋索引（提升查詢速度 10~100 倍）", size=11, color=ft.Colors.BLUE_700),
@@ -83,6 +94,7 @@ def build_overview_page(
 
     right_panel = ft.Column(
         [
+            actions_block,
             help_block,
             build_log_panel(
                 sw_log_only_error=sw_log_only_error,
