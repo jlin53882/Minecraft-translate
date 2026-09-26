@@ -227,7 +227,9 @@ def merge_zhcn_to_zhtw_from_zip(
                 all_files_cache = [n.lower().replace("\\", "/") for n in all_names_raw]
                 # 包裝前綴只算一次,避免每個 mod / 內容檔各掃一次全部檔名
                 mod_wrapper_prefix = detect_mod_wrapper_prefix(all_names_raw)
-                content_wrapper_prefix = detect_content_wrapper_prefix(all_files_cache)
+                # 前綴剝離必須用原始大小寫的檔名 (input_path 保留原始大小寫);
+                # all_files_cache 是小寫版,只供 case-insensitive 查找
+                content_wrapper_prefix = detect_content_wrapper_prefix(all_names_raw)
 
                 # 提交每個 mod 的處理（這裡每個 mod 的 paths 會包含 zh_cn/zh_tw/en_us 任一或多個）
                 for mod_key, paths in mods_to_process.items():
@@ -472,7 +474,8 @@ def merge_zhcn_to_zhtw_from_folder(
             all_files_cache = [n.lower().replace("\\", "/") for n in all_names]
             # 包裝前綴只算一次,避免每個 mod / 內容檔各掃一次全部檔名
             mod_wrapper_prefix = detect_mod_wrapper_prefix(all_names)
-            content_wrapper_prefix = detect_content_wrapper_prefix(all_files_cache)
+            # 前綴剝離必須用原始大小寫的檔名（同 ZIP 模式說明）
+            content_wrapper_prefix = detect_content_wrapper_prefix(all_names)
 
             for mod_key, paths in mods_to_process.items():
                 futures.append(
