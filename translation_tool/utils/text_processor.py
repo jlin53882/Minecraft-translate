@@ -107,7 +107,12 @@ class ReplaceRules(list):
         self.revision = 0
 
     def _adopt(self, rule):
-        if isinstance(rule, dict) and not isinstance(rule, _TrackedRule):
+        # 已屬於其他 ReplaceRules 的規則要複製一份：同一個物件只能通知一個 owner，
+        # 共用會讓另一個 owner 的編譯快取在規則被修改後過期。
+        if isinstance(rule, _TrackedRule):
+            if rule._owner is not None and rule._owner is not self:
+                rule = _TrackedRule(rule)
+        elif isinstance(rule, dict):
             rule = _TrackedRule(rule)
         if isinstance(rule, _TrackedRule):
             rule._owner = self

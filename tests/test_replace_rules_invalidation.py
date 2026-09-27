@@ -67,3 +67,54 @@ def test_loaded_rules_stay_json_serializable(tmp_path, monkeypatch):
     import orjson
 
     assert orjson.loads(orjson.dumps(rules)) == [{"from": "hello", "to": "X"}]
+
+
+def test_tracked_rule_is_not_shared_between_replace_rules():
+    """同一個 tracked rule 不可同時屬於兩個 ReplaceRules。
+
+    若共用同一個物件，修改只會通知其中一個 owner，另一個的編譯快取就會過期。
+    """
+    a = tp.ReplaceRules([{"from": "hello", "to": "A"}])
+    assert apply_replace_rules("hello", a) == "A"
+
+    b = tp.ReplaceRules()
+    b.append(a[0])
+    assert apply_replace_rules("hello", b) == "A"
+
+    # 物件隔離
+    assert b[0] is not a[0]
+
+    # 改 b 不影響 a（含 a 的編譯快取）
+    b[0]["to"] = "B"
+    assert apply_replace_rules("hello", b) == "B"
+    assert apply_replace_rules("hello", a) == "A"
+
+    # 反向：改 a 必須讓 a 的快取失效，且不影響 b
+    a[0]["to"] = "C"
+    assert apply_replace_rules("hello", a) == "C"
+    assert apply_replace_rules("hello", b) == "B"
+
+
+def test_tracked_rule_adopted_via_slice_and_insert_is_isolated():
+    a = tp.ReplaceRules([{"from": "hello", "to": "A"}])
+    b = tp.ReplaceRules([{"from": "x", "to": "y"}])
+    assert apply_replace_rules("hello", a) == "A"
+
+    b[0:1] = [a[0]]
+    b.insert(0, a[0])
+    b.extend([a[0]])
+    assert all(r is not a[0] for r in b)
+
+    a[0]["to"] = "C"
+    assert apply_replace_rules("hello", a) == "C"
+    assert apply_replace_rules("hello", b) == "A"
+
+
+def test_rule_reused_within_same_replace_rules_keeps_tracking():
+    """同一個 ReplaceRules 內重複放入自己的規則仍會正確失效。"""
+    a = tp.ReplaceRules([{"from": "hello", "to": "A"}])
+    a.append(a[0])
+    assert apply_replace_rules("hello", a) == "A"
+
+    a[1]["to"] = "B"
+    assert apply_replace_rules("hello", a) == "B"
