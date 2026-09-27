@@ -211,6 +211,59 @@ def open_extract_dialog(
         preview_dialog.open = True
         page.update()
 
+        async def do_final(_):
+            """（event loop 上）把預覽結果或錯誤套用到對話框。"""
+            if preview_state.error:
+                preview_dialog.content = ft.Container(
+                    content=ft.Text(f"❌ 錯誤：{preview_state.error}", color=RED_400),
+                    width=preview_dialog_width,
+                )
+            else:
+                result = preview_state.result or {}
+                jar_count = total_jars
+                total_files = result.get('total_files', 0)
+                preview_results = result.get('preview_results', [])
+                total_size_mb = result.get('total_size_mb', 0)
+
+                list_items = []
+                # 只列出有可提取檔案的 JAR
+                def _count(pr):
+                    if mode == "dual":
+                        return (pr.get('lang_count', 0) or 0) + (pr.get('book_count', 0) or 0)
+                    return pr.get('count', 0) or 0
+
+                empty_count = sum(1 for pr in preview_results if _count(pr) == 0)
+                preview_results = [pr for pr in preview_results if _count(pr) > 0]
+                if empty_count:
+                    list_items.append(
+                        ft.Text(f"  另有 {empty_count} 個 JAR 沒有可提取的檔案，已略過不列出", size=12, color=GREY_600)
+                    )
+                for pr in preview_results:
+                    jar_name = pr.get('jar', 'unknown')
+                    if mode == "dual":
+                        lang_count = pr.get('lang_count', 0)
+                        book_count = pr.get('book_count', 0)
+                        list_items.append(ft.Text(f"  {jar_name}（Lang: {lang_count}, Book: {book_count}）", size=12))
+                    else:
+                        count = pr.get('count', 0)
+                        list_items.append(ft.Text(f"  {jar_name}（{count} 個檔案）", size=12))
+
+                preview_dialog.content = ft.Container(
+                    width=preview_dialog_width,
+                    content=ft.Column([
+                        ft.Text(f"JAR 數量：{jar_count} 個"),
+                        ft.Text(f"預計提取：{total_files} 個檔案（約 {total_size_mb:.1f} MB）"),
+                        ft.Divider(),
+                        ft.Text("詳細清單：", weight="bold"),
+                        ft.ListView(
+                            controls=list_items,
+                            expand=True,
+                        ),
+                    ], tight=False),
+                )
+            preview_dialog.actions = [ft.TextButton("確定", on_click=lambda e: close_preview_dialog(preview_dialog))]
+            page.update()
+
         async def poll_preview():
             # 在 event loop 上輪詢，背景執行緒不直接碰控制項
             while not preview_state.done:
@@ -222,58 +275,6 @@ def open_extract_dialog(
                 )
                 page.update()
             await do_final(None)
-
-            async def do_final(_):
-                if preview_state.error:
-                    preview_dialog.content = ft.Container(
-                        content=ft.Text(f"❌ 錯誤：{preview_state.error}", color=RED_400),
-                        width=preview_dialog_width,
-                    )
-                else:
-                    result = preview_state.result or {}
-                    jar_count = total_jars
-                    total_files = result.get('total_files', 0)
-                    preview_results = result.get('preview_results', [])
-                    total_size_mb = result.get('total_size_mb', 0)
-
-                    list_items = []
-                    # 只列出有可提取檔案的 JAR
-                    def _count(pr):
-                        if mode == "dual":
-                            return (pr.get('lang_count', 0) or 0) + (pr.get('book_count', 0) or 0)
-                        return pr.get('count', 0) or 0
-
-                    empty_count = sum(1 for pr in preview_results if _count(pr) == 0)
-                    preview_results = [pr for pr in preview_results if _count(pr) > 0]
-                    if empty_count:
-                        list_items.append(
-                            ft.Text(f"  另有 {empty_count} 個 JAR 沒有可提取的檔案，已略過不列出", size=12, color=GREY_600)
-                        )
-                    for pr in preview_results:
-                        jar_name = pr.get('jar', 'unknown')
-                        if mode == "dual":
-                            lang_count = pr.get('lang_count', 0)
-                            book_count = pr.get('book_count', 0)
-                            list_items.append(ft.Text(f"  {jar_name}（Lang: {lang_count}, Book: {book_count}）", size=12))
-                        else:
-                            count = pr.get('count', 0)
-                            list_items.append(ft.Text(f"  {jar_name}（{count} 個檔案）", size=12))
-
-                    preview_dialog.content = ft.Container(
-                        width=preview_dialog_width,
-                        content=ft.Column([
-                            ft.Text(f"JAR 數量：{jar_count} 個"),
-                            ft.Text(f"預計提取：{total_files} 個檔案（約 {total_size_mb:.1f} MB）"),
-                            ft.Divider(),
-                            ft.Text("詳細清單：", weight="bold"),
-                            ft.ListView(
-                                controls=list_items,
-                                expand=True,
-                            ),
-                        ], tight=False),
-                    )
-                preview_dialog.actions = [ft.TextButton("確定", on_click=lambda e: close_preview_dialog(preview_dialog))]
-                page.update()
 
         page.run_task(poll_preview)
 
