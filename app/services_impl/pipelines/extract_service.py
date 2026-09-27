@@ -187,29 +187,84 @@ def _run_extraction_with_session(
         session: 任務 Session
         mode_label: 模式標籤，用於錯誤訊息（'Lang' / 'Book' / 'Dual'）
     """
+    # 注意：GLOBAL_LOG_LIMITER.filter() 只保留 log / progress（其餘欄位會被剝掉），
+    # 因此 error / stats 一律從原始 update 讀取，不可依賴 filter 的回傳值。
+    failures = _FailureTracker()
     for update in generator:
         if is_cancelled():
             # 在 JAR 之間停止（一鍵流水線的取消）
             session.add_log(f"⏹ {mode_label} 提取已取消", level="warning")
             return
+        failures.observe(update)
         filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
-        if filtered is None:
-            continue
+        if filtered is not None:
+            if "log" in filtered:
+                session.add_log(filtered["log"])
+            if "progress" in filtered:
+                session.set_progress(filtered["progress"])
 
-        if "log" in filtered:
-            session.add_log(filtered["log"])
-
-        if "progress" in filtered:
-            session.set_progress(filtered["progress"])
-
-        if filtered.get("error"):
+        if update.get("error"):
+            _flush_limiter_to_session(session)
             session.set_error()
             return
 
+    _flush_limiter_to_session(session)
+
+    # 有任何無法處理的 JAR：提取結果不完整，步驟不可算成功
+    # （一鍵流水線會因此停止，不會以不完整的提取結果繼續合併 / 翻譯 / 打包）
+    total_failures = failures.total()
+    if total_failures > 0:
+        if failures.last_stats is not None:
+            session.set_summary(dict(failures.last_stats, failures=total_failures))
+        session.add_log(
+            f"❌ {mode_label} 提取有 {total_failures} 個 JAR 無法處理（檔案可能已損毀），"
+            "已提取的檔案保留，但此步驟視為失敗",
+            level="error",
+        )
+        session.set_error()
+        return
+    session.finish()
+
+
+def _flush_limiter_to_session(session: TaskSession) -> None:
     final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
     if final and "log" in final:
         session.add_log(final["log"])
-    session.finish()
+
+
+class _FailureTracker:
+    """從提取 generator 的 stats 累計無法處理的 JAR 數。
+
+    - 單一模式（lang / book）：最終 stats（無 phase）即為總數
+    - dual：各 phase 的 stats 分別記錄；若有合計（無 phase 或 phase 非 lang/book）
+      以合計為準，否則加總各 phase，避免只看最後一個 phase 而漏掉失敗
+    """
+
+    def __init__(self) -> None:
+        self.by_phase: dict[str, int] = {}
+        self.combined: int | None = None
+        self.last_stats: dict[str, Any] | None = None
+
+    def observe(self, update: dict[str, Any]) -> None:
+        stats = update.get("stats")
+        if not isinstance(stats, dict):
+            return
+        self.last_stats = stats
+        try:
+            count = int(stats.get("failures", 0) or 0)
+        except (TypeError, ValueError):
+            count = 0
+        phase = update.get("phase")
+        if phase in ("lang", "book"):
+            self.by_phase[phase] = count
+        else:
+            self.combined = count
+
+    def total(self) -> int:
+        phase_sum = sum(self.by_phase.values())
+        if self.combined is None:
+            return phase_sum
+        return max(self.combined, phase_sum)
 
 
 def run_extraction_loop(
