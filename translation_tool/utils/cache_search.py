@@ -663,7 +663,11 @@ class SearchOrchestrator:
         return cache_root / "search_index.db"
 
     def get_engine(self) -> Optional[CacheSearchEngine]:
-        """取得（或延遲建立）共享搜尋引擎實例。"""
+        """取得（或延遲建立）共享搜尋引擎實例。
+
+        注意：回傳後即釋放鎖；重建索引的 swap 可能關閉此 engine。
+        需要長時間使用時請在 self._lock 內使用（search_cache 即如此）。
+        """
         with self._lock:
             if self._engine is None:
                 self._engine = CacheSearchEngine(str(self._db_path()))
@@ -781,14 +785,16 @@ class SearchOrchestrator:
         """只重建單一 cache_type 的索引資料。"""
         # 部分重建後索引不一定對應磁碟狀態，讓下次啟動完整重建
         self.invalidate_index_meta()
-        engine = self.get_engine()
-        if engine is None:
-            return 0
-        engine.clear_index_by_type(cache_type)
         cache_dict = cache_store.get_cache_type_dict(cache_state, cache_type)
         entries = build_index_entries(cache_type, cache_dict)
-        if entries:
-            engine.index_batch(entries)
+        # 寫入期間持有鎖：全量重建的 swap 不可在此時關閉這個 engine
+        with self._lock:
+            engine = self.get_engine()
+            if engine is None:
+                return 0
+            engine.clear_index_by_type(cache_type)
+            if entries:
+                engine.index_batch(entries)
         return len(entries)
 
     def search_cache(
@@ -798,11 +804,16 @@ class SearchOrchestrator:
         limit: int = 50,
         use_fuzzy: bool = True,
     ) -> List[Dict]:
-        """統一封裝查詢流程，必要時再做模糊重排序。"""
-        engine = self.get_engine()
-        if engine is None:
-            return []
-        results = engine.search(query, limit=limit, cache_type=cache_type)
+        """統一封裝查詢流程，必要時再做模糊重排序。
+
+        取得 engine 與執行查詢都在協調器鎖內：重建索引的 swap（關閉舊 engine）
+        必須等目前的查詢完成，不可關閉正在使用中的 engine。
+        """
+        with self._lock:
+            engine = self.get_engine()
+            if engine is None:
+                return []
+            results = engine.search(query, limit=limit, cache_type=cache_type)
         if use_fuzzy and results:
             matcher = FuzzyMatcher()
             results = matcher.rank_results(query, results)
