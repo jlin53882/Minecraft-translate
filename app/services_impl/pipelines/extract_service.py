@@ -189,8 +189,8 @@ def _run_extraction_with_session(
         session: 任務 Session
         mode_label: 模式標籤，用於錯誤訊息（'Lang' / 'Book' / 'Dual'）
     """
-    # 注意：GLOBAL_LOG_LIMITER.filter() 只保留 log / progress（其餘欄位會被剝掉），
-    # 因此 error / stats 一律從原始 update 讀取，不可依賴 filter 的回傳值。
+    # error / stats 一律從原始 update 讀取：filter 只負責 UI 日誌節流，
+    # 生命週期判斷不依賴它的回傳值。
     failures = _FailureTracker()
     for update in generator:
         if is_cancelled():

@@ -19,11 +19,12 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
-from typing import Any, Dict
+from typing import Any
 
 from translation_tool.utils.ui_logging_handler import UISessionLogHandler
 
 logger = logging.getLogger(__name__)
+
 
 class LogLimiter:
     """Log 節流器（UI 友善）。
@@ -36,6 +37,8 @@ class LogLimiter:
 
     注意：
     - `filter()` 可能回傳 None，代表本輪不更新 UI。
+    - `filter()` 會保留 log / progress 以外的欄位（error、result、stats…），
+      帶有這些欄位的 update 不受節流影響。
     - `flush()` 只負責把 pending 合併輸出，不保證與任務結束同步；呼叫端需視流程決定何時 flush。
     """
 
@@ -53,7 +56,7 @@ class LogLimiter:
         self.last_flush = 0.0
         self._cached_progress: Any = None  # 緩存最新 progress，節流時不丟失
 
-    def filter(self, update_dict: Dict[str, Any]):
+    def filter(self, update_dict: dict[str, Any]):
         """批次合併 log + 限制輸出頻率。
 
         回傳：
@@ -72,8 +75,12 @@ class LogLimiter:
         if progress_val is not None:
             self._cached_progress = progress_val
 
+        # log / progress 以外的欄位（error、result、stats…）是呼叫端的控制訊號，
+        # 不可被剝掉，也不可被節流吞掉：帶有這些欄位的 update 一律立即輸出。
+        extras = {k: v for k, v in update_dict.items() if k not in ("log", "progress")}
+
         now = time.time()
-        if now - self.last_flush < self.flush_interval:
+        if not extras and now - self.last_flush < self.flush_interval:
             # log 被節流時，只要有 progress 就單獨 forward
             if progress_val is not None:
                 return {"progress": progress_val}
@@ -82,7 +89,7 @@ class LogLimiter:
         self.last_flush = now
         merged = "\n".join(self.pending_logs)
         self.pending_logs.clear()
-        return {"log": merged, "progress": self._cached_progress}
+        return {**extras, "log": merged, "progress": self._cached_progress}
 
     def flush(self):
         """強制輸出尚未送出的 pending logs。"""
@@ -94,6 +101,7 @@ class LogLimiter:
         self.last_flush = time.time()
         return {"log": merged, "progress": self._cached_progress}
 
+
 # 單例：全域節流器（維持與 services.py 過去行為一致）
 GLOBAL_LOG_LIMITER = LogLimiter(max_logs=5000, flush_interval=0.0)
 
@@ -101,6 +109,7 @@ GLOBAL_LOG_LIMITER = LogLimiter(max_logs=5000, flush_interval=0.0)
 UI_LOG_HANDLER = UISessionLogHandler()
 UI_LOG_HANDLER.setLevel(logging.INFO)
 UI_LOG_HANDLER.setFormatter(logging.Formatter("%(message)s"))
+
 
 def update_logger_config(config_loader, *, logger_name: str = "translation_tool"):
     """重新讀取 config 並套用最新的 Log 等級。
