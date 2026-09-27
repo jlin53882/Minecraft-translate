@@ -92,3 +92,30 @@ def test_swap_waits_for_active_query(tmp_path, monkeypatch):
     assert orch.get_engine() is not old_engine
     assert len(orch.search_cache("Iron", cache_type="lang", use_fuzzy=False)) == 7
     assert not list(tmp_path.glob("*.tmp*"))
+
+
+def test_failed_rebuild_keeps_old_index_and_cleans_tmp(tmp_path, monkeypatch):
+    """重建中途失敗：舊索引維持可用且不被關閉，暫存檔全部清除。"""
+    orch = SearchOrchestrator(lambda: tmp_path)
+    orch.rebuild_search_index(["lang"], {"lang": _entries(5, "Iron")})
+    old_engine = orch.get_engine()
+
+    def boom(engine, cache_types, cache_state):
+        engine.index_batch(
+            [{"key": "x", "src": "partial", "dst": "半", "cache_type": "lang"}]
+        )
+        raise RuntimeError("build failed")
+
+    monkeypatch.setattr(cache_search, "rebuild_from_cache_dicts", boom)
+
+    try:
+        orch.rebuild_search_index(["lang"], {"lang": _entries(7, "Gold")})
+    except RuntimeError as ex:
+        assert "build failed" in str(ex)
+    else:
+        raise AssertionError("rebuild should propagate the build error")
+
+    assert orch.get_engine() is old_engine
+    assert len(orch.search_cache("Iron", cache_type="lang", limit=50)) == 5
+    assert orch.search_cache("partial", cache_type="lang", limit=50) == []
+    assert not list(tmp_path.glob("*.tmp*"))
