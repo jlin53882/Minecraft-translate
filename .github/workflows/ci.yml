@@ -36,6 +36,9 @@ jobs:
     # 之後可以逐步把檢查範圍擴大到全 repo。
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,12 +58,25 @@ jobs:
 
       - name: Ruff (lint + format) on changed Python files
         shell: bash
+        env:
+          # gh CLI 在 Actions 中需要 token；缺少時 gh 會失敗
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           PR_NUM="${{ github.event.pull_request.number }}"
 
-          # 用 GitHub CLI 直接取 PR 變更的檔案清單（繞過 git diff 問題）
-          FILES=$(gh pr diff "$PR_NUM" --name-only | grep -E '\.py$' || true)
+          # 取得變更清單失敗（例如 gh 認證問題）必須讓 job 失敗，
+          # 不可被當成「沒有 Python 變更」而跳過 ruff（原本的 false green）。
+          gh pr diff "$PR_NUM" --repo "$GITHUB_REPOSITORY" --name-only > changed-files.txt
+
+          # 只有「沒有符合的檔案」才允許空結果；排除已刪除的檔案
+          FILES=""
+          while IFS= read -r f; do
+            if [[ "$f" == *.py && -f "$f" ]]; then
+              FILES+="$f"$'\n'
+            fi
+          done < changed-files.txt
+          FILES="${FILES%$'\n'}"
 
           if [ -z "$FILES" ]; then
             echo "No Python files changed; skipping ruff."
