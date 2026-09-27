@@ -13,13 +13,13 @@
 
 # /minecraft_translator_flet/translator_tool/utils/config_manager.py (最終修正版)
 
-import os
+import copy
 import json
 import logging
+import os
 import threading
 from datetime import datetime
 from pathlib import Path
-import copy
 
 
 # PR27：統一路徑解析基準，避免 legacy cwd 依賴造成找不到 config / 資源檔。
@@ -47,7 +47,7 @@ def load_config_example() -> dict:
     try:
         with EXAMPLE_PATH.open(encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return {}
 
 
@@ -362,7 +362,7 @@ def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
         try:
             with resolved_config_path.open("r", encoding="utf-8") as f:
                 user_config = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(
                 f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。"
             )
@@ -405,11 +405,11 @@ def save_config(config, config_path: str | os.PathLike | None = None):
         json.dumps(written_data, sort_keys=True)
 
         clear_config_cache()
-        logging.info(f"設定已成功儲存並驗證至 {resolved_config_path}")
+        logging.info(f"設定已成功儲存並驗證至 {resolved_config_path}")  # noqa: LOG015
         return True
 
-    except Exception as e:
-        logging.error(f"錯誤：儲存或驗證設定檔失敗: {e}")
+    except Exception as e:  # noqa: BLE001
+        logging.error(f"錯誤：儲存或驗證設定檔失敗: {e}")  # noqa: LOG015
         return False
 
 
@@ -439,7 +439,7 @@ def setup_logging(config):
         logging.root.removeHandler(handler)
 
     # 建立 log 資料夾
-    today = datetime.now().strftime("%Y%m%d")
+    today = datetime.now().astimezone().strftime("%Y%m%d")  # 本地日期
     log_folder = resolved_log_dir / today
     log_folder.mkdir(parents=True, exist_ok=True)
     log_file = log_folder / "app.log"
@@ -450,7 +450,7 @@ def setup_logging(config):
     ]
 
     logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
-    logging.info("日誌系統已成功設定。")
+    logging.info("日誌系統已成功設定。")  # noqa: LOG015
 
 
 def get_models_config(cfg: dict) -> dict[str, dict]:
@@ -463,7 +463,7 @@ def get_models_config(cfg: dict) -> dict[str, dict]:
     models = lm_cfg.get("models", {})
 
     if not isinstance(models, dict):
-        logging.warning("models 設定型別錯誤，已忽略（需為 dict）")
+        logging.warning("models 設定型別錯誤，已忽略（需為 dict）")  # noqa: LOG015
         return {}
 
     safe_models: dict[str, dict] = {}
@@ -482,8 +482,6 @@ def get_models_config(cfg: dict) -> dict[str, dict]:
 class ConfigValidationError(ValueError):
     """Config 欄位驗證失敗時拋出。"""
 
-    pass
-
 
 def _validate_lm_translator_config(lm: dict) -> None:
     """驗證 lm_translator 關鍵欄位的型別（ATK-C-2）。
@@ -500,7 +498,7 @@ def _validate_lm_translator_config(lm: dict) -> None:
     # ⚠️ iniital 棄用警告（iniital 是拼寫錯誤，正確為 initial）
     iniital_keys = [k for k in lm if k.startswith("iniital_")]
     if iniital_keys:
-        logging.warning(
+        logging.warning(  # noqa: LOG015
             f"[iniital-deprecation] ⚠️ 偵測到已棄用的 iniital_* 設定鍵：{iniital_keys}。"
             f" 正確拼寫為 initial_batch_size_*，請更新 config.json。"
             f" iniital_* 鍵已不再被翻譯引擎讀取，將使用內建預設值。"
@@ -516,21 +514,23 @@ def _validate_lm_translator_config(lm: dict) -> None:
 
     # 2. initial_batch_size_* 必須是 int
     for key, value in lm.items():
-        if key.startswith("initial_batch_size_") and value is not None:
-            if not isinstance(value, int):
-                raise ConfigValidationError(
-                    f"lm_translator.{key} 必須為 int，"
-                    f"目前為 {type(value).__name__}：'{value}'"
-                )
+        if (
+            key.startswith("initial_batch_size_")
+            and value is not None
+            and not isinstance(value, int)
+        ):
+            raise ConfigValidationError(
+                f"lm_translator.{key} 必須為 int，"
+                f"目前為 {type(value).__name__}：'{value}'"
+            )
 
     # 3. parallel_execution_workers 必須是 int > 0
     workers = lm.get("parallel_execution_workers")
-    if workers is not None:
-        if not isinstance(workers, int) or workers <= 0:
-            raise ConfigValidationError(
-                f"lm_translator.parallel_execution_workers 必須為正整數，"
-                f"目前為 {type(workers).__name__}：{workers}"
-            )
+    if workers is not None and (not isinstance(workers, int) or workers <= 0):
+        raise ConfigValidationError(
+            f"lm_translator.parallel_execution_workers 必須為正整數，"
+            f"目前為 {type(workers).__name__}：{workers}"
+        )
 
     # 4. temperature 必須是 0.0~2.0 的 float
     temp = lm.get("temperature")
@@ -564,7 +564,7 @@ def _validate_translator_config(translator: dict) -> None:
 
 
 def deep_merge(default: dict, override: dict) -> dict:
-    """ """
+    """遞迴合併兩個 dict，override 的值優先（回傳新 dict）。"""
     result = default.copy()
     for k, v in override.items():
         if k in result and isinstance(result[k], dict) and isinstance(v, dict):

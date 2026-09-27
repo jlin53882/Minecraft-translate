@@ -4,21 +4,18 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import time
-
-from translation_tool.utils.cancellation import interruptible_sleep
-
 import requests
 
 from translation_tool.core.lm_api_client import call_gemini_requests
 from translation_tool.core.lm_config_rules import (
-    get_current_key_index,  # 取得目前 Key 索引（向後相容）
     get_current_api_key,  # 取得目前使用中的 key
+    get_current_key_index,  # 取得目前 Key 索引（向後相容）
     rotate_api_key,  # 輪替 key
 )
 from translation_tool.core.lm_response_parser import safe_json_loads
+from translation_tool.utils.cancellation import interruptible_sleep
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_info, log_warning, log_error, log_debug
+from translation_tool.utils.log_unit import log_debug, log_error, log_info, log_warning
 
 # =========================================================
 # Time Constants - 時間相關常數
@@ -185,7 +182,9 @@ def translate_batch_smart_old(
 
     # ATK-A-6: 動態 RPM 等待時間（可從 config 設定，預設用 module-level 常數）
     try:
-        rpm_cooldown_sec = max(0.0, float(lm_cfg.get("rpm_cooldown_sec", RPM_COOLDOWN_SEC)))
+        rpm_cooldown_sec = max(
+            0.0, float(lm_cfg.get("rpm_cooldown_sec", RPM_COOLDOWN_SEC))
+        )
     except (TypeError, ValueError):
         rpm_cooldown_sec = float(RPM_COOLDOWN_SEC)
     key_rotation_buffer_sec = lm_cfg.get("key_rotation_buffer_sec", 5)
@@ -572,7 +571,7 @@ def translate_batch_smart_old(
 
                 break  # 跳出 model loop
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 status = None
                 if isinstance(e, requests.HTTPError) and e.response is not None:
                     status = e.response.status_code
@@ -682,7 +681,7 @@ def translate_batch_smart_old(
                                 return None, "ALL_KEYS_EXHAUSTED"
                             continue
 
-                    except Exception as parse_err:
+                    except Exception as parse_err:  # noqa: BLE001
                         # 備援比對邏輯
                         err_msg = str(e).upper()
                         log_error(f"[⚠️] 無法解析 429 JSON，使用備援。錯誤: {parse_err}")
@@ -719,7 +718,7 @@ def translate_batch_smart_old(
                         error_json = e.response.json()
                         remote_msg = error_json.get("error", {}).get("message", "")
                         remote_status = error_json.get("error", {}).get("status", "")
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         remote_msg = e.response.text or ""
                         remote_status = "NON_JSON"
 
@@ -788,7 +787,7 @@ def translate_batch_smart_old(
                             rotate_api_key()
                             interruptible_sleep(request_interval_sec)
                             continue  # 換 key 繼續 model pool
-                        except Exception as err:
+                        except Exception as err:  # noqa: BLE001
                             log_error(f"API key 切換失敗: {err}")
                             break
 

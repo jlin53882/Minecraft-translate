@@ -37,13 +37,11 @@
     因此「行為層」測試以 Service (run_extraction_loop) 為切入點,確保 Service 端的
     累計語義正確 (即對話框若用 result_stats 印最終行,數字就會對)。
 """
+
 from __future__ import annotations
 
 import re
 from pathlib import Path
-
-import pytest
-
 
 # =============================================================================
 # 程式碼層驗證 — 確認 bug pattern 已移除
@@ -51,11 +49,7 @@ import pytest
 
 # 從這個 test 檔往回找 extractor_dialog.py 的相對路徑
 _DIALOG_PATH = (
-    Path(__file__).parent.parent
-    / "app"
-    / "views"
-    / "extractor"
-    / "extractor_dialog.py"
+    Path(__file__).parent.parent / "app" / "views" / "extractor" / "extractor_dialog.py"
 )
 
 
@@ -69,6 +63,7 @@ class TestBugPatternRemoved:
     def _read_dialog_code(self) -> str:
         """只回傳「程式碼行」,移除所有 docstring / 區塊註解 / 行內註解,避免誤判。"""
         import ast
+
         source = self._read_dialog_source()
         try:
             tree = ast.parse(source)
@@ -77,12 +72,19 @@ class TestBugPatternRemoved:
 
         mask_lines = set()
         for node in ast.walk(tree):
-            if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                if (node.body and isinstance(node.body[0], ast.Expr)
-                        and isinstance(node.body[0].value, ast.Constant)
-                        and isinstance(node.body[0].value.value, str)):
+            if isinstance(  # noqa: SIM102
+                node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            ):
+                if (
+                    node.body
+                    and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, ast.Constant)
+                    and isinstance(node.body[0].value.value, str)
+                ):
                     docstring_node = node.body[0]
-                    for ln in range(docstring_node.lineno, docstring_node.end_lineno + 1):
+                    for ln in range(
+                        docstring_node.lineno, docstring_node.end_lineno + 1
+                    ):
                         mask_lines.add(ln)
 
         out = []
@@ -120,13 +122,18 @@ class TestBugPatternRemoved:
             "請確認 fix 還在。"
         )
         for line in completion_lines:
-            assert ("result_stats['success']" in line
-                    or 'result_stats["success"]' in line), (
+            assert (
+                "result_stats['success']" in line or 'result_stats["success"]' in line
+            ), (
                 "❌ 「[完成] 成功 X/跳過 Y/失敗 Z」行讀的是 dialog 本地的 stats dict (永遠是 0/0/0),\n"
                 "應改成 Service 回傳的 result_stats['success']。\n"
                 f"實際行:{line[:400]}"
             )
-            assert not (re.search(r'(?<!result_)(?<![a-zA-Z_])stats\[[\'\"]success[\'\"]\]', line)), (
+            assert not (
+                re.search(
+                    r"(?<!result_)(?<![a-zA-Z_])stats\[[\'\"]success[\'\"]\]", line
+                )
+            ), (
                 "❌ 「[完成] 成功 X」行含有裸的 stats['success'] (非 result_stats),"
                 "這代表又在讀永遠 0/0/0 的本地 dict。\n"
                 f"實際行:{line[:400]}"
@@ -157,11 +164,10 @@ class TestBugPatternRemoved:
 
         m = matches[0]
         line = m.group(0)
-        assert "result_stats" in line, (
-            "[完成] 統計行沒有 result_stats"
-        )
+        assert "result_stats" in line, "[完成] 統計行沒有 result_stats"
 
-        after_window = code[m.end(): m.end() + 800]
+        # 忽略空白與換行（ruff format 可能把呼叫拆成多行）
+        after_window = re.sub(r"\s+", "", code[m.end() : m.end() + 800])
         assert (
             "update_stats(result_stats['success']" in after_window
             or 'update_stats(result_stats["success"]' in after_window
@@ -173,6 +179,7 @@ class TestBugPatternRemoved:
 # =============================================================================
 # 行為層驗證 — Service 累計語義
 # =============================================================================
+
 
 class TestServiceAccumulatesFinalStats:
     """Service run_extraction_loop 應正確累加,中繼 stats 不會讓最終累計失真。"""
@@ -195,9 +202,20 @@ class TestServiceAccumulatesFinalStats:
         from app.services_impl.pipelines.extract_service import run_extraction_loop
 
         def gen():
-            yield {"progress": 0.5, "log": "[1/2] first.jar", "stats": {"success": 0, "warnings": 0, "failures": 0}}
-            yield {"progress": 1.0, "log": "[2/2] last.jar",  "stats": {"success": 0, "warnings": 0, "failures": 0}}
-            yield {"phase": "lang", "stats": {"success": 3129, "warnings": 2, "failures": 0}}
+            yield {
+                "progress": 0.5,
+                "log": "[1/2] first.jar",
+                "stats": {"success": 0, "warnings": 0, "failures": 0},
+            }
+            yield {
+                "progress": 1.0,
+                "log": "[2/2] last.jar",
+                "stats": {"success": 0, "warnings": 0, "failures": 0},
+            }
+            yield {
+                "phase": "lang",
+                "stats": {"success": 3129, "warnings": 2, "failures": 0},
+            }
 
         received_per_call = []
 
@@ -277,6 +295,7 @@ class TestServiceAccumulatesFinalStats:
 # 文件路徑常量確認 — 不允許絕對路徑 (PR 教訓)
 # =============================================================================
 
+
 class TestPathConvention:
     """本檔案不應寫死 Windows 使用者目錄絕對路徑。"""
 
@@ -286,8 +305,9 @@ class TestPathConvention:
         [作法] 用 AST 把模組 docstring、class docstring、function docstring 的行號遮罩掉,
         只檢查實際「程式碼行」是否含絕對路徑。
         """
-        import re
         import ast
+        import re
+
         text = Path(__file__).read_text(encoding="utf-8")
         try:
             tree = ast.parse(text)
@@ -296,10 +316,15 @@ class TestPathConvention:
 
         mask_lines: set[int] = set()
         for node in ast.walk(tree):
-            if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                if (node.body and isinstance(node.body[0], ast.Expr)
-                        and isinstance(node.body[0].value, ast.Constant)
-                        and isinstance(node.body[0].value.value, str)):
+            if isinstance(  # noqa: SIM102
+                node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            ):
+                if (
+                    node.body
+                    and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, ast.Constant)
+                    and isinstance(node.body[0].value.value, str)
+                ):
                     doc = node.body[0]
                     for ln in range(doc.lineno, doc.end_lineno + 1):
                         mask_lines.add(ln)

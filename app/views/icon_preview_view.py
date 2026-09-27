@@ -5,37 +5,31 @@
 """
 
 import asyncio
-import threading
-import time
-
-import flet as ft
-import json
-import os
 import hashlib
-import platform
-import re
-import zipfile
-from app import icon_index
-from app.icon_reader import IconRef
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from translation_tool.utils.jar_browser import scan_jars
+import json
 import re
 import shutil
-import tempfile
-from pathlib import Path
+import threading
+import time
+import unicodedata
+import zipfile
 from collections import defaultdict
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
+
+import flet as ft
+
+from app.icon_reader import IconRef
 from app.ui import theme
 from app.ui.debounce import Debouncer
 from app.ui.snack import show_snack
-from translation_tool.utils.log_unit import log_info, log_warning, log_error
-from types import SimpleNamespace
-
-from translation_tool.utils.safe_json_loader import load_json_auto_encoding
-from translation_tool.utils.config_manager import load_config
 from translation_tool.core.lang_item_row import LangItemRow
-
-import unicodedata
+from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.jar_browser import scan_jars
+from translation_tool.utils.log_unit import log_error, log_info, log_warning
+from translation_tool.utils.safe_json_loader import load_json_auto_encoding
 
 # ==================================================
 # 實驗性功能開關
@@ -44,10 +38,21 @@ _ENABLE_JAR_ICON = True  # 已啟用（Model JSON 解析 + 批次 ZIP icon 提�
 
 # 真正需要遊戲圖示的 key 前綴（只有這些才 fallback 到 logo.png）
 # 不在清單裡的 key（如 _comment、advancements.*、recipe_type、jei.* 等）不該有 icon
-_CONTENT_ICON_PREFIXES = frozenset([
-    "item", "block", "entity", "enchantment", "effect", "potion", "biome",
-    "attribute", "tile", "-effect",
-])
+_CONTENT_ICON_PREFIXES = frozenset(
+    [
+        "item",
+        "block",
+        "entity",
+        "enchantment",
+        "effect",
+        "potion",
+        "biome",
+        "attribute",
+        "tile",
+        "-effect",
+    ]
+)
+
 
 def _key_needs_icon(key: str) -> bool:
     """判斷 key 是否為需要 icon 的遊戲內容。
@@ -60,9 +65,11 @@ def _key_needs_icon(key: str) -> bool:
     prefix = key.split(".")[0]
     return prefix in _CONTENT_ICON_PREFIXES
 
+
 # ==================================================
 # JAR Icon 提取輔助函式（Phase 1: Model JSON 解析）
 # ==================================================
+
 
 def _get_icon_cache_dir() -> Path:
     """取得 icon 快取根目錄（統一至 .icon_cache/jar_icons/）。"""
@@ -93,7 +100,6 @@ def _migrate_old_icon_cache(source_root: Path) -> bool:
     回傳：
         True 表示有搬移，False 表示無需搬移
     """
-    import shutil
 
     old_path = source_root / "_icon_preview" / "jar_icons"
     new_path = _get_icon_cache_dir()
@@ -118,7 +124,9 @@ def _migrate_old_icon_cache(source_root: Path) -> bool:
             shutil.move(str(old_file), str(new_file))
             files_moved += 1
 
-    log_info(f"[IconPreview] 已將 {files_moved} 個 icon 檔案從舊路徑搬移至新路徑: {old_path} → {new_path}")
+    log_info(
+        f"[IconPreview] 已將 {files_moved} 個 icon 檔案從舊路徑搬移至新路徑: {old_path} → {new_path}"
+    )
     return True
 
 
@@ -173,7 +181,9 @@ def _load_model_index_from_cache(jar_path: Path, modid: str) -> dict | None:
     return index
 
 
-def _load_model_index_from_disk(jar_path: Path, modid: str, current_hash: str) -> dict | None:
+def _load_model_index_from_disk(
+    jar_path: Path, modid: str, current_hash: str
+) -> dict | None:
     """從磁碟讀取 model index cache；hash 或 modid 不符時回傳 None。"""
     cache_dir = _get_model_index_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -186,7 +196,7 @@ def _load_model_index_from_disk(jar_path: Path, modid: str, current_hash: str) -
     try:
         with open(cache_file, encoding="utf-8") as f:
             data = json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return None
 
     # 檢查 jar_hash 是否匹配
@@ -232,7 +242,7 @@ def _build_model_index(names: list[str], modid: str) -> dict[str, list[str]]:
     for n in names:
         if not (n.startswith(prefix) and n.endswith(".json")):
             continue
-        rel = n[len(prefix):]
+        rel = n[len(prefix) :]
         name = rel.replace(".json", "")
         # 保留子目錄前綴（例如 block/restonia_crystal_block）
         # 這樣 _try_extract_mod_icon_from_model 可以用完整路徑做精準 lookup
@@ -255,13 +265,13 @@ def _get_texture_value(model_data: dict) -> str | None:
         return None
 
     if len(textures) == 1:
-        return list(textures.values())[0]
+        return next(iter(textures.values()))
 
     for key in ["layer0", "front", "particle"]:
         if key in textures:
             return textures[key]
 
-    return list(textures.values())[0]
+    return next(iter(textures.values()))
 
 
 def _follow_parent_chain(
@@ -285,7 +295,7 @@ def _follow_parent_chain(
     try:
         raw = zf.read(model_path).decode("utf-8", errors="replace")
         data = json.loads(raw)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
     tex_val = _get_texture_value(data)
@@ -353,7 +363,7 @@ def _try_extract_mod_icon_from_model(
         #       item.actuallyadditions.drill → item/drill
         # 原理：key = "<prefix>.<modid>.<name>"，去掉 modid 前綴就是 model name
         prefix = key.split(".")[0]  # "block" 或 "item" 等
-        rest = key[len(prefix) + 1 + len(modid) + 1:]  # "restonia_crystal_block"
+        rest = key[len(prefix) + 1 + len(modid) + 1 :]  # "restonia_crystal_block"
         model_name = f"{prefix}/{rest}"  # "block/restonia_crystal_block"
 
         if model_name in model_index:
@@ -383,7 +393,9 @@ def _try_extract_mod_icon_from_model(
     return None
 
 
-def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: str) -> Path | None:
+def _extract_jar_icon(
+    jar_path: Path, modid: str, icon_cache_root: Path, key: str
+) -> Path | None:
     """從 JAR 中提取 mod icon 並快取到磁碟（Phase 1: Model JSON 解析）。
 
     支援（按優先順序）：
@@ -406,14 +418,21 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
             names = set(zf.namelist())
 
             # ===== Phase 1: Model JSON 解析（最高優先）=====
-            result = _try_extract_mod_icon_from_model(jar_path, modid, zf, names, key=key)
+            result = _try_extract_mod_icon_from_model(
+                jar_path, modid, zf, names, key=key
+            )
             if result:
                 tex_val, png_path = result
                 icon_data = zf.read(png_path)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                out_path = (
+                    icon_cache_root
+                    / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                )
                 out_path.write_bytes(icon_data)
-                log_info(f"[IconPreview] Model JSON icon: {modid} → {png_path} (tex={tex_val})")
+                log_info(
+                    f"[IconPreview] Model JSON icon: {modid} → {png_path} (tex={tex_val})"
+                )
                 return out_path
 
             # ===== Fallback: assets/<modid>/icon.png（Fabric 標準）=====
@@ -421,20 +440,30 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
             if fabric_icon in names:
                 icon_data = zf.read(fabric_icon)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                out_path = (
+                    icon_cache_root
+                    / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                )
                 out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] 提取 Fabric icon.png: {modid}")
                 return out_path
 
             # ===== Fallback: assets/<modid>/textures/*.png（Fabric glob）=====
-            textures_pattern = re.compile(r"^assets/" + re.escape(modid) + r"/textures/.+\.png$")
+            textures_pattern = re.compile(
+                r"^assets/" + re.escape(modid) + r"/textures/.+\.png$"
+            )
             texture_files = sorted(n for n in names if textures_pattern.match(n))
             if texture_files:
                 icon_data = zf.read(texture_files[0])
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                out_path = (
+                    icon_cache_root
+                    / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                )
                 out_path.write_bytes(icon_data)
-                log_info(f"[IconPreview] 提取 Fabric texture icon: {modid} → {texture_files[0]}")
+                log_info(
+                    f"[IconPreview] 提取 Fabric texture icon: {modid} → {texture_files[0]}"
+                )
                 return out_path
 
             # ===== Fallback: assets/<modid>/textures/logo.png =====
@@ -442,7 +471,10 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
             if logo_texture in names:
                 icon_data = zf.read(logo_texture)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                out_path = (
+                    icon_cache_root
+                    / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                )
                 out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] 提取 logo.png: {modid}")
                 return out_path
@@ -456,19 +488,28 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
                     toml_content = None
 
                 if toml_content:
-                    logo_match = re.search(r'logoFile\s*=\s*"([^"]+\.png)"', toml_content)
+                    logo_match = re.search(
+                        r'logoFile\s*=\s*"([^"]+\.png)"', toml_content
+                    )
                     if logo_match:
                         logo_path = logo_match.group(1)
                         if logo_path in names:
                             icon_data = zf.read(logo_path)
                             icon_cache_root.mkdir(parents=True, exist_ok=True)
-                            out_path = icon_cache_root / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                            out_path = (
+                                icon_cache_root
+                                / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                            )
                             out_path.write_bytes(icon_data)
-                            log_info(f"[IconPreview] 提取 NeoForge logoFile: {modid} → {logo_path}")
+                            log_info(
+                                f"[IconPreview] 提取 NeoForge logoFile: {modid} → {logo_path}"
+                            )
                             return out_path
 
-    except Exception as ex:
-        log_warning(f"[IconPreview] 提取 JAR icon 失敗: {jar_path.name} / {modid} → {ex}")
+    except Exception as ex:  # noqa: BLE001
+        log_warning(
+            f"[IconPreview] 提取 JAR icon 失敗: {jar_path.name} / {modid} → {ex}"
+        )
 
     return None
 
@@ -477,7 +518,13 @@ def _extract_jar_icon(jar_path: Path, modid: str, icon_cache_root: Path, key: st
 # 批次 Icon 提取（每個 JAR 只開一次 ZIP）
 # ==================================================
 
-def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: Path, source_root: Path, progress_cb=None) -> int:
+
+def _batch_extract_jar_icons(
+    jar_to_entries: dict[str, list],
+    icon_cache_root: Path,
+    source_root: Path,
+    progress_cb=None,
+) -> int:
     """批次處理多個 JAR 的 icon 提取（支援預建立索引 + ThreadPoolExecutor）。
 
     PR60 優化架構：
@@ -494,8 +541,6 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
     回傳：
         處理的 JAR 數量
     """
-    from app.icon_reader import IconRef
-    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     # ===== Phase 0: Per-batch in-memory cache：同一 (modid, key) 在同一批次內不重複解析 =====
     _result_cache: dict[tuple[str, str], str | None] = {}
@@ -504,8 +549,9 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
     icon_index = None
     try:
         from app import icon_index as idx_module
+
         icon_index = idx_module.load_icon_index(source_root)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
     if icon_index is not None:
@@ -525,7 +571,9 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
         return len(jar_to_entries)
 
     # ===== Phase 2: 無索引 → ThreadPoolExecutor 即時處理 =====
-    log_info(f"[IconPreview] 無索引，啟動 ThreadPoolExecutor 處理 {len(jar_to_entries)} 個 JAR")
+    log_info(
+        f"[IconPreview] 無索引，啟動 ThreadPoolExecutor 處理 {len(jar_to_entries)} 個 JAR"
+    )
 
     def _process_jar(jar_name: str) -> dict[str, str | None]:
         """Worker：處理單一 JAR，回傳 {key: icon_uri or None}。"""
@@ -549,25 +597,32 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                     if cache_key in _result_cache:
                         result_map[key] = _result_cache[cache_key]
                         continue
-                    res = _try_extract_mod_icon_from_model(jar_path, modid, zf, names, key=key)
+                    res = _try_extract_mod_icon_from_model(
+                        jar_path, modid, zf, names, key=key
+                    )
                     if res:
-                        tex_val, png_path = res
+                        _tex_val, png_path = res
                         uri = IconRef(jar_path, png_path).to_uri()
                         result_map[key] = uri
                         _result_cache[cache_key] = uri
                     else:
                         _result_cache[cache_key] = None
                         result_map[key] = None
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
         return result_map
 
     processed = 0
     total = len(jar_to_entries)
-    config_workers = load_config().get("translator", {}).get("parallel_execution_workers", 4)
+    config_workers = (
+        load_config().get("translator", {}).get("parallel_execution_workers", 4)
+    )
     max_workers = max(1, config_workers) if isinstance(config_workers, int) else 4
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_process_jar, jar_name): jar_name for jar_name in jar_to_entries}
+        futures = {
+            executor.submit(_process_jar, jar_name): jar_name
+            for jar_name in jar_to_entries
+        }
         for future in as_completed(futures):
             jar_name = futures[future]
             try:
@@ -577,7 +632,7 @@ def _batch_extract_jar_icons(jar_to_entries: dict[str, list], icon_cache_root: P
                         uri = entry_icon_paths[e.key]
                         if uri:
                             e.icon_path = uri
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
             processed += 1
             if progress_cb:
@@ -627,7 +682,7 @@ def _load_entries_cache_l2(source_root: Path) -> list | None:
     try:
         with open(cache_file, encoding="utf-8") as f:
             data = json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return None  # 損壞的快取視為失效
 
     # 版本檢查
@@ -643,7 +698,6 @@ def _load_entries_cache_l2(source_root: Path) -> list | None:
 
 def _save_entries_cache_l2(source_root: Path, entries: list):
     """寫入 L2 磁碟快取（atomic write）。"""
-    import tempfile
 
     cache_dir = _get_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -659,18 +713,22 @@ def _save_entries_cache_l2(source_root: Path, entries: list):
         elif isinstance(e, dict):
             serializable_entries.append(e)
         else:
-            serializable_entries.append({
-                "modid": str(e.modid), "key": str(e.key), 
-                "en": str(e.en), "zh_tw": str(e.zh_tw),
-                "source_jar": getattr(e, "source_jar", ""),
-                "icon_path": getattr(e, "icon_path", None),  # [FIX] 加入 icon_path
-            })
+            serializable_entries.append(
+                {
+                    "modid": str(e.modid),
+                    "key": str(e.key),
+                    "en": str(e.en),
+                    "zh_tw": str(e.zh_tw),
+                    "source_jar": getattr(e, "source_jar", ""),
+                    "icon_path": getattr(e, "icon_path", None),  # [FIX] 加入 icon_path
+                }
+            )
 
     data = {
         "version": 1,
         "source_root": str(source_root),
         "entries": serializable_entries,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(cache_file)  # 跨平台 atomic replace（Python 3.3+，自動覆蓋目標檔案）
@@ -687,13 +745,15 @@ def _make_progress_callback(obj, phase: str, total: int):
         phase: Phase 顯示文字
         total: 總步數
     """
+
     def callback(processed: int, total: int):
         # 安全檢查：測試環境或 UI 未初始化時不拋例外
-        if not hasattr(obj, 'progress_text') or not hasattr(obj, 'progress_bar'):
+        if not hasattr(obj, "progress_text") or not hasattr(obj, "progress_bar"):
             return
         obj.progress_text.value = f"[{phase}] {processed} / {total}"
         obj.progress_bar.value = processed / total if total > 0 else 0
         _refresh_progress(obj)
+
     return callback
 
 
@@ -709,7 +769,7 @@ def _refresh_progress(obj) -> None:
 def _show_progress_phase(obj, phase: str, current: int, total: int):
     """更新 Phase 進度顯示（並墊底一次）。"""
     # 安全檢查：測試環境或 UI 未初始化時不拋例外
-    if not hasattr(obj, 'progress_text') or not hasattr(obj, 'progress_bar'):
+    if not hasattr(obj, "progress_text") or not hasattr(obj, "progress_bar"):
         return
     obj.progress_text.value = f"[{phase}] {current} / {total}"
     obj.progress_bar.value = current / total if total > 0 else 0
@@ -726,6 +786,7 @@ def to_halfwidth(text):
     if not isinstance(text, str):
         return text
     return unicodedata.normalize("NFKC", text)
+
 
 class IconPreviewView(ft.Column):
     """
@@ -758,8 +819,8 @@ class IconPreviewView(ft.Column):
         self.current_modid: str | None = None
 
         # 快取（防止重複掃描 JAR）
-        self._entries_cache: list | None = None   # 緩存的 entries（dict 格式）
-        self._cache_meta: dict = {}              # source_root, mode
+        self._entries_cache: list | None = None  # 緩存的 entries（dict 格式）
+        self._cache_meta: dict = {}  # source_root, mode
 
         self._current_zh_file: Path | None = None
         self._zh_data: dict[str, str] = {}
@@ -828,9 +889,9 @@ class IconPreviewView(ft.Column):
         self.mod_total_pages = 0
 
         # ===== 模組搜尋分頁狀態（PR61 Issue 1） =====
-        self._mod_search_matched: list[str] = []   # 目前搜尋結果（所有 matched modid）
-        self._mod_search_page: int = 0             # 目前搜尋結果頁碼
-        self._mod_search_total: int = 0           # 搜尋結果總頁數
+        self._mod_search_matched: list[str] = []  # 目前搜尋結果（所有 matched modid）
+        self._mod_search_page: int = 0  # 目前搜尋結果頁碼
+        self._mod_search_total: int = 0  # 搜尋結果總頁數
 
         # =========================
         # UI 元件
@@ -920,15 +981,33 @@ class IconPreviewView(ft.Column):
             self.source_label.value = f"模組資料夾：{self.source_root}"
             migrated = _migrate_old_icon_cache(self.source_root)
             if migrated:
-                show_snack(self.page, "🔄 已搬移舊 icon cache 至新路徑", color=theme.BLUE_600, clear_existing=True, duration=3000)
+                show_snack(
+                    self.page,
+                    "🔄 已搬移舊 icon cache 至新路徑",
+                    color=theme.BLUE_600,
+                    clear_existing=True,
+                    duration=3000,
+                )
             self._entries_cache = None
             self._cache_meta = {}
             self._update_load_state()
             log_info(f"[IconPreview] 模組資料夾已設定: {self.source_root}")
-            show_snack(self.page, "✅ 模組資料夾已設定", color=theme.GREEN_600, clear_existing=True, duration=3000)
+            show_snack(
+                self.page,
+                "✅ 模組資料夾已設定",
+                color=theme.GREEN_600,
+                clear_existing=True,
+                duration=3000,
+            )
         else:
             log_warning("[IconPreview] 模組資料夾選擇已取消")
-            show_snack(self.page, "⚠️ 模組資料夾選擇已取消", color=theme.WARNING, clear_existing=True, duration=3000)
+            show_snack(
+                self.page,
+                "⚠️ 模組資料夾選擇已取消",
+                color=theme.WARNING,
+                clear_existing=True,
+                duration=3000,
+            )
 
     async def _async_pick_review_dir(self):
         """選擇資源包路徑（async 實作）。"""
@@ -938,10 +1017,22 @@ class IconPreviewView(ft.Column):
             self.review_label.value = f"資源包路徑：{self.review_root}"
             self._update_load_state()
             log_info(f"[IconPreview] 資源包路徑已設定: {self.review_root}")
-            show_snack(self.page, "✅ 資源包路徑已設定", color=theme.GREEN_600, clear_existing=True, duration=3000)
+            show_snack(
+                self.page,
+                "✅ 資源包路徑已設定",
+                color=theme.GREEN_600,
+                clear_existing=True,
+                duration=3000,
+            )
         else:
             log_warning("[IconPreview] 資源包路徑選擇已取消")
-            show_snack(self.page, "⚠️ 資源包路徑選擇已取消", color=theme.WARNING, clear_existing=True, duration=3000)
+            show_snack(
+                self.page,
+                "⚠️ 資源包路徑選擇已取消",
+                color=theme.WARNING,
+                clear_existing=True,
+                duration=3000,
+            )
 
     def _on_pick_source(self, e: ft.FilePickerUploadEvent):
         """處理來源目錄選擇結果"""
@@ -950,15 +1041,33 @@ class IconPreviewView(ft.Column):
             self.source_label.value = f"模組資料夾：{self.source_root}"
             migrated = _migrate_old_icon_cache(self.source_root)
             if migrated:
-                show_snack(self.page, "🔄 已搬移舊 icon cache 至新路徑", color=theme.BLUE_600, clear_existing=True, duration=3000)
+                show_snack(
+                    self.page,
+                    "🔄 已搬移舊 icon cache 至新路徑",
+                    color=theme.BLUE_600,
+                    clear_existing=True,
+                    duration=3000,
+                )
             self._entries_cache = None
             self._cache_meta = {}
             self._update_load_state()
             log_info(f"[IconPreview] 模組資料夾已設定: {self.source_root}")
-            show_snack(self.page, "✅ 模組資料夾已設定", color=theme.GREEN_600, clear_existing=True, duration=3000)
+            show_snack(
+                self.page,
+                "✅ 模組資料夾已設定",
+                color=theme.GREEN_600,
+                clear_existing=True,
+                duration=3000,
+            )
         else:
             log_warning("[IconPreview] 模組資料夾選擇已取消")
-            show_snack(self.page, "⚠️ 模組資料夾選擇已取消", color=theme.WARNING, clear_existing=True, duration=3000)
+            show_snack(
+                self.page,
+                "⚠️ 模組資料夾選擇已取消",
+                color=theme.WARNING,
+                clear_existing=True,
+                duration=3000,
+            )
 
     def _on_pick_review(self, e: ft.FilePickerUploadEvent):
         """處理校對目錄選擇結果"""
@@ -967,10 +1076,22 @@ class IconPreviewView(ft.Column):
             self.review_label.value = f"資源包路徑：{self.review_root}"
             self._update_load_state()
             log_info(f"[IconPreview] 資源包路徑已設定: {self.review_root}")
-            show_snack(self.page, "✅ 資源包路徑已設定", color=theme.GREEN_600, clear_existing=True, duration=3000)
+            show_snack(
+                self.page,
+                "✅ 資源包路徑已設定",
+                color=theme.GREEN_600,
+                clear_existing=True,
+                duration=3000,
+            )
         else:
             log_warning("[IconPreview] 資源包路徑選擇已取消")
-            show_snack(self.page, "⚠️ 資源包路徑選擇已取消", color=theme.WARNING, clear_existing=True, duration=3000)
+            show_snack(
+                self.page,
+                "⚠️ 資源包路徑選擇已取消",
+                color=theme.WARNING,
+                clear_existing=True,
+                duration=3000,
+            )
 
     def _update_load_state(self):
         """更新載入按鈕的啟用狀態"""
@@ -987,7 +1108,13 @@ class IconPreviewView(ft.Column):
         if getattr(self, "_loading", False):
             return
         log_info("[IconPreview] 開始掃描模組...")
-        show_snack(self.page, "⏳ 掃描模組中...", color=theme.BLUE_600, clear_existing=True, duration=3000)
+        show_snack(
+            self.page,
+            "⏳ 掃描模組中...",
+            color=theme.BLUE_600,
+            clear_existing=True,
+            duration=3000,
+        )
         # PR61 Issue 1：載入新模組時清除搜尋狀態
         self._mod_search_matched = []
         self._mod_search_page = 0
@@ -1007,7 +1134,13 @@ class IconPreviewView(ft.Column):
 
         if cache_valid:
             log_info("[IconPreview] 使用 L1 快取！")
-            show_snack(self.page, f"✅ 使用快取（共 {len(self._entries_cache)} 筆）", color=theme.GREEN_600, clear_existing=True, duration=3000)
+            show_snack(
+                self.page,
+                f"✅ 使用快取（共 {len(self._entries_cache)} 筆）",
+                color=theme.GREEN_600,
+                clear_existing=True,
+                duration=3000,
+            )
             # 用快取重建 mods dict（dict 轉回 SimpleNamespace，保持屬性存取相容）
             mods = defaultdict(list)
             for entry in self._entries_cache:
@@ -1024,7 +1157,13 @@ class IconPreviewView(ft.Column):
             cached_entries = _load_entries_cache_l2(self.source_root)
             if cached_entries is not None:
                 log_info("[IconPreview] 使用 L2 磁碟快取！")
-                show_snack(self.page, f"✅ 使用磁碟快取（共 {len(cached_entries)} 筆）", color=theme.GREEN_600, clear_existing=True, duration=3000)
+                show_snack(
+                    self.page,
+                    f"✅ 使用磁碟快取（共 {len(cached_entries)} 筆）",
+                    color=theme.GREEN_600,
+                    clear_existing=True,
+                    duration=3000,
+                )
                 self._entries_cache = cached_entries
                 self._cache_meta = {
                     "source_root": str(self.source_root),
@@ -1061,7 +1200,13 @@ class IconPreviewView(ft.Column):
 
         if mode == "jar_directory":
             log_info("[IconPreview] 使用 JAR 目錄模式掃描")
-            show_snack(self.page, "📦 JAR 目錄模式：從 JAR 讀取 en_us.json...", color=theme.BLUE_600, clear_existing=True, duration=3000)
+            show_snack(
+                self.page,
+                "📦 JAR 目錄模式：從 JAR 讀取 en_us.json...",
+                color=theme.BLUE_600,
+                clear_existing=True,
+                duration=3000,
+            )
         elif mode == "extracted_folder":
             log_info("[IconPreview] 使用解包資料夾模式掃描")
 
@@ -1081,7 +1226,13 @@ class IconPreviewView(ft.Column):
                 entries = await asyncio.to_thread(self._scan_entries, mode, total_steps)
             except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
                 log_error(f"[IconPreview] 掃描失敗: {ex}")
-                show_snack(self.page, f"❌ 掃描失敗：{ex}", color=theme.RED_700, clear_existing=True, duration=4000)
+                show_snack(
+                    self.page,
+                    f"❌ 掃描失敗：{ex}",
+                    color=theme.RED_700,
+                    clear_existing=True,
+                    duration=4000,
+                )
                 entries = []
             finally:
                 self._loading = False
@@ -1110,7 +1261,9 @@ class IconPreviewView(ft.Column):
         """讀取翻譯與圖示（不直接刷新畫面，可在背景執行緒執行）。"""
         if mode == "jar_directory":
             return self._load_entries_from_jar_directory(
-                processed_callback=_make_progress_callback(self, "讀取翻譯內容", total_steps)
+                processed_callback=_make_progress_callback(
+                    self, "讀取翻譯內容", total_steps
+                )
             )
         if mode == "extracted_folder":
             return self._load_entries()
@@ -1120,14 +1273,26 @@ class IconPreviewView(ft.Column):
         """（event loop 上）套用掃描結果並渲染模組清單。"""
         if mode not in ("jar_directory", "extracted_folder"):
             log_warning("[IconPreview] 無法識別資料夾模式，或資料夾為空")
-            show_snack(self.page, "❌ 無法識別模式，請確認資料夾內容", color=theme.RED_700, clear_existing=True, duration=3000)
+            show_snack(
+                self.page,
+                "❌ 無法識別模式，請確認資料夾內容",
+                color=theme.RED_700,
+                clear_existing=True,
+                duration=3000,
+            )
             self.progress_bar.visible = False
             self.update()
             return
 
         if not entries:
             log_warning("[IconPreview] 掃描結果為空，確認 en_us.json 是否存在")
-            show_snack(self.page, "❌ 掃描結果為空，請確認 en_us.json 是否存在", color=theme.RED_700, clear_existing=True, duration=3000)
+            show_snack(
+                self.page,
+                "❌ 掃描結果為空，請確認 en_us.json 是否存在",
+                color=theme.RED_700,
+                clear_existing=True,
+                duration=3000,
+            )
             self.progress_bar.visible = False
             self.update()
             return
@@ -1150,8 +1315,16 @@ class IconPreviewView(ft.Column):
             mods[entry.modid].append(entry)
 
         self.mods = dict(mods)
-        log_info(f"[IconPreview] 載入完成，共 {len(self.mods)} 個模組，{len(entries)} 筆翻譯")
-        show_snack(self.page, f"✅ 載入完成（共 {len(self.mods)} 個模組）", color=theme.GREEN_600, clear_existing=True, duration=3000)
+        log_info(
+            f"[IconPreview] 載入完成，共 {len(self.mods)} 個模組，{len(entries)} 筆翻譯"
+        )
+        show_snack(
+            self.page,
+            f"✅ 載入完成（共 {len(self.mods)} 個模組）",
+            color=theme.GREEN_600,
+            clear_existing=True,
+            duration=3000,
+        )
 
         # 隱藏進度條
         self.progress_bar.visible = False
@@ -1221,18 +1394,20 @@ class IconPreviewView(ft.Column):
         """更新分頁資訊顯示（同時支援一般清單與搜尋結果分頁）"""
         if self._mod_search_matched:
             # 搜尋結果分頁模式（PR61 Issue 1）
-            self.page_info.value = (
-                f"搜尋結果｜第 {self._mod_search_page + 1} / {self._mod_search_total} 頁"
-            )
+            self.page_info.value = f"搜尋結果｜第 {self._mod_search_page + 1} / {self._mod_search_total} 頁"
             self.prev_page_btn.disabled = self._mod_search_page <= 0
-            self.next_page_btn.disabled = self._mod_search_page >= self._mod_search_total - 1
+            self.next_page_btn.disabled = (
+                self._mod_search_page >= self._mod_search_total - 1
+            )
         else:
             # 一般模組清單分頁模式
             self.page_info.value = (
                 f"模組清單｜第 {self.mod_current_page + 1} / {self.mod_total_pages} 頁"
             )
             self.prev_page_btn.disabled = self.mod_current_page <= 0
-            self.next_page_btn.disabled = self.mod_current_page >= self.mod_total_pages - 1
+            self.next_page_btn.disabled = (
+                self.mod_current_page >= self.mod_total_pages - 1
+            )
 
     def _on_page_size_change(self, e: ft.ControlEvent):
         """處理每頁顯示數量變更（PR61 Issue 1）"""
@@ -1323,7 +1498,7 @@ class IconPreviewView(ft.Column):
             self.list_view.controls.append(
                 ft.ListTile(
                     title=ft.Text("無符合結果", color=theme.GREY_600),
-                    subtitle=ft.Text(f"嘗試不同的關鍵字"),
+                    subtitle=ft.Text("嘗試不同的關鍵字"),
                 )
             )
             self.page_info.value = ""
@@ -1332,7 +1507,9 @@ class IconPreviewView(ft.Column):
             # PR61 Issue 1：儲存搜尋結果並計算分頁
             self._mod_search_matched = matched
             self._mod_search_page = 0
-            self._mod_search_total = max(1, (len(matched) + self.mod_page_size - 1) // self.mod_page_size)
+            self._mod_search_total = max(
+                1, (len(matched) + self.mod_page_size - 1) // self.mod_page_size
+            )
             self.mod_search_status.value = f"符合 {len(matched)} / {total} 個模組"
             self._render_mod_search_page()
 
@@ -1341,7 +1518,6 @@ class IconPreviewView(ft.Column):
     def _render_mod_search_page(self):
         """渲染搜尋結果的目前頁（PR61 Issue 1）"""
         matched = self._mod_search_matched
-        total = len(matched)
 
         start = self._mod_search_page * self.mod_page_size
         end = start + self.mod_page_size
@@ -1381,15 +1557,17 @@ class IconPreviewView(ft.Column):
                 self.detail_search_status.value = ""
         else:
             filtered = [
-                e for e in entries
-                if keyword in e.key.lower() or keyword in (e.en or "").lower() or keyword in (e.zh_tw or "").lower()
+                e
+                for e in entries
+                if keyword in e.key.lower()
+                or keyword in (e.en or "").lower()
+                or keyword in (e.zh_tw or "").lower()
             ]
             self._detail_filtered_entries = filtered
             if hasattr(self, "detail_search_status"):
                 self.detail_search_status.value = f"符合 {len(filtered)} / {total} 筆"
-            if not filtered:
-                if hasattr(self, "detail_search_status"):
-                    self.detail_search_status.value = f"無符合結果（{total} 筆）"
+            if not filtered and hasattr(self, "detail_search_status"):
+                self.detail_search_status.value = f"無符合結果（{total} 筆）"
 
         # 重設到第一頁再渲染
         self.current_page = 0
@@ -1402,9 +1580,17 @@ class IconPreviewView(ft.Column):
         self.detail_search_status.visible = visible
 
         # 從 controls 中移除再重新加入（確保順序正確：搜尋框在最上方）
-        self.controls = [c for c in self.controls if c not in [self.detail_search_tf, self.detail_search_status]]
+        self.controls = [
+            c
+            for c in self.controls
+            if c not in [self.detail_search_tf, self.detail_search_status]
+        ]
         if visible:
-            idx = self.controls.index(self.list_view) if self.list_view in self.controls else len(self.controls)
+            idx = (
+                self.controls.index(self.list_view)
+                if self.list_view in self.controls
+                else len(self.controls)
+            )
             self.controls.insert(idx, self.detail_search_tf)
             self.controls.insert(idx + 1, self.detail_search_status)
         self.update()
@@ -1512,12 +1698,26 @@ class IconPreviewView(ft.Column):
     def _save_current_zh(self, e):
         """儲存目前的翻譯到 zh_tw.json"""
         log_info(f"[IconPreview] 開始儲存翻譯: {self._current_zh_file}")
-        show_snack(self.page, "💾 儲存翻譯中...", color=theme.BLUE_600, clear_existing=True, duration=3000)
+        show_snack(
+            self.page,
+            "💾 儲存翻譯中...",
+            color=theme.BLUE_600,
+            clear_existing=True,
+            duration=3000,
+        )
         self.update()
 
         if not self._current_zh_file:
-            log_error(f"[IconPreview] 儲存失敗：找不到 zh_tw.json (modid={self.current_modid})")
-            show_snack(self.page, "❌ 找不到 zh_tw.json", color=theme.RED_700, clear_existing=True, duration=3000)
+            log_error(
+                f"[IconPreview] 儲存失敗：找不到 zh_tw.json (modid={self.current_modid})"
+            )
+            show_snack(
+                self.page,
+                "❌ 找不到 zh_tw.json",
+                color=theme.RED_700,
+                clear_existing=True,
+                duration=3000,
+            )
             return
 
         try:
@@ -1526,11 +1726,25 @@ class IconPreviewView(ft.Column):
                 json.dumps(self._zh_data, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            log_info(f"[IconPreview] 儲存成功：{self._current_zh_file} ({len(self._zh_data)} 筆翻譯)")
-            show_snack(self.page, f"✅ 翻譯已儲存 ({len(self._zh_data)} 筆)", color=theme.GREEN_600, clear_existing=True, duration=3000)
-        except Exception as ex:
+            log_info(
+                f"[IconPreview] 儲存成功：{self._current_zh_file} ({len(self._zh_data)} 筆翻譯)"
+            )
+            show_snack(
+                self.page,
+                f"✅ 翻譯已儲存 ({len(self._zh_data)} 筆)",
+                color=theme.GREEN_600,
+                clear_existing=True,
+                duration=3000,
+            )
+        except Exception as ex:  # noqa: BLE001
             log_error(f"[IconPreview] 儲存失敗：{ex}")
-            show_snack(self.page, f"❌ 儲存失敗：{ex}", color=theme.RED_700, clear_existing=True, duration=3000)
+            show_snack(
+                self.page,
+                f"❌ 儲存失敗：{ex}",
+                color=theme.RED_700,
+                clear_existing=True,
+                duration=3000,
+            )
 
     # ==================================================
     # 輔助：SnackBar
@@ -1574,7 +1788,12 @@ class IconPreviewView(ft.Column):
                     log_info(f"[IconPreview] 雙軌-直接: {direct}")
 
         # Track 2：rglob fallback（容錯，找漏網）
-        found_paths = set(str(direct) for modid in modid_set for direct in [self.review_root / modid / "lang" / "zh_tw.json"] if direct.exists())
+        found_paths = {
+            str(direct)
+            for modid in modid_set
+            for direct in [self.review_root / modid / "lang" / "zh_tw.json"]
+            if direct.exists()
+        }
         for zh_file in self.review_root.rglob("zh_tw.json"):
             if str(zh_file) not in found_paths:
                 data = load_json_auto_encoding(zh_file)
@@ -1592,7 +1811,7 @@ class IconPreviewView(ft.Column):
                 parts = en_file.parts
                 idx = parts.index("assets")
                 modid = parts[idx + 1]
-            except Exception:
+            except Exception:  # noqa: BLE001
                 modid = "unknown"
 
             for key, en_text in data.items():
@@ -1631,10 +1850,14 @@ class IconPreviewView(ft.Column):
             log_info(f"[IconPreview] 偵測為 JAR 目錄模式（{jar_count} 個 JAR 檔）")
             return "jar_directory"
         elif extracted_count > 0:
-            log_info(f"[IconPreview] 偵測為解包資料夾模式（{extracted_count} 個 en_us.json）")
+            log_info(
+                f"[IconPreview] 偵測為解包資料夾模式（{extracted_count} 個 en_us.json）"
+            )
             return "extracted_folder"
         else:
-            log_warning(f"[IconPreview] 無法識別模式：JAR={jar_count}, en_us={extracted_count}")
+            log_warning(
+                f"[IconPreview] 無法識別模式：JAR={jar_count}, en_us={extracted_count}"
+            )
             return "empty"
 
     def _load_entries_from_jar_directory(self, processed_callback=None) -> list:
@@ -1656,16 +1879,20 @@ class IconPreviewView(ft.Column):
         all_modids = set()
         for jar_path in jar_files:
             try:
-                with zipfile.ZipFile(jar_path, 'r') as zf:
+                with zipfile.ZipFile(jar_path, "r") as zf:
                     for name in zf.namelist():
                         if not name.endswith("lang/en_us.json"):
                             continue
-                        parts = name.split('/')
-                        if len(parts) < 3 or parts[-2] != 'lang' or parts[-1] != 'en_us.json':
+                        parts = name.split("/")
+                        if (
+                            len(parts) < 3
+                            or parts[-2] != "lang"
+                            or parts[-1] != "en_us.json"
+                        ):
                             continue
                         modid = parts[1]
                         all_modids.add(modid)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
         _show_progress_phase(self, "收集模組資訊", total_steps, total_steps)
 
@@ -1683,7 +1910,10 @@ class IconPreviewView(ft.Column):
                         log_info(f"[IconPreview] JAR雙軌-直接: {direct}")
 
             # Track 2：rglob fallback
-            found_paths = set(str(self.review_root / modid / "lang" / "zh_tw.json") for modid in all_modids)
+            found_paths = {
+                str(self.review_root / modid / "lang" / "zh_tw.json")
+                for modid in all_modids
+            }
             for zh_file in self.review_root.rglob("zh_tw.json"):
                 if str(zh_file) not in found_paths:
                     data = load_json_auto_encoding(zh_file)
@@ -1708,7 +1938,6 @@ class IconPreviewView(ft.Column):
                     processed_callback()
                 except TypeError:
                     pass  # 忽略不兼容的 callback
-
 
         # 包裝 callback：同時支援 0 參數（旧測試）和 2 參數（新設計）
         def wrapped_callback(processed: int, total: int):
@@ -1741,7 +1970,9 @@ class IconPreviewView(ft.Column):
                 try:
                     data = json.loads(content)
                 except json.JSONDecodeError:
-                    log_warning(f"[IconPreview] JAR 解析 JSON 失敗: {jar_path.name} / {name}")
+                    log_warning(
+                        f"[IconPreview] JAR 解析 JSON 失敗: {jar_path.name} / {name}"
+                    )
                     failed_jars.append(jar_path.name)
                     continue
 
@@ -1753,16 +1984,20 @@ class IconPreviewView(ft.Column):
                     zh_tw_raw = zh_map.get(key, "")
                     if not isinstance(zh_tw_raw, str):
                         zh_tw_raw = ""
-                    entries.append(SimpleNamespace(
-                        modid=modid,
-                        key=key,
-                        en=en_text,
-                        zh_tw=zh_tw_raw.strip(),
-                        source_jar=jar_path.name,
-                    ))
+                    entries.append(
+                        SimpleNamespace(
+                            modid=modid,
+                            key=key,
+                            en=en_text,
+                            zh_tw=zh_tw_raw.strip(),
+                            source_jar=jar_path.name,
+                        )
+                    )
                     jar_entries_count += 1
 
-                log_info(f"[IconPreview] {jar_path.name}: 找到 {jar_entries_count} 筆翻譯")
+                log_info(
+                    f"[IconPreview] {jar_path.name}: 找到 {jar_entries_count} 筆翻譯"
+                )
 
         log_info(f"[IconPreview] JAR 目錄掃描完成：共 {len(entries)} 筆翻譯")
 
@@ -1777,16 +2012,16 @@ class IconPreviewView(ft.Column):
                 if getattr(e, "source_jar", None):
                     jar_to_entries[e.source_jar].append(e)
 
-            icon_total = len(jar_to_entries)
-
             def _on_icon_progress(done: int, total: int):
                 _show_progress_phase(self, "提取模組圖示", done, total)
 
-            _batch_extract_jar_icons(jar_to_entries, icon_cache_root, self.source_root, _on_icon_progress)
+            _batch_extract_jar_icons(
+                jar_to_entries, icon_cache_root, self.source_root, _on_icon_progress
+            )
 
         # ===== 寫入 L2 磁碟快取 =====
         _save_entries_cache_l2(self.source_root, entries)
-        log_info(f"[IconPreview] 已寫入 L2 磁碟快取")
+        log_info("[IconPreview] 已寫入 L2 磁碟快取")
 
         return entries
 
@@ -1796,10 +2031,8 @@ class IconPreviewView(ft.Column):
         if self._detail_filtered_entries is not None:
             # 有搜尋條件，使用過濾後的 entries
             entries = self._detail_filtered_entries
-            search_active = True
         else:
             entries = self.mods.get(self.current_modid, [])
-            search_active = False
 
         total = len(entries)
 

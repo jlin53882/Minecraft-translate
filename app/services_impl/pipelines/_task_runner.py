@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import traceback
-from typing import Callable, Any
+from collections.abc import Callable
+from typing import Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
@@ -34,7 +35,7 @@ def run_callable_task(
     except TaskCancelled:
         session.add_log("⏹ 任務已取消", level="warning")
         return None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error("[%s] %s\n%s", task_name, e, full_traceback)
         if add_session_log_on_error:

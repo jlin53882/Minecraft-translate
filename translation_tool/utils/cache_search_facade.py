@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 from .cache_search import SearchOrchestrator
+
 
 class CacheSearchFacade:
     """CacheSearchFacade 類別。
@@ -29,7 +31,7 @@ class CacheSearchFacade:
         """
         self._cache_root_getter = cache_root_getter
         self._logger = logger
-        self._orchestrator: Optional[SearchOrchestrator] = None
+        self._orchestrator: SearchOrchestrator | None = None
         self._lock = threading.Lock()
 
     def _get_orchestrator(self) -> SearchOrchestrator:
@@ -45,7 +47,7 @@ class CacheSearchFacade:
         try:
             return self._get_orchestrator().get_engine()
         except Exception as e:
-            self._logger.error(f"搜尋引擎初始化失敗: {e}", exc_info=True)
+            self._logger.error(f"搜尋引擎初始化失敗: {e}", exc_info=True)  # noqa: G201
             return None
 
     def is_search_index_current(self, cache_types: list[str]) -> bool:
@@ -67,7 +69,7 @@ class CacheSearchFacade:
             )
             self._logger.info(f"✅ 搜尋索引重建完成，共索引 {total_indexed} 條翻譯")
         except Exception as e:
-            self._logger.error(f"❌ 重建搜尋索引失敗: {e}", exc_info=True)
+            self._logger.error(f"❌ 重建搜尋索引失敗: {e}", exc_info=True)  # noqa: G201
 
     def rebuild_search_index_for_type(
         self,
@@ -84,7 +86,7 @@ class CacheSearchFacade:
             )
             self._logger.info(f"✅ {cache_type} 索引重建完成（{indexed} 條）")
         except Exception as e:
-            self._logger.error(f"❌ {cache_type} 索引重建失敗: {e}", exc_info=True)
+            self._logger.error(f"❌ {cache_type} 索引重建失敗: {e}", exc_info=True)  # noqa: G201
 
     def search_cache(
         self,
@@ -103,7 +105,7 @@ class CacheSearchFacade:
                 use_fuzzy=use_fuzzy,
             )
         except Exception as e:
-            self._logger.error(f"Search failed: {e}", exc_info=True)
+            self._logger.error(f"Search failed: {e}", exc_info=True)  # noqa: G201
             return []
 
     def find_similar_translations(
@@ -123,5 +125,5 @@ class CacheSearchFacade:
                 limit=limit,
             )
         except Exception as e:
-            self._logger.error(f"相似翻譯搜尋失敗: {e}", exc_info=True)
+            self._logger.error(f"相似翻譯搜尋失敗: {e}", exc_info=True)  # noqa: G201
             return []

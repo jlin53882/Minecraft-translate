@@ -1,8 +1,7 @@
 import threading
 import time
 
-from translation_tool.utils import cache_manager
-from translation_tool.utils import cache_search, cache_store
+from translation_tool.utils import cache_manager, cache_search, cache_store
 
 
 def _reset_cache_state():
@@ -17,7 +16,9 @@ def test_rebuild_search_index_contract_and_tmp_cleanup(tmp_path, monkeypatch):
     _reset_cache_state()
 
     cache_manager.add_to_cache("lang", "item.minecraft.diamond", "Diamond", "鑽石")
-    cache_manager.add_to_cache("md", "kubejs/docs|Hello world", "Hello world", "哈囉世界")
+    cache_manager.add_to_cache(
+        "md", "kubejs/docs|Hello world", "Hello world", "哈囉世界"
+    )
 
     cache_manager.rebuild_search_index()
     cache_manager.rebuild_search_index()
@@ -39,14 +40,20 @@ def test_rebuild_search_index_for_type_no_pollution(tmp_path, monkeypatch):
     _reset_cache_state()
 
     cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "蘋果")
-    cache_manager.add_to_cache("patchouli", "assets/mod/book/en_us|Entry", "Entry", "條目")
+    cache_manager.add_to_cache(
+        "patchouli", "assets/mod/book/en_us|Entry", "Entry", "條目"
+    )
     cache_manager.rebuild_search_index()
 
     cache_manager.add_to_cache("lang", "item.minecraft.apple", "Apple", "紅蘋果")
     cache_manager.rebuild_search_index_for_type("lang")
 
-    lang_results = cache_manager.search_cache("紅蘋果", cache_type="lang", use_fuzzy=False)
-    patchouli_results = cache_manager.search_cache("條目", cache_type="patchouli", use_fuzzy=False)
+    lang_results = cache_manager.search_cache(
+        "紅蘋果", cache_type="lang", use_fuzzy=False
+    )
+    patchouli_results = cache_manager.search_cache(
+        "條目", cache_type="patchouli", use_fuzzy=False
+    )
 
     assert lang_results and lang_results[0]["type"] == "lang"
     assert patchouli_results and patchouli_results[0]["type"] == "patchouli"
@@ -72,7 +79,7 @@ def test_rebuild_uses_build_then_swap_query_not_crash(tmp_path, monkeypatch):
     def worker():
         try:
             cache_manager.rebuild_search_index()
-        except Exception as e:  # pragma: no cover
+        except Exception as e:  # pragma: no cover  # noqa: BLE001
             exc.append(e)
 
     t = threading.Thread(target=worker)
@@ -96,7 +103,9 @@ def test_index_meta_tracks_shard_changes(tmp_path, monkeypatch):
 
     shard = cache_manager._get_cache_root() / "lang" / "lang_00001.json"
     shard.parent.mkdir(parents=True, exist_ok=True)
-    shard.write_text('{"item.minecraft.gold": {"src": "Gold", "dst": "金"}}', encoding="utf-8")
+    shard.write_text(
+        '{"item.minecraft.gold": {"src": "Gold", "dst": "金"}}', encoding="utf-8"
+    )
     cache_manager.add_to_cache("lang", "item.minecraft.gold", "Gold", "金")
     cache_manager.rebuild_search_index()
     assert cache_manager.is_search_index_current() is True

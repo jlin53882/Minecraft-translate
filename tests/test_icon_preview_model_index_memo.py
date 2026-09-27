@@ -7,7 +7,9 @@ import zipfile
 from app.views import icon_preview_view as ipv
 
 
-def test_model_index_read_from_disk_once_and_invalidated_on_jar_change(tmp_path, monkeypatch):
+def test_model_index_read_from_disk_once_and_invalidated_on_jar_change(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(ipv, "_get_model_index_cache_dir", lambda: tmp_path / "idx")
     monkeypatch.setattr(ipv, "_MODEL_INDEX_MEMO", {})
     jar = tmp_path / "demo-1.0.jar"

@@ -3,26 +3,26 @@
 維護注意：本檔案的 docstring 與中文註解用於維護說明，不代表行為變更。
 """
 
+import subprocess
 import threading
 import time
-from app.views.config.config_actions import load_config_into_view
-import subprocess
 from pathlib import Path
 from typing import Any
 
 import flet as ft
 
-from app.views._log import LogView
-from translation_tool.utils.log_unit import log_warning
-from translation_tool.utils.config_manager import load_config, save_config
 from app.services_impl.pipelines.merge_service import (
-    run_merge_zip_batch_service,
     run_merge_folder_batch_service,
+    run_merge_zip_batch_service,
 )
 from app.task_session import TaskSession
 from app.ui import theme
-from app.ui.snack import show_snack
 from app.ui.components import primary_button, styled_card
+from app.ui.snack import show_snack
+from app.views._log import LogView
+from app.views.config.config_actions import load_config_into_view
+from translation_tool.utils.config_manager import load_config, save_config
+from translation_tool.utils.log_unit import log_warning
 
 
 class MergeView(ft.Column):
@@ -47,7 +47,6 @@ class MergeView(ft.Column):
     zip_list_view: ft.ListView
     status_chip: ft.Chip
     progress_bar: ft.ProgressBar
-    log_view: ft.ListView
     pick_zip_button: ft.Button
     start_button: ft.Button
     controls: list[ft.Control]
@@ -106,7 +105,7 @@ class MergeView(ft.Column):
                 try:
                     cfg = load_config()
                     load_config_into_view(inner, cfg)
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     def _on_merge_field_changed(self, key: str, value: Any) -> None:
@@ -118,7 +117,7 @@ class MergeView(ft.Column):
             cfg["lang_merger"][key] = value
             save_config(cfg)
             self._broadcast_config_change_to_config_view()
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker) -> None:
@@ -812,7 +811,7 @@ class MergeView(ft.Column):
                 # LogView 接管 append + truncate + scroll
                 # 內部會自己 page.update()
                 self.log_view.sync_from_session(self.session)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log_warning(f"[MergeView] _sync_ui 錯誤: {e!r}")
 
         def poll():
@@ -820,7 +819,7 @@ class MergeView(ft.Column):
                 # 透過 page.run_task() 推到 UI thread
                 try:
                     self.page.run_task(_sync_ui)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     log_warning(f"[MergeView] run_task 錯誤: {e!r}")
                 time.sleep(0.1)
 
@@ -985,7 +984,7 @@ class MergeView(ft.Column):
             # 2026-08-04: 先改 progress_bar 再 call _set_status (內部 page.update)
             self.progress_bar.value = 0.0
             self._set_status("尚未開始", theme.GREY_400)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log_warning(f"[MergeView] pop_dialog 錯誤: {e!r}")
 
     @property

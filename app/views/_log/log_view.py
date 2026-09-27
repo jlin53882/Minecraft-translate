@@ -40,6 +40,7 @@ _LEVEL_COLORS = {
     "debug": theme.TEXT_LOG_DEBUG,
 }
 
+
 class LogView(ft.Container):
     """統一的 log 顯示 widget。
 

@@ -5,42 +5,43 @@
 """
 
 # lm_translator.py
+import hashlib
 import json as json_std
 import math
-import hashlib
 import os
 import time
+from collections.abc import Callable, Generator
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, Optional
+from typing import Any
 
 import orjson as json
 
-from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
-from translation_tool.utils.log_unit import log_info, log_warning, log_debug
-from translation_tool.utils.cache_manager import (
-    add_to_cache,
-    save_translation_cache,
-    reload_translation_cache,
-    get_cache_dict_ref,
+from translation_tool.core.lm_config_rules import (
+    validate_api_keys,
+    value_fully_translated,
 )
 from translation_tool.core.lm_translator_main import (
     DEFAULT_DRY_RUN,
     DEFAULT_EXPORT_CACHE_ONLY,
     translate_batch_smart,
 )
-from translation_tool.core.translation_path_writer import (
-    map_lang_output_path,
-    set_by_path,
-)
-from translation_tool.core.lm_config_rules import (
-    validate_api_keys,
-    value_fully_translated,
-)
 from translation_tool.core.lm_translator_scan import (
     extract_items_parallel,
     scan_translatable_files,
 )
+from translation_tool.core.translation_path_writer import (
+    map_lang_output_path,
+    set_by_path,
+)
+from translation_tool.utils.cache_manager import (
+    add_to_cache,
+    get_cache_dict_ref,
+    reload_translation_cache,
+    save_translation_cache,
+)
+from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 # ============================================================
 # B-3: 快取寫入頻率優化（每 N 個批次才寫一次硬碟）
@@ -119,7 +120,7 @@ def load_checkpoint() -> dict | None:
     try:
         with open(CHECKPOINT_FILE, "r", encoding="utf-8") as f:
             return json_std.load(f)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -199,11 +200,11 @@ def translate_directory_generator(
     input_dir: str,
     output_dir: str,
     *,
-    dry_run: Optional[bool] = None,
+    dry_run: bool | None = None,
     export_lang: bool = False,
     write_new_cache: bool = False,
-    should_cancel: Optional[Callable[[], bool]] = None,
-) -> Generator[Dict[str, Any], None, None]:
+    should_cancel: Callable[[], bool] | None = None,
+) -> Generator[dict[str, Any], None, None]:
     """翻譯目錄的 generator 入口。
 
     Args:
@@ -264,7 +265,7 @@ def translate_directory_generator(
     # =========================
     try:
         patchouli_files, lang_files, files = scan_translatable_files(root)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log_warning(f"⚠️ 掃描可翻譯檔案失敗，已跳過本次掃描：{e}")
         patchouli_files, lang_files, files = [], [], []
 
@@ -589,9 +590,7 @@ def translate_directory_generator(
         if checkpoint.get("fingerprint") != checkpoint_fingerprint:
             # 來源資料夾或待翻譯內容不同（含舊版沒有指紋的 checkpoint）：
             # 不可沿用，否則會跳過新資料的前 N 筆而未翻譯
-            log_warning(
-                "⚠️ checkpoint 屬於其他資料（來源或內容不同），忽略並重新開始"
-            )
+            log_warning("⚠️ checkpoint 屬於其他資料（來源或內容不同），忽略並重新開始")
             clear_checkpoint()
         # 檢查 checkpoint 的 completed_count 是否合理（completed <= 原始 total）
         elif cp_completed <= total and cp_total == total:
@@ -772,16 +771,12 @@ def translate_directory_generator(
             if is_lang:
                 save_translation_cache("lang", write_new_shard=write_new_cache)
                 log_debug(
-                    "✅ lang 分片快取已寫入硬碟（每 {} 批次）".format(
-                        BATCH_WRITE_INTERVAL
-                    )
+                    f"✅ lang 分片快取已寫入硬碟（每 {BATCH_WRITE_INTERVAL} 批次）"
                 )
             else:
                 save_translation_cache("patchouli", write_new_shard=write_new_cache)
                 log_debug(
-                    "✅ patchouli 分片快取已寫入硬碟（每 {} 批次）".format(
-                        BATCH_WRITE_INTERVAL
-                    )
+                    f"✅ patchouli 分片快取已寫入硬碟（每 {BATCH_WRITE_INTERVAL} 批次）"
                 )
             _batch_write_counter = 0  # 重置計數器
 

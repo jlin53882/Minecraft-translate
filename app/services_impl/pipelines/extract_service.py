@@ -11,30 +11,32 @@ PR19：將 extract 類 service 從 app.services.py 抽離到 pipelines 子模組
 - 透過 TaskSession 統一管理任務狀態、日誌、進度
 """
 
-from translation_tool.utils.cancellation import is_cancelled
 import logging
 import os
 import traceback
 from pathlib import Path
 from typing import Any
 
+from app.logging.task_session import TaskSession
 from app.services_impl.logging_service import (
     GLOBAL_LOG_LIMITER,
     UI_LOG_HANDLER,
 )
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
-from app.logging.task_session import TaskSession
 from translation_tool.core.jar_processor import (
     extract_book_files_generator,
     extract_dual_files_generator,
     extract_lang_files_generator,
 )
+from translation_tool.utils.cancellation import is_cancelled
 from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
 
 
-def _select_extraction_generator(mode: str, mods_dir: str, output_dir: str, lang_codes=None, skip_zh_cn=False):
+def _select_extraction_generator(
+    mode: str, mods_dir: str, output_dir: str, lang_codes=None, skip_zh_cn=False
+):
     """根據 mode 選擇對應的提取 Generator。
 
     Args:
@@ -289,9 +291,13 @@ def run_extraction_loop(
         Phase 3 (2026-07-13): DUAL mode 也會拆出 lang / book sub-dict,
         給 extractor_dialog.update_stats 顯示 LANG/BOOK 分區用。
     """
-    stats = {"success": 0, "warnings": 0, "failures": 0,
-             "lang": {"success": 0, "warnings": 0, "failures": 0},
-             "book": {"success": 0, "warnings": 0, "failures": 0}}
+    stats = {
+        "success": 0,
+        "warnings": 0,
+        "failures": 0,
+        "lang": {"success": 0, "warnings": 0, "failures": 0},
+        "book": {"success": 0, "warnings": 0, "failures": 0},
+    }
 
     for update in generator:
         if cancelled_flag is not None and cancelled_flag[0]:
@@ -336,9 +342,11 @@ def run_lang_extraction_service(
     try:
         session.start()
         UI_LOG_HANDLER.set_session(session)
-        generator = _select_extraction_generator("lang", mods_dir, output_dir, lang_codes)
+        generator = _select_extraction_generator(
+            "lang", mods_dir, output_dir, lang_codes
+        )
         _run_extraction_with_session(generator, session, "Lang")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
@@ -367,9 +375,11 @@ def run_book_extraction_service(
     try:
         session.start()
         UI_LOG_HANDLER.set_session(session)
-        generator = _select_extraction_generator("book", mods_dir, output_dir, lang_codes)
+        generator = _select_extraction_generator(
+            "book", mods_dir, output_dir, lang_codes
+        )
         _run_extraction_with_session(generator, session, "Book")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
@@ -398,9 +408,11 @@ def run_dual_extraction_service(
     try:
         session.start()
         UI_LOG_HANDLER.set_session(session)
-        generator = _select_extraction_generator("dual", mods_dir, output_dir, lang_codes)
+        generator = _select_extraction_generator(
+            "dual", mods_dir, output_dir, lang_codes
+        )
         _run_extraction_with_session(generator, session, "Dual")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}")
@@ -424,6 +436,7 @@ def open_output_folder(path: str) -> bool:
         True 表示成功開啟，False 表示失敗（路徑不存在或平台不支援）
     """
     import os
+
     if not path or not os.path.isdir(path):
         return False
 
@@ -432,10 +445,12 @@ def open_output_folder(path: str) -> bool:
             os.startfile(path)
         elif os.uname().sysname == "Darwin":  # macOS
             import subprocess
+
             subprocess.run(["open", path], check=True)
         else:  # Linux
             import subprocess
+
             subprocess.run(["xdg-open", path], check=True)
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False

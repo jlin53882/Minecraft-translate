@@ -27,8 +27,12 @@ def test_load_shard_rows_includes_cleaned_shards_and_excludes_cache_main(tmp_pat
     # Should be excluded
     (lang_dir / "lang_cache_main.json").write_text("{}", encoding="utf-8")
     # Should be included
-    (lang_dir / "lang_00001.json").write_text(json.dumps({"k1": {}}, ensure_ascii=False), encoding="utf-8")
-    (lang_dir / "cleaned_shard_00002.json").write_text(json.dumps({"k2": {}, "k3": {}}, ensure_ascii=False), encoding="utf-8")
+    (lang_dir / "lang_00001.json").write_text(
+        json.dumps({"k1": {}}, ensure_ascii=False), encoding="utf-8"
+    )
+    (lang_dir / "cleaned_shard_00002.json").write_text(
+        json.dumps({"k2": {}, "k3": {}}, ensure_ascii=False), encoding="utf-8"
+    )
 
     view = CacheView.__new__(CacheView)
     view._last_overview_data = {"cache_root": str(cache_root)}
@@ -77,15 +81,25 @@ def test_on_shard_dst_apply_updates_cache_and_history(monkeypatch):
 
     view._notify = lambda msg, level="info": notify_calls.append((level, msg))
     view._history_now_ts = lambda: "2026-02-12T02:00:00+08:00"
-    view._history_append_event = lambda ctype, event: history_calls.append((ctype, event))
+    view._history_append_event = lambda ctype, event: history_calls.append(
+        (ctype, event)
+    )
     view._render_query_results = lambda: None
     view._render_query_detail = lambda: None
     view._render_shard_src_panel = lambda: None
     view._render_shard_dst_panel = lambda: None
     view._refresh_disabled_state = lambda: None
 
-    monkeypatch.setattr(cache_view_module, "cache_update_dst_service", lambda ctype, key, new_dst: update_calls.append((ctype, key, new_dst)) or True)
-    monkeypatch.setattr(cache_view_module, "cache_save_all_service", lambda **kwargs: save_calls.append(kwargs) or {"ok": True})
+    monkeypatch.setattr(
+        cache_view_module,
+        "cache_update_dst_service",
+        lambda ctype, key, new_dst: update_calls.append((ctype, key, new_dst)) or True,
+    )
+    monkeypatch.setattr(
+        cache_view_module,
+        "cache_save_all_service",
+        lambda **kwargs: save_calls.append(kwargs) or {"ok": True},
+    )
 
     CacheView._on_shard_dst_apply(view, None)
 
@@ -136,11 +150,20 @@ def test_on_query_search_all_mode_deduplicates_per_type_key(monkeypatch):
         if mode == "key":
             return {"items": [{"key": "k1"}, {"key": "k2"}]}
         if mode == "dst":
-            return {"items": [{"key": "k2", "preview": "dup"}, {"key": "k3", "preview": "p3"}]}
+            return {
+                "items": [
+                    {"key": "k2", "preview": "dup"},
+                    {"key": "k3", "preview": "p3"},
+                ]
+            }
         return {"items": []}
 
     monkeypatch.setattr(cache_view_module, "cache_search_service", fake_search)
-    monkeypatch.setattr(cache_view_module, "cache_get_entry_service", lambda ctype, key: {"dst": f"dst-{ctype}-{key}"})
+    monkeypatch.setattr(
+        cache_view_module,
+        "cache_get_entry_service",
+        lambda ctype, key: {"dst": f"dst-{ctype}-{key}"},
+    )
 
     CacheView._on_query_search(view, None)
 
@@ -169,7 +192,9 @@ def test_on_query_search_requires_input(monkeypatch):
     view._render_query_results = lambda: None
     view._render_query_detail = lambda: None
 
-    monkeypatch.setattr(cache_view_module, "cache_search_service", lambda *args, **kwargs: {"items": []})
+    monkeypatch.setattr(
+        cache_view_module, "cache_search_service", lambda *args, **kwargs: {"items": []}
+    )
 
     CacheView._on_query_search(view, None)
 

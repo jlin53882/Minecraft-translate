@@ -4,6 +4,7 @@
 """
 
 import threading
+
 from app.task_session import TaskSession
 
 
@@ -127,7 +128,7 @@ class TestTaskSession:
                 for i in range(100):
                     session.set_progress(i / 100)
                     session.add_log(f"Log {i}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         threads = [threading.Thread(target=worker) for _ in range(5)]

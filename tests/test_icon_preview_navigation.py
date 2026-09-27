@@ -15,6 +15,7 @@ from app.ui.debounce import Debouncer
 
 class MockPage:
     """Lightweight Flet Page mock for navigation tests."""
+
     def __init__(self):
         self.overlay = []
         self.update_count = 0
@@ -70,6 +71,7 @@ def create_view_for_navigation():
 # P1: _cancel_detail_search_debounce
 # ==================================================
 
+
 class TestCancelDetailSearchDebounce:
     """_cancel_detail_search_debounce 的各種情境測試。"""
 
@@ -111,6 +113,7 @@ class TestCancelDetailSearchDebounce:
 # ==================================================
 # P1: _go_back（含 race condition 修復驗證）
 # ==================================================
+
 
 class TestGoBack:
     """_go_back 的各種情境測試。"""
@@ -192,6 +195,7 @@ class TestGoBack:
 # 整合：race condition 模擬測試
 # ==================================================
 
+
 class TestRaceCondition:
     """模擬 P1 描述的 race condition 情境。"""
 
@@ -221,7 +225,6 @@ class TestRaceCondition:
             call_log.append(("_do_detail_search", view._detail_search_text))
 
         # 將 _do_detail_search 替換為 spy
-        original_do_detail_search = view._do_detail_search
         view._do_detail_search = fake_do_detail_search
         view._update_detail_search_controls = MagicMock()
         view._render_mod_list = MagicMock()
@@ -234,4 +237,6 @@ class TestRaceCondition:
         view._page.run_pending_tasks()
 
         # 驗證：_do_detail_search 不應該被呼叫（timer 已取消）
-        assert len(call_log) == 0, f"debounce 應在 _go_back 時取消，不應執行。實際呼叫了：{call_log}"
+        assert len(call_log) == 0, (
+            f"debounce 應在 _go_back 時取消，不應執行。實際呼叫了：{call_log}"
+        )

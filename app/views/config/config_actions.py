@@ -3,7 +3,6 @@ from __future__ import annotations
 import traceback
 
 from app.ui.snack import show_snack
-
 from translation_tool.utils.config_manager import get_default
 
 
@@ -394,7 +393,9 @@ def save_config_from_view(
             if line.strip()
         ]
         if "lm_translator.translator.short_text_skip_len" in view.controls_map:
-            raw = view.controls_map["lm_translator.translator.short_text_skip_len"].value
+            raw = view.controls_map[
+                "lm_translator.translator.short_text_skip_len"
+            ].value
             new_config["lm_translator"]["translator"]["short_text_skip_len"] = max(
                 0, int(raw or 0)
             )
@@ -443,8 +444,10 @@ def save_config_from_view(
         for item in registry:
             # 只通知已建立的頁面；尚未建立的頁面建立時會讀取最新設定
             view_obj = built_view(item)
-            if item["key"] == "extractor" and view_obj is not None and hasattr(
-                view_obj.content, "refresh_output_dir_helper"
+            if (
+                item["key"] == "extractor"
+                and view_obj is not None
+                and hasattr(view_obj.content, "refresh_output_dir_helper")
             ):
                 view_obj.content.refresh_output_dir_helper()
 

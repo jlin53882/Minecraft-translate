@@ -7,19 +7,18 @@ PR20：將 merge 類 service 從 app.services.py 抽離到 pipelines 子模組�
 from __future__ import annotations
 
 import logging
+import os
 import traceback
 from pathlib import Path
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
-from translation_tool.core.lang_merger import (
-    merge_zhcn_to_zhtw_from_zip,
-    merge_zhcn_to_zhtw_from_folder,
-)
 from translation_tool.core.lang_merge_extracted_assets import merge_extracted_to_assets
+from translation_tool.core.lang_merger import (
+    merge_zhcn_to_zhtw_from_folder,
+    merge_zhcn_to_zhtw_from_zip,
+)
 from translation_tool.utils.config_manager import load_config
-
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +124,7 @@ def run_merge_zip_batch_service(
                     zh_en_threshold=zh_en_threshold,
                 ):
                     # ---- log ----
-                    if "log" in update and update["log"]:
+                    if update.get("log"):
                         session.add_log(update["log"])
 
                     # ---- progress（疊加 ZIP 進度）----
@@ -140,7 +139,7 @@ def run_merge_zip_batch_service(
                     if update.get("error"):
                         zip_errors.append(_soft_error_detail(update))
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 tb = traceback.format_exc()
                 logger.error(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
                 session.add_log(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
@@ -182,7 +181,7 @@ def run_merge_zip_batch_service(
         else:
             session.finish()
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
         logger.error(f"[致命錯誤] ZIP 合併失敗：{e}\n{tb}")
         session.add_log(f"[致命錯誤] ZIP 合併失敗：{e}\n{tb}")
@@ -243,7 +242,7 @@ def run_merge_folder_batch_service(
                 patchouli_threshold=patchouli_threshold,
                 zh_en_threshold=zh_en_threshold,
             ):
-                if "log" in update and update["log"]:
+                if update.get("log"):
                     session.add_log(update["log"])
 
                 if "progress" in update and update["progress"] is not None:
@@ -278,7 +277,7 @@ def run_merge_folder_batch_service(
                             lang_output_dir=lang_output_dir,
                             session=session,
                         ):
-                            if "log" in update and update["log"]:
+                            if update.get("log"):
                                 session.add_log(update["log"])
                             if "progress" in update and update["progress"] is not None:
                                 # Stage 2 進度合成 (0.5~1.0)。
@@ -292,12 +291,12 @@ def run_merge_folder_batch_service(
                             session.add_log("[階段 2/2 完成]")
                     else:
                         session.add_log("[階段 2/2 略過] 檔案合併(階段 2) 未啟用，跳過")
-                except Exception as stage2_err:
+                except Exception as stage2_err:  # noqa: BLE001
                     logger.warning(f"[階段 2/2 錯誤]: {stage2_err}")
                     session.add_log(f"[階段 2/2 錯誤]: {stage2_err}")
                     folder_errors.append(str(stage2_err))
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             tb = traceback.format_exc()
             logger.error(f"[資料夾] 錯誤：{input_dir}\n{e}\n{tb}")
             session.add_log(f"[資料夾] 錯誤：{input_dir}\n{e}\n{tb}")
@@ -341,7 +340,7 @@ def run_merge_folder_batch_service(
             }
             session.finish()
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
         logger.error(f"[致命錯誤] 資料夾合併失敗：{e}\n{tb}")
         session.add_log(f"[致命錯誤] 資料夾合併失敗：{e}\n{tb}")

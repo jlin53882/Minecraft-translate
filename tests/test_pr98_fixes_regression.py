@@ -23,12 +23,12 @@ Pattern-test strategy: 透過 grep / AST 確認 bug 修法的 code pattern 都�
 測試都是 source-level + 1-2 個 service-level behavior test。
 不靠 mock GUI,Flet 0.85 dialog stack 用 regex 直接 grep 程式碼 pattern。
 """
+
 import ast
 import re
 from pathlib import Path
 
 import pytest
-
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXTRACTOR_DIALOG = REPO_ROOT / "app" / "views" / "extractor" / "extractor_dialog.py"
@@ -48,7 +48,7 @@ def _read(path: Path) -> str:
 def _read_if_exists(path: Path) -> str:
     """讀取檔案內容,檔案不存在時回傳空字串。
 
-    2026-07-14 user review:用於驗證物理刪除的 dead code 檔案 — 
+    2026-07-14 user review:用於驗證物理刪除的 dead code 檔案 —
     檔案不存在時 grep "def xxx" not in "" 永遠 True,
     確保 legacy 函式不會在 dead code 檔案重新加回時偷偷回來。
     """
@@ -80,9 +80,6 @@ class TestFix7a56d22_NoFalseCompletion:
         """[完成] 行必須從 result_stats 取得 — 不再用 stats["success"]。"""
         # 用 AST 找出「[完成]」相關的 add_log call
         tree = _ast_parse(EXTRACTOR_DIALOG)
-        found_completion_log = False
-        found_result_stats_use = False
-        found_raw_stats_use = False
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -95,16 +92,15 @@ class TestFix7a56d22_NoFalseCompletion:
                 first_arg = node.args[0]
                 if isinstance(first_arg, ast.JoinedStr):
                     for value in first_arg.values:
-                        if isinstance(value, ast.Constant) and "[完成]" in (value.value or ""):
-                            found_completion_log = True
+                        if isinstance(value, ast.Constant) and "[完成]" in (
+                            value.value or ""
+                        ):
+                            pass
                             # 確認 value 用 result_stats 變數
                             # (這條用 fuzzy match: 字串內含「成功」+「跳過」+「失敗」)
-                            pass
         # 直接 grep source-level: [完成] 行用 result_stats
         src = _read(EXTRACTOR_DIALOG)
-        completion_pattern = re.search(
-            r'\[完成\].*?result_stats', src, flags=re.DOTALL
-        )
+        completion_pattern = re.search(r"\[完成\].*?result_stats", src, flags=re.DOTALL)
         assert completion_pattern is not None, (
             "回歸:[完成] log 行未使用 result_stats "
             "(commit 7a56d22 應該從 result_stats 取得成功/跳過/失敗)"
@@ -114,7 +110,7 @@ class TestFix7a56d22_NoFalseCompletion:
         """確保「[完成]」log 沒有使用 raw `stats["success"]` 之類的舊語法。"""
         src = _read(EXTRACTOR_DIALOG)
         # 找 [完成] 那行附近是否有 stats["success"] pattern
-        match = re.search(r'\[完成\].*?\n.*?\n.*?', src)
+        match = re.search(r"\[完成\].*?\n.*?\n.*?", src)
         if match:
             completion_block = match.group(0)
             # 舊 buggy 模式: stats["success"], stats["warnings"], stats["failures"]
@@ -132,16 +128,14 @@ class TestFixFbc58c7_LogViewClearAPI:
 
     def test_start_merge_does_not_use_controls_clear(self):
         """舊 buggy:self.log_view.controls.clear() — AttributeError。"""
-        src = _read(MERGE_VIEW)
+        _read(MERGE_VIEW)
         # 找 start_merge 函式範圍
         tree = _ast_parse(MERGE_VIEW)
-        in_start_merge = False
         bad_calls = []
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == "start_merge":
-                in_start_merge = True
                 for sub in ast.walk(node):
-                    if (
+                    if (  # noqa: SIM102
                         isinstance(sub, ast.Call)
                         and isinstance(sub.func, ast.Attribute)
                         and sub.func.attr == "clear"
@@ -151,13 +145,10 @@ class TestFixFbc58c7_LogViewClearAPI:
                             isinstance(sub.func.value, ast.Attribute)
                             and sub.func.value.attr == "controls"
                         ):
-                            bad_calls.append(
-                                f".controls.clear() at line {sub.lineno}"
-                            )
+                            bad_calls.append(f".controls.clear() at line {sub.lineno}")
                 break
         assert not bad_calls, (
-            f"回歸:start_merge 內還在用 .controls.clear():\n"
-            + "\n".join(bad_calls)
+            "回歸:start_merge 內還在用 .controls.clear():\n" + "\n".join(bad_calls)
         )
 
 
@@ -169,7 +160,7 @@ class TestFix0228e05_CancelTrulyInterrupts:
 
     def test_on_cancel_sets_service_cancel_flag(self):
         """確保 on_cancel_click handler 內有 extraction_cancel_flag[0] = True。"""
-        src = _read(EXTRACTOR_DIALOG)
+        _read(EXTRACTOR_DIALOG)
         # 找 on_cancel_click 函式範圍
         tree = _ast_parse(EXTRACTOR_DIALOG)
         found = False
@@ -182,12 +173,10 @@ class TestFix0228e05_CancelTrulyInterrupts:
                         and isinstance(sub.targets[0], ast.Subscript)
                         and isinstance(sub.targets[0].value, ast.Name)
                         and sub.targets[0].value.id == "extraction_cancel_flag"
+                    ) and (
+                        isinstance(sub.value, ast.Constant) and sub.value.value is True
                     ):
-                        if (
-                            isinstance(sub.value, ast.Constant)
-                            and sub.value.value is True
-                        ):
-                            found = True
+                        found = True
                 break
         assert found, (
             "回歸:on_cancel_click handler 內找不到 extraction_cancel_flag[0] = True "
@@ -203,7 +192,7 @@ class TestFix623d370_RePreviewResetsDone:
 
     def test_start_scan_resets_preview_state_done(self):
         """確保 start_scan 函式範圍內有 preview_state.done = False。"""
-        src = _read(EXTRACTOR_DIALOG)
+        _read(EXTRACTOR_DIALOG)
         tree = _ast_parse(EXTRACTOR_DIALOG)
         found = False
         for node in ast.walk(tree):
@@ -246,9 +235,9 @@ class TestFix5ce1cc8_DebugLogHelper:
         src = _read(EXTRACTOR_DIALOG)
         # 排除 docstring 內的 print 描述
         for line in src.splitlines():
-            stripped = line.strip()
+            line.strip()
             # 只看 print(...) 或 print f"..."
-            if re.match(r'^\s*print\s*\(', line) and not line.strip().startswith("#"):
+            if re.match(r"^\s*print\s*\(", line) and not line.strip().startswith("#"):
                 pytest.fail(
                     f"回歸:發現 print() 直印用法於 {line!r},應改用 log_info/log_debug/log_warning"
                 )
@@ -266,9 +255,7 @@ class TestFix4834213_FletDialogAPI:
         # 舊 buggy pattern:page.overlay.append(\w+); \w+.open = True
         # 新 pattern: page.show_dialog(\w+)
         show_dialog_count = src.count("page.show_dialog(")
-        overlay_append_count = len(
-            re.findall(r"page\.overlay\.append\(", src)
-        )
+        overlay_append_count = len(re.findall(r"page\.overlay\.append\(", src))
         assert show_dialog_count >= 3, (
             f"回歸:page.show_dialog 應該至少 3 次 (dialog/preview_dialog/result_dialog),"
             f"實際 {show_dialog_count} 次"
@@ -282,9 +269,7 @@ class TestFix4834213_FletDialogAPI:
         """關閉 dialog 用 page.pop_dialog(),不從 page.overlay.remove。"""
         src = _read(EXTRACTOR_DIALOG)
         pop_count = src.count("page.pop_dialog(")
-        overlay_remove_count = len(
-            re.findall(r"page\.overlay\.remove\(", src)
-        )
+        overlay_remove_count = len(re.findall(r"page\.overlay\.remove\(", src))
         assert pop_count >= 1, (
             "回歸:page.pop_dialog() 至少出現 1 次 (commit 4834213 修法)"
         )
@@ -344,7 +329,7 @@ class TestFixCa01a14_ModalLockAndDismiss:
 
         Task 4 後改在 on_start_click（UI 執行緒）鎖定，避免背景執行緒改 dialog 屬性。
         """
-        src = _read(EXTRACTOR_DIALOG)
+        _read(EXTRACTOR_DIALOG)
         tree = _ast_parse(EXTRACTOR_DIALOG)
         found = False
         for node in ast.walk(tree):
@@ -368,7 +353,7 @@ class TestFixCa01a14_ModalLockAndDismiss:
 
     def test_ui_done_unlocks_modal_false(self):
         """ui_done 內必須 dialog.modal = False。"""
-        src = _read(EXTRACTOR_DIALOG)
+        _read(EXTRACTOR_DIALOG)
         tree = _ast_parse(EXTRACTOR_DIALOG)
         found = False
         for node in ast.walk(tree):
@@ -400,7 +385,7 @@ class TestFixCa01a14_ModalLockAndDismiss:
 
     def test_on_dialog_dismiss_sets_cancel_flag(self):
         """on_dialog_dismiss 內必須 extraction_cancel_flag[0] = True。"""
-        src = _read(EXTRACTOR_DIALOG)
+        _read(EXTRACTOR_DIALOG)
         tree = _ast_parse(EXTRACTOR_DIALOG)
         found = False
         for node in ast.walk(tree):
@@ -503,7 +488,7 @@ class TestFixPreviewDialogModalLock:
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == "on_preview_dismiss":
                 for sub in ast.walk(node):
-                    if (
+                    if (  # noqa: SIM102
                         isinstance(sub, ast.Assign)
                         and len(sub.targets) == 1
                         and isinstance(sub.targets[0], ast.Subscript)
@@ -547,7 +532,7 @@ class TestFixAddLogArgType:
     def test_no_add_log_with_color_string_as_level(self):
         """add_log(...) 第二位置參數不能傳 color 字串(theme.* 等)。"""
         # 讀檔找所有 add_log(... call
-        src = _read(EXTRACTOR_DIALOG)
+        _read(EXTRACTOR_DIALOG)
         # 找函式位置
         tree = _ast_parse(EXTRACTOR_DIALOG)
         bad_calls = []
@@ -572,7 +557,7 @@ class TestFixAddLogArgType:
                     )
         assert not bad_calls, (
             "回歸:add_log 的 level 參數傳了 color 字串 (theme.*),會被 LogView silent return。\n"
-            "應改成 keyword arg level=\"warning\" 對應原本的橘色語意。\n"
+            '應改成 keyword arg level="warning" 對應原本的橘色語意。\n'
             "找到的錯誤:\n" + "\n".join(bad_calls)
         )
 
@@ -637,7 +622,10 @@ class TestFixExtractionSummaryDialogAPI:
         extractor_view = REPO_ROOT / "app" / "views" / "extractor_view.py"
         tree = _ast_parse(extractor_view)
         for node in tree.body:
-            if isinstance(node, ast.ImportFrom) and node.module == "translation_tool.utils.log_unit":
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module == "translation_tool.utils.log_unit"
+            ):
                 imported = {alias.name for alias in node.names}
                 if "log_warning" in imported:
                     return
@@ -685,17 +673,10 @@ class TestFixShowSnackHelper:
         tree = _ast_parse(snack_module)
         found = False
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.FunctionDef)
-                and node.name == "show_snack"
-            ):
+            if isinstance(node, ast.FunctionDef) and node.name == "show_snack":
                 for sub in ast.walk(node):
-                    if (
-                        isinstance(sub, ast.Try)
-                        and any(
-                            isinstance(h, ast.ExceptHandler)
-                            for h in sub.handlers
-                        )
+                    if isinstance(sub, ast.Try) and any(
+                        isinstance(h, ast.ExceptHandler) for h in sub.handlers
                     ):
                         found = True
                 break
@@ -710,10 +691,7 @@ class TestFixShowSnackHelper:
         tree = _ast_parse(snack_module)
         found = False
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.FunctionDef)
-                and node.name == "show_snack"
-            ):
+            if isinstance(node, ast.FunctionDef) and node.name == "show_snack":
                 for sub in ast.walk(node):
                     if (
                         isinstance(sub, ast.Call)
@@ -737,22 +715,18 @@ class TestFixShowSnackHelper:
         tree = _ast_parse(snack_module)
         has_update = False
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.FunctionDef)
-                and node.name == "show_snack"
-            ):
+            if isinstance(node, ast.FunctionDef) and node.name == "show_snack":
                 # 找 page.update() 同步呼叫 (在 try 內)
                 for sub in ast.walk(node):
                     if (
                         isinstance(sub, ast.Call)
                         and isinstance(sub.func, ast.Attribute)
                         and sub.func.attr == "update"
+                    ) and (
+                        isinstance(sub.func.value, ast.Name)
+                        and sub.func.value.id == "page"
                     ):
-                        if (
-                            isinstance(sub.func.value, ast.Name)
-                            and sub.func.value.id == "page"
-                        ):
-                            has_update = True
+                        has_update = True
                 break
         assert has_update, (
             "回歸:show_snack 沒呼叫 page.update() "
@@ -766,9 +740,9 @@ class TestFixShowSnackHelper:
         for view_file in views_dir.glob("*.py"):
             tree = _ast_parse(view_file)
             for node in ast.walk(tree):
-                if (
-                    isinstance(node, ast.FunctionDef)
-                    and node.name in ("_show_snack_bar", "_show_snack")
+                if isinstance(node, ast.FunctionDef) and node.name in (
+                    "_show_snack_bar",
+                    "_show_snack",
                 ):
                     raise AssertionError(
                         f"回歸:{view_file.name} 仍有 {node.name} method。"
@@ -807,7 +781,8 @@ class TestFixButtonLevelModsValidation:
         # 找 _check_mods_dir_or_snack 函式主體
         m = re.search(
             r"def _check_mods_dir_or_snack\(self, [^)]*\) -> bool:(.*?)(?=\n    def |\nclass |\Z)",
-            src, re.DOTALL,
+            src,
+            re.DOTALL,
         )
         assert m is not None, "找不到 _check_mods_dir_or_snack 函式"
         body = m.group(1)
@@ -820,7 +795,8 @@ class TestFixButtonLevelModsValidation:
         src = _read(EXTRACTOR_VIEW)
         m = re.search(
             r"def _check_mods_dir_or_snack\(self, [^)]*\) -> bool:(.*?)(?=\n    def |\nclass |\Z)",
-            src, re.DOTALL,
+            src,
+            re.DOTALL,
         )
         assert m is not None
         body = m.group(1)
@@ -835,7 +811,8 @@ class TestFixButtonLevelModsValidation:
         src = _read(EXTRACTOR_VIEW)
         m = re.search(
             r"def _check_mods_dir_or_snack\(self, [^)]*\) -> bool:(.*?)(?=\n    def |\nclass |\Z)",
-            src, re.DOTALL,
+            src,
+            re.DOTALL,
         )
         assert m is not None
         body = m.group(1)
@@ -865,7 +842,8 @@ class TestFixButtonLevelModsValidation:
         # __init__ 範圍內不能有 `on_click=lambda e: open_extractor_dialog` 或 open_preview_dialog
         m = re.search(
             r"def __init__\(self[^)]*\):(.*?)(?=\n    def \(self\)\)\n|\Z)",
-            src, re.DOTALL,
+            src,
+            re.DOTALL,
         )
         assert m is not None
         init_body = m.group(1)
@@ -892,7 +870,7 @@ class TestFixButtonLevelModsValidation:
             idx = src.find(f"def {m}")
             assert idx > 0, f"找不到 {m}"
             # 抓後續函式主體(下一個 def 或 class 之前)
-            next_def = re.search(r"\n    def |\nclass ", src[idx+1:])
+            next_def = re.search(r"\n    def |\nclass ", src[idx + 1 :])
             end = idx + 1 + next_def.start() if next_def else len(src)
             body = src[idx:end]
             assert "_check_mods_dir_or_snack" in body, (
@@ -905,9 +883,12 @@ class TestFixButtonLevelModsValidation:
     def test_extractor_view_imports_os(self):
         """ExtractorView 必須 import os 才能用 os.path.isdir。"""
         src = _read(EXTRACTOR_VIEW)
-        assert "^import os$" in src or "^import os\n" in src or src.startswith("import os") or "\nimport os\n" in src, (
-            "回歸:ExtractorView 沒 import os (但用 os.path.isdir 會 crash)"
-        )
+        assert (
+            "^import os$" in src
+            or "^import os\n" in src
+            or src.startswith("import os")
+            or "\nimport os\n" in src
+        ), "回歸:ExtractorView 沒 import os (但用 os.path.isdir 會 crash)"
 
 
 class TestFixOnStartClickSnackbar:
@@ -923,7 +904,8 @@ class TestFixOnStartClickSnackbar:
         src = _read(EXTRACTOR_DIALOG)
         m = re.search(
             r"def on_start_click\(e\):(.*?)(?=\n    def |\ndef |\nclass |\Z)",
-            src, re.DOTALL,
+            src,
+            re.DOTALL,
         )
         assert m is not None, "找不到 on_start_click 函式"
         body = m.group(1)
@@ -942,7 +924,8 @@ class TestFixOnStartClickSnackbar:
         src = _read(EXTRACTOR_DIALOG)
         m = re.search(
             r"def on_start_click\(e\):(.*?)(?=\n    def |\ndef |\nclass |\Z)",
-            src, re.DOTALL,
+            src,
+            re.DOTALL,
         )
         assert m is not None
         body = m.group(1)
@@ -955,8 +938,6 @@ class TestFixOnStartClickSnackbar:
         assert "page.show_dialog" in second_block, (
             "回歸:on_start_click 第二個早 return 缺 page.show_dialog"
         )
-
-
 
 
 class TestFixPhase3DeadCodeRemoval:
@@ -973,11 +954,14 @@ class TestFixPhase3DeadCodeRemoval:
     def test_extractor_actions_no_dead_code_audit_block(self):
         """extractor_actions.py 頂部 DEAD CODE audit 區塊應已被物理刪除。"""
         src = _read_if_exists(EXTRACTOR_ACTIONS)
-        assert "# =============================================================================" not in src or src.count("# DEAD CODE") == 0, (
+        assert (
+            "# ============================================================================="
+            not in src
+            or src.count("# DEAD CODE") == 0
+        ), (
             "回歸:extractor_actions.py 又有 DEAD CODE 區塊 "
             "(Phase 3 commit af66bce 應物理刪除 4 個 legacy 函式 + 區塊註解)"
         )
-
 
     def test_extractor_actions_file_physically_deleted(self):
         """extractor_actions.py 檔案已被物理刪除(2026-07-14 user review)。
@@ -996,8 +980,7 @@ class TestFixPhase3DeadCodeRemoval:
         """_extraction_worker 函式應已被物理刪除(legacy code)。"""
         src = _read_if_exists(EXTRACTOR_ACTIONS)
         assert "def _extraction_worker" not in src, (
-            "回歸:_extraction_worker 函式重新出現 "
-            "(Phase 3 commit af66bce 已物理刪除)"
+            "回歸:_extraction_worker 函式重新出現 (Phase 3 commit af66bce 已物理刪除)"
         )
 
     def test_extractor_actions_no_extraction_start_extraction_function(self):
@@ -1064,8 +1047,9 @@ class TestFixPhase3DeadCodeRemoval:
         src = _read(EXTRACTOR_DIALOG)
         # 找 open_preview_dialog 函式範圍
         m = re.search(
-            "def open_preview_dialog\([^)]*\):(.*?)(?=\ndef |\nclass |\Z)",
-            src, re.DOTALL,
+            "def open_preview_dialog\\([^)]*\\):(.*?)(?=\ndef |\nclass |\\Z)",
+            src,
+            re.DOTALL,
         )
         assert m is not None
         body = m.group(1)
@@ -1137,7 +1121,8 @@ class TestFixDUALSignatureBug:
         # 找 def extract_dual_files_generator
         m = re.search(
             r"def extract_dual_files_generator\([\s\S]*?\):",
-            src, re.MULTILINE,
+            src,
+            re.MULTILINE,
         )
         assert m is not None, "找不到 extract_dual_files_generator"
         sig = m.group(0)
@@ -1151,18 +1136,22 @@ class TestFixDUALSignatureBug:
         src = _read(REPO_ROOT / "translation_tool" / "core" / "jar_processor.py")
         # 直接在整個 source 找函式 signature 範圍內的 build_lang_file_regex 呼叫
         # (因為 multiline signature regex 太複雜,改用單獨存在性檢查)
-        assert "build_lang_file_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)" in src, (
+        assert (
+            "build_lang_file_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)" in src
+        ), (
             "回歸:jar_processor.py 內沒有 `build_lang_file_regex(codes=lang_codes, "
             "skip_zh_cn=skip_zh_cn)` 呼叫 "
             "(Bug 1 fix 應讓 lang_codes 過濾真正生效,此斷言鎖定真正的 source pattern)"
         )
+
     def test_extractor_dialog_uses_lang_codes_keyword_arg(self):
         """extractor_dialog.py 對 extract_dual_files_generator 必須用 lang_codes=selected_codes keyword arg。"""
         src = _read(EXTRACTOR_DIALOG)
         # 找 open_extractor_dialog 函式範圍
         m = re.search(
             "def open_extractor_dialog\\([^)]*\\):(.*?)(?=\\ndef |\\nclass |\\Z)",
-            src, re.DOTALL,
+            src,
+            re.DOTALL,
         )
         assert m is not None
         body = m.group(0)
@@ -1173,7 +1162,10 @@ class TestFixDUALSignatureBug:
             "(Bug 1 fix 應避免 TypeError)"
         )
         # 不能用錯誤的 positional 3 args 呼叫
-        assert "extract_dual_files_generator(mods_dir, final_output, selected_codes)" not in body, (
+        assert (
+            "extract_dual_files_generator(mods_dir, final_output, selected_codes)"
+            not in body
+        ), (
             "回歸:extractor_dialog 還是用錯誤的 positional 3 args 呼叫 "
             "(這會引起 TypeError: takes 2 positional arguments but 3 were given)"
         )
@@ -1201,7 +1193,11 @@ class TestFixExceptionTraceback:
     def test_extractor_dialog_imports_traceback(self):
         """extractor_dialog.py 必須 import traceback。"""
         src = _read(EXTRACTOR_DIALOG)
-        assert "^import traceback$" in src or "\nimport traceback\n" in src or src.startswith("import traceback"), (
+        assert (
+            "^import traceback$" in src
+            or "\nimport traceback\n" in src
+            or src.startswith("import traceback")
+        ), (
             "回歸:extractor_dialog.py 沒 import traceback "
             "(Bug 2 fix 應加 import 才能用 traceback.format_exc())"
         )
@@ -1211,8 +1207,9 @@ class TestFixExceptionTraceback:
         src = _read(EXTRACTOR_DIALOG)
         # 找 except Exception as ex: 範圍
         m = re.search(
-            "except Exception as ex:(.*?)(?=\n        (?:state\[\"running\"\]|except |finally))",
-            src, re.DOTALL,
+            'except Exception as ex:(.*?)(?=\n        (?:state\\["running"\\]|except |finally))',
+            src,
+            re.DOTALL,
         )
         assert m is not None, "找不到 except Exception as ex:"
         body = m.group(1)
@@ -1225,8 +1222,9 @@ class TestFixExceptionTraceback:
         """exception handler 必須有 [TRACEBACK] 標籤區分主錯誤訊息與堆疊。"""
         src = _read(EXTRACTOR_DIALOG)
         m = re.search(
-            "except Exception as ex:(.*?)(?=\n        (?:state\[\"running\"\]|except |finally))",
-            src, re.DOTALL,
+            'except Exception as ex:(.*?)(?=\n        (?:state\\["running"\\]|except |finally))',
+            src,
+            re.DOTALL,
         )
         assert m is not None
         body = m.group(1)
@@ -1234,8 +1232,6 @@ class TestFixExceptionTraceback:
             "回歸:exception handler 沒加 [TRACEBACK] 標籤 "
             "(區分主錯誤訊息 [ERROR] 跟堆疊追蹤)"
         )
-
-
 
 
 class TestFixDUALResultSection:
@@ -1251,7 +1247,9 @@ class TestFixDUALResultSection:
 
     def test_run_extraction_loop_returns_lang_book_subdicts(self):
         """run_extraction_loop 回傳的 stats dict 必須有 lang / book sub-dict 初始化。"""
-        src = _read(REPO_ROOT / "app" / "services_impl" / "pipelines" / "extract_service.py")
+        src = _read(
+            REPO_ROOT / "app" / "services_impl" / "pipelines" / "extract_service.py"
+        )
         # 找 run_extraction_loop 函式
         m = re.search(
             r"def run_extraction_loop\([\s\S]*?\):",
@@ -1259,7 +1257,7 @@ class TestFixDUALResultSection:
         )
         assert m is not None
         # 從 sig end 往後找 1000 字元內的 body
-        body = src[m.end():m.end() + 1500]
+        body = src[m.end() : m.end() + 1500]
         assert '"lang":' in body, (
             "回歸:run_extraction_loop 內 stats dict 沒有 lang sub-dict 初始化 "
             "(Phase 3 應加,給 DUAL mode 顯示 LANG 分區用)"
@@ -1271,21 +1269,26 @@ class TestFixDUALResultSection:
 
     def test_run_extraction_loop_extracts_phase_stats(self):
         """run_extraction_loop 必須把 generator yield 的 phase=lang/book stats 拆解到對應 sub-dict。"""
-        src = _read(REPO_ROOT / "app" / "services_impl" / "pipelines" / "extract_service.py")
+        src = _read(
+            REPO_ROOT / "app" / "services_impl" / "pipelines" / "extract_service.py"
+        )
         m = re.search(
             r"def run_extraction_loop\([\s\S]*?\):",
             src,
         )
         assert m is not None
         # 從 sig end 往後找 3000 字元(擴大,確保 capture 到 dict(result))
-        body = src[m.end():m.end() + 3000]
-        assert 'phase = update.get("phase")' in body or 'phase in ("lang", "book")' in body, (
+        body = src[m.end() : m.end() + 3000]
+        assert (
+            'phase = update.get("phase")' in body or 'phase in ("lang", "book")' in body
+        ), (
             "回歸:run_extraction_loop 沒拆解 phase stats "
             "(Phase 3 應把 yield 帶 'phase' 的 stats 寫到對應 sub-dict)"
         )
-        assert "stats[phase] = dict(result)" in body or "stats[phase] = dict(result)" in body, (
-            "回歸:run_extraction_loop 沒把 phase stats 寫入 sub-dict"
-        )
+        assert (
+            "stats[phase] = dict(result)" in body
+            or "stats[phase] = dict(result)" in body
+        ), "回歸:run_extraction_loop 沒把 phase stats 寫入 sub-dict"
 
     def test_extract_dual_files_generator_yields_pure_book_stats(self):
         """extract_dual_files_generator book phase 必須 yield 純 book_stats (不是 combined)。
@@ -1303,7 +1306,7 @@ class TestFixDUALResultSection:
             src,
         )
         assert m is not None, "找不到 extract_dual_files_generator"
-        body = src[m.end():m.end() + 3000]
+        body = src[m.end() : m.end() + 3000]
         # 1. book phase loop 必須 yield 純 book_stats,不是 combined
         assert 'yield {**update, "stats": book_stats, "phase": "book"}' in body, (
             "回歸:extract_dual_files_generator book phase 還在 yield combined "
@@ -1342,9 +1345,7 @@ class TestFixDUALResultSection:
             "回歸:extractor_dialog.py 沒有 lang_row UI 元件 "
             "(Phase 3 應加,顯示 LANG 提取完成 XXX)"
         )
-        assert "ft.Text(\"LANG：" in src, (
-            "回歸:lang_row label 應顯示 LANG：文字"
-        )
+        assert 'ft.Text("LANG：' in src, "回歸:lang_row label 應顯示 LANG：文字"
 
     def test_extractor_dialog_has_book_row_ui(self):
         """extractor_dialog.py 必須有 book_row UI 元件。"""
@@ -1353,9 +1354,8 @@ class TestFixDUALResultSection:
             "回歸:extractor_dialog.py 沒有 book_row UI 元件 "
             "(Phase 3 應加,顯示 BOOK 提取完成 XXX)"
         )
-        assert "ft.Text(\"BOOK：" in src, (
-            "回歸:book_row label 應顯示 BOOK：文字"
-        )
+        compact = re.sub(r"\s+", "", src)  # 忽略格式化造成的換行
+        assert 'ft.Text("BOOK：' in compact, "回歸:book_row label 應顯示 BOOK：文字"
 
     def test_lang_book_row_added_to_dialog_column(self):
         """lang_row / book_row 必須加進 dialog content column 才會 render。"""
@@ -1376,15 +1376,13 @@ class TestFixDUALResultSection:
         )
         assert m is not None
         body = m.group(0)
-        assert "if selected_mode == \"dual\":" in body, (
+        assert 'if selected_mode == "dual":' in body, (
             "回歸:run_extraction 沒在 selected_mode == dual 時呼叫 update_dual_stats "
             "(Phase 3 應只在 DUAL mode 才顯示 LANG/BOOK 分區)"
         )
         assert "update_dual_stats(result_stats)" in body, (
             "回歸:run_extraction 沒呼叫 update_dual_stats(result_stats)"
         )
-
-
 
 
 class TestFixStatsBadgeRemoved:
@@ -1500,10 +1498,10 @@ class TestFixSkipZhCnSwitchWiring:
         assert m is not None
         next_def = re.search(
             "\\ndef [a-zA-Z]",
-            src[m.end():],
+            src[m.end() :],
         )
         end = m.end() + next_def.start() if next_def else len(src)
-        body = src[m.start():end]
+        body = src[m.start() : end]
         assert "skip_zh_cn=self.skip_zh_cn_switch.value" in body, (
             "回歸:_handle_extract_lang_click 沒傳 skip_zh_cn=self.skip_zh_cn_switch.value "
             "(2026-07-14 user review 主 UI 開關應生效)"
@@ -1519,10 +1517,10 @@ class TestFixSkipZhCnSwitchWiring:
         assert m is not None
         next_def = re.search(
             "\\ndef [a-zA-Z]",
-            src[m.end():],
+            src[m.end() :],
         )
         end = m.end() + next_def.start() if next_def else len(src)
-        body = src[m.start():end]
+        body = src[m.start() : end]
         assert "skip_zh_cn=self.skip_zh_cn_switch.value" in body, (
             "回歸:_handle_extract_dual_click 沒傳 skip_zh_cn=self.skip_zh_cn_switch.value"
         )
@@ -1569,10 +1567,10 @@ class TestFixSkipZhCnSwitchWiring:
         assert m is not None
         next_def = re.search(
             "\\ndef [a-zA-Z]",
-            src[m.end():],
+            src[m.end() :],
         )
         end = m.end() + next_def.start() if next_def else len(src)
-        body = src[m.start():end]
+        body = src[m.start() : end]
         assert "skip_zh_cn=self.skip_zh_cn_switch.value" in body, (
             "回歸:_handle_preview_lang_click 沒傳 skip_zh_cn=self.skip_zh_cn_switch.value "
             "(2026-07-14 user review preview 路徑也應生效)"
@@ -1588,10 +1586,10 @@ class TestFixSkipZhCnSwitchWiring:
         assert m is not None
         next_def = re.search(
             "\\ndef [a-zA-Z]",
-            src[m.end():],
+            src[m.end() :],
         )
         end = m.end() + next_def.start() if next_def else len(src)
-        body = src[m.start():end]
+        body = src[m.start() : end]
         assert "skip_zh_cn=self.skip_zh_cn_switch.value" in body, (
             "回歸:_handle_preview_dual_click 沒傳 skip_zh_cn=self.skip_zh_cn_switch.value"
         )
@@ -1611,7 +1609,9 @@ class TestFixSkipZhCnSwitchWiring:
 
     def test_preview_extraction_generator_impl_uses_skip_zh_cn(self):
         """preview_extraction_generator_impl 必須把 skip_zh_cn 傳給 build_lang_file_regex。"""
-        src = _read(REPO_ROOT / "translation_tool" / "core" / "jar_processor_preview.py")
+        src = _read(
+            REPO_ROOT / "translation_tool" / "core" / "jar_processor_preview.py"
+        )
         # 找 build_lang_file_regex calls
         # 在 jar_processor_preview.py 內 build_lang_file_regex 應傳 skip_zh_cn
         pattern_calls = re.findall(
@@ -1628,18 +1628,15 @@ class TestFixSkipZhCnSwitchWiring:
             )
 
 
-
-
-
 class TestFixB86f911_LogUnit:
     """移除自寫 _extractor_debug_log(print 版),改用 project 既有的 log_unit。"""
 
     def test_imports_log_unit(self):
         """import log_info/log_debug/log_warning 必須存在(critical: e232788 補的)。"""
         src = _read(EXTRACTOR_DIALOG)
-        assert (
-            "from translation_tool.utils.log_unit import" in src
-        ), "回歸:沒有 from translation_tool.utils.log_unit import (commit e232788 補)"
+        assert "from translation_tool.utils.log_unit import" in src, (
+            "回歸:沒有 from translation_tool.utils.log_unit import (commit e232788 補)"
+        )
         for fn in ("log_info", "log_debug", "log_warning"):
             assert fn in src, f"回歸:{fn} 沒在 source 內引用到"
 
@@ -1649,10 +1646,7 @@ class TestFixB86f911_LogUnit:
         # 確保沒 print( 開頭的 statement (排除 docstring/註解)
         for line in src.splitlines():
             stripped = line.strip()
-            if (
-                re.match(r"^print\s*\(", stripped)
-                and not stripped.startswith("#")
-            ):
+            if re.match(r"^print\s*\(", stripped) and not stripped.startswith("#"):
                 pytest.fail(
                     f"回歸:發現 print() 直印用法於 {line!r},應改用 log_info/log_debug/log_warning"
                 )

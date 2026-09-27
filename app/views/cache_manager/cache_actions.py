@@ -14,7 +14,9 @@ from collections.abc import Callable
 import flet as ft
 
 
-def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, show_progress: bool = False):
+def run_cache_action(
+    view, reason: str, work_fn: Callable, success_msg: str, show_progress: bool = False
+):
     """執行快取操作並更新 UI
 
     參數：
@@ -35,13 +37,16 @@ def run_cache_action(view, reason: str, work_fn: Callable, success_msg: str, sho
     view._append_log(f"[ACTION#{action_id}] start {reason}")
 
     # 顯示 SnackBar 進度條
-    if show_progress and hasattr(view, 'page'):
+    if show_progress and hasattr(view, "page"):
         progress_bar = ft.ProgressBar(value=0, width=300)
         snack_bar = ft.SnackBar(
-            content=ft.Row([
-                ft.Text(f"{reason} 處理中..."),
-                progress_bar,
-            ], spacing=10),
+            content=ft.Row(
+                [
+                    ft.Text(f"{reason} 處理中..."),
+                    progress_bar,
+                ],
+                spacing=10,
+            ),
             duration=999999,  # 長時間顯示
         )
         view.page.snack_bar = snack_bar

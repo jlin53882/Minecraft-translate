@@ -4,20 +4,21 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import flet as ft
 import threading  # noqa: F401
 
+import flet as ft
+
 from app.ui import theme
-from app.ui.snack import show_snack
-from app.views._log import LogView
-from translation_tool.utils.log_unit import log_info
 
 # UI 共用元件：抽出重複的卡片/按鈕樣式，集中在 app.ui
 from app.ui.components import secondary_button, styled_card
+from app.views._log import LogView
 from app.views.translation.translation_actions import (
     run_ftb,
     run_kjs,
     run_md,
+)
+from app.views.translation.translation_actions import (
     start_ui_timer as start_translation_ui_timer,
 )
 from app.views.translation.translation_panels import (
@@ -32,22 +33,22 @@ from app.views.translation.translation_state import TranslationRunState
 # 可選匯入：避免某個 service 暫時不可用時，整頁無法開啟
 try:
     from app.services_impl.pipelines.ftb_service import run_ftb_translation_service
-except Exception:
+except Exception:  # noqa: BLE001
     run_ftb_translation_service = None
 
 try:
     from app.services_impl.pipelines.kubejs_service import run_kubejs_tooltip_service
-except Exception:
+except Exception:  # noqa: BLE001
     run_kubejs_tooltip_service = None
 
 try:
     from app.services_impl.pipelines.md_service import run_md_translation_service
-except Exception:
+except Exception:  # noqa: BLE001
     run_md_translation_service = None
 
 try:
     from app.task_session import TaskSession
-except Exception:
+except Exception:  # noqa: BLE001
     TaskSession = None
 
 
@@ -92,7 +93,11 @@ class TranslationView(ft.Column):
 
         header = ft.Row(
             [
-                ft.Text("任務翻譯工具（FTB / KubeJS / Markdown）", size=22, weight=ft.FontWeight.BOLD),
+                ft.Text(
+                    "任務翻譯工具（FTB / KubeJS / Markdown）",
+                    size=22,
+                    weight=ft.FontWeight.BOLD,
+                ),
                 ft.Container(expand=True),
                 ft.IconButton(
                     icon=ft.Icons.DELETE_OUTLINE,
@@ -107,16 +112,21 @@ class TranslationView(ft.Column):
         self.kjs_tab_content = self._build_kjs_tab()
         self.md_tab_content = self._build_md_tab()
 
-        tab_bar = ft.TabBar(tabs=[
-            ft.Tab(label="FTB Quests"),
-            ft.Tab(label="KubeJS Tooltips"),
-            ft.Tab(label="Markdown"),
-        ])
-        tab_view = ft.TabBarView(controls=[
-            self.ftb_tab_content,
-            self.kjs_tab_content,
-            self.md_tab_content,
-        ], expand=True)
+        tab_bar = ft.TabBar(
+            tabs=[
+                ft.Tab(label="FTB Quests"),
+                ft.Tab(label="KubeJS Tooltips"),
+                ft.Tab(label="Markdown"),
+            ]
+        )
+        tab_view = ft.TabBarView(
+            controls=[
+                self.ftb_tab_content,
+                self.kjs_tab_content,
+                self.md_tab_content,
+            ],
+            expand=True,
+        )
         tab_content = ft.Column([tab_bar, tab_view], expand=True)
         self.tabs = ft.Tabs(
             content=tab_content,
@@ -355,7 +365,6 @@ class TranslationView(ft.Column):
         self.progress.value = 0
         self._append_log("[UI] 已重置：Markdown 輸入已清空")
         self.page.update()
-
 
     @property
     def page(self):

@@ -4,16 +4,24 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+from typing import ClassVar
+
 import flet as ft
-from app.ui import theme
-from app.ui.snack import show_snack
 
 from app.services_impl.config_service import load_config_json, save_config_json
+from app.ui import theme
+from app.ui.snack import show_snack
 from app.views.config.config_actions import load_config_into_view, save_config_from_view
 from app.views.config.config_form import (
     build_card as build_config_card,
+)
+from app.views.config.config_form import (
     build_footer as build_config_footer,
+)
+from app.views.config.config_form import (
     build_header as build_config_header,
+)
+from app.views.config.config_form import (
     build_key_field,
     build_key_row,
 )
@@ -38,7 +46,7 @@ class ConfigView(ft.Column):
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
 
-    DEFAULT_MODELS = {
+    DEFAULT_MODELS: ClassVar[dict[str, bool]] = {
         "gemini-2.5-flash": True,
     }
 
@@ -296,10 +304,12 @@ class ConfigView(ft.Column):
                 helper="用於：判斷哪些JSON欄位需翻譯",
             )
         )
-        self.controls_map["lm_translator.translator.short_text_skip_len"] = ft.TextField(
-            label="短字串略過長度",
-            dense=True,
-            helper="lang 值 ≤ 此長度且無空白時不翻譯（0 = 不略過，例如 Axe、Ore 也會翻）",
+        self.controls_map["lm_translator.translator.short_text_skip_len"] = (
+            ft.TextField(
+                label="短字串略過長度",
+                dense=True,
+                helper="lang 值 ≤ 此長度且無空白時不翻譯（0 = 不略過，例如 Axe、Ore 也會翻）",
+            )
         )
         self.controls_map["lm_translator.patchouli.dir_names"] = ft.TextField(
             label="Patchouli 資料夾",

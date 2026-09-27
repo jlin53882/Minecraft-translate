@@ -3,8 +3,9 @@
 用途：測試 LM 翻譯配置與規則相關功能。
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 
 class TestAPIKeyManagement:
@@ -52,9 +53,9 @@ class TestAPIKeyManagement:
     def test_rotate_api_key_success(self, mock_load_config):
         """測試 API Key 輪換（成功）。"""
         from translation_tool.core.lm_config_rules import (
-            rotate_api_key,
-            reset_key_index,
             get_current_key_index,
+            reset_key_index,
+            rotate_api_key,
         )
 
         mock_load_config.return_value = {
@@ -78,8 +79,8 @@ class TestAPIKeyManagement:
     def test_rotate_api_key_no_more_keys(self, mock_load_config):
         """測試 API Key 輪換（無更多金鑰）。"""
         from translation_tool.core.lm_config_rules import (
-            rotate_api_key,
             reset_key_index,
+            rotate_api_key,
         )
 
         mock_load_config.return_value = {
@@ -411,13 +412,23 @@ def test_translator_rules_follow_config_changes(monkeypatch):
     """B9：設定未變時重用已編譯的規則；設定物件換掉後立即套用新值。"""
     from translation_tool.core import lm_config_rules as rules
 
-    cfg_a = {"lm_translator": {"translator": {"translatable_keywords": ["text"], "skip_terms": []}}}
-    cfg_b = {"lm_translator": {"translator": {"translatable_keywords": ["lore"], "skip_terms": []}}}
+    cfg_a = {
+        "lm_translator": {
+            "translator": {"translatable_keywords": ["text"], "skip_terms": []}
+        }
+    }
+    cfg_b = {
+        "lm_translator": {
+            "translator": {"translatable_keywords": ["lore"], "skip_terms": []}
+        }
+    }
     current = {"cfg": cfg_a}
     calls = []
     orig_build = rules.build_skip_terms_pattern
     monkeypatch.setattr(rules, "load_config_shared", lambda: current["cfg"])
-    monkeypatch.setattr(rules, "build_skip_terms_pattern", lambda t: calls.append(t) or orig_build(t))
+    monkeypatch.setattr(
+        rules, "build_skip_terms_pattern", lambda t: calls.append(t) or orig_build(t)
+    )
 
     for _ in range(100):
         assert rules.is_translatable_field("item_text") is True
@@ -432,11 +443,21 @@ def test_short_text_skip_len_is_configurable(monkeypatch):
     """C9：短名稱（Axe / Ore）是否略過可由設定決定；預設維持 3。"""
     from translation_tool.core import lm_config_rules as rules
 
-    base = {"lm_translator": {"translator": {"skip_terms": [], "translatable_keywords": []}}}
+    base = {
+        "lm_translator": {"translator": {"skip_terms": [], "translatable_keywords": []}}
+    }
     monkeypatch.setattr(rules, "load_config_shared", lambda: base)
     assert rules.is_value_translatable("Axe", is_lang=True) is False
 
-    cfg0 = {"lm_translator": {"translator": {"skip_terms": [], "translatable_keywords": [], "short_text_skip_len": 0}}}
+    cfg0 = {
+        "lm_translator": {
+            "translator": {
+                "skip_terms": [],
+                "translatable_keywords": [],
+                "short_text_skip_len": 0,
+            }
+        }
+    }
     monkeypatch.setattr(rules, "load_config_shared", lambda: cfg0)
     assert rules.is_value_translatable("Axe", is_lang=True) is True
     assert rules.is_value_translatable("Ore", is_lang=True) is True

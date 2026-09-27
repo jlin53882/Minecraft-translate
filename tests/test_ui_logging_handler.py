@@ -7,13 +7,17 @@ from translation_tool.utils.ui_logging_handler import UISessionLogHandler
 
 
 def _emit(handler, level, msg):
-    record = logging.LogRecord("translation_tool.x", level, __file__, 1, msg, None, None)
+    record = logging.LogRecord(
+        "translation_tool.x", level, __file__, 1, msg, None, None
+    )
     handler.emit(record)
 
 
 def test_levels_and_plain_message():
     handler = UISessionLogHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - [%(name)s] - %(message)s"))
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(levelname)s - [%(name)s] - %(message)s")
+    )
     session = TaskSession()
     handler.set_session(session)
 

@@ -46,7 +46,12 @@ class KeyboardShortcutHandler:
         self._current_view_getter = getter
 
     # 各頁面的搜尋框屬性名稱（依優先順序；顯示中的才會被聚焦）
-    SEARCH_FIELD_ATTRS = ("detail_search_tf", "mod_search_tf", "search_box", "tf_query_input")
+    SEARCH_FIELD_ATTRS = (
+        "detail_search_tf",
+        "mod_search_tf",
+        "search_box",
+        "tf_query_input",
+    )
 
     def _find_search_field(self):
         view = self._current_view_getter() if self._current_view_getter else None
@@ -120,7 +125,7 @@ class KeyboardShortcutHandler:
 
         # P 鍵：快速跳轉面板
         if key == "p":
-            if hasattr(self, '_search_callback') and self._search_callback:
+            if hasattr(self, "_search_callback") and self._search_callback:
                 self._search_callback(None)
             return
 

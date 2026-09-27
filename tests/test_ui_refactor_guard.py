@@ -1,5 +1,5 @@
+import re
 from pathlib import Path
-
 
 BASE = Path(__file__).resolve().parents[1]
 APP_VIEWS = BASE / "app" / "views"
@@ -20,7 +20,9 @@ def test_views_use_shared_components_and_no_local_styled_card():
     for rel in targets:
         src = _read(rel)
         assert "styled_card(" in src, f"{rel} should use styled_card"
-        assert "def _styled_card(" not in src, f"{rel} should not keep local _styled_card"
+        assert "def _styled_card(" not in src, (
+            f"{rel} should not keep local _styled_card"
+        )
 
 
 def test_config_and_rules_use_shared_buttons():
@@ -40,14 +42,20 @@ def test_cache_view_is_primary_entry_only():
 
     entry_src = _read("app/views/cache_view.py")
 
-    assert "from app.ui.components import primary_button, secondary_button" in entry_src
+    assert re.search(
+        r"from app\.ui\.components import [^\n]*\bprimary_button\b[^\n]*\bsecondary_button\b",
+        entry_src,
+    )
     assert "self.btn_reload_all = primary_button(" in entry_src
     assert "self.btn_refresh_stats = secondary_button(" in entry_src
 
 
 def test_cache_overview_is_split_to_panel_module():
     entry_src = _read("app/views/cache_view.py")
-    assert "from app.views.cache_manager.cache_overview_panel import build_overview_page" in entry_src
+    assert (
+        "from app.views.cache_manager.cache_overview_panel import build_overview_page"
+        in entry_src
+    )
     assert "return build_overview_page(" in entry_src
 
 

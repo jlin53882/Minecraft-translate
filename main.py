@@ -15,7 +15,7 @@
 WINDOW_WIDTH_DEFAULT = 1200  # 預設視窗寬度
 WINDOW_HEIGHT_DEFAULT = 850  # 預設視窗高度
 WINDOW_MIN_WIDTH = 1050  # 視窗最小寬度（防止版面破碎）
-WINDOW_MIN_HEIGHT = 760   # 視窗最小高度
+WINDOW_MIN_HEIGHT = 760  # 視窗最小高度
 
 import logging
 
@@ -25,7 +25,11 @@ from app.startup_tasks import start_background_startup_tasks
 from app.ui import theme
 from app.ui.keyboard_shortcuts import create_keyboard_handler
 from app.ui.quick_jump import show_quick_jump_panel
-from app.view_registry import build_navigation_destinations, build_view_registry, get_window_size
+from app.view_registry import (
+    build_navigation_destinations,
+    build_view_registry,
+    get_window_size,
+)
 
 logger = logging.getLogger("main_app")
 
@@ -72,17 +76,17 @@ def main(page: ft.Page):
     page.window_height = WINDOW_HEIGHT_DEFAULT
     page.window_min_width = WINDOW_MIN_WIDTH
     page.window_min_height = WINDOW_MIN_HEIGHT
-    page.window_resizable = True                     # 允許使用者拖曳改大小
-    page.bgcolor = "surfaceVariant"                # Flet M3 淺色主題的背景色
+    page.window_resizable = True  # 允許使用者拖曳改大小
+    page.bgcolor = "surfaceVariant"  # Flet M3 淺色主題的背景色
 
     # Material Design 3 主題設定
     page.theme = ft.Theme(
-        font_family="Noto Sans TC",                 # 全域中文字型
-        use_material3=True,                         # 啟用 M3 设计语言
-        color_scheme_seed=ft.Colors.INDIGO,         # 以 INDIGO 為品牌色彩种子，M3 會自動生成完整色盤
+        font_family="Noto Sans TC",  # 全域中文字型
+        use_material3=True,  # 啟用 M3 设计语言
+        color_scheme_seed=ft.Colors.INDIGO,  # 以 INDIGO 為品牌色彩种子，M3 會自動生成完整色盤
         visual_density=ft.VisualDensity.COMFORTABLE,  # 舒適的控制項密度
     )
-    page.theme_mode = ft.ThemeMode.LIGHT            # 預設淺色主題（另可切換 DARK）
+    page.theme_mode = ft.ThemeMode.LIGHT  # 預設淺色主題（另可切換 DARK）
 
     # ----------------------------------------------------------
     # Step 2：建立 FilePicker（所有 view 共享，作為跨 view 的檔案選擇構件）
@@ -98,10 +102,10 @@ def main(page: ft.Page):
     # 用 named lookup 取代 registry[10] 魔數，未來 view 順序變更時自動跟著調整。
     _first_view = registry[0]
     _pipeline_view = next(
-        (item for item in registry if item.get('key') == 'pipeline'),
+        (item for item in registry if item.get("key") == "pipeline"),
         None,
     )
-    _first_view['view'].content.set_registry(registry)
+    _first_view["view"].content.set_registry(registry)
     if _pipeline_view is None:
         raise RuntimeError(
             "pipeline view not found in registry — "
@@ -121,10 +125,10 @@ def main(page: ft.Page):
         """
         width, height = get_window_size(view_key)
         try:
-            page.window.maximized = False           # 先取消最大化，確保能改尺寸
+            page.window.maximized = False  # 先取消最大化，確保能改尺寸
             page.window.width = width
             page.window.height = height
-        except Exception:
+        except Exception:  # noqa: BLE001
             # 少數環境（舊版 Flet / mobile）window 屬性不同，降級處理
             page.window_width = width
             page.window_height = height
@@ -133,7 +137,7 @@ def main(page: ft.Page):
     # Step 3：建立內容區域（單一 Container，置換不同 view 實例）
     # ----------------------------------------------------------
     # content_area 永遠 expand=True，填滿 NavigationRail 之外的全部空間
-    content_area = ft.Container(content=registry[0]['view'], expand=True)
+    content_area = ft.Container(content=registry[0]["view"], expand=True)
 
     # ----------------------------------------------------------
     # Step 4：鍵盤快捷鍵系統
@@ -158,8 +162,8 @@ def main(page: ft.Page):
         """
         selected_index = e.control.selected_index
         item = registry[selected_index]
-        content_area.content = item['view']
-        resize_window_for_view(item['key'])
+        content_area.content = item["view"]
+        resize_window_for_view(item["key"])
         page.update()
 
     def change_view_by_index(index: int):
@@ -170,8 +174,8 @@ def main(page: ft.Page):
         """
         if 0 <= index < len(registry):
             item = registry[index]
-            content_area.content = item['view']
-            resize_window_for_view(item['key'])
+            content_area.content = item["view"]
+            resize_window_for_view(item["key"])
             rail.selected_index = index
             page.update()
 
@@ -188,12 +192,12 @@ def main(page: ft.Page):
         page.theme_mode = ft.ThemeMode.DARK if is_light else ft.ThemeMode.LIGHT
         toggle_icon_btn.icon = ft.Icons.LIGHT_MODE if is_light else ft.Icons.DARK_MODE
         toggle_icon_btn.tooltip = "切換為淺色模式" if is_light else "切換為深色模式"
-        theme.manager.set_mode('dark' if is_light else 'light')
+        theme.manager.set_mode("dark" if is_light else "light")
         page.update()
 
     # 主題切換按鈕，平常顯示在 NavigationRail trailing 區域
     toggle_icon_btn = ft.IconButton(
-        icon=ft.Icons.DARK_MODE,                  # 預設顯示月亮（當前為淺色）
+        icon=ft.Icons.DARK_MODE,  # 預設顯示月亮（當前為淺色）
         tooltip="切換為深色模式",
         on_click=toggle_theme_mode,
     )
@@ -231,7 +235,7 @@ def main(page: ft.Page):
         extended=True,
         group_alignment=-0.95,
         destinations=destinations,
-        on_change=change_view,                     # 切換時更新內容區
+        on_change=change_view,  # 切換時更新內容區
         bgcolor=ft.Colors.SURFACE,
         # leading：左上角的收合按鈕＋搜尋按鈕
         leading=ft.Container(
@@ -241,7 +245,8 @@ def main(page: ft.Page):
                     ft.IconButton(
                         ft.Icons.MENU,
                         on_click=lambda _: (
-                            setattr(rail, "extended", not rail.extended) or page.update()
+                            setattr(rail, "extended", not rail.extended)
+                            or page.update()
                         ),
                         tooltip="收合/展開選單",
                     ),
@@ -270,15 +275,17 @@ def main(page: ft.Page):
     layout = ft.Row(
         controls=[
             rail,
-            ft.VerticalDivider(width=1, thickness=1, color="outlineVariant"),  # 視覺分隔線
+            ft.VerticalDivider(
+                width=1, thickness=1, color="outlineVariant"
+            ),  # 視覺分隔線
             content_area,
         ],
         expand=True,
-        spacing=0,                          # 讓 content_area 完全填滿右側，無間距
+        spacing=0,  # 讓 content_area 完全填滿右側，無間距
     )
 
-    page.add(layout)                        # 首次把 layout 加入 page（只做一次）
-    resize_window_for_view(registry[0]['key'])  # 套用首頁的預設尺寸
+    page.add(layout)  # 首次把 layout 加入 page（只做一次）
+    resize_window_for_view(registry[0]["key"])  # 套用首頁的預設尺寸
     page.update()
 
     # ----------------------------------------------------------
@@ -294,7 +301,7 @@ if __name__ == "__main__":
     """
     try:
         bootstrap_runtime()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # bootstrap 失敗可能是 config 格式錯誤或 logging 初始化失敗，
         # 印出訊息後仍嘗試啟動（讓使用者能看到 GUI 介面）
         print(f"致命錯誤：配置或日誌系統初始化失敗！錯誤: {e}")

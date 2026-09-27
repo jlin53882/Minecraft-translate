@@ -1,47 +1,69 @@
 """Tests for app.views.config.config_actions (load_config_into_view, save_config_from_view)"""
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 
 def make_full_view():
     """Create a mock view with all controls_map keys that load_config_into_view accesses."""
+
     class MinimalView:
         pass
+
     view = MinimalView()
-    view.page = MagicMock()  # 2026-08-01 (PR #85 重構):show_snack(view.page, ...) 需要 view.page
+    view.page = (
+        MagicMock()
+    )  # 2026-08-01 (PR #85 重構):show_snack(view.page, ...) 需要 view.page
     view.controls_map = {}
-    view.DEFAULT_MODELS = {'gemini-2.5-flash': True}
+    view.DEFAULT_MODELS = {"gemini-2.5-flash": True}
     view.add_model_row = MagicMock()
     view.models_column = MagicMock()
     view.keys_column = MagicMock()
     view.key_fields = []
     keys = [
-        'logging.log_level', 'logging.log_dir',
-        'translator.output_dir_name', 'translator.replace_rules_path',
-        'translator.cache_directory', 'translator.enable_cache_saving',
-        'translator.parallel_execution_workers',
-        'ftb_translator.output_dir_name',
-        'species_cache.cache_directory', 'species_cache.cache_filename',
-        'species_cache.wikipedia_language', 'species_cache.wikipedia_rate_limit_delay',
-        'output_bundler.output_zip_name',
-        'lang_merger.pending_folder_name', 'lang_merger.pending_organized_folder_name',
-        'lang_merger.filtered_pending_min_count', 'lang_merger.quarantine_folder_name',
-        'lang_merger.patchouli_skip_en_us_when_zh_cn_exists',
-        'lang_merger.patchouli_effective_translation_threshold',
-        'lang_merger.zh_en_letter_threshold',
-        'lm_translator.temperature', 'lm_translator.lm_translate_folder_name',
-        'lm_translator.rate_limit.timeout', 'lm_translator.rate_limit.sleep_seconds_between_batches',
-        'lm_translator.patchouli_system_prompt', 'lm_translator.lang_system_prompt',
-        'lm_translator.initial_batch_size_patchouli', 'lm_translator.initial_batch_size_lang',
-        'lm_translator.initial_batch_size_ftb', 'lm_translator.initial_batch_size_kubejs',
-        'lm_translator.initial_batch_size_md', 'lm_translator.min_batch_size',
-        'lm_translator.batch_shrink_factor',
-        'lm_translator.patchouli.dir_names',
-        'lm_translator.translator.skip_terms', 'lm_translator.translator.translatable_keywords',
-        'extractor.output_folder_names.lang_extract', 'extractor.output_folder_names.book_extract',
-        'extractor.output_folder_names.lang_preview', 'extractor.output_folder_names.book_preview',
-        'extractor.output_folder_names.dual_extract', 'extractor.output_folder_names.dual_preview',
+        "logging.log_level",
+        "logging.log_dir",
+        "translator.output_dir_name",
+        "translator.replace_rules_path",
+        "translator.cache_directory",
+        "translator.enable_cache_saving",
+        "translator.parallel_execution_workers",
+        "ftb_translator.output_dir_name",
+        "species_cache.cache_directory",
+        "species_cache.cache_filename",
+        "species_cache.wikipedia_language",
+        "species_cache.wikipedia_rate_limit_delay",
+        "output_bundler.output_zip_name",
+        "lang_merger.pending_folder_name",
+        "lang_merger.pending_organized_folder_name",
+        "lang_merger.filtered_pending_min_count",
+        "lang_merger.quarantine_folder_name",
+        "lang_merger.patchouli_skip_en_us_when_zh_cn_exists",
+        "lang_merger.patchouli_effective_translation_threshold",
+        "lang_merger.zh_en_letter_threshold",
+        "lm_translator.temperature",
+        "lm_translator.lm_translate_folder_name",
+        "lm_translator.rate_limit.timeout",
+        "lm_translator.rate_limit.sleep_seconds_between_batches",
+        "lm_translator.patchouli_system_prompt",
+        "lm_translator.lang_system_prompt",
+        "lm_translator.initial_batch_size_patchouli",
+        "lm_translator.initial_batch_size_lang",
+        "lm_translator.initial_batch_size_ftb",
+        "lm_translator.initial_batch_size_kubejs",
+        "lm_translator.initial_batch_size_md",
+        "lm_translator.min_batch_size",
+        "lm_translator.batch_shrink_factor",
+        "lm_translator.patchouli.dir_names",
+        "lm_translator.translator.skip_terms",
+        "lm_translator.translator.translatable_keywords",
+        "extractor.output_folder_names.lang_extract",
+        "extractor.output_folder_names.book_extract",
+        "extractor.output_folder_names.lang_preview",
+        "extractor.output_folder_names.book_preview",
+        "extractor.output_folder_names.dual_extract",
+        "extractor.output_folder_names.dual_preview",
     ]
     for k in keys:
         view.controls_map[k] = MagicMock()
@@ -56,75 +78,120 @@ class TestLoadConfigIntoViewLangMergerLabels:
 
         view = make_full_view()
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': '待翻譯',
-                'pending_organized_folder_name': '整理',
-                'filtered_pending_min_count': 3,
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "整理",
+                "filtered_pending_min_count": 3,
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {}, 'patchouli_system_prompt': 'p',
-                'lang_system_prompt': 'l', 'translator': {'skip_terms': [], 'translatable_keywords': []},
-                'patchouli': {'dir_names': ['patchouli_books']},
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "patchouli_system_prompt": "p",
+                "lang_system_prompt": "l",
+                "translator": {"skip_terms": [], "translatable_keywords": []},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map['lang_merger.pending_folder_name'].label == "待翻譯資料夾名稱（目前：待翻譯）"
-        assert view.controls_map['lang_merger.pending_organized_folder_name'].label == "整理資料夾名稱（目前：整理）"
-        assert view.controls_map['lang_merger.filtered_pending_min_count'].label == "「整理」key最小出現次數（目前：3）"
+        assert (
+            view.controls_map["lang_merger.pending_folder_name"].label
+            == "待翻譯資料夾名稱（目前：待翻譯）"
+        )
+        assert (
+            view.controls_map["lang_merger.pending_organized_folder_name"].label
+            == "整理資料夾名稱（目前：整理）"
+        )
+        assert (
+            view.controls_map["lang_merger.filtered_pending_min_count"].label
+            == "「整理」key最小出現次數（目前：3）"
+        )
 
     def test_lang_merger_labels_use_custom_folder_names(self):
         from app.views.config.config_actions import load_config_into_view
 
         view = make_full_view()
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': 'MY_PENDING',
-                'pending_organized_folder_name': 'MY_ORGANIZED',
-                'filtered_pending_min_count': 5,
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "MY_PENDING",
+                "pending_organized_folder_name": "MY_ORGANIZED",
+                "filtered_pending_min_count": 5,
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {}, 'patchouli_system_prompt': 'p',
-                'lang_system_prompt': 'l', 'translator': {'skip_terms': [], 'translatable_keywords': []},
-                'patchouli': {'dir_names': ['patchouli_books']},
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "patchouli_system_prompt": "p",
+                "lang_system_prompt": "l",
+                "translator": {"skip_terms": [], "translatable_keywords": []},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map['lang_merger.pending_folder_name'].label == "待翻譯資料夾名稱（目前：MY_PENDING）"
-        assert view.controls_map['lang_merger.pending_organized_folder_name'].label == "整理資料夾名稱（目前：MY_ORGANIZED）"
-        assert view.controls_map['lang_merger.filtered_pending_min_count'].label == "「MY_ORGANIZED」key最小出現次數（目前：5）"
+        assert (
+            view.controls_map["lang_merger.pending_folder_name"].label
+            == "待翻譯資料夾名稱（目前：MY_PENDING）"
+        )
+        assert (
+            view.controls_map["lang_merger.pending_organized_folder_name"].label
+            == "整理資料夾名稱（目前：MY_ORGANIZED）"
+        )
+        assert (
+            view.controls_map["lang_merger.filtered_pending_min_count"].label
+            == "「MY_ORGANIZED」key最小出現次數（目前：5）"
+        )
 
     def test_lang_merger_labels_fall_back_to_defaults_when_missing(self):
         from app.views.config.config_actions import load_config_into_view
 
         view = make_full_view()
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': '待翻譯',
-                'pending_organized_folder_name': '待翻譯整理需翻譯',
-                'filtered_pending_min_count': 3,
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "待翻譯整理需翻譯",
+                "filtered_pending_min_count": 3,
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {}, 'patchouli_system_prompt': 'p',
-                'lang_system_prompt': 'l', 'translator': {'skip_terms': [], 'translatable_keywords': []},
-                'patchouli': {'dir_names': ['patchouli_books']},
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "patchouli_system_prompt": "p",
+                "lang_system_prompt": "l",
+                "translator": {"skip_terms": [], "translatable_keywords": []},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map['lang_merger.pending_folder_name'].label == "待翻譯資料夾名稱（目前：待翻譯）"
-        assert view.controls_map['lang_merger.pending_organized_folder_name'].label == "整理資料夾名稱（目前：待翻譯整理需翻譯）"
-        assert view.controls_map['lang_merger.filtered_pending_min_count'].label == "「待翻譯整理需翻譯」key最小出現次數（目前：3）"
+        assert (
+            view.controls_map["lang_merger.pending_folder_name"].label
+            == "待翻譯資料夾名稱（目前：待翻譯）"
+        )
+        assert (
+            view.controls_map["lang_merger.pending_organized_folder_name"].label
+            == "整理資料夾名稱（目前：待翻譯整理需翻譯）"
+        )
+        assert (
+            view.controls_map["lang_merger.filtered_pending_min_count"].label
+            == "「待翻譯整理需翻譯」key最小出現次數（目前：3）"
+        )
 
 
 class TestLoadConfigIntoViewPrompts:
@@ -136,23 +203,33 @@ class TestLoadConfigIntoViewPrompts:
         view = make_full_view()
         prompt_text = "Custom Patchouli Prompt"
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理',
-                'filtered_pending_min_count': 3, 'quarantine_folder_name': 'q',
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "整理",
+                "filtered_pending_min_count": 3,
+                "quarantine_folder_name": "q",
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {}, 'patchouli_system_prompt': prompt_text,
-                'lang_system_prompt': 'Lang Prompt',
-                'translator': {'skip_terms': [], 'translatable_keywords': []},
-                'patchouli': {'dir_names': ['patchouli_books']},
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "patchouli_system_prompt": prompt_text,
+                "lang_system_prompt": "Lang Prompt",
+                "translator": {"skip_terms": [], "translatable_keywords": []},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map['lm_translator.patchouli_system_prompt'].value == prompt_text
+        assert (
+            view.controls_map["lm_translator.patchouli_system_prompt"].value
+            == prompt_text
+        )
 
     def test_loads_lang_system_prompt_value(self):
         from app.views.config.config_actions import load_config_into_view
@@ -160,23 +237,32 @@ class TestLoadConfigIntoViewPrompts:
         view = make_full_view()
         prompt_text = "Custom Lang Prompt"
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理',
-                'filtered_pending_min_count': 3, 'quarantine_folder_name': 'q',
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "整理",
+                "filtered_pending_min_count": 3,
+                "quarantine_folder_name": "q",
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {}, 'patchouli_system_prompt': 'Patchouli',
-                'lang_system_prompt': prompt_text,
-                'translator': {'skip_terms': [], 'translatable_keywords': []},
-                'patchouli': {'dir_names': ['patchouli_books']},
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "patchouli_system_prompt": "Patchouli",
+                "lang_system_prompt": prompt_text,
+                "translator": {"skip_terms": [], "translatable_keywords": []},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map['lm_translator.lang_system_prompt'].value == prompt_text
+        assert (
+            view.controls_map["lm_translator.lang_system_prompt"].value == prompt_text
+        )
 
 
 class TestLoadConfigIntoViewBatchSizes:
@@ -187,46 +273,62 @@ class TestLoadConfigIntoViewBatchSizes:
 
         view = make_full_view()
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理',
-                'filtered_pending_min_count': 3, 'quarantine_folder_name': 'q',
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "整理",
+                "filtered_pending_min_count": 3,
+                "quarantine_folder_name": "q",
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {}, 'batch_shrink_factor': 0.5,
-                'patchouli_system_prompt': 'p', 'lang_system_prompt': 'l',
-                'translator': {'skip_terms': [], 'translatable_keywords': []},
-                'patchouli': {'dir_names': ['patchouli_books']},
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "batch_shrink_factor": 0.5,
+                "patchouli_system_prompt": "p",
+                "lang_system_prompt": "l",
+                "translator": {"skip_terms": [], "translatable_keywords": []},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map['lm_translator.batch_shrink_factor'].value == 0.5
+        assert view.controls_map["lm_translator.batch_shrink_factor"].value == 0.5
 
     def test_loads_batch_shrink_factor_custom_value(self):
         from app.views.config.config_actions import load_config_into_view
 
         view = make_full_view()
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理',
-                'filtered_pending_min_count': 3, 'quarantine_folder_name': 'q',
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "整理",
+                "filtered_pending_min_count": 3,
+                "quarantine_folder_name": "q",
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {}, 'batch_shrink_factor': 0.3,
-                'patchouli_system_prompt': 'p', 'lang_system_prompt': 'l',
-                'translator': {'skip_terms': [], 'translatable_keywords': []},
-                'patchouli': {'dir_names': ['patchouli_books']},
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "batch_shrink_factor": 0.3,
+                "patchouli_system_prompt": "p",
+                "lang_system_prompt": "l",
+                "translator": {"skip_terms": [], "translatable_keywords": []},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map['lm_translator.batch_shrink_factor'].value == 0.3
+        assert view.controls_map["lm_translator.batch_shrink_factor"].value == 0.3
 
 
 class TestLoadConfigIntoViewSkipTerms:
@@ -237,70 +339,122 @@ class TestLoadConfigIntoViewSkipTerms:
 
         view = make_full_view()
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理',
-                'filtered_pending_min_count': 3, 'quarantine_folder_name': 'q',
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "整理",
+                "filtered_pending_min_count": 3,
+                "quarantine_folder_name": "q",
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {},
-                'patchouli_system_prompt': 'p', 'lang_system_prompt': 'l',
-                'translator': {
-                    'skip_terms': [
-                        'api documentation', 'api docs', 'documentation', 'discord', 'github',
-                        'homepage', 'mod page', 'modpack', 'official website', 'patreon',
-                        'Twitter', 'Modrinth', 'CurseForge', 'Crowdin', 'Twitch', 'Wiki',
-                        'Minecraft', 'Forge', 'YouTube', 'Reddit', 'Ko-fi', 'Flattr',
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "patchouli_system_prompt": "p",
+                "lang_system_prompt": "l",
+                "translator": {
+                    "skip_terms": [
+                        "api documentation",
+                        "api docs",
+                        "documentation",
+                        "discord",
+                        "github",
+                        "homepage",
+                        "mod page",
+                        "modpack",
+                        "official website",
+                        "patreon",
+                        "Twitter",
+                        "Modrinth",
+                        "CurseForge",
+                        "Crowdin",
+                        "Twitch",
+                        "Wiki",
+                        "Minecraft",
+                        "Forge",
+                        "YouTube",
+                        "Reddit",
+                        "Ko-fi",
+                        "Flattr",
                     ],
-                    'translatable_keywords': [],
+                    "translatable_keywords": [],
                 },
-                'patchouli': {'dir_names': ['patchouli_books']},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
         expected = (
-            'api documentation\napi docs\ndocumentation\ndiscord\ngithub\nhomepage\n'
-            'mod page\nmodpack\nofficial website\npatreon\nTwitter\nModrinth\nCurseForge\n'
-            'Crowdin\nTwitch\nWiki\nMinecraft\nForge\nYouTube\nReddit\nKo-fi\nFlattr'
+            "api documentation\napi docs\ndocumentation\ndiscord\ngithub\nhomepage\n"
+            "mod page\nmodpack\nofficial website\npatreon\nTwitter\nModrinth\nCurseForge\n"
+            "Crowdin\nTwitch\nWiki\nMinecraft\nForge\nYouTube\nReddit\nKo-fi\nFlattr"
         )
-        assert view.controls_map['lm_translator.translator.skip_terms'].value == expected
+        assert (
+            view.controls_map["lm_translator.translator.skip_terms"].value == expected
+        )
 
     def test_translatable_keywords_has_18_items_from_example(self):
         from app.views.config.config_actions import load_config_into_view
 
         view = make_full_view()
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理',
-                'filtered_pending_min_count': 3, 'quarantine_folder_name': 'q',
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "整理",
+                "filtered_pending_min_count": 3,
+                "quarantine_folder_name": "q",
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {},
-                'patchouli_system_prompt': 'p', 'lang_system_prompt': 'l',
-                'translator': {
-                    'skip_terms': [],
-                    'translatable_keywords': [
-                        'text', 'name', 'title', 'description', 'subtitle', 'hover', 'note',
-                        'warning', 'quote', 'paragraph', 'body', 'header', 'footer',
-                        'heading', 'effects', 'category', 'link_text', 'pages.title',
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "patchouli_system_prompt": "p",
+                "lang_system_prompt": "l",
+                "translator": {
+                    "skip_terms": [],
+                    "translatable_keywords": [
+                        "text",
+                        "name",
+                        "title",
+                        "description",
+                        "subtitle",
+                        "hover",
+                        "note",
+                        "warning",
+                        "quote",
+                        "paragraph",
+                        "body",
+                        "header",
+                        "footer",
+                        "heading",
+                        "effects",
+                        "category",
+                        "link_text",
+                        "pages.title",
                     ],
                 },
-                'patchouli': {'dir_names': ['patchouli_books']},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
         expected = (
-            'text\nname\ntitle\ndescription\nsubtitle\nhover\nnote\nwarning\nquote\n'
-            'paragraph\nbody\nheader\nfooter\nheading\neffects\ncategory\nlink_text\npages.title'
+            "text\nname\ntitle\ndescription\nsubtitle\nhover\nnote\nwarning\nquote\n"
+            "paragraph\nbody\nheader\nfooter\nheading\neffects\ncategory\nlink_text\npages.title"
         )
-        assert view.controls_map['lm_translator.translator.translatable_keywords'].value == expected
+        assert (
+            view.controls_map["lm_translator.translator.translatable_keywords"].value
+            == expected
+        )
 
 
 class TestLoadConfigIntoViewPatchouliSettings:
@@ -311,140 +465,205 @@ class TestLoadConfigIntoViewPatchouliSettings:
 
         view = make_full_view()
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理',
-                'filtered_pending_min_count': 3, 'quarantine_folder_name': 'q',
-                'patchouli_skip_en_us_when_zh_cn_exists': True,
-                'patchouli_effective_translation_threshold': 0.5,
-                'zh_en_letter_threshold': 2,
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "整理",
+                "filtered_pending_min_count": 3,
+                "quarantine_folder_name": "q",
+                "patchouli_skip_en_us_when_zh_cn_exists": True,
+                "patchouli_effective_translation_threshold": 0.5,
+                "zh_en_letter_threshold": 2,
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {},
-                'patchouli_system_prompt': 'p', 'lang_system_prompt': 'l',
-                'translator': {'skip_terms': [], 'translatable_keywords': []},
-                'patchouli': {'dir_names': ['patchouli_books']},
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "patchouli_system_prompt": "p",
+                "lang_system_prompt": "l",
+                "translator": {"skip_terms": [], "translatable_keywords": []},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value is True
+        assert (
+            view.controls_map[
+                "lang_merger.patchouli_skip_en_us_when_zh_cn_exists"
+            ].value
+            is True
+        )
 
     def test_loads_patchouli_skip_en_us_switch_false(self):
         from app.views.config.config_actions import load_config_into_view
 
         view = make_full_view()
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理',
-                'filtered_pending_min_count': 3, 'quarantine_folder_name': 'q',
-                'patchouli_skip_en_us_when_zh_cn_exists': False,
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "整理",
+                "filtered_pending_min_count": 3,
+                "quarantine_folder_name": "q",
+                "patchouli_skip_en_us_when_zh_cn_exists": False,
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {},
-                'patchouli_system_prompt': 'p', 'lang_system_prompt': 'l',
-                'translator': {'skip_terms': [], 'translatable_keywords': []},
-                'patchouli': {'dir_names': ['patchouli_books']},
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "patchouli_system_prompt": "p",
+                "lang_system_prompt": "l",
+                "translator": {"skip_terms": [], "translatable_keywords": []},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value is False
+        assert (
+            view.controls_map[
+                "lang_merger.patchouli_skip_en_us_when_zh_cn_exists"
+            ].value
+            is False
+        )
 
     def test_loads_patchouli_effective_translation_threshold(self):
         from app.views.config.config_actions import load_config_into_view
 
         view = make_full_view()
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理',
-                'filtered_pending_min_count': 3, 'quarantine_folder_name': 'q',
-                'patchouli_effective_translation_threshold': 0.7,
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "整理",
+                "filtered_pending_min_count": 3,
+                "quarantine_folder_name": "q",
+                "patchouli_effective_translation_threshold": 0.7,
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {},
-                'patchouli_system_prompt': 'p', 'lang_system_prompt': 'l',
-                'translator': {'skip_terms': [], 'translatable_keywords': []},
-                'patchouli': {'dir_names': ['patchouli_books']},
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "patchouli_system_prompt": "p",
+                "lang_system_prompt": "l",
+                "translator": {"skip_terms": [], "translatable_keywords": []},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value == '0.7'
+        assert (
+            view.controls_map[
+                "lang_merger.patchouli_effective_translation_threshold"
+            ].value
+            == "0.7"
+        )
 
     def test_loads_zh_en_letter_threshold(self):
         from app.views.config.config_actions import load_config_into_view
 
         view = make_full_view()
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理',
-                'filtered_pending_min_count': 3, 'quarantine_folder_name': 'q',
-                'zh_en_letter_threshold': 5,
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "整理",
+                "filtered_pending_min_count": 3,
+                "quarantine_folder_name": "q",
+                "zh_en_letter_threshold": 5,
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {},
-                'patchouli_system_prompt': 'p', 'lang_system_prompt': 'l',
-                'translator': {'skip_terms': [], 'translatable_keywords': []},
-                'patchouli': {'dir_names': ['patchouli_books']},
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "patchouli_system_prompt": "p",
+                "lang_system_prompt": "l",
+                "translator": {"skip_terms": [], "translatable_keywords": []},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map['lang_merger.zh_en_letter_threshold'].value == '5'
+        assert view.controls_map["lang_merger.zh_en_letter_threshold"].value == "5"
 
     def test_loads_patchouli_settings_use_defaults(self):
         from app.views.config.config_actions import load_config_into_view
 
         view = make_full_view()
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {
-                'pending_folder_name': '待翻譯', 'pending_organized_folder_name': '整理',
-                'filtered_pending_min_count': 3, 'quarantine_folder_name': 'q',
-                'patchouli_skip_en_us_when_zh_cn_exists': False,
-                'patchouli_effective_translation_threshold': 0.5,
-                'zh_en_letter_threshold': 2,
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {
+                "pending_folder_name": "待翻譯",
+                "pending_organized_folder_name": "整理",
+                "filtered_pending_min_count": 3,
+                "quarantine_folder_name": "q",
+                "patchouli_skip_en_us_when_zh_cn_exists": False,
+                "patchouli_effective_translation_threshold": 0.5,
+                "zh_en_letter_threshold": 2,
             },
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {},
-                'patchouli_system_prompt': 'p', 'lang_system_prompt': 'l',
-                'translator': {'skip_terms': [], 'translatable_keywords': []},
-                'patchouli': {'dir_names': ['patchouli_books']},
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "patchouli_system_prompt": "p",
+                "lang_system_prompt": "l",
+                "translator": {"skip_terms": [], "translatable_keywords": []},
+                "patchouli": {"dir_names": ["patchouli_books"]},
             },
         }
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value is False
-        assert view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value == '0.5'
-        assert view.controls_map['lang_merger.zh_en_letter_threshold'].value == '2'
+        assert (
+            view.controls_map[
+                "lang_merger.patchouli_skip_en_us_when_zh_cn_exists"
+            ].value
+            is False
+        )
+        assert (
+            view.controls_map[
+                "lang_merger.patchouli_effective_translation_threshold"
+            ].value
+            == "0.5"
+        )
+        assert view.controls_map["lang_merger.zh_en_letter_threshold"].value == "2"
 
 
 def _make_base_config():
-        """Return a minimal config structure that save_config_from_view needs."""
-        return {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {'pending_folder_name': '待翻譯'},
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {}, 'translator': {},
-                'patchouli': {'dir_names': []},
-            },
-            'extractor': {'output_folder_names': {}},
-        }
+    """Return a minimal config structure that save_config_from_view needs."""
+    return {
+        "logging": {"log_level": "INFO", "log_dir": "logs"},
+        "translator": {},
+        "ftb_translator": {},
+        "species_cache": {},
+        "output_bundler": {},
+        "lang_merger": {"pending_folder_name": "待翻譯"},
+        "lm_translator": {
+            "temperature": 0.3,
+            "rate_limit": {},
+            "translator": {},
+            "patchouli": {"dir_names": []},
+        },
+        "extractor": {"output_folder_names": {}},
+    }
 
 
 def _make_full_save_view():
@@ -453,7 +672,7 @@ def _make_full_save_view():
     view.load_config = MagicMock()
     view.models_column.controls = []
     # view 刪除 _show_snack_bar,SnackBar 顯示由 show_snack 函式處理
-    view._success_color = MagicMock(return_value='green')
+    view._success_color = MagicMock(return_value="green")
     return view
 
 
@@ -464,7 +683,9 @@ class TestSaveConfigFromViewPatchouliFields:
         from app.views.config.config_actions import save_config_from_view
 
         view = _make_full_save_view()
-        view.controls_map['lang_merger.patchouli_skip_en_us_when_zh_cn_exists'].value = True
+        view.controls_map[
+            "lang_merger.patchouli_skip_en_us_when_zh_cn_exists"
+        ].value = True
 
         saved = {}
 
@@ -481,13 +702,15 @@ class TestSaveConfigFromViewPatchouliFields:
             validate_api_keys_from_ui_fn=lambda keys: None,
         )
 
-        assert saved['lang_merger']['patchouli_skip_en_us_when_zh_cn_exists'] is True
+        assert saved["lang_merger"]["patchouli_skip_en_us_when_zh_cn_exists"] is True
 
     def test_saves_patchouli_effective_translation_threshold(self):
         from app.views.config.config_actions import save_config_from_view
 
         view = _make_full_save_view()
-        view.controls_map['lang_merger.patchouli_effective_translation_threshold'].value = '0.7'
+        view.controls_map[
+            "lang_merger.patchouli_effective_translation_threshold"
+        ].value = "0.7"
 
         saved = {}
 
@@ -504,13 +727,13 @@ class TestSaveConfigFromViewPatchouliFields:
             validate_api_keys_from_ui_fn=lambda keys: None,
         )
 
-        assert saved['lang_merger']['patchouli_effective_translation_threshold'] == 0.7
+        assert saved["lang_merger"]["patchouli_effective_translation_threshold"] == 0.7
 
     def test_saves_zh_en_letter_threshold(self):
         from app.views.config.config_actions import save_config_from_view
 
         view = _make_full_save_view()
-        view.controls_map['lang_merger.zh_en_letter_threshold'].value = '5'
+        view.controls_map["lang_merger.zh_en_letter_threshold"].value = "5"
 
         saved = {}
 
@@ -527,14 +750,15 @@ class TestSaveConfigFromViewPatchouliFields:
             validate_api_keys_from_ui_fn=lambda keys: None,
         )
 
-        assert saved['lang_merger']['zh_en_letter_threshold'] == 5
+        assert saved["lang_merger"]["zh_en_letter_threshold"] == 5
+
 
 class TestRpmCooldownSetting:
     """B8：每批翻譯後等待秒數可在設定頁調整（預設 0 = 不等待）。"""
 
     def _view(self):
         view = _make_full_save_view()
-        view.controls_map['lm_translator.rpm_cooldown_sec'] = MagicMock()
+        view.controls_map["lm_translator.rpm_cooldown_sec"] = MagicMock()
         return view
 
     def test_load_defaults_to_zero(self):
@@ -542,28 +766,35 @@ class TestRpmCooldownSetting:
 
         view = self._view()
         cfg = {
-            'logging': {'log_level': 'INFO', 'log_dir': 'logs'},
-            'translator': {}, 'ftb_translator': {}, 'species_cache': {},
-            'output_bundler': {}, 'lang_merger': {'pending_folder_name': '待翻譯'},
-            'lm_translator': {
-                'temperature': 0.3, 'rate_limit': {}, 'patchouli_system_prompt': 'p',
-                'lang_system_prompt': 'l', 'translator': {'skip_terms': [], 'translatable_keywords': []},
-                'patchouli': {'dir_names': []}, 'models': {},
+            "logging": {"log_level": "INFO", "log_dir": "logs"},
+            "translator": {},
+            "ftb_translator": {},
+            "species_cache": {},
+            "output_bundler": {},
+            "lang_merger": {"pending_folder_name": "待翻譯"},
+            "lm_translator": {
+                "temperature": 0.3,
+                "rate_limit": {},
+                "patchouli_system_prompt": "p",
+                "lang_system_prompt": "l",
+                "translator": {"skip_terms": [], "translatable_keywords": []},
+                "patchouli": {"dir_names": []},
+                "models": {},
             },
         }
         load_config_into_view(view, cfg)
-        assert view.controls_map['lm_translator.rpm_cooldown_sec'].value == '0'
+        assert view.controls_map["lm_translator.rpm_cooldown_sec"].value == "0"
 
-        cfg['lm_translator']['rpm_cooldown_sec'] = 12
+        cfg["lm_translator"]["rpm_cooldown_sec"] = 12
         load_config_into_view(view, cfg)
-        assert view.controls_map['lm_translator.rpm_cooldown_sec'].value == '12'
+        assert view.controls_map["lm_translator.rpm_cooldown_sec"].value == "12"
 
-    @pytest.mark.parametrize('raw, expected', [('3.5', 3.5), ('-2', 0.0), ('', 0.0)])
+    @pytest.mark.parametrize("raw, expected", [("3.5", 3.5), ("-2", 0.0), ("", 0.0)])
     def test_save(self, raw, expected):
         from app.views.config.config_actions import save_config_from_view
 
         view = self._view()
-        view.controls_map['lm_translator.rpm_cooldown_sec'].value = raw
+        view.controls_map["lm_translator.rpm_cooldown_sec"].value = raw
         saved = {}
         save_config_from_view(
             view,
@@ -571,4 +802,4 @@ class TestRpmCooldownSetting:
             save_config_json_fn=saved.update,
             validate_api_keys_from_ui_fn=lambda keys: None,
         )
-        assert saved['lm_translator']['rpm_cooldown_sec'] == expected
+        assert saved["lm_translator"]["rpm_cooldown_sec"] == expected

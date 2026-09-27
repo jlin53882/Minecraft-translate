@@ -8,36 +8,37 @@ from app.ui.view_wrapper import wrap_view
 
 DEFAULT_WINDOW_SIZE = (1280, 960)
 VIEW_WINDOW_SIZES = {
-    'config': (1280, 960),
-    'rules': (1280, 960),
-    'cache': (1360, 940),
-    'qc': (1280, 960),
-    'lookup': (1280, 960),
-    'icon_preview': (1280, 960),
-    'bundler': (1280, 960),
-    'translation': (1280, 960),
-    'extractor': (1280, 900),
-    'lm': (1280, 920),
-    'merge': (1280, 920),
-    'arnold': (1000, 950),
+    "config": (1280, 960),
+    "rules": (1280, 960),
+    "cache": (1360, 940),
+    "qc": (1280, 960),
+    "lookup": (1280, 960),
+    "icon_preview": (1280, 960),
+    "bundler": (1280, 960),
+    "translation": (1280, 960),
+    "extractor": (1280, 900),
+    "lm": (1280, 920),
+    "merge": (1280, 920),
+    "arnold": (1000, 950),
 }
 
 # Lazy import map - 延遲載入 view 的對應表
 # 格式：{'key': (module_name, class_name, needs_file_picker)}
 _VIEW_IMPORT_MAP = {
-    'config': ('app.views.config_view', 'ConfigView', False),
-    'rules': ('app.views.rules_view', 'RulesView', False),
-    'cache': ('app.views.cache_view', 'CacheView', False),
-    'qc': ('app.views.qc_view', 'QCView', True),
-    'lookup': ('app.views.lookup_view', 'LookupView', False),
-    'icon_preview': ('app.views.icon_preview_view', 'IconPreviewView', False),
-    'bundler': ('app.views.bundler_view', 'BundlerView', True),
-    'translation': ('app.views.translation_view', 'TranslationView', True),
-    'extractor': ('app.views.extractor_view', 'ExtractorView', True),
-    'lm': ('app.views.lm_view', 'LMView', True),
-    'merge': ('app.views.merge_view', 'MergeView', True),
-    'pipeline': ('app.views.pipeline.pipeline_view', 'PipelineView', True),
+    "config": ("app.views.config_view", "ConfigView", False),
+    "rules": ("app.views.rules_view", "RulesView", False),
+    "cache": ("app.views.cache_view", "CacheView", False),
+    "qc": ("app.views.qc_view", "QCView", True),
+    "lookup": ("app.views.lookup_view", "LookupView", False),
+    "icon_preview": ("app.views.icon_preview_view", "IconPreviewView", False),
+    "bundler": ("app.views.bundler_view", "BundlerView", True),
+    "translation": ("app.views.translation_view", "TranslationView", True),
+    "extractor": ("app.views.extractor_view", "ExtractorView", True),
+    "lm": ("app.views.lm_view", "LMView", True),
+    "merge": ("app.views.merge_view", "MergeView", True),
+    "pipeline": ("app.views.pipeline.pipeline_view", "PipelineView", True),
 }
+
 
 def _lazy_import_view(view_key: str, page: ft.Page, file_picker: ft.FilePicker):
     """Lazy import view 類別（PR67 優化）。
@@ -56,6 +57,7 @@ def _lazy_import_view(view_key: str, page: ft.Page, file_picker: ft.FilePicker):
     if needs_file_picker:
         return view_class(page, file_picker)
     return view_class(page)
+
 
 class LazyViewItem(dict):
     """registry 項目：第一次取用 item["view"] 時才建立頁面。
@@ -112,18 +114,18 @@ def built_view(item):
 
 
 _VIEW_NAV = [
-    ('config', ft.Icons.SETTINGS, '設定'),
-    ('rules', ft.Icons.RULE, '規則'),
-    ('cache', ft.Icons.STORAGE, '快取管理'),
-    ('qc', ft.Icons.CHECK_CIRCLE, 'QC 檢驗'),
-    ('lookup', ft.Icons.SEARCH, '查詢'),
-    ('icon_preview', ft.Icons.IMAGE, 'JAR 圖示預覽'),
-    ('bundler', ft.Icons.FOLDER_ZIP, '打包'),
-    ('translation', ft.Icons.TRANSLATE, '任務 翻譯工具'),
-    ('extractor', ft.Icons.UNARCHIVE, 'jar 提取'),
-    ('lm', ft.Icons.AUTO_AWESOME, '機器翻譯'),
-    ('merge', ft.Icons.CALL_MERGE, '語系比對合併'),
-    ('pipeline', ft.Icons.TERMINAL, '模組流水線翻譯打包'),
+    ("config", ft.Icons.SETTINGS, "設定"),
+    ("rules", ft.Icons.RULE, "規則"),
+    ("cache", ft.Icons.STORAGE, "快取管理"),
+    ("qc", ft.Icons.CHECK_CIRCLE, "QC 檢驗"),
+    ("lookup", ft.Icons.SEARCH, "查詢"),
+    ("icon_preview", ft.Icons.IMAGE, "JAR 圖示預覽"),
+    ("bundler", ft.Icons.FOLDER_ZIP, "打包"),
+    ("translation", ft.Icons.TRANSLATE, "任務 翻譯工具"),
+    ("extractor", ft.Icons.UNARCHIVE, "jar 提取"),
+    ("lm", ft.Icons.AUTO_AWESOME, "機器翻譯"),
+    ("merge", ft.Icons.CALL_MERGE, "語系比對合併"),
+    ("pipeline", ft.Icons.TERMINAL, "模組流水線翻譯打包"),
 ]
 
 
@@ -146,6 +148,7 @@ def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
         for key, icon, label in _VIEW_NAV
     ]
 
+
 def get_window_size(view_key: str) -> tuple:
     """取得 view 的視窗大小。
 
@@ -157,6 +160,7 @@ def get_window_size(view_key: str) -> tuple:
     """
     return VIEW_WINDOW_SIZES.get(view_key, DEFAULT_WINDOW_SIZE)
 
+
 def build_navigation_destinations(registry):
     """從 registry 建立導航目的地。
 
@@ -166,4 +170,9 @@ def build_navigation_destinations(registry):
     Returns:
         NavigationRailDestination 列表
     """
-    return [ft.NavigationRailDestination(icon=item['icon'], selected_icon=item['icon'], label=item['label']) for item in registry]
+    return [
+        ft.NavigationRailDestination(
+            icon=item["icon"], selected_icon=item["icon"], label=item["label"]
+        )
+        for item in registry
+    ]

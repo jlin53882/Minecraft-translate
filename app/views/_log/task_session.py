@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from typing import Deque
 
 from .log_entry import LogEntry
 
@@ -35,7 +34,7 @@ class TaskSession:
         self.status: str = "IDLE"  # IDLE / RUNNING / DONE / ERROR
         self.error: bool = False
 
-        self.logs: Deque[LogEntry] = deque(maxlen=max_logs)
+        self.logs: deque[LogEntry] = deque(maxlen=max_logs)
         self._next_seq: int = 0
         self._lock = threading.Lock()
         self._cancel_event = threading.Event()

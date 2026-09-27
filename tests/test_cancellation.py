@@ -12,6 +12,7 @@ from translation_tool.utils import cancellation as c
 
 # ---------- cancellation 模組 ----------
 
+
 def test_nested_scopes_combine_outer_and_inner():
     outer = {"v": False}
     inner = {"v": False}
@@ -46,6 +47,7 @@ def test_task_cancelled_is_not_swallowed_by_except_exception():
 
 # ---------- 共用翻譯迴圈 ----------
 
+
 def _patch_loop(monkeypatch):
     monkeypatch.setattr(loop_mod, "reload_translation_cache", lambda: None)
     monkeypatch.setattr(loop_mod, "add_to_cache", lambda *a, **k: None)
@@ -54,7 +56,12 @@ def _patch_loop(monkeypatch):
 
 def _items(n):
     return [
-        {"path": f"k{i}", "text": f"t{i}", "source_text": f"t{i}", "cache_type": "kubejs"}
+        {
+            "path": f"k{i}",
+            "text": f"t{i}",
+            "source_text": f"t{i}",
+            "cache_type": "kubejs",
+        }
         for i in range(n)
     ]
 
@@ -100,6 +107,7 @@ def test_shared_loop_cancelled_while_waiting_for_rate_limit(monkeypatch):
 
 # ---------- service 層 ----------
 
+
 def test_run_callable_task_cancel_is_not_error():
     from app.logging.task_session import TaskSession
     from app.services_impl.pipelines._task_runner import run_callable_task
@@ -114,7 +122,9 @@ def test_run_callable_task_cancel_is_not_error():
         def set_session(self, s):
             pass
 
-    run_callable_task(session=session, task_name="t", func=work, kwargs={}, ui_log_handler=_Handler())
+    run_callable_task(
+        session=session, task_name="t", func=work, kwargs={}, ui_log_handler=_Handler()
+    )
 
     snap = session.snapshot()
     assert snap["status"] == "DONE"
@@ -123,6 +133,7 @@ def test_run_callable_task_cancel_is_not_error():
 
 
 # ---------- 一鍵流水線 ----------
+
 
 def test_pipeline_cancel_stops_current_generator_and_skips_rest(monkeypatch):
     from app.views.pipeline import pipeline_view
@@ -142,7 +153,9 @@ def test_pipeline_cancel_stops_current_generator_and_skips_rest(monkeypatch):
 
     assert view._run_session_step(1, "第一步", step1) is False
     assert produced == [0, 1, 2, 3]
-    assert view._run_session_step(2, "第二步", lambda s: step2_called.append(1)) is False
+    assert (
+        view._run_session_step(2, "第二步", lambda s: step2_called.append(1)) is False
+    )
     assert step2_called == []
 
 

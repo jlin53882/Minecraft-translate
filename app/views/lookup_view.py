@@ -73,7 +73,8 @@ class LookupView(ft.Column):
                     content=ft.Column(
                         [
                             ft.Text(
-                                "單筆學名查詢", theme_style=ft.TextThemeStyle.TITLE_MEDIUM
+                                "單筆學名查詢",
+                                theme_style=ft.TextThemeStyle.TITLE_MEDIUM,
                             ),
                             ft.Row([self.single_input, self.single_button]),
                             ft.Divider(),
@@ -95,7 +96,8 @@ class LookupView(ft.Column):
                     content=ft.Column(
                         [
                             ft.Text(
-                                "批次學名查詢", theme_style=ft.TextThemeStyle.TITLE_MEDIUM
+                                "批次學名查詢",
+                                theme_style=ft.TextThemeStyle.TITLE_MEDIUM,
                             ),
                             ft.Row(
                                 [self.batch_input, self.batch_result_textfield],
@@ -130,7 +132,9 @@ class LookupView(ft.Column):
         self.page.update()
 
         # 2. 在背景執行緒中執行查詢
-        thread = threading.Thread(target=self.single_lookup_worker, args=(search_term,), daemon=True)
+        thread = threading.Thread(
+            target=self.single_lookup_worker, args=(search_term,), daemon=True
+        )
         thread.start()
 
     def _run_on_ui(self, fn):
@@ -175,7 +179,9 @@ class LookupView(ft.Column):
         self.batch_result_textfield.value = "批次查詢中，請稍候..."
         self.page.update()
 
-        thread = threading.Thread(target=self.batch_lookup_worker, args=(json_text,), daemon=True)
+        thread = threading.Thread(
+            target=self.batch_lookup_worker, args=(json_text,), daemon=True
+        )
         thread.start()
 
     def batch_lookup_worker(self, json_text):

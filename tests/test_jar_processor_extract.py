@@ -17,7 +17,9 @@ def test_get_file_hash_returns_sha256_hex():
     # SHA-256("hello world") = b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
     assert isinstance(hash_str, str)
     assert len(hash_str) == 64
-    assert hash_str == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    assert (
+        hash_str == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    )
 
 
 def test_get_file_hash_empty_data_returns_known_sha256():
@@ -25,7 +27,9 @@ def test_get_file_hash_empty_data_returns_known_sha256():
     hash_str = get_file_hash(b"")
 
     # SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-    assert hash_str == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    assert (
+        hash_str == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    )
 
 
 def test_extract_from_jar_impl_direct_includes_jar_process_extract_impl(tmp_path: Path):
@@ -44,7 +48,9 @@ def test_extract_from_jar_impl_direct_includes_jar_process_extract_impl(tmp_path
     result = extract_from_jar_impl(
         str(jar_path),
         str(tmp_path / "out"),
-        re.compile(r"(?:assets/([^/]+)/)?lang/(en_us|zh_cn|zh_tw)\.(json|lang)$", re.IGNORECASE),
+        re.compile(
+            r"(?:assets/([^/]+)/)?lang/(en_us|zh_cn|zh_tw)\.(json|lang)$", re.IGNORECASE
+        ),
     )
 
     assert result == {"status": "success", "extracted": 1, "skipped": 0}
@@ -52,33 +58,35 @@ def test_extract_from_jar_impl_direct_includes_jar_process_extract_impl(tmp_path
 
 
 def test_extract_from_jar_writes_assets_to_stable_output_path(tmp_path: Path):
-    jar_path = tmp_path / 'demo-1.0.0.jar'
-    with zipfile.ZipFile(jar_path, 'w') as zf:
-        zf.writestr('assets/demo/lang/en_us.json', '{"a":"A"}')
+    jar_path = tmp_path / "demo-1.0.0.jar"
+    with zipfile.ZipFile(jar_path, "w") as zf:
+        zf.writestr("assets/demo/lang/en_us.json", '{"a":"A"}')
 
     result = jar_processor._extract_from_jar(
         str(jar_path),
-        str(tmp_path / 'out'),
-        re.compile(r'(?:assets/([^/]+)/)?lang/(en_us|zh_cn|zh_tw)\.(json|lang)$', re.IGNORECASE),
+        str(tmp_path / "out"),
+        re.compile(
+            r"(?:assets/([^/]+)/)?lang/(en_us|zh_cn|zh_tw)\.(json|lang)$", re.IGNORECASE
+        ),
     )
 
-    assert result == {'status': 'success', 'extracted': 1, 'skipped': 0}
-    assert (tmp_path / 'out' / 'assets' / 'demo' / 'lang' / 'en_us.json').exists()
+    assert result == {"status": "success", "extracted": 1, "skipped": 0}
+    assert (tmp_path / "out" / "assets" / "demo" / "lang" / "en_us.json").exists()
 
 
 def test_extract_from_jar_writes_non_assets_under_extracted_folder(tmp_path: Path):
-    jar_path = tmp_path / 'demo-neoforge-1.0.0.jar'
-    with zipfile.ZipFile(jar_path, 'w') as zf:
-        zf.writestr('lang/en_us.json', '{"a":"A"}')
+    jar_path = tmp_path / "demo-neoforge-1.0.0.jar"
+    with zipfile.ZipFile(jar_path, "w") as zf:
+        zf.writestr("lang/en_us.json", '{"a":"A"}')
 
     result = jar_processor._extract_from_jar(
         str(jar_path),
-        str(tmp_path / 'out'),
-        re.compile(r'lang/(en_us|zh_cn|zh_tw)\.(json|lang)$', re.IGNORECASE),
+        str(tmp_path / "out"),
+        re.compile(r"lang/(en_us|zh_cn|zh_tw)\.(json|lang)$", re.IGNORECASE),
     )
 
-    assert result == {'status': 'success', 'extracted': 1, 'skipped': 0}
-    assert (tmp_path / 'out' / 'demo_extracted' / 'lang' / 'en_us.json').exists()
+    assert result == {"status": "success", "extracted": 1, "skipped": 0}
+    assert (tmp_path / "out" / "demo_extracted" / "lang" / "en_us.json").exists()
 
 
 def test_corrupted_jar_is_counted_as_failure(tmp_path: Path):
@@ -111,4 +119,7 @@ def test_corrupted_jar_is_counted_as_failure(tmp_path: Path):
     assert final["stats"]["failures"] == 1
     assert final["stats"]["success"] == 1
     assert "broken-1.0.jar" in final["log"]
-    assert any("[ERROR]" in (u.get("log") or "") and "broken-1.0.jar" in u["log"] for u in updates)
+    assert any(
+        "[ERROR]" in (u.get("log") or "") and "broken-1.0.jar" in u["log"]
+        for u in updates
+    )

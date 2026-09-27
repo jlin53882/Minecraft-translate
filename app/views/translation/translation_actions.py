@@ -17,7 +17,7 @@ def _safe_add_log(view, message: str):
     try:
         if hasattr(view, "session") and view.session is not None:
             view.session.add_log(message)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass  # view 已卸載或 session 已 GC，忽略
 
 
@@ -26,7 +26,7 @@ def _safe_page_update(view):
     try:
         if hasattr(view, "page") and view.page is not None:
             view.page.update()
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass  # view 已卸載，忽略
 
 
@@ -61,7 +61,7 @@ def run_ftb(view, *, dry_run: bool):
     view.session = view.TaskSession()
     try:
         view.session.start()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log_warning(f"FTB session.start() 失敗: {e}")
 
     def worker():
@@ -78,13 +78,13 @@ def run_ftb(view, *, dry_run: bool):
                 step_inject=bool(view.ftb_step_inject.value),
                 write_new_cache=bool(view.ftb_write_new_cache.value),
             )
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             try:
                 if hasattr(view.session, "add_log"):
                     _safe_add_log(view, f"[UI] 服務執行失敗：{ex}")
                 if hasattr(view.session, "set_error"):
                     view.session.set_error()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log_error(f"記錄 FTB 執行失敗時發生錯誤: {e}")
 
     threading.Thread(target=worker, daemon=True).start()
@@ -117,7 +117,7 @@ def run_kjs(view, *, dry_run: bool):
     view.session = view.TaskSession()
     try:
         view.session.start()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log_warning(f"FTB session.start() 失敗: {e}")
 
     def worker():
@@ -133,13 +133,13 @@ def run_kjs(view, *, dry_run: bool):
                 step_inject=bool(view.kjs_step_inject.value),
                 write_new_cache=bool(view.kjs_write_new_cache.value),
             )
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             try:
                 if hasattr(view.session, "add_log"):
                     _safe_add_log(view, f"[UI] 服務執行失敗：{ex}")
                 if hasattr(view.session, "set_error"):
                     view.session.set_error()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log_error(f"記錄 KubeJS 執行失敗時發生錯誤: {e}")
 
     threading.Thread(target=worker, daemon=True).start()
@@ -172,7 +172,7 @@ def run_md(view, *, dry_run: bool):
     view.session = view.TaskSession()
     try:
         view.session.start()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log_warning(f"FTB session.start() 失敗: {e}")
 
     def worker():
@@ -189,13 +189,13 @@ def run_md(view, *, dry_run: bool):
                 write_new_cache=bool(view.md_write_new_cache.value),
                 lang_mode=str(view.md_lang_mode.value or "non_cjk_only"),
             )
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             try:
                 if hasattr(view.session, "add_log"):
                     _safe_add_log(view, f"[UI] 服務執行失敗：{ex}")
                 if hasattr(view.session, "set_error"):
                     view.session.set_error()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log_error(f"記錄 MD 執行失敗時發生錯誤: {e}")
 
     threading.Thread(target=worker, daemon=True).start()

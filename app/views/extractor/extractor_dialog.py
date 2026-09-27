@@ -11,37 +11,30 @@
 """
 
 import asyncio
-
-import flet as ft
-import threading
 import os
-import sys
-import time
+import threading
 import traceback
 
-from translation_tool.utils.log_unit import log_info, log_debug, log_warning
+import flet as ft
 
+from app.services_impl.pipelines.extract_service import (
+    get_lang_codes,
+    open_output_folder,
+    prepare_extraction_paths,
+    run_extraction_loop,
+)
 from app.ui import theme
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
-from app.views.extractor.extractor_state import PreviewState
 from app.views.extractor.extractor_dialog_helpers import format_size
-from app.services_impl.pipelines.extract_service import (
-    prepare_extraction_paths,
-    get_lang_codes,
-    run_lang_extraction_service,
-    run_book_extraction_service,
-    run_extraction_loop,
-    open_output_folder,
-)
+from app.views.extractor.extractor_state import PreviewState
 from translation_tool.core.jar_processor import (
-    preview_extraction_generator,
-    find_jar_files,
+    extract_book_files_generator,
     extract_dual_files_generator,
     extract_lang_files_generator,
-    extract_book_files_generator,
+    preview_extraction_generator,
 )
-
+from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 # ============================================================
 # Debug log helper (2026-07-11 規格重整)
@@ -63,6 +56,7 @@ from translation_tool.core.jar_processor import (
 
 # 背景任務 → UI 的刷新間隔（秒）
 _UI_FLUSH_INTERVAL_SEC = 0.2
+
 
 def open_extractor_dialog(
     page: ft.Page,
@@ -95,7 +89,9 @@ def open_extractor_dialog(
     Returns:
         dialog: 建立好的 Flet Dialog 實例
     """
-    log_info(f"[OPEN] open_extractor_dialog mode={mode!r} auto_start={auto_start} skip_zh_cn={skip_zh_cn}")
+    log_info(
+        f"[OPEN] open_extractor_dialog mode={mode!r} auto_start={auto_start} skip_zh_cn={skip_zh_cn}"
+    )
     """打開完整的提取對話框（進度+日誌+結果）。
 
     直接使用外部傳入的設定，無需重新設定。
@@ -151,7 +147,9 @@ def open_extractor_dialog(
         value=0, height=10, visible=False, bgcolor=theme.GREY_200, color=theme.BLUE
     )
     status_text = ft.Text("等待任務啟動...", size=13, color=theme.GREY_600)
-    progress_pct = ft.Text("0%", size=12, color=theme.GREY_600, weight=ft.FontWeight.BOLD)
+    progress_pct = ft.Text(
+        "0%", size=12, color=theme.GREY_600, weight=ft.FontWeight.BOLD
+    )
 
     # ========== UI 元件 - 日誌 ==========
     # PR refactor/unified-log-view: 改用 LogView widget
@@ -163,9 +161,15 @@ def open_extractor_dialog(
     )
 
     # ========== UI 元件 - 結果統計 ==========
-    stats_success = ft.Text("0", size=14, color=theme.GREEN_700, weight=ft.FontWeight.BOLD)
-    stats_warnings = ft.Text("0", size=14, color=theme.ORANGE_700, weight=ft.FontWeight.BOLD)
-    stats_failures = ft.Text("0", size=14, color=theme.RED_400, weight=ft.FontWeight.BOLD)
+    stats_success = ft.Text(
+        "0", size=14, color=theme.GREEN_700, weight=ft.FontWeight.BOLD
+    )
+    stats_warnings = ft.Text(
+        "0", size=14, color=theme.ORANGE_700, weight=ft.FontWeight.BOLD
+    )
+    stats_failures = ft.Text(
+        "0", size=14, color=theme.RED_400, weight=ft.FontWeight.BOLD
+    )
 
     stats_row = ft.Row(
         [
@@ -291,20 +295,46 @@ def open_extractor_dialog(
         [
             ft.Text("LANG：", size=13, color=theme.BLUE_700, weight=ft.FontWeight.BOLD),
             ft.Text("成功 ", size=13),
-            ft.Text("0", size=13, color=theme.GREEN_700, weight=ft.FontWeight.BOLD, key="lang_success"),
+            ft.Text(
+                "0",
+                size=13,
+                color=theme.GREEN_700,
+                weight=ft.FontWeight.BOLD,
+                key="lang_success",
+            ),
             ft.Text(" / 跳過 ", size=13),
-            ft.Text("0", size=13, color=theme.ORANGE_700, weight=ft.FontWeight.BOLD, key="lang_warnings"),
+            ft.Text(
+                "0",
+                size=13,
+                color=theme.ORANGE_700,
+                weight=ft.FontWeight.BOLD,
+                key="lang_warnings",
+            ),
         ],
         spacing=2,
         visible=False,  # DUAL mode 才顯示
     )
     book_row = ft.Row(
         [
-            ft.Text("BOOK：", size=13, color=theme.PURPLE_700, weight=ft.FontWeight.BOLD),
+            ft.Text(
+                "BOOK：", size=13, color=theme.PURPLE_700, weight=ft.FontWeight.BOLD
+            ),
             ft.Text("成功 ", size=13),
-            ft.Text("0", size=13, color=theme.GREEN_700, weight=ft.FontWeight.BOLD, key="book_success"),
+            ft.Text(
+                "0",
+                size=13,
+                color=theme.GREEN_700,
+                weight=ft.FontWeight.BOLD,
+                key="book_success",
+            ),
             ft.Text(" / 跳過 ", size=13),
-            ft.Text("0", size=13, color=theme.ORANGE_700, weight=ft.FontWeight.BOLD, key="book_warnings"),
+            ft.Text(
+                "0",
+                size=13,
+                color=theme.ORANGE_700,
+                weight=ft.FontWeight.BOLD,
+                key="book_warnings",
+            ),
         ],
         spacing=2,
         visible=False,  # DUAL mode 才顯示
@@ -316,6 +346,7 @@ def open_extractor_dialog(
         :param result_stats: run_extraction_loop 回傳的完整 stats dict,
                               含 lang / book sub-dict。
         """
+
         def apply():
             lang = result_stats.get("lang") or {}
             book = result_stats.get("book") or {}
@@ -324,11 +355,19 @@ def open_extractor_dialog(
                 for ctrl in row.controls:
                     if getattr(ctrl, "key", None) == "lang_success" and row is lang_row:
                         ctrl.value = str(lang.get("success", 0))
-                    elif getattr(ctrl, "key", None) == "lang_warnings" and row is lang_row:
+                    elif (
+                        getattr(ctrl, "key", None) == "lang_warnings"
+                        and row is lang_row
+                    ):
                         ctrl.value = str(lang.get("warnings", 0))
-                    elif getattr(ctrl, "key", None) == "book_success" and row is book_row:
+                    elif (
+                        getattr(ctrl, "key", None) == "book_success" and row is book_row
+                    ):
                         ctrl.value = str(book.get("success", 0))
-                    elif getattr(ctrl, "key", None) == "book_warnings" and row is book_row:
+                    elif (
+                        getattr(ctrl, "key", None) == "book_warnings"
+                        and row is book_row
+                    ):
                         ctrl.value = str(book.get("warnings", 0))
             lang_row.visible = True
             book_row.visible = True
@@ -348,7 +387,7 @@ def open_extractor_dialog(
         - 完成後發 [完成] log + 更新 stats / dual stats
         - on_complete(state["done"], state["stats"]) callback (給 caller 接續處理)
         """
-        log_info(f"[THREAD] run_extraction thread STARTED")
+        log_info("[THREAD] run_extraction thread STARTED")
         selected_mode = mode
         selected_codes = lang_codes  # 使用配置中的所有語系
         selected_skip_zh_cn = skip_zh_cn  # 🐛 2026-07-14 user review: 串接主 UI skip_zh_cn_switch,closure 內才能用
@@ -386,19 +425,22 @@ def open_extractor_dialog(
         try:
             if selected_mode == "lang":
                 gen = extract_lang_files_generator(
-                    mods_dir, final_output,
+                    mods_dir,
+                    final_output,
                     lang_codes=selected_codes,
                     skip_zh_cn=selected_skip_zh_cn,
                 )
             elif selected_mode == "book":
                 # 🐛 2026-07-14 user review:book 模式也接 skip_zh_cn(跟 lang 模式對稱)
                 gen = extract_book_files_generator(
-                    mods_dir, final_output,
+                    mods_dir,
+                    final_output,
                     skip_zh_cn=selected_skip_zh_cn,
                 )
             else:
                 gen = extract_dual_files_generator(
-                    mods_dir, final_output,
+                    mods_dir,
+                    final_output,
                     lang_codes=selected_codes,
                     skip_zh_cn=selected_skip_zh_cn,
                 )
@@ -428,7 +470,9 @@ def open_extractor_dialog(
 
             # 透過 Service 統一處理 Generator 迭代
             # result_stats 是整段任務最終的累計（Service 在 generator 跑完時 yield 最後一次 stats）
-            result_stats = run_extraction_loop(gen, cancelled_flag=cancelled_flag, on_update=on_update)
+            result_stats = run_extraction_loop(
+                gen, cancelled_flag=cancelled_flag, on_update=on_update
+            )
 
             # 同步 cancelled_flag 到 state（讓 on_cancel_click 仍能正常運作）
             if cancelled_flag[0]:
@@ -448,12 +492,16 @@ def open_extractor_dialog(
                 level="system",
             )
             update_progress(1.0, "任務完成")
-            update_stats(result_stats["success"], result_stats["warnings"], result_stats["failures"])
+            update_stats(
+                result_stats["success"],
+                result_stats["warnings"],
+                result_stats["failures"],
+            )
             # Phase 3 (2026-07-13) user 選項 B: DUAL mode 顯示 LANG/BOOK 分區
             if selected_mode == "dual":
                 update_dual_stats(result_stats)
 
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             # 🐛 UX 改進 (2026-07-13 user review): 原本只印 str(ex),遇到 TypeError 等
             # exception 時缺少堆疊追蹤,debug 不便。
             # 改用 traceback.format_exc() 印完整堆疊,讓 user 看到錯誤根因。
@@ -463,7 +511,9 @@ def open_extractor_dialog(
             update_stats(0, 0, 1)
 
         finally:
-            log_info(f"[THREAD] run_extraction finally: running=False, done={state['done']}, cancelled={state['cancelled']}")
+            log_info(
+                f"[THREAD] run_extraction finally: running=False, done={state['done']}, cancelled={state['cancelled']}"
+            )
             state["running"] = False
 
             def ui_done():
@@ -499,28 +549,32 @@ def open_extractor_dialog(
         Args:
             e: Flet ControlEvent(按鈕 click 觸發)
         """
-        log_debug(f"[BTN] on_start_click CALLED")
+        log_debug("[BTN] on_start_click CALLED")
         # 驗證輸入
         if not mods_dir:
-            log_debug(f"[BTN] on_start_click rejected: mods_dir empty")
+            log_debug("[BTN] on_start_click rejected: mods_dir empty")
             # 🐛 UX 改進 (2026-07-13 user review):除了 dialog 內 status_text 提示,
             # 額外彈出 SnackBar 提醒 user。原因:user 按按鈕時視線多在按鈕
             # 與 textfield 上,dialog 內 status_text 在 dialog 底部容易被忽略。
             # SnackBar 從畫面底部彈出 4 秒,user 更可能注意到。
             # Modal=False 期間 SnackBar 可見(還沒進 ui_start 鎖 modal)。
-            page.show_dialog(ft.SnackBar(
-                ft.Text("⚠️ 請先選擇 Mods 資料夾"),
-                open=True,
-            ))
+            page.show_dialog(
+                ft.SnackBar(
+                    ft.Text("⚠️ 請先選擇 Mods 資料夾"),
+                    open=True,
+                )
+            )
             status_text.value = "⚠️ 請先設定 Mod 來源"
             page.update()
             return
         if not os.path.isdir(mods_dir):
             log_debug(f"[BTN] on_start_click rejected: {mods_dir} not a dir")
-            page.show_dialog(ft.SnackBar(
-                ft.Text("⚠️ Mods 資料夾不存在"),
-                open=True,
-            ))
+            page.show_dialog(
+                ft.SnackBar(
+                    ft.Text("⚠️ Mods 資料夾不存在"),
+                    open=True,
+                )
+            )
             status_text.value = "⚠️ Mod 來源資料夾不存在"
             page.update()
             return
@@ -538,7 +592,9 @@ def open_extractor_dialog(
         page.update()
 
         # 啟動執行緒
-        log_debug(f"[BTN] on_start_click spawning run_extraction thread (mode={mode!r})")
+        log_debug(
+            f"[BTN] on_start_click spawning run_extraction thread (mode={mode!r})"
+        )
         threading.Thread(target=run_extraction, daemon=True).start()
 
     def on_cancel_click(e):
@@ -553,7 +609,7 @@ def open_extractor_dialog(
             以及 state["cancelled"] = True (UI 顯示用的狀態)。
             兩份都要設是為了 UI 與 Service 同步。
         """
-        log_debug(f"[BTN] on_cancel_click CALLED, setting cancel flags")
+        log_debug("[BTN] on_cancel_click CALLED, setting cancel flags")
         extraction_cancel_flag[0] = True
         state["cancelled"] = True
         status_text.value = "正在取消..."
@@ -564,7 +620,7 @@ def open_extractor_dialog(
         Args:
             e: Flet ControlEvent(按鈕 click 觸發)
         """
-        log_debug(f"[BTN] on_close_click CALLED")
+        log_debug("[BTN] on_close_click CALLED")
         # Flet 0.85 內建 API: 用 pop_dialog 關閉頂層 dialog (topmost)
         page.pop_dialog()
 
@@ -586,7 +642,10 @@ def open_extractor_dialog(
     # ========== 建立對話框 ==========
     progress_section = ft.Column(
         [
-            ft.Row([status_text, progress_pct], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            ft.Row(
+                [status_text, progress_pct],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            ),
             progress_bar,
         ],
         spacing=4,
@@ -606,7 +665,9 @@ def open_extractor_dialog(
         title=ft.Row(
             [
                 ft.Icon(ft.Icons.DOWNLOAD, size=24, color=theme.BLUE_700),
-                ft.Text(f"提取資源 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD),
+                ft.Text(
+                    f"提取資源 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD
+                ),
             ],
             spacing=10,
         ),
@@ -693,7 +754,7 @@ def open_extractor_dialog(
 
     # 顯示對話框 (Flet 0.85 內建 dialog lifecycle API — show_dialog 自動管理 overlay + open + 父層)
     page.show_dialog(dialog)
-    log_info(f"[OPEN] dialog shown via page.show_dialog()")
+    log_info("[OPEN] dialog shown via page.show_dialog()")
 
     # 如果指定了 auto_start，則自動啟動提取
     if auto_start:
@@ -705,7 +766,9 @@ def open_extractor_dialog(
 def _preview_file_count(result: dict, mode: str) -> int:
     """預覽結果中單一 JAR 的可提取檔案數。"""
     if mode == "dual":
-        return int(result.get("lang_count", 0) or 0) + int(result.get("book_count", 0) or 0)
+        return int(result.get("lang_count", 0) or 0) + int(
+            result.get("book_count", 0) or 0
+        )
     return int(result.get("count", 0) or 0)
 
 
@@ -763,7 +826,9 @@ def open_preview_dialog(
     # 進度區
     # 🐛 Bug 修復：初始狀態文字應為「等待開始」而非「正在掃描」
     status_text = ft.Text("等待開始預覽...", size=13, color=ft.Colors.GREY_600)
-    progress_pct = ft.Text("--", size=12, color=ft.Colors.GREY_600, weight=ft.FontWeight.BOLD)
+    progress_pct = ft.Text(
+        "--", size=12, color=ft.Colors.GREY_600, weight=ft.FontWeight.BOLD
+    )
     # 🐛 Bug 修復：明確設定 progress_bar 的顏色與背景色，避免渲染不明顯
     progress_bar = ft.ProgressBar(
         value=0,
@@ -811,7 +876,9 @@ def open_preview_dialog(
         pop_dialog() 呼叫一次就足夠(就算 preview_dialog 已被使用者提前
         dismiss,pop 找不到東西會靜默 return None,不會波及其他 dialog)。
         """
-        log_info(f"[PREVIEW] show_result_dialog: {len(result.get('preview_results', []))} JARs found")
+        log_info(
+            f"[PREVIEW] show_result_dialog: {len(result.get('preview_results', []))} JARs found"
+        )
         preview_results = result.get("preview_results", [])
         total_files = result.get("total_files", 0)
         total_size_mb = result.get("total_size_mb", 0)
@@ -824,64 +891,103 @@ def open_preview_dialog(
         if mode == "dual":
             total_lang = sum(r.get("lang_count", 0) for r in preview_results)
             total_book = sum(r.get("book_count", 0) for r in preview_results)
-            controls.append(ft.Text(f"Lang：{total_lang} 個", size=14, color=ft.Colors.BLUE_700))
-            controls.append(ft.Text(f"Book：{total_book} 個", size=14, color=ft.Colors.BLUE_700))
+            controls.append(
+                ft.Text(f"Lang：{total_lang} 個", size=14, color=ft.Colors.BLUE_700)
+            )
+            controls.append(
+                ft.Text(f"Book：{total_book} 個", size=14, color=ft.Colors.BLUE_700)
+            )
         else:
-            controls.append(ft.Text(f"共找到 {total_files} 個檔案", size=14, color=ft.Colors.BLUE_700))
+            controls.append(
+                ft.Text(
+                    f"共找到 {total_files} 個檔案", size=14, color=ft.Colors.BLUE_700
+                )
+            )
 
-        controls.append(ft.Text(f"總大小：{total_size_mb:.2f} MB", size=14, color=ft.Colors.BLUE_700))
+        controls.append(
+            ft.Text(
+                f"總大小：{total_size_mb:.2f} MB", size=14, color=ft.Colors.BLUE_700
+            )
+        )
 
         # 只列出有可提取檔案的 JAR（406 個 JAR 時大多是 0 個檔案，清單會被淹沒）
         with_files = [r for r in preview_results if _preview_file_count(r, mode) > 0]
         empty_count = len(preview_results) - len(with_files)
         header = f"詳細清單（{len(with_files)} 個 JAR 有可提取檔案）："
-        controls.extend([ft.Divider(), ft.Text(header, size=13, weight=ft.FontWeight.BOLD)])
+        controls.extend(
+            [ft.Divider(), ft.Text(header, size=13, weight=ft.FontWeight.BOLD)]
+        )
         if empty_count:
             controls.append(
-                ft.Text(f"另有 {empty_count} 個 JAR 沒有可提取的檔案，已略過不列出", size=12, color=ft.Colors.GREY_700)
+                ft.Text(
+                    f"另有 {empty_count} 個 JAR 沒有可提取的檔案，已略過不列出",
+                    size=12,
+                    color=ft.Colors.GREY_700,
+                )
             )
 
         jar_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO)
         for r in with_files:
             if mode == "dual":
                 jar_list.controls.append(
-                    ft.Text(f"📦 {r['jar']}: Lang {r.get('lang_count', 0)} 個 / Book {r.get('book_count', 0)} 個", size=12)
+                    ft.Text(
+                        f"📦 {r['jar']}: Lang {r.get('lang_count', 0)} 個 / Book {r.get('book_count', 0)} 個",
+                        size=12,
+                    )
                 )
             else:
                 # 🐛 2026-07-14 user review:小檔案顯示 0.0 MB(user 看不出來)
                 # 改用 format_size helper 自動選擇單位 (MB / KB / B)
                 # format_size 從頂部 import(extractor_dialog_helpers)
                 jar_list.controls.append(
-                    ft.Text(f"📦 {r['jar']}: {r['count']} 個檔案 ({format_size(r['size_mb'])})", size=12)
+                    ft.Text(
+                        f"📦 {r['jar']}: {r['count']} 個檔案 ({format_size(r['size_mb'])})",
+                        size=12,
+                    )
                 )
 
         list_container = ft.Container(
-            content=jar_list, height=300, padding=5, bgcolor=ft.Colors.GREY_100, border_radius=8
+            content=jar_list,
+            height=300,
+            padding=5,
+            bgcolor=ft.Colors.GREY_100,
+            border_radius=8,
         )
         controls.append(list_container)
 
         def start_extraction(e):
             """確認執行 — 沿用合併後的單一 dialog,只 pop 一次。"""
-            log_info(f"[PREVIEW] start_extraction CALLED (確認執行 clicked)")
+            log_info("[PREVIEW] start_extraction CALLED (確認執行 clicked)")
             page.pop_dialog()  # 只有 preview_dialog 一個 dialog,pop 一次就乾淨
-            log_info(f"[PREVIEW] start_extraction: preview_dialog closed via pop_dialog (single)")
+            log_info(
+                "[PREVIEW] start_extraction: preview_dialog closed via pop_dialog (single)"
+            )
             # 直接開啟提取對話框並自動啟動(不需點擊「開始提取」)
-            log_info(f"[PREVIEW] start_extraction: calling open_extractor_dialog auto_start=True")
+            log_info(
+                "[PREVIEW] start_extraction: calling open_extractor_dialog auto_start=True"
+            )
             open_extractor_dialog(
-                page, file_picker,
+                page,
+                file_picker,
                 input_path=input_path,
                 output_path=output_path,
                 mode=mode,
                 auto_start=True,
             )
-            log_info(f"[PREVIEW] start_extraction: open_extractor_dialog returned")
+            log_info("[PREVIEW] start_extraction: open_extractor_dialog returned")
 
         # 在原本的 preview_dialog 上 mutate title/content/actions,而不是開新 dialog
-        log_info(f"[PREVIEW] show_result_dialog: mutating preview_dialog in-place (single-dialog mode)")
-        preview_dialog.title = ft.Row([
-            ft.Icon(ft.Icons.CHECK_CIRCLE, size=24, color=ft.Colors.GREEN_700),
-            ft.Text(f"提取預覽 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD),
-        ])
+        log_info(
+            "[PREVIEW] show_result_dialog: mutating preview_dialog in-place (single-dialog mode)"
+        )
+        preview_dialog.title = ft.Row(
+            [
+                ft.Icon(ft.Icons.CHECK_CIRCLE, size=24, color=ft.Colors.GREEN_700),
+                ft.Text(
+                    f"提取預覽 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD
+                ),
+            ]
+        )
         preview_dialog.content = ft.Container(
             content=ft.Column(controls, spacing=8, scroll=ft.ScrollMode.AUTO),
             width=600,
@@ -891,7 +997,7 @@ def open_preview_dialog(
             ft.TextButton(
                 "取消",
                 on_click=lambda e: (
-                    log_info(f"[PREVIEW] 取消 CALLED → pop_dialog (single)"),
+                    log_info("[PREVIEW] 取消 CALLED → pop_dialog (single)"),
                     page.pop_dialog(),  # 只有一個 dialog,pop 一次就夠
                 ),
             ),
@@ -900,9 +1006,13 @@ def open_preview_dialog(
         # 2026-07-12:解鎖 preview_dialog modal(掃描已結束,沒有 background thread 風險)。
         # 對應 start_scan() 內的 preview_dialog.modal = True 鎖定。
         preview_dialog.modal = False
-        log_info("[PREVIEW] show_result_dialog: preview_dialog.modal=False (scan finished)")
+        log_info(
+            "[PREVIEW] show_result_dialog: preview_dialog.modal=False (scan finished)"
+        )
         page.update()  # ← 重新 paint preview_dialog,內容現在是「結果列表」
-        log_info(f"[PREVIEW] show_result_dialog: preview_dialog mutated, page.update() done")
+        log_info(
+            "[PREVIEW] show_result_dialog: preview_dialog mutated, page.update() done"
+        )
 
     # ========== 執行掃描 ==========
     state = {"running": False, "cancelled": False, "done": False}
@@ -910,9 +1020,11 @@ def open_preview_dialog(
 
     def start_scan():
         """按鈕：開始預覽掃描"""
-        log_info(f"[PREVIEW] start_scan CALLED (mode={mode!r}, state.running={state['running']})")
+        log_info(
+            f"[PREVIEW] start_scan CALLED (mode={mode!r}, state.running={state['running']})"
+        )
         if state["running"]:
-            log_info(f"[PREVIEW] start_scan rejected: state.running=True")
+            log_info("[PREVIEW] start_scan rejected: state.running=True")
             return
         # 預覽只掃描不寫檔；顯示「確認執行」後實際的提取輸出位置
         # （原本把預覽資料夾當成提取輸出，導致結果多一層或寫進預覽資料夾）
@@ -944,7 +1056,7 @@ def open_preview_dialog(
         # dialog 變孤兒(do_scan / ui_poller thread 仍繼續跑,但 UI 已不在)。
         # 解鎖時機在 show_result_dialog() mutate 完之後(backgound thread 已結束)。
         preview_dialog.modal = True
-        log_info(f"[PREVIEW] start_scan: preview_dialog.modal=True (scanning)")
+        log_info("[PREVIEW] start_scan: preview_dialog.modal=True (scanning)")
 
         # 重置 UI
         log_view.clear()
@@ -959,7 +1071,9 @@ def open_preview_dialog(
         def do_scan():
             """背景執行緒：跑 generator，只寫入 preview_state（不碰任何控制項）。"""
             try:
-                for update in preview_extraction_generator(input_path, mode, skip_zh_cn=skip_zh_cn):
+                for update in preview_extraction_generator(
+                    input_path, mode, skip_zh_cn=skip_zh_cn
+                ):
                     if state["cancelled"]:
                         break
                     if "progress" in update:
@@ -1013,7 +1127,9 @@ def open_preview_dialog(
                 page.update()
             elif final_result:
                 results = final_result.get("preview_results", [])
-                add_log(f"[完成] 找到 {len(results)} 個 JAR", level="system", update=False)
+                add_log(
+                    f"[完成] 找到 {len(results)} 個 JAR", level="system", update=False
+                )
                 show_result_dialog(final_result)
             else:
                 if state["cancelled"]:
@@ -1032,19 +1148,27 @@ def open_preview_dialog(
 
     preview_dialog = ft.AlertDialog(
         modal=False,
-        title=ft.Row([
-            ft.Icon(ft.Icons.SEARCH, size=24, color=ft.Colors.BLUE_700),
-            ft.Text(f"預覽 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD),
-        ]),
+        title=ft.Row(
+            [
+                ft.Icon(ft.Icons.SEARCH, size=24, color=ft.Colors.BLUE_700),
+                ft.Text(f"預覽 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD),
+            ]
+        ),
         content=ft.Container(
-            content=ft.Column([
-                info_text,
-                ft.Divider(),
-                ft.Row([status_text, progress_pct], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                progress_bar,
-                # log_view 已是 LogView widget（自帶深色容器 + 圓角）
-                log_view,
-            ], spacing=10),
+            content=ft.Column(
+                [
+                    info_text,
+                    ft.Divider(),
+                    ft.Row(
+                        [status_text, progress_pct],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    progress_bar,
+                    # log_view 已是 LogView widget（自帶深色容器 + 圓角）
+                    log_view,
+                ],
+                spacing=10,
+            ),
             width=dialog_width,
             height=500,
         ),

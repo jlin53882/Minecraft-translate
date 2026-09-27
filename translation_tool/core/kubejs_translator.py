@@ -5,12 +5,12 @@
 """
 
 from __future__ import annotations
-from translation_tool.utils.cancellation import is_cancelled, raise_if_cancelled
 
-from pathlib import Path
-from typing import Optional, Callable, Dict, Any
-import time
 import math
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import orjson
 
@@ -26,18 +26,20 @@ from translation_tool.core.kubejs_translator_io import (
 )
 from translation_tool.core.kubejs_translator_paths import resolve_kubejs_root_impl
 from translation_tool.core.lm_translator_shared import _get_default_batch_size
+from translation_tool.utils.cancellation import is_cancelled, raise_if_cancelled
 from translation_tool.utils.log_unit import (
+    get_formatted_duration,
+    log_debug,
     log_info,
     log_warning,
-    log_debug,
     progress,
-    get_formatted_duration,
 )
 from translation_tool.utils.text_processor import safe_convert_text
 
+
 def _is_filled_text(v: Any) -> bool:
     """判斷傳入值是否為有實質內容的文字（排除空字串與 {xxx} 格式的語言參考）。
-    
+
     Args:
         v: 任意型別的值。
     Returns:
@@ -45,9 +47,10 @@ def _is_filled_text(v: Any) -> bool:
     """
     return is_filled_text_impl(v)
 
+
 def deep_merge_3way_flat(tw: dict, cn: dict, en: dict) -> dict:
     """對三個語系的扁平鍵值字典做三方合併，優先順序：zh_tw > zh_cn（轉繁）> en_us。
-    
+
     Args:
         tw: 繁體中文鍵值對。
         cn: 簡體中文鍵值對（會自動轉為繁體）。
@@ -57,9 +60,10 @@ def deep_merge_3way_flat(tw: dict, cn: dict, en: dict) -> dict:
     """
     return deep_merge_3way_flat_impl(tw, cn, en, safe_convert_text_fn=safe_convert_text)
 
+
 def prune_en_by_tw_flat(en_map: dict, tw_available: dict) -> dict:
     """從英文鍵值地圖中移除已有中文（繁體）內容的項目，產生待翻譯清單。
-    
+
     Args:
         en_map: 英文鍵值對。
         tw_available: 可用的繁體中文鍵值對。
@@ -68,9 +72,10 @@ def prune_en_by_tw_flat(en_map: dict, tw_available: dict) -> dict:
     """
     return prune_en_by_tw_flat_impl(en_map, tw_available)
 
+
 def _read_json_dict_orjson(path: Path) -> dict:
     """使用 orjson 讀取 JSON 檔案，自動處理 BOM 與結尾多餘逗號。
-    
+
     Args:
         path: 要讀取的 JSON 檔案路徑。
     Returns:
@@ -78,14 +83,16 @@ def _read_json_dict_orjson(path: Path) -> dict:
     """
     return read_json_dict_orjson_impl(path)
 
+
 def _write_json_orjson(path: Path, data: dict) -> None:
     """使用 orjson 將字典以格式化（縮排 2 層）寫入 JSON 檔案。
-    
+
     Args:
         path: 目標檔案路徑，父目錄不存在時會自動建立。
         data: 要寫入的字典資料。
     """
     write_json_orjson_impl(path, data)
+
 
 def clean_kubejs_from_raw(
     base_dir: str,
@@ -96,7 +103,7 @@ def clean_kubejs_from_raw(
     final_root: str | None = None,
 ) -> dict:
     """將 KubeJS 原始提取資料進行清理與三方合併，產出待翻譯與完成品目錄。
-    
+
     Args:
         base_dir: Modpack 根目錄。
         output_dir: 輸出根目錄（預設為 base_dir/Output）。
@@ -119,9 +126,10 @@ def clean_kubejs_from_raw(
         log_info_fn=log_info,
     )
 
+
 def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> Path:
     """自動解析 KubeJS 根目錄，優先傳回包含 client_scripts 的候選目錄。
-    
+
     Args:
         input_dir: 起始搜尋目錄（可為 modpack 根目錄或直接為 kubejs 目錄）。
         max_depth: 最大搜尋深度（預設 4）。
@@ -129,6 +137,7 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> Path:
         Path: 偵測到的 KubeJS 目錄路徑；若找不到則回傳起始目錄本身。
     """
     return resolve_kubejs_root_impl(input_dir, max_depth=max_depth)
+
 
 def step1_extract_and_clean(
     *,
@@ -139,9 +148,9 @@ def step1_extract_and_clean(
     session=None,
     progress_base: float = 0.0,
     progress_span: float = 0.33,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """KubeJS Pipeline 步驟一：從 KubeJS 目錄提取文字並執行清理與三方合併。
-    
+
     Args:
         pack_or_kubejs_dir: Modpack 根目錄或直接為 kubejs 目錄的路徑。
         raw_dir: 原始提取文字的輸出目錄。
@@ -157,7 +166,9 @@ def step1_extract_and_clean(
     log_info(f"\n🔎 [KubeJS] 確定 KubeJS 目錄為: {kubejs_dir_path}")
 
     log_info(f"📦 [KubeJS] 步驟 1-1：正在提取文字至 -> {raw_dir}")
-    from translation_tool.plugins.kubejs.kubejs_tooltip_extract import extract as kjs_extract
+    from translation_tool.plugins.kubejs.kubejs_tooltip_extract import (
+        extract as kjs_extract,
+    )
 
     extract_result = kjs_extract(
         source_dir=str(kubejs_dir_path),
@@ -191,19 +202,20 @@ def step1_extract_and_clean(
         "final_dir": str(Path(final_dir).resolve()),
     }
 
+
 def step2_translate_lm(
     *,
     pending_dir: str,
-    output_dir: Optional[str] = None,
-    translated_dir: Optional[str] = None,
+    output_dir: str | None = None,
+    translated_dir: str | None = None,
     session=None,
     progress_base: float = 0.33,
     progress_span: float = 0.33,
     dry_run: bool = False,
     write_new_cache: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """KubeJS Pipeline 步驟二：呼叫 Gemini API 將待翻譯文字翻譯為繁體中文。
-    
+
     Args:
         pending_dir: 待翻譯檔案目錄（即 step1 的 pending_dir）。
         output_dir: 翻譯結果輸出目錄（與 translated_dir 二選一）。
@@ -247,14 +259,14 @@ def step2_translate_lm(
                 elif p > 1:
                     p = 1.0
                 self.parent.set_progress(self.base + p * self.span)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
         def set_status(self, msg: str):
             if self.parent and hasattr(self.parent, "set_status"):
                 try:
                     self.parent.set_status(msg)
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     proxy = _ProgressProxy(session, progress_base, progress_span)
@@ -270,10 +282,11 @@ def step2_translate_lm(
     if session and hasattr(session, "set_progress"):
         try:
             session.set_progress(progress_base + progress_span)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     return result
+
 
 def step3_inject(
     *,
@@ -283,9 +296,9 @@ def step3_inject(
     session=None,
     progress_base: float = 0.66,
     progress_span: float = 0.33,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """KubeJS Pipeline 步驟三：將翻譯後的 JSON 文字注入回 KubeJS 目錄。
-    
+
     Args:
         pack_or_kubejs_dir: Modpack 根目錄或 kubejs 目錄路徑。
         src_dir: 翻譯後的 JSON 檔案來源目錄。
@@ -299,7 +312,9 @@ def step3_inject(
     kubejs_dir = resolve_kubejs_root(pack_or_kubejs_dir)
     log_info(f"⚡[KubeJS] 步驟 3：開始注入翻譯 -> 目標目錄: {final_dir}")
 
-    from translation_tool.plugins.kubejs.kubejs_tooltip_inject import inject as kjs_inject
+    from translation_tool.plugins.kubejs.kubejs_tooltip_inject import (
+        inject as kjs_inject,
+    )
 
     return kjs_inject(
         str(kubejs_dir),
@@ -310,20 +325,21 @@ def step3_inject(
         progress_span=progress_span,
     )
 
+
 def run_kubejs_pipeline(
     *,
     input_dir: str,
-    output_dir: Optional[str],
+    output_dir: str | None,
     session=None,
     dry_run: bool = False,
     step_extract: bool = True,
     step_translate: bool = True,
     step_inject: bool = True,
-    translator_fn: Optional[Callable[..., Dict[str, Any]]] = None,
+    translator_fn: Callable[..., dict[str, Any]] | None = None,
     write_new_cache: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """KubeJS 翻譯全流程 Pipeline，包含提取、清理、翻譯、注入四個階段。
-    
+
     Args:
         input_dir: KubeJS 模組根目錄（亦可傳入 modpack 根目錄）。
         output_dir: 翻譯結果輸出根目錄（預設為 input_dir/Output）。
@@ -352,7 +368,7 @@ def run_kubejs_pipeline(
     if dry_run:
         log_info("🧪 [KubeJS] 注意：目前為 DRY-RUN 測試模式，不會執行實際動作")
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "paths": {
             "input": str(base),
             "raw": str(raw_dir),
@@ -384,11 +400,11 @@ def run_kubejs_pipeline(
                 data = orjson.loads(p.read_bytes())
                 if isinstance(data, dict):
                     total += len(data)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
         return total
 
-    def _log_kubejs_step2_stats(step2_res: Dict[str, Any]) -> None:
+    def _log_kubejs_step2_stats(step2_res: dict[str, Any]) -> None:
         if not isinstance(step2_res, dict):
             return
         if step2_res.get("skipped"):
@@ -429,7 +445,9 @@ def run_kubejs_pipeline(
             if api_translated is not None:
                 log_info("[KubeJS] API 翻譯: %s", api_translated)
             if records_json or records_csv:
-                log_info("[KubeJS] records: json=%s | csv=%s", records_json, records_csv)
+                log_info(
+                    "[KubeJS] records: json=%s | csv=%s", records_json, records_csv
+                )
         if est_batches is not None:
             log_info("[KubeJS] 預估批次：%s (batch_size=%s)", est_batches, batch_size)
         if avg_batch_sec:
@@ -450,10 +468,20 @@ def run_kubejs_pipeline(
                 f = row.get("file")
                 miss = row.get("cache_miss")
                 dst = row.get("dst")
-                f_batches = math.ceil(miss / batch_size) if isinstance(miss, int) and batch_size > 0 else None
+                f_batches = (
+                    math.ceil(miss / batch_size)
+                    if isinstance(miss, int) and batch_size > 0
+                    else None
+                )
                 if f_batches is None:
                     continue
-                log_info("[KubeJS] - %s | cache_miss=%s | batches=%s | dst=%s", f, miss, f_batches, dst)
+                log_info(
+                    "[KubeJS] - %s | cache_miss=%s | batches=%s | dst=%s",
+                    f,
+                    miss,
+                    f_batches,
+                    dst,
+                )
 
     pending_lang_keys = _count_pending_lang_keys(pending_dir)
     log_info(f"🧾 [KubeJS] 統計：共有 {pending_lang_keys} 個 Key 待翻譯")
@@ -502,7 +530,11 @@ def run_kubejs_pipeline(
             log_info("🧪 [KubeJS] 測試模式：跳過注入操作")
             result["step3"] = {"skipped": True, "reason": "dry_run"}
         else:
-            src_for_inject = translated_dir if translated_dir.exists() and any(translated_dir.rglob("*.json")) else pending_dir
+            src_for_inject = (
+                translated_dir
+                if translated_dir.exists() and any(translated_dir.rglob("*.json"))
+                else pending_dir
+            )
             log_info(f"💉 [KubeJS] 執行注入：來源為 {src_for_inject.name}")
             result["step3"] = step3_inject(
                 pack_or_kubejs_dir=str(base),
@@ -516,12 +548,16 @@ def run_kubejs_pipeline(
         log_info("⏭️ [KubeJS] 跳過步驟 3")
 
     duration = get_formatted_duration(start_time)
-    step2_summary = result.get("step2", {}) if isinstance(result.get("step2"), dict) else {}
+    step2_summary = (
+        result.get("step2", {}) if isinstance(result.get("step2"), dict) else {}
+    )
     if step2_summary:
         log_info("✅ [KubeJS] Step2 統計明細：")
         summary = dict(step2_summary)
         summary.pop("per_file", None)
-        log_info("%s", orjson.dumps(summary, option=orjson.OPT_INDENT_2).decode("utf-8"))
+        log_info(
+            "%s", orjson.dumps(summary, option=orjson.OPT_INDENT_2).decode("utf-8")
+        )
 
         if not summary.get("skipped"):
             total_keys = summary.get("total_keys")
@@ -529,7 +565,11 @@ def run_kubejs_pipeline(
             cache_miss = summary.get("cache_miss")
             files = summary.get("files", summary.get("written_files"))
             batch_size = _get_default_batch_size("kubejs", None)
-            est_batches = math.ceil(cache_miss / batch_size) if isinstance(cache_miss, int) and batch_size > 0 else None
+            est_batches = (
+                math.ceil(cache_miss / batch_size)
+                if isinstance(cache_miss, int) and batch_size > 0
+                else None
+            )
             log_info(
                 "\n🧾 [KubeJS] 摘要：📁 共 %s 個檔案、🔢 總計 %s 個 Key；✅ 快取命中 %s；🤖 需要 AI 翻譯 %s 條；🧮 預估批次 %s 次。",
                 files,
@@ -546,16 +586,17 @@ def run_kubejs_pipeline(
     progress(session, 0.999)
     return result
 
+
 __all__ = [
     "_is_filled_text",
-    "deep_merge_3way_flat",
-    "prune_en_by_tw_flat",
     "_read_json_dict_orjson",
     "_write_json_orjson",
     "clean_kubejs_from_raw",
+    "deep_merge_3way_flat",
+    "prune_en_by_tw_flat",
     "resolve_kubejs_root",
+    "run_kubejs_pipeline",
     "step1_extract_and_clean",
     "step2_translate_lm",
     "step3_inject",
-    "run_kubejs_pipeline",
 ]

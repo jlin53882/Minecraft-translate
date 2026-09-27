@@ -11,9 +11,9 @@ import flet as ft
 
 from app.services_impl.config_service import load_config_json
 from app.ui import theme
-from app.ui.ui_batcher import UiBatcher
 from app.ui.components import styled_card
 from app.ui.snack import show_snack
+from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from translation_tool.core.output_bundler import bundle_outputs_generator
 from translation_tool.utils.log_unit import log_debug
@@ -93,16 +93,24 @@ class BundlerView(ft.Column):
     def _load_output_zip_from_config(self):
         """從 config 載入 output_zip_name 並設定 hint_text"""
         config = load_config_json()
-        self._config_output_zip_name = config.get("output_bundler", {}).get("output_zip_name", "可使用翻譯.zip")
-        self.output_zip_field.hint_text = f"留空則自動帶入：{{root_dir}}\\{self._config_output_zip_name}"
+        self._config_output_zip_name = config.get("output_bundler", {}).get(
+            "output_zip_name", "可使用翻譯.zip"
+        )
+        self.output_zip_field.hint_text = (
+            f"留空則自動帶入：{{root_dir}}\\{self._config_output_zip_name}"
+        )
 
     def _on_root_dir_change(self, e: ft.ControlEvent):
         """當翻譯專案根目錄變更時，更新 output_zip_field 的 hint_text"""
         root_dir = self.root_dir_field.value or ""
         if root_dir and not self.output_zip_field.value:
-            self.output_zip_field.hint_text = f"留空則自動帶入：{root_dir}\\{self._config_output_zip_name}"
+            self.output_zip_field.hint_text = (
+                f"留空則自動帶入：{root_dir}\\{self._config_output_zip_name}"
+            )
         elif not self.output_zip_field.value:
-            self.output_zip_field.hint_text = f"留空則自動帶入：{{root_dir}}\\{self._config_output_zip_name}"
+            self.output_zip_field.hint_text = (
+                f"留空則自動帶入：{{root_dir}}\\{self._config_output_zip_name}"
+            )
 
     def _load_version_data(self):
         config_path = os.path.join(
@@ -115,7 +123,7 @@ class BundlerView(ft.Column):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     self.version_data = json.load(f)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 self.version_data = {}
         else:
             self.version_data = {}
@@ -125,7 +133,7 @@ class BundlerView(ft.Column):
 
     def _refresh_version_list(self, search_text: str):
         self.version_list.controls.clear()
-        filtered = [v for v in self.version_data.keys() if search_text.lower() in v.lower()]
+        filtered = [v for v in self.version_data if search_text.lower() in v.lower()]
         if not filtered:
             self.version_list.controls.append(
                 ft.Container(
@@ -156,7 +164,9 @@ class BundlerView(ft.Column):
         self.version_search.value = version
         self.version_expanded = False
         self._version_toggle_label.value = version
-        log_debug(f"_select_version: toggle_label={self._version_toggle_label.value}, expanded={self.version_expanded}")
+        log_debug(
+            f"_select_version: toggle_label={self._version_toggle_label.value}, expanded={self.version_expanded}"
+        )
         self._page.update()
 
     def _toggle_version_expand(self, e: ft.ControlEvent):
@@ -167,13 +177,22 @@ class BundlerView(ft.Column):
 
     def _build_controls(self):
         log_debug(f"_build_controls: version_expanded={self.version_expanded}")
-        self._version_toggle_label = ft.Text(self.version_search.value or "", size=12, color=theme.GREY_800, expand=True)
+        self._version_toggle_label = ft.Text(
+            self.version_search.value or "", size=12, color=theme.GREY_800, expand=True
+        )
         version_toggle = ft.Container(
-            content=ft.Row([
-                ft.Text("選擇版本", size=12, color=theme.GREY_600),
-                self._version_toggle_label,
-                ft.Icon(ft.Icons.EXPAND_MORE if self.version_expanded else ft.Icons.EXPAND_LESS, size=20),
-            ]),
+            content=ft.Row(
+                [
+                    ft.Text("選擇版本", size=12, color=theme.GREY_600),
+                    self._version_toggle_label,
+                    ft.Icon(
+                        ft.Icons.EXPAND_MORE
+                        if self.version_expanded
+                        else ft.Icons.EXPAND_LESS,
+                        size=20,
+                    ),
+                ]
+            ),
             on_click=self._toggle_version_expand,
             padding=8,
             border=ft.Border.all(1, theme.OUTLINE),
@@ -188,33 +207,45 @@ class BundlerView(ft.Column):
             visible=False,
         )
         self.version_dropdown_container_ref = version_dropdown_container
-        version_section = ft.Column([
-            version_toggle,
-            version_dropdown_container,
-        ], spacing=4)
+        version_section = ft.Column(
+            [
+                version_toggle,
+                version_dropdown_container,
+            ],
+            spacing=4,
+        )
         self._version_section = version_section
 
         description_row = ft.Row(
             [
                 ft.Container(
-                    content=ft.Column([
-                        ft.Text("檔案敘述", size=12, color=theme.GREY_600),
-                        self.description_field,
-                    ], spacing=4),
+                    content=ft.Column(
+                        [
+                            ft.Text("檔案敘述", size=12, color=theme.GREY_600),
+                            self.description_field,
+                        ],
+                        spacing=4,
+                    ),
                     expand=True,
                 ),
                 ft.Container(
-                    content=ft.Column([
-                        ft.Text("資源包圖片", size=12, color=theme.GREY_600),
-                        ft.Row([
-                            self.pack_image_field,
-                            ft.IconButton(
-                                icon=ft.Icons.IMAGE_SEARCH,
-                                tooltip="選擇圖片",
-                                on_click=self._pick_pack_image,
+                    content=ft.Column(
+                        [
+                            ft.Text("資源包圖片", size=12, color=theme.GREY_600),
+                            ft.Row(
+                                [
+                                    self.pack_image_field,
+                                    ft.IconButton(
+                                        icon=ft.Icons.IMAGE_SEARCH,
+                                        tooltip="選擇圖片",
+                                        on_click=self._pick_pack_image,
+                                    ),
+                                ],
+                                spacing=6,
                             ),
-                        ], spacing=6),
-                    ], spacing=4),
+                        ],
+                        spacing=4,
+                    ),
                     expand=True,
                 ),
             ],
@@ -247,17 +278,22 @@ class BundlerView(ft.Column):
 
         extra_folder_section = ft.Column(
             [
-                ft.Row([
-                    ft.Text("其他指定資料夾", size=13, weight=ft.FontWeight.W_500),
-                    ft.IconButton(
-                        icon=ft.Icons.ADD,
-                        icon_size=20,
-                        tooltip="新增資料夾",
-                        on_click=self._pick_extra_folder,
-                    ),
-                ], spacing=8),
+                ft.Row(
+                    [
+                        ft.Text("其他指定資料夾", size=13, weight=ft.FontWeight.W_500),
+                        ft.IconButton(
+                            icon=ft.Icons.ADD,
+                            icon_size=20,
+                            tooltip="新增資料夾",
+                            on_click=self._pick_extra_folder,
+                        ),
+                    ],
+                    spacing=8,
+                ),
                 self.extra_folders_view,
-                ft.Text("從選擇資料夾的下一層開始打包進 ZIP", size=11, color=theme.GREY_500),
+                ft.Text(
+                    "從選擇資料夾的下一層開始打包進 ZIP", size=11, color=theme.GREY_500
+                ),
             ],
             spacing=8,
         )
@@ -281,15 +317,18 @@ class BundlerView(ft.Column):
             styled_card(
                 title="打包設定",
                 icon=ft.Icons.ARCHIVE,
-                content=ft.Column([
-                    version_section,
-                    description_row,
-                    root_dir_row,
-                    output_zip_row,
-                    extra_folder_section,
-                    start_button,
-                    self.progress_bar,
-                ], spacing=12),
+                content=ft.Column(
+                    [
+                        version_section,
+                        description_row,
+                        root_dir_row,
+                        output_zip_row,
+                        extra_folder_section,
+                        start_button,
+                        self.progress_bar,
+                    ],
+                    spacing=12,
+                ),
             ),
             styled_card(
                 title="打包日誌",
@@ -320,10 +359,12 @@ class BundlerView(ft.Column):
         self._page.run_task(self._async_pick_root_dir)
 
     async def _async_pick_root_dir(self):
-        result = await self.file_picker.get_directory_path(dialog_title="選擇翻譯專案根目錄")
+        result = await self.file_picker.get_directory_path(
+            dialog_title="選擇翻譯專案根目錄"
+        )
         log_debug(f"_async_pick_root_dir result: {result}")
         if result:
-            path = result[0].path if hasattr(result[0], 'path') else result
+            path = result[0].path if hasattr(result[0], "path") else result
             self.root_dir_field.value = path
             self._page.update()
 
@@ -367,7 +408,9 @@ class BundlerView(ft.Column):
                 ft.Row(
                     [
                         ft.Icon(icon, size=16, color=theme.BLUE_GREY_500),
-                        ft.Text(path, expand=True, size=13, text_align=ft.TextAlign.START),
+                        ft.Text(
+                            path, expand=True, size=13, text_align=ft.TextAlign.START
+                        ),
                         ft.IconButton(
                             icon=ft.Icons.CLOSE,
                             icon_size=16,
@@ -384,7 +427,6 @@ class BundlerView(ft.Column):
             self.extra_folders.remove(path)
             self._refresh_extra_folders()
             self._page.update()
-
 
     def start_bundling_clicked(self, e: ft.ControlEvent):
         if self._bundling_running:

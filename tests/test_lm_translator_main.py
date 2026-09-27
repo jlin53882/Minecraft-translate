@@ -13,7 +13,7 @@ class TestTranslateBatchSmart:
     @patch("translation_tool.core.lm_translator_main.load_config")
     @patch("translation_tool.core.lm_translator_main.get_current_api_key")
     @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
-    @patch("translation_tool.core.lm_translator_main.time.sleep")
+    @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_translate_batch_smart_lang_success(
         self, mock_sleep, mock_call_api, mock_get_key, mock_config, mock_json_loads
     ):
@@ -38,7 +38,7 @@ class TestTranslateBatchSmart:
 
         items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
 
-        result, status = translate_batch_smart(items, 1)
+        _result, status = translate_batch_smart(items, 1)
 
         assert status in ["AUTO", "PARTIAL", "FAILED"]
         # 成功時 API 應該被調用一次
@@ -48,7 +48,7 @@ class TestTranslateBatchSmart:
     @patch("translation_tool.core.lm_translator_main.load_config")
     @patch("translation_tool.core.lm_translator_main.get_current_api_key")
     @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
-    @patch("translation_tool.core.lm_translator_main.time.sleep")
+    @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_translate_batch_smart_empty_batch(
         self, mock_sleep, mock_call_api, mock_get_key, mock_config, mock_json_loads
     ):
@@ -73,7 +73,7 @@ class TestTranslateBatchSmart:
     @patch("translation_tool.core.lm_translator_main.load_config")
     @patch("translation_tool.core.lm_translator_main.get_current_api_key")
     @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
-    @patch("translation_tool.core.lm_translator_main.time.sleep")
+    @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_translate_batch_smart_api_error_with_retry(
         self, mock_sleep, mock_call_api, mock_get_key, mock_config, mock_json_loads
     ):
@@ -90,7 +90,7 @@ class TestTranslateBatchSmart:
         mock_call_api.return_value = ""  # 空回應觸發重試
 
         items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
-        result, status = translate_batch_smart(items, 1)
+        _result, status = translate_batch_smart(items, 1)
 
         assert status in ["AUTO", "PARTIAL", "FAILED"]
         # 驗證 sleep 被調用（重試時會 sleep）
@@ -108,12 +108,13 @@ class TestSystemPromptConversion:
     @patch("translation_tool.core.lm_api_client.requests.post")
     @patch("translation_tool.core.lm_translator_main.load_config")
     @patch("translation_tool.core.lm_translator_main.get_current_api_key")
-    @patch("translation_tool.core.lm_translator_main.time.sleep")
+    @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_lang_prompt_dict_converted_to_string(
         self, mock_sleep, mock_get_key, mock_config, mock_post
     ):
         """測試 lang_system_prompt 為 dict 時會被轉為 string。"""
         from unittest.mock import Mock
+
         from translation_tool.core.lm_translator_main import translate_batch_smart
 
         mock_response = Mock()
@@ -147,7 +148,7 @@ class TestSystemPromptConversion:
 
         items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
 
-        result, status = translate_batch_smart(items, 1)
+        _result, _status = translate_batch_smart(items, 1)
 
         assert mock_post.call_count >= 1, "API 應該被調用至少一次"
         call_kwargs = mock_post.call_args.kwargs
@@ -161,12 +162,13 @@ class TestSystemPromptConversion:
     @patch("translation_tool.core.lm_api_client.requests.post")
     @patch("translation_tool.core.lm_translator_main.load_config")
     @patch("translation_tool.core.lm_translator_main.get_current_api_key")
-    @patch("translation_tool.core.lm_translator_main.time.sleep")
+    @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_prompt_already_string_unchanged(
         self, mock_sleep, mock_get_key, mock_config, mock_post
     ):
         """測試 system_prompt 原本就是 string 時，內容保持不變。"""
         from unittest.mock import Mock
+
         from translation_tool.core.lm_translator_main import translate_batch_smart
 
         prompt_text = "你是一個專業的 Minecraft 翻譯員"
@@ -199,7 +201,7 @@ class TestSystemPromptConversion:
 
         items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
 
-        result, status = translate_batch_smart(items, 1)
+        _result, _status = translate_batch_smart(items, 1)
 
         assert mock_post.call_count >= 1, "API 應該被調用至少一次"
         call_kwargs = mock_post.call_args.kwargs
@@ -216,7 +218,7 @@ class TestBatchProfileDetection:
     @patch("translation_tool.core.lm_translator_main.load_config")
     @patch("translation_tool.core.lm_translator_main.get_current_api_key")
     @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
-    @patch("translation_tool.core.lm_translator_main.time.sleep")
+    @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_detect_batch_profile_lang(
         self, mock_sleep, mock_call_api, mock_get_key, mock_config, mock_json_loads
     ):
@@ -239,6 +241,6 @@ class TestBatchProfileDetection:
             {"path": f"key.{i}", "text": f"text{i}", "cache_type": "lang"}
             for i in range(10)
         ]
-        result, status = translate_batch_smart(items, 1)
+        _result, status = translate_batch_smart(items, 1)
 
         assert status in ["AUTO", "PARTIAL", "FAILED"]

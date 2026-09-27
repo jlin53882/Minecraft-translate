@@ -21,10 +21,10 @@ if str(ROOT) not in sys.path:
 
 from translation_tool.utils.text_processor import apply_replace_rules
 
-
 # =============================================================================
 # ATK-003 / Gap 2：執行緒隔離測試
 # =============================================================================
+
 
 def test_two_threads_different_rules_isolation():
     """
@@ -80,8 +80,7 @@ def test_ten_threads_concurrent_rules_initialization():
 
     # 10 個不同的 label → rule 對應表
     labels_and_rules = [
-        (f"T{i}", [{"from": "hello", "to": f"HI_{i:02d}"}])
-        for i in range(10)
+        (f"T{i}", [{"from": "hello", "to": f"HI_{i:02d}"}]) for i in range(10)
     ]
 
     def worker(label: str, rules):
@@ -107,10 +106,7 @@ def test_ten_threads_concurrent_rules_initialization():
         if actual != expected:
             all_pass = False
 
-    assert all_pass, (
-        "至少有一個執行緒的結果不符合預期。"
-        f" 結果：{results}"
-    )
+    assert all_pass, f"至少有一個執行緒的結果不符合預期。 結果：{results}"
 
 
 def test_thread_isolation_with_complex_rules():

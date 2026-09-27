@@ -2,6 +2,7 @@
 # 提供髒標記 + 批次更新機制
 
 import flet as ft
+
 from app.ui.debounce import Debouncer
 from translation_tool.utils.log_unit import log_error
 
@@ -44,7 +45,7 @@ class CacheViewOptimized(ft.Column):
         except (AttributeError, AssertionError):
             # 控件尚未添加到 page，略過
             pass
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log_error(f"[CacheViewOptimized] 更新失敗: {e}")
 
     def _render_dirty_areas(self):
@@ -58,12 +59,9 @@ class CacheViewOptimized(ft.Column):
 
     def _render_overview(self):
         """渲染總覽區域"""
-        pass
 
     def _render_query_results(self):
         """渲染搜尋結果"""
-        pass
 
     def _render_shard_results(self):
         """渲染分片結果"""
-        pass

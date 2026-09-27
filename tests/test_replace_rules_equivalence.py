@@ -44,5 +44,10 @@ def test_randomized_equivalence_with_sequential_replace():
             dst = "".join(random.choice(alphabet) for _ in range(random.randint(0, 4)))
             rules.append({"from": src, "to": dst})
         for _ in range(10):
-            text = "".join(random.choice(alphabet) for _ in range(random.randint(0, 20)))
-            assert apply_replace_rules(text, rules) == _naive(text, rules), (text, rules)
+            text = "".join(
+                random.choice(alphabet) for _ in range(random.randint(0, 20))
+            )
+            assert apply_replace_rules(text, rules) == _naive(text, rules), (
+                text,
+                rules,
+            )

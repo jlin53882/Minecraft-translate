@@ -9,8 +9,7 @@ import threading
 from typing import Any
 
 from ..utils.config_manager import load_config, load_config_shared
-from ..utils.log_unit import log_info, log_error, log_debug
-
+from ..utils.log_unit import log_debug, log_error, log_info
 
 # =========================
 # 1. 執行緒安全的 API Key 索引追蹤器
@@ -271,7 +270,7 @@ HASH_PREFIX_PATTERN = re.compile(r"^\s*#")  # 任何 # 開頭（含前置空白�
 
 
 def needs_translation_text(s: str) -> bool:
-    """ """
+    """判斷文字是否仍需翻譯（非空、非中文、非純數字、非 § / $( token）。"""
     if not s or not isinstance(s, str):
         return False
 
@@ -283,12 +282,8 @@ def needs_translation_text(s: str) -> bool:
     if s.strip().isdigit():
         return False
 
-    # 常見不該翻的 token
-    if s.startswith("§") or s.startswith("$("):
-        return False
-
-    # 還有英文 → 需要翻
-    return True
+    # 常見不該翻的 token；其餘（還有英文）→ 需要翻
+    return not s.startswith(("§", "$("))
 
 
 def value_fully_translated(value) -> bool:
@@ -466,7 +461,7 @@ def _translator_rules() -> tuple[re.Pattern, tuple[str, ...], int]:
 
 
 def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
-    """ """
+    """判斷值是否應送翻譯（排除中文、token、技術 ID、短字串、skip_terms 等）。"""
     if not isinstance(value, str):
         return False
 
@@ -514,10 +509,7 @@ def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
         return False
 
     # 避開純數字
-    if is_lang and DIGIT_PATTERN.fullmatch(s):
-        return False
-
-    return True
+    return not (is_lang and DIGIT_PATTERN.fullmatch(s))
 
 
 # =========================

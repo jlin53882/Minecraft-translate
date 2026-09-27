@@ -8,12 +8,14 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from . import cache_shards, cache_store
 from .cache_loader import load_cache_type
 from .cache_overview import (
     build_cache_overview,
+)
+from .cache_overview import (
     get_active_shard_id as _get_active_shard_id_impl,
 )
 from .cache_search_facade import CacheSearchFacade
@@ -30,28 +32,28 @@ _search_facade: CacheSearchFacade | None = None
 _search_facade_lock = threading.Lock()
 
 __all__ = [
+    "ACTIVE_SHARD_FILE",
     "CACHE_TYPES",
     "ROLLING_SHARD_SIZE",
-    "ACTIVE_SHARD_FILE",
+    "add_to_cache",
+    "add_to_cache_batch",
+    "find_similar_translations",
+    "force_rotate_shard",
+    "get_active_shard_id",
+    "get_cache_dict_ref",
+    "get_cache_entry",
+    "get_cache_overview",
+    "get_from_cache",
+    "get_search_engine",
+    "get_session_new_count",
     "initialize_translation_cache",
     "is_cache_initialized",
+    "rebuild_search_index",
+    "rebuild_search_index_for_type",
     "reload_translation_cache",
     "reload_translation_cache_type",
     "save_translation_cache",
-    "add_to_cache",
-    "add_to_cache_batch",
-    "get_from_cache",
-    "get_cache_entry",
-    "get_cache_dict_ref",
-    "get_cache_overview",
-    "get_session_new_count",
-    "get_active_shard_id",
-    "force_rotate_shard",
-    "get_search_engine",
-    "rebuild_search_index",
-    "rebuild_search_index_for_type",
     "search_cache",
-    "find_similar_translations",
 ]
 
 
@@ -92,7 +94,7 @@ def initialize_translation_cache():
                 _load_cache_type(cache_type)
             state.initialized = True
         except Exception as e:
-            log.error(f"快取系統初始化失敗: {e}", exc_info=True)
+            log.error(f"快取系統初始化失敗: {e}", exc_info=True)  # noqa: G201
 
 
 def is_cache_initialized() -> bool:
@@ -178,7 +180,7 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
         )
         cache_store.clear_dirty(state.is_dirty, cache_type)
     except Exception as e:
-        log.error(f"❌ 儲存 {cache_type} 失敗: {e}", exc_info=True)
+        log.error(f"❌ 儲存 {cache_type} 失敗: {e}", exc_info=True)  # noqa: G201
 
 
 def _get_active_shard_path(cache_type: str) -> Path:
@@ -224,10 +226,10 @@ def add_to_cache(
 
 def add_to_cache_batch(
     cache_type: str,
-    entries: List[Tuple[str, str, str]],
+    entries: list[tuple[str, str, str]],
     *,
-    mods: Optional[List[Optional[str]]] = None,
-    paths: Optional[List[Optional[str]]] = None,
+    mods: list[str | None] | None = None,
+    paths: list[str | None] | None = None,
 ):
     """批次新增翻譯到快取（單次鎖獲取，減少鎖競爭）。
 
@@ -265,7 +267,7 @@ def add_to_cache_batch(
             cache_store.mark_dirty(state.is_dirty, cache_type)
 
 
-def get_from_cache(cache_type: str, key: str) -> Optional[str]:
+def get_from_cache(cache_type: str, key: str) -> str | None:
     """從快取取得指定 key 的翻譯文字 (dst)。"""
     state = _state()
     if not state.initialized:
@@ -276,7 +278,7 @@ def get_from_cache(cache_type: str, key: str) -> Optional[str]:
     return cache_store.get_value(cache, key)
 
 
-def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
+def get_cache_entry(cache_type: str, key: str) -> dict[str, Any] | None:
     """取得指定 key 的完整快取項目（包含 src、dst、mod、path）。"""
     state = _state()
     if not state.initialized:
@@ -287,7 +289,7 @@ def get_cache_entry(cache_type: str, key: str) -> Optional[Dict[str, Any]]:
     return cache_store.get_entry(cache, key)
 
 
-def get_cache_dict_ref(cache_type: str) -> Dict[str, Dict[str, Any]]:
+def get_cache_dict_ref(cache_type: str) -> dict[str, dict[str, Any]]:
     """取得指定類型的快取字典參照。"""
     state = _state()
     if not state.initialized:
@@ -313,7 +315,7 @@ def get_active_shard_id(cache_type: str) -> str:
     )
 
 
-def get_cache_overview() -> Dict[str, Any]:
+def get_cache_overview() -> dict[str, Any]:
     """取得所有快取類型的概覽（包含項目數與狀態）"""
     initialize_translation_cache()
     state = _state()
@@ -348,7 +350,7 @@ def force_rotate_shard(cache_type: str) -> bool:
             cur = int((active_file.read_text(encoding="utf-8") or "1").strip())
             active_file.write_text(f"{cur + 1:05d}", encoding="utf-8")
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -389,7 +391,7 @@ def rebuild_search_index_for_type(cache_type: str):
 
 
 def search_cache(
-    query: str, cache_type: str = None, limit: int = 50, use_fuzzy: bool = True
+    query: str, cache_type: str | None = None, limit: int = 50, use_fuzzy: bool = True
 ) -> list:
     """搜尋快取中符合查詢字的翻譯"""
     return _get_search_facade().search_cache(
@@ -398,7 +400,7 @@ def search_cache(
 
 
 def find_similar_translations(
-    text: str, cache_type: str = None, threshold: float = 0.6, limit: int = 20
+    text: str, cache_type: str | None = None, threshold: float = 0.6, limit: int = 20
 ) -> list:
     """使用模糊比對找出相似的翻譯"""
     return _get_search_facade().find_similar_translations(

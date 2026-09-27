@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Dict, Callable
+from typing import Any
 
 from translation_tool.utils.log_unit import log_warning
 
@@ -30,7 +31,7 @@ def step1_extract_impl(
     build_pending_json_fn,
     progress_fn: Callable[[Any, float], None],
     log_warning_fn: Callable[..., None],
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     第一步實作：掃描 Markdown 資料夾，依 lang_mode 過濾並抽取可翻譯區塊，將結果寫入待翻譯 JSON。
     若為 non_cjk_only 模式，會比對同義的 zh_tw 檔案以過濾已譯內容；支援去重複（相同 hash 只留一份）。
@@ -63,7 +64,9 @@ def step1_extract_impl(
             "unique_blocks": 0,
             "duplicate_blocks": 0,
         }
-        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         progress_fn(session, progress_base + progress_span)
         return {
             "input_root": str(in_root),
@@ -98,7 +101,9 @@ def step1_extract_impl(
             rel_parts = rel_md.replace("\\", "/").split("/")
             lang = detect_lang_segment_fn(rel_parts)
             if lang == "en_us":
-                rel_zh = map_rel_lang_path_fn(rel_md, src_lang="en_us", dst_lang="zh_tw")
+                rel_zh = map_rel_lang_path_fn(
+                    rel_md, src_lang="en_us", dst_lang="zh_tw"
+                )
                 zh_path = in_root / rel_zh
                 if zh_path.exists() and zh_path.is_file():
                     try:
@@ -114,7 +119,12 @@ def step1_extract_impl(
                             filtered.append(en_it)
                         items = filtered
                     else:
-                        log_warning_fn("[MD-抽取] 區塊數不一致，保留全部：%s (en=%s zh=%s)", rel_md, len(items), len(zh_items))
+                        log_warning_fn(
+                            "[MD-抽取] 區塊數不一致，保留全部：%s (en=%s zh=%s)",
+                            rel_md,
+                            len(items),
+                            len(zh_items),
+                        )
 
         total_blocks += len(items)
         for it in items:
@@ -130,7 +140,9 @@ def step1_extract_impl(
             out_json_path = pending_root / (rel_md + ".json")
             out_json_path.parent.mkdir(parents=True, exist_ok=True)
             payload = build_pending_json_fn(rel_md, md_path, items, lang_mode)
-            out_json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            out_json_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             json_written += 1
 
         progress_fn(session, progress_base + progress_span * (i / max(1, total_files)))
@@ -148,7 +160,9 @@ def step1_extract_impl(
         "unique_blocks": unique_blocks,
         "duplicate_blocks": dup_blocks,
     }
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     return {
         "input_root": str(in_root),
@@ -174,8 +188,8 @@ def step2_translate_impl(
     write_new_cache: bool,
     progress_proxy_cls,
     translate_md_pending_fn,
-    progress_fn
-) -> Dict[str, Any]:
+    progress_fn,
+) -> dict[str, Any]:
     """
     Step 2：翻譯待翻譯的 JSON 檔案。
 
@@ -220,8 +234,8 @@ def step3_inject_impl(
     load_items_from_json_fn,
     apply_item_to_md_lines_fn,
     map_lang_in_rel_path_allow_zh_fn,
-    progress_fn
-) -> Dict[str, Any]:
+    progress_fn,
+) -> dict[str, Any]:
     """
     Step 3：將翻譯結果注入回 Markdown 檔案。
 
@@ -275,7 +289,7 @@ def step3_inject_impl(
     for idx, jp in enumerate(json_files, start=1):
         try:
             source_md, items = load_items_from_json_fn(jp)
-        except Exception:
+        except Exception:  # noqa: BLE001
             skipped += 1
             error_files += 1
             progress_fn(session, progress_base + progress_span * (idx / max(1, total)))
@@ -299,7 +313,9 @@ def step3_inject_impl(
         for it in items:
             apply_item_to_md_lines_fn(md_lines, it)
 
-        out_rel, status = map_lang_in_rel_path_allow_zh_fn(source_md, src_lang="en_us", dst_lang="zh_tw")
+        out_rel, status = map_lang_in_rel_path_allow_zh_fn(
+            source_md, src_lang="en_us", dst_lang="zh_tw"
+        )
         if status not in ("SRC_EN", "SRC_ZH"):
             skipped += 1
             skipped_lang_status += 1

@@ -6,22 +6,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple, Any
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
-from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
-from translation_tool.utils.log_unit import log_info
-from translation_tool.utils.cache_manager import (
-    add_to_cache,
-    save_translation_cache,
-    reload_translation_cache,
-)
-from translation_tool.utils.config_manager import load_config
 from translation_tool.core.lm_translator_shared_cache import (
     CacheRule,
     get_default_cache_rules,
 )
+from translation_tool.utils.cache_manager import (
+    add_to_cache,
+    reload_translation_cache,
+    save_translation_cache,
+)
+from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
+from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_info
 
 
 @dataclass
@@ -34,11 +35,11 @@ class TranslateLoopResult:
     completed_calls: int
     elapsed_sec: float
     exhausted: bool
-    last_error: Optional[str] = None
+    last_error: str | None = None
 
 
 def _get_default_batch_size(
-    cache_type: str, batch_size_by_type: Optional[Dict[str, int]]
+    cache_type: str, batch_size_by_type: dict[str, int] | None
 ) -> int:
     """根據 cache type 從設定檔查詢對應的批次大小，若未設定則回傳該類型的預設值。"""
     if batch_size_by_type and cache_type in batch_size_by_type:
@@ -59,20 +60,20 @@ def _get_default_batch_size(
 
 
 def translate_items_with_cache_loop(
-    items_to_translate: List[Dict[str, Any]],
+    items_to_translate: list[dict[str, Any]],
     *,
-    total_for_smart: Optional[int] = None,
+    total_for_smart: int | None = None,
     translate_batch_smart: Callable[
-        [List[Dict[str, Any]], Optional[int]],
-        Tuple[Optional[List[Dict[str, Any]]], str],
+        [list[dict[str, Any]], int | None],
+        tuple[list[dict[str, Any]] | None, str],
     ],
-    batch_size_by_type: Optional[Dict[str, int]] = None,
+    batch_size_by_type: dict[str, int] | None = None,
     write_new_cache: bool = True,
-    on_translated_item: Optional[Callable[[Dict[str, Any]], None]] = None,
-    on_batch_flushed: Optional[Callable[[], None]] = None,
-    on_progress: Optional[Callable[[float, str, float], None]] = None,
-    cache_rules: Optional[Dict[str, CacheRule]] = None,
-    sleep_seconds_between_batches: Optional[float] = None,
+    on_translated_item: Callable[[dict[str, Any]], None] | None = None,
+    on_batch_flushed: Callable[[], None] | None = None,
+    on_progress: Callable[[float, str, float], None] | None = None,
+    cache_rules: dict[str, CacheRule] | None = None,
+    sleep_seconds_between_batches: float | None = None,
 ) -> TranslateLoopResult:
     """執行翻譯主迴圈，分批呼叫翻譯 API、寫入快取、回報進度與 ETA，支援中斷與額度耗盡處理。"""
     if cache_rules is None:
@@ -80,9 +81,12 @@ def translate_items_with_cache_loop(
 
     # 如果未指定 sleep_seconds_between_batches，從 config 讀取
     if sleep_seconds_between_batches is None:
-        sleep_seconds_between_batches = load_config().get("lm_translator", {}).get(
-            "rate_limit", {}
-        ).get("sleep_seconds_between_batches", 0.0)
+        sleep_seconds_between_batches = (
+            load_config()
+            .get("lm_translator", {})
+            .get("rate_limit", {})
+            .get("sleep_seconds_between_batches", 0.0)
+        )
 
     reload_translation_cache()
     log_info("[Translator Gen]: 重新載入快取完成")
@@ -93,10 +97,10 @@ def translate_items_with_cache_loop(
         if isinstance(total_for_smart, int) and total_for_smart > 0
         else len(items_to_translate)
     )
-    remaining: List[Dict[str, Any]] = list(items_to_translate)
+    remaining: list[dict[str, Any]] = list(items_to_translate)
     processed = 0
     completed_calls = 0
-    last_error: Optional[str] = None
+    last_error: str | None = None
     exhausted = False
 
     def emit_progress(msg: str) -> None:
@@ -111,13 +115,15 @@ def translate_items_with_cache_loop(
             else:
                 eta_sec = 0.0
             on_progress(progress, msg, eta_sec)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log_info(f"[SharedLM] 進度回報失敗: {e}")
 
     emit_progress("🚀 [SharedLM] 準備開始翻譯工作...")
 
     def cancelled_result() -> TranslateLoopResult:
-        emit_progress(f"⏹ 已取消翻譯，剩餘 {len(remaining)} 筆未翻譯（已完成的批次已寫入快取）")
+        emit_progress(
+            f"⏹ 已取消翻譯，剩餘 {len(remaining)} 筆未翻譯（已完成的批次已寫入快取）"
+        )
         return TranslateLoopResult(
             status="CANCELLED",
             processed=processed,
@@ -144,7 +150,7 @@ def translate_items_with_cache_loop(
         except TaskCancelled:
             # 等待 API 限流時被取消
             return cancelled_result()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             last_error = str(e)
             emit_progress(f"❌ [SharedLM] 翻譯發生異常: {e}")
             return TranslateLoopResult(
@@ -181,27 +187,27 @@ def translate_items_with_cache_loop(
             if on_translated_item is not None:
                 try:
                     on_translated_item(it)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     log_info(f"[SharedLM] 處理翻譯結果失敗: {e}")
 
             rule = cache_rules.get(ctype) or CacheRule("path|source_text")
             cache_key = rule.make_key({"path": pth, "source_text": src})
             try:
                 add_to_cache(ctype, cache_key, src, txt)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log_info(f"[SharedLM] 新增快取失敗: {e}")
 
         remaining = remaining[actual_processed_in_this_batch:]
 
         try:
             save_translation_cache(cache_type, write_new_shard=write_new_cache)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log_info(f"[SharedLM] 儲存快取失敗: {e}")
 
         if on_batch_flushed is not None:
             try:
                 on_batch_flushed()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log_info(f"[SharedLM] 批次刷新回調失敗: {e}")
 
         emit_progress(

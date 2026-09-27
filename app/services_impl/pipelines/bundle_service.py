@@ -97,7 +97,7 @@ def run_bundling_service(
             filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
             if filtered is not None:
                 yield filtered
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] 打包服務失敗：{e}\n{full_traceback}")
         yield {

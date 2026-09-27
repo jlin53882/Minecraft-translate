@@ -14,10 +14,10 @@ from app.services_impl.logging_service import (
     UI_LOG_HANDLER,
 )
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
-from translation_tool.utils.cancellation import cancel_scope
 from translation_tool.core.lm_translator import (
     translate_directory_generator as lm_translate_gen,
 )
+from translation_tool.utils.cancellation import cancel_scope
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def run_lm_translation_service(
                 if filtered is None:
                     continue
 
-                if "log" in filtered and filtered["log"]:
+                if filtered.get("log"):
                     session.add_log(filtered["log"])
 
                 if "progress" in filtered and filtered["progress"] is not None:
@@ -82,7 +82,7 @@ def run_lm_translation_service(
 
         session.finish()
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"LM 服務失敗: {e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] LM 翻譯服務失敗：{e}\n{full_traceback}")
