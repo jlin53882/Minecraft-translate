@@ -40,9 +40,152 @@ def get_converter():
 # replace rules 快取（執行緒安全）
 # =========================
 _RULES_CACHE_LOCK = threading.Lock()
-# id(規則清單) → (規則清單本身, 長度, 編譯結果)；保留清單參考避免 id 被重用
-_RULES_CACHE: dict[int, tuple[list, int, "_CompiledRules"]] = {}
+# id(規則清單) → (規則清單本身, 內容簽章, 編譯結果)；保留清單參考避免 id 被重用
+_RULES_CACHE: dict[int, tuple[list, Any, "_CompiledRules"]] = {}
 _RULES_CACHE_MAX = 4
+
+
+class _TrackedRule(dict):
+    """會在被修改時通知所屬 ReplaceRules 的規則 dict（其餘行為與 dict 相同）。"""
+
+    __slots__ = ("_owner",)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._owner = None
+
+    def _bump(self):
+        if self._owner is not None:
+            self._owner._bump()
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        self._bump()
+
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        self._bump()
+
+    def __ior__(self, other):
+        result = super().__ior__(other)
+        self._bump()
+        return result
+
+    def clear(self):
+        super().clear()
+        self._bump()
+
+    def pop(self, *args):
+        result = super().pop(*args)
+        self._bump()
+        return result
+
+    def popitem(self):
+        result = super().popitem()
+        self._bump()
+        return result
+
+    def setdefault(self, key, default=None):
+        result = super().setdefault(key, default)
+        self._bump()
+        return result
+
+    def update(self, *args, **kwargs):
+        super().update(*args, **kwargs)
+        self._bump()
+
+
+class ReplaceRules(list):
+    """load_replace_rules 回傳的規則清單：任何修改（含規則 dict 就地修改）都會遞增 revision。
+
+    apply_replace_rules 以 (清單, revision) 判斷編譯快取是否仍有效，O(1)，
+    3 萬條規則逐段文字套用時不必每次都比對整份規則內容。
+    """
+
+    def __init__(self, iterable=()):
+        super().__init__(self._adopt(r) for r in iterable)
+        self.revision = 0
+
+    def _adopt(self, rule):
+        if isinstance(rule, dict) and not isinstance(rule, _TrackedRule):
+            rule = _TrackedRule(rule)
+        if isinstance(rule, _TrackedRule):
+            rule._owner = self
+        return rule
+
+    def _bump(self):
+        self.revision += 1
+
+    def __setitem__(self, index, value):
+        if isinstance(index, slice):
+            value = [self._adopt(v) for v in value]
+        else:
+            value = self._adopt(value)
+        super().__setitem__(index, value)
+        self._bump()
+
+    def __delitem__(self, index):
+        super().__delitem__(index)
+        self._bump()
+
+    def __iadd__(self, other):
+        self.extend(other)
+        return self
+
+    def __imul__(self, n):
+        result = super().__imul__(n)
+        self._bump()
+        return result
+
+    def append(self, rule):
+        super().append(self._adopt(rule))
+        self._bump()
+
+    def extend(self, rules):
+        super().extend(self._adopt(r) for r in rules)
+        self._bump()
+
+    def insert(self, index, rule):
+        super().insert(index, self._adopt(rule))
+        self._bump()
+
+    def pop(self, *args):
+        result = super().pop(*args)
+        self._bump()
+        return result
+
+    def remove(self, rule):
+        super().remove(rule)
+        self._bump()
+
+    def clear(self):
+        super().clear()
+        self._bump()
+
+    def sort(self, *args, **kwargs):
+        super().sort(*args, **kwargs)
+        self._bump()
+
+    def reverse(self):
+        super().reverse()
+        self._bump()
+
+
+def _rules_signature(rules: List[Dict[str, str]]):
+    """編譯快取的內容簽章。
+
+    ReplaceRules：revision（O(1)）。其他清單：逐條 (from, to)，
+    正確但為 O(規則數)，大量規則請使用 load_replace_rules 回傳的清單。
+    """
+    if isinstance(rules, ReplaceRules):
+        return ("revision", rules.revision)
+    return (
+        "content",
+        tuple(
+            (rule.get("from"), rule.get("to")) if isinstance(rule, dict) else None
+            for rule in rules
+        ),
+    )
 
 
 class _CompiledRules:
@@ -149,18 +292,20 @@ class _CompiledRules:
 def _get_compiled_rules(rules: List[Dict[str, str]]) -> _CompiledRules:
     """依規則清單取得（或建立）編譯好的規則。
 
-    以清單物件本身與長度判斷：規則變更後重新載入（新清單）或就地增刪時
-    都會自動重建（舊版每個執行緒只建立一次，之後規則改了也不會生效）。
+    以清單物件與內容簽章判斷：新清單、增刪、以及就地修改 from / to 都會重建
+    （舊版每個執行緒只建立一次；之後改成 id + 長度，仍漏掉同長度的就地修改）。
     不同執行緒使用不同規則清單時各自取得對應結果，互不污染。
     """
+    signature = _rules_signature(rules)
     entry = _RULES_CACHE.get(id(rules))
-    if entry is not None and entry[0] is rules and entry[1] == len(rules):
+    if entry is not None and entry[0] is rules and entry[1] == signature:
         return entry[2]
     compiled = _CompiledRules(rules)
     with _RULES_CACHE_LOCK:
+        _RULES_CACHE.pop(id(rules), None)
         if len(_RULES_CACHE) >= _RULES_CACHE_MAX:
             _RULES_CACHE.pop(next(iter(_RULES_CACHE)))
-        _RULES_CACHE[id(rules)] = (rules, len(rules), compiled)
+        _RULES_CACHE[id(rules)] = (rules, signature, compiled)
     return compiled
 
 
@@ -233,7 +378,8 @@ def load_replace_rules(path: str) -> List[Dict[str, str]]:
             fixed_rules.append(rule)
 
     fixed_rules.sort(key=lambda r: len(r["from"]), reverse=True)
-    sorted_rules = fixed_rules + regex_rules
+    # ReplaceRules：規則被修改時會遞增 revision，讓 apply_replace_rules 的編譯快取失效
+    sorted_rules = ReplaceRules(fixed_rules + regex_rules)
 
     log_info(
         "載入替換規則完成：固定字串 %d 條（已長詞優先排序），正則 %d 條",

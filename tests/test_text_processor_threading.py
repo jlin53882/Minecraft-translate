@@ -167,12 +167,29 @@ def test_thread_isolation_with_complex_rules():
 
 
 def test_updated_rules_take_effect_immediately():
-    """B11b：規則變更後（新的清單或就地修改）立即生效，不會沿用舊快取。"""
+    """B11b：規則變更後立即生效，不會沿用舊快取。
+
+    涵蓋：新的清單、append、remove、就地修改 to、就地修改 from。
+    """
     first = [{"from": "hello", "to": "FIRST"}]
     assert apply_replace_rules("hello world", first) == "FIRST world"
 
+    # 新的清單
     second = [{"from": "hello", "to": "SECOND"}]
     assert apply_replace_rules("hello world", second) == "SECOND world"
 
+    # append
     first.append({"from": "world", "to": "世界"})
     assert apply_replace_rules("hello world", first) == "FIRST 世界"
+
+    # 就地修改 to（清單長度不變）
+    first[0]["to"] = "EDITED"
+    assert apply_replace_rules("hello world", first) == "EDITED 世界"
+
+    # 就地修改 from
+    first[0]["from"] = "nothing"
+    assert apply_replace_rules("hello world", first) == "hello 世界"
+
+    # remove
+    first.pop()
+    assert apply_replace_rules("hello world", first) == "hello world"
