@@ -92,7 +92,7 @@ class TranslationView(ft.Column):
 
         header = ft.Row(
             [
-                ft.Text("Translation Workbench", size=22, weight=ft.FontWeight.BOLD),
+                ft.Text("任務翻譯工具（FTB / KubeJS / Markdown）", size=22, weight=ft.FontWeight.BOLD),
                 ft.Container(expand=True),
                 ft.IconButton(
                     icon=ft.Icons.DELETE_OUTLINE,

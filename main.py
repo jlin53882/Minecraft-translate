@@ -209,6 +209,8 @@ def main(page: ft.Page):
 
     # 將快速跳轉的回呼註冊到鍵盤 handler（可透過快捷鍵觸發）
     keyboard_handler.set_search_callback(on_quick_jump)
+    # Ctrl+F：聚焦目前頁面的搜尋框
+    keyboard_handler.set_current_view_getter(lambda: content_area.content)
 
     # ----------------------------------------------------------
     # Step 5：組裝 NavigationRail（左側導航列）
