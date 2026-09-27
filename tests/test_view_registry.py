@@ -24,7 +24,7 @@ def test_views_are_built_lazily(monkeypatch):
     registry = vr.build_view_registry(page=None, file_picker=None)
 
     assert built == []
-    assert [item["key"] for item in registry][0] == "config"
+    assert registry[0]["key"] == "config"
     assert vr.built_view(registry[2]) is None
 
     hooked = []
