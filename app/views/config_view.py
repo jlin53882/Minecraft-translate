@@ -4,16 +4,24 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+from typing import ClassVar
+
 import flet as ft
-from app.ui import theme
-from app.ui.snack import show_snack
 
 from app.services_impl.config_service import load_config_json, save_config_json
+from app.ui import theme
+from app.ui.snack import show_snack
 from app.views.config.config_actions import load_config_into_view, save_config_from_view
 from app.views.config.config_form import (
     build_card as build_config_card,
+)
+from app.views.config.config_form import (
     build_footer as build_config_footer,
+)
+from app.views.config.config_form import (
     build_header as build_config_header,
+)
+from app.views.config.config_form import (
     build_key_field,
     build_key_row,
 )
@@ -38,7 +46,7 @@ class ConfigView(ft.Column):
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
 
-    DEFAULT_MODELS = {
+    DEFAULT_MODELS: ClassVar[dict[str, bool]] = {
         "gemini-2.5-flash": True,
     }
 
@@ -274,6 +282,11 @@ class ConfigView(ft.Column):
         self.controls_map["lm_translator.batch_shrink_factor"] = ft.TextField(
             label="錯誤縮小比例", dense=True, helper="用於：批次失敗時縮小率"
         )
+        self.controls_map["lm_translator.rpm_cooldown_sec"] = ft.TextField(
+            label="每批翻譯後等待秒數",
+            dense=True,
+            helper="0 = 不等待；免費層常遇 429 時可調高",
+        )
 
         self.controls_map["lm_translator.translator.skip_terms"] = ft.TextField(
             label="略過翻譯 (Skip Terms)",
@@ -289,6 +302,13 @@ class ConfigView(ft.Column):
                 expand=True,
                 text_size=13,
                 helper="用於：判斷哪些JSON欄位需翻譯",
+            )
+        )
+        self.controls_map["lm_translator.translator.short_text_skip_len"] = (
+            ft.TextField(
+                label="短字串略過長度",
+                dense=True,
+                helper="lang 值 ≤ 此長度且無空白時不翻譯（0 = 不略過，例如 Axe、Ore 也會翻）",
             )
         )
         self.controls_map["lm_translator.patchouli.dir_names"] = ft.TextField(
@@ -710,7 +730,17 @@ class ConfigView(ft.Column):
                 ),
             ]
         )
-        return self._build_card("批次大小與限制", [batch_row_1, batch_row_2])
+        batch_row_3 = ft.Row(
+            [
+                ft.Column(
+                    [self.controls_map["lm_translator.rpm_cooldown_sec"]], expand=2
+                ),
+                ft.Column([], expand=2),
+            ]
+        )
+        return self._build_card(
+            "批次大小與限制", [batch_row_1, batch_row_2, batch_row_3]
+        )
 
     def _build_lm_filter_card(self) -> ft.Control:
         lists_row = ft.Container(
@@ -739,7 +769,16 @@ class ConfigView(ft.Column):
                 spacing=5,
             ),
         )
-        return self._build_card("過濾條件與目錄", [lists_row])
+        short_row = ft.Row(
+            [
+                ft.Column(
+                    [self.controls_map["lm_translator.translator.short_text_skip_len"]],
+                    expand=2,
+                ),
+                ft.Column([], expand=2),
+            ]
+        )
+        return self._build_card("過濾條件與目錄", [lists_row, short_row])
 
     def _build_lm_models_card(self) -> ft.Control:
         models_section = ft.Container(

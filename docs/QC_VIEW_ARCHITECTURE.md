@@ -6,29 +6,41 @@ QCView 是 **Quality Check（品質檢查）頁**，翻譯完成後的品質驗�
 
 ## 檔案結構
 
-- `app/views/qc_view.py` — 主視圖（約 348 行）
-- `app/views/qc_base.py` — QCBase 共用執行緒任務執行器（約 95 行）
+- `app/views/qc_view.py` — 主視圖
+- `app/views/qc_base.py` — QCBase 共用背景任務執行器
+- `app/ui/ui_batcher.py` — UiBatcher（背景執行緒 → event loop 的批次 UI 更新）
 - `app/views/untranslated_checker.py` — UntranslatedChecker 元件（PR1 拆分）
-- `app/services.py` — `run_untranslated_check_service` / `run_variant_compare_service` / `run_variant_compare_tsv_service`
+- `app/services.py` — `run_untranslated_check_service` / `run_variant_compare_service` / `run_variant_compare_tsv_service` / `run_english_residue_check_service`
 
 ## QCBase（task_worker）
 
-```python
-QCBase(page, progress_bar, log_view)   # 注入共用 progress_bar + LogView
-task_worker(service_func, args_tuple, on_complete, controls_to_disable)
-  → run() [thread]
-      → for update in service_func(*args_tuple):
-            ├─ update["log"] 逐行 → log_view.add(line, level="info")
-            ├─ update["progress"] → progress_bar.value
-            ├─ update["error"] → progress_bar.color = theme.ERROR
-            └─ log_view._list_view.scroll_to(-1) + page.update()
-      finally: 重置 progress_bar、恢復 disabled 控制項
-      完成 → on_complete()
+```
+start_task()（event loop）
+  → 清空 log、重置 progress_bar、停用控制項、page.update()
+  → task_worker(service_func, args, on_complete, controls_to_disable)
+       → threading.Thread(run)                         [worker thread]
+            for update in service_func(*args):
+                log 逐行 → batcher.add_lines([(line, level)])
+                progress → batcher.set_state(progress=...)
+                error    → batcher.set_state(error=True)
+                batcher.flush()                        ← 依節流 / 背壓決定是否排程
+            except → 錯誤行 + set_state(error=True)
+            finally → set_state(done=True)；flush(force=True)
+       → UiBatcher 以 page.run_task 在 event loop 上呼叫 apply_ui(lines, state)
+            log_view.add_many(lines)；progress_bar.value
+            error → progress_bar.color = theme.ERROR
+            done  → 重置 progress_bar、恢復控制項、呼叫 on_complete
+            page.update()
 ```
 
-- `service_func` 須為 **generator**（逐步 yield update dict）
-- `controls_to_disable` 任務期間自動禁用 UI；`on_complete` 回調恢復
-- LogView 已統一為 LogView widget（level 顏色由 LogView 從 theme 取）
+- **worker thread 不直接修改 Flet control，也不呼叫 `page.update()`**；它只把資料交給 `UiBatcher`，所有 UI 變更都在 `apply_ui`（event loop）上執行。
+- **UiBatcher 行為**：
+  - 節流：兩次刷新至少間隔 `interval`（QC 為 0.2 秒）。
+  - 背壓：上一次刷新還在 event loop 上執行時不排新的刷新，資料繼續累積，避免 `run_task` 佇列堆積。
+  - 自適應：下一次間隔至少是上次套用耗時的兩倍，讓 event loop 保留時間處理使用者操作。
+  - 狀態同名 key 只保留最新值；`flush(force=True)` 保證最後一批（含 `done`）一定送出。
+- **完成 / 錯誤回到 event loop**：任務結束一定經 `set_state(done=True)` + `flush(force=True)`；錯誤以 `error` 狀態呈現（進度條變色），日誌等級由 `_guess_level` 依文字推測。
+- `service_func` 須為 **generator**（逐步 yield update dict）。
 
 ## 主要檢查項目（start_task 分派表）
 
@@ -72,10 +84,13 @@ task_worker(service_func, args_tuple, on_complete, controls_to_disable)
 - 掃 `en_dir` 的 en_us 檔，找 `tw_dir` 對應 zh_tw；**找不到對應繁中檔案 → 整檔標記未翻譯**
 - 逐 key：`zh_tw` 缺失或空的 key → 記為未翻譯；寫入 out_dir 報告
 
-三個 service 都包一層 `GLOBAL_LOG_LIMITER.filter()` 過濾高頻日誌，例外時 yield `{log, error: True, progress: 0}`。
+各 service 都包一層 `GLOBAL_LOG_LIMITER.filter()` 節流高頻日誌，例外時 yield `{log, error: True, progress: 0}`。
+
+`filter()` 只節流 `log` / `progress`；`error` 等其他欄位一律保留，帶有這些欄位的 update 會立即輸出、不被節流吞掉。因此 checker 回報的 `error` 一定會到達 `task_worker`（契約詳見 PIPELINE_VIEW_ARCHITECTURE.md 的「Service 層契約」）。
 
 ## 維護注意
 
 1. 新增檢查類型：加 UI 元件 + `start_task` 分派分支 + `set_controls_disabled` 清單。
 2. `task_worker` 的 service 必須是 generator；若回傳 list 會 `TypeError: 'list' object is not iterable`。
-3. `log_view._list_view.scroll_to` 直接碰內部屬性（LogView 為 ft.Container）。
+3. 背景執行緒中不可直接操作 `log_view` / `progress_bar` 或呼叫 `page.update()`；新增的 UI 回饋一律放進 `apply_ui`，經 `UiBatcher` 送到 event loop。
+4. 開始任務時的捲動（`_scroll_to_log`）是 event loop 上的 coroutine，由 `page.run_task` 排程。

@@ -1,7 +1,15 @@
-import pytest
-from app.views.bundler_view import BundlerView
 from app.ui.snack import show_snack
-from tests.conftest import mock_page, mock_filepicker
+from app.views.bundler_view import BundlerView
+from tests.conftest import mock_filepicker, mock_page
+
+
+def _drain_ui_tasks(page):
+    """執行背景 worker 排入 event loop 的 UI 更新（run_task）。"""
+    import asyncio
+
+    while page._tasks:
+        handler, args = page._tasks.pop(0)
+        asyncio.run(handler(*args))
 
 
 def test_bundler_view_initializes_core_controls():
@@ -41,7 +49,7 @@ def test_bundler_view_version_list():
     assert hasattr(view, "version_data")
 
 
-def test_bundler_view_version_list():
+def test_bundler_view_version_list_starts_collapsed():
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
 
@@ -147,10 +155,12 @@ def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
     monkeypatch.setattr(view.log_view._list_view, "scroll_to", lambda **kwargs: None)
 
     def mock_generator(**kwargs):
-        return iter([
-            {"log": "step1", "progress": 0.5},
-            {"log": "done", "progress": 1.0},
-        ])
+        return iter(
+            [
+                {"log": "step1", "progress": 0.5},
+                {"log": "done", "progress": 1.0},
+            ]
+        )
 
     monkeypatch.setattr(
         "app.views.bundler_view.bundle_outputs_generator",
@@ -158,6 +168,7 @@ def test_bundling_worker_updates_progress_and_reenables_controls(monkeypatch):
     )
 
     view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
+    _drain_ui_tasks(page)
 
     assert view.progress_bar.value == 1.0
 
@@ -172,9 +183,11 @@ def test_bundling_worker_with_version_info(monkeypatch):
 
     def mock_generator(**kwargs):
         captured_kwargs.update(kwargs)
-        return iter([
-            {"log": "done", "progress": 1.0},
-        ])
+        return iter(
+            [
+                {"log": "done", "progress": 1.0},
+            ]
+        )
 
     monkeypatch.setattr(
         "app.views.bundler_view.bundle_outputs_generator",
@@ -298,6 +311,7 @@ def test_bundling_worker_with_error(monkeypatch):
     )
 
     view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
+    _drain_ui_tasks(page)
 
     assert view.progress_bar.color == "red"
     assert not view.progress_bar.visible
@@ -308,7 +322,7 @@ def test_bundler_view_show_snack_bar_adds_to_overlay():
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
 
-    show_snack(view.page, 'Test error', '#FF0000')
+    show_snack(view.page, "Test error", "#FF0000")
 
     assert len(page.overlay) == 1
     assert page.overlay[0].open is True
@@ -319,10 +333,11 @@ def test_bundler_view_append_log_adds_control():
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
 
-    view._append_log('test log entry')
+    view._append_log("test log entry")
 
     # PR refactor/unified-log-view: log_view 內部 ListView 透過 _list_view 存取
     assert len(view.log_view._list_view.controls) >= 1
+
 
 def test_bundler_view_version_list_exists():
     page = mock_page()
@@ -345,7 +360,7 @@ def test_bundler_view_version_data_exists():
 def test_bundler_view_pick_pack_image():
     page = mock_page()
     view = BundlerView(page, mock_filepicker())
-    assert hasattr(view, '_pick_pack_image')
+    assert hasattr(view, "_pick_pack_image")
 
 
 def test_bundler_view_extra_folders_list():

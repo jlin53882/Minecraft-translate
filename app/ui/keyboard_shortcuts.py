@@ -37,13 +37,31 @@ class KeyboardShortcutHandler:
         self.page = page
         self.view_registry = view_registry
         self.change_view_callback = change_view_callback
-        self._search_field = None
+        self._current_view_getter = None
         self._search_callback = None
         self._save_callback = None
 
-    def set_search_field(self, search_field):
-        """設定搜尋框控制項"""
-        self._search_field = search_field
+    def set_current_view_getter(self, getter):
+        """設定取得目前頁面的函式（Ctrl+F 用來找該頁的搜尋框）。"""
+        self._current_view_getter = getter
+
+    # 各頁面的搜尋框屬性名稱（依優先順序；顯示中的才會被聚焦）
+    SEARCH_FIELD_ATTRS = (
+        "detail_search_tf",
+        "mod_search_tf",
+        "search_box",
+        "tf_query_input",
+    )
+
+    def _find_search_field(self):
+        view = self._current_view_getter() if self._current_view_getter else None
+        # 頁面外面包了一層 wrap_view 卡片
+        inner = getattr(view, "content", None) or view
+        for attr in self.SEARCH_FIELD_ATTRS:
+            field = getattr(inner, attr, None)
+            if field is not None and getattr(field, "visible", True) is not False:
+                return field
+        return None
 
     def set_search_callback(self, callback):
         """設定搜尋回調函數（開啟快速跳轉面板）"""
@@ -85,10 +103,12 @@ class KeyboardShortcutHandler:
             self._show_toast("跳轉到：合併")
             return
 
-        # F 鍵：搜尋
+        # F 鍵：聚焦目前頁面的搜尋框（規則、JAR 圖示預覽、快取查詢）
         if key == "f":
-            if self._search_field:
-                self._search_field.focus()
+            field = self._find_search_field()
+            if field is not None:
+                # Flet 1.0 的 focus() 是 coroutine，需交給 event loop 執行
+                self.page.run_task(field.focus)
             return
 
         # S 鍵：儲存
@@ -105,7 +125,7 @@ class KeyboardShortcutHandler:
 
         # P 鍵：快速跳轉面板
         if key == "p":
-            if hasattr(self, '_search_callback') and self._search_callback:
+            if hasattr(self, "_search_callback") and self._search_callback:
                 self._search_callback(None)
             return
 

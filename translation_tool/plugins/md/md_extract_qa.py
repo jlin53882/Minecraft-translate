@@ -21,12 +21,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import List, Optional
-import hashlib
 
 from translation_tool.plugins.shared.rich_text_shield import shield_text
 
@@ -43,7 +42,9 @@ def _shield_item(item: dict) -> dict:
 
 # ========= 你那套 § 指令行（遇到就切段，且本行不納入段落翻譯） =========
 # 你貼的內容常見：§align, §stack, §rule, §recipe, §entity
-RE_TOKEN_LINE = re.compile(r"^\s*§(align:|stack\[|rule\{|recipe\[|entity\[)", re.I)
+RE_TOKEN_LINE = re.compile(
+    r"^\s*§(align:|stack\[|rule\{|recipe\[|entity\[)", re.IGNORECASE
+)
 
 # 另外：有些人會把多個 §stack 接在同一行，這行也視為 token 行（避免被當文字）
 RE_MOSTLY_TOKEN_LINE = re.compile(r"^\s*(§[0-9a-zA-Z]+\S*)\s*(§[0-9a-zA-Z]+\S*)*\s*$")
@@ -57,6 +58,9 @@ RE_HEADING_N = re.compile(
 # 格式碼開頭行：§bStats 或 §4Warning...
 # 這行也是「文字」，要納入段落（但 § 前綴要保留）
 RE_FORMAT_PREFIX = re.compile(r"^(?P<prefix>\s*§[0-9a-zA-Z]+)(?P<text>.+)$")
+
+# Markdown 程式碼區塊圍欄（至多 3 個空白縮排，``` 或 ~~~ 三個以上）
+RE_CODE_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 # 語言過濾（漢字）
 RE_CJK = re.compile(r"[\u4e00-\u9fff]")
@@ -124,9 +128,7 @@ def is_splitter_line_old(line: str) -> bool:
     """
     if RE_TOKEN_LINE.match(line):
         return True
-    if RE_MOSTLY_TOKEN_LINE.match(line.strip()):
-        return True
-    return False
+    return bool(RE_MOSTLY_TOKEN_LINE.match(line.strip()))
 
 
 def is_splitter_line(line: str) -> bool:
@@ -143,10 +145,7 @@ def is_splitter_line(line: str) -> bool:
         return True
 
     # 新增：YAML Frontmatter 標記
-    if line.strip() == "---":
-        return True
-
-    return False
+    return line.strip() == "---"
 
 
 def is_translatable_text_line(line: str) -> bool:
@@ -177,10 +176,7 @@ def is_translatable_text_line(line: str) -> bool:
     # 類 YAML 的 key-only 行（保險用）
     # 例如：navigation:、categories:、item_ids:
     # frontmatter 已在 extract_blocks() 處理，這裡只是防呆
-    if re.match(r"^[A-Za-z0-9_\-]+:\s*$", s):
-        return False
-
-    return True
+    return not re.match(r"^[A-Za-z0-9_\-]+:\s*$", s)
 
 
 def normalize_blank_lines(text: str) -> str:
@@ -192,7 +188,7 @@ def normalize_blank_lines(text: str) -> str:
     return text.strip("\n")
 
 
-def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockItem]:
+def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> list[BlockItem]:
     """
     從 Markdown 中抽取「可翻譯的文字區塊」
 
@@ -200,15 +196,18 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockIte
     - 空行視為段落邊界
     - 標題（# 開頭）獨立成一個 block
     - YAML frontmatter（--- ... ---）整段不翻譯
+    - 程式碼區塊（``` 或 ~~~ 圍起來的內容）整段不翻譯（避免 LLM 改動程式碼；
+      區塊內的 # 註解也不會被當成標題）
     - Markdown 圖片行不翻譯
     - 純 component / tag 行（<ItemImage ...> 等）不翻譯
     - § 指令 / token 行不翻譯
     """
     lines = md_text.splitlines(keepends=False)
-    items: List[BlockItem] = []
-    buf: List[str] = []
-    start_ln: Optional[int] = None
+    items: list[BlockItem] = []
+    buf: list[str] = []
+    start_ln: int | None = None
     in_frontmatter = False
+    code_fence: str | None = None  # 目前所在程式碼區塊的圍欄字元（``` 或 ~~~）
 
     def flush(end_ln: int):
         """將目前 buffer 內容輸出成一個翻譯 block"""
@@ -235,6 +234,21 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockIte
     for i, line in enumerate(lines):
         ln = i + 1
         stripped = line.strip()
+
+        # 0) 程式碼區塊（``` / ~~~）：整段原樣保留，不送翻譯
+        fence = RE_CODE_FENCE.match(line)
+        if code_fence is not None:
+            if (
+                fence
+                and fence.group(1)[0] == code_fence[0]
+                and len(fence.group(1)) >= len(code_fence)
+            ):
+                code_fence = None
+            continue
+        if fence:
+            flush(end_ln=ln - 1)
+            code_fence = fence.group(1)
+            continue
 
         # 1) YAML frontmatter 處理（--- ... ---）
         # 進入或離開 frontmatter 區段，整段不翻譯
@@ -288,7 +302,7 @@ def extract_blocks(md_text: str, rel_file: str, lang_mode: str) -> List[BlockIte
 
 
 def build_pending_json(
-    rel_md: str, abs_md: Path, items: List[BlockItem], lang_mode: str
+    rel_md: str, abs_md: Path, items: list[BlockItem], lang_mode: str
 ) -> dict:
     """建構 Markdown 翻譯任務的 JSON 描述檔，包含來源路徑、待處理區塊清單及分塊統計資訊。"""
 
@@ -318,7 +332,7 @@ def has_allowed_lang_segment(path: Path) -> bool:
     return any(RE_LANG_SEG.match(seg) for seg in path.parts)
 
 
-def detect_lang_segment(parts: List[str]) -> Optional[str]:
+def detect_lang_segment(parts: list[str]) -> str | None:
     """
     從路徑 segments 判斷語言資料夾（支援 _en_us/_zh_tw、大小寫）
     回傳: "en_us" / "zh_tw" / "zh_cn" / None
@@ -376,7 +390,7 @@ def iter_md_files(root: Path):
 
 
 def safe_relpath(path: Path, root: Path) -> str:
-    """ """
+    """回傳 path 相對於 root 的 POSIX 路徑字串。"""
     return path.relative_to(root).as_posix()
 
 
@@ -473,7 +487,7 @@ def main():
 
                     # 只有在切分數量一致時才做 index 對齊（保守避免錯位）
                     if len(items) == len(zh_items):
-                        filtered: List[BlockItem] = []
+                        filtered: list[BlockItem] = []
                         for en_it, zh_it in zip(items, zh_items):
                             # zh_tw block 內有 CJK → 視為已翻，跳過 en_us block
                             if contains_cjk(zh_it.text):

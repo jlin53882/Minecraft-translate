@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from typing import Deque
 
 from .log_entry import LogEntry
 
@@ -35,9 +34,10 @@ class TaskSession:
         self.status: str = "IDLE"  # IDLE / RUNNING / DONE / ERROR
         self.error: bool = False
 
-        self.logs: Deque[LogEntry] = deque(maxlen=max_logs)
+        self.logs: deque[LogEntry] = deque(maxlen=max_logs)
         self._next_seq: int = 0
         self._lock = threading.Lock()
+        self._cancel_event = threading.Event()
 
     # ---------- 狀態寫入（Worker 使用） ----------
 
@@ -86,13 +86,27 @@ class TaskSession:
             self.summary = summary
 
     def finish(self) -> None:
-        """完成任務。"""
+        """完成任務。
+
+        已標記錯誤的任務維持 ERROR（service 常在 finally 呼叫 finish()，
+        不可把失敗覆蓋成 DONE，否則 UI 會顯示「任務完成」）。
+        """
         with self._lock:
             self.progress = 1.0
-            self.status = "DONE"
+            self.status = "ERROR" if self.error else "DONE"
+
+    def request_cancel(self) -> None:
+        """要求取消任務；worker 會在下一個檢查點（例如批次之間）停止。"""
+        self._cancel_event.set()
+
+    @property
+    def cancel_requested(self) -> bool:
+        """是否已要求取消。"""
+        return self._cancel_event.is_set()
 
     def start(self) -> None:
         """開始任務，清空日誌並重置序號。"""
+        self._cancel_event.clear()
         with self._lock:
             self.progress = 0.0
             self.logs.clear()

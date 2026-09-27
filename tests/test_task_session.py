@@ -4,6 +4,7 @@
 """
 
 import threading
+
 from app.task_session import TaskSession
 
 
@@ -127,7 +128,7 @@ class TestTaskSession:
                 for i in range(100):
                     session.set_progress(i / 100)
                     session.add_log(f"Log {i}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         threads = [threading.Thread(target=worker) for _ in range(5)]
@@ -138,3 +139,16 @@ class TestTaskSession:
 
         assert len(errors) == 0
         assert len(session.logs) > 0
+
+
+def test_finish_keeps_error_status():
+    """set_error() 之後的 finish()（常見於 finally）不可把狀態蓋成 DONE。"""
+    from app.views._log.task_session import TaskSession
+
+    session = TaskSession()
+    session.start()
+    session.set_error()
+    session.finish()
+
+    assert session.status == "ERROR"
+    assert session.progress == 1.0

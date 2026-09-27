@@ -21,23 +21,31 @@ class UISessionLogHandler(logging.Handler):
         self._session = session
 
     def emit(self, record: logging.LogRecord) -> None:
-        """發送日誌記錄到 UI。"""
+        """發送日誌記錄到 UI。
+
+        UI 只顯示訊息本身（不套用檔案 log 的時間戳 / 模組格式），
+        並把 logging 等級對應到 TaskSession 的 level，讓「只看警告以上」篩選有效。
+        """
         if not self._session:
             return
 
         try:
-            msg: str = self.format(record)
-
-            # 統一 UI log 前綴
+            msg: str = record.getMessage()
             if record.levelno >= logging.ERROR:
-                ui_msg: str = f"[ERROR] {msg}"
+                level, ui_msg = "error", f"[ERROR] {msg}"
             elif record.levelno >= logging.WARNING:
-                ui_msg = f"[WARN] {msg}"
+                level, ui_msg = "warning", f"[WARN] {msg}"
+            elif record.levelno >= logging.INFO:
+                level, ui_msg = "info", msg
             else:
-                ui_msg = f"[INFO] {msg}"
+                level, ui_msg = "debug", msg
 
-            self._session.add_log(ui_msg)
+            try:
+                self._session.add_log(ui_msg, level=level, source="logger")
+            except TypeError:
+                # 舊版 session 只接受 text
+                self._session.add_log(ui_msg)
 
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - 在 handler 內記錄錯誤會遞迴
             # logging handler 內部絕對不能炸
             pass

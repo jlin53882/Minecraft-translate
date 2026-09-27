@@ -4,25 +4,30 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import flet as ft
-from app.ui import theme
-from app.ui.snack import show_snack
+import asyncio
+import re
 import threading
-from translation_tool.utils.log_unit import log_info
+
+import flet as ft
+
+from app.services_impl.config_service import load_replace_rules
+from app.ui import theme
 
 # UI 共用元件：統一按鈕樣式
 from app.ui.components import primary_button, secondary_button
-import threading
-import re
-from app.services_impl.config_service import load_replace_rules
+from app.ui.debounce import Debouncer
+from app.ui.snack import show_snack
 from app.views.rules.rules_actions import (
     calc_total_pages,
     start_reload_thread,
     start_save_thread,
+)
+from app.views.rules.rules_actions import (
     translate_regex_error as rules_translate_regex_error,
 )
 from app.views.rules.rules_state import RulesTableState
 from app.views.rules.rules_table import create_rule_row as rules_create_row
+
 
 class RulesView(ft.Column):
     """RulesView 類別。
@@ -46,16 +51,19 @@ class RulesView(ft.Column):
         self.current_page = self._state.current_page
         self.all_rules_data = []
         self.total_pages = self._state.total_pages
-        
+
         # --- 搜尋狀態（進階版）---
         self.search_results = None  # 搜尋結果（符合的 rule 物件列表）
-        self.search_keyword = ""   # 當前搜尋關鍵字
+        self.search_keyword = ""  # 當前搜尋關鍵字
         self.search_case_sensitive = False  # 大小寫區分
-        self.search_regex = False           # Regex 模式
-        self.search_current_idx = 0         # 當前導航位置
-        
-        # Debounce timer
-        self._search_debounce_timer = None
+        self.search_regex = False  # Regex 模式
+        self.search_current_idx = 0  # 當前導航位置
+
+        # 背景執行緒 → UI 的暫存佇列（掛載前完成的載入）
+        self._ui_lock = threading.Lock()
+        self._pending_ui_calls: list = []
+        # debounce 在 event loop 上執行（threading.Timer 會在背景執行緒改控制項）
+        self._search_debouncer = Debouncer(lambda: self.page, 0.3)
 
         # RID 序號生成器 (UI 專用 ID)
         self._rid_seq = self._state.rid_seq
@@ -72,7 +80,7 @@ class RulesView(ft.Column):
         ]
 
         # 啟動背景載入
-        threading.Thread(target=self._initial_load, daemon=True).start()
+        self._initial_load()
 
     def _new_rid(self) -> int:
         """生成一個新的唯一 RID"""
@@ -112,13 +120,20 @@ class RulesView(ft.Column):
             return
 
         if page < 1 or page > self.total_pages:
-            show_snack(self.page, f"頁碼範圍：1 ~ {self.total_pages}", theme.ERROR, text_color=theme.WHITE)
+            show_snack(
+                self.page,
+                f"頁碼範圍：1 ~ {self.total_pages}",
+                theme.ERROR,
+                text_color=theme.WHITE,
+            )
             self._sync_page_jump_field()
             return
 
         self.current_page = page
         self._render_current_page()
-        show_snack(self.page, f"已跳至第 {page} 頁", theme.PRIMARY, text_color=theme.WHITE)
+        show_snack(
+            self.page, f"已跳至第 {page} 頁", theme.PRIMARY, text_color=theme.WHITE
+        )
         self._sync_page_jump_field()
 
     def _init_controls(self):
@@ -130,9 +145,7 @@ class RulesView(ft.Column):
 
         # 2. 分頁控制
         self.page_info = ft.Text("頁面 0 / 0", size=14, color=theme.GREY_700)
-        self.total_count_text = ft.Text(
-            "共 0 條規則", size=14, color=theme.GREY_700
-        )
+        self.total_count_text = ft.Text("共 0 條規則", size=14, color=theme.GREY_700)
 
         self.prev_button = ft.IconButton(
             ft.Icons.ARROW_BACK,
@@ -149,9 +162,7 @@ class RulesView(ft.Column):
             icon_color=theme.GREY_800,
         )
 
-        self.total_pages_text_label = ft.Text(
-            " / 1 頁", size=13, color=theme.GREY_700
-        )
+        self.total_pages_text_label = ft.Text(" / 1 頁", size=13, color=theme.GREY_700)
 
         self.page_jump_field = ft.TextField(
             value=str(self.current_page),
@@ -188,7 +199,7 @@ class RulesView(ft.Column):
             border_color=theme.OUTLINE,
             content_padding=10,
         )
-        self.sort_box.on_change = self.on_sort_change
+        self.sort_box.on_select = self.on_sort_change
 
         # 4. 表格
         self.rules_table = ft.DataTable(
@@ -215,9 +226,7 @@ class RulesView(ft.Column):
                     )
                 ),
                 ft.DataColumn(
-                    ft.Text(
-                        "操作", weight=ft.FontWeight.BOLD, color=theme.GREY_800
-                    ),
+                    ft.Text("操作", weight=ft.FontWeight.BOLD, color=theme.GREY_800),
                     numeric=True,
                 ),
             ],
@@ -232,9 +241,7 @@ class RulesView(ft.Column):
             padding=ft.Padding(left=5, bottom=5),
             content=ft.Row(
                 [
-                    ft.Icon(
-                        ft.Icons.RULE_FOLDER, size=28, color=theme.BLUE_GREY_800
-                    ),
+                    ft.Icon(ft.Icons.RULE_FOLDER, size=28, color=theme.BLUE_GREY_800),
                     ft.Text(
                         "規則管理 (Translation Rules)",
                         theme_style=ft.TextThemeStyle.HEADLINE_MEDIUM,
@@ -340,10 +347,20 @@ class RulesView(ft.Column):
         mode = e.control.value
         if mode == "from_asc":
             self.all_rules_data.sort(key=lambda r: r.get("from", ""))
-            show_snack(self.page, "✅ 已排序：依 From 字典序", theme.PRIMARY, text_color=theme.WHITE)
+            show_snack(
+                self.page,
+                "✅ 已排序：依 From 字典序",
+                theme.PRIMARY,
+                text_color=theme.WHITE,
+            )
         elif mode == "from_len":
             self.all_rules_data.sort(key=lambda r: len(r.get("from", "")))
-            show_snack(self.page, "✅ 已排序：依 From 長度", theme.PRIMARY, text_color=theme.WHITE)
+            show_snack(
+                self.page,
+                "✅ 已排序：依 From 長度",
+                theme.PRIMARY,
+                text_color=theme.WHITE,
+            )
 
         self.current_page = 1
         self._render_current_page()
@@ -352,27 +369,20 @@ class RulesView(ft.Column):
         """根據關鍵字搜尋規則並更新顯示（進階版：過濾顯示 + 多欄位 + Regex）"""
         # Debounce: 延遲搜尋
         keyword = e.control.value
-        
-        # 取消之前的計時器
-        if self._search_debounce_timer is not None:
-            try:
-                self._search_debounce_timer.cancel()
-            except Exception:
-                pass
-        
-        if not keyword.strip():
-            # 清除搜尋，回覆顯示全部
+
+        if not (keyword or "").strip():
+            # 清除搜尋，回覆顯示全部（並取消尚未執行的搜尋）
+            self._search_debouncer.cancel()
             self._do_search("")
             return
-        
-        # 設定新的 debounce 計時器（300ms）
-        self._search_debounce_timer = threading.Timer(0.3, lambda: self._do_search(keyword))
-        self._search_debounce_timer.start()
-    
+
+        # 300ms 內的連續輸入只搜尋最後一次
+        self._search_debouncer.call(self._do_search, keyword)
+
     def _do_search(self, keyword: str):
         """執行實際搜尋（Debounce 觸發）"""
         keyword = keyword.strip()
-        
+
         if not keyword:
             # 清除搜尋
             self.search_results = None
@@ -382,54 +392,66 @@ class RulesView(ft.Column):
             self.search_current_idx = 0
             self.current_page = 1
             self._render_current_page()
-            show_snack(self.page, "已清除搜尋，顯示全部規則", theme.PRIMARY, text_color=theme.WHITE)
+            show_snack(
+                self.page,
+                "已清除搜尋，顯示全部規則",
+                theme.PRIMARY,
+                text_color=theme.WHITE,
+            )
             return
-        
+
         # 檢測 Regex 模式（以 / 開頭和結尾）
         use_regex = False
         search_keyword = keyword
-        
+
         if keyword.startswith("/") and keyword.endswith("/") and len(keyword) > 2:
             use_regex = True
             search_keyword = keyword[1:-1]  # 移除 /
-        
+
         self.search_keyword = search_keyword
         self.search_regex = use_regex
-        
+
         # 執行搜尋
         matched_rules = []
-        
+
         for rule in self.all_rules_data:
             if self._rule_matches(rule, search_keyword, use_regex):
                 matched_rules.append(rule)
-        
+
         self.search_results = matched_rules
         self.search_current_idx = 0
-        
+
         if not self.search_results:
-            show_snack(self.page, "找不到符合的規則", theme.WARNING, text_color=theme.WHITE)
+            show_snack(
+                self.page, "找不到符合的規則", theme.WARNING, text_color=theme.WHITE
+            )
             self._render_current_page()
             return
-        
+
         # 顯示結果數量
         count = len(self.search_results)
         mode_text = "（正則）" if use_regex else ""
-        show_snack(self.page, f"找到 {count} 筆符合的規則{mode_text}", theme.PRIMARY, text_color=theme.WHITE)
-        
+        show_snack(
+            self.page,
+            f"找到 {count} 筆符合的規則{mode_text}",
+            theme.PRIMARY,
+            text_color=theme.WHITE,
+        )
+
         # 強制回到第一頁
         self.current_page = 1
         self._render_current_page()
-    
+
     def _rule_matches(self, rule: dict, keyword: str, use_regex: bool) -> bool:
         """檢查規則是否符合搜尋條件"""
         # 搜尋欄位
         fields = ["from", "to", "comment", "category"]
-        
+
         for field in fields:
             value = rule.get(field, "")
             if not value:
                 continue
-            
+
             # Regex 模式
             if use_regex:
                 try:
@@ -439,7 +461,7 @@ class RulesView(ft.Column):
                 except re.error:
                     # Regex 錯誤，回退到普通搜尋
                     pass
-            
+
             # 普通搜尋模式
             if not self.search_case_sensitive:
                 if keyword.lower() in value.lower():
@@ -447,16 +469,21 @@ class RulesView(ft.Column):
             else:
                 if keyword in value:
                     return True
-        
+
         return False
 
     # ---------------------------------------------
     # 規則驗證模組
     # ---------------------------------------------
 
-    def validate_rule(self, src: str, dst: str, all_rules, current_index):
+    def validate_rule(
+        self, src: str, dst: str, all_rules, current_index, from_index=None
+    ):
         """
         驗證規則格式正確性，回傳 (is_valid: bool, msg: str)
+
+        from_index：可選的 {from: [索引...]}（由 _build_from_index 建立）。
+        批次驗證全部規則時傳入，重複檢查就不必每條都掃過整個清單（O(n²) → O(n)）。
         """
         if not src.strip():
             return False, "from 欄位不可為空"
@@ -466,8 +493,14 @@ class RulesView(ft.Column):
         except re.error as err:
             return False, self.translate_regex_error(err)
 
-        for idx, rule in enumerate(all_rules):
-            if idx != current_index and rule.get("from") == src:
+        if from_index is not None:
+            candidates = from_index.get(src, ())
+        else:
+            candidates = (
+                idx for idx, rule in enumerate(all_rules) if rule.get("from") == src
+            )
+        for idx in candidates:
+            if idx != current_index:
                 return False, f"⚠ 與第 {idx + 1} 條規則重複"
 
         group_refs = re.findall(r"(?:\\+(\d+)|\$(\d+))", dst)
@@ -490,10 +523,28 @@ class RulesView(ft.Column):
     # --- 執行緒輔助與載入 ---
 
     def _run_on_ui_thread(self, func, *args, **kwargs):
-        """在 UI 執行緒上安全執行函式"""
-        if self.page and self.page.loop:
-            self.page.loop.call_soon_threadsafe(func, *args, **kwargs)
+        """在 UI 執行緒（Flet event loop）上安全執行函式。
 
+        尚未掛上頁面時先暫存，等 did_mount 再執行，避免背景載入比掛載更早完成時
+        結果被丟掉或在背景執行緒直接改控制項。
+        """
+        with self._ui_lock:
+            try:
+                page = self.page
+            except RuntimeError:
+                page = None
+            loop = getattr(page, "loop", None) if page else None
+            if loop is None:
+                self._pending_ui_calls.append((func, args, kwargs))
+                return
+        loop.call_soon_threadsafe(lambda: func(*args, **kwargs))
+
+    def did_mount(self):
+        """掛上頁面後執行在掛載前排入的 UI 更新。"""
+        with self._ui_lock:
+            pending, self._pending_ui_calls = self._pending_ui_calls, []
+        for func, args, kwargs in pending:
+            func(*args, **kwargs)
 
     def _load_rules_core(self):
         """從檔案載入替換規則並回傳"""
@@ -503,14 +554,13 @@ class RulesView(ft.Column):
         """初次啟動時從檔案載入規則並渲染"""
 
         def run():
+            # 背景執行緒只負責讀檔；渲染與 page.update() 交給 event loop
             try:
                 rules_data = self._load_rules_core()
-                self._handle_reload_success(rules_data)
-                self.page.update()
-            except Exception as err:
-                msg = f"初次載入規則失敗: {err}"
-                show_snack(self.page, msg, theme.ERROR, text_color=theme.WHITE)
-                self.page.update()
+            except Exception as err:  # noqa: BLE001 - 失敗要顯示在 UI
+                self._run_on_ui_thread(self._handle_reload_failure, err)
+                return
+            self._run_on_ui_thread(self._handle_reload_success, rules_data)
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -523,49 +573,46 @@ class RulesView(ft.Column):
             # 搜尋模式：只顯示符合的資料
             display_data = self.search_results
             total_count = len(display_data)
-            self.total_pages = max(1, (total_count + self.page_size - 1) // self.page_size)
+            self.total_pages = max(
+                1, (total_count + self.page_size - 1) // self.page_size
+            )
             # 確保頁碼在有效範圍內
-            if self.current_page > self.total_pages:
-                self.current_page = self.total_pages
-            if self.current_page < 1:
-                self.current_page = 1
+            self.current_page = min(self.current_page, self.total_pages)
+            self.current_page = max(self.current_page, 1)
         else:
             # 一般模式：顯示全部資料
             display_data = self.all_rules_data
             total_count = len(self.all_rules_data)
             self.total_pages = calc_total_pages(total_count, self.page_size)
-        
+
         # 計算當前頁的資料範圍
         start = (self.current_page - 1) * self.page_size
         end = start + self.page_size
         current_page_data = display_data[start:end]
 
-        self.rules_table.rows.clear()
-        rows_to_display = []
+        # 重用既有的表格列，只更新內容：
+        # 每次都清空重建 50 列（各含兩個多行 TextField）時，Flet 需移除並重新序列化
+        # 所有控制項，3 萬條規則下排序 / 清除搜尋單次約 2 秒；重用後只送出變更的值。
+        # 多出來的列（例如搜尋結果較少時）只隱藏不刪除，清除搜尋時不必重建。
+        rows = self.rules_table.rows
+        needed = len(current_page_data)
+        while len(rows) < needed:
+            rows.append(self.create_rule_row("", "", 0, 0))
+        for extra in rows[needed:]:
+            extra.visible = False
+            extra.data = None
 
-        for rule in current_page_data:
+        for offset, rule in enumerate(current_page_data):
             # 確保有 RID
             if "_rid" not in rule:
                 rule["_rid"] = self._new_rid()
-
-            rid = rule["_rid"]
-            
-            # 計算在 all_rules_data 中的索引（用於刪除操作）
-            try:
-                self.all_rules_data.index(rule)
-            except ValueError:
-                pass
-
-            row = self.create_rule_row(
+            self._fill_rule_row(
+                rows[offset],
                 rule.get("from", ""),
                 rule.get("to", ""),
-                rid,
-                display_no=start + len(rows_to_display) + 1,
+                rule["_rid"],
+                display_no=start + offset + 1,
             )
-            # 搜尋結果不需標記顏色（已過濾顯示）
-            rows_to_display.append(row)
-
-        self.rules_table.rows.extend(rows_to_display)
 
         # 顯示搜尋結果數或總數
         if self.search_results is not None:
@@ -583,7 +630,11 @@ class RulesView(ft.Column):
         self.prev_button.disabled = self.current_page == 1
         self.next_button.disabled = self.current_page == self.total_pages
 
-        self.page.update()
+        # 只刷新規則頁本身（而非整頁 diff）；尚未掛載時退回整頁更新
+        try:
+            self.update()
+        except (AssertionError, RuntimeError):
+            self.page.update()
 
     # --- 互動事件處理 ---
 
@@ -629,6 +680,23 @@ class RulesView(ft.Column):
         from_field.update()
         to_field.update()
 
+    @staticmethod
+    def _fill_rule_row(row, from_text, to_text, rid: int, display_no: int):
+        """把既有的表格列改成顯示指定規則（清除先前的驗證錯誤樣式）。"""
+        row.visible = True
+        row.data = rid
+        number_cell, from_cell, to_cell, delete_cell = row.cells
+        number_cell.content.value = str(display_no)
+        for field, name, value in (
+            (from_cell.content, "from", from_text),
+            (to_cell.content, "to", to_text),
+        ):
+            field.value = value
+            field.data = {"rid": rid, "field": name}
+            field.border_color = None
+            field.error_text = None
+        delete_cell.content.data = rid
+
     def create_rule_row(self, from_text, to_text, rid: int, display_no: int):
         """建立規則編輯列 UI 元件"""
         return rules_create_row(self, from_text, to_text, rid, display_no)
@@ -657,7 +725,9 @@ class RulesView(ft.Column):
         """處理規則重新載入失敗的錯誤顯示"""
         self.loading_indicator.visible = False
         self.page.update()
-        show_snack(self.page, f"載入規則時發生錯誤: {err}", theme.ERROR, text_color=theme.WHITE)
+        show_snack(
+            self.page, f"載入規則時發生錯誤: {err}", theme.ERROR, text_color=theme.WHITE
+        )
 
     def prev_page(self, e):
         """上一頁，若已在首頁則顯示提示"""
@@ -675,29 +745,85 @@ class RulesView(ft.Column):
         else:
             show_snack(self.page, "已在最後一頁", theme.PRIMARY, text_color=theme.WHITE)
 
-    def save_rules_clicked(self, e):
-        # 先驗證
-        """儲存規則點擊事件。"""
-        for idx, rule in enumerate(self.all_rules_data):
+    @staticmethod
+    def _build_from_index(all_rules) -> dict:
+        """建立 {from: [索引...]}，供批次驗證時 O(1) 查重複。"""
+        index: dict = {}
+        for idx, rule in enumerate(all_rules):
+            index.setdefault(rule.get("from"), []).append(idx)
+        return index
+
+    def _validate_all(self, rules):
+        """驗證全部規則；回傳 (錯誤索引, 訊息) 或 None。可在背景執行緒執行。"""
+        from_index = self._build_from_index(rules)
+        for idx, rule in enumerate(rules):
             ok, msg = self.validate_rule(
-                rule["from"], rule["to"], self.all_rules_data, idx
+                rule["from"], rule["to"], rules, idx, from_index=from_index
             )
             if not ok:
-                show_snack(self.page, 
-                    f"第 {idx + 1} 條規則錯誤：{msg}", theme.ERROR
-                , text_color=theme.WHITE)
+                return idx, msg
+        return None
+
+    def save_rules_clicked(self, e):
+        """儲存規則點擊事件：驗證（背景執行緒）→ 儲存。
+
+        3 萬條規則時舊版逐條掃描整個清單查重複（O(n²)），UI 約 87 秒無回應。
+        """
+        if getattr(self, "_saving", False):
+            return
+        snapshot = [dict(r) for r in self.all_rules_data]
+
+        def finish(failure):
+            self._saving = False
+            if failure is not None:
+                idx, msg = failure
+                show_snack(
+                    self.page,
+                    f"第 {idx + 1} 條規則錯誤：{msg}",
+                    theme.ERROR,
+                    text_color=theme.WHITE,
+                )
                 self.current_page = idx // self.page_size + 1
                 self._render_current_page()
                 return
 
-        # 移除 _rid 並過濾
-        clean_rules = [
-            {"from": r.get("from", ""), "to": r.get("to", "")}
-            for r in self.all_rules_data
-            if r.get("from", "").strip()
-        ]
-        show_snack(self.page, "✅ 驗證通過，正在儲存規則…", theme.PRIMARY, text_color=theme.WHITE)
-        return start_save_thread(self, clean_rules)
+            # 移除 _rid 並過濾
+            clean_rules = [
+                {"from": r.get("from", ""), "to": r.get("to", "")}
+                for r in snapshot
+                if r.get("from", "").strip()
+            ]
+            show_snack(
+                self.page,
+                "✅ 驗證通過，正在儲存規則…",
+                theme.PRIMARY,
+                text_color=theme.WHITE,
+            )
+            start_save_thread(self, clean_rules)
+
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            finish(self._validate_all(snapshot))
+            return
+
+        self._saving = True
+        show_snack(self.page, "🔎 正在驗證規則…", theme.PRIMARY, text_color=theme.WHITE)
+
+        async def _validate_then_save():
+            try:
+                failure = await asyncio.to_thread(self._validate_all, snapshot)
+            except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
+                self._saving = False
+                show_snack(
+                    self.page,
+                    f"驗證規則時發生錯誤：{ex}",
+                    theme.ERROR,
+                    text_color=theme.WHITE,
+                )
+                return
+            finish(failure)
+
+        run_task(_validate_then_save)
 
     def add_row_clicked(self, e):
         """新增一列空白規則並跳轉至最後一頁"""
@@ -709,7 +835,12 @@ class RulesView(ft.Column):
         self.current_page = self.total_pages
 
         self._render_current_page()
-        show_snack(self.page, "➕ 已新增一條規則（已跳至最後一頁）", theme.PRIMARY, text_color=theme.WHITE)
+        show_snack(
+            self.page,
+            "➕ 已新增一條規則（已跳至最後一頁）",
+            theme.PRIMARY,
+            text_color=theme.WHITE,
+        )
 
     def delete_row_clicked(self, e):
         """刪除指定 RID 的規則並重新渲染"""
@@ -733,9 +864,12 @@ class RulesView(ft.Column):
             # ✅ 顯示簡短提示（避免太長）
             src_preview = src[:20] + ("…" if len(src) > 20 else "")
             dst_preview = dst[:20] + ("…" if len(dst) > 20 else "")
-            show_snack(self.page, 
-                f"🗑 已刪除：{src_preview} → {dst_preview}", theme.ERROR
-            , text_color=theme.WHITE)
+            show_snack(
+                self.page,
+                f"🗑 已刪除：{src_preview} → {dst_preview}",
+                theme.ERROR,
+                text_color=theme.WHITE,
+            )
 
     @property
     def page(self):

@@ -23,7 +23,6 @@ from __future__ import annotations
 from unittest.mock import patch
 
 
-
 class TestAtk001DryRunParameter:
     """ATK-001：dry_run / export_cache_only 參數失效"""
 
@@ -31,7 +30,7 @@ class TestAtk001DryRunParameter:
     @patch("translation_tool.core.lm_translator_main.load_config")
     @patch("translation_tool.core.lm_translator_main.get_current_api_key")
     @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
-    @patch("translation_tool.core.lm_translator_main.time.sleep")
+    @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_dry_run_true_should_not_call_api(
         self,
         mock_sleep,
@@ -62,15 +61,19 @@ class TestAtk001DryRunParameter:
         }
         mock_get_key.return_value = "test_key"
         # 模擬 API 回應（正常翻譯結果）
-        mock_call_api.return_value = '{"items": [{"id": "0", "value": "\\u4f60\\u597d"}]}'
-        mock_json_loads.return_value = {"items": [{"id": "0", "value": "\\u4f60\\u597d"}]}
+        mock_call_api.return_value = (
+            '{"items": [{"id": "0", "value": "\\u4f60\\u597d"}]}'
+        )
+        mock_json_loads.return_value = {
+            "items": [{"id": "0", "value": "\\u4f60\\u597d"}]
+        }
 
         items = [
             {"path": "test.key", "text": "Hello", "cache_type": "lang"},
         ]
 
         # Act：dry_run=True → 預期不應呼叫 API
-        result, status = translate_batch_smart(items, 1, dry_run=True)
+        _result, _status = translate_batch_smart(items, 1, dry_run=True)
 
         # Assert：call_gemini_requests 從未被呼叫
         # 目前（修復前）：此斷言會失敗，因為 API 仍被呼叫（Bug）
@@ -80,7 +83,7 @@ class TestAtk001DryRunParameter:
     @patch("translation_tool.core.lm_translator_main.load_config")
     @patch("translation_tool.core.lm_translator_main.get_current_api_key")
     @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
-    @patch("translation_tool.core.lm_translator_main.time.sleep")
+    @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_export_cache_only_true_should_not_call_api(
         self,
         mock_sleep,
@@ -107,15 +110,19 @@ class TestAtk001DryRunParameter:
             }
         }
         mock_get_key.return_value = "test_key"
-        mock_call_api.return_value = '{"items": [{"id": "0", "value": "\\u4f60\\u597d"}]}'
-        mock_json_loads.return_value = {"items": [{"id": "0", "value": "\\u4f60\\u597d"}]}
+        mock_call_api.return_value = (
+            '{"items": [{"id": "0", "value": "\\u4f60\\u597d"}]}'
+        )
+        mock_json_loads.return_value = {
+            "items": [{"id": "0", "value": "\\u4f60\\u597d"}]
+        }
 
         items = [
             {"path": "test.key", "text": "Hello", "cache_type": "lang"},
         ]
 
         # Act：export_cache_only=True → 預期不應呼叫 API
-        result, status = translate_batch_smart(items, 1, export_cache_only=True)
+        _result, _status = translate_batch_smart(items, 1, export_cache_only=True)
 
         # Assert：call_gemini_requests 從未被呼叫
         # 目前（修復前）：此斷言會失敗，因為 API 仍被呼叫（Bug）
@@ -125,7 +132,7 @@ class TestAtk001DryRunParameter:
     @patch("translation_tool.core.lm_translator_main.load_config")
     @patch("translation_tool.core.lm_translator_main.get_current_api_key")
     @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
-    @patch("translation_tool.core.lm_translator_main.time.sleep")
+    @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_both_flags_true_should_not_call_api(
         self,
         mock_sleep,
@@ -152,15 +159,19 @@ class TestAtk001DryRunParameter:
             }
         }
         mock_get_key.return_value = "test_key"
-        mock_call_api.return_value = '{"items": [{"id": "0", "value": "\\u4f60\\u597d"}]}'
-        mock_json_loads.return_value = {"items": [{"id": "0", "value": "\\u4f60\\u597d"}]}
+        mock_call_api.return_value = (
+            '{"items": [{"id": "0", "value": "\\u4f60\\u597d"}]}'
+        )
+        mock_json_loads.return_value = {
+            "items": [{"id": "0", "value": "\\u4f60\\u597d"}]
+        }
 
         items = [
             {"path": "test.key", "text": "Hello", "cache_type": "lang"},
         ]
 
         # Act：兩個 flag 同時為 True
-        result, status = translate_batch_smart(
+        _result, _status = translate_batch_smart(
             items, 1, dry_run=True, export_cache_only=True
         )
 
@@ -171,7 +182,7 @@ class TestAtk001DryRunParameter:
     @patch("translation_tool.core.lm_translator_main.load_config")
     @patch("translation_tool.core.lm_translator_main.get_current_api_key")
     @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
-    @patch("translation_tool.core.lm_translator_main.time.sleep")
+    @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_dry_run_false_should_call_api(
         self,
         mock_sleep,
@@ -198,15 +209,19 @@ class TestAtk001DryRunParameter:
             }
         }
         mock_get_key.return_value = "test_key"
-        mock_call_api.return_value = '{"items": [{"id": "0", "value": "\\u4f60\\u597d"}]}'
-        mock_json_loads.return_value = {"items": [{"id": "0", "value": "\\u4f60\\u597d"}]}
+        mock_call_api.return_value = (
+            '{"items": [{"id": "0", "value": "\\u4f60\\u597d"}]}'
+        )
+        mock_json_loads.return_value = {
+            "items": [{"id": "0", "value": "\\u4f60\\u597d"}]
+        }
 
         items = [
             {"path": "test.key", "text": "Hello", "cache_type": "lang"},
         ]
 
         # Act：dry_run=False（預設值）
-        result, status = translate_batch_smart(items, 1, dry_run=False)
+        _result, _status = translate_batch_smart(items, 1, dry_run=False)
 
         # Assert：API 應該被呼叫
         mock_call_api.assert_called()

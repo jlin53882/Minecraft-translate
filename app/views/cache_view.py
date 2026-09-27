@@ -14,20 +14,32 @@
 - 本輪只補註解/docstring，不改任何 UI 行為。
 """
 
+import asyncio
 import json
 import re
 import time
 import traceback
-import threading
 from pathlib import Path
 
 import flet as ft
+
+from app.services_impl.cache.cache_services import (
+    cache_get_entry_service,
+    cache_get_overview_service,
+    cache_rebuild_index_service,  # A3 搜尋功能
+    cache_reload_service,
+    cache_reload_type_service,
+    cache_rotate_service,
+    cache_save_all_service,
+    cache_search_service,
+    cache_update_dst_service,
+)
 from app.ui import theme
-from app.ui.snack import show_snack
 
 # UI 共用元件：統一按鈕樣式（先套用在總覽區，避免一次改動過大）
-from app.ui.components import primary_button, secondary_button, empty_state
-
+from app.ui.components import empty_state, primary_button, secondary_button
+from app.ui.debounce import Debouncer
+from app.ui.snack import show_snack
 from app.views.cache_manager.cache_actions import run_cache_action
 from app.views.cache_manager.cache_history_store import (
     history_active_default,
@@ -43,17 +55,6 @@ from app.views.cache_manager.cache_state import (
     CacheHistoryState,
     CacheQueryState,
     CacheShardState,
-)
-from app.services_impl.cache.cache_services import (
-    cache_get_entry_service,
-    cache_get_overview_service,
-    cache_reload_service,
-    cache_reload_type_service,
-    cache_rotate_service,
-    cache_save_all_service,
-    cache_search_service,
-    cache_update_dst_service,
-    cache_rebuild_index_service,  # A3 搜尋功能
 )
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
@@ -91,7 +92,7 @@ class CacheView(ft.Column):
             "shard": False,
             "logs": False,
         }
-        self._update_timer = None
+        self._update_debouncer = Debouncer(lambda: self.page, 0.1)
 
         # -------------------- Global state --------------------
         self.ui_busy = False
@@ -183,14 +184,14 @@ class CacheView(ft.Column):
                 ft.dropdown.Option("ALL", "全部"),
             ],
         )
-        self.dd_query_mode.on_change = self._on_query_mode_change
+        self.dd_query_mode.on_select = self._on_query_mode_change
         self.dd_query_type = ft.Dropdown(
             width=180,
             value="ALL",
             tooltip="選擇要查詢的分類（例如 lang / patchouli）",
             options=[ft.dropdown.Option("ALL", "全部")],
         )
-        self.dd_query_type.on_change = self._on_query_type_change
+        self.dd_query_type.on_select = self._on_query_type_change
         self.btn_query_search = ft.Button(
             "搜尋", icon=ft.Icons.SEARCH, on_click=self._on_query_search
         )
@@ -524,7 +525,7 @@ class CacheView(ft.Column):
             title=ft.Text("SRC（可展開）", weight=ft.FontWeight.BOLD),
             controls=[
                 ft.Container(
-                    alignment=ft.alignment.Alignment(-1,-1),
+                    alignment=ft.alignment.Alignment(-1, -1),
                     padding=8,
                     border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
@@ -542,7 +543,7 @@ class CacheView(ft.Column):
             title=ft.Text("DST（可展開，可編輯）", weight=ft.FontWeight.BOLD),
             controls=[
                 ft.Container(
-                    alignment=ft.alignment.Alignment(-1,-1),
+                    alignment=ft.alignment.Alignment(-1, -1),
                     padding=8,
                     border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
@@ -585,7 +586,7 @@ class CacheView(ft.Column):
                 ft.dropdown.Option("200", "200"),
             ],
         )
-        self.dd_page_size.on_change = self._on_page_size_change
+        self.dd_page_size.on_select = self._on_page_size_change
         self.query_page_info = ft.Text("第 1 頁 / 共 1 頁")
         self.query_total_info = ft.Text("共 0 筆")
 
@@ -595,7 +596,7 @@ class CacheView(ft.Column):
             border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=10,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.Alignment(-1,-1),
+            alignment=ft.alignment.Alignment(-1, -1),
             content=ft.Column(
                 [
                     ft.Text("查詢區塊（Explorer）", size=16, weight=ft.FontWeight.BOLD),
@@ -670,7 +671,9 @@ class CacheView(ft.Column):
                                                 ),
                                                 border_radius=8,
                                                 bgcolor=theme.WHITE,
-                                                alignment=ft.alignment.Alignment(-1,-1),
+                                                alignment=ft.alignment.Alignment(
+                                                    -1, -1
+                                                ),
                                                 content=ft.Column(
                                                     [
                                                         self.query_detail_key,
@@ -742,10 +745,9 @@ class CacheView(ft.Column):
             border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.Alignment(-1,-1),
+            alignment=ft.alignment.Alignment(-1, -1),
             content=self.query_type_shard_col,
         )
-
 
         self._build_shard_widgets()
 
@@ -797,7 +799,7 @@ class CacheView(ft.Column):
             border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.Alignment(-1,-1),
+            alignment=ft.alignment.Alignment(-1, -1),
             content=self.shard_detail_key_list,
         )
 
@@ -825,7 +827,7 @@ class CacheView(ft.Column):
             border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.Alignment(-1,-1),
+            alignment=ft.alignment.Alignment(-1, -1),
             content=self.shard_src_field,
         )
 
@@ -865,7 +867,7 @@ class CacheView(ft.Column):
             border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
             bgcolor=theme.WHITE,
-            alignment=ft.alignment.Alignment(-1,-1),
+            alignment=ft.alignment.Alignment(-1, -1),
             content=self.shard_dst_field,
         )
 
@@ -1043,14 +1045,19 @@ class CacheView(ft.Column):
         self.overview_page = self._build_overview_page()
         self.query_entry_page = self._build_query_entry_page()
 
-        main_tab_bar = ft.TabBar(tabs=[
-            ft.Tab(label="總覽 / 管理"),
-            ft.Tab(label="查詢"),
-        ])
-        main_tab_view = ft.TabBarView(controls=[
-            self.overview_page,
-            self.query_entry_page,
-        ], expand=True)
+        main_tab_bar = ft.TabBar(
+            tabs=[
+                ft.Tab(label="總覽 / 管理"),
+                ft.Tab(label="查詢"),
+            ]
+        )
+        main_tab_view = ft.TabBarView(
+            controls=[
+                self.overview_page,
+                self.query_entry_page,
+            ],
+            expand=True,
+        )
         main_tab_content = ft.Column([main_tab_bar, main_tab_view], expand=True)
         self.main_tabs = ft.Tabs(
             content=main_tab_content,
@@ -1109,10 +1116,7 @@ class CacheView(ft.Column):
         if not hasattr(self, "page") or self.page is None:
             return
 
-        if self._update_timer:
-            self._update_timer.cancel()
-        self._update_timer = threading.Timer(0.1, self._do_update)
-        self._update_timer.start()
+        self._update_debouncer.call(self._do_update)
 
     def _do_update(self):
         """批次更新所有髒區域"""
@@ -1138,34 +1142,72 @@ class CacheView(ft.Column):
         except (AttributeError, AssertionError):
             # 控件尚未添加到 page，略過
             pass
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log_error(f"[CacheView] 更新失敗: {e}")
 
     def _batch_refresh(self):
         """批量刷新所有區域（用於初始載入）"""
         try:
             self.update()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log_error(f"[CacheView] 批量刷新失敗: {e}")
 
     # =========================================================
     # Lifecycle
     # =========================================================
     def did_mount(self):
-        """元件載入完成後初始化資料與 UI"""
+        """元件載入完成後初始化資料與 UI。
+
+        總覽需要載入整個快取（大量資料時數秒），有 event loop 時改在執行緒讀取，
+        頁面先顯示「載入中」，不再阻塞切換頁面。
+        """
+        if self.page is not None:
+            self.page.on_resized = self._on_page_resized
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            self._finish_mount(self._fetch_overview())
+            return
+
         try:
-            self._load_overview()
+            self._set_state(True, "LOADING", "trace: 載入快取總覽…")
+        except Exception:  # noqa: BLE001, S110 - 尚未完成掛載時略過
+            pass
+
+        async def _load():
+            fetched = await asyncio.to_thread(self._fetch_overview)
+            self._finish_mount(fetched)
+
+        run_task(_load)
+
+    def _fetch_overview(self):
+        """讀取快取總覽（可在背景執行緒執行）；回傳 (data, error, traceback)。"""
+        try:
+            return cache_get_overview_service(), None, None
+        except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
+            return {}, ex, traceback.format_exc()
+
+    def _finish_mount(self, fetched):
+        """（event loop 上）套用總覽並渲染頁面。"""
+        try:
+            data, error, tb = fetched
+            if error is not None:
+                self._append_log(f"[WARN] 讀取總覽失敗：{error}")
+                self._append_log(tb)
+            if self.ui_busy and self.busy_reason == "LOADING":
+                self.ui_busy = False
+                self.busy_reason = "READY"
+                self.overview_status.value = "狀態：就緒"
+                self.overview_status.color = theme.GREEN_700
+                self.overview_trace.value = "trace: 總覽載入完成"
+            self._refresh_overview_ui(data)
             self._refresh_query_type_options()
             self._render_query_type_shard_page()
             self._render_query_results()
-            # 防護：確保 page 存在
-            if self.page is not None:
-                self.page.on_resized = self._on_page_resized
             self._render_query_detail()
             self._refresh_disabled_state()
             # PR5-7: 使用批量刷新優化初始載入
             self._batch_refresh()
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             log_error(f"CacheView did_mount failed: {ex}")
             log_error(traceback.format_exc())
             self.overview_status.value = "狀態：初始化失敗"
@@ -1173,7 +1215,7 @@ class CacheView(ft.Column):
             self.overview_trace.value = f"trace: did_mount error -> {ex}"
             try:
                 self.update()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
     # =========================================================
@@ -1188,7 +1230,7 @@ class CacheView(ft.Column):
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
-        except Exception:
+        except Exception:  # noqa: BLE001
             h = 0
 
         if h <= 0:
@@ -1206,7 +1248,7 @@ class CacheView(ft.Column):
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
-        except Exception:
+        except Exception:  # noqa: BLE001
             h = 0
 
         if h <= 0:
@@ -1224,7 +1266,7 @@ class CacheView(ft.Column):
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
-        except Exception:
+        except Exception:  # noqa: BLE001
             h = 0
 
         if h <= 0:
@@ -1241,7 +1283,7 @@ class CacheView(ft.Column):
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
-        except Exception:
+        except Exception:  # noqa: BLE001
             h = 0
 
         if h <= 0:
@@ -1258,7 +1300,7 @@ class CacheView(ft.Column):
         """
         try:
             h = float(getattr(self.page, "height", 0) or 0)
-        except Exception:
+        except Exception:  # noqa: BLE001
             h = 0
 
         if h <= 0:
@@ -1275,7 +1317,7 @@ class CacheView(ft.Column):
         """
         try:
             w = float(getattr(self.page, "width", 0) or 0)
-        except Exception:
+        except Exception:  # noqa: BLE001
             w = 0
 
         if w <= 0:
@@ -1292,7 +1334,7 @@ class CacheView(ft.Column):
             self._render_query_type_shard_page()
             self._render_shard_detail_keys()
             self.update()
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     def _set_state(self, busy: bool, reason: str, trace: str):
@@ -1307,6 +1349,8 @@ class CacheView(ft.Column):
                 label = "儲存中"
             elif reason == "ROTATING":
                 label = "輪替分片中"
+            elif reason == "LOADING":
+                label = "載入中"
             else:
                 label = "處理中"
             self.overview_status.value = f"狀態：{label}..."
@@ -1446,7 +1490,7 @@ class CacheView(ft.Column):
                     c.update()
             if hasattr(self, "page") and self.page:
                 self.update()
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             self._append_log(f"[WARN] UI refresh 異常: {ex}")
 
     # 與舊測試相容：run_id guard 的狀態更新入口
@@ -1498,7 +1542,6 @@ class CacheView(ft.Column):
             ]
         )
 
-
     def _append_log(self, text: str):
         """新增日誌訊息並根據等級記錄"""
         if text.startswith("[ERROR"):
@@ -1519,7 +1562,7 @@ class CacheView(ft.Column):
         if isinstance(level, bool):
             level = "info"
         # Skip if not fully initialized (during __init__)
-        if not hasattr(self, '_all_logs') or not hasattr(self, 'log_list'):
+        if not hasattr(self, "_all_logs") or not hasattr(self, "log_list"):
             return
         lv = (level or "info").lower()
         if lv == "error":
@@ -1559,15 +1602,22 @@ class CacheView(ft.Column):
 
     def _build_query_entry_page(self):
         """建立查詢頁面的 UI"""
-        query_sub_tab_bar = ft.TabBar(tabs=[
-            ft.Tab(label="查詢區"),
-            ft.Tab(label="分類/分片"),
-        ])
-        query_sub_tab_view = ft.TabBarView(controls=[
-            self.query_search_card,
-            self.query_type_shard_card,
-        ], expand=True)
-        query_sub_tab_content = ft.Column([query_sub_tab_bar, query_sub_tab_view], expand=True)
+        query_sub_tab_bar = ft.TabBar(
+            tabs=[
+                ft.Tab(label="查詢區"),
+                ft.Tab(label="分類/分片"),
+            ]
+        )
+        query_sub_tab_view = ft.TabBarView(
+            controls=[
+                self.query_search_card,
+                self.query_type_shard_card,
+            ],
+            expand=True,
+        )
+        query_sub_tab_content = ft.Column(
+            [query_sub_tab_bar, query_sub_tab_view], expand=True
+        )
         self.query_sub_tabs = ft.Tabs(
             content=query_sub_tab_content,
             length=2,
@@ -1581,7 +1631,7 @@ class CacheView(ft.Column):
             expand=True,
             bgcolor=theme.WHITE,
             padding=8,
-            alignment=ft.alignment.Alignment(-1,-1),
+            alignment=ft.alignment.Alignment(-1, -1),
             content=self.query_sub_tabs,
         )
 
@@ -1598,7 +1648,7 @@ class CacheView(ft.Column):
                 text_color = theme.TEXT_LOG_ERROR
             elif line.startswith("[WARN"):
                 text_color = theme.TEXT_LOG_WARNING
-            elif line.startswith("[系統") or line.startswith("[SYS"):
+            elif line.startswith(("[系統", "[SYS")):
                 text_color = theme.TEXT_LOG_SYSTEM
             else:
                 text_color = theme.TEXT_LOG_DEFAULT
@@ -1624,7 +1674,7 @@ class CacheView(ft.Column):
         try:
             await ft.Clipboard().set(txt)
             show_snack(self.page, "已複製日誌", theme.BLUE_400)
-        except Exception:
+        except Exception:  # noqa: BLE001
             show_snack(self.page, "複製失敗", theme.RED_400)
 
     def _iter_type_states(self, data: dict):
@@ -1635,7 +1685,9 @@ class CacheView(ft.Column):
         - None: 讀取失敗（資料結構異常，區分「無資料」）
         """
         if not isinstance(data, dict):
-            log_warning(f"[_iter_type_states] 預期 dict，收到 {type(data).__name__}，回傳 None 表示讀取失敗")
+            log_warning(
+                f"[_iter_type_states] 預期 dict，收到 {type(data).__name__}，回傳 None 表示讀取失敗"
+            )
             return None
 
         raw_types = data.get("types")
@@ -1811,7 +1863,7 @@ class CacheView(ft.Column):
         """從服務載入快取總覽資料"""
         try:
             data = cache_get_overview_service()
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             self._append_log(f"[WARN] 讀取總覽失敗：{ex}")
             self._append_log(traceback.format_exc())
             data = {}
@@ -1874,25 +1926,40 @@ class CacheView(ft.Column):
 
         self._set_state(True, "INDEXING", "trace: 正在重建搜尋索引...")
 
-        try:
-            result = cache_rebuild_index_service()
+        def work():
+            try:
+                return cache_rebuild_index_service(), None
+            except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
+                return None, (ex, traceback.format_exc())
 
-            if result.get("success"):
-                msg = result.get("message", "重建完成")
-                self._append_log(f"[INFO] {msg}")
-                self._notify(msg, "info")
-            else:
-                error = result.get("error", "未知錯誤")
-                self._append_log(f"[ERROR] 重建索引失敗: {error}")
-                self._notify(f"重建失敗: {error}", "error")
+        def finish(result, error):
+            try:
+                if error is not None:
+                    ex, tb = error
+                    self._append_log(f"[ERROR] 重建索引異常: {ex}")
+                    self._append_log(tb)
+                    self._notify(f"重建失敗: {ex}", "error")
+                elif result.get("success"):
+                    msg = result.get("message", "重建完成")
+                    self._append_log(f"[INFO] {msg}")
+                    self._notify(msg, "info")
+                else:
+                    err = result.get("error", "未知錯誤")
+                    self._append_log(f"[ERROR] 重建索引失敗: {err}")
+                    self._notify(f"重建失敗: {err}", "error")
+            finally:
+                self._set_state(False, "READY", "trace: 重建完成")
 
-        except Exception as ex:
-            self._append_log(f"[ERROR] 重建索引異常: {ex}")
-            self._append_log(traceback.format_exc())
-            self._notify(f"重建失敗: {ex}", "error")
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            finish(*work())
+            return
 
-        finally:
-            self._set_state(False, "READY", "trace: 重建完成")
+        async def _rebuild():
+            # 大量快取重建需數秒，改在執行緒執行，避免凍結 UI
+            finish(*(await asyncio.to_thread(work)))
+
+        run_task(_rebuild)
 
     # overview 集中操作已移除，功能保留在分類卡按鈕
 
@@ -2022,7 +2089,7 @@ class CacheView(ft.Column):
             return (seq, stem.lower())
 
         active_filename = (
-            f"{cache_type}_{str(active_shard_id)}.json"
+            f"{cache_type}_{active_shard_id!s}.json"
             if str(active_shard_id or "").strip()
             else ""
         )
@@ -2040,11 +2107,9 @@ class CacheView(ft.Column):
             key_count = 0
             try:
                 raw = json.loads(fp.read_text(encoding="utf-8"))
-                if isinstance(raw, dict):
+                if isinstance(raw, (dict, list)):
                     key_count = len(raw)
-                elif isinstance(raw, list):
-                    key_count = len(raw)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 key_count = 0
 
             rows.append(
@@ -2069,11 +2134,11 @@ class CacheView(ft.Column):
 
         try:
             raw = json.loads(fp.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception:  # noqa: BLE001
             return []
 
         if isinstance(raw, dict):
-            return sorted([str(k) for k in raw.keys()])
+            return sorted([str(k) for k in raw])
 
         if isinstance(raw, list):
             out = []
@@ -2227,10 +2292,10 @@ class CacheView(ft.Column):
         if hasattr(self, "shard_workspace_card"):
             self.shard_workspace_card.visible = show_workspace
         # 防護：確保 page 存在且已完全初始化
-        if self.page is not None and hasattr(self, 'page'):
+        if self.page is not None and hasattr(self, "page"):
             try:
                 self.page.update()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
     def _open_shard_workspace_tab(self):
@@ -2285,7 +2350,7 @@ class CacheView(ft.Column):
 
         try:
             raw = json.loads(fp.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception:  # noqa: BLE001
             return None
 
         if isinstance(raw, dict):
@@ -2438,7 +2503,7 @@ class CacheView(ft.Column):
             self._notify("已套用 C3 DST 並寫入快取", "info")
             if self.page:
                 self.page.update()
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             self._notify(f"套用 DST 失敗：{ex}", "error")
 
     def _on_shard_dst_revert(self, e):
@@ -2462,7 +2527,7 @@ class CacheView(ft.Column):
         try:
             await ft.Clipboard().set(str(self.shard_dst_field.value or ""))
             self._notify("已複製 C3 DST 內容", "info")
-        except Exception:
+        except Exception:  # noqa: BLE001
             self._notify("複製失敗", "error")
 
     def _on_shard_dst_restore_latest(self, e):
@@ -2670,7 +2735,7 @@ class CacheView(ft.Column):
             self._notify("已套用選取舊值並寫入快取", "info")
             if self.page:
                 self.page.update()
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             self._notify(f"套用舊值失敗：{ex}", "error")
 
     def _on_shard_page_first(self, e):
@@ -2804,7 +2869,7 @@ class CacheView(ft.Column):
                 border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                 border_radius=8,
                 bgcolor=theme.WHITE,
-                alignment=ft.alignment.Alignment(-1,-1),
+                alignment=ft.alignment.Alignment(-1, -1),
                 content=ft.ListView(
                     expand=True,
                     spacing=4,
@@ -2850,7 +2915,7 @@ class CacheView(ft.Column):
                                 ),
                                 controls=[
                                     ft.Container(
-                                        alignment=ft.alignment.Alignment(-1,-1),
+                                        alignment=ft.alignment.Alignment(-1, -1),
                                         content=shard_list_container,
                                     )
                                 ],
@@ -3048,8 +3113,10 @@ class CacheView(ft.Column):
             self.shard_history_window.visible = True
             source_text = "分片區"
 
-        show_snack(self.page,
-            f"歷史紀錄視窗已打開（{source_text}，可拖曳標題列移動）", theme.BLUE_400
+        show_snack(
+            self.page,
+            f"歷史紀錄視窗已打開（{source_text}，可拖曳標題列移動）",
+            theme.BLUE_400,
         )
         if self.page:
             self.page.update()
@@ -3172,7 +3239,7 @@ class CacheView(ft.Column):
             self._render_query_detail()
             self._notify("已套用選取舊值並寫入快取", "info")
             self.update()
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             self._notify(f"套用舊值失敗：{ex}", "error")
 
     def _render_query_detail(self):
@@ -3231,8 +3298,8 @@ class CacheView(ft.Column):
             self.query_result_list.controls.append(
                 empty_state(
                     icon=ft.Icons.SEARCH_OFF,
-                    title="无搜索结果",
-                    message="请尝试其他关键词或调整筛选条件",
+                    title="沒有搜尋結果",
+                    message="請嘗試其他關鍵字或調整篩選條件",
                 )
             )
         else:
@@ -3344,7 +3411,7 @@ class CacheView(ft.Column):
         """跳轉到指定頁碼"""
         try:
             p = int((self.tf_page_jump.value or "1").strip())
-        except Exception:
+        except Exception:  # noqa: BLE001
             p = 1
         self.query_page = p
         self._render_query_results()
@@ -3354,7 +3421,7 @@ class CacheView(ft.Column):
         """變更每頁顯示數量"""
         try:
             self.query_page_size = int(self.dd_page_size.value or "50")
-        except Exception:
+        except Exception:  # noqa: BLE001
             self.query_page_size = 50
         self.query_page = 1
 
@@ -3407,7 +3474,7 @@ class CacheView(ft.Column):
             self._notify("已套用並寫入快取", "info")
             if self.page:
                 self.page.update()
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             self._notify(f"套用失敗：{ex}", "error")
 
     def _on_revert_dst(self, e):
@@ -3448,7 +3515,8 @@ class CacheView(ft.Column):
 
         # 只填入 DST 輸入框，不寫入快取
         self.query_detail_dst.value = old_dst
-        show_snack(self.page,
+        show_snack(
+            self.page,
             "已載入最新歷史紀錄到 DST（尚未寫入快取，請點「套用」儲存）",
             theme.BLUE_400,
         )
@@ -3458,11 +3526,12 @@ class CacheView(ft.Column):
     def _on_query_input_change(self, e):
         """偵測輸入框變更"""
         current = self.tf_query_input.value or ""
-        if current != self._last_query_value:
-            # 有變更
-            self.query_change_hint.value = "⚠️ 偵測到變更，請重新搜尋"
-            self.query_change_hint.color = theme.WARNING
-            self.update()
+        hint = "⚠️ 偵測到變更，請重新搜尋" if current != self._last_query_value else ""
+        if self.query_change_hint.value == hint:
+            return  # 提示沒變就不刷新（原本每按一鍵都整個快取頁 diff）
+        self.query_change_hint.value = hint
+        self.query_change_hint.color = theme.WARNING
+        self.query_change_hint.update()
 
     def _on_query_mode_change(self, e):
         """偵測搜尋模式變更"""
@@ -3497,6 +3566,32 @@ class CacheView(ft.Column):
             ]
         )
 
+        self.query_search_hint.value = f"搜尋中：{query} …"
+        self.query_search_hint.color = theme.GREY_700
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            self._apply_query_results(self._compute_query_results(query, mode, targets))
+            return
+
+        seq = self._query_seq = getattr(self, "_query_seq", 0) + 1
+        self.query_search_hint.update()
+
+        async def _search():
+            # 大量快取時搜尋需數秒，改在執行緒執行，避免凍結 UI
+            try:
+                dedup = await asyncio.to_thread(
+                    self._compute_query_results, query, mode, targets
+                )
+            except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
+                self._notify(f"搜尋失敗：{ex}", "error")
+                return
+            if seq == self._query_seq:  # 只套用最後一次搜尋
+                self._apply_query_results(dedup)
+
+        run_task(_search)
+
+    def _compute_query_results(self, query: str, mode: str, targets: list) -> list:
+        """查詢快取（可在背景執行緒執行；不修改任何控制項）。"""
         out = []
         for ctype in targets:
             if mode in ("KEY", "ALL"):
@@ -3539,6 +3634,10 @@ class CacheView(ft.Column):
             seen.add(k)
             dedup.append(row)
 
+        return dedup
+
+    def _apply_query_results(self, dedup: list) -> None:
+        """（event loop 上）套用搜尋結果。"""
         self.query_results = dedup
         self.query_page = 1
         self.query_selected_result = (

@@ -1,12 +1,11 @@
 """
 測試 text_processor 的執行緒安全行為（ATK-003 / Gap 2）。
 
-驗證 apply_replace_rules / _init_replace_rules_cache 在多執行緒環境下，
-各執行緒的 rules 不會互相污染。
+驗證 apply_replace_rules 在多執行緒環境下，各執行緒的 rules 不會互相污染。
 
 # 背景
-text_processor.py 已改用 threading.local() 實作執行緒隔離快取。
-本測試確認該實作對以下情境有效：
+編譯後的規則以「規則清單物件」為 key 快取（Task 7 / B11b），
+每次呼叫都使用自己傳入的清單對應的結果。本測試確認以下情境：
 1. 兩個執行緒使用不同 rules，結果各自正確。
 2. 10 個執行緒同時初始化不同 rules，各自結果正確。
 """
@@ -20,12 +19,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from translation_tool.utils.text_processor import apply_replace_rules, _init_replace_rules_cache
-
+from translation_tool.utils.text_processor import apply_replace_rules
 
 # =============================================================================
 # ATK-003 / Gap 2：執行緒隔離測試
 # =============================================================================
+
 
 def test_two_threads_different_rules_isolation():
     """
@@ -35,7 +34,7 @@ def test_two_threads_different_rules_isolation():
         - Thread A 用 rules [hello→HI_A]
         - Thread B 用 rules [hello→HI_B]
     Act：
-        - 兩執行緒並發呼叫 _init_replace_rules_cache + apply_replace_rules
+        - 兩執行緒並發呼叫 apply_replace_rules
     Assert：
         - A 的結果是 "HI_A world"（不是 "HI_B world"）
         - B 的結果是 "HI_B world"（不是 "HI_A world"）
@@ -44,8 +43,6 @@ def test_two_threads_different_rules_isolation():
     lock = threading.Lock()
 
     def worker(label: str, rules):
-        # 每個執行緒獨立初始化自己的 rules 快取
-        _init_replace_rules_cache(rules)
         # 用同一段文字測試
         output = apply_replace_rules("hello world", rules)
         with lock:
@@ -74,7 +71,7 @@ def test_ten_threads_concurrent_rules_initialization():
     Arrange：
         - 10 個執行緒各自持有不同 rules（替換同一段文字的不同部分）
     Act：
-        - 所有執行緒並發執行 _init_replace_rules_cache + apply_replace_rules
+        - 所有執行緒並發執行 apply_replace_rules
     Assert：
         - 每個執行緒的輸出都符合自己攜帶的 rules，不被其他執行緒影響
     """
@@ -83,12 +80,10 @@ def test_ten_threads_concurrent_rules_initialization():
 
     # 10 個不同的 label → rule 對應表
     labels_and_rules = [
-        (f"T{i}", [{"from": "hello", "to": f"HI_{i:02d}"}])
-        for i in range(10)
+        (f"T{i}", [{"from": "hello", "to": f"HI_{i:02d}"}]) for i in range(10)
     ]
 
     def worker(label: str, rules):
-        _init_replace_rules_cache(rules)
         output = apply_replace_rules("hello world", rules)
         with lock:
             results[label] = output
@@ -111,10 +106,7 @@ def test_ten_threads_concurrent_rules_initialization():
         if actual != expected:
             all_pass = False
 
-    assert all_pass, (
-        "至少有一個執行緒的結果不符合預期。"
-        f" 結果：{results}"
-    )
+    assert all_pass, f"至少有一個執行緒的結果不符合預期。 結果：{results}"
 
 
 def test_thread_isolation_with_complex_rules():
@@ -138,7 +130,6 @@ def test_thread_isolation_with_complex_rules():
             {"from": "red", "to": "紅色"},
             {"from": "blue", "to": "藍色"},
         ]
-        _init_replace_rules_cache(rules)
         out = apply_replace_rules("red blue green", rules)
         with lock:
             results["X"] = out
@@ -148,7 +139,6 @@ def test_thread_isolation_with_complex_rules():
             {"from": "red", "to": "RED"},
             {"from": "green", "to": "綠色"},
         ]
-        _init_replace_rules_cache(rules)
         out = apply_replace_rules("red blue green", rules)
         with lock:
             results["Y"] = out
@@ -172,27 +162,30 @@ def test_thread_isolation_with_complex_rules():
     assert "紅色" not in results["Y"], f"Y 意外出現 '紅色'（被 X 污染）：{results['Y']}"
 
 
-def test_reinit_same_thread_does_not_overwrite():
+def test_updated_rules_take_effect_immediately():
+    """B11b：規則變更後立即生效，不會沿用舊快取。
+
+    涵蓋：新的清單、append、remove、就地修改 to、就地修改 from。
     """
-    驗證同一執行緒重複呼叫 _init_replace_rules_cache 不會覆寫既有快取。
+    first = [{"from": "hello", "to": "FIRST"}]
+    assert apply_replace_rules("hello world", first) == "FIRST world"
 
-    Arrange：
-        - 同一執行緒連續初始化兩組不同的 rules
-    Act：
-        - 第一次：hello→FIRST
-        - 第二次：hello→SECOND（預期不覆寫）
-        - 套用 rules
-    Assert：
-        - 結果仍是 FIRST（因為快取已被第一次初始化鎖定）
-    """
-    # 先初始化第一組規則
-    _init_replace_rules_cache([{"from": "hello", "to": "FIRST"}])
-    # 嘗試用第二組規則覆寫（預期被 guard 跳過）
-    _init_replace_rules_cache([{"from": "hello", "to": "SECOND"}])
+    # 新的清單
+    second = [{"from": "hello", "to": "SECOND"}]
+    assert apply_replace_rules("hello world", second) == "SECOND world"
 
-    # 套用時應使用第一組（因為 cache 已被初始化）
-    result = apply_replace_rules("hello world", [{"from": "hello", "to": "FIRST"}])
+    # append
+    first.append({"from": "world", "to": "世界"})
+    assert apply_replace_rules("hello world", first) == "FIRST 世界"
 
-    assert result == "FIRST world", (
-        f"快取被意外覆寫，預期 'FIRST world'，實際：'{result}'"
-    )
+    # 就地修改 to（清單長度不變）
+    first[0]["to"] = "EDITED"
+    assert apply_replace_rules("hello world", first) == "EDITED 世界"
+
+    # 就地修改 from
+    first[0]["from"] = "nothing"
+    assert apply_replace_rules("hello world", first) == "hello 世界"
+
+    # remove
+    first.pop()
+    assert apply_replace_rules("hello world", first) == "hello world"

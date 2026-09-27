@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import traceback
-from typing import Callable, Any
+from collections.abc import Callable
+from typing import Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
+from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +28,14 @@ def run_callable_task(
     try:
         session.start()
         ui_log_handler.set_session(session)
-        result = func(**kwargs)
+        # 註冊取消檢查：翻譯迴圈在批次之間、等待限流時會檢查
+        with cancel_scope(lambda: bool(getattr(session, "cancel_requested", False))):
+            result = func(**kwargs)
         return result
-    except Exception as e:
+    except TaskCancelled:
+        session.add_log("⏹ 任務已取消", level="warning")
+        return None
+    except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error("[%s] %s\n%s", task_name, e, full_traceback)
         if add_session_log_on_error:

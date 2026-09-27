@@ -16,11 +16,12 @@ import logging
 import os
 import re
 import zipfile
+from collections.abc import Callable, Generator
 from pathlib import Path
-from typing import Any, Dict, Generator, Callable
+from typing import Any
 
 from ..utils.config_manager import load_config
-from ..utils.log_unit import log_info, log_error
+from ..utils.log_unit import log_error
 
 log = logging.getLogger(__name__)
 
@@ -29,9 +30,10 @@ VERSION_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+
 def get_file_hash(data: bytes) -> str:
     """計算資料的 SHA-256 雜湊值（16進位字串）。
-    
+
     Args:
         data: 原始位元組資料
     Returns:
@@ -39,9 +41,10 @@ def get_file_hash(data: bytes) -> str:
     """
     return hashlib.sha256(data).hexdigest()
 
+
 def _normalize_jar_base_name(jar_filename: str) -> str:
     """從 JAR 檔名提取乾淨的 Mod ID（去除版本號、forge/fabric 等前輈字）。
-    
+
     Args:
         jar_filename: JAR 檔案路徑或檔名
     Returns:
@@ -60,6 +63,7 @@ def _normalize_jar_base_name(jar_filename: str) -> str:
     else:
         base_name = clean_name
     return base_name or base_full
+
 
 def extract_from_jar_impl(
     jar_path: str,
@@ -119,7 +123,10 @@ def extract_from_jar_impl(
                         output_root, final_mod_folder, normalized_path
                     )
 
-                if normalized_path in jar_results and jar_results[normalized_path] is not None:
+                if (
+                    normalized_path in jar_results
+                    and jar_results[normalized_path] is not None
+                ):
                     source_data = jar_results[normalized_path].encode("utf-8")
                 else:
                     with zf.open(member) as source:
@@ -139,9 +146,12 @@ def extract_from_jar_impl(
                     target.write(source_data)
                 extracted_count += 1
 
-        return {"status": "success", "extracted": extracted_count, "skipped": skipped_count}
-    except Exception as e:
-        import traceback
+        return {
+            "status": "success",
+            "extracted": extracted_count,
+            "skipped": skipped_count,
+        }
+    except Exception as e:  # noqa: BLE001
         log_error("[extract] %s >>> EXCEPTION: %s", jar_path_obj.name, e)
         return {"status": "error", "extracted": 0, "skipped": 0}
 
@@ -153,8 +163,8 @@ def run_extraction_process_impl(
     process_name: str,
     *,
     find_jar_files_fn: Callable[[str], list[str]],
-    extract_from_jar_fn: Callable[[str, str, re.Pattern], Dict[str, Any]],
-) -> Generator[Dict[str, Any], None, None]:
+    extract_from_jar_fn: Callable[[str, str, re.Pattern], dict[str, Any]],
+) -> Generator[dict[str, Any], None, None]:
     """實作：對 mods 目錄下所有 JAR 執行批量提取流程。
 
     使用執行緒池並行處理，並在提取過程中回傳進度。
@@ -178,30 +188,36 @@ def run_extraction_process_impl(
 
     if total_jars == 0:
         log.info("在 '%s' 中未找到任何 .jar 檔案。", mods_dir)
-        yield {'progress': 1.0}
+        yield {"progress": 1.0}
         return
 
     log.info("開始從 %s 個 .jar 檔案中提取 %s 檔案...", total_jars, process_name)
-    yield {'progress': 0.0, 'log': '[掃描階段] 開始掃描 JAR 檔案...'}
+    yield {"progress": 0.0, "log": "[掃描階段] 開始掃描 JAR 檔案..."}
 
     import threading
+
     scan_done = threading.Event()
     scan_error = [None]  # 利用 list 可變特性跨執行緒傳遞
     scan_results_local = [{}]  # [0] = dict | None
 
     def _scan_in_background():
         try:
-            scan_results_local[0] = scan_jars(jar_dir=Path(mods_dir), patterns=[target_regex.pattern])
-        except Exception as e:
+            scan_results_local[0] = scan_jars(
+                jar_dir=Path(mods_dir), patterns=[target_regex.pattern]
+            )
+        except Exception as e:  # noqa: BLE001
             scan_error[0] = e
         finally:
             scan_done.set()
 
-    scan_thread = threading.Thread(target=_scan_in_background, name="scan-jars-bg", daemon=True)
+    scan_thread = threading.Thread(
+        target=_scan_in_background, name="scan-jars-bg", daemon=True
+    )
     scan_thread.start()
 
     # 輪詢等待 scan 完成，每 0.5s 检查一次
     import time
+
     scan_start = time.time()
     last_yielded_at = 0.0
     YIELD_INTERVAL = 5.0  # 節流：每 5 秒才 yield 一次，避免日誌洗版
@@ -210,47 +226,91 @@ def run_extraction_process_impl(
         # 節流 yield：避免 100+ JAR × 30s 掃描產生 ~60 條重複訊息淹沒日誌
         if elapsed - last_yielded_at >= YIELD_INTERVAL:
             last_yielded_at = elapsed
-            log.info("[scan_jars] background scanning... elapsed=%.1fs, jar_count=%s", elapsed, total_jars)
-            yield {'progress': 0.0, 'current': 0, 'total': total_jars, 'log': f'[掃描階段] 已掃描 {total_jars} 個 JAR ({elapsed:.0f}s)...'}
+            log.info(
+                "[scan_jars] background scanning... elapsed=%.1fs, jar_count=%s",
+                elapsed,
+                total_jars,
+            )
+            yield {
+                "progress": 0.0,
+                "current": 0,
+                "total": total_jars,
+                "log": f"[掃描階段] 已掃描 {total_jars} 個 JAR ({elapsed:.0f}s)...",
+            }
         scan_done.wait(timeout=0.5)
     # 最後一次 yield 確保 UI 收到完成訊號
     elapsed = time.time() - scan_start
     if elapsed - last_yielded_at >= 0:  # 永遠 yield 最終狀態
         last_yielded_at = elapsed
-        yield {'progress': 0.0, 'current': 0, 'total': total_jars, 'log': f'[掃描階段] 已掃描 {total_jars} 個 JAR ({elapsed:.0f}s)...'}
+        yield {
+            "progress": 0.0,
+            "current": 0,
+            "total": total_jars,
+            "log": f"[掃描階段] 已掃描 {total_jars} 個 JAR ({elapsed:.0f}s)...",
+        }
 
     scan_thread.join()
     elapsed_total = time.time() - scan_start
 
     if scan_error[0]:
         log_error("[scan_jars] background scan failed: %s", scan_error[0])
-        yield {'progress': 0.0, 'error': True, 'log': f'[錯誤] 掃描失敗: {scan_error[0]}'}
+        yield {
+            "progress": 0.0,
+            "error": True,
+            "log": f"[錯誤] 掃描失敗: {scan_error[0]}",
+        }
         return
 
     all_scan_results = scan_results_local[0]
-    log.info("[scan_jars] 完成，共 %s 個 JAR 被預掃描，耗時 %.1fs", len(all_scan_results), elapsed_total)
-    yield {'progress': 0.0, 'current': 0, 'total': total_jars, 'log': f'[提取階段] 開始提取 ({total_jars} 個 JAR)...'}
+    log.info(
+        "[scan_jars] 完成，共 %s 個 JAR 被預掃描，耗時 %.1fs",
+        len(all_scan_results),
+        elapsed_total,
+    )
+    yield {
+        "progress": 0.0,
+        "current": 0,
+        "total": total_jars,
+        "log": f"[提取階段] 開始提取 ({total_jars} 個 JAR)...",
+    }
 
     processed_count = 0
     total_extracted = 0
     total_skipped = 0
+    failed_jars: list[str] = []
     cpu_count = os.cpu_count() or 2
-    config_workers = load_config().get("translator", {}).get("parallel_execution_workers")
+    config_workers = (
+        load_config().get("translator", {}).get("parallel_execution_workers")
+    )
     if isinstance(config_workers, int) and config_workers > 0:
         max_workers = min(config_workers, 32)
-        log.info("[workers] config=%s, actual=%s (cpu_count=%s, capped at 32)", config_workers, max_workers, cpu_count)
+        log.info(
+            "[workers] config=%s, actual=%s (cpu_count=%s, capped at 32)",
+            config_workers,
+            max_workers,
+            cpu_count,
+        )
     else:
         max_workers = max(1, cpu_count // 2)
-        log.info("[workers] default=%s (config invalid/missing, cpu_count=%s)", max_workers, cpu_count)
+        log.info(
+            "[workers] default=%s (config invalid/missing, cpu_count=%s)",
+            max_workers,
+            cpu_count,
+        )
 
     import time as time_module
+
     _ex_start = time_module.time()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_jar = {}
         for jar in jar_files:
             _t_jar_submit = time_module.time()
-            future_to_jar[executor.submit(extract_from_jar_fn, jar, output_dir, target_regex, all_scan_results)] = (jar, _t_jar_submit)
+            future_to_jar[
+                executor.submit(
+                    extract_from_jar_fn, jar, output_dir, target_regex, all_scan_results
+                )
+            ] = (jar, _t_jar_submit)
 
         for future in concurrent.futures.as_completed(future_to_jar):
             jar_path, submit_time = future_to_jar[future]
@@ -261,43 +321,67 @@ def run_extraction_process_impl(
             prog = processed_count / total_jars
             try:
                 result = future.result()
-                if result['status'] == 'success':
-                    total_extracted += result['extracted']
-                    total_skipped += result['skipped']
-                log.info("[%s/%s] %s queue=%.1fs wall=%.1fs",
-                         processed_count, total_jars, os.path.basename(jar_path), queue_time, wall_time)
+                jar_name = os.path.basename(jar_path)
+                if result["status"] != "success":
+                    # 損毀或無法讀取的 JAR 必須計入失敗，不能被當成成功
+                    failed_jars.append(jar_name)
+                    yield {
+                        "progress": prog,
+                        "current": processed_count,
+                        "total": total_jars,
+                        "log": f"[ERROR] 無法提取 {jar_name}（JAR 可能已損毀或無法讀取）",
+                    }
+                    continue
+                total_extracted += result["extracted"]
+                total_skipped += result["skipped"]
+                log.info(
+                    "[%s/%s] %s queue=%.1fs wall=%.1fs",
+                    processed_count,
+                    total_jars,
+                    os.path.basename(jar_path),
+                    queue_time,
+                    wall_time,
+                )
                 yield {
-                    'progress': prog,
-                    'current': processed_count,
-                    'total': total_jars,
-                    'log': f"[{processed_count}/{total_jars}] {os.path.basename(jar_path)}",
+                    "progress": prog,
+                    "current": processed_count,
+                    "total": total_jars,
+                    "log": f"[{processed_count}/{total_jars}] {os.path.basename(jar_path)}",
                 }
-            except Exception as exc:
-                log_error("提取 %s 時產生例外: %s (wall=%.1fs)", os.path.basename(jar_path), exc, wall_time)
+            except Exception as exc:  # noqa: BLE001
+                failed_jars.append(os.path.basename(jar_path))
+                log_error(
+                    "提取 %s 時產生例外: %s (wall=%.1fs)",
+                    os.path.basename(jar_path),
+                    exc,
+                    wall_time,
+                )
                 yield {
-                    'progress': prog,
-                    'current': processed_count,
-                    'total': total_jars,
-                    'log': f"[ERROR] 提取 {os.path.basename(jar_path)} 時產生例外",
+                    "progress": prog,
+                    "current": processed_count,
+                    "total": total_jars,
+                    "log": f"[ERROR] 提取 {os.path.basename(jar_path)} 時產生例外",
                 }
 
-    log.info(
-        "--- %s 提取完成！ ---\n已檢查 %s/%s 個 JAR 檔案。\n  - 新提取或更新的檔案: %s 個\n  - 因內容相同而跳過的檔案: %s 個",
-        process_name,
-        processed_count,
-        total_jars,
-        total_extracted,
-        total_skipped,
+    summary = (
+        f"--- {process_name} 提取完成！ ---\n已檢查 {processed_count}/{total_jars} 個 JAR 檔案。\n"
+        f"  - 新提取或更新的檔案: {total_extracted} 個\n"
+        f"  - 因內容相同而跳過的檔案: {total_skipped} 個"
     )
-    yield {
-            'progress': 1.0,
-            'current': processed_count,
-            'total': total_jars,
-            'log': f"--- {process_name} 提取完成！ ---\n已檢查 {processed_count}/{total_jars} 個 JAR 檔案。\n  - 新提取或更新的檔案: {total_extracted} 個\n  - 因內容相同而跳過的檔案: {total_skipped} 個",
-            'stats': {
-                'success': total_extracted,
-                'warnings': total_skipped,
-                'failures': 0,
-                'total_files': total_extracted,
-            },
-        }
+    if failed_jars:
+        summary += f"\n  - 無法提取的 JAR: {len(failed_jars)} 個（{', '.join(failed_jars[:10])}"
+        summary += "…）" if len(failed_jars) > 10 else "）"
+    log.info(summary)
+    final = {
+        "progress": 1.0,
+        "current": processed_count,
+        "total": total_jars,
+        "log": summary,
+        "stats": {
+            "success": total_extracted,
+            "warnings": total_skipped,
+            "failures": len(failed_jars),
+            "total_files": total_extracted,
+        },
+    }
+    yield final

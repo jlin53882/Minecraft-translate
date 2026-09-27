@@ -9,9 +9,34 @@ import math
 import os
 import shutil
 import time
-from typing import Any, Dict, Generator, List
+from collections.abc import Generator
+from typing import Any
 
 import orjson
+
+from translation_tool.core.ftb_translator_clean import (
+    clean_ftbquests_from_raw_impl,
+    prune_en_us_by_zh_tw,
+    prune_flat_en_by_tw,
+)
+from translation_tool.core.ftb_translator_clean import (
+    deep_merge_3way as _deep_merge_3way_impl,
+)
+from translation_tool.core.ftb_translator_export import (
+    export_ftbquests_raw_json_impl,
+    resolve_ftbquests_quests_root_impl,
+)
+from translation_tool.core.ftb_translator_template import (
+    prepare_ftbquests_lang_template_only_impl,
+)
+from translation_tool.core.lm_translator_shared import _get_default_batch_size
+from translation_tool.utils.cancellation import raise_if_cancelled
+from translation_tool.utils.log_unit import (
+    get_formatted_duration,
+    log_error,
+    log_info,
+    log_warning,
+)
 
 from ..plugins.ftbquests.ftbquests_snbt_extractor import process_quest_folder
 from ..utils.config_manager import load_config
@@ -23,36 +48,17 @@ from ..utils.text_processor import (
     orjson_pretty_str,
     recursive_translate,
 )
-from translation_tool.core.ftb_translator_clean import (
-    deep_merge_3way as _deep_merge_3way_impl,
-    clean_ftbquests_from_raw_impl,
-    prune_en_us_by_zh_tw,
-    prune_flat_en_by_tw,
-)
-from translation_tool.core.ftb_translator_export import (
-    export_ftbquests_raw_json_impl,
-    resolve_ftbquests_quests_root_impl,
-)
-from translation_tool.core.ftb_translator_template import (
-    prepare_ftbquests_lang_template_only_impl,
-)
-from translation_tool.core.lm_translator_shared import _get_default_batch_size
-from translation_tool.utils.log_unit import (
-    get_formatted_duration,
-    log_error,
-    log_info,
-    log_warning,
-)
+
 
 def _translate_single_file(
     file_path: str,
     input_dir: str,
     output_dir: str,
-    rules: List[Dict[str, str]],
-    custom_translations: Dict[str, str],
+    rules: list[dict[str, str]],
+    custom_translations: dict[str, str],
 ) -> str:
     """翻譯單一檔案（JSON / SNBT / JS / MD）並寫入輸出目錄。
-    
+
     Args:
         file_path: 要翻譯的檔案完整路徑。
         input_dir: 來源目錄（用於計算相對路徑）。
@@ -85,14 +91,19 @@ def _translate_single_file(
                 f.write(translated_content)
 
         return log_msg
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log_error("處理檔案 %s 時發生錯誤: %s", relative_path, e)
         return f"處理 {relative_path} 失敗: {e}"
 
-def translate_directory_generator(input_dir: str) -> Generator[Dict[str, Any], None, None]:
+
+def translate_directory_generator(
+    input_dir: str,
+) -> Generator[dict[str, Any], None, None]:
     """主翻譯流程，支援多執行緒處理。"""
     output_dir_name = (
-        load_config().get("ftb_translator", {}).get("output_dir_name", "FTB任務翻譯輸出")
+        load_config()
+        .get("ftb_translator", {})
+        .get("output_dir_name", "FTB任務翻譯輸出")
     )
     output_dir = os.path.join(os.path.dirname(input_dir), output_dir_name)
     os.makedirs(output_dir, exist_ok=True)
@@ -100,10 +111,14 @@ def translate_directory_generator(input_dir: str) -> Generator[Dict[str, Any], N
     log_info(f"FTB 翻譯開始 (多執行緒模式)，來源: {input_dir}")
 
     rules = load_replace_rules(
-        load_config().get("translator", {}).get("replace_rules_path", "replace_rules.json")
+        load_config()
+        .get("translator", {})
+        .get("replace_rules_path", "replace_rules.json")
     )
     custom_translations = load_custom_translations(
-        load_config().get("translator", {}).get("custom_translator_folder", "custom_translators")
+        load_config()
+        .get("translator", {})
+        .get("custom_translator_folder", "custom_translators")
     )
 
     files_to_translate = []
@@ -117,7 +132,9 @@ def translate_directory_generator(input_dir: str) -> Generator[Dict[str, Any], N
 
     total_files = len(files_to_translate)
     if total_files == 0:
-        log_warning("在指定目錄中沒有找到任何 .json、.snbt 或 .snbt.qkdownloading 檔案。")
+        log_warning(
+            "在指定目錄中沒有找到任何 .json、.snbt 或 .snbt.qkdownloading 檔案。"
+        )
 
     start_time = time.time()
 
@@ -128,7 +145,9 @@ def translate_directory_generator(input_dir: str) -> Generator[Dict[str, Any], N
         processed_count = 0
         cpu_count = os.cpu_count() or 2
         max_allowed_workers = max(1, cpu_count // 2)
-        config_workers = load_config().get("translator", {}).get("parallel_execution_workers")
+        config_workers = (
+            load_config().get("translator", {}).get("parallel_execution_workers")
+        )
         if isinstance(config_workers, int) and config_workers > 0:
             max_workers = min(config_workers, max_allowed_workers)
         else:
@@ -166,7 +185,7 @@ def translate_directory_generator(input_dir: str) -> Generator[Dict[str, Any], N
                 os.makedirs(os.path.dirname(dst_path), exist_ok=True)
                 shutil.copy2(src_path, dst_path)
                 copied_count += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log_error(f"複製檔案 {src_path} 失敗: {e}")
 
     log_info(f"複製階段完成，總共複製了 {copied_count} 個非翻譯檔案。")
@@ -177,9 +196,10 @@ def translate_directory_generator(input_dir: str) -> Generator[Dict[str, Any], N
     log_info(final_log_msg)
     yield {"progress": 1.0}
 
+
 def deep_merge_3way(zh_tw: dict, zh_cn: dict, en_us: dict) -> dict:
     """對 FTB Quests 語系字典（巢狀結構）做三方合併，優先順序：zh_tw > zh_cn（轉繁）> en_us。
-    
+
     Args:
         zh_tw: 繁體中文鍵值對（支援巢狀 dict）。
         zh_cn: 簡體中文鍵值對（會自動轉為繁體）。
@@ -189,9 +209,10 @@ def deep_merge_3way(zh_tw: dict, zh_cn: dict, en_us: dict) -> dict:
     """
     return _deep_merge_3way_impl(zh_tw, zh_cn, en_us)
 
+
 def resolve_ftbquests_quests_root(base_dir: str) -> str:
     """解析 FTB Quests 設定檔的根目錄。
-    
+
     Args:
         base_dir: FTB 模組目錄路徑。
     Returns:
@@ -199,9 +220,10 @@ def resolve_ftbquests_quests_root(base_dir: str) -> str:
     """
     return resolve_ftbquests_quests_root_impl(base_dir)
 
+
 def export_ftbquests_raw_json(base_dir: str, *, output_dir: str | None = None) -> dict:
     """將 FTB Quests 設定匯出為原始 JSON 檔案。
-    
+
     Args:
         base_dir: FTB 模組目錄。
         output_dir: 可選，自訂輸出目錄。
@@ -217,9 +239,10 @@ def export_ftbquests_raw_json(base_dir: str, *, output_dir: str | None = None) -
         log_info_fn=log_info,
     )
 
+
 def clean_ftbquests_from_raw(base_dir: str, *, output_dir: str | None = None) -> dict:
     """清理 FTB Quests 原始設定，移除不需要的欄位。
-    
+
     Args:
         base_dir: FTB 模組目錄。
         output_dir: 可選，自訂輸出目錄。
@@ -234,6 +257,7 @@ def clean_ftbquests_from_raw(base_dir: str, *, output_dir: str | None = None) ->
         log_info_fn=log_info,
     )
 
+
 def prepare_ftbquests_lang_template_only(
     input_config_dir: str,
     output_config_dir: str,
@@ -241,7 +265,7 @@ def prepare_ftbquests_lang_template_only(
     prefer_lang: str = "zh_cn",
 ) -> dict:
     """從 FTB Quests 設定目錄產生語言模板（僅含翻譯鍵名，不含翻譯內容）。
-    
+
     Args:
         input_config_dir: 來源設定目錄。
         output_config_dir: 輸出設定目錄。
@@ -255,7 +279,9 @@ def prepare_ftbquests_lang_template_only(
         prefer_lang=prefer_lang,
     )
 
+
 # NOTE: FTB pipeline does NOT use translate_directory_generator
+
 
 def run_ftb_pipeline(
     directory_path: str,
@@ -289,11 +315,18 @@ def run_ftb_pipeline(
         )
 
     if step_translate:
-        clean_paths = result.get("clean_paths") if isinstance(result.get("clean_paths"), dict) else {}
+        raise_if_cancelled()  # 前面步驟期間已要求取消時，不開始送 API
+        clean_paths = (
+            result.get("clean_paths")
+            if isinstance(result.get("clean_paths"), dict)
+            else {}
+        )
         en_pending_dir = (clean_paths or {}).get("en_pending_dir")
 
         if not en_pending_dir:
-            raise RuntimeError("Step3 需要 Step2 Clean 先產出 en_pending_dir（請先勾 Step2）")
+            raise RuntimeError(
+                "Step3 需要 Step2 Clean 先產出 en_pending_dir（請先勾 Step2）"
+            )
 
         input_lang_dir = os.path.dirname(en_pending_dir)
         out_root = output_dir or os.path.join(directory_path, "Output")
@@ -301,9 +334,13 @@ def run_ftb_pipeline(
             out_root, "ftbquests", "LM翻譯輸出", "config", "ftbquests", "quests", "lang"
         )
 
-        log_info(f"🌐 [步驟 3/4] 啟動 Gemini AI 翻譯階段... (模擬模式: {'開啟' if dry_run else '關閉'})")
+        log_info(
+            f"🌐 [步驟 3/4] 啟動 Gemini AI 翻譯階段... (模擬模式: {'開啟' if dry_run else '關閉'})"
+        )
 
-        from ..plugins.ftbquests.ftbquests_lmtranslator import translate_ftb_pending_to_zh_tw
+        from ..plugins.ftbquests.ftbquests_lmtranslator import (
+            translate_ftb_pending_to_zh_tw,
+        )
 
         lm_res = translate_ftb_pending_to_zh_tw(
             input_lang_dir=input_lang_dir,
@@ -316,11 +353,15 @@ def run_ftb_pipeline(
         try:
             cache_miss = lm_res.get("cache_miss") if isinstance(lm_res, dict) else None
             batch_size = _get_default_batch_size("ftbquests", None)
-            est_batches = math.ceil(cache_miss / batch_size) if isinstance(cache_miss, int) and batch_size > 0 else None
+            est_batches = (
+                math.ceil(cache_miss / batch_size)
+                if isinstance(cache_miss, int) and batch_size > 0
+                else None
+            )
             if isinstance(lm_res, dict):
                 lm_res = dict(lm_res)
                 lm_res["estimated_batches"] = est_batches
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
         log_info(f"✅ AI 翻譯階段結束。詳細統計：\n{orjson_pretty_str(lm_res)}")
@@ -331,13 +372,10 @@ def run_ftb_pipeline(
         return result
 
     if step_inject:
-        try:
-            from ..plugins.ftbquests.ftbquests_snbt_inject import (
-                inject_ftbquests_quests_from_zh_tw_json,
-                inject_ftbquests_zh_tw_from_jsons,
-            )
-        except Exception:
-            raise
+        from ..plugins.ftbquests.ftbquests_snbt_inject import (
+            inject_ftbquests_quests_from_zh_tw_json,
+            inject_ftbquests_zh_tw_from_jsons,
+        )
 
         out_root = output_dir or os.path.join(directory_path, "Output")
         zh_tw_dir = os.path.join(
@@ -358,15 +396,23 @@ def run_ftb_pipeline(
 
         if not lang_exists and not quests_exists:
             try:
-                existing_jsons = [f for f in os.listdir(zh_tw_dir) if f.lower().endswith(".json")] if os.path.isdir(zh_tw_dir) else []
-            except Exception:
+                existing_jsons = (
+                    [f for f in os.listdir(zh_tw_dir) if f.lower().endswith(".json")]
+                    if os.path.isdir(zh_tw_dir)
+                    else []
+                )
+            except Exception:  # noqa: BLE001
                 existing_jsons = []
 
             raise FileNotFoundError(
                 "找不到 Step3 產出的任何 zh_tw JSON：\n"
                 f"- {zh_tw_lang_json_path}\n"
                 f"- {zh_tw_quests_json_path}\n"
-                + (f"\n（目前 zh_tw 目錄內的 json：{existing_jsons}）" if existing_jsons else "")
+                + (
+                    f"\n（目前 zh_tw 目錄內的 json：{existing_jsons}）"
+                    if existing_jsons
+                    else ""
+                )
                 + "\n（請先勾 Step3：Gemini 翻譯 pending/en_us → 輸出到 output_dir/config/.../lang/zh_tw/）"
             )
 
@@ -431,7 +477,10 @@ def run_ftb_pipeline(
                     "reason": "no_lang_template",
                 }
 
-        log_info("✅ Output lang dir = " + os.path.join(output_config_dir, "ftbquests", "quests", "lang"))
+        log_info(
+            "✅ Output lang dir = "
+            + os.path.join(output_config_dir, "ftbquests", "quests", "lang")
+        )
 
         duration = get_formatted_duration(start_time)
         quests_summary = result.get("inject", {}).get("quests", {}) or {}
@@ -439,7 +488,11 @@ def run_ftb_pipeline(
         patched_changed = int(quests_summary.get("patched_keys_changed") or 0)
         patched_candidates = int(quests_summary.get("patched_keys_candidates") or 0)
         missing_updated = max(patched_candidates - patched_changed, 0)
-        coverage = (patched_changed / patched_candidates * 100.0) if patched_candidates > 0 else 0.0
+        coverage = (
+            (patched_changed / patched_candidates * 100.0)
+            if patched_candidates > 0
+            else 0.0
+        )
 
         log_info(
             "🎉 --- FTB Quests 翻譯流程全部完成 --- \n"
@@ -454,14 +507,15 @@ def run_ftb_pipeline(
 
     return result
 
+
 __all__ = [
-    "translate_directory_generator",
+    "clean_ftbquests_from_raw",
     "deep_merge_3way",
+    "export_ftbquests_raw_json",
+    "prepare_ftbquests_lang_template_only",
     "prune_en_us_by_zh_tw",
     "prune_flat_en_by_tw",
     "resolve_ftbquests_quests_root",
-    "export_ftbquests_raw_json",
-    "clean_ftbquests_from_raw",
-    "prepare_ftbquests_lang_template_only",
     "run_ftb_pipeline",
+    "translate_directory_generator",
 ]

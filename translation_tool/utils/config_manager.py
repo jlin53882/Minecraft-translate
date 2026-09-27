@@ -13,12 +13,13 @@
 
 # /minecraft_translator_flet/translator_tool/utils/config_manager.py (最終修正版)
 
-import os
+import copy
 import json
 import logging
+import os
+import threading
 from datetime import datetime
 from pathlib import Path
-import copy
 
 
 # PR27：統一路徑解析基準，避免 legacy cwd 依賴造成找不到 config / 資源檔。
@@ -46,7 +47,7 @@ def load_config_example() -> dict:
     try:
         with EXAMPLE_PATH.open(encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, IOError):
+    except (OSError, json.JSONDecodeError):
         return {}
 
 
@@ -130,6 +131,7 @@ DEFAULT_CONFIG = {
         "initial_batch_size_md": 100,
         "min_batch_size": 50,
         "batch_shrink_factor": 0.5,
+        "rpm_cooldown_sec": 0,
         "rate_limit": {
             "timeout": 600,
             "sleep_seconds_between_batches": 0.0,
@@ -189,6 +191,8 @@ DEFAULT_CONFIG = {
             "11. 只要 value 包含人類語言就必須翻譯\n"
         ),
         "translator": {
+            # lang 值長度 ≤ 此值且不含空白時視為非顯示文字而略過（0 = 不略過）
+            "short_text_skip_len": 3,
             "skip_terms": [
                 "api documentation",
                 "api docs",
@@ -273,6 +277,48 @@ DEFAULT_CONFIG = {
 }
 
 
+# load_config 快取：以設定檔的 (mtime_ns, size) 判斷是否需要重新讀取。
+# 翻譯流程每筆資料都會讀設定（11 萬筆約多花 100 秒），檔案未變就直接用快取。
+_CONFIG_CACHE: dict = {"key": None, "config": None}
+_CONFIG_CACHE_LOCK = threading.Lock()
+
+
+def _file_sig(path: Path):
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def clear_config_cache() -> None:
+    """清除 load_config 快取（寫入設定後呼叫）。"""
+    with _CONFIG_CACHE_LOCK:
+        _CONFIG_CACHE["key"] = None
+        _CONFIG_CACHE["config"] = None
+
+
+def load_config_shared(config_path: str | os.PathLike | None = None) -> dict:
+    """回傳快取中的設定物件（唯讀，呼叫端不可修改）；供高頻讀取使用。"""
+    resolved_config_path = resolve_project_path(config_path or CONFIG_PATH)
+    key = (
+        str(resolved_config_path),
+        _file_sig(resolved_config_path),
+        str(EXAMPLE_PATH),
+        _file_sig(EXAMPLE_PATH),
+        id(DEFAULT_CONFIG),
+    )
+    with _CONFIG_CACHE_LOCK:
+        if _CONFIG_CACHE["key"] == key:
+            return _CONFIG_CACHE["config"]
+    config, cacheable = _load_config_uncached(resolved_config_path)
+    if cacheable:
+        with _CONFIG_CACHE_LOCK:
+            _CONFIG_CACHE["key"] = key
+            _CONFIG_CACHE["config"] = config
+    return config
+
+
 def load_config(config_path: str | os.PathLike | None = None) -> dict:
     """
     載入並合併設定檔，實作三層 fallback 機制。
@@ -292,9 +338,13 @@ def load_config(config_path: str | os.PathLike | None = None) -> dict:
     - 使用者自訂：config.json 有值 → 以使用者為準
 
     回傳：合併後的新 dict（避免直接回傳 DEFAULT_CONFIG 物件被外部修改）。
+    檔案未變動時使用快取，並回傳複本讓呼叫端可自由修改。
     """
-    resolved_config_path = resolve_project_path(config_path or CONFIG_PATH)
+    return copy.deepcopy(load_config_shared(config_path))
 
+
+def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
+    """實際讀檔與合併；回傳 (config, 是否可快取)。"""
     # Layer 3: DEFAULT_CONFIG as base
     # 為什麼用 DEFAULT_CONFIG 而不是空 dict 作為起點？
     # 因為 DEFAULT_CONFIG 是「唯一真相來源」——所有欄位都應該有定義值，
@@ -312,11 +362,11 @@ def load_config(config_path: str | os.PathLike | None = None) -> dict:
         try:
             with resolved_config_path.open("r", encoding="utf-8") as f:
                 user_config = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(
                 f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。"
             )
-            return base
+            return base, False
 
     # Merge: user (Layer 1) > example (Layer 2) > default (Layer 3)
     # 全部用 deep_merge 一次搞定，確保 config.example.json 新增的 top-level key
@@ -331,7 +381,7 @@ def load_config(config_path: str | os.PathLike | None = None) -> dict:
     _validate_lm_translator_config(config["lm_translator"])
     if isinstance(config.get("translator"), dict):
         _validate_translator_config(config["translator"])
-    return config
+    return config, True
 
 
 def save_config(config, config_path: str | os.PathLike | None = None):
@@ -341,6 +391,8 @@ def save_config(config, config_path: str | os.PathLike | None = None):
           False = 寫入失敗
     """
     resolved_config_path = resolve_project_path(config_path or CONFIG_PATH)
+    # 同一秒內連續寫入時 mtime 可能不變，直接清掉快取
+    clear_config_cache()
     try:
         resolved_config_path.parent.mkdir(parents=True, exist_ok=True)
         with resolved_config_path.open("w", encoding="utf-8") as f:
@@ -352,11 +404,12 @@ def save_config(config, config_path: str | os.PathLike | None = None):
         # 能 dump 代表結構是乾淨的
         json.dumps(written_data, sort_keys=True)
 
-        logging.info(f"設定已成功儲存並驗證至 {resolved_config_path}")
+        clear_config_cache()
+        logging.info(f"設定已成功儲存並驗證至 {resolved_config_path}")  # noqa: LOG015
         return True
 
-    except Exception as e:
-        logging.error(f"錯誤：儲存或驗證設定檔失敗: {e}")
+    except Exception as e:  # noqa: BLE001
+        logging.error(f"錯誤：儲存或驗證設定檔失敗: {e}")  # noqa: LOG015
         return False
 
 
@@ -386,7 +439,7 @@ def setup_logging(config):
         logging.root.removeHandler(handler)
 
     # 建立 log 資料夾
-    today = datetime.now().strftime("%Y%m%d")
+    today = datetime.now().astimezone().strftime("%Y%m%d")  # 本地日期
     log_folder = resolved_log_dir / today
     log_folder.mkdir(parents=True, exist_ok=True)
     log_file = log_folder / "app.log"
@@ -397,7 +450,7 @@ def setup_logging(config):
     ]
 
     logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
-    logging.info("日誌系統已成功設定。")
+    logging.info("日誌系統已成功設定。")  # noqa: LOG015
 
 
 def get_models_config(cfg: dict) -> dict[str, dict]:
@@ -410,7 +463,7 @@ def get_models_config(cfg: dict) -> dict[str, dict]:
     models = lm_cfg.get("models", {})
 
     if not isinstance(models, dict):
-        logging.warning("models 設定型別錯誤，已忽略（需為 dict）")
+        logging.warning("models 設定型別錯誤，已忽略（需為 dict）")  # noqa: LOG015
         return {}
 
     safe_models: dict[str, dict] = {}
@@ -429,8 +482,6 @@ def get_models_config(cfg: dict) -> dict[str, dict]:
 class ConfigValidationError(ValueError):
     """Config 欄位驗證失敗時拋出。"""
 
-    pass
-
 
 def _validate_lm_translator_config(lm: dict) -> None:
     """驗證 lm_translator 關鍵欄位的型別（ATK-C-2）。
@@ -447,7 +498,7 @@ def _validate_lm_translator_config(lm: dict) -> None:
     # ⚠️ iniital 棄用警告（iniital 是拼寫錯誤，正確為 initial）
     iniital_keys = [k for k in lm if k.startswith("iniital_")]
     if iniital_keys:
-        logging.warning(
+        logging.warning(  # noqa: LOG015
             f"[iniital-deprecation] ⚠️ 偵測到已棄用的 iniital_* 設定鍵：{iniital_keys}。"
             f" 正確拼寫為 initial_batch_size_*，請更新 config.json。"
             f" iniital_* 鍵已不再被翻譯引擎讀取，將使用內建預設值。"
@@ -463,21 +514,23 @@ def _validate_lm_translator_config(lm: dict) -> None:
 
     # 2. initial_batch_size_* 必須是 int
     for key, value in lm.items():
-        if key.startswith("initial_batch_size_") and value is not None:
-            if not isinstance(value, int):
-                raise ConfigValidationError(
-                    f"lm_translator.{key} 必須為 int，"
-                    f"目前為 {type(value).__name__}：'{value}'"
-                )
+        if (
+            key.startswith("initial_batch_size_")
+            and value is not None
+            and not isinstance(value, int)
+        ):
+            raise ConfigValidationError(
+                f"lm_translator.{key} 必須為 int，"
+                f"目前為 {type(value).__name__}：'{value}'"
+            )
 
     # 3. parallel_execution_workers 必須是 int > 0
     workers = lm.get("parallel_execution_workers")
-    if workers is not None:
-        if not isinstance(workers, int) or workers <= 0:
-            raise ConfigValidationError(
-                f"lm_translator.parallel_execution_workers 必須為正整數，"
-                f"目前為 {type(workers).__name__}：{workers}"
-            )
+    if workers is not None and (not isinstance(workers, int) or workers <= 0):
+        raise ConfigValidationError(
+            f"lm_translator.parallel_execution_workers 必須為正整數，"
+            f"目前為 {type(workers).__name__}：{workers}"
+        )
 
     # 4. temperature 必須是 0.0~2.0 的 float
     temp = lm.get("temperature")
@@ -511,7 +564,7 @@ def _validate_translator_config(translator: dict) -> None:
 
 
 def deep_merge(default: dict, override: dict) -> dict:
-    """ """
+    """遞迴合併兩個 dict，override 的值優先（回傳新 dict）。"""
     result = default.copy()
     for k, v in override.items():
         if k in result and isinstance(result[k], dict) and isinstance(v, dict):

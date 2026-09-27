@@ -4,13 +4,10 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import flet as ft
-from typing import Callable, Tuple, Any
+from collections.abc import Callable
+from typing import Any
 
-# 導入 UI 主題
-from app.ui import theme
-from app.ui.snack import show_snack
-from translation_tool.utils.log_unit import log_info
+import flet as ft
 
 # 導入我們需要的服務
 from app.services import (
@@ -19,10 +16,15 @@ from app.services import (
     run_variant_compare_tsv_service,
 )
 
+# 導入 UI 主題
+from app.ui import theme
+from app.ui.snack import show_snack
+
 # 導入新的拆分元件
 from app.views._log import LogView
 from app.views.qc_base import QCBase
 from app.views.untranslated_checker import UntranslatedChecker
+from translation_tool.utils.log_unit import log_debug
 
 
 class QCView(ft.Column):
@@ -46,10 +48,13 @@ class QCView(ft.Column):
         # --- 共用的日誌 UI ---
         self.progress_bar = ft.ProgressBar(value=0, visible=False)
         # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器）
+        # 本頁可捲動；日誌給固定高度（原本 expand 在捲動欄內只剩一行高）
         self.log_view = LogView(
             page=self._page,
             mode="append",
             max_lines=2000,
+            height=360,
+            expand=False,
         )
 
         # --- 建立 QCBase 任務執行器 ---
@@ -205,7 +210,7 @@ class QCView(ft.Column):
         target_textfield: ft.TextField,
         title: str,
         folder_mode: bool,
-        file_filter: str = None,
+        file_filter: str | None = None,
     ):
         """建立檔案/資料夾選擇按鈕（使用 Flet FilePicker，無 tkinter）。"""
         return ft.IconButton(
@@ -216,14 +221,13 @@ class QCView(ft.Column):
             ),
         )
 
-
     def _pick_file_or_directory(
         self,
         e: ft.ControlEvent,
         target_textfield: ft.TextField,
         title: str,
         folder_mode: bool,
-        file_filter: str = None,
+        file_filter: str | None = None,
     ):
         """使用 Flet FilePicker 選擇檔案或目錄（無 tkinter，不會彈出 Windows 視窗）。"""
         self._pending_pick = {
@@ -242,7 +246,6 @@ class QCView(ft.Column):
         target: ft.TextField = pick["target"]
         title: str = pick["title"]
         folder_mode: bool = pick["folder_mode"]
-        file_filter: str = pick["file_filter"]
 
         path = ""
         try:
@@ -263,7 +266,7 @@ class QCView(ft.Column):
                 self.page.update()
             else:
                 show_snack(self.page, "您已取消選擇", theme.BLUE_GREY_500)
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             show_snack(self.page, f"開啟對話框失敗: {ex}")
 
     def set_controls_disabled(self, disabled: bool):
@@ -283,6 +286,12 @@ class QCView(ft.Column):
             ctrl.disabled = disabled
         self.page.update()
 
+    async def _scroll_to_log(self):
+        try:
+            await self.scroll_to(offset=-1, duration=300)
+        except Exception as ex:  # noqa: BLE001 - 捲動失敗不影響任務
+            log_debug(f"[QC] 捲動到日誌失敗: {ex}")
+
     def start_task(self, task_type: str):
         """處理開始品質檢查任務"""
         self.log_view.clear()
@@ -291,9 +300,13 @@ class QCView(ft.Column):
         self.progress_bar.visible = True
         self.set_controls_disabled(True)
         self.page.update()
+        # 日誌在頁面最下方：開始任務時自動捲到底，讓使用者看得到進度
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is not None:
+            run_task(self._scroll_to_log)
 
         target_func: Callable[..., Any] | None = None
-        args: Tuple[str, ...] = tuple()
+        args: tuple[str, ...] = ()
 
         # 1. 未翻譯檢查 (已移至 UntranslatedChecker 元件，這裡保留作為備用)
         if task_type == "untranslated":
@@ -317,7 +330,9 @@ class QCView(ft.Column):
                 show_snack(self.page, "錯誤：請填寫所有「JSON 資料夾差異比對」的路徑！")
                 self.set_controls_disabled(False)
                 return
-            self.log_view.add("[系統] 開始執行 JSON 資料夾簡繁差異比較...", level="system")
+            self.log_view.add(
+                "[系統] 開始執行 JSON 資料夾簡繁差異比較...", level="system"
+            )
             target_func = run_variant_compare_service
             args = (cn_dir, tw_dir, out_dir)
 
@@ -329,7 +344,9 @@ class QCView(ft.Column):
                 show_snack(self.page, "錯誤：請填寫所有「TSV 單檔案差異比對」的路徑！")
                 self.set_controls_disabled(False)
                 return
-            self.log_view.add("[系統] 開始執行 TSV 單檔案簡繁差異比較...", level="system")
+            self.log_view.add(
+                "[系統] 開始執行 TSV 單檔案簡繁差異比較...", level="system"
+            )
             target_func = run_variant_compare_tsv_service
             args = (tsv_path, out_csv_path)
 

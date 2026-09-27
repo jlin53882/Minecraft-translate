@@ -7,14 +7,12 @@ refactored during the Extractor View architecture cleanup.
 Goal: ensure each helper has deterministic, isolated unit tests so future
 refactors don't accidentally break the contract.
 """
+
 from __future__ import annotations
 
 import os
 import tempfile
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 
 # =============================================================================
@@ -34,8 +32,11 @@ class TestGetOutputFolderNames:
             names = get_output_folder_names()
 
         assert set(names.keys()) == {
-            "lang_extract", "book_extract", "dual_extract",
-            "lang_preview", "book_preview",
+            "lang_extract",
+            "book_extract",
+            "dual_extract",
+            "lang_preview",
+            "book_preview",
         }
         # Verify defaults (Chinese suffix)
         assert names["lang_extract"] == "_提取lang_輸出"
@@ -142,43 +143,36 @@ class TestGetLangCodes:
 class TestPrepareExtractionPaths:
     """Tests for prepare_extraction_paths()."""
 
-    def test_lang_mode_with_explicit_output(self):
-        """lang mode + explicit output_path should use lang suffix."""
+    def test_explicit_output_is_used_as_is(self):
+        """C14：已指定輸出目錄時直接使用，不再多加一層子資料夾。"""
         from app.services_impl.pipelines.extract_service import prepare_extraction_paths
 
         with patch(
             "app.services_impl.pipelines.extract_service.load_config",
             return_value={},
         ):
-            result = prepare_extraction_paths("/mods", "lang", "/output")
+            for mode in ("lang", "book", "dual"):
+                assert prepare_extraction_paths("/mods", mode, "/output") == "/output"
+            # 頁面自動補齊的路徑已含 suffix，不可再疊一層
+            assert (
+                prepare_extraction_paths("/x/mods", "lang", "/x/mods_提取lang_輸出")
+                == "/x/mods_提取lang_輸出"
+            )
 
-        # Should contain both /output and the lang suffix
-        assert "output" in result
-        assert "_提取lang_輸出" in result
-
-    def test_book_mode_uses_book_suffix(self):
-        """book mode should use book_extract suffix."""
+    def test_empty_output_uses_mode_suffix(self):
+        """未指定輸出目錄時，依模式使用對應的子資料夾名稱。"""
         from app.services_impl.pipelines.extract_service import prepare_extraction_paths
 
         with patch(
             "app.services_impl.pipelines.extract_service.load_config",
             return_value={},
         ):
-            result = prepare_extraction_paths("/mods", "book", "/output")
-
-        assert "_提取book_輸出" in result
-
-    def test_dual_mode_uses_dual_suffix(self):
-        """dual mode should use dual_extract suffix."""
-        from app.services_impl.pipelines.extract_service import prepare_extraction_paths
-
-        with patch(
-            "app.services_impl.pipelines.extract_service.load_config",
-            return_value={},
-        ):
-            result = prepare_extraction_paths("/mods", "dual", "/output")
-
-        assert "_提取both_輸出" in result
+            assert prepare_extraction_paths("/mods", "book", "").endswith(
+                "_提取book_輸出"
+            )
+            assert prepare_extraction_paths("/mods", "dual", "").endswith(
+                "_提取both_輸出"
+            )
 
     def test_empty_output_falls_back_to_mods_dir(self):
         """When output_path is empty, mods_dir is used as base."""
@@ -326,24 +320,30 @@ class TestSelectExtractionGenerator:
                 call_log["name"] = name
                 call_log["args"] = args
                 call_log["kwargs"] = kwargs
+
                 # Return an empty generator (so callers can iterate without error)
                 def gen():
                     return
                     yield  # unreachable, makes this a generator function
+
                 gen.__name__ = name
                 return gen()
+
             return factory
 
         monkeypatch.setattr(
-            extract_service, "extract_lang_files_generator",
+            extract_service,
+            "extract_lang_files_generator",
             make_recorder("extract_lang_files_generator"),
         )
         monkeypatch.setattr(
-            extract_service, "extract_book_files_generator",
+            extract_service,
+            "extract_book_files_generator",
             make_recorder("extract_book_files_generator"),
         )
         monkeypatch.setattr(
-            extract_service, "extract_dual_files_generator",
+            extract_service,
+            "extract_dual_files_generator",
             make_recorder("extract_dual_files_generator"),
         )
 
@@ -351,7 +351,9 @@ class TestSelectExtractionGenerator:
 
     def test_lang_mode_invokes_lang_generator(self, monkeypatch):
         """lang mode should invoke the lang generator."""
-        from app.services_impl.pipelines.extract_service import _select_extraction_generator
+        from app.services_impl.pipelines.extract_service import (
+            _select_extraction_generator,
+        )
 
         log = self._install_mocks(monkeypatch)
         _select_extraction_generator("lang", "/mods", "/out")
@@ -361,7 +363,9 @@ class TestSelectExtractionGenerator:
 
     def test_book_mode_invokes_book_generator(self, monkeypatch):
         """book mode should invoke the book generator."""
-        from app.services_impl.pipelines.extract_service import _select_extraction_generator
+        from app.services_impl.pipelines.extract_service import (
+            _select_extraction_generator,
+        )
 
         log = self._install_mocks(monkeypatch)
         _select_extraction_generator("book", "/mods", "/out")
@@ -371,7 +375,9 @@ class TestSelectExtractionGenerator:
 
     def test_dual_mode_invokes_dual_generator(self, monkeypatch):
         """dual mode should invoke the dual generator."""
-        from app.services_impl.pipelines.extract_service import _select_extraction_generator
+        from app.services_impl.pipelines.extract_service import (
+            _select_extraction_generator,
+        )
 
         log = self._install_mocks(monkeypatch)
         _select_extraction_generator("dual", "/mods", "/out")
@@ -381,7 +387,9 @@ class TestSelectExtractionGenerator:
 
     def test_unknown_mode_falls_back_to_dual(self, monkeypatch):
         """Unknown mode (e.g. 'foo') falls back to dual generator."""
-        from app.services_impl.pipelines.extract_service import _select_extraction_generator
+        from app.services_impl.pipelines.extract_service import (
+            _select_extraction_generator,
+        )
 
         log = self._install_mocks(monkeypatch)
         _select_extraction_generator("foo", "/mods", "/out")
@@ -390,7 +398,9 @@ class TestSelectExtractionGenerator:
 
     def test_lang_codes_passed_to_lang_generator(self, monkeypatch):
         """When lang_codes is provided, it should be passed to the generator."""
-        from app.services_impl.pipelines.extract_service import _select_extraction_generator
+        from app.services_impl.pipelines.extract_service import (
+            _select_extraction_generator,
+        )
 
         log = self._install_mocks(monkeypatch)
         _select_extraction_generator("lang", "/mods", "/out", lang_codes=["en_us"])
@@ -420,8 +430,10 @@ class TestRunExtractionLoop:
 
         def gen():
             yield {"progress": 0.5, "log": "halfway"}
-            yield {"progress": 1.0, "stats": {"success": 10, "warnings": 2, "failures": 1}}
-
+            yield {
+                "progress": 1.0,
+                "stats": {"success": 10, "warnings": 2, "failures": 1},
+            }
 
         stats = run_extraction_loop(gen())
         assert stats["success"] == 10
@@ -459,7 +471,7 @@ class TestRunExtractionLoop:
             if len(yielded) >= 2:
                 cancelled[0] = True
 
-        stats = run_extraction_loop(gen(), cancelled_flag=cancelled, on_update=on_update)
+        run_extraction_loop(gen(), cancelled_flag=cancelled, on_update=on_update)
         # Should have stopped early due to cancellation
         assert len(yielded) < 10
 
@@ -488,6 +500,7 @@ class TestRunExtractionServices:
 
     def _make_session_stub(self):
         """Create a mock TaskSession for testing."""
+
         class StubSession:
             def __init__(self):
                 self.calls = []
@@ -514,8 +527,11 @@ class TestRunExtractionServices:
 
     def test_lang_service_calls_session_methods(self):
         """run_lang_extraction_service should call session methods."""
-        from app.services_impl.pipelines.extract_service import run_lang_extraction_service
         from unittest.mock import MagicMock
+
+        from app.services_impl.pipelines.extract_service import (
+            run_lang_extraction_service,
+        )
 
         session = self._make_session_stub()
         with tempfile.TemporaryDirectory() as tmp:
@@ -524,7 +540,7 @@ class TestRunExtractionServices:
             os.makedirs(mods)
 
             # Patch the underlying generator to be empty
-            with patch(
+            with patch(  # noqa: SIM117
                 "app.services_impl.pipelines.extract_service.extract_lang_files_generator",
                 return_value=iter([]),
             ):
@@ -533,7 +549,9 @@ class TestRunExtractionServices:
                     "app.services_impl.pipelines.extract_service.UI_LOG_HANDLER"
                 ) as mock_handler:
                     mock_handler.set_session = MagicMock()
-                    run_lang_extraction_service(mods, out, session, lang_codes=["en_us"])
+                    run_lang_extraction_service(
+                        mods, out, session, lang_codes=["en_us"]
+                    )
 
         # Verify session lifecycle
         assert "start" in session.calls
@@ -543,8 +561,11 @@ class TestRunExtractionServices:
 
     def test_book_service_calls_session_methods(self):
         """run_book_extraction_service should call session methods."""
-        from app.services_impl.pipelines.extract_service import run_book_extraction_service
         from unittest.mock import MagicMock
+
+        from app.services_impl.pipelines.extract_service import (
+            run_book_extraction_service,
+        )
 
         session = self._make_session_stub()
         with tempfile.TemporaryDirectory() as tmp:
@@ -552,7 +573,7 @@ class TestRunExtractionServices:
             out = os.path.join(tmp, "out")
             os.makedirs(mods)
 
-            with patch(
+            with patch(  # noqa: SIM117
                 "app.services_impl.pipelines.extract_service.extract_book_files_generator",
                 return_value=iter([]),
             ):
@@ -560,15 +581,20 @@ class TestRunExtractionServices:
                     "app.services_impl.pipelines.extract_service.UI_LOG_HANDLER"
                 ) as mock_handler:
                     mock_handler.set_session = MagicMock()
-                    run_book_extraction_service(mods, out, session, lang_codes=["en_us"])
+                    run_book_extraction_service(
+                        mods, out, session, lang_codes=["en_us"]
+                    )
 
         assert "start" in session.calls
         assert "finish" in session.calls
 
     def test_dual_service_calls_session_methods(self):
         """run_dual_extraction_service should call session methods."""
-        from app.services_impl.pipelines.extract_service import run_dual_extraction_service
         from unittest.mock import MagicMock
+
+        from app.services_impl.pipelines.extract_service import (
+            run_dual_extraction_service,
+        )
 
         session = self._make_session_stub()
         with tempfile.TemporaryDirectory() as tmp:
@@ -576,7 +602,7 @@ class TestRunExtractionServices:
             out = os.path.join(tmp, "out")
             os.makedirs(mods)
 
-            with patch(
+            with patch(  # noqa: SIM117
                 "app.services_impl.pipelines.extract_service.extract_dual_files_generator",
                 return_value=iter([]),
             ):
@@ -584,15 +610,20 @@ class TestRunExtractionServices:
                     "app.services_impl.pipelines.extract_service.UI_LOG_HANDLER"
                 ) as mock_handler:
                     mock_handler.set_session = MagicMock()
-                    run_dual_extraction_service(mods, out, session, lang_codes=["en_us"])
+                    run_dual_extraction_service(
+                        mods, out, session, lang_codes=["en_us"]
+                    )
 
         assert "start" in session.calls
         assert "finish" in session.calls
 
     def test_lang_service_handles_exception(self):
         """When the generator raises, the service should call set_error."""
-        from app.services_impl.pipelines.extract_service import run_lang_extraction_service
         from unittest.mock import MagicMock
+
+        from app.services_impl.pipelines.extract_service import (
+            run_lang_extraction_service,
+        )
 
         session = self._make_session_stub()
 
@@ -600,27 +631,30 @@ class TestRunExtractionServices:
             raise RuntimeError("explode")
             yield  # Make this a generator
 
-        with patch(
-            "app.services_impl.pipelines.extract_service.extract_lang_files_generator",
-            side_effect=boom,
-        ):
-            with patch(
+        with (
+            patch(
+                "app.services_impl.pipelines.extract_service.extract_lang_files_generator",
+                side_effect=boom,
+            ),
+            patch(
                 "app.services_impl.pipelines.extract_service.UI_LOG_HANDLER"
-            ) as mock_handler:
-                mock_handler.set_session = MagicMock()
-                run_lang_extraction_service("/mods", "/out", session)
+            ) as mock_handler,
+        ):
+            mock_handler.set_session = MagicMock()
+            run_lang_extraction_service("/mods", "/out", session)
 
         assert session.error is True
         assert "set_error" in session.calls
 
     def test_all_services_release_log_handler(self):
         """All three services should call UI_LOG_HANDLER.set_session(None) in finally."""
+        from unittest.mock import MagicMock
+
         from app.services_impl.pipelines.extract_service import (
-            run_lang_extraction_service,
             run_book_extraction_service,
             run_dual_extraction_service,
+            run_lang_extraction_service,
         )
-        from unittest.mock import MagicMock
 
         services = [
             ("lang", run_lang_extraction_service),
@@ -638,19 +672,22 @@ class TestRunExtractionServices:
 
                 # Patch the right generator for each service
                 gen_name = f"extract_{name}_files_generator"
-                with patch(
-                    f"app.services_impl.pipelines.extract_service.{gen_name}",
-                    return_value=iter([]),
-                ):
-                    with patch(
+                with (
+                    patch(
+                        f"app.services_impl.pipelines.extract_service.{gen_name}",
+                        return_value=iter([]),
+                    ),
+                    patch(
                         "app.services_impl.pipelines.extract_service.UI_LOG_HANDLER",
                         mock_handler,
-                    ):
-                        svc_func(mods, out, session)
+                    ),
+                ):
+                    svc_func(mods, out, session)
 
             # Verify set_session(None) was called (release)
             none_calls = [
-                call for call in mock_handler.set_session.call_args_list
+                call
+                for call in mock_handler.set_session.call_args_list
                 if call.args and call.args[0] is None
             ]
             assert len(none_calls) >= 1, f"{name} service did not release log handler"
@@ -664,7 +701,9 @@ class TestRunExtractionWithSession:
 
     def test_session_add_log_called_for_log_updates(self):
         """Log updates from generator should call session.add_log."""
-        from app.services_impl.pipelines.extract_service import _run_extraction_with_session
+        from app.services_impl.pipelines.extract_service import (
+            _run_extraction_with_session,
+        )
 
         class StubSession:
             def __init__(self):
@@ -708,7 +747,9 @@ class TestRunExtractionWithSession:
 
     def test_session_set_error_called_when_error_update(self):
         """An 'error' update triggers session.set_error()."""
-        from app.services_impl.pipelines.extract_service import _run_extraction_with_session
+        from app.services_impl.pipelines.extract_service import (
+            _run_extraction_with_session,
+        )
 
         class StubSession:
             def __init__(self):
@@ -744,7 +785,9 @@ class TestRunExtractionWithSession:
 
     def test_log_limiter_filters_out_updates(self):
         """When GLOBAL_LOG_LIMITER.filter returns None, that update is skipped."""
-        from app.services_impl.pipelines.extract_service import _run_extraction_with_session
+        from app.services_impl.pipelines.extract_service import (
+            _run_extraction_with_session,
+        )
 
         class StubSession:
             def __init__(self):
@@ -787,3 +830,13 @@ class TestRunExtractionWithSession:
         assert "first" in session.logs
         assert "filtered" not in session.logs
         assert "last" in session.logs
+
+
+def test_preview_file_count_by_mode():
+    """N3：預覽清單只列出有可提取檔案的 JAR。"""
+    from app.views.extractor.extractor_dialog import _preview_file_count
+
+    assert _preview_file_count({"count": 0}, "lang") == 0
+    assert _preview_file_count({"count": 3}, "book") == 3
+    assert _preview_file_count({"lang_count": 0, "book_count": 2}, "dual") == 2
+    assert _preview_file_count({}, "dual") == 0

@@ -8,9 +8,8 @@ import re
 import threading
 from typing import Any
 
-from ..utils.config_manager import load_config
-from ..utils.log_unit import log_info, log_error, log_debug
-
+from ..utils.config_manager import load_config, load_config_shared
+from ..utils.log_unit import log_debug, log_error, log_info
 
 # =========================
 # 1. 執行緒安全的 API Key 索引追蹤器
@@ -271,7 +270,7 @@ HASH_PREFIX_PATTERN = re.compile(r"^\s*#")  # 任何 # 開頭（含前置空白�
 
 
 def needs_translation_text(s: str) -> bool:
-    """ """
+    """判斷文字是否仍需翻譯（非空、非中文、非純數字、非 § / $( token）。"""
     if not s or not isinstance(s, str):
         return False
 
@@ -283,12 +282,8 @@ def needs_translation_text(s: str) -> bool:
     if s.strip().isdigit():
         return False
 
-    # 常見不該翻的 token
-    if s.startswith("§") or s.startswith("$("):
-        return False
-
-    # 還有英文 → 需要翻
-    return True
+    # 常見不該翻的 token；其餘（還有英文）→ 需要翻
+    return not s.startswith(("§", "$("))
 
 
 def value_fully_translated(value) -> bool:
@@ -434,8 +429,39 @@ def build_skip_terms_pattern(terms: list[str]) -> re.Pattern:
 
 # =========================
 # 值是否值得翻譯（核心判斷）
+_RULES_CACHE: dict = {"config": None, "rules": None}
+
+
+def _short_text_skip_len() -> int:
+    return _translator_rules()[2]
+
+
+def _translator_rules() -> tuple[re.Pattern, tuple[str, ...], int]:
+    """回傳 (skip_terms pattern, translatable_keywords, short_text_skip_len)。
+
+    每筆資料都會呼叫；設定未變動時（load_config_shared 回傳同一物件）
+    直接使用已編譯的 pattern，不再逐筆讀設定檔與重新編譯 regex。
+    """
+    config = load_config_shared()
+    cached = _RULES_CACHE
+    if cached["config"] is config and cached["rules"] is not None:
+        return cached["rules"]
+    tr_cfg = config.get("lm_translator", {}).get("translator", {})
+    try:
+        short_len = max(0, int(tr_cfg.get("short_text_skip_len", 3)))
+    except (TypeError, ValueError):
+        short_len = 3
+    rules = (
+        build_skip_terms_pattern(tr_cfg.get("skip_terms", [])),
+        tuple(tr_cfg.get("translatable_keywords", [])),
+        short_len,
+    )
+    _RULES_CACHE.update(config=config, rules=rules)
+    return rules
+
+
 def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
-    """ """
+    """判斷值是否應送翻譯（排除中文、token、技術 ID、短字串、skip_terms 等）。"""
     if not isinstance(value, str):
         return False
 
@@ -459,24 +485,17 @@ def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
     if TECH_PATTERN.fullmatch(s):
         return False
 
-    # 太短且無空白，通常不是顯示文字
-    if is_lang and len(s) <= 3 and " " not in s:
+    # 太短且無空白，通常不是顯示文字（長度門檻可在設定調整；0 = 不略過，
+    # 例如 Axe / Ore / Rod 這類短名稱也會送翻譯）
+    if is_lang and len(s) <= _short_text_skip_len() and " " not in s:
         return False
 
         # 避開 #...（#heading、#title）
     if HASH_PREFIX_PATTERN.match(s):
         return False
 
-    # 需要跳過翻譯的關鍵字（可自由擴充）
-    SKIP_TERMS = (
-        load_config()
-        .get("lm_translator", {})
-        .get("translator", {})
-        .get("skip_terms", [])
-    )
-    # print("config skip_terms:",SKIP_TERMS)
-    # 生成跳過關鍵字的 regex pattern
-    SKIP_TERMS_PATTERN = build_skip_terms_pattern(SKIP_TERMS)
+    # 需要跳過翻譯的關鍵字（可在設定頁擴充；pattern 依設定版本快取）
+    SKIP_TERMS_PATTERN, _, _ = _translator_rules()
 
     # 避開指定關鍵字（API documentation / Discord）
     if (
@@ -490,10 +509,7 @@ def is_value_translatable(value: Any, *, is_lang: bool = False) -> bool:
         return False
 
     # 避開純數字
-    if is_lang and DIGIT_PATTERN.fullmatch(s):
-        return False
-
-    return True
+    return not (is_lang and DIGIT_PATTERN.fullmatch(s))
 
 
 # =========================
@@ -505,10 +521,5 @@ def is_translatable_field(key: str) -> bool:
     """
     key_lower = key.lower()
     # 允許翻譯的欄位（包含你自訂的各種文字欄位） 關鍵字版本
-    TRANSLATABLE_KEYWORDS = (
-        load_config()
-        .get("lm_translator", {})
-        .get("translator", {})
-        .get("translatable_keywords", [])
-    )
+    _, TRANSLATABLE_KEYWORDS, _ = _translator_rules()
     return any(keyword in key_lower for keyword in TRANSLATABLE_KEYWORDS)

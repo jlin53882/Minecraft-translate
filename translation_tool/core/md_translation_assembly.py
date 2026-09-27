@@ -9,9 +9,27 @@ from __future__ import annotations
 import math
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-
+from translation_tool.core.lm_translator_shared import _get_default_batch_size
+from translation_tool.core.md_translation_progress import _ProgressProxy
+from translation_tool.core.md_translation_stats import (
+    _LANG_MODE_LABELS,
+)
+from translation_tool.core.md_translation_stats import (
+    count_md_pending_docs as _count_md_pending_docs,
+)
+from translation_tool.core.md_translation_stats import (
+    log_md_step2_stats as _log_md_step2_stats_impl,
+)
+from translation_tool.core.md_translation_stats import (
+    normalize_lang_mode as _normalize_lang_mode,
+)
+from translation_tool.core.md_translation_steps import (
+    step1_extract_impl,
+    step2_translate_impl,
+    step3_inject_impl,
+)
 from translation_tool.plugins.md.md_extract_qa import (
     build_pending_json,
     contains_cjk,
@@ -28,19 +46,7 @@ from translation_tool.plugins.md.md_inject_qa import (
     map_lang_in_rel_path_allow_zh,
 )
 from translation_tool.plugins.md.md_lmtranslator import translate_md_pending
-from translation_tool.core.lm_translator_shared import _get_default_batch_size
-from translation_tool.core.md_translation_progress import _ProgressProxy
-from translation_tool.core.md_translation_stats import (
-    _LANG_MODE_LABELS,
-    count_md_pending_docs as _count_md_pending_docs,
-    log_md_step2_stats as _log_md_step2_stats_impl,
-    normalize_lang_mode as _normalize_lang_mode,
-)
-from translation_tool.core.md_translation_steps import (
-    step1_extract_impl,
-    step2_translate_impl,
-    step3_inject_impl,
-)
+from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.log_unit import (
     get_formatted_duration,
     log_info,
@@ -48,9 +54,11 @@ from translation_tool.utils.log_unit import (
     progress,
 )
 
-def _log_md_step2_stats(step2_res: Dict[str, Any]) -> None:
+
+def _log_md_step2_stats(step2_res: dict[str, Any]) -> None:
     """包裝層：將 step2 翻譯結果的統計資料以格式化日誌寫出（包含快取命中率、批次預估與 ETA）。"""
     _log_md_step2_stats_impl(step2_res, log_info_fn=log_info)
+
 
 def step1_extract(
     *,
@@ -60,7 +68,7 @@ def step1_extract(
     session=None,
     progress_base: float = 0.0,
     progress_span: float = 0.33,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """第一步：掃描 Markdown 資料夾，依語言模式過濾後抽取可翻譯區塊，輸出為待翻譯 JSON 檔案。"""
     return step1_extract_impl(
         input_dir=input_dir,
@@ -80,6 +88,7 @@ def step1_extract(
         log_warning_fn=log_warning,
     )
 
+
 def step2_translate(
     *,
     pending_dir: str,
@@ -89,7 +98,7 @@ def step2_translate(
     progress_span: float = 0.33,
     dry_run: bool = False,
     write_new_cache: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """第二步：讀取待翻譯 JSON，透過 LM API 翻譯內容，輸出翻譯後 JSON（支援快取與 Dry-Run）。"""
     return step2_translate_impl(
         pending_dir=pending_dir,
@@ -104,6 +113,7 @@ def step2_translate(
         progress_fn=progress,
     )
 
+
 def step3_inject(
     *,
     input_dir: str,
@@ -112,7 +122,7 @@ def step3_inject(
     session=None,
     progress_base: float = 0.66,
     progress_span: float = 0.33,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """第三步：將翻譯 JSON 的內容注入回原始 Markdown，輸出翻譯完成的 Markdown 檔案。"""
     return step3_inject_impl(
         input_dir=input_dir,
@@ -128,17 +138,18 @@ def step3_inject(
         progress_fn=progress,
     )
 
+
 def run_md_pipeline(
     input_dir: str,
     session=None,
-    output_dir: Optional[str] = None,
+    output_dir: str | None = None,
     dry_run: bool = False,
     step_extract: bool = True,
     step_translate: bool = True,
     step_inject: bool = True,
     write_new_cache: bool = True,
     lang_mode: str = "non_cjk_only",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Markdown 翻譯完整管線：依序執行抽取→翻譯→注入三步（各步可单独啟用或略過）。"""
     start_tick = time.perf_counter()
     lang_mode = _normalize_lang_mode(lang_mode)
@@ -157,7 +168,7 @@ def run_md_pipeline(
     translated_dir.mkdir(parents=True, exist_ok=True)
     final_dir.mkdir(parents=True, exist_ok=True)
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "paths": {
             "input": str(base),
             "out_root": str(out_root),
@@ -186,6 +197,7 @@ def run_md_pipeline(
 
     pending_json_count = _count_md_pending_docs(pending_dir)
     if step_translate:
+        raise_if_cancelled()  # 前面步驟期間已要求取消時，不開始送 API
         if pending_json_count == 0:
             log_info("[MD] [2/3] 已略過翻譯：沒有可翻譯 JSON")
             result["step2"] = {"skipped": True, "reason": "no_pending_json"}
@@ -230,14 +242,20 @@ def run_md_pipeline(
                 progress_span=0.33,
             )
 
-    step2_summary = result.get("step2", {}) if isinstance(result.get("step2"), dict) else {}
+    step2_summary = (
+        result.get("step2", {}) if isinstance(result.get("step2"), dict) else {}
+    )
     if step2_summary and not step2_summary.get("skipped"):
         total_blocks = step2_summary.get("total_blocks")
         cache_hit = step2_summary.get("cache_hit")
         cache_miss = step2_summary.get("cache_miss")
         files = step2_summary.get("files", step2_summary.get("written_files"))
         batch_size = _get_default_batch_size("md", None)
-        est_batches = math.ceil(cache_miss / batch_size) if isinstance(cache_miss, int) and batch_size > 0 else None
+        est_batches = (
+            math.ceil(cache_miss / batch_size)
+            if isinstance(cache_miss, int) and batch_size > 0
+            else None
+        )
         log_info(
             "\n🧾 [MD] 摘要：📁 共 %s 個檔案、🔢 總計 %s 個 Block；✅ 快取命中 %s；🤖 需要 AI 翻譯 %s 條；🧮 預估批次 %s 次。",
             files,
@@ -251,10 +269,11 @@ def run_md_pipeline(
     log_info("[MD] 流程完成，耗時：%s", get_formatted_duration(start_tick))
     return result
 
+
 __all__ = [
     "_ProgressProxy",
+    "run_md_pipeline",
     "step1_extract",
     "step2_translate",
     "step3_inject",
-    "run_md_pipeline",
 ]

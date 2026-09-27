@@ -5,20 +5,20 @@
 """
 
 import flet as ft
-from app.ui import theme
-from app.ui.snack import show_snack
-from translation_tool.utils.log_unit import log_info
-from app.views.cache_manager.cache_state import CacheQueryState
+
 from app.services_impl.cache.cache_services import (
     cache_get_entry_service,
+    cache_save_all_service,
     cache_search_service,
     cache_update_dst_service,
-    cache_save_all_service,
 )
+from app.ui import theme
+from app.ui.snack import show_snack
 from app.views.cache_manager.cache_history_store import (
-    history_now_ts,
     history_append_event,
+    history_now_ts,
 )
+from app.views.cache_manager.cache_state import CacheQueryState
 
 
 class CacheQueryPanel(ft.Container):
@@ -140,7 +140,7 @@ class CacheQueryPanel(ft.Container):
                 ft.dropdown.Option("200", "200"),
             ],
         )
-        self.dd_page_size.on_change = self._on_page_size_change
+        self.dd_page_size.on_select = self._on_page_size_change
         self.query_page_info = ft.Text("第 1 頁 / 共 1 頁")
         self.query_total_info = ft.Text("共 0 筆")
 
@@ -189,7 +189,9 @@ class CacheQueryPanel(ft.Container):
                                         ft.Container(
                                             expand=True,
                                             padding=8,
-                                            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
+                                            border=ft.Border.all(
+                                                1, theme.OUTLINE_VARIANT
+                                            ),
                                             border_radius=8,
                                             bgcolor=theme.WHITE,
                                             content=self.query_result_list,
@@ -212,10 +214,12 @@ class CacheQueryPanel(ft.Container):
                                         ft.Container(
                                             expand=True,
                                             padding=8,
-                                            border=ft.Border.all(1, theme.OUTLINE_VARIANT),
+                                            border=ft.Border.all(
+                                                1, theme.OUTLINE_VARIANT
+                                            ),
                                             border_radius=8,
                                             bgcolor=theme.WHITE,
-                                            alignment=ft.alignment.Alignment(-1,-1),
+                                            alignment=ft.alignment.Alignment(-1, -1),
                                             content=ft.Column(
                                                 [
                                                     self.query_detail_key,
@@ -326,9 +330,7 @@ class CacheQueryPanel(ft.Container):
         targets = (
             [target_type]
             if target_type != "ALL"
-            else [
-                ctype for ctype, _ in self._iter_type_states(self.last_overview_data)
-            ]
+            else [ctype for ctype, _ in self._iter_type_states(self.last_overview_data)]
         )
 
         out = []
@@ -379,9 +381,7 @@ class CacheQueryPanel(ft.Container):
         self.state.query_selected_result = (
             self.state.query_results[0] if self.state.query_results else None
         )
-        self.query_search_hint.value = (
-            f"搜尋完成：{len(self.state.query_results)} 筆"
-        )
+        self.query_search_hint.value = f"搜尋完成：{len(self.state.query_results)} 筆"
         self.query_search_hint.color = theme.BLUE_700
         self._render_query_results()
         self._render_query_detail()
@@ -543,7 +543,7 @@ class CacheQueryPanel(ft.Container):
         """跳轉到指定頁"""
         try:
             p = int((self.tf_page_jump.value or "1").strip())
-        except Exception:
+        except Exception:  # noqa: BLE001
             p = 1
         self.state.query_page = p
         self._render_query_results()
@@ -553,7 +553,7 @@ class CacheQueryPanel(ft.Container):
         """變更每頁數量"""
         try:
             self.state.query_page_size = int(self.dd_page_size.value or "50")
-        except Exception:
+        except Exception:  # noqa: BLE001
             self.state.query_page_size = 50
         self.state.query_page = 1
         self._render_query_results()
@@ -603,7 +603,7 @@ class CacheQueryPanel(ft.Container):
             self._render_query_detail()
             show_snack(self.page, "已套用並寫入快取", theme.BLUE_400)
             self._page.update()
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             show_snack(self.page, f"套用失敗：{ex}", theme.RED_400)
 
     def _on_revert_dst(self, e):
@@ -620,7 +620,6 @@ class CacheQueryPanel(ft.Container):
         """新增歷史事件"""
         root = str((self.last_overview_data or {}).get("cache_root", "") or "").strip()
         history_append_event(root, cache_type, event)
-
 
     @property
     def page(self):

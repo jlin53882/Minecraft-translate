@@ -17,23 +17,26 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+from app.logging.task_session import TaskSession
 from app.services_impl.logging_service import (
     GLOBAL_LOG_LIMITER,
     UI_LOG_HANDLER,
 )
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
-from app.logging.task_session import TaskSession
 from translation_tool.core.jar_processor import (
     extract_book_files_generator,
     extract_dual_files_generator,
     extract_lang_files_generator,
 )
+from translation_tool.utils.cancellation import is_cancelled
 from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
 
 
-def _select_extraction_generator(mode: str, mods_dir: str, output_dir: str, lang_codes=None, skip_zh_cn=False):
+def _select_extraction_generator(
+    mode: str, mods_dir: str, output_dir: str, lang_codes=None, skip_zh_cn=False
+):
     """根據 mode 選擇對應的提取 Generator。
 
     Args:
@@ -63,10 +66,10 @@ def prepare_extraction_paths(mods_dir: str, mode: str, output_path: str = "") ->
     Args:
         mods_dir: Mod 來源資料夾路徑
         mode: 提取模式（'lang' / 'book' / 'dual'）
-        output_path: 外部指定的輸出路徑（可為空）
+        output_path: 外部指定的輸出路徑（可為空；有值時直接使用，不再加子資料夾）
 
     Returns:
-        最終輸出路徑（含子資料夾名稱）
+        最終輸出路徑
     """
     cfg = load_config()
     folder_names = cfg.get("extractor", {}).get("output_folder_names", {})
@@ -81,10 +84,13 @@ def prepare_extraction_paths(mods_dir: str, mode: str, output_path: str = "") ->
     else:  # dual
         output_subdir = dual_extract
 
-    # 若未指定輸出目錄，使用 mods_dir 作為基礎
-    base_dir = output_path or mods_dir
-    if base_dir:
-        return os.path.join(base_dir, output_subdir)
+    # 已指定輸出目錄（使用者輸入或頁面自動補齊的「mods_提取lang_輸出」）時直接使用；
+    # 原本會再多加一層子資料夾，變成 .../mods_提取lang_輸出/_提取lang_輸出
+    if output_path:
+        return output_path
+    # 未指定時，在 mods_dir 下建立對應模式的子資料夾
+    if mods_dir:
+        return os.path.join(mods_dir, output_subdir)
     return ""
 
 
@@ -183,25 +189,84 @@ def _run_extraction_with_session(
         session: 任務 Session
         mode_label: 模式標籤，用於錯誤訊息（'Lang' / 'Book' / 'Dual'）
     """
+    # error / stats 一律從原始 update 讀取：filter 只負責 UI 日誌節流，
+    # 生命週期判斷不依賴它的回傳值。
+    failures = _FailureTracker()
     for update in generator:
+        if is_cancelled():
+            # 在 JAR 之間停止（一鍵流水線的取消）
+            session.add_log(f"⏹ {mode_label} 提取已取消", level="warning")
+            return
+        failures.observe(update)
         filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
-        if filtered is None:
-            continue
+        if filtered is not None:
+            if "log" in filtered:
+                session.add_log(filtered["log"])
+            if "progress" in filtered:
+                session.set_progress(filtered["progress"])
 
-        if "log" in filtered:
-            session.add_log(filtered["log"])
-
-        if "progress" in filtered:
-            session.set_progress(filtered["progress"])
-
-        if filtered.get("error"):
+        if update.get("error"):
+            _flush_limiter_to_session(session)
             session.set_error()
             return
 
+    _flush_limiter_to_session(session)
+
+    # 有任何無法處理的 JAR：提取結果不完整，步驟不可算成功
+    # （一鍵流水線會因此停止，不會以不完整的提取結果繼續合併 / 翻譯 / 打包）
+    total_failures = failures.total()
+    if total_failures > 0:
+        if failures.last_stats is not None:
+            session.set_summary(dict(failures.last_stats, failures=total_failures))
+        session.add_log(
+            f"❌ {mode_label} 提取有 {total_failures} 個 JAR 無法處理（檔案可能已損毀），"
+            "已提取的檔案保留，但此步驟視為失敗",
+            level="error",
+        )
+        session.set_error()
+        return
+    session.finish()
+
+
+def _flush_limiter_to_session(session: TaskSession) -> None:
     final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
     if final and "log" in final:
         session.add_log(final["log"])
-    session.finish()
+
+
+class _FailureTracker:
+    """從提取 generator 的 stats 累計無法處理的 JAR 數。
+
+    - 單一模式（lang / book）：最終 stats（無 phase）即為總數
+    - dual：各 phase 的 stats 分別記錄；若有合計（無 phase 或 phase 非 lang/book）
+      以合計為準，否則加總各 phase，避免只看最後一個 phase 而漏掉失敗
+    """
+
+    def __init__(self) -> None:
+        self.by_phase: dict[str, int] = {}
+        self.combined: int | None = None
+        self.last_stats: dict[str, Any] | None = None
+
+    def observe(self, update: dict[str, Any]) -> None:
+        stats = update.get("stats")
+        if not isinstance(stats, dict):
+            return
+        self.last_stats = stats
+        try:
+            count = int(stats.get("failures", 0) or 0)
+        except (TypeError, ValueError):
+            count = 0
+        phase = update.get("phase")
+        if phase in ("lang", "book"):
+            self.by_phase[phase] = count
+        else:
+            self.combined = count
+
+    def total(self) -> int:
+        phase_sum = sum(self.by_phase.values())
+        if self.combined is None:
+            return phase_sum
+        return max(self.combined, phase_sum)
 
 
 def run_extraction_loop(
@@ -226,9 +291,13 @@ def run_extraction_loop(
         Phase 3 (2026-07-13): DUAL mode 也會拆出 lang / book sub-dict,
         給 extractor_dialog.update_stats 顯示 LANG/BOOK 分區用。
     """
-    stats = {"success": 0, "warnings": 0, "failures": 0,
-             "lang": {"success": 0, "warnings": 0, "failures": 0},
-             "book": {"success": 0, "warnings": 0, "failures": 0}}
+    stats = {
+        "success": 0,
+        "warnings": 0,
+        "failures": 0,
+        "lang": {"success": 0, "warnings": 0, "failures": 0},
+        "book": {"success": 0, "warnings": 0, "failures": 0},
+    }
 
     for update in generator:
         if cancelled_flag is not None and cancelled_flag[0]:
@@ -273,9 +342,11 @@ def run_lang_extraction_service(
     try:
         session.start()
         UI_LOG_HANDLER.set_session(session)
-        generator = _select_extraction_generator("lang", mods_dir, output_dir, lang_codes)
+        generator = _select_extraction_generator(
+            "lang", mods_dir, output_dir, lang_codes
+        )
         _run_extraction_with_session(generator, session, "Lang")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
@@ -304,9 +375,11 @@ def run_book_extraction_service(
     try:
         session.start()
         UI_LOG_HANDLER.set_session(session)
-        generator = _select_extraction_generator("book", mods_dir, output_dir, lang_codes)
+        generator = _select_extraction_generator(
+            "book", mods_dir, output_dir, lang_codes
+        )
         _run_extraction_with_session(generator, session, "Book")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
@@ -335,9 +408,11 @@ def run_dual_extraction_service(
     try:
         session.start()
         UI_LOG_HANDLER.set_session(session)
-        generator = _select_extraction_generator("dual", mods_dir, output_dir, lang_codes)
+        generator = _select_extraction_generator(
+            "dual", mods_dir, output_dir, lang_codes
+        )
         _run_extraction_with_session(generator, session, "Dual")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}")
@@ -361,6 +436,7 @@ def open_output_folder(path: str) -> bool:
         True 表示成功開啟，False 表示失敗（路徑不存在或平台不支援）
     """
     import os
+
     if not path or not os.path.isdir(path):
         return False
 
@@ -369,10 +445,12 @@ def open_output_folder(path: str) -> bool:
             os.startfile(path)
         elif os.uname().sysname == "Darwin":  # macOS
             import subprocess
+
             subprocess.run(["open", path], check=True)
         else:  # Linux
             import subprocess
+
             subprocess.run(["xdg-open", path], check=True)
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False

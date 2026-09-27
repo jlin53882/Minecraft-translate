@@ -17,17 +17,19 @@
     results = engine.search("你好", limit=50)
 """
 
+import hashlib
+import json
+import os
 import sqlite3
 import threading
 import time
-from pathlib import Path
+from collections.abc import Callable
 from difflib import SequenceMatcher
-from typing import List, Dict, Optional, Any, Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from typing import Any
 
 from . import cache_store
-from .config_manager import load_config
-from .log_unit import log_info, log_warning, log_debug
+from .log_unit import log_debug, log_info, log_warning
 
 # =============================================================================
 # 全文搜尋引擎
@@ -183,7 +185,7 @@ class CacheSearchEngine:
 
             self.conn.commit()
 
-    def index_batch(self, entries: List[dict], batch_size: int = 20000):
+    def index_batch(self, entries: list[dict], batch_size: int = 20000):
         """批次加入索引（效能更好）
 
         Args:
@@ -213,7 +215,7 @@ class CacheSearchEngine:
             try:
                 try:
                     self.conn.execute("PRAGMA recursive_triggers = OFF")
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     log_debug(f"設定 PRAGMA recursive_triggers 失敗: {e}")
 
                 write_start = time.time()
@@ -248,7 +250,7 @@ class CacheSearchEngine:
 
     def search(
         self, query: str, limit: int = 50, cache_type: str | None = None
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """搜尋快取（支援中英文、模糊比對）
 
         Args:
@@ -309,7 +311,7 @@ class CacheSearchEngine:
 
     def _basic_search(
         self, query: str, limit: int, cache_type: str | None = None
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """基本搜尋（當 FTS5 不可用時）"""
         sql = """
             SELECT cache_key, source_text, translated_text, mod_name, file_path, cache_type
@@ -405,10 +407,10 @@ class FuzzyMatcher:
     def find_similar(
         self,
         query: str,
-        candidates: List[dict],
+        candidates: list[dict],
         threshold: float = 0.6,
         key_field: str = "src",
-    ) -> List[dict]:
+    ) -> list[dict]:
         """找出相似的候選項
 
         Args:
@@ -435,10 +437,10 @@ class FuzzyMatcher:
     def rank_results(
         self,
         query: str,
-        results: List[dict],
+        results: list[dict],
         src_weight: float = 0.6,
         dst_weight: float = 0.4,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """對搜尋結果重新評分（同時考慮原文與譯文的相似度）
 
         Args:
@@ -472,11 +474,11 @@ class FuzzyMatcher:
 
 def search_cache(
     query: str,
-    db_path: str = None,
+    db_path: str | None = None,
     limit: int = 50,
     fuzzy: bool = True,
     threshold: float = 0.6,
-) -> List[Dict]:
+) -> list[dict]:
     """快取搜尋的便利函式"""
     with CacheSearchEngine(db_path) as engine:
         results = engine.search(query, limit)
@@ -508,7 +510,7 @@ def _extract_path_from_composite_key(key: str, src: str = "") -> str:
     return key
 
 
-def _infer_search_path(cache_type: str, key: str, entry: Dict[str, Any] | None) -> str:
+def _infer_search_path(cache_type: str, key: str, entry: dict[str, Any] | None) -> str:
     """推導索引要寫入的 path 欄位。
 
     優先使用 entry 內明確提供的 path；若缺少，再依 cache_type 與 key 形態推導。
@@ -530,7 +532,7 @@ def _infer_search_path(cache_type: str, key: str, entry: Dict[str, Any] | None) 
 
 
 def _infer_search_mod(
-    cache_type: str, key: str, path: str, entry: Dict[str, Any] | None
+    cache_type: str, key: str, path: str, entry: dict[str, Any] | None
 ) -> str:
     """推導索引要寫入的 mod 欄位。
 
@@ -564,63 +566,42 @@ def _infer_search_mod(
 
 
 def _build_search_metadata(
-    cache_type: str, key: str, entry: Dict[str, Any] | None
-) -> Dict[str, str]:
+    cache_type: str, key: str, entry: dict[str, Any] | None
+) -> dict[str, str]:
     """組合單筆索引所需的 metadata（mod/path）。"""
     path = _infer_search_path(cache_type, key, entry)
     mod = _infer_search_mod(cache_type, key, path, entry)
     return {"mod": mod, "path": path}
 
 
-def _get_workers_from_config() -> int:
-    """從 config 讀取 parallel_execution_workers"""
-    try:
-        config_workers = load_config().get("translator", {}).get("parallel_execution_workers")
-        if isinstance(config_workers, int) and config_workers > 0:
-            return config_workers
-    except Exception:
-        pass
-    return 4  # fallback to 4 if config unavailable
-
-
 def build_index_entries(
-    cache_type: str, cache_dict: Dict[str, Any]
-) -> List[Dict[str, Any]]:
-    """把單一 cache_type 的記憶體字典轉成可批次索引的條目陣列（並行版本）。"""
+    cache_type: str, cache_dict: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """把單一 cache_type 的記憶體字典轉成可批次索引的條目陣列。
+
+    純 Python、CPU 密集的工作受 GIL 限制，每筆各送進 ThreadPool 反而更慢
+    （實測單執行緒快約 20 倍），因此直接依序建立。
+    """
     t0 = time.time()
-    items = [
-        (key, entry) for key, entry in cache_dict.items() if isinstance(entry, dict)
-    ]
-
-    if not items:
-        return []
-
-    # 使用多執行緒並行處理 metadata 建立
-    max_workers = _get_workers_from_config()
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(_build_single_entry, cache_type, key, entry): idx
-            for idx, (key, entry) in enumerate(items)
-        }
-        results: List[Optional[Dict[str, Any]]] = [None] * len(items)
-        for future in as_completed(futures):
-            idx = futures[future]
-            try:
-                results[idx] = future.result()
-            except Exception as e:
-                log_debug(f"建構索引條目失敗: {e}")
+    results: list[dict[str, Any]] = []
+    for key, entry in cache_dict.items():
+        if not isinstance(entry, dict):
+            continue
+        try:
+            results.append(_build_single_entry(cache_type, key, entry))
+        except Exception as e:  # noqa: BLE001 - 單筆壞資料不影響整體索引
+            log_debug(f"建構索引條目失敗: {e}")
 
     elapsed = time.time() - t0
     log_debug(
-        f"build_index_entries({cache_type}): {len(items)} entries in {elapsed:.2f}s"
+        f"build_index_entries({cache_type}): {len(results)} entries in {elapsed:.2f}s"
     )
-
-    return [r for r in results if r is not None]
+    return results
 
 
 def _build_single_entry(
-    cache_type: str, key: str, entry: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
+    cache_type: str, key: str, entry: dict[str, Any]
+) -> dict[str, Any] | None:
     """建立單筆索引條目（供並行呼叫）。"""
     return {
         "key": key,
@@ -633,37 +614,35 @@ def _build_single_entry(
 
 def rebuild_from_cache_dicts(
     engine: CacheSearchEngine,
-    cache_types: List[str],
-    cache_state: Dict[str, Dict[str, Any]],
+    cache_types: list[str],
+    cache_state: dict[str, dict[str, Any]],
 ) -> int:
-    """依序重建多個類型的索引，回傳實際索引筆數（並行版本）。"""
+    """依序重建多個類型的索引，回傳實際索引筆數。"""
     total_indexed = 0
-
-    # 先並行處理所有 cache_type 的 entries 建立
-    all_entries: Dict[str, List[Dict[str, Any]]] = {}
-    with ThreadPoolExecutor(max_workers=len(cache_types)) as executor:
-        futures = {
-            executor.submit(
-                build_index_entries,
-                cache_type,
-                cache_store.get_cache_type_dict(cache_state, cache_type),
-            ): cache_type
-            for cache_type in cache_types
-        }
-        for future in as_completed(futures):
-            cache_type = futures[future]
-            entries = future.result()
-            if entries:
-                all_entries[cache_type] = entries
-
-    # 再依序寫入 SQLite（保持原有寫入邏輯）
     for cache_type in cache_types:
-        entries = all_entries.get(cache_type, [])
+        entries = build_index_entries(
+            cache_type, cache_store.get_cache_type_dict(cache_state, cache_type)
+        )
         if entries:
             engine.index_batch(entries)
             total_indexed += len(entries)
 
     return total_indexed
+
+
+# 索引欄位或建立方式改變時遞增，讓舊索引在啟動時自動重建
+_INDEX_SCHEMA_VERSION = 1
+
+
+def _remove_sqlite_files(db_path: Path, sidecars_only: bool = False) -> None:
+    """刪除 SQLite 資料庫（與 -wal / -shm）檔案；失敗只記錄。"""
+    suffixes = ["-wal", "-shm"] if sidecars_only else ["", "-wal", "-shm"]
+    for suffix in suffixes:
+        path = db_path.with_name(db_path.name + suffix)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as e:
+            log_debug(f"刪除索引檔案失敗 {path.name}: {e}")
 
 
 class SearchOrchestrator:
@@ -675,7 +654,7 @@ class SearchOrchestrator:
     def __init__(self, cache_root_getter: Callable[[], Path]):
         """以可注入的 cache root getter 建立協調器。"""
         self._cache_root_getter = cache_root_getter
-        self._engine: Optional[CacheSearchEngine] = None
+        self._engine: CacheSearchEngine | None = None
         self._lock = threading.RLock()
 
     def _db_path(self) -> Path:
@@ -684,15 +663,19 @@ class SearchOrchestrator:
         cache_root.mkdir(parents=True, exist_ok=True)
         return cache_root / "search_index.db"
 
-    def get_engine(self) -> Optional[CacheSearchEngine]:
-        """取得（或延遲建立）共享搜尋引擎實例。"""
+    def get_engine(self) -> CacheSearchEngine | None:
+        """取得（或延遲建立）共享搜尋引擎實例。
+
+        注意：回傳後即釋放鎖；重建索引的 swap 可能關閉此 engine。
+        需要長時間使用時請在 self._lock 內使用（search_cache 即如此）。
+        """
         with self._lock:
             if self._engine is None:
                 self._engine = CacheSearchEngine(str(self._db_path()))
             return self._engine
 
     def rebuild_search_index(
-        self, cache_types: List[str], cache_state: Dict[str, Dict[str, Any]]
+        self, cache_types: list[str], cache_state: dict[str, dict[str, Any]]
     ) -> int:
         """以暫存檔重建整體索引，完成後原子替換正式索引檔。
 
@@ -716,85 +699,126 @@ class SearchOrchestrator:
                     raise
 
     def _do_rebuild_search_index(
-        self, db_path, cache_types: List[str], cache_state: Dict[str, Dict[str, Any]]
+        self, db_path, cache_types: list[str], cache_state: dict[str, dict[str, Any]]
     ) -> int:
-        """執行實際的索引重建作業。"""
-        tmp_engine: Optional[CacheSearchEngine] = None
-        old_engine: Optional[CacheSearchEngine] = None
-        total_indexed = 0
+        """先在暫存檔建好新索引，再原子替換正式索引檔。
 
+        重建期間（大量快取需數秒）搜尋仍使用舊索引；
+        只有替換檔案的瞬間才關閉舊連線，避免 Windows 檔案鎖。
+        """
+        tmp_path = db_path.with_name(db_path.name + ".tmp")
+        _remove_sqlite_files(tmp_path)
+
+        tmp_engine = CacheSearchEngine(str(tmp_path))
         try:
-            # 直接寫入目標資料庫（不使用 tmp 檔案，避免 Windows 檔案鎖問題）
-            # 先關閉舊引擎
-            with self._lock:
-                old_engine = self._engine
-                if old_engine is not None:
-                    old_engine.close()
-                    self._engine = None
-
-            del old_engine
-            import gc
-
-            gc.collect()
-
-            # 清理 WAL/SHM 檔案
-            for suffix in ["-wal", "-shm"]:
-                wal_file = db_path.with_name(db_path.name + suffix)
-                if wal_file.exists():
-                    try:
-                        wal_file.unlink()
-                    except Exception as e:
-                        log_debug(f"刪除 WAL/SHM 檔案失敗: {e}")
-
-            # 刪除舊資料庫重新建立
-            if db_path.exists():
-                try:
-                    db_path.unlink()
-                except Exception as e:
-                    log_debug(f"刪除舊資料庫檔案失敗: {e}")
-
-            # 建立新引擎並直接寫入
-            tmp_engine = CacheSearchEngine(str(db_path))
             total_indexed = rebuild_from_cache_dicts(
                 tmp_engine, cache_types, cache_state
             )
+        except BaseException:
+            tmp_engine.close()
+            _remove_sqlite_files(tmp_path)
+            raise
+        tmp_engine.close()
+        # 關閉最後一個連線後 WAL 已 checkpoint，只留下主檔
+        _remove_sqlite_files(tmp_path, sidecars_only=True)
 
-            # 重新建立引擎
-            with self._lock:
+        with self._lock:
+            old_engine = self._engine
+            self._engine = None
+            if old_engine is not None:
+                old_engine.close()
+            _remove_sqlite_files(db_path, sidecars_only=True)
+            try:
+                os.replace(tmp_path, db_path)
+            finally:
+                # 替換失敗（檔案被鎖）時仍重新開啟原本的索引，讓外層重試
                 self._engine = CacheSearchEngine(str(db_path))
 
-            log_debug(f"索引重建完成: {total_indexed} 條")
-            return total_indexed
-        finally:
-            if tmp_engine is not None:
-                tmp_engine.close()
+        self._write_index_meta(cache_types)
+        log_debug(f"索引重建完成: {total_indexed} 條")
+        return total_indexed
+
+    # ---------- 啟動時是否需要重建 ----------
+
+    def _meta_path(self) -> Path:
+        return self._cache_root_getter() / "search_index.meta.json"
+
+    def _cache_fingerprint(self, cache_types: list[str]) -> str:
+        """以各類型分片檔的名稱 / 大小 / 修改時間計算快取指紋（只讀 stat，不讀內容）。"""
+        root = self._cache_root_getter()
+        digest = hashlib.sha256(f"v{_INDEX_SCHEMA_VERSION}".encode())
+        for cache_type in sorted(cache_types):
+            type_dir = root / cache_type
+            if not type_dir.is_dir():
+                continue
+            for shard in sorted(type_dir.glob("*.json")):
+                st = shard.stat()
+                digest.update(
+                    f"{cache_type}/{shard.name}:{st.st_size}:{st.st_mtime_ns}\n".encode()
+                )
+        return digest.hexdigest()
+
+    def _write_index_meta(self, cache_types: list[str]) -> None:
+        try:
+            self._meta_path().write_text(
+                json.dumps({"fingerprint": self._cache_fingerprint(cache_types)}),
+                encoding="utf-8",
+            )
+        except OSError as e:
+            log_debug(f"寫入索引 meta 失敗: {e}")
+
+    def invalidate_index_meta(self) -> None:
+        """索引內容不再對應磁碟分片時呼叫，下次啟動會完整重建。"""
+        try:
+            self._meta_path().unlink(missing_ok=True)
+        except OSError as e:
+            log_debug(f"刪除索引 meta 失敗: {e}")
+
+    def is_index_current(self, cache_types: list[str]) -> bool:
+        """索引檔存在且與目前磁碟上的快取分片一致時回傳 True。"""
+        try:
+            if not self._db_path().exists():
+                return False
+            meta = json.loads(self._meta_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return meta.get("fingerprint") == self._cache_fingerprint(cache_types)
 
     def rebuild_search_index_for_type(
-        self, cache_type: str, cache_state: Dict[str, Dict[str, Any]]
+        self, cache_type: str, cache_state: dict[str, dict[str, Any]]
     ) -> int:
         """只重建單一 cache_type 的索引資料。"""
-        engine = self.get_engine()
-        if engine is None:
-            return 0
-        engine.clear_index_by_type(cache_type)
+        # 部分重建後索引不一定對應磁碟狀態，讓下次啟動完整重建
+        self.invalidate_index_meta()
         cache_dict = cache_store.get_cache_type_dict(cache_state, cache_type)
         entries = build_index_entries(cache_type, cache_dict)
-        if entries:
-            engine.index_batch(entries)
+        # 寫入期間持有鎖：全量重建的 swap 不可在此時關閉這個 engine
+        with self._lock:
+            engine = self.get_engine()
+            if engine is None:
+                return 0
+            engine.clear_index_by_type(cache_type)
+            if entries:
+                engine.index_batch(entries)
         return len(entries)
 
     def search_cache(
         self,
         query: str,
-        cache_type: str = None,
+        cache_type: str | None = None,
         limit: int = 50,
         use_fuzzy: bool = True,
-    ) -> List[Dict]:
-        """統一封裝查詢流程，必要時再做模糊重排序。"""
-        engine = self.get_engine()
-        if engine is None:
-            return []
-        results = engine.search(query, limit=limit, cache_type=cache_type)
+    ) -> list[dict]:
+        """統一封裝查詢流程，必要時再做模糊重排序。
+
+        取得 engine 與執行查詢都在協調器鎖內：重建索引的 swap（關閉舊 engine）
+        必須等目前的查詢完成，不可關閉正在使用中的 engine。
+        """
+        with self._lock:
+            engine = self.get_engine()
+            if engine is None:
+                return []
+            results = engine.search(query, limit=limit, cache_type=cache_type)
         if use_fuzzy and results:
             matcher = FuzzyMatcher()
             results = matcher.rank_results(query, results)
@@ -803,10 +827,10 @@ class SearchOrchestrator:
     def find_similar_translations(
         self,
         text: str,
-        cache_type: str = None,
+        cache_type: str | None = None,
         threshold: float = 0.6,
         limit: int = 20,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """先取候選，再以來源文字相似度過濾並截斷結果。"""
         candidates = self.search_cache(
             text, cache_type=cache_type, limit=limit * 2, use_fuzzy=False

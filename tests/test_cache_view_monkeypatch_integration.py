@@ -87,3 +87,31 @@ def test_fill_requires_danger_confirm(monkeypatch):
     view._on_save_all_fill(None)
 
     assert any("尚未勾選高風險確認" in x for x in view._all_logs)
+
+
+def test_action_runs_off_event_loop_and_stays_busy_until_done(monkeypatch):
+    """B4：有 event loop 時工作在執行緒中執行，完成前維持忙碌狀態，且只執行一次。"""
+    import asyncio
+    import threading
+
+    view = _build_test_view(monkeypatch)
+    tasks = []
+    view._page.run_task = lambda handler, *args: tasks.append(handler)
+    calls = []
+
+    def work():
+        calls.append(threading.current_thread().name)
+        raise TypeError("bad arg inside service")
+
+    view._run_action("RELOADING", work, "done")
+    # 點擊當下不等待工作完成（原本 future.result() 會凍結 UI）
+    assert calls == []
+    assert view.ui_busy is True
+
+    main_thread = threading.current_thread().name
+    asyncio.run(tasks[0]())
+
+    assert len(calls) == 1  # 原本 TypeError 時會重跑 work_fn 最多三次
+    assert calls[0] != main_thread
+    assert view.ui_busy is False
+    assert any("RELOADING 失敗" in x for x in view._all_logs)

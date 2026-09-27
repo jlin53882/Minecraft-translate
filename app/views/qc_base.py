@@ -4,11 +4,28 @@
 維護注意：本模組提供 task_worker 給各 QC 檢查器使用。
 """
 
-import flet as ft
 import threading
-from typing import Callable, Tuple, Any, Optional, List
+import traceback
+from collections.abc import Callable
+from typing import Any
+
+import flet as ft
+
 from app.ui import theme
+from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
+from translation_tool.utils.log_unit import log_error
+
+_UI_FLUSH_INTERVAL_SEC = 0.2
+
+
+def _guess_level(line: str) -> str:
+    """依訊息內容推測 log 等級（service 只回傳字串）。"""
+    if "錯誤" in line or "失敗" in line or "ERROR" in line or "❌" in line:
+        return "error"
+    if "警告" in line or "WARN" in line or "⚠" in line:
+        return "warning"
+    return "info"
 
 
 class QCBase:
@@ -36,9 +53,9 @@ class QCBase:
     def task_worker(
         self,
         service_func: Callable[..., Any],
-        args_tuple: Tuple[Any, ...],
-        on_complete: Optional[Callable[[], None]] = None,
-        controls_to_disable: Optional[List[ft.Control]] = None,
+        args_tuple: tuple[Any, ...],
+        on_complete: Callable[[], None] | None = None,
+        controls_to_disable: list[ft.Control] | None = None,
     ):
         """執行品質檢查服務工作執行緒。
 
@@ -54,39 +71,49 @@ class QCBase:
                 ctrl.disabled = True
             self._page.update()
 
-        def run():
-            try:
-                for update in service_func(*args_tuple):
-                    log_msg = update.get("log", "")
-                    for line in log_msg.split("\n"):
-                        if line.strip():
-                            # PR refactor/unified-log-view: 透過 LogView.add
-                            # 顏色由 LogView 根據 level 從 theme 取
-                            self.log_view.add(line, level="info")
-
-                    if "progress" in update:
-                        self.progress_bar.value = update["progress"]
-                    if update.get("error"):
-                        self.progress_bar.color = theme.ERROR
-
-                    # LogView 是 ft.Container，scroll_to 在內部 _list_view 上
-                    self.log_view._list_view.scroll_to(offset=-1, duration=100)
-                    self._page.update()
-            finally:
-                # 重置 ProgressBar
+        def apply_ui(lines, state):
+            if lines:
+                self.log_view.add_many(lines)
+            if state.get("progress") is not None:
+                self.progress_bar.value = state["progress"]
+            if state.get("error"):
+                self.progress_bar.color = theme.ERROR
+            done = state.get("done", False)
+            if done:
                 self.progress_bar.value = 0
                 self.progress_bar.color = None
-                self._page.update()
-
-                # 恢復控制項
                 if controls_to_disable:
                     for ctrl in controls_to_disable:
                         ctrl.disabled = False
-                    self.page.update()
-
-            # 執行完成回調
-            if on_complete:
+            self._page.update()
+            if done and on_complete:
                 on_complete()
+
+        # 節流 + 背壓：背景任務可能每秒產生上千行，只定期交給 event loop 刷新
+        batcher = UiBatcher(self._page, apply_ui, interval=_UI_FLUSH_INTERVAL_SEC)
+
+        def run():
+            try:
+                for update in service_func(*args_tuple):
+                    lines = [
+                        (line, _guess_level(line))
+                        for line in str(update.get("log") or "").split("\n")
+                        if line.strip()
+                    ]
+                    if lines:
+                        batcher.add_lines(lines)
+                    if "progress" in update:
+                        batcher.set_state(progress=update["progress"])
+                    if update.get("error"):
+                        batcher.set_state(error=True)
+                    batcher.flush()
+            except Exception as ex:  # noqa: BLE001 - 背景執行緒需把錯誤回報到 UI
+                log_error(f"QC 任務失敗: {ex}\n{traceback.format_exc()}")
+                batcher.add_lines([(f"[錯誤] 任務執行失敗：{ex}", "error")])
+                batcher.set_state(error=True)
+            finally:
+                batcher.set_state(done=True)
+                batcher.flush(force=True)
 
         threading.Thread(target=run, daemon=True).start()
 

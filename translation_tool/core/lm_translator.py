@@ -5,40 +5,43 @@
 """
 
 # lm_translator.py
+import hashlib
 import json as json_std
 import math
 import os
 import time
+from collections.abc import Callable, Generator
 from pathlib import Path
-from typing import Dict, Any, Generator, Optional
+from typing import Any
 
 import orjson as json
 
-from translation_tool.utils.log_unit import log_info, log_warning, log_debug
-from translation_tool.utils.cache_manager import (
-    add_to_cache,
-    save_translation_cache,
-    reload_translation_cache,
-    get_cache_dict_ref,
+from translation_tool.core.lm_config_rules import (
+    validate_api_keys,
+    value_fully_translated,
 )
 from translation_tool.core.lm_translator_main import (
     DEFAULT_DRY_RUN,
     DEFAULT_EXPORT_CACHE_ONLY,
     translate_batch_smart,
 )
-from translation_tool.core.translation_path_writer import (
-    map_lang_output_path,
-    set_by_path,
-)
-from translation_tool.core.lm_config_rules import (
-    validate_api_keys,
-    value_fully_translated,
-)
 from translation_tool.core.lm_translator_scan import (
     extract_items_parallel,
     scan_translatable_files,
 )
+from translation_tool.core.translation_path_writer import (
+    map_lang_output_path,
+    set_by_path,
+)
+from translation_tool.utils.cache_manager import (
+    add_to_cache,
+    get_cache_dict_ref,
+    reload_translation_cache,
+    save_translation_cache,
+)
+from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 # ============================================================
 # B-3: 快取寫入頻率優化（每 N 個批次才寫一次硬碟）
@@ -51,8 +54,30 @@ BATCH_WRITE_INTERVAL = 5  # 每 N 個批次寫一次硬碟
 CHECKPOINT_FILE = "logs/translation_checkpoint.json"
 
 
+def compute_checkpoint_fingerprint(input_dir: str, items: list) -> str:
+    """計算待翻譯內容的指紋，確保 checkpoint 只會用在同一批資料上。
+
+    指紋涵蓋輸入資料夾與每一筆項目的 (file, path, text)，任何來源不同、
+    內容或順序改變都會得到不同指紋。
+    """
+    digest = hashlib.sha256(os.path.abspath(input_dir).encode("utf-8"))
+    for item in items:
+        for field in ("file", "path", "text"):
+            digest.update(b"\x1f")
+            digest.update(str(item.get(field, "")).encode("utf-8"))
+        digest.update(b"\x1e")
+    return digest.hexdigest()
+
+
 def save_checkpoint(
-    batch_index: int, completed_count: int, total: int, remaining: list, output_dir: str
+    batch_index: int,
+    completed_count: int,
+    total: int,
+    remaining: list,
+    output_dir: str,
+    *,
+    input_dir: str | None = None,
+    fingerprint: str | None = None,
 ):
     """寫入 checkpoint（每批次完成後）。
 
@@ -62,6 +87,8 @@ def save_checkpoint(
         total: 總項目數量
         remaining: 剩餘待翻譯項目清單（用於恢復時取樣比对）
         output_dir: 輸出目錄路徑
+        input_dir: 輸入資料夾（僅供診斷）
+        fingerprint: compute_checkpoint_fingerprint() 的結果，恢復時必須相符
     """
     os.makedirs(os.path.dirname(CHECKPOINT_FILE), exist_ok=True)
     with open(CHECKPOINT_FILE, "w", encoding="utf-8") as f:
@@ -74,6 +101,8 @@ def save_checkpoint(
                 if remaining
                 else [],  # 只保留前三筆範例，不存完整清單
                 "output_dir": output_dir,
+                "input_dir": input_dir,
+                "fingerprint": fingerprint,
             },
             f,
             ensure_ascii=False,
@@ -91,7 +120,7 @@ def load_checkpoint() -> dict | None:
     try:
         with open(CHECKPOINT_FILE, "r", encoding="utf-8") as f:
             return json_std.load(f)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -171,10 +200,11 @@ def translate_directory_generator(
     input_dir: str,
     output_dir: str,
     *,
-    dry_run: Optional[bool] = None,
+    dry_run: bool | None = None,
     export_lang: bool = False,
     write_new_cache: bool = False,
-) -> Generator[Dict[str, Any], None, None]:
+    should_cancel: Callable[[], bool] | None = None,
+) -> Generator[dict[str, Any], None, None]:
     """翻譯目錄的 generator 入口。
 
     Args:
@@ -183,6 +213,7 @@ def translate_directory_generator(
         dry_run: 是否為模擬執行（None 使用預設值）
         export_lang: 是否匯出語言檔
         write_new_cache: 是否寫入新快取
+        should_cancel: 回傳 True 時在下一個批次前停止（已完成的批次仍會寫出）
 
     Yields:
         進度字典，包含 progress、log 等資訊
@@ -234,7 +265,7 @@ def translate_directory_generator(
     # =========================
     try:
         patchouli_files, lang_files, files = scan_translatable_files(root)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log_warning(f"⚠️ 掃描可翻譯檔案失敗，已跳過本次掃描：{e}")
         patchouli_files, lang_files, files = [], [], []
 
@@ -549,12 +580,20 @@ def translate_directory_generator(
     # ============================================================
     # B-4: 斷點續傳 - 嘗試從 checkpoint 恢復
     # ============================================================
+    checkpoint_fingerprint = compute_checkpoint_fingerprint(
+        input_dir, items_to_translate
+    )
     checkpoint = load_checkpoint()
     if checkpoint:
         cp_completed = checkpoint.get("completed_count", 0)
         cp_total = checkpoint.get("total", 0)
+        if checkpoint.get("fingerprint") != checkpoint_fingerprint:
+            # 來源資料夾或待翻譯內容不同（含舊版沒有指紋的 checkpoint）：
+            # 不可沿用，否則會跳過新資料的前 N 筆而未翻譯
+            log_warning("⚠️ checkpoint 屬於其他資料（來源或內容不同），忽略並重新開始")
+            clear_checkpoint()
         # 檢查 checkpoint 的 completed_count 是否合理（completed <= 原始 total）
-        if cp_completed <= total and cp_total == total:
+        elif cp_completed <= total and cp_total == total:
             log_info(f"🔄 偵測到 checkpoint，已完成 {cp_completed}/{total} 筆")
             # 從 items_to_translate 的正確偏移位置恢復剩餘清單
             remaining = items_to_translate[cp_completed:]
@@ -580,7 +619,14 @@ def translate_directory_generator(
     yield_every = max(1, total // 50)
     _item_idx = 0
 
+    cancelled = False
     while remaining:
+        if (should_cancel is not None and should_cancel()) or is_cancelled():
+            # 在批次之間停止：已完成的批次照常寫出，並走下方的收尾流程
+            cancelled = True
+            log_warning(f"⏹ 已取消翻譯，剩餘 {len(remaining)} 筆未翻譯")
+            yield {"log": f"⏹ 已取消翻譯，剩餘 {len(remaining)} 筆未翻譯"}
+            break
         is_lang = remaining[0]["cache_type"] == "lang"
         batch_size = (
             INITIAL_BATCH_SIZE_LANG if is_lang else INITIAL_BATCH_SIZE_PATCHOULI
@@ -588,7 +634,14 @@ def translate_directory_generator(
         batch = remaining[:batch_size]
 
         # ⭐ 1. 接收 status (原本是 _, 現在改為 status)
-        translated, status = translate_batch_smart(batch, total)
+        try:
+            translated, status = translate_batch_smart(batch, total)
+        except TaskCancelled:
+            # 等待 API 限流時被取消：已完成的批次照常寫出
+            cancelled = True
+            log_warning(f"⏹ 已取消翻譯，剩餘 {len(remaining)} 筆未翻譯")
+            yield {"log": f"⏹ 已取消翻譯，剩餘 {len(remaining)} 筆未翻譯"}
+            break
         log_debug("翻譯結果：%s", translated)
         log_debug("翻譯狀態：%s", status)
 
@@ -718,23 +771,27 @@ def translate_directory_generator(
             if is_lang:
                 save_translation_cache("lang", write_new_shard=write_new_cache)
                 log_debug(
-                    "✅ lang 分片快取已寫入硬碟（每 {} 批次）".format(
-                        BATCH_WRITE_INTERVAL
-                    )
+                    f"✅ lang 分片快取已寫入硬碟（每 {BATCH_WRITE_INTERVAL} 批次）"
                 )
             else:
                 save_translation_cache("patchouli", write_new_shard=write_new_cache)
                 log_debug(
-                    "✅ patchouli 分片快取已寫入硬碟（每 {} 批次）".format(
-                        BATCH_WRITE_INTERVAL
-                    )
+                    f"✅ patchouli 分片快取已寫入硬碟（每 {BATCH_WRITE_INTERVAL} 批次）"
                 )
             _batch_write_counter = 0  # 重置計數器
 
         # ============================================================
         # B-4: 斷點續傳 - 每批次完成後寫入 checkpoint
         # ============================================================
-        save_checkpoint(batch_index, processed, total, remaining, str(out_root))
+        save_checkpoint(
+            batch_index,
+            processed,
+            total,
+            remaining,
+            str(out_root),
+            input_dir=str(input_dir),
+            fingerprint=checkpoint_fingerprint,
+        )
 
         # 計算 ETA
         elapsed = time.perf_counter() - start_time
@@ -804,7 +861,9 @@ def translate_directory_generator(
         log_info(msg_table)
 
     # 判斷是正常完成還是中斷完成
-    if processed < total:
+    if cancelled:
+        final_status_msg = f"⏹ 翻譯已取消，完成 {processed}/{total} 筆，耗時 {duration}"
+    elif processed < total:
         final_status_msg = f"⚠️ 翻譯中斷，僅完成 {processed}/{total} 筆，耗時 {duration}"
     else:
         final_status_msg = f"🎉 翻譯完全完成，耗時 {duration} "

@@ -21,6 +21,7 @@ class ExtractionState:
         done: 是否已完成
         error: 是否發生錯誤
     """
+
     progress: float = 0.0
     current: int = 0
     total: int = 0
@@ -34,11 +35,11 @@ class ExtractionState:
             包含所有欄位的字典
         """
         return {
-            'progress': self.progress,
-            'current': self.current,
-            'total': self.total,
-            'done': self.done,
-            'error': self.error,
+            "progress": self.progress,
+            "current": self.current,
+            "total": self.total,
+            "done": self.done,
+            "error": self.error,
         }
 
 
@@ -53,13 +54,16 @@ class PreviewState:
         done: 是否已完成
         result: 預覽結果資料（完成的話）
         error: 錯誤訊息（有的話）
+        log: 最新一筆進度訊息
     """
+
     progress: float = 0.0
     current: int = 0
     total: int = 0
     done: bool = False
     result: dict | None = None
     error: str | None = None
+    log: str = ""
 
     def as_dict(self) -> dict:
         """將 PreviewState 轉換為字典格式。
@@ -68,10 +72,10 @@ class PreviewState:
             包含所有欄位的字典
         """
         return {
-            'progress': self.progress,
-            'current': self.current,
-            'total': self.total,
-            'done': self.done,
-            'result': self.result,
-            'error': self.error,
+            "progress": self.progress,
+            "current": self.current,
+            "total": self.total,
+            "done": self.done,
+            "result": self.result,
+            "error": self.error,
         }

@@ -6,13 +6,15 @@ LM View 完整模組驗證。
 目標：確認 LMView UI 元件可正確初始化、事件處理正確、與 service 層整合正確。
 """
 
-import flet as ft
 from unittest.mock import patch
-from app.views import lm_view
-from app.ui.snack import show_snack
+
+import flet as ft
+
 from app.logging import LogEntry
+from app.ui.snack import show_snack
+from app.views import lm_view
 from app.views._log import LogView
-from tests.conftest import mock_page, mock_filepicker
+from tests.conftest import mock_filepicker, mock_page
 
 
 class _Session:
@@ -46,14 +48,17 @@ class _Session:
         return {
             "status": self.status,
             "progress": self.progress,
-            "logs": [LogEntry(seq=i, level="info", text=t, source="ui")
-                     for i, t in enumerate(self.logs)],
+            "logs": [
+                LogEntry(seq=i, level="info", text=t, source="ui")
+                for i, t in enumerate(self.logs)
+            ],
         }
 
 
 # ============================================================
 # Helpers
 # ============================================================
+
 
 def make_view():
     """建立乾淨的 LMView + mock 基礎設施。"""
@@ -68,6 +73,7 @@ def make_view():
 # ============================================================
 # Test 1: 表單元件初始化齊全（覆蓋原有）
 # ============================================================
+
 
 def test_lm_view_initializes_primary_controls(monkeypatch):
     """驗證 LMView 所有主要控制項都正確初始化。"""
@@ -98,13 +104,14 @@ def test_lm_view_initializes_primary_controls(monkeypatch):
     assert view.log_view._presenter is not None
 
     # --- File picker ---
-    assert hasattr(view.file_picker, 'get_directory_path')
-    assert hasattr(view.file_picker, 'set_mock_path')
+    assert hasattr(view.file_picker, "get_directory_path")
+    assert hasattr(view.file_picker, "set_mock_path")
 
 
 # ============================================================
 # Test 2: 無輸入時錯誤處理（覆蓋原有）
 # ============================================================
+
 
 def test_start_clicked_without_input_sets_error_status(monkeypatch):
     """驗證未填輸入目錄時，回上錯誤狀態並跳過 service 呼叫。"""
@@ -118,12 +125,15 @@ def test_start_clicked_without_input_sets_error_status(monkeypatch):
 
     # 狀態晶片應顯示錯誤訊息
     assert view.status_chip.label.value == "請先選擇輸入資料夾"
-    assert "red" in view.status_chip.bgcolor.lower() or "RED" in view.status_chip.bgcolor
+    assert (
+        "red" in view.status_chip.bgcolor.lower() or "RED" in view.status_chip.bgcolor
+    )
 
 
 # ============================================================
 # Test 3: 服務啟動參數傳遞（覆蓋原有）
 # ============================================================
+
 
 def test_start_clicked_launches_service_with_current_flags(monkeypatch):
     """驗證 start_clicked 把所有 UI flag 正確傳給 run_lm_translation_service。"""
@@ -131,20 +141,28 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
     captured = {}
 
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    monkeypatch.setattr(lm_view.threading, "Thread",
-                       lambda target=None, args=(), daemon=None:
-                           type("T", (), {"start": lambda self: target(*args)})())
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type(
+            "T", (), {"start": lambda self: target(*args)}
+        )(),
+    )
     monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
 
-    def fake_service(input_dir, output_dir, session, dry_run, export_lang, write_new_cache):
-        captured.update({
-            "input_dir": input_dir,
-            "output_dir": output_dir,
-            "session": session,
-            "dry_run": dry_run,
-            "export_lang": export_lang,
-            "write_new_cache": write_new_cache,
-        })
+    def fake_service(
+        input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+    ):
+        captured.update(
+            {
+                "input_dir": input_dir,
+                "output_dir": output_dir,
+                "session": session,
+                "dry_run": dry_run,
+                "export_lang": export_lang,
+                "write_new_cache": write_new_cache,
+            }
+        )
 
     monkeypatch.setattr(lm_view, "run_lm_translation_service", fake_service)
 
@@ -168,6 +186,7 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
 # Test 4: 路徑選擇回调 — 輸入目錄
 # ============================================================
 
+
 def test_on_input_dir_picked_updates_input_field(monkeypatch):
     """驗證選擇輸入目錄後，正確更新 input_path。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
@@ -186,6 +205,7 @@ def test_on_input_dir_picked_updates_input_field(monkeypatch):
 # ============================================================
 # Test 5: 路徑選擇回调 — 輸出目錄
 # ============================================================
+
 
 def test_on_output_dir_picked_updates_output_field(monkeypatch):
     """驗證選擇輸出目錄後，正確更新 output_path。"""
@@ -206,6 +226,7 @@ def test_on_output_dir_picked_updates_output_field(monkeypatch):
 # Test 5a: async pick_input_directory updates input_path
 # ============================================================
 
+
 def test_async_pick_input_directory_updates_input_field(monkeypatch):
     """驗證 async 選擇輸入目錄後，正確更新 input_path。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
@@ -224,6 +245,7 @@ def test_async_pick_input_directory_updates_input_field(monkeypatch):
 # ============================================================
 # Test 5b: async pick_output_directory updates output_path
 # ============================================================
+
 
 def test_async_pick_output_directory_updates_output_field(monkeypatch):
     """驗證 async 選擇輸出目錄後，正確更新 output_path。"""
@@ -244,18 +266,25 @@ def test_async_pick_output_directory_updates_output_field(monkeypatch):
 # Test 6: 輸出目錄留空 → 使用預設值
 # ============================================================
 
+
 def test_start_clicked_uses_default_output_dir_when_empty(monkeypatch):
     """驗證 output_path 為空時，service 收到預設 lm_translate_folder_name。"""
     page = mock_page()
     captured = {}
 
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
-    monkeypatch.setattr(lm_view.threading, "Thread",
-                       lambda target=None, args=(), daemon=None:
-                           type("T", (), {"start": lambda self: target(*args)})())
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type(
+            "T", (), {"start": lambda self: target(*args)}
+        )(),
+    )
     monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
 
-    def fake_service(input_dir, output_dir, session, dry_run, export_lang, write_new_cache):
+    def fake_service(
+        input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+    ):
         captured["output_dir"] = output_dir
 
     monkeypatch.setattr(lm_view, "run_lm_translation_service", fake_service)
@@ -275,6 +304,7 @@ def test_start_clicked_uses_default_output_dir_when_empty(monkeypatch):
 # Test 7: _set_status 正確更新狀態晶片
 # ============================================================
 
+
 def test_set_status_updates_chip_label_and_color(monkeypatch):
     """驗證 _set_status 正確更新 status_chip 的文字與背景色。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
@@ -290,21 +320,28 @@ def test_set_status_updates_chip_label_and_color(monkeypatch):
 # Test 8: styled_card 結構 — controls 數量與類型
 # ============================================================
 
+
 def test_controls_contains_all_sections(monkeypatch):
-    """驗證 LMView.controls 包含 4 個 styled_card 區塊。"""
+    """驗證 LMView 版面：路徑設定 / （翻譯選項 + 執行狀態 並排）/ 執行日誌。
+
+    Task 10 / C3：選項與狀態並排，讓日誌在 1280×900 下有足夠高度。
+    """
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     view = lm_view.LMView(mock_page(), mock_filepicker())
 
-    assert len(view.controls) == 4, "應有 4 個 styled_card 區塊"
-
-    # 確認每個都是 ft.Container（styled_card 回傳 Container）
-    for ctrl in view.controls:
-        assert isinstance(ctrl, ft.Container), f"每個 section 應為 ft.Container，實際: {type(ctrl)}"
+    assert len(view.controls) == 3
+    path_card, options_row, log_card = view.controls
+    assert isinstance(path_card, ft.Container)
+    assert isinstance(options_row, ft.ResponsiveRow)
+    assert len(options_row.controls) == 2  # 翻譯選項、執行狀態
+    assert isinstance(log_card, ft.Container)
+    assert log_card.expand
 
 
 # ============================================================
 # Test 9: LogPresenter 初始化成功
 # ============================================================
+
 
 def test_log_presenter_initialized_with_tail_mode(monkeypatch):
     """驗證 LogPresenter 以 tail 模式正確初始化，tail_lines 為 250。
@@ -322,6 +359,7 @@ def test_log_presenter_initialized_with_tail_mode(monkeypatch):
 # ============================================================
 # Test 10: 快捷資料夾按鈕已掛載 on_pick handler
 # ============================================================
+
 
 def test_folder_open_buttons_have_on_click(monkeypatch):
     """驗證路徑欄位旁邊的資料夾按鈕有設定 on_click。
@@ -344,8 +382,9 @@ def test_folder_open_buttons_have_on_click(monkeypatch):
     path_row = content_container.content.controls[0]  # 第一列：input_path + icon button
 
     icon_button = path_row.controls[1]
-    assert isinstance(icon_button, ft.IconButton), \
+    assert isinstance(icon_button, ft.IconButton), (
         f"第二個元件應為 IconButton，實際: {type(icon_button)}"
+    )
     assert icon_button.on_click is not None, "IconButton 應有 on_click handler"
     assert callable(icon_button.on_click), "on_click 應為可呼叫物件"
 
@@ -354,11 +393,12 @@ def test_folder_open_buttons_have_on_click(monkeypatch):
 # Test 11: session.snapshot → progress/logs 正確映射
 # ============================================================
 
+
 def test_session_snapshot_returns_correct_structure(monkeypatch):
     """驗證 _Session.snapshot() 回傳正確結構（含 progress/logs/status）。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     page = mock_page()
-    view = lm_view.LMView(page, mock_filepicker())
+    lm_view.LMView(page, mock_filepicker())
 
     session = _Session()
     session.start()
@@ -384,7 +424,9 @@ def test_start_clicked_resets_log_presenter(monkeypatch):
     monkeypatch.setattr(
         lm_view.threading,
         "Thread",
-        lambda target=None, args=(), daemon=None: type("T", (), {"start": lambda self: None})(),
+        lambda target=None, args=(), daemon=None: type(
+            "T", (), {"start": lambda self: None}
+        )(),
     )
     monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
 
@@ -401,8 +443,16 @@ def test_start_clicked_resets_log_presenter(monkeypatch):
     assert reset_calls == [True]
 
 
+def _drive_poller(page):
+    """執行 start_ui_timer 排入的 async poller（mock page 只記錄 run_task）。"""
+    import asyncio
+
+    for coro, args in list(page._tasks):
+        asyncio.run(asyncio.wait_for(coro(*args), timeout=2))
+
+
 def test_start_ui_timer_stops_when_page_update_fails(monkeypatch):
-    """驗證 page.update() 失敗時，LM UI timer 會安全停止，不再拋出背景執行緒例外。"""
+    """驗證 page.update() 失敗時（例如頁面已關閉），LM UI 輪詢會安全停止。"""
 
     class _FailingPage:
         def __init__(self):
@@ -416,9 +466,6 @@ def test_start_ui_timer_stops_when_page_update_fails(monkeypatch):
         def run_task(self, coro, *args):
             self._tasks.append((coro, args))
 
-        def _run_all_tasks(self):
-            pass
-
     page = _FailingPage()
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
 
@@ -429,13 +476,13 @@ def test_start_ui_timer_stops_when_page_update_fails(monkeypatch):
     view.session.set_progress(0.3)
 
     view.start_ui_timer()
-    lm_view.time.sleep(0.25)
+    _drive_poller(page)
 
     assert view._ui_timer_running is False
 
 
 def test_start_ui_timer_attempts_log_view_update(monkeypatch):
-    """驗證 timer 迴圈會嘗試刷新 log_view，避免日誌內容已 sync 但畫面未更新。"""
+    """驗證輪詢會刷新畫面，並在任務完成時恢復按鈕狀態。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     page = mock_page()
 
@@ -444,21 +491,69 @@ def test_start_ui_timer_attempts_log_view_update(monkeypatch):
     view.session.start()
     view.session.add_log("hello")
     view.session.status = "DONE"
+    view._set_running(True)
 
     called = []
-    # PR refactor/unified-log-view: LogView.sync_entries() 內部呼叫 page.update()
-    # （不再直接呼叫 _list_view.update()，因為 LogView 是 ft.Container）
     monkeypatch.setattr(view.page, "update", lambda: called.append(True))
 
     view.start_ui_timer()
-    lm_view.time.sleep(0.25)
+    _drive_poller(page)
 
-    assert called, "page.update() 應至少被呼叫一次（透過 sync_entries 內部）"
+    assert called, "page.update() 應至少被呼叫一次"
+    assert view._ui_timer_running is False
+    assert view.start_button.disabled is False
+    assert view.cancel_button.disabled is True
+
+
+def test_start_clicked_ignored_while_running(monkeypatch):
+    """任務執行中再次按「開始翻譯」不會啟動第二個翻譯執行緒（避免 API 用量加倍）。"""
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    started = []
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type(
+            "T", (), {"start": lambda self: started.append(target)}
+        )(),
+    )
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
+    view.input_path.value = "C:/Assets"
+
+    view.start_clicked(None)
+    view.start_clicked(None)
+
+    assert len(started) == 1
+    assert view.start_button.disabled is True
+
+
+def test_cancel_clicked_requests_session_cancel(monkeypatch):
+    """按「取消」會要求 session 取消（翻譯迴圈在批次之間停止）。"""
+    from app.logging.task_session import TaskSession
+
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type(
+            "T", (), {"start": lambda self: None}
+        )(),
+    )
+    page = mock_page()
+    view = lm_view.LMView(page, mock_filepicker())
+    view.input_path.value = "C:/Assets"
+    view.start_clicked(None)
+    assert isinstance(view.session, TaskSession)
+
+    view.cancel_clicked(None)
+
+    assert view.session.cancel_requested is True
+    assert view.cancel_button.disabled is True
 
 
 # ============================================================
 # Test 10a: pick_input_directory schedules async task
 # ============================================================
+
 
 def test_pick_input_directory_schedules_async_task(monkeypatch):
     """驗證 pick_input_directory 正確排程 _async_pick_input_directory"""
@@ -481,6 +576,7 @@ def test_pick_input_directory_schedules_async_task(monkeypatch):
 # Test 10b: pick_output_directory schedules async task
 # ============================================================
 
+
 def test_pick_output_directory_schedules_async_task(monkeypatch):
     """驗證 pick_output_directory 正確排程 _async_pick_output_directory"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
@@ -502,6 +598,7 @@ def test_pick_output_directory_schedules_async_task(monkeypatch):
 # Test 10c: on_input_dir_picked updates field and calls update
 # ============================================================
 
+
 def test_on_input_dir_picked_updates_field_and_calls_update(monkeypatch):
     """驗證 on_input_dir_picked 正確更新 input_path 並呼叫 page.update()"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
@@ -520,6 +617,7 @@ def test_on_input_dir_picked_updates_field_and_calls_update(monkeypatch):
 # ============================================================
 # Test 10d: on_output_dir_picked updates field and calls update
 # ============================================================
+
 
 def test_on_output_dir_picked_updates_field_and_calls_update(monkeypatch):
     """驗證 on_output_dir_picked 正確更新 output_path 並呼叫 page.update()"""
@@ -540,6 +638,7 @@ def test_on_output_dir_picked_updates_field_and_calls_update(monkeypatch):
 # Test 10e: _show_snack_bar adds to overlay
 # ============================================================
 
+
 def test_show_snack_bar_adds_to_overlay(monkeypatch):
     """驗證 _show_snack_bar 正確將 SnackBar 加入 page.overlay"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
@@ -555,6 +654,7 @@ def test_show_snack_bar_adds_to_overlay(monkeypatch):
 # ============================================================
 # Test 10f: on_input_dir_picked with empty path does not update
 # ============================================================
+
 
 def test_on_input_dir_picked_ignores_empty_path(monkeypatch):
     """驗證 on_input_dir_picked 忽略空路徑"""
@@ -574,6 +674,7 @@ def test_on_input_dir_picked_ignores_empty_path(monkeypatch):
 # ============================================================
 # Test 10g: on_output_dir_picked with empty path does not update
 # ============================================================
+
 
 def test_on_output_dir_picked_ignores_empty_path(monkeypatch):
     """驗證 on_output_dir_picked 忽略空路徑"""

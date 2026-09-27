@@ -3,7 +3,6 @@ from __future__ import annotations
 import traceback
 
 from app.ui.snack import show_snack
-
 from translation_tool.utils.config_manager import get_default
 
 
@@ -158,6 +157,11 @@ def load_config_into_view(view, config: dict):
     view.controls_map["lm_translator.batch_shrink_factor"].value = (
         _v if _v is not None else get_default("lm_translator.batch_shrink_factor")
     )
+    if "lm_translator.rpm_cooldown_sec" in view.controls_map:
+        _v = lm_cfg.get("rpm_cooldown_sec")
+        view.controls_map["lm_translator.rpm_cooldown_sec"].value = str(
+            _v if _v is not None else get_default("lm_translator.rpm_cooldown_sec", 0)
+        )
     view.controls_map["lm_translator.patchouli.dir_names"].value = "\n".join(
         lm_cfg.get("patchouli", {}).get("dir_names", [])
     )
@@ -167,6 +171,13 @@ def load_config_into_view(view, config: dict):
     view.controls_map[
         "lm_translator.translator.translatable_keywords"
     ].value = "\n".join(lm_cfg.get("translator", {}).get("translatable_keywords", []))
+    if "lm_translator.translator.short_text_skip_len" in view.controls_map:
+        _v = lm_cfg.get("translator", {}).get("short_text_skip_len")
+        view.controls_map["lm_translator.translator.short_text_skip_len"].value = str(
+            _v
+            if _v is not None
+            else get_default("lm_translator.translator.short_text_skip_len", 3)
+        )
 
     extractor_cfg = config.get("extractor", {})
     folder_names = extractor_cfg.get("output_folder_names", {})
@@ -355,6 +366,11 @@ def save_config_from_view(
         new_config["lm_translator"]["batch_shrink_factor"] = float(
             view.controls_map["lm_translator.batch_shrink_factor"].value
         )
+        if "lm_translator.rpm_cooldown_sec" in view.controls_map:
+            new_config["lm_translator"]["rpm_cooldown_sec"] = max(
+                0.0,
+                float(view.controls_map["lm_translator.rpm_cooldown_sec"].value or 0),
+            )
         new_config["lm_translator"]["patchouli"]["dir_names"] = [
             line.strip()
             for line in view.controls_map[
@@ -376,6 +392,13 @@ def save_config_from_view(
             ].value.splitlines()
             if line.strip()
         ]
+        if "lm_translator.translator.short_text_skip_len" in view.controls_map:
+            raw = view.controls_map[
+                "lm_translator.translator.short_text_skip_len"
+            ].value
+            new_config["lm_translator"]["translator"]["short_text_skip_len"] = max(
+                0, int(raw or 0)
+            )
         new_config["extractor"]["output_folder_names"] = {
             "lang_extract": view.controls_map[
                 "extractor.output_folder_names.lang_extract"
@@ -416,11 +439,17 @@ def save_config_from_view(
     view.load_config()
 
     if registry is not None:
+        from app.view_registry import built_view
+
         for item in registry:
-            if item["key"] == "extractor" and hasattr(
-                item["view"].content, "refresh_output_dir_helper"
+            # 只通知已建立的頁面；尚未建立的頁面建立時會讀取最新設定
+            view_obj = built_view(item)
+            if (
+                item["key"] == "extractor"
+                and view_obj is not None
+                and hasattr(view_obj.content, "refresh_output_dir_helper")
             ):
-                item["view"].content.refresh_output_dir_helper()
+                view_obj.content.refresh_output_dir_helper()
 
     show_snack(view.page, "✅ 設定已成功儲存！", view._success_color())
     return True

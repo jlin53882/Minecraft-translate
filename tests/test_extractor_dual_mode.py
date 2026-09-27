@@ -16,10 +16,11 @@ PR #90 extractor DUAL mode 修復斷言測試。
 9. `LogLimiter.filter()` 只剝 log/progress，保留 phase/stats/error
 """
 
-import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
-from pathlib import Path
 import sys
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -27,44 +28,42 @@ if str(ROOT) not in sys.path:
 
 from app.services_impl.logging_service import LogLimiter
 
-
 # =============================================================================
 # 1. LogLimiter.filter() 只剝 log/progress，保留 phase/stats/error
 # =============================================================================
+
 
 class TestLogLimiterFilterPreservesNonLogFields:
     """驗證 LogLimiter.filter() 不會剝掉 phase / stats / error 欄位。"""
 
     def test_filter_passes_through_phase_field(self):
-        """phase 欄位應從 update 直接讀取，不依賴 filter() 返回值。"""
+        """phase 欄位要保留在 filter() 的回傳值中，raw update 不被修改。"""
         limiter = LogLimiter(flush_interval=0.0)
         update = {"phase": "book", "log": "test", "progress": 0.5}
         result = limiter.filter(update)
         assert result is not None
-        assert "phase" in update  # raw update 保留
-        assert result.get("phase") is None  # 但 filter 只剝 log/progress
+        assert update == {"phase": "book", "log": "test", "progress": 0.5}
+        assert result["phase"] == "book"
 
     def test_filter_passes_through_stats_field(self):
-        """stats 欄位應從 update 直接讀取，不依賴 filter() 返回值。"""
+        """stats 欄位要保留在 filter() 的回傳值中。"""
         limiter = LogLimiter(flush_interval=0.0)
         stats = {"success": 10, "warnings": 2, "total_files": 12}
         update = {"stats": stats, "log": "extraction done", "progress": 1.0}
         result = limiter.filter(update)
         assert result is not None
-        assert "stats" in update  # raw update 保留
-        assert result.get("stats") is None  # 但 filter 只剝 log/progress
+        assert result["stats"] == stats
 
     def test_filter_passes_through_error_field(self):
-        """error 欄位應從 update 直接讀取，不依賴 filter() 返回值。"""
+        """error 欄位要保留在 filter() 的回傳值中。"""
         limiter = LogLimiter(flush_interval=0.0)
-        update = {"error": False, "log": "ok", "progress": 0.5}
+        update = {"error": True, "log": "boom", "progress": 0.5}
         result = limiter.filter(update)
         assert result is not None
-        assert "error" in update  # raw update 保留
-        assert result.get("error") is None  # 但 filter 只剝 log/progress
+        assert result["error"] is True
 
-    def test_filter_returns_only_log_and_progress(self):
-        """filter() 正常返回時只包含 log 和 progress。"""
+    def test_filter_keeps_all_non_log_fields(self):
+        """filter() 只合併 log、快取 progress，其餘欄位原樣保留。"""
         limiter = LogLimiter(flush_interval=0.0)
         update = {
             "phase": "lang",
@@ -76,12 +75,7 @@ class TestLogLimiterFilterPreservesNonLogFields:
             "progress": 0.3,
         }
         result = limiter.filter(update)
-        assert "log" in result
-        assert "progress" in result
-        # phase / stats / error / current / total 不在 result 中
-        assert "phase" not in result
-        assert "stats" not in result
-        assert "error" not in result
+        assert result == update
 
     def test_filter_with_only_phase_no_log(self):
         """只有 phase 欄位時，filter 直接通過（不改動）。"""
@@ -95,29 +89,39 @@ class TestLogLimiterFilterPreservesNonLogFields:
 # 2. `_auto_fill_output_path` 只在 output 為空時填入
 # =============================================================================
 
+
 class TestAutoFillOutputPathGuard:
     """驗證 _auto_fill_output_path 不覆蓋使用者已自訂的路徑。"""
 
     @pytest.fixture(autouse=True)
     def setup(self, monkeypatch):
         """在 import ExtractorView 前先 patch TaskSession。"""
+
         class _Session:
             def __init__(self, max_logs=2000):
-                self._status = 'IDLE'
+                self._status = "IDLE"
                 self._progress = 0
                 self._logs = []
                 self._error = False
+
             def start(self):
-                self._status = 'RUNNING'
+                self._status = "RUNNING"
+
             def snapshot(self):
-                return {'status': self._status, 'progress': self._progress, 'logs': self._logs, 'error': self._error}
+                return {
+                    "status": self._status,
+                    "progress": self._progress,
+                    "logs": self._logs,
+                    "error": self._error,
+                }
 
         monkeypatch.setattr("app.views.extractor_view.TaskSession", _Session)
 
     def _make_view(self, output_value=""):
         """建立 minimal mock ExtractorView。"""
         from app.views.extractor_view import ExtractorView
-        from tests.conftest import mock_page, mock_filepicker
+        from tests.conftest import mock_filepicker, mock_page
+
         page = mock_page()
         picker = mock_filepicker()
         view = ExtractorView(page, picker)
@@ -133,7 +137,10 @@ class TestAutoFillOutputPathGuard:
                 }
             }
         }
-        with patch("app.services_impl.pipelines.extract_service.load_config", return_value=mock_cfg):
+        with patch(
+            "app.services_impl.pipelines.extract_service.load_config",
+            return_value=mock_cfg,
+        ):
             view = self._make_view(output_value="C:/user/custom/path")
             original_value = view.output_dir_textfield.value
 
@@ -154,7 +161,10 @@ class TestAutoFillOutputPathGuard:
                 }
             }
         }
-        with patch("app.services_impl.pipelines.extract_service.load_config", return_value=mock_cfg):
+        with patch(
+            "app.services_impl.pipelines.extract_service.load_config",
+            return_value=mock_cfg,
+        ):
             view = self._make_view(output_value="")
             assert view.output_dir_textfield.value == ""
 
@@ -172,7 +182,10 @@ class TestAutoFillOutputPathGuard:
                 }
             }
         }
-        with patch("app.services_impl.pipelines.extract_service.load_config", return_value=mock_cfg):
+        with patch(
+            "app.services_impl.pipelines.extract_service.load_config",
+            return_value=mock_cfg,
+        ):
             view = self._make_view(output_value="   ")
             assert (view.output_dir_textfield.value or "").strip() == ""
 
@@ -192,17 +205,26 @@ class TestAutoFillOutputPathGuard:
                 }
             }
         }
-        with patch("app.services_impl.pipelines.extract_service.load_config", return_value=mock_cfg):
-            for mode, expected_suffix in [("lang", "_LANG"), ("book", "_BOOK"), ("dual", "_DUAL")]:
+        with patch(
+            "app.services_impl.pipelines.extract_service.load_config",
+            return_value=mock_cfg,
+        ):
+            for mode, expected_suffix in [
+                ("lang", "_LANG"),
+                ("book", "_BOOK"),
+                ("dual", "_DUAL"),
+            ]:
                 view = self._make_view(output_value="")
                 view._auto_fill_output_path("/test/mods", mode=mode)
-                assert view.output_dir_textfield.value.endswith(expected_suffix), \
+                assert view.output_dir_textfield.value.endswith(expected_suffix), (
                     f"mode={mode} 應以 {expected_suffix} 結尾，實際：{view.output_dir_textfield.value}"
+                )
 
 
 # =============================================================================
 # 3. `extract_dual_files_generator` yield `phase` 欄位
 # =============================================================================
+
 
 class TestExtractDualFilesGeneratorPhase:
     """驗證 extract_dual_files_generator 正確 yield phase 欄位。"""
@@ -219,14 +241,18 @@ class TestExtractDualFilesGeneratorPhase:
         jar = mods_dir / "mod1.jar"
         jar.write_bytes(b"PK\x05\x06" + b"\x00" * 20)
 
-        gen = extract_dual_files_generator(str(mods_dir), str(output_dir), skip_zh_cn=False)
+        gen = extract_dual_files_generator(
+            str(mods_dir), str(output_dir), skip_zh_cn=False
+        )
         updates = list(gen)
 
         phase_updates = [u for u in updates if "phase" in u]
         assert len(phase_updates) >= 1, f"至少一個 phase 更新，實際 updates: {updates}"
 
         book_phases = [u for u in phase_updates if u["phase"] == "book"]
-        assert len(book_phases) >= 1, f"至少一個 phase=book，實際 phase_updates: {phase_updates}"
+        assert len(book_phases) >= 1, (
+            f"至少一個 phase=book，實際 phase_updates: {phase_updates}"
+        )
 
     def test_dual_generator_lang_phase_initial(self, tmp_path):
         """第一個 phase 應為 lang。"""
@@ -268,6 +294,7 @@ class TestExtractDualFilesGeneratorPhase:
             assert "lang" in last_stats, f"stats 應有 lang sub-dict: {last_stats}"
             assert "book" in last_stats, f"stats 應有 book sub-dict: {last_stats}"
 
+
 class TestProgressBarPhaseReset:
     """驗證 Book phase 抵達時 progress_bar.value 重置為 0.0。"""
 
@@ -293,8 +320,10 @@ class TestProgressBarPhaseReset:
         # phase=book 的 update 中，progress 應從 0 開始（因為是新 phase）
         first_book = book_updates[0]
         if "progress" in first_book:
-            assert first_book["progress"] == 0.0, \
+            assert first_book["progress"] == 0.0, (
                 f"book phase 應從 progress=0 開始，實際: {first_book['progress']}"
+            )
+
 
 # =============================================================================
 # 11. ExtractionState 結構完整性

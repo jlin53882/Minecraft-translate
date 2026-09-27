@@ -2,6 +2,7 @@
 # 可獨立創建 widgets、處理事件、回調結果
 
 import flet as ft
+
 from app.ui import theme
 
 
@@ -41,7 +42,9 @@ class CacheQueryView(ft.Container):
         )
 
         # 查詢變更提示
-        self.query_change_hint = ft.Text("", size=11, color=theme.WARNING, visible=False)
+        self.query_change_hint = ft.Text(
+            "", size=11, color=theme.WARNING, visible=False
+        )
 
         # 模式選擇
         self.dd_query_mode = ft.Dropdown(
@@ -54,7 +57,7 @@ class CacheQueryView(ft.Container):
                 ft.dropdown.Option("ALL", "全部"),
             ],
         )
-        self.dd_query_mode.on_change = lambda e: self._on_mode_change()
+        self.dd_query_mode.on_select = lambda e: self._on_mode_change()
 
         # 分類選擇
         self.dd_query_type = ft.Dropdown(
@@ -63,7 +66,7 @@ class CacheQueryView(ft.Container):
             tooltip="選擇要查詢的分類",
             options=[ft.dropdown.Option("ALL", "全部")],
         )
-        self.dd_query_type.on_change = lambda e: self._on_type_change()
+        self.dd_query_type.on_select = lambda e: self._on_type_change()
 
         # 按鈕
         self.btn_query_search = ft.Button(
@@ -107,7 +110,7 @@ class CacheQueryView(ft.Container):
         """設定分類下拉選項（由外部呼叫）"""
         self.dd_query_type.options = options
         self.dd_query_type.value = "ALL"
-        if hasattr(self, 'page') and self.page:
+        if hasattr(self, "page") and self.page:
             self.update()
 
     # ==================== 事件處理 ====================
@@ -149,7 +152,7 @@ class CacheQueryView(ft.Container):
         self.cache_view.update()
 
         # 回調到 cache_view
-        if hasattr(self.cache_view, '_on_query_view_search'):
+        if hasattr(self.cache_view, "_on_query_view_search"):
             self.cache_view._on_query_view_search(
                 query=query,
                 mode=self.dd_query_mode.value,
@@ -165,5 +168,5 @@ class CacheQueryView(ft.Container):
         self.query_search_hint.color = theme.GREY_700
         self.cache_view.update()
 
-        if hasattr(self.cache_view, '_on_query_view_clear'):
+        if hasattr(self.cache_view, "_on_query_view_clear"):
             self.cache_view._on_query_view_clear()

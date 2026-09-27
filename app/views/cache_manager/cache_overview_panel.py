@@ -9,7 +9,9 @@ from __future__ import annotations
 import flet as ft
 
 from app.ui.components import styled_card
+
 from .cache_log_panel import build_log_panel
+
 
 def build_overview_page(
     *,
@@ -33,31 +35,78 @@ def build_overview_page(
     PR3 試點：使用 styled_card 替換 bordered_block，支援卡片收合功能
     """
 
-    # 試點：使用 styled_card 包裝說明區塊（PR3 產出，支援收合）
-    help_block = styled_card(
-        title="操作說明",
-        icon=ft.Icons.HELP_OUTLINE,
+    # 狀態與全域操作按鈕（常駐顯示）
+    actions_block = styled_card(
+        title="操作",
+        icon=ft.Icons.TUNE,
         icon_color=ft.Colors.BLUE_GREY_700,
-        collapsible=True,
-        default_collapsed=False,
         page=page,
         content=ft.Column(
             [
                 overview_status,
                 overview_trace,
-                ft.Row([btn_reload_all, btn_refresh_stats, btn_rebuild_index], wrap=True),
-                ft.Divider(height=8),
-                ft.Text("按鈕說明", weight=ft.FontWeight.BOLD),
-                ft.Text("重新載入：重新讀取全部分類快取（記憶體重建）", size=11, color=ft.Colors.GREY_700),
-                ft.Text("刷新統計：只刷新 UI 顯示數據，不做寫入", size=11, color=ft.Colors.GREY_700),
-                ft.Text("🔍 重建搜尋索引：建立全文搜尋索引（提升查詢速度 10~100 倍）", size=11, color=ft.Colors.BLUE_700),
-                ft.Text("分類卡按鈕（在左側每張卡片上）", size=11, color=ft.Colors.GREY_700),
+                ft.Row(
+                    [btn_reload_all, btn_refresh_stats, btn_rebuild_index], wrap=True
+                ),
+            ],
+            spacing=8,
+        ),
+    )
+
+    # 按鈕說明預設收合：展開時內容很長，會把下方日誌擠到看不見（1280×900 只剩標題列）
+    help_block = styled_card(
+        title="按鈕說明",
+        icon=ft.Icons.HELP_OUTLINE,
+        icon_color=ft.Colors.BLUE_GREY_700,
+        collapsible=True,
+        default_collapsed=True,
+        page=page,
+        content=ft.Column(
+            [
+                ft.Text(
+                    "重新載入：重新讀取全部分類快取（記憶體重建）",
+                    size=11,
+                    color=ft.Colors.GREY_700,
+                ),
+                ft.Text(
+                    "刷新統計：只刷新 UI 顯示數據，不做寫入",
+                    size=11,
+                    color=ft.Colors.GREY_700,
+                ),
+                ft.Text(
+                    "🔍 重建搜尋索引：建立全文搜尋索引（提升查詢速度 10~100 倍）",
+                    size=11,
+                    color=ft.Colors.BLUE_700,
+                ),
+                ft.Text(
+                    "分類卡按鈕（在左側每張卡片上）", size=11, color=ft.Colors.GREY_700
+                ),
                 ft.Text("• 重新載入：只重載該分類", size=11, color=ft.Colors.GREY_700),
-                ft.Text("• 新分片：把該分類新資料寫到新 shard", size=11, color=ft.Colors.GREY_700),
-                ft.Text("• 補滿舊檔：回填既有 shard（覆寫模式）", size=11, color=ft.Colors.GREY_700),
-                ft.Text("• 輪替分片：強制切到下一個 active shard", size=11, color=ft.Colors.GREY_700),
-                ft.Text("• 分析：顯示該分類目前狀態與使用率", size=11, color=ft.Colors.GREY_700),
-                ft.Text("• 切換查詢：跳到查詢頁並帶入分類", size=11, color=ft.Colors.GREY_700),
+                ft.Text(
+                    "• 新分片：把該分類新資料寫到新 shard",
+                    size=11,
+                    color=ft.Colors.GREY_700,
+                ),
+                ft.Text(
+                    "• 補滿舊檔：回填既有 shard（覆寫模式）",
+                    size=11,
+                    color=ft.Colors.GREY_700,
+                ),
+                ft.Text(
+                    "• 輪替分片：強制切到下一個 active shard",
+                    size=11,
+                    color=ft.Colors.GREY_700,
+                ),
+                ft.Text(
+                    "• 分析：顯示該分類目前狀態與使用率",
+                    size=11,
+                    color=ft.Colors.GREY_700,
+                ),
+                ft.Text(
+                    "• 切換查詢：跳到查詢頁並帶入分類",
+                    size=11,
+                    color=ft.Colors.GREY_700,
+                ),
             ],
             spacing=8,
         ),
@@ -74,7 +123,11 @@ def build_overview_page(
         page=page,
         content=ft.Column(
             [
-                ft.Text("卡片可捲動瀏覽，避免分類過多被截斷", size=11, color=ft.Colors.GREY_700),
+                ft.Text(
+                    "卡片可捲動瀏覽，避免分類過多被截斷",
+                    size=11,
+                    color=ft.Colors.GREY_700,
+                ),
                 type_list,
             ],
             expand=True,
@@ -83,6 +136,7 @@ def build_overview_page(
 
     right_panel = ft.Column(
         [
+            actions_block,
             help_block,
             build_log_panel(
                 sw_log_only_error=sw_log_only_error,
@@ -112,8 +166,12 @@ def build_overview_page(
             ft.ResponsiveRow(
                 expand=True,
                 controls=[
-                    ft.Container(col={"xs": 12, "md": 7}, expand=True, content=left_panel),
-                    ft.Container(col={"xs": 12, "md": 5}, expand=True, content=right_panel),
+                    ft.Container(
+                        col={"xs": 12, "md": 7}, expand=True, content=left_panel
+                    ),
+                    ft.Container(
+                        col={"xs": 12, "md": 5}, expand=True, content=right_panel
+                    ),
                 ],
             ),
         ],

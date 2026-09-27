@@ -6,15 +6,16 @@
 
 # /minecraft_translator_flet/app/views/lookup_view.py (加入「查詢中...」功能的修正版)
 
-import flet as ft
 import threading
-from app.ui import theme
-from app.ui.snack import show_snack
-from translation_tool.utils.log_unit import log_info
+
+import flet as ft
+
 from app.services_impl.pipelines.lookup_service import (
     run_batch_lookup_service,
     run_manual_lookup_service,
 )
+from app.ui import theme
+
 
 class LookupView(ft.Column):
     """LookupView 類別。
@@ -72,7 +73,8 @@ class LookupView(ft.Column):
                     content=ft.Column(
                         [
                             ft.Text(
-                                "單筆學名查詢", theme_style=ft.TextThemeStyle.TITLE_MEDIUM
+                                "單筆學名查詢",
+                                theme_style=ft.TextThemeStyle.TITLE_MEDIUM,
                             ),
                             ft.Row([self.single_input, self.single_button]),
                             ft.Divider(),
@@ -94,7 +96,8 @@ class LookupView(ft.Column):
                     content=ft.Column(
                         [
                             ft.Text(
-                                "批次學名查詢", theme_style=ft.TextThemeStyle.TITLE_MEDIUM
+                                "批次學名查詢",
+                                theme_style=ft.TextThemeStyle.TITLE_MEDIUM,
                             ),
                             ft.Row(
                                 [self.batch_input, self.batch_result_textfield],
@@ -129,23 +132,37 @@ class LookupView(ft.Column):
         self.page.update()
 
         # 2. 在背景執行緒中執行查詢
-        thread = threading.Thread(target=self.single_lookup_worker, args=(search_term,))
+        thread = threading.Thread(
+            target=self.single_lookup_worker, args=(search_term,), daemon=True
+        )
         thread.start()
 
+    def _run_on_ui(self, fn):
+        """把 UI 更新排到 Flet event loop（背景執行緒直接 page.update 不安全）。"""
+
+        async def _apply():
+            fn()
+
+        self.page.run_task(_apply)
+
     def single_lookup_worker(self, name: str):
-        # 3. 呼叫後端服務
-        """執行單筆查詢工作。"""
-        result = run_manual_lookup_service(name)
+        """執行單筆查詢工作（背景執行緒）；結果交給 event loop 套用。"""
+        try:
+            result = run_manual_lookup_service(name)
+            color = None  # 恢復預設顏色
+        except Exception as ex:  # noqa: BLE001 - 失敗也要恢復按鈕並顯示原因
+            result = f"查詢失敗：{ex}"
+            color = theme.ERROR
 
-        # 4. 在 UI 執行緒中更新最終結果
-        self.single_result_text.value = result
-        self.single_result_text.color = None  # 恢復預設顏色
+        def apply():
+            self.single_result_text.value = result
+            self.single_result_text.color = color
+            self.single_button.disabled = False
+            self.single_input.disabled = False
+            self.single_progress_ring.visible = False
+            self.page.update()
 
-        # 5. 在 finally 區塊中恢復 UI 狀態，確保無論成功或失敗都會執行
-        self.single_button.disabled = False
-        self.single_input.disabled = False
-        self.single_progress_ring.visible = False
-        self.page.update()
+        self._run_on_ui(apply)
 
     # --- 批次查詢邏輯 ---
     def batch_lookup_clicked(self, e):
@@ -162,26 +179,37 @@ class LookupView(ft.Column):
         self.batch_result_textfield.value = "批次查詢中，請稍候..."
         self.page.update()
 
-        thread = threading.Thread(target=self.batch_lookup_worker, args=(json_text,))
+        thread = threading.Thread(
+            target=self.batch_lookup_worker, args=(json_text,), daemon=True
+        )
         thread.start()
 
     def batch_lookup_worker(self, json_text):
-        """執行批次查詢翻譯服務"""
+        """執行批次查詢翻譯服務（背景執行緒）；結果交給 event loop 套用。"""
+        state = {"text": None, "progress": None}
         try:
             for update in run_batch_lookup_service(json_text):
                 if update.get("error"):
-                    self.batch_result_textfield.value = update.get("log")
+                    state["text"] = update.get("log")
                     break
                 if update.get("result"):
-                    self.batch_result_textfield.value = update.get("result")
+                    state["text"] = update.get("result")
                 if update.get("progress"):
-                    self.batch_progress_bar.value = update.get("progress")
-                self.page.update()
+                    state["progress"] = update.get("progress")
+        except Exception as ex:  # noqa: BLE001 - 失敗也要恢復按鈕並顯示原因
+            state["text"] = f"批次查詢失敗：{ex}"
         finally:
-            self.batch_button.disabled = False
-            self.batch_progress_bar.visible = False
-            self.page.update()
 
+            def apply():
+                if state["text"] is not None:
+                    self.batch_result_textfield.value = state["text"]
+                if state["progress"] is not None:
+                    self.batch_progress_bar.value = state["progress"]
+                self.batch_button.disabled = False
+                self.batch_progress_bar.visible = False
+                self.page.update()
+
+            self._run_on_ui(apply)
 
     @property
     def page(self):

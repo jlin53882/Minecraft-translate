@@ -5,6 +5,7 @@
 
 import threading
 import time
+
 from app.views.qc_base import QCBase
 
 
@@ -38,6 +39,10 @@ class _MockListView:
         self.added_count += 1
         # 模擬行為：把 log text append 進 controls
         self.controls.append(text)
+
+    def add_many(self, items):
+        for text, level in items:
+            self.add(text, level=level)
 
     def clear(self):
         self.controls.clear()
@@ -78,7 +83,7 @@ def test_task_worker_starts_thread():
         completed.set()
         yield {"log": "done", "progress": 1.0}
 
-    qc_base.task_worker(dummy_service, tuple())
+    qc_base.task_worker(dummy_service, ())
 
     # 等待執行緒啟動
     assert completed.wait(timeout=1.0), "執行緒未啟動"
@@ -103,7 +108,7 @@ def test_task_worker_calls_controls_disable():
         task_done.set()  # 標記任務完成（在更新 disabled 之前）
         yield {"log": "done", "progress": 1.0}
 
-    qc_base.task_worker(dummy_service, tuple(), controls_to_disable=[control1, control2])
+    qc_base.task_worker(dummy_service, (), controls_to_disable=[control1, control2])
 
     # 等待足夠時間讓執行緒完成（包括 finally 區塊的 disabled 恢復）
     task_done.wait(timeout=1.0)
@@ -130,7 +135,7 @@ def test_task_worker_accepts_on_complete_callback():
     def on_complete():
         callback_called.set()
 
-    qc_base.task_worker(dummy_service, tuple(), on_complete=on_complete)
+    qc_base.task_worker(dummy_service, (), on_complete=on_complete)
 
     # 等待回調被呼叫
     assert callback_called.wait(timeout=1.0), "on_complete 回調未執行"
@@ -149,7 +154,7 @@ def test_task_worker_updates_progress_bar():
         yield {"log": "step2", "progress": 0.5}
         yield {"log": "done", "progress": 1.0}
 
-    qc_base.task_worker(progress_service, tuple())
+    qc_base.task_worker(progress_service, ())
 
     # 等待執行緒完成
     time.sleep(0.2)
@@ -173,9 +178,67 @@ def test_task_worker_handles_error():
         yield {"log": "error occurred", "error": True, "progress": 0.5}
         # 立即停止，不再產生更多 yield
 
-    qc_base.task_worker(error_service, tuple())
+    qc_base.task_worker(error_service, ())
 
     # 由於執行緒非同步，我們只驗證 task_worker 可以處理 error 欄位而不崩潰
     # 顏色可能為 None（如果 finally 已執行）或非 None（如果在 error 設定後）
     # 這裡只驗證不拋例外
     assert True  # 如果走到這行表示 task_worker 能處理 error 欄位
+
+
+class _LoopPage(_MockPage):
+    """模擬 Flet：UI 更新只能透過 run_task 交給 event loop。"""
+
+    def __init__(self):
+        super().__init__()
+        self.tasks = []
+
+    def run_task(self, handler, *args):
+        import asyncio
+        import inspect
+
+        assert inspect.iscoroutinefunction(handler)
+        self.tasks.append(handler)
+        asyncio.run(handler(*args))
+
+
+def test_task_worker_batches_ui_updates_and_levels():
+    """大量 log 不可每行 page.update；錯誤行要標成 error 等級。"""
+    page = _LoopPage()
+    progress_bar = _MockProgressBar()
+    log_view = _MockListView()
+    levels = []
+    log_view.add = lambda text, level="info", source="ui": levels.append(level)
+    qc_base = QCBase(page, progress_bar, log_view)
+    done = threading.Event()
+
+    def many_lines(*args):
+        for i in range(2000):
+            yield {"log": f"line {i}", "progress": i / 2000}
+        yield {"log": "❌ 錯誤：找不到檔案"}
+
+    qc_base.task_worker(many_lines, (), on_complete=done.set)
+
+    assert done.wait(timeout=5.0)
+    assert len(levels) == 2001
+    assert levels[-1] == "error"
+    assert page.updated < 50
+
+
+def test_task_worker_reports_exception_and_restores_controls():
+    page = _LoopPage()
+    progress_bar = _MockProgressBar()
+    log_view = _MockListView()
+    qc_base = QCBase(page, progress_bar, log_view)
+    control = _MockControl()
+    done = threading.Event()
+
+    def broken(*args):
+        yield {"log": "start"}
+        raise ValueError("boom")
+
+    qc_base.task_worker(broken, (), on_complete=done.set, controls_to_disable=[control])
+
+    assert done.wait(timeout=5.0)
+    assert control.disabled is False
+    assert any("boom" in c for c in log_view.controls)

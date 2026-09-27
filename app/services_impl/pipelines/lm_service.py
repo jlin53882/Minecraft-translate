@@ -17,6 +17,7 @@ from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_loggin
 from translation_tool.core.lm_translator import (
     translate_directory_generator as lm_translate_gen,
 )
+from translation_tool.utils.cancellation import cancel_scope
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,9 @@ def run_lm_translation_service(
 
     logger.debug(f"DEBUG [2. Service]: 接收到的 export_lang 為 -> {export_lang}")
 
+    def _cancel_requested() -> bool:
+        return bool(getattr(session, "cancel_requested", False))
+
     try:
         # 初始化 Session 狀態
         session.start()
@@ -44,26 +48,30 @@ def run_lm_translation_service(
             session.add_log("[DRY-RUN] 啟用：僅進行分析與預覽，不會送出任何 API 請求")
 
         # ⭐ 把 dry_run 明確傳遞給 generator
-        for update_dict in lm_translate_gen(
+        gen = lm_translate_gen(
             input_dir,
             output_dir,
             dry_run=dry_run,
             export_lang=export_lang,
             write_new_cache=write_new_cache,
-        ):
-            filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
-            if filtered is None:
-                continue
+            should_cancel=_cancel_requested,
+        )
+        # cancel_scope：generator 在此執行緒迭代，等待 API 限流時也能被取消打斷
+        with cancel_scope(_cancel_requested):
+            for update_dict in gen:
+                filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
+                if filtered is None:
+                    continue
 
-            if "log" in filtered and filtered["log"]:
-                session.add_log(filtered["log"])
+                if filtered.get("log"):
+                    session.add_log(filtered["log"])
 
-            if "progress" in filtered and filtered["progress"] is not None:
-                session.set_progress(filtered["progress"])
+                if "progress" in filtered and filtered["progress"] is not None:
+                    session.set_progress(filtered["progress"])
 
-            if filtered.get("error"):
-                session.set_error()
-                return
+                if filtered.get("error"):
+                    session.set_error()
+                    return
 
         final = GLOBAL_LOG_LIMITER.flush()
         if final and "log" in final:
@@ -74,7 +82,7 @@ def run_lm_translation_service(
 
         session.finish()
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"LM 服務失敗: {e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] LM 翻譯服務失敗：{e}\n{full_traceback}")
