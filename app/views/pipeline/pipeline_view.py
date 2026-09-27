@@ -381,9 +381,6 @@ class PipelineView(ft.Column):
             text_size=12,
             dense=True,
         )
-        self.log_content = ft.ListView(
-            expand=True, spacing=5, auto_scroll=True
-        )  # PR refactor/unified-log-view: dead widget, 將在下個 commit 移除
         self.progress_bar = ft.ProgressBar(
             width=float("inf"), height=8, value=0, color=CYAN_400, bgcolor="#E0E0E0"
         )
