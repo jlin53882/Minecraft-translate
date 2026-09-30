@@ -859,8 +859,12 @@ def translate_batch_smart_old(
                     "策略：跳過此批（輸出原值），直接處理下一批，避免浪費其他 API Key。"
                 )
 
-                # 1. 認輸：直接塞回原始數據，保證結構完整
-                all_results.extend(current_batch)
+                # 1. 認輸：直接塞回原始數據，保證輸出檔結構完整。
+                #    標記 _untranslated，讓呼叫端不要把原文當成譯文寫入快取
+                #    （否則日後快取命中會永遠拿到未翻譯的原文）。
+                all_results.extend(
+                    {**item, "_untranslated": True} for item in current_batch
+                )
 
                 # 2. 移除指標：讓指標往後跳過這批
                 remaining_items = remaining_items[batch_size:]

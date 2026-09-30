@@ -38,6 +38,16 @@ class TranslateLoopResult:
     last_error: str | None = None
 
 
+def _is_valid_result(it: Any) -> bool:
+    """結果需為 dict 且含字串型別的 path / text / source_text。"""
+    return (
+        isinstance(it, dict)
+        and isinstance(it.get("path"), str)
+        and isinstance(it.get("text"), str)
+        and isinstance(it.get("source_text"), str)
+    )
+
+
 def _get_default_batch_size(
     cache_type: str, batch_size_by_type: dict[str, int] | None
 ) -> int:
@@ -164,22 +174,43 @@ def translate_items_with_cache_loop(
             )
 
         completed_calls += 1
-        safe_translated = translated or []
+        safe_translated = list(translated or [])[: len(batch)]
         actual_processed_in_this_batch = 0
+        untranslated_fallback = 0
+        malformed_fallback = 0
 
-        for it in safe_translated:
-            if not isinstance(it, dict):
-                continue
+        # 對應契約：translate_batch_smart 依輸入順序回傳，第 i 筆結果對應 batch[i]；
+        # 未完成時只回傳前綴（剩下的留在 remaining 下一輪重送）。
+        # 格式無效的結果不可靜默丟棄：以 batch[i] 原文回填並標記 _untranslated，
+        # 輸出仍完整、不寫入快取，且計入 processed，讓 DONE 時 processed == total。
+        for position, it in enumerate(safe_translated):
+            original = batch[position]
+            if not _is_valid_result(it):
+                fallback_src = original.get("source_text", original.get("text"))
+                it = {
+                    **original,
+                    "text": fallback_src if isinstance(fallback_src, str) else "",
+                    "_untranslated": True,
+                }
+                if not _is_valid_result(it):
+                    # 原始項目本身缺欄位：無法輸出也無法快取，不能算完成
+                    last_error = f"批次第 {position} 筆缺少 path/source_text，無法回填"
+                    emit_progress(f"❌ [SharedLM] {last_error}")
+                    return TranslateLoopResult(
+                        status="FAILED",
+                        processed=processed,
+                        total=total,
+                        completed_calls=completed_calls,
+                        elapsed_sec=time.time() - start_time,
+                        exhausted=False,
+                        last_error=last_error,
+                    )
+                malformed_fallback += 1
 
-            pth = it.get("path")
-            txt = it.get("text")
-            src = it.get("source_text")
+            pth = it["path"]
+            txt = it["text"]
+            src = it["source_text"]
             ctype = str(it.get("cache_type") or cache_type)
-
-            if not (
-                isinstance(pth, str) and isinstance(txt, str) and isinstance(src, str)
-            ):
-                continue
 
             actual_processed_in_this_batch += 1
             processed += 1
@@ -190,6 +221,11 @@ def translate_items_with_cache_loop(
                 except Exception as e:  # noqa: BLE001
                     log_info(f"[SharedLM] 處理翻譯結果失敗: {e}")
 
+            if it.get("_untranslated"):
+                # 批次縮到極限回填的原文 / 格式無效回填的原文：保留在輸出，但不寫入快取
+                untranslated_fallback += 1
+                continue
+
             rule = cache_rules.get(ctype) or CacheRule("path|source_text")
             cache_key = rule.make_key({"path": pth, "source_text": src})
             try:
@@ -197,7 +233,15 @@ def translate_items_with_cache_loop(
             except Exception as e:  # noqa: BLE001
                 log_info(f"[SharedLM] 新增快取失敗: {e}")
 
-        remaining = remaining[actual_processed_in_this_batch:]
+        if untranslated_fallback:
+            log_info(
+                f"[SharedLM] {untranslated_fallback} 筆回填原文（批次縮至極限或回傳格式無效），未寫入快取"
+            )
+        if malformed_fallback:
+            last_error = f"{malformed_fallback} 筆回傳格式無效，已回填原文且未翻譯"
+
+        # 切片位置 == 已處理的前綴長度（每筆回傳都已處理或回填），不會錯位。
+        remaining = remaining[len(safe_translated) :]
 
         try:
             save_translation_cache(cache_type, write_new_shard=write_new_cache)

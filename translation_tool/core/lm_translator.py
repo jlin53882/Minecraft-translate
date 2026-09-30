@@ -40,13 +40,20 @@ from translation_tool.utils.cache_manager import (
     save_translation_cache,
 )
 from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import (
+    get_batch_write_interval,
+    load_config,
+)
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
+
 
 # ============================================================
 # B-3: 快取寫入頻率優化（每 N 個批次才寫一次硬碟）
 # ============================================================
-BATCH_WRITE_INTERVAL = 5  # 每 N 個批次寫一次硬碟
+def _get_batch_write_interval() -> int:
+    """讀取 lm_translator.batch_write_interval（與 UI 共用 config_manager 的實作）。"""
+    return get_batch_write_interval()
+
 
 # ============================================================
 # B-4: 斷點續傳機制
@@ -690,8 +697,8 @@ def translate_directory_generator(
                 )
 
             # --- 第一步：登記到快取管理員 (這決定了存檔有沒有內容) ---
-            # 2. 存入記憶體快取
-            if src_text and src_text.strip():
+            # 2. 存入記憶體快取（批次縮到極限時回填的原文不可進快取）
+            if src_text and src_text.strip() and not item.get("_untranslated"):
                 if c_type == "patchouli":
                     # Patchouli 的文本可能隨 path 變動，故使用組合 Key
                     u_key = f"{path}|{src_text}"
@@ -766,17 +773,18 @@ def translate_directory_generator(
         # B-3: 快取寫入頻率優化 - 每 N 個批次才寫一次硬碟
         # ============================================================
         _batch_write_counter += 1
+        batch_write_interval = _get_batch_write_interval()
         # len(remaining) == 0 表示是最後一批，必須寫入
-        if _batch_write_counter % BATCH_WRITE_INTERVAL == 0 or len(remaining) == 0:
+        if _batch_write_counter % batch_write_interval == 0 or len(remaining) == 0:
             if is_lang:
                 save_translation_cache("lang", write_new_shard=write_new_cache)
                 log_debug(
-                    f"✅ lang 分片快取已寫入硬碟（每 {BATCH_WRITE_INTERVAL} 批次）"
+                    f"✅ lang 分片快取已寫入硬碟（每 {batch_write_interval} 批次）"
                 )
             else:
                 save_translation_cache("patchouli", write_new_shard=write_new_cache)
                 log_debug(
-                    f"✅ patchouli 分片快取已寫入硬碟（每 {BATCH_WRITE_INTERVAL} 批次）"
+                    f"✅ patchouli 分片快取已寫入硬碟（每 {batch_write_interval} 批次）"
                 )
             _batch_write_counter = 0  # 重置計數器
 

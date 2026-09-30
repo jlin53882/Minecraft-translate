@@ -13,6 +13,8 @@ from typing import Any
 
 import orjson as json
 
+from translation_tool.utils.cache_shards import list_shards_oldest_first
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,7 +30,7 @@ def load_shard_file(path: Path) -> dict[str, Any]:
             return {}
         data = json.loads(path.read_bytes())
         return data if isinstance(data, dict) else {}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 載入失敗不應中斷其他分片
         logger.warning(f"載入分片失敗 {path}: {e}")
         return {}
 
@@ -50,7 +52,8 @@ def load_cache_type(
     type_dir.mkdir(parents=True, exist_ok=True)
     cache_file_path[cache_type] = type_dir / f"{cache_type}_cache_main.json"
 
-    json_files = sorted(type_dir.glob("*.json"))
+    # 依分片寫入序號由舊到新載入，後寫入者覆蓋先寫入者（見 cache_shards 的 freshness contract）
+    json_files = list_shards_oldest_first(type_dir)
     if not json_files:
         translation_cache[cache_type] = {}
         return
