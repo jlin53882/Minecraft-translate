@@ -339,3 +339,31 @@ def test_batch_write_interval_is_read_from_config(cfg_value, expected):
         cfg["lm_translator"]["batch_write_interval"] = cfg_value
     with patch.object(lm_translator, "load_config", return_value=cfg):
         assert lm_translator._get_batch_write_interval() == expected
+
+
+def test_load_cache_type_orders_shards_by_write_time(tmp_path):
+    """時間戳分片先寫、編號分片後更新同一 key，重載後應取得較新的值。"""
+    import logging
+    import os
+
+    from translation_tool.utils.cache_loader import load_cache_type
+
+    type_dir = tmp_path / "lang"
+    type_dir.mkdir()
+    old = type_dir / "lang_0930120000-1.json"
+    new = type_dir / "lang_00001.json"
+    old.write_text('{"k": "old"}', encoding="utf-8")
+    new.write_text('{"k": "new"}', encoding="utf-8")
+    os.utime(old, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(new, ns=(2_000_000_000, 2_000_000_000))
+
+    cache: dict = {}
+    load_cache_type(
+        "lang",
+        translation_cache=cache,
+        cache_file_path={},
+        cache_root=tmp_path,
+        parallel_workers=2,
+        logger=logging.getLogger("t"),
+    )
+    assert cache["lang"]["k"] == "new"

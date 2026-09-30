@@ -28,7 +28,7 @@ def load_shard_file(path: Path) -> dict[str, Any]:
             return {}
         data = json.loads(path.read_bytes())
         return data if isinstance(data, dict) else {}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 載入失敗不應中斷其他分片
         logger.warning(f"載入分片失敗 {path}: {e}")
         return {}
 
@@ -50,7 +50,11 @@ def load_cache_type(
     type_dir.mkdir(parents=True, exist_ok=True)
     cache_file_path[cache_type] = type_dir / f"{cache_type}_cache_main.json"
 
-    json_files = sorted(type_dir.glob("*.json"))
+    # 依修改時間由舊到新載入（同時間以檔名排序），後寫入者覆蓋先寫入者；
+    # 時間戳分片與編號分片的檔名無法直接比較先後，故不能只靠檔名排序。
+    json_files = sorted(
+        type_dir.glob("*.json"), key=lambda f: (f.stat().st_mtime_ns, f.name)
+    )
     if not json_files:
         translation_cache[cache_type] = {}
         return
