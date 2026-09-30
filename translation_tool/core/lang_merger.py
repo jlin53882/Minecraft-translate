@@ -301,6 +301,14 @@ def merge_zhcn_to_zhtw_from_zip(
                     # 3. 核心重點：無論有沒有 log，每一條任務完成都 yield 一次
                     # 這樣進度條 (progress) 就會隨著任務完成一個個跳動
                     yield yield_data
+            # 累計讀取預算用盡是 sticky 的：之後所有讀取都會失敗並被視為「單檔失敗」，
+            # 輸出只會是部分合併。必須在 pack 層級明確回報，不能顯示成功（issue #109）。
+            budget_exhausted = zip_budget.exhausted
+            if budget_exhausted:
+                log_error(
+                    f"ZIP 累計讀取預算已用盡，輸出不完整：{os.path.basename(zip_file)}"
+                    "（預算用盡後的檔案都未處理，請檢查 ZIP 是否異常龐大）"
+                )
             # <--- 在這裡插入清理代碼 --->
             log_info("正在清理空的待翻譯資料夾...")
             remove_empty_dirs(must_translate_dir)
@@ -325,6 +333,14 @@ def merge_zhcn_to_zhtw_from_zip(
                 min_count=filtered_pending_min_count,
             )
             # <--- 插入結束 --->
+            if budget_exhausted:
+                incomplete_msg = (
+                    f"--- 處理結束但輸出不完整：ZIP 累計讀取預算已用盡"
+                    f"（{os.path.basename(zip_file)}），部分檔案未處理 ---"
+                )
+                log_error(incomplete_msg)
+                yield {"progress": 1.0, "error": True, "log": incomplete_msg}
+                return
             log_info(f"--- 全部處理完成: {total_tasks} 個任務完成 ---")
             yield {"progress": 1.0}
 
