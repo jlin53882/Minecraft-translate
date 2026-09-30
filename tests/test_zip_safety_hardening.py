@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -673,3 +674,297 @@ def test_icon_cache_file_rejects_escaping_modid(tmp_path):
 
     with pytest.raises(UnsafePathError):
         mod._icon_cache_file(root, "../../evil", Path("x/mod.jar"), "item.m.a")
+
+
+# ---------------------------------------------------------------------------
+# 正式 extraction pipeline：預掃描 + 提取共用同一個 JAR 的累計預算
+# ---------------------------------------------------------------------------
+
+_LANG_REGEX = re.compile(r"assets/[^/]+/lang/.*\.json$")
+
+
+def _lang_jar(
+    path: Path, text: int, binary: int, size: int = 1000, prefix: str = ""
+) -> Path:
+    """text 個可解碼的文字成員（掃描時直接保存內容）+ binary 個無法 UTF-8 解碼的成員
+    （掃描時解碼失敗記為 None，提取階段必須重新讀取）。每個成員解壓後都是 size bytes。
+    prefix 用來讓不同 JAR 的輸出檔名不同（相同路徑且內容相同會被提取流程視為「跳過」）。"""
+    entries: dict[str, bytes] = {}
+    for i in range(text):
+        entries[f"assets/m/lang/{prefix}t{i}.json"] = b"x" * size
+    for i in range(binary):
+        entries[f"assets/m/lang/{prefix}b{i}.json"] = b"\xff" * size
+    return _make_zip(path, entries)
+
+
+def _track_budgets(monkeypatch, max_bytes: int, max_members: int = 10_000):
+    """把掃描與提取兩個模組建立的 ZipReadBudget 換成小預算並記錄建立了幾份。"""
+    created: list[ZipReadBudget] = []
+
+    def factory(label: str = "") -> ZipReadBudget:
+        budget = ZipReadBudget(
+            max_bytes=max_bytes, max_members=max_members, label=label
+        )
+        created.append(budget)
+        return budget
+
+    monkeypatch.setattr("translation_tool.utils.jar_browser.ZipReadBudget", factory)
+    monkeypatch.setattr(
+        "translation_tool.core.jar_processor_extract.ZipReadBudget", factory
+    )
+    return created
+
+
+def _run_pipeline(mods: Path, out: Path, jars: list[Path]) -> list[dict]:
+    """走正式流程：run_extraction_process_impl → scan_jars（預掃描）→ extract。"""
+    from translation_tool.core import jar_processor
+    from translation_tool.core.jar_processor_extract import (
+        run_extraction_process_impl,
+    )
+
+    return list(
+        run_extraction_process_impl(
+            str(mods),
+            str(out),
+            _LANG_REGEX,
+            "Lang",
+            find_jar_files_fn=lambda _d: [str(j) for j in jars],
+            extract_from_jar_fn=jar_processor._extract_from_jar,
+        )
+    )
+
+
+@pytest.fixture
+def mods_dir(tmp_path) -> Path:
+    mods = tmp_path / "mods"
+    mods.mkdir()
+    return mods
+
+
+def test_extraction_pipeline_shares_budget_between_prescan_and_extract(
+    tmp_path, mods_dir, monkeypatch
+):
+    """預掃描 10KB（< 12KB）、提取階段重讀 4KB（< 12KB），但合計 14KB > 12KB。
+
+    同一個 JAR 必須因累計超限失敗；若預掃描與提取各拿一份新預算就會錯誤地通過。
+    """
+    _track_budgets(monkeypatch, max_bytes=12_000)
+    jar = _lang_jar(mods_dir / "bomb-1.0.jar", text=6, binary=4)
+    out = tmp_path / "out"
+
+    updates = _run_pipeline(mods_dir, out, [jar])
+
+    final = updates[-1]
+    assert final["stats"]["failures"] == 1
+    assert final["stats"]["success"] == 0
+    assert "bomb-1.0.jar" in final["log"]
+    # 提取中途被中止：不是所有成員都被寫出
+    assert len(list(out.rglob("*.json"))) < 10
+
+
+def test_extraction_pipeline_uses_one_budget_per_jar(tmp_path, mods_dir, monkeypatch):
+    """所有權：預掃描建立、提取沿用，同一個 JAR 只有一份預算。"""
+    created = _track_budgets(monkeypatch, max_bytes=10**9)
+    jar = _lang_jar(mods_dir / "ok-1.0.jar", text=3, binary=2)
+
+    _run_pipeline(mods_dir, tmp_path / "out", [jar])
+
+    assert len(created) == 1
+    # 掃描讀 5 個成員；提取階段只重讀掃描時無法解碼的 2 個二進位成員
+    assert created[0].used_members == 5 + 2
+    assert created[0].used_bytes == (5 + 2) * 1000
+
+
+def test_extraction_pipeline_does_not_recharge_cached_scan_results(
+    tmp_path, mods_dir, monkeypatch
+):
+    """掃描時已讀取並保存的文字內容，提取階段直接使用，不重複計入預算。"""
+    created = _track_budgets(monkeypatch, max_bytes=10**9)
+    jar = _lang_jar(mods_dir / "text-1.0.jar", text=6, binary=0)
+    out = tmp_path / "out"
+
+    updates = _run_pipeline(mods_dir, out, [jar])
+
+    assert updates[-1]["stats"]["success"] == 6
+    assert len(list(out.rglob("*.json"))) == 6
+    assert created[0].used_members == 6
+    assert created[0].used_bytes == 6000
+
+
+def test_extraction_pipeline_exhausted_budget_keeps_rejecting_same_jar(
+    tmp_path, mods_dir, monkeypatch
+):
+    """預掃描就已超限 → 提取階段不可拿到新預算再讀一輪，而是沿用已用盡的預算持續拒絕。"""
+    created = _track_budgets(monkeypatch, max_bytes=5000)
+    jar = _lang_jar(mods_dir / "bomb-1.0.jar", text=20, binary=0)
+
+    updates = _run_pipeline(mods_dir, tmp_path / "out", [jar])
+
+    assert updates[-1]["stats"]["failures"] == 1
+    assert len(created) == 1
+    assert created[0].exhausted
+    assert created[0].used_bytes == 5000  # 提取階段沒有再消耗任何預算
+
+
+def test_extraction_pipeline_budget_is_not_shared_between_jars(
+    tmp_path, mods_dir, monkeypatch
+):
+    """一個 JAR 超限不影響其他 JAR；預算也不會被錯誤地跨 JAR 共用。"""
+    created = _track_budgets(monkeypatch, max_bytes=12_000)
+    bomb = _lang_jar(mods_dir / "bomb-1.0.jar", text=6, binary=4)
+    good = _lang_jar(mods_dir / "good-1.0.jar", text=2, binary=0, prefix="g")
+    out = tmp_path / "out"
+
+    updates = _run_pipeline(mods_dir, out, [bomb, good])
+
+    final = updates[-1]
+    assert final["stats"]["failures"] == 1
+    assert final["stats"]["success"] == 2  # good-1.0.jar 的 2 個檔案
+    assert "bomb-1.0.jar" in final["log"]
+    assert "good-1.0.jar" not in final["log"].split("無法提取的 JAR")[-1]
+    assert len(created) == 2
+    assert sorted(b.label for b in created) == ["bomb-1.0.jar", "good-1.0.jar"]
+
+
+def test_scan_jars_attaches_one_budget_per_jar_with_multiple_workers(tmp_path):
+    from translation_tool.utils.jar_browser import ScanResults, scan_jars
+
+    jars = [
+        _lang_jar(tmp_path / f"m{i}-1.0.jar", text=i + 1, binary=0) for i in range(6)
+    ]
+    empty = _make_zip(tmp_path / "nomatch-1.0.jar", {"readme.txt": b"hi"})
+
+    results = scan_jars(tmp_path, [r"assets/m/lang/.*\.json$"], max_workers=4)
+
+    assert isinstance(results, ScanResults)
+    assert isinstance(results, dict)
+    assert set(results.budgets) == {*jars, empty}  # 包含沒有符合成員的 JAR
+    for i, jar in enumerate(jars):
+        assert results.budgets[jar].used_members == i + 1  # 每個 worker 只用自己的預算
+        assert len(results[jar]) == i + 1
+    assert results.budgets[empty].used_members == 0
+    assert empty not in results  # 既有契約：沒有內容的 JAR 不在結果內
+    assert len({id(b) for b in results.budgets.values()}) == len(results.budgets)
+
+
+def test_scan_results_compares_equal_to_plain_dict(tmp_path):
+    from translation_tool.utils.jar_browser import scan_jars
+
+    jar = _lang_jar(tmp_path / "m-1.0.jar", text=1, binary=0)
+
+    results = scan_jars(tmp_path, [r"assets/m/lang/.*\.json$"])
+
+    assert results == {jar: {"assets/m/lang/t0.json": "x" * 1000}}
+
+
+# ---------------------------------------------------------------------------
+# _extract_jar_icon：model 與 fallback 讀取共用同一份 icon scan 預算
+# ---------------------------------------------------------------------------
+
+
+def _icon_budget(monkeypatch, max_members: int):
+    monkeypatch.setattr(
+        ZipReadBudget,
+        "for_icon_scan",
+        classmethod(lambda cls, label="": cls(10**9, max_members, label)),
+    )
+
+
+_MODEL_MISSING_TEXTURE = (
+    b'{"textures": {"layer0": "m:item/zzz"}}'  # 貼圖不存在 → 走 fallback
+)
+
+
+@pytest.mark.parametrize(("max_members", "expect_icon"), [(1, False), (2, True)])
+def test_extract_jar_icon_fabric_fallback_shares_budget(
+    tmp_path, icon_preview, monkeypatch, max_members, expect_icon
+):
+    """model 讀 1 次；Fabric icon fallback 是第 2 次讀取，預算不足時不可寫入快取。"""
+    _icon_budget(monkeypatch, max_members)
+    jar = _make_zip(
+        tmp_path / "m.jar",
+        {
+            "assets/m/models/item/a.json": _MODEL_MISSING_TEXTURE,
+            "assets/m/icon.png": b"\x89PNG-fabric",
+        },
+    )
+    cache_root = tmp_path / "cache"
+
+    result = icon_preview._extract_jar_icon(jar, "m", cache_root, "item.m.a")
+
+    if expect_icon:
+        assert result is not None
+        assert result.read_bytes() == b"\x89PNG-fabric"
+    else:
+        assert result is None
+        assert not cache_root.exists() or not list(cache_root.rglob("*"))
+
+
+@pytest.mark.parametrize(("max_members", "expect_icon"), [(2, False), (3, True)])
+def test_extract_jar_icon_neoforge_toml_fallback_shares_budget(
+    tmp_path, icon_preview, monkeypatch, max_members, expect_icon
+):
+    """model(1) + neoforge.mods.toml(2) + logoFile PNG(3)：兩個 fallback 讀取都計入預算。"""
+    _icon_budget(monkeypatch, max_members)
+    jar = _make_zip(
+        tmp_path / "m.jar",
+        {
+            "assets/m/models/item/a.json": _MODEL_MISSING_TEXTURE,
+            "META-INF/neoforge.mods.toml": b'logoFile = "logo.png"\n',
+            "logo.png": b"\x89PNG-neo",
+        },
+    )
+    cache_root = tmp_path / "cache"
+
+    result = icon_preview._extract_jar_icon(jar, "m", cache_root, "item.m.a")
+
+    if expect_icon:
+        assert result is not None
+        assert result.read_bytes() == b"\x89PNG-neo"
+    else:
+        assert result is None
+        assert not cache_root.exists() or not list(cache_root.rglob("*"))
+
+
+def test_extract_jar_icon_toml_read_itself_is_charged(
+    tmp_path, icon_preview, monkeypatch
+):
+    """預算只夠 model 讀取時，TOML 讀取本身就被拒絕（不會繼續讀 logoFile）。"""
+    _icon_budget(monkeypatch, 1)
+    jar = _make_zip(
+        tmp_path / "m.jar",
+        {
+            "assets/m/models/item/a.json": _MODEL_MISSING_TEXTURE,
+            "META-INF/neoforge.mods.toml": b'logoFile = "logo.png"\n',
+            "logo.png": b"\x89PNG-neo",
+        },
+    )
+
+    result = icon_preview._extract_jar_icon(jar, "m", tmp_path / "cache", "item.m.a")
+
+    assert result is None
+
+
+@pytest.mark.parametrize(("max_members", "expect_icon"), [(1, False), (2, True)])
+def test_extract_jar_icon_model_resolved_png_read_shares_budget(
+    tmp_path, icon_preview, monkeypatch, max_members, expect_icon
+):
+    """model 解析出貼圖後讀取 PNG 是第 2 次讀取，同樣計入同一份預算。"""
+    _icon_budget(monkeypatch, max_members)
+    jar = _make_zip(
+        tmp_path / "m.jar",
+        {
+            "assets/m/models/item/a.json": b'{"textures": {"layer0": "m:item/a"}}',
+            "assets/m/textures/item/a.png": b"\x89PNG-model",
+        },
+    )
+    cache_root = tmp_path / "cache"
+
+    result = icon_preview._extract_jar_icon(jar, "m", cache_root, "item.m.a")
+
+    if expect_icon:
+        assert result is not None
+        assert result.read_bytes() == b"\x89PNG-model"
+    else:
+        assert result is None
+        assert not cache_root.exists() or not list(cache_root.rglob("*"))

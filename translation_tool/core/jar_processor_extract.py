@@ -99,8 +99,13 @@ def extract_from_jar_impl(
     skipped_count = 0
     jar_filename_base = _normalize_jar_base_name(jar_path)
     jar_path_obj = Path(jar_path)
-    # 同一個 JAR 的掃描讀取與提取讀取共用累計預算（防止大量合法大小成員的 ZIP bomb）
-    budget = ZipReadBudget(label=jar_path_obj.name)
+    # 同一個 JAR 的「預掃描 + 提取」共用同一份累計預算（防止大量合法大小成員的 ZIP bomb）。
+    # 正式流程由 scan_jars 建立並隨 scan_results（ScanResults）傳入；
+    # 直接呼叫本函式（沒有預掃描結果）時，才建立自己的預算供本函式的掃描與提取共用。
+    scan_budgets = getattr(scan_results, "budgets", None) or {}
+    budget = scan_budgets.get(jar_path_obj)
+    if budget is None:
+        budget = ZipReadBudget(label=jar_path_obj.name)
 
     if not jar_path_obj.exists():
         log_error("JAR 檔案不存在: %s", jar_path)

@@ -49,9 +49,25 @@ def _get_default_workers() -> int:
     return max(1, os.cpu_count() // 2)
 
 
+class ScanResults(dict):
+    """scan_jars 的回傳值：行為與一般 ``dict[Path, dict[str, str | None]]`` 完全相同，
+    另外攜帶每個「被掃描的 JAR」的 ZipReadBudget（``budgets``）。
+
+    預掃描與後續提取處理的是同一個 archive，必須共用同一份累計讀取預算；
+    否則兩個階段各拿一份新的預算，實際可讀量會接近預算上限的兩倍。
+    ``budgets`` 包含所有被掃描的 JAR（即使掃描結果為空或已超限而不在 dict 本身內），
+    讓超限的預算在後續階段持續有效。
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.budgets: dict[Path, ZipReadBudget] = {}
+
+
 def _scan_single_jar(
     jar_path: Path,
     patterns: list[str],
+    budget: ZipReadBudget | None = None,
 ) -> tuple[Path, dict[str, str | None]]:
     """掃描單一 JAR，符合 pattern 的檔案內容讀取出來。
 
@@ -70,7 +86,8 @@ def _scan_single_jar(
           - binary 檔案（UTF-8 decode 失敗）：None（由 caller 自行處理）
     """
     result: dict[str, str | None] = {}
-    budget = ZipReadBudget(label=jar_path.name)
+    if budget is None:
+        budget = ZipReadBudget(label=jar_path.name)
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
             for name in zf.namelist():
@@ -111,6 +128,9 @@ def scan_jars(
 ) -> dict[Path, dict[str, str | None]]:
     """平行讀取多個 JAR 內符合 pattern 的檔案內容。
 
+    回傳值是 ScanResults（dict 子類），``.budgets`` 帶有各 JAR 的累計讀取預算，
+    供提取階段延續使用。
+
     參數：
         jar_dir: JAR 檔案所在的目錄
         patterns: 要讀取的檔案 pattern（正則表達式），例如：
@@ -147,15 +167,22 @@ def scan_jars(
     # 決定 worker 數量
     workers = max_workers if max_workers is not None else _get_default_workers()
 
-    results: dict[Path, dict[str, str | None]] = {}
+    results = ScanResults()
 
     # 空目錄或無 JAR 檔：直接回傳空 dict
     if not jar_files:
         return results
 
+    # 每個 JAR 一份預算，由「掃描 → 後續提取」共用（見 ScanResults）；
+    # JAR 之間不共用，worker 各自只處理自己的 JAR。
+    for jar_path in jar_files:
+        results.budgets[jar_path] = ZipReadBudget(label=jar_path.name)
+
     with ThreadPoolExecutor(max_workers=workers) as executor:
         future_to_jar = {
-            executor.submit(_scan_single_jar, jar_path, patterns): jar_path
+            executor.submit(
+                _scan_single_jar, jar_path, patterns, results.budgets[jar_path]
+            ): jar_path
             for jar_path in jar_files
         }
 

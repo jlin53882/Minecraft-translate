@@ -451,7 +451,7 @@ def _extract_jar_icon(
             )
             if result:
                 tex_val, png_path = result
-                icon_data = read_limited(zf, png_path, MAX_ICON_BYTES)
+                icon_data = read_limited(zf, png_path, MAX_ICON_BYTES, budget=budget)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
                 out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
                 out_path.write_bytes(icon_data)
@@ -463,7 +463,7 @@ def _extract_jar_icon(
             # ===== Fallback: assets/<modid>/icon.png（Fabric 標準）=====
             fabric_icon = f"assets/{modid}/icon.png"
             if fabric_icon in names:
-                icon_data = read_limited(zf, fabric_icon, MAX_ICON_BYTES)
+                icon_data = read_limited(zf, fabric_icon, MAX_ICON_BYTES, budget=budget)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
                 out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
                 out_path.write_bytes(icon_data)
@@ -476,7 +476,9 @@ def _extract_jar_icon(
             )
             texture_files = sorted(n for n in names if textures_pattern.match(n))
             if texture_files:
-                icon_data = read_limited(zf, texture_files[0], MAX_ICON_BYTES)
+                icon_data = read_limited(
+                    zf, texture_files[0], MAX_ICON_BYTES, budget=budget
+                )
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
                 out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
                 out_path.write_bytes(icon_data)
@@ -488,7 +490,9 @@ def _extract_jar_icon(
             # ===== Fallback: assets/<modid>/textures/logo.png =====
             logo_texture = f"assets/{modid}/textures/logo.png"
             if logo_texture in names:
-                icon_data = read_limited(zf, logo_texture, MAX_ICON_BYTES)
+                icon_data = read_limited(
+                    zf, logo_texture, MAX_ICON_BYTES, budget=budget
+                )
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
                 out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
                 out_path.write_bytes(icon_data)
@@ -499,7 +503,9 @@ def _extract_jar_icon(
             neoforge_toml = "META-INF/neoforge.mods.toml"
             if neoforge_toml in names:
                 try:
-                    toml_content = read_limited(zf, neoforge_toml).decode("utf-8")
+                    toml_content = read_limited(
+                        zf, neoforge_toml, budget=budget
+                    ).decode("utf-8")
                 except UnicodeDecodeError:
                     toml_content = None
 
@@ -510,7 +516,9 @@ def _extract_jar_icon(
                     if logo_match:
                         logo_path = logo_match.group(1)
                         if logo_path in names:
-                            icon_data = read_limited(zf, logo_path, MAX_ICON_BYTES)
+                            icon_data = read_limited(
+                                zf, logo_path, MAX_ICON_BYTES, budget=budget
+                            )
                             icon_cache_root.mkdir(parents=True, exist_ok=True)
                             out_path = _icon_cache_file(
                                 icon_cache_root, modid, jar_path, key
