@@ -18,12 +18,13 @@ from __future__ import annotations
 import os
 import re
 import zipfile
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable
 
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_warning, log_error
+from translation_tool.utils.log_unit import log_error, log_warning
+from translation_tool.utils.zip_safety import ZipSizeError, read_limited
 
 
 def _get_default_workers() -> int:
@@ -37,7 +38,7 @@ def _get_default_workers() -> int:
         config_workers = config.get("translator", {}).get("parallel_execution_workers")
         if isinstance(config_workers, int) and config_workers > 0:
             return config_workers
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         # config 讀取失敗時不 blocking，直接用 fallback
         pass
     return max(1, os.cpu_count() // 2)
@@ -70,14 +71,18 @@ def _scan_single_jar(
                 for pattern in patterns:
                     if re.search(pattern, name):
                         try:
-                            result[name] = zf.read(name).decode("utf-8")
+                            result[name] = read_limited(zf, name).decode("utf-8")
+                        except ZipSizeError as size_err:
+                            log_warning(
+                                f"[jar_browser] 略過過大檔案 {jar_path.name}!{name}: {size_err}"
+                            )
                         except UnicodeDecodeError:
                             # Binary 檔案（如 .png）：不解碼，設為 None 表示 caller 自行處理
                             result[name] = None
                         break  # 一個檔案只讀一次
     except zipfile.BadZipFile:
         log_warning(f"[jar_browser] 不是有效的 ZIP/JAR: {jar_path.name}")
-    except Exception as ex:
+    except Exception as ex:  # noqa: BLE001
         log_error(f"[jar_browser] 讀取失敗: {jar_path.name} - {ex}")
     return jar_path, result
 
@@ -138,14 +143,12 @@ def scan_jars(
             for jar_path in jar_files
         }
 
-        processed = 0
-        for future in as_completed(future_to_jar):
+        for processed, future in enumerate(as_completed(future_to_jar), start=1):
             jar_path, content = future.result()
             # 跳過沒有匹配檔案且可能為 bad zip 的 JAR（bad zip 會 log warning 並回傳 {}）
             # 若 JAR 有内容則一定會有至少一筆記錄（即使是 None 的 binary 檔）
             if content:  # 空 dict 表示沒有任何匹配，或 bad zip 被跳過
                 results[jar_path] = content
-            processed += 1
             if processed_callback:
                 processed_callback(processed, total)
 

@@ -22,6 +22,14 @@ from typing import Any
 
 from ..utils.config_manager import load_config
 from ..utils.log_unit import log_error
+from ..utils.zip_safety import (
+    MAX_FILE_BYTES,
+    MAX_TEXT_BYTES,
+    UnsafePathError,
+    ZipSizeError,
+    read_limited,
+    safe_join,
+)
 
 log = logging.getLogger(__name__)
 
@@ -103,9 +111,13 @@ def extract_from_jar_impl(
                 for name in zf.namelist():
                     if target_regex.search(name):
                         try:
-                            jar_results[name] = zf.read(name).decode("utf-8")
+                            jar_results[name] = read_limited(
+                                zf, name, MAX_TEXT_BYTES
+                            ).decode("utf-8")
                         except UnicodeDecodeError:
                             jar_results[name] = None
+                        except ZipSizeError as size_err:
+                            log_error("略過過大檔案 %s: %s", name, size_err)
 
         with zipfile.ZipFile(jar_path, "r") as zf:
             for member in zf.infolist():
@@ -115,13 +127,21 @@ def extract_from_jar_impl(
                 if not target_regex.search(normalized_path):
                     continue
 
-                if normalized_path.startswith("assets/"):
-                    final_output_path = os.path.join(output_root, normalized_path)
-                else:
-                    final_mod_folder = f"{jar_filename_base}_extracted"
-                    final_output_path = os.path.join(
-                        output_root, final_mod_folder, normalized_path
+                # 防止路徑遍歷（zip-slip）：最終路徑必須留在 output_root 內
+                try:
+                    if normalized_path.startswith("assets/"):
+                        final_output_path = safe_join(output_root, normalized_path)
+                    else:
+                        final_mod_folder = f"{jar_filename_base}_extracted"
+                        final_output_path = safe_join(
+                            output_root, final_mod_folder, normalized_path
+                        )
+                except UnsafePathError:
+                    log_error(
+                        "拒絕提取不安全路徑: %s（來源 %s）", normalized_path, jar_path
                     )
+                    skipped_count += 1
+                    continue
 
                 if (
                     normalized_path in jar_results
@@ -129,8 +149,12 @@ def extract_from_jar_impl(
                 ):
                     source_data = jar_results[normalized_path].encode("utf-8")
                 else:
-                    with zf.open(member) as source:
-                        source_data = source.read()
+                    try:
+                        source_data = read_limited(zf, member, MAX_FILE_BYTES)
+                    except ZipSizeError as size_err:
+                        log_error("略過過大檔案 %s: %s", normalized_path, size_err)
+                        skipped_count += 1
+                        continue
 
                 source_hash = get_file_hash_fn(source_data)
 

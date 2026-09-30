@@ -30,6 +30,7 @@ from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.jar_browser import scan_jars
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
+from translation_tool.utils.zip_safety import MAX_ICON_BYTES, read_limited
 
 # ==================================================
 # 實驗性功能開關
@@ -293,7 +294,7 @@ def _follow_parent_chain(
     visited.add(model_path)
 
     try:
-        raw = zf.read(model_path).decode("utf-8", errors="replace")
+        raw = read_limited(zf, model_path).decode("utf-8", errors="replace")
         data = json.loads(raw)
     except Exception:  # noqa: BLE001
         return None
@@ -423,7 +424,7 @@ def _extract_jar_icon(
             )
             if result:
                 tex_val, png_path = result
-                icon_data = zf.read(png_path)
+                icon_data = read_limited(zf, png_path, MAX_ICON_BYTES)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
                 out_path = (
                     icon_cache_root
@@ -438,7 +439,7 @@ def _extract_jar_icon(
             # ===== Fallback: assets/<modid>/icon.png（Fabric 標準）=====
             fabric_icon = f"assets/{modid}/icon.png"
             if fabric_icon in names:
-                icon_data = zf.read(fabric_icon)
+                icon_data = read_limited(zf, fabric_icon, MAX_ICON_BYTES)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
                 out_path = (
                     icon_cache_root
@@ -454,7 +455,7 @@ def _extract_jar_icon(
             )
             texture_files = sorted(n for n in names if textures_pattern.match(n))
             if texture_files:
-                icon_data = zf.read(texture_files[0])
+                icon_data = read_limited(zf, texture_files[0], MAX_ICON_BYTES)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
                 out_path = (
                     icon_cache_root
@@ -469,7 +470,7 @@ def _extract_jar_icon(
             # ===== Fallback: assets/<modid>/textures/logo.png =====
             logo_texture = f"assets/{modid}/textures/logo.png"
             if logo_texture in names:
-                icon_data = zf.read(logo_texture)
+                icon_data = read_limited(zf, logo_texture, MAX_ICON_BYTES)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
                 out_path = (
                     icon_cache_root
@@ -483,7 +484,7 @@ def _extract_jar_icon(
             neoforge_toml = "META-INF/neoforge.mods.toml"
             if neoforge_toml in names:
                 try:
-                    toml_content = zf.read(neoforge_toml).decode("utf-8")
+                    toml_content = read_limited(zf, neoforge_toml).decode("utf-8")
                 except UnicodeDecodeError:
                     toml_content = None
 
@@ -494,7 +495,7 @@ def _extract_jar_icon(
                     if logo_match:
                         logo_path = logo_match.group(1)
                         if logo_path in names:
-                            icon_data = zf.read(logo_path)
+                            icon_data = read_limited(zf, logo_path, MAX_ICON_BYTES)
                             icon_cache_root.mkdir(parents=True, exist_ok=True)
                             out_path = (
                                 icon_cache_root

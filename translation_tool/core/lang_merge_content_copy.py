@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
+from typing import Any
 
-from typing import Any, Callable, Dict, List
-
-from ..utils.log_unit import log_info, log_warning, log_error, log_debug
-
+from ..utils.log_unit import log_debug, log_error, log_info, log_warning
+from ..utils.zip_safety import UnsafePathError, safe_join
 
 # ----------------------------------------------------------------------
 # Module-level cache for patchouli effectiveness results
@@ -84,7 +84,7 @@ def _compute_patchouli_lang_effectiveness(
                     try:
                         data = json_module.loads(raw)
                         strings = _extract_all_strings(data)
-                    except Exception:
+                    except Exception:  # noqa: BLE001, S112
                         continue
                 else:
                     strings = [raw]
@@ -97,7 +97,7 @@ def _compute_patchouli_lang_effectiveness(
                 )
                 if total > 0 and cjk_chars / total >= 0.5:
                     effective_count += 1
-            except Exception:
+            except Exception:  # noqa: BLE001, S112
                 continue
 
         ratio = effective_count / len(text_files) if text_files else 0
@@ -128,7 +128,7 @@ def _extract_all_strings(data) -> list[str]:
 _UNSET = object()
 
 
-def detect_content_wrapper_prefix(all_names: List[str] | None) -> str | None:
+def detect_content_wrapper_prefix(all_names: list[str] | None) -> str | None:
     """偵測統一包裝前綴,供 process_content_or_copy_file_impl 剝離輸出路徑。
 
     規則:所有檔名只有一個頂層目錄,且第一個檔名以 ``"<頂層目錄>/"`` 開頭時,
@@ -139,11 +139,11 @@ def detect_content_wrapper_prefix(all_names: List[str] | None) -> str | None:
     """
     if not all_names:
         return None
-    tops = set(
+    tops = {
         n.replace("\\", "/").split("/")[0]
         for n in all_names
         if n.replace("\\", "/").split("/")[0]
-    )
+    }
     if len(tops) == 1:
         candidate = next(iter(tops)) + "/"
         if all_names[0].startswith(candidate):
@@ -158,7 +158,7 @@ def process_content_or_copy_file_impl(
     output_dir: str,
     *,
     only_process_lang: bool = False,
-    all_files_cache: List[str] | None = None,
+    all_files_cache: list[str] | None = None,
     wrapper_prefix: str | None | object = _UNSET,
     patchouli_eff_cache: dict | None = None,
     load_config_fn: Callable[[], dict],
@@ -168,7 +168,7 @@ def process_content_or_copy_file_impl(
     write_text_atomic_fn: Callable[[str, str], Any],
     quarantine_copy_fn: Callable[..., Any],
     normalize_patchouli_book_root_fn: Callable[[str], str],
-    patch_localized_content_json_fn: Callable[..., Dict[str, Any]],
+    patch_localized_content_json_fn: Callable[..., dict[str, Any]],
     json_module,
     patchouli_output_dir: str | None = None,
     other_output_dir: str | None = None,
@@ -177,7 +177,7 @@ def process_content_or_copy_file_impl(
     patchouli_skip: bool | None = None,
     patchouli_threshold: float | None = None,
     zh_en_threshold: int | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """處理非標準 lang JSON / patchouli / 純文字內容的 copy-or-patch 流程。
 
     支援 ZIP 與資料夾兩種 reader。
@@ -218,9 +218,8 @@ def process_content_or_copy_file_impl(
     )
     # 全局關閉 zh_cn 時，直接跳過所有 zh_cn 內容檔案（非 lang 也要檢查）
     norm_lower = input_path.lower().replace("\\", "/")
-    if not _process_zh_cn:
-        if "/zh_cn/" in norm_lower or "/zh_cn." in norm_lower:
-            return {"success": True, "log": None}
+    if not _process_zh_cn and ("/zh_cn/" in norm_lower or "/zh_cn." in norm_lower):
+        return {"success": True, "log": None}
 
     if only_process_lang:
         if "/lang/" not in f"/{normalized_path}":
@@ -231,11 +230,12 @@ def process_content_or_copy_file_impl(
         # 只處理 lang + zh_cn 模式下，額外跳過 zh_cn.lang/zh_cn.json
         if not _process_zh_cn:
             return {"success": True, "log": None}
-        if skip_zh_cn_when_only_lang:
-            if "/lang/" in norm_lower and (
-                "zh_cn.json" in norm_lower or "zh_cn.lang" in norm_lower
-            ):
-                return {"success": True, "log": None}
+        if (
+            skip_zh_cn_when_only_lang
+            and "/lang/" in norm_lower
+            and ("zh_cn.json" in norm_lower or "zh_cn.lang" in norm_lower)
+        ):
+            return {"success": True, "log": None}
 
     def get_patchouli_book_root(path: str):
         # 保留原始大小寫（因為 zf.namelist() 可能用原始大小寫）
@@ -274,7 +274,7 @@ def process_content_or_copy_file_impl(
 
     # ── PATCHOULI 處理（v3 ratio 方案）────────────────────────────────────
     hit = get_patchouli_book_root(normalized_path)
-    book_root, matched_dir_name = hit if hit else (None, None)
+    book_root, _matched_dir_name = hit if hit else (None, None)
 
     if book_root:
         _allow_zh_cn = (
@@ -335,11 +335,15 @@ def process_content_or_copy_file_impl(
         # 注意：normalized_root 已包含 patchouli_root_dir（如 patchouli_books/book_id），
         # 不需再重複拼接 patchouli_root_dir，否則會產生 patchouli_books/patchouli_books/ 雙層目錄。
         _pp_dir = patchouli_output_dir if patchouli_output_dir else output_dir
-        if rel_low.startswith("en_us/"):
-            # en_us 未翻譯內容 → 寫入待翻譯子目錄
-            target = os.path.join(_pp_dir, pending_name, normalized_root, rel_path)
-        else:
-            target = os.path.join(_pp_dir, normalized_root, rel_path)
+        try:
+            if rel_low.startswith("en_us/"):
+                # en_us 未翻譯內容 → 寫入待翻譯子目錄
+                target = safe_join(_pp_dir, pending_name, normalized_root, rel_path)
+            else:
+                target = safe_join(_pp_dir, normalized_root, rel_path)
+        except UnsafePathError:
+            log_error(f"[Patchouli] 拒絕不安全路徑: {rel_path}")
+            return {"success": False, "error": True}
         os.makedirs(os.path.dirname(target), exist_ok=True)
 
         ext = os.path.splitext(input_path)[1].lower()
@@ -349,7 +353,7 @@ def process_content_or_copy_file_impl(
                 tw_content = recursive_translate_dict_fn(raw_text, rules)
                 with open(target, "w", encoding="utf-8") as f:
                     f.write(tw_content)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log_error(f"[Patchouli] 寫入失敗: {e}")
                 with open(target, "wb") as dst:
                     dst.write(reader.read_bytes(input_path))
@@ -394,12 +398,20 @@ def process_content_or_copy_file_impl(
         if is_path_localized:
             tw_path = input_path.replace("\\", "/").replace("zh_cn/", "zh_tw/")
         tw_path = re.sub(r"zh_cn(\..*)$", r"zh_tw\1", tw_path, flags=re.IGNORECASE)
-        final_output_path = os.path.join(output_dir, tw_path)
+        try:
+            final_output_path = safe_join(output_dir, tw_path)
+        except UnsafePathError:
+            log_error(f"拒絕不安全路徑: {tw_path}")
+            return {"success": False, "error": True}
         os.makedirs(os.path.dirname(final_output_path), exist_ok=True)
     else:
         # 新結構：非 zh_cn 內容（manual、book.json 等）寫入 other_output_dir
         _out_dir = other_output_dir if other_output_dir else output_dir
-        final_output_path = os.path.join(_out_dir, _strip(tw_path))
+        try:
+            final_output_path = safe_join(_out_dir, _strip(tw_path))
+        except UnsafePathError:
+            log_error(f"拒絕不安全路徑: {tw_path}")
+            return {"success": False, "error": True}
         os.makedirs(os.path.dirname(final_output_path), exist_ok=True)
 
     try:
@@ -412,7 +424,7 @@ def process_content_or_copy_file_impl(
                 parse_error: Exception | None = None
                 try:
                     source_data = json_module.loads(text)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     parse_error = e
 
                 # ── Step 2: 若失敗，檢查是否為未轉義控制字元問題 ─────────────
@@ -447,13 +459,13 @@ def process_content_or_copy_file_impl(
                         try:
                             source_data = json_module.loads(cleaned)
                             log_debug(f"{log_prefix} 控制字元清理後解析成功")
-                        except Exception as e2:
+                        except Exception as e2:  # noqa: BLE001
                             parse_error = e2
                             source_data = None
 
                 # ── Step 3: 真的失敗才隔離 ───────────────────────────────────
                 if source_data is None:
-                    error_detail = f"Exception: {type(parse_error).__name__}\nMessage: {str(parse_error)}\nPath: {input_path}"
+                    error_detail = f"Exception: {type(parse_error).__name__}\nMessage: {parse_error!s}\nPath: {input_path}"
                     lang = "unknown"
                     for possible_lang in ["zh_cn", "zh_tw", "en_us"]:
                         if possible_lang in normalized_path:
@@ -477,7 +489,7 @@ def process_content_or_copy_file_impl(
                         try:
                             with open(final_output_path, "rb") as f:
                                 existing = json_module.loads(f.read())
-                        except Exception:
+                        except Exception:  # noqa: BLE001
                             existing = {}
                     else:
                         existing = {}
@@ -506,7 +518,7 @@ def process_content_or_copy_file_impl(
                         )
                         if existing_normalized_bytes == final_bytes:
                             should_write = False
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         should_write = True
                 if should_write:
                     write_bytes_atomic_fn(final_output_path, final_bytes)
@@ -554,7 +566,7 @@ def process_content_or_copy_file_impl(
                         )
                     if existing_content == tw_content:
                         should_write = False
-                except Exception:
+                except Exception:  # noqa: BLE001
                     should_write = True
             if should_write:
                 write_text_atomic_fn(final_output_path, tw_content)
@@ -584,7 +596,7 @@ def process_content_or_copy_file_impl(
                 )
                 log_info(log_msg)
                 return {"success": True}
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 log_error(f"處理 {input_path} 時發生未預期錯誤: {e}")
                 return {"success": False, "error": True}
 
@@ -625,7 +637,7 @@ def process_content_or_copy_file_impl(
                         log_debug(
                             f"{log_prefix} 內容檔案 ({ext}) S2TW 轉換後內容無變動，略過寫入。"
                         )
-                except Exception:
+                except Exception:  # noqa: BLE001
                     should_write = True
             if should_write:
                 write_text_atomic_fn(final_output_path, tw_content)
@@ -640,6 +652,6 @@ def process_content_or_copy_file_impl(
         reader.copy_to(input_path, final_output_path)
         log_info(f"{log_prefix} 未知本地化檔案類型 ({ext}) 直接複製完成。")
         return {"success": True}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         log_error(f"處理內容檔案 {input_path} 時發生錯誤: {exc}", exc_info=True)
         return {"success": False, "error": True}
