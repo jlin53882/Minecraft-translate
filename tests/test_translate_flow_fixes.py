@@ -239,27 +239,92 @@ def test_shared_loop_partial_prefix_retries_only_unreturned(monkeypatch):
     assert seen_batches[1] == [f"k{i}" for i in range(3, 10)]
 
 
-def test_shared_loop_invalid_result_is_consumed_not_retried(monkeypatch):
-    """回傳中有格式無效的項目：算已消耗、略過，不會讓尾端項目被重翻。"""
+def _run_with_malformed(monkeypatch, n, bad_index, bad_value=None):
     added = _patch_loop(monkeypatch)
     calls: list[list[str]] = []
+    delivered: list[dict] = []
 
     def fake_translate(batch, _total):
         calls.append([it["path"] for it in batch])
         out = [{**it, "text": "譯"} for it in batch]
-        out[1] = {"path": "k1"}  # 缺 text / source_text → 無效
+        out[bad_index] = {"path": f"k{bad_index}"} if bad_value is None else bad_value
         return out, "AUTO"
 
     res = loop_mod.translate_items_with_cache_loop(
-        _items(4),
+        _items(n),
+        translate_batch_smart=fake_translate,
+        batch_size_by_type={"kubejs": 10},
+        sleep_seconds_between_batches=0,
+        on_translated_item=delivered.append,
+    )
+    return res, added, calls, delivered
+
+
+@pytest.mark.parametrize("bad_index", [0, 1, 3])
+def test_shared_loop_malformed_item_falls_back_not_dropped(monkeypatch, bad_index):
+    """格式無效的結果（首 / 中 / 尾）以原文回填：不重送、不進快取、輸出完整、processed == total。"""
+    res, added, calls, delivered = _run_with_malformed(monkeypatch, 4, bad_index)
+
+    assert len(calls) == 1  # 位置對得上，不會因筆數問題再送一次
+    assert res.status == "DONE"
+    assert res.processed == res.total == 4
+    assert [d["path"] for d in delivered] == ["k0", "k1", "k2", "k3"]
+    bad = delivered[bad_index]
+    assert bad["_untranslated"] is True
+    assert bad["text"] == f"t{bad_index}"  # 原文回填
+    cached = sorted(a[1].split("|")[0] for a in added)
+    assert cached == sorted(f"k{i}" for i in range(4) if i != bad_index)
+    assert res.last_error  # 可觀察：有 item 回填原文
+
+
+def test_shared_loop_non_dict_result_falls_back(monkeypatch):
+    res, _added, _calls, delivered = _run_with_malformed(
+        monkeypatch, 3, 1, bad_value="oops"
+    )
+    assert res.processed == res.total == 3
+    assert delivered[1]["_untranslated"] is True
+
+
+def test_shared_loop_unrecoverable_malformed_item_fails_not_done(monkeypatch):
+    """原始項目本身缺欄位 → 無法回填，不可回 DONE。"""
+    _patch_loop(monkeypatch)
+
+    def fake_translate(batch, _total):
+        return [{"path": "x"}], "AUTO"
+
+    items = [{"path": "k0", "cache_type": "kubejs"}]  # 缺 text / source_text
+    res = loop_mod.translate_items_with_cache_loop(
+        items,
         translate_batch_smart=fake_translate,
         batch_size_by_type={"kubejs": 10},
         sleep_seconds_between_batches=0,
     )
+    assert res.status == "FAILED"
 
-    assert len(calls) == 1  # 不會因為筆數對不上而再送一次
-    assert res.processed == 3
-    assert sorted(a[1].split("|")[0] for a in added) == ["k0", "k2", "k3"]
+
+def test_shared_loop_done_implies_all_processed(monkeypatch):
+    """completion invariant：DONE 不可在 processed < total 時出現（含 PARTIAL + malformed 混合）。"""
+    _patch_loop(monkeypatch)
+    n = {"calls": 0}
+
+    def fake_translate(batch, _total):
+        n["calls"] += 1
+        out = [{**it, "text": "譯"} for it in batch]
+        if n["calls"] == 1:
+            out = out[:3]
+            out[0] = {"path": "bad"}
+            return out, "PARTIAL"
+        return out, "AUTO"
+
+    res = loop_mod.translate_items_with_cache_loop(
+        _items(10),
+        translate_batch_smart=fake_translate,
+        batch_size_by_type={"kubejs": 10},
+        sleep_seconds_between_batches=0,
+    )
+    assert not (res.status == "DONE" and res.processed < res.total)
+    assert res.status == "DONE"
+    assert res.processed == 10
 
 
 # ---------------------------------------------------------------------------
@@ -331,31 +396,50 @@ def test_timestamp_shards_are_loadable_and_do_not_break_active_detection(tmp_pat
     ("cfg_value", "expected"),
     [(None, 2), (3, 3), ("4", 4), (0, 1), (-5, 1), ("abc", 2)],
 )
-def test_batch_write_interval_is_read_from_config(cfg_value, expected):
-    from translation_tool.core import lm_translator
+def test_batch_write_interval_normalization(cfg_value, expected):
+    from translation_tool.utils.config_manager import get_batch_write_interval
 
     cfg = {"lm_translator": {}}
     if cfg_value is not None:
         cfg["lm_translator"]["batch_write_interval"] = cfg_value
-    with patch.object(lm_translator, "load_config", return_value=cfg):
+    assert get_batch_write_interval(cfg) == expected
+    assert get_batch_write_interval({}) == 2  # 缺 lm_translator 區段
+
+
+@pytest.mark.parametrize(
+    ("cfg_value", "expected"),
+    [(None, 2), (0, 1), (-5, 1), ("4", 4), ("abc", 2)],
+)
+def test_runtime_and_ui_share_one_batch_write_interval_source(cfg_value, expected):
+    """runtime 實際使用值與 UI 顯示值都走 config_manager.get_batch_write_interval。"""
+    from translation_tool.core import lm_translator
+    from translation_tool.utils import config_manager
+
+    cfg = {"lm_translator": {}}
+    if cfg_value is not None:
+        cfg["lm_translator"]["batch_write_interval"] = cfg_value
+    with patch.object(config_manager, "load_config", return_value=cfg):
         assert lm_translator._get_batch_write_interval() == expected
+        assert config_manager.get_batch_write_interval() == expected
 
 
-def test_load_cache_type_orders_shards_by_write_time(tmp_path):
-    """時間戳分片先寫、編號分片後更新同一 key，重載後應取得較新的值。"""
+def test_lm_view_uses_shared_batch_write_interval_helper():
+    src = (Path(__file__).parent.parent / "app/views/lm_view.py").read_text(
+        encoding="utf-8"
+    )
+    assert "get_batch_write_interval()" in src
+    assert '.get("batch_write_interval"' not in src
+
+
+# ---------------------------------------------------------------------------
+# 快取分片 freshness contract：載入順序 = 寫入先後，與檔名無關
+# ---------------------------------------------------------------------------
+
+
+def _load(tmp_path: Path) -> dict:
     import logging
-    import os
 
     from translation_tool.utils.cache_loader import load_cache_type
-
-    type_dir = tmp_path / "lang"
-    type_dir.mkdir()
-    old = type_dir / "lang_0930120000-1.json"
-    new = type_dir / "lang_00001.json"
-    old.write_text('{"k": "old"}', encoding="utf-8")
-    new.write_text('{"k": "new"}', encoding="utf-8")
-    os.utime(old, ns=(1_000_000_000, 1_000_000_000))
-    os.utime(new, ns=(2_000_000_000, 2_000_000_000))
 
     cache: dict = {}
     load_cache_type(
@@ -366,4 +450,66 @@ def test_load_cache_type_orders_shards_by_write_time(tmp_path):
         parallel_workers=2,
         logger=logging.getLogger("t"),
     )
-    assert cache["lang"]["k"] == "new"
+    return cache["lang"]
+
+
+def test_freshness_numbered_old_then_timestamp_newer(tmp_path):
+    """Case A：編號分片舊 → 時間戳分片新 → 重載，新值勝出。"""
+    type_dir = tmp_path / "lang"
+    type_dir.mkdir()
+    _save(type_dir, {"K": "A"}, force_new_shard=False)
+    _save(type_dir, {"K": "B"}, force_new_shard=True)
+    assert _load(tmp_path)["K"] == "B"
+
+
+def test_freshness_timestamp_old_then_numbered_newer(tmp_path):
+    """Case B：時間戳分片舊 → 編號分片新 → 重載，新值勝出（檔名排序會讓舊值勝出）。"""
+    type_dir = tmp_path / "lang"
+    type_dir.mkdir()
+    _save(type_dir, {"K": "B"}, force_new_shard=True)
+    _save(type_dir, {"K": "C"}, force_new_shard=False)
+    assert _load(tmp_path)["K"] == "C"
+
+
+def test_freshness_three_writes_newest_wins(tmp_path):
+    """Case C：numbered(A) → timestamp(B) → numbered 更新(C) → timestamp(D)，最後一次寫入勝出。"""
+    type_dir = tmp_path / "lang"
+    type_dir.mkdir()
+    _save(type_dir, {"K": "A"}, force_new_shard=False)
+    _save(type_dir, {"K": "B"}, force_new_shard=True)
+    assert _load(tmp_path)["K"] == "B"
+    _save(type_dir, {"K": "C"}, force_new_shard=False)
+    assert _load(tmp_path)["K"] == "C"
+    _save(type_dir, {"K": "D"}, force_new_shard=True)
+    assert _load(tmp_path)["K"] == "D"
+
+
+def test_freshness_legacy_untracked_shards_keep_name_order_and_lose_to_tracked(
+    tmp_path,
+):
+    type_dir = tmp_path / "lang"
+    type_dir.mkdir()
+    (type_dir / "lang_00001.json").write_bytes(json.dumps({"K": "legacy1", "L": 1}))
+    (type_dir / "lang_00002.json").write_bytes(json.dumps({"K": "legacy2"}))
+    assert _load(tmp_path)["K"] == "legacy2"
+    _save(type_dir, {"K": "new"}, force_new_shard=True)
+    assert _load(tmp_path)["K"] == "new"
+
+
+def test_shard_order_file_is_not_treated_as_a_shard(tmp_path):
+    type_dir = tmp_path / "lang"
+    type_dir.mkdir()
+    _save(type_dir, {"K": 1}, force_new_shard=True)
+    assert (type_dir / cache_shards.SHARD_ORDER_FILE).exists()
+    assert all(p.name != cache_shards.SHARD_ORDER_FILE for p in type_dir.glob("*.json"))
+
+
+def test_timestamp_shard_failure_leaves_no_zero_byte_file(tmp_path):
+    type_dir = tmp_path / "lang"
+    type_dir.mkdir()
+    with (
+        patch.object(cache_shards, "_write_json_atomic", side_effect=OSError("boom")),
+        pytest.raises(OSError, match="boom"),
+    ):
+        _save(type_dir, {"K": 1}, force_new_shard=True)
+    assert list(type_dir.glob("lang_*.json")) == []

@@ -18,7 +18,10 @@ from app.ui import theme
 from app.ui.components import primary_button, secondary_button, styled_card
 from app.ui.snack import show_snack
 from app.views._log import LogView
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import (
+    get_batch_write_interval,
+    load_config,
+)
 from translation_tool.utils.log_unit import log_debug
 
 LM_translate_folder_name = (
@@ -75,9 +78,7 @@ class LMView(ft.Column):
         self.write_new_cache_switch = ft.Switch(
             label="寫入新快取(每次回傳單獨快取)（write_new_cache）", value=False
         )
-        batch_interval = (
-            load_config().get("lm_translator", {}).get("batch_write_interval", 2)
-        )
+        batch_interval = get_batch_write_interval()
         self.batch_interval_info = ft.Text(
             f"快取寫入頻率：每 {batch_interval} 批次寫入一次（由 Config 設定 lm_translator.batch_write_interval）",
             size=11,

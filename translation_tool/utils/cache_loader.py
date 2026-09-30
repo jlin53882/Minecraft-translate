@@ -13,6 +13,8 @@ from typing import Any
 
 import orjson as json
 
+from translation_tool.utils.cache_shards import list_shards_oldest_first
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,11 +52,8 @@ def load_cache_type(
     type_dir.mkdir(parents=True, exist_ok=True)
     cache_file_path[cache_type] = type_dir / f"{cache_type}_cache_main.json"
 
-    # 依修改時間由舊到新載入（同時間以檔名排序），後寫入者覆蓋先寫入者；
-    # 時間戳分片與編號分片的檔名無法直接比較先後，故不能只靠檔名排序。
-    json_files = sorted(
-        type_dir.glob("*.json"), key=lambda f: (f.stat().st_mtime_ns, f.name)
-    )
+    # 依分片寫入序號由舊到新載入，後寫入者覆蓋先寫入者（見 cache_shards 的 freshness contract）
+    json_files = list_shards_oldest_first(type_dir)
     if not json_files:
         translation_cache[cache_type] = {}
         return

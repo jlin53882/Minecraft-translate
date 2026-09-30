@@ -40,26 +40,19 @@ from translation_tool.utils.cache_manager import (
     save_translation_cache,
 )
 from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import (
+    get_batch_write_interval,
+    load_config,
+)
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
+
 
 # ============================================================
 # B-3: 快取寫入頻率優化（每 N 個批次才寫一次硬碟）
 # ============================================================
-DEFAULT_BATCH_WRITE_INTERVAL = 2
-
-
 def _get_batch_write_interval() -> int:
-    """讀取 lm_translator.batch_write_interval（執行時讀取，至少為 1）。"""
-    raw = (
-        load_config()
-        .get("lm_translator", {})
-        .get("batch_write_interval", DEFAULT_BATCH_WRITE_INTERVAL)
-    )
-    try:
-        return max(1, int(raw))
-    except (TypeError, ValueError):
-        return DEFAULT_BATCH_WRITE_INTERVAL
+    """讀取 lm_translator.batch_write_interval（與 UI 共用 config_manager 的實作）。"""
+    return get_batch_write_interval()
 
 
 # ============================================================

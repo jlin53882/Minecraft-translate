@@ -7,6 +7,8 @@
 import logging
 import os
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -61,26 +63,88 @@ def _write_json_atomic(path: Path, data: dict[str, Any]):
     os.replace(tmp_path, path)
 
 
+# 分片新舊順序紀錄（freshness contract）：
+#   每次寫入任何分片（編號分片或時間戳分片）時，在同一資料夾的 SHARD_ORDER_FILE
+#   記錄「檔名 -> 單調遞增的寫入序號」。載入時依序號由舊到新排序，後者覆蓋前者，
+#   因此同一 key 最後一次寫入的值一定勝出，與檔名排序無關。
+#   沒有紀錄的舊分片（升級前產生）序號視為 0，彼此維持檔名排序，且早於所有有紀錄的分片。
+#   刻意不用 .json 副檔名，避免被 `*.json` 的載入 / 指紋 glob 當成分片。
+SHARD_ORDER_FILE = ".shard_order"
+
+
+@contextmanager
+def _shard_lock(type_dir: Path, active_shard_file: str) -> Iterator[None]:
+    """取得與 `.active` 旋轉相同的跨程序獨占鎖。"""
+    type_dir.mkdir(parents=True, exist_ok=True)
+    lock_fd = os.open(
+        str(type_dir / f"{active_shard_file}.lock"), os.O_CREAT | os.O_RDWR
+    )
+    try:
+        _lock_file_fd(lock_fd)
+        yield
+    finally:
+        try:
+            _unlock_file_fd(lock_fd)
+        finally:
+            os.close(lock_fd)
+
+
+def _read_shard_order(type_dir: Path) -> dict[str, int]:
+    """讀取分片寫入序號；檔案不存在或損毀時視為沒有紀錄。"""
+    try:
+        raw = json.loads((type_dir / SHARD_ORDER_FILE).read_bytes())
+    except Exception:  # noqa: BLE001
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if isinstance(v, int)}
+
+
+def _record_shard_write(type_dir: Path, shard_name: str) -> None:
+    """把 shard_name 標記為目前最新寫入（呼叫端須持有 `_shard_lock`）。"""
+    order = _read_shard_order(type_dir)
+    order[shard_name] = max(order.values(), default=0) + 1
+    _write_json_atomic(type_dir / SHARD_ORDER_FILE, order)
+
+
+def list_shards_oldest_first(type_dir: Path) -> list[Path]:
+    """回傳 type_dir 內所有分片，依寫入先後由舊到新排序（後者覆蓋前者）。"""
+    order = _read_shard_order(type_dir)
+    return sorted(type_dir.glob("*.json"), key=lambda f: (order.get(f.name, 0), f.name))
+
+
 def _write_timestamp_shard(
-    type_dir: Path, cache_type: str, entries: dict[str, Any]
+    type_dir: Path,
+    cache_type: str,
+    entries: dict[str, Any],
+    active_shard_file: str = ".active",
 ) -> Path:
     """把 entries 整批寫入 ``{cache_type}_{mmddHHMMSS}-{seq}.json``，回傳檔案路徑。
 
     以 O_EXCL 預先建立檔案取得唯一的 seq（同一秒內多次寫入用 -1、-2 區分），
     不會覆蓋既有分片，也不會影響編號分片的 `.active` 指標。
+    寫入失敗時會移除預先建立的空檔，避免留下永久的 0-byte 分片。
+    新舊順序由 `_record_shard_write` 記錄，不依賴檔名。
     """
     ts = datetime.now().strftime("%m%d%H%M%S")  # noqa: DTZ005 檔名使用本機時間
-    seq = 1
-    while True:
-        path = type_dir / f"{cache_type}_{ts}-{seq}.json"
+    with _shard_lock(type_dir, active_shard_file):
+        seq = 1
+        while True:
+            path = type_dir / f"{cache_type}_{ts}-{seq}.json"
+            try:
+                fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                seq += 1
+                continue
+            os.close(fd)
+            break
         try:
-            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            seq += 1
-            continue
-        os.close(fd)
-        break
-    _write_json_atomic(path, entries)
+            _write_json_atomic(path, entries)
+            _record_shard_write(type_dir, path.name)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            path.with_suffix(".tmp").unlink(missing_ok=True)
+            raise
     return path
 
 
@@ -190,7 +254,7 @@ def _save_entries_to_active_shards(
 
     # force_new_shard=True：寫入獨立的時間戳分片，不動 .active 指標。
     if force_new_shard:
-        path = _write_timestamp_shard(type_dir, cache_type, entries)
+        path = _write_timestamp_shard(type_dir, cache_type, entries, active_shard_file)
         if logger:
             logger.info(
                 f"💾 {cache_type} saved (timestamp): {path.name} (+{len(entries)})"
@@ -200,7 +264,7 @@ def _save_entries_to_active_shards(
     # 防溢：一次寫入的條目數超過分片上限時，整批寫入一個時間戳分片，
     # 避免把單次寫入硬切成多個半滿的編號分片。
     if len(entries) > rolling_shard_size:
-        path = _write_timestamp_shard(type_dir, cache_type, entries)
+        path = _write_timestamp_shard(type_dir, cache_type, entries, active_shard_file)
         if logger:
             logger.warning(
                 f"⚠️ {cache_type} overflow ({len(entries)} > {rolling_shard_size}) "
@@ -269,6 +333,8 @@ def _save_entries_to_active_shards(
                 current_data[k] = v
 
             _write_json_atomic(save_path, current_data)
+            with _shard_lock(type_dir, active_shard_file):
+                _record_shard_write(type_dir, save_path.name)
             if logger:
                 logger.info(
                     f"💾 {cache_type} saved: {save_path.name} (+{len(chunk)} / total={len(current_data)})"
