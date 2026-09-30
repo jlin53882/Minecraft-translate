@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import os
 import zipfile
-from typing import Any, Dict
+from typing import Any
 
 import orjson as json
 
 from ..utils.config_manager import load_config
 from ..utils.log_unit import log_error, log_warning
-
+from ..utils.zip_safety import UnsafePathError, read_limited, safe_join
 
 # ZIP 解壓縮安全上限：50MB（防止 ZIP bomb 攻擊）
 _MAX_UNCOMPRESSED_SIZE = 50 * 1024 * 1024
@@ -30,17 +30,8 @@ def _read_text_from_zip(zf: zipfile.ZipFile, path: str) -> str:
     Returns:
         str: 解碼後的文字內容。
     """
-    # 1. 先檢查解壓縮後大小（防止 ZIP bomb）
-    info = zf.getinfo(path)
-    if info.file_size > _MAX_UNCOMPRESSED_SIZE:
-        raise RuntimeError(
-            f"ZIP 檔案 {path} 解壓縮後大小（{info.file_size / 1024 / 1024:.1f}MB）"
-            f"超過安全上限（50MB），拒絕讀取以防止 ZIP bomb 攻擊。"
-        )
-
-    # 2. 以位元組形式讀取檔案的原始內容
-    with zf.open(path) as f:
-        raw = f.read()
+    # 1. 讀取並限制解壓縮後大小（防止 ZIP bomb；同時檢查 header 與實際讀取量）
+    raw = read_limited(zf, path, _MAX_UNCOMPRESSED_SIZE)
     # 2. 嘗試使用 UTF-8 進行標準解碼
     # 優先使用 utf-8-sig，它會自動過濾掉 UTF-8 的 BOM (\ufeff)
     try:
@@ -54,7 +45,7 @@ def _read_text_from_zip(zf: zipfile.ZipFile, path: str) -> str:
             return raw.decode("utf-8", errors="replace")
 
 
-def _read_json_from_zip(zf: zipfile.ZipFile, path: str) -> Dict[str, Any]:
+def _read_json_from_zip(zf: zipfile.ZipFile, path: str) -> dict[str, Any]:
     """
     從 ZipFile 中讀取指定路徑的檔案，並嘗試將其解析為 JSON 物件 (字典)。
     自動處理 UTF-8 BOM。
@@ -177,13 +168,17 @@ def quarantine_copy_from_zip(
             .get("quarantine_folder_name", "skipped_json")
         )
         quarantine_root = os.path.join(output_dir, quarantine_root_name)
-    target_path = os.path.join(quarantine_root, zip_path)
+    try:
+        target_path = safe_join(quarantine_root, zip_path)
+    except UnsafePathError:
+        log_error(f"[隔離失敗] 拒絕不安全路徑: {zip_path}")
+        return
 
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
     try:
         # 原樣複製 bytes（不 decode、不解析）
-        raw_bytes = zf.read(zip_path)
+        raw_bytes = read_limited(zf, zip_path, _MAX_UNCOMPRESSED_SIZE)
         with open(target_path, "wb") as f:
             f.write(raw_bytes)
 
@@ -200,5 +195,5 @@ def quarantine_copy_from_zip(
 
         log_warning(f"[隔離] 檔案已複製至 {target_path}（原因: {reason}）")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log_error(f"[隔離失敗] 無法複製檔案 {zip_path}: {e}", exc_info=True)

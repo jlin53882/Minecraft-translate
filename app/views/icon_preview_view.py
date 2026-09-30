@@ -30,6 +30,13 @@ from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.jar_browser import scan_jars
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
+from translation_tool.utils.zip_safety import (
+    MAX_ICON_BYTES,
+    ArchiveBudgetError,
+    ZipReadBudget,
+    read_limited,
+    safe_join,
+)
 
 # ==================================================
 # 實驗性功能開關
@@ -280,6 +287,7 @@ def _follow_parent_chain(
     modid: str,
     zf: zipfile.ZipFile,
     visited: set[str] | None = None,
+    budget: ZipReadBudget | None = None,
 ) -> str | None:
     """沿 parent chain 遞迴向上找，直到找到有 textures 的 model。
 
@@ -293,8 +301,12 @@ def _follow_parent_chain(
     visited.add(model_path)
 
     try:
-        raw = zf.read(model_path).decode("utf-8", errors="replace")
+        raw = read_limited(zf, model_path, budget=budget).decode(
+            "utf-8", errors="replace"
+        )
         data = json.loads(raw)
+    except ArchiveBudgetError:
+        raise  # 整包累計超限：交給呼叫端中止這個 JAR，不當成單一 model 解析失敗
     except Exception:  # noqa: BLE001
         return None
 
@@ -318,7 +330,7 @@ def _follow_parent_chain(
         base = str(Path(model_path).parent).replace("\\", "/")
         parent_path = f"{base}/{parent}.json"
 
-    return _follow_parent_chain(parent_path, names, modid, zf, visited)
+    return _follow_parent_chain(parent_path, names, modid, zf, visited, budget)
 
 
 def _texture_to_png_path(tex_val: str) -> str | None:
@@ -338,6 +350,7 @@ def _try_extract_mod_icon_from_model(
     zf: zipfile.ZipFile,
     names: set[str],
     key: str | None = None,
+    budget: ZipReadBudget | None = None,
 ) -> tuple[str, str] | None:
     """嘗試從 model JSON 解析 mod icon。
 
@@ -368,7 +381,9 @@ def _try_extract_mod_icon_from_model(
 
         if model_name in model_index:
             for model_path in model_index[model_name]:
-                tex_val = _follow_parent_chain(model_path, names, modid, zf)
+                tex_val = _follow_parent_chain(
+                    model_path, names, modid, zf, budget=budget
+                )
                 if not tex_val:
                     continue
                 png_path = _texture_to_png_path(tex_val)
@@ -391,6 +406,18 @@ def _try_extract_mod_icon_from_model(
 
     # 當 model lookup 失敗時，不做任何 logo/icon.png fallback，直接回 None
     return None
+
+
+def _icon_cache_file(
+    icon_cache_root: Path, modid: str, jar_path: Path, key: str
+) -> Path:
+    """icon 快取檔路徑。modid 來自 JAR / ZIP 內容，不可信：結果必須留在 icon_cache_root 內
+    （Windows 上 modid 內含反斜線時會被當成目錄分隔符，safe_join 會拒絕逃逸）。"""
+    return Path(
+        safe_join(
+            icon_cache_root, f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+        )
+    )
 
 
 def _extract_jar_icon(
@@ -416,19 +443,17 @@ def _extract_jar_icon(
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
             names = set(zf.namelist())
+            budget = ZipReadBudget.for_icon_scan(jar_path.name)
 
             # ===== Phase 1: Model JSON 解析（最高優先）=====
             result = _try_extract_mod_icon_from_model(
-                jar_path, modid, zf, names, key=key
+                jar_path, modid, zf, names, key=key, budget=budget
             )
             if result:
                 tex_val, png_path = result
-                icon_data = zf.read(png_path)
+                icon_data = read_limited(zf, png_path, MAX_ICON_BYTES, budget=budget)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = (
-                    icon_cache_root
-                    / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
-                )
+                out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
                 out_path.write_bytes(icon_data)
                 log_info(
                     f"[IconPreview] Model JSON icon: {modid} → {png_path} (tex={tex_val})"
@@ -438,12 +463,9 @@ def _extract_jar_icon(
             # ===== Fallback: assets/<modid>/icon.png（Fabric 標準）=====
             fabric_icon = f"assets/{modid}/icon.png"
             if fabric_icon in names:
-                icon_data = zf.read(fabric_icon)
+                icon_data = read_limited(zf, fabric_icon, MAX_ICON_BYTES, budget=budget)
                 icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = (
-                    icon_cache_root
-                    / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
-                )
+                out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
                 out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] 提取 Fabric icon.png: {modid}")
                 return out_path
@@ -454,12 +476,11 @@ def _extract_jar_icon(
             )
             texture_files = sorted(n for n in names if textures_pattern.match(n))
             if texture_files:
-                icon_data = zf.read(texture_files[0])
-                icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = (
-                    icon_cache_root
-                    / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                icon_data = read_limited(
+                    zf, texture_files[0], MAX_ICON_BYTES, budget=budget
                 )
+                icon_cache_root.mkdir(parents=True, exist_ok=True)
+                out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
                 out_path.write_bytes(icon_data)
                 log_info(
                     f"[IconPreview] 提取 Fabric texture icon: {modid} → {texture_files[0]}"
@@ -469,12 +490,11 @@ def _extract_jar_icon(
             # ===== Fallback: assets/<modid>/textures/logo.png =====
             logo_texture = f"assets/{modid}/textures/logo.png"
             if logo_texture in names:
-                icon_data = zf.read(logo_texture)
-                icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = (
-                    icon_cache_root
-                    / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                icon_data = read_limited(
+                    zf, logo_texture, MAX_ICON_BYTES, budget=budget
                 )
+                icon_cache_root.mkdir(parents=True, exist_ok=True)
+                out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
                 out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] 提取 logo.png: {modid}")
                 return out_path
@@ -483,7 +503,9 @@ def _extract_jar_icon(
             neoforge_toml = "META-INF/neoforge.mods.toml"
             if neoforge_toml in names:
                 try:
-                    toml_content = zf.read(neoforge_toml).decode("utf-8")
+                    toml_content = read_limited(
+                        zf, neoforge_toml, budget=budget
+                    ).decode("utf-8")
                 except UnicodeDecodeError:
                     toml_content = None
 
@@ -494,11 +516,12 @@ def _extract_jar_icon(
                     if logo_match:
                         logo_path = logo_match.group(1)
                         if logo_path in names:
-                            icon_data = zf.read(logo_path)
+                            icon_data = read_limited(
+                                zf, logo_path, MAX_ICON_BYTES, budget=budget
+                            )
                             icon_cache_root.mkdir(parents=True, exist_ok=True)
-                            out_path = (
-                                icon_cache_root
-                                / f"{modid}_{jar_path.stem}_{_safe_filename_key(key)}.png"
+                            out_path = _icon_cache_file(
+                                icon_cache_root, modid, jar_path, key
                             )
                             out_path.write_bytes(icon_data)
                             log_info(
@@ -584,6 +607,7 @@ def _batch_extract_jar_icons(
         try:
             with zipfile.ZipFile(jar_path, "r") as zf:
                 names = set(zf.namelist())
+                budget = ZipReadBudget.for_icon_scan(jar_name)
                 for e in jar_to_entries.get(jar_name, []):
                     if not (hasattr(e, "modid") and hasattr(e, "key")):
                         continue
@@ -598,7 +622,7 @@ def _batch_extract_jar_icons(
                         result_map[key] = _result_cache[cache_key]
                         continue
                     res = _try_extract_mod_icon_from_model(
-                        jar_path, modid, zf, names, key=key
+                        jar_path, modid, zf, names, key=key, budget=budget
                     )
                     if res:
                         _tex_val, png_path = res
@@ -608,6 +632,11 @@ def _batch_extract_jar_icons(
                     else:
                         _result_cache[cache_key] = None
                         result_map[key] = None
+        except ArchiveBudgetError:
+            # 累計讀取超過安全上限（budget 已記錄警告）：保留已解析的部分，略過剩餘項目
+            log_warning(
+                f"[IconPreview] 略過 {jar_name} 剩餘項目的圖示解析（累計讀取超限）"
+            )
         except Exception:  # noqa: BLE001, S110
             pass
         return result_map

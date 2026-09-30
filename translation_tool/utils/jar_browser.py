@@ -18,12 +18,18 @@ from __future__ import annotations
 import os
 import re
 import zipfile
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable
 
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_warning, log_error
+from translation_tool.utils.log_unit import log_error, log_warning
+from translation_tool.utils.zip_safety import (
+    ArchiveBudgetError,
+    ZipReadBudget,
+    ZipSizeError,
+    read_limited,
+)
 
 
 def _get_default_workers() -> int:
@@ -37,15 +43,31 @@ def _get_default_workers() -> int:
         config_workers = config.get("translator", {}).get("parallel_execution_workers")
         if isinstance(config_workers, int) and config_workers > 0:
             return config_workers
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         # config 讀取失敗時不 blocking，直接用 fallback
         pass
     return max(1, os.cpu_count() // 2)
 
 
+class ScanResults(dict):
+    """scan_jars 的回傳值：行為與一般 ``dict[Path, dict[str, str | None]]`` 完全相同，
+    另外攜帶每個「被掃描的 JAR」的 ZipReadBudget（``budgets``）。
+
+    預掃描與後續提取處理的是同一個 archive，必須共用同一份累計讀取預算；
+    否則兩個階段各拿一份新的預算，實際可讀量會接近預算上限的兩倍。
+    ``budgets`` 包含所有被掃描的 JAR（即使掃描結果為空或已超限而不在 dict 本身內），
+    讓超限的預算在後續階段持續有效。
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.budgets: dict[Path, ZipReadBudget] = {}
+
+
 def _scan_single_jar(
     jar_path: Path,
     patterns: list[str],
+    budget: ZipReadBudget | None = None,
 ) -> tuple[Path, dict[str, str | None]]:
     """掃描單一 JAR，符合 pattern 的檔案內容讀取出來。
 
@@ -64,20 +86,36 @@ def _scan_single_jar(
           - binary 檔案（UTF-8 decode 失敗）：None（由 caller 自行處理）
     """
     result: dict[str, str | None] = {}
+    if budget is None:
+        budget = ZipReadBudget(label=jar_path.name)
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
             for name in zf.namelist():
                 for pattern in patterns:
                     if re.search(pattern, name):
                         try:
-                            result[name] = zf.read(name).decode("utf-8")
+                            result[name] = read_limited(zf, name, budget=budget).decode(
+                                "utf-8"
+                            )
+                        except ArchiveBudgetError as budget_err:
+                            # 整包累計超限：捨棄這個 JAR 的結果（只讀到一部分會讓後續處理
+                            # 誤以為內容完整），由呼叫端視為「沒有內容」。
+                            log_error(
+                                f"[jar_browser] 略過整個 JAR（累計讀取超過安全上限）: "
+                                f"{jar_path.name} - {budget_err}"
+                            )
+                            return jar_path, {}
+                        except ZipSizeError as size_err:
+                            log_warning(
+                                f"[jar_browser] 略過過大檔案 {jar_path.name}!{name}: {size_err}"
+                            )
                         except UnicodeDecodeError:
                             # Binary 檔案（如 .png）：不解碼，設為 None 表示 caller 自行處理
                             result[name] = None
                         break  # 一個檔案只讀一次
     except zipfile.BadZipFile:
         log_warning(f"[jar_browser] 不是有效的 ZIP/JAR: {jar_path.name}")
-    except Exception as ex:
+    except Exception as ex:  # noqa: BLE001
         log_error(f"[jar_browser] 讀取失敗: {jar_path.name} - {ex}")
     return jar_path, result
 
@@ -89,6 +127,9 @@ def scan_jars(
     processed_callback: Callable[[int, int], None] | None = None,
 ) -> dict[Path, dict[str, str | None]]:
     """平行讀取多個 JAR 內符合 pattern 的檔案內容。
+
+    回傳值是 ScanResults（dict 子類），``.budgets`` 帶有各 JAR 的累計讀取預算，
+    供提取階段延續使用。
 
     參數：
         jar_dir: JAR 檔案所在的目錄
@@ -126,26 +167,31 @@ def scan_jars(
     # 決定 worker 數量
     workers = max_workers if max_workers is not None else _get_default_workers()
 
-    results: dict[Path, dict[str, str | None]] = {}
+    results = ScanResults()
 
     # 空目錄或無 JAR 檔：直接回傳空 dict
     if not jar_files:
         return results
 
+    # 每個 JAR 一份預算，由「掃描 → 後續提取」共用（見 ScanResults）；
+    # JAR 之間不共用，worker 各自只處理自己的 JAR。
+    for jar_path in jar_files:
+        results.budgets[jar_path] = ZipReadBudget(label=jar_path.name)
+
     with ThreadPoolExecutor(max_workers=workers) as executor:
         future_to_jar = {
-            executor.submit(_scan_single_jar, jar_path, patterns): jar_path
+            executor.submit(
+                _scan_single_jar, jar_path, patterns, results.budgets[jar_path]
+            ): jar_path
             for jar_path in jar_files
         }
 
-        processed = 0
-        for future in as_completed(future_to_jar):
+        for processed, future in enumerate(as_completed(future_to_jar), start=1):
             jar_path, content = future.result()
             # 跳過沒有匹配檔案且可能為 bad zip 的 JAR（bad zip 會 log warning 並回傳 {}）
             # 若 JAR 有内容則一定會有至少一筆記錄（即使是 None 的 binary 檔）
             if content:  # 空 dict 表示沒有任何匹配，或 bad zip 被跳過
                 results[jar_path] = content
-            processed += 1
             if processed_callback:
                 processed_callback(processed, total)
 

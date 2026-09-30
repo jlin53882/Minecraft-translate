@@ -4,11 +4,13 @@
 維護注意：本模組為 ZIP icon 讀取的單一責任入口。
 """
 
+import threading
+import zipfile
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-import threading
-import zipfile
+
+from translation_tool.utils.zip_safety import MAX_ICON_BYTES, read_limited
 
 
 @dataclass(frozen=True)
@@ -22,8 +24,8 @@ class IconRef:
     向後相容：舊磁碟路徑 parse 回傳 None。
     """
 
-    jar_path: Path       # JAR 的相對路徑（相對於 source_root）
-    png_path: str        # ZIP 內部路徑
+    jar_path: Path  # JAR 的相對路徑（相對於 source_root）
+    png_path: str  # ZIP 內部路徑
 
     @staticmethod
     def parse(uri: str) -> "IconRef | None":
@@ -70,10 +72,12 @@ class _ZipCache:
 
             # 未命中：關閉最舊的條目（如果有）
             while len(self._cache) >= self.MAX_SIZE:
-                _jar, zf = self._cache.popitem(last=False)  # pop oldest (least recently used)
+                _jar, zf = self._cache.popitem(
+                    last=False
+                )  # pop oldest (least recently used)
                 try:
                     zf.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass  # 關閉失敗不 blocking
 
             # 開新 handle 並加入 cache
@@ -88,7 +92,7 @@ class _ZipCache:
                 _jar, zf = self._cache.popitem(last=False)
                 try:
                     zf.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
 
@@ -110,6 +114,6 @@ def read_icon_bytes(jar_path: Path, png_path: str) -> bytes | None:
     """
     try:
         zf = _zip_cache.get(jar_path)
-        return zf.read(png_path)
-    except Exception:
+        return read_limited(zf, png_path, MAX_ICON_BYTES)
+    except Exception:  # noqa: BLE001
         return None
