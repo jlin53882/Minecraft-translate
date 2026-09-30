@@ -178,8 +178,19 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
         _save_entries_to_active_shards(
             cache_type, data_to_save, force_new_shard=write_new_shard
         )
-        cache_store.clear_dirty(state.is_dirty, cache_type)
+        with state.cache_lock:
+            # save 期間若又有新 pending，仍保持 dirty
+            if not cache_store.get_session_entries(
+                state.session_new_entries, cache_type
+            ):
+                cache_store.clear_dirty(state.is_dirty, cache_type)
     except Exception as e:
+        # 落盤失敗（底層已 rollback）：尚未 durable 的批次放回 pending，下次 save 可重試。
+        # 只補回不存在的 key，save 期間寫入的較新值不會被舊批次覆蓋。
+        with state.cache_lock:
+            cache_store.restore_session_entries_if_absent(
+                state.session_new_entries, state.is_dirty, cache_type, data_to_save
+            )
         log.error(f"❌ 儲存 {cache_type} 失敗: {e}", exc_info=True)  # noqa: G201
 
 
@@ -344,11 +355,13 @@ def force_rotate_shard(cache_type: str) -> bool:
     try:
         with state.cache_lock:
             type_dir = state.cache_file_path[cache_type].parent
-            active_file = type_dir / ACTIVE_SHARD_FILE
-            if not active_file.exists():
-                _ = _get_active_shard_path(cache_type)
-            cur = int((active_file.read_text(encoding="utf-8") or "1").strip())
-            active_file.write_text(f"{cur + 1:05d}", encoding="utf-8")
+            # 與寫入交易共用跨程序 `.active.lock`
+            cache_shards.force_rotate_active_shard(
+                type_dir=type_dir,
+                cache_type=cache_type,
+                active_shard_file=ACTIVE_SHARD_FILE,
+                logger=log,
+            )
         return True
     except Exception:  # noqa: BLE001
         return False

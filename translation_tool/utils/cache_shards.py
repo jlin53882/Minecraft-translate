@@ -176,19 +176,14 @@ def _get_active_shard_path(
     return type_dir / f"{cache_type}_{shard_id_str}.json"
 
 
-def _rotate_shard_if_needed_locked(
+def _advance_active_pointer_locked(
     *,
     type_dir: Path,
     cache_type: str,
-    data: dict[str, Any],
-    rolling_shard_size: int,
     active_shard_file: str,
     logger: logging.Logger | None = None,
-) -> bool:
-    """旋轉 active shard 指標（呼叫端須已持有 `_shard_lock`，此函式不會再取鎖）。"""
-    if len(data) < rolling_shard_size:
-        return False
-
+) -> str:
+    """把 `.active` 指標前進一號並回傳新編號（呼叫端須已持有 `_shard_lock`）。"""
     active_file = type_dir / active_shard_file
     if not active_file.exists():
         _get_active_shard_path(
@@ -203,7 +198,45 @@ def _rotate_shard_if_needed_locked(
 
     if logger:
         logger.info(f"🔁 {cache_type} rolling shard rotate → {new_id}")
+    return new_id
 
+
+def force_rotate_active_shard(
+    *,
+    type_dir: Path,
+    cache_type: str,
+    active_shard_file: str,
+    logger: logging.Logger | None = None,
+) -> str:
+    """手動把 active shard 切到下一片（在 `.active.lock` 保護下，與寫入交易互斥）。"""
+    with _shard_lock(type_dir, active_shard_file):
+        return _advance_active_pointer_locked(
+            type_dir=type_dir,
+            cache_type=cache_type,
+            active_shard_file=active_shard_file,
+            logger=logger,
+        )
+
+
+def _rotate_shard_if_needed_locked(
+    *,
+    type_dir: Path,
+    cache_type: str,
+    data: dict[str, Any],
+    rolling_shard_size: int,
+    active_shard_file: str,
+    logger: logging.Logger | None = None,
+) -> bool:
+    """旋轉 active shard 指標（呼叫端須已持有 `_shard_lock`，此函式不會再取鎖）。"""
+    if len(data) < rolling_shard_size:
+        return False
+
+    _advance_active_pointer_locked(
+        type_dir=type_dir,
+        cache_type=cache_type,
+        active_shard_file=active_shard_file,
+        logger=logger,
+    )
     return True
 
 

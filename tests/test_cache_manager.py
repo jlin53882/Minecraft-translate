@@ -14,7 +14,6 @@ import pytest
 
 from translation_tool.utils import cache_manager, cache_store
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -181,3 +180,181 @@ def test_save_translation_cache_no_op_when_no_dirty_entries(mock_save_path):
 
     # 驗證：無 session 資料時不呼叫儲存
     assert mock_save.call_count == 0
+
+
+# =============================================================================
+# 測試 3: save 失敗後 pending 恢復與重試（真實分片寫入 + .shard_order 失敗注入）
+# =============================================================================
+
+
+def _disk_entries(type_dir: Path) -> dict:
+    import logging
+
+    from translation_tool.utils.cache_loader import load_cache_type
+
+    cache: dict = {}
+    load_cache_type(
+        "lang",
+        translation_cache=cache,
+        cache_file_path={},
+        cache_root=type_dir.parent,
+        parallel_workers=2,
+        logger=logging.getLogger("t"),
+    )
+    return cache["lang"]
+
+
+def _fail_order_write():
+    from translation_tool.utils import cache_shards
+
+    return patch.object(
+        cache_shards, "_record_shard_write", side_effect=OSError("order write failed")
+    )
+
+
+def test_save_failure_restores_pending_and_retry_persists(mock_save_path):
+    """Case 1：.shard_order 失敗（numbered rollback）→ pending 恢復、dirty；重試後落盤。"""
+    cache_type, type_dir = mock_save_path
+    state = cache_store.get_runtime_state()
+    entry = {"src": "Hello", "dst": "哈囉"}
+    state.session_new_entries[cache_type] = {"K": entry}
+    state.is_dirty[cache_type] = True
+
+    with _fail_order_write():
+        cache_manager.save_translation_cache(cache_type, write_new_shard=False)
+
+    assert state.session_new_entries[cache_type] == {"K": entry}
+    assert state.is_dirty[cache_type] is True
+    assert _disk_entries(type_dir) == {}  # 底層已 rollback
+
+    cache_manager.save_translation_cache(cache_type, write_new_shard=False)
+
+    assert state.session_new_entries[cache_type] == {}
+    assert state.is_dirty[cache_type] is False
+    assert _disk_entries(type_dir) == {"K": entry}
+
+
+def test_restore_does_not_overwrite_newer_pending_value(mock_save_path):
+    """Case 2：save 期間同 key 寫入較新值，save 失敗後保留較新值。"""
+    cache_type, _type_dir = mock_save_path
+    state = cache_store.get_runtime_state()
+    old = {"src": "s", "dst": "A"}
+    new = {"src": "s", "dst": "B"}
+    state.session_new_entries[cache_type] = {"K": old, "J": old}
+
+    def save_then_concurrent_write(ct, entries, force_new_shard=False):
+        # 此時 pending 已被 flush；另一個 writer 寫入較新的 K
+        with state.cache_lock:
+            state.session_new_entries[ct]["K"] = new
+        raise OSError("disk error")
+
+    with patch.object(
+        cache_manager,
+        "_save_entries_to_active_shards",
+        side_effect=save_then_concurrent_write,
+    ):
+        cache_manager.save_translation_cache(cache_type)
+
+    assert state.session_new_entries[cache_type]["K"] == new  # 不被舊批次覆蓋
+    assert state.session_new_entries[cache_type]["J"] == old  # 缺少的 key 補回
+    assert state.is_dirty[cache_type] is True
+
+
+def test_save_success_path_clears_pending_and_dirty(mock_save_path):
+    """Case 3：成功路徑不變。"""
+    cache_type, type_dir = mock_save_path
+    state = cache_store.get_runtime_state()
+    entry = {"src": "Hello", "dst": "哈囉"}
+    state.session_new_entries[cache_type] = {"K": entry}
+    state.is_dirty[cache_type] = True
+
+    cache_manager.save_translation_cache(cache_type, write_new_shard=False)
+
+    assert state.session_new_entries[cache_type] == {}
+    assert state.is_dirty[cache_type] is False
+    assert _disk_entries(type_dir) == {"K": entry}
+
+
+def test_repeated_save_failures_remain_retryable(mock_save_path):
+    """Case 4：連續失敗兩次仍可重試，第三次成功。"""
+    cache_type, type_dir = mock_save_path
+    state = cache_store.get_runtime_state()
+    entry = {"src": "Hello", "dst": "哈囉"}
+    state.session_new_entries[cache_type] = {"K": entry}
+    state.is_dirty[cache_type] = True
+
+    for _ in range(2):
+        with _fail_order_write():
+            cache_manager.save_translation_cache(cache_type, write_new_shard=False)
+        assert state.session_new_entries[cache_type] == {"K": entry}
+        assert state.is_dirty[cache_type] is True
+
+    cache_manager.save_translation_cache(cache_type, write_new_shard=False)
+
+    assert state.session_new_entries[cache_type] == {}
+    assert state.is_dirty[cache_type] is False
+    assert _disk_entries(type_dir) == {"K": entry}
+
+
+def test_timestamp_shard_save_failure_also_restores_pending(mock_save_path):
+    cache_type, type_dir = mock_save_path
+    state = cache_store.get_runtime_state()
+    entry = {"src": "x", "dst": "y"}
+    state.session_new_entries[cache_type] = {"K": entry}
+
+    with _fail_order_write():
+        cache_manager.save_translation_cache(cache_type, write_new_shard=True)
+
+    assert state.session_new_entries[cache_type] == {"K": entry}
+    assert state.is_dirty[cache_type] is True
+    assert list(type_dir.glob("lang_*.json")) == []
+
+
+# =============================================================================
+# 測試 4: force_rotate_shard 走 .active.lock
+# =============================================================================
+
+
+def test_force_rotate_shard_advances_active(mock_save_path):
+    """Case B：active 00001 → force rotate → 00002。"""
+    cache_type, type_dir = mock_save_path
+    cache_manager._get_active_shard_path(cache_type)
+    (type_dir / ".active").write_text("00001", encoding="utf-8")
+    state = cache_store.get_runtime_state()
+    state.initialized = True
+
+    assert cache_manager.force_rotate_shard(cache_type) is True
+    assert (type_dir / ".active").read_text(encoding="utf-8") == "00002"
+
+
+def test_force_rotate_shard_waits_for_shard_lock(mock_save_path):
+    """Case A：writer 持有 .active.lock 時，force rotate 必須等待，不可 interleave。"""
+    import time
+
+    from translation_tool.utils import cache_shards
+
+    cache_type, type_dir = mock_save_path
+    cache_manager._get_active_shard_path(cache_type)
+    (type_dir / ".active").write_text("00001", encoding="utf-8")
+    cache_store.get_runtime_state().initialized = True
+
+    result: dict = {}
+    started = threading.Event()
+
+    def rotate():
+        started.set()
+        result["ok"] = cache_manager.force_rotate_shard(cache_type)
+        result["done_at"] = time.monotonic()
+
+    with cache_shards._shard_lock(type_dir, ".active"):
+        t = threading.Thread(target=rotate)
+        t.start()
+        assert started.wait(2)
+        time.sleep(0.3)
+        # 鎖仍被持有：active 尚未被修改，rotate 尚未完成
+        assert (type_dir / ".active").read_text(encoding="utf-8") == "00001"
+        assert "ok" not in result
+    t.join(5)
+
+    assert result["ok"] is True
+    assert (type_dir / ".active").read_text(encoding="utf-8") == "00002"
