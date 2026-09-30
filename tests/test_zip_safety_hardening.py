@@ -968,3 +968,131 @@ def test_extract_jar_icon_model_resolved_png_read_shares_budget(
     else:
         assert result is None
         assert not cache_root.exists() or not list(cache_root.rglob("*"))
+
+
+# ---------------------------------------------------------------------------
+# ZipReadBudget：用盡後持續拒絕（sticky exhausted）
+# ---------------------------------------------------------------------------
+
+
+def _sized_members_zip(sizes: dict[str, int]) -> zipfile.ZipFile:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, size in sizes.items():
+            zf.writestr(name, b"A" * size)
+    buf.seek(0)
+    return zipfile.ZipFile(buf)
+
+
+def test_archive_budget_stays_exhausted_after_declared_size_rejection():
+    """A(1000) 成功 → B(600) 因宣告大小超過剩餘空間被拒 → C(100) 雖小也必須持續被拒。"""
+    zf = _sized_members_zip({"a.bin": 1000, "b.bin": 600, "c.bin": 100})
+    budget = ZipReadBudget(max_bytes=1500, max_members=1000)
+
+    assert len(read_limited(zf, "a.bin", budget=budget)) == 1000
+    with pytest.raises(ArchiveBudgetError):
+        read_limited(zf, "b.bin", budget=budget)
+    assert budget.exhausted
+    assert budget.used_bytes == 1000
+
+    with pytest.raises(ArchiveBudgetError):
+        read_limited(zf, "c.bin", budget=budget)
+
+    assert budget.exhausted
+    assert budget.used_bytes == 1000  # 被拒的成員不佔用位元組
+    assert budget.used_members == 1  # 也不佔用成員數
+
+
+def test_archive_budget_stays_exhausted_after_member_count_rejection():
+    """成員數超限後，即使後續成員很小也持續被拒。"""
+    zf = _sized_members_zip({f"m{i}.bin": 10 for i in range(6)})
+    budget = ZipReadBudget(max_bytes=10**9, max_members=2)
+
+    read_limited(zf, "m0.bin", budget=budget)
+    read_limited(zf, "m1.bin", budget=budget)
+    with pytest.raises(ArchiveBudgetError, match="成員數"):
+        read_limited(zf, "m2.bin", budget=budget)
+    assert budget.exhausted
+
+    for name in ("m3.bin", "m4.bin", "m5.bin"):
+        with pytest.raises(ArchiveBudgetError):
+            read_limited(zf, name, budget=budget)
+
+    assert budget.used_members == 2
+    assert budget.used_bytes == 20
+
+
+def test_archive_budget_stays_exhausted_after_streamed_bytes_rejection():
+    """header 偽造、實際串流量超限（charge 路徑）之後，較小的成員也必須持續被拒。"""
+
+    class _Stream(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class _LyingZip:
+        def open(self, _info):
+            return _Stream(b"Z" * 50_000)
+
+    liar = zipfile.ZipInfo("lie.bin")
+    liar.file_size = 10  # 偽造的小尺寸
+    zf = _sized_members_zip({"small.bin": 10})
+    budget = ZipReadBudget(max_bytes=20_000, max_members=100)
+
+    with pytest.raises(ArchiveBudgetError):
+        read_limited(_LyingZip(), liar, max_bytes=10**9, budget=budget)  # type: ignore[arg-type]
+    assert budget.exhausted
+
+    with pytest.raises(ArchiveBudgetError):
+        read_limited(zf, "small.bin", budget=budget)
+
+
+def test_archive_budget_exhaustion_aborts_in_flight_read():
+    """另一個 worker 在本次讀取進行中用盡預算：進行中的讀取也必須中止，不可照樣完成。"""
+
+    class _Stream(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    budget = ZipReadBudget(max_bytes=10**9, max_members=100)
+
+    class _OtherWorkerExhaustsBudget(_Stream):
+        calls = 0
+
+        def read(self, size=-1):
+            type(self).calls += 1
+            if type(self).calls == 2:
+                # 模擬另一條執行緒上的成員因宣告大小超過預算而被拒絕
+                with pytest.raises(ArchiveBudgetError):
+                    budget.begin_member("other.bin", 10**10)
+            return super().read(size)
+
+    class _Zip:
+        def open(self, _info):
+            return _OtherWorkerExhaustsBudget(b"Z" * (3 * 64 * 1024))
+
+    info = zipfile.ZipInfo("inflight.bin")
+    info.file_size = 10
+
+    with pytest.raises(ArchiveBudgetError):
+        read_limited(_Zip(), info, max_bytes=10**9, budget=budget)  # type: ignore[arg-type]
+
+
+def test_archive_budget_sticky_rejections_do_not_repeat_warning():
+    """第一次用盡記一次警告；之後持續拒絕但不重複記錄。"""
+    zf = _sized_members_zip({"a.bin": 1000, "b.bin": 600, "c.bin": 100, "d.bin": 100})
+    budget = ZipReadBudget(max_bytes=1500, max_members=100, label="evil.jar")
+
+    with patch.object(zip_safety, "log_warning") as warn:
+        read_limited(zf, "a.bin", budget=budget)
+        for name in ("b.bin", "c.bin", "d.bin"):
+            with pytest.raises(ArchiveBudgetError):
+                read_limited(zf, name, budget=budget)
+
+    assert warn.call_count == 1
+    assert "evil.jar" in warn.call_args.args[0]

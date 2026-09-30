@@ -61,8 +61,12 @@ class ZipReadBudget:
     """同一個 archive 的累計讀取預算（執行緒安全，可由多個 worker 共用）。
 
     用法：處理單一 archive 時建立一個 budget，並傳給該次處理的每個 read_limited。
-    超過上限時拋出 ArchiveBudgetError，並對同一個 budget 只記錄一次警告；
-    budget 用盡後，之後的讀取會持續被拒絕。
+    超過上限時拋出 ArchiveBudgetError，並對同一個 budget 只記錄一次警告。
+
+    用盡狀態是 sticky 的：任何一次 archive 層級的超限（位元組或成員數）之後，
+    同一個 budget 的所有讀取都持續拋出 ArchiveBudgetError（包含之後較小的成員、
+    以及其他 worker 正在進行中的讀取），直到這個 budget 物件被丟棄。
+    不依賴 used_bytes / used_members 的數值來維持這個狀態。
     """
 
     def __init__(
@@ -106,6 +110,8 @@ class ZipReadBudget:
     def begin_member(self, name: str, declared_size: int) -> None:
         """開始讀取一個成員前呼叫：檢查成員數，並以宣告大小快速拒絕。"""
         with self._lock:
+            if self._warned:  # 已用盡：持續拒絕，即使這個成員很小
+                self._fail("累計讀取預算已用盡")
             if self.used_members + 1 > self.max_members:
                 self._fail(f"讀取成員數超過 {self.max_members}（{name}）")
             if self.used_bytes + declared_size > self.max_bytes:
@@ -117,6 +123,8 @@ class ZipReadBudget:
     def charge(self, nbytes: int, name: str) -> None:
         """記入實際解壓縮出的位元組數（header 偽造時仍能擋下）。"""
         with self._lock:
+            if self._warned:  # 其他 worker 已用盡預算：進行中的讀取也要中止
+                self._fail("累計讀取預算已用盡")
             self.used_bytes += nbytes
             if self.used_bytes > self.max_bytes:
                 self._fail(
