@@ -145,6 +145,30 @@
 
 ---
 
+## 進行中工作：Issue #108 / #109 / #111
+
+> 這三項是引擎層的功能與修正，與上面的 UI 重構清單互相獨立，已先行處理。
+> 基準：`main` @ `634b4f1`（含 #105、#107）。每個 issue 獨立 commit，方便日後拆分。
+
+| 順序 | Issue | 階段 | 內容 | 驗收 |
+|---|---|---|---|---|
+| 1 | #109 語言合併預算用盡 | A | `lang_merger.py`：executor 結束後檢查 `zip_budget.exhausted`；用盡時 `log_error("預算用盡，輸出不完整")`，並 `yield {"error": True}`，取代「全部處理完成」 | log 有 pack 層級錯誤；不再只顯示成功訊息 |
+| | | B | 測試：小預算 pack ZIP 走 `merge_zhcn_to_zhtw_from_zip`，確認回報錯誤旗標；預算充足時行為不變 | 新測試通過、既有測試不變 |
+| 2 | #111 預掃描與 JAR 清單不一致 | A | `jar_browser.scan_jars` 新增可選 `jar_files`（預設維持 `glob("*.jar")`）；`run_extraction_process_impl` 傳入 `find_jar_files` 的清單 | 預掃描清單與實際清單一致 |
+| | | B | 修正日誌數字（已掃描數 / 含可提取內容數）；測試：巢狀 JAR 被預掃描且共用同一份預算 | `scan_jars` 既有測試與 `icon_preview_view` 行為不變 |
+| 3 | #108 token 預算切批 | 0 | `call_gemini_requests` 以 `meta_out` 回報 `finishReason` 與 `usageMetadata`（含思考 token），維持回傳字串；截斷時 log 原因（`MAX_TOKENS` 或 `STOP` 但 JSON 壞） | 截斷時可從 log 看出原因與 token 用量 |
+| | | 1a | 新增 `lm_batch_budget.py`：本地 token 估算、依預算取前綴、依 profile 保存預算（撞牆減半、連續成功後緩慢回升）、輸出係數以實際用量校正 | 單元測試涵蓋估算、切批、保存、回升 |
+| | | 1b | 明確設定 `maxOutputTokens`；`lm_translator_main`、`lm_translator_shared_loop`、`lm_translator` 三處切批共用同一個估算與預算；維持「回傳為輸入前綴、依位置對應」契約 | 不重翻、不漏翻；截斷後預算保留到後續批次 |
+| | | 1c | `lm_translator` 區段新增設定（預設值、`config.example.json`、`config_manager` 驗證）與測試 | 新設定有預設、有驗證、有測試 |
+| 4 | 收尾 | | 全部測試與 ruff；更新 PR #106 說明；回報 | pytest 全過 |
+
+### 決策紀錄
+
+- **#109 採建議做法 (a)**：不改例外架構、不取消尚未開始的 futures（(b) 另議）。
+- **#111 採可選參數**：`scan_jars(jar_dir, patterns, ..., jar_files=None)`；巢狀 JAR 的預掃描內容會在提取期間留在記憶體，這是 issue 已說明的取捨。
+- **#108 不用 `countTokens` API**，也不動 TPM 限流；先做階段 0 觀測，階段 1 的係數預設保守，並由實際用量校正。
+- **#108 終止保證**：截斷時先縮小學到的預算；若縮小後實際批次沒有變小，才走既有的項目數縮小流程，因此每輪都會嚴格變小或放棄該批。
+
 ## 建議順序與 PR 切法
 
 1. **P0 清理**：拆 2~3 個小 PR（TaskSession 轉接、死碼與殘留、文件）。行為不變，測試當安全網。
