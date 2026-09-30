@@ -513,3 +513,110 @@ def test_timestamp_shard_failure_leaves_no_zero_byte_file(tmp_path):
     ):
         _save(type_dir, {"K": 1}, force_new_shard=True)
     assert list(type_dir.glob("lang_*.json")) == []
+
+
+# ---------------------------------------------------------------------------
+# 編號分片交易：資料與 .shard_order 同一個鎖、失敗時 rollback
+# ---------------------------------------------------------------------------
+
+
+def test_numbered_metadata_failure_rolls_back_shard_data(tmp_path):
+    """序號更新失敗 → 分片還原成寫入前內容並拋出，不留下「新資料 + 舊序號」。"""
+    type_dir = tmp_path / "lang"
+    type_dir.mkdir()
+    _save(type_dir, {"K": "A"}, force_new_shard=False)  # numbered = A
+    _save(type_dir, {"K": "B"}, force_new_shard=True)  # timestamp = B（較新）
+    numbered = type_dir / "lang_00001.json"
+    order_before = (type_dir / cache_shards.SHARD_ORDER_FILE).read_bytes()
+
+    real_record = cache_shards._record_shard_write
+
+    def flaky_record(td, name):
+        if name == numbered.name:
+            raise OSError("order write failed")
+        return real_record(td, name)
+
+    with (
+        patch.object(cache_shards, "_record_shard_write", side_effect=flaky_record),
+        pytest.raises(OSError, match="order write failed"),
+    ):
+        _save(type_dir, {"K": "C"}, force_new_shard=False)
+
+    assert json.loads(numbered.read_bytes()) == {"K": "A"}  # 已還原
+    assert (type_dir / cache_shards.SHARD_ORDER_FILE).read_bytes() == order_before
+    assert _load(tmp_path)["K"] == "B"  # 磁碟狀態與序號一致，不出現舊值蓋新值
+    assert not list(type_dir.glob("*.tmp"))
+
+
+def test_numbered_metadata_failure_on_new_shard_removes_it(tmp_path):
+    type_dir = tmp_path / "lang"
+    type_dir.mkdir()
+    with (
+        patch.object(cache_shards, "_record_shard_write", side_effect=OSError("boom")),
+        pytest.raises(OSError, match="boom"),
+    ):
+        _save(type_dir, {"K": "A"}, force_new_shard=False)
+    assert not (type_dir / "lang_00001.json").exists()
+
+
+def test_concurrent_numbered_writers_do_not_lose_updates(tmp_path):
+    """多個 writer 同時寫同一個 active 編號分片：read-modify-write 不可 lost update。"""
+    import threading
+
+    type_dir = tmp_path / "lang"
+    type_dir.mkdir()
+    threads_n, per_thread = 8, 15
+    start = threading.Barrier(threads_n)
+    errors: list[BaseException] = []
+
+    def worker(tid: int):
+        try:
+            start.wait()
+            for i in range(per_thread):
+                _save(
+                    type_dir,
+                    {f"t{tid}-{i}": f"{tid}/{i}"},
+                    force_new_shard=False,
+                    size=10_000,
+                )
+        except BaseException as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(t,)) for t in range(threads_n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors
+    loaded = _load(tmp_path)
+    assert len(loaded) == threads_n * per_thread
+
+
+def test_numbered_rotation_inside_transaction_does_not_deadlock(tmp_path):
+    """交易內旋轉使用 *_locked，不會對同一把非重入鎖再次加鎖。"""
+    import threading
+
+    type_dir = tmp_path / "lang"
+    type_dir.mkdir()
+
+    def run():
+        for n in range(3):  # 每次 8 筆、分片上限 10：會跨分片並在交易內旋轉
+            chunk = {f"k{n}-{i}": i for i in range(8)}
+            _save(type_dir, chunk, force_new_shard=False, size=10)
+
+    t = threading.Thread(target=run)
+    t.start()
+    t.join(timeout=10)
+    assert not t.is_alive(), "旋轉時發生 nested-lock 死鎖"
+    assert len(_load(tmp_path)) == 24
+    assert (type_dir / ".active").read_text().strip() == "00003"
+
+
+def test_timestamp_shard_does_not_touch_active_pointer(tmp_path):
+    type_dir = tmp_path / "lang"
+    type_dir.mkdir()
+    _save(type_dir, {"a": 1}, force_new_shard=False)
+    before = (type_dir / ".active").read_text()
+    _save(type_dir, {"b": 2}, force_new_shard=True)
+    assert (type_dir / ".active").read_text() == before

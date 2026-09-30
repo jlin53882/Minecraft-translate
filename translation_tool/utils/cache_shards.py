@@ -176,6 +176,37 @@ def _get_active_shard_path(
     return type_dir / f"{cache_type}_{shard_id_str}.json"
 
 
+def _rotate_shard_if_needed_locked(
+    *,
+    type_dir: Path,
+    cache_type: str,
+    data: dict[str, Any],
+    rolling_shard_size: int,
+    active_shard_file: str,
+    logger: logging.Logger | None = None,
+) -> bool:
+    """旋轉 active shard 指標（呼叫端須已持有 `_shard_lock`，此函式不會再取鎖）。"""
+    if len(data) < rolling_shard_size:
+        return False
+
+    active_file = type_dir / active_shard_file
+    if not active_file.exists():
+        _get_active_shard_path(
+            type_dir=type_dir,
+            cache_type=cache_type,
+            active_shard_file=active_shard_file,
+        )
+
+    cur_id = int((active_file.read_text(encoding="utf-8") or "1").strip())
+    new_id = f"{cur_id + 1:05d}"
+    active_file.write_text(new_id, encoding="utf-8")
+
+    if logger:
+        logger.info(f"🔁 {cache_type} rolling shard rotate → {new_id}")
+
+    return True
+
+
 def _rotate_shard_if_needed(
     *,
     type_dir: Path,
@@ -187,43 +218,49 @@ def _rotate_shard_if_needed(
 ) -> bool:
     """當目前分片容量達上限時切到下一片，並回傳是否有旋轉。
 
-    使用檔案鎖確保旋轉操作的原子性，防止 TOCTOU Race Condition。
+    自行取得 `.active.lock`（獨立呼叫用）；已持有鎖的交易內請改用
+    `_rotate_shard_if_needed_locked`，避免 non-reentrant 檔案鎖死鎖。
     """
     if len(data) < rolling_shard_size:
         return False
 
-    active_file = type_dir / active_shard_file
-    lock_file = type_dir / f"{active_shard_file}.lock"
+    with _shard_lock(type_dir, active_shard_file):
+        return _rotate_shard_if_needed_locked(
+            type_dir=type_dir,
+            cache_type=cache_type,
+            data=data,
+            rolling_shard_size=rolling_shard_size,
+            active_shard_file=active_shard_file,
+            logger=logger,
+        )
 
-    # 建立 lock 檔並取得獨占鎖，防止 TOCTOU race
-    type_dir.mkdir(parents=True, exist_ok=True)
-    lock_fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR)
+
+def _commit_numbered_shard(
+    *,
+    type_dir: Path,
+    save_path: Path,
+    new_data: dict[str, Any],
+    old_bytes: bytes | None,
+) -> None:
+    """寫入編號分片並記錄新舊序號（呼叫端須持有 `_shard_lock`）。
+
+    資料與 `.shard_order` 視為同一筆交易：序號更新失敗時把分片還原成寫入前的內容
+    （原本不存在則刪除）再拋出例外，不會留下「新資料 + 舊序號」的矛盾狀態。
+    """
+    _write_json_atomic(save_path, new_data)
     try:
-        # 以跨平台 file lock 進行檔案鎖定
-        _lock_file_fd(lock_fd)
-
-        # 再次確認容量（防止鎖競爭期間已被其他程序旋轉）
-        if len(data) < rolling_shard_size:
-            return False
-
-        if not active_file.exists():
-            _get_active_shard_path(
-                type_dir=type_dir,
-                cache_type=cache_type,
-                active_shard_file=active_shard_file,
-            )
-
-        cur_id = int((active_file.read_text(encoding="utf-8") or "1").strip())
-        new_id = f"{cur_id + 1:05d}"
-        active_file.write_text(new_id, encoding="utf-8")
-
-        if logger:
-            logger.info(f"🔁 {cache_type} rolling shard rotate → {new_id}")
-
-        return True
-    finally:
-        _unlock_file_fd(lock_fd)
-        os.close(lock_fd)
+        _record_shard_write(type_dir, save_path.name)
+    except BaseException:
+        try:
+            if old_bytes is None:
+                save_path.unlink(missing_ok=True)
+            else:
+                tmp = save_path.with_suffix(".tmp")
+                tmp.write_bytes(old_bytes)
+                os.replace(tmp, save_path)
+        except Exception:  # noqa: BLE001, S110
+            pass  # 還原也失敗時仍以原始例外為準
+        raise
 
 
 def _save_entries_to_active_shards(
@@ -242,8 +279,6 @@ def _save_entries_to_active_shards(
     """
     if not entries:
         return
-
-    lock_file = type_dir / f"{active_shard_file}.lock"
 
     # 先確保 `.active` 指標檔存在，避免下方分支直接讀取時找不到檔案。
     _get_active_shard_path(
@@ -272,16 +307,12 @@ def _save_entries_to_active_shards(
             )
         return
 
+    # 編號分片的 read → merge → atomic write → 序號更新 全在同一個跨程序交易鎖內，
+    # 並行寫入不會 lost update，資料與 .shard_order 也不會分離。
+    # 鎖歸屬：此處是唯一 owner；交易內只呼叫 *_locked / 明確要求持鎖的 helper。
     pending_items = list(entries.items())
     while pending_items:
-        # 建立 lock 檔並取得獨占鎖，防止 TOCTOU race
-        type_dir.mkdir(parents=True, exist_ok=True)
-        lock_fd = os.open(str(lock_file), os.O_CREAT | os.O_RDWR)
-        rotated = False
-        try:
-            _lock_file_fd(lock_fd)
-
-            # 在鎖保護下讀取 active shard path（避免 TOCTOU）
+        with _shard_lock(type_dir, active_shard_file):
             save_path = _get_active_shard_path(
                 type_dir=type_dir,
                 cache_type=cache_type,
@@ -289,8 +320,10 @@ def _save_entries_to_active_shards(
             )
 
             current_data: dict[str, Any] = {}
+            old_bytes: bytes | None = None
             try:
-                old_data = json.loads(save_path.read_bytes())
+                old_bytes = save_path.read_bytes()
+                old_data = json.loads(old_bytes)
                 if isinstance(old_data, dict):
                     current_data = old_data
             except FileNotFoundError:
@@ -299,14 +332,8 @@ def _save_entries_to_active_shards(
                 if logger:
                     logger.warning(f"⚠️ 讀取舊分片失敗，將以空白分片續寫: {e}")
 
-            # 在鎖保護下檢查是否需要旋轉
             if len(current_data) >= rolling_shard_size:
-                # 需要旋轉：釋放當前鎖，讓旋轉邏輯取得鎖
-                _unlock_file_fd(lock_fd)
-                os.close(lock_fd)
-                lock_fd = -1
-
-                _rotate_shard_if_needed(
+                _rotate_shard_if_needed_locked(
                     type_dir=type_dir,
                     cache_type=cache_type,
                     data=current_data,
@@ -314,27 +341,20 @@ def _save_entries_to_active_shards(
                     active_shard_file=active_shard_file,
                     logger=logger,
                 )
-                rotated = True
                 continue  # 重新取得路徑和資料
 
-        finally:
-            if lock_fd != -1:
-                try:
-                    _unlock_file_fd(lock_fd)
-                except Exception:  # noqa: BLE001, S110
-                    pass
-                os.close(lock_fd)
-
-        if not rotated:
             capacity = max(0, rolling_shard_size - len(current_data))
             chunk = pending_items[:capacity]
 
             for k, v in chunk:
                 current_data[k] = v
 
-            _write_json_atomic(save_path, current_data)
-            with _shard_lock(type_dir, active_shard_file):
-                _record_shard_write(type_dir, save_path.name)
+            _commit_numbered_shard(
+                type_dir=type_dir,
+                save_path=save_path,
+                new_data=current_data,
+                old_bytes=old_bytes,
+            )
             if logger:
                 logger.info(
                     f"💾 {cache_type} saved: {save_path.name} (+{len(chunk)} / total={len(current_data)})"
@@ -344,7 +364,7 @@ def _save_entries_to_active_shards(
 
             if pending_items:
                 # 若目前分片已滿，預旋轉到下一片
-                _rotate_shard_if_needed(
+                _rotate_shard_if_needed_locked(
                     type_dir=type_dir,
                     cache_type=cache_type,
                     data=current_data,
