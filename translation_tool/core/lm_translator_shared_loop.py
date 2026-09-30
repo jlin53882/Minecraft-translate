@@ -166,6 +166,7 @@ def translate_items_with_cache_loop(
         completed_calls += 1
         safe_translated = translated or []
         actual_processed_in_this_batch = 0
+        untranslated_fallback = 0
 
         for it in safe_translated:
             if not isinstance(it, dict):
@@ -190,6 +191,11 @@ def translate_items_with_cache_loop(
                 except Exception as e:  # noqa: BLE001
                     log_info(f"[SharedLM] 處理翻譯結果失敗: {e}")
 
+            if it.get("_untranslated"):
+                # 批次縮到極限後回填的原文：保留在輸出，但不寫入快取
+                untranslated_fallback += 1
+                continue
+
             rule = cache_rules.get(ctype) or CacheRule("path|source_text")
             cache_key = rule.make_key({"path": pth, "source_text": src})
             try:
@@ -197,7 +203,22 @@ def translate_items_with_cache_loop(
             except Exception as e:  # noqa: BLE001
                 log_info(f"[SharedLM] 新增快取失敗: {e}")
 
-        remaining = remaining[actual_processed_in_this_batch:]
+        if untranslated_fallback:
+            log_info(
+                f"[SharedLM] {untranslated_fallback} 筆因批次縮至極限而回填原文，未寫入快取"
+            )
+
+        # translate_batch_smart 依輸入順序回傳，未完成時只回傳前綴。
+        # 以「實際回傳筆數」切片：格式無效被略過的項目也算已消耗，
+        # 否則會錯把批次尾端尚未處理／已處理的項目留下造成重翻或漏翻。
+        consumed = len(safe_translated)
+        consumed = min(consumed, len(batch))
+        if actual_processed_in_this_batch < consumed:
+            log_info(
+                f"[SharedLM] {consumed - actual_processed_in_this_batch} 筆回傳結果"
+                "格式無效，已略過"
+            )
+        remaining = remaining[consumed:]
 
         try:
             save_translation_cache(cache_type, write_new_shard=write_new_cache)

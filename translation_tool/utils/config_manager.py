@@ -131,6 +131,7 @@ DEFAULT_CONFIG = {
         "initial_batch_size_md": 100,
         "min_batch_size": 50,
         "batch_shrink_factor": 0.5,
+        "batch_write_interval": 2,  # 每 N 個批次寫一次快取（太大會讓單次寫入超過分片上限）
         "rpm_cooldown_sec": 0,
         "rate_limit": {
             "timeout": 600,

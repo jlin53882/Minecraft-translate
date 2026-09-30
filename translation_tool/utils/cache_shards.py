@@ -7,6 +7,7 @@
 import logging
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,29 @@ def _write_json_atomic(path: Path, data: dict[str, Any]):
         os.fsync(f.fileno())
 
     os.replace(tmp_path, path)
+
+
+def _write_timestamp_shard(
+    type_dir: Path, cache_type: str, entries: dict[str, Any]
+) -> Path:
+    """把 entries 整批寫入 ``{cache_type}_{mmddHHMMSS}-{seq}.json``，回傳檔案路徑。
+
+    以 O_EXCL 預先建立檔案取得唯一的 seq（同一秒內多次寫入用 -1、-2 區分），
+    不會覆蓋既有分片，也不會影響編號分片的 `.active` 指標。
+    """
+    ts = datetime.now().strftime("%m%d%H%M%S")  # noqa: DTZ005 檔名使用本機時間
+    seq = 1
+    while True:
+        path = type_dir / f"{cache_type}_{ts}-{seq}.json"
+        try:
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            seq += 1
+            continue
+        os.close(fd)
+        break
+    _write_json_atomic(path, entries)
+    return path
 
 
 def _get_active_shard_path(
@@ -155,7 +179,6 @@ def _save_entries_to_active_shards(
     if not entries:
         return
 
-    active_file = type_dir / active_shard_file
     lock_file = type_dir / f"{active_shard_file}.lock"
 
     # 先確保 `.active` 指標檔存在，避免下方分支直接讀取時找不到檔案。
@@ -165,12 +188,25 @@ def _save_entries_to_active_shards(
         active_shard_file=active_shard_file,
     )
 
+    # force_new_shard=True：寫入獨立的時間戳分片，不動 .active 指標。
     if force_new_shard:
-        cur = int((active_file.read_text(encoding="utf-8") or "1").strip())
-        nxt = cur + 1
-        active_file.write_text(f"{nxt:05d}", encoding="utf-8")
+        path = _write_timestamp_shard(type_dir, cache_type, entries)
         if logger:
-            logger.info(f"🔁 {cache_type} 手動切新分片 -> {nxt:05d}")
+            logger.info(
+                f"💾 {cache_type} saved (timestamp): {path.name} (+{len(entries)})"
+            )
+        return
+
+    # 防溢：一次寫入的條目數超過分片上限時，整批寫入一個時間戳分片，
+    # 避免把單次寫入硬切成多個半滿的編號分片。
+    if len(entries) > rolling_shard_size:
+        path = _write_timestamp_shard(type_dir, cache_type, entries)
+        if logger:
+            logger.warning(
+                f"⚠️ {cache_type} overflow ({len(entries)} > {rolling_shard_size}) "
+                f"→ timestamp shard: {path.name}"
+            )
+        return
 
     pending_items = list(entries.items())
     while pending_items:
@@ -195,7 +231,7 @@ def _save_entries_to_active_shards(
                     current_data = old_data
             except FileNotFoundError:
                 current_data = {}
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 if logger:
                     logger.warning(f"⚠️ 讀取舊分片失敗，將以空白分片續寫: {e}")
 
@@ -221,7 +257,7 @@ def _save_entries_to_active_shards(
             if lock_fd != -1:
                 try:
                     _unlock_file_fd(lock_fd)
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
                 os.close(lock_fd)
 
