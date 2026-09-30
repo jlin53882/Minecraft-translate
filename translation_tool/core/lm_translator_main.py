@@ -708,6 +708,14 @@ def translate_batch_smart_old(
                         raise RuntimeError(
                             "❌ FAILED_PRECONDITION：此地區未啟用 Gemini API 免費方案，請啟用付費"
                         )
+                    if "maxoutputtokens" in msg.replace("_", "").replace(" ", ""):
+                        # maxOutputTokens 超過這個模型的輸出上限：縮小批次無法解決，
+                        # 繼續縮只會把每一批都放棄。直接給出可行動的錯誤。
+                        raise RuntimeError(
+                            f"❌ maxOutputTokens（{budget_cfg.max_output_tokens}）超過模型 "
+                            f"{model_name} 的輸出上限：請調低 lm_translator.max_output_tokens，"
+                            "或設為 0 讓 API 使用模型預設值"
+                        )
                     log_info(
                         "[⚠️] 400 INVALID_ARGUMENT：payload 格式錯誤或過大，縮小 batch"
                     )

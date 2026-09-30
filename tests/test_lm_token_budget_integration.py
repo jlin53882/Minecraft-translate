@@ -395,3 +395,54 @@ def test_shared_loop_short_items_keep_count_behaviour(monkeypatch):
 
     assert res.processed == 250
     assert [len(b) for b in batches] == [250]
+
+
+# ---------------------------------------------------------------------------
+# maxOutputTokens 超過模型上限：給出可行動的錯誤，而不是一路縮批次後全部放棄
+# ---------------------------------------------------------------------------
+
+
+def test_max_output_tokens_over_model_limit_raises_actionable_error(env, monkeypatch):
+    import requests
+
+    response = requests.Response()
+    response.status_code = 400
+    response._content = (
+        b'{"error": {"code": 400, "message": "Unable to submit request because it has '
+        b'a maxOutputTokens value of 32768 but the supported range is from 1 to 8193",'
+        b' "status": "INVALID_ARGUMENT"}}'
+    )
+    calls = []
+
+    def boom(**_kw):
+        calls.append(1)
+        raise requests.HTTPError("400 " + response.text, response=response)
+
+    monkeypatch.setattr(
+        "translation_tool.core.lm_translator_main.call_gemini_requests", boom
+    )
+
+    with pytest.raises(RuntimeError, match="max_output_tokens"):
+        translate_batch_smart(_items(30, "Hi"), 30)
+
+    assert len(calls) == 1  # 不會縮批次後重試
+
+
+def test_other_400_errors_still_shrink_batches(env, monkeypatch):
+    import requests
+
+    response = requests.Response()
+    response.status_code = 400
+    response._content = b'{"error": {"message": "payload too large"}}'
+
+    def boom(**_kw):
+        raise requests.HTTPError("400 " + response.text, response=response)
+
+    monkeypatch.setattr(
+        "translation_tool.core.lm_translator_main.call_gemini_requests", boom
+    )
+
+    results, status = translate_batch_smart(_items(30, "Hi"), 30)
+
+    assert status == "AUTO"
+    assert all(r["_untranslated"] for r in results)  # 既有行為：縮到極限後放棄該批
