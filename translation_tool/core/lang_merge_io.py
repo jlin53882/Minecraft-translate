@@ -15,6 +15,7 @@ import orjson as json
 from ..utils.zip_safety import (
     MAX_FILE_BYTES,
     UnsafePathError,
+    ZipReadBudget,
     read_limited,
     safe_join,
 )
@@ -71,13 +72,18 @@ class DirReader(ABC):
 
 
 class ZipReader(DirReader):
-    """ZIP 檔案讀取器。"""
+    """ZIP 檔案讀取器。
 
-    def __init__(self, zf: zipfile.ZipFile):
+    budget：同一個 ZIP 的累計讀取預算。語言合併會為每個任務各建一個 ZipReader，
+    所以需由呼叫端建立一個 ZipReadBudget 並傳給所有 ZipReader 共用才有累計效果。
+    """
+
+    def __init__(self, zf: zipfile.ZipFile, budget: ZipReadBudget | None = None):
         self._zf = zf
+        self._budget = budget
 
     def read_bytes(self, rel_path: str) -> bytes:
-        return read_limited(self._zf, rel_path, MAX_FILE_BYTES)
+        return read_limited(self._zf, rel_path, MAX_FILE_BYTES, budget=self._budget)
 
     def list_all(self) -> list[str]:
         return self._zf.namelist()

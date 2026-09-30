@@ -9,24 +9,26 @@ from __future__ import annotations
 import os
 import re
 from functools import lru_cache
-from typing import Any, Dict
+from typing import Any
 
 import orjson as json
 
-from ..utils.log_unit import log_info, log_exception
-from ..utils.text_processor import recursive_translate_dict, apply_replace_rules
+from ..utils.log_unit import log_error, log_exception, log_info
+from ..utils.text_processor import apply_replace_rules, recursive_translate_dict
+from ..utils.zip_safety import UnsafePathError, safe_join
 from .lang_codec import dump_lang_text, parse_lang_text
+from .lang_merge_dict import (
+    contains_cjk as _contains_cjk,
+)
+from .lang_merge_dict import (
+    is_pure_english as _is_pure_english,
+)
 from .lang_merge_io import quarantine_copy
 from .lang_merge_zip_io import (
     _write_bytes_atomic,
     _write_text_atomic,
 )
-from .lang_merge_dict import (
-    contains_cjk as _contains_cjk,
-    is_pure_english as _is_pure_english,
-)
 from .lang_processing_format import dump_json_bytes
-
 
 CJK_RE = re.compile(
     r"[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002ebef\U00030000-\U0003134f]"
@@ -55,7 +57,7 @@ def detect_mod_wrapper_prefix(all_names: list[str] | None) -> str | None:
     """
     if not all_names:
         return None
-    tops = set(
+    tops = set(  # noqa: C401
         n.replace("\\", "/").split("/")[0]
         for n in all_names
         if n.replace("\\", "/").split("/")[0]
@@ -69,14 +71,14 @@ def detect_mod_wrapper_prefix(all_names: list[str] | None) -> str | None:
 
 def _process_single_mod(
     reader,
-    paths: Dict[str, str],
+    paths: dict[str, str],
     rules: list,
     output_dir: str,
     must_translate_dir: str,
     errordata_dir: str | None = None,
     all_files_cache: list[str] | None = None,  # 2026-08-04: 預先算好的檔案列表
     wrapper_prefix: str | None | object = _UNSET,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """處理單一模組（mod）的語言合併流程。
 
     讀取 zh_cn / zh_tw / en_us lang 檔案，依據來源優先順序產生最終的 zh_tw.json，
@@ -90,8 +92,8 @@ def _process_single_mod(
     # 跟 Stage 2 共用同一個實作避免重複維護。
     # 在這裡只 import 別名,不重新定義 nested function。
 
-    def _safe_read_lang_json(lang_key: str) -> Dict[str, Any]:
-        """ """
+    def _safe_read_lang_json(lang_key: str) -> dict[str, Any]:
+        """ """  # noqa: D419
         path = paths.get(lang_key)
         if not path:
             return {}
@@ -126,7 +128,7 @@ def _process_single_mod(
             else:
                 return reader.read_json(path)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             quarantine_copy(
                 reader=reader,
                 rel_path=path,
@@ -177,7 +179,8 @@ def _process_single_mod(
             return p[len(_wp) :] if _wp and p.startswith(_wp) else p
 
         final_output_rel = _strip(relative_tw_path)
-        final_output_path = os.path.join(output_dir, final_output_rel)
+        # 輸出路徑來自 ZIP 內成員路徑：必須留在 output_dir 內（含 symlink 解析）
+        final_output_path = safe_join(output_dir, final_output_rel)
         target_has_tw = os.path.exists(final_output_path)
 
         # =============================
@@ -188,7 +191,7 @@ def _process_single_mod(
             try:
                 with open(final_output_path, "rb") as f:
                     final_tw = json.loads(f.read())
-            except Exception:
+            except Exception:  # noqa: BLE001
                 final_tw = {}
         else:
             final_tw = {}
@@ -220,7 +223,7 @@ def _process_single_mod(
         # =============================
         # pending 路徑與 final_output_rel 使用相同的已剝離前綴邏輯
         pending_rel = final_output_rel.replace("zh_tw.json", "en_us.json")
-        pending_path = os.path.join(must_translate_dir, pending_rel)
+        pending_path = safe_join(must_translate_dir, pending_rel)
         os.makedirs(os.path.dirname(pending_path), exist_ok=True)
 
         if pending:
@@ -272,7 +275,10 @@ def _process_single_mod(
             "pending_count": pending_count,
         }
 
-    except Exception as exc:
+    except UnsafePathError as exc:
+        log_error(f"{log_prefix}拒絕不安全的輸出路徑，已略過此模組: {exc}")
+        return {"success": False, "error": True}
+    except Exception as exc:  # noqa: BLE001
         log_exception(f"{log_prefix}處理失敗: {exc}")
         return {
             "success": False,

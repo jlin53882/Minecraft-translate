@@ -24,7 +24,12 @@ from pathlib import Path
 
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error, log_warning
-from translation_tool.utils.zip_safety import ZipSizeError, read_limited
+from translation_tool.utils.zip_safety import (
+    ArchiveBudgetError,
+    ZipReadBudget,
+    ZipSizeError,
+    read_limited,
+)
 
 
 def _get_default_workers() -> int:
@@ -65,13 +70,24 @@ def _scan_single_jar(
           - binary 檔案（UTF-8 decode 失敗）：None（由 caller 自行處理）
     """
     result: dict[str, str | None] = {}
+    budget = ZipReadBudget(label=jar_path.name)
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
             for name in zf.namelist():
                 for pattern in patterns:
                     if re.search(pattern, name):
                         try:
-                            result[name] = read_limited(zf, name).decode("utf-8")
+                            result[name] = read_limited(zf, name, budget=budget).decode(
+                                "utf-8"
+                            )
+                        except ArchiveBudgetError as budget_err:
+                            # 整包累計超限：捨棄這個 JAR 的結果（只讀到一部分會讓後續處理
+                            # 誤以為內容完整），由呼叫端視為「沒有內容」。
+                            log_error(
+                                f"[jar_browser] 略過整個 JAR（累計讀取超過安全上限）: "
+                                f"{jar_path.name} - {budget_err}"
+                            )
+                            return jar_path, {}
                         except ZipSizeError as size_err:
                             log_warning(
                                 f"[jar_browser] 略過過大檔案 {jar_path.name}!{name}: {size_err}"

@@ -25,7 +25,9 @@ from ..utils.log_unit import log_error
 from ..utils.zip_safety import (
     MAX_FILE_BYTES,
     MAX_TEXT_BYTES,
+    ArchiveBudgetError,
     UnsafePathError,
+    ZipReadBudget,
     ZipSizeError,
     read_limited,
     safe_join,
@@ -97,6 +99,8 @@ def extract_from_jar_impl(
     skipped_count = 0
     jar_filename_base = _normalize_jar_base_name(jar_path)
     jar_path_obj = Path(jar_path)
+    # 同一個 JAR 的掃描讀取與提取讀取共用累計預算（防止大量合法大小成員的 ZIP bomb）
+    budget = ZipReadBudget(label=jar_path_obj.name)
 
     if not jar_path_obj.exists():
         log_error("JAR 檔案不存在: %s", jar_path)
@@ -112,10 +116,12 @@ def extract_from_jar_impl(
                     if target_regex.search(name):
                         try:
                             jar_results[name] = read_limited(
-                                zf, name, MAX_TEXT_BYTES
+                                zf, name, MAX_TEXT_BYTES, budget=budget
                             ).decode("utf-8")
                         except UnicodeDecodeError:
                             jar_results[name] = None
+                        except ArchiveBudgetError:
+                            raise  # 整包累計超限：交給外層中止這個 JAR（不是單一檔案過大）
                         except ZipSizeError as size_err:
                             log_error("略過過大檔案 %s: %s", name, size_err)
 
@@ -150,7 +156,11 @@ def extract_from_jar_impl(
                     source_data = jar_results[normalized_path].encode("utf-8")
                 else:
                     try:
-                        source_data = read_limited(zf, member, MAX_FILE_BYTES)
+                        source_data = read_limited(
+                            zf, member, MAX_FILE_BYTES, budget=budget
+                        )
+                    except ArchiveBudgetError:
+                        raise  # 整包累計超限：交給外層中止這個 JAR
                     except ZipSizeError as size_err:
                         log_error("略過過大檔案 %s: %s", normalized_path, size_err)
                         skipped_count += 1
@@ -172,6 +182,18 @@ def extract_from_jar_impl(
 
         return {
             "status": "success",
+            "extracted": extracted_count,
+            "skipped": skipped_count,
+        }
+    except ArchiveBudgetError as e:
+        # 累計讀取超過安全上限：停止處理這個 JAR（已寫出的檔案保留），回報錯誤但不影響其他 JAR
+        log_error(
+            "[extract] 略過 %s 剩餘內容（累計讀取超過安全上限）: %s",
+            jar_path_obj.name,
+            e,
+        )
+        return {
+            "status": "error",
             "extracted": extracted_count,
             "skipped": skipped_count,
         }

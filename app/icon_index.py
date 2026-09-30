@@ -17,7 +17,11 @@ from pathlib import Path
 
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
-from translation_tool.utils.zip_safety import read_limited
+from translation_tool.utils.zip_safety import (
+    ArchiveBudgetError,
+    ZipReadBudget,
+    read_limited,
+)
 
 # ==================================================
 # 核心資料結構
@@ -109,6 +113,7 @@ def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
             names = set(zf.namelist())
+            budget = ZipReadBudget.for_icon_scan(jar_path.name)
             from app.icon_reader import IconRef
             from app.views.icon_preview_view import (
                 _try_extract_mod_icon_from_model,
@@ -123,7 +128,11 @@ def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
                 ):
                     continue
                 try:
-                    content = read_limited(zf, name).decode("utf-8", errors="ignore")
+                    content = read_limited(zf, name, budget=budget).decode(
+                        "utf-8", errors="ignore"
+                    )
+                except ArchiveBudgetError:
+                    raise  # 整包累計超限：交給外層處理
                 except Exception:  # noqa: BLE001, S112
                     continue
                 for line in content.splitlines():
@@ -155,12 +164,15 @@ def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
                         continue
 
                     result = _try_extract_mod_icon_from_model(
-                        jar_path, modid, zf, names, key=key
+                        jar_path, modid, zf, names, key=key, budget=budget
                     )
                     if result:
                         _tex_val, png_path = result
                         results[key] = IconRef(jar_path, png_path).to_uri()
                 break  # 只讀第一個 lang 檔
+    except ArchiveBudgetError:
+        # 累計讀取超過安全上限（budget 已記錄警告）：保留已建立的部分索引，不中止整個索引建置
+        log_warning(f"[IconIndex] {jar_path.name} 累計讀取超限，僅保留已解析的部分索引")
     except Exception:  # noqa: BLE001, S110
         pass
     return results
