@@ -78,31 +78,6 @@ def _iter_entries_from_lang_files(zf: zipfile.ZipFile) -> Iterator[tuple[str, st
         break
 
 
-def _resolve_key_to_icon(jar_path: Path, modid: str, key: str) -> str | None:
-    """對單一 key 進行完整的 icon 解析（ZIP讀取 + model lookup）。
-
-    使用現有的 _try_extract_mod_icon_from_model，傳入 ZIP handle。
-    回傳：IconRef URI 或 None
-    """
-    from app.icon_reader import IconRef
-    from app.views.icon_preview_view import (
-        _try_extract_mod_icon_from_model,
-    )
-
-    try:
-        with zipfile.ZipFile(jar_path, "r") as zf:
-            names = set(zf.namelist())
-            result = _try_extract_mod_icon_from_model(
-                jar_path, modid, zf, names, key=key
-            )
-            if result:
-                _tex_val, png_path = result
-                return IconRef(jar_path, png_path).to_uri()
-    except Exception:  # noqa: BLE001, S110
-        pass
-    return None
-
-
 def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
     """Worker: 處理單一 JAR，建立該 JAR 所有 entry 的 icon 索引。
 

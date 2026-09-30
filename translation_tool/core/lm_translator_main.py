@@ -47,7 +47,6 @@ def translate_batch_smart(
     batch_items,
     total=None,
     dry_run: bool = DEFAULT_DRY_RUN,
-    export_cache_only: bool = DEFAULT_EXPORT_CACHE_ONLY,
 ):
     """
     智慧批次翻譯函數（主入口）
@@ -56,7 +55,6 @@ def translate_batch_smart(
         batch_items: 翻譯項目列表
         total: 總項目數（可選）
         dry_run: True = 不呼叫API，只模擬流程（測試用）
-        export_cache_only: True = 只輸出快取中的內容
 
     職責：協調各子流程，不直接處理細節
     """
@@ -72,7 +70,7 @@ def translate_batch_smart(
     # batch_size = _calculate_batch_size(batch_profile)
 
     # 4. 執行翻譯
-    results, status = _execute_translation(items, total, dry_run, export_cache_only)
+    results, status = _execute_translation(items, total, dry_run)
 
     # 5. 處理輸出
     return _process_output(results, status)
@@ -109,7 +107,7 @@ def _validate_batch_items(items):
     return validated
 
 
-def _execute_translation(items, total, dry_run=False, export_cache_only=False):
+def _execute_translation(items, total, dry_run=False):
     """
     執行翻譯主循環
 
@@ -117,12 +115,11 @@ def _execute_translation(items, total, dry_run=False, export_cache_only=False):
         items: 項目列表
         total: 總項目數
         dry_run: 是否為測試模式（不呼叫 API）
-        export_cache_only: 是否只輸出快取
     回傳：
         (結果列表, 狀態字串)
     """
     # 代理到舊函數（正確傳遞所有參數）
-    return translate_batch_smart_old(items, total, dry_run, export_cache_only)
+    return translate_batch_smart_old(items, total, dry_run)
 
 
 def _process_output(results, status):
@@ -139,9 +136,10 @@ def _process_output(results, status):
     if isinstance(results, tuple):
         return results
 
-    # 處理空結果
+    # 處理空結果：保留原始 status。FAILED / PARTIAL / ALL_KEYS_EXHAUSTED 等狀態
+    # 若被改成 AUTO，呼叫端會把「沒有結果」當成正常完成，不會中斷或回報額度耗盡。
     if not results:
-        return [], "AUTO"
+        return [], status
 
     return results, status
 
@@ -151,9 +149,7 @@ def _process_output(results, status):
 # =========================================================
 
 
-def translate_batch_smart_old(
-    batch_items, total=None, dry_run=False, export_cache_only=False
-):
+def translate_batch_smart_old(batch_items, total=None, dry_run=False):
     """
     智慧型分批翻譯函式
     支援動態縮減 Batch Size、模型切換、以及自動處理輸出截斷問題。
@@ -161,10 +157,6 @@ def translate_batch_smart_old(
     # dry_run：模擬翻譯流程，不呼叫任何 API
     if dry_run:
         return [], "DRY_RUN"
-
-    # export_cache_only：目前與 dry_run 等效（快取實作後再擴充）
-    if export_cache_only:
-        return [], "EXPORT_CACHE_ONLY"
 
     # 統一從 lm_cfg 讀取 batch size 設定
     lm_cfg = load_config().get("lm_translator", {})
@@ -266,6 +258,13 @@ def translate_batch_smart_old(
     models_cfg = load_config().get("lm_translator", {}).get("models", {})
     # 目前使用模型序列
     MODEL_POOL = [name for name, cfg in models_cfg.items() if cfg.get("enabled", False)]
+    if not MODEL_POOL:
+        # 沒有任何啟用的模型：不可進入迴圈。否則每批都會被當成「翻譯失敗」一路縮小，
+        # 最後把原文當成結果輸出，使用者卻看不到明確原因。
+        log_error(
+            "[❌] MODEL_POOL 為空（沒有啟用任何模型），請在設定中啟用至少一個模型"
+        )
+        return [], "FAILED"
 
     # 模型溫度
     MODEL_TEMP = load_config().get("lm_translator", {}).get("temperature", 0.2)
@@ -596,11 +595,9 @@ def translate_batch_smart_old(
                     log_info(
                         f"❌ 403 PERMISSION_DENIED：API Key 無權限 (index {get_current_key_index()})"
                     )
-                    try:
-                        rotate_api_key()
-                        continue  # 換模型
-                    except RuntimeError:
+                    if not rotate_api_key():
                         raise RuntimeError("❌ 所有 API Key 均無權限")
+                    continue  # 換 Key 後繼續
 
                 # ========== 400 ==========
                 if status == 400:
@@ -697,15 +694,6 @@ def translate_batch_smart_old(
                             return None, "ALL_KEYS_EXHAUSTED"
                         continue
 
-                    except RuntimeError:
-                        # ⭐ 關鍵：當 rotate_api_key 拋出 RuntimeError，代表沒 Key 了
-                        # 不要只用 break，要直接 return 狀態給外層
-                        error_final = (
-                            "❌ 所有 API Key 均已耗盡每日配額 (RPD)，請等待重置時間。"
-                        )
-                        log_error(error_final)
-                        return None, "ALL_KEYS_EXHAUSTED"
-
                 # ========== 504 ==========
                 if status == 504:
                     log_info(
@@ -784,9 +772,12 @@ def translate_batch_smart_old(
                             "503 非 overload（可能節點或區域異常）→ 嘗試切換 API key"
                         )
                         try:
-                            rotate_api_key()
+                            if not rotate_api_key():
+                                log_warning(
+                                    "沒有其他 API Key 可切換，改用下一個模型重試"
+                                )
                             interruptible_sleep(request_interval_sec)
-                            continue  # 換 key 繼續 model pool
+                            continue  # 繼續 model pool
                         except Exception as err:  # noqa: BLE001
                             log_error(f"API key 切換失敗: {err}")
                             break

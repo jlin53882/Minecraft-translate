@@ -141,17 +141,14 @@ def rotate_api_key():
 
     行為說明：
     - 內部透過 KeyIndexTracker (_key_tracker) 執行緒安全地切換
-    - 若已經沒有下一個 Key，直接丟出 RuntimeError
-      表示「所有 Key 都不可用，流程必須中止」
+    - 已經沒有下一個 Key 時**不會拋出例外**，而是記錄錯誤並回傳 False；
+      呼叫端必須檢查回傳值，並決定要中止（例如回傳 ALL_KEYS_EXHAUSTED / PARTIAL）
+      或改用其他策略。忽略回傳值會在所有 Key 都不可用時繼續使用同一把 Key。
 
-    Raises:
-        RuntimeError:
-            當所有 API Key 都已嘗試過，且無法再切換時拋出。
-            這通常代表：
-            - 所有 Key 的配額都已用盡（RPD / RPM exhausted），或
-            - 程式被錯誤地要求在「不該換 Key 的情況」下換 Key
-    切換至下一個可用的 API Key。
-    回傳: True (切換成功) / False (已無可用 Key)
+    Returns:
+        bool:
+            True  → 已切換到下一個 Key
+            False → 已無可用 Key（所有 Key 都已嘗試過，例如配額 RPD / RPM 用盡）
     """
     keys = _get_all_keys()
 
@@ -295,25 +292,23 @@ def value_fully_translated(value) -> bool:
     - 決定某一個 key / 欄位是否可以「直接使用 cache」
       而不需要再次送 API 翻譯
 
-    判斷邏輯說明：
+    判斷邏輯說明（**不判斷語系**，只判斷快取內容是否有值）：
     1. 若 value 是字串（str）：
-       - 呼叫 needs_translation_text()
-       - 若該字串「不需要翻譯」，表示已是中文或應保留原文 → 視為已翻譯
+       - 非空字串 → 視為已翻譯（即使內容是英文或特殊標記，也會直接命中快取）
+       - 空字串 → 視為尚未翻譯，需重新送 API
 
     2. 若 value 是字串列表（list[str]）：
-       - 逐一檢查每個元素
-       - 只要其中「任一字串仍需要翻譯」
-         就判定整個 list 尚未完全翻譯
-       - 這是「保守策略」，避免 list 中出現中英混雜的情況
+       - 只要其中任一元素是空字串，就判定整個 list 尚未完全翻譯（一票否決）
+       - 其餘元素不檢查內容
 
     3. 其他型別（例如 dict / int / None）：
        - 不屬於翻譯目標
        - 視為已完成翻譯，直接回傳 True
 
-    為什麼要這樣設計：
-    - Cache 命中必須「100% 安全」
-    - 寧願少命中、重新翻譯
-      也不要誤判為已翻譯而留下英文殘留
+    為什麼不判斷語系：
+    - 是否「需要翻譯」由送進翻譯流程前的 needs_translation_text() 決定；
+      快取只保存「已經處理過」的結果，命中時不再重複做語系判斷。
+    - 代價：快取中若存有未翻譯的英文原文，也會被視為命中（空字串則不會）。
 
     Returns:
         bool:
