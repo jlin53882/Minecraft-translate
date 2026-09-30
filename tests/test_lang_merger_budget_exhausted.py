@@ -56,10 +56,10 @@ def _patch_merge_env(monkeypatch, *, budget_factory=None):
     monkeypatch.setattr(lang_merger, "load_replace_rules", lambda _p: [])
     monkeypatch.setattr(lang_merge_content, "load_config", _fake_config)
     monkeypatch.setattr(lang_merge_zip_io, "load_config", _fake_config)
+    monkeypatch.setattr(lang_merge_content, "recursive_translate_dict", lambda v, _r: v)
     monkeypatch.setattr(
-        lang_merge_content, "recursive_translate_dict", lambda v, _r: v
+        lang_merge_pipeline, "recursive_translate_dict", lambda v, _r: v
     )
-    monkeypatch.setattr(lang_merge_pipeline, "recursive_translate_dict", lambda v, _r: v)
     monkeypatch.setattr(lang_merge_content, "apply_replace_rules", lambda v, _r: v)
     monkeypatch.setattr(lang_merge_pipeline, "apply_replace_rules", lambda v, _r: v)
     if budget_factory is not None:
@@ -75,8 +75,12 @@ def _patch_merge_env(monkeypatch, *, budget_factory=None):
 def _capture_logs(monkeypatch):
     errors: list[str] = []
     infos: list[str] = []
-    monkeypatch.setattr(lang_merger, "log_error", lambda m, *a, **k: errors.append(str(m)))
-    monkeypatch.setattr(lang_merger, "log_info", lambda m, *a, **k: infos.append(str(m)))
+    monkeypatch.setattr(
+        lang_merger, "log_error", lambda m, *a, **k: errors.append(str(m))
+    )
+    monkeypatch.setattr(
+        lang_merger, "log_info", lambda m, *a, **k: infos.append(str(m))
+    )
     return errors, infos
 
 
@@ -103,7 +107,9 @@ def test_exhausted_budget_reports_incomplete_output(tmp_path: Path, monkeypatch)
     assert not any("全部處理完成" in m for m in infos)
 
 
-def test_exhausted_budget_still_finishes_cleanup_and_progress(tmp_path: Path, monkeypatch):
+def test_exhausted_budget_still_finishes_cleanup_and_progress(
+    tmp_path: Path, monkeypatch
+):
     """用盡後不應中途崩潰：輸出目錄與進度照常收尾，只是標記為不完整。"""
     zip_path = tmp_path / "pack.zip"
     out = tmp_path / "out"
@@ -120,7 +126,9 @@ def test_exhausted_budget_still_finishes_cleanup_and_progress(tmp_path: Path, mo
     progresses = [u["progress"] for u in updates if "progress" in u]
     assert progresses == sorted(progresses)
     assert (out / "lang_output").is_dir()
-    assert sum(1 for u in updates if u.get("error") and "不完整" in u.get("log", "")) == 1
+    assert (
+        sum(1 for u in updates if u.get("error") and "不完整" in u.get("log", "")) == 1
+    )
 
 
 def test_sufficient_budget_keeps_success_behaviour(tmp_path: Path, monkeypatch):

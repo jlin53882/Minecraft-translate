@@ -11,6 +11,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from translation_tool.core.lm_batch_budget import (
+    profile_for_cache_type,
+    select_batch_size,
+)
 from translation_tool.core.lm_translator_shared_cache import (
     CacheRule,
     get_default_cache_rules,
@@ -46,6 +50,13 @@ def _is_valid_result(it: Any) -> bool:
         and isinstance(it.get("text"), str)
         and isinstance(it.get("source_text"), str)
     )
+
+
+def _lm_config() -> dict[str, Any]:
+    """目前的 lm_translator 設定（設定不是 dict 時回傳空 dict）。"""
+    cfg = load_config()
+    lm_cfg = (cfg or {}).get("lm_translator", {}) if isinstance(cfg, dict) else {}
+    return lm_cfg if isinstance(lm_cfg, dict) else {}
 
 
 def _get_default_batch_size(
@@ -153,7 +164,14 @@ def translate_items_with_cache_loop(
         if batch_size <= 0:
             batch_size = 50
 
-        batch = remaining[:batch_size]
+        # 項目數上限之外，再依 token 預算取前綴（與 lm_translator_main 共用同一個估算與學到的預算）
+        fit_count = select_batch_size(
+            remaining,
+            profile_for_cache_type(cache_type),
+            batch_size,
+            _lm_config(),
+        )
+        batch = remaining[:fit_count]
 
         try:
             translated, status = translate_batch_smart(batch, total_for_smart)

@@ -131,6 +131,15 @@ DEFAULT_CONFIG = {
         "initial_batch_size_md": 100,
         "min_batch_size": 50,
         "batch_shrink_factor": 0.5,
+        # token 預算切批（issue #108）：批次大小除了項目數，也受估算 token 限制。
+        "token_budget_enabled": True,
+        "max_output_token_budget": 24000,  # 單批預期輸出 token 上限（保守值）
+        "max_input_token_budget": 60000,  # 單批輸入 token 上限（避免吃掉太多 TPM）
+        "max_output_tokens": 32768,  # 送給 API 的 maxOutputTokens；0 = 不送
+        "output_token_factor": 1.5,  # 預期輸出 / 輸入 token 係數（會依實際用量校正）
+        "budget_min_scale": 0.0625,  # 撞牆後輸出預算最多縮到設定值的幾倍
+        "budget_recover_after": 3,  # 連續成功幾批後開始回升預算
+        "budget_recover_factor": 1.5,  # 每次回升的倍率
         "batch_write_interval": 2,  # 每 N 個批次寫一次快取（太大會讓單次寫入超過分片上限）
         "rpm_cooldown_sec": 0,
         "rate_limit": {
@@ -570,6 +579,82 @@ def _validate_lm_translator_config(lm: dict) -> None:
     if models_val is not None and not isinstance(models_val, dict):
         raise ConfigValidationError(
             f"lm_translator.models 必須為 dict，目前為 {type(models_val).__name__}"
+        )
+
+    # 6. token 預算切批設定（issue #108）
+    _validate_token_budget_config(lm)
+
+
+def _validate_token_budget_config(lm: dict) -> None:
+    """驗證 token 預算相關欄位（型別與範圍）；不合法時拋出 ConfigValidationError。"""
+
+    def _typed(key: str, kinds: tuple, label: str):
+        value = lm.get(key)
+        if value is None:
+            return None
+        # bool 是 int 的子類別，但不是合法數字
+        if isinstance(value, bool) or not isinstance(value, kinds):
+            raise ConfigValidationError(
+                f"lm_translator.{key} 必須為{label}，"
+                f"目前為 {type(value).__name__}：'{value}'"
+            )
+        return value
+
+    enabled = lm.get("token_budget_enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        raise ConfigValidationError(
+            f"lm_translator.token_budget_enabled 必須為 true/false，"
+            f"目前為 {type(enabled).__name__}：'{enabled}'"
+        )
+
+    for key in ("max_output_token_budget", "max_input_token_budget"):
+        value = _typed(key, (int,), "正整數")
+        if value is not None and value <= 0:
+            raise ConfigValidationError(
+                f"lm_translator.{key} 必須為正整數，目前為 {value}"
+            )
+
+    out_tokens = _typed("max_output_tokens", (int,), "整數（0 = 不設定）")
+    if out_tokens is not None and out_tokens < 0:
+        raise ConfigValidationError(
+            f"lm_translator.max_output_tokens 不可為負數，目前為 {out_tokens}"
+        )
+
+    factor = _typed("output_token_factor", (int, float), "數字")
+    if factor is not None and not (0.3 <= factor <= 6.0):
+        raise ConfigValidationError(
+            f"lm_translator.output_token_factor 必須在 0.3~6.0 範圍內，目前為 {factor}"
+        )
+
+    min_scale = _typed("budget_min_scale", (int, float), "數字")
+    if min_scale is not None and not (0.0 < min_scale <= 1.0):
+        raise ConfigValidationError(
+            f"lm_translator.budget_min_scale 必須大於 0 且不超過 1，目前為 {min_scale}"
+        )
+
+    recover_after = _typed("budget_recover_after", (int,), "正整數")
+    if recover_after is not None and recover_after < 1:
+        raise ConfigValidationError(
+            f"lm_translator.budget_recover_after 必須為正整數，目前為 {recover_after}"
+        )
+
+    recover_factor = _typed("budget_recover_factor", (int, float), "數字")
+    if recover_factor is not None and not (1.0 < recover_factor <= 4.0):
+        raise ConfigValidationError(
+            f"lm_translator.budget_recover_factor 必須大於 1 且不超過 4，目前為 {recover_factor}"
+        )
+
+    budget = lm.get("max_output_token_budget")
+    if (
+        isinstance(budget, int)
+        and isinstance(out_tokens, int)
+        and out_tokens > 0
+        and budget > out_tokens
+    ):
+        # 不阻擋啟動：預算超過 API 上限只是會讓單批更容易被截斷，屬於設定不合理
+        logging.warning(  # noqa: LOG015
+            f"lm_translator.max_output_token_budget ({budget}) 大於 max_output_tokens "
+            f"({out_tokens})：單批預期輸出可能超過 API 上限，建議調低預算。"
         )
 
 

@@ -139,13 +139,15 @@ def test_extraction_prescans_same_jars_as_find_jar_files(
     assert updates[-1]["stats"]["failures"] == 0
 
 
-def test_prescan_log_numbers_match_actual_jar_list(
-    nested_mods, tmp_path, caplog
-):
-    with caplog.at_level(logging.INFO, logger="translation_tool.core.jar_processor_extract"):
+def test_prescan_log_numbers_match_actual_jar_list(nested_mods, tmp_path, caplog):
+    with caplog.at_level(
+        logging.INFO, logger="translation_tool.core.jar_processor_extract"
+    ):
         _run(nested_mods["mods"], tmp_path / "out")
 
-    msgs = [r.getMessage() for r in caplog.records if "[scan_jars] 完成" in r.getMessage()]
+    msgs = [
+        r.getMessage() for r in caplog.records if "[scan_jars] 完成" in r.getMessage()
+    ]
     assert msgs, "找不到預掃描完成的日誌"
     assert "共預掃描 2 / 2 個 JAR" in msgs[0]
     assert "其中 2 個含可提取內容" in msgs[0]
