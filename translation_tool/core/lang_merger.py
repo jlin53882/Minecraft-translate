@@ -10,18 +10,20 @@ import concurrent.futures
 import os
 import zipfile
 from collections import defaultdict
-from typing import Any, Dict, Generator, List
+from collections.abc import Generator
+from typing import Any
 
 from ..utils.config_manager import load_config
-from ..utils.log_unit import log_error, log_info, log_warning, log_debug, log_exception
+from ..utils.log_unit import log_debug, log_error, log_exception, log_info, log_warning
 from ..utils.text_processor import load_replace_rules
+from ..utils.zip_safety import ZipReadBudget
 from .lang_merge_content import (
     _process_content_or_copy_file,
     export_filtered_pending,
     remove_empty_dirs,
 )
 from .lang_merge_content_copy import detect_content_wrapper_prefix
-from .lang_merge_io import ZipReader, FolderReader
+from .lang_merge_io import FolderReader, ZipReader
 from .lang_merge_pipeline import _process_single_mod, detect_mod_wrapper_prefix
 
 
@@ -33,7 +35,7 @@ def merge_zhcn_to_zhtw_from_zip(
     patchouli_skip: bool | None = None,
     patchouli_threshold: float | None = None,
     zh_en_threshold: int | None = None,
-) -> Generator[Dict[str, Any], None, None]:
+) -> Generator[dict[str, Any], None, None]:
     """將 ZIP 檔案中的簡體中文合併為繁體中文。
 
     Args:
@@ -71,7 +73,7 @@ def merge_zhcn_to_zhtw_from_zip(
         rules = load_replace_rules(
             load_config().get("replace_rules_path", "replace_rules.json")
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log_error(f"載入替換規則失敗: {e}")
         yield {"progress": 0.0, "error": True}
         return
@@ -112,15 +114,11 @@ def merge_zhcn_to_zhtw_from_zip(
 
                 # 只有一個頂層前綴 → 代表整個 ZIP 被包了一層，剝離它
                 if len(top_prefixes) == 1:
-                    wrapper_prefix = list(top_prefixes)[0]
+                    wrapper_prefix = list(top_prefixes)[0]  # noqa: RUF015
                     prefix_to_strip = wrapper_prefix + "/"
 
                     # 只在有實質內容時才剝離（避免空前綴或只有頂層目錄的情況）
-                    sample_stripped = (
-                        all_names[0][len(prefix_to_strip) :]
-                        if all_names[0].startswith(prefix_to_strip)
-                        else all_names[0]
-                    )
+                    sample_stripped = all_names[0].removeprefix(prefix_to_strip)
                     if sample_stripped and sample_stripped != all_names[0]:
 
                         def strip_wrapper(path):
@@ -134,7 +132,7 @@ def merge_zhcn_to_zhtw_from_zip(
 
             # 建立模組索引：以 mod_key 為單位，收集該 mod 下的 zh_cn/zh_tw/en_us 路徑
             lang_files_by_mod = defaultdict(dict)
-            other_files: List[str] = []
+            other_files: list[str] = []
             # for file_path in zf.namelist():
             #    normalized = file_path.replace('\\', '/')
             #    if normalized.endswith('/') or normalized == '':
@@ -169,19 +167,19 @@ def merge_zhcn_to_zhtw_from_zip(
                 norm_low = normalized.lower()
 
                 if "/lang/" in norm_low and (
-                    norm_low.endswith(".json") or norm_low.endswith(".lang")
+                    norm_low.endswith(".json") or norm_low.endswith(".lang")  # noqa: PIE810
                 ):
                     mod_key = normalized.split("/lang/")[0] + "/lang/"
 
-                    if norm_low.endswith("zh_cn.json") or norm_low.endswith(
+                    if norm_low.endswith("zh_cn.json") or norm_low.endswith(  # noqa: PIE810
                         "zh_cn.lang"
                     ):
                         lang_files_by_mod[mod_key]["zh_cn"] = normalized
-                    elif norm_low.endswith("zh_tw.json") or norm_low.endswith(
+                    elif norm_low.endswith("zh_tw.json") or norm_low.endswith(  # noqa: PIE810
                         "zh_tw.lang"
                     ):
                         lang_files_by_mod[mod_key]["zh_tw"] = normalized
-                    elif norm_low.endswith("en_us.json") or norm_low.endswith(
+                    elif norm_low.endswith("en_us.json") or norm_low.endswith(  # noqa: PIE810
                         "en_us.lang"
                     ):
                         lang_files_by_mod[mod_key]["en_us"] = normalized
@@ -219,6 +217,8 @@ def merge_zhcn_to_zhtw_from_zip(
                 max_workers = max_allowed_workers
 
             futures = []
+            # 所有任務共用同一個累計讀取預算（防止大量合法大小成員的 ZIP bomb）
+            zip_budget = ZipReadBudget.for_pack(label=str(zip_file))
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=max_workers
             ) as executor:
@@ -236,7 +236,7 @@ def merge_zhcn_to_zhtw_from_zip(
                     futures.append(
                         executor.submit(
                             _process_single_mod,
-                            ZipReader(zf),
+                            ZipReader(zf, zip_budget),
                             paths,
                             rules,
                             lang_output_dir,
@@ -254,7 +254,7 @@ def merge_zhcn_to_zhtw_from_zip(
                     futures.append(
                         executor.submit(
                             _process_content_or_copy_file,
-                            ZipReader(zf),
+                            ZipReader(zf, zip_budget),
                             input_path,
                             rules,
                             output_dir,
@@ -273,10 +273,10 @@ def merge_zhcn_to_zhtw_from_zip(
 
                 completed = 0
                 for fut in concurrent.futures.as_completed(futures):
-                    completed += 1
+                    completed += 1  # noqa: SIM113
                     try:
                         res = fut.result()
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         log_error(f"處理時發生未預期錯誤: {e}")
                         res = {"success": False, "error": True}
 
@@ -331,7 +331,7 @@ def merge_zhcn_to_zhtw_from_zip(
     except zipfile.BadZipFile:
         log_error(f"錯誤：檔案 '{zip_file}' 不是有效 ZIP。")
         yield {"progress": 1.0, "error": True}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log_exception(f"處理 ZIP 發生錯誤: {e}")
         yield {"progress": 1.0, "error": True}
 
@@ -344,7 +344,7 @@ def merge_zhcn_to_zhtw_from_folder(
     patchouli_skip: bool | None = None,
     patchouli_threshold: float | None = None,
     zh_en_threshold: int | None = None,
-) -> Generator[Dict[str, Any], None, None]:
+) -> Generator[dict[str, Any], None, None]:
     """將資料夾中的簡體中文合併為繁體中文。
 
     與 merge_zhcn_to_zhtw_from_zip 邏輯相同，但使用 FolderReader 讀取目錄內容。
@@ -380,7 +380,7 @@ def merge_zhcn_to_zhtw_from_folder(
         rules = load_replace_rules(
             load_config().get("replace_rules_path", "replace_rules.json")
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log_error(f"載入替換規則失敗: {e}")
         yield {"progress": 0.0, "error": True}
         return
@@ -406,13 +406,9 @@ def merge_zhcn_to_zhtw_from_folder(
                     top_prefixes.add(parts[0])
 
             if len(top_prefixes) == 1:
-                wrapper_prefix = list(top_prefixes)[0]
+                wrapper_prefix = list(top_prefixes)[0]  # noqa: RUF015
                 prefix_to_strip = wrapper_prefix + "/"
-                sample_stripped = (
-                    all_names[0][len(prefix_to_strip) :]
-                    if all_names[0].startswith(prefix_to_strip)
-                    else all_names[0]
-                )
+                sample_stripped = all_names[0].removeprefix(prefix_to_strip)
                 if sample_stripped and sample_stripped != all_names[0]:
 
                     def strip_wrapper(path):
@@ -423,7 +419,7 @@ def merge_zhcn_to_zhtw_from_folder(
                     log_info(f"偵測到統一包裝前綴 '{wrapper_prefix}/'，已自動剝離。")
 
         lang_files_by_mod = defaultdict(dict)
-        other_files: List[str] = []
+        other_files: list[str] = []
 
         for file_path in all_names:
             normalized = file_path.replace("\\", "/")
@@ -433,15 +429,15 @@ def merge_zhcn_to_zhtw_from_folder(
             norm_low = normalized.lower()
 
             if "/lang/" in norm_low and (
-                norm_low.endswith(".json") or norm_low.endswith(".lang")
+                norm_low.endswith(".json") or norm_low.endswith(".lang")  # noqa: PIE810
             ):
                 mod_key = normalized.split("/lang/")[0] + "/lang/"
 
-                if norm_low.endswith("zh_cn.json") or norm_low.endswith("zh_cn.lang"):
+                if norm_low.endswith("zh_cn.json") or norm_low.endswith("zh_cn.lang"):  # noqa: PIE810
                     lang_files_by_mod[mod_key]["zh_cn"] = normalized
-                elif norm_low.endswith("zh_tw.json") or norm_low.endswith("zh_tw.lang"):
+                elif norm_low.endswith("zh_tw.json") or norm_low.endswith("zh_tw.lang"):  # noqa: PIE810
                     lang_files_by_mod[mod_key]["zh_tw"] = normalized
-                elif norm_low.endswith("en_us.json") or norm_low.endswith("en_us.lang"):
+                elif norm_low.endswith("en_us.json") or norm_low.endswith("en_us.lang"):  # noqa: PIE810
                     lang_files_by_mod[mod_key]["en_us"] = normalized
             else:
                 other_files.append(normalized)
@@ -516,10 +512,10 @@ def merge_zhcn_to_zhtw_from_folder(
 
             completed = 0
             for fut in concurrent.futures.as_completed(futures):
-                completed += 1
+                completed += 1  # noqa: SIM113
                 try:
                     res = fut.result()
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     log_error(f"處理時發生未預期錯誤: {e}")
                     res = {"success": False, "error": True}
 
@@ -558,6 +554,6 @@ def merge_zhcn_to_zhtw_from_folder(
         log_info(f"--- 全部處理完成: {total_tasks} 個任務完成 ---")
         yield {"progress": 1.0}
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         log_exception(f"處理資料夾發生錯誤: {e}")
         yield {"progress": 1.0, "error": True}

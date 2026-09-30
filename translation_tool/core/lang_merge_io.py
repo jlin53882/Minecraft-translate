@@ -8,9 +8,17 @@ from __future__ import annotations
 import os
 import zipfile
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any
 
 import orjson as json
+
+from ..utils.zip_safety import (
+    MAX_FILE_BYTES,
+    UnsafePathError,
+    ZipReadBudget,
+    read_limited,
+    safe_join,
+)
 
 
 class DirReader(ABC):
@@ -42,7 +50,7 @@ class DirReader(ABC):
             except UnicodeDecodeError:
                 return raw.decode("utf-8", errors="replace")
 
-    def read_json(self, rel_path: str) -> Dict[str, Any]:
+    def read_json(self, rel_path: str) -> dict[str, Any]:
         """讀取並解析為 JSON（失敗拋 RuntimeError）。"""
         text = self.read_text(rel_path)
         if not text:
@@ -57,7 +65,6 @@ class DirReader(ABC):
 
     def copy_to(self, rel_path: str, target_path: str) -> None:
         """複製檔案內容至目標路徑。"""
-        import shutil
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
         raw = self.read_bytes(rel_path)
         with open(target_path, "wb") as f:
@@ -65,13 +72,18 @@ class DirReader(ABC):
 
 
 class ZipReader(DirReader):
-    """ZIP 檔案讀取器。"""
+    """ZIP 檔案讀取器。
 
-    def __init__(self, zf: zipfile.ZipFile):
+    budget：同一個 ZIP 的累計讀取預算。語言合併會為每個任務各建一個 ZipReader，
+    所以需由呼叫端建立一個 ZipReadBudget 並傳給所有 ZipReader 共用才有累計效果。
+    """
+
+    def __init__(self, zf: zipfile.ZipFile, budget: ZipReadBudget | None = None):
         self._zf = zf
+        self._budget = budget
 
     def read_bytes(self, rel_path: str) -> bytes:
-        return self._zf.read(rel_path)
+        return read_limited(self._zf, rel_path, MAX_FILE_BYTES, budget=self._budget)
 
     def list_all(self) -> list[str]:
         return self._zf.namelist()
@@ -132,7 +144,10 @@ def quarantine_copy(
             .get("quarantine_folder_name", "skipped_json")
         )
         quarantine_root = os.path.join(output_dir, quarantine_root_name)
-    target_path = os.path.join(quarantine_root, rel_path)
+    try:
+        target_path = safe_join(quarantine_root, rel_path)
+    except UnsafePathError:
+        return
 
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
@@ -149,5 +164,5 @@ def quarantine_copy(
             detail_path = target_path + ".detail.txt"
             with open(detail_path, "w", encoding="utf-8") as f:
                 f.write(extra_text)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass

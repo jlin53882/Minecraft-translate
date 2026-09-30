@@ -22,6 +22,16 @@ from typing import Any
 
 from ..utils.config_manager import load_config
 from ..utils.log_unit import log_error
+from ..utils.zip_safety import (
+    MAX_FILE_BYTES,
+    MAX_TEXT_BYTES,
+    ArchiveBudgetError,
+    UnsafePathError,
+    ZipReadBudget,
+    ZipSizeError,
+    read_limited,
+    safe_join,
+)
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +99,13 @@ def extract_from_jar_impl(
     skipped_count = 0
     jar_filename_base = _normalize_jar_base_name(jar_path)
     jar_path_obj = Path(jar_path)
+    # 同一個 JAR 的「預掃描 + 提取」共用同一份累計預算（防止大量合法大小成員的 ZIP bomb）。
+    # 正式流程由 scan_jars 建立並隨 scan_results（ScanResults）傳入；
+    # 直接呼叫本函式（沒有預掃描結果）時，才建立自己的預算供本函式的掃描與提取共用。
+    scan_budgets = getattr(scan_results, "budgets", None) or {}
+    budget = scan_budgets.get(jar_path_obj)
+    if budget is None:
+        budget = ZipReadBudget(label=jar_path_obj.name)
 
     if not jar_path_obj.exists():
         log_error("JAR 檔案不存在: %s", jar_path)
@@ -103,9 +120,15 @@ def extract_from_jar_impl(
                 for name in zf.namelist():
                     if target_regex.search(name):
                         try:
-                            jar_results[name] = zf.read(name).decode("utf-8")
+                            jar_results[name] = read_limited(
+                                zf, name, MAX_TEXT_BYTES, budget=budget
+                            ).decode("utf-8")
                         except UnicodeDecodeError:
                             jar_results[name] = None
+                        except ArchiveBudgetError:
+                            raise  # 整包累計超限：交給外層中止這個 JAR（不是單一檔案過大）
+                        except ZipSizeError as size_err:
+                            log_error("略過過大檔案 %s: %s", name, size_err)
 
         with zipfile.ZipFile(jar_path, "r") as zf:
             for member in zf.infolist():
@@ -115,13 +138,21 @@ def extract_from_jar_impl(
                 if not target_regex.search(normalized_path):
                     continue
 
-                if normalized_path.startswith("assets/"):
-                    final_output_path = os.path.join(output_root, normalized_path)
-                else:
-                    final_mod_folder = f"{jar_filename_base}_extracted"
-                    final_output_path = os.path.join(
-                        output_root, final_mod_folder, normalized_path
+                # 防止路徑遍歷（zip-slip）：最終路徑必須留在 output_root 內
+                try:
+                    if normalized_path.startswith("assets/"):
+                        final_output_path = safe_join(output_root, normalized_path)
+                    else:
+                        final_mod_folder = f"{jar_filename_base}_extracted"
+                        final_output_path = safe_join(
+                            output_root, final_mod_folder, normalized_path
+                        )
+                except UnsafePathError:
+                    log_error(
+                        "拒絕提取不安全路徑: %s（來源 %s）", normalized_path, jar_path
                     )
+                    skipped_count += 1
+                    continue
 
                 if (
                     normalized_path in jar_results
@@ -129,8 +160,16 @@ def extract_from_jar_impl(
                 ):
                     source_data = jar_results[normalized_path].encode("utf-8")
                 else:
-                    with zf.open(member) as source:
-                        source_data = source.read()
+                    try:
+                        source_data = read_limited(
+                            zf, member, MAX_FILE_BYTES, budget=budget
+                        )
+                    except ArchiveBudgetError:
+                        raise  # 整包累計超限：交給外層中止這個 JAR
+                    except ZipSizeError as size_err:
+                        log_error("略過過大檔案 %s: %s", normalized_path, size_err)
+                        skipped_count += 1
+                        continue
 
                 source_hash = get_file_hash_fn(source_data)
 
@@ -148,6 +187,18 @@ def extract_from_jar_impl(
 
         return {
             "status": "success",
+            "extracted": extracted_count,
+            "skipped": skipped_count,
+        }
+    except ArchiveBudgetError as e:
+        # 累計讀取超過安全上限：停止處理這個 JAR（已寫出的檔案保留），回報錯誤但不影響其他 JAR
+        log_error(
+            "[extract] 略過 %s 剩餘內容（累計讀取超過安全上限）: %s",
+            jar_path_obj.name,
+            e,
+        )
+        return {
+            "status": "error",
             "extracted": extracted_count,
             "skipped": skipped_count,
         }
