@@ -10,7 +10,7 @@ import flet as ft
 
 from app.ui import design, kit
 from app.ui.design import C
-from app.ui.design import tone as get_tone
+from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView
 from app.views.translation.translation_actions import (
     run_ftb,
@@ -299,24 +299,12 @@ class TranslationView(ft.Column):
     # UI helpers
     # ------------------------------------------------------------------
     def _set_status(self, text: str, tone: str = "neutral"):
-        """更新狀態晶片的文字與顏色。
-
-        ``tone`` 是語意色組名稱（neutral / em / gold / red / dia / ench）；
-        為了相容 actions 層仍傳的舊背景色（RED_200 等），其他值會依色系轉成對應色組。
-        """
-        if tone not in ("neutral", "em", "gold", "red", "dia", "ench"):
-            from app.ui.snack import snack_style
-
-            tone = snack_style(tone)[0]
-        self.status_chip.label = ft.Text(text)
-        self._apply_status_style(tone)
+        """更新狀態晶片的文字與顏色（``tone`` 為色組名稱，也接受舊背景色）。"""
+        set_chip_status(self.status_chip, text, tone)
         self.page.update()
 
     def _apply_status_style(self, tone: str):
-        t = get_tone(tone)
-        self.status_chip.bgcolor = t.bg
-        self.status_chip.label_text_style = ft.TextStyle(color=t.fg, size=12.5)
-        self.status_chip.side = ft.BorderSide(1, t.line)
+        apply_status_style(self.status_chip, tone)
 
     def _refresh_steps(self):
         """步驟卡跟著勾選框的值更新外觀（程式直接改 checkbox.value 之後呼叫）。"""

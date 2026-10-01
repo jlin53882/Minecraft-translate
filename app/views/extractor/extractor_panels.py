@@ -75,7 +75,7 @@ def _mode_card(
         border_radius=design.RADIUS_CARD,
         content=ft.Column(
             [
-                kit.tone_icon(icon, tone, size=20, box=40, radius=11),
+                ft.Row([kit.tone_icon(icon, tone, size=20, box=40, radius=11)]),
                 ft.Text(title, size=15, weight=ft.FontWeight.BOLD, color=C.TEXT),
                 ft.Text(desc, size=12, color=C.DIM),
                 ft.Container(height=4),
@@ -155,6 +155,7 @@ def build_settings_panel(view) -> ft.Column:
                                 ),
                             ],
                             spacing=8,
+                            vertical_alignment=ft.CrossAxisAlignment.START,
                         ),
                     ],
                 ),

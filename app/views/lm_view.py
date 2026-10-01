@@ -15,8 +15,8 @@ from app.services_impl.pipelines.lm_service import run_lm_translation_service
 from app.task_session import TaskSession
 from app.ui import kit, theme
 from app.ui.design import C
-from app.ui.design import tone as get_tone
 from app.ui.snack import show_snack
+from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView
 from app.views._log.task_session import tag_session
 from translation_tool.utils.config_manager import (
@@ -435,23 +435,11 @@ class LMView(ft.Column):
     # UI helpers
     # --------------------------------------------------
     def _set_status(self, text: str, tone: str = "neutral"):
-        """更新狀態晶片顯示。
-
-        ``tone`` 是語意色組名稱（neutral / em / gold / red / dia / ench）；
-        為了相容舊呼叫端也接受舊的背景色（依色系轉成對應色組）。
-        """
-        if tone not in ("neutral", "em", "gold", "red", "dia", "ench"):
-            from app.ui.snack import snack_style
-
-            tone = snack_style(tone)[0]
-        self.status_chip.label = ft.Text(text)
-        self._apply_status_style(tone)
+        """更新狀態晶片顯示（``tone`` 為色組名稱，也接受舊背景色）。"""
+        set_chip_status(self.status_chip, text, tone)
 
     def _apply_status_style(self, tone: str):
-        t = get_tone(tone)
-        self.status_chip.bgcolor = t.bg
-        self.status_chip.label_text_style = ft.TextStyle(color=t.fg, size=12.5)
-        self.status_chip.side = ft.BorderSide(1, t.line)
+        apply_status_style(self.status_chip, tone)
 
     @property
     def page(self):

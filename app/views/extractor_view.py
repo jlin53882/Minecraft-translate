@@ -82,6 +82,7 @@ class ExtractorView(ft.Column):
             expand=True,
         )
         self.output_dir_textfield.helper = "（請選擇或直接輸入輸出資料夾）"
+        self.output_dir_textfield.helper_style = ft.TextStyle(size=11, color=C.DIM)
 
         self.output_dir_helper_text = ft.Text("", size=12, color=C.DIM)
 
