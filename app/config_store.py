@@ -3,8 +3,9 @@
 為什麼需要它
 - 設定頁、合併頁與外殼都會寫 ``config.json``；外殼（API Key 狀態、模型名稱、主題）
   必須在「任何地方存檔後」立刻更新，不能靠重開 App 或各頁互相呼叫。
-- ``config_service._save_app_config()`` 存檔成功後會呼叫 :func:`notify_saved`，
+- ``config_service._save_app_config()`` 預設存檔成功後會呼叫 :func:`notify_saved`，
   因此舊頁面照原本方式存檔也會通知訂閱者。
+- 通知契約：**所有訂閱者 callback 都在寫入鎖釋放後才執行**（``save`` / ``set_value`` 皆然）。
 
 兩種寫入
 - :func:`set_value`：只改**使用者檔**（``config.json``）裡的一個欄位，不會把三層合併後的預設值
@@ -124,11 +125,18 @@ def set_value(path: str, value: Any) -> bool:
 
 
 def save(config: dict) -> bool:
-    """整份設定存檔（含 normalization）；成功後由 ``config_service`` 通知訂閱者。"""
+    """整份設定存檔（含 normalization）；成功後通知訂閱者一次。
+
+    寫入在 ``_write_lock`` 內完成，通知在鎖**釋放後**才進行：訂閱者 callback 若再呼叫
+    ``set_value`` / ``save`` 不會重入死鎖。
+    """
     from app.services_impl.config_service import _save_app_config
 
     with _write_lock:
-        return bool(_save_app_config(config))
+        ok = bool(_save_app_config(config, notify=False))
+    if ok:
+        notify_saved()
+    return ok
 
 
 # -- 外殼偏好 -----------------------------------------------------------------

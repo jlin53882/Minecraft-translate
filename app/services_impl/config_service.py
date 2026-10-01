@@ -51,12 +51,16 @@ def _load_app_config() -> dict[str, Any]:
     return load_config(CONFIG_PATH)
 
 
-def _save_app_config(config: dict[str, Any]):
+def _save_app_config(config: dict[str, Any], *, notify: bool = True):
     """儲存 app 設定（service 層唯一入口）。
 
     與 `_load_app_config()` 成對：
     - service 層只知道「要存設定」，不應綁死底層儲存細節。
     - 之後若要加上寫入驗證/寫入鎖/異動通知，也集中在這裡處理。
+
+    ``notify=False`` 時只寫檔、不通知訂閱者；呼叫端必須在**自己持有的寫入鎖釋放後**
+    自行呼叫 ``config_store.notify_saved()``（見 ``config_store.save``），
+    這樣訂閱者的 callback 才不會在寫入鎖內執行（避免 callback 再寫設定時重入死鎖）。
     """
 
     # Normalization: 當停用簡中處理時，強制關閉所有相依的子功能。
@@ -81,7 +85,7 @@ def _save_app_config(config: dict[str, Any]):
     from translation_tool.utils.config_manager import save_config
 
     ok = save_config(config, CONFIG_PATH)
-    if ok:
+    if ok and notify:
         notify_saved()  # 讓外殼（API Key 狀態、模型、主題）立即更新
     return ok
 
