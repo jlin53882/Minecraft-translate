@@ -6,6 +6,7 @@
 
 import re
 import threading
+from collections.abc import Collection
 from typing import Any
 
 from ..utils.config_manager import load_config, load_config_shared
@@ -94,40 +95,148 @@ def _get_all_keys() -> list[str]:
     ]
 
 
-def get_current_api_key() -> str:
+def get_api_key_count() -> int:
+    """目前設定檔中有效 API Key 的數量。"""
+    return len(_get_all_keys())
+
+
+def claim_api_key(exclude: Collection[int] = ()) -> tuple[int, str] | None:
     """
-    從金鑰池中取得目前正在使用的 API 金鑰。
+    原子地「領取」一把 API Key，回傳 (index, key)。
 
-    此函式依賴於執行緒安全的 KeyIndexTracker 類別 (_key_tracker)，
-    確保在執行翻譯請求或進行輪替（Rotate）時，始終能獲取到當前設定的金鑰。
+    **Key rotation contract（務必先讀）**
 
-    回傳:
-        str: 目前指向的 Gemini API 金鑰字串。
+    - 這是 atomic get-and-advance：回傳指定的 key 後，tracker 立即前進到「下一把」。
+      因此 tracker 的 index 代表「下一次預計使用哪一把」，**不是**「剛才 request 實際用了哪一把」。
+      這樣高並發時不同執行緒會分散到不同 key（ATK-009）。
+    - 「剛才用了哪一把」由回傳的 index 提供；呼叫端自己記住它（見 ApiKeyCycle），
+      不可以用 get_current_key_index() 去猜剛才失敗的是哪一把。
+    - exclude：本輪已實際失敗的 key index。從 tracker 目前位置起，領取第一把不在 exclude 的 key，
+      並讓 tracker 前進到它的下一把。exclude 為空時行為與舊的 get_current_api_key 完全相同。
+
+    回傳 None 的情況：沒有任何有效 key，或所有 key 都在 exclude 內。
     """
     keys = _get_all_keys()
     if not keys:
         log_error("❌ 設定檔中沒有找到任何有效的 API Key")
-        return ""
+        return None
 
+    count = len(keys)
     # 更新 key_count 以便正確環繞
-    _key_tracker.set_key_count(len(keys))
+    _key_tracker.set_key_count(count)
 
-    # 執行緒安全：atomic get-and-rotate。
-    # 每個執行緒呼叫都會拿到「目前 key」並輪替到下一把，
-    # 確保高並發時不同執行緒分散到不同 key（ATK-009 修復）。
+    # 執行緒安全：在同一把鎖內完成「挑選 + 前進」。
     with _key_tracker._lock:
-        current_index = _key_tracker._index
-        safe_index = min(current_index, len(keys) - 1)
-        key = keys[safe_index]
-        # 立即輪替，讓下一個執行緒拿到不同 key
-        _key_tracker._index += 1
-        if len(keys) > 0:
-            _key_tracker._index = _key_tracker._index % len(keys)
+        start = min(_key_tracker._index, count - 1)
+        for offset in range(count):
+            index = (start + offset) % count
+            if index in exclude:
+                continue
+            _key_tracker._index = (index + 1) % count
+            return index, keys[index]
+    return None
+
+
+def get_current_api_key() -> str:
+    """
+    領取下一把 API Key 並回傳其字串（atomic get-and-advance，見 claim_api_key）。
+
+    注意：呼叫後 tracker 已前進到下一把，所以 get_current_key_index() 之後回傳的是
+    「下一把」而不是剛才使用的這把。需要知道剛才用了哪一把，或要判斷「是否所有 key 都已
+    實際失敗」時，請使用 claim_api_key / ApiKeyCycle。
+
+    回傳:
+        str: Gemini API 金鑰字串；沒有任何有效 key 時回傳空字串。
+    """
+    claim = claim_api_key()
+    return claim[1] if claim else ""
+
+
+class ApiKeyCycle:
+    """
+    一個 retry cycle 的 API Key 使用狀態。
+
+    每次翻譯呼叫（以及其中對同一批資料的重試）各自建立一份，不跨執行緒共用。
+
+    - claim()：領取下一把「本輪尚未實際失敗」的 key，並記住它的 index。
+    - mark_failed()：把「剛才實際使用的那把」標記為失敗，回傳是否還有尚未嘗試的 key。
+      回傳 False 才代表「所有可用 key 都已在本輪實際嘗試且都不可用」（耗盡）。
+    - record_overload() / clear_overload()：503 overload 的**逐把 key** 計數。
+      claim() 是 get-and-advance，連續的請求會輪流用不同的 key，所以 overload 次數必須綁定
+      「實際使用的那把 key」；不同 key 的 overload 不互相累加，只有同一把 key 自己累積到門檻，
+      呼叫端才應該對它 mark_failed()。
+    - reset()：本輪成功後呼叫，開始新的 cycle（同時清除失敗紀錄與 overload 計數）。
+
+    耗盡只依據「實際嘗試過並失敗的 key」，不依賴 tracker index 恰好在最後一格。
+    """
+
+    # 沒有任何有效 key 時，overload 計數使用的 key
+    _NO_KEY = -1
+
+    def __init__(self) -> None:
+        self._failed: set[int] = set()
+        self._overload_counts: dict[int, int] = {}
+        self.current_index: int | None = None
+
+    @property
+    def failed_indexes(self) -> frozenset[int]:
+        """本輪已實際失敗的 key index。"""
+        return frozenset(self._failed)
+
+    def claim(self) -> str:
+        """領取下一把本輪尚未失敗的 key；全部都失敗過時退回一般輪替（呼叫端應已先中止）。"""
+        claim = claim_api_key(self._failed) or claim_api_key()
+        if claim is None:  # 沒有任何有效 key
+            self.current_index = None
+            return ""
+        self.current_index, key = claim
         return key
+
+    def record_overload(self) -> int:
+        """記錄「剛才實際使用的那把 key」遇到一次 503 overload，回傳該把 key 目前的累計次數。"""
+        key = self._NO_KEY if self.current_index is None else self.current_index
+        self._overload_counts[key] = self._overload_counts.get(key, 0) + 1
+        return self._overload_counts[key]
+
+    def overload_count(self, index: int | None = None) -> int:
+        """指定 key（預設為剛才實際使用的那把）目前的 overload 累計次數。"""
+        if index is None:
+            index = self._NO_KEY if self.current_index is None else self.current_index
+        return self._overload_counts.get(index, 0)
+
+    def clear_overload(self) -> None:
+        """中斷所有 key 的 overload 連續紀錄（遇到成功、截斷或非 503 的錯誤時）。"""
+        self._overload_counts.clear()
+
+    def mark_failed(self) -> bool:
+        """標記剛才實際使用的 key 為失敗。回傳 True = 還有尚未嘗試的 key 可用。"""
+        if self.current_index is not None:
+            self._failed.add(self.current_index)
+            self._overload_counts.pop(self.current_index, None)
+        total = get_api_key_count()
+        failed_in_range = sum(1 for index in self._failed if index < total)
+        return failed_in_range < total
+
+    def has_alternative_key(self) -> bool:
+        """是否有一把以上的 key（沒有的話，換 key 沒有意義）。"""
+        return get_api_key_count() > 1
+
+    def reset(self) -> None:
+        """本輪成功：清除失敗紀錄與 overload 計數，開始新的 cycle。"""
+        self._failed.clear()
+        self._overload_counts.clear()
 
 
 def rotate_api_key():
     """
+    【舊 API，請勿用於翻譯請求流程】
+
+    以 tracker 目前的 index 判斷是否還有下一把並前進。這套語意把 tracker 當成
+    「剛才使用的 key」，與 get_current_api_key / claim_api_key 的 get-and-advance
+    （tracker = 下一把）互相衝突：例如 2 把 key，領取 key0 後 tracker 已指向 key1，
+    此時呼叫本函式會回傳 False，彷彿「所有 key 都用完」，但 key1 其實還沒被用過。
+    翻譯流程已改用 ApiKeyCycle 判斷耗盡；本函式僅為向後相容而保留。
+
     切換至下一個可用的 API Key。
 
     使用時機：
@@ -141,17 +250,14 @@ def rotate_api_key():
 
     行為說明：
     - 內部透過 KeyIndexTracker (_key_tracker) 執行緒安全地切換
-    - 若已經沒有下一個 Key，直接丟出 RuntimeError
-      表示「所有 Key 都不可用，流程必須中止」
+    - 已經沒有下一個 Key 時**不會拋出例外**，而是記錄錯誤並回傳 False；
+      呼叫端必須檢查回傳值，並決定要中止（例如回傳 ALL_KEYS_EXHAUSTED / PARTIAL）
+      或改用其他策略。忽略回傳值會在所有 Key 都不可用時繼續使用同一把 Key。
 
-    Raises:
-        RuntimeError:
-            當所有 API Key 都已嘗試過，且無法再切換時拋出。
-            這通常代表：
-            - 所有 Key 的配額都已用盡（RPD / RPM exhausted），或
-            - 程式被錯誤地要求在「不該換 Key 的情況」下換 Key
-    切換至下一個可用的 API Key。
-    回傳: True (切換成功) / False (已無可用 Key)
+    Returns:
+        bool:
+            True  → 已切換到下一個 Key
+            False → 已無可用 Key（所有 Key 都已嘗試過，例如配額 RPD / RPM 用盡）
     """
     keys = _get_all_keys()
 
@@ -295,25 +401,23 @@ def value_fully_translated(value) -> bool:
     - 決定某一個 key / 欄位是否可以「直接使用 cache」
       而不需要再次送 API 翻譯
 
-    判斷邏輯說明：
+    判斷邏輯說明（**不判斷語系**，只判斷快取內容是否有值）：
     1. 若 value 是字串（str）：
-       - 呼叫 needs_translation_text()
-       - 若該字串「不需要翻譯」，表示已是中文或應保留原文 → 視為已翻譯
+       - 非空字串 → 視為已翻譯（即使內容是英文或特殊標記，也會直接命中快取）
+       - 空字串 → 視為尚未翻譯，需重新送 API
 
     2. 若 value 是字串列表（list[str]）：
-       - 逐一檢查每個元素
-       - 只要其中「任一字串仍需要翻譯」
-         就判定整個 list 尚未完全翻譯
-       - 這是「保守策略」，避免 list 中出現中英混雜的情況
+       - 只要其中任一元素是空字串，就判定整個 list 尚未完全翻譯（一票否決）
+       - 其餘元素不檢查內容
 
     3. 其他型別（例如 dict / int / None）：
        - 不屬於翻譯目標
        - 視為已完成翻譯，直接回傳 True
 
-    為什麼要這樣設計：
-    - Cache 命中必須「100% 安全」
-    - 寧願少命中、重新翻譯
-      也不要誤判為已翻譯而留下英文殘留
+    為什麼不判斷語系：
+    - 是否「需要翻譯」由送進翻譯流程前的 needs_translation_text() 決定；
+      快取只保存「已經處理過」的結果，命中時不再重複做語系判斷。
+    - 代價：快取中若存有未翻譯的英文原文，也會被視為命中（空字串則不會）。
 
     Returns:
         bool:

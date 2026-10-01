@@ -99,8 +99,9 @@ def env(monkeypatch):
         return state["cfg"]
 
     monkeypatch.setattr("translation_tool.core.lm_translator_main.load_config", config)
+    # #112 之後 main 走 ApiKeyCycle / claim_api_key；與 main 的測試一樣只換掉設定檔的 key 清單
     monkeypatch.setattr(
-        "translation_tool.core.lm_translator_main.get_current_api_key", lambda: "k"
+        "translation_tool.core.lm_config_rules._get_all_keys", lambda: ["k"]
     )
     monkeypatch.setattr(
         "translation_tool.core.lm_translator_main.interruptible_sleep", lambda *_: None

@@ -11,7 +11,7 @@ class TestTranslateBatchSmart:
 
     @patch("translation_tool.core.lm_translator_main.safe_json_loads")
     @patch("translation_tool.core.lm_translator_main.load_config")
-    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_config_rules._get_all_keys")
     @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
     @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_translate_batch_smart_lang_success(
@@ -32,7 +32,7 @@ class TestTranslateBatchSmart:
                 "patchouli_system_prompt": "test",
             }
         }
-        mock_get_key.return_value = "test_key"
+        mock_get_key.return_value = ["test_key"]
         mock_call_api.return_value = '{"items": [{"id": "0", "value": "你好"}]}'
         mock_json_loads.return_value = {"items": [{"id": "0", "value": "你好"}]}
 
@@ -46,7 +46,7 @@ class TestTranslateBatchSmart:
 
     @patch("translation_tool.core.lm_translator_main.safe_json_loads")
     @patch("translation_tool.core.lm_translator_main.load_config")
-    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_config_rules._get_all_keys")
     @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
     @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_translate_batch_smart_empty_batch(
@@ -61,7 +61,7 @@ class TestTranslateBatchSmart:
                 "models": {"gemini-pro": {"enabled": True}},
             }
         }
-        mock_get_key.return_value = "test_key"
+        mock_get_key.return_value = ["test_key"]
 
         result, status = translate_batch_smart([], 0)
 
@@ -71,7 +71,7 @@ class TestTranslateBatchSmart:
 
     @patch("translation_tool.core.lm_translator_main.safe_json_loads")
     @patch("translation_tool.core.lm_translator_main.load_config")
-    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_config_rules._get_all_keys")
     @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
     @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_translate_batch_smart_api_error_with_retry(
@@ -86,7 +86,7 @@ class TestTranslateBatchSmart:
                 "models": {"gemini-pro": {"enabled": True}},
             }
         }
-        mock_get_key.return_value = "test_key"
+        mock_get_key.return_value = ["test_key"]
         mock_call_api.return_value = ""  # 空回應觸發重試
 
         items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
@@ -107,7 +107,7 @@ class TestSystemPromptConversion:
 
     @patch("translation_tool.core.lm_api_client.requests.post")
     @patch("translation_tool.core.lm_translator_main.load_config")
-    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_config_rules._get_all_keys")
     @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_lang_prompt_dict_converted_to_string(
         self, mock_sleep, mock_get_key, mock_config, mock_post
@@ -144,7 +144,7 @@ class TestSystemPromptConversion:
                 },
             }
         }
-        mock_get_key.return_value = "test_key"
+        mock_get_key.return_value = ["test_key"]
 
         items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
 
@@ -161,7 +161,7 @@ class TestSystemPromptConversion:
 
     @patch("translation_tool.core.lm_api_client.requests.post")
     @patch("translation_tool.core.lm_translator_main.load_config")
-    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_config_rules._get_all_keys")
     @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_prompt_already_string_unchanged(
         self, mock_sleep, mock_get_key, mock_config, mock_post
@@ -197,7 +197,7 @@ class TestSystemPromptConversion:
                 "lang_system_prompt": prompt_text,
             }
         }
-        mock_get_key.return_value = "test_key"
+        mock_get_key.return_value = ["test_key"]
 
         items = [{"path": "test.key", "text": "Hello", "cache_type": "lang"}]
 
@@ -216,7 +216,7 @@ class TestBatchProfileDetection:
 
     @patch("translation_tool.core.lm_translator_main.safe_json_loads")
     @patch("translation_tool.core.lm_translator_main.load_config")
-    @patch("translation_tool.core.lm_translator_main.get_current_api_key")
+    @patch("translation_tool.core.lm_config_rules._get_all_keys")
     @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
     @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
     def test_detect_batch_profile_lang(
@@ -233,7 +233,7 @@ class TestBatchProfileDetection:
                 "models": {"gemini-pro": {"enabled": True}},
             }
         }
-        mock_get_key.return_value = "test_key"
+        mock_get_key.return_value = ["test_key"]
         mock_call_api.return_value = '{"items": []}'
         mock_json_loads.return_value = {"items": []}
 
