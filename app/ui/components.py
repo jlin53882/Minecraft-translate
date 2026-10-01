@@ -12,26 +12,29 @@
 from __future__ import annotations
 
 import flet as ft
-from app.ui import theme
+
+from app.ui import design, theme
+from app.ui.design import C
 
 # -------------------------
 # 基礎視覺常數（集中管理）
 # -------------------------
 
 CARD_PADDING: int = 16
-CARD_RADIUS: int = 10
-CARD_BORDER_COLOR = ft.Colors.BLACK_12
-CARD_BG_COLOR = ft.Colors.WHITE
-DIVIDER_COLOR = theme.GREY_200
+CARD_RADIUS: int = design.RADIUS_CARD
+# 顏色一律用語意色（來自 app.ui.design），會跟著深淺色主題自動切換
+CARD_BORDER_COLOR = C.LINE
+CARD_BG_COLOR = C.PANEL
+DIVIDER_COLOR = C.LINE
 
 
 def section_header(
     title: str,
     icon: str,
     *,
-    icon_color: str = ft.Colors.BLUE_GREY_700,
+    icon_color: str = C.EM,
     icon_size: int = 18,
-    title_size: int = 16,
+    title_size: int = 15,
 ) -> ft.Row:
     """區塊標題列（icon + title）。
 
@@ -49,7 +52,7 @@ def section_header(
     return ft.Row(
         [
             ft.Icon(icon, size=icon_size, color=icon_color),
-            ft.Text(title, weight=ft.FontWeight.BOLD, size=title_size),
+            ft.Text(title, weight=ft.FontWeight.BOLD, size=title_size, color=C.TEXT),
         ],
         spacing=8,
     )
@@ -61,15 +64,15 @@ def styled_card(
     icon: str,
     content: ft.Control,
     expand: bool = False,
-    icon_color: str = ft.Colors.BLUE_GREY_700,
+    icon_color: str = C.EM,
     collapsible: bool = False,
     default_collapsed: bool = False,
-    quick_actions: list = None,
-    page: ft.Page = None,  # 新增：用於收合後刷新 UI
+    quick_actions: list | None = None,
+    page: ft.Page | None = None,  # 新增：用於收合後刷新 UI
 ) -> ft.Container:
     """統一的「區塊卡片」外觀（支援收合）。
 
-    這個元件用在大型 View 內，把每個區塊包成一致的白底卡片。
+    這個元件用在大型 View 內，把每個區塊包成一致的面板卡片（深 / 淺色主題皆適用）。
 
     Args:
         title: 區塊標題
@@ -107,6 +110,7 @@ def styled_card(
         collapse_btn = ft.IconButton(
             icon=ft.Icons.EXPAND_MORE if default_collapsed else ft.Icons.EXPAND_LESS,
             icon_size=20,
+            icon_color=C.MUTED,
             tooltip="收合/展開",
         )
 
@@ -129,7 +133,7 @@ def styled_card(
         card_content[0] = ft.Row(
             [
                 ft.Icon(icon, size=18, color=icon_color),
-                ft.Text(title, weight=ft.FontWeight.BOLD, size=16),
+                ft.Text(title, weight=ft.FontWeight.BOLD, size=16, color=C.TEXT),
                 collapse_btn,
             ],
             spacing=8,
@@ -158,12 +162,12 @@ def primary_button(
     tooltip: str | None = None,
     on_click=None,
     height: int = theme.BUTTON_HEIGHT,
-    bgcolor: str = theme.PRIMARY,
+    bgcolor: str = C.EM,
 ) -> ft.Button:
     """主動作按鈕（整個 App 統一的 primary style）。
 
     Args:
-        bgcolor: 主色背景（預設藍色）。需要特殊語意（例如成功/危險）時可換色。
+        bgcolor: 主色背景（預設祖母綠）。需要特殊語意（例如成功/危險）時可換色。
     """
 
     return ft.Button(
@@ -172,10 +176,12 @@ def primary_button(
         tooltip=tooltip,
         height=height,
         style=ft.ButtonStyle(
-            color=ft.Colors.WHITE,
+            color=C.ON_EM,
             bgcolor=bgcolor,
-            shape=ft.RoundedRectangleBorder(radius=theme.BUTTON_RADIUS),
+            shape=ft.RoundedRectangleBorder(radius=design.RADIUS_CONTROL),
             padding=16,
+            elevation=0,
+            text_style=ft.TextStyle(weight=ft.FontWeight.W_700),
         ),
         on_click=on_click,
     )
@@ -196,7 +202,14 @@ def secondary_button(
         icon=icon,
         tooltip=tooltip,
         height=height,
-        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=theme.BUTTON_RADIUS), padding=16),
+        style=ft.ButtonStyle(
+            color=C.TEXT,
+            bgcolor=C.PANEL,
+            side=ft.BorderSide(1, C.LINE2),
+            shape=ft.RoundedRectangleBorder(radius=design.RADIUS_CONTROL),
+            padding=16,
+            text_style=ft.TextStyle(weight=ft.FontWeight.W_500),
+        ),
         on_click=on_click,
     )
 
@@ -208,19 +221,19 @@ def secondary_button(
 
 def create_snackbar(
     message: str,
-    color: str = ft.Colors.RED_400,
+    color: str = C.RED_BG,
 ) -> ft.SnackBar:
     """建立 SnackBar 元件（統一的樣式）。
 
     Args:
         message: 顯示的文字內容
-        color: 背景顏色，預設紅色
+        color: 背景顏色，預設為錯誤色淡底
 
     Returns:
         SnackBar 元件
     """
     return ft.SnackBar(
-        ft.Text(message),
+        ft.Text(message, color=C.TEXT),
         bgcolor=color,
     )
 
@@ -255,13 +268,18 @@ class ProgressCard(ft.Container):
         self._progress_bar = ft.ProgressBar(
             width=200,
             value=current / total if total > 0 else 0,
+            color=C.EM,
+            bgcolor=C.TRACK,
+            stop_indicator_radius=0,
+            track_gap=0,
         )
         self._percent_text = ft.Text(
             f"{int(current / total * 100)}%" if total > 0 else "0%",
             size=12,
+            color=C.TEXT,
         )
-        self._eta_text = ft.Text("", size=12, color=theme.TEXT_SECONDARY)
-        self._status_text = ft.Text("", size=12)
+        self._eta_text = ft.Text("", size=12, color=C.DIM)
+        self._status_text = ft.Text("", size=12, color=C.MUTED)
 
         # 取消按鈕
         cancel_btn = None
@@ -273,12 +291,16 @@ class ProgressCard(ft.Container):
 
         super().__init__(
             padding=15,
-            border_radius=8,
-            bgcolor=theme.surface_variant,
+            border_radius=design.RADIUS_CONTROL,
+            bgcolor=C.PANEL2,
+            border=ft.Border.all(1, C.LINE),
             content=ft.Column(
                 [
                     ft.Row(
-                        [ft.Text(title, weight=ft.FontWeight.BOLD), cancel_btn],
+                        [
+                            ft.Text(title, weight=ft.FontWeight.BOLD, color=C.TEXT),
+                            cancel_btn,
+                        ],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     ),
                     self._progress_bar,
@@ -366,10 +388,10 @@ def loading_state(
         content=ft.Column(
             [
                 spinner,
-                ft.Text(message, size=14, color=theme.TEXT_SECONDARY),
+                ft.Text(message, size=14, color=C.DIM),
             ]
             if spinner
-            else [ft.Text(message, size=14, color=theme.TEXT_SECONDARY)],
+            else [ft.Text(message, size=14, color=C.DIM)],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=10,
         ),
@@ -388,9 +410,9 @@ def empty_state(
         padding=40,
         content=ft.Column(
             [
-                ft.Icon(icon, size=48, color=theme.TEXT_SECONDARY),
-                ft.Text(title, size=16, weight=ft.FontWeight.BOLD),
-                ft.Text(message, size=14, color=theme.TEXT_SECONDARY),
+                ft.Icon(icon, size=48, color=C.DIM),
+                ft.Text(title, size=16, weight=ft.FontWeight.BOLD, color=C.TEXT),
+                ft.Text(message, size=14, color=C.DIM),
             ]
             + ([action_button] if action_button else []),
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -411,11 +433,9 @@ def error_state(
         padding=40,
         content=ft.Column(
             [
-                ft.Icon(icon, size=48, color=ft.Colors.ERROR),
-                ft.Text(
-                    title, size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ERROR
-                ),
-                ft.Text(message, size=14, color=theme.TEXT_SECONDARY),
+                ft.Icon(icon, size=48, color=C.RED),
+                ft.Text(title, size=16, weight=ft.FontWeight.BOLD, color=C.RED),
+                ft.Text(message, size=14, color=C.DIM),
             ]
             + ([retry_button] if retry_button else []),
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
