@@ -13,9 +13,9 @@ from app.views.cache_manager.panels.query_panel import CacheQueryPanel
 from app.views.cache_manager.panels.shard_panel import CacheShardPanel
 
 __all__ = [
-    'CacheController',
-    'CachePresenter',
-    'CacheOverviewPanel',
-    'CacheQueryPanel',
-    'CacheShardPanel',
+    "CacheController",
+    "CacheOverviewPanel",
+    "CachePresenter",
+    "CacheQueryPanel",
+    "CacheShardPanel",
 ]

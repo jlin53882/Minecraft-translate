@@ -4,6 +4,7 @@
 """
 
 import flet as ft
+
 from app.ui.components import styled_card
 
 
@@ -23,13 +24,19 @@ class CacheShardPanel(ft.Container):
         )
 
         # 操作按鈕
-        actions = ft.Column([
-            ft.Row([
-                ft.Button("新增分片", icon=ft.Icons.ADD),
-                ft.Button("補滿舊檔", icon=ft.Icons.EDIT),
-                ft.Button("輪替分片", icon=ft.Icons.SWAP_HORIZ),
-            ], spacing=10),
-        ], spacing=10)
+        actions = ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Button("新增分片", icon=ft.Icons.ADD),
+                        ft.Button("補滿舊檔", icon=ft.Icons.EDIT),
+                        ft.Button("輪替分片", icon=ft.Icons.SWAP_HORIZ),
+                    ],
+                    spacing=10,
+                ),
+            ],
+            spacing=10,
+        )
 
         # 使用 styled_card 包裝
         shard_card = styled_card(

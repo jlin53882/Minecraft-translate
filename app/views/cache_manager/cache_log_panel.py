@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import flet as ft
 
-from .cache_shared_widgets import bordered_block
+from app.ui import kit
+
 
 def build_log_panel(
     *,
@@ -16,25 +17,13 @@ def build_log_panel(
     btn_log_copy: ft.Control,
     btn_log_clear: ft.Control,
     log_list: ft.Control,
-    height: int = 260,
-) -> ft.Container:
+    height: int = 280,
+) -> ft.Control:
     """Cache 總覽頁右側日誌區塊（非查詢功能）。"""
-
-    return ft.Container(
-        height=height,
-        content=bordered_block(
-            expand=True,
-            content=ft.Column(
-                [
-                    ft.Row([
-                        ft.Text("日誌", weight=ft.FontWeight.BOLD),
-                        sw_log_only_error,
-                        btn_log_copy,
-                        btn_log_clear,
-                    ], wrap=True),
-                    ft.Container(expand=True, content=log_list),
-                ],
-                expand=True,
-            ),
-        ),
+    return kit.section_card(
+        "日誌",
+        ft.Container(content=log_list, height=height - 70),
+        icon=ft.Icons.TERMINAL,
+        tone="gold",
+        actions=[sw_log_only_error, btn_log_copy, btn_log_clear],
     )

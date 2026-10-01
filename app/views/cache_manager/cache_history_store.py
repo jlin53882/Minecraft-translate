@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
-
-from translation_tool.utils.log_unit import log_warning
 from datetime import datetime
 from pathlib import Path
+
+from translation_tool.utils.log_unit import log_warning
+
 
 def history_now_ts() -> str:
     """取得目前的 ISO 時間戳字串（時區Aware）。"""
     return datetime.now().astimezone().isoformat(timespec="seconds")
+
 
 def history_dirs(cache_root: str, cache_type: str):
     """根據 cache_root 與 cache_type 取得並建立 cache_history 目錄結構。
@@ -25,6 +27,7 @@ def history_dirs(cache_root: str, cache_type: str):
     json_dir.mkdir(parents=True, exist_ok=True)
     return base, jsonl_dir, json_dir
 
+
 def history_active_default(cache_type: str) -> dict:
     """取得指定 cache_type 的預設活動狀態（用於新檔案）。"""
     return {
@@ -33,6 +36,7 @@ def history_active_default(cache_type: str) -> dict:
         "next_seq": 2,
         "max_per_file": 10000,
     }
+
 
 def history_load_active(cache_root: str, cache_type: str):
     """載入或初始化 cache_type 的活動狀態（.history.active 檔案）。
@@ -46,17 +50,21 @@ def history_load_active(cache_root: str, cache_type: str):
     active_path = jsonl_dir / ".history.active"
     if not active_path.exists():
         active = history_active_default(cache_type)
-        active_path.write_text(json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8")
+        active_path.write_text(
+            json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         return active, active_path, jsonl_dir, json_dir
 
     try:
         active = json.loads(active_path.read_text(encoding="utf-8"))
         if not isinstance(active, dict):
-            raise ValueError("active format error")
-    except Exception as e:
-        log_warning(f'載入 active 失敗，使用預設值: {e}')
+            raise ValueError("active format error")  # noqa: TRY004
+    except Exception as e:  # noqa: BLE001
+        log_warning(f"載入 active 失敗，使用預設值: {e}")
         active = history_active_default(cache_type)
-        active_path.write_text(json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8")
+        active_path.write_text(
+            json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     active.setdefault("current_file", f"{cache_type}_h000001.jsonl")
     active.setdefault("current_count", 0)
@@ -64,13 +72,19 @@ def history_load_active(cache_root: str, cache_type: str):
     active.setdefault("max_per_file", 10000)
     return active, active_path, jsonl_dir, json_dir
 
+
 def history_save_active(active_path: Path, active: dict):
     """將活動狀態寫入 .history.active 檔案（JSON 格式）。"""
-    active_path.write_text(json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8")
+    active_path.write_text(
+        json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
 
 def history_append_event(cache_root: str, cache_type: str, event: dict):
     """將事件寫入 cache_type 的歷史記錄（自動分檔、寫入 jsonl 與 json）。"""
-    active, active_path, jsonl_dir, json_dir = history_load_active(cache_root, cache_type)
+    active, active_path, jsonl_dir, json_dir = history_load_active(
+        cache_root, cache_type
+    )
     if not active:
         return
 
@@ -99,16 +113,21 @@ def history_append_event(cache_root: str, cache_type: str, event: dict):
             raw = json.loads(json_path.read_text(encoding="utf-8"))
             if isinstance(raw, list):
                 arr = raw
-        except Exception as e:
-            log_warning(f'載入歷史記錄失敗，使用空陣列: {e}')
+        except Exception as e:  # noqa: BLE001
+            log_warning(f"載入歷史記錄失敗，使用空陣列: {e}")
             arr = []
 
     arr.append(event)
     if len(arr) > max_per_file:
         arr = arr[-max_per_file:]
-    json_path.write_text(json.dumps(arr, ensure_ascii=False, indent=2), encoding="utf-8")
+    json_path.write_text(
+        json.dumps(arr, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
-def history_load_recent(cache_root: str, cache_type: str, key: str, limit: int = 20) -> list[dict]:
+
+def history_load_recent(
+    cache_root: str, cache_type: str, key: str, limit: int = 20
+) -> list[dict]:
     """根據 key 取得最近 limit 筆歷史事件（從最新的檔案往前掃）。"""
     _base, jsonl_dir, _json_dir = history_dirs(cache_root, cache_type)
     if jsonl_dir is None:
@@ -119,7 +138,7 @@ def history_load_recent(cache_root: str, cache_type: str, key: str, limit: int =
     for fp in files:
         try:
             lines = fp.read_text(encoding="utf-8").splitlines()
-        except Exception:
+        except Exception:  # noqa: BLE001, S112
             continue
         for ln in reversed(lines):
             ln = ln.strip()
@@ -127,7 +146,7 @@ def history_load_recent(cache_root: str, cache_type: str, key: str, limit: int =
                 continue
             try:
                 ev = json.loads(ln)
-            except Exception:
+            except Exception:  # noqa: BLE001, S112
                 continue
             if str(ev.get("key", "")) != key:
                 continue

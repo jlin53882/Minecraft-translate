@@ -34,11 +34,13 @@ from app.services_impl.cache.cache_services import (
     cache_search_service,
     cache_update_dst_service,
 )
-from app.ui import theme
+from app.ui import design, kit, theme
 
 # UI 共用元件：統一按鈕樣式（先套用在總覽區，避免一次改動過大）
 from app.ui.components import empty_state, primary_button, secondary_button
 from app.ui.debounce import Debouncer
+from app.ui.design import C
+from app.ui.design import tone as get_tone
 from app.ui.snack import show_snack
 from app.views.cache_manager.cache_actions import run_cache_action
 from app.views.cache_manager.cache_history_store import (
@@ -141,6 +143,20 @@ class CacheView(ft.Column):
         )
         self.sw_log_only_error = ft.Switch(
             label="只看警告以上", value=True, on_change=self._on_log_filter_changed
+        )
+
+        # 總覽頂端的統計卡（載入資料後由 _refresh_overview_ui 更新）
+        self.stat_total = kit.stat_card(
+            "快取總筆數", "—", icon=ft.Icons.STORAGE_OUTLINED, tone="ench", expand=1
+        )
+        self.stat_dirty = kit.stat_card(
+            "有變更的類型", "—", icon=ft.Icons.EDIT_NOTE, tone="gold", expand=1
+        )
+        self.stat_types = kit.stat_card(
+            "快取類型", "—", icon=ft.Icons.CATEGORY_OUTLINED, tone="dia", expand=1
+        )
+        self.stat_root = kit.stat_card(
+            "最近儲存", "—", icon=ft.Icons.SAVE_OUTLINED, tone="em", expand=1
         )
 
         self._build_query_widgets()
@@ -1049,7 +1065,11 @@ class CacheView(ft.Column):
             tabs=[
                 ft.Tab(label="總覽 / 管理"),
                 ft.Tab(label="查詢"),
-            ]
+            ],
+            indicator_color=C.EM,
+            label_color=C.EM,
+            unselected_label_color=C.MUTED,
+            divider_color=C.LINE,
         )
         main_tab_view = ft.TabBarView(
             controls=[
@@ -1077,17 +1097,11 @@ class CacheView(ft.Column):
                     ft.Column(
                         expand=True,
                         controls=[
-                            ft.Container(
-                                padding=ft.Padding(bottom=6),
-                                content=ft.Row(
-                                    [
-                                        ft.Text(
-                                            "快取管理器 (Cache Manager)",
-                                            size=24,
-                                            weight=ft.FontWeight.BOLD,
-                                        )
-                                    ]
-                                ),
+                            kit.page_header(
+                                "快取管理",
+                                "翻譯快取分片儲存與全文檢索；命中愈高，API 花費愈低",
+                                icon=ft.Icons.STORAGE_OUTLINED,
+                                tone="dia",
                             ),
                             self.main_tabs,
                         ],
@@ -1597,7 +1611,13 @@ class CacheView(ft.Column):
             btn_log_copy=self.btn_log_copy,
             btn_log_clear=self.btn_log_clear,
             log_list=self.log_list,
-            page=self.page,  # 用於 styled_card 收合功能
+            page=self.page,
+            stat_cards=[
+                self.stat_total,
+                self.stat_dirty,
+                self.stat_types,
+                self.stat_root,
+            ],
         )
 
     def _build_query_entry_page(self):
@@ -1743,21 +1763,11 @@ class CacheView(ft.Column):
                 min(1.0, shard_entries / shard_capacity) if shard_capacity > 0 else 0.0
             )
 
-            if usage_ratio >= 1.0:
-                usage_color = theme.RED_500
-                usage_text_color = theme.RED_700
-            elif usage_ratio >= 0.9:
-                usage_color = theme.AMBER_500
-                usage_text_color = theme.AMBER_800
-            else:
-                usage_color = theme.BLUE_400
-                usage_text_color = theme.BLUE_700
-
-            status_chip = ft.Container(
-                padding=ft.Padding(left=8, right=8, top=2, bottom=2),
-                border_radius=20,
-                bgcolor=theme.AMBER_100 if dirty else theme.GREEN_100,
-                content=ft.Text("有變更" if dirty else "無變更", size=11),
+            usage_tone = (
+                "red" if usage_ratio >= 1.0 else "gold" if usage_ratio >= 0.9 else "dia"
+            )
+            status_chip = kit.chip(
+                "有變更" if dirty else "無變更", "gold" if dirty else "em"
             )
 
             actions = ft.Row(
@@ -1798,37 +1808,38 @@ class CacheView(ft.Column):
 
             self.type_list.controls.append(
                 ft.Container(
-                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
-                    border_radius=10,
-                    padding=10,
+                    border=ft.Border.all(1, C.LINE),
+                    bgcolor=C.PANEL2,
+                    border_radius=design.RADIUS_CONTROL + 2,
+                    padding=14,
                     content=ft.Column(
                         [
                             ft.Row(
                                 [
-                                    ft.Text(ctype, weight=ft.FontWeight.BOLD),
+                                    ft.Text(
+                                        ctype,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=C.TEXT,
+                                        font_family=design.FONT_MONO,
+                                    ),
                                     ft.Container(expand=True),
                                     status_chip,
                                 ]
                             ),
                             ft.Text(
-                                f"筆數: {entries_count} | 新增: {new_count} | 分片: {shard}",
+                                f"筆數 {entries_count:,}　新增 {new_count:,}　分片 {shard}",
                                 size=12,
-                                color=theme.GREY_700,
+                                color=C.MUTED,
                             ),
                             ft.Text(
-                                f"分片使用率: {shard_entries}/{shard_capacity}",
+                                f"分片使用率 {shard_entries:,} / {shard_capacity:,}",
                                 size=11,
-                                color=usage_text_color,
+                                color=get_tone(usage_tone).fg,
                             ),
-                            ft.ProgressBar(
-                                value=usage_ratio,
-                                height=6,
-                                color=usage_color,
-                                bgcolor=theme.BLUE_50,
-                            ),
+                            kit.progress_bar(usage_ratio, usage_tone, height=6),
                             actions,
                         ],
-                        spacing=6,
+                        spacing=8,
                     ),
                 )
             )
@@ -1857,7 +1868,24 @@ class CacheView(ft.Column):
             f"快取根目錄: {data.get('cache_root', '-') or '-'} | "
             f"UI更新: {ts}"
         )
+        self._update_stat_cards(data or {})
         self._render_type_list(data)
+
+    def _update_stat_cards(self, data: dict) -> None:
+        """總覽頂端統計卡。"""
+        types = data.get("types") or {}
+        dirty = int(data.get("dirty_type_count", 0) or 0)
+        self.stat_total.set_value(f"{int(data.get('total_entries', 0) or 0):,}")
+        self.stat_dirty.set_value(
+            str(dirty),
+            delta="尚未寫入磁碟" if dirty else "全部已儲存",
+            delta_tone="gold" if dirty else "em",
+        )
+        self.stat_types.set_value(str(len(types)))
+        saved = data.get("last_save_at") or "—"
+        self.stat_root.set_value(
+            str(saved), delta=str(data.get("cache_root") or ""), delta_tone="neutral"
+        )
 
     def _load_overview(self):
         """從服務載入快取總覽資料"""

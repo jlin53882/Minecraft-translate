@@ -4,6 +4,7 @@
 """
 
 import flet as ft
+
 from app.ui.components import styled_card
 
 
@@ -24,7 +25,10 @@ class CacheQueryPanel(ft.Container):
     def _build_content(self):
         # 搜尋列
         search_bar = ft.Row(
-            [self.search_field, ft.IconButton(ft.Icons.SEARCH, on_click=self._on_search)],
+            [
+                self.search_field,
+                ft.IconButton(ft.Icons.SEARCH, on_click=self._on_search),
+            ],
             spacing=5,
         )
 
@@ -49,6 +53,5 @@ class CacheQueryPanel(ft.Container):
     def _on_search(self, e):
         query = self.search_field.value
         # TODO: 實作搜尋邏輯
-        self.results_list.controls = [
-            ft.ListTile(title=ft.Text(f"搜尋: {query}"))]
+        self.results_list.controls = [ft.ListTile(title=ft.Text(f"搜尋: {query}"))]
         self.results_list.update()
