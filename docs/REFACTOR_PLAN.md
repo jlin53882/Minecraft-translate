@@ -1,7 +1,7 @@
 # 重構審查與計畫（為串接新 UI 做準備）
 
 > 狀態：**P0 清理與 M1–M8 已在 PR #106 完成**（見下方「單一 PR 範圍與里程碑」）。
-> 未列入里程碑的項目已另開 issue，不併入 #106：P1-5 巨型 View 拆分 → #114；P2 全部（含 F811）→ #115。
+> 未列入里程碑的項目已另開 issue，不併入 #106：P1-5 巨型 View 拆分 → #114；P2 全部 → #115；F811 重複定義 → #116。
 > 快照基準：`main` @ `53f4e8b`（PR #104 合併後）。
 > 撰寫時程式碼仍有其他變更在進行，**動手前請先重新量測**（見文末「重現指令」），
 > 下列數字與檔案位置可能已經改變。
@@ -38,7 +38,7 @@
 |---|---|---|
 | 整個套件無法 import | `app/views/cache/` | `__init__.py` 匯入不存在的 `cache_modal_base / cache_modal_query / cache_modal_shard`；`PROJECT_STRUCTURE.md` 也標為「未接線，待清理」 |
 | 占位元件 | `app/views/cache_manager/panels/*`（約 169 行） | 只被 `tests/test_pr1_to_pr6.py` 驗證「可 import」；實際使用的是 `app/views/cache_query_panel.py`（633 行）與 `cache_shard_panel.py`（581 行） |
-| 被覆蓋的重複函式（**未處理**，見 #115） | `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py` 約 L496 與 L605 | `on_translated_item` / `on_batch_flushed` 先內嵌定義，後又被工廠函式覆蓋（ruff F811） |
+| 被覆蓋的重複函式（**未處理**，見 #116） | `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py` 約 L496 與 L605 | `on_translated_item` / `on_batch_flushed` 先內嵌定義，後又被工廠函式覆蓋（ruff F811） |
 | 未使用的 import / 變數 | 全專案 | F401 65 個、F841 6 個（例如 `pipeline_one_click_dialog.py` 的 `wizard_content`、`translate_input_field`） |
 | 過期的註冊 key | `app/view_registry.py` | `VIEW_WINDOW_SIZES` 內有 `"arnold"`，導覽中沒有；`"pipeline"` 卻沒有對應尺寸 |
 | 一次性腳本 | `tools/`（約 11.6k 行） | 含 `__scan_results.json`（8641 行）、`fix_test.py`、`verify_patchouli_*_v2/v3` 等；確認無人使用後移除或歸檔 |
