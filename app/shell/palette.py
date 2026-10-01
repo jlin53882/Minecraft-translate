@@ -1,7 +1,9 @@
 """app/shell/palette.py：快速跳轉面板（Ctrl+P）。
 
 - ``PaletteItem`` / ``build_items`` / ``filter_items``：純邏輯（頁面 + 動作、搜尋與排序），可單元測試。
-- ``CommandPalette``：畫面。支援 ↑ ↓ 選取、Enter 執行、Esc 關閉；由 ``handle_key`` 接收全域鍵盤事件。
+- ``CommandPalette``：畫面。鍵盤分工：↑ / ↓ / Esc 由全域鍵盤事件經 ``handle_key`` 處理；
+  Enter 由搜尋框 ``TextField`` 的 ``on_submit`` 執行目前選取的項目（``handle_key`` 不處理 Enter，
+  避免與 ``on_submit`` 重複觸發）。
 - ``show_palette`` / ``close_palette``：以 ``page.overlay`` 顯示 / 移除。
 """
 
@@ -210,7 +212,11 @@ class CommandPalette(ft.Container):
             self._on_run(item)
 
     def handle_key(self, key: str) -> bool:
-        """處理鍵盤；回傳是否已處理。"""
+        """處理全域鍵盤事件；回傳是否已處理。
+
+        只處理 Esc 與 ↑ / ↓。Enter 不在這裡：它由搜尋框的 ``on_submit`` 執行目前選取的項目，
+        這裡若也處理會重複執行（一般字元則交給輸入框）。
+        """
         name = key.lower()
         if name == "escape":
             self._on_close()

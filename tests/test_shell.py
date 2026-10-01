@@ -220,6 +220,27 @@ def test_palette_keyboard_handling():
     assert p.handle_key("A") is False  # 一般字元交給輸入框
 
 
+def test_palette_enter_runs_the_selection_via_textfield_submit_only():
+    """Enter 由搜尋框 on_submit 執行目前選取的項目；handle_key 不處理 Enter（避免重複觸發）。"""
+    ran: list[str] = []
+    closed: list[bool] = []
+    p = pal.CommandPalette(
+        [
+            pal.PaletteItem("a", "甲", run=lambda: ran.append("a")),
+            pal.PaletteItem("b", "乙", run=lambda: ran.append("b")),
+        ],
+        on_close=lambda: closed.append(True),
+    )
+    p.move(1)
+
+    assert p.handle_key("Enter") is False  # 全域鍵盤處理器不碰 Enter
+    assert ran == []
+
+    p.search.on_submit(None)  # 使用者在搜尋框按 Enter
+
+    assert ran == ["b"] and closed == [True]  # 恰好執行一次
+
+
 def test_palette_height_follows_result_count():
     items = [pal.PaletteItem(str(i), f"項目{i}") for i in range(30)]
     p = pal.CommandPalette(items, on_close=lambda: None)
