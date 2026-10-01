@@ -9,17 +9,46 @@
 
 ## [Unreleased]
 
+> 主要內容：UI 全面重新設計（PR #106）。版本號尚未決定。
+
 ### Features
-- （預留）
+- **UI 全面重新設計（Deepslate & Emerald）**：依 `docs/design/ui-redesign/` 設計稿重做全部頁面；深色 / 淺色主題（偏好存於 `ui.theme_mode`），切換不需重建畫面。
+- **新外殼**：分組側欄（工作流程 / 品管與校對 / 資料庫 / 輸出 / 系統）、頂列（任務膠囊、API Key 狀態）、狀態列、`Ctrl+P` 快速跳轉、`Ctrl+1…0` 切頁。
+- **工作台**：新增 Dashboard 頁面（流程進度、近期活動、快取與規則統計、Key 健康度）。
+- **任務追蹤**：`TaskManager` 統一收集 `TaskSession`，任務執行中切換頁面不中斷，頂列 / 側欄 / 狀態列同步顯示。
+- **共用 UI kit**：`app/ui/kit/`（按鈕、Chip、卡片、進度、空 / 載入 / 錯誤狀態等）與語意色主題 `app/ui/design.py`。
+- **ConfigStore**：設定的讀 / 寫 / 變更通知單一入口，存檔後外殼（Key 狀態、模型、主題）立即更新。
+- **API Key 健康度（#113）**：RPD 耗盡 / 403 的 Key 冷卻一段時間不再被請求（以 Key 指紋識別，不是 index）；全部冷卻時每個 cycle 只試探一把。
+- **token 預算切批（#108）**：依 token 預算切批、學習式預算、`maxOutputTokens`、`finishReason` / 用量診斷；可用 `token_budget_enabled` 關閉。
 
 ### Improvements
-- （預留）
+- 設定存檔的訂閱者通知一律在寫入鎖釋放後執行，並統一所有 app 層寫入的鎖（避免巢狀寫入死鎖與並行寫出壞檔）。
+- AppShell 的 UI 更新改為排程回 Flet event loop 並節流；新增 `AppShell.dispose()` 與 `page.on_close` teardown。
+- 合併頁單欄位寫入改走 ConfigStore（只改被修改的欄位，也會通知外殼）。
+
+### Bug Fixes
+- **語言合併（#109）**：ZIP 累計讀取預算用盡時回報不完整輸出，不再顯示「全部處理完成」。
+- **JAR 提取（#111）**：`scan_jars` 支援明確的 `jar_files`，預掃描清單與實際提取清單一致。
+- 全部 API Key 冷卻時，429 RPM 重試不再改領其他冷卻中的 Key。
+- 字型註冊改為合併而非覆蓋，避免罕用字變方塊。
 
 ### Refactoring
-- （預留）
+- `TaskSession` / `LogEntry` 移到中立的 `app/tasks/`，services 不再 import `app.views`；刪除 `app/logging/`、`app/task_session.py` 轉接。
+- 以單一 `ViewSpec`（`app/view_registry.py`）取代三張平行的導覽表。
+- 刪除 `views/cache/`、`cache_manager/panels/` 死碼與一次性 `tools/` 腳本。
 
 ### Tests
-- （預留）
+- 新增 UI kit、外殼、TaskManager、ConfigStore、Dashboard 資料、Key 健康度、token 預算等測試與 AppShell 排程 / teardown 的回歸測試。
+
+### Docs
+- 新增 `docs/UI_DESIGN_SYSTEM.md`、`docs/LM_TOKEN_BUDGET.md`、`docs/LM_KEY_HEALTH.md`、`docs/CONFIG_APPLY_TIMING.md`、`docs/REFACTOR_PLAN.md`、`docs/REFACTOR_AUDIT.md`。
+- 重寫 `README.md`：更新功能、導覽表、設定、架構與開發說明。
+
+### Known issues
+- 關閉視窗會中斷進行中的任務（#126、#127）。
+- 設定頁尚無 token 預算與 Key 冷卻欄位（#134）。
+- `translator.replace_rules_path` 在語言合併被忽略（#118）。
+- 後續工作清單見 GitHub issues #114 ~ #137。
 
 ---
 
