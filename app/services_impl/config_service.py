@@ -51,16 +51,16 @@ def _load_app_config() -> dict[str, Any]:
     return load_config(CONFIG_PATH)
 
 
-def _save_app_config(config: dict[str, Any], *, notify: bool = True):
+def _save_app_config(config: dict[str, Any]):
     """儲存 app 設定（service 層唯一入口）。
 
     與 `_load_app_config()` 成對：
     - service 層只知道「要存設定」，不應綁死底層儲存細節。
     - 之後若要加上寫入驗證/寫入鎖/異動通知，也集中在這裡處理。
 
-    ``notify=False`` 時只寫檔、不通知訂閱者；呼叫端必須在**自己持有的寫入鎖釋放後**
-    自行呼叫 ``config_store.notify_saved()``（見 ``config_store.save``），
-    這樣訂閱者的 callback 才不會在寫入鎖內執行（避免 callback 再寫設定時重入死鎖）。
+    寫入所有權：寫檔一律在 ``config_store.write_lock()`` 內進行（與 ``config_store.set_value``
+    共用同一把鎖，避免兩個寫入者交錯寫出壞掉的 JSON）；訂閱者在鎖**釋放後**才被通知
+    （callback 再寫設定時才不會重入死鎖）。
     """
 
     # Normalization: 當停用簡中處理時，強制關閉所有相依的子功能。
@@ -81,12 +81,13 @@ def _save_app_config(config: dict[str, Any], *, notify: bool = True):
             "patchouli_skip_en_us_when_zh_cn_exists"
         ] = False
 
-    from app.config_store import notify_saved
+    from app import config_store
     from translation_tool.utils.config_manager import save_config
 
-    ok = save_config(config, CONFIG_PATH)
-    if ok and notify:
-        notify_saved()  # 讓外殼（API Key 狀態、模型、主題）立即更新
+    with config_store.write_lock():
+        ok = save_config(config, CONFIG_PATH)
+    if ok:
+        config_store.notify_saved()  # 讓外殼（API Key 狀態、模型、主題）立即更新
     return ok
 
 

@@ -11,6 +11,7 @@ from typing import Any
 
 import flet as ft
 
+from app import config_store
 from app.services_impl.pipelines.merge_service import (
     run_merge_folder_batch_service,
     run_merge_zip_batch_service,
@@ -21,7 +22,7 @@ from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView
 from app.views.config.config_actions import load_config_into_view
-from translation_tool.utils.config_manager import load_config, save_config
+from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
 
 
@@ -111,11 +112,8 @@ class MergeView(ft.Column):
     def _on_merge_field_changed(self, key: str, value: Any) -> None:
         """寫入 lang_merger 單一欄位到 config.json，支援兩邊同步。"""
         try:
-            cfg = load_config()
-            if "lang_merger" not in cfg:
-                cfg["lang_merger"] = {}
-            cfg["lang_merger"][key] = value
-            save_config(cfg)
+            # 經由 ConfigStore：只改這一個欄位、受寫入鎖保護、並通知外殼等訂閱者
+            config_store.set_value(f"lang_merger.{key}", value)
             self._broadcast_config_change_to_config_view()
         except Exception:  # noqa: BLE001, S110
             pass

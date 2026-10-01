@@ -6,6 +6,7 @@
 - ``config_service._save_app_config()`` 預設存檔成功後會呼叫 :func:`notify_saved`，
   因此舊頁面照原本方式存檔也會通知訂閱者。
 - 通知契約：**所有訂閱者 callback 都在寫入鎖釋放後才執行**（``save`` / ``set_value`` 皆然）。
+- 寫入所有權：app 層對 ``config.json`` 的寫入都在 :func:`write_lock` 內進行（含舊的 service 路徑）。
 
 兩種寫入
 - :func:`set_value`：只改**使用者檔**（``config.json``）裡的一個欄位，不會把三層合併後的預設值
@@ -29,6 +30,12 @@ _lock = threading.Lock()
 _write_lock = threading.Lock()  # 序列化對 config.json 的 read-modify-write
 
 _MISSING = object()
+
+
+def write_lock() -> threading.Lock:
+    """序列化對 ``config.json`` 寫入的鎖。所有 app 層的寫入（``set_value`` / ``save`` /
+    ``config_service.save_config_json``）都必須在這把鎖內寫檔、鎖外通知。"""
+    return _write_lock
 
 
 def subscribe(callback: Callable[[], None]) -> Callable[[], None]:
@@ -127,16 +134,13 @@ def set_value(path: str, value: Any) -> bool:
 def save(config: dict) -> bool:
     """整份設定存檔（含 normalization）；成功後通知訂閱者一次。
 
-    寫入在 ``_write_lock`` 內完成，通知在鎖**釋放後**才進行：訂閱者 callback 若再呼叫
-    ``set_value`` / ``save`` 不會重入死鎖。
+    寫入與通知的鎖邊界由 ``config_service._save_app_config`` 負責（所有整份存檔的路徑，
+    包含舊頁面直接呼叫的 ``save_config_json``，都走同一個入口）：寫入在 ``write_lock()`` 內完成，
+    通知在鎖**釋放後**才進行，訂閱者 callback 再呼叫 ``set_value`` / ``save`` 不會重入死鎖。
     """
     from app.services_impl.config_service import _save_app_config
 
-    with _write_lock:
-        ok = bool(_save_app_config(config, notify=False))
-    if ok:
-        notify_saved()
-    return ok
+    return bool(_save_app_config(config))
 
 
 # -- 外殼偏好 -----------------------------------------------------------------
