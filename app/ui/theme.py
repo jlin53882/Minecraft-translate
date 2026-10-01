@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 from flet import Colors
 
@@ -64,17 +63,17 @@ class ColorTokens:
     button_radius: int
 
     # ─── Log 區塊專用（新增於 PR refactor/unified-log-view）───
-    bg_log_panel: str           # log 容器底色
-    border_log_panel: str       # log 容器邊框
-    text_log_default: str       # log 一般文字
-    text_log_error: str         # log error 等級
-    text_log_warning: str       # log warning 等級
-    text_log_info: str          # log info 等級
-    text_log_system: str        # log system 等級
-    text_log_debug: str         # log debug 等級
+    bg_log_panel: str  # log 容器底色
+    border_log_panel: str  # log 容器邊框
+    text_log_default: str  # log 一般文字
+    text_log_error: str  # log error 等級
+    text_log_warning: str  # log warning 等級
+    text_log_info: str  # log info 等級
+    text_log_system: str  # log system 等級
+    text_log_debug: str  # log debug 等級
 
     # ─── Progress Bar（獨立群組）───
-    bg_progress_track: str      # progress bar 底色
+    bg_progress_track: str  # progress bar 底色
 
 
 # Light Mode Tokens
@@ -147,7 +146,7 @@ DARK_TOKENS = ColorTokens(
 class ThemeManager:
     """主題管理者，支援 light/dark mode 動態切換。"""
 
-    _instance: Optional[ThemeManager] = None
+    _instance: ThemeManager | None = None
 
     def __init__(self):
         self._mode = ThemeMode.LIGHT
@@ -193,22 +192,22 @@ class ThemeManager:
             顏色字串
         """
         token_map = {
-            'primary': self._tokens.primary,
-            'secondary': self._tokens.secondary,
-            'success': self._tokens.success,
-            'error': self._tokens.error,
-            'warning': self._tokens.warning,
-            'info': self._tokens.info,
-            'bg_light': self._tokens.bg_light,
-            'bg_dark': self._tokens.bg_dark,
-            'text_primary': self._tokens.text_primary,
-            'text_secondary': self._tokens.text_secondary,
-            'text_disabled': self._tokens.text_disabled,
-            'text_on_primary': self._tokens.text_on_primary,
-            'surface': self._tokens.surface,
-            'surface_variant': self._tokens.surface_variant,
-            'outline': self._tokens.outline,
-            'outline_variant': self._tokens.outline_variant,
+            "primary": self._tokens.primary,
+            "secondary": self._tokens.secondary,
+            "success": self._tokens.success,
+            "error": self._tokens.error,
+            "warning": self._tokens.warning,
+            "info": self._tokens.info,
+            "bg_light": self._tokens.bg_light,
+            "bg_dark": self._tokens.bg_dark,
+            "text_primary": self._tokens.text_primary,
+            "text_secondary": self._tokens.text_secondary,
+            "text_disabled": self._tokens.text_disabled,
+            "text_on_primary": self._tokens.text_on_primary,
+            "surface": self._tokens.surface,
+            "surface_variant": self._tokens.surface_variant,
+            "outline": self._tokens.outline,
+            "outline_variant": self._tokens.outline_variant,
         }
         return token_map.get(token_name, self._tokens.primary)
 
@@ -377,14 +376,124 @@ PRIMARY_COLOR = Colors.PRIMARY
 # 這次 PR 只完成「token 定義」+「view 使用」，不接通切換邏輯。
 
 # ─── Log 區塊專用 alias ───
-BG_LOG_PANEL = DARK_TOKENS.bg_log_panel           # ← 用 DARK 當預設（符合現有 view）
-BORDER_LOG_PANEL = DARK_TOKENS.border_log_panel
-TEXT_LOG_DEFAULT = DARK_TOKENS.text_log_default
-TEXT_LOG_ERROR = DARK_TOKENS.text_log_error
-TEXT_LOG_WARNING = DARK_TOKENS.text_log_warning
-TEXT_LOG_INFO = DARK_TOKENS.text_log_info
-TEXT_LOG_SYSTEM = DARK_TOKENS.text_log_system
-TEXT_LOG_DEBUG = DARK_TOKENS.text_log_debug
+# 新版設計系統（app.ui.design）的語意色：跟著深淺色主題自動切換，不需要重建控制項。
+from app.ui.design import C as _C
+
+BG_LOG_PANEL = _C.LOG_BG
+BORDER_LOG_PANEL = _C.LINE
+TEXT_LOG_DEFAULT = _C.MUTED
+TEXT_LOG_ERROR = _C.RED
+TEXT_LOG_WARNING = _C.GOLD
+TEXT_LOG_INFO = _C.DIA
+TEXT_LOG_SYSTEM = _C.EM
+TEXT_LOG_DEBUG = _C.DIM
 
 # ─── Progress Bar（獨立群組，不在 Log 範圍）───
 BG_PROGRESS_TRACK = DARK_TOKENS.bg_progress_track
+
+
+# ============================================================
+# 舊色名 → 新設計系統語意色（全域重新對應）
+# ============================================================
+# 還沒改版的頁面仍在用 ``theme.GREEN_700`` / ``theme.GREY_200`` 這類寫死的 Material 色票，
+# 在深色主題下會一片白底或看不見字。這裡把它們依「色系 + 深淺」改指向設計系統的語意色
+# （由 Flutter 依目前主題解析），所有舊頁面就能跟著深 / 淺色主題切換，不必逐行改寫。
+#
+# 規則：色系決定語意（綠→主色、紅→錯誤、藍→資訊、琥珀 / 橘 / 黃→警示、紫→進階）；
+#       淺階（50–200）當「淡底」，其餘當前景色。灰色系依用途對應到面板 / 線條 / 文字。
+import re as _re
+
+_TONE_BY_HUE = {
+    "GREEN": (_C.EM, _C.EM_BG),
+    "TEAL": (_C.EM, _C.EM_BG),
+    "RED": (_C.RED, _C.RED_BG),
+    "BLUE": (_C.DIA, _C.DIA_BG),
+    "CYAN": (_C.DIA, _C.DIA_BG),
+    "AMBER": (_C.GOLD, _C.GOLD_BG),
+    "ORANGE": (_C.GOLD, _C.GOLD_BG),
+    "YELLOW": (_C.GOLD, _C.GOLD_BG),
+    "PURPLE": (_C.ENCH, _C.ENCH_BG),
+}
+_GREY_BY_SHADE = {
+    50: _C.PANEL,
+    100: _C.PANEL2,
+    200: _C.TRACK,
+    300: _C.LINE2,
+    400: _C.DIM,
+    500: _C.DIM,
+    600: _C.MUTED,
+    700: _C.MUTED,
+    800: _C.TEXT,
+    900: _C.TEXT,
+}
+_BLUE_GREY_BY_SHADE = {
+    50: _C.PANEL,
+    100: _C.PANEL2,
+    200: _C.PANEL2,
+    300: _C.LINE2,
+    400: _C.MUTED,
+    500: _C.MUTED,
+    600: _C.MUTED,
+    700: _C.TEXT,
+    800: _C.TEXT,
+    900: _C.TEXT,
+}
+
+
+def legacy_color(hue: str, shade: int | None = None) -> str:
+    """舊色票（色系 + 深淺）→ 語意色。``hue`` 例如 "GREEN" / "BLUE_GREY"。"""
+    shade = 500 if shade is None else shade
+    if hue == "GREY":
+        return _GREY_BY_SHADE.get(shade, _C.MUTED)
+    if hue == "BLUE_GREY":
+        return _BLUE_GREY_BY_SHADE.get(shade, _C.MUTED)
+    strong, soft = _TONE_BY_HUE[hue]
+    return soft if shade <= 200 else strong
+
+
+_LEGACY_NAME = _re.compile(
+    r"(BLUE_GREY|GREY|GREEN|TEAL|RED|BLUE|CYAN|AMBER|ORANGE|YELLOW|PURPLE)(?:_(\d+))?"
+)
+for _name in list(globals()):
+    _m = _LEGACY_NAME.fullmatch(_name)
+    if _m:
+        globals()[_name] = legacy_color(
+            _m.group(1), int(_m.group(2)) if _m.group(2) else None
+        )
+
+# 語意別名：品牌主色改為祖母綠；文字 / 線條 / 背景一律走語意色
+PRIMARY = _C.EM
+SECONDARY = _C.MUTED
+SUCCESS = _C.EM
+ERROR = _C.RED
+WARNING = _C.GOLD
+INFO = _C.DIA
+PRIMARY_COLOR = _C.EM
+BG_LIGHT = _C.PANEL
+BG_DARK = _C.LOG_BG
+TEXT_PRIMARY = _C.TEXT
+TEXT_SECONDARY = _C.DIM
+TEXT_SECONDARY_200 = _C.MUTED
+TEXT_DISABLED = _C.DIM
+OUTLINE = _C.LINE2
+OUTLINE_VARIANT = _C.LINE
+BLACK = _C.TEXT
+BLACK12 = _C.LINE
+# WHITE 在舊頁面幾乎都是「彩色按鈕上的字」→ 主色上的字；當背景用的請改 PANEL
+WHITE = _C.ON_EM
+PANEL = _C.PANEL
+PANEL2 = _C.PANEL2
+
+
+def __getattr__(name: str):
+    """舊色票裡沒逐一列出的名稱（例如 ``BLUE_900``）也能取得對應的語意色。"""
+    match = _LEGACY_NAME.fullmatch(name)
+    if match:
+        return legacy_color(
+            match.group(1), int(match.group(2)) if match.group(2) else None
+        )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+MUTED = _C.MUTED
+DIM = _C.DIM

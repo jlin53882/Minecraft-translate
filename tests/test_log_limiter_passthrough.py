@@ -21,7 +21,7 @@ import pytest
 from app import services as qc_services
 from app.services_impl.logging_service import GLOBAL_LOG_LIMITER, LogLimiter
 from app.services_impl.pipelines import bundle_service, lookup_service
-from app.views._log.task_session import TaskSession
+from app.tasks.task_session import TaskSession
 
 
 @pytest.fixture(autouse=True)

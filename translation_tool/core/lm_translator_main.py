@@ -7,6 +7,12 @@
 import requests
 
 from translation_tool.core.lm_api_client import call_gemini_requests
+from translation_tool.core.lm_batch_budget import (
+    BudgetConfig,
+    estimate_text_tokens,
+    get_tracker,
+    select_batch_size,
+)
 from translation_tool.core.lm_config_rules import ApiKeyCycle
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.utils.cancellation import interruptible_sleep
@@ -36,6 +42,34 @@ DEFAULT_BATCH_SIZE = 50  # 預設批次大小
 # =========================================================
 DEFAULT_DRY_RUN = False  # 預設不跳過 API
 DEFAULT_EXPORT_CACHE_ONLY = False  # 預設進行完整翻譯
+
+# =========================================================
+# 截斷診斷（issue #108 階段 0）
+# =========================================================
+
+
+def _describe_truncation(finish_reason, meta, estimate, sent_count) -> str:
+    """組出截斷時的診斷訊息：finishReason 判定的原因 + 估算與實際 token 用量。
+
+    用來分辨截斷是「輸出 token 上限」（MAX_TOKENS，含思考 token 占用額度）還是
+    「模型正常結束卻產出壞 JSON」（STOP），作為調整批次策略的依據。
+    """
+    if finish_reason == "MAX_TOKENS":
+        cause = "輸出達 token 上限（MAX_TOKENS）"
+    elif finish_reason == "STOP":
+        cause = "模型正常結束（STOP）但 JSON 不完整或損壞，並非 token 上限"
+    elif not finish_reason:
+        cause = "沒有 finishReason，無法判斷原因"
+    else:
+        cause = f"finishReason={finish_reason}"
+    return (
+        f"[截斷診斷] {cause} | 送出 {sent_count} 條 | "
+        f"估算 in/out={estimate.input_tokens:.0f}/{estimate.output_tokens:.0f} | "
+        f"實際 prompt={meta.get('prompt_tokens')} "
+        f"output={meta.get('candidates_tokens')} "
+        f"thoughts={meta.get('thoughts_tokens')}"
+    )
+
 
 # =========================================================
 # 翻譯入口函數（新結構）
@@ -252,7 +286,12 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
     else:
         max_bs = INITIAL_BATCH_SIZE_PATCHOULI
 
+    # batch_size 是「項目數上限」：只會因失敗而縮小；實際每輪送幾筆另外受 token 預算限制
     batch_size = min(len(batch_items), max_bs)
+
+    # token 預算（issue #108）：依 profile 保存學到的預算，跨批次、跨呼叫保留
+    budget_cfg = BudgetConfig.from_config(lm_cfg)
+    budget_tracker = get_tracker(batch_profile)
 
     # 記錄原始總量，用於進度顯示
     original_total = total  # 外部總量
@@ -305,13 +344,33 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
     else:
         LANG_SYSTEM_PROMPT = str(_lang_raw)
 
+    # system prompt 也算輸入 token（每次呼叫都會送出）
+    fixed_input_tokens = estimate_text_tokens(
+        LANG_SYSTEM_PROMPT
+        if batch_profile in ("lang", "kubejs")
+        else PATCHOULI_SYSTEM_PROMPT
+    )
+
     pinned_model_index = None  # None = 正常模式，非 None = 鎖定指定模型
     # 進入動態 Batch 迴圈
     while remaining_items:
         hit_rpm = False  # ⭐ 新增：是否因 RPM 而切換模型
         success_this_round = False  # ⭐ 新增
         hit_overload_retry = False  # ⭐ 新增：標記是否因為 503 需要原地重試
-        current_batch = remaining_items[:batch_size]
+        learned_budget = False  # 本輪是否因截斷而縮小了學到的 token 預算
+        # 項目數上限、輸出 token 預算、輸入 token 預算，先到者為準；永遠只取輸入的前綴
+        fit_count = select_batch_size(
+            remaining_items,
+            batch_profile,
+            batch_size,
+            lm_cfg,
+            fixed_input_tokens=fixed_input_tokens,
+        )
+        current_batch = remaining_items[:fit_count]
+        batch_estimate = budget_tracker.estimate(
+            current_batch, budget_cfg, fixed_input_tokens
+        )
+        api_meta: dict = {}  # call_gemini_requests 填入 finishReason / token 用量
 
         # 建立一個臨時對照表，用來把 ID 對應回原始物件  改成 ID 對照
         id_to_item_map = {str(i): item for i, item in enumerate(current_batch)}
@@ -383,6 +442,8 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                     payload=payload,
                     api_key=key_cycle.claim(),
                     temperature=MODEL_TEMP,
+                    max_output_tokens=budget_cfg.max_output_tokens,
+                    meta_out=api_meta,
                 ).strip()
 
                 # ✅ 空內容檢查（改成 raw_text）
@@ -418,11 +479,21 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                             return True  # } 比 { 先出現，代表截斷
                     return count != 0  # 括號不平衡代表截斷
 
+                finish_reason = api_meta.get("finish_reason")
+                if finish_reason == "MAX_TOKENS" or _is_truncated(raw_text):
+                    # 階段 0 觀測：分辨「輸出 token 上限」與「正常結束卻產出壞 JSON」
+                    log_warning(
+                        _describe_truncation(
+                            finish_reason, api_meta, batch_estimate, fit_count
+                        )
+                    )
+
                 if _is_truncated(raw_text):
                     key_cycle.clear_overload()  # 截斷會中斷 overload 連續紀錄
                     log_info(
                         "[!] 偵測到 JSON 被截斷（結尾不完整或格式錯誤），將縮小 Batch 重試"
                     )
+                    learned_budget = budget_tracker.on_truncated(finish_reason)
                     break
 
                 # 解析 JSON
@@ -472,6 +543,9 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                         log_debug(
                             f"[🔍 缺失範例] {id_to_item_map[missing_ids[0]]['path']}"
                         )
+                    learned_budget = budget_tracker.on_truncated(
+                        finish_reason, kind="missing"
+                    )
                     break
 
                 # ===============================
@@ -525,8 +599,33 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                 # ⭐ 累積結果
                 all_results.extend(result)
 
-                # ⭐ 先把已處理的 batch 移除
-                remaining_items = remaining_items[batch_size:]
+                # 回饋預算：連續成功會讓先前縮小的預算緩慢回升，並以實際輸出校正係數。
+                # 輸出額度（maxOutputTokens）也包含思考 token，校正時要一併計入，否則會低估。
+                _cand_tokens = api_meta.get("candidates_tokens")
+                _actual_out = (
+                    _cand_tokens + (api_meta.get("thoughts_tokens") or 0)
+                    if isinstance(_cand_tokens, int)
+                    else None
+                )
+                budget_tracker.on_success(
+                    budget_cfg,
+                    value_tokens=batch_estimate.value_tokens,
+                    item_count=len(current_batch),
+                    actual_output_tokens=_actual_out,
+                )
+                log_debug(
+                    "[Budget:%s] 成功：%s 條 | 估算 in/out=%.0f/%.0f | 實際 prompt=%s out=%s thoughts=%s",
+                    batch_profile,
+                    len(current_batch),
+                    batch_estimate.input_tokens,
+                    batch_estimate.output_tokens,
+                    api_meta.get("prompt_tokens"),
+                    api_meta.get("candidates_tokens"),
+                    api_meta.get("thoughts_tokens"),
+                )
+
+                # ⭐ 先把已處理的 batch 移除（依實際送出的筆數，不是項目數上限）
+                remaining_items = remaining_items[len(current_batch) :]
 
                 # ⭐ 再計算剩餘數量（這時才準）
                 remaining_count = len(remaining_items)
@@ -534,7 +633,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                 # ⭐ 動態調整 batch_size
                 batch_size = min(batch_size, remaining_count)
                 success_this_round = True  # ⭐⭐⭐ 關鍵 ：標記本輪成功
-                key_cycle.reset()  # 本輪成功：開始新的 key cycle（含 overload 計數）
+                key_cycle.record_success()  # 本輪成功：清除這把 key 的失敗紀錄並開始新的 cycle
                 pinned_model_index = None  # ⭐ 解鎖 模型
 
                 if remaining_count == 0:
@@ -599,7 +698,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                         f"❌ 403 PERMISSION_DENIED：API Key 無權限 (index {key_cycle.current_index})"
                     )
                     # 只有「所有 key 都已實際嘗試且都被拒」才算無權限；還有沒試過的 key 就換它重試
-                    if not key_cycle.mark_failed():
+                    if not key_cycle.mark_failed(reason="forbidden"):
                         raise RuntimeError("❌ 所有 API Key 均無權限")
                     hit_rpm = True  # 用新的 Key 重試同一批（只有一個模型時也要重試）
                     continue
@@ -610,6 +709,14 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                     if "failed_precondition" in msg:
                         raise RuntimeError(
                             "❌ FAILED_PRECONDITION：此地區未啟用 Gemini API 免費方案，請啟用付費"
+                        )
+                    if "maxoutputtokens" in msg.replace("_", "").replace(" ", ""):
+                        # maxOutputTokens 超過這個模型的輸出上限：縮小批次無法解決，
+                        # 繼續縮只會把每一批都放棄。直接給出可行動的錯誤。
+                        raise RuntimeError(
+                            f"❌ maxOutputTokens（{budget_cfg.max_output_tokens}）超過模型 "
+                            f"{model_name} 的輸出上限：請調低 lm_translator.max_output_tokens，"
+                            "或設為 0 讓 API 使用模型預設值"
                         )
                     log_info(
                         "[⚠️] 400 INVALID_ARGUMENT：payload 格式錯誤或過大，縮小 batch"
@@ -657,8 +764,9 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                                 f"[🚫] 每日限額已滿 (RPD)：Key Index {key_cycle.current_index} 今日失效"
                             )
                             hit_rpm = True
-                            # ⭐ 所有 key 都已實際嘗試且都用盡才算耗盡
-                            if not key_cycle.mark_failed():
+                            # ⭐ 所有 key 都已實際嘗試且都用盡才算耗盡；
+                            # 另外記住這把 key 已確定耗盡，後續批次不再白打（issue #113）
+                            if not key_cycle.mark_failed(reason="rpd"):
                                 return None, "ALL_KEYS_EXHAUSTED"
                             continue
 
@@ -820,12 +928,31 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
             log_info("[🔁] 使用新 API Key，重新嘗試同一批次")
             hit_rpm = False  # ⭐ 重置旗標，避免無限 continue
             continue
+        # 截斷後學到的 token 預算若讓下一輪的批次變小，直接重試即可，不必再縮項目數上限。
+        # 每輪的批次都嚴格變小，且預算有下限，所以一定會終止；
+        # 預算縮小後批次沒變（例如批次本來就遠小於預算）才走下方既有的項目數縮小流程。
+        if learned_budget:
+            next_fit = select_batch_size(
+                remaining_items,
+                batch_profile,
+                batch_size,
+                lm_cfg,
+                fixed_input_tokens=fixed_input_tokens,
+            )
+            if next_fit < len(current_batch):
+                log_info(
+                    f"[↓] 依學到的 token 預算縮小 Batch：{len(current_batch)} → {next_fit}"
+                )
+                continue
+
         ## 發生錯誤時縮小比例
         BATCH_SHRINK_FACTOR = (
             load_config().get("lm_translator", {}).get("batch_shrink_factor", 0.75)
         )
+        # 以「這一輪實際送出的筆數」為基準縮小（批次可能因 token 預算比上限小）
+        basis = min(batch_size, len(current_batch))
         # 計算新的 Batch Size
-        new_size = int(batch_size * BATCH_SHRINK_FACTOR)
+        new_size = int(basis * BATCH_SHRINK_FACTOR)
         ## 最小錯誤 batch
         MIN_BATCH_SIZE = (
             load_config().get("lm_translator", {}).get("min_batch_size", 50)
@@ -833,12 +960,12 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
 
         # 安全下限檢查
         if is_lang and new_size < 20:  # Lang 檔通常很短，20 是底線
-            new_size = 20 if batch_size > 20 else 0
+            new_size = 20 if basis > 20 else 0
         elif new_size < MIN_BATCH_SIZE:
-            new_size = MIN_BATCH_SIZE if batch_size > MIN_BATCH_SIZE else 0
+            new_size = MIN_BATCH_SIZE if basis > MIN_BATCH_SIZE else 0
 
         # ⭐邏輯：Batch 縮到極限 → 直接放過這批，處理後續
-        if new_size <= 0 or new_size == batch_size:
+        if new_size <= 0 or new_size == basis:
             # 情況 A：如果是因為 RPM (Rate Limit) 或 API 請求失敗而需要重試
             if hit_rpm:
                 try:
@@ -849,7 +976,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                     continue
                 except RuntimeError:
                     log_error(
-                        f"[❌] 致命錯誤：API Key 已全數耗盡，且目前 Batch ({batch_size}) 無法再縮小。"
+                        f"[❌] 致命錯誤：API Key 已全數耗盡，且目前 Batch ({basis}) 無法再縮小。"
                         "將儲存目前進度並結束任務。"
                     )
                     return all_results, "PARTIAL"
@@ -857,7 +984,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
             # 情況 B：如果是因為 JSON 截斷或模型內容過長 (非 RPM 錯誤)
             else:
                 log_warning(
-                    f"[⚠️] Batch Size 已縮至極限 ({batch_size}) 仍持續截斷。"
+                    f"[⚠️] Batch Size 已縮至極限 ({basis}) 仍持續截斷。"
                     "策略：跳過此批（輸出原值），直接處理下一批，避免浪費其他 API Key。"
                 )
 
@@ -868,8 +995,8 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                     {**item, "_untranslated": True} for item in current_batch
                 )
 
-                # 2. 移除指標：讓指標往後跳過這批
-                remaining_items = remaining_items[batch_size:]
+                # 2. 移除指標：讓指標往後跳過這批（依實際送出的筆數）
+                remaining_items = remaining_items[len(current_batch) :]
 
                 # 3. 如果還有剩下的，重置 batch_size
                 if remaining_items:
@@ -881,7 +1008,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                 # 4. 繼續 while 迴圈處理後面的東西
                 continue
 
-        log_info(f"[↓] 調整 Batch：{batch_size} → {new_size}")
+        log_info(f"[↓] 調整 Batch：{basis} → {new_size}")
         batch_size = new_size
 
     return all_results, "AUTO"  # （只有真的要炸掉時才 raise，你現在這行會吃掉正常流程）

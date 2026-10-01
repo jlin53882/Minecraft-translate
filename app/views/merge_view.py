@@ -11,17 +11,18 @@ from typing import Any
 
 import flet as ft
 
+from app import config_store
 from app.services_impl.pipelines.merge_service import (
     run_merge_folder_batch_service,
     run_merge_zip_batch_service,
 )
-from app.task_session import TaskSession
-from app.ui import theme
-from app.ui.components import primary_button, styled_card
+from app.tasks.task_session import TaskSession, tag_session
+from app.ui import kit, theme
 from app.ui.snack import show_snack
+from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView
 from app.views.config.config_actions import load_config_into_view
-from translation_tool.utils.config_manager import load_config, save_config
+from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
 
 
@@ -111,11 +112,8 @@ class MergeView(ft.Column):
     def _on_merge_field_changed(self, key: str, value: Any) -> None:
         """寫入 lang_merger 單一欄位到 config.json，支援兩邊同步。"""
         try:
-            cfg = load_config()
-            if "lang_merger" not in cfg:
-                cfg["lang_merger"] = {}
-            cfg["lang_merger"][key] = value
-            save_config(cfg)
+            # 經由 ConfigStore：只改這一個欄位、受寫入鎖保護、並通知外殼等訂閱者
+            config_store.set_value(f"lang_merger.{key}", value)
             self._broadcast_config_change_to_config_view()
         except Exception:  # noqa: BLE001, S110
             pass
@@ -126,7 +124,7 @@ class MergeView(ft.Column):
         self._page = page
         self.file_picker = file_picker
 
-        self.session = TaskSession(max_logs=2000)
+        self.session = tag_session(TaskSession(max_logs=2000), "語系合併", "merge")
         self._ui_stop = threading.Event()
         self._run_output_dir: str | None = (
             None  # 2026-08-04: snapshot for _open_output_folder
@@ -207,22 +205,18 @@ class MergeView(ft.Column):
             color=theme.ERROR,
             visible=False,
         )
-        self.output_dir_field = ft.TextField(
-            label="輸出資料夾",
-            hint_text="請選擇合併結果輸出位置",
+        self.output_dir_field = kit.text_field(
+            "輸出資料夾",
+            hint="請選擇合併結果輸出位置",
+            icon=ft.Icons.FOLDER_COPY_OUTLINED,
+            mono=True,
             expand=True,
-            dense=True,
-            border_color=theme.OUTLINE,
-            text_size=14,
-            content_padding=14,
-            prefix_icon=ft.Icons.FOLDER_COPY,
         )
 
         self.zip_list_view = ft.ListView(height=160, spacing=4, auto_scroll=False)
-        self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=theme.GREY_200)
-        self.progress_bar = ft.ProgressBar(
-            value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
-        )
+        self.status_chip = ft.Chip(label=ft.Text("尚未開始"))
+        apply_status_style(self.status_chip, "neutral")
+        self.progress_bar = kit.progress_bar(0, "em", height=8)
         # LogView widget 接管 append + UI controls 數量控制（取代 LogPresenter）
         self.log_view = LogView(
             page=self._page,
@@ -230,19 +224,20 @@ class MergeView(ft.Column):
             max_lines=2000,
         )
 
-        self.pick_zip_button = primary_button(
+        self.pick_zip_button = kit.button(
             "新增 ZIP",
+            "secondary",
             icon=ft.Icons.ADD,
             tooltip="選擇要合併的 ZIP 檔案",
             on_click=self.pick_zips,
-            bgcolor=theme.PRIMARY,
         )
-        self.start_button = primary_button(
+        self.start_button = kit.button(
             "開始合併",
+            "primary",
             icon=ft.Icons.PLAY_ARROW,
+            size="lg",
             tooltip="開始執行合併流程",
             on_click=self.start_merge,
-            bgcolor=theme.SUCCESS,
         )
 
         self.input_mode_group = ft.RadioGroup(
@@ -255,14 +250,11 @@ class MergeView(ft.Column):
             ),
             value="folder",
         )
-        self.folder_path_field = ft.TextField(
-            hint_text="選擇 Mod 來源資料夾",
+        self.folder_path_field = kit.text_field(
+            hint="選擇 Mod 來源資料夾",
+            icon=ft.Icons.FOLDER_OUTLINED,
+            mono=True,
             expand=True,
-            dense=True,
-            border_color=theme.OUTLINE,
-            text_size=13,
-            content_padding=10,
-            prefix_icon=ft.Icons.FOLDER,
         )
         self.zip_panel = ft.Container(
             visible=False,
@@ -289,11 +281,10 @@ class MergeView(ft.Column):
             content=ft.Row(
                 [
                     self.folder_path_field,
-                    ft.IconButton(
-                        icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                        icon_color=theme.BLUE_GREY_700,
-                        tooltip="選擇資料夾",
-                        on_click=self.pick_folder_input,
+                    kit.pick_button(
+                        ft.Icons.FOLDER_OPEN_OUTLINED,
+                        "選擇資料夾",
+                        self.pick_folder_input,
                     ),
                 ],
                 spacing=6,
@@ -397,7 +388,7 @@ class MergeView(ft.Column):
                             spacing=4,
                         ),
                         padding=10,
-                        bgcolor=theme.WHITE,
+                        bgcolor=theme.PANEL,
                         border_radius=8,
                     ),
                     ft.Container(
@@ -425,7 +416,7 @@ class MergeView(ft.Column):
                             spacing=4,
                         ),
                         padding=10,
-                        bgcolor=theme.WHITE,
+                        bgcolor=theme.PANEL,
                         border_radius=8,
                     ),
                 ],
@@ -488,7 +479,7 @@ class MergeView(ft.Column):
                             spacing=4,
                         ),
                         padding=10,
-                        bgcolor=theme.WHITE,
+                        bgcolor=theme.PANEL,
                         border_radius=8,
                     ),
                 ],
@@ -535,67 +526,82 @@ class MergeView(ft.Column):
             border_radius=8,
         )
 
+        input_card = kit.section_card(
+            "輸入來源",
+            ft.Column(
+                [
+                    kit.section_label("輸入模式"),
+                    self.input_mode_group,
+                    self.folder_panel,
+                    self.zip_panel,
+                ],
+                spacing=10,
+            ),
+            icon=ft.Icons.DOWNLOAD,
+            tone="dia",
+        )
+        output_card = kit.section_card(
+            "輸出",
+            ft.Column(
+                [
+                    ft.Row(
+                        [
+                            self.output_dir_field,
+                            kit.pick_button(
+                                ft.Icons.FOLDER_OPEN_OUTLINED,
+                                "選擇輸出資料夾",
+                                lambda e: self.pick_output_dir(),
+                            ),
+                        ],
+                        spacing=8,
+                    ),
+                    self.start_button,
+                    ft.Row([self.status_chip], wrap=True),
+                    self.progress_bar,
+                ],
+                spacing=12,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            ),
+            icon=ft.Icons.FOLDER_OPEN,
+            tone="em",
+        )
+        rules_card = kit.section_card(
+            "合併規則",
+            ft.Column(
+                [
+                    general_options_section,
+                    zh_cn_section,
+                    patchouli_section,
+                    extracted_section,
+                ],
+                spacing=12,
+            ),
+            icon=ft.Icons.TUNE,
+            tone="ench",
+        )
+        log_card = kit.section_card(
+            "執行日誌",
+            # LogView widget 自帶深色容器 + 圓角 + 等寬字（從 theme）
+            ft.Container(content=self.log_view, height=280),
+            icon=ft.Icons.TERMINAL,
+            tone="gold",
+        )
+
         self.controls = [
+            kit.page_header(
+                "語系比對合併",
+                "整合 en_us、zh_cn、zh_tw 三種來源，只留下真正需要翻譯的條目，並保留已完成的繁中",
+                icon=ft.Icons.CALL_MERGE,
+                tone="ench",
+            ),
             self._info_container,
-            styled_card(
-                title="輸入來源",
-                icon=ft.Icons.ARCHIVE,
-                content=ft.Column(
-                    [
-                        ft.Text("輸入模式", weight=ft.FontWeight.W_500, size=13),
-                        ft.Container(content=self.input_mode_group, padding=5),
-                        self.folder_panel,
-                        self.zip_panel,
-                    ],
-                    spacing=10,
-                ),
-            ),
-            styled_card(
-                title="輸出與選項",
-                icon=ft.Icons.FOLDER,
-                content=ft.Column(
-                    [
-                        ft.Row(
-                            [
-                                self.output_dir_field,
-                                ft.IconButton(
-                                    icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                                    icon_color=theme.BLUE_GREY_700,
-                                    tooltip="選擇輸出資料夾",
-                                    on_click=lambda e: self.pick_output_dir(),
-                                ),
-                            ],
-                            spacing=6,
-                        ),
-                        general_options_section,
-                        zh_cn_section,
-                        patchouli_section,
-                        extracted_section,
-                    ],
-                    spacing=12,
-                ),
-            ),
-            styled_card(
-                title="執行狀態",
-                icon=ft.Icons.TIMELINE,
-                content=ft.Column(
-                    [
-                        ft.Row([self.status_chip], wrap=True),
-                        self.progress_bar,
-                        self.start_button,
-                    ],
-                    spacing=10,
-                ),
-            ),
-            styled_card(
-                title="執行日誌",
-                icon=ft.Icons.RECEIPT_LONG,
-                # LogView widget 自帶深色容器 + 圓角 + 等寬字（從 theme）
-                # 用 height=280 保留原本的高度限制
-                content=ft.Container(
-                    content=self.log_view,
-                    height=280,
-                ),
+            ft.Row(
+                [
+                    ft.Column([input_card, output_card], spacing=16, expand=5),
+                    ft.Column([rules_card, log_card], spacing=16, expand=7),
+                ],
+                spacing=16,
+                vertical_alignment=ft.CrossAxisAlignment.START,
             ),
         ]
 
@@ -825,10 +831,9 @@ class MergeView(ft.Column):
 
         threading.Thread(target=poll, daemon=True).start()
 
-    def _set_status(self, text: str, color: str) -> None:
-        """更新狀態晶片顯示。2026-08-04: 加 page.update() 確保 UI 即時反映。"""
-        self.status_chip.label = ft.Text(text)
-        self.status_chip.bgcolor = color
+    def _set_status(self, text: str, tone="neutral") -> None:
+        """更新狀態晶片（``tone`` 為色組名稱，也接受舊背景色）。"""
+        set_chip_status(self.status_chip, text, tone)
         self.page.update()
 
     def _show_merge_summary(self, summary: dict[str, Any]) -> None:
@@ -892,12 +897,12 @@ class MergeView(ft.Column):
                     ft.Text(
                         f"├─ {name}",
                         size=13,
-                        color=ft.Colors.ORANGE_700,
+                        color=theme.ORANGE_700,
                     )
                 )
                 if len(err) > 80:
                     err = err[:80] + "..."
-                failed_rows.append(ft.Text(f"│  └─ {err}", size=12, color="#cccccc"))
+                failed_rows.append(ft.Text(f"│  └─ {err}", size=12, color=theme.MUTED))
             failed_block = [
                 ft.Divider(),
                 ft.Text(f"📋 處理失敗的 {unit}", size=14, weight=ft.FontWeight.BOLD),
@@ -932,7 +937,7 @@ class MergeView(ft.Column):
                 *output_block,
                 *failed_block,
                 ft.Divider(),
-                ft.Text("詳見上方日誌", size=12, color="#aaaaaa"),
+                ft.Text("詳見上方日誌", size=12, color=theme.DIM),
             ],
             spacing=10,
             tight=True,

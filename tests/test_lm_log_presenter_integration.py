@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import flet as ft
 
-from app.logging.task_session import TaskSession
-from app.logging.log_entry import LogEntry
+from app.tasks.log_entry import LogEntry
+from app.tasks.task_session import TaskSession
 
 
 class MockListView:
@@ -33,7 +33,7 @@ class TestLmPresenterTailMode:
 
     def test_tail_mode_respects_tail_lines(self):
         """tail_lines=5 時，sync 後 controls 應只含最後 5 筆。"""
-        from app.logging.log_presenter import LogPresenter
+        from app.views._log.log_presenter import LogPresenter
 
         presenter = LogPresenter(
             mode="tail",
@@ -54,7 +54,7 @@ class TestLmPresenterTailMode:
 
     def test_sync_with_log_entry_list_renders_text(self):
         """sync() 吃 list[LogEntry]，rendered Text 的 value 應為 entry.text。"""
-        from app.logging.log_presenter import LogPresenter
+        from app.views._log.log_presenter import LogPresenter
 
         presenter = LogPresenter(
             mode="tail",
@@ -74,7 +74,7 @@ class TestLmPresenterTailMode:
 
     def test_tail_mode_replaces_all_controls_each_sync(self):
         """tail mode 每次 sync 全量替換 controls。"""
-        from app.logging.log_presenter import LogPresenter
+        from app.views._log.log_presenter import LogPresenter
 
         presenter = LogPresenter(
             mode="tail",
@@ -105,7 +105,7 @@ class TestLmPresenterTailMode:
 
     def test_colorize_false_uses_default_color(self):
         """colorize=False 時，所有 Text.control.color 應為 default_color。"""
-        from app.logging.log_presenter import LogPresenter
+        from app.views._log.log_presenter import LogPresenter
 
         presenter = LogPresenter(
             mode="tail",
@@ -128,7 +128,7 @@ class TestLmPresenterWithSessionSnapshot:
 
     def test_snapshot_log_entry_integrates_with_presenter(self):
         """TaskSession.snapshot()['logs'] 為 list[LogEntry]，能正確傳入 presenter.sync()。"""
-        from app.logging.log_presenter import LogPresenter
+        from app.views._log.log_presenter import LogPresenter
 
         session = TaskSession(max_logs=100)
         # 寫入不同 level / source 的 entries

@@ -7,9 +7,9 @@
 
 import zipfile
 
-from app.logging.task_session import TaskSession
 from app.services_impl.pipelines import extract_service
 from app.services_impl.pipelines.extract_service import _run_extraction_with_session
+from app.tasks.task_session import TaskSession
 
 
 def _final(failures, **extra):

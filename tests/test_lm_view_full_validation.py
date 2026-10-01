@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 import flet as ft
 
-from app.logging import LogEntry
+from app.tasks import LogEntry
+from app.ui.design import tone as get_tone
 from app.ui.snack import show_snack
 from app.views import lm_view
 from app.views._log import LogView
@@ -125,9 +126,7 @@ def test_start_clicked_without_input_sets_error_status(monkeypatch):
 
     # 狀態晶片應顯示錯誤訊息
     assert view.status_chip.label.value == "請先選擇輸入資料夾"
-    assert (
-        "red" in view.status_chip.bgcolor.lower() or "RED" in view.status_chip.bgcolor
-    )
+    assert view.status_chip.bgcolor == get_tone("red").bg
 
 
 # ============================================================
@@ -310,10 +309,13 @@ def test_set_status_updates_chip_label_and_color(monkeypatch):
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     view = lm_view.LMView(mock_page(), mock_filepicker())
 
-    view._set_status("執行中", lm_view.theme.BLUE_200)
+    view._set_status("執行中", "dia")
 
     assert view.status_chip.label.value == "執行中"
-    assert view.status_chip.bgcolor == lm_view.theme.BLUE_200
+    assert view.status_chip.bgcolor == get_tone("dia").bg
+    # 相容舊呼叫端：傳舊的背景色也會轉成對應色組
+    view._set_status("完成", lm_view.theme.GREEN_200)
+    assert view.status_chip.bgcolor == get_tone("em").bg
 
 
 # ============================================================
@@ -322,20 +324,53 @@ def test_set_status_updates_chip_label_and_color(monkeypatch):
 
 
 def test_controls_contains_all_sections(monkeypatch):
-    """驗證 LMView 版面：路徑設定 / （翻譯選項 + 執行狀態 並排）/ 執行日誌。
-
-    Task 10 / C3：選項與狀態並排，讓日誌在 1280×900 下有足夠高度。
-    """
+    """驗證 LMView 版面：頁首（含開始 / 取消）+ 左側設定 / 右側統計、狀態、日誌。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     view = lm_view.LMView(mock_page(), mock_filepicker())
 
-    assert len(view.controls) == 3
-    path_card, options_row, log_card = view.controls
-    assert isinstance(path_card, ft.Container)
-    assert isinstance(options_row, ft.ResponsiveRow)
-    assert len(options_row.controls) == 2  # 翻譯選項、執行狀態
-    assert isinstance(log_card, ft.Container)
-    assert log_card.expand
+    assert len(view.controls) == 2
+    header, body = view.controls
+    assert isinstance(header, ft.Row) and isinstance(body, ft.Row)
+    nodes = list(_walk(view))
+    for control in (
+        view.input_path,
+        view.output_path,
+        view.dry_run_switch,
+        view.start_button,
+        view.cancel_button,
+        view.progress_bar,
+        view.log_view,
+        view.stat_progress,
+        view.stat_keys,
+    ):
+        assert control in nodes
+
+
+def test_elapsed_format():
+    assert lm_view.format_elapsed(0) == "00:00"
+    assert lm_view.format_elapsed(65) == "01:05"
+    assert lm_view.format_elapsed(3725) == "1:02:05"
+    assert lm_view.format_elapsed(-5) == "00:00"
+
+
+def test_stats_follow_session_progress(monkeypatch):
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view._started_at = lm_view.time.monotonic() - 125
+    view._update_stats(0.42)
+    assert view.stat_progress.value_text.value == "42%"
+    assert view.stat_elapsed.value_text.value == "02:05"
+
+
+def _walk(control):
+    yield control
+    for attr in ("controls", "content"):
+        child = getattr(control, attr, None)
+        if isinstance(child, list):
+            for c in child:
+                yield from _walk(c)
+        elif child is not None and not isinstance(child, str):
+            yield from _walk(child)
 
 
 # ============================================================
@@ -362,31 +397,23 @@ def test_log_presenter_initialized_with_tail_mode(monkeypatch):
 
 
 def test_folder_open_buttons_have_on_click(monkeypatch):
-    """驗證路徑欄位旁邊的資料夾按鈕有設定 on_click。
-
-    styled_card 結構：
-    - controls[0] = section_header（ft.Row: icon + text）
-    - controls[1] = ft.Divider
-    - controls[2] = ft.Container(content=ft.Column)
-    → Column.controls[0] = 第一列路徑（input_path + icon_button）
-    → Column.controls[1] = 第二列路徑（output_path + icon_button）
-    """
+    """驗證路徑欄位旁邊的資料夾按鈕有設定 on_click。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     page = mock_page()
     view = lm_view.LMView(page, mock_filepicker())
 
-    path_card = view.controls[0]
-    # controls[2] = content_container (ft.Container wrapping the Column)
-    content_container = path_card.content.controls[2]
-    # content_container.content = ft.Column([path_row_1, path_row_2])
-    path_row = content_container.content.controls[0]  # 第一列：input_path + icon button
-
-    icon_button = path_row.controls[1]
-    assert isinstance(icon_button, ft.IconButton), (
-        f"第二個元件應為 IconButton，實際: {type(icon_button)}"
-    )
-    assert icon_button.on_click is not None, "IconButton 應有 on_click handler"
-    assert callable(icon_button.on_click), "on_click 應為可呼叫物件"
+    for field, handler in (
+        (view.input_path, view.pick_input_directory),
+        (view.output_path, view.pick_output_directory),
+    ):
+        row = next(
+            n
+            for n in _walk(view)
+            if isinstance(n, ft.Row) and field in (n.controls or [])
+        )
+        icon_button = row.controls[1]
+        assert isinstance(icon_button, ft.IconButton)
+        assert callable(icon_button.on_click)
 
 
 # ============================================================
@@ -529,7 +556,7 @@ def test_start_clicked_ignored_while_running(monkeypatch):
 
 def test_cancel_clicked_requests_session_cancel(monkeypatch):
     """按「取消」會要求 session 取消（翻譯迴圈在批次之間停止）。"""
-    from app.logging.task_session import TaskSession
+    from app.tasks.task_session import TaskSession
 
     monkeypatch.setattr(
         lm_view.threading,

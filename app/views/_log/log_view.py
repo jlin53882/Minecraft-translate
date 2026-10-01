@@ -26,11 +26,11 @@ from typing import Literal
 
 import flet as ft
 
-from app.ui import theme
+from app.tasks.log_entry import LogEntry
+from app.tasks.task_session import TaskSession
+from app.ui import design, theme
 
-from .log_entry import LogEntry
 from .log_presenter import LogPresenter
-from .task_session import TaskSession
 
 _LEVEL_COLORS = {
     "error": theme.TEXT_LOG_ERROR,
@@ -62,10 +62,10 @@ class LogView(ft.Container):
     """
 
     # 視覺常數（從 theme 來，集中在這裡）
-    DEFAULT_RADIUS = 8
-    DEFAULT_PADDING = 10
+    DEFAULT_RADIUS = 12
+    DEFAULT_PADDING = 12
     DEFAULT_SPACING = 4
-    DEFAULT_FONT = "Consolas,Monospace"
+    DEFAULT_FONT = design.FONT_MONO
     DEFAULT_TEXT_SIZE = 12
 
     def __init__(

@@ -16,6 +16,10 @@ from typing import Any
 
 import orjson as json
 
+from translation_tool.core.lm_batch_budget import (
+    profile_for_cache_type,
+    select_batch_size,
+)
 from translation_tool.core.lm_config_rules import (
     validate_api_keys,
     value_fully_translated,
@@ -638,7 +642,15 @@ def translate_directory_generator(
         batch_size = (
             INITIAL_BATCH_SIZE_LANG if is_lang else INITIAL_BATCH_SIZE_PATCHOULI
         )
-        batch = remaining[:batch_size]
+        # 項目數上限之外，再依 token 預算取前綴（與共用迴圈、lm_translator_main 共用同一份預算）
+        batch = remaining[
+            : select_batch_size(
+                remaining,
+                profile_for_cache_type(remaining[0]["cache_type"]),
+                batch_size,
+                load_config().get("lm_translator", {}),
+            )
+        ]
 
         # ⭐ 1. 接收 status (原本是 _, 現在改為 status)
         try:

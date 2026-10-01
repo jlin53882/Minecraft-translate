@@ -1,0 +1,539 @@
+"""app/shell/app_shell.py：App 外殼的組裝與導覽。
+
+把側欄、頂列、狀態列、快速跳轉、鍵盤快捷鍵與 ``TaskManager`` 接起來，並負責切頁。
+``main.py`` 只剩 runtime 初始化與 ``AppShell(page).mount()``。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import threading
+import time
+from collections.abc import Callable
+
+import flet as ft
+
+from app import config_store
+from app.shell.palette import (
+    KIND_ACTION,
+    PaletteItem,
+    close_palette,
+    current_palette,
+    page_items,
+    show_palette,
+)
+from app.shell.sidebar import SIDEBAR_WIDTH_COMPACT, Sidebar
+from app.shell.statusbar import StatusBar
+from app.shell.task_manager import TaskInfo, TaskManager
+from app.shell.topbar import TopBar
+from app.ui import design, theme
+from app.ui.keyboard_shortcuts import create_keyboard_handler
+from app.view_registry import (
+    DEFAULT_VIEW_KEY,
+    MIN_WINDOW_SIZE,
+    SPECS_BY_KEY,
+    build_view_registry,
+    get_group,
+    get_window_size,
+    index_of,
+)
+
+logger = logging.getLogger("main_app")
+
+APP_TITLE = "MC 繁化工坊"
+COMPACT_BELOW_WIDTH = 1180  # 視窗比這個窄時，側欄收成只剩圖示
+REFRESH_INTERVAL_SEC = 0.25  # 任務事件的 UI 更新節流
+KEY_REFRESH_SEC = 5.0  # API Key 健康度輪詢間隔
+
+# 時鐘與 sleep 抽成模組層級名稱，測試可以換成假的（不必真的等）
+_monotonic = time.monotonic
+_async_sleep = asyncio.sleep
+
+# 這些頁面建立後，需要拿到 registry 才能互相切頁 / 通知
+_REGISTRY_SETTERS = ("set_registry", "set_view_registry")
+# 需要拿到外殼（導覽 / 任務事件）的頁面
+_SHELL_SETTERS = ("set_shell",)
+
+
+def read_app_version() -> str:
+    """從 pyproject.toml 讀版本號；讀不到就回傳空字串（狀態列不顯示）。"""
+    try:
+        import tomllib
+        from pathlib import Path
+
+        data = tomllib.loads(
+            (Path(__file__).resolve().parents[2] / "pyproject.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        return str(data.get("project", {}).get("version", ""))
+    except Exception:  # noqa: BLE001 - 版本只是裝飾，讀不到不影響啟動
+        return ""
+
+
+class AppShell:
+    """組裝整個 App 外殼。
+
+    ``key_snapshot`` 與 ``config_loader`` 可注入，方便測試（預設讀真實設定）。
+
+    **執行緒與生命週期契約（Flet 1.0 是單執行緒 async UI 模型）**
+
+    - ``TaskManager`` 與 ``config_store`` 的訂閱者可能在任何執行緒被呼叫。AppShell 的訂閱者
+      只負責「排程」：透過 ``page.run_task`` 把 UI 更新排到 page 的 event loop 上，並在那裡
+      合併（coalesce）與節流；絕不在 callback 所在的執行緒直接改 Control 或呼叫 ``page.update()``。
+    - mount 時註冊的全域資源（TaskSession observer、TaskManager / config 訂閱、Key 輪詢、
+      待執行的更新工作）都由 :meth:`dispose` 統一移除；``page.on_close``（session 結束）會呼叫它。
+      不綁 ``on_disconnect``：web client 可能只是暫時斷線，之後會重連。
+    """
+
+    def __init__(
+        self,
+        page: ft.Page,
+        *,
+        file_picker: ft.FilePicker | None = None,
+        key_snapshot: Callable[[], list] | None = None,
+        config_loader: Callable[[], dict] | None = None,
+        task_manager: TaskManager | None = None,
+        initial_mode: str | None = None,
+        mode_saver: Callable[[str], object] | None = None,
+        subscribe_config: Callable[[Callable[[], None]], Callable[[], None]]
+        | None = None,
+    ) -> None:
+        self.page = page
+        self.file_picker = file_picker or ft.FilePicker()
+        self._key_snapshot = key_snapshot or _default_key_snapshot
+        self._config_loader = config_loader or _default_config_loader
+        self.tasks = task_manager or TaskManager()
+        if initial_mode is None:
+            initial_mode = _default_mode()
+        self.mode = initial_mode
+        self._mode_saver = mode_saver or config_store.set_theme_mode
+        self._subscribe_config = subscribe_config or config_store.subscribe
+        self._unsubscribe_config: Callable[[], None] | None = None
+        self._unsubscribe_tasks: Callable[[], None] | None = None
+        self.current_key: str | None = None
+        self._last_refresh = 0.0
+        self._unread = False
+        self._seen_recent: set[int] = set()
+
+        # UI 排程狀態：訂閱者可能在任何執行緒進來，所以用小鎖保護（鎖內不呼叫 Flet、不 await）
+        self._sched_lock = threading.Lock()
+        self._disposed = False
+        self._refresh_scheduled = False
+        self._env_scheduled = False
+        self._refresh_future = None
+        self._env_future = None
+        self._poll_future = None
+        self._page_on_close = None
+        self._previous_on_close = None
+
+        design.apply(page, initial_mode)
+        theme.manager.set_mode(initial_mode)
+
+        self.registry = build_view_registry(page, self.file_picker)
+        for item in self.registry:
+            item.on_build(self._wire_registry)
+
+        self.sidebar = Sidebar(
+            on_select=self.navigate,
+            on_search=self.open_palette,
+            on_theme=self.set_mode,
+            mode=initial_mode,
+        )
+        self.topbar = TopBar(
+            on_task_click=self._open_task_view,
+            on_api_click=lambda: self.navigate("config"),
+            on_recent_click=self._open_task_view,
+        )
+        self.statusbar = StatusBar(version=read_app_version())
+        self.content_area = ft.Container(expand=True)
+
+        self.keyboard = create_keyboard_handler(
+            page, self.registry, self.navigate_index
+        )
+        self.keyboard.set_search_callback(lambda _e=None: self.open_palette())
+        self.keyboard.set_current_view_getter(lambda: self.content_area.content)
+        self.keyboard.set_palette_getter(lambda: current_palette(page))
+
+    # -- 組裝 ----------------------------------------------------------------
+
+    def build(self) -> ft.Control:
+        """外殼的整體版面（側欄 | 頂列 / 內容 / 狀態列）。"""
+        return ft.Row(
+            [
+                self.sidebar,
+                ft.Column(
+                    [self.topbar, self.content_area, self.statusbar],
+                    spacing=0,
+                    expand=True,
+                ),
+            ],
+            spacing=0,
+            expand=True,
+        )
+
+    def mount(self, start_view: str = DEFAULT_VIEW_KEY) -> None:
+        """設定視窗、掛上版面、開始接收任務事件並顯示首頁。"""
+        page = self.page
+        page.title = APP_TITLE
+        width, height = get_window_size()
+        try:
+            page.window.width = width
+            page.window.height = height
+            page.window.min_width, page.window.min_height = MIN_WINDOW_SIZE
+        except Exception:
+            logger.debug("無法設定視窗大小", exc_info=True)
+        page.padding = 0
+        # 合併而非覆蓋：避免洗掉呼叫端（例如開發截圖環境）已註冊的字型
+        page.fonts = {
+            **(getattr(page, "fonts", None) or {}),
+            design.FONT_MONO: "fonts/JetBrainsMono-Regular.ttf",
+        }
+        page.on_keyboard_event = self.keyboard.handle_keyboard
+        page.on_resize = self._on_resize
+        self._bind_page_close()
+
+        self.tasks.attach()
+        self._unsubscribe_tasks = self.tasks.subscribe(self._schedule_task_refresh)
+        # 設定頁（或任何地方）存檔後，API Key 狀態 / 模型 / 資料夾要立刻更新
+        self._unsubscribe_config = self._subscribe_config(self._on_config_saved)
+        self.refresh_environment()
+
+        page.add(self.build())
+        self.navigate(start_view)
+        self._schedule_key_poll()
+
+    # -- 導覽 ----------------------------------------------------------------
+
+    def navigate(self, view_key: str) -> None:
+        """切到指定頁面（key 不存在時記錄警告並忽略）。"""
+        index = index_of(self.registry, view_key)
+        if index < 0:
+            logger.warning("未知的頁面：%s", view_key)
+            return
+        self.navigate_index(index)
+
+    def navigate_index(self, index: int) -> None:
+        if not 0 <= index < len(self.registry):
+            return
+        item = self.registry[index]
+        key = item["key"]
+        spec = SPECS_BY_KEY[key]
+        self.content_area.content = item["view"]
+        self.current_key = key
+        self.sidebar.set_selected(key)
+        group = get_group(spec.group)
+        self.topbar.set_breadcrumb(
+            None if spec.group == "system" else group.label, spec.label
+        )
+        self.page.title = f"{APP_TITLE} — {spec.label}"
+        self._safe_update()
+
+    def _open_task_view(self, view_key: str | None) -> None:
+        if view_key:
+            self.navigate(view_key)
+
+    def _wire_registry(self, view) -> None:
+        """頁面第一次建立後，把 registry 交給需要它的頁面。"""
+        inner = getattr(view, "content", view)
+        for name in _REGISTRY_SETTERS:
+            setter = getattr(inner, name, None)
+            if callable(setter):
+                setter(self.registry)
+        for name in _SHELL_SETTERS:
+            setter = getattr(inner, name, None)
+            if callable(setter):
+                setter(self)
+
+    # -- 主題 ----------------------------------------------------------------
+
+    def set_mode(self, mode: str, *, persist: bool = True) -> None:
+        """切換深 / 淺色，並（預設）記住使用者的選擇。"""
+        mode = "dark" if mode == "dark" else "light"
+        changed = mode != self.mode
+        self.mode = mode
+        self.page.theme_mode = design.THEME_MODES[mode]
+        theme.manager.set_mode(mode)
+        self.sidebar.set_mode(mode)
+        self._safe_update()
+        if persist and changed:
+            try:
+                self._mode_saver(mode)
+            except Exception:
+                logger.warning("無法記住主題偏好", exc_info=True)
+
+    def toggle_mode(self) -> None:
+        self.set_mode(design.toggled_mode(self.page))
+
+    # -- 快速跳轉 -------------------------------------------------------------
+
+    def palette_items(self) -> list[PaletteItem]:
+        actions = [
+            PaletteItem(
+                id="action:theme",
+                label="切換深色 / 淺色主題",
+                kind=KIND_ACTION,
+                sub="外觀",
+                icon=ft.Icons.CONTRAST,
+                keywords=("theme", "dark", "light", "主題", "外觀"),
+                run=self.toggle_mode,
+            ),
+            PaletteItem(
+                id="action:api",
+                label="檢查 API Key 狀態",
+                kind=KIND_ACTION,
+                sub="前往設定",
+                icon=ft.Icons.KEY,
+                keywords=("key", "api", "gemini", "額度"),
+                run=lambda: self.navigate("config"),
+            ),
+        ]
+        return [*page_items(self.navigate), *actions]
+
+    def open_palette(self) -> None:
+        show_palette(self.page, self.palette_items())
+
+    def close_palette(self) -> None:
+        close_palette(self.page)
+
+    # -- 全域狀態（任務 / API / 狀態列）------------------------------------------
+
+    def refresh_environment(self) -> None:
+        """讀設定與 Key 狀態，更新頂列 / 狀態列。"""
+        self.refresh_keys()
+        try:
+            config = self._config_loader() or {}
+        except Exception:
+            logger.warning("外殼讀取設定失敗", exc_info=True)
+            config = {}
+        self.statusbar.set_model(_enabled_model_name(config))
+        self.statusbar.set_workdir(_cache_dir_of(config))
+
+    def _on_config_saved(self) -> None:
+        """設定存檔後（可能在任何執行緒）：只排程，真正的更新在 page event loop 上做。"""
+        with self._sched_lock:
+            if self._disposed or self._env_scheduled:
+                return
+            self._env_scheduled = True
+        ok, future = self._submit_ui(self._apply_config_refresh)
+        with self._sched_lock:
+            if not ok:
+                self._env_scheduled = False
+            else:
+                self._env_future = future
+
+    async def _apply_config_refresh(self) -> None:
+        with self._sched_lock:
+            self._env_scheduled = False
+            if self._disposed:
+                return
+        self.refresh_environment()
+        self._safe_update()
+
+    def refresh_keys(self) -> None:
+        try:
+            snapshot = self._key_snapshot()
+        except Exception:
+            logger.debug("讀取 Key 狀態失敗", exc_info=True)
+            snapshot = []
+        self.topbar.set_keys(snapshot)
+
+    def refresh_tasks(self) -> None:
+        """依 TaskManager 更新任務膠囊、側欄徽章、狀態列與通知。"""
+        current = self.tasks.current()
+        self.topbar.set_task(current)
+        running_views = {t.view_key for t in self.tasks.active() if t.view_key}
+        for key in self.sidebar.items:
+            self.sidebar.set_badge(key, "•" if key in running_views else None, "gold")
+        if current is not None:
+            self.statusbar.set_status(f"執行中：{current.name}", "gold")
+        else:
+            recent = self.tasks.recent(1)
+            failed = bool(recent) and recent[0].status == "error"
+            self.statusbar.set_status(
+                "上次任務失敗" if failed else "就緒", "red" if failed else "em"
+            )
+        recent_tasks = self.tasks.recent()
+        fresh = {t.id for t in recent_tasks} - self._seen_recent
+        if fresh and self.current_key is not None:
+            self._unread = True
+        self._seen_recent |= fresh
+        self.topbar.set_recent(recent_tasks, unread=self._unread)
+
+    def mark_notifications_read(self) -> None:
+        self._unread = False
+        self.topbar.set_recent(self.tasks.recent(), unread=False)
+
+    def _schedule_task_refresh(self) -> None:
+        """任務事件（可能在任何執行緒、而且很密集）：合併成 page event loop 上的一個更新工作。
+
+        已經有排程中的更新工作時直接返回（它執行時會讀到最新狀態），所以大量 progress 事件
+        只會排一個工作；工作本身會依 ``REFRESH_INTERVAL_SEC`` 節流。
+        """
+        with self._sched_lock:
+            if self._disposed or self._refresh_scheduled:
+                return
+            self._refresh_scheduled = True
+        ok, future = self._submit_ui(self._coalesced_refresh)
+        with self._sched_lock:
+            if not ok:
+                self._refresh_scheduled = False
+            else:
+                self._refresh_future = future
+
+    async def _coalesced_refresh(self) -> None:
+        wait = REFRESH_INTERVAL_SEC - (_monotonic() - self._last_refresh)
+        if wait > 0:
+            await _async_sleep(wait)
+        with self._sched_lock:
+            self._refresh_scheduled = False  # 這之後的新事件會排新的工作
+            if self._disposed:
+                return
+        self._last_refresh = _monotonic()
+        self.refresh_tasks()
+        self._safe_update()
+
+    def _submit_ui(self, handler):
+        """把 coroutine function 排到 page 的 event loop，回傳 ``(是否排成功, Future)``。
+
+        失敗（例如 Page 已關閉）回傳 ``(False, None)``；成功時的 Future 留著給 dispose 取消。
+        """
+        try:
+            return True, self.page.run_task(handler)
+        except Exception:
+            logger.debug("無法排程 UI 更新", exc_info=True)
+            return False, None
+
+    def _schedule_key_poll(self) -> None:
+        """每隔幾秒更新一次 API Key 健康度（冷卻到期 / 額度用盡都會變）。"""
+        _ok, self._poll_future = self._submit_ui(self._poll_keys)
+
+    async def _poll_keys(self) -> None:
+        while not self._disposed:
+            await _async_sleep(KEY_REFRESH_SEC)
+            if self._disposed:
+                break
+            self.refresh_keys()
+            self._safe_update()
+
+    # -- 生命週期 ------------------------------------------------------------
+
+    def _bind_page_close(self) -> None:
+        """session 結束（``page.on_close``）時 teardown；保留原本已掛的 handler。
+
+        刻意不用 ``on_disconnect``：web client 暫時斷線後會重連，不能因此做不可逆的 teardown。
+        """
+        page = self.page
+        previous = getattr(page, "on_close", None)
+        self._previous_on_close = previous
+
+        def on_close(event=None) -> None:
+            try:
+                self.dispose()
+            finally:
+                if previous is not None:
+                    previous(event)
+
+        self._page_on_close = on_close
+        try:
+            page.on_close = on_close
+        except Exception:
+            logger.debug("無法掛上 page.on_close", exc_info=True)
+
+    def dispose(self) -> None:
+        """移除 mount 時註冊的全域資源（冪等）。
+
+        - TaskSession 全域 observer（``TaskManager.detach``）與 TaskManager / config 訂閱
+        - Key 輪詢與待執行的更新工作（取消 Future；晚到的 callback 看到 ``_disposed`` 就不更新 UI）
+        - 還掛著我們自己的 page 事件 handler
+        """
+        with self._sched_lock:
+            if self._disposed:
+                return
+            self._disposed = True
+            futures = [self._refresh_future, self._env_future, self._poll_future]
+            self._refresh_future = self._env_future = self._poll_future = None
+            unsubscribers = [self._unsubscribe_tasks, self._unsubscribe_config]
+            self._unsubscribe_tasks = self._unsubscribe_config = None
+        for unsubscribe in unsubscribers:
+            if unsubscribe is not None:
+                try:
+                    unsubscribe()
+                except Exception:
+                    logger.debug("取消訂閱失敗", exc_info=True)
+        self.tasks.detach()
+        for future in futures:
+            if future is not None:
+                try:
+                    future.cancel()
+                except Exception:
+                    logger.debug("取消排程工作失敗", exc_info=True)
+        page = self.page
+        try:
+            if page.on_keyboard_event == self.keyboard.handle_keyboard:
+                page.on_keyboard_event = None
+            if page.on_resize == self._on_resize:
+                page.on_resize = None
+            if getattr(page, "on_close", None) is self._page_on_close:
+                page.on_close = self._previous_on_close
+        except Exception:
+            logger.debug("還原 page handler 失敗", exc_info=True)
+
+    # -- 視窗 ----------------------------------------------------------------
+
+    def _on_resize(self, _e=None) -> None:
+        try:
+            width = self.page.width or self.page.window.width or 0
+        except Exception:  # noqa: BLE001
+            return
+        compact = 0 < width < COMPACT_BELOW_WIDTH
+        if compact != self.sidebar.compact:
+            self.sidebar.set_compact(compact)
+            self._safe_update()
+
+    def _safe_update(self) -> None:
+        try:
+            self.page.update()
+        except Exception:
+            logger.debug("page.update 失敗", exc_info=True)
+
+
+# -- 設定 / Key 的預設來源 -------------------------------------------------------
+
+
+def _default_mode() -> str:
+    try:
+        return config_store.get_theme_mode()
+    except Exception:  # noqa: BLE001 - 設定壞掉時用預設深色
+        return config_store.DEFAULT_THEME_MODE
+
+
+def _default_key_snapshot() -> list:
+    from translation_tool.core.lm_config_rules import get_key_health_snapshot
+
+    return get_key_health_snapshot()
+
+
+def _default_config_loader() -> dict:
+    from translation_tool.utils.config_manager import load_config
+
+    return load_config()
+
+
+def _enabled_model_name(config: dict) -> str | None:
+    """設定中第一個啟用的模型名稱。"""
+    models = (config.get("lm_translator") or {}).get("models") or {}
+    for name, cfg in models.items():
+        if isinstance(cfg, dict) and cfg.get("enabled"):
+            return str(name)
+    return None
+
+
+def _cache_dir_of(config: dict) -> str | None:
+    """狀態列顯示用的快取資料夾（設定沒有就不顯示）。"""
+    value = (config.get("translator") or {}).get("cache_directory")
+    return str(value) if value else None
+
+
+__all__ = ["SIDEBAR_WIDTH_COMPACT", "AppShell", "TaskInfo", "read_app_version"]

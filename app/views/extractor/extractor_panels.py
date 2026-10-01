@@ -23,41 +23,27 @@ Settings（左欄）：
 
 import flet as ft
 
-from app.ui import theme
-from app.ui.components import styled_card
-from app.views._log import LogView
+from app.ui import design, kit
+from app.ui.design import C
 
 
-
-def _build_path_row(view, icon, label, field, pick_target) -> ft.Container:
-    """路徑輸入列：前綴圖示 + TextField + 選擇按鈕。
+def _build_path_row(view, icon, label, field, pick_target) -> ft.Control:
+    """路徑輸入列：小標籤 + TextField + 選擇按鈕。
 
     參數：
         view: ExtractorView 實例
-        icon: Flet 圖示（如 ft.Icons.DNS）
+        icon: 標籤前的圖示（保留參數；新版只用文字小標籤）
         label: 輸入框標籤文字
         field: TextField 控制項
         pick_target: 點擊按鈕後填入路徑的 TextField
-
-    Returns:
-        ft.Container 包裝的路徑輸入列
     """
     return ft.Column(
-        spacing=4,
+        spacing=6,
         controls=[
+            kit.section_label(label),
             ft.Row(
-                controls=[
-                    ft.Icon(icon, size=14, color=ft.Colors.BLUE_GREY),
-                    ft.Text(label, size=12, weight=ft.FontWeight.W_500, color=theme.GREY_700),
-                ],
-                spacing=6,
-            ),
-            ft.Row(
-                controls=[
-                    ft.Container(content=field, expand=True),
-                    _build_pick_button(view, pick_target),
-                ],
-                spacing=6,
+                controls=[field, _build_pick_button(view, pick_target)],
+                spacing=8,
             ),
         ],
     )
@@ -69,125 +55,128 @@ def _build_pick_button(view, target):
     參數：
         view: ExtractorView 實例
         target: 選擇目錄後填入路徑的 TextField
-
-    Returns:
-        ft.IconButton 按鈕
     """
-    return ft.IconButton(
-        icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-        icon_color=ft.Colors.BLUE_GREY_700,
-        tooltip='瀏覽...',
-        on_click=lambda e: view.pick_directory(target),
+    return kit.pick_button(
+        ft.Icons.FOLDER_OPEN_OUTLINED,
+        "瀏覽...",
+        lambda e: view.pick_directory(target),
     )
 
 
-def _build_action_zone(
-    view,
-    extract_row: list[ft.Control],
-    preview_row: list[ft.Control],
+def _mode_card(
+    title: str, desc: str, icon: str, tone: str, extract_button, preview_button
 ) -> ft.Container:
-    """動作區卡片：包含「執行」與「預覽」兩組按鈕列，以及跳過開關。
-
-    參數：
-        view：ExtractorView 實例（需具備 skip_zh_cn_switch 屬性）。
-        extract_row：執行按鈕列（Lang / Book / Dual Extract）。
-        preview_row：預覽按鈕列（Lang / Book / Dual Preview）。
-
-    回傳：
-        ft.Container 包裝的動作區卡片，含灰白邊框與半透明背景。
-    """
-    extract_label = ft.Row(
-        controls=[
-            ft.Icon(ft.Icons.PLAY_ARROW, size=14, color=theme.BLUE_700),
-            ft.Text("執行", size=11, weight=ft.FontWeight.BOLD, color=theme.GREY_600),
-        ],
-        spacing=4,
-    )
-    preview_label = ft.Row(
-        controls=[
-            ft.Icon(ft.Icons.PREVIEW, size=14, color=ft.Colors.AMBER_600),
-            ft.Text("預覽", size=11, weight=ft.FontWeight.BOLD, color=theme.GREY_600),
-        ],
-        spacing=4,
-    )
-
+    """一種提取模式的卡片：圖示 + 說明 + 「提取」「預覽」兩顆按鈕。"""
     return ft.Container(
+        expand=1,
+        padding=16,
+        bgcolor=C.PANEL,
+        border=ft.Border.all(1, C.LINE),
+        border_radius=design.RADIUS_CARD,
         content=ft.Column(
-            spacing=8,
-            controls=[
-                extract_label,
-                ft.Row(extract_row, spacing=10),
-                ft.Container(height=2),
-                preview_label,
-                ft.Row(preview_row, spacing=10),
+            [
+                ft.Row([kit.tone_icon(icon, tone, size=20, box=40, radius=11)]),
+                ft.Text(title, size=15, weight=ft.FontWeight.BOLD, color=C.TEXT),
+                ft.Text(desc, size=12, color=C.DIM),
                 ft.Container(height=4),
-                view.skip_zh_cn_switch,
+                extract_button,
+                preview_button,
             ],
+            spacing=6,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         ),
-        padding=ft.Padding(left=12, top=10, right=12, bottom=10),
-        border=ft.Border.all(1, theme.GREY_200),
-        border_radius=8,
-        bgcolor=ft.Colors.WHITE,
     )
 
 
-def build_settings_panel(view) -> ft.Column:
-    """左側設定面板：包含路徑輸入區、動作按鈕區、以及統計徽章。
-
-    面板組合：
-        1. 路徑卡片：Mods 資料夾 + 輸出資料夾（含清除按鈕）
-        2. 動作卡片：執行區（Lang / Book / Dual Extract）+
-                     預覽區（Lang / Book / Dual Preview）+
-                     跳過 zh_cn 開關
-        3. 統計徽章：成功 / 跳過 / 失敗計數（即時更新）
+def _build_action_zone(view, extract_row: list, preview_row: list) -> ft.Control:
+    """三種模式卡（Lang / Book / Lang + Book），各自有「提取」與「預覽」按鈕。
 
     參數：
         view：ExtractorView 實例。
-
-    回傳：
-        ft.Column，可直接加入 ExtractorView 的 controls。
+        extract_row：[Lang, Book, Dual] 的提取按鈕。
+        preview_row：[Lang, Book, Dual] 的預覽按鈕。
     """
-    return ft.Column(
-        scroll=ft.ScrollMode.ADAPTIVE,
-        spacing=16,
-        controls=[
-            # --- 路徑設定 ---
-            styled_card(
-                title="路徑設定",
-                icon=ft.Icons.FOLDER_OPEN,
-                content=ft.Column(
-                    spacing=12,
+    modes = (
+        (
+            "Lang 語言檔",
+            "從 mods/*.jar 提取 assets/*/lang 語言檔",
+            ft.Icons.TRANSLATE,
+            "dia",
+        ),
+        ("Book 手冊", "提取 Patchouli 等手冊內容", ft.Icons.MENU_BOOK_OUTLINED, "em"),
+        (
+            "Lang + Book",
+            "同時提取語言檔與手冊，分別輸出統計",
+            ft.Icons.LAYERS_OUTLINED,
+            "ench",
+        ),
+    )
+    cards = [
+        _mode_card(title, desc, icon, tone, extract, preview)
+        for (title, desc, icon, tone), extract, preview in zip(
+            modes, extract_row, preview_row, strict=True
+        )
+    ]
+    return ft.Row(cards, spacing=16, vertical_alignment=ft.CrossAxisAlignment.START)
+
+
+def build_settings_panel(view) -> ft.Column:
+    """整個提取頁的內容：頁首 + 路徑 / 選項設定 + 三種模式卡。
+
+    參數：
+        view：ExtractorView 實例（需具備輸入框、開關與六顆按鈕屬性）。
+    """
+    settings_card = kit.section_card(
+        "提取設定",
+        ft.Column(
+            spacing=16,
+            controls=[
+                _build_path_row(
+                    view,
+                    ft.Icons.DNS,
+                    "Mods 資料夾（含 JAR） *",
+                    view.mods_dir_textfield,
+                    view.mods_dir_textfield,
+                ),
+                ft.Column(
+                    spacing=6,
                     controls=[
-                        _build_path_row(view, ft.Icons.DNS, "Mods 資料夾", view.mods_dir_textfield, view.mods_dir_textfield),
-                        ft.Column(
-                            spacing=4,
+                        kit.section_label("輸出資料夾"),
+                        ft.Row(
                             controls=[
-                                ft.Row(
-                                    controls=[
-                                        ft.Icon(ft.Icons.OUTPUT, size=14, color=ft.Colors.BLUE_GREY),
-                                        ft.Text("輸出資料夾", size=12, weight=ft.FontWeight.W_500, color=theme.GREY_700),
-                                    ],
-                                    spacing=6,
-                                ),
-                                ft.Row(
-                                    controls=[
-                                        ft.Container(content=view.output_dir_textfield, expand=True),
-                                        _build_pick_button(view, view.output_dir_textfield),
-                                        ft.IconButton(
-                                            icon=ft.Icons.CLEAR,
-                                            icon_size=18,
-                                            tooltip='清除路徑',
-                                            on_click=view.clear_output_path,
-                                        ),
-                                    ],
-                                    spacing=6,
+                                view.output_dir_textfield,
+                                _build_pick_button(view, view.output_dir_textfield),
+                                ft.IconButton(
+                                    icon=ft.Icons.CLEAR,
+                                    icon_size=18,
+                                    icon_color=C.MUTED,
+                                    tooltip="清除路徑",
+                                    on_click=view.clear_output_path,
                                 ),
                             ],
+                            spacing=8,
+                            vertical_alignment=ft.CrossAxisAlignment.START,
                         ),
                     ],
                 ),
+                view.skip_zh_cn_switch,
+            ],
+        ),
+        icon=ft.Icons.SETTINGS_OUTLINED,
+        tone="dia",
+    )
+    return ft.Column(
+        scroll=ft.ScrollMode.ADAPTIVE,
+        expand=True,
+        spacing=18,
+        controls=[
+            kit.page_header(
+                "JAR 提取",
+                "從模組 JAR 取出語言檔與 Patchouli 手冊；可先預覽掃描結果再決定提取範圍",
+                icon=ft.Icons.INVENTORY_2_OUTLINED,
+                tone="dia",
             ),
-            # --- 動作區（包含跳過開關）---
+            settings_card,
             _build_action_zone(
                 view,
                 extract_row=[
@@ -203,6 +192,3 @@ def build_settings_panel(view) -> ft.Column:
             ),
         ],
     )
-
-
-

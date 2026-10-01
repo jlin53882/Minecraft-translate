@@ -1,0 +1,197 @@
+"""app/logging/task_session.py
+
+新版 TaskSession，支援 LogEntry 結構化日誌。
+
+這是 PR1 的核心產物。
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+from collections import deque
+from collections.abc import Callable
+
+from .log_entry import LogEntry
+
+_logger = logging.getLogger(__name__)
+
+# 全域觀察者：外殼的 TaskManager 用它得知「有任務開始 / 進度 / 結束」，
+# 不必每個頁面各自回報。callback(session, event)，event 為 start / progress / error / finish。
+_observers: list[Callable[[TaskSession, str], None]] = []
+_observers_lock = threading.Lock()
+
+
+def add_observer(callback: Callable[[TaskSession, str], None]) -> None:
+    """註冊全域任務事件觀察者（重複註冊同一個 callback 只會留一份）。"""
+    with _observers_lock:
+        if callback not in _observers:
+            _observers.append(callback)
+
+
+def remove_observer(callback: Callable[[TaskSession, str], None]) -> None:
+    with _observers_lock:
+        if callback in _observers:
+            _observers.remove(callback)
+
+
+def tag_session(session, name: str, view_key: str | None = None):
+    """替 session 標上顯示名稱與所屬頁面（頂列任務膠囊用），並回傳 session。
+
+    用屬性設定而不是建構參數，所以替身 / 舊版 session 也能安全呼叫。
+    """
+    try:
+        session.name = name
+        session.view_key = view_key
+    except AttributeError:
+        pass
+    return session
+
+
+def _notify(session: TaskSession, event: str) -> None:
+    with _observers_lock:
+        observers = list(_observers)
+    for callback in observers:
+        try:
+            callback(session, event)
+        except Exception:
+            _logger.exception("TaskSession 觀察者失敗：%s", event)
+
+
+class TaskSession:
+    """
+    單一長任務的 UI 狀態容器（Single Source of Truth）。
+
+    新版設計：
+    - logs 改為 deque[LogEntry]，提供 seq 追蹤與結構化資訊
+    - add_log() 接受 level/source 參數，相容舊 caller（text-only）
+    - snapshot() 回傳 list[LogEntry]，由 presenter 處理渲染
+    """
+
+    def __init__(
+        self,
+        max_logs: int = 2000,
+        *,
+        name: str | None = None,
+        view_key: str | None = None,
+    ):
+        """
+        初始化 TaskSession。
+
+        Args:
+            max_logs: deque 最大長度，超出時自動淘汰最舊的
+            name: 任務顯示名稱（頂列的任務膠囊用；未提供時顯示「背景任務」）
+            view_key: 任務所屬頁面的 key（點膠囊可跳回該頁）
+        """
+        self.name = name
+        self.view_key = view_key
+        self.progress: float = 0.0
+        self.status: str = "IDLE"  # IDLE / RUNNING / DONE / ERROR
+        self.error: bool = False
+
+        self.logs: deque[LogEntry] = deque(maxlen=max_logs)
+        self._next_seq: int = 0
+        self._lock = threading.Lock()
+        self._cancel_event = threading.Event()
+
+    # ---------- 狀態寫入（Worker 使用） ----------
+
+    def set_progress(self, value: float) -> None:
+        """更新 progress（0.0～1.0），自動 clamp。"""
+        with self._lock:
+            self.progress = max(0.0, min(1.0, value))
+        _notify(self, "progress")
+
+    def add_log(
+        self,
+        text: str,
+        level: str = "info",
+        source: str = "ui",
+    ) -> None:
+        """
+        新增日誌事件。
+
+        支援舊 caller（只傳 text）：level/source 皆使用 default。
+
+        Args:
+            text:   日誌文字
+            level:  等級（debug/info/warning/error/system）
+            source: 來源標記
+        """
+        if not text:
+            return
+        with self._lock:
+            entry = LogEntry(
+                seq=self._next_seq,
+                level=level,
+                text=text,
+                source=source,
+            )
+            self._next_seq += 1
+            self.logs.append(entry)
+
+    def set_error(self) -> None:
+        """設定錯誤狀態。"""
+        with self._lock:
+            self.error = True
+            self.status = "ERROR"
+        _notify(self, "error")
+
+    def set_summary(self, summary: dict) -> None:
+        """設定任務摘要統計（供 DONE 時 UI 取用）。"""
+        with self._lock:
+            self.summary = summary
+
+    def finish(self) -> None:
+        """完成任務。
+
+        已標記錯誤的任務維持 ERROR（service 常在 finally 呼叫 finish()，
+        不可把失敗覆蓋成 DONE，否則 UI 會顯示「任務完成」）。
+        """
+        with self._lock:
+            self.progress = 1.0
+            self.status = "ERROR" if self.error else "DONE"
+        _notify(self, "finish")
+
+    def request_cancel(self) -> None:
+        """要求取消任務；worker 會在下一個檢查點（例如批次之間）停止。"""
+        self._cancel_event.set()
+
+    @property
+    def cancel_requested(self) -> bool:
+        """是否已要求取消。"""
+        return self._cancel_event.is_set()
+
+    def start(self) -> None:
+        """開始任務，清空日誌並重置序號。"""
+        self._cancel_event.clear()
+        with self._lock:
+            self.progress = 0.0
+            self.logs.clear()
+            self._next_seq = 0
+            self.error = False
+            self.status = "RUNNING"
+        _notify(self, "start")
+
+    # ---------- UI 讀取（UI 使用） ----------
+
+    def snapshot(self) -> dict:
+        """
+        回傳 UI 用的不可變快照。
+
+        回傳值：
+            logs      — list[LogEntry]（新格式）
+            log_texts — list[str]（backward compat：舊 caller 仍可正常運行）
+            progress  — float
+            status   — str
+            error    — bool
+        """
+        with self._lock:
+            return {
+                "progress": self.progress,
+                "logs": list(self.logs),
+                "log_texts": [e.text for e in self.logs],
+                "status": self.status,
+                "error": self.error,
+                "summary": getattr(self, "summary", None),
+            }

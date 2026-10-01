@@ -7,23 +7,38 @@
 - 執行語系比對（背景執行緒 + 進度輪詢）
 """
 
-import flet as ft
-import threading
-import time
 import os
-import sys
+import sys  # noqa: F401
+import threading  # noqa: F401
+import time  # noqa: F401
 from pathlib import Path
 
-from app.ui.theme import (
-    BLUE_600, BLUE_700, GREEN_700, TEAL_700,
-    GREY_500, GREY_600, CYAN_700, GREEN_600,
-    WHITE, BLUE_50, GREY_200, BLUE_400,
-    GREEN_50, RED_400, RED_50, RED_50,
+import flet as ft
+
+from app.services_impl.pipelines.merge_service import (
+    run_merge_zip_batch_service,  # noqa: F401
 )
-from app.logging.task_session import TaskSession
+from app.tasks.task_session import TaskSession  # noqa: F401
+from app.ui import theme
+from app.ui.theme import (
+    BLUE_50,  # noqa: F401
+    BLUE_400,  # noqa: F401
+    BLUE_600,  # noqa: F401
+    BLUE_700,  # noqa: F401
+    CYAN_700,  # noqa: F401
+    GREEN_50,  # noqa: F401
+    GREEN_600,  # noqa: F401
+    GREEN_700,  # noqa: F401
+    GREY_200,  # noqa: F401
+    GREY_500,  # noqa: F401
+    GREY_600,
+    RED_50,  # noqa: F401
+    RED_400,  # noqa: F401
+    TEAL_700,
+    WHITE,
+)
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info
-from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
 
 
 def open_merge_dialog(
@@ -38,17 +53,21 @@ def open_merge_dialog(
     safe_float=None,
 ):
     if safe_int is None:
+
         def safe_int(s):
             try:
                 return int(s)
             except (ValueError, TypeError):
                 return None
+
     if safe_float is None:
+
         def safe_float(s):
             try:
                 return float(s)
             except (ValueError, TypeError):
                 return None
+
     """打開語系比對設定對話框。
 
     Args:
@@ -68,8 +87,12 @@ def open_merge_dialog(
 
     cfg = load_config()
     lang_merger_cfg = cfg.get("lang_merger", {})
-    patchouli_skip = lang_merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists", False)
-    patchouli_threshold = str(lang_merger_cfg.get("patchouli_effective_translation_threshold", 0.5))
+    patchouli_skip = lang_merger_cfg.get(
+        "patchouli_skip_en_us_when_zh_cn_exists", False
+    )
+    patchouli_threshold = str(
+        lang_merger_cfg.get("patchouli_effective_translation_threshold", 0.5)
+    )
     zh_en_threshold = str(lang_merger_cfg.get("zh_en_letter_threshold", 2))
 
     input_mode = "folder"
@@ -80,7 +103,7 @@ def open_merge_dialog(
         expand=True,
         border_color=TEAL_700,
     )
-    merge_zip_field = ft.TextField(
+    merge_zip_field = ft.TextField(  # noqa: F841
         label="Mod 來源（ZIP）",
         hint_text="選擇 ZIP 檔案（支援多選）",
         expand=True,
@@ -97,7 +120,9 @@ def open_merge_dialog(
     merge_selected_zips = []
     merge_output_dir_field = ft.TextField(
         label="輸出目錄",
-        hint_text=f"自動帶入：{output_path}" if output_path else "留空使用上方設定的輸出目錄",
+        hint_text=f"自動帶入：{output_path}"
+        if output_path
+        else "留空使用上方設定的輸出目錄",
         value=output_path,
         expand=True,
         border_color=TEAL_700,
@@ -135,10 +160,13 @@ def open_merge_dialog(
         page.update()
 
     merge_input_mode_group = ft.RadioGroup(
-        content=ft.Column([
-            ft.Radio(label="資料夾", value="folder"),
-            ft.Radio(label="ZIP", value="zip"),
-        ], spacing=4),
+        content=ft.Column(
+            [
+                ft.Radio(label="資料夾", value="folder"),
+                ft.Radio(label="ZIP", value="zip"),
+            ],
+            spacing=4,
+        ),
         value="folder",
         on_change=on_input_mode_changed,
     )
@@ -167,13 +195,13 @@ def open_merge_dialog(
             if result:
                 merge_folder_field.value = result
                 page.update()
+
         page.run_task(do_pick)
 
     def pick_zip_input(e=None):
         show_snack_bar("DEBUG: pick_zip_input called")
 
         def on_zip_picked(e: ft.FilePickerUploadEvent):
-            import sys
             log_info(f"on_zip_picked fired! files={e.files}")
             if not e.files:
                 return
@@ -192,10 +220,13 @@ def open_merge_dialog(
                 allow_multiple=True,
                 allowed_extensions=["zip"],
             )
+
         page.run_task(_async_pick_zip)
 
     def refresh_zip_list():
-        log_info(f"Refresh zip list, count={len(merge_selected_zips)}, list={merge_selected_zips}")
+        log_info(
+            f"Refresh zip list, count={len(merge_selected_zips)}, list={merge_selected_zips}"
+        )
         merge_zip_list_view.controls.clear()
         for path in merge_selected_zips:
             name = Path(path).name
@@ -236,6 +267,7 @@ def open_merge_dialog(
             if result:
                 merge_output_dir_field.value = result
                 page.update()
+
         page.run_task(do_pick)
 
     def browse_output_dir(e=None):
@@ -289,12 +321,10 @@ def open_merge_dialog(
         only_lang = merge_only_lang_checkbox.value
         process_zh_cn = merge_process_zh_cn_switch.value
         patchouli_skip_val = merge_patchouli_skip_switch.value
-        patchouli_threshold_val = safe_float(
-            (merge_patchouli_threshold_field.value or "").strip()
-        ) or 0.5
-        zh_en_val = safe_int(
-            (merge_zh_en_threshold_field.value or "").strip()
-        ) or 2
+        patchouli_threshold_val = (
+            safe_float((merge_patchouli_threshold_field.value or "").strip()) or 0.5
+        )
+        zh_en_val = safe_int((merge_zh_en_threshold_field.value or "").strip()) or 2
 
         lang_codes = [code for code, cb in lang_code_checks.items() if cb.value]
         if not lang_codes:
@@ -302,79 +332,129 @@ def open_merge_dialog(
             return
 
         close_dialog(dialog)
-        on_run_merge(merge_input, output, input_mode, only_lang, process_zh_cn, patchouli_skip_val,
-                     patchouli_threshold_val, zh_en_val, lang_codes)
+        on_run_merge(
+            merge_input,
+            output,
+            input_mode,
+            only_lang,
+            process_zh_cn,
+            patchouli_skip_val,
+            patchouli_threshold_val,
+            zh_en_val,
+            lang_codes,
+        )
 
     folder_input_row = ft.Container(
         visible=True,
-        content=ft.Row([
-            merge_folder_field,
-            ft.Button("選擇資料夾", icon=ft.Icons.FOLDER, on_click=pick_folder_input),
-            ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_folder_input),
-        ]),
+        content=ft.Row(
+            [
+                merge_folder_field,
+                ft.Button(
+                    "選擇資料夾", icon=ft.Icons.FOLDER, on_click=pick_folder_input
+                ),
+                ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_folder_input),
+            ]
+        ),
     )
     zip_input_row = ft.Container(
         visible=False,
-        content=ft.Column([
-            ft.Container(
-                content=merge_zip_list_view,
-                border=ft.Border.all(1, "#4b5563"),
-                border_radius=8,
-                padding=5,
-                expand=True,
-            ),
-            ft.Button("選擇 ZIP", icon=ft.Icons.FILE_OPEN, on_click=pick_zip_input),
-        ], spacing=4),
+        content=ft.Column(
+            [
+                ft.Container(
+                    content=merge_zip_list_view,
+                    border=ft.Border.all(1, theme.BORDER_LOG_PANEL),
+                    border_radius=8,
+                    padding=5,
+                    expand=True,
+                ),
+                ft.Button("選擇 ZIP", icon=ft.Icons.FILE_OPEN, on_click=pick_zip_input),
+            ],
+            spacing=4,
+        ),
     )
 
-    content = ft.Column([
-        ft.Text("Mod 來源", weight="bold", size=13),
-        merge_input_mode_group,
-        folder_input_row,
-        zip_input_row,
-        ft.Text("輸出目錄", weight="bold", size=13),
-        ft.Row([
-            merge_output_dir_field,
-            ft.Button("選擇資料夾", icon=ft.Icons.FOLDER_SPECIAL, on_click=pick_output_dir),
-            ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_output_dir),
-        ]),
-        ft.Divider(),
-        ft.Text("語系過濾設定", weight="bold", size=13),
-        merge_only_lang_checkbox,
-        ft.Row([
-            merge_process_zh_cn_switch,
-            ft.Text("（需開啟才能調整下方 Patchouli 設定）", size=11, color=GREY_600),
-        ]),
-        ft.Divider(),
-        ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=12),
-        ft.Row([
-            merge_zh_en_threshold_field,
-            ft.Text("超過此數值判定為英文，用於 lang 過濾，空白用預設值 2", size=10, color=GREY_600),
-        ]),
-        ft.Divider(),
-        ft.Text("Patchouli 進階設定", weight="bold", size=13),
-        ft.Row(
-            [
-                ft.Column(
-                    [
-                        ft.Text("允許 zh_cn 觸發跳過 en_us", weight=ft.FontWeight.W_500, size=12),
-                        merge_patchouli_skip_switch,
-                        ft.Text("當 zh_cn 翻譯足夠好時，跳過對應 en_us", size=10, color=GREY_600),
-                    ],
-                    expand=1,
-                ),
-                ft.Column(
-                    [
-                        ft.Text("en_us 跳過門檻", weight=ft.FontWeight.W_500, size=12),
-                        merge_patchouli_threshold_field,
-                        ft.Text("有效翻譯比例 0.0~1.0，空白用預設值 0.5", size=10, color=GREY_600),
-                    ],
-                    expand=1,
-                ),
-            ],
-            spacing=8,
-        ),
-    ], spacing=10, tight=False)
+    content = ft.Column(
+        [
+            ft.Text("Mod 來源", weight="bold", size=13),
+            merge_input_mode_group,
+            folder_input_row,
+            zip_input_row,
+            ft.Text("輸出目錄", weight="bold", size=13),
+            ft.Row(
+                [
+                    merge_output_dir_field,
+                    ft.Button(
+                        "選擇資料夾",
+                        icon=ft.Icons.FOLDER_SPECIAL,
+                        on_click=pick_output_dir,
+                    ),
+                    ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_output_dir),
+                ]
+            ),
+            ft.Divider(),
+            ft.Text("語系過濾設定", weight="bold", size=13),
+            merge_only_lang_checkbox,
+            ft.Row(
+                [
+                    merge_process_zh_cn_switch,
+                    ft.Text(
+                        "（需開啟才能調整下方 Patchouli 設定）", size=11, color=GREY_600
+                    ),
+                ]
+            ),
+            ft.Divider(),
+            ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=12),
+            ft.Row(
+                [
+                    merge_zh_en_threshold_field,
+                    ft.Text(
+                        "超過此數值判定為英文，用於 lang 過濾，空白用預設值 2",
+                        size=10,
+                        color=GREY_600,
+                    ),
+                ]
+            ),
+            ft.Divider(),
+            ft.Text("Patchouli 進階設定", weight="bold", size=13),
+            ft.Row(
+                [
+                    ft.Column(
+                        [
+                            ft.Text(
+                                "允許 zh_cn 觸發跳過 en_us",
+                                weight=ft.FontWeight.W_500,
+                                size=12,
+                            ),
+                            merge_patchouli_skip_switch,
+                            ft.Text(
+                                "當 zh_cn 翻譯足夠好時，跳過對應 en_us",
+                                size=10,
+                                color=GREY_600,
+                            ),
+                        ],
+                        expand=1,
+                    ),
+                    ft.Column(
+                        [
+                            ft.Text(
+                                "en_us 跳過門檻", weight=ft.FontWeight.W_500, size=12
+                            ),
+                            merge_patchouli_threshold_field,
+                            ft.Text(
+                                "有效翻譯比例 0.0~1.0，空白用預設值 0.5",
+                                size=10,
+                                color=GREY_600,
+                            ),
+                        ],
+                        expand=1,
+                    ),
+                ],
+                spacing=8,
+            ),
+        ],
+        spacing=10,
+        tight=False,
+    )
 
     dialog = ft.AlertDialog(
         modal=True,
@@ -382,9 +462,18 @@ def open_merge_dialog(
         content=ft.Container(content=content, width=dialog_width),
         actions=[
             ft.TextButton("取消", on_click=lambda e: close_dialog(dialog)),
-            ft.OutlinedButton("預覽結果", icon=ft.Icons.PREVIEW, on_click=lambda e: show_preview_result(dialog)),
-            ft.Button("確定執行", icon=ft.Icons.CHECK, bgcolor=TEAL_700, color=WHITE,
-                      on_click=lambda e: start_merge(dialog)),
+            ft.OutlinedButton(
+                "預覽結果",
+                icon=ft.Icons.PREVIEW,
+                on_click=lambda e: show_preview_result(dialog),
+            ),
+            ft.Button(
+                "確定執行",
+                icon=ft.Icons.CHECK,
+                bgcolor=TEAL_700,
+                color=WHITE,
+                on_click=lambda e: start_merge(dialog),
+            ),
         ],
     )
 

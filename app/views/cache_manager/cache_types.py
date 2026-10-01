@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+
 @dataclass(slots=True)
 class CacheUiState:
     """CacheUiState 類別。
@@ -22,9 +23,11 @@ class CacheUiState:
     用途：封裝與 CacheUiState 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
+
     busy: bool = False
     reason: str = ""
     trace: str = "trace: init"
+
 
 @dataclass(slots=True)
 class ActionState:
@@ -33,6 +36,7 @@ class ActionState:
     用途：封裝與 ActionState 相關的狀態與行為。
     維護注意：修改公開方法前請確認外部呼叫點與相容性。
     """
+
     action_id: int
     reason: str
     phase: str

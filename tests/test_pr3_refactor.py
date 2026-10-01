@@ -152,7 +152,7 @@ class TestConstantsInMain:
         assert hasattr(main, "WINDOW_MIN_WIDTH")
         assert hasattr(main, "WINDOW_MIN_HEIGHT")
 
-        assert main.WINDOW_WIDTH_DEFAULT == 1200
-        assert main.WINDOW_HEIGHT_DEFAULT == 850
-        assert main.WINDOW_MIN_WIDTH == 1050
-        assert main.WINDOW_MIN_HEIGHT == 760
+        assert main.WINDOW_WIDTH_DEFAULT == 1360
+        assert main.WINDOW_HEIGHT_DEFAULT == 900
+        assert main.WINDOW_MIN_WIDTH == 1100
+        assert main.WINDOW_MIN_HEIGHT == 720

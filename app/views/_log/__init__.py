@@ -11,36 +11,36 @@
 - log_colors: 等級顏色對應（從 theme 來）
 - load_ui_logging_config: UI 設定讀取
 
-PR refactor/unified-log-view: 從 app/logging/ 搬過來，LogView 是新 widget。
+TaskSession / LogEntry 已搬到 app.tasks（中立，不依賴 UI）；這裡只留 UI 相關的日誌元件。
 """
 
-from .log_entry import LogEntry, LogLevel
-from .task_session import TaskSession
-from .log_presenter import LogPresenter
-from .log_view import LogView
-from .log_config import load_ui_logging_config, DEFAULT_UI_LOGGING
+from app.tasks import LogEntry, LogLevel, TaskSession
+
 from .log_colors import (
     COLOR_MAP,
     LEVEL_PREFIX,
     get_level_color,
     get_level_prefix,
 )
+from .log_config import DEFAULT_UI_LOGGING, load_ui_logging_config
+from .log_presenter import LogPresenter
+from .log_view import LogView
 
 __all__ = [
+    # Colors
+    "COLOR_MAP",
+    "DEFAULT_UI_LOGGING",
+    "LEVEL_PREFIX",
     # Core
     "LogEntry",
     "LogLevel",
-    "TaskSession",
     # Presenter
     "LogPresenter",
     # Widget 🆕
     "LogView",
-    # Config
-    "load_ui_logging_config",
-    "DEFAULT_UI_LOGGING",
-    # Colors
-    "COLOR_MAP",
-    "LEVEL_PREFIX",
+    "TaskSession",
     "get_level_color",
     "get_level_prefix",
+    # Config
+    "load_ui_logging_config",
 ]

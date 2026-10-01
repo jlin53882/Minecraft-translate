@@ -22,8 +22,9 @@ from types import SimpleNamespace
 import flet as ft
 
 from app.icon_reader import IconRef
-from app.ui import theme
+from app.ui import design, kit, theme
 from app.ui.debounce import Debouncer
+from app.ui.design import C
 from app.ui.snack import show_snack
 from translation_tool.core.lang_item_row import LangItemRow
 from translation_tool.utils.config_manager import load_config
@@ -925,10 +926,12 @@ class IconPreviewView(ft.Column):
         # =========================
         # UI 元件
         # =========================
-        self.header = ft.Text("🧩 JAR 圖示預覽", size=20, weight=ft.FontWeight.BOLD)
+        self.header = ft.Text(
+            "🧩 JAR 圖示預覽", size=22, weight=ft.FontWeight.BOLD, color=C.TEXT
+        )
 
         # Mod 清單搜尋框（Phase 2）
-        self.mod_search_tf = ft.TextField(
+        self.mod_search_tf = kit.field(
             label="搜尋模組",
             hint_text="輸入 modid（大小寫不敏感）",
             dense=True,
@@ -944,58 +947,94 @@ class IconPreviewView(ft.Column):
             on_click=self._go_back,
         )
 
-        self.pick_source_btn = ft.Button(
+        self.pick_source_btn = kit.button(
             "選擇模組資料夾（例：mods 資料夾）",
+            "secondary",
             icon=ft.Icons.FOLDER_OPEN,
             on_click=lambda e: self._page.run_task(self._async_pick_source_dir),
         )
 
-        self.pick_review_btn = ft.Button(
+        self.pick_review_btn = kit.button(
             "選擇資源包路徑",
+            "secondary",
             icon=ft.Icons.FOLDER_OPEN,
             on_click=lambda e: self._page.run_task(self._async_pick_review_dir),
         )
 
-        self.source_label = ft.Text("模組資料夾：尚未選擇", size=12)
-        self.review_label = ft.Text("資源包路徑：尚未選擇", size=12)
+        self.source_label = ft.Text(
+            "模組資料夾：尚未選擇", size=12, color=C.MUTED, font_family=design.FONT_MONO
+        )
+        self.review_label = ft.Text(
+            "資源包路徑：尚未選擇", size=12, color=C.MUTED, font_family=design.FONT_MONO
+        )
 
-        self.load_btn = ft.Button(
+        self.load_btn = kit.button(
             "載入模組清單",
+            "primary",
             icon=ft.Icons.PLAY_ARROW,
-            disabled=True,
             on_click=self._on_load_clicked,
         )
+        self.load_btn.disabled = True
 
-        self.save_btn = ft.Button(
+        self.save_btn = kit.button(
             "💾 儲存翻譯",
+            "primary",
             icon=ft.Icons.SAVE,
-            visible=False,
             on_click=self._save_current_zh,
         )
+        self.save_btn.visible = False
 
         self.list_view = ft.ListView(expand=True, spacing=8)
 
         # 進度條
-        self.progress_bar = ft.ProgressBar(visible=False, width=500)
+        self.progress_bar = kit.progress_bar(0, "em", height=6)
+        self.progress_bar.visible = False
         self.progress_text = ft.Text("準備就緒", size=12, color=theme.GREY_600)
 
+        setup_card = kit.section_card(
+            "資料來源",
+            ft.Column(
+                [
+                    ft.Row(
+                        [self.pick_source_btn, self.source_label],
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row(
+                        [self.pick_review_btn, self.review_label],
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row([self.load_btn], spacing=12),
+                    # 進度條：置於「載入模組清單」按鈕下方，掃描時才顯示
+                    self.progress_bar,
+                    self.progress_text,
+                ],
+                spacing=12,
+            ),
+            icon=ft.Icons.FOLDER_OPEN,
+            tone="dia",
+        )
         self.controls = [
-            ft.Row([self.back_btn, self.header], alignment=ft.MainAxisAlignment.START),
+            ft.Row(
+                [
+                    self.back_btn,
+                    kit.tone_icon(
+                        ft.Icons.SPELLCHECK, "ench", size=22, box=46, radius=13
+                    ),
+                    self.header,
+                ],
+                alignment=ft.MainAxisAlignment.START,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=14,
+            ),
             # Mod 清單搜尋（Phase 2）：搜尋框 + 狀態文字
             self.mod_search_tf,
             self.mod_search_status,
-            self.pick_source_btn,
-            self.source_label,
-            self.pick_review_btn,
-            self.review_label,
-            self.load_btn,
-            # 進度條：置於「載入模組清單」按鈕下方，掃描時才顯示
-            self.progress_bar,
-            self.progress_text,
+            setup_card,
             self.save_btn,
             self.page_bar,
             self.page_size_selector,
-            ft.Divider(),
             self.list_view,
         ]
 
@@ -1408,16 +1447,59 @@ class IconPreviewView(ft.Column):
             untranslated = sum(1 for e in entries if not e.zh_tw.strip())
 
             self.list_view.controls.append(
-                ft.ListTile(
-                    title=ft.Text(modid, weight=ft.FontWeight.BOLD),
-                    subtitle=ft.Text(f"總數 {total_count} ｜ 未翻譯 {untranslated}"),
-                    trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT),
-                    on_click=lambda e, m=modid: self._open_mod_detail(m),
-                )
+                self._mod_row(modid, total_count, untranslated)
             )
 
         self._update_page_bar_for_mods()
         self.update()
+
+    def _mod_row(self, modid: str, total_count: int, untranslated: int) -> ft.Control:
+        """模組清單的一列：modid（等寬字）+ 總數 / 未翻譯晶片，點擊進入該模組。"""
+        done_ratio = 1.0 - (untranslated / total_count if total_count else 0.0)
+        return ft.Container(
+            padding=ft.Padding.symmetric(horizontal=14, vertical=10),
+            bgcolor=C.PANEL,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=design.RADIUS_CONTROL + 2,
+            ink=True,
+            on_click=lambda e, m=modid: self._open_mod_detail(m),
+            content=ft.Row(
+                [
+                    ft.Column(
+                        [
+                            ft.Text(
+                                modid,
+                                size=14,
+                                weight=ft.FontWeight.W_600,
+                                color=C.TEXT,
+                                font_family=design.FONT_MONO,
+                            ),
+                            ft.Text(
+                                f"總數 {total_count} ｜ 未翻譯 {untranslated}",
+                                size=12,
+                                color=C.DIM,
+                            ),
+                        ],
+                        spacing=2,
+                        tight=True,
+                        expand=True,
+                    ),
+                    ft.Container(
+                        width=120,
+                        content=kit.progress_bar(
+                            done_ratio, "em" if untranslated == 0 else "gold", height=5
+                        ),
+                    ),
+                    kit.chip(
+                        "完成" if untranslated == 0 else f"未翻譯 {untranslated}",
+                        "em" if untranslated == 0 else "gold",
+                    ),
+                    ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, color=C.DIM),
+                ],
+                spacing=14,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+        )
 
     def _update_page_bar_for_mods(self):
         """更新分頁資訊顯示（同時支援一般清單與搜尋結果分頁）"""
@@ -1558,12 +1640,7 @@ class IconPreviewView(ft.Column):
             total_count = len(entries)
             untranslated = sum(1 for e in entries if not e.zh_tw.strip())
             self.list_view.controls.append(
-                ft.ListTile(
-                    title=ft.Text(modid, weight=ft.FontWeight.BOLD),
-                    subtitle=ft.Text(f"總數 {total_count} ｜ 未翻譯 {untranslated}"),
-                    trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT),
-                    on_click=lambda e, m=modid: self._open_mod_detail(m),
-                )
+                self._mod_row(modid, total_count, untranslated)
             )
 
         self._update_page_bar_for_mods()
@@ -1632,7 +1709,7 @@ class IconPreviewView(ft.Column):
     def _init_detail_search_widgets(self):
         """初始化 Mod 詳情頁的搜尋 UI（只在需要時建立）"""
         if not hasattr(self, "detail_search_tf"):
-            self.detail_search_tf = ft.TextField(
+            self.detail_search_tf = kit.field(
                 label="搜尋 key + value",
                 hint_text="搜尋 key + value",
                 dense=True,

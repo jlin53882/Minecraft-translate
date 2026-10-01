@@ -1,3 +1,4 @@
+from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.bundler_view import BundlerView
 from tests.conftest import mock_filepicker, mock_page
@@ -313,7 +314,7 @@ def test_bundling_worker_with_error(monkeypatch):
     view._bundling_worker("C:/Root", "C:/out.zip", "", "", "")
     _drain_ui_tasks(page)
 
-    assert view.progress_bar.color == "red"
+    assert view.progress_bar.color == C.RED
     assert not view.progress_bar.visible
 
 

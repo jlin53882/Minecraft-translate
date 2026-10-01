@@ -10,8 +10,9 @@ import threading
 import flet as ft
 
 from app.services_impl.config_service import load_config_json
-from app.ui import theme
-from app.ui.components import styled_card
+from app.ui import design, kit
+from app.ui.design import C
+from app.ui.mc_text import mc_text_spans
 from app.ui.snack import show_snack
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
@@ -31,53 +32,48 @@ class BundlerView(ft.Column):
         self.version_data: dict = {}
         self._bundling_running = False
 
-        self.version_search = ft.TextField(
-            label="搜尋版本",
-            hint_text="輸入版本關鍵字...",
+        self.version_search = kit.text_field(
+            hint="輸入版本關鍵字...",
+            icon=ft.Icons.SEARCH,
             expand=True,
-            border_color=theme.OUTLINE,
-            content_padding=10,
             on_change=self._on_version_search_change,
         )
         self.version_list = ft.ListView(
             expand=True,
             height=200,
-            spacing=4,
+            spacing=2,
             auto_scroll=False,
         )
         self.version_expanded = False
-        self.description_field = ft.TextField(
-            label="檔案敘述",
-            hint_text="直接輸入文字，或使用 § 顏色代碼",
+        self.description_field = kit.text_field(
+            hint="直接輸入文字，或使用 § 顏色代碼",
             expand=True,
-            border_color=theme.OUTLINE,
-            content_padding=10,
+            on_change=self._on_meta_change,
         )
-        self.pack_image_field = ft.TextField(
-            label="資源包圖片路徑",
-            hint_text="選擇 pack.png 圖片（可選）",
+        self.pack_image_field = kit.text_field(
+            hint="選擇 pack.png 圖片（可選）",
+            mono=True,
             expand=True,
-            border_color=theme.OUTLINE,
-            content_padding=10,
+            on_change=self._on_meta_change,
         )
-        self.root_dir_field = ft.TextField(
-            label="翻譯專案根目錄",
-            hint_text="包含所有翻譯產出的最上層資料夾",
+        self.root_dir_field = kit.text_field(
+            hint="包含所有翻譯產出的最上層資料夾",
+            mono=True,
             expand=True,
-            border_color=theme.OUTLINE,
-            content_padding=10,
             on_change=self._on_root_dir_change,
         )
-        self.output_zip_field = ft.TextField(
-            label="最終 ZIP 檔案儲存路徑",
-            hint_text="留空則自動帶入翻譯專案根目錄+設定檔檔名",
+        self.output_zip_field = kit.text_field(
+            hint="留空則自動帶入翻譯專案根目錄+設定檔檔名",
+            mono=True,
             expand=True,
-            border_color=theme.OUTLINE,
-            content_padding=10,
         )
         self._config_output_zip_name = "可使用翻譯.zip"
-        self.extra_folders_view = ft.ListView(height=100, spacing=4, auto_scroll=False)
-        self.progress_bar = ft.ProgressBar(value=0, height=8, visible=False)
+        self.extra_folders_view = ft.ListView(spacing=6, auto_scroll=False)
+        self.progress_bar = kit.progress_bar(0, "em", height=8)
+        self.progress_bar.visible = False
+        self.status_text = ft.Text(
+            "準備就緒", size=13, weight=ft.FontWeight.W_600, color=C.TEXT
+        )
         # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器 + cyan400 bug）
         self.log_view = LogView(
             page=self._page,
@@ -138,23 +134,56 @@ class BundlerView(ft.Column):
             self.version_list.controls.append(
                 ft.Container(
                     content=ft.Text(
-                        "請點擊或輸入關鍵字搜尋版本" if search_text else "無可用版本",
+                        "找不到符合的版本" if search_text else "無可用版本",
                         size=12,
-                        color=theme.GREY_500,
+                        color=C.DIM,
                     ),
                     padding=8,
                 )
             )
         for version_key in filtered:
+            selected = version_key == self.version_search.value
+            info = self.version_data.get(version_key, {})
             item = ft.Container(
-                content=ft.Text(version_key, size=13, text_align=ft.TextAlign.START),
-                padding=8,
-                border=ft.Border.all(1, theme.OUTLINE),
-                border_radius=6,
+                content=ft.Row(
+                    [
+                        ft.Text(
+                            version_key,
+                            size=13,
+                            color=C.EM if selected else C.TEXT,
+                            weight=ft.FontWeight.W_600 if selected else None,
+                            expand=True,
+                        ),
+                        ft.Text(
+                            self._format_range(info),
+                            size=11.5,
+                            color=C.DIM,
+                            font_family=design.FONT_MONO,
+                        ),
+                        *(
+                            [ft.Icon(ft.Icons.CHECK, size=14, color=C.EM)]
+                            if selected
+                            else []
+                        ),
+                    ],
+                    spacing=8,
+                ),
+                padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+                border_radius=8,
+                bgcolor=C.EM_BG if selected else None,
+                ink=True,
                 on_click=lambda e, v=version_key: self._select_version(v),
             )
             self.version_list.controls.append(item)
         self._page.update()
+
+    @staticmethod
+    def _format_range(info: dict) -> str:
+        """版本資料 → 「format 9–15」這種顯示字串。"""
+        low, high = info.get("min_format"), info.get("max_format")
+        if low is None and high is None:
+            return ""
+        return f"format {low}" if low == high else f"format {low}–{high}"
 
     def _on_version_search_change(self, e: ft.ControlEvent):
         self._refresh_version_list(e.control.value or "")
@@ -164,178 +193,315 @@ class BundlerView(ft.Column):
         self.version_search.value = version
         self.version_expanded = False
         self._version_toggle_label.value = version
-        log_debug(
-            f"_select_version: toggle_label={self._version_toggle_label.value}, expanded={self.version_expanded}"
+        self.version_dropdown_container_ref.visible = False
+        self._version_toggle_format.value = self._format_range(
+            self.version_data.get(version, {})
         )
+        self._version_toggle_icon.name = ft.Icons.EXPAND_MORE
+        self._update_preview()
         self._page.update()
 
     def _toggle_version_expand(self, e: ft.ControlEvent):
         self.version_expanded = not self.version_expanded
         log_debug(f"_toggle_version_expand: version_expanded={self.version_expanded}")
         self.version_dropdown_container_ref.visible = self.version_expanded
+        self._version_toggle_icon.name = (
+            ft.Icons.EXPAND_LESS if self.version_expanded else ft.Icons.EXPAND_MORE
+        )
+        if self.version_expanded:
+            self._refresh_version_list(self.version_search.value or "")
         self._page.update()
+
+    # --- pack.mcmeta / 描述預覽 ---
+    def _on_meta_change(self, e: ft.ControlEvent):
+        self._update_preview()
+        self._page.update()
+
+    def mcmeta_text(self) -> str:
+        """目前設定會寫進 pack.mcmeta 的內容（跟 output_bundler 寫入的格式一致）。"""
+        info = self.version_data.get(self.version_search.value or "", {})
+        pack = {
+            "pack": {
+                "description": self.description_field.value or "",
+                "min_format": str(info.get("min_format", 0)),
+                "max_format": str(info.get("max_format", 0)),
+            }
+        }
+        return json.dumps(pack, ensure_ascii=False, indent=2)
+
+    def _update_preview(self):
+        """依描述 / 版本 / 圖片更新右側預覽。"""
+        description = self.description_field.value or ""
+        self.preview_title.spans = mc_text_spans(
+            description, default_color=C.TEXT, size=14
+        ) or [ft.TextSpan("（尚未輸入描述）", style=ft.TextStyle(color=C.DIM, size=13))]
+        self.preview_format.value = self._format_range(
+            self.version_data.get(self.version_search.value or "", {})
+        )
+        self.mcmeta_view.value = self.mcmeta_text()
+        image_path = (self.pack_image_field.value or "").strip()
+        if image_path and os.path.isfile(image_path):
+            self.preview_image.content = ft.Image(
+                src=image_path, width=72, height=72, fit=ft.BoxFit.COVER
+            )
+        else:
+            self.preview_image.content = ft.Icon(
+                ft.Icons.IMAGE_OUTLINED, size=30, color=C.DIM
+            )
 
     def _build_controls(self):
         log_debug(f"_build_controls: version_expanded={self.version_expanded}")
+        # --- 版本選擇（可展開的搜尋清單）---
+        current = self.version_search.value or ""
         self._version_toggle_label = ft.Text(
-            self.version_search.value or "", size=12, color=theme.GREY_800, expand=True
+            current or "選擇遊戲版本",
+            size=13.5,
+            color=C.TEXT if current else C.DIM,
+            expand=True,
+        )
+        self._version_toggle_format = ft.Text(
+            self._format_range(self.version_data.get(current, {})),
+            size=12,
+            color=C.DIM,
+            font_family=design.FONT_MONO,
+        )
+        self._version_toggle_icon = ft.Icon(
+            ft.Icons.EXPAND_MORE, size=20, color=C.MUTED
         )
         version_toggle = ft.Container(
             content=ft.Row(
                 [
-                    ft.Text("選擇版本", size=12, color=theme.GREY_600),
+                    ft.Icon(ft.Icons.DIAMOND_OUTLINED, size=18, color=C.GOLD),
                     self._version_toggle_label,
-                    ft.Icon(
-                        ft.Icons.EXPAND_MORE
-                        if self.version_expanded
-                        else ft.Icons.EXPAND_LESS,
-                        size=20,
-                    ),
-                ]
+                    self._version_toggle_format,
+                    self._version_toggle_icon,
+                ],
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             on_click=self._toggle_version_expand,
-            padding=8,
-            border=ft.Border.all(1, theme.OUTLINE),
-            border_radius=6,
+            ink=True,
+            padding=ft.Padding.symmetric(horizontal=12, vertical=12),
+            bgcolor=C.PANEL2,
+            border=ft.Border.all(1, C.LINE2),
+            border_radius=design.RADIUS_CONTROL,
         )
         version_dropdown_container = ft.Container(
-            content=self.version_list,
-            height=180,
-            border=ft.Border.all(1, theme.OUTLINE),
-            border_radius=6,
-            padding=4,
+            content=ft.Column(
+                [self.version_search, ft.Container(self.version_list, height=170)],
+                spacing=8,
+            ),
+            padding=10,
+            bgcolor=C.PANEL2,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=design.RADIUS_CONTROL,
             visible=False,
         )
         self.version_dropdown_container_ref = version_dropdown_container
         version_section = ft.Column(
             [
+                kit.section_label("遊戲版本 (pack_format)"),
                 version_toggle,
                 version_dropdown_container,
             ],
-            spacing=4,
+            spacing=6,
         )
         self._version_section = version_section
 
-        description_row = ft.Row(
-            [
-                ft.Container(
-                    content=ft.Column(
-                        [
-                            ft.Text("檔案敘述", size=12, color=theme.GREY_600),
-                            self.description_field,
-                        ],
-                        spacing=4,
+        info_card = kit.section_card(
+            "資源包資訊",
+            ft.Column(
+                [
+                    version_section,
+                    ft.Column(
+                        [kit.section_label("檔案敘述"), self.description_field],
+                        spacing=6,
                     ),
-                    expand=True,
-                ),
-                ft.Container(
-                    content=ft.Column(
+                    ft.Column(
                         [
-                            ft.Text("資源包圖片", size=12, color=theme.GREY_600),
+                            kit.section_label("資源包圖片"),
                             ft.Row(
                                 [
                                     self.pack_image_field,
-                                    ft.IconButton(
-                                        icon=ft.Icons.IMAGE_SEARCH,
-                                        tooltip="選擇圖片",
-                                        on_click=self._pick_pack_image,
+                                    kit.pick_button(
+                                        ft.Icons.IMAGE_SEARCH,
+                                        "選擇圖片",
+                                        self._pick_pack_image,
                                     ),
                                 ],
-                                spacing=6,
+                                spacing=8,
                             ),
                         ],
-                        spacing=4,
+                        spacing=6,
                     ),
-                    expand=True,
-                ),
-            ],
-            spacing=16,
+                ],
+                spacing=16,
+            ),
+            icon=ft.Icons.DIAMOND_OUTLINED,
+            tone="gold",
         )
 
-        root_dir_row = ft.Row(
-            [
-                self.root_dir_field,
-                ft.IconButton(
-                    icon=ft.Icons.FOLDER_OPEN,
-                    tooltip="選擇資料夾",
-                    on_click=self._pick_root_dir,
-                ),
-            ],
-            spacing=8,
+        paths_card = kit.section_card(
+            "路徑與額外內容",
+            ft.Column(
+                [
+                    ft.Column(
+                        [
+                            kit.section_label("翻譯專案根目錄 *"),
+                            ft.Row(
+                                [
+                                    self.root_dir_field,
+                                    kit.pick_button(
+                                        ft.Icons.FOLDER_OPEN,
+                                        "選擇資料夾",
+                                        self._pick_root_dir,
+                                    ),
+                                ],
+                                spacing=8,
+                            ),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Column(
+                        [
+                            kit.section_label("最終 ZIP 儲存路徑"),
+                            ft.Row(
+                                [
+                                    self.output_zip_field,
+                                    kit.pick_button(
+                                        ft.Icons.SAVE_AS,
+                                        "選擇儲存位置",
+                                        self._pick_output_zip,
+                                    ),
+                                ],
+                                spacing=8,
+                            ),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Column(
+                        [
+                            kit.section_label(
+                                "其他指定資料夾 / 檔案（從選擇資料夾的下一層開始打包進 ZIP）"
+                            ),
+                            self.extra_folders_view,
+                            kit.button(
+                                "新增資料夾",
+                                "secondary",
+                                icon=ft.Icons.ADD,
+                                size="sm",
+                                on_click=self._pick_extra_folder,
+                            ),
+                        ],
+                        spacing=8,
+                    ),
+                ],
+                spacing=16,
+            ),
+            icon=ft.Icons.FOLDER_OPEN,
+            tone="em",
         )
 
-        output_zip_row = ft.Row(
-            [
-                self.output_zip_field,
-                ft.IconButton(
-                    icon=ft.Icons.SAVE_AS,
-                    tooltip="選擇儲存位置",
-                    on_click=self._pick_output_zip,
-                ),
-            ],
-            spacing=8,
+        # --- 右側預覽 ---
+        self.preview_title = ft.Text(spans=[], size=14, selectable=True)
+        self.preview_format = ft.Text(
+            "", size=12, color=C.DIM, font_family=design.FONT_MONO
+        )
+        self.preview_image = ft.Container(
+            width=72,
+            height=72,
+            border_radius=8,
+            bgcolor=C.PANEL2,
+            border=ft.Border.all(1, C.LINE2),
+            alignment=ft.Alignment.CENTER,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        )
+        self.mcmeta_view = ft.Text(
+            "", size=12, selectable=True, color=C.MUTED, font_family=design.FONT_MONO
+        )
+        preview_card = kit.section_card(
+            "資源包預覽",
+            ft.Row(
+                [
+                    self.preview_image,
+                    ft.Column(
+                        [
+                            ft.Text("zip 內的 pack.mcmeta", size=11.5, color=C.DIM),
+                            self.preview_title,
+                            self.preview_format,
+                        ],
+                        spacing=3,
+                        tight=True,
+                        expand=True,
+                    ),
+                ],
+                spacing=14,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            ),
+            icon=ft.Icons.VISIBILITY_OUTLINED,
+            tone="dia",
+        )
+        mcmeta_card = kit.section_card(
+            "pack.mcmeta",
+            self.mcmeta_view,
+            icon=ft.Icons.DATA_OBJECT,
+            tone="gold",
         )
 
-        extra_folder_section = ft.Column(
-            [
-                ft.Row(
-                    [
-                        ft.Text("其他指定資料夾", size=13, weight=ft.FontWeight.W_500),
-                        ft.IconButton(
-                            icon=ft.Icons.ADD,
-                            icon_size=20,
-                            tooltip="新增資料夾",
-                            on_click=self._pick_extra_folder,
-                        ),
-                    ],
-                    spacing=8,
-                ),
-                self.extra_folders_view,
-                ft.Text(
-                    "從選擇資料夾的下一層開始打包進 ZIP", size=11, color=theme.GREY_500
-                ),
-            ],
-            spacing=8,
-        )
-
-        self.start_button = start_button = ft.Button(
+        self.start_button = start_button = kit.button(
             "開始打包",
-            icon=ft.Icons.PLAY_ARROW,
+            "primary",
+            icon=ft.Icons.INVENTORY_2_OUTLINED,
+            size="lg",
             on_click=self.start_bundling_clicked,
-            bgcolor=theme.SUCCESS,
-            color=ft.Colors.WHITE,
         )
-
-        # LogView 自帶深色容器 + 圓角 + 等寬字（從 theme）
-        # 用 height=200 保留原本高度限制
-        log_container = ft.Container(
-            content=self.log_view,
-            height=200,
+        run_card = ft.Container(
+            padding=ft.Padding.symmetric(horizontal=18, vertical=14),
+            bgcolor=C.PANEL,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=design.RADIUS_CARD,
+            content=ft.Row(
+                [
+                    ft.Column(
+                        [self.status_text, self.progress_bar],
+                        spacing=8,
+                        tight=True,
+                        expand=True,
+                    ),
+                    start_button,
+                ],
+                spacing=16,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+        )
+        log_card = kit.section_card(
+            "打包日誌",
+            ft.Container(content=self.log_view, height=200),
+            icon=ft.Icons.RECEIPT_LONG,
+            tone="gold",
+            collapsible=True,
         )
 
         self.controls = [
-            styled_card(
-                title="打包設定",
-                icon=ft.Icons.ARCHIVE,
-                content=ft.Column(
-                    [
-                        version_section,
-                        description_row,
-                        root_dir_row,
-                        output_zip_row,
-                        extra_folder_section,
-                        start_button,
-                        self.progress_bar,
-                    ],
-                    spacing=12,
-                ),
+            kit.page_header(
+                "資源包打包",
+                "將翻譯結果打包成可直接使用的資源包 ZIP，自動產生 pack.mcmeta 與 pack.png",
+                icon=ft.Icons.INVENTORY_2_OUTLINED,
+                tone="gold",
             ),
-            styled_card(
-                title="打包日誌",
-                icon=ft.Icons.RECEIPT_LONG,
-                content=log_container,
+            ft.Row(
+                [
+                    ft.Column([info_card, paths_card], spacing=16, expand=6),
+                    ft.Column(
+                        [preview_card, mcmeta_card, run_card], spacing=16, expand=5
+                    ),
+                ],
+                spacing=16,
+                vertical_alignment=ft.CrossAxisAlignment.START,
             ),
+            log_card,
         ]
+        self._update_preview()
 
     def _pick_pack_image(self, e: ft.ControlEvent):
         self.file_picker.on_upload = self._on_pack_image_picked
@@ -403,22 +569,39 @@ class BundlerView(ft.Column):
         self.extra_folders_view.controls.clear()
         for path in self.extra_folders:
             is_file = os.path.isfile(path)
-            icon = ft.Icons.INSERT_DRIVE_FILE if is_file else ft.Icons.FOLDER
+            icon = (
+                ft.Icons.INSERT_DRIVE_FILE_OUTLINED
+                if is_file
+                else ft.Icons.FOLDER_OUTLINED
+            )
             self.extra_folders_view.controls.append(
-                ft.Row(
-                    [
-                        ft.Icon(icon, size=16, color=theme.BLUE_GREY_500),
-                        ft.Text(
-                            path, expand=True, size=13, text_align=ft.TextAlign.START
-                        ),
-                        ft.IconButton(
-                            icon=ft.Icons.CLOSE,
-                            icon_size=16,
-                            tooltip="移除",
-                            on_click=lambda e, p=path: self._remove_extra_folder(p),
-                        ),
-                    ],
-                    spacing=6,
+                ft.Container(
+                    padding=ft.Padding(left=12, top=4, right=4, bottom=4),
+                    bgcolor=C.PANEL2,
+                    border=ft.Border.all(1, C.LINE),
+                    border_radius=design.RADIUS_CONTROL,
+                    content=ft.Row(
+                        [
+                            ft.Icon(icon, size=16, color=C.MUTED),
+                            ft.Text(
+                                path,
+                                expand=True,
+                                size=12.5,
+                                font_family=design.FONT_MONO,
+                                no_wrap=True,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            ft.IconButton(
+                                icon=ft.Icons.CLOSE,
+                                icon_size=16,
+                                icon_color=C.MUTED,
+                                tooltip="移除",
+                                on_click=lambda e, p=path: self._remove_extra_folder(p),
+                            ),
+                        ],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
                 )
             )
 
@@ -452,6 +635,9 @@ class BundlerView(ft.Column):
         self.progress_bar.visible = True
         self.progress_bar.value = 0
         self.log_view.clear()
+        self.status_text.value = "打包中…"
+        self.status_text.color = C.TEXT
+        self.progress_bar.color = C.EM
         self._append_log("開始執行打包...", level="info")
         self._page.update()
 
@@ -484,6 +670,10 @@ class BundlerView(ft.Column):
         if state.get("done"):
             self.progress_bar.visible = False
         self.start_button.disabled = self._bundling_running
+        if state.get("done"):
+            failed = state.get("error_color") is not None
+            self.status_text.value = "打包失敗，請查看日誌" if failed else "打包完成"
+            self.status_text.color = C.RED if failed else C.EM
         self._page.update()
 
     def _bundling_worker(self, root_dir, output_zip, version, description, pack_image):
@@ -514,11 +704,11 @@ class BundlerView(ft.Column):
                 if "progress" in update:
                     batcher.set_state(progress=update["progress"])
                 if update.get("error"):
-                    batcher.set_state(error_color=theme.ERROR)
+                    batcher.set_state(error_color=C.RED)
                 batcher.flush()
         except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，錯誤顯示於日誌
             batcher.add_lines([(f"[錯誤] {ex}", "error")])
-            batcher.set_state(error_color=theme.RED)
+            batcher.set_state(error_color=C.RED)
         finally:
             self._bundling_running = False
             batcher.set_state(done=True)

@@ -17,11 +17,15 @@
 ```
 Minecraft-translate/
 ├── app/                      # Flet 桌面應用程式（本體）
+│   ├── shell/                # 外殼：側欄 / 頂列 / 狀態列 / 快速跳轉 / TaskManager
+│   ├── tasks/                # TaskSession、LogEntry（與 UI 無關）
+│   ├── config_store.py       # 設定讀寫與變更通知
 │   ├── ui/                   # UI 元件
+│   │   ├── design.py        # 設計 token / 主題（見 docs/UI_DESIGN_SYSTEM.md）
+│   │   ├── kit/             # 共用元件
 │   │   ├── components.py    # 通用元件
 │   │   ├── keyboard_shortcuts.py
-│   │   ├── quick_jump.py
-│   │   ├── theme.py
+│   │   ├── theme.py         # 舊色常數映射
 │   │   └── view_wrapper.py
 │   ├── views/               # 各功能頁面（View）
 │   │   ├── bundler_view.py        # 輸出打包
@@ -35,8 +39,8 @@ Minecraft-translate/
 │   │   ├── lookup_view.py         # 查詢頁
 │   │   ├── merge_view.py          # 合併頁
 │   │   ├── pipeline/              # 一鍵批次翻譯（pipeline_view + 5 dialogs）
-│   │   ├── cache/                 # 舊版快取視圖實驗碼（未接線，待清理）
-│   │   ├── cache_manager/         # 快取視圖抽離模組（actions/state/history/overview，實際被引用）
+│   │   ├── dashboard/             # 工作台資料彙整
+│   │   ├── cache_manager/         # 快取視圖子模組（actions/state/history/overview/log）
 │   │   ├── config/                # 設定視圖子模組（config_actions/config_form）
 │   │   ├── extractor/             # 擷取視圖子模組（dialog/panels/state）
 │   │   ├── rules/                 # 規則視圖子模組（rules_actions/state/table）
@@ -46,11 +50,9 @@ Minecraft-translate/
 │   │   ├── rules_view.py          # 規則頁
 │   │   ├── translation_view.py     # 翻譯頁
 │   │   └── untranslated_checker.py # 未翻譯檢查
-│   ├── logging/              # 日誌模組
 │   ├── services_impl/        # 服務實作
 │   ├── services.py           # 服務協調
 │   ├── startup_tasks.py      # 啟動任務
-│   ├── task_session.py       # 任務 session
 │   └── view_registry.py      # View 註冊表
 │
 ├── translation_tool/         # 核心翻譯引擎（無 GUI 相依）
@@ -157,6 +159,7 @@ Minecraft-translate/
 
 | View | 職責 |
 |------|------|
+| `dashboard_view.py` | 工作台：任務、金鑰、快取、近期活動總覽 |
 | `cache_view.py` | 翻譯快取管理與查詢 |
 | `lm_view.py` | LM 翻譯執行與進度追蹤 |
 | `merge_view.py` | 多語系合併管理 |

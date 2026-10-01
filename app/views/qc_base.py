@@ -11,7 +11,7 @@ from typing import Any
 
 import flet as ft
 
-from app.ui import theme
+from app.ui.design import C
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from translation_tool.utils.log_unit import log_error
@@ -77,11 +77,11 @@ class QCBase:
             if state.get("progress") is not None:
                 self.progress_bar.value = state["progress"]
             if state.get("error"):
-                self.progress_bar.color = theme.ERROR
+                self.progress_bar.color = C.RED
             done = state.get("done", False)
             if done:
                 self.progress_bar.value = 0
-                self.progress_bar.color = None
+                self.progress_bar.color = C.EM
                 if controls_to_disable:
                     for ctrl in controls_to_disable:
                         ctrl.disabled = False

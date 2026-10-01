@@ -21,6 +21,8 @@ from typing import Any
 
 from translation_tool.utils.text_processor import (
     load_replace_rules as load_rules_core,
+)
+from translation_tool.utils.text_processor import (
     save_replace_rules as save_rules_core,
 )
 
@@ -30,6 +32,7 @@ from translation_tool.utils.text_processor import (
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = str(PROJECT_ROOT / "config.json")
 REPLACE_RULES_PATH = str(PROJECT_ROOT / "replace_rules.json")
+
 
 def _load_app_config() -> dict[str, Any]:
     """讀取 app 設定（service 層唯一入口）。
@@ -47,12 +50,17 @@ def _load_app_config() -> dict[str, Any]:
 
     return load_config(CONFIG_PATH)
 
+
 def _save_app_config(config: dict[str, Any]):
     """儲存 app 設定（service 層唯一入口）。
 
     與 `_load_app_config()` 成對：
     - service 層只知道「要存設定」，不應綁死底層儲存細節。
     - 之後若要加上寫入驗證/寫入鎖/異動通知，也集中在這裡處理。
+
+    寫入所有權：寫檔一律在 ``config_store.write_lock()`` 內進行（與 ``config_store.set_value``
+    共用同一把鎖，避免兩個寫入者交錯寫出壞掉的 JSON）；訂閱者在鎖**釋放後**才被通知
+    （callback 再寫設定時才不會重入死鎖）。
     """
 
     # Normalization: 當停用簡中處理時，強制關閉所有相依的子功能。
@@ -66,14 +74,25 @@ def _save_app_config(config: dict[str, Any]):
     # 這樣下次讀取時，不會因為某個子功能仍為 true 而產生矛盾的行為。
     merger_cfg = config.get("lang_merger", {})
     if not merger_cfg.get("process_zh_cn_files", True):
-        config.setdefault("lang_merger", merger_cfg)["skip_zh_cn_when_only_process_lang"] = False
-        config.setdefault("lang_merger", merger_cfg)["patchouli_skip_en_us_when_zh_cn_exists"] = False
+        config.setdefault("lang_merger", merger_cfg)[
+            "skip_zh_cn_when_only_process_lang"
+        ] = False
+        config.setdefault("lang_merger", merger_cfg)[
+            "patchouli_skip_en_us_when_zh_cn_exists"
+        ] = False
 
+    from app import config_store
     from translation_tool.utils.config_manager import save_config
 
-    return save_config(config, CONFIG_PATH)
+    with config_store.write_lock():
+        ok = save_config(config, CONFIG_PATH)
+    if ok:
+        config_store.notify_saved()  # 讓外殼（API Key 狀態、模型、主題）立即更新
+    return ok
+
 
 # --- 檔案讀寫服務 ---
+
 
 def load_replace_rules():
     """載入替換規則。
@@ -83,6 +102,7 @@ def load_replace_rules():
     """
     return load_rules_core(REPLACE_RULES_PATH)
 
+
 def save_replace_rules(rules):
     """儲存替換規則。
 
@@ -90,6 +110,7 @@ def save_replace_rules(rules):
         rules: 規則資料
     """
     save_rules_core(REPLACE_RULES_PATH, rules)
+
 
 def load_config_json() -> dict:
     """載入應用程式設定（UI 層專用包裝）。
@@ -99,10 +120,14 @@ def load_config_json() -> dict:
     """
     return _load_app_config()
 
+
 def save_config_json(config):
     """儲存應用程式設定。
 
     參數：
         config: 設定資料
+
+    回傳：
+        bool: 是否寫入成功
     """
-    _save_app_config(config)
+    return _save_app_config(config)

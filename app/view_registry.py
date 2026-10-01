@@ -2,42 +2,215 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import flet as ft
 
 from app.ui.view_wrapper import wrap_view
 
-DEFAULT_WINDOW_SIZE = (1280, 960)
-VIEW_WINDOW_SIZES = {
-    "config": (1280, 960),
-    "rules": (1280, 960),
-    "cache": (1360, 940),
-    "qc": (1280, 960),
-    "lookup": (1280, 960),
-    "icon_preview": (1280, 960),
-    "bundler": (1280, 960),
-    "translation": (1280, 960),
-    "extractor": (1280, 900),
-    "lm": (1280, 920),
-    "merge": (1280, 920),
-    "arnold": (1000, 950),
-}
+# 視窗尺寸：整個 App 共用一個尺寸，切頁時不再改變視窗（側欄 + 頂列的外殼需要穩定的版面）
+DEFAULT_WINDOW_SIZE = (1360, 900)
+MIN_WINDOW_SIZE = (1100, 720)
 
-# Lazy import map - 延遲載入 view 的對應表
-# 格式：{'key': (module_name, class_name, needs_file_picker)}
-_VIEW_IMPORT_MAP = {
-    "config": ("app.views.config_view", "ConfigView", False),
-    "rules": ("app.views.rules_view", "RulesView", False),
-    "cache": ("app.views.cache_view", "CacheView", False),
-    "qc": ("app.views.qc_view", "QCView", True),
-    "lookup": ("app.views.lookup_view", "LookupView", False),
-    "icon_preview": ("app.views.icon_preview_view", "IconPreviewView", False),
-    "bundler": ("app.views.bundler_view", "BundlerView", True),
-    "translation": ("app.views.translation_view", "TranslationView", True),
-    "extractor": ("app.views.extractor_view", "ExtractorView", True),
-    "lm": ("app.views.lm_view", "LMView", True),
-    "merge": ("app.views.merge_view", "MergeView", True),
-    "pipeline": ("app.views.pipeline.pipeline_view", "PipelineView", True),
-}
+
+@dataclass(frozen=True)
+class NavGroup:
+    """側欄的分組（工作流程 / 品管與校對 / 資料庫 / 輸出）。"""
+
+    key: str
+    label: str
+    tone: str  # 對應 design.tone() 的強調色組
+
+
+@dataclass(frozen=True)
+class ViewSpec:
+    """一個頁面的全部靜態資訊（側欄、麵包屑、快速跳轉、快捷鍵、延遲載入都從這裡取）。"""
+
+    key: str
+    label: str
+    icon: str
+    group: str  # NavGroup.key；"system" 表示固定在側欄底部
+    module: str
+    cls: str
+    needs_file_picker: bool = False
+    shortcut: str | None = None  # Ctrl+<數字>
+    keywords: tuple[str, ...] = ()  # 快速跳轉的額外搜尋字
+
+
+# 側欄由上到下的分組順序（依「工作流程」排序）
+NAV_GROUPS: tuple[NavGroup, ...] = (
+    NavGroup("flow", "工作流程", "em"),
+    NavGroup("qc", "品管與校對", "ench"),
+    NavGroup("data", "資料庫", "dia"),
+    NavGroup("out", "輸出", "gold"),
+)
+SYSTEM_GROUP = NavGroup("system", "系統", "neutral")
+
+# 單一資料來源：新增頁面只需要在這裡加一筆
+VIEW_SPECS: tuple[ViewSpec, ...] = (
+    ViewSpec(
+        "dashboard",
+        "工作台",
+        ft.Icons.GRID_VIEW_OUTLINED,
+        "flow",
+        "app.views.dashboard_view",
+        "DashboardView",
+        False,
+        "1",
+        ("dashboard", "home", "首頁", "總覽", "狀態"),
+    ),
+    ViewSpec(
+        "pipeline",
+        "一鍵流水線",
+        ft.Icons.ACCOUNT_TREE_OUTLINED,
+        "flow",
+        "app.views.pipeline.pipeline_view",
+        "PipelineView",
+        True,
+        "2",
+        ("pipeline", "模組流水線", "提取", "翻譯", "打包"),
+    ),
+    ViewSpec(
+        "extractor",
+        "JAR 提取",
+        ft.Icons.INVENTORY_2_OUTLINED,
+        "flow",
+        "app.views.extractor_view",
+        "ExtractorView",
+        True,
+        "3",
+        ("jar", "extract", "提取"),
+    ),
+    ViewSpec(
+        "merge",
+        "語系合併",
+        ft.Icons.CALL_MERGE,
+        "flow",
+        "app.views.merge_view",
+        "MergeView",
+        True,
+        "4",
+        ("merge", "比對", "lang"),
+    ),
+    ViewSpec(
+        "lm",
+        "機器翻譯",
+        ft.Icons.AUTO_AWESOME_OUTLINED,
+        "flow",
+        "app.views.lm_view",
+        "LMView",
+        True,
+        "5",
+        ("gemini", "lm", "ai", "api"),
+    ),
+    ViewSpec(
+        "translation",
+        "任務翻譯",
+        ft.Icons.TRANSLATE,
+        "flow",
+        "app.views.translation_view",
+        "TranslationView",
+        True,
+        "6",
+        ("task", "翻譯工具"),
+    ),
+    ViewSpec(
+        "qc",
+        "QC 檢驗",
+        ft.Icons.VERIFIED_USER_OUTLINED,
+        "qc",
+        "app.views.qc_view",
+        "QCView",
+        True,
+        "7",
+        ("qc", "品管", "檢查"),
+    ),
+    ViewSpec(
+        "icon_preview",
+        "翻譯校對",
+        ft.Icons.SPELLCHECK,
+        "qc",
+        "app.views.icon_preview_view",
+        "IconPreviewView",
+        False,
+        "8",
+        ("review", "圖示", "icon", "校對"),
+    ),
+    ViewSpec(
+        "cache",
+        "快取管理",
+        ft.Icons.STORAGE_OUTLINED,
+        "data",
+        "app.views.cache_view",
+        "CacheView",
+        False,
+        "9",
+        ("cache", "索引"),
+    ),
+    ViewSpec(
+        "rules",
+        "替換規則",
+        ft.Icons.FIND_REPLACE,
+        "data",
+        "app.views.rules_view",
+        "RulesView",
+        False,
+        "0",
+        ("rules", "規則", "取代"),
+    ),
+    ViewSpec(
+        "lookup",
+        "學名查詢",
+        ft.Icons.SCIENCE_OUTLINED,
+        "data",
+        "app.views.lookup_view",
+        "LookupView",
+        False,
+        None,
+        ("lookup", "查詢", "字典"),
+    ),
+    ViewSpec(
+        "bundler",
+        "資源包打包",
+        ft.Icons.FOLDER_ZIP_OUTLINED,
+        "out",
+        "app.views.bundler_view",
+        "BundlerView",
+        True,
+        None,
+        ("bundle", "zip", "打包"),
+    ),
+    ViewSpec(
+        "config",
+        "設定",
+        ft.Icons.SETTINGS_OUTLINED,
+        "system",
+        "app.views.config_view",
+        "ConfigView",
+        False,
+        None,
+        ("config", "api key", "設定"),
+    ),
+)
+
+SPECS_BY_KEY: dict[str, ViewSpec] = {spec.key: spec for spec in VIEW_SPECS}
+DEFAULT_VIEW_KEY = "dashboard"
+
+
+def get_spec(view_key: str) -> ViewSpec:
+    """依 key 取得 ViewSpec；未知的 key 丟 KeyError。"""
+    return SPECS_BY_KEY[view_key]
+
+
+def get_group(group_key: str) -> NavGroup:
+    for group in (*NAV_GROUPS, SYSTEM_GROUP):
+        if group.key == group_key:
+            return group
+    raise KeyError(group_key)
+
+
+def specs_in_group(group_key: str) -> list[ViewSpec]:
+    return [spec for spec in VIEW_SPECS if spec.group == group_key]
 
 
 def _lazy_import_view(view_key: str, page: ft.Page, file_picker: ft.FilePicker):
@@ -51,10 +224,10 @@ def _lazy_import_view(view_key: str, page: ft.Page, file_picker: ft.FilePicker):
     Returns:
         View 實例
     """
-    module_name, class_name, needs_file_picker = _VIEW_IMPORT_MAP[view_key]
-    module = __import__(module_name, fromlist=[class_name])
-    view_class = getattr(module, class_name)
-    if needs_file_picker:
+    spec = get_spec(view_key)
+    module = __import__(spec.module, fromlist=[spec.cls])
+    view_class = getattr(module, spec.cls)
+    if spec.needs_file_picker:
         return view_class(page, file_picker)
     return view_class(page)
 
@@ -113,24 +286,8 @@ def built_view(item):
     return item.get("view")
 
 
-_VIEW_NAV = [
-    ("config", ft.Icons.SETTINGS, "設定"),
-    ("rules", ft.Icons.RULE, "規則"),
-    ("cache", ft.Icons.STORAGE, "快取管理"),
-    ("qc", ft.Icons.CHECK_CIRCLE, "QC 檢驗"),
-    ("lookup", ft.Icons.SEARCH, "查詢"),
-    ("icon_preview", ft.Icons.IMAGE, "JAR 圖示預覽"),
-    ("bundler", ft.Icons.FOLDER_ZIP, "打包"),
-    ("translation", ft.Icons.TRANSLATE, "任務 翻譯工具"),
-    ("extractor", ft.Icons.UNARCHIVE, "jar 提取"),
-    ("lm", ft.Icons.AUTO_AWESOME, "機器翻譯"),
-    ("merge", ft.Icons.CALL_MERGE, "語系比對合併"),
-    ("pipeline", ft.Icons.TERMINAL, "模組流水線翻譯打包"),
-]
-
-
 def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
-    """建立 view 註冊表（頁面在第一次取用時才建立）。
+    """建立 view 註冊表（頁面在第一次取用時才建立）。順序即側欄順序。
 
     Args:
         page: Flet Page 物件
@@ -144,35 +301,25 @@ def build_view_registry(page: ft.Page, file_picker: ft.FilePicker):
         return lambda: wrap_view(_lazy_import_view(key, page, file_picker))
 
     return [
-        LazyViewItem(_builder(key), key=key, icon=icon, label=label)
-        for key, icon, label in _VIEW_NAV
-    ]
-
-
-def get_window_size(view_key: str) -> tuple:
-    """取得 view 的視窗大小。
-
-    Args:
-        view_key: View 的 key
-
-    Returns:
-        (寬, 高) 元組
-    """
-    return VIEW_WINDOW_SIZES.get(view_key, DEFAULT_WINDOW_SIZE)
-
-
-def build_navigation_destinations(registry):
-    """從 registry 建立導航目的地。
-
-    Args:
-        registry: View 註冊表
-
-    Returns:
-        NavigationRailDestination 列表
-    """
-    return [
-        ft.NavigationRailDestination(
-            icon=item["icon"], selected_icon=item["icon"], label=item["label"]
+        LazyViewItem(
+            _builder(spec.key),
+            key=spec.key,
+            icon=spec.icon,
+            label=spec.label,
+            group=spec.group,
         )
-        for item in registry
+        for spec in VIEW_SPECS
     ]
+
+
+def index_of(registry, view_key: str) -> int:
+    """view key 在 registry 的位置；找不到回傳 -1。"""
+    for index, item in enumerate(registry):
+        if item.get("key") == view_key:
+            return index
+    return -1
+
+
+def get_window_size(_view_key: str | None = None) -> tuple:
+    """視窗大小（整個 App 共用；保留參數是為了相容舊呼叫）。"""
+    return DEFAULT_WINDOW_SIZE

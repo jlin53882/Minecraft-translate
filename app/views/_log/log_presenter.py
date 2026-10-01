@@ -11,12 +11,22 @@
 
 from __future__ import annotations
 
-from typing import List, Literal, Optional, Sequence
+from collections.abc import Sequence
+from typing import Literal
 
 import flet as ft
 
-from .log_colors import get_level_color
-from .log_entry import LogEntry
+from app.tasks.log_entry import LogEntry
+from app.ui import design, theme
+
+# 等級 → 語意色（跟著深淺色主題切換）
+_LEVEL_COLORS = {
+    "system": theme.TEXT_LOG_SYSTEM,
+    "info": theme.TEXT_LOG_INFO,
+    "warning": theme.TEXT_LOG_WARNING,
+    "error": theme.TEXT_LOG_ERROR,
+    "debug": theme.TEXT_LOG_DEBUG,
+}
 
 
 class LogPresenter:
@@ -41,7 +51,7 @@ class LogPresenter:
         mode: Literal["append", "tail"] = "append",
         max_ui_lines: int = 300,
         tail_lines: int = 250,
-        show_levels: Optional[List[str]] = None,
+        show_levels: list[str] | None = None,
         colorize: bool = True,
         text_size: int = 13,
         default_color: str = "#FFFFFF",
@@ -67,7 +77,7 @@ class LogPresenter:
         self,
         list_view: ft.ListView,
         entries: Sequence[LogEntry],
-    ) -> List[LogEntry]:
+    ) -> list[LogEntry]:
         """
         將 LogEntry 同步到 UI ListView。
 
@@ -95,7 +105,7 @@ class LogPresenter:
         self,
         list_view: ft.ListView,
         entries: Sequence[LogEntry],
-    ) -> List[LogEntry]:
+    ) -> list[LogEntry]:
         """Append 模式：只渲染 self._last_seq 之後的新 entries。"""
         # 跳過已處理的
         new_entries = [e for e in entries if e.seq > self._last_seq]
@@ -105,7 +115,12 @@ class LogPresenter:
         for entry in new_entries:
             color = self._entry_color(entry)
             list_view.controls.append(
-                ft.Text(entry.text, size=self.text_size, color=color)
+                ft.Text(
+                    entry.text,
+                    size=self.text_size,
+                    color=color,
+                    font_family=design.FONT_MONO,
+                )
             )
 
         self._last_seq = max(e.seq for e in new_entries)
@@ -120,14 +135,19 @@ class LogPresenter:
         self,
         list_view: ft.ListView,
         entries: Sequence[LogEntry],
-    ) -> List[LogEntry]:
+    ) -> list[LogEntry]:
         """Tail 模式：全量替換為最後 N 筆。"""
         tail = list(entries[-self.tail_lines :]) if entries else []
         list_view.controls.clear()
         for entry in tail:
             color = self._entry_color(entry)
             list_view.controls.append(
-                ft.Text(entry.text, size=self.text_size, color=color)
+                ft.Text(
+                    entry.text,
+                    size=self.text_size,
+                    color=color,
+                    font_family=design.FONT_MONO,
+                )
             )
         return tail
 
@@ -141,7 +161,7 @@ class LogPresenter:
             if hasattr(color, "value"):
                 return color.value  # Colors enum → "grey100"
             return str(color)
-        return "#" + get_level_color(entry.level)
+        return _LEVEL_COLORS.get(str(entry.level).lower(), self.default_color)
 
     def _truncate(self, list_view: ft.ListView) -> None:
         """確保 list_view.controls 不超過 max_ui_lines。"""

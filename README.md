@@ -28,10 +28,12 @@
 
 ## UI 對照（啟用狀態，依 `main.py`）
 
-### 已啟用（目前會出現在左側選單）- 11 個主 View
+### 已啟用（目前會出現在左側選單）- 13 個頁面（含工作台與一鍵流水線）
+- `dashboard_view.py`：工作台
+- `pipeline/pipeline_view.py`：一鍵流水線
 - `config_view.py`：設定
 - `rules_view.py`：替換規則
-- `cache_view.py`：快取管理（含 QueryPanel / ShardPanel）
+- `cache_view.py`：快取管理（總覽 / 查詢 / 分片）
 - `qc_view.py`：品質檢查（含 UntranslatedChecker / QCBase）
 - `lookup_view.py`：查詢
 - `icon_preview_view.py`：圖示預覽

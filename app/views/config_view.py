@@ -9,7 +9,8 @@ from typing import ClassVar
 import flet as ft
 
 from app.services_impl.config_service import load_config_json, save_config_json
-from app.ui import theme
+from app.ui import design, kit, theme
+from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.config.config_actions import load_config_into_view, save_config_from_view
 from app.views.config.config_form import (
@@ -89,7 +90,7 @@ class ConfigView(ft.Column):
 
     def _init_controls(self):
         """初始化所有輸入控制項"""
-        self.controls_map["logging.log_level"] = ft.Dropdown(
+        self.controls_map["logging.log_level"] = kit.dropdown(
             label="日誌等級",
             options=[
                 ft.dropdown.Option(level)
@@ -98,58 +99,58 @@ class ConfigView(ft.Column):
             dense=True,
             helper_text="用於：logging module",
         )
-        self.controls_map["logging.log_dir"] = ft.TextField(
+        self.controls_map["logging.log_dir"] = kit.field(
             label="日誌資料夾名稱", dense=True, helper="用於：logging module"
         )
 
-        self.controls_map["translator.output_dir_name"] = ft.TextField(
+        self.controls_map["translator.output_dir_name"] = kit.field(
             label="主要輸出資料夾名稱", dense=True, helper="用於：翻譯結果輸出"
         )
-        self.controls_map["ftb_translator.output_dir_name"] = ft.TextField(
+        self.controls_map["ftb_translator.output_dir_name"] = kit.field(
             label="FTB 任務輸出資料夾名稱", dense=True, helper="用於：FTB任務翻譯輸出"
         )
-        self.controls_map["translator.replace_rules_path"] = ft.TextField(
+        self.controls_map["translator.replace_rules_path"] = kit.field(
             label="替換規則檔案名稱", dense=True, helper="用於：replace_rules_loader"
         )
-        self.controls_map["translator.cache_directory"] = ft.TextField(
+        self.controls_map["translator.cache_directory"] = kit.field(
             label="快取資料夾名稱", dense=True, helper="用於：翻譯快取系統"
         )
         self.controls_map["translator.enable_cache_saving"] = ft.Checkbox(
             label="啟用通用翻譯快取"
         )
-        self.controls_map["translator.parallel_execution_workers"] = ft.TextField(
+        self.controls_map["translator.parallel_execution_workers"] = kit.field(
             label="檔案處理多執行緒數量", dense=True, helper="用於：平行執行器"
         )
 
-        self.controls_map["species_cache.cache_directory"] = ft.TextField(
+        self.controls_map["species_cache.cache_directory"] = kit.field(
             label="學名快取資料夾", hint_text="用於：學名查詢系統", dense=True
         )
-        self.controls_map["species_cache.cache_filename"] = ft.TextField(
+        self.controls_map["species_cache.cache_filename"] = kit.field(
             label="學名存放檔案名稱", hint_text="用於：學名TSV快取", dense=True
         )
-        self.controls_map["species_cache.wikipedia_language"] = ft.TextField(
+        self.controls_map["species_cache.wikipedia_language"] = kit.field(
             label="Wiki 查詢語言", hint_text="用於：維基百科API", dense=True
         )
-        self.controls_map["species_cache.wikipedia_rate_limit_delay"] = ft.TextField(
+        self.controls_map["species_cache.wikipedia_rate_limit_delay"] = kit.field(
             label="查詢延遲(秒)", hint_text="用於：API速率限制", dense=True
         )
 
-        self.controls_map["output_bundler.output_zip_name"] = ft.TextField(
+        self.controls_map["output_bundler.output_zip_name"] = kit.field(
             label="最終打包 ZIP 檔名", hint_text="用於：BundlerView自動帶入", dense=True
         )
 
-        self.controls_map["lang_merger.pending_folder_name"] = ft.TextField(
+        self.controls_map["lang_merger.pending_folder_name"] = kit.field(
             label="待翻譯資料夾名稱", hint_text="用於：語言合併器", dense=True
         )
-        self.controls_map["lang_merger.pending_organized_folder_name"] = ft.TextField(
+        self.controls_map["lang_merger.pending_organized_folder_name"] = kit.field(
             label="待翻譯整理資料夾名稱", hint_text="用於：lang_merger", dense=True
         )
-        self.controls_map["lang_merger.filtered_pending_min_count"] = ft.TextField(
+        self.controls_map["lang_merger.filtered_pending_min_count"] = kit.field(
             label="待翻譯整理json筆數最小出現次數",
             hint_text="用於：整理分類邏輯",
             dense=True,
         )
-        self.controls_map["lang_merger.quarantine_folder_name"] = ft.TextField(
+        self.controls_map["lang_merger.quarantine_folder_name"] = kit.field(
             label="語言合併器格式問題隔離資料夾名稱",
             hint_text="用於：格式錯誤隔離",
             dense=True,
@@ -158,14 +159,14 @@ class ConfigView(ft.Column):
             ft.Checkbox(label="優先使用已有繁中，無則信任簡中（跳過英文）", value=False)
         )
         self.controls_map["lang_merger.patchouli_effective_translation_threshold"] = (
-            ft.TextField(
+            kit.field(
                 label="en_us 跳過門檻",
                 hint_text="有效翻譯比例閾值 0.0~1.0，空白用預設值 0.5",
                 dense=True,
                 keyboard_type=ft.KeyboardType.NUMBER,
             )
         )
-        self.controls_map["lang_merger.zh_en_letter_threshold"] = ft.TextField(
+        self.controls_map["lang_merger.zh_en_letter_threshold"] = kit.field(
             label="zh 英文含量閾值",
             hint_text="超過此數值判定為英文，空白用預設值 2",
             dense=True,
@@ -178,82 +179,82 @@ class ConfigView(ft.Column):
             label="合併 XX_extracted → assets/(merge 階段2)", value=True
         )
 
-        self.controls_map["lm_translator.temperature"] = ft.TextField(
+        self.controls_map["lm_translator.temperature"] = kit.field(
             label="模型溫度 (Temperature)", hint_text="用於：LM翻譯請求", dense=True
         )
-        self.controls_map["lm_translator.rate_limit.timeout"] = ft.TextField(
+        self.controls_map["lm_translator.rate_limit.timeout"] = kit.field(
             label="API 請求 Timeout",
             helper="用於：API超時控制",
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
         )
         self.controls_map["lm_translator.rate_limit.sleep_seconds_between_batches"] = (
-            ft.TextField(
+            kit.field(
                 label="批次間延遲 (秒)",
                 helper="用於：翻譯批次間延遲",
                 dense=True,
                 keyboard_type=ft.KeyboardType.NUMBER,
             )
         )
-        self.controls_map["lm_translator.lm_translate_folder_name"] = ft.TextField(
+        self.controls_map["lm_translator.lm_translate_folder_name"] = kit.field(
             label="LM 翻譯輸出資料夾", helper="用於：翻譯結果輸出", dense=True
         )
 
-        self.controls_map["species_cache.cache_directory"] = ft.TextField(
+        self.controls_map["species_cache.cache_directory"] = kit.field(
             label="學名快取資料夾", dense=True, helper="用於：學名查詢系統"
         )
-        self.controls_map["species_cache.cache_filename"] = ft.TextField(
+        self.controls_map["species_cache.cache_filename"] = kit.field(
             label="學名存放檔案名稱", dense=True, helper="用於：學名TSV快取"
         )
-        self.controls_map["species_cache.wikipedia_language"] = ft.TextField(
+        self.controls_map["species_cache.wikipedia_language"] = kit.field(
             label="Wiki 查詢語言", dense=True, helper="用於：維基百科API"
         )
-        self.controls_map["species_cache.wikipedia_rate_limit_delay"] = ft.TextField(
+        self.controls_map["species_cache.wikipedia_rate_limit_delay"] = kit.field(
             label="查詢延遲(秒)", dense=True, helper="用於：API速率限制"
         )
 
-        self.controls_map["output_bundler.output_zip_name"] = ft.TextField(
+        self.controls_map["output_bundler.output_zip_name"] = kit.field(
             label="最終打包 ZIP 檔名", dense=True, helper="用於：BundlerView自動帶入"
         )
 
-        self.controls_map["lang_merger.pending_folder_name"] = ft.TextField(
+        self.controls_map["lang_merger.pending_folder_name"] = kit.field(
             label="待翻譯資料夾名稱", dense=True, helper="用於：語言合併器"
         )
-        self.controls_map["lang_merger.pending_organized_folder_name"] = ft.TextField(
+        self.controls_map["lang_merger.pending_organized_folder_name"] = kit.field(
             label="待翻譯整理資料夾名稱", dense=True, helper="用於：lang_merger"
         )
-        self.controls_map["lang_merger.filtered_pending_min_count"] = ft.TextField(
+        self.controls_map["lang_merger.filtered_pending_min_count"] = kit.field(
             label="待翻譯整理json筆數最小出現次數",
             dense=True,
             helper="用於：整理分類邏輯",
         )
-        self.controls_map["lang_merger.quarantine_folder_name"] = ft.TextField(
+        self.controls_map["lang_merger.quarantine_folder_name"] = kit.field(
             label="語言合併器格式問題隔離資料夾名稱",
             dense=True,
             helper="用於：格式錯誤隔離",
         )
 
-        self.controls_map["lm_translator.temperature"] = ft.TextField(
+        self.controls_map["lm_translator.temperature"] = kit.field(
             label="模型溫度 (Temperature)", dense=True, helper="用於：LM翻譯請求"
         )
-        self.controls_map["lm_translator.rate_limit.timeout"] = ft.TextField(
+        self.controls_map["lm_translator.rate_limit.timeout"] = kit.field(
             label="API 請求 Timeout",
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
             helper="用於：API超時控制",
         )
-        self.controls_map["lm_translator.lm_translate_folder_name"] = ft.TextField(
+        self.controls_map["lm_translator.lm_translate_folder_name"] = kit.field(
             label="LM 翻譯輸出資料夾", dense=True, helper="用於：翻譯結果輸出"
         )
 
-        self.controls_map["lm_translator.patchouli_system_prompt"] = ft.TextField(
+        self.controls_map["lm_translator.patchouli_system_prompt"] = kit.field(
             label="Patchouli 提示詞 (System Prompt)",
             multiline=True,
             expand=True,
             text_size=13,
             helper="用於：Patchouli翻譯請求",
         )
-        self.controls_map["lm_translator.lang_system_prompt"] = ft.TextField(
+        self.controls_map["lm_translator.lang_system_prompt"] = kit.field(
             label="Lang 提示詞 (System Prompt)",
             multiline=True,
             expand=True,
@@ -261,57 +262,53 @@ class ConfigView(ft.Column):
             helper="用於：Lang檔案翻譯請求",
         )
 
-        self.controls_map["lm_translator.initial_batch_size_patchouli"] = ft.TextField(
+        self.controls_map["lm_translator.initial_batch_size_patchouli"] = kit.field(
             label="Patchouli 請求大小", dense=True, helper="用於：批次翻譯請求"
         )
-        self.controls_map["lm_translator.initial_batch_size_lang"] = ft.TextField(
+        self.controls_map["lm_translator.initial_batch_size_lang"] = kit.field(
             label="Lang 請求大小", dense=True, helper="用於：批次翻譯請求"
         )
-        self.controls_map["lm_translator.initial_batch_size_ftb"] = ft.TextField(
+        self.controls_map["lm_translator.initial_batch_size_ftb"] = kit.field(
             label="FTB Quests 請求大小", dense=True, helper="用於：批次翻譯請求"
         )
-        self.controls_map["lm_translator.initial_batch_size_kubejs"] = ft.TextField(
+        self.controls_map["lm_translator.initial_batch_size_kubejs"] = kit.field(
             label="KubeJS 請求大小", dense=True, helper="用於：批次翻譯請求"
         )
-        self.controls_map["lm_translator.initial_batch_size_md"] = ft.TextField(
+        self.controls_map["lm_translator.initial_batch_size_md"] = kit.field(
             label="MD 請求大小", dense=True, helper="用於：批次翻譯請求"
         )
-        self.controls_map["lm_translator.min_batch_size"] = ft.TextField(
+        self.controls_map["lm_translator.min_batch_size"] = kit.field(
             label="最小錯誤請求大小", dense=True, helper="用於：錯誤時批次縮小"
         )
-        self.controls_map["lm_translator.batch_shrink_factor"] = ft.TextField(
+        self.controls_map["lm_translator.batch_shrink_factor"] = kit.field(
             label="錯誤縮小比例", dense=True, helper="用於：批次失敗時縮小率"
         )
-        self.controls_map["lm_translator.rpm_cooldown_sec"] = ft.TextField(
+        self.controls_map["lm_translator.rpm_cooldown_sec"] = kit.field(
             label="每批翻譯後等待秒數",
             dense=True,
             helper="0 = 不等待；免費層常遇 429 時可調高",
         )
 
-        self.controls_map["lm_translator.translator.skip_terms"] = ft.TextField(
+        self.controls_map["lm_translator.translator.skip_terms"] = kit.field(
             label="略過翻譯 (Skip Terms)",
             multiline=True,
             expand=True,
             text_size=13,
             helper="用於：翻譯時略過含關鍵字的項目",
         )
-        self.controls_map["lm_translator.translator.translatable_keywords"] = (
-            ft.TextField(
-                label="可翻譯欄位 (Keywords)",
-                multiline=True,
-                expand=True,
-                text_size=13,
-                helper="用於：判斷哪些JSON欄位需翻譯",
-            )
+        self.controls_map["lm_translator.translator.translatable_keywords"] = kit.field(
+            label="可翻譯欄位 (Keywords)",
+            multiline=True,
+            expand=True,
+            text_size=13,
+            helper="用於：判斷哪些JSON欄位需翻譯",
         )
-        self.controls_map["lm_translator.translator.short_text_skip_len"] = (
-            ft.TextField(
-                label="短字串略過長度",
-                dense=True,
-                helper="lang 值 ≤ 此長度且無空白時不翻譯（0 = 不略過，例如 Axe、Ore 也會翻）",
-            )
+        self.controls_map["lm_translator.translator.short_text_skip_len"] = kit.field(
+            label="短字串略過長度",
+            dense=True,
+            helper="lang 值 ≤ 此長度且無空白時不翻譯（0 = 不略過，例如 Axe、Ore 也會翻）",
         )
-        self.controls_map["lm_translator.patchouli.dir_names"] = ft.TextField(
+        self.controls_map["lm_translator.patchouli.dir_names"] = kit.field(
             label="Patchouli 資料夾",
             multiline=True,
             expand=True,
@@ -319,34 +316,34 @@ class ConfigView(ft.Column):
             helper="用於：find_patchouli_json 掃描目錄",
         )
 
-        self.controls_map["extractor.output_folder_names.lang_extract"] = ft.TextField(
+        self.controls_map["extractor.output_folder_names.lang_extract"] = kit.field(
             label="Lang 提取輸出資料夾",
             helper="未填入輸出路徑時自動帶入此名稱",
             dense=True,
         )
-        self.controls_map["extractor.output_folder_names.book_extract"] = ft.TextField(
+        self.controls_map["extractor.output_folder_names.book_extract"] = kit.field(
             label="Book 提取輸出資料夾",
             helper="未填入輸出路徑時自動帶入此名稱",
             dense=True,
         )
-        self.controls_map["extractor.output_folder_names.lang_preview"] = ft.TextField(
+        self.controls_map["extractor.output_folder_names.lang_preview"] = kit.field(
             label="Lang 預覽輸出資料夾",
             helper="未填入輸出路徑時自動帶入此名稱",
             dense=True,
         )
-        self.controls_map["extractor.output_folder_names.book_preview"] = ft.TextField(
+        self.controls_map["extractor.output_folder_names.book_preview"] = kit.field(
             label="Book 預覽輸出資料夾",
             helper="未填入輸出路徑時自動帶入此名稱",
             dense=True,
         )
-        self.controls_map["extractor.output_folder_names.dual_extract"] = ft.TextField(
+        self.controls_map["extractor.output_folder_names.dual_extract"] = kit.field(
             label="Dual 提取輸出資料夾", helper="Lang + Book 同時提取時使用", dense=True
         )
-        self.controls_map["extractor.output_folder_names.dual_preview"] = ft.TextField(
+        self.controls_map["extractor.output_folder_names.dual_preview"] = kit.field(
             label="Dual 預覽輸出資料夾", helper="Lang + Book 同時預覽時使用", dense=True
         )
 
-        self.new_model_field = ft.TextField(
+        self.new_model_field = kit.field(
             label="新增模型名稱", hint_text="gemini-2.5-flash", expand=True, dense=True
         )
         self.add_model_button = ft.IconButton(
@@ -367,35 +364,30 @@ class ConfigView(ft.Column):
     def _build_nav_item(self, item: dict) -> ft.Container:
         """建立導覽項目按鈕"""
         is_selected = self._selected_nav == item["id"]
-
-        btn = ft.Container(
-            padding=12,
-            border_radius=8,
-            bgcolor=ft.Colors.BLUE_200 if is_selected else ft.Colors.GREY_100,
+        return ft.Container(
+            padding=ft.Padding.symmetric(horizontal=12, vertical=11),
+            border_radius=design.RADIUS_CONTROL,
+            bgcolor=C.EM_BG if is_selected else None,
+            ink=True,
             on_click=lambda e, iid=item["id"]: self._on_nav_click(iid),
             content=ft.Row(
                 [
                     ft.Icon(
-                        item["icon"],
-                        size=18,
-                        color=ft.Colors.BLUE_800
-                        if is_selected
-                        else ft.Colors.BLUE_GREY_600,
+                        item["icon"], size=18, color=C.EM if is_selected else C.MUTED
                     ),
                     ft.Text(
                         item["label"],
-                        weight=ft.FontWeight.BOLD,
-                        size=13,
-                        color=ft.Colors.BLUE_900
+                        weight=ft.FontWeight.W_700
                         if is_selected
-                        else ft.Colors.BLUE_GREY_700,
+                        else ft.FontWeight.W_500,
+                        size=13,
+                        color=C.TEXT if is_selected else C.MUTED,
                     ),
                 ],
                 spacing=10,
                 alignment=ft.MainAxisAlignment.START,
             ),
         )
-        return btn
 
     def _on_nav_click(self, nav_id: str):
         """處理導覽點擊"""
@@ -416,59 +408,19 @@ class ConfigView(ft.Column):
 
     def _build_nav_column(self) -> ft.Container:
         """建立左側導覽列"""
-        nav_items = []
-        for item in NAV_ITEMS:
-            is_selected = self._selected_nav == item["id"]
-            btn = ft.Container(
-                padding=12,
-                border_radius=8,
-                bgcolor=ft.Colors.BLUE_200 if is_selected else ft.Colors.GREY_100,
-                on_click=lambda e, iid=item["id"]: self._on_nav_click(iid),
-                content=ft.Row(
-                    [
-                        ft.Icon(
-                            item["icon"],
-                            size=18,
-                            color=ft.Colors.BLUE_800
-                            if is_selected
-                            else ft.Colors.BLUE_GREY_600,
-                        ),
-                        ft.Text(
-                            item["label"],
-                            weight=ft.FontWeight.BOLD,
-                            size=13,
-                            color=ft.Colors.BLUE_900
-                            if is_selected
-                            else ft.Colors.BLUE_GREY_700,
-                        ),
-                    ],
-                    spacing=10,
-                    alignment=ft.MainAxisAlignment.START,
-                ),
-            )
-            nav_items.append(btn)
-
-        self.nav_column = ft.Column(nav_items, spacing=6)
-        nav_container = ft.Container(
-            width=200,
-            content=ft.Column(
-                [
-                    ft.Text(
-                        "設定分類",
-                        weight=ft.FontWeight.BOLD,
-                        size=14,
-                        color=ft.Colors.BLUE_GREY_800,
-                    ),
-                    ft.Divider(height=1, color=ft.Colors.GREY_300),
-                    self.nav_column,
-                ],
-                spacing=8,
-            ),
-            padding=10,
-            bgcolor=ft.Colors.GREY_50,
-            border_radius=10,
+        self.nav_column = ft.Column(
+            [self._build_nav_item(item) for item in NAV_ITEMS], spacing=4
         )
-        return nav_container
+        return ft.Container(
+            width=210,
+            content=ft.Column(
+                [kit.section_label("設定分類"), self.nav_column], spacing=8
+            ),
+            padding=12,
+            bgcolor=C.PANEL,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=design.RADIUS_CARD,
+        )
 
     def _build_content_area(self) -> ft.Column:
         """建立右側內容區（所有分類內容）"""
@@ -992,7 +944,7 @@ class ConfigView(ft.Column):
         row = ft.Container(
             padding=12,
             border_radius=8,
-            bgcolor=theme.WHITE,
+            bgcolor=theme.PANEL,
             border=ft.Border.all(1, theme.GREY_200),
             content=ft.Row(
                 [

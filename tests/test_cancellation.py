@@ -109,8 +109,8 @@ def test_shared_loop_cancelled_while_waiting_for_rate_limit(monkeypatch):
 
 
 def test_run_callable_task_cancel_is_not_error():
-    from app.logging.task_session import TaskSession
     from app.services_impl.pipelines._task_runner import run_callable_task
+    from app.tasks.task_session import TaskSession
 
     session = TaskSession()
 

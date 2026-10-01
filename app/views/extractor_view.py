@@ -14,23 +14,33 @@
 # /minecraft_translator_flet/app/views/extractor_view.py
 # 2026-08-01 (PR #85): view 內 _show_snack_bar wrapper 物理刪除,
 # 所有 caller 改成 show_snack(self.page, ...) 直接呼叫 app/ui/snack.py helper
-import flet as ft
 import os
+import threading  # noqa: F401 - 測試 / 其他模組以 extractor_view.threading 引用
 from pathlib import Path
-from app.ui import theme
+
+import flet as ft
+
+from app.services_impl.pipelines.extract_service import get_output_folder_names
+from app.tasks.task_session import (
+    TaskSession,  # noqa: F401 - 測試以 extractor_view.TaskSession patch
+)
+from app.ui import kit, theme
+from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views._log import LogView
-from translation_tool.utils.log_unit import log_info, log_warning
-import threading
+from app.views.extractor.extractor_dialog import (
+    open_extractor_dialog,
+    open_preview_dialog,
+)
 
-from app.task_session import TaskSession
 # 🐛 2026-07-14 user review: 物理刪除 from app.views.extractor.extractor_actions import
 # (Phase 3 partial 刪 _update_stats_from_log wrapper 後,
 # update_stats_from_log 本體函式也無 caller,本 commit 一起清掉)
-from app.views.extractor.extractor_panels import build_settings_panel, _build_pick_button
-from app.ui.components import styled_card
-from app.views.extractor.extractor_dialog import open_extractor_dialog, open_preview_dialog
-from app.services_impl.pipelines.extract_service import get_output_folder_names
+from app.views.extractor.extractor_panels import (
+    build_settings_panel,
+)
+from translation_tool.utils.log_unit import log_info, log_warning  # noqa: F401
+
 
 class ExtractorView(ft.Column):
     """JAR 提取頁（UI）。
@@ -62,84 +72,64 @@ class ExtractorView(ft.Column):
         # ======================
 
         # 1. Configuration Section Components
-        self.mods_dir_textfield = ft.TextField(
-            hint_text="./mods 或 %USERPROFILE%/Mods",
-            expand=True,
-            dense=True,
-            border_color=theme.OUTLINE,
-            text_size=14,
-            content_padding=15,
+        self.mods_dir_textfield = kit.text_field(
+            hint="./mods 或 %USERPROFILE%/Mods", mono=True, expand=True
         )
 
-        self.output_dir_textfield = ft.TextField(
-            hint_text="（未指定將自動產生）",
+        self.output_dir_textfield = kit.text_field(
+            hint="（未指定將自動產生）",
+            mono=True,
             expand=True,
-            dense=True,
-            border_color=theme.OUTLINE,
-            text_size=14,
-            content_padding=15,
-            helper="（請選擇或直接輸入輸出資料夾）",
         )
+        self.output_dir_textfield.helper = "（請選擇或直接輸入輸出資料夾）"
+        self.output_dir_textfield.helper_style = ft.TextStyle(size=11, color=C.DIM)
 
-        self.output_dir_helper_text = ft.Text("", size=12, color=ft.Colors.GREY_600)
+        self.output_dir_helper_text = ft.Text("", size=12, color=C.DIM)
 
         self.skip_zh_cn_switch = ft.Switch(
             label="跳過 zh_cn 抽取",
             value=False,
+            label_text_style=ft.TextStyle(size=13, color=C.TEXT),
         )
 
-        # 2. Action Buttons - 改为打开对话框
-        # open_extractor_dialog / open_preview_dialog 從頂部 import
-        # 获取 file_picker
+        # 2. Action Buttons - 按下後打開對話框（open_extractor_dialog / open_preview_dialog）
         file_picker = self.file_picker
 
-        self.lang_button = ft.Button(
+        self.lang_button = kit.button(
             "提取 Lang",
+            "primary",
             icon=ft.Icons.LANGUAGE,
-            style=ft.ButtonStyle(
-                color=theme.WHITE,
-                bgcolor=theme.BLUE_700,
-                shape=ft.RoundedRectangleBorder(radius=6),
-                padding=20,
-            ),
             on_click=self._handle_extract_lang_click,
         )
-        self.book_button = ft.Button(
+        self.book_button = kit.button(
             "提取 Book",
+            "primary",
             icon=ft.Icons.BOOK,
-            style=ft.ButtonStyle(
-                color=theme.WHITE,
-                bgcolor=theme.GREEN_700,
-                shape=ft.RoundedRectangleBorder(radius=6),
-                padding=20,
-            ),
             on_click=self._handle_extract_book_click,
         )
 
         # 預覽按鈕
-        self.preview_lang_button = ft.OutlinedButton(
+        self.preview_lang_button = kit.button(
             "預覽 Lang",
+            "secondary",
             icon=ft.Icons.PREVIEW,
             on_click=self._handle_preview_lang_click,
         )
-        self.preview_book_button = ft.OutlinedButton(
+        self.preview_book_button = kit.button(
             "預覽 Book",
+            "secondary",
             icon=ft.Icons.PREVIEW,
             on_click=self._handle_preview_book_click,
         )
-        self.dual_extract_button = ft.Button(
+        self.dual_extract_button = kit.button(
             "提取 Lang + Book",
+            "primary",
             icon=ft.Icons.LANGUAGE,
-            style=ft.ButtonStyle(
-                color=theme.WHITE,
-                bgcolor="#7B1FA2",
-                shape=ft.RoundedRectangleBorder(radius=6),
-                padding=20,
-            ),
             on_click=self._handle_extract_dual_click,
         )
-        self.dual_preview_button = ft.OutlinedButton(
+        self.dual_preview_button = kit.button(
             "預覽 Lang + Book",
+            "secondary",
             icon=ft.Icons.PREVIEW,
             on_click=self._handle_preview_dual_click,
         )
@@ -165,13 +155,7 @@ class ExtractorView(ft.Column):
         self._logs_panel = ft.Container(content=ft.Column([self.log_view], height=350))
         self._logs_panel.visible = False  # 隱藏 — 日誌只在 dialog 內顯示
 
-        self.controls = [
-            styled_card(
-                title="設定",
-                icon=ft.Icons.SETTINGS,
-                content=build_settings_panel(self),
-            ),
-        ]
+        self.controls = [build_settings_panel(self)]
 
         # 初始化 output_dir helper，動態讀取設定值
         # 用 try-except 避免 __init__ 階段 self.page.update() 觸發 Control must be added to the page first
@@ -279,13 +263,13 @@ class ExtractorView(ft.Column):
             suffix = lang_extract
 
         # 保護機制：只有輸出路徑為空時才自動填入，避免覆寫使用者已輸入的自訂路徑
-        if (self.output_dir_textfield.value or '').strip():
+        if (self.output_dir_textfield.value or "").strip():
             return
 
         # 修正邏輯：處理路徑末尾斜線並正確合併名稱
         # 注意：必須先轉成 str 才能呼叫 rstrip，否則會觸發 AttributeError
-        mods_path = Path(str(mods_dir).rstrip('\\/'))
-        
+        mods_path = Path(str(mods_dir).rstrip("\\/"))
+
         # 智慧判斷：如果名稱已經包含 suffix，則直接使用原路徑（避免重複疊加）
         # 如果是「mods」目錄，則在 mods 旁邊產生新的資料夾
         # 其他情況，則把 suffix 加在最後一級目錄名後面
@@ -303,7 +287,11 @@ class ExtractorView(ft.Column):
         self.page.update()
         # 🐛 2026-08-01 user review: 改用 SnackBar 跳出提示,不掛 log UI
         # (原本 _append_log_line 寫進 self.log_view,但 S1 撤回後 user 看不到任何 log)
-        show_snack(self.page, f"[系統] 已自動設定輸出路徑：{output_path}", color=theme.GREEN_600)
+        show_snack(
+            self.page,
+            f"[系統] 已自動設定輸出路徑：{output_path}",
+            color=theme.GREEN_600,
+        )
 
     def _check_mods_dir_or_snack(self, mods_dir: str, action_label: str) -> bool:
         """按鈕 click handler 的前置驗證。
@@ -323,10 +311,18 @@ class ExtractorView(ft.Column):
             直接 SnackBar 提示「請先選擇資料夾」並 return,不進 dialog。
         """
         if not mods_dir:
-            show_snack(self.page, f"⚠️ 請先選擇 Mods 資料夾才能{action_label}", color=theme.AMBER_700)
+            show_snack(
+                self.page,
+                f"⚠️ 請先選擇 Mods 資料夾才能{action_label}",
+                color=theme.AMBER_700,
+            )
             return False
         if not os.path.isdir(mods_dir):
-            show_snack(self.page, f"⚠️ Mods 資料夾不存在,無法{action_label}", color=theme.AMBER_700)
+            show_snack(
+                self.page,
+                f"⚠️ Mods 資料夾不存在,無法{action_label}",
+                color=theme.AMBER_700,
+            )
             return False
         return True
 

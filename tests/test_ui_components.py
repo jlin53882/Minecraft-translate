@@ -1,12 +1,12 @@
 import flet as ft
 
 from app.ui.components import (
+    CARD_BG_COLOR,
     CARD_PADDING,
     CARD_RADIUS,
-    CARD_BG_COLOR,
-    styled_card,
     primary_button,
     secondary_button,
+    styled_card,
 )
 
 
@@ -36,7 +36,9 @@ def test_primary_button_has_click_handler_and_style():
 
 
 def test_primary_button_can_override_bgcolor():
-    b = primary_button("OK", icon=ft.Icons.CHECK, on_click=lambda e: None, bgcolor=ft.Colors.GREEN_700)
+    b = primary_button(
+        "OK", icon=ft.Icons.CHECK, on_click=lambda e: None, bgcolor=ft.Colors.GREEN_700
+    )
     # ButtonStyle 物件在 flet 內部可能不是單純 dict，這裡只確認有設 style，避免測太死。
     assert b.style is not None
 
@@ -44,3 +46,17 @@ def test_primary_button_can_override_bgcolor():
 def test_secondary_button_is_outlined():
     b = secondary_button("Dry", icon=ft.Icons.SEARCH, on_click=lambda e: None)
     assert isinstance(b, ft.OutlinedButton)
+
+
+def test_legacy_components_use_semantic_theme_colors():
+    """舊元件改用設計系統的語意色，才能跟著深淺色主題切換（不寫死白底 / 藍色）。"""
+    from app.ui.design import C
+
+    assert C.PANEL == CARD_BG_COLOR
+    card = styled_card(title="T", icon=ft.Icons.INFO, content=ft.Text("x"))
+    assert card.bgcolor == C.PANEL
+    assert card.border.top.color == C.LINE
+
+    primary = primary_button("Go")
+    assert primary.style.bgcolor == C.EM
+    assert primary.style.color == C.ON_EM

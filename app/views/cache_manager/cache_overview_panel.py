@@ -1,16 +1,29 @@
-"""app/views/cache_manager/cache_overview_panel.py 模組。
+"""app/views/cache_manager/cache_overview_panel.py：快取總覽頁（非查詢區）的版面組裝。
 
-用途：提供本檔案定義的功能與流程，供專案其他模組呼叫。
-維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
+把大段 UI 結構從 cache_view.py 抽離，讓主檔專心處理事件與資料狀態。
+外觀使用 ``app.ui.kit``（統計卡 + 區塊卡片），深 / 淺色主題皆適用。
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import flet as ft
 
-from app.ui.components import styled_card
+from app.ui import kit
 
 from .cache_log_panel import build_log_panel
+
+HELP_LINES = (
+    ("重新載入", "重新讀取全部分類快取（記憶體重建）"),
+    ("刷新統計", "只刷新 UI 顯示數據，不做寫入"),
+    ("重建搜尋索引", "建立全文搜尋索引（提升查詢速度 10~100 倍）"),
+    ("新分片", "把該分類新資料寫到新 shard"),
+    ("補滿舊檔", "回填既有 shard（覆寫模式）"),
+    ("輪替分片", "強制切到下一個 active shard"),
+    ("分析", "顯示該分類目前狀態與使用率"),
+    ("切換查詢", "跳到查詢頁並帶入分類"),
+)
 
 
 def build_overview_page(
@@ -26,112 +39,66 @@ def build_overview_page(
     btn_log_copy: ft.Control,
     btn_log_clear: ft.Control,
     log_list: ft.Control,
-    page: ft.Page = None,  # 用於 styled_card 收合功能
+    page: ft.Page | None = None,
+    stat_cards: Sequence[ft.Control] = (),
 ) -> ft.Control:
     """Cache 總覽頁（非查詢區）組裝。
 
-    把大段 UI 結構從 cache_view.py 抽離，讓主檔更容易閱讀與維護。
-
-    PR3 試點：使用 styled_card 替換 bordered_block，支援卡片收合功能
+    ``stat_cards`` 是頁面頂端的統計卡（由 CacheView 持有、載入資料後更新）。
     """
-
-    # 狀態與全域操作按鈕（常駐顯示）
-    actions_block = styled_card(
-        title="操作",
-        icon=ft.Icons.TUNE,
-        icon_color=ft.Colors.BLUE_GREY_700,
-        page=page,
-        content=ft.Column(
+    actions_block = kit.section_card(
+        "操作",
+        ft.Column(
             [
                 overview_status,
                 overview_trace,
                 ft.Row(
-                    [btn_reload_all, btn_refresh_stats, btn_rebuild_index], wrap=True
+                    [btn_reload_all, btn_refresh_stats, btn_rebuild_index],
+                    wrap=True,
+                    spacing=10,
+                    run_spacing=10,
                 ),
             ],
             spacing=8,
         ),
+        icon=ft.Icons.TUNE,
+        tone="em",
     )
 
-    # 按鈕說明預設收合：展開時內容很長，會把下方日誌擠到看不見（1280×900 只剩標題列）
-    help_block = styled_card(
-        title="按鈕說明",
+    # 按鈕說明預設收合：展開時內容很長，會把下方日誌擠到看不見
+    help_block = kit.section_card(
+        "按鈕說明",
+        ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Text(name, size=12, weight=ft.FontWeight.W_600, width=96),
+                        ft.Text(desc, size=12, expand=True),
+                    ],
+                    spacing=8,
+                )
+                for name, desc in HELP_LINES
+            ],
+            spacing=6,
+        ),
         icon=ft.Icons.HELP_OUTLINE,
-        icon_color=ft.Colors.BLUE_GREY_700,
+        tone="dia",
         collapsible=True,
-        default_collapsed=True,
-        page=page,
-        content=ft.Column(
-            [
-                ft.Text(
-                    "重新載入：重新讀取全部分類快取（記憶體重建）",
-                    size=11,
-                    color=ft.Colors.GREY_700,
-                ),
-                ft.Text(
-                    "刷新統計：只刷新 UI 顯示數據，不做寫入",
-                    size=11,
-                    color=ft.Colors.GREY_700,
-                ),
-                ft.Text(
-                    "🔍 重建搜尋索引：建立全文搜尋索引（提升查詢速度 10~100 倍）",
-                    size=11,
-                    color=ft.Colors.BLUE_700,
-                ),
-                ft.Text(
-                    "分類卡按鈕（在左側每張卡片上）", size=11, color=ft.Colors.GREY_700
-                ),
-                ft.Text("• 重新載入：只重載該分類", size=11, color=ft.Colors.GREY_700),
-                ft.Text(
-                    "• 新分片：把該分類新資料寫到新 shard",
-                    size=11,
-                    color=ft.Colors.GREY_700,
-                ),
-                ft.Text(
-                    "• 補滿舊檔：回填既有 shard（覆寫模式）",
-                    size=11,
-                    color=ft.Colors.GREY_700,
-                ),
-                ft.Text(
-                    "• 輪替分片：強制切到下一個 active shard",
-                    size=11,
-                    color=ft.Colors.GREY_700,
-                ),
-                ft.Text(
-                    "• 分析：顯示該分類目前狀態與使用率",
-                    size=11,
-                    color=ft.Colors.GREY_700,
-                ),
-                ft.Text(
-                    "• 切換查詢：跳到查詢頁並帶入分類",
-                    size=11,
-                    color=ft.Colors.GREY_700,
-                ),
-            ],
-            spacing=8,
-        ),
+        collapsed=True,
     )
 
-    # 分類狀態列表 - 使用 styled_card 支援收合
-    left_panel = styled_card(
-        title="分類狀態清單",
-        icon=ft.Icons.LIST,
-        icon_color=ft.Colors.BLUE_GREY_700,
-        collapsible=True,
-        default_collapsed=False,
-        expand=True,
-        page=page,
-        content=ft.Column(
+    left_panel = kit.section_card(
+        "分類狀態清單",
+        ft.Column(
             [
-                ft.Text(
-                    "卡片可捲動瀏覽，避免分類過多被截斷",
-                    size=11,
-                    color=ft.Colors.GREY_700,
-                ),
+                kit.hint_text("卡片可捲動瀏覽，避免分類過多被截斷"),
                 type_list,
             ],
             expand=True,
         ),
+        icon=ft.Icons.STORAGE_OUTLINED,
+        tone="ench",
+        expand=True,
     )
 
     right_panel = ft.Column(
@@ -146,33 +113,29 @@ def build_overview_page(
             ),
         ],
         expand=True,
-        spacing=8,
+        spacing=12,
     )
 
-    return ft.Column(
-        expand=True,
-        spacing=10,
-        controls=[
-            # 總覽狀態 - 使用 styled_card
-            styled_card(
-                title="總覽",
-                icon=ft.Icons.DASHBOARD,
-                icon_color=ft.Colors.BLUE_GREY_700,
-                collapsible=True,
-                default_collapsed=False,
-                page=page,
-                content=overview_text,
-            ),
-            ft.ResponsiveRow(
-                expand=True,
-                controls=[
-                    ft.Container(
-                        col={"xs": 12, "md": 7}, expand=True, content=left_panel
-                    ),
-                    ft.Container(
-                        col={"xs": 12, "md": 5}, expand=True, content=right_panel
-                    ),
-                ],
-            ),
-        ],
+    controls: list[ft.Control] = []
+    if stat_cards:
+        controls.append(ft.Row(list(stat_cards), spacing=14))
+    controls.append(
+        kit.section_card(
+            "詳細資訊",
+            overview_text,
+            icon=ft.Icons.DASHBOARD_OUTLINED,
+            tone="gold",
+            collapsible=True,
+            collapsed=True,
+        )
     )
+    controls.append(
+        ft.ResponsiveRow(
+            expand=True,
+            controls=[
+                ft.Container(col={"xs": 12, "md": 7}, expand=True, content=left_panel),
+                ft.Container(col={"xs": 12, "md": 5}, expand=True, content=right_panel),
+            ],
+        )
+    )
+    return ft.Column(expand=True, spacing=14, controls=controls)

@@ -21,6 +21,11 @@ from translation_tool.utils.log_unit import log_warning
 NETWORK_RETRY_ATTEMPTS = 3
 NETWORK_RETRY_BASE_SEC = 1.0
 
+# 單次回應的輸出 token 上限（generationConfig.maxOutputTokens）。
+# 不設的話，模型重複輸出時會燒光整個輸出額度（issue #108）。
+# 設定檔 lm_translator.max_output_tokens 可覆寫；設為 0 代表不送這個欄位。
+DEFAULT_MAX_OUTPUT_TOKENS = 32768
+
 
 def _post_with_retry(url: str, **kwargs) -> requests.Response:
     """requests.post，遇到連線階段的暫時性錯誤時指數退避重試（含 jitter）。"""
@@ -42,6 +47,39 @@ def _post_with_retry(url: str, **kwargs) -> requests.Response:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+def _resolve_max_output_tokens(explicit: int | None, lm_cfg: dict) -> int | None:
+    """決定要送出的 maxOutputTokens：明確參數 > 設定檔 > 預設值；<= 0 代表不送。"""
+    value = explicit if explicit is not None else lm_cfg.get("max_output_tokens")
+    if value is None:
+        value = DEFAULT_MAX_OUTPUT_TOKENS
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = DEFAULT_MAX_OUTPUT_TOKENS
+    return value if value > 0 else None
+
+
+def extract_response_meta(result: dict) -> dict:
+    """從 generateContent 回應取出截斷診斷所需的欄位。
+
+    - finish_reason：``candidates[0].finishReason``（STOP / MAX_TOKENS / SAFETY ...）
+    - prompt_tokens / candidates_tokens / thoughts_tokens / total_tokens：
+      ``usageMetadata`` 對應欄位。思考 token（thoughtsTokenCount）也會計入輸出額度，
+      但不一定包含在 candidatesTokenCount 內，所以分開保留。
+    缺少的欄位為 None（呼叫端不可假設一定存在）。
+    """
+    candidates = result.get("candidates") or [{}]
+    first = candidates[0] if isinstance(candidates[0], dict) else {}
+    usage = result.get("usageMetadata") or {}
+    return {
+        "finish_reason": first.get("finishReason"),
+        "prompt_tokens": usage.get("promptTokenCount"),
+        "candidates_tokens": usage.get("candidatesTokenCount"),
+        "thoughts_tokens": usage.get("thoughtsTokenCount"),
+        "total_tokens": usage.get("totalTokenCount"),
+    }
+
+
 def call_gemini_requests(
     *,
     model_name: str,
@@ -49,8 +87,17 @@ def call_gemini_requests(
     payload: dict,
     api_key: str,
     temperature: float,
+    max_output_tokens: int | None = None,
+    meta_out: dict | None = None,
 ) -> str:
-    """以同步 requests 方式呼叫 Gemini generateContent API，並回傳純文字回應。"""
+    """以同步 requests 方式呼叫 Gemini generateContent API，並回傳純文字回應。
+
+    Args:
+        max_output_tokens: 輸出 token 上限；None 時讀設定檔
+            ``lm_translator.max_output_tokens``（預設 32768）。
+        meta_out: 若提供，會以 ``extract_response_meta`` 的結果更新這個 dict
+            （finish_reason、token 用量）。回傳值維持純文字，既有呼叫端不受影響。
+    """
     url = (
         "https://generativelanguage.googleapis.com/"
         f"v1beta/models/{model_name}:generateContent"
@@ -75,9 +122,12 @@ def call_gemini_requests(
         },
     }
 
-    request_timeout = int(
-        load_config().get("lm_translator", {}).get("rate_limit", {}).get("timeout", 600)
-    )
+    lm_cfg = load_config().get("lm_translator", {})
+    output_cap = _resolve_max_output_tokens(max_output_tokens, lm_cfg)
+    if output_cap is not None:
+        data["generationConfig"]["maxOutputTokens"] = output_cap
+
+    request_timeout = int(lm_cfg.get("rate_limit", {}).get("timeout", 600))
 
     response = _post_with_retry(
         url,
@@ -93,6 +143,9 @@ def call_gemini_requests(
         )
 
     result = response.json()
+
+    if meta_out is not None:
+        meta_out.update(extract_response_meta(result))
 
     try:
         return result["candidates"][0]["content"]["parts"][0]["text"]

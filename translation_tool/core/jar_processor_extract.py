@@ -253,8 +253,11 @@ def run_extraction_process_impl(
 
     def _scan_in_background():
         try:
+            # 傳入與實際處理相同的清單（含子目錄 JAR），預掃描才不會與提取階段脫節
             scan_results_local[0] = scan_jars(
-                jar_dir=Path(mods_dir), patterns=[target_regex.pattern]
+                jar_dir=Path(mods_dir),
+                patterns=[target_regex.pattern],
+                jar_files=jar_files,
             )
         except Exception as e:  # noqa: BLE001
             scan_error[0] = e
@@ -313,8 +316,15 @@ def run_extraction_process_impl(
         return
 
     all_scan_results = scan_results_local[0]
+    # 預掃描過的 JAR 數（每個被掃描的 JAR 都有預算）與「含可提取內容」的數量分開記錄，
+    # 兩者都要能對上 total_jars（issue #111）。
+    scanned_jars = len(getattr(all_scan_results, "budgets", None) or {}) or len(
+        all_scan_results
+    )
     log.info(
-        "[scan_jars] 完成，共 %s 個 JAR 被預掃描，耗時 %.1fs",
+        "[scan_jars] 完成，共預掃描 %s / %s 個 JAR（其中 %s 個含可提取內容），耗時 %.1fs",
+        scanned_jars,
+        total_jars,
         len(all_scan_results),
         elapsed_total,
     )

@@ -9,20 +9,19 @@
 執行：pytest tests/test_extractor_recent_fixes.py -v
 """
 
-import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import flet as ft
-import pytest
-
-from app.views.extractor_view import ExtractorView
-from app.views._log import LogView
 # 避免 tests 套件命名衝突（hermes-agent/tests 在 sys.path 前面）
 # 直接用 importlib 從專案的 conftest.py 載入 mock_page / mock_filepicker
 import importlib.util as _importlib_util
 import sys as _sys
+from pathlib import Path
 from pathlib import Path as _Path
+from unittest.mock import patch
+
+import flet as ft
+import pytest
+
+from app.views._log import LogView
+from app.views.extractor_view import ExtractorView
 
 _conftest_path = _Path(__file__).resolve().parent / "conftest.py"
 _spec = _importlib_util.spec_from_file_location("project_conftest", _conftest_path)
@@ -38,6 +37,7 @@ mock_filepicker = _mod.mock_filepicker
 # -----------------------------------------------------------------------------
 # Mock 工具
 # -----------------------------------------------------------------------------
+
 
 class _SessionStub:
     """取代 TaskSession，避免在 __init__ 階段做 I/O。"""
@@ -87,6 +87,7 @@ def _make_view(monkeypatch):
 # -----------------------------------------------------------------------------
 # _auto_fill_output_path：路徑自動補齊邏輯
 # -----------------------------------------------------------------------------
+
 
 class TestAutoFillOutputPath:
     """測試 _auto_fill_output_path 的所有路徑合併情境。
@@ -147,7 +148,7 @@ class TestAutoFillOutputPath:
         assert view.output_dir_textfield.value == expected
 
     def test_結尾帶反斜線會被去除(self, monkeypatch, tmp_path):
-        """情況 A-邊界：輸入 .../mods\（結尾帶反斜線），產出 .../mods_提取lang_輸出"""
+        r"""情況 A-邊界：輸入 .../mods\（結尾帶反斜線），產出 .../mods_提取lang_輸出"""
         view = _make_view(monkeypatch)
         mods_path = self._make_input_path(tmp_path, "mods")
         # 加上結尾反斜線
@@ -224,30 +225,31 @@ class TestAutoFillOutputPath:
 
         # 驗證有 SnackBar 被 append 到 page.overlay
         added_snackbars = [
-            c for c in view.page.overlay[len(overlay_before):]
+            c
+            for c in view.page.overlay[len(overlay_before) :]
             if isinstance(c, ft.SnackBar)
         ]
         assert len(added_snackbars) >= 1, (
-            f"回歸:_auto_fill_output_path 應該呼叫 _show_snack_bar 但 page.overlay 沒新增 SnackBar"
+            "回歸:_auto_fill_output_path 應該呼叫 _show_snack_bar 但 page.overlay 沒新增 SnackBar"
         )
         # 驗證 SnackBar 內容含「自動設定輸出路徑」
         last_snackbar = added_snackbars[-1]
-        assert hasattr(last_snackbar.content, 'value'), (
+        assert hasattr(last_snackbar.content, "value"), (
             f"回歸:SnackBar 內應是 ft.Text,但 {type(last_snackbar.content).__name__} 沒 value 屬性"
         )
         assert "自動設定輸出路徑" in last_snackbar.content.value, (
             f"回歸:SnackBar 內容應該含「自動設定輸出路徑」,實際 {last_snackbar.content.value!r}"
         )
 
+
 class TestExtractorDialogPathFilling:
     """測試 open_extractor_dialog 的路徑自動補齊邏輯。"""
 
     def test_未指定輸出目錄時_使用_mods_dir_作為基礎(self, monkeypatch, tmp_path):
         """未指定 output_path 時，會用 mods_dir + suffix 組出 final_output"""
-        from app.views.extractor.extractor_dialog import open_extractor_dialog
 
-        page = mock_page()
-        fp = mock_filepicker()
+        page = mock_page()  # noqa: F841
+        fp = mock_filepicker()  # noqa: F841
 
         # 由於 open_extractor_dialog 內部會建立 UI 與背景執行緒，
         # 這裡只測試 final_output 的邏輯（從原始碼讀取後模擬）
@@ -260,7 +262,7 @@ class TestExtractorDialogPathFilling:
             mods_path = tmp_path / "mods"
             input_path = str(mods_path)
             output_path = ""
-            mode = "lang"
+            mode = "lang"  # noqa: F841
 
             # 復刻 open_extractor_dialog 的路徑邏輯（用 Path 而非 os.path.join，
             # 確保跨平台路徑分隔符一致）
@@ -274,9 +276,9 @@ class TestExtractorDialogPathFilling:
     def test_已指定輸出目錄時_補上_suffix(self, tmp_path):
         """已指定 output_path 時，會在其下補上 suffix"""
         # 用 tmp_path 動態產生測試路徑
-        mods_path = tmp_path / "mods"
+        mods_path = tmp_path / "mods"  # noqa: F841
         output_path = tmp_path / "my_output"
-        mode = "lang"
+        mode = "lang"  # noqa: F841
 
         output_dir = Path(output_path)
         output_subdir = "_提取lang_輸出"
@@ -330,13 +332,12 @@ class TestExtractorViewControlsStructure:
     # S1 修復後 view.controls 確實包含 '日誌' 標題 (因為 view._logs_panel.visible=True 並掛進 controls)。
     # 之前該 test 是「日誌不應該在主 UI」的舊設計,現在 S1 修復把日誌掛回 UI。
     # 刪除:test_主_UI_不包含日誌區塊
-    pass
 
     def test_主_UI_包含設定區塊(self, monkeypatch):
         """主 UI 應該包含 '設定' 標題"""
         view = _make_view(monkeypatch)
         all_texts = self._get_all_text_in_controls(view.controls)
-        assert "設定" in all_texts
+        assert any("設定" in t for t in all_texts)
 
     # 🐛 2026-08-01 user review (撤回 S1):改回 test_主_UI_只包含_一個_區塊
     # user 改變主意,日誌面板不再掛回主 UI (commit 2 掛回但實測擠壓主畫面)
@@ -353,7 +354,6 @@ class TestExtractorViewControlsStructure:
         assert hasattr(view, "log_view")
         # PR refactor/unified-log-view: log_view 改為 LogView widget
         assert isinstance(view.log_view, LogView)
-
 
 
 class TestExtractorViewInitSafety:
@@ -381,7 +381,6 @@ class TestExtractorViewInitSafety:
         assert "未指定時自動產生" in helper
         assert "_提取lang_輸出" in helper
         assert "_提取book_輸出" in helper
-
 
 
 class TestPathHandlingRegression:
@@ -422,10 +421,10 @@ class TestPathHandlingRegression:
 
         # 各種邊界條件（用 tmp_path 動態產生）
         test_inputs = [
-            str(tmp_path / "mods"),       # 正常路徑
+            str(tmp_path / "mods"),  # 正常路徑
             str(tmp_path / "mods") + "\\",  # 結尾反斜線
-            str(tmp_path / "mods") + "/",    # 結尾正斜線
-            str(tmp_path / "my_folder"),     # 自訂資料夾
+            str(tmp_path / "mods") + "/",  # 結尾正斜線
+            str(tmp_path / "my_folder"),  # 自訂資料夾
             str(tmp_path / "my_folder_提取lang_輸出"),  # 已包含 suffix
         ]
 
@@ -436,4 +435,3 @@ class TestPathHandlingRegression:
             view._auto_fill_output_path(inp, mode="lang")
             # 結果不為空
             assert view.output_dir_textfield.value != ""
-

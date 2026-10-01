@@ -4,17 +4,19 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import flet as ft
-from pathlib import Path
-from typing import Callable
-import unicodedata
 import hashlib
+import unicodedata
+from collections.abc import Callable
+from pathlib import Path
 
+import flet as ft
 from PIL import Image as PILImage
 
+from app.ui import kit
+from app.ui.design import C
 from translation_tool.core.icon_preview_cache import generate_icon_preview
+from translation_tool.core.icon_reason import IconResult, IconRisk
 from translation_tool.core.icon_resolver import resolve_icon_with_reason
-from translation_tool.core.icon_reason import IconRisk, IconResult
 
 _ICON_UPSCALE_SIZE = 64
 """小於此尺寸的 icon 視為需要 upscale（pixels, 一邊）。"""
@@ -34,13 +36,15 @@ def _ensure_icon_size(src_path: Path) -> Path:
             return src_path
 
         # nearest neighbor 放大，不走抗鋸齒
-        upscaled = img.resize((_ICON_UPSCALE_SIZE, _ICON_UPSCALE_SIZE), PILImage.NEAREST)
+        upscaled = img.resize(
+            (_ICON_UPSCALE_SIZE, _ICON_UPSCALE_SIZE), PILImage.NEAREST
+        )
         img.close()
         # 寫入同目錄，檔名加上 _upscaled 後綴，避免覆蓋原始快取
         out_path = src_path.parent / f"{src_path.stem}_upscaled{src_path.suffix}"
         upscaled.save(out_path)
         return out_path
-    except Exception:
+    except Exception:  # noqa: BLE001
         # 任何錯誤（讀不到、ImageFont 失敗等）都回傳原路徑，不阻斷顯示
         return src_path
 
@@ -48,15 +52,18 @@ def _ensure_icon_size(src_path: Path) -> Path:
 # Icon reader（PR59 新增）
 try:
     from app.icon_reader import IconRef, read_icon_bytes
+
     _HAS_ICON_READER = True
 except ImportError:
     _HAS_ICON_READER = False
+
 
 def to_halfwidth(text):
     """將字串轉換為半形。"""
     if not isinstance(text, str):
         return text
     return unicodedata.normalize("NFKC", text)
+
 
 class LangItemRow(ft.Container):
     """LangItemRow 類別。
@@ -89,9 +96,10 @@ class LangItemRow(ft.Container):
                        若有值則直接使用，跳過 resolve_icon_with_reason。
         """
         super().__init__(
-            padding=ft.Padding.symmetric(vertical=10, horizontal=8),
-            border_radius=8,
-            bgcolor=ft.Colors.WHITE,
+            padding=ft.Padding.symmetric(vertical=12, horizontal=12),
+            border_radius=12,
+            bgcolor=C.PANEL,
+            border=ft.Border.all(1, C.LINE),
         )
 
         self.lang_key = lang_key
@@ -130,10 +138,16 @@ class LangItemRow(ft.Container):
                     preview_path = None
             else:
                 # 舊磁碟路徑（無法解析 jar://，走一般流程）
-                preview_path = generate_icon_preview(icon_result.icon_path, preview_root)
+                preview_path = generate_icon_preview(
+                    icon_result.icon_path, preview_root
+                )
         else:
             # icon_path 為 None，或無 _HAS_ICON_READER：嘗試用磁碟路徑生成預覽
-            preview_path = generate_icon_preview(icon_result.icon_path, preview_root) if icon_result.icon_path else None
+            preview_path = (
+                generate_icon_preview(icon_result.icon_path, preview_root)
+                if icon_result.icon_path
+                else None
+            )
 
         # 顯示 icon 或警告
         # 修復：當 preview_path 為 None 時，不顯示任何 icon widget（佔位完全空白）
@@ -149,21 +163,22 @@ class LangItemRow(ft.Container):
         elif icon_result.reason:
             # 無法取得 preview 且有 reason：顯示錯誤 icon + 根據 risk 等級上色
             color_map = {
-                IconRisk.IGNORE: ft.Colors.GREEN_600,
-                IconRisk.WARN: ft.Colors.ORANGE_600,
-                IconRisk.DANGER: ft.Colors.RED_600,
+                IconRisk.IGNORE: C.EM,
+                IconRisk.WARN: C.GOLD,
+                IconRisk.DANGER: C.RED,
             }
             icon_widget = ft.Container(
                 width=128,
                 height=128,
                 alignment=ft.alignment.Alignment.CENTER,
-                bgcolor=ft.Colors.GREY_300,
-                content=ft.Icon(ft.Icons.IMAGE_NOT_SUPPORTED),
+                bgcolor=C.PANEL2,
+                border_radius=10,
+                content=ft.Icon(ft.Icons.IMAGE_NOT_SUPPORTED, color=C.DIM),
             )
             risk_label = ft.Text(
                 f"⚠ {icon_result.reason}",
                 size=12,
-                color=color_map.get(icon_result.risk, ft.Colors.GREY_700),
+                color=color_map.get(icon_result.risk, C.MUTED),
             )
 
         # =========================
@@ -174,7 +189,7 @@ class LangItemRow(ft.Container):
             expand=True,
             controls=[
                 # 繁中翻譯（可編輯）
-                ft.TextField(
+                kit.field(
                     value=to_halfwidth(zh_text or ""),
                     label="繁中翻譯:",
                     multiline=True,
@@ -187,7 +202,7 @@ class LangItemRow(ft.Container):
                     ),
                 ),
                 # lang key（可選取）
-                ft.TextField(
+                kit.field(
                     value=to_halfwidth(lang_key),
                     label="lang key:",
                     read_only=True,
@@ -195,7 +210,7 @@ class LangItemRow(ft.Container):
                     text_size=12,
                 ),
                 # 英文原文（可選取）
-                ft.TextField(
+                kit.field(
                     value=to_halfwidth(en_text),
                     label="英文原文:",
                     read_only=True,

@@ -14,14 +14,16 @@ from app.services_impl.pipelines.lookup_service import (
     run_batch_lookup_service,
     run_manual_lookup_service,
 )
-from app.ui import theme
+from app.ui import kit
+from app.ui.design import C
+
+RECENT_LIMIT = 6  # 「最近查詢」最多顯示幾筆（只存在這次開啟的程式內）
 
 
 class LookupView(ft.Column):
-    """LookupView 類別。
+    """學名查詢頁：單筆查詢（含最近查詢）與 JSON 批次查詢。
 
-    用途：封裝與 LookupView 相關的狀態與行為。
-    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    維護注意：查詢本身由 ``lookup_service`` 提供；本類別只負責畫面與背景執行緒的結果套用。
     """
 
     def __init__(self, page: ft.Page):
@@ -30,88 +32,148 @@ class LookupView(ft.Column):
         參數：
             page: Flet Page 物件
         """
-        super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=15)
+        super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=20)
         self._page = page
+        self._recent: list[str] = []
 
         # --- 單筆查詢 UI 元件 ---
-        self.single_input = ft.TextField(
-            label="輸入單一學名", expand=True, tooltip="例如：Felis catus"
+        self.single_input = kit.text_field(
+            hint="輸入單一學名，例如：Felis catus",
+            icon=ft.Icons.SEARCH,
+            expand=True,
+            on_submit=self.single_lookup_clicked,
+            tooltip="例如：Felis catus",
         )
-        self.single_button = ft.Button(
-            "查詢", icon=ft.Icons.SEARCH, on_click=self.single_lookup_clicked
+        self.single_button = kit.button(
+            "查詢", "primary", icon=ft.Icons.SEARCH, on_click=self.single_lookup_clicked
         )
-        self.single_result_text = ft.Text("查詢結果將顯示在這裡。", selectable=True)
+        self.single_result_text = ft.Text(
+            "查詢結果將顯示在這裡。", selectable=True, size=14, color=C.DIM
+        )
         self.single_progress_ring = ft.ProgressRing(
-            visible=False, width=16, height=16, stroke_width=2
+            visible=False, width=16, height=16, stroke_width=2, color=C.EM
+        )
+        self.recent_row = ft.Row(wrap=True, spacing=8, run_spacing=8, visible=False)
+        self.copy_button = kit.button(
+            "複製結果",
+            "ghost",
+            icon=ft.Icons.CONTENT_COPY,
+            size="sm",
+            on_click=self.copy_result_clicked,
         )
 
         # --- 批次查詢 UI 元件 ---
-        self.batch_input = ft.TextField(
-            label="輸入 JSON 格式的學名列表",
+        self.batch_input = kit.text_field(
+            hint='輸入 JSON 格式的學名列表，例如：["Felis catus", "Canis lupus familiaris"]',
             multiline=True,
-            min_lines=5,
-            expand=True,
+            min_lines=7,
+            max_lines=7,
+            mono=True,
             tooltip='例如：["Felis catus", "Canis lupus familiaris"]',
         )
-        self.batch_result_textfield = ft.TextField(
-            label="批次查詢結果 (JSON)",
+        self.batch_result_textfield = kit.text_field(
+            "批次查詢結果 (JSON)",
             multiline=True,
-            min_lines=5,
+            min_lines=9,
+            max_lines=9,
             read_only=True,
-            expand=True,
+            mono=True,
         )
-        self.batch_button = ft.Button(
-            "批次查詢", icon=ft.Icons.SEARCH, on_click=self.batch_lookup_clicked
+        self.batch_button = kit.button(
+            "批次查詢",
+            "primary",
+            icon=ft.Icons.PLAY_ARROW,
+            on_click=self.batch_lookup_clicked,
         )
-        self.batch_progress_bar = ft.ProgressBar(visible=False)
+        self.batch_progress_bar = kit.progress_bar(None, "em")
+        self.batch_progress_bar.visible = False
 
         # --- UI 佈局 ---
-        self.controls = [
-            ft.Card(
-                content=ft.Container(
-                    padding=15,
-                    content=ft.Column(
-                        [
-                            ft.Text(
-                                "單筆學名查詢",
-                                theme_style=ft.TextThemeStyle.TITLE_MEDIUM,
-                            ),
-                            ft.Row([self.single_input, self.single_button]),
-                            ft.Divider(),
-                            ft.Row(
-                                controls=[
-                                    self.single_progress_ring,
-                                    self.single_result_text,
-                                ],
-                                spacing=10,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            ),
-                        ]
-                    ),
-                )
+        single_card = kit.section_card(
+            "單筆查詢",
+            ft.Column(
+                [
+                    ft.Row([self.single_input, self.single_button], spacing=10),
+                    self.recent_row,
+                ],
+                spacing=12,
             ),
-            ft.Card(
-                content=ft.Container(
-                    padding=15,
-                    content=ft.Column(
-                        [
-                            ft.Text(
-                                "批次學名查詢",
-                                theme_style=ft.TextThemeStyle.TITLE_MEDIUM,
-                            ),
-                            ft.Row(
-                                [self.batch_input, self.batch_result_textfield],
-                                vertical_alignment=ft.CrossAxisAlignment.START,
-                                expand=True,
-                            ),
-                            self.batch_button,
-                            self.batch_progress_bar,
-                        ],
-                        spacing=10,
-                    ),
-                )
+            icon=ft.Icons.SEARCH,
+            tone="dia",
+        )
+        result_card = kit.section_card(
+            "查詢結果",
+            ft.Row(
+                [self.single_progress_ring, self.single_result_text],
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            icon=ft.Icons.AUTO_STORIES_OUTLINED,
+            tone="ench",
+            actions=[self.copy_button],
+        )
+        batch_card = kit.section_card(
+            "批次查詢",
+            ft.Column(
+                [
+                    self.batch_input,
+                    ft.Row([self.batch_button, self.batch_progress_bar], spacing=12),
+                    self.batch_result_textfield,
+                ],
+                spacing=12,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            ),
+            icon=ft.Icons.CHECKLIST,
+            tone="ench",
+        )
+        self.controls = [
+            kit.page_header(
+                "學名查詢",
+                "將生物英文名稱對應成學名與繁體中文；先查本機快取，未命中再連線維基百科",
+                icon=ft.Icons.SCIENCE_OUTLINED,
+                tone="ench",
+            ),
+            ft.Row(
+                [
+                    ft.Column([single_card, result_card], spacing=16, expand=5),
+                    ft.Column([batch_card], spacing=16, expand=6),
+                ],
+                spacing=16,
+                vertical_alignment=ft.CrossAxisAlignment.START,
             ),
         ]
+
+    # --- 最近查詢 / 複製 ---
+    def _remember(self, name: str) -> None:
+        """記住最近查過的名稱（去重、最新在前），並重畫晶片列。"""
+        if name in self._recent:
+            self._recent.remove(name)
+        self._recent.insert(0, name)
+        del self._recent[RECENT_LIMIT:]
+        self.recent_row.controls = [self._recent_chip(n) for n in self._recent]
+        self.recent_row.visible = True
+
+    def _recent_chip(self, name: str) -> ft.Control:
+        chip = kit.chip(name, "neutral")
+        chip.ink = True
+        chip.on_click = lambda _e, n=name: self._lookup_recent(n)
+        return chip
+
+    def _lookup_recent(self, name: str) -> None:
+        if not self.single_input.disabled:
+            self.single_input.value = name
+            self.single_lookup_clicked(None)
+
+    def copy_result_clicked(self, _e=None):
+        """把單筆查詢結果複製到剪貼簿。"""
+        text = self.single_result_text.value or ""
+        if not text:
+            return
+
+        async def _copy():
+            await ft.Clipboard().set(text)
+
+        self.page.run_task(_copy)
 
     # --- 單筆查詢邏輯 ---
     def single_lookup_clicked(self, e):
@@ -119,7 +181,7 @@ class LookupView(ft.Column):
         search_term = self.single_input.value
         if not search_term:
             self.single_result_text.value = "錯誤：請輸入要查詢的學名。"
-            self.single_result_text.color = theme.RED
+            self.single_result_text.color = C.RED
             self.page.update()
             return
 
@@ -128,7 +190,8 @@ class LookupView(ft.Column):
         self.single_input.disabled = True
         self.single_progress_ring.visible = True
         self.single_result_text.value = "查詢中..."
-        self.single_result_text.color = theme.GREY_500
+        self.single_result_text.color = C.DIM
+        self._remember(search_term.strip())
         self.page.update()
 
         # 2. 在背景執行緒中執行查詢
@@ -149,10 +212,10 @@ class LookupView(ft.Column):
         """執行單筆查詢工作（背景執行緒）；結果交給 event loop 套用。"""
         try:
             result = run_manual_lookup_service(name)
-            color = None  # 恢復預設顏色
+            color = C.TEXT
         except Exception as ex:  # noqa: BLE001 - 失敗也要恢復按鈕並顯示原因
             result = f"查詢失敗：{ex}"
-            color = theme.ERROR
+            color = C.RED
 
         def apply():
             self.single_result_text.value = result

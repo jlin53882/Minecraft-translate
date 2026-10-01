@@ -2,56 +2,82 @@ from __future__ import annotations
 
 import flet as ft
 
-from app.ui.components import primary_button
+from app.ui import design, kit
+from app.ui.design import C
+
 
 def build_card(view, title, controls_list):
-    """建立一個包含標題與控制項的卡片 UI 元件。"""
-    return ft.Card(
-        elevation=2,
-        content=ft.Container(
-            padding=15,
-            content=ft.Column(
-                [
-                    ft.Text(title, theme_style=ft.TextThemeStyle.TITLE_MEDIUM, color=ft.Colors.BLUE_800, weight=ft.FontWeight.BOLD),
-                    ft.Divider(height=10, thickness=1, color=ft.Colors.BLUE_50),
-                    *controls_list,
-                ],
-                spacing=12,
-            ),
-        ),
+    """建立一個包含標題與控制項的設定卡片（``kit.section_card``）。"""
+    return kit.section_card(
+        title,
+        ft.Column(list(controls_list), spacing=12),
+        icon=ft.Icons.TUNE,
+        tone="em",
     )
 
+
 def build_header(view):
-    """建立設定頁面的頂部標題列（含圖示與標題文字）。"""
-    return ft.Container(
-        padding=5,
-        content=ft.Row([
-            ft.Icon(ft.Icons.SETTINGS_APPLICATIONS, size=28, color=ft.Colors.BLUE_GREY_800),
-            ft.Text('全域設定 (Global Settings)', theme_style=ft.TextThemeStyle.HEADLINE_MEDIUM, color=ft.Colors.BLUE_GREY_900),
-        ]),
+    """建立設定頁面的頂部標題列（圖示 + 標題 + 說明）。"""
+    return kit.page_header(
+        "設定",
+        "所有設定會寫入 config.json；變更後請按「儲存」，部分項目需重新啟動才會套用",
+        icon=ft.Icons.SETTINGS_OUTLINED,
+        tone="em",
     )
+
 
 def build_footer(view):
     """建立設定頁面的底部橫幅（含提示文字與儲存按鈕）。"""
     return ft.Container(
-        padding=20,
-        bgcolor=ft.Colors.WHITE,
-        border=ft.Border(top=ft.BorderSide(1, ft.Colors.GREY_300)),
-        shadow=ft.BoxShadow(spread_radius=1, blur_radius=5, color=ft.Colors.BLACK_12, offset=ft.Offset(0, -1)),
+        padding=ft.Padding.symmetric(horizontal=24, vertical=14),
+        bgcolor=C.PANEL,
+        border=ft.Border.only(top=ft.BorderSide(1, C.LINE)),
         content=ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
-                ft.Text('提示：修改後請務必點擊儲存', color=ft.Colors.GREY_600, size=12),
-                primary_button('儲存所有設定', icon=ft.Icons.SAVE, tooltip='寫入 config.json（請確認 API Keys 有填好）', on_click=view.save_config_clicked),
+                ft.Row(
+                    [
+                        ft.Icon(ft.Icons.INFO_OUTLINE, size=16, color=C.DIM),
+                        ft.Text("提示：修改後請務必點擊儲存", color=C.MUTED, size=12.5),
+                    ],
+                    spacing=8,
+                ),
+                kit.button(
+                    "儲存所有設定",
+                    "primary",
+                    icon=ft.Icons.SAVE_OUTLINED,
+                    tooltip="寫入 config.json（請確認 API Keys 有填好）",
+                    on_click=view.save_config_clicked,
+                ),
             ],
         ),
     )
 
+
 def build_key_row(view, tf: ft.TextField):
     """建立包含 TextField 與刪除按鈕的橫向排列。"""
-    row = ft.Row(controls=[tf, ft.IconButton(icon=ft.Icons.DELETE, on_click=lambda e: view.remove_key_row(row))])
+    row = ft.Row(
+        controls=[
+            tf,
+            ft.IconButton(
+                icon=ft.Icons.DELETE_OUTLINE,
+                icon_color=C.RED,
+                tooltip="移除這把 Key",
+                on_click=lambda e: view.remove_key_row(row),
+            ),
+        ]
+    )
     return row
 
-def build_key_field(value: str = ''):
-    """建立一個密碼类型的 TextField（可顯示密碼）。"""
-    return ft.TextField(value=value, password=True, can_reveal_password=True, expand=True, dense=True)
+
+def build_key_field(value: str = ""):
+    """建立一個密碼類型的 TextField（可顯示密碼）。"""
+    return kit.field(
+        value=value,
+        password=True,
+        can_reveal_password=True,
+        expand=True,
+        dense=True,
+        text_style=ft.TextStyle(font_family=design.FONT_MONO),
+    )

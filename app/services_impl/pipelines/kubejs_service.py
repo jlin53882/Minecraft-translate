@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from app.services_impl.logging_service import UI_LOG_HANDLER
-from app.logging.task_session import TaskSession
+from app.tasks.task_session import TaskSession
 
 
 def run_kubejs_tooltip_service(

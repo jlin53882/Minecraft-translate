@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from .cache_types import ActionState, CacheUiState
 
+
 class CachePresenter:
     """Cache UI 的顯示層轉換器（Presenter）。
 
@@ -18,7 +19,7 @@ class CachePresenter:
     - action_id/phase 主要用於 trace 與 log；不建議把 UI 邏輯散落在 cache_view.py。
     """
 
-    _STATUS_MAP = {
+    _STATUS_MAP = {  # noqa: RUF012
         "": "就緒",
         "READY": "就緒",
         "SAVING": "儲存中",
@@ -28,7 +29,7 @@ class CachePresenter:
         "CANCELLED": "已取消",
     }
 
-    _PHASE_MAP = {
+    _PHASE_MAP = {  # noqa: RUF012
         "start": "start",
         "success": "success",
         "error": "error",

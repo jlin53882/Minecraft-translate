@@ -1,26 +1,24 @@
 """鍵盤快捷鍵模組。
 
 提供全域鍵盤快捷鍵處理功能。
+
+- Ctrl+<數字>：跳到該頁（對應表在 ``app.view_registry.ViewSpec.shortcut``）
+- Ctrl+P：快速跳轉面板；面板開著時 ↑ ↓ Esc 由面板處理
+- Ctrl+F：聚焦目前頁面的搜尋框；Ctrl+S：儲存
 """
 
 import flet as ft
 
-# 快捷鍵定義：key -> (描述, 處理函數)
-# 支援 Ctrl+1~0 跳轉 1~10，Ctrl+Shift+0 跳轉 11
-SHORTCUTS_DEFINITION = {
-    # 數字鍵 1-9：快速跳轉
-    "1": {"label": "設定", "view_index": 0},
-    "2": {"label": "規則", "view_index": 1},
-    "3": {"label": "快取", "view_index": 2},
-    "4": {"label": "翻譯", "view_index": 3},
-    "5": {"label": "QC", "view_index": 4},
-    "6": {"label": "查詢", "view_index": 5},
-    "7": {"label": "打包", "view_index": 6},
-    "8": {"label": "提取", "view_index": 7},
-    "9": {"label": "翻譯結果", "view_index": 8},
-    # 數字鍵 0：第 10 個 View (lm)
-    "0": {"label": "LM", "view_index": 9},
-}
+
+def shortcut_index(view_registry, key: str) -> int | None:
+    """Ctrl+<數字> 對應到 registry 的位置（快捷鍵定義在 ``ViewSpec.shortcut``）；沒有對應回傳 None。"""
+    from app.view_registry import SPECS_BY_KEY
+
+    for index, item in enumerate(view_registry):
+        spec = SPECS_BY_KEY.get(item.get("key"))
+        if spec is not None and spec.shortcut == key:
+            return index
+    return None
 
 
 class KeyboardShortcutHandler:
@@ -40,6 +38,7 @@ class KeyboardShortcutHandler:
         self._current_view_getter = None
         self._search_callback = None
         self._save_callback = None
+        self._palette_getter = None
 
     def set_current_view_getter(self, getter):
         """設定取得目前頁面的函式（Ctrl+F 用來找該頁的搜尋框）。"""
@@ -67,6 +66,10 @@ class KeyboardShortcutHandler:
         """設定搜尋回調函數（開啟快速跳轉面板）"""
         self._search_callback = callback
 
+    def set_palette_getter(self, getter):
+        """設定取得「目前開著的快速跳轉面板」的函式（開著時，方向鍵 / Esc 交給它）。"""
+        self._palette_getter = getter
+
     def set_save_callback(self, callback):
         """設定儲存回調函數"""
         self._save_callback = callback
@@ -85,22 +88,23 @@ class KeyboardShortcutHandler:
         # 檢查是否按下 Ctrl 或 Meta (Command)
         is_ctrl = e.ctrl or e.meta
 
+        if self._palette_getter is not None:
+            palette = self._palette_getter()
+            if palette is not None and palette.handle_key(e.key):
+                return
+
         if not is_ctrl:
             return
 
         key = e.key.lower()
 
-        # 數字鍵：快速跳轉 (1-9, 0)
-        if key in SHORTCUTS_DEFINITION:
-            view_info = SHORTCUTS_DEFINITION[key]
-            self.change_view_callback(view_info["view_index"])
-            self._show_toast(f"跳轉到：{view_info['label']}")
-            return
-
-        # Ctrl+Shift+0：跳轉到第 11 個 View (merge)
-        if key == "0" and e.shift:
-            self.change_view_callback(10)  # merge 是第 11 個，index 為 10
-            self._show_toast("跳轉到：合併")
+        # 數字鍵：跳到對應頁面
+        if len(key) == 1 and key.isdigit():
+            index = shortcut_index(self.view_registry, key)
+            if index is not None:
+                item = self.view_registry[index]
+                self.change_view_callback(index)
+                self._show_toast(f"跳轉到：{item.get('label', item.get('key'))}")
             return
 
         # F 鍵：聚焦目前頁面的搜尋框（規則、JAR 圖示預覽、快取查詢）

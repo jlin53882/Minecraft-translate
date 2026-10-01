@@ -13,10 +13,10 @@ import os
 import threading
 import traceback
 from functools import partial
+from typing import ClassVar
 
 import flet as ft
 
-from app.logging.task_session import TaskSession
 from app.services_impl.pipelines.bundle_service import (
     build_bundle_staging,
     run_bundling_service,
@@ -30,28 +30,16 @@ from app.services_impl.pipelines.merge_service import (
     run_merge_folder_batch_service,
     run_merge_zip_batch_service,
 )
-from app.ui import theme
+from app.tasks.task_session import TaskSession, tag_session
+from app.ui import design, kit
+from app.ui.design import C
+from app.ui.design import tone as get_tone
 from app.ui.snack import show_snack
 from app.ui.theme import (
-    BLUE_50,
-    BLUE_400,
-    BLUE_600,
     BLUE_700,
-    CYAN_400,
-    GREEN_50,
-    GREEN_600,
-    GREEN_700,
-    GREY_200,
-    GREY_500,
-    GREY_600,
     ORANGE_700,
-    PURPLE_700,
-    RED_50,
     RED_400,
-    TEAL_700,
     WHITE,
-    YELLOW,
-    YELLOW_900,
 )
 from app.views._log import LogView
 from app.views.pipeline.pipeline_bundle_dialog import open_bundle_dialog
@@ -172,40 +160,40 @@ class PipelineConfig:
 
 
 class PipelineStepChip:
-    """單一步驟狀態晶片"""
+    """單一步驟狀態晶片（語意色組：灰=等待、金=進行中、綠=完成、紅=失敗 / 取消）。"""
+
+    _TONES: ClassVar[dict[str, str]] = {
+        "waiting": "neutral",
+        "running": "gold",
+        "done": "em",
+        "failed": "red",
+        "cancelled": "gold",
+    }
+    _ICONS: ClassVar[dict[str, str]] = {
+        "waiting": ft.Icons.CIRCLE,
+        "running": ft.Icons.PENDING,
+        "done": ft.Icons.CHECK_CIRCLE,
+        "failed": ft.Icons.ERROR,
+        "cancelled": ft.Icons.STOP_CIRCLE,
+    }
 
     def __init__(self, name: str, step_num: int):
         self.name = name
         self.step_num = step_num
         self.status = "waiting"
 
-        self.chip = ft.Chip(
-            label=ft.Text(f"{step_num}. {name}"),
-            bgcolor=GREY_200,
-        )
-        self.icon = ft.Icon(ft.Icons.CIRCLE, size=12, color=GREY_500)
+        self.chip = ft.Chip(label=ft.Text(f"{step_num}. {name}"))
+        self.icon = ft.Icon(ft.Icons.CIRCLE, size=12)
         self.chip.leading = self.icon
         self._update_chip()
 
     def _update_chip(self):
-        colors = {
-            "waiting": (GREY_500, GREY_200),
-            "running": (BLUE_400, BLUE_50),
-            "done": (GREEN_600, GREEN_50),
-            "failed": (RED_400, RED_50),
-            "cancelled": (theme.AMBER_700, theme.AMBER_50),
-        }
-        icons = {
-            "waiting": ft.Icons.CIRCLE,
-            "running": ft.Icons.PENDING,
-            "done": ft.Icons.CHECK_CIRCLE,
-            "failed": ft.Icons.ERROR,
-            "cancelled": ft.Icons.STOP_CIRCLE,
-        }
-        color, bg = colors.get(self.status, (GREY_500, GREY_200))
-        self.icon.name = icons[self.status]
-        self.icon.color = color
-        self.chip.bgcolor = bg
+        tone = get_tone(self._TONES.get(self.status, "neutral"))
+        self.icon.name = self._ICONS[self.status]
+        self.icon.color = tone.fg
+        self.chip.bgcolor = tone.bg
+        self.chip.label_text_style = ft.TextStyle(color=tone.fg, size=12.5)
+        self.chip.side = ft.BorderSide(1, tone.line)
 
     def set_status(self, status: str):
         self.status = status
@@ -222,13 +210,14 @@ class PipelineProgressPanel:
 
     def __init__(self, page: ft.Page, on_cancel=None):
         self._page = page
-        self.cancel_button = ft.OutlinedButton(
+        self.cancel_button = kit.button(
             "取消",
+            "danger",
             icon=ft.Icons.STOP_CIRCLE_OUTLINED,
             tooltip="在目前步驟的檢查點停止（已完成的輸出會保留）",
             on_click=(lambda e: on_cancel()) if on_cancel else None,
-            visible=False,
         )
+        self.cancel_button.visible = False
         self.steps = [
             PipelineStepChip("抽取資源", 1),
             PipelineStepChip("語系比對", 2),
@@ -237,20 +226,15 @@ class PipelineProgressPanel:
         ]
         self.current_step = None
 
-        self.step_row = ft.Row(
-            controls=[
-                ft.Container(content=self.steps[0].chip, padding=5),
-                ft.Icon(ft.Icons.ARROW_FORWARD, size=16, color=GREY_500),
-                ft.Container(content=self.steps[1].chip, padding=5),
-                ft.Icon(ft.Icons.ARROW_FORWARD, size=16, color=GREY_500),
-                ft.Container(content=self.steps[2].chip, padding=5),
-                ft.Icon(ft.Icons.ARROW_FORWARD, size=16, color=GREY_500),
-                ft.Container(content=self.steps[3].chip, padding=5),
-            ],
-            spacing=5,
-        )
+        arrow = lambda: ft.Icon(ft.Icons.ARROW_FORWARD, size=16, color=C.DIM)
+        step_controls: list[ft.Control] = []
+        for index, step in enumerate(self.steps):
+            if index:
+                step_controls.append(arrow())
+            step_controls.append(ft.Container(content=step.chip, padding=5))
+        self.step_row = ft.Row(controls=step_controls, spacing=5, wrap=True)
 
-        self.current_label = ft.Text("等待執行...", color=GREY_600, size=14)
+        self.current_label = ft.Text("等待執行...", color=C.MUTED, size=14)
         # PR refactor/unified-log-view: 改用 LogView widget
         # 統一深色容器 + 等寬字 + 等級顏色（從 theme）
         # 保留 height=120 限制
@@ -261,31 +245,24 @@ class PipelineProgressPanel:
             height=120,
         )
 
-        self.container = ft.Container(
-            content=ft.Column(
+        self.container = kit.section_card(
+            "執行進度",
+            ft.Column(
                 [
-                    ft.Text("執行進度", weight="bold", color=BLUE_700),
                     self.step_row,
                     ft.Row(
                         [self.current_label, self.cancel_button],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    ),
-                    ft.Divider(),
-                    ft.Row(
-                        [
-                            ft.Icon(ft.Icons.INFO, size=14, color=GREY_500),
-                            ft.Text("步驟日誌：", size=12, color=GREY_600),
-                        ]
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self.log_view,
                 ],
-                spacing=5,
+                spacing=10,
             ),
-            padding=12,
-            bgcolor=BLUE_50,
-            border_radius=10,
-            visible=False,
+            icon=ft.Icons.TIMELINE,
+            tone="gold",
         )
+        self.container.visible = False
 
     def start(self):
         self.container.visible = True
@@ -367,25 +344,16 @@ class PipelineView(ft.Column):
         self.file_picker = file_picker
         self.registry = None  # 預留給外部注入
 
-        self.input_path_text = ft.TextField(
-            hint_text="尚未選擇讀取來源...",
-            expand=True,
-            border_color=BLUE_700,
-            text_size=12,
-            dense=True,
+        self.input_path_text = kit.text_field(
+            hint="尚未選擇讀取來源...", mono=True, expand=True
         )
-        self.output_path_text = ft.TextField(
-            hint_text="尚未選擇輸出目的地...",
-            expand=True,
-            border_color=BLUE_700,
-            text_size=12,
-            dense=True,
+        self.output_path_text = kit.text_field(
+            hint="尚未選擇輸出目的地...", mono=True, expand=True
         )
-        self.progress_bar = ft.ProgressBar(
-            width=float("inf"), height=8, value=0, color=CYAN_400, bgcolor="#E0E0E0"
-        )
-        self.progress_status = ft.Text("等待任務啟動...", size=12, color=GREY_600)
+        self.progress_bar = kit.progress_bar(0, "em", height=8)
+        self.progress_status = ft.Text("等待任務啟動...", size=12, color=C.MUTED)
         self.keys_container = ft.Column(spacing=10)
+        self._run_buttons: list[ft.Button] = []
 
         self._cancel_event = threading.Event()
         self._current_session: TaskSession | None = None
@@ -506,7 +474,7 @@ class PipelineView(ft.Column):
         """
         if self._cancel_event.is_set():
             return False
-        session = TaskSession()
+        session = tag_session(TaskSession(), "一鍵流水線", "pipeline")
         self._current_session = session
         done = threading.Event()
         self._ui(self.progress_panel.set_step_running, step_num, name)
@@ -880,13 +848,8 @@ class PipelineView(ft.Column):
             yield update_dict
 
     def _set_buttons_disabled(self, disabled: bool):
-        for ctrl in self.workbench_view.controls:
-            if isinstance(ctrl, ft.Column):
-                for row in ctrl.controls:
-                    if isinstance(row, ft.Row) and row.spacing == 10:
-                        for btn in row.controls:
-                            if isinstance(btn, ft.Button) and btn.height == 55:
-                                btn.disabled = disabled
+        for btn in self._run_buttons:
+            btn.disabled = disabled
         if self._one_click_button is not None:
             self._one_click_button.disabled = disabled
 
@@ -970,128 +933,199 @@ class PipelineView(ft.Column):
     # =============================================================================
 
     def _build_one_click_button(self):
-        self._one_click_button = ft.Button(
-            "一鍵製作 (自動執行所有流程)",
+        self._one_click_button = kit.button(
+            "一鍵製作（自動執行所有流程）",
+            "gold",
             icon=ft.Icons.FLASH_ON,
-            width=float("inf"),
-            height=35,
-            bgcolor=YELLOW_900,
-            color=YELLOW,
+            size="lg",
             on_click=self._on_one_click_click,
         )
         return self._one_click_button
 
-    def _build_ui(self):
-        self.workbench_view = ft.Column(
-            [
-                ft.Text("翻譯工作台", size=24, weight="bold", color=BLUE_700),
-                ft.Container(
-                    content=ft.Column(
+    def _step_row(
+        self, number: int, title: str, desc: str, icon: str, tone: str, handler
+    ) -> ft.Control:
+        """一個流水線步驟：編號圓點 + 標題 / 說明 + 「執行此步驟」按鈕。"""
+        button = kit.button(
+            "執行",
+            "secondary",
+            icon=icon,
+            size="sm",
+            tooltip=f"單獨執行：{title}",
+            on_click=handler,
+        )
+        self._run_buttons.append(button)
+        t = get_tone(tone)
+        return ft.Container(
+            padding=ft.Padding.symmetric(horizontal=4, vertical=10),
+            border=ft.Border.only(bottom=ft.BorderSide(1, C.LINE)),
+            content=ft.Row(
+                [
+                    ft.Container(
+                        width=34,
+                        height=34,
+                        border_radius=17,
+                        bgcolor=t.bg,
+                        border=ft.Border.all(1, t.line),
+                        alignment=ft.Alignment.CENTER,
+                        content=ft.Text(
+                            str(number), size=14, weight=ft.FontWeight.BOLD, color=t.fg
+                        ),
+                    ),
+                    ft.Column(
                         [
-                            ft.Text("1. 基礎與打包配置", weight="bold", color=BLUE_600),
+                            ft.Text(
+                                title, size=14, weight=ft.FontWeight.BOLD, color=C.TEXT
+                            ),
+                            ft.Text(desc, size=12, color=C.DIM),
+                        ],
+                        spacing=1,
+                        tight=True,
+                        expand=True,
+                    ),
+                    button,
+                ],
+                spacing=14,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+        )
+
+    def _build_ui(self):
+        paths_card = kit.section_card(
+            "專案路徑",
+            ft.Column(
+                [
+                    ft.Column(
+                        [
+                            kit.section_label("讀取來源（mods 資料夾） *"),
                             ft.Row(
                                 [
-                                    ft.Button(
-                                        "Mod 來源",
-                                        icon=ft.Icons.FOLDER,
-                                        on_click=lambda _: self._page.run_task(
+                                    self.input_path_text,
+                                    kit.pick_button(
+                                        ft.Icons.FOLDER_OPEN,
+                                        "選擇 Mod 來源",
+                                        lambda _: self._page.run_task(
                                             self._pick_input_dir
                                         ),
                                     ),
-                                    ft.Container(
-                                        content=self.input_path_text, expand=True
-                                    ),
-                                ]
+                                ],
+                                spacing=8,
                             ),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Column(
+                        [
+                            kit.section_label("輸出目的地 *"),
                             ft.Row(
                                 [
-                                    ft.Button(
-                                        "輸出目錄",
-                                        icon=ft.Icons.FOLDER_SPECIAL,
-                                        on_click=lambda _: self._page.run_task(
+                                    self.output_path_text,
+                                    kit.pick_button(
+                                        ft.Icons.FOLDER_SPECIAL_OUTLINED,
+                                        "選擇輸出目錄",
+                                        lambda _: self._page.run_task(
                                             self._pick_output_dir
                                         ),
                                     ),
-                                    ft.Container(
-                                        content=self.output_path_text, expand=True
-                                    ),
-                                ]
+                                ],
+                                spacing=8,
                             ),
                         ],
-                        spacing=10,
+                        spacing=6,
                     ),
-                    bgcolor="surfaceContainerLow",
-                    padding=20,
-                    border_radius=15,
+                ],
+                spacing=14,
+            ),
+            icon=ft.Icons.FOLDER_OPEN,
+            tone="em",
+        )
+        steps_card = kit.section_card(
+            "流水線步驟",
+            ft.Column(
+                [
+                    self._step_row(
+                        1,
+                        "抽取資源",
+                        "掃描 JAR，取出 lang 與 Patchouli 手冊",
+                        ft.Icons.UNARCHIVE,
+                        "dia",
+                        self._on_extract_click,
+                    ),
+                    self._step_row(
+                        2,
+                        "語系比對合併",
+                        "en_us / zh_cn / zh_tw 智慧合併，保留既有繁中",
+                        ft.Icons.CALL_MERGE,
+                        "ench",
+                        self._on_merge_click,
+                    ),
+                    self._step_row(
+                        3,
+                        "啟動翻譯",
+                        "Gemini 批次翻譯待翻譯條目",
+                        ft.Icons.AUTO_AWESOME,
+                        "gold",
+                        self._on_translate_click,
+                    ),
+                    self._step_row(
+                        4,
+                        "打包資源",
+                        "輸出 pack.mcmeta 與 ZIP，可直接放入 resourcepacks",
+                        ft.Icons.INVENTORY_2,
+                        "em",
+                        self._on_bundle_click,
+                    ),
+                ],
+                spacing=0,
+            ),
+            icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
+            tone="ench",
+        )
+        status_card = ft.Container(
+            padding=ft.Padding.symmetric(horizontal=18, vertical=14),
+            bgcolor=C.PANEL,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=design.RADIUS_CARD,
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Icon(ft.Icons.INFO_OUTLINE, size=14, color=C.DIM),
+                            self.progress_status,
+                        ]
+                    ),
+                    self.progress_bar,
+                ],
+                spacing=8,
+            ),
+        )
+        one_click = self._build_one_click_button()
+
+        self.workbench_view = ft.Column(
+            [
+                kit.page_header(
+                    "模組流水線・一鍵製作",
+                    "從 JAR 提取到資源包打包，四個步驟一次完成；可隨時取消，已完成的批次會保留",
+                    icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
+                    tone="em",
+                    actions=[one_click],
                 ),
-                self.progress_panel.container,
-                ft.Text("2. 執行任務", weight="bold", color=BLUE_600),
-                ft.Column(
+                ft.Row(
                     [
-                        ft.Row(
-                            [
-                                ft.Button(
-                                    "抽取資源",
-                                    icon=ft.Icons.UNARCHIVE,
-                                    expand=True,
-                                    height=55,
-                                    bgcolor=GREEN_700,
-                                    color=WHITE,
-                                    on_click=self._on_extract_click,
-                                ),
-                                ft.Button(
-                                    "語系比對",
-                                    icon=ft.Icons.SEARCH,
-                                    expand=True,
-                                    height=55,
-                                    bgcolor=TEAL_700,
-                                    color=WHITE,
-                                    on_click=self._on_merge_click,
-                                ),
-                                ft.Button(
-                                    "啟動翻譯",
-                                    icon=ft.Icons.AUTO_AWESOME,
-                                    expand=True,
-                                    height=55,
-                                    bgcolor=BLUE_700,
-                                    color=WHITE,
-                                    on_click=self._on_translate_click,
-                                ),
-                                ft.Button(
-                                    "打包資源",
-                                    icon=ft.Icons.INVENTORY_2,
-                                    expand=True,
-                                    height=55,
-                                    bgcolor=PURPLE_700,
-                                    color=WHITE,
-                                    on_click=self._on_bundle_click,
-                                ),
-                            ],
-                            spacing=10,
+                        ft.Column([paths_card, steps_card], spacing=16, expand=5),
+                        ft.Column(
+                            [status_card, self.progress_panel.container],
+                            spacing=16,
+                            expand=7,
                         ),
-                        ft.Container(
-                            content=ft.Column(
-                                [
-                                    ft.Row(
-                                        [
-                                            ft.Icon(
-                                                ft.Icons.INFO, size=14, color=GREY_500
-                                            ),
-                                            self.progress_status,
-                                        ]
-                                    ),
-                                    self.progress_bar,
-                                ],
-                                spacing=5,
-                            ),
-                            padding=5,
-                        ),
-                        self._build_one_click_button(),
                     ],
-                    spacing=15,
-                    expand=True,
+                    spacing=16,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
                 ),
-            ]
+            ],
+            spacing=18,
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
         )
 
         self.api_view = ft.Column(

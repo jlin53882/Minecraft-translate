@@ -6,18 +6,17 @@
 
 import asyncio
 import threading
+import time
 
 import flet as ft
 
-from app.logging import load_ui_logging_config
 from app.services_impl.pipelines.lm_service import run_lm_translation_service
-from app.task_session import TaskSession
-from app.ui import theme
-
-# UI 共用元件：統一卡片/按鈕樣式
-from app.ui.components import primary_button, secondary_button, styled_card
+from app.tasks.task_session import TaskSession, tag_session
+from app.ui import kit, theme
+from app.ui.design import C
 from app.ui.snack import show_snack
-from app.views._log import LogView
+from app.ui.status_chip import apply_status_style, set_chip_status
+from app.views._log import LogView, load_ui_logging_config
 from translation_tool.utils.config_manager import (
     get_batch_write_interval,
     load_config,
@@ -27,6 +26,14 @@ from translation_tool.utils.log_unit import log_debug
 LM_translate_folder_name = (
     load_config().get("lm_translator", {}).get("lm_translate_folder_name", "LM翻譯後")
 )
+
+
+def format_elapsed(seconds: float) -> str:
+    """秒數 → ``mm:ss``（超過一小時為 ``h:mm:ss``）。"""
+    total = max(0, int(seconds))
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
 
 
 class LMView(ft.Column):
@@ -45,51 +52,42 @@ class LMView(ft.Column):
 
         self.session: TaskSession | None = None
         self._ui_timer_running = False
+        self._started_at: float | None = None
 
         # 基本輸入
-        self.input_path = ft.TextField(
-            label="輸入資料夾（通常是 assets）",
-            hint_text="請選擇要進行 LM 翻譯的資料夾",
+        self.input_path = kit.text_field(
+            hint="請選擇要進行 LM 翻譯的資料夾",
+            icon=ft.Icons.FOLDER_OUTLINED,
+            mono=True,
             expand=True,
-            dense=True,
-            border_color=theme.OUTLINE,
-            text_size=14,
-            content_padding=14,
-            prefix_icon=ft.Icons.FOLDER,
         )
-        self.output_path = ft.TextField(
-            label="輸出資料夾（可選）",
-            hint_text=f"留空會使用：{LM_translate_folder_name}",
+        self.output_path = kit.text_field(
+            hint=f"留空會使用：{LM_translate_folder_name}",
+            icon=ft.Icons.FOLDER_COPY_OUTLINED,
+            mono=True,
             expand=True,
-            dense=True,
-            border_color=theme.OUTLINE,
-            text_size=14,
-            content_padding=14,
-            prefix_icon=ft.Icons.FOLDER_COPY,
         )
 
-        # 參數
-        self.dry_run_switch = ft.Switch(
-            label="Dry-run（只分析，不發送 API）", value=False
+        # 參數（SwitchRow 負責版面，這裡保留 Switch 本體讓外部 / 測試讀寫 .value）
+        dry_run_row = kit.SwitchRow("Dry-run", "只分析，不發送 API")
+        lang_row = kit.SwitchRow("輸出 .lang 格式", "預設輸出 .json")
+        cache_row = kit.SwitchRow(
+            "寫入新快取", "每次回傳單獨存入快取（write_new_cache）", divider=False
         )
-        self.export_lang_checkbox = ft.Switch(
-            label="輸出 .lang 檔案（不是 .json）", value=False
-        )
-        self.write_new_cache_switch = ft.Switch(
-            label="寫入新快取(每次回傳單獨快取)（write_new_cache）", value=False
-        )
+        self.dry_run_switch = dry_run_row.switch
+        self.export_lang_checkbox = lang_row.switch
+        self.write_new_cache_switch = cache_row.switch
         batch_interval = get_batch_write_interval()
         self.batch_interval_info = ft.Text(
             f"快取寫入頻率：每 {batch_interval} 批次寫入一次（由 Config 設定 lm_translator.batch_write_interval）",
             size=11,
-            color=theme.GREY_600,
+            color=C.DIM,
         )
 
         # 狀態與日誌
-        self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=theme.GREY_200)
-        self.progress_bar = ft.ProgressBar(
-            value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
-        )
+        self.status_chip = ft.Chip(label=ft.Text("尚未開始"))
+        self._apply_status_style("neutral")
+        self.progress_bar = kit.progress_bar(0, "em", height=8)
         # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器）
         # tail 模式與既有的 [-250:] 行為一致
         ui_cfg = load_ui_logging_config(load_config)
@@ -99,102 +97,159 @@ class LMView(ft.Column):
             tail_lines=ui_cfg.get("tail_lines", 250),
         )
 
-        # 按鈕（共用 primary style）
-        self.start_button = primary_button(
+        # 按鈕
+        self.start_button = kit.button(
             "開始翻譯",
+            "primary",
             icon=ft.Icons.PLAY_ARROW,
             tooltip="開始執行 LM 翻譯流程",
             on_click=self.start_clicked,
         )
-        self.cancel_button = secondary_button(
+        self.cancel_button = kit.button(
             "取消",
+            "secondary",
             icon=ft.Icons.STOP,
             tooltip="在目前批次完成後停止翻譯（已完成的部分會保留）",
             on_click=self.cancel_clicked,
         )
         self.cancel_button.disabled = True
 
-        self.controls = [
-            styled_card(
-                title="路徑設定",
-                icon=ft.Icons.FOLDER,
-                content=ft.Column(
-                    [
-                        self._path_row(self.input_path, self.pick_input_directory),
-                        self._path_row(self.output_path, self.pick_output_directory),
-                    ],
-                    spacing=10,
-                ),
-            ),
-            # 選項與狀態並排：1280×900 下原本垂直堆疊，日誌只剩約 4 行
-            ft.ResponsiveRow(
+        # 統計卡：進度 / 已用時間 / API Key / 快取寫入
+        self.stat_progress = kit.stat_card(
+            "進度", "0%", icon=ft.Icons.SPEED, tone="em", expand=1
+        )
+        self.stat_elapsed = kit.stat_card(
+            "已用時間", "—", icon=ft.Icons.TIMER_OUTLINED, tone="gold", expand=1
+        )
+        self.stat_keys = kit.stat_card(
+            "可用 API Key", "—", icon=ft.Icons.KEY, tone="dia", expand=1
+        )
+        self.stat_cache = kit.stat_card(
+            "快取寫入",
+            f"{batch_interval}",
+            delta="批次寫入一次",
+            delta_tone="neutral",
+            icon=ft.Icons.STORAGE_OUTLINED,
+            tone="ench",
+            expand=1,
+        )
+        self.refresh_key_stat()
+
+        settings_card = kit.section_card(
+            "翻譯設定",
+            ft.Column(
                 [
-                    ft.Container(
-                        col={"xs": 12, "md": 7},
-                        content=styled_card(
-                            title="翻譯選項",
-                            icon=ft.Icons.FACT_CHECK,
-                            content=ft.Column(
-                                [
-                                    self.dry_run_switch,
-                                    self.export_lang_checkbox,
-                                    self.write_new_cache_switch,
-                                    self.batch_interval_info,
-                                    ft.Row(
-                                        [self.start_button, self.cancel_button],
-                                        spacing=10,
-                                    ),
-                                ],
-                                spacing=8,
-                            ),
-                        ),
+                    ft.Column(
+                        [
+                            kit.section_label("輸入資料夾（通常是 assets） *"),
+                            self._path_row(self.input_path, self.pick_input_directory),
+                        ],
+                        spacing=6,
                     ),
-                    ft.Container(
-                        col={"xs": 12, "md": 5},
-                        content=styled_card(
-                            title="執行狀態",
-                            icon=ft.Icons.TIMELINE,
-                            content=ft.Column(
-                                [
-                                    ft.Row([self.status_chip], wrap=True),
-                                    self.progress_bar,
-                                ],
-                                spacing=10,
+                    ft.Column(
+                        [
+                            kit.section_label("輸出資料夾（可選）"),
+                            self._path_row(
+                                self.output_path, self.pick_output_directory
                             ),
-                        ),
+                        ],
+                        spacing=6,
+                    ),
+                    ft.Column([dry_run_row, lang_row, cache_row], spacing=0),
+                    self.batch_interval_info,
+                ],
+                spacing=16,
+            ),
+            icon=ft.Icons.TUNE,
+            tone="gold",
+        )
+        status_card = kit.section_card(
+            "執行狀態",
+            ft.Column(
+                [
+                    ft.Row([self.status_chip], wrap=True),
+                    self.progress_bar,
+                ],
+                spacing=10,
+            ),
+            icon=ft.Icons.TIMELINE,
+            tone="em",
+        )
+        log_card = kit.section_card(
+            "執行日誌",
+            # self.log_view 已是 LogView widget（自帶深色容器 + 等寬字）
+            self.log_view,
+            icon=ft.Icons.TERMINAL,
+            tone="gold",
+            expand=True,
+        )
+
+        self.controls = [
+            kit.page_header(
+                "機器翻譯",
+                "Gemini 批次翻譯：多組金鑰自動輪替、失敗自動縮小批次重試",
+                icon=ft.Icons.AUTO_AWESOME_OUTLINED,
+                tone="gold",
+                actions=[self.cancel_button, self.start_button],
+            ),
+            ft.Row(
+                [
+                    ft.Column(
+                        [settings_card],
+                        spacing=16,
+                        expand=5,
+                        scroll=ft.ScrollMode.AUTO,
+                    ),
+                    ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    self.stat_progress,
+                                    self.stat_elapsed,
+                                    self.stat_keys,
+                                    self.stat_cache,
+                                ],
+                                spacing=12,
+                            ),
+                            status_card,
+                            log_card,
+                        ],
+                        spacing=16,
+                        expand=8,
                     ),
                 ],
-            ),
-            styled_card(
-                title="執行日誌",
-                icon=ft.Icons.RECEIPT_LONG,
+                spacing=16,
                 expand=True,
-                # self.log_view 已是 LogView widget（自帶深色容器 + 等寬字）
-                content=self.log_view,
+                vertical_alignment=ft.CrossAxisAlignment.START,
             ),
         ]
 
     # --------------------------------------------------
     # Style helpers
     # --------------------------------------------------
-    # 本頁原本有 _section_header / _styled_card，現在改用 app.ui.components.styled_card。
-    # 好處：
-    # - 多頁共用一致樣式
-    # - 之後調整 UI（padding/radius/border/divider）只要改一處
-
     def _path_row(self, field: ft.TextField, on_pick) -> ft.Control:
         """建立路徑輸入列"""
         return ft.Row(
             [
                 field,
-                ft.IconButton(
-                    icon=ft.Icons.FOLDER_OPEN_OUTLINED,
-                    icon_color=theme.BLUE_GREY_700,
-                    tooltip="選擇資料夾",
-                    on_click=on_pick,
-                ),
+                kit.pick_button(ft.Icons.FOLDER_OPEN_OUTLINED, "選擇資料夾", on_pick),
             ],
-            spacing=6,
+            spacing=8,
+        )
+
+    def refresh_key_stat(self):
+        """更新「可用 API Key」統計（#113 的 key 健康度）。"""
+        try:
+            from app.shell.topbar import summarize_keys
+            from translation_tool.core.lm_config_rules import get_key_health_snapshot
+
+            summary = summarize_keys(get_key_health_snapshot())
+        except Exception:  # noqa: BLE001 - 讀不到設定時只是不顯示
+            return
+        self.stat_keys.set_value(
+            f"{summary.usable}/{summary.total}" if summary.total else "—",
+            delta=(f"{summary.cooling} 把冷卻中" if summary.cooling else ""),
+            delta_tone="gold",
         )
 
     # --------------------------------------------------
@@ -255,11 +310,11 @@ class LMView(ft.Column):
             show_snack(self.page, "翻譯正在執行中，請等待完成或先取消", theme.WARNING)
             return
         if not (self.input_path.value or "").strip():
-            self._set_status("請先選擇輸入資料夾", theme.RED_200)
+            self._set_status("請先選擇輸入資料夾", "red")
             self.page.update()
             return
 
-        self.session = TaskSession()
+        self.session = tag_session(TaskSession(), "機器翻譯", "lm")
         self.session.start()
 
         if not (self.output_path.value or "").strip():
@@ -267,7 +322,8 @@ class LMView(ft.Column):
                 f"[資訊] 未指定輸出，將使用預設：{LM_translate_folder_name}"
             )
 
-        self._set_status("執行中", theme.BLUE_200)
+        self._set_status("執行中", "dia")
+        self._started_at = time.monotonic()
         self._set_running(True)
         self.progress_bar.value = 0
         self.log_view.clear()
@@ -306,7 +362,7 @@ class LMView(ft.Column):
             return
         self.session.request_cancel()
         self.cancel_button.disabled = True
-        self._set_status("取消中…", theme.AMBER_200)
+        self._set_status("取消中…", "gold")
         self.page.update()
 
     def _set_running(self, running: bool):
@@ -350,26 +406,38 @@ class LMView(ft.Column):
         except (TypeError, ValueError):
             self.progress_bar.value = 0
         self.log_view.sync_entries(snap.get("logs", []) or [], update=False)
+        self._update_stats(self.progress_bar.value)
 
         status = (snap.get("status") or "").upper()
         if status in ("DONE", "ERROR"):
             if status == "ERROR":
-                self._set_status("任務發生錯誤", theme.RED_200)
+                self._set_status("任務發生錯誤", "red")
             elif getattr(session, "cancel_requested", False):
-                self._set_status("已取消", theme.AMBER_200)
+                self._set_status("已取消", "gold")
             else:
-                self._set_status("任務完成", theme.GREEN_200)
+                self._set_status("任務完成", "em")
             self._ui_timer_running = False
             self._set_running(False)
         self.page.update()
 
+    def _update_stats(self, progress: float):
+        """進度 / 已用時間 / Key 健康度統計卡。"""
+        self.stat_progress.set_value(f"{round((progress or 0) * 100)}%")
+        if self._started_at is not None:
+            self.stat_elapsed.set_value(
+                format_elapsed(time.monotonic() - self._started_at)
+            )
+        self.refresh_key_stat()
+
     # --------------------------------------------------
     # UI helpers
     # --------------------------------------------------
-    def _set_status(self, text: str, color: str):
-        """更新狀態晶片顯示"""
-        self.status_chip.label = ft.Text(text)
-        self.status_chip.bgcolor = color
+    def _set_status(self, text: str, tone: str = "neutral"):
+        """更新狀態晶片顯示（``tone`` 為色組名稱，也接受舊背景色）。"""
+        set_chip_status(self.status_chip, text, tone)
+
+    def _apply_status_style(self, tone: str):
+        apply_status_style(self.status_chip, tone)
 
     @property
     def page(self):

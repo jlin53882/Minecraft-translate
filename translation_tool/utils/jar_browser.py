@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 import re
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -125,6 +125,7 @@ def scan_jars(
     patterns: list[str],
     max_workers: int | None = None,
     processed_callback: Callable[[int, int], None] | None = None,
+    jar_files: Iterable[Path | str] | None = None,
 ) -> dict[Path, dict[str, str | None]]:
     """平行讀取多個 JAR 內符合 pattern 的檔案內容。
 
@@ -141,6 +142,10 @@ def scan_jars(
         max_workers: 最大執行緒數（None=從 config 自動讀取）
         processed_callback: 進度回呼 `(processed: int, total: int) -> None`
             每個 JAR 完成後呼叫一次，用於更新進度條等 UI 元件。
+        jar_files: 明確指定要掃描的 JAR 清單（可含子目錄內的 JAR）。
+            None（預設）維持舊行為：只掃 ``jar_dir`` 頂層的 ``*.jar``。
+            提取流程會傳入與 ``find_jar_files`` 相同的清單，讓預掃描與實際處理的
+            JAR 一致（issue #111）；此時 ``jar_dir`` 僅作為相容參數，不再用於找檔。
 
     回傳：
         dict[Path, dict[str, str | None]]
@@ -160,8 +165,11 @@ def scan_jars(
         for jar_path, files in result.items():
             en_us = files.get("assets/modid/lang/en_us.json")
     """
-    # 找出所有 JAR 檔案
-    jar_files = list(jar_dir.glob("*.jar")) if jar_dir.is_dir() else []
+    # 找出所有 JAR 檔案：明確清單優先（去重、保留順序）；否則維持只掃頂層的舊行為
+    if jar_files is not None:
+        jar_files = list(dict.fromkeys(Path(p) for p in jar_files))
+    else:
+        jar_files = list(jar_dir.glob("*.jar")) if jar_dir.is_dir() else []
     total = len(jar_files)
 
     # 決定 worker 數量
