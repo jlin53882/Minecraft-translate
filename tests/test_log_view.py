@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import flet as ft
 
 from app.ui import theme
-from app.views._log import LogEntry, LogView, TaskSession
+from app.views._log import LogView, TaskSession
 
 
 def test_log_view_default_appearance():
