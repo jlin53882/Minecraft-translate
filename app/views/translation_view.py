@@ -46,7 +46,7 @@ except Exception:  # noqa: BLE001
     run_md_translation_service = None
 
 try:
-    from app.task_session import TaskSession
+    from app.tasks.task_session import TaskSession
 except Exception:  # noqa: BLE001
     TaskSession = None
 

@@ -10,15 +10,13 @@ import time
 
 import flet as ft
 
-from app.logging import load_ui_logging_config
 from app.services_impl.pipelines.lm_service import run_lm_translation_service
-from app.task_session import TaskSession
+from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit, theme
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, set_chip_status
-from app.views._log import LogView
-from app.views._log.task_session import tag_session
+from app.views._log import LogView, load_ui_logging_config
 from translation_tool.utils.config_manager import (
     get_batch_write_interval,
     load_config,

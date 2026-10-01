@@ -17,12 +17,12 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from app.logging.task_session import TaskSession
 from app.services_impl.logging_service import (
     GLOBAL_LOG_LIMITER,
     UI_LOG_HANDLER,
 )
 from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
+from app.tasks.task_session import TaskSession
 from translation_tool.core.jar_processor import (
     extract_book_files_generator,
     extract_dual_files_generator,

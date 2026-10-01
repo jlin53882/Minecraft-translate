@@ -2,7 +2,7 @@
 
 import logging
 
-from app.views._log.task_session import TaskSession
+from app.tasks.task_session import TaskSession
 from translation_tool.utils.ui_logging_handler import UISessionLogHandler
 
 

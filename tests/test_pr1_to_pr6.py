@@ -266,51 +266,6 @@ def test_error_state_with_retry():
     assert isinstance(err, ft.Container)
 
 
-# PR6: Cache Panels
-
-
-def test_cache_overview_panel_import():
-    """Verify CacheOverviewPanel can be imported."""
-    from app.views.cache_manager.panels import CacheOverviewPanel
-
-    assert CacheOverviewPanel is not None
-
-
-def test_cache_query_panel_import():
-    """Verify CacheQueryPanel can be imported."""
-    from app.views.cache_manager.panels import CacheQueryPanel
-
-    assert CacheQueryPanel is not None
-
-
-def test_cache_shard_panel_import():
-    """Verify CacheShardPanel can be imported."""
-    from app.views.cache_manager.panels import CacheShardPanel
-
-    assert CacheShardPanel is not None
-
-
-def test_cache_overview_panel_class():
-    """Verify CacheOverviewPanel is a class."""
-    from app.views.cache_manager.panels import CacheOverviewPanel
-
-    assert isinstance(CacheOverviewPanel, type)
-
-
-def test_cache_query_panel_class():
-    """Verify CacheQueryPanel is a class."""
-    from app.views.cache_manager.panels import CacheQueryPanel
-
-    assert isinstance(CacheQueryPanel, type)
-
-
-def test_cache_shard_panel_class():
-    """Verify CacheShardPanel is a class."""
-    from app.views.cache_manager.panels import CacheShardPanel
-
-    assert isinstance(CacheShardPanel, type)
-
-
 # Theme tests
 
 

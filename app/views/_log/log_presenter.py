@@ -16,9 +16,8 @@ from typing import Literal
 
 import flet as ft
 
+from app.tasks.log_entry import LogEntry
 from app.ui import design, theme
-
-from .log_entry import LogEntry
 
 # 等級 → 語意色（跟著深淺色主題切換）
 _LEVEL_COLORS = {

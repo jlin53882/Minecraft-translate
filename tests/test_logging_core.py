@@ -5,8 +5,8 @@ PR1：Logging Core Foundation — TaskSession 單元測試。
 
 from __future__ import annotations
 
-from app.logging.task_session import TaskSession
-from app.logging.log_entry import LogEntry
+from app.tasks.log_entry import LogEntry
+from app.tasks.task_session import TaskSession
 
 
 class TestTaskSessionLogEntry:

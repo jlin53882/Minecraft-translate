@@ -26,11 +26,11 @@ from typing import Literal
 
 import flet as ft
 
+from app.tasks.log_entry import LogEntry
+from app.tasks.task_session import TaskSession
 from app.ui import design, theme
 
-from .log_entry import LogEntry
 from .log_presenter import LogPresenter
-from .task_session import TaskSession
 
 _LEVEL_COLORS = {
     "error": theme.TEXT_LOG_ERROR,

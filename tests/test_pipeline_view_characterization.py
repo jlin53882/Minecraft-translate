@@ -7,7 +7,7 @@ import os
 
 import flet as ft
 
-from app.logging import LogEntry
+from app.tasks import LogEntry
 from app.ui.snack import show_snack
 from app.views.pipeline import pipeline_view
 from app.views.pipeline.pipeline_view import (

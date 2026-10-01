@@ -17,7 +17,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from app.views._log import task_session as task_session_module
+from app.tasks import task_session as task_session_module
 
 _logger = logging.getLogger(__name__)
 

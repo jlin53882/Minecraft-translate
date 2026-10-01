@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
 
 if TYPE_CHECKING:
-    from app.logging.task_session import TaskSession
+    from app.tasks.task_session import TaskSession
 
 
 def run_ftb_translation_service(

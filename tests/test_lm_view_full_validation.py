@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import flet as ft
 
-from app.logging import LogEntry
+from app.tasks import LogEntry
 from app.ui.design import tone as get_tone
 from app.ui.snack import show_snack
 from app.views import lm_view
@@ -556,7 +556,7 @@ def test_start_clicked_ignored_while_running(monkeypatch):
 
 def test_cancel_clicked_requests_session_cancel(monkeypatch):
     """按「取消」會要求 session 取消（翻譯迴圈在批次之間停止）。"""
-    from app.logging.task_session import TaskSession
+    from app.tasks.task_session import TaskSession
 
     monkeypatch.setattr(
         lm_view.threading,

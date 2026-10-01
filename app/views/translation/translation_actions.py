@@ -5,9 +5,9 @@ import threading
 
 import flet as ft  # noqa: F401
 
+from app.tasks.task_session import tag_session
 from app.ui import theme
 from app.ui.snack import show_snack
-from app.views._log.task_session import tag_session
 from translation_tool.utils.log_unit import log_error, log_warning
 
 

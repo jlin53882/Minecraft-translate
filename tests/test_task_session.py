@@ -1,11 +1,11 @@
-"""app.task_session 單元測試
+"""app.tasks.task_session 單元測試
 
 測試目標：TaskSession 類別的執行緒安全與狀態管理功能。
 """
 
 import threading
 
-from app.task_session import TaskSession
+from app.tasks.task_session import TaskSession
 
 
 class TestTaskSession:
@@ -143,7 +143,7 @@ class TestTaskSession:
 
 def test_finish_keeps_error_status():
     """set_error() 之後的 finish()（常見於 finally）不可把狀態蓋成 DONE。"""
-    from app.views._log.task_session import TaskSession
+    from app.tasks.task_session import TaskSession
 
     session = TaskSession()
     session.start()

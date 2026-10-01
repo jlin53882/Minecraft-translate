@@ -15,12 +15,11 @@ from app.services_impl.pipelines.merge_service import (
     run_merge_folder_batch_service,
     run_merge_zip_batch_service,
 )
-from app.task_session import TaskSession
+from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit, theme
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView
-from app.views._log.task_session import tag_session
 from app.views.config.config_actions import load_config_into_view
 from translation_tool.utils.config_manager import load_config, save_config
 from translation_tool.utils.log_unit import log_warning

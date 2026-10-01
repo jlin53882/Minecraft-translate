@@ -17,7 +17,6 @@ from typing import ClassVar
 
 import flet as ft
 
-from app.logging.task_session import TaskSession
 from app.services_impl.pipelines.bundle_service import (
     build_bundle_staging,
     run_bundling_service,
@@ -31,6 +30,7 @@ from app.services_impl.pipelines.merge_service import (
     run_merge_folder_batch_service,
     run_merge_zip_batch_service,
 )
+from app.tasks.task_session import TaskSession, tag_session
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.design import tone as get_tone
@@ -42,7 +42,6 @@ from app.ui.theme import (
     WHITE,
 )
 from app.views._log import LogView
-from app.views._log.task_session import tag_session
 from app.views.pipeline.pipeline_bundle_dialog import open_bundle_dialog
 from app.views.pipeline.pipeline_extract_dialog import open_extract_dialog
 from app.views.pipeline.pipeline_merge_dialog import open_merge_dialog

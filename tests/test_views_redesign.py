@@ -354,7 +354,7 @@ def test_dashboard_reload_is_not_reentrant():
 
 def test_dashboard_reflects_running_and_finished_tasks():
     from app.shell.task_manager import TaskManager
-    from app.views._log.task_session import TaskSession
+    from app.tasks.task_session import TaskSession
     from app.views.dashboard.dashboard_data import STEP_DONE, STEP_RUNNING
 
     view = _dashboard()

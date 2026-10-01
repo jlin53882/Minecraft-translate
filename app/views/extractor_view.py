@@ -21,7 +21,7 @@ from pathlib import Path
 import flet as ft
 
 from app.services_impl.pipelines.extract_service import get_output_folder_names
-from app.task_session import (
+from app.tasks.task_session import (
     TaskSession,  # noqa: F401 - 測試以 extractor_view.TaskSession patch
 )
 from app.ui import kit, theme

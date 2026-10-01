@@ -15,10 +15,10 @@ from pathlib import Path
 
 import flet as ft
 
-from app.logging.task_session import TaskSession  # noqa: F401
 from app.services_impl.pipelines.merge_service import (
     run_merge_zip_batch_service,  # noqa: F401
 )
+from app.tasks.task_session import TaskSession  # noqa: F401
 from app.ui import theme
 from app.ui.theme import (
     BLUE_50,  # noqa: F401

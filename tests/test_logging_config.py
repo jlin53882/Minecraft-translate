@@ -5,7 +5,7 @@ PR1：Logging Core Foundation — log_config 單元測試。
 
 from __future__ import annotations
 
-from app.logging.log_config import load_ui_logging_config, DEFAULT_UI_LOGGING
+from app.views._log.log_config import DEFAULT_UI_LOGGING, load_ui_logging_config
 
 
 class TestLoadUiLoggingConfig:
@@ -15,6 +15,7 @@ class TestLoadUiLoggingConfig:
         """傳入空 config 時應回傳完整 defaults。"""
         cfg = {}
         result = load_ui_logging_config(cfg.get, "ui_logging") if False else None
+
         # 兩種呼叫方式
         def empty_getter():
             return {}
@@ -25,6 +26,7 @@ class TestLoadUiLoggingConfig:
 
     def test_partial_config_merges_defaults(self):
         """只提供部分鍵時，未提供的鍵使用 default。"""
+
         def partial_getter():
             return {"ui_logging": {"max_ui_lines": 500}}
 
@@ -34,6 +36,7 @@ class TestLoadUiLoggingConfig:
 
     def test_invalid_value_falls_back(self):
         """無效值（負數/非int）時 fallback。"""
+
         def bad_getter():
             return {"ui_logging": {"max_session_logs": -1, "tail_lines": "abc"}}
 
@@ -43,6 +46,7 @@ class TestLoadUiLoggingConfig:
 
     def test_show_levels_lowercase_normalized(self):
         """show_levels 傳入大寫時正規化為小寫。"""
+
         def upper_getter():
             return {"ui_logging": {"show_levels": ["INFO", "ERROR", "Warning"]}}
 

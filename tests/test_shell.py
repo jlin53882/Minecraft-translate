@@ -13,7 +13,7 @@ from app.shell.app_shell import AppShell, _cache_dir_of, _enabled_model_name
 from app.shell.sidebar import SIDEBAR_WIDTH, SIDEBAR_WIDTH_COMPACT, Sidebar
 from app.shell.task_manager import TaskManager
 from app.shell.topbar import ApiStatusPill, TaskPill, TopBar, summarize_keys
-from app.views._log.task_session import TaskSession
+from app.tasks.task_session import TaskSession
 from translation_tool.core.lm_key_health import (
     STATUS_COOLING,
     STATUS_OK,

@@ -88,7 +88,7 @@ def test_bundler_worker_restores_button_and_batches_ui(monkeypatch):
 
 
 def test_translation_cancel_button_requests_cancel_and_shows_cancelled():
-    from app.logging.task_session import TaskSession
+    from app.tasks.task_session import TaskSession
 
     page = mock_page()
     view = tv.TranslationView(page, mock_filepicker())

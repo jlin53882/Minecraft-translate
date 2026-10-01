@@ -12,7 +12,7 @@ from app.shell.task_manager import (
     STATUS_ERROR,
     TaskManager,
 )
-from app.views._log.task_session import TaskSession
+from app.tasks.task_session import TaskSession
 
 
 @pytest.fixture
