@@ -209,3 +209,64 @@ def stat_card(
         border_radius=CARD_RADIUS,
         **expand_kwargs(expand),
     )
+
+
+class ChoiceCard(ft.Container):
+    """可選取的模式卡（圖示 + 標題 / 說明 + 選取勾勾）。用在「先選模式再填欄位」的頁面。
+
+    ``set_selected`` 只改外觀；要在選取時做事請傳 ``on_select(key)``。
+    """
+
+    def __init__(
+        self,
+        key: str,
+        title: str,
+        sub: str = "",
+        *,
+        icon: str | None = None,
+        tone: str = "em",
+        selected: bool = False,
+        on_select=None,
+        expand: bool | int = False,
+    ) -> None:
+        self.choice_key = key
+        self.choice_tone = tone
+        self.selected = selected
+        self._on_select = on_select
+        self._check = ft.Icon(ft.Icons.CHECK_CIRCLE, size=20, color=get_tone(tone).fg)
+        self._title = ft.Text(title, size=14, weight=ft.FontWeight.BOLD, color=C.TEXT)
+        left: list[ft.Control] = []
+        if icon:
+            left.append(tone_icon(icon, tone, size=20, box=40, radius=11))
+        left.append(
+            ft.Column(
+                [self._title, *([ft.Text(sub, size=12, color=C.DIM)] if sub else [])],
+                spacing=1,
+                tight=True,
+                expand=True,
+            )
+        )
+        super().__init__(
+            content=ft.Row(
+                [*left, self._check],
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding.symmetric(horizontal=16, vertical=14),
+            border_radius=CARD_RADIUS,
+            ink=True,
+            on_click=self._click,
+            **expand_kwargs(expand),
+        )
+        self.set_selected(selected)
+
+    def set_selected(self, selected: bool) -> None:
+        self.selected = selected
+        tone = get_tone(self.choice_tone)
+        self.bgcolor = tone.bg if selected else C.PANEL
+        self.border = ft.Border.all(1, tone.line if selected else C.LINE)
+        self._check.visible = selected
+
+    def _click(self, _e=None) -> None:
+        if self._on_select is not None:
+            self._on_select(self.choice_key)

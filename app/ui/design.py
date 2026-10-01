@@ -242,6 +242,7 @@ def build_theme(mode: str = "dark") -> ft.Theme:
             radius=3,
             thumb_color=p.line2,
             main_axis_margin=2,
+            thumb_visibility=False,  # 只在捲動 / 滑過時出現，不蓋住卡片右緣
         ),
         dialog_theme=ft.DialogTheme(
             bgcolor=p.panel,

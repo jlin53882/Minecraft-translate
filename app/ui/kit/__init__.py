@@ -22,12 +22,27 @@ from app.ui.kit.basics import (
     tone_icon,
     vdivider,
 )
-from app.ui.kit.cards import SectionCard, page_header, section_card, stat_card
-from app.ui.kit.inputs import Pager, Segmented, SwitchRow, button, page_window
+from app.ui.kit.cards import (
+    ChoiceCard,
+    SectionCard,
+    page_header,
+    section_card,
+    stat_card,
+)
+from app.ui.kit.inputs import (
+    Pager,
+    Segmented,
+    SwitchRow,
+    button,
+    page_window,
+    pick_button,
+    text_field,
+)
 from app.ui.kit.progress import ProgressRing, clamp01, progress_bar
 from app.ui.kit.states import empty_state, error_state, loading_state
 
 __all__ = [
+    "ChoiceCard",
     "Pager",
     "ProgressRing",
     "SectionCard",
@@ -45,10 +60,12 @@ __all__ = [
     "mono_text",
     "page_header",
     "page_window",
+    "pick_button",
     "progress_bar",
     "section_card",
     "section_label",
     "stat_card",
+    "text_field",
     "tone_icon",
     "vdivider",
 ]

@@ -330,3 +330,23 @@ def test_gallery_builds_and_has_no_stray_expand_false():
     # 回歸：expand=False 的控制項放進 wrap 的 Row 會讓 Flutter 爆版
     for node in _walk(root):
         assert getattr(node, "expand", None) is not False, type(node).__name__
+
+
+# -- text_field -------------------------------------------------------------
+
+
+def test_text_field_applies_design_tokens_and_options():
+    from app.ui.design import C
+
+    f = kit.text_field(
+        "標籤", hint="提示", mono=True, multiline=True, min_lines=3, expand=True
+    )
+    assert f.label == "標籤" and f.hint_text == "提示"
+    assert f.bgcolor == C.PANEL2 and f.focused_border_color == C.EM
+    assert f.multiline is True and f.min_lines == 3 and f.expand is True
+    assert f.text_style.font_family == "JetBrains Mono"
+
+
+def test_text_field_does_not_force_expand():
+    assert kit.text_field("x").expand in (None, 0)
+    assert kit.text_field("x", read_only=True).read_only is True

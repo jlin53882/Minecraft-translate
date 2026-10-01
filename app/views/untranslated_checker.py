@@ -5,12 +5,12 @@
 """
 
 import flet as ft
-from typing import List
-from app.views.qc_base import QCBase
+
 from app.services import run_untranslated_check_service
-from app.ui import theme
+from app.ui import kit
+from app.ui.design import C
 from app.ui.snack import show_snack
-from translation_tool.utils.log_unit import log_info
+from app.views.qc_base import QCBase
 
 
 class UntranslatedChecker(ft.Container):
@@ -34,22 +34,11 @@ class UntranslatedChecker(ft.Container):
             task_runner: QCBase 實例，用於執行緒任務
         """
         # --- 先建立 UI 元件 ---
-        self.en_dir = ft.TextField(
-            label="英文 (en_us) 來源資料夾",
-            expand=True,
-        )
-        self.tw_dir = ft.TextField(
-            label="繁中 (zh_tw) 來源資料夾",
-            expand=True,
-        )
-        self.out_dir = ft.TextField(
-            label="未翻譯報告 輸出資料夾",
-            expand=True,
-        )
-        self.start_button = ft.Button(
-            "開始檢查",
-            icon=ft.Icons.SEARCH_OFF,
-            on_click=self._on_start,
+        self.en_dir = kit.text_field("英文 (en_us) 來源資料夾", mono=True, expand=True)
+        self.tw_dir = kit.text_field("繁中 (zh_tw) 來源資料夾", mono=True, expand=True)
+        self.out_dir = kit.text_field("未翻譯報告 輸出資料夾", mono=True, expand=True)
+        self.start_button = kit.button(
+            "開始檢查", "primary", icon=ft.Icons.SEARCH_OFF, on_click=self._on_start
         )
 
         # --- 先呼叫父類初始化 ---
@@ -65,8 +54,9 @@ class UntranslatedChecker(ft.Container):
         return ft.Column(
             [
                 ft.Text(
-                    "翻譯 Key 缺失檢查 (en_us vs zh_tw)",
-                    theme_style=ft.TextThemeStyle.TITLE_LARGE,
+                    "比對 en_us 與 zh_tw 的 key，列出繁中缺漏或仍是英文的條目。",
+                    size=12.5,
+                    color=C.MUTED,
                 ),
                 ft.Row(
                     [
@@ -76,7 +66,8 @@ class UntranslatedChecker(ft.Container):
                             "選擇英文 (en_us) 來源資料夾",
                             folder_mode=True,
                         ),
-                    ]
+                    ],
+                    spacing=8,
                 ),
                 ft.Row(
                     [
@@ -86,7 +77,8 @@ class UntranslatedChecker(ft.Container):
                             "選擇繁中 (zh_tw) 來源資料夾",
                             folder_mode=True,
                         ),
-                    ]
+                    ],
+                    spacing=8,
                 ),
                 ft.Row(
                     [
@@ -96,11 +88,12 @@ class UntranslatedChecker(ft.Container):
                             "選擇報告輸出資料夾",
                             folder_mode=True,
                         ),
-                    ]
+                    ],
+                    spacing=8,
                 ),
                 self.start_button,
             ],
-            spacing=15,
+            spacing=14,
         )
 
     def _create_pick_button(
@@ -110,10 +103,10 @@ class UntranslatedChecker(ft.Container):
         folder_mode: bool,
     ) -> ft.IconButton:
         """建立檔案/資料夾選擇按鈕"""
-        return ft.IconButton(
-            icon=ft.Icons.FOLDER_OPEN if folder_mode else ft.Icons.FILE_PRESENT,
-            tooltip=title,
-            on_click=lambda e: self._pick_file_or_directory(
+        return kit.pick_button(
+            ft.Icons.FOLDER_OPEN if folder_mode else ft.Icons.FILE_PRESENT,
+            title,
+            lambda e: self._pick_file_or_directory(
                 e, target_textfield, title, folder_mode
             ),
         )
@@ -133,7 +126,9 @@ class UntranslatedChecker(ft.Container):
             title: FilePicker 對話框標題。
             folder_mode: True 為選擇資料夾，False 為選擇檔案。
         """
-        self._page.run_task(self._async_pick_file_or_directory, target_textfield, title, folder_mode)
+        self._page.run_task(
+            self._async_pick_file_or_directory, target_textfield, title, folder_mode
+        )
 
     async def _async_pick_file_or_directory(
         self,
@@ -154,12 +149,11 @@ class UntranslatedChecker(ft.Container):
             result = await self.file_picker.pick_files(dialog_title=title)
 
         if result:
-            path = result[0].path if hasattr(result[0], 'path') else result
+            path = result[0].path if hasattr(result[0], "path") else result
             target_textfield.value = path
             self._page.update()
         else:
-            show_snack(self.page, "您已取消選擇", theme.BLUE_GREY_500)
-
+            show_snack(self.page, "您已取消選擇", C.MUTED)
 
     def _on_start(self, e):
         """處理開始檢查任務"""
@@ -171,7 +165,7 @@ class UntranslatedChecker(ft.Container):
             show_snack(self.page, "錯誤：請填寫所有路徑！")
             return
 
-        controls: List[ft.Control] = [
+        controls: list[ft.Control] = [
             self.start_button,
             self.en_dir,
             self.tw_dir,

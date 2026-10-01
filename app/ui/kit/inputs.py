@@ -75,6 +75,81 @@ def button(
     )
 
 
+def text_field(
+    label: str | None = None,
+    *,
+    hint: str | None = None,
+    value: str | None = None,
+    icon: str | None = None,
+    multiline: bool = False,
+    min_lines: int | None = None,
+    max_lines: int | None = None,
+    read_only: bool = False,
+    mono: bool = False,
+    password: bool = False,
+    on_change: Callable | None = None,
+    on_submit: Callable | None = None,
+    expand: bool | int = False,
+    width: int | None = None,
+    tooltip: str | None = None,
+    suffix: ft.Control | None = None,
+    dense: bool = True,
+) -> ft.TextField:
+    """統一外觀的輸入框（深 / 淺色皆適用）。``mono=True`` 用等寬字（路徑、key、JSON）。"""
+    return ft.TextField(
+        label=label,
+        hint_text=hint,
+        value=value,
+        prefix_icon=icon,
+        multiline=multiline,
+        min_lines=min_lines,
+        max_lines=max_lines,
+        read_only=read_only,
+        password=password,
+        can_reveal_password=password,
+        on_change=on_change,
+        on_submit=on_submit,
+        width=width,
+        tooltip=tooltip,
+        suffix=suffix,
+        filled=True,
+        bgcolor=C.PANEL2,
+        border_color=C.LINE2,
+        focused_border_color=C.EM,
+        border_radius=design.RADIUS_CONTROL,
+        border_width=1,
+        text_size=13,
+        text_style=ft.TextStyle(font_family=design.FONT_MONO) if mono else None,
+        label_style=ft.TextStyle(size=12, color=C.MUTED),
+        hint_style=ft.TextStyle(size=13, color=C.DIM),
+        cursor_color=C.EM,
+        content_padding=ft.Padding.symmetric(
+            horizontal=12, vertical=10 if dense else 14
+        ),
+        **expand_kwargs(expand),
+    )
+
+
+def pick_button(
+    icon: str = ft.Icons.FOLDER_OPEN,
+    tooltip: str | None = None,
+    on_click: Callable | None = None,
+) -> ft.IconButton:
+    """輸入框旁的「瀏覽…」圖示按鈕（選資料夾 / 檔案）。"""
+    return ft.IconButton(
+        icon=icon,
+        tooltip=tooltip,
+        on_click=on_click,
+        icon_color=C.EM,
+        icon_size=20,
+        style=ft.ButtonStyle(
+            bgcolor=C.PANEL2,
+            side=ft.BorderSide(1, C.LINE2),
+            shape=ft.RoundedRectangleBorder(radius=design.RADIUS_CONTROL),
+        ),
+    )
+
+
 class SwitchRow(ft.Container):
     """設定列：左側標題 / 說明，右側開關。``value`` 可讀寫。"""
 
