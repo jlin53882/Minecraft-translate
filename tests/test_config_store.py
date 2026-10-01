@@ -253,6 +253,102 @@ def test_failing_subscriber_does_not_block_others_on_save(cfg_path):
         unsub_b()
 
 
+# -- 寫入所有權：所有 app 層的 config.json 寫入都經過同一把鎖 ---------------------------
+
+
+@pytest.fixture
+def lock_probe(cfg_path, fresh_write_lock, monkeypatch):
+    """攔截真正寫檔的 ``save_config``，記錄每次寫入當下寫入鎖是否被持有，再交給真的實作。"""
+    from translation_tool.utils import config_manager
+
+    real_save = config_manager.save_config
+    held: list[bool] = []
+
+    def spy(config, config_path=None):
+        held.append(fresh_write_lock.locked())
+        return real_save(config, config_path)
+
+    monkeypatch.setattr(config_manager, "save_config", spy)
+    return held
+
+
+@pytest.mark.parametrize("how", ["save", "set_value", "legacy_service"])
+def test_every_config_write_path_holds_the_write_lock(cfg_path, lock_probe, how):
+    if how == "save":
+        assert config_store.save(config_store.snapshot()) is True
+    elif how == "set_value":
+        assert config_store.set_value("x", 1) is True
+    else:
+        assert config_service.save_config_json(config_store.snapshot()) is True
+
+    assert lock_probe == [True]  # 唯一一次寫檔是在持鎖狀態下進行的
+
+
+def test_merge_page_field_change_goes_through_the_config_store(cfg_path, lock_probe):
+    """合併頁單欄位寫入不可繞過 ConfigStore（鎖、通知）。"""
+    from types import SimpleNamespace
+
+    from app.views.merge_view import MergeView
+
+    broadcasts: list[int] = []
+    stub = SimpleNamespace(
+        _broadcast_config_change_to_config_view=lambda: broadcasts.append(1)
+    )
+    calls: list[int] = []
+    unsubscribe = config_store.subscribe(lambda: calls.append(1))
+    try:
+        MergeView._on_merge_field_changed(stub, "pending_folder_name", "我的待翻譯")
+    finally:
+        unsubscribe()
+
+    assert lock_probe == [True]
+    assert calls == [1]  # 外殼等訂閱者也會收到通知
+    assert broadcasts == [1]
+    assert _read(cfg_path) == {"lang_merger": {"pending_folder_name": "我的待翻譯"}}
+
+
+def test_concurrent_writers_never_leave_a_broken_file_or_deadlock(cfg_path):
+    """兩個寫入者（ConfigStore 與舊的 service 路徑）同時寫：檔案永遠可解析、通知次數正確。"""
+    calls: list[int] = []
+    unsubscribe = config_store.subscribe(lambda: calls.append(1))
+    rounds = 40
+    blob = {"filler": ["x" * 50] * 200}  # 加大內容，提高交錯寫入時出事的機率
+    errors: list[BaseException] = []
+
+    def store_writer():
+        try:
+            for i in range(rounds):
+                assert config_store.set_value("store.counter", i) is True
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    def legacy_writer():
+        try:
+            for i in range(rounds):
+                cfg = config_store.snapshot()
+                cfg["legacy"] = {"counter": i, **blob}
+                assert config_service.save_config_json(cfg) is True
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=store_writer),
+        threading.Thread(target=legacy_writer),
+    ]
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+    finally:
+        unsubscribe()
+
+    assert not any(t.is_alive() for t in threads), "寫入卡住（死鎖）"
+    assert not errors, errors
+    assert isinstance(_read(cfg_path), dict)  # 永遠是合法 JSON
+    assert len(calls) == rounds * 2  # 每次成功寫入恰好通知一次
+
+
 def test_save_normalizes_dependent_flags(cfg_path):
     config = config_store.snapshot()
     config["lang_merger"]["process_zh_cn_files"] = False
