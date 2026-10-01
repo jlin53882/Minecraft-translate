@@ -19,22 +19,24 @@ def test_views_use_shared_components_and_no_local_styled_card():
 
     for rel in targets:
         src = _read(rel)
-        assert "styled_card(" in src, f"{rel} should use styled_card"
+        # 共用卡片：舊的 styled_card 或新的 kit.section_card（重新設計後逐頁改用 kit）
+        assert "styled_card(" in src or "section_card(" in src, (
+            f"{rel} should use a shared card component"
+        )
         assert "def _styled_card(" not in src, (
             f"{rel} should not keep local _styled_card"
         )
 
 
 def test_config_and_rules_use_shared_buttons():
+    """設定 / 規則頁的按鈕要走共用元件（舊 primary_button 或新 kit.button），不可各自拼樣式。"""
     config_src = _read("app/views/config/config_form.py")
     rules_src = _read("app/views/rules_view.py")
 
-    assert "from app.ui.components import primary_button" in config_src
-    assert "primary_button(" in config_src
-
-    assert "from app.ui.components import primary_button, secondary_button" in rules_src
-    assert "primary_button(" in rules_src
-    assert "secondary_button(" in rules_src
+    assert "primary_button(" in config_src or "kit.button(" in config_src
+    assert "kit.button(" in rules_src or (
+        "primary_button(" in rules_src and "secondary_button(" in rules_src
+    )
 
 
 def test_cache_view_is_primary_entry_only():

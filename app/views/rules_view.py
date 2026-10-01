@@ -11,11 +11,9 @@ import threading
 import flet as ft
 
 from app.services_impl.config_service import load_replace_rules
-from app.ui import theme
-
-# UI 共用元件：統一按鈕樣式
-from app.ui.components import primary_button, secondary_button
+from app.ui import design, kit, theme
 from app.ui.debounce import Debouncer
+from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.rules.rules_actions import (
     calc_total_pages,
@@ -27,6 +25,7 @@ from app.views.rules.rules_actions import (
 )
 from app.views.rules.rules_state import RulesTableState
 from app.views.rules.rules_table import create_rule_row as rules_create_row
+from translation_tool.utils.text_processor import apply_replace_rules
 
 
 class RulesView(ft.Column):
@@ -42,7 +41,7 @@ class RulesView(ft.Column):
         參數：
             page: Flet Page 物件
         """
-        super().__init__(expand=True, spacing=15)
+        super().__init__(expand=True, spacing=16)
         self._page = page
 
         # --- 分頁和數據狀態 ---
@@ -75,8 +74,12 @@ class RulesView(ft.Column):
         self.controls = [
             self._build_header(),
             self._build_toolbar(),
-            self._build_rules_table_area(),
-            self._build_footer(),
+            ft.Row(
+                [self._build_rules_table_area(), self._build_test_panel()],
+                spacing=16,
+                expand=True,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            ),
         ]
 
         # 啟動背景載入
@@ -140,29 +143,36 @@ class RulesView(ft.Column):
         """初始化所有互動控制項"""
         # 1. 載入指示器
         self.loading_indicator = ft.ProgressRing(
-            width=20, height=20, stroke_width=2, visible=False
+            width=20, height=20, stroke_width=2, visible=False, color=C.EM
         )
 
         # 2. 分頁控制
-        self.page_info = ft.Text("頁面 0 / 0", size=14, color=theme.GREY_700)
-        self.total_count_text = ft.Text("共 0 條規則", size=14, color=theme.GREY_700)
+        self.page_info = ft.Text("頁面 0 / 0", size=13, color=C.MUTED)
+        self.total_count_text = ft.Text("共 0 條規則", size=13, color=C.MUTED)
 
+        nav_style = ft.ButtonStyle(
+            bgcolor=C.PANEL2,
+            side=ft.BorderSide(1, C.LINE2),
+            shape=ft.RoundedRectangleBorder(radius=design.RADIUS_CONTROL),
+        )
         self.prev_button = ft.IconButton(
             ft.Icons.ARROW_BACK,
             on_click=self.prev_page,
             tooltip="上一頁",
             disabled=True,
-            icon_color=theme.GREY_800,
+            icon_color=C.TEXT,
+            style=nav_style,
         )
         self.next_button = ft.IconButton(
             ft.Icons.ARROW_FORWARD,
             on_click=self.next_page,
             tooltip="下一頁",
             disabled=True,
-            icon_color=theme.GREY_800,
+            icon_color=C.TEXT,
+            style=nav_style,
         )
 
-        self.total_pages_text_label = ft.Text(" / 1 頁", size=13, color=theme.GREY_700)
+        self.total_pages_text_label = ft.Text(" / 1 頁", size=13, color=C.MUTED)
 
         self.page_jump_field = ft.TextField(
             value=str(self.current_page),
@@ -172,19 +182,21 @@ class RulesView(ft.Column):
             keyboard_type=ft.KeyboardType.NUMBER,
             hint_text="頁碼",
             on_submit=self.on_page_jump_submit,
+            filled=True,
+            bgcolor=C.PANEL2,
+            border_color=C.LINE2,
+            focused_border_color=C.EM,
+            border_radius=design.RADIUS_CONTROL,
+            text_size=13,
+            content_padding=ft.Padding.symmetric(horizontal=6, vertical=8),
         )
 
         # 3. 搜尋與排序
-        self.search_box = ft.TextField(
-            label="搜尋規則 (由/至)",
-            hint_text="輸入關鍵字...",
-            prefix_icon=ft.Icons.SEARCH,
+        self.search_box = kit.text_field(
+            hint="搜尋 from / to / 備註 / 分類　（/正則/ 以斜線包起來）",
+            icon=ft.Icons.SEARCH,
             on_change=self.on_search,
-            dense=True,
             expand=True,
-            text_size=14,
-            border_color=theme.OUTLINE,
-            content_padding=15,
         )
 
         self.sort_box = ft.Dropdown(
@@ -194,152 +206,229 @@ class RulesView(ft.Column):
                 ft.dropdown.Option("from_len", "依 From 長度"),
             ],
             dense=True,
-            width=180,
-            text_size=14,
-            border_color=theme.OUTLINE,
-            content_padding=10,
+            width=190,
+            text_size=13,
+            filled=True,
+            bgcolor=C.PANEL2,
+            border_color=C.LINE2,
+            focused_border_color=C.EM,
+            border_radius=design.RADIUS_CONTROL,
+            content_padding=ft.Padding.symmetric(horizontal=10, vertical=8),
         )
         self.sort_box.on_select = self.on_sort_change
 
         # 4. 表格
+        def heading(text: str, **kwargs):
+            return ft.DataColumn(
+                ft.Text(text, weight=ft.FontWeight.W_600, size=12, color=C.MUTED),
+                **kwargs,
+            )
+
         self.rules_table = ft.DataTable(
             column_spacing=20,
             heading_row_height=40,
             data_row_min_height=50,
+            heading_row_color=C.PANEL2,
+            divider_thickness=1,
+            horizontal_lines=ft.BorderSide(1, C.LINE),
             columns=[
-                ft.DataColumn(
-                    ft.Text("#", weight=ft.FontWeight.BOLD, color=theme.GREY_800),
-                    numeric=True,
-                ),
-                ft.DataColumn(
-                    ft.Text(
-                        "原文 (簡體)",
-                        weight=ft.FontWeight.BOLD,
-                        color=theme.GREY_800,
-                    )
-                ),
-                ft.DataColumn(
-                    ft.Text(
-                        "替換為 (繁體)",
-                        weight=ft.FontWeight.BOLD,
-                        color=theme.GREY_800,
-                    )
-                ),
-                ft.DataColumn(
-                    ft.Text("操作", weight=ft.FontWeight.BOLD, color=theme.GREY_800),
-                    numeric=True,
-                ),
+                heading("#", numeric=True),
+                heading("原文 (簡體)"),
+                heading("替換為 (繁體)"),
+                heading("操作", numeric=True),
             ],
             rows=[],
         )
+
+        # 5. 即時測試：用目前（尚未儲存）的規則試跑一段文字
+        self.test_input = kit.text_field(
+            hint="貼上一段簡體文字，立即看到套用結果",
+            multiline=True,
+            min_lines=3,
+            max_lines=5,
+            on_change=self.on_test_change,
+        )
+        self.test_result = ft.Text(
+            "", size=13.5, selectable=True, color=C.TEXT, no_wrap=False
+        )
+        self.test_info = ft.Text("", size=12, color=C.DIM)
 
     # --- UI 建構區塊 ---
 
     def _build_header(self):
         """頁面標題區"""
-        return ft.Container(
-            padding=ft.Padding(left=5, bottom=5),
-            content=ft.Row(
-                [
-                    ft.Icon(ft.Icons.RULE_FOLDER, size=28, color=theme.BLUE_GREY_800),
-                    ft.Text(
-                        "規則管理 (Translation Rules)",
-                        theme_style=ft.TextThemeStyle.HEADLINE_MEDIUM,
-                        color=theme.BLUE_GREY_900,
-                    ),
-                    self.loading_indicator,
-                ],
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
+        return kit.page_header(
+            "替換規則",
+            "機器翻譯後自動套用的用語統一規則，支援純文字與正規表達式",
+            icon=ft.Icons.FIND_REPLACE,
+            tone="ench",
+            actions=[self.loading_indicator],
         )
 
     def _build_toolbar(self):
         """工具與操作區 (搜尋/排序/按鈕)"""
-        return ft.Card(
-            elevation=2,
-            content=ft.Container(
-                padding=15,
-                content=ft.Row(
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    controls=[
-                        # 左側：搜尋與排序
-                        ft.Row(
-                            expand=True,
-                            controls=[
-                                self.search_box,
-                                self.sort_box,
-                            ],
-                            spacing=10,
-                        ),
-                        # 右側：功能按鈕
-                        ft.Row(
-                            controls=[
-                                secondary_button(
-                                    "重新載入",
-                                    icon=ft.Icons.REFRESH,
-                                    tooltip="重新載入 replace_rules.json",
-                                    on_click=self.reload_rules_clicked,
-                                ),
-                                primary_button(
-                                    "新增規則",
-                                    icon=ft.Icons.ADD,
-                                    tooltip="新增一列規則",
-                                    on_click=self.add_row_clicked,
-                                    bgcolor=theme.PRIMARY,
-                                ),
-                                primary_button(
-                                    "全部儲存",
-                                    icon=ft.Icons.SAVE,
-                                    tooltip="儲存全部規則到 replace_rules.json",
-                                    on_click=self.save_rules_clicked,
-                                    bgcolor=theme.SUCCESS,
-                                ),
-                            ],
-                            spacing=10,
-                        ),
-                    ],
+        return ft.Row(
+            [
+                self.search_box,
+                self.sort_box,
+                kit.button(
+                    "重新載入",
+                    "secondary",
+                    icon=ft.Icons.REFRESH,
+                    tooltip="重新載入 replace_rules.json",
+                    on_click=self.reload_rules_clicked,
                 ),
-            ),
+                kit.button(
+                    "新增規則",
+                    "gold",
+                    icon=ft.Icons.ADD,
+                    tooltip="新增一列規則",
+                    on_click=self.add_row_clicked,
+                ),
+                kit.button(
+                    "全部儲存",
+                    "primary",
+                    icon=ft.Icons.SAVE_OUTLINED,
+                    tooltip="儲存全部規則到 replace_rules.json",
+                    on_click=self.save_rules_clicked,
+                ),
+            ],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
     def _build_rules_table_area(self):
         """表格內容區"""
-        return ft.Card(
+        return ft.Container(
             expand=True,
-            elevation=2,
-            content=ft.Container(
-                padding=10,
-                content=ft.ListView(
-                    controls=[self.rules_table], expand=True, spacing=0
-                ),
+            bgcolor=C.PANEL,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=design.RADIUS_CARD,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+            content=ft.Column(
+                [
+                    ft.ListView(controls=[self.rules_table], expand=True, spacing=0),
+                    self._build_footer(),
+                ],
+                spacing=0,
+                expand=True,
             ),
         )
 
     def _build_footer(self):
         """底部狀態與分頁列"""
         return ft.Container(
-            padding=ft.Padding(left=10, right=10, top=5, bottom=5),
+            padding=ft.Padding.symmetric(horizontal=16, vertical=10),
+            border=ft.Border.only(top=ft.BorderSide(1, C.LINE)),
             content=ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
                     self.total_count_text,
                     ft.Row(
-                        spacing=6,
+                        spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
                             self.prev_button,
-                            ft.Text("第", size=13, color=theme.GREY_700),
+                            ft.Text("第", size=13, color=C.MUTED),
                             self.page_jump_field,
                             self.total_pages_text_label,
                             self.next_button,
                         ],
                         alignment=ft.MainAxisAlignment.CENTER,
                     ),
-                    # 預留一個空的 Container 以達成 Space Between 的平衡，或放置其他資訊
+                    # 空白佔位，讓分頁列維持置中
                     ft.Container(width=100),
                 ],
             ),
         )
+
+    def _build_test_panel(self):
+        """右側：即時測試 + 小提示"""
+        return ft.Column(
+            [
+                kit.section_card(
+                    "即時測試",
+                    ft.Column(
+                        [
+                            kit.section_label("輸入文字"),
+                            self.test_input,
+                            kit.section_label("套用結果"),
+                            ft.Container(
+                                content=self.test_result,
+                                padding=12,
+                                bgcolor=C.EM_BG,
+                                border=ft.Border.all(1, C.EM_LINE),
+                                border_radius=design.RADIUS_CONTROL,
+                                height=110,
+                            ),
+                            self.test_info,
+                        ],
+                        spacing=8,
+                        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                    ),
+                    icon=ft.Icons.EDIT_NOTE,
+                    tone="ench",
+                ),
+                kit.section_card(
+                    "使用說明",
+                    ft.Text(
+                        "規則由上而下依序套用：固定文字依長詞優先，正規表達式最後套用。"
+                        "from 欄位可使用 \\d、(…) 等語法，to 欄位用 $1 或 \\1 引用群組。",
+                        size=12.5,
+                        color=C.MUTED,
+                    ),
+                    icon=ft.Icons.INFO_OUTLINE,
+                    tone="dia",
+                ),
+            ],
+            spacing=16,
+            width=340,
+        )
+
+    # --- 即時測試 ---
+    def on_test_change(self, e=None):
+        """輸入變更時，用目前（尚未儲存）的規則套用到測試文字。"""
+        text = self.test_input.value or ""
+        if not text.strip():
+            self.test_result.value = ""
+            self.test_info.value = ""
+        else:
+            rules = [
+                {"from": r.get("from", ""), "to": r.get("to", "")}
+                for r in self.all_rules_data
+                if (r.get("from") or "").strip()
+                and self._is_compilable(r.get("from", ""))
+            ]
+            try:
+                result = apply_replace_rules(text, rules)
+            except Exception as err:  # noqa: BLE001 - 規則有問題時顯示原因，不讓頁面出錯
+                result = text
+                self.test_info.value = f"套用失敗：{err}"
+                self.test_info.color = C.RED
+            else:
+                self.test_result.value = result
+                changed = result != text
+                self.test_info.value = (
+                    f"已套用 {len(rules)} 條規則，文字有變更"
+                    if changed
+                    else f"已套用 {len(rules)} 條規則，沒有符合的規則"
+                )
+                self.test_info.color = C.EM if changed else C.DIM
+            self.test_result.value = result
+        try:
+            self.test_result.update()
+            self.test_info.update()
+        except (AssertionError, RuntimeError):
+            pass
+
+    @staticmethod
+    def _is_compilable(pattern: str) -> bool:
+        try:
+            re.compile(pattern)
+        except re.error:
+            return False
+        return True
 
     # --- 邏輯功能 ---
     def on_sort_change(self, e):
@@ -672,8 +761,8 @@ class RulesView(ft.Column):
             from_field.error_text = None
             to_field.error_text = None
         else:
-            from_field.border_color = theme.ERROR
-            to_field.border_color = theme.ERROR
+            from_field.border_color = C.RED
+            to_field.border_color = C.RED
             from_field.error_text = msg
             to_field.error_text = msg
 

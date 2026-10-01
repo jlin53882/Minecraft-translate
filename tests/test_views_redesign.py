@@ -201,3 +201,65 @@ def test_bundler_missing_image_shows_placeholder():
     view.pack_image_field.value = "/no/such/pack.png"
     view._update_preview()
     assert isinstance(view.preview_image.content, ft.Icon)
+
+
+# -- 規則 ---------------------------------------------------------------------
+
+
+def _rules_view(monkeypatch, rules):
+    from app.views.rules_view import RulesView
+
+    monkeypatch.setattr(RulesView, "_initial_load", lambda self: None)
+    view = RulesView(mock_page())
+    view.all_rules_data = [dict(r) for r in rules]
+    return view
+
+
+def test_rules_live_test_applies_unsaved_rules(monkeypatch):
+    view = _rules_view(
+        monkeypatch, [{"from": "软件", "to": "軟體"}, {"from": "内存", "to": "記憶體"}]
+    )
+    view.test_input.value = "升级软件与内存"
+    view.on_test_change()
+    assert "軟體" in view.test_result.value and "記憶體" in view.test_result.value
+    assert "文字有變更" in view.test_info.value
+
+
+def test_rules_live_test_reports_no_match_and_clears(monkeypatch):
+    view = _rules_view(monkeypatch, [{"from": "软件", "to": "軟體"}])
+    view.test_input.value = "nothing here"
+    view.on_test_change()
+    assert view.test_result.value == "nothing here"
+    assert "沒有符合" in view.test_info.value
+    view.test_input.value = ""
+    view.on_test_change()
+    assert view.test_result.value == "" and view.test_info.value == ""
+
+
+def test_rules_live_test_skips_invalid_regex_and_blank_rules(monkeypatch):
+    view = _rules_view(
+        monkeypatch,
+        [{"from": "(", "to": "x"}, {"from": "", "to": "y"}, {"from": "甲", "to": "乙"}],
+    )
+    view.test_input.value = "甲甲"
+    view.on_test_change()  # 壞掉的正則不可讓頁面出錯
+    assert view.test_result.value == "乙乙"
+    assert "1 條規則" in view.test_info.value
+
+
+def test_rules_layout_has_table_footer_and_test_panel(monkeypatch):
+    view = _rules_view(monkeypatch, [])
+    assert view.prev_button in list(_walk_controls(view))
+    assert view.test_input in list(_walk_controls(view))
+    assert view.rules_table in list(_walk_controls(view))
+
+
+def _walk_controls(control):
+    yield control
+    for attr in ("controls", "content"):
+        child = getattr(control, attr, None)
+        if isinstance(child, list):
+            for c in child:
+                yield from _walk_controls(c)
+        elif child is not None and not isinstance(child, str):
+            yield from _walk_controls(child)

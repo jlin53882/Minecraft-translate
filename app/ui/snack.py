@@ -118,6 +118,7 @@ def show_snack(
     # content 維持單一 ft.Text（既有呼叫端 / 測試會讀 snack.content.value）
     content = ft.Text(message, color=tone.fg, size=13, weight=ft.FontWeight.W_500)
 
+    kwargs.setdefault("width", 460)  # 浮動式 toast 不要橫跨整個視窗
     snack = ft.SnackBar(
         content=content,
         bgcolor=C.RAISED,

@@ -132,7 +132,7 @@ def test_rules_view_all_controls_exist(monkeypatch):
     assert view.page_jump_field.text_align == ft.TextAlign.CENTER
 
     assert isinstance(view.search_box, ft.TextField)
-    assert view.search_box.label == "搜尋規則 (由/至)"
+    assert "搜尋" in view.search_box.hint_text
 
     assert isinstance(view.sort_box, ft.Dropdown)
     assert view.sort_box.label == "排序方式"
