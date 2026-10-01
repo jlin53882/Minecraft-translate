@@ -350,3 +350,21 @@ def test_text_field_applies_design_tokens_and_options():
 def test_text_field_does_not_force_expand():
     assert kit.text_field("x").expand in (None, 0)
     assert kit.text_field("x", read_only=True).read_only is True
+
+
+# -- field / dropdown（舊 ft.TextField / ft.Dropdown 的替代）----------------------
+
+
+def test_field_and_dropdown_keep_caller_arguments_and_apply_style():
+    from app.ui.design import C
+
+    f = kit.field(label="標籤", dense=True, helper="說明", value="x")
+    assert (
+        f.label == "標籤" and f.dense is True and f.helper == "說明" and f.value == "x"
+    )
+    assert f.bgcolor == C.PANEL2 and f.focused_border_color == C.EM
+    # 呼叫端指定的值優先
+    assert kit.field(bgcolor="red").bgcolor == "red"
+
+    d = kit.dropdown(label="選單", options=[ft.dropdown.Option("a")], dense=True)
+    assert isinstance(d, ft.Dropdown) and d.label == "選單" and d.bgcolor == C.PANEL2

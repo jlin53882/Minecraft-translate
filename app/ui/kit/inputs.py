@@ -130,6 +130,40 @@ def text_field(
     )
 
 
+_FIELD_DEFAULTS = {
+    "filled": True,
+    "border_radius": design.RADIUS_CONTROL,
+    "border_width": 1,
+    "text_size": 13,
+}
+
+
+def _field_style() -> dict:
+    return {
+        **_FIELD_DEFAULTS,
+        "bgcolor": C.PANEL2,
+        "border_color": C.LINE2,
+        "focused_border_color": C.EM,
+        "cursor_color": C.EM,
+        "label_style": ft.TextStyle(size=12, color=C.MUTED),
+        "hint_style": ft.TextStyle(size=13, color=C.DIM),
+        "content_padding": ft.Padding.symmetric(horizontal=12, vertical=10),
+    }
+
+
+def field(**kwargs) -> ft.TextField:
+    """舊式 ``ft.TextField(...)`` 的直接替代：同樣的參數，套上設計系統外觀（呼叫端給的值優先）。"""
+    return ft.TextField(**{**_field_style(), **kwargs})
+
+
+def dropdown(**kwargs) -> ft.Dropdown:
+    """舊式 ``ft.Dropdown(...)`` 的直接替代：同樣的參數，套上設計系統外觀。"""
+    style = _field_style()
+    style.pop("cursor_color", None)
+    style.pop("hint_style", None)
+    return ft.Dropdown(**{**style, **kwargs})
+
+
 def pick_button(
     icon: str = ft.Icons.FOLDER_OPEN,
     tooltip: str | None = None,
