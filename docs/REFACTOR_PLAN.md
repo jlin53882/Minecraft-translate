@@ -171,6 +171,36 @@
 - **#108 補充**：輸出校正把思考 token 一併計入；`maxOutputTokens` 超過模型上限時給出明確錯誤；停用開關 `token_budget_enabled` 可回到舊行為。
 - **#108 終止保證**：截斷時先縮小學到的預算；若縮小後實際批次沒有變小，才走既有的項目數縮小流程，因此每輪都會嚴格變小或放棄該批。
 
+## 單一 PR 範圍與里程碑（使用者決定，PR #112 合併後開工）
+
+> **決定**：UI 重新設計、重構計畫的基礎建設，以及新開的 issue（目前為 #113）**都放在同一個 PR**
+> （分支 `ccr-013dc142-ycfk3o`，PR #106）。原因：UI 會牽動不少底層（金鑰狀態、任務狀態、設定存取），
+> 拆開做會讓底層被重複修改。commit 仍按里程碑與 issue 分開，方便 review。
+> 參考文件：Flet 官方文件 <https://github.com/flet-dev/flet/tree/main/website/docs>（專案使用 Flet 1.0.1）。
+
+| 里程碑 | 內容 | 驗收 |
+|---|---|---|
+| M1 #113 | 金鑰健康狀態：RPD 耗盡 / 403 的 key 冷卻一段時間不再被請求；全部冷卻時仍探測一次；快照供 UI 顯示 | 已耗盡的 key 在冷卻期內只被請求一次；冷卻到期再給一次機會；ATK-009 並發分散不退化 |
+| M2 主題 | 設計 token 對應 `ft.ColorScheme`，`page.theme` / `page.dark_theme`，預設深色，切換不需重建畫面 | 語意色常數；深淺兩組 scheme 有測試 |
+| M3 UI kit | `app/ui/kit/`：PageHeader、SectionCard、PathField、SwitchRow、StatCard、Chip、進度、RunPanel、Pager… | 各元件有結構測試 |
+| M4 外殼 | `ViewSpec` 取代三張平行表；側欄分組、頂列（任務膠囊、API 狀態）、狀態列、快速跳轉；`TaskManager` | main.py 精簡；導覽與任務事件有測試 |
+| M5 ConfigStore | 讀 / 寫 / 變更通知，取代 View 直接 `load_config` | 設定頁與合併頁不再手動同步 |
+| M6 逐頁 | 工作台（新）與 12 個頁面依設計稿重做；小頁先、大頁後 | 每頁有測試，且以真實 Flet 畫面截圖對照設計稿 |
+| M7 清理 | TaskSession 三層轉接、殘留死碼、`tools/` 一次性腳本、過期文件數字 | `ruff` F401/F811/F841 為 0 |
+| M8 文件 | 各 View 架構文件、`PROJECT_STRUCTURE.md`、PR 說明 | 文件與程式碼一致 |
+
+### #113 設計決策（issue 列出的五個問題）
+
+| 問題 | 決策 | 理由 |
+|---|---|---|
+| 記什麼 | RPD 耗盡（429 `PERDAY` / `DAILY`）與 403 無權限；**不記** 429 RPM、503 overload | 後兩者是暫時性的，不應長期排除 |
+| 記多久 | 固定冷卻（設定 `key_failure_cooldown_sec`，預設 3600 秒），到期再給一次機會 | 不依賴時區資料庫（Windows 沒有 tzdata）；浪費上限為每把 key 每小時一次請求 |
+| 記在哪裡 | 獨立的 key 健康狀態 registry（模組層級、執行緒安全），**以 key 的雜湊識別**而不是 index | 設定檔 key 增減或換順序時狀態仍對得上；不把原始 key 放進狀態或日誌 |
+| 全部都在冷卻 | 仍探測「冷卻最快到期」的那一把，失敗才回 `ALL_KEYS_EXHAUSTED` | 保證能自動恢復，且不會無聲卡住 |
+| 使用者可見性 | log 一行說明，並提供 `snapshot()` 給 UI（頂列 API 狀態、設定頁金鑰列表、流水線金鑰列） | 設計稿的金鑰健康度顯示共用這份狀態 |
+
+測試隔離：根目錄 `conftest.py` 會在每個測試前後重置 key 健康狀態與 token 預算。
+
 ## 建議順序與 PR 切法
 
 1. **P0 清理**：拆 2~3 個小 PR（TaskSession 轉接、死碼與殘留、文件）。行為不變，測試當安全網。
