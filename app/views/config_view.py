@@ -371,24 +371,20 @@ class ConfigView(ft.Column):
         btn = ft.Container(
             padding=12,
             border_radius=8,
-            bgcolor=ft.Colors.BLUE_200 if is_selected else ft.Colors.GREY_100,
+            bgcolor=theme.BLUE_200 if is_selected else theme.GREY_100,
             on_click=lambda e, iid=item["id"]: self._on_nav_click(iid),
             content=ft.Row(
                 [
                     ft.Icon(
                         item["icon"],
                         size=18,
-                        color=ft.Colors.BLUE_800
-                        if is_selected
-                        else ft.Colors.BLUE_GREY_600,
+                        color=theme.BLUE_800 if is_selected else theme.BLUE_GREY_600,
                     ),
                     ft.Text(
                         item["label"],
                         weight=ft.FontWeight.BOLD,
                         size=13,
-                        color=ft.Colors.BLUE_900
-                        if is_selected
-                        else ft.Colors.BLUE_GREY_700,
+                        color=theme.BLUE_900 if is_selected else theme.BLUE_GREY_700,
                     ),
                 ],
                 spacing=10,
@@ -422,24 +418,24 @@ class ConfigView(ft.Column):
             btn = ft.Container(
                 padding=12,
                 border_radius=8,
-                bgcolor=ft.Colors.BLUE_200 if is_selected else ft.Colors.GREY_100,
+                bgcolor=theme.BLUE_200 if is_selected else theme.GREY_100,
                 on_click=lambda e, iid=item["id"]: self._on_nav_click(iid),
                 content=ft.Row(
                     [
                         ft.Icon(
                             item["icon"],
                             size=18,
-                            color=ft.Colors.BLUE_800
+                            color=theme.BLUE_800
                             if is_selected
-                            else ft.Colors.BLUE_GREY_600,
+                            else theme.BLUE_GREY_600,
                         ),
                         ft.Text(
                             item["label"],
                             weight=ft.FontWeight.BOLD,
                             size=13,
-                            color=ft.Colors.BLUE_900
+                            color=theme.BLUE_900
                             if is_selected
-                            else ft.Colors.BLUE_GREY_700,
+                            else theme.BLUE_GREY_700,
                         ),
                     ],
                     spacing=10,
@@ -457,15 +453,15 @@ class ConfigView(ft.Column):
                         "設定分類",
                         weight=ft.FontWeight.BOLD,
                         size=14,
-                        color=ft.Colors.BLUE_GREY_800,
+                        color=theme.BLUE_GREY_800,
                     ),
-                    ft.Divider(height=1, color=ft.Colors.GREY_300),
+                    ft.Divider(height=1, color=theme.GREY_300),
                     self.nav_column,
                 ],
                 spacing=8,
             ),
             padding=10,
-            bgcolor=ft.Colors.GREY_50,
+            bgcolor=theme.GREY_50,
             border_radius=10,
         )
         return nav_container
@@ -992,7 +988,7 @@ class ConfigView(ft.Column):
         row = ft.Container(
             padding=12,
             border_radius=8,
-            bgcolor=theme.WHITE,
+            bgcolor=theme.PANEL,
             border=ft.Border.all(1, theme.GREY_200),
             content=ft.Row(
                 [

@@ -816,7 +816,8 @@ class TestFixButtonLevelModsValidation:
         )
         assert m is not None
         body = m.group(1)
-        assert "show_snack(self.page" in body, (
+        flat = re.sub(r"\s+", "", body)  # 忽略 ruff format 的換行 / 縮排
+        assert "show_snack(self.page," in flat, (
             "回歸:_check_mods_dir_or_snack 驗證失敗時應該呼叫 show_snack 提示"
         )
 

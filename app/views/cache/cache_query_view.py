@@ -26,7 +26,7 @@ class CacheQueryView(ft.Container):
         # 建立 UI
         super().__init__(
             expand=True,
-            bgcolor=theme.WHITE,
+            bgcolor=theme.PANEL,
             padding=8,
         )
         self.content = self._build_content()

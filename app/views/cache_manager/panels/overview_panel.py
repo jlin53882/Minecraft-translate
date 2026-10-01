@@ -4,6 +4,8 @@
 """
 
 import flet as ft
+
+from app.ui import theme
 from app.ui.components import styled_card
 
 
@@ -17,55 +19,81 @@ class CacheOverviewPanel(ft.Container):
 
     def _build_content(self):
         # 統計資訊區塊內容
-        stats_content = ft.Column([
-            ft.Row([
-                ft.Container(
-                    content=ft.Column([
-                        ft.Text("總筆數", size=12),
-                        ft.Text("0", size=24, weight=ft.FontWeight.BOLD),
-                    ], spacing=2),
-                    padding=15,
-                    bgcolor=ft.Colors.SURFACE,
-                    border_radius=8,
-                    expand=True,
+        stats_content = ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    ft.Text("總筆數", size=12),
+                                    ft.Text("0", size=24, weight=ft.FontWeight.BOLD),
+                                ],
+                                spacing=2,
+                            ),
+                            padding=15,
+                            bgcolor=ft.Colors.SURFACE,
+                            border_radius=8,
+                            expand=True,
+                        ),
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    ft.Text("有變更", size=12),
+                                    ft.Text(
+                                        "0",
+                                        size=24,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=theme.ORANGE,
+                                    ),
+                                ],
+                                spacing=2,
+                            ),
+                            padding=15,
+                            bgcolor=ft.Colors.SURFACE,
+                            border_radius=8,
+                            expand=True,
+                        ),
+                    ],
+                    spacing=10,
                 ),
-                ft.Container(
-                    content=ft.Column([
-                        ft.Text("有變更", size=12),
-                        ft.Text("0", size=24, weight=ft.FontWeight.BOLD, color=ft.Colors.ORANGE),
-                    ], spacing=2),
-                    padding=15,
-                    bgcolor=ft.Colors.SURFACE,
-                    border_radius=8,
-                    expand=True,
-                ),
-            ], spacing=10),
-        ], spacing=10)
+            ],
+            spacing=10,
+        )
 
         # 操作按鈕區塊內容
-        actions_content = ft.Column([
-            ft.Row([
-                ft.Button("重新載入", icon=ft.Icons.REFRESH),
-                ft.OutlinedButton("儲存", icon=ft.Icons.SAVE),
-            ], spacing=10),
-        ], spacing=10)
+        actions_content = ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Button("重新載入", icon=ft.Icons.REFRESH),
+                        ft.OutlinedButton("儲存", icon=ft.Icons.SAVE),
+                    ],
+                    spacing=10,
+                ),
+            ],
+            spacing=10,
+        )
 
         # 使用 styled_card 包裝，支援收合
-        return ft.Column([
-            styled_card(
-                title="統計資訊",
-                icon=ft.Icons.ANALYTICS,
-                content=stats_content,
-                collapsible=True,
-                default_collapsed=False,
-                page=self.page,
-            ),
-            styled_card(
-                title="快速操作",
-                icon=ft.Icons.SETTINGS,
-                content=actions_content,
-                collapsible=True,
-                default_collapsed=False,
-                page=self.page,
-            ),
-        ], spacing=15)
+        return ft.Column(
+            [
+                styled_card(
+                    title="統計資訊",
+                    icon=ft.Icons.ANALYTICS,
+                    content=stats_content,
+                    collapsible=True,
+                    default_collapsed=False,
+                    page=self.page,
+                ),
+                styled_card(
+                    title="快速操作",
+                    icon=ft.Icons.SETTINGS,
+                    content=actions_content,
+                    collapsible=True,
+                    default_collapsed=False,
+                    page=self.page,
+                ),
+            ],
+            spacing=15,
+        )

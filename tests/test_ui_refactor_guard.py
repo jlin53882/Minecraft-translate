@@ -20,9 +20,11 @@ def test_views_use_shared_components_and_no_local_styled_card():
     for rel in targets:
         src = _read(rel)
         # 共用卡片：舊的 styled_card 或新的 kit.section_card（重新設計後逐頁改用 kit）
-        assert "styled_card(" in src or "section_card(" in src, (
-            f"{rel} should use a shared card component"
-        )
+        assert (
+            "styled_card(" in src
+            or "section_card(" in src
+            or "build_settings_panel(" in src
+        ), f"{rel} should use a shared card component"
         assert "def _styled_card(" not in src, (
             f"{rel} should not keep local _styled_card"
         )

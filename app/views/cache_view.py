@@ -272,7 +272,7 @@ class CacheView(ft.Column):
             top=100,
             width=420,
             height=480,
-            bgcolor=theme.WHITE,
+            bgcolor=theme.PANEL,
             border=ft.Border.all(2, theme.BLUE_300),
             border_radius=10,
             shadow=ft.BoxShadow(
@@ -338,7 +338,7 @@ class CacheView(ft.Column):
                                                 1, theme.OUTLINE_VARIANT
                                             ),
                                             border_radius=8,
-                                            bgcolor=theme.WHITE,
+                                            bgcolor=theme.PANEL,
                                             content=self.query_history_list,
                                         ),
                                         ft.Text(
@@ -415,7 +415,7 @@ class CacheView(ft.Column):
             top=150,
             width=420,
             height=480,
-            bgcolor=theme.WHITE,
+            bgcolor=theme.PANEL,
             border=ft.Border.all(2, theme.BLUE_300),
             border_radius=10,
             shadow=ft.BoxShadow(
@@ -479,7 +479,7 @@ class CacheView(ft.Column):
                                                 1, theme.OUTLINE_VARIANT
                                             ),
                                             border_radius=8,
-                                            bgcolor=theme.WHITE,
+                                            bgcolor=theme.PANEL,
                                             content=self.shard_history_list,
                                         ),
                                         ft.Text(
@@ -595,7 +595,7 @@ class CacheView(ft.Column):
             padding=14,
             border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=10,
-            bgcolor=theme.WHITE,
+            bgcolor=theme.PANEL,
             alignment=ft.alignment.Alignment(-1, -1),
             content=ft.Column(
                 [
@@ -639,7 +639,7 @@ class CacheView(ft.Column):
                                                     1, theme.OUTLINE_VARIANT
                                                 ),
                                                 border_radius=8,
-                                                bgcolor=theme.WHITE,
+                                                bgcolor=theme.PANEL,
                                                 content=self.query_result_list,
                                             ),
                                         ],
@@ -670,7 +670,7 @@ class CacheView(ft.Column):
                                                     1, theme.OUTLINE_VARIANT
                                                 ),
                                                 border_radius=8,
-                                                bgcolor=theme.WHITE,
+                                                bgcolor=theme.PANEL,
                                                 alignment=ft.alignment.Alignment(
                                                     -1, -1
                                                 ),
@@ -744,7 +744,7 @@ class CacheView(ft.Column):
             padding=8,
             border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
-            bgcolor=theme.WHITE,
+            bgcolor=theme.PANEL,
             alignment=ft.alignment.Alignment(-1, -1),
             content=self.query_type_shard_col,
         )
@@ -798,7 +798,7 @@ class CacheView(ft.Column):
             padding=6,
             border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
-            bgcolor=theme.WHITE,
+            bgcolor=theme.PANEL,
             alignment=ft.alignment.Alignment(-1, -1),
             content=self.shard_detail_key_list,
         )
@@ -826,7 +826,7 @@ class CacheView(ft.Column):
             padding=6,
             border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
-            bgcolor=theme.WHITE,
+            bgcolor=theme.PANEL,
             alignment=ft.alignment.Alignment(-1, -1),
             content=self.shard_src_field,
         )
@@ -866,7 +866,7 @@ class CacheView(ft.Column):
             padding=6,
             border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=8,
-            bgcolor=theme.WHITE,
+            bgcolor=theme.PANEL,
             alignment=ft.alignment.Alignment(-1, -1),
             content=self.shard_dst_field,
         )
@@ -983,7 +983,7 @@ class CacheView(ft.Column):
             padding=0,
             border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=10,
-            bgcolor=theme.WHITE,
+            bgcolor=theme.PANEL,
             content=ft.Column(
                 [
                     ft.Container(
@@ -1034,7 +1034,7 @@ class CacheView(ft.Column):
             padding=0,
             border=ft.Border.all(1, theme.OUTLINE_VARIANT),
             border_radius=10,
-            bgcolor=theme.WHITE,
+            bgcolor=theme.PANEL,
             content=ft.Column(
                 controls=[self.shard_nav_view, self.shard_workspace_card],
                 expand=True,
@@ -1629,7 +1629,7 @@ class CacheView(ft.Column):
 
         return ft.Container(
             expand=True,
-            bgcolor=theme.WHITE,
+            bgcolor=theme.PANEL,
             padding=8,
             alignment=ft.alignment.Alignment(-1, -1),
             content=self.query_sub_tabs,
@@ -2868,7 +2868,7 @@ class CacheView(ft.Column):
                 padding=4,
                 border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                 border_radius=8,
-                bgcolor=theme.WHITE,
+                bgcolor=theme.PANEL,
                 alignment=ft.alignment.Alignment(-1, -1),
                 content=ft.ListView(
                     expand=True,
@@ -2883,7 +2883,7 @@ class CacheView(ft.Column):
                     padding=8,
                     border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
-                    bgcolor=theme.WHITE,
+                    bgcolor=theme.PANEL,
                     content=ft.Column(
                         [
                             ft.Row(

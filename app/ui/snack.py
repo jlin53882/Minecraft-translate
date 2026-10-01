@@ -44,11 +44,18 @@ from translation_tool.utils.log_unit import log_info, log_warning
 # 舊呼叫端傳的是「背景色」（RED_600 / GREEN_600 / theme.PRIMARY …）。新設計的 toast 是中性面板 + 語意色，
 # 所以只看顏色屬於哪個色系，轉成對應的語意色組與圖示。
 _HUE_TONES = (
-    (("red", "error"), "red", ft.Icons.ERROR_OUTLINE),
+    # 先比對語意色名稱（theme 的舊色名已改指向設計系統的語意色）
+    (("tertiaryfixed",), "gold", ft.Icons.WARNING_AMBER),
+    (("error",), "red", ft.Icons.ERROR_OUTLINE),
+    (("primary",), "em", ft.Icons.CHECK_CIRCLE_OUTLINE),
+    (("secondary",), "dia", ft.Icons.INFO_OUTLINE),
+    (("tertiary",), "ench", ft.Icons.INFO_OUTLINE),
+    # 再比對舊的 Material 色票名稱
+    (("red",), "red", ft.Icons.ERROR_OUTLINE),
     (("green", "teal", "success"), "em", ft.Icons.CHECK_CIRCLE_OUTLINE),
     (("orange", "amber", "yellow", "warning"), "gold", ft.Icons.WARNING_AMBER),
     (("purple", "deeppurple", "pink"), "ench", ft.Icons.INFO_OUTLINE),
-    (("blue", "cyan", "indigo", "primary", "info"), "dia", ft.Icons.INFO_OUTLINE),
+    (("blue", "cyan", "indigo", "info"), "dia", ft.Icons.INFO_OUTLINE),
 )
 
 

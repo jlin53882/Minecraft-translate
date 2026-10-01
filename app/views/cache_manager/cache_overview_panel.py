@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import flet as ft
 
+from app.ui import theme
 from app.ui.components import styled_card
 
 from .cache_log_panel import build_log_panel
@@ -39,7 +40,7 @@ def build_overview_page(
     actions_block = styled_card(
         title="操作",
         icon=ft.Icons.TUNE,
-        icon_color=ft.Colors.BLUE_GREY_700,
+        icon_color=theme.BLUE_GREY_700,
         page=page,
         content=ft.Column(
             [
@@ -57,7 +58,7 @@ def build_overview_page(
     help_block = styled_card(
         title="按鈕說明",
         icon=ft.Icons.HELP_OUTLINE,
-        icon_color=ft.Colors.BLUE_GREY_700,
+        icon_color=theme.BLUE_GREY_700,
         collapsible=True,
         default_collapsed=True,
         page=page,
@@ -66,46 +67,46 @@ def build_overview_page(
                 ft.Text(
                     "重新載入：重新讀取全部分類快取（記憶體重建）",
                     size=11,
-                    color=ft.Colors.GREY_700,
+                    color=theme.GREY_700,
                 ),
                 ft.Text(
                     "刷新統計：只刷新 UI 顯示數據，不做寫入",
                     size=11,
-                    color=ft.Colors.GREY_700,
+                    color=theme.GREY_700,
                 ),
                 ft.Text(
                     "🔍 重建搜尋索引：建立全文搜尋索引（提升查詢速度 10~100 倍）",
                     size=11,
-                    color=ft.Colors.BLUE_700,
+                    color=theme.BLUE_700,
                 ),
                 ft.Text(
-                    "分類卡按鈕（在左側每張卡片上）", size=11, color=ft.Colors.GREY_700
+                    "分類卡按鈕（在左側每張卡片上）", size=11, color=theme.GREY_700
                 ),
-                ft.Text("• 重新載入：只重載該分類", size=11, color=ft.Colors.GREY_700),
+                ft.Text("• 重新載入：只重載該分類", size=11, color=theme.GREY_700),
                 ft.Text(
                     "• 新分片：把該分類新資料寫到新 shard",
                     size=11,
-                    color=ft.Colors.GREY_700,
+                    color=theme.GREY_700,
                 ),
                 ft.Text(
                     "• 補滿舊檔：回填既有 shard（覆寫模式）",
                     size=11,
-                    color=ft.Colors.GREY_700,
+                    color=theme.GREY_700,
                 ),
                 ft.Text(
                     "• 輪替分片：強制切到下一個 active shard",
                     size=11,
-                    color=ft.Colors.GREY_700,
+                    color=theme.GREY_700,
                 ),
                 ft.Text(
                     "• 分析：顯示該分類目前狀態與使用率",
                     size=11,
-                    color=ft.Colors.GREY_700,
+                    color=theme.GREY_700,
                 ),
                 ft.Text(
                     "• 切換查詢：跳到查詢頁並帶入分類",
                     size=11,
-                    color=ft.Colors.GREY_700,
+                    color=theme.GREY_700,
                 ),
             ],
             spacing=8,
@@ -116,7 +117,7 @@ def build_overview_page(
     left_panel = styled_card(
         title="分類狀態清單",
         icon=ft.Icons.LIST,
-        icon_color=ft.Colors.BLUE_GREY_700,
+        icon_color=theme.BLUE_GREY_700,
         collapsible=True,
         default_collapsed=False,
         expand=True,
@@ -126,7 +127,7 @@ def build_overview_page(
                 ft.Text(
                     "卡片可捲動瀏覽，避免分類過多被截斷",
                     size=11,
-                    color=ft.Colors.GREY_700,
+                    color=theme.GREY_700,
                 ),
                 type_list,
             ],
@@ -157,7 +158,7 @@ def build_overview_page(
             styled_card(
                 title="總覽",
                 icon=ft.Icons.DASHBOARD,
-                icon_color=ft.Colors.BLUE_GREY_700,
+                icon_color=theme.BLUE_GREY_700,
                 collapsible=True,
                 default_collapsed=False,
                 page=page,

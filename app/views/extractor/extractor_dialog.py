@@ -653,7 +653,7 @@ def open_extractor_dialog(
 
     log_section = ft.Container(
         content=log_view,
-        bgcolor="#1e1e1e",
+        bgcolor=theme.BG_LOG_PANEL,
         border_radius=8,
         height=250,
         padding=10,
@@ -820,14 +820,14 @@ def open_preview_dialog(
     info_text = ft.Text(
         f"來源：{input_path}\n輸出：{output_path}\n模式：{mode}",
         size=12,
-        color=ft.Colors.GREY_600,
+        color=theme.GREY_600,
     )
 
     # 進度區
     # 🐛 Bug 修復：初始狀態文字應為「等待開始」而非「正在掃描」
-    status_text = ft.Text("等待開始預覽...", size=13, color=ft.Colors.GREY_600)
+    status_text = ft.Text("等待開始預覽...", size=13, color=theme.GREY_600)
     progress_pct = ft.Text(
-        "--", size=12, color=ft.Colors.GREY_600, weight=ft.FontWeight.BOLD
+        "--", size=12, color=theme.GREY_600, weight=ft.FontWeight.BOLD
     )
     # 🐛 Bug 修復：明確設定 progress_bar 的顏色與背景色，避免渲染不明顯
     progress_bar = ft.ProgressBar(
@@ -892,22 +892,18 @@ def open_preview_dialog(
             total_lang = sum(r.get("lang_count", 0) for r in preview_results)
             total_book = sum(r.get("book_count", 0) for r in preview_results)
             controls.append(
-                ft.Text(f"Lang：{total_lang} 個", size=14, color=ft.Colors.BLUE_700)
+                ft.Text(f"Lang：{total_lang} 個", size=14, color=theme.BLUE_700)
             )
             controls.append(
-                ft.Text(f"Book：{total_book} 個", size=14, color=ft.Colors.BLUE_700)
+                ft.Text(f"Book：{total_book} 個", size=14, color=theme.BLUE_700)
             )
         else:
             controls.append(
-                ft.Text(
-                    f"共找到 {total_files} 個檔案", size=14, color=ft.Colors.BLUE_700
-                )
+                ft.Text(f"共找到 {total_files} 個檔案", size=14, color=theme.BLUE_700)
             )
 
         controls.append(
-            ft.Text(
-                f"總大小：{total_size_mb:.2f} MB", size=14, color=ft.Colors.BLUE_700
-            )
+            ft.Text(f"總大小：{total_size_mb:.2f} MB", size=14, color=theme.BLUE_700)
         )
 
         # 只列出有可提取檔案的 JAR（406 個 JAR 時大多是 0 個檔案，清單會被淹沒）
@@ -922,7 +918,7 @@ def open_preview_dialog(
                 ft.Text(
                     f"另有 {empty_count} 個 JAR 沒有可提取的檔案，已略過不列出",
                     size=12,
-                    color=ft.Colors.GREY_700,
+                    color=theme.GREY_700,
                 )
             )
 
@@ -950,7 +946,7 @@ def open_preview_dialog(
             content=jar_list,
             height=300,
             padding=5,
-            bgcolor=ft.Colors.GREY_100,
+            bgcolor=theme.GREY_100,
             border_radius=8,
         )
         controls.append(list_container)
@@ -982,7 +978,7 @@ def open_preview_dialog(
         )
         preview_dialog.title = ft.Row(
             [
-                ft.Icon(ft.Icons.CHECK_CIRCLE, size=24, color=ft.Colors.GREEN_700),
+                ft.Icon(ft.Icons.CHECK_CIRCLE, size=24, color=theme.GREEN_700),
                 ft.Text(
                     f"提取預覽 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD
                 ),
@@ -1150,7 +1146,7 @@ def open_preview_dialog(
         modal=False,
         title=ft.Row(
             [
-                ft.Icon(ft.Icons.SEARCH, size=24, color=ft.Colors.BLUE_700),
+                ft.Icon(ft.Icons.SEARCH, size=24, color=theme.BLUE_700),
                 ft.Text(f"預覽 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD),
             ]
         ),

@@ -383,7 +383,11 @@ class PipelineView(ft.Column):
             dense=True,
         )
         self.progress_bar = ft.ProgressBar(
-            width=float("inf"), height=8, value=0, color=CYAN_400, bgcolor="#E0E0E0"
+            width=float("inf"),
+            height=8,
+            value=0,
+            color=CYAN_400,
+            bgcolor=theme.BG_PROGRESS_TRACK,
         )
         self.progress_status = ft.Text("等待任務啟動...", size=12, color=GREY_600)
         self.keys_container = ft.Column(spacing=10)

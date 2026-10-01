@@ -193,7 +193,7 @@ class CacheQueryPanel(ft.Container):
                                                 1, theme.OUTLINE_VARIANT
                                             ),
                                             border_radius=8,
-                                            bgcolor=theme.WHITE,
+                                            bgcolor=theme.PANEL,
                                             content=self.query_result_list,
                                         ),
                                     ],
@@ -218,7 +218,7 @@ class CacheQueryPanel(ft.Container):
                                                 1, theme.OUTLINE_VARIANT
                                             ),
                                             border_radius=8,
-                                            bgcolor=theme.WHITE,
+                                            bgcolor=theme.PANEL,
                                             alignment=ft.alignment.Alignment(-1, -1),
                                             content=ft.Column(
                                                 [

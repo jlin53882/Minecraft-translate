@@ -398,7 +398,7 @@ class MergeView(ft.Column):
                             spacing=4,
                         ),
                         padding=10,
-                        bgcolor=theme.WHITE,
+                        bgcolor=theme.PANEL,
                         border_radius=8,
                     ),
                     ft.Container(
@@ -426,7 +426,7 @@ class MergeView(ft.Column):
                             spacing=4,
                         ),
                         padding=10,
-                        bgcolor=theme.WHITE,
+                        bgcolor=theme.PANEL,
                         border_radius=8,
                     ),
                 ],
@@ -489,7 +489,7 @@ class MergeView(ft.Column):
                             spacing=4,
                         ),
                         padding=10,
-                        bgcolor=theme.WHITE,
+                        bgcolor=theme.PANEL,
                         border_radius=8,
                     ),
                 ],
@@ -893,12 +893,12 @@ class MergeView(ft.Column):
                     ft.Text(
                         f"├─ {name}",
                         size=13,
-                        color=ft.Colors.ORANGE_700,
+                        color=theme.ORANGE_700,
                     )
                 )
                 if len(err) > 80:
                     err = err[:80] + "..."
-                failed_rows.append(ft.Text(f"│  └─ {err}", size=12, color="#cccccc"))
+                failed_rows.append(ft.Text(f"│  └─ {err}", size=12, color=theme.MUTED))
             failed_block = [
                 ft.Divider(),
                 ft.Text(f"📋 處理失敗的 {unit}", size=14, weight=ft.FontWeight.BOLD),
@@ -933,7 +933,7 @@ class MergeView(ft.Column):
                 *output_block,
                 *failed_block,
                 ft.Divider(),
-                ft.Text("詳見上方日誌", size=12, color="#aaaaaa"),
+                ft.Text("詳見上方日誌", size=12, color=theme.DIM),
             ],
             spacing=10,
             tight=True,

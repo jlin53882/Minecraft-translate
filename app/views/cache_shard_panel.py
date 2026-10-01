@@ -4,23 +4,24 @@
 維護注意：本模組依賴 cache_state.CacheShardState 與 cache_services。
 """
 
-import flet as ft
-from pathlib import Path
 import json
+from pathlib import Path
 
-from translation_tool.utils.log_unit import log_info, log_warning
-from app.ui import theme
-from app.ui.snack import show_snack
-from app.views.cache_manager.cache_state import CacheShardState
+import flet as ft
+
 from app.services_impl.cache.cache_services import (
     cache_get_entry_service,
-    cache_update_dst_service,
     cache_save_all_service,
+    cache_update_dst_service,
 )
+from app.ui import theme
+from app.ui.snack import show_snack
 from app.views.cache_manager.cache_history_store import (
-    history_now_ts,
     history_append_event,
+    history_now_ts,
 )
+from app.views.cache_manager.cache_state import CacheShardState
+from translation_tool.utils.log_unit import log_info, log_warning  # noqa: F401
 
 
 class CacheShardPanel(ft.Container):
@@ -62,9 +63,7 @@ class CacheShardPanel(ft.Container):
         )
 
         # Key 列表
-        self.shard_detail_meta = ft.Text(
-            "尚未選擇分片", size=11, color=theme.GREY_700
-        )
+        self.shard_detail_meta = ft.Text("尚未選擇分片", size=11, color=theme.GREY_700)
         self.tf_shard_key_filter = ft.TextField(
             label="過濾 key",
             hint_text="輸入關鍵字快速過濾",
@@ -146,8 +145,8 @@ class CacheShardPanel(ft.Container):
                     padding=8,
                     border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
-                    bgcolor=theme.WHITE,
-                    alignment=ft.alignment.Alignment(-1,-1),
+                    bgcolor=theme.PANEL,
+                    alignment=ft.alignment.Alignment(-1, -1),
                     content=self.query_type_shard_col,
                 ),
                 ft.Divider(height=20),
@@ -181,8 +180,8 @@ class CacheShardPanel(ft.Container):
                     padding=6,
                     border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
-                    bgcolor=theme.WHITE,
-                    alignment=ft.alignment.Alignment(-1,-1),
+                    bgcolor=theme.PANEL,
+                    alignment=ft.alignment.Alignment(-1, -1),
                     content=self.shard_src_field,
                 ),
                 ft.Divider(height=20),
@@ -193,8 +192,8 @@ class CacheShardPanel(ft.Container):
                     padding=6,
                     border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
-                    bgcolor=theme.WHITE,
-                    alignment=ft.alignment.Alignment(-1,-1),
+                    bgcolor=theme.PANEL,
+                    alignment=ft.alignment.Alignment(-1, -1),
                     content=self.shard_dst_field,
                 ),
                 ft.Row(
@@ -260,7 +259,7 @@ class CacheShardPanel(ft.Container):
                     padding=8,
                     border=ft.Border.all(1, theme.OUTLINE_VARIANT),
                     border_radius=8,
-                    bgcolor=theme.WHITE,
+                    bgcolor=theme.PANEL,
                     content=ft.Column(
                         [
                             ft.Text(ctype, size=13, weight=ft.FontWeight.BOLD),
@@ -348,9 +347,7 @@ class CacheShardPanel(ft.Container):
             f"第 {self.state.page} 頁 / 共 {self.state.total_pages} 頁"
         )
         if keyword:
-            self.shard_total_info.value = (
-                f"共 {total_filtered}/{len(all_keys)} keys | 每頁 {self.state.page_size}"
-            )
+            self.shard_total_info.value = f"共 {total_filtered}/{len(all_keys)} keys | 每頁 {self.state.page_size}"
         else:
             self.shard_total_info.value = (
                 f"共 {len(all_keys)} keys | 每頁 {self.state.page_size}"
@@ -387,7 +384,7 @@ class CacheShardPanel(ft.Container):
 
         try:
             raw = json.loads(fp.read_text(encoding="utf-8"))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log_warning(f"載入 shard 資料失敗: {e}")
             return None
 
@@ -420,9 +417,7 @@ class CacheShardPanel(ft.Container):
         if isinstance(entry, dict):
             src_text = str(entry.get("src", ""))
 
-        mode_text = (
-            "👁️ 預覽" if self.state.src_mode == "preview" else "</> 原始碼"
-        )
+        mode_text = "👁️ 預覽" if self.state.src_mode == "preview" else "</> 原始碼"
         self.shard_src_meta.value = f"SRC：{key} | 模式：{mode_text}"
 
         if self.state.src_mode == "raw":
@@ -455,8 +450,10 @@ class CacheShardPanel(ft.Container):
 
             dst_text = ""
             if isinstance(entry, dict):
-                dst_text = str(entry.get("dst", "")).replace("\\r\\n", "\n").replace(
-                    "\\n", "\n"
+                dst_text = (
+                    str(entry.get("dst", ""))
+                    .replace("\\r\\n", "\n")
+                    .replace("\\n", "\n")
                 )
 
             self.state.dst_original = dst_text
@@ -538,7 +535,7 @@ class CacheShardPanel(ft.Container):
             self.state.dst_original = new_dst
             show_snack(self.page, "已套用 DST 並寫入快取", theme.BLUE_400)
             self._page.update()
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             show_snack(self.page, f"套用失敗：{ex}", theme.RED_400)
 
     def _on_shard_dst_revert(self, e):
@@ -560,14 +557,13 @@ class CacheShardPanel(ft.Container):
         try:
             await ft.Clipboard().set(str(self.shard_dst_field.value or ""))
             show_snack(self.page, "已複製 DST 內容", theme.BLUE_400)
-        except Exception:
+        except Exception:  # noqa: BLE001
             show_snack(self.page, "複製失敗", theme.RED_400)
 
     def _history_append_event(self, cache_type: str, event: dict):
         """新增歷史事件"""
         root = str((self.last_overview_data or {}).get("cache_root", "") or "").strip()
         history_append_event(root, cache_type, event)
-
 
     @property
     def page(self):
