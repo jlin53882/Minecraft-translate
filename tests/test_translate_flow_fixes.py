@@ -133,7 +133,7 @@ def test_http_error_status_is_not_retried(api_env):
 
 @patch("translation_tool.core.lm_translator_main.interruptible_sleep")
 @patch("translation_tool.core.lm_translator_main.call_gemini_requests")
-@patch("translation_tool.core.lm_translator_main.get_current_api_key")
+@patch("translation_tool.core.lm_config_rules._get_all_keys")
 @patch("translation_tool.core.lm_translator_main.load_config")
 def test_fallback_items_are_marked_untranslated(
     mock_config, mock_key, mock_call, _mock_sleep
@@ -148,7 +148,7 @@ def test_fallback_items_are_marked_untranslated(
             "models": {"gemini-pro": {"enabled": True}},
         }
     }
-    mock_key.return_value = "k"
+    mock_key.return_value = ["k"]
     mock_call.return_value = '{"items": ['  # 永遠被截斷，batch 縮到極限
 
     items = [
