@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
@@ -119,6 +120,137 @@ def test_legacy_save_path_notifies_too(cfg_path):
         unsubscribe()
     assert calls == [1]
     assert cfg_path.exists()
+
+
+# -- 通知契約：callback 一律在寫入鎖釋放後執行 ------------------------------------
+
+
+@pytest.fixture
+def fresh_write_lock(monkeypatch):
+    """每個測試用全新的寫入鎖：回歸時就算死鎖，也不會把鎖留給後面的測試。"""
+    lock = threading.Lock()
+    monkeypatch.setattr(config_store, "_write_lock", lock)
+    return lock
+
+
+def _run_with_timeout(fn, timeout=5.0):
+    """在背景執行緒跑 fn；逾時代表卡住（死鎖），回傳 (是否完成, 例外)。"""
+    box: dict = {}
+
+    def target():
+        try:
+            box["result"] = fn()
+        except BaseException as exc:  # noqa: BLE001 - 測試要把例外帶回主執行緒
+            box["error"] = exc
+
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    return (not thread.is_alive()), box
+
+
+@pytest.mark.parametrize("how", ["save", "set_value", "legacy_service"])
+def test_listeners_run_after_write_lock_is_released(cfg_path, fresh_write_lock, how):
+    """不論從哪條路徑存檔，訂閱者被呼叫時 ``_write_lock`` 都必須已釋放。"""
+    held_during_callback: list[bool] = []
+    unsubscribe = config_store.subscribe(
+        lambda: held_during_callback.append(fresh_write_lock.locked())
+    )
+    try:
+        if how == "save":
+            assert config_store.save(config_store.snapshot()) is True
+        elif how == "set_value":
+            assert config_store.set_value("x", 1) is True
+        else:
+            assert config_service.save_config_json(config_store.snapshot()) is True
+    finally:
+        unsubscribe()
+    assert held_during_callback == [False]  # 只通知一次，且通知時沒有持鎖
+
+
+def test_listener_can_write_config_without_deadlock(cfg_path, fresh_write_lock):
+    """訂閱者 callback 再寫設定（巢狀寫入）不可死鎖，最終檔案仍是合法 JSON。"""
+    calls: list[int] = []
+
+    def listener():
+        calls.append(1)
+        if len(calls) == 1:  # 只在第一次通知時巢狀寫入，避免無窮遞迴
+            assert config_store.set_value("ui.theme_mode", "light") is True
+
+    unsubscribe = config_store.subscribe(listener)
+    try:
+        finished, box = _run_with_timeout(
+            lambda: config_store.save(config_store.snapshot())
+        )
+    finally:
+        unsubscribe()
+    assert finished, "config_store.save 卡住：訂閱者的巢狀寫入造成死鎖"
+    assert "error" not in box, box.get("error")
+    assert box["result"] is True
+    assert len(calls) == 2  # save 一次 + 巢狀 set_value 一次，沒有重複通知
+    saved = _read(cfg_path)  # 檔案是合法 JSON，且巢狀寫入的值有留下
+    assert saved["ui"]["theme_mode"] == "light"
+    assert fresh_write_lock.locked() is False
+
+
+def test_listener_can_write_config_from_set_value_without_deadlock(
+    cfg_path, fresh_write_lock
+):
+    calls: list[int] = []
+
+    def listener():
+        calls.append(1)
+        if len(calls) == 1:
+            assert config_store.save(config_store.snapshot()) is True
+
+    unsubscribe = config_store.subscribe(listener)
+    try:
+        finished, box = _run_with_timeout(lambda: config_store.set_value("x", 1))
+    finally:
+        unsubscribe()
+    assert finished, "set_value 卡住：訂閱者的巢狀 save 造成死鎖"
+    assert "error" not in box, box.get("error")
+    assert len(calls) == 2
+    assert _read(cfg_path)["x"] == 1
+
+
+def test_save_notifies_exactly_once(cfg_path):
+    calls: list[int] = []
+    unsubscribe = config_store.subscribe(lambda: calls.append(1))
+    try:
+        assert config_store.save(config_store.snapshot()) is True
+    finally:
+        unsubscribe()
+    assert calls == [1]
+
+
+def test_failed_save_does_not_notify(cfg_path, monkeypatch):
+    monkeypatch.setattr(
+        "translation_tool.utils.config_manager.save_config", lambda *a, **k: False
+    )
+    calls: list[int] = []
+    unsubscribe = config_store.subscribe(lambda: calls.append(1))
+    try:
+        assert config_store.save(config_store.snapshot()) is False
+    finally:
+        unsubscribe()
+    assert calls == []
+
+
+def test_failing_subscriber_does_not_block_others_on_save(cfg_path):
+    calls: list[int] = []
+
+    def boom():
+        raise RuntimeError("ui bug")
+
+    unsub_a = config_store.subscribe(boom)
+    unsub_b = config_store.subscribe(lambda: calls.append(1))
+    try:
+        assert config_store.save(config_store.snapshot()) is True
+        assert calls == [1]
+    finally:
+        unsub_a()
+        unsub_b()
 
 
 def test_save_normalizes_dependent_flags(cfg_path):
