@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import flet as ft
@@ -123,7 +124,15 @@ def shell(placeholder_views, env):
     s = _make_shell(env)
     s.mount()
     yield s
-    s.tasks.detach()
+    s.dispose()
+
+
+def _run_scheduled_ui_work(page: FakePage) -> None:
+    """外殼把 UI 更新排進 page.run_task；測試在這裡扮演 event loop 執行它們。"""
+    pending, page.tasks = page.tasks, []
+    for handler in pending:
+        if handler.__name__ != "_poll_keys":  # Key 輪詢是無窮迴圈，不在這裡跑
+            asyncio.run(handler())
 
 
 # -- 快速跳轉：搜尋與排序 ------------------------------------------------------
@@ -588,6 +597,7 @@ def test_config_saved_elsewhere_refreshes_topbar_and_statusbar(shell, env):
     env.snapshot = [_key(0), _key(1), _key(2)]
     env.config = {"lm_translator": {"models": {"other-model": {"enabled": True}}}}
     env.fire_config_saved()
+    _run_scheduled_ui_work(shell.page)  # 設定異動只排程，更新在 page event loop 上做
     assert shell.topbar.api_pill.count_text.value == "3/3 Key"
     assert shell.statusbar.model.value == "other-model"
     assert shell.statusbar.workdir.value == ""  # 設定裡沒有快取資料夾 → 不顯示
