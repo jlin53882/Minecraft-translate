@@ -160,7 +160,11 @@ class AppShell:
         except Exception:
             logger.debug("無法設定視窗大小", exc_info=True)
         page.padding = 0
-        page.fonts = {design.FONT_MONO: "fonts/JetBrainsMono-Regular.ttf"}
+        # 合併而非覆蓋：避免洗掉呼叫端（例如開發截圖環境）已註冊的字型
+        page.fonts = {
+            **(page.fonts or {}),
+            design.FONT_MONO: "fonts/JetBrainsMono-Regular.ttf",
+        }
         page.on_keyboard_event = self.keyboard.handle_keyboard
         page.on_resize = self._on_resize
 
