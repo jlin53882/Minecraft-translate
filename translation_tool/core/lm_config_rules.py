@@ -200,8 +200,9 @@ class ApiKeyCycle:
     registry（冷卻 ``key_failure_cooldown_sec``）：
 
     - claim() 會先跳過冷卻中的 key，所以已耗盡的 key 不會在每個批次都被再請求一次。
-    - 沒有任何健康的 key 時，每個 cycle 最多「試探」一次冷卻最快到期的那把；試探失敗才算耗盡
+    - 沒有任何健康的 key 時，每個 cycle 最多「試探」冷卻最快到期的**那一把**；試探失敗才算耗盡
       （mark_failed() 回傳 False → 呼叫端回報 ALL_KEYS_EXHAUSTED），成功則清除紀錄。
+      試探 key 若回 429 RPM 這類暫時性錯誤，同一個 cycle 重試時仍只用這把，不會改領其他冷卻中的 key。
     - 只有 mark_failed(reason=...) 帶了 "rpd" / "forbidden" 才會記錄；429 RPM、503 overload
       與未帶原因的 mark_failed() 不會長期排除任何 key。
     - 成功時呼叫 record_success()（= 清除該把 key 的紀錄 + reset()）。
@@ -218,6 +219,7 @@ class ApiKeyCycle:
         self.current_index: int | None = None
         self._current_key: str = ""
         self._probed = False  # 這個 cycle 是否已經試探過冷卻中的 key
+        self._probe_key = ""  # 本 cycle 的試探 key（暫時性錯誤時繼續使用同一把）
 
     @property
     def failed_indexes(self) -> frozenset[int]:
@@ -231,35 +233,53 @@ class ApiKeyCycle:
     def claim(self) -> str:
         """領取下一把本輪尚未失敗、且不在冷卻中的 key。
 
-        沒有健康的 key 時，試探一次冷卻最快到期的那把（每個 cycle 一次）；
-        全部都失敗過時退回一般輪替（呼叫端應已先中止）。
+        分成四種情況（不要靠模糊的 fallback 繞過冷卻）：
+
+        1. 有健康的候選 key：直接領取（不會碰冷卻中的 key）。
+        2. 沒有健康 key、本 cycle 還沒試探過：試探冷卻最快到期的那一把（每個 cycle 一次）。
+        3. 沒有健康 key、本 cycle 已試探過：只能繼續用**同一把**試探 key（例如它剛回 429 RPM，
+           那只是暫時性的，沒有證明它不可用）；**絕不**領取其他冷卻中的 key。
+           試探 key 已確定失敗（或已不在設定檔）時回傳 ""，呼叫端的 mark_failed() 早已回報耗盡。
+        4. 完全沒有冷卻中的 key（舊流程）：全部都失敗過時退回一般輪替（呼叫端應已先中止）。
         """
         keys = _get_all_keys()
         cooling = self._cooling_indexes(keys)
-        claim = claim_api_key(self._failed | cooling)
-        if claim is None and cooling and not self._probed:
-            candidates = [i for i in cooling if i not in self._failed]
-            if candidates:
-                registry = get_key_health_registry()
-                probe = min(
-                    candidates, key=lambda i: registry.seconds_remaining(keys[i])
-                )
-                self._probed = True
-                claim = claim_api_key(set(range(len(keys))) - {probe})
-                if claim is not None:
-                    log_info(
-                        f"[🔎] 沒有健康的 API Key，試探冷卻最快到期的 Key {probe}"
-                        f"（{mask_key(keys[probe])}）"
-                    )
-        if claim is None:
-            claim = claim_api_key(self._failed) or claim_api_key()
-        if claim is None:  # 沒有任何有效 key
+        claim = claim_api_key(self._failed | cooling)  # 1. 健康的 key
+        if claim is None and cooling:
+            claim = self._claim_probe(keys, cooling)  # 2 / 3. 只能動試探 key
+        elif claim is None:
+            claim = claim_api_key(self._failed) or claim_api_key()  # 4. 舊流程
+        if claim is None:  # 沒有任何可領取的 key
             self.current_index = None
             self._current_key = ""
             return ""
         self.current_index, key = claim
         self._current_key = key
         return key
+
+    def _claim_probe(
+        self, keys: list[str], cooling: set[int]
+    ) -> tuple[int, str] | None:
+        """沒有健康 key 時：領取（或繼續使用）本 cycle 唯一的試探 key。"""
+        registry = get_key_health_registry()
+        if not self._probed:
+            candidates = [i for i in cooling if i not in self._failed]
+            if not candidates:
+                return None
+            probe = min(candidates, key=lambda i: registry.seconds_remaining(keys[i]))
+            self._probed = True
+            self._probe_key = keys[probe]
+            log_info(
+                f"[🔎] 沒有健康的 API Key，試探冷卻最快到期的 Key {probe}"
+                f"（{mask_key(keys[probe])}）"
+            )
+        elif self._probe_key in keys:
+            probe = keys.index(self._probe_key)
+            if probe in self._failed:  # 試探已確定失敗：不再碰任何冷卻中的 key
+                return None
+        else:  # 試探 key 已從設定檔移除
+            return None
+        return claim_api_key(set(range(len(keys))) - {probe})
 
     def record_overload(self) -> int:
         """記錄「剛才實際使用的那把 key」遇到一次 503 overload，回傳該把 key 目前的累計次數。"""
@@ -322,6 +342,7 @@ class ApiKeyCycle:
         self._failed.clear()
         self._overload_counts.clear()
         self._probed = False
+        self._probe_key = ""
 
 
 def rotate_api_key():
