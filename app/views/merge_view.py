@@ -20,6 +20,7 @@ from app.ui import theme
 from app.ui.components import primary_button, styled_card
 from app.ui.snack import show_snack
 from app.views._log import LogView
+from app.views._log.task_session import tag_session
 from app.views.config.config_actions import load_config_into_view
 from translation_tool.utils.config_manager import load_config, save_config
 from translation_tool.utils.log_unit import log_warning
@@ -126,7 +127,7 @@ class MergeView(ft.Column):
         self._page = page
         self.file_picker = file_picker
 
-        self.session = TaskSession(max_logs=2000)
+        self.session = tag_session(TaskSession(max_logs=2000), "語系合併", "merge")
         self._ui_stop = threading.Event()
         self._run_output_dir: str | None = (
             None  # 2026-08-04: snapshot for _open_output_folder

@@ -7,10 +7,55 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections import deque
+from collections.abc import Callable
 
 from .log_entry import LogEntry
+
+_logger = logging.getLogger(__name__)
+
+# 全域觀察者：外殼的 TaskManager 用它得知「有任務開始 / 進度 / 結束」，
+# 不必每個頁面各自回報。callback(session, event)，event 為 start / progress / error / finish。
+_observers: list[Callable[[TaskSession, str], None]] = []
+_observers_lock = threading.Lock()
+
+
+def add_observer(callback: Callable[[TaskSession, str], None]) -> None:
+    """註冊全域任務事件觀察者（重複註冊同一個 callback 只會留一份）。"""
+    with _observers_lock:
+        if callback not in _observers:
+            _observers.append(callback)
+
+
+def remove_observer(callback: Callable[[TaskSession, str], None]) -> None:
+    with _observers_lock:
+        if callback in _observers:
+            _observers.remove(callback)
+
+
+def tag_session(session, name: str, view_key: str | None = None):
+    """替 session 標上顯示名稱與所屬頁面（頂列任務膠囊用），並回傳 session。
+
+    用屬性設定而不是建構參數，所以替身 / 舊版 session 也能安全呼叫。
+    """
+    try:
+        session.name = name
+        session.view_key = view_key
+    except AttributeError:
+        pass
+    return session
+
+
+def _notify(session: TaskSession, event: str) -> None:
+    with _observers_lock:
+        observers = list(_observers)
+    for callback in observers:
+        try:
+            callback(session, event)
+        except Exception:
+            _logger.exception("TaskSession 觀察者失敗：%s", event)
 
 
 class TaskSession:
@@ -23,13 +68,23 @@ class TaskSession:
     - snapshot() 回傳 list[LogEntry]，由 presenter 處理渲染
     """
 
-    def __init__(self, max_logs: int = 2000):
+    def __init__(
+        self,
+        max_logs: int = 2000,
+        *,
+        name: str | None = None,
+        view_key: str | None = None,
+    ):
         """
         初始化 TaskSession。
 
         Args:
             max_logs: deque 最大長度，超出時自動淘汰最舊的
+            name: 任務顯示名稱（頂列的任務膠囊用；未提供時顯示「背景任務」）
+            view_key: 任務所屬頁面的 key（點膠囊可跳回該頁）
         """
+        self.name = name
+        self.view_key = view_key
         self.progress: float = 0.0
         self.status: str = "IDLE"  # IDLE / RUNNING / DONE / ERROR
         self.error: bool = False
@@ -45,6 +100,7 @@ class TaskSession:
         """更新 progress（0.0～1.0），自動 clamp。"""
         with self._lock:
             self.progress = max(0.0, min(1.0, value))
+        _notify(self, "progress")
 
     def add_log(
         self,
@@ -79,6 +135,7 @@ class TaskSession:
         with self._lock:
             self.error = True
             self.status = "ERROR"
+        _notify(self, "error")
 
     def set_summary(self, summary: dict) -> None:
         """設定任務摘要統計（供 DONE 時 UI 取用）。"""
@@ -94,6 +151,7 @@ class TaskSession:
         with self._lock:
             self.progress = 1.0
             self.status = "ERROR" if self.error else "DONE"
+        _notify(self, "finish")
 
     def request_cancel(self) -> None:
         """要求取消任務；worker 會在下一個檢查點（例如批次之間）停止。"""
@@ -113,6 +171,7 @@ class TaskSession:
             self._next_seq = 0
             self.error = False
             self.status = "RUNNING"
+        _notify(self, "start")
 
     # ---------- UI 讀取（UI 使用） ----------
 

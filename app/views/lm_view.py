@@ -18,6 +18,7 @@ from app.ui import theme
 from app.ui.components import primary_button, secondary_button, styled_card
 from app.ui.snack import show_snack
 from app.views._log import LogView
+from app.views._log.task_session import tag_session
 from translation_tool.utils.config_manager import (
     get_batch_write_interval,
     load_config,
@@ -259,7 +260,7 @@ class LMView(ft.Column):
             self.page.update()
             return
 
-        self.session = TaskSession()
+        self.session = tag_session(TaskSession(), "機器翻譯", "lm")
         self.session.start()
 
         if not (self.output_path.value or "").strip():

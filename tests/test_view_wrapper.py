@@ -1,28 +1,18 @@
 import flet as ft
 
-from app.ui.view_wrapper import (
-    VIEW_MARGIN,
-    VIEW_PADDING,
-    VIEW_RADIUS,
-    VIEW_SHADOW,
-    wrap_view,
-)
+from app.ui.view_wrapper import VIEW_PADDING, wrap_view
 
 
-def test_wrap_view_returns_container_with_expected_style():
-    """確保 wrap_view 統一外框樣式。
-
-    這個測試的目的不是測 Flet 渲染（那屬於整合測試），
-    而是確保我們的 UI 底層封裝不會被不小心改壞。
-    """
-
-    inner = ft.Text("hello")
+def test_wrap_view_is_a_plain_padded_container():
+    """頁面外框只給統一留白並填滿空間；背景由 Page 提供（主題切換不需重建頁面）。"""
+    inner = ft.Text("x")
     c = wrap_view(inner)
 
     assert isinstance(c, ft.Container)
-    assert c.content == inner
-    assert c.padding == VIEW_PADDING
-    assert c.margin == VIEW_MARGIN
-    assert c.border_radius == VIEW_RADIUS
-    assert c.shadow == VIEW_SHADOW
+    assert c.content is inner
     assert c.expand is True
+    assert c.padding == VIEW_PADDING
+    # 不再是卡片：沒有自己的底色 / 陰影 / 圓角
+    assert c.bgcolor is None
+    assert c.shadow is None
+    assert not c.border_radius

@@ -6,6 +6,7 @@ import threading
 import flet as ft
 
 from app.ui.snack import show_snack
+from app.views._log.task_session import tag_session
 from translation_tool.utils.log_unit import log_error, log_warning
 
 
@@ -58,7 +59,7 @@ def run_ftb(view, *, dry_run: bool):
     view.progress.value = 0
     view.log_view.clear()
     _safe_page_update(view)
-    view.session = view.TaskSession()
+    view.session = tag_session(view.TaskSession(), "FTB 任務翻譯", "translation")
     try:
         view.session.start()
     except Exception as e:  # noqa: BLE001
@@ -114,7 +115,7 @@ def run_kjs(view, *, dry_run: bool):
     view.progress.value = 0
     view.log_view.clear()
     _safe_page_update(view)
-    view.session = view.TaskSession()
+    view.session = tag_session(view.TaskSession(), "KubeJS 任務翻譯", "translation")
     try:
         view.session.start()
     except Exception as e:  # noqa: BLE001
@@ -169,7 +170,7 @@ def run_md(view, *, dry_run: bool):
     view.progress.value = 0
     view.log_view.clear()
     _safe_page_update(view)
-    view.session = view.TaskSession()
+    view.session = tag_session(view.TaskSession(), "MD 任務翻譯", "translation")
     try:
         view.session.start()
     except Exception as e:  # noqa: BLE001

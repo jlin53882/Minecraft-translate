@@ -54,6 +54,7 @@ from app.ui.theme import (
     YELLOW_900,
 )
 from app.views._log import LogView
+from app.views._log.task_session import tag_session
 from app.views.pipeline.pipeline_bundle_dialog import open_bundle_dialog
 from app.views.pipeline.pipeline_extract_dialog import open_extract_dialog
 from app.views.pipeline.pipeline_merge_dialog import open_merge_dialog
@@ -506,7 +507,7 @@ class PipelineView(ft.Column):
         """
         if self._cancel_event.is_set():
             return False
-        session = TaskSession()
+        session = tag_session(TaskSession(), "一鍵流水線", "pipeline")
         self._current_session = session
         done = threading.Event()
         self._ui(self.progress_panel.set_step_running, step_num, name)

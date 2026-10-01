@@ -1,14 +1,13 @@
-# -*- coding: utf-8 -*-
 """PR1-6 UI 优化功能测试。"""
 
 import flet as ft
 
 from app.ui import theme
 from app.ui.components import (
-    styled_card,
-    loading_state,
     empty_state,
     error_state,
+    loading_state,
+    styled_card,
 )
 
 
@@ -30,38 +29,44 @@ class MockPage:
 def test_keyboard_handler_import():
     """Verify KeyboardShortcutHandler can be imported."""
     from app.ui.keyboard_shortcuts import KeyboardShortcutHandler
+
     assert KeyboardShortcutHandler is not None
 
 
 def test_keyboard_handler_class():
     """Verify KeyboardShortcutHandler is a class."""
     from app.ui.keyboard_shortcuts import KeyboardShortcutHandler
+
     assert isinstance(KeyboardShortcutHandler, type)
 
 
 def test_keyboard_handler_has_view_registry_param():
     """Verify KeyboardShortcutHandler has view_registry parameter."""
-    from app.ui.keyboard_shortcuts import KeyboardShortcutHandler
     import inspect
+
+    from app.ui.keyboard_shortcuts import KeyboardShortcutHandler
+
     sig = inspect.signature(KeyboardShortcutHandler.__init__)
     params = list(sig.parameters.keys())
     # Should have page, view_registry, change_view_callback
-    assert 'view_registry' in params
+    assert "view_registry" in params
 
 
-# PR2: Quick Jump Panel
+# PR2: Quick Jump Panel（已由 app.shell.palette 的 CommandPalette 取代）
 
 
 def test_quick_jump_import():
-    """Verify QuickJumpPanel can be imported."""
-    from app.ui.quick_jump import QuickJumpPanel
-    assert QuickJumpPanel is not None
+    """Verify CommandPalette can be imported."""
+    from app.shell.palette import CommandPalette
+
+    assert CommandPalette is not None
 
 
 def test_quick_jump_class():
-    """Verify QuickJumpPanel is a class."""
-    from app.ui.quick_jump import QuickJumpPanel
-    assert isinstance(QuickJumpPanel, type)
+    """Verify CommandPalette is a class."""
+    from app.shell.palette import CommandPalette
+
+    assert isinstance(CommandPalette, type)
 
 
 # PR3: styled_card collapsible - Behavior Tests
@@ -77,12 +82,7 @@ def test_styled_card_no_collapsible():
 def test_styled_card_collapsible_false():
     """Verify styled_card with collapsible=False."""
     inner = ft.Text("x")
-    c = styled_card(
-        title="T",
-        icon=ft.Icons.INFO,
-        content=inner,
-        collapsible=False
-    )
+    c = styled_card(title="T", icon=ft.Icons.INFO, content=inner, collapsible=False)
     assert isinstance(c, ft.Container)
 
 
@@ -94,7 +94,7 @@ def test_styled_card_collapsible_true():
         icon=ft.Icons.INFO,
         content=inner,
         collapsible=True,
-        default_collapsed=False
+        default_collapsed=False,
     )
     assert isinstance(c, ft.Container)
 
@@ -104,11 +104,7 @@ def test_styled_card_with_page():
     page = MockPage()
     inner = ft.Text("x")
     c = styled_card(
-        title="Test",
-        icon=ft.Icons.INFO,
-        content=inner,
-        collapsible=True,
-        page=page
+        title="Test", icon=ft.Icons.INFO, content=inner, collapsible=True, page=page
     )
     assert isinstance(c, ft.Container)
 
@@ -123,7 +119,7 @@ def test_styled_card_collapse_toggle():
         content=inner,
         collapsible=True,
         default_collapsed=False,
-        page=page
+        page=page,
     )
     # Verify card structure
     assert isinstance(c, ft.Container)
@@ -138,7 +134,7 @@ def test_styled_card_default_collapsed():
         icon=ft.Icons.INFO,
         content=inner,
         collapsible=True,
-        default_collapsed=True
+        default_collapsed=True,
     )
     assert isinstance(c, ft.Container)
 
@@ -165,10 +161,13 @@ def test_progress_snackbar_display():
     pb = ft.ProgressBar(value=0.3, width=200)
 
     snack = ft.SnackBar(
-        content=ft.Row([
-            ft.Text("Loading..."),
-            pb,
-        ], spacing=10),
+        content=ft.Row(
+            [
+                ft.Text("Loading..."),
+                pb,
+            ],
+            spacing=10,
+        ),
         duration=999999,
     )
     page.snack_bar = snack
@@ -185,10 +184,12 @@ def test_progress_snackbar_update():
     pb = ft.ProgressBar(value=0.0, width=200)
 
     snack = ft.SnackBar(
-        content=ft.Row([
-            ft.Text("Loading..."),
-            pb,
-        ]),
+        content=ft.Row(
+            [
+                ft.Text("Loading..."),
+                pb,
+            ]
+        ),
         duration=999999,
     )
     page.snack_bar = snack
@@ -232,12 +233,10 @@ def test_loading_state_no_spinner():
 def test_empty_state():
     """Verify empty_state returns Container."""
     es = empty_state(
-        icon=ft.Icons.SEARCH_OFF,
-        title="No results",
-        message="Try another keyword"
+        icon=ft.Icons.SEARCH_OFF, title="No results", message="Try another keyword"
     )
     assert isinstance(es, ft.Container)
-    assert es.alignment == ft.alignment.Alignment(0,0)
+    assert es.alignment == ft.alignment.Alignment(0, 0)
 
 
 def test_empty_state_with_button():
@@ -247,18 +246,14 @@ def test_empty_state_with_button():
         icon=ft.Icons.ERROR_OUTLINE,
         title="Error",
         message="Please retry",
-        action_button=btn
+        action_button=btn,
     )
     assert isinstance(es, ft.Container)
 
 
 def test_error_state():
     """Verify error_state returns Container."""
-    err = error_state(
-        icon=ft.Icons.ERROR,
-        title="Error",
-        message="Operation failed"
-    )
+    err = error_state(icon=ft.Icons.ERROR, title="Error", message="Operation failed")
     assert isinstance(err, ft.Container)
 
 
@@ -266,10 +261,7 @@ def test_error_state_with_retry():
     """Verify error_state with retry button."""
     btn = ft.Button("Retry")
     err = error_state(
-        icon=ft.Icons.ERROR,
-        title="Error",
-        message="Failed",
-        retry_button=btn
+        icon=ft.Icons.ERROR, title="Error", message="Failed", retry_button=btn
     )
     assert isinstance(err, ft.Container)
 
@@ -280,36 +272,42 @@ def test_error_state_with_retry():
 def test_cache_overview_panel_import():
     """Verify CacheOverviewPanel can be imported."""
     from app.views.cache_manager.panels import CacheOverviewPanel
+
     assert CacheOverviewPanel is not None
 
 
 def test_cache_query_panel_import():
     """Verify CacheQueryPanel can be imported."""
     from app.views.cache_manager.panels import CacheQueryPanel
+
     assert CacheQueryPanel is not None
 
 
 def test_cache_shard_panel_import():
     """Verify CacheShardPanel can be imported."""
     from app.views.cache_manager.panels import CacheShardPanel
+
     assert CacheShardPanel is not None
 
 
 def test_cache_overview_panel_class():
     """Verify CacheOverviewPanel is a class."""
     from app.views.cache_manager.panels import CacheOverviewPanel
+
     assert isinstance(CacheOverviewPanel, type)
 
 
 def test_cache_query_panel_class():
     """Verify CacheQueryPanel is a class."""
     from app.views.cache_manager.panels import CacheQueryPanel
+
     assert isinstance(CacheQueryPanel, type)
 
 
 def test_cache_shard_panel_class():
     """Verify CacheShardPanel is a class."""
     from app.views.cache_manager.panels import CacheShardPanel
+
     assert isinstance(CacheShardPanel, type)
 
 
@@ -318,14 +316,14 @@ def test_cache_shard_panel_class():
 
 def test_theme_text_secondary():
     """Verify TEXT_SECONDARY exists."""
-    assert hasattr(theme, 'TEXT_SECONDARY')
+    assert hasattr(theme, "TEXT_SECONDARY")
 
 
 def test_theme_text_secondary_200():
     """Verify TEXT_SECONDARY_200 exists."""
-    assert hasattr(theme, 'TEXT_SECONDARY_200')
+    assert hasattr(theme, "TEXT_SECONDARY_200")
 
 
 def test_theme_text_disabled():
     """Verify TEXT_DISABLED exists."""
-    assert hasattr(theme, 'TEXT_DISABLED')
+    assert hasattr(theme, "TEXT_DISABLED")
