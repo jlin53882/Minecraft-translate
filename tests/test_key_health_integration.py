@@ -201,6 +201,59 @@ def test_all_cooling_probes_once_instead_of_going_silent(env):
     assert len(env.calls) == 1  # 只探測一次，不是每把都再打一次
 
 
+def _cool_everything(env: Env) -> None:
+    env.outcomes = {"k0": rpd(), "k1": rpd(), "k2": rpd()}
+    env.translate(3)  # 三把都標記耗盡
+    env.calls.clear()
+
+
+def test_all_cooling_probe_hit_by_rpm_retries_only_the_probe_key(env):
+    """全部冷卻 → 試探某把 → 它回 RPM → 同一 cycle 重試：不得改打其他冷卻中的 key。"""
+    _cool_everything(env)
+    env.outcomes = {
+        "k0": [rpm(), OK_JSON],
+        "k1": [rpm(), OK_JSON],
+        "k2": [rpm(), OK_JSON],
+    }
+
+    result, status = env.translate(1)  # 一個批次：RPM 一次、重試成功一次
+
+    assert status == "AUTO"
+    assert len(result) == 1
+    probe = env.calls[0]
+    assert set(env.calls) == {probe}  # 只有試探 key 被請求；沒有第二把冷卻 key
+    assert env.calls.count(probe) == 2  # RPM 一次 + 重試成功一次
+    assert _statuses(env).count(STATUS_COOLING) == 2  # 另外兩把仍在冷卻
+
+
+def test_all_cooling_probe_rpm_then_rpd_reports_exhausted_after_one_key_only(env):
+    _cool_everything(env)
+    env.outcomes = {
+        "k0": [rpm(), rpd()],
+        "k1": [rpm(), rpd()],
+        "k2": [rpm(), rpd()],
+    }
+
+    result, status = env.translate(3)
+
+    assert status == "ALL_KEYS_EXHAUSTED"
+    assert not result
+    assert len(set(env.calls)) == 1  # 其他兩把冷卻中的 key 一次都沒被請求
+    assert len(env.calls) == 2
+
+
+def test_cooling_key_is_skipped_while_a_healthy_key_exists(env):
+    """一把冷卻、其餘健康：直接用健康的，不試探冷卻中的那把。"""
+    env.outcomes = {"k0": rpd(), "k1": OK_JSON, "k2": OK_JSON}
+    env.translate(3)  # k0 進入冷卻
+    env.calls.clear()
+
+    _result, status = env.translate(6)
+
+    assert status == "AUTO"
+    assert "k0" not in env.calls
+
+
 def test_all_cooling_recovers_when_the_probe_succeeds(env):
     """使用者換了方案 / 配額重置：探測成功就恢復，不必等冷卻到期。"""
     env.outcomes = {"k0": rpd(), "k1": rpd(), "k2": rpd()}

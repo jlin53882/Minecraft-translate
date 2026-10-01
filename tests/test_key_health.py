@@ -329,6 +329,105 @@ def test_probe_is_limited_to_one_per_cycle_and_resets_with_the_cycle(keys):
     assert cycle.mark_failed(reason=REASON_RPD) is False
 
 
+def _all_cooling(clock_seconds=(3000, 1000, 2000)):
+    """三把 key 全部冷卻；KEY_B 最快到期（會被試探）。"""
+    reg = get_key_health_registry()
+    for key, seconds in zip((KEY_A, KEY_B, KEY_C), clock_seconds, strict=True):
+        reg.mark_failed(key, REASON_RPD, seconds)
+
+
+def test_all_cooling_probe_with_transient_rpm_never_claims_other_cooling_keys(keys):
+    """全部冷卻 → 試探 B → B 回 429 RPM（暫時性，不 mark_failed）→ 同一 cycle 重試。
+
+    重試只能再用試探 key B；不可改領冷卻中的 A / C（#113 的 single-probe contract）。
+    """
+    _all_cooling()
+    cycle = ApiKeyCycle()
+
+    probe = cycle.claim()
+    assert probe == KEY_B
+    retries = [cycle.claim() for _ in range(6)]  # RPM 沒有 mark_failed，反覆重試
+
+    assert retries == [KEY_B] * 6
+    assert KEY_A not in retries and KEY_C not in retries
+
+
+def test_all_cooling_probe_rpd_failure_reports_exhausted_and_hands_out_nothing(keys):
+    _all_cooling()
+    cycle = ApiKeyCycle()
+    assert cycle.claim() == KEY_B
+
+    assert cycle.mark_failed(reason=REASON_RPD) is False  # 試探失敗 = 耗盡
+
+    assert cycle.claim() == ""  # 之後也不會繞過冷卻去領 A / C
+    assert cycle.current_index is None
+
+
+def test_all_cooling_probe_success_clears_only_the_probe_key(keys):
+    _all_cooling()
+    reg = get_key_health_registry()
+    cycle = ApiKeyCycle()
+    assert cycle.claim() == KEY_B
+    assert cycle.claim() == KEY_B  # 先經過一次暫時性重試
+
+    cycle.record_success()
+
+    assert not reg.is_cooling(KEY_B)
+    assert reg.is_cooling(KEY_A) and reg.is_cooling(KEY_C)
+
+
+def test_cooling_key_is_not_probed_while_healthy_keys_exist(keys):
+    get_key_health_registry().mark_failed(KEY_A, REASON_RPD, 600)
+    cycle = ApiKeyCycle()
+
+    claimed = _claim_all(cycle, 6)
+
+    assert KEY_A not in claimed
+    assert set(claimed) == {KEY_B, KEY_C}  # 有健康的 key 時直接用，不會試探 A
+
+
+def test_healthy_key_taking_over_after_the_probe_wins(keys):
+    """試探進行中，別處已證明 C 可用（例如另一個執行緒成功）：之後改領健康的 C。"""
+    _all_cooling()
+    cycle = ApiKeyCycle()
+    assert cycle.claim() == KEY_B
+
+    get_key_health_registry().mark_ok(KEY_C)
+
+    assert cycle.claim() == KEY_C
+
+
+def test_cooldown_expiry_makes_the_key_claimable_again_after_a_probe(keys):
+    _all_cooling()
+    cycle = ApiKeyCycle()
+    assert cycle.claim() == KEY_B
+
+    keys["clock"].advance(1500)  # B（1000 秒）與 C（2000 秒）之中，B 到期；A 還在冷卻
+    claimed = {cycle.claim() for _ in range(4)}
+
+    assert KEY_A not in claimed
+    assert KEY_B in claimed
+
+
+def test_probe_key_removed_from_config_does_not_fall_back_to_cooling_keys(keys):
+    _all_cooling()
+    cycle = ApiKeyCycle()
+    assert cycle.claim() == KEY_B
+
+    keys["keys"] = [KEY_A, KEY_C]  # 試探中的 B 被使用者從設定移除
+
+    assert cycle.claim() == ""  # 不會因此改領冷卻中的 A / C
+
+
+def test_new_cycle_can_probe_again(keys):
+    _all_cooling()
+    cycle = ApiKeyCycle()
+    assert cycle.claim() == KEY_B
+    cycle.reset()  # 新的 cycle：可以再試探一次
+
+    assert cycle.claim() == KEY_B
+
+
 def test_mark_failed_is_true_while_a_healthy_key_remains(keys):
     reg = get_key_health_registry()
     reg.mark_failed(KEY_B, REASON_RPD, 1000)
