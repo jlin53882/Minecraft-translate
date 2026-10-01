@@ -382,8 +382,11 @@ def test_pipeline_view_initializes_buttons(monkeypatch):
     def collect(c):
         if isinstance(c, ft.Button):
             buttons.append(c)
-        for child in getattr(c, "controls", []):
+        for child in getattr(c, "controls", None) or []:
             collect(child)
+        content = getattr(c, "content", None)
+        if content is not None and not isinstance(content, str):
+            collect(content)  # 卡片（Container）裡的按鈕
 
     collect(view.workbench_view)
 
