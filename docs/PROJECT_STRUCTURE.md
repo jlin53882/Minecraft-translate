@@ -11,8 +11,8 @@ Minecraft-translate/
 ├── pyproject.toml         # 專案設定與依賴
 ├── app/                   # UI 層（Flet）
 ├── translation_tool/      # 核心翻譯引擎（不含 UI）
-├── tests/                 # 單元測試（176 檔、1905 tests）
-├── tools/                 # 開發輔助腳本
+├── tests/                 # 單元測試（數量見 `pytest --collect-only -q`）
+├── tools/                 # 開發輔助腳本（見 tools/README.md）
 └── docs/                  # 專案文件
 ```
 
@@ -20,17 +20,19 @@ Minecraft-translate/
 
 | 子目錄／檔案 | 職責 |
 |---|---|
-| `views/*.py` | 12 個主視圖：config / rules / cache / qc / lookup / icon_preview / bundler / translation / extractor / lm / merge / pipeline |
-| `views/cache_manager/` | 快取視圖 MVC 子模組（panels/overview、query、shard + actions/state/controller） |
-| `views/cache/` | 舊版快取視圖實驗碼（未接線，待清理） |
+| `views/*.py` | 13 個頁面：dashboard（工作台）/ pipeline / extractor / merge / lm / translation / qc / icon_preview / cache / rules / lookup / bundler / config |
+| `views/cache_manager/` | 快取視圖子模組（overview / log panel + actions / state / controller / presenter） |
+| `views/dashboard/` | 工作台資料彙整（`dashboard_data.py`，與畫面分離，可單獨測試） |
 | `views/pipeline/` | 一鍵批次翻譯子模組（pipeline_view + 5 個 dialog：extract/merge/translate/bundle/one_click） |
 | `views/config/`、`views/extractor/`、`views/rules/`、`views/translation/` | 各主視圖的 panels/actions/state 子模組 |
 | `services_impl/` | 服務實作（pipeline 業務邏輯），不含 QC/checkers |
 | `services.py` | façade：僅保留 QC/checkers 暂緩線的 re-export |
-| `ui/` | 通用 UI 元件：theme.py（主題）、view_wrapper.py、components.py、keyboard_shortcuts.py、quick_jump.py |
+| `ui/` | `design.py`（設計 token / 主題）、`kit/`（共用元件）、theme.py（舊色常數映射）、snack.py、status_chip.py、view_wrapper.py、components.py、keyboard_shortcuts.py。詳見 `UI_DESIGN_SYSTEM.md` |
+| `shell/` | 應用外殼：app_shell、sidebar、topbar、statusbar、palette、task_manager |
+| `config_store.py` | 設定讀 / 寫 / 變更通知 |
 | `startup_tasks.py` | 背景啟動任務（索引重建等） |
-| `view_registry.py` | View 註冊與導航選單建構 |
-| `task_session.py` | 任務階段追蹤 |
+| `view_registry.py` | `ViewSpec` 單一來源：導覽分組、快捷鍵、視窗尺寸 |
+| `tasks/` | 與 UI 無關的任務模型：`TaskSession`、`LogEntry` |
 
 ### `translation_tool/` — 核心翻譯引擎
 
