@@ -98,6 +98,9 @@ def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
 # DEFAULT_CONFIG 是「缺檔或缺欄位時的保底值」，不是要取代使用者設定；
 # load_config() 會用它做深度合併，讓新欄位可以向後相容地補進舊 config.json。
 DEFAULT_CONFIG = {
+    "ui": {
+        "theme_mode": "dark",  # dark / light
+    },
     "logging": {
         "log_level": "INFO",
         "log_format": "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",

@@ -21,6 +21,8 @@ from typing import Any
 
 from translation_tool.utils.text_processor import (
     load_replace_rules as load_rules_core,
+)
+from translation_tool.utils.text_processor import (
     save_replace_rules as save_rules_core,
 )
 
@@ -30,6 +32,7 @@ from translation_tool.utils.text_processor import (
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = str(PROJECT_ROOT / "config.json")
 REPLACE_RULES_PATH = str(PROJECT_ROOT / "replace_rules.json")
+
 
 def _load_app_config() -> dict[str, Any]:
     """讀取 app 設定（service 層唯一入口）。
@@ -46,6 +49,7 @@ def _load_app_config() -> dict[str, Any]:
     from translation_tool.utils.config_manager import load_config
 
     return load_config(CONFIG_PATH)
+
 
 def _save_app_config(config: dict[str, Any]):
     """儲存 app 設定（service 層唯一入口）。
@@ -66,14 +70,24 @@ def _save_app_config(config: dict[str, Any]):
     # 這樣下次讀取時，不會因為某個子功能仍為 true 而產生矛盾的行為。
     merger_cfg = config.get("lang_merger", {})
     if not merger_cfg.get("process_zh_cn_files", True):
-        config.setdefault("lang_merger", merger_cfg)["skip_zh_cn_when_only_process_lang"] = False
-        config.setdefault("lang_merger", merger_cfg)["patchouli_skip_en_us_when_zh_cn_exists"] = False
+        config.setdefault("lang_merger", merger_cfg)[
+            "skip_zh_cn_when_only_process_lang"
+        ] = False
+        config.setdefault("lang_merger", merger_cfg)[
+            "patchouli_skip_en_us_when_zh_cn_exists"
+        ] = False
 
+    from app.config_store import notify_saved
     from translation_tool.utils.config_manager import save_config
 
-    return save_config(config, CONFIG_PATH)
+    ok = save_config(config, CONFIG_PATH)
+    if ok:
+        notify_saved()  # 讓外殼（API Key 狀態、模型、主題）立即更新
+    return ok
+
 
 # --- 檔案讀寫服務 ---
+
 
 def load_replace_rules():
     """載入替換規則。
@@ -83,6 +97,7 @@ def load_replace_rules():
     """
     return load_rules_core(REPLACE_RULES_PATH)
 
+
 def save_replace_rules(rules):
     """儲存替換規則。
 
@@ -90,6 +105,7 @@ def save_replace_rules(rules):
         rules: 規則資料
     """
     save_rules_core(REPLACE_RULES_PATH, rules)
+
 
 def load_config_json() -> dict:
     """載入應用程式設定（UI 層專用包裝）。
@@ -99,10 +115,14 @@ def load_config_json() -> dict:
     """
     return _load_app_config()
 
+
 def save_config_json(config):
     """儲存應用程式設定。
 
     參數：
         config: 設定資料
+
+    回傳：
+        bool: 是否寫入成功
     """
-    _save_app_config(config)
+    return _save_app_config(config)

@@ -76,23 +76,51 @@ def placeholder_views(monkeypatch):
     return built
 
 
-@pytest.fixture
-def shell(placeholder_views):
-    page = FakePage()
-    snapshot = [_key(0), _key(1, STATUS_COOLING)]
-    config = {
-        "lm_translator": {
-            "models": {"gemini-x": {"enabled": True}, "old": {"enabled": False}}
-        },
-        "translator": {"cache_directory": "快取資料"},
+class _Env:
+    """外殼的外部相依（設定存檔、設定異動訂閱）替身，確保測試不會碰真的 config.json。"""
+
+    def __init__(self) -> None:
+        self.saved_modes: list[str] = []
+        self.listeners: list = []
+        self.snapshot = [_key(0), _key(1, STATUS_COOLING)]
+        self.config = {
+            "lm_translator": {
+                "models": {"gemini-x": {"enabled": True}, "old": {"enabled": False}}
+            },
+            "translator": {"cache_directory": "快取資料"},
+        }
+
+    def subscribe(self, callback):
+        self.listeners.append(callback)
+        return lambda: self.listeners.remove(callback)
+
+    def fire_config_saved(self) -> None:
+        for callback in list(self.listeners):
+            callback()
+
+
+def _make_shell(env: _Env, **overrides) -> AppShell:
+    kwargs = {
+        "file_picker": SimpleNamespace(),
+        "key_snapshot": lambda: env.snapshot,
+        "config_loader": lambda: env.config,
+        "task_manager": TaskManager(),
+        "initial_mode": "dark",
+        "mode_saver": env.saved_modes.append,
+        "subscribe_config": env.subscribe,
     }
-    s = AppShell(
-        page,
-        file_picker=SimpleNamespace(),
-        key_snapshot=lambda: snapshot,
-        config_loader=lambda: config,
-        task_manager=TaskManager(),
-    )
+    kwargs.update(overrides)
+    return AppShell(FakePage(), **kwargs)
+
+
+@pytest.fixture
+def env():
+    return _Env()
+
+
+@pytest.fixture
+def shell(placeholder_views, env):
+    s = _make_shell(env)
     s.mount()
     yield s
     s.tasks.detach()
@@ -512,18 +540,54 @@ def test_environment_helpers_tolerate_missing_config():
     assert _cache_dir_of({"translator": {"cache_directory": "x"}}) == "x"
 
 
-def test_broken_config_or_keys_do_not_stop_the_shell(placeholder_views):
+def test_broken_config_or_keys_do_not_stop_the_shell(placeholder_views, env):
     def boom():
         raise RuntimeError("壞掉了")
 
-    s = AppShell(
-        FakePage(),
-        file_picker=SimpleNamespace(),
-        key_snapshot=boom,
-        config_loader=boom,
-        task_manager=TaskManager(),
-    )
+    s = _make_shell(env, key_snapshot=boom, config_loader=boom)
     s.mount()
     s.tasks.detach()
     assert s.current_key == vr.DEFAULT_VIEW_KEY
     assert s.topbar.api_pill.count_text.value == "未設定 Key"
+
+
+# -- 主題偏好與設定異動 -----------------------------------------------------------
+
+
+def test_switching_theme_is_remembered(shell, env):
+    shell.set_mode("light")
+    assert env.saved_modes == ["light"]
+    shell.set_mode("light")  # 沒變就不重複存
+    assert env.saved_modes == ["light"]
+    shell.toggle_mode()
+    assert env.saved_modes == ["light", "dark"]
+
+
+def test_initial_mode_is_not_saved_back(placeholder_views, env):
+    s = _make_shell(env, initial_mode="light")
+    s.mount()
+    s.tasks.detach()
+    assert env.saved_modes == []
+    assert s.page.theme_mode == ft.ThemeMode.LIGHT
+    assert s.sidebar.theme_toggle.value == "light"
+
+
+def test_failing_theme_save_does_not_break_switching(placeholder_views, env):
+    def boom(_mode):
+        raise OSError("disk full")
+
+    s = _make_shell(env, mode_saver=boom)
+    s.mount()
+    s.tasks.detach()
+    s.set_mode("light")
+    assert s.mode == "light"
+
+
+def test_config_saved_elsewhere_refreshes_topbar_and_statusbar(shell, env):
+    assert shell.topbar.api_pill.count_text.value == "1/2 Key"
+    env.snapshot = [_key(0), _key(1), _key(2)]
+    env.config = {"lm_translator": {"models": {"other-model": {"enabled": True}}}}
+    env.fire_config_saved()
+    assert shell.topbar.api_pill.count_text.value == "3/3 Key"
+    assert shell.statusbar.model.value == "other-model"
+    assert shell.statusbar.workdir.value == ""  # 設定裡沒有快取資料夾 → 不顯示

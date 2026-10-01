@@ -10,9 +10,10 @@ Schema contract tests — 驗證 DEFAULT_CONFIG 的結構與型別不會被意�
 4. 必備的 nested dict 結構完整
 """
 
-import pytest
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -26,6 +27,7 @@ class TestSchemaKeys完整性:
 
     def test_has_all_expected_top_level_keys(self):
         expected = {
+            "ui",
             "logging",
             "translator",
             "ftb_translator",
@@ -40,7 +42,9 @@ class TestSchemaKeys完整性:
         missing = expected - actual
         extra = actual - expected
         assert not missing, f"缺少 top-level keys: {missing}"
-        assert not extra, f"多了 top-level keys（確認是否新加入，如果是死設定應移除）: {extra}"
+        assert not extra, (
+            f"多了 top-level keys（確認是否新加入，如果是死設定應移除）: {extra}"
+        )
 
 
 class TestSchema型別合約:
@@ -111,12 +115,16 @@ class TestSchema型別合約:
         # rate_limit 是 nested dict
         assert isinstance(lm["rate_limit"], dict)
         assert isinstance(lm["rate_limit"]["timeout"], int)
-        assert isinstance(lm["rate_limit"]["sleep_seconds_between_batches"], (int, float))
+        assert isinstance(
+            lm["rate_limit"]["sleep_seconds_between_batches"], (int, float)
+        )
 
     def test_lm_translator_models_is_dict(self):
         """models 必須是 dict（key = model name），不是 list。"""
         lm = DEFAULT_CONFIG["lm_translator"]
-        assert isinstance(lm["models"], dict), "lm_translator.models 應為 dict，不應變成 list"
+        assert isinstance(lm["models"], dict), (
+            "lm_translator.models 應為 dict，不應變成 list"
+        )
 
     def test_lm_translator_patchouli_system_prompt_is_string(self):
         lm = DEFAULT_CONFIG["lm_translator"]
@@ -135,12 +143,16 @@ class TestList欄位數量基線:
     def test_skip_terms_minimum_count(self):
         skip_terms = DEFAULT_CONFIG["lm_translator"]["translator"]["skip_terms"]
         assert isinstance(skip_terms, list)
-        assert len(skip_terms) >= 20, f"skip_terms 只有 {len(skip_terms)} 項（預期 ≥ 20），可能被意外刪減"
+        assert len(skip_terms) >= 20, (
+            f"skip_terms 只有 {len(skip_terms)} 項（預期 ≥ 20），可能被意外刪減"
+        )
 
     def test_translatable_keywords_minimum_count(self):
         kw = DEFAULT_CONFIG["lm_translator"]["translator"]["translatable_keywords"]
         assert isinstance(kw, list)
-        assert len(kw) >= 15, f"translatable_keywords 只有 {len(kw)} 項（預期 ≥ 15），可能被意外刪減"
+        assert len(kw) >= 15, (
+            f"translatable_keywords 只有 {len(kw)} 項（預期 ≥ 15），可能被意外刪減"
+        )
 
     def test_jar_extractor_lang_codes_includes_essential(self):
         codes = DEFAULT_CONFIG["jar_extractor"]["lang_codes"]
@@ -155,8 +167,17 @@ class TestList欄位數量基線:
 
     def test_extractor_output_folder_names_all_present(self):
         folders = DEFAULT_CONFIG["extractor"]["output_folder_names"]
-        expected = {"lang_extract", "book_extract", "lang_preview", "book_preview", "dual_extract", "dual_preview"}
-        assert set(folders.keys()) == expected, f"output_folder_names 缺少欄位或有多餘欄位：目前為 {set(folders.keys())}"
+        expected = {
+            "lang_extract",
+            "book_extract",
+            "lang_preview",
+            "book_preview",
+            "dual_extract",
+            "dual_preview",
+        }
+        assert set(folders.keys()) == expected, (
+            f"output_folder_names 缺少欄位或有多餘欄位：目前為 {set(folders.keys())}"
+        )
 
 
 class TestConfigExampleJsonSchema完整性:
@@ -165,6 +186,7 @@ class TestConfigExampleJsonSchema完整性:
     def test_example_json_has_matching_keys(self, tmp_path):
         """config.example.json 的 top-level keys 應與 DEFAULT_CONFIG 相同。"""
         import json
+
         import translation_tool.utils.config_manager as cm
 
         # 用真實的 EXAMPLE_PATH
@@ -190,6 +212,7 @@ class TestConfigExampleJsonSchema完整性:
     def test_example_prompt_fields_not_empty(self, tmp_path):
         """config.example.json 的 system_prompt 不應為空字串。"""
         import json
+
         import translation_tool.utils.config_manager as cm
 
         example_path = cm.EXAMPLE_PATH
@@ -199,10 +222,23 @@ class TestConfigExampleJsonSchema完整性:
         with example_path.open(encoding="utf-8") as f:
             example = json.load(f)
 
-        patchouli_prompt = example.get("lm_translator", {}).get("patchouli_system_prompt", "")
+        patchouli_prompt = example.get("lm_translator", {}).get(
+            "patchouli_system_prompt", ""
+        )
         lang_prompt = example.get("lm_translator", {}).get("lang_system_prompt", "")
 
-        assert patchouli_prompt, "config.example.json 的 patchouli_system_prompt 不應為空"
+        assert patchouli_prompt, (
+            "config.example.json 的 patchouli_system_prompt 不應為空"
+        )
         assert lang_prompt, "config.example.json 的 lang_system_prompt 不應為空"
-        assert len(patchouli_prompt) > 50, "patchouli_system_prompt 長度異常（疑似被清空）"
+        assert len(patchouli_prompt) > 50, (
+            "patchouli_system_prompt 長度異常（疑似被清空）"
+        )
         assert len(lang_prompt) > 50, "lang_system_prompt 長度異常（疑似被清空）"
+
+
+class TestUiSection:
+    """ui 區塊（外殼偏好，例如深 / 淺色）。"""
+
+    def test_ui_defaults(self):
+        assert DEFAULT_CONFIG["ui"] == {"theme_mode": "dark"}

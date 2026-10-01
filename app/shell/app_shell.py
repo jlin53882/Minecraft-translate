@@ -13,6 +13,7 @@ from collections.abc import Callable
 
 import flet as ft
 
+from app import config_store
 from app.shell.palette import (
     KIND_ACTION,
     PaletteItem,
@@ -78,14 +79,22 @@ class AppShell:
         key_snapshot: Callable[[], list] | None = None,
         config_loader: Callable[[], dict] | None = None,
         task_manager: TaskManager | None = None,
-        initial_mode: str = "dark",
+        initial_mode: str | None = None,
+        mode_saver: Callable[[str], object] | None = None,
+        subscribe_config: Callable[[Callable[[], None]], Callable[[], None]]
+        | None = None,
     ) -> None:
         self.page = page
         self.file_picker = file_picker or ft.FilePicker()
         self._key_snapshot = key_snapshot or _default_key_snapshot
         self._config_loader = config_loader or _default_config_loader
         self.tasks = task_manager or TaskManager()
+        if initial_mode is None:
+            initial_mode = _default_mode()
         self.mode = initial_mode
+        self._mode_saver = mode_saver or config_store.set_theme_mode
+        self._subscribe_config = subscribe_config or config_store.subscribe
+        self._unsubscribe_config: Callable[[], None] | None = None
         self.current_key: str | None = None
         self._last_refresh = 0.0
         self._refresh_timer: threading.Timer | None = None
@@ -154,6 +163,8 @@ class AppShell:
 
         self.tasks.attach()
         self.tasks.subscribe(self._schedule_task_refresh)
+        # 設定頁（或任何地方）存檔後，API Key 狀態 / 模型 / 資料夾要立刻更新
+        self._unsubscribe_config = self._subscribe_config(self._on_config_saved)
         self.refresh_environment()
 
         page.add(self.build())
@@ -200,14 +211,20 @@ class AppShell:
 
     # -- 主題 ----------------------------------------------------------------
 
-    def set_mode(self, mode: str) -> None:
-        """切換深 / 淺色。"""
+    def set_mode(self, mode: str, *, persist: bool = True) -> None:
+        """切換深 / 淺色，並（預設）記住使用者的選擇。"""
         mode = "dark" if mode == "dark" else "light"
+        changed = mode != self.mode
         self.mode = mode
         self.page.theme_mode = design.THEME_MODES[mode]
         theme.manager.set_mode(mode)
         self.sidebar.set_mode(mode)
         self._safe_update()
+        if persist and changed:
+            try:
+                self._mode_saver(mode)
+            except Exception:
+                logger.warning("無法記住主題偏好", exc_info=True)
 
     def toggle_mode(self) -> None:
         self.set_mode(design.toggled_mode(self.page))
@@ -255,6 +272,11 @@ class AppShell:
             config = {}
         self.statusbar.set_model(_enabled_model_name(config))
         self.statusbar.set_workdir(_cache_dir_of(config))
+
+    def _on_config_saved(self) -> None:
+        """設定存檔後（可能在背景執行緒）：重讀環境資訊。"""
+        self.refresh_environment()
+        self._safe_update()
 
     def refresh_keys(self) -> None:
         try:
@@ -347,6 +369,13 @@ class AppShell:
 
 
 # -- 設定 / Key 的預設來源 -------------------------------------------------------
+
+
+def _default_mode() -> str:
+    try:
+        return config_store.get_theme_mode()
+    except Exception:  # noqa: BLE001 - 設定壞掉時用預設深色
+        return config_store.DEFAULT_THEME_MODE
 
 
 def _default_key_snapshot() -> list:
