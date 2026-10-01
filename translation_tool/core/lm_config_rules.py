@@ -6,6 +6,7 @@
 
 import re
 import threading
+from collections.abc import Collection
 from typing import Any
 
 from ..utils.config_manager import load_config, load_config_shared
@@ -94,40 +95,122 @@ def _get_all_keys() -> list[str]:
     ]
 
 
-def get_current_api_key() -> str:
+def get_api_key_count() -> int:
+    """目前設定檔中有效 API Key 的數量。"""
+    return len(_get_all_keys())
+
+
+def claim_api_key(exclude: Collection[int] = ()) -> tuple[int, str] | None:
     """
-    從金鑰池中取得目前正在使用的 API 金鑰。
+    原子地「領取」一把 API Key，回傳 (index, key)。
 
-    此函式依賴於執行緒安全的 KeyIndexTracker 類別 (_key_tracker)，
-    確保在執行翻譯請求或進行輪替（Rotate）時，始終能獲取到當前設定的金鑰。
+    **Key rotation contract（務必先讀）**
 
-    回傳:
-        str: 目前指向的 Gemini API 金鑰字串。
+    - 這是 atomic get-and-advance：回傳指定的 key 後，tracker 立即前進到「下一把」。
+      因此 tracker 的 index 代表「下一次預計使用哪一把」，**不是**「剛才 request 實際用了哪一把」。
+      這樣高並發時不同執行緒會分散到不同 key（ATK-009）。
+    - 「剛才用了哪一把」由回傳的 index 提供；呼叫端自己記住它（見 ApiKeyCycle），
+      不可以用 get_current_key_index() 去猜剛才失敗的是哪一把。
+    - exclude：本輪已實際失敗的 key index。從 tracker 目前位置起，領取第一把不在 exclude 的 key，
+      並讓 tracker 前進到它的下一把。exclude 為空時行為與舊的 get_current_api_key 完全相同。
+
+    回傳 None 的情況：沒有任何有效 key，或所有 key 都在 exclude 內。
     """
     keys = _get_all_keys()
     if not keys:
         log_error("❌ 設定檔中沒有找到任何有效的 API Key")
-        return ""
+        return None
 
+    count = len(keys)
     # 更新 key_count 以便正確環繞
-    _key_tracker.set_key_count(len(keys))
+    _key_tracker.set_key_count(count)
 
-    # 執行緒安全：atomic get-and-rotate。
-    # 每個執行緒呼叫都會拿到「目前 key」並輪替到下一把，
-    # 確保高並發時不同執行緒分散到不同 key（ATK-009 修復）。
+    # 執行緒安全：在同一把鎖內完成「挑選 + 前進」。
     with _key_tracker._lock:
-        current_index = _key_tracker._index
-        safe_index = min(current_index, len(keys) - 1)
-        key = keys[safe_index]
-        # 立即輪替，讓下一個執行緒拿到不同 key
-        _key_tracker._index += 1
-        if len(keys) > 0:
-            _key_tracker._index = _key_tracker._index % len(keys)
+        start = min(_key_tracker._index, count - 1)
+        for offset in range(count):
+            index = (start + offset) % count
+            if index in exclude:
+                continue
+            _key_tracker._index = (index + 1) % count
+            return index, keys[index]
+    return None
+
+
+def get_current_api_key() -> str:
+    """
+    領取下一把 API Key 並回傳其字串（atomic get-and-advance，見 claim_api_key）。
+
+    注意：呼叫後 tracker 已前進到下一把，所以 get_current_key_index() 之後回傳的是
+    「下一把」而不是剛才使用的這把。需要知道剛才用了哪一把，或要判斷「是否所有 key 都已
+    實際失敗」時，請使用 claim_api_key / ApiKeyCycle。
+
+    回傳:
+        str: Gemini API 金鑰字串；沒有任何有效 key 時回傳空字串。
+    """
+    claim = claim_api_key()
+    return claim[1] if claim else ""
+
+
+class ApiKeyCycle:
+    """
+    一個 retry cycle 的 API Key 使用狀態。
+
+    每次翻譯呼叫（以及其中對同一批資料的重試）各自建立一份，不跨執行緒共用。
+
+    - claim()：領取下一把「本輪尚未實際失敗」的 key，並記住它的 index。
+    - mark_failed()：把「剛才實際使用的那把」標記為失敗，回傳是否還有尚未嘗試的 key。
+      回傳 False 才代表「所有可用 key 都已在本輪實際嘗試且都不可用」（耗盡）。
+    - reset()：本輪成功後呼叫，開始新的 cycle。
+
+    耗盡只依據「實際嘗試過並失敗的 key」，不依賴 tracker index 恰好在最後一格。
+    """
+
+    def __init__(self) -> None:
+        self._failed: set[int] = set()
+        self.current_index: int | None = None
+
+    @property
+    def failed_indexes(self) -> frozenset[int]:
+        """本輪已實際失敗的 key index。"""
+        return frozenset(self._failed)
+
+    def claim(self) -> str:
+        """領取下一把本輪尚未失敗的 key；全部都失敗過時退回一般輪替（呼叫端應已先中止）。"""
+        claim = claim_api_key(self._failed) or claim_api_key()
+        if claim is None:  # 沒有任何有效 key
+            self.current_index = None
+            return ""
+        self.current_index, key = claim
         return key
+
+    def mark_failed(self) -> bool:
+        """標記剛才實際使用的 key 為失敗。回傳 True = 還有尚未嘗試的 key 可用。"""
+        if self.current_index is not None:
+            self._failed.add(self.current_index)
+        total = get_api_key_count()
+        failed_in_range = sum(1 for index in self._failed if index < total)
+        return failed_in_range < total
+
+    def has_alternative_key(self) -> bool:
+        """是否有一把以上的 key（沒有的話，換 key 沒有意義）。"""
+        return get_api_key_count() > 1
+
+    def reset(self) -> None:
+        """本輪成功：清除失敗紀錄，開始新的 cycle。"""
+        self._failed.clear()
 
 
 def rotate_api_key():
     """
+    【舊 API，請勿用於翻譯請求流程】
+
+    以 tracker 目前的 index 判斷是否還有下一把並前進。這套語意把 tracker 當成
+    「剛才使用的 key」，與 get_current_api_key / claim_api_key 的 get-and-advance
+    （tracker = 下一把）互相衝突：例如 2 把 key，領取 key0 後 tracker 已指向 key1，
+    此時呼叫本函式會回傳 False，彷彿「所有 key 都用完」，但 key1 其實還沒被用過。
+    翻譯流程已改用 ApiKeyCycle 判斷耗盡；本函式僅為向後相容而保留。
+
     切換至下一個可用的 API Key。
 
     使用時機：

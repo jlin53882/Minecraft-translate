@@ -7,11 +7,7 @@
 import requests
 
 from translation_tool.core.lm_api_client import call_gemini_requests
-from translation_tool.core.lm_config_rules import (
-    get_current_api_key,  # 取得目前使用中的 key
-    get_current_key_index,  # 取得目前 Key 索引（向後相容）
-    rotate_api_key,  # 輪替 key
-)
+from translation_tool.core.lm_config_rules import ApiKeyCycle
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.utils.cancellation import interruptible_sleep
 from translation_tool.utils.config_manager import load_config
@@ -157,6 +153,11 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
     # dry_run：模擬翻譯流程，不呼叫任何 API
     if dry_run:
         return [], "DRY_RUN"
+
+    # API Key 使用狀態（一個 retry cycle 一份）：記錄「實際用了哪一把、哪些已實際失敗」。
+    # 不可再用 tracker index 猜剛才失敗的 key：get_current_api_key 是 get-and-advance，
+    # tracker 指的是「下一把」，詳見 lm_config_rules.claim_api_key。
+    key_cycle = ApiKeyCycle()
 
     # 統一從 lm_cfg 讀取 batch size 設定
     lm_cfg = load_config().get("lm_translator", {})
@@ -378,7 +379,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                     model_name=model_name,
                     system_prompt=prompt,
                     payload=payload,
-                    api_key=get_current_api_key(),
+                    api_key=key_cycle.claim(),
                     temperature=MODEL_TEMP,
                 ).strip()
 
@@ -532,6 +533,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                 batch_size = min(batch_size, remaining_count)
                 overload_retry_count = 0
                 success_this_round = True  # ⭐⭐⭐ 關鍵 ：標記本輪成功
+                key_cycle.reset()  # 本輪成功：開始新的 key cycle
                 pinned_model_index = None  # ⭐ 解鎖 模型
 
                 if remaining_count == 0:
@@ -593,11 +595,13 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                 # ========== 403 ==========
                 if status == 403:
                     log_info(
-                        f"❌ 403 PERMISSION_DENIED：API Key 無權限 (index {get_current_key_index()})"
+                        f"❌ 403 PERMISSION_DENIED：API Key 無權限 (index {key_cycle.current_index})"
                     )
-                    if not rotate_api_key():
+                    # 只有「所有 key 都已實際嘗試且都被拒」才算無權限；還有沒試過的 key 就換它重試
+                    if not key_cycle.mark_failed():
                         raise RuntimeError("❌ 所有 API Key 均無權限")
-                    continue  # 換 Key 後繼續
+                    hit_rpm = True  # 用新的 Key 重試同一批（只有一個模型時也要重試）
+                    continue
 
                 # ========== 400 ==========
                 if status == 400:
@@ -649,11 +653,11 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                         if "PERDAY" in quota_id or "DAILY" in remote_msg:
                             # 情況 A：每日額度 (RPD) 滿了 (Log 顯示：GENERATEREQUESTSPERDAY...)
                             log_warning(
-                                f"[🚫] 每日限額已滿 (RPD)：Key Index {get_current_key_index()} 今日失效"
+                                f"[🚫] 每日限額已滿 (RPD)：Key Index {key_cycle.current_index} 今日失效"
                             )
                             hit_rpm = True
-                            # ⭐ 檢查換 Key 是否成功
-                            if not rotate_api_key():
+                            # ⭐ 所有 key 都已實際嘗試且都用盡才算耗盡
+                            if not key_cycle.mark_failed():
                                 return None, "ALL_KEYS_EXHAUSTED"
                             continue
 
@@ -673,8 +677,8 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                                 f"[❓] 偵測到 429 限制 ({quota_id if quota_id else remote_msg})，嘗試切換 Key"
                             )
                             hit_rpm = True
-                            # ⭐ 檢查換 Key 是否成功
-                            if not rotate_api_key():
+                            # ⭐ 所有 key 都已實際嘗試且都用盡才算耗盡
+                            if not key_cycle.mark_failed():
                                 return None, "ALL_KEYS_EXHAUSTED"
                             continue
 
@@ -683,14 +687,18 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                         err_msg = str(e).upper()
                         log_error(f"[⚠️] 無法解析 429 JSON，使用備援。錯誤: {parse_err}")
 
+                        # 換 key 後要用新的 key 重試同一批（只有一個模型時也一樣），
+                        # 與其他 429 分支一致；否則會直接縮批次並輸出原文。
+                        hit_rpm = True
+
                         if "QUOTA" in err_msg or "EXCEEDED" in err_msg:
                             # ⭐ 這裡之前會崩潰，現在這樣改就安全了
-                            if not rotate_api_key():
+                            if not key_cycle.mark_failed():
                                 return None, "ALL_KEYS_EXHAUSTED"
                             continue
 
                         # 兜底處理
-                        if not rotate_api_key():
+                        if not key_cycle.mark_failed():
                             return None, "ALL_KEYS_EXHAUSTED"
                         continue
 
@@ -736,7 +744,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
 
                             try:
                                 # ⭐ 嘗試換 Key
-                                if rotate_api_key():
+                                if key_cycle.mark_failed():
                                     overload_retry_count = 0  # ⭐ 重置過載計數
                                     pinned_model_index = None  # ⭐ 解鎖模型，允許重新選
                                     log_info(
@@ -772,10 +780,10 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                             "503 非 overload（可能節點或區域異常）→ 嘗試切換 API key"
                         )
                         try:
-                            if not rotate_api_key():
-                                log_warning(
-                                    "沒有其他 API Key 可切換，改用下一個模型重試"
-                                )
+                            # 下一次請求領取 key 時 tracker 已前進到下一把，不需要另外切換；
+                            # 只有一把 key 時換 key 沒有意義，改用下一個模型。
+                            if not key_cycle.has_alternative_key():
+                                log_warning("只有一把 API Key，改用下一個模型重試")
                             interruptible_sleep(request_interval_sec)
                             continue  # 繼續 model pool
                         except Exception as err:  # noqa: BLE001
@@ -833,7 +841,8 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
             if hit_rpm:
                 try:
                     log_info("🔄 觸發頻率限制，嘗試切換 API Key...")
-                    rotate_api_key()
+                    if not key_cycle.mark_failed():
+                        raise RuntimeError("NO_MORE_KEYS")
                     # 保持 hit_rpm = True，下一輪會用新 Key 重試這批
                     continue
                 except RuntimeError:
