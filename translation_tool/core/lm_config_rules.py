@@ -161,13 +161,21 @@ class ApiKeyCycle:
     - claim()：領取下一把「本輪尚未實際失敗」的 key，並記住它的 index。
     - mark_failed()：把「剛才實際使用的那把」標記為失敗，回傳是否還有尚未嘗試的 key。
       回傳 False 才代表「所有可用 key 都已在本輪實際嘗試且都不可用」（耗盡）。
-    - reset()：本輪成功後呼叫，開始新的 cycle。
+    - record_overload() / clear_overload()：503 overload 的**逐把 key** 計數。
+      claim() 是 get-and-advance，連續的請求會輪流用不同的 key，所以 overload 次數必須綁定
+      「實際使用的那把 key」；不同 key 的 overload 不互相累加，只有同一把 key 自己累積到門檻，
+      呼叫端才應該對它 mark_failed()。
+    - reset()：本輪成功後呼叫，開始新的 cycle（同時清除失敗紀錄與 overload 計數）。
 
     耗盡只依據「實際嘗試過並失敗的 key」，不依賴 tracker index 恰好在最後一格。
     """
 
+    # 沒有任何有效 key 時，overload 計數使用的 key
+    _NO_KEY = -1
+
     def __init__(self) -> None:
         self._failed: set[int] = set()
+        self._overload_counts: dict[int, int] = {}
         self.current_index: int | None = None
 
     @property
@@ -184,10 +192,27 @@ class ApiKeyCycle:
         self.current_index, key = claim
         return key
 
+    def record_overload(self) -> int:
+        """記錄「剛才實際使用的那把 key」遇到一次 503 overload，回傳該把 key 目前的累計次數。"""
+        key = self._NO_KEY if self.current_index is None else self.current_index
+        self._overload_counts[key] = self._overload_counts.get(key, 0) + 1
+        return self._overload_counts[key]
+
+    def overload_count(self, index: int | None = None) -> int:
+        """指定 key（預設為剛才實際使用的那把）目前的 overload 累計次數。"""
+        if index is None:
+            index = self._NO_KEY if self.current_index is None else self.current_index
+        return self._overload_counts.get(index, 0)
+
+    def clear_overload(self) -> None:
+        """中斷所有 key 的 overload 連續紀錄（遇到成功、截斷或非 503 的錯誤時）。"""
+        self._overload_counts.clear()
+
     def mark_failed(self) -> bool:
         """標記剛才實際使用的 key 為失敗。回傳 True = 還有尚未嘗試的 key 可用。"""
         if self.current_index is not None:
             self._failed.add(self.current_index)
+            self._overload_counts.pop(self.current_index, None)
         total = get_api_key_count()
         failed_in_range = sum(1 for index in self._failed if index < total)
         return failed_in_range < total
@@ -197,8 +222,9 @@ class ApiKeyCycle:
         return get_api_key_count() > 1
 
     def reset(self) -> None:
-        """本輪成功：清除失敗紀錄，開始新的 cycle。"""
+        """本輪成功：清除失敗紀錄與 overload 計數，開始新的 cycle。"""
         self._failed.clear()
+        self._overload_counts.clear()
 
 
 def rotate_api_key():

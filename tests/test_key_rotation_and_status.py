@@ -21,6 +21,7 @@ import requests
 
 from translation_tool.core import lm_config_rules as rules
 from translation_tool.core import lm_translator_main as main
+from translation_tool.core.lm_config_rules import ApiKeyCycle
 
 _OK_JSON = '{"items": [{"id": "0", "value": "你好"}]}'
 
@@ -71,6 +72,25 @@ def _unparseable_429():
     return requests.HTTPError("429 quota exceeded", response=resp)
 
 
+def _rpm_limited():
+    """429 每分鐘限制（RPM）：只等待後重試，不代表任何一把 key 失效。"""
+    body = {
+        "error": {
+            "message": "rate limited",
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [
+                {
+                    "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                    "violations": [
+                        {"quotaId": "GenerateRequestsPerMinutePerProjectPerModel"}
+                    ],
+                }
+            ],
+        }
+    }
+    return _http_error(429, body, "rate limited")
+
+
 def _overloaded():
     return _http_error(503, text="The model is overloaded. Please try again later.")
 
@@ -79,10 +99,10 @@ def _backend_503():
     return _http_error(503, text="backend unavailable")
 
 
-def _config(models: dict[str, bool]) -> dict:
+def _config(models: dict[str, bool], lang_batch: int = 300) -> dict:
     return {
         "lm_translator": {
-            "initial_batch_size_lang": 300,
+            "initial_batch_size_lang": lang_batch,
             "initial_batch_size_patchouli": 100,
             "batch_shrink_factor": 0.75,
             "min_batch_size": 50,
@@ -104,12 +124,20 @@ class Env:
     keys: list[str]
     outcomes: dict[str, object] = field(default_factory=dict)
     calls: list[str] = field(default_factory=list)
+    models: list[str] = field(default_factory=list)
 
     def fake_api(self, **kwargs):
-        """依「實際使用的 key」決定回應；Exception 會被 raise，字串會被回傳。"""
+        """依「實際使用的 key」決定回應。
+
+        outcomes[key] 可以是單一回應（每次都一樣），或 list：依該把 key 被使用的順序取用，
+        用到最後一個後重複最後一個。Exception 會被 raise，字串會被回傳。
+        """
         key = kwargs["api_key"]
         self.calls.append(key)
+        self.models.append(kwargs["model_name"])
         outcome = self.outcomes[key]
+        if isinstance(outcome, list):
+            outcome = outcome.pop(0) if len(outcome) > 1 else outcome[0]
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
@@ -136,6 +164,18 @@ def env() -> Iterator[Env]:
 
 def _texts(result: list[dict]) -> list[str]:
     return [r["text"] for r in result]
+
+
+def _spy_mark_failed():
+    """包住真正的 ApiKeyCycle.mark_failed（行為不變），記錄每次被標記失敗的 key index。"""
+    marked: list[int | None] = []
+    original = ApiKeyCycle.mark_failed
+
+    def wrapper(self):
+        marked.append(self.current_index)  # 呼叫前的 current_index = 被標記失敗的那把
+        return original(self)
+
+    return patch.object(ApiKeyCycle, "mark_failed", wrapper), marked
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +343,15 @@ def test_503_non_overload_two_keys_next_request_uses_the_other_key(env):
     assert _texts(result) == ["你好"]
 
 
+# 503 overload：門檻是「逐把 key」。claim 是 get-and-advance，連續請求會輪流用不同的 key，
+# 所以不同 key 的 overload 不可互相累加；只有同一把 key 自己達門檻才會被標記失敗。
+_T = 3  # 下面的序列都依「同一把 key 累積 3 次」設計
+
+
+def test_overload_threshold_constant_matches_the_sequences_below():
+    assert main.OVERLOAD_KEY_SWITCH_THRESHOLD == _T
+
+
 def test_503_overload_recovers_on_another_key(env):
     env.outcomes = {"key0": _overloaded(), "key1": _OK_JSON}
 
@@ -313,49 +362,172 @@ def test_503_overload_recovers_on_another_key(env):
     assert _texts(result) == ["你好"]
 
 
-def test_503_overload_all_keys_overloaded_returns_partial_without_endless_retry(env):
-    """連續 overload 達門檻才換 key；所有 key 都實際撐不住後回 PARTIAL，不會無限重試。"""
-    env.outcomes = {"key0": _overloaded(), "key1": _overloaded()}
+def test_503_overload_across_two_keys_then_success_marks_no_key_failed(env):
+    """key0 overload → key1 overload → key0 成功：沒有任何 key 被標記失敗。"""
+    env.outcomes = {"key0": [_overloaded(), _OK_JSON], "key1": _overloaded()}
+    ctx, marked = _spy_mark_failed()
 
-    result, status = main.translate_batch_smart(_items(), 1)
+    with ctx:
+        result, status = main.translate_batch_smart(_items(), 1)
+
+    assert env.calls == ["key0", "key1", "key0"]
+    assert status == "AUTO"
+    assert _texts(result) == ["你好"]
+    assert marked == []
+
+
+def test_503_overload_is_not_summed_across_keys(env):
+    """舊 bug：整個 batch 共用一個計數器，不同 key 的 overload 加總到門檻就把某一把 key 淘汰。
+
+    key0 只 overload 了 2 次、key1 1 次（合計 3 次），沒有任何一把自己達門檻 → 不可 mark_failed。
+    """
+    # key0 一直 overload；key1 第一次 overload、第二次成功
+    env.outcomes = {"key0": _overloaded(), "key1": [_overloaded(), _OK_JSON]}
+    ctx, marked = _spy_mark_failed()
+
+    with ctx:
+        result, status = main.translate_batch_smart(_items(), 1)
+
+    assert env.calls == ["key0", "key1", "key0", "key1"]
+    assert env.calls.count("key0") == 2  # 只有 2 次 overload，沒達門檻
+    assert marked == []
+    assert status == "AUTO"
+    assert _texts(result) == ["你好"]
+
+
+def test_503_overload_marks_only_the_key_that_reached_the_threshold(env):
+    """同一把 key（key0）自己累積到門檻 → 只標記它；下一把 key 真的被使用並成功。"""
+    env.outcomes = {
+        "key0": _overloaded(),
+        "key1": [_overloaded(), _overloaded(), _OK_JSON],
+    }
+    ctx, marked = _spy_mark_failed()
+
+    with ctx:
+        result, status = main.translate_batch_smart(_items(), 1)
+
+    # key0 在自己的第 3 次 overload 時才被排除；之後只剩 key1 被使用
+    assert env.calls == ["key0", "key1", "key0", "key1", "key0", "key1"]
+    assert marked == [0]
+    assert status == "AUTO"
+    assert _texts(result) == ["你好"]
+
+
+def test_503_overload_partial_only_after_every_key_reached_its_own_threshold(env):
+    """所有 key 各自達門檻才回 PARTIAL；不是「整體累積 N 次 overload」就結束。"""
+    env.outcomes = {"key0": _overloaded(), "key1": _overloaded()}
+    ctx, marked = _spy_mark_failed()
+
+    with ctx:
+        result, status = main.translate_batch_smart(_items(), 1)
 
     assert result == []
     assert status == "PARTIAL"
-    assert set(env.calls) == {"key0", "key1"}
-    assert len(env.calls) <= 6  # 兩把 key 各達 3 次門檻就收斂
+    assert env.calls.count("key0") == _T
+    assert env.calls.count("key1") == _T
+    assert env.calls == ["key0", "key1"] * _T  # 有界，沒有無限重試
+    assert marked == [0, 1]
 
 
-def test_503_overload_does_not_declare_exhaustion_before_trying_other_key(env):
-    """只有一把 key 以外的情況下，達門檻後必須先換到沒試過的 key，而不是直接 PARTIAL。"""
+def test_503_overload_three_keys_none_is_dropped_before_its_own_threshold(env):
+    """3 把 key：key0、key1 一直 overload，key2 前兩次 overload 之後成功。
+
+    每一把都必須用到自己的門檻次數（key2 的第 3 次請求才成功）；舊的共用計數器會在 key2
+    只 overload 1 次時就把它淘汰，導致 key2 永遠等不到成功。
+    """
+    env.keys = ["key0", "key1", "key2"]
+    env.outcomes = {
+        "key0": _overloaded(),
+        "key1": _overloaded(),
+        "key2": [_overloaded(), _overloaded(), _OK_JSON],
+    }
+    ctx, marked = _spy_mark_failed()
+
+    with ctx:
+        result, status = main.translate_batch_smart(_items(), 1)
+
+    assert env.calls == ["key0", "key1", "key2"] * 3
+    assert marked == [0, 1]
+    assert status == "AUTO"
+    assert _texts(result) == ["你好"]
+
+
+def test_503_overload_three_keys_third_key_succeeds_without_marking_any(env):
     env.keys = ["key0", "key1", "key2"]
     env.outcomes = {"key0": _overloaded(), "key1": _overloaded(), "key2": _OK_JSON}
+    ctx, marked = _spy_mark_failed()
 
-    _result, status = main.translate_batch_smart(_items(), 1)
+    with ctx:
+        result, status = main.translate_batch_smart(_items(), 1)
 
+    assert env.calls == ["key0", "key1", "key2"]
+    assert marked == []
     assert status == "AUTO"
-    assert "key2" in env.calls
+    assert _texts(result) == ["你好"]
 
 
-# ---------------------------------------------------------------------------
-# 成功後重新開始新的 cycle
-# ---------------------------------------------------------------------------
+def test_503_overload_keeps_model_pinned_and_retries_in_place(env):
+    """真正 overload → 同一個模型原地重試（pinned）；換 key 後也不會亂跳到其他模型。"""
+    env.use_models("m1", "m2")
+    env.outcomes = {
+        "key0": _overloaded(),
+        "key1": [_overloaded(), _overloaded(), _OK_JSON],
+    }
 
-
-def test_successful_request_starts_a_new_key_cycle(env):
-    """同一次翻譯呼叫內，成功會重置「已失敗的 key」；之後的批次不會因舊失敗而提前耗盡。"""
-    # 第一批：key0 → RPD、key1 → 成功；第二批開始時 key0 再度可用（輪到它且成功）
-    env.keys = ["key0", "key1"]
-    env.outcomes = {"key0": _rpd(), "key1": _OK_JSON}
-    result, status = main.translate_batch_smart(_items(), 1)
-    assert status == "AUTO"
-
-    env.calls.clear()
-    env.outcomes = {"key0": _OK_JSON, "key1": _OK_JSON}
     result, status = main.translate_batch_smart(_items(), 1)
 
     assert status == "AUTO"
     assert _texts(result) == ["你好"]
-    assert len(env.calls) == 1
+    assert env.models == ["m1"] * len(env.calls)  # 一直是同一個模型，m2 從未被用到
+
+
+def test_non_503_error_interrupts_the_overload_streak(env):
+    """429 RPM（不是 503）會中斷 overload 連續紀錄：之前累積的 overload 不再計入門檻。
+
+    中斷之後 key0 只再 overload 2 次（第 3、5 次請求），沒有達門檻，所以沒有任何 key 被標記失敗。
+    若沒有 clear_overload，key0 會累積到第 1、3、5 次共 3 次而被標記失敗。
+    """
+    env.outcomes = {
+        "key0": _overloaded(),
+        "key1": [_rpm_limited(), _overloaded(), _OK_JSON],
+    }
+    ctx, marked = _spy_mark_failed()
+
+    with ctx:
+        result, status = main.translate_batch_smart(_items(), 1)
+
+    assert env.calls == ["key0", "key1", "key0", "key1", "key0", "key1"]
+    assert marked == []
+    assert status == "AUTO"
+    assert _texts(result) == ["你好"]
+
+
+# ---------------------------------------------------------------------------
+# 成功後重新開始新的 cycle（同一次 translate_batch_smart 呼叫、跨兩個 batch）
+# ---------------------------------------------------------------------------
+
+
+def test_success_resets_failed_keys_for_the_next_batch_of_the_same_call(env):
+    """同一次 translate_batch_smart 處理兩個 batch。
+
+    batch 1：key0 → 429 RPD（key0 被標記失敗）→ 改用 key1 成功 → production 必須 reset。
+    batch 2：key0 重新有資格被使用，所以輪到的 key0 真的被領取並成功。
+
+    沒有 reset 的話，key0 會一直留在失敗清單，batch 2 會跳過它改用 key1。
+    （不是兩次獨立的 translate 呼叫：每次呼叫本來就會建立新的 ApiKeyCycle。）
+    """
+    env.cfg.return_value = _config({"m1": True}, lang_batch=1)
+    env.outcomes = {"key0": [_rpd(), _OK_JSON], "key1": _OK_JSON}
+    items = [
+        {"path": "a", "text": "Hello", "cache_type": "lang"},
+        {"path": "b", "text": "World", "cache_type": "lang"},
+    ]
+
+    result, status = main.translate_batch_smart(items, 2)
+
+    assert env.calls == ["key0", "key1", "key0"]
+    assert status == "AUTO"
+    assert _texts(result) == ["你好", "你好"]
 
 
 # ---------------------------------------------------------------------------

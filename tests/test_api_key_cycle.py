@@ -225,6 +225,89 @@ def test_cycle_has_alternative_key(keys):
 
 
 # ---------------------------------------------------------------------------
+# ApiKeyCycle：503 overload 的逐把 key 計數
+# ---------------------------------------------------------------------------
+
+
+def test_cycle_overload_counts_are_per_key_not_aggregate(keys):
+    """claim 會輪流用不同的 key；不同 key 的 overload 不可互相累加。"""
+    keys["keys"] = ["k0", "k1"]
+    cycle = ApiKeyCycle()
+
+    cycle.claim()  # k0
+    assert cycle.record_overload() == 1
+    cycle.claim()  # k1
+    assert cycle.record_overload() == 1  # 不是 2
+    cycle.claim()  # k0
+    assert cycle.record_overload() == 2
+    assert cycle.overload_count(0) == 2
+    assert cycle.overload_count(1) == 1
+
+
+def test_cycle_overload_count_defaults_to_the_key_just_used(keys):
+    cycle = ApiKeyCycle()
+    cycle.claim()
+    cycle.record_overload()
+    cycle.claim()
+
+    assert cycle.overload_count() == 0  # 現在用的是 k1，它還沒 overload 過
+    assert cycle.overload_count(0) == 1
+
+
+def test_cycle_clear_overload_clears_every_key_but_keeps_failed_keys(keys):
+    keys["keys"] = ["k0", "k1"]
+    cycle = ApiKeyCycle()
+    cycle.claim()
+    cycle.mark_failed()
+    cycle.claim()
+    cycle.record_overload()
+
+    cycle.clear_overload()
+
+    assert cycle.overload_count(1) == 0
+    assert cycle.failed_indexes == frozenset(
+        {0}
+    )  # 中斷 overload 連續紀錄不等於復活失敗的 key
+
+
+def test_cycle_mark_failed_drops_that_keys_overload_count(keys):
+    cycle = ApiKeyCycle()
+    cycle.claim()
+    cycle.record_overload()
+    cycle.record_overload()
+
+    cycle.mark_failed()
+
+    assert cycle.overload_count(0) == 0
+
+
+def test_cycle_reset_clears_failed_keys_and_overload_counts(keys):
+    keys["keys"] = ["k0", "k1"]
+    cycle = ApiKeyCycle()
+    cycle.claim()
+    cycle.record_overload()
+    cycle.mark_failed()
+    cycle.claim()
+    cycle.record_overload()
+
+    cycle.reset()
+
+    assert cycle.failed_indexes == frozenset()
+    assert cycle.overload_count(0) == 0
+    assert cycle.overload_count(1) == 0
+
+
+def test_cycle_overload_without_keys_is_counted_and_never_crashes(keys):
+    keys["keys"] = []
+    cycle = ApiKeyCycle()
+    cycle.claim()
+
+    assert cycle.record_overload() == 1
+    assert cycle.record_overload() == 2
+    assert cycle.mark_failed() is False
+
+
+# ---------------------------------------------------------------------------
 # 並發分散（ATK-009）
 # ---------------------------------------------------------------------------
 

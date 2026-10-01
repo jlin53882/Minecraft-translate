@@ -20,6 +20,9 @@ from translation_tool.utils.log_unit import log_debug, log_error, log_info, log_
 # 免費層若常遇到 429，可在設定頁把「每批翻譯後等待秒數」調高。
 RPM_COOLDOWN_SEC = 0
 OVERLOAD_RETRY_WAIT_SEC = 12  # Overload 重試等待秒數
+# 同一把 API key 累積這麼多次 503 overload 後，才把「這一把」標記為失敗並換下一把。
+# 次數是逐把 key 計算：不同 key 的 overload 不互相累加。
+OVERLOAD_KEY_SWITCH_THRESHOLD = 3
 
 # =========================================================
 # Size Constants - 大小相關常數
@@ -188,8 +191,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
     # ⭐ 已成功送出的 API 次數
     completed_calls = 0
     all_results = []  # 累積所有翻譯結果
-    # ⭐⭐⭐ 新增：503 連續過載計數器（放在 while 迴圈外）
-    overload_retry_count = 0
+    # 503 overload 計數改為「逐把 key」，由 key_cycle 管理（見 ApiKeyCycle.record_overload）
 
     # 判斷這批次類型（影響 System Prompt 與 batch 上限）
     def _norm_file(item):
@@ -417,7 +419,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                     return count != 0  # 括號不平衡代表截斷
 
                 if _is_truncated(raw_text):
-                    overload_retry_count = 0  # 重置過載計數器
+                    key_cycle.clear_overload()  # 截斷會中斷 overload 連續紀錄
                     log_info(
                         "[!] 偵測到 JSON 被截斷（結尾不完整或格式錯誤），將縮小 Batch 重試"
                     )
@@ -531,9 +533,8 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
 
                 # ⭐ 動態調整 batch_size
                 batch_size = min(batch_size, remaining_count)
-                overload_retry_count = 0
                 success_this_round = True  # ⭐⭐⭐ 關鍵 ：標記本輪成功
-                key_cycle.reset()  # 本輪成功：開始新的 key cycle
+                key_cycle.reset()  # 本輪成功：開始新的 key cycle（含 overload 計數）
                 pinned_model_index = None  # ⭐ 解鎖 模型
 
                 if remaining_count == 0:
@@ -579,7 +580,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
 
                 # ⭐⭐⭐ 這一行是關鍵
                 if status != 503:
-                    overload_retry_count = 0  # 重置過載計數器
+                    key_cycle.clear_overload()  # 非 503 的錯誤會中斷 overload 連續紀錄
                     pinned_model_index = None  # ⭐ 解除鎖定
 
                 """
@@ -730,22 +731,22 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
 
                     # ===== A. 真 overload：同一 batch 原地等 =====
                     if is_overloaded:
-                        overload_retry_count += 1  # ⭐ 累積過載次數
+                        # ⭐ 逐把 key 累積：只記在「剛才實際使用的那把 key」上，
+                        # 不同 key 的 overload 不互相累加（claim 是 get-and-advance，
+                        # 連續請求會輪流用不同的 key）。
+                        overload_count = key_cycle.record_overload()
 
                         pinned_model_index = i  # ⭐ 記住是哪個 model 過載
 
-                        # if overload_retry_count >= 3:
-                        #    log_error(f"[❌] 持續 overload（{overload_retry_count} 次）→ 回傳 PARTIAL 保護進度")
-                        #    return all_results, "PARTIAL"
-                        if overload_retry_count >= 3:
+                        if overload_count >= OVERLOAD_KEY_SWITCH_THRESHOLD:
                             log_warning(
-                                f"[🔁] 模型連續 overload（{overload_retry_count} 次），嘗試切換 API Key"
+                                f"[🔁] Key index {key_cycle.current_index} 累積 overload "
+                                f"{overload_count} 次，標記為失敗並嘗試切換 API Key"
                             )
 
                             try:
-                                # ⭐ 嘗試換 Key
+                                # ⭐ 只把「這一把」標記為失敗；還有尚未嘗試的 key 才換
                                 if key_cycle.mark_failed():
-                                    overload_retry_count = 0  # ⭐ 重置過載計數
                                     pinned_model_index = None  # ⭐ 解鎖模型，允許重新選
                                     log_info(
                                         f"[✅] API Key 切換成功 → 原地重送同一 batch，等待 {key_rotation_buffer_sec} 秒"
@@ -766,7 +767,8 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
 
                         wait_sec = overload_retry_sec
                         log_warning(
-                            f"[⚠️] 模型過載（第 {overload_retry_count} 次），"
+                            f"[⚠️] 模型過載（Key index {key_cycle.current_index} "
+                            f"第 {overload_count} 次），"
                             f"原地等待 {wait_sec}s 後重送【同一 batch / 同一模型】"
                         )
 
