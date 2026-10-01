@@ -8,10 +8,9 @@ import threading  # noqa: F401
 
 import flet as ft
 
-from app.ui import theme
-
-# UI 共用元件：抽出重複的卡片/按鈕樣式，集中在 app.ui
-from app.ui.components import secondary_button, styled_card
+from app.ui import design, kit
+from app.ui.design import C
+from app.ui.design import tone as get_tone
 from app.views._log import LogView
 from app.views.translation.translation_actions import (
     run_ftb,
@@ -67,45 +66,30 @@ class TranslationView(ft.Column):
         self.file_picker = file_picker
         self._state = TranslationRunState()
         self._picker_target_field: ft.TextField | None = None
+        self._step_cards: list = []  # 面板建立時登記，reset 後用來刷新步驟卡外觀
 
         self.session = None
         self._ui_timer_running = False
 
         # 右側共用狀態與日誌
-        self.status_chip = ft.Chip(label=ft.Text("尚未開始"), bgcolor=theme.GREY_200)
-        self.cancel_button = secondary_button(
+        self.status_chip = ft.Chip(label=ft.Text("尚未開始"))
+        self._apply_status_style("neutral")
+        self.cancel_button = kit.button(
             "取消",
+            "danger",
             icon=ft.Icons.STOP_CIRCLE_OUTLINED,
             tooltip="在目前批次完成後停止（已翻譯的部分會保留並寫出）",
             on_click=lambda e: self._on_cancel(),
         )
         self.cancel_button.disabled = True
-        self.progress = ft.ProgressBar(
-            value=0, height=8, bgcolor=theme.GREY_200, color=theme.BLUE
-        )
+        # 環形進度；.value 介面與 ft.ProgressBar 相同，actions 層不需要改
+        self.progress = kit.ProgressRing(0, size=96, stroke=9, tone="em", sub="進度")
         # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器）
         # tail 模式與既有的「最後 N 筆整批重建」行為一致
         self.log_view = LogView(
             page=self._page,
             mode="tail",
             tail_lines=250,
-        )
-
-        header = ft.Row(
-            [
-                ft.Text(
-                    "任務翻譯工具（FTB / KubeJS / Markdown）",
-                    size=22,
-                    weight=ft.FontWeight.BOLD,
-                ),
-                ft.Container(expand=True),
-                ft.IconButton(
-                    icon=ft.Icons.DELETE_OUTLINE,
-                    tooltip="清空右側日誌",
-                    on_click=lambda e: self._clear_logs(),
-                ),
-            ],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         )
 
         self.ftb_tab_content = self._build_ftb_tab()
@@ -117,7 +101,11 @@ class TranslationView(ft.Column):
                 ft.Tab(label="FTB Quests"),
                 ft.Tab(label="KubeJS Tooltips"),
                 ft.Tab(label="Markdown"),
-            ]
+            ],
+            indicator_color=C.EM,
+            label_color=C.EM,
+            unselected_label_color=C.MUTED,
+            divider_color=C.LINE,
         )
         tab_view = ft.TabBarView(
             controls=[
@@ -127,7 +115,7 @@ class TranslationView(ft.Column):
             ],
             expand=True,
         )
-        tab_content = ft.Column([tab_bar, tab_view], expand=True)
+        tab_content = ft.Column([tab_bar, tab_view], expand=True, spacing=12)
         self.tabs = ft.Tabs(
             content=tab_content,
             length=3,
@@ -142,64 +130,71 @@ class TranslationView(ft.Column):
         self.run_md_translation_service = run_md_translation_service
         self.TaskSession = TaskSession
 
+        status_card = ft.Container(
+            padding=ft.Padding.symmetric(horizontal=18, vertical=16),
+            bgcolor=C.PANEL,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=design.RADIUS_CARD,
+            content=ft.Row(
+                [
+                    self.progress,
+                    ft.Column(
+                        [
+                            ft.Text("執行狀態", size=12, color=C.DIM),
+                            self.status_chip,
+                            self.cancel_button,
+                        ],
+                        spacing=8,
+                        tight=True,
+                        expand=True,
+                    ),
+                ],
+                spacing=16,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+        )
         right_panel = ft.Column(
             [
-                styled_card(
-                    title="執行狀態",
-                    icon=ft.Icons.TIMELINE,
-                    content=ft.Column(
-                        [
-                            ft.Row([self.status_chip, self.cancel_button], wrap=True),
-                            self.progress,
-                        ],
-                        spacing=10,
-                    ),
-                ),
-                ft.Container(
+                status_card,
+                kit.section_card(
+                    "執行日誌",
+                    self.log_view,
+                    icon=ft.Icons.TERMINAL,
+                    tone="gold",
                     expand=True,
-                    bgcolor="#1e1e1e",
-                    border_radius=8,
-                    border=ft.Border.all(1, theme.GREY_800),
-                    padding=10,
-                    content=self.log_view,
+                    actions=[
+                        ft.IconButton(
+                            icon=ft.Icons.DELETE_OUTLINE,
+                            icon_size=18,
+                            icon_color=C.MUTED,
+                            tooltip="清空日誌",
+                            on_click=lambda e: self._clear_logs(),
+                        )
+                    ],
                 ),
             ],
             expand=True,
-            spacing=12,
+            spacing=16,
         )
 
         body = ft.Row(
             [
-                ft.Container(
-                    expand=2,
-                    content=styled_card(
-                        title="翻譯流程",
-                        icon=ft.Icons.TUNE,
-                        expand=True,
-                        content=self.tabs,
-                    ),
-                ),
-                ft.Container(expand=1, content=right_panel),
+                ft.Container(expand=3, content=self.tabs),
+                ft.Container(expand=2, content=right_panel),
             ],
             expand=True,
-            spacing=12,
+            spacing=16,
         )
 
-        self.summary_card = ft.Container(
-            padding=14,
-            border_radius=10,
-            bgcolor=theme.WHITE,
-            border=ft.Border.all(1, theme.BLACK12),
-            content=ft.Row(
-                [
-                    # ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color=theme.BLUE_GREY_700),
-                    # ft.Text("本頁已與 Extractor 風格對齊；僅調整 UI 樣式，不影響流程邏輯。"),
-                ],
-                spacing=10,
+        self.controls = [
+            kit.page_header(
+                "任務翻譯工具",
+                "處理 FTB Quests、KubeJS Tooltip 與 Markdown 文件，步驟可自由勾選",
+                icon=ft.Icons.TRANSLATE,
+                tone="ench",
             ),
-        )
-
-        self.controls = [header, body, self.summary_card]
+            body,
+        ]
 
     # ------------------------------------------------------------------
     # 樣式 helper（集中到 app.ui.components）
@@ -297,17 +292,36 @@ class TranslationView(ft.Column):
             return
         request()
         self.cancel_button.disabled = True
-        self._set_status("正在取消…", theme.AMBER_200)
+        self._set_status("正在取消…", "gold")
         self.page.update()
 
     # ------------------------------------------------------------------
     # UI helpers
     # ------------------------------------------------------------------
-    def _set_status(self, text: str, color: str):
-        """更新狀態晶片的文字與顏色"""
+    def _set_status(self, text: str, tone: str = "neutral"):
+        """更新狀態晶片的文字與顏色。
+
+        ``tone`` 是語意色組名稱（neutral / em / gold / red / dia / ench）；
+        為了相容 actions 層仍傳的舊背景色（RED_200 等），其他值會依色系轉成對應色組。
+        """
+        if tone not in ("neutral", "em", "gold", "red", "dia", "ench"):
+            from app.ui.snack import snack_style
+
+            tone = snack_style(tone)[0]
         self.status_chip.label = ft.Text(text)
-        self.status_chip.bgcolor = color
+        self._apply_status_style(tone)
         self.page.update()
+
+    def _apply_status_style(self, tone: str):
+        t = get_tone(tone)
+        self.status_chip.bgcolor = t.bg
+        self.status_chip.label_text_style = ft.TextStyle(color=t.fg, size=12.5)
+        self.status_chip.side = ft.BorderSide(1, t.line)
+
+    def _refresh_steps(self):
+        """步驟卡跟著勾選框的值更新外觀（程式直接改 checkbox.value 之後呼叫）。"""
+        for card in self._step_cards:
+            card.refresh()
 
     def _append_log(self, line: str):
         """新增一行日誌到日誌檢視區（直接走 LogView.add）。
@@ -334,8 +348,9 @@ class TranslationView(ft.Column):
         self.ftb_step_translate.value = True
         self.ftb_step_inject.value = True
         self.ftb_write_new_cache.value = True
-        self._set_status("尚未開始", theme.GREY_200)
+        self._set_status("尚未開始", "neutral")
         self.progress.value = 0
+        self._refresh_steps()
         self._append_log("[UI] 已重置：FTB Quests 輸入已清空")
         self.page.update()
 
@@ -347,8 +362,9 @@ class TranslationView(ft.Column):
         self.kjs_step_translate.value = True
         self.kjs_step_inject.value = True
         self.kjs_write_new_cache.value = True
-        self._set_status("尚未開始", theme.GREY_200)
+        self._set_status("尚未開始", "neutral")
         self.progress.value = 0
+        self._refresh_steps()
         self._append_log("[UI] 已重置：KubeJS 輸入已清空")
         self.page.update()
 
@@ -361,8 +377,9 @@ class TranslationView(ft.Column):
         self.md_step_inject.value = True
         self.md_write_new_cache.value = True
         self.md_lang_mode.value = "non_cjk_only"
-        self._set_status("尚未開始", theme.GREY_200)
+        self._set_status("尚未開始", "neutral")
         self.progress.value = 0
+        self._refresh_steps()
         self._append_log("[UI] 已重置：Markdown 輸入已清空")
         self.page.update()
 

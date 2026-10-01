@@ -87,6 +87,15 @@ class ProgressRing(ft.Stack):
         v = clamp01(value)
         return "…" if v is None else f"{round(v * 100)}%"
 
+    @property
+    def value(self) -> float | None:
+        """目前進度（與 ``ft.ProgressBar.value`` 同介面，方便頁面互換使用）。"""
+        return self.ring.value
+
+    @value.setter
+    def value(self, new: float | None) -> None:
+        self.set_value(new)
+
     def set_value(
         self, value: float | None, *, label: str | None = None, sub: str | None = None
     ) -> None:

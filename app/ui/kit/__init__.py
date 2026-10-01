@@ -25,6 +25,8 @@ from app.ui.kit.basics import (
 from app.ui.kit.cards import (
     ChoiceCard,
     SectionCard,
+    StatCard,
+    StepCard,
     page_header,
     section_card,
     stat_card,
@@ -48,6 +50,7 @@ __all__ = [
     "SectionCard",
     "Segmented",
     "StatCard",
+    "StepCard",
     "SwitchRow",
     "button",
     "chip",

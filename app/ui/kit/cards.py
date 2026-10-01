@@ -322,3 +322,77 @@ class ChoiceCard(ft.Container):
     def _click(self, _e=None) -> None:
         if self._on_select is not None:
             self._on_select(self.choice_key)
+
+
+class StepCard(ft.Container):
+    """流程步驟卡（STEP n + 標題 / 說明），右上角是勾選框；點整張卡也能切換勾選。
+
+    ``checkbox`` 是呼叫端持有的 ``ft.Checkbox``（讀寫 ``.value`` 的是它），卡片只負責外觀。
+    """
+
+    def __init__(
+        self,
+        checkbox: ft.Checkbox,
+        step_no: int,
+        title: str,
+        desc: str = "",
+        *,
+        icon: str | None = None,
+        tone: str = "em",
+        expand: bool | int = 1,
+        on_toggle=None,
+    ) -> None:
+        self.checkbox = checkbox
+        self.step_tone = tone
+        self._on_toggle = on_toggle
+        checkbox.on_change = self._changed
+        top: list[ft.Control] = []
+        top.append(tone_icon(icon or ft.Icons.CHECK, tone, size=18, box=36, radius=10))
+        top.append(checkbox)
+        self._status = ft.Text("", size=11.5, weight=ft.FontWeight.W_600)
+        super().__init__(
+            content=ft.Column(
+                [
+                    ft.Row(top, alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ft.Text(
+                        f"STEP {step_no}",
+                        size=10.5,
+                        color=C.DIM,
+                        font_family=design.FONT_MONO,
+                    ),
+                    ft.Text(title, size=14, weight=ft.FontWeight.BOLD, color=C.TEXT),
+                    ft.Text(desc, size=11.5, color=C.DIM, visible=bool(desc)),
+                    self._status,
+                ],
+                spacing=3,
+                tight=True,
+            ),
+            padding=14,
+            border_radius=CARD_RADIUS - 2,
+            ink=True,
+            on_click=self._click,
+            **expand_kwargs(expand),
+        )
+        self.refresh()
+
+    def _click(self, _e=None) -> None:
+        self.checkbox.value = not bool(self.checkbox.value)
+        self._changed()
+
+    def _changed(self, _e=None) -> None:
+        self.refresh()
+        try:
+            self.update()
+        except RuntimeError:
+            pass
+        if self._on_toggle is not None:
+            self._on_toggle(bool(self.checkbox.value))
+
+    def refresh(self) -> None:
+        """依勾選狀態更新外觀（程式直接改 ``checkbox.value`` 之後呼叫）。"""
+        on = bool(self.checkbox.value)
+        tone = get_tone(self.step_tone)
+        self.bgcolor = tone.bg if on else C.PANEL
+        self.border = ft.Border.all(1, tone.line if on else C.LINE)
+        self._status.value = "將執行" if on else "略過"
+        self._status.color = tone.fg if on else C.DIM

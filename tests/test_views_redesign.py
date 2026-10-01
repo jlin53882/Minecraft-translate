@@ -263,3 +263,41 @@ def _walk_controls(control):
                 yield from _walk_controls(c)
         elif child is not None and not isinstance(child, str):
             yield from _walk_controls(child)
+
+
+# -- StepCard / 任務翻譯 -----------------------------------------------------------
+
+
+def test_step_card_follows_checkbox_and_notifies():
+    seen: list[bool] = []
+    box = ft.Checkbox(value=True)
+    card = kit.StepCard(box, 1, "匯出", "說明", on_toggle=seen.append)
+    assert card._status.value == "將執行"
+    card._click()
+    assert box.value is False and card._status.value == "略過" and seen == [False]
+    box.value = True  # 程式直接改值後要手動刷新
+    card.refresh()
+    assert card._status.value == "將執行"
+
+
+def test_translation_steps_stay_in_sync_after_reset(monkeypatch):
+    from app.views import translation_view as tv
+
+    monkeypatch.setattr(tv, "TaskSession", None)
+    view = tv.TranslationView(mock_page(), mock_filepicker())
+    assert len(view._step_cards) == 4 + 3 + 3
+    view.ftb_step_clean.value = False
+    view._refresh_steps()
+    clean_card = next(c for c in view._step_cards if c.checkbox is view.ftb_step_clean)
+    assert clean_card._status.value == "略過"
+    view._reset_ftb_inputs()
+    assert view.ftb_step_clean.value is True and clean_card._status.value == "將執行"
+
+
+def test_translation_progress_ring_has_progressbar_interface(monkeypatch):
+    from app.views import translation_view as tv
+
+    monkeypatch.setattr(tv, "TaskSession", None)
+    view = tv.TranslationView(mock_page(), mock_filepicker())
+    view.progress.value = 0.5
+    assert view.progress.value == 0.5 and view.progress.label.value == "50%"
