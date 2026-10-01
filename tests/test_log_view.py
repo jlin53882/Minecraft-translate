@@ -24,12 +24,12 @@ from app.views._log import LogEntry, LogView, TaskSession
 
 
 def test_log_view_default_appearance():
-    """預設外觀：theme token、Consolas、圓角 8。"""
+    """預設外觀：theme token、等寬字、圓角 12。"""
     page = MagicMock()
     view = LogView(page=page)
     assert view.bgcolor == theme.BG_LOG_PANEL
-    assert view.border_radius == 8
-    assert view.padding == 10
+    assert view.border_radius == 12
+    assert view.padding == 12
     assert isinstance(view.content, ft.ListView)
     assert view.content.spacing == 4
     assert view.content.auto_scroll is True

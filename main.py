@@ -11,6 +11,7 @@
 """
 
 import logging
+from pathlib import Path
 
 import flet as ft
 
@@ -67,4 +68,4 @@ if __name__ == "__main__":
         # 印出訊息後仍嘗試啟動（讓使用者能看到 GUI 介面）
         print(f"致命錯誤：配置或日誌系統初始化失敗！錯誤: {e}")
 
-    ft.run(main)
+    ft.run(main, assets_dir=str(Path(__file__).resolve().parent / "assets"))

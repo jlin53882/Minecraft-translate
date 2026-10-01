@@ -35,8 +35,30 @@ Flet 0.85.0 SnackBar API: https://flet.dev/docs/controls/snackbar
 from __future__ import annotations
 
 import flet as ft
-from app.ui import theme
+
+from app.ui import design, theme
+from app.ui.design import C
+from app.ui.design import tone as get_tone
 from translation_tool.utils.log_unit import log_info, log_warning
+
+# 舊呼叫端傳的是「背景色」（RED_600 / GREEN_600 / theme.PRIMARY …）。新設計的 toast 是中性面板 + 語意色，
+# 所以只看顏色屬於哪個色系，轉成對應的語意色組與圖示。
+_HUE_TONES = (
+    (("red", "error"), "red", ft.Icons.ERROR_OUTLINE),
+    (("green", "teal", "success"), "em", ft.Icons.CHECK_CIRCLE_OUTLINE),
+    (("orange", "amber", "yellow", "warning"), "gold", ft.Icons.WARNING_AMBER),
+    (("purple", "deeppurple", "pink"), "ench", ft.Icons.INFO_OUTLINE),
+    (("blue", "cyan", "indigo", "primary", "info"), "dia", ft.Icons.INFO_OUTLINE),
+)
+
+
+def snack_style(color) -> tuple[str, str]:
+    """舊的背景色 → (語意色組名稱, 圖示)。認不得的顏色視為中性。"""
+    name = str(getattr(color, "value", color) or "").lower()
+    for hues, tone_name, icon in _HUE_TONES:
+        if any(hue in name for hue in hues):
+            return tone_name, icon
+    return "neutral", ft.Icons.INFO_OUTLINE
 
 
 def show_snack(
@@ -87,15 +109,23 @@ def show_snack(
             if isinstance(page.overlay[i], ft.SnackBar):
                 try:
                     del page.overlay[i]
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
-    txt = ft.Text(message, color=text_color) if text_color else ft.Text(message)
+    tone_name, _icon = snack_style(color)
+    tone = get_tone(tone_name)
+    # text_color 是舊版「彩色底上的文字色」；新版用語意色當文字、邊框帶同色系，參數只為相容而保留。
+    # content 維持單一 ft.Text（既有呼叫端 / 測試會讀 snack.content.value）
+    content = ft.Text(message, color=tone.fg, size=13, weight=ft.FontWeight.W_500)
 
     snack = ft.SnackBar(
-        content=txt,
-        bgcolor=color,
+        content=content,
+        bgcolor=C.RAISED,
         duration=duration,
+        behavior=ft.SnackBarBehavior.FLOATING,
+        shape=ft.RoundedRectangleBorder(
+            radius=design.RADIUS_CONTROL + 2, side=ft.BorderSide(1, tone.line)
+        ),
         **kwargs,
     )
 
@@ -116,12 +146,12 @@ def show_snack(
     try:
         # 嘗試新版 API
         page.show_dialog(snack)
-    except Exception:
+    except Exception:  # noqa: BLE001
         # Fallback 到舊版 (overlay.append + open=True)
         try:
             page.overlay.append(snack)
             snack.open = True
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001
             log_warning(f"[SNACKBAR] show_snack overlay fallback failed: {ex!r}")
 
     # page.update() 推 render (SnackBar 跳出關鍵)
@@ -129,7 +159,7 @@ def show_snack(
     # SnackBar 必須自己再 update 才能從畫面跳出
     try:
         page.update()
-    except Exception as ex:
+    except Exception as ex:  # noqa: BLE001
         log_warning(f"[SNACKBAR] show_snack page.update() failed: {ex!r}")
 
     return snack
