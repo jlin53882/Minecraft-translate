@@ -394,13 +394,13 @@ def test_sidebar_theme_toggle_reports_mode():
 
 def test_mount_shows_default_page_and_environment(shell, placeholder_views):
     assert shell.current_key == vr.DEFAULT_VIEW_KEY
-    assert shell.page.title.endswith("一鍵流水線")
+    assert shell.page.title.endswith("工作台")
     assert shell.page.controls  # 版面已加入
     assert shell.page.window.width == vr.DEFAULT_WINDOW_SIZE[0]
-    assert shell.sidebar.selected == "pipeline"
+    assert shell.sidebar.selected == "dashboard"
     assert shell.topbar.group_text.value == "工作流程"
     # 只建立了首頁（延遲載入）
-    assert set(placeholder_views) == {"pipeline"}
+    assert set(placeholder_views) == {"dashboard"}
     # 環境資訊
     assert shell.topbar.api_pill.count_text.value == "1/2 Key"
     assert shell.statusbar.model.value == "gemini-x"

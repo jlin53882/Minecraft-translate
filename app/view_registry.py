@@ -49,6 +49,17 @@ SYSTEM_GROUP = NavGroup("system", "系統", "neutral")
 # 單一資料來源：新增頁面只需要在這裡加一筆
 VIEW_SPECS: tuple[ViewSpec, ...] = (
     ViewSpec(
+        "dashboard",
+        "工作台",
+        ft.Icons.GRID_VIEW_OUTLINED,
+        "flow",
+        "app.views.dashboard_view",
+        "DashboardView",
+        False,
+        "1",
+        ("dashboard", "home", "首頁", "總覽", "狀態"),
+    ),
+    ViewSpec(
         "pipeline",
         "一鍵流水線",
         ft.Icons.ACCOUNT_TREE_OUTLINED,
@@ -56,7 +67,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         "app.views.pipeline.pipeline_view",
         "PipelineView",
         True,
-        "1",
+        "2",
         ("pipeline", "模組流水線", "提取", "翻譯", "打包"),
     ),
     ViewSpec(
@@ -67,7 +78,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         "app.views.extractor_view",
         "ExtractorView",
         True,
-        "2",
+        "3",
         ("jar", "extract", "提取"),
     ),
     ViewSpec(
@@ -78,7 +89,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         "app.views.merge_view",
         "MergeView",
         True,
-        "3",
+        "4",
         ("merge", "比對", "lang"),
     ),
     ViewSpec(
@@ -89,7 +100,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         "app.views.lm_view",
         "LMView",
         True,
-        "4",
+        "5",
         ("gemini", "lm", "ai", "api"),
     ),
     ViewSpec(
@@ -100,7 +111,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         "app.views.translation_view",
         "TranslationView",
         True,
-        "5",
+        "6",
         ("task", "翻譯工具"),
     ),
     ViewSpec(
@@ -111,7 +122,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         "app.views.qc_view",
         "QCView",
         True,
-        "6",
+        "7",
         ("qc", "品管", "檢查"),
     ),
     ViewSpec(
@@ -122,7 +133,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         "app.views.icon_preview_view",
         "IconPreviewView",
         False,
-        "7",
+        "8",
         ("review", "圖示", "icon", "校對"),
     ),
     ViewSpec(
@@ -133,7 +144,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         "app.views.cache_view",
         "CacheView",
         False,
-        "8",
+        "9",
         ("cache", "索引"),
     ),
     ViewSpec(
@@ -144,7 +155,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         "app.views.rules_view",
         "RulesView",
         False,
-        "9",
+        "0",
         ("rules", "規則", "取代"),
     ),
     ViewSpec(
@@ -155,7 +166,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         "app.views.lookup_view",
         "LookupView",
         False,
-        "0",
+        None,
         ("lookup", "查詢", "字典"),
     ),
     ViewSpec(
@@ -183,7 +194,7 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
 )
 
 SPECS_BY_KEY: dict[str, ViewSpec] = {spec.key: spec for spec in VIEW_SPECS}
-DEFAULT_VIEW_KEY = "pipeline"
+DEFAULT_VIEW_KEY = "dashboard"
 
 
 def get_spec(view_key: str) -> ViewSpec:

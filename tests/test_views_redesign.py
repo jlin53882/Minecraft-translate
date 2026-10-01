@@ -301,3 +301,97 @@ def test_translation_progress_ring_has_progressbar_interface(monkeypatch):
     view = tv.TranslationView(mock_page(), mock_filepicker())
     view.progress.value = 0.5
     assert view.progress.value == 0.5 and view.progress.label.value == "50%"
+
+
+# -- 工作台 -------------------------------------------------------------------
+
+
+def _dashboard(**overrides):
+    from app.views.dashboard_view import DashboardView
+
+    kwargs = {
+        "cache_overview_loader": lambda: {
+            "total_entries": 150,
+            "types": {"lang": {"entries_count": 100}, "md": {"entries_count": 50}},
+        },
+        "rules_count_loader": lambda: 1325,
+        "key_snapshot_loader": list,
+    }
+    kwargs.update(overrides)
+    return DashboardView(mock_page(), **kwargs)
+
+
+def test_dashboard_shows_loaded_numbers():
+    view = _dashboard()
+    assert view.stat_cache.value_text.value == "—"  # 載入前
+    view.reload(sync=True)
+    assert view.stat_cache.value_text.value == "150"
+    assert view.stat_rules.value_text.value == "1,325"
+    assert len(view.cache_column.controls) == 2
+
+
+def test_dashboard_survives_failing_loaders():
+    def boom():
+        raise OSError("disk")
+
+    view = _dashboard(
+        cache_overview_loader=boom, rules_count_loader=boom, key_snapshot_loader=boom
+    )
+    view.reload(sync=True)
+    assert view.stat_cache.value_text.value == "—"
+    assert view.stat_rules.value_text.value == "—"
+    assert view.stat_keys.value_text.value == "—"
+
+
+def test_dashboard_reload_is_not_reentrant():
+    view = _dashboard()
+    view._loading = True
+    calls = []
+    view._cache_overview_loader = lambda: calls.append(1) or {}
+    view.reload(sync=True)
+    assert calls == []
+
+
+def test_dashboard_reflects_running_and_finished_tasks():
+    from app.shell.task_manager import TaskManager
+    from app.views._log.task_session import TaskSession
+    from app.views.dashboard.dashboard_data import STEP_DONE, STEP_RUNNING
+
+    view = _dashboard()
+    manager = TaskManager()
+    manager.attach()
+    try:
+        view.set_task_manager(manager)
+        session = TaskSession(name="機器翻譯", view_key="lm")
+        session.start()
+        session.set_progress(0.4)
+        view.refresh_view(view._collect())
+        assert next(s for s in view.data.steps if s.key == "lm").status == STEP_RUNNING
+        assert view.stat_tasks.value_text.value == "1"
+        session.finish()
+        view.refresh_view(view._collect())
+        assert next(s for s in view.data.steps if s.key == "lm").status == STEP_DONE
+        assert "完成 1" in view.stat_tasks.delta_text.value
+        assert view.activity_column.controls
+    finally:
+        manager.detach()
+
+
+def test_dashboard_step_tiles_navigate_through_the_shell():
+    from types import SimpleNamespace
+
+    from app.shell.task_manager import TaskManager
+
+    view = _dashboard()
+    opened = []
+    view.set_shell(SimpleNamespace(navigate=opened.append, tasks=TaskManager()))
+    view.steps_row.controls[2].on_click(None)  # 第三步：機器翻譯
+    view.continue_button.on_click(None)
+    assert opened == ["lm", "pipeline"]
+
+
+def test_dashboard_is_the_default_registered_view():
+    from app import view_registry as vr
+
+    assert vr.DEFAULT_VIEW_KEY == "dashboard"
+    assert vr.get_spec("dashboard").shortcut == "1"

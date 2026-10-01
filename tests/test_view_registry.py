@@ -18,6 +18,7 @@ def test_spec_keys_are_unique_and_cover_all_views():
     keys = [spec.key for spec in vr.VIEW_SPECS]
     assert len(keys) == len(set(keys))
     assert set(keys) == {
+        "dashboard",
         "pipeline",
         "extractor",
         "merge",
@@ -48,8 +49,9 @@ def test_nav_groups_are_ordered_by_workflow():
         "資料庫",
         "輸出",
     ]
-    # 一鍵流水線是工作流程的第一個，且是預設首頁
-    assert vr.specs_in_group("flow")[0].key == vr.DEFAULT_VIEW_KEY == "pipeline"
+    # 工作台是工作流程的第一個，且是預設首頁；其後是一鍵流水線
+    assert vr.specs_in_group("flow")[0].key == vr.DEFAULT_VIEW_KEY == "dashboard"
+    assert vr.specs_in_group("flow")[1].key == "pipeline"
 
 
 def test_shortcuts_are_unique_single_digits():
@@ -108,14 +110,14 @@ def test_views_are_built_lazily(monkeypatch):
     registry = vr.build_view_registry(page=None, file_picker=None)
 
     assert built == []
-    assert registry[0]["key"] == "pipeline"
+    assert registry[0]["key"] == "dashboard"
     assert vr.built_view(registry[2]) is None
 
     hooked = []
-    registry[11].on_build(hooked.append)
-    first = registry[11]["view"]
+    registry[12].on_build(hooked.append)
+    first = registry[12]["view"]
     assert built == ["config"]
     assert hooked == [first]
-    assert registry[11]["view"] is first
-    assert vr.built_view(registry[11]) is first
+    assert registry[12]["view"] is first
+    assert vr.built_view(registry[12]) is first
     assert built == ["config"]

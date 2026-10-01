@@ -47,6 +47,8 @@ KEY_REFRESH_SEC = 5.0  # API Key 健康度輪詢間隔
 
 # 這些頁面建立後，需要拿到 registry 才能互相切頁 / 通知
 _REGISTRY_SETTERS = ("set_registry", "set_view_registry")
+# 需要拿到外殼（導覽 / 任務事件）的頁面
+_SHELL_SETTERS = ("set_shell",)
 
 
 def read_app_version() -> str:
@@ -209,6 +211,10 @@ class AppShell:
             setter = getattr(inner, name, None)
             if callable(setter):
                 setter(self.registry)
+        for name in _SHELL_SETTERS:
+            setter = getattr(inner, name, None)
+            if callable(setter):
+                setter(self)
 
     # -- 主題 ----------------------------------------------------------------
 
