@@ -99,7 +99,7 @@ def text_field(
     return ft.TextField(
         label=label,
         hint_text=hint,
-        value=value,
+        value=value if value is not None else "",
         prefix_icon=icon,
         multiline=multiline,
         min_lines=min_lines,

@@ -47,6 +47,7 @@ __all__ = [
     "ProgressRing",
     "SectionCard",
     "Segmented",
+    "StatCard",
     "SwitchRow",
     "button",
     "chip",

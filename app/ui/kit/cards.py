@@ -174,6 +174,73 @@ def section_card(
     return SectionCard(title, content, **kwargs)
 
 
+class StatCard(ft.Container):
+    """統計卡：圖示 + 標籤、大數字（等寬字型）、變化量。``set_value`` 可更新數字 / 說明。"""
+
+    def __init__(
+        self,
+        label: str,
+        value: str,
+        *,
+        icon: str | None = None,
+        tone: str = "em",
+        delta: str | None = None,
+        delta_tone: str = "em",
+        expand: bool | int = False,
+    ) -> None:
+        head: list[ft.Control] = []
+        if icon:
+            head.append(tone_icon(icon, tone, size=14))
+        head.append(ft.Text(label, size=12, color=C.MUTED, no_wrap=True))
+        self.value_text = ft.Text(
+            value,
+            size=25,
+            weight=ft.FontWeight.BOLD,
+            color=C.TEXT,
+            font_family=design.FONT_MONO,
+        )
+        self.delta_text = ft.Text(
+            delta or "",
+            size=11.5,
+            color=get_tone(delta_tone).fg,
+            visible=bool(delta),
+        )
+        super().__init__(
+            content=ft.Column(
+                [
+                    ft.Row(
+                        head,
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    self.value_text,
+                    self.delta_text,
+                ],
+                spacing=4,
+                tight=True,
+            ),
+            padding=ft.Padding.symmetric(horizontal=16, vertical=13),
+            bgcolor=C.PANEL,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=CARD_RADIUS,
+            **expand_kwargs(expand),
+        )
+
+    def set_value(
+        self,
+        value: str | None = None,
+        delta: str | None = None,
+        delta_tone: str | None = None,
+    ) -> None:
+        if value is not None:
+            self.value_text.value = value
+        if delta is not None:
+            self.delta_text.value = delta
+            self.delta_text.visible = bool(delta)
+        if delta_tone is not None:
+            self.delta_text.color = get_tone(delta_tone).fg
+
+
 def stat_card(
     label: str,
     value: str,
@@ -183,31 +250,16 @@ def stat_card(
     delta: str | None = None,
     delta_tone: str = "em",
     expand: bool | int = False,
-) -> ft.Container:
-    """統計卡：圖示 + 標籤、大數字（等寬字型）、變化量。"""
-    head: list[ft.Control] = []
-    if icon:
-        head.append(tone_icon(icon, tone, size=14))
-    head.append(ft.Text(label, size=12, color=C.MUTED, no_wrap=True))
-    rows: list[ft.Control] = [
-        ft.Row(head, spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-        ft.Text(
-            value,
-            size=25,
-            weight=ft.FontWeight.BOLD,
-            color=C.TEXT,
-            font_family=design.FONT_MONO,
-        ),
-    ]
-    if delta:
-        rows.append(ft.Text(delta, size=11.5, color=get_tone(delta_tone).fg))
-    return ft.Container(
-        content=ft.Column(rows, spacing=4, tight=True),
-        padding=ft.Padding.symmetric(horizontal=16, vertical=13),
-        bgcolor=C.PANEL,
-        border=ft.Border.all(1, C.LINE),
-        border_radius=CARD_RADIUS,
-        **expand_kwargs(expand),
+) -> StatCard:
+    """``StatCard`` 的函式寫法。"""
+    return StatCard(
+        label,
+        value,
+        icon=icon,
+        tone=tone,
+        delta=delta,
+        delta_tone=delta_tone,
+        expand=expand,
     )
 
 
