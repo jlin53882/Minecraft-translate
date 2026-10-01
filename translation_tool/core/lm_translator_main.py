@@ -633,7 +633,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                 # ⭐ 動態調整 batch_size
                 batch_size = min(batch_size, remaining_count)
                 success_this_round = True  # ⭐⭐⭐ 關鍵 ：標記本輪成功
-                key_cycle.reset()  # 本輪成功：開始新的 key cycle（含 overload 計數）
+                key_cycle.record_success()  # 本輪成功：清除這把 key 的失敗紀錄並開始新的 cycle
                 pinned_model_index = None  # ⭐ 解鎖 模型
 
                 if remaining_count == 0:
@@ -698,7 +698,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                         f"❌ 403 PERMISSION_DENIED：API Key 無權限 (index {key_cycle.current_index})"
                     )
                     # 只有「所有 key 都已實際嘗試且都被拒」才算無權限；還有沒試過的 key 就換它重試
-                    if not key_cycle.mark_failed():
+                    if not key_cycle.mark_failed(reason="forbidden"):
                         raise RuntimeError("❌ 所有 API Key 均無權限")
                     hit_rpm = True  # 用新的 Key 重試同一批（只有一個模型時也要重試）
                     continue
@@ -764,8 +764,9 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                                 f"[🚫] 每日限額已滿 (RPD)：Key Index {key_cycle.current_index} 今日失效"
                             )
                             hit_rpm = True
-                            # ⭐ 所有 key 都已實際嘗試且都用盡才算耗盡
-                            if not key_cycle.mark_failed():
+                            # ⭐ 所有 key 都已實際嘗試且都用盡才算耗盡；
+                            # 另外記住這把 key 已確定耗盡，後續批次不再白打（issue #113）
+                            if not key_cycle.mark_failed(reason="rpd"):
                                 return None, "ALL_KEYS_EXHAUSTED"
                             continue
 

@@ -142,6 +142,8 @@ DEFAULT_CONFIG = {
         "budget_recover_factor": 1.5,  # 每次回升的倍率
         "batch_write_interval": 2,  # 每 N 個批次寫一次快取（太大會讓單次寫入超過分片上限）
         "rpm_cooldown_sec": 0,
+        # 已確定 RPD 耗盡 / 403 的 API Key 冷卻多久（秒）；到期後會再給它一次機會，0 = 不記憶（issue #113）
+        "key_failure_cooldown_sec": 3600,
         "rate_limit": {
             "timeout": 600,
             "sleep_seconds_between_batches": 0.0,
@@ -583,6 +585,18 @@ def _validate_lm_translator_config(lm: dict) -> None:
 
     # 6. token 預算切批設定（issue #108）
     _validate_token_budget_config(lm)
+
+    # 7. API Key 失敗冷卻（issue #113）：數字且 >= 0
+    cooldown = lm.get("key_failure_cooldown_sec")
+    if cooldown is not None and (
+        isinstance(cooldown, bool)
+        or not isinstance(cooldown, (int, float))
+        or cooldown < 0
+    ):
+        raise ConfigValidationError(
+            f"lm_translator.key_failure_cooldown_sec 必須為 >= 0 的數字（0 = 不記憶），"
+            f"目前為 {type(cooldown).__name__}：'{cooldown}'"
+        )
 
 
 def _validate_token_budget_config(lm: dict) -> None:

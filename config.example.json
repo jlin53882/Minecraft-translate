@@ -42,6 +42,7 @@
     "budget_recover_factor": 1.5,
     "batch_write_interval": 2,
     "rpm_cooldown_sec": 0,
+    "key_failure_cooldown_sec": 3600,
     "rate_limit": {
       "timeout": 600,
       "sleep_seconds_between_batches": 0.0

@@ -9,14 +9,20 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _reset_lm_batch_budget():
-    """每個測試前後清掉翻譯批次 token 預算的學習狀態（模組層級全域）。
+def _reset_lm_global_state():
+    """每個測試前後清掉翻譯引擎的跨呼叫學習狀態（模組層級全域）。
 
-    預算依 profile 保存在模組內、跨呼叫保留（這是功能本身，issue #108），
-    測試之間必須隔離，否則某個測試觸發的截斷會讓後面測試的批次變小。
+    - token 預算（issue #108）：依 profile 保存，跨批次保留。
+    - API Key 健康狀態（issue #113）：已確定耗盡的 key 會冷卻一段時間。
+
+    這些都是功能本身要保留的狀態，所以測試之間必須隔離，否則某個測試觸發的截斷或 key 耗盡
+    會讓後面測試的行為改變。
     """
     from translation_tool.core.lm_batch_budget import reset_trackers
+    from translation_tool.core.lm_key_health import reset_key_health
 
     reset_trackers()
+    reset_key_health()
     yield
     reset_trackers()
+    reset_key_health()

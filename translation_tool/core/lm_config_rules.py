@@ -10,7 +10,14 @@ from collections.abc import Collection
 from typing import Any
 
 from ..utils.config_manager import load_config, load_config_shared
-from ..utils.log_unit import log_debug, log_error, log_info
+from ..utils.log_unit import log_debug, log_error, log_info, log_warning
+from .lm_key_health import (
+    DEFAULT_COOLDOWN_SEC,
+    RECORDED_REASONS,
+    KeyHealth,
+    get_key_health_registry,
+    mask_key,
+)
 
 # =========================
 # 1. 執行緒安全的 API Key 索引追蹤器
@@ -100,6 +107,26 @@ def get_api_key_count() -> int:
     return len(_get_all_keys())
 
 
+def get_key_failure_cooldown_sec() -> float:
+    """已確定失敗（RPD 耗盡 / 403）的 key 要冷卻多久（秒）；0 = 不記憶（issue #113）。"""
+    raw = load_config().get("lm_translator", {}).get("key_failure_cooldown_sec")
+    if raw is None or isinstance(raw, bool):
+        return DEFAULT_COOLDOWN_SEC
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_COOLDOWN_SEC
+    return value if value >= 0 else DEFAULT_COOLDOWN_SEC
+
+
+def get_key_health_snapshot() -> list[KeyHealth]:
+    """依設定檔順序回傳每把 key 的健康狀態（給 UI 顯示）。同時清掉已不在設定檔內的 key 紀錄。"""
+    keys = _get_all_keys()
+    registry = get_key_health_registry()
+    registry.prune(keys)
+    return registry.snapshot(keys)
+
+
 def claim_api_key(exclude: Collection[int] = ()) -> tuple[int, str] | None:
     """
     原子地「領取」一把 API Key，回傳 (index, key)。
@@ -167,6 +194,18 @@ class ApiKeyCycle:
       呼叫端才應該對它 mark_failed()。
     - reset()：本輪成功後呼叫，開始新的 cycle（同時清除失敗紀錄與 overload 計數）。
 
+    **跨批次的失敗記憶（issue #113）**
+
+    本類別每個 cycle 都是新的，但「已確定 RPD 耗盡 / 403」的 key 會記在 ``lm_key_health`` 的共用
+    registry（冷卻 ``key_failure_cooldown_sec``）：
+
+    - claim() 會先跳過冷卻中的 key，所以已耗盡的 key 不會在每個批次都被再請求一次。
+    - 沒有任何健康的 key 時，每個 cycle 最多「試探」一次冷卻最快到期的那把；試探失敗才算耗盡
+      （mark_failed() 回傳 False → 呼叫端回報 ALL_KEYS_EXHAUSTED），成功則清除紀錄。
+    - 只有 mark_failed(reason=...) 帶了 "rpd" / "forbidden" 才會記錄；429 RPM、503 overload
+      與未帶原因的 mark_failed() 不會長期排除任何 key。
+    - 成功時呼叫 record_success()（= 清除該把 key 的紀錄 + reset()）。
+
     耗盡只依據「實際嘗試過並失敗的 key」，不依賴 tracker index 恰好在最後一格。
     """
 
@@ -177,19 +216,49 @@ class ApiKeyCycle:
         self._failed: set[int] = set()
         self._overload_counts: dict[int, int] = {}
         self.current_index: int | None = None
+        self._current_key: str = ""
+        self._probed = False  # 這個 cycle 是否已經試探過冷卻中的 key
 
     @property
     def failed_indexes(self) -> frozenset[int]:
         """本輪已實際失敗的 key index。"""
         return frozenset(self._failed)
 
+    def _cooling_indexes(self, keys: list[str]) -> set[int]:
+        registry = get_key_health_registry()
+        return {i for i, key in enumerate(keys) if registry.is_cooling(key)}
+
     def claim(self) -> str:
-        """領取下一把本輪尚未失敗的 key；全部都失敗過時退回一般輪替（呼叫端應已先中止）。"""
-        claim = claim_api_key(self._failed) or claim_api_key()
+        """領取下一把本輪尚未失敗、且不在冷卻中的 key。
+
+        沒有健康的 key 時，試探一次冷卻最快到期的那把（每個 cycle 一次）；
+        全部都失敗過時退回一般輪替（呼叫端應已先中止）。
+        """
+        keys = _get_all_keys()
+        cooling = self._cooling_indexes(keys)
+        claim = claim_api_key(self._failed | cooling)
+        if claim is None and cooling and not self._probed:
+            candidates = [i for i in cooling if i not in self._failed]
+            if candidates:
+                registry = get_key_health_registry()
+                probe = min(
+                    candidates, key=lambda i: registry.seconds_remaining(keys[i])
+                )
+                self._probed = True
+                claim = claim_api_key(set(range(len(keys))) - {probe})
+                if claim is not None:
+                    log_info(
+                        f"[🔎] 沒有健康的 API Key，試探冷卻最快到期的 Key {probe}"
+                        f"（{mask_key(keys[probe])}）"
+                    )
+        if claim is None:
+            claim = claim_api_key(self._failed) or claim_api_key()
         if claim is None:  # 沒有任何有效 key
             self.current_index = None
+            self._current_key = ""
             return ""
         self.current_index, key = claim
+        self._current_key = key
         return key
 
     def record_overload(self) -> int:
@@ -208,23 +277,51 @@ class ApiKeyCycle:
         """中斷所有 key 的 overload 連續紀錄（遇到成功、截斷或非 503 的錯誤時）。"""
         self._overload_counts.clear()
 
-    def mark_failed(self) -> bool:
-        """標記剛才實際使用的 key 為失敗。回傳 True = 還有尚未嘗試的 key 可用。"""
+    def mark_failed(self, reason: str | None = None) -> bool:
+        """標記剛才實際使用的 key 為失敗。回傳 True = 還有尚未嘗試的 key 可用。
+
+        reason 為 "rpd"（每日配額用盡）或 "forbidden"（403）時，另外把這把 key 記進共用的
+        key 健康狀態，之後的批次會跳過它直到冷卻到期（issue #113）。其他情況不記錄。
+        """
         if self.current_index is not None:
             self._failed.add(self.current_index)
             self._overload_counts.pop(self.current_index, None)
-        total = get_api_key_count()
-        failed_in_range = sum(1 for index in self._failed if index < total)
-        return failed_in_range < total
+            if reason in RECORDED_REASONS and self._current_key:
+                cooldown = get_key_failure_cooldown_sec()
+                registry = get_key_health_registry()
+                if registry.mark_failed(self._current_key, reason, cooldown):
+                    log_warning(
+                        f"[🧊] Key {self.current_index}（{mask_key(self._current_key)}）"
+                        f"{'今日配額用盡 (RPD)' if reason == 'rpd' else '無權限 (403)'}，"
+                        f"約 {cooldown / 60:.0f} 分鐘內不再使用，到期後會再試一次"
+                    )
+        keys = _get_all_keys()
+        total = len(keys)
+        cooling = self._cooling_indexes(keys)
+        unfailed = [i for i in range(total) if i not in self._failed]
+        if any(i not in cooling for i in unfailed):
+            return True  # 還有健康、尚未嘗試的 key
+        # 剩下的都在冷卻：這個 cycle 還沒試探過的話，還有一次機會
+        return bool(unfailed) and not self._probed
+
+    def record_success(self) -> None:
+        """本輪成功：這把 key 確定可用（清除它的失敗紀錄），並開始新的 cycle。"""
+        if self._current_key:
+            get_key_health_registry().mark_ok(self._current_key)
+        self.reset()
 
     def has_alternative_key(self) -> bool:
         """是否有一把以上的 key（沒有的話，換 key 沒有意義）。"""
         return get_api_key_count() > 1
 
     def reset(self) -> None:
-        """本輪成功：清除失敗紀錄與 overload 計數，開始新的 cycle。"""
+        """本輪成功：清除失敗紀錄與 overload 計數，開始新的 cycle。
+
+        不會清除共用的 key 健康狀態（冷卻中的 key 仍在冷卻）；成功時請用 record_success()。
+        """
         self._failed.clear()
         self._overload_counts.clear()
+        self._probed = False
 
 
 def rotate_api_key():

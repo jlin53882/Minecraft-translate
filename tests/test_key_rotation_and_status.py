@@ -171,9 +171,9 @@ def _spy_mark_failed():
     marked: list[int | None] = []
     original = ApiKeyCycle.mark_failed
 
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
         marked.append(self.current_index)  # 呼叫前的 current_index = 被標記失敗的那把
-        return original(self)
+        return original(self, *args, **kwargs)
 
     return patch.object(ApiKeyCycle, "mark_failed", wrapper), marked
 
@@ -507,9 +507,17 @@ def test_non_503_error_interrupts_the_overload_streak(env):
 # ---------------------------------------------------------------------------
 
 
-def test_success_resets_failed_keys_for_the_next_batch_of_the_same_call(env):
-    """同一次 translate_batch_smart 處理兩個 batch。
+def _two_batch_items() -> list[dict]:
+    return [
+        {"path": "a", "text": "Hello", "cache_type": "lang"},
+        {"path": "b", "text": "World", "cache_type": "lang"},
+    ]
 
+
+def test_success_resets_failed_keys_when_failure_memory_is_disabled(env):
+    """記憶關閉（key_failure_cooldown_sec = 0）時維持 #112 的行為：每個 cycle 重新開始。
+
+    同一次 translate_batch_smart 處理兩個 batch。
     batch 1：key0 → 429 RPD（key0 被標記失敗）→ 改用 key1 成功 → production 必須 reset。
     batch 2：key0 重新有資格被使用，所以輪到的 key0 真的被領取並成功。
 
@@ -518,14 +526,26 @@ def test_success_resets_failed_keys_for_the_next_batch_of_the_same_call(env):
     """
     env.cfg.return_value = _config({"m1": True}, lang_batch=1)
     env.outcomes = {"key0": [_rpd(), _OK_JSON], "key1": _OK_JSON}
-    items = [
-        {"path": "a", "text": "Hello", "cache_type": "lang"},
-        {"path": "b", "text": "World", "cache_type": "lang"},
-    ]
 
-    result, status = main.translate_batch_smart(items, 2)
+    with patch.object(rules, "get_key_failure_cooldown_sec", return_value=0):
+        result, status = main.translate_batch_smart(_two_batch_items(), 2)
 
     assert env.calls == ["key0", "key1", "key0"]
+    assert status == "AUTO"
+    assert _texts(result) == ["你好", "你好"]
+
+
+def test_rpd_exhausted_key_is_not_requested_again_by_the_next_batch(env):
+    """issue #113：key0 已確定 RPD 耗盡，同一次呼叫的下一個 batch 直接用 key1，不再白打 key0。
+
+    cycle 仍會在成功後 reset（失敗紀錄清空），但 key0 在共用的 key 健康狀態裡冷卻中。
+    """
+    env.cfg.return_value = _config({"m1": True}, lang_batch=1)
+    env.outcomes = {"key0": [_rpd(), _OK_JSON], "key1": _OK_JSON}
+
+    result, status = main.translate_batch_smart(_two_batch_items(), 2)
+
+    assert env.calls == ["key0", "key1", "key1"]  # key0 只被請求一次
     assert status == "AUTO"
     assert _texts(result) == ["你好", "你好"]
 
