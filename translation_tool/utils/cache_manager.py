@@ -459,20 +459,35 @@ def is_search_index_current() -> bool:
     return _get_search_facade().is_search_index_current(CACHE_TYPES)
 
 
-def rebuild_search_index():
-    """重建所有快取類型的搜尋索引。"""
+def rebuild_search_index() -> bool:
+    """重建所有快取類型的搜尋索引。
+
+    Returns:
+        False 代表快取初始化失敗而拒絕重建（不可用空 cache 覆蓋既有索引）；
+        True 代表已交給搜尋外觀重建。
+    """
     state = _initialized_state()
-    return _get_search_facade().rebuild_search_index(
-        CACHE_TYPES, state.translation_cache
-    )
+    if not state.initialized:
+        log.error("快取尚未成功初始化，拒絕重建搜尋索引")
+        return False
+    _get_search_facade().rebuild_search_index(CACHE_TYPES, state.translation_cache)
+    return True
 
 
-def rebuild_search_index_for_type(cache_type: str):
-    """重建指定快取類型的搜尋索引"""
+def rebuild_search_index_for_type(cache_type: str) -> bool:
+    """重建指定快取類型的搜尋索引。
+
+    Returns:
+        False 代表快取初始化失敗而拒絕重建；True 代表已交給搜尋外觀重建。
+    """
     state = _initialized_state()
-    return _get_search_facade().rebuild_search_index_for_type(
+    if not state.initialized:
+        log.error(f"快取尚未成功初始化，拒絕重建 {cache_type} 搜尋索引")
+        return False
+    _get_search_facade().rebuild_search_index_for_type(
         cache_type, CACHE_TYPES, state.translation_cache
     )
+    return True
 
 
 def search_cache(

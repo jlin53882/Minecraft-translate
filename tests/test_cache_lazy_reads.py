@@ -324,3 +324,99 @@ def test_cache_update_service_reports_rejected_write(tmp_path, monkeypatch):
     _count_failing_loader(monkeypatch)
 
     assert cache_services.cache_update_dst_service("lang", "k", "乙") is False
+
+
+class _SpyFacade:
+    def __init__(self):
+        self.calls = []
+
+    def rebuild_search_index(self, cache_types, translation_cache):
+        self.calls.append(("all", dict(translation_cache)))
+
+    def rebuild_search_index_for_type(self, cache_type, cache_types, translation_cache):
+        self.calls.append((cache_type, dict(translation_cache)))
+
+
+def _spy_facade(monkeypatch):
+    spy = _SpyFacade()
+    monkeypatch.setattr(cache_manager, "_get_search_facade", lambda: spy)
+    return spy
+
+
+def test_rebuild_search_index_does_not_run_after_initialization_failure(
+    tmp_path, monkeypatch
+):
+    _prepare_disk_cache(tmp_path, monkeypatch)
+    _count_failing_loader(monkeypatch)
+    spy = _spy_facade(monkeypatch)
+
+    assert cache_manager.rebuild_search_index() is False
+    assert spy.calls == []
+
+
+def test_rebuild_search_index_for_type_does_not_run_after_initialization_failure(
+    tmp_path, monkeypatch
+):
+    _prepare_disk_cache(tmp_path, monkeypatch)
+    _count_failing_loader(monkeypatch)
+    spy = _spy_facade(monkeypatch)
+
+    assert cache_manager.rebuild_search_index_for_type("lang") is False
+    assert spy.calls == []
+
+
+def test_rebuild_search_index_runs_when_cache_is_initialized(tmp_path, monkeypatch):
+    _prepare_disk_cache(tmp_path, monkeypatch)
+    spy = _spy_facade(monkeypatch)
+
+    assert cache_manager.rebuild_search_index() is True
+    assert cache_manager.rebuild_search_index_for_type("lang") is True
+
+    assert [c[0] for c in spy.calls] == ["all", "lang"]
+    assert spy.calls[0][1]["lang"]["item.example"]["dst"] == "哈囉"
+
+
+def test_cache_rebuild_index_service_reports_failure_when_cache_init_fails(
+    tmp_path, monkeypatch
+):
+    from app.services_impl.cache import cache_services
+
+    _prepare_disk_cache(tmp_path, monkeypatch)
+    _count_failing_loader(monkeypatch)
+    spy = _spy_facade(monkeypatch)
+
+    result = cache_services.cache_rebuild_index_service()
+
+    assert result["success"] is False
+    assert result["total_indexed"] == 0
+    assert "✅" not in result["message"]
+    assert result["error"]
+    assert spy.calls == []
+
+
+def test_cache_rebuild_index_service_reports_success_when_initialized(
+    tmp_path, monkeypatch
+):
+    from app.services_impl.cache import cache_services
+
+    _prepare_disk_cache(tmp_path, monkeypatch)
+    _spy_facade(monkeypatch)
+
+    result = cache_services.cache_rebuild_index_service()
+
+    assert result["success"] is True
+    assert result["total_indexed"] == 1
+
+
+def test_reload_services_raise_when_index_rebuild_is_rejected(monkeypatch):
+    from app.services_impl.cache import cache_services
+
+    monkeypatch.setattr(cache_manager, "reload_translation_cache", lambda: None)
+    monkeypatch.setattr(cache_manager, "reload_translation_cache_type", lambda t: None)
+    monkeypatch.setattr(cache_manager, "rebuild_search_index", lambda: False)
+    monkeypatch.setattr(cache_manager, "rebuild_search_index_for_type", lambda t: False)
+
+    with pytest.raises(RuntimeError):
+        cache_services.cache_reload_service()
+    with pytest.raises(RuntimeError):
+        cache_services.cache_reload_type_service("lang")

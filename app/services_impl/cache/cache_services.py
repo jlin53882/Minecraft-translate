@@ -29,7 +29,8 @@ def cache_reload_service() -> dict[str, Any]:
     """重新載入翻譯快取，並重建全域搜尋索引。"""
 
     cache_manager.reload_translation_cache()
-    cache_manager.rebuild_search_index()
+    if not cache_manager.rebuild_search_index():
+        raise RuntimeError("快取未成功初始化，搜尋索引未重建")
     return cache_manager.get_cache_overview()
 
 
@@ -37,7 +38,8 @@ def cache_reload_type_service(cache_type: str) -> dict[str, Any]:
     """只重新載入單一 cache_type，並重建該分類搜尋索引。"""
 
     cache_manager.reload_translation_cache_type(cache_type)
-    cache_manager.rebuild_search_index_for_type(cache_type)
+    if not cache_manager.rebuild_search_index_for_type(cache_type):
+        raise RuntimeError(f"快取未成功初始化，{cache_type} 搜尋索引未重建")
     return cache_manager.get_cache_overview()
 
 
@@ -219,7 +221,13 @@ def cache_rebuild_index_service() -> dict[str, Any]:
     """重建快取搜尋索引（A3 改進功能）。"""
 
     try:
-        cache_manager.rebuild_search_index()
+        if not cache_manager.rebuild_search_index():
+            return {
+                "success": False,
+                "total_indexed": 0,
+                "message": "重建索引失敗",
+                "error": "快取未成功初始化，已拒絕重建以保留既有搜尋索引",
+            }
 
         total = sum(
             len(cache_manager.get_cache_dict_ref(ct))
