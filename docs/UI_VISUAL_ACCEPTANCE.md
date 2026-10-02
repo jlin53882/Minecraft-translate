@@ -84,9 +84,11 @@ console errors, and page errors.
 The initial phase is report-only. Pixel-diff thresholds are intentionally not a
 merge gate until repeated runs establish normal renderer variance.
 
-## Baseline update rule
+## Recording results
 
-A baseline may be accepted only when the product change is intentional, all
-matrix cases render successfully, and a human reviews the changed states. Record
-the Flet version, browser executable/version, OS, viewport, theme, report path,
-and approval reason. Never replace a known-bad screenshot to make a diff green.
+Screenshots and `report.json` are review evidence, not repository baselines:
+attach them to the PR or task that needs them and do not commit generated PNG
+files. Record the Flet version, browser executable/version, OS, viewport, theme,
+and report path with the evidence. A visual defect found by the harness belongs
+in an issue; never replace or ignore a known-bad screenshot to make a review
+look clean.

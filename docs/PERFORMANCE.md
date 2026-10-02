@@ -1,6 +1,8 @@
 # Performance measurement contract
 
-This document defines a reproducible baseline, not an optimization target. The
+This document defines a reproducible measurement contract, not an optimization
+target. Recorded numbers are not kept in the repository: they depend on the
+machine and drift quickly, so attach them to the PR or issue that needs them. The
 same command and fixture must be used before and after a change; numbers from
 different platforms or browser versions are not directly comparable.
 
@@ -34,7 +36,7 @@ uv run --isolated python tools/performance_baseline.py \
   --repeats 7
 ```
 
-Outputs:
+Outputs (under the Git-ignored `.artifacts/`):
 
 - `.artifacts/performance/current/performance.json` — machine-readable values
 - `.artifacts/performance/current/performance.md` — human-readable summary
@@ -64,8 +66,8 @@ budget.
    variance; do not immediately classify them as product regressions.
 3. Keep this report non-blocking initially. Add a CI warning or hard gate only
    after the fixture and machine class are stable.
-4. Do not optimize inside the baseline PR. Any optimization needs its own
-   behavior tests and before/after evidence.
+4. Do not mix optimization into a measurement-only change. Any optimization
+   needs its own behavior tests and before/after evidence.
 5. Browser/render timing, Python view construction, JAR I/O, and token
    estimation are separate metrics; do not combine them into one score.
 
