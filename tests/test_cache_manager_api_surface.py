@@ -21,7 +21,12 @@ def test_cache_manager_public_api_surface_exists() -> None:
 def test_cache_manager___all___whitelists_public_api_only() -> None:
     exported = set(getattr(cache_manager, "__all__", []))
 
-    assert {"reload_translation_cache", "save_translation_cache", "search_cache", "CACHE_TYPES"} <= exported
+    assert {
+        "reload_translation_cache",
+        "save_translation_cache",
+        "search_cache",
+        "CACHE_TYPES",
+    } <= exported
     assert "_translation_cache" not in exported
     assert "_initialized" not in exported
 
@@ -38,10 +43,9 @@ def test_get_cache_dict_ref_returns_live_reference_when_initialized() -> None:
     assert state.translation_cache["lang"]["new-key"] == {"src": "World", "dst": "世界"}
 
 
-def test_cache_entry_and_dict_ref_are_safe_when_uninitialized() -> None:
+def test_is_cache_initialized_is_safe_when_uninitialized() -> None:
     state = cache_store.reset_runtime_state(cache_manager.CACHE_TYPES)
     state.initialized = False
     state.translation_cache = {}
 
-    assert cache_manager.get_cache_entry("lang", "missing") is None
-    assert cache_manager.get_cache_dict_ref("lang") == {}
+    assert cache_manager.is_cache_initialized() is False

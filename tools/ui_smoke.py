@@ -93,6 +93,49 @@ def wait_for_title(page: Page, expected: str, timeout_ms: int) -> str:
     return page.title()
 
 
+def _wait_for_server(
+    process,
+    base_url: str,
+    server_log: Path,
+    *,
+    timeout_seconds: float = 45.0,
+    poll_interval: float = 0.2,
+    monotonic=time.monotonic,
+    sleep=time.sleep,
+    urlopen=urllib.request.urlopen,
+) -> None:
+    """Wait for HTTP readiness with one shared deadline path.
+
+    Args:
+        process: Server process exposing ``poll()``.
+        base_url: Local readiness URL.
+        server_log: Log path used in early-exit/timeout diagnostics.
+        timeout_seconds: Maximum readiness wait.
+        poll_interval: Delay between failed probes.
+        monotonic: Injectable clock for deterministic tests.
+        sleep: Injectable sleeper for deterministic tests.
+        urlopen: Injectable HTTP probe function.
+
+    Raises:
+        RuntimeError: If the server exits before becoming ready.
+        TimeoutError: If readiness is not observed before the deadline.
+    """
+    deadline = monotonic() + timeout_seconds
+    while True:
+        if process.poll() is not None:
+            raise RuntimeError(f"Flet smoke server 提前結束，請查看 {server_log}")
+        try:
+            with urlopen(base_url, timeout=1) as response:
+                if response.status == 200:
+                    return
+        except (OSError, TimeoutError, urllib.error.URLError):
+            # Failed probes are transient until the shared deadline expires.
+            pass
+        if monotonic() >= deadline:
+            raise TimeoutError(f"Flet smoke server 45 秒內未就緒：{server_log}")
+        sleep(poll_interval)
+
+
 def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip("-")
 
@@ -151,24 +194,7 @@ def run_smoke(
             )
             try:
                 base_url = f"http://127.0.0.1:{port}"
-                deadline = time.monotonic() + 45
-                while True:
-                    if process.poll() is not None:
-                        raise RuntimeError(
-                            f"Flet smoke server 提前結束，請查看 {server_log}"
-                        )
-                    try:
-                        with urllib.request.urlopen(base_url, timeout=1) as response:
-                            if response.status == 200:
-                                break
-                    except (OSError, TimeoutError, urllib.error.URLError):
-                        # Server startup polling intentionally retries until the deadline.
-                        continue
-                    if time.monotonic() >= deadline:
-                        raise TimeoutError(
-                            f"Flet smoke server 45 秒內未就緒：{server_log}"
-                        )
-                    time.sleep(0.2)
+                _wait_for_server(process, base_url, server_log)
 
                 with sync_playwright() as playwright:
                     browser = playwright.chromium.launch(

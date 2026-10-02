@@ -104,6 +104,10 @@ def initialize_translation_cache():
                 _load_cache_type(cache_type)
             state.initialized = True
         except Exception as e:
+            # 部分 cache type 可能已載入；失敗時不可讓 read API 看見半套狀態。
+            state.translation_cache = {}
+            state.cache_file_path = {}
+            state.initialized = False
             log.error(f"快取系統初始化失敗: {e}", exc_info=True)  # noqa: G201
 
 
@@ -290,9 +294,7 @@ def add_to_cache_batch(
 
 def get_from_cache(cache_type: str, key: str) -> str | None:
     """從快取取得指定 key 的翻譯文字 (dst)。"""
-    state = _state()
-    if not state.initialized:
-        return None
+    state = _initialized_state()
     cache = state.translation_cache.get(cache_type)
     if not isinstance(cache, dict):
         return None
@@ -300,10 +302,8 @@ def get_from_cache(cache_type: str, key: str) -> str | None:
 
 
 def get_cache_entry(cache_type: str, key: str) -> dict[str, Any] | None:
-    """取得指定 key 的完整快取項目（包含 src、dst、mod、path）。"""
-    state = _state()
-    if not state.initialized:
-        return None
+    """取得指定 cache_type 的單筆完整快取條目。"""
+    state = _initialized_state()
     cache = state.translation_cache.get(cache_type)
     if not isinstance(cache, dict):
         return None
@@ -312,9 +312,7 @@ def get_cache_entry(cache_type: str, key: str) -> dict[str, Any] | None:
 
 def get_cache_dict_ref(cache_type: str) -> dict[str, dict[str, Any]]:
     """取得指定類型的快取字典參照。"""
-    state = _state()
-    if not state.initialized:
-        return {}
+    state = _initialized_state()
     cache = state.translation_cache.get(cache_type)
     return cache if isinstance(cache, dict) else {}
 

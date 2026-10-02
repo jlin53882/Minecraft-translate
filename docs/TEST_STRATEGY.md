@@ -1,7 +1,7 @@
 # 測試策略說明
 
 ## 測試組織
-- **總數量**：2694 個測試、226 個 `test_*.py` 檔（2026-10-02 collect-only 實測）
+- **總數量**：2701 個測試、228 個 `test_*.py` 檔（2026-10-02 collect-only 實測）
 - **測試分類**：
   - **單元測試**（unit）：`tests/test_*.py`
   - **表徵測試**（characterization test）：`tests/test_*_characterization.py`

@@ -3,8 +3,8 @@
 用途：驗證 CacheQueryPanel 搜尋功能。
 """
 
-from app.views.cache_query_panel import CacheQueryPanel
 from app.views.cache_manager.cache_state import CacheQueryState
+from app.views.cache_query_panel import CacheQueryPanel
 
 
 class _MockPage:
@@ -37,9 +37,7 @@ def test_cache_query_panel_search_mode_key():
     page = _MockPage()
     state = CacheQueryState()
     last_overview_data = {
-        "types": {
-            "lang": {"entries_count": 100, "active_shard_id": "001"}
-        }
+        "types": {"lang": {"entries_count": 100, "active_shard_id": "001"}}
     }
 
     panel = CacheQueryPanel(page, state, last_overview_data)
@@ -54,9 +52,7 @@ def test_cache_query_panel_search_mode_dst():
     page = _MockPage()
     state = CacheQueryState()
     last_overview_data = {
-        "types": {
-            "lang": {"entries_count": 100, "active_shard_id": "001"}
-        }
+        "types": {"lang": {"entries_count": 100, "active_shard_id": "001"}}
     }
 
     panel = CacheQueryPanel(page, state, last_overview_data)
@@ -70,9 +66,7 @@ def test_cache_query_panel_search_mode_all():
     page = _MockPage()
     state = CacheQueryState()
     last_overview_data = {
-        "types": {
-            "lang": {"entries_count": 100, "active_shard_id": "001"}
-        }
+        "types": {"lang": {"entries_count": 100, "active_shard_id": "001"}}
     }
 
     panel = CacheQueryPanel(page, state, last_overview_data)
@@ -112,7 +106,12 @@ def test_cache_query_panel_render_results_with_data():
     page = _MockPage()
     state = CacheQueryState()
     state.query_results = [
-        {"cache_type": "lang", "key": "test.key", "preview": "test", "shard": "lang_001.json"}
+        {
+            "cache_type": "lang",
+            "key": "test.key",
+            "preview": "test",
+            "shard": "lang_001.json",
+        }
     ]
     last_overview_data = {"types": {}}
 
@@ -123,18 +122,32 @@ def test_cache_query_panel_render_results_with_data():
     assert len(panel.query_result_list.controls) >= 1
 
 
-def test_cache_query_panel_select_result():
+def test_cache_query_panel_select_result(monkeypatch):
     """測試選擇結果"""
+    monkeypatch.setattr(
+        "app.views.cache_query_panel.cache_get_entry_service",
+        lambda _cache_type, _key: {},
+    )
     page = _MockPage()
     state = CacheQueryState()
     state.query_results = [
-        {"cache_type": "lang", "key": "test.key", "preview": "test", "shard": "lang_001.json"}
+        {
+            "cache_type": "lang",
+            "key": "test.key",
+            "preview": "test",
+            "shard": "lang_001.json",
+        }
     ]
     last_overview_data = {"types": {}}
 
     panel = CacheQueryPanel(page, state, last_overview_data)
 
-    row = {"cache_type": "lang", "key": "new.key", "preview": "new", "shard": "lang_001.json"}
+    row = {
+        "cache_type": "lang",
+        "key": "new.key",
+        "preview": "new",
+        "shard": "lang_001.json",
+    }
     panel._on_select_result(row)
 
     assert panel.state.query_selected_result == row

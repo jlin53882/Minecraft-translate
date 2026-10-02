@@ -116,7 +116,7 @@ Minecraft-translate/
 │       ├── text_processor.py    # 文字處理
 │       └── ui_logging_handler.py
 │
-├── tests/                     # 測試（226 個測試檔、2694 個測試）
+├── tests/                     # 測試（228 個測試檔、2701 個測試）
 │   ├── conftest.py            # pytest 全域 fixture
 │   ├── fixtures/              # 測試資料
 │   ├── test_ftb*.py           # FTB 翻譯器測試
