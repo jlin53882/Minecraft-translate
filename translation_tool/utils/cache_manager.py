@@ -72,6 +72,17 @@ def _initialized_state():
     return _state()
 
 
+def _write_rejected(state, operation: str) -> bool:
+    """初始化失敗時拒絕寫入，避免接受無 durable save path 的記憶體資料。
+
+    必須在持有 `state.cache_lock` 時呼叫。
+    """
+    if state.initialized:
+        return False
+    log.error(f"快取尚未成功初始化，拒絕 {operation}（寫入不會被持久化）")
+    return True
+
+
 def _get_cache_root() -> Path:
     """從設定取得快取根目錄路徑"""
     translation_config = load_config().get("translator", {})
@@ -187,7 +198,14 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
     try:
         save_path = state.cache_file_path.get(cache_type)
         if not save_path:
-            cache_store.clear_dirty(state.is_dirty, cache_type)
+            # 缺少 save path 代表快取未成功初始化；不可清掉尚未 durable 的 pending。
+            with state.cache_lock:
+                cache_store.restore_session_entries_if_absent(
+                    state.session_new_entries, state.is_dirty, cache_type, data_to_save
+                )
+            log.error(
+                f"❌ 儲存 {cache_type} 失敗：快取尚未成功初始化，保留 pending 項目"
+            )
             return
         _save_entries_to_active_shards(
             cache_type, data_to_save, force_new_shard=write_new_shard
@@ -234,6 +252,8 @@ def add_to_cache(
 
     state = _initialized_state()
     with state.cache_lock:
+        if _write_rejected(state, "add_to_cache"):
+            return
         cache = cache_store.get_cache_type_dict(state.translation_cache, cache_type)
         entry = {"src": src, "dst": dst}
         if mod:
@@ -269,6 +289,8 @@ def add_to_cache_batch(
 
     state = _initialized_state()
     with state.cache_lock:
+        if _write_rejected(state, "add_to_cache_batch"):
+            return
         cache = cache_store.get_cache_type_dict(state.translation_cache, cache_type)
         session_entries = cache_store.get_session_entries(
             state.session_new_entries, cache_type

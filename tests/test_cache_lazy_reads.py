@@ -122,3 +122,72 @@ def test_read_api_does_not_expose_partial_state_after_initialization_failure(
     assert cache_manager.get_cache_dict_ref("lang") == {}
     assert state.initialized is False
     assert state.translation_cache == {}
+
+
+def _fail_after_lang(monkeypatch):
+    real_loader = cache_manager._load_cache_type
+
+    def fail_after_first(cache_type):
+        if cache_type == "lang":
+            return real_loader(cache_type)
+        raise OSError("simulated cache type failure")
+
+    monkeypatch.setattr(cache_manager, "_load_cache_type", fail_after_first)
+
+
+def _assert_no_pending_write(state):
+    assert state.initialized is False
+    assert state.translation_cache == {}
+    assert not state.session_new_entries.get("lang")
+    assert not state.is_dirty.get("lang")
+
+
+def test_add_to_cache_does_not_accept_write_after_initialization_failure(
+    tmp_path, monkeypatch
+):
+    """Failed initialization must not leave a non-durable pending write."""
+    state = _prepare_disk_cache(tmp_path, monkeypatch)
+    _fail_after_lang(monkeypatch)
+
+    cache_manager.add_to_cache("lang", "new.key", "Hello", "哈囉")
+
+    _assert_no_pending_write(state)
+
+
+def test_add_to_cache_batch_does_not_accept_writes_after_initialization_failure(
+    tmp_path, monkeypatch
+):
+    """Failed initialization must reject the whole batch."""
+    state = _prepare_disk_cache(tmp_path, monkeypatch)
+    _fail_after_lang(monkeypatch)
+
+    cache_manager.add_to_cache_batch(
+        "lang", [("a.key", "A", "甲"), ("b.key", "B", "乙")]
+    )
+
+    _assert_no_pending_write(state)
+
+
+def test_add_to_cache_after_successful_initialization_creates_pending_entry(
+    tmp_path, monkeypatch
+):
+    """Normal writes keep their pending/dirty behavior."""
+    state = _prepare_disk_cache(tmp_path, monkeypatch)
+
+    cache_manager.add_to_cache("lang", "new.key", "Hello", "哈囉")
+
+    assert state.initialized is True
+    assert state.session_new_entries["lang"]["new.key"]["dst"] == "哈囉"
+    assert state.is_dirty["lang"] is True
+
+
+def test_save_without_save_path_keeps_pending_entries(tmp_path, monkeypatch):
+    """A missing save path must not silently drop pending entries."""
+    state = _prepare_disk_cache(tmp_path, monkeypatch)
+    cache_manager.add_to_cache("lang", "new.key", "Hello", "哈囉")
+    state.cache_file_path = {}
+
+    cache_manager.save_translation_cache("lang")
+
+    assert "new.key" in state.session_new_entries["lang"]
+    assert state.is_dirty["lang"] is True
