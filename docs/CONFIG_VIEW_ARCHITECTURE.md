@@ -90,7 +90,19 @@ app/views/config/
 - `translator.parallel_execution_workers` 必須 int > 0
 - 偵測 `iniital_*`（拼錯）舊鍵 → 僅 warn deprecation（不再被引擎讀取）
 
-`save_config`：寫入後**重新讀檔驗證**（可 dump 即代表結構乾淨）；`get_models_config` 只回傳 `{model: {"enabled": bool}}`，外部亂寫 list/str 被忽略。
+## 安全寫入與提交點
+
+`save_config` 使用與目標檔同目錄的唯一暫存檔：先完成 JSON 序列化、
+`flush`、檔案 `fsync` 與暫存檔讀回解析，再以 `os.replace` 原子發布，
+最後重新讀取目標檔驗證。提交前任何失敗都保留原本的 `config.json`，
+並清理本次暫存檔；Windows 目標檔被占用時 `os.replace` 失敗也不會截斷舊檔。
+
+原子替換保證讀者不會看到半份已發布 JSON，但不等同「斷電後最後一次寫入必定存在」。
+支援目錄 `fsync` 的平台會在替換後同步父目錄；Windows 仍以檔案 flush/fsync、
+原子 replace 與明確失敗回報為契約。替換後的讀回驗證若失敗會回傳 `False`，
+但不盲目回滾，避免覆蓋提交點後另一個合法 writer 的更新。
+
+`get_models_config` 只回傳 `{model: {"enabled": bool}}`，外部亂寫 list/str 被忽略。
 
 ## 維護注意
 

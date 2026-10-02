@@ -17,9 +17,12 @@ import copy
 import json
 import logging
 import os
+import tempfile
 import threading
 from datetime import datetime
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 # PR27：統一路徑解析基準，避免 legacy cwd 依賴造成找不到 config / 資源檔。
@@ -418,19 +421,56 @@ def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
     return config, True
 
 
-def save_config(config, config_path: str | os.PathLike | None = None):
-    """
-    儲存設定並檢查是否成功寫入。
-    回傳 True = 寫入成功
-          False = 寫入失敗
+def _fsync_parent_directory(path: Path) -> None:
+    """在支援目錄 fsync 的平台同步替換後的目錄項目。"""
+    if os.name == "nt" or not hasattr(os, "O_DIRECTORY"):
+        return
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def save_config(config, config_path: str | os.PathLike | None = None) -> bool:
+    """以同目錄暫存檔與原子替換儲存設定。
+
+    替換前的序列化、flush、fsync 或 ``os.replace`` 失敗時，既有設定檔
+    保持不變。替換後仍會讀回並解析；若讀回失敗則回傳 ``False``，但不
+    盲目回滾，避免覆蓋另一個合法 writer 在提交點後完成的更新。
+
+    Args:
+        config: 要寫入的 JSON object。
+        config_path: 目標設定檔；省略時使用 ``CONFIG_PATH``。
+
+    Returns:
+        寫入且讀回驗證成功時為 ``True``，否則為 ``False``。
     """
     resolved_config_path = resolve_project_path(config_path or CONFIG_PATH)
     # 同一秒內連續寫入時 mtime 可能不變，直接清掉快取
     clear_config_cache()
+    temp_path: Path | None = None
     try:
         resolved_config_path.parent.mkdir(parents=True, exist_ok=True)
-        with resolved_config_path.open("w", encoding="utf-8") as f:
+        fd, temp_name = tempfile.mkstemp(
+            dir=resolved_config_path.parent,
+            prefix=f".{resolved_config_path.name}.",
+            suffix=".tmp",
+        )
+        temp_path = Path(temp_name)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(config, f, ensure_ascii=False, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
+
+        # 提交前先驗證暫存內容，避免發布不可解析的 JSON。
+        with temp_path.open("r", encoding="utf-8") as f:
+            staged_data = json.load(f)
+        json.dumps(staged_data, sort_keys=True)
+
+        os.replace(temp_path, resolved_config_path)
+        temp_path = None
+        _fsync_parent_directory(resolved_config_path.parent)
 
         with resolved_config_path.open("r", encoding="utf-8") as f:
             written_data = json.load(f)
@@ -445,6 +485,12 @@ def save_config(config, config_path: str | os.PathLike | None = None):
     except Exception as e:  # noqa: BLE001
         logging.error(f"錯誤：儲存或驗證設定檔失敗: {e}")  # noqa: LOG015
         return False
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                log.warning("無法清理設定暫存檔: %s", temp_path)
 
 
 def setup_logging(config):

@@ -62,6 +62,16 @@ def _state():
     return cache_store.ensure_runtime_maps(CACHE_TYPES)
 
 
+def _initialized_state():
+    """惰性初始化快取並回傳執行期狀態。
+
+    模組 import 必須保持唯讀，避免 pytest collection 或單純匯入時建立
+    使用者資料夾；需要磁碟快取的正式 API 在第一次呼叫時才初始化。
+    """
+    initialize_translation_cache()
+    return _state()
+
+
 def _get_cache_root() -> Path:
     """從設定取得快取根目錄路徑"""
     translation_config = load_config().get("translator", {})
@@ -218,7 +228,7 @@ def add_to_cache(
     if not key or not dst:
         return
 
-    state = _state()
+    state = _initialized_state()
     with state.cache_lock:
         cache = cache_store.get_cache_type_dict(state.translation_cache, cache_type)
         entry = {"src": src, "dst": dst}
@@ -253,7 +263,7 @@ def add_to_cache_batch(
     if not entries:
         return
 
-    state = _state()
+    state = _initialized_state()
     with state.cache_lock:
         cache = cache_store.get_cache_type_dict(state.translation_cache, cache_type)
         session_entries = cache_store.get_session_entries(
@@ -320,7 +330,7 @@ def get_session_new_count(cache_type: str) -> int:
 
 def get_active_shard_id(cache_type: str) -> str:
     """取得指定快取類型的目前作用中分片 ID"""
-    state = _state()
+    state = _initialized_state()
     return _get_active_shard_id_impl(
         state.cache_file_path, cache_type, ACTIVE_SHARD_FILE
     )
@@ -389,7 +399,7 @@ def is_search_index_current() -> bool:
 
 def rebuild_search_index():
     """重建所有快取類型的搜尋索引。"""
-    state = _state()
+    state = _initialized_state()
     return _get_search_facade().rebuild_search_index(
         CACHE_TYPES, state.translation_cache
     )
@@ -397,7 +407,7 @@ def rebuild_search_index():
 
 def rebuild_search_index_for_type(cache_type: str):
     """重建指定快取類型的搜尋索引"""
-    state = _state()
+    state = _initialized_state()
     return _get_search_facade().rebuild_search_index_for_type(
         cache_type, CACHE_TYPES, state.translation_cache
     )
@@ -419,11 +429,3 @@ def find_similar_translations(
     return _get_search_facade().find_similar_translations(
         text=text, cache_type=cache_type, threshold=threshold, limit=limit
     )
-
-
-initialize_translation_cache()
-_state_obj = _state()
-log.info(
-    "快取統計："
-    + ", ".join(f"{k}={len(v)}" for k, v in _state_obj.translation_cache.items())
-)

@@ -68,10 +68,10 @@
 
 ## 真實畫面驗證
 
-單元測試只驗證結構。外觀要用真實 Flet 渲染截圖對照設計稿：
+單元測試只驗證結構；真實 Flet 畫面、跨頁任務更新、深淺色與三組視窗尺寸由可重現的 Playwright harness 驗證：
 
-1. 以 `flet.app(view=WEB_BROWSER)` 啟動 `main:main`（固定埠）。
-2. 用 Playwright（`/opt/pw-browsers/chromium`）開啟，以 `Ctrl+1`…`Ctrl+0` 切頁，截圖。
-3. 與 `docs/design/ui-redesign/*.png` 比對。
+```bash
+uv run --isolated python tools/ui_smoke.py
+```
 
-開發環境缺 CJK 字型時，截圖可能出現方塊字，屬環境問題，不是程式問題。
+完整矩陣、固定資料、CJK 字型、輸出位置與 baseline 接受流程見 [`UI_VISUAL_ACCEPTANCE.md`](UI_VISUAL_ACCEPTANCE.md)。效能量測契約見 [`PERFORMANCE.md`](PERFORMANCE.md)。生成的 screenshots 位於被 Git 忽略的 `.artifacts/`，不得直接提交進主線。

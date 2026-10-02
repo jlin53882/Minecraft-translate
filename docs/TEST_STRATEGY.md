@@ -1,7 +1,7 @@
 # 測試策略說明
 
 ## 測試組織
-- **總數量**：1905 個測試（collect-only 收集結果）
+- **總數量**：2694 個測試、226 個 `test_*.py` 檔（2026-10-02 collect-only 實測）
 - **測試分類**：
   - **單元測試**（unit）：`tests/test_*.py`
   - **表徵測試**（characterization test）：`tests/test_*_characterization.py`
@@ -35,18 +35,25 @@
 ## 如何執行測試
 
 ```bash
-uv run pytest                    # 全部（1905 個）
-uv run pytest tests/test_xxx.py  # 單一檔案
-uv run pytest -k "cache"        # 只跑含 "cache" 的測試
-uv run pytest -m "not slow"     # 排除 slow marker 的測試
-uv run pytest -x                # 遇錯即停（適合 characterization test）
+uv run --isolated python -m pytest                    # 全部
+uv run --isolated python -m pytest tests/test_xxx.py  # 單一檔案
+uv run --isolated python -m pytest -k "cache"        # 只跑含 "cache" 的測試
+uv run --isolated python -m pytest -m "not slow"     # 排除 slow marker 的測試
+uv run --isolated python -m pytest -x                 # 遇錯即停
 ```
 
 ## 覆蓋率
 
-```bash
-uv run pytest --cov=translation_tool --cov=app
-```
+目前 `pyproject.toml` 與 `uv.lock` **沒有安裝 pytest-cov**，因此不得把
+`pytest --cov` 當成既定命令。若 #130 後續核准 coverage 工具，先加入 dev
+dependency、更新 lock，再以「風險 × 覆蓋」使用，不設全專案百分比門檻。
+
+## 真實 UI 與效能驗收
+
+- 真實 Flet 截圖／跨頁任務矩陣：`docs/UI_VISUAL_ACCEPTANCE.md`
+- 已記錄的第一版視覺結果：`docs/UI_VISUAL_BASELINE.md`
+- 可重現效能契約：`docs/PERFORMANCE.md`
+- 已記錄的第一版效能數字：`docs/PERFORMANCE_BASELINE.md`
 
 ## 新增測試的 SOP
 
