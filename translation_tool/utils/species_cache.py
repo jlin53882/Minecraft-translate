@@ -6,12 +6,13 @@
 
 # /minecraft_translator_flet/translation_tool/utils/species_cache.py (僅儲存成功查詢的修正版)
 
+from __future__ import annotations
+
 import csv
-import time
-import re
 import logging
+import re
+import time
 from pathlib import Path
-from typing import Dict, Optional
 
 from .config_manager import load_config, resolve_project_path
 
@@ -46,9 +47,9 @@ _SPECIES_NAME_REGEX = re.compile(r"^[A-Z][a-z]+ [a-z]+$")
 _WIKIPEDIA_AVAILABLE = False
 
 # --- 核心快取操作函式 ---
-_CACHE_DIR: Optional[Path] = None
-_CACHE_FILE: Optional[Path] = None
-_species_cache_data: Optional[Dict[str, str]] = None
+_CACHE_DIR: Path | None = None
+_CACHE_FILE: Path | None = None
+_species_cache_data: dict[str, str] | None = None
 
 # 防止 initialize_species_cache() 被重複執行
 _initialized = False
@@ -62,8 +63,9 @@ except ImportError:
     log.warning(
         "未找到 Wikipedia 函式庫 (請執行 pip install wikipedia)。線上查詢功能將不可用。"
     )
-except Exception as e:
+except Exception as e:  # noqa: BLE001 - 選用的第三方套件匯入可能出現各種失敗
     log.error(f"載入 Wikipedia 函式庫時發生未知錯誤: {e}")
+
 
 def initialize_species_cache():
     """初始化學名快取系統。"""
@@ -114,10 +116,11 @@ def initialize_species_cache():
         log.info("學名快取系統初始化完成。")
         return True
 
-    except Exception as e:
-        log.error(f"初始化學名快取時發生嚴重錯誤: {e}", exc_info=True)
+    except Exception:  # 初始化失敗時必須降級為不可用。
+        log.exception("初始化學名快取時發生嚴重錯誤")
         _initialized = False
         return False
+
 
 def is_potential_species_name(name: str) -> bool:
     """判斷是否可能是物種名稱。"""
@@ -125,7 +128,8 @@ def is_potential_species_name(name: str) -> bool:
         return False
     return bool(_SPECIES_NAME_REGEX.match(name))
 
-def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
+
+def query_wikipedia_and_update_cache(species_name: str) -> str | None:
     """線上查詢維基百科並更新快取。"""
     if not _WIKIPEDIA_AVAILABLE or _species_cache_data is None:
         return None
@@ -144,7 +148,7 @@ def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
                 with open(_CACHE_FILE, "a", encoding="utf-8", newline="") as f:
                     writer = csv.writer(f, delimiter="\t")
                     writer.writerow([species_name, common_name])
-            except IOError as e:
+            except OSError as e:
                 log.error(f"寫入快取檔案 {_CACHE_FILE} 失敗: {e}")
 
         return common_name
@@ -161,17 +165,17 @@ def query_wikipedia_and_update_cache(species_name: str) -> Optional[str]:
         if e.options:
             return query_wikipedia_and_update_cache(e.options[0])
         return None
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - wikipedia 套件可能拋出多種執行期錯誤
         log.error(f"線上查詢 '{species_name}' 時發生未知網路或API錯誤: {e}")
         _species_cache_data[species_name] = ""  # 僅更新記憶體快取
         return None
 
-def lookup_species_name(name: str) -> Optional[str]:
+
+def lookup_species_name(name: str) -> str | None:
     """查詢物種名稱。"""
-    if not _initialized:
-        if not initialize_species_cache():
-            log.error("學名快取系統初始化失敗，查詢功能無法使用。")
-            return None
+    if not _initialized and not initialize_species_cache():
+        log.error("學名快取系統初始化失敗，查詢功能無法使用。")
+        return None
 
     if _species_cache_data is None:
         return None
@@ -185,5 +189,3 @@ def lookup_species_name(name: str) -> Optional[str]:
         return query_wikipedia_and_update_cache(name)
 
     return None
-
-initialize_species_cache()

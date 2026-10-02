@@ -17,8 +17,11 @@ def rebuild_index_on_startup() -> None:
         if cache_manager.is_search_index_current():
             logger.info("快取未變動，沿用現有搜尋索引")
             return
-        cache_rebuild_index_service()
-        logger.info("啟動時全域搜尋索引重建完成")
+        result = cache_rebuild_index_service()
+        if result.get("success"):
+            logger.info("啟動時全域搜尋索引重建完成")
+        else:
+            logger.error(f"啟動時全域搜尋索引重建失敗: {result.get('error')}")
     except Exception as ex:
         logger.error(f"啟動時索引重建失敗: {ex}", exc_info=True)  # noqa: G201
 

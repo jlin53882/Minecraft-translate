@@ -71,7 +71,9 @@ def merge_zhcn_to_zhtw_from_zip(
 
     try:
         rules = load_replace_rules(
-            load_config().get("replace_rules_path", "replace_rules.json")
+            load_config()
+            .get("translator", {})
+            .get("replace_rules_path", "replace_rules.json")
         )
     except Exception as e:  # noqa: BLE001
         log_error(f"載入替換規則失敗: {e}")
@@ -394,7 +396,9 @@ def merge_zhcn_to_zhtw_from_folder(
 
     try:
         rules = load_replace_rules(
-            load_config().get("replace_rules_path", "replace_rules.json")
+            load_config()
+            .get("translator", {})
+            .get("replace_rules_path", "replace_rules.json")
         )
     except Exception as e:  # noqa: BLE001
         log_error(f"載入替換規則失敗: {e}")

@@ -1,18 +1,21 @@
+import importlib
+import shutil
 import sys
 import tempfile
-import shutil
 from pathlib import Path
+
 import pytest
 
 # 移除 hermes-agent/tests 從 sys.path，避免它跟我們的 tests 套件命名衝突
 # 這是 hermes-agent 自身 conftest 注入的，但對於我們專案的測試會造成問題
 # （`from tests.conftest import mock_page` 會去 hermes-agent/tests 找 mock_page 而失敗）
-_hermes_agent_tests = Path.home() / "AppData" / "Local" / "hermes" / "hermes-agent" / "tests"
+_hermes_agent_tests = (
+    Path.home() / "AppData" / "Local" / "hermes" / "hermes-agent" / "tests"
+)
 if _hermes_agent_tests.exists():
     _hermes_agent_tests_resolved = _hermes_agent_tests.resolve()
     sys.path = [
-        p for p in sys.path
-        if not (Path(p).resolve() == _hermes_agent_tests_resolved)
+        p for p in sys.path if Path(p).resolve() != _hermes_agent_tests_resolved
     ]
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +27,7 @@ if str(ROOT) not in sys.path:
 # Flet 0.85 Compatibility Helpers
 # -----------------------------------------------------------------------------
 
+
 def _border_all(width, color):
     """Flet 0.85+ compatible Border.all() helper.
 
@@ -31,6 +35,7 @@ def _border_all(width, color):
     This replicates the behavior using Border + BorderSide.
     """
     import flet as ft
+
     return ft.Border(
         top=ft.BorderSide(width, color),
         right=ft.BorderSide(width, color),
@@ -41,6 +46,7 @@ def _border_all(width, color):
 
 # Monkey-patch ft.Border.all for tests that expect the 0.28.3 API
 import flet as ft
+
 ft.Border.all = staticmethod(_border_all)
 
 
@@ -48,9 +54,33 @@ ft.Border.all = staticmethod(_border_all)
 # 共用 Fixtures
 # =============================================================================
 
+
 def pytest_configure(config):
     """Pytest 配置。"""
-    config.addinivalue_line("markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')")
+    config.addinivalue_line(
+        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
+    )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_test_runtime_writes(tmp_path, monkeypatch, request):
+    """將測試執行期的相對路徑與已知固定快取導向 tmp_path。
+
+    Collection 發生在 fixture 之前，因此 production module 仍必須保持
+    import-time 唯讀；本 fixture 只處理測試函式實際執行時的寫入。
+    """
+    monkeypatch.chdir(tmp_path)
+    if request.node.path.name.startswith("test_icon_preview_"):
+        module = importlib.import_module("app.views.icon_preview_view")
+        index_module = importlib.import_module("app.icon_index")
+        icon_cache_root = tmp_path / "icon_cache"
+        icon_cache = icon_cache_root / "jar_icons"
+        model_cache = icon_cache_root / "model_index"
+        index_cache = icon_cache_root / "icon_index" / "fixture.json"
+        monkeypatch.setattr(module, "_get_cache_dir", lambda: icon_cache_root)
+        monkeypatch.setattr(module, "_get_icon_cache_dir", lambda: icon_cache)
+        monkeypatch.setattr(module, "_get_model_index_cache_dir", lambda: model_cache)
+        monkeypatch.setattr(index_module, "get_index_path", lambda _mods: index_cache)
 
 
 @pytest.fixture(autouse=True)
@@ -66,7 +96,6 @@ def _patch_flet_page_property():
 
     這個 patch 在每個測試結束後會自動還原（yield 後的程式碼）。
     """
-    import flet as ft
     from flet.controls.base_control import BaseControl
 
     # 暫存原本的 page property
@@ -86,6 +115,7 @@ def _patch_flet_page_property():
 
     class _EmptyPage:
         """最簡單的 mock page，避免 view.page 拋 RuntimeError。"""
+
         def __init__(self):
             self.overlay = []
             self.updated = 0
@@ -130,6 +160,7 @@ def _patch_flet_page_property():
 # Temp Directory Fixtures
 # -----------------------------------------------------------------------------
 
+
 def temp_dir():
     """提供臨時目錄，測試結束後自動清理。
 
@@ -144,6 +175,7 @@ def temp_dir():
 # -----------------------------------------------------------------------------
 # Mock Config Fixtures
 # -----------------------------------------------------------------------------
+
 
 def mock_config():
     """提供測試用的 mock config。
@@ -170,6 +202,7 @@ def mock_empty_config():
 # -----------------------------------------------------------------------------
 # View Test Fixtures — 工廠模式
 # -----------------------------------------------------------------------------
+
 
 def _make_page(**overrides):
     """工廠函數：每次回傳全新的 _Page instance。
@@ -258,6 +291,7 @@ def _make_filepicker(**overrides):
         - set_mock_path(path): 設定 _mock_path
         - reset(): 重置所有狀態
     """
+
     class _FilePicker:
         def __init__(self):
             self._callback = None
@@ -270,13 +304,26 @@ def _make_filepicker(**overrides):
         def on_upload(self, callback):
             self._callback = callback
 
-        async def get_directory_path(self, dialog_title: str = None):
+        async def get_directory_path(self, dialog_title: str | None = None):
             return self._mock_path
 
-        async def pick_files(self, dialog_title: str = None, allowed_extensions: list = None):
-            return [type('obj', (object,), {'path': self._mock_path})()] if self._mock_path else []
+        async def pick_files(
+            self,
+            dialog_title: str | None = None,
+            allowed_extensions: list | None = None,
+        ):
+            return (
+                [type("obj", (object,), {"path": self._mock_path})()]
+                if self._mock_path
+                else []
+            )
 
-        async def save_file(self, dialog_title: str = None, allowed_extensions: list = None, file_name: str = None):
+        async def save_file(
+            self,
+            dialog_title: str | None = None,
+            allowed_extensions: list | None = None,
+            file_name: str | None = None,
+        ):
             return self._mock_path
 
         def set_mock_path(self, path):

@@ -1,6 +1,6 @@
 # Minecraft Translator Flet — 專案索引
 
-> 版本：0.8.0｜最後更新：2026-08-06
+> 版本：0.8.0｜最後更新：2026-10-02
 
 ---
 
@@ -8,7 +8,7 @@
 
 **用途**：Minecraft 模組翻譯工具，支援 KubeJS、FTB Quests、Patchouli、Markdown 等多種格式的翻譯 pipeline。提供 Flet 桌面 GUI 介面。
 
-**技術棧**：Python 3.12+｜Flet 0.85.0+｜Google Gemini API｜OpenCC
+**技術棧**：Python 3.12+｜Flet 1.0.1｜Google Gemini API｜OpenCC
 
 ---
 
@@ -116,7 +116,7 @@ Minecraft-translate/
 │       ├── text_processor.py    # 文字處理
 │       └── ui_logging_handler.py
 │
-├── tests/                     # 測試（176 個測試檔、1905 個測試）
+├── tests/                     # 測試
 │   ├── conftest.py            # pytest 全域 fixture
 │   ├── fixtures/              # 測試資料
 │   ├── test_ftb*.py           # FTB 翻譯器測試
@@ -133,6 +133,9 @@ Minecraft-translate/
 │
 ├── workspace/                 # OpenClaw agent 工作區
 ├── tools/                     # 工具腳本
+│   ├── ui_smoke.py           # 真實 Flet/Playwright 13 頁視覺與跨頁任務矩陣
+│   ├── ui_smoke_app.py       # 隔離資料的 deterministic Flet smoke app
+│   └── performance_baseline.py # UI/JAR/batching/large-list 效能 baseline
 ├── logs/                      # 執行日誌
 ├── backups/                   # 備份
 ├── .github/workflows/         # GitHub Actions

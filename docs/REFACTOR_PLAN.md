@@ -38,7 +38,7 @@
 | 項目 | 位置 | 說明 |
 |---|---|---|
 | 整個套件無法 import | `app/views/cache/` | `__init__.py` 匯入不存在的 `cache_modal_base / cache_modal_query / cache_modal_shard`；`PROJECT_STRUCTURE.md` 也標為「未接線，待清理」 |
-| 占位元件 | `app/views/cache_manager/panels/*`（約 169 行） | 只被 `tests/test_pr1_to_pr6.py` 驗證「可 import」；實際使用的是 `app/views/cache_query_panel.py`（633 行）與 `cache_shard_panel.py`（581 行） |
+| 占位元件 | `app/views/cache_manager/panels/*`（約 169 行） | 只被 `tests/test_ui_component_contracts.py` 驗證「可 import」；實際使用的是 `app/views/cache_query_panel.py`（633 行）與 `cache_shard_panel.py`（581 行） |
 | 被覆蓋的重複函式（**未處理**，見 #116） | `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py` 約 L496 與 L605 | `on_translated_item` / `on_batch_flushed` 先內嵌定義，後又被工廠函式覆蓋（ruff F811） |
 | 未使用的 import / 變數 | 全專案 | F401 65 個、F841 6 個（例如 `pipeline_one_click_dialog.py` 的 `wizard_content`、`translate_input_field`） |
 | 過期的註冊 key | `app/view_registry.py` | `VIEW_WINDOW_SIZES` 內有 `"arnold"`，導覽中沒有；`"pipeline"` 卻沒有對應尺寸 |
