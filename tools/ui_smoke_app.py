@@ -1,8 +1,7 @@
-"""Deterministic Flet app used by the visual smoke harness.
+"""視覺 smoke harness 使用的確定性 Flet 應用程式。
 
-The module serves the real AppShell and real lazily-built views, but redirects
-runtime data to a disposable directory and injects fixed environment/task data.
-It is not a second product entry point.
+本模組提供真實的 AppShell 與真實的惰性建構頁面，但會把 runtime 資料
+導向可拋棄的目錄，並注入固定的環境與任務資料。它不是第二個產品進入點。
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ if str(SOURCE_ROOT) not in sys.path:
 
 
 def _configure_runtime_root() -> Path:
-    """Redirect mutable project-relative data to the harness runtime directory."""
+    """把會被修改的專案相對路徑資料，導向 harness 的 runtime 目錄。"""
     runtime_root = Path(
         os.environ.get("MINECRAFT_TRANSLATOR_SMOKE_ROOT", SOURCE_ROOT / ".artifacts")
     ).resolve()
@@ -45,7 +44,7 @@ def _configure_runtime_root() -> Path:
 
 
 def _fixed_config() -> dict:
-    """Return stable offline data for UI rendering."""
+    """回傳供 UI 渲染使用、穩定且離線的資料。"""
     from translation_tool.utils.config_manager import DEFAULT_CONFIG
 
     config = copy.deepcopy(DEFAULT_CONFIG)
@@ -58,7 +57,7 @@ def _fixed_config() -> dict:
 
 
 def _query(page: ft.Page, key: str, default: str) -> str:
-    """Read one query-string value with a stable fallback."""
+    """讀取單一 query-string 值，缺少時使用穩定的預設值。"""
     try:
         value = page.query.get(key)
     except (AttributeError, KeyError, TypeError):
@@ -67,7 +66,7 @@ def _query(page: ft.Page, key: str, default: str) -> str:
 
 
 async def _run_sequence(page, shell, interval: float) -> None:
-    """Cycle every real view while a deterministic task remains active."""
+    """在確定性任務持續進行時，依序切換每個真實頁面。"""
     from app.tasks.task_session import TaskSession
     from app.ui.snack import show_snack
     from app.view_registry import VIEW_SPECS
@@ -106,7 +105,7 @@ async def _run_sequence(page, shell, interval: float) -> None:
 
 
 def main(page: ft.Page) -> None:
-    """Mount the production shell with isolated deterministic fixture data."""
+    """以隔離的確定性測試資料掛載正式環境的外殼。"""
     runtime_root = _configure_runtime_root()
     config = _fixed_config()
     (runtime_root / "config.json").write_text(
@@ -148,7 +147,7 @@ def main(page: ft.Page) -> None:
 
 
 def _serve() -> None:
-    """Serve the smoke app as ASGI without opening an unmanaged browser."""
+    """以 ASGI 方式提供 smoke 應用程式，不另外開啟不受管理的瀏覽器。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)

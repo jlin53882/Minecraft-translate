@@ -1,4 +1,4 @@
-"""Capture deterministic desktop-sized screenshots from the real Flet web app."""
+"""從真實的 Flet 網頁版應用程式擷取確定性的桌面尺寸截圖。"""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ VIEW_KEYS = (
 
 
 def find_browser_executable(explicit: str | None = None) -> Path:
-    """Find an existing Chromium browser without downloading one implicitly."""
+    """尋找本機已安裝的 Chromium 系瀏覽器，不會隱含下載。"""
     if explicit:
         path = Path(explicit)
         if path.is_file():
@@ -64,14 +64,14 @@ def find_browser_executable(explicit: str | None = None) -> Path:
 
 
 def choose_port(preferred: int = 0) -> int:
-    """Return an available localhost port."""
+    """回傳一個可用的 localhost 連接埠。"""
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", preferred))
         return int(sock.getsockname()[1])
 
 
 def parse_viewports(values: list[str] | None) -> tuple[tuple[int, int], ...]:
-    """Parse WIDTHxHEIGHT values."""
+    """解析 WIDTHxHEIGHT 格式的視窗尺寸。"""
     if not values:
         return DEFAULT_VIEWPORTS
     parsed = []
@@ -84,7 +84,7 @@ def parse_viewports(values: list[str] | None) -> tuple[tuple[int, int], ...]:
 
 
 def wait_for_title(page: Page, expected: str, timeout_ms: int) -> str:
-    """Wait until the Flet session publishes an exact smoke state title."""
+    """等待 Flet session 發布指定的 smoke 狀態標題。"""
     page.wait_for_function(
         "expected => document.title.startsWith(expected)",
         arg=expected,
@@ -104,21 +104,21 @@ def _wait_for_server(
     sleep=time.sleep,
     urlopen=urllib.request.urlopen,
 ) -> None:
-    """Wait for HTTP readiness with one shared deadline path.
+    """以單一共用期限等待 HTTP 就緒。
 
     Args:
-        process: Server process exposing ``poll()``.
-        base_url: Local readiness URL.
-        server_log: Log path used in early-exit/timeout diagnostics.
-        timeout_seconds: Maximum readiness wait.
-        poll_interval: Delay between failed probes.
-        monotonic: Injectable clock for deterministic tests.
-        sleep: Injectable sleeper for deterministic tests.
-        urlopen: Injectable HTTP probe function.
+        process: 提供 ``poll()`` 的伺服器行程。
+        base_url: 本機就緒檢查用的 URL。
+        server_log: 提早結束或逾時時，用於診斷的 log 路徑。
+        timeout_seconds: 等待就緒的最長秒數。
+        poll_interval: 探測失敗後的等待間隔。
+        monotonic: 可注入的時鐘，供確定性測試使用。
+        sleep: 可注入的 sleep 函式，供確定性測試使用。
+        urlopen: 可注入的 HTTP 探測函式。
 
     Raises:
-        RuntimeError: If the server exits before becoming ready.
-        TimeoutError: If readiness is not observed before the deadline.
+        RuntimeError: 伺服器在就緒前就結束。
+        TimeoutError: 在期限內未觀察到就緒。
     """
     deadline = monotonic() + timeout_seconds
     while True:
@@ -129,7 +129,7 @@ def _wait_for_server(
                 if response.status == 200:
                     return
         except (OSError, TimeoutError, urllib.error.URLError):
-            # Failed probes are transient until the shared deadline expires.
+            # 在共用期限到期前，探測失敗視為暫時性。
             pass
         if monotonic() >= deadline:
             raise TimeoutError(f"Flet smoke server 45 秒內未就緒：{server_log}")
@@ -149,7 +149,7 @@ def run_smoke(
     interval: float = 2.5,
     port: int = 0,
 ) -> dict:
-    """Run the full screenshot matrix and return its machine-readable report."""
+    """執行完整的截圖矩陣，並回傳機器可讀的報告。"""
     output_dir.mkdir(parents=True, exist_ok=True)
     port = choose_port(port)
     server_log = output_dir / "server.log"
@@ -322,7 +322,7 @@ def run_smoke(
 
 
 def main() -> int:
-    """CLI entry point."""
+    """命令列進入點。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--browser-executable")
@@ -343,7 +343,7 @@ def main() -> int:
             interval=args.interval,
             port=args.port,
         )
-    except Exception as exc:  # noqa: BLE001 - CLI boundary reports actionable failure
+    except Exception as exc:  # noqa: BLE001 - CLI 邊界，回報可處理的失敗
         print(f"UI smoke failed: {exc}", file=sys.stderr)
         return 1
 

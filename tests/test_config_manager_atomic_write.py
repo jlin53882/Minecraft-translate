@@ -1,4 +1,4 @@
-"""Failure-injection coverage for atomic config persistence."""
+"""設定檔原子寫入的失敗注入測試。"""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ from translation_tool.utils import config_manager
 
 
 def _temp_files(path: Path) -> list[Path]:
-    """Return task-owned temporary files next to the config target."""
+    """回傳設定檔旁、由本次寫入建立的暫存檔。"""
     return list(path.parent.glob(f".{path.name}.*.tmp"))
 
 
 def test_save_config_atomically_replaces_file_in_same_directory(tmp_path, monkeypatch):
-    """The published config is complete and the replacement source is a sibling."""
+    """發布後的設定檔必須完整，且替換來源是同目錄的暫存檔。"""
     target = tmp_path / "config.json"
     target.write_text('{"old": true}', encoding="utf-8")
     seen: list[tuple[Path, Path]] = []
@@ -36,7 +36,7 @@ def test_save_config_atomically_replaces_file_in_same_directory(tmp_path, monkey
 
 
 def test_save_config_serialization_failure_preserves_existing_file(tmp_path):
-    """A non-serializable value must not truncate the previous config."""
+    """無法序列化的值不可截斷原本的設定檔。"""
     target = tmp_path / "config.json"
     original = '{"old": true}\n'
     target.write_text(original, encoding="utf-8")
@@ -47,7 +47,7 @@ def test_save_config_serialization_failure_preserves_existing_file(tmp_path):
 
 
 def test_save_config_fsync_failure_preserves_existing_file(tmp_path, monkeypatch):
-    """Durability preparation must finish before the old file is replaced."""
+    """必須先完成落盤準備，才能替換舊檔。"""
     target = tmp_path / "config.json"
     original = '{"old": true}'
     target.write_text(original, encoding="utf-8")
@@ -63,7 +63,7 @@ def test_save_config_fsync_failure_preserves_existing_file(tmp_path, monkeypatch
 
 
 def test_save_config_replace_failure_preserves_existing_file(tmp_path, monkeypatch):
-    """Windows sharing or antivirus failures must leave the old JSON intact."""
+    """Windows 檔案共用或防毒軟體造成的失敗，必須保留舊的 JSON 不變。"""
     target = tmp_path / "config.json"
     original = '{"old": true}'
     target.write_text(original, encoding="utf-8")
@@ -81,7 +81,7 @@ def test_save_config_replace_failure_preserves_existing_file(tmp_path, monkeypat
 def test_save_config_readback_failure_reports_failure_after_commit(
     tmp_path, monkeypatch
 ):
-    """A post-replace verification error is observable without unsafe rollback."""
+    """替換後的驗證錯誤必須能被觀察到，且不做不安全的回滾。"""
     target = tmp_path / "config.json"
     target.write_text('{"old": true}', encoding="utf-8")
 

@@ -1,4 +1,4 @@
-"""Regression coverage for translator.replace_rules_path in language merge flows."""
+"""語言合併流程中 translator.replace_rules_path 的回歸測試。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ CUSTOM_RULES = "rules/custom-replace-rules.json"
 
 
 def _patch_custom_rules(monkeypatch):
-    """Return a list recording the rule path requested by the merge flow."""
+    """回傳一個清單，記錄合併流程所要求的規則路徑。"""
     requested: list[str] = []
     config = {
         "translator": {
@@ -27,7 +27,7 @@ def _patch_custom_rules(monkeypatch):
 
 
 def test_folder_merge_uses_nested_translator_replace_rules_path(tmp_path, monkeypatch):
-    """Folder merge must honor the same nested config path as other translators."""
+    """資料夾合併必須與其他翻譯器一樣，遵循巢狀設定路徑。"""
     requested = _patch_custom_rules(monkeypatch)
     input_dir = tmp_path / "input"
     input_dir.mkdir()
@@ -42,7 +42,7 @@ def test_folder_merge_uses_nested_translator_replace_rules_path(tmp_path, monkey
 
 
 def test_zip_merge_uses_nested_translator_replace_rules_path(tmp_path, monkeypatch):
-    """ZIP merge must honor translator.replace_rules_path before opening the ZIP."""
+    """ZIP 合併必須在開啟 ZIP 之前，先遵循 translator.replace_rules_path。"""
     requested = _patch_custom_rules(monkeypatch)
 
     list(

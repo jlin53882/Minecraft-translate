@@ -1,4 +1,4 @@
-"""Regression tests for import-time filesystem side effects."""
+"""匯入時檔案系統副作用的回歸測試。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _run_import_probe(source: str) -> subprocess.CompletedProcess[str]:
-    """Run a clean interpreter against the current checkout."""
+    """用乾淨的直譯器對目前的程式碼執行探測。"""
     env = os.environ.copy()
     for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT"):
         env.pop(key, None)
@@ -29,7 +29,7 @@ def _run_import_probe(source: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_importing_cache_manager_does_not_initialize_or_create_cache_root():
-    """Collection may import cache_manager, but importing must remain read-only."""
+    """收集測試時可能會匯入 cache_manager，但匯入必須維持唯讀。"""
     result = _run_import_probe(
         """
 from pathlib import Path
@@ -45,7 +45,7 @@ assert cache_root.exists() is before
 
 
 def test_importing_species_cache_does_not_initialize_or_create_database_root():
-    """Species cache initialization is lazy so collection cannot create user data."""
+    """學名快取採惰性初始化，因此收集測試時不可建立使用者資料。"""
     result = _run_import_probe(
         """
 from pathlib import Path

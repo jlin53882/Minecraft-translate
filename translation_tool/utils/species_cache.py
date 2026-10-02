@@ -63,7 +63,7 @@ except ImportError:
     log.warning(
         "未找到 Wikipedia 函式庫 (請執行 pip install wikipedia)。線上查詢功能將不可用。"
     )
-except Exception as e:  # noqa: BLE001 - optional third-party import may fail broadly
+except Exception as e:  # noqa: BLE001 - 選用的第三方套件匯入可能出現各種失敗
     log.error(f"載入 Wikipedia 函式庫時發生未知錯誤: {e}")
 
 
@@ -116,7 +116,7 @@ def initialize_species_cache():
         log.info("學名快取系統初始化完成。")
         return True
 
-    except Exception:  # Initialization must degrade to unavailable.
+    except Exception:  # 初始化失敗時必須降級為不可用。
         log.exception("初始化學名快取時發生嚴重錯誤")
         _initialized = False
         return False
@@ -165,7 +165,7 @@ def query_wikipedia_and_update_cache(species_name: str) -> str | None:
         if e.options:
             return query_wikipedia_and_update_cache(e.options[0])
         return None
-    except Exception as e:  # noqa: BLE001 - wikipedia exposes multiple runtime failures
+    except Exception as e:  # noqa: BLE001 - wikipedia 套件可能拋出多種執行期錯誤
         log.error(f"線上查詢 '{species_name}' 時發生未知網路或API錯誤: {e}")
         _species_cache_data[species_name] = ""  # 僅更新記憶體快取
         return None

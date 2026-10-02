@@ -1,4 +1,4 @@
-"""Regression tests for lazy translation-cache reads."""
+"""翻譯快取惰性讀取的回歸測試。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from translation_tool.utils import cache_manager, cache_store
 
 
 def _prepare_disk_cache(tmp_path: Path, monkeypatch):
-    """Create one on-disk lang shard and reset the process runtime state."""
+    """建立一個磁碟上的 lang 分片，並重置程序的 runtime 狀態。"""
     cache_root = tmp_path / "cache"
     lang_dir = cache_root / "lang"
     lang_dir.mkdir(parents=True)
@@ -49,7 +49,7 @@ def _prepare_disk_cache(tmp_path: Path, monkeypatch):
 def test_get_cache_dict_ref_lazily_initializes_existing_disk_cache(
     tmp_path, monkeypatch
 ):
-    """First cache-dict read must expose an existing disk entry."""
+    """第一次讀取快取字典時，必須能看到磁碟上既有的條目。"""
     state = _prepare_disk_cache(tmp_path, monkeypatch)
 
     result = cache_manager.get_cache_dict_ref("lang")
@@ -59,7 +59,7 @@ def test_get_cache_dict_ref_lazily_initializes_existing_disk_cache(
 
 
 def test_get_from_cache_lazily_initializes_existing_cache(tmp_path, monkeypatch):
-    """First value read must not return a false cache miss."""
+    """第一次讀取值時，不可誤判為快取未命中。"""
     state = _prepare_disk_cache(tmp_path, monkeypatch)
 
     assert cache_manager.get_from_cache("lang", "item.example") == "哈囉"
@@ -67,7 +67,7 @@ def test_get_from_cache_lazily_initializes_existing_cache(tmp_path, monkeypatch)
 
 
 def test_get_cache_entry_lazily_initializes_existing_cache(tmp_path, monkeypatch):
-    """First entry read must return the complete persisted entry."""
+    """第一次讀取條目時，必須回傳完整的已持久化條目。"""
     state = _prepare_disk_cache(tmp_path, monkeypatch)
 
     assert cache_manager.get_cache_entry("lang", "item.example") == {
@@ -80,7 +80,7 @@ def test_get_cache_entry_lazily_initializes_existing_cache(tmp_path, monkeypatch
 def test_shared_cache_split_keeps_existing_disk_entry_as_cache_hit(
     tmp_path, monkeypatch
 ):
-    """Representative LM split flow must reuse a disk cache on its first read."""
+    """代表性的 LM 分流流程在第一次讀取時，必須沿用磁碟快取。"""
     _prepare_disk_cache(tmp_path, monkeypatch)
 
     cached, pending = fast_split_items_by_cache(
@@ -99,7 +99,7 @@ def test_shared_cache_split_keeps_existing_disk_entry_as_cache_hit(
 
 
 def test_is_cache_initialized_is_a_pure_state_query(tmp_path, monkeypatch):
-    """The status query itself must not initialize or touch the cache root."""
+    """狀態查詢本身不可初始化，也不可碰觸快取根目錄。"""
     state = _prepare_disk_cache(tmp_path, monkeypatch)
 
     assert cache_manager.is_cache_initialized() is False
@@ -110,7 +110,7 @@ def test_is_cache_initialized_is_a_pure_state_query(tmp_path, monkeypatch):
 def test_read_api_does_not_expose_partial_state_after_initialization_failure(
     tmp_path, monkeypatch
 ):
-    """A failed multi-type load must not leak entries from earlier types."""
+    """多類型載入失敗時，不可洩漏先前已載入類型的條目。"""
     state = _prepare_disk_cache(tmp_path, monkeypatch)
     real_loader = cache_manager._load_cache_type
 
@@ -147,7 +147,7 @@ def _assert_no_pending_write(state):
 def test_add_to_cache_does_not_accept_write_after_initialization_failure(
     tmp_path, monkeypatch
 ):
-    """Failed initialization must not leave a non-durable pending write."""
+    """初始化失敗後，不可留下無法持久化的待寫入項目。"""
     state = _prepare_disk_cache(tmp_path, monkeypatch)
     _fail_after_lang(monkeypatch)
 
@@ -159,7 +159,7 @@ def test_add_to_cache_does_not_accept_write_after_initialization_failure(
 def test_add_to_cache_batch_does_not_accept_writes_after_initialization_failure(
     tmp_path, monkeypatch
 ):
-    """Failed initialization must reject the whole batch."""
+    """初始化失敗時，必須拒絕整批寫入。"""
     state = _prepare_disk_cache(tmp_path, monkeypatch)
     _fail_after_lang(monkeypatch)
 
@@ -173,7 +173,7 @@ def test_add_to_cache_batch_does_not_accept_writes_after_initialization_failure(
 def test_add_to_cache_after_successful_initialization_creates_pending_entry(
     tmp_path, monkeypatch
 ):
-    """Normal writes keep their pending/dirty behavior."""
+    """正常寫入仍須維持 pending / dirty 的行為。"""
     state = _prepare_disk_cache(tmp_path, monkeypatch)
 
     cache_manager.add_to_cache("lang", "new.key", "Hello", "哈囉")
@@ -184,7 +184,7 @@ def test_add_to_cache_after_successful_initialization_creates_pending_entry(
 
 
 def test_save_without_save_path_keeps_pending_entries(tmp_path, monkeypatch):
-    """A missing save path must not silently drop pending entries."""
+    """缺少儲存路徑時，不可靜默丟棄待寫入項目。"""
     state = _prepare_disk_cache(tmp_path, monkeypatch)
     cache_manager.add_to_cache("lang", "new.key", "Hello", "哈囉")
     state.cache_file_path = {}
@@ -196,7 +196,7 @@ def test_save_without_save_path_keeps_pending_entries(tmp_path, monkeypatch):
 
 
 def _count_failing_loader(monkeypatch):
-    """Make every cache type load fail; return the call counter."""
+    """讓每個快取類型的載入都失敗，並回傳呼叫次數記錄。"""
     calls = []
 
     def always_fail(cache_type):
@@ -208,7 +208,7 @@ def _count_failing_loader(monkeypatch):
 
 
 def test_write_apis_return_false_when_rejected(tmp_path, monkeypatch):
-    """Rejected writes must be reported to callers."""
+    """被拒絕的寫入必須回報給呼叫端。"""
     _prepare_disk_cache(tmp_path, monkeypatch)
     _fail_after_lang(monkeypatch)
 
@@ -226,7 +226,7 @@ def test_write_apis_return_true_when_accepted_or_unchanged(tmp_path, monkeypatch
 
 
 def test_failed_initialization_is_not_retried_during_cooldown(tmp_path, monkeypatch):
-    """Persistent failure must not re-run the full load on every access."""
+    """持續失敗時，不可在每次存取都重跑完整載入。"""
     _prepare_disk_cache(tmp_path, monkeypatch)
     calls = _count_failing_loader(monkeypatch)
     now = [100.0]
@@ -237,7 +237,7 @@ def test_failed_initialization_is_not_retried_during_cooldown(tmp_path, monkeypa
     cache_manager.add_to_cache("lang", "b", "B", "乙")
     cache_manager.get_from_cache("lang", "a")
 
-    assert first_calls == 1  # fails on the first cache type, stops there
+    assert first_calls == 1  # 第一個快取類型就失敗，載入隨即中止
     assert len(calls) == first_calls
 
 
@@ -254,7 +254,7 @@ def test_rejected_writes_log_once_per_failure_window(tmp_path, monkeypatch, capl
 
 
 def test_write_succeeds_after_cooldown_once_disk_recovers(tmp_path, monkeypatch):
-    """After the cooldown, a recovered disk initializes and accepts writes."""
+    """冷卻期過後，磁碟恢復時必須能初始化並接受寫入。"""
     state = _prepare_disk_cache(tmp_path, monkeypatch)
     real_loader = cache_manager._load_cache_type
     broken = [True]
@@ -311,7 +311,7 @@ def test_reload_cache_type_does_not_load_into_uninitialized_state(
 
     assert state.initialized is False
     assert state.translation_cache == {}
-    assert calls  # explicit reload bypasses the cooldown and retries once
+    assert calls  # 明確的重載會略過冷卻並重試一次
 
 
 def test_cache_update_service_reports_rejected_write(tmp_path, monkeypatch):

@@ -1,4 +1,4 @@
-"""Reproducible offline performance baseline for UI build, JAR scan and batching."""
+"""可重現的離線效能基準：UI 建構、JAR 掃描與批次選取。"""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ if str(ROOT) not in sys.path:
 
 
 def summarize_samples(samples: list[float]) -> dict[str, float]:
-    """Return stable summary statistics for millisecond samples."""
+    """回傳毫秒樣本的穩定統計摘要。"""
     if not samples:
         raise ValueError("samples must not be empty")
     return {
@@ -32,7 +32,7 @@ def summarize_samples(samples: list[float]) -> dict[str, float]:
 
 
 def benchmark(operation: Callable[[], object], repeats: int) -> dict[str, float]:
-    """Measure an operation repeatedly using perf_counter."""
+    """以 perf_counter 重複量測某個操作。"""
     samples = []
     for _ in range(repeats):
         started = time.perf_counter()
@@ -42,7 +42,7 @@ def benchmark(operation: Callable[[], object], repeats: int) -> dict[str, float]
 
 
 def build_synthetic_jars(root: Path, count: int) -> list[Path]:
-    """Create deterministic JAR fixtures, including nested paths."""
+    """建立確定性的 JAR 測試資料，包含巢狀路徑。"""
     jars = []
     for index in range(count):
         parent = root / ("nested" if index % 10 == 0 else "top")
@@ -59,7 +59,7 @@ def build_synthetic_jars(root: Path, count: int) -> list[Path]:
 
 
 def measure_jar_scans(repeats: int) -> list[dict]:
-    """Measure explicit-list JAR scanning without network access."""
+    """量測以明確清單掃描 JAR 的耗時，不使用網路。"""
     from translation_tool.utils.jar_browser import scan_jars
 
     results = []
@@ -101,7 +101,7 @@ def _batch_items(count: int = 10_000) -> list[dict[str, str]]:
 
 
 def measure_batch_selection(repeats: int) -> list[dict]:
-    """Compare local token-budget selection with count-only selection."""
+    """比較本地 token 預算選取與僅依數量選取的耗時。"""
     from translation_tool.core.lm_batch_budget import reset_trackers, select_batch_size
 
     items = _batch_items()
@@ -142,7 +142,7 @@ def measure_batch_selection(repeats: int) -> list[dict]:
 
 
 def measure_list_construction(repeats: int) -> list[dict]:
-    """Measure Python-side construction cost for large Flet list controls."""
+    """量測大型 Flet 清單控制項在 Python 端的建構成本。"""
     import flet as ft
 
     results = []
@@ -159,7 +159,7 @@ def measure_list_construction(repeats: int) -> list[dict]:
 
 
 def summarize_ui_report(path: Path) -> dict:
-    """Extract startup and first-view build timings from a UI smoke report."""
+    """從 UI smoke 報告中擷取啟動與各頁面首次建構的耗時。"""
     data = json.loads(path.read_text(encoding="utf-8"))
     view_cases = [case for case in data.get("cases", []) if case.get("kind") == "view"]
     if not view_cases:
@@ -180,7 +180,7 @@ def summarize_ui_report(path: Path) -> dict:
 
 
 def environment_info() -> dict[str, str]:
-    """Return the environment fields required to reproduce a baseline."""
+    """回傳重現基準所需的環境欄位。"""
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "platform": platform.platform(),
@@ -192,7 +192,7 @@ def environment_info() -> dict[str, str]:
 
 
 def render_markdown(report: dict) -> str:
-    """Render a compact human-readable baseline summary."""
+    """產生簡潔、可供人閱讀的基準摘要。"""
     lines = [
         "# Performance baseline result",
         "",
@@ -247,7 +247,7 @@ def render_markdown(report: dict) -> str:
 
 
 def main() -> int:
-    """CLI entry point."""
+    """命令列進入點。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--ui-report", type=Path)

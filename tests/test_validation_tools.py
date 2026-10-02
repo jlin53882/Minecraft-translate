@@ -1,4 +1,4 @@
-"""Tests for repository-maintained UI and performance validation tools."""
+"""專案內 UI 與效能驗證工具的測試。"""
 
 from __future__ import annotations
 

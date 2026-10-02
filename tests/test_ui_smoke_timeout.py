@@ -1,4 +1,4 @@
-"""Deterministic timeout regression for the UI smoke startup probe."""
+"""UI smoke 啟動探測的確定性逾時回歸測試。"""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ from tools.ui_smoke import _wait_for_server
 
 
 class _LiveProcess:
-    """Fake process that remains alive during failed probes."""
+    """探測失敗期間仍保持存活的假行程。"""
 
     def poll(self):
         return None
 
 
 def test_wait_for_server_times_out_after_persistent_probe_failures():
-    """Failed HTTP probes must still reach the shared deadline path."""
+    """HTTP 探測失敗時，仍必須走到共用的期限檢查。"""
     now = 0.0
     sleeps: list[float] = []
     probes = 0

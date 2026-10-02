@@ -1,1 +1,1 @@
-"""Repository-maintained validation and measurement tools."""
+"""專案內維護的驗證與量測工具。"""
