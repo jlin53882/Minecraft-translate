@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from translation_tool.core.lm_translator_shared_cache import fast_split_items_by_cache
 from translation_tool.utils import cache_manager, cache_store
 
@@ -191,3 +193,134 @@ def test_save_without_save_path_keeps_pending_entries(tmp_path, monkeypatch):
 
     assert "new.key" in state.session_new_entries["lang"]
     assert state.is_dirty["lang"] is True
+
+
+def _count_failing_loader(monkeypatch):
+    """Make every cache type load fail; return the call counter."""
+    calls = []
+
+    def always_fail(cache_type):
+        calls.append(cache_type)
+        raise OSError("simulated disk failure")
+
+    monkeypatch.setattr(cache_manager, "_load_cache_type", always_fail)
+    return calls
+
+
+def test_write_apis_return_false_when_rejected(tmp_path, monkeypatch):
+    """Rejected writes must be reported to callers."""
+    _prepare_disk_cache(tmp_path, monkeypatch)
+    _fail_after_lang(monkeypatch)
+
+    assert cache_manager.add_to_cache("lang", "k", "A", "甲") is False
+    assert cache_manager.add_to_cache_batch("lang", [("k", "A", "甲")]) is False
+
+
+def test_write_apis_return_true_when_accepted_or_unchanged(tmp_path, monkeypatch):
+    _prepare_disk_cache(tmp_path, monkeypatch)
+
+    assert cache_manager.add_to_cache("lang", "k", "A", "甲") is True
+    assert cache_manager.add_to_cache("lang", "k", "A", "甲") is True
+    assert cache_manager.add_to_cache_batch("lang", [("k2", "B", "乙")]) is True
+    assert cache_manager.add_to_cache("lang", "", "A", "甲") is False
+
+
+def test_failed_initialization_is_not_retried_during_cooldown(tmp_path, monkeypatch):
+    """Persistent failure must not re-run the full load on every access."""
+    _prepare_disk_cache(tmp_path, monkeypatch)
+    calls = _count_failing_loader(monkeypatch)
+    now = [100.0]
+    monkeypatch.setattr(cache_manager, "_monotonic", lambda: now[0])
+
+    cache_manager.add_to_cache("lang", "a", "A", "甲")
+    first_calls = len(calls)
+    cache_manager.add_to_cache("lang", "b", "B", "乙")
+    cache_manager.get_from_cache("lang", "a")
+
+    assert first_calls == 1  # fails on the first cache type, stops there
+    assert len(calls) == first_calls
+
+
+def test_rejected_writes_log_once_per_failure_window(tmp_path, monkeypatch, caplog):
+    _prepare_disk_cache(tmp_path, monkeypatch)
+    _count_failing_loader(monkeypatch)
+
+    with caplog.at_level("ERROR", logger=cache_manager.log.name):
+        for i in range(5):
+            cache_manager.add_to_cache("lang", f"k{i}", "A", "甲")
+
+    rejected = [r for r in caplog.records if "拒絕" in r.getMessage()]
+    assert len(rejected) == 1
+
+
+def test_write_succeeds_after_cooldown_once_disk_recovers(tmp_path, monkeypatch):
+    """After the cooldown, a recovered disk initializes and accepts writes."""
+    state = _prepare_disk_cache(tmp_path, monkeypatch)
+    real_loader = cache_manager._load_cache_type
+    broken = [True]
+
+    def flaky(cache_type):
+        if broken[0]:
+            raise OSError("simulated disk failure")
+        return real_loader(cache_type)
+
+    monkeypatch.setattr(cache_manager, "_load_cache_type", flaky)
+    now = [100.0]
+    monkeypatch.setattr(cache_manager, "_monotonic", lambda: now[0])
+
+    assert cache_manager.add_to_cache("lang", "new.key", "Hello", "哈囉") is False
+    _assert_no_pending_write(state)
+
+    broken[0] = False
+    now[0] += cache_manager._INIT_RETRY_COOLDOWN_SECONDS + 1
+
+    assert cache_manager.add_to_cache("lang", "new.key", "Hello", "哈囉") is True
+    assert state.initialized is True
+    assert state.session_new_entries["lang"]["new.key"]["dst"] == "哈囉"
+    assert state.is_dirty["lang"] is True
+
+
+def test_reload_translation_cache_clears_partial_state_on_failure(
+    tmp_path, monkeypatch
+):
+    state = _prepare_disk_cache(tmp_path, monkeypatch)
+    real_loader = cache_manager.load_cache_type
+
+    def fail_on_second(cache_type, **kwargs):
+        if cache_type == "lang":
+            return real_loader(cache_type, **kwargs)
+        raise OSError("simulated reload failure")
+
+    monkeypatch.setattr(cache_manager, "load_cache_type", fail_on_second)
+
+    with pytest.raises(OSError):
+        cache_manager.reload_translation_cache()
+
+    assert state.initialized is False
+    assert state.translation_cache == {}
+    assert state.cache_file_path == {}
+
+
+def test_reload_cache_type_does_not_load_into_uninitialized_state(
+    tmp_path, monkeypatch
+):
+    state = _prepare_disk_cache(tmp_path, monkeypatch)
+    calls = _count_failing_loader(monkeypatch)
+
+    cache_manager.reload_translation_cache_type("lang")
+
+    assert state.initialized is False
+    assert state.translation_cache == {}
+    assert calls  # explicit reload bypasses the cooldown and retries once
+
+
+def test_cache_update_service_reports_rejected_write(tmp_path, monkeypatch):
+    from app.services_impl.cache import cache_services
+
+    _prepare_disk_cache(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        cache_manager, "get_cache_entry", lambda *_: {"src": "A", "dst": "甲"}
+    )
+    _count_failing_loader(monkeypatch)
+
+    assert cache_services.cache_update_dst_service("lang", "k", "乙") is False

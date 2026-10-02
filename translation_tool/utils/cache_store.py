@@ -52,6 +52,9 @@ class CacheRuntimeState:
     translation_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
     cache_file_path: dict[str, Path] = field(default_factory=dict)
     initialized: bool = False
+    # 初始化失敗的 monotonic 時間（冷卻用）與「本次失敗視窗是否已記錄寫入拒絕」
+    init_failed_at: float | None = None
+    write_reject_logged: bool = False
     session_new_entries: dict[str, dict[str, Any]] = field(default_factory=dict)
     is_dirty: dict[str, bool] = field(default_factory=dict)
     cache_lock: threading.RLock = field(default_factory=threading.RLock)
@@ -132,6 +135,8 @@ def reset_runtime_state(cache_types: list[str]) -> CacheRuntimeState:
     state.translation_cache = {}
     state.cache_file_path = {}
     state.initialized = False
+    state.init_failed_at = None
+    state.write_reject_logged = False
     state.session_new_entries = {k: {} for k in cache_types}
     state.is_dirty = {k: False for k in cache_types}
     return state

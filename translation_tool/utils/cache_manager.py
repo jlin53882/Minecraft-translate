@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,9 @@ log = logging.getLogger(__name__)
 CACHE_TYPES = ["lang", "patchouli", "ftbquests", "kubejs", "md"]
 ROLLING_SHARD_SIZE = 2500
 ACTIVE_SHARD_FILE = ".active"
+# 初始化失敗後的重試冷卻秒數；避免持續故障時每次讀寫都重跑完整載入並洗版 log。
+_INIT_RETRY_COOLDOWN_SECONDS = 30.0
+_monotonic = time.monotonic
 _CACHE_DIR_NAME = "快取資料"
 
 _search_facade: CacheSearchFacade | None = None
@@ -75,12 +79,22 @@ def _initialized_state():
 def _write_rejected(state, operation: str) -> bool:
     """初始化失敗時拒絕寫入，避免接受無 durable save path 的記憶體資料。
 
-    必須在持有 `state.cache_lock` 時呼叫。
+    必須在持有 `state.cache_lock` 時呼叫。每個失敗視窗只記一次 error，
+    避免大量寫入洗版。
     """
     if state.initialized:
         return False
-    log.error(f"快取尚未成功初始化，拒絕 {operation}（寫入不會被持久化）")
+    if not state.write_reject_logged:
+        state.write_reject_logged = True
+        log.error(f"快取尚未成功初始化，拒絕 {operation}（寫入不會被持久化）")
     return True
+
+
+def _clear_partial_state(state) -> None:
+    """清掉半套載入的 runtime cache，避免 read API 暴露部分資料。"""
+    state.translation_cache = {}
+    state.cache_file_path = {}
+    state.initialized = False
 
 
 def _get_cache_root() -> Path:
@@ -110,15 +124,23 @@ def initialize_translation_cache():
     with state.cache_lock:
         if state.initialized:
             return
+        failed_at = state.init_failed_at
+        if (
+            failed_at is not None
+            and _monotonic() - failed_at < _INIT_RETRY_COOLDOWN_SECONDS
+        ):
+            return
         try:
             for cache_type in CACHE_TYPES:
                 _load_cache_type(cache_type)
             state.initialized = True
+            state.init_failed_at = None
+            state.write_reject_logged = False
         except Exception as e:
             # 部分 cache type 可能已載入；失敗時不可讓 read API 看見半套狀態。
-            state.translation_cache = {}
-            state.cache_file_path = {}
-            state.initialized = False
+            _clear_partial_state(state)
+            state.init_failed_at = _monotonic()
+            state.write_reject_logged = False
             log.error(f"快取系統初始化失敗: {e}", exc_info=True)  # noqa: G201
 
 
@@ -136,17 +158,22 @@ def reload_translation_cache():
         state = cache_store.get_runtime_state()
         # 重新載入所有快取型別
         translation_config = load_config().get("translator", {})
-        for cache_type in CACHE_TYPES:
-            load_cache_type(
-                cache_type,
-                translation_cache=state.translation_cache,
-                cache_file_path=state.cache_file_path,
-                cache_root=_get_cache_root(),
-                parallel_workers=translation_config.get(
-                    "parallel_execution_workers", 4
-                ),
-                logger=log,
-            )
+        try:
+            for cache_type in CACHE_TYPES:
+                load_cache_type(
+                    cache_type,
+                    translation_cache=state.translation_cache,
+                    cache_file_path=state.cache_file_path,
+                    cache_root=_get_cache_root(),
+                    parallel_workers=translation_config.get(
+                        "parallel_execution_workers", 4
+                    ),
+                    logger=log,
+                )
+        except Exception:
+            # 與 initialize_translation_cache 一致：失敗時不留半套 state，再把例外交給呼叫端。
+            _clear_partial_state(state)
+            raise
         state.initialized = True
 
 
@@ -155,8 +182,13 @@ def reload_translation_cache_type(cache_type: str):
     if cache_type not in CACHE_TYPES:
         return
     state = _state()
+    # 明確的重載請求：略過初始化失敗冷卻，直接重試。
+    state.init_failed_at = None
     initialize_translation_cache()
     with state.cache_lock:
+        if not state.initialized:
+            log.error(f"快取尚未成功初始化，無法重新載入 {cache_type}")
+            return
         state.translation_cache[cache_type] = {}
         cache_store.get_session_entries(state.session_new_entries, cache_type).clear()
         cache_store.clear_dirty(state.is_dirty, cache_type)
@@ -245,15 +277,20 @@ def add_to_cache(
     *,
     mod: str | None = None,
     path: str | None = None,
-):
-    """新增翻譯到快取。"""
+) -> bool:
+    """新增翻譯到快取。
+
+    Returns:
+        True 代表條目已在快取中（新增或內容未變）；False 代表未寫入
+        （key/dst 為空，或快取初始化失敗而拒絕寫入）。
+    """
     if not key or not dst:
-        return
+        return False
 
     state = _initialized_state()
     with state.cache_lock:
         if _write_rejected(state, "add_to_cache"):
-            return
+            return False
         cache = cache_store.get_cache_type_dict(state.translation_cache, cache_type)
         entry = {"src": src, "dst": dst}
         if mod:
@@ -267,6 +304,7 @@ def add_to_cache(
             )
             session_entries[key] = entry
             cache_store.mark_dirty(state.is_dirty, cache_type)
+        return True
 
 
 def add_to_cache_batch(
@@ -275,7 +313,7 @@ def add_to_cache_batch(
     *,
     mods: list[str | None] | None = None,
     paths: list[str | None] | None = None,
-):
+) -> bool:
     """批次新增翻譯到快取（單次鎖獲取，減少鎖競爭）。
 
     Args:
@@ -283,14 +321,17 @@ def add_to_cache_batch(
         entries: List of (key, src, dst) tuples
         mods: Optional list of mod names (same length as entries)
         paths: Optional list of paths (same length as entries)
+
+    Returns:
+        False 代表整批被拒絕（快取初始化失敗）；否則 True（空 entries 視為 True）。
     """
     if not entries:
-        return
+        return True
 
     state = _initialized_state()
     with state.cache_lock:
         if _write_rejected(state, "add_to_cache_batch"):
-            return
+            return False
         cache = cache_store.get_cache_type_dict(state.translation_cache, cache_type)
         session_entries = cache_store.get_session_entries(
             state.session_new_entries, cache_type
@@ -312,6 +353,7 @@ def add_to_cache_batch(
 
         if dirty:
             cache_store.mark_dirty(state.is_dirty, cache_type)
+        return True
 
 
 def get_from_cache(cache_type: str, key: str) -> str | None:

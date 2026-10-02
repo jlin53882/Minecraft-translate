@@ -200,8 +200,7 @@ def cache_update_dst_service(cache_type: str, key: str, new_dst: str) -> bool:
         return False
 
     src = entry.get("src", "")
-    cache_manager.add_to_cache(cache_type, key, src, new_dst)
-    return True
+    return cache_manager.add_to_cache(cache_type, key, src, new_dst)
 
 def cache_rotate_service(cache_type: str) -> bool:
     """強制對指定 cache_type 進行 shard rotation。"""
