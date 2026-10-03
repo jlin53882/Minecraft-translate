@@ -34,19 +34,36 @@ uv run --isolated python tools/ui_smoke.py \
 Generate JSON and Markdown performance reports:
 
 ```bash
+# Run the same real-Flet views matrix three times. Pass all three reports below.
+uv run --isolated python tools/ui_smoke.py \
+  --output-dir .artifacts/ui-smoke/performance-run-1
+uv run --isolated python tools/ui_smoke.py \
+  --output-dir .artifacts/ui-smoke/performance-run-2
+uv run --isolated python tools/ui_smoke.py \
+  --output-dir .artifacts/ui-smoke/performance-run-3
+
 uv run --isolated python tools/performance_baseline.py \
-  --ui-report .artifacts/ui-smoke/performance-source/report.json \
+  --ui-report .artifacts/ui-smoke/performance-run-1/report.json \
+  --ui-report .artifacts/ui-smoke/performance-run-2/report.json \
+  --ui-report .artifacts/ui-smoke/performance-run-3/report.json \
   --output-dir .artifacts/performance/current \
-  --repeats 7
+  --repeats 7 \
+  --runs 3
 ```
 
 Outputs (under the Git-ignored `.artifacts/`):
 
 - `.artifacts/performance/current/performance.json` — machine-readable values
 - `.artifacts/performance/current/performance.md` — human-readable summary
-- `performance.json` preserves each direct benchmark's `samples_ms` list, plus
-  median, min, max, population standard deviation, repeat count, environment and
-  source commit.
+- `performance.json` preserves each complete run under `runs[]`; every direct
+  benchmark keeps its `samples_ms` list, plus median, min, max, population
+  standard deviation, repeat count, environment and source commit.
+- The top-level `summary` preserves run medians, run-to-run range and standard
+  deviation for UI startup/cold/warm timings, JAR, batching, lists and Dashboard.
+- `measurement` records the requested run count, repeat count, UI report paths,
+  whether one UI report was reused, and the exact command. A single UI report
+  reused across multiple engine runs is explicitly marked and is not equivalent
+  to three complete real-Flet runs.
 - The linked UI smoke report preserves each first-build/revisit timing as a case;
   the performance report references that report and summarizes those cases.
 
@@ -69,13 +86,14 @@ This does not flush the operating-system disk cache and must not be reported as 
 cold-disk measurement.
 
 Use the median as the primary value and retain raw samples, min/max and standard
-deviation to expose variance. A single run is evidence that the harness works,
-not evidence for a regression budget.
+deviation to expose both within-run and run-to-run variance. The report is
+traceable because each raw sample remains under its numbered `runs[]` entry,
+alongside the source commit, environment, input report path and command.
 
 ## Regression policy
 
-1. Run at least three complete baselines on the same machine before proposing a
-   threshold.
+1. Run at least three complete baselines on the same machine, including three
+   real-Flet UI reports, before proposing a threshold.
 2. Compare medians and observed ranges. Investigate changes that exceed normal
    variance; do not immediately classify them as product regressions.
 3. Keep this report non-blocking initially. Add a CI warning or hard gate only

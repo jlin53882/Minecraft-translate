@@ -2,8 +2,10 @@
 
 用途：測試 kubejs_tooltip_extract 模組的功能。
 """
+
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -20,9 +22,9 @@ def test_resolve_kubejs_root_direct(tmp_path: Path) -> None:
     kubejs_dir = tmp_path / "kubejs"
     kubejs_dir.mkdir()
     (kubejs_dir / "test.js").write_text("// test")
-    
+
     result = kubejs_tooltip_extract.resolve_kubejs_root(str(kubejs_dir))
-    
+
     assert result == str(kubejs_dir)
 
 
@@ -33,9 +35,9 @@ def test_resolve_kubejs_root_nested(tmp_path: Path) -> None:
     kubejs_dir = root / "kubejs"
     kubejs_dir.mkdir()
     (kubejs_dir / "test.js").write_text("// test")
-    
+
     result = kubejs_tooltip_extract.resolve_kubejs_root(str(root))
-    
+
     assert result == str(kubejs_dir)
 
 
@@ -43,9 +45,9 @@ def test_resolve_kubejs_root_not_found(tmp_path: Path) -> None:
     """測試 resolve_kubejs_root 找不到時回傳原路徑。"""
     root = tmp_path / "empty"
     root.mkdir()
-    
+
     result = kubejs_tooltip_extract.resolve_kubejs_root(str(root))
-    
+
     assert result == str(root)
 
 
@@ -67,7 +69,7 @@ def test_strip_quotes(tmp_path: Path) -> None:
 def test_split_js_args_basic(tmp_path: Path) -> None:
     """測試 split_js_args 基本功能。"""
     result = kubejs_tooltip_extract.split_js_args('"a", "b"')
-    
+
     assert len(result) == 2
     assert '"a"' in result
     assert '"b"' in result
@@ -76,16 +78,16 @@ def test_split_js_args_basic(tmp_path: Path) -> None:
 def test_split_js_args_nested_brackets(tmp_path: Path) -> None:
     """測試 split_js_args 處理嵌套括號。"""
     result = kubejs_tooltip_extract.split_js_args('item.of("mt:pipe", {lvl:1}), 5')
-    
+
     assert len(result) == 2
-    assert "item.of(\"mt:pipe\", {lvl:1})" in result[0]
+    assert 'item.of("mt:pipe", {lvl:1})' in result[0]
     assert "5" in result[1]
 
 
 def test_extract_array_strings(tmp_path: Path) -> None:
     """測試 extract_array_strings 提取陣列字串。"""
     result = kubejs_tooltip_extract.extract_array_strings('["a", "b", "c"]')
-    
+
     assert result == ["a", "b", "c"]
 
 
@@ -94,7 +96,10 @@ def test_is_patchouli_command_only(tmp_path: Path) -> None:
     # 原始碼中的正規表達式是 {...} 格式
     assert kubejs_tooltip_extract.is_patchouli_command_only("{br}") is True
     assert kubejs_tooltip_extract.is_patchouli_command_only("{l:page}") is True
-    assert kubejs_tooltip_extract.is_patchouli_command_only("{img:minecraft:block}") is True
+    assert (
+        kubejs_tooltip_extract.is_patchouli_command_only("{img:minecraft:block}")
+        is True
+    )
     assert kubejs_tooltip_extract.is_patchouli_command_only("Hello") is False
     assert kubejs_tooltip_extract.is_patchouli_command_only("") is False
 
@@ -109,7 +114,9 @@ def test_is_lang_key_like(tmp_path: Path) -> None:
 
 def test_is_lang_key_ref_like(tmp_path: Path) -> None:
     """測試 is_lang_key_ref_like 判斷引用格式。"""
-    assert kubejs_tooltip_extract.is_lang_key_ref_like("{atm9.quest.create.desc}") is True
+    assert (
+        kubejs_tooltip_extract.is_lang_key_ref_like("{atm9.quest.create.desc}") is True
+    )
     assert kubejs_tooltip_extract.is_lang_key_ref_like("{a}\n{b}") is True
     assert kubejs_tooltip_extract.is_lang_key_ref_like("Hello") is False
 
@@ -150,9 +157,9 @@ def test_extract_call_args(tmp_path: Path) -> None:
     """測試 extract_call_args 提取括號內容。"""
     content = "event.add('item', Text.of('tooltip'))"
     start = content.index("(") + 1
-    
+
     result = kubejs_tooltip_extract.extract_call_args(content, start)
-    
+
     assert result is not None
     assert "'item'" in result
 
@@ -161,9 +168,9 @@ def test_extract_js_string_call(tmp_path: Path) -> None:
     """測試 extract_js_string_call 提取 JS 字串。"""
     content = "Text.of('Hello World')"
     start = content.index("(") + 1
-    
+
     result = kubejs_tooltip_extract.extract_js_string_call(content, start)
-    
+
     assert result == "Hello World"
 
 
@@ -171,17 +178,61 @@ def test_extract_js_string_call_double_quote(tmp_path: Path) -> None:
     """測試 extract_js_string_call 雙引號。"""
     content = 'Text.of("Hello World")'
     start = content.index("(") + 1
-    
+
     result = kubejs_tooltip_extract.extract_js_string_call(content, start)
-    
+
     assert result == "Hello World"
 
 
 def test_should_skip_kubejs_tooltip_expr(tmp_path: Path) -> None:
     """測試 should_skip_kubejs_tooltip_expr 跳過表達式。"""
-    assert kubejs_tooltip_extract.should_skip_kubejs_tooltip_expr("Text.translate('key')") is True
-    assert kubejs_tooltip_extract.should_skip_kubejs_tooltip_expr("Text.of('text')") is True
-    assert kubejs_tooltip_extract.should_skip_kubejs_tooltip_expr("event.add('item', 'text')") is False
+    assert (
+        kubejs_tooltip_extract.should_skip_kubejs_tooltip_expr("Text.translate('key')")
+        is True
+    )
+    assert (
+        kubejs_tooltip_extract.should_skip_kubejs_tooltip_expr("Text.of('text')")
+        is False
+    )
+    assert (
+        kubejs_tooltip_extract.should_skip_kubejs_tooltip_expr("Text.literal('text')")
+        is False
+    )
+    assert (
+        kubejs_tooltip_extract.should_skip_kubejs_tooltip_expr(
+            "event.add('item', 'text')"
+        )
+        is False
+    )
+
+
+def test_extract_preserves_literal_tooltip_calls_for_pipeline_injection(
+    tmp_path: Path,
+) -> None:
+    """Text.of/Text.literal 是 literal 文字，必須能走完整提取到注入流程。"""
+    kubejs_dir = tmp_path / "kubejs" / "client_scripts"
+    kubejs_dir.mkdir(parents=True)
+    (kubejs_dir / "test.js").write_text(
+        "event.add('minecraft:dirt', Text.of('Event text'))\n"
+        "scene.text('scene', 'Scene text')\n"
+        "ItemEvents.tooltip(event => {\n"
+        "  event.add('minecraft:stone', [Text.literal('Tooltip text')]);\n"
+        "});",
+        encoding="utf-8",
+    )
+
+    result = kubejs_tooltip_extract.extract(
+        source_dir=str(tmp_path / "kubejs"),
+        output_dir=str(tmp_path / "raw"),
+    )
+    extracted = json.loads(
+        (tmp_path / "raw" / "client_scripts" / "test.json").read_text(encoding="utf-8")
+    )
+
+    assert result["errors_count"] == 0
+    assert extracted["test.js|minecraft:dirt.0"] == "Event text"
+    assert extracted["test.js|scene.1"] == "Scene text"
+    assert extracted["test.js|minecraft:stone.tooltip.0"] == "Tooltip text"
 
 
 def test_resolve_kubejs_root_case_insensitive(tmp_path: Path) -> None:
@@ -192,7 +243,7 @@ def test_resolve_kubejs_root_case_insensitive(tmp_path: Path) -> None:
     kubejs_dir = root / "kubejs"  # 必須是小寫
     kubejs_dir.mkdir()
     (kubejs_dir / "test.js").write_text("// test")
-    
+
     result = kubejs_tooltip_extract.resolve_kubejs_root(str(root))
-    
+
     assert result == str(kubejs_dir)

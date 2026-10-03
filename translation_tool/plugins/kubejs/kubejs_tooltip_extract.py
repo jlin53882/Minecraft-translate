@@ -4,17 +4,17 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import os
 import json
+import os
 import re
 from collections import defaultdict
 from pathlib import Path
 
 from translation_tool.utils.log_unit import (
-    log_info,
-    log_error,
-    log_warning,
     log_debug,
+    log_error,
+    log_info,
+    log_warning,
 )
 
 
@@ -37,8 +37,8 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
 
     try:
         base = Path(input_dir).resolve()
-    except Exception as e:
-        log_error(f"路徑解析失敗: {input_dir}, 錯誤: {str(e)}")
+    except (OSError, RuntimeError) as e:
+        log_error(f"路徑解析失敗: {input_dir}, 錯誤: {e!s}")
         return input_dir
 
     # 1) 情境 A：使用者直接選中了 kubejs 目錄
@@ -74,8 +74,8 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
                 best_match = p
                 log_info(f"搜尋成功：在深度 {current_depth} 處找到 KubeJS -> {p}")
                 break
-    except Exception as e:
-        log_error(f"掃描目錄時發生異常: {str(e)}")
+    except (OSError, RuntimeError) as e:
+        log_error(f"掃描目錄時發生異常: {e!s}")
 
     if best_match:
         return str(best_match)
@@ -110,13 +110,13 @@ def strip_quotes(s: str) -> str:
     移除字串前後成對的單引號或雙引號。
     """
     s = s.strip()
-    if len(s) >= 2:
-        if (s.startswith("'") and s.endswith("'")) or (
-            s.startswith('"') and s.endswith('"')
-        ):
-            stripped = s[1:-1]
-            log_debug(f"已脫殼引號: {s} -> {stripped}")
-            return stripped
+    if len(s) >= 2 and (
+        (s.startswith("'") and s.endswith("'"))
+        or (s.startswith('"') and s.endswith('"'))
+    ):
+        stripped = s[1:-1]
+        log_debug(f"已脫殼引號: {s} -> {stripped}")
+        return stripped
     return s
 
 
@@ -179,13 +179,9 @@ def extract_array_strings(arr: str) -> list[str]:
     使用正則表達式從字串中提取所有被引號包圍的內容。
     通常用於處理 JS 陣列字串，如 '["a", "b"]' -> ['a', 'b']
     """
-    try:
-        matches = re.findall(r"['\"]([^'\"]+)['\"]", arr)
-        log_debug(f"從陣列提取字串成功，找到 {len(matches)} 個項目")
-        return matches
-    except Exception as e:
-        log_error(f"提取陣列字串時發生錯誤: {str(e)}")
-        return []
+    matches = re.findall(r"['\"]([^'\"]+)['\"]", arr)
+    log_debug(f"從陣列提取字串成功，找到 {len(matches)} 個項目")
+    return matches
 
 
 # ---------- Patchouli 指令過濾 ----------
@@ -294,13 +290,13 @@ def clean_text(s: str) -> str:
 
 
 _RE_SKIP_KUBEJS_TOOLTIP_EXPR = re.compile(
-    r"^\s*(Text\.translate|Text\.of|Component\.translatable|Component\.translate|Component\.literal)\s*\(",
-    re.S,
+    r"^\s*(Text\.translate|Text\.translatable|Component\.translatable|Component\.translate)\s*\(",
+    re.DOTALL,
 )
 
 
 def should_skip_kubejs_tooltip_expr(expr: str) -> bool:
-    """第二參數如果是 Text.translate(...) 這種，代表語言 key 引用，不要抽去翻譯。"""
+    """只跳過明確的語言 key 呼叫，保留 literal／Text.of 文字供翻譯。"""
     return bool(_RE_SKIP_KUBEJS_TOOLTIP_EXPR.match((expr or "").strip()))
 
 
@@ -649,8 +645,9 @@ def extract(
                         # 若內容是陣列 [...]
                         elif args[1].startswith("["):
                             if "Text." in args[1]:
-                                idx = 0
-                                for tm in re.finditer(r"Text\.\w+\s*\(", args[1]):
+                                for idx, tm in enumerate(
+                                    re.finditer(r"Text\.\w+\s*\(", args[1])
+                                ):
                                     t = extract_js_string_call(args[1], tm.end())
                                     if t and not should_skip_text(
                                         t, skip_chinese=False
@@ -658,7 +655,6 @@ def extract(
                                         extracted[
                                             f"{file_name}|{item_id}.{n}.{idx}"
                                         ] = clean_text(t)
-                                    idx += 1
                             else:
                                 # 純字串陣列
                                 for i, txt in enumerate(extract_array_strings(args[1])):
@@ -668,7 +664,7 @@ def extract(
                                         )
 
                 # 2. 處理 Ponder 劇情文字 (scene.text)
-                for m in re.finditer(r"scene\.text\s*\((.+?)\)", content, re.S):
+                for m in re.finditer(r"scene\.text\s*\((.+?)\)", content, re.DOTALL):
                     args = split_js_args(m.group(1))
 
                     if len(args) >= 2:
@@ -706,9 +702,9 @@ def extract(
                         ):
                             extracted[k] = v
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             errors_count += 1  # ✅ 累加
-            msg = f"❌ 處理檔案失敗: {file_path} | 錯誤: {str(e)}"
+            msg = f"❌ 處理檔案失敗: {file_path} | 錯誤: {e!s}"
             log_error(msg)
             # ✅ 出錯就跳過該檔案，繼續下一個
             processed_count += 1

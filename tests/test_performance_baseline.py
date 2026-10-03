@@ -8,6 +8,7 @@ import pytest
 
 from tools.performance_baseline import (
     benchmark,
+    build_multi_run_report,
     measure_dashboard_workloads,
     measure_jar_scans,
     summarize_samples,
@@ -130,3 +131,53 @@ def test_dashboard_workloads_are_separate_and_reproducible(tmp_path) -> None:
         assert sample_set["min_ms"] <= sample_set["median_ms"] <= sample_set["max_ms"]
 
     assert list(tmp_path.iterdir()) == []
+
+
+def test_multi_run_report_keeps_raw_samples_and_run_variance() -> None:
+    """多次完整 baseline 不得把 run 邊界壓平，且要保留 run 間 median。"""
+
+    def make_run(index: int, median: float) -> dict:
+        sample = {
+            "median_ms": median,
+            "min_ms": median,
+            "max_ms": median,
+            "stdev_ms": 0.0,
+            "repeats": 3,
+            "samples_ms": [median, median, median],
+        }
+        return {
+            "run_index": index,
+            "ui_report": None,
+            "environment": {"git_commit": "test", "git_worktree_dirty": False},
+            "ui": {
+                "startup": {"median_ms": median},
+                "browser_ready": {"median_ms": median},
+                "first_view_build": {"dashboard": {"median_ms": median}},
+                "warm_view_revisit": {"dashboard": {"median_ms": median}},
+            },
+            "jar_scan": [{"jar_count": 10, **sample}],
+            "batch_selection": [{"mode": "count_only", **sample}],
+            "list_construction": [{"row_count": 1000, **sample}],
+            "dashboard": {"cache": sample},
+        }
+
+    report = build_multi_run_report(
+        [make_run(1, 1.0), make_run(2, 2.0), make_run(3, 3.0)],
+        repeats=3,
+        ui_reports=[],
+        ui_report_reused=False,
+    )
+
+    assert report["run_count"] == 3
+    assert [run["run_index"] for run in report["runs"]] == [1, 2, 3]
+    assert report["runs"][0]["jar_scan"][0]["samples_ms"] == [1.0, 1.0, 1.0]
+    assert report["summary"]["ui"]["startup"]["run_medians_ms"] == [
+        1.0,
+        2.0,
+        3.0,
+    ]
+    assert report["summary"]["jar_scan"][0]["run_variance"]["run_medians_ms"] == [
+        1.0,
+        2.0,
+        3.0,
+    ]
