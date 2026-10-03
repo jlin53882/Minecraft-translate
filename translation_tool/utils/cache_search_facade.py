@@ -60,7 +60,7 @@ class CacheSearchFacade:
 
     def rebuild_search_index(
         self, cache_types: list[str], translation_cache: dict[str, dict[str, Any]]
-    ) -> None:
+    ) -> bool:
         """重建搜尋索引。"""
         try:
             self._logger.info("🔄 開始重建搜尋索引...")
@@ -68,25 +68,29 @@ class CacheSearchFacade:
                 cache_types, translation_cache
             )
             self._logger.info(f"✅ 搜尋索引重建完成，共索引 {total_indexed} 條翻譯")
+            return True
         except Exception as e:
             self._logger.error(f"❌ 重建搜尋索引失敗: {e}", exc_info=True)  # noqa: G201
+            return False
 
     def rebuild_search_index_for_type(
         self,
         cache_type: str,
         cache_types: list[str],
         translation_cache: dict[str, dict[str, Any]],
-    ) -> None:
+    ) -> bool:
         """重建特定類型的搜尋索引。"""
         if cache_type not in cache_types:
-            return
+            return False
         try:
             indexed = self._get_orchestrator().rebuild_search_index_for_type(
                 cache_type, translation_cache
             )
             self._logger.info(f"✅ {cache_type} 索引重建完成（{indexed} 條）")
+            return True
         except Exception as e:
             self._logger.error(f"❌ {cache_type} 索引重建失敗: {e}", exc_info=True)  # noqa: G201
+            return False
 
     def search_cache(
         self,
