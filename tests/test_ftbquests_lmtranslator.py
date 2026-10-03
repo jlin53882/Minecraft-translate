@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 # 測試模組
-from translation_tool.plugins.ftbquests import ftbquests_lmtranslator
+from translation_tool.plugins.ftbquests import ftbquests_lmtranslator  # noqa: E402
 
 
 def test_map_to_items_basic(tmp_path: Path) -> None:
@@ -217,3 +217,29 @@ def test_ftb_callback_factories_bind_each_project_for_late_calls(
         ]
         assert context["touch"].touched == [str(out_dir / f"{project}.json")]
         assert progress_values[project] == [0.5]
+
+
+def test_ftb_batch_flush_falls_back_to_json_write(monkeypatch, tmp_path: Path) -> None:
+    """批次 flush 失敗時，應對相同輸出呼叫一次 JSON fallback。"""
+    dst = tmp_path / "alpha.json"
+    out_map = {"alpha.title": "translated"}
+    fallback_calls: list[tuple[Path, dict[str, str]]] = []
+
+    def fallback_write_json(path: Path, data: dict[str, str]) -> None:
+        fallback_calls.append((path, data))
+
+    class FailingTouch:
+        def touch(self, _file_id: str) -> None:
+            return None
+
+        def flush(self, _writer) -> None:
+            raise RuntimeError("flush failed")
+
+    monkeypatch.setattr(ftbquests_lmtranslator, "write_json_dict", fallback_write_json)
+
+    on_batch_flushed = ftbquests_lmtranslator._make_on_batch_flushed(
+        str(dst), FailingTouch(), lambda _file_id: None, dst, out_map
+    )
+    on_batch_flushed()
+
+    assert fallback_calls == [(dst, out_map)]

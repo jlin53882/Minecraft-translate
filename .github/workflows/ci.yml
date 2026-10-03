@@ -90,8 +90,16 @@ jobs:
           echo "Changed Python files:"
           echo "$FILES"
 
-          # PR scope gate: keep legacy full-file lint debt (for example #128)
-          # from blocking focused fixes, while enforcing the callback rules
-          # covered by the current PR.
-          echo "$FILES" | xargs uv run ruff check --select F811,B023
+          # Keep the complete changed-files Ruff gate. The FTB translator has
+          # an explicit, temporary #128 baseline for legacy diagnostics only;
+          # remove this scoped baseline when PR-3 cleans those rules.
+          # E402 is explicit so intentional test import ordering is checked.
+          echo "$FILES" | xargs uv run ruff check --extend-select E402 \
+            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:BLE001' \
+            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:I001' \
+            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:PIE790' \
+            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:S110' \
+            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:UP006' \
+            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:UP035' \
+            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:UP045'
           echo "$FILES" | xargs uv run ruff format --check
