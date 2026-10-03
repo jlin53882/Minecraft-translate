@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 # 測試模組
-from translation_tool.plugins.ftbquests import ftbquests_lmtranslator  # noqa: E402
+from translation_tool.plugins.ftbquests import ftbquests_lmtranslator
 
 
 def test_map_to_items_basic(tmp_path: Path) -> None:
