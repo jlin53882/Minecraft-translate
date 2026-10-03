@@ -92,7 +92,7 @@ jobs:
 
           # Keep the complete changed-files Ruff gate. The FTB translator has
           # an explicit, temporary #128 baseline for legacy diagnostics only;
-          # remove this scoped baseline when PR-3 cleans those rules.
+          # remove this scoped baseline when #128 cleans these legacy diagnostics.
           # E402 is explicit so intentional test import ordering is checked.
           echo "$FILES" | xargs uv run ruff check --extend-select E402 \
             --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:BLE001' \
