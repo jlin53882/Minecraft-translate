@@ -20,12 +20,13 @@ import copy
 import json
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _listeners: list[Callable[[], None]] = []
+_path_listeners: list[Callable[[frozenset[str]], None]] = []
 _lock = threading.Lock()
 _write_lock = threading.Lock()  # 序列化對 config.json 的 read-modify-write
 
@@ -51,15 +52,52 @@ def subscribe(callback: Callable[[], None]) -> Callable[[], None]:
     return unsubscribe
 
 
-def notify_saved() -> None:
-    """設定已寫入：通知所有訂閱者（單一訂閱者出錯不影響其他人）。"""
+def subscribe_paths(callback: Callable[[frozenset[str]], None]) -> Callable[[], None]:
+    """訂閱設定異動路徑；保留獨立 API 以相容既有零參數 callback。"""
+    with _lock:
+        _path_listeners.append(callback)
+
+    def unsubscribe() -> None:
+        with _lock:
+            if callback in _path_listeners:
+                _path_listeners.remove(callback)
+
+    return unsubscribe
+
+
+def notify_saved(changed_paths: Iterable[str] | None = None) -> None:
+    """設定已寫入：通知零參數與 changed-path 訂閱者。"""
+    changed = frozenset(changed_paths or ())
     with _lock:
         listeners = list(_listeners)
+        path_listeners = list(_path_listeners)
     for callback in listeners:
         try:
             callback()
         except Exception:
             logger.exception("設定異動訂閱者失敗")
+    for callback in path_listeners:
+        try:
+            callback(changed)
+        except Exception:
+            logger.exception("設定異動路徑訂閱者失敗")
+
+
+def changed_paths(before: Any, after: Any) -> frozenset[str]:
+    """計算兩份設定的 leaf paths，供精準訂閱者判斷是否需要刷新。"""
+    changed: set[str] = set()
+
+    def walk(left: Any, right: Any, prefix: str) -> None:
+        if isinstance(left, dict) and isinstance(right, dict):
+            for key in left.keys() | right.keys():
+                child = f"{prefix}.{key}" if prefix else str(key)
+                walk(left.get(key, _MISSING), right.get(key, _MISSING), child)
+            return
+        if left != right:
+            changed.add(prefix)
+
+    walk(before, after, "")
+    return frozenset(changed)
 
 
 def _walk(data: Any, path: str, default: Any = None) -> Any:
@@ -127,7 +165,7 @@ def set_value(path: str, value: Any) -> bool:
         node[keys[-1]] = copy.deepcopy(value)
         ok = bool(save_config(raw, config_path))
     if ok:
-        notify_saved()
+        notify_saved({path})
     return ok
 
 

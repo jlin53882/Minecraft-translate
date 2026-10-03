@@ -162,6 +162,17 @@ def load_config_into_view(view, config: dict):
         view.controls_map["lm_translator.rpm_cooldown_sec"].value = str(
             _v if _v is not None else get_default("lm_translator.rpm_cooldown_sec", 0)
         )
+    for path in (
+        "lm_translator.max_output_tokens",
+        "lm_translator.max_output_token_budget",
+        "lm_translator.max_input_token_budget",
+        "lm_translator.key_failure_cooldown_sec",
+    ):
+        if path in view.controls_map:
+            _v = lm_cfg.get(path.rsplit(".", 1)[-1])
+            view.controls_map[path].value = str(
+                _v if _v is not None else get_default(path)
+            )
     view.controls_map["lm_translator.patchouli.dir_names"].value = "\n".join(
         lm_cfg.get("patchouli", {}).get("dir_names", [])
     )
@@ -209,7 +220,15 @@ def load_config_into_view(view, config: dict):
     else:
         models_cfg = models_cfg or {}
     for name, cfg in models_cfg.items():
-        view.add_model_row(name)
+        cap = cfg.get("max_output_tokens")
+        if cap is None:
+            view.add_model_row(name)
+        else:
+            try:
+                view.add_model_row(name, cap)
+            except TypeError:
+                # Characterization/test doubles from the legacy one-argument API.
+                view.add_model_row(name)
         view.models_column.controls[-1]._checkbox.value = bool(
             cfg.get("enabled", False)
         )
@@ -371,6 +390,17 @@ def save_config_from_view(
                 0.0,
                 float(view.controls_map["lm_translator.rpm_cooldown_sec"].value or 0),
             )
+        for path in (
+            "lm_translator.max_output_tokens",
+            "lm_translator.max_output_token_budget",
+            "lm_translator.max_input_token_budget",
+            "lm_translator.key_failure_cooldown_sec",
+        ):
+            if path in view.controls_map:
+                key = path.rsplit(".", 1)[-1]
+                new_config["lm_translator"][key] = int(
+                    view.controls_map[path].value or 0
+                )
         new_config["lm_translator"]["patchouli"]["dir_names"] = [
             line.strip()
             for line in view.controls_map[
@@ -427,9 +457,22 @@ def save_config_from_view(
         validate_api_keys_from_ui_fn(api_keys)
         new_config["lm_translator"]["keys"] = api_keys
         models = {}
+        previous_models = new_config["lm_translator"].get("models", {})
         for row in view.models_column.controls:
             cb = row._checkbox
-            models[cb.label] = {"enabled": bool(cb.value)}
+            model_cfg = {"enabled": bool(cb.value)}
+            cap_field = getattr(row, "_max_output_tokens", None)
+            raw_cap = getattr(cap_field, "value", "") if cap_field is not None else ""
+            if raw_cap not in (None, ""):
+                model_cfg["max_output_tokens"] = int(raw_cap)
+            elif (
+                isinstance(previous_models.get(cb.label), dict)
+                and "max_output_tokens" in previous_models[cb.label]
+            ):
+                model_cfg["max_output_tokens"] = previous_models[cb.label][
+                    "max_output_tokens"
+                ]
+            models[cb.label] = model_cfg
         new_config["lm_translator"]["models"] = models
     except (ValueError, TypeError, RuntimeError) as err:
         traceback.print_exc()

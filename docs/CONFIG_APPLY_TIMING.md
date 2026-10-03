@@ -99,3 +99,10 @@
 1. 設定頁每個欄位標示生效時機：`即時` / `下次任務` / `需重啟`（由一份中央表 `app/config_apply.py` 提供，設定頁與文件共用）。
 2. `config_store` 增加「哪些路徑變了」：`subscribe(callback(changed_paths))`，各頁只處理自己關心的路徑，而不是每次全部重讀。
 3. 針對高優先項目各補一個測試（快取目錄變更觸發重載、規則路徑讀對、有任務時的提示）。
+
+## PR-5 實際契約
+
+- 中央 metadata 位於 `app/config_apply.py`，目前對快取根目錄、模型設定、token 上限與 species cache 定義生效時機。
+- 既有 `config_store.subscribe(callback)` 維持零參數相容性；需要精準刷新時使用 `subscribe_paths(callback(changed_paths))`，不要求舊 callback 改簽名。
+- `translator.cache_directory` 儲存後不會讓現行任務中途換根目錄。下一次啟動或明確呼叫 `reload_translation_cache()` 才採用持久化的新路徑；pending writer 仍綁定目前 active root。
+- `lm_translator` 的 per-model `max_output_tokens` 是可選欄位：缺少或 `null` 使用全域值，`0` 表示不送欄位；下一批次讀取，舊版只含 `enabled` 的設定可直接載入。
