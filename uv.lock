@@ -666,7 +666,7 @@ requires-dist = [
 dev = [
     { name = "playwright", specifier = ">=1.63.0" },
     { name = "pytest", specifier = ">=9.0.2" },
-    { name = "ruff", specifier = ">=0.9.0" },
+    { name = "ruff", specifier = "==0.16.9" },
 ]
 
 [[package]]

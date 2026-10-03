@@ -180,8 +180,8 @@ class TestCompareVariantsTsvGenerator:
         """測試輸出目錄自動建立。"""
         file_path = tmp_path / "test.tsv"
 
-        # 輸出到不存在的子目錄
-        output_file = "subdir/output.csv"  # 使用相對路徑
+        # 輸出到不存在的子目錄，且完全位於暫存目錄中
+        output_file = tmp_path / "subdir" / "output.csv"
 
         # Mock OpenCC - 讓轉換後有差異，這樣才會寫入輸出檔案
         mock_converter = MagicMock()
@@ -200,14 +200,13 @@ class TestCompareVariantsTsvGenerator:
 
         results = list(
             variant_comparator_tsv.compare_variants_tsv_generator(
-                str(file_path), output_file
+                str(file_path), str(output_file)
             )
         )
 
-        # 應該成功建立目錄和檔案（在 current working directory）
-        tmp_path / "subdir" / "output.csv"
-        # 由於使用相對路徑，檔案會建立在執行目錄
-        # 這個測試驗證函式能正確處理輸出目錄建立
+        # 應該成功建立暫存目錄和輸出檔案
+        assert output_file.parent.is_dir()
+        assert output_file.exists()
         # 檢查有差異產生
         diff_result = next(r for r in results if "差異" in r.get("log", ""))
         assert "差異" in diff_result["log"]
