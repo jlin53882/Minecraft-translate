@@ -50,9 +50,15 @@ DIALOG_SMOKE_KEYS = (
     "pipeline_translate",
     "pipeline_bundle",
     "pipeline_one_click",
+    "pipeline_one_click_reopen",
     "extractor_run",
     "extractor_preview",
     "merge_summary",
+)
+DIALOG_WIZARD_STEP_KEYS = (
+    "pipeline_one_click_step2",
+    "pipeline_one_click_step3",
+    "pipeline_one_click_step4",
 )
 DIALOG_SCROLL_CASES: dict[str, str] = {
     "pipeline_merge": "pipeline_merge_bottom",
@@ -282,6 +288,10 @@ def _expected_case_keys(
                     for key in DIALOG_SMOKE_KEYS
                 )
                 expected.update(
+                    ("dialog_wizard", theme, viewport, key)
+                    for key in DIALOG_WIZARD_STEP_KEYS
+                )
+                expected.update(
                     ("dialog_scroll", theme, viewport, key)
                     for key in DIALOG_SCROLL_CASES.values()
                 )
@@ -451,6 +461,31 @@ def _run_dialog_scenario(
                 }
             )
         _ack_capture(runtime_root, f"{theme}-{viewport}-dialog_gallery-{dialog_key}")
+        if dialog_key == "pipeline_one_click":
+            for step in range(2, 5):
+                wizard_key = f"pipeline_one_click_step{step}"
+                wait_for_title(
+                    page,
+                    f"SMOKE:DIALOG:pipeline_one_click:STEP:{step}:OPEN",
+                    30000,
+                    exact=True,
+                )
+                page.wait_for_timeout(150)
+                filename = f"{theme}-{viewport}-dialog-{wizard_key}.png"
+                cases.append(
+                    {
+                        "kind": "dialog_wizard",
+                        "theme": theme,
+                        "viewport": viewport,
+                        "view": wizard_key,
+                        "screenshot": _capture_case(page, output_dir, filename),
+                        "needs_visual_review": True,
+                    }
+                )
+                _ack_capture(
+                    runtime_root,
+                    f"{theme}-{viewport}-dialog_wizard-{wizard_key}",
+                )
     wait_for_title(page, "SMOKE:LIFECYCLE:DISPOSED", 10000, exact=True)
     behavior_checks.append(
         {

@@ -10,6 +10,7 @@ import pytest
 
 from tools.ui_smoke import (
     DIALOG_SMOKE_KEYS,
+    DIALOG_WIZARD_STEP_KEYS,
     SMOKE_SCENARIOS,
     VIEW_KEYS,
     _ack_capture,
@@ -40,7 +41,7 @@ def test_dialog_scenario_covers_every_primary_entry_point() -> None:
     """Dialog gallery 的期望清單要涵蓋所有登錄的正式入口。"""
     keys = _expected_case_keys("dialogs", ("light",), ((720, 900),))
 
-    assert len(keys) == len(DIALOG_SMOKE_KEYS) + 2
+    assert len(keys) == len(DIALOG_SMOKE_KEYS) + len(DIALOG_WIZARD_STEP_KEYS) + 2
     assert ("dialog_gallery", "light", "720x900", "pipeline_extract_reopen") in keys
     assert ("dialog_gallery", "light", "720x900", "pipeline_merge_reopen") in keys
     assert ("dialog_scroll", "light", "720x900", "pipeline_merge_bottom") in keys
@@ -49,6 +50,12 @@ def test_dialog_scenario_covers_every_primary_entry_point() -> None:
         "light",
         "720x900",
         "pipeline_merge_reopen_bottom",
+    ) in keys
+    assert (
+        "dialog_wizard",
+        "light",
+        "720x900",
+        "pipeline_one_click_step4",
     ) in keys
 
 
@@ -95,6 +102,37 @@ def test_capture_ack_times_out_without_busy_spin(tmp_path) -> None:
                 poll_interval=0.001,
             )
         )
+
+
+def test_capture_ack_consumes_marker_after_transient_windows_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """marker 暫時被鎖住時應重試，而不是讓 smoke task 提前中止。"""
+    marker = tmp_path / ".smoke-acks" / "locked-case.done"
+    marker.parent.mkdir()
+    marker.write_text("captured", encoding="utf-8")
+    original_unlink = Path.unlink
+    attempts = 0
+
+    def flaky_unlink(path: Path, *args, **kwargs) -> None:
+        nonlocal attempts
+        if path == marker and attempts == 0:
+            attempts += 1
+            raise PermissionError("simulated transient Windows lock")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", flaky_unlink)
+    asyncio.run(
+        _wait_for_capture_ack(
+            tmp_path,
+            "locked-case",
+            timeout_seconds=0.1,
+            poll_interval=0.001,
+        )
+    )
+
+    assert attempts == 1
+    assert not marker.exists()
 
 
 class _TitleHandle:

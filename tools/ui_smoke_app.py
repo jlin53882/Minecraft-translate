@@ -118,7 +118,19 @@ async def _wait_for_capture_ack(
         if time.monotonic() >= deadline:
             raise TimeoutError(f"等待 Playwright 截圖確認逾時：{token}")
         await asyncio.sleep(poll_interval)
-    marker.unlink()
+    while True:
+        try:
+            marker.unlink()
+            return
+        except FileNotFoundError:
+            # 允許一次性 marker 被其他 cleanup 路徑先消費。
+            return
+        except PermissionError:
+            # Windows 可能在檔案剛寫完時短暫保留 handle；bounded retry
+            # 保持 OPEN -> capture -> ACK -> advance 順序，又不會無限等待。
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"清理 Playwright 截圖確認逾時：{token}")
+            await asyncio.sleep(poll_interval)
 
 
 def _dispose_and_probe_late_task(page: ft.Page, shell) -> None:
@@ -283,6 +295,7 @@ async def _run_dialog_sequence(
         ("pipeline_translate", pipeline._on_translate_click),
         ("pipeline_bundle", pipeline._on_bundle_click),
         ("pipeline_one_click", pipeline._on_one_click_click),
+        ("pipeline_one_click_reopen", pipeline._on_one_click_click),
         (
             "extractor_run",
             lambda: open_extractor_dialog(
@@ -321,6 +334,23 @@ async def _run_dialog_sequence(
         await _wait_for_capture_ack(
             runtime_root, f"{theme}-{viewport}-dialog_gallery-{dialog_key}"
         )
+        if dialog_key == "pipeline_one_click":
+            for step in range(2, 5):
+                current_dialog = next(
+                    dialog
+                    for dialog in reversed(page.overlay)
+                    if isinstance(dialog, ft.AlertDialog) and dialog.open
+                )
+                # Step 1 actions are [下一個, 取消]; steps 2/3 are
+                # [上一個, 下一個, 取消], so the penultimate action advances.
+                current_dialog.actions[-2].on_click(None)
+                await asyncio.sleep(interval)
+                page.title = f"SMOKE:DIALOG:pipeline_one_click:STEP:{step}:OPEN"
+                page.update()
+                await _wait_for_capture_ack(
+                    runtime_root,
+                    f"{theme}-{viewport}-dialog_wizard-pipeline_one_click_step{step}",
+                )
         _dismiss_top_dialog(page)
         # 等 Flutter modal 的 reverse transition 完成，避免殘影混入下一張截圖。
         await asyncio.sleep(0.35)

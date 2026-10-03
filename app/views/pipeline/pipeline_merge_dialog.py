@@ -375,8 +375,8 @@ def open_merge_dialog(
         ),
     )
 
-    content = ft.Column(
-        [
+    content = ft.ListView(
+        controls=[
             ft.Text("Mod 來源", weight="bold", size=13),
             merge_input_mode_group,
             folder_input_row,
@@ -455,7 +455,7 @@ def open_merge_dialog(
             ),
         ],
         spacing=10,
-        tight=False,
+        padding=0,
         scroll=ft.ScrollMode.AUTO,
     )
 

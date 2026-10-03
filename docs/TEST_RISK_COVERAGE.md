@@ -18,22 +18,22 @@
 | checkpoint 與取消 | `test_lm_checkpoint_fingerprint.py`、`test_cancellation.py`、`test_task_session.py`、`test_shell_scheduling.py` | fingerprint 測試證明同資料可讀 checkpoint，不等於程序崩潰後整個流程可恢復；FakePage teardown 測試不等於真 Flet 關閉；TaskSession／TaskManager 沒有獨立終止 `CANCELLED` 狀態 | P1 |
 | JAR 掃描／提取與封存安全 | `test_scan_jars_explicit_list.py`、`test_jar_processor_extract.py`、`test_extraction_failure_contract.py`、`test_zip_safety.py`、`test_zip_safety_hardening.py`、`test_zip_bomb_protection.py` | 高風險尺寸／路徑防護有行為測試；大型真實模組包與 UI progress／取消串接仍需人工或整合驗收 | P1 |
 | Lang merge／輸出與 pending | `test_lang_merger_folder_baseline.py`、`test_lang_merger_zip_baseline.py`、`test_lang_merger_budget_exhausted.py`、`test_lang_merge_pending_export.py`、`test_merge_pipeline_e2e.py`、`test_translation_path_writer.py` | 有資料流程測試；跨階段意外中止後所有中間檔案／checkpoint 的恢復邊界仍需另外列明，不能從成功路徑推定 | P1 |
-| FTB Quests／KubeJS／Markdown 注入 | 既有 `test_ftbquests_snbt_inject.py`、`test_kubejs_tooltip_inject.py`、`test_md_inject_qa.py` 以 helper／零碎流程為主；本盤點新增 SNBT 實際寫出、KubeJS 實際 JS 輸出、Markdown 主流程輸出的行為斷言 | FTB Quests 完整 extraction→translate→inject 多階段工作流仍未由單一端到端 fixture 鎖定；KubeJS 所有語法形態未全覆蓋 | P1 |
+| FTB Quests／KubeJS／Markdown 注入 | `test_ftbquests_snbt_inject.py`、`test_kubejs_tooltip_inject.py`、`test_md_inject_qa.py` 均有輸出內容斷言；KubeJS 另保護平衡括號的 `event.add(..., Text.of(...))`、nested Text、escaping、no-op 與 patched count invariant | FTB Quests 完整 extraction→translate→inject 多階段工作流仍未由單一端到端 fixture 鎖定；KubeJS 其他未列出的 JavaScript 語法形態未全覆蓋 | P1 |
 | 資源包 bundler | `test_output_bundler.py`（實際 ZIP 檔案、額外目錄、重複檔名與完整流程）、`test_bundler_view_characterization.py`、`test_duplicate_run_guards.py` | 核心產物有行為保護；UI busy/cancel 與 ZIP 失敗後可恢復狀態仍主要由 View 測試覆蓋 | P2 |
 | Dashboard／13 頁真實渲染與主要 Dialog | `test_dashboard_data.py`、各 View characterization、`tools/ui_smoke.py` 真 Flet／Playwright | FakePage／控制項斷言無法證明 canvas 排版；原 smoke 未覆蓋主要 pipeline Dialog、窄版／直向尺寸、空／有資料／錯誤／取消／loading 矩陣與回訪；新的 harness 和人工檢查清單補上邊界 | P1 |
 | callback／UI teardown | `test_shell_scheduling.py` 驗證 worker callback 只排程及 dispose；smoke 現新增真 Flet session dispose 後 late TaskSession probe | 需在真實 Windows 桌面 CLOSE／destroy 流程確認的部分不屬本次測試工具 PR；CanvasKit smoke 不能代替桌面實機 | P2 |
 
-## 本輪第一批行為補強
+## 本輪第一批行為補強與修復
 
 - `tests/test_ftbquests_snbt_inject.py::test_patch_lang_snbt_file_writes_only_template_keys`：實際解析輸出 SNBT，確認既有值更新、其他欄位保留、模板外 key 不新增。
 - `tests/test_kubejs_tooltip_inject.py::test_inject_basic_flow`：不再只斷言計數非負；檢查實際輸出的翻譯內容與來源 JS 未改動。
 - `tests/test_md_inject_qa.py::test_main_writes_translated_markdown_without_changing_tokens`：走 CLI 主流程及暫存檔案，確認 en_us→zh_tw 輸出、格式 token 保留、多餘文字行清空且來源檔未修改。
 
-這些是 characterization／行為保護；不改產品行為。測試本身無須為了 TDD 形式故意對正確現況變紅；本輪另有下方發現，已作為未處理的產品 follow-up 記錄。
+這些是 characterization／行為保護；KubeJS 的平衡括號 writeback 修復也已納入本 PR，避免測試只保護一個計數器而沒有驗證輸出內容。
 
-## 本輪調查發現、刻意不納入的產品修正
+## 本輪已解決與保留邊界
 
-KubeJS 的 `event.add(..., Text.of(...))` 路徑有待獨立處理：本輪臨時 fixture `event.add('minecraft:dirt', Text.of('Dirty'))` 搭配 translation key `test.js|minecraft:dirt.0`，經 `inject()` 後沒有把「泥土」寫入輸出。根因候選是 `kubejs_tooltip_inject.py` 使用非括號平衡的 `event.add\s*\((.+?)\)` 正規表示式切參數；`Text.of()` 的巢狀右括號可能提早結束 match。此 RED fixture 未提交，因 PR-1 限定只改 tests／tools／docs，且應另立產品修正後再建立正確 RED/GREEN 測試；本輪改以目前可通過的 `scene.text()` 輸出路徑補 characterization coverage。
+KubeJS `event.add(..., Text.of(...))` 的 root cause 是原先以非平衡括號方式切割呼叫參數，巢狀 `Text.of()` 的右括號會提前結束 match；修復改用字串／括號感知的 call scanner，並在實際輸出內容變更後才增加 patched count。回歸測試涵蓋 plain string、nested Text、escaping、already-translated/no-op、scene.text 與 ItemEvents writeback。
 
 其他需獨立驗收的錯誤傳遞：
 
@@ -41,4 +41,4 @@ KubeJS 的 `event.add(..., Text.of(...))` 路徑有待獨立處理：本輪臨�
 - shared LM 翻譯迴圈目前忽略 `add_to_cache()` 的回傳值；寫入被拒絕時，應由後續安全／錯誤處理工作包決定如何反映在任務結果。
 - 目前 smoke 的 `cancelled` case 表示「已送出取消要求、worker 尚未結束」；它不代表專案已定義或驗證終止的 CANCELLED UI 狀態。
 
-以上均未在此 PR 改 production code、未降低現有 assertion，也未引入 coverage gate。
+上述 cache error propagation 與 terminal CANCELLED status 仍是明確邊界；本 PR 未擴張到那些 subsystem，也未引入 coverage gate。

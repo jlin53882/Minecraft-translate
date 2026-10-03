@@ -93,8 +93,9 @@ uv run --isolated python tools/ui_smoke.py \
 The Dialog gallery invokes the production Pipeline extract/merge/translate/bundle
 and one-click entry points, closes and reopens both the extract and Pipeline
 Merge Dialogs, and includes the standalone extractor run/preview and merge-result
-summary Dialogs. The one-click wizard screenshot starts at step 1; manually
-advance through steps 2–4 when reviewing that workflow.
+summary Dialogs. The one-click workflow advances through steps 1–4 via its real
+callbacks, captures each step, dismisses the wizard, and captures a fresh
+reopen. The step screenshots are visual evidence, not a pixel-diff gate.
 
 The gallery closes managed dialogs through Flet's dialog stack and signals raw
 `page.overlay` AlertDialogs with `open=False`. It keeps those controls mounted
@@ -154,14 +155,14 @@ complete case list and non-empty PNGs are not machine proof that content fits.
 The reviewer must inspect the images and record pass/fail/blocked in the PR/task
 evidence.
 
-## Interaction / lifecycle manual checks
+## Interaction / lifecycle acceptance checks
 
 The automated harness checks same-session first build/revisit, command-palette
 close/reopen, workflow Dialog close/reopen, and dispose followed by a late
 `TaskSession` event. Also run and record these real user interactions when a
 change touches the corresponding UI:
 
-- Open and dismiss each one-click wizard step; reopen after dismissal.
+- Review the captured one-click wizard steps 1–4, dismissal, and reopen.
 - While a real task is busy, navigate away/back; verify progress/log freshness,
   busy guards, and the actual cancel control.
 - At minimum and portrait widths, confirm each major Dialog remains usable and
@@ -169,8 +170,28 @@ change touches the corresponding UI:
 - After teardown, verify subscriptions are removed and a late callback does not
   access a disposed view.
 
-These manual checks are evidence items, not automated passes. Mark unrun cases
-blocked/unverified instead of inferring success from a screenshot.
+The one-click step/dismiss/reopen sequence and same-session busy-task navigation
+are covered by the deterministic real-Flet scenario. The `cancelled` scenario
+invokes the real `TaskSession.request_cancel()` path and records the requested
+state; the repository's cancel-control test covers the control callback. A
+terminal `CANCELLED` state is not claimed because the product has no such
+status. Any remaining desktop-only close/destroy behavior must still be marked
+blocked or unverified rather than inferred from a screenshot.
+
+## PR #140 local acceptance evidence (2026-10-03)
+
+- `views`: 290/290 cases across both themes and all five viewports, with first
+  build/revisit pairs, no console/page errors, and ten teardown probes.
+- `dialogs`: 48/48 cases at 1100×720 and 900×700 in both themes; the four
+  Pipeline Merge bottom-scroll screenshots show Patchouli controls reachable
+  while the footer remains visible.
+- One-click wizard check: 32/32 cases at 900×700 in both themes, including
+  steps 1–4, dismiss, and reopen; no console/page errors.
+- Dashboard state checks: empty, data, running, error, cancellation-requested,
+  and loading each produced 4/4 cases at 900×700 and 720×900 in both themes.
+
+The reports and PNGs are ignored local artifacts under `.artifacts/pr1/`; they
+are evidence for the task/PR and are not committed baselines.
 
 The initial phase is report-only. Pixel-diff thresholds are intentionally not a
 merge gate until repeated runs establish normal renderer variance.
