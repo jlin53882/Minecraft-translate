@@ -96,6 +96,27 @@ the standalone extractor run/preview and merge-result summary Dialogs. The
 one-click wizard screenshot starts at step 1; manually advance through steps 2–4
 when reviewing that workflow.
 
+### Smoke title and screenshot acknowledgement contract
+
+`wait_for_title()` uses exact matching by default. Prefix matching is opt-in and
+is used only for titles that intentionally include a changing suffix, such as a
+view build duration or the initial ready marker. Dialog-gallery capture waits
+for the exact `SMOKE:DIALOG:<key>:OPEN` title; the sibling `OPENING` state cannot
+release the screenshot step.
+
+The capture/advance order is:
+
+1. The app publishes `OPENING`, builds and opens the production Dialog, then
+   publishes the exact `OPEN` state.
+2. Playwright waits for that exact state and captures the screenshot.
+3. The capture helper verifies the screenshot file exists and is non-empty before
+   adding the case and writing its `.smoke-acks/<token>.done` marker.
+4. The app consumes the marker before dismissing the Dialog or advancing to the
+   next case.
+
+If capture fails or the artifact is empty, no acknowledgement is sent; a stale
+or incomplete screenshot cannot be reported as a completed Dialog case.
+
 The state `cancelled` means **cancel requested while the worker is still active**.
 `TaskSession` / `TaskManager` currently has no terminal `CANCELLED` status, so this
 case does not claim a distinct completed-cancelled Dashboard state.

@@ -121,14 +121,39 @@ def parse_viewports(values: list[str] | None) -> tuple[tuple[int, int], ...]:
     return tuple(parsed)
 
 
-def wait_for_title(page: Page, expected: str, timeout_ms: int) -> str:
-    """等待 Flet session 發布指定的 smoke 狀態標題。"""
+def _title_matches(title: str, expected: str, *, exact: bool) -> bool:
+    """依明確指定的 exact 或 prefix 契約比對 smoke 標題。"""
+    return title == expected if exact else title.startswith(expected)
+
+
+def wait_for_title(
+    page: Page,
+    expected: str,
+    timeout_ms: int,
+    *,
+    exact: bool = True,
+) -> str:
+    """等待 Flet session 發布完整 smoke 標題或明確指定的前綴。
+
+    Args:
+        page: 顯示隔離 smoke app 的 Playwright 頁面。
+        expected: 預期的完整標題，或 prefix 模式的固定標題開頭。
+        timeout_ms: 等待狀態的最長毫秒數。
+        exact: True 時只接受完全相等；False 時接受標題前綴。
+
+    Returns:
+        與預期狀態相符的完整頁面標題。
+
+    Raises:
+        TimeoutError: 在期限內未出現預期標題。
+        RuntimeError: smoke app 發布錯誤狀態，或回傳標題不符合契約。
+    """
     try:
         title_handle = page.wait_for_function(
-            "expected => { const title = document.title; "
-            "return title.startsWith(expected) || title.startsWith('SMOKE:ERROR:') "
-            "? title : false; }",
-            arg=expected,
+            "({ expected, exact }) => { const title = document.title; "
+            "const matched = exact ? title === expected : title.startsWith(expected); "
+            "return matched || title.startsWith('SMOKE:ERROR:') ? title : false; }",
+            arg={"expected": expected, "exact": exact},
             timeout=timeout_ms,
         )
     except PlaywrightTimeoutError as exc:
@@ -138,6 +163,10 @@ def wait_for_title(page: Page, expected: str, timeout_ms: int) -> str:
     title = str(title_handle.json_value())
     if title.startswith("SMOKE:ERROR:"):
         raise RuntimeError(f"smoke app 情境失敗：{title}")
+    if not _title_matches(title, expected, exact=exact):
+        raise RuntimeError(
+            f"smoke 標題違反比對契約：expected={expected!r}, current={title!r}, exact={exact}"
+        )
     return title
 
 
@@ -253,8 +282,23 @@ def _expected_case_keys(
 
 
 def _capture_case(page: Page, output_dir: Path, filename: str) -> str:
-    """擷取單一畫面並回傳相對於 output directory 的檔名。"""
-    page.screenshot(path=str(output_dir / filename), full_page=True)
+    """擷取單一畫面，確認截圖已寫入後回傳相對檔名。
+
+    Args:
+        page: 要擷取的 Playwright 頁面。
+        output_dir: 此次 smoke run 的截圖目錄。
+        filename: 唯一的截圖檔名。
+
+    Returns:
+        已寫入截圖的相對檔名。
+
+    Raises:
+        RuntimeError: 截圖檔不存在或為空時引發。
+    """
+    screenshot_path = output_dir / filename
+    page.screenshot(path=str(screenshot_path), full_page=True)
+    if not screenshot_path.is_file() or screenshot_path.stat().st_size == 0:
+        raise RuntimeError(f"截圖未完整寫入：{screenshot_path}")
     return filename
 
 
@@ -279,7 +323,9 @@ def _run_view_scenario(
 ) -> None:
     """擷取所有頁面的首次建構、回訪、Command Palette 與 Snackbar。"""
     for index, view_key in enumerate(VIEW_KEYS):
-        title = wait_for_title(page, f"SMOKE:VIEW:{index}:{view_key}:", 30000)
+        title = wait_for_title(
+            page, f"SMOKE:VIEW:{index}:{view_key}:", 30000, exact=False
+        )
         filename = f"{theme}-{viewport}-{index:02d}-{_safe_name(view_key)}.png"
         page.wait_for_timeout(250)
         cases.append(
@@ -298,7 +344,7 @@ def _run_view_scenario(
         _ack_capture(runtime_root, f"{theme}-{viewport}-view-{index}")
 
     for dialog in ("command_palette", "command_palette_reopen", "snackbar"):
-        wait_for_title(page, f"SMOKE:DIALOG:{dialog}", 30000)
+        wait_for_title(page, f"SMOKE:DIALOG:{dialog}", 30000, exact=True)
         page.wait_for_timeout(250)
         filename = f"{theme}-{viewport}-dialog-{dialog}.png"
         cases.append(
@@ -314,7 +360,9 @@ def _run_view_scenario(
         _ack_capture(runtime_root, f"{theme}-{viewport}-dialog-{dialog}")
 
     for index, view_key in enumerate(VIEW_KEYS):
-        title = wait_for_title(page, f"SMOKE:REVISIT:{index}:{view_key}:", 30000)
+        title = wait_for_title(
+            page, f"SMOKE:REVISIT:{index}:{view_key}:", 30000, exact=False
+        )
         page.wait_for_timeout(100)
         filename = f"{theme}-{viewport}-revisit-{index:02d}-{_safe_name(view_key)}.png"
         cases.append(
@@ -329,7 +377,7 @@ def _run_view_scenario(
             }
         )
         _ack_capture(runtime_root, f"{theme}-{viewport}-view_revisit-{index}")
-    wait_for_title(page, "SMOKE:LIFECYCLE:DISPOSED", 10000)
+    wait_for_title(page, "SMOKE:LIFECYCLE:DISPOSED", 10000, exact=True)
     behavior_checks.append(
         {
             "scenario": "views",
@@ -337,7 +385,7 @@ def _run_view_scenario(
             "result": "passed",
         }
     )
-    wait_for_title(page, "SMOKE:DONE", 30000)
+    wait_for_title(page, "SMOKE:DONE", 30000, exact=True)
 
 
 def _run_dialog_scenario(
@@ -352,7 +400,7 @@ def _run_dialog_scenario(
 ) -> None:
     """擷取由 smoke app 呼叫正式入口建立的主要工作流程 Dialog。"""
     for dialog_key in DIALOG_SMOKE_KEYS:
-        wait_for_title(page, f"SMOKE:DIALOG:{dialog_key}:", 30000)
+        wait_for_title(page, f"SMOKE:DIALOG:{dialog_key}:OPEN", 30000, exact=True)
         page.wait_for_timeout(250)
         filename = f"{theme}-{viewport}-dialog-{_safe_name(dialog_key)}.png"
         cases.append(
@@ -366,7 +414,7 @@ def _run_dialog_scenario(
             }
         )
         _ack_capture(runtime_root, f"{theme}-{viewport}-dialog_gallery-{dialog_key}")
-    wait_for_title(page, "SMOKE:LIFECYCLE:DISPOSED", 10000)
+    wait_for_title(page, "SMOKE:LIFECYCLE:DISPOSED", 10000, exact=True)
     behavior_checks.append(
         {
             "scenario": "dialogs",
@@ -374,7 +422,7 @@ def _run_dialog_scenario(
             "result": "passed",
         }
     )
-    wait_for_title(page, "SMOKE:DIALOGS:DONE", 30000)
+    wait_for_title(page, "SMOKE:DIALOGS:DONE", 30000, exact=True)
 
 
 def _run_state_scenario(
@@ -389,7 +437,7 @@ def _run_state_scenario(
     viewport: str,
 ) -> None:
     """擷取單一確定性工作台狀態案例。"""
-    wait_for_title(page, f"SMOKE:STATE:{scenario}", 30000)
+    wait_for_title(page, f"SMOKE:STATE:{scenario}", 30000, exact=True)
     page.wait_for_timeout(250)
     filename = f"{theme}-{viewport}-state-{_safe_name(scenario)}.png"
     cases.append(
@@ -403,7 +451,7 @@ def _run_state_scenario(
         }
     )
     _ack_capture(runtime_root, f"{theme}-{viewport}-state-{scenario}")
-    wait_for_title(page, "SMOKE:LIFECYCLE:DISPOSED", 10000)
+    wait_for_title(page, "SMOKE:LIFECYCLE:DISPOSED", 10000, exact=True)
     behavior_checks.append(
         {
             "scenario": scenario,
@@ -411,7 +459,7 @@ def _run_state_scenario(
             "result": "passed",
         }
     )
-    wait_for_title(page, "SMOKE:STATE:DONE", 30000)
+    wait_for_title(page, "SMOKE:STATE:DONE", 30000, exact=True)
 
 
 def run_smoke(
@@ -552,7 +600,7 @@ def run_smoke(
                                     url, wait_until="domcontentloaded", timeout=45000
                                 )
                                 ready_title = wait_for_title(
-                                    page, f"SMOKE:READY:{theme}:", 45000
+                                    page, f"SMOKE:READY:{theme}:", 45000, exact=False
                                 )
                                 applied_theme = ready_title.split(":", 3)[2]
                                 if applied_theme != theme:
