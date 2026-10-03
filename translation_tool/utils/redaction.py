@@ -9,7 +9,7 @@ from typing import Any
 _GOOGLE_KEY_RE = re.compile(r"\bAIza[0-9A-Za-z_-]{20,}\b")
 _BEARER_RE = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
 _SECRET_FIELD_RE = re.compile(
-    r'(?i)(["\']?(?:api[_-]?key|authorization|bearer|password|secret|token)'
+    r'(?i)(["\']?(?:api[_-]?key|authorization|bearer|credential|password|secret|token)'
     r'["\']?\s*[:=]\s*["\']?)([^\s,;"\'}]+)'
 )
 
@@ -32,7 +32,7 @@ def redact_mapping(value: Any, secrets: Iterable[str] = ()) -> Any:
         for key, item in value.items():
             key_text = str(key)
             if re.search(
-                r"(?i)(api[_-]?key|authorization|bearer|password|secret|token)",
+                r"(?i)(api[_-]?key|authorization|bearer|credential|password|secret|token)",
                 key_text,
             ):
                 result[key] = "[REDACTED]"

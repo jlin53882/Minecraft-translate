@@ -26,6 +26,13 @@ def test_redaction_masks_keys_and_secret_fields():
     )
 
 
+def test_redaction_masks_credential_fields_without_masking_plain_text():
+    redacted = redact_text("credential: abc123; token budget remains visible")
+    assert "abc123" not in redacted
+    assert "token budget remains visible" in redacted
+    assert redact_mapping({"credential": "abc123"})["credential"] == "[REDACTED]"
+
+
 def test_http_error_message_does_not_expose_api_key(monkeypatch):
     secret = "AIza" + "s" * 30
     response = Mock(ok=False, status_code=403, text=f'{{"api_key":"{secret}"}}')
