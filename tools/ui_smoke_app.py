@@ -208,21 +208,46 @@ async def _run_view_sequence(
 
 
 def _dismiss_top_dialog(page: ft.Page) -> None:
-    """關閉目前 smoke gallery 顯示的正式 Dialog。"""
-    if page.pop_dialog() is not None:
-        return
-    for control in reversed(page.overlay):
+    """送出本次 smoke Dialog 的關閉狀態，保留 overlay 等待 Flutter dismiss。
+
+    Args:
+        page: 持有 Flet Dialog stack 與 overlay 的 smoke Page。
+
+    Side Effects:
+        關閉所有受管理 Dialog、將 AlertDialog overlay 設為 closed，並更新頁面。
+    """
+    while page.pop_dialog() is not None:
+        pass
+    for control in tuple(page.overlay):
         if isinstance(control, ft.AlertDialog):
             control.open = False
-            page.overlay.remove(control)
-            break
     page.update()
+
+
+def _remove_closed_overlay_dialogs(page: ft.Page) -> None:
+    """在 Flutter reverse transition 後移除已關閉的 legacy overlay Dialog。
+
+    Args:
+        page: 持有 smoke Dialog overlay 的 Flet Page。
+
+    Side Effects:
+        移除已關閉的 AlertDialog 控件並更新頁面；仍開啟者會保留。
+    """
+    closed_dialogs = tuple(
+        control
+        for control in page.overlay
+        if isinstance(control, ft.AlertDialog) and not control.open
+    )
+    for dialog in closed_dialogs:
+        page.overlay.remove(dialog)
+    if closed_dialogs:
+        page.update()
 
 
 async def _run_dialog_sequence(
     page: ft.Page, shell, interval: float, runtime_root: Path, theme: str, viewport: str
 ) -> None:
-    """透過正式 workflow entry points 逐一展示主要 Dialog。"""
+    """透過正式 workflow entry points 展示 Dialog，並重開 Pipeline Merge。"""
     from app.views.extractor.extractor_dialog import (
         open_extractor_dialog,
         open_preview_dialog,
@@ -254,6 +279,7 @@ async def _run_dialog_sequence(
         ("pipeline_extract", pipeline._on_extract_click),
         ("pipeline_extract_reopen", pipeline._on_extract_click),
         ("pipeline_merge", pipeline._on_merge_click),
+        ("pipeline_merge_reopen", pipeline._on_merge_click),
         ("pipeline_translate", pipeline._on_translate_click),
         ("pipeline_bundle", pipeline._on_bundle_click),
         ("pipeline_one_click", pipeline._on_one_click_click),
@@ -296,7 +322,9 @@ async def _run_dialog_sequence(
             runtime_root, f"{theme}-{viewport}-dialog_gallery-{dialog_key}"
         )
         _dismiss_top_dialog(page)
-        await asyncio.sleep(0.15)
+        # 等 Flutter modal 的 reverse transition 完成，避免殘影混入下一張截圖。
+        await asyncio.sleep(0.35)
+        _remove_closed_overlay_dialogs(page)
 
     _dispose_and_probe_late_task(page, shell)
     await asyncio.sleep(0.2)

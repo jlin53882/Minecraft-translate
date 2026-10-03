@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import flet as ft
 import pytest
 
 from tools.ui_smoke import (
@@ -18,7 +19,11 @@ from tools.ui_smoke import (
     parse_viewports,
     wait_for_title,
 )
-from tools.ui_smoke_app import _wait_for_capture_ack
+from tools.ui_smoke_app import (
+    _dismiss_top_dialog,
+    _remove_closed_overlay_dialogs,
+    _wait_for_capture_ack,
+)
 
 
 def test_view_scenario_covers_first_build_revisit_and_shared_dialogs() -> None:
@@ -35,8 +40,16 @@ def test_dialog_scenario_covers_every_primary_entry_point() -> None:
     """Dialog gallery 的期望清單要涵蓋所有登錄的正式入口。"""
     keys = _expected_case_keys("dialogs", ("light",), ((720, 900),))
 
-    assert len(keys) == len(DIALOG_SMOKE_KEYS)
+    assert len(keys) == len(DIALOG_SMOKE_KEYS) + 2
     assert ("dialog_gallery", "light", "720x900", "pipeline_extract_reopen") in keys
+    assert ("dialog_gallery", "light", "720x900", "pipeline_merge_reopen") in keys
+    assert ("dialog_scroll", "light", "720x900", "pipeline_merge_bottom") in keys
+    assert (
+        "dialog_scroll",
+        "light",
+        "720x900",
+        "pipeline_merge_reopen_bottom",
+    ) in keys
 
 
 def test_each_state_scenario_has_a_case_for_every_viewport_and_theme() -> None:
@@ -194,3 +207,63 @@ def test_capture_case_rejects_empty_screenshot(tmp_path: Path) -> None:
     """空截圖不得被當成已完成案例而放行 ACK。"""
     with pytest.raises(RuntimeError, match="截圖未完整寫入"):
         _capture_case(_ScreenshotPage(b""), tmp_path, "empty.png")
+
+
+class _MixedDialogPage:
+    """模擬由 Flet dialog stack 與 page.overlay 共管的 smoke Page。"""
+
+    def __init__(
+        self,
+        managed_dialogs: list[ft.AlertDialog],
+        overlay: list[ft.AlertDialog],
+    ) -> None:
+        """設定兩種 lifecycle 管理路徑各自持有的 Dialog。"""
+        self._managed_dialogs = managed_dialogs
+        self.overlay = overlay
+        self.update_count = 0
+
+    def pop_dialog(self) -> ft.AlertDialog | None:
+        """模擬 Flet 關閉 stack 最上層 Dialog，保留至 dismiss callback。"""
+        dialog = next(
+            (item for item in reversed(self._managed_dialogs) if item.open), None
+        )
+        if dialog is not None:
+            dialog.open = False
+        return dialog
+
+    def update(self) -> None:
+        """記錄 page.overlay 清理後的畫面更新。"""
+        self.update_count += 1
+
+
+@pytest.mark.parametrize("managed_count", (0, 1))
+def test_dialog_gallery_dismiss_keeps_overlay_mounted_until_transition_finishes(
+    managed_count: int,
+) -> None:
+    """關閉 overlay Dialog 時先送出 open=False，不提前移除 Flutter 控件。"""
+    managed = [ft.AlertDialog(open=True) for _ in range(managed_count)]
+    overlay_dialogs = [ft.AlertDialog(open=True), ft.AlertDialog(open=True)]
+    page = _MixedDialogPage(managed, list(overlay_dialogs))
+
+    _dismiss_top_dialog(page)
+
+    assert all(dialog.open is False for dialog in managed)
+    assert all(dialog.open is False for dialog in overlay_dialogs)
+    assert page.overlay == list(overlay_dialogs)
+    assert page.update_count == 1
+    _remove_closed_overlay_dialogs(page)
+    assert page.overlay == []
+    assert page.update_count == 2
+
+
+def test_remove_closed_overlay_dialogs_keeps_open_dialogs_mounted() -> None:
+    """transition 清理只移除關閉項目，不得卸載其他仍開啟的 Dialog。"""
+    closed = ft.AlertDialog(open=False)
+    opened = ft.AlertDialog(open=True)
+    page = _MixedDialogPage([], [closed, opened])
+
+    _remove_closed_overlay_dialogs(page)
+
+    assert page.overlay == [opened]
+    assert opened.open is True
+    assert page.update_count == 1

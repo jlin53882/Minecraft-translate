@@ -52,6 +52,23 @@ def open_merge_dialog(
     safe_int=None,
     safe_float=None,
 ):
+    """建立可捲動內容區、並將操作列保留在視窗內的設定對話框。
+
+    Args:
+        page: 用來讀取視窗尺寸並顯示 Dialog 的 Flet Page。
+        file_picker: 用於選擇來源 ZIP 與輸出目錄的檔案選擇器。
+        input_path: 預填的 Mod 來源路徑。
+        output_path: 預填的輸出目錄路徑。
+        lang_code_checks: 由外層管理的語言代碼 Checkbox 對照表。
+        on_run_merge: 驗證輸入後呼叫；參數依序為來源、輸出、模式、
+            lang/zh_cn/Patchouli 選項與語言代碼。
+        show_snack_bar: 顯示輸入驗證或預覽提示的回呼。
+        safe_int: 可選的整數轉換器，失敗時回傳 None。
+        safe_float: 可選的浮點數轉換器，失敗時回傳 None。
+
+    Side Effects:
+        將 AlertDialog 附加至 page.overlay、開啟對話框並更新頁面。
+    """
     if safe_int is None:
 
         def safe_int(s):
@@ -68,21 +85,6 @@ def open_merge_dialog(
             except (ValueError, TypeError):
                 return None
 
-    """打開語系比對設定對話框。
-
-    Args:
-        page: Flet Page 實例
-        file_picker: Flet FilePicker 實例
-        input_path: 預填的 Mod 來源路徑
-        output_path: 預填的輸出目錄路徑
-        lang_code_checks: dict[str, ft.Checkbox]，由外層管理
-        on_run_merge: 回調函式，簽名：
-            on_run_merge(merge_input, output_dir, only_lang, process_zh_cn,
-                         patchouli_skip, patchouli_threshold, zh_en_threshold, lang_codes)
-        show_snack_bar: 回調：(message: str, color: str = RED_400) -> void
-        safe_int: 回調：str -> int | None
-        safe_float: 回調：str -> float | None
-    """
     dialog_width = int(page.width * 0.6)
 
     cfg = load_config()
@@ -454,12 +456,19 @@ def open_merge_dialog(
         ],
         spacing=10,
         tight=False,
+        scroll=ft.ScrollMode.AUTO,
     )
 
+    # 保留標題、內容間距與固定操作列所需的垂直空間。
+    dialog_content_height = int(page.height * 0.62)
     dialog = ft.AlertDialog(
         modal=True,
         title=ft.Text("🔍 語系比對設定"),
-        content=ft.Container(content=content, width=dialog_width),
+        content=ft.Container(
+            content=content,
+            width=dialog_width,
+            height=dialog_content_height,
+        ),
         actions=[
             ft.TextButton("取消", on_click=lambda e: close_dialog(dialog)),
             ft.OutlinedButton(

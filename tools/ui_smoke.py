@@ -46,6 +46,7 @@ DIALOG_SMOKE_KEYS = (
     "pipeline_extract",
     "pipeline_extract_reopen",
     "pipeline_merge",
+    "pipeline_merge_reopen",
     "pipeline_translate",
     "pipeline_bundle",
     "pipeline_one_click",
@@ -53,6 +54,10 @@ DIALOG_SMOKE_KEYS = (
     "extractor_preview",
     "merge_summary",
 )
+DIALOG_SCROLL_CASES: dict[str, str] = {
+    "pipeline_merge": "pipeline_merge_bottom",
+    "pipeline_merge_reopen": "pipeline_merge_reopen_bottom",
+}
 SCENARIO_NOTES = {
     "cancelled": (
         "此案例截取取消要求已送出但 worker 尚未結束的畫面；"
@@ -276,6 +281,10 @@ def _expected_case_keys(
                     ("dialog_gallery", theme, viewport, key)
                     for key in DIALOG_SMOKE_KEYS
                 )
+                expected.update(
+                    ("dialog_scroll", theme, viewport, key)
+                    for key in DIALOG_SCROLL_CASES.values()
+                )
             else:
                 expected.add(("state", theme, viewport, scenario))
     return expected
@@ -398,7 +407,17 @@ def _run_dialog_scenario(
     theme: str,
     viewport: str,
 ) -> None:
-    """擷取由 smoke app 呼叫正式入口建立的主要工作流程 Dialog。"""
+    """擷取正式 workflow Dialog，並實際捲動 Merge body 到 Patchouli 設定。
+
+    Args:
+        page: 驅動 Flet smoke app 的 Playwright 頁面。
+        output_dir: 截圖輸出目錄。
+        runtime_root: 一次性 smoke app 狀態與 ACK 目錄。
+        cases: 收集各 Dialog 截圖案例的報告清單。
+        behavior_checks: 收集頁面生命週期驗收結果的報告清單。
+        theme: 目前套用的色彩主題。
+        viewport: WIDTHxHEIGHT 格式的視窗尺寸。
+    """
     for dialog_key in DIALOG_SMOKE_KEYS:
         wait_for_title(page, f"SMOKE:DIALOG:{dialog_key}:OPEN", 30000, exact=True)
         page.wait_for_timeout(250)
@@ -413,6 +432,24 @@ def _run_dialog_scenario(
                 "needs_visual_review": True,
             }
         )
+        scroll_case_key = DIALOG_SCROLL_CASES.get(dialog_key)
+        if scroll_case_key:
+            viewport_width, viewport_height = map(int, viewport.split("x"))
+            # 在 body 中央送出真實 wheel event，讓截圖驗證 scroll owner 而非靜態結構。
+            page.mouse.move(viewport_width // 2, viewport_height // 2)
+            page.mouse.wheel(0, viewport_height * 2)
+            page.wait_for_timeout(250)
+            scroll_filename = f"{theme}-{viewport}-dialog-{scroll_case_key}.png"
+            cases.append(
+                {
+                    "kind": "dialog_scroll",
+                    "theme": theme,
+                    "viewport": viewport,
+                    "view": scroll_case_key,
+                    "screenshot": _capture_case(page, output_dir, scroll_filename),
+                    "needs_visual_review": True,
+                }
+            )
         _ack_capture(runtime_root, f"{theme}-{viewport}-dialog_gallery-{dialog_key}")
     wait_for_title(page, "SMOKE:LIFECYCLE:DISPOSED", 10000, exact=True)
     behavior_checks.append(

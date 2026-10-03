@@ -91,10 +91,16 @@ uv run --isolated python tools/ui_smoke.py \
 ```
 
 The Dialog gallery invokes the production Pipeline extract/merge/translate/bundle
-and one-click entry points, closes and reopens the extract Dialog, and includes
-the standalone extractor run/preview and merge-result summary Dialogs. The
-one-click wizard screenshot starts at step 1; manually advance through steps 2–4
-when reviewing that workflow.
+and one-click entry points, closes and reopens both the extract and Pipeline
+Merge Dialogs, and includes the standalone extractor run/preview and merge-result
+summary Dialogs. The one-click wizard screenshot starts at step 1; manually
+advance through steps 2–4 when reviewing that workflow.
+
+The gallery closes managed dialogs through Flet's dialog stack and signals raw
+`page.overlay` AlertDialogs with `open=False`. It keeps those controls mounted
+until the reverse transition finishes, then removes only closed entries. This
+two-phase lifecycle prevents a stale modal route from appearing behind the next
+case.
 
 ### Smoke title and screenshot acknowledgement contract
 
@@ -116,6 +122,12 @@ The capture/advance order is:
 
 If capture fails or the artifact is empty, no acknowledgement is sent; a stale
 or incomplete screenshot cannot be reported as a completed Dialog case.
+
+For each Dialog-gallery theme/viewport, the harness also sends a real Playwright
+wheel event over the Pipeline Merge body and records a `pipeline_merge_bottom`
+case before acknowledging the Dialog. Review this second image to confirm the
+lower Patchouli controls are reachable while the footer actions remain visible;
+the structural layout test alone cannot prove the rendered scroll interaction.
 
 The state `cancelled` means **cancel requested while the worker is still active**.
 `TaskSession` / `TaskManager` currently has no terminal `CANCELLED` status, so this
