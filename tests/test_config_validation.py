@@ -18,22 +18,15 @@
 """
 
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
-# 確保 translation_tool 在 sys.path
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from translation_tool.utils.config_manager import load_config, ConfigValidationError
-
+from translation_tool.utils.config_manager import ConfigValidationError, load_config
 
 # =============================================================================
 # ATK-013 / Gap 3：Schema 驗證負向測試
 # =============================================================================
+
 
 class TestConfigSchemaValidation:
     """驗證 load_config() 對無效格式的反應。"""
@@ -60,11 +53,14 @@ class TestConfigSchemaValidation:
         """
         config_file = tmp_path / "config.json"
         config_file.write_text(
-            json.dumps({
-                "lm_translator": {
-                    "keys": "token",  # 錯誤：應為 list
+            json.dumps(
+                {
+                    "lm_translator": {
+                        "keys": "token",  # 錯誤：應為 list
+                    }
                 }
-            }), encoding="utf-8"
+            ),
+            encoding="utf-8",
         )
 
         # Act & Assert
@@ -91,11 +87,14 @@ class TestConfigSchemaValidation:
         """
         config_file = tmp_path / "config.json"
         config_file.write_text(
-            json.dumps({
-                "lm_translator": {
-                    "initial_batch_size_lang": "300",  # 錯誤：應為 int
+            json.dumps(
+                {
+                    "lm_translator": {
+                        "initial_batch_size_lang": "300",  # 錯誤：應為 int
+                    }
                 }
-            }), encoding="utf-8"
+            ),
+            encoding="utf-8",
         )
 
         # Act & Assert
@@ -123,11 +122,14 @@ class TestConfigSchemaValidation:
         """
         config_file = tmp_path / "config.json"
         config_file.write_text(
-            json.dumps({
-                "translator": {
-                    "parallel_execution_workers": "4",  # 錯誤：應為 int
+            json.dumps(
+                {
+                    "translator": {
+                        "parallel_execution_workers": "4",  # 錯誤：應為 int
+                    }
                 }
-            }), encoding="utf-8"
+            ),
+            encoding="utf-8",
         )
 
         # Act & Assert
@@ -157,11 +159,14 @@ class TestConfigSchemaValidation:
         """
         config_file = tmp_path / "config.json"
         config_file.write_text(
-            json.dumps({
-                "lm_translator": {
-                    "models": ["gemini-2.5-flash", "gemini-3-flash-preview"]
+            json.dumps(
+                {
+                    "lm_translator": {
+                        "models": ["gemini-2.5-flash", "gemini-3-flash-preview"]
+                    }
                 }
-            }), encoding="utf-8"
+            ),
+            encoding="utf-8",
         )
 
         # Act & Assert
@@ -178,11 +183,8 @@ class TestConfigSchemaValidation:
         """
         config_file = tmp_path / "config.json"
         config_file.write_text(
-            json.dumps({
-                "translator": {
-                    "parallel_execution_workers": 4
-                }
-            }), encoding="utf-8"
+            json.dumps({"translator": {"parallel_execution_workers": 4}}),
+            encoding="utf-8",
         )
 
         cfg = load_config(str(config_file))
@@ -198,11 +200,8 @@ class TestConfigSchemaValidation:
         """
         config_file = tmp_path / "config.json"
         config_file.write_text(
-            json.dumps({
-                "lm_translator": {
-                    "keys": ["token1", "token2"]
-                }
-            }), encoding="utf-8"
+            json.dumps({"lm_translator": {"keys": ["token1", "token2"]}}),
+            encoding="utf-8",
         )
 
         cfg = load_config(str(config_file))
@@ -217,15 +216,14 @@ class TestConfigSchemaValidation:
         """
         config_file = tmp_path / "config.json"
         config_file.write_text(
-            json.dumps({
-                "lm_translator": {
-                    "initial_batch_size_lang": 300
-                }
-            }), encoding="utf-8"
+            json.dumps({"lm_translator": {"initial_batch_size_lang": 300}}),
+            encoding="utf-8",
         )
 
         cfg = load_config(str(config_file))
         batch_size = cfg["lm_translator"]["initial_batch_size_lang"]
 
-        assert isinstance(batch_size, int), f"batch_size 應為 int，實際：{type(batch_size)}"
+        assert isinstance(batch_size, int), (
+            f"batch_size 應為 int，實際：{type(batch_size)}"
+        )
         assert batch_size * 2 == 600  # 確認可用於數學運算

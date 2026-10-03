@@ -21,12 +21,14 @@ import pytest
 
 from translation_tool.utils import jar_browser
 
-
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
 
-def create_test_jar(tmp_dir: Path, jar_name: str, files: dict[str, str | bytes]) -> Path:
+
+def create_test_jar(
+    tmp_dir: Path, jar_name: str, files: dict[str, str | bytes]
+) -> Path:
     """在 tmp_dir 建立測試用 JAR 檔案。
 
     參數：
@@ -59,6 +61,7 @@ def create_bad_jar(tmp_dir: Path, jar_name: str) -> Path:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def sample_jar(tmp_path: Path) -> Path:
     """建立一個含有多個文字檔的範例 JAR。"""
@@ -85,6 +88,7 @@ def binary_jar(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestScanJarsBasic:
     """基本 JAR 掃描測試。"""
@@ -153,7 +157,7 @@ class TestScanJarsMultiplePatterns:
             patterns=[r"assets/([^/]+)/lang/en_us\.json"],
         )
 
-        jar_path = list(result.keys())[0]
+        jar_path = next(iter(result.keys()))
         assert "assets/mod_c/lang/en_us.json" in result[jar_path]
         assert "assets/mod_c/lang/zh_tw.json" not in result[jar_path]
 
@@ -228,7 +232,7 @@ class TestScanJarsCallback:
         def track_callback(processed: int, total: int):
             callback_calls.append((processed, total))
 
-        result = jar_browser.scan_jars(
+        jar_browser.scan_jars(
             jar_dir=tmp_path,
             patterns=[r"assets/([^/]+)/lang/en_us\.json"],
             processed_callback=track_callback,
@@ -323,6 +327,7 @@ class TestScanJarsEmptyAndEdge:
 
     def test_scan_jars_workers_default_fallback(self, tmp_path: Path, monkeypatch):
         """測試 config 沒有設定時 fallback 到 CPU count // 2。"""
+
         def mock_load_config(config_path=None):
             return {}  # config 為空，沒有 translator.parallel_execution_workers
 

@@ -3,8 +3,8 @@
 用途：驗證 CacheShardPanel 元件的功能正確性。
 """
 
-from app.views.cache_shard_panel import CacheShardPanel
 from app.views.cache_manager.cache_state import CacheShardState
+from app.views.cache_shard_panel import CacheShardPanel
 
 
 class _MockPage:

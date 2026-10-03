@@ -3,8 +3,9 @@
 用途：測試 LM API 用戶端相關功能。
 """
 
+from unittest.mock import Mock, patch
+
 import pytest
-from unittest.mock import patch, Mock
 import requests
 
 

@@ -2,12 +2,12 @@
 
 用途：測試 Markdown 翻譯步驟的實現函式。
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from unittest.mock import patch
-
 
 from translation_tool.core.md_translation_progress import _ProgressProxy
 from translation_tool.core.md_translation_steps import (
@@ -99,7 +99,6 @@ def _mock_progress_fn(session, value: float):
 
 def _mock_log_warning(*args, **kwargs):
     """模擬日誌警告。"""
-    pass
 
 
 class TestStep1ExtractImpl:
@@ -218,11 +217,14 @@ class TestStep2TranslateImpl:
 
         def fake_translate(**kwargs):
             # 模擬翻譯函式會調用 session 的 set_progress
-            if "session" in kwargs and kwargs["session"]:
+            if kwargs.get("session"):
                 kwargs["session"].set_progress(0.5)
             return {"translated": 10}
 
-        with patch("translation_tool.core.md_translation_assembly.translate_md_pending", fake_translate):
+        with patch(
+            "translation_tool.core.md_translation_assembly.translate_md_pending",
+            fake_translate,
+        ):
             result = step2_translate_impl(
                 pending_dir=str(pending_dir),
                 translated_dir=str(translated_dir),
@@ -249,7 +251,10 @@ class TestStep2TranslateImpl:
         def fake_translate(**kwargs):
             return {"dry_run": kwargs.get("dry_run", False), "files": 1}
 
-        with patch("translation_tool.core.md_translation_assembly.translate_md_pending", fake_translate):
+        with patch(
+            "translation_tool.core.md_translation_assembly.translate_md_pending",
+            fake_translate,
+        ):
             result = step2_translate_impl(
                 pending_dir=str(pending_dir),
                 translated_dir=str(translated_dir),
@@ -314,10 +319,12 @@ class TestStep3InjectImpl:
 
         # 建立翻譯 JSON
         json_file = json_dir / "test.md.json"
-        json_file.write_text(json.dumps({
-            "source_md": "test.md",
-            "items": [{"text": "你好 世界", "line": 0}]
-        }), encoding="utf-8")
+        json_file.write_text(
+            json.dumps(
+                {"source_md": "test.md", "items": [{"text": "你好 世界", "line": 0}]}
+            ),
+            encoding="utf-8",
+        )
 
         session = _MockSession()
 
@@ -341,7 +348,10 @@ class TestStep3InjectImpl:
             iter_json_files_fn=mock_iter_json,
             load_items_from_json_fn=mock_load_items,
             apply_item_to_md_lines_fn=mock_apply,
-            map_lang_in_rel_path_allow_zh_fn=lambda p, **kw: (p.replace(".md", "_zh_tw.md"), "SRC_EN"),
+            map_lang_in_rel_path_allow_zh_fn=lambda p, **kw: (
+                p.replace(".md", "_zh_tw.md"),
+                "SRC_EN",
+            ),
             progress_fn=_mock_progress_fn,
         )
 
@@ -358,10 +368,9 @@ class TestStep3InjectImpl:
 
         # JSON 指向不存在的 Markdown
         json_file = json_dir / "missing.md.json"
-        json_file.write_text(json.dumps({
-            "source_md": "missing.md",
-            "items": []
-        }), encoding="utf-8")
+        json_file.write_text(
+            json.dumps({"source_md": "missing.md", "items": []}), encoding="utf-8"
+        )
 
         session = _MockSession()
 

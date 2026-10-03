@@ -11,8 +11,8 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from app.services_impl.pipelines.merge_service import run_merge_folder_batch_service
 from app.services_impl.pipelines import merge_service
+from app.services_impl.pipelines.merge_service import run_merge_folder_batch_service
 
 
 class TestMergePipelineE2E:

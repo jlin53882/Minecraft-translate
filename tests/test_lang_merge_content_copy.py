@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-import sys
 import re
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -23,10 +23,11 @@ class TestProcessContentOrCopyFileImpl:
 
     def test_function_signature(self):
         """測試函式簽名包含所有必要參數。"""
+        import inspect
+
         from translation_tool.core.lang_merge_content_copy import (
             process_content_or_copy_file_impl,
         )
-        import inspect
 
         sig = inspect.signature(process_content_or_copy_file_impl)
         params = list(sig.parameters.keys())
@@ -243,8 +244,8 @@ class TestMockZipHandling:
 
         def reader_read_bytes(path):
             if "zh_cn" in path:
-                return "這是中文介紹".encode("utf-8")
-            return "# Intro English".encode("utf-8")
+                return "這是中文介紹".encode()
+            return b"# Intro English"
 
         mock_reader.read_text.side_effect = reader_read_text
         mock_reader.read_bytes.side_effect = reader_read_bytes
@@ -274,8 +275,8 @@ class TestMockZipHandling:
     def test_patchouli_effectiveness_cache(self, tmp_path: Path):
         """驗證同一 book_root 第二次處理時直接用快取，不重算。"""
         from translation_tool.core.lang_merge_content_copy import (
-            process_content_or_copy_file_impl,
             _patchouli_eff_cache,
+            process_content_or_copy_file_impl,
         )
 
         # 先清除 module-level cache，確保從乾淨狀態開始
@@ -309,8 +310,8 @@ class TestMockZipHandling:
         def reader_read_bytes(path):
             read_calls.append(path)
             if "zh_cn" in path:
-                return "這是中文介紹內容".encode("utf-8")
-            return "# English content".encode("utf-8")
+                return "這是中文介紹內容".encode()
+            return b"# English content"
 
         mock_reader.read_text.side_effect = reader_read_text
         mock_reader.read_bytes.side_effect = reader_read_bytes
@@ -396,6 +397,7 @@ class TestAllFilesCacheOptimization:
     def test_uses_all_files_cache_when_provided(self, tmp_path):
         """驗證 process_content_or_copy_file_impl 有 all_files_cache 時，不呼叫 reader.list_all()。"""
         from unittest.mock import MagicMock
+
         from translation_tool.core.lang_merge_content_copy import (
             process_content_or_copy_file_impl,
         )
@@ -435,6 +437,7 @@ class TestAllFilesCacheOptimization:
     def test_falls_back_to_list_all_when_cache_is_none(self, tmp_path):
         """驗證 all_files_cache=None 時，仍走 reader.list_all()。"""
         from unittest.mock import MagicMock
+
         from translation_tool.core.lang_merge_content_copy import (
             process_content_or_copy_file_impl,
         )
@@ -473,6 +476,7 @@ class TestAllFilesCacheOptimization:
     def test_all_files_cache_identity_with_list_all(self, tmp_path):
         """驗證 all_files_cache 與 reader.list_all() 對 ZIP wrapper 偵測行為一致。"""
         from unittest.mock import MagicMock
+
         from translation_tool.core.lang_merge_content_copy import (
             process_content_or_copy_file_impl,
         )
@@ -540,11 +544,13 @@ class TestPatchouliEffectivenessAllNames:
     def test_all_names_avoids_list_all(self):
         """驗證傳入 all_names 時，不呼叫 reader.list_all()。"""
         from unittest.mock import MagicMock
+
+        import orjson
+
         from translation_tool.core.lang_merge_content_copy import (
             _compute_patchouli_lang_effectiveness,
             _patchouli_eff_cache,
         )
-        import orjson
 
         _patchouli_eff_cache.clear()
 
@@ -575,11 +581,13 @@ class TestPatchouliEffectivenessAllNames:
     def test_no_all_names_falls_back_to_list_all(self):
         """驗證不傳 all_names 時，仍呼叫 reader.list_all() (向後相容)。"""
         from unittest.mock import MagicMock
+
+        import orjson
+
         from translation_tool.core.lang_merge_content_copy import (
             _compute_patchouli_lang_effectiveness,
             _patchouli_eff_cache,
         )
-        import orjson
 
         _patchouli_eff_cache.clear()
 
@@ -607,6 +615,7 @@ class TestBytesHandling:
     def test_read_bytes_is_decoded_before_str_replace(self, tmp_path):
         """模擬 reader.read_bytes() 回傳 bytes，確認不拋 TypeError。"""
         from unittest.mock import MagicMock
+
         from translation_tool.core.lang_merge_content_copy import (
             process_content_or_copy_file_impl,
         )
@@ -647,6 +656,7 @@ class TestBytesHandling:
     def test_read_bytes_with_processor_handles_bytes(self, tmp_path):
         """模擬 processor 路徑：read_bytes 回傳 bytes → decode 後傳給 processor。"""
         from unittest.mock import MagicMock
+
         from translation_tool.core.lang_merge_content_copy import (
             process_content_or_copy_file_impl,
         )
@@ -659,7 +669,7 @@ class TestBytesHandling:
 
         mock_reader = MagicMock()
         mock_reader.list_all.return_value = ["assets/test/data.txt"]
-        mock_reader.read_bytes.return_value = "中文\r\n內容\r\n".encode("utf-8")
+        mock_reader.read_bytes.return_value = "中文\r\n內容\r\n".encode()
 
         def mock_load_config():
             return {

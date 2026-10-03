@@ -5,9 +5,10 @@
 這是 PR #51 的一個重要 bug 修復。
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
 import flet as ft
+
 from app.ui import theme
 from app.ui.snack import show_snack
 
@@ -89,7 +90,9 @@ class TestSnackBarInPlaceModification:
 
         # 驗證：只有 1 個 SnackBar
         snackbars = [o for o in page.overlay if isinstance(o, ft.SnackBar)]
-        assert len(snackbars) == 1, f"預期 1 個，實際 {len(snackbars)} 個（accumulation bug）"
+        assert len(snackbars) == 1, (
+            f"預期 1 個，實際 {len(snackbars)} 個（accumulation bug）"
+        )
         assert snackbars[0].content.value == "message 4"  # 最後一個
 
     def test_snack_bar_calls_page_update_on_success(self):

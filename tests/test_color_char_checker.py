@@ -7,19 +7,14 @@ Minecraft formatting codes: 0-9, a-f (顏色), k-o (格式), r (reset)
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from translation_tool.checkers.color_char_checker import (  # noqa: E402
+from translation_tool.checkers.color_char_checker import (
     COLOR_PATTERN,
-    check_color_chars,
     _check_value,
-    check_json_file,
+    check_color_chars,
     check_directory,
+    check_json_file,
 )
 
 

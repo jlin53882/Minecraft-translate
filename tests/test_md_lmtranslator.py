@@ -5,16 +5,11 @@
 
 from __future__ import annotations
 
-import sys
 import json
 from pathlib import Path
 
-# 確保可以導入翻譯工具模組
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
-
 # 測試模組
-from translation_tool.plugins.md import md_lmtranslator  # noqa: E402
+from translation_tool.plugins.md import md_lmtranslator
 
 
 def test_read_json(tmp_path: Path) -> None:

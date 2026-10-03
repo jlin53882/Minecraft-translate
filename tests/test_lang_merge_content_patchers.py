@@ -5,11 +5,13 @@ from pathlib import Path
 
 import orjson
 
-from translation_tool.core.lang_merge_io import ZipReader, quarantine_copy as quarantine_copy_impl
 from translation_tool.core import lang_merge_content
+from translation_tool.core.lang_merge_io import ZipReader
 
 
-def test_patch_localized_content_json_converts_zh_cn_json_to_pretty_zh_tw(tmp_path: Path) -> None:
+def test_patch_localized_content_json_converts_zh_cn_json_to_pretty_zh_tw(
+    tmp_path: Path,
+) -> None:
     zip_path = tmp_path / "fixture.zip"
     out_path = tmp_path / "out" / "assets" / "demo" / "docs" / "zh_tw.extra.json"
 
@@ -35,7 +37,9 @@ def test_patch_localized_content_json_converts_zh_cn_json_to_pretty_zh_tw(tmp_pa
     assert payload == {"title": "簡體內容", "body": "Only English"}
 
 
-def test_patch_localized_content_json_quarantines_invalid_json(tmp_path: Path, monkeypatch) -> None:
+def test_patch_localized_content_json_quarantines_invalid_json(
+    tmp_path: Path, monkeypatch
+) -> None:
     zip_path = tmp_path / "fixture.zip"
     calls: list[dict] = []
 

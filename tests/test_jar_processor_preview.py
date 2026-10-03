@@ -8,17 +8,14 @@
 import os
 import re
 import zipfile
-import time
 from pathlib import Path
-
-import pytest
 
 from translation_tool.core.jar_processor_preview import (
     ExtractionSummary,
     _get_preview_workers,
     _scan_single_jar_for_preview,
-    preview_extraction_generator_impl,
     generate_preview_report,
+    preview_extraction_generator_impl,
 )
 
 
@@ -58,7 +55,9 @@ class TestScanSingleJarForPreview:
             zf.writestr("assets/modid/lang/zh_cn.json", '{"key": "简体"}')
             zf.writestr("assets/modid/textures/icon.png", "png data")  # 不應被匹配
 
-        regex = re.compile(r"assets/([^/]+)/lang/(en_us|zh_tw|zh_cn)\.json$", re.IGNORECASE)
+        regex = re.compile(
+            r"assets/([^/]+)/lang/(en_us|zh_tw|zh_cn)\.json$", re.IGNORECASE
+        )
         result = _scan_single_jar_for_preview(
             str(jar), "lang", regex, book_path_regex=None, lang_regex=None
         )
@@ -86,11 +85,16 @@ class TestScanSingleJarForPreview:
 
         assert result["jar"] == "patchouli.jar"
         assert result["error"] is None
-        assert result["count"] == 2, f"expected 2 matched files, got {result['count']}, matched={result['matched_files']}"
+        assert result["count"] == 2, (
+            f"expected 2 matched files, got {result['count']}, matched={result['matched_files']}"
+        )
 
     def test_dual_mode_returns_both_lang_and_book(self, tmp_path):
         """dual 模式應同時傳回 lang_matched 和 book_matched"""
-        from translation_tool.core.jar_processor import build_lang_file_regex, build_book_path_regex
+        from translation_tool.core.jar_processor import (
+            build_book_path_regex,
+            build_lang_file_regex,
+        )
 
         jar = tmp_path / "dual.jar"
         with zipfile.ZipFile(jar, "w") as zf:
@@ -102,13 +106,20 @@ class TestScanSingleJarForPreview:
         lang_regex = build_lang_file_regex()
         book_regex = build_book_path_regex()
         result = _scan_single_jar_for_preview(
-            str(jar), "dual", target_regex=None,
-            book_path_regex=book_regex, lang_regex=lang_regex
+            str(jar),
+            "dual",
+            target_regex=None,
+            book_path_regex=book_regex,
+            lang_regex=lang_regex,
         )
 
         assert result["error"] is None
-        assert result["lang_count"] == 1, f"expected 1 lang, got {result['lang_count']}, lang={result['lang_matched']}"
-        assert result["book_count"] == 2, f"expected 2 books, got {result['book_count']}, books={result['book_matched']}"
+        assert result["lang_count"] == 1, (
+            f"expected 1 lang, got {result['lang_count']}, lang={result['lang_matched']}"
+        )
+        assert result["book_count"] == 2, (
+            f"expected 2 books, got {result['book_count']}, books={result['book_matched']}"
+        )
         assert len(result["lang_matched"]) == 1
         assert len(result["book_matched"]) == 2
 
@@ -205,14 +216,18 @@ class TestPreviewExtractionGeneratorImpl:
 
     def test_empty_mods_dir_yields_one_result(self, tmp_path):
         """空目錄只 yield 一個 result（progress=1.0）"""
+
         def no_jars(path):
             return []
 
-        results = list(preview_extraction_generator_impl(
-                str(tmp_path), "lang",
+        results = list(
+            preview_extraction_generator_impl(
+                str(tmp_path),
+                "lang",
                 find_jar_files_fn=no_jars,
-                book_path_regex=re.compile(r".*")
-            ))
+                book_path_regex=re.compile(r".*"),
+            )
+        )
 
         assert len(results) == 1
         assert results[0]["progress"] == 1.0
@@ -226,11 +241,14 @@ class TestPreviewExtractionGeneratorImpl:
         def one_jar(path):
             return [str(jar)]
 
-        results = list(preview_extraction_generator_impl(
-            str(tmp_path), "invalid_mode",
-            find_jar_files_fn=one_jar,
-            book_path_regex=re.compile(r".*")
-        ))
+        results = list(
+            preview_extraction_generator_impl(
+                str(tmp_path),
+                "invalid_mode",
+                find_jar_files_fn=one_jar,
+                book_path_regex=re.compile(r".*"),
+            )
+        )
 
         # 第一個或最後一個 update 會有 error
         has_error = any("error" in r for r in results)
@@ -247,11 +265,14 @@ class TestPreviewExtractionGeneratorImpl:
             zf.writestr("assets/botania/lang/zh_tw.json", '{"item": "花"}')
             zf.writestr("assets/botania/lang/zh_cn.json", '{"item": "花"}')
 
-        results = list(preview_extraction_generator_impl(
-            str(mods_dir), "lang",
-            find_jar_files_fn=lambda p: [str(jar)],
-            book_path_regex=re.compile(r".*")
-        ))
+        results = list(
+            preview_extraction_generator_impl(
+                str(mods_dir),
+                "lang",
+                find_jar_files_fn=lambda p: [str(jar)],
+                book_path_regex=re.compile(r".*"),
+            )
+        )
 
         final = results[-1]
         assert "result" in final
@@ -273,19 +294,26 @@ class TestPreviewExtractionGeneratorImpl:
 
         book_regex = build_book_path_regex()
 
-        results = list(preview_extraction_generator_impl(
-            str(mods_dir), "book",
-            find_jar_files_fn=lambda p: [str(jar)],
-            book_path_regex=book_regex
-        ))
+        results = list(
+            preview_extraction_generator_impl(
+                str(mods_dir),
+                "book",
+                find_jar_files_fn=lambda p: [str(jar)],
+                book_path_regex=book_regex,
+            )
+        )
 
         final = results[-1]
         assert final["result"]["total_jars"] == 1
-        assert final["result"]["total_files"] == 2, f"expected 2 files, got {final['result']['total_files']}, preview_results={final['result']['preview_results']}"
+        assert final["result"]["total_files"] == 2, (
+            f"expected 2 files, got {final['result']['total_files']}, preview_results={final['result']['preview_results']}"
+        )
 
     def test_dual_mode_reports_both_counts(self, tmp_path):
         """dual 模式 preview_results 中每個 JAR 應同時有 lang_count 和 book_count"""
-        from translation_tool.core.jar_processor import build_lang_file_regex, build_book_path_regex
+        from translation_tool.core.jar_processor import (
+            build_book_path_regex,
+        )
 
         mods_dir = tmp_path / "mods"
         mods_dir.mkdir()
@@ -298,17 +326,24 @@ class TestPreviewExtractionGeneratorImpl:
 
         book_regex = build_book_path_regex()
 
-        results = list(preview_extraction_generator_impl(
-            str(mods_dir), "dual",
-            find_jar_files_fn=lambda p: [str(jar)],
-            book_path_regex=book_regex
-        ))
+        results = list(
+            preview_extraction_generator_impl(
+                str(mods_dir),
+                "dual",
+                find_jar_files_fn=lambda p: [str(jar)],
+                book_path_regex=book_regex,
+            )
+        )
 
         final = results[-1]
         preview_results = final["result"]["preview_results"]
         assert len(preview_results) == 1
-        assert preview_results[0]["lang_count"] == 1, f"expected 1 lang, got {preview_results[0]}"
-        assert preview_results[0]["book_count"] == 2, f"expected 2 books, got {preview_results[0]}"
+        assert preview_results[0]["lang_count"] == 1, (
+            f"expected 1 lang, got {preview_results[0]}"
+        )
+        assert preview_results[0]["book_count"] == 2, (
+            f"expected 2 books, got {preview_results[0]}"
+        )
 
 
 # =============================================================================
@@ -333,11 +368,14 @@ class TestPreviewExtractionGeneratorImplMultiThreaded:
         def find_jars(path):
             return [str(j) for j in jars]
 
-        results = list(preview_extraction_generator_impl(
-            str(mods_dir), "lang",
-            find_jar_files_fn=find_jars,
-            book_path_regex=re.compile(r".*")
-        ))
+        results = list(
+            preview_extraction_generator_impl(
+                str(mods_dir),
+                "lang",
+                find_jar_files_fn=find_jars,
+                book_path_regex=re.compile(r".*"),
+            )
+        )
 
         final = results[-1]
         assert final["result"]["total_jars"] == jar_count
@@ -356,17 +394,28 @@ class TestPreviewExtractionGeneratorImplMultiThreaded:
                 zf.writestr("assets/mod/lang/en_us.json", '{"key": "value"}')
             jars.append(jar)
 
-        results = list(preview_extraction_generator_impl(
-            str(mods_dir), "lang",
-            find_jar_files_fn=lambda p: [str(j) for j in jars],
-            book_path_regex=re.compile(r".*")
-        ))
+        results = list(
+            preview_extraction_generator_impl(
+                str(mods_dir),
+                "lang",
+                find_jar_files_fn=lambda p: [str(j) for j in jars],
+                book_path_regex=re.compile(r".*"),
+            )
+        )
 
         # 應有 5 次進度更新（每個 JAR 一次）+ 最後一次 final（含有 result）
-        progress_updates = [r for r in results if "progress" in r and "current" in r and "result" not in r]
+        progress_updates = [
+            r
+            for r in results
+            if "progress" in r and "current" in r and "result" not in r
+        ]
         final_updates = [r for r in results if "result" in r]
-        assert len(progress_updates) == 5, f"預期 5 次進度更新，實際 {len(progress_updates)} 次"
-        assert len(final_updates) == 1, f"預期 1 次最終更新，實際 {len(final_updates)} 次"
+        assert len(progress_updates) == 5, (
+            f"預期 5 次進度更新，實際 {len(progress_updates)} 次"
+        )
+        assert len(final_updates) == 1, (
+            f"預期 1 次最終更新，實際 {len(final_updates)} 次"
+        )
 
         # 進度應遞增
         progresses = [r["progress"] for r in progress_updates]
@@ -389,11 +438,14 @@ class TestPreviewExtractionGeneratorImplMultiThreaded:
         def find_jars(path):
             return [str(good), str(bad)]
 
-        results = list(preview_extraction_generator_impl(
-            str(mods_dir), "lang",
-            find_jar_files_fn=find_jars,
-            book_path_regex=re.compile(r".*")
-        ))
+        results = list(
+            preview_extraction_generator_impl(
+                str(mods_dir),
+                "lang",
+                find_jar_files_fn=find_jars,
+                book_path_regex=re.compile(r".*"),
+            )
+        )
 
         final = results[-1]
         assert len(final["result"]["failed_jars"]) == 1
@@ -412,11 +464,14 @@ class TestPreviewExtractionGeneratorImplMultiThreaded:
                 zf.writestr(f"assets/mod{i}/lang/en_us.json", f'{{"key": "{i}"}}')
             jars.append(jar)
 
-        results = list(preview_extraction_generator_impl(
-            str(mods_dir), "lang",
-            find_jar_files_fn=lambda p: [str(j) for j in jars],
-            book_path_regex=re.compile(r".*")
-        ))
+        results = list(
+            preview_extraction_generator_impl(
+                str(mods_dir),
+                "lang",
+                find_jar_files_fn=lambda p: [str(j) for j in jars],
+                book_path_regex=re.compile(r".*"),
+            )
+        )
 
         final = results[-1]
         # 所有 JAR 都應被處理（無競爭導致遺失）
@@ -434,11 +489,14 @@ class TestPreviewExtractionGeneratorImplMultiThreaded:
         with zipfile.ZipFile(jar, "w") as zf:
             zf.writestr("assets/mod/lang/en_us.json", '{"key": "value"}')
 
-        results = list(preview_extraction_generator_impl(
-            str(mods_dir), "lang",
-            find_jar_files_fn=lambda p: [str(jar)],
-            book_path_regex=re.compile(r".*")
-        ))
+        results = list(
+            preview_extraction_generator_impl(
+                str(mods_dir),
+                "lang",
+                find_jar_files_fn=lambda p: [str(jar)],
+                book_path_regex=re.compile(r".*"),
+            )
+        )
 
         for r in results:
             if "progress" in r:
@@ -456,11 +514,14 @@ class TestPreviewExtractionGeneratorImplMultiThreaded:
         with zipfile.ZipFile(jar, "w") as zf:
             zf.writestr("assets/mod/lang/en_us.json", '{"key": "value"}')
 
-        results = list(preview_extraction_generator_impl(
-            str(mods_dir), "lang",
-            find_jar_files_fn=lambda p: [str(jar)],
-            book_path_regex=re.compile(r".*")
-        ))
+        results = list(
+            preview_extraction_generator_impl(
+                str(mods_dir),
+                "lang",
+                find_jar_files_fn=lambda p: [str(jar)],
+                book_path_regex=re.compile(r".*"),
+            )
+        )
 
         for r in results:
             if "log" in r:
@@ -484,11 +545,14 @@ class TestPreviewExtractionGeneratorImplMultiThreaded:
         def find_jars(path):
             return [str(jar_a), str(jar_z)]
 
-        results = list(preview_extraction_generator_impl(
-            str(mods_dir), "lang",
-            find_jar_files_fn=find_jars,
-            book_path_regex=re.compile(r".*")
-        ))
+        results = list(
+            preview_extraction_generator_impl(
+                str(mods_dir),
+                "lang",
+                find_jar_files_fn=find_jars,
+                book_path_regex=re.compile(r".*"),
+            )
+        )
 
         final = results[-1]
         assert final["result"]["total_jars"] == 2
@@ -508,8 +572,10 @@ class TestGeneratePreviewReport:
         """應自動建立多層目錄"""
         output_path = tmp_path / "a" / "b" / "c"
         result = {
-            "total_jars": 0, "preview_results": [],
-            "total_files": 0, "total_size_mb": 0
+            "total_jars": 0,
+            "preview_results": [],
+            "total_files": 0,
+            "total_size_mb": 0,
         }
         report_path = generate_preview_report(result, "lang", str(output_path))
         assert os.path.exists(report_path)
@@ -517,14 +583,17 @@ class TestGeneratePreviewReport:
     def test_report_filename_contains_mode_and_timestamp(self, tmp_path):
         """檔名應包含 mode 和時間戳"""
         result = {
-            "total_jars": 0, "preview_results": [],
-            "total_files": 0, "total_size_mb": 0
+            "total_jars": 0,
+            "preview_results": [],
+            "total_files": 0,
+            "total_size_mb": 0,
         }
         report_path = generate_preview_report(result, "lang", str(tmp_path))
         filename = os.path.basename(report_path)
         assert "lang" in filename
         # 包含時間戳（格式 YYYYMMDD_HHMMSS）
         import re as re_module
+
         assert re_module.search(r"\d{8}_\d{6}", filename)
 
     def test_report_truncates_file_list_at_50(self, tmp_path):
@@ -534,12 +603,9 @@ class TestGeneratePreviewReport:
             "total_jars": 1,
             "total_files": 60,
             "total_size_mb": 1.0,
-            "preview_results": [{
-                "jar": "big_mod.jar",
-                "files": files,
-                "count": 60,
-                "size_mb": 1.0
-            }]
+            "preview_results": [
+                {"jar": "big_mod.jar", "files": files, "count": 60, "size_mb": 1.0}
+            ],
         }
         report_path = generate_preview_report(result, "lang", str(tmp_path))
         content = Path(report_path).read_text(encoding="utf-8")
@@ -551,14 +617,16 @@ class TestGeneratePreviewReport:
             "total_jars": 1,
             "total_files": 5,
             "total_size_mb": 1.0,
-            "preview_results": [{
-                "jar": "dual_mod.jar",
-                "lang_files": ["a.json", "b.json"],
-                "book_files": ["c.json"],
-                "lang_count": 2,
-                "book_count": 1,
-                "size_mb": 1.0
-            }]
+            "preview_results": [
+                {
+                    "jar": "dual_mod.jar",
+                    "lang_files": ["a.json", "b.json"],
+                    "book_files": ["c.json"],
+                    "lang_count": 2,
+                    "book_count": 1,
+                    "size_mb": 1.0,
+                }
+            ],
         }
         report_path = generate_preview_report(result, "dual", str(tmp_path))
         content = Path(report_path).read_text(encoding="utf-8")

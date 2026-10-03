@@ -2,14 +2,15 @@
 
 用途：測試語言編碼相關功能。
 """
+
 from translation_tool.core.lang_codec import (
-    try_repair_lang_line,
     collapse_lang_lines,
-    parse_lang_text,
     dump_lang_text,
     is_mc_standard_lang_path,
-    pick_first_not_none,
     normalize_patchouli_book_root,
+    parse_lang_text,
+    pick_first_not_none,
+    try_repair_lang_line,
 )
 
 
@@ -94,7 +95,7 @@ class TestParseLangText:
         result = parse_lang_text(text)
         assert "key1" in result
         assert "key2" in result
-        assert "#" not in result.keys()
+        assert "#" not in result
 
     def test_with_empty_lines(self):
         """測試包含空行的情況。"""
@@ -168,7 +169,10 @@ class TestIsMcStandardLangPath:
     def test_invalid_path(self):
         """測試無效路徑。"""
         # 這些路徑沒有 /lang/ 或非 .lang 結尾
-        assert is_mc_standard_lang_path("assets/mymod/patchouli_books/book/en_us.json") is False
+        assert (
+            is_mc_standard_lang_path("assets/mymod/patchouli_books/book/en_us.json")
+            is False
+        )
         assert is_mc_standard_lang_path("assets/mymod/lang/") is False
         assert is_mc_standard_lang_path("assets/mymod/lang/zh_cn.json") is False
 

@@ -13,11 +13,11 @@ class TestAddFolderToZip:
     def test_add_folder_to_zip_empty_folder(self, tmp_path):
         """測試空資料夾的處理"""
         from translation_tool.core.output_bundler import _add_folder_to_zip
-        
+
         # 建立空資料夾
         empty_folder = tmp_path / "empty"
         empty_folder.mkdir()
-        
+
         zip_path = tmp_path / "test.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
             count, _ = _add_folder_to_zip(zf, str(empty_folder), "assets")
@@ -27,7 +27,7 @@ class TestAddFolderToZip:
     def test_add_folder_to_zip_nonexistent_folder(self, tmp_path):
         """測試不存在的資料夾處理"""
         from translation_tool.core.output_bundler import _add_folder_to_zip
-        
+
         zip_path = tmp_path / "test.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
             count, _ = _add_folder_to_zip(zf, str(tmp_path / "nonexistent"), "assets")
@@ -37,21 +37,21 @@ class TestAddFolderToZip:
     def test_add_folder_to_zip_with_files(self, tmp_path):
         """測試包含檔案的資料夾處理"""
         from translation_tool.core.output_bundler import _add_folder_to_zip
-        
+
         # 建立測試資料夾結構
         source_folder = tmp_path / "source" / "assets" / "modid" / "lang"
         source_folder.mkdir(parents=True)
-        
+
         # 建立測試檔案
         (source_folder / "en_us.json").write_text('{"key": "value"}')
         (source_folder / "zh_tw.json").write_text('{"key": "翻譯"}')
-        
+
         zip_path = tmp_path / "test.zip"
         with zipfile.ZipFile(zip_path, "w") as zf:
             count, _ = _add_folder_to_zip(zf, str(source_folder), "assets")
 
         assert count == 2
-        
+
         # 驗證 ZIP 內容
         with zipfile.ZipFile(zip_path, "r") as zf:
             names = zf.namelist()
@@ -67,10 +67,9 @@ class TestBundleOutputsGenerator:
         from translation_tool.core.output_bundler import bundle_outputs_generator
 
         output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(
-            str(tmp_path / "nonexistent"),
-            str(output_zip)
-        ))
+        results = list(
+            bundle_outputs_generator(str(tmp_path / "nonexistent"), str(output_zip))
+        )
 
         assert len(results) > 0
         assert results[-1].get("error") is True
@@ -84,10 +83,7 @@ class TestBundleOutputsGenerator:
         (tmp_path / "lang" / "zh_tw.json").write_text('{"test": "value"}')
 
         output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(
-            str(tmp_path),
-            str(output_zip)
-        ))
+        list(bundle_outputs_generator(str(tmp_path), str(output_zip)))
 
         assert output_zip.exists()
         with zipfile.ZipFile(output_zip, "r") as zf:
@@ -101,16 +97,20 @@ class TestBundleOutputsGenerator:
         (tmp_path / "lang").mkdir()
         (tmp_path / "lang" / "zh_tw.json").write_text('{"test": "value"}')
 
-        (tmp_path / "pack.mcmeta").write_text('{"pack":{"description":"FolderVersion","min_format":"10","max_format":"15"}}')
+        (tmp_path / "pack.mcmeta").write_text(
+            '{"pack":{"description":"FolderVersion","min_format":"10","max_format":"15"}}'
+        )
 
         output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(
-            str(tmp_path),
-            str(output_zip),
-            description="UIVersion",
-            min_format=20,
-            max_format=25,
-        ))
+        results = list(
+            bundle_outputs_generator(
+                str(tmp_path),
+                str(output_zip),
+                description="UIVersion",
+                min_format=20,
+                max_format=25,
+            )
+        )
 
         assert output_zip.exists()
         with zipfile.ZipFile(output_zip, "r") as zf:
@@ -135,11 +135,13 @@ class TestBundleOutputsGenerator:
         ui_pack_png.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 16)
 
         output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(
-            str(tmp_path),
-            str(output_zip),
-            pack_image_path=str(ui_pack_png),
-        ))
+        results = list(
+            bundle_outputs_generator(
+                str(tmp_path),
+                str(output_zip),
+                pack_image_path=str(ui_pack_png),
+            )
+        )
 
         assert output_zip.exists()
         with zipfile.ZipFile(output_zip, "r") as zf:
@@ -227,12 +229,15 @@ class TestBundleOutputsGeneratorNewParams:
         (source_folder / "test.json").write_text('{"key": "value"}')
 
         output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(
-            str(tmp_path), str(output_zip),
-            description="My Translation Pack",
-            min_format=15,
-            max_format=15,
-        ))
+        list(
+            bundle_outputs_generator(
+                str(tmp_path),
+                str(output_zip),
+                description="My Translation Pack",
+                min_format=15,
+                max_format=15,
+            )
+        )
 
         assert output_zip.exists()
         with zipfile.ZipFile(output_zip, "r") as zf:
@@ -258,13 +263,18 @@ class TestBundleOutputsGeneratorNewParams:
                     return {"source_folders": {"assets": "zh_tw_generated"}}
                 return default
 
-        monkeypatch.setattr("translation_tool.core.output_bundler.load_config", lambda: MockConfig())
+        monkeypatch.setattr(
+            "translation_tool.core.output_bundler.load_config", lambda: MockConfig()
+        )
 
         output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(
-            str(tmp_path), str(output_zip),
-            pack_image_path=str(pack_image),
-        ))
+        list(
+            bundle_outputs_generator(
+                str(tmp_path),
+                str(output_zip),
+                pack_image_path=str(pack_image),
+            )
+        )
 
         assert output_zip.exists()
         with zipfile.ZipFile(output_zip, "r") as zf:
@@ -289,13 +299,18 @@ class TestBundleOutputsGeneratorNewParams:
                     return {"source_folders": {"assets": "zh_tw_generated"}}
                 return default
 
-        monkeypatch.setattr("translation_tool.core.output_bundler.load_config", lambda: MockConfig())
+        monkeypatch.setattr(
+            "translation_tool.core.output_bundler.load_config", lambda: MockConfig()
+        )
 
         output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(
-            str(tmp_path), str(output_zip),
-            extra_folders=[str(extra)],
-        ))
+        list(
+            bundle_outputs_generator(
+                str(tmp_path),
+                str(output_zip),
+                extra_folders=[str(extra)],
+            )
+        )
 
         assert output_zip.exists()
         with zipfile.ZipFile(output_zip, "r") as zf:
@@ -322,13 +337,18 @@ class TestBundleOutputsGeneratorNewParams:
                     return {"source_folders": {"assets": "zh_tw_generated"}}
                 return default
 
-        monkeypatch.setattr("translation_tool.core.output_bundler.load_config", lambda: MockConfig())
+        monkeypatch.setattr(
+            "translation_tool.core.output_bundler.load_config", lambda: MockConfig()
+        )
 
         output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(
-            str(tmp_path), str(output_zip),
-            extra_folders=[str(extra)],
-        ))
+        list(
+            bundle_outputs_generator(
+                str(tmp_path),
+                str(output_zip),
+                extra_folders=[str(extra)],
+            )
+        )
 
         with zipfile.ZipFile(output_zip, "r") as zf:
             names = zf.namelist()
@@ -351,13 +371,18 @@ class TestBundleOutputsGeneratorNewParams:
                     return {"source_folders": {"assets": "zh_tw_generated"}}
                 return default
 
-        monkeypatch.setattr("translation_tool.core.output_bundler.load_config", lambda: MockConfig())
+        monkeypatch.setattr(
+            "translation_tool.core.output_bundler.load_config", lambda: MockConfig()
+        )
 
         output_zip = tmp_path / "output.zip"
-        list(bundle_outputs_generator(
-            str(tmp_path), str(output_zip),
-            pack_image_path=str(pack_image),
-        ))
+        list(
+            bundle_outputs_generator(
+                str(tmp_path),
+                str(output_zip),
+                pack_image_path=str(pack_image),
+            )
+        )
 
         with zipfile.ZipFile(output_zip, "r") as zf:
             names = zf.namelist()
@@ -377,13 +402,18 @@ class TestBundleOutputsGeneratorNewParams:
                     return {"source_folders": {"assets": "zh_tw_generated"}}
                 return default
 
-        monkeypatch.setattr("translation_tool.core.output_bundler.load_config", lambda: MockConfig())
+        monkeypatch.setattr(
+            "translation_tool.core.output_bundler.load_config", lambda: MockConfig()
+        )
 
         output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(
-            str(tmp_path), str(output_zip),
-            pack_image_path=str(tmp_path / "nonexistent.png"),
-        ))
+        list(
+            bundle_outputs_generator(
+                str(tmp_path),
+                str(output_zip),
+                pack_image_path=str(tmp_path / "nonexistent.png"),
+            )
+        )
 
         assert output_zip.exists()
         with zipfile.ZipFile(output_zip, "r") as zf:
@@ -403,13 +433,18 @@ class TestBundleOutputsGeneratorNewParams:
                     return {"source_folders": {"assets": "zh_tw_generated"}}
                 return default
 
-        monkeypatch.setattr("translation_tool.core.output_bundler.load_config", lambda: MockConfig())
+        monkeypatch.setattr(
+            "translation_tool.core.output_bundler.load_config", lambda: MockConfig()
+        )
 
         output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(
-            str(tmp_path), str(output_zip),
-            extra_folders=[str(tmp_path / "nonexistent")],
-        ))
+        results = list(
+            bundle_outputs_generator(
+                str(tmp_path),
+                str(output_zip),
+                extra_folders=[str(tmp_path / "nonexistent")],
+            )
+        )
 
         assert any("額外項目不存在" in r.get("log", "") for r in results)
 
@@ -453,14 +488,17 @@ class TestOutputBundlerIntegration:
         pack_img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
 
         output_zip = tmp_path / "output.zip"
-        results = list(bundle_outputs_generator(
-            str(tmp_path), str(output_zip),
-            description="Full Test Pack",
-            min_format=9,
-            max_format=15,
-            pack_image_path=str(pack_img),
-            extra_folders=[str(extra)],
-        ))
+        results = list(
+            bundle_outputs_generator(
+                str(tmp_path),
+                str(output_zip),
+                description="Full Test Pack",
+                min_format=9,
+                max_format=15,
+                pack_image_path=str(pack_img),
+                extra_folders=[str(extra)],
+            )
+        )
 
         assert output_zip.exists()
 

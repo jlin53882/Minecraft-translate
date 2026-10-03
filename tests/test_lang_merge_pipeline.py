@@ -9,7 +9,6 @@ import json
 import zipfile
 from pathlib import Path
 
-
 from translation_tool.core.lang_merge_io import ZipReader
 from translation_tool.core.lang_merge_pipeline import _process_single_mod
 
@@ -379,6 +378,7 @@ class TestAllFilesCacheInProcessSingleMod:
     def test_all_files_cache_avoids_list_all(self, tmp_path):
         """驗證傳入 all_files_cache 時，不呼叫 reader.list_all()。"""
         from unittest.mock import MagicMock
+
         from translation_tool.core.lang_merge_pipeline import _process_single_mod
 
         mock_reader = MagicMock()
@@ -412,6 +412,7 @@ class TestAllFilesCacheInProcessSingleMod:
     def test_no_all_files_cache_falls_back_to_list_all(self, tmp_path):
         """驗證不傳 all_files_cache 時，仍呼叫 reader.list_all() (向後相容)。"""
         from unittest.mock import MagicMock
+
         from translation_tool.core.lang_merge_pipeline import _process_single_mod
 
         mock_reader = MagicMock()
