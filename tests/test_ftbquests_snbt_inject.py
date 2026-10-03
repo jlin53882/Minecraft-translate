@@ -2,10 +2,11 @@
 
 用途：測試 ftbquests_snbt_inject 模組的功能。
 """
+
 from __future__ import annotations
 
-import sys
 import json
+import sys
 from pathlib import Path
 
 # 確保可以導入翻譯工具模組
@@ -21,7 +22,7 @@ def test_normalize_config_dir(tmp_path: Path) -> None:
     # 正常路徑
     result = ftbquests_snbt_inject._normalize_config_dir("config")
     assert result == "config"
-    
+
     # 重複的 config/config
     result = ftbquests_snbt_inject._normalize_config_dir("config/config")
     assert result == "config"
@@ -31,16 +32,16 @@ def test_load_json_dict(tmp_path: Path) -> None:
     """測試 _load_json_dict 載入 JSON。"""
     json_file = tmp_path / "test.json"
     json_file.write_text(json.dumps({"key": "value"}))
-    
+
     result = ftbquests_snbt_inject._load_json_dict(str(json_file))
-    
+
     assert result == {"key": "value"}
 
 
 def test_load_json_dict_missing_file(tmp_path: Path) -> None:
     """測試 _load_json_dict 檔案不存在。"""
     result = ftbquests_snbt_inject._load_json_dict(str(tmp_path / "nonexistent.json"))
-    
+
     assert result == {}
 
 
@@ -51,9 +52,9 @@ def test_split_lang_by_source_file(tmp_path: Path) -> None:
         "file2.snbt|key2": "value2",
         "key3": "value3",  # 沒有檔名
     }
-    
+
     result = ftbquests_snbt_inject.split_lang_by_source_file(lang_map)
-    
+
     assert "file1.snbt" in result
     assert "file2.snbt" in result
     assert "_default" in result
@@ -65,9 +66,9 @@ def test_split_lang_by_source_file_with_list(tmp_path: Path) -> None:
     lang_map = {
         "file1.snbt|key1": ["value1", "value2"],
     }
-    
+
     result = ftbquests_snbt_inject.split_lang_by_source_file(lang_map)
-    
+
     assert "file1.snbt" in result
     assert result["file1.snbt"]["key1"] == ["value1", "value2"]
 
@@ -78,9 +79,9 @@ def test_split_lang_by_source_file_invalid_value(tmp_path: Path) -> None:
         "key1": 123,  # 不是字串或列表
         "key2": ["valid", 456],  # 列表中有非字串
     }
-    
+
     result = ftbquests_snbt_inject.split_lang_by_source_file(lang_map)
-    
+
     assert "key1" not in result.get("_default", {})
 
 
@@ -93,13 +94,13 @@ def test_walk_and_copy_all_snbt(tmp_path: Path) -> None:
     subdir = src_root / "sub"
     subdir.mkdir()
     (subdir / "file2.snbt").write_text("content2")
-    
+
     # 建立目標目錄
     dst_root = tmp_path / "dst"
-    
+
     # 執行
     count = ftbquests_snbt_inject.walk_and_copy_all_snbt(str(src_root), str(dst_root))
-    
+
     assert count == 2
     assert (dst_root / "file1.snbt").exists()
     assert (dst_root / "sub" / "file2.snbt").exists()
@@ -111,11 +112,11 @@ def test_walk_and_copy_all_snbt_creates_parent(tmp_path: Path) -> None:
     src_root.mkdir()
     (src_root / "nested" / "file.snbt").parent.mkdir(parents=True)
     (src_root / "nested" / "file.snbt").write_text("content")
-    
+
     dst_root = tmp_path / "dst"
-    
+
     count = ftbquests_snbt_inject.walk_and_copy_all_snbt(str(src_root), str(dst_root))
-    
+
     assert count == 1
     assert (dst_root / "nested" / "file.snbt").exists()
 
@@ -128,7 +129,34 @@ def test_patch_lang_snbt_file_basic(tmp_path: Path) -> None:
         str(tmp_path / "output.snbt"),
         {"key": "value"},
     )
-    
+
     # 應該回傳 (0, 0) 表示沒有變更
     assert result[0] == 0
     assert result[1] == 0
+
+
+def test_patch_lang_snbt_file_writes_only_template_keys(tmp_path: Path) -> None:
+    """確認 SNBT 注入只改模板已有欄位，並保留其他資料。"""
+    source = tmp_path / "en_us.snbt"
+    output = tmp_path / "zh_tw.snbt"
+    original = '{ title: "English", keep: "unchanged" }'
+    source.write_text(original, encoding="utf-8")
+    output.write_text(original, encoding="utf-8")
+
+    changed, candidates, details = ftbquests_snbt_inject.patch_lang_snbt_file(
+        str(source),
+        str(output),
+        {"title": "繁體中文", "missing": "不應新增"},
+        return_details=True,
+    )
+
+    import ftb_snbt_lib as snbt
+
+    with output.open(encoding="utf-8") as stream:
+        result = snbt.load(stream)
+    assert changed == candidates == 1
+    assert str(result["title"]) == "繁體中文"
+    assert str(result["keep"]) == "unchanged"
+    assert "missing" not in result
+    assert details["changed_keys"] == ["title"]
+    assert details["missing_in_template"] == ["missing"]

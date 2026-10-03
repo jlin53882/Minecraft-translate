@@ -4,13 +4,16 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import os
+import ast
 import json
+import os
 import re
 from collections import defaultdict
-
+from collections.abc import Callable
 from pathlib import Path
-from translation_tool.utils.log_unit import log_info, log_error
+
+from translation_tool.utils.log_unit import log_error, log_info
+
 
 def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
     """
@@ -49,42 +52,131 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
 
     return str(best) if best else str(base)
 
+
+def _extract_call_args_with_end(
+    text: str,
+    start: int,
+) -> tuple[str | None, int | None]:
+    """擷取平衡括號呼叫的引數，忽略字串中的括號與跳脫引號。
+
+    Args:
+        text: 含有 JavaScript 呼叫的完整來源。
+        start: 外層左括號後的第一個字元索引。
+
+    Returns:
+        完整引數內容與外層右括號索引；未閉合時回傳 (None, None)。
+    """
+    depth = 1
+    quote: str | None = None
+    escaped = False
+    index = start
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in ("'", chr(34), "`"):
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return text[start:index], index
+        index += 1
+    return None, None
+
+
+def _replace_js_call_arguments(
+    content: str,
+    function_name: str,
+    replace_args: Callable[[str], str],
+) -> str:
+    """以平衡括號邊界替換具名 JavaScript 呼叫的引數。
+
+    Args:
+        content: JavaScript 原始內容。
+        function_name: 不含呼叫括號的函式名稱。
+        replace_args: 接收完整引數並回傳替換後內容的函式。
+
+    Returns:
+        僅替換指定呼叫引數後的完整 JavaScript 內容。
+    """
+    pattern = re.compile(rf"\b{re.escape(function_name)}\s*\(")
+    output: list[str] = []
+    cursor = 0
+    search_from = 0
+    while True:
+        match = pattern.search(content, search_from)
+        if match is None:
+            break
+        arguments, closing_index = _extract_call_args_with_end(content, match.end())
+        if arguments is None or closing_index is None:
+            output.append(content[cursor:])
+            return "".join(output)
+
+        output.append(content[cursor : match.start()])
+        replacement = replace_args(arguments)
+        if replacement == arguments:
+            output.append(content[match.start() : closing_index + 1])
+        else:
+            output.append(content[match.start() : match.end()])
+            output.append(replacement)
+            output.append(")")
+        cursor = closing_index + 1
+        search_from = cursor
+
+    output.append(content[cursor:])
+    return "".join(output)
+
+
 # ---------------- 工具 ----------------
 
-def split_js_args(s):
-    """解析 JavaScript 函式參數"""
-    args = []
+
+def split_js_args(s: str) -> list[str]:
+    """依巢狀括號切分 JavaScript 引數，保留字串逗號與跳脫引號。"""
+    args: list[str] = []
     buf = ""
     depth = 0
-    quote = None
+    quote: str | None = None
+    escaped = False
 
-    for c in s:
-        if quote:
-            buf += c
-            if c == quote:
+    for char in s:
+        if quote is not None:
+            buf += char
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
                 quote = None
             continue
 
-        if c in ("'", '"'):
-            quote = c
-            buf += c
+        if char in ("'", chr(34), "`"):
+            quote = char
+            buf += char
             continue
 
-        if c in "([{":
+        if char in "([{":
             depth += 1
-        elif c in ")]}":
+        elif char in ")]}":
             depth -= 1
 
-        if c == "," and depth == 0:
+        if char == "," and depth == 0:
             args.append(buf.strip())
             buf = ""
         else:
-            buf += c
+            buf += char
 
     if buf.strip():
         args.append(buf.strip())
 
     return args
+
 
 def strip_quotes(s):
     """移除字串首尾的引號"""
@@ -95,38 +187,113 @@ def strip_quotes(s):
         return s[1:-1]
     return s
 
-def replace_text_in_text_obj(expr, new_text):
-    """利用正規表示式將 Text 函數物件中的目標字串內容替換為新文字。"""
-    return re.sub(
-        r'(Text\.\w+\(\s*[\'"])(.+?)([\'"]\s*\))',
-        lambda m: m.group(1) + new_text + m.group(3),
-        expr,
-        count=1,
-    )
+
+def _decode_js_string_literal(literal: str) -> str | None:
+    """解碼單、雙引號字串 literal，供 no-op 判斷保留原格式。
+
+    Args:
+        literal: 含首尾引號的 JavaScript 字串 literal。
+
+    Returns:
+        可安全解碼的字串值；格式不支援或內容不是字串時回傳 None。
+    """
+    if (
+        len(literal) < 2
+        or literal[0] not in ("'", chr(34))
+        or literal[-1] != literal[0]
+    ):
+        return None
+    try:
+        value = ast.literal_eval(literal)
+    except (SyntaxError, ValueError):
+        return None
+    return value if isinstance(value, str) else None
+
+
+def replace_text_in_text_obj(expr: str, new_text: str) -> str:
+    """替換 Text 呼叫的第一個字串引數，並保留其餘引數與 JS 跳脫。
+
+    Args:
+        expr: Text 方法呼叫表達式，可能包含巢狀 Text 呼叫。
+        new_text: 要寫回的翻譯文字。
+
+    Returns:
+        字串引數以安全 JavaScript literal 替換後的表達式；找不到完整字串時
+        回傳原表達式。
+    """
+    call_pattern = re.compile(r"Text\.\w+\s*\(")
+    literal_start = None
+    for match in call_pattern.finditer(expr):
+        candidate = match.end()
+        while candidate < len(expr) and expr[candidate].isspace():
+            candidate += 1
+        if candidate < len(expr) and expr[candidate] in ("'", chr(34)):
+            literal_start = candidate
+            break
+    if literal_start is None:
+        return expr
+
+    quote = expr[literal_start]
+    closing_index = literal_start + 1
+    escaped = False
+    while closing_index < len(expr):
+        char = expr[closing_index]
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == quote:
+            break
+        closing_index += 1
+    if closing_index >= len(expr):
+        return expr
+
+    original_text = _decode_js_string_literal(expr[literal_start : closing_index + 1])
+    if original_text == new_text:
+        return expr
+
+    replacement = json.dumps(new_text, ensure_ascii=False)
+    return expr[:literal_start] + replacement + expr[closing_index + 1 :]
+
 
 def extract_array_strings(expr):
     """從表達式中擷取陣列字串"""
     return re.findall(r"[\"']([^\"']+)[\"']", expr)
 
-def replace_array(expr, new_values):
-    """解析陣列表達式，將其中的字串元素依序替換為新的值。"""
+
+def replace_array(expr: str, new_values: list[str]) -> str:
+    """以安全 JSON/JavaScript 字串 literal 替換陣列元素。
+
+    Args:
+        expr: 原始 JavaScript 陣列表達式。
+        new_values: 依序對應陣列字串的替換值。
+
+    Returns:
+        保留未替換元素並安全跳脫新字串後的陣列表達式。
+    """
     parts = split_js_args(expr[1:-1])
-    out = []
+    output = []
 
-    for i, part in enumerate(parts):
+    for index, part in enumerate(parts):
         part = part.strip()
-        if part.startswith(("'", '"')) and i < len(new_values):
-            out.append(f'"{new_values[i]}"')
+        if part.startswith(("'", chr(34))) and index < len(new_values):
+            original_value = _decode_js_string_literal(part)
+            if original_value == new_values[index]:
+                output.append(part)
+            else:
+                output.append(json.dumps(new_values[index], ensure_ascii=False))
         else:
-            out.append(part)
+            output.append(part)
 
-    return "[" + ", ".join(out) + "]"
+    return "[" + ", ".join(output) + "]"
+
 
 def to_js_name(json_name):
     """將檔案名稱的副檔名從 .json 轉換為 .js。"""
     if json_name.endswith(".json"):
         return json_name[:-5] + ".js"
     return json_name
+
 
 def clean_text(s: str) -> str:
     """
@@ -138,7 +305,9 @@ def clean_text(s: str) -> str:
         return ""
     return str(s).replace("\\n", "\n").strip()
 
+
 # ---------------- 主流程 ----------------
+
 
 def inject(
     original_dir: str,
@@ -149,11 +318,21 @@ def inject(
     progress_base: float = 0.0,
     progress_span: float = 1.0,
 ) -> dict:
-    """
-    ✅ 新版：由 services/UI 呼叫
-    - original_dir: UI 傳入的模組包 root 或 kubejs/ 目錄（會自動 resolve）
-    - translated_dir: 抽取/翻譯後的 JSON 目錄（例如 .../Output/kubejs/待翻譯）
-    - final_output_dir: 插回後輸出的目錄（例如 .../Output/kubejs/完成）
+    """將翻譯內容注入 KubeJS 輸出，保留來源腳本並只計數真正變更的 JS。
+
+    Args:
+        original_dir: 原始模組包根目錄或 kubejs/ 目錄。
+        translated_dir: 抽取或翻譯後的 JSON 目錄。
+        final_output_dir: 注入結果的輸出目錄。
+        session: 可選的進度與日誌工作階段。
+        progress_base: 此步驟進度區間的起點。
+        progress_span: 此步驟進度區間的寬度。
+
+    Returns:
+        輸出目錄與檔案統計；patched_js_files 只計算輸出內容不同於來源的 JS 檔。
+
+    Raises:
+        FileNotFoundError: translated_dir 不存在時引發。
     """
     orig_root = Path(resolve_kubejs_root(original_dir)).resolve()
     trans_root = Path(translated_dir).resolve()
@@ -227,6 +406,7 @@ def inject(
         # ✅ 改成整檔處理（避免跨行 / chain call / scene.text 插不回）
         with open(js_path, "r", encoding="utf-8") as f:
             content = f.read()
+        original_content = content
 
         id_counters = defaultdict(int)
         auto_id = 1  # ✅ 必須跟 extractor 一樣從 1 開始，先跑 event.add，再跑 scene.text，最後跑 ItemEvents
@@ -234,199 +414,210 @@ def inject(
         # ----------------------------
         # 1) Patch event.add(...)
         # ----------------------------
-        def repl_event_add(m: re.Match) -> str:
-            """處理 event.add 事件中的翻譯。"""
+        def repl_event_add(
+            arg_str: str,
+            *,
+            source_file: str = original_js,
+            translation_map: dict = translations,
+            counters: defaultdict[str, int] = id_counters,
+        ) -> str:
+            """只在 event.add 引數實際改變時回傳重建後的引數。"""
             nonlocal auto_id
-            arg_str = m.group(1)
             args = split_js_args(arg_str)
             new_args = list(args)
+            changed = False
 
             # 單參數 -> auto.N
             if len(args) == 1:
-                key = f"{original_js}|auto.{auto_id}"
-                if key in translations:
-                    # 保留雙引號輸出，避免單引號/跳脫亂掉
-                    new_args[0] = json.dumps(translations[key], ensure_ascii=False)
+                key = f"{source_file}|auto.{auto_id}"
+                if key in translation_map:
+                    translated = translation_map[key]
+                    if _decode_js_string_literal(args[0]) != translated:
+                        replacement = json.dumps(translated, ensure_ascii=False)
+                        new_args[0] = replacement
+                        changed = True
                 auto_id += 1
 
-            # ID + tooltip（你原本的格式：file|item_id.n 或 file|item_id.n.idx）
+            # ID + tooltip（檔案|item_id.n 或檔案|item_id.n.idx）
             elif len(args) == 2:
                 item_id = strip_quotes(args[0])
-                n = id_counters[item_id]
-                id_counters[item_id] += 1
+                number = counters[item_id]
+                counters[item_id] += 1
 
                 if args[1].strip().startswith("Text."):
-                    key = f"{original_js}|{item_id}.{n}"
-                    if key in translations:
-                        new_args[1] = replace_text_in_text_obj(
-                            args[1], translations[key]
+                    key = f"{source_file}|{item_id}.{number}"
+                    if key in translation_map:
+                        replacement = replace_text_in_text_obj(
+                            args[1], translation_map[key]
                         )
+                        if replacement != args[1]:
+                            new_args[1] = replacement
+                            changed = True
 
                 elif args[1].strip().startswith("["):
                     if "Text." in args[1]:
-                        idx = 0
+                        index = 0
 
-                        def repl_text(mm: re.Match) -> str:
-                            """
-
-                            - 主要包裝：`group`
-
-
-                            """
-                            nonlocal idx
-                            key = f"{original_js}|{item_id}.{n}.{idx}"
-                            idx += 1
-                            if key in translations:
+                        def repl_text(match: re.Match[str]) -> str:
+                            """依序替換 tooltip 陣列中的 Text 字串。"""
+                            nonlocal index
+                            key = f"{source_file}|{item_id}.{number}.{index}"
+                            index += 1
+                            if key in translation_map:
                                 return replace_text_in_text_obj(
-                                    mm.group(0), translations[key]
+                                    match.group(0), translation_map[key]
                                 )
-                            return mm.group(0)
+                            return match.group(0)
 
-                        new_args[1] = re.sub(
-                            r"Text\.\w+\s*\(\s*['\"].*?['\"]\s*\)",
+                        quote_class = "['" + chr(34) + "]"
+                        text_call_pattern = (
+                            rf"Text\.\w+\s*\(\s*{quote_class}.*?{quote_class}\s*\)"
+                        )
+                        replacement = re.sub(
+                            text_call_pattern,
                             repl_text,
                             args[1],
-                            flags=re.S,
+                            flags=re.DOTALL,
                         )
                     else:
-                        old = extract_array_strings(args[1])
-                        new_vals = []
-                        for i, o in enumerate(old):
-                            key = f"{original_js}|{item_id}.{n}.{i}"
-                            new_vals.append(translations.get(key, o))
-                        new_args[1] = replace_array(args[1], new_vals)
+                        old_values = extract_array_strings(args[1])
+                        new_values = [
+                            translation_map.get(
+                                f"{source_file}|{item_id}.{number}.{index}",
+                                old_value,
+                            )
+                            for index, old_value in enumerate(old_values)
+                        ]
+                        replacement = replace_array(args[1], new_values)
 
-            return "event.add(" + ", ".join(new_args) + ")"
+                    if replacement != args[1]:
+                        new_args[1] = replacement
+                        changed = True
 
-        content = re.sub(r"event\.add\s*\((.+?)\)", repl_event_add, content, flags=re.S)
+            return ", ".join(new_args) if changed else arg_str
+
+        content = _replace_js_call_arguments(content, "event.add", repl_event_add)
 
         # ----------------------------
         # 2) Patch Ponder: scene.text(...)
         #    key: file|scene.{auto_id}  (✅ 接續 event.add 用掉的 auto_id)
         # ----------------------------
-        def repl_scene_text(m: re.Match) -> str:
-            """處理 scene.text 事件中的翻譯。"""
+        def repl_scene_text(
+            arg_str: str,
+            *,
+            source_file: str = original_js,
+            translation_map: dict = translations,
+        ) -> str:
+            """只在 scene.text 文字實際改變時回傳重建後的引數。"""
             nonlocal auto_id
-            arg_str = m.group(1)
             args = split_js_args(arg_str)
             if len(args) < 2:
-                return m.group(0)
+                return arg_str
 
-            # extractor：text = strip_quotes(args[1]) -> clean_text -> if text: key = file|scene.auto_id ; auto_id++
             raw_text_expr = args[1].strip()
             text_candidate = ""
-
-            # A) 'string' / "string"
             if (raw_text_expr.startswith("'") and raw_text_expr.endswith("'")) or (
-                raw_text_expr.startswith('"') and raw_text_expr.endswith('"')
+                raw_text_expr.startswith(chr(34)) and raw_text_expr.endswith(chr(34))
             ):
                 text_candidate = strip_quotes(raw_text_expr)
-
-            # B) Text.xxx("string")（有些 Ponder 也會這樣寫）
             elif raw_text_expr.startswith("Text."):
-                m2 = re.search(r"['\"](.+?)['\"]", raw_text_expr, flags=re.S)
-                if m2:
-                    text_candidate = m2.group(1)
+                quote_class = "['" + chr(34) + "]"
+                match = re.search(
+                    rf"{quote_class}(.+?){quote_class}",
+                    raw_text_expr,
+                    flags=re.DOTALL,
+                )
+                if match:
+                    text_candidate = match.group(1)
 
-            # 只有真的有字才算一筆，並且 auto_id 要++（跟 extractor 對齊）
+            changed = False
             if clean_text(text_candidate):
-                key = f"{original_js}|scene.{auto_id}"
-                if key in translations:
-                    new_text = translations[key]
-
-                    # 依照原本表達式型態替換
+                key = f"{source_file}|scene.{auto_id}"
+                if key in translation_map:
+                    new_text = translation_map[key]
                     if raw_text_expr.startswith("Text."):
-                        args[1] = replace_text_in_text_obj(args[1], new_text)
+                        replacement = replace_text_in_text_obj(args[1], new_text)
                     else:
-                        # 一律輸出成 JSON 字串（雙引號 + 正確跳脫）
-                        args[1] = json.dumps(new_text, ensure_ascii=False)
-
+                        replacement = json.dumps(new_text, ensure_ascii=False)
+                    if replacement != args[1]:
+                        args[1] = replacement
+                        changed = True
                 auto_id += 1
 
-            return "scene.text(" + ", ".join(args) + ")"
+            return ", ".join(args) if changed else arg_str
 
-        content = re.sub(
-            r"scene\.text\s*\((.+?)\)", repl_scene_text, content, flags=re.S
-        )
+        content = _replace_js_call_arguments(content, "scene.text", repl_scene_text)
 
         # ----------------------------
         # 3) Patch ItemEvents Tooltips: .add(...)
         #    key: file|{item_id}.tooltip.{idx}
         # ----------------------------
-        def extract_call_args_with_end(
-            text: str, start: int
-        ) -> tuple[str | None, int | None]:
-            # start 指向 '(' 後面的位置
-            """提取函數呼叫的參數。"""
-            depth = 1
-            i = start
-            buf = ""
-            while i < len(text):
-                ch = text[i]
-                if ch == "(":
-                    depth += 1
-                elif ch == ")":
-                    depth -= 1
-                    if depth == 0:
-                        return buf, i  # buf = args, i = ')' 的 index
-                buf += ch
-                i += 1
-            return None, None
-
-        def patch_itemevents_tooltips(full: str) -> str:
-            """修補 ItemEvents 的 Tooltip。"""
+        def patch_itemevents_tooltips(
+            full: str,
+            *,
+            source_file: str = original_js,
+            translation_map: dict = translations,
+        ) -> str:
+            """修補 ItemEvents Tooltip，無變更時保留呼叫原始文字。"""
             out = []
             last = 0
 
-            for m in re.finditer(r"\.add\s*\(", full):
-                args_str, end_idx = extract_call_args_with_end(full, m.end())
+            for match in re.finditer(r"\.add\s*\(", full):
+                args_str, end_idx = _extract_call_args_with_end(full, match.end())
                 if args_str is None or end_idx is None:
                     continue
 
-                # 把 .add( 之前的內容先塞進去
-                out.append(full[last : m.start()])
-
+                out.append(full[last : match.start()])
                 args = split_js_args(args_str)
                 if len(args) < 2:
-                    # 還原原樣
-                    out.append(full[m.start() : end_idx + 1])
+                    out.append(full[match.start() : end_idx + 1])
                     last = end_idx + 1
                     continue
 
                 raw_id = args[0].strip()
                 if (raw_id.startswith("'") and raw_id.endswith("'")) or (
-                    raw_id.startswith('"') and raw_id.endswith('"')
+                    raw_id.startswith(chr(34)) and raw_id.endswith(chr(34))
                 ):
                     item_id = raw_id[1:-1]
                 else:
-                    item_id = raw_id  # array / regex 原樣保留（跟 extractor 一樣）
+                    item_id = raw_id
 
                 tooltip_block = args[1]
-                idx = 0
+                index = 0
 
-                def repl_text_call(mm: re.Match) -> str:
-                    """處理 Tooltip 文字替換。"""
-                    nonlocal idx
-                    key = f"{original_js}|{item_id}.tooltip.{idx}"
-                    idx += 1
-                    if key in translations:
-                        return replace_text_in_text_obj(mm.group(0), translations[key])
-                    return mm.group(0)
+                def repl_text_call(
+                    text_match: re.Match[str],
+                    *,
+                    current_file: str = source_file,
+                    current_item_id: str = item_id,
+                    current_translations: dict = translation_map,
+                ) -> str:
+                    """替換一個 ItemEvents Tooltip 字串並維持原索引順序。"""
+                    nonlocal index
+                    key = f"{current_file}|{current_item_id}.tooltip.{index}"
+                    index += 1
+                    if key in current_translations:
+                        return replace_text_in_text_obj(
+                            text_match.group(0), current_translations[key]
+                        )
+                    return text_match.group(0)
 
-                # 只替換 Text.xxx("...") 這種
+                quote_class = "['" + chr(34) + "]"
+                text_call_pattern = (
+                    rf"Text\.\w+\s*\(\s*{quote_class}.*?{quote_class}\s*\)"
+                )
                 new_tooltip_block = re.sub(
-                    r"Text\.\w+\s*\(\s*['\"].*?['\"]\s*\)",
+                    text_call_pattern,
                     repl_text_call,
                     tooltip_block,
-                    flags=re.S,
+                    flags=re.DOTALL,
                 )
 
-                args[1] = new_tooltip_block
-
-                # 重組 .add(...)
-                rebuilt = ".add(" + ", ".join(args) + ")"
-                out.append(rebuilt)
-
+                if new_tooltip_block == tooltip_block:
+                    out.append(full[match.start() : end_idx + 1])
+                else:
+                    args[1] = new_tooltip_block
+                    out.append(".add(" + ", ".join(args) + ")")
                 last = end_idx + 1
 
             out.append(full[last:])
@@ -443,10 +634,10 @@ def inject(
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(content)
 
-        patched_js_files += 1
-        msg = f"✔ Patched {out_path}"
-        if session:
-            log_info(msg)
+        if content != original_content:
+            patched_js_files += 1
+            if session:
+                log_info(f"✔ Patched {out_path}")
 
         done += 1
         if session:
@@ -477,6 +668,7 @@ def inject(
         "patched_js_files": patched_js_files,
         "wrote_lang_files": wrote_lang_files,
     }
+
 
 if __name__ == "__main__":
     inject()
