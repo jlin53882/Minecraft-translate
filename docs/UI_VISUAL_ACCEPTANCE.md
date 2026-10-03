@@ -182,10 +182,10 @@ blocked or unverified rather than inferred from a screenshot.
 
 - `views`: 290/290 cases across both themes and all five viewports, with first
   build/revisit pairs, no console/page errors, and ten teardown probes.
-- `dialogs`: 48/48 cases at 1100×720 and 900×700 in both themes; the four
+- `dialogs`: 64/64 cases at 1100×720 and 900×700 in both themes; the four
   Pipeline Merge bottom-scroll screenshots show Patchouli controls reachable
   while the footer remains visible.
-- One-click wizard check: 32/32 cases at 900×700 in both themes, including
+- One-click wizard cases ran at both required heights and themes, including
   steps 1–4, dismiss, and reopen; no console/page errors.
 - Dashboard state checks: empty, data, running, error, cancellation-requested,
   and loading each produced 4/4 cases at 900×700 and 720×900 in both themes.
