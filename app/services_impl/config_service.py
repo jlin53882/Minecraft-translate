@@ -63,6 +63,10 @@ def _save_app_config(config: dict[str, Any]):
     （callback 再寫設定時才不會重入死鎖）。
     """
 
+    from app import config_store
+
+    before = _load_app_config()
+
     # Normalization: 當停用簡中處理時，強制關閉所有相依的子功能。
     #
     # 為什麼在 save 時做這件事？
@@ -81,13 +85,12 @@ def _save_app_config(config: dict[str, Any]):
             "patchouli_skip_en_us_when_zh_cn_exists"
         ] = False
 
-    from app import config_store
     from translation_tool.utils.config_manager import save_config
 
     with config_store.write_lock():
         ok = save_config(config, CONFIG_PATH)
     if ok:
-        config_store.notify_saved()  # 讓外殼（API Key 狀態、模型、主題）立即更新
+        config_store.notify_saved(config_store.changed_paths(before, config))
     return ok
 
 

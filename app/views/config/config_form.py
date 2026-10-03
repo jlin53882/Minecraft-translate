@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import flet as ft
 
+from app.config_apply import apply_timing_note
 from app.ui import design, kit
 from app.ui.design import C
 
@@ -79,5 +80,6 @@ def build_key_field(value: str = ""):
         can_reveal_password=True,
         expand=True,
         dense=True,
+        helper=apply_timing_note("lm_translator.keys"),
         text_style=ft.TextStyle(font_family=design.FONT_MONO),
     )

@@ -429,6 +429,35 @@ def test_max_output_tokens_over_model_limit_raises_actionable_error(env, monkeyp
     assert len(calls) == 1  # 不會縮批次後重試
 
 
+def test_max_output_tokens_error_tries_next_model_for_same_batch(env, monkeypatch):
+    import requests
+
+    response = requests.Response()
+    response.status_code = 400
+    response._content = (
+        b'{"error": {"message": "maxOutputTokens is above this model limit"}}'
+    )
+    env["cfg"] = _lm_cfg(
+        models={"small-model": {"enabled": True}, "fallback-model": {"enabled": True}}
+    )
+    seen: list[str] = []
+
+    def fake(**kw):
+        seen.append(kw["model_name"])
+        if kw["model_name"] == "small-model":
+            raise requests.HTTPError("400 maxOutputTokens", response=response)
+        return env["fake"](**kw)
+
+    monkeypatch.setattr(
+        "translation_tool.core.lm_translator_main.call_gemini_requests", fake
+    )
+    results, status = translate_batch_smart(_items(2, "Hi"), 2)
+
+    assert status == "AUTO"
+    assert seen == ["small-model", "fallback-model"]
+    _assert_translated_in_order(results, _items(2, "Hi"))
+
+
 def test_other_400_errors_still_shrink_batches(env, monkeypatch):
     import requests
 
