@@ -13,21 +13,18 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from translation_tool.core import lang_merge_extracted_assets as extracted_assets
 from translation_tool.core.lang_merge_extracted_assets import (
+    _cleanup_single_mod_extracted,
     _infer_modid_from_lang_file,
     _load_existing_assets,
     _scan_extracted_lang_files,
+    _write_json_atomic,
     merge_extracted_to_assets,
-)
-
-from translation_tool.core.lang_merge_extracted_assets import _write_json_atomic
-from unittest.mock import patch
-from translation_tool.core.lang_merge_extracted_assets import (
-    _cleanup_single_mod_extracted,
 )
 
 
@@ -520,6 +517,7 @@ class TestMergeExtractedConfigFlag:
     def test_merge_service_phase2_invoked_when_enabled(self, tmp_path, monkeypatch):
         """config enable_extracted_to_assets_merge=True 時,merge_service 呼叫 merge_extracted_to_assets"""
         from unittest.mock import MagicMock
+
         from app.services_impl.pipelines import merge_service
 
         # mock merge_extracted_to_assets
@@ -562,6 +560,7 @@ class TestMergeExtractedConfigFlag:
     def test_merge_service_phase2_skipped_when_disabled(self, tmp_path, monkeypatch):
         """config enable_extracted_to_assets_merge=False 時,階段 2 不跑"""
         from unittest.mock import MagicMock
+
         from app.services_impl.pipelines import merge_service
 
         called = []

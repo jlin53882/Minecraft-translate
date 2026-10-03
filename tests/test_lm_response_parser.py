@@ -4,9 +4,10 @@
 """
 
 import pytest
+
 from translation_tool.core.lm_response_parser import (
-    safe_json_loads,
     chunked,
+    safe_json_loads,
 )
 
 
@@ -195,8 +196,8 @@ class TestModuleExports:
     def test_exports(self):
         """測試導出的函數。"""
         from translation_tool.core.lm_response_parser import (
-            safe_json_loads,
             chunked,
+            safe_json_loads,
         )
 
         assert callable(safe_json_loads)

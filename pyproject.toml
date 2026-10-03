@@ -1,24 +1,17 @@
 [project]
 name = "minecraft-translator-flet"
 version = "0.8.0"
-description = "Add your description here"
+description = "Flet-based Minecraft translation and resource-pack tooling"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "flet-cli==1.0.1",
-    "flet-desktop==1.0.1",
-    "flet-web==1.0.1",
     "flet[all]==1.0.1",
     "ftb-snbt-lib>=0.4.1",
-    "google-genai>=1.56.0",
-    "httpx>=0.28.1",
     "opencc-python-reimplemented>=0.1.7",
     "orjson>=3.11.3",
     "pandas>=2.3.3",
     "pillow>=12.0.0",
-    "pytest>=9.0.2",
     "requests>=2.32.5",
-    "tqdm>=4.67.1",
     "wikipedia>=1.4.0",
 ]
 
@@ -26,10 +19,20 @@ dependencies = [
 dev = [
     "playwright>=1.63.0",
     "pytest>=9.0.2",
-    "ruff>=0.9.0",
+    "ruff==0.16.9",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = ["backups"]
 pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+extend-exclude = ["backups"]
+
+[tool.ruff.lint]
+# Keep Ruff 0.16.9's complete rule contract. Existing diagnostics that are
+# outside this mechanical PR remain explicitly scoped in the CI baseline.
+extend-select = ["E402"]

@@ -1,4 +1,4 @@
-'''Regression test for 提取進行中按取消真的中斷 Service (問題 4)。
+"""Regression test for 提取進行中按取消真的中斷 Service (問題 4)。
 
 User 報錯:
     「在提取的時候 點取消 是不會取消提取的工作流程
@@ -13,29 +13,35 @@ Root cause:
     加 outer-scope extraction_cancel_flag list,
     on_cancel_click 同步設 extraction_cancel_flag[0] = True,
     run_extraction 內 reset 後把 reference 傳給 Service。
-'''
+"""
+
 from __future__ import annotations
 
 import re
 from pathlib import Path
 
-import pytest
-
-
-EXTRACTOR_DIALOG = Path(__file__).parent.parent / "app" / "views" / "extractor" / "extractor_dialog.py"
+EXTRACTOR_DIALOG = (
+    Path(__file__).parent.parent / "app" / "views" / "extractor" / "extractor_dialog.py"
+)
 
 
 def _read_code_only(src):
     import ast
+
     tree = ast.parse(src)
     mask = set()
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if (node.body and isinstance(node.body[0], ast.Expr)
-                    and isinstance(node.body[0].value, ast.Constant)
-                    and isinstance(node.body[0].value.value, str)):
-                for ln in range(node.body[0].lineno, node.body[0].end_lineno + 1):
-                    mask.add(ln)
+        if (
+            isinstance(
+                node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            )
+            and node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+            and isinstance(node.body[0].value.value, str)
+        ):
+            for ln in range(node.body[0].lineno, node.body[0].end_lineno + 1):
+                mask.add(ln)
     out = []
     for i, line in enumerate(src.splitlines(), start=1):
         if i in mask:
@@ -80,8 +86,7 @@ class TestExtractionCancelFlag:
     def test_on_cancel_click_sets_outer_flag(self):
         body = self._read_function_body("on_cancel_click")
         assert "extraction_cancel_flag[0] = True" in body, (
-            "on_cancel_click 沒設 extraction_cancel_flag, "
-            "按「取消」背景線程繼續跑"
+            "on_cancel_click 沒設 extraction_cancel_flag, 按「取消」背景線程繼續跑"
         )
         assert 'state["cancelled"] = True' in body, (
             "on_cancel_click 沒設 state['cancelled']"
@@ -90,8 +95,10 @@ class TestExtractionCancelFlag:
 
 class TestServiceRespectsCancellation:
     def test_run_extraction_loop_signature(self):
-        from app.services_impl.pipelines.extract_service import run_extraction_loop
         import inspect
+
+        from app.services_impl.pipelines.extract_service import run_extraction_loop
+
         sig = inspect.signature(run_extraction_loop)
         assert "cancelled_flag" in sig.parameters
 
@@ -126,6 +133,7 @@ class TestServiceRespectsCancellation:
 class TestPathConvention:
     def test_no_hardcoded_user_paths(self):
         import re as _re
+
         text = Path(__file__).read_text(encoding="utf-8")
         code = _read_code_only(text)
         forbidden_patterns = [
@@ -134,6 +142,4 @@ class TestPathConvention:
             _re.compile(r"/home/[A-Za-z]"),
         ]
         for p in forbidden_patterns:
-            assert not p.findall(code), (
-                f"測試碼不應寫死絕對使用者路徑 {p.pattern}"
-            )
+            assert not p.findall(code), f"測試碼不應寫死絕對使用者路徑 {p.pattern}"

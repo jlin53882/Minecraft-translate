@@ -2,9 +2,9 @@
 
 用途：測試 DirReader 抽象介面、ZipReader、FolderReader 以及 quarantine_copy 函式。
 """
+
 from __future__ import annotations
 
-import json
 import zipfile
 from pathlib import Path
 
@@ -12,8 +12,8 @@ import pytest
 
 from translation_tool.core.lang_merge_io import (
     DirReader,
-    ZipReader,
     FolderReader,
+    ZipReader,
     quarantine_copy,
 )
 
@@ -185,7 +185,9 @@ class TestFolderReader:
 class TestQuarantineCopy:
     """測試 quarantine_copy 函式。"""
 
-    def test_quarantine_copy_folder_writer_creates_files(self, tmp_path: Path, monkeypatch):
+    def test_quarantine_copy_folder_writer_creates_files(
+        self, tmp_path: Path, monkeypatch
+    ):
         """測試 quarantine_copy 使用 FolderReader 時會在 quarantine 目錄建立檔案。"""
         file_path = tmp_path / "file.txt"
         file_path.write_text("test content", encoding="utf-8")
@@ -205,7 +207,9 @@ class TestQuarantineCopy:
 
         quarantined = quarantine_dir / "file.txt"
         assert quarantined.read_text(encoding="utf-8") == "test content"
-        assert (quarantine_dir / "file.txt.reason.txt").read_text(encoding="utf-8") == "test_reason"
+        assert (quarantine_dir / "file.txt.reason.txt").read_text(
+            encoding="utf-8"
+        ) == "test_reason"
 
     def test_quarantine_copy_zip_writer_creates_files(self, tmp_path: Path):
         """測試 quarantine_copy 使用 ZipReader 時會在 quarantine 目錄建立檔案。"""
@@ -230,4 +234,6 @@ class TestQuarantineCopy:
 
         quarantined = quarantine_dir / "file.txt"
         assert quarantined.read_text(encoding="utf-8") == "test content"
-        assert (quarantine_dir / "file.txt.reason.txt").read_text(encoding="utf-8") == "zip_reason"
+        assert (quarantine_dir / "file.txt.reason.txt").read_text(
+            encoding="utf-8"
+        ) == "zip_reason"

@@ -6,29 +6,29 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Optional
 import csv
 import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
 class TranslationRecorder:
     """收集翻譯紀錄並輸出 JSON/CSV。"""
 
-    rows: List[Dict[str, Any]] = field(default_factory=list)
+    rows: list[dict[str, Any]] = field(default_factory=list)
 
     def record(
         self,
         *,
         cache_type: str,
-        file_id: Optional[str],
+        file_id: str | None,
         path: str,
         src: str,
         dst: str,
         cache_hit: bool,
-        extra: Optional[Dict[str, Any]] = None,
+        extra: dict[str, Any] | None = None,
     ) -> None:
         self.rows.append(
             {
@@ -54,7 +54,7 @@ class TranslationRecorder:
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         cols = ["cache_type", "file_id", "path", "src", "dst", "cache_hit"]
-        extra_cols = sorted({k for r in self.rows for k in r.keys()} - set(cols))
+        extra_cols = sorted({k for r in self.rows for k in r} - set(cols))
         cols = cols + extra_cols
 
         with out_path.open("w", encoding="utf-8", newline="") as f:

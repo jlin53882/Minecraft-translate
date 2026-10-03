@@ -7,10 +7,8 @@
 確保屬性存取（e.zh_tw）在兩種情况下都正常。
 """
 
-import pytest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
-import flet as ft
+from unittest.mock import patch
 
 
 class MockPage:
@@ -35,7 +33,7 @@ class TestCacheWriteTransform:
 
     def test_namespace_to_dict_conversion(self):
         """SimpleNamespace entry 寫入時應該轉為 dict"""
-        view = create_view()
+        create_view()
 
         entries = [
             SimpleNamespace(
@@ -60,7 +58,7 @@ class TestCacheWriteTransform:
 
     def test_mixed_entries(self):
         """同時有 dict 和 SimpleNamespace 時，兩者都正確處理"""
-        view = create_view()
+        create_view()
 
         entries = [
             SimpleNamespace(modid="mod1", key="key1", en="en1", zh_tw="tw1"),
@@ -84,11 +82,16 @@ class TestCacheReadTransform:
 
     def test_dict_to_namespace_conversion(self):
         """dict entry 讀出時應該轉為 SimpleNamespace，屬性存取正常"""
-        view = create_view()
+        create_view()
 
         # 模擬 PR #51 的快取讀取邏輯
         cache = [
-            {"modid": "actuallyadditions", "key": "item.actuallyadditions.atomic_reconstructor", "en": "Atomic Reshaper", "zh_tw": "原子重塑器"},
+            {
+                "modid": "actuallyadditions",
+                "key": "item.actuallyadditions.atomic_reconstructor",
+                "en": "Atomic Reshaper",
+                "zh_tw": "原子重塑器",
+            },
         ]
 
         # PR #51 的復元邏輯
@@ -110,7 +113,7 @@ class TestCacheReadTransform:
 
     def test_original_namespace_unchanged(self):
         """原本就是 SimpleNamespace 的 entry 不需要轉換"""
-        view = create_view()
+        create_view()
 
         original = SimpleNamespace(modid="mod1", key="key1", en="en1", zh_tw="tw1")
         cache = [original]

@@ -2,20 +2,18 @@
 
 用途：測試 merge_zhcn_to_zhtw_from_folder() 輸出與 ZIP 版本一致。
 """
+
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import orjson
-import pytest
 
 from translation_tool.core import (
-    lang_merger,
     lang_merge_content,
     lang_merge_pipeline,
+    lang_merger,
 )
-
 
 PENDING_DIR = "待翻譯"
 FILTERED_DIR = "待翻譯整理需翻譯"
@@ -27,16 +25,20 @@ def _write_folder_fixture(folder: Path) -> None:
     (folder / "assets" / "demo" / "docs").mkdir(parents=True, exist_ok=True)
 
     (folder / "assets" / "demo" / "lang" / "en_us.json").write_bytes(
-        orjson.dumps({
-            "item.demo.title": "English Title",
-            "item.demo.pending": "Only English",
-        })
+        orjson.dumps(
+            {
+                "item.demo.title": "English Title",
+                "item.demo.pending": "Only English",
+            }
+        )
     )
     (folder / "assets" / "demo" / "lang" / "zh_cn.json").write_bytes(
-        orjson.dumps({
-            "item.demo.title": "简体说明",
-            "item.demo.pending": "Only English",
-        })
+        orjson.dumps(
+            {
+                "item.demo.title": "简体说明",
+                "item.demo.pending": "Only English",
+            }
+        )
     )
     (folder / "assets" / "demo" / "docs" / "zh_cn.extra.json").write_bytes(
         orjson.dumps({"title": "简体内容", "body": "Only English"})
@@ -88,13 +90,23 @@ def test_merge_folder_basic_outputs_stable(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(lang_merger, "load_config", _fake_config)
     monkeypatch.setattr(lang_merger, "load_replace_rules", lambda _path: [])
     monkeypatch.setattr(lang_merge_content, "load_config", _fake_config)
-    monkeypatch.setattr(lang_merge_content, "recursive_translate_dict", _fake_recursive_translate_dict)
-    monkeypatch.setattr(lang_merge_pipeline, "recursive_translate_dict", _fake_recursive_translate_dict)
-    monkeypatch.setattr(lang_merge_content, "apply_replace_rules", _fake_apply_replace_rules)
-    monkeypatch.setattr(lang_merge_pipeline, "apply_replace_rules", _fake_apply_replace_rules)
+    monkeypatch.setattr(
+        lang_merge_content, "recursive_translate_dict", _fake_recursive_translate_dict
+    )
+    monkeypatch.setattr(
+        lang_merge_pipeline, "recursive_translate_dict", _fake_recursive_translate_dict
+    )
+    monkeypatch.setattr(
+        lang_merge_content, "apply_replace_rules", _fake_apply_replace_rules
+    )
+    monkeypatch.setattr(
+        lang_merge_pipeline, "apply_replace_rules", _fake_apply_replace_rules
+    )
 
     updates = list(
-        lang_merger.merge_zhcn_to_zhtw_from_folder(str(input_dir), str(output_dir), only_process_lang=False)
+        lang_merger.merge_zhcn_to_zhtw_from_folder(
+            str(input_dir), str(output_dir), only_process_lang=False
+        )
     )
 
     assert updates[0]["log"].startswith("分析資料夾")
@@ -102,8 +114,24 @@ def test_merge_folder_basic_outputs_stable(tmp_path: Path, monkeypatch) -> None:
     assert updates[-1]["progress"] == 1.0
 
     zh_tw_path = output_dir / "lang_output" / "assets" / "demo" / "lang" / "zh_tw.json"
-    pending_path = output_dir / "lang_output" / PENDING_DIR / "assets" / "demo" / "lang" / "en_us.json"
-    filtered_pending_path = output_dir / "lang_output" / FILTERED_DIR / "assets" / "demo" / "lang" / "en_us.json"
+    pending_path = (
+        output_dir
+        / "lang_output"
+        / PENDING_DIR
+        / "assets"
+        / "demo"
+        / "lang"
+        / "en_us.json"
+    )
+    filtered_pending_path = (
+        output_dir
+        / "lang_output"
+        / FILTERED_DIR
+        / "assets"
+        / "demo"
+        / "lang"
+        / "en_us.json"
+    )
     localized_json_path = output_dir / "assets" / "demo" / "docs" / "zh_tw.extra.json"
 
     assert zh_tw_path.exists(), f"缺少 {zh_tw_path}"
@@ -133,13 +161,23 @@ def test_merge_folder_only_process_lang(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(lang_merger, "load_config", _fake_config)
     monkeypatch.setattr(lang_merger, "load_replace_rules", lambda _path: [])
     monkeypatch.setattr(lang_merge_content, "load_config", _fake_config)
-    monkeypatch.setattr(lang_merge_content, "recursive_translate_dict", _fake_recursive_translate_dict)
-    monkeypatch.setattr(lang_merge_pipeline, "recursive_translate_dict", _fake_recursive_translate_dict)
-    monkeypatch.setattr(lang_merge_content, "apply_replace_rules", _fake_apply_replace_rules)
-    monkeypatch.setattr(lang_merge_pipeline, "apply_replace_rules", _fake_apply_replace_rules)
+    monkeypatch.setattr(
+        lang_merge_content, "recursive_translate_dict", _fake_recursive_translate_dict
+    )
+    monkeypatch.setattr(
+        lang_merge_pipeline, "recursive_translate_dict", _fake_recursive_translate_dict
+    )
+    monkeypatch.setattr(
+        lang_merge_content, "apply_replace_rules", _fake_apply_replace_rules
+    )
+    monkeypatch.setattr(
+        lang_merge_pipeline, "apply_replace_rules", _fake_apply_replace_rules
+    )
 
     updates = list(
-        lang_merger.merge_zhcn_to_zhtw_from_folder(str(input_dir), str(output_dir), only_process_lang=True)
+        lang_merger.merge_zhcn_to_zhtw_from_folder(
+            str(input_dir), str(output_dir), only_process_lang=True
+        )
     )
 
     assert all(not update.get("error", False) for update in updates)
@@ -149,7 +187,9 @@ def test_merge_folder_only_process_lang(tmp_path: Path, monkeypatch) -> None:
     assert zh_tw_path.exists()
 
     localized_json_path = output_dir / "assets" / "demo" / "docs" / "zh_tw.extra.json"
-    assert not localized_json_path.exists(), "only_process_lang=True 時不應產生 localized 檔案"
+    assert not localized_json_path.exists(), (
+        "only_process_lang=True 時不應產生 localized 檔案"
+    )
 
 
 def test_merge_folder_missing_input_dir(tmp_path: Path, monkeypatch) -> None:
@@ -161,7 +201,9 @@ def test_merge_folder_missing_input_dir(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(lang_merger, "load_replace_rules", lambda _path: [])
 
     updates = list(
-        lang_merger.merge_zhcn_to_zhtw_from_folder(str(input_dir), str(output_dir), only_process_lang=False)
+        lang_merger.merge_zhcn_to_zhtw_from_folder(
+            str(input_dir), str(output_dir), only_process_lang=False
+        )
     )
 
     assert updates[-1]["progress"] == 1.0

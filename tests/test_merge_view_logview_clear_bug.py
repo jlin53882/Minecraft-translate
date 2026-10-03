@@ -48,15 +48,14 @@ def _read_code_only(source_text: str) -> str:
     for node in ast.walk(tree):
         if isinstance(
             node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ) and (
+            node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+            and isinstance(node.body[0].value.value, str)
         ):
-            if (
-                node.body
-                and isinstance(node.body[0], ast.Expr)
-                and isinstance(node.body[0].value, ast.Constant)
-                and isinstance(node.body[0].value.value, str)
-            ):
-                for ln in range(node.body[0].lineno, node.body[0].end_lineno + 1):
-                    mask.add(ln)
+            for ln in range(node.body[0].lineno, node.body[0].end_lineno + 1):
+                mask.add(ln)
     out = []
     for i, line in enumerate(source_text.splitlines(), start=1):
         if i in mask:
@@ -131,8 +130,8 @@ class TestStartMergeActuallyClearsLogView:
     @pytest.fixture
     def merge_view_env(self, monkeypatch):
         """建立一個 MergeView,monkeypatch 必要的 session / ui_poller / config。"""
-        from tests.conftest import mock_page, mock_filepicker
         from app.views import merge_view
+        from tests.conftest import mock_filepicker, mock_page
 
         class _Session:
             def __init__(self, max_logs=2000):

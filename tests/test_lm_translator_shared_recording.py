@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
 import csv
 import json
+from pathlib import Path
 
 from translation_tool.core.lm_translator_shared import TranslationRecorder
 
 
-def test_translation_recorder_exports_json_and_csv_with_extra_columns(tmp_path: Path) -> None:
+def test_translation_recorder_exports_json_and_csv_with_extra_columns(
+    tmp_path: Path,
+) -> None:
     rec = TranslationRecorder()
     rec.record(
         cache_type="lang",

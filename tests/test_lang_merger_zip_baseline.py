@@ -6,12 +6,11 @@ from pathlib import Path
 import orjson
 
 from translation_tool.core import (
-    lang_merger,
     lang_merge_content,
     lang_merge_pipeline,
     lang_merge_zip_io,
+    lang_merger,
 )
-
 
 PENDING_DIR = "待翻譯"
 FILTERED_DIR = "待翻譯整理需翻譯"
@@ -154,7 +153,7 @@ def test_merge_zip_baseline_fixture_outputs_are_stable(
     }
     assert all_json_outputs == {
         "assets/demo/docs/zh_tw.extra.json",
-        f"lang_output/assets/demo/lang/zh_tw.json",
+        "lang_output/assets/demo/lang/zh_tw.json",
         f"lang_output/{PENDING_DIR}/assets/demo/lang/en_us.json",
         f"lang_output/{FILTERED_DIR}/assets/demo/lang/en_us.json",
     }

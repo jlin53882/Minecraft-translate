@@ -4,12 +4,10 @@
 驗證 _load_entries_from_jar_directory() 的各種情境。
 """
 
-import pytest
-import zipfile
 import json
+import zipfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-import flet as ft
+from unittest.mock import patch
 
 
 class MockPage:
@@ -52,12 +50,18 @@ class TestLoadEntriesFromJarDirectory:
         jar_dir = tmp_path / "mods"
         jar_dir.mkdir()
 
-        create_test_jar(jar_dir, "actuallyadditions-1.20.jar", {
-            "assets/actuallyadditions/lang/en_us.json": json.dumps({
-                "item.actuallyadditions.atomic_reconstructor": "Atomic Reshaper",
-                "item.actuallyadditions.manual": "Manual",
-            }),
-        })
+        create_test_jar(
+            jar_dir,
+            "actuallyadditions-1.20.jar",
+            {
+                "assets/actuallyadditions/lang/en_us.json": json.dumps(
+                    {
+                        "item.actuallyadditions.atomic_reconstructor": "Atomic Reshaper",
+                        "item.actuallyadditions.manual": "Manual",
+                    }
+                ),
+            },
+        )
 
         view = create_view(source_root=jar_dir, review_root=None)
         entries = view._load_entries_from_jar_directory()
@@ -71,11 +75,17 @@ class TestLoadEntriesFromJarDirectory:
         jar_dir = tmp_path / "mods"
         jar_dir.mkdir()
 
-        create_test_jar(jar_dir, "jei-1.20.1.jar", {
-            "assets/jei/lang/en_us.json": json.dumps({
-                "jei.category.brewing": "Brewing",
-            }),
-        })
+        create_test_jar(
+            jar_dir,
+            "jei-1.20.1.jar",
+            {
+                "assets/jei/lang/en_us.json": json.dumps(
+                    {
+                        "jei.category.brewing": "Brewing",
+                    }
+                ),
+            },
+        )
 
         view = create_view(source_root=jar_dir, review_root=None)
         entries = view._load_entries_from_jar_directory()
@@ -88,12 +98,20 @@ class TestLoadEntriesFromJarDirectory:
         jar_dir = tmp_path / "mods"
         jar_dir.mkdir()
 
-        create_test_jar(jar_dir, "mod1.jar", {
-            "assets/mod1/lang/en_us.json": json.dumps({"mod1.key": "value1"}),
-        })
-        create_test_jar(jar_dir, "mod2.jar", {
-            "assets/mod2/lang/en_us.json": json.dumps({"mod2.key": "value2"}),
-        })
+        create_test_jar(
+            jar_dir,
+            "mod1.jar",
+            {
+                "assets/mod1/lang/en_us.json": json.dumps({"mod1.key": "value1"}),
+            },
+        )
+        create_test_jar(
+            jar_dir,
+            "mod2.jar",
+            {
+                "assets/mod2/lang/en_us.json": json.dumps({"mod2.key": "value2"}),
+            },
+        )
 
         view = create_view(source_root=jar_dir, review_root=None)
         entries = view._load_entries_from_jar_directory()
@@ -112,9 +130,13 @@ class TestLoadEntriesFromJarDirectory:
         bad_jar.write_bytes(b"not a zip file at all")
 
         # 建立好的 JAR
-        create_test_jar(jar_dir, "good.jar", {
-            "assets/good/lang/en_us.json": json.dumps({"good.key": "good value"}),
-        })
+        create_test_jar(
+            jar_dir,
+            "good.jar",
+            {
+                "assets/good/lang/en_us.json": json.dumps({"good.key": "good value"}),
+            },
+        )
 
         view = create_view(source_root=jar_dir, review_root=None)
         entries = view._load_entries_from_jar_directory()
@@ -138,9 +160,13 @@ class TestLoadEntriesFromJarDirectory:
         jar_dir = tmp_path / "mods"
         jar_dir.mkdir()
 
-        create_test_jar(jar_dir, "mod.jar", {
-            "assets/mod/lang/en_us.json": json.dumps({"key": "value"}),
-        })
+        create_test_jar(
+            jar_dir,
+            "mod.jar",
+            {
+                "assets/mod/lang/en_us.json": json.dumps({"key": "value"}),
+            },
+        )
 
         callback_calls = []
 
@@ -148,9 +174,7 @@ class TestLoadEntriesFromJarDirectory:
             callback_calls.append(1)
 
         view = create_view(source_root=jar_dir, review_root=None)
-        entries = view._load_entries_from_jar_directory(
-            processed_callback=progress_callback
-        )
+        view._load_entries_from_jar_directory(processed_callback=progress_callback)
 
         # callback 應該至少被呼叫一次（墊底 + 至少一個 JAR 完成後）
         assert len(callback_calls) >= 1
@@ -160,11 +184,17 @@ class TestLoadEntriesFromJarDirectory:
         jar_dir = tmp_path / "mods"
         jar_dir.mkdir()
 
-        create_test_jar(jar_dir, "actuallyadditions-1.20.jar", {
-            "assets/actuallyadditions/lang/en_us.json": json.dumps({
-                "item.actuallyadditions.atomic_reconstructor": "Atomic Reshaper",
-            }),
-        })
+        create_test_jar(
+            jar_dir,
+            "actuallyadditions-1.20.jar",
+            {
+                "assets/actuallyadditions/lang/en_us.json": json.dumps(
+                    {
+                        "item.actuallyadditions.atomic_reconstructor": "Atomic Reshaper",
+                    }
+                ),
+            },
+        )
 
         view = create_view(source_root=jar_dir, review_root=None)
         entries = view._load_entries_from_jar_directory()
@@ -177,10 +207,18 @@ class TestLoadEntriesFromJarDirectory:
         jar_dir = tmp_path / "mods"
         jar_dir.mkdir()
 
-        create_test_jar(jar_dir, "kjs-etc.jar", {
-            "assets/kubejs/lang/en_us.json": json.dumps({"kubejs.key": "kubejs value"}),
-            "assets/create/lang/en_us.json": json.dumps({"create.key": "create value"}),
-        })
+        create_test_jar(
+            jar_dir,
+            "kjs-etc.jar",
+            {
+                "assets/kubejs/lang/en_us.json": json.dumps(
+                    {"kubejs.key": "kubejs value"}
+                ),
+                "assets/create/lang/en_us.json": json.dumps(
+                    {"create.key": "create value"}
+                ),
+            },
+        )
 
         view = create_view(source_root=jar_dir, review_root=None)
         entries = view._load_entries_from_jar_directory()
@@ -196,12 +234,18 @@ class TestLoadEntriesFromJarDirectory:
         review_dir = tmp_path / "review"
 
         # JAR 內的 en_us.json
-        create_test_jar(jar_dir, "mod1.jar", {
-            "assets/mod1/lang/en_us.json": json.dumps({
-                "key1": "English Value",
-                "key2": "Another Value",
-            }),
-        })
+        create_test_jar(
+            jar_dir,
+            "mod1.jar",
+            {
+                "assets/mod1/lang/en_us.json": json.dumps(
+                    {
+                        "key1": "English Value",
+                        "key2": "Another Value",
+                    }
+                ),
+            },
+        )
 
         # review_root 的 zh_tw.json（直接路徑）
         zh_tw_dir = review_dir / "mod1" / "lang"
@@ -239,41 +283,57 @@ class TestLoadEntriesFromJarDirectory:
         review_dir = tmp_path / "review"
 
         # JAR 1：含 en_us.json
-        create_test_jar(jar_dir, "actuallyadditions-1.20.jar", {
-            "assets/actuallyadditions/lang/en_us.json": json.dumps({
-                "item.actuallyadditions.atomic_reconstructor": "Atomic Reshaper",
-                "item.actuallyadditions.manual": "Manual",
-                "item.actuallyadditions.eye": "Eye of the Ancient",
-            }),
-        })
+        create_test_jar(
+            jar_dir,
+            "actuallyadditions-1.20.jar",
+            {
+                "assets/actuallyadditions/lang/en_us.json": json.dumps(
+                    {
+                        "item.actuallyadditions.atomic_reconstructor": "Atomic Reshaper",
+                        "item.actuallyadditions.manual": "Manual",
+                        "item.actuallyadditions.eye": "Eye of the Ancient",
+                    }
+                ),
+            },
+        )
 
         # JAR 2：另一個模組
-        create_test_jar(jar_dir, "jei-1.20.1.jar", {
-            "assets/jei/lang/en_us.json": json.dumps({
-                "jei.category.brewing": "Brewing",
-                "jei.category.smelting": "Smelting",
-            }),
-        })
+        create_test_jar(
+            jar_dir,
+            "jei-1.20.1.jar",
+            {
+                "assets/jei/lang/en_us.json": json.dumps(
+                    {
+                        "jei.category.brewing": "Brewing",
+                        "jei.category.smelting": "Smelting",
+                    }
+                ),
+            },
+        )
 
         # review_root 的 zh_tw.json（直接路徑）
         zh_tw_dir_aa = review_dir / "actuallyadditions" / "lang"
         zh_tw_dir_aa.mkdir(parents=True)
         (zh_tw_dir_aa / "zh_tw.json").write_text(
-            json.dumps({
-                "item.actuallyadditions.atomic_reconstructor": "原子重塑器",
-                "item.actuallyadditions.manual": "手冊",
-                # "item.actuallyadditions.eye" → 故意留空，測無翻譯的 key
-            }),
+            json.dumps(
+                {
+                    "item.actuallyadditions.atomic_reconstructor": "原子重塑器",
+                    "item.actuallyadditions.manual": "手冊",
+                    # "item.actuallyadditions.eye" → 故意留空，測無翻譯的 key
+                }
+            ),
             encoding="utf-8",
         )
 
         zh_tw_dir_jei = review_dir / "jei" / "lang"
         zh_tw_dir_jei.mkdir(parents=True)
         (zh_tw_dir_jei / "zh_tw.json").write_text(
-            json.dumps({
-                "jei.category.brewing": "釀造",
-                # "jei.category.smelting" → 故意留空
-            }),
+            json.dumps(
+                {
+                    "jei.category.brewing": "釀造",
+                    # "jei.category.smelting" → 故意留空
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -288,12 +348,18 @@ class TestLoadEntriesFromJarDirectory:
         assert len(aa_entries) == 3
 
         # 有翻譯的 key
-        aa_reconstructor = next(e for e in aa_entries if e.key == "item.actuallyadditions.atomic_reconstructor")
+        aa_reconstructor = next(
+            e
+            for e in aa_entries
+            if e.key == "item.actuallyadditions.atomic_reconstructor"
+        )
         assert aa_reconstructor.en == "Atomic Reshaper"
         assert aa_reconstructor.zh_tw == "原子重塑器"
         assert aa_reconstructor.source_jar == "actuallyadditions-1.20.jar"
 
-        aa_manual = next(e for e in aa_entries if e.key == "item.actuallyadditions.manual")
+        aa_manual = next(
+            e for e in aa_entries if e.key == "item.actuallyadditions.manual"
+        )
         assert aa_manual.en == "Manual"
         assert aa_manual.zh_tw == "手冊"
         assert aa_manual.source_jar == "actuallyadditions-1.20.jar"
@@ -330,7 +396,9 @@ class TestLoadEntriesFromJarDirectory:
         """
         view = create_view(source_root=None, review_root=None)
         entries = view._load_entries_from_jar_directory()
-        assert entries == [], "source_root=None 時應回傳空 list，而非拋出 AttributeError"
+        assert entries == [], (
+            "source_root=None 時應回傳空 list，而非拋出 AttributeError"
+        )
 
     def test_jar_entries_non_string_zh_tw(self, tmp_path):
         """zh_tw 值是 list 而非 str 時，應該回傳空字串（防禦機制）"""
@@ -338,9 +406,13 @@ class TestLoadEntriesFromJarDirectory:
         jar_dir.mkdir()
         review_dir = tmp_path / "review"
 
-        create_test_jar(jar_dir, "mod1.jar", {
-            "assets/mod1/lang/en_us.json": json.dumps({"key1": "English"}),
-        })
+        create_test_jar(
+            jar_dir,
+            "mod1.jar",
+            {
+                "assets/mod1/lang/en_us.json": json.dumps({"key1": "English"}),
+            },
+        )
 
         zh_tw_dir = review_dir / "mod1" / "lang"
         zh_tw_dir.mkdir(parents=True)

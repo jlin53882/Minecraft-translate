@@ -3,9 +3,9 @@
 用途：驗證 UntranslatedChecker 元件的功能正確性。
 """
 
-from app.views.untranslated_checker import UntranslatedChecker
 from app.ui.snack import show_snack
 from app.views.qc_base import QCBase
+from app.views.untranslated_checker import UntranslatedChecker
 
 
 class _MockPage:
@@ -37,13 +37,13 @@ class _MockFilePicker:
         self.last_title = None
         self._mock_path = "/mock/path"
 
-    async def get_directory_path(self, dialog_title: str = None):
+    async def get_directory_path(self, dialog_title: str | None = None):
         self.last_title = dialog_title
         return self._mock_path
 
-    async def pick_files(self, dialog_title: str = None):
+    async def pick_files(self, dialog_title: str | None = None):
         self.last_title = dialog_title
-        return [type('obj', (object,), {'path': self._mock_path})()]
+        return [type("obj", (object,), {"path": self._mock_path})()]
 
 
 class _MockProgressBar:
@@ -108,7 +108,7 @@ def test_untranslated_checker_registers_file_picker():
     # file_picker 不在 overlay 中
     assert file_picker not in page.overlay
 
-    checker = UntranslatedChecker(page, file_picker, task_runner)
+    UntranslatedChecker(page, file_picker, task_runner)
 
     # FilePicker 是 Service，自動註冊，不需要添加到 page.overlay
     # 因此 file_picker 仍然不在 overlay 中（這是預期行為）

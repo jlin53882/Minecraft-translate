@@ -4,11 +4,9 @@
 驗證 Track 1（直接路徑）和 Track 2（rglob fallback）的行為。
 """
 
-import pytest
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-import flet as ft
+from unittest.mock import patch
 
 
 class MockPage:
@@ -36,6 +34,7 @@ def create_view(
 def create_en_us_jar(jar_dir: Path, jar_name: str, modid: str, entries: dict):
     """建立含 en_us.json 的測試 JAR"""
     import zipfile
+
     jar_path = jar_dir / jar_name
     with zipfile.ZipFile(jar_path, "w") as zf:
         zf.writestr(f"assets/{modid}/lang/en_us.json", json.dumps(entries))
@@ -58,7 +57,7 @@ class TestZhTwDualTrack:
             encoding="utf-8",
         )
 
-        view = create_view(source_root=None, review_root=review_dir)
+        create_view(source_root=None, review_root=review_dir)
         modid = "actuallyadditions"
 
         # 模擬雙軌邏輯：直接路徑
@@ -96,22 +95,26 @@ class TestZhTwDualTrack:
         # 模擬一個錯誤的 zh_tw.json（某些值是 list 而非 str）
         zh_tw_file = assets_dir / "zh_tw.json"
         zh_tw_file.write_text(
-            json.dumps({
-                "key1": "正常字串",
-                "key2": ["這是 list"],
-                "key3": 12345,
-            }),
+            json.dumps(
+                {
+                    "key1": "正常字串",
+                    "key2": ["這是 list"],
+                    "key3": 12345,
+                }
+            ),
             encoding="utf-8",
         )
 
-        view = create_view(source_root=None, review_root=review_dir)
+        create_view(source_root=None, review_root=review_dir)
 
         # 模擬防禦邏輯
         raw_data = json.loads(zh_tw_file.read_text(encoding="utf-8"))
-        for key, raw_value in raw_data.items():
+        for raw_value in raw_data.values():
             if not isinstance(raw_value, str):
                 raw_value = ""
-            assert isinstance(raw_value, str), f"非 str 值應該被轉為空字串，實際為 {type(raw_value)}"
+            assert isinstance(raw_value, str), (
+                f"非 str 值應該被轉為空字串，實際為 {type(raw_value)}"
+            )
 
     def test_track2_complements_track1(self, tmp_path):
         """Track 2 應該補上 Track 1 找不到的項目"""

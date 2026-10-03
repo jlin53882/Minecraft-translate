@@ -2,6 +2,7 @@
 
 用途：測試 FTB Quests 語系模板處理功能。
 """
+
 from __future__ import annotations
 
 import json
@@ -171,7 +172,7 @@ class TestPrepareFtbquestsLangTemplateOnlyImpl:
         dst_ftb.mkdir(parents=True)
         (dst_ftb / "test.json").write_text('{"old": "data"}', encoding="utf-8")
 
-        result = prepare_ftbquests_lang_template_only_impl(
+        prepare_ftbquests_lang_template_only_impl(
             input_config_dir=str(input_config),
             output_config_dir=str(output_config),
             prefer_lang="en_us",
@@ -190,7 +191,9 @@ class TestPrepareFtbquestsLangTemplateOnlyImpl:
         for lang in ["en_us", "zh_cn", "zh_tw"]:
             src_ftb = input_config / "ftbquests" / "quests" / "lang" / lang
             src_ftb.mkdir(parents=True)
-            (src_ftb / "test.json").write_text(f'{{"lang": "{lang}"}}', encoding="utf-8")
+            (src_ftb / "test.json").write_text(
+                f'{{"lang": "{lang}"}}', encoding="utf-8"
+            )
 
         result = prepare_ftbquests_lang_template_only_impl(
             input_config_dir=str(input_config),
@@ -199,5 +202,9 @@ class TestPrepareFtbquestsLangTemplateOnlyImpl:
         )
 
         assert "zh_tw" in result["template_used"]
-        content = json.loads((Path(result["template_copied_to"]) / "test.json").read_text(encoding="utf-8"))
+        content = json.loads(
+            (Path(result["template_copied_to"]) / "test.json").read_text(
+                encoding="utf-8"
+            )
+        )
         assert content["lang"] == "zh_tw"

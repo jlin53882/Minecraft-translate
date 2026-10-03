@@ -4,10 +4,10 @@ Verifies that when process_zh_cn_files=False, the dependent fields
 skip_zh_cn_when_only_process_lang and patchouli_skip_en_us_when_zh_cn_exists
 are forced to False before writing to disk.
 """
+
 import json
 from pathlib import Path
 from unittest.mock import patch
-
 
 
 class TestStorageNormalization:
@@ -20,7 +20,7 @@ class TestStorageNormalization:
         config = {
             "lang_merger": {
                 "process_zh_cn_files": False,
-                "skip_zh_cn_when_only_process_lang": True,   # should be forced False
+                "skip_zh_cn_when_only_process_lang": True,  # should be forced False
                 "patchouli_skip_en_us_when_zh_cn_exists": True,  # should be forced False
             }
         }

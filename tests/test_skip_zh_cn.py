@@ -16,11 +16,11 @@ import re
 from unittest.mock import patch
 
 from translation_tool.core.jar_processor import (
-    get_lang_codes,
-    build_lang_file_regex,
     build_book_path_regex,
-    extract_lang_files_generator,
+    build_lang_file_regex,
     extract_dual_files_generator,
+    extract_lang_files_generator,
+    get_lang_codes,
 )
 
 
@@ -39,14 +39,10 @@ class TestGetLangCodesSkipZhCn:
         """
         with patch(
             "translation_tool.core.jar_processor.load_config",
-            return_value={
-                "jar_extractor": {"lang_codes": ["en_us", "zh_tw", "zh_cn"]}
-            },
+            return_value={"jar_extractor": {"lang_codes": ["en_us", "zh_tw", "zh_cn"]}},
         ):
             codes = get_lang_codes(skip_zh_cn=False)
-        assert "zh_cn" in codes, (
-            "回歸:get_lang_codes(skip_zh_cn=False) 沒回傳 zh_cn"
-        )
+        assert "zh_cn" in codes, "回歸:get_lang_codes(skip_zh_cn=False) 沒回傳 zh_cn"
         assert codes == ["en_us", "zh_tw", "zh_cn"]
 
     def test_skip_zh_cn_true_removes_zh_cn(self):
@@ -57,9 +53,7 @@ class TestGetLangCodesSkipZhCn:
         """
         with patch(
             "translation_tool.core.jar_processor.load_config",
-            return_value={
-                "jar_extractor": {"lang_codes": ["en_us", "zh_tw", "zh_cn"]}
-            },
+            return_value={"jar_extractor": {"lang_codes": ["en_us", "zh_tw", "zh_cn"]}},
         ):
             codes = get_lang_codes(skip_zh_cn=True)
         assert "zh_cn" not in codes, (
@@ -87,9 +81,7 @@ class TestGetLangCodesSkipZhCn:
         """skip_zh_cn=True 但 config 本來就沒 zh_cn → 不 crash,直接回傳 codes。"""
         with patch(
             "translation_tool.core.jar_processor.load_config",
-            return_value={
-                "jar_extractor": {"lang_codes": ["ja_jp", "ko_kr"]}
-            },
+            return_value={"jar_extractor": {"lang_codes": ["ja_jp", "ko_kr"]}},
         ):
             codes = get_lang_codes(skip_zh_cn=True)
         assert codes == ["ja_jp", "ko_kr"], (
@@ -172,8 +164,6 @@ class TestBuildLangFileRegexSkipZhCn:
         )
         assert regex.search("assets/mymod/lang/en_us.json")
         assert regex.search("assets/mymod/lang/zh_tw.json")
-
-
 
 
 class TestExtractLangGeneratorSkipZhCn:
@@ -403,30 +393,33 @@ class TestFormatSize:
     def test_format_size_large_value_uses_mb(self):
         """size_mb >= 1.0 → 顯示 MB。"""
         from app.views.extractor.extractor_dialog_helpers import format_size
+
         assert format_size(1.0) == "1.0 MB"
         assert format_size(5.5) == "5.5 MB"
 
     def test_format_size_small_value_uses_kb(self):
         """size_mb 在 0.001~1.0 → 顯示 KB。"""
         from app.views.extractor.extractor_dialog_helpers import format_size
+
         assert format_size(0.0293) == "30.0 KB"  # 0.0293 * 1024 = 30.0
         assert format_size(0.5) == "512.0 KB"  # 0.5 * 1024 = 512
 
     def test_format_size_tiny_value_uses_bytes(self):
         """size_mb < 0.001 → 顯示 B。"""
         from app.views.extractor.extractor_dialog_helpers import format_size
+
         assert format_size(0.0001) == "105 B"  # 0.0001 * 1024^2 ≈ 105
 
     def test_format_size_book_jar_with_small_files(self):
         """實際 book 檔案場景:6 個檔案每個 800 bytes,小於 1 MB。"""
         from app.views.extractor.extractor_dialog_helpers import format_size
+
         # 800 bytes = 0.000763 MB
         size_mb = 6 * 800 / (1024**2)
         result = format_size(size_mb)
         # 不應該是 "0.0 MB"
         assert "0.0 MB" not in result, (
-            "回歸:format_size 把小檔案仍顯示 0.0 MB "
-            "(user 看不出檔案大小)"
+            "回歸:format_size 把小檔案仍顯示 0.0 MB (user 看不出檔案大小)"
         )
         # 應該顯示 KB
         assert "KB" in result or "B" in result

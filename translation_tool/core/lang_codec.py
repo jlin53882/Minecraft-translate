@@ -7,12 +7,12 @@
 from __future__ import annotations
 
 import re
-from typing import Dict
 
 from translation_tool.utils.log_unit import log_debug
 
 JSON_LINE = re.compile(r'^\s*"(.+?)"\s*:\s*"(.+?)"\s*,?\s*$')
 KEY_ZH = re.compile(r"^([a-zA-Z0-9_.-]+)([\u4e00-\u9fff].+)$")
+
 
 def try_repair_lang_line(line: str):
     # JSON 風格
@@ -27,6 +27,7 @@ def try_repair_lang_line(line: str):
         return m.group(1), m.group(2)
 
     return None
+
 
 def collapse_lang_lines(text: str):
     """
@@ -55,7 +56,8 @@ def collapse_lang_lines(text: str):
 
     return out
 
-def parse_lang_text(text: str, *, on_error=None) -> Dict[str, str]:
+
+def parse_lang_text(text: str, *, on_error=None) -> dict[str, str]:
     """
     優化後的 .lang 解析：處理 BOM、註解、以及無 '=' 的長文本續行。
     將 .lang 檔案的 key=value 內容解析為字典
@@ -100,13 +102,15 @@ def parse_lang_text(text: str, *, on_error=None) -> Dict[str, str]:
 
     return data
 
-def dump_lang_text(data: Dict[str, str]) -> str:
+
+def dump_lang_text(data: dict[str, str]) -> str:
     """將字典轉換回 .lang 的文字格式"""
     lines = []
     # 按照 key 排序以保持檔案整潔
     for key in sorted(data.keys()):
         lines.append(f"{key}={data[key]}")
     return "\n".join(lines)
+
 
 def is_mc_standard_lang_path(path: str) -> bool:
     """
@@ -118,12 +122,14 @@ def is_mc_standard_lang_path(path: str) -> bool:
     # 必須在 /lang/ 資料夾內且為 .lang 結尾
     return "/lang/" in p and p.endswith(".lang")
 
+
 def pick_first_not_none(*vals):
     """取得第一個非 None 值。"""
     for v in vals:
         if v is not None:
             return v
     return ""
+
 
 def normalize_patchouli_book_root(path: str) -> str:
     """

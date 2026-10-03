@@ -1,4 +1,8 @@
-from app.views.cache_manager.cache_state import CacheHistoryState, CacheQueryState, CacheShardState
+from app.views.cache_manager.cache_state import (
+    CacheHistoryState,
+    CacheQueryState,
+    CacheShardState,
+)
 
 
 def test_cache_query_state_defaults():
@@ -10,9 +14,9 @@ def test_cache_query_state_defaults():
 
 def test_cache_shard_state_defaults():
     s = CacheShardState()
-    assert s.selected_type == ''
+    assert s.selected_type == ""
     assert s.page == 1
-    assert s.src_mode == 'preview'
+    assert s.src_mode == "preview"
 
 
 def test_cache_history_state_defaults():

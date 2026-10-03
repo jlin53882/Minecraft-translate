@@ -2,18 +2,13 @@
 
 用途：測試 kubejs_translator_io 中的 JSON 讀寫功能。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-import sys
 
 import orjson
 import pytest
-
-# 確保可以導入 translation_tool
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 from translation_tool.core.kubejs_translator_io import (
     read_json_dict_orjson_impl,

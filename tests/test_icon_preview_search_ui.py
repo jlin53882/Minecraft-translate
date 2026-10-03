@@ -10,16 +10,13 @@
 - 清除搜尋時恢復完整列表
 """
 
-import pytest
 import threading
 import time
-from pathlib import Path
-from unittest.mock import MagicMock
-
 
 # ==================================================
 # Debounce 邏輯測試（隔離測試，不依賴 Flet）
 # ==================================================
+
 
 class MockDebounceState:
     """測試用 debounce 狀態追蹤"""
@@ -86,6 +83,7 @@ class TestDebounceLogic:
 # ==================================================
 # 搜尋邏輯測試（與 Flet 無關的純邏輯）
 # ==================================================
+
 
 def _mod_search_logic(mod_ids: list[str], keyword: str) -> list[str]:
     """Mod 清單搜尋純邏輯"""
@@ -214,6 +212,7 @@ class TestDetailSearchLogic:
 # ==================================================
 # 搜尋結果數量顯示
 # ==================================================
+
 
 def test_search_result_count_display():
     """搜尋結果數量顯示格式"""

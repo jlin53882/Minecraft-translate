@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Callable
 import json
 import re
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 from translation_tool.plugins.shared.rich_text_shield import (
     shield_text,
@@ -93,9 +94,7 @@ def is_filled_text_impl(v: Any) -> bool:
     s = v.strip()
     if not s:
         return False
-    if _LANG_REF_RE.match(s):
-        return False
-    return True
+    return not _LANG_REF_RE.match(s)
 
 
 def deep_merge_3way_flat_impl(
@@ -266,7 +265,9 @@ def clean_kubejs_from_raw_impl(
             if tw_data:
                 final_tw_lookup.update(tw_data)
     # 若有 final_tw_lookup，先建好 reverse_index（整個 function 只建一次）
-    reverse_index = _build_reverse_index_impl(final_tw_lookup) if final_tw_lookup else {}
+    reverse_index = (
+        _build_reverse_index_impl(final_tw_lookup) if final_tw_lookup else {}
+    )
 
     for group_dir, files_map in groups.items():
         en = read_json_dict_fn(files_map.get("en_us"))

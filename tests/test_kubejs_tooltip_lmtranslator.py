@@ -5,15 +5,10 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-# 確保可以導入翻譯工具模組
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
-
 # 測試模組
-from translation_tool.plugins.kubejs import kubejs_tooltip_lmtranslator  # noqa: E402
+from translation_tool.plugins.kubejs import kubejs_tooltip_lmtranslator
 
 
 def test_collect_items_from_mapping_basic(tmp_path: Path) -> None:

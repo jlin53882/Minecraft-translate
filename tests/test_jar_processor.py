@@ -3,23 +3,21 @@
 用途：測試 jar_processor.py 的主要導出函數與常數。
 """
 
-import re
 import os
-import sys
+import re
 import zipfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from translation_tool.core.jar_processor import (
-    extract_lang_files_generator,
+    BOOK_PATH_REGEX_DUAL_STRUCTURE,
+    ExtractionSummary,
+    build_lang_file_regex,
     extract_book_files_generator,
     extract_dual_files_generator,
-    preview_extraction_generator,
-    ExtractionSummary,
+    extract_lang_files_generator,
     generate_preview_report,
-    BOOK_PATH_REGEX_DUAL_STRUCTURE,
     get_lang_codes,
-    build_lang_file_regex,
+    preview_extraction_generator,
 )
 
 
@@ -206,11 +204,11 @@ class TestGeneratePreviewReport:
                     "jar": "mod1.jar",
                     "files": ["assets/mod/lang/en_us.json"],
                     "count": 1,
-                    "size_mb": 1.5
+                    "size_mb": 1.5,
                 }
             ],
             "total_files": 1,
-            "total_size_mb": 1.5
+            "total_size_mb": 1.5,
         }
 
         report_path = generate_preview_report(result, "lang", str(output_dir))
@@ -234,7 +232,7 @@ class TestExtractDualFilesGenerator:
         jar_path = mods_dir / "test_mod.jar"
         with zipfile.ZipFile(jar_path, "w") as zf:
             zf.writestr("assets/testmod/lang/en_us.json", '{"key": "value"}')
-            zf.writestr("assets/patchouli_books/guide/en_us/book.json", '{}')
+            zf.writestr("assets/patchouli_books/guide/en_us/book.json", "{}")
 
         results = list(extract_dual_files_generator(str(mods_dir), str(output_dir)))
 
@@ -243,13 +241,18 @@ class TestExtractDualFilesGenerator:
 
     def test_dual_mode_lang_error_captured(self, tmp_path, monkeypatch):
         """測試 Lang 階段失敗時，dual_errors 包含 lang 錯誤，Book 階段繼續執行"""
-        from translation_tool.core.jar_processor_extract import run_extraction_process_impl
+        from translation_tool.core.jar_processor_extract import (
+            run_extraction_process_impl,
+        )
 
         def mock_impl(mods_dir, output_dir, target_regex, process_name, **kwargs):
             if process_name == "Lang":
                 raise RuntimeError("Lang extraction failed")
             yield from run_extraction_process_impl(
-                mods_dir, output_dir, target_regex, "Patchouli Book",
+                mods_dir,
+                output_dir,
+                target_regex,
+                "Patchouli Book",
                 find_jar_files_fn=lambda d: [],
                 extract_from_jar_fn=lambda *a, **kw: {},
             )
@@ -259,7 +262,11 @@ class TestExtractDualFilesGenerator:
             mock_impl,
         )
 
-        results = list(extract_dual_files_generator(str(tmp_path / "mods"), str(tmp_path / "output")))
+        results = list(
+            extract_dual_files_generator(
+                str(tmp_path / "mods"), str(tmp_path / "output")
+            )
+        )
 
         dual_error_updates = [r for r in results if "dual_errors" in r]
         assert len(dual_error_updates) == 1
@@ -268,13 +275,18 @@ class TestExtractDualFilesGenerator:
 
     def test_dual_mode_book_error_captured(self, tmp_path, monkeypatch):
         """測試 Book 階段失敗時，dual_errors 包含 book 錯誤"""
-        from translation_tool.core.jar_processor_extract import run_extraction_process_impl
+        from translation_tool.core.jar_processor_extract import (
+            run_extraction_process_impl,
+        )
 
         def mock_impl(mods_dir, output_dir, target_regex, process_name, **kwargs):
             if process_name == "Patchouli Book":
                 raise RuntimeError("Book extraction failed")
             yield from run_extraction_process_impl(
-                mods_dir, output_dir, target_regex, "Lang",
+                mods_dir,
+                output_dir,
+                target_regex,
+                "Lang",
                 find_jar_files_fn=lambda d: [],
                 extract_from_jar_fn=lambda *a, **kw: {},
             )
@@ -284,7 +296,11 @@ class TestExtractDualFilesGenerator:
             mock_impl,
         )
 
-        results = list(extract_dual_files_generator(str(tmp_path / "mods"), str(tmp_path / "output")))
+        results = list(
+            extract_dual_files_generator(
+                str(tmp_path / "mods"), str(tmp_path / "output")
+            )
+        )
 
         dual_error_updates = [r for r in results if "dual_errors" in r]
         assert len(dual_error_updates) == 1
@@ -293,23 +309,42 @@ class TestExtractDualFilesGenerator:
 
     def test_dual_mode_stats_are_merged(self, tmp_path, monkeypatch):
         """測試 dual mode 完成時，stats 是 Lang + Book 的合併"""
-        from translation_tool.core.jar_processor_extract import run_extraction_process_impl
 
         call_count = [0]
 
         def mock_impl(mods_dir, output_dir, target_regex, process_name, **kwargs):
             call_count[0] += 1
             if process_name == "Lang":
-                yield {"progress": 1.0, "stats": {"success": 5, "failures": 0, "warnings": 2, "total_files": 5}}
+                yield {
+                    "progress": 1.0,
+                    "stats": {
+                        "success": 5,
+                        "failures": 0,
+                        "warnings": 2,
+                        "total_files": 5,
+                    },
+                }
             elif process_name == "Patchouli Book":
-                yield {"progress": 1.0, "stats": {"success": 3, "failures": 0, "warnings": 1, "total_files": 3}}
+                yield {
+                    "progress": 1.0,
+                    "stats": {
+                        "success": 3,
+                        "failures": 0,
+                        "warnings": 1,
+                        "total_files": 3,
+                    },
+                }
 
         monkeypatch.setattr(
             "translation_tool.core.jar_processor._run_extraction_process",
             mock_impl,
         )
 
-        results = list(extract_dual_files_generator(str(tmp_path / "mods"), str(tmp_path / "output")))
+        results = list(
+            extract_dual_files_generator(
+                str(tmp_path / "mods"), str(tmp_path / "output")
+            )
+        )
 
         stats_updates = [r for r in results if "stats" in r]
         merged_stats = stats_updates[-1]["stats"]

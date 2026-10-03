@@ -2,16 +2,10 @@
 
 用途：測試 kubejs_translator_paths 中的路徑解析功能。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-import sys
-
-
-# 確保可以導入 translation_tool
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 from translation_tool.core.kubejs_translator_paths import (
     resolve_kubejs_root_impl,

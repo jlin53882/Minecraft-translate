@@ -3,9 +3,9 @@
 import pytest
 
 from translation_tool.core.lang_merge_dict import (
-    merge_lang_dicts,
     contains_cjk,
     is_pure_english,
+    merge_lang_dicts,
 )
 
 
@@ -45,7 +45,7 @@ class TestMergeLangDicts:
         """2. zh_tw 來源含 CJK → 用規則處理後寫進 final_tw。"""
         cn_data = {"k": "原文"}
         tw_src = {"k": "原文中文"}
-        final_tw, pending = merge_lang_dicts(
+        final_tw, _pending = merge_lang_dicts(
             cn_data=cn_data,
             tw_src_data=tw_src,
             en_data={},
@@ -64,7 +64,7 @@ class TestMergeLangDicts:
         """3. zh_cn 含 CJK 但 zh_tw 沒 → S2TW 翻譯 (caller 提供 callable)。"""
         cn_data = {"k": "車輛"}
         en_data = {}
-        final_tw, pending = merge_lang_dicts(
+        final_tw, _pending = merge_lang_dicts(
             cn_data=cn_data,
             tw_src_data=None,
             en_data=en_data,
@@ -82,7 +82,7 @@ class TestMergeLangDicts:
     def test_rule_4_pure_english_to_pending(self):
         """4. 全英文進 pending。"""
         en_data = {"k_en": "Hello"}
-        final_tw, pending = merge_lang_dicts(
+        _final_tw, pending = merge_lang_dicts(
             cn_data={},
             tw_src_data=None,
             en_data=en_data,
@@ -101,7 +101,7 @@ class TestMergeLangDicts:
         """5. fallback:都沒 CJK 的話保留 english_source 到 final_tw。"""
         en_data = {"k_mix": "Hello"}
         # 無 zh_cn 也無 zh_tw,純英文進 pending 不進 final_tw
-        final_tw, pending = merge_lang_dicts(
+        _final_tw, pending = merge_lang_dicts(
             cn_data={},
             tw_src_data=None,
             en_data=en_data,

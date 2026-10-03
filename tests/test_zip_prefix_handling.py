@@ -3,12 +3,13 @@
 用途：驗證 lang_merge_pipeline.py 的 ZIP 包裝前綴自動偵測剝離邏輯。
 新行為：所有前綴（已知或未知）皆自動偵測並剝離，不應觸發任何警告。
 """
+
 import io
-import zipfile
-import pytest
 import tempfile
+import zipfile
 from pathlib import Path
-from unittest.mock import patch
+
+import pytest
 
 from translation_tool.core.lang_merge_io import ZipReader
 from translation_tool.core.lang_merge_pipeline import _process_single_mod

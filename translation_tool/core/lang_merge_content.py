@@ -9,18 +9,17 @@ from __future__ import annotations
 import orjson as json
 
 from ..utils.config_manager import load_config
-from ..utils.text_processor import apply_replace_rules
-from ..utils.text_processor import recursive_translate_dict
+from ..utils.text_processor import apply_replace_rules, recursive_translate_dict
 from .lang_codec import normalize_patchouli_book_root
-from .lang_processing_format import get_text_processor
 from .lang_merge_content_copy import _UNSET, process_content_or_copy_file_impl
 from .lang_merge_content_patchers import patch_localized_content_json_impl
-from .lang_merge_pending import export_filtered_pending_impl, remove_empty_dirs_impl
 from .lang_merge_io import quarantine_copy
+from .lang_merge_pending import export_filtered_pending_impl, remove_empty_dirs_impl
 from .lang_merge_zip_io import (
     _write_bytes_atomic,
     _write_text_atomic,
 )
+from .lang_processing_format import get_text_processor
 
 
 def _patch_localized_content_json(
@@ -109,9 +108,9 @@ def export_filtered_pending(pending_root: str, output_root: str, min_count: int)
 __all__ = [
     "_patch_localized_content_json",
     "_process_content_or_copy_file",
-    "remove_empty_dirs",
+    "apply_replace_rules",
     "export_filtered_pending",
     "load_config",
-    "apply_replace_rules",
     "recursive_translate_dict",
+    "remove_empty_dirs",
 ]

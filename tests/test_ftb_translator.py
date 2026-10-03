@@ -80,7 +80,9 @@ class TestExportFtbquestsRawJson:
 
         (lang_dir / "en_us.json").write_bytes(orjson.dumps({"key": "value"}))
 
-        result = ftb_translator.export_ftbquests_raw_json(str(tmp_path), output_dir=str(tmp_path / "Output"))
+        result = ftb_translator.export_ftbquests_raw_json(
+            str(tmp_path), output_dir=str(tmp_path / "Output")
+        )
 
         assert "raw_root" in result
 
@@ -90,14 +92,27 @@ class TestCleanFtbquestsFromRaw:
 
     def test_clean_ftbquests_basic(self, tmp_path: Path) -> None:
         # 建立測試結構
-        raw_root = tmp_path / "Output" / "ftbquests" / "raw" / "config" / "ftbquests" / "quests" / "lang"
+        raw_root = (
+            tmp_path
+            / "Output"
+            / "ftbquests"
+            / "raw"
+            / "config"
+            / "ftbquests"
+            / "quests"
+            / "lang"
+        )
         (raw_root / "en_us").mkdir(parents=True)
         (raw_root / "zh_cn").mkdir(parents=True)
 
-        (raw_root / "en_us" / "ftb_lang.json").write_bytes(orjson.dumps({"a": "A", "b": "B"}))
+        (raw_root / "en_us" / "ftb_lang.json").write_bytes(
+            orjson.dumps({"a": "A", "b": "B"})
+        )
         (raw_root / "zh_cn" / "ftb_lang.json").write_bytes(orjson.dumps({"a": "簡中A"}))
 
-        result = ftb_translator.clean_ftbquests_from_raw(str(tmp_path), output_dir=str(tmp_path / "Output"))
+        result = ftb_translator.clean_ftbquests_from_raw(
+            str(tmp_path), output_dir=str(tmp_path / "Output")
+        )
 
         assert "en_pending_dir" in result
         assert "zh_tw_dir" in result
@@ -194,7 +209,9 @@ class TestRunFtbPipeline:
         lang_dir = quests_dir / "lang"
         lang_dir.mkdir(parents=True)
 
-        (lang_dir / "en_us.json").write_bytes(orjson.dumps({"key1": "EN1", "key2": "EN2"}))
+        (lang_dir / "en_us.json").write_bytes(
+            orjson.dumps({"key1": "EN1", "key2": "EN2"})
+        )
         (lang_dir / "zh_cn.json").write_bytes(orjson.dumps({"key1": "CN1"}))
 
         result = ftb_translator.run_ftb_pipeline(
@@ -285,7 +302,7 @@ class TestPipelineOutputStructure:
 
         (lang_dir / "en_us.json").write_bytes(orjson.dumps({"key": "value"}))
 
-        result = ftb_translator.run_ftb_pipeline(
+        ftb_translator.run_ftb_pipeline(
             directory_path=str(tmp_path),
             output_dir=str(tmp_path / "Output"),
             step_export=True,
