@@ -1,6 +1,6 @@
 # 測試策略說明
 
-本文件規範測試分類、執行方式，以及行為覆蓋盤點的使用原則。
+本文件規範測試分層、回歸流程、執行方式，以及行為風險盤點的使用原則。
 
 ## 測試組織
 - **總數量**：以 `uv run --isolated python -m pytest --collect-only -q` 為準（不在文件內硬寫數字，避免過期）
@@ -38,6 +38,20 @@
 
 目標：記錄現有 UI 行為，防止意外 regression。
 
+### Integration / pipeline test
+
+當風險跨越多個模組、檔案格式或輸出階段時，使用固定暫存 fixture 驗證完整資料流，
+例如 export → clean → translate fixture → inject。這類測試應斷言最終輸出內容、保留欄位、
+來源檔案是否未被修改，以及錯誤／計數狀態；只斷言函式被呼叫或計數器增加，不足以證明
+pipeline 行為正確。
+
+### Fake fixture 與真實服務的界線
+
+Fake translator、fake API、固定 clock 與 `tmp_path` fixture 適合建立 deterministic
+regression，能證明本地解析、轉換、輸出與錯誤處理的行為。它們不能證明供應商 API、網路、
+認證、模型品質或大型真實模組包的相容性。真實網路／真實 API 不應成為一般回歸測試的必要
+條件；需要時應另列為非 deterministic 的整合或人工驗收。
+
 ## 如何執行測試
 
 ```bash
@@ -47,6 +61,24 @@ uv run --isolated python -m pytest -k "cache"        # 只跑含 "cache" 的測�
 uv run --isolated python -m pytest -m "not slow"     # 排除 slow marker 的測試
 uv run --isolated python -m pytest -x                 # 遇錯即停
 ```
+
+## Bug regression workflow
+
+遇到 production bug 時，依下列順序建立可維護的證據：
+
+```text
+Production bug
+→ failing regression
+→ search the same bug class and adjacent callers
+→ focused GREEN test
+→ impacted subsystem / pipeline tests
+→ full regression
+→ real-Flet acceptance when UI or runtime behavior is affected
+```
+
+測試新增或修正後，先確認失敗測試確實重現問題，再確認 GREEN 測試斷言輸出、狀態、事件或
+檔案內容。搜尋同一 bug class 的目的，是避免只修一個字串或單一路徑而漏掉相鄰格式、狀態
+與 caller；測試數量本身不代表行為覆蓋完整。
 
 ## 覆蓋率
 
@@ -60,6 +92,15 @@ dependency、更新 lock，再以「風險 × 覆蓋」使用，不設全專案�
 
 - 真實 Flet 截圖／跨頁任務矩陣：`docs/UI_VISUAL_ACCEPTANCE.md`
 - 可重現效能契約：`docs/PERFORMANCE.md`
+
+## 變更與測試層級
+
+- 純函式、格式解析、錯誤分類：unit／characterization。
+- 跨檔案格式、輸出寫回、checkpoint、cache 或翻譯流程：integration／pipeline fixture。
+- Flet layout、Dialog、導航、任務生命週期或 renderer 行為：real-Flet／Playwright acceptance，
+  並依 `docs/UI_VISUAL_ACCEPTANCE.md` 的契約人工檢查截圖。
+- 高風險引擎路徑、取消／恢復、資料遺失或覆寫風險：先跑 focused regression，再跑受影響
+  subsystem，最後視範圍執行 full regression。
 
 ## 新增測試的 SOP
 

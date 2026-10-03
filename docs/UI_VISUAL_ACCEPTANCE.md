@@ -178,29 +178,32 @@ terminal `CANCELLED` state is not claimed because the product has no such
 status. Any remaining desktop-only close/destroy behavior must still be marked
 blocked or unverified rather than inferred from a screenshot.
 
-## PR #140 local acceptance evidence (2026-10-03)
+## Acceptance interpretation
 
-- `views`: 290/290 cases across both themes and all five viewports, with first
-  build/revisit pairs, no console/page errors, and ten teardown probes.
-- `dialogs`: 64/64 cases at 1100×720 and 900×700 in both themes; the four
-  Pipeline Merge bottom-scroll screenshots show Patchouli controls reachable
-  while the footer remains visible.
-- One-click wizard cases ran at both required heights and themes, including
-  steps 1–4, dismiss, and reopen; no console/page errors.
-- Dashboard state checks: empty, data, running, error, cancellation-requested,
-  and loading each produced 4/4 cases at 900×700 and 720×900 in both themes.
+A valid acceptance run is a complete, self-consistent report rather than a
+particular historical case count. It must satisfy all of the following:
 
-The reports and PNGs are ignored local artifacts under `.artifacts/pr1/`; they
-are evidence for the task/PR and are not committed baselines.
+- the expected case set is complete, with no missing or duplicate keys;
+- every expected screenshot exists and is non-empty;
+- no unexpected console or page errors are present;
+- the lifecycle / teardown probe passes for each theme and viewport session;
+- screenshots marked `needs_visual_review` are manually inspected and the
+  result is recorded with the task or PR evidence.
 
-The initial phase is report-only. Pixel-diff thresholds are intentionally not a
-merge gate until repeated runs establish normal renderer variance.
+The default matrix is the long-term contract. A narrower probe may be used for
+fast diagnosis, but it must be labelled as partial evidence and cannot replace
+the full acceptance matrix for a release or a broad UI/runtime change.
+
+The initial contract is report-and-review based. Pixel-diff thresholds are not
+an automatic merge gate until a stable fixture, renderer, and comparison policy
+have been established.
 
 ## Recording results
 
 Screenshots and `report.json` are review evidence, not repository baselines:
-attach them to the PR or task that needs them and do not commit generated PNG
-files. Record the Flet version, browser executable/version, OS, viewport, theme,
-and report path with the evidence. A visual defect found by the harness belongs
-in an issue; never replace or ignore a known-bad screenshot to make a review
-look clean.
+attach them to the PR, release, or task that needs them and do not commit
+generated PNG files. Record the Flet version, browser executable/version, OS,
+viewport, theme, and report path with the evidence. A visual defect found by the
+harness belongs in an issue; never replace or ignore a known-bad screenshot to
+make a review look clean. Use a neutral ignored output directory such as
+`.artifacts/ui-smoke/` for local artifacts.

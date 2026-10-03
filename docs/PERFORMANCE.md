@@ -51,6 +51,12 @@ uv run --isolated python tools/performance_baseline.py \
   --runs 3
 ```
 
+The number of `--ui-report` arguments must be either zero, one, or exactly the
+requested `--runs` value. Supplying one report for multiple runs is supported
+for engine-only diagnostics, but the output records `ui_report_reused=true` and
+must not be interpreted as independent UI measurements. For a complete baseline,
+use one freshly generated real-Flet report per run as shown above.
+
 Outputs (under the Git-ignored `.artifacts/`):
 
 - `.artifacts/performance/current/performance.json` — machine-readable values
@@ -102,6 +108,11 @@ alongside the source commit, environment, input report path and command.
    needs its own behavior tests and before/after evidence.
 5. Browser/render timing, Python view construction, JAR I/O, and token
    estimation are separate metrics; do not combine them into one score.
+
+The protocol is measurement-first: a baseline describes observed behavior and
+variance; it does not by itself establish a performance budget. Set a budget or
+CI threshold only after the fixture, platform, renderer, and acceptable variance
+are explicitly agreed upon.
 
 ## Large-list and event-loop follow-up
 
