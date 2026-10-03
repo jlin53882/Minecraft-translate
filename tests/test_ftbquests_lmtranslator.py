@@ -142,3 +142,78 @@ def test_ftb_dry_run_preview_items_can_drop_runtime_fields() -> None:
     assert "_shielded" not in sanitized[0]
     assert sanitized[0]["path"] == "quest.title"
     assert sanitized[0]["text"] != sanitized[0]["source_text"]
+
+
+def test_ftb_callback_factories_bind_each_project_for_late_calls(
+    tmp_path: Path,
+) -> None:
+    """延後呼叫多個專案的 callback 時，仍應寫入各自的上下文。"""
+
+    class Recorder:
+        def __init__(self) -> None:
+            self.records: list[dict] = []
+
+        def record(self, **kwargs) -> None:
+            self.records.append(kwargs)
+
+    class Touch:
+        def __init__(self) -> None:
+            self.touched: list[str] = []
+
+        def touch(self, file_id: str) -> None:
+            self.touched.append(file_id)
+
+        def flush(self, _writer) -> None:
+            return None
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    contexts = []
+    progress_values: dict[str, list[float]] = {"alpha": [], "beta": []}
+
+    for project in ("alpha", "beta"):
+        dst = out_dir / f"{project}.json"
+        out_map: dict[str, str] = {}
+        recorder = Recorder()
+        touch = Touch()
+
+        def set_progress(value: float, project: str = project) -> None:
+            progress_values[project].append(value)
+
+        contexts.append(
+            {
+                "project": project,
+                "on_translated_item": ftbquests_lmtranslator._make_on_translated_item(
+                    f"{project}.json", dst, out_map, recorder, out_dir
+                ),
+                "on_batch_flushed": ftbquests_lmtranslator._make_on_batch_flushed(
+                    str(dst), touch, lambda _file_id: None, dst, out_map
+                ),
+                "on_progress": ftbquests_lmtranslator._make_on_progress(
+                    set_progress, lambda seconds: f"{seconds}s"
+                ),
+                "out_map": out_map,
+                "recorder": recorder,
+                "touch": touch,
+            }
+        )
+
+    for context in reversed(contexts):
+        context["on_translated_item"](
+            {
+                "path": f"{context['project']}.title",
+                "text": f"{context['project']} translated",
+                "source_text": f"{context['project']} source",
+            }
+        )
+        context["on_batch_flushed"]()
+        context["on_progress"](0.5, "working", 3)
+
+    for context in contexts:
+        project = context["project"]
+        assert context["out_map"] == {f"{project}.title": f"{project} translated"}
+        assert [record["file_id"] for record in context["recorder"].records] == [
+            f"{project}.json"
+        ]
+        assert context["touch"].touched == [str(out_dir / f"{project}.json")]
+        assert progress_values[project] == [0.5]

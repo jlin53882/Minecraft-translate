@@ -151,6 +151,69 @@ class DryRunStats:
     per_file: list[dict] = None  # 每個檔案的明細
 
 
+def _make_on_translated_item(rel_src, dst, out_map, rec, out_dir):
+    """建立固定綁定檔案上下文的翻譯結果 callback。"""
+
+    def on_translated_item(it: Dict[str, Any]) -> None:
+        """處理翻譯結果並寫入映射。"""
+        p = it.get("path")
+        t = it.get("text")
+        src_text = str(it.get("source_text") or "")
+        if isinstance(p, str) and isinstance(t, str):
+            try:
+                shielded_src = it.get("_shielded") or shield_text(src_text)
+                shields = getattr(shielded_src, "shields", [])
+                if shields:
+                    t = unshield_text(t, shields)
+            except Exception:
+                pass
+            out_map[p] = t
+            try:
+                rec.record(
+                    cache_type="ftbquests",
+                    file_id=rel_src,
+                    path=p,
+                    src=src_text,
+                    dst=t,
+                    cache_hit=False,
+                    extra={"dst_file": dst.relative_to(out_dir).as_posix()},
+                )
+            except Exception:
+                pass
+
+    return on_translated_item
+
+
+def _make_on_batch_flushed(file_id, touch, _writer, dst, out_map):
+    """建立固定綁定檔案識別與輸出的批次 flush callback。"""
+
+    def on_batch_flushed() -> None:
+        """批量寫入翻譯結果。"""
+        try:
+            touch.touch(file_id)
+            touch.flush(_writer)  # 最小改動：每批也照樣寫，避免中斷損失
+        except Exception:
+            # fallback
+            write_json_dict(dst, out_map)
+
+    return on_batch_flushed
+
+
+def _make_on_progress(set_prog, _fmt_eta):
+    """建立固定綁定 session 進度處理器的 callback。"""
+
+    def on_progress(p: float, msg: str, eta_sec: float) -> None:
+        """報告翻譯進度。"""
+        eta_txt = _fmt_eta(eta_sec)
+        if eta_txt:
+            log_info(f"⏳ [AI 翻譯中] {msg} | 預估剩餘時間：{eta_txt}")
+        else:
+            log_info(f"🚀 [AI 翻譯中] {msg}")
+        set_prog(p)
+
+    return on_progress
+
+
 # -------------------------
 # Public API (callable from pipeline)
 # -------------------------
@@ -492,48 +555,6 @@ def translate_ftb_pending_to_zh_tw(
             )
             continue
 
-        # shared while-loop（includes add_to_cache + save_translation_cache + safe slicing）
-        def on_translated_item(it: Dict[str, Any]) -> None:
-            """處理翻譯結果並寫入映射。"""
-            p = it.get("path")
-            t = it.get("text")
-            src_text = str(it.get("source_text") or "")
-            if isinstance(p, str) and isinstance(t, str):
-                try:
-                    shielded_src = it.get("_shielded") or shield_text(src_text)
-                    shields = getattr(shielded_src, "shields", [])
-                    if shields:
-                        t = unshield_text(t, shields)
-                except Exception:
-                    pass
-                out_map[p] = t
-                try:
-                    rec.record(
-                        cache_type="ftbquests",
-                        file_id=rel_src,
-                        path=p,
-                        src=src_text,
-                        dst=t,
-                        cache_hit=False,
-                        extra={"dst_file": dst.relative_to(out_dir).as_posix()},
-                    )
-                except Exception:
-                    pass
-
-        # ✅ 確保此檔案在翻譯路徑也有 file_id
-        file_id = dst.as_posix()
-        _file_write_table[file_id] = (dst, out_map)
-
-        # 在這之前先確保 file_id/_file_write_table 設定好了（下面會說加在哪）
-        def on_batch_flushed() -> None:
-            """批量寫入翻譯結果。"""
-            try:
-                touch.touch(file_id)
-                touch.flush(_writer)  # 最小改動：每批也照樣寫，避免中斷損失
-            except Exception:
-                # fallback
-                write_json_dict(dst, out_map)
-
         def _fmt_eta(sec: float) -> str:
             """格式化剩餘時間。"""
             if sec <= 0:
@@ -543,70 +564,16 @@ def translate_ftb_pending_to_zh_tw(
                 return f"{m}m{s:02d}s"
             return f"{s}s"
 
-        def make_on_progress(set_prog, _fmt_eta):
-            def on_progress(p: float, msg: str, eta_sec: float) -> None:
-                """報告翻譯進度。"""
-                eta_txt = _fmt_eta(eta_sec)
-                if eta_txt:
-                    log_info(f"⏳ [AI 翻譯中] {msg} | 預估剩餘時間：{eta_txt}")
-                else:
-                    log_info(f"🚀 [AI 翻譯中] {msg}")
-                set_prog(p)
-
-            return on_progress
-
-        def make_on_translated_item(rel_src, dst, out_map, rec, out_dir):
-            def on_translated_item(it: Dict[str, Any]) -> None:
-                """處理翻譯結果並寫入映射。"""
-                p = it.get("path")
-                t = it.get("text")
-                src_text = str(it.get("source_text") or "")
-                if isinstance(p, str) and isinstance(t, str):
-                    try:
-                        shielded_src = it.get("_shielded") or shield_text(src_text)
-                        shields = getattr(shielded_src, "shields", [])
-                        if shields:
-                            t = unshield_text(t, shields)
-                    except Exception:
-                        pass
-                    out_map[p] = t
-                    try:
-                        rec.record(
-                            cache_type="ftbquests",
-                            file_id=rel_src,
-                            path=p,
-                            src=src_text,
-                            dst=t,
-                            cache_hit=False,
-                            extra={"dst_file": dst.relative_to(out_dir).as_posix()},
-                        )
-                    except Exception:
-                        pass
-
-            return on_translated_item
-
-        def make_on_batch_flushed(file_id, touch, _writer, dst, out_map):
-            def on_batch_flushed() -> None:
-                """批量寫入翻譯結果。"""
-                try:
-                    touch.touch(file_id)
-                    touch.flush(_writer)  # 最小改動：每批也照樣寫，避免中斷損失
-                except Exception:
-                    # fallback
-                    write_json_dict(dst, out_map)
-
-            return on_batch_flushed
-
         # ✅ 確保此檔案在翻譯路徑也有 file_id
         file_id = dst.as_posix()
         _file_write_table[file_id] = (dst, out_map)
 
         # ✅ Issue #8 修復：使用工廠函式創建 callbacks
-        on_translated_item = make_on_translated_item(
+        on_translated_item = _make_on_translated_item(
             rel_src, dst, out_map, rec, out_dir
         )
-        on_batch_flushed = make_on_batch_flushed(file_id, touch, _writer, dst, out_map)
-        on_progress = make_on_progress(set_prog, _fmt_eta)
+        on_batch_flushed = _make_on_batch_flushed(file_id, touch, _writer, dst, out_map)
+        on_progress = _make_on_progress(set_prog, _fmt_eta)
 
         res = translate_items_with_cache_loop(
             items_to_translate,
