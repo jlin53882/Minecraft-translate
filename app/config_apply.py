@@ -25,7 +25,19 @@ CONFIG_APPLY_RULES: Final[dict[str, ApplyRule]] = {
     },
     "lm_translator.max_output_tokens": {
         "timing": "next_batch",
-        "note": "下一批次讀取；per-model override 優先於全域值。",
+        "note": "下一批次讀取；per-model override 優先於全域值；0 表示不送 maxOutputTokens。",
+    },
+    "lm_translator.max_output_token_budget": {
+        "timing": "next_batch",
+        "note": "下一批次讀取；用於切批估算。",
+    },
+    "lm_translator.max_input_token_budget": {
+        "timing": "next_batch",
+        "note": "下一批次讀取；用於切批估算。",
+    },
+    "lm_translator.key_failure_cooldown_sec": {
+        "timing": "next_request",
+        "note": "下一次 API key 判斷讀取；不改變已送出的請求。",
     },
     "lm_translator.models.*.max_output_tokens": {
         "timing": "next_batch",
@@ -47,3 +59,9 @@ def get_apply_rule(path: str) -> ApplyRule | None:
     if path.startswith("species_cache."):
         return CONFIG_APPLY_RULES["species_cache.*"]
     return None
+
+
+def apply_timing_note(path: str, fallback: str = "") -> str:
+    """Return the user-facing apply-timing note from the central contract."""
+    rule = get_apply_rule(path)
+    return rule["note"] if rule is not None else fallback

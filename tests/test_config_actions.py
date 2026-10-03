@@ -1,5 +1,6 @@
 """Tests for app.views.config.config_actions (load_config_into_view, save_config_from_view)"""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -803,3 +804,50 @@ class TestRpmCooldownSetting:
             validate_api_keys_from_ui_fn=lambda keys: None,
         )
         assert saved["lm_translator"]["rpm_cooldown_sec"] == expected
+
+
+class TestPerModelMaxOutputTokens:
+    """Per-model blank/zero/numeric values keep the three-way contract."""
+
+    @staticmethod
+    def _view(raw_cap):
+        view = _make_full_save_view()
+        row = SimpleNamespace(
+            _checkbox=SimpleNamespace(label="demo-model", value=True),
+            _max_output_tokens=SimpleNamespace(value=raw_cap),
+        )
+        view.models_column.controls = [row]
+        return view
+
+    @staticmethod
+    def _save(view):
+        from app.views.config.config_actions import save_config_from_view
+
+        saved = {}
+
+        def load_fn():
+            cfg = _make_base_config()
+            cfg["lm_translator"]["models"] = {
+                "demo-model": {"enabled": True, "max_output_tokens": 123}
+            }
+            return cfg
+
+        save_config_from_view(
+            view,
+            load_config_json_fn=load_fn,
+            save_config_json_fn=saved.update,
+            validate_api_keys_from_ui_fn=lambda keys: None,
+        )
+        return saved["lm_translator"]["models"]["demo-model"]
+
+    def test_blank_removes_previous_override_and_falls_back_to_global(self):
+        saved_model = self._save(self._view(""))
+        assert "max_output_tokens" not in saved_model
+
+    def test_zero_keeps_explicit_zero_override(self):
+        saved_model = self._save(self._view("0"))
+        assert saved_model["max_output_tokens"] == 0
+
+    def test_numeric_value_keeps_explicit_override(self):
+        saved_model = self._save(self._view("400"))
+        assert saved_model["max_output_tokens"] == 400

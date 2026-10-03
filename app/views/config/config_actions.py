@@ -457,7 +457,6 @@ def save_config_from_view(
         validate_api_keys_from_ui_fn(api_keys)
         new_config["lm_translator"]["keys"] = api_keys
         models = {}
-        previous_models = new_config["lm_translator"].get("models", {})
         for row in view.models_column.controls:
             cb = row._checkbox
             model_cfg = {"enabled": bool(cb.value)}
@@ -465,13 +464,6 @@ def save_config_from_view(
             raw_cap = getattr(cap_field, "value", "") if cap_field is not None else ""
             if raw_cap not in (None, ""):
                 model_cfg["max_output_tokens"] = int(raw_cap)
-            elif (
-                isinstance(previous_models.get(cb.label), dict)
-                and "max_output_tokens" in previous_models[cb.label]
-            ):
-                model_cfg["max_output_tokens"] = previous_models[cb.label][
-                    "max_output_tokens"
-                ]
             models[cb.label] = model_cfg
         new_config["lm_translator"]["models"] = models
     except (ValueError, TypeError, RuntimeError) as err:

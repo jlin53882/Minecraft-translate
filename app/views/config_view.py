@@ -8,6 +8,7 @@ from typing import ClassVar
 
 import flet as ft
 
+from app.config_apply import apply_timing_note
 from app.services_impl.config_service import load_config_json, save_config_json
 from app.ui import design, kit, theme
 from app.ui.design import C
@@ -113,7 +114,9 @@ class ConfigView(ft.Column):
             label="替換規則檔案名稱", dense=True, helper="用於：replace_rules_loader"
         )
         self.controls_map["translator.cache_directory"] = kit.field(
-            label="快取資料夾名稱", dense=True, helper="用於：翻譯快取系統"
+            label="快取資料夾名稱",
+            dense=True,
+            helper=f"{apply_timing_note('translator.cache_directory')} 用於：翻譯快取系統",
         )
         self.controls_map["translator.enable_cache_saving"] = ft.Checkbox(
             label="啟用通用翻譯快取"
@@ -292,25 +295,25 @@ class ConfigView(ft.Column):
             label="全域最大輸出 Tokens",
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
-            helper="下一批次生效；0 = 不送 maxOutputTokens",
+            helper=apply_timing_note("lm_translator.max_output_tokens"),
         )
         self.controls_map["lm_translator.max_output_token_budget"] = kit.field(
             label="單批輸出預算",
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
-            helper="下一批次生效；用於切批估算",
+            helper=apply_timing_note("lm_translator.max_output_token_budget"),
         )
         self.controls_map["lm_translator.max_input_token_budget"] = kit.field(
             label="單批輸入預算",
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
-            helper="下一批次生效；用於切批估算",
+            helper=apply_timing_note("lm_translator.max_input_token_budget"),
         )
         self.controls_map["lm_translator.key_failure_cooldown_sec"] = kit.field(
             label="API Key 失敗冷卻秒數",
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
-            helper="0 = 不記憶；下一次 key 判斷生效",
+            helper=apply_timing_note("lm_translator.key_failure_cooldown_sec"),
         )
 
         self.controls_map["lm_translator.translator.skip_terms"] = kit.field(
@@ -986,6 +989,7 @@ class ConfigView(ft.Column):
             value="" if max_output_tokens is None else str(max_output_tokens),
             label="模型上限",
             hint_text="全域",
+            helper=apply_timing_note("lm_translator.models.*.max_output_tokens"),
             dense=True,
             width=130,
             keyboard_type=ft.KeyboardType.NUMBER,

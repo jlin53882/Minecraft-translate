@@ -6,6 +6,7 @@ import pytest
 import requests
 
 from app import config_store
+from app.config_apply import CONFIG_APPLY_RULES, apply_timing_note, get_apply_rule
 from app.services_impl import config_service
 from translation_tool.core import lm_api_client
 from translation_tool.core import lm_translator_shared_loop as loop_mod
@@ -107,6 +108,64 @@ def test_active_cache_root_does_not_follow_unsaved_runtime_config(
     monkeypatch.setattr(cache_manager, "_configured_cache_root", lambda: new_root)
     assert cache_manager._get_cache_root() == old_root
     cache_manager.cache_store.reset_runtime_state(cache_manager.CACHE_TYPES)
+
+
+def test_apply_metadata_covers_new_fields_wildcards_and_cache_root():
+    expected_timing = {
+        "lm_translator.max_output_tokens": "next_batch",
+        "lm_translator.max_output_token_budget": "next_batch",
+        "lm_translator.max_input_token_budget": "next_batch",
+        "lm_translator.key_failure_cooldown_sec": "next_request",
+        "translator.cache_directory": "next_reload",
+    }
+    for path, timing in expected_timing.items():
+        rule = get_apply_rule(path)
+        assert rule is not None
+        assert rule["timing"] == timing
+        assert apply_timing_note(path) == rule["note"]
+
+    wildcard_path = "lm_translator.models.demo-model.max_output_tokens"
+    assert (
+        get_apply_rule(wildcard_path)
+        == CONFIG_APPLY_RULES["lm_translator.models.*.max_output_tokens"]
+    )
+    assert (
+        get_apply_rule("species_cache.cache_directory")
+        == CONFIG_APPLY_RULES["species_cache.*"]
+    )
+
+
+def test_config_view_presents_central_apply_metadata_for_lm_fields(monkeypatch):
+    from app.views import config_view
+    from tests.conftest import mock_page
+
+    monkeypatch.setattr(
+        config_view,
+        "apply_timing_note",
+        lambda path: f"CENTRAL:{path}",
+    )
+    monkeypatch.setattr(
+        config_view,
+        "load_config_json",
+        lambda: {
+            "logging": {},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+
+    view = config_view.ConfigView(mock_page())
+
+    for path in (
+        "lm_translator.max_output_tokens",
+        "lm_translator.max_output_token_budget",
+        "lm_translator.max_input_token_budget",
+        "lm_translator.key_failure_cooldown_sec",
+    ):
+        assert view.controls_map[path].helper == f"CENTRAL:{path}"
 
 
 def test_api_schema_round_trip_keeps_old_models_shape():
