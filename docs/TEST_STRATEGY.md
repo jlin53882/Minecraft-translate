@@ -1,5 +1,7 @@
 # 測試策略說明
 
+本文件規範測試分類、執行方式，以及行為覆蓋盤點的使用原則。
+
 ## 測試組織
 - **總數量**：以 `uv run --isolated python -m pytest --collect-only -q` 為準（不在文件內硬寫數字，避免過期）
 - **測試分類**：
@@ -14,6 +16,8 @@
 - **真正的 pytest fixtures**（`autouse`，自動套用到每個測試）：`_isolate_test_runtime_writes`（把執行期寫入導向 `tmp_path`）、`_patch_flet_page_property`
 
 ## 各測試類型說明
+
+以下依測試目的區分單元測試與表徵測試。
 
 ### 單元測試（unit）
 位置：`tests/test_*.py`
@@ -49,6 +53,8 @@ uv run --isolated python -m pytest -x                 # 遇錯即停
 目前 `pyproject.toml` 與 `uv.lock` **沒有安裝 pytest-cov**，因此不得把
 `pytest --cov` 當成既定命令。若日後核准 coverage 工具，先加入 dev
 dependency、更新 lock，再以「風險 × 覆蓋」使用，不設全專案百分比門檻。
+引擎風險路徑、現有行為證據與尚缺邊界見 `docs/TEST_RISK_COVERAGE.md`；
+該 inventory 不以測試數量或 import 測試推論行為覆蓋率。
 
 ## 真實 UI 與效能驗收
 

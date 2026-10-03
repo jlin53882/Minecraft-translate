@@ -6,6 +6,7 @@ import argparse
 import json
 import platform
 import statistics
+import subprocess
 import sys
 import tempfile
 import time
@@ -28,17 +29,131 @@ def summarize_samples(samples: list[float]) -> dict[str, float]:
         "median_ms": round(statistics.median(samples), 3),
         "min_ms": round(min(samples), 3),
         "max_ms": round(max(samples), 3),
+        "stdev_ms": round(statistics.pstdev(samples), 3),
     }
 
 
-def benchmark(operation: Callable[[], object], repeats: int) -> dict[str, float]:
-    """以 perf_counter 重複量測某個操作。"""
+def benchmark(
+    operation: Callable[[], object], repeats: int
+) -> dict[str, float | int | list[float]]:
+    """以 perf_counter 重複量測操作，保留原始樣本供後續變異檢查。"""
     samples = []
     for _ in range(repeats):
         started = time.perf_counter()
         operation()
         samples.append((time.perf_counter() - started) * 1000)
-    return {**summarize_samples(samples), "repeats": repeats}
+    return {
+        **summarize_samples(samples),
+        "repeats": repeats,
+        "samples_ms": [round(sample, 3) for sample in samples],
+    }
+
+
+def measure_dashboard_workloads(repeats: int) -> dict[str, dict]:
+    """分開量測工作台資料來源與 Python 控制項更新，不啟動真實服務。"""
+    from app.services_impl import config_service
+    from app.shell.task_manager import (
+        STATUS_DONE,
+        STATUS_ERROR,
+        STATUS_RUNNING,
+        TaskInfo,
+    )
+    from app.views.dashboard.dashboard_data import build_dashboard_data
+    from app.views.dashboard_view import DashboardView
+    from translation_tool.utils.cache_overview import build_cache_overview
+
+    with tempfile.TemporaryDirectory(prefix="minecraft-dashboard-perf-") as temp_name:
+        root = Path(temp_name)
+        rules_path = root / "replace_rules.json"
+        rules_path.write_text(
+            json.dumps(
+                [
+                    {"from": f"source-{index}", "to": f"target-{index}"}
+                    for index in range(1_000)
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        original_rules_path = config_service.REPLACE_RULES_PATH
+        config_service.REPLACE_RULES_PATH = str(rules_path)
+        try:
+            rules_read = benchmark(config_service.load_replace_rules, repeats)
+        finally:
+            config_service.REPLACE_RULES_PATH = original_rules_path
+
+        cache_root = root / "cache"
+        cache_types = ["lang", "patchouli", "ftbquests", "kubejs", "md"]
+        translation_cache = {}
+        cache_file_path = {}
+        shard_paths = {}
+        for cache_type in cache_types:
+            type_dir = cache_root / cache_type
+            type_dir.mkdir(parents=True)
+            cache_file_path[cache_type] = type_dir / "cache.json"
+            active_shard = type_dir / "active.json"
+            shard_paths[cache_type] = active_shard
+            (type_dir / "active_shard.json").write_text("active", encoding="utf-8")
+            entries = {
+                f"fixture.{cache_type}.{index}": {
+                    "src": f"Source {index}",
+                    "dst": f"譯文 {index}",
+                }
+                for index in range(1_000)
+            }
+            active_shard.write_text(
+                json.dumps(entries, ensure_ascii=False), encoding="utf-8"
+            )
+            translation_cache[cache_type] = entries
+
+        overview_operation = lambda: build_cache_overview(
+            cache_types=cache_types,
+            translation_cache=translation_cache,
+            is_dirty=dict.fromkeys(cache_types, False),
+            session_new_entries={cache_type: {} for cache_type in cache_types},
+            cache_file_path=cache_file_path,
+            rolling_shard_size=10_000,
+            active_shard_file="active_shard.json",
+            get_active_shard_path=shard_paths.__getitem__,
+            load_config=lambda: {"translator": {"cache_directory": str(cache_root)}},
+            cache_dir_name="cache",
+            resolve_project_path=lambda value: Path(value),
+        )
+        cache_overview_read = benchmark(overview_operation, repeats)
+
+        tasks = [
+            TaskInfo(
+                id=index,
+                name=f"固定任務 {index}",
+                view_key="pipeline",
+                status=(STATUS_RUNNING, STATUS_DONE, STATUS_ERROR)[index % 3],
+                progress=(index % 100) / 100,
+                started_at=float(index),
+            )
+            for index in range(300)
+        ]
+        dashboard_data = build_dashboard_data(
+            cache_overview=overview_operation(),
+            rules_count=1_000,
+            key_snapshot=[],
+            active=[task for task in tasks if task.status == STATUS_RUNNING],
+            recent=[task for task in tasks if task.status != STATUS_RUNNING],
+        )
+        dashboard_view = DashboardView(
+            page=None,
+            cache_overview_loader=overview_operation,
+            rules_count_loader=lambda: 1_000,
+            key_snapshot_loader=list,
+        )
+        task_render = benchmark(
+            lambda: dashboard_view.refresh_view(dashboard_data), repeats
+        )
+
+    return {
+        "cache_overview_read": cache_overview_read,
+        "replace_rules_read": rules_read,
+        "dashboard_task_render": task_render,
+    }
 
 
 def build_synthetic_jars(root: Path, count: int) -> list[Path]:
@@ -83,7 +198,9 @@ def measure_jar_scans(repeats: int) -> list[dict]:
             results.append(
                 {
                     "jar_count": count,
+                    "repeats": repeats,
                     **summary,
+                    "samples_ms": [round(sample, 3) for sample in samples],
                     "jars_per_second": round(count / seconds, 3) if seconds else None,
                 }
             )
@@ -159,16 +276,23 @@ def measure_list_construction(repeats: int) -> list[dict]:
 
 
 def summarize_ui_report(path: Path) -> dict:
-    """從 UI smoke 報告中擷取啟動與各頁面首次建構的耗時。"""
+    """分開整理首次頁面建構與同一 session 回訪的耗時。"""
     data = json.loads(path.read_text(encoding="utf-8"))
-    view_cases = [case for case in data.get("cases", []) if case.get("kind") == "view"]
-    if not view_cases:
-        raise ValueError(f"UI report has no view cases: {path}")
+    cases = data.get("cases", [])
+    view_cases = [case for case in cases if case.get("kind") == "view"]
+    revisit_cases = [case for case in cases if case.get("kind") == "view_revisit"]
+    if not view_cases or not revisit_cases:
+        raise ValueError(
+            f"UI report is missing first-build or warm-revisit cases: {path}"
+        )
     startup = [float(case["startup_ms"]) for case in view_cases]
     browser_ready = [float(case["browser_ready_ms"]) for case in view_cases]
     by_view: dict[str, list[float]] = {}
     for case in view_cases:
         by_view.setdefault(case["view"], []).append(float(case["server_build_ms"]))
+    revisit_by_view: dict[str, list[float]] = {}
+    for case in revisit_cases:
+        revisit_by_view.setdefault(case["view"], []).append(float(case["navigate_ms"]))
     return {
         "source": str(path),
         "startup": summarize_samples(startup),
@@ -176,10 +300,14 @@ def summarize_ui_report(path: Path) -> dict:
         "first_view_build": {
             key: summarize_samples(samples) for key, samples in sorted(by_view.items())
         },
+        "warm_view_revisit": {
+            key: summarize_samples(samples)
+            for key, samples in sorted(revisit_by_view.items())
+        },
     }
 
 
-def environment_info() -> dict[str, str]:
+def environment_info() -> dict[str, str | bool | None]:
     """回傳重現基準所需的環境欄位。"""
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -188,7 +316,39 @@ def environment_info() -> dict[str, str]:
         "python": platform.python_version(),
         "flet": metadata.version("flet"),
         "playwright": metadata.version("playwright"),
+        "git_commit": _git_commit(),
+        "git_worktree_dirty": _git_dirty(),
     }
+
+
+def _git_commit() -> str:
+    """取得本次量測工作目錄的 commit，失敗時保留明確未知值。"""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return result.stdout.strip()
+
+
+def _git_dirty() -> bool | None:
+    """確認效能樣本是否來自含未提交變更的工作樹。"""
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return bool(result.stdout.strip())
 
 
 def render_markdown(report: dict) -> str:
@@ -200,6 +360,8 @@ def render_markdown(report: dict) -> str:
         f"- Platform: `{report['environment']['platform']}`",
         f"- Python: `{report['environment']['python']}`",
         f"- Flet: `{report['environment']['flet']}`",
+        f"- Git commit: `{report['environment']['git_commit']}`",
+        f"- Git worktree dirty: `{report['environment']['git_worktree_dirty']}`",
         "",
     ]
     ui = report.get("ui")
@@ -217,7 +379,10 @@ def render_markdown(report: dict) -> str:
         )
         for key, values in ui["first_view_build"].items():
             lines.append(f"- `{key}`: {values['median_ms']} ms")
-        lines.append("")
+        lines.extend(["", "### Warm view revisit", ""])
+        for key, values in ui["warm_view_revisit"].items():
+            lines.append(f"- `{key}`: {values['median_ms']} ms")
+            lines.append("")
     lines.extend(["## JAR scan", ""])
     for item in report["jar_scan"]:
         lines.append(
@@ -233,6 +398,13 @@ def render_markdown(report: dict) -> str:
     lines.extend(["", "## Large list construction", ""])
     for item in report["list_construction"]:
         lines.append(f"- {item['row_count']} rows: {item['median_ms']} ms")
+    lines.extend(["", "## Dashboard", ""])
+    for metric, samples in report["dashboard"].items():
+        lines.append(
+            f"- `{metric}`: {samples['median_ms']} ms "
+            f"(range {samples['min_ms']}–{samples['max_ms']} ms, "
+            f"σ {samples['stdev_ms']} ms)"
+        )
     lines.extend(
         [
             "",
@@ -262,6 +434,7 @@ def main() -> int:
         "jar_scan": measure_jar_scans(args.repeats),
         "batch_selection": measure_batch_selection(max(100, args.repeats * 20)),
         "list_construction": measure_list_construction(args.repeats),
+        "dashboard": measure_dashboard_workloads(args.repeats),
         "network_used": False,
         "real_api_used": False,
     }

@@ -34,14 +34,17 @@ def test_build_synthetic_jars_creates_nested_deterministic_fixtures(tmp_path):
 
 
 def test_summarize_samples_reports_median_and_range():
+    """統計摘要同時保留範圍與樣本變異。"""
     assert performance_baseline.summarize_samples([3.0, 1.0, 2.0]) == {
         "median_ms": 2.0,
         "min_ms": 1.0,
         "max_ms": 3.0,
+        "stdev_ms": 0.816,
     }
 
 
 def test_summarize_ui_report_groups_view_build_timings(tmp_path):
+    """摘要分組保留首次建構與同 session 回訪的測量差異。"""
     report_path = tmp_path / "report.json"
     report_path.write_text(
         json.dumps(
@@ -61,6 +64,8 @@ def test_summarize_ui_report_groups_view_build_timings(tmp_path):
                         "browser_ready_ms": 120,
                         "server_build_ms": 4,
                     },
+                    {"kind": "view_revisit", "view": "dashboard", "navigate_ms": 1},
+                    {"kind": "view_revisit", "view": "dashboard", "navigate_ms": 3},
                     {"kind": "dialog", "view": "snackbar"},
                 ]
             }
@@ -73,3 +78,4 @@ def test_summarize_ui_report_groups_view_build_timings(tmp_path):
     assert summary["startup"]["median_ms"] == 11.0
     assert summary["browser_ready"]["median_ms"] == 110.0
     assert summary["first_view_build"]["dashboard"]["median_ms"] == 3.0
+    assert summary["warm_view_revisit"]["dashboard"]["median_ms"] == 2.0
