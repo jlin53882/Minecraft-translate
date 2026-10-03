@@ -6,16 +6,18 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
-import json
+from typing import Any
+
 
 @dataclass
 class TouchSet:
     """收集本輪被寫入的 file id。"""
 
-    touched: Set[str] = field(default_factory=set)
+    touched: set[str] = field(default_factory=set)
 
     def touch(self, file_id: str) -> None:
         if file_id:
@@ -26,12 +28,13 @@ class TouchSet:
             writer_fn(fid)
         self.touched.clear()
 
+
 def write_dry_run_preview(
     out_dir: str | Path,
-    items: List[Dict[str, Any]],
+    items: list[dict[str, Any]],
     *,
     filename: str = "_dry_run_preview.json",
-    meta: Optional[Dict[str, Any]] = None,
+    meta: dict[str, Any] | None = None,
 ) -> Path:
     """將待翻譯項目寫入 JSON 預覽檔，供 Dry-Run 模式查閱（不實際呼叫 API）。"""
     out_dir = Path(out_dir)
@@ -46,12 +49,13 @@ def write_dry_run_preview(
     p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return p
 
+
 def write_cache_hit_preview(
     out_dir: str | Path,
-    cached_items: List[Dict[str, Any]],
+    cached_items: list[dict[str, Any]],
     *,
     filename: str = "_dry_run_cache_hit_preview.json",
-    meta: Optional[Dict[str, Any]] = None,
+    meta: dict[str, Any] | None = None,
 ) -> Path:
     """將快取直接命中的項目寫入 JSON 預覽檔，記錄哪些內容無需翻譯即可還原。"""
     out_dir = Path(out_dir)

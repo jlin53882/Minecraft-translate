@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -79,17 +80,17 @@ def is_pure_english(value: Any) -> bool:
 
 
 def merge_lang_dicts(
-    cn_data: Optional[Dict[str, Any]],
-    tw_src_data: Optional[Dict[str, Any]],
-    en_data: Optional[Dict[str, Any]],
-    existing_tw: Optional[Dict[str, Any]],
-    rules: List,
+    cn_data: dict[str, Any] | None,
+    tw_src_data: dict[str, Any] | None,
+    en_data: dict[str, Any] | None,
+    existing_tw: dict[str, Any] | None,
+    rules: list,
     apply_replace_rules: Callable[..., Any],
     recursive_translate_dict: Callable[..., Any],
     contains_cjk: Callable[[Any], bool],
     is_pure_english: Callable[[Any], bool],
     is_from_output_dir: bool = False,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """合併 3 個 lang 檔來源成 (final_tw, pending) - 跟 Stage 1 邏輯一致。
 
     規則順序 (從 _process_single_mod Step 4 移植):
@@ -127,8 +128,8 @@ def merge_lang_dicts(
     existing_tw = existing_tw or {}
 
     # 從既有開始 (人工翻譯不覆寫)
-    final_tw: Dict[str, Any] = dict(existing_tw)
-    pending: Dict[str, Any] = {}
+    final_tw: dict[str, Any] = dict(existing_tw)
+    pending: dict[str, Any] = {}
 
     # 所有 key 集合
     all_keys = set(cn_data) | set(tw_src_data) | set(en_data)

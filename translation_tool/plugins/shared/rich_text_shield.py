@@ -11,7 +11,6 @@ from __future__ import annotations
 import re
 import threading
 from dataclasses import dataclass, field
-from typing import Optional
 
 # =============================================================================
 # Patterns（保持為模組層級常數，供外部引用）
@@ -77,7 +76,7 @@ class ShieldedText:
 
     clean: str
     shields: list[ShieldPiece] = field(default_factory=list)
-    skip_reason: Optional[str] = None  # None = 需要翻譯
+    skip_reason: str | None = None  # None = 需要翻譯
     had_color: bool = False
     had_item_ref: bool = False
 
@@ -147,8 +146,6 @@ def shield_text(text: str) -> ShieldedText:
     Returns:
         ShieldedText（含 clean / shields / skip_reason / had_color / had_item_ref）。
     """
-    global _counter_color, _counter_item, _counter_escaped
-
     if not isinstance(text, str):
         return ShieldedText(clean=str(text), shields=[], skip_reason=None)
 

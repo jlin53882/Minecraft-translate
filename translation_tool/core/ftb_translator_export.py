@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
+
 
 def resolve_ftbquests_quests_root_impl(base_dir: str) -> str:
     """往下遞迴找 config/ftbquests/quests。"""
@@ -23,7 +24,11 @@ def resolve_ftbquests_quests_root_impl(base_dir: str) -> str:
         for p in base.rglob("*"):
             if p.is_dir():
                 parts = [x.lower() for x in p.parts[-3:]]
-                if parts == ["ftbquests", "quests"] and len(p.parts) >= 3 and p.parts[-3].lower() == "config":
+                if (
+                    parts == ["ftbquests", "quests"]
+                    and len(p.parts) >= 3
+                    and p.parts[-3].lower() == "config"
+                ):
                     candidates.append(p)
 
     if not candidates:
@@ -31,6 +36,7 @@ def resolve_ftbquests_quests_root_impl(base_dir: str) -> str:
 
     candidates.sort(key=lambda p: (len(p.parts), str(p)))
     return str(candidates[0])
+
 
 def export_ftbquests_raw_json_impl(
     base_dir: str,

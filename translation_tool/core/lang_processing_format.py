@@ -6,14 +6,15 @@
 
 # /minecraft_translator_flet/translation_tool/core/lang_processing_format.py
 import re
-from typing import Callable, Optional, Any, Dict
+import threading
+from collections.abc import Callable
+from typing import Any
+
 import opencc  # 導入 OpenCC 庫
 import orjson as json
-import threading
 
 from ..utils.log_unit import log_debug
 from ..utils.text_processor import apply_replace_rules
-
 
 # 初始化 OpenCC 實例
 converter = opencc.OpenCC("s2twp")
@@ -24,6 +25,7 @@ TRANSLATABLE_CODE_LANGUAGES = {"json", "yaml", "text"}
 # 建立執行緒本地存儲物件
 thread_local = threading.local()
 
+
 def get_converter():
     """私有方法：確保每個執行緒都有自己的 OpenCC 實例"""
     # 檢查這個 Thread 是否已經初始化過自己的 converter
@@ -32,6 +34,7 @@ def get_converter():
         log_debug(f"正在為執行緒 {threading.current_thread().name} 初始化 OpenCC...")
         thread_local.converter = opencc.OpenCC("s2twp")
     return thread_local.converter
+
 
 def convert_only_cjk_old(text: str, rules=None) -> str:
     """只轉換中文（基本 CJK）＋ 套用自訂規則"""
@@ -50,6 +53,7 @@ def convert_only_cjk_old(text: str, rules=None) -> str:
 
     return result_text
 
+
 def convert_only_cjk(text: str, rules=None) -> str:
     """
     只轉換中文（基本 CJK）＋ 套用自訂規則
@@ -66,10 +70,6 @@ def convert_only_cjk(text: str, rules=None) -> str:
 
     def replacer(match):
         # 抓到的一整串中文字
-        """
-
-    
-        """
         cjk_chunk = match.group(1)
         # 整串丟給 OpenCC，這樣「内存」才會變「記憶體」
         return converter.convert(cjk_chunk)
@@ -82,6 +82,7 @@ def convert_only_cjk(text: str, rules=None) -> str:
         result_text = apply_replace_rules(result_text, rules)
 
     return result_text
+
 
 def opencc_markdown_safe(md: str, rules=None) -> str:
     """
@@ -138,9 +139,10 @@ def opencc_markdown_safe(md: str, rules=None) -> str:
 
     return "".join(output)
 
+
 def remove_translated_keys(
-    en_dict: Dict[str, Any], tw_dict: Dict[str, Any]
-) -> Dict[str, Any]:
+    en_dict: dict[str, Any], tw_dict: dict[str, Any]
+) -> dict[str, Any]:
     """從 en_dict 中移除在 tw_dict 中已存在且非空白的 key，回傳剩餘的 en_dict（淺拷貝）。"""
     result = {}
     for k, v in en_dict.items():
@@ -152,11 +154,13 @@ def remove_translated_keys(
             continue
     return result
 
+
 def compare_and_remove_translated_from_en(
-    en_source: Dict[str, Any], tw_base: Dict[str, Any]
-) -> Dict[str, Any]:
+    en_source: dict[str, Any], tw_base: dict[str, Any]
+) -> dict[str, Any]:
     """比較英文來源字典與繁體中文基準字典，從 en_source 中移除 tw_base 已翻譯的鍵值，回傳剩餘待翻譯項目（即「待翻譯」集合）。"""
     return remove_translated_keys(en_source, tw_base)
+
 
 def dump_json_bytes(obj: Any) -> bytes:
     """
@@ -172,9 +176,11 @@ def dump_json_bytes(obj: Any) -> bytes:
     # OPT_INDENT_2 選項用於增加 2 個空格的縮排，使 JSON 易讀。
     return json.dumps(obj, option=json.OPT_INDENT_2)
 
+
 # --------------------------------------------------------------------------
 # I. 核心處理函式 (與 lang_merger.py 保持依賴性，需傳入翻譯規則/函式)
 # --------------------------------------------------------------------------
+
 
 # 調整 translate_markdown 函數簽名和邏輯
 def translate_markdown(
@@ -232,6 +238,7 @@ def translate_markdown(
         # 沒有前置 YAML：整個 body 走 markdown 解析
         return opencc_markdown_safe(cn_content)
 
+
 def translate_plain_text(
     cn_content: str,
     translate_func: Callable[[str, Any], str],
@@ -242,13 +249,14 @@ def translate_plain_text(
     # 對整個文件內容進行 S2TW 轉換。
     return translate_func(cn_content, rules)
 
+
 # --------------------------------------------------------------------------
 # II. 檔案類型與處理器映射 (方便集中調用)
 # --------------------------------------------------------------------------
 
 # 將文件擴展名映射到對應的處理函式。
 # 所有處理函式都需接受 (cn_content, translate_func, rules) 三個參數。
-TEXT_FILE_PROCESSORS: Dict[
+TEXT_FILE_PROCESSORS: dict[
     str, Callable[[str, Callable[[str, Any], str], Any], str]
 ] = {
     # 結構化內容處理器
@@ -264,6 +272,7 @@ TEXT_FILE_PROCESSORS: Dict[
     ".gui": translate_plain_text,
 }
 
-def get_text_processor(ext: str) -> Optional[Callable]:
+
+def get_text_processor(ext: str) -> Callable | None:
     """根據副檔名取得對應的文字處理器函式（translate_markdown、translate_plain_text 等）。若副檔名無對應處理器則回傳 None。"""
     return TEXT_FILE_PROCESSORS.get(ext.lower())

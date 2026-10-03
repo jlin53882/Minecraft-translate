@@ -8,14 +8,15 @@
 - 執行翻譯（背景執行緒 + 進度輪詢）
 """
 
-import flet as ft
 import os
 
+import flet as ft
+
 from app.ui.theme import (
-    BLUE_600, BLUE_700, GREEN_700, TEAL_700, PURPLE_700,
-    GREY_500, GREY_600, CYAN_700, GREEN_600,
-    WHITE, BLUE_50, GREY_200, BLUE_400,
-    GREEN_50, RED_400, RED_50,
+    BLUE_700,
+    GREY_600,
+    RED_400,
+    WHITE,
 )
 from translation_tool.utils.config_manager import load_config
 
@@ -43,28 +44,40 @@ def open_translate_dialog(
 
     cfg = load_config()
     lang_merger_cfg = cfg.get("lang_merger", {})
-    organized_folder = lang_merger_cfg.get("pending_organized_folder_name", "待翻譯整理需翻譯")
+    organized_folder = lang_merger_cfg.get(
+        "pending_organized_folder_name", "待翻譯整理需翻譯"
+    )
 
-    default_input = os.path.join(output_path, "locale_sort", "_整理輸出", organized_folder) if output_path else ""
+    default_input = (
+        os.path.join(output_path, "locale_sort", "_整理輸出", organized_folder)
+        if output_path
+        else ""
+    )
     default_output = os.path.join(output_path, "lm_translate") if output_path else ""
 
     translate_input_field = ft.TextField(
         label="翻譯目標",
-        hint_text=f"自動帶入：{default_input}" if default_input else "留空自動帶入整理後的待翻譯資料夾",
+        hint_text=f"自動帶入：{default_input}"
+        if default_input
+        else "留空自動帶入整理後的待翻譯資料夾",
         value=input_path or default_input,
         expand=True,
         border_color=BLUE_700,
     )
     translate_output_field = ft.TextField(
         label="輸出目錄",
-        hint_text=f"自動帶入：{default_output}" if default_output else "留空自動帶入 lm_translate",
+        hint_text=f"自動帶入：{default_output}"
+        if default_output
+        else "留空自動帶入 lm_translate",
         value=output_path or default_output,
         expand=True,
         border_color=BLUE_700,
     )
 
     dry_run_switch = ft.Switch(label="Dry Run（只分析不翻譯）", value=False)
-    write_new_cache_switch = ft.Switch(label="寫入新快取（每次回傳單獨快取）", value=True)
+    write_new_cache_switch = ft.Switch(
+        label="寫入新快取（每次回傳單獨快取）", value=True
+    )
 
     api_keys_container = ft.Column(spacing=8)
     api_keys = []
@@ -123,6 +136,7 @@ def open_translate_dialog(
             if result:
                 translate_input_field.value = result
                 page.update()
+
         page.run_task(do_pick)
 
     def browse_input_dir(e=None):
@@ -140,6 +154,7 @@ def open_translate_dialog(
             if result:
                 translate_output_field.value = result
                 page.update()
+
         page.run_task(do_pick)
 
     def browse_output_dir(e=None):
@@ -159,26 +174,40 @@ def open_translate_dialog(
         show_snack_bar("🔍 預覽功能待實作")
         close_dialog(dialog)
 
-    content = ft.Column([
-        ft.Text("輸入來源", weight="bold", size=13),
-        ft.Text("留空自動帶入前一步驟輸出", size=10, color=GREY_600),
-        ft.Row([
-            translate_input_field,
-            ft.Button("選擇資料夾", icon=ft.Icons.FOLDER, on_click=pick_input_dir),
-            ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_input_dir),
-        ]),
-        ft.Text("輸出目錄", weight="bold", size=13),
-        ft.Text(f"輸出說明：→ {{output}}/lm_translate/", size=10, color=GREY_600),
-        ft.Row([
-            translate_output_field,
-            ft.Button("選擇資料夾", icon=ft.Icons.FOLDER_SPECIAL, on_click=pick_output_dir),
-            ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_output_dir),
-        ]),
-        ft.Divider(),
-        ft.Text("執行選項", weight="bold", size=13),
-        dry_run_switch,
-        write_new_cache_switch,
-    ], spacing=10, tight=False)
+    content = ft.Column(
+        [
+            ft.Text("輸入來源", weight="bold", size=13),
+            ft.Text("留空自動帶入前一步驟輸出", size=10, color=GREY_600),
+            ft.Row(
+                [
+                    translate_input_field,
+                    ft.Button(
+                        "選擇資料夾", icon=ft.Icons.FOLDER, on_click=pick_input_dir
+                    ),
+                    ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_input_dir),
+                ]
+            ),
+            ft.Text("輸出目錄", weight="bold", size=13),
+            ft.Text("輸出說明：→ {output}/lm_translate/", size=10, color=GREY_600),
+            ft.Row(
+                [
+                    translate_output_field,
+                    ft.Button(
+                        "選擇資料夾",
+                        icon=ft.Icons.FOLDER_SPECIAL,
+                        on_click=pick_output_dir,
+                    ),
+                    ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_output_dir),
+                ]
+            ),
+            ft.Divider(),
+            ft.Text("執行選項", weight="bold", size=13),
+            dry_run_switch,
+            write_new_cache_switch,
+        ],
+        spacing=10,
+        tight=False,
+    )
 
     dialog = ft.AlertDialog(
         modal=True,
@@ -186,9 +215,18 @@ def open_translate_dialog(
         content=ft.Container(content=content, width=dialog_width),
         actions=[
             ft.TextButton("取消", on_click=lambda e: close_dialog(dialog)),
-            ft.OutlinedButton("預覽結果", icon=ft.Icons.PREVIEW, on_click=lambda e: show_preview_result(dialog)),
-            ft.Button("確定執行", icon=ft.Icons.CHECK, bgcolor=BLUE_700, color=WHITE,
-                      on_click=lambda e: start_translate(dialog)),
+            ft.OutlinedButton(
+                "預覽結果",
+                icon=ft.Icons.PREVIEW,
+                on_click=lambda e: show_preview_result(dialog),
+            ),
+            ft.Button(
+                "確定執行",
+                icon=ft.Icons.CHECK,
+                bgcolor=BLUE_700,
+                color=WHITE,
+                on_click=lambda e: start_translate(dialog),
+            ),
         ],
     )
 

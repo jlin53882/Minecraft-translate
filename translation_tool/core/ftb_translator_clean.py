@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 _LANG_REF_RE = re.compile(r"^\{ftbquests\..+\}$")
+
 
 def _is_filled_text(v) -> bool:
     """檢查內容是否為有效的非空字串，且不屬於語言參考標記格式。"""
@@ -19,9 +21,8 @@ def _is_filled_text(v) -> bool:
     s = v.strip()
     if not s:
         return False
-    if _LANG_REF_RE.match(s):
-        return False
-    return True
+    return not _LANG_REF_RE.match(s)
+
 
 def deep_merge_3way(zh_tw: dict, zh_cn: dict, en_us: dict) -> dict:
     """優先順序：zh_tw > (zh_cn 轉繁) > en_us。"""
@@ -49,6 +50,7 @@ def deep_merge_3way(zh_tw: dict, zh_cn: dict, en_us: dict) -> dict:
 
     return merge(zh_tw, zh_cn, en_us)
 
+
 def prune_en_us_by_zh_tw(en_us: Any, zh_tw: Any) -> Any:
     """從 en_us 中刪掉 zh_tw 已有內容的部分。"""
 
@@ -70,6 +72,7 @@ def prune_en_us_by_zh_tw(en_us: Any, zh_tw: Any) -> Any:
         return en_us
     return en_us
 
+
 def prune_flat_en_by_tw(en_map: dict, tw_available: dict) -> dict:
     """針對扁平 dict，只保留 tw 尚未覆蓋的 en key。"""
     out = {}
@@ -80,6 +83,7 @@ def prune_flat_en_by_tw(en_map: dict, tw_available: dict) -> dict:
         out[k] = v
     return out
 
+
 def clean_ftbquests_from_raw_impl(
     base_dir: str,
     *,
@@ -89,9 +93,9 @@ def clean_ftbquests_from_raw_impl(
     log_info_fn: Callable[..., None],
 ) -> dict:
     """清理 FTB Quests RAW JSON（移除翻譯過的金鑰，保留原始結構）。
-    
+
     讀取 base_dir 下的 quests.json，過濾掉已翻譯項目後寫入 output_dir。
-    
+
     Args:
         base_dir: 原始 FTB quests 目錄
         output_dir: 輸出目錄（None 時覆寫原檔）

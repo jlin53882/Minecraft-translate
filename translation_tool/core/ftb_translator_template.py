@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 
+
 def prepare_ftbquests_lang_template_only_impl(
     input_config_dir: str,
     output_config_dir: str,
@@ -44,7 +45,9 @@ def prepare_ftbquests_lang_template_only_impl(
     src_fallback_file = os.path.join(src_lang_root, "en_us.snbt")
 
     if os.path.isfile(src_prefer_file) or os.path.isfile(src_fallback_file):
-        src_file = src_prefer_file if os.path.isfile(src_prefer_file) else src_fallback_file
+        src_file = (
+            src_prefer_file if os.path.isfile(src_prefer_file) else src_fallback_file
+        )
         dst_file = os.path.join(dst_lang_root, os.path.basename(src_file))
         os.makedirs(os.path.dirname(dst_file), exist_ok=True)
         shutil.copy2(src_file, dst_file)

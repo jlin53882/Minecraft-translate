@@ -6,11 +6,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 from translation_tool.core.lm_config_rules import value_fully_translated
 from translation_tool.utils.cache_manager import get_cache_dict_ref
+
 
 @dataclass(frozen=True)
 class CacheRule:
@@ -18,13 +20,14 @@ class CacheRule:
 
     key_mode: str = "path|source_text"
 
-    def make_key(self, item: Dict[str, Any]) -> str:
+    def make_key(self, item: dict[str, Any]) -> str:
         """依規則建立 cache key。"""
         path = str(item.get("path") or "")
         src = str(item.get("source_text") or "")
         if self.key_mode == "path":
             return path
         return f"{path}|{src}"
+
 
 STRICT_SRC_TYPES = {
     "lang",
@@ -33,9 +36,10 @@ STRICT_SRC_TYPES = {
     "md",
 }
 
-ValidHitFn = Callable[[str, Dict[str, Any], Dict[str, Any]], bool]
+ValidHitFn = Callable[[str, dict[str, Any], dict[str, Any]], bool]
 
-def get_default_cache_rules() -> Dict[str, CacheRule]:
+
+def get_default_cache_rules() -> dict[str, CacheRule]:
     """回傳預設 cache rule map。"""
     return {
         "lang": CacheRule("path"),
@@ -44,6 +48,7 @@ def get_default_cache_rules() -> Dict[str, CacheRule]:
         "kubejs": CacheRule("path|source_text"),
         "md": CacheRule("path|source_text"),
     }
+
 
 def _is_valid_hit(dst: str, entry: dict, item: dict) -> bool:
     """判斷 cache 命中是否可信。"""
@@ -64,20 +69,21 @@ def _is_valid_hit(dst: str, entry: dict, item: dict) -> bool:
 
     return True
 
+
 def fast_split_items_by_cache(
-    all_items: Iterable[Dict[str, Any]],
+    all_items: Iterable[dict[str, Any]],
     *,
-    cache_rules: Optional[Dict[str, CacheRule]] = None,
-    is_valid_hit: Optional[ValidHitFn] = None,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    cache_rules: dict[str, CacheRule] | None = None,
+    is_valid_hit: ValidHitFn | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """依據快取規則將所有項目分為「已命中（可直接還原）」與「需要翻譯」兩類。"""
     if cache_rules is None:
         cache_rules = get_default_cache_rules()
 
-    cached_items: List[Dict[str, Any]] = []
-    items_to_translate: List[Dict[str, Any]] = []
+    cached_items: list[dict[str, Any]] = []
+    items_to_translate: list[dict[str, Any]] = []
     checker = is_valid_hit or _is_valid_hit
-    cache_refs: Dict[str, Dict[str, Any]] = {}
+    cache_refs: dict[str, dict[str, Any]] = {}
 
     for it in all_items:
         if not isinstance(it, dict):
