@@ -39,7 +39,7 @@ def _call():
     return lm_api_client.call_gemini_requests(
         model_name="m",
         system_prompt="s",
-        payload={"items": []},
+        payload={"items": [{"id": "0", "value": "source"}]},
         api_key="k",
         temperature=0.1,
     )

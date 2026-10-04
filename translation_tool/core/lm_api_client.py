@@ -28,28 +28,25 @@ NETWORK_RETRY_BASE_SEC = 1.0
 # 設定檔 lm_translator.max_output_tokens 可覆寫；設為 0 代表不送這個欄位。
 DEFAULT_MAX_OUTPUT_TOKENS = 32768
 
-# Gemini generateContent's Schema fields use OpenAPI type enums.
-# propertyOrdering is required by Gemini 2.0 models; maxProperties prevents extras.
+# Gemini responseFormat.text.schema uses a JSON Schema subset.
 TRANSLATION_RESPONSE_SCHEMA = {
-    "type": "OBJECT",
+    "type": "object",
     "properties": {
         "items": {
-            "type": "ARRAY",
+            "type": "array",
             "items": {
-                "type": "OBJECT",
+                "type": "object",
                 "properties": {
-                    "id": {"type": "STRING"},
-                    "value": {"type": "STRING"},
+                    "id": {"type": "string"},
+                    "value": {"type": "string"},
                 },
                 "required": ["id", "value"],
-                "maxProperties": 2,
-                "propertyOrdering": ["id", "value"],
+                "additionalProperties": False,
             },
         }
     },
     "required": ["items"],
-    "maxProperties": 1,
-    "propertyOrdering": ["items"],
+    "additionalProperties": False,
 }
 
 
@@ -59,6 +56,10 @@ def _build_translation_response_schema(payload: dict) -> dict:
     if not isinstance(items, list):
         # Preserve the helper's historical behavior for non-translation callers.
         return deepcopy(TRANSLATION_RESPONSE_SCHEMA)
+    if not items:
+        raise ValueError(
+            "Gemini translation payload must contain at least one item"
+        )
 
     ids = [item.get("id") for item in items if isinstance(item, dict)]
     if len(ids) != len(items) or not all(isinstance(item_id, str) for item_id in ids):
@@ -165,8 +166,12 @@ def call_gemini_requests(
         ],
         "generationConfig": {
             "temperature": temperature,
-            "responseMimeType": "application/json",
-            "responseSchema": _build_translation_response_schema(payload),
+            "responseFormat": {
+                "text": {
+                    "mimeType": "APPLICATION_JSON",
+                    "schema": _build_translation_response_schema(payload),
+                }
+            },
         },
     }
 

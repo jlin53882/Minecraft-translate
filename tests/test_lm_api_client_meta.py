@@ -104,25 +104,27 @@ def test_existing_generation_config_fields_are_kept(post):
 
     cfg = _generation_config(post)
     assert cfg["temperature"] == 0.2
-    assert cfg["responseMimeType"] == "application/json"
-    schema = cfg["responseSchema"]
-    assert schema["type"] == "OBJECT"
+    response_format = cfg["responseFormat"]["text"]
+    assert response_format["mimeType"] == "APPLICATION_JSON"
+    schema = response_format["schema"]
+    assert schema["type"] == "object"
     assert schema["required"] == ["items"]
-    assert schema["maxProperties"] == 1
+    assert schema["additionalProperties"] is False
     items = schema["properties"]["items"]
-    assert items["type"] == "ARRAY"
+    assert items["type"] == "array"
     item = items["items"]
-    assert item["type"] == "OBJECT"
+    assert item["type"] == "object"
     assert item["required"] == ["id", "value"]
     assert item["properties"] == {
-        "id": {"type": "STRING", "enum": ["0", "1"]},
-        "value": {"type": "STRING"},
+        "id": {"type": "string", "enum": ["0", "1"]},
+        "value": {"type": "string"},
     }
-    assert item["maxProperties"] == 2
-    assert item["propertyOrdering"] == ["id", "value"]
+    assert item["additionalProperties"] is False
     assert items["minItems"] == 2
     assert items["maxItems"] == 2
-    assert schema["propertyOrdering"] == ["items"]
+    assert set(cfg) >= {"temperature", "responseFormat", "maxOutputTokens"}
+    assert "responseMimeType" not in cfg
+    assert "responseSchema" not in cfg
 
 
 def test_translation_input_payload_shape_is_unchanged(post):
@@ -147,12 +149,12 @@ def test_translation_input_payload_shape_is_unchanged(post):
 
 def test_dynamic_schema_is_fresh_for_each_batch(post):
     _call(post, payload={"items": [{"id": "a", "value": "A"}]})
-    first_schema = _generation_config(post)["responseSchema"]
+    first_schema = _generation_config(post)["responseFormat"]["text"]["schema"]
     _call(
         post,
         payload={"items": [{"id": "x", "value": "X"}, {"id": "y", "value": "Y"}]},
     )
-    second_schema = _generation_config(post)["responseSchema"]
+    second_schema = _generation_config(post)["responseFormat"]["text"]["schema"]
 
     first_items = first_schema["properties"]["items"]
     second_items = second_schema["properties"]["items"]
@@ -172,6 +174,13 @@ def test_dynamic_schema_is_fresh_for_each_batch(post):
 def test_invalid_batch_ids_are_rejected_before_request(post, items):
     with pytest.raises(ValueError, match="payload"):
         _call(post, payload={"items": items})
+
+    post.assert_not_called()
+
+
+def test_empty_translation_batch_is_rejected_before_request(post):
+    with pytest.raises(ValueError, match="at least one item"):
+        _call(post, payload={"items": []})
 
     post.assert_not_called()
 

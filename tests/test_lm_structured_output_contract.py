@@ -37,6 +37,21 @@ def test_structured_response_with_matching_ids_merges_translations(batch_context
 @pytest.mark.parametrize(
     ("response", "expected_log_fragment"),
     [
+        ('{"items":[],"debug":true}', "root contains fields outside items"),
+        (
+            '{"items":[{"id":"0","value":"鐵錠","debug":true},{"id":"1","value":"鑽石劍"}]}',
+            "items[0] does not contain exactly id and value",
+        ),
+        ('{"items":"not-an-array"}', "items is not an array"),
+        ('{"items":[]}', "missing IDs=['0', '1']"),
+        (
+            '{"items":[{"id":0,"value":"鐵錠"},{"id":"1","value":"鑽石劍"}]}',
+            "items[0] id/value is not a string",
+        ),
+        (
+            '{"items":[{"id":"0","value":42},{"id":"1","value":"鑽石劍"}]}',
+            "items[0] id/value is not a string",
+        ),
         ('{"items":[{"id":"0","value":"鐵錠"}]}', "missing IDs=['1']"),
         (
             '{"items":[{"id":"8","value":"鐵錠"},{"id":"9","value":"鑽石劍"}]}',
