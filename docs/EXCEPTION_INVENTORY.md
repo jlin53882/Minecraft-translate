@@ -92,6 +92,9 @@
 | `app/views/dashboard_view.py:DashboardView._apply_on_ui` | BLE001 | 已記錄／回報 | 沒有 event loop（測試）就直接套用 |
 | `app/views/extractor/extractor_dialog.py:_extractor_run_extraction` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/extractor/extractor_preview_dialog.py:_preview_do_scan` | BLE001 | 已記錄／回報 | 錯誤要回報到 UI |
+| `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._save_current_zh` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._load_entries` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._collect_jar_modids` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview/icon_cache.py:_follow_parent_chain` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview/icon_cache.py:_extract_jar_icon` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/icon_preview/icon_cache.py:_run_jar_workers` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
@@ -99,9 +102,6 @@
 | `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons._process_jar` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview_row.py:_ensure_icon_size` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/icon_preview_view.py:IconPreviewView._begin_scan._scan` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
-| `app/views/icon_preview_view.py:IconPreviewView._save_current_zh` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:IconPreviewView._load_entries` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:IconPreviewView._collect_jar_modids` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/lm_view.py:LMView.refresh_key_stat` | BLE001 | UI／畫面保護 | 讀不到設定時只是不顯示 |
 | `app/views/lookup_view.py:LookupView.single_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/lookup_view.py:LookupView.batch_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |

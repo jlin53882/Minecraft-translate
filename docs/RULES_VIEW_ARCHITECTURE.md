@@ -112,3 +112,9 @@ _render_current_page()
 
 1. `_run_on_ui_thread` 用於把背景執行緒結果切回 UI 執行緒（Flet 無內建 thread-safe 更新）。
 2. `delete_row_clicked` / `add_row_clicked` 操作 `all_rules_data` 後需 `_render_current_page()`。
+
+## 檔案結構（拆分後）
+
+- `app/views/rules_view.py`：`RulesView` 主體（載入、搜尋、驗證、儲存、新增／刪除）。
+- `app/views/rules/rules_widgets.py`：`RulesWidgetsMixin`，控制項與版面組裝（`_init_*`、`_build_*`）。
+- `app/views/rules/rules_actions.py`、`rules_state.py`、`rules_table.py`：重新載入與儲存動作、狀態、表格列。

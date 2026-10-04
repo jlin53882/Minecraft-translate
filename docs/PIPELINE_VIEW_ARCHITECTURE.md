@@ -171,3 +171,9 @@ core generator 與 service 以 dict 回報進度，欄位皆為選用：
 3. 新 service 若以 generator 回傳，`_run_session_step` 會負責迭代；若自行判斷失敗，請寫入 `session.set_error()` 或 summary 的 `failed_*`，不要只輸出含「錯誤」的日誌字串。
 4. 一鍵流程中資料夾型輸入一律走 folder batch service，不可包成 `zip_paths`。
 5. 新增步驟時要同步：`PipelineProgressPanel.steps`、`_one_click_steps` 的 steps、`PipelineConfig` 路徑 property、`_build_pipeline_steps_and_status_cards` 的步驟列。
+
+## 檔案結構（拆分後）
+
+- `app/views/pipeline/pipeline_view.py`：`PipelineView` 主體（步驟執行、一鍵製作流程、取消與按鈕狀態）。
+- `app/views/pipeline/pipeline_widgets.py`：`PipelineWidgetsMixin`，控制項與版面組裝（`_build_ui`、各 `_build_*` 卡片、`_step_row`）。
+- `app/views/pipeline/pipeline_*_dialog.py`：五個設定對話框（translate、bundle、extract、merge、one_click）。每個對話框用一個 `ctx`（`types.SimpleNamespace`）共享狀態與控制項，handler 是以 `ctx` 為第一個參數的模組層級函式（例如 `_extract_start_extraction`），畫面建構拆成 `_<對話框>_build_*` 函式；測試以 `open_*_dialog` 公開入口驅動（`tests/test_pipeline_*_dialog_behavior.py`）。

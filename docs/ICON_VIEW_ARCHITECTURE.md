@@ -133,3 +133,16 @@ translation_tool/core/
 透過 `app.views.icon_preview_row` 建立列元件；核心的 `icon_resolver`、`icon_reason` 與
 `icon_preview_cache` 維持可獨立測試的服務／資料層。新增 icon 行為時先改核心服務，只有控制項組裝
 留在 row/view 層。
+
+## 檔案結構（拆分後）
+
+```
+app/views/icon_preview_view.py            ← IconPreviewView 主體：生命週期、載入流程、進度
+app/views/icon_preview/
+  ├─ list_mixin.py       IconPreviewListMixin    模組清單、分頁、搜尋
+  ├─ detail_mixin.py     IconPreviewDetailMixin  單一模組詳情、載入 entries、翻譯儲存
+  └─ icon_cache.py       圖示提取與快取輔助函式（model JSON 解析、批次提取、model index／L2 快取、進度輔助）
+app/views/icon_preview_row.py             ← 單列（圖示 + 翻譯欄位）
+```
+
+測試要 monkeypatch 圖示輔助函式（`_get_cache_dir`、`_get_jar_hash`、`_try_extract_mod_icon_from_model` 等）時，請 patch `app.views.icon_preview.icon_cache`（呼叫者都在該模組內查名稱）。`app/icon_index.py` 也從 `icon_cache` 匯入 `_try_extract_mod_icon_from_model`。

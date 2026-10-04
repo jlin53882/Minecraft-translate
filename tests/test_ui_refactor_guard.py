@@ -33,7 +33,9 @@ def test_views_use_shared_components_and_no_local_styled_card():
 def test_config_and_rules_use_shared_buttons():
     """設定 / 規則頁的按鈕要走共用元件（舊 primary_button 或新 kit.button），不可各自拼樣式。"""
     config_src = _read("app/views/config/config_form.py")
-    rules_src = _read("app/views/rules_view.py")
+    rules_src = _read("app/views/rules_view.py") + _read(
+        "app/views/rules/rules_widgets.py"
+    )
 
     assert "primary_button(" in config_src or "kit.button(" in config_src
     assert "kit.button(" in rules_src or (
