@@ -3,14 +3,18 @@
 由 ``app/views/cache_view.py`` 拆出（#114），方法內容未改；``CacheView`` 以多重繼承組合這些 mixin。
 """
 
-import json
-import re
 from pathlib import Path
 
 import flet as ft
 
 # UI 共用元件：總覽區使用新 UI kit。
 from app.ui.design import C
+from app.views.cache_manager.shard_reader import (
+    shard_raw,
+    shard_rows,
+    shard_summary,
+    warm_shard_summaries,
+)
 
 
 class CacheShardMixin:
@@ -94,84 +98,25 @@ class CacheShardMixin:
     def _load_shard_rows(
         self, cache_type: str, active_shard_id: str, shard_capacity: int
     ) -> list[dict]:
-        """載入指定類型的所有分片資料"""
+        """載入指定類型的所有分片資料（摘要有記憶，見 shard_reader；背景預熱後只剩 stat）。"""
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
             return []
+        return shard_rows(root, cache_type, active_shard_id, shard_capacity)
 
-        type_dir = Path(root) / cache_type
-        if not type_dir.exists():
-            return []
-
-        def _sort_key(path: Path):
-            """從路徑提取排序用的序列號"""
-            stem = path.stem
-            m = re.search(r"(\d+)$", stem)
-            seq = int(m.group(1)) if m else -1
-            return (seq, stem.lower())
-
-        active_filename = (
-            f"{cache_type}_{active_shard_id!s}.json"
-            if str(active_shard_id or "").strip()
-            else ""
-        )
-
-        shard_files: list[Path] = []
-        for fp in type_dir.glob("*.json"):
-            name = fp.name.lower()
-            # 排除非 shard 參考檔
-            if name == f"{cache_type.lower()}_cache_main.json":
-                continue
-            shard_files.append(fp)
-
-        rows: list[dict] = []
-        for fp in sorted(shard_files, key=_sort_key, reverse=True):
-            key_count = 0
-            try:
-                raw = json.loads(fp.read_text(encoding="utf-8"))
-                if isinstance(raw, (dict, list)):
-                    key_count = len(raw)
-            except Exception:  # noqa: BLE001
-                key_count = 0
-
-            rows.append(
-                {
-                    "filename": fp.name,
-                    "key_count": key_count,
-                    "is_active": fp.name == active_filename,
-                    "capacity": shard_capacity,
-                }
-            )
-        return rows
+    def _warm_shard_cache(self, overview: dict | None = None) -> int:
+        """（背景執行緒）預熱分片摘要記憶，讓 event loop 上的渲染不再解析 JSON。"""
+        return warm_shard_summaries(overview or self._last_overview_data)
 
     def _load_shard_keys(self, cache_type: str, filename: str) -> list[str]:
-        """從分片檔案載入所有鍵值"""
+        """從分片檔案載入所有鍵值（有記憶）。"""
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
             return []
-
         fp = Path(root) / cache_type / filename
         if not fp.exists():
             return []
-
-        try:
-            raw = json.loads(fp.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            return []
-
-        if isinstance(raw, dict):
-            return sorted([str(k) for k in raw])
-
-        if isinstance(raw, list):
-            out = []
-            for idx, item in enumerate(raw):
-                if isinstance(item, dict) and item.get("key"):
-                    out.append(str(item.get("key")))
-                else:
-                    out.append(f"[{idx}]")
-            return out
-
-        return []
+        return list(shard_summary(fp)[1])
 
     def _set_shard_detail_page(self, page: int):
         """設定分片詳情頁碼並計算總頁數"""
@@ -369,24 +314,17 @@ class CacheShardMixin:
     def _load_shard_entry(
         self, cache_type: str, filename: str, key: str
     ) -> dict | None:
-        """載入單一鍵值的詳細資料"""
+        """載入單一鍵值的詳細資料（fallback；最近用過的分片留在 LRU）。"""
         root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
         if not root:
             return None
-
         fp = Path(root) / cache_type / filename
         if not fp.exists():
             return None
-
-        try:
-            raw = json.loads(fp.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            return None
-
+        raw = shard_raw(fp)
         if isinstance(raw, dict):
             entry = raw.get(key)
             return entry if isinstance(entry, dict) else None
-
         return None
 
     async def _on_shard_dst_copy(self, e):

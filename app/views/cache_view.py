@@ -242,7 +242,11 @@ class CacheView(
     def _fetch_overview(self):
         """讀取快取總覽（可在背景執行緒執行）；回傳 (data, error, traceback)。"""
         try:
-            return cache_get_overview_service(), None, None
+            data = cache_get_overview_service()
+            self._warm_shard_cache(
+                data
+            )  # 在背景執行緒預熱分片摘要，渲染時不必解析 JSON
+            return data, None, None
         except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
             return {}, ex, traceback.format_exc()
 
