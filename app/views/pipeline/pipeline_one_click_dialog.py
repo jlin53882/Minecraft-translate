@@ -542,25 +542,7 @@ def _one_click__build_step4(ctx):
             ),
             version_dropdown,
             ft.Text("封面圖片（可留空）", weight="bold", size=13),
-            ft.Row(
-                [
-                    pack_image_field,
-                    ft.Button(
-                        "選擇檔案...",
-                        icon=ft.Icons.IMAGE,
-                        on_click=lambda e: _one_click_pick_pack_image(
-                            ctx, pack_image_field
-                        ),
-                    ),
-                    ft.TextButton(
-                        "移除",
-                        icon=ft.Icons.DELETE_OUTLINE,
-                        on_click=lambda e: _one_click_clear_pack_image(
-                            ctx, pack_image_field
-                        ),
-                    ),
-                ]
-            ),
+            _one_click_pack_image_row(ctx, pack_image_field),
             ft.Text("其他指定資料夾", weight="bold", size=13),
             ft.Container(
                 content=extra_view,
@@ -572,6 +554,25 @@ def _one_click__build_step4(ctx):
         ],
         spacing=10,
         tight=False,
+    )
+
+
+def _one_click_pack_image_row(ctx, pack_image_field) -> ft.Row:
+    """封面圖片列：唯讀路徑欄位 + 選擇檔案 + 移除。"""
+    return ft.Row(
+        [
+            pack_image_field,
+            ft.Button(
+                "選擇檔案...",
+                icon=ft.Icons.IMAGE,
+                on_click=lambda e: _one_click_pick_pack_image(ctx, pack_image_field),
+            ),
+            ft.TextButton(
+                "移除",
+                icon=ft.Icons.DELETE_OUTLINE,
+                on_click=lambda e: _one_click_clear_pack_image(ctx, pack_image_field),
+            ),
+        ]
     )
 
 
