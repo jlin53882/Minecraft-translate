@@ -16,6 +16,8 @@ from collections.abc import Callable
 import flet as ft
 
 from app import config_store
+from app.config_apply import save_notice
+from app.shell.config_effects import CacheRootReloader
 from app.shell.palette import (
     KIND_ACTION,
     PaletteItem,
@@ -36,6 +38,7 @@ from app.view_registry import (
     MIN_WINDOW_SIZE,
     SPECS_BY_KEY,
     build_view_registry,
+    built_view,
     get_group,
     get_window_size,
     index_of,
@@ -49,11 +52,8 @@ REFRESH_INTERVAL_SEC = 0.25  # 任務事件的 UI 更新節流
 KEY_REFRESH_SEC = 5.0  # API Key 健康度輪詢間隔
 CLOSE_WAIT_TIMEOUT_SEC = 2.0
 CLOSE_WAIT_POLL_SEC = 0.05
-CONFIG_WHILE_RUNNING_NOTICE = (
-    "設定已儲存；進行中的任務不受影響，下次任務才套用（API 金鑰除外）。"
-)
-# 這些路徑變更即時生效，不需要「進行中任務不受影響」的提醒
-_CONFIG_NOTICE_IGNORED = frozenset({"ui.theme_mode"})
+# 快取資料夾變更後需要重新整理的頁面
+_CACHE_DEPENDENT_VIEWS = ("dashboard", "cache")
 
 # 時鐘與 sleep 抽成模組層級名稱，測試可以換成假的（不必真的等）
 _monotonic = time.monotonic
@@ -63,6 +63,13 @@ _async_sleep = asyncio.sleep
 _REGISTRY_SETTERS = ("set_registry", "set_view_registry")
 # 需要拿到外殼（導覽 / 任務事件）的頁面
 _SHELL_SETTERS = ("set_shell",)
+
+
+def _default_cache_reload():
+    """重載翻譯快取並重建搜尋索引（背景執行緒呼叫）。"""
+    from app.services_impl.cache.cache_services import cache_reload_service
+
+    return cache_reload_service()
 
 
 def read_app_version() -> str:
@@ -112,6 +119,7 @@ class AppShell:
         ]
         | None = None,
         flush_before_close: Callable[[], object] | None = None,
+        cache_reloader: CacheRootReloader | None = None,
     ) -> None:
         self.page = page
         self.file_picker = file_picker or ft.FilePicker()
@@ -128,6 +136,11 @@ class AppShell:
         )
         self._flush_before_close = flush_before_close or _default_flush_before_close
         self._unsubscribe_config: Callable[[], None] | None = None
+        self._cache_reloader = cache_reloader or CacheRootReloader(
+            is_busy=lambda: bool(self.tasks.active()),
+            reload=_default_cache_reload,
+            on_reloaded=self._on_cache_reloaded,
+        )
         self._unsubscribe_config_paths: Callable[[], None] | None = None
         self._unsubscribe_tasks: Callable[[], None] | None = None
         self.current_key: str | None = None
@@ -350,30 +363,63 @@ class AppShell:
                 self._env_future = future
 
     def _on_config_paths_saved(self, changed_paths: frozenset[str]) -> None:
-        """存檔後（可能在任何執行緒）：若有任務進行中且設定有實質變更，排程提示。"""
-        relevant = {p for p in changed_paths if p not in _CONFIG_NOTICE_IGNORED}
-        if not relevant:
-            return
+        """存檔後（可能在任何執行緒）：觸發設定的副作用，並依中央套用時機表提醒使用者。"""
         with self._sched_lock:
             if self._disposed:
                 return
+        # 快取資料夾變更：沒有任務時立即重載，有任務時等任務結束
+        self._cache_reloader.on_config_paths(changed_paths)
         try:
-            if not self.tasks.active():
-                return
+            running = bool(self.tasks.active())
         except Exception:
             logger.debug("讀取進行中任務失敗", exc_info=True)
+            running = False
+        message = save_notice(changed_paths, tasks_running=running)
+        if message is None:
             return
-        self._submit_ui(self._show_config_while_running_notice)
 
-    async def _show_config_while_running_notice(self) -> None:
-        with self._sched_lock:
-            if self._disposed:
-                return
-        show_snack(
-            self.page,
-            CONFIG_WHILE_RUNNING_NOTICE,
-            theme.INFO,
-        )
+        async def notify() -> None:
+            with self._sched_lock:
+                if self._disposed:
+                    return
+            show_snack(self.page, message, theme.INFO)
+
+        self._submit_ui(notify)
+
+    def _on_cache_reloaded(self, ok: bool) -> None:
+        """快取重載結束（背景執行緒）：排程到 UI 執行緒刷新相關頁面並提示結果。"""
+
+        async def refresh() -> None:
+            with self._sched_lock:
+                if self._disposed:
+                    return
+            if ok:
+                for item in self.registry:
+                    if item["key"] not in _CACHE_DEPENDENT_VIEWS:
+                        continue
+                    view_obj = built_view(item)
+                    content = getattr(view_obj, "content", None)
+                    # 工作台有 reload()；快取頁沒有公開的重載入口，重新掛載流程會重讀總覽
+                    refresh_fn = getattr(content, "reload", None) or getattr(
+                        content, "did_mount", None
+                    )
+                    if callable(refresh_fn):
+                        try:
+                            refresh_fn()
+                        except Exception:
+                            logger.debug("快取重載後刷新頁面失敗", exc_info=True)
+                show_snack(
+                    self.page, "快取資料夾已變更，已重新載入快取與搜尋索引", theme.INFO
+                )
+            else:
+                show_snack(
+                    self.page,
+                    "快取資料夾變更後重新載入失敗，請查看日誌（目前仍使用舊的快取）",
+                    theme.WARNING,
+                )
+            self._safe_update()
+
+        self._submit_ui(refresh)
 
     async def _apply_config_refresh(self) -> None:
         with self._sched_lock:
@@ -423,6 +469,7 @@ class AppShell:
         已經有排程中的更新工作時直接返回（它執行時會讀到最新狀態），所以大量 progress 事件
         只會排一個工作；工作本身會依 ``REFRESH_INTERVAL_SEC`` 節流。
         """
+        self._cache_reloader.poke()  # 任務結束後，等待中的快取重載才會開始
         with self._sched_lock:
             if self._disposed or self._refresh_scheduled:
                 return

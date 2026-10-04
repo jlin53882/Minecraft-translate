@@ -146,7 +146,8 @@ def test_apply_metadata_covers_new_fields_wildcards_and_cache_root():
         "lm_translator.max_output_token_budget": "next_batch",
         "lm_translator.max_input_token_budget": "next_batch",
         "lm_translator.key_failure_cooldown_sec": "next_request",
-        "translator.cache_directory": "next_reload",
+        # 存檔後自動重載（有任務時等任務結束），見 app/shell/config_effects.py
+        "translator.cache_directory": "when_idle",
     }
     for path, timing in expected_timing.items():
         rule = get_apply_rule(path)
@@ -167,11 +168,13 @@ def test_apply_metadata_covers_new_fields_wildcards_and_cache_root():
 
 def test_config_view_presents_central_apply_metadata_for_lm_fields(monkeypatch):
     from app.views import config_view
+    from app.views.config import settings_form
     from tests.conftest import mock_page
 
+    # 說明文字由 settings_form 依 schema 組出；套用時機來自中央 apply-timing 表
     monkeypatch.setattr(
-        config_view,
-        "apply_timing_note",
+        settings_form,
+        "timing_note",
         lambda path: f"CENTRAL:{path}",
     )
     monkeypatch.setattr(
@@ -195,7 +198,7 @@ def test_config_view_presents_central_apply_metadata_for_lm_fields(monkeypatch):
         "lm_translator.max_input_token_budget",
         "lm_translator.key_failure_cooldown_sec",
     ):
-        assert view.controls_map[path].helper == f"CENTRAL:{path}"
+        assert view.controls_map[path].helper.startswith(f"CENTRAL:{path}")
 
 
 def test_api_schema_round_trip_keeps_old_models_shape():

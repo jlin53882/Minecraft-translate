@@ -5,27 +5,72 @@ import traceback
 
 from app.services_impl.logging_service import validate_log_format
 from app.ui.snack import show_snack
+from app.views.config.settings_schema import (
+    Setting,
+    editable_settings,
+    get_path,
+    set_path,
+)
 from translation_tool.utils.config_manager import get_default
 from translation_tool.utils.redaction import redact_text
 
 logger = logging.getLogger(__name__)
 
-# 設定頁「批次大小與限制」補上的 lm_translator 欄位（#134）。
-# 表格驅動：(key, 型別, 標籤, 說明)；新增這類設定只需要在這裡加一列，
-# 設定頁建立控制項、載入與儲存都由這張表處理。
-LM_EXTRA_FIELDS: tuple[tuple[str, str, str, str], ...] = (
-    ("token_budget_enabled", "bool", "啟用 Token 預算切批", "關閉後回到固定批次大小"),
-    ("output_token_factor", "float", "輸出／輸入 Token 係數", "預期輸出是輸入的幾倍"),
-    ("budget_min_scale", "float", "預算最小縮放", "撞牆後輸出預算最多縮到設定值的幾倍"),
-    ("budget_recover_after", "int", "回升前連續成功批次", "連續成功幾批後開始回升預算"),
-    ("budget_recover_factor", "float", "預算回升倍率", "每次回升的倍率"),
-    (
-        "batch_write_interval",
-        "int",
-        "每 N 批寫一次快取",
-        "太大會讓單次寫入超過分片上限",
-    ),
-)
+# 設定值 ↔ 設定頁控制項的轉換，全部由 settings_schema 驅動（#134）。
+# 新增一般設定不需要改這個檔案；只有專用元件（API 金鑰列、模型列）在下方手寫。
+
+
+def _initial_value(config: dict, setting: Setting):
+    value = get_path(config, setting.path)
+    return get_default(setting.path) if value is None else value
+
+
+def _to_control_value(setting: Setting, value):
+    kind = setting.kind
+    if kind == "bool":
+        return bool(value)
+    if kind == "lines":
+        return "\n".join(str(item) for item in (value or []))
+    if kind == "choice":
+        return value
+    return "" if value is None else str(value)
+
+
+def _from_control_value(setting: Setting, raw):
+    """控制項的值 → 要寫入 config 的值；格式錯誤丟出 ValueError（由儲存流程回報）。"""
+    kind = setting.kind
+    if kind == "bool":
+        return bool(raw)
+    if kind == "lines":
+        return [line.strip() for line in str(raw or "").splitlines() if line.strip()]
+    if kind in ("int", "float"):
+        convert = int if kind == "int" else float
+        text = raw.strip() if isinstance(raw, str) else raw
+        if text is None or text == "":
+            if setting.blank == "zero":
+                value = convert(0)
+            elif setting.blank == "default":
+                value = get_default(setting.path)
+            else:
+                raise ValueError(f"「{setting.label}」不可空白")
+        else:
+            value = convert(text)  # 字串或已是數字的值
+        if setting.minimum is not None:
+            value = max(convert(setting.minimum), value)
+        return value
+    value = "" if raw is None else raw
+    if setting.validator == "log_format":
+        value = validate_log_format(value)
+    return value
+
+
+def _apply_label_templates(view, config: dict) -> None:
+    for setting in editable_settings():
+        if not setting.label_template or setting.path not in view.controls_map:
+            continue
+        values = {name: get_path(config, path) for name, path in setting.label_refs}
+        values["value"] = get_path(config, setting.path)
+        view.controls_map[setting.path].label = setting.label_template.format(**values)
 
 
 def load_config_into_view(view, config: dict):
@@ -39,215 +84,14 @@ def load_config_into_view(view, config: dict):
     對於 list 欄位（dir_names、skip_terms、translatable_keywords），
     空清單 [] 是用戶的有效設定，會直接保留，不會被 DEFAULT 值置換。
     """
-    log_cfg = config.get("logging", {})
-    trans_cfg = config.get("translator", {})
-    ftb_cfg = config.get("ftb_translator", {})
-    species_cfg = config.get("species_cache", {})
     lm_cfg = config.get("lm_translator", {})
-    bundle_cfg = config.get("output_bundler", {})
 
-    view.controls_map["logging.log_level"].value = log_cfg.get("log_level")
-    view.controls_map["logging.log_dir"].value = log_cfg.get("log_dir")
-    view.controls_map["logging.log_format"].value = log_cfg.get(
-        "log_format", get_default("logging.log_format")
-    )
-    view.controls_map["translator.output_dir_name"].value = trans_cfg.get(
-        "output_dir_name"
-    )
-    view.controls_map["ftb_translator.output_dir_name"].value = ftb_cfg.get(
-        "output_dir_name"
-    )
-    view.controls_map["translator.replace_rules_path"].value = trans_cfg.get(
-        "replace_rules_path"
-    )
-    view.controls_map["translator.cache_directory"].value = trans_cfg.get(
-        "cache_directory"
-    )
-    view.controls_map["translator.enable_cache_saving"].value = trans_cfg.get(
-        "enable_cache_saving"
-    )
-    view.controls_map["translator.parallel_execution_workers"].value = str(
-        trans_cfg.get("parallel_execution_workers")
-    )
-    view.controls_map["translator.custom_translator_folder"].value = trans_cfg.get(
-        "custom_translator_folder", get_default("translator.custom_translator_folder")
-    )
-    view.controls_map["species_cache.cache_directory"].value = species_cfg.get(
-        "cache_directory"
-    )
-    view.controls_map["species_cache.cache_filename"].value = species_cfg.get(
-        "cache_filename"
-    )
-    view.controls_map["species_cache.wikipedia_language"].value = species_cfg.get(
-        "wikipedia_language"
-    )
-    view.controls_map["species_cache.wikipedia_rate_limit_delay"].value = str(
-        species_cfg.get("wikipedia_rate_limit_delay")
-    )
-    view.controls_map["lm_translator.temperature"].value = str(
-        lm_cfg.get("temperature")
-    )
-    view.controls_map["lm_translator.rate_limit.timeout"].value = str(
-        (lm_cfg.get("rate_limit") or {}).get("timeout", 600)
-    )
-    view.controls_map[
-        "lm_translator.rate_limit.sleep_seconds_between_batches"
-    ].value = str(
-        (lm_cfg.get("rate_limit") or {}).get("sleep_seconds_between_batches", 0.0)
-    )
-    view.controls_map["output_bundler.output_zip_name"].value = bundle_cfg.get(
-        "output_zip_name"
-    )
-
-    lang_merger_cfg = config.get("lang_merger", {})
-    view.controls_map["lang_merger.pending_folder_name"].value = lang_merger_cfg.get(
-        "pending_folder_name"
-    )
-    view.controls_map[
-        "lang_merger.pending_organized_folder_name"
-    ].value = lang_merger_cfg.get("pending_organized_folder_name")
-    view.controls_map["lang_merger.filtered_pending_min_count"].value = str(
-        lang_merger_cfg.get("filtered_pending_min_count")
-    )
-    pending_name = lang_merger_cfg.get("pending_folder_name")
-    organized_name = lang_merger_cfg.get("pending_organized_folder_name")
-    min_count = lang_merger_cfg.get("filtered_pending_min_count")
-    view.controls_map[
-        "lang_merger.pending_folder_name"
-    ].label = f"待翻譯資料夾名稱（目前：{pending_name}）"
-    view.controls_map[
-        "lang_merger.pending_organized_folder_name"
-    ].label = f"整理資料夾名稱（目前：{organized_name}）"
-    view.controls_map[
-        "lang_merger.filtered_pending_min_count"
-    ].label = f"「{organized_name}」key最小出現次數（目前：{min_count}）"
-    view.controls_map["lang_merger.quarantine_folder_name"].value = lang_merger_cfg.get(
-        "quarantine_folder_name"
-    )
-    if "lang_merger.patchouli_skip_en_us_when_zh_cn_exists" in view.controls_map:
-        view.controls_map[
-            "lang_merger.patchouli_skip_en_us_when_zh_cn_exists"
-        ].value = lang_merger_cfg.get("patchouli_skip_en_us_when_zh_cn_exists")
-    _v = lang_merger_cfg.get("patchouli_effective_translation_threshold")
-    view.controls_map[
-        "lang_merger.patchouli_effective_translation_threshold"
-    ].value = str(
-        _v
-        if _v is not None
-        else get_default("lang_merger.patchouli_effective_translation_threshold")
-    )
-    _v = lang_merger_cfg.get("zh_en_letter_threshold")
-    view.controls_map["lang_merger.zh_en_letter_threshold"].value = str(
-        _v if _v is not None else get_default("lang_merger.zh_en_letter_threshold")
-    )
-    # 2026-08-02 (PR-XX merge-asset-integration):階段 2 開關載入
-    if "lang_merger.enable_extracted_to_assets_merge" in view.controls_map:
-        view.controls_map[
-            "lang_merger.enable_extracted_to_assets_merge"
-        ].value = lang_merger_cfg.get("enable_extracted_to_assets_merge", True)
-
-    view.controls_map["lm_translator.lm_translate_folder_name"].value = str(
-        lm_cfg.get("lm_translate_folder_name")
-    )
-    view.controls_map["lm_translator.patchouli_system_prompt"].value = str(
-        lm_cfg.get("patchouli_system_prompt")
-    )
-    view.controls_map["lm_translator.lang_system_prompt"].value = str(
-        lm_cfg.get("lang_system_prompt")
-    )
-    _v = lm_cfg.get("initial_batch_size_patchouli")
-    view.controls_map["lm_translator.initial_batch_size_patchouli"].value = (
-        _v
-        if _v is not None
-        else get_default("lm_translator.initial_batch_size_patchouli")
-    )
-    _v = lm_cfg.get("initial_batch_size_lang")
-    view.controls_map["lm_translator.initial_batch_size_lang"].value = (
-        _v if _v is not None else get_default("lm_translator.initial_batch_size_lang")
-    )
-    _v = lm_cfg.get("initial_batch_size_ftb")
-    view.controls_map["lm_translator.initial_batch_size_ftb"].value = (
-        _v if _v is not None else get_default("lm_translator.initial_batch_size_ftb")
-    )
-    _v = lm_cfg.get("initial_batch_size_kubejs")
-    view.controls_map["lm_translator.initial_batch_size_kubejs"].value = (
-        _v if _v is not None else get_default("lm_translator.initial_batch_size_kubejs")
-    )
-    _v = lm_cfg.get("initial_batch_size_md")
-    view.controls_map["lm_translator.initial_batch_size_md"].value = (
-        _v if _v is not None else get_default("lm_translator.initial_batch_size_md")
-    )
-    _v = lm_cfg.get("min_batch_size")
-    view.controls_map["lm_translator.min_batch_size"].value = (
-        _v if _v is not None else get_default("lm_translator.min_batch_size")
-    )
-    _v = lm_cfg.get("batch_shrink_factor")
-    view.controls_map["lm_translator.batch_shrink_factor"].value = (
-        _v if _v is not None else get_default("lm_translator.batch_shrink_factor")
-    )
-    if "lm_translator.rpm_cooldown_sec" in view.controls_map:
-        _v = lm_cfg.get("rpm_cooldown_sec")
-        view.controls_map["lm_translator.rpm_cooldown_sec"].value = str(
-            _v if _v is not None else get_default("lm_translator.rpm_cooldown_sec", 0)
-        )
-    for path in (
-        "lm_translator.max_output_tokens",
-        "lm_translator.max_output_token_budget",
-        "lm_translator.max_input_token_budget",
-        "lm_translator.key_failure_cooldown_sec",
-    ):
-        if path in view.controls_map:
-            _v = lm_cfg.get(path.rsplit(".", 1)[-1])
-            view.controls_map[path].value = str(
-                _v if _v is not None else get_default(path)
-            )
-    for key, kind, _label, _help in LM_EXTRA_FIELDS:
-        path = f"lm_translator.{key}"
-        if path not in view.controls_map:
+    for setting in editable_settings():
+        control = view.controls_map.get(setting.path)
+        if control is None:
             continue
-        _v = lm_cfg.get(key)
-        _v = _v if _v is not None else get_default(path)
-        view.controls_map[path].value = bool(_v) if kind == "bool" else str(_v)
-    view.controls_map["lm_translator.patchouli.dir_names"].value = "\n".join(
-        lm_cfg.get("patchouli", {}).get("dir_names", [])
-    )
-    view.controls_map["lm_translator.translator.skip_terms"].value = "\n".join(
-        lm_cfg.get("translator", {}).get("skip_terms", [])
-    )
-    view.controls_map[
-        "lm_translator.translator.translatable_keywords"
-    ].value = "\n".join(lm_cfg.get("translator", {}).get("translatable_keywords", []))
-    if "lm_translator.translator.short_text_skip_len" in view.controls_map:
-        _v = lm_cfg.get("translator", {}).get("short_text_skip_len")
-        view.controls_map["lm_translator.translator.short_text_skip_len"].value = str(
-            _v
-            if _v is not None
-            else get_default("lm_translator.translator.short_text_skip_len", 3)
-        )
-
-    extractor_cfg = config.get("extractor", {})
-    folder_names = extractor_cfg.get("output_folder_names", {})
-    view.controls_map[
-        "extractor.output_folder_names.lang_extract"
-    ].value = folder_names.get("lang_extract")
-    view.controls_map[
-        "extractor.output_folder_names.book_extract"
-    ].value = folder_names.get("book_extract")
-    view.controls_map[
-        "extractor.output_folder_names.lang_preview"
-    ].value = folder_names.get("lang_preview")
-    view.controls_map[
-        "extractor.output_folder_names.book_preview"
-    ].value = folder_names.get("book_preview")
-    view.controls_map[
-        "extractor.output_folder_names.dual_extract"
-    ].value = folder_names.get("dual_extract")
-    view.controls_map[
-        "extractor.output_folder_names.dual_preview"
-    ].value = folder_names.get("dual_preview")
-    view.controls_map["extractor.skip_zh_cn_extract"].value = extractor_cfg.get(
-        "skip_zh_cn_extract", get_default("extractor.skip_zh_cn_extract", False)
-    )
+        control.value = _to_control_value(setting, _initial_value(config, setting))
+    _apply_label_templates(view, config)
 
     view.models_column.controls.clear()
     models_cfg = lm_cfg.get("models")
@@ -302,223 +146,16 @@ def save_config_from_view(
       → 按儲存後，使用者的「預設值」就會固化進 config.json（Layer 1 覆蓋 Layer 2/3）
     """
     new_config = load_config_json_fn()
-    if "ftb_translator" not in new_config:
-        new_config["ftb_translator"] = {}
-    if "lm_translator" not in new_config:
-        new_config["lm_translator"] = {}
-    if "rate_limit" not in new_config["lm_translator"]:
-        new_config["lm_translator"]["rate_limit"] = {}
-    if "patchouli" not in new_config["lm_translator"]:
-        new_config["lm_translator"]["patchouli"] = {}
-    if "translator" not in new_config["lm_translator"]:
-        new_config["lm_translator"]["translator"] = {}
     try:
-        new_config["logging"]["log_level"] = view.controls_map[
-            "logging.log_level"
-        ].value
-        new_config["logging"]["log_dir"] = view.controls_map["logging.log_dir"].value
-        new_config["logging"]["log_format"] = validate_log_format(
-            view.controls_map["logging.log_format"].value
-        )
-        new_config["translator"]["output_dir_name"] = view.controls_map[
-            "translator.output_dir_name"
-        ].value
-        new_config["ftb_translator"]["output_dir_name"] = view.controls_map[
-            "ftb_translator.output_dir_name"
-        ].value
-        new_config["translator"]["replace_rules_path"] = view.controls_map[
-            "translator.replace_rules_path"
-        ].value
-        new_config["translator"]["cache_directory"] = view.controls_map[
-            "translator.cache_directory"
-        ].value
-        new_config["translator"]["enable_cache_saving"] = view.controls_map[
-            "translator.enable_cache_saving"
-        ].value
-        new_config["translator"]["parallel_execution_workers"] = int(
-            view.controls_map["translator.parallel_execution_workers"].value
-        )
-        new_config["translator"]["custom_translator_folder"] = view.controls_map[
-            "translator.custom_translator_folder"
-        ].value
-        new_config["species_cache"]["cache_directory"] = view.controls_map[
-            "species_cache.cache_directory"
-        ].value
-        new_config["species_cache"]["cache_filename"] = view.controls_map[
-            "species_cache.cache_filename"
-        ].value
-        new_config["species_cache"]["wikipedia_language"] = view.controls_map[
-            "species_cache.wikipedia_language"
-        ].value
-        new_config["species_cache"]["wikipedia_rate_limit_delay"] = float(
-            view.controls_map["species_cache.wikipedia_rate_limit_delay"].value
-        )
-        new_config["lm_translator"]["temperature"] = float(
-            view.controls_map["lm_translator.temperature"].value
-        )
-        new_config["lm_translator"]["rate_limit"]["timeout"] = int(
-            view.controls_map["lm_translator.rate_limit.timeout"].value
-        )
-        new_config["lm_translator"]["rate_limit"]["sleep_seconds_between_batches"] = (
-            float(
-                view.controls_map[
-                    "lm_translator.rate_limit.sleep_seconds_between_batches"
-                ].value
-            )
-        )
-        new_config["output_bundler"]["output_zip_name"] = view.controls_map[
-            "output_bundler.output_zip_name"
-        ].value
-        new_config["lang_merger"]["pending_folder_name"] = view.controls_map[
-            "lang_merger.pending_folder_name"
-        ].value
-        new_config["lang_merger"]["pending_organized_folder_name"] = view.controls_map[
-            "lang_merger.pending_organized_folder_name"
-        ].value
-        new_config["lang_merger"]["filtered_pending_min_count"] = int(
-            view.controls_map["lang_merger.filtered_pending_min_count"].value
-        )
-        new_config["lm_translator"]["lm_translate_folder_name"] = str(
-            view.controls_map["lm_translator.lm_translate_folder_name"].value
-        )
-        new_config["lang_merger"]["quarantine_folder_name"] = view.controls_map[
-            "lang_merger.quarantine_folder_name"
-        ].value
-        new_config["lang_merger"]["patchouli_skip_en_us_when_zh_cn_exists"] = (
-            view.controls_map[
-                "lang_merger.patchouli_skip_en_us_when_zh_cn_exists"
-            ].value
-        )
-        new_config["lang_merger"]["patchouli_effective_translation_threshold"] = float(
-            view.controls_map[
-                "lang_merger.patchouli_effective_translation_threshold"
-            ].value
-        )
-        new_config["lang_merger"]["zh_en_letter_threshold"] = int(
-            view.controls_map["lang_merger.zh_en_letter_threshold"].value
-        )
-        # 2026-08-02 (PR-XX merge-asset-integration):階段 2 開關儲存
-        if "lang_merger.enable_extracted_to_assets_merge" in view.controls_map:
-            new_config["lang_merger"]["enable_extracted_to_assets_merge"] = bool(
-                view.controls_map["lang_merger.enable_extracted_to_assets_merge"].value
-            )
-        new_config["lm_translator"]["patchouli_system_prompt"] = view.controls_map[
-            "lm_translator.patchouli_system_prompt"
-        ].value
-        new_config["lm_translator"]["lang_system_prompt"] = view.controls_map[
-            "lm_translator.lang_system_prompt"
-        ].value
-        new_config["lm_translator"]["initial_batch_size_patchouli"] = int(
-            view.controls_map["lm_translator.initial_batch_size_patchouli"].value
-        )
-        new_config["lm_translator"]["initial_batch_size_lang"] = int(
-            view.controls_map["lm_translator.initial_batch_size_lang"].value
-        )
-        new_config["lm_translator"]["initial_batch_size_ftb"] = int(
-            view.controls_map["lm_translator.initial_batch_size_ftb"].value
-        )
-        new_config["lm_translator"]["initial_batch_size_kubejs"] = int(
-            view.controls_map["lm_translator.initial_batch_size_kubejs"].value
-        )
-        new_config["lm_translator"]["initial_batch_size_md"] = int(
-            view.controls_map["lm_translator.initial_batch_size_md"].value
-        )
-        new_config["lm_translator"]["min_batch_size"] = int(
-            view.controls_map["lm_translator.min_batch_size"].value
-        )
-        new_config["lm_translator"]["batch_shrink_factor"] = float(
-            view.controls_map["lm_translator.batch_shrink_factor"].value
-        )
-        if "lm_translator.rpm_cooldown_sec" in view.controls_map:
-            new_config["lm_translator"]["rpm_cooldown_sec"] = max(
-                0.0,
-                float(view.controls_map["lm_translator.rpm_cooldown_sec"].value or 0),
-            )
-        for path in (
-            "lm_translator.max_output_tokens",
-            "lm_translator.max_output_token_budget",
-            "lm_translator.max_input_token_budget",
-        ):
-            if path in view.controls_map:
-                key = path.rsplit(".", 1)[-1]
-                new_config["lm_translator"][key] = int(
-                    view.controls_map[path].value or 0
-                )
-        if "lm_translator.key_failure_cooldown_sec" in view.controls_map:
-            new_config["lm_translator"]["key_failure_cooldown_sec"] = max(
-                0.0,
-                float(
-                    view.controls_map["lm_translator.key_failure_cooldown_sec"].value
-                    or 0
-                ),
-            )
-        for key, kind, _label, _help in LM_EXTRA_FIELDS:
-            path = f"lm_translator.{key}"
-            if path not in view.controls_map:
+        for setting in editable_settings():
+            control = view.controls_map.get(setting.path)
+            if control is None:
                 continue
-            raw = view.controls_map[path].value
-            if kind == "bool":
-                new_config["lm_translator"][key] = bool(raw)
-            else:
-                # 留空 = 使用預設值
-                raw = str(raw).strip() if raw is not None else ""
-                if raw == "":
-                    new_config["lm_translator"][key] = get_default(path)
-                else:
-                    new_config["lm_translator"][key] = (
-                        int(raw) if kind == "int" else float(raw)
-                    )
-        new_config["lm_translator"]["patchouli"]["dir_names"] = [
-            line.strip()
-            for line in view.controls_map[
-                "lm_translator.patchouli.dir_names"
-            ].value.splitlines()
-            if line.strip()
-        ]
-        new_config["lm_translator"]["translator"]["skip_terms"] = [
-            line.strip()
-            for line in view.controls_map[
-                "lm_translator.translator.skip_terms"
-            ].value.splitlines()
-            if line.strip()
-        ]
-        new_config["lm_translator"]["translator"]["translatable_keywords"] = [
-            line.strip()
-            for line in view.controls_map[
-                "lm_translator.translator.translatable_keywords"
-            ].value.splitlines()
-            if line.strip()
-        ]
-        if "lm_translator.translator.short_text_skip_len" in view.controls_map:
-            raw = view.controls_map[
-                "lm_translator.translator.short_text_skip_len"
-            ].value
-            new_config["lm_translator"]["translator"]["short_text_skip_len"] = max(
-                0, int(raw or 0)
+            set_path(
+                new_config,
+                setting.path,
+                _from_control_value(setting, control.value),
             )
-        new_config["extractor"]["output_folder_names"] = {
-            "lang_extract": view.controls_map[
-                "extractor.output_folder_names.lang_extract"
-            ].value,
-            "book_extract": view.controls_map[
-                "extractor.output_folder_names.book_extract"
-            ].value,
-            "lang_preview": view.controls_map[
-                "extractor.output_folder_names.lang_preview"
-            ].value,
-            "book_preview": view.controls_map[
-                "extractor.output_folder_names.book_preview"
-            ].value,
-            "dual_extract": view.controls_map[
-                "extractor.output_folder_names.dual_extract"
-            ].value,
-            "dual_preview": view.controls_map[
-                "extractor.output_folder_names.dual_preview"
-            ].value,
-        }
-        new_config["extractor"]["skip_zh_cn_extract"] = bool(
-            view.controls_map["extractor.skip_zh_cn_extract"].value
-        )
         api_keys = [
             key_field.value.strip()
             for key_field in view.key_fields

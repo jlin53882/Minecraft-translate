@@ -10,6 +10,7 @@ import threading
 
 import flet as ft
 
+from app import config_store
 from app.services_impl.config_service import load_config_json
 from app.ui import design, kit
 from app.ui.design import C
@@ -19,6 +20,8 @@ from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from translation_tool.core.output_bundler import bundle_outputs_generator
 from translation_tool.utils.log_unit import log_debug
+
+OUTPUT_ZIP_NAME_PATH = "output_bundler.output_zip_name"
 
 
 class BundlerView(ft.Column):
@@ -98,7 +101,32 @@ class BundlerView(ft.Column):
         )
 
     def did_mount(self):
-        """頁面（重新）加入畫面時重讀設定，讓存檔後的輸出檔名提示不會是舊值。"""
+        """頁面加入畫面時：重讀設定，並訂閱存檔事件，讓輸出檔名提示即時跟著更新（#117）。"""
+        self._refresh_output_zip_hint()
+        self._unsubscribe_config = config_store.subscribe_paths(self._on_config_paths)
+
+    def will_unmount(self):
+        unsubscribe = getattr(self, "_unsubscribe_config", None)
+        self._unsubscribe_config = None
+        if unsubscribe is not None:
+            unsubscribe()
+
+    def _on_config_paths(self, changed_paths) -> None:
+        """設定存檔事件（可能在任何執行緒）：只排程，真正的更新在 page event loop 上做。"""
+        if OUTPUT_ZIP_NAME_PATH not in changed_paths:
+            return
+        run_task = getattr(self._page, "run_task", None)
+        if run_task is None:
+            return
+        try:
+            run_task(self._refresh_output_zip_hint_async)
+        except Exception:
+            logging.getLogger(__name__).debug("無法排程打包頁提示更新", exc_info=True)
+
+    async def _refresh_output_zip_hint_async(self) -> None:
+        self._refresh_output_zip_hint()
+
+    def _refresh_output_zip_hint(self) -> None:
         try:
             self._load_output_zip_from_config()
             self._on_root_dir_change(None)  # 依目前是否已填根目錄重算提示文字

@@ -302,7 +302,7 @@ class TestLoadConfigIntoViewBatchSizes:
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map["lm_translator.batch_shrink_factor"].value == 0.5
+        assert view.controls_map["lm_translator.batch_shrink_factor"].value == "0.5"
 
     def test_loads_batch_shrink_factor_custom_value(self):
         from app.views.config.config_actions import load_config_into_view
@@ -333,7 +333,7 @@ class TestLoadConfigIntoViewBatchSizes:
 
         load_config_into_view(view, cfg)
 
-        assert view.controls_map["lm_translator.batch_shrink_factor"].value == 0.3
+        assert view.controls_map["lm_translator.batch_shrink_factor"].value == "0.3"
 
 
 class TestLoadConfigIntoViewSkipTerms:
