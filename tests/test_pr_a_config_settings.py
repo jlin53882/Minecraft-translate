@@ -92,7 +92,9 @@ def test_config_save_accepts_aq_gemini_key_and_keeps_it():
     view.load_config = MagicMock()
     view._success_color = MagicMock(return_value="green")
     load_config_into_view(view, config)
-    view.key_fields = [SimpleNamespace(value="AQ.testKey_0123456789abcdefghijklmnopqrstuvwxyz")]
+    view.key_fields = [
+        SimpleNamespace(value="AQ.testKey_0123456789abcdefghijklmnopqrstuvwxyz")
+    ]
     saved = {}
 
     result = save_config_from_view(
