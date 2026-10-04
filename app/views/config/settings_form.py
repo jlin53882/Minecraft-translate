@@ -60,6 +60,7 @@ def make_control(setting: Setting) -> ft.Control:
             expand=True,
             text_size=13,
             helper=helper,
+            helper_max_lines=3,  # 說明含「套用時機」，單行會被截成「…」
         )
     if kind in ("int", "float"):
         return kit.field(
@@ -67,8 +68,9 @@ def make_control(setting: Setting) -> ft.Control:
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
             helper=helper,
+            helper_max_lines=3,
         )
-    return kit.field(label=setting.label, dense=True, helper=helper)
+    return kit.field(label=setting.label, dense=True, helper=helper, helper_max_lines=3)
 
 
 def build_controls(controls_map: dict[str, Any]) -> None:
