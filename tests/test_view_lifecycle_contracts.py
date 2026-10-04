@@ -781,3 +781,77 @@ def test_save_current_zh_writes_in_a_thread(tmp_path, monkeypatch):
     asyncio.run(scenario())
     assert seen["thread"] != seen["loop"]
     assert "譯" in target.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# pipeline：session 擁有的 watcher 一定會結束（步驟 worker 的 finally 設定 done）
+# ---------------------------------------------------------------------------
+
+
+class _LoopThreadPage:
+    """真的在另一條執行緒跑 event loop 的 page（run_task → run_coroutine_threadsafe）。"""
+
+    width = 1200
+    height = 800
+
+    def __init__(self):
+        self.overlay = []
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+        self._thread.start()
+        self.futures = []
+
+    def run_task(self, handler, *args):
+        future = asyncio.run_coroutine_threadsafe(handler(*args), self._loop)
+        self.futures.append(future)
+        return future
+
+    def update(self, *a, **k):
+        pass
+
+    def close(self):
+        # 先讓已排入的 _ui 工作都跑完，再停止並關閉 loop（避免 never-awaited／unclosed 警告）
+        asyncio.run_coroutine_threadsafe(asyncio.sleep(0.05), self._loop).result(
+            timeout=3
+        )
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=3)
+        self._loop.close()
+
+
+@pytest.mark.parametrize("failure", ["ok", "raises"])
+def test_pipeline_step_watcher_always_ends_with_the_step(monkeypatch, failure):
+    from app.views.pipeline import pipeline_view as pv
+
+    page = _LoopThreadPage()
+    try:
+        view = pv.PipelineView.__new__(pv.PipelineView)
+        view._page = page
+        view._cancel_event = threading.Event()
+        view._current_session = None
+        view._POLL_INTERVAL_SEC = 0.01
+        view.progress_panel = types.SimpleNamespace(
+            set_step_running=lambda *a: None,
+            add_log=lambda *a, **k: None,
+            finish_step=lambda *a, **k: None,
+            log_view=types.SimpleNamespace(add_many=lambda items: None),
+        )
+        view._update_progress = lambda *a: None
+        monkeypatch.setattr(pv, "TaskSession", _Session)
+        monkeypatch.setattr(pv, "tag_session", lambda s, *a, **k: s)
+
+        def service(session):
+            if failure == "raises":
+                raise RuntimeError("step exploded")
+            return None
+
+        ok = view._run_session_step(1, "測試步驟", service)
+
+        assert ok is (failure == "ok")
+        # 步驟結束後 watcher 必定已結束（沒有留下永遠不結束的輪詢 task）
+        assert page.futures, "步驟應該排入一個 watcher"
+        watcher = page.futures[0]
+        watcher.result(timeout=3)
+        assert watcher.done()
+    finally:
+        page.close()

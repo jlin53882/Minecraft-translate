@@ -20,6 +20,7 @@ app/views/cache_manager/
   ├─ cache_view_query.py        CacheQueryMixin          查詢：搜尋、結果顯示／分頁、單筆編輯
   ├─ cache_view_query_widgets.py CacheQueryWidgetsMixin  查詢頁（含兩個浮動歷史視窗）的 widgets 組裝
   ├─ cache_view_shard.py        CacheShardMixin          分片：清單、key 清單、分頁、dst 複製
+  ├─ shard_reader.py            分片檔摘要（key 數量／key 清單）以檔案簽名記憶；背景預熱，event loop 上只剩記憶命中
   ├─ cache_view_shard_detail.py CacheShardDetailMixin    分片詳情：SRC 預覽、DST 編輯
   ├─ cache_view_shard_widgets.py CacheShardWidgetsMixin  分片頁與主分頁版面的 widgets 組裝
   ├─ cache_view_history.py      CacheHistoryMixin        查詢／分片共用的歷史視窗與還原
@@ -62,6 +63,7 @@ CacheView（主入口）
 - 分頁：`_set_query_page` + `_on_page_first/prev/next/last/jump` + `_on_page_size_change`
 
 ### 分片區
+- **分片讀取的執行緒契約（#114）**：`_load_shard_rows` / `_load_shard_keys` 只查 `shard_reader` 的記憶（檔案簽名未變就不再解析 JSON）；`_fetch_overview`（載入總覽的背景執行緒）與 `run_cache_action` 的背景工作結束前呼叫 `_warm_shard_cache` 預熱（含歷史索引 `warm_history_index`）。`_load_shard_entry` 僅在記憶體快取找不到該筆時才 fallback 讀檔（LRU 只留最近 2 個分片）。歷史紀錄 `cache_history_store`：讀取以 `{key: events}` 索引記憶，append 就地更新；整份 json 鏡像由單一背景執行緒寫入（`history_flush` 可等待）。
 - `_load_shard_rows` → `_load_shard_keys(cache_type, filename)` → `_on_select_shard_key` → `_load_shard_entry` → `_render_shard_src_panel` / `_render_shard_dst_panel`
 - dst 編輯：`_on_shard_dst_apply` / `_on_shard_dst_revert` / `_on_shard_dst_copy` / `_on_shard_dst_restore_latest`
 - 動態高度計算：`_dynamic_*_height/width` 系列（`_on_page_resized` 觸發）

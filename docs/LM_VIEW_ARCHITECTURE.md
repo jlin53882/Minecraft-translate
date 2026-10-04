@@ -55,13 +55,15 @@ run_lm_translation_service()               [lm_service.py，worker thread]
 
 ## UI 輪詢（start_ui_timer / _poll_session）
 
-`start_ui_timer()` 以 `page.run_task(self._poll_session)` 在 **Flet event loop** 上執行輪詢 coroutine；worker thread 只寫 TaskSession，不直接碰 control。
+`start_ui_timer()` 經 `PollerHandle`（`app/ui/poller.py`）以 `page.run_task` 在 **Flet event loop** 上執行 `_poll_session(alive)` coroutine；worker thread 只寫 TaskSession，不直接碰 control。
+
+**Lifecycle（#114）**：輪詢由 View 的 `self._poller` 持有（保存 Future）。`will_unmount()`（換頁／關閉）呼叫 `_poller.stop()`——可重複呼叫，`alive()` 立刻變 False，輪詢不會再多跑一輪去碰已卸載的控制項；翻譯任務本身照常執行（`_ui_timer_running` 保留）。`did_mount()` 在任務仍被追蹤時重新啟動輪詢（`start()` 會先停止舊的，所以重複 mount 只剩一個輪詢；任務在卸載期間結束時，第一次同步就補上最終狀態與按鈕）。
 
 每 `_POLL_INTERVAL_SEC`（0.2 秒）`await asyncio.sleep(...)` 一次，`_sync_from_session()`：
 - `progress` → `progress_bar.value`，並由 `_update_stats` 更新進度 / 已用時間 / Key 統計卡
 - `logs` → `log_view.sync_entries(logs, update=False)`（LogView 內部管理 tail 截斷；最後統一 `page.update()`）
 - `status == "ERROR"` → 「任務發生錯誤」；`"DONE"` 且已要求取消 → 「已取消」；否則 → 「任務完成」
-- 終止條件：DONE / ERROR（恢復按鈕），或 `page.update()` 拋 RuntimeError（頁面已關閉；背景任務照常完成）
+- 終止條件：DONE / ERROR（恢復按鈕）、`page.update()` 拋 RuntimeError（頁面已關閉；背景任務照常完成），或輪詢被 `stop()`（unmount）
 
 ## 取消
 

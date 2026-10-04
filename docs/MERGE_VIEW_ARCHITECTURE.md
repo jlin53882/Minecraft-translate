@@ -88,7 +88,9 @@ service 結束時以 session.set_summary() 寫入統計摘要
 
 ## Poller 同步（_start_ui_poller）
 
-`poll()` 執行緒每 0.1 秒透過 `page.run_task()` 排入 `_sync_ui`（在 UI thread 讀取 `session.snapshot()`）：
+輪詢在 **Flet event loop** 上執行：`_start_ui_poller()` 經 `self._poller`（`PollerHandle`）啟動 `_poll_merge(alive)`，每 0.1 秒 `await asyncio.sleep` 並呼叫 `_sync_ui_once()`（讀取 `session.snapshot()`）；不再另開 `time.sleep` 的 poll 執行緒。合併的背景工作 `_run_merge` 若丟出例外會把 session 轉為 ERROR（否則輪詢等不到結束）。
+
+**Lifecycle（#114）**：`will_unmount()` 停止輪詢（idempotent）；`did_mount()` 在合併仍被追蹤（`_merge_tracking` 且 `_ui_stop` 未設定）時接續輪詢，合併於卸載期間結束時補上最終狀態與摘要（只顯示一次）。每次 `_sync_ui_once()` 的內容：
 - `progress` → `progress_bar.value`
 - `logs` → `log_view.sync_from_session(session)`（LogView 管理 append + truncate + scroll）
 - 狀態：RUNNING→執行中 / DONE→任務完成 / ERROR→任務發生錯誤
@@ -99,7 +101,7 @@ service 結束時以 session.set_summary() 寫入統計摘要
 - 以 `page.show_dialog()` 顯示對話框：成功/失敗數、輸出統計（`lang_output`、`assets`、待翻譯資料夾、整理資料夾、`patchouli_output`、`other_output`、`errordata_output`，數量為 0 的不列）、失敗項目詳細錯誤（截斷 80 字）；按鈕為「開啟輸出資料夾」與「關閉」（關閉後進度與狀態重置為尚未開始）
 - 待翻譯與整理資料夾名稱取自 `lang_merger.pending_folder_name` / `lang_merger.pending_organized_folder_name`
 
-終止：`status` 為 DONE 或 ERROR 時復原 UI（`start_button`/`zip_list_view` enabled）並設定 `_ui_stop` 停止輪詢；`_sync_ui` 內若 `_ui_stop` 已設定則直接略過，避免摘要重複彈出。
+終止：`status` 為 DONE 或 ERROR 時復原 UI（`start_button`/`zip_list_view` enabled）並設定 `_ui_stop` 停止輪詢；`_sync_ui_once` 內若 `_ui_stop` 已設定則直接略過，避免摘要重複彈出。「開啟輸出資料夾」走 `open_output_folder`（不等待外部程式）。
 
 ## MergeView 與 Session
 

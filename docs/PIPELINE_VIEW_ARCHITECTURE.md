@@ -72,6 +72,7 @@ PipelineView（`app/views/pipeline/pipeline_view.py`）是**翻譯工作台**：
   → _ui(_end_run)：恢復按鈕
 ```
 
+- **步驟 watcher 的 lifecycle**：`_watch_session` 由該步驟的 worker 擁有，worker 的 `finally` 一定設定 `done`，watcher 在最後一次同步後結束（服務丟例外也一樣；有行為測試）。
 - **背景 worker 不直接修改 Flet control**，也不呼叫 `page.update()`。所有 UI 更新都經 `_ui(fn)`（`page.run_task` 包一層 coroutine）或 `_watch_session` 在 event loop 上執行。
 - **`TaskSession` 是 worker 與 UI 之間唯一的狀態邊界**：worker 只呼叫 `add_log` / `set_progress` / `set_summary` / `set_error` / `finish`；UI 只讀 `snapshot()`。
 - **`_watch_session`**（coroutine）：每 `_POLL_INTERVAL_SEC`（0.2 秒）`await asyncio.sleep(...)`，依 log `seq` 只取新日誌、批次 `log_view.add_many()`，並更新進度；`done` 事件設定後再同步一次就結束。
@@ -180,3 +181,9 @@ core generator 與 service 以 dict 回報進度，欄位皆為選用：
 - `app/views/pipeline/pipeline_progress.py`：`PipelineStepChip`、`PipelineProgressPanel`（步驟標籤與進度面板）。
 - `app/views/pipeline/pipeline_widgets.py`：`PipelineWidgetsMixin`，控制項與版面組裝（`_build_ui`、各 `_build_*` 卡片、`_step_row`）。
 - `app/views/pipeline/pipeline_*_dialog.py`：五個設定對話框（translate、bundle、extract、merge、one_click）。每個對話框用一個 `ctx`（`types.SimpleNamespace`）共享狀態與控制項，handler 是以 `ctx` 為第一個參數的模組層級函式（例如 `_extract_start_extraction`），畫面建構拆成 `_<對話框>_build_*` 函式；測試以 `open_*_dialog` 公開入口驅動（`tests/test_pipeline_*_dialog_behavior.py`）。
+
+## 提取對話框的預覽（pipeline_extract_dialog）執行緒契約（#114）
+
+「預覽結果」按鈕（sync handler）只建立對話框、`threading.Event`（`cancel_event`）與背景 worker；**JAR 探索（`find_jar_files`，會走訪資料夾）與預覽掃描都在 worker 內**，初始畫面顯示「正在搜尋 JAR...」，JAR 總數由 worker 寫入 `PreviewState.total`。event loop 上的 `_extract_preview_poll` 只讀 `preview_state`。
+
+按「取消」→ `_extract_close_preview_dialog`：設定 `cancel_event`、先送 `open=False` 再移出 overlay；worker 在探索完成後與每筆更新時檢查旗標並停止（結果丟棄）；輪詢在取消後立即結束、不再改動已關閉的對話框。連續開啟／取消不會累積 overlay 或輪詢 task。其餘設定對話框（translate／bundle／extract／merge）關閉時同樣走 `close_overlay_dialog`（`app/ui/dialogs.py`）；「瀏覽」按鈕經 `open_output_folder`（不等待外部程式）。

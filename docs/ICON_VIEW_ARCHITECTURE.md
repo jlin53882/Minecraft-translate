@@ -39,12 +39,14 @@ translation_tool/core/
 ## 主要流程
 
 ```
-[載入] _on_load_clicked()
-  ├─ _detect_source_mode()
-  ├─ _try_use_cached_entries(mode)：L1（_entries_cache，source_root + mode 相符）→ L2（僅 jar_directory）→ 命中即 _rebuild_mods + _render_mod_list
-  └─ 未命中 → _begin_scan(mode)
-       ├─ 有 page.run_task：asyncio.to_thread(_scan_entries) 在背景執行緒掃描，完成後 _finish_load()
-       └─ 否則同步 _scan_entries → _finish_load()
+[載入] _on_load_clicked()（sync handler：只做 UI 準備，然後 page.run_task(_load_async)）
+  └─ _load_async(generation)：每個阻塞步驟都在 asyncio.to_thread，await 之後檢查世代（卸載就丟棄）
+       ├─ _detect_source_mode()（glob / rglob）
+       ├─ _lookup_cached_entries(mode)：L1（_entries_cache，source_root + mode 相符）→ L2（僅 jar_directory，讀磁碟 JSON）→ 命中即 _apply_cached_entries（_rebuild_mods + _render_mod_list，在 event loop）
+       ├─ 未命中 → _count_scan_steps(mode)（glob / rglob）→ _show_scan_started（進度條，在 event loop）
+       └─ asyncio.to_thread(_scan_entries) → _finish_load()
+  無 page.run_task（測試替身）時維持同步流程（_try_use_cached_entries / _begin_scan）
+  Lifecycle：will_unmount() 遞增 _load_generation／_render_generation 並取消 debounce——進行中的載入結果丟棄、旗標復位；did_mount() 只同步載入按鈕狀態
   _scan_entries(mode)
     ├─ extracted_folder → _load_entries()
     │      ├─ 掃 source_root 的 en_us.json（modid 取自路徑中 assets 的下一段）
@@ -62,8 +64,9 @@ translation_tool/core/
   └─ 背景執行緒只記下最新值，_refresh_progress 節流（約 0.2 秒）後經 page.run_task 在 event loop 上套用到 progress_bar / progress_text
 
 [校對] _open_mod_detail(modid) → 第二層
-  ├─ 讀 zh_tw：review_root/<modid>/lang/zh_tw.json，不存在則 rglob 補找
-  ├─ _render_current_page()
+  ├─ 讀 zh_tw：背景執行緒 _find_zh_file（review_root/<modid>/lang/zh_tw.json，不存在則 rglob 補找），回到 event loop 後才套用（期間若返回／換頁／卸載則丟棄）
+  ├─ _render_current_page()：頁碼立即更新；每列圖示準備（prepare_row_icon：解析圖示、讀 JAR、產生預覽圖、upscale）在背景執行緒，event loop 上只建構 LangItemRow（prepared_icon），連續渲染只套用最後一次
+  ├─ 儲存 zh_tw.json：_save_current_zh 在背景執行緒寫檔（_write_zh_file），_finish_save 回 event loop 顯示結果
   │    ├─ 依 _detail_filtered_entries（搜尋）或 mods[current_modid] 分頁（每頁 page_size）
   │    └─ 每筆 → LangItemRow(lang_key, en_text, zh_text, assets_root, preview_root, on_value_changed, icon_path)
   ├─ 搜尋：_on_mod_search_change / _on_detail_search_change → Debouncer（150ms）→ _do_mod_search / _do_detail_search

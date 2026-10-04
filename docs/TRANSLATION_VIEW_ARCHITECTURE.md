@@ -53,13 +53,15 @@ TranslationView（ft.Column）
        │    └→ run_ftb_translation_service(in_dir, session, output_dir=...,
        │         dry_run, step_export/clean/translate/inject, write_new_cache)
        └─ view._start_ui_timer()        （啟用 cancel_button）
-            └→ start_ui_timer(view) → page.run_task(_poll_session)
+            └→ start_ui_timer(view) → view._poller.start(page, _poll_session)
                  每 _POLL_INTERVAL_SEC（0.2 秒）_sync_from_session：
                  ├─ progress → progress.value
                  ├─ logs → log_view.sync_entries(logs, update=False)
                  └─ status DONE/ERROR → _set_status（任務完成／已取消／任務發生錯誤）
                       + 停止輪詢 + 停用 cancel_button
 ```
+**Lifecycle（#114）**：輪詢由 `view._poller`（`PollerHandle`）持有；`TranslationView.will_unmount()` → `stop_ui_timer`（idempotent，輪詢立刻停止、不再碰控制項，任務照常執行），`did_mount()` → `resume_ui_timer`（任務仍被追蹤才重新啟動；重複 mount 不累積；卸載期間任務已結束則補上最終狀態）。
+
 三個 pipeline 皆同一模式（FTB / KubeJS / MD），差異僅在 service 函式與參數（MD 多 `lang_mode`，且以關鍵字 `input_dir=` 傳入）。
 
 **取消**：`cancel_button` → `view._on_cancel()` → `session.request_cancel()`，狀態晶片顯示「正在取消…」；實際在批次之間或等待 API 限流時停止。
