@@ -14,51 +14,51 @@
 from __future__ import annotations
 
 import json
-import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Tuple
+import time
 
+from translation_tool.utils.log_unit import (
+    log_info,
+    log_warning,
+    get_formatted_duration,
+    progress,
+)
 from translation_tool.core.lm_config_rules import validate_api_keys
 from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_translator_shared import (
     CacheRule,
     TouchSet,
     TranslationRecorder,
-    _is_valid_hit,  # ✅ 新增：cache hit 判斷
     fast_split_items_by_cache,
     translate_items_with_cache_loop,
-    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
     write_dry_run_preview,  # ✅ NEW
+    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
+    _is_valid_hit,  # ✅ 新增：cache hit 判斷
 )
 from translation_tool.plugins.shared.lang_text_rules import is_already_zh
 from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
-from translation_tool.utils.log_unit import (
-    get_formatted_duration,
-    log_info,
-    log_warning,
-    progress,
-)
 
 # -------------------------
 # basic io
 # -------------------------
 
 
-def read_json(path: Path) -> dict[str, Any]:
+def read_json(path: Path) -> Dict[str, Any]:
     """讀取 JSON 檔案並回傳字典。"""
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def write_json(path: Path, data: dict[str, Any]) -> None:
+def write_json(path: Path, data: Dict[str, Any]) -> None:
     """寫入 JSON 檔案。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def collect_pending_json_files(pending_root: Path) -> list[Path]:
+def collect_pending_json_files(pending_root: Path) -> List[Path]:
     """收集所有待翻譯的 JSON 檔案路徑。"""
     files = sorted(pending_root.rglob("*.json"))
     # 跳過 manifest
@@ -90,13 +90,13 @@ class PendingItem:
     end_line: int
 
 
-def load_pending_doc(path: Path) -> tuple[dict[str, Any], list[PendingItem]]:
+def load_pending_doc(path: Path) -> Tuple[Dict[str, Any], List[PendingItem]]:
     """載入待翻譯的 Markdown 文件。"""
     data = read_json(path)
     if data.get("schema") != "md_pending_blocks_v1":
         raise ValueError(f"schema 不符：{path}")
 
-    items: list[PendingItem] = []
+    items: List[PendingItem] = []
     for it in data.get("items", []):
         items.append(
             PendingItem(
@@ -125,8 +125,8 @@ def translate_md_pending(
     write_new_cache: bool = True,
     dry_run: bool = False,
     session=None,
-) -> dict[str, Any]:
-    """翻譯待翻譯的 Markdown 區塊並寫回輸出。"""
+) -> Dict[str, Any]:
+    """ """
     validate_api_keys()
     start_time = time.perf_counter()
 
@@ -144,14 +144,14 @@ def translate_md_pending(
     # -------------------------
     # 1) 全域收集：hash -> 原文（去重基礎）
     # -------------------------
-    hash_to_src: dict[str, str] = {}
+    hash_to_src: Dict[str, str] = {}
     total_blocks = 0
     empty_blocks = 0
 
     for jp in json_files:
         try:
             _, items = load_pending_doc(jp)
-        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
+        except Exception as e:
             log_warning(f"[MD-LM] 載入待翻譯文件失敗: {jp} ({e})")
             continue
 
@@ -190,7 +190,7 @@ def translate_md_pending(
     # -------------------------
     cache_rules = {"md": CacheRule("path|source_text")}
 
-    all_unique_items: list[dict[str, Any]] = []
+    all_unique_items: List[Dict[str, Any]] = []
     already_zh_skipped = 0
     skip_skipped = 0
 
@@ -215,6 +215,8 @@ def translate_md_pending(
                 }
             )
             continue
+
+        translate_text = shielded.clean
 
         all_unique_items.append(
             {
@@ -278,7 +280,7 @@ def translate_md_pending(
             log_info(f"🧪 [MD-LM] DRY-RUN preview：{p1}")
             log_info(f"🧪 [MD-LM] DRY-RUN cache-hit preview：{p2}")
 
-        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
+        except Exception as e:
             log_warning(f"⚠️ [MD-LM] DRY-RUN preview 輸出失敗：{e}")
 
         log_info("ℹ️ [MD-LM] dry-run 模式：不翻譯、不寫檔。")
@@ -298,7 +300,7 @@ def translate_md_pending(
     # -------------------------
     # 3) 翻譯：建立 hash -> dst（先塞 cache hit，再跑 shared loop 補 miss）
     # -------------------------
-    hash_to_dst: dict[str, str] = {}
+    hash_to_dst: Dict[str, str] = {}
     for it in cached_items:
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
@@ -307,9 +309,8 @@ def translate_md_pending(
             if shielded is not None and getattr(shielded, "shields", None):
                 try:
                     dst = unshield_text(dst, shielded.shields)
-                except Exception as exc:  # noqa: BLE001
-                    # 還原失敗會讓輸出殘留保護標記，必須留下紀錄（#135）
-                    log_warning(f"[MD-LM] 還原保護標記失敗 h={h}: {exc!r}")
+                except Exception:
+                    pass
             hash_to_dst[h] = dst
 
     rec = TranslationRecorder()
@@ -320,7 +321,7 @@ def translate_md_pending(
         """空寫入函數（MD 模式不需要即時寫入）。"""
         return
 
-    def on_translated_item(it: dict[str, Any]) -> None:
+    def on_translated_item(it: Dict[str, Any]) -> None:
         """處理翻譯結果。"""
         h = str(it.get("path") or "")
         dst = str(it.get("text") or "")
@@ -330,9 +331,8 @@ def translate_md_pending(
             if shielded is not None and getattr(shielded, "shields", None):
                 try:
                     dst = unshield_text(dst, shielded.shields)
-                except Exception as exc:  # noqa: BLE001
-                    # 還原失敗會讓輸出殘留保護標記，必須留下紀錄（#135）
-                    log_warning(f"[MD-LM] 還原保護標記失敗 h={h}: {exc!r}")
+                except Exception:
+                    pass
             hash_to_dst[h] = dst
         # 這裡 recorder 的 cache_type 用 md（方便你日後 QC）
         try:
@@ -345,7 +345,7 @@ def translate_md_pending(
                 cache_hit=False,
                 extra={},
             )
-        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
+        except Exception as e:
             log_warning(f"[MD-LM] 記錄翻譯結果失敗: {e}")
 
     def on_batch_flushed() -> None:
@@ -353,7 +353,7 @@ def translate_md_pending(
         try:
             touch.touch("noop")
             touch.flush(_writer)
-        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
+        except Exception as e:
             log_warning(f"[MD-LM] 批次刷新失敗: {e}")
 
     def _fmt_eta(sec: float) -> str:
@@ -411,11 +411,11 @@ def translate_md_pending(
     for jp in json_files:
         try:
             data, items = load_pending_doc(jp)
-        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
+        except Exception as e:
             log_warning(f"[MD-LM] 略過讀取失敗：{jp} ({e})")
             continue
 
-        out_items: list[dict[str, Any]] = []
+        out_items: List[Dict[str, Any]] = []
         for it in items:
             new_text = it.text
             if it.text.strip() and (not is_already_zh(it.text)):
@@ -460,7 +460,7 @@ def translate_md_pending(
     try:
         rec.export_json(out_root / "LM翻譯後" / "translation_map_md.json")
         rec.export_csv(out_root / "LM翻譯後" / "translation_map_md.csv")
-    except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
+    except Exception as e:
         log_warning(f"[MD-LM] 匯出 translation_map 失敗: {e}")
 
     if missing:

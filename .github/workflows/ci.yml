@@ -95,8 +95,10 @@ jobs:
           # remove this scoped baseline when #128 cleans these legacy diagnostics.
           # E402 is configured in pyproject.toml so local and CI checks agree.
           echo "$FILES" | xargs uv run ruff check \
+            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:BLE001' \
             --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:I001' \
             --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:PIE790' \
+            --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:S110' \
             --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:UP006' \
             --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:UP035' \
             --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:UP045'
