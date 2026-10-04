@@ -692,21 +692,34 @@ class PipelineView(ft.Column):
         )
 
     def _on_one_click_execute(self, config: dict):
+        prepared = self._prepare_one_click(config)
+        if prepared is None:
+            return
+        cfg, mode, lang_codes, merge_options = prepared
+
+        self._show_progress_panel()
+        self._begin_run()
+
+        steps = self._one_click_steps(config, cfg, mode, lang_codes, merge_options)
+        self._start_one_click_worker(steps)
+
+    def _prepare_one_click(self, config: dict):
+        """檢查一鍵製作的輸入；通過時回傳 (cfg, mode, lang_codes, merge_options)，否則顯示提示並回傳 None。"""
         input_dir = (self.input_path_text.value or "").strip()
         output_dir = (self.output_path_text.value or "").strip()
 
         if not input_dir or not os.path.isdir(input_dir):
             show_snack(self._page, "❌ Mod 來源不存在或未選擇")
-            return
+            return None
         if not output_dir or not os.path.isdir(output_dir):
             show_snack(self._page, "❌ 輸出目錄不存在或未選擇")
-            return
+            return None
 
         mode = config.get("mode", "lang")
         lang_codes = config.get("lang_codes", [])
         if not lang_codes:
             show_snack(self._page, "⚠️ 請至少勾選一個語系代碼")
-            return
+            return None
 
         cfg = PipelineConfig(input_dir, output_dir)
         merge_options = {
@@ -716,9 +729,10 @@ class PipelineView(ft.Column):
             "patchouli_threshold": config.get("patchouli_threshold", 0.5),
             "zh_en_threshold": config.get("zh_en_threshold", 2),
         }
+        return cfg, mode, lang_codes, merge_options
 
-        self._show_progress_panel()
-        self._begin_run()
+    def _one_click_steps(self, config: dict, cfg, mode, lang_codes, merge_options):
+        """一鍵製作的四個步驟：抽取、語系比對、翻譯、打包。"""
 
         def extract(session):
             if mode in ("lang", "dual"):
@@ -802,6 +816,10 @@ class PipelineView(ft.Column):
             (3, "啟動翻譯", translate),
             (4, "打包資源", bundle),
         ]
+        return steps
+
+    def _start_one_click_worker(self, steps) -> None:
+        """在背景執行緒依序執行步驟，結束後恢復按鈕狀態。"""
 
         def worker():
             success = False

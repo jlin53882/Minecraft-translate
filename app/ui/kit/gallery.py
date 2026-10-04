@@ -25,6 +25,43 @@ def _block(title: str, *controls: ft.Control) -> ft.Control:
 
 def build_gallery() -> ft.Control:
     """組出展示內容（不依賴 Page，方便測試）。"""
+    buttons, chips = _gallery_buttons_and_chips()
+    stats = _gallery_stats()
+    controls_row = _gallery_controls_row()
+    bars, pager, states = _gallery_bars_pager_states()
+    return ft.Column(
+        [
+            kit.page_header(
+                "UI kit 元件",
+                "新設計的共用元件；顏色全部來自設計系統，會跟著深淺色主題切換",
+                icon=ft.Icons.WIDGETS_OUTLINED,
+                tone="em",
+                actions=[
+                    kit.button("次要動作", "secondary", icon=ft.Icons.DOWNLOAD),
+                    kit.button("主要動作", "primary", icon=ft.Icons.PLAY_ARROW),
+                ],
+            ),
+            stats,
+            _block("按鈕與標籤", buttons, chips),
+            _block("開關列、分段切換、環形進度", controls_row),
+            ft.Row(
+                [
+                    _block("進度條", bars),
+                    kit.section_card("分頁器（表格底部）", pager, flush=True, expand=1),
+                ],
+                spacing=14,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            ),
+            _block("空狀態 · 載入中 · 錯誤", states),
+        ],
+        spacing=16,
+        scroll=ft.ScrollMode.AUTO,
+        expand=True,
+    )
+
+
+def _gallery_buttons_and_chips():
+    """按鈕與標籤展示。"""
     buttons = ft.Row(
         [
             kit.button("主要動作", "primary", icon=ft.Icons.PLAY_ARROW),
@@ -57,6 +94,11 @@ def build_gallery() -> ft.Control:
         spacing=8,
         run_spacing=8,
     )
+    return buttons, chips
+
+
+def _gallery_stats():
+    """統計卡展示。"""
     stats = ft.Row(
         [
             kit.stat_card(
@@ -94,6 +136,11 @@ def build_gallery() -> ft.Control:
         ],
         spacing=14,
     )
+    return stats
+
+
+def _gallery_controls_row():
+    """輸入控制項展示。"""
     controls_row = ft.Row(
         [
             ft.Container(
@@ -145,6 +192,11 @@ def build_gallery() -> ft.Control:
         spacing=40,
         vertical_alignment=ft.CrossAxisAlignment.START,
     )
+    return controls_row
+
+
+def _gallery_bars_pager_states():
+    """進度條、分頁與狀態展示。"""
     bars = ft.Column(
         [
             kit.progress_bar(0.72, "em", height=8),
@@ -177,35 +229,7 @@ def build_gallery() -> ft.Control:
             ),
         ],
     )
-    return ft.Column(
-        [
-            kit.page_header(
-                "UI kit 元件",
-                "新設計的共用元件；顏色全部來自設計系統，會跟著深淺色主題切換",
-                icon=ft.Icons.WIDGETS_OUTLINED,
-                tone="em",
-                actions=[
-                    kit.button("次要動作", "secondary", icon=ft.Icons.DOWNLOAD),
-                    kit.button("主要動作", "primary", icon=ft.Icons.PLAY_ARROW),
-                ],
-            ),
-            stats,
-            _block("按鈕與標籤", buttons, chips),
-            _block("開關列、分段切換、環形進度", controls_row),
-            ft.Row(
-                [
-                    _block("進度條", bars),
-                    kit.section_card("分頁器（表格底部）", pager, flush=True, expand=1),
-                ],
-                spacing=14,
-                vertical_alignment=ft.CrossAxisAlignment.START,
-            ),
-            _block("空狀態 · 載入中 · 錯誤", states),
-        ],
-        spacing=16,
-        scroll=ft.ScrollMode.AUTO,
-        expand=True,
-    )
+    return bars, pager, states
 
 
 def main(page: ft.Page) -> None:

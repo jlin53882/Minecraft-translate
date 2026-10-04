@@ -422,6 +422,42 @@ def _icon_cache_file(
     )
 
 
+def _store_icon(
+    zf: zipfile.ZipFile,
+    member: str,
+    icon_cache_root: Path,
+    modid: str,
+    jar_path: Path,
+    key: str,
+    budget: ZipReadBudget,
+) -> Path:
+    """讀出 JAR 內的圖示檔並寫入圖示快取，回傳快取檔路徑。"""
+    icon_data = read_limited(zf, member, MAX_ICON_BYTES, budget=budget)
+    icon_cache_root.mkdir(parents=True, exist_ok=True)
+    out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
+    out_path.write_bytes(icon_data)
+    return out_path
+
+
+def _neoforge_logo_member(
+    zf: zipfile.ZipFile, names: set[str], budget: ZipReadBudget
+) -> str | None:
+    """從 NeoForge 的 neoforge.mods.toml 取得 logoFile 在 JAR 內的路徑（找不到回傳 None）。"""
+    neoforge_toml = "META-INF/neoforge.mods.toml"
+    if neoforge_toml not in names:
+        return None
+    try:
+        toml_content = read_limited(zf, neoforge_toml, budget=budget).decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if not toml_content:
+        return None
+    logo_match = re.search(r'logoFile\s*=\s*"([^"]+\.png)"', toml_content)
+    if logo_match and logo_match.group(1) in names:
+        return logo_match.group(1)
+    return None
+
+
 def _extract_jar_icon(
     jar_path: Path, modid: str, icon_cache_root: Path, key: str
 ) -> Path | None:
@@ -453,10 +489,9 @@ def _extract_jar_icon(
             )
             if result:
                 tex_val, png_path = result
-                icon_data = read_limited(zf, png_path, MAX_ICON_BYTES, budget=budget)
-                icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
-                out_path.write_bytes(icon_data)
+                out_path = _store_icon(
+                    zf, png_path, icon_cache_root, modid, jar_path, key, budget
+                )
                 log_info(
                     f"[IconPreview] Model JSON icon: {modid} → {png_path} (tex={tex_val})"
                 )
@@ -465,10 +500,9 @@ def _extract_jar_icon(
             # ===== Fallback: assets/<modid>/icon.png（Fabric 標準）=====
             fabric_icon = f"assets/{modid}/icon.png"
             if fabric_icon in names:
-                icon_data = read_limited(zf, fabric_icon, MAX_ICON_BYTES, budget=budget)
-                icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
-                out_path.write_bytes(icon_data)
+                out_path = _store_icon(
+                    zf, fabric_icon, icon_cache_root, modid, jar_path, key, budget
+                )
                 log_info(f"[IconPreview] 提取 Fabric icon.png: {modid}")
                 return out_path
 
@@ -478,12 +512,9 @@ def _extract_jar_icon(
             )
             texture_files = sorted(n for n in names if textures_pattern.match(n))
             if texture_files:
-                icon_data = read_limited(
-                    zf, texture_files[0], MAX_ICON_BYTES, budget=budget
+                out_path = _store_icon(
+                    zf, texture_files[0], icon_cache_root, modid, jar_path, key, budget
                 )
-                icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
-                out_path.write_bytes(icon_data)
                 log_info(
                     f"[IconPreview] 提取 Fabric texture icon: {modid} → {texture_files[0]}"
                 )
@@ -492,44 +523,20 @@ def _extract_jar_icon(
             # ===== Fallback: assets/<modid>/textures/logo.png =====
             logo_texture = f"assets/{modid}/textures/logo.png"
             if logo_texture in names:
-                icon_data = read_limited(
-                    zf, logo_texture, MAX_ICON_BYTES, budget=budget
+                out_path = _store_icon(
+                    zf, logo_texture, icon_cache_root, modid, jar_path, key, budget
                 )
-                icon_cache_root.mkdir(parents=True, exist_ok=True)
-                out_path = _icon_cache_file(icon_cache_root, modid, jar_path, key)
-                out_path.write_bytes(icon_data)
                 log_info(f"[IconPreview] 提取 logo.png: {modid}")
                 return out_path
 
             # ===== Fallback: NeoForge logoFile =====
-            neoforge_toml = "META-INF/neoforge.mods.toml"
-            if neoforge_toml in names:
-                try:
-                    toml_content = read_limited(
-                        zf, neoforge_toml, budget=budget
-                    ).decode("utf-8")
-                except UnicodeDecodeError:
-                    toml_content = None
-
-                if toml_content:
-                    logo_match = re.search(
-                        r'logoFile\s*=\s*"([^"]+\.png)"', toml_content
-                    )
-                    if logo_match:
-                        logo_path = logo_match.group(1)
-                        if logo_path in names:
-                            icon_data = read_limited(
-                                zf, logo_path, MAX_ICON_BYTES, budget=budget
-                            )
-                            icon_cache_root.mkdir(parents=True, exist_ok=True)
-                            out_path = _icon_cache_file(
-                                icon_cache_root, modid, jar_path, key
-                            )
-                            out_path.write_bytes(icon_data)
-                            log_info(
-                                f"[IconPreview] 提取 NeoForge logoFile: {modid} → {logo_path}"
-                            )
-                            return out_path
+            logo_path = _neoforge_logo_member(zf, names, budget)
+            if logo_path:
+                out_path = _store_icon(
+                    zf, logo_path, icon_cache_root, modid, jar_path, key, budget
+                )
+                log_info(f"[IconPreview] 提取 NeoForge logoFile: {modid} → {logo_path}")
+                return out_path
 
     except Exception as ex:  # noqa: BLE001
         log_warning(
@@ -542,6 +549,55 @@ def _extract_jar_icon(
 # ==================================================
 # 批次 Icon 提取（每個 JAR 只開一次 ZIP）
 # ==================================================
+
+
+def _apply_icon_index(jar_to_entries: dict[str, list], icon_index, progress_cb) -> int:
+    """索引存在：直接用索引套用 icon，完全不做 JAR I/O。回傳處理的 JAR 數量。"""
+    applied = 0
+    for entries in jar_to_entries.values():
+        for e in entries:
+            if not (hasattr(e, "modid") and hasattr(e, "key")):
+                continue
+            key = e.key
+            if key in icon_index:
+                e.icon_path = icon_index[key]
+                applied += 1
+    if progress_cb:
+        progress_cb(len(jar_to_entries), len(jar_to_entries))
+    log_info(f"[IconPreview] 索引命中：{applied} 個 entry 直接套用 icon")
+    return len(jar_to_entries)
+
+
+def _run_jar_workers(jar_to_entries: dict[str, list], process_jar, progress_cb) -> int:
+    """以 ThreadPoolExecutor 並行處理每個 JAR，並把結果套用到對應的 entry。回傳已處理的 JAR 數量。"""
+    processed = 0
+    total = len(jar_to_entries)
+    config_workers = (
+        load_config().get("translator", {}).get("parallel_execution_workers", 4)
+    )
+    max_workers = max(1, config_workers) if isinstance(config_workers, int) else 4
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(process_jar, jar_name): jar_name
+            for jar_name in jar_to_entries
+        }
+        for future in as_completed(futures):
+            jar_name = futures[future]
+            try:
+                entry_icon_paths = future.result()
+                for e in jar_to_entries.get(jar_name, []):
+                    if hasattr(e, "key") and e.key in entry_icon_paths:
+                        uri = entry_icon_paths[e.key]
+                        if uri:
+                            e.icon_path = uri
+            except Exception:  # noqa: BLE001, S110
+                pass
+            processed += 1
+            if progress_cb:
+                progress_cb(processed, total)
+                if processed % 50 == 0:
+                    log_info(f"[IconPreview] 處理進度：{processed}/{total} JARs")
+    return processed
 
 
 def _batch_extract_jar_icons(
@@ -580,20 +636,7 @@ def _batch_extract_jar_icons(
         pass
 
     if icon_index is not None:
-        # 索引存在：直接用索引，完全不做 JAR I/O
-        applied = 0
-        for jar_name, entries in jar_to_entries.items():
-            for e in entries:
-                if not (hasattr(e, "modid") and hasattr(e, "key")):
-                    continue
-                key = e.key
-                if key in icon_index:
-                    e.icon_path = icon_index[key]
-                    applied += 1
-        if progress_cb:
-            progress_cb(len(jar_to_entries), len(jar_to_entries))
-        log_info(f"[IconPreview] 索引命中：{applied} 個 entry 直接套用 icon")
-        return len(jar_to_entries)
+        return _apply_icon_index(jar_to_entries, icon_index, progress_cb)
 
     # ===== Phase 2: 無索引 → ThreadPoolExecutor 即時處理 =====
     log_info(
@@ -643,33 +686,7 @@ def _batch_extract_jar_icons(
             pass
         return result_map
 
-    processed = 0
-    total = len(jar_to_entries)
-    config_workers = (
-        load_config().get("translator", {}).get("parallel_execution_workers", 4)
-    )
-    max_workers = max(1, config_workers) if isinstance(config_workers, int) else 4
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(_process_jar, jar_name): jar_name
-            for jar_name in jar_to_entries
-        }
-        for future in as_completed(futures):
-            jar_name = futures[future]
-            try:
-                entry_icon_paths = future.result()
-                for e in jar_to_entries.get(jar_name, []):
-                    if hasattr(e, "key") and e.key in entry_icon_paths:
-                        uri = entry_icon_paths[e.key]
-                        if uri:
-                            e.icon_path = uri
-            except Exception:  # noqa: BLE001, S110
-                pass
-            processed += 1
-            if progress_cb:
-                progress_cb(processed, total)
-                if processed % 50 == 0:
-                    log_info(f"[IconPreview] 處理進度：{processed}/{total} JARs")
+    processed = _run_jar_workers(jar_to_entries, _process_jar, progress_cb)
 
     log_info(f"[IconPreview] ThreadPoolExecutor 完成：{processed} 個 JAR")
     return processed
@@ -833,6 +850,59 @@ class IconPreviewView(ft.Column):
             page: Flet Page 物件
         """
         super().__init__(expand=True, spacing=8)
+        self._init_icon_preview_state(page)
+        self._init_icon_preview_paging_controls()
+        self._init_icon_preview_source_controls()
+
+        setup_card = kit.section_card(
+            "資料來源",
+            ft.Column(
+                [
+                    ft.Row(
+                        [self.pick_source_btn, self.source_label],
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row(
+                        [self.pick_review_btn, self.review_label],
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row([self.load_btn], spacing=12),
+                    # 進度條：置於「載入模組清單」按鈕下方，掃描時才顯示
+                    self.progress_bar,
+                    self.progress_text,
+                ],
+                spacing=12,
+            ),
+            icon=ft.Icons.FOLDER_OPEN,
+            tone="dia",
+        )
+        self.controls = [
+            ft.Row(
+                [
+                    self.back_btn,
+                    kit.tone_icon(
+                        ft.Icons.SPELLCHECK, "ench", size=22, box=46, radius=13
+                    ),
+                    self.header,
+                ],
+                alignment=ft.MainAxisAlignment.START,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=14,
+            ),
+            # Mod 清單搜尋（Phase 2）：搜尋框 + 狀態文字
+            self.mod_search_tf,
+            self.mod_search_status,
+            setup_card,
+            self.save_btn,
+            self.page_bar,
+            self.page_size_selector,
+            self.list_view,
+        ]
+
+    def _init_icon_preview_state(self, page) -> None:
+        """圖示預覽頁的狀態、載入進度與分頁欄。"""
         self._page = page
         self._loading = False  # 掃描進行中（避免重複點擊載入）
         self._last_progress_refresh = 0.0
@@ -887,6 +957,9 @@ class IconPreviewView(ft.Column):
             tooltip="上一頁",
             on_click=self._prev_page,
         )
+
+    def _init_icon_preview_paging_controls(self) -> None:
+        """模組清單分頁與每頁筆數控制項。"""
 
         self.next_page_btn = ft.IconButton(
             icon=ft.Icons.CHEVRON_RIGHT,
@@ -948,6 +1021,9 @@ class IconPreviewView(ft.Column):
             on_click=self._go_back,
         )
 
+    def _init_icon_preview_source_controls(self) -> None:
+        """來源／審查資料夾選擇與載入按鈕。"""
+
         self.pick_source_btn = kit.button(
             "選擇模組資料夾（例：mods 資料夾）",
             "secondary",
@@ -991,53 +1067,6 @@ class IconPreviewView(ft.Column):
         self.progress_bar = kit.progress_bar(0, "em", height=6)
         self.progress_bar.visible = False
         self.progress_text = ft.Text("準備就緒", size=12, color=C.MUTED)
-
-        setup_card = kit.section_card(
-            "資料來源",
-            ft.Column(
-                [
-                    ft.Row(
-                        [self.pick_source_btn, self.source_label],
-                        spacing=12,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    ft.Row(
-                        [self.pick_review_btn, self.review_label],
-                        spacing=12,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    ft.Row([self.load_btn], spacing=12),
-                    # 進度條：置於「載入模組清單」按鈕下方，掃描時才顯示
-                    self.progress_bar,
-                    self.progress_text,
-                ],
-                spacing=12,
-            ),
-            icon=ft.Icons.FOLDER_OPEN,
-            tone="dia",
-        )
-        self.controls = [
-            ft.Row(
-                [
-                    self.back_btn,
-                    kit.tone_icon(
-                        ft.Icons.SPELLCHECK, "ench", size=22, box=46, radius=13
-                    ),
-                    self.header,
-                ],
-                alignment=ft.MainAxisAlignment.START,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                spacing=14,
-            ),
-            # Mod 清單搜尋（Phase 2）：搜尋框 + 狀態文字
-            self.mod_search_tf,
-            self.mod_search_status,
-            setup_card,
-            self.save_btn,
-            self.page_bar,
-            self.page_size_selector,
-            self.list_view,
-        ]
 
     # ==================================================
     # Folder picker callbacks
@@ -1194,6 +1223,23 @@ class IconPreviewView(ft.Column):
         mode = self._detect_source_mode()
         log_info(f"[IconPreview] 偵測到模式: {mode}")
 
+        if self._try_use_cached_entries(mode):
+            return
+
+        self._begin_scan(mode)
+
+    def _rebuild_mods(self, entries) -> None:
+        """依 entries 重建 modid → entry 清單（dict 轉回 SimpleNamespace，保持屬性存取相容）。"""
+        mods = defaultdict(list)
+        for entry in entries:
+            if isinstance(entry, dict):
+                mods[entry["modid"]].append(SimpleNamespace(**entry))
+            else:
+                mods[entry.modid].append(entry)
+        self.mods = dict(mods)
+
+    def _try_use_cached_entries(self, mode: str) -> bool:
+        """命中 L1 記憶體快取或 L2 磁碟快取時直接顯示並回傳 True；否則回傳 False。"""
         # === 快取檢查（L1 in-memory）===
         cache_valid = (
             self._entries_cache is not None
@@ -1211,15 +1257,9 @@ class IconPreviewView(ft.Column):
                 duration=3000,
             )
             # 用快取重建 mods dict（dict 轉回 SimpleNamespace，保持屬性存取相容）
-            mods = defaultdict(list)
-            for entry in self._entries_cache:
-                if isinstance(entry, dict):
-                    mods[entry["modid"]].append(SimpleNamespace(**entry))
-                else:
-                    mods[entry.modid].append(entry)
-            self.mods = dict(mods)
+            self._rebuild_mods(self._entries_cache)
             self._render_mod_list()
-            return
+            return True
 
         # === L2 磁碟快取檢查（只在 jar_directory 模式）===
         if mode == "jar_directory":
@@ -1239,18 +1279,13 @@ class IconPreviewView(ft.Column):
                     "mode": mode,
                 }
                 # 重建 mods dict
-                mods = defaultdict(list)
-                for entry in cached_entries:
-                    if isinstance(entry, dict):
-                        mods[entry["modid"]].append(SimpleNamespace(**entry))
-                    else:
-                        mods[entry.modid].append(entry)
-                self.mods = dict(mods)
+                self._rebuild_mods(cached_entries)
                 self._render_mod_list()
-                return
+                return True
+        return False
 
-        # === 快取 miss ===
-
+    def _begin_scan(self, mode: str) -> None:
+        """快取 miss：顯示進度並掃描 entries（有事件迴圈時改在背景執行緒執行）。"""
         # 顯示進度條
         if mode == "jar_directory":
             jar_files = list(self.source_root.glob("*.jar"))
@@ -1979,8 +2014,15 @@ class IconPreviewView(ft.Column):
             return []
         jar_files = list(self.source_root.glob("*.jar"))
         total_steps = len(jar_files)
-        failed_jars = []
 
+        all_modids = self._collect_jar_modids(jar_files, total_steps)
+        zh_map = self._build_zh_tw_lookup(all_modids)
+        entries = self._scan_jar_entries(processed_callback, total_steps, zh_map)
+        self._extract_and_cache_icons(entries)
+        return entries
+
+    def _collect_jar_modids(self, jar_files, total_steps):
+        """Phase 1/3：收集所有 JAR 內的 modid。"""
         # ===== Phase 1/3：收集所有 modid =====
         _show_progress_phase(self, "收集模組資訊", 0, total_steps)
         all_modids = set()
@@ -2002,7 +2044,10 @@ class IconPreviewView(ft.Column):
             except Exception:  # noqa: BLE001, S110
                 pass
         _show_progress_phase(self, "收集模組資訊", total_steps, total_steps)
+        return all_modids
 
+    def _build_zh_tw_lookup(self, all_modids):
+        """Phase 2/3：建立 zh_tw 對照表（雙軌制）。"""
         # ===== Phase 2/3：建立 zh_tw 對照表（雙軌制）=====
         _show_progress_phase(self, "建立翻譯對照表", 0, 1)
         zh_map = {}
@@ -2030,7 +2075,10 @@ class IconPreviewView(ft.Column):
 
             log_info(f"[IconPreview] 已建立 zh_tw 對照表，共 {len(zh_map)} 筆")
         _show_progress_phase(self, "建立翻譯對照表", 1, 1)
+        return zh_map
 
+    def _scan_jar_entries(self, processed_callback, total_steps, zh_map):
+        """Phase 3/3：掃描 JAR 內的 en_us.json 並建立 entries。"""
         # ===== Phase 3/3：使用 jar_browser 多執行緒掃描 =====
         entries = []
         failed_jars = []
@@ -2107,7 +2155,10 @@ class IconPreviewView(ft.Column):
                 )
 
         log_info(f"[IconPreview] JAR 目錄掃描完成：共 {len(entries)} 筆翻譯")
+        return entries
 
+    def _extract_and_cache_icons(self, entries) -> None:
+        """Phase 4/4：批次提取模組圖示並寫入 L2 磁碟快取。"""
         # ===== JAR Icon 掃描：提取 mod icons =====
         icon_cache_root = _get_icon_cache_dir()
 
@@ -2129,8 +2180,6 @@ class IconPreviewView(ft.Column):
         # ===== 寫入 L2 磁碟快取 =====
         _save_entries_cache_l2(self.source_root, entries)
         log_info("[IconPreview] 已寫入 L2 磁碟快取")
-
-        return entries
 
     def _render_current_page(self):
         """渲染當前頁面的項目列表（支援 detail 搜尋過濾）"""

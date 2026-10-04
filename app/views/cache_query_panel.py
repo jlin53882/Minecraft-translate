@@ -178,76 +178,9 @@ class CacheQueryPanel(ft.Container):
                 ft.Text("查詢模式與分類選擇", size=11, color=C.MUTED),
                 ft.Row([self.dd_query_mode, self.dd_query_type], wrap=True),
                 self.query_search_hint,
+                self._results_split_view(),
                 ft.Container(
-                    expand=True,
-                    content=ft.ResponsiveRow(
-                        expand=True,
-                        controls=[
-                            ft.Container(
-                                col={"xs": 12, "md": 5},
-                                expand=True,
-                                content=ft.Column(
-                                    [
-                                        ft.Text(
-                                            "結果列表（左）",
-                                            weight=ft.FontWeight.BOLD,
-                                        ),
-                                        ft.Container(
-                                            expand=True,
-                                            padding=8,
-                                            border=ft.Border.all(1, C.LINE),
-                                            border_radius=8,
-                                            bgcolor=C.PANEL,
-                                            content=self.query_result_list,
-                                        ),
-                                    ],
-                                    expand=True,
-                                    spacing=6,
-                                    horizontal_alignment=ft.CrossAxisAlignment.START,
-                                ),
-                            ),
-                            ft.Container(
-                                col={"xs": 12, "md": 7},
-                                expand=True,
-                                content=ft.Column(
-                                    [
-                                        ft.Text(
-                                            "內容檢視（右）",
-                                            weight=ft.FontWeight.BOLD,
-                                        ),
-                                        ft.Container(
-                                            expand=True,
-                                            padding=8,
-                                            border=ft.Border.all(1, C.LINE),
-                                            border_radius=8,
-                                            bgcolor=C.PANEL,
-                                            alignment=ft.alignment.Alignment(-1, -1),
-                                            content=ft.Column(
-                                                [
-                                                    self.query_detail_key,
-                                                    self.query_detail_type,
-                                                    self.query_detail_shard,
-                                                    self.query_detail_status,
-                                                    self.query_detail_src,
-                                                    self.query_detail_dst,
-                                                ],
-                                                expand=True,
-                                                spacing=6,
-                                                scroll=ft.ScrollMode.ALWAYS,
-                                                horizontal_alignment=ft.CrossAxisAlignment.START,
-                                            ),
-                                        ),
-                                    ],
-                                    expand=True,
-                                    spacing=6,
-                                    horizontal_alignment=ft.CrossAxisAlignment.START,
-                                ),
-                            ),
-                        ],
-                    ),
-                ),
-                ft.Container(
-                    padding=ft.Padding(top=4),
+                    padding=self._pager_bar(),
                     content=ft.Row(
                         [
                             self.btn_page_first,
@@ -275,6 +208,81 @@ class CacheQueryPanel(ft.Container):
             spacing=8,
             horizontal_alignment=ft.CrossAxisAlignment.START,
         )
+
+    def _results_split_view(self) -> ft.Control:
+        """左側結果列表、右側內容檢視。"""
+        return ft.Container(
+            expand=True,
+            content=ft.ResponsiveRow(
+                expand=True,
+                controls=[
+                    ft.Container(
+                        col={"xs": 12, "md": 5},
+                        expand=True,
+                        content=ft.Column(
+                            [
+                                ft.Text(
+                                    "結果列表（左）",
+                                    weight=ft.FontWeight.BOLD,
+                                ),
+                                ft.Container(
+                                    expand=True,
+                                    padding=8,
+                                    border=ft.Border.all(1, C.LINE),
+                                    border_radius=8,
+                                    bgcolor=C.PANEL,
+                                    content=self.query_result_list,
+                                ),
+                            ],
+                            expand=True,
+                            spacing=6,
+                            horizontal_alignment=ft.CrossAxisAlignment.START,
+                        ),
+                    ),
+                    ft.Container(
+                        col={"xs": 12, "md": 7},
+                        expand=True,
+                        content=ft.Column(
+                            [
+                                ft.Text(
+                                    "內容檢視（右）",
+                                    weight=ft.FontWeight.BOLD,
+                                ),
+                                ft.Container(
+                                    expand=True,
+                                    padding=8,
+                                    border=ft.Border.all(1, C.LINE),
+                                    border_radius=8,
+                                    bgcolor=C.PANEL,
+                                    alignment=ft.alignment.Alignment(-1, -1),
+                                    content=ft.Column(
+                                        [
+                                            self.query_detail_key,
+                                            self.query_detail_type,
+                                            self.query_detail_shard,
+                                            self.query_detail_status,
+                                            self.query_detail_src,
+                                            self.query_detail_dst,
+                                        ],
+                                        expand=True,
+                                        spacing=6,
+                                        scroll=ft.ScrollMode.ALWAYS,
+                                        horizontal_alignment=ft.CrossAxisAlignment.START,
+                                    ),
+                                ),
+                            ],
+                            expand=True,
+                            spacing=6,
+                            horizontal_alignment=ft.CrossAxisAlignment.START,
+                        ),
+                    ),
+                ],
+            ),
+        )
+
+    def _pager_bar(self) -> ft.Control:
+        """查詢結果的分頁與套用／還原按鈕列。"""
+        return ft.Padding(top=4)
 
     def _iter_type_states(self, data: dict):
         """迭代所有快取類型與其狀態"""

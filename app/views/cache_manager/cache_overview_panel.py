@@ -26,6 +26,58 @@ HELP_LINES = (
 )
 
 
+def _build_actions_block(
+    overview_status: ft.Control,
+    overview_trace: ft.Control,
+    btn_reload_all: ft.Control,
+    btn_refresh_stats: ft.Control,
+    btn_rebuild_index: ft.Control,
+) -> ft.Control:
+    """總覽頁的「操作」卡片。"""
+    return kit.section_card(
+        "操作",
+        ft.Column(
+            [
+                overview_status,
+                overview_trace,
+                ft.Row(
+                    [btn_reload_all, btn_refresh_stats, btn_rebuild_index],
+                    wrap=True,
+                    spacing=10,
+                    run_spacing=10,
+                ),
+            ],
+            spacing=8,
+        ),
+        icon=ft.Icons.TUNE,
+        tone="em",
+    )
+
+
+def _build_help_block() -> ft.Control:
+    """總覽頁的「按鈕說明」卡片（預設收合：展開時內容很長，會把下方日誌擠到看不見）。"""
+    return kit.section_card(
+        "按鈕說明",
+        ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Text(name, size=12, weight=ft.FontWeight.W_600, width=96),
+                        ft.Text(desc, size=12, expand=True),
+                    ],
+                    spacing=8,
+                )
+                for name, desc in HELP_LINES
+            ],
+            spacing=6,
+        ),
+        icon=ft.Icons.HELP_OUTLINE,
+        tone="dia",
+        collapsible=True,
+        collapsed=True,
+    )
+
+
 def build_overview_page(
     *,
     overview_text: ft.Control,
@@ -46,46 +98,15 @@ def build_overview_page(
 
     ``stat_cards`` 是頁面頂端的統計卡（由 CacheView 持有、載入資料後更新）。
     """
-    actions_block = kit.section_card(
-        "操作",
-        ft.Column(
-            [
-                overview_status,
-                overview_trace,
-                ft.Row(
-                    [btn_reload_all, btn_refresh_stats, btn_rebuild_index],
-                    wrap=True,
-                    spacing=10,
-                    run_spacing=10,
-                ),
-            ],
-            spacing=8,
-        ),
-        icon=ft.Icons.TUNE,
-        tone="em",
+    actions_block = _build_actions_block(
+        overview_status,
+        overview_trace,
+        btn_reload_all,
+        btn_refresh_stats,
+        btn_rebuild_index,
     )
 
-    # 按鈕說明預設收合：展開時內容很長，會把下方日誌擠到看不見
-    help_block = kit.section_card(
-        "按鈕說明",
-        ft.Column(
-            [
-                ft.Row(
-                    [
-                        ft.Text(name, size=12, weight=ft.FontWeight.W_600, width=96),
-                        ft.Text(desc, size=12, expand=True),
-                    ],
-                    spacing=8,
-                )
-                for name, desc in HELP_LINES
-            ],
-            spacing=6,
-        ),
-        icon=ft.Icons.HELP_OUTLINE,
-        tone="dia",
-        collapsible=True,
-        collapsed=True,
-    )
+    help_block = _build_help_block()
 
     left_panel = kit.section_card(
         "分類狀態清單",

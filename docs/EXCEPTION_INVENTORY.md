@@ -43,9 +43,9 @@
 | `app/shell/app_shell.py:read_app_version` | BLE001 | UI／畫面保護 | 版本只是裝飾，讀不到不影響啟動 |
 | `app/shell/app_shell.py:AppShell._on_resize` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/shell/app_shell.py:_default_mode` | BLE001 | 已記錄／回報 | 設定壞掉時用預設深色 |
-| `app/ui/snack.py:show_snack` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/ui/snack.py:show_snack` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/ui/snack.py:show_snack` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/ui/snack.py:_clear_existing_snacks` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/ui/snack.py:_show_snack_dialog` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/ui/snack.py:_show_snack_dialog` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/ui/snack.py:show_snack` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/bundler_view.py:BundlerView._load_version_data` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/bundler_view.py:BundlerView._bundling_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，錯誤顯示於日誌 |
@@ -95,13 +95,13 @@
 | `app/views/icon_preview_row.py:_ensure_icon_size` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/icon_preview_view.py:_follow_parent_chain` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview_view.py:_extract_jar_icon` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/icon_preview_view.py:_run_jar_workers` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview_view.py:_batch_extract_jar_icons` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview_view.py:_batch_extract_jar_icons._process_jar` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:_batch_extract_jar_icons` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:IconPreviewView._on_load_clicked._scan` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
+| `app/views/icon_preview_view.py:IconPreviewView._begin_scan._scan` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
 | `app/views/icon_preview_view.py:IconPreviewView._save_current_zh` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/icon_preview_view.py:IconPreviewView._load_entries` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:IconPreviewView._load_entries_from_jar_directory` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/icon_preview_view.py:IconPreviewView._collect_jar_modids` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/lm_view.py:LMView.refresh_key_stat` | BLE001 | UI／畫面保護 | 讀不到設定時只是不顯示 |
 | `app/views/lookup_view.py:LookupView.single_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/lookup_view.py:LookupView.batch_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
@@ -114,7 +114,7 @@
 | `app/views/pipeline/pipeline_extract_dialog.py:open_extract_dialog.show_preview_result.do_preview` | BLE001 | 已記錄／回報 | 錯誤要顯示在對話框 |
 | `app/views/pipeline/pipeline_one_click_dialog.py:_load_version_data` | BLE001 | UI／畫面保護 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
 | `app/views/pipeline/pipeline_view.py:PipelineView._run_session_step` | BLE001 | 已記錄／回報 | 背景步驟邊界：任何錯誤都轉成步驟失敗 |
-| `app/views/pipeline/pipeline_view.py:PipelineView._on_one_click_execute.worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，確保按鈕會恢復 |
+| `app/views/pipeline/pipeline_view.py:PipelineView._start_one_click_worker.worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，確保按鈕會恢復 |
 | `app/views/qc_base.py:QCBase.task_worker.run` | BLE001 | 已記錄／回報 | 背景執行緒需把錯誤回報到 UI |
 | `app/views/qc_view.py:QCView._async_pick_file_or_directory` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/qc_view.py:QCView._scroll_to_log` | BLE001 | 已記錄／回報 | 捲動失敗不影響任務 |
