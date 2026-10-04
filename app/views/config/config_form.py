@@ -43,7 +43,9 @@ def build_footer(view):
                     content=ft.Row(
                         [
                             ft.Icon(ft.Icons.INFO_OUTLINE, size=16, color=C.DIM),
-                            ft.Text("提示：修改後請務必點擊儲存", color=C.MUTED, size=12.5),
+                            ft.Text(
+                                "提示：修改後請務必點擊儲存", color=C.MUTED, size=12.5
+                            ),
                         ],
                         spacing=8,
                     ),
