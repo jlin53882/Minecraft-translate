@@ -6,6 +6,34 @@
 from unittest.mock import patch
 
 
+def test_batch_profile_and_response_helpers_preserve_translation_contract():
+    from translation_tool.core.lm_translator_main import (
+        _detect_batch_profile,
+        _is_truncated_response,
+        _normalize_translations,
+    )
+
+    assert _detect_batch_profile([{"cache_type": "ftbquests"}]) == "ftb"
+    assert _detect_batch_profile([{"file": "mod/lang/en_us.json"}]) == "lang"
+    assert _detect_batch_profile([{"file": "mod/patchouli/book.json"}]) == "patch"
+
+    assert _normalize_translations(
+        {"items": [{"id": "a", "value": "A"}, {"id": 1, "value": "B"}]}
+    ) == {"a": "A", "1": "B"}
+    assert _normalize_translations([{"text": "A"}, {"id": "x", "value": "B"}]) == {
+        "0": "A",
+        "x": "B",
+    }
+    assert _is_truncated_response('{"items": []}') is False
+    assert _is_truncated_response('{"items": [') is True
+
+
+def test_legacy_batch_name_is_only_a_compatibility_alias():
+    from translation_tool.core import lm_translator_main as main
+
+    assert main.translate_batch_smart_old is main._translate_batch_smart_impl
+
+
 class TestTranslateBatchSmart:
     """translate_batch_smart 測試"""
 

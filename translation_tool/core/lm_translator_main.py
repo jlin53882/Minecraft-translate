@@ -45,6 +45,85 @@ DEFAULT_BATCH_SIZE = 50  # 預設批次大小
 DEFAULT_DRY_RUN = False  # 預設不跳過 API
 DEFAULT_EXPORT_CACHE_ONLY = False  # 預設進行完整翻譯
 
+
+def _detect_batch_profile(items):
+    """依 cache type 或檔案路徑決定批次 profile。"""
+    cache_types = [
+        str(item.get("cache_type", "")).lower()
+        for item in items
+        if isinstance(item, dict) and item.get("cache_type")
+    ]
+    if cache_types:
+        unique = set(cache_types)
+        if len(unique) == 1:
+            cache_type = next(iter(unique))
+            if cache_type in {"lang", "patchouli", "ftbquests", "kubejs", "md"}:
+                return (
+                    "lang"
+                    if cache_type == "lang"
+                    else ("ftb" if cache_type == "ftbquests" else cache_type)
+                )
+        for cache_type in ("lang", "ftbquests", "kubejs", "md", "patchouli"):
+            if cache_type in cache_types:
+                return "ftb" if cache_type == "ftbquests" else cache_type
+
+    files = [
+        str(item.get("file", "")).replace("\\", "/").lower()
+        for item in items
+        if isinstance(item, dict)
+    ]
+    if files and all("/lang/" in path for path in files):
+        return "lang"
+    if any("/ftbquests/" in path for path in files):
+        return "ftb"
+    if any("/kubejs/" in path for path in files):
+        return "kubejs"
+    if any("/md/" in path for path in files):
+        return "md"
+    return "patch"
+
+
+def _is_truncated_response(text: str) -> bool:
+    """判斷回應是否不是完整 JSON；供狀態機與測試共用。"""
+    try:
+        import json
+
+        json.loads(text)
+        return False
+    except json.JSONDecodeError:
+        pass
+
+    balance = 0
+    for char in text:
+        if char == "{":
+            balance += 1
+        elif char == "}":
+            balance -= 1
+        if balance < 0:
+            return True
+    return balance != 0
+
+
+def _normalize_translations(parsed) -> dict[str, object]:
+    """把模型可能回傳的三種 JSON 形狀統一為 ``{id: value}``."""
+    normalized: dict[str, object] = {}
+    if isinstance(parsed, dict):
+        if "items" in parsed:
+            for item in parsed["items"]:
+                if isinstance(item, dict) and "id" in item and "value" in item:
+                    normalized[str(item["id"])] = item["value"]
+        elif {"file", "path", "text"} <= parsed.keys():
+            normalized["0"] = parsed["text"]
+        else:
+            normalized.update({str(key): value for key, value in parsed.items()})
+    elif isinstance(parsed, list):
+        for index, item in enumerate(parsed):
+            if isinstance(item, dict):
+                result_id = str(item.get("id", index))
+                normalized[result_id] = item.get("value", item.get("text", ""))
+    return normalized
+
+
 # =========================================================
 # 截斷診斷（issue #108 階段 0）
 # =========================================================
@@ -154,7 +233,7 @@ def _execute_translation(items, total, dry_run=False):
         (結果列表, 狀態字串)
     """
     # 代理到舊函數（正確傳遞所有參數）
-    return translate_batch_smart_old(items, total, dry_run)
+    return _translate_batch_smart_impl(items, total, dry_run)
 
 
 def _process_output(results, status):
@@ -184,7 +263,7 @@ def _process_output(results, status):
 # =========================================================
 
 
-def translate_batch_smart_old(batch_items, total=None, dry_run=False):
+def _translate_batch_smart_impl(batch_items, total=None, dry_run=False):
     """
     智慧型分批翻譯函式
     支援動態縮減 Batch Size、模型切換、以及自動處理輸出截斷問題。
@@ -230,51 +309,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
     # 503 overload 計數改為「逐把 key」，由 key_cycle 管理（見 ApiKeyCycle.record_overload）
 
     # 判斷這批次類型（影響 System Prompt 與 batch 上限）
-    def _norm_file(item):
-        return str(item.get("file", "")).replace("\\", "/").lower()
-
-    def detect_batch_profile(items):
-        # ✅ 優先用 cache_type（最可靠）
-        cache_types = [
-            str(i.get("cache_type", "")).lower() for i in items if isinstance(i, dict)
-        ]
-        cache_types = [c for c in cache_types if c]
-
-        if cache_types:
-            # 如果整批都是同一種 cache_type，就直接採用
-            uniq = set(cache_types)
-            if len(uniq) == 1:
-                ct = next(iter(uniq))
-                if ct in ("lang", "patchouli", "ftbquests", "kubejs", "md"):
-                    return (
-                        "lang" if ct == "lang" else ("ftb" if ct == "ftbquests" else ct)
-                    )
-
-            # 混合批次：優先級（你可以調）
-            if "lang" in cache_types:
-                return "lang"
-            if "ftbquests" in cache_types:
-                return "ftb"
-            if "kubejs" in cache_types:
-                return "kubejs"
-            if "md" in cache_types:
-                return "md"
-            if "patchouli" in cache_types:
-                return "patch"
-
-        # ⬇️ fallback：沿用你原本的檔案路徑判斷
-        files = [_norm_file(i) for i in items if isinstance(i, dict)]
-        if files and all("/lang/" in f for f in files):
-            return "lang"
-        if any("/ftbquests/" in f for f in files):
-            return "ftb"
-        if any("/kubejs/" in f for f in files):
-            return "kubejs"
-        if any("/md/" in f for f in files):
-            return "md"
-        return "patch"
-
-    batch_profile = detect_batch_profile(batch_items)
+    batch_profile = _detect_batch_profile(batch_items)
     is_lang = batch_profile == "lang"
 
     if batch_profile == "lang":
@@ -462,34 +497,8 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                     continue
 
                 # --- 核心改進：檢查輸出是否被截斷（ATK-B-1）---
-                def _is_truncated(text: str) -> bool:
-                    """判斷 API 回應是否被截斷。
-
-                    三層檢查：
-                    1. 嘗試直接解析 JSON（最準確）
-                    2. JSON 失敗時，檢查大括號平衡（} 比 { 先出現代表截斷）
-                    3. 簡單檢查結尾是否完整
-                    """
-                    try:
-                        import json
-
-                        json.loads(text)
-                        return False  # 成功解析，代表沒截斷
-                    except json.JSONDecodeError:
-                        pass
-                    # 大括號平衡檢查
-                    count = 0
-                    for ch in text:
-                        if ch == "{":
-                            count += 1
-                        elif ch == "}":
-                            count -= 1
-                        if count < 0:
-                            return True  # } 比 { 先出現，代表截斷
-                    return count != 0  # 括號不平衡代表截斷
-
                 finish_reason = api_meta.get("finish_reason")
-                if finish_reason == "MAX_TOKENS" or _is_truncated(raw_text):
+                if finish_reason == "MAX_TOKENS" or _is_truncated_response(raw_text):
                     # 階段 0 觀測：分辨「輸出 token 上限」與「正常結束卻產出壞 JSON」
                     log_warning(
                         _describe_truncation(
@@ -497,7 +506,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                         )
                     )
 
-                if _is_truncated(raw_text):
+                if _is_truncated_response(raw_text):
                     key_cycle.clear_overload()  # 截斷會中斷 overload 連續紀錄
                     log_info(
                         "[!] 偵測到 JSON 被截斷（結尾不完整或格式錯誤），將縮小 Batch 重試"
@@ -510,29 +519,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                 # print(raw_text) # 除錯用：印出原始回傳內容
 
                 # 1. 將任何模型輸出標準化為 {id: text}
-                # ===============================
-                normalized_translations = {}
-
-                if isinstance(parsed, dict):
-                    if "items" in parsed:  # 標準格式
-                        for item in parsed["items"]:
-                            if "id" in item and "value" in item:
-                                normalized_translations[str(item["id"])] = item["value"]
-
-                    elif {"file", "path", "text"} <= parsed.keys():  # 單一物件
-                        normalized_translations["0"] = parsed["text"]
-
-                    else:  # 簡化格式 {"0":"...", "1":"..."}
-                        for k, v in parsed.items():
-                            normalized_translations[str(k)] = v
-
-                elif isinstance(parsed, list):
-                    for i, item in enumerate(parsed):
-                        if isinstance(item, dict):
-                            res_id = str(item.get("id", i))
-                            normalized_translations[res_id] = item.get(
-                                "value", item.get("text", "")
-                            )
+                normalized_translations = _normalize_translations(parsed)
 
                 # ===============================
                 # 2. 漏翻檢查
@@ -1051,3 +1038,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
         batch_size = new_size
 
     return all_results, "AUTO"  # （只有真的要炸掉時才 raise，你現在這行會吃掉正常流程）
+
+
+# 暫保舊名稱供外部整合程式相容；現役入口與內部呼叫已不再依賴 ``old`` 命名。
+translate_batch_smart_old = _translate_batch_smart_impl
