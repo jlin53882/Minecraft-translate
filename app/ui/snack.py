@@ -58,6 +58,10 @@ _HUE_TONES = (
     (("blue", "cyan", "indigo", "info"), "dia", ft.Icons.INFO_OUTLINE),
 )
 
+# AppShell 的 statusbar 約 30px；保留 12px 的視覺間距，避免 floating SnackBar
+# 蓋住狀態列。這個局部 token 刻意不 import shell/statusbar，避免 UI kit 反向依賴外殼。
+SNACK_BOTTOM_MARGIN = 42
+
 
 def snack_style(color) -> tuple[str, str]:
     """舊的背景色 → (語意色組名稱, 圖示)。認不得的顏色視為中性。"""
@@ -125,7 +129,24 @@ def show_snack(
     # content 維持單一 ft.Text（既有呼叫端 / 測試會讀 snack.content.value）
     content = ft.Text(message, color=tone.fg, size=13, weight=ft.FontWeight.W_500)
 
-    kwargs.setdefault("width", 460)  # 浮動式 toast 不要橫跨整個視窗
+    requested_width = kwargs.pop("width", None)
+    snack_width = requested_width or 460
+    if "margin" not in kwargs:
+        page_width = getattr(page, "width", None)
+        if isinstance(page_width, (int, float)) and page_width > 0:
+            horizontal_margin = max(12, (page_width - snack_width) / 2)
+            kwargs["margin"] = ft.Margin.only(
+                left=horizontal_margin,
+                right=horizontal_margin,
+                bottom=SNACK_BOTTOM_MARGIN,
+            )
+        else:
+            # 測試 double / 舊版 Page 可能沒有 width；至少保留底部安全距離。
+            kwargs["margin"] = ft.Margin.only(bottom=SNACK_BOTTOM_MARGIN)
+    if requested_width is not None:
+        # 呼叫端明確指定 width 時保留其 contract；預設路徑刻意用左右 margin
+        # 取得相同的視覺寬度，因 Flet 1.0.1 會在 width + margin 同時存在時忽略 bottom。
+        kwargs["width"] = requested_width
     snack = ft.SnackBar(
         content=content,
         bgcolor=C.RAISED,
@@ -149,18 +170,17 @@ def show_snack(
         if close_icon_color:
             snack.close_icon_color = close_icon_color
 
-    # 優先使用 page.show_dialog (Flet 0.82.2+ 推薦)
-    # 保留 fallback 給還沒升級的環境
+    # 以 page.show_dialog() 顯示，讓 Flet 的 floating SnackBar 真正套用 bottom margin；
+    # 預設不再同時傳固定 width，因 Flet 1.0.1 對「固定 width + margin」會忽略 bottom margin。
     try:
-        # 嘗試新版 API
         page.show_dialog(snack)
     except Exception:  # noqa: BLE001
-        # Fallback 到舊版 (overlay.append + open=True)
+        # Fallback 給只支援 overlay 的 Page 實作。
         try:
             page.overlay.append(snack)
             snack.open = True
         except Exception as ex:  # noqa: BLE001
-            log_warning(f"[SNACKBAR] show_snack overlay fallback failed: {ex!r}")
+            log_warning(f"[SNACKBAR] show_snack display failed: {ex!r}")
 
     # page.update() 推 render (SnackBar 跳出關鍵)
     # 跟 PR #98 commit 0798022 對齊: caller 可能已經 page.update() 過自己負責的部分,
