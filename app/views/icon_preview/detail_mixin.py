@@ -1,5 +1,6 @@
 """IconPreviewView 的單一模組詳情、載入 entries 與翻譯儲存（由 icon_preview_view.py 拆出，#114）。"""
 
+import asyncio
 import json
 import zipfile
 from collections import defaultdict
@@ -15,7 +16,7 @@ from app.views.icon_preview.icon_cache import (
     to_halfwidth,
 )
 from app.views.icon_preview.progress import _show_progress_phase
-from app.views.icon_preview_row import LangItemRow
+from app.views.icon_preview_row import LangItemRow, prepare_row_icon
 from translation_tool.utils.jar_browser import scan_jars
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
@@ -48,24 +49,46 @@ class IconPreviewDetailMixin:
 
         log_info(f"[IconPreview] 開啟模組詳情: {modid}")
 
+        # zh_tw.json 的搜尋（含 rglob fallback）與讀取在背景執行緒，不佔用 event loop
+        self._current_zh_file = None
+        self._zh_data = {}
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            self._current_zh_file, self._zh_data = self._find_zh_file(modid)
+            self._render_current_page()
+            return
+
+        self.list_view.controls.clear()
+        self.update()
+        generation = self._render_generation
+
+        async def _open():
+            found = await asyncio.to_thread(self._find_zh_file, modid)
+            if generation != self._render_generation or self.current_modid != modid:
+                return  # 期間已換頁／返回／卸載：丟棄結果
+            self._current_zh_file, self._zh_data = found
+            self._render_current_page()
+
+        run_task(_open)
+
+    def _find_zh_file(self, modid: str):
+        """找出並讀取 ``{modid}/lang/zh_tw.json``（磁碟 I/O，可在背景執行緒）。
+
+        回傳 ``(path | None, data)``。
+        """
         # Track 1：直接路徑（快速）
         direct = self.review_root / modid / "lang" / "zh_tw.json"
         if direct.exists():
-            self._current_zh_file = direct
-            self._zh_data = load_json_auto_encoding(direct) or {}
             log_info(f"[IconPreview] 直接路徑: {direct}")
-        else:
-            # Track 2：rglob fallback（容錯）
-            zh_files = list(self.review_root.rglob(f"{modid}/lang/zh_tw.json"))
-            self._current_zh_file = zh_files[0] if zh_files else None
-            if self._current_zh_file and self._current_zh_file.exists():
-                self._zh_data = load_json_auto_encoding(self._current_zh_file) or {}
-                log_info(f"[IconPreview] rglob fallback: {self._current_zh_file}")
-            else:
-                self._zh_data = {}
-                log_warning(f"[IconPreview] 找不到 zh_tw.json for mod: {modid}")
-
-        self._render_current_page()
+            return direct, load_json_auto_encoding(direct) or {}
+        # Track 2：rglob fallback（容錯）
+        zh_files = list(self.review_root.rglob(f"{modid}/lang/zh_tw.json"))
+        found = zh_files[0] if zh_files else None
+        if found and found.exists():
+            log_info(f"[IconPreview] rglob fallback: {found}")
+            return found, load_json_auto_encoding(found) or {}
+        log_warning(f"[IconPreview] 找不到 zh_tw.json for mod: {modid}")
+        return found, {}
 
     def _go_back(self, e):
         """處理返回按鈕，返回模組清單"""
@@ -132,31 +155,50 @@ class IconPreviewDetailMixin:
             )
             return
 
+        target = self._current_zh_file
+        payload = json.dumps(self._zh_data, ensure_ascii=False, indent=2)
+        count = len(self._zh_data)
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            self._finish_save(self._write_zh_file(target, payload), target, count)
+            return
+
+        async def _save():
+            error = await asyncio.to_thread(self._write_zh_file, target, payload)
+            self._finish_save(error, target, count)
+
+        run_task(_save)
+
+    @staticmethod
+    def _write_zh_file(target, payload: str):
+        """寫入 zh_tw.json（磁碟 I/O，可在背景執行緒）；成功回傳 None，失敗回傳例外。"""
         try:
-            self._current_zh_file.parent.mkdir(parents=True, exist_ok=True)
-            self._current_zh_file.write_text(
-                json.dumps(self._zh_data, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            log_info(
-                f"[IconPreview] 儲存成功：{self._current_zh_file} ({len(self._zh_data)} 筆翻譯)"
-            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(payload, encoding="utf-8")
+        except Exception as ex:  # noqa: BLE001 - 錯誤由呼叫端顯示在 UI
+            return ex
+        return None
+
+    def _finish_save(self, error, target, count: int) -> None:
+        """（event loop 上）顯示儲存結果。"""
+        if error is None:
+            log_info(f"[IconPreview] 儲存成功：{target} ({count} 筆翻譯)")
             show_snack(
                 self.page,
-                f"✅ 翻譯已儲存 ({len(self._zh_data)} 筆)",
+                f"✅ 翻譯已儲存 ({count} 筆)",
                 color=C.EM,
                 clear_existing=True,
                 duration=3000,
             )
-        except Exception as ex:  # noqa: BLE001
-            log_error(f"[IconPreview] 儲存失敗：{ex}")
-            show_snack(
-                self.page,
-                f"❌ 儲存失敗：{ex}",
-                color=C.RED,
-                clear_existing=True,
-                duration=3000,
-            )
+            return
+        log_error(f"[IconPreview] 儲存失敗：{error}")
+        show_snack(
+            self.page,
+            f"❌ 儲存失敗：{error}",
+            color=C.RED,
+            clear_existing=True,
+            duration=3000,
+        )
 
     # ==================================================
     # 輔助：SnackBar
@@ -452,7 +494,11 @@ class IconPreviewDetailMixin:
         log_info("[IconPreview] 已寫入 L2 磁碟快取")
 
     def _render_current_page(self):
-        """渲染當前頁面的項目列表（支援 detail 搜尋過濾）"""
+        """渲染當前頁面的項目列表（支援 detail 搜尋過濾）。
+
+        每列的圖示準備（解析圖示、讀 JAR、產生預覽圖）是磁碟／ZIP／圖片 I/O，
+        在背景執行緒完成；event loop 上只建構控制項。連續呼叫時只有最後一次會套用。
+        """
         # Phase 2：搜尋過濾邏輯
         if self._detail_filtered_entries is not None:
             # 有搜尋條件，使用過濾後的 entries
@@ -466,10 +512,51 @@ class IconPreviewDetailMixin:
 
         start = self.current_page * self.page_size
         end = start + self.page_size
+        page_entries = list(entries[start:end])
 
         self.list_view.controls.clear()
+        self.page_info.value = (
+            f"{self.current_modid}｜第 {self.current_page + 1} / {self.total_pages} 頁"
+        )
+        self.prev_page_btn.disabled = self.current_page <= 0
+        self.next_page_btn.disabled = self.current_page >= self.total_pages - 1
 
-        for entry in entries[start:end]:
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            # 沒有 event loop（測試替身）：同步流程
+            self._fill_rows(page_entries, None)
+            return
+
+        self.update()  # 先把空列表／頁碼送出去，畫面不等圖示準備
+        self._render_generation += 1
+        generation = self._render_generation
+        icon_context = (self.source_root / "assets", _get_icon_cache_dir())
+
+        async def _prepare_and_fill():
+            prepared = await asyncio.to_thread(
+                self._prepare_row_icons, page_entries, icon_context
+            )
+            if generation != self._render_generation:
+                return  # 已有更新的渲染、或 View 已卸載：丟棄
+            self._fill_rows(page_entries, prepared)
+
+        run_task(_prepare_and_fill)
+
+    @staticmethod
+    def _prepare_row_icons(entries, icon_context) -> list:
+        """替每個項目準備圖示（磁碟／ZIP／圖片 I/O，在背景執行緒）。"""
+        assets_root, preview_root = icon_context
+        return [
+            prepare_row_icon(
+                entry.key, assets_root, preview_root, getattr(entry, "icon_path", None)
+            )
+            for entry in entries
+        ]
+
+    def _fill_rows(self, page_entries, prepared) -> None:
+        """（event loop 上）依準備好的圖示建構列並刷新；``prepared`` 為 None 時同步計算。"""
+        self.list_view.controls.clear()
+        for index, entry in enumerate(page_entries):
             self.list_view.controls.append(
                 LangItemRow(
                     lang_key=entry.key,
@@ -479,13 +566,7 @@ class IconPreviewDetailMixin:
                     preview_root=_get_icon_cache_dir(),
                     on_value_changed=self._on_value_changed,
                     icon_path=getattr(entry, "icon_path", None),
+                    prepared_icon=None if prepared is None else prepared[index],
                 )
             )
-
-        self.page_info.value = (
-            f"{self.current_modid}｜第 {self.current_page + 1} / {self.total_pages} 頁"
-        )
-        self.prev_page_btn.disabled = self.current_page <= 0
-        self.next_page_btn.disabled = self.current_page >= self.total_pages - 1
-
         self.update()

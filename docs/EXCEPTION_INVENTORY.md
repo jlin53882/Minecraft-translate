@@ -4,7 +4,7 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **258** 項；其中 **144** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **258** 項；其中 **143** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
@@ -92,7 +92,7 @@
 | `app/views/dashboard_view.py:DashboardView._apply_on_ui` | BLE001 | 已記錄／回報 | 沒有 event loop（測試）就直接套用 |
 | `app/views/extractor/extractor_dialog.py:_extractor_run_extraction` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/extractor/extractor_preview_dialog.py:_preview_do_scan` | BLE001 | 已記錄／回報 | 錯誤要回報到 UI |
-| `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._save_current_zh` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._write_zh_file` | BLE001 | 已記錄／回報 | 錯誤由呼叫端顯示在 UI |
 | `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._load_entries` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._collect_jar_modids` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview/icon_cache.py:_follow_parent_chain` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |

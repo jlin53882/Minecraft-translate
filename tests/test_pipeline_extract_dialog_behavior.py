@@ -520,3 +520,76 @@ def _button_in(dialog, label):
         if getattr(a, "content", None) == label:
             return a
     raise AssertionError(label)
+
+
+def test_find_jar_files_runs_in_the_worker_not_in_the_click_handler(env):
+    """JAR 探索（走訪資料夾）原本在 sync handler 內；現在只在背景 worker 內執行。"""
+    env.updates = [{"result": _result()}]
+    dialog = env.open()
+    _button(dialog, "預覽結果").on_click(None)
+    assert env.find_calls == []  # 點擊當下沒有任何探索
+    env.threads[-1].target()  # worker 執行
+    assert env.find_calls == [str(env.mods)]
+    _drain(env.page)
+    assert env.find_calls == [str(env.mods)]  # 輪詢（event loop）也沒有再探索
+
+
+def test_cancel_during_jar_discovery_stops_before_scanning(env, monkeypatch):
+    seen = []
+
+    def find_and_cancel(d):
+        _button_in(pd, "取消").on_click(None)  # 使用者在探索期間取消
+        return ["a.jar", "b.jar"]
+
+    def gen(mods, mode, lang_codes=None):
+        seen.append("generator started")
+        yield {"result": _result()}
+
+    monkeypatch.setattr(mod, "find_jar_files", find_and_cancel)
+    monkeypatch.setattr(mod, "preview_extraction_generator", gen)
+    dialog = env.open()
+    _button(dialog, "預覽結果").on_click(None)
+    pd = env.page.overlay[-1]
+    env.threads[-1].target()
+
+    assert seen == []  # 取消後不再進入掃描
+    assert pd.open is False and pd not in env.page.overlay
+    before = pd.content
+    _drain(env.page)
+    assert pd.content is before  # poller 不再更新已關閉的對話框
+    assert env.page.overlay == [dialog]
+
+
+def test_repeated_open_cancel_reopen_does_not_accumulate_overlay_or_tasks(env):
+    env.updates = [{"result": _result()}]
+    dialog = env.open()
+    previews = []
+    for _ in range(5):
+        _button(dialog, "預覽結果").on_click(None)
+        pd = env.page.overlay[-1]
+        previews.append(pd)
+        _button_in(pd, "取消").on_click(None)
+    assert env.page.overlay == [dialog]  # 沒有殘留的預覽對話框
+    # 排入的 poller 全部立刻結束（取消後不再輪詢），不留下永遠不結束的 task
+    _drain(env.page)
+    assert env.page._tasks == []
+    assert all(p.open is False for p in previews)
+
+
+def test_reopen_after_cancel_is_not_affected_by_the_old_scan(env):
+    env.updates = [{"result": _result()}]
+    dialog = env.open()
+    _button(dialog, "預覽結果").on_click(None)
+    first = env.page.overlay[-1]
+    _button_in(first, "取消").on_click(None)
+
+    _button(dialog, "預覽結果").on_click(None)
+    second = env.page.overlay[-1]
+    assert second is not first
+    env.threads[-1].target()  # 只跑第二個 worker
+    _drain(env.page)
+
+    texts = _texts(second)
+    assert "預計提取：5 個檔案（約 1.5 MB）" in texts
+    assert "JAR 數量：2 個" in texts  # 探索得到的 JAR 數量不會被後續更新蓋成 0
+    assert first not in env.page.overlay and first.open is False

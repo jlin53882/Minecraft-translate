@@ -696,3 +696,86 @@ def test_navigation_closes_the_previous_step_dialog_properly(env):
     env.click("下一個")
     assert (False, True) in seen
     assert first not in env.page.overlay
+
+
+# ---------- 步驟 4：控制項契約（沒有「看得到、改了卻不生效」的欄位） ----------
+
+
+def test_bundle_input_is_read_only_and_explained(env):
+    """一鍵流程的打包來源由流程自動決定（PipelineConfig.bundle_sources），欄位不可編輯。"""
+    env.open()
+    env.goto(4)
+    field = env.field("輸入來源")
+    assert field.read_only is True
+    assert field.on_change is None
+    assert any("不可在此修改" in t for t in env.texts())
+    # 改了也不會進 config：config 不含任何 bundle_input 鍵
+    config = env.confirm()
+    assert "bundle_input" not in config
+
+
+@pytest.mark.parametrize("step", [1, 2, 3, 4])
+def test_no_dead_editable_controls_in_any_step(env, step):
+    """每個步驟上「可編輯」的欄位／開關／勾選都必須有 on_change（否則修改不會生效）。"""
+    env.open()
+    env.goto(step)
+    for cls in (ft.TextField, ft.Switch, ft.Checkbox, ft.RadioGroup):
+        for control in env.controls(cls):
+            if getattr(control, "read_only", False):
+                continue
+            assert control.on_change is not None, (
+                f"步驟 {step} 的 {cls.__name__} {getattr(control, 'label', '')!r} "
+                "可編輯但沒有 on_change：使用者的修改不會生效"
+            )
+
+
+def _pick_image(env, path):
+    env.picker._mock_path = path
+    button = next(
+        c
+        for c in env.controls(ft.Button)
+        if getattr(c, "content", None) == "選擇檔案..."
+    )
+    button.on_click(None)
+    _drain(env.page)
+
+
+def test_pack_image_picker_sets_state_field_and_config(env):
+    env.open()
+    env.goto(4)
+    _pick_image(env, "/img/cover.PNG")
+    assert env.field("封面圖片（可留空）").value == "/img/cover.PNG"
+    assert env.confirm()["pack_image"] == "/img/cover.PNG"
+
+
+def test_pack_image_survives_navigation(env):
+    env.open()
+    env.goto(4)
+    _pick_image(env, "/img/cover.jpg")
+    env.click("上一個")
+    env.click("下一個")
+    assert env.field("封面圖片（可留空）").value == "/img/cover.jpg"
+    assert env.confirm()["pack_image"] == "/img/cover.jpg"
+
+
+def test_pack_image_remove_clears_state_and_config(env):
+    env.open()
+    env.goto(4)
+    _pick_image(env, "/img/cover.png")
+    remove = next(
+        c for c in env.controls(ft.TextButton) if getattr(c, "content", None) == "移除"
+    )
+    remove.on_click(None)
+    assert env.field("封面圖片（可留空）").value == ""
+    assert env.confirm()["pack_image"] is None
+
+
+def test_pack_image_rejects_unsupported_extension_and_ignores_cancel(env):
+    env.open()
+    env.goto(4)
+    _pick_image(env, "/img/cover.gif")
+    assert env.snacks == [("⚠️ 封面圖片只支援 .png/.jpg",)]
+    assert env.field("封面圖片（可留空）").value == ""
+    _pick_image(env, None)  # 取消選擇
+    assert env.field("封面圖片（可留空）").value == ""
+    assert env.confirm()["pack_image"] is None

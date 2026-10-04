@@ -211,6 +211,10 @@ class CacheView(
     # =========================================================
     # Lifecycle
     # =========================================================
+    def will_unmount(self):
+        """換頁／關閉：取消尚未執行的 debounce 更新（idempotent）。"""
+        self._update_debouncer.cancel()
+
     def did_mount(self):
         """元件載入完成後初始化資料與 UI。
 

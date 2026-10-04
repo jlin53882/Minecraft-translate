@@ -298,7 +298,8 @@ def _extract_preview_worker(
                 break
             preview_state.progress = update.get("progress", 0)
             preview_state.current = update.get("current", 0)
-            preview_state.total = update.get("total", 0)
+            # 沒帶 total 的更新（例如最後的 result）不能把「JAR 探索」得到的總數蓋成 0
+            preview_state.total = update.get("total", preview_state.total)
             if "result" in update:
                 preview_state.result = update["result"]
     except Exception as ex:  # noqa: BLE001 - 錯誤要顯示在對話框

@@ -377,6 +377,10 @@ class RulesView(RulesWidgetsMixin, ft.Column):
                 return
         loop.call_soon_threadsafe(lambda: func(*args, **kwargs))
 
+    def will_unmount(self):
+        """換頁／關閉：取消尚未執行的搜尋 debounce（idempotent）。"""
+        self._search_debouncer.cancel()
+
     def did_mount(self):
         """掛上頁面後執行在掛載前排入的 UI 更新。"""
         with self._ui_lock:

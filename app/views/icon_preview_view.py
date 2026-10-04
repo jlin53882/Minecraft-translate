@@ -95,6 +95,8 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         self._loading = False  # 掃描進行中（避免重複點擊載入）
         # 每次卸載就遞增：進行中的載入看到世代變了就丟棄結果，不再碰（已卸載的）控制項
         self._load_generation = 0
+        # 詳情頁渲染的世代：連續渲染只套用最後一次；卸載時遞增以丟棄進行中的結果
+        self._render_generation = 0
         self._last_progress_refresh = 0.0
 
         # =========================
@@ -392,8 +394,11 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
     # 載入 → 建立模組清單
     # ==================================================
     def will_unmount(self) -> None:
-        """換頁／關閉：讓進行中的載入作廢（結果丟棄、不再更新控制項；idempotent）。"""
+        """換頁／關閉：讓進行中的載入作廢（結果丟棄、不再更新控制項）並取消 debounce（idempotent）。"""
         self._load_generation += 1
+        self._render_generation += 1
+        self._mod_search_debouncer.cancel()
+        self._detail_search_debouncer.cancel()
 
     def did_mount(self) -> None:
         """重新掛載：作廢的載入已把旗標復位，這裡只同步按鈕狀態。"""

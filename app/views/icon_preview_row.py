@@ -98,8 +98,27 @@ def _resolve_preview_path(icon_result, preview_root: Path) -> Path | None:
     return preview_path
 
 
+def prepare_row_icon(
+    lang_key: str, assets_root: Path, preview_root: Path, icon_path: str | None
+):
+    """準備一列的圖示（**會做磁碟／ZIP／圖片 I/O**，必須在背景執行緒呼叫，#114）。
+
+    回傳 ``(icon_result, preview_path)``：``preview_path`` 已經完成 upscale，
+    交給 ``LangItemRow(prepared_icon=...)`` 後建構列時不再做任何 I/O。
+    """
+    if icon_path:
+        # jar:// URI 不能轉 Path（Windows 上 Path("jar://...") 會變成 jar:\C:\... 格式）
+        icon_result = IconResult(icon_path=icon_path, reason="", risk=None)
+    else:
+        icon_result = resolve_icon_with_reason(lang_key, assets_root)
+    preview_path = _resolve_preview_path(icon_result, preview_root)
+    if preview_path:
+        preview_path = _ensure_icon_size(preview_path)
+    return icon_result, preview_path
+
+
 def _build_icon_widget(
-    preview_path: Path | None, icon_result
+    preview_path: Path | None, icon_result, *, upscale: bool = True
 ) -> tuple[ft.Control | None, ft.Text | None]:
     """建立圖示控制項；無預覽但有原因時改顯示警示圖示與風險說明。回傳 (icon_widget, risk_label)。"""
     risk_label = None
@@ -108,7 +127,7 @@ def _build_icon_widget(
     icon_widget: ft.Control | None = None
     if preview_path:
         # 小於 32x32 的 icon（如 Minecraft 16x16 item icon）以 nearest neighbor 放大至 64x64
-        upscaled_path = _ensure_icon_size(preview_path)
+        upscaled_path = _ensure_icon_size(preview_path) if upscale else preview_path
         icon_widget = ft.Image(
             src=str(upscaled_path),
             width=128,
@@ -154,6 +173,7 @@ class LangItemRow(ft.Container):
         preview_root: Path,
         on_value_changed: Callable[[str, str], None],
         icon_path: str | None = None,
+        prepared_icon=None,
     ):
         """初始化 LangItemRow。
 
@@ -166,6 +186,8 @@ class LangItemRow(ft.Container):
             on_value_changed: 值變更回調函數
             icon_path: 圖示路徑（可為 JAR 內的路徑 或已提取到磁碟的路徑）。
                        若有值則直接使用，跳過 resolve_icon_with_reason。
+            prepared_icon: ``prepare_row_icon`` 在背景執行緒算好的 ``(icon_result, preview_path)``；
+                       提供時建構列不做任何 I/O（event loop 上使用）。未提供則同步計算（相容舊呼叫）。
         """
         super().__init__(
             padding=ft.Padding.symmetric(vertical=12, horizontal=12),
@@ -180,19 +202,18 @@ class LangItemRow(ft.Container):
         # =========================
         # 🖼 Icon + 分類
         # =========================
-        # icon_path 有值（來自 JAR 掃描）：直接使用，跳過 resolve
-        if icon_path:
-            # jar:// URI 不能轉 Path（Windows 上 Path("jar://...") 會變成 jar:\C:\... 格式）
-            # 保持 string，讓 IconRef.parse 處理
-            icon_result = IconResult(
-                icon_path=icon_path,  # 可能是 jar:// URI string 或磁碟 Path
-                reason="",
-                risk=None,
+        if prepared_icon is not None:
+            icon_result, preview_path = prepared_icon
+            icon_widget, risk_label = _build_icon_widget(
+                preview_path, icon_result, upscale=False
             )
         else:
-            icon_result = resolve_icon_with_reason(lang_key, assets_root)
-        preview_path = _resolve_preview_path(icon_result, preview_root)
-        icon_widget, risk_label = _build_icon_widget(preview_path, icon_result)
+            icon_result, preview_path = prepare_row_icon(
+                lang_key, assets_root, preview_root, icon_path
+            )
+            icon_widget, risk_label = _build_icon_widget(
+                preview_path, icon_result, upscale=False
+            )
 
         # =========================
         # 📝 文字區
