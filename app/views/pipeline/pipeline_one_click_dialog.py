@@ -201,12 +201,23 @@ def _one_click_init_state(
     )
 
 
-def _one_click_rebuild_ui(ctx):
+def _one_click_dispose_dialogs(ctx) -> None:
+    """關閉並移除目前的對話框。
+
+    必須先把 ``open=False`` 送到前端（page.update），再從 overlay 移除；
+    直接移除會讓前端的 dialog route 留在畫面上（殘影＋擋住整個頁面）。
+    """
     for d in ctx.dialogs:
         d.open = False
+    ctx.page.update()
+    for d in ctx.dialogs:
         if d in ctx.page.overlay:
             ctx.page.overlay.remove(d)
     ctx.dialogs.clear()
+
+
+def _one_click_rebuild_ui(ctx):
+    _one_click_dispose_dialogs(ctx)
 
     step = ctx.state["step"]
 
@@ -220,11 +231,7 @@ def _one_click_rebuild_ui(ctx):
 
 
 def _one_click_close_all(ctx):
-    for d in ctx.dialogs:
-        d.open = False
-        if d in ctx.page.overlay:
-            ctx.page.overlay.remove(d)
-    ctx.dialogs.clear()
+    _one_click_dispose_dialogs(ctx)
     ctx.page.update()
 
 

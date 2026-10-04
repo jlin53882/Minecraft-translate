@@ -658,3 +658,39 @@ def test_collected_values_flow_into_single_config(env):
     )
     assert config["version"] == "1.21"
     assert len(env.executed) == 1
+
+
+def test_closing_sends_open_false_before_removing_from_overlay(env):
+    """先把 open=False 送到前端、再移出 overlay。
+
+    直接移除會讓前端的 dialog route 留在畫面上（殘影並擋住整個頁面；網頁版實測重現）。
+    """
+    env.open()
+    dialog = env.dialog
+    seen = []
+    original = env.page.update
+
+    def spy(*a, **k):
+        seen.append((dialog.open, dialog in env.page.overlay))
+        return original(*a, **k)
+
+    env.page.update = spy
+    env.click("取消")
+    assert (False, True) in seen  # 關閉狀態送出時，dialog 還在 overlay 內
+    assert env.page.overlay == []
+
+
+def test_navigation_closes_the_previous_step_dialog_properly(env):
+    env.open()
+    first = env.dialog
+    seen = []
+    original = env.page.update
+
+    def spy(*a, **k):
+        seen.append((first.open, first in env.page.overlay))
+        return original(*a, **k)
+
+    env.page.update = spy
+    env.click("下一個")
+    assert (False, True) in seen
+    assert first not in env.page.overlay
