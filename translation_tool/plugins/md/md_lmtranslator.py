@@ -14,32 +14,32 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
-import time
 
-from translation_tool.utils.log_unit import (
-    log_info,
-    log_warning,
-    get_formatted_duration,
-    progress,
-)
 from translation_tool.core.lm_config_rules import validate_api_keys
 from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_translator_shared import (
     CacheRule,
     TouchSet,
     TranslationRecorder,
-    fast_split_items_by_cache,
     TranslatorHooks,
-    run_translator_skeleton,
-    write_dry_run_preview,  # ✅ NEW
-    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
     _is_valid_hit,  # ✅ 新增：cache hit 判斷
+    fast_split_items_by_cache,
+    run_translator_skeleton,
+    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
+    write_dry_run_preview,  # ✅ NEW
 )
 from translation_tool.plugins.shared.lang_text_rules import is_already_zh
 from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
+from translation_tool.utils.log_unit import (
+    get_formatted_duration,
+    log_info,
+    log_warning,
+    progress,
+)
 
 # -------------------------
 # basic io

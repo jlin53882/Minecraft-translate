@@ -19,33 +19,31 @@ Rich Text Shield：shield_text() / unshield_text() 保護 KubeJS 格式（彩色
 
 from __future__ import annotations
 
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import re
+from typing import Any, Dict, List, Optional, Tuple
+
 import opencc
 
-from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_config_rules import validate_api_keys
-from translation_tool.utils.config_manager import load_config
-
+from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_translator_shared import (
     CacheRule,
-    fast_split_items_by_cache,
-    TranslatorHooks,
-    run_translator_skeleton,
     TouchSet,
     TranslationRecorder,
-    write_dry_run_preview,
-    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
+    TranslatorHooks,
     _is_valid_hit,  # ✅ 新增：cache hit 判斷
+    fast_split_items_by_cache,
+    run_translator_skeleton,
+    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
+    write_dry_run_preview,
 )
-
 from translation_tool.plugins.shared.json_io import (
+    collect_json_files,
     read_json_dict,
     write_json_dict,
-    collect_json_files,
 )
 from translation_tool.plugins.shared.lang_path_rules import (
     compute_output_path,
@@ -54,7 +52,7 @@ from translation_tool.plugins.shared.rich_text_shield import (
     shield_text,
     unshield_text,
 )
-
+from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning, progress
 
 
