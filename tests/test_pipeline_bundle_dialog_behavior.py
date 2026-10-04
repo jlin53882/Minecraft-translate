@@ -65,12 +65,18 @@ def _drain(page):
 
 
 class _Picker:
-    """get_directory_path / pick_files 的可控替身（pick_files 回傳含 .files 的結果）。"""
+    """get_directory_path / pick_files / save_file 的可控替身（Flet 1.0：pick_files 直接回傳清單）。"""
 
     def __init__(self):
         self.dirs: list[str | None] = []
         self.files_path: str | None = None
         self.pick_kwargs: dict = {}
+        self.save_path: str | None = None
+        self.save_kwargs: dict = {}
+
+    async def save_file(self, **kwargs):
+        self.save_kwargs = kwargs
+        return self.save_path
 
     async def get_directory_path(self, dialog_title=None):
         return self.dirs.pop(0) if self.dirs else None
@@ -81,8 +87,8 @@ class _Picker:
             "allowed_extensions": allowed_extensions,
         }
         if self.files_path is None:
-            return None
-        return SimpleNamespace(files=[SimpleNamespace(path=self.files_path)])
+            return []
+        return [SimpleNamespace(path=self.files_path)]
 
 
 class _Env:
@@ -100,6 +106,7 @@ class _Env:
         monkeypatch.setattr(mod, "_load_version_data", lambda: self.versions)
 
     def open(self, input_path="", output_path=None):
+        """input_path 是管線頁的 Mod 來源（對話框不使用）；要模擬使用者改輸入來源請用 ``type_input``。"""
         mod.open_bundle_dialog(
             self.page,
             self.picker,
@@ -109,6 +116,12 @@ class _Env:
             show_snack_bar=lambda msg, *a, **k: self.snacks.append(msg),
         )
         return self.page.overlay[-1]
+
+    def open_typing_input(self, path):
+        """開啟後把「輸入來源」改成 path（模擬使用者輸入）。"""
+        dialog = self.open()
+        _field(dialog, "輸入來源").value = str(path)
+        return dialog
 
 
 @pytest.fixture
@@ -145,16 +158,19 @@ def test_default_subfolder_and_zip_name_without_config(env):
     dialog = env.open()
     assert _field(dialog, "輸入來源").value == _default_input(env)
     zip_field = _field(dialog, "輸出 ZIP 檔案")
-    assert zip_field.value == ""  # 欄位留空，只在 hint 顯示預設
+    assert zip_field.value == os.path.join(
+        str(env.out), "可使用翻譯.zip"
+    )  # 預設直接帶入
     assert (
         zip_field.hint_text
         == f"自動帶入：{os.path.join(str(env.out), '可使用翻譯.zip')}"
     )
 
 
-def test_explicit_input_path_wins_over_default(env):
-    dialog = env.open(input_path="/some/input")
-    assert _field(dialog, "輸入來源").value == "/some/input"
+def test_mod_source_is_never_used_as_bundle_input(env):
+    """原本把 Mod 來源當成打包輸入；預設應是 {output}/lm_translate/_翻譯輸出。"""
+    dialog = env.open(input_path="/some/mods")
+    assert _field(dialog, "輸入來源").value == _default_input(env)
 
 
 def test_empty_output_path_gives_empty_defaults_and_fallback_hints(env):
@@ -194,48 +210,62 @@ def test_confirm_with_missing_input_dir_is_rejected(env):
     assert env.calls == [] and dialog.open is True
 
 
+def test_default_zip_path_is_prefilled_and_accepted(env):
+    """輸出 ZIP 預設已帶入（原本欄位留空又不允許空白，預設值形同無效）。"""
+    os.makedirs(_default_input(env))
+    dialog = env.open()
+    _button(dialog, "確定執行").on_click(None)
+    assert env.snacks == []
+    assert env.calls[0]["output_zip_path"] == os.path.join(
+        str(env.out), "可使用翻譯.zip"
+    )
+
+
 def test_confirm_with_empty_zip_name_is_rejected(env):
-    dialog = env.open(input_path=str(env.out))
+    dialog = env.open_typing_input(env.out)
     _field(dialog, "輸出 ZIP 檔案").value = "   "
     _button(dialog, "確定執行").on_click(None)
     assert env.snacks == ["⚠️ 輸出 ZIP 檔名不可空白"]
     assert env.calls == [] and dialog.open is True
 
 
-def test_confirm_rejects_nonexistent_image_with_unsupported_extension(env):
-    dialog = env.open(input_path=str(env.out))
+def test_confirm_rejects_existing_image_with_unsupported_extension(env):
+    img = env.tmp / "cover.gif"
+    img.write_bytes(b"x")
+    dialog = env.open_typing_input(env.out)
     _field(dialog, "輸出 ZIP 檔案").value = "a.zip"
-    _field(dialog, "封面圖片（可留空）").value = str(env.tmp / "pack.gif")
+    _field(dialog, "封面圖片（可留空）").value = str(img)
     _button(dialog, "確定執行").on_click(None)
     assert env.snacks == ["⚠️ 封面圖片只支援 .png/.jpg"]
     assert env.calls == []
 
 
-def test_existing_image_file_is_accepted_whatever_its_extension(env):
-    img = env.tmp / "cover.gif"
+def test_confirm_rejects_nonexistent_image(env):
+    """原本驗證反了：不存在的 .png 會通過，存在但副檔名錯的反而被放行。"""
+    dialog = env.open_typing_input(env.out)
+    _field(dialog, "輸出 ZIP 檔案").value = "a.zip"
+    _field(dialog, "封面圖片（可留空）").value = str(env.tmp / "gone.png")
+    _button(dialog, "確定執行").on_click(None)
+    assert env.snacks == ["⚠️ 封面圖片檔案不存在"]
+    assert env.calls == []
+
+
+def test_existing_png_is_accepted_and_forwarded(env):
+    img = env.tmp / "cover.png"
     img.write_bytes(b"x")
-    dialog = env.open(input_path=str(env.out))
+    dialog = env.open_typing_input(env.out)
     _field(dialog, "輸出 ZIP 檔案").value = "a.zip"
     _field(dialog, "封面圖片（可留空）").value = str(img)
     _button(dialog, "確定執行").on_click(None)
-    assert env.calls[0]["pack_image_path"] == str(img)
-
-
-def test_missing_png_path_passes_validation_and_is_forwarded(env):
-    missing = str(env.tmp / "gone.png")
-    dialog = env.open(input_path=str(env.out))
-    _field(dialog, "輸出 ZIP 檔案").value = "a.zip"
-    _field(dialog, "封面圖片（可留空）").value = missing
-    _button(dialog, "確定執行").on_click(None)
     assert env.snacks == []
-    assert env.calls[0]["pack_image_path"] == missing
+    assert env.calls[0]["pack_image_path"] == str(img)
 
 
 # ---------- callback 參數 ----------
 
 
 def test_confirm_calls_back_with_exact_kwargs_and_closes(env):
-    dialog = env.open(input_path=str(env.out))
+    dialog = env.open_typing_input(env.out)
     zip_path = str(env.tmp / "pack.zip")
     _field(dialog, "輸出 ZIP 檔案").value = f"  {zip_path} "
     _field(dialog, "檔案敘述").value = "  §a測試翻譯  "
@@ -265,12 +295,21 @@ def test_blank_input_falls_back_to_default_input_dir(env):
     assert env.calls[0]["input_root_dir"] == default
 
 
-def test_pack_formats_are_always_none_even_after_selecting_a_version(env):
-    dialog = env.open(input_path=str(env.out))
+def test_no_version_selected_passes_no_formats(env):
+    dialog = env.open_typing_input(env.out)
+    _field(dialog, "輸出 ZIP 檔案").value = "z.zip"
+    _button(dialog, "確定執行").on_click(None)
+    assert env.calls[0]["min_format"] is None and env.calls[0]["max_format"] is None
+
+
+def test_selected_version_maps_to_pack_formats(env):
+    """所選 Minecraft 版本要轉成 pack_format 範圍（原本一律傳 None）。"""
+    env.versions["1.20.1"] = {"min_format": 9, "max_format": 15}
+    dialog = env.open_typing_input(env.out)
     _field(dialog, "輸出 ZIP 檔案").value = "z.zip"
     _version_item(dialog, "1.20.1").on_click(None)
     _button(dialog, "確定執行").on_click(None)
-    assert env.calls[0]["min_format"] is None and env.calls[0]["max_format"] is None
+    assert env.calls[0]["min_format"] == 9 and env.calls[0]["max_format"] == 15
 
 
 def test_cancel_closes_without_callback(env):
@@ -350,8 +389,11 @@ def test_version_search_without_match_shows_placeholder(env):
 
 def test_selecting_version_updates_selected_label(env):
     dialog = env.open()
+    _toggle(dialog).on_click(None)
+    assert _dropdown(dialog).visible is True
     _version_item(dialog, "1.19.4").on_click(None)
-    assert "1.19.4" in _texts(dialog)
+    assert "已選擇：1.19.4" in _texts(dialog)
+    assert _dropdown(dialog).visible is False  # 選完自動收合
 
 
 def test_missing_version_data_still_opens_with_placeholder(env):
@@ -381,7 +423,7 @@ def test_pick_pack_image_cancelled_keeps_value(env):
 
 
 def test_remove_button_clears_pack_image_and_it_is_not_passed(env):
-    dialog = env.open(input_path=str(env.out))
+    dialog = env.open_typing_input(env.out)
     _field(dialog, "輸出 ZIP 檔案").value = "z.zip"
     _field(dialog, "封面圖片（可留空）").value = str(env.tmp / "p.png")
     updated = env.page.updated
@@ -393,7 +435,7 @@ def test_remove_button_clears_pack_image_and_it_is_not_passed(env):
 
 
 def test_extra_folders_add_dedupe_remove_and_forwarded(env):
-    dialog = env.open(input_path=str(env.out))
+    dialog = env.open_typing_input(env.out)
     _field(dialog, "輸出 ZIP 檔案").value = "z.zip"
     add = _inner_button(dialog, "+ 新增資料夾")
     env.picker.dirs = ["/data/alpha", "/data/alpha", "/data/beta", None]
@@ -419,13 +461,25 @@ def test_extra_folders_add_dedupe_remove_and_forwarded(env):
 
 def test_pick_input_dir_and_output_zip_fill_fields(env):
     dialog = env.open()
-    env.picker.dirs = ["/chosen/in", "/chosen/out"]
+    env.picker.dirs = ["/chosen/in"]
+    env.picker.save_path = "/chosen/out/my_pack"
     _inner_button(dialog, "選擇資料夾").on_click(None)
     _drain(env.page)
     _inner_button(dialog, "選擇儲存位置").on_click(None)
     _drain(env.page)
     assert _field(dialog, "輸入來源").value == "/chosen/in"
-    assert _field(dialog, "輸出 ZIP 檔案").value == "/chosen/out"
+    # 輸出是 ZIP「檔案」：用另存新檔，並補上 .zip（原本選的是資料夾，後續建立 ZIP 會失敗）
+    assert _field(dialog, "輸出 ZIP 檔案").value == "/chosen/out/my_pack.zip"
+    assert env.picker.save_kwargs["allowed_extensions"] == ["zip"]
+
+
+def test_pick_output_zip_cancelled_keeps_value(env):
+    dialog = env.open()
+    before = _field(dialog, "輸出 ZIP 檔案").value
+    env.picker.save_path = None
+    _inner_button(dialog, "選擇儲存位置").on_click(None)
+    _drain(env.page)
+    assert _field(dialog, "輸出 ZIP 檔案").value == before
 
 
 def test_pick_cancelled_keeps_input_value(env):
@@ -440,7 +494,7 @@ def test_pick_cancelled_keeps_input_value(env):
 def test_browse_input_dir_messages_and_open(env, monkeypatch):
     opened = []
     monkeypatch.setattr(mod.os, "startfile", opened.append, raising=False)
-    dialog = env.open(input_path=str(env.out))
+    dialog = env.open_typing_input(env.out)
     browse = _inner_button(dialog, "瀏覽")
     browse.on_click(None)
     assert opened == [str(env.out)]
@@ -470,11 +524,11 @@ def test_preview_with_no_input_and_no_output_shows_error(env):
     assert dialog.open is True
 
 
-def test_preview_with_valid_input_reports_not_implemented_and_closes(env):
-    dialog = env.open(input_path=str(env.out))
+def test_preview_with_valid_input_reports_not_implemented_and_keeps_open(env):
+    dialog = env.open_typing_input(env.out)
     _button(dialog, "預覽結果").on_click(None)
     assert env.snacks == ["🔍 預覽功能待實作"]
-    assert dialog.open is False
+    assert dialog.open is True
     assert env.calls == []
 
 
@@ -484,4 +538,4 @@ def test_preview_falls_back_to_default_input_when_field_blank(env):
     _field(dialog, "輸入來源").value = ""
     _button(dialog, "預覽結果").on_click(None)
     assert env.snacks == ["🔍 預覽功能待實作"]
-    assert dialog.open is False
+    assert dialog.open is True

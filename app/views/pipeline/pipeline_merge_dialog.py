@@ -23,7 +23,6 @@ from app.services_impl.pipelines.merge_service import (
 from app.tasks.task_session import TaskSession  # noqa: F401
 from app.ui.design import C
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_info
 
 
 def _default_safe_int(s):
@@ -416,39 +415,30 @@ def _merge_pick_folder_input(ctx, e=None):
 
 
 def _merge_pick_zip_input(ctx, e=None):
-    ctx.show_snack_bar("DEBUG: pick_zip_input called")
-
-    def on_zip_picked(e: ft.FilePickerUploadEvent):
-        log_info(f"on_zip_picked fired! files={e.files}")
-        if not e.files:
-            return
-        for f in e.files:
-            if f.path and f.path not in ctx.merge_selected_zips:
-                ctx.merge_selected_zips.append(f.path)
-        ctx.refresh_zip_list()
-        ctx.page.update()
-        ctx.show_snack_bar(f"選了 {len(ctx.merge_selected_zips)} 個 ZIP")
-
-    ctx.file_picker.on_upload = on_zip_picked
-
     async def _async_pick_zip():
-        await ctx.file_picker.pick_files(
+        # Flet 1.0：pick_files() 直接回傳選到的檔案（不會觸發 on_upload）
+        result = await ctx.file_picker.pick_files(
             dialog_title="選擇 ZIP 檔案",
             allow_multiple=True,
             allowed_extensions=["zip"],
         )
+        if not result:
+            return
+        for f in result if isinstance(result, list) else [result]:
+            path = getattr(f, "path", None) or (f if isinstance(f, str) else None)
+            if path and path not in ctx.merge_selected_zips:
+                ctx.merge_selected_zips.append(path)
+        ctx.refresh_zip_list()
+        ctx.page.update()
+        ctx.show_snack_bar(f"選了 {len(ctx.merge_selected_zips)} 個 ZIP")
 
     ctx.page.run_task(_async_pick_zip)
 
 
 def _merge_refresh_zip_list(ctx):
-    log_info(
-        f"Refresh zip list, count={len(ctx.merge_selected_zips)}, list={ctx.merge_selected_zips}"
-    )
     ctx.merge_zip_list_view.controls.clear()
     for path in ctx.merge_selected_zips:
         name = Path(path).name
-        log_info(f"Adding zip row: {name}")
         ctx.merge_zip_list_view.controls.append(
             ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -514,8 +504,7 @@ def _merge_show_preview_result(ctx, dialog):
     if not output:
         ctx.show_snack_bar("⚠️ 請填寫輸出目錄")
         return
-    ctx.show_snack_bar("🔍 預覽功能待實作")
-    ctx.close_dialog(dialog)
+    ctx.show_snack_bar("🔍 預覽功能待實作")  # 保留對話框，避免丟掉使用者已填的設定
 
 
 def _merge_start_merge(ctx, dialog):
@@ -545,10 +534,15 @@ def _merge_start_merge(ctx, dialog):
     only_lang = ctx.merge_only_lang_checkbox.value
     process_zh_cn = ctx.merge_process_zh_cn_switch.value
     patchouli_skip_val = ctx.merge_patchouli_skip_switch.value
-    patchouli_threshold_val = (
-        ctx.safe_float((ctx.merge_patchouli_threshold_field.value or "").strip()) or 0.5
+    # 0 是合法值；只有空白／格式錯誤才回到預設
+    patchouli_threshold_val = ctx.safe_float(
+        (ctx.merge_patchouli_threshold_field.value or "").strip()
     )
-    zh_en_val = ctx.safe_int((ctx.merge_zh_en_threshold_field.value or "").strip()) or 2
+    if patchouli_threshold_val is None:
+        patchouli_threshold_val = 0.5
+    zh_en_val = ctx.safe_int((ctx.merge_zh_en_threshold_field.value or "").strip())
+    if zh_en_val is None:
+        zh_en_val = 2
 
     lang_codes = [code for code, cb in ctx.lang_code_checks.items() if cb.value]
     if not lang_codes:

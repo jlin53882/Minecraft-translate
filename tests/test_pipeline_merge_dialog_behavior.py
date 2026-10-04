@@ -250,7 +250,7 @@ def test_start_strips_paths_and_passes_modified_options(env):
     ]
 
 
-@pytest.mark.parametrize("text", ["", "abc", "0", "0.0"])
+@pytest.mark.parametrize("text", ["", "abc"])
 def test_patchouli_threshold_falls_back_to_default(env, text):
     dialog = env.open()
     for c in _walk(dialog):
@@ -260,7 +260,7 @@ def test_patchouli_threshold_falls_back_to_default(env, text):
     assert env.runs[0][6] == 0.5
 
 
-@pytest.mark.parametrize("text", ["", "x", "1.5", "0"])
+@pytest.mark.parametrize("text", ["", "x", "1.5"])
 def test_zh_en_threshold_falls_back_to_default(env, text):
     dialog = env.open()
     for c in _walk(dialog):
@@ -268,6 +268,19 @@ def test_zh_en_threshold_falls_back_to_default(env, text):
             c.value = text
     _button(dialog, "確定執行").on_click(None)
     assert env.runs[0][7] == 2
+
+
+def test_zero_thresholds_are_valid_values_not_defaults(env):
+    """0 是合法閾值（原本被 `or` 當成空值而換成預設 0.5／2）。"""
+    dialog = env.open()
+    for c in _walk(dialog):
+        if isinstance(c, ft.TextField) and c.width == 100:
+            c.value = "0.0"
+        elif isinstance(c, ft.TextField) and c.width == 80:
+            c.value = "0"
+    _button(dialog, "確定執行").on_click(None)
+    assert env.runs[0][6] == 0.0
+    assert env.runs[0][7] == 0
 
 
 def test_custom_safe_converters_are_used(env):
@@ -286,6 +299,22 @@ def test_zh_cn_off_is_passed_with_skip_false(env):
     assert env.runs[0][4] is False and env.runs[0][5] is False
 
 
+def _pick_zips(env, button, paths):
+    """讓 file_picker.pick_files() 回傳指定檔案（Flet 1.0 直接回傳清單），並執行點擊。"""
+
+    async def pick_files(**kwargs):
+        return [SimpleNamespace(path=p) for p in paths]
+
+    env.picker.pick_files = pick_files
+    button = button or next(
+        c
+        for c in _walk(env.page.overlay[-1])
+        if isinstance(c, ft.Button) and c.content == "選擇 ZIP"
+    )
+    button.on_click(None)
+    _drain(env.page)
+
+
 def test_zip_mode_requires_selection_and_passes_list(env):
     dialog = env.open()
     _set_mode(dialog, "zip")
@@ -296,13 +325,14 @@ def test_zip_mode_requires_selection_and_passes_list(env):
     zip_button = next(
         c for c in _walk(dialog) if isinstance(c, ft.Button) and c.content == "選擇 ZIP"
     )
-    zip_button.on_click(None)
-    assert env.snacks[1] == "DEBUG: pick_zip_input called"
-    files = [SimpleNamespace(path="/a/x.zip"), SimpleNamespace(path="/a/y.zip")]
-    env.picker.on_upload(SimpleNamespace(files=files))
+    _pick_zips(env, zip_button, ["/a/x.zip", "/a/y.zip"])
     assert env.snacks[-1] == "選了 2 個 ZIP"
+    assert "DEBUG: pick_zip_input called" not in env.snacks
     # 重複選取不會重複加入
-    env.picker.on_upload(SimpleNamespace(files=[SimpleNamespace(path="/a/x.zip")]))
+    _pick_zips(env, zip_button, ["/a/x.zip"])
+    assert env.snacks[-1] == "選了 2 個 ZIP"
+    # 取消選取（回傳空）不變動
+    _pick_zips(env, zip_button, [])
     assert env.snacks[-1] == "選了 2 個 ZIP"
 
     _button(dialog, "確定執行").on_click(None)
@@ -325,14 +355,7 @@ def test_zip_mode_requires_selection_and_passes_list(env):
 def test_zip_list_remove_button_drops_entry(env):
     dialog = env.open()
     _set_mode(dialog, "zip")
-    next(
-        c for c in _walk(dialog) if isinstance(c, ft.Button) and c.content == "選擇 ZIP"
-    ).on_click(None)
-    env.picker.on_upload(
-        SimpleNamespace(
-            files=[SimpleNamespace(path="/a/x.zip"), SimpleNamespace(path="/a/y.zip")]
-        )
-    )
+    _pick_zips(env, None, ["/a/x.zip", "/a/y.zip"])
     lv = next(
         c for c in _walk(dialog) if isinstance(c, ft.ListView) and c.height == 100
     )
@@ -421,11 +444,12 @@ def test_preview_validates_fields(env, src, out, message):
     assert dialog.open is True
 
 
-def test_preview_is_stub_that_closes_dialog(env):
+def test_preview_is_stub_that_keeps_dialog_open(env):
+    """預覽尚未實作：只提示，不關閉對話框（避免丟掉使用者已填的設定）。"""
     dialog = env.open()
     _button(dialog, "預覽結果").on_click(None)
     assert env.snacks == ["🔍 預覽功能待實作"]
-    assert dialog.open is False
+    assert dialog.open is True
     assert env.runs == []
 
 

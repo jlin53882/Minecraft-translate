@@ -31,10 +31,11 @@ def open_translate_dialog(
     Args:
         page: Flet Page 實例
         file_picker: Flet FilePicker 實例
-        input_path: 預填的翻譯目標資料夾路徑
-        output_path: 預填的輸出目錄路徑
+        input_path: 管線頁的 Mod 來源（本對話框不使用；翻譯目標由輸出根目錄推算）
+        output_path: 管線頁的輸出根目錄；翻譯目標預設為
+            ``{output}/locale_sort/_整理輸出/<待翻譯整理資料夾>``，輸出預設為 ``{output}/lm_translate``
         on_start_translate: 回調函式，簽名：
-            on_start_translate(input_dir, output_dir, dry_run, write_new_cache, api_keys)
+            on_start_translate(input_dir, output_dir, dry_run, write_new_cache)
         show_snack_bar: 回調：(message: str, color: str = C.RED) -> void
     """
     ctx = types.SimpleNamespace(
@@ -97,7 +98,7 @@ def _translate_init_state_and_fields(ctx, input_path, output_path):
         hint_text=f"自動帶入：{ctx.default_input}"
         if ctx.default_input
         else "留空自動帶入整理後的待翻譯資料夾",
-        value=input_path or ctx.default_input,
+        value=ctx.default_input,
         expand=True,
         border_color=C.DIA,
     )
@@ -106,7 +107,7 @@ def _translate_init_state_and_fields(ctx, input_path, output_path):
         hint_text=f"自動帶入：{ctx.default_output}"
         if ctx.default_output
         else "留空自動帶入 lm_translate",
-        value=output_path or ctx.default_output,
+        value=ctx.default_output,
         expand=True,
         border_color=C.DIA,
     )
@@ -120,15 +121,6 @@ def _translate_build_option_widgets(ctx) -> None:
     ctx.write_new_cache_switch = ft.Switch(
         label="寫入新快取（每次回傳單獨快取）", value=True
     )
-
-    ctx.api_keys_container = ft.Column(spacing=8)
-    ctx.api_keys = []
-
-    ctx.add_key_field = functools.partial(_translate_add_key_field, ctx)
-
-    ctx.delete_key_field = functools.partial(_translate_delete_key_field, ctx)
-
-    ctx.add_key_field()
 
     ctx.close_dialog = functools.partial(_translate_close_dialog, ctx)
 
@@ -187,34 +179,6 @@ def _translate_build_content(ctx):
         tight=False,
     )
     return content
-
-
-def _translate_add_key_field(ctx, initial_value=""):
-    row = ft.Row(spacing=10)
-    key_tf = ft.TextField(
-        value=initial_value,
-        hint_text="輸入 API Key",
-        expand=True,
-        text_size=12,
-        border_color=C.DIA,
-        password=True,
-    )
-    del_btn = ft.IconButton(
-        icon=ft.Icons.DELETE,
-        icon_color=C.RED,
-        on_click=lambda _: ctx.delete_key_field(row),
-    )
-    row.controls = [key_tf, del_btn]
-    ctx.api_keys_container.controls.append(row)
-    ctx.api_keys.append(key_tf)
-    ctx.page.update()
-
-
-def _translate_delete_key_field(ctx, row):
-    ctx.api_keys_container.controls.remove(row)
-    if row.controls[0] in ctx.api_keys:
-        ctx.api_keys.remove(row.controls[0])
-    ctx.page.update()
 
 
 def _translate_close_dialog(ctx, dialog):

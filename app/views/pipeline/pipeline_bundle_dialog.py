@@ -118,7 +118,7 @@ def _bundle_init_state_and_fields(ctx, input_path, output_path):
         hint_text=f"自動帶入：{ctx.default_input}"
         if ctx.default_input
         else "留空自動帶入翻譯完成後的輸出",
-        value=input_path or ctx.default_input,
+        value=ctx.default_input,
         expand=True,
         border_color=C.ENCH,
     )
@@ -127,7 +127,7 @@ def _bundle_init_state_and_fields(ctx, input_path, output_path):
         hint_text=f"自動帶入：{ctx.default_output_zip}"
         if ctx.default_output_zip
         else "留空自動帶入可使用翻譯.zip",
-        value="",
+        value=ctx.default_output_zip,
         expand=True,
         border_color=C.ENCH,
     )
@@ -148,6 +148,7 @@ def _bundle_build_version_widgets(ctx):
         expand=True, height=160, spacing=4, auto_scroll=False
     )
     ctx.version_expanded = False
+    ctx.selected_version = None
 
     ctx.version_toggle_label = ft.Text("", size=12, expand=True)
     version_search = ft.TextField(
@@ -309,7 +310,10 @@ def _bundle__refresh_version_list(ctx, search_text: str):
 
 
 def _bundle__select_version(ctx, version: str):
-    ctx.version_toggle_label.value = version
+    ctx.selected_version = version
+    ctx.version_toggle_label.value = f"已選擇：{version}"
+    ctx.version_expanded = False
+    ctx.version_dropdown_container.visible = False
     ctx.page.update()
 
 
@@ -336,19 +340,24 @@ def _bundle_start_bundle(ctx, dialog):
         return
 
     pack_img = (ctx.pack_image_field.value or "").strip()
-    if pack_img and not os.path.isfile(pack_img):
+    if pack_img:
         ext = os.path.splitext(pack_img)[1].lower()
+        if not os.path.isfile(pack_img):
+            ctx.show_snack_bar("⚠️ 封面圖片檔案不存在")
+            return
         if ext not in (".png", ".jpg", ".jpeg"):
             ctx.show_snack_bar("⚠️ 封面圖片只支援 .png/.jpg")
             return
+
+    version_info = ctx.version_data.get(ctx.selected_version or "", {})
 
     ctx.close_dialog(dialog)
     ctx.on_start_bundle(
         input_root_dir=input_dir or ctx.default_input,
         output_zip_path=output_zip or ctx.default_output_zip,
         description=(ctx.description_field.value or "").strip(),
-        min_format=None,
-        max_format=None,
+        min_format=version_info.get("min_format"),
+        max_format=version_info.get("max_format"),
         pack_image_path=pack_img or None,
         extra_folders=list(ctx.extra_folders),
     )
@@ -376,8 +385,15 @@ def _bundle_browse_input_dir(ctx, e=None):
 
 def _bundle_pick_output_zip(ctx, e=None):
     async def do_pick():
-        result = await ctx.file_picker.get_directory_path()
+        # 輸出必須是 ZIP「檔案」路徑：用另存新檔，而不是選資料夾
+        result = await ctx.file_picker.save_file(
+            dialog_title="選擇輸出 ZIP 檔案",
+            file_name=os.path.basename(ctx.default_output_zip) or "可使用翻譯.zip",
+            allowed_extensions=["zip"],
+        )
         if result:
+            if not result.lower().endswith(".zip"):
+                result += ".zip"
             ctx.bundle_output_zip_field.value = result
             ctx.page.update()
 
@@ -390,8 +406,9 @@ def _bundle_pick_pack_image(ctx, e=None):
             dialog_title="選擇封面圖片",
             allowed_extensions=["png", "jpg", "jpeg"],
         )
-        if result and result.files:
-            ctx.pack_image_field.value = result.files[0].path
+        # Flet 1.0：pick_files() 直接回傳 list[FilePickerFile]
+        if result:
+            ctx.pack_image_field.value = result[0].path
             ctx.page.update()
 
     ctx.page.run_task(do_pick)
@@ -440,5 +457,4 @@ def _bundle_show_preview_result(ctx, dialog):
     if not input_dir or not os.path.isdir(input_dir):
         ctx.show_snack_bar("⚠️ 輸入資料夾不存在")
         return
-    ctx.show_snack_bar("🔍 預覽功能待實作")
-    ctx.close_dialog(dialog)
+    ctx.show_snack_bar("🔍 預覽功能待實作")  # 保留對話框，避免丟掉使用者已填的設定

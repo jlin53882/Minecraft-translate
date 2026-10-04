@@ -54,7 +54,7 @@ class UntranslatedChecker(ft.Container):
         return ft.Column(
             [
                 ft.Text(
-                    "比對 en_us 與 zh_tw 的 key，列出繁中缺漏或仍是英文的條目。",
+                    "比對 en_us 與 zh_tw 的 key，列出繁中缺漏的條目（值仍是英文的不在此檢查範圍）。",
                     size=12.5,
                     color=C.MUTED,
                 ),

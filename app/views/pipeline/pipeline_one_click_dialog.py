@@ -38,6 +38,14 @@ def _load_version_data():
     return {}
 
 
+def _parse_number(text, cast, default):
+    """欄位文字轉數字；空白或格式錯誤時回傳預設值（與欄位提示「空白用預設值」一致）。"""
+    try:
+        return cast(str(text).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def open_one_click_dialog(
     page: ft.Page,
     file_picker: ft.FilePicker,
@@ -67,6 +75,8 @@ def open_one_click_dialog(
                 "write_new_cache": bool,
                 "description": str,
                 "version": str,
+                "min_format": int | None,   # 由所選版本對應；未選為 None
+                "max_format": int | None,
                 "pack_image": str | None,
                 "extra_folders": list[str],
                 "zip_output": str,
@@ -148,6 +158,10 @@ def _one_click_init_state(
 ) -> None:
     """一鍵製作對話框：狀態與步驟標籤。"""
 
+    ctx.patchouli_threshold_default = lang_merger_cfg.get(
+        "patchouli_effective_translation_threshold", 0.5
+    )
+    ctx.zh_en_threshold_default = lang_merger_cfg.get("zh_en_letter_threshold", 2)
     ctx.state = {
         "step": 1,
         "mode": "lang",
@@ -157,10 +171,8 @@ def _one_click_init_state(
         "patchouli_skip": lang_merger_cfg.get(
             "patchouli_skip_en_us_when_zh_cn_exists", False
         ),
-        "patchouli_threshold": lang_merger_cfg.get(
-            "patchouli_effective_translation_threshold", 0.5
-        ),
-        "zh_en_threshold": lang_merger_cfg.get("zh_en_letter_threshold", 2),
+        "patchouli_threshold": ctx.patchouli_threshold_default,
+        "zh_en_threshold": ctx.zh_en_threshold_default,
         "dry_run": False,
         "write_new_cache": True,
         "description": "",
@@ -254,6 +266,9 @@ def _one_click__build_step1(ctx):
         for code, cb in lang_checks.items():
             ctx.state["lang_codes"][code] = cb.value
 
+    for cb in lang_checks.values():
+        cb.on_change = on_lang_check
+
     lang_section = ft.Column(
         [lang_checks[code] for code in ctx.lang_codes_default], spacing=2
     )
@@ -285,6 +300,12 @@ def _one_click__build_step2(ctx):
         zip_list_view,
     ) = _one_click_step2_widgets(ctx)
 
+    def on_only_lang(e):
+        ctx.state["only_lang"] = e.control.value
+
+    def on_process_zh_cn(e):
+        ctx.state["process_zh_cn"] = e.control.value
+
     return ft.Column(
         [
             ft.Text("Mod 來源", weight="bold", size=13),
@@ -296,8 +317,16 @@ def _one_click__build_step2(ctx):
             ft.Text(ctx.output_path or "未設定", size=11, color=C.MUTED),
             ft.Divider(),
             ft.Text("語系過濾設定", weight="bold", size=13),
-            ft.Switch(label="只處理 lang 檔案", value=ctx.state["only_lang"]),
-            ft.Switch(label="處理 zh_cn 檔案", value=ctx.state["process_zh_cn"]),
+            ft.Switch(
+                label="只處理 lang 檔案",
+                value=ctx.state["only_lang"],
+                on_change=on_only_lang,
+            ),
+            ft.Switch(
+                label="處理 zh_cn 檔案",
+                value=ctx.state["process_zh_cn"],
+                on_change=on_process_zh_cn,
+            ),
             ft.Divider(),
             ft.Text("zh 英文含量閾值", weight=ft.FontWeight.W_500, size=12),
             zh_en_field,
@@ -379,7 +408,18 @@ def _one_click_step2_widgets(ctx):
 
     patchouli_skip_cb.on_change = on_patchouli_skip
 
+    def on_patchouli_threshold(e):
+        ctx.state["patchouli_threshold"] = _parse_number(
+            e.control.value, float, ctx.patchouli_threshold_default
+        )
+
+    def on_zh_en_threshold(e):
+        ctx.state["zh_en_threshold"] = _parse_number(
+            e.control.value, int, ctx.zh_en_threshold_default
+        )
+
     patchouli_thresh_field = ft.TextField(
+        on_change=on_patchouli_threshold,
         value=str(ctx.state["patchouli_threshold"]),
         width=100,
         dense=True,
@@ -389,6 +429,7 @@ def _one_click_step2_widgets(ctx):
     )
 
     zh_en_field = ft.TextField(
+        on_change=on_zh_en_threshold,
         value=str(ctx.state["zh_en_threshold"]),
         width=80,
         dense=True,
@@ -558,6 +599,13 @@ def _one_click__build_step4(ctx):
 
 def _one_click_step4_version_widgets(ctx):
     """步驟 4：輸出、版本與額外資料夾控制項（版本切換使用 nonlocal，必須同處定義）。"""
+
+    def on_description(e):
+        ctx.state["description"] = e.control.value
+
+    def on_zip_output(e):
+        ctx.state["zip_output"] = e.control.value
+
     bundle_input_field = ft.TextField(
         label="輸入來源",
         hint_text="自動帶入翻譯完成後的輸出",
@@ -566,12 +614,15 @@ def _one_click_step4_version_widgets(ctx):
         border_color=C.ENCH,
     )
     zip_output_field = ft.TextField(
+        on_change=on_zip_output,
         label="輸出 ZIP 檔案",
         value=ctx.state["zip_output"],
         expand=True,
         border_color=C.ENCH,
     )
+
     desc_field = ft.TextField(
+        on_change=on_description,
         label="檔案敘述",
         hint_text="直接輸入文字，或使用 § 顏色代碼",
         value=ctx.state["description"],
@@ -700,6 +751,7 @@ def _one_click__go_next(ctx):
 
 def _one_click__do_execute(ctx):
     ctx.close_all()
+    version_info = _load_version_data().get(ctx.state["version"], {})
     config = {
         "mode": ctx.state["mode"],
         "lang_codes": [code for code, v in ctx.state["lang_codes"].items() if v],
@@ -712,6 +764,8 @@ def _one_click__do_execute(ctx):
         "write_new_cache": ctx.state["write_new_cache"],
         "description": ctx.state["description"],
         "version": ctx.state["version"],
+        "min_format": version_info.get("min_format"),
+        "max_format": version_info.get("max_format"),
         "pack_image": ctx.state["pack_image"],
         "extra_folders": list(ctx.state["extra_folders"]),
         "zip_output": ctx.state["zip_output"],

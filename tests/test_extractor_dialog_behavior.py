@@ -290,3 +290,62 @@ def test_auto_start_runs_without_a_click(env):
     dialog = env.open(auto_start=True)
     assert dialog.modal is True
     assert len(env.threads) == 1
+
+
+def test_stats_reach_on_complete(env):
+    """成功時 on_complete 收到 service 回報的統計（原本恆為 0/0/0）。"""
+    dialog = env.open()
+    _button(dialog, "開始提取").on_click(None)
+    env.run_thread()
+    done, stats = env.completed[0]
+    assert done is True
+    assert (stats["success"], stats["warnings"], stats["failures"]) == (3, 1, 0)
+
+
+def test_exception_is_reported_as_not_done_with_one_failure(env):
+    env.raise_in_loop = RuntimeError("壞掉了")
+    dialog = env.open()
+    _button(dialog, "開始提取").on_click(None)
+    env.run_thread()
+    done, stats = env.completed[0]
+    assert done is False
+    assert stats["failures"] == 1
+
+
+def test_cancelled_run_is_not_reported_as_complete(env, monkeypatch):
+    """取消後不得出現「[完成]」與 100%「任務完成」，on_complete 也不是 done。"""
+    dialog = env.open()
+    _button(dialog, "開始提取").on_click(None)
+
+    def loop_that_gets_cancelled(gen, cancelled_flag, on_update):
+        on_update({"progress": 0.4, "current": 2, "total": 5, "log": "處理中"})
+        _button(dialog, "取消").on_click(None)
+        return {"success": 2, "warnings": 0, "failures": 0}
+
+    monkeypatch.setattr(mod, "run_extraction_loop", loop_that_gets_cancelled)
+    env.run_thread()
+
+    texts = _texts(dialog)
+    assert not any("[完成]" in t for t in texts)
+    assert "任務完成" not in texts and "100%" not in texts
+    assert any("[取消] 已處理部分：成功 2 / 跳過 0 / 失敗 0" in t for t in texts)
+    assert "已取消" in texts
+    assert env.completed[0][0] is False
+    assert dialog.modal is False
+
+
+def test_failure_before_the_try_block_still_unlocks_the_dialog(env, monkeypatch):
+    """輸出目錄建不起來（權限／路徑是檔案）時，不得讓對話框永遠停在 modal + 取消。"""
+
+    def boom(*a, **k):
+        raise OSError("denied")
+
+    monkeypatch.setattr(mod.os, "makedirs", boom)
+    dialog = env.open()
+    _button(dialog, "開始提取").on_click(None)
+    env.run_thread()
+
+    assert any("[ERROR] denied" in t for t in _texts(dialog))
+    assert dialog.modal is False
+    assert _button(dialog, "取消").visible is False
+    assert _button(dialog, "關閉").visible is True

@@ -222,6 +222,9 @@ def _extract_start_extraction(ctx, dialog):
     selected_codes = [
         code for code, cb in ctx.lang_code_checks_local.items() if cb.value
     ]
+    if ctx.lang_codes and not selected_codes:
+        ctx.show_snack_bar("⚠️ 請至少選擇一個語言代碼")
+        return
     ctx.close_dialog(dialog)
 
     for code in ctx.lang_codes:

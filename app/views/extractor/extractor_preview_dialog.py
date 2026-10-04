@@ -441,6 +441,10 @@ async def _preview_ui_poller(ctx):
     if final_error:
         ctx.add_log(f"[ERROR] {final_error}", level="error", update=False)
         ctx.status_text.value = f"預覽失敗：{final_error}"
+        ctx.progress_bar.value = 0
+        ctx.progress_pct.value = "--"
+        # 掃描已結束：解除 start_scan() 的 modal 鎖定，否則使用者無法關閉對話框
+        ctx.preview_dialog.modal = False
         ctx.page.update()
     elif final_result:
         results = final_result.get("preview_results", [])
@@ -449,6 +453,7 @@ async def _preview_ui_poller(ctx):
     else:
         if ctx.state["cancelled"]:
             ctx.status_text.value = "已取消"
+        ctx.preview_dialog.modal = False
         ctx.page.update()
 
 

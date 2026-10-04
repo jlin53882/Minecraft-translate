@@ -783,8 +783,8 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
                 input_root_dir=cfg.bundle_staging_dir,
                 output_zip_path=config.get("zip_output") or cfg.bundle_output_zip,
                 description=config.get("description", ""),
-                min_format=0,
-                max_format=0,
+                min_format=config.get("min_format") or 0,
+                max_format=config.get("max_format") or 0,
                 pack_image_path=config.get("pack_image"),
                 extra_folders=config.get("extra_folders", []),
             )

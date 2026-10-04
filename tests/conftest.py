@@ -310,6 +310,7 @@ def _make_filepicker(**overrides):
             self,
             dialog_title: str | None = None,
             allowed_extensions: list | None = None,
+            **kwargs,
         ):
             return (
                 [type("obj", (object,), {"path": self._mock_path})()]

@@ -249,15 +249,6 @@ def test_unchecked_languages_are_excluded_and_checks_shared_with_caller(env):
     assert env.checks["zh_cn"] is boxes["zh_cn"] and env.checks["zh_cn"].value is False
 
 
-def test_all_languages_unchecked_still_runs_with_empty_codes(env):
-    dialog = env.open()
-    for c in _walk(dialog):
-        if isinstance(c, ft.Checkbox):
-            c.value = False
-    _button(dialog, "確定執行").on_click(None)
-    assert env.runs[0][1] == {"lang_codes": []}
-
-
 def test_cancel_closes_without_callback(env):
     dialog = env.open()
     _button(dialog, "取消").on_click(None)
@@ -479,3 +470,14 @@ def test_preview_can_be_run_twice_independently(env):
     assert first is not second
     assert any("預計提取：1 個檔案" in t for t in _texts(first.content))
     assert _texts(second.content) == ["❌ 錯誤：第二次失敗"]
+
+
+def test_start_requires_at_least_one_language_code(env):
+    """全部取消勾選時不得以 lang_codes=[] 開始（與合併對話框一致）。"""
+    dialog = env.open()
+    for cb in (c for c in _walk(dialog) if isinstance(c, ft.Checkbox)):
+        cb.value = False
+    _button(dialog, "確定執行").on_click(None)
+    assert "⚠️ 請至少選擇一個語言代碼" in env.snacks
+    assert env.runs == []
+    assert dialog.open is True

@@ -2,8 +2,8 @@
 
 透過公開入口 ``open_one_click_dialog`` 開啟 4 步驟 wizard，走訪控件樹、驅動
 on_click / on_change 處理器，驗證導覽、收集到 config 的值與最後的 on_execute 回呼。
-部分測試是「現況特徵化」：目前沒有接上 on_change 的控件（步驟 2 的 Switch／閾值欄位、
-語言代碼 Checkbox）不會改動 config，重構時需維持此行為。
+語言代碼 Checkbox、步驟 2 的 Switch／閾值欄位、步驟 4 的檔案敘述／ZIP 路徑原本沒有接上
+on_change（使用者的修改不會進 config）；現在都會收集，並有對應測試。
 """
 
 from __future__ import annotations
@@ -247,14 +247,18 @@ def test_mode_selection_is_collected_and_survives_navigation(env, mode):
     assert env.run_to_end()["mode"] == mode
 
 
-def test_lang_checkbox_changes_do_not_reach_config(env):
-    """Checkbox 沒有掛 on_change：取消勾選目前不會影響 lang_codes。"""
+def test_lang_checkbox_changes_reach_config(env):
+    """取消勾選語言代碼會反映在 lang_codes（原本 Checkbox 沒掛 on_change）。"""
     env.open()
-    for cb in env.controls(ft.Checkbox):
-        assert cb.on_change is None
-    env.controls(ft.Checkbox)[1].value = False
-    config = env.run_to_end()
-    assert config["lang_codes"] == ["en_us", "zh_cn", "zh_tw"]
+    cb = env.controls(ft.Checkbox)[1]
+    assert cb.on_change is not None
+    cb.value = False
+    cb.on_change(SimpleNamespace(control=cb))
+    env.click("下一個")
+    env.click("上一個")
+    assert env.controls(ft.Checkbox)[1].value is False  # 返回步驟 1 仍保留
+    config = env.run_to_end_from(1)
+    assert config["lang_codes"] == ["en_us", "zh_tw"]
 
 
 def test_lang_codes_come_from_config_and_zero_codes_means_empty_list(
@@ -311,29 +315,50 @@ def test_patchouli_skip_switch_is_collected(env):
     assert env.run_to_end_from(2)["patchouli_skip"] is True
 
 
-def test_zh_cn_switch_does_not_disable_patchouli_options(env):
-    """目前 process_zh_cn 與 patchouli 選項互不相依，亦未收集 Switch 變更。"""
+def test_step2_switches_are_collected(env):
+    """「只處理 lang」「處理 zh_cn」Switch 的變更會進 config（原本沒掛 on_change）；
+    兩者與 Patchouli 選項互不相依。"""
     env.open()
     env.goto(2)
-    sw = env.switch("處理 zh_cn 檔案")
-    assert sw.on_change is None
-    sw.value = False
+    only = env.switch("只處理 lang 檔案")
+    zh = env.switch("處理 zh_cn 檔案")
+    only.value = False
+    only.on_change(SimpleNamespace(control=only))
+    zh.value = False
+    zh.on_change(SimpleNamespace(control=zh))
     assert env.switch("允許 zh_cn 觸發跳過 en_us").disabled in (None, False)
     for f in env.controls(ft.TextField):
         if f.width in (80, 100):
             assert not f.disabled
     config = env.run_to_end_from(2)
-    assert config["process_zh_cn"] is True and config["only_lang"] is True
+    assert config["process_zh_cn"] is False and config["only_lang"] is False
 
 
-def test_threshold_fields_are_not_collected(env):
+def _type(field, text):
+    field.value = text
+    field.on_change(SimpleNamespace(control=field))
+
+
+def test_threshold_fields_are_collected(env):
     env.open()
     env.goto(2)
-    for f in env.controls(ft.TextField):
-        if f.width == 80:
-            f.value = "9"
-        elif f.width == 100:
-            f.value = "0.9"
+    zh_en = next(f for f in env.controls(ft.TextField) if f.width == 80)
+    patch = next(f for f in env.controls(ft.TextField) if f.width == 100)
+    _type(zh_en, "9")
+    _type(patch, "0.9")
+    config = env.run_to_end_from(2)
+    assert config["zh_en_threshold"] == 9
+    assert config["patchouli_threshold"] == 0.9
+
+
+def test_blank_or_invalid_threshold_falls_back_to_defaults(env):
+    """空白／格式錯誤 → 回到設定檔的預設值（欄位提示「空白用預設值」）。"""
+    env.open()
+    env.goto(2)
+    zh_en = next(f for f in env.controls(ft.TextField) if f.width == 80)
+    patch = next(f for f in env.controls(ft.TextField) if f.width == 100)
+    _type(zh_en, "")
+    _type(patch, "abc")
     config = env.run_to_end_from(2)
     assert config["zh_en_threshold"] == 2
     assert config["patchouli_threshold"] == 0.5
@@ -432,15 +457,15 @@ def test_step4_default_zip_name_when_config_empty(env):
     )
 
 
-def test_step4_text_fields_are_not_collected(env):
-    """檔案敘述／ZIP 路徑欄位沒有 on_change，輸入內容不會進 config。"""
+def test_step4_text_fields_are_collected(env):
+    """檔案敘述／ZIP 路徑的輸入會進 config（原本欄位沒有 on_change）。"""
     env.open()
     env.goto(4)
-    env.field("檔案敘述").value = "§a漢化"
-    env.field("輸出 ZIP 檔案").value = "/x/y.zip"
+    _type(env.field("檔案敘述"), "§a漢化")
+    _type(env.field("輸出 ZIP 檔案"), "/x/y.zip")
     config = env.run_to_end_from(4)
-    assert config["description"] == ""
-    assert config["zip_output"] == os.path.join(str(env.out), "可使用翻譯.zip")
+    assert config["description"] == "§a漢化"
+    assert config["zip_output"] == "/x/y.zip"
 
 
 def _version_items(env):
@@ -545,6 +570,8 @@ def test_confirm_calls_on_execute_once_with_default_config(env):
         "write_new_cache": True,
         "description": "",
         "version": "",
+        "min_format": None,
+        "max_format": None,
         "pack_image": None,
         "extra_folders": [],
         "zip_output": os.path.join(str(env.out), "可使用翻譯.zip"),
@@ -552,6 +579,20 @@ def test_confirm_calls_on_execute_once_with_default_config(env):
     }
     assert dialog.open is False
     assert env.page.overlay == []
+
+
+def test_selected_version_maps_to_pack_formats(env, monkeypatch):
+    """所選版本要轉成 min/max pack_format 交給打包（原本只傳版本字串、格式一律 0）。"""
+    monkeypatch.setattr(
+        mod,
+        "_load_version_data",
+        lambda: {"1.20": {"min_format": 15, "max_format": 18}, "1.21": {}},
+    )
+    env.open()
+    env.goto(4)
+    next(i for i in _version_items(env) if i.content.value == "1.20").on_click(None)
+    config = env.confirm()
+    assert (config["min_format"], config["max_format"]) == (15, 18)
 
 
 def test_confirm_closes_current_dialog(env):

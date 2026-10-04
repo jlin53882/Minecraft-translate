@@ -260,3 +260,23 @@ def test_rescan_on_the_same_dialog_after_an_error_resets_the_state(env):
     env.updates = [{"result": _result(count=7)}]
     env.scan(dialog)
     assert "共找到 7 個檔案" in _texts(dialog)
+
+
+def test_error_unlocks_modal_so_the_dialog_can_be_closed(env):
+    """預覽失敗後必須解除 modal（原本鎖死、沒有任何關閉方式）並重設進度。"""
+    env.updates = [
+        {"progress": 0.6, "current": 3, "total": 5, "log": "掃描中"},
+        {"error": "壞掉了"},
+    ]
+    dialog = env.open()
+    env.scan(dialog)
+    assert "預覽失敗：壞掉了" in _texts(dialog)
+    assert dialog.modal is False
+    assert "100%" not in _texts(dialog)
+
+
+def test_empty_result_unlocks_modal(env):
+    env.updates = []
+    dialog = env.open()
+    env.scan(dialog)
+    assert dialog.modal is False

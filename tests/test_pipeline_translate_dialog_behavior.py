@@ -60,6 +60,9 @@ class _Env:
         self.src.mkdir()
         self.out = tmp_path / "out"
         self.out.mkdir()
+        # 翻譯目標預設為 {output}/locale_sort/_整理輸出/<待翻譯整理資料夾>（需存在才能開始）
+        self.organized = self.out / "locale_sort" / "_整理輸出" / "待翻譯整理需翻譯"
+        self.organized.mkdir(parents=True)
         self.snacks: list[str] = []
         self.runs: list[dict] = []
         self.cfg: dict = {}
@@ -94,20 +97,22 @@ def test_initial_state(env):
     assert dialog.open is True and dialog.modal is True
     assert dialog in env.page.overlay
     tin, tout = env.fields(dialog)
-    assert tin.value == str(env.src)
-    assert tout.value == str(env.out)
+    # 預設值由輸出根目錄推算；管線頁的 Mod 來源不會被當成翻譯目標
+    assert tin.value == str(env.organized)
+    assert tout.value == str(env.out / "lm_translate")
     assert _switch(dialog, "Dry Run").value is False
     assert _switch(dialog, "寫入新快取").value is True
 
 
-def test_empty_input_path_defaults_to_organized_folder(env):
-    dialog = env.open(input_path="")
-    tin, tout = env.fields(dialog)
-    expected = os.path.join(
-        str(env.out), "locale_sort", "_整理輸出", "待翻譯整理需翻譯"
-    )
-    assert tin.value == expected
-    assert tout.value == str(env.out)
+def test_mod_source_is_never_used_as_translate_input(env):
+    """原本把 Mod 來源當成翻譯目標、輸出根目錄當成輸出目錄，預設執行會翻譯整個 Mods 資料夾。"""
+    for given in ("", str(env.src)):
+        dialog = env.open(input_path=given)
+        tin, tout = env.fields(dialog)
+        assert tin.value == os.path.join(
+            str(env.out), "locale_sort", "_整理輸出", "待翻譯整理需翻譯"
+        )
+        assert tout.value == str(env.out / "lm_translate")
 
 
 def test_organized_folder_name_comes_from_config_and_reopen_is_fresh(env):
@@ -127,8 +132,8 @@ def test_start_passes_exact_kwargs_and_closes(env):
     assert env.snacks == []
     assert env.runs == [
         {
-            "input_dir": str(env.src),
-            "output_dir": str(env.out),
+            "input_dir": str(env.organized),
+            "output_dir": str(env.out / "lm_translate"),
             "dry_run": False,
             "write_new_cache": True,
         }

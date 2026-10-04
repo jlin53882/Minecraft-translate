@@ -600,6 +600,7 @@ def _extractor_on_update(ctx, update: dict) -> None:
         current = update.get("current", 0)
         pct = update.get("progress", 0)
         log_msg = update.get("log", f"正在處理 {current}/{total}")
+        ctx.state["progress"] = pct
         ctx.add_log(log_msg)
         ctx.update_progress(pct, log_msg)
 
@@ -617,12 +618,25 @@ def _extractor_report_result(ctx, result_stats: dict, cancelled_flag: list) -> N
 
     # ✅ 真正的「整段完成」只在這裡發生（用 Service 回傳的累計 stats）
     # 避免逐 jar 誤觸發「[完成] 0/0/0」假訊息。
-    ctx.state["done"] = True
-    ctx.add_log(
-        f"[完成] 成功 {result_stats['success']} / 跳過 {result_stats['warnings']} / 失敗 {result_stats['failures']}",
-        level="system",
+    ctx.state["stats"].update(
+        success=result_stats["success"],
+        warnings=result_stats["warnings"],
+        failures=result_stats["failures"],
     )
-    ctx.update_progress(1.0, "任務完成")
+    if cancelled_flag[0]:
+        # 取消：不標記完成、不把進度拉到 100%；只回報已處理的部分
+        ctx.add_log(
+            f"[取消] 已處理部分：成功 {result_stats['success']} / 跳過 {result_stats['warnings']} / 失敗 {result_stats['failures']}",
+            level="warning",
+        )
+        ctx.update_progress(ctx.state["progress"], "已取消")
+    else:
+        ctx.state["done"] = True
+        ctx.add_log(
+            f"[完成] 成功 {result_stats['success']} / 跳過 {result_stats['warnings']} / 失敗 {result_stats['failures']}",
+            level="system",
+        )
+        ctx.update_progress(1.0, "任務完成")
     ctx.update_stats(
         result_stats["success"],
         result_stats["warnings"],
@@ -661,18 +675,15 @@ def _extractor_run_extraction(ctx):
     """
     log_info("[THREAD] run_extraction thread STARTED")
 
-    # 建立輸出目錄
-    os.makedirs(ctx.final_output, exist_ok=True)
-
-    # 開始提取
+    # 開始提取（先設狀態；建立輸出目錄等可能失敗的步驟都在 try 內，失敗時 finally 仍會恢復 UI）
     ctx.state["running"] = True
     ctx.state["done"] = False
     ctx.state["cancelled"] = False
 
-    _extractor_ui_start(ctx)
-
     # ✅ 使用 Service 層的 run_extraction_loop 處理 Generator（選擇、cancelled 檢查、stats 解析）
     try:
+        os.makedirs(ctx.final_output, exist_ok=True)
+        _extractor_ui_start(ctx)
         gen = _extractor_make_generator(ctx)
 
         # ⭐ 每次開新任務先 reset cancel flag,然後傳 reference 給 Service
@@ -692,7 +703,7 @@ def _extractor_run_extraction(ctx):
         # 用 traceback.format_exc() 印完整堆疊,讓 user 看到錯誤根因。
         ctx.add_log(f"[ERROR] {ex}", level="error")
         ctx.add_log(f"[TRACEBACK]\n{traceback.format_exc()}", level="error")
-        ctx.state["done"] = True
+        ctx.state["stats"]["failures"] = 1
         ctx.update_stats(0, 0, 1)
 
     finally:
