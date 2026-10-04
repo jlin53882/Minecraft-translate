@@ -220,7 +220,7 @@ def _log_error_to_file(error: Exception, func_name: str):
     try:
         # 確保日誌目錄存在
         log_dir = get_data_root() / "logs"
-        log_dir.mkdir(exist_ok=True)
+        log_dir.mkdir(parents=True, exist_ok=True)
 
         # 日誌檔案路徑（按日期分檔）
         log_file = (

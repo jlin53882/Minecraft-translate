@@ -15,7 +15,20 @@
  └─ 各種輸出資料夾
 ```
 
-打包流程（Nuitka standalone）不在 repo 內。`tools/build_exe.bat` 是依此結構整理的**草稿，尚未實測**。
+打包流程（Nuitka standalone）不在 repo 內。`tools/build_exe.bat` 是依此結構整理的**草稿，尚未在 Windows 實測**。
+
+### 重新打包不得刪除使用者資料
+
+正式資料夾同時是執行資料夾，所以重新打包是「更新」而不是「重建」：
+
+1. Nuitka 先輸出到 `dist\_staging`（只清這個暫存資料夾）。
+2. 驗證 staging 內有 exe 才發佈；build 失敗時正式資料夾完全不動。
+3. 由 `tools/publish_dist.py` 只複製／覆蓋，**永遠不刪除** `config.json`、`logs/`、`快取資料/`、`學名資料庫/`、`.icon_cache/` 與輸出資料夾。
+   - 每次覆蓋：程式檔、`config.example.json`。
+   - 僅在不存在時才建立：`config.json`、`replace_rules.json`（兩者使用者都會編輯並由 App 寫回）。
+4. 已知代價：舊版遺留而新版已沒有的程式檔不會被清掉。
+
+契約由 `tests/test_publish_dist.py` 保護（第一次發佈 → 模擬使用者資料 → 第二次發佈 → 資料不變；失敗的 build 不動正式資料夾）。該測試驗證的是 `publish_dist.py` 的邏輯，**不等於**在 Windows 上實際跑過 `build_exe.bat`。
 原始碼執行（`uv run python main.py`）仍然支援，行為不變。
 
 > 先前版本的本文件曾寫「只支援原始碼」，是錯的：當時只看了 repo 內的 README 與 `release.yml`。
