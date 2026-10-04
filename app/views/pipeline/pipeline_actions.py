@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from app.services_impl.pipelines.bundle_service import (
@@ -166,46 +167,65 @@ class PipelineActions:
     def one_click_steps(
         self, config: dict, cfg: PipelineConfig, mode, lang_codes, merge_options
     ) -> list[tuple[int, str, Callable]]:
-        """一鍵製作的四個步驟 ``(步驟編號, 名稱, fn(session))``：抽取、語系比對、翻譯、打包。"""
+        """一鍵製作的四個步驟 ``(步驟編號, 名稱, fn(session))``：抽取、語系比對、翻譯、打包。
+
+        每個步驟 = 一個 session = 一次 ``start()`` + 一次 terminal ``finish()``（失敗先 ``set_error()``）。
+        """
 
         def extract(session):
             self._extract_into(session, cfg, mode, lang_codes, mods_dir=cfg.input_dir)
 
-        def merge(session):
-            # 各抽取結果分別合併（lang 只處理語言檔，book 需處理 Patchouli 內容）
-            # 兩個來源共用同一個 session（finish_session=False），由這個步驟擁有生命週期：
-            # 任何結束路徑（成功／來源失敗／例外／取消）都只 finish 一次，失敗時先 set_error()
-            session.start()
-            try:
-                os.makedirs(cfg.merge_output_dir, exist_ok=True)
-                sources = []
-                if mode in ("lang", "dual"):
-                    # 「只處理 lang 檔案」開關（一鍵對話框步驟 2）；book 來源固定要處理 Patchouli 內容
-                    sources.append(
-                        (cfg.extract_lang_output_dir, config.get("only_lang", True))
-                    )
-                if mode in ("book", "dual"):
-                    sources.append((cfg.extract_book_output_dir, False))
-                total_sources = len(sources)
-                for source_index, (src, only_lang) in enumerate(sources):
-                    yield from self.services.merge_folder(
-                        input_dir=src,
-                        session=session,
-                        only_process_lang=only_lang,
-                        progress_start=source_index / total_sources,
-                        progress_end=(source_index + 1) / total_sources,
-                        finish_session=False,
-                        **merge_options,
-                    )
-                    if session_failed(session):
-                        return
-            except Exception:
-                session.set_error()
-                raise
-            finally:
-                session.finish()
+        return [
+            (1, "抽取資源", extract),
+            (
+                2,
+                "語系比對",
+                partial(self._step_merge, config, cfg, mode, merge_options),
+            ),
+            (3, "啟動翻譯", partial(self._step_translate, config, cfg)),
+            (4, "打包資源", partial(self._step_bundle, config, cfg)),
+        ]
 
-        def translate(session):
+    def _step_merge(self, config, cfg, mode, merge_options, session):
+        # 各抽取結果分別合併（lang 只處理語言檔，book 需處理 Patchouli 內容）
+        # 兩個來源共用同一個 session（finish_session=False），由這個步驟擁有生命週期：
+        # 任何結束路徑（成功／來源失敗／例外／取消）都只 finish 一次，失敗時先 set_error()
+        session.start()
+        try:
+            os.makedirs(cfg.merge_output_dir, exist_ok=True)
+            sources = []
+            if mode in ("lang", "dual"):
+                # 「只處理 lang 檔案」開關（一鍵對話框步驟 2）；book 來源固定要處理 Patchouli 內容
+                sources.append(
+                    (cfg.extract_lang_output_dir, config.get("only_lang", True))
+                )
+            if mode in ("book", "dual"):
+                sources.append((cfg.extract_book_output_dir, False))
+            total_sources = len(sources)
+            for source_index, (src, only_lang) in enumerate(sources):
+                yield from self.services.merge_folder(
+                    input_dir=src,
+                    session=session,
+                    only_process_lang=only_lang,
+                    progress_start=source_index / total_sources,
+                    progress_end=(source_index + 1) / total_sources,
+                    finish_session=False,
+                    **merge_options,
+                )
+                if session_failed(session):
+                    return
+        except Exception:
+            session.set_error()
+            raise
+        finally:
+            session.finish()
+
+    def _step_translate(self, config, cfg, session):
+        # 一個步驟 = 一個 session = 一次 start() + 一次 terminal finish()：
+        # 多個來源（lang／patchouli）依序翻譯但共用 session（manage_session=False），
+        # 所以不會清掉前一個來源的日誌，也不會在 TaskManager 留下重複的完成紀錄
+        session.start()
+        try:
             inputs = [d for d in cfg.translate_input_dirs if _has_files(d)]
             if not inputs:
                 session.add_log("[系統] 沒有待翻譯內容，略過翻譯")
@@ -219,46 +239,45 @@ class PipelineActions:
                     dry_run=config.get("dry_run", False),
                     export_lang=False,
                     write_new_cache=config.get("write_new_cache", True),
+                    manage_session=False,
                 )
                 if session.error:
                     return
+        except Exception:
+            session.set_error()
+            raise
+        finally:
+            session.finish()
 
-        def bundle(session):
-            session.start()
-            try:
-                stats = self.services.build_staging(
-                    cfg.bundle_sources, cfg.bundle_staging_dir
-                )
-                session.add_log(
-                    f"[系統] 打包暫存完成：複製 {stats['copied']} 個、合併 {stats['merged']} 個檔案"
-                )
-                if not stats["copied"] and not stats["merged"]:
-                    session.add_log("❌ 沒有可打包的翻譯檔案", level="error")
-                    session.set_error()
-                    return
-                yield from self.bundle(
-                    session,
-                    manage_session=False,
-                    input_root_dir=cfg.bundle_staging_dir,
-                    output_zip_path=config.get("zip_output") or cfg.bundle_output_zip,
-                    description=config.get("description", ""),
-                    min_format=config.get("min_format") or 0,
-                    max_format=config.get("max_format") or 0,
-                    pack_image_path=config.get("pack_image"),
-                    extra_folders=config.get("extra_folders", []),
-                )
-            except Exception:
+    def _step_bundle(self, config, cfg, session):
+        session.start()
+        try:
+            stats = self.services.build_staging(
+                cfg.bundle_sources, cfg.bundle_staging_dir
+            )
+            session.add_log(
+                f"[系統] 打包暫存完成：複製 {stats['copied']} 個、合併 {stats['merged']} 個檔案"
+            )
+            if not stats["copied"] and not stats["merged"]:
+                session.add_log("❌ 沒有可打包的翻譯檔案", level="error")
                 session.set_error()
-                raise
-            finally:
-                session.finish()
-
-        return [
-            (1, "抽取資源", extract),
-            (2, "語系比對", merge),
-            (3, "啟動翻譯", translate),
-            (4, "打包資源", bundle),
-        ]
+                return
+            yield from self.bundle(
+                session,
+                manage_session=False,
+                input_root_dir=cfg.bundle_staging_dir,
+                output_zip_path=config.get("zip_output") or cfg.bundle_output_zip,
+                description=config.get("description", ""),
+                min_format=config.get("min_format") or 0,
+                max_format=config.get("max_format") or 0,
+                pack_image_path=config.get("pack_image"),
+                extra_folders=config.get("extra_folders", []),
+            )
+        except Exception:
+            session.set_error()
+            raise
+        finally:
+            session.finish()
 
     # ------------------------------------------------------------------ 內部
 

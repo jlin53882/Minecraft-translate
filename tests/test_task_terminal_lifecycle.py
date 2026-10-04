@@ -341,3 +341,163 @@ def test_runner_exception_and_cancellation_leave_no_active_session(manager):
 
     runner2.run_step(1, "取消", cancels)
     assert manager.active() == []
+
+
+# ------------------------------------------------------------ 邊界：generator.close 取消
+
+
+class _LoopPage:
+    def run_task(self, handler, *args):
+        return None
+
+
+def _runner_for(session):
+    return PipelineRunner(
+        _LoopPage(),
+        _Panel(),
+        lambda *a: None,
+        session_factory=lambda: session,
+        session_failed=lambda s: s.error,
+    )
+
+
+def test_cancelling_a_single_merge_step_via_generator_close_leaves_no_active_session(
+    manager, monkeypatch, tmp_path
+):
+    """PipelineRunner 取消時 ``result.close()``：yield 之後的 finish 不會執行，仍要 terminal。"""
+
+    def slow_stage1(*a, **k):
+        for i in range(10):
+            yield {"progress": i / 10}
+
+    monkeypatch.setattr(merge_service, "merge_zhcn_to_zhtw_from_folder", slow_stage1)
+    monkeypatch.setattr(merge_service, "_run_extracted_stage2", lambda *a, **k: None)
+
+    for input_mode in ("folder", "zip"):
+        session = _session(f"合併-{input_mode}")
+        runner = _runner_for(session)
+        actions = PipelineActions()
+        if input_mode == "zip":
+            monkeypatch.setattr(merge_service, "_merge_one_zip", lambda *a, **k: [])
+
+        def step(s, actions=actions, input_mode=input_mode):
+            gen = actions.merge(
+                s,
+                str(tmp_path) if input_mode == "folder" else "a.zip",
+                str(tmp_path / "o"),
+                input_mode,
+                only_lang=True,
+                process_zh_cn=True,
+                patchouli_skip=False,
+                patchouli_threshold=0.5,
+                zh_en_threshold=2,
+            )
+            for update in gen:
+                runner.request_cancel()  # 使用者在 merge 執行中按取消
+                yield update
+
+        assert runner.run_step(1, "合併", step) is False
+        assert manager.active() == [], input_mode
+
+
+def test_service_generator_close_before_terminal_still_finishes(
+    manager, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        merge_service, "merge_zhcn_to_zhtw_from_folder", lambda *a, **k: iter([])
+    )
+    monkeypatch.setattr(merge_service, "_run_extracted_stage2", lambda *a, **k: None)
+    session = _session()
+    session.start()
+    gen = merge_service.run_merge_folder_batch_service(
+        str(tmp_path), str(tmp_path / "o"), session, True
+    )
+    next(gen)  # 停在最後一次 yield
+    gen.close()
+    assert manager.active() == []
+
+
+# ------------------------------------------------------------ 邊界：一鍵翻譯多來源共用 session
+
+
+def test_one_click_translate_runs_all_inputs_in_one_session_lifecycle(
+    manager, tmp_path
+):
+    cfg = _cfg(tmp_path)
+    inputs = list(cfg.translate_input_dirs)
+    assert len(inputs) >= 2
+    for d in inputs:
+        import os
+
+        os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, "x.json"), "w").write("{}")
+
+    seen = []
+
+    def fake_translate(**kw):
+        session = kw["session"]
+        seen.append(kw["input_dir"])
+        assert kw["manage_session"] is False  # 步驟自己擁有生命週期
+        session.add_log(f"translated {kw['input_dir']}")
+
+    actions = PipelineActions(PipelineServices(translate=fake_translate))
+    step3 = actions.one_click_steps({}, cfg, "lang", ["en_us"], {})[2][2]
+    session = _session("一鍵翻譯")
+    step3(session)
+
+    assert seen == inputs
+    logs = [e.text for e in session.snapshot()["logs"]]
+    assert all(
+        any(d in line for line in logs) for d in inputs
+    )  # 前一個來源的日誌沒被清掉
+    assert [t.name for t in manager.recent()] == ["一鍵翻譯"]  # 只有一筆完成紀錄
+    _assert_terminal(manager, session, STATUS_DONE)
+
+
+def test_one_click_translate_without_inputs_still_start_finish(manager, tmp_path):
+    cfg = _cfg(tmp_path)
+    step3 = PipelineActions().one_click_steps({}, cfg, "lang", ["en_us"], {})[2][2]
+    session = _session("一鍵翻譯")
+    step3(session)
+    assert any("沒有待翻譯內容" in e.text for e in session.snapshot()["logs"])
+    _assert_terminal(manager, session, STATUS_DONE)
+
+
+def test_one_click_translate_error_in_first_input_stops_and_ends_error(
+    manager, tmp_path
+):
+    import os
+
+    cfg = _cfg(tmp_path)
+    for d in cfg.translate_input_dirs:
+        os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, "x.json"), "w").write("{}")
+    calls = []
+
+    def failing(**kw):
+        calls.append(kw["input_dir"])
+        kw["session"].set_error()
+
+    step3 = PipelineActions(PipelineServices(translate=failing)).one_click_steps(
+        {}, cfg, "lang", ["en_us"], {}
+    )[2][2]
+    session = _session("一鍵翻譯")
+    step3(session)
+    assert len(calls) == 1
+    _assert_terminal(manager, session, STATUS_ERROR)
+
+
+def test_lm_service_with_manage_session_false_leaves_lifecycle_to_the_caller(
+    manager, monkeypatch
+):
+    monkeypatch.setattr(lm_service, "lm_translate_gen", lambda *a, **k: iter([]))
+    session = _session()
+    session.start()
+    session.add_log("keep me")
+    lm_service.run_lm_translation_service("in", "out", session, manage_session=False)
+    assert len(manager.active()) == 1  # service 沒有 finish
+    assert [e.text for e in session.snapshot()["logs"]] == [
+        "keep me"
+    ]  # 也沒有 start() 清日誌
+    session.finish()
+    _assert_terminal(manager, session, STATUS_DONE)

@@ -171,6 +171,16 @@ def _merge_one_zip(
     return zip_errors
 
 
+def _fatal_zip_error(session, stats: dict, output_dir: str, error: Exception) -> dict:
+    """ZIP 合併的致命錯誤：記錄並寫入摘要（即使失敗也要回報）；``set_error``／finish 由呼叫端處理。"""
+    tb = traceback.format_exc()
+    logger.error(f"[致命錯誤] ZIP 合併失敗：{error}\n{tb}")
+    session.add_log(f"[致命錯誤] ZIP 合併失敗：{error}\n{tb}")
+    error_summary = _zip_summary(stats, output_dir)
+    session.set_summary(error_summary)
+    return error_summary
+
+
 def run_merge_zip_batch_service(
     zip_paths: list[str],
     output_dir: str,
@@ -201,11 +211,14 @@ def run_merge_zip_batch_service(
         "failed_zips_list": [],  # [{"name": str, "error": str}, ...]
     }
 
+    finished = False  # generator 被 close（取消）時由 finally 補 finish
+
     try:
         total = len(zip_paths)
         if total == 0:
             session.add_log("[系統] 未選擇任何 ZIP 檔案")
             session.finish()
+            finished = True
             yield {
                 "progress": 1.0,
                 "log": None,
@@ -251,21 +264,20 @@ def run_merge_zip_batch_service(
             session.finish()  # ERROR 也要 finish，TaskManager 才會離開 active
         else:
             session.finish()
+        finished = True
 
     except Exception as e:  # noqa: BLE001
-        tb = traceback.format_exc()
-        logger.error(f"[致命錯誤] ZIP 合併失敗：{e}\n{tb}")
-        session.add_log(f"[致命錯誤] ZIP 合併失敗：{e}\n{tb}")
-        # 產出統計摘要（即使失敗也要回報）
-        error_summary = _zip_summary(stats, output_dir)
-        session.set_summary(error_summary)
+        error_summary = _fatal_zip_error(session, stats, output_dir, e)
         yield {"progress": 1.0, "log": None, "summary": error_summary}
         session.set_error()
         session.finish()
+        finished = True
 
     finally:
         # ⭐ 避免 handler 留著舊 session
         UI_LOG_HANDLER.set_session(None)
+        if not finished:
+            session.finish()
 
 
 def _set_monotonic_progress(session, value: float) -> None:
@@ -369,6 +381,19 @@ def _finish_folder_run(session, stats: dict, output_dir: str, failed: bool) -> d
     return {"progress": 1.0, "log": None, "error": failed, "summary": final_summary}
 
 
+def _fatal_folder_error(
+    session, stats: dict, output_dir: str, error: Exception
+) -> dict:
+    """資料夾合併的致命錯誤：記錄、寫入摘要並 ``set_error()``；回傳摘要（finish 由呼叫端決定）。"""
+    tb = traceback.format_exc()
+    logger.error(f"[致命錯誤] 資料夾合併失敗：{error}\n{tb}")
+    session.add_log(f"[致命錯誤] 資料夾合併失敗：{error}\n{tb}")
+    error_summary = _folder_summary(stats, output_dir)
+    session.set_summary(error_summary)
+    session.set_error()
+    return error_summary
+
+
 def run_merge_folder_batch_service(
     input_dir: str,
     output_dir: str,
@@ -397,6 +422,7 @@ def run_merge_folder_batch_service(
         "failed_folders_list": [],
     }
     folder_errors = []
+    finished = False  # generator 被 close（取消）時，yield 之後的 finish 不會執行；finally 補上
 
     try:
         session.add_log(f"[資料夾] 開始處理：{os.path.basename(input_dir)}")
@@ -444,20 +470,20 @@ def run_merge_folder_batch_service(
 
         _record_folder_result(stats, input_dir, folder_errors)
 
-        yield _finish_folder_run(session, stats, output_dir, bool(folder_errors))
+        update = _finish_folder_run(session, stats, output_dir, bool(folder_errors))
+        yield update
         if finish_session:
             session.finish()  # 失敗時已 set_error()，finish 維持 ERROR 並離開 active
+            finished = True
 
     except Exception as e:  # noqa: BLE001
-        tb = traceback.format_exc()
-        logger.error(f"[致命錯誤] 資料夾合併失敗：{e}\n{tb}")
-        session.add_log(f"[致命錯誤] 資料夾合併失敗：{e}\n{tb}")
-        error_summary = _folder_summary(stats, output_dir)
-        session.set_summary(error_summary)
-        session.set_error()
+        error_summary = _fatal_folder_error(session, stats, output_dir, e)
         if finish_session:
             session.finish()
+            finished = True
         yield {"progress": 1.0, "log": None, "error": True, "summary": error_summary}
 
     finally:
         UI_LOG_HANDLER.set_session(None)
+        if finish_session and not finished:
+            session.finish()  # 取消（generator.close）等沒走到 finish 的路徑

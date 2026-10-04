@@ -29,8 +29,14 @@ def run_lm_translation_service(
     dry_run: bool = False,
     export_lang: bool = False,
     write_new_cache: bool = True,
+    *,
+    manage_session: bool = True,
 ):
-    """執行 LM 翻譯流程（service 層包裝）。"""
+    """執行 LM 翻譯流程（service 層包裝）。
+
+    ``manage_session=False`` 時由呼叫端擁有 ``TaskSession`` 的 ``start()``／``finish()``
+    （一鍵流程的步驟 3 會依序翻譯多個來源，共用同一個 session）。
+    """
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
     ensure_pipeline_logging()
 
@@ -41,7 +47,8 @@ def run_lm_translation_service(
 
     try:
         # 初始化 Session 狀態
-        session.start()
+        if manage_session:
+            session.start()
         UI_LOG_HANDLER.set_session(session)
         # ⭐ Dry Run 模式提示
         if dry_run:
@@ -91,4 +98,5 @@ def run_lm_translation_service(
         UI_LOG_HANDLER.set_session(None)
         # 任何結束路徑（成功／service 回報錯誤／例外）都只送一次 terminal finish：
         # 失敗時順序是 set_error() → finish()（已標記錯誤的維持 ERROR）
-        session.finish()
+        if manage_session:
+            session.finish()

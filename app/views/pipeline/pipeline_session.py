@@ -194,6 +194,8 @@ class PipelineRunner:
                     for _ in result:
                         if self.cancel_event.is_set():
                             result.close()
+                            # generator 被 close 時 yield 之後的 finish 不會執行：補 terminal
+                            session.finish()
                             break
         except TaskCancelled:
             session.finish()  # 取消也要 terminal（TaskManager 不可殘留 active；重複 finish 無害）
