@@ -851,3 +851,100 @@ class TestPerModelMaxOutputTokens:
     def test_numeric_value_keeps_explicit_override(self):
         saved_model = self._save(self._view("400"))
         assert saved_model["max_output_tokens"] == 400
+
+
+class TestKeyFailureCooldownSetting:
+    """The UI round-trip preserves the validator's numeric cooldown contract."""
+
+    @staticmethod
+    def _view():
+        view = _make_full_save_view()
+        view.controls_map["lm_translator.key_failure_cooldown_sec"] = MagicMock()
+        return view
+
+    @staticmethod
+    def _round_trip(raw_config):
+        from copy import deepcopy
+
+        from app.views.config.config_actions import (
+            load_config_into_view,
+            save_config_from_view,
+        )
+        from translation_tool.utils.config_manager import DEFAULT_CONFIG
+
+        view = TestKeyFailureCooldownSetting._view()
+        config = deepcopy(DEFAULT_CONFIG)
+        for section, values in raw_config.items():
+            if isinstance(values, dict) and isinstance(config.get(section), dict):
+                config[section].update(deepcopy(values))
+            else:
+                config[section] = deepcopy(values)
+        config["lm_translator"]["models"] = {}
+        config["lm_translator"]["keys"] = []
+        load_config_into_view(view, config)
+        saved = {}
+        save_config_from_view(
+            view,
+            load_config_json_fn=lambda: deepcopy(config),
+            save_config_json_fn=saved.update,
+            validate_api_keys_from_ui_fn=lambda keys: None,
+        )
+        return view, saved
+
+    def test_fractional_cooldown_round_trips_through_ui(self):
+        config = _make_base_config()
+        config["lm_translator"]["key_failure_cooldown_sec"] = 0.5
+        config["lm_translator"]["models"] = {}
+
+        view, saved = self._round_trip(config)
+
+        assert (
+            view.controls_map["lm_translator.key_failure_cooldown_sec"].value == "0.5"
+        )
+        assert saved["lm_translator"]["key_failure_cooldown_sec"] == 0.5
+
+    def test_unrelated_save_preserves_fractional_cooldown(self):
+        config = _make_base_config()
+        config["lm_translator"]["key_failure_cooldown_sec"] = 0.5
+        config["lm_translator"]["models"] = {}
+        view = self._view()
+
+        from copy import deepcopy
+
+        from app.views.config.config_actions import (
+            load_config_into_view,
+            save_config_from_view,
+        )
+        from translation_tool.utils.config_manager import DEFAULT_CONFIG
+
+        merged_config = deepcopy(DEFAULT_CONFIG)
+        for section, values in config.items():
+            if isinstance(values, dict) and isinstance(
+                merged_config.get(section), dict
+            ):
+                merged_config[section].update(deepcopy(values))
+            else:
+                merged_config[section] = deepcopy(values)
+        merged_config["lm_translator"]["keys"] = []
+
+        load_config_into_view(view, merged_config)
+        view.controls_map["logging.log_dir"].value = "other-logs"
+        saved = {}
+        save_config_from_view(
+            view,
+            load_config_json_fn=lambda: deepcopy(merged_config),
+            save_config_json_fn=saved.update,
+            validate_api_keys_from_ui_fn=lambda keys: None,
+        )
+
+        assert saved["logging"]["log_dir"] == "other-logs"
+        assert saved["lm_translator"]["key_failure_cooldown_sec"] == 0.5
+
+    def test_zero_cooldown_round_trips_as_disabled_value(self):
+        config = _make_base_config()
+        config["lm_translator"]["key_failure_cooldown_sec"] = 0.0
+        config["lm_translator"]["models"] = {}
+
+        _, saved = self._round_trip(config)
+
+        assert saved["lm_translator"]["key_failure_cooldown_sec"] == 0.0

@@ -33,6 +33,29 @@ def test_redaction_masks_credential_fields_without_masking_plain_text():
     assert redact_mapping({"credential": "abc123"})["credential"] == "[REDACTED]"
 
 
+@pytest.mark.parametrize(
+    ("value", "secret_parts"),
+    [
+        ('password="correct horse battery"', ("correct", "horse", "battery")),
+        ("credential='client secret value'", ("client", "secret", "value")),
+        ("token=abc123", ("abc123",)),
+    ],
+)
+def test_redaction_consumes_complete_quoted_and_unquoted_secret_values(
+    value, secret_parts
+):
+    redacted = redact_text(value)
+
+    assert all(part not in redacted for part in secret_parts)
+
+
+def test_redaction_mapping_preserves_safe_values_with_credential_fields():
+    assert redact_mapping({"credential": "abc123", "message": "safe text"}) == {
+        "credential": "[REDACTED]",
+        "message": "safe text",
+    }
+
+
 def test_http_error_message_does_not_expose_api_key(monkeypatch):
     secret = "AIza" + "s" * 30
     response = Mock(ok=False, status_code=403, text=f'{{"api_key":"{secret}"}}')

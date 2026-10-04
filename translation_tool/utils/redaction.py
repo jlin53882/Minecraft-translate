@@ -10,7 +10,7 @@ _GOOGLE_KEY_RE = re.compile(r"\bAIza[0-9A-Za-z_-]{20,}\b")
 _BEARER_RE = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
 _SECRET_FIELD_RE = re.compile(
     r'(?i)(["\']?(?:api[_-]?key|authorization|bearer|credential|password|secret|token)'
-    r'["\']?\s*[:=]\s*["\']?)([^\s,;"\'}]+)'
+    r'["\']?\s*[:=]\s*)(?:"[^"]*"|\'[^\']*\'|[^\s,;"\'}]+)'
 )
 
 

@@ -439,7 +439,9 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                     "LANG" if prompt is LANG_SYSTEM_PROMPT else "PATCHOUI",
                 )
 
-                model_output_cap = model_output_token_cap(lm_cfg, model_name)
+                model_override = model_output_token_cap(lm_cfg, model_name)
+                cap_source = "per_model" if model_override is not None else "global"
+                model_output_cap = model_override
                 if model_output_cap is None:
                     model_output_cap = budget_cfg.max_output_tokens
 
@@ -730,10 +732,22 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                                 model_fallback_retry = True
                                 break
                             continue
+                        if cap_source == "per_model":
+                            setting_path = (
+                                f"lm_translator.models.{model_name}.max_output_tokens"
+                            )
+                            guidance = (
+                                f"請調低 {setting_path}，或清空此欄位以回退全域設定，"
+                                "或設為 0 讓 API 使用模型預設值"
+                            )
+                        else:
+                            guidance = (
+                                "請調低 lm_translator.max_output_tokens，"
+                                "或設為 0 讓 API 使用模型預設值"
+                            )
                         raise RuntimeError(
                             f"❌ maxOutputTokens（{model_output_cap}）超過模型 "
-                            f"{model_name} 的輸出上限：請調低 lm_translator.max_output_tokens，"
-                            "或設為 0 讓 API 使用模型預設值"
+                            f"{model_name} 的輸出上限：{guidance}"
                         )
                     log_info(
                         "[⚠️] 400 INVALID_ARGUMENT：payload 格式錯誤或過大，縮小 batch"

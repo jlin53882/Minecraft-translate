@@ -394,13 +394,20 @@ def save_config_from_view(
             "lm_translator.max_output_tokens",
             "lm_translator.max_output_token_budget",
             "lm_translator.max_input_token_budget",
-            "lm_translator.key_failure_cooldown_sec",
         ):
             if path in view.controls_map:
                 key = path.rsplit(".", 1)[-1]
                 new_config["lm_translator"][key] = int(
                     view.controls_map[path].value or 0
                 )
+        if "lm_translator.key_failure_cooldown_sec" in view.controls_map:
+            new_config["lm_translator"]["key_failure_cooldown_sec"] = max(
+                0.0,
+                float(
+                    view.controls_map["lm_translator.key_failure_cooldown_sec"].value
+                    or 0
+                ),
+            )
         new_config["lm_translator"]["patchouli"]["dir_names"] = [
             line.strip()
             for line in view.controls_map[
