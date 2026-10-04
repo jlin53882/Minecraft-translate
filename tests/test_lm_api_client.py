@@ -34,7 +34,7 @@ class TestCallGeminiRequests:
         result = call_gemini_requests(
             model_name="gemini-pro",
             system_prompt="You are a translator",
-            payload={"key": "value"},
+            payload={"items": [{"id": "0", "value": "value"}]},
             api_key="test_api_key",
             temperature=0.7,
         )
@@ -59,7 +59,7 @@ class TestCallGeminiRequests:
             call_gemini_requests(
                 model_name="gemini-pro",
                 system_prompt="You are a translator",
-                payload={"key": "value"},
+                payload={"items": [{"id": "0", "value": "value"}]},
                 api_key="test_api_key",
                 temperature=0.7,
             )
@@ -81,7 +81,7 @@ class TestCallGeminiRequests:
             call_gemini_requests(
                 model_name="gemini-pro",
                 system_prompt="You are a translator",
-                payload={"key": "value"},
+                payload={"items": [{"id": "0", "value": "value"}]},
                 api_key="test_api_key",
                 temperature=0.7,
             )
@@ -104,7 +104,7 @@ class TestCallGeminiRequests:
         call_gemini_requests(
             model_name="gemini-pro",
             system_prompt="test",
-            payload={},
+            payload={"items": [{"id": "0", "value": "value"}]},
             api_key="test_key",
             temperature=0.5,
         )
@@ -136,7 +136,7 @@ class TestCallGeminiRequests:
         call_gemini_requests(
             model_name="gemini-pro",
             system_prompt="test prompt",
-            payload={"key": "value"},
+            payload={"items": [{"id": "0", "value": "value"}]},
             api_key=fake_api_key,
             temperature=0.7,
         )

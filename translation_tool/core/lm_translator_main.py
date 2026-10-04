@@ -130,7 +130,7 @@ def _normalize_translations(parsed) -> dict[str, object]:
 def _structured_response_shape_error(parsed) -> str | None:
     """Reject schema-shaped responses that violate the items/id/value contract."""
     if not isinstance(parsed, dict) or "items" not in parsed:
-        return None  # Keep legacy response normalization as a defensive fallback.
+        return "root must contain exactly the items property"
     if set(parsed) != {"items"}:
         return "root contains fields outside items"
     items = parsed["items"]
@@ -617,7 +617,11 @@ def _merge_batch_response(
     parsed = safe_json_loads(raw_text)
     expected_ids = set(round_data.id_to_item)
     contract_error = _structured_response_shape_error(parsed)
-    normalized = _normalize_translations(parsed) if contract_error is None else {}
+    normalized = (
+        {item["id"]: item["value"] for item in parsed["items"]}
+        if contract_error is None
+        else {}
+    )
     returned_ids = set(normalized)
     if contract_error is None and returned_ids != expected_ids:
         missing_ids = sorted(expected_ids - returned_ids)

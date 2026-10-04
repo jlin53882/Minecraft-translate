@@ -52,16 +52,31 @@ TRANSLATION_RESPONSE_SCHEMA = {
 
 def _build_translation_response_schema(payload: dict) -> dict:
     """Constrain the response array and IDs to the current input batch."""
+    if not isinstance(payload, dict):
+        raise ValueError("Gemini translation payload must be an object")  # noqa: TRY004
+    if "items" not in payload:
+        raise ValueError("Gemini translation payload must contain items")
     items = payload.get("items")
     if not isinstance(items, list):
-        # Preserve the helper's historical behavior for non-translation callers.
-        return deepcopy(TRANSLATION_RESPONSE_SCHEMA)
+        raise ValueError("Gemini translation payload items must be a list")  # noqa: TRY004
     if not items:
         raise ValueError("Gemini translation payload must contain at least one item")
 
-    ids = [item.get("id") for item in items if isinstance(item, dict)]
-    if len(ids) != len(items) or not all(isinstance(item_id, str) for item_id in ids):
-        raise ValueError("Gemini 翻譯 payload 的每個 item 都必須有字串 id")
+    ids = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError(  # noqa: TRY004
+                "Gemini 翻譯 payload 的每個 item 都必須是 object"
+            )
+        if not isinstance(item.get("id"), str):
+            raise ValueError(  # noqa: TRY004
+                "Gemini 翻譯 payload 的每個 item 都必須有字串 id"
+            )
+        if not isinstance(item.get("value"), str):
+            raise ValueError(  # noqa: TRY004
+                "Gemini 翻譯 payload 的每個 item 都必須有字串 value"
+            )
+        ids.append(item["id"])
     if len(ids) != len(set(ids)):
         raise ValueError("Gemini 翻譯 payload 的 item id 不可重複")
 

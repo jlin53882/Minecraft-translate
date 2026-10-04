@@ -66,7 +66,7 @@ def test_http_error_message_does_not_expose_api_key(monkeypatch):
         lm_api_client.call_gemini_requests(
             model_name="m",
             system_prompt="p",
-            payload={},
+            payload={"items": [{"id": "0", "value": "value"}]},
             api_key=secret,
             temperature=0.2,
         )
@@ -86,7 +86,7 @@ def test_malformed_response_message_is_redacted(monkeypatch):
         lm_api_client.call_gemini_requests(
             model_name="m",
             system_prompt="p",
-            payload={},
+            payload={"items": [{"id": "0", "value": "value"}]},
             api_key=secret,
             temperature=0.2,
         )

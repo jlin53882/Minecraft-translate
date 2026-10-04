@@ -43,6 +43,7 @@ def test_structured_response_with_matching_ids_merges_translations(batch_context
             "items[0] does not contain exactly id and value",
         ),
         ('{"items":"not-an-array"}', "items is not an array"),
+        ('{"items":[],"other":true}', "root contains fields outside items"),
         ('{"items":[]}', "missing IDs=['0', '1']"),
         (
             '{"items":[{"id":0,"value":"鐵錠"},{"id":"1","value":"鑽石劍"}]}',
@@ -77,4 +78,28 @@ def test_id_contract_mismatches_are_rejected_and_sent_to_retry_flow(
     assert merged is None
     assert rejected is True
     assert expected_log_fragment in warning.call_args.args[0]
+    runtime.budget_tracker.on_truncated.assert_called_once_with("STOP", kind="missing")
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        '{"0":"鐵錠","1":"鑽石劍"}',
+        '[{"id":"0","value":"鐵錠"},{"id":"1","value":"鑽石劍"}]',
+    ],
+)
+def test_legacy_response_shapes_are_rejected_and_sent_to_retry_flow(
+    batch_context, response, monkeypatch
+):
+    runtime, round_data = batch_context
+    warning = Mock()
+    monkeypatch.setattr("translation_tool.core.lm_translator_main.log_warning", warning)
+
+    merged, rejected = _merge_batch_response(
+        runtime, round_data, response, {"finish_reason": "STOP"}
+    )
+
+    assert merged is None
+    assert rejected is True
+    assert "root must contain exactly the items property" in warning.call_args.args[0]
     runtime.budget_tracker.on_truncated.assert_called_once_with("STOP", kind="missing")

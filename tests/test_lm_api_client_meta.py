@@ -38,7 +38,11 @@ def _call(post, lm_cfg=None, payload=None, **kwargs):
         return call_gemini_requests(
             model_name="m",
             system_prompt="s",
-            payload=payload or {"items": [{"id": "0", "value": "Iron Ingot"}]},
+            payload=(
+                {"items": [{"id": "0", "value": "Iron Ingot"}]}
+                if payload is None
+                else payload
+            ),
             api_key="k",
             temperature=0.2,
             **kwargs,
@@ -145,6 +149,7 @@ def test_translation_input_payload_shape_is_unchanged(post):
     assert request_body["contents"][0]["parts"][0]["text"] == (
         '{"items": [{"id": "0", "value": "Iron Ingot"}]}'
     )
+    assert payload == {"items": [{"id": "0", "value": "Iron Ingot"}]}
 
 
 def test_dynamic_schema_is_fresh_for_each_batch(post):
@@ -181,6 +186,30 @@ def test_invalid_batch_ids_are_rejected_before_request(post, items):
 def test_empty_translation_batch_is_rejected_before_request(post):
     with pytest.raises(ValueError, match="at least one item"):
         _call(post, payload={"items": []})
+
+    post.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"items": "bad"},
+        {},
+        {"items": ["bad"]},
+        {"items": [{"id": "0"}]},
+        {"items": [{"id": "0", "value": 1}]},
+    ],
+)
+def test_malformed_translation_payload_is_rejected_before_request(post, payload):
+    with pytest.raises(ValueError):
+        _call(post, payload=payload)
+
+    post.assert_not_called()
+
+
+def test_non_object_translation_payload_is_rejected_before_request(post):
+    with pytest.raises(ValueError, match="payload"):
+        _call(post, payload=[])
 
     post.assert_not_called()
 
