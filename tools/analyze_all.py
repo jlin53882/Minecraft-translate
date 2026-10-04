@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """全面分析單元測試覆蓋"""
 
 import os
