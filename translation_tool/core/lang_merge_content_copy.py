@@ -31,6 +31,7 @@ def _compute_patchouli_lang_effectiveness(
     json_module=None,
     all_names: list[str]
     | None = None,  # 2026-08-04: 預先算好的檔案列表,避免重複 reader.list_all()
+    cache_namespace: object | None = None,
 ) -> dict[str, bool]:
     """Compute effective translation status for zh_tw and zh_cn in a book_root.
 
@@ -47,7 +48,10 @@ def _compute_patchouli_lang_effectiveness(
     TEXT_EXTS = {".json", ".md", ".txt"}
 
     book_root_lower = book_root.lower()
-    cache_key = (book_root_lower, threshold)
+    # Reader identity is part of the key.  The same book path can exist in
+    # multiple input folders/archives during one process; sharing the result
+    # between those sources can reuse stale effectiveness data.
+    cache_key = (cache_namespace, book_root_lower, threshold)
 
     # ── 1. Cache lookup ────────────────────────────────────────────────
     if cache_key in _patchouli_eff_cache:
@@ -296,7 +300,8 @@ def process_content_or_copy_file_impl(
 
         # 優先使用外部傳入的預掃描 cache，否則走內部 _compute_patchouli_lang_effectiveness（自帶 module-level cache）
         book_root_lower = book_root.lower()
-        cache_key = (book_root_lower, _threshold)
+        cache_namespace = id(reader)
+        cache_key = (cache_namespace, book_root_lower, _threshold)
         if patchouli_eff_cache is not None and cache_key in patchouli_eff_cache:
             eff = patchouli_eff_cache[cache_key]
             log_debug(f"[Patchouli Eff] 使用外部預掃描 cache for {book_root!r}: {eff}")
@@ -307,6 +312,7 @@ def process_content_or_copy_file_impl(
                 threshold=_threshold,
                 json_module=json_module,
                 all_names=_all_names,  # 2026-08-04: 傳入預先算好的檔案列表
+                cache_namespace=cache_namespace,
             )
         has_eff_zh_tw = bool(eff.get("zh_tw", False))
         has_eff_zh_cn = bool(eff.get("zh_cn", False))
@@ -353,14 +359,42 @@ def process_content_or_copy_file_impl(
             try:
                 raw_text = reader.read_text(input_path)
                 tw_content = recursive_translate_dict_fn(raw_text, rules)
-                with open(target, "w", encoding="utf-8") as f:
-                    f.write(tw_content)
+                should_write = True
+                if os.path.isfile(target):
+                    try:
+                        with open(target, "r", encoding="utf-8") as f:
+                            should_write = f.read() != tw_content
+                    except OSError:
+                        should_write = True
+                if should_write:
+                    write_text_atomic_fn(target, tw_content)
+                else:
+                    log_debug(f"[Patchouli] 內容一致，略過寫入: {target}")
             except Exception as e:  # noqa: BLE001
                 log_error(f"[Patchouli] 寫入失敗: {e}")
-                with open(target, "wb") as dst:
-                    dst.write(reader.read_bytes(input_path))
+                raw_bytes = reader.read_bytes(input_path)
+                should_write = True
+                if os.path.isfile(target):
+                    try:
+                        with open(target, "rb") as f:
+                            should_write = f.read() != raw_bytes
+                    except OSError:
+                        should_write = True
+                if should_write:
+                    write_bytes_atomic_fn(target, raw_bytes)
         else:
-            reader.copy_to(input_path, target)
+            raw_bytes = reader.read_bytes(input_path)
+            should_write = True
+            if os.path.isfile(target):
+                try:
+                    with open(target, "rb") as f:
+                        should_write = f.read() != raw_bytes
+                except OSError:
+                    should_write = True
+            if should_write:
+                write_bytes_atomic_fn(target, raw_bytes)
+            else:
+                log_debug(f"[Patchouli] 二進位內容一致，略過寫入: {target}")
 
         return {"success": True, "log": f"[Patchouli] {action_log}: {target}"}
 
