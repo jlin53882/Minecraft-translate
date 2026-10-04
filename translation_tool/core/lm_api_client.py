@@ -57,9 +57,7 @@ def _build_translation_response_schema(payload: dict) -> dict:
         # Preserve the helper's historical behavior for non-translation callers.
         return deepcopy(TRANSLATION_RESPONSE_SCHEMA)
     if not items:
-        raise ValueError(
-            "Gemini translation payload must contain at least one item"
-        )
+        raise ValueError("Gemini translation payload must contain at least one item")
 
     ids = [item.get("id") for item in items if isinstance(item, dict)]
     if len(ids) != len(items) or not all(isinstance(item_id, str) for item_id in ids):
