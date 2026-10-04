@@ -301,130 +301,113 @@ def _restore_directory_checkpoint(
     return items_to_translate[completed:], completed, fingerprint
 
 
-def translate_directory_generator(
-    input_dir: str,
-    output_dir: str,
+def _extract_directory_items(
+    files: list[str],
     *,
-    dry_run: bool | None = None,
-    export_lang: bool = False,
-    write_new_cache: bool = False,
-    should_cancel: Callable[[], bool] | None = None,
-) -> Generator[dict[str, Any], None, None]:
-    """翻譯目錄入口；掃描、cache、批次、checkpoint 與輸出由明確 phase helper 編排。"""
-    dry_run = DEFAULT_DRY_RUN if dry_run is None else dry_run
-    validate_api_keys()
-    reload_translation_cache()
-
-    root = Path(input_dir).resolve()
-    out_root = Path(output_dir).resolve()
-    out_root.mkdir(parents=True, exist_ok=True)
-    log_debug(f"DEBUG [3. Translator Gen]: export_lang={export_lang}")
-    log_info(f"\\n📂 輸入資料夾：{root}\\n📤 輸出資料夾：{out_root}")
-    yield {"progress": 0.0}
-
-    try:
-        patchouli_files, lang_files, files = scan_translatable_files(root)
-    except Exception as error:  # noqa: BLE001
-        log_warning(f"⚠️ 掃描可翻譯檔案失敗，已跳過本次掃描：{error}")
-        patchouli_files, lang_files, files = [], [], []
-
-    log_info(f"🔍 掃描完成：Patchouli={len(patchouli_files)}，Lang={len(lang_files)}")
-    yield {"progress": 0.0}
-    if not files:
-        log_info("⚠️ 未找到任何可翻譯 JSON 檔案")
-        yield {"progress": 1.0}
-        return
-
+    export_lang: bool,
+    work_thread: int,
+) -> tuple[dict[str, dict], list[dict[str, Any]], list[dict[str, Any]]]:
+    """抽取目錄項目，並把抽取進度轉成入口可轉送的事件。"""
     file_cache: dict[str, dict] = {}
     all_items: list[dict[str, Any]] = []
-    work_thread = (
-        load_config().get("translator", {}).get("parallel_execution_workers", 4)
-    )
-    previous_extract_progress = 0.0
+    events: list[dict[str, Any]] = []
+    previous_progress = 0.0
+
     for file_cache, all_items in extract_items_parallel(
         files=files,
         export_lang=export_lang,
         work_thread=work_thread,
     ):
         extract_progress = len(file_cache) / max(len(files), 1)
-        if (
-            extract_progress - previous_extract_progress >= 0.05
-            or extract_progress >= 1.0
-        ):
-            previous_extract_progress = extract_progress
-            yield {
-                "progress": 0.2 * extract_progress,
-                "log": f"✂️ 抽取中... ({len(file_cache)}/{len(files)} 檔)",
-            }
+        if extract_progress - previous_progress >= 0.05 or extract_progress >= 1.0:
+            previous_progress = extract_progress
+            events.append(
+                {
+                    "progress": 0.2 * extract_progress,
+                    "log": f"✂️ 抽取中... ({len(file_cache)}/{len(files)} 檔)",
+                }
+            )
 
-    log_info(f"✂️ 抽取完成：共 {len(all_items)} 段文字")
-    yield {"progress": 0.2}
+    return file_cache, all_items, events
 
-    cached_items, items_to_translate = _split_directory_items(all_items)
-    log_info(
-        f"🧠 Cache 命中 {len(cached_items)} 筆，需翻譯 {len(items_to_translate)} 筆"
-    )
-    yield {"progress": 0.2}
 
-    if cached_items and not dry_run:
-        cached_files = set()
-        for item in cached_items:
-            file_name = item.get("file")
-            if file_name not in file_cache:
-                continue
-            set_by_path(file_cache[file_name], item["path"], item["text"])
-            cached_files.add(file_name)
-        _write_directory_outputs(file_cache, cached_files, root, out_root, export_lang)
-        if cached_files:
-            yield {"progress": 0.2}
-
-    if DEFAULT_EXPORT_CACHE_ONLY and not items_to_translate and not dry_run:
-        clear_checkpoint()
-        yield {"progress": 1.0}
-        return
-
+def _apply_cached_directory_items(
+    cached_items: list[dict[str, Any]],
+    file_cache: dict[str, dict],
+    *,
+    dry_run: bool,
+    root: Path,
+    out_root: Path,
+    export_lang: bool,
+) -> set[str]:
+    """套用 cache 命中項目並寫出受影響檔案；dry-run 僅產生預覽。"""
     if dry_run:
-        preview_path = out_root / "_dry_run_preview.json"
-        cache_hit_preview_path = out_root / "_dry_run_cache_hit_preview.json"
-        preview_path.write_bytes(
-            json.dumps(
-                items_to_translate,
-                option=json.OPT_INDENT_2 | json.OPT_NON_STR_KEYS,
-            )
-        )
-        cache_hit_preview_path.write_bytes(
-            json.dumps(
-                [
-                    {
-                        "file": item.get("file"),
-                        "path": item.get("path"),
-                        "text": item.get("text"),
-                        "source_text": item.get("source_text"),
-                        "cache_type": item.get("cache_type"),
-                    }
-                    for item in cached_items
-                ],
-                option=json.OPT_INDENT_2 | json.OPT_NON_STR_KEYS,
-            )
-        )
-        log_info(
-            f"\\n🚧 DRY-RUN 完成，預覽檔已產生\\n"
-            f"📄 待翻譯預覽：{preview_path}\\n"
-            f"🎯 Cache 命中預覽：{cache_hit_preview_path}"
-        )
-        yield {"progress": 1.0}
-        return
+        return set()
 
-    total = len(items_to_translate)
-    if total == 0:
-        clear_checkpoint()
-        log_info("🎉 所有項目皆已從 Cache 恢復，無需翻譯。")
-        yield {"progress": 1.0, "log": "🎉 所有項目皆已從 Cache 恢復，無需翻譯。"}
-        return
+    touched_files: set[str] = set()
+    for item in cached_items:
+        file_name = item.get("file")
+        if file_name not in file_cache:
+            continue
+        set_by_path(file_cache[file_name], item["path"], item["text"])
+        touched_files.add(file_name)
 
-    remaining, completed_before, checkpoint_fingerprint = _restore_directory_checkpoint(
-        input_dir, items_to_translate
+    _write_directory_outputs(file_cache, touched_files, root, out_root, export_lang)
+    return touched_files
+
+
+def _write_directory_previews(
+    items_to_translate: list[dict[str, Any]],
+    cached_items: list[dict[str, Any]],
+    out_root: Path,
+) -> None:
+    """輸出 dry-run 的待翻譯與 cache 命中預覽。"""
+    preview_path = out_root / "_dry_run_preview.json"
+    cache_hit_preview_path = out_root / "_dry_run_cache_hit_preview.json"
+    preview_path.write_bytes(
+        json.dumps(
+            items_to_translate,
+            option=json.OPT_INDENT_2 | json.OPT_NON_STR_KEYS,
+        )
     )
+    cache_hit_preview_path.write_bytes(
+        json.dumps(
+            [
+                {
+                    "file": item.get("file"),
+                    "path": item.get("path"),
+                    "text": item.get("text"),
+                    "source_text": item.get("source_text"),
+                    "cache_type": item.get("cache_type"),
+                }
+                for item in cached_items
+            ],
+            option=json.OPT_INDENT_2 | json.OPT_NON_STR_KEYS,
+        )
+    )
+    log_info(
+        f"\\n🚧 DRY-RUN 完成，預覽檔已產生\\n"
+        f"📄 待翻譯預覽：{preview_path}\\n"
+        f"🎯 Cache 命中預覽：{cache_hit_preview_path}"
+    )
+
+
+def _run_directory_translation(
+    *,
+    remaining: list[dict[str, Any]],
+    file_cache: dict[str, dict],
+    root: Path,
+    out_root: Path,
+    export_lang: bool,
+    should_cancel: Callable[[], bool] | None,
+    write_new_cache: bool,
+    input_dir: str,
+    items_to_translate: list[dict[str, Any]],
+    completed_before: int,
+    checkpoint_fingerprint: str,
+    total: int,
+) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]], int]:
+    """執行目錄翻譯 phase，集中 callback、輸出、checkpoint 與終態契約。"""
     pending_events: list[dict[str, Any]] = []
     touched_files: set[str] = set()
     translation_log: list[dict[str, Any]] = []
@@ -462,7 +445,7 @@ def translate_directory_generator(
             total,
             items_to_translate[processed:],
             str(out_root),
-            input_dir=str(input_dir),
+            input_dir=input_dir,
             fingerprint=checkpoint_fingerprint,
         )
 
@@ -498,11 +481,7 @@ def translate_directory_generator(
         on_batch_flushed()
 
     processed = completed_before + int(result.processed or 0)
-    if not (
-        result.status == "FAILED"
-        and result.last_error
-        and "checkpoint" in result.last_error
-    ):
+    if result.status == "DONE" and processed >= total:
         clear_checkpoint()
 
     if translation_log:
@@ -514,15 +493,121 @@ def translate_directory_generator(
             )
         )
 
-    yield from pending_events
+    return result, pending_events, translation_log, processed
 
-    if result.status == "CANCELLED":
-        final_message = f"⏹ 翻譯已取消，完成 {processed}/{total} 筆"
-    elif result.status in {"FAILED", "ALL_KEYS_EXHAUSTED"}:
-        final_message = f"⚠️ 翻譯中斷，完成 {processed}/{total} 筆，狀態={result.status}"
-    else:
-        final_message = f"🎉 翻譯完全完成，完成 {processed}/{total} 筆"
 
+def _directory_final_message(status: str, processed: int, total: int) -> str:
+    """把 shared loop 終態轉成目錄翻譯對使用者的訊息。"""
+    if status == "CANCELLED":
+        return f"⏹ 翻譯已取消，完成 {processed}/{total} 筆"
+    if status in {"FAILED", "ALL_KEYS_EXHAUSTED"}:
+        return f"⚠️ 翻譯中斷，完成 {processed}/{total} 筆，狀態={status}"
+    if status == "DONE" and processed >= total:
+        return f"🎉 翻譯完全完成，完成 {processed}/{total} 筆"
+    return f"⚠️ 翻譯未完成，完成 {processed}/{total} 筆，狀態={status}"
+
+
+def translate_directory_generator(
+    input_dir: str,
+    output_dir: str,
+    *,
+    dry_run: bool | None = None,
+    export_lang: bool = False,
+    write_new_cache: bool = False,
+    should_cancel: Callable[[], bool] | None = None,
+) -> Generator[dict[str, Any], None, None]:
+    """編排目錄翻譯各 phase；實際工作由 phase helper 負責。"""
+    dry_run = DEFAULT_DRY_RUN if dry_run is None else dry_run
+    validate_api_keys()
+    reload_translation_cache()
+
+    root = Path(input_dir).resolve()
+    out_root = Path(output_dir).resolve()
+    out_root.mkdir(parents=True, exist_ok=True)
+    log_debug(f"DEBUG [3. Translator Gen]: export_lang={export_lang}")
+    log_info(f"\\n📂 輸入資料夾：{root}\\n📤 輸出資料夾：{out_root}")
+    yield {"progress": 0.0}
+
+    try:
+        patchouli_files, lang_files, files = scan_translatable_files(root)
+    except Exception as error:  # noqa: BLE001
+        log_warning(f"⚠️ 掃描可翻譯檔案失敗，已跳過本次掃描：{error}")
+        patchouli_files, lang_files, files = [], [], []
+
+    log_info(f"🔍 掃描完成：Patchouli={len(patchouli_files)}，Lang={len(lang_files)}")
+    yield {"progress": 0.0}
+    if not files:
+        log_info("⚠️ 未找到任何可翻譯 JSON 檔案")
+        yield {"progress": 1.0}
+        return
+
+    work_thread = (
+        load_config().get("translator", {}).get("parallel_execution_workers", 4)
+    )
+    file_cache, all_items, extract_events = _extract_directory_items(
+        files,
+        export_lang=export_lang,
+        work_thread=work_thread,
+    )
+    yield from extract_events
+    log_info(f"✂️ 抽取完成：共 {len(all_items)} 段文字")
+    yield {"progress": 0.2}
+
+    cached_items, items_to_translate = _split_directory_items(all_items)
+    log_info(
+        f"🧠 Cache 命中 {len(cached_items)} 筆，需翻譯 {len(items_to_translate)} 筆"
+    )
+    yield {"progress": 0.2}
+
+    cached_files = _apply_cached_directory_items(
+        cached_items,
+        file_cache,
+        dry_run=dry_run,
+        root=root,
+        out_root=out_root,
+        export_lang=export_lang,
+    )
+    if cached_files:
+        yield {"progress": 0.2}
+
+    if DEFAULT_EXPORT_CACHE_ONLY and not items_to_translate and not dry_run:
+        clear_checkpoint()
+        yield {"progress": 1.0}
+        return
+
+    if dry_run:
+        _write_directory_previews(items_to_translate, cached_items, out_root)
+        yield {"progress": 1.0}
+        return
+
+    total = len(items_to_translate)
+    if total == 0:
+        clear_checkpoint()
+        log_info("🎉 所有項目皆已從 Cache 恢復，無需翻譯。")
+        yield {"progress": 1.0, "log": "🎉 所有項目皆已從 Cache 恢復，無需翻譯。"}
+        return
+
+    remaining, completed_before, checkpoint_fingerprint = _restore_directory_checkpoint(
+        input_dir, items_to_translate
+    )
+    result, pending_events, _translation_log, processed = _run_directory_translation(
+        remaining=remaining,
+        file_cache=file_cache,
+        root=root,
+        out_root=out_root,
+        export_lang=export_lang,
+        should_cancel=should_cancel,
+        write_new_cache=write_new_cache,
+        input_dir=input_dir,
+        items_to_translate=items_to_translate,
+        completed_before=completed_before,
+        checkpoint_fingerprint=checkpoint_fingerprint,
+        total=total,
+    )
+    if pending_events:
+        yield from pending_events
+
+    final_message = _directory_final_message(result.status, processed, total)
     log_info(final_message)
     yield {
         "progress": 1.0 if processed >= total else processed / total,

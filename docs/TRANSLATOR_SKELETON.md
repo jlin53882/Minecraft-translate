@@ -39,6 +39,11 @@ durable batch metadata；checkpoint 寫入失敗會使 shared loop 回傳 `FAILE
 把未持久化的 boundary 當成成功。這個 hook 是三個 translator 共用的 checkpoint
 contract，各格式若需要額外保存 output fingerprint 或 recovery metadata，應在此掛接。
 
+目錄入口 `translate_directory_generator()` 只負責 phase 編排：驗證與掃描、抽取、
+cache split／輸出、dry-run 預覽，以及呼叫 shared translation phase。抽取、cache-hit
+套用、預覽輸出與批次 callback 都由獨立 helper 負責，避免入口重新累積格式與 lifecycle
+細節。
+
 ## Plugin-specific responsibilities
 
 | Translator | 保留在 plugin 的差異 |
@@ -65,7 +70,10 @@ cache flush、checkpoint hook 與 status。現況能力盤點如下：
 
 這裡的 checkpoint 是可恢復邊界 contract，但不是完整 crash resume orchestration；若未來改變 checkpoint schema，
 必須先補 characterization tests 並獨立記錄輸入 fingerprint、已完成 batch、partial
-output 與取消狀態。
+output 與取消狀態。清理規則固定為：只有 shared loop 回報 `DONE` 且累計
+`processed >= total` 的完整完成才可 `clear_checkpoint()`；`CANCELLED`、`FAILED`、
+`ALL_KEYS_EXHAUSTED`、未完整的 `DONE` 與 dry-run 都必須保留 checkpoint，讓下一次執行
+仍可恢復。所有新增 terminal status 都應預設走保留路徑，並補上對應 regression test。
 
 ## Verification rule
 
