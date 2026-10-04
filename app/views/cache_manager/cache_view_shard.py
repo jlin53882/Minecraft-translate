@@ -9,6 +9,7 @@ import flet as ft
 
 # UI 共用元件：總覽區使用新 UI kit。
 from app.ui.design import C
+from app.views.cache_manager.cache_history_store import warm_history_index
 from app.views.cache_manager.shard_reader import (
     shard_raw,
     shard_rows,
@@ -106,7 +107,12 @@ class CacheShardMixin:
 
     def _warm_shard_cache(self, overview: dict | None = None) -> int:
         """（背景執行緒）預熱分片摘要記憶，讓 event loop 上的渲染不再解析 JSON。"""
-        return warm_shard_summaries(overview or self._last_overview_data)
+        data = overview or self._last_overview_data
+        warm_history_index(
+            str((data or {}).get("cache_root", "") or ""),
+            (data or {}).get("types") or {},
+        )
+        return warm_shard_summaries(data)
 
     def _load_shard_keys(self, cache_type: str, filename: str) -> list[str]:
         """從分片檔案載入所有鍵值（有記憶）。"""

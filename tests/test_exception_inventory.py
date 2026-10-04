@@ -92,7 +92,7 @@ UNEXPLAINED_NOQA_BASELINE = {
     "app/shell/app_shell.py": 1,
     "app/ui/snack.py": 4,
     "app/views/bundler_view.py": 1,
-    "app/views/cache_manager/cache_history_store.py": 4,
+    "app/views/cache_manager/cache_history_store.py": 2,
     "app/views/cache_manager/cache_view_history.py": 2,
     "app/views/cache_manager/cache_view_overview.py": 2,
     "app/views/cache_manager/cache_view_query.py": 3,
