@@ -103,3 +103,22 @@ jobs:
             --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:UP035' \
             --extend-per-file-ignores 'translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:UP045'
           echo "$FILES" | xargs uv run ruff format --check
+
+  audit:
+    # 依 uv.lock 的 production 依賴（不含 dev 群組）檢查已知漏洞（#147）。
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Export locked production dependencies
+        run: uv export --frozen --no-dev --no-emit-project --no-hashes -o audit-requirements.txt
+
+      - name: pip-audit
+        run: uvx pip-audit -r audit-requirements.txt --no-deps --disable-pip

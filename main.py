@@ -11,13 +11,13 @@
 """
 
 import logging
-from pathlib import Path
 
 import flet as ft
 
 from app.shell import AppShell
 from app.startup_tasks import start_background_startup_tasks
 from app.view_registry import DEFAULT_WINDOW_SIZE, MIN_WINDOW_SIZE
+from translation_tool.utils.app_paths import get_resource_root
 
 # 視窗尺寸常數（實際值定義在 view_registry；保留這些名稱給既有的測試 / 外部引用）
 WINDOW_WIDTH_DEFAULT, WINDOW_HEIGHT_DEFAULT = DEFAULT_WINDOW_SIZE
@@ -68,4 +68,4 @@ if __name__ == "__main__":
         # 印出訊息後仍嘗試啟動（讓使用者能看到 GUI 介面）
         print(f"致命錯誤：配置或日誌系統初始化失敗！錯誤: {e}")
 
-    ft.run(main, assets_dir=str(Path(__file__).resolve().parent / "assets"))
+    ft.run(main, assets_dir=str(get_resource_root() / "assets"))

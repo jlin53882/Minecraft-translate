@@ -37,6 +37,7 @@ from translation_tool.core.translation_path_writer import (
     map_lang_output_path,
     set_by_path,
 )
+from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.cache_manager import (
     add_to_cache,
     get_cache_dict_ref,
@@ -62,7 +63,7 @@ def _get_batch_write_interval() -> int:
 # ============================================================
 # B-4: 斷點續傳機制
 # ============================================================
-CHECKPOINT_FILE = "logs/translation_checkpoint.json"
+CHECKPOINT_FILE = str(get_data_root() / "logs" / "translation_checkpoint.json")
 
 
 def compute_checkpoint_fingerprint(input_dir: str, items: list) -> str:
