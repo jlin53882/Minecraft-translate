@@ -13,7 +13,11 @@ from app.services_impl.config_service import load_config_json, save_config_json
 from app.ui import design, kit, theme
 from app.ui.design import C
 from app.ui.snack import show_snack
-from app.views.config.config_actions import load_config_into_view, save_config_from_view
+from app.views.config.config_actions import (
+    LM_EXTRA_FIELDS,
+    load_config_into_view,
+    save_config_from_view,
+)
 from app.views.config.config_form import (
     build_card as build_config_card,
 )
@@ -325,6 +329,18 @@ class ConfigView(ft.Column):
             keyboard_type=ft.KeyboardType.NUMBER,
             helper=apply_timing_note("lm_translator.key_failure_cooldown_sec"),
         )
+
+        for key, kind, label, helper in LM_EXTRA_FIELDS:
+            path = f"lm_translator.{key}"
+            if kind == "bool":
+                self.controls_map[path] = ft.Checkbox(label=label, tooltip=helper)
+            else:
+                self.controls_map[path] = kit.field(
+                    label=label,
+                    dense=True,
+                    keyboard_type=ft.KeyboardType.NUMBER,
+                    helper=helper,
+                )
 
         self.controls_map["lm_translator.translator.skip_terms"] = kit.field(
             label="略過翻譯 (Skip Terms)",
@@ -764,8 +780,16 @@ class ConfigView(ft.Column):
                 ),
             ]
         )
+        extra_controls = [
+            self.controls_map[f"lm_translator.{key}"] for key, *_ in LM_EXTRA_FIELDS
+        ]
+        extra_rows = [
+            ft.Row([ft.Column([c], expand=1) for c in extra_controls[i : i + 3]])
+            for i in range(0, len(extra_controls), 3)
+        ]
         return self._build_card(
-            "批次大小與限制", [batch_row_1, batch_row_2, batch_row_3, budget_row]
+            "批次大小與限制",
+            [batch_row_1, batch_row_2, batch_row_3, budget_row, *extra_rows],
         )
 
     def _build_lm_filter_card(self) -> ft.Control:

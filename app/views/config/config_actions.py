@@ -10,6 +10,23 @@ from translation_tool.utils.redaction import redact_text
 
 logger = logging.getLogger(__name__)
 
+# 設定頁「批次大小與限制」補上的 lm_translator 欄位（#134）。
+# 表格驅動：(key, 型別, 標籤, 說明)；新增這類設定只需要在這裡加一列，
+# 設定頁建立控制項、載入與儲存都由這張表處理。
+LM_EXTRA_FIELDS: tuple[tuple[str, str, str, str], ...] = (
+    ("token_budget_enabled", "bool", "啟用 Token 預算切批", "關閉後回到固定批次大小"),
+    ("output_token_factor", "float", "輸出／輸入 Token 係數", "預期輸出是輸入的幾倍"),
+    ("budget_min_scale", "float", "預算最小縮放", "撞牆後輸出預算最多縮到設定值的幾倍"),
+    ("budget_recover_after", "int", "回升前連續成功批次", "連續成功幾批後開始回升預算"),
+    ("budget_recover_factor", "float", "預算回升倍率", "每次回升的倍率"),
+    (
+        "batch_write_interval",
+        "int",
+        "每 N 批寫一次快取",
+        "太大會讓單次寫入超過分片上限",
+    ),
+)
+
 
 def load_config_into_view(view, config: dict):
     """
@@ -184,6 +201,13 @@ def load_config_into_view(view, config: dict):
             view.controls_map[path].value = str(
                 _v if _v is not None else get_default(path)
             )
+    for key, kind, _label, _help in LM_EXTRA_FIELDS:
+        path = f"lm_translator.{key}"
+        if path not in view.controls_map:
+            continue
+        _v = lm_cfg.get(key)
+        _v = _v if _v is not None else get_default(path)
+        view.controls_map[path].value = bool(_v) if kind == "bool" else str(_v)
     view.controls_map["lm_translator.patchouli.dir_names"].value = "\n".join(
         lm_cfg.get("patchouli", {}).get("dir_names", [])
     )
@@ -428,6 +452,22 @@ def save_config_from_view(
                     or 0
                 ),
             )
+        for key, kind, _label, _help in LM_EXTRA_FIELDS:
+            path = f"lm_translator.{key}"
+            if path not in view.controls_map:
+                continue
+            raw = view.controls_map[path].value
+            if kind == "bool":
+                new_config["lm_translator"][key] = bool(raw)
+            else:
+                # 留空 = 使用預設值
+                raw = str(raw).strip() if raw is not None else ""
+                if raw == "":
+                    new_config["lm_translator"][key] = get_default(path)
+                else:
+                    new_config["lm_translator"][key] = (
+                        int(raw) if kind == "int" else float(raw)
+                    )
         new_config["lm_translator"]["patchouli"]["dir_names"] = [
             line.strip()
             for line in view.controls_map[

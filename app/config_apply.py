@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Final, TypedDict
 
+# 沒有登記在 CONFIG_APPLY_RULES 的設定：下次任務才讀取（絕大多數引擎設定都是如此）。
+DEFAULT_TIMING: Final = "next_task"
+
 
 class ApplyRule(TypedDict):
     timing: str
@@ -54,6 +57,18 @@ CONFIG_APPLY_RULES: Final[dict[str, ApplyRule]] = {
     "logging.log_dir": {
         "timing": "next_task",
         "note": "應用日誌於啟動時建立；錯誤記錄（errors_*.log）每次寫入時讀取。",
+    },
+    "logging.log_level": {
+        "timing": "immediate",
+        "note": "存檔後立即套用到執行中的日誌，不必重啟。",
+    },
+    "logging.log_format": {
+        "timing": "immediate",
+        "note": "存檔後立即套用到執行中的日誌，不必重啟。",
+    },
+    "ui_logging.tail_lines": {
+        "timing": "next_task",
+        "note": "下次開始機器翻譯時套用，不必重開頁面。",
     },
     "species_cache.*": {
         "timing": "restart",

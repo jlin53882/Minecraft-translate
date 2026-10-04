@@ -323,6 +323,10 @@ class LMView(ft.Column):
 
         self.session = tag_session(TaskSession(), "機器翻譯", "lm")
         self.session.start()
+        # 日誌顯示行數：每次開始任務時讀最新設定，存檔後不必重開頁面
+        self.log_view.set_tail_lines(
+            load_ui_logging_config(load_config).get("tail_lines", 250)
+        )
 
         if not (self.output_path.value or "").strip():
             self.session.add_log(

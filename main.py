@@ -38,10 +38,27 @@ def bootstrap_runtime():
     注意：main.py 可被測試環境 import，因此不在模組層執行此初始化，
     而是延後到 `if __name__ == "__main__"` 才呼叫，確保測試自行控制 runtime。
     """
-    from translation_tool.utils.config_manager import load_config, setup_logging
+    from translation_tool.utils.config_manager import (
+        load_config,
+        setup_logging,
+        sync_missing_config_keys,
+    )
+
+    # 範本新增的設定欄位補進使用者的 config.json（只補缺少的 key，不改使用者的值）
+    try:
+        sync_missing_config_keys()
+    except Exception:
+        logger.warning("同步新設定欄位失敗，不影響啟動", exc_info=True)
 
     config = load_config()
     setup_logging(config)
+
+    # log_level / log_format 存檔後立即套用（不必等下次啟動流水線）
+    from app import config_store
+    from app.services_impl.config_service import _load_app_config
+    from app.services_impl.logging_service import watch_logging_config
+
+    watch_logging_config(config_store.subscribe_paths, _load_app_config)
 
     root_level = logging.getLogger().getEffectiveLevel()
     logger.info(

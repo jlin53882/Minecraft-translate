@@ -4,6 +4,7 @@
 """
 
 import json
+import logging
 import os
 import threading
 
@@ -95,6 +96,15 @@ class BundlerView(ft.Column):
         self.output_zip_field.hint_text = (
             f"留空則自動帶入：{{root_dir}}\\{self._config_output_zip_name}"
         )
+
+    def did_mount(self):
+        """頁面（重新）加入畫面時重讀設定，讓存檔後的輸出檔名提示不會是舊值。"""
+        try:
+            self._load_output_zip_from_config()
+            self._on_root_dir_change(None)  # 依目前是否已填根目錄重算提示文字
+            self.update()
+        except Exception:
+            logging.getLogger(__name__).debug("重新整理打包頁提示失敗", exc_info=True)
 
     def _on_root_dir_change(self, e: ft.ControlEvent):
         """當翻譯專案根目錄變更時，更新 output_zip_field 的 hint_text"""

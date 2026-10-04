@@ -17,6 +17,7 @@ import copy
 import json
 import logging
 import os
+import shutil
 import tempfile
 import threading
 from datetime import datetime
@@ -442,6 +443,81 @@ def _fsync_parent_directory(path: Path) -> None:
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+# 同步時不寫入使用者 config.json 的路徑：
+# - lm_translator.keys：範本是佔位字串，不是使用者的金鑰，不能寫進使用者的設定檔。
+# - lm_translator.models：使用者自訂的名單，缺少的模型是使用者刻意移除，不能補回去。
+_SYNC_SKIP_PATHS = frozenset({"lm_translator.keys", "lm_translator.models"})
+
+
+def _collect_missing_keys(
+    template: dict, user: dict, prefix: str = ""
+) -> list[tuple[str, dict, str, object]]:
+    """比對範本與使用者設定，回傳缺少的 (路徑, 使用者端的父 dict, key, 要補的值)。"""
+    missing: list[tuple[str, dict, str, object]] = []
+    for key, default_value in template.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if path in _SYNC_SKIP_PATHS or path in DEPRECATED_CONFIG_KEYS:
+            continue
+        if key not in user:
+            missing.append((path, user, key, copy.deepcopy(default_value)))
+        elif isinstance(default_value, dict) and isinstance(user[key], dict):
+            missing.extend(_collect_missing_keys(default_value, user[key], path))
+        # 使用者值型別與範本不同、或是 list：一律維持使用者的值
+    return missing
+
+
+def sync_missing_config_keys(
+    config_path: str | os.PathLike | None = None,
+) -> list[str]:
+    """把範本（DEFAULT_CONFIG + config.example.json）新增的設定寫進使用者的 config.json。
+
+    讀取時三層合併本來就會讓新設定生效；這個函式讓新欄位**實際出現在使用者的檔案裡**，
+    使用者看得到也改得到。規則：
+
+    - 只補「缺少的 key」，**絕不改動使用者已有的值**（包含 ``false``、``0``、空字串、``null``）。
+    - config.json 不存在、讀不到或不是 JSON object 時不做任何事（新安裝仍由合併機制提供預設值）。
+    - list 不碰；使用者值與範本型別不同時維持使用者的值。
+    - ``lm_translator.keys`` 與 ``lm_translator.models`` 不補（見 ``_SYNC_SKIP_PATHS``）；
+      已標示為 deprecated 的欄位不補。
+    - 有變更時先留一份 ``<檔名>.pre-sync.bak``，再用 ``save_config`` 原子寫入。
+    - 沒有缺少的欄位時不寫檔；重複執行是冪等的。
+
+    回傳：實際補上的設定路徑（例如 ``["lm_translator.max_input_token_budget"]``）。
+    """
+    resolved = resolve_project_path(config_path or CONFIG_PATH)
+    if not resolved.is_file():
+        return []
+    try:
+        with resolved.open("r", encoding="utf-8") as f:
+            user_config = json.load(f)
+    except (OSError, ValueError):
+        log.warning("同步設定欄位：無法讀取 %s，略過", resolved, exc_info=True)
+        return []
+    if not isinstance(user_config, dict):
+        return []
+
+    template = deep_merge(copy.deepcopy(DEFAULT_CONFIG), load_config_example() or {})
+    missing = _collect_missing_keys(template, user_config)
+    if not missing:
+        return []
+
+    backup = resolved.with_name(resolved.name + ".pre-sync.bak")
+    try:
+        shutil.copy2(resolved, backup)
+    except OSError:
+        # 沒有備份就不動使用者的檔案
+        log.warning("同步設定欄位：無法建立備份 %s，略過", backup, exc_info=True)
+        return []
+    for _path, parent, key, value in missing:
+        parent[key] = value
+    if not save_config(user_config, resolved):
+        log.error("同步設定欄位：寫入失敗，原檔保持不變（備份在 %s）", backup)
+        return []
+    added = [path for path, *_ in missing]
+    log.info("已把新設定欄位補進 %s：%s", resolved, ", ".join(added))
+    return added
 
 
 def save_config(config, config_path: str | os.PathLike | None = None) -> bool:
