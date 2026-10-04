@@ -20,26 +20,30 @@
 from __future__ import annotations
 
 import json
-import shutil  # 用於 _cleanup_extracted_dirs 刪除整個 _extracted 子資料夾
 import os
 import re
+import shutil  # 用於 _cleanup_extracted_dirs 刪除整個 _extracted 子資料夾
 import traceback
 from collections import defaultdict
+from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 
-from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.core.lang_merge_dict import (
+    contains_cjk as stage2_contains_cjk,
+)
+from translation_tool.core.lang_merge_dict import (
+    is_pure_english as stage2_is_pure_english,
+)
+from translation_tool.core.lang_merge_dict import (
+    merge_lang_dicts,
+)
+from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 from translation_tool.utils.safe_json_loader import load_json_auto_encoding
 from translation_tool.utils.text_processor import (
     apply_replace_rules,
     recursive_translate_dict,
 )
-from translation_tool.core.lang_merge_dict import (
-    merge_lang_dicts,
-    contains_cjk as stage2_contains_cjk,
-    is_pure_english as stage2_is_pure_english,
-)
-
 
 # 任何 *_extracted 結尾 (含可選版本後綴) 算會被這個 pattern 挑到
 # re.match(r".*_extracted(_\w+)?$", name) 接受:
@@ -256,10 +260,18 @@ def _cleanup_single_mod_extracted(lang_output_dir: Path, modid: str) -> bool:
                 if not any(entry.iterdir()):
                     shutil.rmtree(entry)
                 return True
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                 # 2026-08-04: log warning instead of silent pass
                 log_warning(f"[MergeExt→Assets] cleanup 失敗 ({modid}): {e}")
     return False
+
+
+def _safe_session_log(session, message: str) -> None:
+    """寫入 UI session 日誌；UI 日誌失敗不可中斷合併（只留 debug 紀錄）。"""
+    try:
+        session.add_log(message)
+    except Exception:  # noqa: BLE001
+        log_debug("[MergeExt→Assets] session.add_log 失敗", exc_info=True)
 
 
 def _cleanup_extracted_dirs(lang_output_dir: Path, session: Any = None) -> int:
@@ -290,11 +302,10 @@ def _cleanup_extracted_dirs(lang_output_dir: Path, session: Any = None) -> int:
             cleaned += 1
             log_info(f"[MergeExt→Assets] 已清理 _extracted 子資料夾: {entry.name}")
             if session is not None:
-                try:
-                    session.add_log(f"[清理] 已刪除 {entry.name}/ (內容已併入 assets/)")
-                except Exception:
-                    pass
-        except Exception as exc:
+                _safe_session_log(
+                    session, f"[清理] 已刪除 {entry.name}/ (內容已併入 assets/)"
+                )
+        except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
             log_warning(f"[MergeExt→Assets] 無法刪除 {entry}: {exc!r}")
     return cleaned
 
@@ -326,10 +337,7 @@ def merge_extracted_to_assets(
 
     log_info(f"[MergeExt→Assets] 開始,掃描 {lang_output_dir}")
     if session is not None:
-        try:
-            session.add_log("[MergeExt→Assets] 開始掃描 XX_extracted/")
-        except Exception:
-            pass
+        _safe_session_log(session, "[MergeExt→Assets] 開始掃描 XX_extracted/")
 
     if not lang_output_dir.exists():
         log_warning(f"[MergeExt→Assets] 不存在: {lang_output_dir}")
@@ -389,7 +397,7 @@ def merge_extracted_to_assets(
                     data = load_json_auto_encoding(source_path)
                     if data is None or not isinstance(data, dict):
                         raise ValueError("來源 JSON 無法讀取或不是 dict 格式")
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                     mod_error = f"{modid}: read failed ({source_path}): {exc}"
                     log_warning(f"[MergeExt→Assets] {mod_error}")
                     total_warnings += 1
@@ -410,7 +418,7 @@ def merge_extracted_to_assets(
             try:
                 # 既有 assets/{modid}/lang/zh_tw.json (人工翻譯保護)
                 existing_tw = existing.get((modid, "zh_tw"), {})
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                 mod_error = f"{modid}: read failed (existing assets): {exc}"
                 log_warning(f"[MergeExt→Assets] {mod_error}")
                 total_warnings += 1
@@ -431,7 +439,7 @@ def merge_extracted_to_assets(
                     is_pure_english=stage2_is_pure_english,
                     is_from_output_dir=bool(existing_tw),
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                 mod_error = f"{modid}: merge failed: {exc}"
                 log_warning(f"[MergeExt→Assets] {mod_error}")
                 total_warnings += 1
@@ -450,33 +458,28 @@ def merge_extracted_to_assets(
                     # 2026-08-04 B3: 寫成功才刪該 mod 的 _extracted source (per-mod commit)
                     try:
                         _cleanup_single_mod_extracted(lang_output_dir, modid)
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                         log_warning(f"[MergeExt→Assets] cleanup 失敗 ({modid}): {exc}")
                     mod_added_count = len(final_tw) - len(existing_tw)
                     if mod_added_count > 0:
                         total_added += mod_added_count
                     if session is not None:
-                        try:
-                            session.add_log(
-                                f"  ✓ {modid}/zh_tw.json: {len(final_tw)} keys"
-                                + (
-                                    f" (+{mod_added_count} 新)"
-                                    if mod_added_count > 0
-                                    else ""
-                                )
-                            )
-                        except Exception:
-                            pass
+                        _safe_session_log(
+                            session,
+                            f"  ✓ {modid}/zh_tw.json: {len(final_tw)} keys"
+                            + (
+                                f" (+{mod_added_count} 新)"
+                                if mod_added_count > 0
+                                else ""
+                            ),
+                        )
                 else:
                     # 沒 zh_tw 內容,不寫空檔案(避免污染 assets/)
                     if session is not None:
-                        try:
-                            session.add_log(
-                                f"  - {modid}: 沒 zh_tw 內容,跳過寫 assets/"
-                            )
-                        except Exception:
-                            pass
-            except Exception as exc:
+                        _safe_session_log(
+                            session, f"  - {modid}: 沒 zh_tw 內容,跳過寫 assets/"
+                        )
+            except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                 mod_error = f"{modid}: write failed ({target_path}): {exc}"
                 log_warning(f"[MergeExt→Assets] {mod_error}")
                 total_warnings += 1
@@ -492,20 +495,14 @@ def merge_extracted_to_assets(
             # LM 翻譯完成後,user 再跑一次 merge,Stage 1 會讀 zh_tw.json
             # 並寫到 assets/{modid}/lang/zh_tw.json。
             if pending and session is not None:
-                try:
-                    session.add_log(
-                        f"  → {modid}: {len(pending)} pending 在 待翻譯/,等 LM 翻"
-                    )
-                except Exception:
-                    pass
+                _safe_session_log(
+                    session, f"  → {modid}: {len(pending)} pending 在 待翻譯/,等 LM 翻"
+                )
 
             if session is not None and mod_added_count > 0:
-                try:
-                    session.add_log(
-                        f"  ✓ {modid}: +{mod_added_count} 個 key 進 assets/"
-                    )
-                except Exception:
-                    pass
+                _safe_session_log(
+                    session, f"  ✓ {modid}: +{mod_added_count} 個 key 進 assets/"
+                )
 
             progress = base_progress + (idx / total_modids) * span
             yield {
@@ -521,12 +518,9 @@ def merge_extracted_to_assets(
             f" {total_warnings} 個 warning"
         )
         if session is not None:
-            try:
-                session.add_log(
-                    f"[MergeExt→Assets] 完成: {total_added} 個 key 已並入 assets/"
-                )
-            except Exception:
-                pass
+            _safe_session_log(
+                session, f"[MergeExt→Assets] 完成: {total_added} 個 key 已並入 assets/"
+            )
         # 2026-08-04: per-mod cleanup 已在 loop 內處理,不再需要 batch cleanup
         yield {
             "progress": 1.0,
@@ -535,12 +529,9 @@ def merge_extracted_to_assets(
             "message": "; ".join(error_details) if error_details else None,
         }
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
         tb = traceback.format_exc()
         log_warning(f"[MergeExt→Assets] 錯誤: {exc}\n{tb}")
         if session is not None:
-            try:
-                session.add_log(f"[MergeExt→Assets] 錯誤: {exc}")
-            except Exception:
-                pass
+            _safe_session_log(session, f"[MergeExt→Assets] 錯誤: {exc}")
         yield {"progress": 1.0, "log": None, "error": True}

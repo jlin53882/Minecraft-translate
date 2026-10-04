@@ -7,10 +7,10 @@
 from __future__ import annotations
 
 import os
-import zipfile
-from typing import Any, Dict, Callable
+from collections.abc import Callable
+from typing import Any
 
-from ..utils.log_unit import log_info, log_warning, log_error, log_debug
+from ..utils.log_unit import log_debug, log_error, log_info, log_warning
 
 
 def patch_localized_content_json_impl(
@@ -25,14 +25,14 @@ def patch_localized_content_json_impl(
     quarantine_copy_fn: Callable[..., Any],
     json_module,
     logger_override=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """將本地化 JSON 檔案（zh_cn）讀取後套用 S2TW 翻譯規則，以格式化 JSON 寫入 tw_output_path；若解析失敗則隔離至 quarantine。"""
     try:
         raw_text = reader.read_text(cn_path)
 
         try:
             cn_data = json_module.loads(raw_text)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
             log_warning(f"{log_prefix} zh_cn JSON 無法解析，已跳過該檔案: {e}")
             quarantine_copy_fn(
                 reader=reader,
@@ -46,7 +46,9 @@ def patch_localized_content_json_impl(
             }
 
         translated_data = recursive_translate_dict_fn(cn_data, rules)
-        new_content_bytes = json_module.dumps(translated_data, option=json_module.OPT_INDENT_2)
+        new_content_bytes = json_module.dumps(
+            translated_data, option=json_module.OPT_INDENT_2
+        )
 
         should_write = True
         log_msg = None
@@ -57,7 +59,7 @@ def patch_localized_content_json_impl(
                     existing_raw = f.read().decode("utf-8")
                 try:
                     existing_data = json_module.loads(existing_raw)
-                except Exception:
+                except Exception:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
                     log_warning(f"{log_prefix} TW JSON 無法解析，將覆蓋修復")
                     existing_data = None
 
@@ -67,7 +69,7 @@ def patch_localized_content_json_impl(
                     )
                     if new_content_bytes == existing_normalized_bytes:
                         should_write = False
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
                 log_warning(f"{log_prefix} 無法載入現有 TW 檔案 ({e})，將覆蓋寫入")
 
         if should_write:
@@ -83,7 +85,7 @@ def patch_localized_content_json_impl(
             "success": True,
             "pending_count": 0,
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         log_error(f"處理內容 JSON 檔案 {cn_path} 發生錯誤: {exc}", exc_info=True)
         return {
             "success": False,

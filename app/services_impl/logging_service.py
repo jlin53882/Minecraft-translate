@@ -21,6 +21,7 @@ import time
 from collections import deque
 from typing import Any
 
+from translation_tool.utils.redaction import RedactingFormatter
 from translation_tool.utils.ui_logging_handler import UISessionLogHandler
 
 logger = logging.getLogger(__name__)
@@ -184,6 +185,33 @@ def update_logger_config(config_loader, *, logger_name: str = "translation_tool"
 
     root_logger.setLevel(_numeric_level)
     UI_LOG_HANDLER.setLevel(_numeric_level)
-    UI_LOG_HANDLER.setFormatter(logging.Formatter(_format_str))
+    UI_LOG_HANDLER.setFormatter(RedactingFormatter(_format_str))
 
     logger.debug(f"Log 系統已同步：Level={_level_name}, Format={_format_str}")
+
+
+# 這些設定存檔後要立刻套用到執行中的 logger（不必等下次啟動流水線）
+LOGGING_LIVE_PATHS = frozenset({"logging.log_level", "logging.log_format"})
+
+
+def apply_logging_config_if_changed(changed_paths, config_loader) -> bool:
+    """設定存檔後：若 log 等級或格式有變，立即重新套用；回傳是否有套用。
+
+    套用失敗只記錄，不影響存檔流程（存檔通知的訂閱者例外會被 config_store 吞掉並記錄，
+    這裡自己也保護，避免日誌設定錯誤變成使用者看到的存檔失敗）。
+    """
+    if not LOGGING_LIVE_PATHS.intersection(changed_paths):
+        return False
+    try:
+        update_logger_config(config_loader)
+    except Exception:
+        logger.warning("存檔後套用日誌設定失敗", exc_info=True)
+        return False
+    return True
+
+
+def watch_logging_config(subscribe_paths, config_loader):
+    """訂閱設定存檔事件，使 log_level / log_format 的變更即時生效；回傳取消訂閱函式。"""
+    return subscribe_paths(
+        lambda changed: apply_logging_config_if_changed(changed, config_loader)
+    )

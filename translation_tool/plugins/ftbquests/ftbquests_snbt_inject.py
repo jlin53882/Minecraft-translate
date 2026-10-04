@@ -11,26 +11,29 @@ from __future__ import annotations
 
 import os
 import shutil
-from typing import Dict, Any, Tuple, Optional, List
 from collections import defaultdict
+from typing import Any
 
-import orjson
 import ftb_snbt_lib as snbt
-from ftb_snbt_lib.tag import Compound, List as SnbtList  # 避免跟 typing.List 混淆
-from ...utils.text_processor import (
-    convert_snbt_tree_inplace,  # 轉換.snbt 資料夾檔案內容（就地修改）。
-    convert_snbt_file_inplace,  # 轉換.snbt（或任何純文字檔）內容。
-    load_replace_rules,  # 載入替換規則。
-)
-from ...utils.config_manager import load_config
+import orjson
+from ftb_snbt_lib.tag import Compound  # 避免跟 typing.List 混淆
+from ftb_snbt_lib.tag import List as SnbtList
 
 # 導入我們自訂的日誌工具
 from translation_tool.utils.log_unit import (
-    log_info,
-    log_error,
-    log_warning,
     log_debug,
+    log_error,
+    log_info,
+    log_warning,
 )
+
+from ...utils.config_manager import load_config
+from ...utils.text_processor import (
+    convert_snbt_file_inplace,  # 轉換.snbt（或任何純文字檔）內容。
+    convert_snbt_tree_inplace,  # 轉換.snbt 資料夾檔案內容（就地修改）。
+    load_replace_rules,  # 載入替換規則。
+)
+
 
 def _normalize_config_dir(path: str) -> str:
     """
@@ -45,6 +48,7 @@ def _normalize_config_dir(path: str) -> str:
         return os.path.dirname(norm)
     return norm
 
+
 def _load_json_dict(path: str) -> dict:
     """載入 JSON 檔案為字典。"""
     if not os.path.isfile(path):
@@ -52,7 +56,8 @@ def _load_json_dict(path: str) -> dict:
     with open(path, "rb") as f:
         return orjson.loads(f.read())
 
-def split_lang_by_source_file(lang_map: dict) -> Dict[str, Dict[str, str]]:
+
+def split_lang_by_source_file(lang_map: dict) -> dict[str, dict[str, str]]:
     """
     將 extractor 產出的扁平 key 拆回來源檔：
       - "xxx.snbt|some.key" -> 檔名=xxx.snbt, inner_key=some.key
@@ -64,7 +69,7 @@ def split_lang_by_source_file(lang_map: dict) -> Dict[str, Dict[str, str]]:
         "_default": {...}
       }
     """
-    out: Dict[str, Dict[str, str]] = {}
+    out: dict[str, dict[str, str]] = {}
     for k, v in lang_map.items():
         if not (
             isinstance(v, str)
@@ -77,6 +82,7 @@ def split_lang_by_source_file(lang_map: dict) -> Dict[str, Dict[str, str]]:
             filename, inner_key = "_default", k
         out.setdefault(filename, {})[inner_key] = v
     return out
+
 
 def _walk_and_copy_template(template_dir: str, zh_tw_dir: str) -> int:
     """
@@ -99,6 +105,7 @@ def _walk_and_copy_template(template_dir: str, zh_tw_dir: str) -> int:
 
     return copied
 
+
 def walk_and_copy_all_snbt(src_root_dir: str, dst_root_dir: str) -> int:
     """
     把 src_root_dir 下所有 .snbt 複製到 dst_root_dir（保留相對路徑）
@@ -120,16 +127,16 @@ def walk_and_copy_all_snbt(src_root_dir: str, dst_root_dir: str) -> int:
 
     return copied
 
-def _read_snbt(path: str) -> Compound | None:
-    """
 
-    """
+def _read_snbt(path: str) -> Compound | None:
+    """讀取 SNBT 檔案；失敗時記錄錯誤並回傳 None。"""
     try:
         with open(path, "r", encoding="utf-8") as f:
             return snbt.load(f)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         log_error("SNBT 讀取失敗: %s -> %s", path, e)
         return None
+
 
 def _write_snbt(path: str, root: Compound) -> None:
     """寫入 SNBT 檔案。"""
@@ -137,13 +144,14 @@ def _write_snbt(path: str, root: Compound) -> None:
     with open(path, "w", encoding="utf-8") as f:
         f.write(snbt.dumps(root))
 
+
 def patch_lang_snbt_file(
     src_path: str,
     dst_path: str,
-    updates: Dict[str, Any],
+    updates: dict[str, Any],
     *,
     return_details: bool = False,  # ✅ 新增：要不要回傳詳細資訊
-) -> Tuple[int, int] | Tuple[int, int, Dict[str, Any]]:
+) -> tuple[int, int] | tuple[int, int, dict[str, Any]]:
     """
     以 src_path 的結構為準，將 updates 覆蓋到 dst_path（dst 通常是複製的模板檔）
     - 只更新模板內存在的 key（避免亂塞 key）
@@ -186,17 +194,17 @@ def patch_lang_snbt_file(
     candidates = 0
 
     # ✅ 詳細統計
-    missing_in_template: List[str] = []
-    skipped_type_mismatch: List[str] = []
-    unchanged_keys: List[str] = []
-    changed_keys: List[str] = []
+    missing_in_template: list[str] = []
+    skipped_type_mismatch: list[str] = []
+    unchanged_keys: list[str] = []
+    changed_keys: list[str] = []
 
     def _list_to_py(v):
         """將 SnbtList 物件轉換為標準 Python 列表，並將內部元素格式化為字串。"""
         if isinstance(v, SnbtList):
             out = []
             for e in v:
-                out.append(str(e) if isinstance(e, snbt.String) else str(e))
+                out.append(str(e))
             return out
         return None
 
@@ -264,13 +272,14 @@ def patch_lang_snbt_file(
     }
     return changed, candidates, details
 
+
 def patch_quest_snbt_file(
     src_path: str,
     dst_path: str,
-    updates: Dict[str, Any],
+    updates: dict[str, Any],
     *,
     return_details: bool = False,
-) -> Tuple[int, int] | Tuple[int, int, Dict[str, Any]]:
+) -> tuple[int, int] | tuple[int, int, dict[str, Any]]:
     """
     專門 patch quest 本體 SNBT：
     - updates 的 key 形式通常是：
@@ -301,7 +310,7 @@ def patch_quest_snbt_file(
     if not dst_root:
         dst_root = src_root
 
-    want: Dict[Tuple[str, str], Any] = {}  # (id, kind) -> val
+    want: dict[tuple[str, str], Any] = {}  # (id, kind) -> val
     skipped: list[str] = []
 
     for k, v in updates.items():
@@ -394,7 +403,7 @@ def patch_quest_snbt_file(
                     if key in want:
                         _apply_field(node, kind, want[key], f"id:{qid}|{kind}")
 
-            for _, sub in node.items():
+            for sub in node.values():
                 if isinstance(sub, (Compound, SnbtList)):
                     _recurse(sub)
 
@@ -420,6 +429,7 @@ def patch_quest_snbt_file(
             "missing": missing,
         },
     )
+
 
 def inject_ftbquests_zh_tw_from_json_old(
     base_config_dir: str,
@@ -472,7 +482,7 @@ def inject_ftbquests_zh_tw_from_json_old(
     missing_template_files = 0
 
     # _default：沒有 filename| 前綴的 key（通常不該出現，除非你的 make_output_key 規則改過）
-    if "_default" in by_file and by_file["_default"]:
+    if by_file.get("_default"):
         skipped_default = len(by_file["_default"])
 
     for filename, updates in by_file.items():
@@ -502,6 +512,7 @@ def inject_ftbquests_zh_tw_from_json_old(
         "skipped_default_keys": skipped_default,
         "missing_template_files": missing_template_files,
     }
+
 
 def inject_ftbquests_quests_from_zh_tw_json(
     *,
@@ -537,7 +548,7 @@ def inject_ftbquests_quests_from_zh_tw_json(
     missing_source_files = 0
     skipped_default = 0
 
-    if "_default" in by_file and by_file["_default"]:
+    if by_file.get("_default"):
         skipped_default = len(by_file["_default"])
 
     def _build_filename_index(root_dir: str) -> dict[str, list[str]]:
@@ -607,10 +618,11 @@ def inject_ftbquests_quests_from_zh_tw_json(
         "skipped_default_keys": skipped_default,
     }
 
+
 def inject_ftbquests_zh_tw_from_jsons(
     base_config_dir: str,
-    zh_tw_lang_json_path: Optional[str],
-    zh_tw_quests_json_path: Optional[str],
+    zh_tw_lang_json_path: str | None,
+    zh_tw_quests_json_path: str | None,
     *,
     template_prefer: str = "zh_cn",
     overwrite_template_copy: bool = True,
@@ -710,7 +722,7 @@ def inject_ftbquests_zh_tw_from_jsons(
 
     # _default：沒有 filename| 前綴的 key（通常不該出現，除非你的 make_output_key 規則改過）
     if template_mode == "dir":
-        if "_default" in by_file and by_file["_default"]:
+        if by_file.get("_default"):
             skipped_default = len(by_file["_default"])
     else:
         # 單檔制：_default 視為可注入

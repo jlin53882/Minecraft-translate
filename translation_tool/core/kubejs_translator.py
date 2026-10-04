@@ -259,14 +259,14 @@ def step2_translate_lm(
                 elif p > 1:
                     p = 1.0
                 self.parent.set_progress(self.base + p * self.span)
-            except Exception:  # noqa: BLE001, S110
+            except Exception:  # noqa: BLE001, S110 - UI 進度回報失敗不可中斷翻譯
                 pass
 
         def set_status(self, msg: str):
             if self.parent and hasattr(self.parent, "set_status"):
                 try:
                     self.parent.set_status(msg)
-                except Exception:  # noqa: BLE001, S110
+                except Exception:  # noqa: BLE001, S110 - UI 狀態回報失敗不可中斷翻譯
                     pass
 
     proxy = _ProgressProxy(session, progress_base, progress_span)
@@ -282,7 +282,7 @@ def step2_translate_lm(
     if session and hasattr(session, "set_progress"):
         try:
             session.set_progress(progress_base + progress_span)
-        except Exception:  # noqa: BLE001, S110
+        except Exception:  # noqa: BLE001, S110 - UI 進度回報失敗不可中斷翻譯
             pass
 
     return result
@@ -400,8 +400,8 @@ def run_kubejs_pipeline(
                 data = orjson.loads(p.read_bytes())
                 if isinstance(data, dict):
                     total += len(data)
-            except Exception:  # noqa: BLE001, S110
-                pass
+            except Exception as exc:  # noqa: BLE001 - 壞檔不計入總數，但要留下紀錄
+                log_warning(f"[KubeJS] 統計待翻譯數量時略過無法讀取的檔案 {p}: {exc!r}")
         return total
 
     def _log_kubejs_step2_stats(step2_res: dict[str, Any]) -> None:

@@ -17,12 +17,19 @@ import copy
 import json
 import logging
 import os
+import shutil
 import tempfile
 import threading
 from datetime import datetime
 from pathlib import Path
 
 from translation_tool.utils.app_paths import get_data_root, get_resource_root
+from translation_tool.utils.config_schema import (
+    build_default_config,
+    get_path,
+    sensitive_paths,
+)
+from translation_tool.utils.redaction import RedactingFormatter, register_secrets
 
 log = logging.getLogger(__name__)
 
@@ -112,205 +119,24 @@ def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
 
 # DEFAULT_CONFIG 是「缺檔或缺欄位時的保底值」，不是要取代使用者設定；
 # load_config() 會用它做深度合併，讓新欄位可以向後相容地補進舊 config.json。
-DEFAULT_CONFIG = {
-    "ui": {
-        "theme_mode": "dark",  # dark / light
-    },
-    "logging": {
-        "log_level": "INFO",
-        "log_format": "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",
-        "log_dir": "logs",
-    },
-    "translator": {
-        "output_dir_name": "zh_tw_generated",
-        "replace_rules_path": "replace_rules.json",
-        "cache_directory": "快取資料",
-        "enable_cache_saving": True,
-        "parallel_execution_workers": 4,
-        "custom_translator_folder": "custom_translators",
-        "cjk_ratio_threshold": 0.7,
-    },
-    "ftb_translator": {
-        "output_dir_name": "FTB任務翻譯輸出",
-    },
-    "species_cache": {
-        "cache_directory": "學名資料庫",
-        "cache_filename": "species_cache.tsv",
-        "wikipedia_language": "zh",
-        "wikipedia_rate_limit_delay": 0.5,
-    },
-    "lm_translator": {
-        "temperature": 0.3,
-        "lm_translate_folder_name": "LM翻譯後",
-        "initial_batch_size_patchouli": 100,
-        "initial_batch_size_lang": 300,
-        "initial_batch_size_ftb": 200,
-        "initial_batch_size_kubejs": 200,
-        "initial_batch_size_md": 100,
-        "min_batch_size": 50,
-        "batch_shrink_factor": 0.5,
-        # token 預算切批（issue #108）：批次大小除了項目數，也受估算 token 限制。
-        "token_budget_enabled": True,
-        "max_output_token_budget": 24000,  # 單批預期輸出 token 上限（保守值）
-        "max_input_token_budget": 60000,  # 單批輸入 token 上限（避免吃掉太多 TPM）
-        "max_output_tokens": 32768,  # 送給 API 的 maxOutputTokens；0 = 不送
-        "output_token_factor": 1.5,  # 預期輸出 / 輸入 token 係數（會依實際用量校正）
-        "budget_min_scale": 0.0625,  # 撞牆後輸出預算最多縮到設定值的幾倍
-        "budget_recover_after": 3,  # 連續成功幾批後開始回升預算
-        "budget_recover_factor": 1.5,  # 每次回升的倍率
-        "batch_write_interval": 2,  # 每 N 個批次寫一次快取（太大會讓單次寫入超過分片上限）
-        "rpm_cooldown_sec": 0,
-        # 已確定 RPD 耗盡 / 403 的 API Key 冷卻多久（秒）；到期後會再給它一次機會，0 = 不記憶（issue #113）
-        "key_failure_cooldown_sec": 3600,
-        "rate_limit": {
-            "timeout": 600,
-            "sleep_seconds_between_batches": 0.0,
-        },
-        "models": {
-            "gemini-2.5-flash": {"enabled": True},
-        },
-        "keys": [
-            "YOUR_GEMINI_API_KEY_1",
-            "YOUR_GEMINI_API_KEY_2",
-        ],
-        "patchouli_system_prompt": (
-            "你是專業的 Minecraft Patchouli 手冊翻譯員。\n\n"
-            "你正在翻譯一個「ID → Value 對照表」。\n\n"
-            "⚠️【極重要規則 — ID 不可變】⚠️\n"
-            "- items[].id 是不可變的識別符號\n"
-            "- id 不具有任何語意，也不對應任何 JSON 結構\n"
-            "- id 只能被視為純文字索引\n"
-            "- 絕對禁止：\n"
-            "  - 修改、重寫、補零、轉型、排序、重編任何 id\n"
-            "  - 新增或刪除任何 id\n"
-            "  - 嘗試推測 id 與內容的關聯\n\n"
-            "📌 任務規則：\n"
-            "1. 只允許修改 items[].value 的字串內容\n"
-            "2. items[].id 必須與輸入完全一字不差\n"
-            "3. items 的數量與順序必須與輸入完全一致\n"
-            "4. 如果你不確定如何翻譯，請原樣回傳 value\n"
-            "5. 回傳必須是合法 JSON，且格式與輸入完全一致\n"
-            "6. 僅翻譯為繁體中文（台灣用語）\n"
-            "7. 保留 §, %, {}, $(...) 等所有符號與格式\n"
-            "8. 單位（mb、tick 等）請保留原文\n"
-            "9. Minecraft 請保持原文，不要翻譯成「當個創世神」\n"
-            "10. 每一筆 value 必須只根據該筆原文自身內容翻譯\n"
-            "11. 只要 value 包含人類語言就必須翻譯\n"
-            "12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石)"
-        ),
-        "lang_system_prompt": (
-            "你正在翻譯 Minecraft 語言檔案（JSON 格式）。\n\n"
-            "你收到的是一個「ID → value 對照表」。\n\n"
-            "⚠️【極重要規則 — ID 不可變】⚠️\n"
-            "- items[].id 是唯一識別符號\n"
-            "- id 不具有任何語意\n"
-            "- 絕對禁止：\n"
-            "  - 修改、轉型、補零、重排、推測或重寫任何 id\n"
-            "  - 新增或刪除任何 item\n\n"
-            "📌 任務規則：\n"
-            "1. 只允許修改 items[].value 的字串內容\n"
-            "2. items[].id 必須與輸入完全一字不差\n"
-            "3. items 的數量與順序必須與輸入完全一致\n"
-            "4. 如果你不確定如何翻譯，請原樣回傳 value\n"
-            '5. 回傳必須是合法 JSON，格式必須為 {"items":[{"id":...,"value":...}, ...]}\n'
-            "6. 僅翻譯為繁體中文（台灣用語）\n"
-            "7. 保留 §, %, {}, $(...) 等所有符號與格式\n"
-            "8. 單位（mb、tick 等）請保留原文\n"
-            "9. Minecraft 請保持原文\n"
-            "10. 每一筆 value 只依該筆原文翻譯\n"
-            "11. 只要 value 包含人類語言就必須翻譯\n"
-        ),
-        "translator": {
-            # lang 值長度 ≤ 此值且不含空白時視為非顯示文字而略過（0 = 不略過）
-            "short_text_skip_len": 3,
-            "skip_terms": [
-                "api documentation",
-                "api docs",
-                "documentation",
-                "discord",
-                "github",
-                "homepage",
-                "mod page",
-                "modpack",
-                "official website",
-                "patreon",
-                "Twitter",
-                "Modrinth",
-                "CurseForge",
-                "Crowdin",
-                "Twitch",
-                "Wiki",
-                "Minecraft",
-                "Forge",
-                "YouTube",
-                "Reddit",
-                "Ko-fi",
-                "Flattr",
-            ],
-            "translatable_keywords": [
-                "text",
-                "name",
-                "title",
-                "description",
-                "subtitle",
-                "hover",
-                "note",
-                "warning",
-                "quote",
-                "paragraph",
-                "body",
-                "header",
-                "footer",
-                "heading",
-                "effects",
-                "category",
-                "link_text",
-                "pages.title",
-            ],
-        },
-        "patchouli": {
-            "dir_names": ["patchouli_books", "book", "manual", "guidebook"],
-        },
-    },
-    "output_bundler": {"output_zip_name": "可使用翻譯.zip"},
-    "jar_extractor": {
-        "lang_codes": ["en_us", "zh_cn", "zh_tw"],
-    },
-    "lang_merger": {
-        "pending_folder_name": "待翻譯",
-        "pending_organized_folder_name": "待翻譯整理需翻譯",
-        "filtered_pending_min_count": 3,
-        "quarantine_folder_name": "問題檔案skipped_json",
-        "process_zh_cn_files": True,
-        "skip_zh_cn_when_only_process_lang": False,
-        "patchouli_skip_en_us_when_zh_cn_exists": False,
-        "patchouli_effective_translation_threshold": 0.5,
-        "zh_en_letter_threshold": 2,
-        # 2026-08-02 (PR-XX merge-asset-整):把 lang_output/{XX_extracted,...}/ 內 lang 檔
-        # key-by-key 合併進 lang_output/assets/{modid}/lang/{xx_yy}.json,
-        # 這樣 minecraft 才能抓到從 JAR 內建抽出的 mod lang
-        # (預設 True,符合 user 期望流程)
-        "enable_extracted_to_assets_merge": True,
-    },
-    "extractor": {
-        "output_folder_names": {
-            "lang_extract": "_提取lang_輸出",
-            "book_extract": "_提取book_輸出",
-            "lang_preview": "_預覽lang_輸出",
-            "book_preview": "_預覽book_輸出",
-            "dual_extract": "_提取both_輸出",
-            "dual_preview": "_預覽both_輸出",
-        },
-        "target_language": ["zh_tw"],
-        "skip_zh_cn_extract": False,
-    },
-}
+# 預設值的唯一來源是 config_schema.SETTINGS（每個設定的 default），這裡只是由它建出。
+DEFAULT_CONFIG = build_default_config()
 
 
 # load_config 快取：以設定檔的 (mtime_ns, size) 判斷是否需要重新讀取。
 # 翻譯流程每筆資料都會讀設定（11 萬筆約多花 100 秒），檔案未變就直接用快取。
 _CONFIG_CACHE: dict = {"key": None, "config": None}
 _CONFIG_CACHE_LOCK = threading.Lock()
+
+
+def _sensitive_values(config: dict):
+    """schema 標示為 sensitive 的設定值（字串，或字串清單裡的每一項）。"""
+    for path in sensitive_paths():
+        value = get_path(config, path)
+        items = value if isinstance(value, list) else [value]
+        for item in items:
+            if isinstance(item, str) and not item.startswith("YOUR_"):
+                yield item
 
 
 def _file_sig(path: Path):
@@ -412,8 +238,8 @@ def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
             with resolved_config_path.open("r", encoding="utf-8") as f:
                 user_config = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
-            print(
-                f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。"
+            log.error(
+                "讀取設定檔 %s 失敗: %s，將使用預設設定。", resolved_config_path, e
             )
             return base, False
 
@@ -425,6 +251,10 @@ def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
     # lm_translator.models 不允許 deep merge（視為使用者資料，完全替換）
     if "models" in user_config.get("lm_translator", {}):
         config["lm_translator"]["models"] = user_config["lm_translator"]["models"]
+
+    # schema 標示為 sensitive 的設定值（目前是 API 金鑰）登錄為「已知機密」，
+    # 之後任何輸出出口都會遮蔽（#125）；佔位字串不登錄
+    register_secrets(_sensitive_values(config))
 
     # ATK-C-2: 對最終結果做驗證
     _validate_lm_translator_config(config["lm_translator"])
@@ -442,6 +272,81 @@ def _fsync_parent_directory(path: Path) -> None:
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+# 同步時不寫入使用者 config.json 的路徑：
+# - lm_translator.keys：範本是佔位字串，不是使用者的金鑰，不能寫進使用者的設定檔。
+# - lm_translator.models：使用者自訂的名單，缺少的模型是使用者刻意移除，不能補回去。
+_SYNC_SKIP_PATHS = frozenset({"lm_translator.keys", "lm_translator.models"})
+
+
+def _collect_missing_keys(
+    template: dict, user: dict, prefix: str = ""
+) -> list[tuple[str, dict, str, object]]:
+    """比對範本與使用者設定，回傳缺少的 (路徑, 使用者端的父 dict, key, 要補的值)。"""
+    missing: list[tuple[str, dict, str, object]] = []
+    for key, default_value in template.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if path in _SYNC_SKIP_PATHS or path in DEPRECATED_CONFIG_KEYS:
+            continue
+        if key not in user:
+            missing.append((path, user, key, copy.deepcopy(default_value)))
+        elif isinstance(default_value, dict) and isinstance(user[key], dict):
+            missing.extend(_collect_missing_keys(default_value, user[key], path))
+        # 使用者值型別與範本不同、或是 list：一律維持使用者的值
+    return missing
+
+
+def sync_missing_config_keys(
+    config_path: str | os.PathLike | None = None,
+) -> list[str]:
+    """把範本（DEFAULT_CONFIG + config.example.json）新增的設定寫進使用者的 config.json。
+
+    讀取時三層合併本來就會讓新設定生效；這個函式讓新欄位**實際出現在使用者的檔案裡**，
+    使用者看得到也改得到。規則：
+
+    - 只補「缺少的 key」，**絕不改動使用者已有的值**（包含 ``false``、``0``、空字串、``null``）。
+    - config.json 不存在、讀不到或不是 JSON object 時不做任何事（新安裝仍由合併機制提供預設值）。
+    - list 不碰；使用者值與範本型別不同時維持使用者的值。
+    - ``lm_translator.keys`` 與 ``lm_translator.models`` 不補（見 ``_SYNC_SKIP_PATHS``）；
+      已標示為 deprecated 的欄位不補。
+    - 有變更時先留一份 ``<檔名>.pre-sync.bak``，再用 ``save_config`` 原子寫入。
+    - 沒有缺少的欄位時不寫檔；重複執行是冪等的。
+
+    回傳：實際補上的設定路徑（例如 ``["lm_translator.max_input_token_budget"]``）。
+    """
+    resolved = resolve_project_path(config_path or CONFIG_PATH)
+    if not resolved.is_file():
+        return []
+    try:
+        with resolved.open("r", encoding="utf-8") as f:
+            user_config = json.load(f)
+    except (OSError, ValueError):
+        log.warning("同步設定欄位：無法讀取 %s，略過", resolved, exc_info=True)
+        return []
+    if not isinstance(user_config, dict):
+        return []
+
+    template = deep_merge(copy.deepcopy(DEFAULT_CONFIG), load_config_example() or {})
+    missing = _collect_missing_keys(template, user_config)
+    if not missing:
+        return []
+
+    backup = resolved.with_name(resolved.name + ".pre-sync.bak")
+    try:
+        shutil.copy2(resolved, backup)
+    except OSError:
+        # 沒有備份就不動使用者的檔案
+        log.warning("同步設定欄位：無法建立備份 %s，略過", backup, exc_info=True)
+        return []
+    for _path, parent, key, value in missing:
+        parent[key] = value
+    if not save_config(user_config, resolved):
+        log.error("同步設定欄位：寫入失敗，原檔保持不變（備份在 %s）", backup)
+        return []
+    added = [path for path, *_ in missing]
+    log.info("已把新設定欄位補進 %s：%s", resolved, ", ".join(added))
+    return added
 
 
 def save_config(config, config_path: str | os.PathLike | None = None) -> bool:
@@ -540,6 +445,9 @@ def setup_logging(config):
         logging.StreamHandler(),
         logging.FileHandler(log_file, encoding="utf-8"),
     ]
+    # 所有日誌輸出（含 traceback）都經過遮蔽，避免金鑰出現在日誌檔或終端機（#125）
+    for handler in handlers:
+        handler.setFormatter(RedactingFormatter(log_format))
 
     logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
     logging.info("日誌系統已成功設定。")  # noqa: LOG015

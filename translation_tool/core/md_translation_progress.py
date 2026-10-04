@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+
 class _ProgressProxy:
     """把 step 內部 0~1 進度映射到 pipeline 區段。"""
 
@@ -23,5 +24,5 @@ class _ProgressProxy:
             p = 0.0 if p is None else float(p)
             p = min(1.0, max(0.0, p))
             self.parent.set_progress(self.base + p * self.span)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - UI 進度回報失敗不可中斷翻譯
             pass

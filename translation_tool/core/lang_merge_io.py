@@ -12,6 +12,7 @@ from typing import Any
 
 import orjson as json
 
+from ..utils.log_unit import log_warning
 from ..utils.zip_safety import (
     MAX_FILE_BYTES,
     UnsafePathError,
@@ -164,5 +165,7 @@ def quarantine_copy(
             detail_path = target_path + ".detail.txt"
             with open(detail_path, "w", encoding="utf-8") as f:
                 f.write(extra_text)
-    except Exception:  # noqa: BLE001, S110
-        pass
+    except Exception as exc:  # noqa: BLE001 - 隔離副本寫入失敗不可中斷合併，但要留下紀錄
+        log_warning(
+            f"隔離檔案寫入失敗（原檔未被複製或說明檔缺漏）：{target_path}: {exc!r}"
+        )

@@ -24,22 +24,21 @@ from translation_tool.checkers.variant_comparator_tsv import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "run_english_residue_check_service",
     "run_untranslated_check_service",
     "run_variant_compare_service",
-    "run_english_residue_check_service",
     "run_variant_compare_tsv_service",
 ]
 
-def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
-    """執行此 generator 並逐步回報進度（yield update dict）。
 
-    """
+def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
+    """執行此 generator 並逐步回報進度（yield update dict）。"""
     try:
         for update_dict in check_untranslated_generator(en_dir, tw_dir, out_dir):
             filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
             if filtered is not None:
                 yield filtered
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] 未翻譯檢查失敗：{e}\n{full_traceback}")
         yield {
@@ -48,16 +47,15 @@ def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
             "progress": 0,
         }
 
-def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
-    """執行此 generator 並逐步回報進度（yield update dict）。
 
-    """
+def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
+    """執行此 generator 並逐步回報進度（yield update dict）。"""
     try:
         for update_dict in compare_variants_generator(cn_dir, tw_dir, out_dir):
             filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
             if filtered is not None:
                 yield filtered
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] 簡繁差異比較失敗：{e}\n{full_traceback}")
         yield {
@@ -66,16 +64,15 @@ def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
             "progress": 0,
         }
 
-def run_english_residue_check_service(input_dir: str, out_dir: str):
-    """執行此 generator 並逐步回報進度（yield update dict）。
 
-    """
+def run_english_residue_check_service(input_dir: str, out_dir: str):
+    """執行此 generator 並逐步回報進度（yield update dict）。"""
     try:
         for update_dict in check_english_residue_generator(input_dir, out_dir):
             filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
             if filtered is not None:
                 yield filtered
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] 殘留英文檢查失敗：{e}\n{full_traceback}")
         yield {
@@ -84,16 +81,15 @@ def run_english_residue_check_service(input_dir: str, out_dir: str):
             "progress": 0,
         }
 
-def run_variant_compare_tsv_service(tsv_path: str, output_csv_path: str):
-    """執行此 generator 並逐步回報進度（yield update dict）。
 
-    """
+def run_variant_compare_tsv_service(tsv_path: str, output_csv_path: str):
+    """執行此 generator 並逐步回報進度（yield update dict）。"""
     try:
         for update_dict in compare_variants_tsv_generator(tsv_path, output_csv_path):
             filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
             if filtered is not None:
                 yield filtered
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] TSV 簡繁差異比較失敗：{e}\n{full_traceback}")
         yield {

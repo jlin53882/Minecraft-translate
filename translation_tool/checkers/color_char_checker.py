@@ -5,10 +5,14 @@
 """
 
 import json
+import logging
 import os
 import re
+from collections.abc import Generator
 from dataclasses import dataclass
-from typing import Any, Generator
+from typing import Any
+
+log = logging.getLogger(__name__)
 
 # 核心檢查：& 後只能接 Minecraft 合法的格式化代碼字元
 # 合法範圍：0-9（數字）, a-f（顏色代碼）, k-o（格式代碼）, r（重置）
@@ -127,7 +131,7 @@ def check_json_file(file_path: str) -> Generator[ColorCharError, None, None]:
         with open(file_path, encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
-        # 不阻断，继续检查其他文件
+        log.warning("色碼檢查：略過無法讀取的檔案 %s", file_path, exc_info=True)
         return
 
     if isinstance(data, dict):

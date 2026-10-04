@@ -449,7 +449,8 @@ def force_rotate_shard(cache_type: str) -> bool:
                 logger=log,
             )
         return True
-    except Exception:  # noqa: BLE001
+    except Exception:
+        log.warning("強制輪替作用中分片失敗：%s", cache_type, exc_info=True)
         return False
 
 

@@ -52,6 +52,7 @@ from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import (
     log_error,
     log_info,
+    log_warning,
 )
 
 # -------------------------
@@ -163,8 +164,9 @@ def _make_on_translated_item(rel_src, dst, out_map, rec, out_dir):
                 shields = getattr(shielded_src, "shields", [])
                 if shields:
                     t = unshield_text(t, shields)
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
+                # 還原失敗會讓輸出殘留保護標記，必須留下紀錄（#135）
+                log_warning(f"[FTB-LM] 還原保護標記失敗 path={p}: {exc!r}")
             out_map[p] = t
             try:
                 rec.record(
@@ -176,8 +178,8 @@ def _make_on_translated_item(rel_src, dst, out_map, rec, out_dir):
                     cache_hit=False,
                     extra={"dst_file": dst.relative_to(out_dir).as_posix()},
                 )
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
+                log_warning(f"[FTB-LM] 記錄翻譯結果失敗 path={p}: {exc!r}")
 
     return on_translated_item
 
@@ -190,8 +192,9 @@ def _make_on_batch_flushed(file_id, touch, _writer, dst, out_map):
         try:
             touch.touch(file_id)
             touch.flush(_writer)  # 最小改動：每批也照樣寫，避免中斷損失
-        except Exception:
-            # fallback
+        except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
+            # fallback：批次刷新失敗時直接寫檔，避免中斷損失
+            log_warning(f"[FTB-LM] 批次刷新失敗，改用直接寫檔 file={file_id}: {exc!r}")
             write_json_dict(dst, out_map)
 
     return on_batch_flushed
@@ -242,7 +245,7 @@ def translate_ftb_pending_to_zh_tw(
         if session is not None and hasattr(session, "set_progress"):
             try:
                 session.set_progress(v)
-            except Exception:
+            except Exception:  # UI 進度回報失敗不可中斷翻譯  # noqa: BLE001, S110 - UI 進度回報失敗不可中斷翻譯
                 pass
 
     # rename langs 預設沿用你 CLI 的清單（但 pending 通常只有 en_us，不太會用到）
@@ -291,7 +294,8 @@ def translate_ftb_pending_to_zh_tw(
             mapping = read_json_dict(src)
             c = count_translatable_keys(mapping)
             return src, int(c), mapping
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
+            log_warning(f"[FTB-LM] 讀取 JSON 失敗，視為 0 條目 src={src}: {exc!r}")
             return src, 0, {}
 
     # max_workers 你可以改成 config 的 parallel_execution_workers
@@ -363,8 +367,8 @@ def translate_ftb_pending_to_zh_tw(
             global_total_hit += len(cached_items)
             global_total_to_translate += len(real_to_translate)
 
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
+            log_warning(f"[FTB-LM] 預先統計待翻譯數量失敗 src={src}: {exc!r}")
 
     log_info(
         f"\n🔎 [FTB-LM][掃描完畢] 發現待處理檔案：{len(json_files)} 個 | 文本總條目：{global_total_keys} 條"
@@ -520,8 +524,8 @@ def translate_ftb_pending_to_zh_tw(
                         cache_hit=True,
                         extra={"dst_file": dst.relative_to(out_dir).as_posix()},
                     )
-                except Exception:
-                    pass
+                except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
+                    log_warning(f"[FTB-LM] 記錄快取命中失敗 path={p}: {exc!r}")
 
         # 全命中 cache：直接輸出
         if not items_to_translate:
@@ -654,7 +658,7 @@ def translate_ftb_pending_to_zh_tw(
                 meta=meta,
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
             log_error(f"⚠️ [FTB-LM] DRY-RUN preview 輸出失敗：{e}")
 
         return {
@@ -673,9 +677,8 @@ def translate_ftb_pending_to_zh_tw(
         rec.export_csv(out_dir / "translation_map.csv")
         log_info(f"✅ [FTB-LM] 已匯出 translation_map.json / .csv 到 {out_dir}")
 
-    except Exception:
+    except Exception:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
         log_error("⚠️ [FTB-LM] 匯出 translation_map 失敗")
-        pass
 
     log_info(f"✅ [任務翻譯完成] 已將 {total_written} 個翻譯檔案輸出至：{out_dir}")
     log_info("📊 提示：您可以在該目錄下查看 translation_map.csv 來核對翻譯條目細節。")

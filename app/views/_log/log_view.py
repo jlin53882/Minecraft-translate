@@ -237,6 +237,15 @@ class LogView(ft.Container):
         """新增 debug 等級 log。"""
         self.add(text, level="debug")
 
+    def set_tail_lines(self, tail_lines: int) -> None:
+        """更新 tail 模式的顯示筆數（設定變更後下次同步即生效）。"""
+        if not isinstance(tail_lines, int) or isinstance(tail_lines, bool):
+            return
+        if tail_lines <= 0:
+            return
+        self.tail_lines = tail_lines
+        self._presenter.tail_lines = tail_lines
+
     def clear(self) -> None:
         """清空所有 log。"""
         self._list_view.controls.clear()

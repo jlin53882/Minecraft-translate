@@ -295,7 +295,7 @@ def test_start_clicked_uses_default_output_dir_when_empty(monkeypatch):
     view.start_clicked(None)
 
     # output_dir 應為預設值
-    expected_default = lm_view.LM_translate_folder_name
+    expected_default = lm_view.get_lm_translate_folder_name()
     assert captured["output_dir"] == expected_default
 
 

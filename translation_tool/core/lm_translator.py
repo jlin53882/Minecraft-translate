@@ -136,7 +136,8 @@ def load_checkpoint() -> dict | None:
     try:
         with open(CHECKPOINT_FILE, "r", encoding="utf-8") as f:
             return json_std.load(f)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 - 損毀的 checkpoint 視為沒有，但要留下紀錄
+        log_warning(f"讀取 checkpoint 失敗，視為沒有 checkpoint：{exc!r}")
         return None
 
 

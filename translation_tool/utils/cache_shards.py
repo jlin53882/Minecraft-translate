@@ -93,7 +93,12 @@ def _read_shard_order(type_dir: Path) -> dict[str, int]:
     """讀取分片寫入序號；檔案不存在或損毀時視為沒有紀錄。"""
     try:
         raw = json.loads((type_dir / SHARD_ORDER_FILE).read_bytes())
-    except Exception:  # noqa: BLE001
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "讀取分片序號失敗，視為沒有紀錄：%s", type_dir, exc_info=True
+        )
         return {}
     if not isinstance(raw, dict):
         return {}

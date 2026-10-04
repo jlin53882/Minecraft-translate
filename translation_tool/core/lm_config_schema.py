@@ -1,30 +1,10 @@
-"""Minimal, backward-compatible schema for the ``lm_translator`` section."""
+"""Per-model ``max_output_tokens`` helper for the ``lm_translator.models`` mapping.
+
+設定項目的型別、說明與預設值都在 ``app/views/config/settings_schema.py``（設定頁 schema）與
+``DEFAULT_CONFIG``；這裡只保留引擎端讀取「每個模型的輸出上限覆寫」的函式。
+"""
 
 from __future__ import annotations
-
-from typing import Final
-
-LM_TRANSLATOR_SCHEMA: Final[dict[str, dict[str, object]]] = {
-    "keys": {"type": "list[str]", "default": []},
-    "models": {"type": "mapping[str, ModelConfig]", "default": {}},
-    "max_output_tokens": {"type": "int", "default": 32768, "minimum": 0},
-    "temperature": {"type": "number", "default": 0.2},
-    "key_failure_cooldown_sec": {
-        "type": "number",
-        "default": 3600,
-        "minimum": 0,
-    },
-}
-
-MODEL_SCHEMA: Final[dict[str, dict[str, object]]] = {
-    "enabled": {"type": "bool", "default": False},
-    "max_output_tokens": {
-        "type": "int|null",
-        "default": None,
-        "minimum": 0,
-        "description": "per-model override; null uses the global value; 0 omits the field",
-    },
-}
 
 
 def model_output_token_cap(lm_config: dict, model_name: str) -> int | None:

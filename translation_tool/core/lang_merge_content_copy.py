@@ -84,7 +84,8 @@ def _compute_patchouli_lang_effectiveness(
                     try:
                         data = json_module.loads(raw)
                         strings = _extract_all_strings(data)
-                    except Exception:  # noqa: BLE001, S112
+                    except Exception as exc:  # noqa: BLE001 - 解析失敗的檔案不計入有效翻譯，已留 debug 紀錄
+                        log_debug(f"略過無法解析的 JSON {fname}: {exc!r}")
                         continue
                 else:
                     strings = [raw]
@@ -97,7 +98,8 @@ def _compute_patchouli_lang_effectiveness(
                 )
                 if total > 0 and cjk_chars / total >= 0.5:
                     effective_count += 1
-            except Exception:  # noqa: BLE001, S112
+            except Exception as exc:  # noqa: BLE001 - 單一檔案失敗不中斷整批統計，已留 debug 紀錄
+                log_debug(f"有效翻譯統計略過檔案 {fname}: {exc!r}")
                 continue
 
         ratio = effective_count / len(text_files) if text_files else 0

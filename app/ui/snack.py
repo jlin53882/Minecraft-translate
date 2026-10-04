@@ -40,6 +40,7 @@ from app.ui import design, theme
 from app.ui.design import C
 from app.ui.design import tone as get_tone
 from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.redaction import redact_secrets
 
 # 舊呼叫端傳的是「背景色」（RED_600 / GREEN_600 / theme.PRIMARY …）。新設計的 toast 是中性面板 + 語意色，
 # 所以只看顏色屬於哪個色系，轉成對應的語意色組與圖示。
@@ -112,6 +113,7 @@ def show_snack(
     Returns:
         ft.SnackBar 實例 (可用於後續手動管理)
     """
+    message = redact_secrets(message)  # 提示訊息可能帶有使用者輸入或例外文字（#125）
     log_info(f"[UI] SnackBar: {message}")
 
     # 清除已存在的 SnackBar (避免 overlay 累積)

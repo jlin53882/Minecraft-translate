@@ -3,7 +3,6 @@
 用途：測試 generate_icon_preview 函數的圖示預覽生成功能。
 """
 
-
 from translation_tool.core.icon_preview_cache import generate_icon_preview
 
 
@@ -62,7 +61,7 @@ class TestGenerateIconPreview:
         result2 = generate_icon_preview(icon_path, preview_root)
         assert result1 == result2
 
-    def test_invalid_image_returns_none(self, tmp_path, capsys):
+    def test_invalid_image_returns_none(self, tmp_path, caplog):
         """測試無效的圖片應回傳 None 且不中斷"""
         icon_path = tmp_path / "invalid.png"
         preview_root = tmp_path / "preview"
@@ -70,12 +69,12 @@ class TestGenerateIconPreview:
         # 寫入無效資料
         icon_path.write_bytes(b"not an image")
 
-        result = generate_icon_preview(icon_path, preview_root)
+        with caplog.at_level("WARNING"):
+            result = generate_icon_preview(icon_path, preview_root)
 
         assert result is None
-        # 應該有警告訊息
-        captured = capsys.readouterr()
-        assert "WARN" in captured.out or "無法產生" in captured.out
+        # 應該有警告訊息（改走 logging，而不是 print）
+        assert any("無法產生 icon 預覽" in r.getMessage() for r in caplog.records)
 
     def test_preview_root_created_if_not_exists(self, tmp_path):
         """測試 preview_root 不存在時會自動建立"""

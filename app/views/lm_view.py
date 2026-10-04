@@ -23,9 +23,16 @@ from translation_tool.utils.config_manager import (
 )
 from translation_tool.utils.log_unit import log_debug
 
-LM_translate_folder_name = (
-    load_config().get("lm_translator", {}).get("lm_translate_folder_name", "LM翻譯後")
-)
+DEFAULT_LM_TRANSLATE_FOLDER_NAME = "LM翻譯後"
+
+
+def get_lm_translate_folder_name() -> str:
+    """輸出資料夾預設名稱；使用時才讀設定，存檔後不需重啟（#117）。"""
+    return (
+        load_config()
+        .get("lm_translator", {})
+        .get("lm_translate_folder_name", DEFAULT_LM_TRANSLATE_FOLDER_NAME)
+    )
 
 
 def format_elapsed(seconds: float) -> str:
@@ -62,7 +69,7 @@ class LMView(ft.Column):
             expand=True,
         )
         self.output_path = kit.text_field(
-            hint=f"留空會使用：{LM_translate_folder_name}",
+            hint=f"留空會使用：{get_lm_translate_folder_name()}",
             icon=ft.Icons.FOLDER_COPY_OUTLINED,
             mono=True,
             expand=True,
@@ -316,10 +323,14 @@ class LMView(ft.Column):
 
         self.session = tag_session(TaskSession(), "機器翻譯", "lm")
         self.session.start()
+        # 日誌顯示行數：每次開始任務時讀最新設定，存檔後不必重開頁面
+        self.log_view.set_tail_lines(
+            load_ui_logging_config(load_config).get("tail_lines", 250)
+        )
 
         if not (self.output_path.value or "").strip():
             self.session.add_log(
-                f"[資訊] 未指定輸出，將使用預設：{LM_translate_folder_name}"
+                f"[資訊] 未指定輸出，將使用預設：{get_lm_translate_folder_name()}"
             )
 
         self._set_status("執行中", "dia")
@@ -329,7 +340,7 @@ class LMView(ft.Column):
         self.log_view.clear()
         self.page.update()
 
-        output_dir = self.output_path.value or LM_translate_folder_name
+        output_dir = self.output_path.value or get_lm_translate_folder_name()
         dry_run = self.dry_run_switch.value
         export_lang = self.export_lang_checkbox.value
         write_new_cache = self.write_new_cache_switch.value

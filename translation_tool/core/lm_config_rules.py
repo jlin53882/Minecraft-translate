@@ -408,23 +408,23 @@ def validate_api_keys():
     for k in keys:
         # 1. 檢查金鑰是否符合 Google API Key 的標準前綴 "AIza"
         if not k.startswith("AIza"):
-            log_error(f"❌ 偵測到無效格式金鑰: {k!r}")
+            log_error(f"❌ 偵測到無效格式金鑰: {mask_key(k)}")
             raise RuntimeError(
-                f"❌ 無效的 API Key 格式：{k!r}\n"
+                f"❌ 無效的 API Key 格式：{mask_key(k)}\n"
                 "Gemini API Key 應以 'AIza' 開頭，請檢查您的設定檔。"
             )
         # 2. 檢查金鑰長度（Google API Key 通常為 39-40 個字元）
         if len(k) < 35:
-            log_error(f"❌ 偵測到過短的 API 金鑰: {k!r} (長度={len(k)})")
+            log_error(f"❌ 偵測到過短的 API 金鑰: {mask_key(k)} (長度={len(k)})")
             raise RuntimeError(
-                f"❌ API Key 長度異常：{k!r}\n"
+                f"❌ API Key 長度異常：{mask_key(k)}\n"
                 f"長度為 {len(k)}，正常應為 35-45 個字元，請檢查是否輸入正確。"
             )
         # 3. 檢查金鑰字元是否僅包含允許的字元（AIza + 英數字/ dash / underscore）
         if not re.match(r"^AIza[a-zA-Z0-9_-]+$", k):
-            log_error(f"❌ 偵測到包含無效字元的 API 金鑰: {k!r}")
+            log_error(f"❌ 偵測到包含無效字元的 API 金鑰: {mask_key(k)}")
             raise RuntimeError(
-                f"❌ API Key 包含無效字元：{k!r}\n"
+                f"❌ API Key 包含無效字元：{mask_key(k)}\n"
                 "僅允許 'AIza' 開頭後接英文字母、數字、 dash(-) 或 underscore(_)。"
             )
 
@@ -442,18 +442,18 @@ def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
             raise RuntimeError("❌ API Key 不得為空，請輸入有效的 Gemini API Key。")
         if not k.startswith("AIza"):
             raise RuntimeError(
-                f"❌ 無效的 API Key 格式：{k!r}\n"
+                f"❌ 無效的 API Key 格式：{mask_key(k)}\n"
                 "請使用 Google AI Studio 產生的 Gemini API Key，"
                 "通常應以 'AIza' 字樣開頭。"
             )
         if len(k) < 35:
             raise RuntimeError(
-                f"❌ API Key 長度異常：{k!r}\n"
+                f"❌ API Key 長度異常：{mask_key(k)}\n"
                 f"長度為 {len(k)}，正常應為 35-45 個字元，請檢查是否輸入正確。"
             )
         if not re.match(r"^AIza[a-zA-Z0-9_-]+$", k):
             raise RuntimeError(
-                f"❌ API Key 包含無效字元：{k!r}\n"
+                f"❌ API Key 包含無效字元：{mask_key(k)}\n"
                 "僅允許 'AIza' 開頭後接英文字母、數字、 dash(-) 或 underscore(_)。"
             )
 

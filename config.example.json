@@ -1,152 +1,156 @@
 {
-  "ui": {
-    "theme_mode": "dark"
-  },
-  "logging": {
-    "log_level": "INFO",
-    "log_format": "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",
-    "log_dir": "logs"
-  },
-  "translator": {
-    "output_dir_name": "zh_tw_generated",
-    "replace_rules_path": "replace_rules.json",
-    "cache_directory": "快取資料",
-    "enable_cache_saving": true,
-    "parallel_execution_workers": 4,
-    "custom_translator_folder": "custom_translators"
-  },
-  "ftb_translator": {
-    "output_dir_name": "FTB任務翻譯輸出"
-  },
-  "species_cache": {
-    "cache_directory": "學名資料庫",
-    "cache_filename": "species_cache.tsv",
-    "wikipedia_language": "zh",
-    "wikipedia_rate_limit_delay": 0.5
-  },
-  "lm_translator": {
-    "_comment": "大型語言模型 (LLM) 翻譯設定：批次大小、API keys、模型清單與 system prompt。詳見 docs/lm_translator.md",
-    "temperature": 0.3,
-    "lm_translate_folder_name": "LM翻譯後",
-    "initial_batch_size_patchouli": 100,
-    "initial_batch_size_lang": 300,
-    "initial_batch_size_ftb": 200,
-    "initial_batch_size_kubejs": 200,
-    "initial_batch_size_md": 100,
-    "min_batch_size": 50,
-    "batch_shrink_factor": 0.5,
-    "token_budget_enabled": true,
-    "max_output_token_budget": 24000,
-    "max_input_token_budget": 60000,
-    "max_output_tokens": 32768,
-    "output_token_factor": 1.5,
-    "budget_min_scale": 0.0625,
-    "budget_recover_after": 3,
-    "budget_recover_factor": 1.5,
-    "batch_write_interval": 2,
-    "rpm_cooldown_sec": 0,
-    "key_failure_cooldown_sec": 3600,
-    "rate_limit": {
-      "timeout": 600,
-      "sleep_seconds_between_batches": 0.0
+    "logging": {
+        "log_level": "INFO",
+        "log_dir": "logs",
+        "log_format": "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s"
     },
-    "models": {
-      "gemini-2.5-flash": {
-        "enabled": true
-      }
-    },
-    "keys": [
-      "YOUR_GEMINI_API_KEY_1",
-      "YOUR_GEMINI_API_KEY_2"
-    ],
-    "patchouli_system_prompt": "你是專業的 Minecraft Patchouli 手冊翻譯員。\r\n\r\n你正在翻譯一個「ID → Value 對照表」。\r\n\r\n⚠️【極重要規則 — ID 不可變】⚠️\r\n- items[].id 是不可變的識別符號\r\n- id 不具有任何語意，也不對應任何 JSON 結構\r\n- id 只能被視為純文字索引\r\n- 絕對禁止：\r\n  - 修改、重寫、補零、轉型、排序、重編任何 id\r\n  - 新增或刪除任何 id\r\n  - 嘗試推測 id 與內容的關聯\r\n\r\n📌 任務規則：\r\n1. 只允許修改 items[].value 的字串內容\r\n2. items[].id 必須與輸入完全一字不差\r\n3. items 的數量與順序必須與輸入完全一致\r\n4. 如果你不確定如何翻譯，請原樣回傳 value\r\n5. 回傳必須是合法 JSON，且格式與輸入完全一致\r\n6. 僅翻譯為繁體中文（台灣用語）\r\n7. 保留 §, %, {}, $(...) 等所有符號與格式\r\n8. 單位（mb、tick 等）請保留原文\r\n9. Minecraft 請保持原文，不要翻譯成「當個創世神」\r\n10. 每一筆 value 必須只根據該筆原文自身內容翻譯\r\n11. 只要 value 包含人類語言就必須翻譯\r\n12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石)",
-    "lang_system_prompt": "你正在翻譯 Minecraft 語言檔案（JSON 格式）。\r\n\r\n你收到的是一個「ID → value 對照表」。\r\n\r\n⚠️【極重要規則 — ID 不可變】⚠️\r\n- items[].id 是唯一識別符號\r\n- id 不具有任何語意\r\n- 絕對禁止：\r\n  - 修改、轉型、補零、重排、推測或重寫任何 id\r\n  - 新增或刪除任何 item\r\n\r\n📌 任務規則：\r\n1. 只允許修改 items[].value 的字串內容\r\n2. items[].id 必須與輸入完全一字不差\r\n3. items 的數量與順序必須與輸入完全一致\r\n4. 如果你不確定如何翻譯，請原樣回傳 value\r\n5. 回傳必須是合法 JSON，格式必須為 {\"items\":[{\"id\":...,\"value\":...}, ...]}\r\n6. 僅翻譯為繁體中文（台灣用語）\r\n7. 保留 §, %, {}, $(...) 等所有符號與格式\r\n8. 單位（mb、tick 等）請保留原文\r\n9. Minecraft 請保持原文\r\n10. 每一筆 value 只依該筆原文翻譯\r\n11. 只要 value 包含人類語言就必須翻譯\r\n12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石)",
     "translator": {
-      "short_text_skip_len": 3,
-      "skip_terms": [
-        "api documentation",
-        "api docs",
-        "documentation",
-        "discord",
-        "github",
-        "homepage",
-        "mod page",
-        "modpack",
-        "official website",
-        "patreon",
-        "Twitter",
-        "Modrinth",
-        "CurseForge",
-        "Crowdin",
-        "Twitch",
-        "Wiki",
-        "Minecraft",
-        "Forge",
-        "YouTube",
-        "Reddit",
-        "Ko-fi",
-        "Flattr"
-      ],
-      "translatable_keywords": [
-        "text",
-        "name",
-        "title",
-        "description",
-        "subtitle",
-        "hover",
-        "note",
-        "warning",
-        "quote",
-        "paragraph",
-        "body",
-        "header",
-        "footer",
-        "heading",
-        "effects",
-        "category",
-        "link_text",
-        "pages.title"
-      ]
+        "output_dir_name": "zh_tw_generated",
+        "replace_rules_path": "replace_rules.json",
+        "cache_directory": "快取資料",
+        "parallel_execution_workers": 4,
+        "enable_cache_saving": true,
+        "custom_translator_folder": "custom_translators",
+        "cjk_ratio_threshold": 0.7
     },
-    "patchouli": {
-      "dir_names": [
-        "patchouli_books",
-        "book",
-        "manual",
-        "guidebook"
-      ]
+    "ftb_translator": {
+        "output_dir_name": "FTB任務翻譯輸出"
+    },
+    "output_bundler": {
+        "output_zip_name": "可使用翻譯.zip"
+    },
+    "lm_translator": {
+        "keys": [
+            "YOUR_GEMINI_API_KEY_1",
+            "YOUR_GEMINI_API_KEY_2"
+        ],
+        "models": {
+            "gemini-2.5-flash": {
+                "enabled": true
+            }
+        },
+        "temperature": 0.3,
+        "rate_limit": {
+            "timeout": 600,
+            "sleep_seconds_between_batches": 0.0
+        },
+        "lm_translate_folder_name": "LM翻譯後",
+        "translator": {
+            "skip_terms": [
+                "api documentation",
+                "api docs",
+                "documentation",
+                "discord",
+                "github",
+                "homepage",
+                "mod page",
+                "modpack",
+                "official website",
+                "patreon",
+                "Twitter",
+                "Modrinth",
+                "CurseForge",
+                "Crowdin",
+                "Twitch",
+                "Wiki",
+                "Minecraft",
+                "Forge",
+                "YouTube",
+                "Reddit",
+                "Ko-fi",
+                "Flattr"
+            ],
+            "translatable_keywords": [
+                "text",
+                "name",
+                "title",
+                "description",
+                "subtitle",
+                "hover",
+                "note",
+                "warning",
+                "quote",
+                "paragraph",
+                "body",
+                "header",
+                "footer",
+                "heading",
+                "effects",
+                "category",
+                "link_text",
+                "pages.title"
+            ],
+            "short_text_skip_len": 3
+        },
+        "patchouli": {
+            "dir_names": [
+                "patchouli_books",
+                "book",
+                "manual",
+                "guidebook"
+            ]
+        },
+        "patchouli_system_prompt": "你是專業的 Minecraft Patchouli 手冊翻譯員。\n\n你正在翻譯一個「ID → Value 對照表」。\n\n⚠️【極重要規則 — ID 不可變】⚠️\n- items[].id 是不可變的識別符號\n- id 不具有任何語意，也不對應任何 JSON 結構\n- id 只能被視為純文字索引\n- 絕對禁止：\n  - 修改、重寫、補零、轉型、排序、重編任何 id\n  - 新增或刪除任何 id\n  - 嘗試推測 id 與內容的關聯\n\n📌 任務規則：\n1. 只允許修改 items[].value 的字串內容\n2. items[].id 必須與輸入完全一字不差\n3. items 的數量與順序必須與輸入完全一致\n4. 如果你不確定如何翻譯，請原樣回傳 value\n5. 回傳必須是合法 JSON，且格式與輸入完全一致\n6. 僅翻譯為繁體中文（台灣用語）\n7. 保留 §, %, {}, $(...) 等所有符號與格式\n8. 單位（mb、tick 等）請保留原文\n9. Minecraft 請保持原文，不要翻譯成「當個創世神」\n10. 每一筆 value 必須只根據該筆原文自身內容翻譯\n11. 只要 value 包含人類語言就必須翻譯\n12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石)",
+        "lang_system_prompt": "你正在翻譯 Minecraft 語言檔案（JSON 格式）。\n\n你收到的是一個「ID → value 對照表」。\n\n⚠️【極重要規則 — ID 不可變】⚠️\n- items[].id 是唯一識別符號\n- id 不具有任何語意\n- 絕對禁止：\n  - 修改、轉型、補零、重排、推測或重寫任何 id\n  - 新增或刪除任何 item\n\n📌 任務規則：\n1. 只允許修改 items[].value 的字串內容\n2. items[].id 必須與輸入完全一字不差\n3. items 的數量與順序必須與輸入完全一致\n4. 如果你不確定如何翻譯，請原樣回傳 value\n5. 回傳必須是合法 JSON，格式必須為 {\"items\":[{\"id\":...,\"value\":...}, ...]}\n6. 僅翻譯為繁體中文（台灣用語）\n7. 保留 §, %, {}, $(...) 等所有符號與格式\n8. 單位（mb、tick 等）請保留原文\n9. Minecraft 請保持原文\n10. 每一筆 value 只依該筆原文翻譯\n11. 只要 value 包含人類語言就必須翻譯\n",
+        "initial_batch_size_patchouli": 100,
+        "initial_batch_size_lang": 300,
+        "initial_batch_size_ftb": 200,
+        "initial_batch_size_kubejs": 200,
+        "initial_batch_size_md": 100,
+        "min_batch_size": 50,
+        "batch_shrink_factor": 0.5,
+        "rpm_cooldown_sec": 0,
+        "max_output_tokens": 32768,
+        "key_failure_cooldown_sec": 3600,
+        "max_output_token_budget": 24000,
+        "max_input_token_budget": 60000,
+        "token_budget_enabled": true,
+        "output_token_factor": 1.5,
+        "budget_min_scale": 0.0625,
+        "budget_recover_after": 3,
+        "budget_recover_factor": 1.5,
+        "batch_write_interval": 2
+    },
+    "species_cache": {
+        "cache_directory": "學名資料庫",
+        "cache_filename": "species_cache.tsv",
+        "wikipedia_language": "zh",
+        "wikipedia_rate_limit_delay": 0.5
+    },
+    "lang_merger": {
+        "pending_folder_name": "待翻譯",
+        "pending_organized_folder_name": "待翻譯整理需翻譯",
+        "filtered_pending_min_count": 3,
+        "quarantine_folder_name": "問題檔案skipped_json",
+        "zh_en_letter_threshold": 2,
+        "patchouli_skip_en_us_when_zh_cn_exists": false,
+        "patchouli_effective_translation_threshold": 0.5,
+        "enable_extracted_to_assets_merge": true,
+        "process_zh_cn_files": true,
+        "skip_zh_cn_when_only_process_lang": false
+    },
+    "extractor": {
+        "output_folder_names": {
+            "lang_extract": "_提取lang_輸出",
+            "book_extract": "_提取book_輸出",
+            "dual_extract": "_提取both_輸出",
+            "lang_preview": "_預覽lang_輸出",
+            "book_preview": "_預覽book_輸出",
+            "dual_preview": "_預覽both_輸出"
+        },
+        "skip_zh_cn_extract": false,
+        "target_language": [
+            "zh_tw"
+        ]
+    },
+    "ui": {
+        "theme_mode": "dark"
+    },
+    "jar_extractor": {
+        "lang_codes": [
+            "en_us",
+            "zh_cn",
+            "zh_tw"
+        ]
     }
-  },
-  "output_bundler": {
-    "output_zip_name": "可使用翻譯.zip"
-  },
-  "lang_merger": {
-    "pending_folder_name": "待翻譯",
-    "pending_organized_folder_name": "待翻譯整理需翻譯",
-    "filtered_pending_min_count": 3,
-    "quarantine_folder_name": "問題檔案skipped_json",
-    "process_zh_cn_files": true,
-    "skip_zh_cn_when_only_process_lang": false,
-    "patchouli_skip_en_us_when_zh_cn_exists": false,
-    "patchouli_effective_translation_threshold": 0.5
-  },
-  "jar_extractor": {
-    "lang_codes": [
-      "en_us",
-      "zh_cn",
-      "zh_tw"
-    ]
-  },
-  "extractor": {
-    "output_folder_names": {
-      "lang_extract": "_提取lang_輸出",
-      "book_extract": "_提取book_輸出",
-      "lang_preview": "_預覽lang_輸出",
-      "book_preview": "_預覽book_輸出",
-      "dual_extract": "_提取both_輸出",
-      "dual_preview": "_預覽both_輸出"
-    },
-    "target_language": ["zh_tw"],
-    "skip_zh_cn_extract": false
-  }
 }

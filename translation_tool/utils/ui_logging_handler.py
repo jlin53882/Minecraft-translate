@@ -7,6 +7,8 @@
 import logging
 from typing import Any
 
+from translation_tool.utils.redaction import redact_secrets
+
 
 class UISessionLogHandler(logging.Handler):
     """將 Python logging 訊息轉送到 TaskSession（UI）。"""
@@ -30,7 +32,7 @@ class UISessionLogHandler(logging.Handler):
             return
 
         try:
-            msg: str = record.getMessage()
+            msg: str = redact_secrets(record.getMessage())
             if record.levelno >= logging.ERROR:
                 level, ui_msg = "error", f"[ERROR] {msg}"
             elif record.levelno >= logging.WARNING:

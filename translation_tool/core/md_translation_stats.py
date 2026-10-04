@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Dict, Callable
+from typing import Any
 
 from translation_tool.core.lm_translator_shared import _get_default_batch_size
 
@@ -19,6 +20,7 @@ _LANG_MODE_LABELS = {
     "all": "抽取全部（all）",
 }
 
+
 def normalize_lang_mode(lang_mode: str) -> str:
     """正規化語言過濾模式參數，若輸入無效則預設回傳 "non_cjk_only"。"""
     mode = (lang_mode or "").strip().lower()
@@ -26,11 +28,13 @@ def normalize_lang_mode(lang_mode: str) -> str:
         return mode
     return "non_cjk_only"
 
+
 def count_json_files(root: Path) -> int:
     """遞迴統計指定目錄下所有 .json 檔案的總數。"""
     if not root.exists() or not root.is_dir():
         return 0
     return sum(1 for p in root.rglob("*.json") if p.is_file())
+
 
 def count_md_pending_docs(root: Path) -> int:
     """統計指定目錄下符合 Markdown 待處理結構（schema v1）的 JSON 文件數量。"""
@@ -42,13 +46,16 @@ def count_md_pending_docs(root: Path) -> int:
             continue
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception:  # noqa: BLE001, S112 - 統計僅計入可解析的待翻譯檔，壞檔略過
             continue
         if isinstance(data, dict) and data.get("schema") == "md_pending_blocks_v1":
             count += 1
     return count
 
-def log_md_step2_stats(step2_res: Dict[str, Any], *, log_info_fn: Callable[..., None]) -> None:
+
+def log_md_step2_stats(
+    step2_res: dict[str, Any], *, log_info_fn: Callable[..., None]
+) -> None:
     """解析並格式化 Markdown 翻譯任務的統計數據，輸出包含快取命中率、批次預估及 ETA 的進度日誌。"""
     if not isinstance(step2_res, dict):
         return
@@ -70,7 +77,11 @@ def log_md_step2_stats(step2_res: Dict[str, Any], *, log_info_fn: Callable[..., 
     batch_size = _get_default_batch_size("md", None)
     avg_batch_sec = step2_res.get("avg_batch_sec")
     est_sec_per_batch = avg_batch_sec
-    est_batches = math.ceil(cache_miss / batch_size) if isinstance(cache_miss, int) and batch_size > 0 else None
+    est_batches = (
+        math.ceil(cache_miss / batch_size)
+        if isinstance(cache_miss, int) and batch_size > 0
+        else None
+    )
 
     log_info_fn(
         "[MD] [2/3] 統計 %s | files=%s | total=%s | unique=%s | dup=%s",
