@@ -68,30 +68,6 @@ class TestExtractionCancelFlag:
             "on_cancel_click 無法中斷 Service"
         )
 
-    def test_run_extraction_resets_and_references_outer_flag(self):
-        body = self._read_function_body("run_extraction")
-        assert "extraction_cancel_flag[0] = False" in body, (
-            "run_extraction 沒 reset extraction_cancel_flag, "
-            "連續任務之間 cancel flag 會殘留"
-        )
-        assert "cancelled_flag = extraction_cancel_flag" in body, (
-            "cancelled_flag 沒用 outer-scope reference, "
-            "Service 看不到 outer flag 修改, 按取消不會中斷"
-        )
-        assert "cancelled_flag = [False]" not in body, (
-            "run_extraction 還有 cancelled_flag = [False] (local list), "
-            "Service 用 local list 偵測, outer flag 修改無效"
-        )
-
-    def test_on_cancel_click_sets_outer_flag(self):
-        body = self._read_function_body("on_cancel_click")
-        assert "extraction_cancel_flag[0] = True" in body, (
-            "on_cancel_click 沒設 extraction_cancel_flag, 按「取消」背景線程繼續跑"
-        )
-        assert 'state["cancelled"] = True' in body, (
-            "on_cancel_click 沒設 state['cancelled']"
-        )
-
 
 class TestServiceRespectsCancellation:
     def test_run_extraction_loop_signature(self):

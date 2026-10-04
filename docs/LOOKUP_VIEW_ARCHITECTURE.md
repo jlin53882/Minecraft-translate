@@ -6,18 +6,22 @@ LookupView 是**學名（物種名稱）翻譯的快速查詢工具**，屬於�
 
 ## 主要 UI 元件
 
+`LookupView`（`ft.Column`）的控制項由 `_init_lookup_inputs` 建立，`__init__` 以 `kit` 的卡片組裝版面。
+
 | 元件 | 類型 | 說明 |
 |------|------|------|
-| `single_input` | TextField | 單筆學名輸入（如 `Felis catus`） |
-| `single_button` | ft.Button | 觸發單筆查詢 |
+| `single_input` | `kit.text_field` | 單筆學名輸入（如 `Felis catus`），Enter 也觸發查詢（`on_submit`） |
+| `single_button` | `kit.button` | 觸發單筆查詢 |
+| `recent_row` | Row | 「最近查詢」晶片列（`_remember` 記錄於 `_recent`，最多 `RECENT_LIMIT` 筆，只存在本次執行）；點晶片經 `_lookup_recent` 重新查詢 |
 | `single_result_text` | Text | 單筆查詢結果（`selectable=True`） |
 | `single_progress_ring` | ProgressRing | 查詢中旋轉指示器（預設隱藏） |
-| `batch_input` | TextField | JSON 陣列輸入（multiline, min_lines=5） |
-| `batch_result_textfield` | TextField | 批次結果（read_only, multiline） |
-| `batch_button` | ft.Button | 觸發批次查詢 |
-| `batch_progress_bar` | ProgressBar | 批次進度（不確定進度時 `value=None`） |
+| `copy_button` | `kit.button` | 「查詢結果」卡右上角動作，`copy_result_clicked` 複製結果到剪貼簿 |
+| `batch_input` | `kit.text_field` | JSON 陣列輸入（multiline） |
+| `batch_result_textfield` | `kit.text_field` | 批次結果（read_only, multiline） |
+| `batch_button` | `kit.button` | 觸發批次查詢 |
+| `batch_progress_bar` | `kit.progress_bar` | 批次進度（不確定進度時 `value=None`，預設隱藏） |
 
-**佈局**：雙 Card（單筆在上、批次在下），`ft.Column(scroll=ADAPTIVE)`。
+**佈局**：頁首 `kit.page_header` + 左右兩欄（`ft.Column(scroll=ADAPTIVE)`）。左欄為「單筆查詢」卡（輸入 + 最近查詢）與「查詢結果」卡，右欄為「批次查詢」卡。
 
 ## 呼叫鏈
 
@@ -25,10 +29,10 @@ LookupView 是**學名（物種名稱）翻譯的快速查詢工具**，屬於�
 ```
 single_lookup_clicked(e)
   ├─ 驗證輸入非空（否則顯示錯誤）
-  ├─ 鎖 UI：button/input disabled + ProgressRing 顯示 + 「查詢中...」
-  ├─ threading.Thread(single_lookup_worker).start()
+  ├─ 鎖 UI：button/input disabled + ProgressRing 顯示 + 「查詢中...」，並 _remember(名稱)
+  ├─ threading.Thread(single_lookup_worker, daemon=True).start()
   └─ single_lookup_worker(name)
-       └─ run_manual_lookup_service(name) → 更新結果 + 復原 UI（finally）
+       └─ run_manual_lookup_service(name) → 結果與復原 UI 的動作經 _run_on_ui 排到 event loop 套用
 ```
 
 ### 批次查詢
@@ -36,13 +40,13 @@ single_lookup_clicked(e)
 batch_lookup_clicked(e)
   ├─ 驗證 JSON 非空
   ├─ 鎖 UI：button disabled + ProgressBar 顯示（indeterminate）
-  ├─ threading.Thread(batch_lookup_worker).start()
+  ├─ threading.Thread(batch_lookup_worker, daemon=True).start()
   └─ batch_lookup_worker(json_text)
        └─ for update in run_batch_lookup_service(json_text):  # generator
-            ├─ update.error → 顯示 log、break
-            ├─ update.result → 寫入 batch_result_textfield
-            └─ update.progress → batch_progress_bar.value
-        finally: 復原 UI（button + ProgressBar）
+            ├─ update.error → 記下 log 文字、break
+            ├─ update.result → 記下結果文字
+            └─ update.progress → 記下進度值
+        finally: 經 _run_on_ui 一次套用結果文字 / 進度，並復原 UI（button + ProgressBar）
 ```
 
 ## Service 層（app/services_impl/pipelines/lookup_service.py，PR17 抽離）
@@ -70,19 +74,19 @@ batch_lookup_clicked(e)
 4. 格式不合法 → None（不發請求）
 
 ### 線上查詢（wikipedia，`_WIKIPEDIA_AVAILABLE`）
-- 查詢前 `time.sleep(_RATE_LIMIT_DELAY)`（config `wikipedia_rate_limit_delay`，預設 0.5s）做 rate limit
+- 查詢前 `time.sleep(_RATE_LIMIT_DELAY)`（config `species_cache.wikipedia_rate_limit_delay`，預設 0.5s）做 rate limit；語言取自 `species_cache.wikipedia_language`（預設 `zh`）
 - `wikipedia.page(name, auto_suggest=False)`，取 `page.title.split("(")[0]`（去括號註記）為俗名
-- **成功才寫檔**：記憶體快取 + `species_cache.tsv` append（TSV：`學名\t俗名`）；失敗僅更新記憶體為 `""`（不重複查詢、不寫檔）
-- `PageError` → 回 None；`DisambiguationError` → 取第一個選項遞迴查詢；其他例外 → 回 None
+- **成功才寫檔**：記憶體快取 + 快取檔 append（config `species_cache.cache_directory` / `cache_filename`，預設 `學名資料庫/species_cache.tsv`；TSV：`學名\t俗名`）；失敗僅更新記憶體為 `""`（不重複查詢、不寫檔）
+- `PageError` → 回 None；`DisambiguationError` → 原名稱記為空值快取，取第一個選項遞迴查詢；其他例外 → 回 None（原名稱記為空值快取）
 
 ## 檔案結構
 
-- `app/views/lookup_view.py` — UI（約 195 行）
+- `app/views/lookup_view.py` — UI
 - `app/services_impl/pipelines/lookup_service.py` — service 封裝
 - `translation_tool/utils/species_cache.py` — `is_potential_species_name` / `lookup_species_name`（本地快取 + 線上查詢）
 
 ## 維護注意
 
-1. 兩個 worker 都在背景執行緒更新 Flet 控制項並呼叫 `page.update()`；與 Extractor/LM 頁的 TaskSession + UI timer 模式不同，此頁為一次性 worker 執行緒。
-2. `page` 屬性為 `@property`（2026-08-01 PR #85 修正）：先前是 bound method，導致 `show_snack(self.page, ...)` 收不到 Page 實例。
+1. 兩個 worker 都是一次性背景執行緒，不直接改控制項：結果經 `_run_on_ui`（`page.run_task`）排到 event loop 套用；與 Extractor/LM 頁的 TaskSession + UI timer 模式不同。
+2. `page` 屬性為 `@property`：必須是 Page 實例，`show_snack(self.page, ...)` 才收得到。
 3. 批次結果以 `ensure_ascii=False` dump 中文，結果區顯示原始 JSON。

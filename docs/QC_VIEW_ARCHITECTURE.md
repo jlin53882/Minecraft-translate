@@ -2,15 +2,16 @@
 
 ## 定位
 
-QCView 是 **Quality Check（品質檢查）頁**，翻譯完成後的品質驗證工具，非翻譯管線必要環節。三張 Card 各自獨立，共用同一組 `progress_bar` + `log_view`。
+QCView 是 **Quality Check（品質檢查）頁**，翻譯完成後的品質驗證工具，非翻譯管線必要環節。頁面先以三張模式卡（`kit.ChoiceCard`，由 `QC_MODES` 定義）選擇檢驗模式，只顯示對應的設定面板；三種模式共用同一組 `progress_bar` + `log_view`。
 
 ## 檔案結構
 
 - `app/views/qc_view.py` — 主視圖
-- `app/views/qc_base.py` — QCBase 共用背景任務執行器
+- `app/views/qc_base.py` — `QCBase` 共用背景任務執行器（`task_worker`、`_guess_level`）
 - `app/ui/ui_batcher.py` — UiBatcher（背景執行緒 → event loop 的批次 UI 更新）
-- `app/views/untranslated_checker.py` — UntranslatedChecker 元件（PR1 拆分）
-- `app/services.py` — `run_untranslated_check_service` / `run_variant_compare_service` / `run_variant_compare_tsv_service` / `run_english_residue_check_service`
+- `app/views/untranslated_checker.py` — `UntranslatedChecker` 元件（Key 缺失檢查模式的面板內容）
+- `app/services.py` — `run_untranslated_check_service` / `run_variant_compare_service` / `run_variant_compare_tsv_service`（皆為 generator 包裝）；另有 `run_english_residue_check_service`，目前 QCView 沒有使用
+- `translation_tool/checkers/` — 實際比對邏輯（`untranslated_checker.py`、`variant_comparator.py`、`variant_comparator_tsv.py`）
 
 ## QCBase（task_worker）
 
@@ -28,8 +29,8 @@ start_task()（event loop）
             finally → set_state(done=True)；flush(force=True)
        → UiBatcher 以 page.run_task 在 event loop 上呼叫 apply_ui(lines, state)
             log_view.add_many(lines)；progress_bar.value
-            error → progress_bar.color = theme.ERROR
-            done  → 重置 progress_bar、恢復控制項、呼叫 on_complete
+            error → progress_bar.color = C.RED
+            done  → progress_bar.value = 0、color = C.EM、恢復控制項、呼叫 on_complete
             page.update()
 ```
 
@@ -51,16 +52,18 @@ start_task()（event loop）
 | `compare_tsv` | `run_variant_compare_tsv_service` | tsv_path / out_csv_path | TSV 簡繁差異 CSV |
 
 `start_task(task_type)` 流程：
-1. 清空 log、重置 progress_bar、`set_controls_disabled(True)`
+1. 清空 log、重置 progress_bar 並設為可見、`set_controls_disabled(True)`（只含 JSON / TSV 兩組欄位與按鈕；Key 缺失檢查的控制項由 `UntranslatedChecker._on_start` 傳入 `controls_to_disable`），並以 `page.run_task(_scroll_to_log)` 捲到日誌
 2. 依 task_type 收集路徑（缺漏 → snack 錯誤 + 復原控制項）
 3. `task_runner.task_worker(target_func, args, on_complete=復原控制項)`
 
 ## UI 架構
 
-- **Card 1**：`untranslated_checker` 元件（Key 缺失檢查，`UntranslatedChecker(page, file_picker, task_runner)`）
-- **Card 2**：簡繁差異比較 JSON 資料夾模式（`cn_dir_textfield` / `tw_dir_textfield_2` / `compare_out_dir_textfield` / `compare_start_button`）
-- **Card 3**：簡繁差異比較 TSV 單檔案模式（`tsv_file_textfield` / `tsv_out_file_textfield` / `compare_tsv_start_button`）
-- 共用：`progress_bar` + `log_view`（LogView widget，`mode="append"`、`max_lines=2000`）
+建構子拆成 `_init_qc_state_and_progress`（狀態、共用進度列／日誌、`QCBase`、各欄位與按鈕）、`_build_qc_mode_cards`（`mode_cards`）、`_build_qc_json_panel`、`_build_qc_tsv_and_untranslated_panels`（組出 `mode_panels` 並呼叫 `_apply_mode`）。`select_mode(mode)` 切換 `self.mode`（預設為 `QC_MODES` 第一項 `untranslated`），只顯示對應面板。
+
+- **模式 `untranslated`**：`untranslated_checker` 元件（Key 缺失檢查，`UntranslatedChecker(page, file_picker, task_runner)`）
+- **模式 `compare_json`**：簡繁差異比較 JSON 資料夾（`cn_dir_textfield` / `tw_dir_textfield_2` / `compare_out_dir_textfield` / `compare_start_button`）
+- **模式 `compare_tsv`**：簡繁差異比較 TSV 單檔（`tsv_file_textfield` / `tsv_out_file_textfield` / `compare_tsv_start_button`）
+- 共用：「處理日誌」`kit.section_card`，內含 `progress_bar`（預設隱藏，`start_task` 時顯示）+ `log_view`（`LogView`，`mode="append"`、`max_lines=2000`、`height=360`）
 
 ## FilePicker 流程
 
@@ -71,26 +74,26 @@ start_task()（event loop）
 
 ## 三種檢查服務的比較邏輯
 
-### 簡繁差異比較（JSON 資料夾模式，`variant_comparator.py:compare_variants_generator`）
-- 初始化 `OpenCC('s2twp')` + `load_replace_rules`（與 ftb_translator 相同的轉換鏈）
-- 掃描 `zh_cn_dir` 所有 `.json`，對應 `zh_tw_dir` 中 `zh_cn.json → zh_tw.json` 相對路徑；**找不到對應繁中檔 → 跳過**
-- 逐 key：只比較**兩側皆為 str** 的鍵；`converter.convert(cn_value)` → `apply_replace_rules()` 後與 `tw_value` 比對
-- 有差異 → 寫報告 JSON（`key` / `zh_cn_original` / `zh_cn_converted_to_tw` / `zh_tw_actual`）至 output_dir 同相對路徑
+### 簡繁差異比較（JSON 資料夾模式，`translation_tool/checkers/variant_comparator.py` 的 `compare_variants_generator`）
+- 初始化 `OpenCC('s2twp')` + `load_replace_rules`（規則路徑讀 config 的 `translator.replace_rules_path`，與 ftb_translator 相同的轉換鏈）
+- 掃描 `zh_cn_dir` 所有 `.json`，對應 `zh_tw_dir` 中 `zh_cn.json → zh_tw.json` 相對路徑；**找不到對應繁中檔 → 跳過**；找不到任何 `.json` → error 結束
+- 逐 key：只比較**兩側都有的 key**，且**兩側皆為 str**；`converter.convert(cn_value)` → `apply_replace_rules()` 後與 `tw_value` 比對
+- 有差異 → 寫報告 JSON（`key` / `zh_cn_original` / `zh_cn_converted_to_tw` / `zh_tw_actual`）至 output_dir，沿用 zh_cn 檔的相對路徑（檔名不改成 zh_tw）
 
-### TSV 簡繁差異（`variant_comparator_tsv.py:compare_variants_tsv_generator`）
-- 單檔模式：讀 TSV，用 `OpenCC('s2twp')` 轉換簡中欄位，輸出 CSV（含 `zh_cn_converted_by_opencc` 欄位）
+### TSV 簡繁差異（`translation_tool/checkers/variant_comparator_tsv.py` 的 `compare_variants_tsv_generator`）
+- 單檔模式：讀 TSV（需有 `key` / `zh_cn` / `zh_tw` 欄，否則 error），用 `OpenCC('s2twp')` 轉換 `zh_cn` 欄後與 `zh_tw` 比對（不套用 replace rules），差異輸出 CSV（欄位 `key` / `zh_cn_original` / `zh_cn_converted_by_opencc` / `zh_tw_original`，`utf-8-sig`）
 
-### 未翻譯檢查（`untranslated_checker.py:check_untranslated_generator`）
-- 掃 `en_dir` 的 en_us 檔，找 `tw_dir` 對應 zh_tw；**找不到對應繁中檔案 → 整檔標記未翻譯**
-- 逐 key：`zh_tw` 缺失或空的 key → 記為未翻譯；寫入 out_dir 報告
+### 未翻譯檢查（`translation_tool/checkers/untranslated_checker.py` 的 `check_untranslated_generator`）
+- 掃 `en_dir` 的所有 `.json`，找 `tw_dir` 下相同相對路徑的檔案；**找不到對應繁中檔案 → 整檔標記未翻譯**
+- 以 key 集合差（`en.keys() - tw.keys()`）判斷，**只看 key 是否缺失**，不看值是否為空或仍為英文；報告（缺失 key 的英文值）寫入 out_dir 同相對路徑
 
-各 service 都包一層 `GLOBAL_LOG_LIMITER.filter()` 節流高頻日誌，例外時 yield `{log, error: True, progress: 0}`。
+各 service（`app/services.py`）都包一層 `GLOBAL_LOG_LIMITER.filter()` 節流高頻日誌，例外時 yield `{log, error: True, progress: 0}`。
 
 `filter()` 只節流 `log` / `progress`；`error` 等其他欄位一律保留，帶有這些欄位的 update 會立即輸出、不被節流吞掉。因此 checker 回報的 `error` 一定會到達 `task_worker`（契約詳見 PIPELINE_VIEW_ARCHITECTURE.md 的「Service 層契約」）。
 
 ## 維護注意
 
-1. 新增檢查類型：加 UI 元件 + `start_task` 分派分支 + `set_controls_disabled` 清單。
+1. 新增檢查類型：在 `QC_MODES` 加一項、`mode_panels` 加對應面板、`start_task` 加分派分支，並把新欄位加進 `set_controls_disabled` 清單。
 2. `task_worker` 的 service 必須是 generator；若回傳 list 會 `TypeError: 'list' object is not iterable`。
 3. 背景執行緒中不可直接操作 `log_view` / `progress_bar` 或呼叫 `page.update()`；新增的 UI 回饋一律放進 `apply_ui`，經 `UiBatcher` 送到 event loop。
 4. 開始任務時的捲動（`_scroll_to_log`）是 event loop 上的 coroutine，由 `page.run_task` 排程。

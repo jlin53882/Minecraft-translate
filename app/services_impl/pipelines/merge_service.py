@@ -63,6 +63,114 @@ def _soft_error_detail(update: dict, default: str = "內部軟性錯誤") -> str
     return default
 
 
+def _zip_summary(stats: dict, output_dir: str) -> dict:
+    """ZIP 批次的統計摘要（含輸出檔案計數）。"""
+    return {
+        "total_zips": stats["total_zips"],
+        "success_zips": stats["success_zips"],
+        "failed_zips": stats["failed_zips"],
+        "errored_files": stats["errored_files"],
+        "failed_zips_list": stats["failed_zips_list"],
+        "output_counts": _count_output_files(output_dir),
+    }
+
+
+def _folder_summary(stats: dict, output_dir: str) -> dict:
+    """資料夾批次的統計摘要（含輸出檔案計數）。"""
+    return {
+        "total_folders": stats["total_folders"],
+        "success_folders": stats["success_folders"],
+        "failed_folders": stats["failed_folders"],
+        "errored_files": stats["errored_files"],
+        "failed_folders_list": stats["failed_folders_list"],
+        "output_counts": _count_output_files(output_dir),
+    }
+
+
+def _record_zip_result(
+    stats: dict, session, idx: int, total: int, zip_name: str, zip_errors: list[str]
+) -> None:
+    """依單一 ZIP 的錯誤清單更新統計並寫入 session 日誌。"""
+    if zip_errors:
+        stats["failed_zips"] += 1
+        stats["failed_zips_list"].append(
+            {
+                "name": zip_name,
+                "error": "; ".join(dict.fromkeys(zip_errors)),
+            }
+        )
+        session.add_log(f"[ZIP {idx + 1}/{total}] 失敗：{zip_name}")
+    else:
+        session.add_log(f"[ZIP {idx + 1}/{total}] 完成：{zip_name}")
+        stats["success_zips"] += 1
+
+
+def _record_folder_result(
+    stats: dict, input_dir: str, folder_errors: list[str]
+) -> None:
+    """依資料夾的錯誤清單更新統計。"""
+    if folder_errors:
+        stats["failed_folders"] = 1
+        stats["failed_folders_list"].append(
+            {
+                "name": os.path.basename(input_dir),
+                "error": "; ".join(dict.fromkeys(folder_errors)),
+            }
+        )
+    else:
+        stats["success_folders"] = 1
+
+
+def _merge_one_zip(
+    zip_path: str,
+    output_dir: str,
+    session,
+    only_process_lang,
+    idx: int,
+    total: int,
+    zip_name: str,
+    zip_base_progress: float,
+    *,
+    process_zh_cn,
+    patchouli_skip,
+    patchouli_threshold,
+    zh_en_threshold,
+) -> list[str]:
+    """合併單一 ZIP（把進度疊加到整批進度），回傳這個 ZIP 的錯誤訊息清單。"""
+    zip_errors: list[str] = []
+    try:
+        # ⚠️ 關鍵：一定要 iterate generator，否則 merge 不會執行
+        for update in merge_zhcn_to_zhtw_from_zip(
+            zip_path,
+            output_dir,
+            only_process_lang,
+            process_zh_cn=process_zh_cn,
+            patchouli_skip=patchouli_skip,
+            patchouli_threshold=patchouli_threshold,
+            zh_en_threshold=zh_en_threshold,
+        ):
+            # ---- log ----
+            if update.get("log"):
+                session.add_log(update["log"])
+
+            # ---- progress（疊加 ZIP 進度）----
+            if "progress" in update and update["progress"] is not None:
+                merged_progress = zip_base_progress + (update["progress"] / total)
+                session.set_progress(min(merged_progress, 0.999))
+
+            # ---- error ----
+            # 2026-08-04 修正 A2: 軟性 error 不中止整批,繼續處理下一個 ZIP
+            if update.get("error"):
+                zip_errors.append(_soft_error_detail(update))
+
+    except Exception as e:  # noqa: BLE001
+        tb = traceback.format_exc()
+        logger.error(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
+        session.add_log(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
+        zip_errors.append(str(e))
+    return zip_errors
+
+
 def run_merge_zip_batch_service(
     zip_paths: list[str],
     output_dir: str,
@@ -108,69 +216,31 @@ def run_merge_zip_batch_service(
         for idx, zip_path in enumerate(zip_paths):
             zip_name = Path(zip_path).name
             zip_base_progress = idx / total
-            zip_errors = []
 
             session.add_log(f"[ZIP {idx + 1}/{total}] 開始處理：{zip_name}")
 
-            try:
-                # ⚠️ 關鍵：一定要 iterate generator，否則 merge 不會執行
-                for update in merge_zhcn_to_zhtw_from_zip(
-                    zip_path,
-                    output_dir,
-                    only_process_lang,
-                    process_zh_cn=process_zh_cn,
-                    patchouli_skip=patchouli_skip,
-                    patchouli_threshold=patchouli_threshold,
-                    zh_en_threshold=zh_en_threshold,
-                ):
-                    # ---- log ----
-                    if update.get("log"):
-                        session.add_log(update["log"])
+            zip_errors = _merge_one_zip(
+                zip_path,
+                output_dir,
+                session,
+                only_process_lang,
+                idx,
+                total,
+                zip_name,
+                zip_base_progress,
+                process_zh_cn=process_zh_cn,
+                patchouli_skip=patchouli_skip,
+                patchouli_threshold=patchouli_threshold,
+                zh_en_threshold=zh_en_threshold,
+            )
 
-                    # ---- progress（疊加 ZIP 進度）----
-                    if "progress" in update and update["progress"] is not None:
-                        merged_progress = zip_base_progress + (
-                            update["progress"] / total
-                        )
-                        session.set_progress(min(merged_progress, 0.999))
-
-                    # ---- error ----
-                    # 2026-08-04 修正 A2: 軟性 error 不中止整批,繼續處理下一個 ZIP
-                    if update.get("error"):
-                        zip_errors.append(_soft_error_detail(update))
-
-            except Exception as e:  # noqa: BLE001
-                tb = traceback.format_exc()
-                logger.error(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
-                session.add_log(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
-                zip_errors.append(str(e))
-
-            if zip_errors:
-                stats["failed_zips"] += 1
-                stats["failed_zips_list"].append(
-                    {
-                        "name": zip_name,
-                        "error": "; ".join(dict.fromkeys(zip_errors)),
-                    }
-                )
-                session.add_log(f"[ZIP {idx + 1}/{total}] 失敗：{zip_name}")
-            else:
-                session.add_log(f"[ZIP {idx + 1}/{total}] 完成：{zip_name}")
-                stats["success_zips"] += 1
+            _record_zip_result(stats, session, idx, total, zip_name, zip_errors)
 
             # ZIP 完成後，至少推進一次 progress
             session.set_progress((idx + 1) / total)
 
         # 產出統計摘要，並寫入 session 供 UI 取用
-        output_counts = _count_output_files(output_dir)
-        final_summary = {
-            "total_zips": stats["total_zips"],
-            "success_zips": stats["success_zips"],
-            "failed_zips": stats["failed_zips"],
-            "errored_files": stats["errored_files"],
-            "failed_zips_list": stats["failed_zips_list"],
-            "output_counts": output_counts,
-        }
+        final_summary = _zip_summary(stats, output_dir)
         session.set_summary(final_summary)
         yield {"progress": 1.0, "log": None, "summary": final_summary}
         # 部分失敗維持批次語意（DONE + failed_zips_list）；全部失敗才視為任務失敗，
@@ -186,14 +256,7 @@ def run_merge_zip_batch_service(
         logger.error(f"[致命錯誤] ZIP 合併失敗：{e}\n{tb}")
         session.add_log(f"[致命錯誤] ZIP 合併失敗：{e}\n{tb}")
         # 產出統計摘要（即使失敗也要回報）
-        error_summary = {
-            "total_zips": stats["total_zips"],
-            "success_zips": stats["success_zips"],
-            "failed_zips": stats["failed_zips"],
-            "errored_files": stats["errored_files"],
-            "failed_zips_list": stats["failed_zips_list"],
-            "output_counts": _count_output_files(output_dir),
-        }
+        error_summary = _zip_summary(stats, output_dir)
         session.set_summary(error_summary)
         yield {"progress": 1.0, "log": None, "summary": error_summary}
         session.set_error()
@@ -201,6 +264,49 @@ def run_merge_zip_batch_service(
     finally:
         # ⭐ 避免 handler 留著舊 session
         UI_LOG_HANDLER.set_session(None)
+
+
+def _run_extracted_stage2(folder_errors: list[str], output_dir: str, session) -> None:
+    """階段 2：把 XX_extracted 的 lang 檔 key-by-key 合併進 lang_output/assets（就地追加 folder_errors）。
+
+    階段 1 已有錯誤時略過；由設定 ``lang_merger.enable_extracted_to_assets_merge`` 控制是否執行。
+    """
+    # 階段 2 (2026-08-02 PR-XX merge-asset-integration):
+    # 從 input_dir 內 XX_extracted/ 的 lang 檔 key-by-key 合併進
+    # output_dir/lang_output/assets/{modid}/lang/{xx_yy}.json
+    if folder_errors:
+        session.add_log("[階段 2/2 略過] 階段 1 發生錯誤，不處理部分輸出")
+    else:
+        try:
+            cfg = load_config()
+            enable_extracted_merge = cfg.get("lang_merger", {}).get(
+                "enable_extracted_to_assets_merge", True
+            )
+            if enable_extracted_merge:
+                session.add_log("[階段 2/2 開始] XX_extracted → assets 合併")
+                lang_output_dir = os.path.join(output_dir, "lang_output")
+                for update in merge_extracted_to_assets(
+                    lang_output_dir=lang_output_dir,
+                    session=session,
+                ):
+                    if update.get("log"):
+                        session.add_log(update["log"])
+                    if "progress" in update and update["progress"] is not None:
+                        # Stage 2 進度合成 (0.5~1.0)。
+                        stage2_progress = 0.5 + update["progress"] * 0.5
+                        session.set_progress(min(stage2_progress, 0.999))
+                    if update.get("error"):
+                        folder_errors.append(_soft_error_detail(update))
+                        session.add_log("[階段 2/2 錯誤] assets 合併中止")
+                        break
+                if not folder_errors:
+                    session.add_log("[階段 2/2 完成]")
+            else:
+                session.add_log("[階段 2/2 略過] 檔案合併(階段 2) 未啟用，跳過")
+        except Exception as stage2_err:  # noqa: BLE001
+            logger.warning(f"[階段 2/2 錯誤]: {stage2_err}")
+            session.add_log(f"[階段 2/2 錯誤]: {stage2_err}")
+            folder_errors.append(str(stage2_err))
 
 
 def run_merge_folder_batch_service(
@@ -262,39 +368,7 @@ def run_merge_folder_batch_service(
             # 從 input_dir 內 XX_extracted/ 的 lang 檔 key-by-key 合併進
             # output_dir/lang_output/assets/{modid}/lang/{xx_yy}.json
             # config flag "enable_extracted_to_assets_merge" 控制是否跑。
-            if folder_errors:
-                session.add_log("[階段 2/2 略過] 階段 1 發生錯誤，不處理部分輸出")
-            else:
-                try:
-                    cfg = load_config()
-                    enable_extracted_merge = cfg.get("lang_merger", {}).get(
-                        "enable_extracted_to_assets_merge", True
-                    )
-                    if enable_extracted_merge:
-                        session.add_log("[階段 2/2 開始] XX_extracted → assets 合併")
-                        lang_output_dir = os.path.join(output_dir, "lang_output")
-                        for update in merge_extracted_to_assets(
-                            lang_output_dir=lang_output_dir,
-                            session=session,
-                        ):
-                            if update.get("log"):
-                                session.add_log(update["log"])
-                            if "progress" in update and update["progress"] is not None:
-                                # Stage 2 進度合成 (0.5~1.0)。
-                                stage2_progress = 0.5 + update["progress"] * 0.5
-                                session.set_progress(min(stage2_progress, 0.999))
-                            if update.get("error"):
-                                folder_errors.append(_soft_error_detail(update))
-                                session.add_log("[階段 2/2 錯誤] assets 合併中止")
-                                break
-                        if not folder_errors:
-                            session.add_log("[階段 2/2 完成]")
-                    else:
-                        session.add_log("[階段 2/2 略過] 檔案合併(階段 2) 未啟用，跳過")
-                except Exception as stage2_err:  # noqa: BLE001
-                    logger.warning(f"[階段 2/2 錯誤]: {stage2_err}")
-                    session.add_log(f"[階段 2/2 錯誤]: {stage2_err}")
-                    folder_errors.append(str(stage2_err))
+            _run_extracted_stage2(folder_errors, output_dir, session)
 
         except Exception as e:  # noqa: BLE001
             tb = traceback.format_exc()
@@ -302,26 +376,9 @@ def run_merge_folder_batch_service(
             session.add_log(f"[資料夾] 錯誤：{input_dir}\n{e}\n{tb}")
             folder_errors.append(str(e))
 
-        if folder_errors:
-            stats["failed_folders"] = 1
-            stats["failed_folders_list"].append(
-                {
-                    "name": os.path.basename(input_dir),
-                    "error": "; ".join(dict.fromkeys(folder_errors)),
-                }
-            )
-        else:
-            stats["success_folders"] = 1
+        _record_folder_result(stats, input_dir, folder_errors)
 
-        output_counts = _count_output_files(output_dir)
-        final_summary = {
-            "total_folders": stats["total_folders"],
-            "success_folders": stats["success_folders"],
-            "failed_folders": stats["failed_folders"],
-            "errored_files": stats["errored_files"],
-            "failed_folders_list": stats["failed_folders_list"],
-            "output_counts": output_counts,
-        }
+        final_summary = _folder_summary(stats, output_dir)
         session.set_summary(final_summary)
         if folder_errors:
             session.set_error()
@@ -344,14 +401,7 @@ def run_merge_folder_batch_service(
         tb = traceback.format_exc()
         logger.error(f"[致命錯誤] 資料夾合併失敗：{e}\n{tb}")
         session.add_log(f"[致命錯誤] 資料夾合併失敗：{e}\n{tb}")
-        error_summary = {
-            "total_folders": stats["total_folders"],
-            "success_folders": stats["success_folders"],
-            "failed_folders": stats["failed_folders"],
-            "errored_files": stats["errored_files"],
-            "failed_folders_list": stats["failed_folders_list"],
-            "output_counts": _count_output_files(output_dir),
-        }
+        error_summary = _folder_summary(stats, output_dir)
         session.set_summary(error_summary)
         session.set_error()
         yield {"progress": 1.0, "log": None, "error": True, "summary": error_summary}

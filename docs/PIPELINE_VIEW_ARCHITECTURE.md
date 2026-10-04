@@ -2,7 +2,7 @@
 
 ## 定位
 
-PipelineView（`app/views/pipeline/pipeline_view.py`）是**翻譯工作台**：在單一頁面串起整條流水線（抽取 → 語系比對 → 翻譯 → 打包），可逐步執行或「一鍵製作」自動跑完。另有獨立的 API 金鑰管理頁（`api_view`）。
+PipelineView（`app/views/pipeline/pipeline_view.py`）是**翻譯工作台**：在單一頁面串起整條流水線（抽取 → 語系比對 → 翻譯 → 打包），可逐步執行或「一鍵製作」自動跑完。`PipelineView` 另建了一個 API 金鑰管理區塊（`api_view`），但目前並未掛到頁面上（`controls` 只含 `workbench_view`）。
 
 > 與各單頁的關係：此頁直接呼叫 service（`run_lang_extraction_service` / `run_book_extraction_service`、`run_merge_folder_batch_service` / `run_merge_zip_batch_service`、`run_lm_translation_service`、`build_bundle_staging` + `run_bundling_service`），不經由 ExtractorView / MergeView / LMView / BundlerView。
 
@@ -10,7 +10,7 @@ PipelineView（`app/views/pipeline/pipeline_view.py`）是**翻譯工作台**：
 
 | 檔案 | 內容 |
 |------|------|
-| `pipeline_view.py` | 主視圖：PipelineConfig、PipelineStepChip、PipelineProgressPanel、PipelineView |
+| `pipeline_view.py` | 主視圖：`PipelineConfig`、`PipelineStepChip`、`PipelineProgressPanel`、`PipelineView` |
 | `pipeline_extract_dialog.py` | `open_extract_dialog(...)` 抽取參數對話框 |
 | `pipeline_merge_dialog.py` | `open_merge_dialog(...)` 語系比對參數對話框 |
 | `pipeline_translate_dialog.py` | `open_translate_dialog(...)` 翻譯參數對話框 |
@@ -40,16 +40,19 @@ PipelineView（`app/views/pipeline/pipeline_view.py`）是**翻譯工作台**：
 - `start()` / `set_step_running(step_num, name)` / `add_log(msg, level, is_success)` / `finish_step(step_num, success, cancelled)` / `finish_all(success, cancelled)` / `set_running(running)` / `hide()` / `clear_logs()`
 - `cancel_button`（「取消」）：執行中顯示，按下呼叫 `PipelineView._on_cancel`
 - 這些方法都會修改 control，只能在 event loop 上呼叫
-- 使用 **LogView widget**（取代舊 LogPresenter）
+- 日誌使用 `LogView` widget；外層為 `kit.section_card("執行進度")`（`container`，預設隱藏，`start()` 後顯示）
 
 ## 主要流程
 
 ### 工作台（workbench_view）
 ```
-[填路徑] input_path_text / output_path_text（FilePicker）
-  → 四顆步驟按鈕（抽取資源/語系比對/啟動翻譯/打包資源）
-  → 各 _on_*_click()：驗證路徑非空 → 開啟對應 dialog → 回呼到 _run_*()
+[填路徑] input_path_text / output_path_text（kit.text_field，旁邊的 kit.pick_button 以 file_picker 選資料夾）
+  → 「流水線步驟」卡片四列（`_step_row`，各有「執行」按鈕）：抽取資源 / 語系比對合併 / 啟動翻譯 / 打包資源
+  → 各 _on_*_click()：驗證路徑非空 → 開啟對應 dialog → 回呼到 _run_*()（_run_extraction / _run_merge / _run_translate / _run_bundle）
+  → _start_single_step()
 ```
+
+頁面佈局由 `_build_ui` 組合：`kit.page_header`（右側為「一鍵製作」按鈕，`_build_one_click_button`）下方分兩欄——左欄為「專案路徑」卡片（`_build_pipeline_paths_card`）與「流水線步驟」卡片，右欄為進度狀態卡（`progress_status` + `progress_bar`）與 `progress_panel.container`；步驟與狀態卡由 `_build_pipeline_steps_and_status_cards` 建立。
 
 ### 執行模型（worker thread → TaskSession → event loop）
 
@@ -83,6 +86,8 @@ PipelineView（`app/views/pipeline/pipeline_view.py`）是**翻譯工作台**：
 - 打包：`_bundle_into_session` → `run_bundling_service`（使用者指定的輸入資料夾，不建立暫存）。
 
 ### 一鍵製作（_on_one_click_execute）
+`_on_one_click_execute` 委派三個方法：`_prepare_one_click`（檢查來源／輸出資料夾存在、至少一個語系代碼，並組出 `PipelineConfig` 與合併選項，不通過則提示並中止）→ `_one_click_steps`（回傳四個 `(step_num, name, fn)`）→ `_start_one_click_worker`（背景執行緒依序跑，結束後 `finish_all` 並 `_end_run`）。
+
 四個步驟依序以 `_run_session_step` 執行，任一步回傳失敗或已取消就停止，後續步驟不執行：
 
 1. **抽取資源**：依 mode 抽取到 lang / book 輸出資料夾。任何 JAR 無法處理（`stats.failures > 0`）或收到 `error` → 抽取 session 為 ERROR（見下方 Service 契約）。
@@ -150,19 +155,19 @@ core generator 與 service 以 dict 回報進度，欄位皆為選用：
 
 ## API 金鑰管理（api_view）
 
-`keys_container` 動態增刪 API Key 列（`_add_key_field` / `_delete_key_field`）+ 儲存設定按鈕。
+`api_view` 內含 `keys_container`（以 `_add_key_field` / `_delete_key_field` 增刪 API Key 列）與「儲存設定」按鈕；該按鈕尚未綁定 `on_click`，且 `api_view` 未被加入頁面，所以目前不會顯示。
 
 ## 與其他 View 的關係
 
 - 共用 `TaskSession` + `LogView` widget + `_page.run_task()` 的 UI 更新模式
 - 使用與 BundlerView 相同的 `run_bundling_service`（打包核心），但此頁走 dialog 流程
 - 抽取/語系比對/翻譯 service 與各單頁共用（`app/services_impl/pipelines/*`）
-- `set_view_registry` 由 main.py 注入 view registry（保留 `set_registry` 相容舊代碼）
+- `set_view_registry` 由 `AppShell` 建立頁面後注入 view registry（`set_registry` 為相容別名，轉呼叫前者）
 
 ## 維護注意
 
-1. `_set_buttons_disabled` 靠「Row.spacing==10 且 Button.height==55」判斷工作台按鈕 — 改佈局時易誤傷其他按鈕。
+1. `_set_buttons_disabled` 只停用 `_run_buttons`（`_step_row` 建立的「執行」按鈕）與 `_one_click_button`；新增會觸發任務的按鈕要自行加入其中。
 2. 背景執行緒中不可直接修改 control 或呼叫 `page.update()`；一律經 `_ui()` 或寫入 TaskSession。
 3. 新 service 若以 generator 回傳，`_run_session_step` 會負責迭代；若自行判斷失敗，請寫入 `session.set_error()` 或 summary 的 `failed_*`，不要只輸出含「錯誤」的日誌字串。
 4. 一鍵流程中資料夾型輸入一律走 folder batch service，不可包成 `zip_paths`。
-5. 新增步驟時要同步：PipelineProgressPanel.steps、`_on_one_click_execute` 的 steps、PipelineConfig 路徑 property。
+5. 新增步驟時要同步：`PipelineProgressPanel.steps`、`_one_click_steps` 的 steps、`PipelineConfig` 路徑 property、`_build_pipeline_steps_and_status_cards` 的步驟列。

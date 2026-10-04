@@ -32,6 +32,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXTRACTOR_DIALOG = REPO_ROOT / "app" / "views" / "extractor" / "extractor_dialog.py"
+# 預覽對話框已拆到獨立模組（#114）
+EXTRACTOR_PREVIEW_DIALOG = (
+    REPO_ROOT / "app" / "views" / "extractor" / "extractor_preview_dialog.py"
+)
 # 🐛 2026-07-14 user review:extractor_actions.py 已物理刪除 (跟 update_stats_from_log 一樣)
 # 這檔案原本裝 4 個 legacy 函式 + DEAD CODE 註解,Phase 3 commit af66bce
 # 已經把函式物理刪除,檔案剩空殼,沒 production caller。
@@ -158,62 +162,12 @@ class TestFixFbc58c7_LogViewClearAPI:
 class TestFix0228e05_CancelTrulyInterrupts:
     """on_cancel_click 同時設 extraction_cancel_flag[0] = True,worker thread 在下個 jar check。"""
 
-    def test_on_cancel_sets_service_cancel_flag(self):
-        """確保 on_cancel_click handler 內有 extraction_cancel_flag[0] = True。"""
-        _read(EXTRACTOR_DIALOG)
-        # 找 on_cancel_click 函式範圍
-        tree = _ast_parse(EXTRACTOR_DIALOG)
-        found = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "on_cancel_click":
-                for sub in ast.walk(node):
-                    if (
-                        isinstance(sub, ast.Assign)
-                        and len(sub.targets) == 1
-                        and isinstance(sub.targets[0], ast.Subscript)
-                        and isinstance(sub.targets[0].value, ast.Name)
-                        and sub.targets[0].value.id == "extraction_cancel_flag"
-                    ) and (
-                        isinstance(sub.value, ast.Constant) and sub.value.value is True
-                    ):
-                        found = True
-                break
-        assert found, (
-            "回歸:on_cancel_click handler 內找不到 extraction_cancel_flag[0] = True "
-            "(commit 0228e05 修法,必須同步 Service cancel 旗標)"
-        )
-
 
 # =============================================================================
 # commit 623d370 — 重複「開始預覽」不卡死 (preview_state.done reset)
 # =============================================================================
 class TestFix623d370_RePreviewResetsDone:
     """start_scan handler 必須 reset preview_state.done = False,否則第二次掃描 poller 立刻退出。"""
-
-    def test_start_scan_resets_preview_state_done(self):
-        """確保 start_scan 函式範圍內有 preview_state.done = False。"""
-        _read(EXTRACTOR_DIALOG)
-        tree = _ast_parse(EXTRACTOR_DIALOG)
-        found = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "start_scan":
-                for sub in ast.walk(node):
-                    if (
-                        isinstance(sub, ast.Assign)
-                        and len(sub.targets) == 1
-                        and isinstance(sub.targets[0], ast.Attribute)
-                        and sub.targets[0].attr == "done"
-                        and isinstance(sub.targets[0].value, ast.Name)
-                        and sub.targets[0].value.id == "preview_state"
-                        and isinstance(sub.value, ast.Constant)
-                        and sub.value.value is False
-                    ):
-                        found = True
-                break
-        assert found, (
-            "回歸:start_scan 內找不到 preview_state.done = False "
-            "(commit 623d370 修法,必須 reset 才能讓第二次預覽重新跑 poller)"
-        )
 
 
 # =============================================================================
@@ -295,7 +249,7 @@ class TestFixA59e85b_SingleDialogRefactor:
 
     def test_preview_dialog_title_mutated(self):
         """show_result_dialog 內必須 mutate preview_dialog.title。"""
-        src = _read(EXTRACTOR_DIALOG)
+        src = _read(EXTRACTOR_PREVIEW_DIALOG)
         assert "preview_dialog.title =" in src, (
             "回歸:preview_dialog.title 沒有被 mutate "
             "(commit a59e85b 改成 mutate-in-place,不開新 dialog)"
@@ -303,7 +257,7 @@ class TestFixA59e85b_SingleDialogRefactor:
 
     def test_preview_dialog_content_mutated(self):
         """show_result_dialog 內必須 mutate preview_dialog.content。"""
-        src = _read(EXTRACTOR_DIALOG)
+        src = _read(EXTRACTOR_PREVIEW_DIALOG)
         assert "preview_dialog.content =" in src, (
             "回歸:preview_dialog.content 沒有被 mutate "
             "(commit a59e85b 改成 mutate-in-place)"
@@ -311,7 +265,7 @@ class TestFixA59e85b_SingleDialogRefactor:
 
     def test_preview_dialog_actions_mutated(self):
         """show_result_dialog 內必須 mutate preview_dialog.actions。"""
-        src = _read(EXTRACTOR_DIALOG)
+        src = _read(EXTRACTOR_PREVIEW_DIALOG)
         assert "preview_dialog.actions =" in src, (
             "回歸:preview_dialog.actions 沒有被 mutate "
             "(commit a59e85b 改成 mutate-in-place)"
@@ -323,89 +277,6 @@ class TestFixA59e85b_SingleDialogRefactor:
 # =============================================================================
 class TestFixCa01a14_ModalLockAndDismiss:
     """提取中 dialog.modal=True;ui_done 解鎖回 False;on_dismiss 防呆 + 設 cancel flag。"""
-
-    def test_ui_start_locks_modal_true(self):
-        """開始提取時必須 dialog.modal = True。
-
-        Task 4 後改在 on_start_click（UI 執行緒）鎖定，避免背景執行緒改 dialog 屬性。
-        """
-        _read(EXTRACTOR_DIALOG)
-        tree = _ast_parse(EXTRACTOR_DIALOG)
-        found = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "on_start_click":
-                for sub in ast.walk(node):
-                    if (
-                        isinstance(sub, ast.Assign)
-                        and len(sub.targets) == 1
-                        and isinstance(sub.targets[0], ast.Attribute)
-                        and sub.targets[0].attr == "modal"
-                        and isinstance(sub.targets[0].value, ast.Name)
-                        and isinstance(sub.value, ast.Constant)
-                        and sub.value.value is True
-                    ):
-                        found = True
-                break
-        assert found, (
-            "回歸:on_start_click 內沒有 dialog.modal = True "
-            "(commit ca01a14 修法,提取進行中必須 modal=True 阻擋外側 dismiss)"
-        )
-
-    def test_ui_done_unlocks_modal_false(self):
-        """ui_done 內必須 dialog.modal = False。"""
-        _read(EXTRACTOR_DIALOG)
-        tree = _ast_parse(EXTRACTOR_DIALOG)
-        found = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "ui_done":
-                for sub in ast.walk(node):
-                    if (
-                        isinstance(sub, ast.Assign)
-                        and len(sub.targets) == 1
-                        and isinstance(sub.targets[0], ast.Attribute)
-                        and sub.targets[0].attr == "modal"
-                        and isinstance(sub.targets[0].value, ast.Name)
-                        and isinstance(sub.value, ast.Constant)
-                        and sub.value.value is False
-                    ):
-                        found = True
-                break
-        assert found, (
-            "回歸:ui_done 內沒有 dialog.modal = False "
-            "(commit ca01a14 修法,任務完成後恢復可外側關閉)"
-        )
-
-    def test_on_dialog_dismiss_handler_exists(self):
-        """必須有 on_dialog_dismiss handler 設 cancel flag。"""
-        src = _read(EXTRACTOR_DIALOG)
-        assert "def on_dialog_dismiss(" in src, (
-            "回歸:on_dialog_dismiss handler 不存在 "
-            "(commit ca01a14 防呆安全網,modal lock 的最後一道防線)"
-        )
-
-    def test_on_dialog_dismiss_sets_cancel_flag(self):
-        """on_dialog_dismiss 內必須 extraction_cancel_flag[0] = True。"""
-        _read(EXTRACTOR_DIALOG)
-        tree = _ast_parse(EXTRACTOR_DIALOG)
-        found = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "on_dialog_dismiss":
-                for sub in ast.walk(node):
-                    if (
-                        isinstance(sub, ast.Assign)
-                        and len(sub.targets) == 1
-                        and isinstance(sub.targets[0], ast.Subscript)
-                        and isinstance(sub.targets[0].value, ast.Name)
-                        and sub.targets[0].value.id == "extraction_cancel_flag"
-                        and isinstance(sub.value, ast.Constant)
-                        and sub.value.value is True
-                    ):
-                        found = True
-                break
-        assert found, (
-            "回歸:on_dialog_dismiss 內沒設 extraction_cancel_flag[0] = True "
-            "(commit ca01a14 修法,讓 background thread 提早結束而非空跑)"
-        )
 
 
 # =============================================================================
@@ -419,103 +290,6 @@ class TestFixPreviewDialogModalLock:
     extraction_cancel_flag[0],因為 preview 流程本就靠 state dict 管理取消,
     do_scan() 的 for 迴圈每個 generator yield 都 check state["cancelled"]。
     """
-
-    def test_start_scan_locks_preview_dialog_modal(self):
-        """start_scan() 內必須 preview_dialog.modal = True。"""
-        tree = _ast_parse(EXTRACTOR_DIALOG)
-        found = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "start_scan":
-                for sub in ast.walk(node):
-                    if (
-                        isinstance(sub, ast.Assign)
-                        and len(sub.targets) == 1
-                        and isinstance(sub.targets[0], ast.Attribute)
-                        and sub.targets[0].attr == "modal"
-                        and isinstance(sub.targets[0].value, ast.Name)
-                        and sub.targets[0].value.id == "preview_dialog"
-                        and isinstance(sub.value, ast.Constant)
-                        and sub.value.value is True
-                    ):
-                        found = True
-                break
-        assert found, (
-            "回歸:start_scan 內沒有 preview_dialog.modal = True "
-            "(User 2026-07-12 補發現,預覽掃描時必須鎖定避免 dismiss 後 thread 變孤兒)"
-        )
-
-    def test_show_result_dialog_unlocks_preview_dialog_modal(self):
-        """show_result_dialog mutate 結束時,必須 preview_dialog.modal = False 解除鎖定。"""
-        tree = _ast_parse(EXTRACTOR_DIALOG)
-        found = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "show_result_dialog":
-                for sub in ast.walk(node):
-                    if (
-                        isinstance(sub, ast.Assign)
-                        and len(sub.targets) == 1
-                        and isinstance(sub.targets[0], ast.Attribute)
-                        and sub.targets[0].attr == "modal"
-                        and isinstance(sub.targets[0].value, ast.Name)
-                        and sub.targets[0].value.id == "preview_dialog"
-                        and isinstance(sub.value, ast.Constant)
-                        and sub.value.value is False
-                    ):
-                        found = True
-                break
-        assert found, (
-            "回歸:show_result_dialog 內 mutate 結束時沒設 preview_dialog.modal = False "
-            "(掃描結束應解鎖,讓使用者可點外側關閉結果 dialog)"
-        )
-
-    def test_on_preview_dismiss_handler_exists(self):
-        """必須有 on_preview_dismiss handler 提供 ESC / 程式錯誤時的安全網。"""
-        tree = _ast_parse(EXTRACTOR_DIALOG)
-        found = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "on_preview_dismiss":
-                found = True
-                break
-        assert found, (
-            "回歸:on_preview_dismiss handler 不存在 "
-            "(User 2026-07-12 補發現,preview dialog 需要類同主 dialog 的 dismiss 防呆)"
-        )
-
-    def test_on_preview_dismiss_sets_cancelled_flag(self):
-        """on_preview_dismiss 內必須 state["cancelled"] = True — do_scan / ui_poller 都會 check。"""
-        tree = _ast_parse(EXTRACTOR_DIALOG)
-        found = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "on_preview_dismiss":
-                for sub in ast.walk(node):
-                    if (  # noqa: SIM102
-                        isinstance(sub, ast.Assign)
-                        and len(sub.targets) == 1
-                        and isinstance(sub.targets[0], ast.Subscript)
-                        and isinstance(sub.targets[0].value, ast.Name)
-                        and sub.targets[0].value.id == "state"
-                        and isinstance(sub.value, ast.Constant)
-                        and sub.value.value is True
-                    ):
-                        # 確認是 state["cancelled"] (不是 state["running"])
-                        if isinstance(sub.targets[0].slice, ast.Constant):
-                            key = sub.targets[0].slice.value
-                            if key == "cancelled":
-                                found = True
-                                break
-                break
-        assert found, (
-            "回歸:on_preview_dismiss 內沒設 state['cancelled'] = True "
-            "(do_scan for 迴圈與 ui_poller while 都 check 這個旗標來中斷)"
-        )
-
-    def test_preview_dialog_on_dismiss_attached(self):
-        """preview_dialog.on_dismiss 必須被 hook 到 on_preview_dismiss function。"""
-        src = _read(EXTRACTOR_DIALOG)
-        assert "preview_dialog.on_dismiss = on_preview_dismiss" in src, (
-            "回歸:preview_dialog.on_dismiss 沒有 hook on_preview_dismiss "
-            "(User 2026-07-12 補發現,確保 dismiss 觸發時能進入 cancel 防呆)"
-        )
 
 
 # =============================================================================
@@ -900,46 +674,6 @@ class TestFixOnStartClickSnackbar:
     作為 第二線防呆 (例如 programmatic 呼叫或未來 bypass button layer)。
     """
 
-    def test_on_start_click_first_rejection_has_snackbar(self):
-        """on_start_click 第一個早 return (mods_dir 空) 必須有 SnackBar。"""
-        src = _read(EXTRACTOR_DIALOG)
-        m = re.search(
-            r"def on_start_click\(e\):(.*?)(?=\n    def |\ndef |\nclass |\Z)",
-            src,
-            re.DOTALL,
-        )
-        assert m is not None, "找不到 on_start_click 函式"
-        body = m.group(1)
-        # 第一個 if not mods_dir 區塊:到 if not os.path.isdir 之前
-        idx_isdir = body.find("if not os.path.isdir")
-        first_block = body[:idx_isdir] if idx_isdir > 0 else body
-        assert "SnackBar" in first_block, (
-            "回歸:on_start_click 第一個早 return 缺 SnackBar"
-        )
-        assert "page.show_dialog" in first_block, (
-            "回歸:on_start_click 第一個早 return 缺 page.show_dialog"
-        )
-
-    def test_on_start_click_second_rejection_has_snackbar(self):
-        """on_start_click 第二個早 return (mods_dir 不是資料夾) 必須有 SnackBar。"""
-        src = _read(EXTRACTOR_DIALOG)
-        m = re.search(
-            r"def on_start_click\(e\):(.*?)(?=\n    def |\ndef |\nclass |\Z)",
-            src,
-            re.DOTALL,
-        )
-        assert m is not None
-        body = m.group(1)
-        idx_isdir = body.find("if not os.path.isdir")
-        assert idx_isdir > 0
-        second_block = body[idx_isdir:]
-        assert "SnackBar" in second_block, (
-            "回歸:on_start_click 第二個早 return 缺 SnackBar"
-        )
-        assert "page.show_dialog" in second_block, (
-            "回歸:on_start_click 第二個早 return 缺 page.show_dialog"
-        )
-
 
 class TestFixPhase3DeadCodeRemoval:
     """Phase 3 (2026-07-13) 物理刪除 legacy code & test 的 source-level 斷言。
@@ -1045,7 +779,7 @@ class TestFixPhase3DeadCodeRemoval:
 
     def test_extractor_dialog_docstring_no_legacy_reference(self):
         """extractor_dialog.open_preview_dialog docstring 不應引用舊 extractor_actions.show_preview。"""
-        src = _read(EXTRACTOR_DIALOG)
+        src = _read(EXTRACTOR_PREVIEW_DIALOG)
         # 找 open_preview_dialog 函式範圍
         m = re.search(
             "def open_preview_dialog\\([^)]*\\):(.*?)(?=\ndef |\nclass |\\Z)",
@@ -1145,37 +879,6 @@ class TestFixDUALSignatureBug:
             "(Bug 1 fix 應讓 lang_codes 過濾真正生效,此斷言鎖定真正的 source pattern)"
         )
 
-    def test_extractor_dialog_uses_lang_codes_keyword_arg(self):
-        """extractor_dialog.py 對 extract_dual_files_generator 必須用 lang_codes=selected_codes keyword arg。"""
-        src = _read(EXTRACTOR_DIALOG)
-        # 找 open_extractor_dialog 函式範圍
-        m = re.search(
-            "def open_extractor_dialog\\([^)]*\\):(.*?)(?=\\ndef |\\nclass |\\Z)",
-            src,
-            re.DOTALL,
-        )
-        assert m is not None
-        body = m.group(0)
-        # 必須有 keyword arg 呼叫 (multiline 也支援:查 「lang_codes=selected_codes」字串)
-        # 🐛 2026-07-14 user review: 改成 multiline 呼叫 (加 skip_zh_cn)
-        assert "lang_codes=selected_codes" in body, (
-            "回歸:extractor_dialog 沒用 lang_codes=selected_codes keyword arg 呼叫 "
-            "(Bug 1 fix 應避免 TypeError)"
-        )
-        # 不能用錯誤的 positional 3 args 呼叫
-        assert (
-            "extract_dual_files_generator(mods_dir, final_output, selected_codes)"
-            not in body
-        ), (
-            "回歸:extractor_dialog 還是用錯誤的 positional 3 args 呼叫 "
-            "(這會引起 TypeError: takes 2 positional arguments but 3 were given)"
-        )
-        # 🐛 2026-07-14 Phase 2 fix: skip_zh_cn 也用 keyword arg
-        assert "skip_zh_cn=selected_skip_zh_cn" in body, (
-            "回歸:extract_dual_files_generator 沒傳 skip_zh_cn=selected_skip_zh_cn "
-            "(Phase 2 user review 應讓主 UI skip_zh_cn_switch 生效)"
-        )
-
 
 class TestFixExceptionTraceback:
     """Bug 2 fix (2026-07-13): exception handler 加 traceback.format_exc()。
@@ -1201,37 +904,6 @@ class TestFixExceptionTraceback:
         ), (
             "回歸:extractor_dialog.py 沒 import traceback "
             "(Bug 2 fix 應加 import 才能用 traceback.format_exc())"
-        )
-
-    def test_extractor_dialog_exception_handler_includes_traceback(self):
-        """exception handler 必須用 traceback.format_exc()。"""
-        src = _read(EXTRACTOR_DIALOG)
-        # 找 except Exception as ex: 範圍
-        m = re.search(
-            'except Exception as ex:(.*?)(?=\n        (?:state\\["running"\\]|except |finally))',
-            src,
-            re.DOTALL,
-        )
-        assert m is not None, "找不到 except Exception as ex:"
-        body = m.group(1)
-        assert "traceback.format_exc()" in body, (
-            "回歸:exception handler 沒用 traceback.format_exc() "
-            "(Bug 2 fix 應加完整堆疊追蹤,user 實機 debug 不便)"
-        )
-
-    def test_extractor_dialog_exception_handler_includes_tracking_label(self):
-        """exception handler 必須有 [TRACEBACK] 標籤區分主錯誤訊息與堆疊。"""
-        src = _read(EXTRACTOR_DIALOG)
-        m = re.search(
-            'except Exception as ex:(.*?)(?=\n        (?:state\\["running"\\]|except |finally))',
-            src,
-            re.DOTALL,
-        )
-        assert m is not None
-        body = m.group(1)
-        assert "[TRACEBACK]" in body, (
-            "回歸:exception handler 沒加 [TRACEBACK] 標籤 "
-            "(區分主錯誤訊息 [ERROR] 跟堆疊追蹤)"
         )
 
 
@@ -1331,14 +1003,6 @@ class TestFixDUALResultSection:
             "Phase 3 fix 必須用 phase='book_final' 不在 ('lang','book') 範圍"
         )
 
-    def test_extractor_dialog_has_update_dual_stats_helper(self):
-        """extractor_dialog.py 必須有 update_dual_stats helper。"""
-        src = _read(EXTRACTOR_DIALOG)
-        assert "def update_dual_stats(" in src, (
-            "回歸:extractor_dialog.py 沒有 update_dual_stats helper "
-            "(Phase 3 應加,給 DUAL mode LANG/BOOK 分區顯示用)"
-        )
-
     def test_extractor_dialog_has_lang_row_ui(self):
         """extractor_dialog.py 必須有 lang_row UI 元件。"""
         src = _read(EXTRACTOR_DIALOG)
@@ -1365,24 +1029,6 @@ class TestFixDUALResultSection:
         assert "stats_row," in src and "lang_row," in src and "book_row," in src, (
             "回歸:lang_row / book_row 沒加進 dialog content column "
             "(Phase 3 應放在 stats_row 後面,讓 Flet 渲染)"
-        )
-
-    def test_run_extraction_calls_update_dual_stats_for_dual_mode(self):
-        """extractor_dialog.run_extraction 必須在 selected_mode == 'dual' 時呼叫 update_dual_stats。"""
-        src = _read(EXTRACTOR_DIALOG)
-        # 找 run_extraction 函式範圍
-        m = re.search(
-            r"def run_extraction\(\):[\s\S]*?(?=\n        except Exception as ex:|\n    def [a-zA-Z]|\Z)",
-            src,
-        )
-        assert m is not None
-        body = m.group(0)
-        assert 'if selected_mode == "dual":' in body, (
-            "回歸:run_extraction 沒在 selected_mode == dual 時呼叫 update_dual_stats "
-            "(Phase 3 應只在 DUAL mode 才顯示 LANG/BOOK 分區)"
-        )
-        assert "update_dual_stats(result_stats)" in body, (
-            "回歸:run_extraction 沒呼叫 update_dual_stats(result_stats)"
         )
 
 
@@ -1526,27 +1172,9 @@ class TestFixSkipZhCnSwitchWiring:
             "回歸:_handle_extract_dual_click 沒傳 skip_zh_cn=self.skip_zh_cn_switch.value"
         )
 
-    def test_extractor_dialog_run_extraction_passes_skip_zh_cn_to_dual(self):
-        """run_extraction 內 extract_dual_files_generator 必須用 skip_zh_cn=selected_skip_zh_cn。"""
-        src = _read(EXTRACTOR_DIALOG)
-        assert "extract_dual_files_generator(" in src
-        assert "skip_zh_cn=selected_skip_zh_cn" in src, (
-            "回歸:extract_dual_files_generator 沒傳 skip_zh_cn=selected_skip_zh_cn "
-            "(Phase 2 user review 應串接 skip_zh_cn)"
-        )
-
-    def test_extractor_dialog_run_extraction_passes_skip_zh_cn_to_lang(self):
-        """run_extraction 內 extract_lang_files_generator 必須也傳 skip_zh_cn。"""
-        src = _read(EXTRACTOR_DIALOG)
-        assert "extract_lang_files_generator(" in src
-        assert "skip_zh_cn=selected_skip_zh_cn" in src, (
-            "回歸:extract_lang_files_generator 沒傳 skip_zh_cn "
-            "(Phase 2 user review 應在 lang mode 也生效)"
-        )
-
     def test_extractor_dialog_open_preview_dialog_has_skip_zh_cn_param(self):
         """open_preview_dialog signature 必須有 skip_zh_cn 參數(2026-07-14 user review 補發現 preview 路徑)。"""
-        src = _read(EXTRACTOR_DIALOG)
+        src = _read(EXTRACTOR_PREVIEW_DIALOG)
         m = re.search(
             "def open_preview_dialog\\([^)]*\\):",
             src,

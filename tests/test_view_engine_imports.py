@@ -27,6 +27,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     # 打包／提取：對話框與頁面直接呼叫引擎
     ("app/views/bundler_view.py", "translation_tool.core.output_bundler"): "改走 service",
     ("app/views/extractor/extractor_dialog.py", "translation_tool.core.jar_processor"): "改走 service",
+    ("app/views/extractor/extractor_preview_dialog.py", "translation_tool.core.jar_processor"): "改走 service",
     ("app/views/pipeline/pipeline_extract_dialog.py", "translation_tool.core.jar_processor"): "改走 service",
     # 圖示預覽列：圖示解析與預覽快取
     ("app/views/icon_preview_row.py", "translation_tool.core.icon_preview_cache"): "改走 service",

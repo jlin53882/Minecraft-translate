@@ -8,13 +8,14 @@
 
 ## 檔案結構
 
-- `app/views/untranslated_checker.py` — `UntranslatedChecker` 元件（約 172 行，`ft.Container`）
+- `app/views/untranslated_checker.py` — `UntranslatedChecker` 元件（`ft.Container`；`_build_content` 組出 UI）
 - `app/views/qc_base.py` — 依賴 `QCBase.task_worker()` 執行執行緒任務
-- `app/services.py` — `run_untranslated_check_service(en_dir, tw_dir, out_dir)`（generator）
+- `app/services.py` — `run_untranslated_check_service(en_dir, tw_dir, out_dir)`（generator，包一層 `GLOBAL_LOG_LIMITER.filter()`；例外時 yield `{log, error: True, progress: 0}`）
+- `translation_tool/checkers/untranslated_checker.py` — 實際比對邏輯 `check_untranslated_generator`
 
 ## 與 QCView 的關係
 
-- `UntranslatedChecker(page, file_picker, task_runner)` 由 QCView 建立並佈局在**第一張 Card**（PR1 拆分）
+- `UntranslatedChecker(page, file_picker, task_runner)` 由 QCView 建立，放進 `mode_panels["untranslated"]`（標題「Key 缺失檢查」的 `kit.section_card`）；QCView 以模式卡切換顯示，預設選中的就是此模式
 - QCView 的 `start_task("untranslated")` 仍保留 `run_untranslated_check_service` 作為備用分派（讀 `self.untranslated_checker.en_dir/tw_dir/out_dir`）
 
 ## 主要 UI 元件
@@ -26,7 +27,7 @@
 | `out_dir` (TextField) | 報告輸出資料夾路徑 |
 | `start_button` (ft.Button) | 開始檢查（SEARCH_OFF icon） |
 
-每列路徑欄配 `_create_pick_button(folder_mode=True)`（FOLDER_OPEN icon）。
+三個欄位皆為 `kit.text_field`，每列配 `_create_pick_button(folder_mode=True)`（`kit.pick_button`，FOLDER_OPEN icon）。
 
 ## 任務執行（_on_start）
 
@@ -66,4 +67,4 @@ Translation Workflow（翻譯執行） → UntranslatedChecker（QC 把關）→
 ## 維護注意
 
 1. 此元件**不自己開執行緒**；一律透過注入的 `task_runner`（QCBase）執行，沿用 QC 共用 progress_bar + log_view。
-2. service 必須是 generator；逐筆 yield 的 log 會寫入 QCView 的 LogView（level="info"）。
+2. service 必須是 generator；yield 的 log 逐行寫入 QCView 的 LogView，等級由 `qc_base._guess_level` 依文字推測（含「錯誤」「失敗」→ error，含「警告」→ warning，其餘 info）。

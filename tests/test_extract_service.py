@@ -834,7 +834,7 @@ class TestRunExtractionWithSession:
 
 def test_preview_file_count_by_mode():
     """N3：預覽清單只列出有可提取檔案的 JAR。"""
-    from app.views.extractor.extractor_dialog import _preview_file_count
+    from app.views.extractor.extractor_preview_dialog import _preview_file_count
 
     assert _preview_file_count({"count": 0}, "lang") == 0
     assert _preview_file_count({"count": 3}, "book") == 3

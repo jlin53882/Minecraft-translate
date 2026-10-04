@@ -60,6 +60,114 @@ def cache_save_all_service(
     return cache_manager.get_cache_overview()
 
 
+def _search_rank(text: str, q_lower: str) -> int:
+    """計算搜尋排序用的 rank（越小代表越符合 query）。
+
+    規則（case-insensitive）：
+    - 0：text 完全等於 query
+    - 1：text 以 query 開頭（prefix match）
+    - 2：其他（fallback）
+    """
+    t = (text or "").lower()
+    if t == q_lower:
+        return 0
+    if t.startswith(q_lower):
+        return 1
+    return 2
+
+
+def _search_with_engine(
+    cache_type: str, q: str, mode: str, limit: int
+) -> dict[str, Any] | None:
+    """用搜尋引擎（FTS5）查詢；沒有結果時回傳 None（交給線性掃描）。"""
+    results = cache_manager.search_cache(
+        query=q,
+        cache_type=cache_type,
+        limit=limit,
+        use_fuzzy=True,
+    )
+    if not results:
+        return None
+
+    q_lower = q.lower()
+    hits = []
+    for r in results:
+        if mode == "key":
+            if q_lower not in r.get("src", "").lower():
+                continue
+        elif mode == "dst" and q_lower not in r.get("dst", "").lower():
+            continue
+
+        rank_text = r.get("dst", "") if mode == "dst" else r.get("src", "")
+        hits.append(
+            {
+                "key": r.get("key", ""),
+                "rank": _search_rank(rank_text, q_lower),
+                "preview": str(r.get("dst", ""))[:40],
+                "score": r.get("combined_score", r.get("score", 0.0)),
+            }
+        )
+
+    hits.sort(key=lambda x: (x["rank"], -x["score"]))
+    return {
+        "items": hits,
+        "truncated": len(results) >= limit,
+        "limit": limit,
+    }
+
+
+def _search_linear(cache_type: str, q: str, mode: str, limit: int) -> dict[str, Any]:
+    """線性掃描記憶體中的快取（搜尋引擎失敗或沒有結果時的降級路徑）。"""
+    cache_ref = cache_manager.get_cache_dict_ref(cache_type)
+    if not cache_ref:
+        return {"items": [], "truncated": False, "limit": limit}
+
+    q_lower = q.lower()
+    hits: list[dict] = []
+    truncated = False
+
+    for key, entry in cache_ref.items():
+        if not isinstance(entry, dict):
+            continue
+
+        dst = entry.get("dst", "")
+
+        if mode == "dst":
+            hay = (dst or "").lower()
+            if q_lower not in hay:
+                continue
+            hits.append(
+                {
+                    "key": key,
+                    "rank": _search_rank(dst, q_lower),
+                    "preview": str(dst)[:40],
+                    "score": 0.5,
+                }
+            )
+        else:
+            hay = (key or "").lower()
+            if q_lower not in hay:
+                continue
+            hits.append(
+                {
+                    "key": key,
+                    "rank": _search_rank(key, q_lower),
+                    "preview": "",
+                    "score": 0.5,
+                }
+            )
+
+        if len(hits) >= limit:
+            truncated = True
+            break
+
+    return {
+        "items": hits,
+        "truncated": truncated,
+        "limit": limit,
+    }
+
+
 def cache_search_service(
     cache_type: str,
     query: str,
@@ -76,122 +184,13 @@ def cache_search_service(
         return {"items": [], "truncated": False, "limit": limit}
 
     try:
-        results = cache_manager.search_cache(
-            query=q,
-            cache_type=cache_type,
-            limit=limit,
-            use_fuzzy=True,
-        )
-
-        if results:
-            hits = []
-            for r in results:
-                if mode == "key":
-                    if q.lower() not in r.get("src", "").lower():
-                        continue
-                elif mode == "dst" and q.lower() not in r.get("dst", "").lower():
-                    continue
-
-                def _rank(text: str) -> int:
-                    """計算搜尋排序用的 rank（越小代表越符合 query）。
-
-                    規則（case-insensitive）：
-                    - 0：text 完全等於 query
-                    - 1：text 以 query 開頭（prefix match）
-                    - 2：其他（fallback）
-                    """
-                    t = (text or "").lower()
-                    if t == q.lower():
-                        return 0
-                    if t.startswith(q.lower()):
-                        return 1
-                    return 2
-
-                rank_text = r.get("dst", "") if mode == "dst" else r.get("src", "")
-
-                hits.append(
-                    {
-                        "key": r.get("key", ""),
-                        "rank": _rank(rank_text),
-                        "preview": str(r.get("dst", ""))[:40],
-                        "score": r.get("combined_score", r.get("score", 0.0)),
-                    }
-                )
-
-            hits.sort(key=lambda x: (x["rank"], -x["score"]))
-            truncated = len(results) >= limit
-            return {
-                "items": hits,
-                "truncated": truncated,
-                "limit": limit,
-            }
-
+        result = _search_with_engine(cache_type, q, mode, limit)
+        if result is not None:
+            return result
     except Exception as e:  # noqa: BLE001
         log_warning(f"搜尋引擎失敗，降級使用線性掃描: {e}")
 
-    cache_ref = cache_manager.get_cache_dict_ref(cache_type)
-    if not cache_ref:
-        return {"items": [], "truncated": False, "limit": limit}
-
-    q_lower = q.lower()
-    hits: list[dict] = []
-    truncated = False
-
-    def _rank(text: str) -> int:
-        """計算搜尋排序用的 rank（越小代表越符合 query）。
-
-        規則（case-insensitive）：
-        - 0：text 完全等於 query
-        - 1：text 以 query 開頭（prefix match）
-        - 2：其他（fallback）
-        """
-        t = (text or "").lower()
-        if t == q_lower:
-            return 0
-        if t.startswith(q_lower):
-            return 1
-        return 2
-
-    for key, entry in cache_ref.items():
-        if not isinstance(entry, dict):
-            continue
-
-        dst = entry.get("dst", "")
-
-        if mode == "dst":
-            hay = (dst or "").lower()
-            if q_lower not in hay:
-                continue
-            hits.append(
-                {
-                    "key": key,
-                    "rank": _rank(dst),
-                    "preview": str(dst)[:40],
-                    "score": 0.5,
-                }
-            )
-        else:
-            hay = (key or "").lower()
-            if q_lower not in hay:
-                continue
-            hits.append(
-                {
-                    "key": key,
-                    "rank": _rank(key),
-                    "preview": "",
-                    "score": 0.5,
-                }
-            )
-
-        if len(hits) >= limit:
-            truncated = True
-            break
-
-    return {
-        "items": hits,
-        "truncated": truncated,
-        "limit": limit,
-    }
+    return _search_linear(cache_type, q, mode, limit)
 
 
 def cache_get_entry_service(cache_type: str, key: str) -> dict[str, Any] | None:

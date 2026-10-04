@@ -35,9 +35,9 @@
 | `app/services_impl/pipelines/extract_service.py:run_dual_extraction_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/lm_service.py:run_lm_translation_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/lookup_service.py:run_batch_lookup_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
+| `app/services_impl/pipelines/merge_service.py:_merge_one_zip` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/merge_service.py:run_merge_zip_batch_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/services_impl/pipelines/merge_service.py:run_merge_zip_batch_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/services_impl/pipelines/merge_service.py:run_merge_folder_batch_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/services_impl/pipelines/merge_service.py:_run_extracted_stage2` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/merge_service.py:run_merge_folder_batch_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/merge_service.py:run_merge_folder_batch_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/shell/app_shell.py:read_app_version` | BLE001 | UI／畫面保護 | 版本只是裝飾，讀不到不影響啟動 |
@@ -90,8 +90,8 @@
 | `app/views/cache_view.py:CacheView._on_page_resized` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView.commit_ui` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/dashboard_view.py:DashboardView._apply_on_ui` | BLE001 | 已記錄／回報 | 沒有 event loop（測試）就直接套用 |
-| `app/views/extractor/extractor_dialog.py:open_extractor_dialog.run_extraction` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/extractor/extractor_dialog.py:open_preview_dialog.start_scan.do_scan` | BLE001 | 已記錄／回報 | 錯誤要回報到 UI |
+| `app/views/extractor/extractor_dialog.py:_extractor_run_extraction` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/extractor/extractor_preview_dialog.py:_preview_do_scan` | BLE001 | 已記錄／回報 | 錯誤要回報到 UI |
 | `app/views/icon_preview_row.py:_ensure_icon_size` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/icon_preview_view.py:_follow_parent_chain` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview_view.py:_extract_jar_icon` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |

@@ -258,7 +258,7 @@ class ExtractorView(ft.Column):
                 return
             raise
 
-    def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
+    def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang") -> str:
         """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。
 
         ✅ 階段 B 重構：config 讀取已抽離至 extract_service.get_output_folder_names()
@@ -279,8 +279,9 @@ class ExtractorView(ft.Column):
             suffix = lang_extract
 
         # 保護機制：只有輸出路徑為空時才自動填入，避免覆寫使用者已輸入的自訂路徑
-        if (self.output_dir_textfield.value or "").strip():
-            return
+        existing = (self.output_dir_textfield.value or "").strip()
+        if existing:
+            return existing
 
         # 修正邏輯：處理路徑末尾斜線並正確合併名稱
         # 注意：必須先轉成 str 才能呼叫 rstrip，否則會觸發 AttributeError
@@ -308,6 +309,7 @@ class ExtractorView(ft.Column):
             f"[系統] 已自動設定輸出路徑：{output_path}",
             color=C.EM,
         )
+        return output_path
 
     def _check_mods_dir_or_snack(self, mods_dir: str, action_label: str) -> bool:
         """按鈕 click handler 的前置驗證。
