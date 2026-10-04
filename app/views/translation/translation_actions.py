@@ -87,6 +87,8 @@ def run_ftb(view, *, dry_run: bool):
                     _safe_add_log(view, f"[UI] 服務執行失敗：{ex}")
                 if hasattr(view.session, "set_error"):
                     view.session.set_error()
+                if hasattr(view.session, "finish"):
+                    view.session.finish()  # set_error() → finish()：TaskManager 才會離開 active
             except Exception as e:  # noqa: BLE001
                 log_error(f"記錄 FTB 執行失敗時發生錯誤: {e}")
 
@@ -142,6 +144,8 @@ def run_kjs(view, *, dry_run: bool):
                     _safe_add_log(view, f"[UI] 服務執行失敗：{ex}")
                 if hasattr(view.session, "set_error"):
                     view.session.set_error()
+                if hasattr(view.session, "finish"):
+                    view.session.finish()  # set_error() → finish()：TaskManager 才會離開 active
             except Exception as e:  # noqa: BLE001
                 log_error(f"記錄 KubeJS 執行失敗時發生錯誤: {e}")
 
@@ -198,6 +202,8 @@ def run_md(view, *, dry_run: bool):
                     _safe_add_log(view, f"[UI] 服務執行失敗：{ex}")
                 if hasattr(view.session, "set_error"):
                     view.session.set_error()
+                if hasattr(view.session, "finish"):
+                    view.session.finish()  # set_error() → finish()：TaskManager 才會離開 active
             except Exception as e:  # noqa: BLE001
                 log_error(f"記錄 MD 執行失敗時發生錯誤: {e}")
 

@@ -811,7 +811,9 @@ class TestRunExtractionWithSession:
             _run_extraction_with_session(gen(), session, "Test")
 
         assert session.error is True
-        assert session.finished is False  # Should NOT finish on error
+        assert (
+            session.finished is True
+        )  # ERROR 後仍要 finish（TaskManager 才會離開 active）
 
     def test_log_limiter_filters_out_updates(self):
         """When GLOBAL_LOG_LIMITER.filter returns None, that update is skipped."""

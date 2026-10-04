@@ -248,6 +248,7 @@ def run_merge_zip_batch_service(
         if stats["success_zips"] == 0:
             session.add_log("[系統] 所有 ZIP 皆處理失敗")
             session.set_error()
+            session.finish()  # ERROR 也要 finish，TaskManager 才會離開 active
         else:
             session.finish()
 
@@ -260,6 +261,7 @@ def run_merge_zip_batch_service(
         session.set_summary(error_summary)
         yield {"progress": 1.0, "log": None, "summary": error_summary}
         session.set_error()
+        session.finish()
 
     finally:
         # ⭐ 避免 handler 留著舊 session
@@ -443,8 +445,8 @@ def run_merge_folder_batch_service(
         _record_folder_result(stats, input_dir, folder_errors)
 
         yield _finish_folder_run(session, stats, output_dir, bool(folder_errors))
-        if not folder_errors and finish_session:
-            session.finish()
+        if finish_session:
+            session.finish()  # 失敗時已 set_error()，finish 維持 ERROR 並離開 active
 
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
@@ -453,6 +455,8 @@ def run_merge_folder_batch_service(
         error_summary = _folder_summary(stats, output_dir)
         session.set_summary(error_summary)
         session.set_error()
+        if finish_session:
+            session.finish()
         yield {"progress": 1.0, "log": None, "error": True, "summary": error_summary}
 
     finally:

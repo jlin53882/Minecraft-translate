@@ -248,6 +248,7 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                 log_warning(f"[MergeView] 合併執行失敗：{ex!r}")
                 self.session.add_log(f"[錯誤] 合併執行失敗：{ex}", level="error")
                 self.session.set_error()
+                self.session.finish()  # set_error() → finish()：TaskManager 才會離開 active
 
         def _run_merge_service():
             if input_mode == "folder":

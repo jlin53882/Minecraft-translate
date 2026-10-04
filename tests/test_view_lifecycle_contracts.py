@@ -48,7 +48,7 @@ class _Session:
 
     def finish(self):
         self.progress = 1.0
-        self.status = "DONE"
+        self.status = "ERROR" if self.error else "DONE"  # 與真正的 TaskSession 一致
 
     def request_cancel(self):
         self.cancel_requested = True

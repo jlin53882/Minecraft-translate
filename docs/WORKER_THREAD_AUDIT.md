@@ -66,6 +66,10 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 
 其餘 `page.run_task` 皆為**一次性有限工作**（選檔、剪貼簿、套用結果、focus、debounce 觸發），不會常駐。
 
+### TaskSession terminal 契約（所有背景任務）
+
+`start()` 之後任何結束路徑都要有一次 `finish()`，失敗順序為 `set_error()` → `finish()`（`TaskSession.finish()` 對已出錯的維持 ERROR）；`TaskManager` 以 `finish` 為結案事件。盤點結果：`_task_runner.run_callable_task`（FTB／KubeJS／MD）原本就符合；本 PR 補齊 extract（lang／book／dual／取消）、LM、merge（folder／zip）、`MergeView`／翻譯頁的 worker 例外邊界，以及 `PipelineActions`（dual 抽取、一鍵 merge、打包）。護欄：`tests/test_task_terminal_lifecycle.py`（真正的 `TaskManager`，每條路徑都驗證 `active() == []` 與 recent 狀態）。
+
 ## C. event loop 上的同步阻塞（本 PR 前 → 後）
 
 | 位置 | 原本 | 現在 |

@@ -80,8 +80,6 @@ def run_lm_translation_service(
         if dry_run:
             session.add_log("[DRY-RUN] 分析完成，未執行實際翻譯")
 
-        session.finish()
-
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"LM 服務失敗: {e}\n{full_traceback}")
@@ -91,3 +89,6 @@ def run_lm_translation_service(
     finally:
         # ⭐ 避免 handler 留著舊 session
         UI_LOG_HANDLER.set_session(None)
+        # 任何結束路徑（成功／service 回報錯誤／例外）都只送一次 terminal finish：
+        # 失敗時順序是 set_error() → finish()（已標記錯誤的維持 ERROR）
+        session.finish()

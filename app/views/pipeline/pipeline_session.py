@@ -196,11 +196,12 @@ class PipelineRunner:
                             result.close()
                             break
         except TaskCancelled:
-            pass
+            session.finish()  # 取消也要 terminal（TaskManager 不可殘留 active；重複 finish 無害）
         except Exception as ex:  # noqa: BLE001 - 背景步驟邊界：任何錯誤都轉成步驟失敗
             log_error(f"[Pipeline] {name} 失敗：{ex}\n{traceback.format_exc()}")
             session.add_log(f"❌ 錯誤：{ex}", level="error")
             session.set_error()
+            session.finish()  # 安全網：順序 set_error() → finish()
         finally:
             self.current_session = None
             if self.cancel_event.is_set():

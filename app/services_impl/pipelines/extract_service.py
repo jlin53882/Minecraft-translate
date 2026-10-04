@@ -194,6 +194,16 @@ def prepare_preview_paths(mods_dir: str, mode: str) -> str:
     return str(mods_path.with_name(mods_path.name + suffix))
 
 
+def _end_failed(session: TaskSession, finish_session: bool) -> None:
+    """失敗收尾：一律 ``set_error()`` → ``finish()``（由本 service 擁有 session 生命週期時）。
+
+    ``set_error()`` 在 ``TaskManager`` 不是 terminal event，必須再 ``finish()`` 才會離開 active。
+    """
+    session.set_error()
+    if finish_session:
+        session.finish()
+
+
 def _run_extraction_with_session(
     generator,
     session: TaskSession,
@@ -222,6 +232,8 @@ def _run_extraction_with_session(
         if is_cancelled():
             # 在 JAR 之間停止（一鍵流水線的取消）
             session.add_log(f"⏹ {mode_label} 提取已取消", level="warning")
+            if finish_session:
+                session.finish()
             return
         failures.observe(update)
         filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
@@ -236,7 +248,7 @@ def _run_extraction_with_session(
 
         if update.get("error"):
             _flush_limiter_to_session(session)
-            session.set_error()
+            _end_failed(session, finish_session)
             return
 
     _flush_limiter_to_session(session)
@@ -252,7 +264,7 @@ def _run_extraction_with_session(
             "已提取的檔案保留，但此步驟視為失敗",
             level="error",
         )
-        session.set_error()
+        _end_failed(session, finish_session)
         return
     if finish_session:
         session.finish()
@@ -392,7 +404,7 @@ def run_lang_extraction_service(
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
-        session.set_error()
+        _end_failed(session, manage_session)
         GLOBAL_LOG_LIMITER.flush()
     finally:
         # ⭐ 避免 handler 留著舊 session
@@ -437,7 +449,7 @@ def run_book_extraction_service(
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
-        session.set_error()
+        _end_failed(session, manage_session)
         GLOBAL_LOG_LIMITER.flush()
     finally:
         # ⭐ 避免 handler 留著舊 session
@@ -470,7 +482,7 @@ def run_dual_extraction_service(
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}")
-        session.set_error()
+        _end_failed(session, True)
         GLOBAL_LOG_LIMITER.flush()
     finally:
         # ⭐ 避免 handler 留著舊 session

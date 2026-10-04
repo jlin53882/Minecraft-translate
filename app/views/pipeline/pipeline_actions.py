@@ -32,7 +32,6 @@ from app.services_impl.pipelines.merge_service import (
 )
 from app.tasks.task_session import TaskSession
 from app.views.pipeline.pipeline_config import PipelineConfig, _has_files
-from translation_tool.utils.cancellation import is_cancelled
 
 
 @dataclass(frozen=True)
@@ -155,6 +154,9 @@ class PipelineActions:
                     session.set_error()
                     return
                 yield update_dict
+        except Exception:
+            session.set_error()  # 順序一定是 set_error() → finish()，TaskManager 才會記成 ERROR
+            raise
         finally:
             if manage_session:
                 session.finish()
@@ -171,30 +173,37 @@ class PipelineActions:
 
         def merge(session):
             # 各抽取結果分別合併（lang 只處理語言檔，book 需處理 Patchouli 內容）
+            # 兩個來源共用同一個 session（finish_session=False），由這個步驟擁有生命週期：
+            # 任何結束路徑（成功／來源失敗／例外／取消）都只 finish 一次，失敗時先 set_error()
             session.start()
-            os.makedirs(cfg.merge_output_dir, exist_ok=True)
-            sources = []
-            if mode in ("lang", "dual"):
-                # 「只處理 lang 檔案」開關（一鍵對話框步驟 2）；book 來源固定要處理 Patchouli 內容
-                sources.append(
-                    (cfg.extract_lang_output_dir, config.get("only_lang", True))
-                )
-            if mode in ("book", "dual"):
-                sources.append((cfg.extract_book_output_dir, False))
-            total_sources = len(sources)
-            for source_index, (src, only_lang) in enumerate(sources):
-                yield from self.services.merge_folder(
-                    input_dir=src,
-                    session=session,
-                    only_process_lang=only_lang,
-                    progress_start=source_index / total_sources,
-                    progress_end=(source_index + 1) / total_sources,
-                    finish_session=False,
-                    **merge_options,
-                )
-                if session_failed(session):
-                    return
-            session.finish()
+            try:
+                os.makedirs(cfg.merge_output_dir, exist_ok=True)
+                sources = []
+                if mode in ("lang", "dual"):
+                    # 「只處理 lang 檔案」開關（一鍵對話框步驟 2）；book 來源固定要處理 Patchouli 內容
+                    sources.append(
+                        (cfg.extract_lang_output_dir, config.get("only_lang", True))
+                    )
+                if mode in ("book", "dual"):
+                    sources.append((cfg.extract_book_output_dir, False))
+                total_sources = len(sources)
+                for source_index, (src, only_lang) in enumerate(sources):
+                    yield from self.services.merge_folder(
+                        input_dir=src,
+                        session=session,
+                        only_process_lang=only_lang,
+                        progress_start=source_index / total_sources,
+                        progress_end=(source_index + 1) / total_sources,
+                        finish_session=False,
+                        **merge_options,
+                    )
+                    if session_failed(session):
+                        return
+            except Exception:
+                session.set_error()
+                raise
+            finally:
+                session.finish()
 
         def translate(session):
             inputs = [d for d in cfg.translate_input_dirs if _has_files(d)]
@@ -238,6 +247,9 @@ class PipelineActions:
                     pack_image_path=config.get("pack_image"),
                     extra_folders=config.get("extra_folders", []),
                 )
+            except Exception:
+                session.set_error()
+                raise
             finally:
                 session.finish()
 
@@ -259,33 +271,40 @@ class PipelineActions:
         mods_dir: str | None = None,
     ) -> None:
         source = mods_dir if mods_dir is not None else cfg.input_dir
-        # dual：兩段抽取共用同一個 session 生命週期與 0~1 進度區間
+        # dual：兩段抽取共用同一個 session 生命週期與 0~1 進度區間，由這裡擁有 start()／finish()：
+        # 任何結束路徑（成功／lang 失敗／例外／取消）都 finish 一次，失敗時先 set_error()
         dual = mode == "dual"
         if dual:
             session.start()
-        if mode in ("lang", "dual"):
-            os.makedirs(cfg.extract_lang_output_dir, exist_ok=True)
-            self.services.extract_lang(
-                source,
-                cfg.extract_lang_output_dir,
-                session,
-                lang_codes=lang_codes,
-                manage_session=not dual,
-                progress_start=0.0,
-                progress_end=0.5 if dual else 1.0,
-            )
-            if session.error:
-                return
-        if mode in ("book", "dual"):
-            os.makedirs(cfg.extract_book_output_dir, exist_ok=True)
-            self.services.extract_book(
-                source,
-                cfg.extract_book_output_dir,
-                session,
-                lang_codes=lang_codes,
-                manage_session=not dual,
-                progress_start=0.5 if dual else 0.0,
-                progress_end=1.0,
-            )
-        if dual and not session.error and not is_cancelled():
-            session.finish()
+        try:
+            if mode in ("lang", "dual"):
+                os.makedirs(cfg.extract_lang_output_dir, exist_ok=True)
+                self.services.extract_lang(
+                    source,
+                    cfg.extract_lang_output_dir,
+                    session,
+                    lang_codes=lang_codes,
+                    manage_session=not dual,
+                    progress_start=0.0,
+                    progress_end=0.5 if dual else 1.0,
+                )
+                if session.error:
+                    return
+            if mode in ("book", "dual"):
+                os.makedirs(cfg.extract_book_output_dir, exist_ok=True)
+                self.services.extract_book(
+                    source,
+                    cfg.extract_book_output_dir,
+                    session,
+                    lang_codes=lang_codes,
+                    manage_session=not dual,
+                    progress_start=0.5 if dual else 0.0,
+                    progress_end=1.0,
+                )
+        except Exception:
+            if dual:
+                session.set_error()
+            raise
+        finally:
+            if dual:
+                session.finish()
