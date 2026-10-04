@@ -86,13 +86,143 @@ def test_second_publish_keeps_user_data_unchanged(tmp_path):
     assert "example-new" in (target / "config.example.json").read_text(encoding="utf-8")
 
 
-def test_publish_never_deletes_existing_files(tmp_path):
+def _make_staging_files(root: Path, files: dict[str, str]) -> Path:
+    import shutil
+
+    staging = root / "staging"
+    if staging.exists():
+        shutil.rmtree(staging)
+    for rel, content in files.items():
+        path = staging / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    return staging
+
+
+def test_removed_packaged_files_are_deleted_on_upgrade(tmp_path):
+    """版本 B 已移除的 DLL / PYD / 套件，不得留在正式資料夾形成混合版本。"""
     target = tmp_path / "dist" / "App"
-    _publish(tmp_path, _make_staging(tmp_path, "1"), target)
-    stale = target / "lib" / "old_version_only.dll"
-    stale.write_text("old", encoding="utf-8")
-    _publish(tmp_path, _make_staging(tmp_path, "2"), target)
-    assert stale.exists()  # 已知代價：舊版遺留檔不會被清掉
+    v1 = {
+        EXE: "exe-1",
+        "lib/module_a.pyd": "a1",
+        "lib/old_dependency.dll": "dll1",
+        "lib/package_x/__init__.py": "x1",
+        "lib/package_x/old_part.py": "x-old",
+        "lib/kept.dll": "k1",
+    }
+    _publish(tmp_path, _make_staging_files(tmp_path, v1), target)
+    assert (target / "lib" / "old_dependency.dll").exists()
+
+    # 版本 B：移除 module_a、old_dependency、package_x 整個套件；kept.dll 更新
+    v2 = {EXE: "exe-2", "lib/kept.dll": "k2", "lib/package_y/__init__.py": "y2"}
+    _publish(tmp_path, _make_staging_files(tmp_path, v2), target)
+
+    assert not (target / "lib" / "module_a.pyd").exists()
+    assert not (target / "lib" / "old_dependency.dll").exists()
+    assert not (target / "lib" / "package_x").exists()  # 變空的資料夾一併修剪
+    assert (target / "lib" / "kept.dll").read_text(encoding="utf-8") == "k2"
+    assert (target / "lib" / "package_y" / "__init__.py").exists()
+    # 結果與乾淨 build 等價（除 manifest 與 seed 檔案）
+    actual = {
+        p.relative_to(target).as_posix()
+        for p in target.rglob("*")
+        if p.is_file()
+        and p.name
+        not in (
+            publish_dist.MANIFEST_NAME,
+            "config.json",
+            "replace_rules.json",
+            "config.example.json",
+        )
+    }
+    assert actual == set(v2)
+
+
+def test_user_data_survives_while_stale_packaged_files_are_removed(tmp_path):
+    target = tmp_path / "dist" / "App"
+    _publish(
+        tmp_path,
+        _make_staging_files(tmp_path, {EXE: "e1", "lib/old.dll": "o"}),
+        target,
+    )
+    user_files = {
+        "config.json": "user-config",
+        "replace_rules.json": "user-rules",
+        "logs/a.log": "log",
+        "快取資料/x.json": "{}",
+        "學名資料庫/s.json": "{}",
+        ".icon_cache/a.png": "png",
+        "zh_tw_generated/out.json": "{}",
+        # 使用者把檔案放進 packaged 資料夾：不在 manifest，不得被刪
+        "lib/user_note.txt": "mine",
+    }
+    for rel, content in user_files.items():
+        path = target / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    _publish(tmp_path, _make_staging_files(tmp_path, {EXE: "e2"}), target)
+
+    assert not (target / "lib" / "old.dll").exists()
+    for rel, content in user_files.items():
+        assert (target / rel).read_text(encoding="utf-8") == content, rel
+    assert (target / "lib").is_dir()  # 內含使用者檔案，資料夾不得被修剪
+
+
+def test_first_publish_without_manifest_does_not_guess_stale_files(tmp_path):
+    """沒有舊 manifest（舊安裝升級）：無法判斷，什麼都不刪（已知限制，見文件）。"""
+    target = tmp_path / "dist" / "App"
+    target.mkdir(parents=True)
+    legacy = target / "lib" / "legacy.dll"
+    legacy.parent.mkdir()
+    legacy.write_text("old", encoding="utf-8")
+    _publish(tmp_path, _make_staging_files(tmp_path, {EXE: "e1"}), target)
+    assert legacy.exists()
+    assert (target / publish_dist.MANIFEST_NAME).is_file()
+
+
+def test_tampered_manifest_cannot_delete_protected_or_outside_paths(tmp_path):
+    import json
+
+    target = tmp_path / "dist" / "App"
+    _publish(tmp_path, _make_staging_files(tmp_path, {EXE: "e1"}), target)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep", encoding="utf-8")
+    (target / "logs").mkdir()
+    (target / "logs" / "a.log").write_text("log", encoding="utf-8")
+    (target / "config.json").write_text("cfg", encoding="utf-8")
+    (target / publish_dist.MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "files": [
+                    "config.json",
+                    "logs/a.log",
+                    "../../outside.txt",
+                    str(outside),
+                    "",
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _publish(tmp_path, _make_staging_files(tmp_path, {EXE: "e2"}), target)
+
+    assert outside.read_text(encoding="utf-8") == "keep"
+    assert (target / "logs" / "a.log").read_text(encoding="utf-8") == "log"
+    assert (target / "config.json").read_text(encoding="utf-8") == "cfg"
+
+
+def test_corrupt_manifest_deletes_nothing(tmp_path):
+    target = tmp_path / "dist" / "App"
+    _publish(
+        tmp_path,
+        _make_staging_files(tmp_path, {EXE: "e1", "lib/old.dll": "o"}),
+        target,
+    )
+    (target / publish_dist.MANIFEST_NAME).write_text("{not json", encoding="utf-8")
+    _publish(tmp_path, _make_staging_files(tmp_path, {EXE: "e2"}), target)
+    assert (target / "lib" / "old.dll").exists()
 
 
 def test_failed_build_does_not_touch_target(tmp_path):

@@ -11,13 +11,11 @@ REM
 REM  重新打包是「更新」不是「重建」：
 REM    1. Nuitka 先輸出到 dist\_staging（只清這個暫存資料夾）。
 REM    2. 驗證 staging 內有 exe 才發佈；build 失敗時 dist\MinecraftTranslator 完全不動。
-REM    3. 以 tools\publish_dist.py 只複製／覆蓋檔案，絕不刪除 config.json、logs\、
-REM       快取資料\、學名資料庫\、.icon_cache\、輸出資料夾等使用者資料。
-REM    代價：舊版遺留而新版已沒有的程式檔不會被清掉（無害）。
-REM
-REM  可寫資料位置由 translation_tool/utils/app_paths.py 決定：
-REM    打包後 = exe 所在資料夾；可用環境變數 MCT_DATA_DIR 覆蓋。
-REM  首次測試請保持 console 模式（force），確認能啟動後再改 disable。
+REM    3. 以 tools\publish_dist.py 發佈：新版 packaged files（exe、DLL/PYD、assets）完全取代
+REM       舊版——上次發佈過、這次已不存在的檔案會依 .packaged_manifest.json 刪除，避免舊
+REM       DLL/PYD/套件殘留成混合版本；使用者資料（config.json、replace_rules.json、logs\、
+REM       快取資料\、學名資料庫\、.icon_cache\、輸出資料夾）不在 manifest 內，永遠不會被刪。
+REM    限制：從沒有 manifest 的舊安裝首次升級時，舊遺留檔無法判斷，不會被刪（需手動清一次）。
 REM ============================================================
 setlocal
 cd /d "%~dp0.."
