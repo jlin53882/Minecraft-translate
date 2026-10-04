@@ -118,7 +118,6 @@ UNEXPLAINED_NOQA_BASELINE = {
     "translation_tool/core/lm_translator_shared_loop.py": 7,
     "translation_tool/core/md_translation_steps.py": 1,
     "translation_tool/plugins/kubejs/kubejs_tooltip_extract.py": 1,
-    "translation_tool/utils/cache_loader.py": 1,
     "translation_tool/utils/cache_search.py": 1,
     "translation_tool/utils/cache_shards.py": 2,
     "translation_tool/utils/config_manager.py": 1,
@@ -127,27 +126,23 @@ UNEXPLAINED_NOQA_BASELINE = {
 }
 
 
-def _count_unexplained_noqa() -> dict[str, int]:
-    import re
+def _load_generator():
+    import importlib.util
 
-    pattern = re.compile(r"noqa:\s*[A-Z0-9, ]*(BLE001|S110|S112)")
-    counts: dict[str, int] = {}
-    for root in ("app", "translation_tool"):
-        for path in (REPO_ROOT / root).rglob("*.py"):
-            n = 0
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if pattern.search(line) and " - " not in line.split("noqa:", 1)[1]:
-                    n += 1
-            if n:
-                counts[path.relative_to(REPO_ROOT).as_posix()] = n
-    main_text = (REPO_ROOT / "main.py").read_text(encoding="utf-8").splitlines()
-    n = sum(
-        1
-        for line in main_text
-        if pattern.search(line) and " - " not in line.split("noqa:", 1)[1]
+    spec = importlib.util.spec_from_file_location(
+        "gen_exception_inventory", REPO_ROOT / "tools" / "gen_exception_inventory.py"
     )
-    if n:
-        counts["main.py"] = n
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _count_unexplained_noqa() -> dict[str, int]:
+    rows = _load_generator().collect()
+    counts: dict[str, int] = {}
+    for row in rows:
+        if row["reason"].startswith("（未寫原因"):
+            counts[row["file"]] = counts.get(row["file"], 0) + 1
     return counts
 
 
@@ -174,4 +169,26 @@ def test_baseline_has_no_stale_entries():
     }
     assert not stale, "請調降 UNEXPLAINED_NOQA_BASELINE：" + ", ".join(
         f"{p}: 基準 {b} → 實際 {n}" for p, (b, n) in stale.items()
+    )
+
+
+def test_inventory_document_matches_the_code():
+    """docs/EXCEPTION_INVENTORY.md 逐檔、逐分類的數量必須與程式碼一致（行號不比對，避免程式碼稍微移動就失敗）。"""
+    import re
+    from collections import Counter
+
+    rows = _load_generator().collect()
+    actual = Counter(
+        (r["file"], r["kind"], r["reason"].startswith("（未寫原因")) for r in rows
+    )
+    text = (REPO_ROOT / "docs" / "EXCEPTION_INVENTORY.md").read_text(encoding="utf-8")
+    documented: Counter = Counter()
+    pattern = re.compile(
+        r"^\| `([^:`]+):[^`]*`（第 \d+ 行） \| [^|]+ \| ([^|]+) \| ([^|]+) \|$",
+        re.MULTILINE,
+    )
+    for file, kind, reason in pattern.findall(text):
+        documented[(file, kind.strip(), reason.strip().startswith("（未寫原因"))] += 1
+    assert documented == actual, (
+        "docs/EXCEPTION_INVENTORY.md 已過期，請執行 `uv run python tools/gen_exception_inventory.py` 重新產生"
     )
