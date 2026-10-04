@@ -16,6 +16,9 @@ REPO_ROOT = Path(app_paths.__file__).resolve().parents[2]
 def _clean(monkeypatch):
     monkeypatch.delenv(app_paths.DATA_DIR_ENV, raising=False)
     monkeypatch.delattr(sys, "frozen", raising=False)
+    app_paths._migrated_roots.clear()
+    yield
+    app_paths._migrated_roots.clear()
 
 
 def test_source_mode_uses_repo_root():
@@ -170,3 +173,121 @@ def test_error_log_creates_missing_nested_data_root(tmp_path):
     assert log_file.is_file()
     assert "nested-root-marker" in log_file.read_text(encoding="utf-8")
     assert "probe_func" in log_file.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# app/ 與 data/ 分離
+# ---------------------------------------------------------------------------
+
+
+def _frozen_exe(monkeypatch, exe: Path) -> None:
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_text("", encoding="utf-8")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(exe))
+
+
+def test_split_layout_uses_sibling_data_dir(monkeypatch, tmp_path):
+    _frozen_exe(monkeypatch, tmp_path / "root" / "app" / "App.exe")
+    assert app_paths.is_split_layout()
+    assert app_paths.get_data_root() == tmp_path / "root" / "data"
+    # 資源（唯讀）留在 app/，不跟著搬到 data/
+    assert app_paths.get_resource_root() == (tmp_path / "root" / "app").resolve()
+
+
+def test_flat_layout_keeps_old_behaviour(monkeypatch, tmp_path):
+    """exe 不在 app/ 資料夾：維持舊版平面式（資料與程式同一資料夾），不污染上一層。"""
+    _frozen_exe(monkeypatch, tmp_path / "MT" / "App.exe")
+    assert not app_paths.is_split_layout()
+    assert app_paths.get_data_root() == (tmp_path / "MT").resolve()
+    assert app_paths.get_resource_root() == (tmp_path / "MT").resolve()
+    assert not (tmp_path / "data").exists()
+
+
+def test_source_mode_resource_root_is_repo_root():
+    assert app_paths.get_resource_root() == REPO_ROOT
+    assert (REPO_ROOT / "config.example.json").is_file()
+    assert (
+        REPO_ROOT / "translation_tool" / "core" / "resource_pack_version.json"
+    ).is_file()
+
+
+def test_env_override_beats_split_layout(monkeypatch, tmp_path):
+    _frozen_exe(monkeypatch, tmp_path / "root" / "app" / "App.exe")
+    override = tmp_path / "elsewhere"
+    monkeypatch.setenv(app_paths.DATA_DIR_ENV, str(override))
+    assert app_paths.get_data_root() == override.resolve()
+    assert not (tmp_path / "root" / "data").exists()  # 覆蓋時不觸發遷移
+
+
+def test_first_start_migrates_legacy_data_into_data_dir(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    _frozen_exe(monkeypatch, root / "app" / "App.exe")
+    legacy = {
+        "config.json": "legacy-config",
+        "replace_rules.json": "legacy-rules",
+        "logs/2026/app.log": "log",
+        "快取資料/lang/a.json": "{}",
+        "學名資料庫/s.json": "{}",
+        ".icon_cache/jar_icons/a.png": "png",
+        "custom_translators/t.py": "x",
+    }
+    for rel, content in legacy.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    unrelated = root / "readme.txt"
+    unrelated.write_text("keep", encoding="utf-8")
+
+    data_root = app_paths.get_data_root()
+
+    for rel, content in legacy.items():
+        assert (data_root / rel).read_text(encoding="utf-8") == content, rel
+        assert not (root / rel).exists(), f"{rel} 應已搬走"
+    assert unrelated.read_text(encoding="utf-8") == "keep"  # 未知檔案不碰
+
+
+def test_migration_never_overwrites_existing_data(tmp_path):
+    root = tmp_path / "root"
+    data = root / "data"
+    data.mkdir(parents=True)
+    (data / "config.json").write_text("new-config", encoding="utf-8")
+    (root / "config.json").write_text("old-config", encoding="utf-8")
+    (root / "logs").mkdir()
+    (root / "logs" / "a.log").write_text("log", encoding="utf-8")
+
+    moved = app_paths.migrate_legacy_data(root, data)
+
+    assert moved == ["logs"]
+    assert (data / "config.json").read_text(encoding="utf-8") == "new-config"
+    assert (root / "config.json").read_text(encoding="utf-8") == "old-config"
+    assert (data / "logs" / "a.log").exists()
+
+
+def test_migration_is_idempotent_and_runs_once(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    _frozen_exe(monkeypatch, root / "app" / "App.exe")
+    (root / "config.json").write_text("legacy", encoding="utf-8")
+
+    calls = []
+    real = app_paths.migrate_legacy_data
+    monkeypatch.setattr(
+        app_paths, "migrate_legacy_data", lambda *a: calls.append(a) or real(*a)
+    )
+    app_paths.get_data_root()
+    app_paths.get_data_root()
+    assert len(calls) == 1
+    assert (root / "data" / "config.json").read_text(encoding="utf-8") == "legacy"
+
+
+def test_migration_failure_does_not_break_startup(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    _frozen_exe(monkeypatch, root / "app" / "App.exe")
+    (root / "config.json").write_text("legacy", encoding="utf-8")
+
+    def boom(src, dest):
+        raise OSError("locked")
+
+    monkeypatch.setattr(app_paths.shutil, "move", boom)
+    assert app_paths.get_data_root() == root / "data"  # 不丟例外
+    assert (root / "config.json").exists()  # 失敗的項目留在原處，下次再試

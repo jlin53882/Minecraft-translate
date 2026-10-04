@@ -1,21 +1,26 @@
 @echo off
 chcp 65001 >nul
 REM ============================================================
-REM  Minecraft Translator 打包腳本（Nuitka standalone）— 草稿，尚未實測
+REM  Minecraft Translator 打包腳本（Nuitka standalone）— 草稿，尚未在 Windows 實測
 REM
-REM  輸出結構（資料放 exe 旁邊）：
-REM    dist\MinecraftTranslator\MinecraftTranslator.exe
-REM    dist\MinecraftTranslator\config.json  ← 由 config.example.json 複製（僅首次）
-REM    dist\MinecraftTranslator\快取資料\、logs\ ...  ← 執行時產生
+REM  輸出結構（app\ 與 data\ 分離）：
+REM    dist\MinecraftTranslator\MinecraftTranslator.bat       ← 啟動器（每次覆蓋）
+REM    dist\MinecraftTranslator\app\MinecraftTranslator.exe   ← 程式：每次整個換掉
+REM    dist\MinecraftTranslator\data\config.json、logs\、快取資料\ ...  ← 使用者資料：永遠保留
 REM
-REM  重新打包是「更新」不是「重建」：
+REM  重新打包是「換掉 app\、保留 data\」：
 REM    1. Nuitka 先輸出到 dist\_staging（只清這個暫存資料夾）。
 REM    2. 驗證 staging 內有 exe 才發佈；build 失敗時 dist\MinecraftTranslator 完全不動。
-REM    3. 以 tools\publish_dist.py 發佈：新版 packaged files（exe、DLL/PYD、assets）完全取代
-REM       舊版——上次發佈過、這次已不存在的檔案會依 .packaged_manifest.json 刪除，避免舊
-REM       DLL/PYD/套件殘留成混合版本；使用者資料（config.json、replace_rules.json、logs\、
-REM       快取資料\、學名資料庫\、.icon_cache\、輸出資料夾）不在 manifest 內，永遠不會被刪。
-REM    限制：從沒有 manifest 的舊安裝首次升級時，舊遺留檔無法判斷，不會被刪（需手動清一次）。
+REM    3. tools\publish_dist.py 先在旁邊準備 app.new，再換成 app\（失敗會還原；程式正在
+REM       執行時會失敗並提示先關閉），舊版 DLL/PYD/套件不會殘留。data\ 從不被刪除或覆蓋，
+REM       config.json、replace_rules.json 只在不存在時才建立。
+REM    4. 舊版平面式安裝（exe 與資料混在同一資料夾）：不刪任何東西；使用者資料會在新版
+REM       第一次啟動時由程式搬進 data\，舊程式檔確認新版正常後可手動刪除。
+REM
+REM  資料位置由 translation_tool/utils/app_paths.py 決定：
+REM    exe 位於名為 app 的資料夾 → 資料在上一層的 data\；否則（舊版平面式）在 exe 旁邊。
+REM    可用環境變數 MCT_DATA_DIR 覆蓋。
+REM  首次測試請保持 console 模式（force），確認能啟動後再改 disable。
 REM ============================================================
 setlocal
 cd /d "%~dp0.."
@@ -53,17 +58,19 @@ uv run --frozen --with nuitka python -m nuitka ^
   --include-data-dir=assets=assets ^
   --include-data-files=translation_tool/core/resource_pack_version.json=translation_tool/core/resource_pack_version.json ^
   --include-data-files=pyproject.toml=pyproject.toml ^
+  --include-data-files=config.example.json=config.example.json ^
   --output-dir=%STAGING_DIR% ^
   --output-filename=%APP_NAME%.exe ^
   %ICON_OPT% ^
   main.py
 if %errorlevel% neq 0 ( pause & exit /b 1 )
 
-echo [3/3] 發佈到 %OUTPUT_DIR%\%APP_NAME%（不刪除既有資料）...
+echo [3/3] 發佈到 %OUTPUT_DIR%\%APP_NAME%（換掉 app\、保留 data\）...
 uv run --frozen python tools\publish_dist.py ^
   --staging "%STAGING_DIR%\main.dist" ^
   --target "%OUTPUT_DIR%\%APP_NAME%" ^
   --exe %APP_NAME%.exe ^
+  --launcher %APP_NAME%.bat ^
   --update-file config.example.json ^
   --seed-file config.example.json:config.json ^
   --seed-file replace_rules.json

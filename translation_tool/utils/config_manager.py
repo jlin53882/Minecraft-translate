@@ -22,7 +22,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from translation_tool.utils.app_paths import get_data_root
+from translation_tool.utils.app_paths import get_data_root, get_resource_root
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +35,8 @@ def get_project_root() -> Path:
 
 PROJECT_ROOT = get_project_root()
 CONFIG_PATH = PROJECT_ROOT / "config.json"
-EXAMPLE_PATH = PROJECT_ROOT / "config.example.json"
+# config.example.json 隨程式附帶（唯讀），打包後在資源根目錄，不在可寫的資料根目錄
+EXAMPLE_PATH = get_resource_root() / "config.example.json"
 
 # PR-A：這些欄位仍由三層合併保留，避免舊 config 在升級時遺失；
 # 但歷史追查沒有找到正式 runtime caller，因此不在新 UI 中宣稱可調整。

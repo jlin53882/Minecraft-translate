@@ -5,62 +5,82 @@
 
 ## 發佈形式
 
-實際發佈給使用者的是**打包的 exe**，可寫資料放在 exe 旁邊：
+實際發佈給使用者的是**打包的 exe**。建議結構是 **`app/` 與 `data/` 分離**：
 
 ```
-<資料夾>/
- ├─ <程式>.exe（與打包產物）
- ├─ config.json、config.example.json、replace_rules.json
- ├─ 快取資料/、學名資料庫/、logs/、.icon_cache/
- └─ 各種輸出資料夾
+<安裝資料夾>/
+ ├─ MinecraftTranslator.bat     ← 啟動器（每次更新覆蓋）
+ ├─ app/                        ← 程式：每次更新整個換掉
+ │   ├─ MinecraftTranslator.exe
+ │   ├─ assets/、config.example.json、pyproject.toml、DLL/PYD …   （唯讀資源）
+ └─ data/                       ← 使用者資料：更新時完全不碰
+     ├─ config.json、replace_rules.json
+     └─ logs/、快取資料/、學名資料庫/、.icon_cache/、custom_translators/
 ```
+
+舊版平面式（exe 與資料放同一資料夾）仍然支援，行為與過去相同：只有「exe 所在資料夾名稱為 `app`」才會啟用分離式。
+原始碼執行（`uv run python main.py`）不受影響。
 
 打包流程（Nuitka standalone）不在 repo 內。`tools/build_exe.bat` 是依此結構整理的**草稿，尚未在 Windows 實測**。
 
-### 重新打包：取代程式檔、保留使用者資料
+> 先前版本的本文件曾寫「只支援原始碼」，是錯的：當時只看了 repo 內的 README 與 `release.yml`。
 
-正式資料夾同時是執行資料夾，檔案分兩類：
+## 兩種根目錄
 
-| 類別 | 內容 | 重新打包時 |
-|---|---|---|
-| A. packaged files | exe、DLL / PYD、Nuitka 相依樹、assets、`config.example.json` | **完全取代**：新版沒有的舊檔會被刪除，避免已移除的 DLL / PYD / 套件殘留成混合版本 |
-| B. 使用者資料 | `config.json`、`replace_rules.json`、`logs/`、`快取資料/`、`學名資料庫/`、`.icon_cache/`、各輸出資料夾 | **永遠保留**；`config.json`、`replace_rules.json` 僅在不存在時才建立 |
+單一決定點：`translation_tool/utils/app_paths.py`。
+
+| 函式 | 用途 | 原始碼模式 | 打包（分離式） | 打包（平面式） |
+|---|---|---|---|---|
+| `get_resource_root()` | 隨程式附帶的**唯讀**檔案：`assets/`、`config.example.json`、`pyproject.toml`、`resource_pack_version.json` | 專案根目錄 | `app/` | exe 所在資料夾 |
+| `get_data_root()` | 使用者**可寫**資料：設定、規則、快取、日誌、checkpoint、icon 快取 | 專案根目錄 | `<根>/data` | exe 所在資料夾 |
+
+`get_data_root()` 的決定順序：
+
+1. 環境變數 `MCT_DATA_DIR`（明確覆蓋；不觸發遷移）。
+2. 打包後且 exe 位於名為 `app` 的資料夾：`<app 的上一層>/data`。
+3. 打包後但 exe 不在 `app` 資料夾：exe 所在資料夾（平面式）。
+4. 原始碼執行：專案根目錄。
+
+不要用 `Path(__file__)` 推算位置：打包後它可能指向 `_internal/` 或暫存解壓目錄。
+
+### 舊版資料遷移（分離式首次啟動）
+
+舊使用者把新版放進同一個安裝資料夾後，使用者資料仍在 `<根>/`（`app/` 的上一層）。第一次呼叫 `get_data_root()` 時會一次性搬進 `data/`：
+
+- 只搬已知項目：`config.json`、`replace_rules.json`、`logs/`、`快取資料/`、`學名資料庫/`、`.icon_cache/`、`custom_translators/`。其他檔案不碰。
+- `data/` 內已有同名項目時**不覆蓋、不合併**，舊位置的檔案保留。
+- 單一項目搬移失敗只記錄，不影響啟動，下次啟動再試。
+- 每個行程只執行一次，重複執行是冪等的。
+- 舊版遺留的程式檔（舊 exe 等）不會被刪，確認新版正常後可手動刪除。
+
+### 重新打包：換掉 `app/`、保留 `data/`
 
 流程：
 
 1. Nuitka 先輸出到 `dist\_staging`（只清這個暫存資料夾）。
 2. 驗證 staging 內有 exe 才發佈；build 失敗時正式資料夾完全不動。
-3. `tools/publish_dist.py` 先複製新檔，再依 `.packaged_manifest.json` 刪除「上次發佈過、這次已不存在」的檔案，最後寫入新 manifest。
-   - 使用者資料從不進 manifest，所以不會被刪；另有保護清單作為第二道防線，manifest 被改壞（路徑越界、指向 `config.json` / `logs/` 等）也不會刪到。
-   - manifest 損毀時寧可不刪任何東西。
-   - 因刪檔而變空的資料夾會被修剪；內含其他檔案（例如使用者放進去的）的資料夾不會被動。
+3. `tools/publish_dist.py` 先複製到 `app.new`，再 `app → app.old`、`app.new → app`，最後刪 `app.old`。
+   - 新版沒有的舊 DLL / PYD / 套件不會殘留，結果等價於乾淨 build。
+   - 任何一步失敗都會還原 `app/`；程式正在執行（檔案被鎖）時會失敗並提示先關閉。
+   - `data/` 從不被刪除或覆蓋；`config.json`、`replace_rules.json` 僅在不存在時才建立。
+   - 上次中斷遺留的 `app.new` / `app.old` 會在下次發佈時清掉。
 
 已知限制：
 
-- 從沒有 manifest 的舊安裝首次升級時，無法判斷舊遺留檔是否屬於 packaged files，所以不會刪除；需手動清一次，之後就自動維護。
-- 流程是「先複製、再刪除、最後寫 manifest」，不是整個資料夾的原子替換；中途失敗時重新執行即可（冪等）。
-- 長期更乾淨的模型是把 packaged 與使用者資料拆成 `app/` 與 `data/` 兩個目錄，可整體替換 `app/`。這需要更大的路徑重構，本 PR 不做。
+- 替換不是單一原子操作（Windows 沒有「目錄交換」），但每一步失敗都會還原，且 `data/` 不在任何一步的範圍內。
+- 如果防毒軟體正掃描舊的 `app.old`，刪不掉只會留下殘留資料夾，不影響使用。
 
-契約由 `tests/test_publish_dist.py` 保護：移除的 DLL / PYD / 套件會被清掉、結果與乾淨 build 等價、使用者資料不變、失敗的 build 不動正式資料夾、被竄改或損毀的 manifest 不會刪到保護項目或 target 之外的檔案。該測試驗證的是 `publish_dist.py` 的邏輯，**不等於**在 Windows 上實際跑過 `build_exe.bat`。
-
-## 資料根目錄的決定規則
-
-單一決定點：`translation_tool/utils/app_paths.py::get_data_root()`，依序：
-
-1. 環境變數 `MCT_DATA_DIR`（明確覆蓋）。
-2. 打包後（PyInstaller `sys.frozen` 或 Nuitka `__compiled__`）：exe 所在資料夾。
-3. 原始碼執行：專案根目錄。
-
-不要用 `Path(__file__)` 推算可寫資料位置：打包後它可能指向 `_internal/` 或暫存解壓目錄。
+契約由 `tests/test_publish_dist.py`、`tests/test_app_paths.py` 保護。這些測試驗證的是路徑與發佈邏輯，**不等於**在 Windows 上實際跑過 `build_exe.bat` 與打包後的 exe。
 
 ## 資料目錄契約（目前）
 
-可寫資料一律相對於「資料根目錄」（`PROJECT_ROOT` 即 `get_data_root()` 的結果）：
+可寫資料一律相對於「資料根目錄」（`PROJECT_ROOT` 即 `get_data_root()` 的結果）。
+唯讀資源（`config.example.json` 等）改走「資源根目錄」，見上節。
 
 | 資料 | 預設位置 | 來源 |
 |---|---|---|
 | 使用者設定 | `config.json` | `CONFIG_PATH` |
-| 預設設定範本（唯讀） | `config.example.json` | `EXAMPLE_PATH` |
+| 預設設定範本（唯讀，在資源根目錄） | `config.example.json` | `EXAMPLE_PATH` |
 | 替換規則 | `replace_rules.json`（`translator.replace_rules_path`） | `config_manager` |
 | 翻譯快取 | `快取資料/`（`cache_manager._CACHE_DIR_NAME`，設定 `translator.cache_directory`） | `utils/cache_manager.py` |
 | 學名資料庫 | `學名資料庫/`（`species_cache.cache_directory`） | `utils/species_cache.py` |
@@ -68,7 +88,7 @@
 | 錯誤記錄 | `logs/errors_<日期>.log` | `utils/exceptions.py` |
 | 翻譯 checkpoint | `logs/translation_checkpoint.json` | `core/lm_translator.CHECKPOINT_FILE` |
 | 圖示快取 | `.icon_cache/` | `app/icon_index.py`、`app/views/icon_preview_view.py` |
-| 輸出資料夾 | 各 `*_dir_name` / `*_folder_name` 設定，多數經 `resolve_project_path` | `config_manager.DEFAULT_CONFIG` |
+| 輸出資料夾 | **相對於使用者選的輸入資料夾**（例如 FTB 輸出在輸入資料夾的上一層、提取輸出在 mods 資料夾旁邊），不在資料根目錄內；僅確認 FTB 與提取兩處，其他流程未逐一查證 | `ftb_translator.py`、`extractor_view.py` |
 
 ### 已處理的不一致
 
@@ -80,13 +100,10 @@
 
 `config_manager.PROJECT_ROOT` 與 `config_service.PROJECT_ROOT` 也都改由同一函式取得。
 
-### 仍使用 `__file__` 的唯讀資源（不是可寫資料）
+### 仍使用 `__file__` 的唯讀資源
 
-- `translation_tool/core/resource_pack_version.json`（`pipeline_*_dialog.py`、`bundler_view.py`）
-- `pyproject.toml`（`app/shell/app_shell.py` 讀版本號；讀不到只是不顯示版本）
-- `assets/`（`main.py`）
-
-這些必須隨打包一併帶入（見 `tools/build_exe.bat` 的 `--include-data-*`）。
+`resource_pack_version.json` 在 3 處（`pipeline_bundle_dialog.py`、`pipeline_one_click_dialog.py`、`bundler_view.py`）仍以 `os.path.dirname(__file__)` 往上推算，**沒有改成 `get_resource_root()`**：這三個檔案有大量既有 ruff 問題，改動會讓 CI 的 changed-files lint 失敗，而清理它們超出本 PR 範圍。
+它們依賴 Nuitka 把模組的 `__file__` 對應到 `app/` 內的虛擬路徑，並由 `--include-data-files` 把該 JSON 放在 `app/translation_tool/core/`。這是推論，**需 Windows 實機確認**；有 `tests/test_app_paths.py::test_source_mode_resource_root_is_repo_root` 確保原始碼模式下檔案位置一致。
 
 ## 尚未驗證（需 Windows 實機）
 
@@ -94,4 +111,6 @@
 - 打包後設定、快取、`logs/` 實際落在 exe 旁邊；關閉重開後仍在。
 - `__compiled__` 與 `sys.argv[0]` 在 Nuitka standalone / onefile 下的實際值。
 - `resource_pack_version.json`、`pyproject.toml` 打包後的讀取行為。
+- 分離式首次啟動的舊資料搬移（用真實舊安裝，含 Windows 檔案被占用的情況）。
+- 啟動器 `MinecraftTranslator.bat` 啟動 `app\\MinecraftTranslator.exe` 的行為。
 - 上述測試待其他功能完成後再進行。

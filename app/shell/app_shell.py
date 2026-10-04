@@ -63,12 +63,11 @@ def read_app_version() -> str:
     """從 pyproject.toml 讀版本號；讀不到就回傳空字串（狀態列不顯示）。"""
     try:
         import tomllib
-        from pathlib import Path
+
+        from translation_tool.utils.app_paths import get_resource_root
 
         data = tomllib.loads(
-            (Path(__file__).resolve().parents[2] / "pyproject.toml").read_text(
-                encoding="utf-8"
-            )
+            (get_resource_root() / "pyproject.toml").read_text(encoding="utf-8")
         )
         return str(data.get("project", {}).get("version", ""))
     except Exception:  # noqa: BLE001 - 版本只是裝飾，讀不到不影響啟動
