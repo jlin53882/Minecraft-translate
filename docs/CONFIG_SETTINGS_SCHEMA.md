@@ -22,6 +22,10 @@ settings_schema.SETTINGS ──► settings_form.build_controls()  控制項
 
 若這個設定的套用時機不是「下次任務」，在 `app/config_apply.py` 的 `CONFIG_APPLY_RULES` 登記；沒登記的設定顯示「下次執行任務時套用」。
 
+## 與舊的 `lm_config_schema.py`
+
+舊的最小 schema（只涵蓋 `lm_translator`、沒有程式使用、預設值曾與 `DEFAULT_CONFIG` 漂移）已移除；`lm_config_schema.py` 只剩引擎端讀取每個模型輸出上限覆寫的 `model_output_token_cap()`。
+
 ## 專用元件
 
 API 金鑰列與模型列有各自的新增／移除／排序互動，無法由欄位資料描述，仍由 `ConfigView` 手寫，並在 schema 中以 `kind="custom"` 與 `Custom("keys")`／`Custom("models")` 區塊登記。
