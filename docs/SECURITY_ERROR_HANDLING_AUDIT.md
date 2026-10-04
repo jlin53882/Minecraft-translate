@@ -45,7 +45,7 @@ Ruff 報出的全部 BLE001、S110、S112、print 與 legacy comment 不等於�
 
 ### #135 例外與 print 盤點
 
-量測指令：`ruff check app translation_tool main.py --select BLE001,S110,S112,T201`。分類：**修** = 補 log；**保留** = 刻意保留並加 `# noqa: BLE001 - 原因`；**待 #150** = 在 PR #150 會重寫的檔案，等它合併後再處理，避免衝突。
+量測指令：`ruff check app translation_tool main.py --select BLE001,S110,S112,T201`。分類：**修** = 補 log；**保留** = 刻意保留並加 `# noqa: BLE001 - 原因`；
 
 | 位置 | 類別 | 處理 |
 |---|---|---|
@@ -61,6 +61,6 @@ Ruff 報出的全部 BLE001、S110、S112、print 與 legacy comment 不等於�
 | `app/services.py`、`lookup_service.py`、各 checker、`variant_comparator*.py`、`jar_processor.py`、`output_bundler.py`、`lang_merge_content_patchers.py`、`lm_translator_scan.py`、`ftbquests_snbt_*.py`、兩個 pipeline dialog：已記錄或已回報給呼叫端的邊界 | 保留 | 加 `# noqa: BLE001 - 原因` |
 | `main.py`、`icon_preview_cache.py`、`utils/exceptions.py`、`config_manager.py`：`print` | 修 | 改為 logging（含對應測試更新） |
 | `md_extract_qa.py`、`md_inject_qa.py`：約 36 個 `print` | 保留 | 命令列 QA 工具的輸出；不經過 logging 是刻意的 |
-| `ftbquests_lmtranslator.py`、`md_lmtranslator.py`、`kubejs_tooltip_lmtranslator.py`：約 25 處 `except Exception`（含 unshield 失敗、recorder 記錄失敗、統計失敗等無聲路徑） | **待 #150** | PR #150 大幅重寫這三個檔案；先前在這裡做的修改已移出本 PR，等 #150 合併後再補一個小 PR |
+| `ftbquests_lmtranslator.py`、`md_lmtranslator.py`、`kubejs_tooltip_lmtranslator.py`（PR #150 合併後處理） | 修／保留 | 無聲路徑補 `log_warning`（unshield 失敗會讓輸出殘留保護標記、recorder 記錄失敗、批次刷新 fallback、預先統計、JSON 讀取失敗）；已有紀錄的邊界加 `# noqa: BLE001 - 原因`；這三個檔案的 BLE001（FTB 另含 S110）已從 CI 的 per-file 基準移除，FTB callback 的失敗路徑有測試 |
 
 自動修正（`ruff --fix`）曾移除 `output_bundler.py` 內被測試 monkeypatch 的 `load_config` 匯入而使 7 個測試失敗，已以 `# noqa: F401` 保留並說明。動到的每個檔案都已清掉其既有 ruff 問題（CI 對變更檔案是全檔檢查）。
