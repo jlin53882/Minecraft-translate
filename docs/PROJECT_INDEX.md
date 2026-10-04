@@ -259,7 +259,7 @@ pending item → cache key（path|source_text）
 app/
 ├── services.py          # 服務協調層（協調 view 與 core）
 ├── view_registry.py     # View 註冊工廠
-├── task_session.py      # 任務 session 管理
+├── tasks/               # 任務 session（task_session.py、log_entry.py）
 ├── startup_tasks.py     # 啟動時執行的工作
 ├── ui/
 │   ├── components.py    # legacy Button / Card 等相容元件（新程式使用 kit）

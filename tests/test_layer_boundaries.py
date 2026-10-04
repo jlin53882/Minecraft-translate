@@ -8,11 +8,14 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def test_translation_tool_core_does_not_import_flet_or_app():
-    """核心模組不得反向持有 Flet 或 app UI 相依。"""
-    core_root = _repo_root() / "translation_tool" / "core"
+def test_translation_tool_does_not_import_flet_or_app():
+    """整個引擎套件（core／utils／checkers／…）不得反向持有 Flet 或 app UI 相依（#136）。
+
+    函式內的延遲 import 也會被抓到（掃描整棵 AST）。
+    """
+    engine_root = _repo_root() / "translation_tool"
     violations: list[str] = []
-    for path in sorted(core_root.glob("*.py")):
+    for path in sorted(engine_root.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):

@@ -22,7 +22,7 @@ app/views/cache_manager/                   ← 從 cache_view 抽離的模組（
   └─ cache_state.py            CacheQueryState/ShardState/HistoryState ← 被引用
 ```
 
-**注意**：`cache_manager/panels/`（CacheOverviewPanel / CacheQueryPanel / CacheShardPanel）、`cache_controller.py`、`cache_presenter.py`、`cache_log_panel.py`、`cache_shared_widgets.py`、`cache_types.py` 目前**沒有被任何 app/tests 程式碼引用**，是未接線的草案模組；`app/views/cache/`（cache_view_optimized / cache_query_view）也是死程式碼（其 `__init__.py` 甚至 import 不存在的 cache_modal_*）。維護時不要依賴這些模組。
+**注意**：`cache_view.py` 實際只使用 `cache_actions`、`cache_history_store`、`cache_overview_panel`、`cache_state`。`cache_controller.py`、`cache_presenter.py`、`cache_types.py`、`cache_log_panel.py`、`cache_shared_widgets.py` 仍存在（由 `app/views/__init__.py` 與 `cache_manager/__init__.py` 匯出、有測試涵蓋），但 `cache_view.py` 目前不使用它們，是尚未接線的 MVC 雛形（#114 拆 `cache_view.py` 時會以它們為基礎）。先前文件提到的 `cache_manager/panels/` 與 `app/views/cache/` 已在 PR #106 刪除。
 
 ## 呼叫鏈（實際）
 
