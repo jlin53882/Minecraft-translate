@@ -18,7 +18,7 @@
 | 校正 | 成功回應後，以實際輸出（`candidates` + 思考 token）用 EMA 校正「輸出 / 輸入」係數 |
 
 三個切批位置共用同一份估算與學到的預算：`lm_translator_shared_loop`（外層）、
-`lm_translator.translate_directory_generator`、`lm_translator_main.translate_batch_smart_old`（內層）。
+`lm_translator.translate_directory_generator`、`lm_translator_main.translate_batch_smart`（內層 state machine）。
 
 ### 估算方式（純本地，不呼叫 `countTokens`）
 

@@ -14,31 +14,34 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
-import time
 
-from translation_tool.utils.log_unit import (
-    log_info,
-    log_warning,
-    get_formatted_duration,
-    progress,
-)
 from translation_tool.core.lm_config_rules import validate_api_keys
 from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_translator_shared import (
     CacheRule,
     TouchSet,
     TranslationRecorder,
-    fast_split_items_by_cache,
-    translate_items_with_cache_loop,
-    write_dry_run_preview,  # ✅ NEW
-    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
+    TranslatorHooks,
     _is_valid_hit,  # ✅ 新增：cache hit 判斷
+    make_checkpoint_adapter,
+    make_progress_hook,
+    prepare_translator_items,
+    run_translator_skeleton,
+    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
+    write_dry_run_preview,  # ✅ NEW
 )
 from translation_tool.plugins.shared.lang_text_rules import is_already_zh
 from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
+from translation_tool.utils.log_unit import (
+    get_formatted_duration,
+    log_info,
+    log_warning,
+    progress,
+)
 
 # -------------------------
 # basic io
@@ -216,8 +219,6 @@ def translate_md_pending(
             )
             continue
 
-        translate_text = shielded.clean
-
         all_unique_items.append(
             {
                 "cache_type": "md",
@@ -229,7 +230,7 @@ def translate_md_pending(
             }
         )
 
-    cached_items, items_to_translate = fast_split_items_by_cache(
+    cached_items, items_to_translate = prepare_translator_items(
         all_unique_items,
         cache_rules=cache_rules,
         is_valid_hit=_is_valid_hit,
@@ -356,26 +357,17 @@ def translate_md_pending(
         except Exception as e:
             log_warning(f"[MD-LM] 批次刷新失敗: {e}")
 
-    def _fmt_eta(sec: float) -> str:
-        """格式化剩餘時間。"""
-        if sec <= 0:
-            return ""
-        m, s = divmod(int(sec), 60)
-        return f"{m}m{s:02d}s" if m > 0 else f"{s}s"
+    on_progress = make_progress_hook(
+        lambda value: progress(session, value),
+        lambda message: log_info("⏳ [MD-LM] %s", message),
+        message_formatter=lambda msg, eta: f"{msg}{f' | ETA：{eta}' if eta else ''}",
+    )
 
-    def on_progress(p: float, msg: str, eta_sec: float) -> None:
-        """報告翻譯進度。"""
-        eta_txt = _fmt_eta(eta_sec)
-        log_info(
-            "⏳ [MD-LM] %s%s",
-            msg,
-            f" | ETA：{eta_txt}" if eta_txt else "",
-        )
-        progress(session, p)
+    checkpoint = make_checkpoint_adapter("md", items_to_translate, target=str(out_root))
 
     avg_batch_sec = None
     if items_to_translate:
-        res = translate_items_with_cache_loop(
+        res = run_translator_skeleton(
             items_to_translate,
             total_for_smart=len(items_to_translate),
             translate_batch_smart=lambda batch, total: translate_batch_smart(
@@ -385,10 +377,15 @@ def translate_md_pending(
                 write_new_cache
             ),  # ✅ 這裡會走 add_to_cache('md') + save_translation_cache('md')
             cache_rules=cache_rules,
-            on_translated_item=on_translated_item,
-            on_batch_flushed=on_batch_flushed,
-            on_progress=on_progress,
+            hooks=TranslatorHooks(
+                on_translated_item=on_translated_item,
+                on_batch_flushed=on_batch_flushed,
+                on_batch_checkpoint=checkpoint,
+                on_progress=on_progress,
+            ),
         )
+        if res.status == "DONE":
+            checkpoint.clear()
         avg_batch_sec = (
             (res.elapsed_sec / res.completed_calls) if res.completed_calls else None
         )

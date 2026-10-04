@@ -16,44 +16,42 @@
 
 from __future__ import annotations
 
+import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import math
-
-from translation_tool.core.lm_translator_main import translate_batch_smart
+from typing import Any, Dict, List, Optional, Tuple
 
 from translation_tool.core.lm_config_rules import validate_api_keys
-
-from translation_tool.utils.config_manager import load_config
-
+from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_translator_shared import (
-    fast_split_items_by_cache,  # ✅ 新增：高速分流
-    translate_items_with_cache_loop,
     CacheRule,
     TouchSet,  # ✅ 新增：touched/flush
     TranslationRecorder,  # ✅ 新增：翻譯記錄
-    write_dry_run_preview,  # ✅ 新增：dry-run preview 檔
-    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
-    _is_valid_hit,  # ✅ 新增：cache hit 判斷
+    TranslatorHooks,
     _get_default_batch_size,
+    _is_valid_hit,  # ✅ 新增：cache hit 判斷
+    make_checkpoint_adapter,
+    make_progress_hook,
+    prepare_translator_items,
+    run_translator_skeleton,
+    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
+    write_dry_run_preview,  # ✅ 新增：dry-run preview 檔
 )
-
 from translation_tool.plugins.shared.json_io import (
+    collect_json_files,
     read_json_dict,
     write_json_dict,
-    collect_json_files,
 )
 from translation_tool.plugins.shared.lang_path_rules import (
     compute_output_path,
 )
 from translation_tool.plugins.shared.lang_text_rules import is_already_zh
 from translation_tool.plugins.shared.rich_text_shield import shield_text, unshield_text
-
+from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import (
-    log_info,
     log_error,
+    log_info,
 )
 
 # -------------------------
@@ -201,17 +199,16 @@ def _make_on_batch_flushed(file_id, touch, _writer, dst, out_map):
 
 def _make_on_progress(set_prog, _fmt_eta):
     """建立固定綁定 session 進度處理器的 callback。"""
-
-    def on_progress(p: float, msg: str, eta_sec: float) -> None:
-        """報告翻譯進度。"""
-        eta_txt = _fmt_eta(eta_sec)
-        if eta_txt:
-            log_info(f"⏳ [AI 翻譯中] {msg} | 預估剩餘時間：{eta_txt}")
-        else:
-            log_info(f"🚀 [AI 翻譯中] {msg}")
-        set_prog(p)
-
-    return on_progress
+    return make_progress_hook(
+        set_prog,
+        log_info,
+        eta_formatter=_fmt_eta,
+        message_formatter=lambda msg, eta: (
+            f"⏳ [AI 翻譯中] {msg} | 預估剩餘時間：{eta}"
+            if eta
+            else f"🚀 [AI 翻譯中] {msg}"
+        ),
+    )
 
 
 # -------------------------
@@ -340,7 +337,7 @@ def translate_ftb_pending_to_zh_tw(
                 mapping, cache_type="ftbquests", file_hint=file_hint
             )
 
-            cached_items, items_to_translate = fast_split_items_by_cache(
+            cached_items, items_to_translate = prepare_translator_items(
                 all_items,
                 cache_rules=cache_rules,
                 is_valid_hit=_is_valid_hit,
@@ -421,7 +418,7 @@ def translate_ftb_pending_to_zh_tw(
         )
         all_items = map_to_items(mapping, cache_type="ftbquests", file_hint=file_hint)
 
-        cached_items, items_to_translate = fast_split_items_by_cache(
+        cached_items, items_to_translate = prepare_translator_items(
             all_items,
             cache_rules=cache_rules,
             is_valid_hit=_is_valid_hit,
@@ -555,15 +552,6 @@ def translate_ftb_pending_to_zh_tw(
             )
             continue
 
-        def _fmt_eta(sec: float) -> str:
-            """格式化剩餘時間。"""
-            if sec <= 0:
-                return ""
-            m, s = divmod(int(sec), 60)
-            if m > 0:
-                return f"{m}m{s:02d}s"
-            return f"{s}s"
-
         # ✅ 確保此檔案在翻譯路徑也有 file_id
         file_id = dst.as_posix()
         _file_write_table[file_id] = (dst, out_map)
@@ -573,9 +561,12 @@ def translate_ftb_pending_to_zh_tw(
             rel_src, dst, out_map, rec, out_dir
         )
         on_batch_flushed = _make_on_batch_flushed(file_id, touch, _writer, dst, out_map)
-        on_progress = _make_on_progress(set_prog, _fmt_eta)
+        on_progress = _make_on_progress(set_prog, None)
+        checkpoint = make_checkpoint_adapter(
+            "ftbquests", items_to_translate, target=str(dst)
+        )
 
-        res = translate_items_with_cache_loop(
+        res = run_translator_skeleton(
             items_to_translate,
             total_for_smart=global_total_to_translate,
             translate_batch_smart=lambda batch, total: translate_batch_smart(
@@ -583,10 +574,15 @@ def translate_ftb_pending_to_zh_tw(
             ),
             write_new_cache=bool(write_new_cache),  # ✅ 改成吃參數
             cache_rules=cache_rules,
-            on_translated_item=on_translated_item,
-            on_batch_flushed=on_batch_flushed,
-            on_progress=on_progress,
+            hooks=TranslatorHooks(
+                on_translated_item=on_translated_item,
+                on_batch_flushed=on_batch_flushed,
+                on_batch_checkpoint=checkpoint,
+                on_progress=on_progress,
+            ),
         )
+        if res.status == "DONE":
+            checkpoint.clear()
 
         # final write
         touch.touch(file_id)

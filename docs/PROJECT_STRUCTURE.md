@@ -85,7 +85,7 @@ Minecraft-translate/
 
 | 模組 | 職責 | 對外函式 |
 |---|---|---|
-| `core/lm_translator_main.py` | AI 翻譯入口調度，支援批次大小自動調整、錯誤重試、API Key 輪替 | `translate_batch_smart()`, `translate_batch_smart_old()` |
+| `core/lm_translator_main.py` | AI 翻譯入口調度，支援批次大小自動調整、錯誤重試、API Key 輪替 | `translate_batch_smart()`；`translate_batch_smart_old` 僅為相容 alias |
 | `core/lm_translator.py` | AI 翻譯主邏輯，支援 Gemini API 目錄批次翻譯、斷點續傳 | `translate_directory_generator()`, `save_checkpoint()`, `load_checkpoint()`, `clear_checkpoint()` |
 | `core/lang_merger.py` | 智慧合併 en_us / zh_cn / zh_tw，保留已翻譯內容 | `merge_zhcn_to_zhtw_from_zip()`, `get_lang_codes()`, `build_lang_file_regex()` |
 | `core/jar_processor.py` | 從 mod JAR 提取語言檔與 Patchouli 手冊（ Generator 介面） | `extract_lang_files_generator()`, `extract_book_files_generator()`, `preview_extraction_generator()` |
@@ -94,6 +94,7 @@ Minecraft-translate/
 | `core/lm_response_parser.py` | AI 回應 JSON 解析，處理截斷與 chunked 回應 | `safe_json_loads()`, `_extract_json_blocks()`, `chunked()` |
 | `core/lm_translator_shared_loop.py` | 批次翻譯迴圈（含 cache 查詢、WAR 記錄） | `translate_items_with_cache_loop()`, `_get_default_batch_size()` |
 | `core/lm_translator_shared_cache.py` | 翻譯 cache 查詢與匹配邏輯 | `fast_split_items_by_cache()`, `get_default_cache_rules()`, `_is_valid_hit()` |
+| `core/lm_translator_skeleton.py` | FTB / KubeJS / Markdown 共用 cache、batch、flush、checkpoint 與 progress contract | `prepare_translator_items()`, `run_translator_skeleton()`, `make_checkpoint_adapter()` |
 | `core/lm_translator_shared_preview.py` | 翻譯預覽輸出（dry-run / cache-hit） | `write_dry_run_preview()`, `write_cache_hit_preview()` |
 | `core/lang_merge_pipeline.py` | 合併流程管線（ZIP → 解壓 → 合併 → 寫出） | （內部用於 `lang_merger`） |
 | `plugins/ftbquests/ftbquests_lmtranslator.py` | FTB Quests 翻譯引擎 | `translate_ftb_pending_to_zh_tw()`, `DryRunStats` |
