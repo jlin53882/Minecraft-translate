@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """全面分析單元測試覆蓋"""
 
 import os
@@ -6,7 +5,7 @@ import os
 # translation_tool/core 所有模組
 core_modules = [
     "ftb_translator",
-    "ftb_translator_clean", 
+    "ftb_translator_clean",
     "ftb_translator_export",
     "ftb_translator_template",
     "icon_classifier",
@@ -22,7 +21,6 @@ core_modules = [
     "kubejs_translator_io",
     "kubejs_translator_paths",
     "lang_codec",
-    "lang_item_row",
     "lang_merger",
     "lang_merge_content",
     "lang_merge_content_copy",
@@ -100,21 +98,31 @@ app_modules = [
 test_dir = "tests"
 test_files = []
 if os.path.exists(test_dir):
-    test_files = [f.replace("test_", "").replace(".py", "") for f in os.listdir(test_dir) if f.startswith("test_")]
+    test_files = [
+        f.replace("test_", "").replace(".py", "")
+        for f in os.listdir(test_dir)
+        if f.startswith("test_")
+    ]
 
 # 建立覆蓋表
 covered = set()
 for t in test_files:
     # 簡單比對
-    for m in core_modules + utils_modules + plugins_modules + checkers_modules + app_modules:
-        if t.replace("_", "").replace(".", "").startswith(m.replace("_", "").replace(".", "")) or m.replace("_", "").startswith(t.replace("_", "").replace(".", "")):
+    for m in (
+        core_modules + utils_modules + plugins_modules + checkers_modules + app_modules
+    ):
+        if t.replace("_", "").replace(".", "").startswith(
+            m.replace("_", "").replace(".", "")
+        ) or m.replace("_", "").startswith(t.replace("_", "").replace(".", "")):
             covered.add(m)
 
 print("=" * 70)
 print("翻譯工具核心模組測試覆蓋情況")
 print("=" * 70)
 
-all_modules = core_modules + utils_modules + plugins_modules + checkers_modules + app_modules
+all_modules = (
+    core_modules + utils_modules + plugins_modules + checkers_modules + app_modules
+)
 
 covered_modules = sorted([m for m in all_modules if m in covered])
 missing_modules = sorted([m for m in all_modules if m not in covered])

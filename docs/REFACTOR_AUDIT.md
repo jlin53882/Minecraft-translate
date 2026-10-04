@@ -40,6 +40,13 @@
 
 ## 建議順序
 
+### PR-B 進度（2026-10-04）
+
+- `LangItemRow` 已從 `translation_tool/core/lang_item_row.py` 移至 `app/views/icon_preview_row.py`，
+  `translation_tool/core` 不再反向 import Flet／`app`；相關 import boundary test 與 Icon View 文件已同步。
+- `cache_view.py` 的總覽按鈕／empty state 已改用 `app.ui.kit`；`components.py` 尚未刪除，因 legacy
+  tests 仍直接覆蓋其 public helpers。#121 的相容層清理仍未完成，不能在本 PR 宣稱關閉。
+
 1. **#118**（bug，小、先補測試）→ **#119**（讓新測試不再污染）→ **#116**（死碼）。這三項小而獨立，風險低。
 2. **#117** 的高優先項（快取資料夾重載、存檔時有任務的提示）。
 3. **#114 + #121 + #120**：拆 View 時一併清除相容層、最後重寫 View 文件（避免重寫兩次）。

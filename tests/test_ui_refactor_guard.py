@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[1]
@@ -42,16 +41,16 @@ def test_config_and_rules_use_shared_buttons():
 
 
 def test_cache_view_is_primary_entry_only():
-    """cache_view.py 保持主實作，避免多餘的 impl 檔案。"""
+    """cache_view.py 保持主實作，且總覽 controls 使用新的 UI kit。"""
 
     entry_src = _read("app/views/cache_view.py")
 
-    assert re.search(
-        r"from app\.ui\.components import [^\n]*\bprimary_button\b[^\n]*\bsecondary_button\b",
-        entry_src,
+    assert "from app.ui.components import" not in entry_src
+    assert "self.btn_reload_all = kit.button(" in entry_src
+    assert (
+        'self.btn_refresh_stats = kit.button(\n            "刷新統計",\n            "secondary"'
+        in entry_src
     )
-    assert "self.btn_reload_all = primary_button(" in entry_src
-    assert "self.btn_refresh_stats = secondary_button(" in entry_src
 
 
 def test_cache_overview_is_split_to_panel_module():

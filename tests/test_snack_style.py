@@ -36,6 +36,7 @@ def test_snack_style_maps_legacy_colors_to_tones(color, tone):
 class _Page:
     def __init__(self):
         self.overlay = []
+        self.width = 1100
 
     def show_dialog(self, snack):
         self.overlay.append(snack)
@@ -51,6 +52,14 @@ def test_show_snack_uses_panel_background_and_tone_text():
     assert snack.content.value == "完成"  # 既有呼叫端 / 測試依賴 content 是單一 Text
     assert snack.content.color == get_tone("em").fg
     assert snack.behavior == ft.SnackBarBehavior.FLOATING
+
+
+def test_show_snack_reserves_space_above_the_app_statusbar():
+    snack = show_snack(_Page(), "完成")
+    assert snack.margin is not None
+    assert snack.margin.left == pytest.approx(320)
+    assert snack.margin.right == pytest.approx(320)
+    assert snack.margin.bottom >= 40
 
 
 def test_show_snack_default_is_error_toned():

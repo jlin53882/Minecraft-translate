@@ -1,6 +1,6 @@
 # Minecraft Translator Flet — 專案索引
 
-> 版本：0.8.0｜最後更新：2026-10-02
+> 版本：0.8.0｜最後更新：2026-10-04
 
 ---
 
@@ -23,7 +23,7 @@ Minecraft-translate/
 │   ├── ui/                   # UI 元件
 │   │   ├── design.py        # 設計 token / 主題（見 docs/UI_DESIGN_SYSTEM.md）
 │   │   ├── kit/             # 共用元件
-│   │   ├── components.py    # 通用元件
+│   │   ├── components.py    # legacy 通用元件（逐步遷移至 kit）
 │   │   ├── keyboard_shortcuts.py
 │   │   ├── theme.py         # 舊色常數映射
 │   │   └── view_wrapper.py
@@ -35,6 +35,7 @@ Minecraft-translate/
 │   │   ├── config_view.py         # 設定頁
 │   │   ├── extractor_view.py      # 擷取頁
 │   │   ├── icon_preview_view.py   # 圖示預覽
+│   │   ├── icon_preview_row.py    # 圖示預覽單筆 UI 列
 │   │   ├── lm_view.py             # LM 翻譯頁
 │   │   ├── lookup_view.py         # 查詢頁
 │   │   ├── merge_view.py          # 合併頁
@@ -68,7 +69,6 @@ Minecraft-translate/
 │   │   ├── lang_merge_*.py           # 合併相關（pipeline/content/content_copy/pending/zip_io）
 │   │   ├── lang_processing_format.py  # 處理格式
 │   │   ├── lang_codec.py             # 編碼處理
-│   │   ├── lang_item_row.py          # 語系列處理
 │   │   ├── md_translation_*.py       # MD 翻譯（assembly/progress/stats/steps）
 │   │   ├── ftb_translator*.py        # FTB 翻譯（clean/export/template）
 │   │   ├── jar_processor*.py         # JAR 處理（discovery/extract/preview）
@@ -262,7 +262,7 @@ app/
 ├── task_session.py      # 任務 session 管理
 ├── startup_tasks.py     # 啟動時執行的工作
 ├── ui/
-│   ├── components.py    # Button / Input / Card 等通用元件
+│   ├── components.py    # legacy Button / Card 等相容元件（新程式使用 kit）
 │   ├── view_wrapper.py  # View 包裝器（含滾動/標題列）
 │   ├── theme.py         # 主題定義
 │   └── keyboard_shortcuts.py

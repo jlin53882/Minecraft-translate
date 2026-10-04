@@ -36,8 +36,7 @@ from app.services_impl.cache.cache_services import (
 )
 from app.ui import design, kit, theme
 
-# UI 共用元件：統一按鈕樣式（先套用在總覽區，避免一次改動過大）
-from app.ui.components import empty_state, primary_button, secondary_button
+# UI 共用元件：總覽區使用新 UI kit；components.py 暫留給未遷移的 legacy tests。
 from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.design import tone as get_tone
@@ -113,20 +112,23 @@ class CacheView(ft.Column):
         )
 
         # top actions（總覽區先統一成共用按鈕樣式）
-        self.btn_reload_all = primary_button(
+        self.btn_reload_all = kit.button(
             "重新載入全部",
+            "primary",
             icon=ft.Icons.REFRESH,
             tooltip="重新載入各類型 cache",
             on_click=self._on_reload_all,
         )
-        self.btn_refresh_stats = secondary_button(
+        self.btn_refresh_stats = kit.button(
             "刷新統計",
+            "secondary",
             icon=ft.Icons.ANALYTICS,
             tooltip="更新總覽統計數據",
             on_click=self._on_refresh_stats,
         )
-        self.btn_rebuild_index = secondary_button(
+        self.btn_rebuild_index = kit.button(
             "重建搜尋索引",
+            "secondary",
             icon=ft.Icons.SEARCH,
             tooltip="重建全文搜尋索引（提升搜尋速度）",
             on_click=self._on_rebuild_index,
@@ -1743,10 +1745,10 @@ class CacheView(ft.Column):
         if type_states is None:
             # 讀取失敗：顯示錯誤狀態
             self.type_list.controls.append(
-                empty_state(
+                kit.empty_state(
                     icon=ft.Icons.ERROR_OUTLINE,
                     title="讀取失敗",
-                    message="無法載入快取類型，請檢查日誌或重新整理",
+                    subtitle="無法載入快取類型，請檢查日誌或重新整理",
                 )
             )
             self.update()
@@ -1846,10 +1848,10 @@ class CacheView(ft.Column):
 
         if not self.type_list.controls:
             self.type_list.controls.append(
-                empty_state(
+                kit.empty_state(
                     icon=ft.Icons.INVENTORY_2_OUTLINED,
                     title="沒有分類資料",
-                    message="請先建立快取或重新載入",
+                    subtitle="請先建立快取或重新載入",
                 )
             )
 
@@ -3324,10 +3326,10 @@ class CacheView(ft.Column):
 
         if not page_rows:
             self.query_result_list.controls.append(
-                empty_state(
+                kit.empty_state(
                     icon=ft.Icons.SEARCH_OFF,
                     title="沒有搜尋結果",
-                    message="請嘗試其他關鍵字或調整篩選條件",
+                    subtitle="請嘗試其他關鍵字或調整篩選條件",
                 )
             )
         else:

@@ -107,6 +107,8 @@ class DashboardView(ft.Column):
         self._cache_overview: dict | None = None
         self._rules_count: int | None = None
         self._loading = False
+        self._active_task_ids: set[int] = set()
+        self._task_state_lock = threading.Lock()
         self.data = DashboardData()
 
         self.title_text = ft.Text("", size=22, weight=ft.FontWeight.BOLD, color=C.TEXT)
@@ -230,6 +232,8 @@ class DashboardView(ft.Column):
         if self._unsubscribe is not None:
             self._unsubscribe()
         self._tasks = tasks
+        with self._task_state_lock:
+            self._active_task_ids = {task.id for task in tasks.active()}
         self._unsubscribe = tasks.subscribe(self._on_tasks_changed)
         self.refresh_view(self._collect())
 
@@ -299,6 +303,15 @@ class DashboardView(ft.Column):
             self.refresh_view(self._collect())
 
     def _on_tasks_changed(self) -> None:
+        tasks = self._tasks
+        active_ids = {task.id for task in tasks.active()} if tasks else set()
+        with self._task_state_lock:
+            crossed_task_boundary = active_ids != self._active_task_ids
+            self._active_task_ids = active_ids
+        if crossed_task_boundary:
+            # 只在 active task membership 發生開始 / 結束邊界時重讀昂貴統計；
+            # progress 事件只更新 UI 狀態。
+            self.reload()
         self._apply_on_ui()
 
     def _safe_update(self) -> None:

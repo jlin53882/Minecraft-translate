@@ -15,8 +15,8 @@ IconPreviewView（`app/views/icon_preview_view.py`，約 1750 行）是**翻譯�
 app/views/icon_preview_view.py        ← 主視圖（雙層 UI + 載入/搜尋/儲存）
 app/icon_index.py                     ← JAR 模式：建立/快取 modid → icon 路徑索引
 app/icon_reader.py                    ← JAR 模式：IconRef 解析 + 從 ZIP 讀 icon bytes
+app/views/icon_preview_row.py         ← 單筆 key 列（icon 解析 + 翻譯輸入框）
 translation_tool/core/
-  ├─ lang_item_row.py                 ← 單筆 key 列（icon 解析 + 翻譯輸入框）
   ├─ icon_resolver.py                 ← resolve_icon_with_reason() / resolve_icon_for_lang_key()
   ├─ icon_reason.py                   ← IconRisk / IconResult 資料結構
   ├─ icon_preview_cache.py            ← generate_icon_preview()（64×64 快取）
@@ -98,7 +98,7 @@ translation_tool/core/
 
 舊版 ICON_VIEW_ARCHITECTURE 描述的流程（`_load_entries` → `LangItemRow.__init__` 直接 `resolve_icon_with_reason` + `classify_no_icon_reason` → IconRisk 標籤）**已過時**：
 
-1. icon 解析核心仍走 `icon_resolver` / `icon_reason` / `icon_preview_cache`（由 `lang_item_row.py` 使用）✓
+1. icon 解析核心仍走 `icon_resolver` / `icon_reason` / `icon_preview_cache`（由 `app/views/icon_preview_row.py` 使用）✓
 2. `icon_classifier.classify_no_icon_reason` 無直接 caller，但仍被 `icon_resolver.resolve_icon_with_reason` 呼叫（回填未命中原因）— 非死碼
 3. 新增 JAR 目錄模式（`app/icon_index.py` + `app/icon_reader.py` + `scan_jars`）與 L2 快取
 4. 新增兩層即時搜尋（模組清單 / 詳情列）
@@ -109,3 +109,11 @@ translation_tool/core/
 2. `_render_current_page` 每次重建 LangItemRow；entry 需帶 `icon_path` 避免重複解析。
 3. 舊快取檔名以 SHA256 前 16 字元為 key；`_migrate_old_icon_cache` 負責搬遷。
 4. `to_halfwidth()` 是全形轉半形工具（檔名正規化用）。
+
+## 分層邊界（PR-B，2026-10-04）
+
+`LangItemRow` 是 Flet UI 元件，現位於 `app/views/icon_preview_row.py`；`translation_tool/core`
+只保留 icon 解析與資料處理模組，不再反向 import `app` 或 Flet。`IconPreviewView` 是 UI owner，
+透過 `app.views.icon_preview_row` 建立列元件；核心的 `icon_resolver`、`icon_reason` 與
+`icon_preview_cache` 維持可獨立測試的服務／資料層。新增 icon 行為時先改核心服務，只有控制項組裝
+留在 row/view 層。

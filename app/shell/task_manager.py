@@ -61,9 +61,11 @@ class TaskManager:
         self._clock = clock
         self._lock = threading.Lock()
         self._active: dict[int, TaskInfo] = {}
+        self._sessions: dict[int, weakref.ReferenceType] = {}
         self._recent: deque[TaskInfo] = deque(maxlen=RECENT_LIMIT)
         self._subscribers: list[Callable[[], None]] = []
         self._attached = False
+        self._accepting = True
 
     # -- 接上 TaskSession ------------------------------------------------------
 
@@ -72,6 +74,7 @@ class TaskManager:
         if not self._attached:
             task_session_module.add_observer(self._on_session_event)
             self._attached = True
+        self.resume_accepting()
 
     def detach(self) -> None:
         if self._attached:
@@ -83,6 +86,8 @@ class TaskManager:
         with self._lock:
             info = self._active.get(sid)
             if event == "start":
+                if not self._accepting:
+                    return
                 info = TaskInfo(
                     id=sid,
                     name=getattr(session, "name", None) or DEFAULT_TASK_NAME,
@@ -90,6 +95,7 @@ class TaskManager:
                     started_at=self._clock(),
                 )
                 self._active[sid] = info
+                self._sessions[sid] = weakref.ref(session)
                 weakref.finalize(session, self._drop, sid)
             elif info is None:
                 return  # 沒有 start 過的 session（例如單元測試直接呼叫 finish）
@@ -104,8 +110,19 @@ class TaskManager:
                     info.progress = 1.0
                 info.finished_at = self._clock()
                 self._active.pop(sid, None)
+                self._sessions.pop(sid, None)
                 self._recent.appendleft(info)
         self._emit()
+
+    def stop_accepting(self) -> None:
+        """關閉流程進入 drain 階段後，拒絕新的 session 註冊。"""
+        with self._lock:
+            self._accepting = False
+
+    def resume_accepting(self) -> None:
+        """關閉中止且外殼仍存活時，恢復註冊新的 session。"""
+        with self._lock:
+            self._accepting = True
 
     def _drop(self, sid: int) -> None:
         """session 被回收卻沒有 finish：當作中斷，從進行中移除。"""
@@ -115,8 +132,32 @@ class TaskManager:
                 return
             info.status = STATUS_ERROR
             info.finished_at = self._clock()
+            self._sessions.pop(sid, None)
             self._recent.appendleft(info)
         self._emit()
+
+    def request_cancel_active(self) -> int:
+        """要求所有已註冊中的 session 取消，回傳送出要求的數量。
+
+        這只設定 worker 可觀察的 cancellation flag，不把 requested 誤當成
+        worker 已停止；呼叫端仍必須等待 ``finish``／實際 writer completion。
+        """
+        with self._lock:
+            sessions = [ref() for ref in self._sessions.values()]
+        requested = 0
+        for session in sessions:
+            if session is None:
+                continue
+            request_cancel = getattr(session, "request_cancel", None)
+            if not callable(request_cancel):
+                continue
+            try:
+                request_cancel()
+            except Exception:
+                _logger.exception("要求任務取消失敗")
+                continue
+            requested += 1
+        return requested
 
     # -- 讀取 ---------------------------------------------------------------
 

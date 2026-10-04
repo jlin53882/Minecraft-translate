@@ -125,7 +125,7 @@ def test_rules() -> bool:
 
     # LangItemRow 需 lang_key, en_text, zh_text, assets_root, preview_root, on_value_changed
     try:
-        from translation_tool.core.lang_item_row import LangItemRow
+        from app.views.icon_preview_row import LangItemRow
 
         dummy_cb = lambda k, v: None
         row = LangItemRow(

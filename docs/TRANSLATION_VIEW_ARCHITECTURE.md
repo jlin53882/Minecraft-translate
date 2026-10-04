@@ -64,7 +64,8 @@ TranslationView（ft.Column）
 
 ## UI 風格
 
-- 全部共用 `app/ui/components.py` 的 `styled_card` / `primary_button` / `secondary_button`（一致性調整只需改該檔）
+- 目前以 `app/ui/kit` 的 `button`、`section_card` 與 design tokens 組裝畫面；`app/ui/components.py`
+  只保留尚未遷移的 legacy 相容元件，不是新 View 的入口。
 - `log_view` 為 **LogView widget**（`mode="tail"`、`tail_lines=250`）；`_append_log` 直接走 `log_view.add(line, level="system")`
 - `page` 屬性為 `@property`（2026-08-01 PR #85 修正 snack bar 問題）
 

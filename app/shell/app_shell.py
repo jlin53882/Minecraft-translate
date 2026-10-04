@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import threading
 import time
@@ -45,6 +46,8 @@ APP_TITLE = "MC 繁化工坊"
 COMPACT_BELOW_WIDTH = 1180  # 視窗比這個窄時，側欄收成只剩圖示
 REFRESH_INTERVAL_SEC = 0.25  # 任務事件的 UI 更新節流
 KEY_REFRESH_SEC = 5.0  # API Key 健康度輪詢間隔
+CLOSE_WAIT_TIMEOUT_SEC = 2.0
+CLOSE_WAIT_POLL_SEC = 0.05
 
 # 時鐘與 sleep 抽成模組層級名稱，測試可以換成假的（不必真的等）
 _monotonic = time.monotonic
@@ -99,6 +102,7 @@ class AppShell:
         mode_saver: Callable[[str], object] | None = None,
         subscribe_config: Callable[[Callable[[], None]], Callable[[], None]]
         | None = None,
+        flush_before_close: Callable[[], object] | None = None,
     ) -> None:
         self.page = page
         self.file_picker = file_picker or ft.FilePicker()
@@ -110,6 +114,7 @@ class AppShell:
         self.mode = initial_mode
         self._mode_saver = mode_saver or config_store.set_theme_mode
         self._subscribe_config = subscribe_config or config_store.subscribe
+        self._flush_before_close = flush_before_close or _default_flush_before_close
         self._unsubscribe_config: Callable[[], None] | None = None
         self._unsubscribe_tasks: Callable[[], None] | None = None
         self.current_key: str | None = None
@@ -127,6 +132,9 @@ class AppShell:
         self._poll_future = None
         self._page_on_close = None
         self._previous_on_close = None
+        self._window_on_event = None
+        self._previous_window_on_event = None
+        self._close_pending = False
 
         design.apply(page, initial_mode)
         theme.manager.set_mode(initial_mode)
@@ -193,6 +201,7 @@ class AppShell:
         page.on_keyboard_event = self.keyboard.handle_keyboard
         page.on_resize = self._on_resize
         self._bind_page_close()
+        self._bind_window_close()
 
         self.tasks.attach()
         self._unsubscribe_tasks = self.tasks.subscribe(self._schedule_task_refresh)
@@ -428,18 +437,193 @@ class AppShell:
         previous = getattr(page, "on_close", None)
         self._previous_on_close = previous
 
-        def on_close(event=None) -> None:
+        async def on_close(event=None) -> None:
             try:
                 self.dispose()
             finally:
-                if previous is not None:
-                    previous(event)
+                await self._invoke_existing_handler_async(previous, event)
 
         self._page_on_close = on_close
         try:
             page.on_close = on_close
         except Exception:
             logger.debug("無法掛上 page.on_close", exc_info=True)
+
+    def _invoke_existing_handler(self, handler, event=None) -> None:
+        """保留既有 handler，且不遺失 async callback。"""
+        if handler is None:
+            return
+        is_async = inspect.iscoroutinefunction(handler) or (
+            callable(handler) and inspect.iscoroutinefunction(handler.__call__)
+        )
+        if is_async:
+
+            async def invoke_async() -> None:
+                try:
+                    await handler(event)
+                except Exception:
+                    logger.debug("既有 async page handler 失敗", exc_info=True)
+
+            self._submit_ui(invoke_async)
+            return
+        try:
+            result = handler(event)
+        except Exception:
+            logger.debug("既有 page handler 失敗", exc_info=True)
+            return
+        if inspect.isawaitable(result):
+
+            async def await_result() -> None:
+                try:
+                    await result
+                except Exception:
+                    logger.debug("既有 awaitable page handler 失敗", exc_info=True)
+
+            self._submit_ui(await_result)
+
+    async def _invoke_existing_handler_async(self, handler, event=None) -> None:
+        """在 close event dispatch 內直接完成既有 handler chaining。"""
+        if handler is None:
+            return
+        try:
+            result = handler(event)
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.debug("既有 async page handler 失敗", exc_info=True)
+
+    def _abort_close(self) -> None:
+        """中止 close，但保留外殼時恢復接收新任務。"""
+        self._close_pending = False
+        if not self._disposed:
+            self.tasks.resume_accepting()
+
+    def _bind_window_close(self) -> None:
+        """把桌面 native CLOSE 導向同一個 lifecycle teardown。"""
+        window = getattr(self.page, "window", None)
+        if window is None:
+            return
+        previous = getattr(window, "on_event", None)
+        self._previous_window_on_event = previous
+        try:
+            window.prevent_close = True
+        except Exception:
+            logger.debug("無法啟用桌面視窗關閉攔截", exc_info=True)
+
+        async def on_window_event(event=None) -> None:
+            close_type = getattr(getattr(ft, "WindowEventType", None), "CLOSE", None)
+            if close_type is None or getattr(event, "type", None) != close_type:
+                self._invoke_existing_handler(previous, event)
+                return
+            if self._disposed:
+                return
+            if self.tasks.active() and not self._close_pending:
+                self._show_close_confirmation()
+                return
+            if self._close_pending:
+                return
+            await self._complete_window_close()
+
+        self._window_on_event = on_window_event
+        try:
+            window.on_event = on_window_event
+        except Exception:
+            logger.debug("無法掛上 desktop window event handler", exc_info=True)
+
+    def _show_close_confirmation(self) -> None:
+        """任務執行中先讓使用者選擇繼續或取消關閉。"""
+        show_dialog = getattr(self.page, "show_dialog", None)
+        if not callable(show_dialog):
+            logger.warning("頁面不支援關閉確認對話框，保留視窗開啟")
+            return
+
+        def keep_running(_event=None) -> None:
+            try:
+                self.page.pop_dialog()
+            except Exception:
+                logger.debug("關閉確認取消失敗", exc_info=True)
+
+        def confirm_close(_event=None) -> None:
+            try:
+                self.page.pop_dialog()
+            except Exception:
+                logger.debug("關閉確認 dialog 關閉失敗", exc_info=True)
+            if self._close_pending or self._disposed:
+                return
+            self._close_pending = True
+            self.tasks.request_cancel_active()
+            ok, _future = self._submit_ui(self._complete_window_close)
+            if not ok:
+                self._abort_close()
+                self._show_close_failure()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("仍有任務正在執行"),
+            content=ft.Text("關閉視窗會中斷目前任務，尚未落盤的資料可能遺失。"),
+            actions=[
+                ft.TextButton("繼續執行", on_click=keep_running),
+                ft.TextButton("仍要關閉", on_click=confirm_close),
+            ],
+        )
+        show_dialog(dialog)
+
+    async def _complete_window_close(self) -> None:
+        """完成 desktop close：先 teardown，再讓 native window 結束。"""
+        if self._disposed:
+            return
+        self.tasks.stop_accepting()
+        close_ready = False
+        try:
+            self.tasks.request_cancel_active()
+            deadline = _monotonic() + CLOSE_WAIT_TIMEOUT_SEC
+            while self.tasks.active() and _monotonic() < deadline:
+                await _async_sleep(CLOSE_WAIT_POLL_SEC)
+            if self.tasks.active():
+                self._show_close_failure()
+                return
+            result = self._flush_before_close()
+            if inspect.isawaitable(result):
+                result = await result
+            if result is False:
+                raise RuntimeError("close flush returned false")
+            close_ready = True
+        except Exception:
+            logger.warning(
+                "關閉前 drain/flush/checkpoint 失敗，保留視窗供重試", exc_info=True
+            )
+            self._show_close_failure()
+            return
+        finally:
+            if not close_ready and not self._disposed:
+                self._abort_close()
+        self.dispose()
+        destroy = getattr(getattr(self.page, "window", None), "destroy", None)
+        if not callable(destroy):
+            return
+        try:
+            result = destroy()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.debug("無法銷毀 desktop window", exc_info=True)
+
+    def _show_close_failure(self) -> None:
+        show_dialog = getattr(self.page, "show_dialog", None)
+        if not callable(show_dialog):
+            return
+        show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("無法安全關閉"),
+                content=ft.Text("任務或資料寫入尚未完成，請稍後再試。"),
+                actions=[
+                    ft.TextButton(
+                        "知道了", on_click=lambda _e=None: self.page.pop_dialog()
+                    )
+                ],
+            )
+        )
 
     def dispose(self) -> None:
         """移除 mount 時註冊的全域資源（冪等）。
@@ -452,6 +636,7 @@ class AppShell:
             if self._disposed:
                 return
             self._disposed = True
+            self._close_pending = False
             futures = [self._refresh_future, self._env_future, self._poll_future]
             self._refresh_future = self._env_future = self._poll_future = None
             unsubscribers = [self._unsubscribe_tasks, self._unsubscribe_config]
@@ -477,6 +662,13 @@ class AppShell:
                 page.on_resize = None
             if getattr(page, "on_close", None) is self._page_on_close:
                 page.on_close = self._previous_on_close
+            window = getattr(page, "window", None)
+            if (
+                window is not None
+                and getattr(window, "on_event", None) is self._window_on_event
+            ):
+                window.on_event = self._previous_window_on_event
+                window.prevent_close = False
         except Exception:
             logger.debug("還原 page handler 失敗", exc_info=True)
 
@@ -500,6 +692,14 @@ class AppShell:
 
 
 # -- 設定 / Key 的預設來源 -------------------------------------------------------
+
+
+def _default_flush_before_close() -> bool:
+    """flush 共用 log buffer；各 writer 必須在自身 completion 前完成落盤。"""
+    from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
+
+    GLOBAL_LOG_LIMITER.flush()
+    return True
 
 
 def _default_mode() -> str:

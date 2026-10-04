@@ -94,13 +94,13 @@
 
 ### P1-6　共用 UI 元件層太薄
 
-- **現況**：`app/ui/components.py` 中，`styled_card`（50 處）、`primary_button`（15）、
-  `secondary_button`（11）、`empty_state`（4）有人用；
-  `section_header`、`create_snackbar`、`loading_state`、`error_state` **0 處使用**。
+- **現況**：`app/ui/kit/` 已成為新 View 的共用元件入口；PR-B 已將 `cache_view.py` 的總覽按鈕與
+  empty state 遷移到 kit。`app/ui/components.py` 仍是 legacy 相容層，需等 runtime 與 tests caller
+  都清除後才能刪除，不能只因沒有 production import 就直接移除。
 - **原因**：設計稿反覆出現的元件（路徑欄位 + 瀏覽、進度 + 日誌 + 取消面板、開關列、統計卡、
   分頁器、表格、步驟列）目前每頁各自拼裝，重設計時會重複改十幾次。
-- **建議**：抽成 `app/ui/kit/`，優先做 **執行面板**（進度 + 日誌 + 取消）與 **路徑欄位**，
-  其次是統計卡、分頁器、開關列。
+- **下一步**：以實際 caller 逐頁遷移到 `kit`，每頁補行為測試與深／淺色驗收；優先處理仍依賴
+  `components.py` 的 runtime caller，再刪除已無 caller 的 helper。
 
 ### P1-7　長任務執行方式不統一
 
@@ -138,7 +138,7 @@
 
 | # | 問題 | 說明 |
 |---|---|---|
-| P2-10 | `translation_tool/core/lang_item_row.py` 使用 flet 並 import `app.icon_reader` | 「引擎不含 UI」唯一的例外；移到 `app/ui/` |
+| P2-10 | `translation_tool/core/lang_item_row.py` 使用 flet 並 import `app.icon_reader` | ✅ PR-B：已移至 `app/views/icon_preview_row.py`；核心保留 icon resolver／reason／cache |
 | P2-11 | 核心翻譯函式過長 | `lm_translator.translate_directory_generator` 679 行；`lm_translator_main.translate_batch_smart_old` 728 行（名稱叫 old，但 `_execute_translation` 仍轉呼叫它，實際是現役）；FTB / KubeJS / MD 三個 `*_lmtranslator.py` 各 370~580 行，流程相似（checkpoint、cache loop、批次 flush、進度），可抽共用骨架 |
 | P2-12 | 設定為全域單例 | `translation_tool/core` 有 16 個檔案各自 `load_config`；測試需清快取。設定頁約 60 個欄位逐一硬寫，可改成由設定結構描述（schema）驅動 |
 | P2-13 | 例外與除錯輸出 | `except Exception` 289 處；非工具程式碼的 `print(` 36 處；TODO / FIXME 19 處；標註 legacy / 相容的註解 86 處，值得定期盤點 |

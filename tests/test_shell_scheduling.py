@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from types import SimpleNamespace
 
@@ -64,13 +65,16 @@ class FakePage:
         self.dark_theme = None
         self.padding = None
         self.width = 1440
-        self.window = SimpleNamespace(width=0, height=0, min_width=0, min_height=0)
+        self.window = FakeWindow()
         self.on_keyboard_event = None
         self.on_resize = None
         self.on_close = None
         self.on_disconnect = None
+        self.dialogs: list = []
         self.update_threads: list[int] = []
         self.scheduled: list[tuple] = []  # (handler, future)
+        self.run_task_calls = 0
+        self.fail_run_task = False
 
     @property
     def updated(self) -> int:
@@ -83,9 +87,19 @@ class FakePage:
         self.controls.extend(controls)
 
     def run_task(self, handler, *args):
+        self.run_task_calls += 1
+        if self.fail_run_task:
+            raise RuntimeError("run_task unavailable")
         future = FakeFuture()
         self.scheduled.append((handler, future, args))
         return future
+
+    def show_dialog(self, dialog) -> None:
+        self.dialogs.append(dialog)
+
+    def pop_dialog(self, *_args) -> None:
+        if self.dialogs:
+            self.dialogs.pop()
 
     def drain(self, only=None) -> int:
         """在目前執行緒（扮演 UI 執行緒）依序執行已排程的工作，回傳執行了幾個。"""
@@ -100,6 +114,24 @@ class FakePage:
 
     def scheduled_names(self) -> list[str]:
         return [handler.__name__ for handler, _f, _a in self.scheduled]
+
+
+class FakeWindow(SimpleNamespace):
+    """最小的桌面視窗事件替身。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            width=0,
+            height=0,
+            min_width=0,
+            min_height=0,
+            prevent_close=False,
+            on_event=None,
+        )
+        self.destroy_calls = 0
+
+    async def destroy(self) -> None:
+        self.destroy_calls += 1
 
 
 class Env:
@@ -167,7 +199,7 @@ def shell(env, clock):
     shell.dispose() if hasattr(shell, "dispose") else shell.tasks.detach()
 
 
-def _make_shell(env: Env) -> AppShell:
+def _make_shell(env: Env, *, flush_before_close=None) -> AppShell:
     return AppShell(
         FakePage(),
         file_picker=SimpleNamespace(),
@@ -177,6 +209,7 @@ def _make_shell(env: Env) -> AppShell:
         initial_mode="dark",
         mode_saver=lambda _m: None,
         subscribe_config=env.subscribe,
+        flush_before_close=flush_before_close,
     )
 
 
@@ -383,7 +416,7 @@ def test_dispose_is_idempotent(mounted, env):
 def test_page_on_close_runs_the_teardown(mounted, env):
     assert callable(mounted.page.on_close)
 
-    mounted.page.on_close(None)
+    asyncio.run(mounted.page.on_close(None))
 
     assert not _observer_registered(mounted.tasks)
     assert env.listeners == []
@@ -395,10 +428,246 @@ def test_page_on_close_preserves_an_existing_handler(env, clock):
     shell.page.on_close = seen.append  # 別人先掛的 on_close
 
     shell.mount()
-    shell.page.on_close("event")
+    asyncio.run(shell.page.on_close("event"))
 
     assert seen == ["event"]  # 原本的 handler 仍被呼叫
     assert not _observer_registered(shell.tasks)
+
+
+def test_page_on_close_awaits_an_async_existing_handler_without_ui_scheduler(
+    env, clock
+):
+    seen: list[object] = []
+
+    async def previous(event) -> None:
+        seen.append(event)
+
+    shell = _make_shell(env)
+    shell.page.on_close = previous
+    shell.mount()
+    shell.page.scheduled.clear()
+    calls_before_close = shell.page.run_task_calls
+    shell.page.fail_run_task = True
+
+    asyncio.run(shell.page.on_close("event"))
+
+    assert seen == ["event"]
+    assert shell.page.run_task_calls == calls_before_close
+    shell.dispose()
+
+
+def test_page_on_close_awaits_sync_handler_returning_awaitable(env, clock):
+    seen: list[object] = []
+
+    def previous(event):
+        async def inner():
+            seen.append(event)
+
+        return inner()
+
+    shell = _make_shell(env)
+    shell.page.on_close = previous
+    shell.mount()
+    asyncio.run(shell.page.on_close("event"))
+
+    assert seen == ["event"]
+    shell.dispose()
+
+
+def test_page_on_close_prior_handler_failure_does_not_break_dispose(env, clock, caplog):
+    async def previous(_event):
+        raise RuntimeError("prior close failed")
+
+    shell = _make_shell(env)
+    shell.page.on_close = previous
+    shell.mount()
+
+    with caplog.at_level(logging.DEBUG, logger="main_app"):
+        asyncio.run(shell.page.on_close("event"))
+
+    assert not _observer_registered(shell.tasks)
+    assert any(
+        "既有 async page handler 失敗" in record.message for record in caplog.records
+    )
+    shell.dispose()
+
+
+def test_mount_wires_desktop_window_close_to_idempotent_teardown(env, clock):
+    shell = _make_shell(env)
+    shell.mount()
+    shell.page.scheduled.clear()
+
+    assert shell.page.window.prevent_close is True
+    assert callable(shell.page.window.on_event)
+    window_handler = shell.page.window.on_event
+
+    event = SimpleNamespace(type=ft.WindowEventType.CLOSE)
+    asyncio.run(window_handler(event))
+
+    assert shell.page.window.destroy_calls == 1
+    assert not _observer_registered(shell.tasks)
+    assert env.listeners == []
+
+    # A second close event must not repeat teardown or destroy.
+    asyncio.run(window_handler(event))
+    assert shell.page.window.destroy_calls == 1
+
+
+def test_desktop_close_with_active_task_requires_confirmation(env, clock):
+    shell = _make_shell(env)
+    shell.mount()
+    shell.page.scheduled.clear()
+    session = TaskSession(name="長任務")
+    session.start()
+    shell.page.scheduled.clear()
+
+    window_handler = shell.page.window.on_event
+    event = SimpleNamespace(type=ft.WindowEventType.CLOSE)
+    asyncio.run(window_handler(event))
+
+    assert shell.page.window.destroy_calls == 0
+    assert len(shell.page.dialogs) == 1
+    dialog = shell.page.dialogs[0]
+    assert [action.content for action in dialog.actions] == ["繼續執行", "仍要關閉"]
+
+    dialog.actions[1].on_click(None)
+    assert session.cancel_requested is True
+    session.finish()
+    shell.page.drain()
+    assert shell.page.window.destroy_calls == 1
+
+
+def test_desktop_close_zero_active_stops_accepting_before_async_flush(env, clock):
+    late_sessions: list[TaskSession] = []
+
+    async def flush_before_close():
+        late = TaskSession(name="flush 中啟動的晚到任務")
+        late_sessions.append(late)
+        late.start()
+        assert shell.tasks.active() == []
+        await asyncio.sleep(0)
+        assert shell.tasks.active() == []
+        return True
+
+    shell = _make_shell(env, flush_before_close=flush_before_close)
+    shell.mount()
+    shell.page.scheduled.clear()
+
+    asyncio.run(
+        shell.page.window.on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE))
+    )
+
+    assert len(late_sessions) == 1
+    assert shell.page.window.destroy_calls == 1
+    assert shell.tasks.active() == []
+    late_sessions[0].finish()
+
+
+def test_desktop_close_rejection_keeps_task_running(env, clock):
+    shell = _make_shell(env)
+    shell.mount()
+    shell.page.scheduled.clear()
+    session = TaskSession(name="長任務")
+    session.start()
+
+    asyncio.run(
+        shell.page.window.on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE))
+    )
+    dialog = shell.page.dialogs[0]
+    dialog.actions[0].on_click(None)
+
+    assert session.cancel_requested is False
+    assert shell.page.window.destroy_calls == 0
+    assert shell.page.dialogs == []
+    session.finish()
+    shell.dispose()
+
+
+def test_desktop_close_keeps_window_when_final_flush_fails(env, clock):
+    shell = _make_shell(env, flush_before_close=lambda: False)
+    shell.mount()
+    shell.page.scheduled.clear()
+
+    asyncio.run(
+        shell.page.window.on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE))
+    )
+
+    assert shell.page.window.destroy_calls == 0
+    assert shell._disposed is False
+    assert shell.page.dialogs
+    assert shell.page.dialogs[-1].title.value == "無法安全關閉"
+    session = TaskSession(name="flush failure 後的任務")
+    session.start()
+    assert any(task.id == id(session) for task in shell.tasks.active())
+    session.finish()
+    shell.dispose()
+
+
+def test_desktop_close_keeps_window_when_final_flush_raises(env, clock):
+    def flush_before_close():
+        raise RuntimeError("flush failed")
+
+    shell = _make_shell(env, flush_before_close=flush_before_close)
+    shell.mount()
+    shell.page.scheduled.clear()
+
+    asyncio.run(
+        shell.page.window.on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE))
+    )
+
+    assert shell.page.window.destroy_calls == 0
+    assert shell._disposed is False
+    session = TaskSession(name="flush raise 後的任務")
+    session.start()
+    assert any(task.id == id(session) for task in shell.tasks.active())
+    session.finish()
+    shell.dispose()
+
+
+def test_desktop_close_drain_timeout_restores_task_acceptance(env, clock):
+    shell = _make_shell(env)
+    shell.mount()
+    shell.page.scheduled.clear()
+    first = TaskSession(name="逾時任務")
+    first.start()
+
+    asyncio.run(
+        shell.page.window.on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE))
+    )
+    shell.page.dialogs[0].actions[1].on_click(None)
+    shell.page.drain()
+
+    assert shell.page.window.destroy_calls == 0
+    second = TaskSession(name="逾時後的新任務")
+    second.start()
+    assert any(task.id == id(second) for task in shell.tasks.active())
+    second.finish()
+    assert all(task.id != id(second) for task in shell.tasks.active())
+    first.finish()
+    shell.dispose()
+
+
+def test_desktop_close_schedule_failure_restores_task_acceptance(env, clock):
+    shell = _make_shell(env)
+    shell.mount()
+    shell.page.scheduled.clear()
+    first = TaskSession(name="排程失敗任務")
+    first.start()
+    shell.page.fail_run_task = True
+
+    asyncio.run(
+        shell.page.window.on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE))
+    )
+    shell.page.dialogs[0].actions[1].on_click(None)
+
+    assert shell.page.window.destroy_calls == 0
+    second = TaskSession(name="排程失敗後的新任務")
+    second.start()
+    assert any(task.id == id(second) for task in shell.tasks.active())
+    second.finish()
+    assert all(task.id != id(second) for task in shell.tasks.active())
+    first.finish()
+    shell.dispose()
 
 
 def test_disconnect_does_not_tear_down_so_web_reconnect_keeps_working(mounted, env):

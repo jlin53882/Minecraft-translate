@@ -113,6 +113,22 @@ def test_detach_stops_tracking():
     session.finish()
 
 
+def test_resume_accepting_reopens_registration_after_close_drain():
+    m = TaskManager()
+    m.attach()
+    m.stop_accepting()
+    ignored = TaskSession(name="被拒絕")
+    ignored.start()
+    assert m.active() == []
+
+    m.resume_accepting()
+    accepted = TaskSession(name="恢復後")
+    accepted.start()
+    assert [task.name for task in m.active()] == ["恢復後"]
+    accepted.finish()
+    m.detach()
+
+
 def test_abandoned_session_is_marked_interrupted(manager):
     session = TaskSession(name="被丟棄")
     session.start()

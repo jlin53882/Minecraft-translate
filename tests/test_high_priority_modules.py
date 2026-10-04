@@ -53,14 +53,14 @@ def test_lang_codec_has_encode_decode():
     assert hasattr(lang_codec, "__file__")
 
 
-# ==================== lang_item_row ====================
+# ==================== icon_preview_row ====================
 
 
 def test_lang_item_row_import():
     """Verify lang_item_row can be imported."""
-    from translation_tool.core import lang_item_row
+    from app.views import icon_preview_row
 
-    assert lang_item_row is not None
+    assert icon_preview_row is not None
 
 
 # ==================== lang_processing_format ====================
