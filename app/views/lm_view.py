@@ -12,7 +12,7 @@ import flet as ft
 
 from app.services_impl.pipelines.lm_service import run_lm_translation_service
 from app.tasks.task_session import TaskSession, tag_session
-from app.ui import kit, theme
+from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, set_chip_status
@@ -314,7 +314,7 @@ class LMView(ft.Column):
         """處理開始翻譯按鈕點擊事件"""
         if self._ui_timer_running:
             # 任務執行中：避免重複啟動（會重複送出 API 並同時寫入同一輸出/快取）
-            show_snack(self.page, "翻譯正在執行中，請等待完成或先取消", theme.WARNING)
+            show_snack(self.page, "翻譯正在執行中，請等待完成或先取消", C.GOLD)
             return
         if not (self.input_path.value or "").strip():
             self._set_status("請先選擇輸入資料夾", "red")

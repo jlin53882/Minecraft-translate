@@ -14,13 +14,7 @@ import threading
 
 import flet as ft
 
-from app.ui.theme import (
-    BLUE_700,
-    GREEN_700,
-    GREY_600,
-    RED_400,
-    WHITE,
-)
+from app.ui.design import C
 from app.views.extractor.extractor_state import PreviewState
 from translation_tool.core.jar_processor import (
     find_jar_files,
@@ -64,7 +58,7 @@ def open_extract_dialog(
         else "留空使用上方設定的 Mod 來源",
         value=input_path,
         expand=True,
-        border_color=BLUE_700,
+        border_color=C.DIA,
     )
     output_field = ft.TextField(
         label="輸出目錄",
@@ -73,7 +67,7 @@ def open_extract_dialog(
         else "留空使用上方設定的輸出目錄",
         value=output_path,
         expand=True,
-        border_color=BLUE_700,
+        border_color=C.DIA,
     )
 
     radio_group = ft.RadioGroup(
@@ -229,7 +223,7 @@ def open_extract_dialog(
             """（event loop 上）把預覽結果或錯誤套用到對話框。"""
             if preview_state.error:
                 preview_dialog.content = ft.Container(
-                    content=ft.Text(f"❌ 錯誤：{preview_state.error}", color=RED_400),
+                    content=ft.Text(f"❌ 錯誤：{preview_state.error}", color=C.RED),
                     width=preview_dialog_width,
                 )
             else:
@@ -256,7 +250,7 @@ def open_extract_dialog(
                         ft.Text(
                             f"  另有 {empty_count} 個 JAR 沒有可提取的檔案，已略過不列出",
                             size=12,
-                            color=GREY_600,
+                            color=C.MUTED,
                         )
                     )
                 for pr in preview_results:
@@ -368,8 +362,8 @@ def open_extract_dialog(
             ft.Button(
                 "確定執行",
                 icon=ft.Icons.CHECK,
-                bgcolor=GREEN_700,
-                color=WHITE,
+                bgcolor=C.EM,
+                color=C.ON_EM,
                 on_click=lambda e: start_extraction(dialog),
             ),
         ],

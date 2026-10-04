@@ -93,7 +93,7 @@ Ruff 報出的全部 BLE001、S110、S112、print 與 legacy comment 不等於�
 | `lm_config_rules.py` 的 `rotate_key_index()`、`is_api_keys_exhausted()` | 舊 API，**專案內沒有任何呼叫端** | 保留（公開介面變更不在本 PR 範圍）；列為可刪除候選，註解已說明「請勿用於翻譯請求流程」 |
 | `get_current_key_index()`、`reset_key_index()` | 舊 API，仍有呼叫端 | 保留 |
 | `app/services.py`、`services_impl/*`、`lang_merge_content`、`md_translation_assembly`、`lm_translator_shared`、`jar_processor` 的「相容 façade／re-export」 | 刻意的相容層 | 保留；移除屬 #114 / #121 / #136 的重構範圍 |
-| `app/ui/theme.py` 的 `legacy_color`、`app/views/__init__.py` 的舊 alias | 已有追蹤 | #121 |
+| `app/views/__init__.py` 的舊 alias | 已有追蹤 | #121（`theme.py` 與 `components.py` 已移除） |
 | `extractor.target_language`、`translator.cjk_ratio_threshold` | 歷史相容欄位 | 保留讀取相容，設定頁不提供；schema 內標示原因 |
 | 其餘「相容舊測試／舊呼叫」的註解（`cache_view`、`config_actions`、`task_session` 等） | 仍有測試或呼叫端依賴 | 保留 |
 

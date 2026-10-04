@@ -30,7 +30,8 @@ from app.shell.sidebar import SIDEBAR_WIDTH_COMPACT, Sidebar
 from app.shell.statusbar import StatusBar
 from app.shell.task_manager import TaskInfo, TaskManager
 from app.shell.topbar import TopBar
-from app.ui import design, theme
+from app.ui import design
+from app.ui.design import C
 from app.ui.keyboard_shortcuts import create_keyboard_handler
 from app.ui.snack import show_snack
 from app.view_registry import (
@@ -163,7 +164,6 @@ class AppShell:
         self._close_pending = False
 
         design.apply(page, initial_mode)
-        theme.manager.set_mode(initial_mode)
 
         self.registry = build_view_registry(page, self.file_picker)
         for item in self.registry:
@@ -293,7 +293,6 @@ class AppShell:
         changed = mode != self.mode
         self.mode = mode
         self.page.theme_mode = design.THEME_MODES[mode]
-        theme.manager.set_mode(mode)
         self.sidebar.set_mode(mode)
         self._safe_update()
         if persist and changed:
@@ -382,7 +381,7 @@ class AppShell:
             with self._sched_lock:
                 if self._disposed:
                     return
-            show_snack(self.page, message, theme.INFO)
+            show_snack(self.page, message, C.DIA)
 
         self._submit_ui(notify)
 
@@ -409,13 +408,13 @@ class AppShell:
                         except Exception:
                             logger.debug("快取重載後刷新頁面失敗", exc_info=True)
                 show_snack(
-                    self.page, "快取資料夾已變更，已重新載入快取與搜尋索引", theme.INFO
+                    self.page, "快取資料夾已變更，已重新載入快取與搜尋索引", C.DIA
                 )
             else:
                 show_snack(
                     self.page,
                     "快取資料夾變更後重新載入失敗，請查看日誌（目前仍使用舊的快取）",
-                    theme.WARNING,
+                    C.GOLD,
                 )
             self._safe_update()
 

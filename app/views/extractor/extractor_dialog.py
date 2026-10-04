@@ -23,7 +23,7 @@ from app.services_impl.pipelines.extract_service import (
     prepare_extraction_paths,
     run_extraction_loop,
 )
-from app.ui import theme
+from app.ui.design import C
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from app.views.extractor.extractor_dialog_helpers import format_size
@@ -146,12 +146,10 @@ def open_extractor_dialog(
 
     # ========== UI 元件 - 進度條 ==========
     progress_bar = ft.ProgressBar(
-        value=0, height=10, visible=False, bgcolor=theme.GREY_200, color=theme.BLUE
+        value=0, height=10, visible=False, bgcolor=C.TRACK, color=C.DIA
     )
-    status_text = ft.Text("等待任務啟動...", size=13, color=theme.GREY_600)
-    progress_pct = ft.Text(
-        "0%", size=12, color=theme.GREY_600, weight=ft.FontWeight.BOLD
-    )
+    status_text = ft.Text("等待任務啟動...", size=13, color=C.MUTED)
+    progress_pct = ft.Text("0%", size=12, color=C.MUTED, weight=ft.FontWeight.BOLD)
 
     # ========== UI 元件 - 日誌 ==========
     # PR refactor/unified-log-view: 改用 LogView widget
@@ -163,15 +161,9 @@ def open_extractor_dialog(
     )
 
     # ========== UI 元件 - 結果統計 ==========
-    stats_success = ft.Text(
-        "0", size=14, color=theme.GREEN_700, weight=ft.FontWeight.BOLD
-    )
-    stats_warnings = ft.Text(
-        "0", size=14, color=theme.ORANGE_700, weight=ft.FontWeight.BOLD
-    )
-    stats_failures = ft.Text(
-        "0", size=14, color=theme.RED_400, weight=ft.FontWeight.BOLD
-    )
+    stats_success = ft.Text("0", size=14, color=C.EM, weight=ft.FontWeight.BOLD)
+    stats_warnings = ft.Text("0", size=14, color=C.GOLD, weight=ft.FontWeight.BOLD)
+    stats_failures = ft.Text("0", size=14, color=C.RED, weight=ft.FontWeight.BOLD)
 
     stats_row = ft.Row(
         [
@@ -191,8 +183,8 @@ def open_extractor_dialog(
     start_button = ft.Button(
         "開始提取",
         icon=ft.Icons.PLAY_ARROW,
-        bgcolor=theme.GREEN_700,
-        color=theme.WHITE,
+        bgcolor=C.EM,
+        color=C.ON_EM,
     )
     cancel_button = ft.Button(
         "取消",
@@ -295,12 +287,12 @@ def open_extractor_dialog(
     # 結束時用 stats_data 更新文字。
     lang_row = ft.Row(
         [
-            ft.Text("LANG：", size=13, color=theme.BLUE_700, weight=ft.FontWeight.BOLD),
+            ft.Text("LANG：", size=13, color=C.DIA, weight=ft.FontWeight.BOLD),
             ft.Text("成功 ", size=13),
             ft.Text(
                 "0",
                 size=13,
-                color=theme.GREEN_700,
+                color=C.EM,
                 weight=ft.FontWeight.BOLD,
                 key="lang_success",
             ),
@@ -308,7 +300,7 @@ def open_extractor_dialog(
             ft.Text(
                 "0",
                 size=13,
-                color=theme.ORANGE_700,
+                color=C.GOLD,
                 weight=ft.FontWeight.BOLD,
                 key="lang_warnings",
             ),
@@ -318,14 +310,12 @@ def open_extractor_dialog(
     )
     book_row = ft.Row(
         [
-            ft.Text(
-                "BOOK：", size=13, color=theme.PURPLE_700, weight=ft.FontWeight.BOLD
-            ),
+            ft.Text("BOOK：", size=13, color=C.ENCH, weight=ft.FontWeight.BOLD),
             ft.Text("成功 ", size=13),
             ft.Text(
                 "0",
                 size=13,
-                color=theme.GREEN_700,
+                color=C.EM,
                 weight=ft.FontWeight.BOLD,
                 key="book_success",
             ),
@@ -333,7 +323,7 @@ def open_extractor_dialog(
             ft.Text(
                 "0",
                 size=13,
-                color=theme.ORANGE_700,
+                color=C.GOLD,
                 weight=ft.FontWeight.BOLD,
                 key="book_warnings",
             ),
@@ -479,7 +469,7 @@ def open_extractor_dialog(
             # 同步 cancelled_flag 到 state（讓 on_cancel_click 仍能正常運作）
             if cancelled_flag[0]:
                 state["cancelled"] = True
-                # 🐛 Bug fix (2026-07-12 user review): 之前傳 theme.ORANGE_700
+                # 🐛 Bug fix (2026-07-12 user review): 之前傳 C.GOLD
                 # (color 字串) 給 add_log 的 level 參數,會被 LogView.add() 判斷
                 # 為不在 show_levels 白名單 → silent return,整行 log 不顯示
                 # 並且 prefix 自動判斷(["[系統" → "system"]) 失效。
@@ -638,7 +628,7 @@ def open_extractor_dialog(
     info_text = ft.Text(
         f"來源：{mods_dir}\n輸出：{final_output}",
         size=12,
-        color=theme.GREY_600,
+        color=C.MUTED,
     )
 
     # ========== 建立對話框 ==========
@@ -655,7 +645,7 @@ def open_extractor_dialog(
 
     log_section = ft.Container(
         content=log_view,
-        bgcolor=theme.BG_LOG_PANEL,
+        bgcolor=C.LOG_BG,
         border_radius=8,
         height=250,
         padding=10,
@@ -666,7 +656,7 @@ def open_extractor_dialog(
         modal=False,
         title=ft.Row(
             [
-                ft.Icon(ft.Icons.DOWNLOAD, size=24, color=theme.BLUE_700),
+                ft.Icon(ft.Icons.DOWNLOAD, size=24, color=C.DIA),
                 ft.Text(
                     f"提取資源 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD
                 ),
@@ -686,7 +676,7 @@ def open_extractor_dialog(
                             spacing=4,
                         ),
                         padding=10,
-                        bgcolor=theme.GREY_100,
+                        bgcolor=C.PANEL2,
                         border_radius=8,
                     ),
                     ft.Divider(),
@@ -822,21 +812,19 @@ def open_preview_dialog(
     info_text = ft.Text(
         f"來源：{input_path}\n輸出：{output_path}\n模式：{mode}",
         size=12,
-        color=theme.GREY_600,
+        color=C.MUTED,
     )
 
     # 進度區
     # 🐛 Bug 修復：初始狀態文字應為「等待開始」而非「正在掃描」
-    status_text = ft.Text("等待開始預覽...", size=13, color=theme.GREY_600)
-    progress_pct = ft.Text(
-        "--", size=12, color=theme.GREY_600, weight=ft.FontWeight.BOLD
-    )
+    status_text = ft.Text("等待開始預覽...", size=13, color=C.MUTED)
+    progress_pct = ft.Text("--", size=12, color=C.MUTED, weight=ft.FontWeight.BOLD)
     # 🐛 Bug 修復：明確設定 progress_bar 的顏色與背景色，避免渲染不明顯
     progress_bar = ft.ProgressBar(
         value=0,
         height=8,
-        bgcolor=theme.GREY_200,
-        color=theme.BLUE,
+        bgcolor=C.TRACK,
+        color=C.DIA,
     )
 
     # 日誌區
@@ -893,19 +881,15 @@ def open_preview_dialog(
         if mode == "dual":
             total_lang = sum(r.get("lang_count", 0) for r in preview_results)
             total_book = sum(r.get("book_count", 0) for r in preview_results)
-            controls.append(
-                ft.Text(f"Lang：{total_lang} 個", size=14, color=theme.BLUE_700)
-            )
-            controls.append(
-                ft.Text(f"Book：{total_book} 個", size=14, color=theme.BLUE_700)
-            )
+            controls.append(ft.Text(f"Lang：{total_lang} 個", size=14, color=C.DIA))
+            controls.append(ft.Text(f"Book：{total_book} 個", size=14, color=C.DIA))
         else:
             controls.append(
-                ft.Text(f"共找到 {total_files} 個檔案", size=14, color=theme.BLUE_700)
+                ft.Text(f"共找到 {total_files} 個檔案", size=14, color=C.DIA)
             )
 
         controls.append(
-            ft.Text(f"總大小：{total_size_mb:.2f} MB", size=14, color=theme.BLUE_700)
+            ft.Text(f"總大小：{total_size_mb:.2f} MB", size=14, color=C.DIA)
         )
 
         # 只列出有可提取檔案的 JAR（406 個 JAR 時大多是 0 個檔案，清單會被淹沒）
@@ -920,7 +904,7 @@ def open_preview_dialog(
                 ft.Text(
                     f"另有 {empty_count} 個 JAR 沒有可提取的檔案，已略過不列出",
                     size=12,
-                    color=theme.GREY_700,
+                    color=C.MUTED,
                 )
             )
 
@@ -948,7 +932,7 @@ def open_preview_dialog(
             content=jar_list,
             height=300,
             padding=5,
-            bgcolor=theme.GREY_100,
+            bgcolor=C.PANEL2,
             border_radius=8,
         )
         controls.append(list_container)
@@ -980,7 +964,7 @@ def open_preview_dialog(
         )
         preview_dialog.title = ft.Row(
             [
-                ft.Icon(ft.Icons.CHECK_CIRCLE, size=24, color=theme.GREEN_700),
+                ft.Icon(ft.Icons.CHECK_CIRCLE, size=24, color=C.EM),
                 ft.Text(
                     f"提取預覽 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD
                 ),
@@ -1148,7 +1132,7 @@ def open_preview_dialog(
         modal=False,
         title=ft.Row(
             [
-                ft.Icon(ft.Icons.SEARCH, size=24, color=theme.BLUE_700),
+                ft.Icon(ft.Icons.SEARCH, size=24, color=C.DIA),
                 ft.Text(f"預覽 - {mode.upper()}", size=18, weight=ft.FontWeight.BOLD),
             ]
         ),

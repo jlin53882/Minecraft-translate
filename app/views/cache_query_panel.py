@@ -12,7 +12,7 @@ from app.services_impl.cache.cache_services import (
     cache_search_service,
     cache_update_dst_service,
 )
-from app.ui import theme
+from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.cache_manager.cache_history_store import (
     history_append_event,
@@ -86,9 +86,7 @@ class CacheQueryPanel(ft.Container):
         )
 
         # 提示文字
-        self.query_search_hint = ft.Text(
-            "請輸入關鍵字開始搜尋", size=11, color=theme.GREY_700
-        )
+        self.query_search_hint = ft.Text("請輸入關鍵字開始搜尋", size=11, color=C.MUTED)
 
         # 結果列表
         self.query_result_list = ft.ListView(
@@ -163,13 +161,13 @@ class CacheQueryPanel(ft.Container):
                 ft.Text(
                     "關鍵字輸入（可輸入 key / dst / 關鍵字）",
                     size=11,
-                    color=theme.GREY_700,
+                    color=C.MUTED,
                 ),
                 ft.Row(
                     [self.tf_query_input, self.btn_query_search, self.btn_query_clear],
                     wrap=True,
                 ),
-                ft.Text("查詢模式與分類選擇", size=11, color=theme.GREY_700),
+                ft.Text("查詢模式與分類選擇", size=11, color=C.MUTED),
                 ft.Row([self.dd_query_mode, self.dd_query_type], wrap=True),
                 self.query_search_hint,
                 ft.Container(
@@ -189,11 +187,9 @@ class CacheQueryPanel(ft.Container):
                                         ft.Container(
                                             expand=True,
                                             padding=8,
-                                            border=ft.Border.all(
-                                                1, theme.OUTLINE_VARIANT
-                                            ),
+                                            border=ft.Border.all(1, C.LINE),
                                             border_radius=8,
-                                            bgcolor=theme.PANEL,
+                                            bgcolor=C.PANEL,
                                             content=self.query_result_list,
                                         ),
                                     ],
@@ -214,11 +210,9 @@ class CacheQueryPanel(ft.Container):
                                         ft.Container(
                                             expand=True,
                                             padding=8,
-                                            border=ft.Border.all(
-                                                1, theme.OUTLINE_VARIANT
-                                            ),
+                                            border=ft.Border.all(1, C.LINE),
                                             border_radius=8,
-                                            bgcolor=theme.PANEL,
+                                            bgcolor=C.PANEL,
                                             alignment=ft.alignment.Alignment(-1, -1),
                                             content=ft.Column(
                                                 [
@@ -322,7 +316,7 @@ class CacheQueryPanel(ft.Container):
         """執行關鍵字搜尋"""
         query = (self.tf_query_input.value or "").strip()
         if not query:
-            show_snack(self.page, "請輸入查詢內容", theme.AMBER_700)
+            show_snack(self.page, "請輸入查詢內容", C.GOLD)
             return
 
         mode = (self.dd_query_mode.value or "ALL").upper()
@@ -382,7 +376,7 @@ class CacheQueryPanel(ft.Container):
             self.state.query_results[0] if self.state.query_results else None
         )
         self.query_search_hint.value = f"搜尋完成：{len(self.state.query_results)} 筆"
-        self.query_search_hint.color = theme.BLUE_700
+        self.query_search_hint.color = C.DIA
         self._render_query_results()
         self._render_query_detail()
         self._page.update()
@@ -394,7 +388,7 @@ class CacheQueryPanel(ft.Container):
         self.state.query_selected_result = None
         self.state.query_page = 1
         self.query_search_hint.value = "請輸入關鍵字開始搜尋"
-        self.query_search_hint.color = theme.GREY_700
+        self.query_search_hint.color = C.MUTED
         self._render_query_results()
         self._render_query_detail()
         self._page.update()
@@ -420,7 +414,7 @@ class CacheQueryPanel(ft.Container):
 
         if not page_rows:
             self.query_result_list.controls.append(
-                ft.Text("無搜尋結果", size=12, color=theme.GREY_600)
+                ft.Text("無搜尋結果", size=12, color=C.MUTED)
             )
         else:
             for row in page_rows:
@@ -439,10 +433,10 @@ class CacheQueryPanel(ft.Container):
                         padding=8,
                         border=ft.Border.all(
                             1,
-                            theme.BLUE_200 if selected else theme.OUTLINE_VARIANT,
+                            C.DIA_BG if selected else C.LINE,
                         ),
                         border_radius=8,
-                        bgcolor=theme.BLUE_50 if selected else None,
+                        bgcolor=C.DIA_BG if selected else None,
                         on_click=lambda e, r=row: self._on_select_result(r),
                         content=ft.Column(
                             [
@@ -457,7 +451,7 @@ class CacheQueryPanel(ft.Container):
                                 ft.Text(
                                     f"類型: {cache_type} | shard: {shard}",
                                     size=11,
-                                    color=theme.GREY_700,
+                                    color=C.MUTED,
                                 ),
                                 ft.Text(
                                     f"預覽: {preview}",
@@ -563,7 +557,7 @@ class CacheQueryPanel(ft.Container):
     def _on_apply_dst(self, e):
         """套用目標翻譯"""
         if not self.state.query_selected_result:
-            show_snack(self.page, "請先選擇一筆資料", theme.AMBER_700)
+            show_snack(self.page, "請先選擇一筆資料", C.GOLD)
             return
 
         ctype = str(self.state.query_selected_result.get("cache_type", ""))
@@ -575,7 +569,7 @@ class CacheQueryPanel(ft.Container):
         try:
             done = cache_update_dst_service(ctype, key, new_dst)
             if not done:
-                show_snack(self.page, "套用失敗：找不到目標 key", theme.RED_400)
+                show_snack(self.page, "套用失敗：找不到目標 key", C.RED)
                 return
 
             cache_save_all_service(write_new_shard=False, only_types=[ctype])
@@ -601,19 +595,19 @@ class CacheQueryPanel(ft.Container):
 
             self._render_query_results()
             self._render_query_detail()
-            show_snack(self.page, "已套用並寫入快取", theme.BLUE_400)
+            show_snack(self.page, "已套用並寫入快取", C.DIA)
             self._page.update()
         except Exception as ex:  # noqa: BLE001
-            show_snack(self.page, f"套用失敗：{ex}", theme.RED_400)
+            show_snack(self.page, f"套用失敗：{ex}", C.RED)
 
     def _on_revert_dst(self, e):
         """還原 DST 到原始值"""
         if not self.state.query_selected_result:
-            show_snack(self.page, "請先選擇一筆資料", theme.AMBER_700)
+            show_snack(self.page, "請先選擇一筆資料", C.GOLD)
             return
 
         self.query_detail_dst.value = str(self.state.query_original_dst or "")
-        show_snack(self.page, "已還原到原始值", theme.BLUE_400)
+        show_snack(self.page, "已還原到原始值", C.DIA)
         self._page.update()
 
     def _history_append_event(self, cache_type: str, event: dict):

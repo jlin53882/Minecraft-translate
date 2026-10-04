@@ -54,7 +54,7 @@ def test_cache_view_is_primary_entry_only():
 
 
 def test_cache_overview_is_split_to_panel_module():
-    entry_src = _read("app/views/cache_view.py")
+    entry_src = _read("app/views/cache_manager/cache_view_overview.py")
     assert (
         "from app.views.cache_manager.cache_overview_panel import build_overview_page"
         in entry_src

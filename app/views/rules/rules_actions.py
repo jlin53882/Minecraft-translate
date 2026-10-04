@@ -6,7 +6,7 @@ import threading
 
 import flet as ft  # noqa: F401
 
-from app.ui import theme
+from app.ui.design import C
 from app.ui.snack import show_snack
 
 
@@ -62,7 +62,7 @@ def start_reload_thread(view):
     """在后台线程启动规则重新加载流程"""
     view.loading_indicator.visible = True
     view.page.update()
-    show_snack(view.page, "🔄 正在重新載入規則…", theme.BLUE_700)
+    show_snack(view.page, "🔄 正在重新載入規則…", C.DIA)
     threading.Thread(target=lambda: perform_reload(view), daemon=True).start()
 
 
@@ -76,13 +76,11 @@ def start_save_thread(view, clean_rules):
 
             save_replace_rules(clean_rules)
             view._run_on_ui_thread(
-                lambda: show_snack(view.page, "規則已成功儲存！", theme.GREEN_700)
+                lambda: show_snack(view.page, "規則已成功儲存！", C.EM)
             )
         except Exception as err:  # noqa: BLE001
             msg = f"儲存規則時發生錯誤: {err}"
-            view._run_on_ui_thread(
-                lambda msg=msg: show_snack(view.page, msg, theme.RED_600)
-            )
+            view._run_on_ui_thread(lambda msg=msg: show_snack(view.page, msg, C.RED))
 
     threading.Thread(target=worker, daemon=True).start()
 

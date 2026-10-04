@@ -16,15 +16,7 @@ import os
 
 import flet as ft
 
-from app.ui.theme import (
-    BLUE_700,
-    GREEN_700,
-    GREY_500,
-    GREY_600,
-    PURPLE_700,
-    TEAL_700,
-    WHITE,
-)
+from app.ui.design import C
 from translation_tool.utils.config_manager import load_config
 
 
@@ -131,7 +123,7 @@ def open_one_click_dialog(
 
     dialogs: list[ft.AlertDialog] = []
     step_label = ft.Text(
-        f"{state['step']}/4", size=12, color=GREY_600, weight=ft.FontWeight.W_500
+        f"{state['step']}/4", size=12, color=C.MUTED, weight=ft.FontWeight.W_500
     )
 
     def rebuild_ui():
@@ -203,9 +195,9 @@ def open_one_click_dialog(
         return ft.Column(
             [
                 ft.Text("Mod 來源（唯讀）", weight="bold", size=13),
-                ft.Text(input_path or "未設定", size=11, color=GREY_600),
+                ft.Text(input_path or "未設定", size=11, color=C.MUTED),
                 ft.Text("輸出目錄（唯讀）", weight="bold", size=13),
-                ft.Text(output_path or "未設定", size=11, color=GREY_600),
+                ft.Text(output_path or "未設定", size=11, color=C.MUTED),
                 ft.Divider(),
                 ft.Text("執行模式", weight="bold", size=13),
                 radio_group,
@@ -237,7 +229,7 @@ def open_one_click_dialog(
             hint_text="留空使用上方設定的路徑",
             value=input_path,
             expand=True,
-            border_color=TEAL_700,
+            border_color=C.EM,
             read_only=True,
         )
 
@@ -298,7 +290,7 @@ def open_one_click_dialog(
                 ft.Container(content=zip_list_view),
                 ft.Divider(),
                 ft.Text("輸出目錄（唯讀）", weight="bold", size=13),
-                ft.Text(output_path or "未設定", size=11, color=GREY_600),
+                ft.Text(output_path or "未設定", size=11, color=C.MUTED),
                 ft.Divider(),
                 ft.Text("語系過濾設定", weight="bold", size=13),
                 ft.Switch(label="只處理 lang 檔案", value=state["only_lang"]),
@@ -351,14 +343,14 @@ def open_one_click_dialog(
             hint_text="自動帶入整理後的待翻譯資料夾",
             value=state["translate_input"],
             expand=True,
-            border_color=BLUE_700,
+            border_color=C.DIA,
         )
         _translate_output_field = ft.TextField(
             label="輸出目錄",
             hint_text="自動帶入：{output}/lm_translate/",
             value=state["translate_output"],
             expand=True,
-            border_color=BLUE_700,
+            border_color=C.DIA,
         )
 
         return ft.Column(
@@ -371,7 +363,7 @@ def open_one_click_dialog(
                     if output_path
                     else "未設定",
                     size=11,
-                    color=GREY_600,
+                    color=C.MUTED,
                 ),
                 ft.Text("輸出目錄（唯讀）", weight="bold", size=13),
                 ft.Text(
@@ -379,7 +371,7 @@ def open_one_click_dialog(
                     if output_path
                     else "未設定",
                     size=11,
-                    color=GREY_600,
+                    color=C.MUTED,
                 ),
                 ft.Divider(),
                 ft.Text("執行選項", weight="bold", size=13),
@@ -396,32 +388,32 @@ def open_one_click_dialog(
             hint_text="自動帶入翻譯完成後的輸出",
             value=state["bundle_input"],
             expand=True,
-            border_color=PURPLE_700,
+            border_color=C.ENCH,
         )
         zip_output_field = ft.TextField(
             label="輸出 ZIP 檔案",
             value=state["zip_output"],
             expand=True,
-            border_color=PURPLE_700,
+            border_color=C.ENCH,
         )
         desc_field = ft.TextField(
             label="檔案敘述",
             hint_text="直接輸入文字，或使用 § 顏色代碼",
             value=state["description"],
             expand=True,
-            border_color=PURPLE_700,
+            border_color=C.ENCH,
         )
         pack_image_field = ft.TextField(
             label="封面圖片（可留空）",
             value=state["pack_image"] or "",
             expand=True,
-            border_color=PURPLE_700,
+            border_color=C.ENCH,
             read_only=True,
         )
 
         version_data = _load_version_data()
         version_toggle_label = ft.Text(
-            state["version"] or "點擊選擇版本", expand=True, size=12, color=GREY_600
+            state["version"] or "點擊選擇版本", expand=True, size=12, color=C.MUTED
         )
         version_expanded = False
         version_list = ft.ListView(expand=True, height=140, spacing=4)
@@ -431,14 +423,14 @@ def open_one_click_dialog(
             filtered = [v for v in version_data if search.lower() in v.lower()]
             if not filtered:
                 version_list.controls.append(
-                    ft.Text("無可用版本", size=12, color=GREY_500)
+                    ft.Text("無可用版本", size=12, color=C.DIM)
                 )
             for v in filtered:
                 version_list.controls.append(
                     ft.Container(
                         content=ft.Text(v, size=13),
                         padding=8,
-                        border=ft.Border.all(1, GREY_500),
+                        border=ft.Border.all(1, C.DIM),
                         border_radius=6,
                         on_click=lambda e, ver=v: _select_version(ver),
                     )
@@ -461,7 +453,7 @@ def open_one_click_dialog(
         version_dropdown = ft.Container(
             content=version_list,
             height=140,
-            border=ft.Border.all(1, GREY_500),
+            border=ft.Border.all(1, C.DIM),
             border_radius=6,
             padding=4,
             visible=False,
@@ -520,7 +512,7 @@ def open_one_click_dialog(
                         ]
                     ),
                     padding=8,
-                    border=ft.Border.all(1, GREY_500),
+                    border=ft.Border.all(1, C.DIM),
                     border_radius=6,
                     on_click=_toggle_version,
                 ),
@@ -530,7 +522,7 @@ def open_one_click_dialog(
                 ft.Text("其他指定資料夾", weight="bold", size=13),
                 ft.Container(
                     content=extra_view,
-                    border=ft.Border.all(1, GREY_500),
+                    border=ft.Border.all(1, C.DIM),
                     border_radius=6,
                     padding=4,
                 ),
@@ -545,7 +537,7 @@ def open_one_click_dialog(
     dialog_width = int(page.width * 0.6)
 
     step_label = ft.Text(
-        f"{state['step']}/4", size=12, color=GREY_600, weight=ft.FontWeight.W_500
+        f"{state['step']}/4", size=12, color=C.MUTED, weight=ft.FontWeight.W_500
     )
 
     def build_dialog(step: int):
@@ -566,8 +558,8 @@ def open_one_click_dialog(
                 ft.Button(
                     "確定執行",
                     icon=ft.Icons.CHECK,
-                    bgcolor=GREEN_700,
-                    color=WHITE,
+                    bgcolor=C.EM,
+                    color=C.ON_EM,
                     on_click=lambda e: _do_execute(),
                 )
             )

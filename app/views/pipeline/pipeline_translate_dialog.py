@@ -12,12 +12,7 @@ import os
 
 import flet as ft
 
-from app.ui.theme import (
-    BLUE_700,
-    GREY_600,
-    RED_400,
-    WHITE,
-)
+from app.ui.design import C
 from translation_tool.utils.config_manager import load_config
 
 
@@ -38,7 +33,7 @@ def open_translate_dialog(
         output_path: 預填的輸出目錄路徑
         on_start_translate: 回調函式，簽名：
             on_start_translate(input_dir, output_dir, dry_run, write_new_cache, api_keys)
-        show_snack_bar: 回調：(message: str, color: str = RED_400) -> void
+        show_snack_bar: 回調：(message: str, color: str = C.RED) -> void
     """
     dialog_width = int(page.width * 0.6)
 
@@ -62,7 +57,7 @@ def open_translate_dialog(
         else "留空自動帶入整理後的待翻譯資料夾",
         value=input_path or default_input,
         expand=True,
-        border_color=BLUE_700,
+        border_color=C.DIA,
     )
     translate_output_field = ft.TextField(
         label="輸出目錄",
@@ -71,7 +66,7 @@ def open_translate_dialog(
         else "留空自動帶入 lm_translate",
         value=output_path or default_output,
         expand=True,
-        border_color=BLUE_700,
+        border_color=C.DIA,
     )
 
     dry_run_switch = ft.Switch(label="Dry Run（只分析不翻譯）", value=False)
@@ -89,12 +84,12 @@ def open_translate_dialog(
             hint_text="輸入 API Key",
             expand=True,
             text_size=12,
-            border_color=BLUE_700,
+            border_color=C.DIA,
             password=True,
         )
         del_btn = ft.IconButton(
             icon=ft.Icons.DELETE,
-            icon_color=RED_400,
+            icon_color=C.RED,
             on_click=lambda _: delete_key_field(row),
         )
         row.controls = [key_tf, del_btn]
@@ -177,7 +172,7 @@ def open_translate_dialog(
     content = ft.Column(
         [
             ft.Text("輸入來源", weight="bold", size=13),
-            ft.Text("留空自動帶入前一步驟輸出", size=10, color=GREY_600),
+            ft.Text("留空自動帶入前一步驟輸出", size=10, color=C.MUTED),
             ft.Row(
                 [
                     translate_input_field,
@@ -188,7 +183,7 @@ def open_translate_dialog(
                 ]
             ),
             ft.Text("輸出目錄", weight="bold", size=13),
-            ft.Text("輸出說明：→ {output}/lm_translate/", size=10, color=GREY_600),
+            ft.Text("輸出說明：→ {output}/lm_translate/", size=10, color=C.MUTED),
             ft.Row(
                 [
                     translate_output_field,
@@ -223,8 +218,8 @@ def open_translate_dialog(
             ft.Button(
                 "確定執行",
                 icon=ft.Icons.CHECK,
-                bgcolor=BLUE_700,
-                color=WHITE,
+                bgcolor=C.DIA,
+                color=C.ON_EM,
                 on_click=lambda e: start_translate(dialog),
             ),
         ],

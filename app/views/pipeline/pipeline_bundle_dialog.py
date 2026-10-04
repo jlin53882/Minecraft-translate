@@ -13,12 +13,7 @@ import os
 
 import flet as ft
 
-from app.ui.theme import (
-    GREY_500,
-    GREY_600,
-    PURPLE_700,
-    WHITE,
-)
+from app.ui.design import C
 from translation_tool.utils.config_manager import load_config
 
 
@@ -84,7 +79,7 @@ def open_bundle_dialog(
         else "留空自動帶入翻譯完成後的輸出",
         value=input_path or default_input,
         expand=True,
-        border_color=PURPLE_700,
+        border_color=C.ENCH,
     )
     bundle_output_zip_field = ft.TextField(
         label="輸出 ZIP 檔案",
@@ -93,13 +88,13 @@ def open_bundle_dialog(
         else "留空自動帶入可使用翻譯.zip",
         value="",
         expand=True,
-        border_color=PURPLE_700,
+        border_color=C.ENCH,
     )
     description_field = ft.TextField(
         label="檔案敘述",
         hint_text="直接輸入文字，或使用 § 顏色代碼",
         expand=True,
-        border_color=PURPLE_700,
+        border_color=C.ENCH,
     )
 
     version_data = _load_version_data()
@@ -111,7 +106,7 @@ def open_bundle_dialog(
         label="搜尋版本",
         hint_text="輸入版本關鍵字...",
         expand=True,
-        border_color=PURPLE_700,
+        border_color=C.ENCH,
         dense=True,
         on_change=lambda e: _refresh_version_list(e.control.value or ""),
     )
@@ -120,12 +115,12 @@ def open_bundle_dialog(
         version_list.controls.clear()
         filtered = [v for v in version_data if search_text.lower() in v.lower()]
         if not filtered:
-            version_list.controls.append(ft.Text("無可用版本", size=12, color=GREY_500))
+            version_list.controls.append(ft.Text("無可用版本", size=12, color=C.DIM))
         for version_key in filtered:
             item = ft.Container(
                 content=ft.Text(version_key, size=13),
                 padding=8,
-                border=ft.Border.all(1, GREY_500),
+                border=ft.Border.all(1, C.DIM),
                 border_radius=6,
                 on_click=lambda e, v=version_key: _select_version(v),
             )
@@ -147,7 +142,7 @@ def open_bundle_dialog(
     version_dropdown_container = ft.Container(
         content=version_list,
         height=160,
-        border=ft.Border.all(1, GREY_500),
+        border=ft.Border.all(1, C.DIM),
         border_radius=6,
         padding=4,
         visible=False,
@@ -157,7 +152,7 @@ def open_bundle_dialog(
         label="封面圖片（可留空）",
         hint_text="選擇 pack.png 圖片",
         expand=True,
-        border_color=PURPLE_700,
+        border_color=C.ENCH,
         read_only=True,
     )
     extra_folders_view = ft.ListView(height=80, spacing=4, auto_scroll=False)
@@ -281,7 +276,7 @@ def open_bundle_dialog(
     content = ft.Column(
         [
             ft.Text("輸入來源", weight="bold", size=13),
-            ft.Text("留空自動帶入，翻譯完成後再使用", size=10, color=GREY_600),
+            ft.Text("留空自動帶入，翻譯完成後再使用", size=10, color=C.MUTED),
             ft.Row(
                 [
                     bundle_input_field,
@@ -307,13 +302,13 @@ def open_bundle_dialog(
             ft.Container(
                 content=ft.Row(
                     [
-                        ft.Text("已選擇：", size=11, color=GREY_600),
+                        ft.Text("已選擇：", size=11, color=C.MUTED),
                         version_toggle_label,
                         ft.Icon(ft.Icons.EXPAND_MORE, size=18),
                     ]
                 ),
                 padding=8,
-                border=ft.Border.all(1, GREY_500),
+                border=ft.Border.all(1, C.DIM),
                 border_radius=6,
                 on_click=_toggle_version_expand,
             ),
@@ -337,7 +332,7 @@ def open_bundle_dialog(
             ft.Text("其他指定資料夾", weight="bold", size=13),
             ft.Container(
                 content=extra_folders_view,
-                border=ft.Border.all(1, GREY_500),
+                border=ft.Border.all(1, C.DIM),
                 border_radius=8,
                 padding=4,
             ),
@@ -363,8 +358,8 @@ def open_bundle_dialog(
             ft.Button(
                 "確定執行",
                 icon=ft.Icons.CHECK,
-                bgcolor=PURPLE_700,
-                color=WHITE,
+                bgcolor=C.ENCH,
+                color=C.ON_EM,
                 on_click=lambda e: start_bundle(dialog),
             ),
         ],

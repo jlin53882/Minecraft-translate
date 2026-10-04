@@ -19,24 +19,7 @@ from app.services_impl.pipelines.merge_service import (
     run_merge_zip_batch_service,  # noqa: F401
 )
 from app.tasks.task_session import TaskSession  # noqa: F401
-from app.ui import theme
-from app.ui.theme import (
-    BLUE_50,  # noqa: F401
-    BLUE_400,  # noqa: F401
-    BLUE_600,  # noqa: F401
-    BLUE_700,  # noqa: F401
-    CYAN_700,  # noqa: F401
-    GREEN_50,  # noqa: F401
-    GREEN_600,  # noqa: F401
-    GREEN_700,  # noqa: F401
-    GREY_200,  # noqa: F401
-    GREY_500,  # noqa: F401
-    GREY_600,
-    RED_50,  # noqa: F401
-    RED_400,  # noqa: F401
-    TEAL_700,
-    WHITE,
-)
+from app.ui.design import C
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info
 
@@ -103,13 +86,13 @@ def open_merge_dialog(
         hint_text=f"自動帶入：{input_path}" if input_path else "留空使用上方設定的路徑",
         value=input_path,
         expand=True,
-        border_color=TEAL_700,
+        border_color=C.EM,
     )
     merge_zip_field = ft.TextField(  # noqa: F841
         label="Mod 來源（ZIP）",
         hint_text="選擇 ZIP 檔案（支援多選）",
         expand=True,
-        border_color=TEAL_700,
+        border_color=C.EM,
         read_only=True,
         disabled=True,
         visible=False,
@@ -127,7 +110,7 @@ def open_merge_dialog(
         else "留空使用上方設定的輸出目錄",
         value=output_path,
         expand=True,
-        border_color=TEAL_700,
+        border_color=C.EM,
     )
     merge_only_lang_checkbox = ft.Checkbox(label="只處理 lang 檔案", value=True)
     merge_process_zh_cn_switch = ft.Switch(label="處理 zh_cn 檔案", value=True)
@@ -364,7 +347,7 @@ def open_merge_dialog(
             [
                 ft.Container(
                     content=merge_zip_list_view,
-                    border=ft.Border.all(1, theme.BORDER_LOG_PANEL),
+                    border=ft.Border.all(1, C.LINE),
                     border_radius=8,
                     padding=5,
                     expand=True,
@@ -400,7 +383,7 @@ def open_merge_dialog(
                 [
                     merge_process_zh_cn_switch,
                     ft.Text(
-                        "（需開啟才能調整下方 Patchouli 設定）", size=11, color=GREY_600
+                        "（需開啟才能調整下方 Patchouli 設定）", size=11, color=C.MUTED
                     ),
                 ]
             ),
@@ -412,7 +395,7 @@ def open_merge_dialog(
                     ft.Text(
                         "超過此數值判定為英文，用於 lang 過濾，空白用預設值 2",
                         size=10,
-                        color=GREY_600,
+                        color=C.MUTED,
                     ),
                 ]
             ),
@@ -431,7 +414,7 @@ def open_merge_dialog(
                             ft.Text(
                                 "當 zh_cn 翻譯足夠好時，跳過對應 en_us",
                                 size=10,
-                                color=GREY_600,
+                                color=C.MUTED,
                             ),
                         ],
                         expand=1,
@@ -445,7 +428,7 @@ def open_merge_dialog(
                             ft.Text(
                                 "有效翻譯比例 0.0~1.0，空白用預設值 0.5",
                                 size=10,
-                                color=GREY_600,
+                                color=C.MUTED,
                             ),
                         ],
                         expand=1,
@@ -479,8 +462,8 @@ def open_merge_dialog(
             ft.Button(
                 "確定執行",
                 icon=ft.Icons.CHECK,
-                bgcolor=TEAL_700,
-                color=WHITE,
+                bgcolor=C.EM,
+                color=C.ON_EM,
                 on_click=lambda e: start_merge(dialog),
             ),
         ],

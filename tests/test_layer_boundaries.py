@@ -43,3 +43,23 @@ def test_icon_preview_row_is_the_ui_owner_for_lang_item_row():
     from app.views.icon_preview_row import LangItemRow
 
     assert LangItemRow.__module__ == "app.views.icon_preview_row"
+
+
+def test_legacy_ui_compat_layer_is_gone():
+    """PR #106 留下的舊色票映射與舊元件已移除（#121）：不得再 import 或引用。"""
+    root = _repo_root()
+    assert not (root / "app" / "ui" / "theme.py").exists()
+    assert not (root / "app" / "ui" / "components.py").exists()
+    offenders: list[str] = []
+    for path in sorted((root / "app").rglob("*.py")) + [root / "main.py"]:
+        text = path.read_text(encoding="utf-8")
+        for needle in ("app.ui.theme", "app.ui.components", "legacy_color"):
+            if needle in text:
+                offenders.append(f"{path.relative_to(root)}: {needle}")
+        tree = ast.parse(text, filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "app.ui":
+                names = {alias.name for alias in node.names}
+                if names & {"theme", "components"}:
+                    offenders.append(f"{path.relative_to(root)}:{node.lineno}: {names}")
+    assert offenders == [], "舊相容層仍被引用：\n" + "\n".join(offenders)

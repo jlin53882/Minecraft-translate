@@ -2,7 +2,8 @@ import json
 
 import flet as ft
 
-from app.views import cache_view as cache_view_module
+from app.views.cache_manager import cache_view_query as cache_query_module
+from app.views.cache_manager import cache_view_shard_detail as cache_shard_detail_module
 from app.views.cache_view import CacheView
 
 
@@ -91,12 +92,12 @@ def test_on_shard_dst_apply_updates_cache_and_history(monkeypatch):
     view._refresh_disabled_state = lambda: None
 
     monkeypatch.setattr(
-        cache_view_module,
+        cache_shard_detail_module,
         "cache_update_dst_service",
         lambda ctype, key, new_dst: update_calls.append((ctype, key, new_dst)) or True,
     )
     monkeypatch.setattr(
-        cache_view_module,
+        cache_shard_detail_module,
         "cache_save_all_service",
         lambda **kwargs: save_calls.append(kwargs) or {"ok": True},
     )
@@ -158,9 +159,9 @@ def test_on_query_search_all_mode_deduplicates_per_type_key(monkeypatch):
             }
         return {"items": []}
 
-    monkeypatch.setattr(cache_view_module, "cache_search_service", fake_search)
+    monkeypatch.setattr(cache_query_module, "cache_search_service", fake_search)
     monkeypatch.setattr(
-        cache_view_module,
+        cache_query_module,
         "cache_get_entry_service",
         lambda ctype, key: {"dst": f"dst-{ctype}-{key}"},
     )
@@ -193,7 +194,9 @@ def test_on_query_search_requires_input(monkeypatch):
     view._render_query_detail = lambda: None
 
     monkeypatch.setattr(
-        cache_view_module, "cache_search_service", lambda *args, **kwargs: {"items": []}
+        cache_query_module,
+        "cache_search_service",
+        lambda *args, **kwargs: {"items": []},
     )
 
     CacheView._on_query_search(view, None)
@@ -235,7 +238,7 @@ def test_on_query_search_runs_in_thread_and_applies_latest_only(monkeypatch):
         threads.append(threading.current_thread())
         return {"items": [{"key": query, "preview": "p"}]}
 
-    monkeypatch.setattr(cache_view_module, "cache_search_service", fake_search)
+    monkeypatch.setattr(cache_query_module, "cache_search_service", fake_search)
 
     CacheView._on_query_search(view, None)
     view.tf_query_input.value = "xyz"

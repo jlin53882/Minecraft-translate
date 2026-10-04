@@ -8,6 +8,7 @@ import os
 import flet as ft
 
 from app.tasks import LogEntry
+from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.pipeline import pipeline_view
 from app.views.pipeline.pipeline_view import (
@@ -334,11 +335,10 @@ def test_pipeline_progress_panel_add_log():
     assert len(panel.log_view._list_view.controls) == 1
     text_ctrl = panel.log_view._list_view.controls[0]
     assert "測試訊息" in text_ctrl.value
-    # PR refactor/unified-log-view: 預設顏色從 CYAN_700 改為 theme.TEXT_LOG_INFO
+    # PR refactor/unified-log-view: 預設顏色從 CYAN_700 改為 C.DIA
     # (LogView 把無前綴的 info 等級對應到 INFO 顏色，不再是 DEFAULT)
-    from app.ui import theme
 
-    assert text_ctrl.color == theme.TEXT_LOG_INFO
+    assert text_ctrl.color == C.DIA
 
 
 def test_pipeline_progress_panel_add_log_success():

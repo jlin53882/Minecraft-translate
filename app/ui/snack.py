@@ -20,13 +20,13 @@ Flet 0.85.0 SnackBar API: https://flet.dev/docs/controls/snackbar
     show_snack(page, "操作完成")
 
     # 帶顏色
-    show_snack(page, "發生錯誤", color=theme.ERROR)
+    show_snack(page, "發生錯誤", color=C.RED)
 
     # 帶 action 按鈕
     show_snack(page, "已刪除", action_label="復原", on_action=lambda e: restore())
 
-    # 帶文字顏色 (e.g. rules_view.py: theme.WHITE 文字)
-    show_snack(page, "已跳至第 1 頁", theme.PRIMARY, text_color=theme.WHITE)
+    # 帶文字顏色 (e.g. rules_view.py: C.ON_EM 文字)
+    show_snack(page, "已跳至第 1 頁", C.EM, text_color=C.ON_EM)
 
     # 清除已存在的 SnackBar (預設行為,避免 overlay 累積)
     # icon_preview_view.py 用 clear_existing=True 顯式指定 (預設已 True)
@@ -36,13 +36,13 @@ from __future__ import annotations
 
 import flet as ft
 
-from app.ui import design, theme
+from app.ui import design
 from app.ui.design import C
 from app.ui.design import tone as get_tone
 from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.redaction import redact_secrets
 
-# 舊呼叫端傳的是「背景色」（RED_600 / GREEN_600 / theme.PRIMARY …）。新設計的 toast 是中性面板 + 語意色，
+# 舊呼叫端傳的是「背景色」（RED_600 / GREEN_600 / C.EM …）。新設計的 toast 是中性面板 + 語意色，
 # 所以只看顏色屬於哪個色系，轉成對應的語意色組與圖示。
 _HUE_TONES = (
     # 先比對語意色名稱（theme 的舊色名已改指向設計系統的語意色）
@@ -76,7 +76,7 @@ def snack_style(color) -> tuple[str, str]:
 def show_snack(
     page: ft.Page,
     message: str,
-    color: str = theme.ERROR,
+    color: str = C.RED,
     *,
     duration: int = 4000,
     action_label: str | None = None,
@@ -99,7 +99,7 @@ def show_snack(
     Args:
         page: Flet Page 實例
         message: 顯示的文字訊息
-        color: 背景顏色 (預設 theme.ERROR)
+        color: 背景顏色 (預設 C.RED)
         duration: 顯示時間 (毫秒), 預設 4000ms
         action_label: action 按鈕文字 (如 "復原")
         on_action: action 按鈕點擊回調

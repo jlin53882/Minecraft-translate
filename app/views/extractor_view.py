@@ -27,7 +27,7 @@ from app.services_impl.pipelines.extract_service import (
 from app.tasks.task_session import (
     TaskSession,  # noqa: F401 - 測試以 extractor_view.TaskSession patch
 )
-from app.ui import kit, theme
+from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views._log import LogView
@@ -177,7 +177,7 @@ class ExtractorView(ft.Column):
         Args:
             target: 選擇後要填入路徑的 TextField。
         """
-        show_snack(self.page, "請選擇此欄位的資料夾", color=theme.BLUE_600)
+        show_snack(self.page, "請選擇此欄位的資料夾", color=C.DIA)
         self._page.run_task(self._async_pick_directory, target)
 
     async def _async_pick_directory(self, target):
@@ -191,7 +191,7 @@ class ExtractorView(ft.Column):
             target.value = result
             self.page.update()
         else:
-            show_snack(self.page, "未選擇資料夾", color=theme.BLUE_600)
+            show_snack(self.page, "未選擇資料夾", color=C.DIA)
 
     # 僅在按「預覽/提取」時自動填入輸出路徑，選擇資料夾時不自動填入
     def refresh_config_defaults(self):
@@ -302,7 +302,7 @@ class ExtractorView(ft.Column):
         show_snack(
             self.page,
             f"[系統] 已自動設定輸出路徑：{output_path}",
-            color=theme.GREEN_600,
+            color=C.EM,
         )
 
     def _check_mods_dir_or_snack(self, mods_dir: str, action_label: str) -> bool:
@@ -326,14 +326,14 @@ class ExtractorView(ft.Column):
             show_snack(
                 self.page,
                 f"⚠️ 請先選擇 Mods 資料夾才能{action_label}",
-                color=theme.AMBER_700,
+                color=C.GOLD,
             )
             return False
         if not os.path.isdir(mods_dir):
             show_snack(
                 self.page,
                 f"⚠️ Mods 資料夾不存在,無法{action_label}",
-                color=theme.AMBER_700,
+                color=C.GOLD,
             )
             return False
         return True
@@ -463,7 +463,7 @@ class ExtractorView(ft.Column):
         self.page.update()
         # 🐛 2026-08-01 user review: 改用 SnackBar 跳出提示,不掛 log UI
         # (原本 _append_log_line 寫進 self.log_view,但 S1 撤回後 user 看不到任何 log)
-        show_snack(self.page, "[系統] 已清除輸出路徑", color=theme.BLUE_600)
+        show_snack(self.page, "[系統] 已清除輸出路徑", color=C.DIA)
 
     # ==================================================
     # Worker Logic

@@ -17,7 +17,8 @@ from app.services_impl.pipelines.merge_service import (
     run_merge_zip_batch_service,
 )
 from app.tasks.task_session import TaskSession, tag_session
-from app.ui import kit, theme
+from app.ui import kit
+from app.ui.design import C
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView
@@ -202,7 +203,7 @@ class MergeView(ft.Column):
         self._zh_cn_disabled_note = ft.Text(
             "需先開啟「處理 zh_cn 檔案」",
             size=11,
-            color=theme.ERROR,
+            color=C.RED,
             visible=False,
         )
         self.output_dir_field = kit.text_field(
@@ -266,7 +267,7 @@ class MergeView(ft.Column):
                             ft.Text(
                                 "可加入多個 ZIP，會依序合併。",
                                 size=12,
-                                color=theme.GREY_600,
+                                color=C.MUTED,
                             ),
                         ],
                         spacing=10,
@@ -311,7 +312,7 @@ class MergeView(ft.Column):
                     ft.Text(
                         "開啟後，只處理語言檔；其他內容檔案會略過。",
                         size=12,
-                        color=theme.GREY_600,
+                        color=C.MUTED,
                     ),
                     ft.Container(height=6),
                     ft.Row(
@@ -330,13 +331,13 @@ class MergeView(ft.Column):
                     ft.Text(
                         "超過此數值判定為英文，用於 lang 過濾，預設 2。",
                         size=12,
-                        color=theme.GREY_600,
+                        color=C.MUTED,
                     ),
                 ],
                 spacing=6,
             ),
             padding=12,
-            bgcolor=theme.GREY_50,
+            bgcolor=C.PANEL,
             border_radius=10,
         )
 
@@ -348,13 +349,13 @@ class MergeView(ft.Column):
                     ft.Text(
                         "關閉後，所有 zh_cn 檔案都會略過。",
                         size=12,
-                        color=theme.GREY_600,
+                        color=C.MUTED,
                     ),
                 ],
                 spacing=6,
             ),
             padding=12,
-            bgcolor=theme.GREY_50,
+            bgcolor=C.PANEL,
             border_radius=10,
         )
 
@@ -381,14 +382,14 @@ class MergeView(ft.Column):
                                 ft.Text(
                                     "內容中日韓文字佔比達門檻時，視為有效翻譯並跳過英文",
                                     size=12,
-                                    color=theme.GREY_600,
+                                    color=C.MUTED,
                                 ),
                                 self._skip_disabled_note(),
                             ],
                             spacing=4,
                         ),
                         padding=10,
-                        bgcolor=theme.PANEL,
+                        bgcolor=C.PANEL,
                         border_radius=8,
                     ),
                     ft.Container(
@@ -410,20 +411,20 @@ class MergeView(ft.Column):
                                 ft.Text(
                                     "預設 0.5，範圍 0.0 ~ 1.0。",
                                     size=12,
-                                    color=theme.GREY_600,
+                                    color=C.MUTED,
                                 ),
                             ],
                             spacing=4,
                         ),
                         padding=10,
-                        bgcolor=theme.PANEL,
+                        bgcolor=C.PANEL,
                         border_radius=8,
                     ),
                 ],
                 spacing=10,
             ),
             padding=12,
-            bgcolor=theme.GREY_50,
+            bgcolor=C.PANEL,
             border_radius=10,
         )
 
@@ -473,20 +474,20 @@ class MergeView(ft.Column):
                                     "把 {XX_extracted}/{modid}/lang/*.json 的 key 補到 assets/{modid}/lang/*.json,"
                                     " 關閉不動(內部未變)。",
                                     size=12,
-                                    color=theme.GREY_600,
+                                    color=C.MUTED,
                                 ),
                             ],
                             spacing=4,
                         ),
                         padding=10,
-                        bgcolor=theme.PANEL,
+                        bgcolor=C.PANEL,
                         border_radius=8,
                     ),
                 ],
                 spacing=10,
             ),
             padding=12,
-            bgcolor=theme.GREY_50,
+            bgcolor=C.PANEL,
             border_radius=10,
         )
 
@@ -498,12 +499,12 @@ class MergeView(ft.Column):
                 [
                     ft.Row(
                         [
-                            ft.Icon(ft.Icons.INFO_OUTLINE, color=theme.BLUE, size=18),
+                            ft.Icon(ft.Icons.INFO_OUTLINE, color=C.DIA, size=18),
                             ft.Text(
                                 "📁 輸出資料夾說明",
                                 weight="bold",
                                 size=12,
-                                color=theme.GREY_700,
+                                color=C.MUTED,
                             ),
                         ],
                         spacing=8,
@@ -511,18 +512,18 @@ class MergeView(ft.Column):
                     ft.Text(
                         f"• 「{organized_name}」（key數≥{min_count}）→ 送機器翻譯",
                         size=12,
-                        color=theme.GREY_700,
+                        color=C.MUTED,
                     ),
                     ft.Text(
                         f"• 「{pending_name}」（key數<{min_count}）→ 未過濾，跳過不要送翻譯",
                         size=12,
-                        color=theme.GREY_700,
+                        color=C.MUTED,
                     ),
                 ],
                 spacing=4,
             ),
             padding=10,
-            bgcolor=theme.BLUE_50,
+            bgcolor=C.DIA_BG,
             border_radius=8,
         )
 
@@ -697,7 +698,7 @@ class MergeView(ft.Column):
         # 否則會 AttributeError: 'LogView' object has no attribute 'controls'。
         self.log_view.clear()
         self.progress_bar.value = 0.0
-        self._set_status("執行中", theme.BLUE_200)
+        self._set_status("執行中", C.DIA_BG)
 
         self.session.start()
         self.session.add_log("[系統] 開始合併任務")
@@ -769,9 +770,9 @@ class MergeView(ft.Column):
                 logs = snap["logs"]
 
                 if status == "RUNNING":
-                    self._set_status("執行中", theme.BLUE_200)
+                    self._set_status("執行中", C.DIA_BG)
                 elif status == "DONE":
-                    self._set_status("任務完成", theme.GREEN_200)
+                    self._set_status("任務完成", C.EM_BG)
                     snap_summary = snap.get("summary")
                     if snap_summary:
                         self._merge_stats = snap_summary
@@ -803,7 +804,7 @@ class MergeView(ft.Column):
                     # 2026-08-02:DONE/ERROR 後停止 poller,避免無限 background update
                     self._ui_stop.set()
                 elif status == "ERROR":
-                    self._set_status("任務發生錯誤", theme.RED_200)
+                    self._set_status("任務發生錯誤", C.RED_BG)
                     self._ui_stop.set()
 
                 self.progress_bar.value = progress
@@ -897,12 +898,12 @@ class MergeView(ft.Column):
                     ft.Text(
                         f"├─ {name}",
                         size=13,
-                        color=theme.ORANGE_700,
+                        color=C.GOLD,
                     )
                 )
                 if len(err) > 80:
                     err = err[:80] + "..."
-                failed_rows.append(ft.Text(f"│  └─ {err}", size=12, color=theme.MUTED))
+                failed_rows.append(ft.Text(f"│  └─ {err}", size=12, color=C.MUTED))
             failed_block = [
                 ft.Divider(),
                 ft.Text(f"📋 處理失敗的 {unit}", size=14, weight=ft.FontWeight.BOLD),
@@ -922,14 +923,14 @@ class MergeView(ft.Column):
                 ft.Divider(),
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.GREEN, size=20),
+                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=C.EM, size=20),
                         ft.Text(f"成功處理 {unit}：{s_zips} 個", size=14),
                     ],
                     spacing=8,
                 ),
                 ft.Row(
                     [
-                        ft.Icon(ft.Icons.ERROR, color=theme.RED, size=20),
+                        ft.Icon(ft.Icons.ERROR, color=C.RED, size=20),
                         ft.Text(f"失敗 {unit}：{f_zips} 個", size=14),
                     ],
                     spacing=8,
@@ -937,7 +938,7 @@ class MergeView(ft.Column):
                 *output_block,
                 *failed_block,
                 ft.Divider(),
-                ft.Text("詳見上方日誌", size=12, color=theme.DIM),
+                ft.Text("詳見上方日誌", size=12, color=C.DIM),
             ],
             spacing=10,
             tight=True,
@@ -963,7 +964,7 @@ class MergeView(ft.Column):
     def _open_output_folder(self) -> None:
         """開啟輸出資料夾（使用檔案總管）。"""
 
-        snack = ft.SnackBar(ft.Text("正在開啟輸出資料夾..."), bgcolor=theme.BLUE_700)
+        snack = ft.SnackBar(ft.Text("正在開啟輸出資料夾..."), bgcolor=C.DIA)
         self.page.overlay.append(snack)
         snack.open = True
         self.page.update()
@@ -988,7 +989,7 @@ class MergeView(ft.Column):
             self.page.pop_dialog()
             # 2026-08-04: 先改 progress_bar 再 call _set_status (內部 page.update)
             self.progress_bar.value = 0.0
-            self._set_status("尚未開始", theme.GREY_400)
+            self._set_status("尚未開始", C.DIM)
         except Exception as e:  # noqa: BLE001
             log_warning(f"[MergeView] pop_dialog 錯誤: {e!r}")
 

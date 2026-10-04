@@ -550,10 +550,10 @@ class TestFixAddLogArgType:
                 if (
                     isinstance(second_arg, ast.Attribute)
                     and isinstance(second_arg.value, ast.Name)
-                    and second_arg.value.id == "theme"
+                    and second_arg.value.id in ("theme", "C")
                 ):
                     bad_calls.append(
-                        f"add_log(... , theme.{second_arg.attr}) at line {node.lineno}"
+                        f"add_log(... , {second_arg.value.id}.{second_arg.attr}) at line {node.lineno}"
                     )
         assert not bad_calls, (
             "回歸:add_log 的 level 參數傳了 color 字串 (theme.*),會被 LogView silent return。\n"

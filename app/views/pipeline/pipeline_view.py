@@ -35,12 +35,6 @@ from app.ui import design, kit
 from app.ui.design import C
 from app.ui.design import tone as get_tone
 from app.ui.snack import show_snack
-from app.ui.theme import (
-    BLUE_700,
-    ORANGE_700,
-    RED_400,
-    WHITE,
-)
 from app.views._log import LogView
 from app.views.pipeline.pipeline_bundle_dialog import open_bundle_dialog
 from app.views.pipeline.pipeline_extract_dialog import open_extract_dialog
@@ -401,11 +395,11 @@ class PipelineView(ft.Column):
             label=f"API Key {len(self.keys_container.controls) + 1}",
             expand=True,
             text_size=12,
-            border_color=BLUE_700,
+            border_color=C.DIA,
         )
         del_btn = ft.IconButton(
             icon=ft.Icons.DELETE,
-            icon_color=RED_400,
+            icon_color=C.RED,
             on_click=lambda _: self._delete_key_field(new_row),
         )
         new_row.controls = [key_tf, del_btn]
@@ -1130,11 +1124,9 @@ class PipelineView(ft.Column):
 
         self.api_view = ft.Column(
             [
-                ft.Text("API 金鑰管理", size=24, weight="bold", color=ORANGE_700),
+                ft.Text("API 金鑰管理", size=24, weight="bold", color=C.GOLD),
                 ft.Container(content=self.keys_container, expand=True),
-                ft.Button(
-                    "儲存設定", icon=ft.Icons.SAVE, bgcolor=BLUE_700, color=WHITE
-                ),
+                ft.Button("儲存設定", icon=ft.Icons.SAVE, bgcolor=C.DIA, color=C.ON_EM),
             ],
             spacing=10,
             expand=True,

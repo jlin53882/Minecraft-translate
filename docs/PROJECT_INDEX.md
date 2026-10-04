@@ -23,9 +23,7 @@ Minecraft-translate/
 │   ├── ui/                   # UI 元件
 │   │   ├── design.py        # 設計 token / 主題（見 docs/UI_DESIGN_SYSTEM.md）
 │   │   ├── kit/             # 共用元件
-│   │   ├── components.py    # legacy 通用元件（逐步遷移至 kit）
 │   │   ├── keyboard_shortcuts.py
-│   │   ├── theme.py         # 舊色常數映射
 │   │   └── view_wrapper.py
 │   ├── views/               # 各功能頁面（View）
 │   │   ├── bundler_view.py        # 輸出打包
@@ -262,9 +260,8 @@ app/
 ├── tasks/               # 任務 session（task_session.py、log_entry.py）
 ├── startup_tasks.py     # 啟動時執行的工作
 ├── ui/
-│   ├── components.py    # legacy Button / Card 等相容元件（新程式使用 kit）
 │   ├── view_wrapper.py  # View 包裝器（含滾動/標題列）
-│   ├── theme.py         # 主題定義
+│   ├── design.py        # 設計 token / 主題
 │   └── keyboard_shortcuts.py
 └── views/
     ├── lm_view.py          # 翻譯頁（核心）

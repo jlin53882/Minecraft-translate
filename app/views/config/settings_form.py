@@ -8,7 +8,7 @@ from typing import Any
 import flet as ft
 
 from app.config_apply import timing_note
-from app.ui import kit, theme
+from app.ui import kit
 from app.ui.design import C
 from app.views.config.settings_schema import (
     NAV_PAGES,
@@ -126,7 +126,7 @@ def _render_labeled(item: Labeled, controls_map: dict[str, Any]) -> ft.Column:
         controls_map[item.path],
     ]
     if item.note:
-        controls.append(ft.Text(item.note, size=11, color=theme.GREY_600))
+        controls.append(ft.Text(item.note, size=11, color=C.MUTED))
     return ft.Column(controls, expand=1)
 
 

@@ -22,7 +22,7 @@ from types import SimpleNamespace
 import flet as ft
 
 from app.icon_reader import IconRef
-from app.ui import design, kit, theme
+from app.ui import design, kit
 from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.snack import show_snack
@@ -939,7 +939,7 @@ class IconPreviewView(ft.Column):
             on_change=self._on_mod_search_change,
             visible=False,
         )
-        self.mod_search_status = ft.Text("", size=11, color=theme.GREY_600)
+        self.mod_search_status = ft.Text("", size=11, color=C.MUTED)
 
         self.back_btn = ft.IconButton(
             icon=ft.Icons.ARROW_BACK,
@@ -990,7 +990,7 @@ class IconPreviewView(ft.Column):
         # 進度條
         self.progress_bar = kit.progress_bar(0, "em", height=6)
         self.progress_bar.visible = False
-        self.progress_text = ft.Text("準備就緒", size=12, color=theme.GREY_600)
+        self.progress_text = ft.Text("準備就緒", size=12, color=C.MUTED)
 
         setup_card = kit.section_card(
             "資料來源",
@@ -1053,7 +1053,7 @@ class IconPreviewView(ft.Column):
                 show_snack(
                     self.page,
                     "🔄 已搬移舊 icon cache 至新路徑",
-                    color=theme.BLUE_600,
+                    color=C.DIA,
                     clear_existing=True,
                     duration=3000,
                 )
@@ -1064,7 +1064,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 "✅ 模組資料夾已設定",
-                color=theme.GREEN_600,
+                color=C.EM,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1073,7 +1073,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 "⚠️ 模組資料夾選擇已取消",
-                color=theme.WARNING,
+                color=C.GOLD,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1089,7 +1089,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 "✅ 資源包路徑已設定",
-                color=theme.GREEN_600,
+                color=C.EM,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1098,7 +1098,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 "⚠️ 資源包路徑選擇已取消",
-                color=theme.WARNING,
+                color=C.GOLD,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1113,7 +1113,7 @@ class IconPreviewView(ft.Column):
                 show_snack(
                     self.page,
                     "🔄 已搬移舊 icon cache 至新路徑",
-                    color=theme.BLUE_600,
+                    color=C.DIA,
                     clear_existing=True,
                     duration=3000,
                 )
@@ -1124,7 +1124,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 "✅ 模組資料夾已設定",
-                color=theme.GREEN_600,
+                color=C.EM,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1133,7 +1133,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 "⚠️ 模組資料夾選擇已取消",
-                color=theme.WARNING,
+                color=C.GOLD,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1148,7 +1148,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 "✅ 資源包路徑已設定",
-                color=theme.GREEN_600,
+                color=C.EM,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1157,7 +1157,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 "⚠️ 資源包路徑選擇已取消",
-                color=theme.WARNING,
+                color=C.GOLD,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1180,7 +1180,7 @@ class IconPreviewView(ft.Column):
         show_snack(
             self.page,
             "⏳ 掃描模組中...",
-            color=theme.BLUE_600,
+            color=C.DIA,
             clear_existing=True,
             duration=3000,
         )
@@ -1206,7 +1206,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 f"✅ 使用快取（共 {len(self._entries_cache)} 筆）",
-                color=theme.GREEN_600,
+                color=C.EM,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1229,7 +1229,7 @@ class IconPreviewView(ft.Column):
                 show_snack(
                     self.page,
                     f"✅ 使用磁碟快取（共 {len(cached_entries)} 筆）",
-                    color=theme.GREEN_600,
+                    color=C.EM,
                     clear_existing=True,
                     duration=3000,
                 )
@@ -1272,7 +1272,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 "📦 JAR 目錄模式：從 JAR 讀取 en_us.json...",
-                color=theme.BLUE_600,
+                color=C.DIA,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1298,7 +1298,7 @@ class IconPreviewView(ft.Column):
                 show_snack(
                     self.page,
                     f"❌ 掃描失敗：{ex}",
-                    color=theme.RED_700,
+                    color=C.RED,
                     clear_existing=True,
                     duration=4000,
                 )
@@ -1345,7 +1345,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 "❌ 無法識別模式，請確認資料夾內容",
-                color=theme.RED_700,
+                color=C.RED,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1358,7 +1358,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 "❌ 掃描結果為空，請確認 en_us.json 是否存在",
-                color=theme.RED_700,
+                color=C.RED,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1390,7 +1390,7 @@ class IconPreviewView(ft.Column):
         show_snack(
             self.page,
             f"✅ 載入完成（共 {len(self.mods)} 個模組）",
-            color=theme.GREEN_600,
+            color=C.EM,
             clear_existing=True,
             duration=3000,
         )
@@ -1609,7 +1609,7 @@ class IconPreviewView(ft.Column):
             self.list_view.controls.clear()
             self.list_view.controls.append(
                 ft.ListTile(
-                    title=ft.Text("無符合結果", color=theme.GREY_600),
+                    title=ft.Text("無符合結果", color=C.MUTED),
                     subtitle=ft.Text("嘗試不同的關鍵字"),
                 )
             )
@@ -1717,7 +1717,7 @@ class IconPreviewView(ft.Column):
                 on_change=self._on_detail_search_change,
                 visible=False,
             )
-            self.detail_search_status = ft.Text("", size=11, color=theme.GREY_600)
+            self.detail_search_status = ft.Text("", size=11, color=C.MUTED)
 
     def _open_mod_detail(self, modid: str):
         """開啟模組詳情畫面"""
@@ -1808,7 +1808,7 @@ class IconPreviewView(ft.Column):
         show_snack(
             self.page,
             "💾 儲存翻譯中...",
-            color=theme.BLUE_600,
+            color=C.DIA,
             clear_existing=True,
             duration=3000,
         )
@@ -1821,7 +1821,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 "❌ 找不到 zh_tw.json",
-                color=theme.RED_700,
+                color=C.RED,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1839,7 +1839,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 f"✅ 翻譯已儲存 ({len(self._zh_data)} 筆)",
-                color=theme.GREEN_600,
+                color=C.EM,
                 clear_existing=True,
                 duration=3000,
             )
@@ -1848,7 +1848,7 @@ class IconPreviewView(ft.Column):
             show_snack(
                 self.page,
                 f"❌ 儲存失敗：{ex}",
-                color=theme.RED_700,
+                color=C.RED,
                 clear_existing=True,
                 duration=3000,
             )

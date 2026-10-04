@@ -11,7 +11,7 @@ import threading
 import flet as ft
 
 from app.services_impl.config_service import load_replace_rules
-from app.ui import design, kit, theme
+from app.ui import design, kit
 from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.snack import show_snack
@@ -111,14 +111,14 @@ class RulesView(ft.Column):
         """驗證並執行頁碼跳轉"""
         raw = (e.control.value or "").strip()
         if not raw:
-            show_snack(self.page, "請輸入頁碼", theme.PRIMARY, text_color=theme.WHITE)
+            show_snack(self.page, "請輸入頁碼", C.EM, text_color=C.ON_EM)
             self._sync_page_jump_field()
             return
 
         try:
             page = int(raw)
         except ValueError:
-            show_snack(self.page, "頁碼必須是數字", theme.ERROR, text_color=theme.WHITE)
+            show_snack(self.page, "頁碼必須是數字", C.RED, text_color=C.ON_EM)
             self._sync_page_jump_field()
             return
 
@@ -126,17 +126,15 @@ class RulesView(ft.Column):
             show_snack(
                 self.page,
                 f"頁碼範圍：1 ~ {self.total_pages}",
-                theme.ERROR,
-                text_color=theme.WHITE,
+                C.RED,
+                text_color=C.ON_EM,
             )
             self._sync_page_jump_field()
             return
 
         self.current_page = page
         self._render_current_page()
-        show_snack(
-            self.page, f"已跳至第 {page} 頁", theme.PRIMARY, text_color=theme.WHITE
-        )
+        show_snack(self.page, f"已跳至第 {page} 頁", C.EM, text_color=C.ON_EM)
         self._sync_page_jump_field()
 
     def _init_controls(self):
@@ -439,16 +437,16 @@ class RulesView(ft.Column):
             show_snack(
                 self.page,
                 "✅ 已排序：依 From 字典序",
-                theme.PRIMARY,
-                text_color=theme.WHITE,
+                C.EM,
+                text_color=C.ON_EM,
             )
         elif mode == "from_len":
             self.all_rules_data.sort(key=lambda r: len(r.get("from", "")))
             show_snack(
                 self.page,
                 "✅ 已排序：依 From 長度",
-                theme.PRIMARY,
-                text_color=theme.WHITE,
+                C.EM,
+                text_color=C.ON_EM,
             )
 
         self.current_page = 1
@@ -484,8 +482,8 @@ class RulesView(ft.Column):
             show_snack(
                 self.page,
                 "已清除搜尋，顯示全部規則",
-                theme.PRIMARY,
-                text_color=theme.WHITE,
+                C.EM,
+                text_color=C.ON_EM,
             )
             return
 
@@ -511,9 +509,7 @@ class RulesView(ft.Column):
         self.search_current_idx = 0
 
         if not self.search_results:
-            show_snack(
-                self.page, "找不到符合的規則", theme.WARNING, text_color=theme.WHITE
-            )
+            show_snack(self.page, "找不到符合的規則", C.GOLD, text_color=C.ON_EM)
             self._render_current_page()
             return
 
@@ -523,8 +519,8 @@ class RulesView(ft.Column):
         show_snack(
             self.page,
             f"找到 {count} 筆符合的規則{mode_text}",
-            theme.PRIMARY,
-            text_color=theme.WHITE,
+            C.EM,
+            text_color=C.ON_EM,
         )
 
         # 強制回到第一頁
@@ -807,16 +803,14 @@ class RulesView(ft.Column):
         self.current_page = 1
         self._render_current_page()
         self.loading_indicator.visible = False
-        show_snack(self.page, "規則載入完成！", theme.GREEN_600, text_color=theme.WHITE)
+        show_snack(self.page, "規則載入完成！", C.EM, text_color=C.ON_EM)
         self.page.update()
 
     def _handle_reload_failure(self, err):
         """處理規則重新載入失敗的錯誤顯示"""
         self.loading_indicator.visible = False
         self.page.update()
-        show_snack(
-            self.page, f"載入規則時發生錯誤: {err}", theme.ERROR, text_color=theme.WHITE
-        )
+        show_snack(self.page, f"載入規則時發生錯誤: {err}", C.RED, text_color=C.ON_EM)
 
     def prev_page(self, e):
         """上一頁，若已在首頁則顯示提示"""
@@ -824,7 +818,7 @@ class RulesView(ft.Column):
             self.current_page -= 1
             self._render_current_page()
         else:
-            show_snack(self.page, "已在第一頁", theme.PRIMARY, text_color=theme.WHITE)
+            show_snack(self.page, "已在第一頁", C.EM, text_color=C.ON_EM)
 
     def next_page(self, e):
         """下一頁，若已在末頁則顯示提示"""
@@ -832,7 +826,7 @@ class RulesView(ft.Column):
             self.current_page += 1
             self._render_current_page()
         else:
-            show_snack(self.page, "已在最後一頁", theme.PRIMARY, text_color=theme.WHITE)
+            show_snack(self.page, "已在最後一頁", C.EM, text_color=C.ON_EM)
 
     @staticmethod
     def _build_from_index(all_rules) -> dict:
@@ -869,8 +863,8 @@ class RulesView(ft.Column):
                 show_snack(
                     self.page,
                     f"第 {idx + 1} 條規則錯誤：{msg}",
-                    theme.ERROR,
-                    text_color=theme.WHITE,
+                    C.RED,
+                    text_color=C.ON_EM,
                 )
                 self.current_page = idx // self.page_size + 1
                 self._render_current_page()
@@ -885,8 +879,8 @@ class RulesView(ft.Column):
             show_snack(
                 self.page,
                 "✅ 驗證通過，正在儲存規則…",
-                theme.PRIMARY,
-                text_color=theme.WHITE,
+                C.EM,
+                text_color=C.ON_EM,
             )
             start_save_thread(self, clean_rules)
 
@@ -896,7 +890,7 @@ class RulesView(ft.Column):
             return
 
         self._saving = True
-        show_snack(self.page, "🔎 正在驗證規則…", theme.PRIMARY, text_color=theme.WHITE)
+        show_snack(self.page, "🔎 正在驗證規則…", C.EM, text_color=C.ON_EM)
 
         async def _validate_then_save():
             try:
@@ -906,8 +900,8 @@ class RulesView(ft.Column):
                 show_snack(
                     self.page,
                     f"驗證規則時發生錯誤：{ex}",
-                    theme.ERROR,
-                    text_color=theme.WHITE,
+                    C.RED,
+                    text_color=C.ON_EM,
                 )
                 return
             finish(failure)
@@ -927,8 +921,8 @@ class RulesView(ft.Column):
         show_snack(
             self.page,
             "➕ 已新增一條規則（已跳至最後一頁）",
-            theme.PRIMARY,
-            text_color=theme.WHITE,
+            C.EM,
+            text_color=C.ON_EM,
         )
 
     def delete_row_clicked(self, e):
@@ -956,8 +950,8 @@ class RulesView(ft.Column):
             show_snack(
                 self.page,
                 f"🗑 已刪除：{src_preview} → {dst_preview}",
-                theme.ERROR,
-                text_color=theme.WHITE,
+                C.RED,
+                text_color=C.ON_EM,
             )
 
     @property

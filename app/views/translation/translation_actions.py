@@ -6,7 +6,7 @@ import threading
 import flet as ft  # noqa: F401
 
 from app.tasks.task_session import tag_session
-from app.ui import theme
+from app.ui.design import C
 from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_error, log_warning
 
@@ -40,22 +40,22 @@ def _is_running(view) -> bool:
 def run_ftb(view, *, dry_run: bool):
     """执行 FTB (Feed The Beast) 模组翻译流程"""
     if _is_running(view):
-        show_snack(view.page, "已有翻譯任務執行中，請等待完成", theme.AMBER_700)
+        show_snack(view.page, "已有翻譯任務執行中，請等待完成", C.GOLD)
         return
     in_dir = (view.ftb_in_dir.value or "").strip()
     if not in_dir:
-        show_snack(view.page, "請先選擇輸入資料夾", theme.RED_600)
+        show_snack(view.page, "請先選擇輸入資料夾", C.RED)
         return
     if view.run_ftb_translation_service is None:
-        show_snack(view.page, "FTB service 尚未可用", theme.RED_600)
+        show_snack(view.page, "FTB service 尚未可用", C.RED)
         return
     if view.TaskSession is None:
-        show_snack(view.page, "TaskSession 尚未可用", theme.RED_600)
+        show_snack(view.page, "TaskSession 尚未可用", C.RED)
         return
     out_dir = (view.ftb_out_dir.value or "").strip() or None
     view._set_status(
         "模擬執行" if dry_run else "執行中",
-        theme.AMBER_200 if dry_run else theme.BLUE_200,
+        C.GOLD_BG if dry_run else C.DIA_BG,
     )
     view.progress.value = 0
     view.log_view.clear()
@@ -96,22 +96,22 @@ def run_ftb(view, *, dry_run: bool):
 def run_kjs(view, *, dry_run: bool):
     """执行 KubeJS (KubeJavaScript) 工具提示翻译流程"""
     if _is_running(view):
-        show_snack(view.page, "已有翻譯任務執行中，請等待完成", theme.AMBER_700)
+        show_snack(view.page, "已有翻譯任務執行中，請等待完成", C.GOLD)
         return
     in_dir = (view.kjs_in_dir.value or "").strip()
     if not in_dir:
-        show_snack(view.page, "請先選擇輸入資料夾", theme.RED_600)
+        show_snack(view.page, "請先選擇輸入資料夾", C.RED)
         return
     if view.run_kubejs_tooltip_service is None:
-        show_snack(view.page, "KubeJS service 尚未可用", theme.RED_600)
+        show_snack(view.page, "KubeJS service 尚未可用", C.RED)
         return
     if view.TaskSession is None:
-        show_snack(view.page, "TaskSession 尚未可用", theme.RED_600)
+        show_snack(view.page, "TaskSession 尚未可用", C.RED)
         return
     out_dir = (view.kjs_out_dir.value or "").strip() or None
     view._set_status(
         "模擬執行" if dry_run else "執行中",
-        theme.AMBER_200 if dry_run else theme.BLUE_200,
+        C.GOLD_BG if dry_run else C.DIA_BG,
     )
     view.progress.value = 0
     view.log_view.clear()
@@ -151,22 +151,22 @@ def run_kjs(view, *, dry_run: bool):
 def run_md(view, *, dry_run: bool):
     """执行 Markdown 文档翻译流程"""
     if _is_running(view):
-        show_snack(view.page, "已有翻譯任務執行中，請等待完成", theme.AMBER_700)
+        show_snack(view.page, "已有翻譯任務執行中，請等待完成", C.GOLD)
         return
     in_dir = (view.md_in_dir.value or "").strip()
     if not in_dir:
-        show_snack(view.page, "請先選擇輸入資料夾", theme.RED_600)
+        show_snack(view.page, "請先選擇輸入資料夾", C.RED)
         return
     if view.run_md_translation_service is None:
-        show_snack(view.page, "MD service 尚未可用", theme.RED_600)
+        show_snack(view.page, "MD service 尚未可用", C.RED)
         return
     if view.TaskSession is None:
-        show_snack(view.page, "TaskSession 尚未可用", theme.RED_600)
+        show_snack(view.page, "TaskSession 尚未可用", C.RED)
         return
     out_dir = (view.md_out_dir.value or "").strip() or None
     view._set_status(
         "模擬執行" if dry_run else "執行中",
-        theme.AMBER_200 if dry_run else theme.BLUE_200,
+        C.GOLD_BG if dry_run else C.DIA_BG,
     )
     view.progress.value = 0
     view.log_view.clear()
@@ -245,11 +245,11 @@ def _sync_from_session(view):
     status = (snap.get("status") or "").upper()
     if status in ("DONE", "ERROR"):
         if status == "ERROR":
-            view._set_status("任務發生錯誤", theme.RED_200)
+            view._set_status("任務發生錯誤", C.RED_BG)
         elif getattr(view.session, "cancel_requested", False):
-            view._set_status("已取消", theme.AMBER_200)
+            view._set_status("已取消", C.GOLD_BG)
         else:
-            view._set_status("任務完成", theme.GREEN_200)
+            view._set_status("任務完成", C.EM_BG)
         view._ui_timer_running = False
         cancel_button = getattr(view, "cancel_button", None)
         if cancel_button is not None:

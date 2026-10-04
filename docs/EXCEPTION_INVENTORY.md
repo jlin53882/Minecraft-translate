@@ -54,6 +54,27 @@
 | `app/views/cache_manager/cache_history_store.py:history_append_event` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_history_store.py:history_load_recent` | BLE001/S112 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_history_store.py:history_load_recent` | BLE001/S112 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_history.py:CacheHistoryMixin._on_shard_apply_selected_history` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_history.py:CacheHistoryMixin._on_apply_selected_history` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_overview.py:CacheOverviewMixin._copy_logs` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_overview.py:CacheOverviewMixin._load_overview` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_overview.py:CacheOverviewMixin._on_rebuild_index.work` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
+| `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_page_jump` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_page_size_change` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_apply_dst` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_query_search._search` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_shard_list_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_type_shard_panel_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_shard_key_list_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_shard_key_panel_width` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._load_shard_rows` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._load_shard_keys` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._set_shard_workspace_visible` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._load_shard_entry` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._on_shard_dst_copy` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard_detail.py:CacheShardDetailMixin._dynamic_shard_src_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard_detail.py:CacheShardDetailMixin._dynamic_shard_dst_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard_detail.py:CacheShardDetailMixin._on_shard_dst_apply` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_query_panel.py:CacheQueryPanel._on_page_jump` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_query_panel.py:CacheQueryPanel._on_page_size_change` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_query_panel.py:CacheQueryPanel._on_apply_dst` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -66,29 +87,8 @@
 | `app/views/cache_view.py:CacheView._fetch_overview` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
 | `app/views/cache_view.py:CacheView._finish_mount` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView._finish_mount` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._dynamic_shard_list_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._dynamic_type_shard_panel_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._dynamic_shard_key_list_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._dynamic_shard_src_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._dynamic_shard_dst_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._dynamic_shard_key_panel_width` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView._on_page_resized` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView.commit_ui` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._copy_logs` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._load_overview` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_rebuild_index.work` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
-| `app/views/cache_view.py:CacheView._load_shard_rows` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._load_shard_keys` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._set_shard_workspace_visible` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._load_shard_entry` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_shard_dst_apply` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_shard_dst_copy` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_shard_apply_selected_history` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_apply_selected_history` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_page_jump` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_page_size_change` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_apply_dst` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_query_search._search` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
 | `app/views/dashboard_view.py:DashboardView._apply_on_ui` | BLE001 | 已記錄／回報 | 沒有 event loop（測試）就直接套用 |
 | `app/views/extractor/extractor_dialog.py:open_extractor_dialog.run_extraction` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/extractor/extractor_dialog.py:open_preview_dialog.start_scan.do_scan` | BLE001 | 已記錄／回報 | 錯誤要回報到 UI |

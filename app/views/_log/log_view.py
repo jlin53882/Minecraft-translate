@@ -28,16 +28,17 @@ import flet as ft
 
 from app.tasks.log_entry import LogEntry
 from app.tasks.task_session import TaskSession
-from app.ui import design, theme
+from app.ui import design
+from app.ui.design import C
 
 from .log_presenter import LogPresenter
 
 _LEVEL_COLORS = {
-    "error": theme.TEXT_LOG_ERROR,
-    "warning": theme.TEXT_LOG_WARNING,
-    "info": theme.TEXT_LOG_INFO,
-    "system": theme.TEXT_LOG_SYSTEM,
-    "debug": theme.TEXT_LOG_DEBUG,
+    "error": C.RED,
+    "warning": C.GOLD,
+    "info": C.DIA,
+    "system": C.EM,
+    "debug": C.DIM,
 }
 
 
@@ -107,15 +108,15 @@ class LogView(ft.Container):
             show_levels=self.show_levels,
             colorize=True,
             text_size=self.DEFAULT_TEXT_SIZE,
-            default_color=theme.TEXT_LOG_DEFAULT,
+            default_color=C.MUTED,
         )
 
         # 最後才 super().__init__()
         super().__init__(
             expand=expand,
             height=height,
-            bgcolor=theme.BG_LOG_PANEL,
-            border=ft.Border.all(1, theme.BORDER_LOG_PANEL),
+            bgcolor=C.LOG_BG,
+            border=ft.Border.all(1, C.LINE),
             border_radius=self.DEFAULT_RADIUS,
             padding=self.DEFAULT_PADDING,
             clip_behavior=ft.ClipBehavior.HARD_EDGE,
@@ -207,7 +208,7 @@ class LogView(ft.Container):
         return ft.Text(
             text,
             size=self.DEFAULT_TEXT_SIZE,
-            color=_LEVEL_COLORS.get(level, theme.TEXT_LOG_DEFAULT),
+            color=_LEVEL_COLORS.get(level, C.MUTED),
             font_family=self.DEFAULT_FONT,
         )
 
