@@ -27,6 +27,30 @@ NETWORK_RETRY_BASE_SEC = 1.0
 # 設定檔 lm_translator.max_output_tokens 可覆寫；設為 0 代表不送這個欄位。
 DEFAULT_MAX_OUTPUT_TOKENS = 32768
 
+# Gemini generateContent's Schema fields use OpenAPI type enums.
+# propertyOrdering is required by Gemini 2.0 models; maxProperties prevents extras.
+TRANSLATION_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "items": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "id": {"type": "STRING"},
+                    "value": {"type": "STRING"},
+                },
+                "required": ["id", "value"],
+                "maxProperties": 2,
+                "propertyOrdering": ["id", "value"],
+            },
+        }
+    },
+    "required": ["items"],
+    "maxProperties": 1,
+    "propertyOrdering": ["items"],
+}
+
 
 def _post_with_retry(url: str, **kwargs) -> requests.Response:
     """requests.post，遇到連線階段的暫時性錯誤時指數退避重試（含 jitter）。"""
@@ -120,6 +144,7 @@ def call_gemini_requests(
         "generationConfig": {
             "temperature": temperature,
             "responseMimeType": "application/json",
+            "responseSchema": TRANSLATION_RESPONSE_SCHEMA,
         },
     }
 

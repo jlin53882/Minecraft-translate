@@ -97,6 +97,42 @@ def test_existing_generation_config_fields_are_kept(post):
     cfg = _generation_config(post)
     assert cfg["temperature"] == 0.2
     assert cfg["responseMimeType"] == "application/json"
+    schema = cfg["responseSchema"]
+    assert schema["type"] == "OBJECT"
+    assert schema["required"] == ["items"]
+    assert schema["maxProperties"] == 1
+    items = schema["properties"]["items"]
+    assert items["type"] == "ARRAY"
+    item = items["items"]
+    assert item["type"] == "OBJECT"
+    assert item["required"] == ["id", "value"]
+    assert item["properties"] == {
+        "id": {"type": "STRING"},
+        "value": {"type": "STRING"},
+    }
+    assert item["maxProperties"] == 2
+    assert item["propertyOrdering"] == ["id", "value"]
+    assert schema["propertyOrdering"] == ["items"]
+
+
+def test_translation_input_payload_shape_is_unchanged(post):
+    payload = {"items": [{"id": "0", "value": "Iron Ingot"}]}
+    with patch(
+        "translation_tool.core.lm_api_client.load_config",
+        return_value={"lm_translator": {}},
+    ):
+        call_gemini_requests(
+            model_name="m",
+            system_prompt="s",
+            payload=payload,
+            api_key="k",
+            temperature=0.2,
+        )
+
+    request_body = post.call_args.kwargs["json"]
+    assert request_body["contents"][0]["parts"][0]["text"] == (
+        '{"items": [{"id": "0", "value": "Iron Ingot"}]}'
+    )
 
 
 # --- meta_out --------------------------------------------------------------

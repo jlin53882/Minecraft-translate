@@ -127,6 +127,29 @@ def _normalize_translations(parsed) -> dict[str, object]:
     return normalized
 
 
+def _structured_response_shape_error(parsed) -> str | None:
+    """Reject schema-shaped responses that violate the items/id/value contract."""
+    if not isinstance(parsed, dict) or "items" not in parsed:
+        return None  # Keep legacy response normalization as a defensive fallback.
+    if set(parsed) != {"items"}:
+        return "root contains fields outside items"
+    items = parsed["items"]
+    if not isinstance(items, list):
+        return "items is not an array"
+
+    seen: set[str] = set()
+    for index, item in enumerate(items):
+        if not isinstance(item, dict) or set(item) != {"id", "value"}:
+            return f"items[{index}] does not contain exactly id and value"
+        item_id = item["id"]
+        if not isinstance(item_id, str) or not isinstance(item["value"], str):
+            return f"items[{index}] id/value is not a string"
+        if item_id in seen:
+            return f"duplicate id {item_id!r}"
+        seen.add(item_id)
+    return None
+
+
 # =========================================================
 # 截斷診斷（issue #108 階段 0）
 # =========================================================
@@ -592,10 +615,20 @@ def _merge_batch_response(
 ) -> tuple[list[dict] | None, bool]:
     """Parse, validate, and restore ordered translations for one successful response."""
     parsed = safe_json_loads(raw_text)
-    normalized = _normalize_translations(parsed)
-    sent_count = len(round_data.id_to_item)
-    if len(normalized) < sent_count:
-        log_warning(f"[❌ 漏翻] 送出 {sent_count} 條，實收 {len(normalized)} 條")
+    expected_ids = set(round_data.id_to_item)
+    contract_error = _structured_response_shape_error(parsed)
+    normalized = _normalize_translations(parsed) if contract_error is None else {}
+    returned_ids = set(normalized)
+    if contract_error is None and returned_ids != expected_ids:
+        missing_ids = sorted(expected_ids - returned_ids)
+        unexpected_ids = sorted(returned_ids - expected_ids)
+        contract_error = f"missing IDs={missing_ids}, unexpected IDs={unexpected_ids}"
+    if contract_error is None and any(
+        not isinstance(value, str) for value in normalized.values()
+    ):
+        contract_error = "one or more translation values are not strings"
+    if contract_error is not None:
+        log_warning(f"[❌ 回應契約不符] {contract_error}；本批次將重試/縮小")
         runtime.budget_tracker.on_truncated(
             api_meta.get("finish_reason"), kind="missing"
         )
@@ -617,7 +650,10 @@ def _merge_batch_response(
             log_warning("[⚠️ 異常長度] path=%s", original_item["path"])
         merged.append({**original_item, "text": translated_text})
     if lazy_count:
-        log_info(f"[📊 本批次疑似未翻，建議Cache內容查詢 {lazy_count}/{sent_count}]")
+        log_info(
+            f"[📊 本批次疑似未翻，建議Cache內容查詢 "
+            f"{lazy_count}/{len(round_data.id_to_item)}]"
+        )
     return merged, False
 
 
