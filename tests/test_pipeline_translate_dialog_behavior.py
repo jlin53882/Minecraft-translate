@@ -60,8 +60,12 @@ class _Env:
         self.src.mkdir()
         self.out = tmp_path / "out"
         self.out.mkdir()
-        # 翻譯目標預設為 {output}/locale_sort/_整理輸出/<待翻譯整理資料夾>（需存在才能開始）
-        self.organized = self.out / "locale_sort" / "_整理輸出" / "待翻譯整理需翻譯"
+        # 翻譯目標預設為 {output}/locale_sort/_整理輸出/lang_output/<待翻譯整理資料夾>
+        # （語系合併把待翻譯清單輸出在 lang_output/ 底下；需存在才能開始）
+        self.organized = (
+            self.out / "locale_sort" / "_整理輸出" / "lang_output" / "待翻譯整理需翻譯"
+        )
+        self.translate_out = self.out / "lm_translate" / "_翻譯輸出"
         self.organized.mkdir(parents=True)
         self.snacks: list[str] = []
         self.runs: list[dict] = []
@@ -99,7 +103,7 @@ def test_initial_state(env):
     tin, tout = env.fields(dialog)
     # 預設值由輸出根目錄推算；管線頁的 Mod 來源不會被當成翻譯目標
     assert tin.value == str(env.organized)
-    assert tout.value == str(env.out / "lm_translate")
+    assert tout.value == str(env.translate_out)
     assert _switch(dialog, "Dry Run").value is False
     assert _switch(dialog, "寫入新快取").value is True
 
@@ -110,9 +114,13 @@ def test_mod_source_is_never_used_as_translate_input(env):
         dialog = env.open(input_path=given)
         tin, tout = env.fields(dialog)
         assert tin.value == os.path.join(
-            str(env.out), "locale_sort", "_整理輸出", "待翻譯整理需翻譯"
+            str(env.out),
+            "locale_sort",
+            "_整理輸出",
+            "lang_output",
+            "待翻譯整理需翻譯",
         )
-        assert tout.value == str(env.out / "lm_translate")
+        assert tout.value == str(env.translate_out)
 
 
 def test_organized_folder_name_comes_from_config_and_reopen_is_fresh(env):
@@ -121,7 +129,7 @@ def test_organized_folder_name_comes_from_config_and_reopen_is_fresh(env):
     second = env.open(input_path="")
     assert env.fields(first)[0].value.endswith("待翻譯整理需翻譯")
     assert env.fields(second)[0].value == os.path.join(
-        str(env.out), "locale_sort", "_整理輸出", "自訂名稱"
+        str(env.out), "locale_sort", "_整理輸出", "lang_output", "自訂名稱"
     )
 
 
@@ -133,7 +141,7 @@ def test_start_passes_exact_kwargs_and_closes(env):
     assert env.runs == [
         {
             "input_dir": str(env.organized),
-            "output_dir": str(env.out / "lm_translate"),
+            "output_dir": str(env.translate_out),
             "dry_run": False,
             "write_new_cache": True,
         }
@@ -172,7 +180,7 @@ def test_blank_fields_fall_back_to_defaults_even_if_not_existing(env):
     dialog = env.open(input_path="")
     tin, tout = env.fields(dialog)
     default_in = tin.value
-    default_out = os.path.join(str(env.out), "lm_translate")
+    default_out = str(env.translate_out)
     tin.value = ""
     tout.value = "  "
     _button(dialog, "確定執行").on_click(None)

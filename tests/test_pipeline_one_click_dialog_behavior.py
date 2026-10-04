@@ -389,9 +389,11 @@ def test_step3_shows_paths_and_defaults(env):
     env.open()
     env.goto(3)
     texts = env.texts()
-    assert os.path.join(str(env.out), "lm_translate") in texts
+    assert os.path.join(str(env.out), "lm_translate", "_翻譯輸出") in texts
     assert (
-        os.path.join(str(env.out), "locale_sort", "_整理輸出", "待翻譯整理需翻譯")
+        os.path.join(
+            str(env.out), "locale_sort", "_整理輸出", "lang_output", "待翻譯整理需翻譯"
+        )
         in texts
     )
     assert env.switch("Dry Run（只分析不翻譯）").value is False
@@ -419,7 +421,10 @@ def test_step3_uses_custom_organized_folder_name(monkeypatch, tmp_path):
     )
     e.open()
     e.goto(3)
-    assert os.path.join(str(e.out), "locale_sort", "_整理輸出", "自訂待翻") in e.texts()
+    assert (
+        os.path.join(str(e.out), "locale_sort", "_整理輸出", "lang_output", "自訂待翻")
+        in e.texts()
+    )
 
 
 # ---------- 步驟 4 ----------

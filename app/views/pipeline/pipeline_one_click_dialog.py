@@ -150,6 +150,7 @@ def _one_click_init_config_defaults(ctx):
         "lm_translate_folder_name", "_翻譯輸出"
     )
     output_zip_name = bundler_cfg.get("output_zip_name", "可使用翻譯.zip")
+    ctx.translate_output_subfolder = translate_output_subfolder
     return lang_merger_cfg, output_zip_name, translate_output_subfolder
 
 
@@ -424,7 +425,7 @@ def _one_click__build_step3(ctx):
     )
     _translate_output_field = ft.TextField(
         label="輸出目錄",
-        hint_text="自動帶入：{output}/lm_translate/",
+        hint_text="自動帶入：{output}/lm_translate/<翻譯輸出子資料夾>",
         value=ctx.state["translate_output"],
         expand=True,
         border_color=C.DIA,
@@ -435,7 +436,11 @@ def _one_click__build_step3(ctx):
             ft.Text("翻譯目標（唯讀）", weight="bold", size=13),
             ft.Text(
                 os.path.join(
-                    ctx.output_path, "locale_sort", "_整理輸出", ctx.organized_folder
+                    ctx.output_path,
+                    "locale_sort",
+                    "_整理輸出",
+                    "lang_output",
+                    ctx.organized_folder,
                 )
                 if ctx.output_path
                 else "未設定",
@@ -444,7 +449,9 @@ def _one_click__build_step3(ctx):
             ),
             ft.Text("輸出目錄（唯讀）", weight="bold", size=13),
             ft.Text(
-                os.path.join(ctx.output_path, "lm_translate")
+                os.path.join(
+                    ctx.output_path, "lm_translate", ctx.translate_output_subfolder
+                )
                 if ctx.output_path
                 else "未設定",
                 size=11,

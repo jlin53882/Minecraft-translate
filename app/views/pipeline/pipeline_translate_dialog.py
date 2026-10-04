@@ -35,7 +35,8 @@ def open_translate_dialog(
         file_picker: Flet FilePicker 實例
         input_path: 管線頁的 Mod 來源（本對話框不使用；翻譯目標由輸出根目錄推算）
         output_path: 管線頁的輸出根目錄；翻譯目標預設為
-            ``{output}/locale_sort/_整理輸出/<待翻譯整理資料夾>``，輸出預設為 ``{output}/lm_translate``
+            ``{output}/locale_sort/_整理輸出/lang_output/<待翻譯整理資料夾>``，
+            輸出預設為 ``{output}/lm_translate/<翻譯輸出子資料夾>``
         on_start_translate: 回調函式，簽名：
             on_start_translate(input_dir, output_dir, dry_run, write_new_cache)
         show_snack_bar: 回調：(message: str, color: str = C.RED) -> void
@@ -86,13 +87,23 @@ def _translate_init_state_and_fields(ctx, input_path, output_path):
         "pending_organized_folder_name", "待翻譯整理需翻譯"
     )
 
+    translate_output_subfolder = lang_merger_cfg.get(
+        "lm_translate_folder_name", "_翻譯輸出"
+    )
+
+    # 與 PipelineConfig 一致：語系合併把待翻譯清單輸出在 lang_output/ 底下；
+    # 翻譯輸出 {output}/lm_translate/<子資料夾> 也是打包對話框的預設輸入
     ctx.default_input = (
-        os.path.join(output_path, "locale_sort", "_整理輸出", organized_folder)
+        os.path.join(
+            output_path, "locale_sort", "_整理輸出", "lang_output", organized_folder
+        )
         if output_path
         else ""
     )
     ctx.default_output = (
-        os.path.join(output_path, "lm_translate") if output_path else ""
+        os.path.join(output_path, "lm_translate", translate_output_subfolder)
+        if output_path
+        else ""
     )
 
     ctx.translate_input_field = ft.TextField(
@@ -108,7 +119,7 @@ def _translate_init_state_and_fields(ctx, input_path, output_path):
         label="輸出目錄",
         hint_text=f"自動帶入：{ctx.default_output}"
         if ctx.default_output
-        else "留空自動帶入 lm_translate",
+        else "留空自動帶入 lm_translate/<翻譯輸出子資料夾>",
         value=ctx.default_output,
         expand=True,
         border_color=C.DIA,
@@ -158,7 +169,11 @@ def _translate_build_content(ctx):
                 ]
             ),
             ft.Text("輸出目錄", weight="bold", size=13),
-            ft.Text("輸出說明：→ {output}/lm_translate/", size=10, color=C.MUTED),
+            ft.Text(
+                "輸出說明：→ {output}/lm_translate/<翻譯輸出子資料夾>",
+                size=10,
+                color=C.MUTED,
+            ),
             ft.Row(
                 [
                     ctx.translate_output_field,
