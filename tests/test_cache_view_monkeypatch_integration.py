@@ -115,3 +115,42 @@ def test_action_runs_off_event_loop_and_stays_busy_until_done(monkeypatch):
     assert calls[0] != main_thread
     assert view.ui_busy is False
     assert any("RELOADING 失敗" in x for x in view._all_logs)
+
+
+def test_fill_runs_only_after_danger_confirm_is_ticked(monkeypatch):
+    """勾選高風險確認後才會真的執行（確認勾選現在由頁面實際建立）。"""
+    view = _build_test_view(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        "app.views.cache_manager.cache_view_overview.cache_save_all_service",
+        lambda **kw: calls.append(kw) or {"ok": True},
+    )
+
+    view._on_save_one_fill("lang")
+    assert calls == []
+    assert any("尚未勾選高風險確認" in x for x in view._all_logs)
+
+    view.chk_danger_confirm.value = True
+    view._on_save_one_fill("lang")
+    assert calls == [{"write_new_shard": False, "only_types": ["lang"]}]
+
+
+def test_real_view_creates_the_danger_confirm_checkbox_in_the_actions_card():
+    """原本 chk_danger_confirm 從未被建立，確認檢查形同虛設。"""
+    from tests.conftest import mock_page
+
+    view = CacheView(mock_page())
+    assert isinstance(view.chk_danger_confirm, ft.Checkbox)
+    assert view.chk_danger_confirm.value is False
+
+    def walk(c):
+        yield c
+        for attr in ("controls", "content"):
+            child = getattr(c, attr, None)
+            if isinstance(child, list):
+                for x in child:
+                    yield from walk(x)
+            elif child is not None and not isinstance(child, str):
+                yield from walk(child)
+
+    assert any(c is view.chk_danger_confirm for c in walk(view.overview_page))

@@ -121,6 +121,12 @@ class CacheView(
             on_click=self._on_rebuild_index,
         )
 
+        # 「補滿舊檔」是覆寫既有分片的高風險動作：勾選後才會執行（_on_save_*_fill 會檢查）
+        self.chk_danger_confirm = ft.Checkbox(
+            label="我了解「補滿舊檔」會覆寫既有分片（高風險）",
+            value=False,
+        )
+
         # list + log controls
         self.type_list = ft.ListView(expand=True, spacing=6, auto_scroll=True)
         self.log_list = ft.ListView(expand=True, spacing=2, auto_scroll=True)

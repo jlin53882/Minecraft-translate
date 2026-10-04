@@ -14,7 +14,9 @@ import types
 
 import flet as ft
 
+from app.services_impl.pipelines.extract_service import open_output_folder
 from app.ui.design import C
+from app.ui.dialogs import close_overlay_dialog
 from translation_tool.utils.config_manager import load_config
 
 
@@ -182,8 +184,7 @@ def _translate_build_content(ctx):
 
 
 def _translate_close_dialog(ctx, dialog):
-    dialog.open = False
-    ctx.page.update()
+    close_overlay_dialog(ctx.page, dialog)
 
 
 def _translate_start_translate(ctx, dialog):
@@ -216,7 +217,8 @@ def _translate_pick_input_dir(ctx, e=None):
 def _translate_browse_input_dir(ctx, e=None):
     path = (ctx.translate_input_field.value or "").strip()
     if path and os.path.isdir(path):
-        os.startfile(path)
+        if not open_output_folder(path):
+            ctx.show_snack_bar("⚠️ 無法開啟資料夾")
     elif not path:
         ctx.show_snack_bar("⚠️ 請先選擇資料夾")
     else:
@@ -236,7 +238,8 @@ def _translate_pick_output_dir(ctx, e=None):
 def _translate_browse_output_dir(ctx, e=None):
     path = (ctx.translate_output_field.value or "").strip()
     if path and os.path.isdir(path):
-        os.startfile(path)
+        if not open_output_folder(path):
+            ctx.show_snack_bar("⚠️ 無法開啟資料夾")
     elif not path:
         ctx.show_snack_bar("⚠️ 請先選擇資料夾")
     else:

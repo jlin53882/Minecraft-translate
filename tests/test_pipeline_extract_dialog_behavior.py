@@ -292,7 +292,7 @@ def test_pick_cancelled_keeps_existing_value(env):
 
 def test_browse_opens_existing_dir_and_reports_bad_paths(env, monkeypatch):
     opened = []
-    monkeypatch.setattr(mod.os, "startfile", opened.append, raising=False)
+    monkeypatch.setattr(mod, "open_output_folder", lambda p: opened.append(p) or True)
     dialog = env.open()
     browse = [
         c for c in _walk(dialog) if isinstance(c, ft.Button) and c.content == "瀏覽"
@@ -481,3 +481,34 @@ def test_start_requires_at_least_one_language_code(env):
     assert "⚠️ 請至少選擇一個語言代碼" in env.snacks
     assert env.runs == []
     assert dialog.open is True
+
+
+def test_preview_cancel_stops_the_background_scan(env, monkeypatch):
+    """掃描中按「取消」要真的中止背景掃描（原本只關對話框，掃描仍跑到結束）。"""
+    seen = []
+
+    def gen(mods, mode, lang_codes=None):
+        yield {"progress": 0.1, "current": 1, "total": 3}
+        _button_in(pd, "取消").on_click(None)  # 使用者在掃描中途取消
+        yield {"progress": 0.2, "current": 2, "total": 3}
+        seen.append("不應該跑到這裡")
+        yield {"result": _result()}
+
+    monkeypatch.setattr(mod, "preview_extraction_generator", gen)
+    dialog = env.open()
+    _button(dialog, "預覽結果").on_click(None)
+    pd = env.page.overlay[-1]
+    env.threads[-1].target()
+    assert seen == []
+    assert pd.open is False and pd not in env.page.overlay
+    # poller 發現已取消，不再改動已關閉的對話框
+    content_before = pd.content
+    _drain(env.page)
+    assert pd.content is content_before
+
+
+def _button_in(dialog, label):
+    for a in dialog.actions:
+        if getattr(a, "content", None) == label:
+            return a
+    raise AssertionError(label)

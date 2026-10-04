@@ -32,6 +32,7 @@ def _build_actions_block(
     btn_reload_all: ft.Control,
     btn_refresh_stats: ft.Control,
     btn_rebuild_index: ft.Control,
+    chk_danger_confirm: ft.Control,
 ) -> ft.Control:
     """總覽頁的「操作」卡片。"""
     return kit.section_card(
@@ -46,6 +47,7 @@ def _build_actions_block(
                     spacing=10,
                     run_spacing=10,
                 ),
+                chk_danger_confirm,
             ],
             spacing=8,
         ),
@@ -87,6 +89,7 @@ def build_overview_page(
     btn_reload_all: ft.Control,
     btn_refresh_stats: ft.Control,
     btn_rebuild_index: ft.Control,  # A3 搜尋功能
+    chk_danger_confirm: ft.Control,
     sw_log_only_error: ft.Control,
     btn_log_copy: ft.Control,
     btn_log_clear: ft.Control,
@@ -104,6 +107,7 @@ def build_overview_page(
         btn_reload_all,
         btn_refresh_stats,
         btn_rebuild_index,
+        chk_danger_confirm,
     )
 
     help_block = _build_help_block()

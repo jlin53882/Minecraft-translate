@@ -18,9 +18,11 @@ import flet as ft
 
 from app.services_impl.pipelines.extract_service import (
     find_jar_files,
+    open_output_folder,
     preview_extraction_generator,
 )
 from app.ui.design import C
+from app.ui.dialogs import close_overlay_dialog
 from app.views.extractor.extractor_state import PreviewState
 from translation_tool.utils.config_manager import load_config
 
@@ -195,8 +197,7 @@ def _extract_build_content(ctx, lang_codes_section):
 
 
 def _extract_close_dialog(ctx, dialog):
-    dialog.open = False
-    ctx.page.update()
+    close_overlay_dialog(ctx.page, dialog)
 
 
 def _extract_start_extraction(ctx, dialog):
@@ -245,7 +246,8 @@ def _extract_pick_mods_dir(ctx, e=None):
 def _extract_browse_mods_dir(ctx, e=None):
     path = (ctx.mods_field.value or "").strip()
     if path and os.path.isdir(path):
-        os.startfile(path)
+        if not open_output_folder(path):
+            ctx.show_snack_bar("⚠️ 無法開啟資料夾")
     elif not path:
         ctx.show_snack_bar("⚠️ 請先選擇資料夾")
     else:
@@ -265,19 +267,27 @@ def _extract_pick_output_dir(ctx, e=None):
 def _extract_browse_output_dir(ctx, e=None):
     path = (ctx.output_field.value or "").strip()
     if path and os.path.isdir(path):
-        os.startfile(path)
+        if not open_output_folder(path):
+            ctx.show_snack_bar("⚠️ 無法開啟資料夾")
     elif not path:
         ctx.show_snack_bar("⚠️ 請先選擇資料夾")
     else:
         ctx.show_snack_bar("⚠️ 路徑不存在")
 
 
-def _extract_preview_worker(preview_state, mods, mode, selected_codes) -> None:
-    """背景執行緒：跑預覽 generator，只寫入 preview_state（不碰任何控制項）。"""
+def _extract_preview_worker(
+    preview_state, mods, mode, selected_codes, cancel_event=None
+) -> None:
+    """背景執行緒：跑預覽 generator，只寫入 preview_state（不碰任何控制項）。
+
+    ``cancel_event`` 被設定（使用者按「取消」）時在下一筆更新就停止掃描。
+    """
     try:
         for update in preview_extraction_generator(
             mods, mode, lang_codes=selected_codes
         ):
+            if cancel_event is not None and cancel_event.is_set():
+                break
             if "error" in update:
                 preview_state.error = update["error"]
                 break
@@ -351,9 +361,11 @@ def _extract_preview_result_content(
     )
 
 
-def _extract_close_preview_dialog(ctx, d) -> None:
-    d.open = False
-    ctx.page.update()
+def _extract_close_preview_dialog(ctx, d, cancel_event=None) -> None:
+    """關閉預覽對話框；掃描中按「取消」時一併中止背景掃描。"""
+    if cancel_event is not None:
+        cancel_event.set()
+    close_overlay_dialog(ctx.page, d)
 
 
 def _extract_preview_apply_final(
@@ -379,11 +391,18 @@ def _extract_preview_apply_final(
 
 
 async def _extract_preview_poll(
-    ctx, preview_dialog, preview_state, mode, total_jars, width
+    ctx, preview_dialog, preview_state, mode, total_jars, width, cancel_event=None
 ) -> None:
-    """在 event loop 上輪詢預覽進度；背景執行緒不直接碰控制項。"""
+    """在 event loop 上輪詢預覽進度；背景執行緒不直接碰控制項。
+
+    使用者取消（``cancel_event``）後立即結束輪詢，不再改動已關閉的對話框。
+    """
     while not preview_state.done:
+        if cancel_event is not None and cancel_event.is_set():
+            return
         await asyncio.sleep(0.2)
+        if cancel_event is not None and cancel_event.is_set():
+            return
         pct = int(preview_state.progress * 100)
         preview_dialog.content = ft.Container(
             content=ft.Text(
@@ -392,6 +411,8 @@ async def _extract_preview_poll(
             width=width,
         )
         ctx.page.update()
+    if cancel_event is not None and cancel_event.is_set():
+        return
     _extract_preview_apply_final(
         ctx, preview_dialog, preview_state, mode, total_jars, width
     )
@@ -417,10 +438,16 @@ def _extract_show_preview_result(ctx, dialog):
     preview_state = PreviewState()
     preview_state.total = total_jars
     preview_state.current = 0
+    cancel_event = threading.Event()
 
     threading.Thread(
         target=functools.partial(
-            _extract_preview_worker, preview_state, mods, mode, selected_codes
+            _extract_preview_worker,
+            preview_state,
+            mods,
+            mode,
+            selected_codes,
+            cancel_event,
         ),
         daemon=True,
     ).start()
@@ -435,7 +462,9 @@ def _extract_show_preview_result(ctx, dialog):
         actions=[
             ft.TextButton(
                 "取消",
-                on_click=lambda e: _extract_close_preview_dialog(ctx, preview_dialog),
+                on_click=lambda e: _extract_close_preview_dialog(
+                    ctx, preview_dialog, cancel_event
+                ),
             )
         ],
     )
@@ -446,7 +475,13 @@ def _extract_show_preview_result(ctx, dialog):
 
     async def poll_preview():
         await _extract_preview_poll(
-            ctx, preview_dialog, preview_state, mode, total_jars, preview_dialog_width
+            ctx,
+            preview_dialog,
+            preview_state,
+            mode,
+            total_jars,
+            preview_dialog_width,
+            cancel_event,
         )
 
     ctx.page.run_task(poll_preview)

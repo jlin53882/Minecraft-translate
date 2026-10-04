@@ -401,7 +401,7 @@ def test_pick_folder_cancelled_keeps_value(env):
 
 def test_browse_buttons_validate_path(env, tmp_path, monkeypatch):
     opened = []
-    monkeypatch.setattr(mod.os, "startfile", opened.append, raising=False)
+    monkeypatch.setattr(mod, "open_output_folder", lambda p: opened.append(p) or True)
     dialog = env.open()
     browse = [
         c for c in _walk(dialog) if isinstance(c, ft.Button) and c.content == "瀏覽"
@@ -425,7 +425,8 @@ def test_cancel_closes_without_running_and_reopen_gives_new_dialog(env):
     assert env.runs == []
     again = env.open()
     assert again is not dialog and again.open is True
-    assert [d.open for d in env.page.overlay] == [False, True]
+    # 關閉後會從 overlay 移除，不會一直累積已關閉的對話框
+    assert env.page.overlay == [again]
 
 
 @pytest.mark.parametrize(

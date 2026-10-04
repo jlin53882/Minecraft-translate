@@ -493,7 +493,7 @@ def test_pick_cancelled_keeps_input_value(env):
 
 def test_browse_input_dir_messages_and_open(env, monkeypatch):
     opened = []
-    monkeypatch.setattr(mod.os, "startfile", opened.append, raising=False)
+    monkeypatch.setattr(mod, "open_output_folder", lambda p: opened.append(p) or True)
     dialog = env.open_typing_input(env.out)
     browse = _inner_button(dialog, "瀏覽")
     browse.on_click(None)
@@ -539,3 +539,26 @@ def test_preview_falls_back_to_default_input_when_field_blank(env):
     _button(dialog, "預覽結果").on_click(None)
     assert env.snacks == ["🔍 預覽功能待實作"]
     assert dialog.open is True
+
+
+def test_browse_reports_failure_when_folder_cannot_be_opened(env, monkeypatch):
+    """非 Windows 或開啟失敗時顯示提示，而不是在 handler 內丟 AttributeError。"""
+    monkeypatch.setattr(mod, "open_output_folder", lambda p: False)
+    dialog = env.open_typing_input(env.out)
+    _inner_button(dialog, "瀏覽").on_click(None)
+    assert env.snacks == ["⚠️ 無法開啟資料夾"]
+
+
+def test_closing_removes_dialog_from_overlay_after_sending_close(env):
+    dialog = env.open()
+    seen = []
+    original = env.page.update
+
+    def spy(*a, **k):
+        seen.append((dialog.open, dialog in env.page.overlay))
+        return original(*a, **k)
+
+    env.page.update = spy
+    _button(dialog, "取消").on_click(None)
+    assert (False, True) in seen  # 先送出 open=False，再移除
+    assert dialog not in env.page.overlay

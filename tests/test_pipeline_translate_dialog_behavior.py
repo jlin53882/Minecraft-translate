@@ -194,4 +194,4 @@ def test_cancel_closes_without_running_and_reopen_is_new_dialog(env):
     assert dialog.open is False and env.runs == []
     again = env.open()
     assert again is not dialog and again.open is True
-    assert [d.open for d in env.page.overlay] == [False, True]
+    assert env.page.overlay == [again]  # 關閉後移出 overlay，不累積

@@ -83,5 +83,5 @@ def test_pipeline_merge_cancel_action_closes_and_reopens_dialog(
 
     assert reopened_dialog is not first_dialog
     assert reopened_dialog.open is True
-    assert sum(dialog.open for dialog in page.overlay) == 1
-    assert len(updates) == 3
+    assert page.overlay == [reopened_dialog]  # 關閉後移出 overlay
+    assert len(updates) == 4  # 開啟、關閉、移除、再開啟

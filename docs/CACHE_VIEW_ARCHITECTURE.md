@@ -6,7 +6,7 @@ CacheView（`app/views/cache_view.py` 為主入口；功能實作以 mixin 拆�
 
 | 區域 | 功能 |
 |------|------|
-| 總覽 | 四張統計卡（快取總筆數 / 有變更的類型 / 快取類型 / 最近儲存）、預設收合的「詳細資訊」；下方左側「分類狀態清單」（各 cache_type 卡片：重新載入 / 新分片 / 補滿舊檔 / 輪替分片 / 分析 / 切換查詢），右側「操作」卡（狀態列、重新載入全部、刷新統計、重建搜尋索引）、預設收合的「按鈕說明」與「日誌」（預設開啟「只看警告以上」，另有複製全部 / 清空） |
+| 總覽 | 四張統計卡（快取總筆數 / 有變更的類型 / 快取類型 / 最近儲存）、預設收合的「詳細資訊」；下方左側「分類狀態清單」（各 cache_type 卡片：重新載入 / 新分片 / 補滿舊檔 / 輪替分片 / 分析 / 切換查詢），右側「操作」卡（狀態列、重新載入全部、刷新統計、重建搜尋索引、「補滿舊檔」高風險確認勾選）、預設收合的「按鈕說明」與「日誌」（預設開啟「只看警告以上」，另有複製全部 / 清空） |
 | 查詢 | 查詢頁內有「查詢區」與「分類/分片」兩個子分頁（預設「查詢區」）。查詢區為「查詢區塊（Explorer）」：關鍵字輸入（placeholder「輸入 key / dst / 關鍵字」）+「搜尋」「清空」，模式與分類兩個下拉預設皆「全部」（Key / DST / 全部模式，含全文索引），左側「結果列表」（空時顯示「沒有搜尋結果」）、右側「內容檢視」（Key / 類型 / Shard / Cache 狀態、可展開 SRC）與「歷史紀錄」按鈕，底部為分頁列（每頁預設 50）與「套用」「還原」「還原最新」 |
 | 分片編輯 | 「分類/分片」子分頁依 cache_type 列出卡片（分片編號、狀態、筆數、shard 使用量、「切換查詢」與預設收合的「分片清單」）；進入 shard → 選 key → SRC 預覽（preview/raw 模式）、編輯 dst、復原、複製、還原最新、套用歷史版本 |
 | 歷史 | 查詢區與分片區各有一個浮動視窗（標題「版本歷史紀錄」，預設隱藏，由「歷史紀錄」按鈕開啟），查看/套用歷史事件 |
@@ -54,7 +54,7 @@ CacheView（主入口）
 - `_build_overview_page()`：組裝總覽頁（UI 組裝已抽到 `cache_overview_panel.build_overview_page`）
 - `_run_action(reason, work_fn, success_msg, show_progress=False)`：共用動作包裝（busy 狀態 + SnackBar），委派 `run_cache_action`
 - `_on_reload_all` / `_on_reload_one` / `_on_save_all_new` / `_on_save_all_fill` / `_on_save_one_new` / `_on_save_one_fill` / `_on_rotate_one` / `_on_analyze_one` / `_on_jump_to_query_type` / `_on_rebuild_index` / `_on_refresh_stats`
-- 「補滿舊檔」為高風險動作，程式以 `hasattr(self, "chk_danger_confirm")` 判斷確認勾選；但目前沒有任何程式碼建立 `chk_danger_confirm`，因此此確認檢查實際不生效
+- 「補滿舊檔」為高風險動作：總覽頁「操作」卡片內有確認勾選 `chk_danger_confirm`（「我了解「補滿舊檔」會覆寫既有分片（高風險）」，預設未勾選）；`_on_save_all_fill` / `_on_save_one_fill` 在未勾選時只提示「尚未勾選高風險確認」而不執行
 
 ### 查詢區
 - `_on_query_search()`：模式 `KEY` / `DST` / `ALL`（預設 ALL）、分類預設全部；搜尋在 `asyncio.to_thread` 執行，以 `_query_seq` 只套用最後一次結果 → `_render_query_results()`

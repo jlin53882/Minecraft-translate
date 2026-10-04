@@ -17,11 +17,13 @@ from pathlib import Path
 
 import flet as ft
 
+from app.services_impl.pipelines.extract_service import open_output_folder
 from app.services_impl.pipelines.merge_service import (
     run_merge_zip_batch_service,  # noqa: F401
 )
 from app.tasks.task_session import TaskSession  # noqa: F401
 from app.ui.design import C
+from app.ui.dialogs import close_overlay_dialog
 from translation_tool.utils.config_manager import load_config
 
 
@@ -387,8 +389,7 @@ def _merge_on_input_mode_changed(ctx, e=None):
 
 
 def _merge_close_dialog(ctx, dialog):
-    dialog.open = False
-    ctx.page.update()
+    close_overlay_dialog(ctx.page, dialog)
 
 
 def _merge_update_patchouli_controls(ctx):
@@ -465,7 +466,8 @@ def _merge_remove_merge_zip(ctx, path: str):
 def _merge_browse_folder_input(ctx, e=None):
     path = (ctx.merge_folder_field.value or "").strip()
     if path and os.path.isdir(path):
-        os.startfile(path)
+        if not open_output_folder(path):
+            ctx.show_snack_bar("⚠️ 無法開啟資料夾")
     elif not path:
         ctx.show_snack_bar("⚠️ 請先選擇資料夾")
     else:
@@ -485,7 +487,8 @@ def _merge_pick_output_dir(ctx, e=None):
 def _merge_browse_output_dir(ctx, e=None):
     path = (ctx.merge_output_dir_field.value or "").strip()
     if path and os.path.isdir(path):
-        os.startfile(path)
+        if not open_output_folder(path):
+            ctx.show_snack_bar("⚠️ 無法開啟資料夾")
     elif not path:
         ctx.show_snack_bar("⚠️ 請先選擇資料夾")
     else:

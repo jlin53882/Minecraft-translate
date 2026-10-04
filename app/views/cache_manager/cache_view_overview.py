@@ -49,6 +49,7 @@ class CacheOverviewMixin:
             btn_reload_all=self.btn_reload_all,
             btn_refresh_stats=self.btn_refresh_stats,
             btn_rebuild_index=self.btn_rebuild_index,  # A3 搜尋功能
+            chk_danger_confirm=self.chk_danger_confirm,
             sw_log_only_error=self.sw_log_only_error,
             btn_log_copy=self.btn_log_copy,
             btn_log_clear=self.btn_log_clear,
@@ -342,9 +343,7 @@ class CacheOverviewMixin:
 
     def _on_save_all_fill(self, e):
         """觸發補滿所有活躍分片（高風險，長時間操作）"""
-        if hasattr(self, "chk_danger_confirm") and not bool(
-            getattr(self.chk_danger_confirm, "value", False)
-        ):
+        if not self.chk_danger_confirm.value:
             self._notify("尚未勾選高風險確認", "warn")
             return
         self._run_action(
@@ -425,9 +424,7 @@ class CacheOverviewMixin:
 
     def _on_save_one_fill(self, cache_type: str):
         """補滿指定類型的活躍分片（高風險）"""
-        if hasattr(self, "chk_danger_confirm") and not bool(
-            getattr(self.chk_danger_confirm, "value", False)
-        ):
+        if not self.chk_danger_confirm.value:
             self._notify("尚未勾選高風險確認", "warn")
             return
         self._run_action(
