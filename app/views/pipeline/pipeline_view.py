@@ -754,15 +754,20 @@ class PipelineView(ft.Column):
                 sources.append((cfg.extract_lang_output_dir, True))
             if mode in ("book", "dual"):
                 sources.append((cfg.extract_book_output_dir, False))
-            for src, only_lang in sources:
+            total_sources = len(sources)
+            for source_index, (src, only_lang) in enumerate(sources):
                 yield from run_merge_folder_batch_service(
                     input_dir=src,
                     session=session,
                     only_process_lang=only_lang,
+                    progress_start=source_index / total_sources,
+                    progress_end=(source_index + 1) / total_sources,
+                    finish_session=False,
                     **merge_options,
                 )
                 if self._session_failed(session):
                     return
+            session.finish()
 
         def translate(session):
             inputs = [d for d in cfg.translate_input_dirs if _has_files(d)]

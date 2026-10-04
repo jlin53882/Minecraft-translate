@@ -514,16 +514,6 @@ def merge_extracted_to_assets(
         had_errors = False
         error_details: list[str] = []
 
-        # 進度範圍:session.progress (階段 1 完成時已 1.0) → 1.0
-        # 但我們要給階段 2 留 mirror 2.5% 空間,讓 UI 看到階段 2 在跑
-        # 公式: base_progress + (idx / total_modids) * (1.0 - base_progress)
-        if session is not None and hasattr(session, "snapshot"):
-            # session.progress 通常 1.0 (階段 1 已經填滿)
-            base_progress = max(0.0, min(0.999, session.progress))
-        else:
-            base_progress = 0.0
-        span = 1.0 - base_progress
-
         for idx, (modid, lang_files) in enumerate(extracted.items(), start=1):
             # 2026-08-02 重構:Stage 2 不再走 self-written key-by-key merge,
             # 改用 Stage 1 拆出來的 merge_lang_dicts helper (reused),
@@ -653,7 +643,7 @@ def merge_extracted_to_assets(
                 total_warnings += 1
                 had_errors = True
                 error_details.append(mod_error)
-                progress = base_progress + (idx / total_modids) * span
+                progress = idx / total_modids
                 yield {"progress": progress, "log": None, "error": False}
                 continue
 
@@ -672,7 +662,7 @@ def merge_extracted_to_assets(
                     session, f"  ✓ {modid}: +{mod_added_count} 個 key 進 assets/"
                 )
 
-            progress = base_progress + (idx / total_modids) * span
+            progress = idx / total_modids
             yield {
                 "progress": progress,
                 "log": None,

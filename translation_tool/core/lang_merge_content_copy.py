@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -15,10 +16,11 @@ from ..utils.log_unit import log_debug, log_error, log_info, log_warning
 from ..utils.zip_safety import UnsafePathError, safe_join
 
 # ----------------------------------------------------------------------
-# Module-level cache for patchouli effectiveness results
-# Key: (book_root_lower, threshold) → (zh_tw: bool, zh_cn: bool)
+# Backwards-compatible fallback cache for direct helper callers. Production
+# merge runs pass a fresh per-invocation cache through process_content... .
 # ----------------------------------------------------------------------
 _patchouli_eff_cache: dict = {}
+_patchouli_eff_cache_lock = threading.RLock()
 
 
 # ----------------------------------------------------------------------
@@ -32,6 +34,7 @@ def _compute_patchouli_lang_effectiveness(
     all_names: list[str]
     | None = None,  # 2026-08-04: 預先算好的檔案列表,避免重複 reader.list_all()
     cache_namespace: object | None = None,
+    cache_store: dict | None = None,
 ) -> dict[str, bool]:
     """Compute effective translation status for zh_tw and zh_cn in a book_root.
 
@@ -48,68 +51,81 @@ def _compute_patchouli_lang_effectiveness(
     TEXT_EXTS = {".json", ".md", ".txt"}
 
     book_root_lower = book_root.lower()
-    # Reader identity is part of the key.  The same book path can exist in
-    # multiple input folders/archives during one process; sharing the result
-    # between those sources can reuse stale effectiveness data.
-    cache_key = (cache_namespace, book_root_lower, threshold)
+    # A supplied cache belongs to one merge invocation.  The fallback module
+    # cache is kept only for backwards-compatible direct callers and is
+    # isolated by reader identity to prevent cross-source reuse.
+    cache = cache_store if cache_store is not None else _patchouli_eff_cache
+    cache_key = (
+        (book_root_lower, threshold)
+        if cache_store is not None
+        else (cache_namespace, book_root_lower, threshold)
+    )
 
     # ── 1. Cache lookup ────────────────────────────────────────────────
-    if cache_key in _patchouli_eff_cache:
-        log_debug(
-            f"[Patchouli Eff] cache hit for book_root={book_root!r} threshold={threshold}"
-        )
-        return _patchouli_eff_cache[cache_key]
+    with _patchouli_eff_cache_lock:
+        if cache_key in cache:
+            log_debug(
+                f"[Patchouli Eff] cache hit for book_root={book_root!r} threshold={threshold}"
+            )
+            return cache[cache_key]
 
     log_debug(
         f"[Patchouli Eff] cache miss for book_root={book_root!r} threshold={threshold}, computing…"
     )
 
-    result: dict[str, bool] = {"zh_tw": False, "zh_cn": False}
+    # Hold the per-key lifecycle lock through the computation.  This is a
+    # small single-flight guard: concurrent workers for the same book cannot
+    # all perform the expensive traversal and CJK scan.
+    with _patchouli_eff_cache_lock:
+        if cache_key in cache:
+            return cache[cache_key]
 
-    for lang in ("zh_tw", "zh_cn"):
-        prefix_lower = book_root_lower + lang + "/"
-        text_files: list[str] = []
-        # 2026-08-04 性能優化:用預先算好的 all_names,避免每次呼叫 reader.list_all()
-        _names = all_names if all_names is not None else reader.list_all()
-        for name in _names:
-            if name.lower().startswith(prefix_lower):
-                ext = os.path.splitext(name)[1].lower()
-                if ext in TEXT_EXTS:
-                    text_files.append((name, ext))
+        result: dict[str, bool] = {"zh_tw": False, "zh_cn": False}
 
-        if not text_files:
-            continue
+        for lang in ("zh_tw", "zh_cn"):
+            prefix_lower = book_root_lower + lang + "/"
+            text_files: list[str] = []
+            # 2026-08-04 性能優化:用預先算好的 all_names,避免每次呼叫 reader.list_all()
+            _names = all_names if all_names is not None else reader.list_all()
+            for name in _names:
+                if name.lower().startswith(prefix_lower):
+                    ext = os.path.splitext(name)[1].lower()
+                    if ext in TEXT_EXTS:
+                        text_files.append((name, ext))
 
-        effective_count = 0
-        for fname, ext in text_files:
-            try:
-                raw = reader.read_text(fname)
-                if ext == ".json":
-                    try:
-                        data = json_module.loads(raw)
-                        strings = _extract_all_strings(data)
-                    except Exception as exc:  # noqa: BLE001 - 解析失敗的檔案不計入有效翻譯，已留 debug 紀錄
-                        log_debug(f"略過無法解析的 JSON {fname}: {exc!r}")
-                        continue
-                else:
-                    strings = [raw]
-
-                total = sum(len(s) for s in strings if isinstance(s, str))
-                if total == 0:
-                    continue
-                cjk_chars = sum(
-                    len(CJK_RE.findall(s)) for s in strings if isinstance(s, str)
-                )
-                if total > 0 and cjk_chars / total >= 0.5:
-                    effective_count += 1
-            except Exception as exc:  # noqa: BLE001 - 單一檔案失敗不中斷整批統計，已留 debug 紀錄
-                log_debug(f"有效翻譯統計略過檔案 {fname}: {exc!r}")
+            if not text_files:
                 continue
 
-        ratio = effective_count / len(text_files) if text_files else 0
-        result[lang] = ratio >= threshold
+            effective_count = 0
+            for fname, ext in text_files:
+                try:
+                    raw = reader.read_text(fname)
+                    if ext == ".json":
+                        try:
+                            data = json_module.loads(raw)
+                            strings = _extract_all_strings(data)
+                        except Exception as exc:  # noqa: BLE001 - 解析失敗的檔案不計入有效翻譯，已留 debug 紀錄
+                            log_debug(f"略過無法解析的 JSON {fname}: {exc!r}")
+                            continue
+                    else:
+                        strings = [raw]
 
-    _patchouli_eff_cache[cache_key] = result
+                    total = sum(len(s) for s in strings if isinstance(s, str))
+                    if total == 0:
+                        continue
+                    cjk_chars = sum(
+                        len(CJK_RE.findall(s)) for s in strings if isinstance(s, str)
+                    )
+                    if total > 0 and cjk_chars / total >= 0.5:
+                        effective_count += 1
+                except Exception as exc:  # noqa: BLE001 - 單一檔案失敗不中斷整批統計，已留 debug 紀錄
+                    log_debug(f"有效翻譯統計略過檔案 {fname}: {exc!r}")
+                    continue
+
+            ratio = effective_count / len(text_files) if text_files else 0
+            result[lang] = ratio >= threshold
+
+        cache[cache_key] = result
     log_debug(
         f"[Patchouli Eff] cached result for {book_root!r} threshold={threshold}: {result}"
     )
@@ -301,7 +317,7 @@ def process_content_or_copy_file_impl(
         # 優先使用外部傳入的預掃描 cache，否則走內部 _compute_patchouli_lang_effectiveness（自帶 module-level cache）
         book_root_lower = book_root.lower()
         cache_namespace = id(reader)
-        cache_key = (cache_namespace, book_root_lower, _threshold)
+        cache_key = (book_root_lower, _threshold)
         if patchouli_eff_cache is not None and cache_key in patchouli_eff_cache:
             eff = patchouli_eff_cache[cache_key]
             log_debug(f"[Patchouli Eff] 使用外部預掃描 cache for {book_root!r}: {eff}")
@@ -313,6 +329,7 @@ def process_content_or_copy_file_impl(
                 json_module=json_module,
                 all_names=_all_names,  # 2026-08-04: 傳入預先算好的檔案列表
                 cache_namespace=cache_namespace,
+                cache_store=patchouli_eff_cache,
             )
         has_eff_zh_tw = bool(eff.get("zh_tw", False))
         has_eff_zh_cn = bool(eff.get("zh_cn", False))

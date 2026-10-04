@@ -27,6 +27,11 @@ from .lang_merge_io import FolderReader, ZipReader
 from .lang_merge_pipeline import _process_single_mod, detect_mod_wrapper_prefix
 
 
+def _scale_progress(value: float, start: float, end: float) -> float:
+    """Map source-local progress into the caller's progress range."""
+    return start + max(0.0, min(1.0, value)) * (end - start)
+
+
 def merge_zhcn_to_zhtw_from_zip(
     zip_file: str,
     output_dir: str,
@@ -35,6 +40,8 @@ def merge_zhcn_to_zhtw_from_zip(
     patchouli_skip: bool | None = None,
     patchouli_threshold: float | None = None,
     zh_en_threshold: int | None = None,
+    progress_start: float = 0.0,
+    progress_end: float = 1.0,
 ) -> Generator[dict[str, Any], None, None]:
     """將 ZIP 檔案中的簡體中文合併為繁體中文。
 
@@ -50,6 +57,7 @@ def merge_zhcn_to_zhtw_from_zip(
         負責掃描 ZIP、分類每個 mod 的 zh_cn/zh_tw/en_us、
         決定各模組執行哪些步驟，最終回傳產生的 log/progress
     """
+    processing_end = progress_start + (progress_end - progress_start) * 0.90
     os.makedirs(output_dir, exist_ok=True)
     # 新結構：輸出分為三個子目錄
     # - lang_output/：lang 合併輸出（含待翻譯）
@@ -77,7 +85,7 @@ def merge_zhcn_to_zhtw_from_zip(
         )
     except Exception as e:  # noqa: BLE001
         log_error(f"載入替換規則失敗: {e}")
-        yield {"progress": 0.0, "error": True}
+        yield {"progress": _scale_progress(0.0, progress_start, progress_end), "error": True}
         return
 
     # --- 新增：檢查 ZIP 檔案是否存在 ---
@@ -85,7 +93,7 @@ def merge_zhcn_to_zhtw_from_zip(
         full_path = os.path.abspath(zip_file)  # 取得絕對路徑，方便除錯
         log_warning(f"檔案不存在，已跳過: {full_path}")
         yield {
-            "progress": 1.0,
+            "progress": _scale_progress(1.0, progress_start, progress_end),
             # "log": f"跳過：找不到檔案 {full_path}",
             "error": False,  # 設為 False 是為了讓程式繼續執行下一個任務而不中斷
         }
@@ -95,7 +103,7 @@ def merge_zhcn_to_zhtw_from_zip(
     try:
         with zipfile.ZipFile(zip_file, "r") as zf:
             yield {
-                "progress": 0.0,
+                "progress": _scale_progress(0.0, progress_start, progress_end),
                 "log": f"分析 ZIP 檔案: {os.path.basename(zip_file)}",
             }
 
@@ -195,16 +203,17 @@ def merge_zhcn_to_zhtw_from_zip(
                 k: v for k, v in lang_files_by_mod.items() if v
             }  # 只取有任何 lang 檔的 mod
             total_lang_mods = len(mods_to_process)
-            total_content_files = len(other_files)
+            eligible_other_files = [] if only_process_lang else other_files
+            total_content_files = len(eligible_other_files)
             total_tasks = total_lang_mods + total_content_files
             if total_tasks == 0:
                 log_info("未找到任何可處理的文件，處理結束。")
-                yield {"progress": 1.0, "error": False}
+                yield {"progress": _scale_progress(1.0, progress_start, progress_end), "error": False}
                 return
             log_info(
                 f"找到 {total_lang_mods} 個語言模組與 {total_content_files} 個內容檔案，開始處理..."
             )
-            yield {"progress": 0.0}
+            yield {"progress": _scale_progress(0.0, progress_start, progress_end)}
 
             # 使用 ThreadPoolExecutor 處理（你可以依需求調整 max_workers）
             # 讀取config 設定資料
@@ -252,7 +261,8 @@ def merge_zhcn_to_zhtw_from_zip(
                     )
 
                 # 提交其他檔案處理（例如圖片、md、json5、localized files 等）
-                for input_path in other_files:
+                patchouli_eff_cache: dict = {}
+                for input_path in eligible_other_files:
                     futures.append(
                         executor.submit(
                             _process_content_or_copy_file,
@@ -263,6 +273,7 @@ def merge_zhcn_to_zhtw_from_zip(
                             only_process_lang,
                             all_files_cache=all_files_cache,
                             wrapper_prefix=content_wrapper_prefix,
+                            patchouli_eff_cache=patchouli_eff_cache,
                             patchouli_output_dir=patchouli_output_dir,
                             other_output_dir=other_output_dir,
                             errordata_dir=errordata_output_dir,
@@ -282,7 +293,9 @@ def merge_zhcn_to_zhtw_from_zip(
                         log_error(f"處理時發生未預期錯誤: {e}")
                         res = {"success": False, "error": True}
 
-                    progress = completed / total_tasks
+                    progress = _scale_progress(
+                        completed / total_tasks, progress_start, processing_end
+                    )
                     # ⭐ 修改重點：無論有沒有 log，都要 yield 進度
                     # 這樣 UI 才會收到 progress 並更新進度條
 
@@ -311,9 +324,13 @@ def merge_zhcn_to_zhtw_from_zip(
                     f"ZIP 累計讀取預算已用盡，輸出不完整：{os.path.basename(zip_file)}"
                     "（預算用盡後的檔案都未處理，請檢查 ZIP 是否異常龐大）"
                 )
+            # Worker processing is complete; finalize work owns the remaining
+            # progress range so the UI does not claim 100% prematurely.
+            yield {"progress": _scale_progress(0.90, progress_start, progress_end)}
             # <--- 在這裡插入清理代碼 --->
             log_info("正在清理空的待翻譯資料夾...")
             remove_empty_dirs(must_translate_dir)
+            yield {"progress": _scale_progress(0.94, progress_start, progress_end)}
             # 🔥 新增：輸出整理後的待翻譯檔案（位於 lang_output/）
             # 讀取config 設定資料
             folder_name = (
@@ -334,6 +351,7 @@ def merge_zhcn_to_zhtw_from_zip(
                 filtered_pending_dir,
                 min_count=filtered_pending_min_count,
             )
+            yield {"progress": _scale_progress(0.98, progress_start, progress_end)}
             # <--- 插入結束 --->
             if budget_exhausted:
                 incomplete_msg = (
@@ -341,17 +359,21 @@ def merge_zhcn_to_zhtw_from_zip(
                     f"（{os.path.basename(zip_file)}），部分檔案未處理 ---"
                 )
                 log_error(incomplete_msg)
-                yield {"progress": 1.0, "error": True, "log": incomplete_msg}
+                yield {
+                    "progress": _scale_progress(1.0, progress_start, progress_end),
+                    "error": True,
+                    "log": incomplete_msg,
+                }
                 return
             log_info(f"--- 全部處理完成: {total_tasks} 個任務完成 ---")
-            yield {"progress": 1.0}
+            yield {"progress": _scale_progress(1.0, progress_start, progress_end)}
 
     except zipfile.BadZipFile:
         log_error(f"錯誤：檔案 '{zip_file}' 不是有效 ZIP。")
-        yield {"progress": 1.0, "error": True}
+        yield {"progress": _scale_progress(1.0, progress_start, progress_end), "error": True}
     except Exception as e:  # noqa: BLE001
         log_exception(f"處理 ZIP 發生錯誤: {e}")
-        yield {"progress": 1.0, "error": True}
+        yield {"progress": _scale_progress(1.0, progress_start, progress_end), "error": True}
 
 
 def merge_zhcn_to_zhtw_from_folder(
@@ -362,6 +384,8 @@ def merge_zhcn_to_zhtw_from_folder(
     patchouli_skip: bool | None = None,
     patchouli_threshold: float | None = None,
     zh_en_threshold: int | None = None,
+    progress_start: float = 0.0,
+    progress_end: float = 1.0,
 ) -> Generator[dict[str, Any], None, None]:
     """將資料夾中的簡體中文合併為繁體中文。
 
@@ -379,6 +403,7 @@ def merge_zhcn_to_zhtw_from_folder(
     Yields:
         進度字典，包含 progress、log、error 等資訊
     """
+    processing_end = progress_start + (progress_end - progress_start) * 0.90
     os.makedirs(output_dir, exist_ok=True)
     lang_output_dir = os.path.join(output_dir, "lang_output")
     patchouli_output_dir = os.path.join(output_dir, "patchouli_output")
@@ -402,18 +427,21 @@ def merge_zhcn_to_zhtw_from_folder(
         )
     except Exception as e:  # noqa: BLE001
         log_error(f"載入替換規則失敗: {e}")
-        yield {"progress": 0.0, "error": True}
+        yield {"progress": _scale_progress(0.0, progress_start, progress_end), "error": True}
         return
 
     if not os.path.exists(input_dir):
         full_path = os.path.abspath(input_dir)
         log_warning(f"資料夾不存在，已跳過: {full_path}")
-        yield {"progress": 1.0, "error": False}
+        yield {"progress": _scale_progress(1.0, progress_start, progress_end), "error": False}
         return
 
     try:
         reader = FolderReader(input_dir)
-        yield {"progress": 0.0, "log": f"分析資料夾: {os.path.basename(input_dir)}"}
+        yield {
+            "progress": _scale_progress(0.0, progress_start, progress_end),
+            "log": f"分析資料夾: {os.path.basename(input_dir)}",
+        }
 
         all_names = reader.list_all()
         strip_wrapper = None
@@ -464,16 +492,17 @@ def merge_zhcn_to_zhtw_from_folder(
 
         mods_to_process = {k: v for k, v in lang_files_by_mod.items() if v}
         total_lang_mods = len(mods_to_process)
-        total_content_files = len(other_files)
+        eligible_other_files = [] if only_process_lang else other_files
+        total_content_files = len(eligible_other_files)
         total_tasks = total_lang_mods + total_content_files
         if total_tasks == 0:
             log_info("未找到任何可處理的文件，處理結束。")
-            yield {"progress": 1.0, "error": False}
+            yield {"progress": _scale_progress(1.0, progress_start, progress_end), "error": False}
             return
         log_info(
             f"找到 {total_lang_mods} 個語言模組與 {total_content_files} 個內容檔案，開始處理..."
         )
-        yield {"progress": 0.0}
+        yield {"progress": _scale_progress(0.0, progress_start, progress_end)}
 
         cpu_count = os.cpu_count() or 2
         max_allowed_workers = max(1, cpu_count // 2)
@@ -509,7 +538,8 @@ def merge_zhcn_to_zhtw_from_folder(
                     )
                 )
 
-            for input_path in other_files:
+            patchouli_eff_cache: dict = {}
+            for input_path in eligible_other_files:
                 futures.append(
                     executor.submit(
                         _process_content_or_copy_file,
@@ -520,6 +550,7 @@ def merge_zhcn_to_zhtw_from_folder(
                         only_process_lang,
                         all_files_cache=all_files_cache,
                         wrapper_prefix=content_wrapper_prefix,
+                        patchouli_eff_cache=patchouli_eff_cache,
                         patchouli_output_dir=patchouli_output_dir,
                         other_output_dir=other_output_dir,
                         errordata_dir=errordata_output_dir,
@@ -539,7 +570,9 @@ def merge_zhcn_to_zhtw_from_folder(
                     log_error(f"處理時發生未預期錯誤: {e}")
                     res = {"success": False, "error": True}
 
-                progress = completed / total_tasks
+                progress = _scale_progress(
+                    completed / total_tasks, progress_start, processing_end
+                )
                 yield_data = {
                     "progress": progress,
                     "error": res.get("error", False),
@@ -554,8 +587,10 @@ def merge_zhcn_to_zhtw_from_folder(
 
                 yield yield_data
 
+        yield {"progress": _scale_progress(0.90, progress_start, progress_end)}
         log_info("正在清理空的待翻譯資料夾...")
         remove_empty_dirs(must_translate_dir)
+        yield {"progress": _scale_progress(0.94, progress_start, progress_end)}
         folder_name = (
             load_config()
             .get("lang_merger", {})
@@ -571,9 +606,10 @@ def merge_zhcn_to_zhtw_from_folder(
             filtered_pending_dir,
             min_count=filtered_pending_min_count,
         )
+        yield {"progress": _scale_progress(0.98, progress_start, progress_end)}
         log_info(f"--- 全部處理完成: {total_tasks} 個任務完成 ---")
-        yield {"progress": 1.0}
+        yield {"progress": _scale_progress(1.0, progress_start, progress_end)}
 
     except Exception as e:  # noqa: BLE001
         log_exception(f"處理資料夾發生錯誤: {e}")
-        yield {"progress": 1.0, "error": True}
+        yield {"progress": _scale_progress(1.0, progress_start, progress_end), "error": True}

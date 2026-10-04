@@ -440,6 +440,62 @@ class TestPatchouliIncrementalOutput:
         assert process_content_or_copy_file_impl(**kwargs)["success"]
         assert len(writes) == 1
 
+    def test_patchouli_effectiveness_cache_is_per_merge_run(self):
+        from translation_tool.core.lang_merge_content_copy import (
+            _compute_patchouli_lang_effectiveness,
+        )
+
+        names = ["assets/patchouli_books/test_book/zh_cn/intro.md"]
+        reader_a = MagicMock()
+        reader_a.read_text.return_value = "這是中文"
+        reader_b = MagicMock()
+        reader_b.read_text.return_value = "English text"
+
+        result_a = _compute_patchouli_lang_effectiveness(
+            reader_a,
+            "assets/patchouli_books/test_book/",
+            json_module=MagicMock(),
+            all_names=names,
+            cache_store={},
+        )
+        result_b = _compute_patchouli_lang_effectiveness(
+            reader_b,
+            "assets/patchouli_books/test_book/",
+            json_module=MagicMock(),
+            all_names=names,
+            cache_store={},
+        )
+
+        assert result_a["zh_cn"] is True
+        assert result_b["zh_cn"] is False
+
+    def test_patchouli_effectiveness_is_single_flight_per_run(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from translation_tool.core.lang_merge_content_copy import (
+            _compute_patchouli_lang_effectiveness,
+        )
+
+        names = ["assets/patchouli_books/test_book/zh_cn/intro.md"]
+        reader = MagicMock()
+        reader.read_text.return_value = "這是中文"
+        cache = {}
+
+        def compute():
+            return _compute_patchouli_lang_effectiveness(
+                reader,
+                "assets/patchouli_books/test_book/",
+                json_module=MagicMock(),
+                all_names=names,
+                cache_store=cache,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda _: compute(), range(2)))
+
+        assert all(result["zh_cn"] for result in results)
+        assert reader.read_text.call_count == 1
+
     def test_patchouli_effectiveness_cache_isolated_by_reader(self):
         from translation_tool.core.lang_merge_content_copy import (
             _compute_patchouli_lang_effectiveness,

@@ -18,6 +18,7 @@ class _FakeSession:
         self.error = False
         self._summary = None
         self.finish_called = False
+        self.progress_history = []
 
     def start(self):
         pass
@@ -27,6 +28,7 @@ class _FakeSession:
 
     def set_progress(self, val):
         self.progress = val
+        self.progress_history.append(val)
 
     def set_error(self):
         self.error = True
@@ -38,7 +40,7 @@ class _FakeSession:
         self.finish_called = True
 
     def snapshot(self):
-        return {"status": "IDLE", "progress": 0.0, "logs": self.logs}
+        return {"status": "IDLE", "progress": self.progress, "logs": self.logs}
 
 
 class _FakeUIHandler:
@@ -113,6 +115,55 @@ def test_run_merge_folder_batch_service_nonexistent_folder_yields_without_error(
     assert not results[-1].get("error", False)
     assert results[-1]["summary"]["success_folders"] == 1
     assert results[-1]["summary"]["failed_folders"] == 0
+
+
+def test_folder_service_stage_progress_is_monotonic_and_finish_is_owned_by_caller(
+    tmp_path: Path, monkeypatch
+) -> None:
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "out"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    session = _FakeSession()
+
+    monkeypatch.setattr(merge_service, "ensure_pipeline_logging", lambda: None)
+    monkeypatch.setattr(merge_service, "UI_LOG_HANDLER", _FakeUIHandler())
+    monkeypatch.setattr(
+        merge_service,
+        "load_config",
+        lambda: {"lang_merger": {"enable_extracted_to_assets_merge": True}},
+    )
+    monkeypatch.setattr(
+        merge_service,
+        "merge_zhcn_to_zhtw_from_folder",
+        lambda *args, **kwargs: iter(
+            [
+                {"progress": kwargs["progress_start"]},
+                {"progress": kwargs["progress_end"]},
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        merge_service,
+        "merge_extracted_to_assets",
+        lambda *args, **kwargs: iter([{"progress": 0.0}, {"progress": 1.0}]),
+    )
+
+    list(
+        merge_service.run_merge_folder_batch_service(
+            str(input_dir),
+            str(output_dir),
+            session,
+            only_process_lang=True,
+            progress_start=0.0,
+            progress_end=1.0,
+            finish_session=False,
+        )
+    )
+
+    assert session.finish_called is False
+    assert session.progress == 1.0
+    assert session.progress_history == sorted(session.progress_history)
 
 
 def test_output_counts_has_assets_key(tmp_path: Path):
