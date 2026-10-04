@@ -820,38 +820,36 @@ class _LoopThreadPage:
 
 
 @pytest.mark.parametrize("failure", ["ok", "raises"])
-def test_pipeline_step_watcher_always_ends_with_the_step(monkeypatch, failure):
-    from app.views.pipeline import pipeline_view as pv
+def test_pipeline_step_watcher_always_ends_with_the_step(failure):
+    from app.views.pipeline.pipeline_actions import session_failed
+    from app.views.pipeline.pipeline_session import PipelineRunner
 
     page = _LoopThreadPage()
     try:
-        view = pv.PipelineView.__new__(pv.PipelineView)
-        view._page = page
-        view._cancel_event = threading.Event()
-        view._current_session = None
-        view._POLL_INTERVAL_SEC = 0.01
-        view.progress_panel = types.SimpleNamespace(
+        panel = types.SimpleNamespace(
             set_step_running=lambda *a: None,
             add_log=lambda *a, **k: None,
             finish_step=lambda *a, **k: None,
             log_view=types.SimpleNamespace(add_many=lambda items: None),
         )
-        view._update_progress = lambda *a: None
-        monkeypatch.setattr(pv, "TaskSession", _Session)
-        monkeypatch.setattr(pv, "tag_session", lambda s, *a, **k: s)
+        runner = PipelineRunner(
+            page,
+            panel,
+            lambda *a: None,
+            session_factory=_Session,
+            session_failed=session_failed,
+        )
+        runner.POLL_INTERVAL_SEC = 0.01
 
         def service(session):
             if failure == "raises":
                 raise RuntimeError("step exploded")
-            return None
 
-        ok = view._run_session_step(1, "測試步驟", service)
+        ok = runner.run_step(1, "測試步驟", service)
 
         assert ok is (failure == "ok")
         # 步驟結束後 watcher 必定已結束（沒有留下永遠不結束的輪詢 task）
-        assert page.futures, "步驟應該排入一個 watcher"
-        watcher = page.futures[0]
-        watcher.result(timeout=3)
-        assert watcher.done()
+        assert runner.poller.wait_idle(timeout=3)
+        assert not runner.poller.running
     finally:
         page.close()

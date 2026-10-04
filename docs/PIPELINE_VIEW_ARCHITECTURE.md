@@ -2,15 +2,17 @@
 
 ## 定位
 
-PipelineView（`app/views/pipeline/pipeline_view.py`）是**翻譯工作台**：在單一頁面串起整條流水線（抽取 → 語系比對 → 翻譯 → 打包），可逐步執行或「一鍵製作」自動跑完。`PipelineView` 另建了一個 API 金鑰管理區塊（`api_view`），但目前並未掛到頁面上（`controls` 只含 `workbench_view`）。
+PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／生命週期）是**翻譯工作台**：在單一頁面串起整條流水線（抽取 → 語系比對 → 翻譯 → 打包），可逐步執行或「一鍵製作」自動跑完。`PipelineView` 另建了一個 API 金鑰管理區塊（`api_view`），但目前並未掛到頁面上（`controls` 只含 `workbench_view`）。
 
-> 與各單頁的關係：此頁直接呼叫 service（`run_lang_extraction_service` / `run_book_extraction_service`、`run_merge_folder_batch_service` / `run_merge_zip_batch_service`、`run_lm_translation_service`、`build_bundle_staging` + `run_bundling_service`），不經由 ExtractorView / MergeView / LMView / BundlerView。
+> 與各單頁的關係：此頁經 `PipelineActions`（`pipeline_actions.py`）呼叫 service（`run_lang_extraction_service` / `run_book_extraction_service`、`run_merge_folder_batch_service` / `run_merge_zip_batch_service`、`run_lm_translation_service`、`build_bundle_staging` + `run_bundling_service`），不經由 ExtractorView / MergeView / LMView / BundlerView。
 
 ## 檔案結構（app/views/pipeline/）
 
 | 檔案 | 內容 |
 |------|------|
-| `pipeline_view.py` | 主視圖：`PipelineConfig`、`PipelineStepChip`、`PipelineProgressPanel`、`PipelineView` |
+| `pipeline_view.py` | 主視圖 `PipelineView`：組版、按鈕事件委派、`will_unmount`／`did_mount`；不 import 任何 service、不直接開執行緒 |
+| `pipeline_actions.py` | `PipelineActions`／`PipelineServices`：service 邊界（抽取／語系比對／翻譯／打包／一鍵步驟），不碰 UI、不開執行緒 |
+| `pipeline_session.py` | `PipelineRunner`：session、worker 啟動、日誌／進度 watcher（`PollerHandle`）、取消、卸載／重掛載 |
 | `pipeline_extract_dialog.py` | `open_extract_dialog(...)` 抽取參數對話框 |
 | `pipeline_merge_dialog.py` | `open_merge_dialog(...)` 語系比對參數對話框 |
 | `pipeline_translate_dialog.py` | `open_translate_dialog(...)` 翻譯參數對話框 |
@@ -58,51 +60,52 @@ PipelineView（`app/views/pipeline/pipeline_view.py`）是**翻譯工作台**：
 
 ```
 按鈕 / 一鍵製作（event loop）
-  → _begin_run()：清除 _cancel_event、停用按鈕、顯示取消按鈕
-  → threading.Thread(worker)
-       → _run_session_step(step_num, name, service_fn)   [worker thread]
-            session = TaskSession()
-            page.run_task(_watch_session, session, done)  ← event loop 上的 watcher
-            with cancel_scope(_cancel_event.is_set):
-                result = service_fn(session)              ← service 只寫 session
+  → PipelineView._begin_run()：runner.reset_cancel()、停用按鈕、顯示取消按鈕
+  → PipelineRunner.start_single / start_sequence → launch_worker(worker)   [預設 daemon Thread]
+       → PipelineRunner.run_step(step_num, name, service_fn)               [worker thread]
+            session = session_factory()                                    [預設 tag_session(TaskSession())]
+            ui(_start_watch)  ← event loop 上由 PollerHandle 持有的 watcher
+            with cancel_scope(cancel_event.is_set):
+                result = service_fn(session)     ← service 只寫 session
                 generator → 完整迭代（未迭代就不會執行）
-            done.set() → 等 watcher 送出最後一批日誌
-            ok = 未取消 且 not _session_failed(session)
-            _ui(finish_step / add_log / _update_progress)
-  → _ui(_end_run)：恢復按鈕
+            watch.done.set() → poller.wait_idle() → ui(_final_sync)      ← 最後一批日誌一定補上
+            ok = 未取消 且 not session_failed(session)
+            ui(finish_step / add_log / update_progress)
+  → ui(on_end)：PipelineView._end_run 恢復按鈕
 ```
 
-- **步驟 watcher 的 lifecycle**：`_watch_session` 由該步驟的 worker 擁有，worker 的 `finally` 一定設定 `done`，watcher 在最後一次同步後結束（服務丟例外也一樣；有行為測試）。
-- **背景 worker 不直接修改 Flet control**，也不呼叫 `page.update()`。所有 UI 更新都經 `_ui(fn)`（`page.run_task` 包一層 coroutine）或 `_watch_session` 在 event loop 上執行。
+- **依賴邊界**：`PipelineView(page, file_picker, *, actions=None, session_factory=None, launch_worker=None)`。測試可注入假的 `PipelineActions`（驗證 View 的委派）、`PipelineServices`（驗證 action 對 service 的呼叫）、同步的 `launch_worker`；不需要 patch module 名稱或 `threading.Thread`。
+- **watcher 的 owner 與 teardown**：`PipelineRunner.poller`（`PollerHandle`）。`will_unmount()` → `runner.on_unmount()` 停止 watcher（背景步驟照常執行，不再碰已卸載的控制項）；`did_mount()` → `runner.on_mount()` 接續（以 `_Watch.last_seq` 避免重複日誌；重複掛載只會有一個 poller）。步驟結束時 `_final_sync` 一定在 event loop 上補最後一次同步（卸載期間完成也不漏）。
+- **背景 worker 不直接修改 Flet control**，也不呼叫 `page.update()`。所有 UI 更新都經 `PipelineRunner.ui(fn)`（`page.run_task` 包一層 coroutine）或 watcher 在 event loop 上執行。
 - **`TaskSession` 是 worker 與 UI 之間唯一的狀態邊界**：worker 只呼叫 `add_log` / `set_progress` / `set_summary` / `set_error` / `finish`；UI 只讀 `snapshot()`。
-- **`_watch_session`**（coroutine）：每 `_POLL_INTERVAL_SEC`（0.2 秒）`await asyncio.sleep(...)`，依 log `seq` 只取新日誌、批次 `log_view.add_many()`，並更新進度；`done` 事件設定後再同步一次就結束。
+- **`_watch_loop`**（coroutine）：每 `POLL_INTERVAL_SEC`（0.2 秒）`await asyncio.sleep(...)`，依 log `seq` 只取新日誌、批次 `log_view.add_many()`，並更新進度；`done` 事件設定後再同步一次就結束。
 - **session 狀態**：`IDLE → RUNNING → DONE | ERROR`。`set_error()` 之後 `finish()` 不會把 ERROR 改回 DONE。
-- **步驟結果判定**（`_session_failed`）：`session.error` 為真，或 summary 中 `failed_zips` / `failed_folders` / `errored_files` 任一大於 0 → 失敗。已要求取消 → 「已取消」（不算成功）。其餘 → 成功。
+- **步驟結果判定**（`session_failed`）：`session.error` 為真，或 summary 中 `failed_zips` / `failed_folders` / `errored_files` 任一大於 0 → 失敗。已要求取消 → 「已取消」（不算成功）。其餘 → 成功。
 
 ### 個別步驟
-`_start_single_step(step_num, name, service_fn)` 以同一個 `_run_session_step` 執行單一步驟：
+`_start_single_step(step_num, name, service_fn)` 交給 `PipelineRunner.run_step` 執行單一步驟（動作由 `PipelineActions` 提供）：
 - 抽取：依 mode 呼叫 lang / book 抽取 service；dual 模式 lang 失敗就不執行 book。
 - 語系比對：dialog 選擇 folder → `run_merge_folder_batch_service(input_dir=...)`；選擇 ZIP → `run_merge_zip_batch_service(zip_paths=[...])`。
 - 翻譯：`run_lm_translation_service`。
-- 打包：`_bundle_into_session` → `run_bundling_service`（使用者指定的輸入資料夾，不建立暫存）。
+- 打包：`PipelineActions.bundle` → `run_bundling_service`（使用者指定的輸入資料夾，不建立暫存）。
 
 ### 一鍵製作（_on_one_click_execute）
-`_on_one_click_execute` 委派三個方法：`_prepare_one_click`（檢查來源／輸出資料夾存在、至少一個語系代碼，並組出 `PipelineConfig` 與合併選項，不通過則提示並中止）→ `_one_click_steps`（回傳四個 `(step_num, name, fn)`）→ `_start_one_click_worker`（背景執行緒依序跑，結束後 `finish_all` 並 `_end_run`）。
+`_on_one_click_execute` 委派三個方法：`_prepare_one_click`（檢查來源／輸出資料夾存在、至少一個語系代碼，並組出 `PipelineConfig` 與合併選項，不通過則提示並中止）→ `PipelineActions.one_click_steps`（回傳四個 `(step_num, name, fn)`）→ `PipelineRunner.start_sequence`（背景執行緒依序跑，結束後 `finish_all` 並 `_end_run`）。
 
-四個步驟依序以 `_run_session_step` 執行，任一步回傳失敗或已取消就停止，後續步驟不執行：
+四個步驟依序以 `run_step` 執行，任一步回傳失敗或已取消就停止，後續步驟不執行：
 
 1. **抽取資源**：依 mode 抽取到 lang / book 輸出資料夾。任何 JAR 無法處理（`stats.failures > 0`）或收到 `error` → 抽取 session 為 ERROR（見下方 Service 契約）。
 2. **語系比對**：抽取結果是**資料夾**，因此一律走 `run_merge_folder_batch_service`：
    - lang 輸出 → `only_process_lang` 取自對話框步驟 2 的「只處理 lang 檔案」開關（預設 True）
    - book 輸出 → `only_process_lang=False`（需處理 Patchouli 內容）
-   - 兩者都輸出到 `merge_output_dir`；前一個來源失敗（`_session_failed`）就不處理下一個。
+   - 兩者都輸出到 `merge_output_dir`；前一個來源失敗（`session_failed`）就不處理下一個。
    - 一鍵對話框步驟 2 沒有「資料夾／ZIP」來源選項（來源固定為步驟 1 的提取輸出，原本的選項從未生效，已移除）。
    - **不可把資料夾傳給 `run_merge_zip_batch_service`**：它逐一以 ZIP 開啟 `zip_paths`，資料夾會變成 `failed_zips`，實際上什麼都沒合併。
 3. **啟動翻譯**：只翻譯 `translate_input_dirs` 中有檔案的資料夾；沒有待翻譯內容 → 記錄並略過（步驟仍成功）。任一輸入 session.error → 停止。
 4. **打包資源**：
    - `build_bundle_staging(bundle_sources, bundle_staging_dir)`：清空暫存後，依序疊加各來源的 `assets/`；同路徑 JSON 逐 key 合併（後者覆蓋），其他檔案直接覆蓋，略過待翻譯資料夾。
    - 暫存為空 → session.set_error()。
-   - 否則 `_bundle_into_session(input_root_dir=bundle_staging_dir, ...)`；bundle generator 回傳 `error` → session.set_error()。
+   - 否則 `PipelineActions.bundle(input_root_dir=bundle_staging_dir, ...)`；bundle generator 回傳 `error` → session.set_error()。
    - 先建暫存的原因：打包 generator 遇到多個來源的同路徑檔案會改名（`_1`），不會合併；既有譯文與新譯文必須先疊成一份。
 
 全部成功 → `finish_all(True)`；失敗或取消 → `finish_all(False, cancelled=...)`，並恢復按鈕。
@@ -110,12 +113,12 @@ PipelineView（`app/views/pipeline/pipeline_view.py`）是**翻譯工作台**：
 ## 取消（cancellation）
 
 ```
-取消按鈕 → _on_cancel()
-  → _cancel_event.set()；目前 session.request_cancel()
-  → _run_session_step 以 cancel_scope(_cancel_event.is_set) 包住 service
+取消按鈕 → PipelineView._on_cancel() → runner.request_cancel()
+  → cancel_event.set()；目前 session.request_cancel()
+  → PipelineRunner.run_step 以 cancel_scope(cancel_event.is_set) 包住 service
        → service 可再疊自己的 cancel_scope（例如 lm_service 的 session.cancel_requested）
        → core 在檢查點呼叫 is_cancelled() / raise_if_cancelled() / interruptible_sleep()
-       → raise TaskCancelled → 在 service / 翻譯迴圈 / _run_session_step 攔截
+       → raise TaskCancelled → 在 service / 翻譯迴圈 / run_step 攔截
 ```
 
 `translation_tool/utils/cancellation.py` 的契約：
@@ -124,7 +127,7 @@ PipelineView（`app/views/pipeline/pipeline_view.py`）是**翻譯工作台**：
 - **`interruptible_sleep(sec)`**：有 cancel scope 時以小步 sleep 並檢查取消；沒有 scope 時等同 `time.sleep`。
 - **檢查點**：翻譯在批次之間與等待限流時；抽取在 JAR 之間（`is_cancelled()`）；generator 型 step 在每次 yield 之間。
 - **已完成的輸出保留**：翻譯中途取消會照常寫出已完成的批次；取消只阻止後續工作。
-- **尚未執行的步驟不執行**：`_run_session_step` 開始前檢查 `_cancel_event`；取消的步驟回傳失敗，一鍵流程就此停止。
+- **尚未執行的步驟不執行**：`run_step` 開始前檢查 `cancel_event`；取消的步驟回傳失敗，一鍵流程就此停止。
 - **粒度限制**：抽取已送進 thread pool 的 JAR 會處理完才停止，不保證立即中止單一 JAR。
 
 ## Service 層契約（pipelines/*_service.py）
@@ -152,8 +155,8 @@ core generator 與 service 以 dict 回報進度，欄位皆為選用：
 ### 生命週期判定
 - 關鍵失敗（`error`、`stats.failures`）**以原始 update 為準**，不依賴 limiter 的回傳值；limiter 只負責 UI 日誌節流。
 - 抽取（`_run_extraction_with_session`）：收到 `error` → set_error；結束時 `failures > 0` → 寫入 summary、記錄錯誤、set_error；否則 finish。取消 → 停止並記錄。
-- 語系比對：部分失敗寫入 summary 的 `failed_*` / `errored_files`（單頁維持批次語意，session 可能是 DONE），一鍵流程以 `_session_failed` 視為失敗。
-- 打包：`_bundle_into_session` 見到 `error` 即 set_error 並停止迭代。
+- 語系比對：部分失敗寫入 summary 的 `failed_*` / `errored_files`（單頁維持批次語意，session 可能是 DONE），一鍵流程以 `session_failed` 視為失敗。
+- 打包：`PipelineActions.bundle` 見到 `error` 即 set_error 並停止迭代。
 
 ## API 金鑰管理（api_view）
 
@@ -169,14 +172,16 @@ core generator 與 service 以 dict 回報進度，欄位皆為選用：
 ## 維護注意
 
 1. `_set_buttons_disabled` 只停用 `_run_buttons`（`_step_row` 建立的「執行」按鈕）與 `_one_click_button`；新增會觸發任務的按鈕要自行加入其中。
-2. 背景執行緒中不可直接修改 control 或呼叫 `page.update()`；一律經 `_ui()` 或寫入 TaskSession。
-3. 新 service 若以 generator 回傳，`_run_session_step` 會負責迭代；若自行判斷失敗，請寫入 `session.set_error()` 或 summary 的 `failed_*`，不要只輸出含「錯誤」的日誌字串。
+2. 背景執行緒中不可直接修改 control 或呼叫 `page.update()`；一律經 `PipelineRunner.ui()` 或寫入 TaskSession。
+3. 新 service 若以 generator 回傳，`run_step` 會負責迭代；若自行判斷失敗，請寫入 `session.set_error()` 或 summary 的 `failed_*`，不要只輸出含「錯誤」的日誌字串。
 4. 一鍵流程中資料夾型輸入一律走 folder batch service，不可包成 `zip_paths`。
-5. 新增步驟時要同步：`PipelineProgressPanel.steps`、`_one_click_steps` 的 steps、`PipelineConfig` 路徑 property、`_build_pipeline_steps_and_status_cards` 的步驟列。
+5. 新增步驟時要同步：`PipelineProgressPanel.steps`、`PipelineActions.one_click_steps` 的 steps、`PipelineConfig` 路徑 property、`_build_pipeline_steps_and_status_cards` 的步驟列。
 
 ## 檔案結構（拆分後）
 
-- `app/views/pipeline/pipeline_view.py`：`PipelineView` 主體（步驟執行、一鍵製作流程、取消與按鈕狀態）。
+- `app/views/pipeline/pipeline_view.py`：`PipelineView`（組版、事件委派、按鈕狀態、`will_unmount`／`did_mount`）。
+- `app/views/pipeline/pipeline_actions.py`：`PipelineActions`／`PipelineServices`（service 邊界）。
+- `app/views/pipeline/pipeline_session.py`：`PipelineRunner`（session／worker／輪詢／取消／生命週期）。
 - `app/views/pipeline/pipeline_config.py`：`PipelineConfig`，由輸入／輸出根目錄推算各步驟的資料夾。
 - `app/views/pipeline/pipeline_progress.py`：`PipelineStepChip`、`PipelineProgressPanel`（步驟標籤與進度面板）。
 - `app/views/pipeline/pipeline_widgets.py`：`PipelineWidgetsMixin`，控制項與版面組裝（`_build_ui`、各 `_build_*` 卡片、`_step_row`）。

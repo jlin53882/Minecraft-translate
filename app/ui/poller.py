@@ -33,6 +33,7 @@ class PollerHandle:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._idle = threading.Condition(self._lock)
         self._generation = 0
         self._active_generation: int | None = None
         self._future: Any = None
@@ -84,13 +85,25 @@ class PollerHandle:
             self._generation += 1
             self._active_generation = None
             future, self._future = self._future, None
+            self._idle.notify_all()
         self._cancel(future)
+
+    def wait_idle(self, timeout: float | None = None) -> bool:
+        """（背景執行緒）等到沒有執行中的輪詢（結束或被 stop）；逾時回傳 False。
+
+        不得在 event loop 上呼叫（會阻塞）。沒有輪詢在跑時立刻回傳 True。
+        """
+        with self._idle:
+            return self._idle.wait_for(
+                lambda: self._active_generation is None, timeout=timeout
+            )
 
     def _finished(self, generation: int) -> None:
         with self._lock:
             if self._active_generation == generation:
                 self._active_generation = None
                 self._future = None
+            self._idle.notify_all()
 
     @staticmethod
     def _cancel(future: Any) -> None:

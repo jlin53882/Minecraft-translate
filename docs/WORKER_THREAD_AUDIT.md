@@ -27,14 +27,14 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 
 行為層測試：`tests/test_view_lifecycle_contracts.py`（poller 的 teardown／重 mount／卸載後不更新、阻塞步驟的執行緒身分、卸載後丟棄結果）、`tests/test_shard_reader.py`、`tests/test_cache_history_store.py`、`tests/test_pipeline_extract_dialog_behavior.py`。
 
-## A. 背景執行緒啟動點（`threading.Thread`，20 處）
+## A. 背景執行緒啟動點（`threading.Thread`，19 處）
 
 | 位置 | 回到 UI 的方式 | owner／結束 |
 |---|---|---|
 | `translation/translation_actions.py`（FTB／KubeJS／MD 三處） | worker 只寫 `TaskSession`；View 的 `_poller`（event loop）同步 | 任務自己結束；輪詢由 View 持有（見 B） |
 | `lm_view.py` | 同上（`run_lm_translation_service`） | 同上 |
 | `merge_view.py`（`_run_merge`） | 只寫 session；event loop 輪詢 | worker 例外會把 session 轉 ERROR（否則輪詢等不到結束） |
-| `pipeline/pipeline_view.py`（兩處） | `self._ui(...)`（`page.run_task`）；步驟 watcher 在 event loop | worker 的 `finally` 一定設定 `done`，watcher 隨步驟結束 |
+| `pipeline/pipeline_session.py`（`default_worker_launcher`，單一啟動點；測試可注入 `launch_worker`） | `PipelineRunner.ui(...)`（`page.run_task`）；步驟 watcher 在 event loop | worker 的 `finally` 一定設定 `done`；watcher 由 `PollerHandle` 持有 |
 | `pipeline/pipeline_extract_dialog.py` | worker 只寫 `PreviewState`；`_extract_preview_poll` 在 event loop | `cancel_event`；探索與掃描都在 worker 內 |
 | `extractor/extractor_dialog.py`（`run_extraction`） | `UiBatcher`／`run_on_ui` | 取消旗標 `extraction_cancel_flag`；dismiss 也會設定 |
 | `extractor/extractor_preview_dialog.py`（`_preview_do_scan`） | 只寫 `preview_state`；`_preview_ui_poller` 在 event loop | `state["cancelled"]`；dismiss 設定 |
@@ -55,7 +55,7 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 | 翻譯頁 `_poll_session` | `TranslationView._poller`（`app/ui/poller.PollerHandle`） | `will_unmount()` → `stop_ui_timer`；`did_mount()` → `resume_ui_timer` | `test_translation_*`：卸載後不再同步、重複 teardown、重 mount 只剩一個 poller、卸載期間結束會補最終狀態 |
 | LM 頁 `_poll_session` | `LMView._poller` | `will_unmount()`／`did_mount()` | `test_lm_*`（同上） |
 | 合併頁 `_poll_merge`（原為 `time.sleep(0.1)` 的 poll 執行緒） | `MergeView._poller` | `will_unmount()`／`did_mount()`；DONE／ERROR 設 `_ui_stop` | `test_merge_*`：不再另開執行緒、卸載停止、重 mount、卸載期間完成只顯示一次摘要 |
-| 流水線步驟 `_watch_session` | 步驟 worker（`done` 事件） | worker `finally` 設定 `done` → watcher 最後一次同步後結束 | `test_pipeline_step_watcher_always_ends_with_the_step`（含服務丟例外） |
+| 流水線步驟 `_watch_loop` | `PipelineRunner.poller`（`PollerHandle`） | `will_unmount()` → `runner.on_unmount()`；`did_mount()` → `runner.on_mount()`；worker `finally` 設定 `done` 並補 `_final_sync` | `test_pipeline_runner_behavior`（卸載停止、重掛載單一 poller、卸載期間完成補日誌、取消）、`test_pipeline_step_watcher_always_ends_with_the_step` |
 | 提取預覽 `_preview_ui_poller` | 對話框（`preview_state`／`state["cancelled"]`） | 完成或取消即結束；dismiss 設定取消 | `test_extractor_preview_dialog_behavior` |
 | 流水線提取預覽 `_extract_preview_poll` | 對話框（`cancel_event`） | 「取消」設旗標、輪詢立即結束、結果丟棄、overlay 移除 | `test_pipeline_extract_dialog_behavior`（探索期間取消、反覆開關不累積） |
 | 圖示預覽載入／渲染（`_load_async`、`_prepare_and_fill`、`_open`） | `IconPreviewView._load_generation`／`_render_generation` | `will_unmount()` 遞增世代：結果丟棄、旗標復位；進度刷新在載入結束後不再套用 | `test_icon_*`（卸載中的掃描／渲染／zh 讀取被丟棄） |

@@ -121,13 +121,12 @@ def test_bundling_service_error_survives_limiter(tmp_path):
 
 def test_pipeline_bundle_step_fails_when_input_missing(tmp_path):
     """一鍵流水線的打包步驟：輸入不存在時 session 必須是 ERROR。"""
-    from app.views.pipeline.pipeline_view import PipelineView
+    from app.views.pipeline.pipeline_actions import PipelineActions
 
     session = TaskSession()
     session.start()
     list(
-        PipelineView._bundle_into_session(
-            None,
+        PipelineActions().bundle(
             session,
             input_root_dir=str(tmp_path / "missing"),
             output_zip_path=str(tmp_path / "out.zip"),
