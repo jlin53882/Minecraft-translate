@@ -5,10 +5,17 @@ from __future__ import annotations
 from typing import Final
 
 LM_TRANSLATOR_SCHEMA: Final[dict[str, dict[str, object]]] = {
-    "keys": {"type": "list[str]", "default": []},
-    "models": {"type": "mapping[str, ModelConfig]", "default": {}},
+    # 預設值是範本佔位字串，不是空清單；與 DEFAULT_CONFIG 一致（有測試保護）。
+    "keys": {
+        "type": "list[str]",
+        "default": ["YOUR_GEMINI_API_KEY_1", "YOUR_GEMINI_API_KEY_2"],
+    },
+    "models": {
+        "type": "mapping[str, ModelConfig]",
+        "default": {"gemini-2.5-flash": {"enabled": True}},
+    },
     "max_output_tokens": {"type": "int", "default": 32768, "minimum": 0},
-    "temperature": {"type": "number", "default": 0.2},
+    "temperature": {"type": "number", "default": 0.3},
     "key_failure_cooldown_sec": {
         "type": "number",
         "default": 3600,

@@ -7,9 +7,9 @@
 from __future__ import annotations
 
 import os
-from ..utils.log_unit import log_warning
-
 import shutil
+
+from ..utils.log_unit import log_warning
 
 
 def remove_empty_dirs_impl(root_dir: str, *, logger_override=None) -> None:
@@ -25,6 +25,7 @@ def remove_empty_dirs_impl(root_dir: str, *, logger_override=None) -> None:
                 os.rmdir(dirpath)
         except OSError as e:
             log_warning(f"刪除空目錄失敗 {dirpath}: {e}")
+
 
 def export_filtered_pending_impl(
     pending_root: str,
@@ -48,7 +49,8 @@ def export_filtered_pending_impl(
             try:
                 with open(pending_path, "rb") as f:
                     data = json_module.loads(f.read())
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
+                log_warning(f"略過無法讀取的待翻譯檔 {pending_path}: {exc!r}")
                 continue
             if len(data) >= int(min_count):
                 rel_path = os.path.relpath(pending_path, pending_root).lstrip(os.sep)

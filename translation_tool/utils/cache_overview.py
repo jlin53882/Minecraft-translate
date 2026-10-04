@@ -7,10 +7,15 @@
 from __future__ import annotations
 
 import datetime
+import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import orjson as json
+
+log = logging.getLogger(__name__)
+
 
 def get_active_shard_id(
     cache_file_path: dict[str, Path], cache_type: str, active_shard_file: str
@@ -22,8 +27,9 @@ def get_active_shard_id(
         if active_file.exists():
             return active_file.read_text(encoding="utf-8").strip()
     except Exception:
-        pass
+        log.warning("讀取作用中分片失敗 cache_type=%s", cache_type, exc_info=True)
     return ""
+
 
 def build_cache_overview(
     *,
@@ -57,7 +63,7 @@ def build_cache_overview(
                 active_data = json.loads(active_path.read_bytes())
                 if isinstance(active_data, dict):
                     active_entries = len(active_data)
-        except Exception:
+        except Exception:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
             active_entries = 0
 
         if dirty:
@@ -80,7 +86,7 @@ def build_cache_overview(
                 translation_config.get("cache_directory", cache_dir_name)
             ).resolve()
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
         cache_root = ""
 
     return {
@@ -88,6 +94,6 @@ def build_cache_overview(
         "total_entries": total_entries,
         "dirty_type_count": dirty_type_count,
         "types": out_types,
-        "last_reload_at": datetime.datetime.now().strftime("%H:%M:%S"),
+        "last_reload_at": datetime.datetime.now().astimezone().strftime("%H:%M:%S"),
         "last_save_at": None,
     }

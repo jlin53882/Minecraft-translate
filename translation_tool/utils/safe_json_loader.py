@@ -6,16 +6,17 @@
 
 import json
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
 _CANDIDATE_ENCODINGS = [
     "utf-8",
     "utf-8-sig",  # 處理 BOM
-    "cp1252",     # 常見 Windows 編碼
-    "latin-1",    # 最後保底
+    "cp1252",  # 常見 Windows 編碼
+    "latin-1",  # 最後保底
 ]
 
-def load_json_auto_encoding(path: Path) -> Optional[Dict[str, Any]]:
+
+def load_json_auto_encoding(path: Path) -> dict[str, Any] | None:
     """
     嘗試用多種編碼讀取 JSON。
     成功 → dict
@@ -29,6 +30,6 @@ def load_json_auto_encoding(path: Path) -> Optional[Dict[str, Any]]:
             data = json.loads(text)
             if isinstance(data, dict):
                 return data
-        except Exception:
+        except Exception:  # noqa: BLE001, S112 - 逐一嘗試編碼；全部失敗才回傳 None
             continue
     return None

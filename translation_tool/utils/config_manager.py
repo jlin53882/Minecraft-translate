@@ -412,8 +412,8 @@ def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
             with resolved_config_path.open("r", encoding="utf-8") as f:
                 user_config = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
-            print(
-                f"錯誤：讀取設定檔 {resolved_config_path} 失敗: {e}，將使用預設設定。"
+            log.error(
+                "讀取設定檔 %s 失敗: %s，將使用預設設定。", resolved_config_path, e
             )
             return base, False
 

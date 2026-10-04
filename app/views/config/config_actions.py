@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import traceback
 
 from app.services_impl.logging_service import validate_log_format
 from app.ui.snack import show_snack
 from translation_tool.utils.config_manager import get_default
+from translation_tool.utils.redaction import redact_text
+
+logger = logging.getLogger(__name__)
 
 
 def load_config_into_view(view, config: dict):
@@ -493,7 +497,8 @@ def save_config_from_view(
             models[cb.label] = model_cfg
         new_config["lm_translator"]["models"] = models
     except (ValueError, TypeError, RuntimeError) as err:
-        traceback.print_exc()
+        # 錯誤訊息可能帶有使用者輸入，記錄前先遮蔽（#125）
+        logger.error("儲存設定失敗：%s", redact_text(traceback.format_exc()))
         show_snack(view.page, f"❌ 發生錯誤：{type(err).__name__}: {err}")
         return False
     save_config_json_fn(new_config)

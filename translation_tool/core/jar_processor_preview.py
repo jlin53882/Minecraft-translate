@@ -22,9 +22,10 @@ import os
 import re
 import threading
 import zipfile
+from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, Generator, Callable
+from typing import Any
 
 from translation_tool.utils.config_manager import load_config
 
@@ -39,7 +40,7 @@ def _get_preview_workers() -> int:
         if isinstance(config_workers, int) and config_workers > 0:
             return config_workers
     except Exception:
-        pass
+        log.debug("讀取 parallel_execution_workers 失敗，改用預設值", exc_info=True)
     return min(4, os.cpu_count() or 2)
 
 
@@ -49,7 +50,7 @@ def _scan_single_jar_for_preview(
     target_regex: re.Pattern | None,
     book_path_regex: re.Pattern | None,
     lang_regex: re.Pattern | None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """在單一 JAR 中執行預覽比對（ThreadPoolExecutor 並行工作函式）。
 
     與原本 for-loop 內的邏輯完全一致，只是包成可並行的純函式。
@@ -114,7 +115,7 @@ def _scan_single_jar_for_preview(
                     "jar_size_mb": jar_size / (1024**2),
                     "error": None,
                 }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
         log.warning("預覽 %s 時發生錯誤: %s", jar_name, e)
         return {
             "jar": jar_name,
@@ -152,7 +153,7 @@ class ExtractionSummary:
     def add_failure(self, jar_name: str, error: str):
         self.failures.append({"jar": jar_name, "error": error})
 
-    def get_summary(self) -> Dict[str, Any]:
+    def get_summary(self) -> dict[str, Any]:
         return {
             "success_count": len(self.success),
             "warning_count": len(self.warnings),
@@ -171,7 +172,7 @@ def preview_extraction_generator_impl(
     book_path_regex: re.Pattern,
     lang_codes: list[str] | None = None,
     skip_zh_cn: bool = False,
-) -> Generator[Dict[str, Any], None, None]:
+) -> Generator[dict[str, Any], None, None]:
     """產生 JAR 檔案預覽（多執行緒平行掃描版本）。
 
     流程：
@@ -221,7 +222,11 @@ def preview_extraction_generator_impl(
     # (jar_processor 從 jar_processor_preview 頂部 import,所以不能反向 import)
     # 函數內 lazy import 是處理循環引入的標準做法,效能影響極小
     # (只在呼叫 preview_extraction_generator_impl 時才執行)
-    from translation_tool.core.jar_processor import build_lang_file_regex, build_book_path_regex
+    from translation_tool.core.jar_processor import (
+        build_book_path_regex,
+        build_lang_file_regex,
+    )
+
     if mode == "lang":
         target_regex = build_lang_file_regex(codes=lang_codes, skip_zh_cn=skip_zh_cn)
         lang_regex = None
@@ -237,9 +242,11 @@ def preview_extraction_generator_impl(
 
     # ---- 多執行緒掃描階段 ----
     workers = _get_preview_workers()
-    log.info("[preview] 開始多執行緒預覽掃描，JAR 數量=%d，workers=%d", total_jars, workers)
+    log.info(
+        "[preview] 開始多執行緒預覽掃描，JAR 數量=%d，workers=%d", total_jars, workers
+    )
 
-    scan_results: dict[str, Dict[str, Any]] = {}
+    scan_results: dict[str, dict[str, Any]] = {}
     scan_lock = threading.Lock()  # 保護 scan_results 的寫入
     done_count = [0]  # 已完成的 JAR 數量（用 list 包裝以便跨執行緒修改）
 
@@ -260,7 +267,7 @@ def preview_extraction_generator_impl(
             jar_path = future_to_jar[future]
             try:
                 result = future.result()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                 log.warning("預覽 %s 時發生例外: %s", jar_path, e)
                 result = {
                     "jar": os.path.basename(jar_path),
@@ -294,30 +301,34 @@ def preview_extraction_generator_impl(
     total_size_bytes = 0
     failed_jars = []
 
-    for jar_name, result in scan_results.items():
+    for result in scan_results.values():
         if result.get("error"):
             failed_jars.append({"jar": result["jar"], "error": result["error"]})
 
         if mode == "dual":
             lang_count = result.get("lang_count", 0)
             book_count = result.get("book_count", 0)
-            preview_results.append({
-                "jar": result["jar"],
-                "lang_files": result.get("lang_matched", []),
-                "book_files": result.get("book_matched", []),
-                "lang_count": lang_count,
-                "book_count": book_count,
-                "size_mb": result["size_mb"],
-            })
+            preview_results.append(
+                {
+                    "jar": result["jar"],
+                    "lang_files": result.get("lang_matched", []),
+                    "book_files": result.get("book_matched", []),
+                    "lang_count": lang_count,
+                    "book_count": book_count,
+                    "size_mb": result["size_mb"],
+                }
+            )
             total_files += lang_count + book_count
         else:
             count = result.get("count", 0)
-            preview_results.append({
-                "jar": result["jar"],
-                "files": result.get("matched_files", []),
-                "count": count,
-                "size_mb": result["size_mb"],
-            })
+            preview_results.append(
+                {
+                    "jar": result["jar"],
+                    "files": result.get("matched_files", []),
+                    "count": count,
+                    "size_mb": result["size_mb"],
+                }
+            )
             total_files += count
 
         total_size_bytes += int(result["size_mb"] * (1024**2))
@@ -340,7 +351,7 @@ def preview_extraction_generator_impl(
     }
 
 
-def generate_preview_report(result: Dict[str, Any], mode: str, output_path: str) -> str:
+def generate_preview_report(result: dict[str, Any], mode: str, output_path: str) -> str:
     """將預覽結果寫入 Markdown 報告檔案。
 
     報告包含摘要統計與每個 JAR 的檔案清單（超過 50 筆時截斷）。
@@ -356,7 +367,7 @@ def generate_preview_report(result: Dict[str, Any], mode: str, output_path: str)
     """
     output_dir = Path(output_path)
     output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
     report_filename = f"preview_report_{mode}_{timestamp}.md"
     report_path = output_dir / report_filename
 
@@ -368,7 +379,7 @@ def generate_preview_report(result: Dict[str, Any], mode: str, output_path: str)
     report_lines = [
         f"# JAR 提取預覽報告 - {mode.upper()}",
         "",
-        f"**生成時間：** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"**生成時間：** {datetime.datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S')}",
         "",
         "## 摘要統計",
         "",
@@ -388,10 +399,10 @@ def generate_preview_report(result: Dict[str, Any], mode: str, output_path: str)
         if mode == "dual":
             report_lines.append(f"- **Lang 檔案：** {r.get('lang_count', 0)}")
             report_lines.append(f"- **Book 檔案：** {r.get('book_count', 0)}")
-            files = r.get('lang_files', []) + r.get('book_files', [])
+            files = r.get("lang_files", []) + r.get("book_files", [])
         else:
             report_lines.append(f"- **檔案數量：** {r.get('count', 0)}")
-            files = r.get('files', [])
+            files = r.get("files", [])
         report_lines.append(f"- **JAR 大小：** {r['size_mb']:.2f} MB")
         report_lines.append("- **檔案清單：**")
         report_lines.append("")
