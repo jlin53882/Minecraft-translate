@@ -2,7 +2,6 @@
 用途：驗證 CacheSearchEngine 的 SQLite WAL 當機復原能力。
 模擬 unclean shutdown（WAL 未 checkpoint），確認重新開啟 DB 時資料仍完整。
 """
-
 import sqlite3
 import tempfile
 from pathlib import Path

@@ -7,10 +7,7 @@ def test_load_config_uses_project_root_not_cwd(tmp_path, monkeypatch):
     fake_root = tmp_path / "project_root"
     fake_root.mkdir(parents=True)
     (fake_root / "config.json").write_text(
-        json.dumps(
-            {"translator": {"cache_directory": "cache_root_from_config"}},
-            ensure_ascii=False,
-        ),
+        json.dumps({"translator": {"cache_directory": "cache_root_from_config"}}, ensure_ascii=False),
         encoding="utf-8",
     )
 
@@ -33,11 +30,7 @@ def test_cache_root_uses_project_root_not_cwd(tmp_path, monkeypatch):
     other_cwd.mkdir(parents=True)
 
     monkeypatch.chdir(other_cwd)
-    monkeypatch.setattr(
-        cache_manager,
-        "load_config",
-        lambda: {"translator": {"cache_directory": "cache_root_from_config"}},
-    )
+    monkeypatch.setattr(cache_manager, "load_config", lambda: {"translator": {"cache_directory": "cache_root_from_config"}})
     monkeypatch.setattr(cache_manager, "resolve_project_path", lambda p: fake_root / p)
 
     cache_root = cache_manager._get_cache_root()
@@ -49,13 +42,10 @@ def test_replace_rules_relative_path_resolves_to_project_root(tmp_path, monkeypa
     fake_root.mkdir(parents=True)
     rules_path = fake_root / "replace_rules.json"
     rules_path.write_text(
-        json.dumps(
-            [
-                {"from": "abcdef", "to": "A"},
-                {"from": "abc", "to": "B"},
-            ],
-            ensure_ascii=False,
-        ),
+        json.dumps([
+            {"from": "abcdef", "to": "A"},
+            {"from": "abc", "to": "B"},
+        ], ensure_ascii=False),
         encoding="utf-8",
     )
 

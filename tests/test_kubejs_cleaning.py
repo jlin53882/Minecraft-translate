@@ -30,10 +30,6 @@ def test_clean_kubejs_from_raw_splits_pending_and_final_outputs(tmp_path: Path) 
     assert result["pending_lang_written"] == 1
     assert result["merged_lang_written"] == 1
     assert result["copied_other_jsons"] == 1
-    assert orjson.loads(
-        (pending_root / "assets" / "demo" / "lang" / "en_us.json").read_bytes()
-    ) == {"b": "B"}
-    assert orjson.loads(
-        (final_root / "assets" / "demo" / "lang" / "zh_tw.json").read_bytes()
-    ) == {"a": "簡中A"}
+    assert orjson.loads((pending_root / "assets" / "demo" / "lang" / "en_us.json").read_bytes()) == {"b": "B"}
+    assert orjson.loads((final_root / "assets" / "demo" / "lang" / "zh_tw.json").read_bytes()) == {"a": "簡中A"}
     assert (pending_root / "client_scripts" / "tooltip" / "tip.json").exists()

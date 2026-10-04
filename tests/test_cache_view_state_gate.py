@@ -48,9 +48,7 @@ def make_view_for_state_gate(current_action_id: int = 2):
 def test_set_ui_state_ignores_stale_run_id():
     view = make_view_for_state_gate(current_action_id=5)
 
-    CacheView.set_ui_state(
-        view, busy=True, reason="RELOADING", trace="trace old", run_id=4
-    )
+    CacheView.set_ui_state(view, busy=True, reason="RELOADING", trace="trace old", run_id=4)
 
     assert view.ui_busy is False
     assert view.busy_reason == ""
@@ -60,9 +58,7 @@ def test_set_ui_state_ignores_stale_run_id():
 def test_set_ui_state_applies_current_run_id():
     view = make_view_for_state_gate(current_action_id=5)
 
-    CacheView.set_ui_state(
-        view, busy=True, reason="RELOADING", trace="trace ok", run_id=5
-    )
+    CacheView.set_ui_state(view, busy=True, reason="RELOADING", trace="trace ok", run_id=5)
 
     assert view.ui_busy is True
     assert view.busy_reason == "RELOADING"

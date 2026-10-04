@@ -10,11 +10,11 @@ from __future__ import annotations
 # Flet 可用的顏色常量（theme 常見值）
 # 這裡用 hex 或基本顏色名稱，view 層再依據 theme 轉換
 COLOR_MAP = {
-    "system": "4CAF50",  # 綠
-    "info": "90CAF9",  # 淺藍
+    "system": "4CAF50",   # 綠
+    "info": "90CAF9",    # 淺藍
     "warning": "FF9800",  # 橙
-    "error": "F44336",  # 紅
-    "debug": "9E9E9E",  # 灰
+    "error": "F44336",    # 紅
+    "debug": "9E9E9E",    # 灰
 }
 
 # 等級標記前綴（當無顏色時用於裝飾）

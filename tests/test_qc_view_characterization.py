@@ -122,11 +122,11 @@ def test_qc_view_all_textfields_exist(monkeypatch):
     page = mock_page()
     view = QCView(page, mock_filepicker())
 
-    assert view.cn_dir_textfield.label == "簡中 (zh_cn) 來源資料夾 (JSON)"
-    assert view.tw_dir_textfield_2.label == "繁中 (zh_tw) 來源資料夾 (JSON)"
-    assert view.compare_out_dir_textfield.label == "JSON 差異報告 輸出資料夾"
-    assert view.tsv_file_textfield.label == "簡繁差異 TSV 檔案路徑"
-    assert view.tsv_out_file_textfield.label == "TSV 差異報告 輸出檔案 (.csv)"
+    assert view.cn_dir_textfield.label == '簡中 (zh_cn) 來源資料夾 (JSON)'
+    assert view.tw_dir_textfield_2.label == '繁中 (zh_tw) 來源資料夾 (JSON)'
+    assert view.compare_out_dir_textfield.label == 'JSON 差異報告 輸出資料夾'
+    assert view.tsv_file_textfield.label == '簡繁差異 TSV 檔案路徑'
+    assert view.tsv_out_file_textfield.label == 'TSV 差異報告 輸出檔案 (.csv)'
 
 
 def test_qc_view_all_buttons_exist(monkeypatch):
@@ -134,8 +134,8 @@ def test_qc_view_all_buttons_exist(monkeypatch):
     page = mock_page()
     view = QCView(page, mock_filepicker())
 
-    assert view.compare_start_button.content == "啟動：JSON 資料夾差異比對"
-    assert view.compare_tsv_start_button.content == "啟動：TSV 單檔案差異比對"
+    assert view.compare_start_button.content == '啟動：JSON 資料夾差異比對'
+    assert view.compare_tsv_start_button.content == '啟動：TSV 單檔案差異比對'
 
 
 def test_qc_view_progress_bar_and_log_view(monkeypatch):
@@ -202,7 +202,7 @@ def test_qc_view_show_snack_bar_adds_to_overlay():
     page = mock_page()
     view = QCView(page, mock_filepicker())
 
-    show_snack(view.page, "Test error", "#FF0000")
+    show_snack(view.page, 'Test error', '#FF0000')
 
     assert len(page.overlay) == 1
     assert page.overlay[0].open is True
@@ -212,7 +212,7 @@ def test_qc_view_pick_file_or_directory():
     """測試 _pick_file_or_directory 方法存在（已移除 tkinter）。"""
     view = QCView(mock_page(), mock_filepicker())
 
-    assert hasattr(view, "_pick_file_or_directory")
+    assert hasattr(view, '_pick_file_or_directory')
     assert callable(view._pick_file_or_directory)
 
 
@@ -220,7 +220,7 @@ def test_qc_view_task_runner_exists():
     """測試 task_runner 存在"""
     view = QCView(mock_page(), mock_filepicker())
 
-    assert hasattr(view, "task_runner")
+    assert hasattr(view, 'task_runner')
     assert view.task_runner is not None
 
 
@@ -229,7 +229,7 @@ def test_qc_view_create_pick_button_returns_icon_button():
     page = mock_page()
     view = QCView(page, mock_filepicker())
 
-    btn = view._create_pick_button(view.cn_dir_textfield, "Test", True)
+    btn = view._create_pick_button(view.cn_dir_textfield, 'Test', True)
 
     assert btn is not None
     assert isinstance(btn, ft.IconButton)

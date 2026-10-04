@@ -28,9 +28,7 @@ def test_run_lm_translation_service_uses_log_limiter(monkeypatch):
     seen = []
 
     monkeypatch.setattr(lm_service, "ensure_pipeline_logging", lambda: None)
-    monkeypatch.setattr(
-        lm_service.UI_LOG_HANDLER, "set_session", lambda s: seen.append(s)
-    )
+    monkeypatch.setattr(lm_service.UI_LOG_HANDLER, "set_session", lambda s: seen.append(s))
 
     def fake_gen(*args, **kwargs):
         yield {"log": "raw-1", "progress": 0.25}

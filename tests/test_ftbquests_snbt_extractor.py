@@ -2,7 +2,6 @@
 
 用途：測試 ftbquests_snbt_extractor 模組的功能。
 """
-
 from __future__ import annotations
 
 import sys
@@ -20,19 +19,12 @@ def test_is_lang_key_ref(tmp_path: Path) -> None:
     """測試 is_lang_key_ref 判斷 FTB 語系參考。"""
     assert ftbquests_snbt_extractor.is_lang_key_ref("{ftbquests.xxx}") is True
     assert ftbquests_snbt_extractor.is_lang_key_ref("plain text") is False
-    assert (
-        ftbquests_snbt_extractor.is_lang_key_ref("{atm9.quest}") is False
-    )  # 不是 ftbquests
+    assert ftbquests_snbt_extractor.is_lang_key_ref("{atm9.quest}") is False  # 不是 ftbquests
 
 
 def test_is_lang_key_ref_like(tmp_path: Path) -> None:
     """測試 is_lang_key_ref_like 純引用格式。"""
-    assert (
-        ftbquests_snbt_extractor.is_lang_key_ref_like(
-            "{atm9.quest.create.desc.belts.1}"
-        )
-        is True
-    )
+    assert ftbquests_snbt_extractor.is_lang_key_ref_like("{atm9.quest.create.desc.belts.1}") is True
     assert ftbquests_snbt_extractor.is_lang_key_ref_like("{a}\n{b}") is True
     assert ftbquests_snbt_extractor.is_lang_key_ref_like("plain text") is False
     assert ftbquests_snbt_extractor.is_lang_key_ref_like("") is False
@@ -41,18 +33,16 @@ def test_is_lang_key_ref_like(tmp_path: Path) -> None:
 def test_is_tag_condition_text(tmp_path: Path) -> None:
     """測試 is_tag_condition_text 標籤條件文字。"""
     assert ftbquests_snbt_extractor.is_tag_condition_text("Any #minecraft:logs") is True
-    assert (
-        ftbquests_snbt_extractor.is_tag_condition_text("All #forge:ingots/iron") is True
-    )
+    assert ftbquests_snbt_extractor.is_tag_condition_text("All #forge:ingots/iron") is True
     assert ftbquests_snbt_extractor.is_tag_condition_text("Normal text") is False
 
 
 def test_ensure_lang(tmp_path: Path) -> None:
     """測試 ensure_lang 確保語系存在。"""
     store = {}
-
+    
     ftbquests_snbt_extractor.ensure_lang(store, "en_us")
-
+    
     assert "en_us" in store
     assert "lang" in store["en_us"]
     assert "quests" in store["en_us"]
@@ -61,9 +51,9 @@ def test_ensure_lang(tmp_path: Path) -> None:
 def test_ensure_lang_preserves_existing(tmp_path: Path) -> None:
     """測試 ensure_lang 保留現有資料。"""
     store = {"en_us": {"lang": {"existing": "value"}, "quests": {}}}
-
+    
     ftbquests_snbt_extractor.ensure_lang(store, "en_us")
-
+    
     assert "existing" in store["en_us"]["lang"]
 
 
