@@ -210,6 +210,20 @@ def handle_translation_errors(log_func=None, auto_retry=True, max_retries=3):
 # =============================================================================
 
 
+def _resolve_error_log_dir():
+    """錯誤記錄資料夾：優先用 ``logging.log_dir`` 設定，讀不到則退回資料根目錄下的 logs。"""
+    try:
+        from translation_tool.utils.config_manager import (
+            load_config,
+            resolve_project_path,
+        )
+
+        log_dir = (load_config().get("logging") or {}).get("log_dir") or "logs"
+        return resolve_project_path(log_dir)
+    except Exception:  # noqa: BLE001 - 設定讀不到不可讓錯誤記錄本身失敗
+        return get_data_root() / "logs"
+
+
 def _log_error_to_file(error: Exception, func_name: str):
     """將錯誤寫入日誌檔案
 
@@ -219,7 +233,7 @@ def _log_error_to_file(error: Exception, func_name: str):
     """
     try:
         # 確保日誌目錄存在
-        log_dir = get_data_root() / "logs"
+        log_dir = _resolve_error_log_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
 
         # 日誌檔案路徑（按日期分檔）

@@ -58,7 +58,6 @@
 ### D 啟動時讀一次（需重啟）
 | 設定 | 位置 |
 |---|---|
-| `lm_translator.lm_translate_folder_name` | `lm_view.py` 模組層級常數 `LM_translate_folder_name` |
 | `species_cache.cache_directory / cache_filename / wikipedia_language / wikipedia_rate_limit_delay` | `species_cache.py` 模組層級；學名資料庫已初始化後改了不會重載 |
 | 視窗大小 | `AppShell.build` 時設定（本來就不需要即時） |
 
@@ -66,7 +65,6 @@
 | 設定 | 說明 |
 |---|---|
 | `translator.replace_rules_path` | `lang_merger.py` 兩處（L74、L397）讀的是**頂層** `replace_rules_path`，但設定放在 `translator.replace_rules_path`，所以合併時永遠用預設 `replace_rules.json`。`ftb_translator.py` 與 `variant_comparator.py` 讀對了。→ 改了路徑只有部分流程會用到 |
-| `logging.log_dir` | 設定頁有欄位，但錯誤記錄寫死 `Path("logs")`（`exceptions.py`），`log_dir` 未被實際使用（未確認其他位置） |
 | `extractor.target_language` | 歷史相容欄位；追查不到正式 caller，目前不生效，不應在 UI 宣稱可調整 |
 | `translator.cjk_ratio_threshold` | 歷史相容欄位；追查不到 caller 或明確判定規則，目前不生效，不應臆造語意 |
 | `translator.enable_cache_saving` | 只找到零星使用，未確認行為 |
@@ -110,3 +108,11 @@
 - 既有 `config_store.subscribe(callback)` 維持零參數相容性；需要精準刷新時使用 `subscribe_paths(callback(changed_paths))`，不要求舊 callback 改簽名。
 - `translator.cache_directory` 儲存後不會讓現行任務中途換根目錄。下一次啟動或明確呼叫 `reload_translation_cache()` 才採用持久化的新路徑；pending writer 仍綁定目前 active root。
 - `lm_translator` 的 per-model `max_output_tokens` 是可選欄位：缺少或 `null` 使用全域值，`0` 表示不送欄位；下一批次讀取，舊版只含 `enabled` 的設定可直接載入。
+
+## #117 後續處理（PR-2）
+
+- `lm_translator.lm_translate_folder_name`：改為使用時才讀（`lm_view.get_lm_translate_folder_name()`），不再是 D 類。
+- `output_bundler.output_zip_name`：實際打包時重新讀設定（原本沿用頁面建立時的值，存檔後仍用舊檔名）；輸入框提示文字仍需重新開啟頁面才更新。
+- `logging.log_dir`：應用日誌本來就有使用；錯誤記錄（`errors_*.log`）改為讀此設定，不再寫死 `logs`。
+- 有任務進行中存檔時，`AppShell` 會顯示「進行中的任務不受影響，下次任務才套用」的提示（僅 `ui.theme_mode` 例外）。
+- 仍待處理：`logging.log_level` 存檔時即時套用、機器翻譯頁日誌行數、`species_cache.*`（已標示需重啟）、`translator.enable_cache_saving` 行為確認（`cache_manager.py:229` 每次寫入前讀取，屬下次寫入生效）。

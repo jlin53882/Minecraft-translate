@@ -43,6 +43,18 @@ CONFIG_APPLY_RULES: Final[dict[str, ApplyRule]] = {
         "timing": "next_batch",
         "note": "下一批次讀取；0 表示不送 maxOutputTokens。",
     },
+    "lm_translator.lm_translate_folder_name": {
+        "timing": "next_task",
+        "note": "使用時才讀取；存檔後下次執行機器翻譯即套用，不需重啟。",
+    },
+    "output_bundler.output_zip_name": {
+        "timing": "next_task",
+        "note": "打包時才讀取；輸入框提示文字於重新開啟頁面後更新。",
+    },
+    "logging.log_dir": {
+        "timing": "next_task",
+        "note": "應用日誌於啟動時建立；錯誤記錄（errors_*.log）每次寫入時讀取。",
+    },
     "species_cache.*": {
         "timing": "restart",
         "note": "目前模組初始化後不熱切換。",

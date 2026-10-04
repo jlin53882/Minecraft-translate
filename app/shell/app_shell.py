@@ -30,6 +30,7 @@ from app.shell.task_manager import TaskInfo, TaskManager
 from app.shell.topbar import TopBar
 from app.ui import design, theme
 from app.ui.keyboard_shortcuts import create_keyboard_handler
+from app.ui.snack import show_snack
 from app.view_registry import (
     DEFAULT_VIEW_KEY,
     MIN_WINDOW_SIZE,
@@ -48,6 +49,11 @@ REFRESH_INTERVAL_SEC = 0.25  # 任務事件的 UI 更新節流
 KEY_REFRESH_SEC = 5.0  # API Key 健康度輪詢間隔
 CLOSE_WAIT_TIMEOUT_SEC = 2.0
 CLOSE_WAIT_POLL_SEC = 0.05
+CONFIG_WHILE_RUNNING_NOTICE = (
+    "設定已儲存；進行中的任務不受影響，下次任務才套用（API 金鑰除外）。"
+)
+# 這些路徑變更即時生效，不需要「進行中任務不受影響」的提醒
+_CONFIG_NOTICE_IGNORED = frozenset({"ui.theme_mode"})
 
 # 時鐘與 sleep 抽成模組層級名稱，測試可以換成假的（不必真的等）
 _monotonic = time.monotonic
@@ -101,6 +107,10 @@ class AppShell:
         mode_saver: Callable[[str], object] | None = None,
         subscribe_config: Callable[[Callable[[], None]], Callable[[], None]]
         | None = None,
+        subscribe_config_paths: Callable[
+            [Callable[[frozenset[str]], None]], Callable[[], None]
+        ]
+        | None = None,
         flush_before_close: Callable[[], object] | None = None,
     ) -> None:
         self.page = page
@@ -113,8 +123,12 @@ class AppShell:
         self.mode = initial_mode
         self._mode_saver = mode_saver or config_store.set_theme_mode
         self._subscribe_config = subscribe_config or config_store.subscribe
+        self._subscribe_config_paths = (
+            subscribe_config_paths or config_store.subscribe_paths
+        )
         self._flush_before_close = flush_before_close or _default_flush_before_close
         self._unsubscribe_config: Callable[[], None] | None = None
+        self._unsubscribe_config_paths: Callable[[], None] | None = None
         self._unsubscribe_tasks: Callable[[], None] | None = None
         self.current_key: str | None = None
         self._last_refresh = 0.0
@@ -206,6 +220,10 @@ class AppShell:
         self._unsubscribe_tasks = self.tasks.subscribe(self._schedule_task_refresh)
         # 設定頁（或任何地方）存檔後，API Key 狀態 / 模型 / 資料夾要立刻更新
         self._unsubscribe_config = self._subscribe_config(self._on_config_saved)
+        # 有任務在跑時存檔：提醒「進行中的任務不受影響」（#117）
+        self._unsubscribe_config_paths = self._subscribe_config_paths(
+            self._on_config_paths_saved
+        )
         self.refresh_environment()
 
         page.add(self.build())
@@ -330,6 +348,32 @@ class AppShell:
                 self._env_scheduled = False
             else:
                 self._env_future = future
+
+    def _on_config_paths_saved(self, changed_paths: frozenset[str]) -> None:
+        """存檔後（可能在任何執行緒）：若有任務進行中且設定有實質變更，排程提示。"""
+        relevant = {p for p in changed_paths if p not in _CONFIG_NOTICE_IGNORED}
+        if not relevant:
+            return
+        with self._sched_lock:
+            if self._disposed:
+                return
+        try:
+            if not self.tasks.active():
+                return
+        except Exception:
+            logger.debug("讀取進行中任務失敗", exc_info=True)
+            return
+        self._submit_ui(self._show_config_while_running_notice)
+
+    async def _show_config_while_running_notice(self) -> None:
+        with self._sched_lock:
+            if self._disposed:
+                return
+        show_snack(
+            self.page,
+            CONFIG_WHILE_RUNNING_NOTICE,
+            theme.INFO,
+        )
 
     async def _apply_config_refresh(self) -> None:
         with self._sched_lock:
@@ -638,8 +682,13 @@ class AppShell:
             self._close_pending = False
             futures = [self._refresh_future, self._env_future, self._poll_future]
             self._refresh_future = self._env_future = self._poll_future = None
-            unsubscribers = [self._unsubscribe_tasks, self._unsubscribe_config]
+            unsubscribers = [
+                self._unsubscribe_tasks,
+                self._unsubscribe_config,
+                self._unsubscribe_config_paths,
+            ]
             self._unsubscribe_tasks = self._unsubscribe_config = None
+            self._unsubscribe_config_paths = None
         for unsubscribe in unsubscribers:
             if unsubscribe is not None:
                 try:

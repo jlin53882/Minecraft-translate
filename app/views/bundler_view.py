@@ -624,6 +624,8 @@ class BundlerView(ft.Column):
             return
 
         if not output_zip:
+            # 使用時才讀設定：存檔後的新檔名立刻生效（#117）
+            self._load_output_zip_from_config()
             output_zip = os.path.join(root_dir, self._config_output_zip_name)
 
         version = self.version_search.value or ""
