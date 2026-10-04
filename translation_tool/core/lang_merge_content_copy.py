@@ -23,6 +23,13 @@ _patchouli_eff_cache: dict = {}
 _patchouli_eff_cache_lock = threading.RLock()
 
 
+class _PatchouliSingleFlight:
+    """表示同一 cache key 正在計算，讓其他 worker 等待而不重複計算。"""
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+
+
 # ----------------------------------------------------------------------
 # Helper: Patchouli 翻譯有效性 ratio 計算
 # ----------------------------------------------------------------------
@@ -61,25 +68,33 @@ def _compute_patchouli_lang_effectiveness(
         else (cache_namespace, book_root_lower, threshold)
     )
 
-    # ── 1. Cache lookup ────────────────────────────────────────────────
-    with _patchouli_eff_cache_lock:
-        if cache_key in cache:
-            log_debug(
-                f"[Patchouli Eff] cache hit for book_root={book_root!r} threshold={threshold}"
-            )
-            return cache[cache_key]
+    # Only the short cache/flight bookkeeping is globally locked.  The
+    # expensive reader traversal runs outside the lock, so different books
+    # can still be processed concurrently.
+    while True:
+        with _patchouli_eff_cache_lock:
+            cached = cache.get(cache_key)
+            if isinstance(cached, _PatchouliSingleFlight):
+                flight = cached
+                is_owner = False
+            elif cached is not None:
+                log_debug(
+                    f"[Patchouli Eff] cache hit for book_root={book_root!r} threshold={threshold}"
+                )
+                return cached
+            else:
+                flight = _PatchouliSingleFlight()
+                cache[cache_key] = flight
+                is_owner = True
+        if is_owner:
+            break
+        flight.done.wait()
 
     log_debug(
         f"[Patchouli Eff] cache miss for book_root={book_root!r} threshold={threshold}, computing…"
     )
 
-    # Hold the per-key lifecycle lock through the computation.  This is a
-    # small single-flight guard: concurrent workers for the same book cannot
-    # all perform the expensive traversal and CJK scan.
-    with _patchouli_eff_cache_lock:
-        if cache_key in cache:
-            return cache[cache_key]
-
+    try:
         result: dict[str, bool] = {"zh_tw": False, "zh_cn": False}
 
         for lang in ("zh_tw", "zh_cn"):
@@ -125,7 +140,15 @@ def _compute_patchouli_lang_effectiveness(
             ratio = effective_count / len(text_files) if text_files else 0
             result[lang] = ratio >= threshold
 
-        cache[cache_key] = result
+        with _patchouli_eff_cache_lock:
+            cache[cache_key] = result
+            flight.done.set()
+    except Exception:
+        with _patchouli_eff_cache_lock:
+            if cache.get(cache_key) is flight:
+                del cache[cache_key]
+            flight.done.set()
+        raise
     log_debug(
         f"[Patchouli Eff] cached result for {book_root!r} threshold={threshold}: {result}"
     )
@@ -315,22 +338,16 @@ def process_content_or_copy_file_impl(
         )
 
         # 優先使用外部傳入的預掃描 cache，否則走內部 _compute_patchouli_lang_effectiveness（自帶 module-level cache）
-        book_root_lower = book_root.lower()
         cache_namespace = id(reader)
-        cache_key = (book_root_lower, _threshold)
-        if patchouli_eff_cache is not None and cache_key in patchouli_eff_cache:
-            eff = patchouli_eff_cache[cache_key]
-            log_debug(f"[Patchouli Eff] 使用外部預掃描 cache for {book_root!r}: {eff}")
-        else:
-            eff = _compute_patchouli_lang_effectiveness(
-                reader,
-                book_root,
-                threshold=_threshold,
-                json_module=json_module,
-                all_names=_all_names,  # 2026-08-04: 傳入預先算好的檔案列表
-                cache_namespace=cache_namespace,
-                cache_store=patchouli_eff_cache,
-            )
+        eff = _compute_patchouli_lang_effectiveness(
+            reader,
+            book_root,
+            threshold=_threshold,
+            json_module=json_module,
+            all_names=_all_names,  # 2026-08-04: 傳入預先算好的檔案列表
+            cache_namespace=cache_namespace,
+            cache_store=patchouli_eff_cache,
+        )
         has_eff_zh_tw = bool(eff.get("zh_tw", False))
         has_eff_zh_cn = bool(eff.get("zh_cn", False))
 

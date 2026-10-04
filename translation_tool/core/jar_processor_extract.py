@@ -310,7 +310,7 @@ def run_extraction_process_impl(
         scan_done.wait(timeout=0.5)
     # 最後一次 yield 確保 UI 收到完成訊號
     elapsed = time.time() - scan_start
-    if elapsed - last_yielded_at >= 0:  # 永遠 yield 最終狀態
+    if not scan_error[0] and elapsed - last_yielded_at >= 0:
         last_yielded_at = elapsed
         yield {
             "progress": scan_progress_end,
@@ -324,10 +324,15 @@ def run_extraction_process_impl(
 
     if scan_error[0]:
         log_error("[scan_jars] background scan failed: %s", scan_error[0])
+        scan_progress_value = progress_start + scan_span * 0.2 * (
+            scan_progress[0] / total_jars
+        )
         yield {
-            "progress": progress_start,
+            "progress": scan_progress_value,
+            "current": scan_progress[0],
+            "total": total_jars,
             "error": True,
-            "log": f"[錯誤] 掃描失敗: {scan_error[0]}",
+            "log": f"[錯誤] 掃描失敗（已完成 {scan_progress[0]}/{total_jars}）：{scan_error[0]}",
         }
         return
 
@@ -356,7 +361,10 @@ def run_extraction_process_impl(
 
     processed_count = 0
     total_extracted = 0
-    total_skipped = 0
+    skipped_scan_jars = {
+        path for path in getattr(all_scan_results, "skipped_jars", set())
+    }
+    total_skipped = len(skipped_scan_jars - set(eligible_jars))
     failed_jars: list[str] = [
         path.name for path in getattr(all_scan_results, "failed_jars", set())
     ]

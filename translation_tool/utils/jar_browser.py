@@ -62,6 +62,7 @@ class ScanResults(dict):
         super().__init__()
         self.budgets: dict[Path, ZipReadBudget] = {}
         self.failed_jars: set[Path] = set()
+        self.skipped_jars: set[Path] = set()
 
 
 def _scan_single_jar(
@@ -69,6 +70,7 @@ def _scan_single_jar(
     patterns: list[str],
     budget: ZipReadBudget | None = None,
     failure_callback: Callable[[Path], None] | None = None,
+    skipped_callback: Callable[[Path], None] | None = None,
 ) -> tuple[Path, dict[str, str | None]]:
     """掃描單一 JAR，符合 pattern 的檔案內容讀取出來。
 
@@ -109,6 +111,8 @@ def _scan_single_jar(
                                 failure_callback(jar_path)
                             return jar_path, {}
                         except ZipSizeError as size_err:
+                            if skipped_callback:
+                                skipped_callback(jar_path)
                             log_warning(
                                 f"[jar_browser] 略過過大檔案 {jar_path.name}!{name}: {size_err}"
                             )
@@ -201,6 +205,7 @@ def scan_jars(
                 patterns,
                 results.budgets[jar_path],
                 results.failed_jars.add,
+                results.skipped_jars.add,
             ): jar_path
             for jar_path in jar_files
         }

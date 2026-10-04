@@ -498,6 +498,42 @@ class TestPatchouliIncrementalOutput:
         assert all(result["zh_cn"] for result in results)
         assert reader.read_text.call_count == 1
 
+    def test_different_books_can_compute_in_parallel(self):
+        """single-flight 只應合併同一 cache key，不應鎖住所有 books。"""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        from translation_tool.core.lang_merge_content_copy import (
+            _compute_patchouli_lang_effectiveness,
+        )
+
+        names = [
+            "assets/patchouli_books/book_a/zh_cn/intro.md",
+            "assets/patchouli_books/book_b/zh_cn/intro.md",
+        ]
+        barrier = threading.Barrier(2)
+        reader = MagicMock()
+
+        def read_text(_name):
+            barrier.wait(timeout=2)
+            return "這是中文"
+
+        reader.read_text.side_effect = read_text
+
+        def compute(book):
+            return _compute_patchouli_lang_effectiveness(
+                reader,
+                f"assets/patchouli_books/{book}/",
+                json_module=MagicMock(),
+                all_names=names,
+                cache_store={},
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(compute, ("book_a", "book_b")))
+
+        assert all(result["zh_cn"] for result in results)
+
     def test_patchouli_effectiveness_cache_isolated_by_reader(self):
         from translation_tool.core.lang_merge_content_copy import (
             _compute_patchouli_lang_effectiveness,

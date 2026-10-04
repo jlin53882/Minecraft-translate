@@ -599,6 +599,7 @@ class PipelineView(ft.Column):
         }
 
         def service(session):
+            session.start()
             os.makedirs(output_dir, exist_ok=True)
             if input_mode == "folder":
                 return run_merge_folder_batch_service(
@@ -770,6 +771,7 @@ class PipelineView(ft.Column):
 
         def merge(session):
             # 各抽取結果分別合併（lang 只處理語言檔，book 需處理 Patchouli 內容）
+            session.start()
             os.makedirs(cfg.merge_output_dir, exist_ok=True)
             sources = []
             if mode in ("lang", "dual"):
