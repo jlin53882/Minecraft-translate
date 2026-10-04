@@ -544,6 +544,9 @@ class PipelineView(ft.Column):
         cfg = PipelineConfig(mods_dir, output_dir)
 
         def service(session):
+            dual_lifecycle = mode == "dual"
+            if dual_lifecycle:
+                session.start()
             if mode in ("lang", "dual"):
                 os.makedirs(cfg.extract_lang_output_dir, exist_ok=True)
                 run_lang_extraction_service(
@@ -551,6 +554,9 @@ class PipelineView(ft.Column):
                     cfg.extract_lang_output_dir,
                     session,
                     lang_codes=lang_codes,
+                    manage_session=not dual_lifecycle,
+                    progress_start=0.0,
+                    progress_end=0.5 if dual_lifecycle else 1.0,
                 )
                 if session.error:
                     return
@@ -561,7 +567,12 @@ class PipelineView(ft.Column):
                     cfg.extract_book_output_dir,
                     session,
                     lang_codes=lang_codes,
+                    manage_session=not dual_lifecycle,
+                    progress_start=0.5 if dual_lifecycle else 0.0,
+                    progress_end=1.0,
                 )
+            if dual_lifecycle and not session.error and not self._cancel_event.is_set():
+                session.finish()
 
         self._start_single_step(1, f"抽取資源（{mode}）", service)
 
@@ -727,6 +738,9 @@ class PipelineView(ft.Column):
         self._begin_run()
 
         def extract(session):
+            dual_lifecycle = mode == "dual"
+            if dual_lifecycle:
+                session.start()
             if mode in ("lang", "dual"):
                 os.makedirs(cfg.extract_lang_output_dir, exist_ok=True)
                 run_lang_extraction_service(
@@ -734,6 +748,9 @@ class PipelineView(ft.Column):
                     cfg.extract_lang_output_dir,
                     session,
                     lang_codes=lang_codes,
+                    manage_session=not dual_lifecycle,
+                    progress_start=0.0,
+                    progress_end=0.5 if dual_lifecycle else 1.0,
                 )
                 if session.error:
                     return
@@ -744,7 +761,12 @@ class PipelineView(ft.Column):
                     cfg.extract_book_output_dir,
                     session,
                     lang_codes=lang_codes,
+                    manage_session=not dual_lifecycle,
+                    progress_start=0.5 if dual_lifecycle else 0.0,
+                    progress_end=1.0,
                 )
+            if dual_lifecycle and not session.error and not self._cancel_event.is_set():
+                session.finish()
 
         def merge(session):
             # 各抽取結果分別合併（lang 只處理語言檔，book 需處理 Patchouli 內容）

@@ -11,7 +11,7 @@ PR #90 extractor DUAL mode 修復斷言測試。
 4. `phase`/`stats`/`error` 從 raw update 讀，不是 filtered
 5. DUAL mode stats 走 `update["stats"]`，不走 `update_stats_from_log`
 6. `_auto_fill_output_path` guard：output 有值時 return，不覆蓋
-7. `progress_bar.value = 0.0` 在 phase 切換時重置
+7. dual phase progress 在切換時維持單調
 8. `extract_dual_files_generator` yield `phase` 欄位
 9. `LogLimiter.filter()` 只剝 log/progress，保留 phase/stats/error
 """
@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.services_impl.logging_service import LogLimiter
+from app.services_impl.logging_service import LogLimiter  # noqa: E402
 
 # =============================================================================
 # 1. LogLimiter.filter() 只剝 log/progress，保留 phase/stats/error
@@ -296,10 +296,10 @@ class TestExtractDualFilesGeneratorPhase:
 
 
 class TestProgressBarPhaseReset:
-    """驗證 Book phase 抵達時 progress_bar.value 重置為 0.0。"""
+    """驗證 Book phase 接續 Lang phase 的全域進度。"""
 
     def test_book_phase_resets_progress_bar(self, tmp_path):
-        """extract_dual_files_generator 抵達 book phase 時，progress_bar.value 應為 0.0。"""
+        """extract_dual_files_generator 抵達 book phase 時，進度不得倒退。"""
         from translation_tool.core.jar_processor import extract_dual_files_generator
 
         mods_dir = tmp_path / "mods"
@@ -317,12 +317,32 @@ class TestProgressBarPhaseReset:
         book_updates = [u for u in updates if u.get("phase") == "book"]
         assert len(book_updates) >= 1, f"需要有 phase=book，實際 updates: {updates}"
 
-        # phase=book 的 update 中，progress 應從 0 開始（因為是新 phase）
+        # dual phase 使用單一全域進度，Book 從 50% 接續，而不是重置為 0%。
         first_book = book_updates[0]
         if "progress" in first_book:
-            assert first_book["progress"] == 0.0, (
-                f"book phase 應從 progress=0 開始，實際: {first_book['progress']}"
+            assert first_book["progress"] == 0.5, (
+                f"book phase 應從 progress=0.5 開始，實際: {first_book['progress']}"
             )
+
+    def test_dual_progress_is_monotonic(self, monkeypatch, tmp_path):
+        """Lang 與 Book phase 映射後，整體 progress 不得倒退。"""
+        from translation_tool.core import jar_processor as jp
+
+        def fake_run_extraction(*_args, **_kwargs):
+            for progress in (0.0, 0.5, 1.0):
+                yield {"progress": progress}
+
+        monkeypatch.setattr(jp, "_run_extraction_process", fake_run_extraction)
+        updates = list(
+            jp.extract_dual_files_generator(
+                str(tmp_path / "mods"), str(tmp_path / "out")
+            )
+        )
+
+        progress = [update["progress"] for update in updates if "progress" in update]
+        assert progress == sorted(progress)
+        assert progress[0] == 0.0
+        assert progress[-1] == 1.0
 
 
 # =============================================================================

@@ -61,12 +61,14 @@ class ScanResults(dict):
     def __init__(self) -> None:
         super().__init__()
         self.budgets: dict[Path, ZipReadBudget] = {}
+        self.failed_jars: set[Path] = set()
 
 
 def _scan_single_jar(
     jar_path: Path,
     patterns: list[str],
     budget: ZipReadBudget | None = None,
+    failure_callback: Callable[[Path], None] | None = None,
 ) -> tuple[Path, dict[str, str | None]]:
     """掃描單一 JAR，符合 pattern 的檔案內容讀取出來。
 
@@ -103,6 +105,8 @@ def _scan_single_jar(
                                 f"[jar_browser] 略過整個 JAR（累計讀取超過安全上限）: "
                                 f"{jar_path.name} - {budget_err}"
                             )
+                            if failure_callback:
+                                failure_callback(jar_path)
                             return jar_path, {}
                         except ZipSizeError as size_err:
                             log_warning(
@@ -114,8 +118,12 @@ def _scan_single_jar(
                         break  # 一個檔案只讀一次
     except zipfile.BadZipFile:
         log_warning(f"[jar_browser] 不是有效的 ZIP/JAR: {jar_path.name}")
+        if failure_callback:
+            failure_callback(jar_path)
     except Exception as ex:  # noqa: BLE001
         log_error(f"[jar_browser] 讀取失敗: {jar_path.name} - {ex}")
+        if failure_callback:
+            failure_callback(jar_path)
     return jar_path, result
 
 
@@ -188,7 +196,11 @@ def scan_jars(
     with ThreadPoolExecutor(max_workers=workers) as executor:
         future_to_jar = {
             executor.submit(
-                _scan_single_jar, jar_path, patterns, results.budgets[jar_path]
+                _scan_single_jar,
+                jar_path,
+                patterns,
+                results.budgets[jar_path],
+                results.failed_jars.add,
             ): jar_path
             for jar_path in jar_files
         }

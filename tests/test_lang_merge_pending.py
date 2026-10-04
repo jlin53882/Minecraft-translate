@@ -185,6 +185,30 @@ def test_export_filtered_pending_impl_skips_unchanged_file(
     assert calls == []
 
 
+def test_export_filtered_pending_impl_rechecks_threshold_for_unchanged_file(
+    tmp_path: Path,
+) -> None:
+    """門檻提高時，mtime/size 相同的整理檔也要重新判斷條目數。"""
+    import orjson
+
+    pending_root = tmp_path / "pending"
+    output_root = tmp_path / "output"
+    source = pending_root / "assets" / "demo" / "lang" / "en_us.json"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(orjson.dumps({"a": 1, "b": 2}))
+
+    lang_merge_pending.export_filtered_pending_impl(
+        str(pending_root), str(output_root), min_count=2, json_module=orjson
+    )
+    output = output_root / "assets" / "demo" / "lang" / "en_us.json"
+    assert output.exists()
+
+    lang_merge_pending.export_filtered_pending_impl(
+        str(pending_root), str(output_root), min_count=3, json_module=orjson
+    )
+    assert not output.exists()
+
+
 def test_export_filtered_pending_impl_removes_only_stale_json(
     tmp_path: Path,
 ) -> None:

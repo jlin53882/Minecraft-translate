@@ -604,10 +604,9 @@ def merge_extracted_to_assets(
                     # deep wrapper layouts are cleaned as well.
                     try:
                         scanned_sources = [
-                            source_path
+                            paths[0]
                             for paths in lang_files.values()
-                            for source_path in paths
-                            if "待翻譯" not in source_path.parts
+                            if paths and "待翻譯" not in paths[0].parts
                         ]
                         _cleanup_single_mod_extracted(
                             lang_output_dir, modid, scanned_sources

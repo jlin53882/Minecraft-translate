@@ -54,6 +54,7 @@ def export_filtered_pending_impl(
             pending_path = os.path.join(dirpath, filename)
             rel_path = os.path.relpath(pending_path, pending_root).lstrip(os.sep)
             out_path = os.path.join(output_root, rel_path)
+            data = None
             try:
                 source_stat = os.stat(pending_path)
                 if os.path.isfile(out_path):
@@ -62,11 +63,21 @@ def export_filtered_pending_impl(
                         source_stat.st_size == output_stat.st_size
                         and source_stat.st_mtime_ns == output_stat.st_mtime_ns
                     ):
-                        eligible_paths.add(rel_path)
-                        continue
-                with open(pending_path, "rb") as f:
-                    raw = f.read()
-                    data = json_module.loads(raw)
+                        # mtime/size 只能判斷來源內容未變更，不能判斷本次
+                        # filtered_pending_min_count 是否改變；門檻提高時仍
+                        # 必須重新計算條目數，避免保留不再符合的整理檔。
+                        with open(pending_path, "rb") as f:
+                            data = json_module.loads(f.read())
+                        try:
+                            if len(data) >= min_count:
+                                eligible_paths.add(rel_path)
+                                continue
+                        except TypeError:
+                            pass
+                if data is None:
+                    with open(pending_path, "rb") as f:
+                        raw = f.read()
+                        data = json_module.loads(raw)
             except Exception as exc:  # noqa: BLE001
                 log_warning(f"略過無法讀取的待翻譯檔 {pending_path}: {exc!r}")
                 continue

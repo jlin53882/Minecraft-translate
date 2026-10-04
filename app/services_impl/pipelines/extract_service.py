@@ -192,6 +192,10 @@ def _run_extraction_with_session(
     generator,
     session: TaskSession,
     mode_label: str,
+    *,
+    finish_session: bool = True,
+    progress_start: float = 0.0,
+    progress_end: float = 1.0,
 ) -> None:
     """統一的 Generator 處理邏輯。
 
@@ -219,7 +223,10 @@ def _run_extraction_with_session(
             if "log" in filtered:
                 session.add_log(filtered["log"])
             if "progress" in filtered:
-                session.set_progress(filtered["progress"])
+                phase_progress = max(0.0, min(1.0, float(filtered["progress"])))
+                session.set_progress(
+                    progress_start + (progress_end - progress_start) * phase_progress
+                )
 
         if update.get("error"):
             _flush_limiter_to_session(session)
@@ -241,7 +248,8 @@ def _run_extraction_with_session(
         )
         session.set_error()
         return
-    session.finish()
+    if finish_session:
+        session.finish()
 
 
 def _flush_limiter_to_session(session: TaskSession) -> None:
@@ -345,6 +353,10 @@ def run_lang_extraction_service(
     output_dir: str,
     session: TaskSession,
     lang_codes: list[str] | None = None,
+    *,
+    manage_session: bool = True,
+    progress_start: float = 0.0,
+    progress_end: float = 1.0,
 ) -> None:
     """執行語言檔擷取服務。
 
@@ -356,12 +368,20 @@ def run_lang_extraction_service(
     """
     ensure_pipeline_logging()
     try:
-        session.start()
+        if manage_session:
+            session.start()
         UI_LOG_HANDLER.set_session(session)
         generator = _select_extraction_generator(
             "lang", mods_dir, output_dir, lang_codes
         )
-        _run_extraction_with_session(generator, session, "Lang")
+        _run_extraction_with_session(
+            generator,
+            session,
+            "Lang",
+            finish_session=manage_session,
+            progress_start=progress_start,
+            progress_end=progress_end,
+        )
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
@@ -378,6 +398,10 @@ def run_book_extraction_service(
     output_dir: str,
     session: TaskSession,
     lang_codes: list[str] | None = None,
+    *,
+    manage_session: bool = True,
+    progress_start: float = 0.0,
+    progress_end: float = 1.0,
 ) -> None:
     """執行書本檔擷取服務。
 
@@ -389,12 +413,20 @@ def run_book_extraction_service(
     """
     ensure_pipeline_logging()
     try:
-        session.start()
+        if manage_session:
+            session.start()
         UI_LOG_HANDLER.set_session(session)
         generator = _select_extraction_generator(
             "book", mods_dir, output_dir, lang_codes
         )
-        _run_extraction_with_session(generator, session, "Book")
+        _run_extraction_with_session(
+            generator,
+            session,
+            "Book",
+            finish_session=manage_session,
+            progress_start=progress_start,
+            progress_end=progress_end,
+        )
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
