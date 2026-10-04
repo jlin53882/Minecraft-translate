@@ -19,6 +19,9 @@ from .lm_key_health import (
     mask_key,
 )
 
+_API_KEY_PATTERN = re.compile(r"(?:AIza|AQ\.)[a-zA-Z0-9_-]+")
+_API_KEY_PREFIXES = ("AIza", "AQ.")
+
 # =========================
 # 1. 執行緒安全的 API Key 索引追蹤器
 # =========================
@@ -406,26 +409,26 @@ def validate_api_keys():
         raise RuntimeError("❌ 設定檔中沒有找到任何 API Key，請先設定金鑰。")
 
     for k in keys:
-        # 1. 檢查金鑰是否符合 Google API Key 的標準前綴 "AIza"
-        if not k.startswith("AIza"):
+        # 1. 接受標準 API keys (AIza) 與新的 Gemini authorization keys (AQ.)
+        if not k.startswith(_API_KEY_PREFIXES):
             log_error(f"❌ 偵測到無效格式金鑰: {mask_key(k)}")
             raise RuntimeError(
                 f"❌ 無效的 API Key 格式：{mask_key(k)}\n"
-                "Gemini API Key 應以 'AIza' 開頭，請檢查您的設定檔。"
+                "Gemini API Key 應以 'AIza' 或 'AQ.' 開頭，請檢查您的設定檔。"
             )
-        # 2. 檢查金鑰長度（Google API Key 通常為 39-40 個字元）
+        # 2. 檢查金鑰長度（保留既有最低長度檢查）
         if len(k) < 35:
             log_error(f"❌ 偵測到過短的 API 金鑰: {mask_key(k)} (長度={len(k)})")
             raise RuntimeError(
                 f"❌ API Key 長度異常：{mask_key(k)}\n"
                 f"長度為 {len(k)}，正常應為 35-45 個字元，請檢查是否輸入正確。"
             )
-        # 3. 檢查金鑰字元是否僅包含允許的字元（AIza + 英數字/ dash / underscore）
-        if not re.match(r"^AIza[a-zA-Z0-9_-]+$", k):
+        # 3. 除支援前綴外，key body 僅允許英數字、dash 與 underscore。
+        if not _API_KEY_PATTERN.fullmatch(k):
             log_error(f"❌ 偵測到包含無效字元的 API 金鑰: {mask_key(k)}")
             raise RuntimeError(
                 f"❌ API Key 包含無效字元：{mask_key(k)}\n"
-                "僅允許 'AIza' 開頭後接英文字母、數字、 dash(-) 或 underscore(_)。"
+                "僅允許 'AIza' 或 'AQ.' 開頭後接英文字母、數字、 dash(-) 或 underscore(_)。"
             )
 
     log_info(f"✅ 金鑰格式驗證通過，共載入 {len(keys)} 組金鑰。")
@@ -440,21 +443,21 @@ def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
     for k in keys:
         if not k:
             raise RuntimeError("❌ API Key 不得為空，請輸入有效的 Gemini API Key。")
-        if not k.startswith("AIza"):
+        if not k.startswith(_API_KEY_PREFIXES):
             raise RuntimeError(
                 f"❌ 無效的 API Key 格式：{mask_key(k)}\n"
                 "請使用 Google AI Studio 產生的 Gemini API Key，"
-                "通常應以 'AIza' 字樣開頭。"
+                "應以 'AIza' 或 'AQ.' 字樣開頭。"
             )
         if len(k) < 35:
             raise RuntimeError(
                 f"❌ API Key 長度異常：{mask_key(k)}\n"
                 f"長度為 {len(k)}，正常應為 35-45 個字元，請檢查是否輸入正確。"
             )
-        if not re.match(r"^AIza[a-zA-Z0-9_-]+$", k):
+        if not _API_KEY_PATTERN.fullmatch(k):
             raise RuntimeError(
                 f"❌ API Key 包含無效字元：{mask_key(k)}\n"
-                "僅允許 'AIza' 開頭後接英文字母、數字、 dash(-) 或 underscore(_)。"
+                "僅允許 'AIza' 或 'AQ.' 開頭後接英文字母、數字、 dash(-) 或 underscore(_)。"
             )
 
 

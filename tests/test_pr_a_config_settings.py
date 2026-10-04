@@ -76,6 +76,38 @@ def test_invalid_log_format_is_rejected_before_persistence():
     save_config.assert_not_called()
 
 
+def test_config_save_accepts_aq_gemini_key_and_keeps_it():
+    from app.views.config.config_actions import (
+        load_config_into_view,
+        save_config_from_view,
+    )
+    from tests.test_config_actions import make_full_view
+    from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
+    from translation_tool.utils.config_manager import DEFAULT_CONFIG
+
+    config = deepcopy(DEFAULT_CONFIG)
+    config["lm_translator"]["models"] = {}
+    config["lm_translator"]["keys"] = []
+    view = make_full_view()
+    view.load_config = MagicMock()
+    view._success_color = MagicMock(return_value="green")
+    load_config_into_view(view, config)
+    view.key_fields = [SimpleNamespace(value="AQ.testKey_0123456789abcdefghijklmnopqrstuvwxyz")]
+    saved = {}
+
+    result = save_config_from_view(
+        view,
+        load_config_json_fn=lambda: deepcopy(config),
+        save_config_json_fn=saved.update,
+        validate_api_keys_from_ui_fn=validate_api_keys_from_ui,
+    )
+
+    assert result is True
+    assert saved["lm_translator"]["keys"] == [
+        "AQ.testKey_0123456789abcdefghijklmnopqrstuvwxyz"
+    ]
+
+
 def test_mounted_extractor_refreshes_persisted_skip_default_after_save():
     from app.views.config.config_actions import (
         load_config_into_view,

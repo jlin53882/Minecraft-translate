@@ -112,6 +112,21 @@ class TestAPIKeyManagement:
         validate_api_keys()
 
     @patch("translation_tool.core.lm_config_rules.load_config")
+    def test_validate_api_keys_accepts_aq_and_legacy_prefixes(self, mock_load_config):
+        from translation_tool.core.lm_config_rules import validate_api_keys
+
+        mock_load_config.return_value = {
+            "lm_translator": {
+                "keys": [
+                    "AIzaSyctest123456789012345678901234567890",
+                    "AQ.testKey_0123456789abcdefghijklmnopqrstuvwxyz",
+                ]
+            }
+        }
+
+        validate_api_keys()
+
+    @patch("translation_tool.core.lm_config_rules.load_config")
     def test_validate_api_keys_empty(self, mock_load_config):
         """測試 API Key 驗證（無金鑰）。"""
         from translation_tool.core.lm_config_rules import validate_api_keys
@@ -137,6 +152,16 @@ class TestAPIKeyManagement:
 
         # 不應該拋出異常
         validate_api_keys_from_ui(["AIzaSyctest123456789012345678901234567890"])
+
+    def test_validate_api_keys_from_ui_accepts_aq_prefix_additively(self):
+        from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
+
+        validate_api_keys_from_ui(
+            [
+                "AIzaSyctest123456789012345678901234567890",
+                "AQ.testKey_0123456789abcdefghijklmnopqrstuvwxyz",
+            ]
+        )
 
     def test_validate_api_keys_from_ui_invalid(self):
         """測試 UI API Key 驗證（無效）。"""
