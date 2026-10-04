@@ -16,12 +16,12 @@ import types
 
 import flet as ft
 
-from app.ui.design import C
-from app.views.extractor.extractor_state import PreviewState
-from translation_tool.core.jar_processor import (
+from app.services_impl.pipelines.extract_service import (
     find_jar_files,
     preview_extraction_generator,
 )
+from app.ui.design import C
+from app.views.extractor.extractor_state import PreviewState
 from translation_tool.utils.config_manager import load_config
 
 

@@ -804,7 +804,7 @@ def _default_mode() -> str:
 
 
 def _default_key_snapshot() -> list:
-    from translation_tool.core.lm_config_rules import get_key_health_snapshot
+    from app.services_impl.key_health_service import get_key_health_snapshot
 
     return get_key_health_snapshot()
 

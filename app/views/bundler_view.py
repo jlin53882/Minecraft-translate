@@ -12,13 +12,13 @@ import flet as ft
 
 from app import config_store
 from app.services_impl.config_service import load_config_json
+from app.services_impl.pipelines.bundle_service import bundle_outputs_generator
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.mc_text import mc_text_spans
 from app.ui.snack import show_snack
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
-from translation_tool.core.output_bundler import bundle_outputs_generator
 from translation_tool.utils.log_unit import log_debug
 
 OUTPUT_ZIP_NAME_PATH = "output_bundler.output_zip_name"

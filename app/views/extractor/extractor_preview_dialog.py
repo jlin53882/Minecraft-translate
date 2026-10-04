@@ -12,13 +12,15 @@ import types
 
 import flet as ft
 
-from app.services_impl.pipelines.extract_service import prepare_extraction_paths
+from app.services_impl.pipelines.extract_service import (
+    prepare_extraction_paths,
+    preview_extraction_generator,
+)
 from app.ui.design import C
 from app.views._log import LogView
 from app.views.extractor import extractor_dialog as _extractor_dialog
 from app.views.extractor.extractor_dialog_helpers import format_size
 from app.views.extractor.extractor_state import PreviewState
-from translation_tool.core.jar_processor import preview_extraction_generator
 from translation_tool.utils.log_unit import log_info, log_warning
 
 # 背景任務 → UI 的刷新間隔（秒）

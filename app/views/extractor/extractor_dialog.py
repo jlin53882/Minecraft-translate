@@ -19,6 +19,9 @@ import types
 import flet as ft
 
 from app.services_impl.pipelines.extract_service import (
+    extract_book_files_generator,
+    extract_dual_files_generator,
+    extract_lang_files_generator,
     get_lang_codes,
     open_output_folder,
     prepare_extraction_paths,
@@ -27,11 +30,6 @@ from app.services_impl.pipelines.extract_service import (
 from app.ui.design import C
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
-from translation_tool.core.jar_processor import (
-    extract_book_files_generator,
-    extract_dual_files_generator,
-    extract_lang_files_generator,
-)
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 # ============================================================

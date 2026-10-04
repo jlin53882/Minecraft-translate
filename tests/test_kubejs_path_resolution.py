@@ -5,7 +5,9 @@ from pathlib import Path
 from translation_tool.core import kubejs_translator
 
 
-def test_resolve_kubejs_root_prefers_candidate_with_client_scripts(tmp_path: Path) -> None:
+def test_resolve_kubejs_root_prefers_candidate_with_client_scripts(
+    tmp_path: Path,
+) -> None:
     shallow = tmp_path / "pack" / "kubejs"
     deep = tmp_path / "pack" / "nested" / "kubejs"
     deep_client = deep / "client_scripts"

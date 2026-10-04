@@ -14,6 +14,11 @@ from collections.abc import Callable
 
 import flet as ft
 
+from app.services_impl.key_health_service import (
+    STATUS_COOLING,
+    STATUS_PROBING,
+    KeyHealth,
+)
 from app.shell.task_manager import STATUS_ERROR, TaskManager
 from app.ui import design, kit
 from app.ui.design import C
@@ -30,11 +35,6 @@ from app.views.dashboard.dashboard_data import (
     format_ago,
     format_count,
     greeting,
-)
-from translation_tool.core.lm_key_health import (
-    STATUS_COOLING,
-    STATUS_PROBING,
-    KeyHealth,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ def _default_rules_count() -> int:
 
 
 def _default_key_snapshot() -> list[KeyHealth]:
-    from translation_tool.core.lm_config_rules import get_key_health_snapshot
+    from app.services_impl.key_health_service import get_key_health_snapshot
 
     return get_key_health_snapshot()
 

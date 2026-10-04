@@ -20,9 +20,11 @@ from pathlib import Path
 # 測試 helper
 # ==================================================
 
+
 def create_mock_zip(files: dict[str, str]) -> zipfile.ZipFile:
     """建立記憶體中的 mock ZIP，用於測試。"""
     import io
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         for name, content in files.items():
@@ -37,13 +39,14 @@ def create_mock_zip(files: dict[str, str]) -> zipfile.ZipFile:
 # _build_model_index()
 # ==================================================
 
+
 def _build_model_index_impl(names: list[str], modid: str) -> dict[str, list[str]]:
     """測試用的 _build_model_index 實作（直接移植自 icon_preview_view.py）"""
     index: dict[str, list[str]] = {}
     prefix = f"assets/{modid}/models/"
     for n in names:
         if n.startswith(prefix) and n.endswith(".json"):
-            rel = n[len(prefix):]
+            rel = n[len(prefix) :]
             name = rel.replace(".json", "")
             if "/" in name:
                 name = name.split("/")[-1]
@@ -97,6 +100,7 @@ class TestBuildModelIndex:
 # ==================================================
 # _get_texture_value()
 # ==================================================
+
 
 def _get_texture_value_impl(model_data: dict) -> str | None:
     """測試用的 _get_texture_value 實作"""
@@ -152,6 +156,7 @@ class TestGetTextureValue:
 # _follow_parent_chain()
 # ==================================================
 
+
 def _follow_parent_chain_impl(
     model_path: str,
     names: set[str],
@@ -201,12 +206,12 @@ def _follow_parent_chain_impl(
 def test_follow_parent_chain_finds_texture():
     """parent chain 找到 texture"""
     files = {
-        "assets/testmod/models/item/drill.json": json.dumps({
-            "parent": "testmod:item/drill_base"
-        }),
-        "assets/testmod/models/item/drill_base.json": json.dumps({
-            "textures": {"layer0": "testmod:item/drill_base_tex"}
-        }),
+        "assets/testmod/models/item/drill.json": json.dumps(
+            {"parent": "testmod:item/drill_base"}
+        ),
+        "assets/testmod/models/item/drill_base.json": json.dumps(
+            {"textures": {"layer0": "testmod:item/drill_base_tex"}}
+        ),
     }
     names = set(files.keys())
 
@@ -222,9 +227,9 @@ def test_follow_parent_chain_finds_texture():
 def test_follow_parent_chain_skips_minecraft():
     """遇到 minecraft: parent 直接回 None"""
     files = {
-        "assets/testmod/models/item/drill.json": json.dumps({
-            "parent": "minecraft:item/generated"
-        }),
+        "assets/testmod/models/item/drill.json": json.dumps(
+            {"parent": "minecraft:item/generated"}
+        ),
     }
     names = set(files.keys())
 
@@ -257,6 +262,7 @@ def test_follow_parent_chain_no_parent_no_texture():
 # _texture_to_png_path()
 # ==================================================
 
+
 def _texture_to_png_path_impl(tex_val: str) -> str | None:
     """測試用的 _texture_to_png_path 實作"""
     if not tex_val or ":" not in tex_val:
@@ -267,16 +273,22 @@ def _texture_to_png_path_impl(tex_val: str) -> str | None:
 
 class TestTextureToPngPath:
     def test_standard_conversion(self):
-        assert _texture_to_png_path_impl("actuallyadditions:item/drill_blue") == \
-            "assets/actuallyadditions/textures/item/drill_blue.png"
+        assert (
+            _texture_to_png_path_impl("actuallyadditions:item/drill_blue")
+            == "assets/actuallyadditions/textures/item/drill_blue.png"
+        )
 
     def test_block_path(self):
-        assert _texture_to_png_path_impl("actuallyadditions:block/fluid/oil") == \
-            "assets/actuallyadditions/textures/block/fluid/oil.png"
+        assert (
+            _texture_to_png_path_impl("actuallyadditions:block/fluid/oil")
+            == "assets/actuallyadditions/textures/block/fluid/oil.png"
+        )
 
     def test_minecraft_builtin(self):
-        assert _texture_to_png_path_impl("minecraft:item/diamond") == \
-            "assets/minecraft/textures/item/diamond.png"
+        assert (
+            _texture_to_png_path_impl("minecraft:item/diamond")
+            == "assets/minecraft/textures/item/diamond.png"
+        )
 
     def test_no_namespace(self):
         assert _texture_to_png_path_impl("some/path") is None
@@ -290,15 +302,16 @@ class TestTextureToPngPath:
 # 整合測試：從 lang key 到 PNG 路徑完整流程
 # ==================================================
 
+
 def test_end_to_end_lang_key_to_png():
     """測試：從 lang key 到 PNG 路徑的完整流程"""
     files = {
-        "assets/actuallyadditions/models/item/drill_blue.json": json.dumps({
-            "textures": {"layer0": "actuallyadditions:item/drill_blue"}
-        }),
-        "assets/actuallyadditions/lang/en_us.json": json.dumps({
-            "item.actuallyadditions.drill_blue": "Blue Drill"
-        }),
+        "assets/actuallyadditions/models/item/drill_blue.json": json.dumps(
+            {"textures": {"layer0": "actuallyadditions:item/drill_blue"}}
+        ),
+        "assets/actuallyadditions/lang/en_us.json": json.dumps(
+            {"item.actuallyadditions.drill_blue": "Blue Drill"}
+        ),
     }
 
     # Step 1: _build_model_index
@@ -308,7 +321,9 @@ def test_end_to_end_lang_key_to_png():
 
     # Step 2: _get_texture_value
     with create_mock_zip(files) as zf:
-        model_data = json.loads(zf.read("assets/actuallyadditions/models/item/drill_blue.json"))
+        model_data = json.loads(
+            zf.read("assets/actuallyadditions/models/item/drill_blue.json")
+        )
         tex_val = _get_texture_value_impl(model_data)
         assert tex_val == "actuallyadditions:item/drill_blue"
 
@@ -324,9 +339,9 @@ def test_end_to_end_lang_key_to_png():
 def test_fuzzy_block_name_match():
     """測試：block key 的 variant 名稱模糊匹配"""
     files = {
-        "assets/testmod/models/block/coffee_1.json": json.dumps({
-            "textures": {"layer0": "testmod:block/coffee_stage1"}
-        }),
+        "assets/testmod/models/block/coffee_1.json": json.dumps(
+            {"textures": {"layer0": "testmod:block/coffee_stage1"}}
+        ),
     }
     names = list(files.keys())
     index = _build_model_index_impl(names, "testmod")

@@ -14,7 +14,9 @@ class _Session:
         self.values.append(value)
 
 
-def test_step2_translate_uses_progress_proxy_and_forwards_flags(tmp_path: Path, monkeypatch) -> None:
+def test_step2_translate_uses_progress_proxy_and_forwards_flags(
+    tmp_path: Path, monkeypatch
+) -> None:
     calls = {}
     session = _Session()
 
@@ -23,7 +25,9 @@ def test_step2_translate_uses_progress_proxy_and_forwards_flags(tmp_path: Path, 
         kwargs["session"].set_progress(0.5)
         return {"dry_run": kwargs["dry_run"], "files": 1}
 
-    monkeypatch.setattr(md_translation_assembly, "translate_md_pending", fake_translate_md_pending)
+    monkeypatch.setattr(
+        md_translation_assembly, "translate_md_pending", fake_translate_md_pending
+    )
 
     result = md_translation_assembly.step2_translate(
         pending_dir=str(tmp_path / "pending"),

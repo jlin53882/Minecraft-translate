@@ -265,8 +265,8 @@ class LMView(ft.Column):
     def refresh_key_stat(self):
         """更新「可用 API Key」統計（#113 的 key 健康度）。"""
         try:
+            from app.services_impl.key_health_service import get_key_health_snapshot
             from app.shell.topbar import summarize_keys
-            from translation_tool.core.lm_config_rules import get_key_health_snapshot
 
             summary = summarize_keys(get_key_health_snapshot())
         except Exception:  # noqa: BLE001 - 讀不到設定時只是不顯示

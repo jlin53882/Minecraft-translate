@@ -49,7 +49,9 @@ def test_is_mc_standard_lang_path_samples(path: str, expected: bool) -> None:
     assert lang_codec.is_mc_standard_lang_path(path) is expected
 
 
-def test_export_filtered_pending_keeps_only_threshold_files_and_cleans_output(tmp_path: Path) -> None:
+def test_export_filtered_pending_keeps_only_threshold_files_and_cleans_output(
+    tmp_path: Path,
+) -> None:
     pending_root = tmp_path / "pending"
     output_root = tmp_path / "filtered"
 
@@ -61,11 +63,15 @@ def test_export_filtered_pending_keeps_only_threshold_files_and_cleans_output(tm
     skip_file.parent.mkdir(parents=True, exist_ok=True)
     stale_file.parent.mkdir(parents=True, exist_ok=True)
 
-    keep_file.write_bytes(orjson.dumps([{"k": 1}, {"k": 2}], option=orjson.OPT_INDENT_2))
+    keep_file.write_bytes(
+        orjson.dumps([{"k": 1}, {"k": 2}], option=orjson.OPT_INDENT_2)
+    )
     skip_file.write_bytes(orjson.dumps([{"k": 1}], option=orjson.OPT_INDENT_2))
     stale_file.write_text("stale", encoding="utf-8")
 
-    lang_merge_content.export_filtered_pending(str(pending_root), str(output_root), min_count=2)
+    lang_merge_content.export_filtered_pending(
+        str(pending_root), str(output_root), min_count=2
+    )
 
     assert not stale_file.exists()
     assert (output_root / "a" / "keep.json").exists()

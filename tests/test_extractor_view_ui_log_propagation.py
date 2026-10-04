@@ -35,6 +35,7 @@ class TestAppendLogLineCore:
 
     def test_color_assignment_rules(self):
         """Color assignment based on log content."""
+
         def get_color(text):
             color = "#e0e0e0"
             if "[ERROR]" in text:
@@ -98,7 +99,7 @@ class TestAppendLogLineCore:
             log_view.controls.append(ft.Text(f"log line {i}", size=12))
 
         if len(log_view.controls) > MAX:
-            del log_view.controls[:len(log_view.controls) - MAX]
+            del log_view.controls[: len(log_view.controls) - MAX]
 
         assert len(log_view.controls) == MAX
 
@@ -108,9 +109,11 @@ class TestPageUpdateIntegration:
 
     def test_page_update_increments_counter(self):
         """page.update() increments updated counter."""
+
         class _Page:
             def __init__(self):
                 self.updated = 0
+
             def update(self, *args, **kwargs):
                 self.updated += 1
 
@@ -121,12 +124,15 @@ class TestPageUpdateIntegration:
 
     def test_page_schedule_update_called_when_present(self):
         """page.schedule_update() called if available on page object."""
+
         class _Page:
             def __init__(self):
                 self.updated = 0
                 self.schedule_called = 0
+
             def update(self, *args, **kwargs):
                 self.updated += 1
+
             def schedule_update(self, *args, **kwargs):
                 self.schedule_called += 1
 
@@ -138,9 +144,11 @@ class TestPageUpdateIntegration:
 
     def test_set_controls_disabled_updates_page(self):
         """Disabling controls triggers page.update()."""
+
         class _Page:
             def __init__(self):
                 self.updated = 0
+
             def update(self, *args, **kwargs):
                 self.updated += 1
 
@@ -157,9 +165,11 @@ class TestPageUpdateIntegration:
 
     def test_disable_then_append_both_update_page(self):
         """set_controls_disabled(True) then _append_log_line both trigger updates."""
+
         class _Page:
             def __init__(self):
                 self.updated = 0
+
             def update(self, *args, **kwargs):
                 self.updated += 1
 
@@ -243,7 +253,7 @@ class TestConcurrentAppend:
             with lock:
                 current_len = len(session_logs)
             if current_len > last_seen[0]:
-                for log in session_logs[last_seen[0]:current_len]:
+                for log in session_logs[last_seen[0] : current_len]:
                     log_view.controls.append(ft.Text(log, size=12))
                     page_updates.append(1)
                 last_seen[0] = current_len
@@ -267,7 +277,9 @@ class TestConcurrentAppend:
         thread.join()
         append_ui()
 
-        assert len(log_view.controls) == 20, f"Expected 20, got {len(log_view.controls)}"
+        assert len(log_view.controls) == 20, (
+            f"Expected 20, got {len(log_view.controls)}"
+        )
         assert len(page_updates) >= 1
 
 

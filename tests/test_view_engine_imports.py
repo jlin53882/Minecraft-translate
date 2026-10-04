@@ -1,7 +1,8 @@
 """View／UI／外殼直接 import 引擎核心（translation_tool.core）的棘輪（#136）。
 
-目標方向是 View 經由 ``app/services_impl`` 呼叫引擎；一次改完風險太高，所以先把「目前的直接依賴」
-列成白名單並鎖住：**不得新增**，只能隨各 View 的拆分逐步移除（移除時請同步刪掉白名單的項目）。
+View 經由 ``app/services_impl`` 取用引擎（金鑰健康度：``key_health_service``；圖示：``icon_service``；
+提取／打包：``pipelines/extract_service``、``bundle_service``）。白名單目前為空：**不得新增**直接 import；
+確有充分理由時才加入白名單並寫明原因。
 
 ``translation_tool.utils.*``（log_unit、config_manager…）是純工具，不在此限制內。
 """
@@ -15,25 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCAN_DIRS = ("app/views", "app/ui", "app/shell")
 
 # (View 檔案, 引擎模組)：已知的直接依賴與處理方向
-ALLOWED: dict[tuple[str, str], str] = {
-    # 金鑰健康度：顯示用的資料類別／常數；快照函式應由 service 提供
-    ("app/shell/app_shell.py", "translation_tool.core.lm_config_rules"): "改走 service",
-    ("app/shell/topbar.py", "translation_tool.core.lm_key_health"): "顯示用資料類別",
-    ("app/views/dashboard/dashboard_data.py", "translation_tool.core.lm_key_health"): "顯示用資料類別",
-    ("app/views/dashboard_view.py", "translation_tool.core.lm_config_rules"): "改走 service",
-    ("app/views/dashboard_view.py", "translation_tool.core.lm_key_health"): "顯示用資料類別",
-    ("app/views/lm_view.py", "translation_tool.core.lm_config_rules"): "改走 service",
-    ("app/views/config_view.py", "translation_tool.core.lm_config_rules"): "改走 service",
-    # 打包／提取：對話框與頁面直接呼叫引擎
-    ("app/views/bundler_view.py", "translation_tool.core.output_bundler"): "改走 service",
-    ("app/views/extractor/extractor_dialog.py", "translation_tool.core.jar_processor"): "改走 service",
-    ("app/views/extractor/extractor_preview_dialog.py", "translation_tool.core.jar_processor"): "改走 service",
-    ("app/views/pipeline/pipeline_extract_dialog.py", "translation_tool.core.jar_processor"): "改走 service",
-    # 圖示預覽列：圖示解析與預覽快取
-    ("app/views/icon_preview_row.py", "translation_tool.core.icon_preview_cache"): "改走 service",
-    ("app/views/icon_preview_row.py", "translation_tool.core.icon_reason"): "顯示用資料類別",
-    ("app/views/icon_preview_row.py", "translation_tool.core.icon_resolver"): "改走 service",
-}  # fmt: skip
+ALLOWED: dict[tuple[str, str], str] = {}  # #136：全部已改走 app/services_impl
 
 
 def _engine_imports() -> set[tuple[str, str]]:

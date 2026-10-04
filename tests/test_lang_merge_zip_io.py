@@ -2,6 +2,7 @@
 
 用途：測試 ZIP 檔案 IO 操作的各種情況。
 """
+
 from __future__ import annotations
 
 import json
@@ -191,7 +192,9 @@ class TestQuarantineCopyFromZip:
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("assets/mod/lang/en_us.json", '{"key": "value"}')
 
-        monkeypatch.setattr("translation_tool.core.lang_merge_zip_io.load_config", _mock_config)
+        monkeypatch.setattr(
+            "translation_tool.core.lang_merge_zip_io.load_config", _mock_config
+        )
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             quarantine_copy_from_zip(
@@ -201,8 +204,17 @@ class TestQuarantineCopyFromZip:
                 reason="test_reason",
             )
 
-        quarantine_path = output_dir / "skipped_json" / "assets" / "mod" / "lang" / "en_us.json"
-        reason_path = output_dir / "skipped_json" / "assets" / "mod" / "lang" / "en_us.json.reason.txt"
+        quarantine_path = (
+            output_dir / "skipped_json" / "assets" / "mod" / "lang" / "en_us.json"
+        )
+        reason_path = (
+            output_dir
+            / "skipped_json"
+            / "assets"
+            / "mod"
+            / "lang"
+            / "en_us.json.reason.txt"
+        )
 
         assert quarantine_path.exists()
         assert quarantine_path.read_bytes() == b'{"key": "value"}'
@@ -217,7 +229,9 @@ class TestQuarantineCopyFromZip:
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("test.json", "{}")
 
-        monkeypatch.setattr("translation_tool.core.lang_merge_zip_io.load_config", _mock_config)
+        monkeypatch.setattr(
+            "translation_tool.core.lang_merge_zip_io.load_config", _mock_config
+        )
 
         with zipfile.ZipFile(zip_path, "r") as zf:
             quarantine_copy_from_zip(

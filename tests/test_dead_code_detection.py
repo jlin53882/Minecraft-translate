@@ -1,6 +1,7 @@
 """tests/test_dead_code_detection.py
 用途：靜態分析確認 ftb_translator_export / ftb_translator_template 有實際 caller（非死碼）。
 """
+
 from pathlib import Path
 
 
@@ -10,10 +11,7 @@ def test_ftb_translator_modules_have_callers():
     core_dir = repo_root / "translation_tool" / "core"
 
     # 搜尋翻譯模組：排除自身 + __pycache__
-    py_files = [
-        f for f in core_dir.glob("**/*.py")
-        if "__pycache__" not in str(f)
-    ]
+    py_files = [f for f in core_dir.glob("**/*.py") if "__pycache__" not in str(f)]
     assert len(py_files) > 0
 
     callers_export = []

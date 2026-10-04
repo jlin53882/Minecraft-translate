@@ -12,11 +12,14 @@ from pathlib import Path
 import flet as ft
 from PIL import Image as PILImage
 
+from app.services_impl.icon_service import (
+    IconResult,
+    IconRisk,
+    generate_icon_preview,
+    resolve_icon_with_reason,
+)
 from app.ui import kit
 from app.ui.design import C
-from translation_tool.core.icon_preview_cache import generate_icon_preview
-from translation_tool.core.icon_reason import IconResult, IconRisk
-from translation_tool.core.icon_resolver import resolve_icon_with_reason
 
 _ICON_UPSCALE_SIZE = 64
 """小於此尺寸的 icon 視為需要 upscale（pixels, 一邊）。"""

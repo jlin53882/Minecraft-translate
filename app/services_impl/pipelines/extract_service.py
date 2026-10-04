@@ -27,11 +27,15 @@ from translation_tool.core.jar_processor import (
     extract_book_files_generator,
     extract_dual_files_generator,
     extract_lang_files_generator,
+    find_jar_files,  # noqa: F401 - 轉出給 View（#136）
+    preview_extraction_generator,  # noqa: F401 - 轉出給 View（#136）
 )
 from translation_tool.utils.cancellation import is_cancelled
 from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
+
+# View 經由本模組取用引擎的提取／預覽 generator（#136）：上方 import 即為對外介面
 
 
 def _select_extraction_generator(
