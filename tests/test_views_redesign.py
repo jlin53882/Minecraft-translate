@@ -377,6 +377,35 @@ def test_dashboard_reflects_running_and_finished_tasks():
         manager.detach()
 
 
+def test_dashboard_reloads_stats_at_task_boundaries_not_every_progress_event(
+    monkeypatch,
+):
+    from app.shell.task_manager import TaskManager
+    from app.tasks.task_session import TaskSession
+
+    view = _dashboard()
+    manager = TaskManager()
+    manager.attach()
+    sessions: list[TaskSession] = []
+    reloads: list[str] = []
+    monkeypatch.setattr(view, "reload", lambda: reloads.append("reload"))
+    try:
+        view.set_task_manager(manager)
+        session = TaskSession(name="機器翻譯", view_key="lm")
+        sessions.append(session)
+        session.start()
+        assert reloads == ["reload"]
+
+        for progress in (0.1, 0.2, 0.3, 0.4):
+            session.set_progress(progress)
+        assert reloads == ["reload"]
+
+        session.finish()
+        assert reloads == ["reload", "reload"]
+    finally:
+        manager.detach()
+
+
 def test_dashboard_step_tiles_navigate_through_the_shell():
     from types import SimpleNamespace
 
