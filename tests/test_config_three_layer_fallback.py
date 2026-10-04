@@ -349,12 +349,14 @@ class TestLoadConfigIntoView:
                 self.controls_map = {
                     "logging.log_level": MockControl(),
                     "logging.log_dir": MockControl(),
+                    "logging.log_format": MockControl(),
                     "translator.output_dir_name": MockControl(),
                     "ftb_translator.output_dir_name": MockControl(),
                     "translator.replace_rules_path": MockControl(),
                     "translator.cache_directory": MockControl(),
                     "translator.enable_cache_saving": MockControl(),
                     "translator.parallel_execution_workers": MockControl(),
+                    "translator.custom_translator_folder": MockControl(),
                     "species_cache.cache_directory": MockControl(),
                     "species_cache.cache_filename": MockControl(),
                     "species_cache.wikipedia_language": MockControl(),
@@ -389,6 +391,7 @@ class TestLoadConfigIntoView:
                     "extractor.output_folder_names.book_preview": MockControl(),
                     "extractor.output_folder_names.dual_extract": MockControl(),
                     "extractor.output_folder_names.dual_preview": MockControl(),
+                    "extractor.skip_zh_cn_extract": MockControl(),
                 }
                 self.models_column = MockColumn()
                 self.key_fields = []

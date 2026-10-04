@@ -17,14 +17,14 @@ app/views/config/
 
 | id | label | 對應內容區 |
 |----|-------|-----------|
-| `general` | 一般設定 | logging.log_level / log_dir、translator.output_dir_name、replace_rules_path、cache_directory、parallel_execution_workers 等 |
+| `general` | 一般設定 | logging.log_level / log_dir / log_format、translator.output_dir_name、replace_rules_path、cache_directory、parallel_execution_workers、custom_translator_folder 等 |
 | `api_models` | API & 模型設定 | `_build_lm_keys_card`（keys 動態列）+ `_build_lm_models_card`（models 動態列，可上移/下移/刪除） |
 | `translation_behavior` | 翻譯行為設定 | `_build_lm_basic_card` / `_build_lm_filter_card`（temperature、batch sizes、skip_terms、translatable_keywords） |
 | `merger` | 語言合併器設定 | `_build_lang_merger_card`（pending 資料夾命名、門檻值、patchouli 開關） |
 | `prompts` | 提示詞管理 | `_build_lm_prompts_card`（patchouli/lang system prompt） |
 | `species_lookup` | 學名查詢管理 | species_cache 設定（cache_directory / wikipedia_language / rate_limit_delay） |
 | `batch_limits` | 批次與限制 | `_build_lm_batch_card`（initial_batch_size_* 各格式、min_batch_size、batch_shrink_factor） |
-| `extractor` | Jar 提取設定 | extractor.output_folder_names（lang/book/dual 的 extract/preview 資料夾名） |
+| `extractor` | Jar 提取設定 | extractor.output_folder_names、skip_zh_cn_extract；target_language 僅作舊設定相容，不宣稱會生效 |
 
 ## 呼叫鏈
 
@@ -43,7 +43,8 @@ app/views/config/
       ├─ validate_api_keys_from_ui(api_keys)（lm_config_rules.py）
       ├─ save_config_json(new_config) → 觸發 normalization
       ├─ view.load_config() → 重新載入刷新 UI
-      └─ registry 中 extractor view 若有 refresh_output_dir_helper → 呼叫（更新 helper 文案）
+      └─ registry 中已建立的 ExtractorView → refresh_config_defaults()
+          （同步 config-backed UI defaults；尚未建立的頁面於建立時讀取最新設定）
 ```
 
 ## 主要方法（config_view.py）
@@ -106,6 +107,13 @@ app/views/config/
 
 ## 維護注意
 
-1. 新增 config 欄位時，需同步更新：`_init_controls`（建立控制項）、`load_config_into_view`（載入）、`save_config_from_view`（儲存）三處。
+1. 新增 config 欄位時，需同步更新：`_init_controls`（建立控制項）、`load_config_into_view`（載入）、`save_config_from_view`（儲存）三處；若欄位沒有明確 runtime caller，必須列入相容/棄用清單，不得只新增看似可調整的輸入框。
 2. list 欄位在 UI 是「每行一個元素」的多行 TextField，載入用 `\n` join、儲存用 splitlines 過濾空行。
-3. `save_config_from_view` 的 registry 參數用來在儲存後通知 extractor view 重新整理 helper 文案（若 extractor 頁尚未 mount，其內部有 try/except 防護）。
+3. `save_config_from_view` 的 registry 參數會在儲存後通知已建立的 ExtractorView 執行 `refresh_config_defaults()`，重新同步 config-backed UI defaults；尚未建立的頁面則於建立時讀取最新設定。
+
+## PR-A 設定稽核結論
+
+- `extractor.skip_zh_cn_extract`：設定頁提供預設值；ExtractorView 建立時載入，提取/預覽仍保留每次操作的手動覆寫，最後由 regex/generator 實際套用。
+- `translator.custom_translator_folder`：設定頁提供 round-trip；FTB translator 每次任務讀取並傳給 `load_custom_translations`。
+- `logging.log_format`：設定頁提供 round-trip；既有 `update_logger_config` formatter 契約保留，下一次流水線啟動套用。
+- `extractor.target_language`、`translator.cjk_ratio_threshold`：保留舊設定以避免升級遺失，但歷史追查沒有正式 caller/可證明規則；列為 `DEPRECATED_CONFIG_KEYS`，不在 UI 製造無效控制項。

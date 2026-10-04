@@ -103,6 +103,11 @@ class ConfigView(ft.Column):
         self.controls_map["logging.log_dir"] = kit.field(
             label="日誌資料夾名稱", dense=True, helper="用於：logging module"
         )
+        self.controls_map["logging.log_format"] = kit.field(
+            label="日誌格式",
+            dense=True,
+            helper="下次流水線啟動時套用；使用 Python logging 格式欄位",
+        )
 
         self.controls_map["translator.output_dir_name"] = kit.field(
             label="主要輸出資料夾名稱", dense=True, helper="用於：翻譯結果輸出"
@@ -123,6 +128,11 @@ class ConfigView(ft.Column):
         )
         self.controls_map["translator.parallel_execution_workers"] = kit.field(
             label="檔案處理多執行緒數量", dense=True, helper="用於：平行執行器"
+        )
+        self.controls_map["translator.custom_translator_folder"] = kit.field(
+            label="自訂翻譯資料夾",
+            dense=True,
+            helper="下次 FTB 任務讀取；相對路徑以專案根目錄為基準",
         )
 
         self.controls_map["species_cache.cache_directory"] = kit.field(
@@ -369,6 +379,9 @@ class ConfigView(ft.Column):
         self.controls_map["extractor.output_folder_names.dual_preview"] = kit.field(
             label="Dual 預覽輸出資料夾", helper="Lang + Book 同時預覽時使用", dense=True
         )
+        self.controls_map["extractor.skip_zh_cn_extract"] = ft.Checkbox(
+            label="提取頁預設跳過 zh_cn（可在每次操作前覆寫）"
+        )
 
         self.new_model_field = kit.field(
             label="新增模型名稱", hint_text="gemini-2.5-flash", expand=True, dense=True
@@ -461,6 +474,7 @@ class ConfigView(ft.Column):
                     [
                         self.controls_map["logging.log_level"],
                         self.controls_map["logging.log_dir"],
+                        self.controls_map["logging.log_format"],
                     ],
                 ),
                 self._build_card(
@@ -472,6 +486,13 @@ class ConfigView(ft.Column):
                         self.controls_map["translator.cache_directory"],
                         self.controls_map["translator.parallel_execution_workers"],
                         self.controls_map["translator.enable_cache_saving"],
+                        self.controls_map["translator.custom_translator_folder"],
+                        ft.Text(
+                            "translator.cjk_ratio_threshold 已保留供舊設定相容，歷史上沒有實際 caller；"
+                            "本頁不提供無效的可調整欄位。",
+                            size=12,
+                            color=C.DIM,
+                        ),
                     ],
                 ),
                 self._build_card(
@@ -596,6 +617,14 @@ class ConfigView(ft.Column):
                                     expand=1,
                                 ),
                             ]
+                        ),
+                        ft.Divider(),
+                        self.controls_map["extractor.skip_zh_cn_extract"],
+                        ft.Text(
+                            "extractor.target_language 是歷史設定；目前沒有正式生效語意，"
+                            "保留舊 config 讀取相容但不再宣稱會影響提取。",
+                            size=12,
+                            color=C.DIM,
                         ),
                     ],
                 ),

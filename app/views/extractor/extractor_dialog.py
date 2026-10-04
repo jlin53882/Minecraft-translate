@@ -117,7 +117,9 @@ def open_extractor_dialog(
     final_output = prepare_extraction_paths(mods_dir, mode, output_dir)
 
     # ✅ 階段 B-2 重構：lang_codes 讀取已抽離至 extract_service.get_lang_codes()
-    lang_codes = get_lang_codes()
+    # skip_zh_cn 是提取頁的單次操作值；傳入 service 讓設定預設與手動覆寫
+    # 都能在建立 generator 前完成，避免先讀到一份再由 regex 二次猜測。
+    lang_codes = get_lang_codes(skip_zh_cn=skip_zh_cn)
 
     # 狀態變數
     state = {

@@ -35,6 +35,15 @@ PROJECT_ROOT = get_project_root()
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 EXAMPLE_PATH = PROJECT_ROOT / "config.example.json"
 
+# PR-A：這些欄位仍由三層合併保留，避免舊 config 在升級時遺失；
+# 但歷史追查沒有找到正式 runtime caller，因此不在新 UI 中宣稱可調整。
+DEPRECATED_CONFIG_KEYS = frozenset(
+    {
+        "extractor.target_language",
+        "translator.cjk_ratio_threshold",
+    }
+)
+
 
 def load_config_example() -> dict:
     """讀取 config.example.json，不存在或解析失敗時回傳空 dict。

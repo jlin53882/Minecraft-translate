@@ -20,7 +20,10 @@ from pathlib import Path
 
 import flet as ft
 
-from app.services_impl.pipelines.extract_service import get_output_folder_names
+from app.services_impl.pipelines.extract_service import (
+    get_output_folder_names,
+    get_skip_zh_cn_extract,
+)
 from app.tasks.task_session import (
     TaskSession,  # noqa: F401 - 測試以 extractor_view.TaskSession patch
 )
@@ -88,7 +91,7 @@ class ExtractorView(ft.Column):
 
         self.skip_zh_cn_switch = ft.Switch(
             label="跳過 zh_cn 抽取",
-            value=False,
+            value=get_skip_zh_cn_extract(),
             label_text_style=ft.TextStyle(size=13, color=C.TEXT),
         )
 
@@ -191,12 +194,21 @@ class ExtractorView(ft.Column):
             show_snack(self.page, "未選擇資料夾", color=theme.BLUE_600)
 
     # 僅在按「預覽/提取」時自動填入輸出路徑，選擇資料夾時不自動填入
-    def refresh_output_dir_helper(self):
-        """重新讀取 config 並更新 output_dir_textfield 的 helper。
+    def refresh_config_defaults(self):
+        """Refresh config-backed controls after settings are saved.
 
-        在設定頁儲存 extractor 設定後呼叫。
+        ExtractorView owns both the output helper and the skip-zh_cn switch,
+        so the config view only needs to notify this single lifecycle API.
+        ``_update_output_dir_helper`` already defers the page update when the
+        view has not been mounted yet; the updated switch value is retained
+        for the next mount.
         """
+        self.skip_zh_cn_switch.value = get_skip_zh_cn_extract()
         self._update_output_dir_helper()
+
+    def refresh_output_dir_helper(self):
+        """Backward-compatible alias for the config refresh ownership API."""
+        self.refresh_config_defaults()
 
     def _update_output_dir_helper(self):
         """動態更新 output_dir_textfield 的 helper，顯示實際的資料夾命名設定。
