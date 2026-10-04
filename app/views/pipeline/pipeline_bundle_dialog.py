@@ -313,7 +313,7 @@ def _bundle__refresh_version_list(ctx, search_text: str):
 
 def _bundle__select_version(ctx, version: str):
     ctx.selected_version = version
-    ctx.version_toggle_label.value = f"已選擇：{version}"
+    ctx.version_toggle_label.value = version  # 「已選擇：」前綴是版面上的固定文字
     ctx.version_expanded = False
     ctx.version_dropdown_container.visible = False
     ctx.page.update()

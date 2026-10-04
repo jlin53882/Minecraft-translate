@@ -392,8 +392,30 @@ def test_selecting_version_updates_selected_label(env):
     _toggle(dialog).on_click(None)
     assert _dropdown(dialog).visible is True
     _version_item(dialog, "1.19.4").on_click(None)
-    assert "已選擇：1.19.4" in _texts(dialog)
     assert _dropdown(dialog).visible is False  # 選完自動收合
+    _assert_selected_version_row(dialog, "1.19.4")
+
+
+def _assert_selected_version_row(dialog, version):
+    """用實際組合出的版面驗證：「已選擇：」只出現一次、版本只出現一次（不是重複前綴）。
+
+    版面是 ``Row([Text("已選擇："), Text(version), ...])``；測試找出那一列，
+    把列內所有文字串起來檢查。
+    """
+    row = next(
+        c
+        for c in _walk(dialog)
+        if isinstance(c, ft.Row)
+        and any(isinstance(x, ft.Text) and x.value == "已選擇：" for x in c.controls)
+    )
+    values = [x.value for x in row.controls if isinstance(x, ft.Text)]
+    assert values == ["已選擇：", version]
+    shown = "".join(values)
+    assert shown == f"已選擇：{version}"
+    assert shown.count("已選擇：") == 1 and shown.count(version) == 1
+    assert "已選擇：已選擇：" not in shown and "已選擇： 已選擇：" not in shown
+    # 整個對話框內也不存在重複前綴
+    assert not any("已選擇：已選擇" in t for t in _texts(dialog))
 
 
 def test_missing_version_data_still_opens_with_placeholder(env):

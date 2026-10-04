@@ -4,7 +4,7 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **258** 項；其中 **145** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **258** 項；其中 **144** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
@@ -101,14 +101,14 @@
 | `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons._process_jar` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview_row.py:_ensure_icon_size` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:IconPreviewView._begin_scan._scan` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
+| `app/views/icon_preview_view.py:IconPreviewView._load_async` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
 | `app/views/lm_view.py:LMView.refresh_key_stat` | BLE001 | UI／畫面保護 | 讀不到設定時只是不顯示 |
 | `app/views/lookup_view.py:LookupView.single_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/lookup_view.py:LookupView.batch_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/merge_view.py:MergeView._broadcast_config_change_to_config_view` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/merge_view.py:MergeView._on_merge_field_changed` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/merge_view.py:MergeView._start_ui_poller._sync_ui` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/merge_view.py:MergeView._start_ui_poller.poll` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/merge_view.py:MergeView.start_merge._run_merge` | BLE001 | 已記錄／回報 | 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束 |
+| `app/views/merge_view.py:MergeView._sync_ui_once` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/merge_view.py:MergeView._close_dialog_overlay` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/pipeline/pipeline_bundle_dialog.py:_load_version_data` | BLE001 | UI／畫面保護 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
 | `app/views/pipeline/pipeline_extract_dialog.py:_extract_preview_worker` | BLE001 | 已記錄／回報 | 錯誤要顯示在對話框 |

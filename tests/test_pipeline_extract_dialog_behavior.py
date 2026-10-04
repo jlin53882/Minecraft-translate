@@ -90,7 +90,13 @@ class _Env:
 
         monkeypatch.setattr(mod.threading, "Thread", _Thread)
         monkeypatch.setattr(mod, "load_config", lambda: env.cfg)
-        monkeypatch.setattr(mod, "find_jar_files", lambda d: ["a.jar", "b.jar"])
+        self.find_calls: list[str] = []
+
+        def find_jars(d):
+            env.find_calls.append(d)
+            return ["a.jar", "b.jar"]
+
+        monkeypatch.setattr(mod, "find_jar_files", find_jars)
         monkeypatch.setattr(mod, "preview_extraction_generator", gen)
 
     def open(self, input_path=None, output_path=None):
@@ -324,7 +330,9 @@ def test_preview_start_shows_scanning_dialog_and_starts_daemon_worker(env):
     _button(dialog, "預覽結果").on_click(None)
     pd = env.page.overlay[-1]
     assert pd is not dialog and pd.open is True and pd.modal is True
-    assert "預覽掃描中...（0/2）" in _texts(pd)
+    # JAR 探索在背景執行緒（尚未執行）：這裡不能已經呼叫過 find_jar_files／產生總數
+    assert "正在搜尋 JAR..." in _texts(pd)
+    assert env.find_calls == []
     assert [a.content for a in pd.actions] == ["取消"]
     assert len(env.threads) == 1 and env.threads[0].daemon is True
     assert len(env.page._tasks) == 1  # poller

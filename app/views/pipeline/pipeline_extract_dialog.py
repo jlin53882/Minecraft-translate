@@ -280,9 +280,14 @@ def _extract_preview_worker(
 ) -> None:
     """背景執行緒：跑預覽 generator，只寫入 preview_state（不碰任何控制項）。
 
-    ``cancel_event`` 被設定（使用者按「取消」）時在下一筆更新就停止掃描。
+    JAR 探索（``find_jar_files``，會走訪資料夾）也在這裡執行，不佔用 event loop。
+    ``cancel_event`` 被設定（使用者按「取消」）時在下一個檢查點就停止，結果直接丟棄。
     """
     try:
+        jar_files = find_jar_files(mods)
+        preview_state.total = len(jar_files)
+        if cancel_event is not None and cancel_event.is_set():
+            return
         for update in preview_extraction_generator(
             mods, mode, lang_codes=selected_codes
         ):
@@ -369,7 +374,7 @@ def _extract_close_preview_dialog(ctx, d, cancel_event=None) -> None:
 
 
 def _extract_preview_apply_final(
-    ctx, preview_dialog, preview_state, mode, total_jars, width
+    ctx, preview_dialog, preview_state, mode, width
 ) -> None:
     """（event loop 上）把預覽結果或錯誤套用到對話框。"""
     if preview_state.error:
@@ -379,7 +384,7 @@ def _extract_preview_apply_final(
         )
     else:
         preview_dialog.content = _extract_preview_result_content(
-            preview_state.result or {}, mode, total_jars, width
+            preview_state.result or {}, mode, preview_state.total, width
         )
     preview_dialog.actions = [
         ft.TextButton(
@@ -391,7 +396,7 @@ def _extract_preview_apply_final(
 
 
 async def _extract_preview_poll(
-    ctx, preview_dialog, preview_state, mode, total_jars, width, cancel_event=None
+    ctx, preview_dialog, preview_state, mode, width, cancel_event=None
 ) -> None:
     """在 event loop 上輪詢預覽進度；背景執行緒不直接碰控制項。
 
@@ -413,9 +418,7 @@ async def _extract_preview_poll(
         ctx.page.update()
     if cancel_event is not None and cancel_event.is_set():
         return
-    _extract_preview_apply_final(
-        ctx, preview_dialog, preview_state, mode, total_jars, width
-    )
+    _extract_preview_apply_final(ctx, preview_dialog, preview_state, mode, width)
 
 
 def _extract_show_preview_result(ctx, dialog):
@@ -432,11 +435,9 @@ def _extract_show_preview_result(ctx, dialog):
     selected_codes = [
         code for code, cb in ctx.lang_code_checks_local.items() if cb.value
     ]
-    jar_files = find_jar_files(mods)
-    total_jars = len(jar_files)
 
     preview_state = PreviewState()
-    preview_state.total = total_jars
+    preview_state.total = 0
     preview_state.current = 0
     cancel_event = threading.Event()
 
@@ -456,7 +457,7 @@ def _extract_show_preview_result(ctx, dialog):
         modal=True,
         title=ft.Text("預覽結果"),
         content=ft.Container(
-            content=ft.Text(f"預覽掃描中...（0/{total_jars}）"),
+            content=ft.Text("正在搜尋 JAR..."),
             width=preview_dialog_width,
         ),
         actions=[
@@ -479,7 +480,6 @@ def _extract_show_preview_result(ctx, dialog):
             preview_dialog,
             preview_state,
             mode,
-            total_jars,
             preview_dialog_width,
             cancel_event,
         )

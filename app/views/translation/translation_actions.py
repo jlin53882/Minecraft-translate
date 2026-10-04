@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import threading
 
 import flet as ft  # noqa: F401
@@ -212,22 +213,34 @@ def start_ui_timer(view):
 
     輪詢在 Flet event loop 上執行（page.run_task），背景執行緒不直接更新 UI。
     """
-    if view._ui_timer_running:
-        return
     view._ui_timer_running = True
-    view.page.run_task(_poll_session, view)
+    if view._poller.running:
+        return
+    view._poller.start(view.page, functools.partial(_poll_session, view))
 
 
-async def _poll_session(view):
-    """定期同步 session 狀態，直到任務結束或頁面已關閉。"""
-    while view._ui_timer_running:
+def stop_ui_timer(view):
+    """停止輪詢（換頁／卸載）。背景任務照常執行；``_ui_timer_running`` 保留，
+    重新掛載時由 ``resume_ui_timer`` 接續（任務若已結束會補上最終狀態）。"""
+    view._poller.stop()
+
+
+def resume_ui_timer(view):
+    """重新掛載後：任務仍在追蹤中就重新啟動輪詢（內部會先同步一次最新狀態）。"""
+    if view._ui_timer_running and view.session is not None:
+        view._poller.start(view.page, functools.partial(_poll_session, view))
+
+
+async def _poll_session(view, alive=lambda: True):
+    """定期同步 session 狀態，直到任務結束、頁面已關閉或輪詢被停止（unmount）。"""
+    while alive() and view._ui_timer_running:
         try:
             _sync_from_session(view)
         except RuntimeError as e:
             log_warning(f"翻譯頁 UI 輪詢停止：{e}")
             view._ui_timer_running = False
             break
-        if view._ui_timer_running:
+        if alive() and view._ui_timer_running:
             await asyncio.sleep(_POLL_INTERVAL_SEC)
 
 

@@ -10,12 +10,15 @@ import flet as ft
 
 from app.ui import design, kit
 from app.ui.design import C
+from app.ui.poller import PollerHandle
 from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView
 from app.views.translation.translation_actions import (
+    resume_ui_timer,
     run_ftb,
     run_kjs,
     run_md,
+    stop_ui_timer,
 )
 from app.views.translation.translation_actions import (
     start_ui_timer as start_translation_ui_timer,
@@ -94,6 +97,7 @@ class TranslationView(ft.Column):
 
         self.session = None
         self._ui_timer_running = False
+        self._poller = PollerHandle()  # 輪詢的 owner：卸載時 stop、重新掛載時 resume
 
         # 右側共用狀態與日誌
         self.status_chip = ft.Chip(label=ft.Text("尚未開始"))
@@ -287,6 +291,14 @@ class TranslationView(ft.Column):
     # ------------------------------------------------------------------
     # ui poller
     # ------------------------------------------------------------------
+    def will_unmount(self):
+        """換頁／關閉：停止輪詢（idempotent）。任務本身照常執行，不再碰已卸載的控制項。"""
+        stop_ui_timer(self)
+
+    def did_mount(self):
+        """重新掛載：任務仍在追蹤就接續輪詢（任務已結束時補上最終狀態）。"""
+        resume_ui_timer(self)
+
     def _start_ui_timer(self):
         """啟動 UI 更新計時器"""
         self.cancel_button.disabled = False

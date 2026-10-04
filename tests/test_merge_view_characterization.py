@@ -320,37 +320,30 @@ def test_show_merge_summary_handles_large_failed_list(monkeypatch):
     assert error is None, f"_show_merge_summary crashed with 472 failures: {error}"
 
 
-def test_ui_poller_shows_summary_once_when_sync_tasks_queue_up(monkeypatch):
-    """poller 排入多個 _sync_ui 時,DONE 後的摘要視窗只應跳出一次。"""
+def test_ui_poller_shows_summary_once_and_stops_on_done(monkeypatch):
+    """輪詢在 event loop 上執行：DONE 後摘要視窗只跳出一次，輪詢自行結束。"""
     import asyncio
-    import threading
 
     monkeypatch.setattr(merge_view, "TaskSession", _Session)
-
     monkeypatch.setattr(merge_widgets, "TaskSession", _Session)
     monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
     monkeypatch.setattr(merge_widgets, "load_config", lambda: {"lang_merger": {}})
     page = mock_page()
-    queued = []
-    enough = threading.Event()
-
-    def _run_task(fn):
-        queued.append(fn)
-        if len(queued) >= 3:
-            enough.set()
-
-    page.run_task = _run_task
     view = merge_view.MergeView(page, mock_filepicker())
     shown = []
     monkeypatch.setattr(view, "_show_merge_summary", lambda s: shown.append(s))
 
     view._start_ui_poller()
-    assert enough.wait(timeout=5)
-    for fn in list(queued):  # noqa: PERF101 - poller 可能在迭代時再排入工作，需要快照
-        asyncio.run(fn())
+    assert len(page._tasks) == 1  # 只排入一個 async poller，不另開執行緒
+    handler, args = page._tasks[0]
+    asyncio.run(asyncio.wait_for(handler(*args), timeout=5))
+    # 再多同步幾次（模擬排隊中的舊同步工作）也不會重複跳出摘要
+    view._sync_ui_once()
+    view._sync_ui_once()
 
     assert len(shown) == 1
     assert view._ui_stop.is_set()
+    assert view._poller.running is False
 
 
 def _dialog_texts(control) -> list[str]:

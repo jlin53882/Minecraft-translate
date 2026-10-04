@@ -8,6 +8,7 @@ import flet as ft
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
 from app.ui.design import C
+from app.ui.poller import PollerHandle
 from app.ui.status_chip import apply_status_style
 from app.views._log import LogView
 from translation_tool.utils.config_manager import load_config
@@ -23,6 +24,8 @@ class MergeWidgetsMixin:
 
         self.session = tag_session(TaskSession(max_logs=2000), "語系合併", "merge")
         self._ui_stop = threading.Event()
+        self._poller = PollerHandle()  # 輪詢的 owner：卸載時 stop、重新掛載時 resume
+        self._merge_tracking = False  # 合併進行中（輪詢尚未見到 DONE／ERROR）
         self._run_output_dir: str | None = (
             None  # 2026-08-04: snapshot for _open_output_folder
         )

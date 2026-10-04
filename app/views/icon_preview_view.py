@@ -93,6 +93,8 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         """圖示預覽頁的狀態、載入進度與分頁欄。"""
         self._page = page
         self._loading = False  # 掃描進行中（避免重複點擊載入）
+        # 每次卸載就遞增：進行中的載入看到世代變了就丟棄結果，不再碰（已卸載的）控制項
+        self._load_generation = 0
         self._last_progress_refresh = 0.0
 
         # =========================
@@ -389,8 +391,16 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
     # ==================================================
     # 載入 → 建立模組清單
     # ==================================================
+    def will_unmount(self) -> None:
+        """換頁／關閉：讓進行中的載入作廢（結果丟棄、不再更新控制項；idempotent）。"""
+        self._load_generation += 1
+
+    def did_mount(self) -> None:
+        """重新掛載：作廢的載入已把旗標復位，這裡只同步按鈕狀態。"""
+        self._update_load_state()
+
     def _on_load_clicked(self, e):
-        """處理載入按鈕點擊事件"""
+        """處理載入按鈕點擊事件（磁碟掃描、讀快取都在背景執行緒，不佔用 event loop）。"""
         if getattr(self, "_loading", False):
             return
         log_info("[IconPreview] 開始掃描模組...")
@@ -408,13 +418,71 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         self._mod_search_text = ""
         self.update()
 
-        mode = self._detect_source_mode()
-        log_info(f"[IconPreview] 偵測到模式: {mode}")
-
-        if self._try_use_cached_entries(mode):
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            # 沒有 event loop（測試替身）：維持同步流程
+            mode = self._detect_source_mode()
+            log_info(f"[IconPreview] 偵測到模式: {mode}")
+            if self._try_use_cached_entries(mode):
+                return
+            self._begin_scan(mode)
             return
 
-        self._begin_scan(mode)
+        self._loading = True
+        self.load_btn.disabled = True
+        self.update()
+        generation = self._load_generation
+
+        async def _load():
+            await self._load_async(generation)
+
+        run_task(_load)
+
+    async def _load_async(self, generation: int) -> None:
+        """依序：偵測模式 → 查快取 → 計算步數 → 掃描；每個阻塞步驟都在執行緒中執行。
+
+        每次 await 之後檢查世代：View 已卸載（世代變了）就丟棄結果，只復位旗標。
+        """
+
+        def current() -> bool:
+            return self._load_generation == generation
+
+        mode = "unknown"
+        entries: list = []
+        try:
+            mode = await asyncio.to_thread(self._detect_source_mode)
+            if not current():
+                return
+            log_info(f"[IconPreview] 偵測到模式: {mode}")
+            cached = await asyncio.to_thread(self._lookup_cached_entries, mode)
+            if not current():
+                return
+            if cached is not None:
+                self._apply_cached_entries(cached[0], cached[1], mode)
+                return
+            total_steps = await asyncio.to_thread(self._count_scan_steps, mode)
+            if not current():
+                return
+            self._show_scan_started(mode, total_steps)
+            entries = await asyncio.to_thread(self._scan_entries, mode, total_steps)
+        except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
+            if not current():
+                return
+            log_error(f"[IconPreview] 掃描失敗: {ex}")
+            show_snack(
+                self.page,
+                f"❌ 掃描失敗：{ex}",
+                color=C.RED,
+                clear_existing=True,
+                duration=4000,
+            )
+            entries = []
+        finally:
+            self._loading = False
+            if current():
+                self._update_load_state()
+        if current():
+            self._finish_load(entries, mode)
 
     def _rebuild_mods(self, entries) -> None:
         """依 entries 重建 modid → entry 清單（dict 轉回 SimpleNamespace，保持屬性存取相容）。"""
@@ -426,70 +494,63 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
                 mods[entry.modid].append(entry)
         self.mods = dict(mods)
 
-    def _try_use_cached_entries(self, mode: str) -> bool:
-        """命中 L1 記憶體快取或 L2 磁碟快取時直接顯示並回傳 True；否則回傳 False。"""
-        # === 快取檢查（L1 in-memory）===
+    def _lookup_cached_entries(self, mode: str):
+        """查 L1 記憶體／L2 磁碟快取（純讀取，可在背景執行緒）。
+
+        回傳 ``("L1" | "L2", entries)``；沒有可用快取時回傳 None。
+        """
         cache_valid = (
             self._entries_cache is not None
             and self._cache_meta.get("source_root") == str(self.source_root)
             and self._cache_meta.get("mode") == mode
         )
-
         if cache_valid:
-            log_info("[IconPreview] 使用 L1 快取！")
-            show_snack(
-                self.page,
-                f"✅ 使用快取（共 {len(self._entries_cache)} 筆）",
-                color=C.EM,
-                clear_existing=True,
-                duration=3000,
-            )
-            # 用快取重建 mods dict（dict 轉回 SimpleNamespace，保持屬性存取相容）
-            self._rebuild_mods(self._entries_cache)
-            self._render_mod_list()
-            return True
-
-        # === L2 磁碟快取檢查（只在 jar_directory 模式）===
+            return "L1", self._entries_cache
+        # L2 磁碟快取只在 jar_directory 模式
         if mode == "jar_directory":
             cached_entries = _load_entries_cache_l2(self.source_root)
             if cached_entries is not None:
-                log_info("[IconPreview] 使用 L2 磁碟快取！")
-                show_snack(
-                    self.page,
-                    f"✅ 使用磁碟快取（共 {len(cached_entries)} 筆）",
-                    color=C.EM,
-                    clear_existing=True,
-                    duration=3000,
-                )
-                self._entries_cache = cached_entries
-                self._cache_meta = {
-                    "source_root": str(self.source_root),
-                    "mode": mode,
-                }
-                # 重建 mods dict
-                self._rebuild_mods(cached_entries)
-                self._render_mod_list()
-                return True
-        return False
+                return "L2", cached_entries
+        return None
 
-    def _begin_scan(self, mode: str) -> None:
-        """快取 miss：顯示進度並掃描 entries（有事件迴圈時改在背景執行緒執行）。"""
-        # 顯示進度條
-        if mode == "jar_directory":
-            jar_files = list(self.source_root.glob("*.jar"))
-            total_steps = len(jar_files)
-        elif mode == "extracted_folder":
-            en_files = list(self.source_root.rglob("en_us.json"))
-            total_steps = len(en_files)
+    def _apply_cached_entries(self, kind: str, entries, mode: str) -> None:
+        """（event loop 上）顯示命中的快取並渲染模組清單。"""
+        if kind == "L1":
+            log_info("[IconPreview] 使用 L1 快取！")
+            label = f"✅ 使用快取（共 {len(entries)} 筆）"
         else:
-            total_steps = 0
+            log_info("[IconPreview] 使用 L2 磁碟快取！")
+            label = f"✅ 使用磁碟快取（共 {len(entries)} 筆）"
+            self._entries_cache = entries
+            self._cache_meta = {"source_root": str(self.source_root), "mode": mode}
+        show_snack(self.page, label, color=C.EM, clear_existing=True, duration=3000)
+        # 用快取重建 mods dict（dict 轉回 SimpleNamespace，保持屬性存取相容）
+        self._rebuild_mods(entries)
+        self._render_mod_list()
 
+    def _try_use_cached_entries(self, mode: str) -> bool:
+        """（同步流程）命中快取時直接顯示並回傳 True；否則回傳 False。"""
+        cached = self._lookup_cached_entries(mode)
+        if cached is None:
+            return False
+        self._apply_cached_entries(cached[0], cached[1], mode)
+        return True
+
+    def _count_scan_steps(self, mode: str) -> int:
+        """掃描前計算步數（glob／rglob；可在背景執行緒）。"""
+        if mode == "jar_directory":
+            return len(list(self.source_root.glob("*.jar")))
+        if mode == "extracted_folder":
+            return len(list(self.source_root.rglob("en_us.json")))
+        return 0
+
+    def _show_scan_started(self, mode: str, total_steps: int) -> None:
+        """（event loop 上）顯示掃描進度條與提示。"""
         if total_steps > 0:
             self.progress_bar.visible = True
             self.progress_bar.value = 0
             self.progress_text.value = f"正在掃描：0 / {total_steps}"
             self.update()
-
         if mode == "jar_directory":
             log_info("[IconPreview] 使用 JAR 目錄模式掃描")
             show_snack(
@@ -502,36 +563,11 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         elif mode == "extracted_folder":
             log_info("[IconPreview] 使用解包資料夾模式掃描")
 
-        run_task = getattr(self.page, "run_task", None)
-        if run_task is None:
-            self._finish_load(self._scan_entries(mode, total_steps), mode)
-            return
-
-        # 掃描（讀 JAR、建 model index、提取圖示）在執行緒執行：
-        # 406 個 JAR 首次載入原本會在 event loop 上同步執行約 60 秒，整個 UI 凍結
-        self._loading = True
-        self.load_btn.disabled = True
-        self.update()
-
-        async def _scan():
-            try:
-                entries = await asyncio.to_thread(self._scan_entries, mode, total_steps)
-            except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
-                log_error(f"[IconPreview] 掃描失敗: {ex}")
-                show_snack(
-                    self.page,
-                    f"❌ 掃描失敗：{ex}",
-                    color=C.RED,
-                    clear_existing=True,
-                    duration=4000,
-                )
-                entries = []
-            finally:
-                self._loading = False
-                self._update_load_state()
-            self._finish_load(entries, mode)
-
-        run_task(_scan)
+    def _begin_scan(self, mode: str) -> None:
+        """（同步流程，無 event loop 時）掃描 entries 並套用結果。"""
+        total_steps = self._count_scan_steps(mode)
+        self._show_scan_started(mode, total_steps)
+        self._finish_load(self._scan_entries(mode, total_steps), mode)
 
     def _set_progress(self, text: str, value: float, visible: bool | None) -> None:
         """（可在背景執行緒呼叫）記下最新進度；實際賦值與刷新交給 event loop。"""
@@ -562,6 +598,8 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         self._last_progress_refresh = now
 
         async def _update():
+            if not self._loading:  # 載入已結束或已作廢（unmount）：不再套用進度
+                return
             self._apply_pending_progress()
             self.update()
 

@@ -3,15 +3,15 @@
 維護注意：本檔案的 docstring 與中文註解用於維護說明，不代表行為變更。
 """
 
-import subprocess
+import asyncio
 import threading
-import time
 from pathlib import Path
 from typing import Any
 
 import flet as ft
 
 from app import config_store
+from app.services_impl.pipelines.extract_service import open_output_folder
 from app.services_impl.pipelines.merge_service import (
     run_merge_folder_batch_service,
     run_merge_zip_batch_service,
@@ -242,6 +242,14 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         self._start_ui_poller()
 
         def _run_merge():
+            try:
+                _run_merge_service()
+            except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束
+                log_warning(f"[MergeView] 合併執行失敗：{ex!r}")
+                self.session.add_log(f"[錯誤] 合併執行失敗：{ex}", level="error")
+                self.session.set_error()
+
+        def _run_merge_service():
             if input_mode == "folder":
                 for _ in run_merge_folder_batch_service(
                     input_dir=self.folder_path_field.value,
@@ -284,90 +292,98 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         threading.Thread(target=_run_merge, daemon=True).start()
 
     def _start_ui_poller(self) -> None:
-        """啟動 UI 輪詢器，定期同步進度與日誌。
+        """啟動 UI 輪詢器（在 Flet event loop 上），定期同步進度與日誌。
 
-        2026-08-02 修正:daemon thread 內不能直接 page.update()(Flet 0.85 限制)。
-        所有 update 都透過 page.run_task() 推到 UI thread。
+        輪詢由 ``self._poller`` 持有：卸載（will_unmount）時 stop、重新掛載（did_mount）時接續，
+        重複啟動不會累積；DONE／ERROR 後自行結束。背景工作執行緒不碰 UI。
         """
         self._ui_stop.clear()
+        self._merge_tracking = True
         self.log_view.clear()
         # 2026-08-04 B6: 快照 output_dir,避免合併期間使用者改欄位導致開錯資料夾
         self._run_output_dir = self.output_dir_field.value
+        self._poller.start(self.page, self._poll_merge)
 
-        async def _sync_ui():
-            """在 UI thread 內執行 update。"""
-            # poller 可能已排入多個 _sync_ui；DONE/ERROR 處理過後的就直接略過，
-            # 避免摘要視窗重複跳出
-            if self._ui_stop.is_set():
-                return
-            try:
-                snap = self.session.snapshot()
-                status = snap["status"]
-                progress = snap["progress"]
-                logs = snap["logs"]
+    async def _poll_merge(self, alive=lambda: True) -> None:
+        """每 0.1 秒同步一次，直到任務結束或輪詢被停止（unmount）。"""
+        while alive() and not self._ui_stop.is_set():
+            self._sync_ui_once()
+            if self._ui_stop.is_set() or not alive():
+                break
+            await asyncio.sleep(0.1)
 
-                if status == "RUNNING":
-                    self._set_status("執行中", C.DIA_BG)
-                elif status == "DONE":
-                    self._set_status("任務完成", C.EM_BG)
-                    snap_summary = snap.get("summary")
-                    if snap_summary:
-                        self._merge_stats = snap_summary
-                    else:
-                        # fallback：從 logs 解析
-                        success_zips = 0
-                        failed_zips = 0
-                        failed_zip_details = []
-                        for log_line in logs:
-                            text = (
-                                log_line.text
-                                if hasattr(log_line, "text")
-                                else str(log_line)
-                            )
-                            if "[完成]" in text and "[錯誤]" not in text:
-                                success_zips += 1
-                            elif "[錯誤]" in text:
-                                failed_zips += 1
-                                for zp in self.selected_zips:
-                                    if zp in text:
-                                        failed_zip_details.append(Path(zp).name)
-                                        break
-                        self._merge_stats = {
-                            "success_zips": success_zips,
-                            "failed_zips": failed_zips,
-                            "failed_zip_details": failed_zip_details,
-                        }
-                    self._show_merge_summary(self._merge_stats)
-                    # 2026-08-02:DONE/ERROR 後停止 poller,避免無限 background update
-                    self._ui_stop.set()
-                elif status == "ERROR":
-                    self._set_status("任務發生錯誤", C.RED_BG)
-                    self._ui_stop.set()
+    def will_unmount(self) -> None:
+        """換頁／關閉：停止輪詢（idempotent）。合併任務本身照常執行。"""
+        self._poller.stop()
 
-                self.progress_bar.value = progress
+    def did_mount(self) -> None:
+        """重新掛載：合併仍在追蹤就接續輪詢（任務已結束時補上最終狀態與摘要）。"""
+        if self._merge_tracking and not self._ui_stop.is_set():
+            self._poller.start(self.page, self._poll_merge)
 
-                # 2026-08-04 修正: 先 re-enable 按鈕，再 call sync_from_session (內部 page.update())
-                # 否則按鈕 disabled=False 在 page.update() 之後才設，UI 永遠看不到
-                if status in ("DONE", "ERROR"):
-                    self.start_button.disabled = False
-                    self.zip_list_view.disabled = False
+    def _sync_ui_once(self) -> None:
+        """在 event loop 上同步一次 session 狀態到畫面。"""
+        # poller 可能已排入多個 _sync_ui；DONE/ERROR 處理過後的就直接略過，
+        # 避免摘要視窗重複跳出
+        if self._ui_stop.is_set():
+            return
+        try:
+            snap = self.session.snapshot()
+            status = snap["status"]
+            progress = snap["progress"]
+            logs = snap["logs"]
 
-                # LogView 接管 append + truncate + scroll
-                # 內部會自己 page.update()
-                self.log_view.sync_from_session(self.session)
-            except Exception as e:  # noqa: BLE001
-                log_warning(f"[MergeView] _sync_ui 錯誤: {e!r}")
+            if status == "RUNNING":
+                self._set_status("執行中", C.DIA_BG)
+            elif status == "DONE":
+                self._set_status("任務完成", C.EM_BG)
+                snap_summary = snap.get("summary")
+                if snap_summary:
+                    self._merge_stats = snap_summary
+                else:
+                    # fallback：從 logs 解析
+                    success_zips = 0
+                    failed_zips = 0
+                    failed_zip_details = []
+                    for log_line in logs:
+                        text = (
+                            log_line.text
+                            if hasattr(log_line, "text")
+                            else str(log_line)
+                        )
+                        if "[完成]" in text and "[錯誤]" not in text:
+                            success_zips += 1
+                        elif "[錯誤]" in text:
+                            failed_zips += 1
+                            for zp in self.selected_zips:
+                                if zp in text:
+                                    failed_zip_details.append(Path(zp).name)
+                                    break
+                    self._merge_stats = {
+                        "success_zips": success_zips,
+                        "failed_zips": failed_zips,
+                        "failed_zip_details": failed_zip_details,
+                    }
+                self._show_merge_summary(self._merge_stats)
+                # 2026-08-02:DONE/ERROR 後停止 poller,避免無限 background update
+                self._ui_stop.set()
+            elif status == "ERROR":
+                self._set_status("任務發生錯誤", C.RED_BG)
+                self._ui_stop.set()
 
-        def poll():
-            while not self._ui_stop.is_set():
-                # 透過 page.run_task() 推到 UI thread
-                try:
-                    self.page.run_task(_sync_ui)
-                except Exception as e:  # noqa: BLE001
-                    log_warning(f"[MergeView] run_task 錯誤: {e!r}")
-                time.sleep(0.1)
+            self.progress_bar.value = progress
 
-        threading.Thread(target=poll, daemon=True).start()
+            # 2026-08-04 修正: 先 re-enable 按鈕，再 call sync_from_session (內部 page.update())
+            # 否則按鈕 disabled=False 在 page.update() 之後才設，UI 永遠看不到
+            if status in ("DONE", "ERROR"):
+                self.start_button.disabled = False
+                self.zip_list_view.disabled = False
+
+            # LogView 接管 append + truncate + scroll
+            # 內部會自己 page.update()
+            self.log_view.sync_from_session(self.session)
+        except Exception as e:  # noqa: BLE001
+            log_warning(f"[MergeView] _sync_ui 錯誤: {e!r}")
 
     def _set_status(self, text: str, tone="neutral") -> None:
         """更新狀態晶片（``tone`` 為色組名稱，也接受舊背景色）。"""
@@ -432,7 +448,8 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         self.page.update()
         # 2026-08-04 B6: 用合併開始時的快照,避免使用者中途改欄位導致開錯資料夾
         target = getattr(self, "_run_output_dir", None) or self.output_dir_field.value
-        subprocess.Popen(["explorer", target], shell=True)
+        if not open_output_folder(target):
+            show_snack(self.page, "⚠️ 無法開啟輸出資料夾", C.GOLD)
 
     def _close_dialog_overlay(self) -> None:
         """關閉頂層 dialog (跟 _show_merge_summary 用 page.show_dialog 對稱)。

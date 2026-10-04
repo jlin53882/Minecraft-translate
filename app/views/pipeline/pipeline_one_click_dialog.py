@@ -89,6 +89,7 @@ def open_one_click_dialog(
         input_path=input_path,
         output_path=output_path,
         on_execute=on_execute,
+        show_snack_bar=show_snack_bar,
     )
     lang_merger_cfg, output_zip_name, translate_output_subfolder = (
         _one_click_init_config_defaults(ctx)
@@ -515,7 +516,12 @@ def _one_click__build_step4(ctx):
 
     return ft.Column(
         [
-            ft.Text("輸入來源", weight="bold", size=13),
+            ft.Text("輸入來源（唯讀）", weight="bold", size=13),
+            ft.Text(
+                "一鍵流程固定使用步驟 2（語系合併）與步驟 3（翻譯）的輸出，不可在此修改",
+                size=11,
+                color=C.MUTED,
+            ),
             ft.Row([bundle_input_field]),
             ft.Text("輸出 ZIP 檔案", weight="bold", size=13),
             ft.Row([zip_output_field]),
@@ -536,7 +542,25 @@ def _one_click__build_step4(ctx):
             ),
             version_dropdown,
             ft.Text("封面圖片（可留空）", weight="bold", size=13),
-            ft.Row([pack_image_field]),
+            ft.Row(
+                [
+                    pack_image_field,
+                    ft.Button(
+                        "選擇檔案...",
+                        icon=ft.Icons.IMAGE,
+                        on_click=lambda e: _one_click_pick_pack_image(
+                            ctx, pack_image_field
+                        ),
+                    ),
+                    ft.TextButton(
+                        "移除",
+                        icon=ft.Icons.DELETE_OUTLINE,
+                        on_click=lambda e: _one_click_clear_pack_image(
+                            ctx, pack_image_field
+                        ),
+                    ),
+                ]
+            ),
             ft.Text("其他指定資料夾", weight="bold", size=13),
             ft.Container(
                 content=extra_view,
@@ -551,6 +575,38 @@ def _one_click__build_step4(ctx):
     )
 
 
+_PACK_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg")
+
+
+def _one_click_pick_pack_image(ctx, field) -> None:
+    """選擇封面圖片（Flet 1.0：``pick_files`` 直接回傳清單）；副檔名與打包對話框一致。"""
+
+    async def do():
+        result = await ctx.file_picker.pick_files(
+            dialog_title="選擇封面圖片",
+            allowed_extensions=["png", "jpg", "jpeg"],
+        )
+        if not result:
+            return
+        path = getattr(result[0], "path", None)
+        if not path:
+            return
+        if os.path.splitext(path)[1].lower() not in _PACK_IMAGE_EXTENSIONS:
+            ctx.show_snack_bar("⚠️ 封面圖片只支援 .png/.jpg")
+            return
+        ctx.state["pack_image"] = path
+        field.value = path
+        ctx.page.update()
+
+    ctx.page.run_task(do)
+
+
+def _one_click_clear_pack_image(ctx, field) -> None:
+    ctx.state["pack_image"] = None
+    field.value = ""
+    ctx.page.update()
+
+
 def _one_click_step4_version_widgets(ctx):
     """步驟 4：輸出、版本與額外資料夾控制項（版本切換使用 nonlocal，必須同處定義）。"""
 
@@ -561,6 +617,7 @@ def _one_click_step4_version_widgets(ctx):
         ctx.state["zip_output"] = e.control.value
 
     bundle_input_field = ft.TextField(
+        read_only=True,  # 只顯示：實際打包來源由流程自動決定（見 PipelineConfig.bundle_sources）
         label="輸入來源",
         hint_text="自動帶入翻譯完成後的輸出",
         value=ctx.state["bundle_input"],

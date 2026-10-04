@@ -14,6 +14,7 @@ from app.services_impl.pipelines.lm_service import run_lm_translation_service
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
 from app.ui.design import C
+from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView, load_ui_logging_config
@@ -69,6 +70,7 @@ class LMView(ft.Column):
 
         self.session: TaskSession | None = None
         self._ui_timer_running = False
+        self._poller = PollerHandle()  # 輪詢的 owner：卸載時 stop、重新掛載時 resume
         self._started_at: float | None = None
 
         # 基本輸入
@@ -406,14 +408,23 @@ class LMView(ft.Column):
 
     def start_ui_timer(self):
         """啟動 UI 輪詢（在 Flet event loop 上執行，避免背景執行緒直接更新 UI）。"""
-        if self._ui_timer_running:
-            return
         self._ui_timer_running = True
-        self._page.run_task(self._poll_session)
+        if self._poller.running:
+            return
+        self._poller.start(self._page, self._poll_session)
 
-    async def _poll_session(self):
-        """定期把 session 的進度與日誌同步到畫面，直到任務結束。"""
-        while self._ui_timer_running:
+    def will_unmount(self):
+        """換頁／關閉：停止輪詢（idempotent）。任務本身照常執行，不再碰已卸載的控制項。"""
+        self._poller.stop()
+
+    def did_mount(self):
+        """重新掛載：任務仍在追蹤就接續輪詢（任務已結束時補上最終狀態與按鈕）。"""
+        if self._ui_timer_running and self.session is not None:
+            self._poller.start(self._page, self._poll_session)
+
+    async def _poll_session(self, alive=lambda: True):
+        """定期把 session 的進度與日誌同步到畫面，直到任務結束、頁面關閉或輪詢被停止。"""
+        while alive() and self._ui_timer_running:
             try:
                 self._sync_from_session()
             except RuntimeError as e:
@@ -421,7 +432,7 @@ class LMView(ft.Column):
                 log_debug(f"LM UI poll stopped: {e}")
                 self._ui_timer_running = False
                 break
-            if self._ui_timer_running:
+            if alive() and self._ui_timer_running:
                 await asyncio.sleep(self._POLL_INTERVAL_SEC)
 
     def _sync_from_session(self):
