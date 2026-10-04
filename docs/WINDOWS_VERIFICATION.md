@@ -79,15 +79,15 @@ dist\MinecraftTranslator\
 | #139 | Snackbar 與底部狀態列重疊 | 原觀察來自 Windows 11 / Flet 1.0.1 / Chrome 的截圖。開發環境會用網頁版重現；若網頁版與桌面版行為不同，請在 Windows 桌面版再確認 |
 | #147 | oauthlib CVE | 不需要 Windows；需要確認 Flet 是否會進入 PKCE Authorization Code 流程（程式／依賴分析） |
 
-## 5. 不需要 Windows（開發環境以網頁版處理，列出供對照）
+## 5. 不需要 Windows（網頁版 smoke 可驗證）
 
-這些項目會以 `tools/ui_smoke.py`（真實 Flet 網頁版＋Playwright）驗證，不需要 Codex 在 Windows 做：
+這些項目可用 `tools/ui_smoke.py`（真實 Flet 網頁版＋Playwright）驗證；外網被封鎖的環境改用 `tools/ui_smoke_offline.py`（把 CanvasKit／字型導向本機檔案，參數相同）：
 
-- #134：設定頁 8 頁的排版、欄寬、補齊欄位的顯示與儲存。
-- #117：設定頁套用時機說明、存檔提示、快取資料夾存檔後的重載與頁面刷新、打包頁 `output_zip_name` 即時更新。
-- #114／#121／#120：View 拆分、舊色名稱與 `components.py` 清除、文件核對（前後截圖對照）。
+- #134：設定頁的排版、欄寬與補齊欄位的顯示（smoke 只截設定頁預設的一般設定頁；其他頁與互動需手動操作）。
+- #117：設定頁套用時機說明（文字可見性）；存檔提示、快取重載、打包頁即時更新屬互動行為，smoke 不涵蓋，仍建議手動確認。
+- #114／#121／#120：View 拆分與舊色名稱清除以 smoke 截圖前後對照（`views`、`dialogs` 兩個 scenario，深淺色 × 1360×900／900×700）。
 
-> 注意：網頁版驗證**不能**取代第 1、2 節；視窗事件、打包與檔案鎖只存在於 Windows 桌面版。
+> 網頁版驗證**不能**取代第 1、2 節；視窗事件、打包與檔案鎖只存在於 Windows 桌面版。
 
 ## 6. 回報後的收尾
 
