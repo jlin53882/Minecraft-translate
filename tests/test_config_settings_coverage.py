@@ -290,11 +290,13 @@ def test_invalid_log_format_is_rejected_by_validator():
     assert ok is False and saved == {}
 
 
-# --- 新增設定只需要 DEFAULT_CONFIG + 一個 Setting ------------------------------
+# --- 新增設定只需要一個 Setting（default／timing／sensitive 都在 schema）----------------
 
 
 @pytest.fixture
 def with_new_setting(monkeypatch):
+    from translation_tool.utils import config_schema
+
     new = schema.Setting(
         "translator.brand_new_option",
         "int",
@@ -302,12 +304,20 @@ def with_new_setting(monkeypatch):
         "general",
         schema.C_TRANSLATOR,
         "示範：新增設定只需 schema 一列",
+        default=5,
         minimum=1,
+        timing="next_batch",
+        timing_note="示範：下一批次讀取。",
     )
-    monkeypatch.setattr(schema, "SETTINGS", (*schema.SETTINGS, new))
-    monkeypatch.setitem(schema.SETTINGS_BY_PATH, new.path, new)
-    monkeypatch.setitem(DEFAULT_CONFIG["translator"], "brand_new_option", 5)
+    monkeypatch.setattr(config_schema, "SETTINGS", (*config_schema.SETTINGS, new))
+    monkeypatch.setitem(config_schema.SETTINGS_BY_PATH, new.path, new)
     return new
+
+
+def test_new_setting_default_comes_from_the_schema(with_new_setting):
+    from translation_tool.utils.config_schema import build_default_config
+
+    assert build_default_config()["translator"]["brand_new_option"] == 5
 
 
 def test_new_setting_appears_in_its_card_automatically(with_new_setting):
@@ -332,3 +342,61 @@ def test_new_setting_gets_a_control_loads_and_saves(with_new_setting):
     view.controls_map[with_new_setting.path].value = "0"  # 低於 minimum
     ok, saved = _save(view, config)
     assert ok and saved["translator"]["brand_new_option"] == 1
+
+
+def test_sensitive_setting_values_are_registered_as_secrets(monkeypatch):
+    """schema 標示 sensitive 的設定，載入時登錄為已知機密（不再硬編碼金鑰路徑）。"""
+    from translation_tool.utils import config_manager, config_schema, redaction
+
+    redaction._known_secrets.clear()
+    extra = config_schema.Setting(
+        "translator.api_secret_demo", "str", default="", sensitive=True
+    )
+    monkeypatch.setattr(config_schema, "SETTINGS", (*config_schema.SETTINGS, extra))
+    values = list(
+        config_manager._sensitive_values(
+            {"translator": {"api_secret_demo": "demo-secret-value-123"}}
+        )
+    )
+    assert values == ["demo-secret-value-123"]
+    redaction._known_secrets.clear()
+
+
+# --- schema 是預設值、套用時機、敏感資訊的唯一來源 --------------------------------
+
+
+def test_default_config_is_built_from_the_schema():
+    from translation_tool.utils.config_schema import build_default_config
+
+    assert DEFAULT_CONFIG == build_default_config()
+
+
+def test_apply_rules_are_derived_from_the_schema():
+    from app.config_apply import CONFIG_APPLY_RULES, timing_of
+
+    for setting in schema.SETTINGS:
+        assert timing_of(setting.path) == setting.timing, setting.path
+        if setting.timing != DEFAULT_TIMING or setting.timing_note:
+            assert CONFIG_APPLY_RULES[setting.path]["timing"] == setting.timing
+
+
+def test_every_schema_timing_is_known_and_non_default_timing_is_explained():
+    from translation_tool.utils.config_schema import TIMINGS
+
+    for setting in schema.SETTINGS:
+        assert setting.timing in TIMINGS, setting.path
+        if setting.timing != DEFAULT_TIMING:
+            assert setting.timing_note, f"{setting.path} 的套用時機需要說明文字"
+
+
+def test_secret_like_settings_are_marked_sensitive():
+    """名稱看起來像機密的設定必須標示 sensitive，避免新增後漏登錄遮蔽。"""
+    import re
+
+    from translation_tool.utils.config_schema import sensitive_paths
+
+    secret_like = re.compile(r"(api[_-]?key|secret|password|credential)|\.keys$", re.IGNORECASE)
+    for setting in schema.SETTINGS:
+        if secret_like.search(setting.path):
+            assert setting.path in sensitive_paths(), setting.path
+    assert sensitive_paths() == {"lm_translator.keys"}

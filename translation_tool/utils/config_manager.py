@@ -24,6 +24,11 @@ from datetime import datetime
 from pathlib import Path
 
 from translation_tool.utils.app_paths import get_data_root, get_resource_root
+from translation_tool.utils.config_schema import (
+    build_default_config,
+    get_path,
+    sensitive_paths,
+)
 from translation_tool.utils.redaction import RedactingFormatter, register_secrets
 
 log = logging.getLogger(__name__)
@@ -114,205 +119,24 @@ def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
 
 # DEFAULT_CONFIG 是「缺檔或缺欄位時的保底值」，不是要取代使用者設定；
 # load_config() 會用它做深度合併，讓新欄位可以向後相容地補進舊 config.json。
-DEFAULT_CONFIG = {
-    "ui": {
-        "theme_mode": "dark",  # dark / light
-    },
-    "logging": {
-        "log_level": "INFO",
-        "log_format": "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",
-        "log_dir": "logs",
-    },
-    "translator": {
-        "output_dir_name": "zh_tw_generated",
-        "replace_rules_path": "replace_rules.json",
-        "cache_directory": "快取資料",
-        "enable_cache_saving": True,
-        "parallel_execution_workers": 4,
-        "custom_translator_folder": "custom_translators",
-        "cjk_ratio_threshold": 0.7,
-    },
-    "ftb_translator": {
-        "output_dir_name": "FTB任務翻譯輸出",
-    },
-    "species_cache": {
-        "cache_directory": "學名資料庫",
-        "cache_filename": "species_cache.tsv",
-        "wikipedia_language": "zh",
-        "wikipedia_rate_limit_delay": 0.5,
-    },
-    "lm_translator": {
-        "temperature": 0.3,
-        "lm_translate_folder_name": "LM翻譯後",
-        "initial_batch_size_patchouli": 100,
-        "initial_batch_size_lang": 300,
-        "initial_batch_size_ftb": 200,
-        "initial_batch_size_kubejs": 200,
-        "initial_batch_size_md": 100,
-        "min_batch_size": 50,
-        "batch_shrink_factor": 0.5,
-        # token 預算切批（issue #108）：批次大小除了項目數，也受估算 token 限制。
-        "token_budget_enabled": True,
-        "max_output_token_budget": 24000,  # 單批預期輸出 token 上限（保守值）
-        "max_input_token_budget": 60000,  # 單批輸入 token 上限（避免吃掉太多 TPM）
-        "max_output_tokens": 32768,  # 送給 API 的 maxOutputTokens；0 = 不送
-        "output_token_factor": 1.5,  # 預期輸出 / 輸入 token 係數（會依實際用量校正）
-        "budget_min_scale": 0.0625,  # 撞牆後輸出預算最多縮到設定值的幾倍
-        "budget_recover_after": 3,  # 連續成功幾批後開始回升預算
-        "budget_recover_factor": 1.5,  # 每次回升的倍率
-        "batch_write_interval": 2,  # 每 N 個批次寫一次快取（太大會讓單次寫入超過分片上限）
-        "rpm_cooldown_sec": 0,
-        # 已確定 RPD 耗盡 / 403 的 API Key 冷卻多久（秒）；到期後會再給它一次機會，0 = 不記憶（issue #113）
-        "key_failure_cooldown_sec": 3600,
-        "rate_limit": {
-            "timeout": 600,
-            "sleep_seconds_between_batches": 0.0,
-        },
-        "models": {
-            "gemini-2.5-flash": {"enabled": True},
-        },
-        "keys": [
-            "YOUR_GEMINI_API_KEY_1",
-            "YOUR_GEMINI_API_KEY_2",
-        ],
-        "patchouli_system_prompt": (
-            "你是專業的 Minecraft Patchouli 手冊翻譯員。\n\n"
-            "你正在翻譯一個「ID → Value 對照表」。\n\n"
-            "⚠️【極重要規則 — ID 不可變】⚠️\n"
-            "- items[].id 是不可變的識別符號\n"
-            "- id 不具有任何語意，也不對應任何 JSON 結構\n"
-            "- id 只能被視為純文字索引\n"
-            "- 絕對禁止：\n"
-            "  - 修改、重寫、補零、轉型、排序、重編任何 id\n"
-            "  - 新增或刪除任何 id\n"
-            "  - 嘗試推測 id 與內容的關聯\n\n"
-            "📌 任務規則：\n"
-            "1. 只允許修改 items[].value 的字串內容\n"
-            "2. items[].id 必須與輸入完全一字不差\n"
-            "3. items 的數量與順序必須與輸入完全一致\n"
-            "4. 如果你不確定如何翻譯，請原樣回傳 value\n"
-            "5. 回傳必須是合法 JSON，且格式與輸入完全一致\n"
-            "6. 僅翻譯為繁體中文（台灣用語）\n"
-            "7. 保留 §, %, {}, $(...) 等所有符號與格式\n"
-            "8. 單位（mb、tick 等）請保留原文\n"
-            "9. Minecraft 請保持原文，不要翻譯成「當個創世神」\n"
-            "10. 每一筆 value 必須只根據該筆原文自身內容翻譯\n"
-            "11. 只要 value 包含人類語言就必須翻譯\n"
-            "12. 學名請翻譯為台灣常用語（如 Creeper → 苦力怕）,(Spawn Egg-> 生怪蛋),(cobblestone->鵝卵石)"
-        ),
-        "lang_system_prompt": (
-            "你正在翻譯 Minecraft 語言檔案（JSON 格式）。\n\n"
-            "你收到的是一個「ID → value 對照表」。\n\n"
-            "⚠️【極重要規則 — ID 不可變】⚠️\n"
-            "- items[].id 是唯一識別符號\n"
-            "- id 不具有任何語意\n"
-            "- 絕對禁止：\n"
-            "  - 修改、轉型、補零、重排、推測或重寫任何 id\n"
-            "  - 新增或刪除任何 item\n\n"
-            "📌 任務規則：\n"
-            "1. 只允許修改 items[].value 的字串內容\n"
-            "2. items[].id 必須與輸入完全一字不差\n"
-            "3. items 的數量與順序必須與輸入完全一致\n"
-            "4. 如果你不確定如何翻譯，請原樣回傳 value\n"
-            '5. 回傳必須是合法 JSON，格式必須為 {"items":[{"id":...,"value":...}, ...]}\n'
-            "6. 僅翻譯為繁體中文（台灣用語）\n"
-            "7. 保留 §, %, {}, $(...) 等所有符號與格式\n"
-            "8. 單位（mb、tick 等）請保留原文\n"
-            "9. Minecraft 請保持原文\n"
-            "10. 每一筆 value 只依該筆原文翻譯\n"
-            "11. 只要 value 包含人類語言就必須翻譯\n"
-        ),
-        "translator": {
-            # lang 值長度 ≤ 此值且不含空白時視為非顯示文字而略過（0 = 不略過）
-            "short_text_skip_len": 3,
-            "skip_terms": [
-                "api documentation",
-                "api docs",
-                "documentation",
-                "discord",
-                "github",
-                "homepage",
-                "mod page",
-                "modpack",
-                "official website",
-                "patreon",
-                "Twitter",
-                "Modrinth",
-                "CurseForge",
-                "Crowdin",
-                "Twitch",
-                "Wiki",
-                "Minecraft",
-                "Forge",
-                "YouTube",
-                "Reddit",
-                "Ko-fi",
-                "Flattr",
-            ],
-            "translatable_keywords": [
-                "text",
-                "name",
-                "title",
-                "description",
-                "subtitle",
-                "hover",
-                "note",
-                "warning",
-                "quote",
-                "paragraph",
-                "body",
-                "header",
-                "footer",
-                "heading",
-                "effects",
-                "category",
-                "link_text",
-                "pages.title",
-            ],
-        },
-        "patchouli": {
-            "dir_names": ["patchouli_books", "book", "manual", "guidebook"],
-        },
-    },
-    "output_bundler": {"output_zip_name": "可使用翻譯.zip"},
-    "jar_extractor": {
-        "lang_codes": ["en_us", "zh_cn", "zh_tw"],
-    },
-    "lang_merger": {
-        "pending_folder_name": "待翻譯",
-        "pending_organized_folder_name": "待翻譯整理需翻譯",
-        "filtered_pending_min_count": 3,
-        "quarantine_folder_name": "問題檔案skipped_json",
-        "process_zh_cn_files": True,
-        "skip_zh_cn_when_only_process_lang": False,
-        "patchouli_skip_en_us_when_zh_cn_exists": False,
-        "patchouli_effective_translation_threshold": 0.5,
-        "zh_en_letter_threshold": 2,
-        # 2026-08-02 (PR-XX merge-asset-整):把 lang_output/{XX_extracted,...}/ 內 lang 檔
-        # key-by-key 合併進 lang_output/assets/{modid}/lang/{xx_yy}.json,
-        # 這樣 minecraft 才能抓到從 JAR 內建抽出的 mod lang
-        # (預設 True,符合 user 期望流程)
-        "enable_extracted_to_assets_merge": True,
-    },
-    "extractor": {
-        "output_folder_names": {
-            "lang_extract": "_提取lang_輸出",
-            "book_extract": "_提取book_輸出",
-            "lang_preview": "_預覽lang_輸出",
-            "book_preview": "_預覽book_輸出",
-            "dual_extract": "_提取both_輸出",
-            "dual_preview": "_預覽both_輸出",
-        },
-        "target_language": ["zh_tw"],
-        "skip_zh_cn_extract": False,
-    },
-}
+# 預設值的唯一來源是 config_schema.SETTINGS（每個設定的 default），這裡只是由它建出。
+DEFAULT_CONFIG = build_default_config()
 
 
 # load_config 快取：以設定檔的 (mtime_ns, size) 判斷是否需要重新讀取。
 # 翻譯流程每筆資料都會讀設定（11 萬筆約多花 100 秒），檔案未變就直接用快取。
 _CONFIG_CACHE: dict = {"key": None, "config": None}
 _CONFIG_CACHE_LOCK = threading.Lock()
+
+
+def _sensitive_values(config: dict):
+    """schema 標示為 sensitive 的設定值（字串，或字串清單裡的每一項）。"""
+    for path in sensitive_paths():
+        value = get_path(config, path)
+        items = value if isinstance(value, list) else [value]
+        for item in items:
+            if isinstance(item, str) and not item.startswith("YOUR_"):
+                yield item
 
 
 def _file_sig(path: Path):
@@ -428,12 +252,9 @@ def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
     if "models" in user_config.get("lm_translator", {}):
         config["lm_translator"]["models"] = user_config["lm_translator"]["models"]
 
-    # 使用者設定的 API 金鑰登錄為「已知機密」，之後任何輸出都會遮蔽（#125）
-    register_secrets(
-        k
-        for k in (config.get("lm_translator", {}).get("keys") or [])
-        if isinstance(k, str) and not k.startswith("YOUR_")
-    )
+    # schema 標示為 sensitive 的設定值（目前是 API 金鑰）登錄為「已知機密」，
+    # 之後任何輸出出口都會遮蔽（#125）；佔位字串不登錄
+    register_secrets(_sensitive_values(config))
 
     # ATK-C-2: 對最終結果做驗證
     _validate_lm_translator_config(config["lm_translator"])

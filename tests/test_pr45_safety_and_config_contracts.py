@@ -160,10 +160,9 @@ def test_apply_metadata_covers_new_fields_wildcards_and_cache_root():
         get_apply_rule(wildcard_path)
         == CONFIG_APPLY_RULES["lm_translator.models.*.max_output_tokens"]
     )
-    assert (
-        get_apply_rule("species_cache.cache_directory")
-        == CONFIG_APPLY_RULES["species_cache.*"]
-    )
+    # species_cache.* 的每個設定在 schema 內各自標示「需重啟」
+    assert get_apply_rule("species_cache.cache_directory")["timing"] == "restart"
+    assert get_apply_rule("species_cache.wikipedia_language")["timing"] == "restart"
 
 
 def test_config_view_presents_central_apply_metadata_for_lm_fields(monkeypatch):
