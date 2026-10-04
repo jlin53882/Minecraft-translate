@@ -24,14 +24,20 @@ from translation_tool.core.lm_translator_shared_preview import (
 )
 from translation_tool.core.lm_translator_shared_recording import TranslationRecorder
 from translation_tool.core.lm_translator_skeleton import (
+    JsonCheckpointAdapter,
     TranslatorHooks,
     TranslatorSkeleton,
+    format_eta,
+    make_checkpoint_adapter,
+    make_progress_hook,
+    prepare_translator_items,
     run_translator_skeleton,
 )
 
 __all__ = [
     "STRICT_SRC_TYPES",
     "CacheRule",
+    "JsonCheckpointAdapter",
     "TouchSet",
     "TranslateLoopResult",
     "TranslationRecorder",
@@ -41,7 +47,11 @@ __all__ = [
     "_get_default_batch_size",
     "_is_valid_hit",
     "fast_split_items_by_cache",
+    "format_eta",
     "get_default_cache_rules",
+    "make_checkpoint_adapter",
+    "make_progress_hook",
+    "prepare_translator_items",
     "run_translator_skeleton",
     "translate_items_with_cache_loop",
     "write_cache_hit_preview",

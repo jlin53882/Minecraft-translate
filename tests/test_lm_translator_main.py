@@ -42,6 +42,33 @@ def test_batch_entrypoint_is_a_small_compatibility_facade():
     assert main._translate_batch_smart_impl is not main._run_batch_state_machine
 
 
+def test_batch_state_machine_has_separate_state_action_and_response_layers():
+    from translation_tool.core import lm_translator_main as main
+
+    function_lengths = {
+        name: len(inspect.getsource(getattr(main, name)).splitlines())
+        for name in (
+            "_build_batch_runtime",
+            "_prepare_batch",
+            "_handle_batch_error",
+            "_merge_batch_response",
+            "_attempt_batch",
+            "_run_batch_state_machine",
+        )
+    }
+    assert function_lengths["_run_batch_state_machine"] < 100
+    assert function_lengths["_attempt_batch"] < 120
+    assert function_lengths["_merge_batch_response"] < 60
+    assert function_lengths["_handle_batch_error"] < 160
+
+    state_machine_source = inspect.getsource(main._run_batch_state_machine)
+    assert "_prepare_batch" in state_machine_source
+    assert "_attempt_batch" in state_machine_source
+    assert "call_gemini_requests" not in state_machine_source
+    assert "safe_json_loads" not in state_machine_source
+    assert "decide_batch_action" in inspect.getsource(main._handle_batch_error)
+
+
 def test_batch_error_classifier_covers_retry_actions_without_api_calls():
     import requests
 

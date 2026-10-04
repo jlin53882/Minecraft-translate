@@ -97,10 +97,15 @@ def translate_items_with_cache_loop(
     on_progress: Callable[[float, str, float], None] | None = None,
     cache_rules: dict[str, CacheRule] | None = None,
     sleep_seconds_between_batches: float | None = None,
+    reload_cache: bool = True,
+    cache_add: Callable[..., bool] | None = None,
+    cache_save: Callable[..., bool] | None = None,
 ) -> TranslateLoopResult:
     """執行翻譯主迴圈，分批呼叫翻譯 API、寫入快取、回報進度與 ETA，支援中斷與額度耗盡處理。"""
     if cache_rules is None:
         cache_rules = get_default_cache_rules()
+    cache_add = cache_add or add_to_cache
+    cache_save = cache_save or save_translation_cache
 
     # 如果未指定 sleep_seconds_between_batches，從 config 讀取
     if sleep_seconds_between_batches is None:
@@ -111,8 +116,9 @@ def translate_items_with_cache_loop(
             .get("sleep_seconds_between_batches", 0.0)
         )
 
-    reload_translation_cache()
-    log_info("[Translator Gen]: 重新載入快取完成")
+    if reload_cache:
+        reload_translation_cache()
+        log_info("[Translator Gen]: 重新載入快取完成")
     start_time = time.time()
 
     total = (
@@ -250,7 +256,7 @@ def translate_items_with_cache_loop(
             rule = cache_rules.get(ctype) or CacheRule("path|source_text")
             cache_key = rule.make_key({"path": pth, "source_text": src})
             try:
-                cache_written = add_to_cache(ctype, cache_key, src, txt)
+                cache_written = cache_add(ctype, cache_key, src, txt)
                 if cache_written is False:
                     cache_write_failed = True
                     last_error = f"快取寫入被拒絕：{ctype}:{cache_key}"
@@ -272,9 +278,7 @@ def translate_items_with_cache_loop(
 
         save_ok = True
         try:
-            save_result = save_translation_cache(
-                cache_type, write_new_shard=write_new_cache
-            )
+            save_result = cache_save(cache_type, write_new_shard=write_new_cache)
             save_ok = save_result is not False
         except Exception as e:  # noqa: BLE001
             save_ok = False
@@ -292,6 +296,7 @@ def translate_items_with_cache_loop(
                 log_info(f"[SharedLM] 批次刷新回調失敗: {redact_text(e)}")
 
         if on_batch_checkpoint is not None:
+            checkpoint_failed = False
             try:
                 on_batch_checkpoint(
                     {
@@ -303,7 +308,21 @@ def translate_items_with_cache_loop(
                     }
                 )
             except Exception as e:  # noqa: BLE001
-                log_info(f"[SharedLM] 批次 checkpoint 回調失敗: {redact_text(e)}")
+                checkpoint_failed = True
+                last_error = f"checkpoint 寫入失敗: {redact_text(e)}"
+                log_info(f"[SharedLM] {last_error}")
+
+            if checkpoint_failed:
+                emit_progress(f"❌ [SharedLM] {last_error}")
+                return TranslateLoopResult(
+                    status="FAILED",
+                    processed=processed,
+                    total=total,
+                    completed_calls=completed_calls,
+                    elapsed_sec=time.time() - start_time,
+                    exhausted=False,
+                    last_error=last_error,
+                )
 
         emit_progress(
             f"✅ 批次完成 ({cache_type}) | 成功: {actual_processed_in_this_batch} | 總進度: {processed}/{total}"

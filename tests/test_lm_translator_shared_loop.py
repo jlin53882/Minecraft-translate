@@ -382,6 +382,41 @@ class TestTranslateItemsWithCacheLoop:
     @patch("translation_tool.core.lm_translator_shared_loop.reload_translation_cache")
     @patch("translation_tool.core.lm_translator_shared_loop.save_translation_cache")
     @patch("translation_tool.core.lm_translator_shared_loop.add_to_cache")
+    def test_checkpoint_failure_is_a_terminal_failure(
+        self, mock_add_cache, mock_save_cache, mock_reload
+    ):
+        from translation_tool.core.lm_translator_shared_loop import (
+            translate_items_with_cache_loop,
+        )
+
+        def mock_translate(batch, total):
+            translated = [item.copy() for item in batch]
+            translated[0]["text"] = "Translated"
+            return translated, "AUTO"
+
+        items = [
+            {
+                "path": "path1",
+                "text": "Hello",
+                "source_text": "Hello",
+                "cache_type": "lang",
+            }
+        ]
+
+        result = translate_items_with_cache_loop(
+            items,
+            translate_batch_smart=mock_translate,
+            on_batch_checkpoint=lambda _state: (_ for _ in ()).throw(
+                RuntimeError("disk full")
+            ),
+        )
+
+        assert result.status == "FAILED"
+        assert result.last_error == "checkpoint 寫入失敗: disk full"
+
+    @patch("translation_tool.core.lm_translator_shared_loop.reload_translation_cache")
+    @patch("translation_tool.core.lm_translator_shared_loop.save_translation_cache")
+    @patch("translation_tool.core.lm_translator_shared_loop.add_to_cache")
     def test_translate_items_exception_handling(
         self, mock_add_cache, mock_save_cache, mock_reload
     ):

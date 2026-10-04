@@ -27,7 +27,9 @@ from translation_tool.core.lm_translator_shared import (
     TranslationRecorder,
     TranslatorHooks,
     _is_valid_hit,  # ✅ 新增：cache hit 判斷
-    fast_split_items_by_cache,
+    make_checkpoint_adapter,
+    make_progress_hook,
+    prepare_translator_items,
     run_translator_skeleton,
     write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
     write_dry_run_preview,  # ✅ NEW
@@ -228,7 +230,7 @@ def translate_md_pending(
             }
         )
 
-    cached_items, items_to_translate = fast_split_items_by_cache(
+    cached_items, items_to_translate = prepare_translator_items(
         all_unique_items,
         cache_rules=cache_rules,
         is_valid_hit=_is_valid_hit,
@@ -355,22 +357,13 @@ def translate_md_pending(
         except Exception as e:
             log_warning(f"[MD-LM] 批次刷新失敗: {e}")
 
-    def _fmt_eta(sec: float) -> str:
-        """格式化剩餘時間。"""
-        if sec <= 0:
-            return ""
-        m, s = divmod(int(sec), 60)
-        return f"{m}m{s:02d}s" if m > 0 else f"{s}s"
+    on_progress = make_progress_hook(
+        lambda value: progress(session, value),
+        lambda message: log_info("⏳ [MD-LM] %s", message),
+        message_formatter=lambda msg, eta: f"{msg}{f' | ETA：{eta}' if eta else ''}",
+    )
 
-    def on_progress(p: float, msg: str, eta_sec: float) -> None:
-        """報告翻譯進度。"""
-        eta_txt = _fmt_eta(eta_sec)
-        log_info(
-            "⏳ [MD-LM] %s%s",
-            msg,
-            f" | ETA：{eta_txt}" if eta_txt else "",
-        )
-        progress(session, p)
+    checkpoint = make_checkpoint_adapter("md", items_to_translate, target=str(out_root))
 
     avg_batch_sec = None
     if items_to_translate:
@@ -387,9 +380,12 @@ def translate_md_pending(
             hooks=TranslatorHooks(
                 on_translated_item=on_translated_item,
                 on_batch_flushed=on_batch_flushed,
+                on_batch_checkpoint=checkpoint,
                 on_progress=on_progress,
             ),
         )
+        if res.status == "DONE":
+            checkpoint.clear()
         avg_batch_sec = (
             (res.elapsed_sec / res.completed_calls) if res.completed_calls else None
         )
