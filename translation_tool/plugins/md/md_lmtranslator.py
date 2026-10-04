@@ -154,7 +154,7 @@ def translate_md_pending(
     for jp in json_files:
         try:
             _, items = load_pending_doc(jp)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
             log_warning(f"[MD-LM] 載入待翻譯文件失敗: {jp} ({e})")
             continue
 
@@ -281,7 +281,7 @@ def translate_md_pending(
             log_info(f"🧪 [MD-LM] DRY-RUN preview：{p1}")
             log_info(f"🧪 [MD-LM] DRY-RUN cache-hit preview：{p2}")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
             log_warning(f"⚠️ [MD-LM] DRY-RUN preview 輸出失敗：{e}")
 
         log_info("ℹ️ [MD-LM] dry-run 模式：不翻譯、不寫檔。")
@@ -310,8 +310,9 @@ def translate_md_pending(
             if shielded is not None and getattr(shielded, "shields", None):
                 try:
                     dst = unshield_text(dst, shielded.shields)
-                except Exception:
-                    pass
+                except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
+                    # 還原失敗會讓輸出殘留保護標記，必須留下紀錄（#135）
+                    log_warning(f"[MD-LM] 還原保護標記失敗 h={h}: {exc!r}")
             hash_to_dst[h] = dst
 
     rec = TranslationRecorder()
@@ -332,8 +333,9 @@ def translate_md_pending(
             if shielded is not None and getattr(shielded, "shields", None):
                 try:
                     dst = unshield_text(dst, shielded.shields)
-                except Exception:
-                    pass
+                except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
+                    # 還原失敗會讓輸出殘留保護標記，必須留下紀錄（#135）
+                    log_warning(f"[MD-LM] 還原保護標記失敗 h={h}: {exc!r}")
             hash_to_dst[h] = dst
         # 這裡 recorder 的 cache_type 用 md（方便你日後 QC）
         try:
@@ -346,7 +348,7 @@ def translate_md_pending(
                 cache_hit=False,
                 extra={},
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
             log_warning(f"[MD-LM] 記錄翻譯結果失敗: {e}")
 
     def on_batch_flushed() -> None:
@@ -354,7 +356,7 @@ def translate_md_pending(
         try:
             touch.touch("noop")
             touch.flush(_writer)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
             log_warning(f"[MD-LM] 批次刷新失敗: {e}")
 
     on_progress = make_progress_hook(
@@ -408,7 +410,7 @@ def translate_md_pending(
     for jp in json_files:
         try:
             data, items = load_pending_doc(jp)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
             log_warning(f"[MD-LM] 略過讀取失敗：{jp} ({e})")
             continue
 
@@ -457,7 +459,7 @@ def translate_md_pending(
     try:
         rec.export_json(out_root / "LM翻譯後" / "translation_map_md.json")
         rec.export_csv(out_root / "LM翻譯後" / "translation_map_md.csv")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
         log_warning(f"[MD-LM] 匯出 translation_map 失敗: {e}")
 
     if missing:

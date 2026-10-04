@@ -248,7 +248,7 @@ def translate_kubejs_pending_to_zh_tw(
         try:
             mapping = read_json_dict(src)
             return src, int(count_translatable_keys(mapping))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
             log_warning(f"[KubeJS-LM] 讀取 JSON 失敗 {src}: {e}")
             return src, 0
 
@@ -305,7 +305,7 @@ def translate_kubejs_pending_to_zh_tw(
             _split_off_tw_items(cached_items, items_to_translate)
             global_total_hit += len(cached_items)
             global_total_to_translate += len(items_to_translate)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
             log_warning(f"[KubeJS-LM] 預掃描失敗 {src}: {e}")
 
     log_info(
@@ -414,7 +414,7 @@ def translate_kubejs_pending_to_zh_tw(
                         cache_hit=True,
                         extra={"dst_file": dst.relative_to(out_dir).as_posix()},
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
                     log_warning(f"[KubeJS-LM] 記錄快取命中失敗: {e}")
 
         file_id = dst.as_posix()
@@ -483,7 +483,7 @@ def translate_kubejs_pending_to_zh_tw(
                 f"🎯 [DRY-RUN] cache-hit preview written: {hit_preview_path.as_posix()}"
             )
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
             log_warning(f"⚠️ [KubeJS-LM] DRY-RUN preview 輸出失敗：{e}")
 
         progress(1.0)
@@ -543,12 +543,12 @@ def translate_kubejs_pending_to_zh_tw(
                     cache_hit=False,
                     extra={"dst_file": st["dst"].relative_to(out_dir).as_posix()},
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
                 log_warning(f"[KubeJS-LM] 記錄翻譯結果失敗: {e}")
 
             try:
                 touch.touch(st["file_id"])
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
                 log_warning(f"[KubeJS-LM] touch 失敗: {e}")
 
         def on_batch_flushed() -> None:
@@ -556,7 +556,7 @@ def translate_kubejs_pending_to_zh_tw(
             """批量寫入翻譯結果。"""
             try:
                 touch.flush(_writer)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
                 log_warning(f"[KubeJS-LM] 批次刷新失敗，使用 fallback 寫入: {e}")
                 for fid, (dstp, data) in _file_write_table.items():
                     write_json_dict(dstp, data)
@@ -607,7 +607,7 @@ def translate_kubejs_pending_to_zh_tw(
         rec_json = rec.export_json(out_dir / "translation_map.json")
         rec_csv = rec.export_csv(out_dir / "translation_map.csv")
         log_info(f"🧾 [KubeJS-LM] records written: {rec_json} | {rec_csv}")
-    except Exception as ex:
+    except Exception as ex:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
         log_info(f"⚠️ [KubeJS-LM] export records failed: {ex}")
 
     return {
