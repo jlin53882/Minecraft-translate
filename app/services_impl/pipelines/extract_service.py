@@ -117,7 +117,10 @@ def get_output_folder_names() -> dict[str, str]:
 
 
 def get_target_language() -> str:
-    """從 config 讀取預設目標語系。
+    """讀取歷史目標語系設定，僅保留相容性。
+
+    `extractor.target_language` 沒有正式的 production caller；新的提取流程
+    使用語系清單與單次 skip 開關，不應在這裡自行推導新的業務規則。
 
     取代 View 層內直接呼叫 load_config() 的反模式。
 
@@ -128,7 +131,7 @@ def get_target_language() -> str:
     return cfg.get("extractor", {}).get("target_language", "zh_tw")
 
 
-def get_lang_codes() -> list[str]:
+def get_lang_codes(*, skip_zh_cn: bool | None = None) -> list[str]:
     """從 config 讀取 JAR 提取的預設語系代碼列表。
 
     取代 View/Dialog 內直接呼叫 load_config() + get("jar_extractor") 的反模式。
@@ -137,7 +140,20 @@ def get_lang_codes() -> list[str]:
         語系代碼列表，預設為 ["en_us", "zh_cn", "zh_tw"]
     """
     cfg = load_config()
-    return cfg.get("jar_extractor", {}).get("lang_codes", ["en_us", "zh_cn", "zh_tw"])
+    if skip_zh_cn is None:
+        skip_zh_cn = bool(cfg.get("extractor", {}).get("skip_zh_cn_extract", False))
+    codes = cfg.get("jar_extractor", {}).get("lang_codes", ["en_us", "zh_cn", "zh_tw"])
+    if not isinstance(codes, list) or not codes:
+        codes = ["en_us", "zh_cn", "zh_tw"]
+    if skip_zh_cn:
+        codes = [code for code in codes if code != "zh_cn"]
+    return codes
+
+
+def get_skip_zh_cn_extract() -> bool:
+    """取得提取頁單次操作開關的預設值。"""
+    cfg = load_config()
+    return bool(cfg.get("extractor", {}).get("skip_zh_cn_extract", False))
 
 
 def prepare_preview_paths(mods_dir: str, mode: str) -> str:

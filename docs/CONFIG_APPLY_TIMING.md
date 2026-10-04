@@ -42,6 +42,8 @@
 | `translator.output_dir_name`、`ftb_translator.output_dir_name` | 每次任務讀 |
 | `lang_merger.*` | 每次合併讀 |
 | `extractor.output_folder_names.*`、`jar_extractor.lang_codes` | 提取頁在按下動作時才讀 |
+| `extractor.skip_zh_cn_extract` | 提取頁建立時讀為預設值；每次操作仍可用頁面開關覆寫 |
+| `translator.custom_translator_folder` | 每次 FTB 任務建立時讀取，下一次任務生效 |
 | `output_bundler.output_zip_name`（實際打包） | 打包時讀；**但輸入框提示文字是頁面建立時讀的（見 C）** |
 | `logging.log_level`、`logging.log_format` | 每次啟動流水線時 `update_logger_config` 重新套用 |
 | `lm_translator.translator.*`、`lm_translator.patchouli.dir_names` | 每次任務讀 |
@@ -65,7 +67,9 @@
 |---|---|
 | `translator.replace_rules_path` | `lang_merger.py` 兩處（L74、L397）讀的是**頂層** `replace_rules_path`，但設定放在 `translator.replace_rules_path`，所以合併時永遠用預設 `replace_rules.json`。`ftb_translator.py` 與 `variant_comparator.py` 讀對了。→ 改了路徑只有部分流程會用到 |
 | `logging.log_dir` | 設定頁有欄位，但錯誤記錄寫死 `Path("logs")`（`exceptions.py`），`log_dir` 未被實際使用（未確認其他位置） |
-| `translator.custom_translator_folder`、`translator.enable_cache_saving` | 只找到零星使用，未確認行為 |
+| `extractor.target_language` | 歷史相容欄位；追查不到正式 caller，目前不生效，不應在 UI 宣稱可調整 |
+| `translator.cjk_ratio_threshold` | 歷史相容欄位；追查不到 caller 或明確判定規則，目前不生效，不應臆造語意 |
+| `translator.enable_cache_saving` | 只找到零星使用，未確認行為 |
 
 ## 風險最高的一項：`translator.cache_directory`
 

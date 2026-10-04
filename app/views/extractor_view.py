@@ -20,7 +20,10 @@ from pathlib import Path
 
 import flet as ft
 
-from app.services_impl.pipelines.extract_service import get_output_folder_names
+from app.services_impl.pipelines.extract_service import (
+    get_output_folder_names,
+    get_skip_zh_cn_extract,
+)
 from app.tasks.task_session import (
     TaskSession,  # noqa: F401 - 測試以 extractor_view.TaskSession patch
 )
@@ -88,7 +91,7 @@ class ExtractorView(ft.Column):
 
         self.skip_zh_cn_switch = ft.Switch(
             label="跳過 zh_cn 抽取",
-            value=False,
+            value=get_skip_zh_cn_extract(),
             label_text_style=ft.TextStyle(size=13, color=C.TEXT),
         )
 

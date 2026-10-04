@@ -26,6 +26,9 @@ def load_config_into_view(view, config: dict):
 
     view.controls_map["logging.log_level"].value = log_cfg.get("log_level")
     view.controls_map["logging.log_dir"].value = log_cfg.get("log_dir")
+    view.controls_map["logging.log_format"].value = log_cfg.get(
+        "log_format", get_default("logging.log_format")
+    )
     view.controls_map["translator.output_dir_name"].value = trans_cfg.get(
         "output_dir_name"
     )
@@ -43,6 +46,9 @@ def load_config_into_view(view, config: dict):
     )
     view.controls_map["translator.parallel_execution_workers"].value = str(
         trans_cfg.get("parallel_execution_workers")
+    )
+    view.controls_map["translator.custom_translator_folder"].value = trans_cfg.get(
+        "custom_translator_folder", get_default("translator.custom_translator_folder")
     )
     view.controls_map["species_cache.cache_directory"].value = species_cfg.get(
         "cache_directory"
@@ -210,6 +216,9 @@ def load_config_into_view(view, config: dict):
     view.controls_map[
         "extractor.output_folder_names.dual_preview"
     ].value = folder_names.get("dual_preview")
+    view.controls_map["extractor.skip_zh_cn_extract"].value = extractor_cfg.get(
+        "skip_zh_cn_extract", get_default("extractor.skip_zh_cn_extract", False)
+    )
 
     view.models_column.controls.clear()
     models_cfg = lm_cfg.get("models")
@@ -279,6 +288,9 @@ def save_config_from_view(
             "logging.log_level"
         ].value
         new_config["logging"]["log_dir"] = view.controls_map["logging.log_dir"].value
+        new_config["logging"]["log_format"] = view.controls_map[
+            "logging.log_format"
+        ].value
         new_config["translator"]["output_dir_name"] = view.controls_map[
             "translator.output_dir_name"
         ].value
@@ -297,6 +309,9 @@ def save_config_from_view(
         new_config["translator"]["parallel_execution_workers"] = int(
             view.controls_map["translator.parallel_execution_workers"].value
         )
+        new_config["translator"]["custom_translator_folder"] = view.controls_map[
+            "translator.custom_translator_folder"
+        ].value
         new_config["species_cache"]["cache_directory"] = view.controls_map[
             "species_cache.cache_directory"
         ].value
@@ -456,6 +471,9 @@ def save_config_from_view(
                 "extractor.output_folder_names.dual_preview"
             ].value,
         }
+        new_config["extractor"]["skip_zh_cn_extract"] = bool(
+            view.controls_map["extractor.skip_zh_cn_extract"].value
+        )
         api_keys = [
             key_field.value.strip()
             for key_field in view.key_fields
