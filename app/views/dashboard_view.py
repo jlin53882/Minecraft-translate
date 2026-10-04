@@ -309,7 +309,8 @@ class DashboardView(ft.Column):
             crossed_task_boundary = active_ids != self._active_task_ids
             self._active_task_ids = active_ids
         if crossed_task_boundary:
-            # 只在任務開始 / 最後一個任務結束時重讀昂貴的統計；progress 事件只更新 UI 狀態。
+            # 只在 active task membership 發生開始 / 結束邊界時重讀昂貴統計；
+            # progress 事件只更新 UI 狀態。
             self.reload()
         self._apply_on_ui()
 

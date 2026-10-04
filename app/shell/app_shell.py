@@ -437,11 +437,11 @@ class AppShell:
         previous = getattr(page, "on_close", None)
         self._previous_on_close = previous
 
-        def on_close(event=None) -> None:
+        async def on_close(event=None) -> None:
             try:
                 self.dispose()
             finally:
-                self._invoke_existing_handler(previous, event)
+                await self._invoke_existing_handler_async(previous, event)
 
         self._page_on_close = on_close
         try:
@@ -480,6 +480,23 @@ class AppShell:
                     logger.debug("既有 awaitable page handler 失敗", exc_info=True)
 
             self._submit_ui(await_result)
+
+    async def _invoke_existing_handler_async(self, handler, event=None) -> None:
+        """在 close event dispatch 內直接完成既有 handler chaining。"""
+        if handler is None:
+            return
+        try:
+            result = handler(event)
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.debug("既有 async page handler 失敗", exc_info=True)
+
+    def _abort_close(self) -> None:
+        """中止 close，但保留外殼時恢復接收新任務。"""
+        self._close_pending = False
+        if not self._disposed:
+            self.tasks.resume_accepting()
 
     def _bind_window_close(self) -> None:
         """把桌面 native CLOSE 導向同一個 lifecycle teardown。"""
@@ -538,7 +555,7 @@ class AppShell:
             self.tasks.request_cancel_active()
             ok, _future = self._submit_ui(self._complete_window_close)
             if not ok:
-                self._close_pending = False
+                self._abort_close()
                 self._show_close_failure()
 
         dialog = ft.AlertDialog(
@@ -556,27 +573,30 @@ class AppShell:
         """完成 desktop close：先 teardown，再讓 native window 結束。"""
         if self._disposed:
             return
-        self.tasks.request_cancel_active()
-        deadline = _monotonic() + CLOSE_WAIT_TIMEOUT_SEC
-        while self.tasks.active() and _monotonic() < deadline:
-            await _async_sleep(CLOSE_WAIT_POLL_SEC)
-        if self.tasks.active():
-            self._close_pending = False
-            self._show_close_failure()
-            return
+        close_ready = False
         try:
+            self.tasks.request_cancel_active()
+            deadline = _monotonic() + CLOSE_WAIT_TIMEOUT_SEC
+            while self.tasks.active() and _monotonic() < deadline:
+                await _async_sleep(CLOSE_WAIT_POLL_SEC)
+            if self.tasks.active():
+                self._show_close_failure()
+                return
             result = self._flush_before_close()
             if inspect.isawaitable(result):
                 result = await result
             if result is False:
                 raise RuntimeError("close flush returned false")
+            close_ready = True
         except Exception:
-            self._close_pending = False
             logger.warning(
-                "關閉前 flush/checkpoint 失敗，保留視窗供重試", exc_info=True
+                "關閉前 drain/flush/checkpoint 失敗，保留視窗供重試", exc_info=True
             )
             self._show_close_failure()
             return
+        finally:
+            if not close_ready and not self._disposed:
+                self._abort_close()
         self.dispose()
         destroy = getattr(getattr(self.page, "window", None), "destroy", None)
         if not callable(destroy):

@@ -74,7 +74,7 @@ class TaskManager:
         if not self._attached:
             task_session_module.add_observer(self._on_session_event)
             self._attached = True
-        self._accepting = True
+        self.resume_accepting()
 
     def detach(self) -> None:
         if self._attached:
@@ -118,6 +118,11 @@ class TaskManager:
         """關閉流程進入 drain 階段後，拒絕新的 session 註冊。"""
         with self._lock:
             self._accepting = False
+
+    def resume_accepting(self) -> None:
+        """關閉中止且外殼仍存活時，恢復註冊新的 session。"""
+        with self._lock:
+            self._accepting = True
 
     def _drop(self, sid: int) -> None:
         """session 被回收卻沒有 finish：當作中斷，從進行中移除。"""
