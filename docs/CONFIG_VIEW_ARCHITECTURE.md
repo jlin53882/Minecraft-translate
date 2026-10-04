@@ -43,7 +43,8 @@ app/views/config/
       ├─ validate_api_keys_from_ui(api_keys)（lm_config_rules.py）
       ├─ save_config_json(new_config) → 觸發 normalization
       ├─ view.load_config() → 重新載入刷新 UI
-      └─ registry 中 extractor view 若有 refresh_output_dir_helper → 呼叫（更新 helper 文案）
+      └─ registry 中已建立的 ExtractorView → refresh_config_defaults()
+          （同步 config-backed UI defaults；尚未建立的頁面於建立時讀取最新設定）
 ```
 
 ## 主要方法（config_view.py）
@@ -108,7 +109,7 @@ app/views/config/
 
 1. 新增 config 欄位時，需同步更新：`_init_controls`（建立控制項）、`load_config_into_view`（載入）、`save_config_from_view`（儲存）三處；若欄位沒有明確 runtime caller，必須列入相容/棄用清單，不得只新增看似可調整的輸入框。
 2. list 欄位在 UI 是「每行一個元素」的多行 TextField，載入用 `\n` join、儲存用 splitlines 過濾空行。
-3. `save_config_from_view` 的 registry 參數用來在儲存後通知 extractor view 重新整理 helper 文案（若 extractor 頁尚未 mount，其內部有 try/except 防護）。
+3. `save_config_from_view` 的 registry 參數會在儲存後通知已建立的 ExtractorView 執行 `refresh_config_defaults()`，重新同步 config-backed UI defaults；尚未建立的頁面則於建立時讀取最新設定。
 
 ## PR-A 設定稽核結論
 
