@@ -7,14 +7,14 @@ from types import SimpleNamespace
 
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.views.icon_preview.entries_cache import _save_entries_cache_l2
 from app.views.icon_preview.icon_cache import (
     _ENABLE_JAR_ICON,
     _batch_extract_jar_icons,
     _get_icon_cache_dir,
-    _save_entries_cache_l2,
-    _show_progress_phase,
     to_halfwidth,
 )
+from app.views.icon_preview.progress import _show_progress_phase
 from app.views.icon_preview_row import LangItemRow
 from translation_tool.utils.jar_browser import scan_jars
 from translation_tool.utils.log_unit import log_error, log_info, log_warning

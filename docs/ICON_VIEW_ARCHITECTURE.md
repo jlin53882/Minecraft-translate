@@ -141,8 +141,10 @@ app/views/icon_preview_view.py            ← IconPreviewView 主體：生命週
 app/views/icon_preview/
   ├─ list_mixin.py       IconPreviewListMixin    模組清單、分頁、搜尋
   ├─ detail_mixin.py     IconPreviewDetailMixin  單一模組詳情、載入 entries、翻譯儲存
-  └─ icon_cache.py       圖示提取與快取輔助函式（model JSON 解析、批次提取、model index／L2 快取、進度輔助）
+  ├─ icon_cache.py       圖示提取與快取輔助函式（model JSON 解析、批次提取、model index 快取）
+  ├─ entries_cache.py    掃描結果（entries）的 L2 磁碟快取
+  └─ progress.py         Phase 進度顯示輔助
 app/views/icon_preview_row.py             ← 單列（圖示 + 翻譯欄位）
 ```
 
-測試要 monkeypatch 圖示輔助函式（`_get_cache_dir`、`_get_jar_hash`、`_try_extract_mod_icon_from_model` 等）時，請 patch `app.views.icon_preview.icon_cache`（呼叫者都在該模組內查名稱）。`app/icon_index.py` 也從 `icon_cache` 匯入 `_try_extract_mod_icon_from_model`。
+測試要 monkeypatch 圖示輔助函式（`_get_cache_dir`、`_get_jar_hash`、`_try_extract_mod_icon_from_model` 等）時，請 patch `app.views.icon_preview.icon_cache`（呼叫者都在該模組內查名稱）；L2 entries 快取目錄 `_get_cache_dir` 在 `entries_cache`。`app/icon_index.py` 也從 `icon_cache` 匯入 `_try_extract_mod_icon_from_model`。

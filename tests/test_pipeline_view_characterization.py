@@ -10,13 +10,13 @@ import flet as ft
 from app.tasks import LogEntry
 from app.ui.design import C
 from app.ui.snack import show_snack
-from app.views.pipeline import pipeline_view
-from app.views.pipeline.pipeline_view import (
-    PipelineConfig,
+from app.views.pipeline import pipeline_config, pipeline_view
+from app.views.pipeline.pipeline_config import PipelineConfig
+from app.views.pipeline.pipeline_progress import (
     PipelineProgressPanel,
     PipelineStepChip,
-    PipelineView,
 )
+from app.views.pipeline.pipeline_view import PipelineView
 from tests.conftest import mock_filepicker, mock_page
 
 # -----------------------------------------------------------------------------
@@ -79,7 +79,7 @@ class _Session:
 def test_pipeline_config_default_paths(monkeypatch):
     """驗證 PipelineConfig 產生的路徑符合預期結構"""
     monkeypatch.setattr(
-        pipeline_view,
+        pipeline_config,
         "load_config",
         lambda: {
             "lang_merger": {
@@ -110,7 +110,7 @@ def test_pipeline_config_default_paths(monkeypatch):
 def test_pipeline_config_extract_paths(monkeypatch):
     """驗證 extract_*_output_dir 屬性"""
     monkeypatch.setattr(
-        pipeline_view,
+        pipeline_config,
         "load_config",
         lambda: {
             "lang_merger": {},
@@ -130,7 +130,7 @@ def test_pipeline_config_extract_paths(monkeypatch):
 def test_pipeline_config_merge_paths(monkeypatch):
     """驗證 merge_* 屬性"""
     monkeypatch.setattr(
-        pipeline_view,
+        pipeline_config,
         "load_config",
         lambda: {
             "lang_merger": {},
@@ -146,7 +146,7 @@ def test_pipeline_config_merge_paths(monkeypatch):
 def test_pipeline_config_translate_paths(monkeypatch):
     """驗證 translate_* 屬性"""
     monkeypatch.setattr(
-        pipeline_view,
+        pipeline_config,
         "load_config",
         lambda: {
             "lang_merger": {
@@ -173,7 +173,7 @@ def test_pipeline_config_translate_paths(monkeypatch):
 def test_pipeline_config_bundle_paths(monkeypatch):
     """驗證 bundle_* 屬性"""
     monkeypatch.setattr(
-        pipeline_view,
+        pipeline_config,
         "load_config",
         lambda: {
             "lang_merger": {},

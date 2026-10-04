@@ -20,6 +20,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+EXTRACTOR_DIALOG_UI = (
+    Path(__file__).parent.parent
+    / "app"
+    / "views"
+    / "extractor"
+    / "extractor_dialog_ui.py"
+)
 EXTRACTOR_DIALOG = (
     Path(__file__).parent.parent / "app" / "views" / "extractor" / "extractor_dialog.py"
 )
@@ -62,7 +69,8 @@ class TestExtractionCancelFlag:
         return m.group(1)
 
     def test_outer_scope_flag_exists(self):
-        body = self._read_function_body("open_extractor_dialog")
+        # 旗標在 extractor_dialog_ui.py 的控制項建構階段建立（開啟對話框時呼叫）
+        body = EXTRACTOR_DIALOG_UI.read_text(encoding="utf-8")
         assert "extraction_cancel_flag = [False]" in body, (
             "outer-scope extraction_cancel_flag 沒建立, "
             "on_cancel_click 無法中斷 Service"

@@ -32,6 +32,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXTRACTOR_DIALOG = REPO_ROOT / "app" / "views" / "extractor" / "extractor_dialog.py"
+# 控制項建構與 UI 更新輔助拆到 extractor_dialog_ui.py（#114）
+EXTRACTOR_DIALOG_UI = (
+    REPO_ROOT / "app" / "views" / "extractor" / "extractor_dialog_ui.py"
+)
 # 預覽對話框已拆到獨立模組（#114）
 EXTRACTOR_PREVIEW_DIALOG = (
     REPO_ROOT / "app" / "views" / "extractor" / "extractor_preview_dialog.py"
@@ -1014,7 +1018,7 @@ class TestFixDUALResultSection:
 
     def test_extractor_dialog_has_book_row_ui(self):
         """extractor_dialog.py 必須有 book_row UI 元件。"""
-        src = _read(EXTRACTOR_DIALOG)
+        src = _read(EXTRACTOR_DIALOG_UI)
         assert "book_row = ft.Row(" in src, (
             "回歸:extractor_dialog.py 沒有 book_row UI 元件 "
             "(Phase 3 應加,顯示 BOOK 提取完成 XXX)"
@@ -1024,7 +1028,7 @@ class TestFixDUALResultSection:
 
     def test_lang_book_row_added_to_dialog_column(self):
         """lang_row / book_row 必須加進 dialog content column 才會 render。"""
-        src = _read(EXTRACTOR_DIALOG)
+        src = _read(EXTRACTOR_DIALOG_UI)
         # 找 stats_row 後面是否有 lang_row, book_row 加進 column
         assert "stats_row," in src and "lang_row," in src and "book_row," in src, (
             "回歸:lang_row / book_row 沒加進 dialog content column "

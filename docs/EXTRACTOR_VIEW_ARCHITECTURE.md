@@ -184,5 +184,6 @@ ExtractorView._handle_preview_*_click()    ← 只驗證 mods_dir，不自動填
 ## 對話框檔案結構（拆分後）
 
 - `app/views/extractor/extractor_dialog.py`：`open_extractor_dialog`（提取對話框）。以 `ctx`（`types.SimpleNamespace`）共享狀態與控制項，handler 為 `_extractor_*` 模組層級函式；`open_preview_dialog` 以模組 `__getattr__` 延遲轉出。
+- `app/views/extractor/extractor_dialog_ui.py`：提取對話框的控制項建構與 UI 更新輔助（log／進度／統計，皆只依賴 `ctx`）。
 - `app/views/extractor/extractor_preview_dialog.py`：`open_preview_dialog`（預覽對話框，確認後呼叫 `extractor_dialog.open_extractor_dialog`）。
 - 行為由 `tests/test_extractor_dialog_behavior.py`、`tests/test_extractor_preview_dialog_behavior.py` 以公開入口驅動驗證。

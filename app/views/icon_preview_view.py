@@ -17,12 +17,10 @@ from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.icon_preview.detail_mixin import IconPreviewDetailMixin
-from app.views.icon_preview.icon_cache import (
-    _load_entries_cache_l2,
-    _make_progress_callback,
-    _migrate_old_icon_cache,
-)
+from app.views.icon_preview.entries_cache import _load_entries_cache_l2
+from app.views.icon_preview.icon_cache import _migrate_old_icon_cache
 from app.views.icon_preview.list_mixin import IconPreviewListMixin
+from app.views.icon_preview.progress import _make_progress_callback
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
 

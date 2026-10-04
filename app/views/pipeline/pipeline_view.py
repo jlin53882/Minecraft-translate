@@ -13,7 +13,6 @@ import os
 import threading
 import traceback
 from functools import partial
-from typing import ClassVar
 
 import flet as ft
 
@@ -33,296 +32,28 @@ from app.services_impl.pipelines.merge_service import (
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
 from app.ui.design import C
-from app.ui.design import tone as get_tone
 from app.ui.snack import show_snack
-from app.views._log import LogView
 from app.views.pipeline.pipeline_bundle_dialog import open_bundle_dialog
+from app.views.pipeline.pipeline_config import PipelineConfig, _has_files
 from app.views.pipeline.pipeline_extract_dialog import open_extract_dialog
 from app.views.pipeline.pipeline_merge_dialog import open_merge_dialog
 from app.views.pipeline.pipeline_one_click_dialog import open_one_click_dialog
+from app.views.pipeline.pipeline_progress import (
+    PipelineProgressPanel,
+)
 from app.views.pipeline.pipeline_translate_dialog import open_translate_dialog
 from app.views.pipeline.pipeline_widgets import PipelineWidgetsMixin
 from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
-from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
-
-
-def _has_files(path: str) -> bool:
-    """資料夾存在且至少含有一個檔案。"""
-    if not os.path.isdir(path):
-        return False
-    return any(files for _, _, files in os.walk(path))
-
-
-class PipelineConfig:
-    """一鍵製作路徑設定檔"""
-
-    def __init__(self, input_dir: str, output_dir: str):
-        cfg = load_config()
-        self.input_dir = input_dir
-        self.output_dir = output_dir
-
-        lang_merger = cfg.get("lang_merger", {})
-        bundler = cfg.get("output_bundler", {})
-
-        self.jar_mod_extract = "jar_mod_extract"
-        self.lang_output_subfolder = "_提取lang_輸出"
-        self.book_output_subfolder = "_提取book_輸出"
-
-        self.locale_sort = "locale_sort"
-        self.sort_output_subfolder = "_整理輸出"
-        self.pending_folder = lang_merger.get("pending_folder_name", "待翻譯")
-        self.organized_folder = lang_merger.get(
-            "pending_organized_folder_name", "待翻譯整理需翻譯"
-        )
-
-        self.lm_translate = "lm_translate"
-        self.translate_output_subfolder = "_翻譯輸出"
-
-        self.output_zip_name = bundler.get("output_zip_name", "可使用翻譯.zip")
-
-    @property
-    def extract_lang_output_dir(self):
-        return os.path.join(
-            self.output_dir, self.jar_mod_extract, self.lang_output_subfolder
-        )
-
-    @property
-    def extract_book_output_dir(self):
-        return os.path.join(
-            self.output_dir, self.jar_mod_extract, self.book_output_subfolder
-        )
-
-    @property
-    def merge_input_dir(self):
-        return os.path.join(self.output_dir, self.jar_mod_extract)
-
-    @property
-    def merge_output_dir(self):
-        return os.path.join(
-            self.output_dir, self.locale_sort, self.sort_output_subfolder
-        )
-
-    @property
-    def translate_input_dir(self):
-        """語言檔待翻譯清單（語系合併輸出於 lang_output/ 底下）。"""
-        return os.path.join(self.merge_output_dir, "lang_output", self.organized_folder)
-
-    @property
-    def patchouli_pending_dir(self):
-        """Patchouli 書本的待翻譯內容。"""
-        return os.path.join(
-            self.merge_output_dir, "patchouli_output", self.pending_folder
-        )
-
-    @property
-    def translate_input_dirs(self):
-        return [self.translate_input_dir, self.patchouli_pending_dir]
-
-    @property
-    def translate_output_dir(self):
-        return os.path.join(
-            self.output_dir, self.lm_translate, self.translate_output_subfolder
-        )
-
-    @property
-    def bundle_input_dir(self):
-        return os.path.join(
-            self.output_dir, self.lm_translate, self.translate_output_subfolder
-        )
-
-    @property
-    def bundle_staging_dir(self):
-        return os.path.join(self.output_dir, "_打包暫存")
-
-    @property
-    def bundle_sources(self):
-        """打包來源（優先序由低到高）：合併後的既有譯文 → LLM 新譯文。"""
-        return [
-            os.path.join(self.merge_output_dir, "lang_output"),
-            os.path.join(self.merge_output_dir, "patchouli_output"),
-            self.translate_output_dir,
-        ]
-
-    @property
-    def bundle_output_zip(self):
-        return os.path.join(self.output_dir, self.output_zip_name)
-
 
 # =============================================================================
 # PipelineStepChip - 步驟狀態晶片
 # =============================================================================
 
 
-class PipelineStepChip:
-    """單一步驟狀態晶片（語意色組：灰=等待、金=進行中、綠=完成、紅=失敗 / 取消）。"""
-
-    _TONES: ClassVar[dict[str, str]] = {
-        "waiting": "neutral",
-        "running": "gold",
-        "done": "em",
-        "failed": "red",
-        "cancelled": "gold",
-    }
-    _ICONS: ClassVar[dict[str, str]] = {
-        "waiting": ft.Icons.CIRCLE,
-        "running": ft.Icons.PENDING,
-        "done": ft.Icons.CHECK_CIRCLE,
-        "failed": ft.Icons.ERROR,
-        "cancelled": ft.Icons.STOP_CIRCLE,
-    }
-
-    def __init__(self, name: str, step_num: int):
-        self.name = name
-        self.step_num = step_num
-        self.status = "waiting"
-
-        self.chip = ft.Chip(label=ft.Text(f"{step_num}. {name}"))
-        self.icon = ft.Icon(ft.Icons.CIRCLE, size=12)
-        self.chip.leading = self.icon
-        self._update_chip()
-
-    def _update_chip(self):
-        tone = get_tone(self._TONES.get(self.status, "neutral"))
-        self.icon.name = self._ICONS[self.status]
-        self.icon.color = tone.fg
-        self.chip.bgcolor = tone.bg
-        self.chip.label_text_style = ft.TextStyle(color=tone.fg, size=12.5)
-        self.chip.side = ft.BorderSide(1, tone.line)
-
-    def set_status(self, status: str):
-        self.status = status
-        self._update_chip()
-
-
 # =============================================================================
 # PipelineProgressPanel - 日誌+進度面板
 # =============================================================================
-
-
-class PipelineProgressPanel:
-    """日誌+進度面板，顯示步驟狀態晶片、進度條、即時日誌"""
-
-    def __init__(self, page: ft.Page, on_cancel=None):
-        self._page = page
-        self.cancel_button = kit.button(
-            "取消",
-            "danger",
-            icon=ft.Icons.STOP_CIRCLE_OUTLINED,
-            tooltip="在目前步驟的檢查點停止（已完成的輸出會保留）",
-            on_click=(lambda e: on_cancel()) if on_cancel else None,
-        )
-        self.cancel_button.visible = False
-        self.steps = [
-            PipelineStepChip("抽取資源", 1),
-            PipelineStepChip("語系比對", 2),
-            PipelineStepChip("啟動翻譯", 3),
-            PipelineStepChip("打包資源", 4),
-        ]
-        self.current_step = None
-
-        arrow = lambda: ft.Icon(ft.Icons.ARROW_FORWARD, size=16, color=C.DIM)
-        step_controls: list[ft.Control] = []
-        for index, step in enumerate(self.steps):
-            if index:
-                step_controls.append(arrow())
-            step_controls.append(ft.Container(content=step.chip, padding=5))
-        self.step_row = ft.Row(controls=step_controls, spacing=5, wrap=True)
-
-        self.current_label = ft.Text("等待執行...", color=C.MUTED, size=14)
-        # PR refactor/unified-log-view: 改用 LogView widget
-        # 統一深色容器 + 等寬字 + 等級顏色（從 theme）
-        # 保留 height=120 限制
-        self.log_view = LogView(
-            page=page,
-            mode="append",
-            max_lines=500,
-            height=120,
-        )
-
-        self.container = kit.section_card(
-            "執行進度",
-            ft.Column(
-                [
-                    self.step_row,
-                    ft.Row(
-                        [self.current_label, self.cancel_button],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    self.log_view,
-                ],
-                spacing=10,
-            ),
-            icon=ft.Icons.TIMELINE,
-            tone="gold",
-        )
-        self.container.visible = False
-
-    def start(self):
-        self.container.visible = True
-        for step in self.steps:
-            step.set_status("waiting")
-
-    def set_step_running(self, step_num: int, name: str):
-        self.current_step = step_num - 1
-        for i, step in enumerate(self.steps):
-            if i < self.current_step:
-                step.set_status("done")
-            elif i == self.current_step:
-                step.set_status("running")
-            else:
-                step.set_status("waiting")
-        self.current_label.value = f"目前的：{name}"
-
-    def add_log(self, msg: str, level: str = "info", is_success: bool | None = None):
-        """PR refactor/unified-log-view: 改用 LogView.add() 統一處理等級顏色。
-
-        Args:
-            msg: log 文字
-            level: debug/info/warning/error/system（從字串前綴自動推斷）
-            is_success: 保留向後兼容（True=success、False=error、None=預設）
-        """
-        # 向後兼容 is_success 參數（map 到 level）
-        if is_success is not None and level == "info":
-            level = "system" if is_success else "error"
-        # 從 msg 字串前綴推斷 level（向後兼容既有呼叫）
-        if level == "info":
-            if msg.startswith(("▶", "✅")):
-                level = "system"
-            elif msg.startswith("❌"):
-                level = "error"
-        self.log_view.add(f">> {msg}", level=level)
-
-    def finish_step(self, step_num: int, success: bool, cancelled: bool = False):
-        if cancelled:
-            self.steps[step_num - 1].set_status("cancelled")
-        else:
-            self.steps[step_num - 1].set_status("done" if success else "failed")
-
-    def set_running(self, running: bool):
-        """任務執行中才顯示取消按鈕。"""
-        self.cancel_button.visible = running
-        self.cancel_button.disabled = not running
-
-    def finish_all(self, success: bool, cancelled: bool = False):
-        if success:
-            self.current_label.value = "✅ 一鍵製作完成！"
-        elif cancelled:
-            self.current_label.value = "⏹ 已取消"
-        else:
-            self.current_label.value = "❌ 流程失敗"
-        for step in self.steps:
-            if step.status == "running":
-                step.set_status("failed" if not success else "done")
-        self.set_running(False)
-
-    def hide(self):
-        self.container.visible = False
-
-    def clear_logs(self):
-        # PR refactor/unified-log-view: log_view 改用 LogView
-        self.log_view.clear()
 
 
 # =============================================================================

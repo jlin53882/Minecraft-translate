@@ -71,12 +71,13 @@ def _isolate_test_runtime_writes(tmp_path, monkeypatch, request):
     monkeypatch.chdir(tmp_path)
     if request.node.path.name.startswith("test_icon_preview_"):
         module = importlib.import_module("app.views.icon_preview.icon_cache")
+        entries_module = importlib.import_module("app.views.icon_preview.entries_cache")
         index_module = importlib.import_module("app.icon_index")
         icon_cache_root = tmp_path / "icon_cache"
         icon_cache = icon_cache_root / "jar_icons"
         model_cache = icon_cache_root / "model_index"
         index_cache = icon_cache_root / "icon_index" / "fixture.json"
-        monkeypatch.setattr(module, "_get_cache_dir", lambda: icon_cache_root)
+        monkeypatch.setattr(entries_module, "_get_cache_dir", lambda: icon_cache_root)
         monkeypatch.setattr(module, "_get_icon_cache_dir", lambda: icon_cache)
         monkeypatch.setattr(module, "_get_model_index_cache_dir", lambda: model_cache)
         monkeypatch.setattr(index_module, "get_index_path", lambda _mods: index_cache)

@@ -175,5 +175,7 @@ core generator 與 service 以 dict 回報進度，欄位皆為選用：
 ## 檔案結構（拆分後）
 
 - `app/views/pipeline/pipeline_view.py`：`PipelineView` 主體（步驟執行、一鍵製作流程、取消與按鈕狀態）。
+- `app/views/pipeline/pipeline_config.py`：`PipelineConfig`，由輸入／輸出根目錄推算各步驟的資料夾。
+- `app/views/pipeline/pipeline_progress.py`：`PipelineStepChip`、`PipelineProgressPanel`（步驟標籤與進度面板）。
 - `app/views/pipeline/pipeline_widgets.py`：`PipelineWidgetsMixin`，控制項與版面組裝（`_build_ui`、各 `_build_*` 卡片、`_step_row`）。
 - `app/views/pipeline/pipeline_*_dialog.py`：五個設定對話框（translate、bundle、extract、merge、one_click）。每個對話框用一個 `ctx`（`types.SimpleNamespace`）共享狀態與控制項，handler 是以 `ctx` 為第一個參數的模組層級函式（例如 `_extract_start_extraction`），畫面建構拆成 `_<對話框>_build_*` 函式；測試以 `open_*_dialog` 公開入口驅動（`tests/test_pipeline_*_dialog_behavior.py`）。
