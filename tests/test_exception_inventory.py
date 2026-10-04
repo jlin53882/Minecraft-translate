@@ -173,22 +173,13 @@ def test_baseline_has_no_stale_entries():
 
 
 def test_inventory_document_matches_the_code():
-    """docs/EXCEPTION_INVENTORY.md 逐檔、逐分類的數量必須與程式碼一致（行號不比對，避免程式碼稍微移動就失敗）。"""
-    import re
-    from collections import Counter
+    """docs/EXCEPTION_INVENTORY.md 必須與 render(collect()) 逐字一致。
 
-    rows = _load_generator().collect()
-    actual = Counter(
-        (r["file"], r["kind"], r["reason"].startswith("（未寫原因")) for r in rows
-    )
-    text = (REPO_ROOT / "docs" / "EXCEPTION_INVENTORY.md").read_text(encoding="utf-8")
-    documented: Counter = Counter()
-    pattern = re.compile(
-        r"^\| `([^:`]+):[^`]*`（第 \d+ 行） \| [^|]+ \| ([^|]+) \| ([^|]+) \|$",
-        re.MULTILINE,
-    )
-    for file, kind, reason in pattern.findall(text):
-        documented[(file, kind.strip(), reason.strip().startswith("（未寫原因"))] += 1
-    assert documented == actual, (
+    每一列的檔案、函式、規則、分類、原因都會比對（文件不含行號，所以一般的程式碼移動不會讓它失敗）。
+    """
+    gen = _load_generator()
+    expected = gen.render(gen.collect())
+    actual = (REPO_ROOT / "docs" / "EXCEPTION_INVENTORY.md").read_text(encoding="utf-8")
+    assert actual == expected, (
         "docs/EXCEPTION_INVENTORY.md 已過期，請執行 `uv run python tools/gen_exception_inventory.py` 重新產生"
     )

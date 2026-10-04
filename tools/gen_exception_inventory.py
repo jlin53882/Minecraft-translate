@@ -8,7 +8,7 @@
 - 原因：行內 noqa 的說明文字（若有）
 
 用法：``python tools/gen_exception_inventory.py``（覆寫文件）；
-``tests/test_exception_inventory.py`` 檢查文件與程式碼的逐檔數量一致。
+``tests/test_exception_inventory.py`` 檢查整份文件與 ``render(collect())`` 逐字一致。
 """
 
 from __future__ import annotations
@@ -127,7 +127,7 @@ def render(rows: list[dict[str, str]]) -> str:
     out = [
         "# 寬鬆例外逐項盤點（#135）",
         "",
-        "> 由 `tools/gen_exception_inventory.py` 產生；`tests/test_exception_inventory.py` 檢查逐檔數量與程式碼一致。",
+        "> 由 `tools/gen_exception_inventory.py` 產生；`tests/test_exception_inventory.py` 檢查整份文件與程式碼逐字一致（不含行號，避免普通修改造成漂移）。",
         "> 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。",
         "> 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。",
         "",
@@ -144,7 +144,7 @@ def render(rows: list[dict[str, str]]) -> str:
     ]
     for r in rows:
         out.append(
-            f"| `{r['file']}:{r['func']}`（第 {r['line']} 行） | {r['rules']} | {r['kind']} | {r['reason']} |"
+            f"| `{r['file']}:{r['func']}` | {r['rules']} | {r['kind']} | {r['reason']} |"
         )
     out.append("")
     return "\n".join(out)

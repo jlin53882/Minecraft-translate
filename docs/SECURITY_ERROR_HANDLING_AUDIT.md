@@ -71,7 +71,7 @@ Ruff 報出的全部 BLE001、S110、S112、print 與 legacy comment 不等於�
 量測：`ruff check app translation_tool main.py --select BLE001,S110,S112,T201`。由 `tests/test_exception_inventory.py` 強制：
 
 1. **沒有說明的寬鬆例外、無聲例外、非工具程式的 `print` 都會讓測試失敗**；唯一的例外清單是兩個命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`，stdout 即產品介面）。
-2. **逐項盤點**：`docs/EXCEPTION_INVENTORY.md` 由 `tools/gen_exception_inventory.py` 產生，列出全部 258 個寬鬆例外豁免（BLE001／S110／S112）的位置、函式、規則、分類與原因／處理；`test_inventory_document_matches_the_code` 檢查文件與程式碼逐檔、逐分類的數量一致（行號不比對）。分類：已記錄／回報 211、UI／畫面保護 32、盡力而為（靜默）15。
+2. **逐項盤點**：`docs/EXCEPTION_INVENTORY.md` 由 `tools/gen_exception_inventory.py` 產生，列出全部 258 個寬鬆例外豁免（BLE001／S110／S112）的位置、函式、規則、分類與原因／處理；`test_inventory_document_matches_the_code` 檢查整份文件與 `render(collect())` 逐字一致（每列的檔案、函式、規則、分類、原因都會比對；文件不含行號，避免普通修改造成漂移）。分類：已記錄／回報 211、UI／畫面保護 32、盡力而為（靜默）15。
 3. **棘輪**：258 個中 113 個已在程式碼內寫明原因，其餘 145 個（處理本身已有紀錄／回報，或屬 UI／icon 保護、進度回報、復原失敗時以原始例外為準）記錄在測試的 `UNEXPLAINED_NOQA_BASELINE`（逐檔數量），**只能減少、不能增加**；補上原因後請調降基準並重新產生盤點文件。沒有資料相關的無聲路徑留在這 145 個之中——那些已在前面補了日誌。
 
 ### 分類與處理
