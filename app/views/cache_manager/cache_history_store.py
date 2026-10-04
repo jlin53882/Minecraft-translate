@@ -42,7 +42,7 @@ def _parse_index(fp: Path) -> dict[str, list[dict]]:
             continue
         try:
             ev = json.loads(ln)
-        except ValueError:  # noqa: S112 - 損毀的歷史行略過，其餘行照常讀取（與原行為一致）
+        except ValueError:  # 損毀的歷史行略過，其餘行照常讀取（與原行為一致）
             continue
         by_key.setdefault(str(ev.get("key", "")), []).append(ev)
     return by_key

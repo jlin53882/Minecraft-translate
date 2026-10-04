@@ -4,12 +4,12 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **255** 項；其中 **138** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **254** 項；其中 **138** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
 | 已記錄／回報 | 211 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
-| UI／畫面保護 | 29 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
+| UI／畫面保護 | 28 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 15 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
 | 位置 | 規則 | 分類 | 原因／處理 |
@@ -50,7 +50,6 @@
 | `app/views/bundler_view.py:BundlerView._load_version_data` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/bundler_view.py:BundlerView._bundling_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，錯誤顯示於日誌 |
 | `app/views/cache_manager/cache_actions.py:run_cache_action.execute_work` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
-| `app/views/cache_manager/cache_history_store.py:_parse_index` | S112 | UI／畫面保護 | 損毀的歷史行略過，其餘行照常讀取（與原行為一致） |
 | `app/views/cache_manager/cache_history_store.py:history_load_active` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_history_store.py:_append_mirror` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_history_store.py:_append_mirror` | BLE001 | 已記錄／回報 | 鏡像是衍生資料，失敗只記錄 |
