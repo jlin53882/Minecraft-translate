@@ -421,7 +421,7 @@ def validate_api_keys():
             log_error(f"❌ 偵測到過短的 API 金鑰: {mask_key(k)} (長度={len(k)})")
             raise RuntimeError(
                 f"❌ API Key 長度異常：{mask_key(k)}\n"
-                f"長度為 {len(k)}，正常應為 35-45 個字元，請檢查是否輸入正確。"
+                f"長度為 {len(k)}，API Key 應至少包含 35 個字元，請檢查是否輸入正確。"
             )
         # 3. 除支援前綴外，key body 僅允許英數字、dash 與 underscore。
         if not _API_KEY_PATTERN.fullmatch(k):
@@ -452,7 +452,7 @@ def validate_api_keys_from_ui(keys: list[str]):  # ui 專用
         if len(k) < 35:
             raise RuntimeError(
                 f"❌ API Key 長度異常：{mask_key(k)}\n"
-                f"長度為 {len(k)}，正常應為 35-45 個字元，請檢查是否輸入正確。"
+                f"長度為 {len(k)}，API Key 應至少包含 35 個字元，請檢查是否輸入正確。"
             )
         if not _API_KEY_PATTERN.fullmatch(k):
             raise RuntimeError(

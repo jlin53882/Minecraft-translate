@@ -146,6 +146,19 @@ class TestAPIKeyManagement:
         with pytest.raises(RuntimeError, match="無效的 API Key 格式"):
             validate_api_keys()
 
+    @patch("translation_tool.core.lm_config_rules.load_config")
+    def test_validate_api_keys_short_key_message_states_minimum_only(
+        self, mock_load_config
+    ):
+        from translation_tool.core.lm_config_rules import validate_api_keys
+
+        mock_load_config.return_value = {"lm_translator": {"keys": ["AQ." + "x" * 20]}}
+
+        with pytest.raises(RuntimeError, match="API Key 應至少包含 35 個字元") as exc:
+            validate_api_keys()
+
+        assert "35-45" not in str(exc.value)
+
     def test_validate_api_keys_from_ui_success(self):
         """測試 UI API Key 驗證（成功）。"""
         from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
@@ -169,6 +182,14 @@ class TestAPIKeyManagement:
 
         with pytest.raises(RuntimeError, match="無效的 API Key 格式"):
             validate_api_keys_from_ui(["InvalidKey"])
+
+    def test_validate_api_keys_from_ui_short_key_message_states_minimum_only(self):
+        from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
+
+        with pytest.raises(RuntimeError, match="API Key 應至少包含 35 個字元") as exc:
+            validate_api_keys_from_ui(["AQ." + "x" * 20])
+
+        assert "35-45" not in str(exc.value)
 
 
 class TestCJKDetection:
