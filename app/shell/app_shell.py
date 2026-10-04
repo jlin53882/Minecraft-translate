@@ -240,6 +240,8 @@ class AppShell:
         self.refresh_environment()
 
         page.add(self.build())
+        # 套用首次載入時的可用寬度；Web 窄視窗不一定會在註冊 handler 後送出 resize。
+        self._on_resize()
         self.navigate(start_view)
         self._schedule_key_poll()
 

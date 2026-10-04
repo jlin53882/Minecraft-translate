@@ -11,6 +11,7 @@ from translation_tool.utils import redaction
 
 CUSTOM_KEY = "my-private-key-0123456789"  # 不符合 AIza 格式：只靠「已知機密」登錄遮蔽
 GOOGLE_KEY = "AIza" + "S" * 35
+AQ_KEY = "AQ.XX"
 
 
 @pytest.fixture(autouse=True)
@@ -27,7 +28,9 @@ def test_registered_secret_is_masked_in_any_format():
 
 
 def test_google_format_masked_even_if_not_registered():
-    assert GOOGLE_KEY not in redaction.redact_secrets(f"bad key {GOOGLE_KEY}")
+    for key in (GOOGLE_KEY, AQ_KEY):
+        assert key not in redaction.redact_secrets(f"bad key {key}")
+        assert key not in redaction.redact_text(f"bad key {key}")
 
 
 def test_short_values_are_not_registered_and_normal_text_is_untouched():
@@ -47,15 +50,21 @@ def test_formatter_masks_message_and_traceback():
     redaction.register_secrets([CUSTOM_KEY])
     fmt = redaction.RedactingFormatter("%(message)s")
     try:
-        raise RuntimeError(f"upstream said {CUSTOM_KEY}")
+        raise RuntimeError(f"upstream said {CUSTOM_KEY} and {AQ_KEY}")
     except RuntimeError:
         import sys
 
         record = logging.LogRecord(
-            "t", logging.ERROR, __file__, 1, "failed %s", (CUSTOM_KEY,), sys.exc_info()
+            "t",
+            logging.ERROR,
+            __file__,
+            1,
+            "failed %s",
+            (CUSTOM_KEY,),
+            sys.exc_info(),
         )
     out = fmt.format(record)
-    assert CUSTOM_KEY not in out
+    assert CUSTOM_KEY not in out and AQ_KEY not in out
 
 
 def test_log_file_written_by_setup_logging_is_redacted(tmp_path):
@@ -67,14 +76,16 @@ def test_log_file_written_by_setup_logging_is_redacted(tmp_path):
     saved_handlers, saved_level = root.handlers[:], root.level
     try:
         cm.setup_logging(config)
-        logging.getLogger("t").error("leaked %s and %s", CUSTOM_KEY, GOOGLE_KEY)
+        logging.getLogger("t").error(
+            "leaked %s, %s, and %s", CUSTOM_KEY, GOOGLE_KEY, AQ_KEY
+        )
         for h in root.handlers:
             h.flush()
         files = list((tmp_path / "logs").rglob("app.log"))
         assert files
         text = files[0].read_text(encoding="utf-8")
         assert "leaked" in text
-        assert CUSTOM_KEY not in text and GOOGLE_KEY not in text
+        assert CUSTOM_KEY not in text and GOOGLE_KEY not in text and AQ_KEY not in text
     finally:
         for h in root.handlers[:]:
             root.removeHandler(h)

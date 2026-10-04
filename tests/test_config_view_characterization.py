@@ -374,6 +374,30 @@ def test_config_view_build_footer(monkeypatch):
     view = ConfigView(mock_page())
     footer = view._build_footer()
     assert footer is not None
+    assert isinstance(footer.content, ft.ResponsiveRow)
+    assert footer.content.controls[0].col == {"xs": 12, "md": 8}
+    assert footer.content.controls[1].col == {"xs": 12, "md": 4}
+
+
+def test_config_view_uses_stacked_layout_on_narrow_screens(monkeypatch):
+    monkeypatch.setattr(
+        "app.views.config_view.load_config_json",
+        lambda: {
+            "logging": {},
+            "translator": {},
+            "species_cache": {},
+            "lm_translator": {},
+            "output_bundler": {},
+            "lang_merger": {},
+        },
+    )
+    view = ConfigView(mock_page())
+    layout = view.scroll_container.controls[1]
+    assert isinstance(layout, ft.ResponsiveRow)
+    assert [control.col for control in layout.controls] == [
+        {"xs": 12, "md": 3},
+        {"xs": 12, "md": 9},
+    ]
 
 
 def test_config_view_build_card(monkeypatch):
