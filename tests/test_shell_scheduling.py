@@ -537,6 +537,32 @@ def test_desktop_close_with_active_task_requires_confirmation(env, clock):
     assert shell.page.window.destroy_calls == 1
 
 
+def test_desktop_close_zero_active_stops_accepting_before_async_flush(env, clock):
+    late_sessions: list[TaskSession] = []
+
+    async def flush_before_close():
+        late = TaskSession(name="flush 中啟動的晚到任務")
+        late_sessions.append(late)
+        late.start()
+        assert shell.tasks.active() == []
+        await asyncio.sleep(0)
+        assert shell.tasks.active() == []
+        return True
+
+    shell = _make_shell(env, flush_before_close=flush_before_close)
+    shell.mount()
+    shell.page.scheduled.clear()
+
+    asyncio.run(
+        shell.page.window.on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE))
+    )
+
+    assert len(late_sessions) == 1
+    assert shell.page.window.destroy_calls == 1
+    assert shell.tasks.active() == []
+    late_sessions[0].finish()
+
+
 def test_desktop_close_rejection_keeps_task_running(env, clock):
     shell = _make_shell(env)
     shell.mount()

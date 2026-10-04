@@ -551,7 +551,6 @@ class AppShell:
             if self._close_pending or self._disposed:
                 return
             self._close_pending = True
-            self.tasks.stop_accepting()
             self.tasks.request_cancel_active()
             ok, _future = self._submit_ui(self._complete_window_close)
             if not ok:
@@ -573,6 +572,7 @@ class AppShell:
         """完成 desktop close：先 teardown，再讓 native window 結束。"""
         if self._disposed:
             return
+        self.tasks.stop_accepting()
         close_ready = False
         try:
             self.tasks.request_cancel_active()
