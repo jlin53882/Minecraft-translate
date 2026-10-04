@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import random
+from copy import deepcopy
 
 import requests
 
@@ -50,6 +51,27 @@ TRANSLATION_RESPONSE_SCHEMA = {
     "maxProperties": 1,
     "propertyOrdering": ["items"],
 }
+
+
+def _build_translation_response_schema(payload: dict) -> dict:
+    """Constrain the response array and IDs to the current input batch."""
+    items = payload.get("items")
+    if not isinstance(items, list):
+        # Preserve the helper's historical behavior for non-translation callers.
+        return deepcopy(TRANSLATION_RESPONSE_SCHEMA)
+
+    ids = [item.get("id") for item in items if isinstance(item, dict)]
+    if len(ids) != len(items) or not all(isinstance(item_id, str) for item_id in ids):
+        raise ValueError("Gemini 翻譯 payload 的每個 item 都必須有字串 id")
+    if len(ids) != len(set(ids)):
+        raise ValueError("Gemini 翻譯 payload 的 item id 不可重複")
+
+    schema = deepcopy(TRANSLATION_RESPONSE_SCHEMA)
+    item_array = schema["properties"]["items"]
+    item_array["minItems"] = len(ids)
+    item_array["maxItems"] = len(ids)
+    item_array["items"]["properties"]["id"]["enum"] = ids
+    return schema
 
 
 def _post_with_retry(url: str, **kwargs) -> requests.Response:
@@ -144,7 +166,7 @@ def call_gemini_requests(
         "generationConfig": {
             "temperature": temperature,
             "responseMimeType": "application/json",
-            "responseSchema": TRANSLATION_RESPONSE_SCHEMA,
+            "responseSchema": _build_translation_response_schema(payload),
         },
     }
 

@@ -30,7 +30,7 @@ def _body(text='{"items": []}', finish="STOP", usage=None) -> dict:
     return body
 
 
-def _call(post, lm_cfg=None, **kwargs):
+def _call(post, lm_cfg=None, payload=None, **kwargs):
     with patch(
         "translation_tool.core.lm_api_client.load_config",
         return_value={"lm_translator": lm_cfg or {}},
@@ -38,7 +38,7 @@ def _call(post, lm_cfg=None, **kwargs):
         return call_gemini_requests(
             model_name="m",
             system_prompt="s",
-            payload={"items": []},
+            payload=payload or {"items": [{"id": "0", "value": "Iron Ingot"}]},
             api_key="k",
             temperature=0.2,
             **kwargs,
@@ -92,7 +92,15 @@ def test_invalid_config_value_falls_back_to_default(post):
 
 
 def test_existing_generation_config_fields_are_kept(post):
-    _call(post)
+    _call(
+        post,
+        payload={
+            "items": [
+                {"id": "0", "value": "Iron Ingot"},
+                {"id": "1", "value": "Diamond Sword"},
+            ]
+        },
+    )
 
     cfg = _generation_config(post)
     assert cfg["temperature"] == 0.2
@@ -107,11 +115,13 @@ def test_existing_generation_config_fields_are_kept(post):
     assert item["type"] == "OBJECT"
     assert item["required"] == ["id", "value"]
     assert item["properties"] == {
-        "id": {"type": "STRING"},
+        "id": {"type": "STRING", "enum": ["0", "1"]},
         "value": {"type": "STRING"},
     }
     assert item["maxProperties"] == 2
     assert item["propertyOrdering"] == ["id", "value"]
+    assert items["minItems"] == 2
+    assert items["maxItems"] == 2
     assert schema["propertyOrdering"] == ["items"]
 
 
@@ -133,6 +143,37 @@ def test_translation_input_payload_shape_is_unchanged(post):
     assert request_body["contents"][0]["parts"][0]["text"] == (
         '{"items": [{"id": "0", "value": "Iron Ingot"}]}'
     )
+
+
+def test_dynamic_schema_is_fresh_for_each_batch(post):
+    _call(post, payload={"items": [{"id": "a", "value": "A"}]})
+    first_schema = _generation_config(post)["responseSchema"]
+    _call(
+        post,
+        payload={"items": [{"id": "x", "value": "X"}, {"id": "y", "value": "Y"}]},
+    )
+    second_schema = _generation_config(post)["responseSchema"]
+
+    first_items = first_schema["properties"]["items"]
+    second_items = second_schema["properties"]["items"]
+    assert first_items["minItems"] == first_items["maxItems"] == 1
+    assert first_items["items"]["properties"]["id"]["enum"] == ["a"]
+    assert second_items["minItems"] == second_items["maxItems"] == 2
+    assert second_items["items"]["properties"]["id"]["enum"] == ["x", "y"]
+
+
+@pytest.mark.parametrize(
+    "items",
+    [
+        [{"id": "same", "value": "A"}, {"id": "same", "value": "B"}],
+        [{"value": "missing id"}],
+    ],
+)
+def test_invalid_batch_ids_are_rejected_before_request(post, items):
+    with pytest.raises(ValueError, match="payload"):
+        _call(post, payload={"items": items})
+
+    post.assert_not_called()
 
 
 # --- meta_out --------------------------------------------------------------
