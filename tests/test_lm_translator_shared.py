@@ -90,6 +90,17 @@ class TestSharedModuleExports:
 
         assert callable(translate_items_with_cache_loop)
 
+    def test_translator_skeleton_exports(self):
+        from translation_tool.core.lm_translator_shared import (
+            TranslatorHooks,
+            TranslatorSkeleton,
+            run_translator_skeleton,
+        )
+
+        assert TranslatorHooks is not None
+        assert TranslatorSkeleton is not None
+        assert callable(run_translator_skeleton)
+
 
 class TestSharedModuleAllList:
     """測試 __all__ 列表。"""
@@ -112,6 +123,9 @@ class TestSharedModuleAllList:
             "TranslateLoopResult",
             "_get_default_batch_size",
             "translate_items_with_cache_loop",
+            "TranslatorHooks",
+            "TranslatorSkeleton",
+            "run_translator_skeleton",
         ]
 
         for item in expected:

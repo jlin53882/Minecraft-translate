@@ -19,32 +19,33 @@ Rich Text Shield：shield_text() / unshield_text() 保護 KubeJS 格式（彩色
 
 from __future__ import annotations
 
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import re
+from typing import Any, Dict, List, Optional, Tuple
+
 import opencc
 
-from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_config_rules import validate_api_keys
-from translation_tool.utils.config_manager import load_config
-
+from translation_tool.core.lm_translator_main import translate_batch_smart
 from translation_tool.core.lm_translator_shared import (
     CacheRule,
-    fast_split_items_by_cache,
-    translate_items_with_cache_loop,
     TouchSet,
     TranslationRecorder,
-    write_dry_run_preview,
-    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
+    TranslatorHooks,
     _is_valid_hit,  # ✅ 新增：cache hit 判斷
+    make_checkpoint_adapter,
+    make_progress_hook,
+    prepare_translator_items,
+    run_translator_skeleton,
+    write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
+    write_dry_run_preview,
 )
-
 from translation_tool.plugins.shared.json_io import (
+    collect_json_files,
     read_json_dict,
     write_json_dict,
-    collect_json_files,
 )
 from translation_tool.plugins.shared.lang_path_rules import (
     compute_output_path,
@@ -53,7 +54,7 @@ from translation_tool.plugins.shared.rich_text_shield import (
     shield_text,
     unshield_text,
 )
-
+from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning, progress
 
 
@@ -289,7 +290,7 @@ def translate_kubejs_pending_to_zh_tw(
             file_hint = f"output/kubejs/{rel_src}"  # must contain /kubejs/
             all_items = collect_items_from_mapping(mapping, file_hint=file_hint)
 
-            cached_items, items_to_translate = fast_split_items_by_cache(
+            cached_items, items_to_translate = prepare_translator_items(
                 all_items,
                 cache_rules=cache_rules,
                 is_valid_hit=_is_valid_hit,
@@ -347,7 +348,7 @@ def translate_kubejs_pending_to_zh_tw(
         file_hint = f"output/kubejs/{rel_src}"
         all_items = collect_items_from_mapping(mapping, file_hint=file_hint)
 
-        cached_items, items_to_translate = fast_split_items_by_cache(
+        cached_items, items_to_translate = prepare_translator_items(
             all_items,
             cache_rules=cache_rules,
             is_valid_hit=_is_valid_hit,
@@ -560,25 +561,13 @@ def translate_kubejs_pending_to_zh_tw(
                 for fid, (dstp, data) in _file_write_table.items():
                     write_json_dict(dstp, data)
 
-        def _fmt_eta(sec: float) -> str:
-            """格式化剩餘時間。"""
-            if sec <= 0:
-                return ""
-            m, s = divmod(int(sec), 60)
-            if m >= 60:
-                h, m2 = divmod(m, 60)
-                return f"{h}h{m2:02d}m{s:02d}s"
-            if m > 0:
-                return f"{m}m{s:02d}s"
-            return f"{s}s"
+        on_progress = make_progress_hook(progress, log_info)
 
-        def on_progress(p: float, msg: str, eta_sec: float) -> None:
-            """報告翻譯進度。"""
-            eta_txt = _fmt_eta(eta_sec)
-            log_info(f"{msg}" + (f" | ETA ≈ {eta_txt}" if eta_txt else ""))
-            progress(p)
+        checkpoint = make_checkpoint_adapter(
+            "kubejs", all_miss_items, target=str(out_dir)
+        )
 
-        res = translate_items_with_cache_loop(
+        res = run_translator_skeleton(
             all_miss_items,
             total_for_smart=global_total_to_translate,
             translate_batch_smart=lambda batch, total: translate_batch_smart(
@@ -586,10 +575,15 @@ def translate_kubejs_pending_to_zh_tw(
             ),
             write_new_cache=bool(write_new_cache),
             cache_rules=cache_rules,
-            on_translated_item=on_translated_item,
-            on_batch_flushed=on_batch_flushed,
-            on_progress=on_progress,
+            hooks=TranslatorHooks(
+                on_translated_item=on_translated_item,
+                on_batch_flushed=on_batch_flushed,
+                on_batch_checkpoint=checkpoint,
+                on_progress=on_progress,
+            ),
         )
+        if res.status == "DONE":
+            checkpoint.clear()
 
         translated_done = int(res.processed or 0)
         avg_batch_sec = (

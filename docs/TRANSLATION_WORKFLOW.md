@@ -46,9 +46,9 @@ JAR 內的路徑會依正規表達式（`lang_codes` 設定值）篩選，只取
 ### 2. Translate
 
 - **入口**：`translation_tool/core/lm_translator_main.py` → `translate_batch_smart()`（新主入口）
-- **內部委託**：`translate_batch_smart()` 驗證輸入後，委託 `_execute_translation()` 執行，
-  `_execute_translation()` 再呼叫 `translate_batch_smart_old()`（舊版實作），
-  完成翻譯後由 `_process_output()` 包裝輸出。
+- **內部委託**：`translate_batch_smart()` 驗證輸入後，委託 `_execute_translation()`，
+  再進入 `_translate_batch_smart_impl()` façade 與拆分後的 batch state/action helpers；
+  `translate_batch_smart_old` 僅是 temporary compatibility alias，不是主實作。
   兩者回傳格式相同：`List[dict] + status`，可互換使用。
 - **資料格式**：
   - 傳入 `batch_items` 為 `List[dict]`，每項需含 `text`（原文）與 `path`（檔案路徑），
@@ -63,7 +63,7 @@ JAR 內的路徑會依正規表達式（`lang_codes` 設定值）篩選，只取
   - **漏翻**：記錄警告，保留原文
 - **觸發方式**：
   - UI：`TranslationView` 分頁（FTB Quests / KubeJS Tooltips / Markdown）
-  - CLI：直接呼叫 `translate_batch_smart()` 或 `translate_batch_smart_old()`
+  - CLI：正式呼叫 `translate_batch_smart()`；舊 alias 僅供相容性整合使用
 
 ---
 

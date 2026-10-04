@@ -75,14 +75,16 @@ def fast_split_items_by_cache(
     *,
     cache_rules: dict[str, CacheRule] | None = None,
     is_valid_hit: ValidHitFn | None = None,
+    cache_provider: Callable[[str], dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """依據快取規則將所有項目分為「已命中（可直接還原）」與「需要翻譯」兩類。"""
+    """依據 shared 規則分為 cache hit/miss；provider 只注入既有 cache ownership。"""
     if cache_rules is None:
         cache_rules = get_default_cache_rules()
 
     cached_items: list[dict[str, Any]] = []
     items_to_translate: list[dict[str, Any]] = []
     checker = is_valid_hit or _is_valid_hit
+    provider = cache_provider or get_cache_dict_ref
     cache_refs: dict[str, dict[str, Any]] = {}
 
     for it in all_items:
@@ -94,7 +96,7 @@ def fast_split_items_by_cache(
         key = rule.make_key(it)
 
         if ctype not in cache_refs:
-            cache_refs[ctype] = get_cache_dict_ref(ctype)
+            cache_refs[ctype] = provider(ctype)
 
         entry = cache_refs[ctype].get(key)
         if isinstance(entry, dict):
