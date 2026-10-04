@@ -8,6 +8,7 @@ from typing import ClassVar
 
 import flet as ft
 
+from app.config_apply import apply_timing_note
 from app.services_impl.config_service import load_config_json, save_config_json
 from app.ui import design, kit, theme
 from app.ui.design import C
@@ -113,7 +114,9 @@ class ConfigView(ft.Column):
             label="替換規則檔案名稱", dense=True, helper="用於：replace_rules_loader"
         )
         self.controls_map["translator.cache_directory"] = kit.field(
-            label="快取資料夾名稱", dense=True, helper="用於：翻譯快取系統"
+            label="快取資料夾名稱",
+            dense=True,
+            helper=f"{apply_timing_note('translator.cache_directory')} 用於：翻譯快取系統",
         )
         self.controls_map["translator.enable_cache_saving"] = ft.Checkbox(
             label="啟用通用翻譯快取"
@@ -287,6 +290,30 @@ class ConfigView(ft.Column):
             label="每批翻譯後等待秒數",
             dense=True,
             helper="0 = 不等待；免費層常遇 429 時可調高",
+        )
+        self.controls_map["lm_translator.max_output_tokens"] = kit.field(
+            label="全域最大輸出 Tokens",
+            dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            helper=apply_timing_note("lm_translator.max_output_tokens"),
+        )
+        self.controls_map["lm_translator.max_output_token_budget"] = kit.field(
+            label="單批輸出預算",
+            dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            helper=apply_timing_note("lm_translator.max_output_token_budget"),
+        )
+        self.controls_map["lm_translator.max_input_token_budget"] = kit.field(
+            label="單批輸入預算",
+            dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            helper=apply_timing_note("lm_translator.max_input_token_budget"),
+        )
+        self.controls_map["lm_translator.key_failure_cooldown_sec"] = kit.field(
+            label="API Key 失敗冷卻秒數",
+            dense=True,
+            keyboard_type=ft.KeyboardType.NUMBER,
+            helper=apply_timing_note("lm_translator.key_failure_cooldown_sec"),
         )
 
         self.controls_map["lm_translator.translator.skip_terms"] = kit.field(
@@ -687,11 +714,29 @@ class ConfigView(ft.Column):
                 ft.Column(
                     [self.controls_map["lm_translator.rpm_cooldown_sec"]], expand=2
                 ),
-                ft.Column([], expand=2),
+                ft.Column(
+                    [self.controls_map["lm_translator.max_output_tokens"]], expand=2
+                ),
+                ft.Column(
+                    [self.controls_map["lm_translator.key_failure_cooldown_sec"]],
+                    expand=2,
+                ),
+            ]
+        )
+        budget_row = ft.Row(
+            [
+                ft.Column(
+                    [self.controls_map["lm_translator.max_output_token_budget"]],
+                    expand=1,
+                ),
+                ft.Column(
+                    [self.controls_map["lm_translator.max_input_token_budget"]],
+                    expand=1,
+                ),
             ]
         )
         return self._build_card(
-            "批次大小與限制", [batch_row_1, batch_row_2, batch_row_3]
+            "批次大小與限制", [batch_row_1, batch_row_2, batch_row_3, budget_row]
         )
 
     def _build_lm_filter_card(self) -> ft.Control:
@@ -906,7 +951,7 @@ class ConfigView(ft.Column):
         """建立設定卡片"""
         return build_config_card(self, title, controls_list)
 
-    def add_model_row(self, model_name: str):
+    def add_model_row(self, model_name: str, max_output_tokens: int | None = None):
         """新增模型項目到列表"""
         cb = ft.Checkbox(
             label=model_name,
@@ -940,6 +985,15 @@ class ConfigView(ft.Column):
             icon_size=18,
             on_click=lambda e: self.remove_model_by_checkbox(cb),
         )
+        max_tokens_field = kit.field(
+            value="" if max_output_tokens is None else str(max_output_tokens),
+            label="模型上限",
+            hint_text="全域",
+            helper=apply_timing_note("lm_translator.models.*.max_output_tokens"),
+            dense=True,
+            width=130,
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
 
         row = ft.Container(
             padding=12,
@@ -949,7 +1003,7 @@ class ConfigView(ft.Column):
             content=ft.Row(
                 [
                     order_text,
-                    ft.Row([cb], expand=True),
+                    ft.Row([cb, max_tokens_field], expand=True),
                     ft.Row([btn_up, btn_down, btn_delete], spacing=2),
                 ],
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -958,6 +1012,7 @@ class ConfigView(ft.Column):
         )
         row._order_text = order_text
         row._checkbox = cb
+        row._max_output_tokens = max_tokens_field
         self.models_column.controls.append(row)
         self._refresh_model_order_labels()
 

@@ -14,10 +14,12 @@ from translation_tool.core.lm_batch_budget import (
     select_batch_size,
 )
 from translation_tool.core.lm_config_rules import ApiKeyCycle
+from translation_tool.core.lm_config_schema import model_output_token_cap
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.utils.cancellation import interruptible_sleep
-from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.config_manager import get_models_config, load_config
 from translation_tool.utils.log_unit import log_debug, log_error, log_info, log_warning
+from translation_tool.utils.redaction import redact_text
 
 # =========================================================
 # Time Constants - 時間相關常數
@@ -297,7 +299,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
     original_total = total  # 外部總量
 
     # 模型導入設定
-    models_cfg = load_config().get("lm_translator", {}).get("models", {})
+    models_cfg = get_models_config(load_config())
     # 目前使用模型序列
     MODEL_POOL = [name for name, cfg in models_cfg.items() if cfg.get("enabled", False)]
     if not MODEL_POOL:
@@ -357,6 +359,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
         hit_rpm = False  # ⭐ 新增：是否因 RPM 而切換模型
         success_this_round = False  # ⭐ 新增
         hit_overload_retry = False  # ⭐ 新增：標記是否因為 503 需要原地重試
+        model_fallback_retry = False  # per-model maxOutputTokens 失敗時維持同一批
         learned_budget = False  # 本輪是否因截斷而縮小了學到的 token 預算
         # 項目數上限、輸出 token 預算、輸入 token 預算，先到者為準；永遠只取輸入的前綴
         fit_count = select_batch_size(
@@ -436,13 +439,19 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                     "LANG" if prompt is LANG_SYSTEM_PROMPT else "PATCHOUI",
                 )
 
+                model_override = model_output_token_cap(lm_cfg, model_name)
+                cap_source = "per_model" if model_override is not None else "global"
+                model_output_cap = model_override
+                if model_output_cap is None:
+                    model_output_cap = budget_cfg.max_output_tokens
+
                 raw_text = call_gemini_requests(
                     model_name=model_name,
                     system_prompt=prompt,
                     payload=payload,
                     api_key=key_cycle.claim(),
                     temperature=MODEL_TEMP,
-                    max_output_tokens=budget_cfg.max_output_tokens,
+                    max_output_tokens=model_output_cap,
                     meta_out=api_meta,
                 ).strip()
 
@@ -705,18 +714,40 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
 
                 # ========== 400 ==========
                 if status == 400:
-                    msg = str(e).lower()
+                    msg = redact_text(e).lower()
                     if "failed_precondition" in msg:
                         raise RuntimeError(
                             "❌ FAILED_PRECONDITION：此地區未啟用 Gemini API 免費方案，請啟用付費"
                         )
                     if "maxoutputtokens" in msg.replace("_", "").replace(" ", ""):
-                        # maxOutputTokens 超過這個模型的輸出上限：縮小批次無法解決，
-                        # 繼續縮只會把每一批都放棄。直接給出可行動的錯誤。
+                        # maxOutputTokens 是模型能力差異，不是 payload 大小問題。
+                        # 有下一個模型時保留同一批直接 fallback；單模型才終止並給可行動錯誤。
+                        if i + 1 < len(MODEL_POOL):
+                            log_warning(
+                                f"模型 {model_name} 的 maxOutputTokens 不受支援，"
+                                f"改用下一個模型（目前上限 {model_output_cap}）"
+                            )
+                            if pinned_model_index is not None:
+                                pinned_model_index = None
+                                model_fallback_retry = True
+                                break
+                            continue
+                        if cap_source == "per_model":
+                            setting_path = (
+                                f"lm_translator.models.{model_name}.max_output_tokens"
+                            )
+                            guidance = (
+                                f"請調低 {setting_path}，或清空此欄位以回退全域設定，"
+                                "或設為 0 讓 API 使用模型預設值"
+                            )
+                        else:
+                            guidance = (
+                                "請調低 lm_translator.max_output_tokens，"
+                                "或設為 0 讓 API 使用模型預設值"
+                            )
                         raise RuntimeError(
-                            f"❌ maxOutputTokens（{budget_cfg.max_output_tokens}）超過模型 "
-                            f"{model_name} 的輸出上限：請調低 lm_translator.max_output_tokens，"
-                            "或設為 0 讓 API 使用模型預設值"
+                            f"❌ maxOutputTokens（{model_output_cap}）超過模型 "
+                            f"{model_name} 的輸出上限：{guidance}"
                         )
                     log_info(
                         "[⚠️] 400 INVALID_ARGUMENT：payload 格式錯誤或過大，縮小 batch"
@@ -728,7 +759,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                     try:
                         # 1. 嘗試解析 JSON 錯誤格式
                         error_json = e.response.json().get("error", {})
-                        remote_msg = error_json.get("message", "").upper()
+                        remote_msg = redact_text(error_json.get("message", "")).upper()
 
                         # 2. 從細節中抓取具體的 Quota ID (這是判斷 RPD/RPM 的關鍵)
                         details = error_json.get("details", [])
@@ -793,8 +824,11 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
 
                     except Exception as parse_err:  # noqa: BLE001
                         # 備援比對邏輯
-                        err_msg = str(e).upper()
-                        log_error(f"[⚠️] 無法解析 429 JSON，使用備援。錯誤: {parse_err}")
+                        err_msg = redact_text(e).upper()
+                        log_error(
+                            "[⚠️] 無法解析 429 JSON，使用備援。錯誤: "
+                            f"{redact_text(parse_err)}"
+                        )
 
                         # 換 key 後要用新的 key 重試同一批（只有一個模型時也一樣），
                         # 與其他 429 分支一致；否則會直接縮批次並輸出原文。
@@ -821,10 +855,12 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                 if status == 503:
                     try:
                         error_json = e.response.json()
-                        remote_msg = error_json.get("error", {}).get("message", "")
+                        remote_msg = redact_text(
+                            error_json.get("error", {}).get("message", "")
+                        )
                         remote_status = error_json.get("error", {}).get("status", "")
                     except Exception:  # noqa: BLE001
-                        remote_msg = e.response.text or ""
+                        remote_msg = redact_text(e.response.text or "")
                         remote_status = "NON_JSON"
 
                     log_error("-" * 60)
@@ -897,7 +933,7 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                             interruptible_sleep(request_interval_sec)
                             continue  # 繼續 model pool
                         except Exception as err:  # noqa: BLE001
-                            log_error(f"API key 切換失敗: {err}")
+                            log_error(f"API key 切換失敗: {redact_text(err)}")
                             break
 
                 # ======== 500 ==========
@@ -911,11 +947,14 @@ def translate_batch_smart_old(batch_items, total=None, dry_run=False):
                     break
 
                 # ========== fallback ==========
-                log_info(f"[!] 未分類錯誤: {e}")
+                log_info(f"[!] 未分類錯誤: {redact_text(e)}")
                 break
 
         # ⭐⭐⭐ 關鍵判定：如果是因為過載而跳出，直接進入下一次 while 迴圈（不執行下方的縮小邏輯）
         if hit_overload_retry:
+            continue
+
+        if model_fallback_retry:
             continue
 
         # ⭐⭐⭐ 如果這一輪已成功，直接進下一 round

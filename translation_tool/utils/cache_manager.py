@@ -94,11 +94,20 @@ def _clear_partial_state(state) -> None:
     """清掉半套載入的 runtime cache，避免 read API 暴露部分資料。"""
     state.translation_cache = {}
     state.cache_file_path = {}
+    state.active_cache_root = None
     state.initialized = False
 
 
 def _get_cache_root() -> Path:
     """從設定取得快取根目錄路徑"""
+    state = _state()
+    if state.active_cache_root is not None:
+        return state.active_cache_root
+    return _configured_cache_root()
+
+
+def _configured_cache_root() -> Path:
+    """讀取目前持久化設定的快取根目錄（尚未啟用前使用）。"""
     translation_config = load_config().get("translator", {})
     cache_dir_name = translation_config.get("cache_directory", _CACHE_DIR_NAME)
     return resolve_project_path(cache_dir_name)
@@ -131,6 +140,7 @@ def initialize_translation_cache():
         ):
             return
         try:
+            state.active_cache_root = _configured_cache_root()
             for cache_type in CACHE_TYPES:
                 _load_cache_type(cache_type)
             state.initialized = True
@@ -153,9 +163,11 @@ def reload_translation_cache():
     """重新載入翻譯快取。"""
     state = cache_store.get_runtime_state()
     with state.cache_lock:
+        configured_root = _configured_cache_root()
         cache_store.reset_runtime_state(CACHE_TYPES)
         # re-fetch state after reset (reset_runtime_state modifies the global)
         state = cache_store.get_runtime_state()
+        state.active_cache_root = configured_root
         # 重新載入所有快取型別
         translation_config = load_config().get("translator", {})
         try:
@@ -215,7 +227,7 @@ def _save_entries_to_active_shards(
 def save_translation_cache(cache_type: str, write_new_shard: bool = True):
     """儲存翻譯快取。"""
     if not load_config().get("translator", {}).get("enable_cache_saving", True):
-        return
+        return True
 
     state = _state()
     with state.cache_lock:
@@ -223,7 +235,7 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
             state.session_new_entries, cache_type
         )
         if not session_entries:
-            return
+            return True
         data_to_save = cache_store.flush_session_entries(
             state.session_new_entries, cache_type
         )
@@ -238,7 +250,7 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
             log.error(
                 f"❌ 儲存 {cache_type} 失敗：快取尚未成功初始化，保留 pending 項目"
             )
-            return
+            return False
         _save_entries_to_active_shards(
             cache_type, data_to_save, force_new_shard=write_new_shard
         )
@@ -248,6 +260,7 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
                 state.session_new_entries, cache_type
             ):
                 cache_store.clear_dirty(state.is_dirty, cache_type)
+        return True
     except Exception as e:
         # 落盤失敗（底層已 rollback）：尚未 durable 的批次放回 pending，下次 save 可重試。
         # 只補回不存在的 key，save 期間寫入的較新值不會被舊批次覆蓋。
@@ -256,6 +269,7 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
                 state.session_new_entries, state.is_dirty, cache_type, data_to_save
             )
         log.error(f"❌ 儲存 {cache_type} 失敗: {e}", exc_info=True)  # noqa: G201
+        return False
 
 
 def _get_active_shard_path(cache_type: str) -> Path:
@@ -470,8 +484,11 @@ def rebuild_search_index() -> bool:
     if not state.initialized:
         log.error("快取尚未成功初始化，拒絕重建搜尋索引")
         return False
-    _get_search_facade().rebuild_search_index(CACHE_TYPES, state.translation_cache)
-    return True
+    result = _get_search_facade().rebuild_search_index(
+        CACHE_TYPES, state.translation_cache
+    )
+    # 舊版測試替身／外部 facade 可能沒有回傳值；只有明確 False 才算失敗。
+    return result is not False
 
 
 def rebuild_search_index_for_type(cache_type: str) -> bool:
@@ -484,10 +501,10 @@ def rebuild_search_index_for_type(cache_type: str) -> bool:
     if not state.initialized:
         log.error(f"快取尚未成功初始化，拒絕重建 {cache_type} 搜尋索引")
         return False
-    _get_search_facade().rebuild_search_index_for_type(
+    result = _get_search_facade().rebuild_search_index_for_type(
         cache_type, CACHE_TYPES, state.translation_cache
     )
-    return True
+    return result is not False
 
 
 def search_cache(

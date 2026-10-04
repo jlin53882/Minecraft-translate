@@ -14,6 +14,7 @@ import requests
 from translation_tool.utils.cancellation import interruptible_sleep
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
+from translation_tool.utils.redaction import redact_text
 
 # 只重試「連線階段」的暫時性網路錯誤（連線被拒、DNS、連線逾時、連線中斷）。
 # HTTP 狀態碼（429/503 等）與讀取逾時由 lm_translator_main 依狀態處理
@@ -40,7 +41,7 @@ def _post_with_retry(url: str, **kwargs) -> requests.Response:
             wait = NETWORK_RETRY_BASE_SEC * (2 ** (attempt - 1))
             wait += random.uniform(0, NETWORK_RETRY_BASE_SEC)
             log_warning(
-                f"[API] 連線失敗（第 {attempt}/{NETWORK_RETRY_ATTEMPTS} 次）：{e}；"
+                f"[API] 連線失敗（第 {attempt}/{NETWORK_RETRY_ATTEMPTS} 次）：{redact_text(e)}；"
                 f"{wait:.1f}s 後重試"
             )
             interruptible_sleep(wait)
@@ -138,7 +139,7 @@ def call_gemini_requests(
 
     if not response.ok:
         raise requests.HTTPError(
-            f"{response.status_code} {response.text}",
+            f"{response.status_code} {redact_text(response.text)[:2000]}",
             response=response,
         )
 
@@ -151,5 +152,6 @@ def call_gemini_requests(
         return result["candidates"][0]["content"]["parts"][0]["text"]
     except Exception:  # noqa: BLE001
         raise RuntimeError(
-            f"Gemini 回傳格式異常: {json.dumps(result, ensure_ascii=False)}"
+            "Gemini 回傳格式異常: "
+            f"{redact_text(json.dumps(result, ensure_ascii=False))[:2000]}"
         )

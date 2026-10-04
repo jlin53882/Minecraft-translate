@@ -51,6 +51,8 @@ class CacheRuntimeState:
 
     translation_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
     cache_file_path: dict[str, Path] = field(default_factory=dict)
+    # 設定存檔後不自動切換；明確 reload 或下次啟動才更新。
+    active_cache_root: Path | None = None
     initialized: bool = False
     # 初始化失敗的 monotonic 時間（冷卻用）與「本次失敗視窗是否已記錄寫入拒絕」
     init_failed_at: float | None = None
@@ -134,6 +136,7 @@ def reset_runtime_state(cache_types: list[str]) -> CacheRuntimeState:
     state = get_runtime_state()
     state.translation_cache = {}
     state.cache_file_path = {}
+    state.active_cache_root = None
     state.initialized = False
     state.init_failed_at = None
     state.write_reject_logged = False

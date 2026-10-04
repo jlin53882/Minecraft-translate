@@ -75,4 +75,8 @@
 - `translation_tool/core/lm_api_client.py`：`maxOutputTokens`、`meta_out`
 - `translation_tool/core/lm_translator_main.py`：截斷診斷、學習與重試
 - 測試：`tests/test_lm_batch_budget.py`、`tests/test_lm_api_client_meta.py`、`tests/test_lm_token_budget_integration.py`、`tests/test_config_token_budget.py`
+
+### Per-model 上限（PR-5）
+
+`lm_translator.models.<model>.max_output_tokens` 是 optional override。未設定或為 `null` 時回退到全域 `lm_translator.max_output_tokens`；設為 `0` 時不送 `generationConfig.maxOutputTokens`。舊版只含 `enabled` 的 models schema 不需要 migration。
 - 根目錄 `conftest.py`：測試間重置學到的預算

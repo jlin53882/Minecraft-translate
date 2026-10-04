@@ -27,6 +27,7 @@ from translation_tool.utils.cache_manager import (
 from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info
+from translation_tool.utils.redaction import redact_text
 
 
 @dataclass
@@ -137,7 +138,7 @@ def translate_items_with_cache_loop(
                 eta_sec = 0.0
             on_progress(progress, msg, eta_sec)
         except Exception as e:  # noqa: BLE001
-            log_info(f"[SharedLM] 進度回報失敗: {e}")
+            log_info(f"[SharedLM] 進度回報失敗: {redact_text(e)}")
 
     emit_progress("🚀 [SharedLM] 準備開始翻譯工作...")
 
@@ -179,8 +180,8 @@ def translate_items_with_cache_loop(
             # 等待 API 限流時被取消
             return cancelled_result()
         except Exception as e:  # noqa: BLE001
-            last_error = str(e)
-            emit_progress(f"❌ [SharedLM] 翻譯發生異常: {e}")
+            last_error = redact_text(e)
+            emit_progress(f"❌ [SharedLM] 翻譯發生異常: {last_error}")
             return TranslateLoopResult(
                 status="FAILED",
                 processed=processed,
@@ -196,6 +197,7 @@ def translate_items_with_cache_loop(
         actual_processed_in_this_batch = 0
         untranslated_fallback = 0
         malformed_fallback = 0
+        cache_write_failed = False
 
         # 對應契約：translate_batch_smart 依輸入順序回傳，第 i 筆結果對應 batch[i]；
         # 未完成時只回傳前綴（剩下的留在 remaining 下一輪重送）。
@@ -237,7 +239,7 @@ def translate_items_with_cache_loop(
                 try:
                     on_translated_item(it)
                 except Exception as e:  # noqa: BLE001
-                    log_info(f"[SharedLM] 處理翻譯結果失敗: {e}")
+                    log_info(f"[SharedLM] 處理翻譯結果失敗: {redact_text(e)}")
 
             if it.get("_untranslated"):
                 # 批次縮到極限回填的原文 / 格式無效回填的原文：保留在輸出，但不寫入快取
@@ -247,9 +249,15 @@ def translate_items_with_cache_loop(
             rule = cache_rules.get(ctype) or CacheRule("path|source_text")
             cache_key = rule.make_key({"path": pth, "source_text": src})
             try:
-                add_to_cache(ctype, cache_key, src, txt)
+                cache_written = add_to_cache(ctype, cache_key, src, txt)
+                if cache_written is False:
+                    cache_write_failed = True
+                    last_error = f"快取寫入被拒絕：{ctype}:{cache_key}"
+                    log_info(f"[SharedLM] {last_error}")
             except Exception as e:  # noqa: BLE001
-                log_info(f"[SharedLM] 新增快取失敗: {e}")
+                cache_write_failed = True
+                last_error = f"新增快取失敗: {redact_text(e)}"
+                log_info(f"[SharedLM] {last_error}")
 
         if untranslated_fallback:
             log_info(
@@ -261,20 +269,42 @@ def translate_items_with_cache_loop(
         # 切片位置 == 已處理的前綴長度（每筆回傳都已處理或回填），不會錯位。
         remaining = remaining[len(safe_translated) :]
 
+        save_ok = True
         try:
-            save_translation_cache(cache_type, write_new_shard=write_new_cache)
+            save_result = save_translation_cache(
+                cache_type, write_new_shard=write_new_cache
+            )
+            save_ok = save_result is not False
         except Exception as e:  # noqa: BLE001
-            log_info(f"[SharedLM] 儲存快取失敗: {e}")
+            save_ok = False
+            last_error = f"儲存快取失敗: {redact_text(e)}"
+            log_info(f"[SharedLM] {last_error}")
+
+        if not save_ok:
+            cache_write_failed = True
+            last_error = last_error or f"快取 {cache_type} 儲存失敗"
 
         if on_batch_flushed is not None:
             try:
                 on_batch_flushed()
             except Exception as e:  # noqa: BLE001
-                log_info(f"[SharedLM] 批次刷新回調失敗: {e}")
+                log_info(f"[SharedLM] 批次刷新回調失敗: {redact_text(e)}")
 
         emit_progress(
             f"✅ 批次完成 ({cache_type}) | 成功: {actual_processed_in_this_batch} | 總進度: {processed}/{total}"
         )
+
+        if cache_write_failed:
+            emit_progress(f"❌ [SharedLM] {last_error}")
+            return TranslateLoopResult(
+                status="FAILED",
+                processed=processed,
+                total=total,
+                completed_calls=completed_calls,
+                elapsed_sec=time.time() - start_time,
+                exhausted=False,
+                last_error=last_error,
+            )
 
         st = (status or "").upper()
         if st == "ALL_KEYS_EXHAUSTED":

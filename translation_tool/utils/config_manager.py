@@ -554,7 +554,15 @@ def get_models_config(cfg: dict) -> dict[str, dict]:
         if not isinstance(model_cfg, dict):
             continue
 
-        safe_models[model_name] = {"enabled": bool(model_cfg.get("enabled", False))}
+        safe_model = {"enabled": bool(model_cfg.get("enabled", False))}
+        model_cap = model_cfg.get("max_output_tokens")
+        if (
+            model_cap is not None
+            and isinstance(model_cap, int)
+            and not isinstance(model_cap, bool)
+        ):
+            safe_model["max_output_tokens"] = model_cap
+        safe_models[model_name] = safe_model
 
     return safe_models
 
@@ -631,6 +639,22 @@ def _validate_lm_translator_config(lm: dict) -> None:
         raise ConfigValidationError(
             f"lm_translator.models 必須為 dict，目前為 {type(models_val).__name__}"
         )
+    if isinstance(models_val, dict):
+        for model_name, model_cfg in models_val.items():
+            if not isinstance(model_name, str) or not isinstance(model_cfg, dict):
+                raise ConfigValidationError(
+                    "lm_translator.models 必須是 model name -> object 的 mapping"
+                )
+            model_cap = model_cfg.get("max_output_tokens")
+            if model_cap is not None and (
+                isinstance(model_cap, bool)
+                or not isinstance(model_cap, int)
+                or model_cap < 0
+            ):
+                raise ConfigValidationError(
+                    f"lm_translator.models.{model_name}.max_output_tokens "
+                    f"必須為非負整數或 null，目前為 {model_cap!r}"
+                )
 
     # 6. token 預算切批設定（issue #108）
     _validate_token_budget_config(lm)
