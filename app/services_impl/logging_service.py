@@ -110,6 +110,47 @@ UI_LOG_HANDLER = UISessionLogHandler()
 UI_LOG_HANDLER.setLevel(logging.INFO)
 UI_LOG_HANDLER.setFormatter(logging.Formatter("%(message)s"))
 
+DEFAULT_LOG_FORMAT = "%(message)s"
+
+
+def validate_log_format(format_string: str) -> str:
+    """Validate a logging formatter before it crosses the config boundary.
+
+    Constructing ``logging.Formatter`` alone does not catch every invalid
+    formatter.  Formatting a representative record also detects references
+    to fields that are not provided by normal ``LogRecord`` instances.
+    """
+    if not isinstance(format_string, str) or not format_string.strip():
+        raise ValueError("logging.log_format 必須是非空字串")
+
+    formatter = logging.Formatter(format_string)
+    record = logging.LogRecord(
+        name="validation",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg="test",
+        args=(),
+        exc_info=None,
+    )
+    try:
+        formatter.format(record)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"logging.log_format 無效：{exc}") from exc
+    return format_string
+
+
+def _resolve_log_format(format_string: object) -> str:
+    """Return a safe runtime formatter for legacy or externally edited config."""
+    try:
+        return validate_log_format(format_string)
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            "Invalid logging.log_format; falling back to the default formatter: %s",
+            exc,
+        )
+        return DEFAULT_LOG_FORMAT
+
 
 def update_logger_config(config_loader, *, logger_name: str = "translation_tool"):
     """重新讀取 config 並套用最新的 Log 等級。
@@ -130,7 +171,7 @@ def update_logger_config(config_loader, *, logger_name: str = "translation_tool"
 
     _level_name = _log_cfg.get("log_level", "INFO").upper()
     _numeric_level = getattr(logging, _level_name, logging.INFO)
-    _format_str = _log_cfg.get("log_format", "%(message)s")
+    _format_str = _resolve_log_format(_log_cfg.get("log_format", DEFAULT_LOG_FORMAT))
 
     root_logger = logging.getLogger()
     target_logger = logging.getLogger(logger_name)

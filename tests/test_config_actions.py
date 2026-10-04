@@ -71,6 +71,7 @@ def make_full_view():
     ]
     for k in keys:
         view.controls_map[k] = MagicMock()
+    view.controls_map["logging.log_format"].value = "%(message)s"
     return view
 
 
@@ -654,7 +655,11 @@ class TestLoadConfigIntoViewPatchouliSettings:
 def _make_base_config():
     """Return a minimal config structure that save_config_from_view needs."""
     return {
-        "logging": {"log_level": "INFO", "log_dir": "logs"},
+        "logging": {
+            "log_level": "INFO",
+            "log_dir": "logs",
+            "log_format": "%(message)s",
+        },
         "translator": {},
         "ftb_translator": {},
         "species_cache": {},

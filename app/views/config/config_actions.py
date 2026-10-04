@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import traceback
 
+from app.services_impl.logging_service import validate_log_format
 from app.ui.snack import show_snack
 from translation_tool.utils.config_manager import get_default
 
@@ -288,9 +289,9 @@ def save_config_from_view(
             "logging.log_level"
         ].value
         new_config["logging"]["log_dir"] = view.controls_map["logging.log_dir"].value
-        new_config["logging"]["log_format"] = view.controls_map[
-            "logging.log_format"
-        ].value
+        new_config["logging"]["log_format"] = validate_log_format(
+            view.controls_map["logging.log_format"].value
+        )
         new_config["translator"]["output_dir_name"] = view.controls_map[
             "translator.output_dir_name"
         ].value
@@ -504,12 +505,16 @@ def save_config_from_view(
         for item in registry:
             # 只通知已建立的頁面；尚未建立的頁面建立時會讀取最新設定
             view_obj = built_view(item)
-            if (
-                item["key"] == "extractor"
-                and view_obj is not None
-                and hasattr(view_obj.content, "refresh_output_dir_helper")
-            ):
-                view_obj.content.refresh_output_dir_helper()
+            if item["key"] != "extractor" or view_obj is None:
+                continue
+
+            content = getattr(view_obj, "content", None)
+            refresh_config_defaults = getattr(content, "refresh_config_defaults", None)
+            if callable(refresh_config_defaults):
+                refresh_config_defaults()
+            elif hasattr(content, "refresh_output_dir_helper"):
+                # Backward-compatible fallback for legacy test doubles/views.
+                content.refresh_output_dir_helper()
 
     show_snack(view.page, "✅ 設定已成功儲存！", view._success_color())
     return True
