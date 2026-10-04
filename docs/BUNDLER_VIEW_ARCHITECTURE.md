@@ -79,3 +79,8 @@ BundlerView.start_bundling_clicked()
 1. **不要改成走 `run_bundling_service`**：BundlerView 的 worker 直接迭代 generator（無 TaskSession），與 pipeline 的 session 流程是刻意不同的兩種設計。
 2. 背景 worker（`_bundling_worker`）不直接改控制項或呼叫 `page.update()`：日誌與進度經 `UiBatcher` 排到 event loop 上套用（Flet 1.0 的 worker-thread 契約）。
 3. `_on_pack_image_picked` / `_on_output_zip_picked` / `_on_extra_folder_picked` 是 FilePicker 事件 stub（`pass`），實際流程用 `_page.run_task(_async_*)` 完成。
+
+## 檔案結構（拆分後）
+
+- `app/views/bundler_view.py`：`BundlerView` 主體（設定同步、版本選擇、選檔、打包背景執行緒與 log）。
+- `app/views/bundler/bundler_widgets.py`：`BundlerWidgetsMixin`，控制項與卡片組裝（`_build_controls`、`_build_bundler_*_card`／`section`）。
