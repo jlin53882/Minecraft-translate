@@ -133,12 +133,12 @@ class TestMergePipelineE2E:
                 output_dir
                 / "lang_output"
                 / "待翻譯"
-                / f"{mod}_extracted"
+                / "assets"
                 / mod
                 / "lang"
                 / "en_us.json"
             )
-            assert pending.exists(), f"Stage 2 cleanup 誤刪 pending source: {pending}"
+            assert pending.exists(), f"Stage 2 pending 未整理到 assets: {pending}"
 
     def test_pipeline_skips_stage2_when_enable_extracted_merge_false(
         self, tmp_path: Path, monkeypatch

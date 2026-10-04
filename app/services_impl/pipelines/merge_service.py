@@ -212,6 +212,9 @@ def run_merge_folder_batch_service(
     patchouli_skip: bool | None = None,
     patchouli_threshold: float | None = None,
     zh_en_threshold: int | None = None,
+    progress_start: float = 0.0,
+    progress_end: float = 1.0,
+    finish_session: bool = True,
 ):
     """以資料夾為單位進行合併（支援 generator merge）。
 
@@ -229,6 +232,14 @@ def run_merge_folder_batch_service(
     }
     folder_errors = []
 
+    def set_monotonic_progress(value: float) -> None:
+        snapshot_fn = getattr(session, "snapshot", None)
+        if callable(snapshot_fn):
+            current = snapshot_fn().get("progress", 0.0)
+        else:
+            current = getattr(session, "progress", 0.0)
+        session.set_progress(max(float(current or 0.0), min(1.0, value)))
+
     try:
         session.add_log(f"[資料夾] 開始處理：{os.path.basename(input_dir)}")
 
@@ -241,12 +252,14 @@ def run_merge_folder_batch_service(
                 patchouli_skip=patchouli_skip,
                 patchouli_threshold=patchouli_threshold,
                 zh_en_threshold=zh_en_threshold,
+                progress_start=progress_start,
+                progress_end=progress_start + (progress_end - progress_start) * 0.90,
             ):
                 if update.get("log"):
                     session.add_log(update["log"])
 
                 if "progress" in update and update["progress"] is not None:
-                    session.set_progress(update["progress"])
+                    set_monotonic_progress(update["progress"])
 
                 # 2026-08-04 修正 A2: 軟性 error 不中止,繼續處理
                 if update.get("error"):
@@ -273,16 +286,29 @@ def run_merge_folder_batch_service(
                     if enable_extracted_merge:
                         session.add_log("[階段 2/2 開始] XX_extracted → assets 合併")
                         lang_output_dir = os.path.join(output_dir, "lang_output")
+                        stage2_start = (
+                            progress_start + (progress_end - progress_start) * 0.90
+                        )
                         for update in merge_extracted_to_assets(
                             lang_output_dir=lang_output_dir,
                             session=session,
+                            pending_folder_names=(
+                                cfg.get("lang_merger", {}).get(
+                                    "pending_folder_name", "待翻譯"
+                                ),
+                                cfg.get("lang_merger", {}).get(
+                                    "pending_organized_folder_name",
+                                    "待翻譯整理需翻譯",
+                                ),
+                            ),
                         ):
                             if update.get("log"):
                                 session.add_log(update["log"])
                             if "progress" in update and update["progress"] is not None:
-                                # Stage 2 進度合成 (0.5~1.0)。
-                                stage2_progress = 0.5 + update["progress"] * 0.5
-                                session.set_progress(min(stage2_progress, 0.999))
+                                stage2_progress = stage2_start + update["progress"] * (
+                                    progress_end - stage2_start
+                                )
+                                set_monotonic_progress(stage2_progress)
                             if update.get("error"):
                                 folder_errors.append(_soft_error_detail(update))
                                 session.add_log("[階段 2/2 錯誤] assets 合併中止")
@@ -338,7 +364,8 @@ def run_merge_folder_batch_service(
                 "error": False,
                 "summary": final_summary,
             }
-            session.finish()
+            if finish_session:
+                session.finish()
 
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
