@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from app.services_impl.pipelines import extract_service, lm_service, merge_service
@@ -380,7 +382,7 @@ def test_cancelling_a_single_merge_step_via_generator_close_leaves_no_active_ses
         if input_mode == "zip":
             monkeypatch.setattr(merge_service, "_merge_one_zip", lambda *a, **k: [])
 
-        def step(s, actions=actions, input_mode=input_mode):
+        def step(s, actions=actions, input_mode=input_mode, runner=runner):
             gen = actions.merge(
                 s,
                 str(tmp_path) if input_mode == "folder" else "a.zip",
@@ -430,7 +432,7 @@ def test_one_click_translate_runs_all_inputs_in_one_session_lifecycle(
         import os
 
         os.makedirs(d, exist_ok=True)
-        open(os.path.join(d, "x.json"), "w").write("{}")
+        (Path(d) / "x.json").write_text("{}", encoding="utf-8")
 
     seen = []
 
@@ -471,7 +473,7 @@ def test_one_click_translate_error_in_first_input_stops_and_ends_error(
     cfg = _cfg(tmp_path)
     for d in cfg.translate_input_dirs:
         os.makedirs(d, exist_ok=True)
-        open(os.path.join(d, "x.json"), "w").write("{}")
+        (Path(d) / "x.json").write_text("{}", encoding="utf-8")
     calls = []
 
     def failing(**kw):
