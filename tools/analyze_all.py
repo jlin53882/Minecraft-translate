@@ -22,7 +22,6 @@ core_modules = [
     "kubejs_translator_io",
     "kubejs_translator_paths",
     "lang_codec",
-    "lang_item_row",
     "lang_merger",
     "lang_merge_content",
     "lang_merge_content_copy",
