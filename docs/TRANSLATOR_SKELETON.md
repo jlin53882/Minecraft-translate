@@ -72,8 +72,9 @@ cache flush、checkpoint hook 與 status。現況能力盤點如下：
 必須先補 characterization tests 並獨立記錄輸入 fingerprint、已完成 batch、partial
 output 與取消狀態。清理規則固定為：只有 shared loop 回報 `DONE` 且累計
 `processed >= total` 的完整完成才可 `clear_checkpoint()`；`CANCELLED`、`FAILED`、
-`ALL_KEYS_EXHAUSTED`、未完整的 `DONE` 與 dry-run 都必須保留 checkpoint，讓下一次執行
-仍可恢復。所有新增 terminal status 都應預設走保留路徑，並補上對應 regression test。
+`PARTIAL`、`ALL_KEYS_EXHAUSTED`、未完整的 `DONE` 與 dry-run 都必須保留 checkpoint，
+讓下一次執行仍可恢復。所有新增 terminal status 都應預設走保留路徑，並補上對應
+regression test；`PARTIAL` 是 batch engine 的受保護部分完成狀態，不等同於完整成功。
 
 ## Verification rule
 

@@ -44,6 +44,7 @@ def _configure_directory_run(tmp_path, monkeypatch):
     [
         ("CANCELLED", 1, True),
         ("FAILED", 1, True),
+        ("PARTIAL", 1, True),
         ("ALL_KEYS_EXHAUSTED", 1, True),
         ("DONE", 0, True),
         ("DONE", 1, False),
