@@ -238,3 +238,98 @@ def test_build_script_has_no_destructive_update_of_target():
         if "rmdir" in stripped:
             assert "staging_dir" in stripped, f"只允許清 staging：{line}"
     assert "/mir" not in text.lower()
+
+
+# ---------------------------------------------------------------------------
+# 完整升級生命週期：舊版平面式 → publish → 新版首次啟動 migration
+# ---------------------------------------------------------------------------
+
+
+def _start_new_version(monkeypatch, target: Path) -> Path:
+    """模擬使用者啟動 target/app/App.exe，回傳新版實際使用的資料根目錄。"""
+    from translation_tool.utils import app_paths
+
+    exe = target / "app" / EXE
+    assert exe.is_file()
+    monkeypatch.setattr(app_paths.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(app_paths.sys, "executable", str(exe))
+    app_paths._migrated_roots.clear()
+    try:
+        return app_paths.get_data_root()
+    finally:
+        app_paths._migrated_roots.clear()
+
+
+def test_legacy_flat_upgrade_preserves_user_config_and_rules(tmp_path, monkeypatch):
+    """舊版 config.json / replace_rules.json 不得被預設 seed 擋住而無法遷移。"""
+    target = tmp_path / "dist" / "App"
+    target.mkdir(parents=True)
+    (target / EXE).write_text("old-exe", encoding="utf-8")
+    (target / "config.json").write_text("USER-CONFIG", encoding="utf-8")
+    (target / "replace_rules.json").write_text("USER-RULES", encoding="utf-8")
+    (target / "logs").mkdir()
+    (target / "logs" / "a.log").write_text("USER-LOG", encoding="utf-8")
+    (target / "快取資料").mkdir()
+    (target / "快取資料" / "c.json").write_text("USER-CACHE", encoding="utf-8")
+
+    _publish(tmp_path, _staging(tmp_path, {EXE: "new-exe"}), target)
+
+    # publish 不得預先建立會擋住 migration 的預設檔
+    assert not (target / "data" / "config.json").exists()
+    assert not (target / "data" / "replace_rules.json").exists()
+
+    data_root = _start_new_version(monkeypatch, target)
+
+    assert data_root == target / "data"
+    assert (data_root / "config.json").read_text(encoding="utf-8") == "USER-CONFIG"
+    assert (data_root / "replace_rules.json").read_text(
+        encoding="utf-8"
+    ) == "USER-RULES"
+    assert (data_root / "logs" / "a.log").read_text(encoding="utf-8") == "USER-LOG"
+    assert (data_root / "快取資料" / "c.json").read_text(
+        encoding="utf-8"
+    ) == "USER-CACHE"
+    assert not (target / "config.json").exists()
+    assert not (target / "replace_rules.json").exists()
+    # 舊程式檔不刪（留給使用者確認新版正常後手動清除）
+    assert (target / EXE).read_text(encoding="utf-8") == "old-exe"
+
+
+def test_legacy_with_only_config_still_seeds_missing_rules(tmp_path, monkeypatch):
+    target = tmp_path / "dist" / "App"
+    target.mkdir(parents=True)
+    (target / "config.json").write_text("USER-CONFIG", encoding="utf-8")
+
+    _publish(tmp_path, _staging(tmp_path, {EXE: "new"}), target)
+    data_root = _start_new_version(monkeypatch, target)
+
+    assert (data_root / "config.json").read_text(encoding="utf-8") == "USER-CONFIG"
+    # 舊安裝沒有規則檔：發佈時補預設
+    assert (data_root / "replace_rules.json").exists()
+
+
+def test_fresh_install_still_gets_default_seed(tmp_path, monkeypatch):
+    target = tmp_path / "dist" / "App"
+    _publish(tmp_path, _staging(tmp_path, {EXE: "new"}), target)
+    data_root = _start_new_version(monkeypatch, target)
+    assert (data_root / "config.json").read_text(
+        encoding="utf-8"
+    ) == '{"v": "example-new"}'
+    assert (data_root / "replace_rules.json").exists()
+
+
+def test_republish_after_migration_never_overwrites_migrated_data(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "dist" / "App"
+    target.mkdir(parents=True)
+    (target / "config.json").write_text("USER-CONFIG", encoding="utf-8")
+    _publish(tmp_path, _staging(tmp_path, {EXE: "v1"}), target)
+    _start_new_version(monkeypatch, target)  # 遷移完成
+    (target / "data" / "config.json").write_text("EDITED-AFTER", encoding="utf-8")
+
+    _publish(tmp_path, _staging(tmp_path, {EXE: "v2"}), target)
+
+    assert (target / "data" / "config.json").read_text(
+        encoding="utf-8"
+    ) == "EDITED-AFTER"

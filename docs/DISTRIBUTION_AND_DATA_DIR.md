@@ -62,7 +62,7 @@
 3. `tools/publish_dist.py` 先複製到 `app.new`，再 `app → app.old`、`app.new → app`，最後刪 `app.old`。
    - 新版沒有的舊 DLL / PYD / 套件不會殘留，結果等價於乾淨 build。
    - 任何一步失敗都會還原 `app/`；程式正在執行（檔案被鎖）時會失敗並提示先關閉。
-   - `data/` 從不被刪除或覆蓋；`config.json`、`replace_rules.json` 僅在不存在時才建立。
+   - `data/` 從不被刪除或覆蓋；`config.json`、`replace_rules.json` 僅在 `data/` 內不存在，**且舊版平面式的根目錄也沒有同名檔**時才建立。舊使用者的檔案優先，由新版首次啟動搬進 `data/`；若發佈時先放預設檔，migration 會因 `data/` 已有同名檔而跳過，使用者設定看起來就被重置。
    - 上次中斷遺留的 `app.new` / `app.old` 會在下次發佈時清掉。
 
 已知限制：
@@ -70,7 +70,7 @@
 - 替換不是單一原子操作（Windows 沒有「目錄交換」），但每一步失敗都會還原，且 `data/` 不在任何一步的範圍內。
 - 如果防毒軟體正掃描舊的 `app.old`，刪不掉只會留下殘留資料夾，不影響使用。
 
-契約由 `tests/test_publish_dist.py`、`tests/test_app_paths.py` 保護。這些測試驗證的是路徑與發佈邏輯，**不等於**在 Windows 上實際跑過 `build_exe.bat` 與打包後的 exe。
+契約由 `tests/test_publish_dist.py`、`tests/test_app_paths.py` 保護，其中包含完整升級生命週期的整合測試（舊版平面式安裝 → publish → 新版首次啟動 migration → 使用者設定與規則進入 `data/`）。這些測試驗證的是路徑與發佈邏輯，**不等於**在 Windows 上實際跑過 `build_exe.bat` 與打包後的 exe。
 
 ## 資料目錄契約（目前）
 

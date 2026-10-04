@@ -17,7 +17,9 @@
 
 契約（有 tests/test_publish_dist.py 保護）：
 1. ``app/`` 完全取代：新版沒有的舊 DLL / PYD / 套件不會殘留，結果等價於乾淨 build。
-2. ``data/`` 從不被刪除或覆蓋。``--seed-file SRC[:DEST]`` 只在 ``data/DEST`` 不存在時才建立。
+2. ``data/`` 從不被刪除或覆蓋。``--seed-file SRC[:DEST]`` 只在 ``data/DEST`` 不存在、
+   **且舊版平面式的 ``<target>/DEST`` 也不存在**時才建立（舊使用者檔案優先，由新版首次啟動
+   搬進 ``data/``；否則預設檔會搶先佔住位置，使用者設定看起來被重置）。
 3. staging 不存在、缺 exe、來源檔案缺漏，都在動 target 之前失敗（build 失敗不破壞可用版本）。
 4. 替換流程：先複製到 ``app.new``，再 ``app → app.old``、``app.new → app``，最後刪 ``app.old``。
    任何一步失敗都會還原 ``app``；程式正在執行（檔案被鎖）時會失敗並提示先關閉。
@@ -103,6 +105,11 @@ def publish(
     data_dir.mkdir(parents=True, exist_ok=True)
     for src, dest in seed_files:
         dest_path = data_dir / dest
+        # 舊版平面式安裝：同名使用者檔案還在 target 根目錄、等新版首次啟動搬進 data/。
+        # 此時不能預先建立預設檔，否則 migration 會因 data/ 已有同名檔而跳過，
+        # 使用者設定看起來被重置。舊檔優先；只有全新安裝才 seed。
+        if (target / dest).exists():
+            continue
         if not dest_path.exists():
             dest_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest_path)
