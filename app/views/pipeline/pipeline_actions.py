@@ -32,6 +32,7 @@ from app.services_impl.pipelines.merge_service import (
 )
 from app.tasks.task_session import TaskSession
 from app.views.pipeline.pipeline_config import PipelineConfig, _has_files
+from translation_tool.utils.cancellation import is_cancelled
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,7 @@ class PipelineActions:
             "patchouli_threshold": patchouli_threshold,
             "zh_en_threshold": zh_en_threshold,
         }
+        session.start()
         os.makedirs(output_dir, exist_ok=True)
         if input_mode == "folder":
             return self.services.merge_folder(
@@ -153,6 +155,7 @@ class PipelineActions:
 
         def merge(session):
             # 各抽取結果分別合併（lang 只處理語言檔，book 需處理 Patchouli 內容）
+            session.start()
             os.makedirs(cfg.merge_output_dir, exist_ok=True)
             sources = []
             if mode in ("lang", "dual"):
@@ -162,15 +165,20 @@ class PipelineActions:
                 )
             if mode in ("book", "dual"):
                 sources.append((cfg.extract_book_output_dir, False))
-            for src, only_lang in sources:
+            total_sources = len(sources)
+            for source_index, (src, only_lang) in enumerate(sources):
                 yield from self.services.merge_folder(
                     input_dir=src,
                     session=session,
                     only_process_lang=only_lang,
+                    progress_start=source_index / total_sources,
+                    progress_end=(source_index + 1) / total_sources,
+                    finish_session=False,
                     **merge_options,
                 )
                 if session_failed(session):
                     return
+            session.finish()
 
         def translate(session):
             inputs = [d for d in cfg.translate_input_dirs if _has_files(d)]
@@ -230,15 +238,33 @@ class PipelineActions:
         mods_dir: str | None = None,
     ) -> None:
         source = mods_dir if mods_dir is not None else cfg.input_dir
+        # dual：兩段抽取共用同一個 session 生命週期與 0~1 進度區間
+        dual = mode == "dual"
+        if dual:
+            session.start()
         if mode in ("lang", "dual"):
             os.makedirs(cfg.extract_lang_output_dir, exist_ok=True)
             self.services.extract_lang(
-                source, cfg.extract_lang_output_dir, session, lang_codes=lang_codes
+                source,
+                cfg.extract_lang_output_dir,
+                session,
+                lang_codes=lang_codes,
+                manage_session=not dual,
+                progress_start=0.0,
+                progress_end=0.5 if dual else 1.0,
             )
             if session.error:
                 return
         if mode in ("book", "dual"):
             os.makedirs(cfg.extract_book_output_dir, exist_ok=True)
             self.services.extract_book(
-                source, cfg.extract_book_output_dir, session, lang_codes=lang_codes
+                source,
+                cfg.extract_book_output_dir,
+                session,
+                lang_codes=lang_codes,
+                manage_session=not dual,
+                progress_start=0.5 if dual else 0.0,
+                progress_end=1.0,
             )
+        if dual and not session.error and not is_cancelled():
+            session.finish()

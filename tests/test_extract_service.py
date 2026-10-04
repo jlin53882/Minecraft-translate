@@ -617,6 +617,36 @@ class TestRunExtractionServices:
         assert "start" in session.calls
         assert "finish" in session.calls
 
+    def test_phase_service_can_leave_lifecycle_to_dual_pipeline(self):
+        """Dual pipeline phases reuse one parent session without resetting it."""
+        from unittest.mock import MagicMock
+
+        from app.services_impl.pipelines.extract_service import (
+            run_book_extraction_service,
+            run_lang_extraction_service,
+        )
+
+        session = self._make_session_stub()
+        with (
+            patch(
+                "app.services_impl.pipelines.extract_service.extract_lang_files_generator",
+                return_value=iter([]),
+            ),
+            patch(
+                "app.services_impl.pipelines.extract_service.extract_book_files_generator",
+                return_value=iter([]),
+            ),
+            patch(
+                "app.services_impl.pipelines.extract_service.UI_LOG_HANDLER",
+                MagicMock(),
+            ),
+        ):
+            run_lang_extraction_service("/mods", "/out", session, manage_session=False)
+            run_book_extraction_service("/mods", "/out", session, manage_session=False)
+
+        assert "start" not in session.calls
+        assert "finish" not in session.calls
+
     def test_lang_service_handles_exception(self):
         """When the generator raises, the service should call set_error."""
         from unittest.mock import MagicMock

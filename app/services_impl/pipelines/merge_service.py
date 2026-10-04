@@ -266,47 +266,105 @@ def run_merge_zip_batch_service(
         UI_LOG_HANDLER.set_session(None)
 
 
-def _run_extracted_stage2(folder_errors: list[str], output_dir: str, session) -> None:
+def _set_monotonic_progress(session, value: float) -> None:
+    """進度只增不減（兩個階段／多個來源共用同一個 session 時不會倒退）。"""
+    snapshot_fn = getattr(session, "snapshot", None)
+    if callable(snapshot_fn):
+        current = snapshot_fn().get("progress", 0.0)
+    else:
+        current = getattr(session, "progress", 0.0)
+    session.set_progress(max(float(current or 0.0), min(1.0, value)))
+
+
+def _run_folder_stage1(
+    input_dir: str,
+    output_dir: str,
+    session,
+    only_process_lang,
+    options: dict,
+    progress_start: float,
+    progress_end: float,
+    folder_errors: list[str],
+) -> None:
+    """階段 1：zh_cn → zh_tw（佔進度區間的前 90%）；軟性 error 不中止，記入 folder_errors。"""
+    for update in merge_zhcn_to_zhtw_from_folder(
+        input_dir,
+        output_dir,
+        only_process_lang,
+        **options,
+        progress_start=progress_start,
+        progress_end=progress_start + (progress_end - progress_start) * 0.90,
+    ):
+        if update.get("log"):
+            session.add_log(update["log"])
+        if "progress" in update and update["progress"] is not None:
+            _set_monotonic_progress(session, update["progress"])
+        # 2026-08-04 修正 A2: 軟性 error 不中止,繼續處理
+        if update.get("error"):
+            folder_errors.append(_soft_error_detail(update))
+
+
+def _run_extracted_stage2(
+    folder_errors: list[str],
+    output_dir: str,
+    session,
+    progress_start: float,
+    progress_end: float,
+) -> None:
     """階段 2：把 XX_extracted 的 lang 檔 key-by-key 合併進 lang_output/assets（就地追加 folder_errors）。
 
     階段 1 已有錯誤時略過；由設定 ``lang_merger.enable_extracted_to_assets_merge`` 控制是否執行。
+    進度落在 ``progress_start~progress_end`` 區間的最後 10%（單調遞增）。
     """
     # 階段 2 (2026-08-02 PR-XX merge-asset-integration):
     # 從 input_dir 內 XX_extracted/ 的 lang 檔 key-by-key 合併進
     # output_dir/lang_output/assets/{modid}/lang/{xx_yy}.json
     if folder_errors:
         session.add_log("[階段 2/2 略過] 階段 1 發生錯誤，不處理部分輸出")
-    else:
-        try:
-            cfg = load_config()
-            enable_extracted_merge = cfg.get("lang_merger", {}).get(
-                "enable_extracted_to_assets_merge", True
-            )
-            if enable_extracted_merge:
-                session.add_log("[階段 2/2 開始] XX_extracted → assets 合併")
-                lang_output_dir = os.path.join(output_dir, "lang_output")
-                for update in merge_extracted_to_assets(
-                    lang_output_dir=lang_output_dir,
-                    session=session,
-                ):
-                    if update.get("log"):
-                        session.add_log(update["log"])
-                    if "progress" in update and update["progress"] is not None:
-                        # Stage 2 進度合成 (0.5~1.0)。
-                        stage2_progress = 0.5 + update["progress"] * 0.5
-                        session.set_progress(min(stage2_progress, 0.999))
-                    if update.get("error"):
-                        folder_errors.append(_soft_error_detail(update))
-                        session.add_log("[階段 2/2 錯誤] assets 合併中止")
-                        break
-                if not folder_errors:
-                    session.add_log("[階段 2/2 完成]")
-            else:
-                session.add_log("[階段 2/2 略過] 檔案合併(階段 2) 未啟用，跳過")
-        except Exception as stage2_err:  # noqa: BLE001
-            logger.warning(f"[階段 2/2 錯誤]: {stage2_err}")
-            session.add_log(f"[階段 2/2 錯誤]: {stage2_err}")
-            folder_errors.append(str(stage2_err))
+        return
+    try:
+        cfg = load_config()
+        lang_merger = cfg.get("lang_merger", {})
+        if not lang_merger.get("enable_extracted_to_assets_merge", True):
+            session.add_log("[階段 2/2 略過] 檔案合併(階段 2) 未啟用，跳過")
+            return
+        session.add_log("[階段 2/2 開始] XX_extracted → assets 合併")
+        lang_output_dir = os.path.join(output_dir, "lang_output")
+        stage2_start = progress_start + (progress_end - progress_start) * 0.90
+        for update in merge_extracted_to_assets(
+            lang_output_dir=lang_output_dir,
+            session=session,
+            pending_folder_names=(
+                lang_merger.get("pending_folder_name", "待翻譯"),
+                lang_merger.get("pending_organized_folder_name", "待翻譯整理需翻譯"),
+            ),
+        ):
+            if update.get("log"):
+                session.add_log(update["log"])
+            if "progress" in update and update["progress"] is not None:
+                _set_monotonic_progress(
+                    session,
+                    stage2_start + update["progress"] * (progress_end - stage2_start),
+                )
+            if update.get("error"):
+                folder_errors.append(_soft_error_detail(update))
+                session.add_log("[階段 2/2 錯誤] assets 合併中止")
+                break
+        if not folder_errors:
+            session.add_log("[階段 2/2 完成]")
+    except Exception as stage2_err:  # noqa: BLE001
+        logger.warning(f"[階段 2/2 錯誤]: {stage2_err}")
+        session.add_log(f"[階段 2/2 錯誤]: {stage2_err}")
+        folder_errors.append(str(stage2_err))
+
+
+def _finish_folder_run(session, stats: dict, output_dir: str, failed: bool) -> dict:
+    """寫入摘要並在失敗時標記 session；回傳最後一筆更新（成功時的 finish 由呼叫端在 yield 後執行）。"""
+    final_summary = _folder_summary(stats, output_dir)
+    session.set_summary(final_summary)
+    if failed:
+        session.set_error()
+    return {"progress": 1.0, "log": None, "error": failed, "summary": final_summary}
 
 
 def run_merge_folder_batch_service(
@@ -318,6 +376,9 @@ def run_merge_folder_batch_service(
     patchouli_skip: bool | None = None,
     patchouli_threshold: float | None = None,
     zh_en_threshold: int | None = None,
+    progress_start: float = 0.0,
+    progress_end: float = 1.0,
+    finish_session: bool = True,
 ):
     """以資料夾為單位進行合併（支援 generator merge）。
 
@@ -339,24 +400,21 @@ def run_merge_folder_batch_service(
         session.add_log(f"[資料夾] 開始處理：{os.path.basename(input_dir)}")
 
         try:
-            for update in merge_zhcn_to_zhtw_from_folder(
+            _run_folder_stage1(
                 input_dir,
                 output_dir,
+                session,
                 only_process_lang,
-                process_zh_cn=process_zh_cn,
-                patchouli_skip=patchouli_skip,
-                patchouli_threshold=patchouli_threshold,
-                zh_en_threshold=zh_en_threshold,
-            ):
-                if update.get("log"):
-                    session.add_log(update["log"])
-
-                if "progress" in update and update["progress"] is not None:
-                    session.set_progress(update["progress"])
-
-                # 2026-08-04 修正 A2: 軟性 error 不中止,繼續處理
-                if update.get("error"):
-                    folder_errors.append(_soft_error_detail(update))
+                {
+                    "process_zh_cn": process_zh_cn,
+                    "patchouli_skip": patchouli_skip,
+                    "patchouli_threshold": patchouli_threshold,
+                    "zh_en_threshold": zh_en_threshold,
+                },
+                progress_start,
+                progress_end,
+                folder_errors,
+            )
 
             if folder_errors:
                 session.add_log("[階段 1/2 失敗] zh_cn → zh_tw 處理發生錯誤")
@@ -368,7 +426,13 @@ def run_merge_folder_batch_service(
             # 從 input_dir 內 XX_extracted/ 的 lang 檔 key-by-key 合併進
             # output_dir/lang_output/assets/{modid}/lang/{xx_yy}.json
             # config flag "enable_extracted_to_assets_merge" 控制是否跑。
-            _run_extracted_stage2(folder_errors, output_dir, session)
+            _run_extracted_stage2(
+                folder_errors,
+                output_dir,
+                session,
+                progress_start,
+                progress_end,
+            )
 
         except Exception as e:  # noqa: BLE001
             tb = traceback.format_exc()
@@ -378,23 +442,8 @@ def run_merge_folder_batch_service(
 
         _record_folder_result(stats, input_dir, folder_errors)
 
-        final_summary = _folder_summary(stats, output_dir)
-        session.set_summary(final_summary)
-        if folder_errors:
-            session.set_error()
-            yield {
-                "progress": 1.0,
-                "log": None,
-                "error": True,
-                "summary": final_summary,
-            }
-        else:
-            yield {
-                "progress": 1.0,
-                "log": None,
-                "error": False,
-                "summary": final_summary,
-            }
+        yield _finish_folder_run(session, stats, output_dir, bool(folder_errors))
+        if not folder_errors and finish_session:
             session.finish()
 
     except Exception as e:  # noqa: BLE001

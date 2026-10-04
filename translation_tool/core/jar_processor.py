@@ -133,7 +133,13 @@ def _extract_from_jar(
 
 
 def _run_extraction_process(
-    mods_dir: str, output_dir: str, target_regex: re.Pattern, process_name: str
+    mods_dir: str,
+    output_dir: str,
+    target_regex: re.Pattern,
+    process_name: str,
+    *,
+    progress_start: float = 0.0,
+    progress_end: float = 1.0,
 ) -> Generator[dict[str, Any], None, None]:
     """執行提取流程的 generator。
 
@@ -153,7 +159,23 @@ def _run_extraction_process(
         process_name,
         find_jar_files_fn=find_jar_files,
         extract_from_jar_fn=_extract_from_jar,
+        progress_start=progress_start,
+        progress_end=progress_end,
     )
+
+
+def _map_progress_update(
+    update: dict[str, Any], progress_start: float, progress_end: float
+) -> dict[str, Any]:
+    """把單一 extraction phase 的 progress 映射到 dual 全域範圍。"""
+    if "progress" not in update:
+        return update
+    mapped = dict(update)
+    phase_progress = max(0.0, min(1.0, float(update["progress"])))
+    mapped["progress"] = (
+        progress_start + (progress_end - progress_start) * phase_progress
+    )
+    return mapped
 
 
 def extract_lang_files_generator(
@@ -239,6 +261,7 @@ def extract_dual_files_generator(
             target_regex=lang_file_regex,
             process_name="Lang",
         ):
+            update = _map_progress_update(update, 0.0, 0.5)
             if "stats" in update:
                 lang_stats = update["stats"]
                 yield {**update, "phase": "lang"}
@@ -248,7 +271,11 @@ def extract_dual_files_generator(
         lang_error = str(e)
     if lang_stats:
         yield {"phase": "lang", "stats": lang_stats}
-    yield {"phase": "book", "log": "[系統] Lang 提取完成，開始提取 Book..."}
+    yield {
+        "phase": "book",
+        "progress": 0.5,
+        "log": "[系統] Lang 提取完成，開始提取 Book...",
+    }
     book_error = None
     last_book_stats = None
     try:
@@ -258,6 +285,7 @@ def extract_dual_files_generator(
             BOOK_PATH_REGEX_DUAL_STRUCTURE,
             "Patchouli Book",
         ):
+            update = _map_progress_update(update, 0.5, 1.0)
             if "stats" in update:
                 book_stats = update["stats"]
                 last_book_stats = book_stats

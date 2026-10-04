@@ -391,6 +391,183 @@ class TestJsonModuleHandling:
             orjson.loads(invalid_json.encode("utf-8"))
 
 
+class TestPatchouliIncrementalOutput:
+    """Patchouli 輸出只在內容變更時寫入，且快取不跨 reader 共用。"""
+
+    def test_unchanged_patchouli_content_is_not_written_again(self, tmp_path: Path):
+        from translation_tool.core.lang_merge_content_copy import (
+            _patchouli_eff_cache,
+            process_content_or_copy_file_impl,
+        )
+
+        _patchouli_eff_cache.clear()
+        reader = MagicMock()
+        input_path = "assets/patchouli_books/test_book/en_us/intro.md"
+        reader.list_all.return_value = [input_path]
+        reader.read_text.return_value = "Hello"
+        writes: list[tuple[str, str]] = []
+
+        def write_text(path: str, content: str) -> None:
+            writes.append((path, content))
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_text(content, encoding="utf-8")
+
+        def config():
+            return {
+                "lang_merger": {"pending_folder_name": "待翻譯"},
+                "lm_translator": {"patchouli": {"dir_names": ["patchouli_books"]}},
+            }
+
+        kwargs = {
+            "reader": reader,
+            "input_path": input_path,
+            "rules": [],
+            "output_dir": str(tmp_path / "output"),
+            "all_files_cache": [input_path],
+            "load_config_fn": config,
+            "recursive_translate_dict_fn": lambda content, rules: content,
+            "get_text_processor_fn": lambda ext: None,
+            "write_bytes_atomic_fn": lambda path, data: Path(path).write_bytes(data),
+            "write_text_atomic_fn": write_text,
+            "quarantine_copy_fn": lambda **kwargs: None,
+            "normalize_patchouli_book_root_fn": lambda value: value,
+            "patch_localized_content_json_fn": lambda *args, **kwargs: {
+                "success": True
+            },
+            "json_module": MagicMock(),
+            "patchouli_output_dir": str(tmp_path / "patchouli"),
+        }
+
+        assert process_content_or_copy_file_impl(**kwargs)["success"]
+        assert process_content_or_copy_file_impl(**kwargs)["success"]
+        assert len(writes) == 1
+
+    def test_patchouli_effectiveness_cache_is_per_merge_run(self):
+        from translation_tool.core.lang_merge_content_copy import (
+            _compute_patchouli_lang_effectiveness,
+        )
+
+        names = ["assets/patchouli_books/test_book/zh_cn/intro.md"]
+        reader_a = MagicMock()
+        reader_a.read_text.return_value = "這是中文"
+        reader_b = MagicMock()
+        reader_b.read_text.return_value = "English text"
+
+        result_a = _compute_patchouli_lang_effectiveness(
+            reader_a,
+            "assets/patchouli_books/test_book/",
+            json_module=MagicMock(),
+            all_names=names,
+            cache_store={},
+        )
+        result_b = _compute_patchouli_lang_effectiveness(
+            reader_b,
+            "assets/patchouli_books/test_book/",
+            json_module=MagicMock(),
+            all_names=names,
+            cache_store={},
+        )
+
+        assert result_a["zh_cn"] is True
+        assert result_b["zh_cn"] is False
+
+    def test_patchouli_effectiveness_is_single_flight_per_run(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from translation_tool.core.lang_merge_content_copy import (
+            _compute_patchouli_lang_effectiveness,
+        )
+
+        names = ["assets/patchouli_books/test_book/zh_cn/intro.md"]
+        reader = MagicMock()
+        reader.read_text.return_value = "這是中文"
+        cache = {}
+
+        def compute():
+            return _compute_patchouli_lang_effectiveness(
+                reader,
+                "assets/patchouli_books/test_book/",
+                json_module=MagicMock(),
+                all_names=names,
+                cache_store=cache,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda _: compute(), range(2)))
+
+        assert all(result["zh_cn"] for result in results)
+        assert reader.read_text.call_count == 1
+
+    def test_different_books_can_compute_in_parallel(self):
+        """single-flight 只應合併同一 cache key，不應鎖住所有 books。"""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        from translation_tool.core.lang_merge_content_copy import (
+            _compute_patchouli_lang_effectiveness,
+        )
+
+        names = [
+            "assets/patchouli_books/book_a/zh_cn/intro.md",
+            "assets/patchouli_books/book_b/zh_cn/intro.md",
+        ]
+        barrier = threading.Barrier(2)
+        reader = MagicMock()
+
+        def read_text(_name):
+            barrier.wait(timeout=2)
+            return "這是中文"
+
+        reader.read_text.side_effect = read_text
+
+        def compute(book):
+            return _compute_patchouli_lang_effectiveness(
+                reader,
+                f"assets/patchouli_books/{book}/",
+                json_module=MagicMock(),
+                all_names=names,
+                cache_store={},
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(compute, ("book_a", "book_b")))
+
+        assert all(result["zh_cn"] for result in results)
+
+    def test_patchouli_effectiveness_cache_isolated_by_reader(self):
+        from translation_tool.core.lang_merge_content_copy import (
+            _compute_patchouli_lang_effectiveness,
+            _patchouli_eff_cache,
+        )
+
+        _patchouli_eff_cache.clear()
+        names = ["assets/patchouli_books/test_book/zh_cn/intro.md"]
+        reader_zh = MagicMock()
+        reader_zh.read_text.return_value = "這是中文"
+        reader_en = MagicMock()
+        reader_en.read_text.return_value = "English text"
+
+        result_zh = _compute_patchouli_lang_effectiveness(
+            reader_zh,
+            "assets/patchouli_books/test_book/",
+            threshold=0.5,
+            json_module=MagicMock(),
+            all_names=names,
+            cache_namespace=id(reader_zh),
+        )
+        result_en = _compute_patchouli_lang_effectiveness(
+            reader_en,
+            "assets/patchouli_books/test_book/",
+            threshold=0.5,
+            json_module=MagicMock(),
+            all_names=names,
+            cache_namespace=id(reader_en),
+        )
+
+        assert result_zh["zh_cn"] is True
+        assert result_en["zh_cn"] is False
+
+
 class TestAllFilesCacheOptimization:
     """2026-08-04 性能優化: reader.list_all() 改用 all_files_cache 的單元測試。"""
 

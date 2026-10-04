@@ -181,6 +181,11 @@ def test_merge_folder_only_process_lang(tmp_path: Path, monkeypatch) -> None:
     )
 
     assert all(not update.get("error", False) for update in updates)
+    progress_values = [update["progress"] for update in updates if "progress" in update]
+    assert progress_values == sorted(progress_values)
+    assert 0.90 in progress_values
+    assert 0.94 in progress_values
+    assert 0.98 in progress_values
     assert updates[-1]["progress"] == 1.0
 
     zh_tw_path = output_dir / "lang_output" / "assets" / "demo" / "lang" / "zh_tw.json"

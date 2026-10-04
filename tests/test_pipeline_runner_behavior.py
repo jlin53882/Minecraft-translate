@@ -368,7 +368,7 @@ def test_actions_merge_dispatches_by_input_mode(tmp_path):
 def test_actions_dual_extract_skips_book_when_lang_fails(tmp_path):
     calls = []
 
-    def lang(mods, out, session, lang_codes=None):
+    def lang(mods, out, session, lang_codes=None, **kw):
         calls.append("lang")
         session.set_error()
 

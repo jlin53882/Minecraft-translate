@@ -53,6 +53,8 @@ uv run --frozen --with nuitka python -m nuitka ^
   --include-package-data=flet ^
   --include-package=flet_desktop ^
   --include-package-data=flet_desktop ^
+  --include-package=opencc ^
+  --include-package-data=opencc ^
   --include-package=translation_tool ^
   --include-package=app ^
   --include-data-dir=assets=assets ^

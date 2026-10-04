@@ -99,7 +99,7 @@ def test_one_click_pipeline_stops_after_failed_extraction(tmp_path):
 
     calls = []
 
-    def fake_lang_extraction(mods_dir, output_dir, session, lang_codes=None):
+    def fake_lang_extraction(mods_dir, output_dir, session, lang_codes=None, **kw):
         # 走 production 的提取 session 處理（generator 最終回報 1 個 JAR 失敗）
         _run_extraction_with_session(iter([_final(1)]), session, "Lang")
 
