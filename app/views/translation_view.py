@@ -197,12 +197,12 @@ class TranslationView(ft.Column):
         ]
 
     # ------------------------------------------------------------------
-    # 樣式 helper（集中到 app.ui.components）
+    # 樣式 helper（集中到 app.ui.kit / app.ui.design）
     # ------------------------------------------------------------------
-    # 本頁原本有 _section_header / _styled_card，現在改用共用的 styled_card / primary_button 等。
+    # 本頁原本有 _section_header / _styled_card，現在改用 kit 的共用元件。
     # 目的：
     # - 多個 View 可共用同一套卡片/按鈕樣式
-    # - 之後要調 UI 一致性，只需要改 app/ui/components.py
+    # - 新 UI 的一致性調整集中在 app/ui/kit 與 app/ui/design。
 
     def _path_row(self, field: ft.TextField) -> ft.Control:
         """建立路徑輸入列 UI"""

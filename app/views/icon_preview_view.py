@@ -26,7 +26,7 @@ from app.ui import design, kit, theme
 from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.snack import show_snack
-from translation_tool.core.lang_item_row import LangItemRow
+from app.views.icon_preview_row import LangItemRow
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.jar_browser import scan_jars
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
