@@ -59,9 +59,10 @@ _HUE_TONES = (
     (("blue", "cyan", "indigo", "info"), "dia", ft.Icons.INFO_OUTLINE),
 )
 
-# AppShell 的 statusbar 約 30px；保留 12px 的視覺間距，避免 floating SnackBar
-# 蓋住狀態列。這個局部 token 刻意不 import shell/statusbar，避免 UI kit 反向依賴外殼。
-SNACK_BOTTOM_MARGIN = 42
+# AppShell 狀態列約 30px；設定頁固定儲存列在窄視窗會增高到約 94px。保留
+# 額外間距，讓 Snackbar 共用 overlay 時不會蓋住頁尾操作列或提示。這個局部
+# token 刻意不 import shell/statusbar，避免 UI kit 反向依賴外殼。
+SNACK_BOTTOM_MARGIN = 160
 
 
 def snack_style(color) -> tuple[str, str]:

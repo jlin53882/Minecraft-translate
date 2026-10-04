@@ -59,7 +59,7 @@ def test_show_snack_reserves_space_above_the_app_statusbar():
     assert snack.margin is not None
     assert snack.margin.left == pytest.approx(320)
     assert snack.margin.right == pytest.approx(320)
-    assert snack.margin.bottom >= 40
+    assert snack.margin.bottom >= 150
 
 
 def test_show_snack_default_is_error_toned():

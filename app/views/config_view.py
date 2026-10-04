@@ -72,13 +72,19 @@ class ConfigView(ft.Column):
             spacing=15,
             controls=[
                 self._build_header(),
-                ft.Row(
+                ft.ResponsiveRow(
                     controls=[
-                        self._build_nav_column(),
-                        self._build_content_area(),
+                        ft.Container(
+                            content=self._build_nav_column(),
+                            col={"xs": 12, "md": 3},
+                        ),
+                        ft.Container(
+                            content=self._build_content_area(),
+                            col={"xs": 12, "md": 9},
+                        ),
                     ],
-                    vertical_alignment=ft.CrossAxisAlignment.START,
                     spacing=15,
+                    run_spacing=15,
                 ),
             ],
         )
@@ -163,7 +169,6 @@ class ConfigView(ft.Column):
             [self._build_nav_item(item) for item in NAV_ITEMS], spacing=4
         )
         return ft.Container(
-            width=210,
             content=ft.Column(
                 [kit.section_label("設定分類"), self.nav_column], spacing=8
             ),

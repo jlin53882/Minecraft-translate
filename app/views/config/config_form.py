@@ -33,23 +33,31 @@ def build_footer(view):
         padding=ft.Padding.symmetric(horizontal=24, vertical=14),
         bgcolor=C.PANEL,
         border=ft.Border.only(top=ft.BorderSide(1, C.LINE)),
-        content=ft.Row(
+        content=ft.ResponsiveRow(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            run_spacing=10,
             controls=[
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.INFO_OUTLINE, size=16, color=C.DIM),
-                        ft.Text("提示：修改後請務必點擊儲存", color=C.MUTED, size=12.5),
-                    ],
-                    spacing=8,
+                ft.Container(
+                    col={"xs": 12, "md": 8},
+                    content=ft.Row(
+                        [
+                            ft.Icon(ft.Icons.INFO_OUTLINE, size=16, color=C.DIM),
+                            ft.Text("提示：修改後請務必點擊儲存", color=C.MUTED, size=12.5),
+                        ],
+                        spacing=8,
+                    ),
                 ),
-                kit.button(
-                    "儲存所有設定",
-                    "primary",
-                    icon=ft.Icons.SAVE_OUTLINED,
-                    tooltip="寫入 config.json（請確認 API Keys 有填好）",
-                    on_click=view.save_config_clicked,
+                ft.Container(
+                    col={"xs": 12, "md": 4},
+                    alignment=ft.Alignment.CENTER_RIGHT,
+                    content=kit.button(
+                        "儲存所有設定",
+                        "primary",
+                        icon=ft.Icons.SAVE_OUTLINED,
+                        tooltip="寫入 config.json（請確認 API Keys 有填好）",
+                        on_click=view.save_config_clicked,
+                    ),
                 ),
             ],
         ),
