@@ -180,13 +180,9 @@ def translate_batch_smart(
     if not items:
         return [], "AUTO"
 
-    # 2. 偵測 profile（TODO: 舊函數會重新計算，目前是被丟棄的死碼）
-    # batch_profile = _detect_batch_profile(items)
+    # 批次 profile 與批次大小由 _execute_translation 內部決定（舊版在這裡重複計算後丟棄，已移除）。
 
-    # 3. 計算批次大小（TODO: 舊函數會重新計算，目前是被丟棄的死碼）
-    # batch_size = _calculate_batch_size(batch_profile)
-
-    # 4. 執行翻譯
+    # 2. 執行翻譯
     results, status = _execute_translation(items, total, dry_run)
 
     # 5. 處理輸出

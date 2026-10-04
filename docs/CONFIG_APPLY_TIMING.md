@@ -109,10 +109,31 @@
 - `translator.cache_directory` 儲存後不會讓現行任務中途換根目錄。下一次啟動或明確呼叫 `reload_translation_cache()` 才採用持久化的新路徑；pending writer 仍綁定目前 active root。
 - `lm_translator` 的 per-model `max_output_tokens` 是可選欄位：缺少或 `null` 使用全域值，`0` 表示不送欄位；下一批次讀取，舊版只含 `enabled` 的設定可直接載入。
 
-## #117 後續處理（PR-2）
+## 套用時機契約（#117 最終）
 
-- `lm_translator.lm_translate_folder_name`：改為使用時才讀（`lm_view.get_lm_translate_folder_name()`），不再是 D 類。
-- `output_bundler.output_zip_name`：實際打包時重新讀設定（原本沿用頁面建立時的值，存檔後仍用舊檔名）；輸入框提示文字仍需重新開啟頁面才更新。
-- `logging.log_dir`：應用日誌本來就有使用；錯誤記錄（`errors_*.log`）改為讀此設定，不再寫死 `logs`。
-- 有任務進行中存檔時，`AppShell` 會顯示「進行中的任務不受影響，下次任務才套用」的提示（僅 `ui.theme_mode` 例外）。
-- 仍待處理：`logging.log_level` 存檔時即時套用、機器翻譯頁日誌行數、`species_cache.*`（已標示需重啟）、`translator.enable_cache_saving` 行為確認（`cache_manager.py:229` 每次寫入前讀取，屬下次寫入生效）。
+中央表在 `app/config_apply.py`：設定頁的說明文字、存檔提示與自動重載都以它為準。
+
+| timing | 意義 | 存檔後行為 |
+|---|---|---|
+| `immediate` | 立即套用 | 不提醒（例如 `logging.log_level`／`log_format`、深淺色） |
+| `next_request` | 進行中的任務在下次 API 請求讀到 | 有任務時提醒「會在下一批次／下次請求套用」 |
+| `next_batch` | 進行中的任務在下一批次讀到 | 同上 |
+| `next_task` | 進行中的任務不受影響（沒登記的設定預設為此） | 有任務時提醒「進行中的任務不受影響，下次任務才套用」 |
+| `when_idle` | 沒任務時立即套用，有任務則等任務結束 | `translator.cache_directory`：自動重載快取與搜尋索引（見下） |
+| `restart` | 需重啟 | 不論有沒有任務都提醒「需重新啟動」（`species_cache.*`、`logging.log_dir`） |
+
+### 快取資料夾變更（`translator.cache_directory`）
+
+存檔且該值改變時（`app/shell/config_effects.py::CacheRootReloader`）：
+
+- **沒有任務進行中**：在背景執行緒呼叫 `cache_reload_service()`（重載快取並重建搜尋索引），完成後刷新工作台與快取頁並提示。
+- **有任務進行中**：不動；任務全部結束後才重載（相容 PR #143「現行任務不可中途換快取根目錄」的契約，避免任務寫入新舊兩個資料夾）。
+- 重載期間又有新變更：重載結束後再跑一次；重載失敗只記錄並提示，仍使用舊快取。
+
+### 其他已落實的項目
+
+- 機器翻譯輸出資料夾預設名稱、打包 `output_zip_name` 都是使用時才讀；打包頁的輸入框提示訂閱存檔事件即時更新。
+- `logging.log_level`／`log_format` 存檔後立即套用；機器翻譯頁日誌行數在每次開始任務時讀最新設定。
+- 錯誤記錄（`errors_*.log`）每次寫入時讀 `logging.log_dir`；應用日誌需重啟才換資料夾。
+- `translator.enable_cache_saving`：`cache_manager.save_translation_cache` 每次寫入前讀取，下次寫入生效。
+- 仍不做：進行中任務中途改批次大小等「引擎行為」以外的重新設計——現況就是各設定依上表在「下一批次／下次請求／下次任務」讀取。

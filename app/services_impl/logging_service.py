@@ -21,6 +21,7 @@ import time
 from collections import deque
 from typing import Any
 
+from translation_tool.utils.redaction import RedactingFormatter
 from translation_tool.utils.ui_logging_handler import UISessionLogHandler
 
 logger = logging.getLogger(__name__)
@@ -184,7 +185,7 @@ def update_logger_config(config_loader, *, logger_name: str = "translation_tool"
 
     root_logger.setLevel(_numeric_level)
     UI_LOG_HANDLER.setLevel(_numeric_level)
-    UI_LOG_HANDLER.setFormatter(logging.Formatter(_format_str))
+    UI_LOG_HANDLER.setFormatter(RedactingFormatter(_format_str))
 
     logger.debug(f"Log 系統已同步：Level={_level_name}, Format={_format_str}")
 

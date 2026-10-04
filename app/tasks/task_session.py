@@ -12,6 +12,8 @@ import threading
 from collections import deque
 from collections.abc import Callable
 
+from translation_tool.utils.redaction import redact_secrets
+
 from .log_entry import LogEntry
 
 _logger = logging.getLogger(__name__)
@@ -120,6 +122,8 @@ class TaskSession:
         """
         if not text:
             return
+        # UI 日誌的總出口：不論來自 logger 或直接呼叫，機密都不會顯示在畫面上（#125）
+        text = redact_secrets(text)
         with self._lock:
             entry = LogEntry(
                 seq=self._next_seq,

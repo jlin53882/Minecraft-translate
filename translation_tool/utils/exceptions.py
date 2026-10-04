@@ -20,6 +20,7 @@ from datetime import datetime
 from functools import wraps
 
 from translation_tool.utils.app_paths import get_data_root
+from translation_tool.utils.redaction import redact_secrets
 
 # =============================================================================
 # 自訂異常類別
@@ -248,13 +249,13 @@ def _log_error_to_file(error: Exception, func_name: str):
             f.write(f"\n{'=' * 80}\n")
             f.write(f"[{timestamp}] 錯誤發生於: {func_name}\n")
             f.write(f"錯誤類型: {type(error).__name__}\n")
-            f.write(f"錯誤訊息: {error!s}\n")
+            f.write(f"錯誤訊息: {redact_secrets(error)}\n")
 
             if isinstance(error, TranslationError) and error.context:
-                f.write(f"錯誤上下文: {error.context}\n")
+                f.write(f"錯誤上下文: {redact_secrets(error.context)}\n")
 
             f.write("\n堆疊追蹤:\n")
-            f.write(traceback.format_exc())
+            f.write(redact_secrets(traceback.format_exc()))
             f.write(f"{'=' * 80}\n")
 
     except Exception as log_error:  # noqa: BLE001 - 記錄失敗不可中斷主流程

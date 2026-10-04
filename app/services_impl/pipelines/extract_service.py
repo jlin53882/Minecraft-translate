@@ -468,5 +468,6 @@ def open_output_folder(path: str) -> bool:
 
             subprocess.run(["xdg-open", path], check=True)
         return True
-    except Exception:  # noqa: BLE001
+    except Exception:
+        logger.warning("開啟資料夾失敗：%s", path, exc_info=True)
         return False

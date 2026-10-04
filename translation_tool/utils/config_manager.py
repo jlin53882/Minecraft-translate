@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from translation_tool.utils.app_paths import get_data_root, get_resource_root
+from translation_tool.utils.redaction import RedactingFormatter, register_secrets
 
 log = logging.getLogger(__name__)
 
@@ -427,6 +428,13 @@ def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
     if "models" in user_config.get("lm_translator", {}):
         config["lm_translator"]["models"] = user_config["lm_translator"]["models"]
 
+    # 使用者設定的 API 金鑰登錄為「已知機密」，之後任何輸出都會遮蔽（#125）
+    register_secrets(
+        k
+        for k in (config.get("lm_translator", {}).get("keys") or [])
+        if isinstance(k, str) and not k.startswith("YOUR_")
+    )
+
     # ATK-C-2: 對最終結果做驗證
     _validate_lm_translator_config(config["lm_translator"])
     if isinstance(config.get("translator"), dict):
@@ -616,6 +624,9 @@ def setup_logging(config):
         logging.StreamHandler(),
         logging.FileHandler(log_file, encoding="utf-8"),
     ]
+    # 所有日誌輸出（含 traceback）都經過遮蔽，避免金鑰出現在日誌檔或終端機（#125）
+    for handler in handlers:
+        handler.setFormatter(RedactingFormatter(log_format))
 
     logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
     logging.info("日誌系統已成功設定。")  # noqa: LOG015

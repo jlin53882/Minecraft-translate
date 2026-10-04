@@ -33,6 +33,7 @@ from translation_tool.core.lm_translator_shared import _get_default_batch_size
 from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.log_unit import (
     get_formatted_duration,
+    log_debug,
     log_error,
     log_info,
     log_warning,
@@ -361,8 +362,8 @@ def run_ftb_pipeline(
             if isinstance(lm_res, dict):
                 lm_res = dict(lm_res)
                 lm_res["estimated_batches"] = est_batches
-        except Exception:  # noqa: BLE001, S110
-            pass
+        except Exception as exc:  # noqa: BLE001 - 預估批次數只是顯示資訊，失敗不影響翻譯
+            log_debug(f"預估批次數失敗：{exc!r}")
 
         log_info(f"✅ AI 翻譯階段結束。詳細統計：\n{orjson_pretty_str(lm_res)}")
 

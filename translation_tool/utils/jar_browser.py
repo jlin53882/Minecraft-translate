@@ -43,8 +43,7 @@ def _get_default_workers() -> int:
         config_workers = config.get("translator", {}).get("parallel_execution_workers")
         if isinstance(config_workers, int) and config_workers > 0:
             return config_workers
-    except Exception:  # noqa: BLE001, S110
-        # config 讀取失敗時不 blocking，直接用 fallback
+    except Exception:  # noqa: BLE001, S110 - config 讀取失敗時不 blocking，直接用 fallback
         pass
     return max(1, os.cpu_count() // 2)
 
