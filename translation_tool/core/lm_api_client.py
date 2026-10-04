@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import random
+from copy import deepcopy
 
 import requests
 
@@ -26,6 +27,65 @@ NETWORK_RETRY_BASE_SEC = 1.0
 # 不設的話，模型重複輸出時會燒光整個輸出額度（issue #108）。
 # 設定檔 lm_translator.max_output_tokens 可覆寫；設為 0 代表不送這個欄位。
 DEFAULT_MAX_OUTPUT_TOKENS = 32768
+
+# Gemini responseFormat.text.schema uses a JSON Schema subset.
+TRANSLATION_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "value": {"type": "string"},
+                },
+                "required": ["id", "value"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["items"],
+    "additionalProperties": False,
+}
+
+
+def _build_translation_response_schema(payload: dict) -> dict:
+    """Constrain the response array and IDs to the current input batch."""
+    if not isinstance(payload, dict):
+        raise ValueError("Gemini translation payload must be an object")  # noqa: TRY004
+    if "items" not in payload:
+        raise ValueError("Gemini translation payload must contain items")
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise ValueError("Gemini translation payload items must be a list")  # noqa: TRY004
+    if not items:
+        raise ValueError("Gemini translation payload must contain at least one item")
+
+    ids = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError(  # noqa: TRY004
+                "Gemini 翻譯 payload 的每個 item 都必須是 object"
+            )
+        if not isinstance(item.get("id"), str):
+            raise ValueError(  # noqa: TRY004
+                "Gemini 翻譯 payload 的每個 item 都必須有字串 id"
+            )
+        if not isinstance(item.get("value"), str):
+            raise ValueError(  # noqa: TRY004
+                "Gemini 翻譯 payload 的每個 item 都必須有字串 value"
+            )
+        ids.append(item["id"])
+    if len(ids) != len(set(ids)):
+        raise ValueError("Gemini 翻譯 payload 的 item id 不可重複")
+
+    schema = deepcopy(TRANSLATION_RESPONSE_SCHEMA)
+    item_array = schema["properties"]["items"]
+    item_array["minItems"] = len(ids)
+    item_array["maxItems"] = len(ids)
+    item_array["items"]["properties"]["id"]["enum"] = ids
+    return schema
 
 
 def _post_with_retry(url: str, **kwargs) -> requests.Response:
@@ -119,7 +179,12 @@ def call_gemini_requests(
         ],
         "generationConfig": {
             "temperature": temperature,
-            "responseMimeType": "application/json",
+            "responseFormat": {
+                "text": {
+                    "mimeType": "APPLICATION_JSON",
+                    "schema": _build_translation_response_schema(payload),
+                }
+            },
         },
     }
 

@@ -30,7 +30,7 @@ def _body(text='{"items": []}', finish="STOP", usage=None) -> dict:
     return body
 
 
-def _call(post, lm_cfg=None, **kwargs):
+def _call(post, lm_cfg=None, payload=None, **kwargs):
     with patch(
         "translation_tool.core.lm_api_client.load_config",
         return_value={"lm_translator": lm_cfg or {}},
@@ -38,7 +38,11 @@ def _call(post, lm_cfg=None, **kwargs):
         return call_gemini_requests(
             model_name="m",
             system_prompt="s",
-            payload={"items": []},
+            payload=(
+                {"items": [{"id": "0", "value": "Iron Ingot"}]}
+                if payload is None
+                else payload
+            ),
             api_key="k",
             temperature=0.2,
             **kwargs,
@@ -92,11 +96,122 @@ def test_invalid_config_value_falls_back_to_default(post):
 
 
 def test_existing_generation_config_fields_are_kept(post):
-    _call(post)
+    _call(
+        post,
+        payload={
+            "items": [
+                {"id": "0", "value": "Iron Ingot"},
+                {"id": "1", "value": "Diamond Sword"},
+            ]
+        },
+    )
 
     cfg = _generation_config(post)
     assert cfg["temperature"] == 0.2
-    assert cfg["responseMimeType"] == "application/json"
+    response_format = cfg["responseFormat"]["text"]
+    assert response_format["mimeType"] == "APPLICATION_JSON"
+    schema = response_format["schema"]
+    assert schema["type"] == "object"
+    assert schema["required"] == ["items"]
+    assert schema["additionalProperties"] is False
+    items = schema["properties"]["items"]
+    assert items["type"] == "array"
+    item = items["items"]
+    assert item["type"] == "object"
+    assert item["required"] == ["id", "value"]
+    assert item["properties"] == {
+        "id": {"type": "string", "enum": ["0", "1"]},
+        "value": {"type": "string"},
+    }
+    assert item["additionalProperties"] is False
+    assert items["minItems"] == 2
+    assert items["maxItems"] == 2
+    assert set(cfg) >= {"temperature", "responseFormat", "maxOutputTokens"}
+    assert "responseMimeType" not in cfg
+    assert "responseSchema" not in cfg
+
+
+def test_translation_input_payload_shape_is_unchanged(post):
+    payload = {"items": [{"id": "0", "value": "Iron Ingot"}]}
+    with patch(
+        "translation_tool.core.lm_api_client.load_config",
+        return_value={"lm_translator": {}},
+    ):
+        call_gemini_requests(
+            model_name="m",
+            system_prompt="s",
+            payload=payload,
+            api_key="k",
+            temperature=0.2,
+        )
+
+    request_body = post.call_args.kwargs["json"]
+    assert request_body["contents"][0]["parts"][0]["text"] == (
+        '{"items": [{"id": "0", "value": "Iron Ingot"}]}'
+    )
+    assert payload == {"items": [{"id": "0", "value": "Iron Ingot"}]}
+
+
+def test_dynamic_schema_is_fresh_for_each_batch(post):
+    _call(post, payload={"items": [{"id": "a", "value": "A"}]})
+    first_schema = _generation_config(post)["responseFormat"]["text"]["schema"]
+    _call(
+        post,
+        payload={"items": [{"id": "x", "value": "X"}, {"id": "y", "value": "Y"}]},
+    )
+    second_schema = _generation_config(post)["responseFormat"]["text"]["schema"]
+
+    first_items = first_schema["properties"]["items"]
+    second_items = second_schema["properties"]["items"]
+    assert first_items["minItems"] == first_items["maxItems"] == 1
+    assert first_items["items"]["properties"]["id"]["enum"] == ["a"]
+    assert second_items["minItems"] == second_items["maxItems"] == 2
+    assert second_items["items"]["properties"]["id"]["enum"] == ["x", "y"]
+
+
+@pytest.mark.parametrize(
+    "items",
+    [
+        [{"id": "same", "value": "A"}, {"id": "same", "value": "B"}],
+        [{"value": "missing id"}],
+    ],
+)
+def test_invalid_batch_ids_are_rejected_before_request(post, items):
+    with pytest.raises(ValueError, match="payload"):
+        _call(post, payload={"items": items})
+
+    post.assert_not_called()
+
+
+def test_empty_translation_batch_is_rejected_before_request(post):
+    with pytest.raises(ValueError, match="at least one item"):
+        _call(post, payload={"items": []})
+
+    post.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"items": "bad"},
+        {},
+        {"items": ["bad"]},
+        {"items": [{"id": "0"}]},
+        {"items": [{"id": "0", "value": 1}]},
+    ],
+)
+def test_malformed_translation_payload_is_rejected_before_request(post, payload):
+    with pytest.raises(ValueError):
+        _call(post, payload=payload)
+
+    post.assert_not_called()
+
+
+def test_non_object_translation_payload_is_rejected_before_request(post):
+    with pytest.raises(ValueError, match="payload"):
+        _call(post, payload=[])
+
+    post.assert_not_called()
 
 
 # --- meta_out --------------------------------------------------------------
