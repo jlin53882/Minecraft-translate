@@ -131,8 +131,9 @@ def test_step_service_runs_off_the_event_loop_thread(loop_page):
 # --------------------------------------------------------------- 生命週期
 
 
-def test_unmount_stops_the_watcher_but_step_finishes_and_flushes_logs(loop_page):
-    """卸載：watcher 停止（不再輪詢），步驟照常結束，最後一批日誌仍補上。"""
+def test_unmount_defers_all_ui_updates_until_remount(loop_page):
+    """卸載：watcher 停止、worker 照常結束，但完成後的 UI 更新不碰（已卸載的）控制項；
+    重新掛載時才一次套用（最終日誌、步驟完成）。"""
     runner, panel = _runner(loop_page)
     release = threading.Event()
     started = threading.Event()
@@ -144,25 +145,50 @@ def test_unmount_stops_the_watcher_but_step_finishes_and_flushes_logs(loop_page)
         release.wait(3)
         session.add_log("after-unmount")
 
-    def worker():
-        result["ok"] = runner.run_step(1, "步驟", service)
-
-    t = threading.Thread(target=worker)
+    t = threading.Thread(
+        target=lambda: result.update(ok=runner.run_step(1, "步驟", service))
+    )
     t.start()
     assert started.wait(3)
     loop_page.drain()
     assert runner.poller.running
 
-    runner.on_unmount()
-    runner.on_unmount()  # idempotent
+    asyncio.run_coroutine_threadsafe(_call(runner.on_unmount), loop_page.loop).result(3)
+    asyncio.run_coroutine_threadsafe(_call(runner.on_unmount), loop_page.loop).result(3)
     assert not runner.poller.running
+    snapshot_logs = list(panel.logs)
+    snapshot_steps = list(panel.steps)
     release.set()
     t.join(5)
     loop_page.drain()
 
     assert result["ok"] is True
-    assert ">> after-unmount" in panel.logs  # 卸載期間的日誌由最終同步補上
+    # 卸載期間：沒有任何 UI 更新（日誌、步驟完成都沒動）
+    assert panel.logs == snapshot_logs
+    assert panel.steps == snapshot_steps
+
+    asyncio.run_coroutine_threadsafe(_call(runner.on_mount), loop_page.loop).result(3)
+    loop_page.drain()
+
+    assert ">> after-unmount" in panel.logs
     assert panel.logs.count(">> first") == 1
+    assert ("finished", 1, True, False) in panel.steps
+    assert not runner.poller.running  # 步驟已結束，不會留下 poller
+
+
+def test_unmounted_sequence_defers_finish_and_button_restore(loop_page):
+    runner, panel = _runner(loop_page, launch_worker=lambda target: target())
+    ended = []
+    asyncio.run_coroutine_threadsafe(_call(runner.on_unmount), loop_page.loop).result(3)
+
+    runner.start_sequence([(1, "步驟", lambda s: None)], lambda: ended.append(True))
+    loop_page.drain()
+    assert ended == [] and panel.finished_all is None
+
+    asyncio.run_coroutine_threadsafe(_call(runner.on_mount), loop_page.loop).result(3)
+    loop_page.drain()
+    assert ended == [True]
+    assert panel.finished_all == (True, False)
 
 
 def test_remount_resumes_a_single_poller_without_duplicate_logs(loop_page):
@@ -395,3 +421,158 @@ def test_actions_one_click_steps_cover_the_four_stages(tmp_path):
         (3, "啟動翻譯"),
         (4, "打包資源"),
     ]
+
+
+# --------------------------------------------------------------- 契約：both → dual
+
+
+def test_one_click_all_modes_reach_both_extractors_and_both_merge_sources(tmp_path):
+    """對話框的「全部執行」(both) → on_execute 收到 dual → lang + book 都抽取、兩個 merge 來源。"""
+    from app.views.pipeline.pipeline_config import normalize_extract_mode
+
+    assert normalize_extract_mode("both") == "dual"
+    assert normalize_extract_mode("lang") == "lang"
+    assert normalize_extract_mode(None) == "lang"
+
+    calls = []
+    services = PipelineServices(
+        extract_lang=lambda *a, **k: calls.append("lang"),
+        extract_book=lambda *a, **k: calls.append("book"),
+        merge_folder=lambda **k: calls.append(("merge", k["input_dir"])) or iter([]),
+        translate=lambda **k: None,
+        build_staging=lambda *a, **k: {"copied": 0, "merged": 0},
+    )
+    view = pipeline_view.PipelineView(
+        mock_page(),
+        mock_filepicker(),
+        actions=PipelineActions(services),
+        launch_worker=lambda target: target(),
+    )
+    (tmp_path / "mods").mkdir()
+    (tmp_path / "out").mkdir()
+    view.input_path_text.value = str(tmp_path / "mods")
+    view.output_path_text.value = str(tmp_path / "out")
+
+    # 即使收到舊式的 "both"，View 邊界也會正規化
+    view._on_one_click_execute({"mode": "both", "lang_codes": ["en_us"]})
+
+    assert calls[:2] == ["lang", "book"]
+    merges = [c for c in calls if isinstance(c, tuple)]
+    assert len(merges) == 2
+    cfg = PipelineConfig(str(tmp_path / "mods"), str(tmp_path / "out"))
+    assert [m[1] for m in merges] == [
+        cfg.extract_lang_output_dir,
+        cfg.extract_book_output_dir,
+    ]
+
+
+# --------------------------------------------------------------- 契約：bundle 的 TaskSession 生命週期
+
+
+def test_bundle_action_registers_progresses_and_finishes_in_task_manager(tmp_path):
+    from app.shell.task_manager import TaskManager
+
+    manager = TaskManager()
+    manager.attach()
+    try:
+        seen = {}
+
+        def fake_bundle(**kwargs):
+            seen["active_during"] = [t.name for t in manager.active()]
+            yield {"progress": 0.5, "log": "half"}
+
+        actions = PipelineActions(PipelineServices(bundle=fake_bundle))
+        session = TaskSession(name="打包", view_key="pipeline")
+        list(
+            actions.bundle(
+                session,
+                input_root_dir=str(tmp_path),
+                output_zip_path=str(tmp_path / "o" / "x.zip"),
+            )
+        )
+
+        assert seen["active_during"] == ["打包"]  # start() 後全域看得到
+        assert manager.active() == []  # finish() 後離開 active
+        assert [t.name for t in manager.recent()] == ["打包"]
+        assert session.snapshot()["status"] == "DONE"
+    finally:
+        manager.detach()
+
+
+def test_bundle_action_error_stays_error_and_cancel_does_not_leave_running(tmp_path):
+    from app.shell.task_manager import TaskManager
+
+    manager = TaskManager()
+    manager.attach()
+    try:
+        failing = PipelineActions(
+            PipelineServices(bundle=lambda **k: iter([{"error": True}]))
+        )
+        s1 = TaskSession(name="打包失敗", view_key="pipeline")
+        list(
+            failing.bundle(
+                s1, input_root_dir="i", output_zip_path=str(tmp_path / "a.zip")
+            )
+        )
+        assert s1.snapshot()["status"] == "ERROR"
+
+        def endless(**kwargs):
+            while True:
+                yield {"progress": 0.1}
+
+        cancelled = PipelineActions(PipelineServices(bundle=endless))
+        s2 = TaskSession(name="打包取消", view_key="pipeline")
+        gen = cancelled.bundle(
+            s2, input_root_dir="i", output_zip_path=str(tmp_path / "b.zip")
+        )
+        next(gen)
+        gen.close()  # PipelineRunner 取消時會 close generator
+        assert s2.snapshot()["status"] != "RUNNING"
+        assert manager.active() == []
+    finally:
+        manager.detach()
+
+
+def test_one_click_bundle_step_manages_the_session_lifecycle(tmp_path):
+    (tmp_path / "mods").mkdir()
+    (tmp_path / "out").mkdir()
+    cfg = PipelineConfig(str(tmp_path / "mods"), str(tmp_path / "out"))
+    actions = PipelineActions(
+        PipelineServices(
+            build_staging=lambda *a, **k: {"copied": 1, "merged": 0},
+            bundle=lambda **k: iter([{"progress": 1.0}]),
+        )
+    )
+    step4 = actions.one_click_steps({}, cfg, "lang", ["en_us"], {})[3][2]
+    session = TaskSession(name="一鍵", view_key="pipeline")
+    list(step4(session))
+    snap = session.snapshot()
+    assert snap["status"] == "DONE"
+    assert any(
+        "打包暫存完成" in e.text for e in snap["logs"]
+    )  # 暫存日誌沒被 start() 清掉
+
+    empty = PipelineActions(
+        PipelineServices(build_staging=lambda *a, **k: {"copied": 0, "merged": 0})
+    )
+    s2 = TaskSession(name="一鍵", view_key="pipeline")
+    list(empty.one_click_steps({}, cfg, "lang", ["en_us"], {})[3][2](s2))
+    assert s2.snapshot()["status"] == "ERROR"
+
+
+# --------------------------------------------------------------- 契約：翻譯輸出路徑單一來源
+
+
+def test_translate_output_path_follows_lm_translate_folder_name(monkeypatch):
+    from app.views.pipeline import pipeline_config
+
+    monkeypatch.setattr(
+        pipeline_config,
+        "load_config",
+        lambda: {"lang_merger": {"lm_translate_folder_name": "LM翻譯後"}},
+    )
+    cfg = PipelineConfig("in", "out")
+    assert cfg.translate_output_dir.endswith("lm_translate/LM翻譯後") or (
+        cfg.translate_output_dir.replace("\\", "/").endswith("lm_translate/LM翻譯後")
+    )
+    assert cfg.bundle_sources[-1] == cfg.translate_output_dir

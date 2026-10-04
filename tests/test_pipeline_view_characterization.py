@@ -43,6 +43,9 @@ class _Session:
     def set_error(self):
         self._error = True
 
+    def finish(self):
+        self._done = True
+
     def set_progress(self, val):
         self._progress = val
 

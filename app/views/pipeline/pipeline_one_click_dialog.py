@@ -19,6 +19,7 @@ import types
 import flet as ft
 
 from app.ui.design import C
+from app.views.pipeline.pipeline_config import normalize_extract_mode
 from translation_tool.utils.config_manager import load_config
 
 
@@ -765,7 +766,7 @@ def _one_click__do_execute(ctx):
     ctx.close_all()
     version_info = _load_version_data().get(ctx.state["version"], {})
     config = {
-        "mode": ctx.state["mode"],
+        "mode": normalize_extract_mode(ctx.state["mode"]),
         "lang_codes": [code for code, v in ctx.state["lang_codes"].items() if v],
         "only_lang": ctx.state["only_lang"],
         "process_zh_cn": ctx.state["process_zh_cn"],

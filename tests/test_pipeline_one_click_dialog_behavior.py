@@ -244,7 +244,8 @@ def test_mode_selection_is_collected_and_survives_navigation(env, mode):
     env.click("下一個")
     env.click("上一個")
     assert env.controls(ft.RadioGroup)[0].value == mode
-    assert env.run_to_end()["mode"] == mode
+    # UI 的「全部執行」(both) 在邊界正規化為引擎的 dual
+    assert env.run_to_end()["mode"] == ("dual" if mode == "both" else mode)
 
 
 def test_lang_checkbox_changes_reach_config(env):
@@ -654,7 +655,7 @@ def test_collected_values_flow_into_single_config(env):
     _version_items(env)[1].on_click(None)
     config = env.run_to_end_from(4)
     assert (config["mode"], config["patchouli_skip"], config["dry_run"]) == (
-        "both",
+        "dual",
         True,
         True,
     )

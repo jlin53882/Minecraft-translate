@@ -12,6 +12,11 @@ def _has_files(path: str) -> bool:
     return any(files for _, _, files in os.walk(path))
 
 
+def normalize_extract_mode(mode: str | None) -> str:
+    """抽取模式的邊界正規化：UI 的「全部執行」(``both``) 在引擎／actions 一律是 ``dual``。"""
+    return "dual" if mode == "both" else (mode or "lang")
+
+
 class PipelineConfig:
     """一鍵製作路徑設定檔"""
 
@@ -35,7 +40,9 @@ class PipelineConfig:
         )
 
         self.lm_translate = "lm_translate"
-        self.translate_output_subfolder = "_翻譯輸出"
+        self.translate_output_subfolder = lang_merger.get(
+            "lm_translate_folder_name", "_翻譯輸出"
+        )
 
         self.output_zip_name = bundler.get("output_zip_name", "可使用翻譯.zip")
 

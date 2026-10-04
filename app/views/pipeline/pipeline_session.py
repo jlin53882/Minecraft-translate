@@ -7,7 +7,9 @@
 - **session**：每個步驟使用獨立 ``TaskSession``（可注入 ``session_factory``）。
 - **輪詢**：日誌／進度由 event loop 上的 watcher 同步到面板，watcher 由 ``PollerHandle`` 持有：
   ``on_unmount()`` 停止它（背景步驟照常執行、不再碰已卸載的控制項）、``on_mount()`` 接續
-  （以 ``last_seq`` 避免重複日誌）；步驟結束時一定會再補一次最終同步。
+  （以 ``last_seq`` 避免重複日誌）。
+- **卸載期間不碰 UI**：View 卸載後 worker／session 照常執行，但所有會動到控制項的更新
+  （最終日誌同步、步驟／整串完成、按鈕恢復）都先暫存，``on_mount()`` 時依序套用一次。
 - **取消**：``cancel_event`` 由 View 的取消按鈕設定，步驟在檢查點停止，後續步驟不再執行。
 
 UI 更新一律透過 ``ui()``（``page.run_task``）排回 event loop；worker 不直接改控制項。
@@ -74,6 +76,9 @@ class PipelineRunner:
         self.current_session: TaskSession | None = None
         self.poller = PollerHandle()  # 日誌／進度 watcher 的 owner
         self._watch: _Watch | None = None
+        # 只在 event loop 上讀寫：View 是否掛載、卸載期間暫存的 UI 更新
+        self._mounted = True
+        self._pending: list[tuple[Callable, tuple]] = []
 
     # ------------------------------------------------------------------ UI marshal
 
@@ -87,12 +92,27 @@ class PipelineRunner:
 
     # ------------------------------------------------------------------ 生命週期
 
+    def ui_view(self, fn, *args) -> None:
+        """排回 event loop 更新 View 的控制項；View 已卸載時改為暫存，掛載時再套用。"""
+        self.ui(self._deliver, fn, args)
+
+    def _deliver(self, fn, args) -> None:
+        if self._mounted:
+            fn(*args)
+        else:
+            self._pending.append((fn, args))
+
     def on_unmount(self) -> None:
-        """換頁／關閉：停止 watcher（idempotent）；背景步驟照常執行。"""
+        """換頁／關閉（event loop）：停止 watcher、之後的 UI 更新暫存；背景步驟照常執行。"""
+        self._mounted = False
         self.poller.stop()
 
     def on_mount(self) -> None:
-        """重新掛載：步驟仍在追蹤就接續輪詢（已結束的步驟會補一次最終同步後結束）。"""
+        """（重新）掛載（event loop）：套用卸載期間暫存的更新，步驟仍在追蹤就接續輪詢。"""
+        self._mounted = True
+        pending, self._pending = self._pending, []
+        for fn, args in pending:
+            fn(*args)
         if self._watch is not None:
             self._start_watch()
 
@@ -118,7 +138,7 @@ class PipelineRunner:
             try:
                 self.run_step(step_num, name, service_fn)
             finally:
-                self.ui(on_end)
+                self.ui_view(on_end)
 
         self._launch(worker)
 
@@ -134,9 +154,9 @@ class PipelineRunner:
                 success = True
             except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，確保按鈕會恢復
                 log_error(f"[Pipeline] 一鍵製作失敗：{ex}\n{traceback.format_exc()}")
-                self.ui(self._panel.add_log, f"❌ 流程失敗：{ex}", "error")
+                self.ui_view(self._panel.add_log, f"❌ 流程失敗：{ex}", "error")
             finally:
-                self.ui(self._finish_sequence, success, on_end)
+                self.ui_view(self._finish_sequence, success, on_end)
 
         self._launch(worker)
 
@@ -163,8 +183,8 @@ class PipelineRunner:
         self.current_session = session
         watch = _Watch(session)
         self._watch = watch
-        self.ui(self._panel.set_step_running, step_num, name)
-        self.ui(self._panel.add_log, f"▶ 開始：{name}")
+        self.ui_view(self._panel.set_step_running, step_num, name)
+        self.ui_view(self._panel.add_log, f"▶ 開始：{name}")
         self.ui(self._start_watch)
         try:
             # 取消檢查：翻譯在批次之間 / 等待限流時、提取在 JAR 之間停止
@@ -190,7 +210,7 @@ class PipelineRunner:
         # 之後的最終同步由 event loop 上的 _final_sync 補上，不會漏掉日誌
         if not self.poller.wait_idle(timeout=_FINAL_SYNC_TIMEOUT_SEC):
             log_warning(f"[Pipeline] {name} 日誌同步未完成")
-        self.ui(self._final_sync, watch)
+        self.ui_view(self._final_sync, watch)
 
         cancelled = self.cancel_event.is_set()
         ok = not cancelled and not self._session_failed(session)
@@ -204,13 +224,13 @@ class PipelineRunner:
             self._panel.add_log(f"✅ {name} 完成" if ok else f"❌ {name} 失敗")
             self._update_progress(1.0, "完成" if ok else "失敗")
 
-        self.ui(_finish)
+        self.ui_view(_finish)
         return ok
 
     # ------------------------------------------------------------------ 輪詢（event loop）
 
     def _start_watch(self) -> None:
-        if self._watch is not None:
+        if self._watch is not None and self._mounted:
             self.poller.start(self._page, self._watch_loop)
 
     async def _watch_loop(self, alive) -> None:

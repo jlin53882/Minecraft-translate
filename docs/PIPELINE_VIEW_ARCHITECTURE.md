@@ -46,6 +46,12 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
 
 ## 主要流程
 
+### 契約摘要
+
+- **抽取模式**：對話框顯示的「全部執行」(`both`) 在邊界（一鍵對話框 config 輸出、`PipelineView._prepare_one_click`）以 `normalize_extract_mode` 轉成引擎的 `dual`；`PipelineActions` 只認 `lang`／`book`／`dual`。
+- **TaskSession 生命週期**：每個步驟的 session 都要 `start()`（登記到全域 `TaskManager`）並在結束／取消時 `finish()`（已 `set_error()` 維持 ERROR）。`PipelineActions.bundle(manage_session=True)` 負責單一打包步驟；一鍵步驟 4 自己 `start()`／`finally finish()`，內部呼叫 `bundle(manage_session=False)`。
+- **翻譯輸出路徑單一來源**：`PipelineConfig.translate_output_subfolder` 讀 `lang_merger.lm_translate_folder_name`（預設 `_翻譯輸出`），與翻譯／打包／一鍵對話框的預設路徑一致。
+
 ### 工作台（workbench_view）
 ```
 [填路徑] input_path_text / output_path_text（kit.text_field，旁邊的 kit.pick_button 以 file_picker 選資料夾）
@@ -75,7 +81,7 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
 ```
 
 - **依賴邊界**：`PipelineView(page, file_picker, *, actions=None, session_factory=None, launch_worker=None)`。測試可注入假的 `PipelineActions`（驗證 View 的委派）、`PipelineServices`（驗證 action 對 service 的呼叫）、同步的 `launch_worker`；不需要 patch module 名稱或 `threading.Thread`。
-- **watcher 的 owner 與 teardown**：`PipelineRunner.poller`（`PollerHandle`）。`will_unmount()` → `runner.on_unmount()` 停止 watcher（背景步驟照常執行，不再碰已卸載的控制項）；`did_mount()` → `runner.on_mount()` 接續（以 `_Watch.last_seq` 避免重複日誌；重複掛載只會有一個 poller）。步驟結束時 `_final_sync` 一定在 event loop 上補最後一次同步（卸載期間完成也不漏）。
+- **watcher 的 owner 與 teardown**：`PipelineRunner.poller`（`PollerHandle`）。`will_unmount()` → `runner.on_unmount()` 停止 watcher，並把之後所有會動到控制項的更新（`_final_sync`、步驟／整串完成、按鈕恢復）改為暫存（`ui_view` → `_deliver`）；背景步驟與 session 照常執行，**卸載期間不碰控制項也不 `page.update()`**。`did_mount()` → `runner.on_mount()` 依序套用暫存更新一次，並接續輪詢（以 `_Watch.last_seq` 避免重複日誌；重複掛載只會有一個 poller）。
 - **背景 worker 不直接修改 Flet control**，也不呼叫 `page.update()`。所有 UI 更新都經 `PipelineRunner.ui(fn)`（`page.run_task` 包一層 coroutine）或 watcher 在 event loop 上執行。
 - **`TaskSession` 是 worker 與 UI 之間唯一的狀態邊界**：worker 只呼叫 `add_log` / `set_progress` / `set_summary` / `set_error` / `finish`；UI 只讀 `snapshot()`。
 - **`_watch_loop`**（coroutine）：每 `POLL_INTERVAL_SEC`（0.2 秒）`await asyncio.sleep(...)`，依 log `seq` 只取新日誌、批次 `log_view.add_many()`，並更新進度；`done` 事件設定後再同步一次就結束。

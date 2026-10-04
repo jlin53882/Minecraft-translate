@@ -130,18 +130,34 @@ class PipelineActions:
             write_new_cache=write_new_cache,
         )
 
-    def bundle(self, session: TaskSession, **kwargs) -> Iterator:
-        """打包資源：把 service 的 generator 更新寫進 session（日誌／進度／錯誤）。"""
-        os.makedirs(os.path.dirname(kwargs["output_zip_path"]) or ".", exist_ok=True)
-        for update_dict in self.services.bundle(**kwargs):
-            if update_dict.get("log"):
-                session.add_log(update_dict["log"])
-            if update_dict.get("progress") is not None:
-                session.set_progress(update_dict["progress"])
-            if update_dict.get("error"):
-                session.set_error()
-                return
-            yield update_dict
+    def bundle(
+        self, session: TaskSession, *, manage_session: bool = True, **kwargs
+    ) -> Iterator:
+        """打包資源：把 service 的 generator 更新寫進 session（日誌／進度／錯誤）。
+
+        ``manage_session=True`` 時負責完整的 session 生命週期（``start()`` 登記為 active，
+        結束或被取消關閉時 ``finish()``；已 ``set_error()`` 的維持 ERROR），讓全域
+        ``TaskManager``（topbar／取消）看得到這個任務。一鍵流程的步驟 4 已先寫入暫存日誌，
+        由步驟自己管理生命週期，所以傳 ``manage_session=False``。
+        """
+        if manage_session:
+            session.start()
+        try:
+            os.makedirs(
+                os.path.dirname(kwargs["output_zip_path"]) or ".", exist_ok=True
+            )
+            for update_dict in self.services.bundle(**kwargs):
+                if update_dict.get("log"):
+                    session.add_log(update_dict["log"])
+                if update_dict.get("progress") is not None:
+                    session.set_progress(update_dict["progress"])
+                if update_dict.get("error"):
+                    session.set_error()
+                    return
+                yield update_dict
+        finally:
+            if manage_session:
+                session.finish()
 
     # ------------------------------------------------------------------ 一鍵製作
 
@@ -199,26 +215,31 @@ class PipelineActions:
                     return
 
         def bundle(session):
-            stats = self.services.build_staging(
-                cfg.bundle_sources, cfg.bundle_staging_dir
-            )
-            session.add_log(
-                f"[系統] 打包暫存完成：複製 {stats['copied']} 個、合併 {stats['merged']} 個檔案"
-            )
-            if not stats["copied"] and not stats["merged"]:
-                session.add_log("❌ 沒有可打包的翻譯檔案", level="error")
-                session.set_error()
-                return
-            yield from self.bundle(
-                session,
-                input_root_dir=cfg.bundle_staging_dir,
-                output_zip_path=config.get("zip_output") or cfg.bundle_output_zip,
-                description=config.get("description", ""),
-                min_format=config.get("min_format") or 0,
-                max_format=config.get("max_format") or 0,
-                pack_image_path=config.get("pack_image"),
-                extra_folders=config.get("extra_folders", []),
-            )
+            session.start()
+            try:
+                stats = self.services.build_staging(
+                    cfg.bundle_sources, cfg.bundle_staging_dir
+                )
+                session.add_log(
+                    f"[系統] 打包暫存完成：複製 {stats['copied']} 個、合併 {stats['merged']} 個檔案"
+                )
+                if not stats["copied"] and not stats["merged"]:
+                    session.add_log("❌ 沒有可打包的翻譯檔案", level="error")
+                    session.set_error()
+                    return
+                yield from self.bundle(
+                    session,
+                    manage_session=False,
+                    input_root_dir=cfg.bundle_staging_dir,
+                    output_zip_path=config.get("zip_output") or cfg.bundle_output_zip,
+                    description=config.get("description", ""),
+                    min_format=config.get("min_format") or 0,
+                    max_format=config.get("max_format") or 0,
+                    pack_image_path=config.get("pack_image"),
+                    extra_folders=config.get("extra_folders", []),
+                )
+            finally:
+                session.finish()
 
         return [
             (1, "抽取資源", extract),

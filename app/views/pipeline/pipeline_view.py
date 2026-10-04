@@ -16,7 +16,7 @@ from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.pipeline.pipeline_actions import PipelineActions, session_failed
 from app.views.pipeline.pipeline_bundle_dialog import open_bundle_dialog
-from app.views.pipeline.pipeline_config import PipelineConfig
+from app.views.pipeline.pipeline_config import PipelineConfig, normalize_extract_mode
 from app.views.pipeline.pipeline_extract_dialog import open_extract_dialog
 from app.views.pipeline.pipeline_merge_dialog import open_merge_dialog
 from app.views.pipeline.pipeline_one_click_dialog import open_one_click_dialog
@@ -320,7 +320,7 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
             show_snack(self._page, "❌ 輸出目錄不存在或未選擇")
             return None
 
-        mode = config.get("mode", "lang")
+        mode = normalize_extract_mode(config.get("mode"))
         lang_codes = config.get("lang_codes", [])
         if not lang_codes:
             show_snack(self._page, "⚠️ 請至少勾選一個語系代碼")
