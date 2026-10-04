@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.zip_safety import (
@@ -42,7 +43,7 @@ def _compute_modpack_hash(mods_dir: Path) -> str:
 
 def get_index_path(mods_dir: Path) -> Path:
     """取得該 modpack 的索引檔路徑。"""
-    cache_dir = Path(__file__).parent.parent / ".icon_cache" / "icon_index"
+    cache_dir = get_data_root() / ".icon_cache" / "icon_index"
     cache_dir.mkdir(parents=True, exist_ok=True)
     h = _compute_modpack_hash(mods_dir)
     return cache_dir / f"{h}.json"

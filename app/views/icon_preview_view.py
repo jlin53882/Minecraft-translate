@@ -27,6 +27,7 @@ from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.icon_preview_row import LangItemRow
+from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.jar_browser import scan_jars
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
@@ -81,12 +82,12 @@ def _key_needs_icon(key: str) -> bool:
 
 def _get_icon_cache_dir() -> Path:
     """取得 icon 快取根目錄（統一至 .icon_cache/jar_icons/）。"""
-    return Path(__file__).parent.parent.parent / ".icon_cache" / "jar_icons"
+    return get_data_root() / ".icon_cache" / "jar_icons"
 
 
 def _get_model_index_cache_dir() -> Path:
     """取得 model index 快取目錄（.icon_cache/model_index/）。"""
-    return Path(__file__).parent.parent.parent / ".icon_cache" / "model_index"
+    return get_data_root() / ".icon_cache" / "model_index"
 
 
 def _get_jar_hash(jar_path: Path) -> str:
@@ -679,7 +680,7 @@ def _batch_extract_jar_icons(
 # ==================================================
 def _get_cache_dir() -> Path:
     """取得 L2 快取目錄（專案根目錄）。"""
-    return Path(__file__).parent.parent.parent / ".icon_cache"
+    return get_data_root() / ".icon_cache"
 
 
 def _compute_cache_key(source_root: Path) -> str:

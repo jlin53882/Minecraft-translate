@@ -16,9 +16,9 @@ PR15 範圍（只抽離 IO/wrapper，不改 pipeline/service 流程）：
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
+from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.text_processor import (
     load_replace_rules as load_rules_core,
 )
@@ -28,8 +28,8 @@ from translation_tool.utils.text_processor import (
 
 # --- 檔案路徑設定 ---
 # services_impl/config_service.py 位於 app/services_impl/ 底下：
-# parents[0]=services_impl, parents[1]=app, parents[2]=repo root
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# 可寫資料根目錄：原始碼模式為 repo root，打包後為 exe 所在資料夾（見 app_paths）
+PROJECT_ROOT = get_data_root()
 CONFIG_PATH = str(PROJECT_ROOT / "config.json")
 REPLACE_RULES_PATH = str(PROJECT_ROOT / "replace_rules.json")
 

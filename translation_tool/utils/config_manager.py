@@ -22,13 +22,15 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from translation_tool.utils.app_paths import get_data_root
+
 log = logging.getLogger(__name__)
 
 
 # PR27：統一路徑解析基準，避免 legacy cwd 依賴造成找不到 config / 資源檔。
 def get_project_root() -> Path:
-    """取得專案根目錄路徑。"""
-    return Path(__file__).resolve().parents[2]
+    """取得可寫資料的根目錄（原始碼模式為專案根目錄；打包後為 exe 所在資料夾）。"""
+    return get_data_root()
 
 
 PROJECT_ROOT = get_project_root()

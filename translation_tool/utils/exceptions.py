@@ -15,18 +15,20 @@
 
 import time
 import traceback
-from functools import wraps
-from pathlib import Path
 from datetime import datetime
+from functools import wraps
+
+from translation_tool.utils.app_paths import get_data_root
 
 # =============================================================================
 # 自訂異常類別
 # =============================================================================
 
+
 class TranslationError(Exception):
     """翻譯相關錯誤的基底類別"""
 
-    def __init__(self, message: str, context: dict = None):
+    def __init__(self, message: str, context: dict | None = None):
         """初始化翻譯錯誤。
 
         參數：
@@ -44,10 +46,10 @@ class TranslationError(Exception):
             return f"{self.message} (context: {ctx})"
         return self.message
 
+
 class APIError(TranslationError):
     """API 相關錯誤"""
 
-    pass
 
 class RateLimitError(APIError):
     """API 限流錯誤（429 Too Many Requests）"""
@@ -65,6 +67,7 @@ class RateLimitError(APIError):
         )
         self.retry_after = retry_after
 
+
 class OverloadError(APIError):
     """API 過載錯誤（503 Service Unavailable - overload）"""
 
@@ -76,24 +79,23 @@ class OverloadError(APIError):
         """
         super().__init__("API 伺服器過載", context)
 
+
 class FileFormatError(TranslationError):
     """檔案格式錯誤（JSON、lang 等）"""
 
-    pass
 
 class CacheError(TranslationError):
     """快取相關錯誤"""
 
-    pass
 
 class ConfigError(TranslationError):
     """配置檔錯誤"""
 
-    pass
 
 # =============================================================================
 # 錯誤處理裝飾器
 # =============================================================================
+
 
 def handle_translation_errors(log_func=None, auto_retry=True, max_retries=3):
     """統一的錯誤處理裝飾器
@@ -194,7 +196,7 @@ def handle_translation_errors(log_func=None, auto_retry=True, max_retries=3):
                 except Exception as e:
                     # 未預期的錯誤
                     if log_func:
-                        log_func(f"💥 未預期錯誤: {str(e)}")
+                        log_func(f"💥 未預期錯誤: {e!s}")
                     _log_error_to_file(e, func.__name__)
                     raise
 
@@ -202,9 +204,11 @@ def handle_translation_errors(log_func=None, auto_retry=True, max_retries=3):
 
     return decorator
 
+
 # =============================================================================
 # 錯誤記錄
 # =============================================================================
+
 
 def _log_error_to_file(error: Exception, func_name: str):
     """將錯誤寫入日誌檔案
@@ -215,19 +219,21 @@ def _log_error_to_file(error: Exception, func_name: str):
     """
     try:
         # 確保日誌目錄存在
-        log_dir = Path("logs")
+        log_dir = get_data_root() / "logs"
         log_dir.mkdir(exist_ok=True)
 
         # 日誌檔案路徑（按日期分檔）
-        log_file = log_dir / f"errors_{datetime.now().strftime('%Y-%m-%d')}.log"
+        log_file = (
+            log_dir / f"errors_{datetime.now().astimezone().strftime('%Y-%m-%d')}.log"
+        )
 
         # 寫入錯誤資訊
         with open(log_file, "a", encoding="utf-8") as f:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
             f.write(f"\n{'=' * 80}\n")
             f.write(f"[{timestamp}] 錯誤發生於: {func_name}\n")
             f.write(f"錯誤類型: {type(error).__name__}\n")
-            f.write(f"錯誤訊息: {str(error)}\n")
+            f.write(f"錯誤訊息: {error!s}\n")
 
             if isinstance(error, TranslationError) and error.context:
                 f.write(f"錯誤上下文: {error.context}\n")
@@ -236,13 +242,15 @@ def _log_error_to_file(error: Exception, func_name: str):
             f.write(traceback.format_exc())
             f.write(f"{'=' * 80}\n")
 
-    except Exception as log_error:
+    except Exception as log_error:  # noqa: BLE001 - 記錄失敗不可中斷主流程
         # 記錄失敗也不應該中斷主流程
         print(f"[WARN] 寫入錯誤日誌失敗: {log_error}")
+
 
 # =============================================================================
 # 便利函式
 # =============================================================================
+
 
 def raise_if_invalid_json(data: dict, required_keys: list, source: str = "unknown"):
     """檢查 JSON 資料是否包含必要欄位
@@ -261,6 +269,7 @@ def raise_if_invalid_json(data: dict, required_keys: list, source: str = "unknow
             f"JSON 格式錯誤：缺少必要欄位 {missing}",
             context={"source": source, "missing_keys": missing},
         )
+
 
 def raise_if_empty(value, name: str):
     """檢查值是否為空

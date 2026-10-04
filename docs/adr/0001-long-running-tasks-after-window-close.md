@@ -10,14 +10,14 @@ PR #149 加入「關閉前確認、取消、drain、flush」作為短期緩解�
 
 ## 事實盤點
 
-**發佈形式**：僅原始碼執行（見 `docs/DISTRIBUTION_AND_DATA_DIR.md`），結束行為以原始碼模式為準，
-built app 的「立即終止、不保證 flush」尚未適用。
+**發佈形式**：打包 exe，資料放 exe 旁邊（見 `docs/DISTRIBUTION_AND_DATA_DIR.md`）。
+打包後關閉視窗是否立即終止、不保證 flush，需 Windows 實機確認。
 
 **續跑能力**（靜態盤點，皆未端到端驗證）：
 
 | 流程 | 續跑機制 | 備註 |
 |---|---|---|
-| 機器翻譯（`core/lm_translator.py`） | 有 checkpoint：`compute_checkpoint_fingerprint`、`save_checkpoint`、`load_checkpoint`、`clear_checkpoint` | 每批後寫入；指紋比對防止套用到不同資料；**路徑 `logs/translation_checkpoint.json` 為相對工作目錄** |
+| 機器翻譯（`core/lm_translator.py`） | 有 checkpoint：`compute_checkpoint_fingerprint`、`save_checkpoint`、`load_checkpoint`、`clear_checkpoint` | 每批後寫入；指紋比對防止套用到不同資料；路徑已改為走資料根目錄（`get_data_root()`），不再依賴工作目錄 |
 | 翻譯快取 | 已寫入的快取不重翻 | 以 shard 與寫入間隔落盤，尚未落盤的部分關閉時可能遺失 |
 | FTB / KubeJS / MD translator | 依快取分流，未發現獨立 checkpoint | 重開後靠快取跳過已翻項目 |
 | 合併 / 提取 | 未發現續跑機制 | 重開需重跑 |
@@ -33,7 +33,7 @@ built app 的「立即終止、不保證 flush」尚未適用。
 ## 建議（待你確認）
 
 先做 **C**：
-1. 把 checkpoint 與錯誤記錄路徑改為走資料根目錄（修正上述相對路徑問題）。
+1. （已完成）checkpoint 與錯誤記錄路徑改為走資料根目錄。
 2. 驗證機器翻譯「中斷 → 重開 → 續跑」端到端，補測試（中斷點在切批中、寫快取中、剛開始）。
 3. 在 App 啟動時顯示「上次被中斷的任務」。
 4. 其他流程的續跑能力列為後續。

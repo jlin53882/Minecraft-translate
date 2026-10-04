@@ -1,0 +1,64 @@
+@echo off
+chcp 65001 >nul
+REM ============================================================
+REM  Minecraft Translator 打包腳本（Nuitka standalone）— 草稿，尚未實測
+REM
+REM  輸出結構（資料放 exe 旁邊）：
+REM    dist\MinecraftTranslator\MinecraftTranslator.exe
+REM    dist\MinecraftTranslator\config.json  ← 由 config.example.json 複製（首次）
+REM    dist\MinecraftTranslator\快取資料\、logs\ ...  ← 執行時產生
+REM
+REM  可寫資料位置由 translation_tool/utils/app_paths.py 決定：
+REM    打包後 = exe 所在資料夾；可用環境變數 MCT_DATA_DIR 覆蓋。
+REM  首次測試請保持 console 模式（force），確認能啟動後再改 disable。
+REM ============================================================
+setlocal
+cd /d "%~dp0.."
+
+uv --version >nul 2>nul
+if %errorlevel% neq 0 (
+    echo 找不到 uv，請先安裝：https://docs.astral.sh/uv/
+    pause
+    exit /b 1
+)
+
+set APP_NAME=MinecraftTranslator
+set OUTPUT_DIR=dist
+set CONSOLE_MODE=force
+
+echo [1/3] 同步環境...
+uv sync --frozen
+if %errorlevel% neq 0 ( pause & exit /b 1 )
+
+echo [2/3] Nuitka 打包...
+if exist icon.ico ( set ICON_OPT=--windows-icon-from-ico=icon.ico ) else ( set ICON_OPT= )
+
+uv run --frozen --with nuitka python -m nuitka ^
+  --standalone ^
+  --jobs=%NUMBER_OF_PROCESSORS% ^
+  --windows-console-mode=%CONSOLE_MODE% ^
+  --include-package=flet ^
+  --include-package-data=flet ^
+  --include-package=flet_desktop ^
+  --include-package-data=flet_desktop ^
+  --include-package=translation_tool ^
+  --include-package=app ^
+  --include-data-dir=assets=assets ^
+  --include-data-files=translation_tool/core/resource_pack_version.json=translation_tool/core/resource_pack_version.json ^
+  --include-data-files=pyproject.toml=pyproject.toml ^
+  --output-dir=%OUTPUT_DIR% ^
+  --output-filename=%APP_NAME%.exe ^
+  %ICON_OPT% ^
+  main.py
+if %errorlevel% neq 0 ( pause & exit /b 1 )
+
+echo [3/3] 複製資料檔到 exe 旁邊...
+set DIST=%OUTPUT_DIR%\main.dist
+if exist "%OUTPUT_DIR%\%APP_NAME%" rmdir /s /q "%OUTPUT_DIR%\%APP_NAME%"
+ren "%DIST%" %APP_NAME%
+copy /y config.example.json "%OUTPUT_DIR%\%APP_NAME%\config.example.json" >nul
+copy /y replace_rules.json "%OUTPUT_DIR%\%APP_NAME%\replace_rules.json" >nul
+if not exist "%OUTPUT_DIR%\%APP_NAME%\config.json" copy /y config.example.json "%OUTPUT_DIR%\%APP_NAME%\config.json" >nul
+
+echo 完成：%OUTPUT_DIR%\%APP_NAME%
+pause
