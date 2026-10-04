@@ -97,6 +97,66 @@ class DashboardView(ft.Column):
         key_snapshot_loader: Callable[[], list] = _default_key_snapshot,
     ) -> None:
         super().__init__(expand=True, spacing=18, scroll=ft.ScrollMode.AUTO)
+        activity_card, cache_card, flow_card = self._init_dashboard_state_and_cards(
+            cache_overview_loader, key_snapshot_loader, page, rules_count_loader
+        )
+        keys_card = self._build_dashboard_keys_card()
+        self.controls = [
+            ft.Row(
+                [
+                    ft.Row(
+                        [
+                            kit.tone_icon(
+                                ft.Icons.GRID_VIEW, "em", size=22, box=46, radius=13
+                            ),
+                            ft.Column(
+                                [
+                                    self.title_text,
+                                    ft.Text(
+                                        "專案狀態一覽：快取、規則、API Key 與翻譯流程進度",
+                                        size=13,
+                                        color=C.MUTED,
+                                    ),
+                                ],
+                                spacing=2,
+                                tight=True,
+                            ),
+                        ],
+                        spacing=14,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row([self.refresh_button, self.continue_button], spacing=10),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.END,
+            ),
+            ft.Row(
+                [self.stat_cache, self.stat_rules, self.stat_keys, self.stat_tasks],
+                spacing=14,
+            ),
+            ft.Row(
+                [
+                    ft.Column([flow_card], expand=7),
+                    ft.Column([cache_card], expand=4),
+                ],
+                spacing=16,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            ),
+            ft.Row(
+                [
+                    ft.Column([activity_card], expand=6),
+                    ft.Column([keys_card], expand=5),
+                ],
+                spacing=16,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            ),
+        ]
+        self.refresh_view(self._collect())
+
+    def _init_dashboard_state_and_cards(
+        self, cache_overview_loader, key_snapshot_loader, page, rules_count_loader
+    ):
+        """工作台的狀態與流程／快取／活動卡片。"""
         self._page = page
         self._cache_overview_loader = cache_overview_loader
         self._rules_count_loader = rules_count_loader
@@ -155,6 +215,10 @@ class DashboardView(ft.Column):
         activity_card = kit.section_card(
             "最近活動", self.activity_column, icon=ft.Icons.HISTORY, tone="dia"
         )
+        return activity_card, cache_card, flow_card
+
+    def _build_dashboard_keys_card(self):
+        """API 金鑰卡片。"""
         keys_card = kit.section_card(
             "API Key 狀態",
             self.keys_column,
@@ -169,57 +233,7 @@ class DashboardView(ft.Column):
                 )
             ],
         )
-        self.controls = [
-            ft.Row(
-                [
-                    ft.Row(
-                        [
-                            kit.tone_icon(
-                                ft.Icons.GRID_VIEW, "em", size=22, box=46, radius=13
-                            ),
-                            ft.Column(
-                                [
-                                    self.title_text,
-                                    ft.Text(
-                                        "專案狀態一覽：快取、規則、API Key 與翻譯流程進度",
-                                        size=13,
-                                        color=C.MUTED,
-                                    ),
-                                ],
-                                spacing=2,
-                                tight=True,
-                            ),
-                        ],
-                        spacing=14,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    ft.Row([self.refresh_button, self.continue_button], spacing=10),
-                ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                vertical_alignment=ft.CrossAxisAlignment.END,
-            ),
-            ft.Row(
-                [self.stat_cache, self.stat_rules, self.stat_keys, self.stat_tasks],
-                spacing=14,
-            ),
-            ft.Row(
-                [
-                    ft.Column([flow_card], expand=7),
-                    ft.Column([cache_card], expand=4),
-                ],
-                spacing=16,
-                vertical_alignment=ft.CrossAxisAlignment.START,
-            ),
-            ft.Row(
-                [
-                    ft.Column([activity_card], expand=6),
-                    ft.Column([keys_card], expand=5),
-                ],
-                spacing=16,
-                vertical_alignment=ft.CrossAxisAlignment.START,
-            ),
-        ]
-        self.refresh_view(self._collect())
+        return keys_card
 
     # -- 外殼介面 --------------------------------------------------------------
 

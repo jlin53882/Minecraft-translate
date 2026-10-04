@@ -139,6 +139,11 @@ class RulesView(ft.Column):
 
     def _init_controls(self):
         """初始化所有互動控制項"""
+        self._init_rules_table_controls()
+        self._init_rules_sort_and_test_controls()
+
+    def _init_rules_table_controls(self) -> None:
+        """規則表分頁與導覽控制項。"""
         # 1. 載入指示器
         self.loading_indicator = ft.ProgressRing(
             width=20, height=20, stroke_width=2, visible=False, color=C.EM
@@ -196,6 +201,9 @@ class RulesView(ft.Column):
             on_change=self.on_search,
             expand=True,
         )
+
+    def _init_rules_sort_and_test_controls(self) -> None:
+        """排序、規則表與即時測試控制項。"""
 
         self.sort_box = ft.Dropdown(
             label="排序方式",

@@ -54,6 +54,16 @@ class LMView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=16)
+        batch_interval, cache_row, dry_run_row, lang_row = (
+            self._init_lm_state_and_options(file_picker, page)
+        )
+        settings_card = self._build_lm_settings_card(
+            batch_interval, cache_row, dry_run_row, lang_row
+        )
+        self._build_lm_status_and_log_cards(settings_card)
+
+    def _init_lm_state_and_options(self, file_picker, page):
+        """機器翻譯頁的狀態與輸入選項。"""
         self._page = page
         self.file_picker = file_picker
 
@@ -112,6 +122,10 @@ class LMView(ft.Column):
             tooltip="開始執行 LM 翻譯流程",
             on_click=self.start_clicked,
         )
+        return batch_interval, cache_row, dry_run_row, lang_row
+
+    def _build_lm_settings_card(self, batch_interval, cache_row, dry_run_row, lang_row):
+        """機器翻譯設定卡片與執行按鈕。"""
         self.cancel_button = kit.button(
             "取消",
             "secondary",
@@ -170,6 +184,10 @@ class LMView(ft.Column):
             icon=ft.Icons.TUNE,
             tone="gold",
         )
+        return settings_card
+
+    def _build_lm_status_and_log_cards(self, settings_card) -> None:
+        """狀態卡片、日誌卡片與整體版面。"""
         status_card = kit.section_card(
             "執行狀態",
             ft.Column(

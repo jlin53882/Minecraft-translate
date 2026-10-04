@@ -66,6 +66,56 @@ class ExtractorView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=15)
+        self._init_extractor_inputs(file_picker, page)
+        self.dual_extract_button = kit.button(
+            "提取 Lang + Book",
+            "primary",
+            icon=ft.Icons.LANGUAGE,
+            on_click=self._handle_extract_dual_click,
+        )
+        self.dual_preview_button = kit.button(
+            "預覽 Lang + Book",
+            "secondary",
+            icon=ft.Icons.PREVIEW,
+            on_click=self._handle_preview_dual_click,
+        )
+
+        # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器 + 字串比對判 level）
+        # 注意:此 LogView 必須先建立 (在 Day 3-4 區段),因 _append_log_line()
+        # 在 _auto_fill_output_path() 內依賴它
+        self.log_view = LogView(
+            page=self._page,
+            mode="append",
+            max_lines=2000,
+        )
+
+        # ======================
+        # Layout Composition（使用 styled_card 統一外觀）
+        # ======================
+        # 🐛 2026-08-01 user review:不掛日誌面板到主 UI
+        # user 之前 base 設計是「日誌不顯示在主畫面」,規格書原本 S1 修復
+        # 要把日誌掛回 (確認 commit a3189f9),但 user 之後實測發現
+        # 會擠壓主畫面,改變主意不顯示。
+        # 日誌 self.log_view 仍建構 (供 _append_log_line 寫入跟 dialog 用),
+        # 但 self._logs_panel 不掛進 self.controls (user 看到的「主畫面」)。
+        self._logs_panel = ft.Container(content=ft.Column([self.log_view], height=350))
+        self._logs_panel.visible = False  # 隱藏 — 日誌只在 dialog 內顯示
+
+        self.controls = [build_settings_panel(self)]
+
+        # 初始化 output_dir helper，動態讀取設定值
+        # 用 try-except 避免 __init__ 階段 self.page.update() 觸發 Control must be added to the page first
+        try:
+            self._update_output_dir_helper()
+        except RuntimeError as e:
+            if "Control must be added to the page first" in str(e):
+                # 在 __init__ 階段元件還沒被加到 page，跳過 update 即可
+                pass
+            else:
+                raise
+
+    def _init_extractor_inputs(self, file_picker, page) -> None:
+        """提取頁的狀態與輸入控制項。"""
         self._page = page
         self.file_picker = file_picker
 
@@ -124,52 +174,6 @@ class ExtractorView(ft.Column):
             icon=ft.Icons.PREVIEW,
             on_click=self._handle_preview_book_click,
         )
-        self.dual_extract_button = kit.button(
-            "提取 Lang + Book",
-            "primary",
-            icon=ft.Icons.LANGUAGE,
-            on_click=self._handle_extract_dual_click,
-        )
-        self.dual_preview_button = kit.button(
-            "預覽 Lang + Book",
-            "secondary",
-            icon=ft.Icons.PREVIEW,
-            on_click=self._handle_preview_dual_click,
-        )
-
-        # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器 + 字串比對判 level）
-        # 注意:此 LogView 必須先建立 (在 Day 3-4 區段),因 _append_log_line()
-        # 在 _auto_fill_output_path() 內依賴它
-        self.log_view = LogView(
-            page=self._page,
-            mode="append",
-            max_lines=2000,
-        )
-
-        # ======================
-        # Layout Composition（使用 styled_card 統一外觀）
-        # ======================
-        # 🐛 2026-08-01 user review:不掛日誌面板到主 UI
-        # user 之前 base 設計是「日誌不顯示在主畫面」,規格書原本 S1 修復
-        # 要把日誌掛回 (確認 commit a3189f9),但 user 之後實測發現
-        # 會擠壓主畫面,改變主意不顯示。
-        # 日誌 self.log_view 仍建構 (供 _append_log_line 寫入跟 dialog 用),
-        # 但 self._logs_panel 不掛進 self.controls (user 看到的「主畫面」)。
-        self._logs_panel = ft.Container(content=ft.Column([self.log_view], height=350))
-        self._logs_panel.visible = False  # 隱藏 — 日誌只在 dialog 內顯示
-
-        self.controls = [build_settings_panel(self)]
-
-        # 初始化 output_dir helper，動態讀取設定值
-        # 用 try-except 避免 __init__ 階段 self.page.update() 觸發 Control must be added to the page first
-        try:
-            self._update_output_dir_helper()
-        except RuntimeError as e:
-            if "Control must be added to the page first" in str(e):
-                # 在 __init__ 階段元件還沒被加到 page，跳過 update 即可
-                pass
-            else:
-                raise
 
     def pick_directory(self, target):
         """開啟目錄選擇對話框。

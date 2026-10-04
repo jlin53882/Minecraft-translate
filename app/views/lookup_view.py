@@ -33,60 +33,7 @@ class LookupView(ft.Column):
             page: Flet Page 物件
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=20)
-        self._page = page
-        self._recent: list[str] = []
-
-        # --- 單筆查詢 UI 元件 ---
-        self.single_input = kit.text_field(
-            hint="輸入單一學名，例如：Felis catus",
-            icon=ft.Icons.SEARCH,
-            expand=True,
-            on_submit=self.single_lookup_clicked,
-            tooltip="例如：Felis catus",
-        )
-        self.single_button = kit.button(
-            "查詢", "primary", icon=ft.Icons.SEARCH, on_click=self.single_lookup_clicked
-        )
-        self.single_result_text = ft.Text(
-            "查詢結果將顯示在這裡。", selectable=True, size=14, color=C.DIM
-        )
-        self.single_progress_ring = ft.ProgressRing(
-            visible=False, width=16, height=16, stroke_width=2, color=C.EM
-        )
-        self.recent_row = ft.Row(wrap=True, spacing=8, run_spacing=8, visible=False)
-        self.copy_button = kit.button(
-            "複製結果",
-            "ghost",
-            icon=ft.Icons.CONTENT_COPY,
-            size="sm",
-            on_click=self.copy_result_clicked,
-        )
-
-        # --- 批次查詢 UI 元件 ---
-        self.batch_input = kit.text_field(
-            hint='輸入 JSON 格式的學名列表，例如：["Felis catus", "Canis lupus familiaris"]',
-            multiline=True,
-            min_lines=7,
-            max_lines=7,
-            mono=True,
-            tooltip='例如：["Felis catus", "Canis lupus familiaris"]',
-        )
-        self.batch_result_textfield = kit.text_field(
-            "批次查詢結果 (JSON)",
-            multiline=True,
-            min_lines=9,
-            max_lines=9,
-            read_only=True,
-            mono=True,
-        )
-        self.batch_button = kit.button(
-            "批次查詢",
-            "primary",
-            icon=ft.Icons.PLAY_ARROW,
-            on_click=self.batch_lookup_clicked,
-        )
-        self.batch_progress_bar = kit.progress_bar(None, "em")
-        self.batch_progress_bar.visible = False
+        self._init_lookup_inputs(page)
 
         # --- UI 佈局 ---
         single_card = kit.section_card(
@@ -142,6 +89,63 @@ class LookupView(ft.Column):
                 vertical_alignment=ft.CrossAxisAlignment.START,
             ),
         ]
+
+    def _init_lookup_inputs(self, page) -> None:
+        """查詢頁的狀態與輸入控制項。"""
+        self._page = page
+        self._recent: list[str] = []
+
+        # --- 單筆查詢 UI 元件 ---
+        self.single_input = kit.text_field(
+            hint="輸入單一學名，例如：Felis catus",
+            icon=ft.Icons.SEARCH,
+            expand=True,
+            on_submit=self.single_lookup_clicked,
+            tooltip="例如：Felis catus",
+        )
+        self.single_button = kit.button(
+            "查詢", "primary", icon=ft.Icons.SEARCH, on_click=self.single_lookup_clicked
+        )
+        self.single_result_text = ft.Text(
+            "查詢結果將顯示在這裡。", selectable=True, size=14, color=C.DIM
+        )
+        self.single_progress_ring = ft.ProgressRing(
+            visible=False, width=16, height=16, stroke_width=2, color=C.EM
+        )
+        self.recent_row = ft.Row(wrap=True, spacing=8, run_spacing=8, visible=False)
+        self.copy_button = kit.button(
+            "複製結果",
+            "ghost",
+            icon=ft.Icons.CONTENT_COPY,
+            size="sm",
+            on_click=self.copy_result_clicked,
+        )
+
+        # --- 批次查詢 UI 元件 ---
+        self.batch_input = kit.text_field(
+            hint='輸入 JSON 格式的學名列表，例如：["Felis catus", "Canis lupus familiaris"]',
+            multiline=True,
+            min_lines=7,
+            max_lines=7,
+            mono=True,
+            tooltip='例如：["Felis catus", "Canis lupus familiaris"]',
+        )
+        self.batch_result_textfield = kit.text_field(
+            "批次查詢結果 (JSON)",
+            multiline=True,
+            min_lines=9,
+            max_lines=9,
+            read_only=True,
+            mono=True,
+        )
+        self.batch_button = kit.button(
+            "批次查詢",
+            "primary",
+            icon=ft.Icons.PLAY_ARROW,
+            on_click=self.batch_lookup_clicked,
+        )
+        self.batch_progress_bar = kit.progress_bar(None, "em")
+        self.batch_progress_bar.visible = False
 
     # --- 最近查詢 / 複製 ---
     def _remember(self, name: str) -> None:

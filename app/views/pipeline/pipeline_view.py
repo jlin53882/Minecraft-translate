@@ -985,6 +985,51 @@ class PipelineView(ft.Column):
         )
 
     def _build_ui(self):
+        paths_card = self._build_pipeline_paths_card()
+        status_card, steps_card = self._build_pipeline_steps_and_status_cards()
+        one_click = self._build_one_click_button()
+
+        self.workbench_view = ft.Column(
+            [
+                kit.page_header(
+                    "模組流水線・一鍵製作",
+                    "從 JAR 提取到資源包打包，四個步驟一次完成；可隨時取消，已完成的批次會保留",
+                    icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
+                    tone="em",
+                    actions=[one_click],
+                ),
+                ft.Row(
+                    [
+                        ft.Column([paths_card, steps_card], spacing=16, expand=5),
+                        ft.Column(
+                            [status_card, self.progress_panel.container],
+                            spacing=16,
+                            expand=7,
+                        ),
+                    ],
+                    spacing=16,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                ),
+            ],
+            spacing=18,
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+        )
+
+        self.api_view = ft.Column(
+            [
+                ft.Text("API 金鑰管理", size=24, weight="bold", color=C.GOLD),
+                ft.Container(content=self.keys_container, expand=True),
+                ft.Button("儲存設定", icon=ft.Icons.SAVE, bgcolor=C.DIA, color=C.ON_EM),
+            ],
+            spacing=10,
+            expand=True,
+        )
+
+        self.controls.append(self.workbench_view)
+
+    def _build_pipeline_paths_card(self):
+        """路徑卡片。"""
         paths_card = kit.section_card(
             "專案路徑",
             ft.Column(
@@ -1033,6 +1078,10 @@ class PipelineView(ft.Column):
             icon=ft.Icons.FOLDER_OPEN,
             tone="em",
         )
+        return paths_card
+
+    def _build_pipeline_steps_and_status_cards(self):
+        """步驟與狀態卡片。"""
         steps_card = kit.section_card(
             "流水線步驟",
             ft.Column(
@@ -1093,43 +1142,4 @@ class PipelineView(ft.Column):
                 spacing=8,
             ),
         )
-        one_click = self._build_one_click_button()
-
-        self.workbench_view = ft.Column(
-            [
-                kit.page_header(
-                    "模組流水線・一鍵製作",
-                    "從 JAR 提取到資源包打包，四個步驟一次完成；可隨時取消，已完成的批次會保留",
-                    icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
-                    tone="em",
-                    actions=[one_click],
-                ),
-                ft.Row(
-                    [
-                        ft.Column([paths_card, steps_card], spacing=16, expand=5),
-                        ft.Column(
-                            [status_card, self.progress_panel.container],
-                            spacing=16,
-                            expand=7,
-                        ),
-                    ],
-                    spacing=16,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
-                ),
-            ],
-            spacing=18,
-            scroll=ft.ScrollMode.AUTO,
-            expand=True,
-        )
-
-        self.api_view = ft.Column(
-            [
-                ft.Text("API 金鑰管理", size=24, weight="bold", color=C.GOLD),
-                ft.Container(content=self.keys_container, expand=True),
-                ft.Button("儲存設定", icon=ft.Icons.SAVE, bgcolor=C.DIA, color=C.ON_EM),
-            ],
-            spacing=10,
-            expand=True,
-        )
-
-        self.controls.append(self.workbench_view)
+        return status_card, steps_card

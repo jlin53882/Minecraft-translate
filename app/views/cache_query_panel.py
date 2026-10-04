@@ -49,6 +49,11 @@ class CacheQueryPanel(ft.Container):
 
     def _build_components(self):
         """建立內部元件"""
+        self._build_query_inputs()
+        self._build_query_detail_and_pager()
+
+    def _build_query_inputs(self) -> None:
+        """查詢輸入控制項。"""
         # 搜尋輸入
         self.tf_query_input = ft.TextField(
             label="輸入 key / dst / 關鍵字",
@@ -107,6 +112,9 @@ class CacheQueryPanel(ft.Container):
         self.query_detail_status = ft.Text(
             "Cache 狀態: -", text_align=ft.TextAlign.LEFT
         )
+
+    def _build_query_detail_and_pager(self) -> None:
+        """詳情欄位與分頁控制項。"""
         self.query_detail_src = ft.Text(
             "-", selectable=True, no_wrap=False, text_align=ft.TextAlign.LEFT
         )

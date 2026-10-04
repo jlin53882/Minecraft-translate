@@ -131,6 +131,7 @@ class TestStartMergeActuallyClearsLogView:
     def merge_view_env(self, monkeypatch):
         """建立一個 MergeView,monkeypatch 必要的 session / ui_poller / config。"""
         from app.views import merge_view
+        from app.views.merge import merge_widgets
         from tests.conftest import mock_filepicker, mock_page
 
         class _Session:
@@ -160,7 +161,10 @@ class TestStartMergeActuallyClearsLogView:
                 return {"status": "DONE", "progress": 1.0, "logs": self.logs}
 
         monkeypatch.setattr(merge_view, "TaskSession", _Session)
+
+        monkeypatch.setattr(merge_widgets, "TaskSession", _Session)
         monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
+        monkeypatch.setattr(merge_widgets, "load_config", lambda: {"lang_merger": {}})
 
         page = mock_page()
         view = merge_view.MergeView(page, mock_filepicker())

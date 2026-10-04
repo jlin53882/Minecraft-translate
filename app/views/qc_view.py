@@ -67,6 +67,34 @@ class QCView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=18)
+        self._init_qc_state_and_progress(file_picker, page)
+        self._build_qc_mode_cards()
+        json_panel = self._build_qc_json_panel()
+        self._build_qc_tsv_and_untranslated_panels(json_panel)
+
+        self.controls = [
+            kit.page_header(
+                "QC 品質檢驗",
+                "檢查缺漏、簡繁不一致與英文殘留；報告輸出到你指定的資料夾",
+                icon=ft.Icons.VERIFIED_USER_OUTLINED,
+                tone="red",
+            ),
+            ft.Row(list(self.mode_cards.values()), spacing=16),
+            *self.mode_panels.values(),
+            kit.section_card(
+                "處理日誌",
+                ft.Column(
+                    [self.progress_bar, self.log_view],
+                    spacing=10,
+                    horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                ),
+                icon=ft.Icons.TERMINAL,
+                tone="gold",
+            ),
+        ]
+
+    def _init_qc_state_and_progress(self, file_picker, page) -> None:
+        """QC 頁的狀態、進度列與模式選擇。"""
         self._page = page
         self.file_picker = file_picker
         self.mode = QC_MODES[0][0]
@@ -123,6 +151,9 @@ class QCView(ft.Column):
             on_click=lambda e: self.start_task("compare_tsv"),
         )
 
+    def _build_qc_mode_cards(self) -> None:
+        """QC 模式卡片。"""
+
         # --- UI 佈局：模式卡 + 對應的設定面板 + 共用日誌 ---
         self.mode_cards = {
             key: kit.ChoiceCard(
@@ -137,6 +168,9 @@ class QCView(ft.Column):
             )
             for key, title, sub, icon, tone in QC_MODES
         }
+
+    def _build_qc_json_panel(self):
+        """JSON 檢查面板。"""
 
         json_panel = kit.section_card(
             "JSON 資料夾模式",
@@ -187,6 +221,10 @@ class QCView(ft.Column):
             icon=ft.Icons.FOLDER_OPEN,
             tone="em",
         )
+        return json_panel
+
+    def _build_qc_tsv_and_untranslated_panels(self, json_panel) -> None:
+        """TSV 與未翻譯檢查面板。"""
         tsv_panel = kit.section_card(
             "TSV 單檔案模式",
             ft.Column(
@@ -239,27 +277,6 @@ class QCView(ft.Column):
             "compare_tsv": tsv_panel,
         }
         self._apply_mode()
-
-        self.controls = [
-            kit.page_header(
-                "QC 品質檢驗",
-                "檢查缺漏、簡繁不一致與英文殘留；報告輸出到你指定的資料夾",
-                icon=ft.Icons.VERIFIED_USER_OUTLINED,
-                tone="red",
-            ),
-            ft.Row(list(self.mode_cards.values()), spacing=16),
-            *self.mode_panels.values(),
-            kit.section_card(
-                "處理日誌",
-                ft.Column(
-                    [self.progress_bar, self.log_view],
-                    spacing=10,
-                    horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-                ),
-                icon=ft.Icons.TERMINAL,
-                tone="gold",
-            ),
-        ]
 
     # --- 模式切換 ---
     def select_mode(self, mode: str) -> None:

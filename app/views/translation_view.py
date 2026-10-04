@@ -62,6 +62,30 @@ class TranslationView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=16)
+        tab_content = self._init_translation_state_and_tabs(file_picker, page)
+        right_panel = self._build_translation_status_and_right_panel(tab_content)
+
+        body = ft.Row(
+            [
+                ft.Container(expand=3, content=self.tabs),
+                ft.Container(expand=2, content=right_panel),
+            ],
+            expand=True,
+            spacing=16,
+        )
+
+        self.controls = [
+            kit.page_header(
+                "任務翻譯工具",
+                "處理 FTB Quests、KubeJS Tooltip 與 Markdown 文件，步驟可自由勾選",
+                icon=ft.Icons.TRANSLATE,
+                tone="ench",
+            ),
+            body,
+        ]
+
+    def _init_translation_state_and_tabs(self, file_picker, page):
+        """任務翻譯頁的狀態與分頁。"""
         self._page = page
         self.file_picker = file_picker
         self._state = TranslationRunState()
@@ -116,6 +140,10 @@ class TranslationView(ft.Column):
             expand=True,
         )
         tab_content = ft.Column([tab_bar, tab_view], expand=True, spacing=12)
+        return tab_content
+
+    def _build_translation_status_and_right_panel(self, tab_content):
+        """狀態卡片與右側面板。"""
         self.tabs = ft.Tabs(
             content=tab_content,
             length=3,
@@ -176,25 +204,7 @@ class TranslationView(ft.Column):
             expand=True,
             spacing=16,
         )
-
-        body = ft.Row(
-            [
-                ft.Container(expand=3, content=self.tabs),
-                ft.Container(expand=2, content=right_panel),
-            ],
-            expand=True,
-            spacing=16,
-        )
-
-        self.controls = [
-            kit.page_header(
-                "任務翻譯工具",
-                "處理 FTB Quests、KubeJS Tooltip 與 Markdown 文件，步驟可自由勾選",
-                icon=ft.Icons.TRANSLATE,
-                tone="ench",
-            ),
-            body,
-        ]
+        return right_panel
 
     # ------------------------------------------------------------------
     # 樣式 helper（集中到 app.ui.kit / app.ui.design）

@@ -16,8 +16,9 @@ def test_views_use_shared_components_and_no_local_styled_card():
         "app/views/merge_view.py",
     ]
 
+    companions = {"app/views/merge_view.py": ["app/views/merge/merge_widgets.py"]}
     for rel in targets:
-        src = _read(rel)
+        src = _read(rel) + "".join(_read(c) for c in companions.get(rel, []))
         # 共用卡片：舊的 styled_card 或新的 kit.section_card（重新設計後逐頁改用 kit）
         assert (
             "styled_card(" in src

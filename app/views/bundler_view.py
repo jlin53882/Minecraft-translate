@@ -288,6 +288,60 @@ class BundlerView(ft.Column):
             )
 
     def _build_controls(self):
+        version_section = self._build_bundler_version_section()
+        info_card = self._build_bundler_info_card(version_section)
+        paths_card = self._build_bundler_paths_card()
+        mcmeta_card, preview_card, start_button = self._build_bundler_preview_cards()
+        run_card = ft.Container(
+            padding=ft.Padding.symmetric(horizontal=18, vertical=14),
+            bgcolor=C.PANEL,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=design.RADIUS_CARD,
+            content=ft.Row(
+                [
+                    ft.Column(
+                        [self.status_text, self.progress_bar],
+                        spacing=8,
+                        tight=True,
+                        expand=True,
+                    ),
+                    start_button,
+                ],
+                spacing=16,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+        )
+        log_card = kit.section_card(
+            "打包日誌",
+            ft.Container(content=self.log_view, height=200),
+            icon=ft.Icons.RECEIPT_LONG,
+            tone="gold",
+            collapsible=True,
+        )
+
+        self.controls = [
+            kit.page_header(
+                "資源包打包",
+                "將翻譯結果打包成可直接使用的資源包 ZIP，自動產生 pack.mcmeta 與 pack.png",
+                icon=ft.Icons.INVENTORY_2_OUTLINED,
+                tone="gold",
+            ),
+            ft.Row(
+                [
+                    ft.Column([info_card, paths_card], spacing=16, expand=6),
+                    ft.Column(
+                        [preview_card, mcmeta_card, run_card], spacing=16, expand=5
+                    ),
+                ],
+                spacing=16,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            ),
+            log_card,
+        ]
+        self._update_preview()
+
+    def _build_bundler_version_section(self):
+        """版本選擇區塊。"""
         log_debug(f"_build_controls: version_expanded={self.version_expanded}")
         # --- 版本選擇（可展開的搜尋清單）---
         current = self.version_search.value or ""
@@ -345,6 +399,10 @@ class BundlerView(ft.Column):
             spacing=6,
         )
         self._version_section = version_section
+        return version_section
+
+    def _build_bundler_info_card(self, version_section):
+        """資訊卡片。"""
 
         info_card = kit.section_card(
             "資源包資訊",
@@ -378,6 +436,10 @@ class BundlerView(ft.Column):
             icon=ft.Icons.DIAMOND_OUTLINED,
             tone="gold",
         )
+        return info_card
+
+    def _build_bundler_paths_card(self):
+        """路徑卡片。"""
 
         paths_card = kit.section_card(
             "路徑與額外內容",
@@ -439,6 +501,10 @@ class BundlerView(ft.Column):
             icon=ft.Icons.FOLDER_OPEN,
             tone="em",
         )
+        return paths_card
+
+    def _build_bundler_preview_cards(self):
+        """預覽與 mcmeta 卡片。"""
 
         # --- 右側預覽 ---
         self.preview_title = ft.Text(spans=[], size=14, selectable=True)
@@ -493,53 +559,7 @@ class BundlerView(ft.Column):
             size="lg",
             on_click=self.start_bundling_clicked,
         )
-        run_card = ft.Container(
-            padding=ft.Padding.symmetric(horizontal=18, vertical=14),
-            bgcolor=C.PANEL,
-            border=ft.Border.all(1, C.LINE),
-            border_radius=design.RADIUS_CARD,
-            content=ft.Row(
-                [
-                    ft.Column(
-                        [self.status_text, self.progress_bar],
-                        spacing=8,
-                        tight=True,
-                        expand=True,
-                    ),
-                    start_button,
-                ],
-                spacing=16,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-        )
-        log_card = kit.section_card(
-            "打包日誌",
-            ft.Container(content=self.log_view, height=200),
-            icon=ft.Icons.RECEIPT_LONG,
-            tone="gold",
-            collapsible=True,
-        )
-
-        self.controls = [
-            kit.page_header(
-                "資源包打包",
-                "將翻譯結果打包成可直接使用的資源包 ZIP，自動產生 pack.mcmeta 與 pack.png",
-                icon=ft.Icons.INVENTORY_2_OUTLINED,
-                tone="gold",
-            ),
-            ft.Row(
-                [
-                    ft.Column([info_card, paths_card], spacing=16, expand=6),
-                    ft.Column(
-                        [preview_card, mcmeta_card, run_card], spacing=16, expand=5
-                    ),
-                ],
-                spacing=16,
-                vertical_alignment=ft.CrossAxisAlignment.START,
-            ),
-            log_card,
-        ]
-        self._update_preview()
+        return mcmeta_card, preview_card, start_button
 
     def _pick_pack_image(self, e: ft.ControlEvent):
         self.file_picker.on_upload = self._on_pack_image_picked
