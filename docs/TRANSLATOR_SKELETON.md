@@ -9,6 +9,7 @@ items
   → ordered result handling
   → cache write
   → format-specific flush callback
+  → checkpoint hook
   → progress / cancellation / final status
 ```
 
@@ -19,9 +20,16 @@ items
 `translate_items_with_cache_loop()` 維持以下契約：
 
 - 保留輸入順序與 batch prefix slicing。
-- 每個 batch 完成後才更新 cache、checkpoint/輸出與 progress。
+- 每個 batch 完成後才更新 cache、輸出、checkpoint 與 progress。
 - cache write failure、API failure、取消與額度耗盡不可被 callback 吞成成功。
-- `on_translated_item`、`on_batch_flushed`、`on_progress` 只提供格式特定的輸出與 UI 回報，不得改變 loop 的狀態判定。
+- `on_translated_item`、`on_batch_flushed`、`on_batch_checkpoint`、`on_progress`
+  只提供格式特定的輸出、durable boundary 與 UI 回報，不得改變 loop 的狀態判定。
+
+`on_batch_checkpoint(state)` 會在 shared loop 完成 cache flush 與 format flush
+之後、progress 之前呼叫。`state` 至少包含 `cache_type`、`processed`、`total`、
+`completed_calls` 與該批次的 API `status`；callback 失敗只記錄診斷，不會把已完成
+的批次回滾或誤報成未完成。這個 hook 是三個 translator 共用的 checkpoint 邊界，
+各格式若需要額外保存 output fingerprint 或 recovery metadata，應在此掛接。
 
 ## Plugin-specific responsibilities
 
@@ -38,10 +46,18 @@ items
 ## Checkpoint and recovery boundary
 
 目前 skeleton 保留既有 checkpoint／cache writer 的 ownership：每個 plugin
-仍負責自己的檔案 writer 與輸出格式；shared loop 負責 batch 邊界與 status。
-因此本文件不宣稱「關閉後背景持續執行」或超出既有 checkpoint 能力的 crash
-resume。若未來改變 checkpoint schema，必須先補 characterization tests 並獨立
-記錄輸入 fingerprint、已完成 batch、partial output 與取消狀態。
+仍負責自己的檔案 writer 與輸出格式；shared loop 負責統一 batch 邊界、cache flush、
+checkpoint hook 與 status。現況能力盤點如下：
+
+| Translator | 每批 durable 邊界 | 格式特定 recovery 資料 | 狀態 |
+|---|---|---|---|
+| FTB Quests | shared cache flush + `on_batch_checkpoint` | JSON map、file TouchSet | 已由共用 skeleton 覆蓋 |
+| KubeJS | shared cache flush + `on_batch_checkpoint` | shield/unshield 與 JS output | 已由共用 skeleton 覆蓋 |
+| Markdown | shared cache flush + `on_batch_checkpoint` | content hash 與文件回填 | 已由共用 skeleton 覆蓋 |
+
+這裡不宣稱超出既有 checkpoint 能力的 crash resume；若未來改變 checkpoint schema，
+必須先補 characterization tests 並獨立記錄輸入 fingerprint、已完成 batch、partial
+output 與取消狀態。
 
 ## Verification rule
 

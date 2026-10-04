@@ -20,10 +20,11 @@ from translation_tool.core.lm_translator_shared_loop import (
 
 @dataclass(frozen=True)
 class TranslatorHooks:
-    """格式特定的輸出、flush 與進度 callback。"""
+    """格式特定的輸出、flush、checkpoint 與進度 callback。"""
 
     on_translated_item: Callable[[dict[str, Any]], None] | None = None
     on_batch_flushed: Callable[[], None] | None = None
+    on_batch_checkpoint: Callable[[dict[str, Any]], None] | None = None
     on_progress: Callable[[float, str, float], None] | None = None
 
 
@@ -53,6 +54,7 @@ class TranslatorSkeleton:
             write_new_cache=self.write_new_cache,
             on_translated_item=self.hooks.on_translated_item,
             on_batch_flushed=self.hooks.on_batch_flushed,
+            on_batch_checkpoint=self.hooks.on_batch_checkpoint,
             on_progress=self.hooks.on_progress,
             cache_rules=self.cache_rules,
             sleep_seconds_between_batches=self.sleep_seconds_between_batches,

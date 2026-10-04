@@ -3,6 +3,7 @@
 測試目標：翻譯批次處理函數。
 """
 
+import inspect
 from unittest.mock import patch
 
 
@@ -32,6 +33,34 @@ def test_legacy_batch_name_is_only_a_compatibility_alias():
     from translation_tool.core import lm_translator_main as main
 
     assert main.translate_batch_smart_old is main._translate_batch_smart_impl
+
+
+def test_batch_entrypoint_is_a_small_compatibility_facade():
+    from translation_tool.core import lm_translator_main as main
+
+    assert len(inspect.getsource(main._translate_batch_smart_impl).splitlines()) < 100
+    assert main._translate_batch_smart_impl is not main._run_batch_state_machine
+
+
+def test_batch_error_classifier_covers_retry_actions_without_api_calls():
+    import requests
+
+    from translation_tool.core.lm_translator_main import _classify_batch_error
+
+    assert _classify_batch_error(requests.Timeout()) == "timeout"
+    assert _classify_batch_error(RuntimeError("x"), 400) == "invalid_argument"
+    assert _classify_batch_error(RuntimeError("x"), 403) == "key_forbidden"
+    assert _classify_batch_error(RuntimeError("x"), 404) == "model_missing"
+    assert _classify_batch_error(RuntimeError("x"), 429) == "rate_limited"
+    assert _classify_batch_error(RuntimeError("x"), 500) == "server_error"
+    assert _classify_batch_error(RuntimeError("x"), 503) == "service_unavailable"
+    assert _classify_batch_error(RuntimeError("x"), 504) == "deadline_exceeded"
+    assert _classify_batch_error(RuntimeError("x"), 418) == "unknown"
+
+    response = requests.Response()
+    response.status_code = 429
+    error = requests.HTTPError(response=response)
+    assert _classify_batch_error(error) == "rate_limited"
 
 
 class TestTranslateBatchSmart:

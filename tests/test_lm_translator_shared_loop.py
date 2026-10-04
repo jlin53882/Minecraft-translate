@@ -330,6 +330,58 @@ class TestTranslateItemsWithCacheLoop:
     @patch("translation_tool.core.lm_translator_shared_loop.reload_translation_cache")
     @patch("translation_tool.core.lm_translator_shared_loop.save_translation_cache")
     @patch("translation_tool.core.lm_translator_shared_loop.add_to_cache")
+    def test_checkpoint_is_emitted_between_flush_and_progress(
+        self, mock_add_cache, mock_save_cache, mock_reload
+    ):
+        from translation_tool.core.lm_translator_shared_loop import (
+            translate_items_with_cache_loop,
+        )
+
+        events = []
+
+        def mock_translate(batch, total):
+            result = [item.copy() for item in batch]
+            result[0]["text"] = "Translated"
+            return result, "AUTO"
+
+        items = [
+            {
+                "path": "path1",
+                "text": "Hello",
+                "source_text": "Hello",
+                "cache_type": "lang",
+            }
+        ]
+
+        result = translate_items_with_cache_loop(
+            items,
+            translate_batch_smart=mock_translate,
+            on_batch_flushed=lambda: events.append("flush"),
+            on_batch_checkpoint=lambda state: events.append(
+                ("checkpoint", state["processed"], state["total"])
+            ),
+            on_progress=lambda _p, msg, _eta: events.append(("progress", msg)),
+        )
+
+        assert result.status == "DONE"
+        flush_index = events.index("flush")
+        checkpoint_index = next(
+            index
+            for index, event in enumerate(events)
+            if isinstance(event, tuple) and event[0] == "checkpoint"
+        )
+        progress_index = next(
+            index
+            for index, event in enumerate(events)
+            if isinstance(event, tuple)
+            and event[0] == "progress"
+            and "批次完成" in event[1]
+        )
+        assert flush_index < checkpoint_index < progress_index
+
+    @patch("translation_tool.core.lm_translator_shared_loop.reload_translation_cache")
+    @patch("translation_tool.core.lm_translator_shared_loop.save_translation_cache")
+    @patch("translation_tool.core.lm_translator_shared_loop.add_to_cache")
     def test_translate_items_exception_handling(
         self, mock_add_cache, mock_save_cache, mock_reload
     ):

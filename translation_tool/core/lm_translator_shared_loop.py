@@ -93,6 +93,7 @@ def translate_items_with_cache_loop(
     write_new_cache: bool = True,
     on_translated_item: Callable[[dict[str, Any]], None] | None = None,
     on_batch_flushed: Callable[[], None] | None = None,
+    on_batch_checkpoint: Callable[[dict[str, Any]], None] | None = None,
     on_progress: Callable[[float, str, float], None] | None = None,
     cache_rules: dict[str, CacheRule] | None = None,
     sleep_seconds_between_batches: float | None = None,
@@ -289,6 +290,20 @@ def translate_items_with_cache_loop(
                 on_batch_flushed()
             except Exception as e:  # noqa: BLE001
                 log_info(f"[SharedLM] 批次刷新回調失敗: {redact_text(e)}")
+
+        if on_batch_checkpoint is not None:
+            try:
+                on_batch_checkpoint(
+                    {
+                        "cache_type": cache_type,
+                        "processed": processed,
+                        "total": total,
+                        "completed_calls": completed_calls,
+                        "status": status,
+                    }
+                )
+            except Exception as e:  # noqa: BLE001
+                log_info(f"[SharedLM] 批次 checkpoint 回調失敗: {redact_text(e)}")
 
         emit_progress(
             f"✅ 批次完成 ({cache_type}) | 成功: {actual_processed_in_this_batch} | 總進度: {processed}/{total}"

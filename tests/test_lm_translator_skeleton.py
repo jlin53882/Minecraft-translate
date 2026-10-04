@@ -28,6 +28,7 @@ def test_skeleton_forwards_common_loop_contract(monkeypatch):
     hooks = skeleton.TranslatorHooks(
         on_translated_item=lambda _item: None,
         on_batch_flushed=lambda: None,
+        on_batch_checkpoint=lambda _state: None,
         on_progress=lambda _p, _msg, _eta: None,
     )
     items = [{"path": "a", "source_text": "A", "text": "A"}]
@@ -47,4 +48,5 @@ def test_skeleton_forwards_common_loop_contract(monkeypatch):
     assert calls["write_new_cache"] is False
     assert calls["on_translated_item"] is hooks.on_translated_item
     assert calls["on_batch_flushed"] is hooks.on_batch_flushed
+    assert calls["on_batch_checkpoint"] is hooks.on_batch_checkpoint
     assert calls["on_progress"] is hooks.on_progress

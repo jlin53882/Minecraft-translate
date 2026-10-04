@@ -258,12 +258,39 @@ def _process_output(results, status):
     return results, status
 
 
+def _classify_batch_error(error, status: int | None = None) -> str:
+    """將 HTTP/timeout 例外映射成狀態機可消費的純 action 類別。
+
+    保留既有 retry 行為，但讓狀態判定不再散落在主迴圈的例外處理中；
+    這個 helper 也能用固定輸入直接測試，不需要真正呼叫 API。
+    """
+    if isinstance(error, requests.Timeout):
+        return "timeout"
+    if status is None and isinstance(error, requests.HTTPError):
+        response = error.response
+        status = response.status_code if response is not None else None
+    return {
+        400: "invalid_argument",
+        403: "key_forbidden",
+        404: "model_missing",
+        429: "rate_limited",
+        500: "server_error",
+        503: "service_unavailable",
+        504: "deadline_exceeded",
+    }.get(status, "unknown")
+
+
 # =========================================================
 # 舊翻譯函數（保留原邏輯）
 # =========================================================
 
 
 def _translate_batch_smart_impl(batch_items, total=None, dry_run=False):
+    """執行既有翻譯 contract；詳細 state machine 由命名 helper 承擔。"""
+    return _run_batch_state_machine(batch_items, total, dry_run)
+
+
+def _run_batch_state_machine(batch_items, total=None, dry_run=False):
     """
     智慧型分批翻譯函式
     支援動態縮減 Batch Size、模型切換、以及自動處理輸出截斷問題。
@@ -672,9 +699,10 @@ def _translate_batch_smart_impl(batch_items, total=None, dry_run=False):
                 status = None
                 if isinstance(e, requests.HTTPError) and e.response is not None:
                     status = e.response.status_code
+                error_action = _classify_batch_error(e, status)
 
                 # ⭐⭐⭐ 這一行是關鍵
-                if status != 503:
+                if error_action != "service_unavailable":
                     key_cycle.clear_overload()  # 非 503 的錯誤會中斷 overload 連續紀錄
                     pinned_model_index = None  # ⭐ 解除鎖定
 
@@ -684,12 +712,12 @@ def _translate_batch_smart_impl(batch_items, total=None, dry_run=False):
                 """
 
                 # ========== 404 ==========
-                if status == 404:
+                if error_action == "model_missing":
                     log_info(f"[⛔] 模型 {model_name} 不存在或無法使用，跳過此模型")
                     break  # ⭐ 跳離迴圈
 
                 # ========== 403 ==========
-                if status == 403:
+                if error_action == "key_forbidden":
                     log_info(
                         f"❌ 403 PERMISSION_DENIED：API Key 無權限 (index {key_cycle.current_index})"
                     )
@@ -700,7 +728,7 @@ def _translate_batch_smart_impl(batch_items, total=None, dry_run=False):
                     continue
 
                 # ========== 400 ==========
-                if status == 400:
+                if error_action == "invalid_argument":
                     msg = redact_text(e).lower()
                     if "failed_precondition" in msg:
                         raise RuntimeError(
@@ -742,7 +770,7 @@ def _translate_batch_smart_impl(batch_items, total=None, dry_run=False):
                     break  # ⭐ 交給 batch shrink
 
                 # ========== 429 RESOURCE_EXHAUSTED ==========
-                if status == 429:
+                if error_action == "rate_limited":
                     try:
                         # 1. 嘗試解析 JSON 錯誤格式
                         error_json = e.response.json().get("error", {})
@@ -833,13 +861,13 @@ def _translate_batch_smart_impl(batch_items, total=None, dry_run=False):
                         continue
 
                 # ========== 504 ==========
-                if status == 504:
+                if error_action == "deadline_exceeded":
                     log_info(
                         "[⏱️] 504 DEADLINE_EXCEEDED：請求過大或模型計算太久，縮小 batch"
                     )
                     break
 
-                if status == 503:
+                if error_action == "service_unavailable":
                     try:
                         error_json = e.response.json()
                         remote_msg = redact_text(
@@ -924,12 +952,12 @@ def _translate_batch_smart_impl(batch_items, total=None, dry_run=False):
                             break
 
                 # ======== 500 ==========
-                if status == 500:
+                if error_action == "server_error":
                     log_info("[⚠️] 500 INTERNAL：Gemini 後端錯誤，嘗試換模型或縮 batch")
                     break
 
                 # ========== requests timeout ==========
-                if isinstance(e, requests.Timeout):
+                if error_action == "timeout":
                     log_info("[⏱️] Timeout：模型尚未完成計算，縮小 batch")
                     break
 
