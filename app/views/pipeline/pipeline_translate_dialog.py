@@ -8,7 +8,9 @@
 - 執行翻譯（背景執行緒 + 進度輪詢）
 """
 
+import functools
 import os
+import types
 
 import flet as ft
 
@@ -35,7 +37,45 @@ def open_translate_dialog(
             on_start_translate(input_dir, output_dir, dry_run, write_new_cache, api_keys)
         show_snack_bar: 回調：(message: str, color: str = C.RED) -> void
     """
-    dialog_width = int(page.width * 0.6)
+    ctx = types.SimpleNamespace(
+        page=page,
+        file_picker=file_picker,
+        on_start_translate=on_start_translate,
+        show_snack_bar=show_snack_bar,
+    )
+    dialog_width = _translate_init_state_and_fields(ctx, input_path, output_path)
+    _translate_build_option_widgets(ctx)
+    content = _translate_build_content(ctx)
+
+    dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("🔄 啟動翻譯設定"),
+        content=ft.Container(content=content, width=dialog_width),
+        actions=[
+            ft.TextButton("取消", on_click=lambda e: ctx.close_dialog(dialog)),
+            ft.OutlinedButton(
+                "預覽結果",
+                icon=ft.Icons.PREVIEW,
+                on_click=lambda e: ctx.show_preview_result(dialog),
+            ),
+            ft.Button(
+                "確定執行",
+                icon=ft.Icons.CHECK,
+                bgcolor=C.DIA,
+                color=C.ON_EM,
+                on_click=lambda e: ctx.start_translate(dialog),
+            ),
+        ],
+    )
+
+    ctx.page.overlay.append(dialog)
+    dialog.open = True
+    ctx.page.update()
+
+
+def _translate_init_state_and_fields(ctx, input_path, output_path):
+    """翻譯對話框的路徑、設定預設值與輸入欄位。"""
+    dialog_width = int(ctx.page.width * 0.6)
 
     cfg = load_config()
     lang_merger_cfg = cfg.get("lang_merger", {})
@@ -43,131 +83,70 @@ def open_translate_dialog(
         "pending_organized_folder_name", "待翻譯整理需翻譯"
     )
 
-    default_input = (
+    ctx.default_input = (
         os.path.join(output_path, "locale_sort", "_整理輸出", organized_folder)
         if output_path
         else ""
     )
-    default_output = os.path.join(output_path, "lm_translate") if output_path else ""
+    ctx.default_output = (
+        os.path.join(output_path, "lm_translate") if output_path else ""
+    )
 
-    translate_input_field = ft.TextField(
+    ctx.translate_input_field = ft.TextField(
         label="翻譯目標",
-        hint_text=f"自動帶入：{default_input}"
-        if default_input
+        hint_text=f"自動帶入：{ctx.default_input}"
+        if ctx.default_input
         else "留空自動帶入整理後的待翻譯資料夾",
-        value=input_path or default_input,
+        value=input_path or ctx.default_input,
         expand=True,
         border_color=C.DIA,
     )
-    translate_output_field = ft.TextField(
+    ctx.translate_output_field = ft.TextField(
         label="輸出目錄",
-        hint_text=f"自動帶入：{default_output}"
-        if default_output
+        hint_text=f"自動帶入：{ctx.default_output}"
+        if ctx.default_output
         else "留空自動帶入 lm_translate",
-        value=output_path or default_output,
+        value=output_path or ctx.default_output,
         expand=True,
         border_color=C.DIA,
     )
 
-    dry_run_switch = ft.Switch(label="Dry Run（只分析不翻譯）", value=False)
-    write_new_cache_switch = ft.Switch(
+    ctx.dry_run_switch = ft.Switch(label="Dry Run（只分析不翻譯）", value=False)
+    return dialog_width
+
+
+def _translate_build_option_widgets(ctx) -> None:
+    """開關、API 金鑰區與 handler 綁定。"""
+    ctx.write_new_cache_switch = ft.Switch(
         label="寫入新快取（每次回傳單獨快取）", value=True
     )
 
-    api_keys_container = ft.Column(spacing=8)
-    api_keys = []
+    ctx.api_keys_container = ft.Column(spacing=8)
+    ctx.api_keys = []
 
-    def add_key_field(initial_value=""):
-        row = ft.Row(spacing=10)
-        key_tf = ft.TextField(
-            value=initial_value,
-            hint_text="輸入 API Key",
-            expand=True,
-            text_size=12,
-            border_color=C.DIA,
-            password=True,
-        )
-        del_btn = ft.IconButton(
-            icon=ft.Icons.DELETE,
-            icon_color=C.RED,
-            on_click=lambda _: delete_key_field(row),
-        )
-        row.controls = [key_tf, del_btn]
-        api_keys_container.controls.append(row)
-        api_keys.append(key_tf)
-        page.update()
+    ctx.add_key_field = functools.partial(_translate_add_key_field, ctx)
 
-    def delete_key_field(row):
-        api_keys_container.controls.remove(row)
-        if row.controls[0] in api_keys:
-            api_keys.remove(row.controls[0])
-        page.update()
+    ctx.delete_key_field = functools.partial(_translate_delete_key_field, ctx)
 
-    add_key_field()
+    ctx.add_key_field()
 
-    def close_dialog(dialog):
-        dialog.open = False
-        page.update()
+    ctx.close_dialog = functools.partial(_translate_close_dialog, ctx)
 
-    def start_translate(dialog):
-        input_dir = (translate_input_field.value or "").strip()
-        output_dir = (translate_output_field.value or "").strip()
+    ctx.start_translate = functools.partial(_translate_start_translate, ctx)
 
-        if input_dir and not os.path.isdir(input_dir):
-            show_snack_bar("⚠️ 翻譯目標資料夾不存在")
-            return
+    ctx.pick_input_dir = functools.partial(_translate_pick_input_dir, ctx)
 
-        close_dialog(dialog)
-        on_start_translate(
-            input_dir=input_dir or default_input,
-            output_dir=output_dir or default_output,
-            dry_run=dry_run_switch.value,
-            write_new_cache=write_new_cache_switch.value,
-        )
+    ctx.browse_input_dir = functools.partial(_translate_browse_input_dir, ctx)
 
-    def pick_input_dir(e=None):
-        async def do_pick():
-            result = await file_picker.get_directory_path()
-            if result:
-                translate_input_field.value = result
-                page.update()
+    ctx.pick_output_dir = functools.partial(_translate_pick_output_dir, ctx)
 
-        page.run_task(do_pick)
+    ctx.browse_output_dir = functools.partial(_translate_browse_output_dir, ctx)
 
-    def browse_input_dir(e=None):
-        path = (translate_input_field.value or "").strip()
-        if path and os.path.isdir(path):
-            os.startfile(path)
-        elif not path:
-            show_snack_bar("⚠️ 請先選擇資料夾")
-        else:
-            show_snack_bar("⚠️ 路徑不存在")
+    ctx.show_preview_result = functools.partial(_translate_show_preview_result, ctx)
 
-    def pick_output_dir(e=None):
-        async def do_pick():
-            result = await file_picker.get_directory_path()
-            if result:
-                translate_output_field.value = result
-                page.update()
 
-        page.run_task(do_pick)
-
-    def browse_output_dir(e=None):
-        path = (translate_output_field.value or "").strip()
-        if path and os.path.isdir(path):
-            os.startfile(path)
-        elif not path:
-            show_snack_bar("⚠️ 請先選擇資料夾")
-        else:
-            show_snack_bar("⚠️ 路徑不存在")
-
-    def show_preview_result(dialog):
-        input_dir = (translate_input_field.value or "").strip() or default_input
-        if not input_dir or not os.path.isdir(input_dir):
-            show_snack_bar("⚠️ 翻譯目標資料夾不存在")
-            return
-        show_snack_bar("🔍 預覽功能待實作")
-        close_dialog(dialog)
+def _translate_build_content(ctx):
+    """對話框內容。"""
 
     content = ft.Column(
         [
@@ -175,56 +154,135 @@ def open_translate_dialog(
             ft.Text("留空自動帶入前一步驟輸出", size=10, color=C.MUTED),
             ft.Row(
                 [
-                    translate_input_field,
+                    ctx.translate_input_field,
                     ft.Button(
-                        "選擇資料夾", icon=ft.Icons.FOLDER, on_click=pick_input_dir
+                        "選擇資料夾", icon=ft.Icons.FOLDER, on_click=ctx.pick_input_dir
                     ),
-                    ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_input_dir),
+                    ft.Button(
+                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_input_dir
+                    ),
                 ]
             ),
             ft.Text("輸出目錄", weight="bold", size=13),
             ft.Text("輸出說明：→ {output}/lm_translate/", size=10, color=C.MUTED),
             ft.Row(
                 [
-                    translate_output_field,
+                    ctx.translate_output_field,
                     ft.Button(
                         "選擇資料夾",
                         icon=ft.Icons.FOLDER_SPECIAL,
-                        on_click=pick_output_dir,
+                        on_click=ctx.pick_output_dir,
                     ),
-                    ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_output_dir),
+                    ft.Button(
+                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_output_dir
+                    ),
                 ]
             ),
             ft.Divider(),
             ft.Text("執行選項", weight="bold", size=13),
-            dry_run_switch,
-            write_new_cache_switch,
+            ctx.dry_run_switch,
+            ctx.write_new_cache_switch,
         ],
         spacing=10,
         tight=False,
     )
+    return content
 
-    dialog = ft.AlertDialog(
-        modal=True,
-        title=ft.Text("🔄 啟動翻譯設定"),
-        content=ft.Container(content=content, width=dialog_width),
-        actions=[
-            ft.TextButton("取消", on_click=lambda e: close_dialog(dialog)),
-            ft.OutlinedButton(
-                "預覽結果",
-                icon=ft.Icons.PREVIEW,
-                on_click=lambda e: show_preview_result(dialog),
-            ),
-            ft.Button(
-                "確定執行",
-                icon=ft.Icons.CHECK,
-                bgcolor=C.DIA,
-                color=C.ON_EM,
-                on_click=lambda e: start_translate(dialog),
-            ),
-        ],
+
+def _translate_add_key_field(ctx, initial_value=""):
+    row = ft.Row(spacing=10)
+    key_tf = ft.TextField(
+        value=initial_value,
+        hint_text="輸入 API Key",
+        expand=True,
+        text_size=12,
+        border_color=C.DIA,
+        password=True,
+    )
+    del_btn = ft.IconButton(
+        icon=ft.Icons.DELETE,
+        icon_color=C.RED,
+        on_click=lambda _: ctx.delete_key_field(row),
+    )
+    row.controls = [key_tf, del_btn]
+    ctx.api_keys_container.controls.append(row)
+    ctx.api_keys.append(key_tf)
+    ctx.page.update()
+
+
+def _translate_delete_key_field(ctx, row):
+    ctx.api_keys_container.controls.remove(row)
+    if row.controls[0] in ctx.api_keys:
+        ctx.api_keys.remove(row.controls[0])
+    ctx.page.update()
+
+
+def _translate_close_dialog(ctx, dialog):
+    dialog.open = False
+    ctx.page.update()
+
+
+def _translate_start_translate(ctx, dialog):
+    input_dir = (ctx.translate_input_field.value or "").strip()
+    output_dir = (ctx.translate_output_field.value or "").strip()
+
+    if input_dir and not os.path.isdir(input_dir):
+        ctx.show_snack_bar("⚠️ 翻譯目標資料夾不存在")
+        return
+
+    ctx.close_dialog(dialog)
+    ctx.on_start_translate(
+        input_dir=input_dir or ctx.default_input,
+        output_dir=output_dir or ctx.default_output,
+        dry_run=ctx.dry_run_switch.value,
+        write_new_cache=ctx.write_new_cache_switch.value,
     )
 
-    page.overlay.append(dialog)
-    dialog.open = True
-    page.update()
+
+def _translate_pick_input_dir(ctx, e=None):
+    async def do_pick():
+        result = await ctx.file_picker.get_directory_path()
+        if result:
+            ctx.translate_input_field.value = result
+            ctx.page.update()
+
+    ctx.page.run_task(do_pick)
+
+
+def _translate_browse_input_dir(ctx, e=None):
+    path = (ctx.translate_input_field.value or "").strip()
+    if path and os.path.isdir(path):
+        os.startfile(path)
+    elif not path:
+        ctx.show_snack_bar("⚠️ 請先選擇資料夾")
+    else:
+        ctx.show_snack_bar("⚠️ 路徑不存在")
+
+
+def _translate_pick_output_dir(ctx, e=None):
+    async def do_pick():
+        result = await ctx.file_picker.get_directory_path()
+        if result:
+            ctx.translate_output_field.value = result
+            ctx.page.update()
+
+    ctx.page.run_task(do_pick)
+
+
+def _translate_browse_output_dir(ctx, e=None):
+    path = (ctx.translate_output_field.value or "").strip()
+    if path and os.path.isdir(path):
+        os.startfile(path)
+    elif not path:
+        ctx.show_snack_bar("⚠️ 請先選擇資料夾")
+    else:
+        ctx.show_snack_bar("⚠️ 路徑不存在")
+
+
+def _translate_show_preview_result(ctx, dialog):
+    input_dir = (ctx.translate_input_field.value or "").strip() or ctx.default_input
+    if not input_dir or not os.path.isdir(input_dir):
+        ctx.show_snack_bar("⚠️ 翻譯目標資料夾不存在")
+        return
+    ctx.show_snack_bar("🔍 預覽功能待實作")
+    ctx.close_dialog(dialog)

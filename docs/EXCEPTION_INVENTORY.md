@@ -111,7 +111,7 @@
 | `app/views/merge_view.py:MergeView._start_ui_poller.poll` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/merge_view.py:MergeView._close_dialog_overlay` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/pipeline/pipeline_bundle_dialog.py:_load_version_data` | BLE001 | UI／畫面保護 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
-| `app/views/pipeline/pipeline_extract_dialog.py:open_extract_dialog.show_preview_result.do_preview` | BLE001 | 已記錄／回報 | 錯誤要顯示在對話框 |
+| `app/views/pipeline/pipeline_extract_dialog.py:_extract_preview_worker` | BLE001 | 已記錄／回報 | 錯誤要顯示在對話框 |
 | `app/views/pipeline/pipeline_one_click_dialog.py:_load_version_data` | BLE001 | UI／畫面保護 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
 | `app/views/pipeline/pipeline_view.py:PipelineView._run_session_step` | BLE001 | 已記錄／回報 | 背景步驟邊界：任何錯誤都轉成步驟失敗 |
 | `app/views/pipeline/pipeline_view.py:PipelineView._start_one_click_worker.worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，確保按鈕會恢復 |
