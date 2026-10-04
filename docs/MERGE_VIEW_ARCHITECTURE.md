@@ -10,6 +10,8 @@ MergeView 位於翻譯流程**第二步**（Translate → **Merge** → 寫回 J
 
 ## 主要 UI 結構
 
+控制項與版面的組裝在 `app/views/merge/merge_widgets.py`（`MergeWidgetsMixin`，由 `merge_view.py` 拆出，#114）；`MergeView` 保留事件處理、執行流程與日誌輪詢。
+
 | 區塊 | 元件 | 說明 |
 |------|------|------|
 | 輸入模式 | `input_mode_group` | ZIP / 資料夾 Radio，切換 `zip_panel` / `folder_panel` 顯示 |

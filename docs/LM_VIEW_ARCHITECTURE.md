@@ -24,7 +24,7 @@ LMView 是 **LM（Large Model）翻譯執行頁**，對已提取的 assets 資�
 start_clicked()（event loop）
   ├─ 驗證 input_path 非空
   ├─ session = TaskSession(); session.start()
-  ├─ output_dir = output_path 或 LM_translate_folder_name
+  ├─ output_dir = output_path 或 lm_translate_folder_name 設定值
   ├─ threading.Thread(run_lm_translation_service, args=(input, output, session, dry_run, export_lang, write_new_cache)).start()
   └─ start_ui_timer()
 
@@ -96,8 +96,7 @@ LMView 本身不直接操作 cache_manager，只透過 `write_new_cache_switch` 
 
 ### 錯誤處理與 Key 輪替（`translate_batch_smart`）
 
-- **只有連續 503（overloaded）才累積 `overload_retry_count`**；其他錯誤重置計數器
-- `overload_retry_count >= 3` → 換 API Key（`rotate_api_key`），成功後重置計數
+- **只有 503（overloaded）才累積 overload 計數**，且**逐把 key** 計數（`lm_config_rules` 的 `record_overload()` / `clear_overload()`）：不同 key 的 overload 不互相累加；同一把 key 累積到門檻（`overload_threshold`，預設 3，見 `lm_batch_actions`）才對它 `mark_failed()` 並換 key（`BatchAction.ROTATE_KEY`），成功後 `reset()` 開始新的 cycle
 - **404** → 模型不存在，跳過該模型
 - **403** → Key 無權限，`rotate_api_key`，無 Key 可換 → RuntimeError「所有 API Key 均無權限」
 - **400** FAILED_PRECONDITION → 此地區未啟用 Gemini 免費方案；否則縮小 batch
@@ -112,6 +111,6 @@ LMView 本身不直接操作 cache_manager，只透過 `write_new_cache_switch` 
 ## 維護注意
 
 1. 目錄選擇回呼（`on_input_dir_picked` / `on_output_dir_picked`）接受帶 `.path` 的事件物件；`_async_pick_*` 會包 FakeEvent 觸發（FilePicker 相容層）。
-2. `LM_translate_folder_name` 在 import 時從 config 讀取（模組層級常數）— 改設定需重啟。
+2. 輸出資料夾名稱由 `get_lm_translate_folder_name()`（`app/views/lm_view.py`）讀取 `lm_translator.lm_translate_folder_name`，下次任務套用（見 `CONFIG_APPLY_TIMING.md`）。
 3. 與 Extractor/Translation 頁共用同一套 TaskSession + event loop 輪詢模式；背景執行緒不可直接修改 control 或呼叫 `page.update()`。
 4. 翻譯流程新增等待時使用 `interruptible_sleep()`；新增長迴圈時在迭代之間檢查 `is_cancelled()`。

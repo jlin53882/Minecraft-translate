@@ -165,7 +165,7 @@ ExtractorView._handle_preview_*_click()
 1. **不要在 on_update 裡判斷「整段完成」**：generator 會逐 JAR yield 帶 `stats` 的 update，舊邏輯 `pct >= 1.0 or "stats" in update` 會逐 JAR 誤觸發「[完成] 0/0/0」。真正的完成只能等 `run_extraction_loop` 返回後用回傳的累計 stats。
 2. **背景 thread 更新 UI 必須走 `page.run_task`**：`dialog.modal` 等屬性直接呼叫 `page.update()` 不會確實同步到前端（2026-07-13 回歸 bug）。
 3. **cancel flag 用 outer-scope list**：`on_cancel_click` 與 worker thread 要共享同一份 reference，否則取消只改 UI 不改執行。
-4. **`LogView.add()` 的 level 必須在白名單**（debug/info/warning/error/system）：傳顏色字串（如 `theme.ORANGE_700`）會 silent return，整行 log 不顯示。
+4. **`LogView.add()` 的 level 必須在白名單**（debug/info/warning/error/system）：傳顏色字串（如 `C.GOLD`）會 silent return，整行 log 不顯示。
 5. **預覽 dialog 用「單一 dialog mutate」**：不要把 result dialog 疊在 preview dialog 上（modal=False 可能被提前 dismiss 打破疊層假設）。掃描完成直接把 preview_dialog 的 title/content/actions 換成結果畫面。
 6. **`preview_state.done` 每次掃描前要重設 False**：否則上次的 `done=True` 讓新一輪 ui_poller 立刻退出，user 看到「按了沒反應」。
 7. **循環引入**：`jar_processor_preview.py` 內使用 lazy import 讀 `build_lang_file_regex` / `build_book_path_regex`（避免反向 import jar_processor）。

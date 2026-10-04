@@ -798,11 +798,31 @@ def _make_progress_callback(obj, phase: str, total: int):
         # 安全檢查：測試環境或 UI 未初始化時不拋例外
         if not hasattr(obj, "progress_text") or not hasattr(obj, "progress_bar"):
             return
-        obj.progress_text.value = f"[{phase}] {processed} / {total}"
-        obj.progress_bar.value = processed / total if total > 0 else 0
-        _refresh_progress(obj)
+        _set_progress(
+            obj,
+            f"[{phase}] {processed} / {total}",
+            processed / total if total > 0 else 0,
+        )
 
     return callback
+
+
+def _set_progress(obj, text: str, value: float, *, visible: bool | None = None) -> None:
+    """更新進度顯示。
+
+    掃描在背景執行緒時不可直接改 Flet 控制項（#114 的 worker-thread 契約）：view 提供
+    ``_set_progress`` 時只記下最新值，實際賦值與刷新由 event loop 上的 ``_refresh_progress`` 完成；
+    沒有這個方法的物件（測試替身）維持直接賦值。
+    """
+    setter = getattr(type(obj), "_set_progress", None)
+    if setter is not None:
+        setter(obj, text, value, visible)
+        return
+    obj.progress_text.value = text
+    obj.progress_bar.value = value
+    if visible is not None:
+        obj.progress_bar.visible = visible
+    _refresh_progress(obj)
 
 
 def _refresh_progress(obj) -> None:
@@ -819,10 +839,12 @@ def _show_progress_phase(obj, phase: str, current: int, total: int):
     # 安全檢查：測試環境或 UI 未初始化時不拋例外
     if not hasattr(obj, "progress_text") or not hasattr(obj, "progress_bar"):
         return
-    obj.progress_text.value = f"[{phase}] {current} / {total}"
-    obj.progress_bar.value = current / total if total > 0 else 0
-    obj.progress_bar.visible = True
-    _refresh_progress(obj)
+    _set_progress(
+        obj,
+        f"[{phase}] {current} / {total}",
+        current / total if total > 0 else 0,
+        visible=True,
+    )
 
 
 def to_halfwidth(text):
@@ -1345,10 +1367,27 @@ class IconPreviewView(ft.Column):
 
         run_task(_scan)
 
+    def _set_progress(self, text: str, value: float, visible: bool | None) -> None:
+        """（可在背景執行緒呼叫）記下最新進度；實際賦值與刷新交給 event loop。"""
+        self._pending_progress = (text, value, visible)
+        self._refresh_progress()
+
+    def _apply_pending_progress(self) -> None:
+        """在 event loop 上把最新進度寫進控制項。"""
+        pending = getattr(self, "_pending_progress", None)
+        if pending is None:
+            return
+        text, value, visible = pending
+        self.progress_text.value = text
+        self.progress_bar.value = value
+        if visible is not None:
+            self.progress_bar.visible = visible
+
     def _refresh_progress(self):
         """（可在背景執行緒呼叫）節流後由 event loop 刷新進度顯示。"""
         run_task = getattr(self.page, "run_task", None)
         if run_task is None:
+            self._apply_pending_progress()
             self.update()
             return
         now = time.monotonic()
@@ -1357,6 +1396,7 @@ class IconPreviewView(ft.Column):
         self._last_progress_refresh = now
 
         async def _update():
+            self._apply_pending_progress()
             self.update()
 
         run_task(_update)
@@ -1375,6 +1415,9 @@ class IconPreviewView(ft.Column):
 
     def _finish_load(self, entries: list, mode: str):
         """（event loop 上）套用掃描結果並渲染模組清單。"""
+        self._pending_progress = (
+            None  # 掃描結束後不再套用延遲的進度（避免重新顯示進度條）
+        )
         if mode not in ("jar_directory", "extracted_folder"):
             log_warning("[IconPreview] 無法識別資料夾模式，或資料夾為空")
             show_snack(

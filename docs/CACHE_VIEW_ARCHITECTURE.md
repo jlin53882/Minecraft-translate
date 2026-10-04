@@ -2,7 +2,7 @@
 
 ## 定位
 
-CacheView（`app/views/cache_view.py`，約 3500 行）是快取系統的 UI 入口，功能包含：
+CacheView（`app/views/cache_view.py`，約 550 行的主入口；功能實作以 mixin 拆在 `app/views/cache_manager/cache_view_*.py`）是快取系統的 UI 入口，功能包含：
 
 | 區域 | 功能 |
 |------|------|
@@ -14,15 +14,24 @@ CacheView（`app/views/cache_view.py`，約 3500 行）是快取系統的 UI 入
 ## 檔案結構（實際現況）
 
 ```
-app/views/cache_view.py                    ← 主入口（ft.Column，monolithic）
-app/views/cache_manager/                   ← 從 cache_view 抽離的模組（實際被引用）
+app/views/cache_view.py                         ← 主入口（ft.Column）：__init__、生命週期、忙碌／停用狀態、髒標記刷新
+app/views/cache_manager/
+  ├─ cache_view_overview.py     CacheOverviewMixin       總覽：類型清單、批次操作、日誌
+  ├─ cache_view_query.py        CacheQueryMixin          查詢：搜尋、結果顯示／分頁、單筆編輯
+  ├─ cache_view_query_widgets.py CacheQueryWidgetsMixin  查詢頁（含兩個浮動歷史視窗）的 widgets 組裝
+  ├─ cache_view_shard.py        CacheShardMixin          分片：清單、key 清單、分頁
+  ├─ cache_view_shard_detail.py CacheShardDetailMixin    分片詳情：SRC 預覽、DST 編輯
+  ├─ cache_view_shard_widgets.py CacheShardWidgetsMixin  分片頁與主分頁版面的 widgets 組裝
+  ├─ cache_view_history.py      CacheHistoryMixin        查詢／分片共用的歷史視窗與還原
   ├─ cache_actions.py          run_cache_action()          ← 被引用
   ├─ cache_history_store.py    history_* 7 個函式          ← 被引用
   ├─ cache_overview_panel.py   build_overview_page()       ← 被引用
   └─ cache_state.py            CacheQueryState/ShardState/HistoryState ← 被引用
 ```
 
-**注意**：`cache_view.py` 實際只使用 `cache_actions`、`cache_history_store`、`cache_overview_panel`、`cache_state`。`cache_controller.py`、`cache_presenter.py`、`cache_types.py`、`cache_log_panel.py`、`cache_shared_widgets.py` 仍存在（由 `app/views/__init__.py` 與 `cache_manager/__init__.py` 匯出、有測試涵蓋），但 `cache_view.py` 目前不使用它們，是尚未接線的 MVC 雛形（#114 拆 `cache_view.py` 時會以它們為基礎）。先前文件提到的 `cache_manager/panels/` 與 `app/views/cache/` 已在 PR #106 刪除。
+`CacheView` 以多重繼承組合上述 mixin；mixin 方法內容由原本單一檔案原樣搬出（#114），所有方法仍以 `CacheView._xxx` 呼叫。**測試要 monkeypatch 服務函式時，請 patch 方法實際所在的模組**（例如 `cache_view_query` 的 `cache_search_service`、`cache_view_shard_detail` 的 `cache_update_dst_service`）。
+
+**注意**：`cache_view.py` 實際只使用 `cache_actions`、`cache_history_store`、`cache_overview_panel`、`cache_state`。`cache_controller.py`、`cache_presenter.py`、`cache_types.py`、`cache_log_panel.py`、`cache_shared_widgets.py` 仍存在（由 `app/views/__init__.py` 與 `cache_manager/__init__.py` 匯出、有測試涵蓋），但 `cache_view.py` 目前不使用它們，是尚未接線的 MVC 雛形（後續把 mixin 的狀態與動作改接到它們屬 #114 的下一階段）。先前文件提到的 `cache_manager/panels/` 與 `app/views/cache/` 已在 PR #106 刪除。
 
 ## 呼叫鏈（實際）
 
