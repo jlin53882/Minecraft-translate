@@ -153,6 +153,66 @@ def test_export_filtered_pending_impl_cleans_old_output(tmp_path: Path) -> None:
     assert not old_file.exists()
 
 
+def test_export_filtered_pending_impl_skips_unchanged_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """未變更的 pending 不應重複複製。"""
+    import orjson
+
+    pending_root = tmp_path / "pending"
+    output_root = tmp_path / "output"
+    source = pending_root / "assets" / "demo" / "lang" / "en_us.json"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(orjson.dumps({"a": 1, "b": 2}))
+
+    lang_merge_pending.export_filtered_pending_impl(
+        str(pending_root), str(output_root), min_count=2, json_module=orjson
+    )
+    output = output_root / "assets" / "demo" / "lang" / "en_us.json"
+
+    calls = []
+    real_copy2 = lang_merge_pending.shutil.copy2
+    monkeypatch.setattr(
+        lang_merge_pending.shutil,
+        "copy2",
+        lambda *args, **kwargs: calls.append(args) or real_copy2(*args, **kwargs),
+    )
+    lang_merge_pending.export_filtered_pending_impl(
+        str(pending_root), str(output_root), min_count=2, json_module=orjson
+    )
+
+    assert output.exists()
+    assert calls == []
+
+
+def test_export_filtered_pending_impl_removes_only_stale_json(
+    tmp_path: Path,
+) -> None:
+    """低於門檻或已刪除的整理 JSON 會被移除。"""
+    import orjson
+
+    pending_root = tmp_path / "pending"
+    output_root = tmp_path / "output"
+    source = pending_root / "keep.json"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(orjson.dumps({"a": 1, "b": 2}))
+    stale = output_root / "stale.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("{}", encoding="utf-8")
+
+    lang_merge_pending.export_filtered_pending_impl(
+        str(pending_root), str(output_root), min_count=2, json_module=orjson
+    )
+    assert (output_root / "keep.json").exists()
+    assert not stale.exists()
+
+    source.write_bytes(orjson.dumps({"a": 1}))
+    lang_merge_pending.export_filtered_pending_impl(
+        str(pending_root), str(output_root), min_count=2, json_module=orjson
+    )
+    assert not (output_root / "keep.json").exists()
+
+
 def test_export_filtered_pending_impl_invalid_json(tmp_path: Path) -> None:
     """測試 export_filtered_pending_impl 處理無效 JSON。"""
     pending_root = tmp_path / "pending"

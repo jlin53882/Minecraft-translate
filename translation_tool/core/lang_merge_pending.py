@@ -34,27 +34,68 @@ def export_filtered_pending_impl(
     *,
     json_module,
 ) -> None:
-    """掃描 pending_root 找出條目數 >= min_count 的 pending.json 檔案，複製到 output_root（寫入前會先刪除舊 output_root）。"""
+    """增量更新條目數達門檻的 pending JSON。
+
+    整理目錄是 pending 的衍生視圖，不需要每次整個刪除重建。以來源檔案
+    的相對路徑、大小與修改時間判斷是否變更；未變更檔案直接跳過，只有
+    新增/變更/低於門檻的檔案才會讀取或更新。
+    """
     if not os.path.isdir(pending_root):
         return
-    if os.path.exists(output_root):
-        shutil.rmtree(output_root)
     os.makedirs(output_root, exist_ok=True)
+
+    min_count = int(min_count)
+    eligible_paths: set[str] = set()
 
     for dirpath, _, filenames in os.walk(pending_root):
         for filename in filenames:
             if not filename.lower().endswith(".json"):
                 continue
             pending_path = os.path.join(dirpath, filename)
+            rel_path = os.path.relpath(pending_path, pending_root).lstrip(os.sep)
+            out_path = os.path.join(output_root, rel_path)
             try:
+                source_stat = os.stat(pending_path)
+                if os.path.isfile(out_path):
+                    output_stat = os.stat(out_path)
+                    if (
+                        source_stat.st_size == output_stat.st_size
+                        and source_stat.st_mtime_ns == output_stat.st_mtime_ns
+                    ):
+                        eligible_paths.add(rel_path)
+                        continue
                 with open(pending_path, "rb") as f:
-                    data = json_module.loads(f.read())
+                    raw = f.read()
+                    data = json_module.loads(raw)
             except Exception as exc:  # noqa: BLE001
                 log_warning(f"略過無法讀取的待翻譯檔 {pending_path}: {exc!r}")
                 continue
-            if len(data) >= int(min_count):
-                rel_path = os.path.relpath(pending_path, pending_root).lstrip(os.sep)
-                out_path = os.path.join(output_root, rel_path)
+
+            try:
+                data_count = len(data)
+            except TypeError:
+                data_count = 0
+            if data_count >= min_count:
+                eligible_paths.add(rel_path)
                 os.makedirs(os.path.dirname(out_path), exist_ok=True)
-                with open(out_path, "wb") as f:
-                    f.write(json_module.dumps(data, option=json_module.OPT_INDENT_2))
+                # 保留來源 bytes 與修改時間，避免第二次 JSON 序列化。
+                shutil.copy2(pending_path, out_path)
+
+    # 只移除過期 JSON，不刪除整個輸出目錄或其他非 JSON 檔案。
+    for dirpath, _, filenames in os.walk(output_root, topdown=False):
+        for filename in filenames:
+            if not filename.lower().endswith(".json"):
+                continue
+            out_path = os.path.join(dirpath, filename)
+            rel_path = os.path.relpath(out_path, output_root).lstrip(os.sep)
+            if rel_path not in eligible_paths:
+                try:
+                    os.remove(out_path)
+                except OSError as exc:
+                    log_warning(f"刪除過期整理檔失敗 {out_path}: {exc}")
+        if dirpath != output_root:
+            try:
+                if not os.listdir(dirpath):
+                    os.rmdir(dirpath)
+            except OSError:
+                pass

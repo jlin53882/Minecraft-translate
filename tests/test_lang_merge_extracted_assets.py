@@ -25,6 +25,7 @@ from translation_tool.core.lang_merge_extracted_assets import (
     _scan_extracted_lang_files,
     _write_json_atomic,
     merge_extracted_to_assets,
+    normalize_pending_extracted_wrappers,
 )
 
 
@@ -665,6 +666,176 @@ class TestCleanupSingleModExtracted:
         assert extracted_dir.exists()
         _cleanup_single_mod_extracted(tmp_path, "ae2ct")
         assert not extracted_dir.exists(), "空的 _extracted 目錄應被刪除"
+
+    def test_stage2_cleans_deep_extracted_layout(self, tmp_path: Path):
+        """深層 JAR wrapper layout 成功寫入後也要清掉中間目錄。"""
+        lang_output_dir = tmp_path / "lang_output"
+        source = (
+            lang_output_dir
+            / "aether_extracted"
+            / "packs"
+            / "classic_b173"
+            / "assets"
+            / "aether"
+            / "lang"
+            / "zh_cn.json"
+        )
+        source.parent.mkdir(parents=True)
+        source.write_text('{"new_key": "中文"}', encoding="utf-8")
+
+        list(merge_extracted_to_assets(lang_output_dir))
+
+        assert (
+            lang_output_dir / "assets" / "aether" / "lang" / "zh_tw.json"
+        ).exists()
+        assert not (lang_output_dir / "aether_extracted").exists()
+
+    def test_duplicate_keys_are_not_counted_as_new_and_source_is_cleaned(
+        self, tmp_path: Path
+    ):
+        """既有 assets key 不新增，但成功處理後仍清理深層來源。"""
+        lang_output_dir = tmp_path / "lang_output"
+        target = lang_output_dir / "assets" / "aether" / "lang" / "zh_tw.json"
+        target.parent.mkdir(parents=True)
+        target.write_text('{"same_key": "既有翻譯"}', encoding="utf-8")
+
+        source = (
+            lang_output_dir
+            / "aether_extracted"
+            / "packs"
+            / "classic_b173"
+            / "assets"
+            / "aether"
+            / "lang"
+            / "zh_cn.json"
+        )
+        source.parent.mkdir(parents=True)
+        source.write_text('{"same_key": "相同來源"}', encoding="utf-8")
+
+        updates = list(merge_extracted_to_assets(lang_output_dir))
+
+        assert updates[-1]["error"] is False
+        assert json.loads(target.read_text(encoding="utf-8")) == {
+            "same_key": "既有翻譯"
+        }
+        assert not (lang_output_dir / "aether_extracted").exists()
+
+    def test_pending_wrappers_are_flattened_without_deleting_pending_files(
+        self, tmp_path: Path
+    ):
+        """階段 2 後 pending 保留內容，但不保留 *_extracted 包裝層。"""
+        lang_output_dir = tmp_path / "lang_output"
+        for folder_name in ("待翻譯", "待翻譯整理需翻譯"):
+            source = (
+                lang_output_dir
+                / folder_name
+                / "aether_extracted"
+                / "packs"
+                / "tooltips"
+                / "assets"
+                / "aether"
+                / "lang"
+                / "en_us.json"
+            )
+            source.parent.mkdir(parents=True)
+            source.write_text('{"key": "English"}', encoding="utf-8")
+
+        moved = normalize_pending_extracted_wrappers(lang_output_dir)
+
+        assert moved == 2
+        for folder_name in ("待翻譯", "待翻譯整理需翻譯"):
+            assert (
+                lang_output_dir
+                / folder_name
+                / "assets"
+                / "aether"
+                / "lang"
+                / "en_us.json"
+            ).exists()
+            assert not (lang_output_dir / folder_name / "aether_extracted").exists()
+
+    def test_pending_data_and_packs_are_mapped_to_assets_lang(self, tmp_path: Path):
+        """data/packs 來源最後都要輸出成 assets/<modid>/lang。"""
+        lang_output_dir = tmp_path / "lang_output"
+        sources = [
+            lang_output_dir
+            / "待翻譯"
+            / "CodeChickenLib_extracted"
+            / "data"
+            / "codechickenlib"
+            / "lang"
+            / "en_us.json",
+            lang_output_dir
+            / "待翻譯"
+            / "aether_extracted"
+            / "packs"
+            / "tooltips"
+            / "assets"
+            / "aether"
+            / "lang"
+            / "en_us.lang",
+        ]
+        for source in sources:
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("{}", encoding="utf-8")
+
+        normalize_pending_extracted_wrappers(lang_output_dir)
+
+        assert (
+            lang_output_dir
+            / "待翻譯"
+            / "assets"
+            / "codechickenlib"
+            / "lang"
+            / "en_us.json"
+        ).exists()
+        assert (
+            lang_output_dir
+            / "待翻譯"
+            / "assets"
+            / "aether"
+            / "lang"
+            / "en_us.lang"
+        ).exists()
+        assert not (lang_output_dir / "待翻譯" / "data").exists()
+        assert not (lang_output_dir / "待翻譯" / "packs").exists()
+        assert not (lang_output_dir / "待翻譯" / "aether_extracted").exists()
+
+    def test_pending_collision_merges_new_keys_and_drops_source(self, tmp_path: Path):
+        """目的檔已存在時，相同 key 忽略、新 key 補入且來源被清理。"""
+        lang_output_dir = tmp_path / "lang_output"
+        destination = (
+            lang_output_dir / "待翻譯" / "assets" / "aether" / "lang" / "en_us.json"
+        )
+        destination.parent.mkdir(parents=True)
+        destination.write_text(
+            '{"same": "existing", "keep": "old"}', encoding="utf-8"
+        )
+        source = (
+            lang_output_dir
+            / "待翻譯"
+            / "aether_extracted"
+            / "packs"
+            / "tooltips"
+            / "assets"
+            / "aether"
+            / "lang"
+            / "en_us.json"
+        )
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            '{"same": "duplicate", "new": "new english"}', encoding="utf-8"
+        )
+
+        normalize_pending_extracted_wrappers(lang_output_dir)
+
+        assert json.loads(destination.read_text(encoding="utf-8")) == {
+            "same": "existing",
+            "keep": "old",
+            "new": "new english",
+        }
+        assert not source.exists()
+        assert not (lang_output_dir / "待翻譯" / "aether_extracted").exists()
 
     def test_cleanup_nonexistent_mod_does_nothing(self, tmp_path: Path):
         """不存在的 modid 不會 crash。"""

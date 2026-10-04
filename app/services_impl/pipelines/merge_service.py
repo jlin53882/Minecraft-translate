@@ -276,6 +276,15 @@ def run_merge_folder_batch_service(
                         for update in merge_extracted_to_assets(
                             lang_output_dir=lang_output_dir,
                             session=session,
+                            pending_folder_names=(
+                                cfg.get("lang_merger", {}).get(
+                                    "pending_folder_name", "待翻譯"
+                                ),
+                                cfg.get("lang_merger", {}).get(
+                                    "pending_organized_folder_name",
+                                    "待翻譯整理需翻譯",
+                                ),
+                            ),
                         ):
                             if update.get("log"):
                                 session.add_log(update["log"])

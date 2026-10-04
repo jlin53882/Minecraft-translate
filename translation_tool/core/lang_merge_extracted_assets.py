@@ -25,10 +25,11 @@ import re
 import shutil  # 用於 _cleanup_extracted_dirs 刪除整個 _extracted 子資料夾
 import traceback
 from collections import defaultdict
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.lang_codec import dump_lang_text, parse_lang_text
 from translation_tool.core.lang_merge_dict import (
     contains_cjk as stage2_contains_cjk,
 )
@@ -243,11 +244,62 @@ def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
             log_warning(f"[MergeExt→Assets] 無法清理暫存檔 {tmp_path}: {cleanup_error}")
 
 
-def _cleanup_single_mod_extracted(lang_output_dir: Path, modid: str) -> bool:
+def _cleanup_single_mod_extracted(
+    lang_output_dir: Path,
+    modid: str,
+    source_paths: Iterable[Path] | None = None,
+) -> bool:
     """2026-08-04 B3: 只刪除指定 modid 的 _extracted 目錄 (per-mod commit)。
 
     只有該 mod 寫入成功後才呼叫,避免寫失敗時 source 已被刪。
     """
+    # Prefer the exact files discovered by the scanner.  Extracted JAR layouts
+    # are not necessarily ``*_extracted/<modid>/...``; they can contain
+    # wrapper directories such as ``packs/foo/assets/<modid>/...``.
+    if source_paths is not None:
+        cleaned = False
+        for source_path in source_paths:
+            source_path = Path(source_path)
+            if not source_path.is_file():
+                continue
+            try:
+                # A lang file always lives below ``<modid>/lang``.  Removing
+                # that mod directory preserves sibling mods in the same
+                # extracted container and keeps the cleanup atomic: if the
+                # directory removal fails, the source remains available for a
+                # retry.
+                mod_dir = source_path.parent.parent
+                if mod_dir.name != modid:
+                    source_path.unlink()
+                    mod_dir = source_path.parent
+                else:
+                    shutil.rmtree(mod_dir)
+                cleaned = True
+                current = mod_dir.parent
+                extracted_root = next(
+                    (
+                        parent
+                        for parent in (current, *current.parents)
+                        if _EXTRACTED_NAME_RE.match(parent.name)
+                    ),
+                    None,
+                )
+                while current != lang_output_dir and current.exists():
+                    if extracted_root is not None and current == extracted_root:
+                        if any(current.iterdir()):
+                            break
+                        current.rmdir()
+                        break
+                    if any(current.iterdir()):
+                        break
+                    parent = current.parent
+                    current.rmdir()
+                    current = parent
+            except OSError as exc:
+                log_warning(f"[MergeExt→Assets] cleanup 失敗 ({modid}): {exc}")
+        return cleaned
+
+    # Backward-compatible fallback for callers/tests that only provide modid.
     for entry in lang_output_dir.iterdir():
         if not entry.is_dir():
             continue
@@ -272,6 +324,100 @@ def _safe_session_log(session, message: str) -> None:
         session.add_log(message)
     except Exception:  # noqa: BLE001
         log_debug("[MergeExt→Assets] session.add_log 失敗", exc_info=True)
+
+
+def normalize_pending_extracted_wrappers(
+    lang_output_dir: str | Path,
+    folder_names: Iterable[str] = ("待翻譯", "待翻譯整理需翻譯"),
+) -> int:
+    """把 pending 語言檔正規化成 ``assets/<modid>/lang`` 結構。
+
+    pending 內容本身必須保留給後續翻譯；這裡只把
+    ``待翻譯/**/lang/<lang>`` 搬成
+    ``待翻譯/assets/<modid>/lang/<lang>``，避免 ``data``、``packs``、
+    ``*_extracted`` 等暫存或 JAR 包裝路徑變成最終輸出結構的一部分。
+    階段 2 掃描完成後才可呼叫此函式。
+    """
+    lang_output_dir = Path(lang_output_dir)
+    moved = 0
+
+    for folder_name in folder_names:
+        root = lang_output_dir / folder_name
+        if not root.is_dir():
+            continue
+        lang_files = [
+            path
+            for path in root.rglob("*")
+            if path.is_file()
+            and path.parent.name == "lang"
+            and path.suffix.lower() in {".json", ".lang"}
+        ]
+        for source in lang_files:
+            modid = _infer_modid_from_lang_file(source)
+            if not modid:
+                log_warning(f"[MergeExt→Assets] pending 推不出 modid，保留來源: {source}")
+                continue
+            destination = root / "assets" / modid / "lang" / source.name
+            if source == destination:
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.exists():
+                try:
+                    if source.suffix.lower() == ".json":
+                        source_data = load_json_auto_encoding(source) or {}
+                        destination_data = load_json_auto_encoding(destination) or {}
+                        if not isinstance(source_data, dict) or not isinstance(
+                            destination_data, dict
+                        ):
+                            raise ValueError("pending JSON 不是 object")
+                        added = {
+                            key: value
+                            for key, value in source_data.items()
+                            if key not in destination_data
+                        }
+                        if added:
+                            _write_json_atomic(
+                                destination,
+                                {**destination_data, **added},
+                            )
+                    else:
+                        source_data = parse_lang_text(
+                            source.read_text(encoding="utf-8-sig")
+                        )
+                        destination_data = parse_lang_text(
+                            destination.read_text(encoding="utf-8-sig")
+                        )
+                        added = {
+                            key: value
+                            for key, value in source_data.items()
+                            if key not in destination_data
+                        }
+                        if added:
+                            destination.write_text(
+                                dump_lang_text({**destination_data, **added}),
+                                encoding="utf-8",
+                            )
+                    source.unlink()
+                    moved += 1
+                except (OSError, TypeError, ValueError) as exc:
+                    log_warning(
+                        f"[MergeExt→Assets] pending 合併失敗，保留來源: {source}: {exc}"
+                    )
+                continue
+            shutil.move(str(source), str(destination))
+            moved += 1
+
+        # 只移除搬移後剩下的空包裝目錄；任何未處理的非語言檔仍會保留。
+        for directory in sorted(
+            (path for path in root.rglob("*") if path.is_dir()),
+            key=lambda path: len(path.parts),
+            reverse=True,
+        ):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+    return moved
 
 
 def _cleanup_extracted_dirs(lang_output_dir: Path, session: Any = None) -> int:
@@ -313,6 +459,7 @@ def _cleanup_extracted_dirs(lang_output_dir: Path, session: Any = None) -> int:
 def merge_extracted_to_assets(
     lang_output_dir: str | Path,
     session: Any = None,
+    pending_folder_names: Iterable[str] | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """合併階段 2:把 lang_output_dir 內 XX_extracted 的 lang 檔 key-by-key 進 assets/。
 
@@ -321,6 +468,7 @@ def merge_extracted_to_assets(
             函式會同時讀它下面的 XX_extracted/*/lang/*.json
             以及下面的 assets/{modid}/lang/*.json (既有最終結果)。
         session: 任意的有 add_log()/set_progress() 介面的物件 (可選)。
+        pending_folder_names: 待翻譯與整理待翻譯資料夾名稱；未提供時使用預設名稱。
 
     Yields:
         {"progress": float, "log": str | None, "error": bool}
@@ -351,6 +499,11 @@ def merge_extracted_to_assets(
 
         if not extracted:
             log_info("[MergeExt→Assets] 沒找到 XX_extracted/*, 跳過 (無源可合併)")
+            normalize_pending_extracted_wrappers(
+                lang_output_dir,
+                folder_names=pending_folder_names
+                or ("待翻譯", "待翻譯整理需翻譯"),
+            )
             yield {"progress": 1.0, "log": None, "error": False}
             return
 
@@ -455,12 +608,22 @@ def merge_extracted_to_assets(
                 if final_tw:
                     _write_json_atomic(target_path, final_tw)
                     total_files_written += 1
-                    # 2026-08-04 B3: 寫成功才刪該 mod 的 _extracted source (per-mod commit)
+                    # 2026-08-04 B3: 寫成功才刪該 mod 的 _extracted source
+                    # (per-mod commit).  Use the exact scanned source paths so
+                    # deep wrapper layouts are cleaned as well.
                     try:
-                        _cleanup_single_mod_extracted(lang_output_dir, modid)
+                        scanned_sources = [
+                            source_path
+                            for paths in lang_files.values()
+                            for source_path in paths
+                            if "待翻譯" not in source_path.parts
+                        ]
+                        _cleanup_single_mod_extracted(
+                            lang_output_dir, modid, scanned_sources
+                        )
                     except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                         log_warning(f"[MergeExt→Assets] cleanup 失敗 ({modid}): {exc}")
-                    mod_added_count = len(final_tw) - len(existing_tw)
+                    mod_added_count = len(set(final_tw) - set(existing_tw))
                     if mod_added_count > 0:
                         total_added += mod_added_count
                     if session is not None:
@@ -473,6 +636,11 @@ def merge_extracted_to_assets(
                                 else ""
                             ),
                         )
+                        if mod_added_count == 0:
+                            _safe_session_log(
+                                session,
+                                f"  - {modid}: 相同 key 已存在於 assets，略過新增",
+                            )
                 else:
                     # 沒 zh_tw 內容,不寫空檔案(避免污染 assets/)
                     if session is not None:
@@ -520,6 +688,15 @@ def merge_extracted_to_assets(
         if session is not None:
             _safe_session_log(
                 session, f"[MergeExt→Assets] 完成: {total_added} 個 key 已並入 assets/"
+            )
+        normalized = normalize_pending_extracted_wrappers(
+            lang_output_dir,
+            folder_names=pending_folder_names
+            or ("待翻譯", "待翻譯整理需翻譯"),
+        )
+        if normalized and session is not None:
+            _safe_session_log(
+                session, f"[MergeExt→Assets] 已整理 {normalized} 個 pending 語言檔"
             )
         # 2026-08-04: per-mod cleanup 已在 loop 內處理,不再需要 batch cleanup
         yield {
