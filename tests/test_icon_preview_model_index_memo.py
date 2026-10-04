@@ -5,28 +5,33 @@ import os
 import zipfile
 
 from app.views import icon_preview_view as ipv
+from app.views.icon_preview import icon_cache
 
 
 def test_model_index_read_from_disk_once_and_invalidated_on_jar_change(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(ipv, "_get_model_index_cache_dir", lambda: tmp_path / "idx")
-    monkeypatch.setattr(ipv, "_MODEL_INDEX_MEMO", {})
+    monkeypatch.setattr(
+        icon_cache, "_get_model_index_cache_dir", lambda: tmp_path / "idx"
+    )
+    monkeypatch.setattr(icon_cache, "_MODEL_INDEX_MEMO", {})
     jar = tmp_path / "demo-1.0.jar"
     with zipfile.ZipFile(jar, "w") as zf:
         zf.writestr("assets/demo/models/item/a.json", "{}")
 
-    ipv._save_model_index_to_cache(jar, "demo", {"item/a": ["x"]})
-    ipv._MODEL_INDEX_MEMO.clear()
+    icon_cache._save_model_index_to_cache(jar, "demo", {"item/a": ["x"]})
+    icon_cache._MODEL_INDEX_MEMO.clear()
 
     reads = []
-    orig = ipv._load_model_index_from_disk
+    orig = icon_cache._load_model_index_from_disk
     monkeypatch.setattr(
-        ipv, "_load_model_index_from_disk", lambda *a: reads.append(1) or orig(*a)
+        icon_cache,
+        "_load_model_index_from_disk",
+        lambda *a: reads.append(1) or orig(*a),
     )
 
     for _ in range(50):
-        assert ipv._load_model_index_from_cache(jar, "demo") == {"item/a": ["x"]}
+        assert icon_cache._load_model_index_from_cache(jar, "demo") == {"item/a": ["x"]}
     assert len(reads) == 1
 
     # JAR 更新（mtime/size 改變）→ 快取失效
@@ -34,7 +39,7 @@ def test_model_index_read_from_disk_once_and_invalidated_on_jar_change(
         zf.writestr("assets/demo/models/item/b.json", "{}")
     st = jar.stat()
     os.utime(jar, (st.st_atime, st.st_mtime + 10))
-    assert ipv._load_model_index_from_cache(jar, "demo") is None
+    assert icon_cache._load_model_index_from_cache(jar, "demo") is None
 
 
 def test_load_runs_scan_off_event_loop(tmp_path, monkeypatch):

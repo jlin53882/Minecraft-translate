@@ -105,7 +105,7 @@ def test_icon_cache_paths_follow_data_root(monkeypatch, tmp_path):
     若有人改回 Path(__file__) 或 cwd，這裡會失敗。
     """
     from app import icon_index
-    from app.views import icon_preview_view
+    from app.views.icon_preview import icon_cache as icon_preview_view
 
     root = tmp_path / "data"
     monkeypatch.setenv(app_paths.DATA_DIR_ENV, str(root))

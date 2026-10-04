@@ -4,6 +4,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import flet as ft
 import pytest
 
 # 移除 hermes-agent/tests 從 sys.path，避免它跟我們的 tests 套件命名衝突
@@ -45,8 +46,6 @@ def _border_all(width, color):
 
 
 # Monkey-patch ft.Border.all for tests that expect the 0.28.3 API
-import flet as ft
-
 ft.Border.all = staticmethod(_border_all)
 
 
@@ -71,7 +70,7 @@ def _isolate_test_runtime_writes(tmp_path, monkeypatch, request):
     """
     monkeypatch.chdir(tmp_path)
     if request.node.path.name.startswith("test_icon_preview_"):
-        module = importlib.import_module("app.views.icon_preview_view")
+        module = importlib.import_module("app.views.icon_preview.icon_cache")
         index_module = importlib.import_module("app.icon_index")
         icon_cache_root = tmp_path / "icon_cache"
         icon_cache = icon_cache_root / "jar_icons"
