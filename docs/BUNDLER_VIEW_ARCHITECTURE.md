@@ -26,10 +26,10 @@ BundlerView.start_bundling_clicked()
 
 ## 畫面結構
 
-`BundlerView`（`ft.Column`）由 `_build_controls` 組裝，其下的建構器為 `_build_bundler_version_section`、`_build_bundler_info_card`、`_build_bundler_paths_card`、`_build_bundler_preview_cards`。版面為頁首 `kit.page_header`，下方左右兩欄，最底為可收合的「打包日誌」卡：
+`BundlerView`（`ft.Column`）由 `_build_controls` 組裝，其下的建構器為 `_build_bundler_version_section`、`_build_bundler_info_card`、`_build_bundler_paths_card`、`_build_bundler_preview_cards`。版面為頁首 `kit.page_header`，下方左右兩欄，最底為可收合的「打包日誌」卡（預設展開，高度 200）：
 
-- 左欄：「資源包資訊」卡（版本、`description_field`、`pack_image_field`）、「路徑與額外內容」卡（根目錄、輸出 ZIP、額外資料夾）。
-- 右欄：「資源包預覽」卡（`preview_image` / `preview_title` / `preview_format`）、「pack.mcmeta」卡（`mcmeta_view`，內容由 `mcmeta_text()` 產生）、執行卡（`status_text`、`progress_bar`、`start_button`）。
+- 左欄：「資源包資訊」卡（由上而下：「遊戲版本 (pack_format)」選擇器，預設顯示「選擇遊戲版本」；「檔案敘述」`description_field`；「資源包圖片」`pack_image_field`，右側為選圖按鈕）、「路徑與額外內容」卡（「翻譯專案根目錄 *」、「最終 ZIP 儲存路徑」，各自右側有選擇按鈕；「其他指定資料夾 / 檔案」與「新增資料夾」按鈕）。
+- 右欄：「資源包預覽」卡（`preview_image` / `preview_title` / `preview_format`）、「pack.mcmeta」卡（`mcmeta_view`，內容由 `mcmeta_text()` 產生）、執行卡（左側 `status_text` 預設「準備就緒」，其下 `progress_bar` 預設隱藏；右側「開始打包」`start_button`）。預覽卡未輸入描述時顯示「（尚未輸入描述）」，`mcmeta_view` 預設顯示 description 為空、min/max_format 為 "0" 的 JSON。
 - 描述、版本或圖片改變時由 `_update_preview` 更新預覽；描述以 `mc_text_spans` 渲染 § 顏色代碼。
 
 ## 主要 UI 元件

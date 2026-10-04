@@ -27,11 +27,11 @@ translation_tool/core/
 
 `IconPreviewView.__init__` 依序呼叫 `_init_icon_preview_state`、`_init_icon_preview_paging_controls`、`_init_icon_preview_source_controls` 建立控制項，再組成 `controls`（由上而下）：
 
-1. 標題列：`back_btn`（僅詳情頁顯示）、圖示、`header`
-2. `mod_search_tf` / `mod_search_status`：模組清單搜尋（詳情頁隱藏）
-3. 「資料來源」卡（`kit.section_card`）：`pick_source_btn` + `source_label`、`pick_review_btn` + `review_label`、`load_btn`、`progress_bar` / `progress_text`
+1. 標題列：`back_btn`（僅詳情頁顯示）、圖示、`header`（文字「JAR 圖示預覽」）
+2. `mod_search_tf`（label「搜尋模組」）/ `mod_search_status`：模組清單搜尋（初始隱藏，載入並顯示模組清單後才出現；詳情頁隱藏）
+3. 「資料來源」卡（`kit.section_card`）：`pick_source_btn` + `source_label`、`pick_review_btn` + `review_label`、`load_btn`、`progress_bar` / `progress_text`（按鈕文字依序為「選擇模組資料夾（例：mods 資料夾）」、「選擇資源包路徑」、「載入模組清單」；來源標籤預設「模組資料夾：尚未選擇」「資源包路徑：尚未選擇」；`progress_text` 預設「準備就緒」，`progress_bar` 掃描時才顯示）
 4. `save_btn`（僅詳情頁顯示）
-5. `page_bar`（`prev_page_btn` / `page_info` / `next_page_btn`）與 `page_size_selector`
+5. `page_bar`（`prev_page_btn` / `page_info` / `next_page_btn`；預設只見左右箭頭，`page_info` 為空）與 `page_size_selector`（「每頁顯示」，預設 50）
 6. `list_view`：模組清單列（`_mod_row`）或詳情頁的 `LangItemRow`
 
 進入詳情頁時，`_update_detail_search_controls` 會在 `list_view` 前插入 `detail_search_tf` / `detail_search_status`。

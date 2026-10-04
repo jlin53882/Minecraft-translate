@@ -52,7 +52,7 @@ PipelineView（`app/views/pipeline/pipeline_view.py`）是**翻譯工作台**：
   → _start_single_step()
 ```
 
-頁面佈局由 `_build_ui` 組合：`kit.page_header`（右側為「一鍵製作」按鈕，`_build_one_click_button`）下方分兩欄——左欄為「專案路徑」卡片（`_build_pipeline_paths_card`）與「流水線步驟」卡片，右欄為進度狀態卡（`progress_status` + `progress_bar`）與 `progress_panel.container`；步驟與狀態卡由 `_build_pipeline_steps_and_status_cards` 建立。
+頁面佈局由 `_build_ui` 組合：`kit.page_header`（標題「模組流水線・一鍵製作」；右側為「一鍵製作（自動執行所有流程）」按鈕，`_build_one_click_button`）下方分兩欄——左欄為「專案路徑」卡片（`_build_pipeline_paths_card`，欄位「讀取來源（mods 資料夾） *」與「輸出目的地 *」，未選擇時顯示「尚未選擇…」placeholder，各欄右側為選資料夾按鈕）與「流水線步驟」卡片（編號 1–4 的四列，右側各一「執行」按鈕），右欄為進度狀態卡（`progress_status` 預設顯示「等待任務啟動...」+ `progress_bar`）與 `progress_panel.container`（預設隱藏，截圖預設狀態下不可見）；步驟與狀態卡由 `_build_pipeline_steps_and_status_cards` 建立。
 
 ### 執行模型（worker thread → TaskSession → event loop）
 
@@ -92,9 +92,10 @@ PipelineView（`app/views/pipeline/pipeline_view.py`）是**翻譯工作台**：
 
 1. **抽取資源**：依 mode 抽取到 lang / book 輸出資料夾。任何 JAR 無法處理（`stats.failures > 0`）或收到 `error` → 抽取 session 為 ERROR（見下方 Service 契約）。
 2. **語系比對**：抽取結果是**資料夾**，因此一律走 `run_merge_folder_batch_service`：
-   - lang 輸出 → `only_process_lang=True`
+   - lang 輸出 → `only_process_lang` 取自對話框步驟 2 的「只處理 lang 檔案」開關（預設 True）
    - book 輸出 → `only_process_lang=False`（需處理 Patchouli 內容）
    - 兩者都輸出到 `merge_output_dir`；前一個來源失敗（`_session_failed`）就不處理下一個。
+   - 一鍵對話框步驟 2 沒有「資料夾／ZIP」來源選項（來源固定為步驟 1 的提取輸出，原本的選項從未生效，已移除）。
    - **不可把資料夾傳給 `run_merge_zip_batch_service`**：它逐一以 ZIP 開啟 `zip_paths`，資料夾會變成 `failed_zips`，實際上什麼都沒合併。
 3. **啟動翻譯**：只翻譯 `translate_input_dirs` 中有檔案的資料夾；沒有待翻譯內容 → 記錄並略過（步驟仍成功）。任一輸入 session.error → 停止。
 4. **打包資源**：

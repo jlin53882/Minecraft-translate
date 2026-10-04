@@ -32,7 +32,7 @@ RulesView（維護替換規則）→ ConfigView（翻譯參數）→ Translation
 
 ## 頁面佈局
 
-`__init__` 先 `_init_controls`（`_init_rules_table_controls` + `_init_rules_sort_and_test_controls`），再組出：`_build_header`（`kit.page_header`，右側 `loading_indicator`）、`_build_toolbar`（`search_box` / `sort_box` / 重新載入 / 新增規則 / 全部儲存）、左側 `_build_rules_table_area`（`rules_table` + `_build_footer` 分頁列：`total_count_text`、`prev_button`、`page_jump_field`、`total_pages_text_label`、`next_button`）、右側 `_build_test_panel`（「即時測試」`test_input` / `test_result` / `test_info`，另有「使用說明」卡）。最後 `_initial_load()` 啟動背景載入。
+`__init__` 先 `_init_controls`（`_init_rules_table_controls` + `_init_rules_sort_and_test_controls`），再組出：`_build_header`（`kit.page_header`，標題「替換規則」、副標「機器翻譯後自動套用的用語統一規則，支援純文字與正規表達式」，右側 `loading_indicator`）、`_build_toolbar`（由左至右：`search_box`（placeholder「搜尋 from / to / 備註 / 分類　(/正則/ 以斜線包起來)」）/ `sort_box`（placeholder「排序方式」）/ 重新載入 / 新增規則 / 全部儲存）、左側 `_build_rules_table_area`（`rules_table` + `_build_footer` 分頁列：`total_count_text`、`prev_button`、`page_jump_field`、`total_pages_text_label`、`next_button`）、右側 `_build_test_panel`（「即時測試」卡：`test_input`（標籤「輸入文字」，placeholder「貼上一段簡體文字，立即看到套用結果」）/ `test_result`（標籤「套用結果」）/ `test_info`；其下為「使用說明」卡）。最後 `_initial_load()` 啟動背景載入。
 
 即時測試（`on_test_change`）以目前尚未儲存的 `all_rules_data`（略過 from 為空或無法編譯者）呼叫 `apply_replace_rules`。
 

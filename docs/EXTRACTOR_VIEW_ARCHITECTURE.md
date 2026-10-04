@@ -11,6 +11,12 @@ ExtractorView 位於翻譯流程的**輸入端**：從 mods 資料夾的 JAR 檔
 
 ---
 
+## 預設畫面（1360x900）
+
+頁首「JAR 提取」（副標：從模組 JAR 取出語言檔與 Patchouli 手冊）→ 「提取設定」卡：「Mods 資料夾（含 JAR） *」欄位（placeholder `./mods 或 %USERPROFILE%/Mods`，右側選資料夾按鈕）、「輸出資料夾」欄位（placeholder「（未指定將自動產生）」，右側選資料夾按鈕與清除「X」按鈕）、自動產生路徑與預設語系的說明文字、「跳過 zh_cn 抽取」開關（預設關）→ 下方並排三張模式卡：「Lang 語言檔」（「提取 Lang」主按鈕 +「預覽 Lang」外框按鈕）、「Book 手冊」（「提取 Book」/「預覽 Book」）、「Lang + Book」（「提取 Lang + Book」/「預覽 Lang + Book」）。
+
+---
+
 ## 模組地圖
 
 ```

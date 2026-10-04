@@ -60,6 +60,8 @@ start_task()（event loop）
 
 建構子拆成 `_init_qc_state_and_progress`（狀態、共用進度列／日誌、`QCBase`、各欄位與按鈕）、`_build_qc_mode_cards`（`mode_cards`）、`_build_qc_json_panel`、`_build_qc_tsv_and_untranslated_panels`（組出 `mode_panels` 並呼叫 `_apply_mode`）。`select_mode(mode)` 切換 `self.mode`（預設為 `QC_MODES` 第一項 `untranslated`），只顯示對應面板。
 
+版面由上而下：`kit.page_header`「QC 品質檢驗」（副標「檢查缺漏、簡繁不一致與英文殘留；報告輸出到你指定的資料夾」）→ 一列三張模式卡（標題／副標：「Key 缺失檢查」比對 en_us 與 zh_tw 的 key；「簡繁差異（JSON 資料夾）」OpenCC 轉換後逐檔比對；「簡繁差異（TSV 單檔）」輸出含轉換欄位的 CSV；預設選中第一張並顯示勾選標記）→ 目前模式的設定面板（預設只顯示「Key 缺失檢查」）→ 「處理日誌」卡片（預設為空，進度條隱藏）。
+
 - **模式 `untranslated`**：`untranslated_checker` 元件（Key 缺失檢查，`UntranslatedChecker(page, file_picker, task_runner)`）
 - **模式 `compare_json`**：簡繁差異比較 JSON 資料夾（`cn_dir_textfield` / `tw_dir_textfield_2` / `compare_out_dir_textfield` / `compare_start_button`）
 - **模式 `compare_tsv`**：簡繁差異比較 TSV 單檔（`tsv_file_textfield` / `tsv_out_file_textfield` / `compare_tsv_start_button`）

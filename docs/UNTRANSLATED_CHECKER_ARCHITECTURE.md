@@ -27,6 +27,8 @@
 | `out_dir` (TextField) | 報告輸出資料夾路徑 |
 | `start_button` (ft.Button) | 開始檢查（SEARCH_OFF icon） |
 
+面板由上而下：說明文字「比對 en_us 與 zh_tw 的 key，列出繁中缺漏的條目（值仍是英文的不在此檢查範圍）。」→ 三列欄位（標籤依序為「英文 (en_us) 來源資料夾」「繁中 (zh_tw) 來源資料夾」「未翻譯報告 輸出資料夾」，預設皆空）→ 「開始檢查」按鈕（主色）。
+
 三個欄位皆為 `kit.text_field`，每列配 `_create_pick_button(folder_mode=True)`（`kit.pick_button`，FOLDER_OPEN icon）。
 
 ## 任務執行（_on_start）

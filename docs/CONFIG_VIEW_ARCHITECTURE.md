@@ -2,7 +2,7 @@
 
 ## 定位
 
-ConfigView（`app/views/config_view.py`）是全域設定頁：以**左側導覽 + 右側內容**的兩欄佈局，管理 `config.json` 的設定區段。設定頁可編輯 logging / translator / ftb_translator / lm_translator / lang_merger / extractor / output_bundler / species_cache；`ui`（`ui.theme_mode`）、`jar_extractor.lang_codes` 等沒有指定 `page` 的設定不在此頁編輯。頁面標題為「設定」，頂部為 `build_header`、底部為「儲存所有設定」按鈕列（`build_footer`）。
+ConfigView（`app/views/config_view.py`）是全域設定頁：以**左側導覽 + 右側內容**的兩欄佈局，管理 `config.json` 的設定區段。設定頁可編輯 logging / translator / ftb_translator / lm_translator / lang_merger / extractor / output_bundler / species_cache；`ui`（`ui.theme_mode`）、`jar_extractor.lang_codes` 等沒有指定 `page` 的設定不在此頁編輯。頁面頂部為 `build_header`（標題「設定」，副標「所有設定會寫入 config.json；變更後請按「儲存」，部分項目需重新啟動才會套用」），底部為 `build_footer` 固定橫幅（左側提示「提示：修改後請務必點擊儲存」，右側「儲存所有設定」按鈕）。預設進入「一般設定」頁，每個設定欄位下方有說明文字（含套用時機與用途）。
 
 ## 檔案結構
 
@@ -25,14 +25,14 @@ app/views/config/
 
 | id | label | 內容 |
 |----|-------|------|
-| `general` | 一般設定 | logging（log_level / log_dir / log_format）、translator（`output_dir_name`、`replace_rules_path`、`cache_directory`、`parallel_execution_workers`、`enable_cache_saving`、`custom_translator_folder`）、`ftb_translator.output_dir_name`、`output_bundler.output_zip_name` |
-| `api_models` | API & 模型設定 | 專用元件：`_keys_panel`（API keys 動態列）與 `_models_panel`（models 動態列，勾選啟用、可上移／下移／刪除、每個模型的 `max_output_tokens`「模型上限」欄，空白表示用全域值） |
-| `translation_behavior` | 翻譯行為設定 | temperature、rate_limit.timeout、sleep_seconds_between_batches、`lm_translate_folder_name`、skip_terms、translatable_keywords、patchouli 目錄名稱、short_text_skip_len |
-| `merger` | 語言合併器設定 | pending 資料夾命名、門檻值、patchouli 開關、檔案合併（階段 2） |
-| `prompts` | 提示詞管理 | patchouli / lang system prompt |
-| `species_lookup` | 學名查詢管理 | species_cache 設定（cache_directory、cache_filename、wikipedia 語言與速率） |
-| `batch_limits` | 批次與限制 | initial_batch_size_* 各格式、min_batch_size、batch_shrink_factor、rpm_cooldown_sec、max_output_tokens、token 預算、金鑰失敗冷卻、batch_write_interval |
-| `extractor` | Jar 提取設定 | extractor.output_folder_names（extract / preview 各三種）、skip_zh_cn_extract；target_language 僅作舊設定相容，不宣稱會生效（版面中以 `Note` 說明） |
+| `general` | 一般設定 | 依序為「日誌設定 (Logging)」、「翻譯與處理設定 (Translator)」、「成品打包器 (Output Bundler)」三張卡，欄位單欄堆疊：logging（log_level / log_dir / log_format）、translator（`output_dir_name`、`replace_rules_path`、`cache_directory`、`parallel_execution_workers`、`enable_cache_saving`、`custom_translator_folder`）、`ftb_translator.output_dir_name`、`output_bundler.output_zip_name` |
+| `api_models` | API & 模型設定 | 「API 金鑰設定」卡（`_keys_panel`：標題「API 金鑰 (API Keys)」旁「+」新增；每列為遮罩輸入框＋顯示/隱藏眼睛＋刪除鈕）與「模型設定」卡（`_models_panel`：標題「模型清單 (Models List)」＋「新增模型名稱」輸入框＋「+」；每列為序號、勾選啟用、模型名、`max_output_tokens`「模型上限」欄（空白表示用全域值）、上移／下移／刪除） |
+| `translation_behavior` | 翻譯行為設定 | 「基本設定」卡（同一列：temperature、rate_limit.timeout、sleep_seconds_between_batches、`lm_translate_folder_name`）與「過濾條件與目錄」卡（skip_terms、translatable_keywords、patchouli 目錄名稱三個多行欄並排；`short_text_skip_len` 在其下方）。內容：temperature、rate_limit.timeout、sleep_seconds_between_batches、`lm_translate_folder_name`、skip_terms、translatable_keywords、patchouli 目錄名稱、short_text_skip_len |
+| `merger` | 語言合併器設定 | 單張「語言合併器設定 (Lang Merger)」卡，由上而下：pending 資料夾命名／整理資料夾名稱／key 最小出現次數／隔離資料夾名稱（兩欄兩列）、「語系過濾設定」（zh 英文含量閾值）、「Patchouli 進階設定」（翻譯來源優先級勾選、en_us 跳過門檻）、「檔案合併(階段 2)」（合併 XX_extracted → assets/） |
+| `prompts` | 提示詞管理 | 「提示詞 (System Prompts)」卡：Patchouli 與 Lang 兩個 system prompt 多行欄左右並排 |
+| `species_lookup` | 學名查詢管理 | 「學名查詢設定 (Species Cache)」卡，四欄單欄堆疊：species_cache 設定（cache_directory、cache_filename、wikipedia 語言與速率） |
+| `batch_limits` | 批次與限制 | 「批次大小與限制」卡（多列並排欄位，含「啟用 Token 預算切批」勾選）：initial_batch_size_* 各格式、min_batch_size、batch_shrink_factor、rpm_cooldown_sec、max_output_tokens、token 預算、金鑰失敗冷卻、batch_write_interval |
+| `extractor` | Jar 提取設定 | 「JAR 輸出資料夾命名」卡：extractor.output_folder_names（extract / preview 各三種）、skip_zh_cn_extract；target_language 僅作舊設定相容，不宣稱會生效（版面中以 `Note` 說明） |
 
 ## 呼叫鏈
 

@@ -10,18 +10,18 @@ LookupView 是**學名（物種名稱）翻譯的快速查詢工具**，屬於�
 
 | 元件 | 類型 | 說明 |
 |------|------|------|
-| `single_input` | `kit.text_field` | 單筆學名輸入（如 `Felis catus`），Enter 也觸發查詢（`on_submit`） |
-| `single_button` | `kit.button` | 觸發單筆查詢 |
-| `recent_row` | Row | 「最近查詢」晶片列（`_remember` 記錄於 `_recent`，最多 `RECENT_LIMIT` 筆，只存在本次執行）；點晶片經 `_lookup_recent` 重新查詢 |
-| `single_result_text` | Text | 單筆查詢結果（`selectable=True`） |
+| `single_input` | `kit.text_field` | 單筆學名輸入（placeholder「輸入單一學名，例如：Felis catus」），Enter 也觸發查詢（`on_submit`） |
+| `single_button` | `kit.button` | 「查詢」（primary，搜尋圖示），與輸入框同一列、位於其右側 |
+| `recent_row` | Row | 「最近查詢」晶片列（預設隱藏，首次查詢後才顯示；`_remember` 記錄於 `_recent`，最多 `RECENT_LIMIT` 筆，只存在本次執行）；點晶片經 `_lookup_recent` 重新查詢 |
+| `single_result_text` | Text | 單筆查詢結果（`selectable=True`；預設顯示「查詢結果將顯示在這裡。」） |
 | `single_progress_ring` | ProgressRing | 查詢中旋轉指示器（預設隱藏） |
-| `copy_button` | `kit.button` | 「查詢結果」卡右上角動作，`copy_result_clicked` 複製結果到剪貼簿 |
-| `batch_input` | `kit.text_field` | JSON 陣列輸入（multiline） |
-| `batch_result_textfield` | `kit.text_field` | 批次結果（read_only, multiline） |
-| `batch_button` | `kit.button` | 觸發批次查詢 |
+| `copy_button` | `kit.button` | 「複製結果」（ghost），位於「查詢結果」卡右上角，`copy_result_clicked` 複製結果到剪貼簿 |
+| `batch_input` | `kit.text_field` | JSON 陣列輸入（multiline；placeholder「輸入 JSON 格式的學名列表，例如：["Felis catus", "Canis lupus familiaris"]」） |
+| `batch_result_textfield` | `kit.text_field` | 批次結果（read_only, multiline；標籤「批次查詢結果 (JSON)」，位於按鈕下方） |
+| `batch_button` | `kit.button` | 「批次查詢」（primary），位於 JSON 輸入框下方，與 `batch_progress_bar` 同一列 |
 | `batch_progress_bar` | `kit.progress_bar` | 批次進度（不確定進度時 `value=None`，預設隱藏） |
 
-**佈局**：頁首 `kit.page_header` + 左右兩欄（`ft.Column(scroll=ADAPTIVE)`）。左欄為「單筆查詢」卡（輸入 + 最近查詢）與「查詢結果」卡，右欄為「批次查詢」卡。
+**佈局**：頁首 `kit.page_header` + 左右兩欄（`ft.Column(scroll=ADAPTIVE)`）。左欄為「單筆查詢」卡（輸入 + 查詢按鈕同列，下接最近查詢）與「查詢結果」卡（標題右側「複製結果」），右欄為「批次查詢」卡（由上而下：JSON 輸入、「批次查詢」按鈕列、批次結果）。
 
 ## 呼叫鏈
 

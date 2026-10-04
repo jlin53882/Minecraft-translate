@@ -280,11 +280,9 @@ def test_lang_codes_come_from_config_and_zero_codes_means_empty_list(
 # ---------- 步驟 2 ----------
 
 
-def test_step2_defaults_and_readonly_fields(env):
+def test_step2_defaults(env):
     env.open()
     env.goto(2)
-    assert env.field("Mod 來源").value == str(env.mods)
-    assert env.field("Mod 來源").read_only is True
     assert env.switch("只處理 lang 檔案").value is True
     assert env.switch("處理 zh_cn 檔案").value is True
     assert env.switch("允許 zh_cn 觸發跳過 en_us").value is False
@@ -292,17 +290,16 @@ def test_step2_defaults_and_readonly_fields(env):
     assert thresholds == ["2", "0.5"]
 
 
-def test_step2_input_mode_toggle_is_remembered(env):
+def test_step2_has_no_dead_source_controls(env):
+    """一鍵流程的語系比對固定處理步驟 1 的提取輸出；原本的「資料夾／ZIP」來源選項從未生效，已移除。"""
     env.open()
     env.goto(2)
-    group = env.controls(ft.RadioGroup)[0]
-    assert group.value == "folder"
-    assert [r.value for r in env.controls(ft.Radio)] == ["folder", "zip"]
-    group.value = "zip"
-    group.on_change(SimpleNamespace(control=group))
-    env.click("上一個")
-    env.click("下一個")
-    assert env.controls(ft.RadioGroup)[0].value == "zip"
+    assert env.controls(ft.RadioGroup) == []
+    assert env.controls(ft.Radio) == []
+    assert not any(f.label == "Mod 來源" for f in env.controls(ft.TextField))
+    assert "步驟 1 的提取輸出（自動帶入）" in [
+        getattr(c, "value", None) for c in env.controls(ft.Text)
+    ]
 
 
 def test_patchouli_skip_switch_is_collected(env):

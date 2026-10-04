@@ -14,16 +14,16 @@ TranslationView（頁面標題「任務翻譯工具」）是 FTB Quests / KubeJS
 ## 架構圖（文字版）
 ```
 TranslationView（ft.Column）
-  ├─ kit.page_header「任務翻譯工具」
+  ├─ kit.page_header「任務翻譯工具」（副標：處理 FTB Quests、KubeJS Tooltip 與 Markdown 文件，步驟可自由勾選）
   └─ body = ft.Row
        ├─ 左（expand=3）：ft.Tabs（TabBar + TabBarView：FTB Quests / KubeJS Tooltips / Markdown）
        │    └─ 每個 tab 由 translation_panels.build_*_tab() 建立（_tab）
        │         ├─ section_card「路徑設定」：build_path_row（輸入／輸出資料夾；MD 另有 md_lang_mode）
        │         ├─ section_card「翻譯步驟」：kit.StepCard 步驟列（背後為 ft.Checkbox）+「寫入新快取」kit.SwitchRow
-       │         └─ build_action_row：開始翻譯 / Dry-run / Reset
+       │         └─ build_action_row：開始翻譯 / Dry-run 開始模擬翻譯 / Reset
        └─ 右（expand=2）：
-            ├─ 執行狀態卡：kit.ProgressRing（progress）+ status_chip + cancel_button
-            └─ section_card「執行日誌」：log_view（LogView tail）+ 清空日誌按鈕
+            ├─ 執行狀態卡：kit.ProgressRing（progress，預設 0%）+「執行狀態」標籤 + status_chip（預設「尚未開始」）+ cancel_button（「取消」，預設停用）
+            └─ section_card「執行日誌」：log_view（LogView tail）+ 標題列右側垃圾桶圖示按鈕（tooltip「清空日誌」）
 ```
 
 `__init__` 拆成 `_init_translation_state_and_tabs`（狀態、右側控制項、三個 tab）與 `_build_translation_status_and_right_panel`（`ft.Tabs`、service seam、右側面板）。
@@ -39,7 +39,7 @@ TranslationView（ft.Column）
 | KubeJS | `kjs_step_extract`（匯出與清理）/ `kjs_step_translate`（翻譯）/ `kjs_step_inject`（寫回） | `kjs_write_new_cache` Switch |
 | Markdown | `md_step_extract`（抽取）/ `md_step_translate`（翻譯）/ `md_step_inject`（寫回） | `md_write_new_cache` Switch + `md_lang_mode` Dropdown（non_cjk_only / cjk_only / all） |
 
-每個 tab 的輸入／輸出欄位為 `ftb_in_dir` / `ftb_out_dir`、`kjs_in_dir` / `kjs_out_dir`、`md_in_dir` / `md_out_dir`；輸出留空時由 service 使用預設位置（placeholder 分別為 `<input>/Output`、MD 為 `<input>/Output/md`）。
+每個 tab 的輸入／輸出欄位為 `ftb_in_dir` / `ftb_out_dir`、`kjs_in_dir` / `kjs_out_dir`、`md_in_dir` / `md_out_dir`；欄位標籤：FTB / KubeJS 為「輸入資料夾（模組包根目錄）」「輸出資料夾（可選）」，MD 為「輸入資料夾（遞迴掃描 .md）」「輸出資料夾（可選）」；欄位右側各有資料夾選擇按鈕。輸出留空時由 service 使用預設位置（hint 分別為 `<input>/Output`、MD 為 `<input>/Output/md`）。
 
 ## TranslationActions 流程
 ```

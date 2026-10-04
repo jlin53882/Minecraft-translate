@@ -4,7 +4,7 @@
 - 依序顯示 4 個步驟對話框（1/4 → 2/4 → 3/4 → 4/4）
 - 每個步驟顯示唯讀的 input_path / output_path
 - Step 1：執行模式、語言代碼勾選
-- Step 2：語系比對設定（folder/zip 切換）
+- Step 2：語系比對設定（來源固定為步驟 1 的提取輸出）
 - Step 3：翻譯設定（Dry Run、寫入新快取）
 - Step 4：打包設定（ZIP 檔名、版本、封面圖片）
 - 按「確定執行」後回呼叫 on_execute，所有設定資料透過回調傳回
@@ -182,8 +182,6 @@ def _one_click_init_state(
         "zip_output": os.path.join(ctx.output_path, output_zip_name)
         if ctx.output_path
         else "",
-        "merge_input_mode": "folder",
-        "merge_selected_zips": [],
         "translate_input": "",
         "translate_output": os.path.join(ctx.output_path, "lm_translate")
         if ctx.output_path
@@ -298,14 +296,9 @@ def _one_click__build_step1(ctx):
 
 
 def _one_click__build_step2(ctx):
-    (
-        folder_field,
-        input_mode_group,
-        patchouli_skip_cb,
-        patchouli_thresh_field,
-        zh_en_field,
-        zip_list_view,
-    ) = _one_click_step2_widgets(ctx)
+    patchouli_skip_cb, patchouli_thresh_field, zh_en_field = _one_click_step2_widgets(
+        ctx
+    )
 
     def on_only_lang(e):
         ctx.state["only_lang"] = e.control.value
@@ -315,10 +308,9 @@ def _one_click__build_step2(ctx):
 
     return ft.Column(
         [
-            ft.Text("Mod 來源", weight="bold", size=13),
-            input_mode_group,
-            ft.Container(content=folder_field),
-            ft.Container(content=zip_list_view),
+            ft.Text("合併來源（唯讀）", weight="bold", size=13),
+            # 一鍵流程的語系比對固定處理「步驟 1 的提取輸出」，不是另外指定的 Mod 來源
+            ft.Text("步驟 1 的提取輸出（自動帶入）", size=11, color=C.MUTED),
             ft.Divider(),
             ft.Text("輸出目錄（唯讀）", weight="bold", size=13),
             ft.Text(ctx.output_path or "未設定", size=11, color=C.MUTED),
@@ -358,52 +350,7 @@ def _one_click__build_step2(ctx):
 
 
 def _one_click_step2_widgets(ctx):
-    """步驟 2：輸入模式、ZIP 清單與 Patchouli 選項。"""
-
-    def on_input_mode_changed(e=None):
-        ctx.state["merge_input_mode"] = e.control.value if e else "folder"
-
-    input_mode_group = ft.RadioGroup(
-        content=ft.Column(
-            [
-                ft.Radio(label="資料夾", value="folder"),
-                ft.Radio(label="ZIP", value="zip"),
-            ],
-            spacing=4,
-        ),
-        value=ctx.state["merge_input_mode"],
-        on_change=on_input_mode_changed,
-    )
-
-    folder_field = ft.TextField(
-        label="Mod 來源",
-        hint_text="留空使用上方設定的路徑",
-        value=ctx.input_path,
-        expand=True,
-        border_color=C.EM,
-        read_only=True,
-    )
-
-    zip_list_view = ft.ListView(expand=False, height=80, spacing=2)
-    for path in ctx.state["merge_selected_zips"]:
-        name = os.path.basename(path)
-        zip_list_view.controls.append(
-            ft.Row(
-                [
-                    ft.Text(name, expand=True, size=12),
-                    ft.IconButton(
-                        icon=ft.Icons.CLOSE,
-                        icon_size=16,
-                        on_click=lambda e, p=path: _remove_zip(p),
-                    ),
-                ]
-            )
-        )
-
-    def _remove_zip(path: str):
-        if path in ctx.state["merge_selected_zips"]:
-            ctx.state["merge_selected_zips"].remove(path)
-            ctx.rebuild_ui()
+    """步驟 2：Patchouli 選項與閾值欄位。"""
 
     patchouli_skip_cb = ft.Switch(
         label="允許 zh_cn 觸發跳過 en_us",
@@ -444,14 +391,7 @@ def _one_click_step2_widgets(ctx):
         text_align=ft.TextAlign.CENTER,
         hint_text="空白用預設值",
     )
-    return (
-        folder_field,
-        input_mode_group,
-        patchouli_skip_cb,
-        patchouli_thresh_field,
-        zh_en_field,
-        zip_list_view,
-    )
+    return patchouli_skip_cb, patchouli_thresh_field, zh_en_field
 
 
 def _one_click__build_step3(ctx):

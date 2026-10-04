@@ -469,7 +469,10 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
             os.makedirs(cfg.merge_output_dir, exist_ok=True)
             sources = []
             if mode in ("lang", "dual"):
-                sources.append((cfg.extract_lang_output_dir, True))
+                # 「只處理 lang 檔案」開關（一鍵對話框步驟 2）；book 來源固定要處理 Patchouli 內容
+                sources.append(
+                    (cfg.extract_lang_output_dir, config.get("only_lang", True))
+                )
             if mode in ("book", "dual"):
                 sources.append((cfg.extract_book_output_dir, False))
             for src, only_lang in sources:
