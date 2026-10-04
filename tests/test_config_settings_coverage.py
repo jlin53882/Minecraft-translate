@@ -395,7 +395,9 @@ def test_secret_like_settings_are_marked_sensitive():
 
     from translation_tool.utils.config_schema import sensitive_paths
 
-    secret_like = re.compile(r"(api[_-]?key|secret|password|credential)|\.keys$", re.IGNORECASE)
+    secret_like = re.compile(
+        r"(api[_-]?key|secret|password|credential)|\.keys$", re.IGNORECASE
+    )
     for setting in schema.SETTINGS:
         if secret_like.search(setting.path):
             assert setting.path in sensitive_paths(), setting.path
