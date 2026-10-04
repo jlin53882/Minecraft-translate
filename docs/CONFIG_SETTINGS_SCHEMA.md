@@ -13,9 +13,20 @@ translation_tool/utils/config_schema.SETTINGS（唯一來源：欄位、預設�
         └─► config_manager（sensitive）                        已知機密登錄（輸出遮蔽）
 ```
 
+## config.example.json 由 schema 產生
+
+`config.example.json` 是打包版第一次啟動時複製成 `config.json` 的範本，**不要手動編輯**。新增或修改設定後執行：
+
+```
+python tools/gen_config_example.py          # 覆寫 config.example.json
+python tools/gen_config_example.py --check  # 只檢查，不一致回傳 1
+```
+
+`tests/test_config_example_generated.py` 在 CI 檢查檔案與 schema 逐字一致，所以忘了重新產生會讓測試失敗。
+
 ## 新增一個一般設定
 
-**只需要在 `translation_tool/utils/config_schema.py` 的 `SETTINGS` 加一個 `Setting`。** 不需要改 `DEFAULT_CONFIG`、設定頁、套用時機表或機密遮蔽：
+**只需要在 `translation_tool/utils/config_schema.py` 的 `SETTINGS` 加一個 `Setting`。** 不需要改 `DEFAULT_CONFIG`、設定頁、套用時機表或機密遮蔽；最後執行一次 `python tools/gen_config_example.py` 更新範本：
 
 ```python
 Setting(
@@ -31,7 +42,7 @@ Setting(
 
 | schema 欄位 | 衍生出來的東西 |
 |---|---|
-| `default` | `config_manager.DEFAULT_CONFIG`（`build_default_config()`）、三層合併的最底層、載入時的預設值 |
+| `default` | `config_manager.DEFAULT_CONFIG`（`build_default_config()`）、三層合併的最底層、載入時的預設值、`config.example.json`（見下） |
 | `kind` / `label` / `help` / `page` / `card` / `weight` | 設定頁的控制項與卡片；沒列在 `LAYOUT` 的設定自動接在所屬卡片最後面 |
 | `minimum` / `blank` / `validator` | 儲存時的轉換、夾住下限、空白處理與驗證 |
 | `timing` / `timing_note` | `app/config_apply.py::CONFIG_APPLY_RULES`（設定頁說明、存檔提示、自動重載） |
