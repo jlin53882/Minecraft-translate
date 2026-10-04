@@ -85,7 +85,10 @@ def merge_zhcn_to_zhtw_from_zip(
         )
     except Exception as e:  # noqa: BLE001
         log_error(f"載入替換規則失敗: {e}")
-        yield {"progress": _scale_progress(0.0, progress_start, progress_end), "error": True}
+        yield {
+            "progress": _scale_progress(0.0, progress_start, progress_end),
+            "error": True,
+        }
         return
 
     # --- 新增：檢查 ZIP 檔案是否存在 ---
@@ -208,7 +211,10 @@ def merge_zhcn_to_zhtw_from_zip(
             total_tasks = total_lang_mods + total_content_files
             if total_tasks == 0:
                 log_info("未找到任何可處理的文件，處理結束。")
-                yield {"progress": _scale_progress(1.0, progress_start, progress_end), "error": False}
+                yield {
+                    "progress": _scale_progress(1.0, progress_start, progress_end),
+                    "error": False,
+                }
                 return
             log_info(
                 f"找到 {total_lang_mods} 個語言模組與 {total_content_files} 個內容檔案，開始處理..."
@@ -370,10 +376,16 @@ def merge_zhcn_to_zhtw_from_zip(
 
     except zipfile.BadZipFile:
         log_error(f"錯誤：檔案 '{zip_file}' 不是有效 ZIP。")
-        yield {"progress": _scale_progress(1.0, progress_start, progress_end), "error": True}
+        yield {
+            "progress": _scale_progress(1.0, progress_start, progress_end),
+            "error": True,
+        }
     except Exception as e:  # noqa: BLE001
         log_exception(f"處理 ZIP 發生錯誤: {e}")
-        yield {"progress": _scale_progress(1.0, progress_start, progress_end), "error": True}
+        yield {
+            "progress": _scale_progress(1.0, progress_start, progress_end),
+            "error": True,
+        }
 
 
 def merge_zhcn_to_zhtw_from_folder(
@@ -427,13 +439,19 @@ def merge_zhcn_to_zhtw_from_folder(
         )
     except Exception as e:  # noqa: BLE001
         log_error(f"載入替換規則失敗: {e}")
-        yield {"progress": _scale_progress(0.0, progress_start, progress_end), "error": True}
+        yield {
+            "progress": _scale_progress(0.0, progress_start, progress_end),
+            "error": True,
+        }
         return
 
     if not os.path.exists(input_dir):
         full_path = os.path.abspath(input_dir)
         log_warning(f"資料夾不存在，已跳過: {full_path}")
-        yield {"progress": _scale_progress(1.0, progress_start, progress_end), "error": False}
+        yield {
+            "progress": _scale_progress(1.0, progress_start, progress_end),
+            "error": False,
+        }
         return
 
     try:
@@ -497,7 +515,10 @@ def merge_zhcn_to_zhtw_from_folder(
         total_tasks = total_lang_mods + total_content_files
         if total_tasks == 0:
             log_info("未找到任何可處理的文件，處理結束。")
-            yield {"progress": _scale_progress(1.0, progress_start, progress_end), "error": False}
+            yield {
+                "progress": _scale_progress(1.0, progress_start, progress_end),
+                "error": False,
+            }
             return
         log_info(
             f"找到 {total_lang_mods} 個語言模組與 {total_content_files} 個內容檔案，開始處理..."
@@ -612,4 +633,7 @@ def merge_zhcn_to_zhtw_from_folder(
 
     except Exception as e:  # noqa: BLE001
         log_exception(f"處理資料夾發生錯誤: {e}")
-        yield {"progress": _scale_progress(1.0, progress_start, progress_end), "error": True}
+        yield {
+            "progress": _scale_progress(1.0, progress_start, progress_end),
+            "error": True,
+        }

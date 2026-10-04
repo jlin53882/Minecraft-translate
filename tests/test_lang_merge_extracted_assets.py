@@ -685,9 +685,7 @@ class TestCleanupSingleModExtracted:
 
         list(merge_extracted_to_assets(lang_output_dir))
 
-        assert (
-            lang_output_dir / "assets" / "aether" / "lang" / "zh_tw.json"
-        ).exists()
+        assert (lang_output_dir / "assets" / "aether" / "lang" / "zh_tw.json").exists()
         assert not (lang_output_dir / "aether_extracted").exists()
 
     def test_duplicate_keys_are_not_counted_as_new_and_source_is_cleaned(
@@ -790,12 +788,7 @@ class TestCleanupSingleModExtracted:
             / "en_us.json"
         ).exists()
         assert (
-            lang_output_dir
-            / "待翻譯"
-            / "assets"
-            / "aether"
-            / "lang"
-            / "en_us.lang"
+            lang_output_dir / "待翻譯" / "assets" / "aether" / "lang" / "en_us.lang"
         ).exists()
         assert not (lang_output_dir / "待翻譯" / "data").exists()
         assert not (lang_output_dir / "待翻譯" / "packs").exists()
@@ -808,9 +801,7 @@ class TestCleanupSingleModExtracted:
             lang_output_dir / "待翻譯" / "assets" / "aether" / "lang" / "en_us.json"
         )
         destination.parent.mkdir(parents=True)
-        destination.write_text(
-            '{"same": "existing", "keep": "old"}', encoding="utf-8"
-        )
+        destination.write_text('{"same": "existing", "keep": "old"}', encoding="utf-8")
         source = (
             lang_output_dir
             / "待翻譯"

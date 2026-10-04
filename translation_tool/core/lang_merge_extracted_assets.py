@@ -355,7 +355,9 @@ def normalize_pending_extracted_wrappers(
         for source in lang_files:
             modid = _infer_modid_from_lang_file(source)
             if not modid:
-                log_warning(f"[MergeExt→Assets] pending 推不出 modid，保留來源: {source}")
+                log_warning(
+                    f"[MergeExt→Assets] pending 推不出 modid，保留來源: {source}"
+                )
                 continue
             destination = root / "assets" / modid / "lang" / source.name
             if source == destination:
@@ -501,8 +503,7 @@ def merge_extracted_to_assets(
             log_info("[MergeExt→Assets] 沒找到 XX_extracted/*, 跳過 (無源可合併)")
             normalize_pending_extracted_wrappers(
                 lang_output_dir,
-                folder_names=pending_folder_names
-                or ("待翻譯", "待翻譯整理需翻譯"),
+                folder_names=pending_folder_names or ("待翻譯", "待翻譯整理需翻譯"),
             )
             yield {"progress": 1.0, "log": None, "error": False}
             return
@@ -681,8 +682,7 @@ def merge_extracted_to_assets(
             )
         normalized = normalize_pending_extracted_wrappers(
             lang_output_dir,
-            folder_names=pending_folder_names
-            or ("待翻譯", "待翻譯整理需翻譯"),
+            folder_names=pending_folder_names or ("待翻譯", "待翻譯整理需翻譯"),
         )
         if normalized and session is not None:
             _safe_session_log(

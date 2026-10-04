@@ -431,7 +431,9 @@ class TestPatchouliIncrementalOutput:
             "write_text_atomic_fn": write_text,
             "quarantine_copy_fn": lambda **kwargs: None,
             "normalize_patchouli_book_root_fn": lambda value: value,
-            "patch_localized_content_json_fn": lambda *args, **kwargs: {"success": True},
+            "patch_localized_content_json_fn": lambda *args, **kwargs: {
+                "success": True
+            },
             "json_module": MagicMock(),
             "patchouli_output_dir": str(tmp_path / "patchouli"),
         }

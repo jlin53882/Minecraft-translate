@@ -253,8 +253,7 @@ def run_merge_folder_batch_service(
                 patchouli_threshold=patchouli_threshold,
                 zh_en_threshold=zh_en_threshold,
                 progress_start=progress_start,
-                progress_end=progress_start
-                + (progress_end - progress_start) * 0.90,
+                progress_end=progress_start + (progress_end - progress_start) * 0.90,
             ):
                 if update.get("log"):
                     session.add_log(update["log"])
@@ -287,7 +286,9 @@ def run_merge_folder_batch_service(
                     if enable_extracted_merge:
                         session.add_log("[階段 2/2 開始] XX_extracted → assets 合併")
                         lang_output_dir = os.path.join(output_dir, "lang_output")
-                        stage2_start = progress_start + (progress_end - progress_start) * 0.90
+                        stage2_start = (
+                            progress_start + (progress_end - progress_start) * 0.90
+                        )
                         for update in merge_extracted_to_assets(
                             lang_output_dir=lang_output_dir,
                             session=session,
