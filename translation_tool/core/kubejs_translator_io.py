@@ -6,11 +6,15 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 from typing import Any
-import re
 
 import orjson
+
+log = logging.getLogger(__name__)
+
 
 def read_json_dict_orjson_impl(path: Path) -> dict:
     """使用 orjson 讀取 JSON 檔並容忍 BOM / trailing comma。"""
@@ -24,11 +28,13 @@ def read_json_dict_orjson_impl(path: Path) -> dict:
         data = orjson.loads(raw.encode("utf-8"))
         return data if isinstance(data, dict) else {}
     except Exception:
+        log.warning("讀取 KubeJS 翻譯檔失敗，視為空檔：%s", path, exc_info=True)
         return {}
+
 
 def write_json_orjson_impl(path: Path, data: dict) -> None:
     """將字典資料以 orjson 格式化（縮排 2 層）寫入 JSON 檔案。
-    
+
     Args:
         path: 目標檔案路徑，父目錄不存在時會自動建立。
         data: 要寫入的字典資料，鍵會被轉為字串。

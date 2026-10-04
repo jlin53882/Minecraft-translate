@@ -80,9 +80,12 @@ if __name__ == "__main__":
     """
     try:
         bootstrap_runtime()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         # bootstrap 失敗可能是 config 格式錯誤或 logging 初始化失敗，
         # 印出訊息後仍嘗試啟動（讓使用者能看到 GUI 介面）
-        print(f"致命錯誤：配置或日誌系統初始化失敗！錯誤: {e}")
+        # 此時日誌可能尚未初始化；root logger 的預設 handler 仍會把 CRITICAL 印到 stderr
+        logger.critical(
+            "致命錯誤：配置或日誌系統初始化失敗！錯誤: %s", e, exc_info=True
+        )
 
     ft.run(main, assets_dir=str(get_resource_root() / "assets"))

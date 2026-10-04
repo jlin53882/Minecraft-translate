@@ -6,16 +6,16 @@
 
 # ftbquests_snbt_extractor.py
 # FTB Quests SNBT 抽取工具
+import json
 import os
 import re
-import json
-import ftb_snbt_lib as snbt
 
+import ftb_snbt_lib as snbt
 from ftb_snbt_lib.tag import Compound, List
 
 from translation_tool.utils.log_unit import (
-    log_info,
     log_error,
+    log_info,
     log_warning,
 )
 
@@ -28,9 +28,11 @@ LANG_PRIORITY = {lang: i for i, lang in enumerate(LANG_WHITELIST)}
 # 只解析語言字串 key
 LANG_KEY_SUFFIX = (".title", ".quest_desc")
 
+
 def is_lang_key_ref(val: str):
     """判斷是否為 FTB 語系參考（{ftbquests.xxx} 格式）。"""
     return bool(re.match(r"^\{ftbquests\.", val))
+
 
 def is_lang_key_ref_like(val: str) -> bool:
     """
@@ -45,10 +47,12 @@ def is_lang_key_ref_like(val: str) -> bool:
         return False
     return bool(re.fullmatch(r"\{[^{}]+\}(?:\n\{[^{}]+\})*", s))
 
+
 TAG_CONDITION_PATTERN = re.compile(
     r"^\s*(any\s+of|any|all|no)\s*#",
     re.IGNORECASE,
 )
+
 
 def is_tag_condition_text(s: str) -> bool:
     """
@@ -59,14 +63,16 @@ def is_tag_condition_text(s: str) -> bool:
     """
     return bool(TAG_CONDITION_PATTERN.match(s))
 
+
 def walk_snbt_file(path: str) -> Compound | None:
     """讀取 SNBT 檔案"""
     try:
         with open(path, "r", encoding="utf-8") as f:
             return snbt.load(f)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         log_error(f"❌ SNBT 解析失敗: {path} -> {e}")
         return None
+
 
 # =========================
 # lang/*.snbt 抽取
@@ -99,6 +105,7 @@ def extract_lang_file(filename: str, root: Compound) -> dict:
                     out[f"{filename}|{key}"] = "\n".join(texts)
 
     return out
+
 
 # =========================
 # quest 本體抽取（title）
@@ -144,7 +151,7 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
 
         id_val = obj.get("id")
         if isinstance(id_val, snbt.String):
-            key = f"{filename}|id:{str(id_val)}|{kind}"
+            key = f"{filename}|id:{id_val!s}|{kind}"
         else:
             key = f"{filename}|{kind}"
 
@@ -170,10 +177,12 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
     recurse(root, "root")
     return out
 
+
 def ensure_lang(store: dict, lang: str):
     """確保語系存在於儲存區。"""
     if lang not in store:
         store[lang] = {"lang": {}, "quests": {}}
+
 
 # =========================
 # 主流程
@@ -285,6 +294,7 @@ def process_quest_folder(quests_root: str) -> dict:
                 final_output[lang]["quests"].update(extracted)
 
     return final_output
+
 
 # =========================
 # CLI 入口

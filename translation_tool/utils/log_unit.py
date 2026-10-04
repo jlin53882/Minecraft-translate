@@ -21,15 +21,17 @@ log_exception() 封裝：自動擷取 Traceback 堆疊資訊，專門用於追�
 類型強制：自動轉換為 float。
 邊界約束 (Clamp)：確保進度數值嚴格限制在 0.0 至 100.0 之間，防止 UI 進度條溢出。
 """
+
 from __future__ import annotations
 
 import logging
-import time
 import sys
-from typing import Any, Dict
+import time
+from typing import Any
 
 _THIS_MODULE = __name__
-_CALLER_LOGGER_CACHE: Dict[object, str] = {}
+_CALLER_LOGGER_CACHE: dict[object, str] = {}
+
 
 def _get_caller_logger_name() -> str:
     """
@@ -48,9 +50,10 @@ def _get_caller_logger_name() -> str:
                 _CALLER_LOGGER_CACHE[code] = mod
                 return mod
             f = f.f_back
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 - logging 自身失敗不可再記錄（會遞迴），退回預設 logger 名稱
         pass
     return _THIS_MODULE
+
 
 def _log(level: int, msg: str, *args: Any, **kwargs: Any) -> None:
     """
@@ -68,24 +71,29 @@ def _log(level: int, msg: str, *args: Any, **kwargs: Any) -> None:
             kwargs["stacklevel"] = 3
 
         logger.log(level, msg, *args, **kwargs)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 - logging 自身失敗不可再記錄（會遞迴），也不可中斷呼叫端
         pass
+
 
 def log_info(msg: str, *args: Any, **kwargs: Any) -> None:
     """INFO：一般流程資訊。"""
     _log(logging.INFO, msg, *args, **kwargs)
 
+
 def log_warning(msg: str, *args: Any, **kwargs: Any) -> None:
     """WARNING：非致命但值得注意的狀態。"""
     _log(logging.WARNING, msg, *args, **kwargs)
+
 
 def log_error(msg: str, *args: Any, **kwargs: Any) -> None:
     """ERROR：錯誤狀態或例外。"""
     _log(logging.ERROR, msg, *args, **kwargs)
 
+
 def log_debug(msg: str, *args: Any, **kwargs: Any) -> None:
     """DEBUG：除錯資訊（通常只在 DEBUG level 顯示）。"""
     _log(logging.DEBUG, msg, *args, **kwargs)
+
 
 def log_exception(msg: str, *args: Any, **kwargs: Any) -> None:
     """
@@ -110,8 +118,9 @@ def log_exception(msg: str, *args: Any, **kwargs: Any) -> None:
             kwargs["stacklevel"] = 2
 
         logger.exception(msg, *args, **kwargs)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 - logging 自身失敗不可再記錄（會遞迴），也不可中斷呼叫端
         pass
+
 
 def progress(*args, session=None, p: float | None = None) -> None:
     """
@@ -141,8 +150,9 @@ def progress(*args, session=None, p: float | None = None) -> None:
         elif fp > 1.0:
             fp = 1.0
         session.set_progress(fp)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 - UI 進度回報失敗不可中斷任務
         pass
+
 
 def get_formatted_duration(start_tick: float) -> str:
     """計算從 start_tick（perf_counter）到現在的耗時，回傳可讀字串。"""
@@ -155,4 +165,3 @@ def get_formatted_duration(start_tick: float) -> str:
     if hours > 0:
         return f"{hours} 小時 {minutes} 分 {seconds} 秒"
     return f"{minutes} 分 {seconds} 秒"
-

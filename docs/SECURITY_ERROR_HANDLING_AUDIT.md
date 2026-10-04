@@ -43,24 +43,24 @@ Ruff 報出的全部 BLE001、S110、S112、print 與 legacy comment 不等於�
 
 稽核方式為靜態 grep，未涵蓋所有第三方例外的 `repr`。未處理的項目不代表沒有風險。
 
-### #135 例外與 print 盤點（`ruff --select BLE001,S110,S112,T201`）
+### #135 例外與 print 盤點
 
-分類：**修** = 補 log；**保留** = 刻意保留並加說明；**待處理** = 尚未處理。
+量測指令：`ruff check app translation_tool main.py --select BLE001,S110,S112,T201`。分類：**修** = 補 log；**保留** = 刻意保留並加 `# noqa: BLE001 - 原因`；**待 #150** = 在 PR #150 會重寫的檔案，等它合併後再處理，避免衝突。
 
 | 位置 | 類別 | 處理 |
 |---|---|---|
-| `ftbquests_lmtranslator.py`、`md_lmtranslator.py`：unshield 失敗 | 修 | 會讓輸出殘留保護標記，改為 `log_warning` |
-| `ftbquests_lmtranslator.py`：recorder 記錄失敗（2 處）、預先統計失敗 | 修 | 補 `log_warning` |
 | `lang_merge_pending.py`：無法讀取的待翻譯檔 | 修 | 補 `log_warning` 後略過 |
 | `cache_overview.py`：讀取作用中分片失敗 | 修 | 補 `log.warning` |
-| `jar_processor_preview.py`：讀取 worker 數設定失敗 | 修 | 補 `log.debug` 後使用預設值 |
+| `jar_processor_preview.py`：worker 數設定讀取失敗 | 修 | 補 `log.debug` 後使用預設值 |
+| `kubejs_translator_io.py`：讀取失敗視為空檔 | 修 | 補 `log.warning`（原本完全無聲） |
+| `color_char_checker.py`：略過無法讀取的檔案 | 修 | 補 `log.warning`（原本完全無聲） |
 | `lang_merge_extracted_assets.py`：`session.add_log` 保護（7 處） | 保留 | 集中為 `_safe_session_log`，失敗只留 debug |
-| `ftbquests_lmtranslator.py`、`md_translation_progress.py`：`set_progress` 保護 | 保留 | UI 進度失敗不可中斷翻譯，加 noqa 說明 |
-| `md_translation_stats.py`、`safe_json_loader.py`：逐檔 / 逐編碼嘗試 | 保留 | 外部不可信輸入，壞檔略過，加 noqa 說明 |
-| 其餘 `except Exception`（已有 log 的邊界，約 22 處） | 保留 | 失敗已記錄，加 `# noqa: BLE001 - 原因` |
-| `utils/log_unit.py`：logging 內部 `try/except/pass`（4 處） | 待處理 | logging 自身失敗不可遞迴記錄，需另行確認寫法 |
-| `plugins/md/md_extract_qa.py`、`md_inject_qa.py`：`print`（約 36 處） | 待處理 | 看起來是命令列 QA 工具的輸出，需確認是否仍被使用 |
-| `main.py`、`core/icon_preview_cache.py`、`utils/exceptions.py`：`print` | 待處理 | 各 1 處 |
-| 其他檔案的 BLE001 | 待處理 | 本 PR 只處理高風險路徑上的檔案 |
+| `md_translation_progress.py`、`log_unit.py`（`progress`）：UI 進度回報 | 保留 | 進度失敗不可中斷任務，加說明 |
+| `log_unit.py`：logging 自身失敗（3 處） | 保留 | 失敗不可再記錄（會遞迴）也不可中斷呼叫端，加說明 |
+| `md_translation_stats.py`、`safe_json_loader.py`：逐檔／逐編碼嘗試 | 保留 | 外部不可信輸入，壞檔略過，加說明 |
+| `app/services.py`、`lookup_service.py`、各 checker、`variant_comparator*.py`、`jar_processor.py`、`output_bundler.py`、`lang_merge_content_patchers.py`、`lm_translator_scan.py`、`ftbquests_snbt_*.py`、兩個 pipeline dialog：已記錄或已回報給呼叫端的邊界 | 保留 | 加 `# noqa: BLE001 - 原因` |
+| `main.py`、`icon_preview_cache.py`、`utils/exceptions.py`、`config_manager.py`：`print` | 修 | 改為 logging（含對應測試更新） |
+| `md_extract_qa.py`、`md_inject_qa.py`：約 36 個 `print` | 保留 | 命令列 QA 工具的輸出；不經過 logging 是刻意的 |
+| `ftbquests_lmtranslator.py`、`md_lmtranslator.py`、`kubejs_tooltip_lmtranslator.py`：約 25 處 `except Exception`（含 unshield 失敗、recorder 記錄失敗、統計失敗等無聲路徑） | **待 #150** | PR #150 大幅重寫這三個檔案；先前在這裡做的修改已移出本 PR，等 #150 合併後再補一個小 PR |
 
-本表只涵蓋 PR-2 動到的檔案與上述 ruff 規則；`except Exception` 的完整盤點尚未完成。
+自動修正（`ruff --fix`）曾移除 `output_bundler.py` 內被測試 monkeypatch 的 `load_config` 匯入而使 7 個測試失敗，已以 `# noqa: F401` 保留並說明。動到的每個檔案都已清掉其既有 ruff 問題（CI 對變更檔案是全檔檢查）。

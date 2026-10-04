@@ -7,18 +7,21 @@
 from __future__ import annotations
 
 import concurrent.futures
+from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 
 import orjson as json
 
-from ..utils.log_unit import log_info, log_warning, log_error
 from translation_tool.core.translatable_extractor import (
     extract_translatables,
     find_lang_json,
     find_patchouli_json,
     is_lang_file,
 )
+
+from ..utils.log_unit import log_error, log_info, log_warning
+
 
 def is_plain_lang_json(data: dict) -> bool:
     """判斷是否為純 lang JSON（key: str -> value: str）。
@@ -35,6 +38,7 @@ def is_plain_lang_json(data: dict) -> bool:
 
     return True
 
+
 def scan_translatable_files(root: Path) -> tuple[list[Path], list[Path], list[Path]]:
     """掃描 root 下可翻譯 JSON 檔案。
 
@@ -46,9 +50,10 @@ def scan_translatable_files(root: Path) -> tuple[list[Path], list[Path], list[Pa
         lang_files = find_lang_json(root)
         files = patchouli_files + lang_files
         return patchouli_files, lang_files, files
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         log_warning(f"掃描 {root} 時失敗: {e}")
         return [], [], []
+
 
 def extract_items_parallel(
     *,
@@ -75,7 +80,9 @@ def extract_items_parallel(
 
                 # ⭐ 若要輸出 .lang，但內容不是純 key->str，就只能退回輸出 json
                 if export_lang and not is_plain_lang_json(data):
-                    log_info(f"⚠️ Lang 檔為複合格式（含 list/dict），無法輸出 .lang，將改用 .json：{f}")
+                    log_info(
+                        f"⚠️ Lang 檔為複合格式（含 list/dict），無法輸出 .lang，將改用 .json：{f}"
+                    )
             else:
                 c_type = "patchouli"
 
@@ -88,7 +95,7 @@ def extract_items_parallel(
                 "data": data,
                 "items": extracted_items,
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
             log_error(f"❌ 檔案處理失敗 {f.name}: {e}")
             return None
 

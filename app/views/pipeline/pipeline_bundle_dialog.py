@@ -8,15 +8,16 @@
 - 執行打包（背景執行緒 + 進度輪詢）
 """
 
-import flet as ft
-import os
 import json
+import os
+
+import flet as ft
 
 from app.ui.theme import (
-    BLUE_600, BLUE_700, GREEN_700, TEAL_700, PURPLE_700,
-    GREY_500, GREY_600, CYAN_700, GREEN_600,
-    WHITE, BLUE_50, GREY_200, BLUE_400,
-    GREEN_50, RED_400, RED_50,
+    GREY_500,
+    GREY_600,
+    PURPLE_700,
+    WHITE,
 )
 from translation_tool.utils.config_manager import load_config
 
@@ -32,7 +33,7 @@ def _load_version_data():
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+        except Exception:  # noqa: BLE001 - 讀不到版本資料時使用空設定，UI 仍可開啟
             return {}
     return {}
 
@@ -63,21 +64,33 @@ def open_bundle_dialog(
     bundler_cfg = cfg.get("output_bundler", {})
     output_zip_name = bundler_cfg.get("output_zip_name", "可使用翻譯.zip")
     lang_merger_cfg = cfg.get("lang_merger", {})
-    translate_output_subfolder = lang_merger_cfg.get("lm_translate_folder_name", "_翻譯輸出")
+    translate_output_subfolder = lang_merger_cfg.get(
+        "lm_translate_folder_name", "_翻譯輸出"
+    )
 
-    default_input = os.path.join(output_path, "lm_translate", translate_output_subfolder) if output_path else ""
-    default_output_zip = os.path.join(output_path, output_zip_name) if output_path else ""
+    default_input = (
+        os.path.join(output_path, "lm_translate", translate_output_subfolder)
+        if output_path
+        else ""
+    )
+    default_output_zip = (
+        os.path.join(output_path, output_zip_name) if output_path else ""
+    )
 
     bundle_input_field = ft.TextField(
         label="輸入來源",
-        hint_text=f"自動帶入：{default_input}" if default_input else "留空自動帶入翻譯完成後的輸出",
+        hint_text=f"自動帶入：{default_input}"
+        if default_input
+        else "留空自動帶入翻譯完成後的輸出",
         value=input_path or default_input,
         expand=True,
         border_color=PURPLE_700,
     )
     bundle_output_zip_field = ft.TextField(
         label="輸出 ZIP 檔案",
-        hint_text=f"自動帶入：{default_output_zip}" if default_output_zip else "留空自動帶入可使用翻譯.zip",
+        hint_text=f"自動帶入：{default_output_zip}"
+        if default_output_zip
+        else "留空自動帶入可使用翻譯.zip",
         value="",
         expand=True,
         border_color=PURPLE_700,
@@ -105,11 +118,9 @@ def open_bundle_dialog(
 
     def _refresh_version_list(search_text: str):
         version_list.controls.clear()
-        filtered = [v for v in version_data.keys() if search_text.lower() in v.lower()]
+        filtered = [v for v in version_data if search_text.lower() in v.lower()]
         if not filtered:
-            version_list.controls.append(
-                ft.Text("無可用版本", size=12, color=GREY_500)
-            )
+            version_list.controls.append(ft.Text("無可用版本", size=12, color=GREY_500))
         for version_key in filtered:
             item = ft.Container(
                 content=ft.Text(version_key, size=13),
@@ -191,6 +202,7 @@ def open_bundle_dialog(
             if result:
                 bundle_input_field.value = result
                 page.update()
+
         page.run_task(do_pick)
 
     def browse_input_dir(e=None):
@@ -208,6 +220,7 @@ def open_bundle_dialog(
             if result:
                 bundle_output_zip_field.value = result
                 page.update()
+
         page.run_task(do_pick)
 
     def pick_pack_image(e=None):
@@ -219,6 +232,7 @@ def open_bundle_dialog(
             if result and result.files:
                 pack_image_field.value = result.files[0].path
                 page.update()
+
         page.run_task(do_pick)
 
     def add_extra_folder(e=None):
@@ -228,6 +242,7 @@ def open_bundle_dialog(
                 extra_folders.append(result)
                 _refresh_extra_folders()
                 page.update()
+
         page.run_task(do_pick)
 
     def _refresh_extra_folders():
@@ -263,45 +278,76 @@ def open_bundle_dialog(
         show_snack_bar("🔍 預覽功能待實作")
         close_dialog(dialog)
 
-    content = ft.Column([
-        ft.Text("輸入來源", weight="bold", size=13),
-        ft.Text("留空自動帶入，翻譯完成後再使用", size=10, color=GREY_600),
-        ft.Row([
-            bundle_input_field,
-            ft.Button("選擇資料夾", icon=ft.Icons.FOLDER, on_click=pick_input_dir),
-            ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_input_dir),
-        ]),
-        ft.Text("輸出 ZIP 檔案", weight="bold", size=13),
-        ft.Row([
-            bundle_output_zip_field,
-            ft.Button("選擇儲存位置", icon=ft.Icons.SAVE, on_click=pick_output_zip),
-        ]),
-        ft.Text("檔案敘述", weight="bold", size=13),
-        description_field,
-        ft.Text("Minecraft 版本", weight="bold", size=13),
-        version_search,
-        ft.Container(
-            content=ft.Row([
-                ft.Text("已選擇：", size=11, color=GREY_600),
-                version_toggle_label,
-                ft.Icon(ft.Icons.EXPAND_MORE, size=18),
-            ]),
-            padding=8,
-            border=ft.Border.all(1, GREY_500),
-            border_radius=6,
-            on_click=_toggle_version_expand,
-        ),
-        version_dropdown_container,
-        ft.Text("封面圖片（可留空）", weight="bold", size=13),
-        ft.Row([
-            pack_image_field,
-            ft.Button("選擇檔案...", icon=ft.Icons.IMAGE, on_click=pick_pack_image),
-            ft.Button("移除", icon=ft.Icons.DELETE, on_click=lambda e: setattr(pack_image_field, 'value', '') or page.update()),
-        ]),
-        ft.Text("其他指定資料夾", weight="bold", size=13),
-        ft.Container(content=extra_folders_view, border=ft.Border.all(1, GREY_500), border_radius=8, padding=4),
-        ft.Button("+ 新增資料夾", icon=ft.Icons.FOLDER_OPEN, on_click=add_extra_folder),
-    ], spacing=10, tight=False)
+    content = ft.Column(
+        [
+            ft.Text("輸入來源", weight="bold", size=13),
+            ft.Text("留空自動帶入，翻譯完成後再使用", size=10, color=GREY_600),
+            ft.Row(
+                [
+                    bundle_input_field,
+                    ft.Button(
+                        "選擇資料夾", icon=ft.Icons.FOLDER, on_click=pick_input_dir
+                    ),
+                    ft.Button("瀏覽", icon=ft.Icons.SEARCH, on_click=browse_input_dir),
+                ]
+            ),
+            ft.Text("輸出 ZIP 檔案", weight="bold", size=13),
+            ft.Row(
+                [
+                    bundle_output_zip_field,
+                    ft.Button(
+                        "選擇儲存位置", icon=ft.Icons.SAVE, on_click=pick_output_zip
+                    ),
+                ]
+            ),
+            ft.Text("檔案敘述", weight="bold", size=13),
+            description_field,
+            ft.Text("Minecraft 版本", weight="bold", size=13),
+            version_search,
+            ft.Container(
+                content=ft.Row(
+                    [
+                        ft.Text("已選擇：", size=11, color=GREY_600),
+                        version_toggle_label,
+                        ft.Icon(ft.Icons.EXPAND_MORE, size=18),
+                    ]
+                ),
+                padding=8,
+                border=ft.Border.all(1, GREY_500),
+                border_radius=6,
+                on_click=_toggle_version_expand,
+            ),
+            version_dropdown_container,
+            ft.Text("封面圖片（可留空）", weight="bold", size=13),
+            ft.Row(
+                [
+                    pack_image_field,
+                    ft.Button(
+                        "選擇檔案...", icon=ft.Icons.IMAGE, on_click=pick_pack_image
+                    ),
+                    ft.Button(
+                        "移除",
+                        icon=ft.Icons.DELETE,
+                        on_click=lambda e: (
+                            setattr(pack_image_field, "value", "") or page.update()
+                        ),
+                    ),
+                ]
+            ),
+            ft.Text("其他指定資料夾", weight="bold", size=13),
+            ft.Container(
+                content=extra_folders_view,
+                border=ft.Border.all(1, GREY_500),
+                border_radius=8,
+                padding=4,
+            ),
+            ft.Button(
+                "+ 新增資料夾", icon=ft.Icons.FOLDER_OPEN, on_click=add_extra_folder
+            ),
+        ],
+        spacing=10,
+        tight=False,
+    )
 
     dialog = ft.AlertDialog(
         modal=True,
@@ -309,9 +355,18 @@ def open_bundle_dialog(
         content=ft.Container(content=content, width=dialog_width),
         actions=[
             ft.TextButton("取消", on_click=lambda e: close_dialog(dialog)),
-            ft.OutlinedButton("預覽結果", icon=ft.Icons.PREVIEW, on_click=lambda e: show_preview_result(dialog)),
-            ft.Button("確定執行", icon=ft.Icons.CHECK, bgcolor=PURPLE_700, color=WHITE,
-                      on_click=lambda e: start_bundle(dialog)),
+            ft.OutlinedButton(
+                "預覽結果",
+                icon=ft.Icons.PREVIEW,
+                on_click=lambda e: show_preview_result(dialog),
+            ),
+            ft.Button(
+                "確定執行",
+                icon=ft.Icons.CHECK,
+                bgcolor=PURPLE_700,
+                color=WHITE,
+                on_click=lambda e: start_bundle(dialog),
+            ),
         ],
     )
 

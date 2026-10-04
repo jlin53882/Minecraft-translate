@@ -17,6 +17,7 @@ from translation_tool.utils.species_cache import (
 
 logger = logging.getLogger(__name__)
 
+
 def run_manual_lookup_service(name: str) -> str:
     """執行學名查詢"""
     if not is_potential_species_name(name):
@@ -24,10 +25,9 @@ def run_manual_lookup_service(name: str) -> str:
     result = lookup_species_name(name)
     return result if result else "在本地快取和線上查詢中均未找到結果。"
 
-def run_batch_lookup_service(json_text: str):
-    """執行此 generator 並逐步回報進度（yield update dict）。
 
-    """
+def run_batch_lookup_service(json_text: str):
+    """執行此 generator 並逐步回報進度（yield update dict）。"""
     try:
         names = json.loads(json_text)
         if not isinstance(names, list):
@@ -71,6 +71,6 @@ def run_batch_lookup_service(json_text: str):
     except json.JSONDecodeError:
         logger.error({"log": "輸入的不是有效的 JSON 格式。"})
         yield {"log": "輸入的不是有效的 JSON 格式。", "error": True}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         logger.error({"log": f"查詢時發生錯誤: {e}"})
         yield {"log": f"查詢時發生錯誤: {e}", "error": True}

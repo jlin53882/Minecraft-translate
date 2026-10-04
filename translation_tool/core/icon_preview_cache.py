@@ -5,9 +5,12 @@
 """
 
 import hashlib
+import logging
 from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
+
+log = logging.getLogger(__name__)
 
 
 def generate_icon_preview(icon_path: Path, preview_root: Path) -> Path | None:
@@ -42,6 +45,6 @@ def generate_icon_preview(icon_path: Path, preview_root: Path) -> Path | None:
         return preview_path
 
     except (UnidentifiedImageError, OSError, ValueError) as e:
-        # ❗ 關鍵：任何圖片錯誤都「吞掉」
-        print(f"[WARN] 無法產生 icon 預覽：{icon_path} → {e}")
+        # ❗ 關鍵：任何圖片錯誤都「吞掉」（回傳 None），但要留下紀錄
+        log.warning("無法產生 icon 預覽：%s → %s", icon_path, e)
         return None

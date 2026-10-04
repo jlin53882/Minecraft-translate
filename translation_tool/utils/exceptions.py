@@ -13,6 +13,7 @@
         raise APIError("API 呼叫失敗")
 """
 
+import logging
 import time
 import traceback
 from datetime import datetime
@@ -258,7 +259,7 @@ def _log_error_to_file(error: Exception, func_name: str):
 
     except Exception as log_error:  # noqa: BLE001 - 記錄失敗不可中斷主流程
         # 記錄失敗也不應該中斷主流程
-        print(f"[WARN] 寫入錯誤日誌失敗: {log_error}")
+        logging.getLogger(__name__).warning("寫入錯誤日誌失敗: %s", log_error)
 
 
 # =============================================================================

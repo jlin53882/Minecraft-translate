@@ -5,11 +5,11 @@
 """
 
 import re
+from collections.abc import Generator
 from pathlib import Path
-from typing import Dict, Any, Generator
+from typing import Any
 
 from translation_tool.core.jar_processor_discovery import find_jar_files
-from translation_tool.utils.config_manager import load_config
 from translation_tool.core.jar_processor_extract import (
     extract_from_jar_impl,
     run_extraction_process_impl,
@@ -19,6 +19,7 @@ from translation_tool.core.jar_processor_preview import (
     generate_preview_report,
     preview_extraction_generator_impl,
 )
+from translation_tool.utils.config_manager import load_config
 
 BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
     r"^(assets|data)/([^/]+)/"
@@ -32,12 +33,13 @@ BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
     re.IGNORECASE,
 )
 
+
 def get_lang_codes(*, skip_zh_cn: bool = False) -> list[str]:
     """從 config 取得 jar_extractor.lang_codes，預設 ["en_us", "zh_tw", "zh_cn"]。
-    
+
     Args:
         skip_zh_cn: 是否跳過 zh_cn（從 extractor.skip_zh_cn_extract 讀取）。
-    
+
     回傳值保證為非空 list。
     """
     cfg = load_config()
@@ -48,7 +50,10 @@ def get_lang_codes(*, skip_zh_cn: bool = False) -> list[str]:
         codes = ["en_us", "zh_tw", "zh_cn"]
     return codes
 
-def build_lang_file_regex(*, codes: list[str] | None = None, skip_zh_cn: bool = False) -> re.Pattern:
+
+def build_lang_file_regex(
+    *, codes: list[str] | None = None, skip_zh_cn: bool = False
+) -> re.Pattern:
     """根據 lang_codes 動態建 lang file regex。
 
     Args:
@@ -68,11 +73,15 @@ def build_lang_file_regex(*, codes: list[str] | None = None, skip_zh_cn: bool = 
         # (跟 codes=None 路徑的 get_lang_codes(skip_zh_cn=True) 對稱)
         codes = [c for c in codes if c != "zh_cn"]
     codes_str = "|".join(map(re.escape, codes))
-    regex = re.compile(rf"(?:assets/([^/]+)/)?lang/({codes_str})\.(json|lang)$", re.IGNORECASE)
+    regex = re.compile(
+        rf"(?:assets/([^/]+)/)?lang/({codes_str})\.(json|lang)$", re.IGNORECASE
+    )
     return regex
 
 
-def build_book_path_regex(*, codes: list[str] | None = None, skip_zh_cn: bool = False) -> re.Pattern:
+def build_book_path_regex(
+    *, codes: list[str] | None = None, skip_zh_cn: bool = False
+) -> re.Pattern:
     """根據 lang_codes 動態建 Book 檔案 regex。
 
     Args:
@@ -103,12 +112,13 @@ def build_book_path_regex(*, codes: list[str] | None = None, skip_zh_cn: bool = 
         re.IGNORECASE,
     )
 
+
 def _extract_from_jar(
     jar_path: str,
     output_root: str,
     target_regex: re.Pattern,
     all_scan_results: dict[Path, dict[str, str | None]] | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """從 JAR 檔案提取檔案。
 
     Args:
@@ -117,11 +127,14 @@ def _extract_from_jar(
         target_regex: 目標檔案正規表達式
         all_scan_results: 預先掃描的 JAR 結果（由 caller 傳入）
     """
-    return extract_from_jar_impl(jar_path, output_root, target_regex, scan_results=all_scan_results)
+    return extract_from_jar_impl(
+        jar_path, output_root, target_regex, scan_results=all_scan_results
+    )
+
 
 def _run_extraction_process(
     mods_dir: str, output_dir: str, target_regex: re.Pattern, process_name: str
-) -> Generator[Dict[str, Any], None, None]:
+) -> Generator[dict[str, Any], None, None]:
     """執行提取流程的 generator。
 
     Args:
@@ -142,7 +155,14 @@ def _run_extraction_process(
         extract_from_jar_fn=_extract_from_jar,
     )
 
-def extract_lang_files_generator(mods_dir: str, output_dir: str, *, lang_codes: list[str] | None = None, skip_zh_cn: bool = False) -> Generator[Dict[str, Any], None, None]:
+
+def extract_lang_files_generator(
+    mods_dir: str,
+    output_dir: str,
+    *,
+    lang_codes: list[str] | None = None,
+    skip_zh_cn: bool = False,
+) -> Generator[dict[str, Any], None, None]:
     """從 mods 目錄提取語言檔。
 
     Args:
@@ -162,7 +182,14 @@ def extract_lang_files_generator(mods_dir: str, output_dir: str, *, lang_codes: 
         process_name="Lang",
     )
 
-def extract_book_files_generator(mods_dir: str, output_dir: str, *, lang_codes: list[str] | None = None, skip_zh_cn: bool = False) -> Generator[Dict[str, Any], None, None]:
+
+def extract_book_files_generator(
+    mods_dir: str,
+    output_dir: str,
+    *,
+    lang_codes: list[str] | None = None,
+    skip_zh_cn: bool = False,
+) -> Generator[dict[str, Any], None, None]:
     """從 mods 目錄提取 Patchouli 書本檔。
 
     Args:
@@ -183,13 +210,14 @@ def extract_book_files_generator(mods_dir: str, output_dir: str, *, lang_codes: 
         "Patchouli Book",
     )
 
+
 def extract_dual_files_generator(
     mods_dir: str,
     output_dir: str,
     *,
     lang_codes: list[str] | None = None,
     skip_zh_cn: bool = False,
-) -> Generator[Dict[str, Any], None, None]:
+) -> Generator[dict[str, Any], None, None]:
     """從 mods 目錄依序提取語言檔與書本檔（dual 模式）。
 
     Args:
@@ -216,7 +244,7 @@ def extract_dual_files_generator(
                 yield {**update, "phase": "lang"}
             else:
                 yield {**update, "phase": "lang"}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         lang_error = str(e)
     if lang_stats:
         yield {"phase": "lang", "stats": lang_stats}
@@ -246,7 +274,7 @@ def extract_dual_files_generator(
                     yield {**update, "stats": book_stats, "phase": "book"}
             else:
                 yield {**update, "phase": "book"}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         book_error = str(e)
     # Phase 3 fix: book phase 結束後補一個 combined yield(無 phase,不污染 sub-dict),
     # 確保 run_extraction_loop 頂層 stats["success"] 是 lang+book 合計。
@@ -266,12 +294,13 @@ def extract_dual_files_generator(
     if lang_error or book_error:
         yield {"dual_errors": {"lang": lang_error, "book": book_error}, "error": True}
 
+
 def preview_extraction_generator(
     mods_dir: str,
     mode: str,
     lang_codes: list[str] | None = None,
     skip_zh_cn: bool = False,
-) -> Generator[Dict[str, Any], None, None]:
+) -> Generator[dict[str, Any], None, None]:
     """預覽提取結果。
 
     Args:
@@ -293,16 +322,17 @@ def preview_extraction_generator(
         skip_zh_cn=skip_zh_cn,
     )
 
+
 __all__ = [
-    "find_jar_files",
+    "BOOK_PATH_REGEX_DUAL_STRUCTURE",
+    "ExtractionSummary",
     "_extract_from_jar",
     "_run_extraction_process",
-    "extract_lang_files_generator",
-    "extract_book_files_generator",
-    "preview_extraction_generator",
-    "ExtractionSummary",
-    "generate_preview_report",
-    "BOOK_PATH_REGEX_DUAL_STRUCTURE",
-    "get_lang_codes",
     "build_lang_file_regex",
+    "extract_book_files_generator",
+    "extract_lang_files_generator",
+    "find_jar_files",
+    "generate_preview_report",
+    "get_lang_codes",
+    "preview_extraction_generator",
 ]
