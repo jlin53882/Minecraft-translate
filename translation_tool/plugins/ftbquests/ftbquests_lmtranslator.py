@@ -30,7 +30,8 @@ from translation_tool.utils.config_manager import load_config
 
 from translation_tool.core.lm_translator_shared import (
     fast_split_items_by_cache,  # ✅ 新增：高速分流
-    translate_items_with_cache_loop,
+    TranslatorHooks,
+    run_translator_skeleton,
     CacheRule,
     TouchSet,  # ✅ 新增：touched/flush
     TranslationRecorder,  # ✅ 新增：翻譯記錄
@@ -575,7 +576,7 @@ def translate_ftb_pending_to_zh_tw(
         on_batch_flushed = _make_on_batch_flushed(file_id, touch, _writer, dst, out_map)
         on_progress = _make_on_progress(set_prog, _fmt_eta)
 
-        res = translate_items_with_cache_loop(
+        res = run_translator_skeleton(
             items_to_translate,
             total_for_smart=global_total_to_translate,
             translate_batch_smart=lambda batch, total: translate_batch_smart(
@@ -583,9 +584,11 @@ def translate_ftb_pending_to_zh_tw(
             ),
             write_new_cache=bool(write_new_cache),  # ✅ 改成吃參數
             cache_rules=cache_rules,
-            on_translated_item=on_translated_item,
-            on_batch_flushed=on_batch_flushed,
-            on_progress=on_progress,
+            hooks=TranslatorHooks(
+                on_translated_item=on_translated_item,
+                on_batch_flushed=on_batch_flushed,
+                on_progress=on_progress,
+            ),
         )
 
         # final write

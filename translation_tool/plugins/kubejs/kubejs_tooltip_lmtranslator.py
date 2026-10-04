@@ -33,7 +33,8 @@ from translation_tool.utils.config_manager import load_config
 from translation_tool.core.lm_translator_shared import (
     CacheRule,
     fast_split_items_by_cache,
-    translate_items_with_cache_loop,
+    TranslatorHooks,
+    run_translator_skeleton,
     TouchSet,
     TranslationRecorder,
     write_dry_run_preview,
@@ -578,7 +579,7 @@ def translate_kubejs_pending_to_zh_tw(
             log_info(f"{msg}" + (f" | ETA ≈ {eta_txt}" if eta_txt else ""))
             progress(p)
 
-        res = translate_items_with_cache_loop(
+        res = run_translator_skeleton(
             all_miss_items,
             total_for_smart=global_total_to_translate,
             translate_batch_smart=lambda batch, total: translate_batch_smart(
@@ -586,9 +587,11 @@ def translate_kubejs_pending_to_zh_tw(
             ),
             write_new_cache=bool(write_new_cache),
             cache_rules=cache_rules,
-            on_translated_item=on_translated_item,
-            on_batch_flushed=on_batch_flushed,
-            on_progress=on_progress,
+            hooks=TranslatorHooks(
+                on_translated_item=on_translated_item,
+                on_batch_flushed=on_batch_flushed,
+                on_progress=on_progress,
+            ),
         )
 
         translated_done = int(res.processed or 0)

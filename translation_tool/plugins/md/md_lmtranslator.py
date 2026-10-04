@@ -32,7 +32,8 @@ from translation_tool.core.lm_translator_shared import (
     TouchSet,
     TranslationRecorder,
     fast_split_items_by_cache,
-    translate_items_with_cache_loop,
+    TranslatorHooks,
+    run_translator_skeleton,
     write_dry_run_preview,  # ✅ NEW
     write_cache_hit_preview,  # ✅ 新增：cache hit preview 檔
     _is_valid_hit,  # ✅ 新增：cache hit 判斷
@@ -216,8 +217,6 @@ def translate_md_pending(
             )
             continue
 
-        translate_text = shielded.clean
-
         all_unique_items.append(
             {
                 "cache_type": "md",
@@ -375,7 +374,7 @@ def translate_md_pending(
 
     avg_batch_sec = None
     if items_to_translate:
-        res = translate_items_with_cache_loop(
+        res = run_translator_skeleton(
             items_to_translate,
             total_for_smart=len(items_to_translate),
             translate_batch_smart=lambda batch, total: translate_batch_smart(
@@ -385,9 +384,11 @@ def translate_md_pending(
                 write_new_cache
             ),  # ✅ 這裡會走 add_to_cache('md') + save_translation_cache('md')
             cache_rules=cache_rules,
-            on_translated_item=on_translated_item,
-            on_batch_flushed=on_batch_flushed,
-            on_progress=on_progress,
+            hooks=TranslatorHooks(
+                on_translated_item=on_translated_item,
+                on_batch_flushed=on_batch_flushed,
+                on_progress=on_progress,
+            ),
         )
         avg_batch_sec = (
             (res.elapsed_sec / res.completed_calls) if res.completed_calls else None

@@ -17,6 +17,11 @@ from translation_tool.core.lm_translator_shared_loop import (
     _get_default_batch_size,
     translate_items_with_cache_loop,
 )
+from translation_tool.core.lm_translator_skeleton import (
+    TranslatorHooks,
+    TranslatorSkeleton,
+    run_translator_skeleton,
+)
 from translation_tool.core.lm_translator_shared_preview import (
     TouchSet,
     write_cache_hit_preview,
@@ -36,6 +41,9 @@ __all__ = [
     "fast_split_items_by_cache",
     "get_default_cache_rules",
     "translate_items_with_cache_loop",
+    "TranslatorHooks",
+    "TranslatorSkeleton",
+    "run_translator_skeleton",
     "write_cache_hit_preview",
     "write_dry_run_preview",
 ]
