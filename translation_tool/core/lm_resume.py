@@ -93,12 +93,34 @@ def peek_interrupted_task() -> InterruptedTask | None:
 
 
 def _plugin_task(kind: str) -> InterruptedTask | None:
-    """FTB／KubeJS／MD 的標記；沒有版本 2 的舊檔（寫入專用、沒有任何來源指紋）不提示。"""
+    """FTB／KubeJS／MD 的標記。
+
+    沒有標記回傳 None。標記存在但**不是可驗證的版本 2**（舊版 ``JsonCheckpointAdapter`` 寫入專用的
+    格式、``kind`` 不符、缺少輸入資料夾）時，仍回傳一個「無法續跑」的任務：使用者會在啟動對話框
+    看到原因並可以放棄（清除），不能靜默忽略（#164 驗收條件）。
+    """
     data = plugin_resume.read_marker(kind)
-    if not isinstance(data, dict) or data.get("version") != 2:
+    if not isinstance(data, dict):
         return None
-    if data.get("kind") != kind or not isinstance(data.get("input_dir"), str):
-        return None
+    current = (
+        data.get("version") == 2
+        and data.get("kind") == kind
+        and isinstance(data.get("input_dir"), str)
+    )
+    if not current:
+        # 舊格式沒有輸入資料夾；僅供顯示的欄位盡量沿用（舊檔以 target 記錄輸出、processed 記錄進度）
+        return InterruptedTask(
+            input_dir=str(data.get("input_dir") or ""),
+            output_dir=str(data.get("output_dir") or data.get("target") or ""),
+            export_lang=False,
+            write_new_cache=True,
+            completed=_as_int(data.get("completed_count", data.get("processed"))),
+            total=_as_int(data.get("total")),
+            updated_at=str(data.get("updated_at") or ""),
+            fingerprint=None,
+            version=None,
+            kind=kind,
+        )
     options = data.get("options")
     return InterruptedTask(
         input_dir=data["input_dir"],
@@ -129,6 +151,10 @@ def peek_interrupted_tasks() -> list[InterruptedTask]:
 
 
 def _check_plugin_task(task: InterruptedTask) -> ResumeCheck:
+    if not task.has_current_format:
+        return ResumeCheck(
+            False, "舊版續跑標記缺少來源與版本資訊，無法安全續跑；請放棄此任務"
+        )
     if not task.fingerprint:
         return ResumeCheck(False, "標記沒有來源指紋，無法驗證輸入是否與上次相同")
     if not task.input_dir or not Path(task.input_dir).is_dir():

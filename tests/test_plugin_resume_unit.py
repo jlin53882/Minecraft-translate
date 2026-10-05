@@ -455,17 +455,46 @@ class TestPeekInterruptedTasks:
         )
         assert task.has_current_format
 
-    def test_legacy_write_only_markers_are_not_offered(self):
-        """舊版 adapter 的檔案沒有版本、沒有輸入資料夾，也從來沒有人讀取：不提示。"""
+    def test_legacy_write_only_markers_are_reported_as_not_resumable(self):
+        """舊版 adapter 的檔案沒有版本、沒有輸入資料夾：不能續跑，但**不得靜默忽略**——
+        使用者要能看到原因並放棄（#164 驗收條件）。"""
         _put(
             plugin_resume.marker_path("md"),
-            json.dumps({"plugin": "md", "processed": 3, "total": 9}),
+            json.dumps(
+                {"plugin": "md", "target": "C:/old_out", "processed": 3, "total": 9}
+            ),
         )
+
+        (task,) = lm_resume.peek_interrupted_tasks()
+
+        assert task.kind == "md" and task.label == "Markdown 翻譯"
+        assert not task.has_current_format and task.fingerprint is None
+        assert (task.output_dir, task.completed, task.total) == ("C:/old_out", 3, 9)
+        check = lm_resume.check_resume_feasibility(task)
+        assert check.ok is False
+        assert "舊版" in check.reason and "放棄" in check.reason
+
+    def test_a_legacy_marker_can_be_discarded_and_then_stops_being_reported(self):
+        _put(plugin_resume.marker_path("kubejs"), json.dumps({"plugin": "kubejs"}))
+        (task,) = lm_resume.peek_interrupted_tasks()
+
+        lm_resume.discard_interrupted_task(task)
+
+        assert not plugin_resume.marker_path("kubejs").exists()
         assert lm_resume.peek_interrupted_tasks() == []
 
-    def test_markers_of_the_wrong_kind_are_ignored(self):
-        _write_plugin_marker("md", kind="kubejs")
-        assert lm_resume.peek_interrupted_tasks() == []
+    @pytest.mark.parametrize(
+        "overrides",
+        [{"kind": "kubejs"}, {"input_dir": None}, {"version": 1}],
+        ids=["wrong-kind", "missing-input", "old-version"],
+    )
+    def test_malformed_current_markers_are_also_reported_not_ignored(self, overrides):
+        _write_plugin_marker("md", **overrides)
+
+        (task,) = lm_resume.peek_interrupted_tasks()
+
+        assert task.kind == "md" and not task.has_current_format
+        assert lm_resume.check_resume_feasibility(task).ok is False
 
     def test_detection_never_calls_the_api(self, monkeypatch):
         _write_plugin_marker("kubejs")

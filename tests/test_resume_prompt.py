@@ -11,6 +11,7 @@ import time
 from types import SimpleNamespace
 
 import flet as ft
+import pytest
 
 from app.shell import resume_prompt as rp
 from app.shell.resume_prompt import ResumePrompt, describe_task
@@ -368,3 +369,42 @@ def test_default_background_runner_turns_exceptions_into_a_failed_check():
     asyncio.run(page.tasks[0]())
 
     assert results[0].ok is False and "scan crashed" in results[0].reason
+
+
+def test_a_legacy_plugin_marker_is_shown_as_not_resumable_and_can_be_discarded(
+    tmp_path, monkeypatch
+):
+    """#164：舊版標記不得靜默忽略——啟動時看到原因，只能放棄或稍後；放棄後標記被清除。"""
+    import json
+
+    from translation_tool.core import lm_resume, plugin_resume
+
+    monkeypatch.setenv("MCT_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(rp, "show_snack", lambda *a, **k: None)
+    marker = plugin_resume.marker_path("ftbquests")
+    marker.parent.mkdir(parents=True)
+    marker.write_text(
+        json.dumps({"plugin": "ftbquests", "processed": 2, "total": 7}),
+        encoding="utf-8",
+    )
+    page = FakePage()
+    prompt = ResumePrompt(
+        page,
+        find_tasks=lm_resume.peek_interrupted_tasks,
+        check_resume=lm_resume.check_resume_feasibility,
+        discard=lm_resume.discard_interrupted_task,
+        on_resume=lambda t: pytest.fail("不可續跑"),
+        run_background=lambda work, done: done(work()),
+    )
+
+    assert prompt.show_if_needed() is True
+
+    texts = [c.value for c in _walk(page.dialogs[-1]) if isinstance(c, ft.Text)]
+    assert any("FTB 任務翻譯" in t for t in texts)
+    assert any("無法續跑" in t and "舊版" in t for t in texts)
+    buttons = {
+        c.content: c for c in _walk(page.dialogs[-1]) if isinstance(c, ft.TextButton)
+    }
+    assert buttons["續跑"].disabled is True
+    buttons["放棄"].on_click(None)
+    assert not marker.exists() and page.dialogs == []
