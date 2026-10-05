@@ -509,3 +509,36 @@ def test_cn_conversion_also_applies_replace_rules(db, tmp_path, monkeypatch):
     row = db.list_entries("1.21.1")[0][0]
     assert (row.zh_tw, row.source) == ("儲存方塊", SRC_JAR_CN)  # OpenCC 轉繁後再套規則
     assert db.entry_detail(row.id).translations[0].zh_cn == "存储方块"  # 簡中原文保留
+
+
+# ------------------------------------------------ 換行、前後空白、格式碼原樣保留
+SPECIAL = "§a哈囉§r\n第二行 %s\\n字面換行 "  # 真換行、字面 \n、§ 格式碼、%s、結尾空白
+
+
+def test_values_with_newlines_codes_and_trailing_space_are_stored_verbatim(db):
+    db.ingest("1.21.1", [item(en="Hello %s\nWorld", tw=SPECIAL)])
+    row = db.list_entries("1.21.1")[0][0]
+    assert row.zh_tw == SPECIAL and row.en_us == "Hello %s\nWorld"
+
+
+def test_manual_save_and_write_back_do_not_trim_values(db):
+    db.ingest("1.21.1", [item()])
+    entry = db.list_entries("1.21.1")[0][0]
+    db.save_manual(entry.id, SPECIAL)
+    assert db.get_entry(entry.id).zh_tw == SPECIAL
+    with pytest.raises(ValueError):
+        db.save_manual(entry.id, " \n ")  # 全是空白仍然視為空
+
+    db.write_back(
+        "1.20.1",
+        [WriteBackItem(KIND_LANG, "foo", "k.x", "Some English", " 前後空白\n")],
+    )
+    assert db.list_entries("1.20.1")[0][0].zh_tw == " 前後空白\n"
+
+
+def test_resolver_returns_value_with_special_characters_intact(db):
+    db.ingest("1.21.1", [item(en="Hello %s\nWorld", tw=SPECIAL)])
+    hit = TranslationResolver(db, "1.21.1").lookup(
+        KIND_LANG, "foo", "item.foo.a", "Hello %s\nWorld"
+    )
+    assert hit.zh_tw == SPECIAL

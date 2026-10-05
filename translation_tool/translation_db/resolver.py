@@ -151,7 +151,7 @@ class WriteBackBuffer:
     def add(self, item: dict[str, Any], translated: str | None = None) -> None:
         ident = item_identity(item, self.root)
         text = (translated if translated is not None else item.get("text")) or ""
-        if ident is None or not str(text).strip():
+        if ident is None or not str(text).strip():  # 只用 strip 判斷空白，內容原樣寫入
             return
         kind, mod_id, key, en = ident
         self._pending.append(WriteBackItem(kind, mod_id, key, en, str(text)))

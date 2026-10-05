@@ -461,3 +461,75 @@ def test_lm_view_warns_when_database_is_on_but_no_version_is_set(db_path, monkey
     view.use_db_switch.value = False
     view._on_db_option_changed()
     assert "尚未指定目標版本" not in view.db_info.value
+
+
+# ------------------------------------------------------------------ 特殊字元在介面上的呈現
+def test_formatting_helpers_detect_and_compare_special_tokens():
+    from app.views.moddb import formatting as fm
+
+    assert fm.visible_breaks("哈囉\n世界  ！") == "哈囉 ¶ 世界 ！"
+    assert fm.shorten("哈囉\r\n世界", 20) == "哈囉 ¶ 世界"
+    assert fm.token_issues("Hello %s\nWorld", "哈囉 %s\n世界") == []
+    assert fm.token_issues("Hello %s\nWorld", "哈囉\n世界") == ["少了 1 個「%s」"]
+    assert fm.token_issues("a", "§a哈囉") == ["多了 1 個「§a」"]
+    assert fm.token_issues("a\\nb", "甲\n乙") == [
+        "多了 1 個「換行」",
+        "少了 1 個「字面 \\n」",
+    ]
+    assert fm.token_issues("$(br)text", "$(br)文字") == []
+    assert fm.whitespace_note(" 哈囉 ") != "" and fm.whitespace_note("哈囉") == ""
+
+
+@pytest.fixture
+def special_entries(db_path):
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG, "foo", "tip.a", "Hello %s\nWorld", "§a哈囉§r %s\n世界 "
+            ),
+            ScanItem(KIND_LANG, "foo", "tip.b", "Plain Text Here", "純文字"),
+        ],
+    )
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    yield panel
+    db.close()
+
+
+def test_list_shows_newline_marker_and_editor_keeps_exact_text(special_entries):
+    panel = special_entries
+    first = next(r for r in panel.rows if r.key == "tip.a")
+    panel.select(first.id)
+    shown = texts_of(panel.list_view)
+    assert any("¶" in t for t in shown)  # 清單預覽：換行顯示成 ¶
+    assert panel.src_text.value == "Hello %s\nWorld"  # 原文保留真正的換行
+    assert panel.tw_field.value == "§a哈囉§r %s\n世界 "  # 譯文逐字相同（含結尾空白）
+    assert panel.save_btn.disabled is True  # 沒改動：結尾空白不會被當成「已修改」
+
+
+def test_editor_hints_for_missing_tokens_whitespace_and_color_codes(special_entries):
+    panel = special_entries
+    panel.select(next(r for r in panel.rows if r.key == "tip.a").id)
+    assert panel.mc_preview.visible is True and panel.mc_preview.spans  # § 顏色預覽
+    assert "前後有空白" in panel.token_hint.value  # 結尾空白提醒
+
+    panel.tw_field.value = "§a哈囉§r\n世界"  # 少了 %s
+    panel._on_text_change()
+    assert "少了 1 個「%s」" in panel.token_hint.value
+    assert panel.save_btn.disabled is False
+
+    panel.tw_field.value = "哈囉 %s\n世界"
+    panel._on_text_change()
+    assert panel.token_hint.visible is False and panel.mc_preview.visible is False
+
+
+def test_saving_keeps_newlines_codes_and_surrounding_whitespace(special_entries):
+    panel = special_entries
+    panel.select(next(r for r in panel.rows if r.key == "tip.a").id)
+    panel.tw_field.value = " §c警告§r %s\n第二行\n"
+    panel._on_text_change()
+    panel._save()
+    stored = panel.db().get_entry(panel.selected.id).zh_tw
+    assert stored == " §c警告§r %s\n第二行\n"

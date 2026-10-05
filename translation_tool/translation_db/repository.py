@@ -230,8 +230,10 @@ class TranslationDB:
                     if item.zh_tw.strip():
                         adds.append((SRC_JAR_TW, item.zh_tw, item.zh_cn))
                     elif item.zh_cn.strip() and convert is not None:
-                        converted = convert(item.zh_cn).strip()
-                        if converted:
+                        converted = convert(item.zh_cn)
+                        if (
+                            converted.strip()
+                        ):  # 空白判斷用 strip，但存原樣（前後空白在遊戲內可能有意義）
                             adds.append((SRC_JAR_CN, converted, item.zh_cn))
                     added = False
                     for src, tw, cn in adds:
@@ -542,8 +544,8 @@ class TranslationDB:
         propagate: bool = True,
     ) -> list[Impact]:
         """手動儲存譯文：寫入「人工」來源，並同步原文相同的其他版本。回傳受影響的條目。"""
-        text = new_zh_tw.strip()
-        if not text:
+        text = new_zh_tw  # 原樣儲存：前後空白、換行、格式碼都不改動
+        if not text.strip():
             raise ValueError("譯文不可為空")
         batch = uuid.uuid4().hex
         done: list[Impact] = []
@@ -651,8 +653,8 @@ class TranslationDB:
         touched: list[int] = []
         with self._tx() as conn:
             for item in items:
-                text = item.zh_tw.strip()
-                if not text or not item.en_us:
+                text = item.zh_tw
+                if not text.strip() or not item.en_us:
                     continue
                 row = conn.execute(
                     "SELECT id, en_us FROM entry WHERE kind=? AND mc_version=? "

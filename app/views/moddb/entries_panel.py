@@ -19,6 +19,7 @@ from app.services_impl.moddb_service import (
 )
 from app.ui import design, kit
 from app.ui.design import C
+from app.ui.mc_text import mc_text_spans
 from app.ui.snack import show_snack
 from app.views.moddb.formatting import (
     KIND_LABELS,
@@ -29,6 +30,8 @@ from app.views.moddb.formatting import (
     shorten,
     source_label,
     source_tone,
+    token_issues,
+    whitespace_note,
 )
 from translation_tool.utils.log_unit import log_debug
 
@@ -121,6 +124,8 @@ class EntriesPanel(ft.Column):
             on_change=self._on_text_change,
         )
         self.source_chip = ft.Container()
+        self.token_hint = ft.Text("", size=12, color=C.GOLD, visible=False)
+        self.mc_preview = ft.Text("", size=14, selectable=True, visible=False)
         self.meta_col = ft.Column(spacing=4)
         self.impact_text = ft.Text("", size=12.5, color=C.GOLD)
         self.impact_box = ft.Container(
@@ -192,6 +197,8 @@ class EntriesPanel(ft.Column):
                 ),
                 ft.Row([kit.section_label("譯文 zh_tw"), self.source_chip], spacing=8),
                 self.tw_field,
+                self.token_hint,
+                self.mc_preview,
                 self.meta_col,
                 self.impact_box,
                 self.saved_text,
@@ -618,9 +625,31 @@ class EntriesPanel(ft.Column):
             self._safe_update()
 
     def pending_text(self) -> str:
-        return (self.tw_field.value or "").strip()
+        """輸入框的內容（原樣；前後空白與換行是譯文的一部分）。全是空白視為空。"""
+        value = self.tw_field.value or ""
+        return value if value.strip() else ""
+
+    def _update_format_hints(self) -> None:
+        """換行、`§` 格式碼、`%s` 佔位符與前後空白的提醒，以及 `§` 顏色預覽。"""
+        entry = self.selected
+        text = self.tw_field.value or ""
+        notes: list[str] = []
+        if entry is not None and text.strip():
+            issues = token_issues(entry.en_us, text)
+            if issues:
+                notes.append("與原文的特殊字元不一致：" + "、".join(issues))
+        space = whitespace_note(text)
+        if space:
+            notes.append(space)
+        self.token_hint.value = "；".join(notes)
+        self.token_hint.visible = bool(notes)
+        has_codes = "§" in text
+        self.mc_preview.visible = has_codes
+        self.mc_preview.value = ""
+        self.mc_preview.spans = mc_text_spans(text, C.TEXT, 14) if has_codes else []
 
     def _update_impact(self) -> None:
+        self._update_format_hints()
         entry, db = self.selected, self.db()
         text = self.pending_text()
         changed = bool(entry and db and text and text != entry.zh_tw)
