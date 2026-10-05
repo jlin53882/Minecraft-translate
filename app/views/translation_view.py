@@ -11,6 +11,7 @@ import flet as ft
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.poller import PollerHandle
+from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView
 from app.views.translation.translation_actions import (
@@ -31,6 +32,7 @@ from app.views.translation.translation_panels import (
     build_path_row,
 )
 from app.views.translation.translation_state import TranslationRunState
+from translation_tool.utils.log_unit import log_warning
 
 # 可選匯入：避免某個 service 暫時不可用時，整頁無法開啟
 try:
@@ -287,6 +289,56 @@ class TranslationView(ft.Column):
     def _run_md(self, *, dry_run: bool):
         """執行 Markdown 翻譯流程"""
         return run_md(self, dry_run=dry_run)
+
+    def resume_interrupted(self, task) -> None:
+        """重開後續跑（#164）：切到對應分頁、帶入上次的輸入與選項後開始。
+
+        只在使用者於啟動時的確認對話框按下「續跑」後才會被呼叫；已完成的譯文由翻譯快取還原，
+        只會翻譯尚未完成的部分。一律是正式執行（dry-run 關閉、翻譯步驟開啟）。
+        """
+        if self._ui_timer_running:
+            show_snack(self.page, "已有翻譯任務執行中，無法續跑上次的任務", C.GOLD)
+            return
+        options = getattr(task, "options", None) or {}
+        kind = getattr(task, "kind", "")
+
+        def flag(name: str, default: bool = True) -> bool:
+            return bool(options.get(name, default))
+
+        if kind == "ftbquests":
+            self.tabs.selected_index = 0
+            self.ftb_in_dir.value = task.input_dir
+            self.ftb_out_dir.value = task.output_dir or ""
+            self.ftb_step_export.value = flag("step_export")
+            self.ftb_step_clean.value = flag("step_clean")
+            self.ftb_step_translate.value = True
+            self.ftb_step_inject.value = flag("step_inject")
+            self.ftb_write_new_cache.value = flag("write_new_cache")
+            runner = self._run_ftb
+        elif kind == "kubejs":
+            self.tabs.selected_index = 1
+            self.kjs_in_dir.value = task.input_dir
+            self.kjs_out_dir.value = task.output_dir or ""
+            self.kjs_step_extract.value = flag("step_extract")
+            self.kjs_step_translate.value = True
+            self.kjs_step_inject.value = flag("step_inject")
+            self.kjs_write_new_cache.value = flag("write_new_cache")
+            runner = self._run_kjs
+        elif kind == "md":
+            self.tabs.selected_index = 2
+            self.md_in_dir.value = task.input_dir
+            self.md_out_dir.value = task.output_dir or ""
+            self.md_step_extract.value = flag("step_extract")
+            self.md_step_translate.value = True
+            self.md_step_inject.value = flag("step_inject")
+            self.md_write_new_cache.value = flag("write_new_cache")
+            self.md_lang_mode.value = str(options.get("lang_mode") or "non_cjk_only")
+            runner = self._run_md
+        else:
+            log_warning(f"[Resume] 任務翻譯頁不支援續跑類型：{kind!r}")
+            return
+        self._refresh_steps()
+        runner(dry_run=False)
 
     # ------------------------------------------------------------------
     # ui poller

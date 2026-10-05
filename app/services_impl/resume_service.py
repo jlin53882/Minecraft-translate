@@ -10,7 +10,7 @@ from translation_tool.core.lm_resume import (
     ResumeCheck,
     check_resume_feasibility,
     discard_interrupted_task,
-    peek_interrupted_task,
+    peek_interrupted_tasks,
 )
 
 __all__ = [
@@ -18,13 +18,13 @@ __all__ = [
     "ResumeCheck",
     "check_resume",
     "discard_interrupted",
-    "find_interrupted_task",
+    "find_interrupted_tasks",
 ]
 
 
-def find_interrupted_task() -> InterruptedTask | None:
-    """上次未完成的機器翻譯（沒有則 None）。只讀一個小 JSON，可在 UI 執行緒呼叫。"""
-    return peek_interrupted_task()
+def find_interrupted_tasks() -> list[InterruptedTask]:
+    """上次未完成的翻譯任務（機器翻譯、FTB、KubeJS、MD；沒有則空）。只讀幾個小 JSON。"""
+    return peek_interrupted_tasks()
 
 
 def check_resume(task: InterruptedTask) -> ResumeCheck:
@@ -32,6 +32,6 @@ def check_resume(task: InterruptedTask) -> ResumeCheck:
     return check_resume_feasibility(task)
 
 
-def discard_interrupted() -> None:
+def discard_interrupted(task: InterruptedTask | None = None) -> None:
     """放棄上次的任務（清除標記，不續跑）。"""
-    discard_interrupted_task()
+    discard_interrupted_task(task)

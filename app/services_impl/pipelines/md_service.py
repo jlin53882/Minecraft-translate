@@ -19,22 +19,38 @@ def run_md_translation_service(
     """執行 Markdown 翻譯流程"""
     from app.services_impl.pipelines._task_runner import run_callable_task
     from translation_tool.core.md_translation_assembly import run_md_pipeline
+    from translation_tool.core.plugin_resume import resume_task
 
-    return run_callable_task(
-        session=session,
-        task_name="[非預期錯誤] MD 流程失敗：",
-        func=run_md_pipeline,
-        kwargs={
-            "input_dir": input_dir,
-            "session": session,
-            "output_dir": output_dir,
-            "dry_run": dry_run,
+    with resume_task(
+        "md",
+        input_dir=input_dir,
+        output_dir=output_dir,
+        options={
             "step_extract": step_extract,
             "step_translate": step_translate,
             "step_inject": step_inject,
             "write_new_cache": write_new_cache,
             "lang_mode": lang_mode,
         },
-        add_session_log_on_error=True,
-        ui_log_handler=UI_LOG_HANDLER,
-    )
+        session=session,
+        dry_run=dry_run,
+        translate_enabled=step_translate,
+    ):
+        return run_callable_task(
+            session=session,
+            task_name="[非預期錯誤] MD 流程失敗：",
+            func=run_md_pipeline,
+            kwargs={
+                "input_dir": input_dir,
+                "session": session,
+                "output_dir": output_dir,
+                "dry_run": dry_run,
+                "step_extract": step_extract,
+                "step_translate": step_translate,
+                "step_inject": step_inject,
+                "write_new_cache": write_new_cache,
+                "lang_mode": lang_mode,
+            },
+            add_session_log_on_error=True,
+            ui_log_handler=UI_LOG_HANDLER,
+        )

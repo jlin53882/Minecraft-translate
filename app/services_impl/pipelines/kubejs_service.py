@@ -19,21 +19,36 @@ def run_kubejs_tooltip_service(
     """執行 KubeJS 翻譯流程（無回傳值）。"""
     from app.services_impl.pipelines._task_runner import run_callable_task
     from translation_tool.core.kubejs_translator import run_kubejs_pipeline
+    from translation_tool.core.plugin_resume import resume_task
 
-    return run_callable_task(
-        session=session,
-        task_name="[致命錯誤] KubeJS 服務失敗：",
-        func=run_kubejs_pipeline,
-        kwargs={
-            "input_dir": input_dir,
-            "output_dir": output_dir,
-            "session": session,
-            "dry_run": dry_run,
+    with resume_task(
+        "kubejs",
+        input_dir=input_dir,
+        output_dir=output_dir,
+        options={
             "step_extract": step_extract,
             "step_translate": step_translate,
             "step_inject": step_inject,
             "write_new_cache": write_new_cache,
         },
-        add_session_log_on_error=False,
-        ui_log_handler=UI_LOG_HANDLER,
-    )
+        session=session,
+        dry_run=dry_run,
+        translate_enabled=step_translate,
+    ):
+        return run_callable_task(
+            session=session,
+            task_name="[致命錯誤] KubeJS 服務失敗：",
+            func=run_kubejs_pipeline,
+            kwargs={
+                "input_dir": input_dir,
+                "output_dir": output_dir,
+                "session": session,
+                "dry_run": dry_run,
+                "step_extract": step_extract,
+                "step_translate": step_translate,
+                "step_inject": step_inject,
+                "write_new_cache": write_new_cache,
+            },
+            add_session_log_on_error=False,
+            ui_log_handler=UI_LOG_HANDLER,
+        )

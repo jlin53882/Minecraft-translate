@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,7 +21,7 @@ from translation_tool.core.lm_translator_shared_loop import (
     TranslateLoopResult,
     translate_items_with_cache_loop,
 )
-from translation_tool.utils.app_paths import get_data_root
+from translation_tool.core.plugin_resume import active_context, marker_path
 from translation_tool.utils.cache_manager import (
     add_to_cache as _default_cache_add,
 )
@@ -62,19 +63,62 @@ def prepare_translator_items(
 
 @dataclass
 class JsonCheckpointAdapter:
-    """Minimal durable batch checkpoint used by each plugin adapter."""
+    """每批翻譯完成後的 durable checkpoint；續跑任務進行中時寫出可續跑的標記（#164）。
+
+    - **沒有續跑任務**（CLI／直接呼叫）：寫入原本的最小資訊（舊格式，沒有人讀取），
+      ``clear()`` 在迴圈完成時移除檔案。
+    - **有續跑任務**（服務層以 ``plugin_resume.resume_task`` 包住整個任務）：寫出版本 2 標記
+      （``kind``、輸入／輸出、選項、涵蓋全部來源檔案的指紋、已保存進度），可由 ``lm_resume``
+      偵測並續跑。標記在**整個任務完成**時才由 ``resume_task`` 清除——FTB 是逐檔案翻譯，
+      不能在第一個檔案完成時就清掉；這裡的 ``clear()`` 只回報「這個迴圈完成」。
+    """
 
     plugin: str
     fingerprint: str
     target: str = ""
     path: Path | None = None
+    _context: Any = field(default=None, init=False, repr=False)
+    _last_processed: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.path is None:
             # 一律走資料根目錄（#137），不依賴執行時的工作目錄（#162）
-            self.path = (
-                get_data_root() / "logs" / f"translator_{self.plugin}_checkpoint.json"
+            self.path = marker_path(self.plugin)
+            # 只有使用預設位置時才參與續跑任務（測試或呼叫端明確指定 path 時維持原行為）
+            self._context = active_context(self.plugin)
+            if self._context is not None:
+                self._context.loop_started()
+
+    def _payload(self, state: dict[str, Any]) -> dict[str, Any]:
+        processed = int(state.get("processed") or 0)
+        total = int(state.get("total") or 0)
+        payload: dict[str, Any] = {
+            "plugin": self.plugin,
+            "fingerprint": self.fingerprint,
+            "target": self.target,
+            "cache_type": state.get("cache_type"),
+            "processed": processed,
+            "total": total,
+            "completed_calls": int(state.get("completed_calls") or 0),
+            "status": state.get("status"),
+        }
+        ctx = self._context
+        if ctx is not None:
+            payload.update(
+                {
+                    "version": 2,
+                    "kind": ctx.kind,
+                    "input_dir": ctx.input_dir,
+                    "output_dir": ctx.output_dir or "",
+                    "options": ctx.options,
+                    # 任務層級的來源指紋；單一迴圈的項目指紋改放 items_fingerprint
+                    "fingerprint": ctx.fingerprint,
+                    "items_fingerprint": self.fingerprint,
+                    "completed_count": ctx.completed_base + processed,
+                    "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                }
             )
+        return payload
 
     def __call__(self, state: dict[str, Any]) -> None:
         """Atomically and durably persist the last completed batch boundary.
@@ -84,16 +128,8 @@ class JsonCheckpointAdapter:
         """
         assert self.path is not None
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "plugin": self.plugin,
-            "fingerprint": self.fingerprint,
-            "target": self.target,
-            "cache_type": state.get("cache_type"),
-            "processed": int(state.get("processed") or 0),
-            "total": int(state.get("total") or 0),
-            "completed_calls": int(state.get("completed_calls") or 0),
-            "status": state.get("status"),
-        }
+        payload = self._payload(state)
+        self._last_processed = int(state.get("processed") or 0)
         temporary = self.path.with_suffix(".tmp")
         with open(temporary, "w", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
@@ -103,7 +139,14 @@ class JsonCheckpointAdapter:
         fsync_directory(self.path.parent)
 
     def clear(self) -> None:
-        """Remove a completed checkpoint; failed/cancelled tasks retain it."""
+        """迴圈完成（DONE）。
+
+        有續跑任務時只回報完成（標記由任務結束時一併清除）；否則移除檔案。失敗／取消的迴圈
+        不會呼叫這裡，所以標記保留。
+        """
+        if self._context is not None:
+            self._context.loop_completed(self._last_processed)
+            return
         if self.path is not None and self.path.exists():
             self.path.unlink()
 
