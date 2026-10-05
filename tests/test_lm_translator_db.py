@@ -128,9 +128,8 @@ def test_db_hit_then_cache_then_ai_and_output_is_correct(run_env, tmp_path):
     assert lang["item.foo.db"] == "資料庫譯文"  # 資料庫優先
     assert lang["item.foo.cache"] == "快取譯文"  # 快取
     assert lang["item.foo.ai"] == "AI:Needs Machine Translation"
-    assert seen["ai_batches"] == [
-        ["item.foo.ai", "name"]
-    ]  # AI 只翻剩下的（書名未被資料庫收錄）
+    # AI 只翻剩下的（書名未被資料庫收錄）；檔案掃描順序不固定，所以排序後比對
+    assert [sorted(b) for b in seen["ai_batches"]] == [["item.foo.ai", "name"]]
     book = json.loads(
         (
             out

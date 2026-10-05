@@ -439,3 +439,20 @@ def test_scan_folder_can_cancel(db, tmp_path):
     )
     report = [u for u in gen if "report" in u][-1]["report"]
     assert report.cancelled is True
+
+
+def test_scan_dry_run_reads_but_never_writes(db, tmp_path):
+    make_jar(tmp_path / "foo.jar", LANG_JAR)
+    opts = ScanOptions("1.21.1", dry_run=True)
+    last = None
+    for upd in scan_folder_generator(db, tmp_path, opts, workers=1):
+        last = upd
+    report = last["report"]
+    assert report.dry_run and report.items_found == 4 and report.stats.new_entries == 0
+    assert db.count_entries() == 0 and db.last_scans() == []
+    # 預覽不需要資料庫
+    assert [u for u in scan_folder_generator(None, tmp_path, opts, workers=1)][-1][
+        "report"
+    ].items_found == 4
+    with pytest.raises(ValueError):
+        list(scan_folder_generator(None, tmp_path, ScanOptions("1.21.1")))

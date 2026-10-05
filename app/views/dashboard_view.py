@@ -79,6 +79,12 @@ def _default_rules_count() -> int:
     return len(load_replace_rules())
 
 
+def _default_moddb_summary() -> dict | None:
+    from app.services_impl.moddb_service import summarize_database
+
+    return summarize_database()
+
+
 def _default_key_snapshot() -> list[KeyHealth]:
     from app.services_impl.key_health_service import get_key_health_snapshot
 
@@ -95,12 +101,16 @@ class DashboardView(ft.Column):
         cache_overview_loader: Callable[[], dict] = _default_cache_overview,
         rules_count_loader: Callable[[], int] = _default_rules_count,
         key_snapshot_loader: Callable[[], list] = _default_key_snapshot,
+        moddb_loader: Callable[[], dict | None] = _default_moddb_summary,
     ) -> None:
         super().__init__(expand=True, spacing=18, scroll=ft.ScrollMode.AUTO)
+        self._moddb_loader = moddb_loader
+        self._moddb: dict | None = None
         activity_card, cache_card, flow_card = self._init_dashboard_state_and_cards(
             cache_overview_loader, key_snapshot_loader, page, rules_count_loader
         )
         keys_card = self._build_dashboard_keys_card()
+        moddb_card = self._build_dashboard_moddb_card()
         self.controls = [
             ft.Row(
                 [
@@ -137,7 +147,7 @@ class DashboardView(ft.Column):
             ft.Row(
                 [
                     ft.Column([flow_card], expand=7),
-                    ft.Column([cache_card], expand=4),
+                    ft.Column([cache_card, moddb_card], spacing=16, expand=4),
                 ],
                 spacing=16,
                 vertical_alignment=ft.CrossAxisAlignment.START,
@@ -217,6 +227,61 @@ class DashboardView(ft.Column):
         )
         return activity_card, cache_card, flow_card
 
+    def _build_dashboard_moddb_card(self):
+        """Mod 資料庫卡片：資料量、翻譯進度與入口。"""
+        self.moddb_column = ft.Column(spacing=8)
+        return kit.section_card(
+            "Mod 資料庫",
+            self.moddb_column,
+            icon=ft.Icons.DATASET_OUTLINED,
+            tone="dia",
+            actions=[
+                kit.button(
+                    "開啟",
+                    "ghost",
+                    size="sm",
+                    on_click=lambda _e: self._go("moddb"),
+                )
+            ],
+        )
+
+    def _render_moddb(self) -> None:
+        info = self._moddb
+        if not info:
+            self.moddb_column.controls = [
+                kit.empty_state(
+                    "尚未建立資料庫",
+                    "掃描 mods 資料夾的 jar，即可建立分版本的翻譯記憶庫",
+                    icon=ft.Icons.DATASET_OUTLINED,
+                    action_text="前往掃描匯入",
+                    on_action=lambda _e: self._go("moddb"),
+                )
+            ]
+            return
+        versions = "、".join(info["versions"][:4]) or "—"
+        target = info.get("target_version") or "未設定"
+        self.moddb_column.controls = [
+            ft.Row(
+                [
+                    ft.Text(
+                        f"{info['entries']:,}",
+                        size=24,
+                        weight=ft.FontWeight.BOLD,
+                        color=C.TEXT,
+                        font_family=design.FONT_MONO,
+                    ),
+                    ft.Text("條目", size=12, color=C.MUTED),
+                ],
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.END,
+            ),
+            kit.progress_bar(info["progress"] / 100, "dia", height=6),
+            ft.Text(
+                f"已翻譯 {info['progress']}%・版本：{versions}", size=12, color=C.MUTED
+            ),
+            ft.Text(f"翻譯時的目標版本：{target}", size=11.5, color=C.DIM),
+        ]
+
     def _build_dashboard_keys_card(self):
         """API 金鑰卡片。"""
         keys_card = kit.section_card(
@@ -293,7 +358,16 @@ class DashboardView(ft.Column):
             except Exception:
                 logger.warning("工作台讀取規則數失敗", exc_info=True)
                 rules = None
-            self._cache_overview, self._rules_count = overview, rules
+            try:
+                moddb = self._moddb_loader()
+            except Exception:
+                logger.warning("工作台讀取 Mod 資料庫摘要失敗", exc_info=True)
+                moddb = None
+            self._cache_overview, self._rules_count, self._moddb = (
+                overview,
+                rules,
+                moddb,
+            )
             self._loading = False
             self._apply_on_ui(direct=sync)
 
@@ -338,6 +412,7 @@ class DashboardView(ft.Column):
 
     def refresh_view(self, data: DashboardData) -> None:
         self.data = data
+        self._render_moddb()
         self.title_text.value = f"{greeting()}，歡迎回來"
         self.stat_cache.set_value(
             format_count(data.total_entries if self._cache_overview else None)

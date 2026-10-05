@@ -151,7 +151,7 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
     monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
 
     def fake_service(
-        input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+        input_dir, output_dir, session, dry_run, export_lang, write_new_cache, **db
     ):
         captured.update(
             {
@@ -283,7 +283,7 @@ def test_start_clicked_uses_default_output_dir_when_empty(monkeypatch):
     monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
 
     def fake_service(
-        input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+        input_dir, output_dir, session, dry_run, export_lang, write_new_cache, **db
     ):
         captured["output_dir"] = output_dir
 

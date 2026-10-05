@@ -54,7 +54,7 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
     monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
 
     def fake_service(
-        input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+        input_dir, output_dir, session, dry_run, export_lang, write_new_cache, **db
     ):
         calls.update(
             {
@@ -64,6 +64,7 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
                 "dry_run": dry_run,
                 "export_lang": export_lang,
                 "write_new_cache": write_new_cache,
+                "db": db,
             }
         )
 
@@ -83,6 +84,42 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
     assert calls["dry_run"] is True
     assert calls["export_lang"] is True
     assert calls["write_new_cache"] is True
+    # Mod 資料庫選項（預設值取自設定；版本留空則傳 None 交給設定）
+    assert set(calls["db"]) == {"use_translation_db", "translation_db_version"}
+
+
+def test_db_options_follow_the_page_controls(monkeypatch):
+    """機器翻譯頁上的「使用 Mod 資料庫」與目標版本會原樣傳給 service。"""
+    calls = {}
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type(
+            "T", (), {"start": lambda self: target(*args)}
+        )(),
+    )
+    monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
+    monkeypatch.setattr(
+        lm_view,
+        "run_lm_translation_service",
+        lambda *a, **db: calls.update(db=db),
+    )
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view.input_path.value = "C:/Assets"
+    view.use_db_switch.value = False
+    view.db_version_field.value = " 1.20.1 "
+    view.start_clicked(None)
+    assert calls["db"] == {
+        "use_translation_db": False,
+        "translation_db_version": "1.20.1",
+    }
+
+    view._ui_timer_running = False
+    view.db_version_field.value = ""
+    view.use_db_switch.value = True
+    view.start_clicked(None)
+    assert calls["db"] == {"use_translation_db": True, "translation_db_version": None}
 
 
 def test_start_clicked_leaves_session_start_and_finish_to_the_service(monkeypatch):
@@ -105,7 +142,7 @@ def test_start_clicked_leaves_session_start_and_finish_to_the_service(monkeypatc
         seen = {}
 
         def fake_service(
-            input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+            input_dir, output_dir, session, dry_run, export_lang, write_new_cache, **db
         ):
             seen["active_before_service_start"] = manager.active()
             session.start()  # 真正的 service 會自己 start()／finish()
@@ -147,7 +184,7 @@ def test_default_output_notice_survives_service_start_and_poller_tail_sync(
     monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
 
     def fake_service(
-        input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+        input_dir, output_dir, session, dry_run, export_lang, write_new_cache, **db
     ):
         session.start()  # 真正的 service 會 start()，清空 session 日誌
         session.add_log("translating…")
@@ -199,13 +236,14 @@ def _launch_spy(monkeypatch):
     monkeypatch.setattr(
         lm_view,
         "run_lm_translation_service",
-        lambda input_dir, output_dir, session, dry_run, export_lang, write_new_cache: (
+        lambda input_dir, output_dir, session, dry_run, export_lang, write_new_cache, **db: (
             calls.update(
                 input_dir=input_dir,
                 output_dir=output_dir,
                 dry_run=dry_run,
                 export_lang=export_lang,
                 write_new_cache=write_new_cache,
+                db=db,
             )
         ),
     )
@@ -236,6 +274,7 @@ def test_resume_interrupted_restores_inputs_and_options_then_starts(monkeypatch)
         "dry_run": False,
         "export_lang": True,
         "write_new_cache": False,
+        "db": {"use_translation_db": True, "translation_db_version": None},
     }
     assert view.input_path.value == "C:/mods/assets"
     assert view.output_path.value == "C:/out"

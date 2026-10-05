@@ -26,6 +26,7 @@ def test_spec_keys_are_unique_and_cover_all_views():
         "translation",
         "qc",
         "icon_preview",
+        "moddb",
         "cache",
         "rules",
         "lookup",
@@ -114,10 +115,10 @@ def test_views_are_built_lazily(monkeypatch):
     assert vr.built_view(registry[2]) is None
 
     hooked = []
-    registry[12].on_build(hooked.append)
-    first = registry[12]["view"]
+    registry[13].on_build(hooked.append)
+    first = registry[13]["view"]
     assert built == ["config"]
     assert hooked == [first]
-    assert registry[12]["view"] is first
-    assert vr.built_view(registry[12]) is first
+    assert registry[13]["view"] is first
+    assert vr.built_view(registry[13]) is first
     assert built == ["config"]

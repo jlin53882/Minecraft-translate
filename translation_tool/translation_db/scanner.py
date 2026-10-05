@@ -51,6 +51,7 @@ class ScanOptions:
     convert_cn: bool = True
     scan_nested: bool = True
     include_patchouli: bool = True
+    dry_run: bool = False  # 只讀 jar 並統計，不寫入資料庫
 
 
 @dataclass
@@ -77,8 +78,10 @@ class ScanReport:
     jars_without_lang: int = 0
     jars_failed: list[str] = field(default_factory=list)
     nested_jars: int = 0
+    items_found: int = 0  # 讀到的項目數（預覽時用）
     stats: IngestStats = field(default_factory=IngestStats)
     cancelled: bool = False
+    dry_run: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -87,6 +90,8 @@ class ScanReport:
             "jars_without_lang": self.jars_without_lang,
             "jars_failed": len(self.jars_failed),
             "nested_jars": self.nested_jars,
+            "items_found": self.items_found,
+            "dry_run": self.dry_run,
             "new_entries": self.stats.new_entries,
             "existing": self.stats.existing,
             "added_translations": self.stats.added_translations,
@@ -250,7 +255,7 @@ def find_jars(folder: str | Path) -> list[Path]:
 
 
 def scan_folder_generator(
-    db: TranslationDB,
+    db: TranslationDB | None,
     folder: str | Path,
     options: ScanOptions,
     *,
@@ -261,7 +266,9 @@ def scan_folder_generator(
 
     最後一次 yield 帶 ``report``（``ScanReport``）。
     """
-    report = ScanReport(version=options.version)
+    report = ScanReport(version=options.version, dry_run=options.dry_run)
+    if db is None and not options.dry_run:
+        raise ValueError("需要資料庫才能寫入掃描結果")
     jars = find_jars(folder)
     report.jars_total = len(jars)
     if not jars:
@@ -298,30 +305,34 @@ def scan_folder_generator(
                     log = f"{result.name}　沒有語言檔"
                 else:
                     report.jars_with_lang += 1
-                    stats = db.ingest(options.version, result.items, convert)
-                    report.stats.add(stats)
-                    log = (
-                        f"{result.name}　新增 {stats.new_entries}　補入 {stats.added_translations}"
-                        f"　略過 {stats.existing}"
-                        + (
-                            f"　原文已變動 {stats.en_changed}"
-                            if stats.en_changed
-                            else ""
+                    report.items_found += len(result.items)
+                    if options.dry_run or db is None:
+                        log = f"{result.name}　可匯入 {len(result.items)} 項"
+                    else:
+                        stats = db.ingest(options.version, result.items, convert)
+                        report.stats.add(stats)
+                        log = (
+                            f"{result.name}　新增 {stats.new_entries}"
+                            f"　補入 {stats.added_translations}　略過 {stats.existing}"
+                            + (
+                                f"　原文已變動 {stats.en_changed}"
+                                if stats.en_changed
+                                else ""
+                            )
                         )
-                    )
                 yield {"progress": done / len(jars), "log": log}
         finally:
             if report.cancelled:
                 for f in futures:
                     f.cancel()
 
-    db.record_scan(options.version, str(folder), report.as_dict())
     state = "已取消" if report.cancelled else "完成"
-    yield {
-        "progress": 1.0,
-        "log": (
+    if options.dry_run or db is None:
+        summary = f"🔎 預覽{state}：{report.jars_with_lang} 個 jar 含語言檔，共 {report.items_found} 項（未寫入）"
+    else:
+        db.record_scan(options.version, str(folder), report.as_dict())
+        summary = (
             f"🎉 掃描{state}：新增 {report.stats.new_entries}　補入 {report.stats.added_translations}"
             f"　略過 {report.stats.existing}　原文已變動 {report.stats.en_changed}"
-        ),
-        "report": report,
-    }
+        )
+    yield {"progress": 1.0, "log": summary, "report": report}
