@@ -20,7 +20,7 @@ from app.ui.snack import show_snack
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from app.views.bundler.bundler_widgets import BundlerWidgetsMixin
-from translation_tool.utils.log_unit import log_debug
+from translation_tool.utils.log_unit import log_debug, log_info
 
 OUTPUT_ZIP_NAME_PATH = "output_bundler.output_zip_name"
 
@@ -425,7 +425,9 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         self.status_text.value = "打包中…"
         self.status_text.color = C.TEXT
         self.progress_bar.color = C.EM
-        self._append_log("開始執行打包...", level="info")
+        message = "開始執行打包..."
+        self._append_log(message, level="info")
+        log_info(message, extra={"ui_mirror": True})
         self._page.update()
 
         thread = threading.Thread(

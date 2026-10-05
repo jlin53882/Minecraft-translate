@@ -13,7 +13,10 @@ from app.services_impl.logging_service import (
     GLOBAL_LOG_LIMITER,
     UI_LOG_HANDLER,
 )
-from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
+from app.services_impl.pipelines._pipeline_logging import (
+    ensure_pipeline_logging,
+    mirror_session_log,
+)
 from translation_tool.core.lm_translator import (
     translate_directory_generator as lm_translate_gen,
 )
@@ -52,7 +55,11 @@ def run_lm_translation_service(
         UI_LOG_HANDLER.set_session(session)
         # ⭐ Dry Run 模式提示
         if dry_run:
-            session.add_log("[DRY-RUN] 啟用：僅進行分析與預覽，不會送出任何 API 請求")
+            mirror_session_log(
+                session,
+                logger,
+                "[DRY-RUN] 啟用：僅進行分析與預覽，不會送出任何 API 請求",
+            )
 
         # ⭐ 把 dry_run 明確傳遞給 generator
         gen = lm_translate_gen(
@@ -85,12 +92,16 @@ def run_lm_translation_service(
             session.add_log(final["log"])
 
         if dry_run:
-            session.add_log("[DRY-RUN] 分析完成，未執行實際翻譯")
+            mirror_session_log(session, logger, "[DRY-RUN] 分析完成，未執行實際翻譯")
 
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
-        logger.error(f"LM 服務失敗: {e}\n{full_traceback}")
-        session.add_log(f"[致命錯誤] LM 翻譯服務失敗：{e}\n{full_traceback}")
+        mirror_session_log(
+            session,
+            logger,
+            f"[致命錯誤] LM 翻譯服務失敗：{e}\n{full_traceback}",
+            level="error",
+        )
         session.set_error()
         GLOBAL_LOG_LIMITER.flush()
     finally:

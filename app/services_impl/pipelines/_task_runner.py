@@ -8,7 +8,10 @@ from collections.abc import Callable
 from typing import Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
-from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
+from app.services_impl.pipelines._pipeline_logging import (
+    ensure_pipeline_logging,
+    mirror_session_log,
+)
 from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
 
 logger = logging.getLogger(__name__)
@@ -33,13 +36,19 @@ def run_callable_task(
             result = func(**kwargs)
         return result
     except TaskCancelled:
-        session.add_log("⏹ 任務已取消", level="warning")
+        mirror_session_log(session, logger, "⏹ 任務已取消", level="warning")
         return None
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
-        logger.error("[%s] %s\n%s", task_name, e, full_traceback)
         if add_session_log_on_error:
-            session.add_log(f"[{task_name}] {e}\n{full_traceback}")
+            mirror_session_log(
+                session,
+                logger,
+                f"[{task_name}] {e}\n{full_traceback}",
+                level="error",
+            )
+        else:
+            logger.error("[%s] %s\n%s", task_name, e, full_traceback)
         session.set_error()
         return None
     finally:

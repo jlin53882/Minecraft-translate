@@ -31,7 +31,9 @@ def run_batch_lookup_service(json_text: str):
     try:
         names = json.loads(json_text)
         if not isinstance(names, list):
-            yield {"log": "錯誤：JSON 內容必須是一個列表 (List)。", "error": True}
+            message = "錯誤：JSON 內容必須是一個列表 (List)。"
+            logger.error(message)
+            yield {"log": message, "error": True}
             return
 
         results = {}
@@ -69,8 +71,10 @@ def run_batch_lookup_service(json_text: str):
             yield final
 
     except json.JSONDecodeError:
-        logger.error({"log": "輸入的不是有效的 JSON 格式。"})
-        yield {"log": "輸入的不是有效的 JSON 格式。", "error": True}
+        message = "輸入的不是有效的 JSON 格式。"
+        logger.error(message)
+        yield {"log": message, "error": True}
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
-        logger.error({"log": f"查詢時發生錯誤: {e}"})
-        yield {"log": f"查詢時發生錯誤: {e}", "error": True}
+        message = f"查詢時發生錯誤: {e}"
+        logger.error(message)
+        yield {"log": message, "error": True}

@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui.poller import PollerHandle
 from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
-from translation_tool.utils.log_unit import log_error, log_warning
+from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
 # 步驟 worker 等待最後一次日誌同步的上限（秒）
 _FINAL_SYNC_TIMEOUT_SEC = 30
@@ -153,7 +153,8 @@ class PipelineRunner:
                         return
                 success = True
             except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，確保按鈕會恢復
-                log_error(f"[Pipeline] 一鍵製作失敗：{ex}\n{traceback.format_exc()}")
+                error_text = f"[Pipeline] 一鍵製作失敗：{ex}\n{traceback.format_exc()}"
+                log_error(error_text, extra={"ui_mirror": True})
                 self.ui_view(self._panel.add_log, f"❌ 流程失敗：{ex}", "error")
             finally:
                 self.ui_view(self._finish_sequence, success, on_end)
@@ -165,8 +166,10 @@ class PipelineRunner:
         self._panel.finish_all(success, cancelled=cancelled)
         if success:
             self._panel.add_log("✅ 一鍵製作完成！")
+            log_info("✅ 一鍵製作完成！", extra={"ui_mirror": True})
         elif cancelled:
             self._panel.add_log("⏹ 一鍵製作已取消", "warning")
+            log_info("⏹ 一鍵製作已取消", extra={"ui_mirror": True})
         on_end()
 
     # ------------------------------------------------------------------ 步驟
@@ -185,6 +188,7 @@ class PipelineRunner:
         self._watch = watch
         self.ui_view(self._panel.set_step_running, step_num, name)
         self.ui_view(self._panel.add_log, f"▶ 開始：{name}")
+        log_info(f"▶ 開始：{name}", extra={"ui_mirror": True})
         self.ui(self._start_watch)
         try:
             # 取消檢查：翻譯在批次之間 / 等待限流時、提取在 JAR 之間停止
@@ -222,9 +226,12 @@ class PipelineRunner:
             self._panel.finish_step(step_num, ok, cancelled=cancelled)
             if cancelled:
                 self._panel.add_log(f"⏹ {name} 已取消", "warning")
+                log_info(f"⏹ {name} 已取消", extra={"ui_mirror": True})
                 self._update_progress(1.0, "已取消")
                 return
-            self._panel.add_log(f"✅ {name} 完成" if ok else f"❌ {name} 失敗")
+            message = f"✅ {name} 完成" if ok else f"❌ {name} 失敗"
+            self._panel.add_log(message)
+            log_info(message, extra={"ui_mirror": True})
             self._update_progress(1.0, "完成" if ok else "失敗")
 
         self.ui_view(_finish)

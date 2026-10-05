@@ -2,6 +2,7 @@
 
 import logging
 
+from app.services_impl.pipelines._pipeline_logging import mirror_session_log
 from app.tasks.task_session import TaskSession
 from translation_tool.utils.ui_logging_handler import UISessionLogHandler
 
@@ -49,3 +50,16 @@ def test_ui_mirror_record_does_not_duplicate_session_log():
     handler.emit(record)
 
     assert session.snapshot()["logs"] == []
+
+
+def test_mirror_session_log_writes_once_to_session_and_logger(caplog):
+    session = TaskSession()
+
+    with caplog.at_level(logging.WARNING):
+        mirror_session_log(session, logging.getLogger("test.pipeline"), "取消任務", "warning")
+
+    assert [(entry.level, entry.text) for entry in session.snapshot()["logs"]] == [
+        ("warning", "取消任務")
+    ]
+    assert [record.message for record in caplog.records] == ["取消任務"]
+    assert caplog.records[0].ui_mirror is True
