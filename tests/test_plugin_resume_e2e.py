@@ -29,6 +29,7 @@ from translation_tool.core import (
     lm_translator_shared_loop,
     plugin_resume,
 )
+from translation_tool.core.lm_translator_skeleton import JsonCheckpointAdapter
 from translation_tool.plugins.ftbquests import ftbquests_lmtranslator
 from translation_tool.plugins.kubejs import kubejs_tooltip_lmtranslator
 from translation_tool.plugins.md import md_lmtranslator
@@ -57,6 +58,11 @@ class Runtime:
         self.monkeypatch = monkeypatch
         self.calls: list[list[str]] = []
         self.crash_at_call: int | None = None
+        # 「快取已 durable、輸出已刷新，但 checkpoint 還沒更新」的中斷點：
+        # 共用迴圈每批順序是 cache_save → on_batch_flushed → on_batch_checkpoint，
+        # 在第 N 次 checkpoint callback 進入時（尚未寫入）強制結束，正好落在該視窗。
+        self.crash_at_checkpoint: int | None = None
+        self.checkpoint_calls = 0
         self.config = {
             "translator": {
                 "cache_directory": str(tmp_path / "cache"),
@@ -84,6 +90,16 @@ class Runtime:
             lm_translator_shared_loop, "select_batch_size", lambda r, p, n, c: n
         )
 
+        real_call = JsonCheckpointAdapter.__call__
+
+        def checkpoint_with_fault(adapter, state):
+            self.checkpoint_calls += 1
+            if self.crash_at_checkpoint == self.checkpoint_calls:
+                raise SimulatedCrash
+            return real_call(adapter, state)
+
+        monkeypatch.setattr(JsonCheckpointAdapter, "__call__", checkpoint_with_fault)
+
     def install_fake_translator(self, module) -> None:
         def fake(batch, total=None):
             if (
@@ -107,6 +123,8 @@ class Runtime:
             plugin_resume._ACTIVE.clear()
         self.calls = []
         self.crash_at_call = None
+        self.crash_at_checkpoint = None
+        self.checkpoint_calls = 0
 
     def wipe_cache_and_markers(self) -> None:
         shutil.rmtree(self.tmp / "cache", ignore_errors=True)
@@ -185,6 +203,7 @@ class Flow:
 
     # 流程中「翻譯之前」的步驟（抽取／清理）；測試用它模擬在翻譯開始前被強制結束
     early_step: ClassVar[tuple[str, str]]
+    cache_type: ClassVar[str]
 
     @contextlib.contextmanager
     def early_step_patch(self, monkeypatch, replacement=None):
@@ -202,6 +221,7 @@ class Flow:
 
 class FtbFlow(Flow):
     kind = "ftbquests"
+    cache_type = "ftbquests"
     early_step = ("translation_tool.core.ftb_translator", "clean_ftbquests_from_raw")
     module = ftbquests_lmtranslator
     default_options: ClassVar[dict[str, Any]] = {
@@ -251,6 +271,7 @@ class FtbFlow(Flow):
 
 class KubejsFlow(Flow):
     kind = "kubejs"
+    cache_type = "kubejs"
     early_step = ("translation_tool.core.kubejs_translator", "step1_extract_and_clean")
     module = kubejs_tooltip_lmtranslator
     default_options: ClassVar[dict[str, Any]] = {
@@ -290,6 +311,7 @@ class KubejsFlow(Flow):
 
 class MdFlow(Flow):
     kind = "md"
+    cache_type = "md"
     early_step = ("translation_tool.core.md_translation_assembly", "step1_extract")
     module = md_lmtranslator
     default_options: ClassVar[dict[str, Any]] = {
@@ -432,6 +454,48 @@ class TestPluginResume:
         (data,) = seen
         assert data["status"] == "STARTED" and data["completed_count"] == 0
         assert data["kind"] == flow.kind and data["input_dir"] == str(flow.input_dir)
+
+    @pytest.mark.parametrize("crash_checkpoint", [1, 2])
+    def test_crash_after_cache_is_durable_but_before_the_checkpoint_updates(
+        self, rt, flow, crash_checkpoint
+    ):
+        """cache fsync 完成、輸出已刷新，checkpoint 還沒寫入就被強制結束（freshness 邊界）。
+
+        標記只是「沒做完」的記錄、不是續跑位置：它記的進度落後於 durable 快取，重開後仍必須
+        靠「重新抽取＋快取分流」讓那批直接命中，不得再送 API。
+        """
+        expected, all_sent = _baseline(rt, flow)
+
+        rt.crash_at_checkpoint = crash_checkpoint
+        with pytest.raises(SimulatedCrash):
+            flow.run(rt, flow.input_dir)
+        done_before = rt.sent()
+        assert len(done_before) == crash_checkpoint * BATCH_SIZE
+        marker = json.loads(_marker(flow).read_text("utf-8"))
+        rt.restart_app()
+
+        durable = len(cache_manager.get_cache_dict_ref(flow.cache_type))
+        assert durable == crash_checkpoint * BATCH_SIZE, (
+            "該批的譯文已經 durable 地存在快取"
+        )
+        assert marker["completed_count"] < durable, (
+            "標記落後於 durable 快取（還沒更新到這一批）"
+        )
+        (task,) = [t for t in lm_resume.peek_interrupted_tasks() if t.kind == flow.kind]
+        assert lm_resume.check_resume_feasibility(task).ok
+        assert rt.calls == [], "偵測與檢查階段不得呼叫翻譯 API"
+
+        session = flow.run(
+            rt, Path(task.input_dir), output_dir=task.output_dir or None, **task.options
+        )
+
+        resumed = rt.sent()
+        assert not session.error
+        assert sorted(done_before + resumed) == sorted(all_sent), (
+            "durable 快取裡的那批不得再送 API；其餘也不得漏翻"
+        )
+        assert _read_tree(flow.output_root(flow.input_dir)) == expected
+        assert not _marker(flow).exists(), "完成後清除標記"
 
     def test_marker_describes_the_task_and_replays_the_options(self, rt, flow):
         rt.crash_at_call = 2
