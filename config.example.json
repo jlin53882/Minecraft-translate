@@ -16,6 +16,23 @@
     "ftb_translator": {
         "output_dir_name": "FTB任務翻譯輸出"
     },
+    "translation_db": {
+        "enabled": true,
+        "path": "mod_translation.db",
+        "version": "",
+        "cross_version": true,
+        "write_back": true,
+        "sync_manual": true,
+        "priority": [
+            "人工",
+            "町宮字幕組",
+            "自訂補充",
+            "模組自帶繁中",
+            "i18n 轉換",
+            "簡中轉繁",
+            "AI 機翻"
+        ]
+    },
     "output_bundler": {
         "output_zip_name": "可使用翻譯.zip"
     },

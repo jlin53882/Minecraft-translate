@@ -31,11 +31,16 @@ def run_lm_translation_service(
     write_new_cache: bool = True,
     *,
     manage_session: bool = True,
+    use_translation_db: bool | None = None,
+    translation_db_version: str | None = None,
 ):
     """執行 LM 翻譯流程（service 層包裝）。
 
     ``manage_session=False`` 時由呼叫端擁有 ``TaskSession`` 的 ``start()``／``finish()``
     （一鍵流程的步驟 3 會依序翻譯多個來源，共用同一個 session）。
+
+    ``use_translation_db`` / ``translation_db_version`` 為 None 時使用設定檔的 Mod 資料庫設定
+    （一鍵流程走這條路徑）；機器翻譯頁會明確傳入頁面上的選擇。
     """
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
     ensure_pipeline_logging()
@@ -62,6 +67,8 @@ def run_lm_translation_service(
             export_lang=export_lang,
             write_new_cache=write_new_cache,
             should_cancel=_cancel_requested,
+            use_translation_db=use_translation_db,
+            translation_db_version=translation_db_version,
         )
         # cancel_scope：generator 在此執行緒迭代，等待 API 限流時也能被取消打斷
         with cancel_scope(_cancel_requested):

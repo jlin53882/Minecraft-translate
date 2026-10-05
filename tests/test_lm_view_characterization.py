@@ -1,3 +1,5 @@
+import pytest
+
 from app.tasks import LogEntry
 from app.views import lm_view
 from tests.conftest import mock_filepicker, mock_page
@@ -54,7 +56,7 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
     monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
 
     def fake_service(
-        input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+        input_dir, output_dir, session, dry_run, export_lang, write_new_cache, **db
     ):
         calls.update(
             {
@@ -64,6 +66,7 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
                 "dry_run": dry_run,
                 "export_lang": export_lang,
                 "write_new_cache": write_new_cache,
+                "db": db,
             }
         )
 
@@ -83,6 +86,42 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
     assert calls["dry_run"] is True
     assert calls["export_lang"] is True
     assert calls["write_new_cache"] is True
+    # Mod 資料庫選項（預設值取自設定；版本留空則傳 None 交給設定）
+    assert set(calls["db"]) == {"use_translation_db", "translation_db_version"}
+
+
+def test_db_options_follow_the_page_controls(monkeypatch):
+    """機器翻譯頁上的「使用 Mod 資料庫」與目標版本會原樣傳給 service。"""
+    calls = {}
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type(
+            "T", (), {"start": lambda self: target(*args)}
+        )(),
+    )
+    monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
+    monkeypatch.setattr(
+        lm_view,
+        "run_lm_translation_service",
+        lambda *a, **db: calls.update(db=db),
+    )
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view.input_path.value = "C:/Assets"
+    view.use_db_switch.value = False
+    view.db_version_field.value = " 1.20.1 "
+    view.start_clicked(None)
+    assert calls["db"] == {
+        "use_translation_db": False,
+        "translation_db_version": "1.20.1",
+    }
+
+    view._ui_timer_running = False
+    view.db_version_field.value = ""
+    view.use_db_switch.value = True
+    view.start_clicked(None)
+    assert calls["db"] == {"use_translation_db": True, "translation_db_version": None}
 
 
 def test_start_clicked_leaves_session_start_and_finish_to_the_service(monkeypatch):
@@ -105,7 +144,7 @@ def test_start_clicked_leaves_session_start_and_finish_to_the_service(monkeypatc
         seen = {}
 
         def fake_service(
-            input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+            input_dir, output_dir, session, dry_run, export_lang, write_new_cache, **db
         ):
             seen["active_before_service_start"] = manager.active()
             session.start()  # 真正的 service 會自己 start()／finish()
@@ -147,7 +186,7 @@ def test_default_output_notice_survives_service_start_and_poller_tail_sync(
     monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
 
     def fake_service(
-        input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+        input_dir, output_dir, session, dry_run, export_lang, write_new_cache, **db
     ):
         session.start()  # 真正的 service 會 start()，清空 session 日誌
         session.add_log("translating…")
@@ -199,13 +238,14 @@ def _launch_spy(monkeypatch):
     monkeypatch.setattr(
         lm_view,
         "run_lm_translation_service",
-        lambda input_dir, output_dir, session, dry_run, export_lang, write_new_cache: (
+        lambda input_dir, output_dir, session, dry_run, export_lang, write_new_cache, **db: (
             calls.update(
                 input_dir=input_dir,
                 output_dir=output_dir,
                 dry_run=dry_run,
                 export_lang=export_lang,
                 write_new_cache=write_new_cache,
+                db=db,
             )
         ),
     )
@@ -225,6 +265,8 @@ def test_resume_interrupted_restores_inputs_and_options_then_starts(monkeypatch)
             "output_dir": "C:/out",
             "export_lang": True,
             "write_new_cache": False,
+            "use_translation_db": False,  # 沒有記錄資料庫選項的舊 checkpoint
+            "translation_db_version": "",
         },
     )()
 
@@ -236,6 +278,7 @@ def test_resume_interrupted_restores_inputs_and_options_then_starts(monkeypatch)
         "dry_run": False,
         "export_lang": True,
         "write_new_cache": False,
+        "db": {"use_translation_db": False, "translation_db_version": None},
     }
     assert view.input_path.value == "C:/mods/assets"
     assert view.output_path.value == "C:/out"
@@ -253,9 +296,55 @@ def test_resume_interrupted_does_not_start_a_second_run(monkeypatch):
             "output_dir": "",
             "export_lang": False,
             "write_new_cache": True,
+            "use_translation_db": False,
+            "translation_db_version": "",
         },
     )()
 
     view.resume_interrupted(task)
 
     assert calls == {}
+
+
+def _task(use_db, version):
+    return type(
+        "Task",
+        (),
+        {
+            "input_dir": "C:/assets",
+            "output_dir": "C:/out",
+            "export_lang": False,
+            "write_new_cache": True,
+            "use_translation_db": use_db,
+            "translation_db_version": version,
+        },
+    )()
+
+
+@pytest.mark.parametrize(
+    ("current_on", "current_version", "saved_on", "saved_version", "expected"),
+    [
+        # 原任務 DB=True、1.21.1；現在頁面是別的版本 → 仍用 1.21.1
+        (True, "1.20.1", True, "1.21.1", (True, "1.21.1")),
+        # 原任務 DB=False；現在頁面是開的 → 仍然關閉
+        (True, "1.20.1", False, "", (False, None)),
+        # 原任務沒有指定版本（其實沒用資料庫）→ 不能退回目前設定的版本
+        (True, "1.20.1", True, "", (False, None)),
+        # 原任務版本覆寫了全域設定 → 恢復覆寫值，而不是頁面目前的值
+        (False, "9.9.9", True, "1.19.2", (True, "1.19.2")),
+    ],
+)
+def test_resume_interrupted_restores_the_original_database_choice(
+    monkeypatch, current_on, current_version, saved_on, saved_version, expected
+):
+    calls = _launch_spy(monkeypatch)
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view.use_db_switch.value = current_on
+    view.db_version_field.value = current_version
+
+    view.resume_interrupted(_task(saved_on, saved_version))
+
+    assert calls["db"] == {
+        "use_translation_db": expected[0],
+        "translation_db_version": expected[1],
+    }

@@ -20,6 +20,13 @@ from translation_tool.core.lm_config_rules import (
     validate_api_keys,
     value_fully_translated,
 )
+from translation_tool.core.lm_translator_db import (
+    DirectoryDbContext,
+    directory_db,
+    flush_write_back,
+    resolve_db_choice,
+    split_db_hits,
+)
 from translation_tool.core.lm_translator_main import (
     DEFAULT_DRY_RUN,
     DEFAULT_EXPORT_CACHE_ONLY,
@@ -116,6 +123,7 @@ def save_checkpoint(
     fingerprint: str | None = None,
     export_lang: bool | None = None,
     write_new_cache: bool | None = None,
+    translation_db: dict[str, Any] | None = None,
 ):
     """寫入「任務尚未完成」的標記（每批次完成、快取落盤後呼叫）。
 
@@ -134,6 +142,8 @@ def save_checkpoint(
         fingerprint: compute_checkpoint_fingerprint() 的結果（涵蓋全部抽取項目），
             續跑前必須相符
         export_lang / write_new_cache: 這次任務的選項，續跑時沿用
+        translation_db: 這次任務**實際生效**的 Mod 資料庫選項 ``{"enabled": bool, "version": str}``，
+            續跑時必須沿用（否則設定改變後，剩餘項目會寫回不同版本）
     """
     payload = {
         "version": CHECKPOINT_VERSION,
@@ -146,6 +156,7 @@ def save_checkpoint(
         "fingerprint": fingerprint,
         "export_lang": export_lang,
         "write_new_cache": write_new_cache,
+        "translation_db": translation_db,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
     _atomic_write_text(CHECKPOINT_FILE, json_std.dumps(payload, ensure_ascii=False))
@@ -329,7 +340,12 @@ def _cache_saving_enabled() -> bool:
     return bool(load_config().get("translator", {}).get("enable_cache_saving", True))
 
 
-def _note_directory_checkpoint(fingerprint: str, *, cache_saving: bool = True) -> None:
+def _note_directory_checkpoint(
+    fingerprint: str,
+    *,
+    cache_saving: bool = True,
+    db_choice: tuple[bool, str] = (False, ""),
+) -> None:
     """啟動翻譯時處理上次遺留的 checkpoint（只記錄，不依位置跳過任何項目）。
 
     已完成批次的譯文在翻譯快取裡：這次的快取分流自然會把它們當成命中並寫回輸出，
@@ -351,6 +367,14 @@ def _note_directory_checkpoint(fingerprint: str, *, cache_saving: bool = True) -
             f"🔄 接續上次中斷的任務（上次已保存進度 {checkpoint.get('completed_count', 0)}"
             f"/{checkpoint.get('total', 0)} 筆；已完成的部分由快取還原）"
         )
+        saved = checkpoint.get("translation_db") or {}
+        saved_choice = (bool(saved.get("enabled")), str(saved.get("version") or ""))
+        if saved_choice != db_choice:
+            log_warning(
+                f"⚠️ 這次的 Mod 資料庫選項（使用={db_choice[0]}，版本={db_choice[1] or '未指定'}）"
+                f"與中斷的任務（使用={saved_choice[0]}，版本={saved_choice[1] or '未指定'}）不同，"
+                "剩餘項目將依這次的選項查詢與寫回；若不是預期的結果請取消並從「續跑」重新開始"
+            )
         return
     log_warning("⚠️ 上次中斷的任務屬於其他資料或舊格式，無法接續，已捨棄該標記")
     clear_checkpoint()
@@ -462,8 +486,13 @@ def _run_directory_translation(
     checkpoint_fingerprint: str,
     total: int,
     write_checkpoint: bool = True,
+    db_ctx: DirectoryDbContext | None = None,
+    db_choice: tuple[bool, str] = (False, ""),
 ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]], int]:
     """執行目錄翻譯 phase，集中 callback、輸出、checkpoint 與終態契約。"""
+    _note_directory_checkpoint(
+        checkpoint_fingerprint, cache_saving=write_checkpoint, db_choice=db_choice
+    )
     pending_events: list[dict[str, Any]] = []
     touched_files: set[str] = set()
     translation_log: list[dict[str, Any]] = []
@@ -475,6 +504,12 @@ def _run_directory_translation(
             return
         set_by_path(file_cache[file_name], item["path"], item["text"])
         touched_files.add(file_name)
+        if (
+            db_ctx is not None
+            and db_ctx.buffer is not None
+            and not item.get("_untranslated")
+        ):
+            db_ctx.buffer.add(item)
         source_text = item.get("source_text") or item.get("text") or ""
         if source_text:
             translation_log.append(
@@ -490,6 +525,7 @@ def _run_directory_translation(
     def on_batch_flushed() -> None:
         _write_directory_outputs(file_cache, touched_files, root, out_root, export_lang)
         touched_files.clear()
+        flush_write_back(db_ctx)
 
     def on_batch_checkpoint(state: dict[str, Any]) -> None:
         nonlocal checkpoint_batch_index
@@ -507,6 +543,7 @@ def _run_directory_translation(
             fingerprint=checkpoint_fingerprint,
             export_lang=export_lang,
             write_new_cache=write_new_cache,
+            translation_db={"enabled": db_choice[0], "version": db_choice[1]},
         )
 
     def on_progress(progress: float, message: str, _eta_sec: float) -> None:
@@ -536,6 +573,7 @@ def _run_directory_translation(
     )
     if touched_files:
         on_batch_flushed()
+    flush_write_back(db_ctx)
 
     processed = int(result.processed or 0)
     if result.status == "DONE" and processed >= total:
@@ -564,6 +602,35 @@ def _directory_final_message(status: str, processed: int, total: int) -> str:
     return f"⚠️ 翻譯未完成，完成 {processed}/{total} 筆，狀態={status}"
 
 
+def _scan_directory_files(root: Path) -> list[Path]:
+    """掃描可翻譯檔案；失敗只記錄警告並回傳空清單。"""
+    try:
+        patchouli_files, lang_files, files = scan_translatable_files(root)
+    except Exception as error:  # noqa: BLE001
+        log_warning(f"⚠️ 掃描可翻譯檔案失敗，已跳過本次掃描：{error}")
+        patchouli_files, lang_files, files = [], [], []
+    log_info(f"🔍 掃描完成：Patchouli={len(patchouli_files)}，Lang={len(lang_files)}")
+    return files
+
+
+def _split_db_cache(
+    all_items: list[dict[str, Any]],
+    db_ctx: DirectoryDbContext | None,
+    dry_run: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """查詢順序：Mod 資料庫 → 翻譯快取；回傳（可直接套用的項目, 仍需翻譯的項目）。"""
+    db_hits, remaining = split_db_hits(db_ctx, all_items)
+    cached_items, items_to_translate = _split_directory_items(remaining)
+    log_info(
+        f"🧠 Cache 命中 {len(cached_items)} 筆，需翻譯 {len(items_to_translate)} 筆"
+    )
+    if db_ctx is not None and db_ctx.buffer is not None and not dry_run:
+        # 快取命中的譯文也補進資料庫（只新增、不覆蓋），讓過去的 AI 成果不流失
+        db_ctx.buffer.add_many(cached_items)
+        flush_write_back(db_ctx, "快取命中：")
+    return db_hits + cached_items, items_to_translate
+
+
 def translate_directory_generator(
     input_dir: str,
     output_dir: str,
@@ -572,8 +639,14 @@ def translate_directory_generator(
     export_lang: bool = False,
     write_new_cache: bool = False,
     should_cancel: Callable[[], bool] | None = None,
+    use_translation_db: bool | None = None,
+    translation_db_version: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
-    """編排目錄翻譯各 phase；實際工作由 phase helper 負責。"""
+    """編排目錄翻譯各 phase；實際工作由 phase helper 負責。
+
+    查詢順序為 **Mod 資料庫 → 翻譯快取 → AI**。``use_translation_db`` /
+    ``translation_db_version`` 為 None 時使用設定檔（``translation_db``）的值。
+    """
     dry_run = DEFAULT_DRY_RUN if dry_run is None else dry_run
     validate_api_keys()
     reload_translation_cache()
@@ -585,90 +658,86 @@ def translate_directory_generator(
     log_info(f"\\n📂 輸入資料夾：{root}\\n📤 輸出資料夾：{out_root}")
     yield {"progress": 0.0}
 
-    try:
-        patchouli_files, lang_files, files = scan_translatable_files(root)
-    except Exception as error:  # noqa: BLE001
-        log_warning(f"⚠️ 掃描可翻譯檔案失敗，已跳過本次掃描：{error}")
-        patchouli_files, lang_files, files = [], [], []
+    # 資料庫選項（設定為「下次任務才套用」）整個任務只解析一次：開啟資料庫、寫回、checkpoint 共用
+    db_choice = resolve_db_choice(use_translation_db, translation_db_version)
+    with directory_db(root, use_db=db_choice[0], version=db_choice[1]) as db_ctx:
+        files = _scan_directory_files(root)
+        yield {"progress": 0.0}
+        if not files:
+            log_info("⚠️ 未找到任何可翻譯 JSON 檔案")
+            yield {"progress": 1.0}
+            return
 
-    log_info(f"🔍 掃描完成：Patchouli={len(patchouli_files)}，Lang={len(lang_files)}")
-    yield {"progress": 0.0}
-    if not files:
-        log_info("⚠️ 未找到任何可翻譯 JSON 檔案")
-        yield {"progress": 1.0}
-        return
-
-    work_thread = (
-        load_config().get("translator", {}).get("parallel_execution_workers", 4)
-    )
-    file_cache, all_items, extract_events = _extract_directory_items(
-        files,
-        export_lang=export_lang,
-        work_thread=work_thread,
-    )
-    yield from extract_events
-    log_info(f"✂️ 抽取完成：共 {len(all_items)} 段文字")
-    # 指紋涵蓋全部抽取項目（快取分流之前），不受快取進度影響，重開後才能比對得上
-    checkpoint_fingerprint = compute_checkpoint_fingerprint(input_dir, all_items)
-    yield {"progress": 0.2}
-
-    cached_items, items_to_translate = _split_directory_items(all_items)
-    log_info(
-        f"🧠 Cache 命中 {len(cached_items)} 筆，需翻譯 {len(items_to_translate)} 筆"
-    )
-    yield {"progress": 0.2}
-
-    cached_files = _apply_cached_directory_items(
-        cached_items,
-        file_cache,
-        dry_run=dry_run,
-        root=root,
-        out_root=out_root,
-        export_lang=export_lang,
-    )
-    if cached_files:
+        work_thread = (
+            load_config().get("translator", {}).get("parallel_execution_workers", 4)
+        )
+        file_cache, all_items, extract_events = _extract_directory_items(
+            files,
+            export_lang=export_lang,
+            work_thread=work_thread,
+        )
+        yield from extract_events
+        log_info(f"✂️ 抽取完成：共 {len(all_items)} 段文字")
+        # 指紋涵蓋全部抽取項目（快取分流之前），不受快取進度影響，重開後才能比對得上
+        checkpoint_fingerprint = compute_checkpoint_fingerprint(input_dir, all_items)
         yield {"progress": 0.2}
 
-    if DEFAULT_EXPORT_CACHE_ONLY and not items_to_translate and not dry_run:
-        clear_checkpoint()
-        yield {"progress": 1.0}
-        return
+        cached_items, items_to_translate = _split_db_cache(all_items, db_ctx, dry_run)
+        yield {"progress": 0.2}
 
-    if dry_run:
-        _write_directory_previews(items_to_translate, cached_items, out_root)
-        yield {"progress": 1.0}
-        return
+        if _apply_cached_directory_items(
+            cached_items,
+            file_cache,
+            dry_run=dry_run,
+            root=root,
+            out_root=out_root,
+            export_lang=export_lang,
+        ):
+            yield {"progress": 0.2}
 
-    total = len(items_to_translate)
-    if total == 0:
-        clear_checkpoint()
-        log_info("🎉 所有項目皆已從 Cache 恢復，無需翻譯。")
-        yield {"progress": 1.0, "log": "🎉 所有項目皆已從 Cache 恢復，無需翻譯。"}
-        return
+        if DEFAULT_EXPORT_CACHE_ONLY and not items_to_translate and not dry_run:
+            clear_checkpoint()
+            yield {"progress": 1.0}
+            return
 
-    cache_saving = _cache_saving_enabled()
-    _note_directory_checkpoint(checkpoint_fingerprint, cache_saving=cache_saving)
-    result, pending_events, _translation_log, processed = _run_directory_translation(
-        remaining=items_to_translate,
-        file_cache=file_cache,
-        root=root,
-        out_root=out_root,
-        export_lang=export_lang,
-        should_cancel=should_cancel,
-        write_new_cache=write_new_cache,
-        input_dir=input_dir,
-        items_to_translate=items_to_translate,
-        cache_hit_count=len(cached_items),
-        checkpoint_fingerprint=checkpoint_fingerprint,
-        total=total,
-        write_checkpoint=cache_saving,
-    )
-    if pending_events:
-        yield from pending_events
+        if dry_run:
+            _write_directory_previews(items_to_translate, cached_items, out_root)
+            yield {"progress": 1.0}
+            return
 
-    final_message = _directory_final_message(result.status, processed, total)
-    log_info(final_message)
-    yield {
-        "progress": 1.0 if processed >= total else processed / total,
-        "log": final_message,
-    }
+        total = len(items_to_translate)
+        if total == 0:
+            clear_checkpoint()
+            log_info("🎉 所有項目皆已從 Cache 恢復，無需翻譯。")
+            yield {"progress": 1.0, "log": "🎉 所有項目皆已從 Cache 恢復，無需翻譯。"}
+            return
+
+        cache_saving = _cache_saving_enabled()
+        result, pending_events, _translation_log, processed = (
+            _run_directory_translation(
+                remaining=items_to_translate,
+                file_cache=file_cache,
+                root=root,
+                out_root=out_root,
+                export_lang=export_lang,
+                should_cancel=should_cancel,
+                write_new_cache=write_new_cache,
+                input_dir=input_dir,
+                items_to_translate=items_to_translate,
+                cache_hit_count=len(cached_items),
+                checkpoint_fingerprint=checkpoint_fingerprint,
+                total=total,
+                write_checkpoint=cache_saving,
+                db_ctx=db_ctx,
+                db_choice=db_choice,
+            )
+        )
+        if pending_events:
+            yield from pending_events
+
+        final_message = _directory_final_message(result.status, processed, total)
+        log_info(final_message)
+        yield {
+            "progress": 1.0 if processed >= total else processed / total,
+            "log": final_message,
+        }

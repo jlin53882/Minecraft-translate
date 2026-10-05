@@ -30,6 +30,9 @@ class UISessionLogHandler(logging.Handler):
         """
         if not self._session:
             return
+        # 已由呼叫端直接寫入 session 的訊息（只補寫後台 log 用）不重複送進 UI
+        if getattr(record, "ui_mirrored", False):
+            return
 
         try:
             msg: str = redact_secrets(record.getMessage())

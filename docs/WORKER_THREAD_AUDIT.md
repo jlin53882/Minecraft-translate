@@ -27,12 +27,13 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 
 行為層測試：`tests/test_view_lifecycle_contracts.py`（poller 的 teardown／重 mount／卸載後不更新、阻塞步驟的執行緒身分、卸載後丟棄結果）、`tests/test_shard_reader.py`、`tests/test_cache_history_store.py`、`tests/test_pipeline_extract_dialog_behavior.py`。
 
-## A. 背景執行緒啟動點（`threading.Thread`，20 處）
+## A. 背景執行緒啟動點（`threading.Thread`，21 處）
 
 | 位置 | 回到 UI 的方式 | owner／結束 |
 |---|---|---|
 | `translation/translation_actions.py`（FTB／KubeJS／MD 三處） | worker 只寫 `TaskSession`；View 的 `_poller`（event loop）同步 | 任務自己結束；輪詢由 View 持有（見 B） |
 | `lm_view.py` | 同上（`run_lm_translation_service`） | 同上 |
+| `moddb/scan_panel.py`（Mod 資料庫掃描，`run_moddb_scan_service`） | worker 只寫 `TaskSession`；`ScanPanel._poller`（event loop）同步 | 任務自己結束（取消旗標在批次之間檢查）；輪詢由 View 持有，`will_unmount()` 停止 |
 | `merge_view.py`（`_run_merge`） | 只寫 session；event loop 輪詢 | worker 例外會把 session 轉 ERROR（否則輪詢等不到結束） |
 | `pipeline/pipeline_session.py`（`default_worker_launcher`，單一啟動點；測試可注入 `launch_worker`） | `PipelineRunner.ui(...)`（`page.run_task`）；步驟 watcher 在 event loop | worker 的 `finally` 一定設定 `done`；watcher 由 `PollerHandle` 持有 |
 | `pipeline/pipeline_extract_dialog.py` | worker 只寫 `PreviewState`；`_extract_preview_poll` 在 event loop | `cancel_event`；探索與掃描都在 worker 內 |

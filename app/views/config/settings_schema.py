@@ -25,6 +25,7 @@ from translation_tool.utils.config_schema import (  # noqa: F401 - 重新匯出�
     C_MODELS,
     C_PROMPTS,
     C_SPECIES,
+    C_TDB,
     C_TRANSLATOR,
     SETTINGS,
     SETTINGS_BY_PATH,
@@ -180,6 +181,7 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
                 ),
             ),
         ),
+        Card(C_TDB),
         Card(C_BUNDLER),
     ),
     "api_models": (

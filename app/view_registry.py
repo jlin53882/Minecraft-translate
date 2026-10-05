@@ -137,6 +137,17 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         ("review", "圖示", "icon", "校對"),
     ),
     ViewSpec(
+        "moddb",
+        "Mod 資料庫",
+        ft.Icons.DATASET_OUTLINED,
+        "data",
+        "app.views.moddb_view",
+        "ModDbView",
+        True,
+        None,
+        ("moddb", "資料庫", "翻譯記憶", "版本", "jar", "掃描"),
+    ),
+    ViewSpec(
         "cache",
         "快取管理",
         ft.Icons.STORAGE_OUTLINED,
