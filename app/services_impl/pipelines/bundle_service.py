@@ -248,6 +248,7 @@ def run_bundling_service(
     max_format: int = 0,
     pack_image_path: str | None = None,
     extra_folders: list[str] | None = None,
+    force_rebuild: bool = False,
 ):
     """執行此 generator 並逐步回報進度（yield update dict）。"""
     try:
@@ -259,6 +260,7 @@ def run_bundling_service(
             max_format=max_format,
             pack_image_path=pack_image_path,
             extra_folders=extra_folders,
+            force_rebuild=force_rebuild,
         ):
             filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
             if filtered is not None:
