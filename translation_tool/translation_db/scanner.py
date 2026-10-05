@@ -42,6 +42,7 @@ from translation_tool.utils.text_processor import (
 )
 from translation_tool.utils.zip_safety import (
     MAX_FILE_BYTES,
+    ArchiveBudgetError,
     ZipReadBudget,
     ZipSizeError,
     read_limited,
@@ -285,7 +286,12 @@ def _scan_archive(
     result: JarResult,
     depth: int,
 ) -> None:
-    budget = ZipReadBudget(label=label)
+    # 內嵌 jar 的讀取也計入這個 archive 的累計預算（防 ZIP bomb）；翻譯 ZIP 可能包含較多檔案，用較寬鬆的預算
+    budget = (
+        ZipReadBudget.for_pack(label)
+        if options.translated
+        else ZipReadBudget(label=label)
+    )
     names = zf.namelist()
     for ident_key, members in _group_members(names, options, dir_names).items():
         try:
@@ -304,12 +310,17 @@ def _scan_archive(
         if not (options.translated or name.startswith(NESTED_DIRS)):
             continue
         try:
-            data = read_limited(zf, name, MAX_FILE_BYTES)
+            data = read_limited(zf, name, MAX_FILE_BYTES, budget=budget)
             with zipfile.ZipFile(io.BytesIO(data)) as nested:
                 result.nested_jars += 1
                 _scan_archive(
                     nested, f"{label}!{name}", options, dir_names, result, depth + 1
                 )
+        except ArchiveBudgetError as exc:
+            result.error = str(
+                exc
+            )  # 累計讀取超過上限：停止讀取這個 archive 的其餘內嵌 jar
+            break
         except (zipfile.BadZipFile, ZipSizeError, OSError):
             continue
 

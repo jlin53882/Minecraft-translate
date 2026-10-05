@@ -621,3 +621,36 @@ def test_entries_and_overview_show_unknown_original_text(db_path):
     overview.refresh()
     assert "原文未知 1" in overview.stat_content.delta_text.value
     db.close()
+
+
+# ------------------------------------------------------------------ 同步開關（設定預設值與預覽）
+def test_sync_switch_starts_from_setting_and_refreshes_the_preview(
+    db_path, monkeypatch
+):
+    seed(db_path)
+    monkeypatch.setattr(
+        moddb_service,
+        "load_db_settings",
+        lambda: DbSettings(path=str(db_path), version="1.21.1", sync_manual=False),
+    )
+    db = TranslationDB(db_path)
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    assert panel.sync_row.value is False  # 設定關閉就不該預設同步
+
+    panel.select(next(r for r in panel.rows if r.key == "item.foo.a").id)
+    panel.tw_field.value = "新譯文"
+    panel._on_text_change()
+    assert (
+        "不會影響其他版本" in panel.impact_text.value
+        or "只出現在" in panel.impact_text.value
+    )
+
+    panel.sync_row.value = True
+    panel._on_sync_change()  # 開關事件：預覽立即重算
+    assert "1.20.1" in panel.impact_text.value
+    panel.sync_row.value = False
+    panel._on_sync_change()
+    assert "1.20.1" not in panel.impact_text.value
+    assert panel.sync_row.switch.on_change is not None
+    db.close()

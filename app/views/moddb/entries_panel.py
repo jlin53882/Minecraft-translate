@@ -138,8 +138,13 @@ class EntriesPanel(ft.Column):
             visible=False,
         )
         self.saved_text = ft.Text("", size=12.5, color=C.EM)
+        # 預設值取自設定 translation_db.sync_manual；頁面上的開關是這一頁的個別覆寫
         self.sync_row = kit.SwitchRow(
-            "同步其他版本", "原文相同的版本一併取代（可還原）", True, divider=False
+            "同步其他版本",
+            "原文相同的版本一併取代（可還原）",
+            current_settings().sync_manual,
+            on_change=self._on_sync_change,
+            divider=False,
         )
 
     def _build_editor_actions(self) -> None:
@@ -600,6 +605,11 @@ class EntriesPanel(ft.Column):
         self._safe_update()
 
     def _on_text_change(self, _e=None) -> None:
+        self._update_impact()
+        self._safe_update()
+
+    def _on_sync_change(self, _e=None) -> None:
+        """切換「同步其他版本」：影響預覽要跟著重算（儲存時讀的是這個開關）。"""
         self._update_impact()
         self._safe_update()
 

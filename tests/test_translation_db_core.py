@@ -711,3 +711,36 @@ def test_find_jars_accepts_a_single_file_and_zip_folders(tmp_path):
     assert find_jars(tmp_path / "a.zip", translated=True) == [tmp_path / "a.zip"]
     assert [p.name for p in find_jars(tmp_path, translated=True)] == ["a.zip", "b.jar"]
     assert [p.name for p in find_jars(tmp_path)] == ["b.jar"]
+
+
+# ------------------------------------------------ 內嵌 jar 的讀取要計入 archive 的累計預算
+def test_nested_jars_are_charged_to_the_archive_budget(tmp_path, monkeypatch):
+    from translation_tool.translation_db import scanner
+    from translation_tool.utils import zip_safety
+
+    inner = {
+        f"META-INF/jarjar/lib{i}.jar": jar_bytes(
+            {f"assets/m{i}/lang/en_us.json": {"a.b": "Some Text Here"}}
+        )
+        for i in range(5)
+    }
+    jar = make_jar(
+        tmp_path / "big.jar",
+        {"assets/foo/lang/en_us.json": {"a.b": "Outer Text Here"}},
+        inner,
+    )
+
+    ok = scan_jar(jar, ScanOptions("1.21.1"), ())
+    assert ok.nested_jars == 5 and not ok.error  # 預算足夠時照常掃描
+
+    monkeypatch.setattr(
+        scanner,
+        "ZipReadBudget",
+        lambda label="": zip_safety.ZipReadBudget(10_000, 3, label),
+    )
+
+    limited = scan_jar(jar, ScanOptions("1.21.1"), ())
+    assert (
+        limited.error and "累計" in limited.error
+    )  # 超過成員數上限：回報並停止，不會無限讀下去
+    assert limited.nested_jars < 5
