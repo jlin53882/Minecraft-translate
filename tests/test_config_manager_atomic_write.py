@@ -100,3 +100,27 @@ def test_save_config_readback_failure_reports_failure_after_commit(
     assert config_manager.save_config({"new": True}, target) is False
     assert json.loads(target.read_text(encoding="utf-8")) == {"new": True}
     assert _temp_files(target) == []
+
+
+def test_save_config_syncs_the_directory_after_replace_via_the_shared_helper(
+    tmp_path, monkeypatch
+):
+    """設定檔與 checkpoint 共用 ``fs_utils.fsync_directory``：replace 之後才同步父目錄。"""
+    target = tmp_path / "config.json"
+    events: list[str] = []
+    real_replace = config_manager.os.replace
+    monkeypatch.setattr(
+        config_manager.os,
+        "replace",
+        lambda a, b: (events.append("replace"), real_replace(a, b))[1],
+    )
+    monkeypatch.setattr(
+        config_manager,
+        "fsync_directory",
+        lambda path: events.append(f"fsync_dir:{Path(path) == target.parent}"),
+    )
+
+    assert config_manager.save_config({"k": 1}, target) is True
+
+    assert events == ["replace", "fsync_dir:True"]
+    assert not hasattr(config_manager, "_fsync_parent_directory"), "重複實作應已移除"

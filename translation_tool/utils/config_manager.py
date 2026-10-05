@@ -29,6 +29,7 @@ from translation_tool.utils.config_schema import (
     get_path,
     sensitive_paths,
 )
+from translation_tool.utils.fs_utils import fsync_directory
 from translation_tool.utils.redaction import RedactingFormatter, register_secrets
 
 log = logging.getLogger(__name__)
@@ -263,17 +264,6 @@ def _load_config_uncached(resolved_config_path: Path) -> tuple[dict, bool]:
     return config, True
 
 
-def _fsync_parent_directory(path: Path) -> None:
-    """在支援目錄 fsync 的平台同步替換後的目錄項目。"""
-    if os.name == "nt" or not hasattr(os, "O_DIRECTORY"):
-        return
-    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
 # 同步時不寫入使用者 config.json 的路徑：
 # - lm_translator.keys：範本是佔位字串，不是使用者的金鑰，不能寫進使用者的設定檔。
 # - lm_translator.models：使用者自訂的名單，缺少的模型是使用者刻意移除，不能補回去。
@@ -387,7 +377,7 @@ def save_config(config, config_path: str | os.PathLike | None = None) -> bool:
 
         os.replace(temp_path, resolved_config_path)
         temp_path = None
-        _fsync_parent_directory(resolved_config_path.parent)
+        fsync_directory(resolved_config_path.parent)
 
         with resolved_config_path.open("r", encoding="utf-8") as f:
             written_data = json.load(f)
