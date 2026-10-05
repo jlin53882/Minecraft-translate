@@ -37,15 +37,20 @@ from translation_tool.translation_db.models import (
     WriteBackStats,
 )
 from translation_tool.translation_db.schema import (
+    DB_EMPTY,
+    DB_FOREIGN,
+    DB_VALID,
     DEFAULT_PRIORITY,
+    SCHEMA_VERSION,
     SRC_AI,
     SRC_JAR_CN,
     SRC_JAR_TW,
     SRC_MANUAL,
+    classify_database,
     connect,
-    has_schema,
     init_schema,
     rank_sql,
+    stored_schema_version,
 )
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
@@ -77,13 +82,26 @@ class TranslationDB:
         existed = self.path.is_file()
         if not existed and (readonly or not create):
             raise FileNotFoundError(str(self.path))
+        kind = DB_EMPTY
+        if existed:
+            # 開啟前先以唯讀方式驗證：不是本功能的資料庫就拒絕，絕不對其他 SQLite 建立資料表或改設定
+            kind = classify_database(self.path)
+            if kind == DB_FOREIGN:
+                raise ValueError(
+                    f"不是 Mod 翻譯資料庫（為避免污染其他資料庫，不會初始化）：{self.path}"
+                )
+            if kind == DB_EMPTY and (readonly or not create):
+                raise ValueError(f"資料庫尚未初始化：{self.path}")
         self._conn = connect(self.path, readonly=readonly)
-        if not readonly:
-            init_schema(self._conn)
-            self._sync_priority()
-        elif not has_schema(self._conn):
+        try:
+            if kind == DB_VALID and stored_schema_version(self._conn) > SCHEMA_VERSION:
+                raise ValueError(f"資料庫版本較新，請更新程式：{self.path}")
+            if not readonly:
+                init_schema(self._conn)
+                self._sync_priority()
+        except BaseException:
             self._conn.close()
-            raise ValueError(f"不是 Mod 翻譯資料庫：{self.path}")
+            raise
 
     # ------------------------------------------------------------------ 基礎
     def close(self) -> None:

@@ -256,7 +256,7 @@ class ScanPanel(ft.Column):
             expand=1,
         )
         self.stat_failed = kit.stat_card(
-            "無法讀取", "—", icon=ft.Icons.ERROR_OUTLINE, tone="red", expand=1
+            "失敗（整包未寫入）", "—", icon=ft.Icons.ERROR_OUTLINE, tone="red", expand=1
         )
         self.stats_row = ft.Row(
             [
@@ -520,7 +520,11 @@ class ScanPanel(ft.Column):
             self.stat_skip.set_value(format_count(s.get("existing")))
             self.stat_changed.set_value(format_count(s.get("en_changed")))
         self.stat_nolang.set_value(format_count(s.get("jars_without_lang")))
-        self.stat_failed.set_value(format_count(s.get("jars_failed")))
+        skipped = s.get("skipped_nested") or 0
+        self.stat_failed.set_value(
+            format_count(s.get("jars_failed")),
+            delta=f"另略過內嵌 jar {skipped:,} 個" if skipped else "",
+        )
 
     def _reset_stats(self) -> None:
         for card in (

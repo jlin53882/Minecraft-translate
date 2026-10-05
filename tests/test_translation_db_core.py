@@ -744,3 +744,201 @@ def test_nested_jars_are_charged_to_the_archive_budget(tmp_path, monkeypatch):
         limited.error and "累計" in limited.error
     )  # 超過成員數上限：回報並停止，不會無限讀下去
     assert limited.nested_jars < 5
+
+
+# ------------------------------------------------ 審查 #168：foreign SQLite、部分寫入、遞迴預算、取消
+import sqlite3  # noqa: E402
+
+from translation_tool.translation_db import DbSettings, open_db  # noqa: E402
+from translation_tool.utils import zip_safety  # noqa: E402
+
+
+def deflated_jar(
+    files: dict[str, object], nested: dict[str, bytes] | None = None
+) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in files.items():
+            zf.writestr(name, json.dumps(data, ensure_ascii=False))
+        for name, blob in (nested or {}).items():
+            zf.writestr(name, blob)
+    return buf.getvalue()
+
+
+def test_foreign_sqlite_is_never_initialised_or_modified(tmp_path):
+    other = tmp_path / "other.db"
+    conn = sqlite3.connect(other)
+    conn.execute("CREATE TABLE users (id INTEGER, meta TEXT)")
+    conn.commit()
+    conn.close()
+    before = other.read_bytes()
+    for create in (True, False):
+        with pytest.raises(ValueError, match="不是 Mod 翻譯資料庫"):
+            TranslationDB(other, create=create)
+    with pytest.raises(ValueError):
+        TranslationDB(other, readonly=True)
+    assert (
+        other.read_bytes() == before
+    )  # 一個位元組都沒動（沒有 DDL、沒有改 journal mode）
+    check = sqlite3.connect(other)
+    assert [r[0] for r in check.execute("SELECT name FROM sqlite_master")] == ["users"]
+    assert check.execute("PRAGMA journal_mode").fetchone()[0] != "wal"
+    check.close()
+    # 設定指到其他 SQLite：功能停用（回傳 None），不拋出也不修改
+    assert open_db(DbSettings(path=str(other)), create=True) is None
+    assert open_db(DbSettings(path=str(other)), create=False) is None
+    assert other.read_bytes() == before
+
+
+def test_lookalike_database_without_our_schema_is_rejected(tmp_path):
+    odd = tmp_path / "odd.db"
+    conn = sqlite3.connect(odd)  # 有 meta 與 entry 但欄位、schema_version 都不是我們的
+    conn.executescript("CREATE TABLE meta (k TEXT); CREATE TABLE entry (x INTEGER);")
+    conn.close()
+    with pytest.raises(ValueError):
+        TranslationDB(odd)
+
+
+def test_non_sqlite_and_empty_files(tmp_path):
+    junk = tmp_path / "junk.db"
+    junk.write_bytes(b"this is not a database" * 20)
+    with pytest.raises(ValueError):
+        TranslationDB(junk)
+    empty = tmp_path / "empty.db"
+    empty.write_bytes(b"")
+    with pytest.raises(ValueError, match="尚未初始化"):
+        TranslationDB(empty, create=False)  # 翻譯流程不會把空檔案初始化
+    db = TranslationDB(empty)  # 掃描／介面 (create=True) 可以
+    assert db.count_entries() == 0
+    db.close()
+
+
+def test_database_from_a_newer_version_is_refused(tmp_path):
+    path = tmp_path / "new.db"
+    TranslationDB(path).close()
+    conn = sqlite3.connect(path)
+    conn.execute("UPDATE meta SET value='999' WHERE key='schema_version'")
+    conn.commit()
+    conn.close()
+    with pytest.raises(ValueError, match="版本較新"):
+        TranslationDB(path)
+
+
+def test_archive_that_hits_a_safety_limit_commits_nothing(db, tmp_path, monkeypatch):
+    """前面的語言檔讀成功、後面才超過上限：整個 archive 失敗，不寫入部分資料，也不算成功。"""
+    from translation_tool.translation_db import scanner
+
+    make_jar(
+        tmp_path / "bomb.jar",
+        {
+            "assets/aaa/lang/en_us.json": {"a.b": "First mod text"},
+            "assets/bbb/lang/en_us.json": {"a.b": "Second mod text"},
+            "assets/ccc/lang/en_us.json": {"a.b": "Third mod text"},
+        },
+    )
+    make_jar(
+        tmp_path / "good.jar",
+        {"assets/ok/lang/en_us.json": {"a.b": "Healthy mod text"}},
+    )
+    real = zip_safety.ZipReadBudget
+
+    def budget(options, label):
+        return real(
+            max_bytes=10_000_000,
+            max_members=2 if label == "bomb.jar" else 100,
+            label=label,
+        )
+
+    monkeypatch.setattr(scanner, "_new_budget", budget)
+    monkeypatch.setattr(scanner, "_new_tree_budget", lambda o, label: real(label=label))
+
+    res = scan_jar(tmp_path / "bomb.jar", ScanOptions("1.21.1"), ())
+    assert res.error and res.items == []  # 契約：error → 清空 items
+
+    report = run_scan(db, tmp_path)
+    assert report.jars_failed == ["bomb.jar"] and report.jars_with_lang == 1
+    assert {r.mod_id for r in db.list_entries("1.21.1")[0]} == {
+        "ok"
+    }  # bomb.jar 一筆都沒進資料庫
+
+
+def test_oversized_nested_jar_is_skipped_but_counted_not_silent(tmp_path, monkeypatch):
+    from translation_tool.translation_db import scanner
+
+    inner = jar_bytes({"assets/inner/lang/en_us.json": {"k.a": "Inner text here"}})
+    jar = make_jar(
+        tmp_path / "outer.jar",
+        {"assets/foo/lang/en_us.json": {"a.b": "Outer text here"}},
+        {"META-INF/jarjar/big.jar": inner, "META-INF/jarjar/bad.jar": b"not a zip"},
+    )
+    monkeypatch.setattr(scanner, "MAX_FILE_BYTES", 10)  # 讓 big.jar 超過單檔上限
+    res = scan_jar(jar, ScanOptions("1.21.1"), ())
+    assert (
+        not res.error and res.skipped_nested == 2
+    )  # 外層內容保留，略過的內嵌 jar 有記錄
+    assert {i.mod_id for i in res.items} == {"foo"}
+
+
+def test_nested_archives_share_a_tree_wide_budget(tmp_path, monkeypatch):
+    """每個內嵌 jar 的 blob 很小（高壓縮），但解壓後加總超過整棵樹的預算 → 整包失敗。"""
+    from translation_tool.translation_db import scanner
+
+    text = "word " * 30_000  # 約 150KB，壓縮後很小
+    inner = {
+        f"META-INF/jarjar/lib{i}.jar": deflated_jar(
+            {f"assets/m{i}/lang/en_us.json": {"k.a": text}}
+        )
+        for i in range(4)
+    }
+    jar = tmp_path / "tree.jar"
+    with zipfile.ZipFile(jar, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            "assets/foo/lang/en_us.json", json.dumps({"a.b": "Outer text here"})
+        )
+        for name, blob in inner.items():
+            zf.writestr(name, blob)
+
+    ok = scan_jar(jar, ScanOptions("1.21.1"), ())
+    assert not ok.error and ok.nested_jars == 4  # 預設預算：全部讀得到
+
+    real = zip_safety.ZipReadBudget
+    monkeypatch.setattr(
+        scanner,
+        "_new_tree_budget",
+        lambda o, label: real(max_bytes=300_000, label=label),
+    )
+    limited = scan_jar(jar, ScanOptions("1.21.1"), ())
+    assert limited.error and "累計" in limited.error
+    assert limited.items == [] and limited.nested_jars < 4  # 超過就停止，不寫部分資料
+
+
+def test_cancel_stops_inside_a_large_member_without_finishing_it(tmp_path):
+    big = "word " * 2_000_000  # 約 10MB 的單一語言檔，壓縮後很小
+    jar = tmp_path / "huge.jar"
+    with zipfile.ZipFile(jar, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("assets/foo/lang/en_us.json", json.dumps({"a.b": big}))
+    checks: list[int] = []
+
+    def cancel() -> bool:
+        checks.append(1)
+        return len(checks) > 3  # 讀了幾個區塊後取消
+
+    res = scan_jar(jar, ScanOptions("1.21.1"), (), should_cancel=cancel)
+    assert res.cancelled and res.items == []
+    assert len(checks) < 20  # 10MB 以 64KB 分塊約 160 次；取消後立刻停止，而不是讀完
+
+
+def test_cancel_with_running_workers_returns_promptly_and_writes_nothing(db, tmp_path):
+    import time
+
+    big = "word " * 1_000_000
+    for n in range(4):
+        with zipfile.ZipFile(tmp_path / f"m{n}.jar", "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(f"assets/m{n}/lang/en_us.json", json.dumps({"a.b": big}))
+    started = time.monotonic()
+    gen = scan_folder_generator(
+        db, tmp_path, ScanOptions("1.21.1"), should_cancel=lambda: True, workers=4
+    )
+    report = [u for u in gen if "report" in u][-1]["report"]
+    assert report.cancelled and db.count_entries() == 0
+    assert time.monotonic() - started < 5

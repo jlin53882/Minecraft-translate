@@ -161,12 +161,50 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def has_schema(conn: sqlite3.Connection) -> bool:
-    """資料庫是否已有 entry 資料表（用來判斷是否為本功能的資料庫）。"""
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='entry'"
-    ).fetchone()
-    return row is not None
+DB_EMPTY = "empty"  # 沒有任何資料表（新檔案或 0 位元組的檔案）
+DB_VALID = "valid"  # 本功能的資料庫
+DB_FOREIGN = "foreign"  # 其他用途的 SQLite（或根本不是 SQLite）
+
+_ENTRY_COLUMNS = {"id", "kind", "mc_version", "mod_id", "key", "en_us"}
+
+
+def classify_database(path: str | Path) -> str:
+    """判斷既有檔案是不是本功能的資料庫。
+
+    以**唯讀**連線檢查：不會建立資料表、不會改 journal mode，所以指到其他 SQLite 時不會污染它。
+    本功能的資料庫需同時具備：``meta`` 內有 ``schema_version``、``entry`` 資料表且欄位符合。
+    """
+    uri = f"{Path(path).resolve().as_uri()}?mode=ro"
+    try:
+        conn = sqlite3.connect(uri, uri=True)
+    except sqlite3.Error:
+        return DB_FOREIGN
+    try:
+        names = {
+            r[0]
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        if not names:
+            return DB_EMPTY
+        if not {"meta", "entry"} <= names:
+            return DB_FOREIGN
+        has_version = conn.execute(
+            "SELECT 1 FROM meta WHERE key='schema_version'"
+        ).fetchone()
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(entry)")}
+        return DB_VALID if has_version and _ENTRY_COLUMNS <= columns else DB_FOREIGN
+    except sqlite3.Error:  # 不是 SQLite 檔案、meta 結構不同…… 都視為其他用途
+        return DB_FOREIGN
+    finally:
+        conn.close()
+
+
+def stored_schema_version(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    try:
+        return int(row[0]) if row else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 def rank_sql(priority: tuple[int, ...], col: str = "source") -> str:

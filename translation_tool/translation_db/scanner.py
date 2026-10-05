@@ -79,7 +79,9 @@ class JarResult:
     name: str
     items: list[ScanItem] = field(default_factory=list)
     nested_jars: int = 0
-    error: str = ""
+    skipped_nested: int = 0  # 損毀或過大而略過的內嵌 jar（不影響其餘內容）
+    error: str = ""  # 有值＝這個 archive 讀取失敗：items 會被清空，整包不寫入資料庫
+    cancelled: bool = False
 
     @property
     def has_lang(self) -> bool:
@@ -96,6 +98,7 @@ class ScanReport:
     jars_without_lang: int = 0
     jars_failed: list[str] = field(default_factory=list)
     nested_jars: int = 0
+    skipped_nested: int = 0
     items_found: int = 0  # 讀到的項目數（預覽時用）
     stats: IngestStats = field(default_factory=IngestStats)
     cancelled: bool = False
@@ -108,6 +111,7 @@ class ScanReport:
             "jars_without_lang": self.jars_without_lang,
             "jars_failed": len(self.jars_failed),
             "nested_jars": self.nested_jars,
+            "skipped_nested": self.skipped_nested,
             "items_found": self.items_found,
             "dry_run": self.dry_run,
             "new_entries": self.stats.new_entries,
@@ -136,6 +140,54 @@ def make_converter(rules: list | None = None) -> Callable[[str], str]:
     """簡轉繁（OpenCC s2twp）後套用替換規則；與語系合併的 ``recursive_translate_dict`` 相同。"""
     active = list(rules or [])
     return lambda text: recursive_translate_dict(text, active)
+
+
+class ScanCancelled(Exception):
+    """使用者取消掃描：在讀取解壓的下一個區塊就中止（不必等整個 jar 讀完）。"""
+
+
+class _DualBudget:
+    """同時計入「單一 archive 預算」與「整棵遞迴樹預算」，並在每次讀取時檢查取消。
+
+    ``read_limited`` 只需要 ``begin_member`` / ``charge``，所以直接以相同介面包裝。
+    樹預算讓巢狀 jar 重新取得的 archive 預算仍受總量約束（壓縮率高的內嵌 jar 不能放大總解壓量）。
+    """
+
+    def __init__(
+        self,
+        archive: ZipReadBudget,
+        tree: ZipReadBudget,
+        should_cancel: Callable[[], bool] | None,
+    ) -> None:
+        self._archive, self._tree, self._cancel = archive, tree, should_cancel
+
+    def _check(self) -> None:
+        if self._cancel is not None and self._cancel():
+            raise ScanCancelled
+
+    def begin_member(self, name: str, declared_size: int) -> None:
+        self._check()
+        self._tree.begin_member(name, declared_size)
+        self._archive.begin_member(name, declared_size)
+
+    def charge(self, nbytes: int, name: str) -> None:
+        self._check()
+        self._tree.charge(nbytes, name)
+        self._archive.charge(nbytes, name)
+
+
+def _new_budget(options: ScanOptions, label: str) -> ZipReadBudget:
+    """翻譯 ZIP 可能含較多檔案，使用較寬鬆的預算。"""
+    return (
+        ZipReadBudget.for_pack(label)
+        if options.translated
+        else ZipReadBudget(label=label)
+    )
+
+
+def _new_tree_budget(options: ScanOptions, label: str) -> ZipReadBudget:
+    """整棵遞迴樹（外層 + 所有內嵌 jar）共用的預算。"""
+    return _new_budget(options, label)
 
 
 def _load_json(data: bytes) -> dict | None:
@@ -285,13 +337,11 @@ def _scan_archive(
     dir_names: Sequence[str],
     result: JarResult,
     depth: int,
+    tree: ZipReadBudget,
+    should_cancel: Callable[[], bool] | None,
 ) -> None:
-    # 內嵌 jar 的讀取也計入這個 archive 的累計預算（防 ZIP bomb）；翻譯 ZIP 可能包含較多檔案，用較寬鬆的預算
-    budget = (
-        ZipReadBudget.for_pack(label)
-        if options.translated
-        else ZipReadBudget(label=label)
-    )
+    """讀取一個 archive（含內嵌 jar）。安全上限（單一成員、archive、整棵樹）超過時設定 ``result.error``。"""
+    budget = _DualBudget(_new_budget(options, label), tree, should_cancel)
     names = zf.namelist()
     for ident_key, members in _group_members(names, options, dir_names).items():
         try:
@@ -300,7 +350,7 @@ def _scan_archive(
             )
         except ZipSizeError as exc:
             result.error = str(exc)
-            break
+            return
     if not options.scan_nested or depth >= MAX_NESTED_DEPTH:
         return
     for name in names:
@@ -314,29 +364,59 @@ def _scan_archive(
             with zipfile.ZipFile(io.BytesIO(data)) as nested:
                 result.nested_jars += 1
                 _scan_archive(
-                    nested, f"{label}!{name}", options, dir_names, result, depth + 1
+                    nested,
+                    f"{label}!{name}",
+                    options,
+                    dir_names,
+                    result,
+                    depth + 1,
+                    tree,
+                    should_cancel,
                 )
         except ArchiveBudgetError as exc:
-            result.error = str(
-                exc
-            )  # 累計讀取超過上限：停止讀取這個 archive 的其餘內嵌 jar
-            break
+            result.error = str(exc)  # 累計上限：整包視為失敗，不再讀其餘內嵌 jar
+            return
         except (zipfile.BadZipFile, ZipSizeError, OSError):
-            continue
+            result.skipped_nested += 1  # 單一內嵌 jar 損毀或過大：略過它，記錄在結果中
+        if result.error:  # 內層已回報安全上限
+            return
 
 
 def scan_jar(
-    path: str | Path, options: ScanOptions, dir_names: Sequence[str] | None = None
+    path: str | Path,
+    options: ScanOptions,
+    dir_names: Sequence[str] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> JarResult:
-    """讀取單一 jar（含內嵌 jar）的語言與書籍項目。同一個鍵值只保留第一筆。"""
+    """讀取單一 jar／zip（含內嵌 jar）的語言與書籍項目。同一個鍵值只保留第一筆。
+
+    失敗契約：``result.error`` 有值（無法讀取、超過安全上限）時 ``items`` 一律清空，
+    呼叫端不得寫入部分資料。取消（``result.cancelled``）同理。
+    """
     p = Path(path)
     result = JarResult(name=p.name)
     dirs = tuple(dir_names) if dir_names is not None else patchouli_dir_names()
     try:
         with zipfile.ZipFile(p) as zf:
-            _scan_archive(zf, p.name, options, dirs, result, 0)
+            _scan_archive(
+                zf,
+                p.name,
+                options,
+                dirs,
+                result,
+                0,
+                _new_tree_budget(options, p.name),
+                should_cancel,
+            )
+    except ScanCancelled:
+        result.cancelled, result.items = True, []
+        return result
     except (zipfile.BadZipFile, OSError) as exc:
         result.error = f"無法讀取：{exc}"
+        result.items = []
+        return result
+    if result.error:
+        result.items = []
         return result
     seen: set[tuple[str, str, str]] = set()
     unique: list[ScanItem] = []
@@ -397,18 +477,26 @@ def scan_folder_generator(
 
     done = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        futures = {pool.submit(scan_jar, j, options, dirs): j for j in jars}
+        futures = {
+            pool.submit(scan_jar, j, options, dirs, should_cancel): j for j in jars
+        }
         try:
             for fut in concurrent.futures.as_completed(futures):
                 if should_cancel is not None and should_cancel():
                     report.cancelled = True
                     break
                 result: JarResult = fut.result()
+                if result.cancelled:
+                    report.cancelled = True
+                    break
                 done += 1
                 report.nested_jars += result.nested_jars
-                if result.error and not result.items:
+                report.skipped_nested += result.skipped_nested
+                if (
+                    result.error
+                ):  # 失敗的 archive 不寫入任何資料（避免只匯入一部分卻顯示成功）
                     report.jars_failed.append(result.name)
-                    log = f"❌ {result.name}　{result.error}"
+                    log = f"❌ {result.name}　未寫入：{result.error}"
                 elif not result.has_lang:
                     report.jars_without_lang += 1
                     log = f"{result.name}　沒有語言檔"
@@ -430,6 +518,8 @@ def scan_folder_generator(
                                 else ""
                             )
                         )
+                if result.skipped_nested and not result.error:
+                    log += f"（略過 {result.skipped_nested} 個損毀或過大的內嵌 jar）"
                 yield {"progress": done / len(jars), "log": log}
         finally:
             if report.cancelled:
