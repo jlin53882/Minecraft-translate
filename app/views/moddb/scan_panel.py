@@ -38,7 +38,7 @@ class ScanPanel(ft.Column):
     def __init__(
         self, page: ft.Page, file_picker: ft.FilePicker, get_db, on_finished=None
     ):
-        super().__init__(expand=True, spacing=12)
+        super().__init__(expand=True, spacing=12, scroll=ft.ScrollMode.AUTO)
         self._page = page
         self.file_picker = file_picker
         self._get_db = get_db

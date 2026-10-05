@@ -64,9 +64,9 @@ class EntriesPanel(ft.Column):
             self.filter_card,
             ft.Row(
                 [
-                    ft.Container(self.list_card, expand=4),
-                    ft.Container(self.editor_card, expand=6),
-                    ft.Container(self.history_card, expand=3),
+                    ft.Column([self.list_card], scroll=ft.ScrollMode.AUTO, expand=4),
+                    ft.Column([self.editor_card], scroll=ft.ScrollMode.AUTO, expand=6),
+                    ft.Column([self.history_card], scroll=ft.ScrollMode.AUTO, expand=3),
                 ],
                 spacing=12,
                 expand=True,
@@ -197,15 +197,15 @@ class EntriesPanel(ft.Column):
                 self.saved_text,
                 self.sync_row,
                 ft.Row(
-                    [
-                        self.prev_btn,
-                        self.next_btn,
-                        self.reset_btn,
-                        ft.Container(expand=True),
-                        self.confirm_btn,
-                        self.save_btn,
-                    ],
+                    [self.prev_btn, self.next_btn, self.reset_btn],
                     spacing=8,
+                    wrap=True,
+                ),
+                ft.Row(
+                    [self.confirm_btn, self.save_btn],
+                    spacing=8,
+                    alignment=ft.MainAxisAlignment.END,
+                    wrap=True,
                 ),
                 ft.Divider(height=1, color=C.LINE),
                 self.sug_seg,
@@ -213,6 +213,7 @@ class EntriesPanel(ft.Column):
             ],
             spacing=10,
             visible=False,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
         self.editor_card = kit.section_card(
             "編輯",

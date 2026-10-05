@@ -7,12 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from translation_tool.core import lm_translator
-from translation_tool.core import lm_translator_db
+from translation_tool.core import lm_translator, lm_translator_db
 from translation_tool.translation_db import (
-    DbSettings,
     KIND_LANG,
     KIND_PATCHOULI,
+    DbSettings,
     ScanItem,
     TranslationDB,
 )

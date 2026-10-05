@@ -139,22 +139,36 @@ class LMView(ft.Column):
             divider=False,
         )
         self.use_db_switch = db_row.switch
+        self.use_db_switch.on_change = self._on_db_option_changed
         self.db_version_field = kit.text_field(
             "目標版本",
             hint="例如 1.21.1（留空則使用設定中的預設版本）",
             value=db_settings.version,
+            on_change=self._on_db_option_changed,
         )
         self.db_info = ft.Text("", size=11.5, color=C.DIM)
         self.refresh_db_info()
         self.db_card = kit.section_card(
             "預翻譯資料庫",
-            ft.Column([db_row, self.db_version_field, self.db_info], spacing=10),
+            ft.Column(
+                [db_row, self.db_version_field, self.db_info],
+                spacing=10,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            ),
             icon=ft.Icons.DATASET_OUTLINED,
             tone="dia",
         )
 
+    def _on_db_option_changed(self, _e=None) -> None:
+        """開關或版本變更：更新提示（沒有指定版本時，這次不會使用資料庫）。"""
+        self.refresh_db_info()
+        try:
+            self._page.update()
+        except Exception as exc:  # noqa: BLE001 - 頁面尚未掛載時只是不即時更新提示
+            log_debug(f"LM 資料庫提示更新略過：{exc}")
+
     def refresh_db_info(self) -> None:
-        """顯示資料庫目前的狀態（不存在時提示如何建立）。"""
+        """顯示資料庫目前的狀態（不存在時提示如何建立；開著卻沒有版本時提醒填寫）。"""
         try:
             info = summarize_database()
         except Exception as exc:  # noqa: BLE001 - 資料庫問題只影響提示文字，不應讓頁面載入失敗
@@ -169,6 +183,11 @@ class LMView(ft.Column):
                 f"資料庫 {info['entries']:,} 條目（已翻譯 {info['progress']}%）・"
                 f"版本：{'、'.join(info['versions'][:4]) or '—'}"
             )
+        no_version = not (self.db_version_field.value or "").strip() and not (
+            load_db_settings().version
+        )
+        if self.use_db_switch.value and no_version:
+            self.db_info.value += "\n⚠ 尚未指定目標版本：請填寫上方「目標版本」，否則這次不會使用也不會寫入資料庫。"
 
     def _build_lm_settings_card(self, batch_interval, cache_row, dry_run_row, lang_row):
         """機器翻譯設定卡片與執行按鈕。"""

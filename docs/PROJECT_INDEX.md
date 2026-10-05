@@ -317,6 +317,7 @@ app/
 | `docs/LM_VIEW_ARCHITECTURE.md` | LMView（`app/views/lm_view.py`） |
 | `docs/LOOKUP_VIEW_ARCHITECTURE.md` | LookupView（`app/views/lookup_view.py`） |
 | `docs/MERGE_VIEW_ARCHITECTURE.md` | MergeView（`app/views/merge_view.py`） |
+| `docs/MOD_TRANSLATION_DB.md` | Mod 翻譯資料庫（`translation_tool/translation_db/`）與 ModDbView（`app/views/moddb_view.py`） |
 | `docs/PIPELINE_VIEW_ARCHITECTURE.md` | PipelineView（`app/views/pipeline/`） |
 | `docs/QC_VIEW_ARCHITECTURE.md` | QCView（`app/views/qc_view.py` + `qc_base.py`） |
 | `docs/RULES_VIEW_ARCHITECTURE.md` | RulesView（`app/views/rules/`） |

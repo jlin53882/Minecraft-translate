@@ -12,6 +12,7 @@
 > 主要內容：UI 全面重新設計（PR #106）。版本號尚未決定。
 
 ### Features
+- **Mod 翻譯資料庫**：分版本的翻譯記憶庫（SQLite）。掃描 mods 資料夾的 jar（含 `META-INF/jarjar` 內嵌 jar、Patchouli 書籍）建立；機器翻譯的查詢順序為「資料庫 → 快取 → AI」，翻譯結果自動寫回（只新增、不覆蓋，其他版本相同原文的空白一併補上）；在「Mod 資料庫」頁可手動校對，儲存時同步所有版本中原文相同的條目（可還原）。詳見 `docs/MOD_TRANSLATION_DB.md`。
 - **UI 全面重新設計（Deepslate & Emerald）**：依 `docs/design/ui-redesign/` 設計稿重做全部頁面；深色 / 淺色主題（偏好存於 `ui.theme_mode`），切換不需重建畫面。
 - **新外殼**：分組側欄（工作流程 / 品管與校對 / 資料庫 / 輸出 / 系統）、頂列（任務膠囊、API Key 狀態）、狀態列、`Ctrl+P` 快速跳轉、`Ctrl+1…0` 切頁。
 - **工作台**：新增 Dashboard 頁面（流程進度、近期活動、快取與規則統計、Key 健康度）。

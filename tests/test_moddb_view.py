@@ -388,9 +388,9 @@ def _dashboard(moddb):
 
     view = DashboardView(
         mock_page(),
-        cache_overview_loader=lambda: {},
+        cache_overview_loader=dict,
         rules_count_loader=lambda: 0,
-        key_snapshot_loader=lambda: [],
+        key_snapshot_loader=list,
         moddb_loader=lambda: moddb,
     )
     view.reload(sync=True)
@@ -439,3 +439,25 @@ def test_every_view_spec_reaches_moddb_through_registry_and_palette():
 
     spec = vr.get_spec("moddb")
     assert (spec.group, spec.cls, spec.needs_file_picker) == ("data", "ModDbView", True)
+
+
+def test_lm_view_warns_when_database_is_on_but_no_version_is_set(db_path, monkeypatch):
+    from app.views import lm_view
+
+    monkeypatch.setattr(
+        lm_view, "load_db_settings", lambda: DbSettings(path=str(db_path), version="")
+    )
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view.use_db_switch.value = True
+    view.db_version_field.value = ""
+    view.refresh_db_info()
+    assert "尚未指定目標版本" in view.db_info.value
+
+    view.db_version_field.value = "1.21.1"
+    view._on_db_option_changed()
+    assert "尚未指定目標版本" not in view.db_info.value
+
+    view.db_version_field.value = ""
+    view.use_db_switch.value = False
+    view._on_db_option_changed()
+    assert "尚未指定目標版本" not in view.db_info.value

@@ -125,7 +125,7 @@ def test_ingest_records_en_change_without_touching_entry(db):
 
 
 def test_ingest_converts_cn_only_when_no_tw(db):
-    conv = lambda s: s.replace("钢", "鋼")  # noqa: E731
+    conv = lambda s: s.replace("钢", "鋼")
     db.ingest("1.21.1", [item(cn="钢外壳"), item(key="k2", cn="钢", tw="繁中")], conv)
     rows = {r.key: r for r in db.list_entries("1.21.1")[0]}
     assert (rows["item.foo.a"].zh_tw, rows["item.foo.a"].source) == (

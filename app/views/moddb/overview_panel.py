@@ -40,22 +40,7 @@ class OverviewPanel(ft.Column):
         self._open_scan = open_scan
         self._open_entries = open_entries
 
-        self.stat_mods = kit.stat_card(
-            "模組", "—", icon=ft.Icons.EXTENSION_OUTLINED, tone="em", expand=1
-        )
-        self.stat_content = kit.stat_card(
-            "不重複條目", "—", icon=ft.Icons.TEXT_SNIPPET_OUTLINED, tone="dia", expand=1
-        )
-        self.stat_diff = kit.stat_card(
-            "跨版本譯文不同", "—", icon=ft.Icons.COMPARE_ARROWS, tone="gold", expand=1
-        )
-        self.stat_changed = kit.stat_card(
-            "原文已變動（掃描時略過）",
-            "—",
-            icon=ft.Icons.EDIT_NOTE,
-            tone="neutral",
-            expand=1,
-        )
+        self._build_stat_cards()
         self.versions_col = ft.Column(spacing=14)
         self.legend = ft.Row(
             [kit.chip(label, tone, dot=True) for _f, label, tone in SEGMENTS],
@@ -120,6 +105,38 @@ class OverviewPanel(ft.Column):
             self.empty,
             self.content_col,
         ]
+
+    def _build_stat_cards(self) -> None:
+        self.stat_mods = kit.stat_card(
+            "模組",
+            "—",
+            icon=ft.Icons.EXTENSION_OUTLINED,
+            tone="em",
+            delta="資料庫內出現過的模組",
+            delta_tone="neutral",
+            expand=1,
+        )
+        self.stat_content = kit.stat_card(
+            "不重複條目", "—", icon=ft.Icons.TEXT_SNIPPET_OUTLINED, tone="dia", expand=1
+        )
+        self.stat_diff = kit.stat_card(
+            "跨版本譯文不同",
+            "—",
+            icon=ft.Icons.COMPARE_ARROWS,
+            tone="gold",
+            delta="相同內容、各版本譯文不一致",
+            delta_tone="neutral",
+            expand=1,
+        )
+        self.stat_changed = kit.stat_card(
+            "原文已變動",
+            "—",
+            icon=ft.Icons.EDIT_NOTE,
+            tone="neutral",
+            delta="鍵值相同但原文改了（掃描時略過）",
+            delta_tone="neutral",
+            expand=1,
+        )
 
     # ------------------------------------------------------------------ 載入
     def refresh(self, *, update: bool = False) -> None:
