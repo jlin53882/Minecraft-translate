@@ -49,6 +49,7 @@ from translation_tool.utils.config_manager import (
     get_batch_write_interval,
     load_config,
 )
+from translation_tool.utils.fs_utils import fsync_directory
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 # Keep historical module attributes patchable while the shared loop owns writes.
@@ -85,6 +86,25 @@ def compute_checkpoint_fingerprint(input_dir: str, items: list) -> str:
     return digest.hexdigest()
 
 
+CHECKPOINT_VERSION = 2
+
+
+def _atomic_write_text(path: str, text: str) -> None:
+    """暫存檔 fsync → ``os.replace`` → fsync 目錄：被中斷時要嘛是舊內容、要嘛是完整新內容。
+
+    打包成 exe 後關閉視窗不保證執行任何清理，所以不能依賴關閉流程補寫（#151）。
+    """
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
+    fsync_directory(directory)
+
+
 def save_checkpoint(
     batch_index: int,
     completed_count: int,
@@ -94,50 +114,80 @@ def save_checkpoint(
     *,
     input_dir: str | None = None,
     fingerprint: str | None = None,
+    export_lang: bool | None = None,
+    write_new_cache: bool | None = None,
 ):
-    """寫入 checkpoint（每批次完成後）。
+    """寫入「任務尚未完成」的標記（每批次完成、快取落盤後呼叫）。
+
+    checkpoint 不是翻譯結果的備份：已完成批次的譯文在翻譯快取（已 fsync），重開後由快取還原，
+    所以續跑不會依「位置」跳過項目，也就不可能因為快取與 checkpoint 不同步而漏翻。
+    checkpoint 的用途是讓下次啟動偵測到「上次沒做完」並詢問使用者（見 ``lm_resume``）。
 
     Args:
         batch_index: 目前處理的批次編號
-        completed_count: 已完成的項目數量（用於恢復時計算正確的剩餘切片起點）
-        total: 總項目數量
-        remaining: 剩餘待翻譯項目清單（用於恢復時取樣比对）
+        completed_count: 已 durable 的進度（快取命中加上本次已落盤的翻譯；只有快取存檔成功的批次
+            才會寫 checkpoint，所以它是「可恢復的進度」，不等於本次行程已處理的數量；僅供顯示）
+        total: 可翻譯項目總數（抽取結果的筆數，不受快取進度影響）
+        remaining: 剩餘待翻譯項目清單（只留前三筆作診斷）
         output_dir: 輸出目錄路徑
-        input_dir: 輸入資料夾（僅供診斷）
-        fingerprint: compute_checkpoint_fingerprint() 的結果，恢復時必須相符
+        input_dir: 輸入資料夾
+        fingerprint: compute_checkpoint_fingerprint() 的結果（涵蓋全部抽取項目），
+            續跑前必須相符
+        export_lang / write_new_cache: 這次任務的選項，續跑時沿用
     """
-    os.makedirs(os.path.dirname(CHECKPOINT_FILE), exist_ok=True)
-    with open(CHECKPOINT_FILE, "w", encoding="utf-8") as f:
-        json_std.dump(
-            {
-                "batch_index": batch_index,
-                "completed_count": completed_count,
-                "total": total,
-                "remaining_sample": remaining[:3]
-                if remaining
-                else [],  # 只保留前三筆範例，不存完整清單
-                "output_dir": output_dir,
-                "input_dir": input_dir,
-                "fingerprint": fingerprint,
-            },
-            f,
-            ensure_ascii=False,
-        )
+    payload = {
+        "version": CHECKPOINT_VERSION,
+        "batch_index": batch_index,
+        "completed_count": completed_count,
+        "total": total,
+        "remaining_sample": remaining[:3] if remaining else [],
+        "output_dir": output_dir,
+        "input_dir": input_dir,
+        "fingerprint": fingerprint,
+        "export_lang": export_lang,
+        "write_new_cache": write_new_cache,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    _atomic_write_text(CHECKPOINT_FILE, json_std.dumps(payload, ensure_ascii=False))
+
+
+def _quarantine_corrupt_checkpoint() -> str | None:
+    """把無法使用的 checkpoint 改名為 ``.corrupt``（保留供診斷），回傳新路徑；失敗回傳 None。
+
+    只記錄警告但留著原檔，每次啟動都會再讀到、再警告。改名後下一次就是「沒有 checkpoint」；
+    下一個損毀的檔案會覆蓋舊的 ``.corrupt``（只保留最近一份）。
+    """
+    quarantined = f"{CHECKPOINT_FILE}.corrupt"
+    try:
+        os.replace(CHECKPOINT_FILE, quarantined)
+    except OSError as exc:
+        log_warning(f"無法隔離損毀的 checkpoint（{CHECKPOINT_FILE}）：{exc!r}")
+        return None
+    return quarantined
 
 
 def load_checkpoint() -> dict | None:
-    """讀取 checkpoint，若不存在或讀取失敗回傳 None。
+    """讀取 checkpoint；不存在、損毀或格式不是物件時回傳 None。
+
+    損毀（無法解析或不是 JSON 物件）的檔案會記錄警告並隔離成 ``.corrupt``，不會殘留在原位。
 
     Returns:
-        checkpoint 字典，若無 checkpoint 則回傳 None
+        checkpoint 字典，若無可用的 checkpoint 則回傳 None
     """
     if not os.path.exists(CHECKPOINT_FILE):
         return None
     try:
         with open(CHECKPOINT_FILE, "r", encoding="utf-8") as f:
-            return json_std.load(f)
+            data = json_std.load(f)
+        if not isinstance(data, dict):
+            raise TypeError(
+                f"checkpoint 必須是 JSON 物件，實際為 {type(data).__name__}"
+            )
+        return data
     except Exception as exc:  # noqa: BLE001 - 損毀的 checkpoint 視為沒有，但要留下紀錄
-        log_warning(f"讀取 checkpoint 失敗，視為沒有 checkpoint：{exc!r}")
+        quarantined = _quarantine_corrupt_checkpoint()
+        where = f"，已隔離為 {quarantined}" if quarantined else ""
+        log_warning(f"讀取 checkpoint 失敗，視為沒有 checkpoint{where}：{exc!r}")
         return None
 
 
@@ -274,33 +324,36 @@ def _write_directory_outputs(
         )
 
 
-def _restore_directory_checkpoint(
-    input_dir: str,
-    items_to_translate: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], int, str]:
-    """載入並驗證目錄翻譯 checkpoint，回傳剩餘項目、已完成數與 fingerprint。"""
-    fingerprint = compute_checkpoint_fingerprint(input_dir, items_to_translate)
+def _cache_saving_enabled() -> bool:
+    """快取儲存開著才有「重開後由快取還原」的前提；關閉時不寫 checkpoint。"""
+    return bool(load_config().get("translator", {}).get("enable_cache_saving", True))
+
+
+def _note_directory_checkpoint(fingerprint: str, *, cache_saving: bool = True) -> None:
+    """啟動翻譯時處理上次遺留的 checkpoint（只記錄，不依位置跳過任何項目）。
+
+    已完成批次的譯文在翻譯快取裡：這次的快取分流自然會把它們當成命中並寫回輸出，
+    只剩未完成的項目需要翻譯。checkpoint 與目前輸入相符就是「接續上次」；
+    不符（輸入內容或來源不同、舊格式）時明確告知並捨棄，不能靜默忽略。
+    """
     checkpoint = load_checkpoint()
     if not checkpoint:
-        return items_to_translate, 0, fingerprint
-
-    completed = checkpoint.get("completed_count", 0)
-    total = checkpoint.get("total", 0)
-    if checkpoint.get("fingerprint") != fingerprint:
-        log_warning("⚠️ checkpoint 屬於其他資料（來源或內容不同），忽略並重新開始")
+        return
+    if not cache_saving:
+        log_warning("⚠️ 快取儲存已停用，無法接續上次中斷的任務，已捨棄該標記")
         clear_checkpoint()
-        return items_to_translate, 0, fingerprint
-    if completed > len(items_to_translate):
-        log_warning("⚠️ checkpoint 數量異常，忽略並重新開始")
-        clear_checkpoint()
-        return items_to_translate, 0, fingerprint
-    if total != len(items_to_translate):
-        log_warning("⚠️ checkpoint 與目前總數不一致，忽略並重新開始")
-        clear_checkpoint()
-        return items_to_translate, 0, fingerprint
-
-    log_info(f"🔄 偵測到 checkpoint，已完成 {completed}/{len(items_to_translate)} 筆")
-    return items_to_translate[completed:], completed, fingerprint
+        return
+    if (
+        checkpoint.get("version") == CHECKPOINT_VERSION
+        and checkpoint.get("fingerprint") == fingerprint
+    ):
+        log_info(
+            f"🔄 接續上次中斷的任務（上次已保存進度 {checkpoint.get('completed_count', 0)}"
+            f"/{checkpoint.get('total', 0)} 筆；已完成的部分由快取還原）"
+        )
+        return
+    log_warning("⚠️ 上次中斷的任務屬於其他資料或舊格式，無法接續，已捨棄該標記")
+    clear_checkpoint()
 
 
 def _extract_directory_items(
@@ -405,9 +458,10 @@ def _run_directory_translation(
     write_new_cache: bool,
     input_dir: str,
     items_to_translate: list[dict[str, Any]],
-    completed_before: int,
+    cache_hit_count: int,
     checkpoint_fingerprint: str,
     total: int,
+    write_checkpoint: bool = True,
 ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]], int]:
     """執行目錄翻譯 phase，集中 callback、輸出、checkpoint 與終態契約。"""
     pending_events: list[dict[str, Any]] = []
@@ -439,23 +493,24 @@ def _run_directory_translation(
 
     def on_batch_checkpoint(state: dict[str, Any]) -> None:
         nonlocal checkpoint_batch_index
+        if not write_checkpoint:
+            return
         checkpoint_batch_index += 1
-        processed = completed_before + int(state.get("processed") or 0)
+        processed = int(state.get("processed") or 0)
         save_checkpoint(
             checkpoint_batch_index,
-            processed,
-            total,
+            cache_hit_count + processed,
+            cache_hit_count + total,
             items_to_translate[processed:],
             str(out_root),
             input_dir=input_dir,
             fingerprint=checkpoint_fingerprint,
+            export_lang=export_lang,
+            write_new_cache=write_new_cache,
         )
 
     def on_progress(progress: float, message: str, _eta_sec: float) -> None:
-        absolute_progress = min(
-            0.2 + 0.8 * (completed_before / total + progress * len(remaining) / total),
-            1.0,
-        )
+        absolute_progress = min(0.2 + 0.8 * progress, 1.0)
         pending_events.append({"progress": absolute_progress, "log": message})
 
     def translate_batch(batch: list[dict[str, Any]], batch_total: int | None):
@@ -482,7 +537,7 @@ def _run_directory_translation(
     if touched_files:
         on_batch_flushed()
 
-    processed = completed_before + int(result.processed or 0)
+    processed = int(result.processed or 0)
     if result.status == "DONE" and processed >= total:
         clear_checkpoint()
 
@@ -553,6 +608,8 @@ def translate_directory_generator(
     )
     yield from extract_events
     log_info(f"✂️ 抽取完成：共 {len(all_items)} 段文字")
+    # 指紋涵蓋全部抽取項目（快取分流之前），不受快取進度影響，重開後才能比對得上
+    checkpoint_fingerprint = compute_checkpoint_fingerprint(input_dir, all_items)
     yield {"progress": 0.2}
 
     cached_items, items_to_translate = _split_directory_items(all_items)
@@ -589,11 +646,10 @@ def translate_directory_generator(
         yield {"progress": 1.0, "log": "🎉 所有項目皆已從 Cache 恢復，無需翻譯。"}
         return
 
-    remaining, completed_before, checkpoint_fingerprint = _restore_directory_checkpoint(
-        input_dir, items_to_translate
-    )
+    cache_saving = _cache_saving_enabled()
+    _note_directory_checkpoint(checkpoint_fingerprint, cache_saving=cache_saving)
     result, pending_events, _translation_log, processed = _run_directory_translation(
-        remaining=remaining,
+        remaining=items_to_translate,
         file_cache=file_cache,
         root=root,
         out_root=out_root,
@@ -602,9 +658,10 @@ def translate_directory_generator(
         write_new_cache=write_new_cache,
         input_dir=input_dir,
         items_to_translate=items_to_translate,
-        completed_before=completed_before,
+        cache_hit_count=len(cached_items),
         checkpoint_fingerprint=checkpoint_fingerprint,
         total=total,
+        write_checkpoint=cache_saving,
     )
     if pending_events:
         yield from pending_events

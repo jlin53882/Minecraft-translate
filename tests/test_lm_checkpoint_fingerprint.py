@@ -100,8 +100,12 @@ def test_checkpoint_from_other_folder_with_same_count_is_ignored(tmp_path, monke
     assert not checkpoint.exists()
 
 
-def test_checkpoint_of_same_data_still_resumes(tmp_path, monkeypatch):
-    """同一批資料的 checkpoint 仍可續傳（只翻剩餘項目）。"""
+def test_checkpoint_of_same_data_resumes_from_cache(tmp_path, monkeypatch):
+    """同一批資料的 checkpoint：已完成的部分由快取還原，只翻剩餘項目，輸出完整。
+
+    續跑不再依 checkpoint 的位置跳過項目（那會在快取沒同步時漏翻）；已完成批次的譯文
+    以快取為準，這裡用「前 4 筆已在快取」模擬上次中斷後的磁碟狀態。
+    """
     checkpoint = tmp_path / "logs" / "checkpoint.json"
     monkeypatch.setattr(lm_translator, "CHECKPOINT_FILE", str(checkpoint))
     input_a, items = _setup(tmp_path, monkeypatch, "A", 10)
@@ -115,6 +119,10 @@ def test_checkpoint_of_same_data_still_resumes(tmp_path, monkeypatch):
         input_dir=str(input_a),
         fingerprint=fingerprint,
     )
+    cache = {
+        it["path"]: {"src": it["text"], "dst": "譯:" + it["text"]} for it in items[:4]
+    }
+    monkeypatch.setattr(lm_translator, "get_cache_dict_ref", lambda cache_type: cache)
 
     sent = []
     original = lm_translator.translate_batch_smart
@@ -125,6 +133,8 @@ def test_checkpoint_of_same_data_still_resumes(tmp_path, monkeypatch):
 
     monkeypatch.setattr(lm_translator, "translate_batch_smart", spy)
 
-    _run(input_a, tmp_path / "A_out")
+    result = _run(input_a, tmp_path / "A_out")
 
     assert sent == [f"k{i}" for i in range(4, 10)]
+    assert len(result) == 10
+    assert all(v.startswith("譯:") for v in result.values())

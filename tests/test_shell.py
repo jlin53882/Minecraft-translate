@@ -109,6 +109,7 @@ def _make_shell(env: _Env, **overrides) -> AppShell:
         "initial_mode": "dark",
         "mode_saver": env.saved_modes.append,
         "subscribe_config": env.subscribe,
+        "find_interrupted_task": lambda: None,  # 不讀真實的 checkpoint 檔
     }
     kwargs.update(overrides)
     return AppShell(FakePage(), **kwargs)

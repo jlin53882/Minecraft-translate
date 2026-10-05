@@ -21,6 +21,7 @@ APP = ROOT / "app"
 # 與 docs/WORKER_THREAD_AUDIT.md 的「背景執行緒啟動點」表一致
 EXPECTED_THREAD_SITES = {
     "app/shell/config_effects.py": 1,
+    "app/shell/resume_prompt.py": 1,
     "app/startup_tasks.py": 1,
     "app/views/bundler_view.py": 1,
     "app/views/dashboard_view.py": 1,

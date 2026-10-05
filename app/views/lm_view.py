@@ -388,6 +388,22 @@ class LMView(ft.Column):
 
         self.start_ui_timer()
 
+    def resume_interrupted(self, task) -> None:
+        """重開後續跑（#151）：帶入上次的輸入與選項後開始。
+
+        只在使用者於啟動時的確認對話框按下「續跑」後才會被呼叫；已完成的譯文由翻譯快取
+        還原，只會翻譯尚未完成的部分。
+        """
+        if self._ui_timer_running:
+            show_snack(self.page, "翻譯正在執行中，無法續跑上次的任務", C.GOLD)
+            return
+        self.input_path.value = task.input_dir
+        self.output_path.value = task.output_dir
+        self.dry_run_switch.value = False
+        self.export_lang_checkbox.value = task.export_lang
+        self.write_new_cache_switch.value = task.write_new_cache
+        self.start_clicked(None)
+
     def cancel_clicked(self, e):
         """要求取消翻譯；會在目前批次完成後停止。"""
         if self.session is None or not self._ui_timer_running:

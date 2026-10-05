@@ -24,6 +24,7 @@ import pytest
 from app import view_registry as vr
 from app.shell import app_shell
 from app.shell.app_shell import AppShell
+from app.shell.resume_prompt import ResumePrompt
 from app.shell.task_manager import TaskManager
 from app.tasks import task_session as task_session_module
 from app.tasks.task_session import TaskSession
@@ -210,6 +211,7 @@ def _make_shell(env: Env, *, flush_before_close=None) -> AppShell:
         mode_saver=lambda _m: None,
         subscribe_config=env.subscribe,
         flush_before_close=flush_before_close,
+        find_interrupted_task=lambda: None,  # 不讀真實的 checkpoint 檔
     )
 
 
@@ -674,3 +676,89 @@ def test_disconnect_does_not_tear_down_so_web_reconnect_keeps_working(mounted, e
     """web client 可能只是暫時斷線再重連：不可把永久 teardown 綁在 on_disconnect。"""
     assert mounted.page.on_disconnect is None
     assert _observer_registered(mounted.tasks)
+
+
+# -- #151：啟動時偵測上次被中斷的機器翻譯 ---------------------------------------------
+
+
+def _interrupted_task():
+    return SimpleNamespace(
+        input_dir="C:/assets",
+        output_dir="C:/out",
+        export_lang=False,
+        write_new_cache=True,
+        completed=3,
+        total=9,
+        updated_at="",
+    )
+
+
+def _shell_with_interrupted_task(env: Env, task) -> AppShell:
+    shell = _make_shell(env)
+    shell._resume_prompt = ResumePrompt(
+        shell.page,
+        find_task=lambda: task,
+        check_resume=lambda _t: SimpleNamespace(ok=True, reason=""),
+        discard=lambda: None,
+        on_resume=shell._resume_interrupted_task,
+        run_background=lambda work, done: done(work()),
+    )
+    return shell
+
+
+def test_mount_prompts_for_an_interrupted_task_without_starting_anything(env):
+    shell = _shell_with_interrupted_task(env, _interrupted_task())
+
+    shell.mount()
+
+    assert len(shell.page.dialogs) == 1, "啟動時要詢問使用者"
+    assert shell.tasks.active() == [], "使用者確認前不得啟動任何任務"
+    shell.dispose()
+
+
+def test_mount_without_an_interrupted_task_shows_no_dialog(env):
+    shell = _make_shell(env)
+
+    shell.mount()
+
+    assert shell.page.dialogs == []
+    shell.dispose()
+
+
+def test_a_failing_resume_prompt_never_breaks_mount(env, caplog):
+    shell = _make_shell(env)
+
+    class Broken:
+        def show_if_needed(self):
+            raise RuntimeError("prompt exploded")
+
+    shell._resume_prompt = Broken()
+
+    shell.mount()  # 不得拋出例外
+
+    assert shell.page.controls, "外殼仍然完成掛載"
+    shell.dispose()
+
+
+def test_confirming_resume_opens_the_lm_page_and_hands_over_the_task(env):
+    task = _interrupted_task()
+    shell = _shell_with_interrupted_task(env, task)
+    received: list = []
+
+    class FakeLMView(ft.Column):
+        def resume_interrupted(self, t):
+            received.append(t)
+
+    lm_item = next(i for i in shell.registry if i["key"] == "lm")
+    # 真實的頁面被 wrap_view 包在容器裡：外殼要能穿過容器找到 LMView
+    dict.__setitem__(lm_item, "view", ft.Container(content=FakeLMView()))
+    shell.mount()
+
+    dialog = shell.page.dialogs[-1]
+    resume_button = next(b for b in dialog.actions if b.content == "續跑")
+    assert resume_button.disabled is False
+    resume_button.on_click(None)
+
+    assert received == [task]
+    assert shell.current_key == "lm"
+    shell.dispose()
