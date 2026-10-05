@@ -295,6 +295,21 @@ def translate_items_with_cache_loop(
             except Exception as e:  # noqa: BLE001
                 log_info(f"[SharedLM] 批次刷新回調失敗: {redact_text(e)}")
 
+        if cache_write_failed:
+            # 只有快取 durable 之後才算完成的批次：checkpoint 不得領先快取，否則重開後
+            # checkpoint 宣稱完成、快取卻沒有這批，已翻譯的項目會被重新送 API（#151）。
+            # 輸出檔已在上面寫出；checkpoint 維持上一個 durable 批次的狀態。
+            emit_progress(f"❌ [SharedLM] {last_error}")
+            return TranslateLoopResult(
+                status="FAILED",
+                processed=processed,
+                total=total,
+                completed_calls=completed_calls,
+                elapsed_sec=time.time() - start_time,
+                exhausted=False,
+                last_error=last_error,
+            )
+
         if on_batch_checkpoint is not None:
             checkpoint_failed = False
             try:
@@ -327,18 +342,6 @@ def translate_items_with_cache_loop(
         emit_progress(
             f"✅ 批次完成 ({cache_type}) | 成功: {actual_processed_in_this_batch} | 總進度: {processed}/{total}"
         )
-
-        if cache_write_failed:
-            emit_progress(f"❌ [SharedLM] {last_error}")
-            return TranslateLoopResult(
-                status="FAILED",
-                processed=processed,
-                total=total,
-                completed_calls=completed_calls,
-                elapsed_sec=time.time() - start_time,
-                exhausted=False,
-                last_error=last_error,
-            )
 
         st = (status or "").upper()
         if st == "ALL_KEYS_EXHAUSTED":

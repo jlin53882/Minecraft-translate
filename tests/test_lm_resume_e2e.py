@@ -117,6 +117,7 @@ def env(tmp_path, monkeypatch):
         e.crash_at_translate_call = None
         e.crash_at_checkpoint_call = None
 
+    e.monkeypatch = monkeypatch
     e.restart_app = restart_app
     restart_app()
     yield e
@@ -358,3 +359,84 @@ class TestMarkerLifecycle:
 
         assert any("快取儲存已停用" in w for w in warnings)
         assert not Path(lm_translator.CHECKPOINT_FILE).exists()
+
+
+class TestCheckpointNeverRunsAheadOfDurableCache:
+    """checkpoint 宣稱完成的批次，快取一定要已經 durable（review：cache save 失敗不得推進 checkpoint）。"""
+
+    def _fail_cache_save_on(self, env, call_number: int) -> list[int]:
+        """第 ``call_number`` 次快取存檔失敗（回傳 False、沒有落盤，與真實的失敗行為一致）。"""
+        calls: list[int] = []
+        real_save = lm_translator.save_translation_cache
+
+        def save(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == call_number:
+                return False
+            return real_save(*args, **kwargs)
+
+        env.monkeypatch.setattr(lm_translator, "save_translation_cache", save)
+        return calls
+
+    def _checkpoint(self) -> dict:
+        return json.loads(Path(lm_translator.CHECKPOINT_FILE).read_text("utf-8"))
+
+    def test_cache_save_failure_does_not_advance_the_checkpoint(self, env):
+        self._fail_cache_save_on(env, 2)  # 第 2 批的快取存檔失敗
+
+        out = env.tmp / "out"
+        events = list(
+            lm_translator.translate_directory_generator(
+                str(env.input), str(out), write_new_cache=True
+            )
+        )
+
+        assert env.checkpoint_calls == 1, "第 2 批快取沒落盤，不得寫 checkpoint"
+        assert self._checkpoint()["completed_count"] == BATCH_SIZE
+        assert any("FAILED" in str(e.get("log", "")) for e in events)
+        # 失敗後不再繼續送後面的批次
+        assert len([p for b in env.calls for p in b]) == 2 * BATCH_SIZE
+
+    def test_add_to_cache_rejection_also_blocks_the_checkpoint(self, env):
+        real_add = lm_translator.add_to_cache
+        seen: list[str] = []
+
+        def add(cache_type, key, src, dst, **kwargs):
+            seen.append(key)
+            if len(env.calls) == 2:  # 第 2 批的項目被快取拒絕
+                return False
+            return real_add(cache_type, key, src, dst, **kwargs)
+
+        env.monkeypatch.setattr(lm_translator, "add_to_cache", add)
+
+        run(env, "out", write_new_cache=True)
+
+        assert env.checkpoint_calls == 1
+        assert self._checkpoint()["completed_count"] == BATCH_SIZE
+
+    def test_failed_batch_is_not_committed_and_resume_retranslates_only_it(self, env):
+        """crash 前最後一個 checkpoint 與磁碟快取一致：重開後只重翻沒有 durable 的批次。"""
+        expected = baseline_outputs(env)
+        self._fail_cache_save_on(env, 2)
+        run(env, "out", write_new_cache=True)
+        committed = [p for b in env.calls[:1] for p in b]  # 只有第 1 批 durable
+        env.restart_app()  # 等同重開 App：記憶體快取全部消失
+
+        task = lm_resume.peek_interrupted_task()
+        assert task is not None and task.completed == BATCH_SIZE
+        assert lm_resume.check_resume_feasibility(task).ok
+        out = run(env, "out", write_new_cache=True)
+
+        resumed = [p for b in env.calls for p in b]
+        assert set(resumed).isdisjoint(committed), "已 durable 的批次不得重翻"
+        assert sorted(committed + resumed) == sorted(ALL_PATHS)
+        assert read_outputs(out) == expected
+
+    def test_successful_runs_still_checkpoint_every_batch(self, env):
+        env.crash_at_translate_call = 4
+
+        with pytest.raises(SimulatedCrash):
+            run(env, "out", write_new_cache=True)
+
+        assert env.checkpoint_calls == 3
+        assert self._checkpoint()["completed_count"] == 3 * BATCH_SIZE
