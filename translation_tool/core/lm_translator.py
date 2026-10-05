@@ -24,6 +24,7 @@ from translation_tool.core.lm_translator_db import (
     DirectoryDbContext,
     directory_db,
     flush_write_back,
+    resolve_db_choice,
     split_db_hits,
 )
 from translation_tool.core.lm_translator_main import (
@@ -122,6 +123,7 @@ def save_checkpoint(
     fingerprint: str | None = None,
     export_lang: bool | None = None,
     write_new_cache: bool | None = None,
+    translation_db: dict[str, Any] | None = None,
 ):
     """寫入「任務尚未完成」的標記（每批次完成、快取落盤後呼叫）。
 
@@ -140,6 +142,8 @@ def save_checkpoint(
         fingerprint: compute_checkpoint_fingerprint() 的結果（涵蓋全部抽取項目），
             續跑前必須相符
         export_lang / write_new_cache: 這次任務的選項，續跑時沿用
+        translation_db: 這次任務**實際生效**的 Mod 資料庫選項 ``{"enabled": bool, "version": str}``，
+            續跑時必須沿用（否則設定改變後，剩餘項目會寫回不同版本）
     """
     payload = {
         "version": CHECKPOINT_VERSION,
@@ -152,6 +156,7 @@ def save_checkpoint(
         "fingerprint": fingerprint,
         "export_lang": export_lang,
         "write_new_cache": write_new_cache,
+        "translation_db": translation_db,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
     _atomic_write_text(CHECKPOINT_FILE, json_std.dumps(payload, ensure_ascii=False))
@@ -335,7 +340,12 @@ def _cache_saving_enabled() -> bool:
     return bool(load_config().get("translator", {}).get("enable_cache_saving", True))
 
 
-def _note_directory_checkpoint(fingerprint: str, *, cache_saving: bool = True) -> None:
+def _note_directory_checkpoint(
+    fingerprint: str,
+    *,
+    cache_saving: bool = True,
+    db_choice: tuple[bool, str] = (False, ""),
+) -> None:
     """啟動翻譯時處理上次遺留的 checkpoint（只記錄，不依位置跳過任何項目）。
 
     已完成批次的譯文在翻譯快取裡：這次的快取分流自然會把它們當成命中並寫回輸出，
@@ -357,6 +367,14 @@ def _note_directory_checkpoint(fingerprint: str, *, cache_saving: bool = True) -
             f"🔄 接續上次中斷的任務（上次已保存進度 {checkpoint.get('completed_count', 0)}"
             f"/{checkpoint.get('total', 0)} 筆；已完成的部分由快取還原）"
         )
+        saved = checkpoint.get("translation_db") or {}
+        saved_choice = (bool(saved.get("enabled")), str(saved.get("version") or ""))
+        if saved_choice != db_choice:
+            log_warning(
+                f"⚠️ 這次的 Mod 資料庫選項（使用={db_choice[0]}，版本={db_choice[1] or '未指定'}）"
+                f"與中斷的任務（使用={saved_choice[0]}，版本={saved_choice[1] or '未指定'}）不同，"
+                "剩餘項目將依這次的選項查詢與寫回；若不是預期的結果請取消並從「續跑」重新開始"
+            )
         return
     log_warning("⚠️ 上次中斷的任務屬於其他資料或舊格式，無法接續，已捨棄該標記")
     clear_checkpoint()
@@ -469,8 +487,12 @@ def _run_directory_translation(
     total: int,
     write_checkpoint: bool = True,
     db_ctx: DirectoryDbContext | None = None,
+    db_choice: tuple[bool, str] = (False, ""),
 ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]], int]:
     """執行目錄翻譯 phase，集中 callback、輸出、checkpoint 與終態契約。"""
+    _note_directory_checkpoint(
+        checkpoint_fingerprint, cache_saving=write_checkpoint, db_choice=db_choice
+    )
     pending_events: list[dict[str, Any]] = []
     touched_files: set[str] = set()
     translation_log: list[dict[str, Any]] = []
@@ -521,6 +543,7 @@ def _run_directory_translation(
             fingerprint=checkpoint_fingerprint,
             export_lang=export_lang,
             write_new_cache=write_new_cache,
+            translation_db={"enabled": db_choice[0], "version": db_choice[1]},
         )
 
     def on_progress(progress: float, message: str, _eta_sec: float) -> None:
@@ -690,7 +713,6 @@ def translate_directory_generator(
             return
 
         cache_saving = _cache_saving_enabled()
-        _note_directory_checkpoint(checkpoint_fingerprint, cache_saving=cache_saving)
         result, pending_events, _translation_log, processed = (
             _run_directory_translation(
                 remaining=items_to_translate,
@@ -707,6 +729,7 @@ def translate_directory_generator(
                 total=total,
                 write_checkpoint=cache_saving,
                 db_ctx=db_ctx,
+                db_choice=resolve_db_choice(use_translation_db, translation_db_version),
             )
         )
         if pending_events:

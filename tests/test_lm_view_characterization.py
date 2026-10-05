@@ -1,3 +1,5 @@
+import pytest
+
 from app.tasks import LogEntry
 from app.views import lm_view
 from tests.conftest import mock_filepicker, mock_page
@@ -263,6 +265,8 @@ def test_resume_interrupted_restores_inputs_and_options_then_starts(monkeypatch)
             "output_dir": "C:/out",
             "export_lang": True,
             "write_new_cache": False,
+            "use_translation_db": False,  # 沒有記錄資料庫選項的舊 checkpoint
+            "translation_db_version": "",
         },
     )()
 
@@ -274,7 +278,7 @@ def test_resume_interrupted_restores_inputs_and_options_then_starts(monkeypatch)
         "dry_run": False,
         "export_lang": True,
         "write_new_cache": False,
-        "db": {"use_translation_db": True, "translation_db_version": None},
+        "db": {"use_translation_db": False, "translation_db_version": None},
     }
     assert view.input_path.value == "C:/mods/assets"
     assert view.output_path.value == "C:/out"
@@ -292,9 +296,55 @@ def test_resume_interrupted_does_not_start_a_second_run(monkeypatch):
             "output_dir": "",
             "export_lang": False,
             "write_new_cache": True,
+            "use_translation_db": False,
+            "translation_db_version": "",
         },
     )()
 
     view.resume_interrupted(task)
 
     assert calls == {}
+
+
+def _task(use_db, version):
+    return type(
+        "Task",
+        (),
+        {
+            "input_dir": "C:/assets",
+            "output_dir": "C:/out",
+            "export_lang": False,
+            "write_new_cache": True,
+            "use_translation_db": use_db,
+            "translation_db_version": version,
+        },
+    )()
+
+
+@pytest.mark.parametrize(
+    ("current_on", "current_version", "saved_on", "saved_version", "expected"),
+    [
+        # 原任務 DB=True、1.21.1；現在頁面是別的版本 → 仍用 1.21.1
+        (True, "1.20.1", True, "1.21.1", (True, "1.21.1")),
+        # 原任務 DB=False；現在頁面是開的 → 仍然關閉
+        (True, "1.20.1", False, "", (False, None)),
+        # 原任務沒有指定版本（其實沒用資料庫）→ 不能退回目前設定的版本
+        (True, "1.20.1", True, "", (False, None)),
+        # 原任務版本覆寫了全域設定 → 恢復覆寫值，而不是頁面目前的值
+        (False, "9.9.9", True, "1.19.2", (True, "1.19.2")),
+    ],
+)
+def test_resume_interrupted_restores_the_original_database_choice(
+    monkeypatch, current_on, current_version, saved_on, saved_version, expected
+):
+    calls = _launch_spy(monkeypatch)
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view.use_db_switch.value = current_on
+    view.db_version_field.value = current_version
+
+    view.resume_interrupted(_task(saved_on, saved_version))
+
+    assert calls["db"] == {
+        "use_translation_db": expected[0],
+        "translation_db_version": expected[1],
+    }

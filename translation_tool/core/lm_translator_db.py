@@ -38,6 +38,20 @@ class DirectoryDbContext:
         self.db.close()
 
 
+def resolve_db_choice(
+    use_db: bool | None = None, version: str | None = None
+) -> tuple[bool, str]:
+    """這次任務**實際生效**的 (是否使用資料庫, 目標版本)。
+
+    None 代表「用設定檔的值」；續跑用的 checkpoint 必須保存解析後的值，
+    否則重開後設定檔改了，剩餘項目會查詢／寫回到不同的版本。
+    """
+    settings = load_db_settings()
+    enabled = settings.enabled if use_db is None else bool(use_db)
+    target = (version if version is not None else settings.version).strip()
+    return enabled, target
+
+
 def open_directory_db(
     root: str | Path,
     *,

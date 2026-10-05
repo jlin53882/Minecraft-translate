@@ -472,6 +472,13 @@ class LMView(ft.Column):
         self.dry_run_switch.value = False
         self.export_lang_checkbox.value = task.export_lang
         self.write_new_cache_switch.value = task.write_new_cache
+        # 沿用上次任務實際使用的資料庫選項，不採用目前的頁面／設定值（否則剩餘項目會寫回不同版本）
+        # 沒有版本＝上次其實沒有使用資料庫；不能讓空欄位退回目前設定的版本
+        self.use_db_switch.value = task.use_translation_db and bool(
+            task.translation_db_version
+        )
+        self.db_version_field.value = task.translation_db_version
+        self.refresh_db_info()
         self.start_clicked(None)
 
     def cancel_clicked(self, e):
