@@ -150,7 +150,12 @@ class OverviewPanel(ft.Column):
             self.stat_mods.set_value(format_count(ov["mods"]))
             self.stat_content.set_value(
                 format_count(ov["content"]),
-                delta=f"共 {format_count(sum(s.total for s in stats))} 筆（含各版本）",
+                delta=f"共 {format_count(sum(s.total for s in stats))} 筆（含各版本）"
+                + (
+                    f"・原文未知 {format_count(ov['no_source'])}"
+                    if ov["no_source"]
+                    else ""
+                ),
                 delta_tone="neutral",
             )
             self.stat_diff.set_value(format_count(ov["diff"]))

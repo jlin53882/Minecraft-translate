@@ -214,7 +214,7 @@ class TranslationDB:
                         ).lastrowid
                         known[item.key] = (eid, item.en_us)
                         stats.new_entries += 1
-                    elif cur[1] != item.en_us:
+                    elif cur[1] != item.en_us and item.en_us and cur[1]:
                         conn.execute(
                             "INSERT OR IGNORE INTO src_change "
                             "(kind, mc_version, mod_id, key, old_en, new_en) "
@@ -225,10 +225,19 @@ class TranslationDB:
                         continue
                     else:
                         eid = cur[0]
+                        if cur[1] != item.en_us and item.en_us:
+                            # 原文原本未知（例如先匯入了只有 zh_tw 的翻譯 ZIP）：補上
+                            conn.execute(
+                                "UPDATE entry SET en_us=? WHERE id=?", (item.en_us, eid)
+                            )
+                            known[item.key] = (eid, item.en_us)
+                            stats.adopted += 1
+                        # 這次沒有原文（item.en_us 為空）時，沿用既有原文，只補譯文
 
                     adds: list[tuple[int, str, str]] = []
                     if item.zh_tw.strip():
-                        adds.append((SRC_JAR_TW, item.zh_tw, item.zh_cn))
+                        src_tw = SRC_JAR_TW if item.source is None else item.source
+                        adds.append((src_tw, item.zh_tw, item.zh_cn))
                     elif item.zh_cn.strip() and convert is not None:
                         converted = convert(item.zh_cn)
                         if (
@@ -330,13 +339,16 @@ class TranslationDB:
             SELECT COUNT(*) FROM (
                 SELECT e.kind, e.mod_id, e.key, e.en_us
                 FROM entry e JOIN effective f ON f.entry_id = e.id
+                WHERE e.en_us <> ''
                 GROUP BY e.kind, e.mod_id, e.key, e.en_us
                 HAVING COUNT(DISTINCT f.zh_tw) > 1
             )
             """
         )[0]
         changed = self._one("SELECT COUNT(*) FROM src_change")[0]
+        no_source = self._one("SELECT COUNT(*) FROM entry WHERE en_us = ''")[0]
         return {
+            "no_source": no_source,
             "mods": mods,
             "content": content,
             "diff": diff,
@@ -395,7 +407,7 @@ class TranslationDB:
     _DIFF_SQL = """EXISTS (
         SELECT 1 FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
         WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
-          AND e2.en_us = e.en_us AND e2.mc_version <> e.mc_version
+          AND e2.en_us = e.en_us AND e.en_us <> '' AND e2.mc_version <> e.mc_version
           AND (f.zh_tw IS NULL OR f2.zh_tw <> f.zh_tw))"""
 
     def list_entries(
@@ -471,14 +483,18 @@ class TranslationDB:
                 (entry_id,),
             )
         ]
-        detail.versions = [
-            r[0]
-            for r in self._q(
-                "SELECT mc_version FROM entry WHERE kind=? AND mod_id=? AND key=? "
-                "AND en_us=? ORDER BY mc_version",
-                (entry.kind, entry.mod_id, entry.key, entry.en_us),
-            )
-        ]
+        detail.versions = (
+            [entry.mc_version]
+            if not entry.en_us  # 原文未知：沒有可比對的內容，只有自己
+            else [
+                r[0]
+                for r in self._q(
+                    "SELECT mc_version FROM entry WHERE kind=? AND mod_id=? AND key=? "
+                    "AND en_us=? ORDER BY mc_version",
+                    (entry.kind, entry.mod_id, entry.key, entry.en_us),
+                )
+            ]
+        )
         detail.same_key = [
             SameKeyRow(eid, ver, en, en == entry.en_us, tw or "", src)
             for eid, ver, en, tw, src in self._q(
@@ -489,16 +505,20 @@ class TranslationDB:
                 (entry.kind, entry.mod_id, entry.key, entry_id),
             )
         ]
-        detail.same_text = [
-            SameTextRow(eid, ver, mod, key, tw or "", src)
-            for eid, ver, mod, key, tw, src in self._q(
-                "SELECT e.id, e.mc_version, e.mod_id, e.key, f.zh_tw, f.source "
-                "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
-                "WHERE e.en_us=? AND e.kind=? AND NOT (e.mod_id=? AND e.key=?) "
-                "ORDER BY (f.zh_tw IS NULL), e.mod_id, e.key LIMIT ?",
-                (entry.en_us, entry.kind, entry.mod_id, entry.key, text_limit),
-            )
-        ]
+        detail.same_text = (
+            []
+            if not entry.en_us
+            else [
+                SameTextRow(eid, ver, mod, key, tw or "", src)
+                for eid, ver, mod, key, tw, src in self._q(
+                    "SELECT e.id, e.mc_version, e.mod_id, e.key, f.zh_tw, f.source "
+                    "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
+                    "WHERE e.en_us=? AND e.kind=? AND NOT (e.mod_id=? AND e.key=?) "
+                    "ORDER BY (f.zh_tw IS NULL), e.mod_id, e.key LIMIT ?",
+                    (entry.en_us, entry.kind, entry.mod_id, entry.key, text_limit),
+                )
+            ]
+        )
         detail.history = [
             HistoryRow(*r)
             for r in self._q(
@@ -511,6 +531,16 @@ class TranslationDB:
 
     # ------------------------------------------------------------ 手動更新
     def _same_content(self, conn: sqlite3.Connection, entry_id: int) -> list[tuple]:
+        """與此條目「相同內容」的條目（含自己）。原文未知的條目沒有可比對的內容，只有自己。"""
+        known = conn.execute(
+            "SELECT en_us FROM entry WHERE id = ?", (entry_id,)
+        ).fetchone()
+        if known is None or known[0] == "":
+            return conn.execute(
+                "SELECT e.id, e.mc_version, f.zh_tw, f.source FROM entry e "
+                "LEFT JOIN effective f ON f.entry_id = e.id WHERE e.id = ?",
+                (entry_id,),
+            ).fetchall()
         return conn.execute(
             "SELECT e.id, e.mc_version, f.zh_tw, f.source FROM entry e "
             "LEFT JOIN effective f ON f.entry_id = e.id "
@@ -667,7 +697,7 @@ class TranslationDB:
                         "VALUES (?,?,?,?,?)",
                         (item.kind, version, item.mod_id, item.key, item.en_us),
                     ).lastrowid
-                elif row[1] != item.en_us:
+                elif row[1] != item.en_us and row[1]:
                     conn.execute(
                         "INSERT OR IGNORE INTO src_change "
                         "(kind, mc_version, mod_id, key, old_en, new_en) "
@@ -678,6 +708,10 @@ class TranslationDB:
                     continue
                 else:
                     eid = row[0]
+                    if not row[1]:  # 原文原本未知：補上
+                        conn.execute(
+                            "UPDATE entry SET en_us=? WHERE id=?", (item.en_us, eid)
+                        )
                 cur = conn.execute(
                     "INSERT OR IGNORE INTO translation (entry_id, source, zh_tw) "
                     "VALUES (?,?,?)",

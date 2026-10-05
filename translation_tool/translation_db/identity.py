@@ -95,8 +95,17 @@ def classify_parts(
 def classify_member(
     member_name: str, dir_names: Sequence[str] | None = None
 ) -> FileIdentity | None:
-    """jar 內成員路徑（``assets/foo/lang/en_us.json``）的身分。"""
-    return classify_parts(member_name.replace("\\", "/").split("/"), dir_names)
+    """jar／zip 內成員路徑的身分。
+
+    ``assets``／``data`` 可以出現在路徑中的任何位置（例如翻譯包的 ``pack/1.20/assets/foo/lang/zh_tw.json``）。
+    """
+    parts = member_name.replace("\\", "/").split("/")
+    for idx, part in enumerate(parts):
+        if part.lower() in _ROOT_DIRS:
+            found = classify_parts(parts[idx:], dir_names)
+            if found is not None:
+                return found
+    return None
 
 
 def classify_file(

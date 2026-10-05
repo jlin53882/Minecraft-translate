@@ -12,6 +12,12 @@ import threading
 import flet as ft
 
 from app.services_impl.moddb_service import (
+    SOURCE_NAMES,
+    SRC_CUSTOM,
+    SRC_I18N,
+    SRC_JAR_TW,
+    SRC_MANUAL,
+    SRC_SUBTITLE,
     ScanOptions,
     current_settings,
     pack_format_hint,
@@ -30,6 +36,8 @@ from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_debug
 
 _POLL_INTERVAL_SEC = 0.2
+# 翻譯 ZIP 匯入時可選的「譯文來源」標記（預設：自訂補充）
+ZIP_SOURCES = (SRC_CUSTOM, SRC_SUBTITLE, SRC_I18N, SRC_JAR_TW, SRC_MANUAL)
 
 
 class ScanPanel(ft.Column):
@@ -47,6 +55,7 @@ class ScanPanel(ft.Column):
         self._running = False
         self._poller = PollerHandle()
         self._versions: list[str] = []
+        self.mode = "jar"
 
         self._build_version_card()
         self._build_options_card()
@@ -104,14 +113,46 @@ class ScanPanel(ft.Column):
         )
 
     def _build_options_card(self) -> None:
+        self.mode_seg = kit.Segmented(
+            [("jar", "mods 資料夾（jar）"), ("zip", "翻譯 ZIP（已翻譯）")],
+            "jar",
+            self._on_mode,
+        )
+        self.path_label = kit.section_label("mods 資料夾")
         self.path_field = kit.text_field(
             hint="請選擇 mods 資料夾",
             icon=ft.Icons.FOLDER_OUTLINED,
             mono=True,
             expand=True,
         )
+        self.zip_pick_btn = kit.pick_button(
+            ft.Icons.FOLDER_ZIP_OUTLINED, "選擇 ZIP 檔", self._pick_zip
+        )
+        self.zip_pick_btn.visible = False
+        self.source_dd = kit.dropdown(
+            label="譯文來源標記",
+            dense=True,
+            value=str(SRC_CUSTOM),
+            options=[
+                ft.dropdown.Option(key=str(code), text=SOURCE_NAMES[code])
+                for code in ZIP_SOURCES
+            ],
+        )
+        self.source_dd.visible = False
+        self.mode_note = kit.hint_text(
+            "ZIP 內的 lang／patchouli 的 zh_tw 一律不判讀、不清理、不套規則，直接匯入（包含沒有中文的值）。"
+            "ZIP 沒有 en_us 時原文先留空，之後掃描同版本的 jar 會自動補上。"
+        )
+        self.mode_note.visible = False
+        self.clean_row = kit.SwitchRow(
+            "判斷並清理英文內容",
+            "開：與機器翻譯相同，只匯入需要翻譯的英文（略過技術 ID、過短字串等）；關：所有英文字串逐字匯入",
+            True,
+        )
         self.nested_row = kit.SwitchRow(
-            "掃描內嵌 jar", "META-INF/jarjar、META-INF/jars 內的子模組也一併讀取", True
+            "掃描內嵌 jar",
+            "META-INF/jarjar、META-INF/jars 內的子模組；翻譯 ZIP 則掃描 ZIP 內任何位置的 jar",
+            True,
         )
         self.jar_tr_row = kit.SwitchRow(
             "讀取模組自帶 zh_tw／zh_cn", "以來源「模組自帶繁中」「簡中轉繁」匯入", True
@@ -130,13 +171,15 @@ class ScanPanel(ft.Column):
             "包含 Patchouli 手冊", "書籍內文也匯入，供跨版本沿用", True, divider=False
         )
         self.options_card = kit.section_card(
-            "2　選擇 mods 資料夾與選項",
+            "2　選擇匯入來源與選項",
             ft.Column(
                 [
-                    kit.section_label("mods 資料夾"),
+                    self.mode_seg,
+                    self.path_label,
                     ft.Row(
                         [
                             self.path_field,
+                            self.zip_pick_btn,
                             kit.pick_button(
                                 ft.Icons.FOLDER_OPEN_OUTLINED,
                                 "選擇資料夾",
@@ -145,8 +188,11 @@ class ScanPanel(ft.Column):
                         ],
                         spacing=8,
                     ),
+                    self.source_dd,
+                    self.mode_note,
                     ft.Column(
                         [
+                            self.clean_row,
                             self.nested_row,
                             self.jar_tr_row,
                             self.cn_row,
@@ -203,7 +249,7 @@ class ScanPanel(ft.Column):
             "原文已變動", "—", icon=ft.Icons.COMPARE_ARROWS, tone="gold", expand=1
         )
         self.stat_nolang = kit.stat_card(
-            "沒有語言檔的 jar",
+            "沒有語言檔的檔案",
             "—",
             icon=ft.Icons.INSERT_DRIVE_FILE_OUTLINED,
             tone="neutral",
@@ -303,7 +349,7 @@ class ScanPanel(ft.Column):
 
     def _on_version_typed(self, _e=None) -> None:
         version = self.version()
-        self.start_btn.text = f"開始掃描 {version}" if version else "開始掃描"
+        self.start_btn.content = self._start_label()
         self.version_hint.value = pack_format_hint(version)
         self._render_versions()
 
@@ -314,21 +360,61 @@ class ScanPanel(ft.Column):
     def _pick_folder(self, _e) -> None:
         self._page.run_task(self._async_pick_folder)
 
+    def _pick_zip(self, _e) -> None:
+        self._page.run_task(self._async_pick_zip)
+
+    async def _async_pick_zip(self) -> None:
+        result = await self.file_picker.pick_files(
+            dialog_title="選擇翻譯 ZIP",
+            allow_multiple=False,
+            allowed_extensions=["zip"],
+        )
+        if result:
+            self.path_field.value = result[0].path
+            self._safe_update()
+
     async def _async_pick_folder(self) -> None:
         result = await self.file_picker.get_directory_path()
         if result:
             self.path_field.value = result
             self._safe_update()
 
+    def _on_mode(self, key: str) -> None:
+        """切換匯入來源：mods 資料夾（jar）或翻譯 ZIP（已翻譯，zh_tw 直接匯入）。"""
+        self.mode = key
+        zip_mode = key == "zip"
+        self.path_label.value = (
+            "翻譯 ZIP（檔案或資料夾）" if zip_mode else "mods 資料夾"
+        )
+        self.path_field.hint_text = (
+            "請選擇 ZIP 檔，或放有 ZIP 的資料夾" if zip_mode else "請選擇 mods 資料夾"
+        )
+        self.zip_pick_btn.visible = zip_mode
+        self.source_dd.visible = zip_mode
+        self.mode_note.visible = zip_mode
+        self.jar_tr_row.visible = not zip_mode
+        self.rules_row.visible = not zip_mode
+        self.start_btn.content = self._start_label()
+        self._safe_update()
+
+    def _start_label(self) -> str:
+        verb = "匯入" if self.mode == "zip" else "掃描"
+        version = self.version()
+        return f"開始{verb} {version}" if version else f"開始{verb}"
+
     def build_options(self, *, dry_run: bool = False) -> ScanOptions:
+        translated = self.mode == "zip"
         return ScanOptions(
             version=self.version(),
-            read_jar_translations=self.jar_tr_row.value,
+            read_jar_translations=True if translated else self.jar_tr_row.value,
             convert_cn=self.cn_row.value,
             scan_nested=self.nested_row.value,
             include_patchouli=self.book_row.value,
-            apply_rules=self.rules_row.value,
+            apply_rules=False if translated else self.rules_row.value,
             dry_run=dry_run,
+            clean_english=self.clean_row.value,
+            translated=translated,
+            translation_source=int(self.source_dd.value or SRC_CUSTOM),
         )
 
     def start_clicked(self, _e=None, *, dry_run: bool = False) -> None:
@@ -341,7 +427,12 @@ class ScanPanel(ft.Column):
             self._safe_update()
             return
         if not folder:
-            self._set_status("請先選擇 mods 資料夾", "red")
+            self._set_status(
+                "請先選擇 ZIP 檔或資料夾"
+                if self.mode == "zip"
+                else "請先選擇 mods 資料夾",
+                "red",
+            )
             self._safe_update()
             return
         self.session = tag_session(TaskSession(), "Mod 資料庫掃描", "moddb")
@@ -421,7 +512,11 @@ class ScanPanel(ft.Column):
             self.stat_changed.set_value("—")
         else:
             self.stat_new.set_value(format_count(s.get("new_entries")), delta="")
-            self.stat_added.set_value(format_count(s.get("added_translations")))
+            adopted = s.get("adopted") or 0
+            self.stat_added.set_value(
+                format_count(s.get("added_translations")),
+                delta=f"另補上原文 {adopted:,} 筆" if adopted else "",
+            )
             self.stat_skip.set_value(format_count(s.get("existing")))
             self.stat_changed.set_value(format_count(s.get("en_changed")))
         self.stat_nolang.set_value(format_count(s.get("jars_without_lang")))

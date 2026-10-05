@@ -38,6 +38,7 @@ from translation_tool.utils.log_unit import log_debug
 PAGE_SIZE = 50
 ALL_MODS = "全部模組"
 ACTOR = "使用者"
+NO_SOURCE_TEXT = "（原文未知：之後掃描同版本的 jar，會自動補上原文）"
 
 
 class EntriesPanel(ft.Column):
@@ -327,10 +328,10 @@ class EntriesPanel(ft.Column):
                     ft.Column(
                         [
                             ft.Text(
-                                shorten(row.en_us, 48),
+                                shorten(row.en_us, 48) if row.en_us else "（原文未知）",
                                 size=13,
                                 weight=ft.FontWeight.W_500,
-                                color=C.TEXT,
+                                color=C.TEXT if row.en_us else C.DIM,
                             ),
                             ft.Text(
                                 shorten(row.zh_tw, 48) if row.zh_tw else "（未翻譯）",
@@ -373,7 +374,7 @@ class EntriesPanel(ft.Column):
             self.history_col.controls = [kit.hint_text("尚未選取條目")]
             return
         entry = detail.entry
-        self.src_text.value = entry.en_us
+        self.src_text.value = entry.en_us or NO_SOURCE_TEXT
         self.tw_field.value = entry.zh_tw
         self.source_chip.content = kit.chip(
             source_label(entry.source) if entry.zh_tw else "尚無譯文",
@@ -634,7 +635,7 @@ class EntriesPanel(ft.Column):
         entry = self.selected
         text = self.tw_field.value or ""
         notes: list[str] = []
-        if entry is not None and text.strip():
+        if entry is not None and entry.en_us and text.strip():
             issues = token_issues(entry.en_us, text)
             if issues:
                 notes.append("與原文的特殊字元不一致：" + "、".join(issues))

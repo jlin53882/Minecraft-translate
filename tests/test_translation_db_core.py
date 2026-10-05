@@ -337,6 +337,7 @@ def test_write_back_buffer_flushes_translated_items(db, tmp_path):
 def make_jar(
     path: Path, files: dict[str, object], nested: dict[str, bytes] | None = None
 ) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w") as zf:
         for name, data in files.items():
             zf.writestr(name, json.dumps(data, ensure_ascii=False))
@@ -542,3 +543,171 @@ def test_resolver_returns_value_with_special_characters_intact(db):
         KIND_LANG, "foo", "item.foo.a", "Hello %s\nWorld"
     )
     assert hit.zh_tw == SPECIAL
+
+
+# ------------------------------------------------ 翻譯 ZIP：zh_tw 不判讀、直接匯入
+TRANSLATED_ZIP = {
+    "assets/foo/lang/zh_tw.json": {
+        "item.foo.a": "鋼製外殼",
+        "item.foo.plain": "Vanilla",  # 沒有中文也照單全收
+        "item.foo.multi": "§a哈囉 %s\n第二行 ",
+        "item.foo.b": "存儲方塊",  # 不套替換規則
+    },
+}
+
+
+def run_scan(db, folder, **kw):
+    opts = ScanOptions("1.21.1", **kw)
+    return [u for u in scan_folder_generator(db, folder, opts, workers=1)][-1]["report"]
+
+
+def test_classify_member_finds_root_anywhere_in_the_path():
+    ident = classify_member("pack/1.20/assets/foo/lang/zh_tw.json")
+    assert (ident.mod_id, ident.lang) == ("foo", "zh_tw")
+    book = classify_member("x/data/foo/patchouli_books/guide/zh_tw/e.json")
+    assert book.file_key == "patchouli_books/guide/e.json"
+    assert classify_member("textures/assets/readme.txt") is None
+
+
+def test_translated_zip_imports_every_zh_tw_value_without_judging(db, tmp_path):
+    make_jar(tmp_path / "pack.zip", TRANSLATED_ZIP)
+    report = run_scan(
+        db,
+        tmp_path / "pack.zip",
+        translated=True,
+        rules=RULES,
+        translation_source=SRC_SUBTITLE,
+    )
+    assert report.stats.new_entries == 4 and report.stats.adopted == 0
+    rows = {r.key: r for r in db.list_entries("1.21.1")[0]}
+    assert rows["item.foo.plain"].zh_tw == "Vanilla"  # 無中文也匯入
+    assert rows["item.foo.multi"].zh_tw == "§a哈囉 %s\n第二行 "  # 逐字
+    assert rows["item.foo.b"].zh_tw == "存儲方塊"  # 不套替換規則
+    assert all(r.source == SRC_SUBTITLE and r.en_us == "" for r in rows.values())
+
+
+def test_zip_without_english_gets_original_text_when_jar_is_scanned_later(db, tmp_path):
+    make_jar(tmp_path / "zips" / "pack.zip", TRANSLATED_ZIP)
+    run_scan(db, tmp_path / "zips", translated=True)
+    make_jar(
+        tmp_path / "mods" / "foo.jar",
+        {
+            "assets/foo/lang/en_us.json": {
+                "item.foo.a": "Steel Casing",
+                "item.foo.b": "Storage Block",
+            }
+        },
+    )
+    report = run_scan(db, tmp_path / "mods")
+    assert report.stats.adopted == 2 and report.stats.en_changed == 0
+    rows = {r.key: r for r in db.list_entries("1.21.1")[0]}
+    assert (rows["item.foo.a"].en_us, rows["item.foo.a"].zh_tw) == (
+        "Steel Casing",
+        "鋼製外殼",
+    )
+    assert rows["item.foo.plain"].en_us == ""  # jar 沒有的鍵值維持原文未知
+    again = run_scan(db, tmp_path / "mods")
+    assert again.stats.adopted == 0  # 重掃不會重複計算
+
+
+def test_zip_import_after_jar_scan_adds_a_second_source(db, tmp_path):
+    make_jar(
+        tmp_path / "mods" / "foo.jar",
+        {
+            "assets/foo/lang/en_us.json": {"item.foo.a": "Steel Casing"},
+            "assets/foo/lang/zh_tw.json": {"item.foo.a": "自帶譯名"},
+        },
+    )
+    run_scan(db, tmp_path / "mods")
+    make_jar(
+        tmp_path / "pack.zip",
+        {"assets/foo/lang/zh_tw.json": {"item.foo.a": "鋼製外殼"}},
+    )
+    report = run_scan(
+        db, tmp_path / "pack.zip", translated=True, translation_source=SRC_SUBTITLE
+    )
+    assert report.stats.new_entries == 0 and report.stats.added_translations == 1
+    row = db.list_entries("1.21.1")[0][0]
+    assert (row.en_us, row.zh_tw, row.source) == (
+        "Steel Casing",
+        "鋼製外殼",
+        SRC_SUBTITLE,
+    )  # 町宮優先於自帶
+
+
+def test_zip_with_both_languages_pairs_them_and_scans_jars_inside(db, tmp_path):
+    inner = jar_bytes({"assets/inner/lang/zh_tw.json": {"k.a": "內層譯文"}})
+    make_jar(
+        tmp_path / "pack.zip",
+        {
+            "assets/foo/lang/en_us.json": {"item.foo.a": "Steel Casing"},
+            "assets/foo/lang/zh_tw.json": {"item.foo.a": "鋼製外殼"},
+        },
+        {"libs/inner-mod.jar": inner},  # 任何位置的 jar 都掃
+    )
+    report = run_scan(db, tmp_path / "pack.zip", translated=True)
+    rows = {(r.mod_id, r.key): r for r in db.list_entries("1.21.1")[0]}
+    assert rows[("foo", "item.foo.a")].en_us == "Steel Casing"
+    assert rows[("inner", "k.a")].zh_tw == "內層譯文" and report.nested_jars == 1
+
+
+def test_clean_english_switch_controls_filtering_of_english_values(tmp_path):
+    jar = make_jar(
+        tmp_path / "foo.jar",
+        {
+            "assets/foo/lang/en_us.json": {
+                "a.real": "Steel Casing Block",
+                "a.short": "Hi",
+                "a.id": "minecraft:stone",
+            }
+        },
+    )
+    on = {i.key for i in scan_jar(jar, ScanOptions("1.21.1"), ()).items}
+    off = {
+        i.key
+        for i in scan_jar(jar, ScanOptions("1.21.1", clean_english=False), ()).items
+    }
+    assert on == {"a.real"}  # 與機器翻譯相同的判斷：略過過短字串與技術 ID
+    assert off == {"a.real", "a.short", "a.id"}  # 關閉：全部逐字匯入
+
+
+def test_translated_patchouli_uses_field_names_not_content(db, tmp_path):
+    make_jar(
+        tmp_path / "pack.zip",
+        {
+            "assets/foo/patchouli_books/guide/zh_tw/entries/a.json": {
+                "name": "入門",
+                "category": "patchouli:basics",  # 資源引用不是文字
+                "pages": [{"type": "text", "text": "歡迎。"}],
+            }
+        },
+    )
+    run_scan(db, tmp_path / "pack.zip", translated=True)
+    keys = {r.key.split("#")[1]: r.zh_tw for r in db.list_entries("1.21.1")[0]}
+    assert keys == {
+        "name": "入門",
+        "pages[0].text": "歡迎。",
+    }  # type／category 這類結構欄位不收
+
+
+def test_unknown_english_entries_never_sync_or_look_different(db):
+    db.ingest("1.21.1", [item(en="", tw="甲")])
+    db.ingest("1.20.1", [item(en="", tw="乙")])
+    entry = db.list_entries("1.21.1")[0][0]
+    assert entry.diff is False  # 沒有原文就沒有「相同內容」可比
+    assert [i.mc_version for i in db.preview_manual(entry.id, "丙")] == ["1.21.1"]
+    db.save_manual(entry.id, "丙")
+    assert db.list_entries("1.20.1")[0][0].zh_tw == "乙"
+    detail = db.entry_detail(entry.id)
+    assert detail.same_text == [] and detail.versions == ["1.21.1"]
+    assert db.overview()["no_source"] == 2 and db.overview()["diff"] == 0
+
+
+def test_find_jars_accepts_a_single_file_and_zip_folders(tmp_path):
+    from translation_tool.translation_db.scanner import find_jars
+
+    make_jar(tmp_path / "a.zip", {"x.txt": "1"})
+    make_jar(tmp_path / "sub" / "b.jar", {"x.txt": "1"})
+    assert find_jars(tmp_path / "a.zip", translated=True) == [tmp_path / "a.zip"]
+    assert [p.name for p in find_jars(tmp_path, translated=True)] == ["a.zip", "b.jar"]
+    assert [p.name for p in find_jars(tmp_path)] == ["b.jar"]

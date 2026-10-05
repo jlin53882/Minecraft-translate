@@ -365,7 +365,7 @@ def test_scan_version_list_filters_and_choosing_fills_the_field(db_path):
     panel._render_versions()
     assert 0 < len(panel.version_list.controls) < len(panel._versions)
     panel._choose_version("1.20.1")
-    assert panel.version() == "1.20.1" and panel.start_btn.text == "開始掃描 1.20.1"
+    assert panel.version() == "1.20.1" and panel.start_btn.content == "開始掃描 1.20.1"
 
 
 def test_scan_option_switches_flow_into_scan_options(db_path):
@@ -533,3 +533,91 @@ def test_saving_keeps_newlines_codes_and_surrounding_whitespace(special_entries)
     panel._save()
     stored = panel.db().get_entry(panel.selected.id).zh_tw
     assert stored == " §c警告§r %s\n第二行\n"
+
+
+# ------------------------------------------------------------------ 翻譯 ZIP 匯入（掃描頁）
+def test_scan_panel_zip_mode_switches_controls_and_options(db_path):
+    panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
+    panel.version_field.value = "1.21.1"
+    jar_opts = panel.build_options()
+    assert (jar_opts.translated, jar_opts.clean_english, jar_opts.apply_rules) == (
+        False,
+        True,
+        True,
+    )
+    assert panel.source_dd.visible is False and panel.zip_pick_btn.visible is False
+
+    panel._on_mode("zip")
+    assert (
+        panel.mode == "zip" and panel.source_dd.visible and panel.zip_pick_btn.visible
+    )
+    assert panel.mode_note.visible is True
+    assert (
+        panel.jar_tr_row.visible is False and panel.rules_row.visible is False
+    )  # zh_tw 不判讀、不套規則
+    assert panel.start_btn.content == "開始匯入 1.21.1"
+
+    panel.source_dd.value = str(scan_panel.SRC_SUBTITLE)
+    panel.clean_row.value = False
+    opts = panel.build_options()
+    assert (
+        opts.translated is True
+        and opts.apply_rules is False
+        and opts.read_jar_translations is True
+    )
+    assert (
+        opts.clean_english is False
+        and opts.translation_source == scan_panel.SRC_SUBTITLE
+    )
+
+    panel._on_mode("jar")
+    assert (
+        panel.start_btn.content == "開始掃描 1.21.1" and panel.rules_row.visible is True
+    )
+
+
+def test_scan_panel_imports_a_translated_zip_directly(db_path, tmp_path, monkeypatch):
+    make_jar(
+        tmp_path / "pack.zip",
+        {
+            "assets/foo/lang/zh_tw.json": {
+                "item.foo.a": "鋼製外殼",
+                "item.foo.plain": "Vanilla",
+            }
+        },
+    )
+    monkeypatch.setattr(scan_panel, "threading", SimpleNamespace(Thread=_SyncThread))
+    monkeypatch.setattr(
+        scan_panel.PollerHandle, "start", lambda self, page, handler: True
+    )
+    panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
+    panel.version_field.value = "1.21.1"
+    panel._on_mode("zip")
+    panel.path_field.value = str(tmp_path / "pack.zip")
+    panel.start_clicked()
+    panel.sync_from_session()
+    assert (
+        panel.status_chip.label.value == "掃描完成"
+        and panel.stat_new.value_text.value == "2"
+    )
+    db = TranslationDB(db_path)
+    rows = {r.key: r for r in db.list_entries("1.21.1")[0]}
+    assert (
+        rows["item.foo.plain"].zh_tw == "Vanilla" and rows["item.foo.plain"].en_us == ""
+    )
+    assert rows["item.foo.a"].source == scan_panel.SRC_CUSTOM
+    db.close()
+
+
+def test_entries_and_overview_show_unknown_original_text(db_path):
+    db = TranslationDB(db_path)
+    db.ingest("1.21.1", [ScanItem(KIND_LANG, "foo", "item.foo.a", "", "鋼製外殼")])
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    assert entries_panel.NO_SOURCE_TEXT == panel.src_text.value
+    assert "（原文未知）" in texts_of(panel.list_view)
+    assert panel.token_hint.visible is False  # 沒有原文就不比對特殊字元
+    overview = moddb_view.OverviewPanel(mock_page(), lambda: db)
+    overview.refresh()
+    assert "原文未知 1" in overview.stat_content.delta_text.value
+    db.close()

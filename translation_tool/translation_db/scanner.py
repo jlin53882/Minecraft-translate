@@ -1,6 +1,6 @@
 """scanner.py
 
-掃描 mods 資料夾中的 jar，讀出語言檔（lang）與 Patchouli 書籍，寫入資料庫。
+掃描 mods 資料夾中的 jar（或翻譯 ZIP），讀出語言檔（lang）與 Patchouli 書籍，寫入資料庫。
 
 - 以 ``zipfile`` 直接讀 jar，沿用 ``zip_safety`` 的大小與成員數預算（防 ZIP bomb）。
 - 內嵌 jar（``META-INF/jarjar``、``META-INF/jars``）會遞迴掃描，最多 3 層。
@@ -14,6 +14,7 @@ from __future__ import annotations
 import concurrent.futures
 import io
 import json
+import re
 import zipfile
 from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field, replace
@@ -21,6 +22,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from translation_tool.core.lang_merge_dict import contains_cjk
+from translation_tool.core.lm_config_rules import is_translatable_field
 from translation_tool.core.translatable_extractor import extract_translatables
 from translation_tool.translation_db.identity import (
     FileIdentity,
@@ -30,6 +32,7 @@ from translation_tool.translation_db.identity import (
 )
 from translation_tool.translation_db.models import IngestStats, ScanItem
 from translation_tool.translation_db.repository import TranslationDB
+from translation_tool.translation_db.schema import SRC_CUSTOM
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
 from translation_tool.utils.text_processor import (
@@ -45,6 +48,8 @@ from translation_tool.utils.zip_safety import (
 )
 
 NESTED_DIRS = ("META-INF/jarjar/", "META-INF/jars/")
+# 書籍檔的「命名空間資源 ID」（如 patchouli:basics）是引用不是文字；直接匯入時只跳過這一種結構值
+_RESOURCE_ID = re.compile(r"^#?[a-z0-9_.-]+:[a-z0-9_./-]+$")
 MAX_NESTED_DEPTH = 3
 CONVERT_MODE = "s2twp"
 
@@ -61,6 +66,9 @@ class ScanOptions:
     dry_run: bool = False  # 只讀 jar 並統計，不寫入資料庫
     apply_rules: bool = True  # 與語系合併相同：對 jar 自帶譯文套用「替換規則」
     rules: Any = field(default=(), compare=False, repr=False)  # 載入後的替換規則
+    clean_english: bool = True  # 判斷並清理英文內容；關閉則所有英文字串逐字匯入
+    translated: bool = False  # 來源是已翻譯的內容（翻譯 ZIP）：zh_tw 不判讀、直接匯入
+    translation_source: int = SRC_CUSTOM  # translated 時，zh_tw 的來源代碼
 
 
 @dataclass
@@ -105,6 +113,7 @@ class ScanReport:
             "existing": self.stats.existing,
             "added_translations": self.stats.added_translations,
             "en_changed": self.stats.en_changed,
+            "adopted": self.stats.adopted,
             "cancelled": self.cancelled,
         }
 
@@ -136,6 +145,43 @@ def _load_json(data: bytes) -> dict | None:
     return obj if isinstance(obj, dict) else None
 
 
+def extract_all_strings(data: Any, *, is_lang: bool) -> dict[str, str]:
+    """不判讀內容，取出全部字串值：``{JSON 路徑: 文字}``。
+
+    lang 檔取頂層所有字串；書籍檔沿用欄位名稱規則（``is_translatable_field``，只看欄位名、不看內容），
+    避免把 ``type``、``id`` 之類的結構欄位也當成文字；書籍檔另外略過 ``namespace:id`` 形式的資源引用。
+    """
+    found: dict[str, str] = {}
+
+    def walk(node: Any, base: str) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                path = f"{base}.{key}" if base else str(key)
+                if isinstance(value, str):
+                    if value.strip() and (
+                        (is_lang and not base)
+                        or (
+                            not is_lang
+                            and is_translatable_field(str(key))
+                            and not _RESOURCE_ID.match(value.strip())
+                        )
+                    ):
+                        found[path] = value
+                else:
+                    walk(value, path)
+        elif isinstance(node, list):
+            for idx, value in enumerate(node):
+                path = f"{base}[{idx}]"
+                if isinstance(value, str):
+                    if value.strip() and not is_lang:
+                        found[path] = value
+                else:
+                    walk(value, path)
+
+    walk(data, "")
+    return found
+
+
 def _group_members(
     names: Sequence[str], options: ScanOptions, dir_names: Sequence[str]
 ) -> dict[tuple[str, str, str], dict[str, str]]:
@@ -155,6 +201,14 @@ def _group_members(
     return groups
 
 
+def _read_json_member(
+    zf: zipfile.ZipFile, budget: ZipReadBudget, member: str | None
+) -> dict | None:
+    if member is None:
+        return None
+    return _load_json(read_limited(zf, member, budget=budget))
+
+
 def _items_for_group(
     zf: zipfile.ZipFile,
     budget: ZipReadBudget,
@@ -163,50 +217,61 @@ def _items_for_group(
     options: ScanOptions,
 ) -> list[ScanItem]:
     kind, mod_id, file_key = ident_key
+    is_lang = kind == "lang"
     en_member = members.get("en_us")
-    if en_member is None:
-        return []
-    en = _load_json(read_limited(zf, en_member, budget=budget))
-    if en is None:
-        return []
+    en = _read_json_member(zf, budget, en_member)
+    if not options.translated and en is None:
+        return []  # 掃描 jar 以原文為準；沒有 en_us 就沒有可匯入的條目
 
-    # 與翻譯流程使用同一套抽取規則，之後查詢才會對得上
-    extracted = extract_translatables(en, PurePosixPath(en_member))
-    if not extracted:
-        return []
+    # 英文：預設與翻譯流程使用同一套抽取規則（之後查詢才會對得上）；關閉「清理」則全部字串逐字匯入
+    en_items: dict[str, str] = {}
+    if en is not None and en_member is not None:
+        if options.clean_english:
+            for it in extract_translatables(en, PurePosixPath(en_member)):
+                en_items[it["path"]] = it["source_text"]
+        else:
+            en_items = extract_all_strings(en, is_lang=is_lang)
 
-    translations: dict[str, dict] = {}
-    if options.read_jar_translations:
-        for lang in ("zh_tw", "zh_cn"):
-            member = members.get(lang)
-            if member is None:
-                continue
-            obj = _load_json(read_limited(zf, member, budget=budget))
-            if obj is not None:
-                translations[lang] = obj
+    tw_obj = cn_obj = None
+    if options.read_jar_translations or options.translated:
+        tw_obj = _read_json_member(zf, budget, members.get("zh_tw"))
+        cn_obj = _read_json_member(zf, budget, members.get("zh_cn"))
+
+    paths = list(en_items)
+    tw_all: dict[str, str] = {}
+    if options.translated and tw_obj is not None:
+        # 已翻譯來源：zh_tw 的每個字串都匯入，連 en_us 沒有的鍵值也收（原文先留空）
+        tw_all = extract_all_strings(tw_obj, is_lang=is_lang)
+        paths += [p for p in tw_all if p not in en_items]
+    if not paths:
+        return []
 
     ident = FileIdentity(kind, mod_id, file_key, "en_us")
     out: list[ScanItem] = []
-    for item in extracted:
-        path = item["path"]
-        text = item["source_text"]
-        tw = get_by_path(translations["zh_tw"], path) if "zh_tw" in translations else ""
-        cn = get_by_path(translations["zh_cn"], path) if "zh_cn" in translations else ""
-        # 與語系合併相同：只有含中文（CJK）的值才算譯文；繁中先套替換規則
-        tw = (
-            apply_replace_rules(tw, options.rules)
-            if isinstance(tw, str) and contains_cjk(tw)
-            else ""
-        )
-        cn = cn if isinstance(cn, str) and contains_cjk(cn) else ""
+    for path in paths:
+        tw = cn = ""
+        source = None
+        if options.translated:
+            tw = tw_all.get(path, "")  # 不判讀、不套規則，逐字匯入
+            source = options.translation_source
+        elif tw_obj is not None:
+            raw = get_by_path(tw_obj, path)
+            # 與語系合併相同：只有含中文（CJK）的值才算譯文；繁中先套替換規則
+            if isinstance(raw, str) and contains_cjk(raw):
+                tw = apply_replace_rules(raw, options.rules)
+        if cn_obj is not None:
+            raw_cn = get_by_path(cn_obj, path)
+            if isinstance(raw_cn, str) and contains_cjk(raw_cn):
+                cn = raw_cn
         out.append(
             ScanItem(
                 kind=kind,
                 mod_id=mod_id,
                 key=ident.item_key(path),
-                en_us=text,
+                en_us=en_items.get(path, ""),
                 zh_tw=tw,
                 zh_cn=cn,
+                source=source,
             )
         )
     return out
@@ -235,7 +300,8 @@ def _scan_archive(
     for name in names:
         if name.endswith("/") or not name.lower().endswith(".jar"):
             continue
-        if not name.startswith(NESTED_DIRS):
+        # 翻譯 ZIP 內任何位置的 jar 都掃；一般 jar 只看 jarjar／jars 內嵌目錄
+        if not (options.translated or name.startswith(NESTED_DIRS)):
             continue
         try:
             data = read_limited(zf, name, MAX_FILE_BYTES)
@@ -272,9 +338,17 @@ def scan_jar(
     return result
 
 
-def find_jars(folder: str | Path) -> list[Path]:
-    """遞迴找出資料夾內所有 jar（排序，掃描順序固定）。"""
-    return sorted(Path(folder).rglob("*.jar"), key=lambda x: x.as_posix().lower())
+def find_jars(folder: str | Path, *, translated: bool = False) -> list[Path]:
+    """要掃描的檔案（排序，順序固定）。
+
+    傳入單一檔案就只掃它；資料夾則遞迴找 jar（``translated`` 時也找 zip）。
+    """
+    path = Path(folder)
+    if path.is_file():
+        return [path]
+    patterns = ("*.jar", "*.zip") if translated else ("*.jar",)
+    found = {p for pattern in patterns for p in path.rglob(pattern)}
+    return sorted(found, key=lambda x: x.as_posix().lower())
 
 
 def scan_folder_generator(
@@ -292,12 +366,12 @@ def scan_folder_generator(
     report = ScanReport(version=options.version, dry_run=options.dry_run)
     if db is None and not options.dry_run:
         raise ValueError("需要資料庫才能寫入掃描結果")
-    jars = find_jars(folder)
+    jars = find_jars(folder, translated=options.translated)
     report.jars_total = len(jars)
     if not jars:
         yield {
             "progress": 1.0,
-            "log": f"⚠️ 在 {folder} 找不到任何 jar",
+            "log": f"⚠️ 在 {folder} 找不到任何 {'jar／zip' if options.translated else 'jar'}",
             "report": report,
         }
         return
@@ -338,6 +412,7 @@ def scan_folder_generator(
                         log = (
                             f"{result.name}　新增 {stats.new_entries}"
                             f"　補入 {stats.added_translations}　略過 {stats.existing}"
+                            + (f"　補上原文 {stats.adopted}" if stats.adopted else "")
                             + (
                                 f"　原文已變動 {stats.en_changed}"
                                 if stats.en_changed

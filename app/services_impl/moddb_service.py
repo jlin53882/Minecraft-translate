@@ -27,8 +27,12 @@ from translation_tool.translation_db import (
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 from translation_tool.translation_db.schema import (
     SRC_AI,
+    SRC_CUSTOM,
+    SRC_I18N,
     SRC_JAR_CN,
+    SRC_JAR_TW,
     SRC_MANUAL,
+    SRC_SUBTITLE,
 )
 from translation_tool.utils.cancellation import cancel_scope
 from translation_tool.utils.config_manager import load_config
@@ -37,8 +41,12 @@ from translation_tool.utils.config_manager import load_config
 __all__ = [
     "SOURCE_NAMES",
     "SRC_AI",
+    "SRC_CUSTOM",
+    "SRC_I18N",
     "SRC_JAR_CN",
+    "SRC_JAR_TW",
     "SRC_MANUAL",
+    "SRC_SUBTITLE",
     "DbSettings",
     "EntryDetail",
     "EntryRow",

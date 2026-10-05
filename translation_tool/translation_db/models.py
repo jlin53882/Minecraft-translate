@@ -108,9 +108,10 @@ class ScanItem:
     kind: str
     mod_id: str
     key: str
-    en_us: str
+    en_us: str  # 空字串＝原文未知（例如只匯入了 zh_tw 的翻譯 ZIP），之後掃描 jar 會補上
     zh_tw: str = ""
     zh_cn: str = ""
+    source: int | None = None  # zh_tw 的來源代碼；None＝模組自帶繁中
 
 
 @dataclass(frozen=True)
@@ -130,12 +131,14 @@ class IngestStats:
     existing: int = 0  # 條目已存在、原文相同、沒有新增任何譯文
     added_translations: int = 0  # 為既有條目補入新來源譯文
     en_changed: int = 0  # 原文已變動（略過）
+    adopted: int = 0  # 原文原本未知，這次補上
 
     def add(self, other: IngestStats) -> None:
         self.new_entries += other.new_entries
         self.existing += other.existing
         self.added_translations += other.added_translations
         self.en_changed += other.en_changed
+        self.adopted += other.adopted
 
 
 @dataclass
