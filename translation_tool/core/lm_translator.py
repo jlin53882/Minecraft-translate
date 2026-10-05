@@ -49,6 +49,7 @@ from translation_tool.utils.config_manager import (
     get_batch_write_interval,
     load_config,
 )
+from translation_tool.utils.fs_utils import fsync_directory
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 # Keep historical module attributes patchable while the shared loop owns writes.
@@ -89,7 +90,7 @@ CHECKPOINT_VERSION = 2
 
 
 def _atomic_write_text(path: str, text: str) -> None:
-    """寫入暫存檔並 fsync 後再 ``os.replace``：被中斷時要嘛是舊內容、要嘛是完整新內容。
+    """暫存檔 fsync → ``os.replace`` → fsync 目錄：被中斷時要嘛是舊內容、要嘛是完整新內容。
 
     打包成 exe 後關閉視窗不保證執行任何清理，所以不能依賴關閉流程補寫（#151）。
     """
@@ -101,6 +102,7 @@ def _atomic_write_text(path: str, text: str) -> None:
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp_path, path)
+    fsync_directory(directory)
 
 
 def save_checkpoint(

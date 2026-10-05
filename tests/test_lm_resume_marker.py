@@ -84,6 +84,27 @@ class TestSaveCheckpoint:
         assert synced, "寫入後必須 fsync，不能依賴關閉時的清理"
         assert not Path(f"{checkpoint}.tmp").exists()
 
+    def test_directory_is_fsynced_after_the_replace(self, checkpoint, monkeypatch):
+        """rename 本身也要持久化：replace 之後同步父目錄。"""
+        events: list[str] = []
+        real_replace = os.replace
+        monkeypatch.setattr(
+            lm_translator.os,
+            "replace",
+            lambda a, b: (events.append("replace"), real_replace(a, b))[1],
+        )
+        monkeypatch.setattr(
+            lm_translator,
+            "fsync_directory",
+            lambda path: events.append(f"fsync_dir:{Path(path).name}"),
+        )
+
+        lm_translator.save_checkpoint(
+            1, 1, 2, [], "out", input_dir="in", fingerprint="x"
+        )
+
+        assert events == ["replace", f"fsync_dir:{checkpoint.parent.name}"]
+
     def test_crash_while_writing_keeps_the_previous_checkpoint(
         self, checkpoint, monkeypatch
     ):
