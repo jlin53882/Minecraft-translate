@@ -65,3 +65,15 @@ def test_mirror_session_log_writes_once_to_session_and_logger(caplog):
     ]
     assert [record.message for record in caplog.records] == ["取消任務"]
     assert caplog.records[0].ui_mirrored is True
+
+
+def test_mirror_session_log_prefix_only_applies_to_backend_log(caplog):
+    session = TaskSession()
+
+    with caplog.at_level(logging.INFO):
+        mirror_session_log(
+            session, logging.getLogger("test.pipeline"), "完成 100%", prefix="[前綴] "
+        )
+
+    assert [entry.text for entry in session.snapshot()["logs"]] == ["完成 100%"]
+    assert [record.message for record in caplog.records] == ["[前綴] 完成 100%"]

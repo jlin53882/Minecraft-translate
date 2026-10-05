@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
-from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
+from app.services_impl.pipelines._pipeline_logging import (
+    ensure_pipeline_logging,
+    mirror_session_log,
+)
 from translation_tool.translation_db import (
     SOURCE_NAMES,
     DbSettings,
@@ -143,21 +146,9 @@ def summarize_database() -> dict[str, Any] | None:
         db.close()
 
 
-_LEVELS = {"warning": logging.WARNING, "error": logging.ERROR}
-
-
 def _log_both(session, text: str, level: str = "info") -> None:
-    """掃描進度同時寫入 UI（session）與後台 log。
-
-    ``ui_mirrored`` 讓 UI log handler 略過這筆，避免同一行在畫面出現兩次。
-    """
-    session.add_log(text, level=level)
-    logger.log(
-        _LEVELS.get(level, logging.INFO),
-        "[Mod 資料庫掃描] %s",
-        text,
-        extra={"ui_mirrored": True},
-    )
+    """掃描進度同時寫入 UI（session）與後台 log（加 ``[Mod 資料庫掃描]`` 前綴）。"""
+    mirror_session_log(session, logger, text, level, prefix="[Mod 資料庫掃描] ")
 
 
 def run_moddb_scan_service(

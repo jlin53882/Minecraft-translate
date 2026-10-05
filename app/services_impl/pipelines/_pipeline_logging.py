@@ -11,8 +11,12 @@ from app.services_impl.logging_service import (
 )
 
 
-def mirror_session_log(session, logger, text: str, level: str = "info") -> None:
+def mirror_session_log(
+    session, logger, text: str, level: str = "info", *, prefix: str = ""
+) -> None:
     """將一則任務訊息同時寫入 TaskSession 與後台 log。
+
+    ``prefix`` 只加在後台 log（例如 ``"[Mod 資料庫掃描] "``），UI 維持原文。
 
     ``ui_mirrored`` 會由 ``UISessionLogHandler`` 識別，避免後台 log
     再次回灌同一個 session，造成 UI 顯示重複訊息。
@@ -23,7 +27,7 @@ def mirror_session_log(session, logger, text: str, level: str = "info") -> None:
         # 相容仍使用舊版純文字 add_log(text) 介面的測試替身或舊版 session。
         session.add_log(text)
     numeric = {"debug": 10, "info": 20, "warning": 30, "error": 40}.get(level, 20)
-    logger.log(numeric, text, extra={"ui_mirrored": True})
+    logger.log(numeric, "%s%s", prefix, text, extra={"ui_mirrored": True})
 
 
 def ensure_pipeline_logging():
