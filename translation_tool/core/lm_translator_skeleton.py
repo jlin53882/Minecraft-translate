@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,7 @@ from translation_tool.core.lm_translator_shared_loop import (
     TranslateLoopResult,
     translate_items_with_cache_loop,
 )
+from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.cache_manager import (
     add_to_cache as _default_cache_add,
 )
@@ -68,10 +70,16 @@ class JsonCheckpointAdapter:
 
     def __post_init__(self) -> None:
         if self.path is None:
-            self.path = Path("logs") / f"translator_{self.plugin}_checkpoint.json"
+            # 一律走資料根目錄（#137），不依賴執行時的工作目錄（#162）
+            self.path = (
+                get_data_root() / "logs" / f"translator_{self.plugin}_checkpoint.json"
+            )
 
     def __call__(self, state: dict[str, Any]) -> None:
-        """Atomically persist the last completed batch boundary."""
+        """Atomically and durably persist the last completed batch boundary.
+
+        fsync 後才 replace：打包 exe 關閉視窗不保證執行清理，不能依賴關閉流程補寫。
+        """
         assert self.path is not None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -85,10 +93,10 @@ class JsonCheckpointAdapter:
             "status": state.get("status"),
         }
         temporary = self.path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, sort_keys=True),
-            encoding="utf-8",
-        )
+        with open(temporary, "w", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+            f.flush()
+            os.fsync(f.fileno())
         temporary.replace(self.path)
 
     def clear(self) -> None:
