@@ -33,7 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from translation_tool.core import output_bundler  # noqa: E402
+from translation_tool.core import output_bundler
 
 
 def _scan(root: Path, extras: list[str]) -> tuple[int, int]:
