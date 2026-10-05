@@ -18,6 +18,11 @@ from translation_tool.utils.config_manager import (
 )
 from translation_tool.utils.log_unit import log_debug, log_error, log_info, log_warning
 
+# ZIP 壓縮等級（zlib 1~9）。量測（150 個 mod、約 124 MB 的語言檔與貼圖）：
+# level 9 耗時 8.4 s、8.72 MB；level 6 耗時 3.7 s、8.70 MB——大小幾乎相同、快 2.3 倍。
+# 解壓後的檔案內容與等級無關，Minecraft 載入不受影響（#165）。
+ZIP_COMPRESS_LEVEL = 6
+
 
 def _add_folder_to_zip(
     zip_file: zipfile.ZipFile,
@@ -193,7 +198,10 @@ def bundle_outputs_generator(
             log_warning(f"pack.png 已存在於 '{pack_png_source}'，跳過 UI 設定")
 
         with zipfile.ZipFile(
-            output_zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+            output_zip_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=ZIP_COMPRESS_LEVEL,
         ) as zf:
             # Write pack.mcmeta from folder if exists, otherwise from UI
             if pack_mcmeta_source:
