@@ -268,6 +268,80 @@ class TestResumeTask:
             raise KeyboardInterrupt
         assert marker.exists()
 
+    def test_the_initial_marker_is_durable_before_any_adapter_exists(self):
+        """review：第一個批次 durable 之前被強制結束，重開後也要偵測得到。"""
+        with _task(
+            kind="md",
+            input_dir="C:/in",
+            output_dir="C:/out",
+            options={"step_translate": True, "lang_mode": "all"},
+        ):
+            marker = plugin_resume.marker_path("md")
+            assert marker.exists(), "還沒有任何翻譯批次，標記就必須已經在磁碟上"
+            data = json.loads(marker.read_text("utf-8"))
+
+        assert data["version"] == 2 and data["kind"] == "md"
+        assert (data["input_dir"], data["output_dir"]) == ("C:/in", "C:/out")
+        assert data["options"] == {"step_translate": True, "lang_mode": "all"}
+        assert data["fingerprint"] == "fp"
+        assert (data["completed_count"], data["total"]) == (0, 0)
+        assert data["status"] == "STARTED" and data["updated_at"]
+
+    def test_a_crash_before_the_first_adapter_keeps_the_initial_marker(self):
+        with pytest.raises(KeyboardInterrupt), _task(session=_session()):
+            raise KeyboardInterrupt  # 例如抽取途中被強制結束
+
+        (task,) = lm_resume.peek_interrupted_tasks()
+        assert task.kind == "kubejs" and task.has_current_format
+        assert (task.completed, task.total) == (0, 0)
+
+    def test_the_initial_marker_is_detected_and_resumable(self, tmp_path):
+        root = _kubejs(tmp_path)
+        fp = plugin_resume.compute_source_fingerprint("kubejs", str(root), None)
+        with (
+            pytest.raises(KeyboardInterrupt),
+            _task(input_dir=str(root), fingerprint_fn=lambda *_a: fp),
+        ):
+            raise KeyboardInterrupt
+
+        (task,) = lm_resume.peek_interrupted_tasks()
+
+        assert lm_resume.check_resume_feasibility(task).ok
+
+    def test_a_new_task_replaces_the_previous_marker_of_the_same_flow(self):
+        self._marker()  # 舊任務遺留的標記
+        with _task(options={"step_translate": True, "fresh": True}):
+            data = json.loads(plugin_resume.marker_path("kubejs").read_text("utf-8"))
+        assert data["options"].get("fresh") is True and data["completed_count"] == 0
+
+    def test_a_failed_initial_write_never_breaks_the_task(self, monkeypatch):
+        warnings: list[str] = []
+        monkeypatch.setattr(plugin_resume, "log_warning", warnings.append)
+
+        def deny(*_a, **_k):
+            raise PermissionError("read-only")
+
+        monkeypatch.setattr(plugin_resume, "write_marker", deny)
+        with _task(session=_session()) as ctx:
+            assert ctx is not None  # 任務照常執行，adapter 之後仍可寫標記
+        assert any("初始續跑標記" in w for w in warnings)
+
+    def test_the_initial_marker_write_is_atomic_and_fsynced(self, monkeypatch):
+        synced: list[str] = []
+        real_fsync = os.fsync
+        monkeypatch.setattr(
+            os, "fsync", lambda fd: (synced.append("file"), real_fsync(fd))
+        )
+        monkeypatch.setattr(
+            plugin_resume, "fsync_directory", lambda path: synced.append("dir")
+        )
+
+        with _task():
+            pass
+
+        assert synced == ["file", "dir"]
+        assert not plugin_resume.marker_path("kubejs").with_suffix(".tmp").exists()
+
     def test_progress_accumulates_across_loops(self):
         with _task() as ctx:
             ctx.loop_started()

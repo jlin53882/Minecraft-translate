@@ -13,8 +13,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -22,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.utils.app_paths import get_data_root
+from translation_tool.utils.fs_utils import fsync_directory
 from translation_tool.utils.log_unit import log_info, log_warning
 
 PLUGIN_KINDS = ("ftbquests", "kubejs", "md")
@@ -150,6 +153,21 @@ class ResumeContext:
     completed_base: int = 0  # 已完成迴圈處理的項目數（顯示用的累計進度）
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
+    def initial_payload(self) -> dict[str, Any]:
+        """任務一開始就 durable 寫入的標記內容（還沒有任何批次）；之後由 adapter 逐批更新進度。"""
+        return {
+            "version": 2,
+            "kind": self.kind,
+            "input_dir": self.input_dir,
+            "output_dir": self.output_dir or "",
+            "options": self.options,
+            "fingerprint": self.fingerprint,
+            "completed_count": 0,
+            "total": 0,
+            "status": "STARTED",
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        }
+
     def loop_started(self) -> None:
         with self._lock:
             self.loops_started += 1
@@ -175,6 +193,19 @@ def active_context(kind: str) -> ResumeContext | None:
         return _ACTIVE.get(kind)
 
 
+def write_marker(kind: str, payload: dict[str, Any]) -> None:
+    """原子且 durable 地寫入標記：暫存檔 fsync → replace → fsync 目錄。"""
+    path = marker_path(kind)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    with open(temporary, "w", encoding="utf-8") as f:
+        f.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        f.flush()
+        os.fsync(f.fileno())
+    temporary.replace(path)
+    fsync_directory(path.parent)
+
+
 def clear_marker(kind: str) -> None:
     try:
         marker_path(kind).unlink(missing_ok=True)
@@ -197,6 +228,8 @@ def resume_task(
     """包住整個翻譯任務：任務期間讓 adapter 能寫出續跑標記，結束時決定是否清除。
 
     - dry-run 或沒有勾選翻譯步驟：不記錄標記，也不碰既有標記。
+    - 開始時立即寫入初始標記（``completed_count`` 0、``status`` ``STARTED``），之後由
+      ``JsonCheckpointAdapter`` 在每個 durable 批次更新進度。
     - 整個任務完成（沒有錯誤、沒有取消、每個翻譯迴圈都 DONE）才清除標記；
       取消、失敗、金鑰耗盡都保留。
     - 無法計算來源指紋（來源太大、讀取失敗）時不提供續跑，不影響翻譯本身。
@@ -210,10 +243,18 @@ def resume_task(
         yield None
         return
     ctx = ResumeContext(kind, input_dir, output_dir, dict(options), fingerprint)
+    # 任務一開始就 durable 寫入初始標記：抽取／清理途中、第一個批次完成前被強制結束，
+    # 重開後也偵測得到（只靠 adapter 的逐批更新，第一批 durable 之前磁碟上沒有任何標記）。
+    try:
+        write_marker(kind, ctx.initial_payload())
+    except OSError as exc:
+        log_warning(f"[Resume] 無法寫入 {kind} 的初始續跑標記（任務照常執行）：{exc!r}")
     with _ACTIVE_LOCK:
         _ACTIVE[kind] = ctx
+    returned_normally = False
     try:
         yield ctx
+        returned_normally = True
     finally:
         with _ACTIVE_LOCK:
             if _ACTIVE.get(kind) is ctx:
@@ -221,7 +262,8 @@ def resume_task(
         failed = bool(getattr(session, "error", False)) or bool(
             getattr(session, "cancel_requested", False)
         )
-        if not failed and ctx.all_loops_done:
+        # 例外（含 KeyboardInterrupt／SystemExit）離開時一律保留標記；只有正常結束才可能清除
+        if returned_normally and not failed and ctx.all_loops_done:
             clear_marker(kind)
 
 

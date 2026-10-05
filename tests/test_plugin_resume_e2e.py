@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import importlib
 import json
 import shutil
 import sys
@@ -181,13 +183,26 @@ class Flow:
     def output_root(self, input_dir: Path) -> Path:
         return input_dir.parent / "out"
 
+    # 流程中「翻譯之前」的步驟（抽取／清理）；測試用它模擬在翻譯開始前被強制結束
+    early_step: ClassVar[tuple[str, str]]
 
-def _lines(prefix: str, n: int) -> list[str]:
-    return [f"{prefix} {i} text" for i in range(n)]
+    @contextlib.contextmanager
+    def early_step_patch(self, monkeypatch, replacement=None):
+        """在 ``with`` 範圍內把「翻譯之前的步驟」換成會強制結束（或自訂）的版本，離開後還原。"""
+        module_path, name = self.early_step
+        module = importlib.import_module(module_path)
+
+        def crash(*_a, **_k):
+            raise SimulatedCrash
+
+        with monkeypatch.context() as scoped:
+            scoped.setattr(module, name, replacement or crash)
+            yield
 
 
 class FtbFlow(Flow):
     kind = "ftbquests"
+    early_step = ("translation_tool.core.ftb_translator", "clean_ftbquests_from_raw")
     module = ftbquests_lmtranslator
     default_options: ClassVar[dict[str, Any]] = {
         "step_export": True,
@@ -236,6 +251,7 @@ class FtbFlow(Flow):
 
 class KubejsFlow(Flow):
     kind = "kubejs"
+    early_step = ("translation_tool.core.kubejs_translator", "step1_extract_and_clean")
     module = kubejs_tooltip_lmtranslator
     default_options: ClassVar[dict[str, Any]] = {
         "step_extract": True,
@@ -274,6 +290,7 @@ class KubejsFlow(Flow):
 
 class MdFlow(Flow):
     kind = "md"
+    early_step = ("translation_tool.core.md_translation_assembly", "step1_extract")
     module = md_lmtranslator
     default_options: ClassVar[dict[str, Any]] = {
         "step_extract": True,
@@ -341,7 +358,7 @@ class TestPluginResume:
         assert len(rt.sent()) > 2 * BATCH_SIZE, "測試資料必須產生多個批次"
         assert not _marker(flow).exists()
 
-    @pytest.mark.parametrize("crash_call", [2, 3])
+    @pytest.mark.parametrize("crash_call", [1, 2, 3])
     def test_crash_then_resume_translates_only_the_rest(self, rt, flow, crash_call):
         expected, all_sent = _baseline(rt, flow)
 
@@ -349,7 +366,8 @@ class TestPluginResume:
         with pytest.raises(SimulatedCrash):
             flow.run(rt, flow.input_dir)
         done_before = rt.sent()
-        assert _marker(flow).exists(), "中斷後要有續跑標記"
+        assert len(done_before) == (crash_call - 1) * BATCH_SIZE
+        assert _marker(flow).exists(), "中斷後要有續跑標記（含第一次 API 呼叫就被中斷）"
         rt.restart_app()
 
         (task,) = [t for t in lm_resume.peek_interrupted_tasks() if t.kind == flow.kind]
@@ -371,6 +389,49 @@ class TestPluginResume:
         assert sorted(done_before + resumed) == sorted(all_sent), "不重翻、不漏翻"
         assert _read_tree(flow.output_root(flow.input_dir)) == expected
         assert not _marker(flow).exists(), "完成後清除標記"
+
+    def test_crash_before_translation_even_starts_is_still_resumable(
+        self, rt, flow, monkeypatch
+    ):
+        """抽取／清理途中被強制結束：磁碟上已經有初始標記，重開後偵測得到並能完整續跑。"""
+        expected, all_sent = _baseline(rt, flow)
+        with flow.early_step_patch(monkeypatch), pytest.raises(SimulatedCrash):
+            flow.run(rt, flow.input_dir)
+
+        assert rt.calls == [], "還沒有任何 API 呼叫"
+        assert _marker(flow).exists(), "第一個批次之前就必須有標記"
+        rt.restart_app()
+        (task,) = [t for t in lm_resume.peek_interrupted_tasks() if t.kind == flow.kind]
+        assert lm_resume.check_resume_feasibility(task).ok
+        assert rt.calls == []
+
+        session = flow.run(
+            rt, Path(task.input_dir), output_dir=task.output_dir or None, **task.options
+        )
+
+        assert not session.error
+        assert sorted(rt.sent()) == sorted(all_sent), "不重翻、不漏翻"
+        assert _read_tree(flow.output_root(flow.input_dir)) == expected
+        assert not _marker(flow).exists()
+
+    def test_the_initial_marker_exists_while_the_pipeline_runs_its_early_steps(
+        self, rt, flow, monkeypatch
+    ):
+        seen: list[dict] = []
+
+        def probe(*_a, **_k):
+            seen.append(json.loads(_marker(flow).read_text("utf-8")))
+            raise SimulatedCrash
+
+        with (
+            flow.early_step_patch(monkeypatch, replacement=probe),
+            pytest.raises(SimulatedCrash),
+        ):
+            flow.run(rt, flow.input_dir)
+
+        (data,) = seen
+        assert data["status"] == "STARTED" and data["completed_count"] == 0
+        assert data["kind"] == flow.kind and data["input_dir"] == str(flow.input_dir)
 
     def test_marker_describes_the_task_and_replays_the_options(self, rt, flow):
         rt.crash_at_call = 2
