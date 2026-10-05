@@ -207,6 +207,7 @@ def test_force_rebuild_ignores_matching_state(src, zip_path):
 
 def test_build_exception_commits_no_state(src, zip_path, monkeypatch):
     run(src, zip_path)
+    previous = zip_path.read_bytes()
     edit_file(src, zip_path)
 
     def boom(*a, **k):
@@ -216,6 +217,7 @@ def test_build_exception_commits_no_state(src, zip_path, monkeypatch):
     monkeypatch.setattr(output_bundler, "_iter_add_folder_to_zip", boom)
     updates = run(src, zip_path)
     assert updates[-1].get("error")
+    assert zip_path.exists() and zip_path.read_bytes() == previous  # 舊 ZIP 保留
     assert not state_file(zip_path).exists()
     assert not Path(str(zip_path) + ".tmp").exists()
     monkeypatch.undo()
@@ -276,3 +278,55 @@ def test_progress_is_reported_per_file_in_a_single_large_folder(tmp_path, zip_pa
     assert progress == sorted(progress)
     assert "200 / 200" in file_updates[-1]["log"]
     assert updates[-1]["progress"] == 1.0
+
+
+def test_failed_first_build_leaves_no_zip_or_tmp(src, zip_path, monkeypatch):
+    def boom(*a, **k):
+        raise OSError("disk full")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(output_bundler, "_iter_add_folder_to_zip", boom)
+    assert run(src, zip_path)[-1].get("error")
+    assert not zip_path.exists() and not Path(str(zip_path) + ".tmp").exists()
+
+
+def test_replace_failure_keeps_previous_zip(src, zip_path, monkeypatch):
+    run(src, zip_path)
+    previous = zip_path.read_bytes()
+    edit_file(src, zip_path)
+
+    def bad_replace(*a, **k):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(output_bundler.os, "replace", bad_replace)
+    updates = run(src, zip_path)
+    monkeypatch.undo()
+
+    assert updates[-1].get("error")
+    assert zip_path.read_bytes() == previous
+    assert not state_file(zip_path).exists()
+    assert not Path(str(zip_path) + ".tmp").exists()
+
+
+def test_state_commit_failure_keeps_new_zip_and_next_run_rebuilds(
+    src, zip_path, monkeypatch
+):
+    run(src, zip_path)
+    previous = zip_path.read_bytes()
+    edit_file(src, zip_path)
+
+    def bad_commit(*a, **k):
+        raise OSError("sidecar write failed")
+
+    monkeypatch.setattr(output_bundler, "_commit_state", bad_commit)
+    updates = run(src, zip_path)
+    monkeypatch.undo()
+
+    assert not updates[-1].get("error")
+    assert "無法保存打包狀態" in updates[-1]["log"]
+    assert zip_path.exists() and zip_path.read_bytes() != previous  # 新 ZIP 保留
+    with zipfile.ZipFile(zip_path) as zf:
+        assert zf.testzip() is None
+    assert not state_file(zip_path).exists()
+    assert not reused(run(src, zip_path))  # 無有效狀態 → 重建
+    assert reused(run(src, zip_path))

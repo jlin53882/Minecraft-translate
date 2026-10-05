@@ -573,9 +573,17 @@ def bundle_outputs_generator(
         with zipfile.ZipFile(tmp_zip_path) as check:
             check.namelist()  # 中央目錄必須可讀，才允許替換正式 ZIP
         os.replace(tmp_zip_path, output_zip_path)
-        if fingerprint is not None:
-            _commit_state(output_zip_path, fingerprint)
         committed = True
+        state_warning = None
+        if fingerprint is not None:
+            # 狀態只是最佳化用的中繼資料：寫入失敗不得影響已成功的 ZIP，下次僅需重建。
+            try:
+                _commit_state(output_zip_path, fingerprint)
+            except OSError as ex:
+                _remove_quietly(_state_path(output_zip_path))
+                _remove_quietly(_state_path(output_zip_path) + ".tmp")
+                state_warning = f"無法保存打包狀態（下次會重新打包）: {ex}"
+                log_warning(state_warning)
 
         duration = time.time() - start_time
         log_parts = [
@@ -585,12 +593,14 @@ def bundle_outputs_generator(
             log_parts.append(f"跳過 pack.mcmeta（已存在於：{skipped_pack_mcmeta}）")
         if skipped_pack_png:
             log_parts.append(f"跳過 pack.png（已存在於：{skipped_pack_png}）")
+        if state_warning:
+            log_parts.append(state_warning)
         yield {"progress": 1.0, "log": "--- " + "；".join(log_parts) + " ---"}
 
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         log_error(f"打包時發生嚴重錯誤: {e}", exc_info=True)
         yield {"progress": 1.0, "log": f"錯誤：打包失敗: {e}", "error": True}
-        _remove_quietly(output_zip_path)
+        # 失敗時保留既有的有效 ZIP（尚未 os.replace）；僅讓狀態失效，下次必定重建。
         _remove_quietly(_state_path(output_zip_path))
     finally:
         # 取消（GeneratorExit）或例外：暫存檔不得殘留，狀態不得生效。
