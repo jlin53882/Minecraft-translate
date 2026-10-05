@@ -364,3 +364,228 @@ class TestPipelineStepStillUsesStats:
         build_bundle_staging(sources, str(out))
         second = build_bundle_staging(sources, str(out))
         assert second["copied"] or second["merged"]
+
+
+class TestContentIdentityIsNeverInferredFromMtime:
+    """review P2：大小與 mtime 都相同但內容不同時，仍必須更新 staging。"""
+
+    def test_same_size_same_mtime_different_bytes_is_rewritten(self, tmp_path):
+        src = tmp_path / "src"
+        f = _put(src / "assets/m/data.bin", b"AAAA")
+        out = tmp_path / "out"
+        build_bundle_staging([str(src)], str(out))
+        staged = out / "assets/m/data.bin"
+
+        f.write_bytes(b"BBBB")  # 大小相同
+        os.utime(f, ns=(5_000_000_000, 5_000_000_000))
+        os.utime(staged, ns=(5_000_000_000, 5_000_000_000))  # mtime 也相同
+        assert os.stat(f).st_size == os.stat(staged).st_size
+        assert os.stat(f).st_mtime_ns == os.stat(staged).st_mtime_ns
+
+        stats = build_bundle_staging([str(src)], str(out))
+
+        assert staged.read_bytes() == b"BBBB", "不得沿用過期內容"
+        assert stats["written"] == 1 and stats["unchanged"] == 0
+        ref = tmp_path / "ref"
+        _reference_full_rebuild([str(src)], str(ref))
+        assert _snapshot(out) == _snapshot(ref)
+
+    def test_difference_in_a_late_chunk_is_detected(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(bundle_service, "_COMPARE_CHUNK", 8)
+        src = tmp_path / "src"
+        f = _put(src / "assets/m/big.bin", b"x" * 100)
+        out = tmp_path / "out"
+        build_bundle_staging([str(src)], str(out))
+        staged = out / "assets/m/big.bin"
+
+        f.write_bytes(b"x" * 99 + b"y")  # 只有最後一個位元組不同
+        os.utime(f, ns=(7_000_000_000, 7_000_000_000))
+        os.utime(staged, ns=(7_000_000_000, 7_000_000_000))
+        build_bundle_staging([str(src)], str(out))
+
+        assert staged.read_bytes() == b"x" * 99 + b"y"
+
+    def test_identical_content_is_still_not_rewritten(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        _put(src / "assets/m/data.bin", b"A" * 5000)
+        out = tmp_path / "out"
+        build_bundle_staging([str(src)], str(out))
+        monkeypatch.setattr(
+            bundle_service, "_copy_file", lambda s, d: pytest.fail("內容相同不應重寫")
+        )
+
+        stats = build_bundle_staging([str(src)], str(out))
+
+        assert stats["written"] == 0 and stats["unchanged"] == 1
+
+    def test_comparison_does_not_use_a_stale_result_cache(self, tmp_path):
+        """同一行程內連續比對：內容在大小與 mtime 不變下改變，第二次必須看見。"""
+        a = _put(tmp_path / "a.bin", b"AAAA")
+        b = _put(tmp_path / "b.bin", b"AAAA")
+        for p in (a, b):
+            os.utime(p, ns=(9_000_000_000, 9_000_000_000))
+        assert bundle_service._same_file_content(str(a), str(b)) is True
+
+        b.write_bytes(b"BBBB")
+        os.utime(b, ns=(9_000_000_000, 9_000_000_000))
+
+        assert bundle_service._same_file_content(str(a), str(b)) is False
+
+
+class TestCaseInsensitiveFileSystems:
+    """review P2：Windows 上僅大小寫不同的路徑視為同一個檔案，staging 的實體拼法必須收斂到來源。
+
+    測試在大小寫敏感的 Linux 上以 ``normcase = lower`` 模擬 Windows 的比對規則；
+    ``os.rename`` 在 NTFS 上支援僅大小寫不同的改名。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _windows_like_normcase(self, monkeypatch):
+        monkeypatch.setattr(os.path, "normcase", str.lower)
+
+    @staticmethod
+    def _tree(root: Path) -> list[str]:
+        return sorted(p.relative_to(root).as_posix() for p in root.rglob("*"))
+
+    def test_directory_case_rename_converges_without_content_change(self, tmp_path):
+        src = tmp_path / "src"
+        _lang(src, "modid", {"a": "1"})
+        out = tmp_path / "out"
+        build_bundle_staging([str(src)], str(out))
+
+        (src / "assets" / "modid").rename(src / "assets" / "ModID")  # 內容完全沒變
+        stats = build_bundle_staging([str(src)], str(out))
+
+        assert self._tree(out) == [
+            "assets",
+            "assets/ModID",
+            "assets/ModID/lang",
+            "assets/ModID/lang/zh_tw.json",
+        ], "ZIP 項目名稱來自 staging 的實體路徑，拼法必須與來源一致"
+        assert stats["removed"] == 0 and stats["written"] == 0
+        assert json.loads(
+            (out / "assets/ModID/lang/zh_tw.json").read_text("utf-8")
+        ) == {"a": "1"}
+
+    def test_file_name_case_rename_converges(self, tmp_path):
+        src = tmp_path / "src"
+        f = _lang(src, "m", {"a": "1"})
+        out = tmp_path / "out"
+        build_bundle_staging([str(src)], str(out))
+
+        f.rename(f.with_name("ZH_TW.json"))
+        build_bundle_staging([str(src)], str(out))
+
+        assert self._tree(out) == [
+            "assets",
+            "assets/m",
+            "assets/m/lang",
+            "assets/m/lang/ZH_TW.json",
+        ]
+
+    def test_nested_and_unrelated_entries_are_handled(self, tmp_path):
+        src = tmp_path / "src"
+        _put(src / "assets/mod/lang/a.json", '{"a": 1}')
+        _put(src / "assets/other/lang/keep.json", '{"k": 1}')
+        out = tmp_path / "out"
+        build_bundle_staging([str(src)], str(out))
+
+        (src / "assets" / "mod").rename(src / "assets" / "MOD")
+        (src / "assets" / "MOD" / "lang").rename(src / "assets" / "MOD" / "LANG")
+        build_bundle_staging([str(src)], str(out))
+
+        assert self._tree(out) == [
+            "assets",
+            "assets/MOD",
+            "assets/MOD/LANG",
+            "assets/MOD/LANG/a.json",
+            "assets/other",
+            "assets/other/lang",
+            "assets/other/lang/keep.json",
+        ]
+
+    def test_first_source_decides_the_spelling_when_sources_differ_in_case(
+        self, tmp_path
+    ):
+        low, high = tmp_path / "low", tmp_path / "high"
+        _lang(low, "ModID", {"k1": "low", "k2": "low"})
+        _lang(high, "modid", {"k2": "high"})  # 另一個來源用不同大小寫
+        out = tmp_path / "out"
+
+        stats = build_bundle_staging([str(low), str(high)], str(out))
+
+        assert self._tree(out) == [
+            "assets",
+            "assets/ModID",
+            "assets/ModID/lang",
+            "assets/ModID/lang/zh_tw.json",
+        ], "與舊版完整重建一致：先寫入的來源決定拼法，後面的合併進同一個檔案"
+        assert json.loads(
+            (out / "assets/ModID/lang/zh_tw.json").read_text("utf-8")
+        ) == {
+            "k1": "low",
+            "k2": "high",
+        }
+        assert stats["merged"] == 1
+
+    def test_second_run_after_case_convergence_is_a_noop(self, tmp_path, monkeypatch):
+        src = tmp_path / "src"
+        _lang(src, "modid", {"a": "1"})
+        out = tmp_path / "out"
+        build_bundle_staging([str(src)], str(out))
+        (src / "assets" / "modid").rename(src / "assets" / "ModID")
+        build_bundle_staging([str(src)], str(out))
+
+        stats = build_bundle_staging([str(src)], str(out))
+
+        assert stats["written"] == 0 and stats["removed"] == 0
+
+
+class TestLargeTree:
+    """#158 驗收：大型目錄、重複執行、來源變更。"""
+
+    @pytest.fixture
+    def big_sources(self, tmp_path):
+        low, mid, high = tmp_path / "low", tmp_path / "mid", tmp_path / "high"
+        for i in range(40):
+            for j in range(10):  # 每個 mod 10 個單一來源檔
+                _put(low / f"assets/mod{i}/textures/t{j}.png", f"png-{i}-{j}".encode())
+            _lang(
+                low, f"mod{i}", {"a": f"low{i}", "b": "low"}
+            )  # 與 mid／high 重疊的 JSON
+            _lang(mid, f"mod{i}", {"b": f"mid{i}"})
+            if i % 2:
+                _lang(high, f"mod{i}", {"c": f"high{i}"})
+        return [str(low), str(mid), str(high)]
+
+    def test_second_pass_writes_nothing_and_matches_clean_rebuild(
+        self, tmp_path, big_sources
+    ):
+        out, ref = tmp_path / "out", tmp_path / "ref"
+        first = build_bundle_staging(big_sources, str(out))
+        second = build_bundle_staging(big_sources, str(out))
+        _reference_full_rebuild(big_sources, str(ref))
+
+        outputs = 40 * 10 + 40  # 單一來源檔 + 合併的語言檔
+        assert first["written"] == outputs
+        assert second["written"] == 0 and second["unchanged"] == outputs
+        assert second["removed"] == 0
+        assert _snapshot(out) == _snapshot(ref)
+
+    def test_changes_in_a_big_tree_only_touch_the_affected_outputs(
+        self, tmp_path, big_sources, monkeypatch
+    ):
+        out, ref = tmp_path / "out", tmp_path / "ref"
+        build_bundle_staging(big_sources, str(out))
+        low, mid = Path(big_sources[0]), Path(big_sources[1])
+        (low / "assets/mod3/textures/t1.png").write_bytes(b"changed")  # 改一個
+        (low / "assets/mod7/textures/t2.png").unlink()  # 刪一個
+        _lang(mid, "mod5", {"b": "mid5-new"})  # 合併語言檔的來源之一
+        _put(low / "assets/mod40/textures/new.png", b"new")  # 增一個
+
+        stats = build_bundle_staging(big_sources, str(out))
+
+        assert stats["written"] == 3  # 改 + 合併 + 新增
+        assert stats["removed"] == 1
+        _reference_full_rebuild(big_sources, str(ref))
+        assert _snapshot(out) == _snapshot(ref)

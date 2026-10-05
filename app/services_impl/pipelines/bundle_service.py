@@ -6,7 +6,6 @@ PR18：將 bundle 類 service 從 app.services.py 抽離到 pipelines 子模組�
 
 from __future__ import annotations
 
-import filecmp
 import json
 import logging
 import os
@@ -33,27 +32,28 @@ def _read_json_dict(path: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _stat_signature(path: str) -> tuple[int, int] | None:
-    """回傳 (大小, mtime_ns)；檔案不存在或無法讀取時回傳 None。"""
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_size, st.st_mtime_ns
+_COMPARE_CHUNK = 1024 * 1024
 
 
 def _same_file_content(src: str, dst: str) -> bool:
-    """判斷 dst 是否已經是 src 的完整複本（先比大小與 mtime，再比內容）。
+    """判斷 dst 是否與 src 位元組完全相同（大小不同直接判定不同，其餘逐塊比對）。
 
-    ``shutil.copy2`` 會保留 mtime，所以先前複製過且來源沒變的檔案可以不讀內容就判定相同；
-    大小相同但 mtime 不同時才逐位元組比對。
+    **不能用 mtime 當相同的依據**：同步工具、備份還原或時間戳精度可能讓內容不同的兩個檔案
+    大小與 mtime 都一樣，沿用舊檔會讓 ZIP 含過期資料，違反「增量結果 == 完整重建」。
+    不使用 ``filecmp.cmp``：它以 (大小, mtime) 快取比對結果，同樣會被這種情況騙過。
     """
-    src_sig, dst_sig = _stat_signature(src), _stat_signature(dst)
-    if src_sig is None or dst_sig is None or src_sig[0] != dst_sig[0]:
+    try:
+        if os.path.getsize(src) != os.path.getsize(dst):
+            return False
+        with open(src, "rb") as f1, open(dst, "rb") as f2:
+            while True:
+                chunk = f1.read(_COMPARE_CHUNK)
+                if chunk != f2.read(len(chunk)):
+                    return False
+                if not chunk:
+                    return True
+    except OSError:
         return False
-    if src_sig[1] == dst_sig[1]:
-        return True
-    return filecmp.cmp(src, dst, shallow=False)
 
 
 def _prepare_destination(dst: str) -> None:
@@ -84,16 +84,31 @@ def _write_bytes(dst: str, data: bytes) -> None:
         f.write(data)
 
 
+def _canonical_path(rel_path: str, canon: dict[str, str]) -> str:
+    """逐層取得「第一次出現的拼法」（大小寫不敏感的檔案系統上，同一路徑只有一種拼法）。
+
+    與舊版完整重建一致：先寫入的來源決定資料夾與檔名的大小寫，後面的來源寫進同一個位置。
+    ``canon`` 以 ``os.path.normcase`` 的結果為鍵，記錄每一層路徑的標準拼法。
+    """
+    current = ""
+    for part in rel_path.split(os.sep):
+        candidate = os.path.join(current, part) if current else part
+        current = canon.setdefault(os.path.normcase(candidate), candidate)
+    return current
+
+
 def _collect_bundle_sources(
     sources: list[str],
-) -> dict[str, tuple[str, list[str]]]:
+) -> tuple[dict[str, tuple[str, list[str]]], dict[str, str]]:
     """依來源優先序收集各輸出路徑對應的來源檔案。
 
     Returns:
-        {路徑比對鍵: (staging 內相對路徑, [來源檔案…（優先序由低到高）])}。
+        (plan, canon)。plan：{路徑比對鍵: (staging 內的標準相對路徑, [來源檔案…（優先序由低到高）])}；
+        canon：每一層路徑（資料夾與檔案）的標準拼法。
         比對鍵用 ``os.path.normcase``，使 Windows 上僅大小寫不同的路徑視為同一個檔案。
     """
     plan: dict[str, tuple[str, list[str]]] = {}
+    canon: dict[str, str] = {}
     for source in sources:
         content_root = os.path.join(source, _STAGING_CONTENT_ROOT)
         if not os.path.isdir(content_root):
@@ -102,12 +117,33 @@ def _collect_bundle_sources(
             dirs[:] = [d for d in dirs if d not in _STAGING_SKIP_DIRS]
             rel_root = os.path.relpath(root, source)
             for name in files:
-                rel_path = os.path.join(rel_root, name)
+                rel_path = _canonical_path(os.path.join(rel_root, name), canon)
                 key = os.path.normcase(rel_path)
                 if key not in plan:
                     plan[key] = (rel_path, [])
                 plan[key][1].append(os.path.join(root, name))
-    return plan
+    return plan, canon
+
+
+def _normalize_staging_case(staging_dir: str, canon: dict[str, str]) -> None:
+    """把 staging 內「只有大小寫不同」的既有資料夾與檔案改成標準拼法。
+
+    大小寫不敏感的檔案系統（Windows）上，來源改名大小寫（``modid`` → ``ModID``）時，
+    寫入會落在既有的實體項目上、拼法維持舊的；ZIP 的項目名稱來自 staging 的實體路徑，
+    所以必須先改名，完整重建與增量結果才會一致。大小寫敏感的系統上，兩種拼法本來就是
+    不同的路徑，不會進到這裡（``normcase`` 不改變大小寫）。
+    """
+    for root, dirs, files in os.walk(staging_dir):
+        rel_root = os.path.relpath(root, staging_dir)
+        for names in (dirs, files):
+            for index, name in enumerate(names):
+                rel = name if rel_root == "." else os.path.join(rel_root, name)
+                wanted = canon.get(os.path.normcase(rel))
+                if wanted is None or wanted == rel:
+                    continue
+                new_name = os.path.basename(wanted)
+                os.rename(os.path.join(root, name), os.path.join(root, new_name))
+                names[index] = new_name  # os.walk 之後會以新名稱往下走
 
 
 def _prune_staging(staging_dir: str, expected: set[str]) -> int:
@@ -136,7 +172,8 @@ def build_bundle_staging(sources: list[str], staging_dir: str) -> dict:
     staging 是增量更新的：不再整個刪除重建，而是先算出每個輸出檔「應有的內容」，
     與現有 staging 內容相同就不寫入，最後刪掉不在預期集合內的殘留檔案。結果與完整
     重建一致；沒有 manifest 或版本標記，每次都由來源重新推導，因此不會有過期狀態，
-    中斷後下一次執行也會收斂到同一結果。
+    中斷後下一次執行也會收斂到同一結果。內容是否相同只看位元組（不依 mtime）；大小寫不敏感的
+    檔案系統上，僅大小寫不同的既有資料夾與檔案會先改名成來源的拼法。
 
     Args:
         sources: 依優先序由低到高排列的來源根目錄（不存在者略過）。
@@ -150,9 +187,12 @@ def build_bundle_staging(sources: list[str], staging_dir: str) -> dict:
     """
     os.makedirs(staging_dir, exist_ok=True)
 
+    plan, canon = _collect_bundle_sources(sources)
+    _normalize_staging_case(staging_dir, canon)
+
     copied = merged = written = unchanged = 0
     expected: set[str] = set()
-    for key, (rel_path, srcs) in _collect_bundle_sources(sources).items():
+    for key, (rel_path, srcs) in plan.items():
         dst = os.path.join(staging_dir, rel_path)
         expected.add(key)
 
