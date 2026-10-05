@@ -49,7 +49,12 @@ def resolve_db_choice(
     settings = load_db_settings()
     enabled = settings.enabled if use_db is None else bool(use_db)
     target = (version if version is not None else settings.version).strip()
-    return enabled, target
+    if enabled and not target:
+        log_info(
+            "📚 Mod 資料庫已啟用但尚未指定目標版本，已略過（請到設定或機器翻譯頁選擇）"
+        )
+    # 沒有版本或停用＝實際上不使用資料庫；回傳值就是這次任務的不可變選擇
+    return (True, target) if enabled and target else (False, "")
 
 
 def open_directory_db(

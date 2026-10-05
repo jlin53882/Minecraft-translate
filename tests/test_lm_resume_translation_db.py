@@ -53,8 +53,8 @@ def test_checkpoint_records_page_override_and_disabled(env, monkeypatch):  # noq
             translation_db_version="1.19.2",
         )
     task = lm_resume.peek_interrupted_task()
-    assert task.use_translation_db is False  # 這次任務關閉了資料庫
-    assert task.translation_db_version == "1.19.2"
+    # 這次任務關閉了資料庫：實際生效的選擇是「不使用」（不保留沒用到的版本）
+    assert task.use_translation_db is False and task.translation_db_version == ""
 
 
 def test_legacy_checkpoint_without_database_fields_means_database_unused(
@@ -89,3 +89,35 @@ def test_resume_with_different_database_choice_is_warned(env, monkeypatch):  # n
     run(env, "out", write_new_cache=True)
     text = "\n".join(warnings)
     assert "Mod 資料庫選項" in text and "1.21.1" in text and "1.20.1" in text
+
+
+@pytest.mark.parametrize(
+    ("use_db", "version", "expected"),
+    [
+        (None, None, (True, "1.21.1")),  # 用設定檔
+        (None, "  1.19.2 ", (True, "1.19.2")),  # 頁面覆寫版本
+        (False, "1.19.2", (False, "")),  # 停用：版本不算數
+        (True, "", (False, "")),  # 啟用但沒有版本＝實際不使用
+    ],
+)
+def test_resolve_db_choice_returns_the_effective_choice(
+    monkeypatch, use_db, version, expected
+):
+    _settings(monkeypatch, enabled=True, version="1.21.1")
+    assert lm_translator_db.resolve_db_choice(use_db, version) == expected
+
+
+def test_database_choice_is_resolved_once_per_task(env, monkeypatch):  # noqa: F811
+    """任務中途設定被改掉（設定是「下次任務才套用」）：checkpoint 仍記這次任務實際開的版本。"""
+    reads = iter(["1.21.1"] + ["1.20.1"] * 50)
+
+    def changing_settings():
+        return DbSettings(enabled=True, version=next(reads))
+
+    monkeypatch.setattr(lm_translator_db, "load_db_settings", changing_settings)
+    env.crash_at_translate_call = 2
+    with pytest.raises(SimulatedCrash):
+        run(env, "out", write_new_cache=True)  # 沒傳選項：走設定檔（一鍵流程）
+
+    task = lm_resume.peek_interrupted_task()
+    assert (task.use_translation_db, task.translation_db_version) == (True, "1.21.1")

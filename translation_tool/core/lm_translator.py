@@ -658,9 +658,9 @@ def translate_directory_generator(
     log_info(f"\\n📂 輸入資料夾：{root}\\n📤 輸出資料夾：{out_root}")
     yield {"progress": 0.0}
 
-    with directory_db(
-        root, use_db=use_translation_db, version=translation_db_version
-    ) as db_ctx:
+    # 資料庫選項（設定為「下次任務才套用」）整個任務只解析一次：開啟資料庫、寫回、checkpoint 共用
+    db_choice = resolve_db_choice(use_translation_db, translation_db_version)
+    with directory_db(root, use_db=db_choice[0], version=db_choice[1]) as db_ctx:
         files = _scan_directory_files(root)
         yield {"progress": 0.0}
         if not files:
@@ -729,7 +729,7 @@ def translate_directory_generator(
                 total=total,
                 write_checkpoint=cache_saving,
                 db_ctx=db_ctx,
-                db_choice=resolve_db_choice(use_translation_db, translation_db_version),
+                db_choice=db_choice,
             )
         )
         if pending_events:
