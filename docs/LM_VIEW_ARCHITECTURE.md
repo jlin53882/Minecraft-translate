@@ -86,7 +86,7 @@ LMView 本身不直接操作 cache_manager，只透過 `write_new_cache_switch` 
 3. **抽取**（0.0→0.2）：`extract_items_parallel` 並行抽取（worker 數取自 `translator.parallel_execution_workers`），進度每增加 5% 才 yield 一次
 4. **Cache 命中比對**（0.2）：`_split_directory_items` 分流，命中項目先寫出（dry-run 不寫）
 5. **dry-run**：只輸出 `_dry_run_preview.json` 與 `_dry_run_cache_hit_preview.json` 後結束（progress 1.0）
-6. **checkpoint**：`_restore_directory_checkpoint` 比對 fingerprint，相符才續跑；每批結束 `save_checkpoint`，完整完成後 `clear_checkpoint`
+6. **checkpoint（未完成標記，#151）**：指紋涵蓋全部抽取項目（快取分流之前）；`_note_directory_checkpoint` 比對指紋，相符記錄「接續上次」、不符或舊格式則明確警告並捨棄。**不依位置跳過項目**——已完成批次的譯文在翻譯快取，快取分流自然把它們當命中寫回輸出。每批「快取落盤 → 輸出寫入 → `save_checkpoint`（原子寫入＋fsync）」，完整完成後 `clear_checkpoint`；`translator.enable_cache_saving` 關閉時不寫 checkpoint（沒有可還原的來源）
 7. **批次翻譯**：`run_translator_skeleton` → `translate_items_with_cache_loop`（`lm_translator_shared_loop.py`）→ `translate_batch_smart`（`lm_translator_main.py`）→ 每批寫回輸出檔，結束時寫 `translation_map.json`
 
 ### Cache 命中判定（lang vs patchouli key 不同）

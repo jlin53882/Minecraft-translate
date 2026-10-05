@@ -27,7 +27,7 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 
 行為層測試：`tests/test_view_lifecycle_contracts.py`（poller 的 teardown／重 mount／卸載後不更新、阻塞步驟的執行緒身分、卸載後丟棄結果）、`tests/test_shard_reader.py`、`tests/test_cache_history_store.py`、`tests/test_pipeline_extract_dialog_behavior.py`。
 
-## A. 背景執行緒啟動點（`threading.Thread`，19 處）
+## A. 背景執行緒啟動點（`threading.Thread`，20 處）
 
 | 位置 | 回到 UI 的方式 | owner／結束 |
 |---|---|---|
@@ -44,6 +44,7 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 | `rules_view.py`、`rules/rules_actions.py`（三處） | `_run_on_ui_thread`（`loop.call_soon_threadsafe`；掛載前暫存到 `did_mount`） | worker 結束 |
 | `dashboard_view.py` | `work()` 只讀資料，`_apply_on_ui` 以 `page.run_task` 套用 | worker 結束 |
 | `startup_tasks.py` | 純索引重建，不碰 UI | worker 結束 |
+| `shell/resume_prompt.py`（啟動時檢查能否續跑上次中斷的機器翻譯，#151） | worker 只讀輸入資料夾並比對指紋（不碰 UI、不呼叫 API）；結果以 `page.run_task` 交回 event loop 更新對話框 | worker 結束；使用者在檢查途中關閉對話框時結果被丟棄 |
 | `shell/config_effects.py` | `on_reloaded` → `AppShell._submit_ui`（有 `_disposed` 守衛） | worker 結束；`AppShell.dispose()` |
 
 其他執行緒：`ThreadPoolExecutor`（`icon_cache._run_jar_workers`、`icon_index`）在 `asyncio.to_thread` 的 worker 內使用，純 I/O；`cache_history_store._MIRROR_EXECUTOR` 單一背景執行緒寫歷史 json 鏡像（不碰 UI）。

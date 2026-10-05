@@ -183,3 +183,79 @@ def test_explicit_output_has_no_default_notice(monkeypatch):
     view.output_path.value = "C:/Out"
     view.start_clicked(None)
     assert not [e for e in view.session.snapshot()["logs"] if "未指定輸出" in e.text]
+
+
+def _launch_spy(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type(
+            "T", (), {"start": lambda self: target(*args)}
+        )(),
+    )
+    monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
+    monkeypatch.setattr(
+        lm_view,
+        "run_lm_translation_service",
+        lambda input_dir, output_dir, session, dry_run, export_lang, write_new_cache: (
+            calls.update(
+                input_dir=input_dir,
+                output_dir=output_dir,
+                dry_run=dry_run,
+                export_lang=export_lang,
+                write_new_cache=write_new_cache,
+            )
+        ),
+    )
+    return calls
+
+
+def test_resume_interrupted_restores_inputs_and_options_then_starts(monkeypatch):
+    """#151：續跑帶入上次的輸入與選項（dry-run 一律關閉），之後與按下「開始翻譯」相同。"""
+    calls = _launch_spy(monkeypatch)
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view.dry_run_switch.value = True  # 使用者目前的設定不應影響續跑
+    task = type(
+        "Task",
+        (),
+        {
+            "input_dir": "C:/mods/assets",
+            "output_dir": "C:/out",
+            "export_lang": True,
+            "write_new_cache": False,
+        },
+    )()
+
+    view.resume_interrupted(task)
+
+    assert calls == {
+        "input_dir": "C:/mods/assets",
+        "output_dir": "C:/out",
+        "dry_run": False,
+        "export_lang": True,
+        "write_new_cache": False,
+    }
+    assert view.input_path.value == "C:/mods/assets"
+    assert view.output_path.value == "C:/out"
+
+
+def test_resume_interrupted_does_not_start_a_second_run(monkeypatch):
+    calls = _launch_spy(monkeypatch)
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view._ui_timer_running = True  # 已有任務在跑
+    task = type(
+        "Task",
+        (),
+        {
+            "input_dir": "C:/assets",
+            "output_dir": "",
+            "export_lang": False,
+            "write_new_cache": True,
+        },
+    )()
+
+    view.resume_interrupted(task)
+
+    assert calls == {}
