@@ -6,6 +6,7 @@ import flet as ft
 
 from app.ui.design import C
 from app.views._log import LogView
+from translation_tool.utils.log_unit import log_info
 
 
 def _extractor_build_progress_and_stats(ctx) -> None:
@@ -338,3 +339,10 @@ def _extractor_ui_start(ctx) -> None:
     ctx.add_log(f"[系統] 開始提取 ({ctx.mode})...", level="system")
     ctx.add_log(f"[系統] 來源：{ctx.mods_dir}", level="system")
     ctx.add_log(f"[系統] 輸出：{ctx.final_output}", level="system")
+    log_info(
+        "[系統] 開始提取 (%s)...",
+        ctx.mode,
+        extra={"ui_mirror": True},
+    )
+    log_info("[系統] 來源：%s", ctx.mods_dir, extra={"ui_mirror": True})
+    log_info("[系統] 輸出：%s", ctx.final_output, extra={"ui_mirror": True})

@@ -23,7 +23,10 @@ from app.services_impl.logging_service import (
     GLOBAL_LOG_LIMITER,
     UI_LOG_HANDLER,
 )
-from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
+from app.services_impl.pipelines._pipeline_logging import (
+    ensure_pipeline_logging,
+    mirror_session_log,
+)
 from app.tasks.task_session import TaskSession
 from translation_tool.core.jar_processor import (
     extract_book_files_generator,
@@ -36,6 +39,10 @@ from translation_tool.utils.cancellation import is_cancelled
 from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
+
+
+def _session_log(session, text: str, level: str = "info") -> None:
+    mirror_session_log(session, logger, text, level)
 
 # View 經由本模組取用引擎的提取／預覽 generator（#136）：上方 import 即為對外介面
 
@@ -231,7 +238,7 @@ def _run_extraction_with_session(
     for update in generator:
         if is_cancelled():
             # 在 JAR 之間停止（一鍵流水線的取消）
-            session.add_log(f"⏹ {mode_label} 提取已取消", level="warning")
+            _session_log(session, f"⏹ {mode_label} 提取已取消", level="warning")
             if finish_session:
                 session.finish()
             return
@@ -239,6 +246,7 @@ def _run_extraction_with_session(
         filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
         if filtered is not None:
             if "log" in filtered:
+                # 這些訊息由核心 generator 的 logger 負責寫入後台，這裡只送 UI。
                 session.add_log(filtered["log"])
             if "progress" in filtered:
                 phase_progress = max(0.0, min(1.0, float(filtered["progress"])))
@@ -259,7 +267,8 @@ def _run_extraction_with_session(
     if total_failures > 0:
         if failures.last_stats is not None:
             session.set_summary(dict(failures.last_stats, failures=total_failures))
-        session.add_log(
+        _session_log(
+            session,
             f"❌ {mode_label} 提取有 {total_failures} 個 JAR 無法處理（檔案可能已損毀），"
             "已提取的檔案保留，但此步驟視為失敗",
             level="error",
@@ -273,6 +282,7 @@ def _run_extraction_with_session(
 def _flush_limiter_to_session(session: TaskSession) -> None:
     final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
     if final and "log" in final:
+        # 最終摘要已由核心 generator 記錄到後台，這裡只送 UI。
         session.add_log(final["log"])
 
 
@@ -403,7 +413,7 @@ def run_lang_extraction_service(
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
-        session.add_log(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
+        _session_log(session, f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}", "error")
         _end_failed(session, manage_session)
         GLOBAL_LOG_LIMITER.flush()
     finally:
@@ -448,7 +458,7 @@ def run_book_extraction_service(
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
-        session.add_log(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
+        _session_log(session, f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}", "error")
         _end_failed(session, manage_session)
         GLOBAL_LOG_LIMITER.flush()
     finally:
@@ -481,7 +491,7 @@ def run_dual_extraction_service(
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}")
-        session.add_log(f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}")
+        _session_log(session, f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}", "error")
         _end_failed(session, True)
         GLOBAL_LOG_LIMITER.flush()
     finally:

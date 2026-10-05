@@ -12,7 +12,10 @@ import traceback
 from pathlib import Path
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
-from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
+from app.services_impl.pipelines._pipeline_logging import (
+    ensure_pipeline_logging,
+    mirror_session_log,
+)
 from translation_tool.core.lang_merge_extracted_assets import merge_extracted_to_assets
 from translation_tool.core.lang_merger import (
     merge_zhcn_to_zhtw_from_folder,
@@ -22,6 +25,10 @@ from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
+
+
+def _session_log(session, text: str, level: str = "info") -> None:
+    mirror_session_log(session, logger, text, level)
 
 
 def _count_output_files(out_dir: str) -> dict:
@@ -100,9 +107,9 @@ def _record_zip_result(
                 "error": "; ".join(dict.fromkeys(zip_errors)),
             }
         )
-        session.add_log(f"[ZIP {idx + 1}/{total}] 失敗：{zip_name}")
+        _session_log(session, f"[ZIP {idx + 1}/{total}] 失敗：{zip_name}", "error")
     else:
-        session.add_log(f"[ZIP {idx + 1}/{total}] 完成：{zip_name}")
+        _session_log(session, f"[ZIP {idx + 1}/{total}] 完成：{zip_name}")
         stats["success_zips"] += 1
 
 
@@ -153,6 +160,7 @@ def _merge_one_zip(
             raise_if_cancelled()  # 取消檢查點：每個 update
             # ---- log ----
             if update.get("log"):
+                # 核心合併流程已記錄後台 logger，這裡只送 UI。
                 session.add_log(update["log"])
 
             # ---- progress（疊加 ZIP 進度）----
@@ -168,7 +176,7 @@ def _merge_one_zip(
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
         logger.error(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
-        session.add_log(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
+        _session_log(session, f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}", "error")
         zip_errors.append(str(e))
     return zip_errors
 
@@ -177,7 +185,7 @@ def _fatal_zip_error(session, stats: dict, output_dir: str, error: Exception) ->
     """ZIP 合併的致命錯誤：記錄並寫入摘要（即使失敗也要回報）；``set_error``／finish 由呼叫端處理。"""
     tb = traceback.format_exc()
     logger.error(f"[致命錯誤] ZIP 合併失敗：{error}\n{tb}")
-    session.add_log(f"[致命錯誤] ZIP 合併失敗：{error}\n{tb}")
+    _session_log(session, f"[致命錯誤] ZIP 合併失敗：{error}\n{tb}", "error")
     error_summary = _zip_summary(stats, output_dir)
     session.set_summary(error_summary)
     return error_summary
@@ -218,7 +226,7 @@ def run_merge_zip_batch_service(
     try:
         total = len(zip_paths)
         if total == 0:
-            session.add_log("[系統] 未選擇任何 ZIP 檔案")
+            _session_log(session, "[系統] 未選擇任何 ZIP 檔案", "warning")
             session.finish()
             finished = True
             yield {
@@ -233,7 +241,7 @@ def run_merge_zip_batch_service(
             zip_name = Path(zip_path).name
             zip_base_progress = idx / total
 
-            session.add_log(f"[ZIP {idx + 1}/{total}] 開始處理：{zip_name}")
+            _session_log(session, f"[ZIP {idx + 1}/{total}] 開始處理：{zip_name}")
 
             zip_errors = _merge_one_zip(
                 zip_path,
@@ -262,7 +270,7 @@ def run_merge_zip_batch_service(
         # 部分失敗維持批次語意（DONE + failed_zips_list）；全部失敗才視為任務失敗，
         # 避免呼叫端（例如一鍵流程）把「沒有任何 ZIP 成功」當成完成。
         if stats["success_zips"] == 0:
-            session.add_log("[系統] 所有 ZIP 皆處理失敗")
+            _session_log(session, "[系統] 所有 ZIP 皆處理失敗", "error")
             session.set_error()
             session.finish()  # ERROR 也要 finish，TaskManager 才會離開 active
         else:
@@ -315,6 +323,7 @@ def _run_folder_stage1(
         # 取消檢查點：每個 update 之後（停止消費即中止核心 generator 的後續處理）
         raise_if_cancelled()
         if update.get("log"):
+            # 核心合併流程已記錄後台 logger，這裡只送 UI。
             session.add_log(update["log"])
         if "progress" in update and update["progress"] is not None:
             _set_monotonic_progress(session, update["progress"])
@@ -339,15 +348,15 @@ def _run_extracted_stage2(
     # 從 input_dir 內 XX_extracted/ 的 lang 檔 key-by-key 合併進
     # output_dir/lang_output/assets/{modid}/lang/{xx_yy}.json
     if folder_errors:
-        session.add_log("[階段 2/2 略過] 階段 1 發生錯誤，不處理部分輸出")
+        _session_log(session, "[階段 2/2 略過] 階段 1 發生錯誤，不處理部分輸出", "warning")
         return
     try:
         cfg = load_config()
         lang_merger = cfg.get("lang_merger", {})
         if not lang_merger.get("enable_extracted_to_assets_merge", True):
-            session.add_log("[階段 2/2 略過] 檔案合併(階段 2) 未啟用，跳過")
+            _session_log(session, "[階段 2/2 略過] 檔案合併(階段 2) 未啟用，跳過")
             return
-        session.add_log("[階段 2/2 開始] XX_extracted → assets 合併")
+        _session_log(session, "[階段 2/2 開始] XX_extracted → assets 合併")
         lang_output_dir = os.path.join(output_dir, "lang_output")
         stage2_start = progress_start + (progress_end - progress_start) * 0.90
         for update in merge_extracted_to_assets(
@@ -360,6 +369,7 @@ def _run_extracted_stage2(
         ):
             raise_if_cancelled()  # 取消檢查點：階段 2 每個 update
             if update.get("log"):
+                # 核心 assets 合併流程已記錄後台 logger，這裡只送 UI。
                 session.add_log(update["log"])
             if "progress" in update and update["progress"] is not None:
                 _set_monotonic_progress(
@@ -368,13 +378,13 @@ def _run_extracted_stage2(
                 )
             if update.get("error"):
                 folder_errors.append(_soft_error_detail(update))
-                session.add_log("[階段 2/2 錯誤] assets 合併中止")
+                _session_log(session, "[階段 2/2 錯誤] assets 合併中止", "error")
                 break
         if not folder_errors:
-            session.add_log("[階段 2/2 完成]")
+            _session_log(session, "[階段 2/2 完成]")
     except Exception as stage2_err:  # noqa: BLE001
         logger.warning(f"[階段 2/2 錯誤]: {stage2_err}")
-        session.add_log(f"[階段 2/2 錯誤]: {stage2_err}")
+        _session_log(session, f"[階段 2/2 錯誤]: {stage2_err}", "error")
         folder_errors.append(str(stage2_err))
 
 
@@ -393,7 +403,7 @@ def _fatal_folder_error(
     """資料夾合併的致命錯誤：記錄、寫入摘要並 ``set_error()``；回傳摘要（finish 由呼叫端決定）。"""
     tb = traceback.format_exc()
     logger.error(f"[致命錯誤] 資料夾合併失敗：{error}\n{tb}")
-    session.add_log(f"[致命錯誤] 資料夾合併失敗：{error}\n{tb}")
+    _session_log(session, f"[致命錯誤] 資料夾合併失敗：{error}\n{tb}", "error")
     error_summary = _folder_summary(stats, output_dir)
     session.set_summary(error_summary)
     session.set_error()
@@ -431,7 +441,7 @@ def run_merge_folder_batch_service(
     finished = False  # generator 被 close（取消）時，yield 之後的 finish 不會執行；finally 補上
 
     try:
-        session.add_log(f"[資料夾] 開始處理：{os.path.basename(input_dir)}")
+        _session_log(session, f"[資料夾] 開始處理：{os.path.basename(input_dir)}")
 
         try:
             _run_folder_stage1(
@@ -451,10 +461,10 @@ def run_merge_folder_batch_service(
             )
 
             if folder_errors:
-                session.add_log("[階段 1/2 失敗] zh_cn → zh_tw 處理發生錯誤")
+                _session_log(session, "[階段 1/2 失敗] zh_cn → zh_tw 處理發生錯誤", "error")
             else:
-                session.add_log(f"[資料夾] 完成：{os.path.basename(input_dir)}")
-                session.add_log("[階段 1/2 完成] zh_cn → zh_tw 翻譯已完成")
+                _session_log(session, f"[資料夾] 完成：{os.path.basename(input_dir)}")
+                _session_log(session, "[階段 1/2 完成] zh_cn → zh_tw 翻譯已完成")
 
             # 階段 2 (2026-08-02 PR-XX merge-asset-integration):
             # 從 input_dir 內 XX_extracted/ 的 lang 檔 key-by-key 合併進
@@ -471,7 +481,7 @@ def run_merge_folder_batch_service(
         except Exception as e:  # noqa: BLE001
             tb = traceback.format_exc()
             logger.error(f"[資料夾] 錯誤：{input_dir}\n{e}\n{tb}")
-            session.add_log(f"[資料夾] 錯誤：{input_dir}\n{e}\n{tb}")
+            _session_log(session, f"[資料夾] 錯誤：{input_dir}\n{e}\n{tb}", "error")
             folder_errors.append(str(e))
 
         _record_folder_result(stats, input_dir, folder_errors)

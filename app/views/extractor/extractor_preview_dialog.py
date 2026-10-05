@@ -21,7 +21,7 @@ from app.views._log import LogView
 from app.views.extractor import extractor_dialog as _extractor_dialog
 from app.views.extractor.extractor_dialog_helpers import format_size
 from app.views.extractor.extractor_state import PreviewState
-from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
 # 背景任務 → UI 的刷新間隔（秒）
 _UI_FLUSH_INTERVAL_SEC = 0.2
@@ -217,6 +217,12 @@ def _preview_add_log(ctx, msg, level: str = "info", update: bool = True):
         elif msg.startswith("[完成"):
             level = "system"
     ctx.log_view.add(f">> {msg}", level=level, update=update)
+
+
+def _preview_backend_log(msg: str, level: str = "info") -> None:
+    """將只顯示在預覽 UI 的訊息同步寫入應用程式 log 檔案。"""
+    log_fn = {"warning": log_warning, "error": log_error}.get(level, log_info)
+    log_fn(msg, extra={"ui_mirror": True})
 
 
 def _preview_result_controls(ctx, result: dict) -> list:
@@ -440,6 +446,7 @@ async def _preview_ui_poller(ctx):
 
     if final_error:
         ctx.add_log(f"[ERROR] {final_error}", level="error", update=False)
+        _preview_backend_log(f"[ERROR] {final_error}", "error")
         ctx.status_text.value = f"預覽失敗：{final_error}"
         ctx.progress_bar.value = 0
         ctx.progress_pct.value = "--"
@@ -449,6 +456,7 @@ async def _preview_ui_poller(ctx):
     elif final_result:
         results = final_result.get("preview_results", [])
         ctx.add_log(f"[完成] 找到 {len(results)} 個 JAR", level="system", update=False)
+        _preview_backend_log(f"[完成] 找到 {len(results)} 個 JAR")
         ctx.show_result_dialog(final_result)
     else:
         if ctx.state["cancelled"]:
@@ -492,6 +500,7 @@ def _preview_start_scan(ctx):
     ctx.page.update()
 
     ctx.add_log(f"[系統] 開始預覽 {ctx.mode.upper()} 掃描...", level="system")
+    _preview_backend_log(f"[系統] 開始預覽 {ctx.mode.upper()} 掃描...")
 
     threading.Thread(
         target=functools.partial(_preview_do_scan, ctx), daemon=True

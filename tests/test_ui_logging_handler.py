@@ -35,3 +35,17 @@ def test_levels_and_plain_message():
 
 def test_no_session_is_noop():
     _emit(UISessionLogHandler(), logging.ERROR, "x")
+
+
+def test_ui_mirror_record_does_not_duplicate_session_log():
+    handler = UISessionLogHandler()
+    session = TaskSession()
+    handler.set_session(session)
+    record = logging.LogRecord(
+        "translation_tool.x", logging.INFO, __file__, 1, "mirrored", None, None
+    )
+    record.ui_mirror = True
+
+    handler.emit(record)
+
+    assert session.snapshot()["logs"] == []

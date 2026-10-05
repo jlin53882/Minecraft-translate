@@ -30,6 +30,10 @@ class UISessionLogHandler(logging.Handler):
         """
         if not self._session:
             return
+        # Pipeline service 可能會把直接寫入 session 的訊息鏡像到檔案 logger。
+        # 這類記錄不可再次回灌 session，否則 UI 會顯示兩次相同訊息。
+        if getattr(record, "ui_mirror", False):
+            return
 
         try:
             msg: str = redact_secrets(record.getMessage())

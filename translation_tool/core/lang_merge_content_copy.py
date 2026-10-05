@@ -383,8 +383,15 @@ def process_content_or_copy_file_impl(
                 target = safe_join(_pp_dir, pending_name, normalized_root, rel_path)
             else:
                 target = safe_join(_pp_dir, normalized_root, rel_path)
-        except UnsafePathError:
-            log_error(f"[Patchouli] 拒絕不安全路徑: {rel_path}")
+        except UnsafePathError as exc:
+            log_error(
+                "[Patchouli] 拒絕不安全路徑: root=%r normalized_root=%r "
+                "rel_path=%r reason=%s",
+                _pp_dir,
+                normalized_root,
+                rel_path,
+                exc,
+            )
             return {"success": False, "error": True}
         os.makedirs(os.path.dirname(target), exist_ok=True)
 
