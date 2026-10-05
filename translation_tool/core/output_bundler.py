@@ -128,7 +128,20 @@ def _load_reusable_state(output_zip_path: str, fingerprint: str) -> bool:
             or state.get("zip_size") != os.path.getsize(output_zip_path)
         ):
             return False
-        return state.get("zip_hash") == _hash_file(output_zip_path)
+        # 快速路徑：大小與 mtime_ns 皆與上次成功打包時相同，視為 ZIP 未被動過，
+        # 不必重讀整個 ZIP（避免每次沿用都付出完整讀取 I/O）。
+        # 取捨：刻意還原 mtime 的竄改或靜默位元腐化不會被偵測，必要時用 force_rebuild。
+        if state.get("zip_mtime_ns") == os.stat(output_zip_path).st_mtime_ns:
+            return True
+        # mtime 不同（被碰過、複製過）→ 退回完整雜湊比對，內容相同仍可沿用。
+        actual_hash = _hash_file(output_zip_path)
+        if state.get("zip_hash") != actual_hash:
+            return False
+        try:  # 刷新 mtime，下次即可走快速路徑
+            _commit_state(output_zip_path, fingerprint, actual_hash)
+        except OSError:
+            pass
+        return True
     except (OSError, ValueError):
         return False
 
@@ -142,13 +155,16 @@ def _remove_quietly(path: str) -> None:
         log_warning(f"無法移除 {path}: {ex}")
 
 
-def _commit_state(output_zip_path: str, fingerprint: str) -> None:
+def _commit_state(
+    output_zip_path: str, fingerprint: str, zip_hash: str | None = None
+) -> None:
     """ZIP 已完整落地後才呼叫：以暫存檔＋原子替換寫入狀態 sidecar。"""
     state = {
         "version": BUNDLE_STATE_VERSION,
         "fingerprint": fingerprint,
         "zip_size": os.path.getsize(output_zip_path),
-        "zip_hash": _hash_file(output_zip_path),
+        "zip_mtime_ns": os.stat(output_zip_path).st_mtime_ns,
+        "zip_hash": zip_hash or _hash_file(output_zip_path),
     }
     final = _state_path(output_zip_path)
     tmp = final + ".tmp"
@@ -165,13 +181,22 @@ class _ProgressTracker:
         self.done = 0
         self._every = max(1, self.total // 20)
 
-    def tick(self) -> dict[str, Any] | None:
+    @property
+    def progress(self) -> float:
+        """目前進度（0.15~0.85）；所有階段共用，確保單調不倒退。"""
+        return 0.15 + 0.7 * min(self.done, self.total) / self.total
+
+    def advance(self) -> None:
+        """記錄一個已寫入的檔案（不產生更新；用於已自行 yield 的單檔寫入）。"""
         self.done += 1
+
+    def tick(self) -> dict[str, Any] | None:
+        self.advance()
         if self.done % self._every and self.done < self.total:
             return None
         done = min(self.done, self.total)
         return {
-            "progress": 0.15 + 0.7 * done / self.total,
+            "progress": self.progress,
             "log": f"正在建立資源包：{done} / {self.total} 個檔案（{done * 100 // self.total}%）",
         }
 
@@ -416,6 +441,7 @@ def bundle_outputs_generator(
                     seen_files["pack.mcmeta"] = 1
                     zf.writestr("pack.mcmeta", content)
                     total_files_added += 1
+                    tracker.advance()
                     yield {"progress": 0.05, "log": "已寫入 pack.mcmeta（來自資料夾）"}
                     log_info(f"寫入 pack.mcmeta（來自：{pack_mcmeta_source}）")
                 except Exception as ex:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
@@ -435,6 +461,7 @@ def bundle_outputs_generator(
                         with open(pack_png_source, "rb") as src:
                             zf.writestr("pack.png", src.read())
                         total_files_added += 1
+                        tracker.advance()
                         yield {"progress": 0.1, "log": "已寫入 pack.png（來自資料夾）"}
                         log_info(f"寫入 pack.png（來自：{pack_png_source}）")
                 except Exception as ex:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
@@ -454,14 +481,12 @@ def bundle_outputs_generator(
                 except Exception as ex:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
                     yield {"progress": 0.1, "log": f"複製 pack.png 失敗: {ex}"}
 
-            total_steps = len(subfolders) + (len(extra_folders) if extra_folders else 0)
-            step = 0
-
             for folder_name in subfolders:
-                step += 1
-                progress = 0.15 + (step / total_steps) * 0.7
                 full_source_path = os.path.join(input_root_dir, folder_name)
-                yield {"progress": progress, "log": f"正在掃描來源: '{folder_name}'..."}
+                yield {
+                    "progress": tracker.progress,
+                    "log": f"正在掃描來源: '{folder_name}'...",
+                }
                 log_info(f"掃描資料夾: {full_source_path}")
 
                 base = "" if folder_name.lower() == "root" else folder_name
@@ -472,13 +497,13 @@ def bundle_outputs_generator(
                 if count > 0:
                     total_files_added += count
                     yield {
-                        "progress": progress,
+                        "progress": tracker.progress,
                         "log": f"成功從 '{folder_name}' 加入 {count} 個檔案。",
                     }
                     log_info(f"從 '{folder_name}' 加入 {count} 個檔案")
                 else:
                     yield {
-                        "progress": progress,
+                        "progress": tracker.progress,
                         "log": f"警告：'{folder_name}' 中沒有可打包的檔案。",
                     }
                     log_warning(f"'{folder_name}' 中沒有可打包的檔案")
@@ -496,25 +521,24 @@ def bundle_outputs_generator(
                     seen_files[archive_name] = 1
                     zf.write(full_path, archive_name)
                     total_files_added += 1
+                    tracker.advance()
                     yield {
-                        "progress": 0.15 + ((step + 1) / total_steps) * 0.7,
+                        "progress": tracker.progress,
                         "log": f"額外檔案: +1 ({entry})",
                     }
                     log_debug(f"加入根目錄檔案: {entry}")
 
             if extra_folders:
                 for extra_path in extra_folders:
-                    step += 1
-                    progress = 0.15 + (step / total_steps) * 0.7
                     yield {
-                        "progress": progress,
+                        "progress": tracker.progress,
                         "log": f"正在處理額外項目: '{extra_path}'...",
                     }
                     log_debug(f"處理額外項目: {extra_path}")
 
                     if not os.path.exists(extra_path):
                         yield {
-                            "progress": progress,
+                            "progress": tracker.progress,
                             "log": f"額外項目不存在: '{extra_path}'",
                         }
                         log_warning(f"額外項目不存在: {extra_path}")
@@ -532,8 +556,9 @@ def bundle_outputs_generator(
                         seen_files[archive_name] = 1
                         zf.write(extra_path, archive_name)
                         total_files_added += 1
+                        tracker.advance()
                         yield {
-                            "progress": progress,
+                            "progress": tracker.progress,
                             "log": f"額外檔案: +1 ({file_name})",
                         }
                         log_info(f"加入額外檔案: {file_name}")
@@ -547,7 +572,7 @@ def bundle_outputs_generator(
                                 )
                                 total_files_added += count
                                 yield {
-                                    "progress": progress,
+                                    "progress": tracker.progress,
                                     "log": f"額外資料夾 '{parent_name}/{entry}': +{count} 個檔案",
                                 }
                                 log_debug(
@@ -564,8 +589,9 @@ def bundle_outputs_generator(
                                 seen_files[archive_name] = 1
                                 zf.write(src, archive_name)
                                 total_files_added += 1
+                                tracker.advance()
                                 yield {
-                                    "progress": progress,
+                                    "progress": tracker.progress,
                                     "log": f"額外檔案: +1 ({entry})",
                                 }
                                 log_debug(f"額外資料夾內檔案: {entry}")

@@ -330,3 +330,74 @@ def test_state_commit_failure_keeps_new_zip_and_next_run_rebuilds(
     assert not state_file(zip_path).exists()
     assert not reused(run(src, zip_path))  # 無有效狀態 → 重建
     assert reused(run(src, zip_path))
+
+
+def _count_zip_hashes(monkeypatch, zip_path):
+    calls = []
+    real = output_bundler._hash_file
+
+    def spy(path):
+        if str(path) == str(zip_path):
+            calls.append(path)
+        return real(path)
+
+    monkeypatch.setattr(output_bundler, "_hash_file", spy)
+    return calls
+
+
+def test_reuse_fast_path_does_not_reread_the_zip(src, zip_path, monkeypatch):
+    run(src, zip_path)
+    calls = _count_zip_hashes(monkeypatch, zip_path)
+
+    assert reused(run(src, zip_path))
+    assert calls == []
+
+
+def test_touched_zip_with_same_content_is_reused_via_hash_then_fast(
+    src, zip_path, monkeypatch
+):
+    run(src, zip_path)
+    st = zip_path.stat()
+    os.utime(zip_path, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    calls = _count_zip_hashes(monkeypatch, zip_path)
+
+    assert reused(run(src, zip_path))  # mtime 不同 → 雜湊比對，內容相同仍沿用
+    assert len(calls) == 1
+    assert reused(run(src, zip_path))  # 狀態已刷新 → 快速路徑
+    assert len(calls) == 1
+
+
+def test_force_rebuild_repairs_corruption_that_keeps_size_and_mtime(src, zip_path):
+    run(src, zip_path)
+    st = zip_path.stat()
+    data = bytearray(zip_path.read_bytes())
+    data[len(data) // 2] ^= 0xFF
+    zip_path.write_bytes(bytes(data))
+    os.utime(
+        zip_path, ns=(st.st_atime_ns, st.st_mtime_ns)
+    )  # 已知取捨：快速路徑不讀 ZIP
+
+    assert not reused(run(src, zip_path, force_rebuild=True))
+    with zipfile.ZipFile(zip_path) as zf:
+        assert zf.testzip() is None
+
+
+def test_progress_never_goes_backwards_with_pack_and_root_files(tmp_path, zip_path):
+    root = tmp_path / "p"
+    for i in range(5):
+        d = root / f"m{i}/assets/m/lang"
+        d.mkdir(parents=True)
+        for k in range(40):
+            (d / f"f{k}.json").write_text("{}")
+    (root / "pack.mcmeta").write_text('{"pack": {}}')
+    (root / "pack.png").write_bytes(b"\x89PNG")
+    (root / "readme.txt").write_text("x")
+    extra = tmp_path / "extra"
+    extra.mkdir()
+    (extra / "e.txt").write_text("e")
+
+    updates = run(root, zip_path, extra_folders=[str(extra)])
+    values = [u["progress"] for u in updates if u["progress"] >= 0.15]
+
+    assert values == sorted(values)
+    assert updates[-1]["progress"] == 1.0
