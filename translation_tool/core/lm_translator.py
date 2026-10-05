@@ -48,9 +48,14 @@ from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
 from translation_tool.utils.config_manager import (
     get_batch_write_interval,
     load_config,
+    resolve_project_path,
 )
 from translation_tool.utils.fs_utils import fsync_directory
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
+from translation_tool.utils.translation_db import (
+    TranslationDB,
+    split_items_by_translation_db,
+)
 
 # Keep historical module attributes patchable while the shared loop owns writes.
 add_to_cache = _cache_manager.add_to_cache
@@ -284,12 +289,32 @@ def _split_directory_items(
             return bool(source) and entry.get("src") == source
         return True
 
-    return prepare_translator_items(
+    cached_items, items_to_translate = prepare_translator_items(
         all_items,
         cache_rules=_directory_cache_rules(),
         is_valid_hit=is_valid_hit,
         cache_provider=get_cache_dict_ref,
     )
+    db_hits, items_to_translate = split_items_by_translation_db(
+        _open_translation_db(),
+        items_to_translate,
+        is_translated=value_fully_translated,
+    )
+    if db_hits:
+        log_info(f"📚 預翻譯資料庫命中 {len(db_hits)} 筆")
+    return cached_items + db_hits, items_to_translate
+
+
+def _open_translation_db() -> TranslationDB | None:
+    """依設定開啟預翻譯資料庫；未啟用、未設定路徑或無法開啟時回傳 None。"""
+    cfg = load_config().get("translator", {})
+    if not cfg.get("enable_translation_db", False):
+        return None
+    path = str(cfg.get("translation_db_path") or "").strip()
+    if not path:
+        return None
+    db = TranslationDB(resolve_project_path(path))
+    return db if db.available else None
 
 
 def _write_directory_outputs(
