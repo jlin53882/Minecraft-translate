@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from translation_tool.core.lm_translator_skeleton import make_checkpoint_adapter
 
 
@@ -94,6 +96,32 @@ def test_write_is_fsynced_and_leaves_no_tmp_file(tmp_path, monkeypatch):
     assert json.loads(adapter.path.read_text(encoding="utf-8"))["processed"] == 3
 
 
+def test_directory_is_fsynced_after_the_replace(tmp_path, monkeypatch):
+    """只 fsync 暫存檔不夠：rename 造成的目錄項目更新也要同步（replace 之後）。"""
+    from translation_tool.core import lm_translator_skeleton as skeleton
+
+    monkeypatch.setenv("MCT_DATA_DIR", str(tmp_path))
+    events: list[tuple[str, object]] = []
+    adapter = _adapter()
+    real_replace = type(adapter.path).replace
+
+    def tracking_replace(self, target):
+        events.append(("replace", str(target)))
+        return real_replace(self, target)
+
+    monkeypatch.setattr(type(adapter.path), "replace", tracking_replace)
+    monkeypatch.setattr(
+        skeleton, "fsync_directory", lambda path: events.append(("fsync_dir", path))
+    )
+
+    adapter(_state())
+
+    assert [name for name, _ in events] == ["replace", "fsync_dir"], (
+        "必須先 replace，再同步目錄"
+    )
+    assert events[1][1] == adapter.path.parent
+
+
 def test_crash_before_replace_keeps_the_previous_checkpoint(tmp_path, monkeypatch):
     monkeypatch.setenv("MCT_DATA_DIR", str(tmp_path))
     adapter = _adapter()
@@ -105,10 +133,8 @@ def test_crash_before_replace_keeps_the_previous_checkpoint(tmp_path, monkeypatc
 
     monkeypatch.setattr(type(adapter.path), "replace", crash)
     newer = {**_state(), "processed": 6}
-    try:
+    with pytest.raises(OSError):
         adapter(newer)
-    except OSError:
-        pass
     monkeypatch.undo()
 
     assert adapter.path.read_text(encoding="utf-8") == before  # 不會留下半截 JSON

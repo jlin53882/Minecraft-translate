@@ -27,6 +27,7 @@ from translation_tool.utils.cache_manager import (
 from translation_tool.utils.cache_manager import (
     save_translation_cache as _default_cache_save,
 )
+from translation_tool.utils.fs_utils import fsync_directory
 
 
 @dataclass(frozen=True)
@@ -78,7 +79,8 @@ class JsonCheckpointAdapter:
     def __call__(self, state: dict[str, Any]) -> None:
         """Atomically and durably persist the last completed batch boundary.
 
-        fsync 後才 replace：打包 exe 關閉視窗不保證執行清理，不能依賴關閉流程補寫。
+        暫存檔 fsync → replace → fsync 目錄：後者讓 rename 本身也持久化。
+        打包 exe 關閉視窗不保證執行清理，不能依賴關閉流程補寫。
         """
         assert self.path is not None
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -98,6 +100,7 @@ class JsonCheckpointAdapter:
             f.flush()
             os.fsync(f.fileno())
         temporary.replace(self.path)
+        fsync_directory(self.path.parent)
 
     def clear(self) -> None:
         """Remove a completed checkpoint; failed/cancelled tasks retain it."""
