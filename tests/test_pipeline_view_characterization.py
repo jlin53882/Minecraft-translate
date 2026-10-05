@@ -8,14 +8,16 @@ import os
 import flet as ft
 
 from app.tasks import LogEntry
+from app.ui.design import C
 from app.ui.snack import show_snack
-from app.views.pipeline import pipeline_view
-from app.views.pipeline.pipeline_view import (
-    PipelineConfig,
+from app.views.pipeline import pipeline_config
+from app.views.pipeline.pipeline_actions import PipelineActions, PipelineServices
+from app.views.pipeline.pipeline_config import PipelineConfig
+from app.views.pipeline.pipeline_progress import (
     PipelineProgressPanel,
     PipelineStepChip,
-    PipelineView,
 )
+from app.views.pipeline.pipeline_view import PipelineView
 from tests.conftest import mock_filepicker, mock_page
 
 # -----------------------------------------------------------------------------
@@ -40,6 +42,9 @@ class _Session:
 
     def set_error(self):
         self._error = True
+
+    def finish(self):
+        self._done = True
 
     def set_progress(self, val):
         self._progress = val
@@ -78,7 +83,7 @@ class _Session:
 def test_pipeline_config_default_paths(monkeypatch):
     """驗證 PipelineConfig 產生的路徑符合預期結構"""
     monkeypatch.setattr(
-        pipeline_view,
+        pipeline_config,
         "load_config",
         lambda: {
             "lang_merger": {
@@ -109,7 +114,7 @@ def test_pipeline_config_default_paths(monkeypatch):
 def test_pipeline_config_extract_paths(monkeypatch):
     """驗證 extract_*_output_dir 屬性"""
     monkeypatch.setattr(
-        pipeline_view,
+        pipeline_config,
         "load_config",
         lambda: {
             "lang_merger": {},
@@ -129,7 +134,7 @@ def test_pipeline_config_extract_paths(monkeypatch):
 def test_pipeline_config_merge_paths(monkeypatch):
     """驗證 merge_* 屬性"""
     monkeypatch.setattr(
-        pipeline_view,
+        pipeline_config,
         "load_config",
         lambda: {
             "lang_merger": {},
@@ -145,7 +150,7 @@ def test_pipeline_config_merge_paths(monkeypatch):
 def test_pipeline_config_translate_paths(monkeypatch):
     """驗證 translate_* 屬性"""
     monkeypatch.setattr(
-        pipeline_view,
+        pipeline_config,
         "load_config",
         lambda: {
             "lang_merger": {
@@ -172,7 +177,7 @@ def test_pipeline_config_translate_paths(monkeypatch):
 def test_pipeline_config_bundle_paths(monkeypatch):
     """驗證 bundle_* 屬性"""
     monkeypatch.setattr(
-        pipeline_view,
+        pipeline_config,
         "load_config",
         lambda: {
             "lang_merger": {},
@@ -334,11 +339,10 @@ def test_pipeline_progress_panel_add_log():
     assert len(panel.log_view._list_view.controls) == 1
     text_ctrl = panel.log_view._list_view.controls[0]
     assert "測試訊息" in text_ctrl.value
-    # PR refactor/unified-log-view: 預設顏色從 CYAN_700 改為 theme.TEXT_LOG_INFO
+    # PR refactor/unified-log-view: 預設顏色從 CYAN_700 改為 C.DIA
     # (LogView 把無前綴的 info 等級對應到 INFO 顏色，不再是 DEFAULT)
-    from app.ui import theme
 
-    assert text_ctrl.color == theme.TEXT_LOG_INFO
+    assert text_ctrl.color == C.DIA
 
 
 def test_pipeline_progress_panel_add_log_success():
@@ -372,7 +376,6 @@ def test_pipeline_progress_panel_add_log_failure():
 
 def test_pipeline_view_initializes_buttons(monkeypatch):
     """驗證 PipelineView 初始化時有 6 個按鈕"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
     page = mock_page()
     view = PipelineView(page, mock_filepicker())
 
@@ -395,7 +398,6 @@ def test_pipeline_view_initializes_buttons(monkeypatch):
 
 def test_pipeline_view_progress_panel_hidden_initially(monkeypatch):
     """驗證進度面板初始隱藏"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
     page = mock_page()
     view = PipelineView(page, mock_filepicker())
 
@@ -404,7 +406,6 @@ def test_pipeline_view_progress_panel_hidden_initially(monkeypatch):
 
 def test_pipeline_view_lang_code_checks_empty_initially(monkeypatch):
     """驗證 _lang_code_checks 初始為空 dict"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
     page = mock_page()
     view = PipelineView(page, mock_filepicker())
 
@@ -418,7 +419,6 @@ def test_pipeline_view_lang_code_checks_empty_initially(monkeypatch):
 
 def test_on_extract_click_without_input_shows_snack(monkeypatch):
     """驗證缺少 Mod 來源路徑時顯示 SnackBar"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
     page = mock_page()
     view = PipelineView(page, mock_filepicker())
     view.input_path_text.value = ""
@@ -431,7 +431,6 @@ def test_on_extract_click_without_input_shows_snack(monkeypatch):
 
 def test_on_extract_click_without_output_shows_snack(monkeypatch):
     """驗證缺少輸出路徑時顯示 SnackBar"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
     page = mock_page()
     view = PipelineView(page, mock_filepicker())
     view.input_path_text.value = "C:/input"
@@ -444,7 +443,6 @@ def test_on_extract_click_without_output_shows_snack(monkeypatch):
 
 def test_on_merge_click_without_input_shows_snack(monkeypatch):
     """驗證 _on_merge_click 缺少輸入時顯示 SnackBar"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
     page = mock_page()
     view = PipelineView(page, mock_filepicker())
     view.input_path_text.value = ""
@@ -457,7 +455,6 @@ def test_on_merge_click_without_input_shows_snack(monkeypatch):
 
 def test_on_translate_click_without_input_shows_snack(monkeypatch):
     """驗證 _on_translate_click 缺少輸入時顯示 SnackBar"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
     page = mock_page()
     view = PipelineView(page, mock_filepicker())
     view.input_path_text.value = ""
@@ -470,7 +467,6 @@ def test_on_translate_click_without_input_shows_snack(monkeypatch):
 
 def test_on_bundle_click_without_input_shows_snack(monkeypatch):
     """驗證 _on_bundle_click 缺少輸入時顯示 SnackBar"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
     page = mock_page()
     view = PipelineView(page, mock_filepicker())
     view.input_path_text.value = ""
@@ -483,7 +479,6 @@ def test_on_bundle_click_without_input_shows_snack(monkeypatch):
 
 def test_on_one_click_click_without_input_shows_snack(monkeypatch):
     """驗證 _on_one_click_click 缺少輸入時顯示 SnackBar"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
     page = mock_page()
     view = PipelineView(page, mock_filepicker())
     view.input_path_text.value = ""
@@ -499,37 +494,33 @@ def test_on_one_click_click_without_input_shows_snack(monkeypatch):
 # -----------------------------------------------------------------------------
 
 
-def test_run_translate_calls_service_with_correct_args(monkeypatch):
-    """驗證 _run_translate 正確呼叫 run_lm_translation_service"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
-    calls = {}
-    monkeypatch.setattr(
-        pipeline_view.threading,
-        "Thread",
-        lambda target=None, args=(), daemon=None: type(
-            "T", (), {"start": lambda self: target(*args)}
-        )(),
-    )
-    monkeypatch.setattr(
-        pipeline_view,
-        "run_lm_translation_service",
-        lambda **kw: calls.update(kw) or (_ for _ in ()).throw(StopIteration()),
+def _inline_view(tmp_path=None, **services):
+    """以注入的 service 與「同步啟動」的 worker 建立 PipelineView（不 patch 任何 module 名稱）。"""
+    return PipelineView(
+        mock_page(),
+        mock_filepicker(),
+        actions=PipelineActions(PipelineServices(**services)),
+        launch_worker=lambda target: target(),
     )
 
-    page = mock_page()
-    view = PipelineView(page, mock_filepicker())
+
+def test_run_translate_calls_service_with_correct_args(tmp_path):
+    """驗證 _run_translate 以正確參數呼叫翻譯 service（透過注入的 PipelineServices）"""
+    calls = {}
+    view = _inline_view(translate=lambda **kw: calls.update(kw))
 
     view._run_translate(
-        input_dir="C:/in",
-        output_dir="C:/out",
+        input_dir=str(tmp_path / "in"),
+        output_dir=str(tmp_path / "out"),
         dry_run=True,
         write_new_cache=False,
     )
 
-    assert calls["input_dir"] == "C:/in"
-    assert calls["output_dir"] == "C:/out"
+    assert calls["input_dir"] == str(tmp_path / "in")
+    assert calls["output_dir"] == str(tmp_path / "out")
     assert calls["dry_run"] is True
     assert calls["write_new_cache"] is False
+    assert (tmp_path / "out").is_dir()  # 輸出目錄由 action 建立
 
 
 # -----------------------------------------------------------------------------
@@ -537,30 +528,20 @@ def test_run_translate_calls_service_with_correct_args(monkeypatch):
 # -----------------------------------------------------------------------------
 
 
-def test_run_bundle_calls_service_with_all_args(monkeypatch):
-    """驗證 _run_bundle 正確呼叫 run_bundling_service（含擴展參數）"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
+def test_run_bundle_calls_service_with_all_args(tmp_path):
+    """驗證 _run_bundle 正確呼叫打包 service（含擴展參數）"""
     calls = {}
 
     def fake_bundle(**kwargs):
         calls.update(kwargs)
         return iter([])
 
-    monkeypatch.setattr(
-        pipeline_view.threading,
-        "Thread",
-        lambda target=None, args=(), daemon=None: type(
-            "T", (), {"start": lambda self: target(*args)}
-        )(),
-    )
-    monkeypatch.setattr(pipeline_view, "run_bundling_service", fake_bundle)
-
-    page = mock_page()
-    view = PipelineView(page, mock_filepicker())
+    view = _inline_view(bundle=fake_bundle)
+    zip_path = str(tmp_path / "out" / "result.zip")
 
     view._run_bundle(
-        input_root_dir="C:/in",
-        output_zip_path="C:/out/result.zip",
+        input_root_dir=str(tmp_path / "in"),
+        output_zip_path=zip_path,
         description="測試描述",
         min_format=10,
         max_format=18,
@@ -568,8 +549,8 @@ def test_run_bundle_calls_service_with_all_args(monkeypatch):
         extra_folders=["C:/extra1", "C:/extra2"],
     )
 
-    assert calls["input_root_dir"] == "C:/in"
-    assert calls["output_zip_path"] == "C:/out/result.zip"
+    assert calls["input_root_dir"] == str(tmp_path / "in")
+    assert calls["output_zip_path"] == zip_path
     assert calls["description"] == "測試描述"
     assert calls["min_format"] == 10
     assert calls["max_format"] == 18
@@ -578,29 +559,26 @@ def test_run_bundle_calls_service_with_all_args(monkeypatch):
 
 
 # -----------------------------------------------------------------------------
-# _do_bundle Service Call Tests
+# PipelineActions.bundle Service Call Tests
 # -----------------------------------------------------------------------------
 
 
-def test_bundle_into_session_calls_run_bundling_service(monkeypatch):
-    """驗證 _bundle_into_session 正確傳遞所有參數到 run_bundling_service"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
+def test_actions_bundle_passes_arguments_and_logs_to_session(tmp_path):
+    """驗證 PipelineActions.bundle 傳遞所有參數到打包 service，並把日誌寫進 session"""
     calls = {}
 
     def fake_bundle(**kwargs):
         calls.update(kwargs)
         yield {"progress": 1.0, "log": "done"}
 
-    monkeypatch.setattr(pipeline_view, "run_bundling_service", fake_bundle)
-
     session = _Session()
-    view = pipeline_view.PipelineView(mock_page(), mock_filepicker())
+    actions = PipelineActions(PipelineServices(bundle=fake_bundle))
 
     list(
-        view._bundle_into_session(
+        actions.bundle(
             session,
-            input_root_dir="C:/bundle_in",
-            output_zip_path="C:/out/bundle.zip",
+            input_root_dir=str(tmp_path / "bundle_in"),
+            output_zip_path=str(tmp_path / "out" / "bundle.zip"),
             description="mydesc",
             min_format=0,
             max_format=0,
@@ -609,8 +587,8 @@ def test_bundle_into_session_calls_run_bundling_service(monkeypatch):
         )
     )
 
-    assert calls["input_root_dir"] == "C:/bundle_in"
-    assert calls["output_zip_path"] == "C:/out/bundle.zip"
+    assert calls["input_root_dir"] == str(tmp_path / "bundle_in")
+    assert calls["output_zip_path"] == str(tmp_path / "out" / "bundle.zip")
     assert calls["description"] == "mydesc"
     assert calls["pack_image_path"] == "C:/pack.png"
     assert calls["extra_folders"] == ["C:/extra"]
@@ -624,7 +602,6 @@ def test_bundle_into_session_calls_run_bundling_service(monkeypatch):
 
 def test_on_one_click_execute_invalid_input_dir(monkeypatch):
     """驗證 _on_one_click_execute 當 Mod 來源目錄不存在時顯示 SnackBar"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
     page = mock_page()
     view = PipelineView(page, mock_filepicker())
     view.input_path_text.value = "C:/nonexistent"
@@ -637,7 +614,6 @@ def test_on_one_click_execute_invalid_input_dir(monkeypatch):
 
 def test_on_one_click_execute_invalid_output_dir(monkeypatch, tmp_path):
     """驗證 _on_one_click_execute 當輸出目錄不存在時顯示 SnackBar"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
     page = mock_page()
     view = PipelineView(page, mock_filepicker())
     view.input_path_text.value = str(tmp_path)
@@ -655,7 +631,6 @@ def test_on_one_click_execute_invalid_output_dir(monkeypatch, tmp_path):
 
 def test_show_snack_bar_adds_to_overlay(monkeypatch):
     """驗證 _show_snack_bar 在 overlay 新增 SnackBar"""
-    monkeypatch.setattr(pipeline_view, "TaskSession", _Session)
     page = mock_page()
     view = PipelineView(page, mock_filepicker())
 

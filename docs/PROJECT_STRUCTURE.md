@@ -27,7 +27,7 @@ Minecraft-translate/
 | `views/config/`、`views/extractor/`、`views/rules/`、`views/translation/` | 各主視圖的 panels/actions/state 子模組 |
 | `services_impl/` | 服務實作（pipeline 業務邏輯），不含 QC/checkers |
 | `services.py` | façade：僅保留 QC/checkers 暂緩線的 re-export |
-| `ui/` | `design.py`（設計 token / 主題）、`kit/`（新共用元件）、theme.py（舊色常數映射）、snack.py、status_chip.py、view_wrapper.py、`components.py`（legacy 相容層）、keyboard_shortcuts.py。詳見 `UI_DESIGN_SYSTEM.md` |
+| `ui/` | `design.py`（設計 token / 主題）、`kit/`（新共用元件）、snack.py、status_chip.py、view_wrapper.py、keyboard_shortcuts.py。詳見 `UI_DESIGN_SYSTEM.md` |
 | `shell/` | 應用外殼：app_shell、sidebar、topbar、statusbar、palette、task_manager |
 | `config_store.py` | 設定讀 / 寫 / 變更通知 |
 | `startup_tasks.py` | 背景啟動任務（索引重建等） |
@@ -117,4 +117,4 @@ Minecraft-translate/
 | `utils/config_manager.py` | 設定載入與驗證、Logging 初始化 | `load_config()`, `setup_logging()` |
 | `app/views/translation_view.py` | 任務翻譯工具主視圖（FTB / KubeJS / Markdown） | `TranslationView` |
 | `app/views/lm_view.py` | 機器翻譯設定與操作視圖 | `LMView` |
-| `app/ui/theme.py` | 主題系統（深色／淺色切換） | module-level constants（無 class） |
+| `app/ui/design.py` | 設計 token 與主題（深色／淺色切換） | module-level constants |

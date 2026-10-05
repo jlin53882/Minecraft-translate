@@ -4,12 +4,12 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **258** 項；其中 **145** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **254** 項；其中 **138** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
 | 已記錄／回報 | 211 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
-| UI／畫面保護 | 32 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
+| UI／畫面保護 | 28 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 15 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
 | 位置 | 規則 | 分類 | 原因／處理 |
@@ -35,25 +35,42 @@
 | `app/services_impl/pipelines/extract_service.py:run_dual_extraction_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/lm_service.py:run_lm_translation_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/lookup_service.py:run_batch_lookup_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
+| `app/services_impl/pipelines/merge_service.py:_merge_one_zip` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/merge_service.py:run_merge_zip_batch_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/services_impl/pipelines/merge_service.py:run_merge_zip_batch_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/services_impl/pipelines/merge_service.py:run_merge_folder_batch_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/services_impl/pipelines/merge_service.py:_run_extracted_stage2` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/merge_service.py:run_merge_folder_batch_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/merge_service.py:run_merge_folder_batch_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/shell/app_shell.py:read_app_version` | BLE001 | UI／畫面保護 | 版本只是裝飾，讀不到不影響啟動 |
 | `app/shell/app_shell.py:AppShell._on_resize` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/shell/app_shell.py:_default_mode` | BLE001 | 已記錄／回報 | 設定壞掉時用預設深色 |
-| `app/ui/snack.py:show_snack` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/ui/snack.py:show_snack` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/ui/snack.py:show_snack` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/ui/snack.py:_clear_existing_snacks` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/ui/snack.py:_show_snack_dialog` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/ui/snack.py:_show_snack_dialog` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/ui/snack.py:show_snack` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/bundler_view.py:BundlerView._load_version_data` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/bundler_view.py:BundlerView._bundling_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，錯誤顯示於日誌 |
 | `app/views/cache_manager/cache_actions.py:run_cache_action.execute_work` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
 | `app/views/cache_manager/cache_history_store.py:history_load_active` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_manager/cache_history_store.py:history_append_event` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_manager/cache_history_store.py:history_load_recent` | BLE001/S112 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/cache_manager/cache_history_store.py:history_load_recent` | BLE001/S112 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_history_store.py:_append_mirror` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_history_store.py:_append_mirror` | BLE001 | 已記錄／回報 | 鏡像是衍生資料，失敗只記錄 |
+| `app/views/cache_manager/cache_view_history.py:CacheHistoryMixin._on_shard_apply_selected_history` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_history.py:CacheHistoryMixin._on_apply_selected_history` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_overview.py:CacheOverviewMixin._copy_logs` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_overview.py:CacheOverviewMixin._load_overview` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_overview.py:CacheOverviewMixin._on_rebuild_index.work` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
+| `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_page_jump` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_page_size_change` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_apply_dst` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_query_search._search` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_shard_list_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_type_shard_panel_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_shard_key_list_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_shard_key_panel_width` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._set_shard_workspace_visible` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._on_shard_dst_copy` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard_detail.py:CacheShardDetailMixin._dynamic_shard_src_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard_detail.py:CacheShardDetailMixin._dynamic_shard_dst_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/cache_manager/cache_view_shard_detail.py:CacheShardDetailMixin._on_shard_dst_apply` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_query_panel.py:CacheQueryPanel._on_page_jump` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_query_panel.py:CacheQueryPanel._on_page_size_change` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_query_panel.py:CacheQueryPanel._on_apply_dst` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -66,55 +83,34 @@
 | `app/views/cache_view.py:CacheView._fetch_overview` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
 | `app/views/cache_view.py:CacheView._finish_mount` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView._finish_mount` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._dynamic_shard_list_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._dynamic_type_shard_panel_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._dynamic_shard_key_list_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._dynamic_shard_src_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._dynamic_shard_dst_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._dynamic_shard_key_panel_width` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView._on_page_resized` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView.commit_ui` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._copy_logs` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._load_overview` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_rebuild_index.work` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
-| `app/views/cache_view.py:CacheView._load_shard_rows` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._load_shard_keys` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._set_shard_workspace_visible` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._load_shard_entry` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_shard_dst_apply` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_shard_dst_copy` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_shard_apply_selected_history` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_apply_selected_history` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_page_jump` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_page_size_change` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_apply_dst` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_view.py:CacheView._on_query_search._search` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
 | `app/views/dashboard_view.py:DashboardView._apply_on_ui` | BLE001 | 已記錄／回報 | 沒有 event loop（測試）就直接套用 |
-| `app/views/extractor/extractor_dialog.py:open_extractor_dialog.run_extraction` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/extractor/extractor_dialog.py:open_preview_dialog.start_scan.do_scan` | BLE001 | 已記錄／回報 | 錯誤要回報到 UI |
+| `app/views/extractor/extractor_dialog.py:_extractor_run_extraction` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/extractor/extractor_preview_dialog.py:_preview_do_scan` | BLE001 | 已記錄／回報 | 錯誤要回報到 UI |
+| `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._write_zh_file` | BLE001 | 已記錄／回報 | 錯誤由呼叫端顯示在 UI |
+| `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._load_entries` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._collect_jar_modids` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/icon_preview/icon_cache.py:_follow_parent_chain` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/icon_preview/icon_cache.py:_extract_jar_icon` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/icon_preview/icon_cache.py:_run_jar_workers` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons._process_jar` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview_row.py:_ensure_icon_size` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:_follow_parent_chain` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:_extract_jar_icon` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:_batch_extract_jar_icons` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:_batch_extract_jar_icons._process_jar` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:_batch_extract_jar_icons` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:IconPreviewView._on_load_clicked._scan` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
-| `app/views/icon_preview_view.py:IconPreviewView._save_current_zh` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:IconPreviewView._load_entries` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/icon_preview_view.py:IconPreviewView._load_entries_from_jar_directory` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/icon_preview_view.py:IconPreviewView._load_async` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
 | `app/views/lm_view.py:LMView.refresh_key_stat` | BLE001 | UI／畫面保護 | 讀不到設定時只是不顯示 |
 | `app/views/lookup_view.py:LookupView.single_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/lookup_view.py:LookupView.batch_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/merge_view.py:MergeView._broadcast_config_change_to_config_view` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/merge_view.py:MergeView._on_merge_field_changed` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/merge_view.py:MergeView._start_ui_poller._sync_ui` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/merge_view.py:MergeView._start_ui_poller.poll` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/merge_view.py:MergeView.start_merge._run_merge` | BLE001 | 已記錄／回報 | 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束 |
+| `app/views/merge_view.py:MergeView._sync_ui_once` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/merge_view.py:MergeView._close_dialog_overlay` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/pipeline/pipeline_bundle_dialog.py:_load_version_data` | BLE001 | UI／畫面保護 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
-| `app/views/pipeline/pipeline_extract_dialog.py:open_extract_dialog.show_preview_result.do_preview` | BLE001 | 已記錄／回報 | 錯誤要顯示在對話框 |
+| `app/views/pipeline/pipeline_extract_dialog.py:_extract_preview_worker` | BLE001 | 已記錄／回報 | 錯誤要顯示在對話框 |
 | `app/views/pipeline/pipeline_one_click_dialog.py:_load_version_data` | BLE001 | UI／畫面保護 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
-| `app/views/pipeline/pipeline_view.py:PipelineView._run_session_step` | BLE001 | 已記錄／回報 | 背景步驟邊界：任何錯誤都轉成步驟失敗 |
-| `app/views/pipeline/pipeline_view.py:PipelineView._on_one_click_execute.worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，確保按鈕會恢復 |
+| `app/views/pipeline/pipeline_session.py:PipelineRunner.start_sequence.worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，確保按鈕會恢復 |
+| `app/views/pipeline/pipeline_session.py:PipelineRunner.run_step` | BLE001 | 已記錄／回報 | 背景步驟邊界：任何錯誤都轉成步驟失敗 |
 | `app/views/qc_base.py:QCBase.task_worker.run` | BLE001 | 已記錄／回報 | 背景執行緒需把錯誤回報到 UI |
 | `app/views/qc_view.py:QCView._async_pick_file_or_directory` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/qc_view.py:QCView._scroll_to_log` | BLE001 | 已記錄／回報 | 捲動失敗不影響任務 |

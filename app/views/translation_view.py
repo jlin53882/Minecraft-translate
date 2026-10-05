@@ -10,12 +10,15 @@ import flet as ft
 
 from app.ui import design, kit
 from app.ui.design import C
+from app.ui.poller import PollerHandle
 from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView
 from app.views.translation.translation_actions import (
+    resume_ui_timer,
     run_ftb,
     run_kjs,
     run_md,
+    stop_ui_timer,
 )
 from app.views.translation.translation_actions import (
     start_ui_timer as start_translation_ui_timer,
@@ -62,6 +65,30 @@ class TranslationView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=16)
+        tab_content = self._init_translation_state_and_tabs(file_picker, page)
+        right_panel = self._build_translation_status_and_right_panel(tab_content)
+
+        body = ft.Row(
+            [
+                ft.Container(expand=3, content=self.tabs),
+                ft.Container(expand=2, content=right_panel),
+            ],
+            expand=True,
+            spacing=16,
+        )
+
+        self.controls = [
+            kit.page_header(
+                "任務翻譯工具",
+                "處理 FTB Quests、KubeJS Tooltip 與 Markdown 文件，步驟可自由勾選",
+                icon=ft.Icons.TRANSLATE,
+                tone="ench",
+            ),
+            body,
+        ]
+
+    def _init_translation_state_and_tabs(self, file_picker, page):
+        """任務翻譯頁的狀態與分頁。"""
         self._page = page
         self.file_picker = file_picker
         self._state = TranslationRunState()
@@ -70,6 +97,7 @@ class TranslationView(ft.Column):
 
         self.session = None
         self._ui_timer_running = False
+        self._poller = PollerHandle()  # 輪詢的 owner：卸載時 stop、重新掛載時 resume
 
         # 右側共用狀態與日誌
         self.status_chip = ft.Chip(label=ft.Text("尚未開始"))
@@ -116,6 +144,10 @@ class TranslationView(ft.Column):
             expand=True,
         )
         tab_content = ft.Column([tab_bar, tab_view], expand=True, spacing=12)
+        return tab_content
+
+    def _build_translation_status_and_right_panel(self, tab_content):
+        """狀態卡片與右側面板。"""
         self.tabs = ft.Tabs(
             content=tab_content,
             length=3,
@@ -176,25 +208,7 @@ class TranslationView(ft.Column):
             expand=True,
             spacing=16,
         )
-
-        body = ft.Row(
-            [
-                ft.Container(expand=3, content=self.tabs),
-                ft.Container(expand=2, content=right_panel),
-            ],
-            expand=True,
-            spacing=16,
-        )
-
-        self.controls = [
-            kit.page_header(
-                "任務翻譯工具",
-                "處理 FTB Quests、KubeJS Tooltip 與 Markdown 文件，步驟可自由勾選",
-                icon=ft.Icons.TRANSLATE,
-                tone="ench",
-            ),
-            body,
-        ]
+        return right_panel
 
     # ------------------------------------------------------------------
     # 樣式 helper（集中到 app.ui.kit / app.ui.design）
@@ -277,6 +291,14 @@ class TranslationView(ft.Column):
     # ------------------------------------------------------------------
     # ui poller
     # ------------------------------------------------------------------
+    def will_unmount(self):
+        """換頁／關閉：停止輪詢（idempotent）。任務本身照常執行，不再碰已卸載的控制項。"""
+        stop_ui_timer(self)
+
+    def did_mount(self):
+        """重新掛載：任務仍在追蹤就接續輪詢（任務已結束時補上最終狀態）。"""
+        resume_ui_timer(self)
+
     def _start_ui_timer(self):
         """啟動 UI 更新計時器"""
         self.cancel_button.disabled = False

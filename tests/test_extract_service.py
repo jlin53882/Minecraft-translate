@@ -811,7 +811,9 @@ class TestRunExtractionWithSession:
             _run_extraction_with_session(gen(), session, "Test")
 
         assert session.error is True
-        assert session.finished is False  # Should NOT finish on error
+        assert (
+            session.finished is True
+        )  # ERROR 後仍要 finish（TaskManager 才會離開 active）
 
     def test_log_limiter_filters_out_updates(self):
         """When GLOBAL_LOG_LIMITER.filter returns None, that update is skipped."""
@@ -864,7 +866,7 @@ class TestRunExtractionWithSession:
 
 def test_preview_file_count_by_mode():
     """N3：預覽清單只列出有可提取檔案的 JAR。"""
-    from app.views.extractor.extractor_dialog import _preview_file_count
+    from app.views.extractor.extractor_preview_dialog import _preview_file_count
 
     assert _preview_file_count({"count": 0}, "lang") == 0
     assert _preview_file_count({"count": 3}, "book") == 3

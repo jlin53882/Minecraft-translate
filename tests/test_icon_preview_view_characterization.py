@@ -17,8 +17,18 @@ def test_icon_preview_view_initializes_core_sections():
     assert view.page_bar is not None
 
 
+def _drain(page):
+    """執行 mock page 排入的 async 工作（圖示準備／存檔都在 to_thread，之後回 event loop 套用）。"""
+    import asyncio
+
+    while page._tasks:
+        handler, args = page._tasks.pop(0)
+        asyncio.run(handler(*args))
+
+
 def test_render_current_page_uses_current_page_size():
-    view = IconPreviewView(mock_page())
+    page = mock_page()
+    view = IconPreviewView(page)
     view.current_modid = "demo"
     view.mods = {
         "demo": [
@@ -30,8 +40,11 @@ def test_render_current_page_uses_current_page_size():
     view._zh_data = {}
 
     view._render_current_page()
-
+    # 頁碼立即更新；列在背景準備圖示後才套用（event loop 上不做圖示 I/O）
     assert view.total_pages == 3
+    assert view.list_view.controls == []
+    _drain(page)
+
     assert len(view.list_view.controls) == 50
 
 
@@ -45,6 +58,8 @@ def test_save_current_zh_writes_modified_json():
         view._zh_data = {"k": "青蘋果"}
 
         view._save_current_zh(None)
+        assert not json_path.exists()  # 寫檔在背景執行緒，點擊當下不寫
+        _drain(page)
 
         assert "青蘋果" in json_path.read_text(encoding="utf-8")
         assert page.overlay

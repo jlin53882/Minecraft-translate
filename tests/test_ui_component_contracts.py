@@ -2,14 +2,6 @@
 
 import flet as ft
 
-from app.ui import theme
-from app.ui.components import (
-    empty_state,
-    error_state,
-    loading_state,
-    styled_card,
-)
-
 
 # Mock Page for testing
 class MockPage:
@@ -70,73 +62,6 @@ def test_quick_jump_class():
 
 
 # PR3: styled_card collapsible - Behavior Tests
-
-
-def test_styled_card_no_collapsible():
-    """Verify styled_card works without collapsible."""
-    inner = ft.Text("x")
-    c = styled_card(title="T", icon=ft.Icons.INFO, content=inner)
-    assert isinstance(c, ft.Container)
-
-
-def test_styled_card_collapsible_false():
-    """Verify styled_card with collapsible=False."""
-    inner = ft.Text("x")
-    c = styled_card(title="T", icon=ft.Icons.INFO, content=inner, collapsible=False)
-    assert isinstance(c, ft.Container)
-
-
-def test_styled_card_collapsible_true():
-    """Verify styled_card with collapsible=True."""
-    inner = ft.Text("x")
-    c = styled_card(
-        title="T",
-        icon=ft.Icons.INFO,
-        content=inner,
-        collapsible=True,
-        default_collapsed=False,
-    )
-    assert isinstance(c, ft.Container)
-
-
-def test_styled_card_with_page():
-    """Verify styled_card with page parameter."""
-    page = MockPage()
-    inner = ft.Text("x")
-    c = styled_card(
-        title="Test", icon=ft.Icons.INFO, content=inner, collapsible=True, page=page
-    )
-    assert isinstance(c, ft.Container)
-
-
-def test_styled_card_collapse_toggle():
-    """Test collapse button structure exists."""
-    page = MockPage()
-    inner = ft.Text("content")
-    c = styled_card(
-        title="Test",
-        icon=ft.Icons.INFO,
-        content=inner,
-        collapsible=True,
-        default_collapsed=False,
-        page=page,
-    )
-    # Verify card structure
-    assert isinstance(c, ft.Container)
-    assert c.content is not None
-
-
-def test_styled_card_default_collapsed():
-    """Verify default_collapsed=True creates collapsed card."""
-    inner = ft.Text("content")
-    c = styled_card(
-        title="Test",
-        icon=ft.Icons.INFO,
-        content=inner,
-        collapsible=True,
-        default_collapsed=True,
-    )
-    assert isinstance(c, ft.Container)
 
 
 # PR4: Progress Bar - SnackBar Integration
@@ -218,67 +143,4 @@ def test_snackbar_close():
 # PR5: Unified States
 
 
-def test_loading_state():
-    """Verify loading_state returns Container."""
-    ls = loading_state("Loading...")
-    assert isinstance(ls, ft.Container)
-
-
-def test_loading_state_no_spinner():
-    """Verify loading_state without spinner."""
-    ls = loading_state("Wait", show_spinner=False)
-    assert isinstance(ls, ft.Container)
-
-
-def test_empty_state():
-    """Verify empty_state returns Container."""
-    es = empty_state(
-        icon=ft.Icons.SEARCH_OFF, title="No results", message="Try another keyword"
-    )
-    assert isinstance(es, ft.Container)
-    assert es.alignment == ft.alignment.Alignment(0, 0)
-
-
-def test_empty_state_with_button():
-    """Verify empty_state with action button."""
-    btn = ft.Button("Retry")
-    es = empty_state(
-        icon=ft.Icons.ERROR_OUTLINE,
-        title="Error",
-        message="Please retry",
-        action_button=btn,
-    )
-    assert isinstance(es, ft.Container)
-
-
-def test_error_state():
-    """Verify error_state returns Container."""
-    err = error_state(icon=ft.Icons.ERROR, title="Error", message="Operation failed")
-    assert isinstance(err, ft.Container)
-
-
-def test_error_state_with_retry():
-    """Verify error_state with retry button."""
-    btn = ft.Button("Retry")
-    err = error_state(
-        icon=ft.Icons.ERROR, title="Error", message="Failed", retry_button=btn
-    )
-    assert isinstance(err, ft.Container)
-
-
 # Theme tests
-
-
-def test_theme_text_secondary():
-    """Verify TEXT_SECONDARY exists."""
-    assert hasattr(theme, "TEXT_SECONDARY")
-
-
-def test_theme_text_secondary_200():
-    """Verify TEXT_SECONDARY_200 exists."""
-    assert hasattr(theme, "TEXT_SECONDARY_200")
-
-
-def test_theme_text_disabled():
-    """Verify TEXT_DISABLED exists."""
-    assert hasattr(theme, "TEXT_DISABLED")

@@ -67,8 +67,13 @@ def run_cache_action(
         """在背景執行緒執行工作；只呼叫 work_fn 一次（原本 TypeError 時會重跑）。"""
         try:
             if progress_callback is not None and _accepts_on_progress(work_fn):
-                return work_fn(on_progress=progress_callback), None
-            return work_fn(), None
+                result = work_fn(on_progress=progress_callback)
+            else:
+                result = work_fn()
+            warm = getattr(view, "_warm_shard_cache", None)
+            if callable(warm) and isinstance(result, dict):
+                warm(result)  # 背景預熱：之後 event loop 上的分片頁渲染只剩記憶命中
+            return result, None
         except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
             return None, (ex, traceback.format_exc())
 

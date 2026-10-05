@@ -12,8 +12,9 @@ import flet as ft
 
 from app.services_impl.pipelines.lm_service import run_lm_translation_service
 from app.tasks.task_session import TaskSession, tag_session
-from app.ui import kit, theme
+from app.ui import kit
 from app.ui.design import C
+from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView, load_ui_logging_config
@@ -54,11 +55,22 @@ class LMView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=16)
+        batch_interval, cache_row, dry_run_row, lang_row = (
+            self._init_lm_state_and_options(file_picker, page)
+        )
+        settings_card = self._build_lm_settings_card(
+            batch_interval, cache_row, dry_run_row, lang_row
+        )
+        self._build_lm_status_and_log_cards(settings_card)
+
+    def _init_lm_state_and_options(self, file_picker, page):
+        """機器翻譯頁的狀態與輸入選項。"""
         self._page = page
         self.file_picker = file_picker
 
         self.session: TaskSession | None = None
         self._ui_timer_running = False
+        self._poller = PollerHandle()  # 輪詢的 owner：卸載時 stop、重新掛載時 resume
         self._started_at: float | None = None
 
         # 基本輸入
@@ -112,6 +124,10 @@ class LMView(ft.Column):
             tooltip="開始執行 LM 翻譯流程",
             on_click=self.start_clicked,
         )
+        return batch_interval, cache_row, dry_run_row, lang_row
+
+    def _build_lm_settings_card(self, batch_interval, cache_row, dry_run_row, lang_row):
+        """機器翻譯設定卡片與執行按鈕。"""
         self.cancel_button = kit.button(
             "取消",
             "secondary",
@@ -170,6 +186,10 @@ class LMView(ft.Column):
             icon=ft.Icons.TUNE,
             tone="gold",
         )
+        return settings_card
+
+    def _build_lm_status_and_log_cards(self, settings_card) -> None:
+        """狀態卡片、日誌卡片與整體版面。"""
         status_card = kit.section_card(
             "執行狀態",
             ft.Column(
@@ -247,8 +267,8 @@ class LMView(ft.Column):
     def refresh_key_stat(self):
         """更新「可用 API Key」統計（#113 的 key 健康度）。"""
         try:
+            from app.services_impl.key_health_service import get_key_health_snapshot
             from app.shell.topbar import summarize_keys
-            from translation_tool.core.lm_config_rules import get_key_health_snapshot
 
             summary = summarize_keys(get_key_health_snapshot())
         except Exception:  # noqa: BLE001 - 讀不到設定時只是不顯示
@@ -314,24 +334,25 @@ class LMView(ft.Column):
         """處理開始翻譯按鈕點擊事件"""
         if self._ui_timer_running:
             # 任務執行中：避免重複啟動（會重複送出 API 並同時寫入同一輸出/快取）
-            show_snack(self.page, "翻譯正在執行中，請等待完成或先取消", theme.WARNING)
+            show_snack(self.page, "翻譯正在執行中，請等待完成或先取消", C.GOLD)
             return
         if not (self.input_path.value or "").strip():
             self._set_status("請先選擇輸入資料夾", "red")
             self.page.update()
             return
 
+        # session 的 start()／finish() 由 run_lm_translation_service 擁有（單一 owner）：
+        # 這裡不能再 start()，否則會重複登記並清掉剛寫入的日誌
         self.session = tag_session(TaskSession(), "機器翻譯", "lm")
-        self.session.start()
+        if not (self.output_path.value or "").strip():
+            # 屬於 session 日誌的開頭訊息（service 的 start() 清空日誌後會放回，
+            # 輪詢的 tail 重整也不會讓它消失）；沒有此方法的替身退回 add_log
+            add = getattr(self.session, "add_start_log", self.session.add_log)
+            add(f"[資訊] 未指定輸出，將使用預設：{get_lm_translate_folder_name()}")
         # 日誌顯示行數：每次開始任務時讀最新設定，存檔後不必重開頁面
         self.log_view.set_tail_lines(
             load_ui_logging_config(load_config).get("tail_lines", 250)
         )
-
-        if not (self.output_path.value or "").strip():
-            self.session.add_log(
-                f"[資訊] 未指定輸出，將使用預設：{get_lm_translate_folder_name()}"
-            )
 
         self._set_status("執行中", "dia")
         self._started_at = time.monotonic()
@@ -388,14 +409,23 @@ class LMView(ft.Column):
 
     def start_ui_timer(self):
         """啟動 UI 輪詢（在 Flet event loop 上執行，避免背景執行緒直接更新 UI）。"""
-        if self._ui_timer_running:
-            return
         self._ui_timer_running = True
-        self._page.run_task(self._poll_session)
+        if self._poller.running:
+            return
+        self._poller.start(self._page, self._poll_session)
 
-    async def _poll_session(self):
-        """定期把 session 的進度與日誌同步到畫面，直到任務結束。"""
-        while self._ui_timer_running:
+    def will_unmount(self):
+        """換頁／關閉：停止輪詢（idempotent）。任務本身照常執行，不再碰已卸載的控制項。"""
+        self._poller.stop()
+
+    def did_mount(self):
+        """重新掛載：任務仍在追蹤就接續輪詢（任務已結束時補上最終狀態與按鈕）。"""
+        if self._ui_timer_running and self.session is not None:
+            self._poller.start(self._page, self._poll_session)
+
+    async def _poll_session(self, alive=lambda: True):
+        """定期把 session 的進度與日誌同步到畫面，直到任務結束、頁面關閉或輪詢被停止。"""
+        while alive() and self._ui_timer_running:
             try:
                 self._sync_from_session()
             except RuntimeError as e:
@@ -403,7 +433,7 @@ class LMView(ft.Column):
                 log_debug(f"LM UI poll stopped: {e}")
                 self._ui_timer_running = False
                 break
-            if self._ui_timer_running:
+            if alive() and self._ui_timer_running:
                 await asyncio.sleep(self._POLL_INTERVAL_SEC)
 
     def _sync_from_session(self):

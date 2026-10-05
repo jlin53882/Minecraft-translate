@@ -17,15 +17,16 @@ from typing import Literal
 import flet as ft
 
 from app.tasks.log_entry import LogEntry
-from app.ui import design, theme
+from app.ui import design
+from app.ui.design import C
 
 # 等級 → 語意色（跟著深淺色主題切換）
 _LEVEL_COLORS = {
-    "system": theme.TEXT_LOG_SYSTEM,
-    "info": theme.TEXT_LOG_INFO,
-    "warning": theme.TEXT_LOG_WARNING,
-    "error": theme.TEXT_LOG_ERROR,
-    "debug": theme.TEXT_LOG_DEBUG,
+    "system": C.EM,
+    "info": C.DIA,
+    "warning": C.GOLD,
+    "error": C.RED,
+    "debug": C.DIM,
 }
 
 

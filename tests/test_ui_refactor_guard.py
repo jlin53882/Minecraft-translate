@@ -16,8 +16,9 @@ def test_views_use_shared_components_and_no_local_styled_card():
         "app/views/merge_view.py",
     ]
 
+    companions = {"app/views/merge_view.py": ["app/views/merge/merge_widgets.py"]}
     for rel in targets:
-        src = _read(rel)
+        src = _read(rel) + "".join(_read(c) for c in companions.get(rel, []))
         # 共用卡片：舊的 styled_card 或新的 kit.section_card（重新設計後逐頁改用 kit）
         assert (
             "styled_card(" in src
@@ -32,7 +33,9 @@ def test_views_use_shared_components_and_no_local_styled_card():
 def test_config_and_rules_use_shared_buttons():
     """設定 / 規則頁的按鈕要走共用元件（舊 primary_button 或新 kit.button），不可各自拼樣式。"""
     config_src = _read("app/views/config/config_form.py")
-    rules_src = _read("app/views/rules_view.py")
+    rules_src = _read("app/views/rules_view.py") + _read(
+        "app/views/rules/rules_widgets.py"
+    )
 
     assert "primary_button(" in config_src or "kit.button(" in config_src
     assert "kit.button(" in rules_src or (
@@ -54,7 +57,7 @@ def test_cache_view_is_primary_entry_only():
 
 
 def test_cache_overview_is_split_to_panel_module():
-    entry_src = _read("app/views/cache_view.py")
+    entry_src = _read("app/views/cache_manager/cache_view_overview.py")
     assert (
         "from app.views.cache_manager.cache_overview_panel import build_overview_page"
         in entry_src

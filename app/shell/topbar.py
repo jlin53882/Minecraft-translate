@@ -11,11 +11,11 @@ from dataclasses import dataclass
 
 import flet as ft
 
+from app.services_impl.key_health_service import STATUS_COOLING, KeyHealth
 from app.shell.task_manager import STATUS_ERROR, TaskInfo
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.design import tone as get_tone
-from translation_tool.core.lm_key_health import STATUS_COOLING, KeyHealth
 
 TOPBAR_HEIGHT = 56
 

@@ -10,9 +10,9 @@ import datetime as dt
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from app.services_impl.key_health_service import KeyHealth
 from app.shell.task_manager import STATUS_ERROR, TaskInfo
 from app.shell.topbar import KeySummary, summarize_keys
-from translation_tool.core.lm_key_health import KeyHealth
 
 # 翻譯流程五步：(頁面 key, 標題, 說明)
 PIPELINE_STEPS = (

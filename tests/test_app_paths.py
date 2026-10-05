@@ -105,7 +105,8 @@ def test_icon_cache_paths_follow_data_root(monkeypatch, tmp_path):
     若有人改回 Path(__file__) 或 cwd，這裡會失敗。
     """
     from app import icon_index
-    from app.views import icon_preview_view
+    from app.views.icon_preview import entries_cache
+    from app.views.icon_preview import icon_cache as icon_preview_view
 
     root = tmp_path / "data"
     monkeypatch.setenv(app_paths.DATA_DIR_ENV, str(root))
@@ -119,7 +120,7 @@ def test_icon_cache_paths_follow_data_root(monkeypatch, tmp_path):
     assert index_path.parent == cache_root / "icon_index"
     assert icon_preview_view._get_icon_cache_dir() == cache_root / "jar_icons"
     assert icon_preview_view._get_model_index_cache_dir() == cache_root / "model_index"
-    assert icon_preview_view._get_cache_dir() == cache_root
+    assert entries_cache._get_cache_dir() == cache_root
     # 不得寫到 repo 或 cwd
     assert not (REPO_ROOT / ".icon_cache" / "icon_index" / index_path.name).exists()
     assert not (tmp_path / ".icon_cache").exists()

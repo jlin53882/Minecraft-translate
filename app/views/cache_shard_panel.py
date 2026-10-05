@@ -14,7 +14,7 @@ from app.services_impl.cache.cache_services import (
     cache_save_all_service,
     cache_update_dst_service,
 )
-from app.ui import theme
+from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.cache_manager.cache_history_store import (
     history_append_event,
@@ -53,9 +53,7 @@ class CacheShardPanel(ft.Container):
     def _build_components(self):
         """建立內部元件"""
         # 分類/分片列表
-        self.query_type_shard_hint = ft.Text(
-            "分類 / 分片清單", size=11, color=theme.GREY_700
-        )
+        self.query_type_shard_hint = ft.Text("分類 / 分片清單", size=11, color=C.MUTED)
         self.query_type_shard_col = ft.Column(
             spacing=6,
             scroll=ft.ScrollMode.AUTO,
@@ -63,7 +61,7 @@ class CacheShardPanel(ft.Container):
         )
 
         # Key 列表
-        self.shard_detail_meta = ft.Text("尚未選擇分片", size=11, color=theme.GREY_700)
+        self.shard_detail_meta = ft.Text("尚未選擇分片", size=11, color=C.MUTED)
         self.tf_shard_key_filter = ft.TextField(
             label="過濾 key",
             hint_text="輸入關鍵字快速過濾",
@@ -93,9 +91,7 @@ class CacheShardPanel(ft.Container):
         self.shard_total_info = ft.Text("共 0 keys | 每頁 50")
 
         # SRC 預覽
-        self.shard_src_meta = ft.Text(
-            "SRC：請先選擇 key", size=11, color=theme.GREY_700
-        )
+        self.shard_src_meta = ft.Text("SRC：請先選擇 key", size=11, color=C.MUTED)
         self.btn_shard_src_preview = ft.OutlinedButton(
             "👁️ 預覽", on_click=self._on_shard_src_preview_mode
         )
@@ -113,9 +109,7 @@ class CacheShardPanel(ft.Container):
         )
 
         # DST 編輯
-        self.shard_dst_meta = ft.Text(
-            "DST：請先選擇 key", size=11, color=theme.GREY_700
-        )
+        self.shard_dst_meta = ft.Text("DST：請先選擇 key", size=11, color=C.MUTED)
         self.shard_dst_field = ft.TextField(
             value="",
             multiline=True,
@@ -143,9 +137,9 @@ class CacheShardPanel(ft.Container):
                 ft.Container(
                     expand=True,
                     padding=8,
-                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, C.LINE),
                     border_radius=8,
-                    bgcolor=theme.PANEL,
+                    bgcolor=C.PANEL,
                     alignment=ft.alignment.Alignment(-1, -1),
                     content=self.query_type_shard_col,
                 ),
@@ -161,7 +155,7 @@ class CacheShardPanel(ft.Container):
                         self.shard_page_info,
                         self.btn_shard_page_next,
                         self.btn_shard_page_last,
-                        ft.Text("|", size=12, color=theme.GREY_500),
+                        ft.Text("|", size=12, color=C.DIM),
                         self.shard_total_info,
                     ],
                     wrap=True,
@@ -178,9 +172,9 @@ class CacheShardPanel(ft.Container):
                 ft.Container(
                     expand=True,
                     padding=6,
-                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, C.LINE),
                     border_radius=8,
-                    bgcolor=theme.PANEL,
+                    bgcolor=C.PANEL,
                     alignment=ft.alignment.Alignment(-1, -1),
                     content=self.shard_src_field,
                 ),
@@ -190,9 +184,9 @@ class CacheShardPanel(ft.Container):
                 ft.Container(
                     expand=True,
                     padding=6,
-                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, C.LINE),
                     border_radius=8,
-                    bgcolor=theme.PANEL,
+                    bgcolor=C.PANEL,
                     alignment=ft.alignment.Alignment(-1, -1),
                     content=self.shard_dst_field,
                 ),
@@ -241,7 +235,7 @@ class CacheShardPanel(ft.Container):
         pairs = list(self._iter_type_states(self.last_overview_data))
         if not pairs:
             self.query_type_shard_col.controls.append(
-                ft.Text("目前沒有分類資料", color=theme.GREY_600)
+                ft.Text("目前沒有分類資料", color=C.MUTED)
             )
             self.state.selected_type = ""
             self.state.selected_file = ""
@@ -257,16 +251,16 @@ class CacheShardPanel(ft.Container):
             self.query_type_shard_col.controls.append(
                 ft.Container(
                     padding=8,
-                    border=ft.Border.all(1, theme.OUTLINE_VARIANT),
+                    border=ft.Border.all(1, C.LINE),
                     border_radius=8,
-                    bgcolor=theme.PANEL,
+                    bgcolor=C.PANEL,
                     content=ft.Column(
                         [
                             ft.Text(ctype, size=13, weight=ft.FontWeight.BOLD),
                             ft.Text(
                                 f"分片: {shard} | 狀態: {dirty}",
                                 size=11,
-                                color=theme.GREY_700,
+                                color=C.MUTED,
                             ),
                             ft.Text(
                                 f"筆數: {entries_count}",
@@ -292,7 +286,7 @@ class CacheShardPanel(ft.Container):
             self.state.dst_loaded_sig = None
             self.state.dst_original = ""
             self.shard_detail_key_list.controls.append(
-                ft.Text("請先在上方選擇分片", size=11, color=theme.GREY_600)
+                ft.Text("請先在上方選擇分片", size=11, color=C.MUTED)
             )
             self._render_shard_src_panel()
             self._render_shard_dst_panel()
@@ -318,7 +312,7 @@ class CacheShardPanel(ft.Container):
 
         if not page_keys:
             self.shard_detail_key_list.controls.append(
-                ft.Text("此分片沒有 key", size=11, color=theme.GREY_600)
+                ft.Text("此分片沒有 key", size=11, color=C.MUTED)
             )
         else:
             for idx, key in enumerate(page_keys, start=start + 1):
@@ -328,10 +322,10 @@ class CacheShardPanel(ft.Container):
                         padding=6,
                         border=ft.Border.all(
                             1,
-                            theme.BLUE_300 if selected else theme.OUTLINE_VARIANT,
+                            C.DIA if selected else C.LINE,
                         ),
                         border_radius=6,
-                        bgcolor=theme.BLUE_50 if selected else None,
+                        bgcolor=C.DIA_BG if selected else None,
                         on_click=lambda e, k=key: self._on_select_shard_key(k),
                         content=ft.Text(
                             f"{idx}. {key}",
@@ -502,7 +496,7 @@ class CacheShardPanel(ft.Container):
     def _on_shard_dst_apply(self, e):
         """套用 DST"""
         if not self.state.selected_key:
-            show_snack(self.page, "請先選擇 key", theme.AMBER_700)
+            show_snack(self.page, "請先選擇 key", C.GOLD)
             return
 
         ctype = str(self.state.selected_type or "")
@@ -514,7 +508,7 @@ class CacheShardPanel(ft.Container):
         try:
             done = cache_update_dst_service(ctype, key, new_dst)
             if not done:
-                show_snack(self.page, "套用失敗：找不到 key", theme.RED_400)
+                show_snack(self.page, "套用失敗：找不到 key", C.RED)
                 return
 
             cache_save_all_service(write_new_shard=False, only_types=[ctype])
@@ -533,32 +527,32 @@ class CacheShardPanel(ft.Container):
             self._history_append_event(ctype, history_event)
 
             self.state.dst_original = new_dst
-            show_snack(self.page, "已套用 DST 並寫入快取", theme.BLUE_400)
+            show_snack(self.page, "已套用 DST 並寫入快取", C.DIA)
             self._page.update()
         except Exception as ex:  # noqa: BLE001
-            show_snack(self.page, f"套用失敗：{ex}", theme.RED_400)
+            show_snack(self.page, f"套用失敗：{ex}", C.RED)
 
     def _on_shard_dst_revert(self, e):
         """還原 DST"""
         if not self.state.selected_key:
-            show_snack(self.page, "請先選擇 key", theme.AMBER_700)
+            show_snack(self.page, "請先選擇 key", C.GOLD)
             return
 
         self.shard_dst_field.value = str(self.state.dst_original or "")
-        show_snack(self.page, "已還原到原始值", theme.BLUE_400)
+        show_snack(self.page, "已還原到原始值", C.DIA)
         self._page.update()
 
     async def _on_shard_dst_copy(self, e):
         """複製 DST"""
         if not self.state.selected_key:
-            show_snack(self.page, "請先選擇 key", theme.AMBER_700)
+            show_snack(self.page, "請先選擇 key", C.GOLD)
             return
 
         try:
             await ft.Clipboard().set(str(self.shard_dst_field.value or ""))
-            show_snack(self.page, "已複製 DST 內容", theme.BLUE_400)
+            show_snack(self.page, "已複製 DST 內容", C.DIA)
         except Exception:  # noqa: BLE001
-            show_snack(self.page, "複製失敗", theme.RED_400)
+            show_snack(self.page, "複製失敗", C.RED)
 
     def _history_append_event(self, cache_type: str, event: dict):
         """新增歷史事件"""

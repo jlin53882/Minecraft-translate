@@ -10,7 +10,8 @@ import flet as ft
 
 from app.config_apply import apply_timing_note
 from app.services_impl.config_service import load_config_json, save_config_json
-from app.ui import design, kit, theme
+from app.services_impl.key_health_service import validate_api_keys_from_ui
+from app.ui import design, kit
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.config.config_actions import (
@@ -32,7 +33,6 @@ from app.views.config.config_form import (
 )
 from app.views.config.settings_form import build_controls, build_pages
 from app.views.config.settings_schema import NAV_PAGES
-from translation_tool.core.lm_config_rules import validate_api_keys_from_ui
 
 # 導覽項目由 settings_schema.NAV_PAGES 產生（圖示名稱對應 ft.Icons）
 NAV_ITEMS = [
@@ -199,7 +199,7 @@ class ConfigView(ft.Column):
     def _models_panel(self) -> ft.Control:
         """模型清單的專用元件（卡片內容）。"""
         return ft.Container(
-            bgcolor=theme.GREY_50,
+            bgcolor=C.PANEL,
             padding=10,
             border_radius=8,
             content=ft.Column(
@@ -221,7 +221,7 @@ class ConfigView(ft.Column):
     def _keys_panel(self) -> ft.Control:
         """API 金鑰列的專用元件（卡片內容）。"""
         return ft.Container(
-            bgcolor=theme.GREY_50,
+            bgcolor=C.PANEL,
             padding=10,
             border_radius=8,
             content=ft.Column(
@@ -264,7 +264,7 @@ class ConfigView(ft.Column):
         order_text = ft.Text(
             "00",
             size=12,
-            color=theme.GREY_600,
+            color=C.MUTED,
             weight=ft.FontWeight.W_500,
             width=28,
             text_align=ft.TextAlign.RIGHT,
@@ -300,8 +300,8 @@ class ConfigView(ft.Column):
         row = ft.Container(
             padding=12,
             border_radius=8,
-            bgcolor=theme.PANEL,
-            border=ft.Border.all(1, theme.GREY_200),
+            bgcolor=C.PANEL,
+            border=ft.Border.all(1, C.TRACK),
             content=ft.Row(
                 [
                     order_text,
@@ -388,7 +388,7 @@ class ConfigView(ft.Column):
 
     def _success_color(self):
         """取得成功顏色"""
-        return theme.SUCCESS
+        return C.EM
 
     def save_config_clicked(self, e):
         """儲存設定"""

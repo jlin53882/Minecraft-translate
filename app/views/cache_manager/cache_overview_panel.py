@@ -26,27 +26,16 @@ HELP_LINES = (
 )
 
 
-def build_overview_page(
-    *,
-    overview_text: ft.Control,
-    type_list: ft.Control,
+def _build_actions_block(
     overview_status: ft.Control,
     overview_trace: ft.Control,
     btn_reload_all: ft.Control,
     btn_refresh_stats: ft.Control,
-    btn_rebuild_index: ft.Control,  # A3 搜尋功能
-    sw_log_only_error: ft.Control,
-    btn_log_copy: ft.Control,
-    btn_log_clear: ft.Control,
-    log_list: ft.Control,
-    page: ft.Page | None = None,
-    stat_cards: Sequence[ft.Control] = (),
+    btn_rebuild_index: ft.Control,
+    chk_danger_confirm: ft.Control,
 ) -> ft.Control:
-    """Cache 總覽頁（非查詢區）組裝。
-
-    ``stat_cards`` 是頁面頂端的統計卡（由 CacheView 持有、載入資料後更新）。
-    """
-    actions_block = kit.section_card(
+    """總覽頁的「操作」卡片。"""
+    return kit.section_card(
         "操作",
         ft.Column(
             [
@@ -58,6 +47,7 @@ def build_overview_page(
                     spacing=10,
                     run_spacing=10,
                 ),
+                chk_danger_confirm,
             ],
             spacing=8,
         ),
@@ -65,8 +55,10 @@ def build_overview_page(
         tone="em",
     )
 
-    # 按鈕說明預設收合：展開時內容很長，會把下方日誌擠到看不見
-    help_block = kit.section_card(
+
+def _build_help_block() -> ft.Control:
+    """總覽頁的「按鈕說明」卡片（預設收合：展開時內容很長，會把下方日誌擠到看不見）。"""
+    return kit.section_card(
         "按鈕說明",
         ft.Column(
             [
@@ -86,6 +78,39 @@ def build_overview_page(
         collapsible=True,
         collapsed=True,
     )
+
+
+def build_overview_page(
+    *,
+    overview_text: ft.Control,
+    type_list: ft.Control,
+    overview_status: ft.Control,
+    overview_trace: ft.Control,
+    btn_reload_all: ft.Control,
+    btn_refresh_stats: ft.Control,
+    btn_rebuild_index: ft.Control,  # A3 搜尋功能
+    chk_danger_confirm: ft.Control,
+    sw_log_only_error: ft.Control,
+    btn_log_copy: ft.Control,
+    btn_log_clear: ft.Control,
+    log_list: ft.Control,
+    page: ft.Page | None = None,
+    stat_cards: Sequence[ft.Control] = (),
+) -> ft.Control:
+    """Cache 總覽頁（非查詢區）組裝。
+
+    ``stat_cards`` 是頁面頂端的統計卡（由 CacheView 持有、載入資料後更新）。
+    """
+    actions_block = _build_actions_block(
+        overview_status,
+        overview_trace,
+        btn_reload_all,
+        btn_refresh_stats,
+        btn_rebuild_index,
+        chk_danger_confirm,
+    )
+
+    help_block = _build_help_block()
 
     left_panel = kit.section_card(
         "分類狀態清單",

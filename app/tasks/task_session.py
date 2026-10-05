@@ -93,6 +93,7 @@ class TaskSession:
 
         self.logs: deque[LogEntry] = deque(maxlen=max_logs)
         self._next_seq: int = 0
+        self._start_logs: list[tuple[str, str]] = []
         self._lock = threading.Lock()
         self._cancel_event = threading.Event()
 
@@ -141,6 +142,17 @@ class TaskSession:
             self.status = "ERROR"
         _notify(self, "error")
 
+    def add_start_log(self, text: str, level: str = "info") -> None:
+        """新增「開始前就知道、要顯示在任務日誌開頭」的訊息。
+
+        會立刻寫入日誌，而且 ``start()`` 清空日誌後會重新放回——所以由 View 在 service
+        ``start()`` 之前寫入的提示（例如預設輸出路徑）也屬於 session snapshot，
+        輪詢／tail 重整／卸載後重新掛載都不會讓它消失。
+        """
+        with self._lock:
+            self._start_logs.append((text, level))
+        self.add_log(text, level)
+
     def set_summary(self, summary: dict) -> None:
         """設定任務摘要統計（供 DONE 時 UI 取用）。"""
         with self._lock:
@@ -175,6 +187,9 @@ class TaskSession:
             self._next_seq = 0
             self.error = False
             self.status = "RUNNING"
+            start_logs = list(self._start_logs)
+        for text, level in start_logs:  # 清空日誌後把開頭訊息放回
+            self.add_log(text, level)
         _notify(self, "start")
 
     # ---------- UI 讀取（UI 使用） ----------

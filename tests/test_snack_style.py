@@ -3,7 +3,6 @@
 import flet as ft
 import pytest
 
-from app.ui import theme
 from app.ui.design import C
 from app.ui.design import tone as get_tone
 from app.ui.snack import show_snack, snack_style
@@ -13,19 +12,17 @@ from app.ui.snack import show_snack, snack_style
     ("color", "tone"),
     [
         (ft.Colors.RED_600, "red"),
-        (theme.ERROR, "red"),
+        (C.RED, "red"),
         (ft.Colors.GREEN_400, "em"),
-        (theme.SUCCESS, "em"),
+        (C.EM, "em"),
         (ft.Colors.ORANGE_700, "gold"),
         (ft.Colors.AMBER_200, "gold"),
         (ft.Colors.BLUE_500, "dia"),
-        (theme.PRIMARY, "em"),
         (ft.Colors.PURPLE_700, "ench"),
         (ft.Colors.GREY_700, "neutral"),
-        (theme.WARNING, "gold"),
-        (theme.INFO, "dia"),
-        (theme.RED_200, "red"),
-        (theme.GREEN_700, "em"),
+        (C.GOLD, "gold"),
+        (C.DIA, "dia"),
+        (C.RED_BG, "red"),
         (None, "neutral"),
     ],
 )

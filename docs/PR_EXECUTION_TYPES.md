@@ -175,7 +175,7 @@ PR3 做的事：
 ## PR4 為什麼屬於這類
 PR4 補了：
 - `app/services.py` 的意圖說明
-- `app/task_session.py` 的狀態邏輯說明
+- `app/tasks/task_session.py` 的狀態邏輯說明
 - `app/views/extractor_view.py` 的 generator / poller 分工說明
 - `main.py` 的啟動責任與 UI 組裝邊界
 - `config_manager.py` 的 lazy config / logging 初始化說明

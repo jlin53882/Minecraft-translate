@@ -400,7 +400,7 @@ def test_read_icon_bytes_returns_none_for_oversized_png(tmp_path):
 
 @pytest.fixture
 def icon_preview(monkeypatch):
-    from app.views import icon_preview_view as mod
+    from app.views.icon_preview import icon_cache as mod
 
     # 不碰磁碟上的 model index 快取
     monkeypatch.setattr(mod, "_load_model_index_from_cache", lambda *a, **k: None)
@@ -658,7 +658,7 @@ def test_lang_merge_rejects_symlink_escape(tmp_path, need_symlinks):
 
 
 def test_icon_cache_file_stays_inside_cache_root(tmp_path):
-    from app.views import icon_preview_view as mod
+    from app.views.icon_preview import icon_cache as mod
 
     root = tmp_path / "cache"
     path = mod._icon_cache_file(root, "m", Path("x/mod-1.0.jar"), "item.m.a")
@@ -668,7 +668,7 @@ def test_icon_cache_file_stays_inside_cache_root(tmp_path):
 
 
 def test_icon_cache_file_rejects_escaping_modid(tmp_path):
-    from app.views import icon_preview_view as mod
+    from app.views.icon_preview import icon_cache as mod
 
     root = tmp_path / "cache"
 

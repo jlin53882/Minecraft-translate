@@ -1,10 +1,94 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
 from translation_tool.utils.log_unit import log_warning
+
+# --- 效能／執行緒契約（#114）-------------------------------------------------
+# 歷史紀錄從 UI handler 呼叫，不能在 event loop 上反覆掃描／改寫大檔：
+# - 讀取：每個 jsonl 檔解析成 {key: [events]} 並以檔案簽名（mtime_ns、大小）記住，
+#   ``history_load_recent`` 只做目錄列表與 stat；``history_append_event`` 會就地更新記憶，
+#   所以「套用 → 讀歷史」不會重新解析整個檔案。背景預熱用 ``warm_history_index``。
+# - 寫入：jsonl 只做 O(1) 的附加；整份 json 鏡像（最多 10000 筆、每次整個重寫）交給
+#   單一背景執行緒依序處理（``history_flush`` 可等待全部完成）。
+_INDEX_LOCK = threading.Lock()
+_INDEX_MEMO: dict[str, tuple[tuple[int, int], dict[str, list[dict]]]] = {}
+_MIRROR_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="history-mirror"
+)
+
+
+def _stat_sig(fp: Path) -> tuple[int, int] | None:
+    try:
+        st = fp.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _parse_index(fp: Path) -> dict[str, list[dict]]:
+    by_key: dict[str, list[dict]] = {}
+    try:
+        lines = fp.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):  # 讀不到的檔案視為沒有紀錄（與原行為一致）
+        return by_key
+    for ln in lines:
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            ev = json.loads(ln)
+        except ValueError:  # 損毀的歷史行略過，其餘行照常讀取（與原行為一致）
+            continue
+        by_key.setdefault(str(ev.get("key", "")), []).append(ev)
+    return by_key
+
+
+def _file_index(fp: Path) -> dict[str, list[dict]]:
+    """回傳 jsonl 檔的 {key: [events（檔案順序）]}；簽名沒變就直接用記憶。"""
+    sig = _stat_sig(fp)
+    if sig is None:
+        return {}
+    name = str(fp)
+    with _INDEX_LOCK:
+        hit = _INDEX_MEMO.get(name)
+        if hit is not None and hit[0] == sig:
+            return hit[1]
+    by_key = _parse_index(fp)
+    with _INDEX_LOCK:
+        _INDEX_MEMO[name] = (sig, by_key)
+    return by_key
+
+
+def warm_history_index(cache_root: str, cache_types) -> int:
+    """（背景執行緒）預熱各類型歷史索引；回傳解析的檔案數。"""
+    count = 0
+    root = str(cache_root or "").strip()
+    if not root:
+        return 0
+    for cache_type in cache_types:
+        jsonl_dir = Path(root) / "cache_history" / str(cache_type) / "jsonl"
+        if not jsonl_dir.exists():
+            continue
+        for fp in jsonl_dir.glob(f"{cache_type}_h*.jsonl"):
+            _file_index(fp)
+            count += 1
+    return count
+
+
+def history_flush(timeout: float | None = 10.0) -> None:
+    """等待背景鏡像寫入全部完成（測試／結束前使用）。"""
+    _MIRROR_EXECUTOR.submit(lambda: None).result(timeout=timeout)
+
+
+def clear_history_memo() -> None:
+    """清空讀取記憶（測試用）。"""
+    with _INDEX_LOCK:
+        _INDEX_MEMO.clear()
 
 
 def history_now_ts() -> str:
@@ -100,29 +184,46 @@ def history_append_event(cache_root: str, cache_type: str, event: dict):
     current_file = str(active.get("current_file"))
     jsonl_path = jsonl_dir / current_file
     line = json.dumps(event, ensure_ascii=False)
+    sig_before = _stat_sig(jsonl_path)
     with jsonl_path.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
+
+    # 就地更新讀取記憶（簽名與寫入前一致才更新；否則留給下次讀取重新解析）
+    sig_after = _stat_sig(jsonl_path)
+    with _INDEX_LOCK:
+        memo = _INDEX_MEMO.get(str(jsonl_path))
+        if memo is not None and sig_after is not None and memo[0] == sig_before:
+            memo[1].setdefault(str(event.get("key", "")), []).append(event)
+            _INDEX_MEMO[str(jsonl_path)] = (sig_after, memo[1])
 
     active["current_count"] = int(active.get("current_count", 0) or 0) + 1
     history_save_active(active_path, active)
 
+    # 整份 json 鏡像（讀整個陣列、附加、整個重寫）交給背景執行緒，依序執行
     json_path = json_dir / current_file.replace(".jsonl", ".json")
-    arr = []
-    if json_path.exists():
-        try:
-            raw = json.loads(json_path.read_text(encoding="utf-8"))
-            if isinstance(raw, list):
-                arr = raw
-        except Exception as e:  # noqa: BLE001
-            log_warning(f"載入歷史記錄失敗，使用空陣列: {e}")
-            arr = []
+    _MIRROR_EXECUTOR.submit(_append_mirror, json_path, event, max_per_file)
 
-    arr.append(event)
-    if len(arr) > max_per_file:
-        arr = arr[-max_per_file:]
-    json_path.write_text(
-        json.dumps(arr, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+
+def _append_mirror(json_path: Path, event: dict, max_per_file: int) -> None:
+    """（背景執行緒）把事件附加到 json 鏡像並截斷到 max_per_file 筆。"""
+    try:
+        arr: list = []
+        if json_path.exists():
+            try:
+                raw = json.loads(json_path.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    arr = raw
+            except Exception as e:  # noqa: BLE001
+                log_warning(f"載入歷史記錄失敗，使用空陣列: {e}")
+                arr = []
+        arr.append(event)
+        if len(arr) > max_per_file:
+            arr = arr[-max_per_file:]
+        json_path.write_text(
+            json.dumps(arr, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception as e:  # noqa: BLE001 - 鏡像是衍生資料，失敗只記錄
+        log_warning(f"寫入歷史 json 鏡像失敗: {e}")
 
 
 def history_load_recent(
@@ -136,20 +237,8 @@ def history_load_recent(
     files = sorted(jsonl_dir.glob(f"{cache_type}_h*.jsonl"), reverse=True)
     out: list[dict] = []
     for fp in files:
-        try:
-            lines = fp.read_text(encoding="utf-8").splitlines()
-        except Exception:  # noqa: BLE001, S112
-            continue
-        for ln in reversed(lines):
-            ln = ln.strip()
-            if not ln:
-                continue
-            try:
-                ev = json.loads(ln)
-            except Exception:  # noqa: BLE001, S112
-                continue
-            if str(ev.get("key", "")) != key:
-                continue
+        events = _file_index(fp).get(key, [])
+        for ev in reversed(events):  # 檔案內由新到舊
             out.append(ev)
             if len(out) >= limit:
                 return out

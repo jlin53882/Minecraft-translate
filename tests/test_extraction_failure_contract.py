@@ -92,13 +92,14 @@ def test_real_corrupted_jar_makes_lang_extraction_error(tmp_path, monkeypatch):
     assert list((tmp_path / "out").rglob("en_us.json"))
 
 
-def test_one_click_pipeline_stops_after_failed_extraction(tmp_path, monkeypatch):
+def test_one_click_pipeline_stops_after_failed_extraction(tmp_path):
     from app.views.pipeline import pipeline_view
+    from app.views.pipeline.pipeline_actions import PipelineActions, PipelineServices
     from tests.conftest import mock_filepicker, mock_page
 
     calls = []
 
-    def fake_lang_extraction(mods_dir, output_dir, session, lang_codes=None):
+    def fake_lang_extraction(mods_dir, output_dir, session, lang_codes=None, **kw):
         # 走 production 的提取 session 處理（generator 最終回報 1 個 JAR 失敗）
         _run_extraction_with_session(iter([_final(1)]), session, "Lang")
 
@@ -106,34 +107,24 @@ def test_one_click_pipeline_stops_after_failed_extraction(tmp_path, monkeypatch)
         calls.append("merge")
         yield {"progress": 1.0}
 
-    monkeypatch.setattr(
-        pipeline_view, "run_lang_extraction_service", fake_lang_extraction
+    services = PipelineServices(
+        extract_lang=fake_lang_extraction,
+        merge_folder=fake_merge,
+        translate=lambda **k: calls.append("translate"),
+        build_staging=lambda *a, **k: (
+            calls.append("bundle") or {"copied": 1, "merged": 0}
+        ),
     )
-    monkeypatch.setattr(pipeline_view, "run_merge_folder_batch_service", fake_merge)
-    monkeypatch.setattr(
-        pipeline_view,
-        "run_lm_translation_service",
-        lambda **k: calls.append("translate"),
-    )
-    monkeypatch.setattr(
-        pipeline_view,
-        "build_bundle_staging",
-        lambda *a, **k: calls.append("bundle") or {"copied": 1, "merged": 0},
-    )
-
-    class _SyncThread:
-        def __init__(self, target=None, daemon=None, **kw):
-            self._target = target
-
-        def start(self):
-            self._target()
-
-    monkeypatch.setattr(pipeline_view.threading, "Thread", _SyncThread)
 
     (tmp_path / "mods").mkdir()
     (tmp_path / "out").mkdir()
     page = mock_page()
-    view = pipeline_view.PipelineView(page, mock_filepicker())
+    view = pipeline_view.PipelineView(
+        page,
+        mock_filepicker(),
+        actions=PipelineActions(services),
+        launch_worker=lambda target: target(),
+    )
     view.input_path_text.value = str(tmp_path / "mods")
     view.output_path_text.value = str(tmp_path / "out")
 

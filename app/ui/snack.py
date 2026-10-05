@@ -20,13 +20,13 @@ Flet 0.85.0 SnackBar API: https://flet.dev/docs/controls/snackbar
     show_snack(page, "操作完成")
 
     # 帶顏色
-    show_snack(page, "發生錯誤", color=theme.ERROR)
+    show_snack(page, "發生錯誤", color=C.RED)
 
     # 帶 action 按鈕
     show_snack(page, "已刪除", action_label="復原", on_action=lambda e: restore())
 
-    # 帶文字顏色 (e.g. rules_view.py: theme.WHITE 文字)
-    show_snack(page, "已跳至第 1 頁", theme.PRIMARY, text_color=theme.WHITE)
+    # 帶文字顏色 (e.g. rules_view.py: C.ON_EM 文字)
+    show_snack(page, "已跳至第 1 頁", C.EM, text_color=C.ON_EM)
 
     # 清除已存在的 SnackBar (預設行為,避免 overlay 累積)
     # icon_preview_view.py 用 clear_existing=True 顯式指定 (預設已 True)
@@ -36,13 +36,13 @@ from __future__ import annotations
 
 import flet as ft
 
-from app.ui import design, theme
+from app.ui import design
 from app.ui.design import C
 from app.ui.design import tone as get_tone
 from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.redaction import redact_secrets
 
-# 舊呼叫端傳的是「背景色」（RED_600 / GREEN_600 / theme.PRIMARY …）。新設計的 toast 是中性面板 + 語意色，
+# 舊呼叫端傳的是「背景色」（RED_600 / GREEN_600 / C.EM …）。新設計的 toast 是中性面板 + 語意色，
 # 所以只看顏色屬於哪個色系，轉成對應的語意色組與圖示。
 _HUE_TONES = (
     # 先比對語意色名稱（theme 的舊色名已改指向設計系統的語意色）
@@ -74,10 +74,58 @@ def snack_style(color) -> tuple[str, str]:
     return "neutral", ft.Icons.INFO_OUTLINE
 
 
+def _clear_existing_snacks(page: ft.Page) -> None:
+    """清除已存在的 SnackBar (避免 overlay 累積)。"""
+    if hasattr(page, "overlay") and page.overlay:
+        for i in range(len(page.overlay) - 1, -1, -1):
+            if isinstance(page.overlay[i], ft.SnackBar):
+                try:
+                    del page.overlay[i]
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
+
+def _apply_snack_layout(page: ft.Page, kwargs: dict) -> None:
+    """依頁面寬度決定 SnackBar 的左右 margin／底部安全距離（就地修改 kwargs）。"""
+    requested_width = kwargs.pop("width", None)
+    snack_width = requested_width or 460
+    if "margin" not in kwargs:
+        page_width = getattr(page, "width", None)
+        if isinstance(page_width, (int, float)) and page_width > 0:
+            horizontal_margin = max(12, (page_width - snack_width) / 2)
+            kwargs["margin"] = ft.Margin.only(
+                left=horizontal_margin,
+                right=horizontal_margin,
+                bottom=SNACK_BOTTOM_MARGIN,
+            )
+        else:
+            # 測試 double / 舊版 Page 可能沒有 width；至少保留底部安全距離。
+            kwargs["margin"] = ft.Margin.only(bottom=SNACK_BOTTOM_MARGIN)
+    if requested_width is not None:
+        # 呼叫端明確指定 width 時保留其 contract；預設路徑刻意用左右 margin
+        # 取得相同的視覺寬度，因 Flet 1.0.1 會在 width + margin 同時存在時忽略 bottom。
+        kwargs["width"] = requested_width
+
+
+def _show_snack_dialog(page: ft.Page, snack: ft.SnackBar) -> None:
+    """顯示 SnackBar；show_dialog 失敗時退回 overlay。"""
+    # 以 page.show_dialog() 顯示，讓 Flet 的 floating SnackBar 真正套用 bottom margin；
+    # 預設不再同時傳固定 width，因 Flet 1.0.1 對「固定 width + margin」會忽略 bottom margin。
+    try:
+        page.show_dialog(snack)
+    except Exception:  # noqa: BLE001
+        # Fallback 給只支援 overlay 的 Page 實作。
+        try:
+            page.overlay.append(snack)
+            snack.open = True
+        except Exception as ex:  # noqa: BLE001
+            log_warning(f"[SNACKBAR] show_snack display failed: {ex!r}")
+
+
 def show_snack(
     page: ft.Page,
     message: str,
-    color: str = theme.ERROR,
+    color: str = C.RED,
     *,
     duration: int = 4000,
     action_label: str | None = None,
@@ -100,7 +148,7 @@ def show_snack(
     Args:
         page: Flet Page 實例
         message: 顯示的文字訊息
-        color: 背景顏色 (預設 theme.ERROR)
+        color: 背景顏色 (預設 C.RED)
         duration: 顯示時間 (毫秒), 預設 4000ms
         action_label: action 按鈕文字 (如 "復原")
         on_action: action 按鈕點擊回調
@@ -117,14 +165,8 @@ def show_snack(
     message = redact_secrets(message)  # 提示訊息可能帶有使用者輸入或例外文字（#125）
     log_info(f"[UI] SnackBar: {message}")
 
-    # 清除已存在的 SnackBar (避免 overlay 累積)
-    if clear_existing and hasattr(page, "overlay") and page.overlay:
-        for i in range(len(page.overlay) - 1, -1, -1):
-            if isinstance(page.overlay[i], ft.SnackBar):
-                try:
-                    del page.overlay[i]
-                except Exception:  # noqa: BLE001, S110
-                    pass
+    if clear_existing:
+        _clear_existing_snacks(page)
 
     tone_name, _icon = snack_style(color)
     tone = get_tone(tone_name)
@@ -132,24 +174,7 @@ def show_snack(
     # content 維持單一 ft.Text（既有呼叫端 / 測試會讀 snack.content.value）
     content = ft.Text(message, color=tone.fg, size=13, weight=ft.FontWeight.W_500)
 
-    requested_width = kwargs.pop("width", None)
-    snack_width = requested_width or 460
-    if "margin" not in kwargs:
-        page_width = getattr(page, "width", None)
-        if isinstance(page_width, (int, float)) and page_width > 0:
-            horizontal_margin = max(12, (page_width - snack_width) / 2)
-            kwargs["margin"] = ft.Margin.only(
-                left=horizontal_margin,
-                right=horizontal_margin,
-                bottom=SNACK_BOTTOM_MARGIN,
-            )
-        else:
-            # 測試 double / 舊版 Page 可能沒有 width；至少保留底部安全距離。
-            kwargs["margin"] = ft.Margin.only(bottom=SNACK_BOTTOM_MARGIN)
-    if requested_width is not None:
-        # 呼叫端明確指定 width 時保留其 contract；預設路徑刻意用左右 margin
-        # 取得相同的視覺寬度，因 Flet 1.0.1 會在 width + margin 同時存在時忽略 bottom。
-        kwargs["width"] = requested_width
+    _apply_snack_layout(page, kwargs)
     snack = ft.SnackBar(
         content=content,
         bgcolor=C.RAISED,
@@ -173,17 +198,7 @@ def show_snack(
         if close_icon_color:
             snack.close_icon_color = close_icon_color
 
-    # 以 page.show_dialog() 顯示，讓 Flet 的 floating SnackBar 真正套用 bottom margin；
-    # 預設不再同時傳固定 width，因 Flet 1.0.1 對「固定 width + margin」會忽略 bottom margin。
-    try:
-        page.show_dialog(snack)
-    except Exception:  # noqa: BLE001
-        # Fallback 給只支援 overlay 的 Page 實作。
-        try:
-            page.overlay.append(snack)
-            snack.open = True
-        except Exception as ex:  # noqa: BLE001
-            log_warning(f"[SNACKBAR] show_snack display failed: {ex!r}")
+    _show_snack_dialog(page, snack)
 
     # page.update() 推 render (SnackBar 跳出關鍵)
     # 跟 PR #98 commit 0798022 對齊: caller 可能已經 page.update() 過自己負責的部分,

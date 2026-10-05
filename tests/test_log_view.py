@@ -7,7 +7,7 @@ PR refactor/unified-log-view Stage 2 驗證。
 驗證項目：
 - 預設外觀（theme token、Consolas、圓角 8）
 - add() 行為（不走 LogPresenter、直接 append）
-- add_error() 用 theme.TEXT_LOG_ERROR
+- add_error() 用 C.RED
 - clear() 清空
 - sync_from_session() 從 TaskSession 拿資料
 - show_levels 過濾
@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 
 import flet as ft
 
-from app.ui import theme
+from app.ui.design import C
 from app.views._log import LogView, TaskSession
 
 
@@ -27,7 +27,7 @@ def test_log_view_default_appearance():
     """預設外觀：theme token、等寬字、圓角 12。"""
     page = MagicMock()
     view = LogView(page=page)
-    assert view.bgcolor == theme.BG_LOG_PANEL
+    assert view.bgcolor == C.LOG_BG
     assert view.border_radius == 12
     assert view.padding == 12
     assert isinstance(view.content, ft.ListView)
@@ -45,13 +45,13 @@ def test_log_view_add_appends_text_entry():
 
 
 def test_log_view_add_error_uses_red():
-    """add_error 應用 theme.TEXT_LOG_ERROR。"""
+    """add_error 應用 C.RED。"""
     page = MagicMock()
     view = LogView(page=page)  # colorize 內部 hardcode，不需傳入
     view.add_error("boom")
     text_control = view._list_view.controls[0]
     # add() 直接走 theme token（不是 LogPresenter）
-    assert text_control.color == theme.TEXT_LOG_ERROR
+    assert text_control.color == C.RED
 
 
 def test_log_view_clear_empties():

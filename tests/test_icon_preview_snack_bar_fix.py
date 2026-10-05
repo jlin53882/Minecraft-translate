@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import flet as ft
 
-from app.ui import theme
+from app.ui.design import C
 from app.ui.snack import show_snack
 
 
@@ -43,7 +43,7 @@ class TestSnackBarInPlaceModification:
             # 不呼叫真的 __init__（會觸發太多依賴）
 
         # 呼叫 _show_snack
-        show_snack(view.page, "new message", color=theme.GREEN_600)
+        show_snack(view.page, "new message", color=C.EM)
 
         # 驗證：overlay 裡只有一個 SnackBar（新的）
         snackbars = [o for o in page.overlay if isinstance(o, ft.SnackBar)]
@@ -67,7 +67,7 @@ class TestSnackBarInPlaceModification:
             view = IconPreviewView.__new__(IconPreviewView)
             view._page = page
 
-        show_snack(view.page, "new message", color=theme.WARNING)
+        show_snack(view.page, "new message", color=C.GOLD)
 
         # 驗證：Container 保留，SnackBar 被替換
         snackbars = [o for o in page.overlay if isinstance(o, ft.SnackBar)]
@@ -86,7 +86,7 @@ class TestSnackBarInPlaceModification:
 
         # 呼叫 5 次
         for i in range(5):
-            show_snack(view.page, f"message {i}", color=theme.WARNING)
+            show_snack(view.page, f"message {i}", color=C.GOLD)
 
         # 驗證：只有 1 個 SnackBar
         snackbars = [o for o in page.overlay if isinstance(o, ft.SnackBar)]
@@ -106,5 +106,5 @@ class TestSnackBarInPlaceModification:
             view._page = page
 
         # 不應 raise，page.update() 應該被呼叫
-        show_snack(view.page, "test", color=theme.GREEN_600)
+        show_snack(view.page, "test", color=C.EM)
         assert page.update_called is True

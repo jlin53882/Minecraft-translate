@@ -13,6 +13,8 @@ PR19：將 extract 類 service 從 app.services.py 抽離到 pipelines 子模組
 
 import logging
 import os
+import subprocess
+import sys
 import traceback
 from pathlib import Path
 from typing import Any
@@ -27,11 +29,15 @@ from translation_tool.core.jar_processor import (
     extract_book_files_generator,
     extract_dual_files_generator,
     extract_lang_files_generator,
+    find_jar_files,  # noqa: F401 - 轉出給 View（#136）
+    preview_extraction_generator,  # noqa: F401 - 轉出給 View（#136）
 )
 from translation_tool.utils.cancellation import is_cancelled
 from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
+
+# View 經由本模組取用引擎的提取／預覽 generator（#136）：上方 import 即為對外介面
 
 
 def _select_extraction_generator(
@@ -188,6 +194,16 @@ def prepare_preview_paths(mods_dir: str, mode: str) -> str:
     return str(mods_path.with_name(mods_path.name + suffix))
 
 
+def _end_failed(session: TaskSession, finish_session: bool) -> None:
+    """失敗收尾：一律 ``set_error()`` → ``finish()``（由本 service 擁有 session 生命週期時）。
+
+    ``set_error()`` 在 ``TaskManager`` 不是 terminal event，必須再 ``finish()`` 才會離開 active。
+    """
+    session.set_error()
+    if finish_session:
+        session.finish()
+
+
 def _run_extraction_with_session(
     generator,
     session: TaskSession,
@@ -216,6 +232,8 @@ def _run_extraction_with_session(
         if is_cancelled():
             # 在 JAR 之間停止（一鍵流水線的取消）
             session.add_log(f"⏹ {mode_label} 提取已取消", level="warning")
+            if finish_session:
+                session.finish()
             return
         failures.observe(update)
         filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
@@ -230,7 +248,7 @@ def _run_extraction_with_session(
 
         if update.get("error"):
             _flush_limiter_to_session(session)
-            session.set_error()
+            _end_failed(session, finish_session)
             return
 
     _flush_limiter_to_session(session)
@@ -246,7 +264,7 @@ def _run_extraction_with_session(
             "已提取的檔案保留，但此步驟視為失敗",
             level="error",
         )
-        session.set_error()
+        _end_failed(session, finish_session)
         return
     if finish_session:
         session.finish()
@@ -386,7 +404,7 @@ def run_lang_extraction_service(
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
-        session.set_error()
+        _end_failed(session, manage_session)
         GLOBAL_LOG_LIMITER.flush()
     finally:
         # ⭐ 避免 handler 留著舊 session
@@ -431,7 +449,7 @@ def run_book_extraction_service(
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
-        session.set_error()
+        _end_failed(session, manage_session)
         GLOBAL_LOG_LIMITER.flush()
     finally:
         # ⭐ 避免 handler 留著舊 session
@@ -464,7 +482,7 @@ def run_dual_extraction_service(
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}")
         session.add_log(f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}")
-        session.set_error()
+        _end_failed(session, True)
         GLOBAL_LOG_LIMITER.flush()
     finally:
         # ⭐ 避免 handler 留著舊 session
@@ -472,33 +490,36 @@ def run_dual_extraction_service(
 
 
 def open_output_folder(path: str) -> bool:
-    """用系統預設檔案管理員開啟資料夾。
+    """用系統預設檔案管理員開啟資料夾（**不等待**外部程式，可在 UI handler 內直接呼叫）。
 
-    取代 UI 層直接呼叫 os.startfile 的反模式。
-    UI 層不應處理 OS 層級的操作。
+    取代 UI 層直接呼叫 os.startfile 的反模式；UI 層不應處理 OS 層級的操作。
+
+    - Windows：``os.startfile``（只交給 shell，不等待）。
+    - macOS／Linux：``subprocess.Popen``（不 ``wait``）。原本的 ``subprocess.run(check=True)``
+      會讓 Flet event loop 等到外部程式結束，違反 #114「sync handler 不得阻塞」。
 
     Args:
         path: 資料夾路徑
 
     Returns:
-        True 表示成功開啟，False 表示失敗（路徑不存在或平台不支援）
+        True 表示已成功啟動；False 表示路徑不存在或無法啟動（錯誤只記錄，不會拋出）。
+        啟動後外部程式自己失敗（例如非零 exit code）不會被偵測到。
     """
-    import os
-
     if not path or not os.path.isdir(path):
         return False
 
     try:
         if os.name == "nt":  # Windows
             os.startfile(path)
-        elif os.uname().sysname == "Darwin":  # macOS
-            import subprocess
-
-            subprocess.run(["open", path], check=True)
-        else:  # Linux
-            import subprocess
-
-            subprocess.run(["xdg-open", path], check=True)
+        else:
+            opener = "open" if sys.platform == "darwin" else "xdg-open"
+            subprocess.Popen(
+                [opener, path],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
         return True
     except Exception:
         logger.warning("開啟資料夾失敗：%s", path, exc_info=True)

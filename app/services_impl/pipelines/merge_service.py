@@ -18,6 +18,7 @@ from translation_tool.core.lang_merger import (
     merge_zhcn_to_zhtw_from_folder,
     merge_zhcn_to_zhtw_from_zip,
 )
+from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,125 @@ def _soft_error_detail(update: dict, default: str = "內部軟性錯誤") -> str
     return default
 
 
+def _zip_summary(stats: dict, output_dir: str) -> dict:
+    """ZIP 批次的統計摘要（含輸出檔案計數）。"""
+    return {
+        "total_zips": stats["total_zips"],
+        "success_zips": stats["success_zips"],
+        "failed_zips": stats["failed_zips"],
+        "errored_files": stats["errored_files"],
+        "failed_zips_list": stats["failed_zips_list"],
+        "output_counts": _count_output_files(output_dir),
+    }
+
+
+def _folder_summary(stats: dict, output_dir: str) -> dict:
+    """資料夾批次的統計摘要（含輸出檔案計數）。"""
+    return {
+        "total_folders": stats["total_folders"],
+        "success_folders": stats["success_folders"],
+        "failed_folders": stats["failed_folders"],
+        "errored_files": stats["errored_files"],
+        "failed_folders_list": stats["failed_folders_list"],
+        "output_counts": _count_output_files(output_dir),
+    }
+
+
+def _record_zip_result(
+    stats: dict, session, idx: int, total: int, zip_name: str, zip_errors: list[str]
+) -> None:
+    """依單一 ZIP 的錯誤清單更新統計並寫入 session 日誌。"""
+    if zip_errors:
+        stats["failed_zips"] += 1
+        stats["failed_zips_list"].append(
+            {
+                "name": zip_name,
+                "error": "; ".join(dict.fromkeys(zip_errors)),
+            }
+        )
+        session.add_log(f"[ZIP {idx + 1}/{total}] 失敗：{zip_name}")
+    else:
+        session.add_log(f"[ZIP {idx + 1}/{total}] 完成：{zip_name}")
+        stats["success_zips"] += 1
+
+
+def _record_folder_result(
+    stats: dict, input_dir: str, folder_errors: list[str]
+) -> None:
+    """依資料夾的錯誤清單更新統計。"""
+    if folder_errors:
+        stats["failed_folders"] = 1
+        stats["failed_folders_list"].append(
+            {
+                "name": os.path.basename(input_dir),
+                "error": "; ".join(dict.fromkeys(folder_errors)),
+            }
+        )
+    else:
+        stats["success_folders"] = 1
+
+
+def _merge_one_zip(
+    zip_path: str,
+    output_dir: str,
+    session,
+    only_process_lang,
+    idx: int,
+    total: int,
+    zip_name: str,
+    zip_base_progress: float,
+    *,
+    process_zh_cn,
+    patchouli_skip,
+    patchouli_threshold,
+    zh_en_threshold,
+) -> list[str]:
+    """合併單一 ZIP（把進度疊加到整批進度），回傳這個 ZIP 的錯誤訊息清單。"""
+    zip_errors: list[str] = []
+    try:
+        # ⚠️ 關鍵：一定要 iterate generator，否則 merge 不會執行
+        for update in merge_zhcn_to_zhtw_from_zip(
+            zip_path,
+            output_dir,
+            only_process_lang,
+            process_zh_cn=process_zh_cn,
+            patchouli_skip=patchouli_skip,
+            patchouli_threshold=patchouli_threshold,
+            zh_en_threshold=zh_en_threshold,
+        ):
+            raise_if_cancelled()  # 取消檢查點：每個 update
+            # ---- log ----
+            if update.get("log"):
+                session.add_log(update["log"])
+
+            # ---- progress（疊加 ZIP 進度）----
+            if "progress" in update and update["progress"] is not None:
+                merged_progress = zip_base_progress + (update["progress"] / total)
+                session.set_progress(min(merged_progress, 0.999))
+
+            # ---- error ----
+            # 2026-08-04 修正 A2: 軟性 error 不中止整批,繼續處理下一個 ZIP
+            if update.get("error"):
+                zip_errors.append(_soft_error_detail(update))
+
+    except Exception as e:  # noqa: BLE001
+        tb = traceback.format_exc()
+        logger.error(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
+        session.add_log(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
+        zip_errors.append(str(e))
+    return zip_errors
+
+
+def _fatal_zip_error(session, stats: dict, output_dir: str, error: Exception) -> dict:
+    """ZIP 合併的致命錯誤：記錄並寫入摘要（即使失敗也要回報）；``set_error``／finish 由呼叫端處理。"""
+    tb = traceback.format_exc()
+    logger.error(f"[致命錯誤] ZIP 合併失敗：{error}\n{tb}")
+    session.add_log(f"[致命錯誤] ZIP 合併失敗：{error}\n{tb}")
+    error_summary = _zip_summary(stats, output_dir)
+    session.set_summary(error_summary)
+    return error_summary
+
+
 def run_merge_zip_batch_service(
     zip_paths: list[str],
     output_dir: str,
@@ -93,11 +213,14 @@ def run_merge_zip_batch_service(
         "failed_zips_list": [],  # [{"name": str, "error": str}, ...]
     }
 
+    finished = False  # generator 被 close（取消）時由 finally 補 finish
+
     try:
         total = len(zip_paths)
         if total == 0:
             session.add_log("[系統] 未選擇任何 ZIP 檔案")
             session.finish()
+            finished = True
             yield {
                 "progress": 1.0,
                 "log": None,
@@ -106,71 +229,34 @@ def run_merge_zip_batch_service(
             return
 
         for idx, zip_path in enumerate(zip_paths):
+            raise_if_cancelled()  # 取消檢查點：ZIP 與 ZIP 之間
             zip_name = Path(zip_path).name
             zip_base_progress = idx / total
-            zip_errors = []
 
             session.add_log(f"[ZIP {idx + 1}/{total}] 開始處理：{zip_name}")
 
-            try:
-                # ⚠️ 關鍵：一定要 iterate generator，否則 merge 不會執行
-                for update in merge_zhcn_to_zhtw_from_zip(
-                    zip_path,
-                    output_dir,
-                    only_process_lang,
-                    process_zh_cn=process_zh_cn,
-                    patchouli_skip=patchouli_skip,
-                    patchouli_threshold=patchouli_threshold,
-                    zh_en_threshold=zh_en_threshold,
-                ):
-                    # ---- log ----
-                    if update.get("log"):
-                        session.add_log(update["log"])
+            zip_errors = _merge_one_zip(
+                zip_path,
+                output_dir,
+                session,
+                only_process_lang,
+                idx,
+                total,
+                zip_name,
+                zip_base_progress,
+                process_zh_cn=process_zh_cn,
+                patchouli_skip=patchouli_skip,
+                patchouli_threshold=patchouli_threshold,
+                zh_en_threshold=zh_en_threshold,
+            )
 
-                    # ---- progress（疊加 ZIP 進度）----
-                    if "progress" in update and update["progress"] is not None:
-                        merged_progress = zip_base_progress + (
-                            update["progress"] / total
-                        )
-                        session.set_progress(min(merged_progress, 0.999))
-
-                    # ---- error ----
-                    # 2026-08-04 修正 A2: 軟性 error 不中止整批,繼續處理下一個 ZIP
-                    if update.get("error"):
-                        zip_errors.append(_soft_error_detail(update))
-
-            except Exception as e:  # noqa: BLE001
-                tb = traceback.format_exc()
-                logger.error(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
-                session.add_log(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
-                zip_errors.append(str(e))
-
-            if zip_errors:
-                stats["failed_zips"] += 1
-                stats["failed_zips_list"].append(
-                    {
-                        "name": zip_name,
-                        "error": "; ".join(dict.fromkeys(zip_errors)),
-                    }
-                )
-                session.add_log(f"[ZIP {idx + 1}/{total}] 失敗：{zip_name}")
-            else:
-                session.add_log(f"[ZIP {idx + 1}/{total}] 完成：{zip_name}")
-                stats["success_zips"] += 1
+            _record_zip_result(stats, session, idx, total, zip_name, zip_errors)
 
             # ZIP 完成後，至少推進一次 progress
             session.set_progress((idx + 1) / total)
 
         # 產出統計摘要，並寫入 session 供 UI 取用
-        output_counts = _count_output_files(output_dir)
-        final_summary = {
-            "total_zips": stats["total_zips"],
-            "success_zips": stats["success_zips"],
-            "failed_zips": stats["failed_zips"],
-            "errored_files": stats["errored_files"],
-            "failed_zips_list": stats["failed_zips_list"],
-            "output_counts": output_counts,
-        }
+        final_summary = _zip_summary(stats, output_dir)
         session.set_summary(final_summary)
         yield {"progress": 1.0, "log": None, "summary": final_summary}
         # 部分失敗維持批次語意（DONE + failed_zips_list）；全部失敗才視為任務失敗，
@@ -178,29 +264,140 @@ def run_merge_zip_batch_service(
         if stats["success_zips"] == 0:
             session.add_log("[系統] 所有 ZIP 皆處理失敗")
             session.set_error()
+            session.finish()  # ERROR 也要 finish，TaskManager 才會離開 active
         else:
             session.finish()
+        finished = True
 
     except Exception as e:  # noqa: BLE001
-        tb = traceback.format_exc()
-        logger.error(f"[致命錯誤] ZIP 合併失敗：{e}\n{tb}")
-        session.add_log(f"[致命錯誤] ZIP 合併失敗：{e}\n{tb}")
-        # 產出統計摘要（即使失敗也要回報）
-        error_summary = {
-            "total_zips": stats["total_zips"],
-            "success_zips": stats["success_zips"],
-            "failed_zips": stats["failed_zips"],
-            "errored_files": stats["errored_files"],
-            "failed_zips_list": stats["failed_zips_list"],
-            "output_counts": _count_output_files(output_dir),
-        }
-        session.set_summary(error_summary)
+        error_summary = _fatal_zip_error(session, stats, output_dir, e)
         yield {"progress": 1.0, "log": None, "summary": error_summary}
         session.set_error()
+        session.finish()
+        finished = True
 
     finally:
         # ⭐ 避免 handler 留著舊 session
         UI_LOG_HANDLER.set_session(None)
+        if not finished:
+            session.finish()
+
+
+def _set_monotonic_progress(session, value: float) -> None:
+    """進度只增不減（兩個階段／多個來源共用同一個 session 時不會倒退）。"""
+    snapshot_fn = getattr(session, "snapshot", None)
+    if callable(snapshot_fn):
+        current = snapshot_fn().get("progress", 0.0)
+    else:
+        current = getattr(session, "progress", 0.0)
+    session.set_progress(max(float(current or 0.0), min(1.0, value)))
+
+
+def _run_folder_stage1(
+    input_dir: str,
+    output_dir: str,
+    session,
+    only_process_lang,
+    options: dict,
+    progress_start: float,
+    progress_end: float,
+    folder_errors: list[str],
+) -> None:
+    """階段 1：zh_cn → zh_tw（佔進度區間的前 90%）；軟性 error 不中止，記入 folder_errors。"""
+    for update in merge_zhcn_to_zhtw_from_folder(
+        input_dir,
+        output_dir,
+        only_process_lang,
+        **options,
+        progress_start=progress_start,
+        progress_end=progress_start + (progress_end - progress_start) * 0.90,
+    ):
+        # 取消檢查點：每個 update 之後（停止消費即中止核心 generator 的後續處理）
+        raise_if_cancelled()
+        if update.get("log"):
+            session.add_log(update["log"])
+        if "progress" in update and update["progress"] is not None:
+            _set_monotonic_progress(session, update["progress"])
+        # 2026-08-04 修正 A2: 軟性 error 不中止,繼續處理
+        if update.get("error"):
+            folder_errors.append(_soft_error_detail(update))
+
+
+def _run_extracted_stage2(
+    folder_errors: list[str],
+    output_dir: str,
+    session,
+    progress_start: float,
+    progress_end: float,
+) -> None:
+    """階段 2：把 XX_extracted 的 lang 檔 key-by-key 合併進 lang_output/assets（就地追加 folder_errors）。
+
+    階段 1 已有錯誤時略過；由設定 ``lang_merger.enable_extracted_to_assets_merge`` 控制是否執行。
+    進度落在 ``progress_start~progress_end`` 區間的最後 10%（單調遞增）。
+    """
+    # 階段 2 (2026-08-02 PR-XX merge-asset-integration):
+    # 從 input_dir 內 XX_extracted/ 的 lang 檔 key-by-key 合併進
+    # output_dir/lang_output/assets/{modid}/lang/{xx_yy}.json
+    if folder_errors:
+        session.add_log("[階段 2/2 略過] 階段 1 發生錯誤，不處理部分輸出")
+        return
+    try:
+        cfg = load_config()
+        lang_merger = cfg.get("lang_merger", {})
+        if not lang_merger.get("enable_extracted_to_assets_merge", True):
+            session.add_log("[階段 2/2 略過] 檔案合併(階段 2) 未啟用，跳過")
+            return
+        session.add_log("[階段 2/2 開始] XX_extracted → assets 合併")
+        lang_output_dir = os.path.join(output_dir, "lang_output")
+        stage2_start = progress_start + (progress_end - progress_start) * 0.90
+        for update in merge_extracted_to_assets(
+            lang_output_dir=lang_output_dir,
+            session=session,
+            pending_folder_names=(
+                lang_merger.get("pending_folder_name", "待翻譯"),
+                lang_merger.get("pending_organized_folder_name", "待翻譯整理需翻譯"),
+            ),
+        ):
+            raise_if_cancelled()  # 取消檢查點：階段 2 每個 update
+            if update.get("log"):
+                session.add_log(update["log"])
+            if "progress" in update and update["progress"] is not None:
+                _set_monotonic_progress(
+                    session,
+                    stage2_start + update["progress"] * (progress_end - stage2_start),
+                )
+            if update.get("error"):
+                folder_errors.append(_soft_error_detail(update))
+                session.add_log("[階段 2/2 錯誤] assets 合併中止")
+                break
+        if not folder_errors:
+            session.add_log("[階段 2/2 完成]")
+    except Exception as stage2_err:  # noqa: BLE001
+        logger.warning(f"[階段 2/2 錯誤]: {stage2_err}")
+        session.add_log(f"[階段 2/2 錯誤]: {stage2_err}")
+        folder_errors.append(str(stage2_err))
+
+
+def _finish_folder_run(session, stats: dict, output_dir: str, failed: bool) -> dict:
+    """寫入摘要並在失敗時標記 session；回傳最後一筆更新（成功時的 finish 由呼叫端在 yield 後執行）。"""
+    final_summary = _folder_summary(stats, output_dir)
+    session.set_summary(final_summary)
+    if failed:
+        session.set_error()
+    return {"progress": 1.0, "log": None, "error": failed, "summary": final_summary}
+
+
+def _fatal_folder_error(
+    session, stats: dict, output_dir: str, error: Exception
+) -> dict:
+    """資料夾合併的致命錯誤：記錄、寫入摘要並 ``set_error()``；回傳摘要（finish 由呼叫端決定）。"""
+    tb = traceback.format_exc()
+    logger.error(f"[致命錯誤] 資料夾合併失敗：{error}\n{tb}")
+    session.add_log(f"[致命錯誤] 資料夾合併失敗：{error}\n{tb}")
+    error_summary = _folder_summary(stats, output_dir)
+    session.set_summary(error_summary)
+    session.set_error()
+    return error_summary
 
 
 def run_merge_folder_batch_service(
@@ -231,39 +428,27 @@ def run_merge_folder_batch_service(
         "failed_folders_list": [],
     }
     folder_errors = []
-
-    def set_monotonic_progress(value: float) -> None:
-        snapshot_fn = getattr(session, "snapshot", None)
-        if callable(snapshot_fn):
-            current = snapshot_fn().get("progress", 0.0)
-        else:
-            current = getattr(session, "progress", 0.0)
-        session.set_progress(max(float(current or 0.0), min(1.0, value)))
+    finished = False  # generator 被 close（取消）時，yield 之後的 finish 不會執行；finally 補上
 
     try:
         session.add_log(f"[資料夾] 開始處理：{os.path.basename(input_dir)}")
 
         try:
-            for update in merge_zhcn_to_zhtw_from_folder(
+            _run_folder_stage1(
                 input_dir,
                 output_dir,
+                session,
                 only_process_lang,
-                process_zh_cn=process_zh_cn,
-                patchouli_skip=patchouli_skip,
-                patchouli_threshold=patchouli_threshold,
-                zh_en_threshold=zh_en_threshold,
-                progress_start=progress_start,
-                progress_end=progress_start + (progress_end - progress_start) * 0.90,
-            ):
-                if update.get("log"):
-                    session.add_log(update["log"])
-
-                if "progress" in update and update["progress"] is not None:
-                    set_monotonic_progress(update["progress"])
-
-                # 2026-08-04 修正 A2: 軟性 error 不中止,繼續處理
-                if update.get("error"):
-                    folder_errors.append(_soft_error_detail(update))
+                {
+                    "process_zh_cn": process_zh_cn,
+                    "patchouli_skip": patchouli_skip,
+                    "patchouli_threshold": patchouli_threshold,
+                    "zh_en_threshold": zh_en_threshold,
+                },
+                progress_start,
+                progress_end,
+                folder_errors,
+            )
 
             if folder_errors:
                 session.add_log("[階段 1/2 失敗] zh_cn → zh_tw 處理發生錯誤")
@@ -275,52 +460,13 @@ def run_merge_folder_batch_service(
             # 從 input_dir 內 XX_extracted/ 的 lang 檔 key-by-key 合併進
             # output_dir/lang_output/assets/{modid}/lang/{xx_yy}.json
             # config flag "enable_extracted_to_assets_merge" 控制是否跑。
-            if folder_errors:
-                session.add_log("[階段 2/2 略過] 階段 1 發生錯誤，不處理部分輸出")
-            else:
-                try:
-                    cfg = load_config()
-                    enable_extracted_merge = cfg.get("lang_merger", {}).get(
-                        "enable_extracted_to_assets_merge", True
-                    )
-                    if enable_extracted_merge:
-                        session.add_log("[階段 2/2 開始] XX_extracted → assets 合併")
-                        lang_output_dir = os.path.join(output_dir, "lang_output")
-                        stage2_start = (
-                            progress_start + (progress_end - progress_start) * 0.90
-                        )
-                        for update in merge_extracted_to_assets(
-                            lang_output_dir=lang_output_dir,
-                            session=session,
-                            pending_folder_names=(
-                                cfg.get("lang_merger", {}).get(
-                                    "pending_folder_name", "待翻譯"
-                                ),
-                                cfg.get("lang_merger", {}).get(
-                                    "pending_organized_folder_name",
-                                    "待翻譯整理需翻譯",
-                                ),
-                            ),
-                        ):
-                            if update.get("log"):
-                                session.add_log(update["log"])
-                            if "progress" in update and update["progress"] is not None:
-                                stage2_progress = stage2_start + update["progress"] * (
-                                    progress_end - stage2_start
-                                )
-                                set_monotonic_progress(stage2_progress)
-                            if update.get("error"):
-                                folder_errors.append(_soft_error_detail(update))
-                                session.add_log("[階段 2/2 錯誤] assets 合併中止")
-                                break
-                        if not folder_errors:
-                            session.add_log("[階段 2/2 完成]")
-                    else:
-                        session.add_log("[階段 2/2 略過] 檔案合併(階段 2) 未啟用，跳過")
-                except Exception as stage2_err:  # noqa: BLE001
-                    logger.warning(f"[階段 2/2 錯誤]: {stage2_err}")
-                    session.add_log(f"[階段 2/2 錯誤]: {stage2_err}")
-                    folder_errors.append(str(stage2_err))
+            _run_extracted_stage2(
+                folder_errors,
+                output_dir,
+                session,
+                progress_start,
+                progress_end,
+            )
 
         except Exception as e:  # noqa: BLE001
             tb = traceback.format_exc()
@@ -328,60 +474,22 @@ def run_merge_folder_batch_service(
             session.add_log(f"[資料夾] 錯誤：{input_dir}\n{e}\n{tb}")
             folder_errors.append(str(e))
 
-        if folder_errors:
-            stats["failed_folders"] = 1
-            stats["failed_folders_list"].append(
-                {
-                    "name": os.path.basename(input_dir),
-                    "error": "; ".join(dict.fromkeys(folder_errors)),
-                }
-            )
-        else:
-            stats["success_folders"] = 1
+        _record_folder_result(stats, input_dir, folder_errors)
 
-        output_counts = _count_output_files(output_dir)
-        final_summary = {
-            "total_folders": stats["total_folders"],
-            "success_folders": stats["success_folders"],
-            "failed_folders": stats["failed_folders"],
-            "errored_files": stats["errored_files"],
-            "failed_folders_list": stats["failed_folders_list"],
-            "output_counts": output_counts,
-        }
-        session.set_summary(final_summary)
-        if folder_errors:
-            session.set_error()
-            yield {
-                "progress": 1.0,
-                "log": None,
-                "error": True,
-                "summary": final_summary,
-            }
-        else:
-            yield {
-                "progress": 1.0,
-                "log": None,
-                "error": False,
-                "summary": final_summary,
-            }
-            if finish_session:
-                session.finish()
+        update = _finish_folder_run(session, stats, output_dir, bool(folder_errors))
+        yield update
+        if finish_session:
+            session.finish()  # 失敗時已 set_error()，finish 維持 ERROR 並離開 active
+            finished = True
 
     except Exception as e:  # noqa: BLE001
-        tb = traceback.format_exc()
-        logger.error(f"[致命錯誤] 資料夾合併失敗：{e}\n{tb}")
-        session.add_log(f"[致命錯誤] 資料夾合併失敗：{e}\n{tb}")
-        error_summary = {
-            "total_folders": stats["total_folders"],
-            "success_folders": stats["success_folders"],
-            "failed_folders": stats["failed_folders"],
-            "errored_files": stats["errored_files"],
-            "failed_folders_list": stats["failed_folders_list"],
-            "output_counts": _count_output_files(output_dir),
-        }
-        session.set_summary(error_summary)
-        session.set_error()
+        error_summary = _fatal_folder_error(session, stats, output_dir, e)
+        if finish_session:
+            session.finish()
+            finished = True
         yield {"progress": 1.0, "log": None, "error": True, "summary": error_summary}
 
     finally:
         UI_LOG_HANDLER.set_session(None)
+        if finish_session and not finished:
+            session.finish()  # 取消（generator.close）等沒走到 finish 的路徑

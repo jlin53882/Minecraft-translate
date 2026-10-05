@@ -11,6 +11,7 @@ from unittest.mock import patch
 import flet as ft
 
 from app.tasks import LogEntry
+from app.ui.design import C
 from app.ui.design import tone as get_tone
 from app.ui.snack import show_snack
 from app.views import lm_view
@@ -314,7 +315,7 @@ def test_set_status_updates_chip_label_and_color(monkeypatch):
     assert view.status_chip.label.value == "執行中"
     assert view.status_chip.bgcolor == get_tone("dia").bg
     # 相容舊呼叫端：傳舊的背景色也會轉成對應色組
-    view._set_status("完成", lm_view.theme.GREEN_200)
+    view._set_status("完成", C.EM_BG)
     assert view.status_chip.bgcolor == get_tone("em").bg
 
 
@@ -672,7 +673,7 @@ def test_show_snack_bar_adds_to_overlay(monkeypatch):
     page = mock_page()
     view = lm_view.LMView(page, mock_filepicker())
 
-    show_snack(view.page, "Test message", lm_view.theme.RED_600)
+    show_snack(view.page, "Test message", C.RED)
 
     assert len(page.overlay) == 1
     assert page.overlay[0].open is True

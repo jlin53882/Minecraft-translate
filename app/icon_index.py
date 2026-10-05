@@ -91,7 +91,7 @@ def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
             names = set(zf.namelist())
             budget = ZipReadBudget.for_icon_scan(jar_path.name)
             from app.icon_reader import IconRef
-            from app.views.icon_preview_view import (
+            from app.views.icon_preview.icon_cache import (
                 _try_extract_mod_icon_from_model,
             )
 

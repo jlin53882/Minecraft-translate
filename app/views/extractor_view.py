@@ -27,7 +27,7 @@ from app.services_impl.pipelines.extract_service import (
 from app.tasks.task_session import (
     TaskSession,  # noqa: F401 - 測試以 extractor_view.TaskSession patch
 )
-from app.ui import kit, theme
+from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views._log import LogView
@@ -66,6 +66,56 @@ class ExtractorView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=15)
+        self._init_extractor_inputs(file_picker, page)
+        self.dual_extract_button = kit.button(
+            "提取 Lang + Book",
+            "primary",
+            icon=ft.Icons.LANGUAGE,
+            on_click=self._handle_extract_dual_click,
+        )
+        self.dual_preview_button = kit.button(
+            "預覽 Lang + Book",
+            "secondary",
+            icon=ft.Icons.PREVIEW,
+            on_click=self._handle_preview_dual_click,
+        )
+
+        # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器 + 字串比對判 level）
+        # 注意:此 LogView 必須先建立 (在 Day 3-4 區段),因 _append_log_line()
+        # 在 _auto_fill_output_path() 內依賴它
+        self.log_view = LogView(
+            page=self._page,
+            mode="append",
+            max_lines=2000,
+        )
+
+        # ======================
+        # Layout Composition（使用 styled_card 統一外觀）
+        # ======================
+        # 🐛 2026-08-01 user review:不掛日誌面板到主 UI
+        # user 之前 base 設計是「日誌不顯示在主畫面」,規格書原本 S1 修復
+        # 要把日誌掛回 (確認 commit a3189f9),但 user 之後實測發現
+        # 會擠壓主畫面,改變主意不顯示。
+        # 日誌 self.log_view 仍建構 (供 _append_log_line 寫入跟 dialog 用),
+        # 但 self._logs_panel 不掛進 self.controls (user 看到的「主畫面」)。
+        self._logs_panel = ft.Container(content=ft.Column([self.log_view], height=350))
+        self._logs_panel.visible = False  # 隱藏 — 日誌只在 dialog 內顯示
+
+        self.controls = [build_settings_panel(self)]
+
+        # 初始化 output_dir helper，動態讀取設定值
+        # 用 try-except 避免 __init__ 階段 self.page.update() 觸發 Control must be added to the page first
+        try:
+            self._update_output_dir_helper()
+        except RuntimeError as e:
+            if "Control must be added to the page first" in str(e):
+                # 在 __init__ 階段元件還沒被加到 page，跳過 update 即可
+                pass
+            else:
+                raise
+
+    def _init_extractor_inputs(self, file_picker, page) -> None:
+        """提取頁的狀態與輸入控制項。"""
         self._page = page
         self.file_picker = file_picker
 
@@ -124,52 +174,6 @@ class ExtractorView(ft.Column):
             icon=ft.Icons.PREVIEW,
             on_click=self._handle_preview_book_click,
         )
-        self.dual_extract_button = kit.button(
-            "提取 Lang + Book",
-            "primary",
-            icon=ft.Icons.LANGUAGE,
-            on_click=self._handle_extract_dual_click,
-        )
-        self.dual_preview_button = kit.button(
-            "預覽 Lang + Book",
-            "secondary",
-            icon=ft.Icons.PREVIEW,
-            on_click=self._handle_preview_dual_click,
-        )
-
-        # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器 + 字串比對判 level）
-        # 注意:此 LogView 必須先建立 (在 Day 3-4 區段),因 _append_log_line()
-        # 在 _auto_fill_output_path() 內依賴它
-        self.log_view = LogView(
-            page=self._page,
-            mode="append",
-            max_lines=2000,
-        )
-
-        # ======================
-        # Layout Composition（使用 styled_card 統一外觀）
-        # ======================
-        # 🐛 2026-08-01 user review:不掛日誌面板到主 UI
-        # user 之前 base 設計是「日誌不顯示在主畫面」,規格書原本 S1 修復
-        # 要把日誌掛回 (確認 commit a3189f9),但 user 之後實測發現
-        # 會擠壓主畫面,改變主意不顯示。
-        # 日誌 self.log_view 仍建構 (供 _append_log_line 寫入跟 dialog 用),
-        # 但 self._logs_panel 不掛進 self.controls (user 看到的「主畫面」)。
-        self._logs_panel = ft.Container(content=ft.Column([self.log_view], height=350))
-        self._logs_panel.visible = False  # 隱藏 — 日誌只在 dialog 內顯示
-
-        self.controls = [build_settings_panel(self)]
-
-        # 初始化 output_dir helper，動態讀取設定值
-        # 用 try-except 避免 __init__ 階段 self.page.update() 觸發 Control must be added to the page first
-        try:
-            self._update_output_dir_helper()
-        except RuntimeError as e:
-            if "Control must be added to the page first" in str(e):
-                # 在 __init__ 階段元件還沒被加到 page，跳過 update 即可
-                pass
-            else:
-                raise
 
     def pick_directory(self, target):
         """開啟目錄選擇對話框。
@@ -177,7 +181,7 @@ class ExtractorView(ft.Column):
         Args:
             target: 選擇後要填入路徑的 TextField。
         """
-        show_snack(self.page, "請選擇此欄位的資料夾", color=theme.BLUE_600)
+        show_snack(self.page, "請選擇此欄位的資料夾", color=C.DIA)
         self._page.run_task(self._async_pick_directory, target)
 
     async def _async_pick_directory(self, target):
@@ -191,7 +195,7 @@ class ExtractorView(ft.Column):
             target.value = result
             self.page.update()
         else:
-            show_snack(self.page, "未選擇資料夾", color=theme.BLUE_600)
+            show_snack(self.page, "未選擇資料夾", color=C.DIA)
 
     # 僅在按「預覽/提取」時自動填入輸出路徑，選擇資料夾時不自動填入
     def refresh_config_defaults(self):
@@ -254,7 +258,7 @@ class ExtractorView(ft.Column):
                 return
             raise
 
-    def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang"):
+    def _auto_fill_output_path(self, mods_dir: str, mode: str = "lang") -> str:
         """根據 Mods 資料夾自動產生並填入輸出路徑（使用指定模式的設定）。
 
         ✅ 階段 B 重構：config 讀取已抽離至 extract_service.get_output_folder_names()
@@ -275,8 +279,9 @@ class ExtractorView(ft.Column):
             suffix = lang_extract
 
         # 保護機制：只有輸出路徑為空時才自動填入，避免覆寫使用者已輸入的自訂路徑
-        if (self.output_dir_textfield.value or "").strip():
-            return
+        existing = (self.output_dir_textfield.value or "").strip()
+        if existing:
+            return existing
 
         # 修正邏輯：處理路徑末尾斜線並正確合併名稱
         # 注意：必須先轉成 str 才能呼叫 rstrip，否則會觸發 AttributeError
@@ -302,8 +307,9 @@ class ExtractorView(ft.Column):
         show_snack(
             self.page,
             f"[系統] 已自動設定輸出路徑：{output_path}",
-            color=theme.GREEN_600,
+            color=C.EM,
         )
+        return output_path
 
     def _check_mods_dir_or_snack(self, mods_dir: str, action_label: str) -> bool:
         """按鈕 click handler 的前置驗證。
@@ -326,14 +332,14 @@ class ExtractorView(ft.Column):
             show_snack(
                 self.page,
                 f"⚠️ 請先選擇 Mods 資料夾才能{action_label}",
-                color=theme.AMBER_700,
+                color=C.GOLD,
             )
             return False
         if not os.path.isdir(mods_dir):
             show_snack(
                 self.page,
                 f"⚠️ Mods 資料夾不存在,無法{action_label}",
-                color=theme.AMBER_700,
+                color=C.GOLD,
             )
             return False
         return True
@@ -463,7 +469,7 @@ class ExtractorView(ft.Column):
         self.page.update()
         # 🐛 2026-08-01 user review: 改用 SnackBar 跳出提示,不掛 log UI
         # (原本 _append_log_line 寫進 self.log_view,但 S1 撤回後 user 看不到任何 log)
-        show_snack(self.page, "[系統] 已清除輸出路徑", color=theme.BLUE_600)
+        show_snack(self.page, "[系統] 已清除輸出路徑", color=C.DIA)
 
     # ==================================================
     # Worker Logic

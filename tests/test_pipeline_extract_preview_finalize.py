@@ -85,7 +85,8 @@ def _run_preview(monkeypatch, tmp_path, generator):
     preview_btn.on_click(None)
 
     preview_dialog = page.overlay[-1]
-    assert any("預覽掃描中" in t for t in _texts(preview_dialog.content))
+    # 一開始只顯示「正在搜尋 JAR」：JAR 探索在背景執行緒，不在 UI handler 內
+    assert "正在搜尋 JAR..." in _texts(preview_dialog.content)
     # 執行 event loop 上的輪詢 + finalization（production coroutine）
     while page.tasks:
         handler, args = page.tasks.pop(0)

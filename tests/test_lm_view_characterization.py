@@ -83,3 +83,103 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
     assert calls["dry_run"] is True
     assert calls["export_lang"] is True
     assert calls["write_new_cache"] is True
+
+
+def test_start_clicked_leaves_session_start_and_finish_to_the_service(monkeypatch):
+    """LMView 不可自己 start() session：service 才是單一 lifecycle owner（否則會重複 start、
+    清掉剛寫入的日誌，且 service 不 finish 時會在 TaskManager 留下 phantom active）。"""
+    from app.shell.task_manager import TaskManager
+    from app.tasks.task_session import TaskSession
+
+    manager = TaskManager()
+    manager.attach()
+    try:
+        monkeypatch.setattr(
+            lm_view.threading,
+            "Thread",
+            lambda target=None, args=(), daemon=None: type(
+                "T", (), {"start": lambda self: target(*args)}
+            )(),
+        )
+        monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
+        seen = {}
+
+        def fake_service(
+            input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+        ):
+            seen["active_before_service_start"] = manager.active()
+            session.start()  # 真正的 service 會自己 start()／finish()
+            session.finish()
+
+        monkeypatch.setattr(lm_view, "run_lm_translation_service", fake_service)
+        view = lm_view.LMView(mock_page(), mock_filepicker())
+        view.input_path.value = "C:/Assets"
+
+        view.start_clicked(None)
+
+        assert isinstance(view.session, TaskSession)
+        assert seen["active_before_service_start"] == []  # view 沒有先 start
+        assert manager.active() == []
+        assert len(manager.recent()) == 1  # 只有一筆 terminal record
+    finally:
+        manager.detach()
+
+
+def _rendered_logs(view):
+    return " ".join(
+        str(getattr(c, "spans", "")) + str(getattr(c, "value", ""))
+        for c in view.log_view._list_view.controls
+    )
+
+
+def test_default_output_notice_survives_service_start_and_poller_tail_sync(
+    monkeypatch,
+):
+    """未指定輸出的預設路徑提示屬於 session 日誌：service 的 start() 清空日誌後仍在，
+    而且 poller 的第一次同步（tail mode 會重建控制項）之後、重複同步之後都還在。"""
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type(
+            "T", (), {"start": lambda self: target(*args)}
+        )(),
+    )
+    monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
+
+    def fake_service(
+        input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+    ):
+        session.start()  # 真正的 service 會 start()，清空 session 日誌
+        session.add_log("translating…")
+
+    monkeypatch.setattr(lm_view, "run_lm_translation_service", fake_service)
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view.input_path.value = "C:/Assets"
+    view.output_path.value = ""
+
+    view.start_clicked(None)
+    view._sync_from_session()  # 模擬 poller 首次同步（tail mode 重建控制項）
+    view._sync_from_session()  # 再同步一次
+
+    assert "未指定輸出，將使用預設" in _rendered_logs(view)
+    texts = [e.text for e in view.session.snapshot()["logs"]]
+    assert any("未指定輸出" in t for t in texts)  # 是 session snapshot 的一部分
+    assert texts.index(next(t for t in texts if "未指定輸出" in t)) < texts.index(
+        "translating…"
+    )
+
+
+def test_explicit_output_has_no_default_notice(monkeypatch):
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type(
+            "T", (), {"start": lambda self: None}
+        )(),
+    )
+    monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view.input_path.value = "C:/Assets"
+    view.output_path.value = "C:/Out"
+    view.start_clicked(None)
+    assert not [e for e in view.session.snapshot()["logs"] if "未指定輸出" in e.text]

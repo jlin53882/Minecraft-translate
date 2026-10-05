@@ -13,6 +13,7 @@ import flet as ft
 
 from app.shell import palette as palette_module
 from app.views import cache_shard_panel, cache_view
+from app.views.cache_manager import cache_view_overview
 from app.views.cache_manager.cache_state import CacheShardState
 from app.views.cache_shard_panel import CacheShardPanel
 from app.views.pipeline import pipeline_view
@@ -110,7 +111,9 @@ def test_cache_view_copy_logs_uses_clipboard_service(monkeypatch):
     values = _patch_clipboard(monkeypatch)
     snacks = []
     monkeypatch.setattr(
-        cache_view, "show_snack", lambda page, msg, *a, **k: snacks.append(msg)
+        cache_view_overview,
+        "show_snack",
+        lambda page, msg, *a, **k: snacks.append(msg),
     )
     view = cache_view.CacheView.__new__(cache_view.CacheView)
     view._all_logs = ["[INFO] a", "[WARN] b"]

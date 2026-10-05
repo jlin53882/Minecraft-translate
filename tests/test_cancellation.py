@@ -151,11 +151,9 @@ def test_pipeline_cancel_stops_current_generator_and_skips_rest(monkeypatch):
 
     step2_called = []
 
-    assert view._run_session_step(1, "第一步", step1) is False
+    assert view.runner.run_step(1, "第一步", step1) is False
     assert produced == [0, 1, 2, 3]
-    assert (
-        view._run_session_step(2, "第二步", lambda s: step2_called.append(1)) is False
-    )
+    assert view.runner.run_step(2, "第二步", lambda s: step2_called.append(1)) is False
     assert step2_called == []
 
 
@@ -172,8 +170,8 @@ def test_pipeline_cancel_propagates_to_step_session(monkeypatch):
         seen["session_flag"] = session.cancel_requested
         seen["scope"] = c.is_cancelled()
 
-    view._run_session_step(3, "啟動翻譯", translate_step)
+    view.runner.run_step(3, "啟動翻譯", translate_step)
     assert seen == {"session_flag": True, "scope": True}
 
     view._begin_run()  # 下一次執行會重設取消狀態
-    assert view._cancel_event.is_set() is False
+    assert view.runner.cancel_event.is_set() is False

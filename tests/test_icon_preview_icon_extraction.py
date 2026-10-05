@@ -62,7 +62,7 @@ class TestExtractJarIcon:
 
     def test_fallback_to_icon_png(self, tmp_path):
         """Model JSON 解析失敗時，fallback 到 icon.png"""
-        from app.views.icon_preview_view import _extract_jar_icon
+        from app.views.icon_preview.icon_cache import _extract_jar_icon
 
         jar = tmp_path / "test_mod-1.0.jar"
         cache_root = tmp_path / "icon_cache"
@@ -74,7 +74,7 @@ class TestExtractJarIcon:
         )
 
         with patch(
-            "app.views.icon_preview_view._try_extract_mod_icon_from_model",
+            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
             return_value=None,
         ):
             result = _extract_jar_icon(
@@ -88,7 +88,7 @@ class TestExtractJarIcon:
 
     def test_fallback_to_logo_png(self, tmp_path):
         """icon.png 不存在時，fallback 到 logo.png"""
-        from app.views.icon_preview_view import _extract_jar_icon
+        from app.views.icon_preview.icon_cache import _extract_jar_icon
 
         jar = tmp_path / "test_mod-1.0.jar"
         cache_root = tmp_path / "icon_cache"
@@ -101,7 +101,7 @@ class TestExtractJarIcon:
 
         # Model JSON 解析失敗（mock 返回 None），才會走到 logo.png fallback
         with patch(
-            "app.views.icon_preview_view._try_extract_mod_icon_from_model",
+            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
             return_value=None,
         ):
             result = _extract_jar_icon(
@@ -114,7 +114,7 @@ class TestExtractJarIcon:
 
     def test_neoforge_logofile_fallback(self, tmp_path):
         """NeoForge logoFile fallback"""
-        from app.views.icon_preview_view import _extract_jar_icon
+        from app.views.icon_preview.icon_cache import _extract_jar_icon
 
         jar = tmp_path / "neoforge_mod-1.0.jar"
         cache_root = tmp_path / "icon_cache"
@@ -127,7 +127,7 @@ class TestExtractJarIcon:
         )
 
         with patch(
-            "app.views.icon_preview_view._try_extract_mod_icon_from_model",
+            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
             return_value=None,
         ):
             result = _extract_jar_icon(
@@ -139,7 +139,7 @@ class TestExtractJarIcon:
 
     def test_no_icon_returns_none(self, tmp_path):
         """找不到任何 icon 時回傳 None"""
-        from app.views.icon_preview_view import _extract_jar_icon
+        from app.views.icon_preview.icon_cache import _extract_jar_icon
 
         jar = tmp_path / "empty_mod-1.0.jar"
         cache_root = tmp_path / "icon_cache"
@@ -156,7 +156,7 @@ class TestExtractJarIcon:
 
     def test_corrupted_zip_returns_none(self, tmp_path):
         """ZIP 損壞時不回報例外，回傳 None"""
-        from app.views.icon_preview_view import _extract_jar_icon
+        from app.views.icon_preview.icon_cache import _extract_jar_icon
 
         jar = tmp_path / "bad_mod-1.0.jar"
         cache_root = tmp_path / "icon_cache"
@@ -168,7 +168,7 @@ class TestExtractJarIcon:
 
     def test_icon_path_unique_per_key(self, tmp_path):
         """同一個 modid，不同 key 產生不同的 icon 檔名"""
-        from app.views.icon_preview_view import _extract_jar_icon
+        from app.views.icon_preview.icon_cache import _extract_jar_icon
 
         jar = tmp_path / "test_mod-1.0.jar"
         cache_root = tmp_path / "icon_cache"
@@ -180,7 +180,7 @@ class TestExtractJarIcon:
         )
 
         with patch(
-            "app.views.icon_preview_view._try_extract_mod_icon_from_model",
+            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
             return_value=None,
         ):
             path1 = _extract_jar_icon(jar, "test_mod", cache_root, "item.test_mod.one")
@@ -192,7 +192,7 @@ class TestExtractJarIcon:
 
     def test_icon_cache_root_created_if_not_exists(self, tmp_path):
         """icon_cache_root 不存在時自動建立"""
-        from app.views.icon_preview_view import _extract_jar_icon
+        from app.views.icon_preview.icon_cache import _extract_jar_icon
 
         jar = tmp_path / "test_mod-1.0.jar"
         cache_root = tmp_path / "nonexistent_cache_dir"  # 不存在
@@ -204,7 +204,7 @@ class TestExtractJarIcon:
         )
 
         with patch(
-            "app.views.icon_preview_view._try_extract_mod_icon_from_model",
+            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
             return_value=None,
         ):
             result = _extract_jar_icon(
@@ -234,7 +234,7 @@ class TestBatchExtractJarIcons:
 
     def test_single_jar_opened_once(self, tmp_path):
         """同一個 JAR 的多個 entry 只開一次 ZIP"""
-        from app.views.icon_preview_view import _batch_extract_jar_icons
+        from app.views.icon_preview.icon_cache import _batch_extract_jar_icons
 
         jar = tmp_path / "mods" / "test_mod-1.0.jar"
         jar.parent.mkdir(parents=True)
@@ -265,7 +265,7 @@ class TestBatchExtractJarIcons:
         with (
             patch("zipfile.ZipFile", side_effect=counting_zipfile),
             patch(
-                "app.views.icon_preview_view._try_extract_mod_icon_from_model",
+                "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
                 return_value=None,
             ),
         ):
@@ -278,7 +278,7 @@ class TestBatchExtractJarIcons:
 
     def test_icon_path_written_back_to_entries(self, tmp_path):
         """找到 icon 時，icon_path 正確寫回 entry"""
-        from app.views.icon_preview_view import _batch_extract_jar_icons
+        from app.views.icon_preview.icon_cache import _batch_extract_jar_icons
 
         jar = tmp_path / "mods" / "test_mod-1.0.jar"
         jar.parent.mkdir(parents=True)
@@ -295,7 +295,7 @@ class TestBatchExtractJarIcons:
         cache_root = tmp_path / "icon_cache"
 
         with patch(
-            "app.views.icon_preview_view._try_extract_mod_icon_from_model",
+            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
             return_value=("test_mod:item/one", "assets/test_mod/textures/item/one.png"),
         ):
             _batch_extract_jar_icons(jar_to_entries, cache_root, tmp_path / "mods")
@@ -307,7 +307,7 @@ class TestBatchExtractJarIcons:
 
     def test_missing_jar_skipped(self, tmp_path):
         """JAR 檔案不存在時跳過，不拋例外"""
-        from app.views.icon_preview_view import _batch_extract_jar_icons
+        from app.views.icon_preview.icon_cache import _batch_extract_jar_icons
 
         entry = MockEntry("missing_mod", "item.missing_mod.hello")
         jar_to_entries = {"missing_mod-1.0.jar": [entry]}
@@ -326,7 +326,7 @@ class TestBatchExtractJarIcons:
 
     def test_progress_callback_invoked(self, tmp_path):
         """progress callback 每個 JAR 都會被呼叫"""
-        from app.views.icon_preview_view import _batch_extract_jar_icons
+        from app.views.icon_preview.icon_cache import _batch_extract_jar_icons
 
         jar = tmp_path / "mods" / "mod_a-1.0.jar"
         jar.parent.mkdir(parents=True)
@@ -345,7 +345,7 @@ class TestBatchExtractJarIcons:
             progress_calls.append((processed, total))
 
         with patch(
-            "app.views.icon_preview_view._try_extract_mod_icon_from_model",
+            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
             return_value=None,
         ):
             _batch_extract_jar_icons(
@@ -358,7 +358,7 @@ class TestBatchExtractJarIcons:
 
     def test_multiple_modids_same_jar(self, tmp_path):
         """同一個 JAR 含多個 modid，每個都嘗試提取"""
-        from app.views.icon_preview_view import _batch_extract_jar_icons
+        from app.views.icon_preview.icon_cache import _batch_extract_jar_icons
 
         jar = tmp_path / "mods" / "multi_mod-1.0.jar"
         jar.parent.mkdir(parents=True)
@@ -378,7 +378,7 @@ class TestBatchExtractJarIcons:
         cache_root = tmp_path / "icon_cache"
 
         with patch(
-            "app.views.icon_preview_view._try_extract_mod_icon_from_model",
+            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
             return_value=("mod_a:item/hello", "assets/mod_a/textures/item/hello.png"),
         ):
             _batch_extract_jar_icons(jar_to_entries, cache_root, tmp_path / "mods")
@@ -397,7 +397,7 @@ class TestLoadModelIndexFromCache:
 
     def test_cache_miss_no_file(self, tmp_path):
         """cache 檔不存在 → 回傳 None"""
-        from app.views.icon_preview_view import _load_model_index_from_cache
+        from app.views.icon_preview.icon_cache import _load_model_index_from_cache
 
         jar = tmp_path / "test.jar"
         create_test_jar(jar, {})
@@ -408,7 +408,7 @@ class TestLoadModelIndexFromCache:
 
     def test_cache_miss_wrong_modid(self, tmp_path):
         """cache 存在但 modid 不匹配 → 回傳 None"""
-        from app.views.icon_preview_view import _load_model_index_from_cache
+        from app.views.icon_preview.icon_cache import _load_model_index_from_cache
 
         jar = tmp_path / "test.jar"
         create_test_jar(jar, {})
@@ -428,7 +428,7 @@ class TestLoadModelIndexFromCache:
         )
 
         with patch(
-            "app.views.icon_preview_view._get_jar_hash", return_value="dummy_hash"
+            "app.views.icon_preview.icon_cache._get_jar_hash", return_value="dummy_hash"
         ):
             result = _load_model_index_from_cache(jar, "correct_modid")
 
@@ -436,7 +436,7 @@ class TestLoadModelIndexFromCache:
 
     def test_cache_hit(self, tmp_path):
         """cache 存在且 hash + modid 匹配 → 回傳 index"""
-        from app.views.icon_preview_view import _load_model_index_from_cache
+        from app.views.icon_preview.icon_cache import _load_model_index_from_cache
 
         jar = tmp_path / "test.jar"
         create_test_jar(jar, {})
@@ -459,9 +459,11 @@ class TestLoadModelIndexFromCache:
             return cache_dir
 
         with (
-            patch("app.views.icon_preview_view._get_jar_hash", return_value="abc123"),
             patch(
-                "app.views.icon_preview_view._get_model_index_cache_dir",
+                "app.views.icon_preview.icon_cache._get_jar_hash", return_value="abc123"
+            ),
+            patch(
+                "app.views.icon_preview.icon_cache._get_model_index_cache_dir",
                 side_effect=fake_cache_dir,
             ),
         ):
@@ -480,7 +482,7 @@ class TestSaveModelIndexToCache:
 
     def test_cache_file_written(self, tmp_path):
         """寫入後 cache 檔存在且內容正確"""
-        from app.views.icon_preview_view import _save_model_index_to_cache
+        from app.views.icon_preview.icon_cache import _save_model_index_to_cache
 
         jar = tmp_path / "test.jar"
         create_test_jar(jar, {})
@@ -492,9 +494,11 @@ class TestSaveModelIndexToCache:
             return cache_dir
 
         with (
-            patch("app.views.icon_preview_view._get_jar_hash", return_value="xyz789"),
             patch(
-                "app.views.icon_preview_view._get_model_index_cache_dir",
+                "app.views.icon_preview.icon_cache._get_jar_hash", return_value="xyz789"
+            ),
+            patch(
+                "app.views.icon_preview.icon_cache._get_model_index_cache_dir",
                 side_effect=fake_cache_dir,
             ),
         ):
@@ -520,31 +524,31 @@ class TestToHalfwidth:
 
     def test_全形數字轉半形(self):
         """全形數字轉半形"""
-        from app.views.icon_preview_view import to_halfwidth
+        from app.views.icon_preview.icon_cache import to_halfwidth
 
         assert to_halfwidth("１２３") == "123"
 
     def test_全形字母轉半形(self):
         """全形字母轉半形"""
-        from app.views.icon_preview_view import to_halfwidth
+        from app.views.icon_preview.icon_cache import to_halfwidth
 
         assert to_halfwidth("ＡＢＣ") == "ABC"
 
     def test_混合內容(self):
         """混合內容保留不需要轉換的部分"""
-        from app.views.icon_preview_view import to_halfwidth
+        from app.views.icon_preview.icon_cache import to_halfwidth
 
         assert to_halfwidth("Atomic Reshaper １２３") == "Atomic Reshaper 123"
 
     def test_空字串(self):
         """空字串不報錯"""
-        from app.views.icon_preview_view import to_halfwidth
+        from app.views.icon_preview.icon_cache import to_halfwidth
 
         assert to_halfwidth("") == ""
 
     def test_已全是半形(self):
         """已是半形的內容不變"""
-        from app.views.icon_preview_view import to_halfwidth
+        from app.views.icon_preview.icon_cache import to_halfwidth
 
         assert to_halfwidth("hello 123") == "hello 123"
 
@@ -559,7 +563,7 @@ class TestSafeFilenameKey:
 
     def test_backslash_removed(self):
         """key 含反斜線時被移除"""
-        from app.views.icon_preview_view import _safe_filename_key
+        from app.views.icon_preview.icon_cache import _safe_filename_key
 
         result = _safe_filename_key("Use \\locate structure betterjungletemples")
         assert "\\" not in result
@@ -567,13 +571,13 @@ class TestSafeFilenameKey:
 
     def test_normal_key(self):
         """正常 key 不變"""
-        from app.views.icon_preview_view import _safe_filename_key
+        from app.views.icon_preview.icon_cache import _safe_filename_key
 
         assert _safe_filename_key("restonia_crystal_block") == "restonia_crystal_block"
 
     def test_slash_replaced(self):
         """斜線被替換為底線"""
-        from app.views.icon_preview_view import _safe_filename_key
+        from app.views.icon_preview.icon_cache import _safe_filename_key
 
         result = _safe_filename_key("path/to/some_file")
         assert "/" not in result
@@ -581,7 +585,7 @@ class TestSafeFilenameKey:
 
     def test_spaces_replaced(self):
         """空白被替換為底線"""
-        from app.views.icon_preview_view import _safe_filename_key
+        from app.views.icon_preview.icon_cache import _safe_filename_key
 
         result = _safe_filename_key("some key with spaces")
         assert " " not in result
@@ -589,7 +593,7 @@ class TestSafeFilenameKey:
 
     def test_long_key_truncated(self):
         """超長 key 被截斷"""
-        from app.views.icon_preview_view import _safe_filename_key
+        from app.views.icon_preview.icon_cache import _safe_filename_key
 
         long_key = "a" * 100
         result = _safe_filename_key(long_key)
@@ -599,7 +603,7 @@ class TestSafeFilenameKey:
         """sanitized key 拿來當檔名時不應報錯"""
         import zipfile
 
-        from app.views.icon_preview_view import (
+        from app.views.icon_preview.icon_cache import (
             _extract_jar_icon,
             _safe_filename_key,
         )
@@ -615,7 +619,7 @@ class TestSafeFilenameKey:
         safe = _safe_filename_key(key_with_backslash)
 
         with patch(
-            "app.views.icon_preview_view._try_extract_mod_icon_from_model",
+            "app.views.icon_preview.icon_cache._try_extract_mod_icon_from_model",
             return_value=None,
         ):
             result = _extract_jar_icon(jar, "test_mod", cache_root, key_with_backslash)
@@ -636,7 +640,7 @@ class TestAtomicWrite:
         """寫入時目標檔案已存在，tmp.replace 應自動覆蓋不報錯"""
         import zipfile
 
-        from app.views.icon_preview_view import _save_model_index_to_cache
+        from app.views.icon_preview.icon_cache import _save_model_index_to_cache
 
         jar = tmp_path / "test.jar"
         with zipfile.ZipFile(jar, "w") as zf:
@@ -645,9 +649,11 @@ class TestAtomicWrite:
         model_index = {"item/test": ["models/item/test.json"]}
 
         with (
-            patch("app.views.icon_preview_view._get_jar_hash", return_value="abc123"),
             patch(
-                "app.views.icon_preview_view._get_model_index_cache_dir",
+                "app.views.icon_preview.icon_cache._get_jar_hash", return_value="abc123"
+            ),
+            patch(
+                "app.views.icon_preview.icon_cache._get_model_index_cache_dir",
                 return_value=tmp_path / "cache",
             ),
         ):

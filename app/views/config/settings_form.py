@@ -8,7 +8,7 @@ from typing import Any
 import flet as ft
 
 from app.config_apply import timing_note
-from app.ui import kit, theme
+from app.ui import kit
 from app.ui.design import C
 from app.views.config.settings_schema import (
     NAV_PAGES,
@@ -60,6 +60,7 @@ def make_control(setting: Setting) -> ft.Control:
             expand=True,
             text_size=13,
             helper=helper,
+            helper_max_lines=3,  # 說明含「套用時機」，單行會被截成「…」
         )
     if kind in ("int", "float"):
         return kit.field(
@@ -67,8 +68,9 @@ def make_control(setting: Setting) -> ft.Control:
             dense=True,
             keyboard_type=ft.KeyboardType.NUMBER,
             helper=helper,
+            helper_max_lines=3,
         )
-    return kit.field(label=setting.label, dense=True, helper=helper)
+    return kit.field(label=setting.label, dense=True, helper=helper, helper_max_lines=3)
 
 
 def build_controls(controls_map: dict[str, Any]) -> None:
@@ -126,7 +128,7 @@ def _render_labeled(item: Labeled, controls_map: dict[str, Any]) -> ft.Column:
         controls_map[item.path],
     ]
     if item.note:
-        controls.append(ft.Text(item.note, size=11, color=theme.GREY_600))
+        controls.append(ft.Text(item.note, size=11, color=C.MUTED))
     return ft.Column(controls, expand=1)
 
 

@@ -8,11 +8,14 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def test_translation_tool_core_does_not_import_flet_or_app():
-    """核心模組不得反向持有 Flet 或 app UI 相依。"""
-    core_root = _repo_root() / "translation_tool" / "core"
+def test_translation_tool_does_not_import_flet_or_app():
+    """整個引擎套件（core／utils／checkers／…）不得反向持有 Flet 或 app UI 相依（#136）。
+
+    函式內的延遲 import 也會被抓到（掃描整棵 AST）。
+    """
+    engine_root = _repo_root() / "translation_tool"
     violations: list[str] = []
-    for path in sorted(core_root.glob("*.py")):
+    for path in sorted(engine_root.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -40,3 +43,23 @@ def test_icon_preview_row_is_the_ui_owner_for_lang_item_row():
     from app.views.icon_preview_row import LangItemRow
 
     assert LangItemRow.__module__ == "app.views.icon_preview_row"
+
+
+def test_legacy_ui_compat_layer_is_gone():
+    """PR #106 留下的舊色票映射與舊元件已移除（#121）：不得再 import 或引用。"""
+    root = _repo_root()
+    assert not (root / "app" / "ui" / "theme.py").exists()
+    assert not (root / "app" / "ui" / "components.py").exists()
+    offenders: list[str] = []
+    for path in sorted((root / "app").rglob("*.py")) + [root / "main.py"]:
+        text = path.read_text(encoding="utf-8")
+        for needle in ("app.ui.theme", "app.ui.components", "legacy_color"):
+            if needle in text:
+                offenders.append(f"{path.relative_to(root)}: {needle}")
+        tree = ast.parse(text, filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "app.ui":
+                names = {alias.name for alias in node.names}
+                if names & {"theme", "components"}:
+                    offenders.append(f"{path.relative_to(root)}:{node.lineno}: {names}")
+    assert offenders == [], "舊相容層仍被引用：\n" + "\n".join(offenders)

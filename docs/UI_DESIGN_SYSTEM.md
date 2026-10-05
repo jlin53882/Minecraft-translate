@@ -13,7 +13,6 @@
 | 頁面登錄 | `app/view_registry.py` | `ViewSpec`：標題、圖示、分組、快捷鍵、視窗尺寸，**唯一來源** |
 | 設定存取 | `app/config_store.py` | 讀 / 寫 / 變更通知；View 不再直接 `load_config` |
 | 任務模型 | `app/tasks/` | `TaskSession`、`LogEntry`（與 UI 無關，業務層可直接使用） |
-| 舊色常數 | `app/ui/theme.py` | 舊名稱（`PRIMARY`、`PANEL`…）映射到語意色，舊程式不必改也會跟著換主題 |
 
 ## 色彩
 

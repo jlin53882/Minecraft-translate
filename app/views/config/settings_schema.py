@@ -283,11 +283,11 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
                     Labeled(
                         "lang_merger.patchouli_skip_en_us_when_zh_cn_exists",
                         "翻譯來源優先級：繁中 > 簡中(達門檻) > 英文",
-                        "內容中日韓文字佔比達此值時視為有效翻譯",
                     ),
                     Labeled(
                         "lang_merger.patchouli_effective_translation_threshold",
                         "en_us 跳過門檻",
+                        "內容中日韓文字佔比達此值時視為有效翻譯",
                     ),
                 ),
                 Gap(),

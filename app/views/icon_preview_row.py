@@ -12,11 +12,14 @@ from pathlib import Path
 import flet as ft
 from PIL import Image as PILImage
 
+from app.services_impl.icon_service import (
+    IconResult,
+    IconRisk,
+    generate_icon_preview,
+    resolve_icon_with_reason,
+)
 from app.ui import kit
 from app.ui.design import C
-from translation_tool.core.icon_preview_cache import generate_icon_preview
-from translation_tool.core.icon_reason import IconResult, IconRisk
-from translation_tool.core.icon_resolver import resolve_icon_with_reason
 
 _ICON_UPSCALE_SIZE = 64
 """小於此尺寸的 icon 視為需要 upscale（pixels, 一邊）。"""
@@ -65,6 +68,94 @@ def to_halfwidth(text):
     return unicodedata.normalize("NFKC", text)
 
 
+def _resolve_preview_path(icon_result, preview_root: Path) -> Path | None:
+    """依圖示來源（jar:// URI 或磁碟路徑）產生預覽圖並回傳路徑；無法產生時回傳 None。"""
+    # PR59 fix：處理 jar:// URI（新格式）與舊磁碟路徑
+    if icon_result.icon_path and _HAS_ICON_READER:
+        icon_ref = IconRef.parse(str(icon_result.icon_path))
+        if icon_ref is not None:
+            # 從 ZIP 直接讀取 bytes，寫入 preview_root
+            png_bytes = read_icon_bytes(icon_ref.jar_path, icon_ref.png_path)
+            if png_bytes:
+                digest = hashlib.sha256(png_bytes).hexdigest()[:16]
+                preview_root.mkdir(parents=True, exist_ok=True)
+                zip_preview_path = preview_root / f"zip_{digest}.png"
+                if not zip_preview_path.exists():
+                    zip_preview_path.write_bytes(png_bytes)
+                preview_path = zip_preview_path
+            else:
+                preview_path = None
+        else:
+            # 舊磁碟路徑（無法解析 jar://，走一般流程）
+            preview_path = generate_icon_preview(icon_result.icon_path, preview_root)
+    else:
+        # icon_path 為 None，或無 _HAS_ICON_READER：嘗試用磁碟路徑生成預覽
+        preview_path = (
+            generate_icon_preview(icon_result.icon_path, preview_root)
+            if icon_result.icon_path
+            else None
+        )
+    return preview_path
+
+
+def prepare_row_icon(
+    lang_key: str, assets_root: Path, preview_root: Path, icon_path: str | None
+):
+    """準備一列的圖示（**會做磁碟／ZIP／圖片 I/O**，必須在背景執行緒呼叫，#114）。
+
+    回傳 ``(icon_result, preview_path)``：``preview_path`` 已經完成 upscale，
+    交給 ``LangItemRow(prepared_icon=...)`` 後建構列時不再做任何 I/O。
+    """
+    if icon_path:
+        # jar:// URI 不能轉 Path（Windows 上 Path("jar://...") 會變成 jar:\C:\... 格式）
+        icon_result = IconResult(icon_path=icon_path, reason="", risk=None)
+    else:
+        icon_result = resolve_icon_with_reason(lang_key, assets_root)
+    preview_path = _resolve_preview_path(icon_result, preview_root)
+    if preview_path:
+        preview_path = _ensure_icon_size(preview_path)
+    return icon_result, preview_path
+
+
+def _build_icon_widget(
+    preview_path: Path | None, icon_result, *, upscale: bool = True
+) -> tuple[ft.Control | None, ft.Text | None]:
+    """建立圖示控制項；無預覽但有原因時改顯示警示圖示與風險說明。回傳 (icon_widget, risk_label)。"""
+    risk_label = None
+    # 顯示 icon 或警告
+    # 修復：當 preview_path 為 None 時，不顯示任何 icon widget（佔位完全空白）
+    icon_widget: ft.Control | None = None
+    if preview_path:
+        # 小於 32x32 的 icon（如 Minecraft 16x16 item icon）以 nearest neighbor 放大至 64x64
+        upscaled_path = _ensure_icon_size(preview_path) if upscale else preview_path
+        icon_widget = ft.Image(
+            src=str(upscaled_path),
+            width=128,
+            height=128,
+        )
+    elif icon_result.reason:
+        # 無法取得 preview 且有 reason：顯示錯誤 icon + 根據 risk 等級上色
+        color_map = {
+            IconRisk.IGNORE: C.EM,
+            IconRisk.WARN: C.GOLD,
+            IconRisk.DANGER: C.RED,
+        }
+        icon_widget = ft.Container(
+            width=128,
+            height=128,
+            alignment=ft.alignment.Alignment.CENTER,
+            bgcolor=C.PANEL2,
+            border_radius=10,
+            content=ft.Icon(ft.Icons.IMAGE_NOT_SUPPORTED, color=C.DIM),
+        )
+        risk_label = ft.Text(
+            f"⚠ {icon_result.reason}",
+            size=12,
+            color=color_map.get(icon_result.risk, C.MUTED),
+        )
+    return icon_widget, risk_label
+
+
 class LangItemRow(ft.Container):
     """LangItemRow 類別。
 
@@ -82,6 +173,7 @@ class LangItemRow(ft.Container):
         preview_root: Path,
         on_value_changed: Callable[[str, str], None],
         icon_path: str | None = None,
+        prepared_icon=None,
     ):
         """初始化 LangItemRow。
 
@@ -94,6 +186,8 @@ class LangItemRow(ft.Container):
             on_value_changed: 值變更回調函數
             icon_path: 圖示路徑（可為 JAR 內的路徑 或已提取到磁碟的路徑）。
                        若有值則直接使用，跳過 resolve_icon_with_reason。
+            prepared_icon: ``prepare_row_icon`` 在背景執行緒算好的 ``(icon_result, preview_path)``；
+                       提供時建構列不做任何 I/O（event loop 上使用）。未提供則同步計算（相容舊呼叫）。
         """
         super().__init__(
             padding=ft.Padding.symmetric(vertical=12, horizontal=12),
@@ -108,83 +202,41 @@ class LangItemRow(ft.Container):
         # =========================
         # 🖼 Icon + 分類
         # =========================
-        # icon_path 有值（來自 JAR 掃描）：直接使用，跳過 resolve
-        if icon_path:
-            # jar:// URI 不能轉 Path（Windows 上 Path("jar://...") 會變成 jar:\C:\... 格式）
-            # 保持 string，讓 IconRef.parse 處理
-            icon_result = IconResult(
-                icon_path=icon_path,  # 可能是 jar:// URI string 或磁碟 Path
-                reason="",
-                risk=None,
+        if prepared_icon is not None:
+            icon_result, preview_path = prepared_icon
+            icon_widget, risk_label = _build_icon_widget(
+                preview_path, icon_result, upscale=False
             )
         else:
-            icon_result = resolve_icon_with_reason(lang_key, assets_root)
-        risk_label = None
-
-        # PR59 fix：處理 jar:// URI（新格式）與舊磁碟路徑
-        if icon_result.icon_path and _HAS_ICON_READER:
-            icon_ref = IconRef.parse(str(icon_result.icon_path))
-            if icon_ref is not None:
-                # 從 ZIP 直接讀取 bytes，寫入 preview_root
-                png_bytes = read_icon_bytes(icon_ref.jar_path, icon_ref.png_path)
-                if png_bytes:
-                    digest = hashlib.sha256(png_bytes).hexdigest()[:16]
-                    preview_root.mkdir(parents=True, exist_ok=True)
-                    zip_preview_path = preview_root / f"zip_{digest}.png"
-                    if not zip_preview_path.exists():
-                        zip_preview_path.write_bytes(png_bytes)
-                    preview_path = zip_preview_path
-                else:
-                    preview_path = None
-            else:
-                # 舊磁碟路徑（無法解析 jar://，走一般流程）
-                preview_path = generate_icon_preview(
-                    icon_result.icon_path, preview_root
-                )
-        else:
-            # icon_path 為 None，或無 _HAS_ICON_READER：嘗試用磁碟路徑生成預覽
-            preview_path = (
-                generate_icon_preview(icon_result.icon_path, preview_root)
-                if icon_result.icon_path
-                else None
+            icon_result, preview_path = prepare_row_icon(
+                lang_key, assets_root, preview_root, icon_path
             )
-
-        # 顯示 icon 或警告
-        # 修復：當 preview_path 為 None 時，不顯示任何 icon widget（佔位完全空白）
-        icon_widget: ft.Control | None = None
-        if preview_path:
-            # 小於 32x32 的 icon（如 Minecraft 16x16 item icon）以 nearest neighbor 放大至 64x64
-            upscaled_path = _ensure_icon_size(preview_path)
-            icon_widget = ft.Image(
-                src=str(upscaled_path),
-                width=128,
-                height=128,
-            )
-        elif icon_result.reason:
-            # 無法取得 preview 且有 reason：顯示錯誤 icon + 根據 risk 等級上色
-            color_map = {
-                IconRisk.IGNORE: C.EM,
-                IconRisk.WARN: C.GOLD,
-                IconRisk.DANGER: C.RED,
-            }
-            icon_widget = ft.Container(
-                width=128,
-                height=128,
-                alignment=ft.alignment.Alignment.CENTER,
-                bgcolor=C.PANEL2,
-                border_radius=10,
-                content=ft.Icon(ft.Icons.IMAGE_NOT_SUPPORTED, color=C.DIM),
-            )
-            risk_label = ft.Text(
-                f"⚠ {icon_result.reason}",
-                size=12,
-                color=color_map.get(icon_result.risk, C.MUTED),
+            icon_widget, risk_label = _build_icon_widget(
+                preview_path, icon_result, upscale=False
             )
 
         # =========================
         # 📝 文字區
         # =========================
-        text_col = ft.Column(
+        text_col = self._build_text_column(zh_text, lang_key, en_text, risk_label)
+
+        # =========================
+        # 🔧 最外層 Row
+        # =========================
+        row_controls: list[ft.Control] = []
+        if icon_widget is not None:
+            row_controls.append(icon_widget)
+        row_controls.append(text_col)
+
+        self.content = ft.Row(
+            spacing=12,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+            controls=row_controls,
+        )
+
+    def _build_text_column(self, zh_text, lang_key, en_text, risk_label) -> ft.Column:
+        """翻譯、lang key、英文原文欄位組成的文字區。"""
+        return ft.Column(
             spacing=6,
             expand=True,
             controls=[
@@ -220,18 +272,4 @@ class LangItemRow(ft.Container):
                 ),
                 risk_label if risk_label else ft.Container(),
             ],
-        )
-
-        # =========================
-        # 🔧 最外層 Row
-        # =========================
-        row_controls: list[ft.Control] = []
-        if icon_widget is not None:
-            row_controls.append(icon_widget)
-        row_controls.append(text_col)
-
-        self.content = ft.Row(
-            spacing=12,
-            vertical_alignment=ft.CrossAxisAlignment.START,
-            controls=row_controls,
         )

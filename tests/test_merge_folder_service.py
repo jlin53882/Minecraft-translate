@@ -288,7 +288,9 @@ def test_stage1_soft_errors_fail_folder_and_skip_stage2(tmp_path: Path, monkeypa
     assert results[-1]["error"] is True
     assert session.error is True
     assert session._summary == summary
-    assert session.finish_called is False
+    assert (
+        session.finish_called is True
+    )  # ERROR 後仍要 finish（TaskManager 才會離開 active）
     assert not stage2_called
     assert any("[階段 1/2 失敗]" in log for log in session.logs)
     assert not any("[階段 1/2 完成]" in log for log in session.logs)
@@ -339,7 +341,9 @@ def test_stage2_soft_error_yields_final_error_lifecycle(tmp_path: Path, monkeypa
     assert "assets write failed" in summary["failed_folders_list"][0]["error"]
     assert session.error is True
     assert session._summary == summary
-    assert session.finish_called is False
+    assert (
+        session.finish_called is True
+    )  # ERROR 後仍要 finish（TaskManager 才會離開 active）
 
 
 def test_production_stage2_write_failure_reaches_error_lifecycle(
@@ -395,7 +399,9 @@ def test_production_stage2_write_failure_reaches_error_lifecycle(
     assert "bad_b" in summary["failed_folders_list"][0]["error"]
     assert "write failed" in summary["failed_folders_list"][0]["error"]
     assert session.error is True
-    assert session.finish_called is False
+    assert (
+        session.finish_called is True
+    )  # ERROR 後仍要 finish（TaskManager 才會離開 active）
     for modid in ("good_a", "good_c"):
         assert (lang_output_dir / "assets" / modid / "lang" / "zh_tw.json").exists()
         assert not sources[modid].exists()
