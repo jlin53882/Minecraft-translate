@@ -344,6 +344,11 @@ class LMView(ft.Column):
         # session 的 start()／finish() 由 run_lm_translation_service 擁有（單一 owner）：
         # 這裡不能再 start()，否則會重複登記並清掉剛寫入的日誌
         self.session = tag_session(TaskSession(), "機器翻譯", "lm")
+        if not (self.output_path.value or "").strip():
+            # 屬於 session 日誌的開頭訊息（service 的 start() 清空日誌後會放回，
+            # 輪詢的 tail 重整也不會讓它消失）；沒有此方法的替身退回 add_log
+            add = getattr(self.session, "add_start_log", self.session.add_log)
+            add(f"[資訊] 未指定輸出，將使用預設：{get_lm_translate_folder_name()}")
         # 日誌顯示行數：每次開始任務時讀最新設定，存檔後不必重開頁面
         self.log_view.set_tail_lines(
             load_ui_logging_config(load_config).get("tail_lines", 250)
@@ -354,12 +359,6 @@ class LMView(ft.Column):
         self._set_running(True)
         self.progress_bar.value = 0
         self.log_view.clear()
-        if not (self.output_path.value or "").strip():
-            # 直接寫進畫面日誌：寫進 session 會被 service 的 start() 清掉
-            self.log_view.add(
-                f"[資訊] 未指定輸出，將使用預設：{get_lm_translate_folder_name()}",
-                update=False,
-            )
         self.page.update()
 
         output_dir = self.output_path.value or get_lm_translate_folder_name()

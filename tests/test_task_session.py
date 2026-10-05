@@ -152,3 +152,18 @@ def test_finish_keeps_error_status():
 
     assert session.status == "ERROR"
     assert session.progress == 1.0
+
+
+def test_start_logs_survive_start_and_keep_their_order():
+    """開頭訊息（add_start_log）立刻可見，``start()`` 清空日誌後會放回且排在最前面。"""
+    from app.tasks.task_session import TaskSession
+
+    session = TaskSession()
+    session.add_start_log("提示", "info")
+    assert [e.text for e in session.snapshot()["logs"]] == ["提示"]
+
+    session.start()
+    session.add_log("work")
+    texts = [e.text for e in session.snapshot()["logs"]]
+    assert texts == ["提示", "work"]
+    assert [e.seq for e in session.snapshot()["logs"]] == [0, 1]

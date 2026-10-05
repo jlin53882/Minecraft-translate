@@ -125,10 +125,18 @@ def test_start_clicked_leaves_session_start_and_finish_to_the_service(monkeypatc
         manager.detach()
 
 
-def test_default_output_notice_is_shown_and_not_cleared_by_service_start(monkeypatch):
-    """未指定輸出時的預設路徑提示直接寫進畫面日誌；寫進 session 會被 service 的 start() 清掉。"""
-    from app.tasks.task_session import TaskSession
+def _rendered_logs(view):
+    return " ".join(
+        str(getattr(c, "spans", "")) + str(getattr(c, "value", ""))
+        for c in view.log_view._list_view.controls
+    )
 
+
+def test_default_output_notice_survives_service_start_and_poller_tail_sync(
+    monkeypatch,
+):
+    """未指定輸出的預設路徑提示屬於 session 日誌：service 的 start() 清空日誌後仍在，
+    而且 poller 的第一次同步（tail mode 會重建控制項）之後、重複同步之後都還在。"""
     monkeypatch.setattr(
         lm_view.threading,
         "Thread",
@@ -142,7 +150,7 @@ def test_default_output_notice_is_shown_and_not_cleared_by_service_start(monkeyp
         input_dir, output_dir, session, dry_run, export_lang, write_new_cache
     ):
         session.start()  # 真正的 service 會 start()，清空 session 日誌
-        session.finish()
+        session.add_log("translating…")
 
     monkeypatch.setattr(lm_view, "run_lm_translation_service", fake_service)
     view = lm_view.LMView(mock_page(), mock_filepicker())
@@ -150,10 +158,28 @@ def test_default_output_notice_is_shown_and_not_cleared_by_service_start(monkeyp
     view.output_path.value = ""
 
     view.start_clicked(None)
+    view._sync_from_session()  # 模擬 poller 首次同步（tail mode 重建控制項）
+    view._sync_from_session()  # 再同步一次
 
-    assert isinstance(view.session, TaskSession)
-    rendered = " ".join(
-        str(getattr(c, "spans", "")) + str(getattr(c, "value", ""))
-        for c in view.log_view._list_view.controls
+    assert "未指定輸出，將使用預設" in _rendered_logs(view)
+    texts = [e.text for e in view.session.snapshot()["logs"]]
+    assert any("未指定輸出" in t for t in texts)  # 是 session snapshot 的一部分
+    assert texts.index(next(t for t in texts if "未指定輸出" in t)) < texts.index(
+        "translating…"
     )
-    assert "未指定輸出，將使用預設" in rendered
+
+
+def test_explicit_output_has_no_default_notice(monkeypatch):
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type(
+            "T", (), {"start": lambda self: None}
+        )(),
+    )
+    monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view.input_path.value = "C:/Assets"
+    view.output_path.value = "C:/Out"
+    view.start_clicked(None)
+    assert not [e for e in view.session.snapshot()["logs"] if "未指定輸出" in e.text]
