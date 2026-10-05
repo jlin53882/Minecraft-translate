@@ -456,3 +456,56 @@ def test_scan_dry_run_reads_but_never_writes(db, tmp_path):
     ].items_found == 4
     with pytest.raises(ValueError):
         list(scan_folder_generator(None, tmp_path, ScanOptions("1.21.1")))
+
+
+# ------------------------------------------------ 與語系合併相同的清理規則
+RULES = [{"from": "存儲", "to": "儲存"}]
+
+
+def test_scan_ignores_non_cjk_values_in_chinese_files(tmp_path):
+    """zh_tw／zh_cn 裡只是英文（沒翻譯的複本）不算譯文，與語系合併的判斷一致。"""
+    jar = make_jar(
+        tmp_path / "foo.jar",
+        {
+            "assets/foo/lang/en_us.json": {
+                "a.b": "Steel Casing",
+                "c.d": "Infused Alloy",
+            },
+            "assets/foo/lang/zh_tw.json": {"a.b": "Steel Casing"},
+            "assets/foo/lang/zh_cn.json": {"c.d": "Infused Alloy"},
+        },
+    )
+    items = {i.key: i for i in scan_jar(jar, ScanOptions("1.21.1"), ()).items}
+    assert (items["a.b"].zh_tw, items["a.b"].zh_cn) == ("", "")
+    assert (items["c.d"].zh_tw, items["c.d"].zh_cn) == ("", "")
+
+
+def test_scan_applies_replace_rules_to_traditional_text(tmp_path):
+    jar = make_jar(
+        tmp_path / "foo.jar",
+        {
+            "assets/foo/lang/en_us.json": {"a.b": "Storage Block"},
+            "assets/foo/lang/zh_tw.json": {"a.b": "存儲方塊"},
+        },
+    )
+    on = scan_jar(jar, ScanOptions("1.21.1", rules=RULES), ())
+    assert on.items[0].zh_tw == "儲存方塊"
+    off = scan_jar(jar, ScanOptions("1.21.1", apply_rules=False), ())
+    assert off.items[0].zh_tw == "存儲方塊"
+
+
+def test_cn_conversion_also_applies_replace_rules(db, tmp_path, monkeypatch):
+    from translation_tool.translation_db import scanner
+
+    make_jar(
+        tmp_path / "foo.jar",
+        {
+            "assets/foo/lang/en_us.json": {"a.b": "Storage Block"},
+            "assets/foo/lang/zh_cn.json": {"a.b": "存储方块"},
+        },
+    )
+    monkeypatch.setattr(scanner, "load_rules", lambda: RULES)
+    list(scan_folder_generator(db, tmp_path, ScanOptions("1.21.1"), workers=1))
+    row = db.list_entries("1.21.1")[0][0]
+    assert (row.zh_tw, row.source) == ("儲存方塊", SRC_JAR_CN)  # OpenCC 轉繁後再套規則
+    assert db.entry_detail(row.id).translations[0].zh_cn == "存储方块"  # 簡中原文保留

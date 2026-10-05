@@ -19,6 +19,18 @@
 來源代碼：0 AI 機翻、1 模組自帶繁中、2 簡中轉繁（OpenCC `s2twp`）、3 町宮字幕組、4 i18n 轉換、5 自訂補充、6 人工。
 預設優先序：人工 > 町宮 > 自訂 > 自帶繁中 > i18n > 簡中轉繁 > AI；已校驗（`checker` 不為空）者永遠最優先。
 
+### 掃描時的清理規則（與語系合併一致）
+
+jar 自帶的 `zh_tw`／`zh_cn` 與「語系合併」使用同一套判斷與函式（`lang_merge_dict.contains_cjk`、
+`text_processor.apply_replace_rules`、`recursive_translate_dict`）：
+
+1. 只有**含中文（CJK）**的值才算譯文；`zh_tw`／`zh_cn` 裡只是英文複本的條目不匯入。
+2. `zh_tw` 含中文 → 套用「替換規則」後存為「模組自帶繁中」。
+3. 沒有繁中、`zh_cn` 含中文 → OpenCC（`s2twp`）轉繁並套用替換規則，存為「簡中轉繁」（簡中原文一併保留）。
+4. 原文（`en_us`）用翻譯流程的抽取規則（`extract_translatables`），所以資料庫的條目與機器翻譯要翻的條目一致。
+
+替換規則在**掃描當下**套用（可在掃描頁關閉「套用替換規則」）；之後再改規則不會回頭改已存入的譯文。
+
 ### 身分（`translation_db/identity.py`）
 
 - **lang**：`assets/<模組>/lang/en_us.json` 的頂層鍵值。

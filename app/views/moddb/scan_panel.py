@@ -121,6 +121,11 @@ class ScanPanel(ft.Column):
             "只在沒有繁中時補上，標記為「簡中轉繁」",
             True,
         )
+        self.rules_row = kit.SwitchRow(
+            "套用替換規則",
+            "與語系合併相同：自帶繁中與簡轉繁後的文字都會套用「替換規則」",
+            True,
+        )
         self.book_row = kit.SwitchRow(
             "包含 Patchouli 手冊", "書籍內文也匯入，供跨版本沿用", True, divider=False
         )
@@ -141,7 +146,13 @@ class ScanPanel(ft.Column):
                         spacing=8,
                     ),
                     ft.Column(
-                        [self.nested_row, self.jar_tr_row, self.cn_row, self.book_row],
+                        [
+                            self.nested_row,
+                            self.jar_tr_row,
+                            self.cn_row,
+                            self.rules_row,
+                            self.book_row,
+                        ],
                         spacing=0,
                     ),
                     kit.hint_text(
@@ -316,6 +327,7 @@ class ScanPanel(ft.Column):
             convert_cn=self.cn_row.value,
             scan_nested=self.nested_row.value,
             include_patchouli=self.book_row.value,
+            apply_rules=self.rules_row.value,
             dry_run=dry_run,
         )
 

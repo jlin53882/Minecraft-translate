@@ -16,10 +16,11 @@ import io
 import json
 import zipfile
 from collections.abc import Callable, Generator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.translatable_extractor import extract_translatables
 from translation_tool.translation_db.identity import (
     FileIdentity,
@@ -29,7 +30,13 @@ from translation_tool.translation_db.identity import (
 )
 from translation_tool.translation_db.models import IngestStats, ScanItem
 from translation_tool.translation_db.repository import TranslationDB
+from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
+from translation_tool.utils.text_processor import (
+    apply_replace_rules,
+    load_replace_rules,
+    recursive_translate_dict,
+)
 from translation_tool.utils.zip_safety import (
     MAX_FILE_BYTES,
     ZipReadBudget,
@@ -52,6 +59,8 @@ class ScanOptions:
     scan_nested: bool = True
     include_patchouli: bool = True
     dry_run: bool = False  # 只讀 jar 並統計，不寫入資料庫
+    apply_rules: bool = True  # 與語系合併相同：對 jar 自帶譯文套用「替換規則」
+    rules: Any = field(default=(), compare=False, repr=False)  # 載入後的替換規則
 
 
 @dataclass
@@ -100,16 +109,23 @@ class ScanReport:
         }
 
 
-def make_converter() -> Callable[[str], str] | None:
-    """建立簡轉繁轉換器；OpenCC 不可用時回傳 None（簡中來源就不會被轉入）。"""
+def load_rules() -> list:
+    """載入替換規則（與語系合併讀同一個檔案）；失敗回傳空清單。"""
     try:
-        from opencc import OpenCC
+        return load_replace_rules(
+            load_config()
+            .get("translator", {})
+            .get("replace_rules_path", "replace_rules.json")
+        )
+    except Exception as exc:  # noqa: BLE001 - 規則檔問題不應讓掃描失敗，只是略過替換
+        log_warning(f"載入替換規則失敗，略過替換：{exc}")
+        return []
 
-        cc = OpenCC(CONVERT_MODE)
-        return cc.convert
-    except Exception as exc:  # noqa: BLE001 - 轉換器是選配，缺少時仍可掃描
-        log_warning(f"OpenCC 無法使用，略過簡中轉繁：{exc}")
-        return None
+
+def make_converter(rules: list | None = None) -> Callable[[str], str]:
+    """簡轉繁（OpenCC s2twp）後套用替換規則；與語系合併的 ``recursive_translate_dict`` 相同。"""
+    active = list(rules or [])
+    return lambda text: recursive_translate_dict(text, active)
 
 
 def _load_json(data: bytes) -> dict | None:
@@ -176,14 +192,21 @@ def _items_for_group(
         text = item["source_text"]
         tw = get_by_path(translations["zh_tw"], path) if "zh_tw" in translations else ""
         cn = get_by_path(translations["zh_cn"], path) if "zh_cn" in translations else ""
+        # 與語系合併相同：只有含中文（CJK）的值才算譯文；繁中先套替換規則
+        tw = (
+            apply_replace_rules(tw, options.rules)
+            if isinstance(tw, str) and contains_cjk(tw)
+            else ""
+        )
+        cn = cn if isinstance(cn, str) and contains_cjk(cn) else ""
         out.append(
             ScanItem(
                 kind=kind,
                 mod_id=mod_id,
                 key=ident.item_key(path),
                 en_us=text,
-                zh_tw=tw if isinstance(tw, str) else "",
-                zh_cn=cn if isinstance(cn, str) else "",
+                zh_tw=tw,
+                zh_cn=cn,
             )
         )
     return out
@@ -279,7 +302,8 @@ def scan_folder_generator(
         }
         return
 
-    convert = make_converter() if options.convert_cn else None
+    options = replace(options, rules=load_rules() if options.apply_rules else [])
+    convert = make_converter(options.rules) if options.convert_cn else None
     dirs = patchouli_dir_names()
     yield {
         "progress": 0.0,
