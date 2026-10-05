@@ -813,15 +813,25 @@ def test_non_sqlite_and_empty_files(tmp_path):
     db.close()
 
 
-def test_database_from_a_newer_version_is_refused(tmp_path):
+def test_database_from_a_newer_version_is_refused_without_touching_it(tmp_path):
+    """太新的資料庫在第一次可寫連線之前就拒絕：位元組不變、journal mode 不變、不產生 -wal/-shm。"""
     path = tmp_path / "new.db"
     TranslationDB(path).close()
     conn = sqlite3.connect(path)
+    conn.execute("PRAGMA journal_mode=DELETE")
     conn.execute("UPDATE meta SET value='999' WHERE key='schema_version'")
     conn.commit()
     conn.close()
-    with pytest.raises(ValueError, match="版本較新"):
-        TranslationDB(path)
+    before = path.read_bytes()
+    for create in (True, False):
+        with pytest.raises(ValueError, match="版本較新"):
+            TranslationDB(path, create=create)
+    assert path.read_bytes() == before
+    conn = sqlite3.connect(path)
+    assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    conn.close()
+    assert not (tmp_path / "new.db-wal").exists()
+    assert not (tmp_path / "new.db-shm").exists()
 
 
 def test_archive_that_hits_a_safety_limit_commits_nothing(db, tmp_path, monkeypatch):
