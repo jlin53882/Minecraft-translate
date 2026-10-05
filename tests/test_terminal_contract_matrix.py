@@ -437,3 +437,142 @@ def test_composite_merge_generator_close_after_first_source_skips_the_second(
     assert runner.run_step(2, "合併", step) is False
     assert counter.ran == ["_提取lang_輸出"]
     assert manager.active() == []
+
+
+# =============================================================================
+# 真正的取消：核心 generator 在取消後必須停止消費（processed < total），而不是跑完才標記取消
+# =============================================================================
+
+TOTAL_UPDATES = 10
+
+
+def _counting_core(processed, runner, cancel_after=1):
+    """假核心 generator：每個 update 記數；第 ``cancel_after`` 個之後使用者按取消。"""
+
+    def core(*a, **k):
+        for i in range(TOTAL_UPDATES):
+            processed.append(i)
+            if len(processed) == cancel_after:
+                runner.request_cancel()
+            yield {"progress": (i + 1) / TOTAL_UPDATES, "log": f"u{i}"}
+
+    return core
+
+
+def test_single_merge_folder_stage1_really_stops_after_cancel(
+    manager, monkeypatch, tmp_path
+):
+    session = TaskSession(name="合併", view_key="pipeline")
+    runner = _runner(session)
+    processed: list[int] = []
+    stage2: list[int] = []
+    # 先建立 step（內含預設假核心），再換成會計數的假核心
+    step = _single_merge(monkeypatch, "success", tmp_path)
+    monkeypatch.setattr(
+        merge_service,
+        "merge_zhcn_to_zhtw_from_folder",
+        _counting_core(processed, runner),
+    )
+    monkeypatch.setattr(
+        merge_service, "_run_extracted_stage2", lambda *a, **k: stage2.append(1)
+    )
+
+    assert runner.run_step(1, "合併", step) is False
+    assert len(processed) < TOTAL_UPDATES, "核心必須在取消後停止，而不是跑完才標記取消"
+    assert processed == [0]
+    assert stage2 == []  # 階段 2 也不會執行
+    assert manager.active() == []
+
+
+def test_single_merge_folder_stage2_really_stops_after_cancel(
+    manager, monkeypatch, tmp_path
+):
+    session = TaskSession(name="合併", view_key="pipeline")
+    runner = _runner(session)
+    processed: list[int] = []
+    monkeypatch.setattr(
+        merge_service, "merge_zhcn_to_zhtw_from_folder", lambda *a, **k: iter([])
+    )
+    monkeypatch.setattr(
+        merge_service,
+        "merge_extracted_to_assets",
+        _counting_core(processed, runner),
+    )
+    monkeypatch.setattr(
+        merge_service,
+        "load_config",
+        lambda: {"lang_merger": {"enable_extracted_to_assets_merge": True}},
+    )
+    actions = PipelineActions()
+    step = lambda s: actions.merge(
+        s,
+        str(tmp_path),
+        str(tmp_path / "o"),
+        "folder",
+        only_lang=True,
+        process_zh_cn=True,
+        patchouli_skip=False,
+        patchouli_threshold=0.5,
+        zh_en_threshold=2,
+    )
+
+    assert runner.run_step(1, "合併", step) is False
+    assert processed == [0]
+    assert manager.active() == []
+
+
+def test_single_merge_zip_really_stops_after_cancel(manager, monkeypatch, tmp_path):
+    session = TaskSession(name="合併", view_key="pipeline")
+    runner = _runner(session)
+    processed: list[int] = []
+    monkeypatch.setattr(
+        merge_service,
+        "merge_zhcn_to_zhtw_from_zip",
+        _counting_core(processed, runner),
+    )
+    actions = PipelineActions()
+    step = lambda s: actions.merge(
+        s,
+        ["a.zip", "b.zip"],
+        str(tmp_path / "o"),
+        "zip",
+        only_lang=True,
+        process_zh_cn=True,
+        patchouli_skip=False,
+        patchouli_threshold=0.5,
+        zh_en_threshold=2,
+    )
+
+    assert runner.run_step(1, "合併", step) is False
+    assert processed == [
+        0
+    ]  # 第一個 ZIP 的第 1 個 update 後即停止，第二個 ZIP 也不會開始
+    assert manager.active() == []
+
+
+def test_zip_merge_stops_between_zips(manager, monkeypatch):
+    session = TaskSession(name="合併", view_key="pipeline")
+    runner = _runner(session)
+    opened: list[str] = []
+
+    def fake_one_zip(zip_path, *a, **k):
+        opened.append(zip_path)
+        runner.request_cancel()  # 第一個 ZIP 處理完成時按取消
+        return []
+
+    monkeypatch.setattr(merge_service, "_merge_one_zip", fake_one_zip)
+    actions = PipelineActions()
+    step = lambda s: actions.merge(
+        s,
+        ["a.zip", "b.zip", "c.zip"],
+        "out",
+        "zip",
+        only_lang=True,
+        process_zh_cn=True,
+        patchouli_skip=False,
+        patchouli_threshold=0.5,
+        zh_en_threshold=2,
+    )
+    assert runner.run_step(1, "合併", step) is False
+    assert opened == ["a.zip"]
+    assert manager.active() == []

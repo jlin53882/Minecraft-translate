@@ -349,16 +349,17 @@ class LMView(ft.Column):
             load_ui_logging_config(load_config).get("tail_lines", 250)
         )
 
-        if not (self.output_path.value or "").strip():
-            self.session.add_log(
-                f"[資訊] 未指定輸出，將使用預設：{get_lm_translate_folder_name()}"
-            )
-
         self._set_status("執行中", "dia")
         self._started_at = time.monotonic()
         self._set_running(True)
         self.progress_bar.value = 0
         self.log_view.clear()
+        if not (self.output_path.value or "").strip():
+            # 直接寫進畫面日誌：寫進 session 會被 service 的 start() 清掉
+            self.log_view.add(
+                f"[資訊] 未指定輸出，將使用預設：{get_lm_translate_folder_name()}",
+                update=False,
+            )
         self.page.update()
 
         output_dir = self.output_path.value or get_lm_translate_folder_name()

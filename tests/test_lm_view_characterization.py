@@ -123,3 +123,37 @@ def test_start_clicked_leaves_session_start_and_finish_to_the_service(monkeypatc
         assert len(manager.recent()) == 1  # 只有一筆 terminal record
     finally:
         manager.detach()
+
+
+def test_default_output_notice_is_shown_and_not_cleared_by_service_start(monkeypatch):
+    """未指定輸出時的預設路徑提示直接寫進畫面日誌；寫進 session 會被 service 的 start() 清掉。"""
+    from app.tasks.task_session import TaskSession
+
+    monkeypatch.setattr(
+        lm_view.threading,
+        "Thread",
+        lambda target=None, args=(), daemon=None: type(
+            "T", (), {"start": lambda self: target(*args)}
+        )(),
+    )
+    monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
+
+    def fake_service(
+        input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+    ):
+        session.start()  # 真正的 service 會 start()，清空 session 日誌
+        session.finish()
+
+    monkeypatch.setattr(lm_view, "run_lm_translation_service", fake_service)
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view.input_path.value = "C:/Assets"
+    view.output_path.value = ""
+
+    view.start_clicked(None)
+
+    assert isinstance(view.session, TaskSession)
+    rendered = " ".join(
+        str(getattr(c, "spans", "")) + str(getattr(c, "value", ""))
+        for c in view.log_view._list_view.controls
+    )
+    assert "未指定輸出，將使用預設" in rendered

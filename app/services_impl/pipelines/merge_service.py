@@ -18,6 +18,7 @@ from translation_tool.core.lang_merger import (
     merge_zhcn_to_zhtw_from_folder,
     merge_zhcn_to_zhtw_from_zip,
 )
+from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,7 @@ def _merge_one_zip(
             patchouli_threshold=patchouli_threshold,
             zh_en_threshold=zh_en_threshold,
         ):
+            raise_if_cancelled()  # 取消檢查點：每個 update
             # ---- log ----
             if update.get("log"):
                 session.add_log(update["log"])
@@ -227,6 +229,7 @@ def run_merge_zip_batch_service(
             return
 
         for idx, zip_path in enumerate(zip_paths):
+            raise_if_cancelled()  # 取消檢查點：ZIP 與 ZIP 之間
             zip_name = Path(zip_path).name
             zip_base_progress = idx / total
 
@@ -309,6 +312,8 @@ def _run_folder_stage1(
         progress_start=progress_start,
         progress_end=progress_start + (progress_end - progress_start) * 0.90,
     ):
+        # 取消檢查點：每個 update 之後（停止消費即中止核心 generator 的後續處理）
+        raise_if_cancelled()
         if update.get("log"):
             session.add_log(update["log"])
         if "progress" in update and update["progress"] is not None:
@@ -353,6 +358,7 @@ def _run_extracted_stage2(
                 lang_merger.get("pending_organized_folder_name", "待翻譯整理需翻譯"),
             ),
         ):
+            raise_if_cancelled()  # 取消檢查點：階段 2 每個 update
             if update.get("log"):
                 session.add_log(update["log"])
             if "progress" in update and update["progress"] is not None:

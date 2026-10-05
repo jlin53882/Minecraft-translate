@@ -86,6 +86,8 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 | `MergeView`、翻譯頁（FTB／KJS／MD）的 `session.start()` | UI owner（View 啟動，service 結案；worker 例外邊界補 `set_error()`→`finish()`） | service；View 例外邊界 |
 | `LMView` | **不再 start**（原本與 service 重複 start，會清掉剛寫入的日誌） | `lm_service` |
 
+merge 的取消檢查點（`merge_service`，經 `raise_if_cancelled()`；`PipelineRunner` 以 `cancel_scope` 包住 service，`TaskCancelled` 繼承 `BaseException` 不會被內部 `except Exception` 吞掉，會經 service `finally` 結案）：folder 階段 1 與階段 2 的每個 update、ZIP 的每個 update、ZIP 與 ZIP 之間——停止消費核心 generator 即中止其後續處理，執行中的來源不會「跑完才標記取消」。測試以「10 個 update、第 1 個之後取消、`processed == [0]`」驗證（folder／ZIP 各一）。
+
 取消檢查點：composite action 在 inner operation 之間檢查 `session.error`／`is_cancelled()`（dual 抽取的 lang→book、一鍵 merge 的來源之間、一鍵翻譯的輸入之間），取消後不再執行下一個；`PipelineRunner` 迭代 generator 時偵測取消會 `close()` 並補 `finish()`。
 
 #### 會被 `PipelineRunner` `close()` 的 generator（close-safe 盤點）
