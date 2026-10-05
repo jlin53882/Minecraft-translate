@@ -332,52 +332,26 @@ def test_state_commit_failure_keeps_new_zip_and_next_run_rebuilds(
     assert reused(run(src, zip_path))
 
 
-def _count_zip_hashes(monkeypatch, zip_path):
-    calls = []
-    real = output_bundler._hash_file
-
-    def spy(path):
-        if str(path) == str(zip_path):
-            calls.append(path)
-        return real(path)
-
-    monkeypatch.setattr(output_bundler, "_hash_file", spy)
-    return calls
-
-
-def test_reuse_fast_path_does_not_reread_the_zip(src, zip_path, monkeypatch):
-    run(src, zip_path)
-    calls = _count_zip_hashes(monkeypatch, zip_path)
-
-    assert reused(run(src, zip_path))
-    assert calls == []
-
-
-def test_touched_zip_with_same_content_is_reused_via_hash_then_fast(
-    src, zip_path, monkeypatch
-):
+def test_touched_zip_with_same_content_is_still_reused(src, zip_path):
     run(src, zip_path)
     st = zip_path.stat()
     os.utime(zip_path, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
-    calls = _count_zip_hashes(monkeypatch, zip_path)
 
-    assert reused(run(src, zip_path))  # mtime 不同 → 雜湊比對，內容相同仍沿用
-    assert len(calls) == 1
-    assert reused(run(src, zip_path))  # 狀態已刷新 → 快速路徑
-    assert len(calls) == 1
+    assert reused(run(src, zip_path))  # 內容相同，只有 mtime 不同
 
 
-def test_force_rebuild_repairs_corruption_that_keeps_size_and_mtime(src, zip_path):
+def test_zip_mutation_keeping_size_and_mtime_is_detected(src, zip_path):
     run(src, zip_path)
     st = zip_path.stat()
     data = bytearray(zip_path.read_bytes())
     data[len(data) // 2] ^= 0xFF
     zip_path.write_bytes(bytes(data))
-    os.utime(
-        zip_path, ns=(st.st_atime_ns, st.st_mtime_ns)
-    )  # 已知取捨：快速路徑不讀 ZIP
+    os.utime(zip_path, ns=(st.st_atime_ns, st.st_mtime_ns))  # 還原 mtime
+    assert zip_path.stat().st_size == st.st_size
 
-    assert not reused(run(src, zip_path, force_rebuild=True))
+    updates = run(src, zip_path)  # 不需要 force_rebuild
+
+    assert not reused(updates)
     with zipfile.ZipFile(zip_path) as zf:
         assert zf.testzip() is None
 

@@ -128,20 +128,9 @@ def _load_reusable_state(output_zip_path: str, fingerprint: str) -> bool:
             or state.get("zip_size") != os.path.getsize(output_zip_path)
         ):
             return False
-        # 快速路徑：大小與 mtime_ns 皆與上次成功打包時相同，視為 ZIP 未被動過，
-        # 不必重讀整個 ZIP（避免每次沿用都付出完整讀取 I/O）。
-        # 取捨：刻意還原 mtime 的竄改或靜默位元腐化不會被偵測，必要時用 force_rebuild。
-        if state.get("zip_mtime_ns") == os.stat(output_zip_path).st_mtime_ns:
-            return True
-        # mtime 不同（被碰過、複製過）→ 退回完整雜湊比對，內容相同仍可沿用。
-        actual_hash = _hash_file(output_zip_path)
-        if state.get("zip_hash") != actual_hash:
-            return False
-        try:  # 刷新 mtime，下次即可走快速路徑
-            _commit_state(output_zip_path, fingerprint, actual_hash)
-        except OSError:
-            pass
-        return True
+        # 輸出 ZIP 是使用者成品：每次沿用都以雜湊確認內容未被改動（讀取 + BLAKE2，
+        # 遠比重新掃描／壓縮／寫出便宜），即使大小與 mtime 被刻意保持相同也能偵測。
+        return state.get("zip_hash") == _hash_file(output_zip_path)
     except (OSError, ValueError):
         return False
 
@@ -155,16 +144,13 @@ def _remove_quietly(path: str) -> None:
         log_warning(f"無法移除 {path}: {ex}")
 
 
-def _commit_state(
-    output_zip_path: str, fingerprint: str, zip_hash: str | None = None
-) -> None:
+def _commit_state(output_zip_path: str, fingerprint: str) -> None:
     """ZIP 已完整落地後才呼叫：以暫存檔＋原子替換寫入狀態 sidecar。"""
     state = {
         "version": BUNDLE_STATE_VERSION,
         "fingerprint": fingerprint,
         "zip_size": os.path.getsize(output_zip_path),
-        "zip_mtime_ns": os.stat(output_zip_path).st_mtime_ns,
-        "zip_hash": zip_hash or _hash_file(output_zip_path),
+        "zip_hash": _hash_file(output_zip_path),
     }
     final = _state_path(output_zip_path)
     tmp = final + ".tmp"
