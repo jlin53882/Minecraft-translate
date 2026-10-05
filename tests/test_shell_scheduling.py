@@ -211,7 +211,7 @@ def _make_shell(env: Env, *, flush_before_close=None) -> AppShell:
         mode_saver=lambda _m: None,
         subscribe_config=env.subscribe,
         flush_before_close=flush_before_close,
-        find_interrupted_task=lambda: None,  # 不讀真實的 checkpoint 檔
+        find_interrupted_tasks=list,  # 不讀真實的 checkpoint 檔
     )
 
 
@@ -681,25 +681,43 @@ def test_disconnect_does_not_tear_down_so_web_reconnect_keeps_working(mounted, e
 # -- #151：啟動時偵測上次被中斷的機器翻譯 ---------------------------------------------
 
 
-def _interrupted_task():
+def _interrupted_task(kind: str = "lm_directory"):
     return SimpleNamespace(
+        kind=kind,
+        label=kind,
         input_dir="C:/assets",
         output_dir="C:/out",
         export_lang=False,
         write_new_cache=True,
+        options={},
         completed=3,
         total=9,
         updated_at="",
     )
 
 
-def _shell_with_interrupted_task(env: Env, task) -> AppShell:
+def _buttons(control, label: str) -> list:
+    """遞迴找出對話框內容樹中指定文字的 TextButton。"""
+    found = []
+    if isinstance(control, ft.TextButton) and control.content == label:
+        found.append(control)
+    for child in getattr(control, "controls", None) or []:
+        found.extend(_buttons(child, label))
+    inner = getattr(control, "content", None)
+    if inner is not None and not isinstance(inner, str):
+        found.extend(_buttons(inner, label))
+    for action in getattr(control, "actions", None) or []:
+        found.extend(_buttons(action, label))
+    return found
+
+
+def _shell_with_interrupted_tasks(env: Env, tasks) -> AppShell:
     shell = _make_shell(env)
     shell._resume_prompt = ResumePrompt(
         shell.page,
-        find_task=lambda: task,
+        find_tasks=lambda: tasks,
         check_resume=lambda _t: SimpleNamespace(ok=True, reason=""),
-        discard=lambda: None,
+        discard=lambda _t: None,
         on_resume=shell._resume_interrupted_task,
         run_background=lambda work, done: done(work()),
     )
@@ -707,7 +725,7 @@ def _shell_with_interrupted_task(env: Env, task) -> AppShell:
 
 
 def test_mount_prompts_for_an_interrupted_task_without_starting_anything(env):
-    shell = _shell_with_interrupted_task(env, _interrupted_task())
+    shell = _shell_with_interrupted_tasks(env, [_interrupted_task()])
 
     shell.mount()
 
@@ -740,25 +758,65 @@ def test_a_failing_resume_prompt_never_breaks_mount(env, caplog):
     shell.dispose()
 
 
-def test_confirming_resume_opens_the_lm_page_and_hands_over_the_task(env):
-    task = _interrupted_task()
-    shell = _shell_with_interrupted_task(env, task)
-    received: list = []
-
-    class FakeLMView(ft.Column):
+def _install_fake_view(shell: AppShell, key: str, received: list):
+    class FakeView(ft.Column):
         def resume_interrupted(self, t):
             received.append(t)
 
-    lm_item = next(i for i in shell.registry if i["key"] == "lm")
-    # 真實的頁面被 wrap_view 包在容器裡：外殼要能穿過容器找到 LMView
-    dict.__setitem__(lm_item, "view", ft.Container(content=FakeLMView()))
+    item = next(i for i in shell.registry if i["key"] == key)
+    # 真實的頁面被 wrap_view 包在容器裡：外殼要能穿過容器找到頁面
+    dict.__setitem__(item, "view", ft.Container(content=FakeView()))
+
+
+def test_confirming_resume_opens_the_lm_page_and_hands_over_the_task(env):
+    task = _interrupted_task("lm_directory")
+    shell = _shell_with_interrupted_tasks(env, [task])
+    received: list = []
+    _install_fake_view(shell, "lm", received)
     shell.mount()
 
-    dialog = shell.page.dialogs[-1]
-    resume_button = next(b for b in dialog.actions if b.content == "續跑")
+    (resume_button,) = _buttons(shell.page.dialogs[-1], "續跑")
     assert resume_button.disabled is False
     resume_button.on_click(None)
 
     assert received == [task]
     assert shell.current_key == "lm"
+    shell.dispose()
+
+
+@pytest.mark.parametrize("kind", ["ftbquests", "kubejs", "md"])
+def test_plugin_tasks_resume_in_the_translation_page(env, kind):
+    task = _interrupted_task(kind)
+    shell = _shell_with_interrupted_tasks(env, [task])
+    received: list = []
+    _install_fake_view(shell, "translation", received)
+    shell.mount()
+
+    (resume_button,) = _buttons(shell.page.dialogs[-1], "續跑")
+    resume_button.on_click(None)
+
+    assert received == [task]
+    assert shell.current_key == "translation"
+    shell.dispose()
+
+
+def test_several_interrupted_tasks_share_one_dialog_and_resume_only_the_chosen_one(
+    env,
+):
+    lm, md = _interrupted_task("lm_directory"), _interrupted_task("md")
+    shell = _shell_with_interrupted_tasks(env, [lm, md])
+    lm_received: list = []
+    translation_received: list = []
+    _install_fake_view(shell, "lm", lm_received)
+    _install_fake_view(shell, "translation", translation_received)
+    shell.mount()
+
+    assert len(shell.page.dialogs) == 1, "多個任務共用一個對話框"
+    resume_buttons = _buttons(shell.page.dialogs[-1], "續跑")
+    assert len(resume_buttons) == 2
+    resume_buttons[1].on_click(None)  # 只續跑 MD
+
+    assert translation_received == [md]
+    assert lm_received == [], "沒有被選擇的任務不得啟動"
+    assert shell.current_key == "translation"
     shell.dispose()

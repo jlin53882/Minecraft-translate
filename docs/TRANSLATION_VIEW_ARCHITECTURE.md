@@ -102,6 +102,10 @@ TranslationView（ft.Column）
   - `map_lang_in_rel_path_allow_zh_fn` 回傳 `status` 只認 `SRC_EN` / `SRC_ZH`，其他狀態跳過（`skipped_lang_status`）
   - 來源 MD 不存在 → `skipped_missing_source`；保留原始結尾換行（`ends_with_nl`）
 
+## 重開後續跑（#164）
+
+啟動時若偵測到上次被中斷的 FTB／KubeJS／MD 任務，使用者在外殼的確認對話框按「續跑」後，外殼切到本頁並呼叫 `TranslationView.resume_interrupted(task)`：依 `task.kind` 切到對應分頁、把輸入／輸出資料夾與步驟開關帶回控制項（翻譯步驟一律開啟、dry-run 一律關閉），再走和按下「執行」相同的 `_run_ftb`／`_run_kjs`／`_run_md`。已有任務在跑時不會重複啟動。行為與限制見 `docs/RESUME_CAPABILITY.md`。
+
 ## 與其他 View 的關係
 
 | View | 職責 | 關係 |

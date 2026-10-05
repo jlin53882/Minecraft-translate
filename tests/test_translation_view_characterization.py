@@ -437,3 +437,121 @@ def test_translation_view_progress_exists():
     picker = mock_filepicker()
     view = tv.TranslationView(page, picker)
     assert view.progress is not None
+
+
+# -- #164：重開後續跑 ---------------------------------------------------------------
+
+
+def _resume_view(monkeypatch):
+    """建立任務翻譯頁，並把三個服務換成記錄呼叫的替身（執行緒改為同步）。"""
+    calls: list[tuple[str, tuple, dict]] = []
+    monkeypatch.setattr(tv, "TaskSession", _Session)
+    monkeypatch.setattr(
+        tv.threading,
+        "Thread",
+        lambda target=None, daemon=None: type(
+            "T", (), {"start": lambda self: target()}
+        )(),
+    )
+    monkeypatch.setattr(tv.TranslationView, "_start_ui_timer", lambda self: None)
+    for attr, name in (
+        ("run_ftb_translation_service", "ftbquests"),
+        ("run_kubejs_tooltip_service", "kubejs"),
+        ("run_md_translation_service", "md"),
+    ):
+        monkeypatch.setattr(
+            tv,
+            attr,
+            lambda *a, _n=name, **k: calls.append((_n, a, k)),
+        )
+    return tv.TranslationView(mock_page(), mock_filepicker()), calls
+
+
+def _task(kind, **options):
+    return type(
+        "Task",
+        (),
+        {
+            "kind": kind,
+            "input_dir": "C:/Pack",
+            "output_dir": "C:/Out",
+            "options": options,
+        },
+    )()
+
+
+def test_resume_ftb_selects_the_tab_restores_the_options_and_starts(monkeypatch):
+    view, calls = _resume_view(monkeypatch)
+    view.ftb_step_translate.value = False  # 使用者目前的設定不應影響續跑
+    task = _task(
+        "ftbquests",
+        step_export=True,
+        step_clean=False,
+        step_inject=False,
+        write_new_cache=False,
+    )
+
+    view.resume_interrupted(task)
+
+    assert view.tabs.selected_index == 0
+    ((name, args, kwargs),) = calls
+    assert name == "ftbquests" and args[0] == "C:/Pack"
+    assert kwargs["output_dir"] == "C:/Out"
+    assert kwargs["dry_run"] is False
+    assert kwargs["step_translate"] is True, "有續跑標記代表翻譯步驟本來就是開的"
+    assert (kwargs["step_export"], kwargs["step_clean"]) == (True, False)
+    assert (kwargs["step_inject"], kwargs["write_new_cache"]) == (False, False)
+
+
+def test_resume_kubejs_selects_the_tab_and_restores_the_options(monkeypatch):
+    view, calls = _resume_view(monkeypatch)
+
+    view.resume_interrupted(
+        _task("kubejs", step_extract=False, step_inject=True, write_new_cache=True)
+    )
+
+    assert view.tabs.selected_index == 1
+    ((name, args, kwargs),) = calls
+    assert name == "kubejs" and args[0] == "C:/Pack"
+    assert kwargs["dry_run"] is False and kwargs["step_translate"] is True
+    assert kwargs["step_extract"] is False and kwargs["write_new_cache"] is True
+
+
+def test_resume_md_restores_the_language_mode(monkeypatch):
+    view, calls = _resume_view(monkeypatch)
+
+    view.resume_interrupted(_task("md", lang_mode="all", write_new_cache=False))
+
+    assert view.tabs.selected_index == 2
+    ((name, _args, kwargs),) = calls
+    assert name == "md"
+    assert kwargs["input_dir"] == "C:/Pack" and kwargs["output_dir"] == "C:/Out"
+    assert kwargs["lang_mode"] == "all" and kwargs["write_new_cache"] is False
+    assert kwargs["dry_run"] is False and kwargs["step_translate"] is True
+
+
+def test_resume_with_missing_options_falls_back_to_the_defaults(monkeypatch):
+    view, calls = _resume_view(monkeypatch)
+
+    view.resume_interrupted(_task("md"))
+
+    ((_n, _a, kwargs),) = calls
+    assert kwargs["lang_mode"] == "non_cjk_only"
+    assert kwargs["step_extract"] is True and kwargs["step_inject"] is True
+
+
+def test_resume_does_not_start_a_second_run(monkeypatch):
+    view, calls = _resume_view(monkeypatch)
+    view._ui_timer_running = True  # 已有任務在跑
+
+    view.resume_interrupted(_task("kubejs"))
+
+    assert calls == []
+
+
+def test_resume_of_an_unknown_kind_starts_nothing(monkeypatch):
+    view, calls = _resume_view(monkeypatch)
+
+    view.resume_interrupted(_task("something_else"))
+
+    assert calls == []

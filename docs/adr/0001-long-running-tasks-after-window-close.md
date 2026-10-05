@@ -67,3 +67,4 @@ PR #149 加入「關閉前確認、取消、drain、flush」作為短期緩解�
 - 啟動時偵測與對話框：`lm_resume`（引擎，唯讀）→ `resume_service`（service）→ `ResumePrompt`（外殼）。
 - 關閉快取儲存時不寫 checkpoint（沒有可還原來源）。
 - 其他流程的盤點見 `docs/RESUME_CAPABILITY.md`。
+- **#164**：FTB／KubeJS／MD 也支援重開後續跑（整個任務一個標記、整條流程以同一組選項重新執行、來源檔案內容指紋、多任務共用一個對話框）；設計決定與限制見 `docs/RESUME_CAPABILITY.md`。

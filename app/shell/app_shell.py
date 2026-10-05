@@ -65,6 +65,13 @@ _async_sleep = asyncio.sleep
 _REGISTRY_SETTERS = ("set_registry", "set_view_registry")
 # 需要拿到外殼（導覽 / 任務事件）的頁面
 _SHELL_SETTERS = ("set_shell",)
+# 續跑時各種任務要回到的頁面（機器翻譯頁；FTB／KubeJS／MD 都在任務翻譯頁的分頁）
+_RESUME_VIEW_BY_KIND = {
+    "lm_directory": "lm",
+    "ftbquests": "translation",
+    "kubejs": "translation",
+    "md": "translation",
+}
 
 
 def _default_cache_reload():
@@ -122,7 +129,7 @@ class AppShell:
         | None = None,
         flush_before_close: Callable[[], object] | None = None,
         cache_reloader: CacheRootReloader | None = None,
-        find_interrupted_task: Callable[[], object] | None = None,
+        find_interrupted_tasks: Callable[[], object] | None = None,
     ) -> None:
         self.page = page
         self.file_picker = file_picker or ft.FilePicker()
@@ -165,7 +172,7 @@ class AppShell:
         self._previous_window_on_event = None
         self._close_pending = False
         self._resume_prompt = _build_resume_prompt(
-            page, self._resume_interrupted_task, find_interrupted_task
+            page, self._resume_interrupted_task, find_interrupted_tasks
         )
 
         design.apply(page, initial_mode)
@@ -285,16 +292,17 @@ class AppShell:
             logger.warning("顯示續跑提示失敗", exc_info=True)
 
     def _resume_interrupted_task(self, task) -> None:
-        """使用者確認續跑：切到機器翻譯頁，帶入上次的輸入與選項後開始。"""
-        self.navigate("lm")
-        index = index_of(self.registry, "lm")
+        """使用者確認續跑：切到對應的頁面（機器翻譯或任務翻譯），帶入上次的輸入與選項後開始。"""
+        view_key = _RESUME_VIEW_BY_KIND.get(getattr(task, "kind", "lm_directory"), "lm")
+        self.navigate(view_key)
+        index = index_of(self.registry, view_key)
         view = built_view(self.registry[index]) if index >= 0 else None
         inner = getattr(view, "content", None) or view  # wrap_view 包了一層容器
         resume = getattr(inner, "resume_interrupted", None)
         if callable(resume):
             resume(task)
         else:
-            logger.warning("機器翻譯頁不支援續跑，無法帶入上次的任務")
+            logger.warning("頁面 %s 不支援續跑，無法帶入上次的任務", view_key)
 
     def _open_task_view(self, view_key: str | None) -> None:
         if view_key:
@@ -815,13 +823,13 @@ class AppShell:
 # -- 設定 / Key 的預設來源 -------------------------------------------------------
 
 
-def _build_resume_prompt(page, on_resume, find_task=None) -> ResumePrompt:
-    """建立啟動時的續跑提示（引擎相依由 service 層提供；``find_task`` 可注入給測試）。"""
+def _build_resume_prompt(page, on_resume, find_tasks=None) -> ResumePrompt:
+    """建立啟動時的續跑提示（引擎相依由 service 層提供；``find_tasks`` 可注入給測試）。"""
     from app.services_impl import resume_service
 
     return ResumePrompt(
         page,
-        find_task=find_task or resume_service.find_interrupted_task,
+        find_tasks=find_tasks or resume_service.find_interrupted_tasks,
         check_resume=resume_service.check_resume,
         discard=resume_service.discard_interrupted,
         on_resume=on_resume,
