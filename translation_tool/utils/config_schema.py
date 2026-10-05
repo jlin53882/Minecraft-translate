@@ -72,6 +72,7 @@ C_SPECIES = "學名查詢設定 (Species Cache)"
 C_BATCH = "批次大小與限制"
 C_MERGER = "語言合併器設定 (Lang Merger)"
 C_EXTRACTOR = "JAR 輸出資料夾命名"
+C_TDB = "Mod 資料庫 (Translation DB)"
 
 SETTINGS: tuple[Setting, ...] = (
     Setting(
@@ -165,6 +166,78 @@ SETTINGS: tuple[Setting, ...] = (
         C_TRANSLATOR,
         "",
         default=True,
+    ),
+    Setting(
+        "translation_db.enabled",
+        "bool",
+        "翻譯時使用 Mod 資料庫",
+        "general",
+        C_TDB,
+        "機器翻譯先查資料庫（資料庫 → 快取 → AI）；資料庫不存在或未指定版本時自動略過",
+        default=True,
+    ),
+    Setting(
+        "translation_db.path",
+        "str",
+        "資料庫檔案（SQLite）",
+        "general",
+        C_TDB,
+        "相對路徑以資料目錄為基準；不存在時，到「Mod 資料庫」頁掃描 jar 會自動建立",
+        default="mod_translation.db",
+    ),
+    Setting(
+        "translation_db.version",
+        "str",
+        "預設目標版本",
+        "general",
+        C_TDB,
+        "翻譯查詢與寫回使用的遊戲版本，例如 1.21.1；機器翻譯頁可個別覆寫",
+        default="",
+    ),
+    Setting(
+        "translation_db.cross_version",
+        "bool",
+        "允許跨版本沿用",
+        "general",
+        C_TDB,
+        "目標版本沒有譯文時，沿用其他版本中原文完全相同的譯文",
+        default=True,
+    ),
+    Setting(
+        "translation_db.write_back",
+        "bool",
+        "翻譯結果寫入資料庫",
+        "general",
+        C_TDB,
+        "只新增、不覆蓋；其他版本中原文相同且沒有譯文的空白也會補上",
+        default=True,
+    ),
+    Setting(
+        "translation_db.sync_manual",
+        "bool",
+        "手動儲存時同步其他版本",
+        "general",
+        C_TDB,
+        "在 Mod 資料庫頁修改譯文時，原文相同的其他版本一併取代（異動記錄可還原）",
+        default=True,
+    ),
+    Setting(
+        "translation_db.priority",
+        "lines",
+        "來源優先順序（每行一個，上方優先）",
+        "general",
+        C_TDB,
+        "已校驗者永遠最優先。可用名稱：人工、町宮字幕組、自訂補充、模組自帶繁中、i18n 轉換、簡中轉繁、AI 機翻",
+        default=[
+            "人工",
+            "町宮字幕組",
+            "自訂補充",
+            "模組自帶繁中",
+            "i18n 轉換",
+            "簡中轉繁",
+            "AI 機翻",
+        ],
+        weight=1,
     ),
     Setting(
         "translator.custom_translator_folder",

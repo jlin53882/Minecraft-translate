@@ -154,7 +154,7 @@ class PipelineRunner:
                 success = True
             except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，確保按鈕會恢復
                 error_text = f"[Pipeline] 一鍵製作失敗：{ex}\n{traceback.format_exc()}"
-                log_error(error_text, extra={"ui_mirror": True})
+                log_error(error_text, extra={"ui_mirrored": True})
                 self.ui_view(self._panel.add_log, f"❌ 流程失敗：{ex}", "error")
             finally:
                 self.ui_view(self._finish_sequence, success, on_end)
@@ -166,10 +166,10 @@ class PipelineRunner:
         self._panel.finish_all(success, cancelled=cancelled)
         if success:
             self._panel.add_log("✅ 一鍵製作完成！")
-            log_info("✅ 一鍵製作完成！", extra={"ui_mirror": True})
+            log_info("✅ 一鍵製作完成！", extra={"ui_mirrored": True})
         elif cancelled:
             self._panel.add_log("⏹ 一鍵製作已取消", "warning")
-            log_info("⏹ 一鍵製作已取消", extra={"ui_mirror": True})
+            log_warning("⏹ 一鍵製作已取消", extra={"ui_mirrored": True})
         on_end()
 
     # ------------------------------------------------------------------ 步驟
@@ -188,7 +188,7 @@ class PipelineRunner:
         self._watch = watch
         self.ui_view(self._panel.set_step_running, step_num, name)
         self.ui_view(self._panel.add_log, f"▶ 開始：{name}")
-        log_info(f"▶ 開始：{name}", extra={"ui_mirror": True})
+        log_info(f"▶ 開始：{name}", extra={"ui_mirrored": True})
         self.ui(self._start_watch)
         try:
             # 取消檢查：翻譯在批次之間 / 等待限流時、提取在 JAR 之間停止
@@ -226,12 +226,12 @@ class PipelineRunner:
             self._panel.finish_step(step_num, ok, cancelled=cancelled)
             if cancelled:
                 self._panel.add_log(f"⏹ {name} 已取消", "warning")
-                log_info(f"⏹ {name} 已取消", extra={"ui_mirror": True})
+                log_warning(f"⏹ {name} 已取消", extra={"ui_mirrored": True})
                 self._update_progress(1.0, "已取消")
                 return
             message = f"✅ {name} 完成" if ok else f"❌ {name} 失敗"
             self._panel.add_log(message)
-            log_info(message, extra={"ui_mirror": True})
+            log_info(message, extra={"ui_mirrored": True})
             self._update_progress(1.0, "完成" if ok else "失敗")
 
         self.ui_view(_finish)

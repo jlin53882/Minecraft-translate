@@ -239,7 +239,7 @@ class MergeView(MergeWidgetsMixin, ft.Column):
 
         self.session.start()
         self.session.add_log("[系統] 開始合併任務")
-        log_info("[系統] 開始合併任務", extra={"ui_mirror": True})
+        log_info("[系統] 開始合併任務", extra={"ui_mirrored": True})
         self._start_ui_poller()
 
         def _run_merge():
@@ -248,9 +248,7 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束
                 log_warning(f"[MergeView] 合併執行失敗：{ex!r}")
                 self.session.add_log(f"[錯誤] 合併執行失敗：{ex}", level="error")
-                log_error(
-                    "[錯誤] 合併執行失敗：%s", ex, extra={"ui_mirror": True}
-                )
+                log_error("[錯誤] 合併執行失敗：%s", ex, extra={"ui_mirrored": True})
                 self.session.set_error()
                 self.session.finish()  # set_error() → finish()：TaskManager 才會離開 active
 

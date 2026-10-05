@@ -222,7 +222,7 @@ def _preview_add_log(ctx, msg, level: str = "info", update: bool = True):
 def _preview_backend_log(msg: str, level: str = "info") -> None:
     """將只顯示在預覽 UI 的訊息同步寫入應用程式 log 檔案。"""
     log_fn = {"warning": log_warning, "error": log_error}.get(level, log_info)
-    log_fn(msg, extra={"ui_mirror": True})
+    log_fn(msg, extra={"ui_mirrored": True})
 
 
 def _preview_result_controls(ctx, result: dict) -> list:

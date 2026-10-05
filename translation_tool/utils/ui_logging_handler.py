@@ -30,9 +30,8 @@ class UISessionLogHandler(logging.Handler):
         """
         if not self._session:
             return
-        # Pipeline service 可能會把直接寫入 session 的訊息鏡像到檔案 logger。
-        # 這類記錄不可再次回灌 session，否則 UI 會顯示兩次相同訊息。
-        if getattr(record, "ui_mirror", False):
+        # 已由呼叫端直接寫入 session 的訊息（只補寫後台 log 用）不重複送進 UI
+        if getattr(record, "ui_mirrored", False):
             return
 
         try:

@@ -165,7 +165,7 @@ def test_keywords_and_key_names_are_searchable():
 
 def test_search_matches_group_name_and_multi_word():
     labels = {i.label for i in pal.filter_items(_items(), "資料庫")}
-    assert labels == {"快取管理", "替換規則", "學名查詢"}
+    assert labels == {"Mod 資料庫", "快取管理", "替換規則", "學名查詢"}
     assert pal.filter_items(_items(), "zzzz-not-found") == []
 
 

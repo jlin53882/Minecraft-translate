@@ -409,12 +409,12 @@ class TranslationView(ft.Column):
         self.ftb_step_clean.value = True
         self.ftb_step_translate.value = True
         self.ftb_step_inject.value = True
-        log_info("[UI] 已重置：FTB Quests 輸入已清空", extra={"ui_mirror": True})
         self.ftb_write_new_cache.value = True
         self._set_status("尚未開始", "neutral")
         self.progress.value = 0
         self._refresh_steps()
         self._append_log("[UI] 已重置：FTB Quests 輸入已清空")
+        log_info("[UI] 已重置：FTB Quests 輸入已清空", extra={"ui_mirrored": True})
         self.page.update()
 
     def _reset_kjs_inputs(self):
@@ -424,12 +424,12 @@ class TranslationView(ft.Column):
         self.kjs_step_extract.value = True
         self.kjs_step_translate.value = True
         self.kjs_step_inject.value = True
-        log_info("[UI] 已重置：KubeJS 輸入已清空", extra={"ui_mirror": True})
         self.kjs_write_new_cache.value = True
         self._set_status("尚未開始", "neutral")
         self.progress.value = 0
         self._refresh_steps()
         self._append_log("[UI] 已重置：KubeJS 輸入已清空")
+        log_info("[UI] 已重置：KubeJS 輸入已清空", extra={"ui_mirrored": True})
         self.page.update()
 
     def _reset_md_inputs(self):
@@ -439,13 +439,13 @@ class TranslationView(ft.Column):
         self.md_step_extract.value = True
         self.md_step_translate.value = True
         self.md_step_inject.value = True
-        log_info("[UI] 已重置：Markdown 輸入已清空", extra={"ui_mirror": True})
         self.md_write_new_cache.value = True
         self.md_lang_mode.value = "non_cjk_only"
         self._set_status("尚未開始", "neutral")
         self.progress.value = 0
         self._refresh_steps()
         self._append_log("[UI] 已重置：Markdown 輸入已清空")
+        log_info("[UI] 已重置：Markdown 輸入已清空", extra={"ui_mirrored": True})
         self.page.update()
 
     @property

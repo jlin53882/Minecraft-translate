@@ -427,7 +427,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         self.progress_bar.color = C.EM
         message = "開始執行打包..."
         self._append_log(message, level="info")
-        log_info(message, extra={"ui_mirror": True})
+        log_info(message, extra={"ui_mirrored": True})
         self._page.update()
 
         thread = threading.Thread(

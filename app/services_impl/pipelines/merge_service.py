@@ -176,7 +176,9 @@ def _merge_one_zip(
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
         logger.error(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
-        _session_log(session, f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}", "error")
+        _session_log(
+            session, f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}", "error"
+        )
         zip_errors.append(str(e))
     return zip_errors
 
@@ -348,7 +350,9 @@ def _run_extracted_stage2(
     # 從 input_dir 內 XX_extracted/ 的 lang 檔 key-by-key 合併進
     # output_dir/lang_output/assets/{modid}/lang/{xx_yy}.json
     if folder_errors:
-        _session_log(session, "[階段 2/2 略過] 階段 1 發生錯誤，不處理部分輸出", "warning")
+        _session_log(
+            session, "[階段 2/2 略過] 階段 1 發生錯誤，不處理部分輸出", "warning"
+        )
         return
     try:
         cfg = load_config()
@@ -461,7 +465,9 @@ def run_merge_folder_batch_service(
             )
 
             if folder_errors:
-                _session_log(session, "[階段 1/2 失敗] zh_cn → zh_tw 處理發生錯誤", "error")
+                _session_log(
+                    session, "[階段 1/2 失敗] zh_cn → zh_tw 處理發生錯誤", "error"
+                )
             else:
                 _session_log(session, f"[資料夾] 完成：{os.path.basename(input_dir)}")
                 _session_log(session, "[階段 1/2 完成] zh_cn → zh_tw 翻譯已完成")

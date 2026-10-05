@@ -411,7 +411,7 @@ class QCView(ft.Column):
                 return
             message = "[系統] 開始執行 Key 缺失檢查..."
             self.log_view.add(message, level="system")
-            log_info(message, extra={"ui_mirror": True})
+            log_info(message, extra={"ui_mirrored": True})
             target_func = run_untranslated_check_service
             args = (en_dir, tw_dir, out_dir)
 
@@ -426,7 +426,7 @@ class QCView(ft.Column):
                 return
             message = "[系統] 開始執行 JSON 資料夾簡繁差異比較..."
             self.log_view.add(message, level="system")
-            log_info(message, extra={"ui_mirror": True})
+            log_info(message, extra={"ui_mirrored": True})
             target_func = run_variant_compare_service
             args = (cn_dir, tw_dir, out_dir)
 
@@ -440,7 +440,7 @@ class QCView(ft.Column):
                 return
             message = "[系統] 開始執行 TSV 單檔案簡繁差異比較..."
             self.log_view.add(message, level="system")
-            log_info(message, extra={"ui_mirror": True})
+            log_info(message, extra={"ui_mirrored": True})
             target_func = run_variant_compare_tsv_service
             args = (tsv_path, out_csv_path)
 

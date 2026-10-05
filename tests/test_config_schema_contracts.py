@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from translation_tool.utils.config_manager import DEFAULT_CONFIG
+from translation_tool.utils.config_manager import DEFAULT_CONFIG  # noqa: E402
 
 
 class TestSchemaKeys完整性:
@@ -31,6 +31,7 @@ class TestSchemaKeys完整性:
             "logging",
             "translator",
             "ftb_translator",
+            "translation_db",
             "species_cache",
             "lm_translator",
             "output_bundler",

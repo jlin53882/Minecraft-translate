@@ -342,7 +342,7 @@ def _extractor_ui_start(ctx) -> None:
     log_info(
         "[系統] 開始提取 (%s)...",
         ctx.mode,
-        extra={"ui_mirror": True},
+        extra={"ui_mirrored": True},
     )
-    log_info("[系統] 來源：%s", ctx.mods_dir, extra={"ui_mirror": True})
-    log_info("[系統] 輸出：%s", ctx.final_output, extra={"ui_mirror": True})
+    log_info("[系統] 來源：%s", ctx.mods_dir, extra={"ui_mirrored": True})
+    log_info("[系統] 輸出：%s", ctx.final_output, extra={"ui_mirrored": True})

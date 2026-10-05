@@ -30,6 +30,7 @@ EXPECTED_THREAD_SITES = {
     "app/views/lm_view.py": 1,
     "app/views/lookup_view.py": 2,
     "app/views/merge_view.py": 1,
+    "app/views/moddb/scan_panel.py": 1,
     "app/views/pipeline/pipeline_extract_dialog.py": 1,
     "app/views/pipeline/pipeline_session.py": 1,
     "app/views/qc_base.py": 1,

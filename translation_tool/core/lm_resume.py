@@ -43,6 +43,9 @@ class InterruptedTask:
     version: int | None
     kind: str = LM_KIND
     options: dict[str, Any] = field(default_factory=dict)
+    # 上次任務實際生效的 Mod 資料庫選項；沒有記錄的舊 checkpoint（資料庫功能之前建立）一定沒用資料庫
+    use_translation_db: bool = False
+    translation_db_version: str = ""
 
     @property
     def label(self) -> str:
@@ -79,11 +82,15 @@ def peek_interrupted_task() -> InterruptedTask | None:
     if not isinstance(input_dir, str) or not input_dir:
         # 舊格式沒有 input_dir：仍要讓使用者看到並能放棄，不能讓檔案默默留著
         input_dir = ""
+    db_opts = data.get("translation_db")
+    db_opts = db_opts if isinstance(db_opts, dict) else {}
     return InterruptedTask(
         input_dir=input_dir,
         output_dir=str(data.get("output_dir") or ""),
         export_lang=bool(data.get("export_lang")),
         write_new_cache=data.get("write_new_cache") is not False,
+        use_translation_db=bool(db_opts.get("enabled")),
+        translation_db_version=str(db_opts.get("version") or ""),
         completed=_as_int(data.get("completed_count")),
         total=_as_int(data.get("total")),
         updated_at=str(data.get("updated_at") or ""),

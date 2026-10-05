@@ -361,7 +361,7 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
         self.progress_panel.add_log("⏹ 正在取消…（等待目前的檢查點）", "warning")
         log_warning(
             "⏹ 正在取消…（等待目前的檢查點）",
-            extra={"ui_mirror": True},
+            extra={"ui_mirrored": True},
         )
         self._page.update()
 

@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **257** 項；其中 **138** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **267** 項；其中 **138** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 214 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 224 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 28 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 15 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -28,6 +28,7 @@
 | `app/services.py:run_variant_compare_tsv_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `app/services_impl/cache/cache_services.py:cache_search_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/cache/cache_services.py:cache_rebuild_index_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/services_impl/moddb_service.py:run_moddb_scan_service` | BLE001 | 已記錄／回報 | 背景任務：任何失敗都要回報到 session，不可讓執行緒默默結束 |
 | `app/services_impl/pipelines/_task_runner.py:run_callable_task` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/bundle_service.py:run_bundling_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/extract_service.py:run_lang_extraction_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -98,6 +99,8 @@
 | `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons._process_jar` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview_row.py:_ensure_icon_size` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/icon_preview_view.py:IconPreviewView._load_async` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
+| `app/views/lm_view.py:LMView._on_db_option_changed` | BLE001 | 已記錄／回報 | 頁面尚未掛載時只是不即時更新提示 |
+| `app/views/lm_view.py:LMView.refresh_db_info` | BLE001 | 已記錄／回報 | 資料庫問題只影響提示文字，不應讓頁面載入失敗 |
 | `app/views/lm_view.py:LMView.refresh_key_stat` | BLE001 | UI／畫面保護 | 讀不到設定時只是不顯示 |
 | `app/views/lookup_view.py:LookupView.single_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/lookup_view.py:LookupView.batch_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
@@ -106,6 +109,10 @@
 | `app/views/merge_view.py:MergeView.start_merge._run_merge` | BLE001 | 已記錄／回報 | 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束 |
 | `app/views/merge_view.py:MergeView._sync_ui_once` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/merge_view.py:MergeView._close_dialog_overlay` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/moddb/entries_panel.py:EntriesPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
+| `app/views/moddb/overview_panel.py:OverviewPanel.refresh` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料 |
+| `app/views/moddb/scan_panel.py:ScanPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響掃描本身 |
+| `app/views/moddb_view.py:ModDbView._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
 | `app/views/pipeline/pipeline_bundle_dialog.py:_load_version_data` | BLE001 | UI／畫面保護 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
 | `app/views/pipeline/pipeline_extract_dialog.py:_extract_preview_worker` | BLE001 | 已記錄／回報 | 錯誤要顯示在對話框 |
 | `app/views/pipeline/pipeline_one_click_dialog.py:_load_version_data` | BLE001 | UI／畫面保護 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
@@ -196,7 +203,7 @@
 | `translation_tool/core/lm_api_client.py:call_gemini_requests` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_resume.py:check_resume_feasibility` | BLE001 | 已記錄／回報 | 檢查失敗要回報給使用者，不能讓啟動流程中斷 |
 | `translation_tool/core/lm_translator.py:load_checkpoint` | BLE001 | 已記錄／回報 | 損毀的 checkpoint 視為沒有，但要留下紀錄 |
-| `translation_tool/core/lm_translator.py:translate_directory_generator` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/lm_translator.py:_scan_directory_files` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_main.py:_handle_batch_error` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_main.py:_handle_batch_error` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_main.py:_attempt_batch` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -246,6 +253,9 @@
 | `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending.on_batch_flushed` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
 | `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
 | `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
+| `translation_tool/translation_db/identity.py:patchouli_dir_names` | BLE001 | 已記錄／回報 | 設定不可用時退回預設，不影響身分計算 |
+| `translation_tool/translation_db/scanner.py:load_rules` | BLE001 | 已記錄／回報 | 規則檔問題不應讓掃描失敗，只是略過替換 |
+| `translation_tool/translation_db/settings.py:open_db` | BLE001 | 已記錄／回報 | 資料庫問題不應中斷翻譯 |
 | `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
 | `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
 | `translation_tool/utils/cache_search.py:CacheSearchEngine.index_batch` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |

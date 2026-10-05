@@ -20,7 +20,7 @@ Minecraft-translate/
 
 | 子目錄／檔案 | 職責 |
 |---|---|
-| `views/*.py` | 13 個頁面：dashboard（工作台）/ pipeline / extractor / merge / lm / translation / qc / icon_preview / cache / rules / lookup / bundler / config |
+| `views/*.py` | 14 個頁面：dashboard（工作台）/ pipeline / extractor / merge / lm / translation / qc / icon_preview / moddb / cache / rules / lookup / bundler / config |
 | `views/cache_manager/` | 快取視圖子模組（overview / log panel + actions / state / controller / presenter） |
 | `views/dashboard/` | 工作台資料彙整（`dashboard_data.py`，與畫面分離，可單獨測試） |
 | `views/pipeline/` | 一鍵批次翻譯子模組（pipeline_view + 5 個 dialog：extract/merge/translate/bundle/one_click） |
@@ -39,6 +39,7 @@ Minecraft-translate/
 | 子目錄 | 職責 |
 |---|---|
 | `core/` | 翻譯核心演算法：lm_translator（AI 翻譯）、lang_merger（語言合併）、jar_processor（JAR 處理）、output_bundler（打包輸出） |
+| `translation_db/` | Mod 翻譯資料庫：分版本的 SQLite 翻譯記憶庫（掃描 jar、翻譯流程查詢與寫回、手動同步），見 `MOD_TRANSLATION_DB.md` |
 | `plugins/` | 格式插件：ftbquests（SBNT）、kubejs、md（Markdown）、shared（通用 JSON IO / lang rules） |
 | `checkers/` | 品管檢查器（generator 形式，回傳 `CheckResult`），各 checker 職責如下 |
 

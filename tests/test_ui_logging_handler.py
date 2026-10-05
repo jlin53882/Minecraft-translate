@@ -38,14 +38,14 @@ def test_no_session_is_noop():
     _emit(UISessionLogHandler(), logging.ERROR, "x")
 
 
-def test_ui_mirror_record_does_not_duplicate_session_log():
+def test_ui_mirrored_record_does_not_duplicate_session_log():
     handler = UISessionLogHandler()
     session = TaskSession()
     handler.set_session(session)
     record = logging.LogRecord(
         "translation_tool.x", logging.INFO, __file__, 1, "mirrored", None, None
     )
-    record.ui_mirror = True
+    record.ui_mirrored = True
 
     handler.emit(record)
 
@@ -56,10 +56,12 @@ def test_mirror_session_log_writes_once_to_session_and_logger(caplog):
     session = TaskSession()
 
     with caplog.at_level(logging.WARNING):
-        mirror_session_log(session, logging.getLogger("test.pipeline"), "取消任務", "warning")
+        mirror_session_log(
+            session, logging.getLogger("test.pipeline"), "取消任務", "warning"
+        )
 
     assert [(entry.level, entry.text) for entry in session.snapshot()["logs"]] == [
         ("warning", "取消任務")
     ]
     assert [record.message for record in caplog.records] == ["取消任務"]
-    assert caplog.records[0].ui_mirror is True
+    assert caplog.records[0].ui_mirrored is True

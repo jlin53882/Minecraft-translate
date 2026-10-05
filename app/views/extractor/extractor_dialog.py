@@ -294,7 +294,7 @@ def _extractor_report_result(ctx, result_stats: dict, cancelled_flag: list) -> N
         ctx.state["cancelled"] = True
         # 用 level="warning"：傳顏色字串給 level 會被 LogView 當成不在白名單而整行不顯示
         ctx.add_log("[系統] 任務已取消", level="warning")
-        log_warning("[系統] 任務已取消", extra={"ui_mirror": True})
+        log_warning("[系統] 任務已取消", extra={"ui_mirrored": True})
 
     # ✅ 真正的「整段完成」只在這裡發生（用 Service 回傳的累計 stats）
     # 避免逐 jar 誤觸發「[完成] 0/0/0」假訊息。
@@ -314,7 +314,7 @@ def _extractor_report_result(ctx, result_stats: dict, cancelled_flag: list) -> N
             result_stats["success"],
             result_stats["warnings"],
             result_stats["failures"],
-            extra={"ui_mirror": True},
+            extra={"ui_mirrored": True},
         )
         ctx.update_progress(ctx.state["progress"], "已取消")
     else:
@@ -328,7 +328,7 @@ def _extractor_report_result(ctx, result_stats: dict, cancelled_flag: list) -> N
             result_stats["success"],
             result_stats["warnings"],
             result_stats["failures"],
-            extra={"ui_mirror": True},
+            extra={"ui_mirrored": True},
         )
         ctx.update_progress(1.0, "任務完成")
     ctx.update_stats(
@@ -397,8 +397,10 @@ def _extractor_run_extraction(ctx):
         # 用 traceback.format_exc() 印完整堆疊,讓 user 看到錯誤根因。
         ctx.add_log(f"[ERROR] {ex}", level="error")
         ctx.add_log(f"[TRACEBACK]\n{traceback.format_exc()}", level="error")
-        log_error("[ERROR] %s", ex, extra={"ui_mirror": True})
-        log_error("[TRACEBACK]\n%s", traceback.format_exc(), extra={"ui_mirror": True})
+        log_error("[ERROR] %s", ex, extra={"ui_mirrored": True})
+        log_error(
+            "[TRACEBACK]\n%s", traceback.format_exc(), extra={"ui_mirrored": True}
+        )
         ctx.state["stats"]["failures"] = 1
         ctx.update_stats(0, 0, 1)
 

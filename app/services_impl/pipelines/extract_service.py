@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 def _session_log(session, text: str, level: str = "info") -> None:
     mirror_session_log(session, logger, text, level)
 
+
 # View 經由本模組取用引擎的提取／預覽 generator（#136）：上方 import 即為對外介面
 
 
@@ -413,7 +414,9 @@ def run_lang_extraction_service(
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}")
-        _session_log(session, f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}", "error")
+        _session_log(
+            session, f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}", "error"
+        )
         _end_failed(session, manage_session)
         GLOBAL_LOG_LIMITER.flush()
     finally:
@@ -458,7 +461,9 @@ def run_book_extraction_service(
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}")
-        _session_log(session, f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}", "error")
+        _session_log(
+            session, f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}", "error"
+        )
         _end_failed(session, manage_session)
         GLOBAL_LOG_LIMITER.flush()
     finally:
@@ -491,7 +496,9 @@ def run_dual_extraction_service(
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
         logger.error(f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}")
-        _session_log(session, f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}", "error")
+        _session_log(
+            session, f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}", "error"
+        )
         _end_failed(session, True)
         GLOBAL_LOG_LIMITER.flush()
     finally:
