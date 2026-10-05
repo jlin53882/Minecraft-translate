@@ -1,0 +1,175 @@
+"""schema.py
+
+Mod 翻譯資料庫（SQLite）的資料表結構、來源代碼與連線設定。
+
+資料模型（譯文跟「內容」綁定，版本只是標示內容出現在哪個遊戲版本）：
+
+- ``entry``：某個遊戲版本中的一個可翻譯項目 ``(類型, 版本, 模組, 鍵值) → 原文``。
+  「相同內容」以 ``(類型, 模組, 鍵值, 原文)`` 判斷，可橫跨版本。
+- ``translation``：掛在 entry 上的譯文，同一個 entry 可有多個來源，每個來源最多一筆。
+- ``effective``：每個 entry 依來源優先序選出的「生效譯文」，寫入時維護，讀取不必重算。
+- ``history``：手動更新的異動紀錄（可還原）。
+- ``src_change``：掃描／翻譯時發現「鍵值相同但原文已變動」而略過的紀錄。
+- ``scan_run``：掃描紀錄。
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+SCHEMA_VERSION = 1
+
+KIND_LANG = "lang"
+KIND_PATCHOULI = "patchouli"
+KINDS = (KIND_LANG, KIND_PATCHOULI)
+
+# 來源代碼（寫入資料庫後不可更動）
+SRC_AI = 0
+SRC_JAR_TW = 1
+SRC_JAR_CN = 2  # 簡中經 OpenCC 轉繁
+SRC_SUBTITLE = 3  # 町宮字幕組
+SRC_I18N = 4
+SRC_CUSTOM = 5
+SRC_MANUAL = 6
+
+SOURCE_NAMES: dict[int, str] = {
+    SRC_AI: "AI 機翻",
+    SRC_JAR_TW: "模組自帶繁中",
+    SRC_JAR_CN: "簡中轉繁",
+    SRC_SUBTITLE: "町宮字幕組",
+    SRC_I18N: "i18n 轉換",
+    SRC_CUSTOM: "自訂補充",
+    SRC_MANUAL: "人工",
+}
+
+# 預設優先序（先者優先）；已校驗（checker 不為空）者永遠最優先
+DEFAULT_PRIORITY: tuple[int, ...] = (
+    SRC_MANUAL,
+    SRC_SUBTITLE,
+    SRC_CUSTOM,
+    SRC_JAR_TW,
+    SRC_I18N,
+    SRC_JAR_CN,
+    SRC_AI,
+)
+
+_DDL = """
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS entry (
+    id         INTEGER PRIMARY KEY,
+    kind       TEXT NOT NULL,
+    mc_version TEXT NOT NULL,
+    mod_id     TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    en_us      TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (kind, mc_version, mod_id, key)
+);
+CREATE INDEX IF NOT EXISTS idx_entry_content ON entry (kind, mod_id, key, en_us);
+CREATE INDEX IF NOT EXISTS idx_entry_mod ON entry (mc_version, mod_id);
+CREATE INDEX IF NOT EXISTS idx_entry_en ON entry (en_us);
+
+CREATE TABLE IF NOT EXISTS translation (
+    id         INTEGER PRIMARY KEY,
+    entry_id   INTEGER NOT NULL REFERENCES entry (id) ON DELETE CASCADE,
+    source     INTEGER NOT NULL,
+    zh_tw      TEXT NOT NULL DEFAULT '',
+    zh_cn      TEXT NOT NULL DEFAULT '',
+    checker    TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (entry_id, source)
+);
+
+CREATE TABLE IF NOT EXISTS effective (
+    entry_id INTEGER PRIMARY KEY REFERENCES entry (id) ON DELETE CASCADE,
+    zh_tw    TEXT NOT NULL,
+    source   INTEGER NOT NULL,
+    checker  TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS history (
+    id          INTEGER PRIMARY KEY,
+    entry_id    INTEGER NOT NULL REFERENCES entry (id) ON DELETE CASCADE,
+    batch       TEXT NOT NULL,
+    at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actor       TEXT NOT NULL DEFAULT '',
+    action      TEXT NOT NULL,
+    old_zh_tw   TEXT NOT NULL DEFAULT '',
+    new_zh_tw   TEXT NOT NULL DEFAULT '',
+    prev_manual TEXT,
+    note        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_history_entry ON history (entry_id);
+CREATE INDEX IF NOT EXISTS idx_history_batch ON history (batch);
+
+CREATE TABLE IF NOT EXISTS src_change (
+    id          INTEGER PRIMARY KEY,
+    kind        TEXT NOT NULL,
+    mc_version  TEXT NOT NULL,
+    mod_id      TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    old_en      TEXT NOT NULL,
+    new_en      TEXT NOT NULL,
+    detected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (kind, mc_version, mod_id, key, new_en)
+);
+
+CREATE TABLE IF NOT EXISTS scan_run (
+    id          INTEGER PRIMARY KEY,
+    mc_version  TEXT NOT NULL,
+    folder      TEXT NOT NULL,
+    started_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TEXT,
+    stats       TEXT NOT NULL DEFAULT '{}'
+);
+"""
+
+
+def connect(path: str | Path, *, readonly: bool = False) -> sqlite3.Connection:
+    """開啟資料庫連線（可跨執行緒使用，呼叫端自行加鎖）。
+
+    ``readonly=True`` 以唯讀 URI 開啟，不會建立檔案也不會寫入。
+    """
+    p = Path(path)
+    if readonly:
+        conn = sqlite3.connect(
+            f"{p.resolve().as_uri()}?mode=ro", uri=True, check_same_thread=False
+        )
+    else:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(p, check_same_thread=False)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    if not readonly:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+    return conn
+
+
+def init_schema(conn: sqlite3.Connection) -> None:
+    """建立資料表（已存在則略過）並記錄 schema 版本。"""
+    conn.executescript(_DDL)
+    conn.execute(
+        "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
+        (str(SCHEMA_VERSION),),
+    )
+    conn.commit()
+
+
+def has_schema(conn: sqlite3.Connection) -> bool:
+    """資料庫是否已有 entry 資料表（用來判斷是否為本功能的資料庫）。"""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='entry'"
+    ).fetchone()
+    return row is not None
+
+
+def rank_sql(priority: tuple[int, ...], col: str = "source") -> str:
+    """把來源優先序轉成 SQL ``CASE`` 排序運算式（只含整數，不接受外部字串）。"""
+    parts = " ".join(f"WHEN {int(s)} THEN {i}" for i, s in enumerate(priority))
+    return f"CASE {col} {parts} ELSE 99 END"

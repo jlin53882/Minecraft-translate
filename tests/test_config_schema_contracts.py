@@ -31,6 +31,7 @@ class TestSchemaKeys完整性:
             "logging",
             "translator",
             "ftb_translator",
+            "translation_db",
             "species_cache",
             "lm_translator",
             "output_bundler",
