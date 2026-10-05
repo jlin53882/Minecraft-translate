@@ -63,7 +63,7 @@ UI 與文件說明「可恢復的進度」時一律以 checkpoint 為準，不�
 |---|---|---|---|
 | 機器翻譯頁（`translate_directory_generator`） | 翻譯快取（每批 fsync）＋ checkpoint 標記 | **是** | 中斷點（剛開始／批次之間／快取落盤後 checkpoint 前）都有端到端測試 |
 | 一鍵流水線的翻譯步驟 | 同上（逐來源呼叫同一個函式） | 否 | 全域只有一個 checkpoint：上一個來源完成就清除，下一個來源再建立。中斷後重跑流水線，已完成部分由快取命中，很快跑完 |
-| FTB／KubeJS／MD 翻譯 | 翻譯快取（共用批次迴圈）；各自寫 `translator_<plugin>_checkpoint.json` | 否（只盤點） | **發現**：`JsonCheckpointAdapter` 預設寫在相對路徑 `logs/`（相依工作目錄，未對齊資料根目錄 `get_data_root()`），且**沒有任何程式讀取它**（寫入專用）；原子寫入但未 fsync。續跑實際靠快取。建議另開 issue：路徑改走資料根目錄，或移除這個無人讀取的檔案 |
+| FTB／KubeJS／MD 翻譯 | 翻譯快取（共用批次迴圈）；各自寫 `data/logs/translator_<plugin>_checkpoint.json` | 否（只盤點；#164 追蹤） | `JsonCheckpointAdapter` 的位置與落盤已修正（#162／PR #163：改走資料根目錄、fsync 並同步目錄）。**仍然沒有任何程式讀取它**（寫入專用），續跑實際靠快取；#164 完成後會由泛化的標記取代。舊版寫在工作目錄 `logs/` 的 `translator_*_checkpoint.json` 是無人讀取的殘留，可手動刪除 |
 | 語系合併 | 無 | 否 | 沒有續跑機制；重開需重跑（輸出可重新推導） |
 | JAR 提取 | 無 | 否 | 同上 |
 | 打包 | 無，但 staging 是增量更新（#158） | 否 | 重跑成本低 |
