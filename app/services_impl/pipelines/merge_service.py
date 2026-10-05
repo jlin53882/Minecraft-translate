@@ -160,7 +160,6 @@ def _merge_one_zip(
             raise_if_cancelled()  # 取消檢查點：每個 update
             # ---- log ----
             if update.get("log"):
-                # 核心合併流程已記錄後台 logger，這裡只送 UI。
                 session.add_log(update["log"])
 
             # ---- progress（疊加 ZIP 進度）----
@@ -325,7 +324,6 @@ def _run_folder_stage1(
         # 取消檢查點：每個 update 之後（停止消費即中止核心 generator 的後續處理）
         raise_if_cancelled()
         if update.get("log"):
-            # 核心合併流程已記錄後台 logger，這裡只送 UI。
             session.add_log(update["log"])
         if "progress" in update and update["progress"] is not None:
             _set_monotonic_progress(session, update["progress"])
@@ -373,7 +371,6 @@ def _run_extracted_stage2(
         ):
             raise_if_cancelled()  # 取消檢查點：階段 2 每個 update
             if update.get("log"):
-                # 核心 assets 合併流程已記錄後台 logger，這裡只送 UI。
                 session.add_log(update["log"])
             if "progress" in update and update["progress"] is not None:
                 _set_monotonic_progress(

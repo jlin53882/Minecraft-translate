@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from translation_tool.utils.redaction import redact_secrets
+from translation_tool.utils.ui_mirror import MIRROR_FLAG
 
 
 class UISessionLogHandler(logging.Handler):
@@ -31,7 +32,7 @@ class UISessionLogHandler(logging.Handler):
         if not self._session:
             return
         # 已由呼叫端直接寫入 session 的訊息（只補寫後台 log 用）不重複送進 UI
-        if getattr(record, "ui_mirrored", False):
+        if getattr(record, MIRROR_FLAG, False):
             return
 
         try:

@@ -23,6 +23,7 @@ from typing import Any
 
 from translation_tool.utils.redaction import RedactingFormatter
 from translation_tool.utils.ui_logging_handler import UISessionLogHandler
+from translation_tool.utils.ui_mirror import ensure_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,7 @@ def update_logger_config(config_loader, *, logger_name: str = "translation_tool"
 
     if UI_LOG_HANDLER not in root_logger.handlers:
         root_logger.addHandler(UI_LOG_HANDLER)
+    ensure_tracker()  # UI→後台鏡像去重用（見 translation_tool.utils.ui_mirror）
 
     target_logger.setLevel(_numeric_level)
     target_logger.propagate = True

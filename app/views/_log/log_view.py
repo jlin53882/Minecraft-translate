@@ -30,6 +30,7 @@ from app.tasks.log_entry import LogEntry
 from app.tasks.task_session import TaskSession
 from app.ui import design
 from app.ui.design import C
+from translation_tool.utils.ui_mirror import BACKEND_SOURCES, mirror_to_backend
 
 from .log_presenter import LogPresenter
 
@@ -131,8 +132,15 @@ class LogView(ft.Container):
         level: str = "info",
         source: str = "ui",
         update: bool = True,
+        *,
+        mirror: bool = True,
+        mirror_text: str | None = None,
     ) -> None:
         """新增一行 log（給 reset 動作、純事件用）。
+
+        UI 與後台同步：寫進畫面的訊息會自動鏡像到後台 log（等級過濾只影響畫面，
+        不影響後台）。``source`` 是 ``logger`` / ``backend`` 的訊息本來就來自後台，不鏡像；
+        後台最近已記錄過相同內容的也不重複寫。
 
         重要：此方法**不走 LogPresenter**，因為 LogPresenter 的 append 模式用
         `e.seq > _last_seq` 做 dedup。若每次都用 seq=0，第二筆以後會被吃掉。
@@ -145,9 +153,14 @@ class LogView(ft.Container):
             level: 等級（debug/info/warning/error/system）
             source: 來源標記
             update: 是否立即刷新畫面；批次新增時傳 False，最後再呼叫 refresh()
+            mirror: 是否鏡像到後台 log
+            mirror_text: 後台要記錄的文字（畫面文字帶裝飾前綴如 ``>> `` 時使用）
         """
         if not text:
             return
+
+        if mirror and source not in BACKEND_SOURCES:
+            mirror_to_backend(mirror_text if mirror_text is not None else text, level)
 
         # 等級過濾（不在白名單就跳過）
         if level not in self.show_levels:

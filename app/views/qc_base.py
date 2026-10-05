@@ -15,6 +15,7 @@ from app.ui.design import C
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from translation_tool.utils.log_unit import log_error
+from translation_tool.utils.ui_mirror import mirror_lines
 
 _UI_FLUSH_INTERVAL_SEC = 0.2
 
@@ -101,6 +102,7 @@ class QCBase:
                         if line.strip()
                     ]
                     if lines:
+                        mirror_lines(lines, prefix="[QC] ")
                         batcher.add_lines(lines)
                     if "progress" in update:
                         batcher.set_state(progress=update["progress"])

@@ -247,7 +247,6 @@ def _run_extraction_with_session(
         filtered: dict[str, Any] | None = GLOBAL_LOG_LIMITER.filter(update)
         if filtered is not None:
             if "log" in filtered:
-                # 這些訊息由核心 generator 的 logger 負責寫入後台，這裡只送 UI。
                 session.add_log(filtered["log"])
             if "progress" in filtered:
                 phase_progress = max(0.0, min(1.0, float(filtered["progress"])))
@@ -283,7 +282,6 @@ def _run_extraction_with_session(
 def _flush_limiter_to_session(session: TaskSession) -> None:
     final: dict[str, Any] | None = GLOBAL_LOG_LIMITER.flush()
     if final and "log" in final:
-        # 最終摘要已由核心 generator 記錄到後台，這裡只送 UI。
         session.add_log(final["log"])
 
 

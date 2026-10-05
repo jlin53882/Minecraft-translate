@@ -32,7 +32,7 @@ from app.views.translation.translation_panels import (
     build_path_row,
 )
 from app.views.translation.translation_state import TranslationRunState
-from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.log_unit import log_warning
 
 # 可選匯入：避免某個 service 暫時不可用時，整頁無法開啟
 try:
@@ -414,7 +414,6 @@ class TranslationView(ft.Column):
         self.progress.value = 0
         self._refresh_steps()
         self._append_log("[UI] 已重置：FTB Quests 輸入已清空")
-        log_info("[UI] 已重置：FTB Quests 輸入已清空", extra={"ui_mirrored": True})
         self.page.update()
 
     def _reset_kjs_inputs(self):
@@ -429,7 +428,6 @@ class TranslationView(ft.Column):
         self.progress.value = 0
         self._refresh_steps()
         self._append_log("[UI] 已重置：KubeJS 輸入已清空")
-        log_info("[UI] 已重置：KubeJS 輸入已清空", extra={"ui_mirrored": True})
         self.page.update()
 
     def _reset_md_inputs(self):
@@ -445,7 +443,6 @@ class TranslationView(ft.Column):
         self.progress.value = 0
         self._refresh_steps()
         self._append_log("[UI] 已重置：Markdown 輸入已清空")
-        log_info("[UI] 已重置：Markdown 輸入已清空", extra={"ui_mirrored": True})
         self.page.update()
 
     @property

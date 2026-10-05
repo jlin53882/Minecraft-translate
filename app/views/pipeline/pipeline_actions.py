@@ -34,7 +34,6 @@ from app.services_impl.pipelines.merge_service import (
 from app.tasks.task_session import TaskSession
 from app.views.pipeline.pipeline_config import PipelineConfig, _has_files
 from translation_tool.utils.cancellation import is_cancelled
-from translation_tool.utils.log_unit import log_error, log_info
 
 
 @dataclass(frozen=True)
@@ -240,7 +239,6 @@ class PipelineActions:
             if not inputs:
                 message = "[系統] 沒有待翻譯內容，略過翻譯"
                 session.add_log(message)
-                log_info(message, extra={"ui_mirrored": True})
                 return
             os.makedirs(cfg.translate_output_dir, exist_ok=True)
             for src in inputs:
@@ -272,11 +270,9 @@ class PipelineActions:
                 + _staging_reuse_note(stats)
             )
             session.add_log(message)
-            log_info(message, extra={"ui_mirrored": True})
             if not stats["copied"] and not stats["merged"]:
                 message = "❌ 沒有可打包的翻譯檔案"
                 session.add_log(message, level="error")
-                log_error(message, extra={"ui_mirrored": True})
                 session.set_error()
                 return
             yield from self.bundle(

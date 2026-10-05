@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections import deque
 from collections.abc import Callable
 
 from translation_tool.utils.redaction import redact_secrets
+from translation_tool.utils.ui_mirror import BACKEND_SOURCES, mirror_to_backend
 
 from .log_entry import LogEntry
 
@@ -48,6 +50,17 @@ def tag_session(session, name: str, view_key: str | None = None):
     except AttributeError:
         pass
     return session
+
+
+def add_log_unmirrored(session, text: str, level: str = "info") -> None:
+    """寫進任務畫面日誌但不鏡像到後台（呼叫端已把更完整的內容寫進後台時使用）。
+
+    舊版 / 測試替身 session 沒有 ``mirror`` 參數，退回只傳文字與等級。
+    """
+    try:
+        session.add_log(text, level=level, mirror=False)
+    except TypeError:
+        session.add_log(text, level=level)
 
 
 def _notify(session: TaskSession, event: str) -> None:
@@ -96,6 +109,16 @@ class TaskSession:
         self._start_logs: list[tuple[str, str]] = []
         self._lock = threading.Lock()
         self._cancel_event = threading.Event()
+        self._started_at: float | None = None
+
+    # ---------- 後台生命週期紀錄 ----------
+
+    def _prefix(self) -> str:
+        return f"[{self.name}] " if self.name else ""
+
+    def _log_lifecycle(self, text: str, level: str = "info") -> None:
+        """任務開始 / 結束寫進後台 log（不進畫面），讓 log 檔能看出每個任務的邊界、結果與耗時。"""
+        mirror_to_backend(text, level, prefix=self._prefix(), dedupe=False)
 
     # ---------- 狀態寫入（Worker 使用） ----------
 
@@ -110,16 +133,26 @@ class TaskSession:
         text: str,
         level: str = "info",
         source: str = "ui",
+        *,
+        mirror: bool = True,
     ) -> None:
         """
         新增日誌事件。
 
         支援舊 caller（只傳 text）：level/source 皆使用 default。
 
+        UI 與後台同步：寫進畫面的訊息會自動鏡像到後台 log（帶任務名稱前綴），
+        所以呼叫端不必再自己配對 ``log_info``。以下情況不會鏡像：
+
+        - ``source`` 是 ``logger`` / ``backend``：訊息本來就來自後台。
+        - ``mirror=False``：呼叫端已自行寫入後台（例如 ``mirror_session_log``）。
+        - 後台最近已記錄過相同內容（核心流程自己 log 後又 yield 給 UI 的那一份）。
+
         Args:
             text:   日誌文字
             level:  等級（debug/info/warning/error/system）
             source: 來源標記
+            mirror: 是否鏡像到後台 log
         """
         if not text:
             return
@@ -134,6 +167,10 @@ class TaskSession:
             )
             self._next_seq += 1
             self.logs.append(entry)
+        if mirror and source not in BACKEND_SOURCES:
+            mirror_to_backend(
+                text, level, prefix=f"[{self.name}] " if self.name else ""
+            )
 
     def set_error(self) -> None:
         """設定錯誤狀態。"""
@@ -167,6 +204,19 @@ class TaskSession:
         with self._lock:
             self.progress = 1.0
             self.status = "ERROR" if self.error else "DONE"
+            status = self.status
+            summary = getattr(self, "summary", None)
+            log_count = len(self.logs)
+            started = self._started_at
+        elapsed = f"，耗時 {time.monotonic() - started:.1f}s" if started else ""
+        summary_text = str(summary) if summary else ""
+        if len(summary_text) > 500:
+            summary_text = summary_text[:500] + "…（已截斷）"
+        extra = f"，摘要：{summary_text}" if summary_text else ""
+        self._log_lifecycle(
+            f"任務結束：{status}{elapsed}，畫面日誌 {log_count} 筆{extra}",
+            "error" if status == "ERROR" else "info",
+        )
         _notify(self, "finish")
 
     def request_cancel(self) -> None:
@@ -187,9 +237,14 @@ class TaskSession:
             self._next_seq = 0
             self.error = False
             self.status = "RUNNING"
+            self._started_at = time.monotonic()
             start_logs = list(self._start_logs)
-        for text, level in start_logs:  # 清空日誌後把開頭訊息放回
-            self.add_log(text, level)
+        for (
+            text,
+            level,
+        ) in start_logs:  # 清空日誌後把開頭訊息放回（後台已記錄過，不再鏡像）
+            self.add_log(text, level, mirror=False)
+        self._log_lifecycle("任務開始")
         _notify(self, "start")
 
     # ---------- UI 讀取（UI 使用） ----------

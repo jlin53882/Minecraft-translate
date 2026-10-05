@@ -81,7 +81,7 @@ def test_allowlist_entries_exist():
 # 其餘為 UI 保護（畫面更新、進度回報）——都不是無聲吞掉資料相關錯誤的路徑；
 # 資料相關的無聲路徑已補上紀錄（見 docs/SECURITY_ERROR_HANDLING_AUDIT.md）。
 UNEXPLAINED_NOQA_BASELINE = {
-    "app/icon_index.py": 5,
+    "app/icon_index.py": 2,
     "app/icon_reader.py": 3,
     "app/services_impl/cache/cache_services.py": 2,
     "app/services_impl/pipelines/_task_runner.py": 1,
@@ -105,7 +105,7 @@ UNEXPLAINED_NOQA_BASELINE = {
     "app/views/icon_preview/detail_mixin.py": 2,
     "app/views/icon_preview/icon_cache.py": 5,
     "app/views/icon_preview_row.py": 1,
-    "app/views/merge_view.py": 4,
+    "app/views/merge_view.py": 2,
     "app/views/qc_view.py": 1,
     "app/views/rules/rules_actions.py": 2,
     "app/views/translation/translation_actions.py": 11,

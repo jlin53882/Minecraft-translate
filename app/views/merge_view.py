@@ -5,6 +5,7 @@
 
 import asyncio
 import threading
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ from app.services_impl.pipelines.merge_service import (
     run_merge_folder_batch_service,
     run_merge_zip_batch_service,
 )
-from app.tasks.task_session import TaskSession
+from app.tasks.task_session import TaskSession, add_log_unmirrored
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.ui.status_chip import set_chip_status
@@ -24,7 +25,7 @@ from app.views._log import LogView
 from app.views.config.config_actions import load_config_into_view
 from app.views.merge.merge_widgets import MergeWidgetsMixin
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_error, log_info, log_warning
+from translation_tool.utils.log_unit import log_error, log_warning
 
 
 class MergeView(MergeWidgetsMixin, ft.Column):
@@ -107,8 +108,11 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                 try:
                     cfg = load_config()
                     load_config_into_view(inner, cfg)
-                except Exception:  # noqa: BLE001, S110
-                    pass
+                except Exception as exc:  # noqa: BLE001 - 通知失敗不影響合併頁，但要留下紀錄
+                    log_warning(
+                        f"[MergeView] 同步設定到已開啟的頁面失敗：{exc!r}",
+                        exc_info=True,
+                    )
 
     def _on_merge_field_changed(self, key: str, value: Any) -> None:
         """寫入 lang_merger 單一欄位到 config.json，支援兩邊同步。"""
@@ -116,8 +120,11 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             # 經由 ConfigStore：只改這一個欄位、受寫入鎖保護、並通知外殼等訂閱者
             config_store.set_value(f"lang_merger.{key}", value)
             self._broadcast_config_change_to_config_view()
-        except Exception:  # noqa: BLE001, S110
-            pass
+        except Exception as exc:  # noqa: BLE001 - 欄位寫入失敗不可中斷 UI，但設定沒存成功必須留下紀錄
+            log_warning(
+                f"[MergeView] 寫入設定 lang_merger.{key}={value!r} 失敗：{exc!r}",
+                exc_info=True,
+            )
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker) -> None:
         """初始化 MergeView。"""
@@ -238,17 +245,30 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         self._set_status("執行中", C.DIA_BG)
 
         self.session.start()
-        self.session.add_log("[系統] 開始合併任務")
-        log_info("[系統] 開始合併任務", extra={"ui_mirrored": True})
+        source_desc = (
+            f"資料夾 {self.folder_path_field.value}"
+            if input_mode == "folder"
+            else f"{len(self.selected_zips)} 個 ZIP"
+        )
+        self.session.add_log(
+            f"[系統] 開始合併任務｜來源：{source_desc}｜輸出：{self.output_dir_field.value}"
+        )
         self._start_ui_poller()
 
         def _run_merge():
             try:
                 _run_merge_service()
             except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束
-                log_warning(f"[MergeView] 合併執行失敗：{ex!r}")
-                self.session.add_log(f"[錯誤] 合併執行失敗：{ex}", level="error")
-                log_error("[錯誤] 合併執行失敗：%s", ex, extra={"ui_mirrored": True})
+                # 完整堆疊寫後台；畫面顯示例外類型與訊息，並指向後台 log
+                log_error(
+                    f"[MergeView] 合併執行失敗（模式：{input_mode}，"
+                    f"輸出：{self.output_dir_field.value}）：{ex!r}\n{traceback.format_exc()}"
+                )
+                add_log_unmirrored(
+                    self.session,
+                    f"[錯誤] 合併執行失敗：{type(ex).__name__}: {ex}（完整堆疊已寫入後台 log）",
+                    "error",
+                )
                 self.session.set_error()
                 self.session.finish()  # set_error() → finish()：TaskManager 才會離開 active
 

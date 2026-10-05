@@ -24,7 +24,7 @@ from app.views.pipeline.pipeline_progress import PipelineProgressPanel
 from app.views.pipeline.pipeline_session import PipelineRunner
 from app.views.pipeline.pipeline_translate_dialog import open_translate_dialog
 from app.views.pipeline.pipeline_widgets import PipelineWidgetsMixin
-from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.log_unit import log_info
 
 
 class PipelineView(PipelineWidgetsMixin, ft.Column):
@@ -359,10 +359,6 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
             return
         self.progress_panel.cancel_button.disabled = True
         self.progress_panel.add_log("⏹ 正在取消…（等待目前的檢查點）", "warning")
-        log_warning(
-            "⏹ 正在取消…（等待目前的檢查點）",
-            extra={"ui_mirrored": True},
-        )
         self._page.update()
 
     def _reenable_buttons(self, e=None):

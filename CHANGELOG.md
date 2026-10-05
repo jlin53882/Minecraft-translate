@@ -23,6 +23,8 @@
 - **token 預算切批（#108）**：依 token 預算切批、學習式預算、`maxOutputTokens`、`finishReason` / 用量診斷；可用 `token_budget_enabled` 關閉。
 
 ### Improvements
+- **UI 與後台日誌自動同步**：寫進畫面的訊息（`TaskSession.add_log`、`LogView.add`、批次推畫面的提取／打包／QC 路徑）會自動鏡像到後台 log，不必每個呼叫點自己配對 `log_info`。核心流程已經自己 log 過的訊息會去重（`translation_tool/utils/ui_mirror.py`，相同文字每筆後台記錄只抵銷一次），鏡像記錄帶 `ui_mirrored` 標記，UI log handler 會略過，不會在畫面重複。任務開始／結束（狀態、耗時、摘要）也寫入後台。
+- **日誌詳細度**：在 `except` 區塊內記 ERROR 會自動附上 traceback；翻譯頁、合併、流水線的失敗訊息補上例外類型、輸入／輸出路徑與「完整堆疊已寫入後台 log」；任務開始訊息列出輸入、輸出與步驟設定（翻譯、合併、QC、打包）；圖示索引、MD 統計、快取歷史、版本對照檔等原本靜默略過的錯誤改為留下警告。
 - 設定存檔的訂閱者通知一律在寫入鎖釋放後執行，並統一所有 app 層寫入的鎖（避免巢狀寫入死鎖與並行寫出壞檔）。
 - AppShell 的 UI 更新改為排程回 Flet event loop 並節流；新增 `AppShell.dispose()` 與 `page.on_close` teardown。
 - 合併頁單欄位寫入改走 ConfigStore（只改被修改的欄位，也會通知外殼）。

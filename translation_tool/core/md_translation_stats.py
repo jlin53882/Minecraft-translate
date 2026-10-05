@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.core.lm_translator_shared import _get_default_batch_size
+from translation_tool.utils.log_unit import log_warning
 
 _LANG_MODE_LABELS = {
     "non_cjk_only": "僅抽取非中文（non_cjk_only）",
@@ -46,7 +47,8 @@ def count_md_pending_docs(root: Path) -> int:
             continue
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001, S112 - 統計僅計入可解析的待翻譯檔，壞檔略過
+        except Exception as exc:  # noqa: BLE001 - 統計僅計入可解析的待翻譯檔，壞檔略過但要記錄是哪個檔
+            log_warning(f"[MD] 統計時略過無法解析的待翻譯檔 {p}: {exc!r}")
             continue
         if isinstance(data, dict) and data.get("schema") == "md_pending_blocks_v1":
             count += 1

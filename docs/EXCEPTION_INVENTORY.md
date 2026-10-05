@@ -4,19 +4,19 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **267** 項；其中 **138** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **269** 項；其中 **133** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 224 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
-| UI／畫面保護 | 28 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
-| 盡力而為（靜默） | 15 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
+| 已記錄／回報 | 230 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| UI／畫面保護 | 23 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
+| 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
 | 位置 | 規則 | 分類 | 原因／處理 |
 |---|---|---|---|
-| `app/icon_index.py:_iter_entries_from_lang_files` | BLE001/S112 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/icon_index.py:_process_single_jar` | BLE001/S112 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/icon_index.py:_process_single_jar` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/icon_index.py:_iter_entries_from_lang_files` | BLE001 | 已記錄／回報 | 單一 lang 檔讀不出來就略過，但要留下是哪個檔案 |
+| `app/icon_index.py:_process_single_jar` | BLE001 | 已記錄／回報 | 單一 lang 檔讀不出來就略過，但要留下是哪個檔案 |
+| `app/icon_index.py:_process_single_jar` | BLE001 | 已記錄／回報 | 單一 JAR 索引失敗不中止整體，但要留下堆疊 |
 | `app/icon_index.py:build_icon_index` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/icon_index.py:load_icon_index` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/icon_reader.py:_ZipCache.get` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
@@ -104,8 +104,8 @@
 | `app/views/lm_view.py:LMView.refresh_key_stat` | BLE001 | UI／畫面保護 | 讀不到設定時只是不顯示 |
 | `app/views/lookup_view.py:LookupView.single_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/lookup_view.py:LookupView.batch_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
-| `app/views/merge_view.py:MergeView._broadcast_config_change_to_config_view` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/merge_view.py:MergeView._on_merge_field_changed` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/merge_view.py:MergeView._broadcast_config_change_to_config_view` | BLE001 | 已記錄／回報 | 通知失敗不影響合併頁，但要留下紀錄 |
+| `app/views/merge_view.py:MergeView._on_merge_field_changed` | BLE001 | 已記錄／回報 | 欄位寫入失敗不可中斷 UI，但設定沒存成功必須留下紀錄 |
 | `app/views/merge_view.py:MergeView.start_merge._run_merge` | BLE001 | 已記錄／回報 | 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束 |
 | `app/views/merge_view.py:MergeView._sync_ui_once` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/merge_view.py:MergeView._close_dialog_overlay` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -217,7 +217,7 @@
 | `translation_tool/core/lm_translator_shared_loop.py:translate_items_with_cache_loop` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_shared_loop.py:translate_items_with_cache_loop` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/md_translation_progress.py:_ProgressProxy.set_progress` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷翻譯 |
-| `translation_tool/core/md_translation_stats.py:count_md_pending_docs` | BLE001/S112 | 盡力而為（靜默） | 統計僅計入可解析的待翻譯檔，壞檔略過 |
+| `translation_tool/core/md_translation_stats.py:count_md_pending_docs` | BLE001 | 已記錄／回報 | 統計僅計入可解析的待翻譯檔，壞檔略過但要記錄是哪個檔 |
 | `translation_tool/core/md_translation_steps.py:step3_inject_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/output_bundler.py:bundle_outputs_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/output_bundler.py:bundle_outputs_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
@@ -281,3 +281,5 @@
 | `translation_tool/utils/text_processor.py:load_custom_translations` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/text_processor.py:convert_snbt_file_inplace` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/ui_logging_handler.py:UISessionLogHandler.emit` | BLE001/S110 | 盡力而為（靜默） | 在 handler 內記錄錯誤會遞迴 |
+| `translation_tool/utils/ui_mirror.py:_BackendSeenTracker.emit` | BLE001 | 盡力而為（靜默） | handler 內不可再丟例外 |
+| `translation_tool/utils/ui_mirror.py:mirror_to_backend` | BLE001 | 盡力而為（靜默） | 鏡像失敗不可影響 UI 或任務本身 |

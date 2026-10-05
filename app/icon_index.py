@@ -64,7 +64,8 @@ def _iter_entries_from_lang_files(zf: zipfile.ZipFile) -> Iterator[tuple[str, st
             continue
         try:
             content = read_limited(zf, name).decode("utf-8", errors="ignore")
-        except Exception:  # noqa: BLE001, S112
+        except Exception as exc:  # noqa: BLE001 - 單一 lang 檔讀不出來就略過，但要留下是哪個檔案
+            log_warning(f"[IconIndex] 略過無法讀取的 lang 檔 {name}: {exc!r}")
             continue
         for line in content.splitlines():
             line = line.strip()
@@ -109,7 +110,10 @@ def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
                     )
                 except ArchiveBudgetError:
                     raise  # 整包累計超限：交給外層處理
-                except Exception:  # noqa: BLE001, S112
+                except Exception as exc:  # noqa: BLE001 - 單一 lang 檔讀不出來就略過，但要留下是哪個檔案
+                    log_warning(
+                        f"[IconIndex] 略過無法讀取的 lang 檔 {jar_path.name}!/{name}: {exc!r}"
+                    )
                     continue
                 for line in content.splitlines():
                     line = line.strip()
@@ -149,8 +153,11 @@ def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
     except ArchiveBudgetError:
         # 累計讀取超過安全上限（budget 已記錄警告）：保留已建立的部分索引，不中止整個索引建置
         log_warning(f"[IconIndex] {jar_path.name} 累計讀取超限，僅保留已解析的部分索引")
-    except Exception:  # noqa: BLE001, S110
-        pass
+    except Exception as exc:  # noqa: BLE001 - 單一 JAR 索引失敗不中止整體，但要留下堆疊
+        log_warning(
+            f"[IconIndex] {jar_path.name} 索引建立失敗，僅保留已解析的部分索引：{exc!r}",
+            exc_info=True,
+        )
     return results
 
 

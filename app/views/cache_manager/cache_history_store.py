@@ -36,13 +36,14 @@ def _parse_index(fp: Path) -> dict[str, list[dict]]:
         lines = fp.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError):  # 讀不到的檔案視為沒有紀錄（與原行為一致）
         return by_key
-    for ln in lines:
+    for lineno, ln in enumerate(lines, start=1):
         ln = ln.strip()
         if not ln:
             continue
         try:
             ev = json.loads(ln)
-        except ValueError:  # 損毀的歷史行略過，其餘行照常讀取（與原行為一致）
+        except ValueError as exc:  # 損毀的歷史行略過，其餘行照常讀取（與原行為一致）
+            log_warning(f"略過損毀的快取歷史記錄（第 {lineno} 行）：{exc}")
             continue
         by_key.setdefault(str(ev.get("key", "")), []).append(ev)
     return by_key

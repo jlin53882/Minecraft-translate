@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import threading
+import traceback
 
 import flet as ft
 
@@ -20,7 +21,8 @@ from app.ui.snack import show_snack
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from app.views.bundler.bundler_widgets import BundlerWidgetsMixin
-from translation_tool.utils.log_unit import log_debug, log_info
+from translation_tool.utils.log_unit import log_debug, log_error
+from translation_tool.utils.ui_mirror import mirror_lines
 
 OUTPUT_ZIP_NAME_PATH = "output_bundler.output_zip_name"
 
@@ -425,9 +427,12 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         self.status_text.value = "打包中…"
         self.status_text.color = C.TEXT
         self.progress_bar.color = C.EM
-        message = "開始執行打包..."
+        message = (
+            f"開始執行打包｜根目錄：{root_dir}｜輸出 ZIP：{output_zip}"
+            f"｜版本：{version or '（未指定）'}｜額外資料夾：{len(self.extra_folders)} 個"
+            f"｜封面圖：{pack_image or '（無）'}"
+        )
         self._append_log(message, level="info")
-        log_info(message, extra={"ui_mirrored": True})
         self._page.update()
 
         thread = threading.Thread(
@@ -487,15 +492,16 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
 
             for update in bundle_outputs_generator(**generator_kwargs):
                 log_msg = update.get("log", "")
-                batcher.add_lines(
-                    [(line, "info") for line in log_msg.split("\n") if line.strip()]
-                )
+                lines = [(line, "info") for line in log_msg.split("\n") if line.strip()]
+                mirror_lines(lines, prefix="[打包] ")
+                batcher.add_lines(lines)
                 if "progress" in update:
                     batcher.set_state(progress=update["progress"])
                 if update.get("error"):
                     batcher.set_state(error_color=C.RED)
                 batcher.flush()
         except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，錯誤顯示於日誌
+            log_error(f"[打包] 打包執行失敗：{ex}\n{traceback.format_exc()}")
             batcher.add_lines([(f"[錯誤] {ex}", "error")])
             batcher.set_state(error_color=C.RED)
         finally:

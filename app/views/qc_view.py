@@ -25,7 +25,7 @@ from app.ui.snack import show_snack
 from app.views._log import LogView
 from app.views.qc_base import QCBase
 from app.views.untranslated_checker import UntranslatedChecker
-from translation_tool.utils.log_unit import log_debug, log_info
+from translation_tool.utils.log_unit import log_debug
 
 # 三種檢驗模式（key、標題、說明、圖示、色組）
 QC_MODES = (
@@ -409,9 +409,8 @@ class QCView(ft.Column):
                 show_snack(self.page, "錯誤：請填寫所有「Key 缺失檢查」的路徑！")
                 self.set_controls_disabled(False)
                 return
-            message = "[系統] 開始執行 Key 缺失檢查..."
+            message = f"[系統] 開始執行 Key 缺失檢查｜原文：{en_dir}｜譯文：{tw_dir}｜輸出：{out_dir}"
             self.log_view.add(message, level="system")
-            log_info(message, extra={"ui_mirrored": True})
             target_func = run_untranslated_check_service
             args = (en_dir, tw_dir, out_dir)
 
@@ -424,9 +423,8 @@ class QCView(ft.Column):
                 show_snack(self.page, "錯誤：請填寫所有「JSON 資料夾差異比對」的路徑！")
                 self.set_controls_disabled(False)
                 return
-            message = "[系統] 開始執行 JSON 資料夾簡繁差異比較..."
+            message = f"[系統] 開始執行 JSON 資料夾簡繁差異比較｜簡中：{cn_dir}｜繁中：{tw_dir}｜輸出：{out_dir}"
             self.log_view.add(message, level="system")
-            log_info(message, extra={"ui_mirrored": True})
             target_func = run_variant_compare_service
             args = (cn_dir, tw_dir, out_dir)
 
@@ -438,9 +436,8 @@ class QCView(ft.Column):
                 show_snack(self.page, "錯誤：請填寫所有「TSV 單檔案差異比對」的路徑！")
                 self.set_controls_disabled(False)
                 return
-            message = "[系統] 開始執行 TSV 單檔案簡繁差異比較..."
+            message = f"[系統] 開始執行 TSV 單檔案簡繁差異比較｜TSV：{tsv_path}｜輸出：{out_csv_path}"
             self.log_view.add(message, level="system")
-            log_info(message, extra={"ui_mirrored": True})
             target_func = run_variant_compare_tsv_service
             args = (tsv_path, out_csv_path)
 
