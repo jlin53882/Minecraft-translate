@@ -49,6 +49,14 @@ class PipelineServices:
     build_staging: Callable[..., Any] = build_bundle_staging
 
 
+def _staging_reuse_note(stats: dict[str, Any]) -> str:
+    """增量 staging 的補充說明；舊版 / 測試替身沒有這些欄位時不顯示。"""
+    unchanged, removed = stats.get("unchanged"), stats.get("removed")
+    if not unchanged and not removed:
+        return ""
+    return f"（沿用未變更 {unchanged or 0} 個、移除殘留 {removed or 0} 個）"
+
+
 def session_failed(session: TaskSession) -> bool:
     """任務失敗：session 標記錯誤，或摘要中有失敗項目。"""
     if session.error:
@@ -258,6 +266,7 @@ class PipelineActions:
             )
             session.add_log(
                 f"[系統] 打包暫存完成：複製 {stats['copied']} 個、合併 {stats['merged']} 個檔案"
+                + _staging_reuse_note(stats)
             )
             if not stats["copied"] and not stats["merged"]:
                 session.add_log("❌ 沒有可打包的翻譯檔案", level="error")
