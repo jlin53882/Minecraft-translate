@@ -27,7 +27,7 @@ def describe_task(task: Any) -> str:
     if task.output_dir:
         lines.append(f"輸出資料夾：{task.output_dir}")
     if task.total:
-        lines.append(f"上次已處理：{task.completed} / {task.total} 筆")
+        lines.append(f"已保存的進度：{task.completed} / {task.total} 筆")
     if task.updated_at:
         lines.append(f"最後更新：{task.updated_at}")
     lines.append("已完成的譯文保存在翻譯快取，續跑時只會翻譯尚未完成的部分。")

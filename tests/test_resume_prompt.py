@@ -130,6 +130,7 @@ def test_dialog_describes_the_interrupted_task_and_waits_for_the_check():
 
     text = describe_task(_task())
     assert "C:/mods/assets" in text and "C:/out" in text and "40 / 100" in text
+    assert "已保存的進度" in text, "顯示的是可恢復的進度，不是本次行程已處理的數量"
     assert h.dialog.modal is True
     assert "檢查" in h.status_text()
     assert h.button("續跑").disabled is True, "檢查完成前不可續跑"

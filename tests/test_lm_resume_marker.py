@@ -252,3 +252,76 @@ def test_discard_clears_the_marker(checkpoint, tmp_path):
 
     assert not checkpoint.exists()
     assert lm_resume.peek_interrupted_task() is None
+
+
+class TestCorruptCheckpointIsQuarantined:
+    """損毀的 checkpoint 只警告會在每次啟動重複讀到；改名保留供診斷，之後就是「沒有標記」。"""
+
+    def _corrupt(self, checkpoint: Path, content: str = "{not json") -> Path:
+        checkpoint.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint.write_text(content, encoding="utf-8")
+        return Path(f"{checkpoint}.corrupt")
+
+    def test_unparsable_file_is_renamed_with_a_warning(self, checkpoint, monkeypatch):
+        warnings: list[str] = []
+        monkeypatch.setattr(lm_translator, "log_warning", warnings.append)
+        quarantined = self._corrupt(checkpoint)
+
+        assert lm_translator.load_checkpoint() is None
+
+        assert not checkpoint.exists(), "不得殘留在原位"
+        assert quarantined.read_text(encoding="utf-8") == "{not json"
+        assert len(warnings) == 1
+        assert str(quarantined) in warnings[0] and "checkpoint" in warnings[0]
+
+    def test_the_next_startup_is_quiet(self, checkpoint, monkeypatch):
+        warnings: list[str] = []
+        monkeypatch.setattr(lm_translator, "log_warning", warnings.append)
+        self._corrupt(checkpoint)
+        lm_translator.load_checkpoint()
+        warnings.clear()
+
+        assert lm_translator.load_checkpoint() is None
+        assert lm_resume.peek_interrupted_task() is None
+        assert warnings == []
+
+    def test_json_that_is_not_an_object_is_also_quarantined(self, checkpoint):
+        quarantined = self._corrupt(checkpoint, "[1, 2, 3]")
+
+        assert lm_resume.peek_interrupted_task() is None
+
+        assert not checkpoint.exists() and quarantined.exists()
+
+    def test_a_new_corrupt_file_replaces_the_previous_quarantine(self, checkpoint):
+        quarantined = self._corrupt(checkpoint, "first")
+        lm_translator.load_checkpoint()
+        self._corrupt(checkpoint, "second")
+
+        lm_translator.load_checkpoint()
+
+        assert quarantined.read_text(encoding="utf-8") == "second"
+
+    def test_quarantine_failure_is_reported_and_still_treated_as_missing(
+        self, checkpoint, monkeypatch
+    ):
+        warnings: list[str] = []
+        monkeypatch.setattr(lm_translator, "log_warning", warnings.append)
+        self._corrupt(checkpoint)
+
+        def deny(*_a, **_k):
+            raise PermissionError("locked")
+
+        monkeypatch.setattr(lm_translator.os, "replace", deny)
+
+        assert lm_translator.load_checkpoint() is None
+        assert any("無法隔離" in w for w in warnings)
+        assert checkpoint.exists()
+
+    def test_a_valid_checkpoint_is_untouched(self, checkpoint, tmp_path):
+        root = tmp_path / "in"
+        _lang_file(root, {"a": "Hello"})
+        _save(root)
+
+        assert lm_translator.load_checkpoint() is not None
+
+        assert checkpoint.exists() and not Path(f"{checkpoint}.corrupt").exists()

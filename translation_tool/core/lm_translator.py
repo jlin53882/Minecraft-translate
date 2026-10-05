@@ -125,7 +125,8 @@ def save_checkpoint(
 
     Args:
         batch_index: 目前處理的批次編號
-        completed_count: 已處理的項目數量（快取命中加上本次已翻譯；僅供顯示）
+        completed_count: 已 durable 的進度（快取命中加上本次已落盤的翻譯；只有快取存檔成功的批次
+            才會寫 checkpoint，所以它是「可恢復的進度」，不等於本次行程已處理的數量；僅供顯示）
         total: 可翻譯項目總數（抽取結果的筆數，不受快取進度影響）
         remaining: 剩餘待翻譯項目清單（只留前三筆作診斷）
         output_dir: 輸出目錄路徑
@@ -150,19 +151,43 @@ def save_checkpoint(
     _atomic_write_text(CHECKPOINT_FILE, json_std.dumps(payload, ensure_ascii=False))
 
 
+def _quarantine_corrupt_checkpoint() -> str | None:
+    """把無法使用的 checkpoint 改名為 ``.corrupt``（保留供診斷），回傳新路徑；失敗回傳 None。
+
+    只記錄警告但留著原檔，每次啟動都會再讀到、再警告。改名後下一次就是「沒有 checkpoint」；
+    下一個損毀的檔案會覆蓋舊的 ``.corrupt``（只保留最近一份）。
+    """
+    quarantined = f"{CHECKPOINT_FILE}.corrupt"
+    try:
+        os.replace(CHECKPOINT_FILE, quarantined)
+    except OSError as exc:
+        log_warning(f"無法隔離損毀的 checkpoint（{CHECKPOINT_FILE}）：{exc!r}")
+        return None
+    return quarantined
+
+
 def load_checkpoint() -> dict | None:
-    """讀取 checkpoint，若不存在或讀取失敗回傳 None。
+    """讀取 checkpoint；不存在、損毀或格式不是物件時回傳 None。
+
+    損毀（無法解析或不是 JSON 物件）的檔案會記錄警告並隔離成 ``.corrupt``，不會殘留在原位。
 
     Returns:
-        checkpoint 字典，若無 checkpoint 則回傳 None
+        checkpoint 字典，若無可用的 checkpoint 則回傳 None
     """
     if not os.path.exists(CHECKPOINT_FILE):
         return None
     try:
         with open(CHECKPOINT_FILE, "r", encoding="utf-8") as f:
-            return json_std.load(f)
+            data = json_std.load(f)
+        if not isinstance(data, dict):
+            raise TypeError(
+                f"checkpoint 必須是 JSON 物件，實際為 {type(data).__name__}"
+            )
+        return data
     except Exception as exc:  # noqa: BLE001 - 損毀的 checkpoint 視為沒有，但要留下紀錄
-        log_warning(f"讀取 checkpoint 失敗，視為沒有 checkpoint：{exc!r}")
+        quarantined = _quarantine_corrupt_checkpoint()
+        where = f"，已隔離為 {quarantined}" if quarantined else ""
+        log_warning(f"讀取 checkpoint 失敗，視為沒有 checkpoint{where}：{exc!r}")
         return None
 
 
@@ -323,7 +348,7 @@ def _note_directory_checkpoint(fingerprint: str, *, cache_saving: bool = True) -
         and checkpoint.get("fingerprint") == fingerprint
     ):
         log_info(
-            f"🔄 接續上次中斷的任務（上次已處理 {checkpoint.get('completed_count', 0)}"
+            f"🔄 接續上次中斷的任務（上次已保存進度 {checkpoint.get('completed_count', 0)}"
             f"/{checkpoint.get('total', 0)} 筆；已完成的部分由快取還原）"
         )
         return
