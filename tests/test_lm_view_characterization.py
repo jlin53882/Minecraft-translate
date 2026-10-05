@@ -83,3 +83,43 @@ def test_start_clicked_launches_service_with_current_flags(monkeypatch):
     assert calls["dry_run"] is True
     assert calls["export_lang"] is True
     assert calls["write_new_cache"] is True
+
+
+def test_start_clicked_leaves_session_start_and_finish_to_the_service(monkeypatch):
+    """LMView 不可自己 start() session：service 才是單一 lifecycle owner（否則會重複 start、
+    清掉剛寫入的日誌，且 service 不 finish 時會在 TaskManager 留下 phantom active）。"""
+    from app.shell.task_manager import TaskManager
+    from app.tasks.task_session import TaskSession
+
+    manager = TaskManager()
+    manager.attach()
+    try:
+        monkeypatch.setattr(
+            lm_view.threading,
+            "Thread",
+            lambda target=None, args=(), daemon=None: type(
+                "T", (), {"start": lambda self: target(*args)}
+            )(),
+        )
+        monkeypatch.setattr(lm_view.LMView, "start_ui_timer", lambda self: None)
+        seen = {}
+
+        def fake_service(
+            input_dir, output_dir, session, dry_run, export_lang, write_new_cache
+        ):
+            seen["active_before_service_start"] = manager.active()
+            session.start()  # 真正的 service 會自己 start()／finish()
+            session.finish()
+
+        monkeypatch.setattr(lm_view, "run_lm_translation_service", fake_service)
+        view = lm_view.LMView(mock_page(), mock_filepicker())
+        view.input_path.value = "C:/Assets"
+
+        view.start_clicked(None)
+
+        assert isinstance(view.session, TaskSession)
+        assert seen["active_before_service_start"] == []  # view 沒有先 start
+        assert manager.active() == []
+        assert len(manager.recent()) == 1  # 只有一筆 terminal record
+    finally:
+        manager.detach()

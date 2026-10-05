@@ -33,6 +33,7 @@ from app.services_impl.pipelines.merge_service import (
 )
 from app.tasks.task_session import TaskSession
 from app.views.pipeline.pipeline_config import PipelineConfig, _has_files
+from translation_tool.utils.cancellation import is_cancelled
 
 
 @dataclass(frozen=True)
@@ -212,7 +213,7 @@ class PipelineActions:
                     finish_session=False,
                     **merge_options,
                 )
-                if session_failed(session):
+                if session_failed(session) or is_cancelled():
                     return
         except Exception:
             session.set_error()
@@ -241,7 +242,7 @@ class PipelineActions:
                     write_new_cache=config.get("write_new_cache", True),
                     manage_session=False,
                 )
-                if session.error:
+                if session.error or is_cancelled():  # 失敗或取消：不跑下一個來源
                     return
         except Exception:
             session.set_error()
@@ -307,7 +308,7 @@ class PipelineActions:
                     progress_start=0.0,
                     progress_end=0.5 if dual else 1.0,
                 )
-                if session.error:
+                if session.error or is_cancelled():  # lang 失敗或取消：不跑 book
                     return
             if mode in ("book", "dual"):
                 os.makedirs(cfg.extract_book_output_dir, exist_ok=True)

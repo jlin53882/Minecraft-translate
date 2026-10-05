@@ -70,6 +70,37 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 
 `start()` 之後任何結束路徑都要有一次 `finish()`，失敗順序為 `set_error()` → `finish()`（`TaskSession.finish()` 對已出錯的維持 ERROR）；`TaskManager` 以 `finish` 為結案事件。盤點結果：`_task_runner.run_callable_task`（FTB／KubeJS／MD）原本就符合；本 PR 補齊 extract（lang／book／dual／取消）、LM、merge（folder／zip）、`MergeView`／翻譯頁的 worker 例外邊界，以及 `PipelineActions`（dual 抽取、一鍵 merge、打包）。護欄：`tests/test_task_terminal_lifecycle.py`（真正的 `TaskManager`，每條路徑都驗證 `active() == []` 與 recent 狀態）。
 
+#### `session.start()` 的 owner 分類（`rg "session\.start\(" app`）
+
+| 位置 | 類型 | terminal finish 在哪裡 |
+|---|---|---|
+| `extract_service`（lang／book／dual，`manage_session=True`） | single owner（service） | `_run_extraction_with_session` 與例外分支（`_end_failed`）；取消也 `finish()` |
+| `lm_service`（`manage_session=True`） | single owner（service） | `finally`（成功／錯誤／例外／取消皆經此） |
+| `PipelineActions.merge`（單獨語系比對） | single owner（action 啟動，service 結案） | `merge_service` 的結尾與 `finally`（`generator.close()` 也會結案） |
+| `PipelineActions.bundle(manage_session=True)` | single owner（action） | `finally`（`except` 先 `set_error()`） |
+| `PipelineActions._extract_into`（dual） | composite outer owner | `finally`；內部 lang／book 以 `manage_session=False` 呼叫 |
+| `PipelineActions._step_merge` | composite outer owner | `finally`；內部以 `finish_session=False` 呼叫 |
+| `PipelineActions._step_translate` | composite outer owner | `finally`；內部以 `manage_session=False` 呼叫 |
+| `PipelineActions._step_bundle` | composite outer owner | `finally`；內部 `bundle(manage_session=False)` |
+| `_task_runner.run_callable_task`（FTB／KubeJS／MD） | single owner | `finally` |
+| `MergeView`、翻譯頁（FTB／KJS／MD）的 `session.start()` | UI owner（View 啟動，service 結案；worker 例外邊界補 `set_error()`→`finish()`） | service；View 例外邊界 |
+| `LMView` | **不再 start**（原本與 service 重複 start，會清掉剛寫入的日誌） | `lm_service` |
+
+取消檢查點：composite action 在 inner operation 之間檢查 `session.error`／`is_cancelled()`（dual 抽取的 lang→book、一鍵 merge 的來源之間、一鍵翻譯的輸入之間），取消後不再執行下一個；`PipelineRunner` 迭代 generator 時偵測取消會 `close()` 並補 `finish()`。
+
+#### 會被 `PipelineRunner` `close()` 的 generator（close-safe 盤點）
+
+| 路徑 | finish 位置 | close-safe |
+|---|---|---|
+| `PipelineActions.merge`→`run_merge_folder_batch_service` | `finally`（`finished` 旗標避免重複）＋Runner 補 `finish()` | ✅ |
+| `PipelineActions.merge`→`run_merge_zip_batch_service` | `finally`（`finished` 旗標）＋Runner 補 `finish()` | ✅ |
+| `PipelineActions.bundle` | `finally`（`manage_session=True`） | ✅ |
+| 一鍵 `_step_merge` | outer `finally` | ✅ |
+| 一鍵 `_step_bundle` | outer `finally` | ✅ |
+| extract／LM（非 generator，用取消旗標＋`cancel_scope`） | 取消檢查點／`finally` | ✅ |
+
+護欄：`tests/test_terminal_contract_matrix.py`（success／error／exception／cancel × single／composite，真正的 `TaskManager`）與 `tests/test_task_terminal_lifecycle.py`。
+
 ## C. event loop 上的同步阻塞（本 PR 前 → 後）
 
 | 位置 | 原本 | 現在 |

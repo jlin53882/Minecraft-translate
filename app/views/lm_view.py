@@ -341,8 +341,9 @@ class LMView(ft.Column):
             self.page.update()
             return
 
+        # session 的 start()／finish() 由 run_lm_translation_service 擁有（單一 owner）：
+        # 這裡不能再 start()，否則會重複登記並清掉剛寫入的日誌
         self.session = tag_session(TaskSession(), "機器翻譯", "lm")
-        self.session.start()
         # 日誌顯示行數：每次開始任務時讀最新設定，存檔後不必重開頁面
         self.log_view.set_tail_lines(
             load_ui_logging_config(load_config).get("tail_lines", 250)
