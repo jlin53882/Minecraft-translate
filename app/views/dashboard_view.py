@@ -247,6 +247,16 @@ class DashboardView(ft.Column):
 
     def _render_moddb(self) -> None:
         info = self._moddb
+        if info and info.get("problem"):
+            self.moddb_column.controls = [
+                ft.Text(
+                    f"⚠ 資料庫無法使用：{info['problem']}",
+                    size=12.5,
+                    color=C.RED,
+                    selectable=True,
+                )
+            ]
+            return
         if not info:
             self.moddb_column.controls = [
                 kit.empty_state(
@@ -360,9 +370,9 @@ class DashboardView(ft.Column):
                 rules = None
             try:
                 moddb = self._moddb_loader()
-            except Exception:
+            except Exception as exc:
                 logger.warning("工作台讀取 Mod 資料庫摘要失敗", exc_info=True)
-                moddb = None
+                moddb = {"problem": f"讀取摘要失敗（{exc}），詳情請看後台 log"}
             self._cache_overview, self._rules_count, self._moddb = (
                 overview,
                 rules,

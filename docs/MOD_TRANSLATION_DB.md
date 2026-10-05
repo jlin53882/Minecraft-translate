@@ -128,3 +128,13 @@ app/views/moddb_view.py + app/views/moddb/  總覽 / 條目校對 / 掃描匯入
 
 `tests/test_translation_db_core.py`（資料庫、掃描、規則）、`tests/test_lm_translator_db.py`（與目錄翻譯整合）、
 `tests/test_moddb_view.py`（各頁籤與服務層）。
+
+## 日誌與錯誤訊息
+
+- **UI 與後台一致**：掃描進度（每個 jar 的結果、失敗原因、略過的內嵌 jar、摘要）同時寫入畫面日誌與後台 log
+  （帶 `[Mod 資料庫掃描]` 前綴）；寫入 session 的訊息會標記 `ui_mirrored`，UI log handler 不會重複送進畫面。
+  失敗與略過用 `warning`／`error` 等級，「只看警告以上」篩選可用。
+- **開不起來就說原因**：設定的檔案存在但不是本功能的資料庫、或版本太新時，總覽、工作台、機器翻譯頁都會顯示
+  原因（而不是「尚未建立資料庫」）；掃描也會在日誌寫明。
+- **寫入失敗指出對象**：資料庫寫入失敗會帶出 jar 名稱、版本與資料庫路徑；手動儲存／還原失敗在畫面提示並寫後台 log。
+- 略過的內嵌 jar 會列出完整路徑與原因，不再只顯示數量。

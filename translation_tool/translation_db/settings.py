@@ -12,7 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.translation_db.repository import TranslationDB
-from translation_tool.translation_db.schema import DEFAULT_PRIORITY, SOURCE_NAMES
+from translation_tool.translation_db.schema import (
+    DB_FOREIGN,
+    DB_NEWER,
+    DEFAULT_PRIORITY,
+    SOURCE_NAMES,
+    classify_database,
+)
 from translation_tool.utils.log_unit import log_info, log_warning
 
 DEFAULT_DB_FILE = "mod_translation.db"
@@ -76,6 +82,23 @@ def load_db_settings(config: dict | None = None) -> DbSettings:
 
 
 _open_lock = threading.Lock()
+
+
+def database_problem(settings: DbSettings) -> str:
+    """設定的資料庫檔案「存在但不能用」的原因（正常或尚未建立回傳空字串）。
+
+    供介面顯示：開不起來時不能讓使用者看到「尚未建立資料庫」而去重新掃描
+    （掃描一樣會被拒絕，還會誤以為是自己操作錯誤）。
+    """
+    path = settings.resolved_path()
+    if not path.is_file():
+        return ""
+    kind = classify_database(path)
+    if kind == DB_FOREIGN:
+        return f"設定的檔案不是 Mod 翻譯資料庫（為避免污染不會使用）：{path}。請到設定頁改用其他路徑。"
+    if kind == DB_NEWER:
+        return f"資料庫版本比本程式新，請更新程式後再使用：{path}"
+    return ""
 
 
 def open_db(settings: DbSettings, *, create: bool = False) -> TranslationDB | None:

@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 import flet as ft
 
-from app.services_impl.moddb_service import VersionStat
+from app.services_impl.moddb_service import VersionStat, database_problem
 from app.ui import design, kit
 from app.ui.design import C
 from app.views.moddb.formatting import format_count, percent
@@ -62,6 +62,9 @@ class OverviewPanel(ft.Column):
             icon=ft.Icons.REFRESH,
             on_click=lambda _e: self.refresh(update=True),
         )
+        self.problem = ft.Text(
+            "", size=12.5, color=C.RED, selectable=True, visible=False
+        )
         self.empty = kit.empty_state(
             "資料庫還沒有資料",
             "到「掃描匯入」選擇遊戲版本與 mods 資料夾，讀取 jar 內的語言檔即可建立",
@@ -102,6 +105,7 @@ class OverviewPanel(ft.Column):
         )
         self.controls = [
             ft.Row([self.refresh_btn], alignment=ft.MainAxisAlignment.END),
+            self.problem,
             self.empty,
             self.content_col,
         ]
@@ -145,6 +149,12 @@ class OverviewPanel(ft.Column):
         has_data = bool(stats)
         self.empty.visible = not has_data
         self.content_col.visible = has_data
+        # 檔案存在卻開不起來（其他用途的 SQLite、版本太新）：說明原因，避免誤導成「尚未建立」
+        problem = "" if has_data else database_problem()
+        self.problem.value = f"⚠ 資料庫無法使用：{problem}" if problem else ""
+        self.problem.visible = bool(problem)
+        if problem:
+            self.empty.visible = False
         if has_data and db is not None:
             ov = db.overview()
             self.stat_mods.set_value(format_count(ov["mods"]))

@@ -952,3 +952,69 @@ def test_cancel_with_running_workers_returns_promptly_and_writes_nothing(db, tmp
     report = [u for u in gen if "report" in u][-1]["report"]
     assert report.cancelled and db.count_entries() == 0
     assert time.monotonic() - started < 5
+
+
+# ------------------------------------------------------------------ log：UI 與後台一致、錯誤訊息明確
+def test_skipped_nested_jar_is_named_in_the_scan_log(db, tmp_path):
+    make_jar(
+        tmp_path / "m" / "outer.jar",
+        {"assets/foo/lang/en_us.json": {"a.b": "Outer Text Here"}},
+        nested={"META-INF/jarjar/broken.jar": b"this is not a zip"},
+    )
+    updates = list(scan_folder_generator(db, tmp_path / "m", ScanOptions("1.21.1")))
+    line = next(u for u in updates if "outer.jar" in u.get("log", ""))
+    assert line["level"] == "warning"
+    assert "broken.jar" in line["log"] and "不是有效的 zip" in line["log"]
+
+
+def test_failed_archive_and_summary_are_flagged_as_warnings(db, tmp_path):
+    (tmp_path / "m").mkdir()
+    (tmp_path / "m" / "bad.jar").write_bytes(b"not a zip")
+    updates = list(scan_folder_generator(db, tmp_path / "m", ScanOptions("1.21.1")))
+    assert any(u.get("level") == "error" and "bad.jar" in u["log"] for u in updates)
+    final = updates[-1]
+    assert final["level"] == "warning" and "失敗 1 個" in final["log"]
+
+
+def test_ingest_failure_names_the_jar_version_and_database(db, tmp_path, monkeypatch):
+    make_jar(
+        tmp_path / "m" / "foo.jar",
+        {"assets/foo/lang/en_us.json": {"a.b": "Some Text Here"}},
+    )
+
+    def boom(*_a, **_k):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(db, "ingest", boom)
+    with pytest.raises(RuntimeError) as err:
+        list(scan_folder_generator(db, tmp_path / "m", ScanOptions("1.21.1")))
+    msg = str(err.value)
+    assert "foo.jar" in msg and "1.21.1" in msg and "database is locked" in msg
+
+
+def test_missing_folder_message_hints_what_to_check(db, tmp_path):
+    (tmp_path / "empty").mkdir()
+    first = next(scan_folder_generator(db, tmp_path / "empty", ScanOptions("1.21.1")))
+    assert first["level"] == "warning" and "請確認路徑" in first["log"]
+
+
+def test_database_problem_explains_unusable_files(tmp_path):
+    from translation_tool.translation_db.settings import DbSettings, database_problem
+
+    missing = DbSettings(path=str(tmp_path / "none.db"))
+    assert database_problem(missing) == ""  # 尚未建立不算問題
+
+    foreign = tmp_path / "other.db"
+    c = sqlite3.connect(foreign)
+    c.execute("CREATE TABLE t(x)")
+    c.commit()
+    c.close()
+    assert "不是 Mod 翻譯資料庫" in database_problem(DbSettings(path=str(foreign)))
+
+    newer = tmp_path / "newer.db"
+    TranslationDB(newer).close()
+    c = sqlite3.connect(newer)
+    c.execute("UPDATE meta SET value='999' WHERE key='schema_version'")
+    c.commit()
+    c.close()
+    assert "比本程式新" in database_problem(DbSettings(path=str(newer)))

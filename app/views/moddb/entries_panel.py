@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import flet as ft
 
 from app.services_impl.moddb_service import (
@@ -33,7 +35,12 @@ from app.views.moddb.formatting import (
     token_issues,
     whitespace_note,
 )
-from translation_tool.utils.log_unit import log_debug
+from translation_tool.utils.log_unit import (
+    log_debug,
+    log_exception,
+    log_info,
+    log_warning,
+)
 
 PAGE_SIZE = 50
 ALL_MODS = "全部模組"
@@ -686,9 +693,26 @@ class EntriesPanel(ft.Column):
                 entry.id, text, actor=ACTOR, propagate=self.sync_row.value
             )
         except ValueError as exc:
+            log_warning(
+                f"Mod 資料庫儲存被拒絕：{entry.mc_version} {entry.mod_id} {entry.key}（{exc}）"
+            )
             show_snack(self._page, str(exc), C.RED)
             return
+        except sqlite3.Error as exc:
+            log_exception(
+                f"Mod 資料庫儲存失敗：{entry.mc_version} {entry.mod_id} {entry.key}"
+            )
+            show_snack(
+                self._page,
+                f"儲存失敗（資料庫錯誤：{exc}）。可能是資料庫被其他程式鎖住，請稍後再試；詳情見後台 log",
+                C.RED,
+            )
+            return
         others = [i.mc_version for i in done if not i.is_self]
+        log_info(
+            f"Mod 資料庫手動儲存：{entry.mc_version} {entry.mod_id} {entry.key}"
+            f"（同步 {len(others)} 個版本：{'、'.join(others) or '無'}）"
+        )
         message = (
             f"已儲存，並同步 {len(others)} 個版本：{'、'.join(others)}"
             if others
@@ -711,7 +735,17 @@ class EntriesPanel(ft.Column):
         db = self.db()
         if db is None:
             return
-        count = db.revert(history_id)
+        try:
+            count = db.revert(history_id)
+        except sqlite3.Error as exc:
+            log_exception(f"Mod 資料庫還原失敗：history_id={history_id}")
+            show_snack(
+                self._page,
+                f"還原失敗（資料庫錯誤：{exc}）；詳情見後台 log",
+                C.RED,
+            )
+            return
+        log_info(f"Mod 資料庫還原：history_id={history_id}，還原 {count} 筆")
         self._load_list(page=self.pager.current_page)
         show_snack(
             self._page,

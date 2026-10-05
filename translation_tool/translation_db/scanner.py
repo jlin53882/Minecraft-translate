@@ -15,6 +15,7 @@ import concurrent.futures
 import io
 import json
 import re
+import sqlite3
 import zipfile
 from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field, replace
@@ -82,6 +83,7 @@ class JarResult:
     skipped_nested: int = 0  # 損毀或過大而略過的內嵌 jar（不影響其餘內容）
     error: str = ""  # 有值＝這個 archive 讀取失敗：items 會被清空，整包不寫入資料庫
     cancelled: bool = False
+    notes: list[str] = field(default_factory=list)  # 略過內嵌 jar 的原因（供日誌顯示）
 
     @property
     def has_lang(self) -> bool:
@@ -330,6 +332,13 @@ def _items_for_group(
     return out
 
 
+def _reason(exc: BaseException) -> str:
+    """略過原因：損毀的 jar 的例外訊息常是空字串或英文，補上可讀的說明。"""
+    if isinstance(exc, zipfile.BadZipFile):
+        return f"不是有效的 zip／jar（{exc}）"
+    return str(exc) or exc.__class__.__name__
+
+
 def _scan_archive(
     zf: zipfile.ZipFile,
     label: str,
@@ -376,8 +385,9 @@ def _scan_archive(
         except ArchiveBudgetError as exc:
             result.error = str(exc)  # 累計上限：整包視為失敗，不再讀其餘內嵌 jar
             return
-        except (zipfile.BadZipFile, ZipSizeError, OSError):
+        except (zipfile.BadZipFile, ZipSizeError, OSError) as exc:
             result.skipped_nested += 1  # 單一內嵌 jar 損毀或過大：略過它，記錄在結果中
+            result.notes.append(f"略過內嵌 jar {label}!{name}：{_reason(exc)}")
         if result.error:  # 內層已回報安全上限
             return
 
@@ -462,7 +472,9 @@ def scan_folder_generator(
     if not jars:
         yield {
             "progress": 1.0,
-            "log": f"⚠️ 在 {folder} 找不到任何 {'jar／zip' if options.translated else 'jar'}",
+            "log": f"⚠️ 在 {folder} 找不到任何 {'jar／zip' if options.translated else 'jar'}"
+            "（請確認路徑，以及資料夾內是否有檔案）",
+            "level": "warning",
             "report": report,
         }
         return
@@ -490,6 +502,7 @@ def scan_folder_generator(
                     report.cancelled = True
                     break
                 done += 1
+                level = "info"
                 report.nested_jars += result.nested_jars
                 report.skipped_nested += result.skipped_nested
                 if (
@@ -497,6 +510,7 @@ def scan_folder_generator(
                 ):  # 失敗的 archive 不寫入任何資料（避免只匯入一部分卻顯示成功）
                     report.jars_failed.append(result.name)
                     log = f"❌ {result.name}　未寫入：{result.error}"
+                    level = "error"
                 elif not result.has_lang:
                     report.jars_without_lang += 1
                     log = f"{result.name}　沒有語言檔"
@@ -506,7 +520,13 @@ def scan_folder_generator(
                     if options.dry_run or db is None:
                         log = f"{result.name}　可匯入 {len(result.items)} 項"
                     else:
-                        stats = db.ingest(options.version, result.items, convert)
+                        try:
+                            stats = db.ingest(options.version, result.items, convert)
+                        except sqlite3.Error as exc:
+                            raise RuntimeError(
+                                f"寫入資料庫失敗（{result.name}，版本 {options.version}，"
+                                f"資料庫 {db.path}）：{exc}"
+                            ) from exc
                         report.stats.add(stats)
                         log = (
                             f"{result.name}　新增 {stats.new_entries}"
@@ -520,13 +540,15 @@ def scan_folder_generator(
                         )
                 if result.skipped_nested and not result.error:
                     log += f"（略過 {result.skipped_nested} 個損毀或過大的內嵌 jar）"
-                yield {"progress": done / len(jars), "log": log}
+                    level = "warning"
+                    log += "".join(f"\n　⚠️ {note}" for note in result.notes)
+                yield {"progress": done / len(jars), "log": log, "level": level}
         finally:
             if report.cancelled:
                 for f in futures:
                     f.cancel()
 
-    state = "已取消" if report.cancelled else "完成"
+    state = "已取消（已處理的檔案已寫入，其餘未處理）" if report.cancelled else "完成"
     if options.dry_run or db is None:
         summary = f"🔎 預覽{state}：{report.jars_with_lang} 個 jar 含語言檔，共 {report.items_found} 項（未寫入）"
     else:
@@ -535,4 +557,14 @@ def scan_folder_generator(
             f"🎉 掃描{state}：新增 {report.stats.new_entries}　補入 {report.stats.added_translations}"
             f"　略過 {report.stats.existing}　原文已變動 {report.stats.en_changed}"
         )
-    yield {"progress": 1.0, "log": summary, "report": report}
+    if report.jars_failed:
+        summary += (
+            f"　⚠️ 失敗 {len(report.jars_failed)} 個（{'、'.join(report.jars_failed[:5])}"
+            f"{'…' if len(report.jars_failed) > 5 else ''}）"
+        )
+    yield {
+        "progress": 1.0,
+        "log": summary,
+        "level": "warning" if report.jars_failed or report.cancelled else "info",
+        "report": report,
+    }

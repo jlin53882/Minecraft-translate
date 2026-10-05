@@ -654,3 +654,89 @@ def test_sync_switch_starts_from_setting_and_refreshes_the_preview(
     assert "1.20.1" not in panel.impact_text.value
     assert panel.sync_row.switch.on_change is not None
     db.close()
+
+
+# ------------------------------------------------------------------ log：UI 與後台一致、錯誤原因明確
+def _foreign_db(path: Path) -> None:
+    import sqlite3
+
+    c = sqlite3.connect(path)
+    c.execute("CREATE TABLE t(x)")
+    c.commit()
+    c.close()
+
+
+def test_scan_progress_reaches_both_ui_and_backend_log_once(db_path, tmp_path, caplog):
+    import logging
+
+    from app.services_impl.logging_service import UI_LOG_HANDLER
+
+    make_jar(
+        tmp_path / "mods" / "foo.jar",
+        {"assets/foo/lang/en_us.json": {"a.b": "Some Text Here"}},
+    )
+    session = TaskSession()
+    root = logging.getLogger()
+    root.addHandler(UI_LOG_HANDLER)
+    try:
+        with caplog.at_level(logging.INFO):
+            moddb_service.run_moddb_scan_service(
+                str(tmp_path / "mods"), moddb_service.ScanOptions("1.21.1"), session
+            )
+    finally:
+        root.removeHandler(UI_LOG_HANDLER)
+    ui = [e.text for e in session.snapshot()["logs"] if "foo.jar" in e.text]
+    backend = [r.getMessage() for r in caplog.records if "foo.jar" in r.getMessage()]
+    assert len(ui) == 1, ui  # UI 只出現一次（沒有被 handler 重複送入）
+    assert len(backend) == 1, backend  # 後台 log 也有
+
+
+def test_scan_into_a_foreign_database_explains_why(db_path, tmp_path):
+    _foreign_db(db_path)
+    make_jar(
+        tmp_path / "mods" / "foo.jar",
+        {"assets/foo/lang/en_us.json": {"a.b": "Some Text Here"}},
+    )
+    session = TaskSession()
+    moddb_service.run_moddb_scan_service(
+        str(tmp_path / "mods"), moddb_service.ScanOptions("1.21.1"), session
+    )
+    snap = session.snapshot()
+    assert snap["status"] == "ERROR"
+    text = "\n".join(e.text for e in snap["logs"])
+    assert "無法開啟 Mod 資料庫" in text and "不是 Mod 翻譯資料庫" in text
+
+
+def test_unusable_database_is_explained_not_shown_as_not_created(db_path):
+    _foreign_db(db_path)
+    info = moddb_service.summarize_database()
+    assert info is not None and "不是 Mod 翻譯資料庫" in info["problem"]
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    assert view.overview.problem.visible is True
+    assert view.overview.empty.visible is False
+    assert "資料庫無法使用" in view.overview.problem.value
+
+
+def test_missing_database_is_not_a_problem(db_path):
+    assert moddb_service.summarize_database() is None
+    assert moddb_service.database_problem() == ""
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    assert view.overview.problem.visible is False and view.overview.empty.visible
+
+
+def test_ui_handler_skips_records_already_written_to_the_session():
+    import logging
+
+    from translation_tool.utils.ui_logging_handler import UISessionLogHandler
+
+    handler, session = UISessionLogHandler(), TaskSession()
+    handler.set_session(session)
+    log = logging.getLogger("t.mirror")
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    try:
+        log.info("只進後台", extra={"ui_mirrored": True})
+        log.info("兩邊都要")
+    finally:
+        log.removeHandler(handler)
+    assert [e.text for e in session.snapshot()["logs"]] == ["兩邊都要"]

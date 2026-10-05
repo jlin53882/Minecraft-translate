@@ -33,7 +33,7 @@ from app.ui.status_chip import apply_status_style, set_chip_status
 from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb.formatting import format_count
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_debug
+from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 _POLL_INTERVAL_SEC = 0.2
 # 翻譯 ZIP 匯入時可選的「譯文來源」標記（預設：自訂補充）
@@ -423,10 +423,12 @@ class ScanPanel(ft.Column):
             return
         folder = (self.path_field.value or "").strip()
         if not self.version():
+            log_warning("Mod 資料庫掃描未開始：尚未選擇或輸入遊戲版本")
             self._set_status("請先選擇或輸入遊戲版本", "red")
             self._safe_update()
             return
         if not folder:
+            log_warning("Mod 資料庫掃描未開始：尚未選擇來源路徑")
             self._set_status(
                 "請先選擇 ZIP 檔或資料夾"
                 if self.mode == "zip"
@@ -455,6 +457,7 @@ class ScanPanel(ft.Column):
         if self.session is None or not self._running:
             return
         self.session.request_cancel()
+        log_info("Mod 資料庫掃描：使用者要求取消，等待目前處理中的檔案停止")
         self.cancel_btn.disabled = True
         self._set_status("取消中…", "gold")
         self._safe_update()

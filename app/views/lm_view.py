@@ -24,7 +24,7 @@ from translation_tool.utils.config_manager import (
     get_batch_write_interval,
     load_config,
 )
-from translation_tool.utils.log_unit import log_debug
+from translation_tool.utils.log_unit import log_debug, log_warning
 
 DEFAULT_LM_TRANSLATE_FOLDER_NAME = "LM翻譯後"
 
@@ -172,9 +172,11 @@ class LMView(ft.Column):
         try:
             info = summarize_database()
         except Exception as exc:  # noqa: BLE001 - 資料庫問題只影響提示文字，不應讓頁面載入失敗
-            log_debug(f"讀取 Mod 資料庫摘要失敗：{exc}")
-            info = None
-        if info is None:
+            log_warning(f"讀取 Mod 資料庫摘要失敗：{exc}")
+            info = {"problem": f"讀取摘要失敗（{exc}），詳情請看後台 log"}
+        if info is not None and info.get("problem"):
+            self.db_info.value = f"⚠ 資料庫無法使用：{info['problem']}"
+        elif info is None:
             self.db_info.value = (
                 "尚未建立資料庫：到「Mod 資料庫」頁掃描 jar 後，這裡會自動使用。"
             )

@@ -79,19 +79,24 @@ class TranslationDB:
         self._rank = rank_sql(self.priority, "t.source")
         existed = self.path.is_file()
         if not existed and (readonly or not create):
-            raise FileNotFoundError(str(self.path))
+            raise FileNotFoundError(f"資料庫檔案不存在：{self.path}")
         kind = DB_EMPTY
         if existed:
             # 開啟前先以唯讀方式驗證：不是本功能的資料庫就拒絕，絕不對其他 SQLite 建立資料表或改設定
             kind = classify_database(self.path)
             if kind == DB_FOREIGN:
                 raise ValueError(
-                    f"不是 Mod 翻譯資料庫（為避免污染其他資料庫，不會初始化）：{self.path}"
+                    "不是 Mod 翻譯資料庫（可能是其他用途的 SQLite、不是 SQLite 檔案，"
+                    f"或檔案無法讀取；為避免污染其他資料庫，不會初始化）：{self.path}"
                 )
             if kind == DB_NEWER:
-                raise ValueError(f"資料庫版本較新，請更新程式：{self.path}")
+                raise ValueError(
+                    f"資料庫版本較新（schema 比本程式新），請更新程式後再使用：{self.path}"
+                )
             if kind == DB_EMPTY and (readonly or not create):
-                raise ValueError(f"資料庫尚未初始化：{self.path}")
+                raise ValueError(
+                    f"資料庫檔案存在但尚未初始化（沒有任何資料表），請先到「Mod 資料庫」掃描匯入：{self.path}"
+                )
         self._conn = connect(self.path, readonly=readonly)
         try:
             if not readonly:
@@ -592,7 +597,7 @@ class TranslationDB:
         """手動儲存譯文：寫入「人工」來源，並同步原文相同的其他版本。回傳受影響的條目。"""
         text = new_zh_tw  # 原樣儲存：前後空白、換行、格式碼都不改動
         if not text.strip():
-            raise ValueError("譯文不可為空")
+            raise ValueError("譯文不可為空，未儲存")
         batch = uuid.uuid4().hex
         done: list[Impact] = []
         with self._tx() as conn:
