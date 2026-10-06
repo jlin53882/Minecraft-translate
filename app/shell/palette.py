@@ -16,6 +16,7 @@ import flet as ft
 
 from app.ui import design, kit
 from app.ui.design import C
+from app.ui.sync_text_field import SyncTextField
 from app.view_registry import VIEW_SPECS, get_group
 
 KIND_PAGE = "page"
@@ -105,7 +106,7 @@ class CommandPalette(ft.Container):
         self.index = 0
         self._on_close = on_close
         self._on_run = on_run
-        self.search = ft.TextField(
+        self.search = SyncTextField(
             hint_text="搜尋頁面或動作…",
             autofocus=True,
             border=ft.NoInputBorder(),

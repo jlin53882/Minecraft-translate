@@ -16,6 +16,7 @@ from app.services_impl.cache.cache_services import (
 )
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.ui.sync_text_field import SyncTextField
 from app.views.cache_manager.cache_history_store import (
     history_append_event,
     history_now_ts,
@@ -62,7 +63,7 @@ class CacheShardPanel(ft.Container):
 
         # Key 列表
         self.shard_detail_meta = ft.Text("尚未選擇分片", size=11, color=C.MUTED)
-        self.tf_shard_key_filter = ft.TextField(
+        self.tf_shard_key_filter = SyncTextField(
             label="過濾 key",
             hint_text="輸入關鍵字快速過濾",
             dense=True,
@@ -98,7 +99,7 @@ class CacheShardPanel(ft.Container):
         self.btn_shard_src_raw = ft.OutlinedButton(
             "</> 原始碼", on_click=self._on_shard_src_raw_mode
         )
-        self.shard_src_field = ft.TextField(
+        self.shard_src_field = SyncTextField(
             value="",
             read_only=True,
             multiline=True,
@@ -110,7 +111,7 @@ class CacheShardPanel(ft.Container):
 
         # DST 編輯
         self.shard_dst_meta = ft.Text("DST：請先選擇 key", size=11, color=C.MUTED)
-        self.shard_dst_field = ft.TextField(
+        self.shard_dst_field = SyncTextField(
             value="",
             multiline=True,
             min_lines=6,

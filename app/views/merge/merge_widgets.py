@@ -10,6 +10,7 @@ from app.ui import kit
 from app.ui.design import C
 from app.ui.poller import PollerHandle
 from app.ui.status_chip import apply_status_style
+from app.ui.sync_text_field import SyncTextField
 from app.views._log import LogView
 from translation_tool.utils.config_manager import load_config
 
@@ -67,7 +68,7 @@ class MergeWidgetsMixin:
         # patchouli_effective_translation_threshold: 有效翻譯比例閾值（0.0~1.0）
         # 用於判斷 Patchouli Book 的 zh 語言資料夾是否有「有效翻譯」
         # 當 zh_tw 或 zh_cn 的有效翻譯比例 >= 此閾值時，會觸發跳過 en_us（如果 patchouli_skip_zh_cn_switch=True）
-        self.patchouli_threshold_field = ft.TextField(
+        self.patchouli_threshold_field = SyncTextField(
             value="0.5",
             width=96,
             hint_text="空白用預設值",
@@ -86,7 +87,7 @@ class MergeWidgetsMixin:
         """輸出資料夾、清單、狀態、日誌與按鈕控制項。"""
         # zh_en_letter_threshold: zh_tw 英文含量的閾值
         # 用於 is_already_zh() 判斷：超過此數值的英文字母視為英文內容
-        self.zh_en_letter_threshold_field = ft.TextField(
+        self.zh_en_letter_threshold_field = SyncTextField(
             value="2",
             width=64,
             hint_text="空白用預設值",

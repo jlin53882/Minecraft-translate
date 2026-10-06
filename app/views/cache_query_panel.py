@@ -14,6 +14,7 @@ from app.services_impl.cache.cache_services import (
 )
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.ui.sync_text_field import SyncTextField
 from app.views.cache_manager.cache_history_store import (
     history_append_event,
     history_now_ts,
@@ -55,7 +56,7 @@ class CacheQueryPanel(ft.Container):
     def _build_query_inputs(self) -> None:
         """查詢輸入控制項。"""
         # 搜尋輸入
-        self.tf_query_input = ft.TextField(
+        self.tf_query_input = SyncTextField(
             label="輸入 key / dst / 關鍵字",
             width=360,
             tooltip="輸入要搜尋的 key、dst 或關鍵字",
@@ -118,7 +119,7 @@ class CacheQueryPanel(ft.Container):
         self.query_detail_src = ft.Text(
             "-", selectable=True, no_wrap=False, text_align=ft.TextAlign.LEFT
         )
-        self.query_detail_dst = ft.TextField(
+        self.query_detail_dst = SyncTextField(
             value="",
             multiline=True,
             min_lines=4,
@@ -131,7 +132,7 @@ class CacheQueryPanel(ft.Container):
         self.btn_page_prev = ft.OutlinedButton("<", on_click=self._on_page_prev)
         self.btn_page_next = ft.OutlinedButton(">", on_click=self._on_page_next)
         self.btn_page_last = ft.OutlinedButton(">>", on_click=self._on_page_last)
-        self.tf_page_jump = ft.TextField(
+        self.tf_page_jump = SyncTextField(
             width=70,
             value="1",
             text_align=ft.TextAlign.CENTER,

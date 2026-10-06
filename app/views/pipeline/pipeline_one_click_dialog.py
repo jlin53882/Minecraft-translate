@@ -19,6 +19,7 @@ import types
 import flet as ft
 
 from app.ui.design import C
+from app.ui.sync_text_field import SyncTextField
 from app.views.pipeline.pipeline_config import normalize_extract_mode
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
@@ -383,7 +384,7 @@ def _one_click_step2_widgets(ctx):
             e.control.value, int, ctx.zh_en_threshold_default
         )
 
-    patchouli_thresh_field = ft.TextField(
+    patchouli_thresh_field = SyncTextField(
         on_change=on_patchouli_threshold,
         value=str(ctx.state["patchouli_threshold"]),
         width=100,
@@ -393,7 +394,7 @@ def _one_click_step2_widgets(ctx):
         hint_text="空白用預設值",
     )
 
-    zh_en_field = ft.TextField(
+    zh_en_field = SyncTextField(
         on_change=on_zh_en_threshold,
         value=str(ctx.state["zh_en_threshold"]),
         width=80,
@@ -426,14 +427,14 @@ def _one_click__build_step3(ctx):
 
     write_cache_sw.on_change = on_write_cache
 
-    _translate_input_field = ft.TextField(
+    _translate_input_field = SyncTextField(
         label="翻譯目標",
         hint_text="自動帶入整理後的待翻譯資料夾",
         value=ctx.state["translate_input"],
         expand=True,
         border_color=C.DIA,
     )
-    _translate_output_field = ft.TextField(
+    _translate_output_field = SyncTextField(
         label="輸出目錄",
         hint_text="自動帶入：{output}/lm_translate/<翻譯輸出子資料夾>",
         value=ctx.state["translate_output"],
@@ -626,7 +627,7 @@ def _one_click_step4_version_widgets(ctx):
     def on_zip_output(e):
         ctx.state["zip_output"] = e.control.value
 
-    bundle_input_field = ft.TextField(
+    bundle_input_field = SyncTextField(
         read_only=True,  # 只顯示：實際打包來源由流程自動決定（見 PipelineConfig.bundle_sources）
         label="輸入來源",
         hint_text="自動帶入翻譯完成後的輸出",
@@ -634,7 +635,7 @@ def _one_click_step4_version_widgets(ctx):
         expand=True,
         border_color=C.ENCH,
     )
-    zip_output_field = ft.TextField(
+    zip_output_field = SyncTextField(
         on_change=on_zip_output,
         label="輸出 ZIP 檔案",
         value=ctx.state["zip_output"],
@@ -642,7 +643,7 @@ def _one_click_step4_version_widgets(ctx):
         border_color=C.ENCH,
     )
 
-    desc_field = ft.TextField(
+    desc_field = SyncTextField(
         on_change=on_description,
         label="檔案敘述",
         hint_text="直接輸入文字，或使用 § 顏色代碼",
@@ -650,7 +651,7 @@ def _one_click_step4_version_widgets(ctx):
         expand=True,
         border_color=C.ENCH,
     )
-    pack_image_field = ft.TextField(
+    pack_image_field = SyncTextField(
         label="封面圖片（可留空）",
         value=ctx.state["pack_image"] or "",
         expand=True,

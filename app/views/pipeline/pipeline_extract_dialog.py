@@ -24,6 +24,7 @@ from app.services_impl.pipelines.extract_service import (
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog
 from app.ui.safe_file_picker import ensure_output_dir
+from app.ui.sync_text_field import SyncTextField
 from app.views.extractor.extractor_state import PreviewState
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error
@@ -97,7 +98,7 @@ def _extract_init_state_and_fields(ctx, input_path, output_path):
         "lang_codes", ["en_us", "zh_cn", "zh_tw"]
     )
 
-    ctx.mods_field = ft.TextField(
+    ctx.mods_field = SyncTextField(
         label="Mod 來源",
         hint_text=f"自動帶入：{input_path}"
         if input_path
@@ -106,7 +107,7 @@ def _extract_init_state_and_fields(ctx, input_path, output_path):
         expand=True,
         border_color=C.DIA,
     )
-    ctx.output_field = ft.TextField(
+    ctx.output_field = SyncTextField(
         label="輸出目錄",
         hint_text=f"自動帶入：{output_path}"
         if output_path

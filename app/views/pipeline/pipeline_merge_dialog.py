@@ -25,6 +25,7 @@ from app.tasks.task_session import TaskSession  # noqa: F401
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog
 from app.ui.safe_file_picker import ensure_output_dir
+from app.ui.sync_text_field import SyncTextField
 from translation_tool.utils.config_manager import load_config
 
 
@@ -143,14 +144,14 @@ def _merge_init_state_and_config(ctx, input_path):
     zh_en_threshold = str(lang_merger_cfg.get("zh_en_letter_threshold", 2))
 
     ctx.input_mode = "folder"
-    ctx.merge_folder_field = ft.TextField(
+    ctx.merge_folder_field = SyncTextField(
         label="Mod 來源",
         hint_text=f"自動帶入：{input_path}" if input_path else "留空使用上方設定的路徑",
         value=input_path,
         expand=True,
         border_color=C.EM,
     )
-    merge_zip_field = ft.TextField(  # noqa: F841
+    merge_zip_field = SyncTextField(  # noqa: F841
         label="Mod 來源（ZIP）",
         hint_text="選擇 ZIP 檔案（支援多選）",
         expand=True,
@@ -172,7 +173,7 @@ def _merge_build_option_widgets(
     ctx, output_path, patchouli_skip, patchouli_threshold, zh_en_threshold
 ) -> None:
     """輸出、僅 lang、zh_cn 與 Patchouli 選項控制項。"""
-    ctx.merge_output_dir_field = ft.TextField(
+    ctx.merge_output_dir_field = SyncTextField(
         label="輸出目錄",
         hint_text=f"自動帶入：{output_path}"
         if output_path
@@ -187,7 +188,7 @@ def _merge_build_option_widgets(
         label="允許 zh_cn 觸發跳過 en_us",
         value=patchouli_skip,
     )
-    ctx.merge_patchouli_threshold_field = ft.TextField(
+    ctx.merge_patchouli_threshold_field = SyncTextField(
         value=patchouli_threshold,
         width=100,
         dense=True,
@@ -195,7 +196,7 @@ def _merge_build_option_widgets(
         text_align=ft.TextAlign.CENTER,
         hint_text="空白用預設值",
     )
-    ctx.merge_zh_en_threshold_field = ft.TextField(
+    ctx.merge_zh_en_threshold_field = SyncTextField(
         value=zh_en_threshold,
         width=80,
         dense=True,
