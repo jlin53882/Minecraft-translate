@@ -12,6 +12,7 @@
 > 主要內容：UI 全面重新設計（PR #106）。版本號尚未決定。
 
 ### Docs
+- 新增 `docs/WEB_MODE_LIMITATIONS.md`：Flet Web 模式限制（不能選資料夾、只能輸入主機路徑）與未來擴充方向。
 - 新增 `docs/CROSS_CUTTING_REVIEW_CHECKLIST.md`：橫切改動（日誌／任務生命週期／併發）提交前自查清單。
 
 ### Features

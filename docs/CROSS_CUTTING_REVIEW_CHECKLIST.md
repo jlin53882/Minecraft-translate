@@ -99,6 +99,7 @@ PR #169（UI 與後台日誌同步）歷經多輪審查才收斂。回顧後，�
 - [`PR_WORKFLOW.md`](PR_WORKFLOW.md)：PR 執行彙報格式
 - [`EXCEPTION_INVENTORY.md`](EXCEPTION_INVENTORY.md)：例外處理盤點
 - [`WORKER_THREAD_AUDIT.md`](WORKER_THREAD_AUDIT.md)：背景執行緒稽核
+- [`WEB_MODE_LIMITATIONS.md`](WEB_MODE_LIMITATIONS.md)：Flet Web 模式限制
 - [`WINDOWS_VERIFICATION.md`](WINDOWS_VERIFICATION.md)：Windows 實機驗證
 
 ## 修訂紀錄
