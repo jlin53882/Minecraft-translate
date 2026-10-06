@@ -43,9 +43,7 @@ def test_change_event_value_overwrites_stale_control_value():
     from app.ui.sync_text_field import _sync_value
 
     control = SimpleNamespace(value="舊路徑")
-    _sync_value(
-        SimpleNamespace(control=control, data="新路徑", name="change")
-    )
+    _sync_value(SimpleNamespace(control=control, data="新路徑", name="change"))
 
     assert control.value == "新路徑"
 

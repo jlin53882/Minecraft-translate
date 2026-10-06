@@ -22,13 +22,14 @@ def _sync_value(e) -> None:
         value = getattr(e, "data", None)
         current = getattr(e.control, "value", "")
         event_name = getattr(e, "name", None)
-        # Web 的 change 事件可能已帶回新文字，但 Python 控制項仍保留舊值；
-        # change 資料是這次輸入的完整值，必須優先寫回控制項。
-        if event_name == "change" and isinstance(value, str):
-            e.control.value = value
-        # blur 事件有些 renderer 只送空資料，不能因此清除原本的值；
-        # 只有控制項仍為空時，才使用非空事件資料作為補救。
-        elif not current and value:
+        # 兩種情況寫回事件資料：
+        # 1. change 事件：Web 可能已帶回新文字、Python 控制項卻還是舊值；change 資料是
+        #    這次輸入的完整值，必須優先寫回。
+        # 2. 其他事件（例如 blur）：有些 renderer 只送空資料，不能因此清掉原本的值；
+        #    只有控制項仍為空時，才用非空事件資料補救。
+        if (event_name == "change" and isinstance(value, str)) or (
+            not current and value
+        ):
             e.control.value = value
 
 
