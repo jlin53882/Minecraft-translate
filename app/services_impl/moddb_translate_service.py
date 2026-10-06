@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LIMIT = 2000
 _FLAGGED_LOG_LIMIT = 20
+ABORT_AFTER_FAILURES = 500  # 連續這麼多筆都沒翻成功就中止（API Key／模型設定有問題）
 
 
 @dataclass(frozen=True)
@@ -135,10 +136,15 @@ def _translate_rows(
 ) -> None:
     """分批機翻並寫回；每批先檢查特殊字元，一致者才寫入。"""
     buffer: list[WriteBackItem] = []
+    failures = {"streak": 0, "aborted": False}
 
     def on_translated_item(item: dict[str, Any]) -> None:
         if item.get("_untranslated"):
+            failures["streak"] += 1
+            if failures["streak"] >= ABORT_AFTER_FAILURES:
+                failures["aborted"] = True
             return
+        failures["streak"] = 0
         report.translated += 1
         source, text = item["source_text"], item["text"]
         issues = token_issues(source, text)
@@ -166,7 +172,7 @@ def _translate_rows(
             _log(session, message)
 
     def translate_batch(batch, batch_total):
-        if cancelled() or is_cancelled():
+        if cancelled() or is_cancelled() or failures["aborted"]:
             raise TaskCancelled()
         return translate_batch_smart(batch, total=batch_total)
 
@@ -187,14 +193,22 @@ def _translate_rows(
             ),
         )
     flush()
-    report.status = result.status
+    report.status = "ABORTED" if failures["aborted"] else result.status
+    if failures["aborted"]:
+        _log(
+            session,
+            f"❌ 連續 {ABORT_AFTER_FAILURES} 筆都翻譯失敗，已中止（避免白白耗用額度與時間）。"
+            "請檢查設定頁的 API Key 與模型名稱，並查看日誌中的「伺服器回應」了解原因；"
+            "已翻成功的部分已寫入資料庫。",
+            "error",
+        )
     report.remaining = db.count_untranslated(options.version, list(options.mod_ids))
     _log(
         session,
-        f"完成（狀態 {result.status}）：AI 回傳 {report.translated} 筆、"
+        f"完成（狀態 {report.status}）：AI 回傳 {report.translated} 筆、"
         f"寫入 {report.written} 筆、特殊字元不一致未寫入 {report.flagged} 筆；"
         f"此範圍仍有 {report.remaining} 筆未翻譯",
-        "warning" if result.status != "DONE" or report.flagged else "info",
+        "warning" if report.status != "DONE" or report.flagged else "info",
     )
     if result.last_error:
         _log(session, f"最後一次錯誤：{result.last_error}", "warning")

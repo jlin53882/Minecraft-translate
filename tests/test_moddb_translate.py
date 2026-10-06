@@ -539,3 +539,65 @@ def test_translate_panel_explains_zero_limit_means_all(db_path):
     assert "上限 2 筆" in panel.count_text.value
     assert "最多翻譯 2 筆" in panel.count_text.value
     db.close()
+
+
+def test_service_aborts_when_every_item_keeps_failing(db_path, monkeypatch):
+    """API 設定有問題時（每筆都回填原文），連續失敗達門檻就中止，不要把全部資料跑完。"""
+    seed(db_path)
+    monkeypatch.setattr(moddb_translate_service, "ABORT_AFTER_FAILURES", 2)
+    calls = []
+
+    def always_fail(batch, total=None, dry_run=False):
+        calls.append(len(batch))
+        return [{**it, "_untranslated": True} for it in batch], "DONE"
+
+    monkeypatch.setattr(moddb_translate_service, "translate_batch_smart", always_fail)
+    monkeypatch.setattr(
+        moddb_translate_service,
+        "run_translator_skeleton",
+        _skeleton_one_per_batch(moddb_translate_service.run_translator_skeleton),
+    )
+    summary = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))["summary"]
+    assert summary["status"] == "ABORTED" and summary["written"] == 0
+    assert len(calls) < 3  # foo 有 3 筆未翻譯，一筆一批時第 2 筆失敗後就停止
+
+
+def _skeleton_one_per_batch(real):
+    def wrapper(items, **kwargs):
+        hooks = kwargs["hooks"]
+        translate = kwargs["translate_batch_smart"]
+        from types import SimpleNamespace as NS
+
+        processed = 0
+        for item in items:
+            try:
+                translated, _ = translate([item], len(items))
+            except BaseException:  # noqa: BLE001 - TaskCancelled 是 BaseException
+                return NS(status="CANCELLED", processed=processed, last_error=None)
+            for result in translated:
+                hooks.on_translated_item(result)
+                processed += 1
+            hooks.on_batch_flushed()
+        return NS(status="DONE", processed=processed, last_error=None)
+
+    return wrapper
+
+
+def test_remote_error_detail_shows_server_message_without_secrets():
+    from translation_tool.core.lm_translator_main import _remote_error_detail
+
+    class Resp:
+        text = ""
+
+        def json(self):
+            return {
+                "error": {
+                    "message": "Invalid value at 'generation_config' key=AIzaSyA1234567890abcdefghijklmnopqrstuv"
+                }
+            }
+
+    err = type("E", (Exception,), {})()
+    err.response = Resp()
+    detail = _remote_error_detail(err)
+    assert "generation_config" in detail and "AIzaSy" not in detail
+    assert _remote_error_detail(Exception("x")) == ""
