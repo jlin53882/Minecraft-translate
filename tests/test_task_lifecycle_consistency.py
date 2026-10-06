@@ -25,7 +25,7 @@ def _messages(caplog, name):
     return [
         r.getMessage()
         for r in caplog.records
-        if r.getMessage().startswith(f"[{name}] 任務")
+        if getattr(r, "task_name", None) == name and r.getMessage().startswith("任務")
     ]
 
 
@@ -134,7 +134,7 @@ def test_late_set_error_amends_session_task_manager_and_backend_consistently(
     # 3) 後台：一筆「任務結束：DONE」＋一筆明確的「任務結果更正」，沒有第二筆結束
     messages = _messages(caplog, "更正")
     assert [m for m in messages if "任務結束" in m] == [
-        next(m for m in messages if m.startswith("[更正] 任務結束：DONE"))
+        next(m for m in messages if m.startswith("任務結束：DONE"))
     ]
     assert len([m for m in messages if "任務結果更正" in m]) == 1
     assert "DONE → ERROR" in next(m for m in messages if "任務結果更正" in m)
@@ -225,5 +225,5 @@ def test_previous_runs_backend_record_cannot_excuse_the_next_runs_ui_line(caplog
     mirrored = [
         r.getMessage() for r in caplog.records if getattr(r, "ui_mirrored", False)
     ]
-    assert "[重跑去重] 處理完成" in mirrored
+    assert "處理完成" in mirrored
     ui_mirror.BACKEND_SEEN_TRACKER.clear()

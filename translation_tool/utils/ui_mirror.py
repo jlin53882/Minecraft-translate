@@ -58,25 +58,73 @@ _SEEN_WINDOW_SEC = 5.0
 _CURRENT_TASK: contextvars.ContextVar[object | None] = contextvars.ContextVar(
     "ui_mirror_current_task", default=None
 )
+# 任務的顯示名稱（只用在 app.log 的任務標籤，不參與歸屬比對）
+_CURRENT_TASK_NAME: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "ui_mirror_current_task_name", default=None
+)
 
 
-def set_current_task(task: object | None) -> None:
-    """設定目前 context 的任務識別（``None`` 代表沒有任務）。"""
+def set_current_task(task: object | None, name: str | None = None) -> None:
+    """設定目前 context 的任務識別與顯示名稱（``None`` 代表沒有任務）。"""
     _CURRENT_TASK.set(task)
+    _CURRENT_TASK_NAME.set(name if task is not None else None)
 
 
 def current_task() -> object | None:
     return _CURRENT_TASK.get()
 
 
+def current_task_name() -> str | None:
+    return _CURRENT_TASK_NAME.get()
+
+
 @contextlib.contextmanager
-def task_scope(task: object | None):
+def task_scope(task: object | None, name: str | None = None):
     """暫時把目前 context 歸屬到某個任務（測試或不經 ``set_session`` 的呼叫端用）。"""
     token = _CURRENT_TASK.set(task)
+    name_token = _CURRENT_TASK_NAME.set(name if task is not None else None)
     try:
         yield task
     finally:
+        _CURRENT_TASK_NAME.reset(name_token)
         _CURRENT_TASK.reset(token)
+
+
+def format_task_tag(task: object | None, name: str | None) -> str:
+    """``app.log`` 每一行的任務標籤：``[task=名稱/識別] ``（沒有任務時是空字串）。"""
+    if task is None:
+        return ""
+    label = " ".join(str(name).split()) if name else ""
+    return f"[task={label}/{task}] " if label else f"[task={task}] "
+
+
+def _install_record_factory() -> None:
+    """安裝 LogRecord 工廠：每筆記錄建立當下（寫 log 的那條執行緒）帶上任務標籤。
+
+    記錄在呼叫 ``logger.info(...)`` 的執行緒建立，所以讀得到那條執行緒的 ``contextvars``
+    （服務入口設定的任務、執行緒池繼承的任務）；之後不論哪個 handler（檔案、終端機、UI）
+    格式化它，標籤都已經在記錄上。冪等：已安裝就不重複包。
+    """
+    current = logging.getLogRecordFactory()
+    if getattr(current, "_ui_mirror_task_tag", False):
+        return
+
+    def factory(*args, **kwargs):
+        record = current(*args, **kwargs)
+        task = _CURRENT_TASK.get()
+        name = _CURRENT_TASK_NAME.get()
+        record.task_id = task
+        record.task_name = name
+        record.task_tag = format_task_tag(task, name)
+        return record
+
+    factory._ui_mirror_task_tag = True  # type: ignore[attr-defined]
+    logging.setLogRecordFactory(factory)
+
+
+def install_task_record_factory() -> None:
+    """公開入口（``setup_logging`` 與 ``ensure_tracker`` 會呼叫）。"""
+    _install_record_factory()
 
 
 def new_task_id(label: str = "ui") -> str:
@@ -92,7 +140,7 @@ def new_task_scope(label: str = "ui", task: object | None = None):
     以及同一條執行緒轉送給畫面的訊息，需要屬於同一個任務才分得出「同時執行的另一個任務」。
     ``task`` 可預先指定（呼叫端要在別的執行緒用同一個識別轉送訊息時，先 ``new_task_id()`` 存起來）。
     """
-    with task_scope(task if task is not None else new_task_id(label)) as scope:
+    with task_scope(task if task is not None else new_task_id(label), label) as scope:
         yield scope
 
 
@@ -252,6 +300,7 @@ BACKEND_SEEN_TRACKER = _BackendSeenTracker()
 
 def ensure_tracker() -> None:
     """確保追蹤器掛在 root logger（``setup_logging`` 會清掉 root handlers，所以每次都檢查）。"""
+    _install_record_factory()  # 讓每筆後台記錄都帶任務標籤（見 RedactingFormatter）
     root = logging.getLogger()
     if BACKEND_SEEN_TRACKER not in root.handlers:
         root.addHandler(BACKEND_SEEN_TRACKER)
@@ -265,6 +314,7 @@ def mirror_to_backend(
     logger: logging.Logger | None = None,
     dedupe: bool = True,
     task: object | None = None,
+    task_name: str | None = None,
 ) -> bool:
     """把一則 UI 訊息寫入後台 log；回傳是否真的寫入。
 
@@ -277,6 +327,10 @@ def mirror_to_backend(
         task: 這則訊息所屬的任務識別；沒給時用目前 context 的任務（見 ``set_current_task``）。
             去重只會被「同一任務或歸屬未知」的後台記錄抵銷，同時執行的另一個任務
             剛好寫出相同文字時不會互相吃掉。
+        task_name: 該任務的顯示名稱（只用在 ``app.log`` 的任務標籤）。
+
+    寫出這筆記錄時會暫時把 context 歸屬到 ``task``：不論從哪條執行緒呼叫（例如 UI 執行緒
+    替某個背景任務補寫），``app.log`` 這一行的任務標籤都是**這則訊息所屬的任務**。
     """
     if not text:
         return False
@@ -295,13 +349,15 @@ def mirror_to_backend(
                 return False
             body = "\n".join(kept)
         target = logger or logging.getLogger(MIRROR_LOGGER_NAME)
-        target.log(
-            _LEVELS.get(str(level).lower(), logging.INFO),
-            "%s%s",
-            prefix,
-            body,
-            extra={MIRROR_FLAG: True},
-        )
+        name = task_name if task_name is not None else current_task_name()
+        with task_scope(task, name):
+            target.log(
+                _LEVELS.get(str(level).lower(), logging.INFO),
+                "%s%s",
+                prefix,
+                body,
+                extra={MIRROR_FLAG: True},
+            )
         return True
     except Exception:  # noqa: BLE001 - 鏡像失敗不可影響 UI 或任務本身
         return False

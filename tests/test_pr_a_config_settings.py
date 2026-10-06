@@ -200,7 +200,8 @@ def test_saved_log_format_is_used_by_ui_handler():
         logger_name="pr_a_test_logger",
     )
 
-    assert UI_LOG_HANDLER.formatter._fmt == "CUSTOM %(message)s"
+    # 使用者的格式保留，並自動在 %(message)s 前加上任務標籤（見 redaction.with_task_tag）
+    assert UI_LOG_HANDLER.formatter._fmt == "CUSTOM %(task_tag)s%(message)s"
 
 
 def test_invalid_runtime_log_format_falls_back_before_pipeline_start():
@@ -211,7 +212,7 @@ def test_invalid_runtime_log_format_falls_back_before_pipeline_start():
         logger_name="pr_a_invalid_format_logger",
     )
 
-    assert UI_LOG_HANDLER.formatter._fmt == "%(message)s"
+    assert UI_LOG_HANDLER.formatter._fmt == "%(task_tag)s%(message)s"
 
 
 def test_ftb_consumer_reads_saved_custom_translator_folder(tmp_path):

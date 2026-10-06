@@ -31,6 +31,7 @@ from translation_tool.utils.config_schema import (
 )
 from translation_tool.utils.fs_utils import fsync_directory
 from translation_tool.utils.redaction import RedactingFormatter, register_secrets
+from translation_tool.utils.ui_mirror import install_task_record_factory
 
 log = logging.getLogger(__name__)
 
@@ -439,6 +440,8 @@ def setup_logging(config):
     for handler in handlers:
         handler.setFormatter(RedactingFormatter(log_format))
 
+    # 每筆記錄在寫 log 的執行緒帶上任務標籤，app.log 才分得出同時執行的各任務（見 ui_mirror）
+    install_task_record_factory()
     logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
     logging.info("日誌系統已成功設定。")  # noqa: LOG015
 

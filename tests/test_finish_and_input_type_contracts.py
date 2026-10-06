@@ -31,7 +31,10 @@ def _reset_tracker():
 
 def _end_records(caplog, name):
     return [
-        r for r in caplog.records if r.getMessage().startswith(f"[{name}] 任務結束")
+        r
+        for r in caplog.records
+        if getattr(r, "task_name", None) == name
+        and r.getMessage().startswith("任務結束")
     ]
 
 

@@ -59,7 +59,7 @@ class UISessionLogHandler(logging.Handler):
                 self._sessions.pop(key, None)  # 重新綁定移到最後
                 self._sessions[key] = session
                 self._latest = session
-                set_current_task(key)
+                set_current_task(key, getattr(session, "name", None))
                 return
             current = current_task()
             if current is not None:

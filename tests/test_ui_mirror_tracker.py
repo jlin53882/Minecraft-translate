@@ -175,7 +175,10 @@ def test_concurrent_tasks_with_the_same_text_do_not_excuse_each_other(caplog):
     mirrored = [
         r.getMessage() for r in caplog.records if getattr(r, "ui_mirrored", False)
     ]
-    assert mirrored == ["[B] 完成"]
+    assert mirrored == ["完成"]
+    assert [
+        r.task_name for r in caplog.records if getattr(r, "ui_mirrored", False)
+    ] == ["B"]
 
 
 def test_backend_record_from_an_unknown_task_is_compatible_with_any_task(caplog):
@@ -216,7 +219,10 @@ def test_tracker_task_attribution_follows_each_thread(caplog):
     mirrored = [
         r.getMessage() for r in caplog.records if getattr(r, "ui_mirrored", False)
     ]
-    assert mirrored == ["[A] 同時的訊息"]
+    assert mirrored == ["同時的訊息"]
+    assert [
+        r.task_name for r in caplog.records if getattr(r, "ui_mirrored", False)
+    ] == ["A"]
 
 
 def test_set_session_binds_the_current_context_to_the_task():

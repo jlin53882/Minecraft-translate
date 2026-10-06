@@ -60,10 +60,34 @@ def redact_secrets(value: Any) -> str:
     return _BEARER_RE.sub("Bearer [REDACTED]", text)
 
 
+def with_task_tag(fmt: str) -> str:
+    """在 ``%(message)s`` 前面插入任務標籤 ``%(task_tag)s``（已含時不重複）。
+
+    ``task_tag`` 由 ``ui_mirror`` 安裝的 LogRecord 工廠填入：任務執行中是
+    ``[task=<任務名稱>/<識別>] ``，沒有任務時是空字串。這樣同時執行多個任務時，
+    ``app.log`` 的每一行都看得出屬於哪一個任務，核心流程不需要自己知道 UI／任務。
+    """
+    if "%(task_tag)" in fmt or "%(message)s" not in fmt:
+        return fmt
+    return fmt.replace("%(message)s", "%(task_tag)s%(message)s", 1)
+
+
 class RedactingFormatter(logging.Formatter):
-    """格式化後（含 traceback）再遮蔽機密，確保任何 handler 輸出都不含金鑰。"""
+    """格式化後（含 traceback）再遮蔽機密，確保任何 handler 輸出都不含金鑰。
+
+    同時自動在格式中加上任務標籤（見 ``with_task_tag``），讓 log 檔與終端機的每一行
+    都標示它屬於哪個任務。
+    """
+
+    def __init__(self, fmt: str | None = None, *args: Any, **kwargs: Any) -> None:
+        if fmt is not None and kwargs.get("style", "%") == "%":
+            fmt = with_task_tag(fmt)
+        super().__init__(fmt, *args, **kwargs)
 
     def format(self, record: logging.LogRecord) -> str:
+        # 工廠安裝之前建立的記錄（或第三方直接建立的 LogRecord）沒有這個欄位
+        if not hasattr(record, "task_tag"):
+            record.task_tag = ""
         return redact_secrets(super().format(record))
 
 

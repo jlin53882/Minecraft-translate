@@ -55,5 +55,5 @@ def test_real_merge_keeps_ui_and_backend_logs_in_sync(tmp_path, caplog):
     assert len(analyzing) == 1
 
     # 任務邊界也在後台
-    assert any(m.startswith("[E2E 合併] 任務開始") for m in backend)
-    assert any(m.startswith("[E2E 合併] 任務結束") for m in backend)
+    assert any(m.startswith("任務開始") for m in backend)
+    assert any(m.startswith("任務結束") for m in backend)

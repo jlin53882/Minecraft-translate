@@ -128,12 +128,14 @@ class TaskSession:
 
     # ---------- 後台生命週期紀錄 ----------
 
-    def _prefix(self) -> str:
-        return f"[{self.name}] " if self.name else ""
-
     def _log_lifecycle(self, text: str, level: str = "info") -> None:
-        """任務開始 / 結束寫進後台 log（不進畫面），讓 log 檔能看出每個任務的邊界、結果與耗時。"""
-        mirror_to_backend(text, level, prefix=self._prefix(), dedupe=False)
+        """任務開始 / 結束寫進後台 log（不進畫面），讓 log 檔能看出每個任務的邊界、結果與耗時。
+
+        任務名稱與識別由 ``app.log`` 每一行的任務標籤（``[task=名稱/識別]``）標示，不再另加文字前綴。
+        """
+        mirror_to_backend(
+            text, level, dedupe=False, task=self.task_id, task_name=self.name
+        )
 
     # ---------- 狀態寫入（Worker 使用） ----------
 
@@ -183,12 +185,7 @@ class TaskSession:
             self._next_seq += 1
             self.logs.append(entry)
         if mirror and source not in BACKEND_SOURCES:
-            mirror_to_backend(
-                text,
-                level,
-                prefix=f"[{self.name}] " if self.name else "",
-                task=self.task_id,
-            )
+            mirror_to_backend(text, level, task=self.task_id, task_name=self.name)
 
     @property
     def is_finished(self) -> bool:

@@ -159,5 +159,8 @@ def test_pool_backend_records_are_attributed_so_concurrent_tasks_stay_separate(c
     mirrored = [
         r.getMessage() for r in caplog.records if getattr(r, "ui_mirrored", False)
     ]
-    assert mirrored == ["[B] 池內處理完成"]
+    assert mirrored == ["池內處理完成"]
+    # 補寫的是 B 的那一行：app.log 的任務標籤標示 B（不是提交池工作的 A）
+    tagged = [r for r in caplog.records if getattr(r, "ui_mirrored", False)]
+    assert [r.task_name for r in tagged] == ["B"]
     ui_mirror.BACKEND_SEEN_TRACKER.clear()

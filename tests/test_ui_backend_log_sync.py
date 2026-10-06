@@ -28,14 +28,18 @@ def _backend(caplog, name_prefix: str | None = None):
     ]
 
 
-def test_session_add_log_is_mirrored_to_backend_with_task_prefix(caplog):
+def test_session_add_log_is_mirrored_to_backend_with_task_tag(caplog):
     session = TaskSession(name="合併")
     with caplog.at_level(logging.INFO):
         session.add_log("處理 a.jar", level="warning")
 
-    records = _backend(caplog, "[合併] 處理 a.jar")
+    records = _backend(caplog, "處理 a.jar")
     assert len(records) == 1
     assert records[0].levelno == logging.WARNING
+    # app.log 的任務標籤標示這一行屬於哪個任務（不再另加文字前綴）
+    assert records[0].task_name == "合併"
+    assert records[0].task_id == session.task_id
+    assert records[0].task_tag == f"[task=合併/{session.task_id}] "
     assert [e.text for e in session.snapshot()["logs"]] == ["處理 a.jar"]
 
 
@@ -118,9 +122,10 @@ def test_session_lifecycle_is_written_to_backend(caplog):
         session.set_error()
         session.finish()
 
-    messages = [r.getMessage() for r in caplog.records]
-    assert "[提取] 任務開始" in messages
-    ended = [m for m in messages if m.startswith("[提取] 任務結束：ERROR")]
+    mine = [r for r in caplog.records if getattr(r, "task_name", None) == "提取"]
+    messages = [r.getMessage() for r in mine]
+    assert "任務開始" in messages
+    ended = [m for m in messages if m.startswith("任務結束：ERROR")]
     assert ended and "耗時" in ended[0] and "'success': 3" in ended[0]
 
 

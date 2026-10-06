@@ -42,22 +42,25 @@ MIRRORING_UI_CALLS = {
     "add_start_log",
 }
 
-#: (相對路徑, 函式名稱, 該函式內第幾個 except) -> 為什麼這一組成對寫法是安全的（人工確認過）
-REVIEWED: dict[tuple[str, str, int], str] = {
+#: (相對路徑, 限定函式名稱, 例外型別, 同函式同型別的第幾個 except) -> 為什麼這一組成對寫法是安全的（人工確認過）
+REVIEWED: dict[tuple[str, str, str, int], str] = {
     (
         "app/services_impl/pipelines/_task_runner.py",
         "run_callable_task",
-        1,
+        "Exception",
+        0,
     ): "if/else 互斥：只會走 mirror_session_log 或 logger.error 其中一條",
     (
         "translation_tool/core/jar_processor_extract.py",
         "run_extraction_process_impl",
+        "Exception",
         0,
     ): "後台第一行與畫面文字相同（[ERROR] 提取 … 時產生例外），細節接在後面；多行訊息逐行去重",
     (
         "translation_tool/core/lang_merge_extracted_assets.py",
         "merge_extracted_to_assets",
-        0,
+        "Exception",
+        5,
     ): "後台第一行與畫面文字相同（… 錯誤: {exc!r}），後面接 traceback；"
     "由 test_merge_ext_assets_fatal_exception_is_written_to_backend_once 鎖住",
 }
@@ -85,34 +88,31 @@ def _is_unmirrored(node: ast.Call) -> bool:
     )
 
 
-def _handler_ordinal(tree: ast.AST, handler: ast.ExceptHandler, func_name: str) -> int:
-    """這個 ``except`` 是所屬函式內由上而下的第幾個（0 起算）。
+def _handler_identities(tree: ast.AST) -> dict[ast.ExceptHandler, tuple[str, str, int]]:
+    """每個 ``except`` 的穩定識別：``(限定函式名稱, 例外型別, 同函式同型別的第幾個)``。
 
-    比行號穩定（改動其他行不影響），又能區分同一個函式裡的不同 ``except``，
-    ``REVIEWED`` 的豁免才不會順便放過同函式日後新增的其他 ``except``。
+    - 限定名稱含外層 class（``A.run`` 與 ``B.run`` 不會混在一起）。
+    - 序號只在「同一函式、同一例外型別」內計算：在函式前面插入別的型別的 ``try/except``
+      不會讓既有項目位移；``REVIEWED`` 的豁免也不會順便放過同函式日後新增的其他 ``except``。
     """
-    ordinal = 0
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.ExceptHandler)
-            and _enclosing_function(tree, node.lineno) == func_name
-        ):
-            if node is handler:
-                return ordinal
-            ordinal += 1
-    return ordinal
+    identities: dict[ast.ExceptHandler, tuple[str, str, int]] = {}
+    counters: dict[tuple[str, str], int] = {}
 
+    def visit(node: ast.AST, scope: tuple[str, ...]) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                visit(child, (*scope, child.name))
+                continue
+            if isinstance(child, ast.ExceptHandler):
+                func = ".".join(scope) or "<module>"
+                exc_type = ast.unparse(child.type) if child.type else "<bare>"
+                ordinal = counters.get((func, exc_type), 0)
+                counters[(func, exc_type)] = ordinal + 1
+                identities[child] = (func, exc_type, ordinal)
+            visit(child, scope)
 
-def _enclosing_function(tree: ast.AST, lineno: int) -> str:
-    best = None
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.lineno <= lineno <= (node.end_lineno or node.lineno)
-            and (best is None or node.lineno > best.lineno)
-        ):
-            best = node
-    return best.name if best else "<module>"
+    visit(tree, ())
+    return identities
 
 
 def _handler_pairs(base: Path = ROOT, dirs: tuple[str, ...] = SCAN_DIRS):
@@ -121,6 +121,7 @@ def _handler_pairs(base: Path = ROOT, dirs: tuple[str, ...] = SCAN_DIRS):
     for scan in dirs:
         for path in sorted((base / scan).rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"))
+            identities = _handler_identities(tree)
             for handler in ast.walk(tree):
                 if not isinstance(handler, ast.ExceptHandler):
                     continue
@@ -159,12 +160,13 @@ def _handler_pairs(base: Path = ROOT, dirs: tuple[str, ...] = SCAN_DIRS):
                             if is_log_key and not is_none:
                                 ui.append(ast.unparse(value))
                 if backend and ui:
-                    func = _enclosing_function(tree, handler.lineno)
+                    func, exc_type, ordinal = identities[handler]
                     found.append(
                         (
                             str(path.relative_to(base)).replace("\\", "/"),
                             func,
-                            _handler_ordinal(tree, handler, func),
+                            exc_type,
+                            ordinal,
                             handler.lineno,
                             {t for t in backend if t},
                             {t for t in ui if t},
@@ -176,11 +178,12 @@ def _handler_pairs(base: Path = ROOT, dirs: tuple[str, ...] = SCAN_DIRS):
 def _unmatched_problems(pairs, reviewed=None):
     reviewed = REVIEWED if reviewed is None else reviewed
     problems = []
-    for rel, func, ordinal, lineno, backend, ui in pairs:
+    for rel, func, exc_type, ordinal, lineno, backend, ui in pairs:
         unmatched = sorted(ui - backend)
-        if unmatched and (rel, func, ordinal) not in reviewed:
+        if unmatched and (rel, func, exc_type, ordinal) not in reviewed:
             problems.append(
-                f"{rel}:{lineno} ({func}#{ordinal}) 沒有對應後台記錄的畫面訊息：{unmatched}"
+                f"{rel}:{lineno} ({func} / except {exc_type} #{ordinal}) "
+                f"沒有對應後台記錄的畫面訊息：{unmatched}"
             )
     return problems
 
@@ -201,7 +204,10 @@ def test_backend_and_ui_messages_in_one_handler_use_identical_text():
 
 
 def test_reviewed_entries_are_not_stale():
-    pairs = {(rel, func, ordinal) for rel, func, ordinal, *_ in _handler_pairs()}
+    pairs = {
+        (rel, func, exc_type, ordinal)
+        for rel, func, exc_type, ordinal, *_ in _handler_pairs()
+    }
     stale = [key for key in REVIEWED if key not in pairs]
     assert not stale, f"REVIEWED 內已不存在的項目，請移除：{stale}"
 
@@ -338,14 +344,61 @@ def test_every_ui_message_needs_a_matching_backend_record_not_just_one(tmp_path)
     """舊規則「有任何一組相同就放行」會放過 handler 內其他不一致的訊息。"""
     problems = _unmatched_problems(_synthetic_pairs(tmp_path), reviewed={})
     joined = "\n".join(problems)
-    assert (
-        "worker#0" in joined and "f'c {exc!r}'" in joined
-    )  # 第一個 handler：a 相同但 c 沒有
-    assert "worker#1" in joined  # 第二個 handler：{exc!r} vs {exc}
+    # 第一個 handler：a 相同但 c 沒有；第二個 handler：{exc!r} vs {exc}
+    assert "worker / except ValueError #0" in joined and "f'c {exc!r}'" in joined
+    assert "worker / except KeyError #0" in joined
 
 
 def test_a_reviewed_exemption_covers_only_that_one_except(tmp_path):
     """豁免鍵含 except 序號：同一個函式日後新增的其他 except 不會被順便放過。"""
-    reviewed = {("app/mod.py", "worker", 0): "人工確認過"}
+    reviewed = {("app/mod.py", "worker", "ValueError", 0): "人工確認過"}
     problems = _unmatched_problems(_synthetic_pairs(tmp_path), reviewed=reviewed)
-    assert len(problems) == 1 and "worker#1" in problems[0]
+    assert len(problems) == 1 and "except KeyError #0" in problems[0]
+
+
+_TWO_CLASSES = """
+class A:
+    def run(self, session, logger):
+        try:
+            go()
+        except ValueError as exc:
+            logger.error(f"x {exc!r}")
+            session.add_log(f"y {exc!r}")
+
+
+class B:
+    def run(self, session, logger):
+        try:
+            go()
+        except ValueError as exc:
+            logger.error(f"x {exc!r}")
+            session.add_log(f"z {exc!r}")
+"""
+
+
+def test_same_method_name_in_different_classes_has_different_identities(tmp_path):
+    pkg = tmp_path / "app"
+    pkg.mkdir()
+    (pkg / "mod.py").write_text(_TWO_CLASSES, encoding="utf-8")
+    identities = {
+        (func, exc, ordinal)
+        for _rel, func, exc, ordinal, *_ in _handler_pairs(tmp_path, ("app",))
+    }
+    assert identities == {("A.run", "ValueError", 0), ("B.run", "ValueError", 0)}
+
+
+def test_inserting_another_kind_of_except_does_not_shift_existing_identities(tmp_path):
+    """在前面插入別種例外型別的 try/except，既有項目的識別不變（序號只在同型別內計算）。"""
+    pkg = tmp_path / "app"
+    pkg.mkdir()
+    shifted = _SYNTHETIC.replace(
+        "    try:\n        run()",
+        "    try:\n        warmup()\n    except OSError:\n        pass\n    try:\n        run()",
+        1,
+    )
+    (pkg / "mod.py").write_text(shifted, encoding="utf-8")
+    identities = {
+        (func, exc, ordinal)
+        for _rel, func, exc, ordinal, *_ in _handler_pairs(tmp_path, ("app",))
+    }
+    assert identities == {("worker", "ValueError", 0), ("worker", "KeyError", 0)}
