@@ -33,6 +33,8 @@ from datetime import datetime, timedelta, timezone, tzinfo
 from datetime import time as dt_time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from translation_tool.utils.ui_mirror import run_in_context
+
 # 失敗原因
 REASON_RPD = "rpd"  # 每日配額用盡
 REASON_FORBIDDEN = "forbidden"  # 403 無權限
@@ -395,7 +397,7 @@ class ModelQuotaRegistry:
                 self.renew(model, owner, lease_sec)
 
         thread = threading.Thread(
-            target=beat, name="probe-lease-heartbeat", daemon=True
+            target=run_in_context(beat), name="probe-lease-heartbeat", daemon=True
         )
         thread.start()
         try:
