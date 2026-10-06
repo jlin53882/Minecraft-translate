@@ -56,6 +56,13 @@ class OverviewPanel(ft.Column):
             icon=ft.Icons.COMPARE_ARROWS,
             on_click=lambda _e: self._goto_entries("diff"),
         )
+        self.diff_help_btn = ft.IconButton(
+            icon=ft.Icons.HELP_OUTLINE,
+            icon_size=20,
+            icon_color=C.MUTED,
+            tooltip="說明",
+            on_click=lambda _e: self._show_diff_help(),
+        )
         self.refresh_btn = kit.button(
             "重新整理",
             "secondary",
@@ -83,7 +90,11 @@ class OverviewPanel(ft.Column):
                     ],
                     spacing=12,
                 ),
-                ft.Row([self.diff_btn], alignment=ft.MainAxisAlignment.END),
+                ft.Row(
+                    [self.diff_help_btn, self.diff_btn],
+                    alignment=ft.MainAxisAlignment.END,
+                    spacing=4,
+                ),
                 kit.section_card(
                     "各版本翻譯進度",
                     ft.Column([self.legend, self.versions_col], spacing=12),
@@ -317,6 +328,33 @@ class OverviewPanel(ft.Column):
     def _goto_scan(self) -> None:
         if self._open_scan:
             self._open_scan()
+
+    def _show_diff_help(self) -> None:
+        """說明「檢視差異條目」查的是什麼，以及為何可能是空白。"""
+        show_dialog = getattr(self._page, "show_dialog", None)
+        if not callable(show_dialog):
+            return
+        show_dialog(
+            ft.AlertDialog(
+                title=ft.Text("關於「檢視差異條目」"),
+                content=ft.Text(
+                    "會跳到「條目校對」並套用「版本不同」篩選，列出對應上方"
+                    "「跨版本譯文不同」的條目：同一個模組、同一個鍵值、原文相同，"
+                    "但在另一個遊戲版本中的譯文不一樣。\n\n"
+                    "資料庫只有一個遊戲版本時沒有其他版本可以比較，結果一定是空白；"
+                    "匯入第二個版本後才會出現。\n\n"
+                    "注意：這不是「原文已變動」。原文已變動是鍵值相同但英文原文改了"
+                    "（掃描時略過），不會顯示在這個清單。",
+                    selectable=True,
+                    width=420,
+                ),
+                actions=[
+                    ft.TextButton(
+                        "知道了", on_click=lambda _e=None: self._page.pop_dialog()
+                    )
+                ],
+            )
+        )
 
     def _goto_entries(
         self, state: str, version: str | None = None, mod_id: str | None = None
