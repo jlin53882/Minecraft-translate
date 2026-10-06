@@ -725,6 +725,27 @@ def test_model_quota_lease_outcomes_rpd_rearms_release_rearms_ok_clears():
     assert reg.is_exhausted("m1") is False
 
 
+def test_model_quota_release_rearms_only_the_given_model_and_owner():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(clock, probe_interval=600)
+    a, b = object(), object()
+    for model in ("m1", "m2"):
+        reg.mark_exhausted(model, until=clock.t + 86_400)
+    clock.t += 601
+    assert reg.claim("m1", a) and reg.claim("m2", a)
+
+    reg.release("m1", b)  # 不是持有者：沒有效果
+    assert reg.claim("m1", b) is False
+
+    reg.release("m1", a)  # a 放棄 m1：收回並重新計時；m2 的租約不受影響
+    assert reg.claim("m1", a) is False
+    assert reg.claim("m2", a) is True
+    clock.t += 601
+    assert reg.claim("m1", a) is True  # 下一個探測週期
+
+
 def test_model_quota_lease_expires_if_the_holder_never_releases():
     from translation_tool.core.lm_key_health import ModelQuotaRegistry
 

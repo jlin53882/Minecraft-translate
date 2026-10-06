@@ -601,6 +601,57 @@ def test_missing_model_then_rpd_is_terminal_not_a_shrink(env):
     assert env.model_calls == ["m1", "m2"]  # 各只試一次；404 的 m1 不會每輪重打
 
 
+def backend_503():
+    return _http_error(503, text="backend unavailable")
+
+
+def test_all_models_missing_is_a_terminal_failure_not_an_untranslated_auto(env):
+    """整個模型池都是 404：不能 SHRINK 後把原文回填成 AUTO。"""
+    env.model_outcomes = {"m1": not_found(), "m2": not_found()}
+    env.outcomes = {"k0": OK_JSON, "k1": OK_JSON, "k2": OK_JSON}
+
+    result, status = env.translate(2, models=("m1", "m2"))
+
+    assert status == "FAILED"
+    assert not any(item.get("_untranslated") for item in result or [])
+    assert not result
+    assert env.model_calls == ["m1", "m2"]  # 各只試一次
+
+
+def test_missing_model_plus_lost_probe_claim_is_exhausted(env):
+    """m1 404、m2 的探測名額被別的 worker 領走：沒有任何模型能送 → 耗盡。"""
+    quota = get_model_quota_registry()
+    quota.mark_exhausted("m1")
+    env.clock.t += DEFAULT_PROBE_INTERVAL_SEC + 1
+    assert quota.claim("m1", object())  # 別的 worker 正在探測 m1
+    env.model_outcomes = {"m2": not_found()}
+    env.outcomes = {"k0": OK_JSON, "k1": OK_JSON, "k2": OK_JSON}
+
+    result, status = env.translate(2, models=("m2", "m1"))
+
+    assert status == "ALL_KEYS_EXHAUSTED"
+    assert not result
+
+
+@pytest.mark.parametrize("abandon", [backend_503, lambda: ""], ids=["503", "empty"])
+def test_probe_lease_is_released_when_the_probe_falls_through_to_another_model(
+    env, abandon
+):
+    """探測的模型被放棄（503 → 下一個模型、空回應）：租約收回並重新計時。
+
+    後續批次不能每批都再探測一次，必須等下一個 10 分鐘週期。
+    """
+    _exhaust_m1_and_wait_for_probe(env, models=("m1", "m2"))
+    env.model_outcomes = {"m1": abandon(), "m2": OK_JSON}
+
+    result, status = env.translate(4, models=("m1", "m2"))  # 4 個批次（每批 1 筆）
+
+    assert status == "AUTO"
+    assert len(result) == 4
+    assert env.model_calls.count("m1") == 1  # 只探測一次
+    assert env.model_calls.count("m2") == 4
+
+
 def test_single_key_rpd_behaviour(env):
     env.keys = ["k0"]
     env.outcomes = {"k0": rpd()}

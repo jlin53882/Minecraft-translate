@@ -730,6 +730,27 @@ def _plan_model_indices(runtime: _BatchRuntime, quota) -> list[int] | None:
     return indices
 
 
+def _dead_end_outcome(
+    runtime: _BatchRuntime, model_indices: list[int], skipped_by_quota: set[int]
+) -> _BatchRoundOutcome | None:
+    """這一輪沒有任何模型能送請求（都是 404 或被每日配額擋住）時的終止結果；否則回傳 None。
+
+    縮小 batch 對這種情況沒有用，而且會把原文回填成「已翻譯」。
+    """
+    if not all(
+        index in runtime.missing_models or index in skipped_by_quota
+        for index in model_indices
+    ):
+        return None
+    if skipped_by_quota:
+        log_warning(
+            "[🚫] 沒有可用的模型：其餘模型今日配額已用盡或正由其他 worker 探測中"
+        )
+        return _BatchRoundOutcome(BatchAction.EXHAUSTED)
+    log_error("[❌] 所有啟用的模型都不存在或無法使用，請檢查模型名稱設定")
+    return _BatchRoundOutcome(BatchAction.FAIL)
+
+
 def _attempt_batch(
     runtime: _BatchRuntime, round_data: _BatchRound
 ) -> _BatchRoundOutcome:
@@ -779,6 +800,7 @@ def _attempt_batch(
                 meta_out=api_meta,
             ).strip()
             if not raw_text:
+                quota.release(model_name, owner)  # 放棄這個模型：收回探測租約
                 continue
             finish_reason = api_meta.get("finish_reason")
             if finish_reason == "MAX_TOKENS" or _is_truncated_response(raw_text):
@@ -831,19 +853,13 @@ def _attempt_batch(
                 cap_source=cap_source,
             )
             if action is BatchAction.NEXT_MODEL:
+                quota.release(model_name, owner)  # 放棄這個模型：收回探測租約
                 continue
             return _BatchRoundOutcome(action)
 
-    if skipped_by_quota and all(
-        index in runtime.missing_models or index in skipped_by_quota
-        for index in model_indices
-    ):
-        # 沒有任何模型能送請求（都是 404 或被配額擋住）：縮小 batch 沒有用，
-        # 而且會把原文回填成「已翻譯」，所以回報耗盡。
-        log_warning(
-            "[🚫] 沒有可用的模型：其餘模型今日配額已用盡或正由其他 worker 探測中"
-        )
-        return _BatchRoundOutcome(BatchAction.EXHAUSTED)
+    dead_end = _dead_end_outcome(runtime, model_indices, skipped_by_quota)
+    if dead_end is not None:
+        return dead_end
 
     # Model pool exhausted: the outer loop must shrink/skip this prefix,
     # rather than treating the exhausted pool as an endless next-model retry.

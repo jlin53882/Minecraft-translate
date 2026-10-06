@@ -322,6 +322,20 @@ class ModelQuotaRegistry:
                 self._lease[model] = (owner, now + self._lease_ttl)
             return True
 
+    def release(self, model: str, owner: object) -> None:
+        """``owner`` 放棄這個模型（改用其他模型）：收回它的探測租約並重新計時。
+
+        只有同一個模型的 RPM／503 重試才該保留租約；放棄模型時不收回的話，同一個呼叫的後續批次
+        會每批都重入租約再探測一次，而不是等下一個探測週期。
+        """
+        now = self._clock()
+        with self._lock:
+            lease = self._lease.get(model)
+            if lease is not None and lease[0] is owner:
+                del self._lease[model]
+                if model in self._until:
+                    self._next_probe[model] = now + self._probe_interval
+
     def release_owner(self, owner: object) -> None:
         """收回 ``owner`` 持有的所有探測租約並重新計時（探測沒有成功也沒有被判 RPD 的收尾）。"""
         now = self._clock()
