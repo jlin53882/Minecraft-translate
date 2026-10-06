@@ -19,11 +19,12 @@ import os
 import re
 import zipfile
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error, log_warning
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 from translation_tool.utils.zip_safety import (
     ArchiveBudgetError,
     ZipReadBudget,
@@ -197,7 +198,7 @@ def scan_jars(
     for jar_path in jar_files:
         results.budgets[jar_path] = ZipReadBudget(label=jar_path.name)
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    with ContextThreadPoolExecutor(max_workers=workers) as executor:
         future_to_jar = {
             executor.submit(
                 _scan_single_jar,

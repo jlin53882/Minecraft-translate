@@ -135,6 +135,7 @@ class LogView(ft.Container):
         *,
         mirror: bool = True,
         mirror_text: str | None = None,
+        dedupe: bool = False,
     ) -> None:
         """新增一行 log（給 reset 動作、純事件用）。
 
@@ -155,12 +156,20 @@ class LogView(ft.Container):
             update: 是否立即刷新畫面；批次新增時傳 False，最後再呼叫 refresh()
             mirror: 是否鏡像到後台 log
             mirror_text: 後台要記錄的文字（畫面文字帶裝飾前綴如 ``>> `` 時使用）
+            dedupe: 這則是「轉送後台已記錄的內容」（例如把核心流程 yield 的 log 顯示出來）時傳
+                ``True``，後台已有相同內容就不重複寫；預設 ``False`` 代表這是 UI 自己的事件
+                （按鈕、重置、驗證失敗…），後台一定沒有對應記錄，必須無條件寫入——
+                否則剛好同文字的別筆後台記錄會讓它被吃掉。
         """
         if not text:
             return
 
         if mirror and source not in BACKEND_SOURCES:
-            mirror_to_backend(mirror_text if mirror_text is not None else text, level)
+            mirror_to_backend(
+                mirror_text if mirror_text is not None else text,
+                level,
+                dedupe=dedupe,
+            )
 
         # 等級過濾（不在白名單就跳過）
         if level not in self.show_levels:

@@ -22,6 +22,7 @@ from app.views.extractor import extractor_dialog as _extractor_dialog
 from app.views.extractor.extractor_dialog_helpers import format_size
 from app.views.extractor.extractor_state import PreviewState
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
+from translation_tool.utils.ui_mirror import in_new_task
 
 # 背景任務 → UI 的刷新間隔（秒）
 _UI_FLUSH_INTERVAL_SEC = 0.2
@@ -202,7 +203,9 @@ def _preview_build_dialog(ctx, dialog_width) -> None:
     ctx.on_preview_dismiss = functools.partial(_preview_on_preview_dismiss, ctx)
 
 
-def _preview_add_log(ctx, msg, level: str = "info", update: bool = True):
+def _preview_add_log(
+    ctx, msg, level: str = "info", update: bool = True, *, forwarded: bool = False
+):
     """PR refactor/unified-log-view: 改用 LogView.add() 統一處理等級顏色。
 
     level: debug/info/warning/error/system，預設 info
@@ -216,7 +219,9 @@ def _preview_add_log(ctx, msg, level: str = "info", update: bool = True):
             level = "error"
         elif msg.startswith("[完成"):
             level = "system"
-    ctx.log_view.add(f">> {msg}", level=level, update=update, mirror_text=msg)
+    ctx.log_view.add(
+        f">> {msg}", level=level, update=update, mirror_text=msg, dedupe=forwarded
+    )
 
 
 def _preview_result_controls(ctx, result: dict) -> list:
@@ -424,7 +429,7 @@ async def _preview_ui_poller(ctx):
         if cur_log:
             ctx.status_text.value = cur_log
             if cur_log != last_log:
-                ctx.add_log(cur_log, update=False)
+                ctx.add_log(cur_log, update=False, forwarded=True)  # 掃描流程的 log
                 last_log = cur_log
         if finished:
             break
@@ -495,7 +500,8 @@ def _preview_start_scan(ctx):
     ctx.add_log(f"[系統] 開始預覽 {ctx.mode.upper()} 掃描...", level="system")
 
     threading.Thread(
-        target=functools.partial(_preview_do_scan, ctx), daemon=True
+        target=in_new_task("extract-preview", functools.partial(_preview_do_scan, ctx)),
+        daemon=True,
     ).start()
 
     async def poller():

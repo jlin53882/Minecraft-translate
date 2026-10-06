@@ -12,12 +12,13 @@ import json
 import re
 import zipfile
 from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 
 from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 from translation_tool.utils.zip_safety import (
     ArchiveBudgetError,
     ZipReadBudget,
@@ -196,7 +197,7 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
         load_config().get("translator", {}).get("parallel_execution_workers", 8)
     )
     max_workers = max(1, config_workers) if isinstance(config_workers, int) else 8
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(_process_single_jar, (jar, modid)): (jar, modid)
             for jar, modid in jar_modid_pairs

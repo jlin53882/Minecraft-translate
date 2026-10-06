@@ -15,7 +15,7 @@ from app.ui.design import C
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from translation_tool.utils.log_unit import log_error
-from translation_tool.utils.ui_mirror import mirror_lines
+from translation_tool.utils.ui_mirror import in_new_task, mirror_lines
 
 _UI_FLUSH_INTERVAL_SEC = 0.2
 
@@ -117,7 +117,7 @@ class QCBase:
                 batcher.set_state(done=True)
                 batcher.flush(force=True)
 
-        threading.Thread(target=run, daemon=True).start()
+        threading.Thread(target=in_new_task("qc", run), daemon=True).start()
 
     @property
     def page(self):

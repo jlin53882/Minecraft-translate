@@ -10,13 +10,14 @@ import shutil
 import threading
 import unicodedata
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 
 from app.icon_reader import IconRef
 from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 from translation_tool.utils.zip_safety import (
     MAX_ICON_BYTES,
     ArchiveBudgetError,
@@ -561,7 +562,7 @@ def _run_jar_workers(jar_to_entries: dict[str, list], process_jar, progress_cb) 
         load_config().get("translator", {}).get("parallel_execution_workers", 4)
     )
     max_workers = max(1, config_workers) if isinstance(config_workers, int) else 4
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(process_jar, jar_name): jar_name
             for jar_name in jar_to_entries

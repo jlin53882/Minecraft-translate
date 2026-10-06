@@ -22,7 +22,7 @@ from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from app.views.bundler.bundler_widgets import BundlerWidgetsMixin
 from translation_tool.utils.log_unit import log_debug, log_error, log_warning
-from translation_tool.utils.ui_mirror import mirror_lines
+from translation_tool.utils.ui_mirror import in_new_task, mirror_lines
 
 OUTPUT_ZIP_NAME_PATH = "output_bundler.output_zip_name"
 
@@ -439,7 +439,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         self._page.update()
 
         thread = threading.Thread(
-            target=self._bundling_worker,
+            target=in_new_task("bundler", self._bundling_worker),
             args=(root_dir, output_zip, version, description, pack_image),
             daemon=True,
         )

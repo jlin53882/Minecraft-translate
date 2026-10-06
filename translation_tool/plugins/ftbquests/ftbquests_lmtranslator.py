@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import math
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -54,6 +54,7 @@ from translation_tool.utils.log_unit import (
     log_info,
     log_warning,
 )
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
 # -------------------------
 # Smart 翻譯轉接器（資料格式轉換）
@@ -304,7 +305,7 @@ def translate_ftb_pending_to_zh_tw(
         load_config().get("translator", {}).get("parallel_execution_workers", 4)
     )
 
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+    with ContextThreadPoolExecutor(max_workers=max_workers) as ex:
         futs = [ex.submit(_count_one, src) for src in json_files]
         for fu in as_completed(futs):
             src, c, mapping = fu.result()

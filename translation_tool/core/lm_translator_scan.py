@@ -19,6 +19,7 @@ from translation_tool.core.translatable_extractor import (
     find_patchouli_json,
     is_lang_file,
 )
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
 from ..utils.log_unit import log_error, log_info, log_warning
 
@@ -99,7 +100,7 @@ def extract_items_parallel(
             log_error(f"❌ 檔案處理失敗 {f.name}: {e!r}")
             return None
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=work_thread) as executor:
+    with ContextThreadPoolExecutor(max_workers=work_thread) as executor:
         future_to_file = {executor.submit(process_file_task, f): f for f in files}
         for future in concurrent.futures.as_completed(future_to_file):
             result = future.result()

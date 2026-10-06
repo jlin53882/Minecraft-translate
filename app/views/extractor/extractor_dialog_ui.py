@@ -247,7 +247,7 @@ def _extractor_flush_ui(ctx, force: bool = False):
     ctx.batcher.flush(force=force)
 
 
-def _extractor_add_log(ctx, msg: str, level: str = "info"):
+def _extractor_add_log(ctx, msg: str, level: str = "info", *, forwarded: bool = False):
     """PR refactor/unified-log-view: 改用 LogView 統一處理等級顏色。
 
     level: debug/info/warning/error/system，預設 info
@@ -262,7 +262,9 @@ def _extractor_add_log(ctx, msg: str, level: str = "info"):
         elif msg.startswith("[完成"):
             level = "system"
     # 批次推畫面的路徑不經過 LogView.add，所以在入口鏡像到後台（已記錄過的內容會去重）
-    mirror_to_backend(msg, level)
+    # forwarded=True：轉送核心流程 yield 的 log（後台可能已有，去重）；
+    # 預設是對話框自己的事件（開始／取消／完成／錯誤），後台沒有對應記錄，無條件寫入。
+    mirror_to_backend(msg, level, dedupe=forwarded)
     ctx.batcher.add_lines([(f">> {msg}", level)])
     ctx.flush_ui()
 

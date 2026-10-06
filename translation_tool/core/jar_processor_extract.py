@@ -20,6 +20,8 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor, run_in_context
+
 from ..utils.config_manager import load_config
 from ..utils.log_unit import log_error
 from ..utils.zip_safety import (
@@ -279,8 +281,9 @@ def run_extraction_process_impl(
         finally:
             scan_done.set()
 
+    # run_in_context：背景預掃描寫出的後台記錄要帶著建立它的任務歸屬
     scan_thread = threading.Thread(
-        target=_scan_in_background, name="scan-jars-bg", daemon=True
+        target=run_in_context(_scan_in_background), name="scan-jars-bg", daemon=True
     )
     scan_thread.start()
 
@@ -399,7 +402,7 @@ def run_extraction_process_impl(
 
     _ex_start = time_module.time()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_jar = {}
         for jar in eligible_jars:
             _t_jar_submit = time_module.time()

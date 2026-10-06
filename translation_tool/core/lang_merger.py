@@ -13,6 +13,8 @@ from collections import defaultdict
 from collections.abc import Generator
 from typing import Any
 
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
+
 from ..utils.config_manager import load_config
 from ..utils.log_unit import log_debug, log_error, log_exception, log_info
 from ..utils.text_processor import load_replace_rules
@@ -249,9 +251,7 @@ def merge_zhcn_to_zhtw_from_zip(
             futures = []
             # 所有任務共用同一個累計讀取預算（防止大量合法大小成員的 ZIP bomb）
             zip_budget = ZipReadBudget.for_pack(label=str(zip_file))
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=max_workers
-            ) as executor:
+            with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
                 # ✅ 優化點：在啟動 ThreadPool 前，先完成一次性的路徑標準化快取
                 all_names_raw = zf.namelist()
                 all_files_cache = [n.lower().replace("\\", "/") for n in all_names_raw]
@@ -564,7 +564,7 @@ def merge_zhcn_to_zhtw_from_folder(
             max_workers = max_allowed_workers
 
         futures = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
             all_files_cache = [n.lower().replace("\\", "/") for n in all_names]
             # 包裝前綴只算一次,避免每個 mod / 內容檔各掃一次全部檔名
             mod_wrapper_prefix = detect_mod_wrapper_prefix(all_names)

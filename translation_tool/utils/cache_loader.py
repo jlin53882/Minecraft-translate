@@ -7,13 +7,13 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 import orjson as json
 
 from translation_tool.utils.cache_shards import list_shards_oldest_first
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def load_cache_type(
         translation_cache[cache_type] = {}
         return
 
-    with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+    with ContextThreadPoolExecutor(max_workers=parallel_workers) as executor:
         results = list(executor.map(load_shard_file, json_files))
 
     temp_cache: dict[str, Any] = {}

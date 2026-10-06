@@ -13,14 +13,16 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import contextvars
 import inspect
 import logging
 import threading
 import time
+import uuid
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from translation_tool.utils.redaction import redact_secrets
 
@@ -72,9 +74,58 @@ def task_scope(task: object | None):
     """暫時把目前 context 歸屬到某個任務（測試或不經 ``set_session`` 的呼叫端用）。"""
     token = _CURRENT_TASK.set(task)
     try:
-        yield
+        yield task
     finally:
         _CURRENT_TASK.reset(token)
+
+
+@contextlib.contextmanager
+def new_task_scope(label: str = "ui"):
+    """為「沒有 ``TaskSession``、背景執行緒直接消費 generator」的工作建立一個唯一的任務歸屬。
+
+    提取對話框、打包、QC 這類路徑沒有 session，但它們的核心流程與執行緒池寫出的後台記錄、
+    以及同一條執行緒轉送給畫面的訊息，需要屬於同一個任務才分得出「同時執行的另一個任務」。
+    """
+    with task_scope(f"{label}-{uuid.uuid4().hex[:8]}") as scope:
+        yield scope
+
+
+def in_new_task(label: str, func: Callable) -> Callable:
+    """回傳在「新任務歸屬」裡執行 ``func`` 的函式（給背景工作執行緒的 ``target`` 用）。"""
+
+    def runner(*args, **kwargs):
+        with new_task_scope(label):
+            return func(*args, **kwargs)
+
+    return runner
+
+
+def run_in_context(func: Callable) -> Callable:
+    """回傳在「呼叫當下 context 的副本」裡執行 ``func`` 的函式。
+
+    給 ``threading.Thread(target=...)`` 用：新執行緒預設不繼承 ``contextvars``，
+    包過之後它寫出的後台記錄才會帶著建立它的任務歸屬。
+    """
+    ctx = contextvars.copy_context()
+
+    def runner(*args, **kwargs):
+        return ctx.run(func, *args, **kwargs)
+
+    return runner
+
+
+class ContextThreadPoolExecutor(concurrent.futures.ThreadPoolExecutor):
+    """提交工作時帶著呼叫端的 ``contextvars``（任務歸屬）的 ``ThreadPoolExecutor``。
+
+    標準的 ``ThreadPoolExecutor`` 工作執行緒不繼承 context，在池內寫出的後台記錄會失去
+    任務歸屬（退回只比文字＋時間窗）。每次 ``submit`` 各自複製一份 context
+    （同一個 ``Context`` 物件不能同時被兩條執行緒進入），``map`` 內部呼叫 ``submit``，所以同樣適用。
+    專案內一律用它取代 ``ThreadPoolExecutor``（``tests/test_thread_context_contract.py`` 把關）。
+    """
+
+    def submit(self, fn, /, *args, **kwargs):
+        ctx = contextvars.copy_context()
+        return super().submit(ctx.run, fn, *args, **kwargs)
 
 
 def task_key(session: object) -> object:

@@ -26,6 +26,7 @@ from app.ui.dialogs import close_overlay_dialog
 from app.views.extractor.extractor_state import PreviewState
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error
+from translation_tool.utils.ui_mirror import in_new_task
 
 
 def open_extract_dialog(
@@ -445,13 +446,16 @@ def _extract_show_preview_result(ctx, dialog):
     cancel_event = threading.Event()
 
     threading.Thread(
-        target=functools.partial(
-            _extract_preview_worker,
-            preview_state,
-            mods,
-            mode,
-            selected_codes,
-            cancel_event,
+        target=in_new_task(
+            "pipeline-extract-preview",
+            functools.partial(
+                _extract_preview_worker,
+                preview_state,
+                mods,
+                mode,
+                selected_codes,
+                cancel_event,
+            ),
         ),
         daemon=True,
     ).start()

@@ -20,7 +20,7 @@ Rich Text Shield：shield_text() / unshield_text() 保護 KubeJS 格式（彩色
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -56,6 +56,7 @@ from translation_tool.plugins.shared.rich_text_shield import (
 )
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning, progress
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
 
 # -------------------------
@@ -257,7 +258,7 @@ def translate_kubejs_pending_to_zh_tw(
     )
     max_workers = max(1, max_workers)
 
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+    with ContextThreadPoolExecutor(max_workers=max_workers) as ex:
         futs = [ex.submit(_count_one, p) for p in json_files]
         for fu in as_completed(futs):
             src, c = fu.result()

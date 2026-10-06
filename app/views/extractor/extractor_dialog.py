@@ -43,6 +43,7 @@ from app.views.extractor.extractor_dialog_ui import (
     _extractor_update_stats,
 )
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
+from translation_tool.utils.ui_mirror import in_new_task
 
 # ============================================================
 # Debug log helper (2026-07-11 規格重整)
@@ -280,11 +281,11 @@ def _extractor_on_update(ctx, update: dict) -> None:
         pct = update.get("progress", 0)
         log_msg = update.get("log", f"正在處理 {current}/{total}")
         ctx.state["progress"] = pct
-        ctx.add_log(log_msg)
+        ctx.add_log(log_msg, forwarded=True)  # 核心流程 yield 的 log：後台可能已有
         ctx.update_progress(pct, log_msg)
 
     elif "error" in update:
-        ctx.add_log(f"[ERROR] {update['error']}", level="error")
+        ctx.add_log(f"[ERROR] {update['error']}", level="error", forwarded=True)
 
 
 def _extractor_report_result(ctx, result_stats: dict, cancelled_flag: list) -> None:
@@ -455,7 +456,11 @@ def _extractor_on_start_click(ctx, e):
     log_debug(
         f"[BTN] on_start_click spawning run_extraction thread (mode={ctx.mode!r})"
     )
-    threading.Thread(target=ctx.run_extraction, daemon=True).start()
+    # 這條執行緒直接消費提取 generator（沒有 TaskSession）：給它自己的任務歸屬，
+    # 核心流程與執行緒池寫出的後台記錄才分得出是哪一次提取。
+    threading.Thread(
+        target=in_new_task("extractor", ctx.run_extraction), daemon=True
+    ).start()
 
 
 def _extractor_on_cancel_click(ctx, e):
