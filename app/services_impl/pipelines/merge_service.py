@@ -42,12 +42,19 @@ def _cleanup_cancelled_output(
     if finished or existed_before or not getattr(session, "cancel_requested", False):
         return
     try:
-        shutil.rmtree(output_dir, ignore_errors=True)
-        _session_log(session, f"[取消] 已清理半成品輸出：{output_dir}", "info")
+        shutil.rmtree(output_dir)
+    except FileNotFoundError:
+        return  # 已經不在了
     except OSError as exc:
+        # 檔案被鎖住、防毒、權限：不能回報「已清理」
         _session_log(
             session, f"[取消] 清理半成品輸出失敗：{output_dir}；{exc!r}", "warning"
         )
+        return
+    if os.path.exists(output_dir):
+        _session_log(session, f"[取消] 半成品輸出未完全清除：{output_dir}", "warning")
+    else:
+        _session_log(session, f"[取消] 已清理半成品輸出：{output_dir}", "info")
 
 
 def _session_log(session, text: str, level: str = "info") -> None:

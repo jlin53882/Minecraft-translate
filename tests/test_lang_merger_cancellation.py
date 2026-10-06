@@ -143,3 +143,53 @@ def test_zip_service_removes_new_output_when_cancelled(tmp_path, monkeypatch):
         )
 
     assert not output.exists()
+
+
+def test_cleanup_failure_is_not_reported_as_success(tmp_path, monkeypatch):
+    """清理失敗（檔案被鎖、權限）時不能記「已清理」。"""
+    from app.services_impl.pipelines import merge_service
+
+    output = tmp_path / "out"
+    output.mkdir()
+    session = TaskSession()
+    session.start()
+    session.request_cancel()
+    logged = []
+    monkeypatch.setattr(
+        merge_service,
+        "_session_log",
+        lambda s, text, level="info": logged.append((level, text)),
+    )
+
+    def locked(path):
+        raise PermissionError("locked by another process")
+
+    monkeypatch.setattr(merge_service.shutil, "rmtree", locked)
+
+    merge_service._cleanup_cancelled_output(str(output), False, False, session)
+
+    assert logged and logged[0][0] == "warning"
+    assert "失敗" in logged[0][1]
+    assert not any("已清理" in text for _, text in logged)
+    assert output.exists()
+
+
+def test_cleanup_success_is_reported(tmp_path, monkeypatch):
+    from app.services_impl.pipelines import merge_service
+
+    output = tmp_path / "out"
+    output.mkdir()
+    session = TaskSession()
+    session.start()
+    session.request_cancel()
+    logged = []
+    monkeypatch.setattr(
+        merge_service,
+        "_session_log",
+        lambda s, text, level="info": logged.append((level, text)),
+    )
+
+    merge_service._cleanup_cancelled_output(str(output), False, False, session)
+
+    assert not output.exists()
+    assert any("已清理半成品輸出" in text for _, text in logged)

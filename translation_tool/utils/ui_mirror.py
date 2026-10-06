@@ -90,6 +90,16 @@ def task_scope(task: object | None, name: str | None = None):
         _CURRENT_TASK.reset(token)
 
 
+def session_task_scope(session: object):
+    """把目前 context 歸屬到 ``session`` 的任務（工作執行緒邊界寫錯誤 log 用）。
+
+    服務結束時 ``UI_LOG_HANDLER.set_session(None)`` 已清掉那條執行緒的任務歸屬；之後在邊界
+    ``except`` 裡寫的完整堆疊沒有歸屬，會退回「最近綁定的 session」而送進別的任務畫面，
+    ``app.log`` 也沒有 ``[task=…]``。邊界寫 log 前用它重新歸屬到自己的任務。
+    """
+    return task_scope(task_key(session), getattr(session, "name", None))
+
+
 def format_task_tag(task: object | None, name: str | None) -> str:
     """``app.log`` 每一行的任務標籤：``[task=名稱/識別] ``（沒有任務時是空字串）。"""
     if task is None:

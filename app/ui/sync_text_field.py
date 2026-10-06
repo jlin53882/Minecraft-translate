@@ -11,6 +11,8 @@ Web 模式手動輸入的內容要等失焦／送出才會進到 ``.value``，�
 
 from __future__ import annotations
 
+import inspect
+
 import flet as ft
 
 from translation_tool.utils.log_unit import log_info
@@ -53,33 +55,79 @@ def _sync_blur(e) -> None:
     _sync_value(e)
 
 
+# 內建的同步 handler 本身就是「已同步」：init 再次確認時不可再包一層
+_sync_value._sync_wrapped = True
+_sync_blur._sync_wrapped = True
+
+
+def _takes_event(handler) -> bool:
+    """handler 是否接收事件參數（Flet 也支援零參數的 handler）。"""
+    try:
+        params = inspect.signature(handler).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(
+        p.kind in (p.VAR_POSITIONAL, p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+        for p in params
+    )
+
+
+def _synced(user_handler, sync):
+    """先同步事件值，再呼叫呼叫端自己的 handler。
+
+    Web 的 ``e.data`` 已是新值、``e.control.value`` 卻可能還是舊值；許多呼叫端的
+    ``on_change`` 直接讀 ``e.control.value``，所以同步一定要排在它前面，不能二選一。
+    保留呼叫端 handler 的 sync／async 與零參數寫法。
+    """
+    if user_handler is None:
+        return sync
+    if getattr(user_handler, "_sync_wrapped", False):
+        return user_handler  # 已包過（例如 init 再次確認）：不重複包
+    takes_event = _takes_event(user_handler)
+
+    if inspect.iscoroutinefunction(user_handler):
+
+        async def wrapper(e):
+            sync(e)
+            await (user_handler(e) if takes_event else user_handler())
+
+    else:
+
+        def wrapper(e):
+            sync(e)
+            return user_handler(e) if takes_event else user_handler()
+
+    wrapper._sync_wrapped = True
+    wrapper.__wrapped__ = user_handler
+    return wrapper
+
+
 class SyncTextField(ft.TextField):
     def __init__(self, *args, **kwargs):
-        """在控制項建立前就註冊 Web 同步事件。"""
+        """在控制項建立前就註冊 Web 同步事件（並與呼叫端自己的 handler 串起來）。"""
         # Flet 會在基底建構子內準備事件註冊資料；要在 super() 前傳入，
         # 才能確保 Web renderer 真的把 handler 發佈到前端，而不是只改到
         # Python 物件上的屬性。
-        is_single_line = not (
-            kwargs.get("multiline", False)
-            or kwargs.get("password", False)
-            or kwargs.get("read_only", False)
+        editable = not kwargs.get("read_only", False)
+        single_line = editable and not (
+            kwargs.get("multiline", False) or kwargs.get("password", False)
         )
-        if is_single_line:
-            if kwargs.get("on_change") is None:
-                kwargs["on_change"] = _sync_value
-            if kwargs.get("on_blur") is None:
-                kwargs["on_blur"] = _sync_blur
+        if editable and (single_line or kwargs.get("on_change") is not None):
+            # 有呼叫端 handler 時任何型態的欄位都要先同步（多行也一樣）；沒有時只補單行
+            kwargs["on_change"] = _synced(kwargs.get("on_change"), _sync_value)
+        if single_line:
+            kwargs["on_blur"] = _synced(kwargs.get("on_blur"), _sync_blur)
         super().__init__(*args, **kwargs)
         self._ensure_sync_handlers()
 
     def _ensure_sync_handlers(self) -> None:
         """為可編輯單行欄位註冊輸入與失焦同步事件。"""
-        if self.multiline or self.password or self.read_only:
+        if self.read_only:
             return
-        if self.on_change is None:
-            self.on_change = _sync_value
-        if self.on_blur is None:
-            self.on_blur = _sync_blur
+        if self.on_change is not None or not (self.multiline or self.password):
+            self.on_change = _synced(self.on_change, _sync_value)
+        if not (self.multiline or self.password):
+            self.on_blur = _synced(self.on_blur, _sync_blur)
 
     def init(self):
         super().init()

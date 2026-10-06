@@ -93,12 +93,45 @@ def test_typed_zip_path_is_not_duplicated_or_empty(view):
     assert view._zip_paths_for_run() == ["a.zip"]
 
 
-def test_start_merge_accepts_only_a_typed_zip_path(view):
+def test_start_merge_without_any_zip_is_rejected(view):
     view.input_mode_group.value = "zip"
     view.selected_zips = []
     view.zip_path_field.value = ""
-    view.start_merge(None)  # 沒有任何 ZIP：提示、不啟動
+
+    view.start_merge(None)
+
     assert view.start_button.disabled is not True
+
+
+def test_start_merge_runs_with_only_a_typed_zip_path(view, monkeypatch):
+    """Web：沒有用選擇器、只手動輸入 ZIP 路徑也能開始，且開始訊息的數量是實際執行的數量。"""
+    received = {}
+
+    def fake_service(**kwargs):
+        received.update(kwargs)
+        return iter(())
+
+    monkeypatch.setattr(merge_view, "run_merge_zip_batch_service", fake_service)
+
+    class _SyncThread:
+        def __init__(self, target=None, daemon=None, **kw):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(merge_view.threading, "Thread", _SyncThread)
+    view.input_mode_group.value = "zip"
+    view.selected_zips = []
+    view.zip_path_field.value = "C:/mods/a.zip"
+    view.output_dir_field.value = "C:/out"
+
+    view.start_merge(None)
+
+    assert view.start_button.disabled is True
+    assert received["zip_paths"] == ["C:/mods/a.zip"]
+    started = [text for _, text in view.session.logs if "開始合併任務" in text]
+    assert started and "1 個 ZIP" in started[0] and "0 個 ZIP" not in started[0]
 
 
 # ---------------------------------------- 服務層：兩種取消來源都要能停止核心迴圈
@@ -174,7 +207,7 @@ def test_worker_exposes_the_session_flag_to_the_core_via_cancel_scope(
 
     seen = []
 
-    def fake_service(mode):
+    def fake_service(mode, zip_paths=None):
         seen.append(is_cancelled())
         view.session.request_cancel()
         seen.append(is_cancelled())
@@ -187,7 +220,7 @@ def test_worker_exposes_the_session_flag_to_the_core_via_cancel_scope(
 
 
 def test_worker_treats_cancellation_as_a_normal_stop(view, monkeypatch):
-    def cancelled(mode):
+    def cancelled(mode, zip_paths=None):
         raise TaskCancelled()
 
     monkeypatch.setattr(view, "_run_merge_service", cancelled)
@@ -199,7 +232,7 @@ def test_worker_treats_cancellation_as_a_normal_stop(view, monkeypatch):
 
 
 def test_worker_marks_real_failures_as_errors(view, monkeypatch):
-    def broken(mode):
+    def broken(mode, zip_paths=None):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(view, "_run_merge_service", broken)
@@ -208,3 +241,113 @@ def test_worker_marks_real_failures_as_errors(view, monkeypatch):
 
     assert view.session.status == "ERROR"
     assert getattr(view.session, "finished", False) is True
+
+
+# ----------------------- 背景執行緒邊界的錯誤必須歸屬到自己的任務（不串到別的任務畫面）
+
+
+def test_worker_boundary_error_stays_attributed_to_its_own_task(monkeypatch):
+    import logging
+    import threading
+
+    from translation_tool.utils import ui_mirror
+    from translation_tool.utils.ui_logging_handler import UISessionLogHandler
+
+    ui_mirror.install_task_record_factory()
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_widgets, "load_config", lambda: {"lang_merger": {}})
+    view = merge_view.MergeView(mock_page(), mock_filepicker())
+    merge_session, other_session = (
+        TaskSession(name="語系合併"),
+        TaskSession(name="機器翻譯"),
+    )
+    merge_session.start()
+    other_session.start()
+    view.session = merge_session
+
+    handler = UISessionLogHandler()
+    handler.setLevel(logging.INFO)
+    records = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    capture = _Capture(level=logging.INFO)
+    root = logging.getLogger()
+    previous = root.level
+    root.addHandler(handler)
+    root.addHandler(capture)
+    root.setLevel(logging.INFO)
+
+    def service_that_cleans_up_then_fails(mode, zip_paths=None):
+        # 等同真實服務：入口 set_session、finally set_session(None)，之後例外往外傳
+        handler.set_session(merge_session)
+        handler.set_session(None)
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(view, "_run_merge_service", service_that_cleans_up_then_fails)
+    try:
+        handler.set_session(other_session)  # 另一個任務是「最近綁定」的 session
+        worker = threading.Thread(target=view._run_merge_worker, args=("folder",))
+        worker.start()
+        worker.join()
+    finally:
+        root.removeHandler(handler)
+        root.removeHandler(capture)
+        root.setLevel(previous)
+        handler.clear()
+
+    failure = [r for r in records if "合併執行失敗" in r.getMessage()]
+    assert failure, "邊界錯誤必須寫進後台 log"
+    assert all(r.task_id == merge_session.task_id for r in failure)
+    assert all(r.task_name == "語系合併" for r in failure)
+    other_texts = [e.text for e in other_session.snapshot()["logs"]]
+    assert not any("boom" in t for t in other_texts)  # 沒有串進別的任務畫面
+    own_texts = [e.text for e in merge_session.snapshot()["logs"]]
+    assert any("合併執行失敗" in t for t in own_texts)  # 自己的畫面有錯誤摘要
+
+
+def test_translation_page_boundary_error_stays_attributed_to_its_own_task():
+    """同一類問題：翻譯頁工作執行緒邊界的錯誤堆疊也要歸屬到自己的任務。"""
+    import logging
+    import threading
+    from types import SimpleNamespace
+
+    from app.views.translation import translation_actions
+    from translation_tool.utils import ui_mirror
+
+    ui_mirror.install_task_record_factory()
+    session = TaskSession(name="FTB 翻譯")
+    session.start()
+    view = SimpleNamespace(session=session)
+    records = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    capture = _Capture(level=logging.INFO)
+    root = logging.getLogger()
+    previous = root.level
+    root.addHandler(capture)
+    root.setLevel(logging.INFO)
+
+    def boundary():
+        ui_mirror.set_current_task(None)  # 服務結束後這條執行緒沒有任務歸屬
+        try:
+            raise RuntimeError("boom")
+        except RuntimeError as ex:
+            translation_actions._report_service_failure(view, "FTB", ex, "C:/in")
+
+    try:
+        worker = threading.Thread(target=boundary)
+        worker.start()
+        worker.join()
+    finally:
+        root.removeHandler(capture)
+        root.setLevel(previous)
+
+    failure = [r for r in records if "服務執行失敗" in r.getMessage()]
+    assert failure
+    assert all(r.task_id == session.task_id for r in failure)

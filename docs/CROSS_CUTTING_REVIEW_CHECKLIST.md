@@ -53,6 +53,7 @@ PR #169（UI 與後台日誌同步）歷經多輪審查才收斂。回顧後，�
 - [ ] 是否假設「UI 執行緒有任務歸屬」？沒有；未知歸屬走「最近綁定的 session」退回行為。
 - [ ] 路由用**任務識別**，不用文字內容或全域「目前的 session」。
 - [ ] `task_id` 是否每次 `start()` 重新產生（同一個 session 重跑不可沿用舊 ID）？
+- [ ] 工作執行緒邊界的 `except` 寫錯誤 log 前，是否用 `session_task_scope(session)` 重新歸屬？服務結束時已 `set_session(None)` 清掉歸屬，沒有歸屬的記錄會退回「最近綁定的 session」，完整堆疊可能送進別的任務畫面。
 - [ ] 同時執行兩個任務且訊息文字相同時，去重是否仍各自成立？（要有真正的多任務測試，不是單元 mock。）
 
 ## 5. 任務生命週期（狀態機）
@@ -69,6 +70,8 @@ PR #169（UI 與後台日誌同步）歷經多輪審查才收斂。回顧後，�
 - [ ] 一鍵流程可略過缺少的輸入（`skip_missing_input=True`），一般流程不可。
 - [ ] 失敗時 UI 是否真的有可見的提示？對話框關閉後要再推一次 `page.update()`，避免遮罩殘留把 SnackBar 蓋住（`pipeline_one_click_dialog.py` 的 `_one_click_dispose_dialogs`）。
 - [ ] 完成訊息不可在失敗時仍顯示「已完成」。
+- [ ] 包裝呼叫端 handler 時（例如 `SyncTextField`）要「先同步、再呼叫」並保留 sync／async／零參數寫法，不可二選一；測試要模擬 Web 真實情況（`e.data` 是新值、`control.value` 是舊值），不能在測試裡先手動設好值。
+- [ ] 清理動作（刪資料夾）成功與否要如實記錄：`ignore_errors=True` 之後不能無條件寫「已清理」。
 - [ ] 平台差異：新增檔案／資料夾選擇器一律用 `SafeFilePicker`（Flet Web 不支援 `get_directory_path`），並讓欄位可手動輸入。
 - [ ] 輸出資料夾不要求事先存在，用 `ensure_output_dir()` 自動建立；只有「輸入」才要求存在。
 

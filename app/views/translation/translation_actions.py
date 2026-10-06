@@ -11,6 +11,7 @@ from app.tasks.task_session import add_log_unmirrored, tag_session
 from app.ui.design import C
 from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_error, log_warning
+from translation_tool.utils.ui_mirror import session_task_scope
 
 
 # =========================================================
@@ -45,9 +46,11 @@ def _log_task_start(view, label: str, in_dir: str, out_dir, dry_run: bool, **ste
 
 def _report_service_failure(view, label: str, ex: Exception, in_dir: str) -> None:
     """服務拋出未預期例外：完整堆疊寫後台，畫面顯示例外類型、訊息與去向。"""
-    log_error(
-        f"[UI] {label} 服務執行失敗（輸入：{in_dir}）：{ex!r}\n{traceback.format_exc()}"
-    )
+    # 服務結束時已清掉這條執行緒的任務歸屬：重新歸屬再寫堆疊，才不會串進別的任務畫面
+    with session_task_scope(view.session):
+        log_error(
+            f"[UI] {label} 服務執行失敗（輸入：{in_dir}）：{ex!r}\n{traceback.format_exc()}"
+        )
     _safe_add_log(
         view,
         f"[UI] {label} 服務執行失敗：{type(ex).__name__}: {ex}"

@@ -7,11 +7,67 @@ def test_single_line_field_syncs_on_change_by_default():
     assert kit.text_field("路徑").on_change is not None
 
 
-def test_explicit_handler_is_kept():
-    def handler(e):
-        pass
+def test_caller_handler_runs_after_the_web_value_is_synced():
+    """Web：事件資料是新值、控制項仍是舊值時，呼叫端 handler 讀到的必須是新值。"""
+    from types import SimpleNamespace
 
-    assert kit.text_field("x", on_change=handler).on_change is handler
+    from app.ui.sync_text_field import SyncTextField
+
+    seen = []
+    field = SyncTextField(label="x", on_change=lambda e: seen.append(e.control.value))
+    field.value = "舊路徑"
+
+    field.on_change(SimpleNamespace(control=field, data="新路徑", name="change"))
+
+    assert seen == ["新路徑"]
+
+
+def test_caller_handler_supports_async_and_zero_arg_styles():
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.ui.sync_text_field import SyncTextField
+
+    calls = []
+
+    async def async_handler(e):
+        calls.append(("async", e.control.value))
+
+    def zero_arg():
+        calls.append(("zero", None))
+
+    field = SyncTextField(label="x", on_change=async_handler)
+    field.value = "舊"
+    asyncio.run(
+        field.on_change(SimpleNamespace(control=field, data="新", name="change"))
+    )
+    other = SyncTextField(label="y", on_change=zero_arg)
+    other.on_change(SimpleNamespace(control=other, data="新", name="change"))
+
+    assert calls == [("async", "新"), ("zero", None)]
+
+
+def test_caller_blur_handler_also_syncs_first():
+    from types import SimpleNamespace
+
+    from app.ui.sync_text_field import SyncTextField
+
+    seen = []
+    field = SyncTextField(label="x", on_blur=lambda e: seen.append(e.control.value))
+    field.value = ""
+
+    field.on_blur(SimpleNamespace(control=field, data="新路徑", name="blur"))
+
+    assert seen == ["新路徑"]
+
+
+def test_handlers_are_not_wrapped_twice():
+    from app.ui.sync_text_field import SyncTextField
+
+    field = SyncTextField(label="x", on_change=lambda e: None)
+    first = field.on_change
+    field._ensure_sync_handlers()
+    assert field.on_change is first
 
 
 def test_sync_handler_writes_event_value_back_to_control():
