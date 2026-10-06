@@ -113,8 +113,9 @@ def _install_record_factory() -> None:
         record = current(*args, **kwargs)
         task = _CURRENT_TASK.get()
         name = _CURRENT_TASK_NAME.get()
-        record.task_id = task
-        record.task_name = name
+        # 沒有任務時三個欄位都是空字串（自訂格式用 %(task_name)s 等不會印出 "None"）
+        record.task_id = "" if task is None else str(task)
+        record.task_name = name or ""
         record.task_tag = format_task_tag(task, name)
         return record
 

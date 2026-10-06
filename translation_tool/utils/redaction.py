@@ -60,16 +60,49 @@ def redact_secrets(value: Any) -> str:
     return _BEARER_RE.sub("Bearer [REDACTED]", text)
 
 
+# ``%(message)s`` 的 percent-style 規格：可帶旗標、寬度、精度與型別（``%(message)-80s``、``%(message).200s``…）
+_MESSAGE_FIELD_RE = re.compile(r"%\(message\)[-+ #0]*\d*(?:\.\d+)?[sra]")
+
+
 def with_task_tag(fmt: str) -> str:
-    """在 ``%(message)s`` 前面插入任務標籤 ``%(task_tag)s``（已含時不重複）。
+    """在 ``%(message)…`` 前面插入任務標籤 ``%(task_tag)s``（已含時不重複）。
 
     ``task_tag`` 由 ``ui_mirror`` 安裝的 LogRecord 工廠填入：任務執行中是
     ``[task=<任務名稱>/<識別>] ``，沒有任務時是空字串。這樣同時執行多個任務時，
     ``app.log`` 的每一行都看得出屬於哪一個任務，核心流程不需要自己知道 UI／任務。
+
+    ``%(message)s`` 之外，帶寬度／精度／旗標的合法寫法（``%(message)-80s``）也會插入；
+    沒有 ``%(message)`` 欄位的格式不動。
     """
-    if "%(task_tag)" in fmt or "%(message)s" not in fmt:
+    if "%(task_tag)" in fmt:
         return fmt
-    return fmt.replace("%(message)s", "%(task_tag)s%(message)s", 1)
+    match = _MESSAGE_FIELD_RE.search(fmt)
+    if match is None:
+        return fmt
+    return f"{fmt[: match.start()]}%(task_tag)s{fmt[match.start() :]}"
+
+
+def tag_continuation_lines(text: str, tag: str) -> str:
+    """多行輸出（多行訊息、traceback）的每一個實體行都帶上任務標籤。
+
+    ``logging`` 以記錄為單位輸出，一筆記錄可能有很多行（``logger.exception`` 的
+    traceback、含換行的訊息）；只有第一行有標籤的話，``grep '[task=…]'`` 會漏掉後面的行。
+    第一行已經由格式帶標籤（``%(task_tag)s``），這裡補其餘的行；格式沒有帶標籤時不動。
+    """
+    if not tag or "\n" not in text:
+        return text
+    first, *rest = text.split("\n")
+    if tag not in first:
+        return text
+    return "\n".join(
+        [
+            first,
+            *(
+                f"{tag.rstrip()} {line}".rstrip() if line else tag.rstrip()
+                for line in rest
+            ),
+        ]
+    )
 
 
 class RedactingFormatter(logging.Formatter):
@@ -85,10 +118,12 @@ class RedactingFormatter(logging.Formatter):
         super().__init__(fmt, *args, **kwargs)
 
     def format(self, record: logging.LogRecord) -> str:
-        # 工廠安裝之前建立的記錄（或第三方直接建立的 LogRecord）沒有這個欄位
-        if not hasattr(record, "task_tag"):
-            record.task_tag = ""
-        return redact_secrets(super().format(record))
+        # 工廠安裝之前建立的記錄（或第三方直接建立的 LogRecord）沒有這些欄位
+        for field in ("task_id", "task_name", "task_tag"):
+            if not hasattr(record, field):
+                setattr(record, field, "")
+        text = redact_secrets(super().format(record))
+        return tag_continuation_lines(text, record.task_tag)
 
 
 def redact_text(value: Any, secrets: Iterable[str] = ()) -> str:

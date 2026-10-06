@@ -125,7 +125,9 @@ def validate_log_format(format_string: str) -> str:
     if not isinstance(format_string, str) or not format_string.strip():
         raise ValueError("logging.log_format 必須是非空字串")
 
-    formatter = logging.Formatter(format_string)
+    # 與執行期使用同一個 formatter 與同一份記錄欄位契約：``task_id`` / ``task_name`` /
+    # ``task_tag`` 是 LogRecord 工廠提供的正式欄位，自訂格式可以使用；未知欄位仍會被拒絕。
+    formatter = RedactingFormatter(format_string)
     record = logging.LogRecord(
         name="validation",
         level=logging.INFO,
@@ -135,6 +137,9 @@ def validate_log_format(format_string: str) -> str:
         args=(),
         exc_info=None,
     )
+    record.task_id = ""
+    record.task_name = ""
+    record.task_tag = ""
     try:
         formatter.format(record)
     except (AttributeError, KeyError, TypeError, ValueError) as exc:

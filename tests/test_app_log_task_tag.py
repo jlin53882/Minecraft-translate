@@ -209,3 +209,174 @@ def test_setup_logging_installs_the_record_factory_and_a_tagging_formatter():
     }
     assert "install_task_record_factory" in called
     assert "RedactingFormatter" in called
+
+
+# ---------------------------------------------------------------- 多行輸出：每個實體行都有標籤
+
+
+def _record(msg="訊息", exc_info=None, task=("abc12345", "合併甲")):
+    ui_mirror.install_task_record_factory()
+    with task_scope(*task) if task else task_scope(None):
+        return logging.getLogger("fmt.test").makeRecord(
+            "fmt.test", logging.ERROR, __file__, 1, msg, None, exc_info
+        )
+
+
+def _format(record, fmt=DEFAULT_FORMAT):
+    return RedactingFormatter(fmt).format(record).split("\n")
+
+
+TAG = "[task=合併甲/abc12345]"
+
+
+def test_every_physical_line_of_a_multiline_message_is_tagged():
+    lines = _format(_record("第一行\n第二行\n\n第四行（上一行是空行）"))
+    assert len(lines) == 4
+    assert all(TAG in line for line in lines), lines
+    assert lines[0].endswith(f"{TAG} 第一行")
+    assert lines[1] == f"{TAG} 第二行"
+    assert lines[2] == TAG  # 空行也保留標籤
+    assert lines[3] == f"{TAG} 第四行（上一行是空行）"
+
+
+def test_every_physical_line_of_a_traceback_is_tagged():
+    try:
+        raise RuntimeError("壞掉了")
+    except RuntimeError:
+        import sys
+
+        record = _record("處理失敗", exc_info=sys.exc_info())
+    lines = _format(record)
+    assert len(lines) >= 4
+    assert all(TAG in line for line in lines), lines
+    assert any("Traceback (most recent call last):" in line for line in lines)
+    assert lines[-1] == f"{TAG} RuntimeError: 壞掉了"
+
+
+def test_multiline_message_plus_traceback_all_tagged():
+    try:
+        raise ValueError("原因")
+    except ValueError:
+        import sys
+
+        record = _record("第一行\n第二行", exc_info=sys.exc_info())
+    lines = _format(record)
+    assert all(TAG in line for line in lines), lines
+    assert f"{TAG} 第二行" in lines
+    assert lines[-1] == f"{TAG} ValueError: 原因"
+
+
+def test_no_task_context_leaves_multiline_output_untouched():
+    lines = _format(_record("甲\n乙", task=None))
+    assert all("[task=" not in line for line in lines)
+    assert lines[1] == "乙"
+
+
+def test_redaction_still_applies_to_every_line_and_lines_stay_tagged():
+    secret = "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q"
+    lines = _format(
+        _record(f"呼叫失敗\nAuthorization: Bearer abcdef123456\n金鑰 {secret}")
+    )
+    text = "\n".join(lines)
+    assert "abcdef123456" not in text and secret not in text
+    assert all(TAG in line for line in lines), lines
+
+
+def test_a_format_without_the_tag_field_is_not_touched():
+    """格式本身沒有帶標籤時（例如沒有 %(message)）不替續行硬加。"""
+    lines = _format(_record("甲\n乙"), fmt="%(levelname)s only")
+    assert lines == ["ERROR only"]
+
+
+def test_real_file_traceback_lines_all_belong_to_their_task(app_log):
+    a, b = TaskSession(name="甲"), TaskSession(name="乙")
+    log = logging.getLogger("core.err")
+    with task_scope(a.task_id, "甲"):
+        try:
+            raise RuntimeError("甲的錯誤")
+        except RuntimeError:
+            log.exception("甲 失敗")
+    with task_scope(b.task_id, "乙"):
+        log.error("乙 的\n多行訊息")
+
+    lines = app_log()
+    # 沒有任何一個實體行遺漏標籤（兩筆記錄的所有行都帶標籤）
+    assert all("[task=" in line for line in lines), [
+        x for x in lines if "[task=" not in x
+    ]
+    a_lines = [line for line in lines if f"/{a.task_id}]" in line]
+    b_lines = [line for line in lines if f"/{b.task_id}]" in line]
+    assert any("RuntimeError: 甲的錯誤" in line for line in a_lines)
+    assert all(b.task_id not in line for line in a_lines)
+    assert any("多行訊息" in line for line in b_lines)
+    assert not any("甲" in line and b.task_id in line for line in lines)
+
+
+# ---------------------------------------------------------------- 自訂格式與驗證器
+
+
+@pytest.mark.parametrize(
+    ("fmt", "expected"),
+    [
+        ("%(message)-80s", "%(task_tag)s%(message)-80s"),
+        ("%(levelname)s %(message).200s", "%(levelname)s %(task_tag)s%(message).200s"),
+        ("%(message)10.5s|", "%(task_tag)s%(message)10.5s|"),
+        ("%(message)r", "%(task_tag)s%(message)r"),
+        (
+            "[%(name)s] %(message)s %(extra)s",
+            "[%(name)s] %(task_tag)s%(message)s %(extra)s",
+        ),
+        ("%(task_tag)s%(message)-80s", "%(task_tag)s%(message)-80s"),  # 已含：不重複
+        ("%(asctime)s only", "%(asctime)s only"),
+    ],
+)
+def test_with_task_tag_handles_percent_style_message_specs(fmt, expected):
+    assert with_task_tag(fmt) == expected
+    assert with_task_tag(with_task_tag(fmt)) == expected  # 冪等
+
+
+def test_the_tag_is_inserted_only_once_for_specs_with_width():
+    fmt = with_task_tag("%(message)-80s")
+    assert fmt.count("%(task_tag)") == 1
+
+
+@pytest.mark.parametrize(
+    "fmt",
+    [
+        "%(levelname)s %(task_tag)s %(message)s",
+        "%(task_name)s/%(task_id)s %(message)s",
+        "%(task_tag)s%(task_name)s%(task_id)s %(message)s",
+        "%(message)-80s",
+        "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",
+    ],
+)
+def test_validator_accepts_formats_using_the_task_fields(fmt):
+    from app.services_impl.logging_service import validate_log_format
+
+    assert validate_log_format(fmt) == fmt
+
+
+@pytest.mark.parametrize(
+    "fmt",
+    [
+        "%(not_exist)s",
+        "%(task_unknown)s %(message)s",
+        "%(task_tag)d %(message)s",
+        "   ",
+    ],
+)
+def test_validator_still_rejects_unknown_fields_and_bad_specs(fmt):
+    from app.services_impl.logging_service import validate_log_format
+
+    with pytest.raises(ValueError):
+        validate_log_format(fmt)
+
+
+def test_task_name_and_id_fields_render_cleanly_with_and_without_a_task():
+    """沒有任務時欄位是空字串，不是 'None'。"""
+    fmt = "%(task_name)s/%(task_id)s|%(message)s"
+    inside = _format(_record("x"), fmt)  # _record 預設任務：合併甲 / abc12345
+    outside = _format(_record("x", task=None), fmt)
+    assert inside[0].startswith("合併甲/abc12345|")
+    assert outside == ["/|x"]
+    assert "None" not in outside[0]
