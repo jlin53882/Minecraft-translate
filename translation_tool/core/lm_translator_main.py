@@ -808,7 +808,8 @@ def _attempt_batch(
         if model_index in runtime.missing_models:
             continue
         model_name = runtime.model_pool[model_index]
-        if not quota.claim(model_name, owner, _probe_lease_sec(runtime)):
+        lease_sec = _probe_lease_sec(runtime)
+        if not quota.claim(model_name, owner, lease_sec):
             # 今日配額已用盡且還沒輪到探測（或探測名額被其他 worker 領走）：不白打請求
             skipped_by_quota.add(model_index)
             continue
@@ -833,15 +834,16 @@ def _attempt_batch(
                 f"[→] 嘗試模型 {model_name} | Batch={len(round_data.current_batch)}"
                 f"/{runtime.batch_size} | 翻譯總量={runtime.original_total}"
             )
-            raw_text = call_gemini_requests(
-                model_name=model_name,
-                system_prompt=prompt,
-                payload=round_data.payload,
-                api_key=runtime.key_cycle.claim(),
-                temperature=runtime.model_temperature,
-                max_output_tokens=output_cap,
-                meta_out=api_meta,
-            ).strip()
+            with quota.hold_probe_lease(model_name, owner, lease_sec):
+                raw_text = call_gemini_requests(
+                    model_name=model_name,
+                    system_prompt=prompt,
+                    payload=round_data.payload,
+                    api_key=runtime.key_cycle.claim(),
+                    temperature=runtime.model_temperature,
+                    max_output_tokens=output_cap,
+                    meta_out=api_meta,
+                ).strip()
             # HTTP 200 已證明沒有被 RPD 拒絕：配額紀錄在這裡就清除；回應內容的問題（空、截斷、
             # 格式不符）由 batch 流程自己處理，不影響配額狀態。
             quota.mark_ok(model_name, started_at=started)

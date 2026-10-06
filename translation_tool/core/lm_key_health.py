@@ -26,7 +26,8 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone, tzinfo
 from datetime import time as dt_time
@@ -222,6 +223,8 @@ class ModelQuotaHealth:
     model: str
     seconds_remaining: float
     reset_at: float  # epoch 秒
+    # 沒有時區資料庫、已過最早可能的重置時間但還沒到最晚時間：正由單一探測確認是否已恢復。
+    uncertain: bool = False
 
 
 DEFAULT_PROBE_INTERVAL_SEC = 600.0
@@ -314,7 +317,10 @@ class ModelQuotaRegistry:
             return True
 
     def is_exhausted(self, model: str) -> bool:
-        return self.seconds_remaining(model) > 0
+        """紀錄還有效（與 ``is_blocked`` / ``claim`` 的門控一致，含不確定視窗）。"""
+        now = self._clock()
+        with self._lock:
+            return self._hard_until.get(model, 0.0) > now
 
     def _claimable_locked(self, model: str, owner: object, now: float) -> bool:
         until = self._hard_until.get(model)
@@ -353,6 +359,51 @@ class ModelQuotaRegistry:
                 self._lease[model] = (owner, now + ttl)
             return True
 
+    def holds_lease(self, model: str, owner: object) -> bool:
+        with self._lock:
+            lease = self._lease.get(model)
+            return lease is not None and lease[0] is owner
+
+    def renew(self, model: str, owner: object, lease_sec: float) -> bool:
+        """``owner`` 仍持有這個模型的探測租約時續租；租約已被收回或換人則不動。"""
+        now = self._clock()
+        with self._lock:
+            lease = self._lease.get(model)
+            if lease is None or lease[0] is not owner:
+                return False
+            self._lease[model] = (owner, now + lease_sec)
+            return True
+
+    @contextmanager
+    def hold_probe_lease(
+        self, model: str, owner: object, lease_sec: float
+    ) -> Iterator[None]:
+        """探測請求飛行期間持續續租（心跳），請求結束就停止。
+
+        租約長度只是持有者異常結束時的保底；請求還活著就一直續租，不必推算請求「最久會花多久」
+        （``requests`` 的 timeout 不是整段 wall-clock 上限，慢速傳輸或多位址連線都可能超過）。
+        沒有持有租約（模型沒耗盡、不是探測）時不開執行緒。
+        """
+        if not self.holds_lease(model, owner):
+            yield
+            return
+        stop = threading.Event()
+        interval = max(lease_sec / 3, 0.05)
+
+        def beat() -> None:
+            while not stop.wait(interval):
+                self.renew(model, owner, lease_sec)
+
+        thread = threading.Thread(
+            target=beat, name="probe-lease-heartbeat", daemon=True
+        )
+        thread.start()
+        try:
+            yield
+        finally:
+            stop.set()
+            thread.join(timeout=1.0)
+
     def release(self, model: str, owner: object) -> None:
         """``owner`` 放棄這個模型（改用其他模型）：收回它的探測租約並重新計時。
 
@@ -385,14 +436,23 @@ class ModelQuotaRegistry:
         return max(0.0, until - self._clock())
 
     def snapshot(self, models: Sequence[str]) -> list[ModelQuotaHealth]:
-        """依傳入順序回傳「目前耗盡中」的模型（沒耗盡的不列出）。"""
+        """依傳入順序回傳「紀錄仍有效」的模型（沒耗盡的不列出）；與實際門控一致。
+
+        不確定視窗內的模型（已過最早可能的重置時間、還沒到最晚時間）也會列出並標示 ``uncertain``。
+        """
         now = self._clock()
         with self._lock:
             until = dict(self._until)
+            hard_until = dict(self._hard_until)
         return [
-            ModelQuotaHealth(model, until[model] - now, until[model])
+            ModelQuotaHealth(
+                model,
+                max(0.0, until[model] - now),
+                until[model],
+                uncertain=until[model] <= now,
+            )
             for model in models
-            if until.get(model, 0.0) > now
+            if hard_until.get(model, 0.0) > now
         ]
 
     def soonest_reset_in(self, models: Sequence[str]) -> float | None:

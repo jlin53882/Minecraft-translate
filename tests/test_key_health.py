@@ -830,7 +830,7 @@ def test_uncertain_reset_window_keeps_a_single_owner_probe_after_the_early_deadl
     reg.mark_exhausted("m1", until=clock.t + 100, grace_until=clock.t + 4000)
 
     clock.t += 700  # 過了較早的期限（也過了探測間隔），但還在不確定視窗內
-    assert reg.is_exhausted("m1") is False  # 顯示上不再算「耗盡」
+    assert reg.is_exhausted("m1") is True  # 門控仍在，讀取端與門控一致
     assert reg.claim("m1", a) is True  # 第一個 worker 領到探測租約
     assert reg.claim("m1", b) is False  # 其他 worker 仍被擋下
     assert reg.is_blocked("m1", b) is True
@@ -849,3 +849,60 @@ def test_certain_deadline_without_grace_unblocks_everyone_as_before():
     clock.t += 101
     assert reg.claim("m1", object()) is True
     assert reg.claim("m1", object()) is True
+
+
+def test_probe_lease_heartbeat_keeps_a_slow_but_alive_probe_protected():
+    """租約心跳：探測請求還活著就持續續租，不再靠推算「最壞耗時」的秒數。
+
+    真實時鐘 + 很短的租約：沒有心跳的話租約早就過期，其他 worker 會搶到第二個探測。
+    """
+    import time as real_time
+
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    reg = ModelQuotaRegistry(probe_interval=0.0)
+    a, b = object(), object()
+    reg.mark_exhausted("m1", until=real_time.time() + 1000)
+    assert reg.claim("m1", a, lease_sec=0.2)
+
+    with reg.hold_probe_lease("m1", a, lease_sec=0.2):
+        real_time.sleep(0.7)  # 比租約（0.2 秒）久得多：只有心跳能讓它維持
+        assert reg.claim("m1", b) is False  # 探測仍在飛行，別的 worker 不能搶
+
+    real_time.sleep(0.4)  # 請求結束、心跳停止：租約自然到期
+    assert reg.claim("m1", b) is True
+
+
+def test_probe_lease_heartbeat_does_nothing_for_a_model_that_is_not_probing():
+    import threading
+
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    reg = ModelQuotaRegistry()
+    before = threading.active_count()
+
+    with reg.hold_probe_lease("healthy", object(), lease_sec=0.2):
+        assert threading.active_count() == before  # 沒有耗盡紀錄、沒有租約：不開執行緒
+
+
+def test_uncertain_window_is_visible_to_readers_and_consistent_with_gating():
+    """不確定視窗（沒有 tzdata）：快照／is_exhausted 與實際門控一致，並標示「確認中」。"""
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(clock, probe_interval=600)
+    reg.mark_exhausted("m1", until=clock.t + 100, grace_until=clock.t + 4000)
+
+    snap = reg.snapshot(["m1"])
+    assert [(h.model, h.uncertain) for h in snap] == [("m1", False)]
+
+    clock.t += 700  # 過了較早的期限，仍在不確定視窗內
+    assert reg.is_exhausted("m1") is True  # 門控仍在，讀取端也算耗盡
+    snap = reg.snapshot(["m1"])
+    assert [(h.model, h.uncertain, h.seconds_remaining) for h in snap] == [
+        ("m1", True, 0.0)
+    ]
+
+    clock.t += 4000  # 過了最晚時間：完全失效
+    assert reg.is_exhausted("m1") is False
+    assert reg.snapshot(["m1"]) == []

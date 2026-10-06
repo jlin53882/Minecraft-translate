@@ -100,7 +100,9 @@ def _default_model_quota_snapshot() -> list[ModelQuotaHealth]:
 
 
 def format_quota_reset(model: ModelQuotaHealth) -> str:
-    """「約 X 小時 Y 分鐘後重置（本機時間 HH:MM）」。"""
+    """「約 X 小時 Y 分鐘後重置（本機時間 HH:MM）」；不確定視窗內改為說明正在確認。"""
+    if model.uncertain:
+        return "重置時間不確定，正在探測是否已恢復"
     minutes = max(0, int(model.seconds_remaining // 60))
     hours, minutes = divmod(minutes, 60)
     remaining = f"{hours} 小時 {minutes} 分鐘" if hours else f"{minutes} 分鐘"
@@ -687,7 +689,10 @@ class DashboardView(ft.Column):
                         spacing=2,
                         expand=True,
                     ),
-                    kit.chip("今日額度用盡", "red"),
+                    kit.chip(
+                        "確認中" if model.uncertain else "今日額度用盡",
+                        "dia" if model.uncertain else "red",
+                    ),
                 ],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
