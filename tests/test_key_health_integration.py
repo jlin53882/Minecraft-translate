@@ -633,16 +633,13 @@ def test_missing_model_plus_lost_probe_claim_is_exhausted(env):
     assert not result
 
 
-@pytest.mark.parametrize("abandon", [backend_503, lambda: ""], ids=["503", "empty"])
-def test_probe_lease_is_released_when_the_probe_falls_through_to_another_model(
-    env, abandon
-):
+def test_probe_lease_is_released_when_the_probe_falls_through_to_another_model(env):
     """探測的模型被放棄（503 → 下一個模型、空回應）：租約收回並重新計時。
 
     後續批次不能每批都再探測一次，必須等下一個 10 分鐘週期。
     """
     _exhaust_m1_and_wait_for_probe(env, models=("m1", "m2"))
-    env.model_outcomes = {"m1": abandon(), "m2": OK_JSON}
+    env.model_outcomes = {"m1": backend_503(), "m2": OK_JSON}
 
     result, status = env.translate(4, models=("m1", "m2"))  # 4 個批次（每批 1 筆）
 
@@ -669,6 +666,47 @@ def test_slow_probe_keeps_its_lease_for_the_whole_request_timeout(env):
     assert status == "AUTO"
     assert len(result) == 1
     assert seen == [False]
+
+
+def cap_unsupported():
+    return _http_error(400, text="maxOutputTokens is not supported by this model")
+
+
+@pytest.mark.parametrize(
+    "second_failure",
+    [not_found, cap_unsupported, backend_503, lambda: ""],
+    ids=["404", "maxOutputTokens", "503", "empty"],
+)
+def test_pinned_model_that_is_then_abandoned_falls_back_to_the_next_model(
+    env, second_failure
+):
+    """m1 先 503 overload（被釘住重試），第二次又被放棄（404／maxOutputTokens／503／空回應）：
+    必須解除釘選、改試 m2，不能只因為這一輪的候選只有 m1 就終止或縮小 batch。"""
+    env.model_outcomes = {"m1": [overloaded(), second_failure()], "m2": OK_JSON}
+    env.outcomes = {"k0": OK_JSON, "k1": OK_JSON, "k2": OK_JSON}
+
+    result, status = env.translate(1, models=("m1", "m2"))
+
+    assert status == "AUTO"
+    assert len(result) == 1
+    assert not any(item.get("_untranslated") for item in result)
+    assert env.model_calls[:2] == ["m1", "m1"]
+    assert env.model_calls[-1] == "m2"
+
+
+@pytest.mark.parametrize("body", ["", '{"items": []}'], ids=["empty", "malformed"])
+def test_http_200_from_a_probe_clears_the_exhaustion_even_if_the_body_is_unusable(
+    env, body
+):
+    """HTTP 200 已證明沒有被 RPD 拒絕：配額紀錄要清掉，翻譯內容問題由 batch 流程自己處理。"""
+    _exhaust_m1_and_wait_for_probe(env, models=("m1", "m2"))
+    env.model_outcomes = {"m1": body, "m2": OK_JSON}
+    quota = get_model_quota_registry()
+
+    env.translate(1, models=("m1", "m2"))
+
+    assert env.model_calls[0] == "m1"  # 探測
+    assert not quota.is_exhausted("m1")  # 額度已恢復，不再顯示「今日額度用盡」
 
 
 def test_single_key_rpd_behaviour(env):

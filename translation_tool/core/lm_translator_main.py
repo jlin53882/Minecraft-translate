@@ -339,10 +339,9 @@ class _BatchRuntime:
     completed_calls: int = 0
     pinned_model_index: int | None = None
     # 同專案模式的模型配額：本次呼叫用來持有「探測租約」的身分（見 ModelQuotaRegistry）、
-    # 已確定不存在（404）的模型、以及這一輪 _attempt_batch 實際會走的模型索引。
+    # 已確定不存在（404）的模型。
     quota_owner: object = field(default_factory=object)
     missing_models: set[int] = field(default_factory=set)
-    round_indices: tuple[int, ...] = ()
     rpm_cooldown_sec: float = RPM_COOLDOWN_SEC
     key_rotation_buffer_sec: float = 5
     overload_retry_sec: float = OVERLOAD_RETRY_WAIT_SEC
@@ -582,23 +581,9 @@ def _handle_batch_error(
                 f"約 {_format_remaining(quota.seconds_remaining(model_name))} 後重置"
             )
             usable = _usable_model_indices(runtime, quota)
-            action = decide_batch_action(
+            return decide_batch_action(
                 error_kind, quota_kind="rpd", has_next_model=bool(usable)
             ).action
-            has_later_candidate = any(
-                index > model_index
-                for index in usable
-                if index in runtime.round_indices
-            )
-            if (
-                action is BatchAction.NEXT_MODEL
-                and not has_later_candidate
-                and runtime.pinned_model_index is not None
-            ):
-                # 被釘住（503 重試）的模型遇到 RPD：解除釘選，重新走完整模型池改用其他模型。
-                runtime.pinned_model_index = None
-                return BatchAction.RETRY_SAME_MODEL
-            return action
         if quota_kind == "rpm":
             wait_time = retry_after or 10
             log_info(f"[⏳] 每分鐘頻率限制 (RPM)：等待 {wait_time} 秒")
@@ -709,6 +694,27 @@ def _merge_batch_response(
     return merged, False
 
 
+def _abandon_model(
+    runtime: _BatchRuntime,
+    quota,
+    model_index: int,
+    model_indices: list[int],
+    pinned_round: bool,
+) -> None:
+    """放棄目前的模型、改試其他模型的單一入口。
+
+    - 收回它的探測租約並重新計時（只有同一模型的 RPM／503 重試才保留租約）。
+    - 這一輪是「被釘住」的（503 overload 重試只走那一個模型）：解除釘選，並把整個模型池加進這一輪
+      的候選，否則迴圈只有被釘住的模型，放棄後其他模型根本不會被試到。
+    """
+    quota.release(runtime.model_pool[model_index], runtime.quota_owner)
+    if pinned_round:
+        runtime.pinned_model_index = None
+        model_indices.extend(
+            [i for i in range(len(runtime.model_pool)) if i not in model_indices]
+        )
+
+
 def _probe_lease_sec(runtime: _BatchRuntime) -> float:
     """探測租約長度：請求逾時（``rate_limit.timeout``，預設 600 秒）+ 餘裕。"""
     try:
@@ -738,7 +744,6 @@ def _plan_model_indices(runtime: _BatchRuntime, quota) -> list[int] | None:
         if runtime.pinned_model_index is not None
         else list(range(len(runtime.model_pool)))
     )
-    runtime.round_indices = tuple(indices)
     return indices
 
 
@@ -772,6 +777,7 @@ def _attempt_batch(
     model_indices = _plan_model_indices(runtime, quota)
     if model_indices is None:
         return _BatchRoundOutcome(BatchAction.EXHAUSTED)
+    pinned_round = runtime.pinned_model_index is not None
     skipped_by_quota: set[int] = set()
     for model_index in model_indices:
         if model_index in runtime.missing_models:
@@ -811,8 +817,11 @@ def _attempt_batch(
                 max_output_tokens=output_cap,
                 meta_out=api_meta,
             ).strip()
+            # HTTP 200 已證明沒有被 RPD 拒絕：配額紀錄在這裡就清除；回應內容的問題（空、截斷、
+            # 格式不符）由 batch 流程自己處理，不影響配額狀態。
+            quota.mark_ok(model_name, started_at=started)
             if not raw_text:
-                quota.release(model_name, owner)  # 放棄這個模型：收回探測租約
+                _abandon_model(runtime, quota, model_index, model_indices, pinned_round)
                 continue
             finish_reason = api_meta.get("finish_reason")
             if finish_reason == "MAX_TOKENS" or _is_truncated_response(raw_text):
@@ -851,7 +860,6 @@ def _attempt_batch(
             ]
             runtime.batch_size = min(runtime.batch_size, len(runtime.remaining_items))
             runtime.key_cycle.record_success()
-            quota.mark_ok(model_name, started_at=started)  # 探測成功 = 配額已恢復
             runtime.pinned_model_index = None
             if not runtime.remaining_items and runtime.rpm_cooldown_sec > 0:
                 interruptible_sleep(runtime.rpm_cooldown_sec)
@@ -865,7 +873,7 @@ def _attempt_batch(
                 cap_source=cap_source,
             )
             if action is BatchAction.NEXT_MODEL:
-                quota.release(model_name, owner)  # 放棄這個模型：收回探測租約
+                _abandon_model(runtime, quota, model_index, model_indices, pinned_round)
                 continue
             return _BatchRoundOutcome(action)
 
