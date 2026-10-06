@@ -41,6 +41,10 @@
 - 合併頁單欄位寫入改走 ConfigStore（只改被修改的欄位，也會通知外殼）。
 
 ### Bug Fixes
+- **任務開始前寫入的訊息掛在舊的 `task_id`**：`add_start_log()` 在 `start()` 前鏡像到後台，`start()` 又換新識別，同一次執行被拆成兩個 task；改為 `start()` 後用新識別鏡像一次。
+- **單步 Pipeline 合併取消後新建輸出沒被刪**：對話框與 `PipelineActions.merge` 先建立了輸出資料夾，服務看到「原本就存在」所以不清理；改為對話框只驗證路徑（`check_output_dir`）、輸出資料夾由服務建立。
+- **資料夾合併的初始掃描無法取消**：`FolderReader.list_all()` 要整個 `os.walk` 跑完才回傳；新增 `iter_all()`，每進入一個資料夾檢查一次取消。
+- **Web 的「儲存檔案」對話框仍會拋例外**：Flet Web 的 `save_file` 沒有 `src_bytes` 時拋 `ValueError`（不是 `FletUnsupportedPlatformException`），`SafeFilePicker.save_file` 改為進入 Flet 之前先判斷 Web。
 - **`SyncTextField` 與呼叫端自己的 `on_change`／`on_blur` 串起來**：先把 Web 事件的新值寫回控制項，再呼叫呼叫端的 handler（保留 async 與零參數寫法）；原本呼叫端有自己的 handler 時不會同步，handler 讀到的 `e.control.value` 仍是舊值（一鍵流程的輸出 ZIP、閾值等欄位）。
 - **工作執行緒邊界的錯誤堆疊重新歸屬到自己的任務**（語系合併頁、翻譯頁）：服務結束時已清掉任務歸屬，邊界 `log_error` 會退回「最近綁定的 session」而送進別的任務畫面。新增 `session_task_scope()`。
 - 合併頁開始訊息與背景工作共用同一份 ZIP 清單（手動輸入 ZIP 時不再顯示「0 個 ZIP」）；取消後清理失敗不再記成「已清理」。

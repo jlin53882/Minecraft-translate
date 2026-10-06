@@ -193,3 +193,59 @@ def test_cleanup_success_is_reported(tmp_path, monkeypatch):
 
     assert not output.exists()
     assert any("已清理半成品輸出" in text for _, text in logged)
+
+
+# ------------------------------------------- 資料夾來源的初始掃描本身也要可取消（os.walk）
+
+
+def _many_dirs(tmp_path, count=50):
+    src = tmp_path / "scan"
+    for i in range(count):
+        d = src / f"d{i}"
+        d.mkdir(parents=True)
+        (d / "f.txt").write_text("x", encoding="utf-8")
+    return src
+
+
+def test_folder_reader_scan_stops_when_cancelled(tmp_path):
+    """list_all 以前要整個 os.walk 完才回傳，取消只能等掃完；現在每進一個資料夾就檢查。"""
+    from translation_tool.core.lang_merge_io import FolderReader
+
+    src = _many_dirs(tmp_path)
+    checks = []
+
+    def cancel_after_a_few():
+        checks.append(1)
+        return len(checks) >= 4
+
+    with cancel_scope(cancel_after_a_few), pytest.raises(TaskCancelled):
+        FolderReader(str(src)).list_all()
+
+    assert len(checks) < 50  # 沒有把 50 個資料夾都走完
+
+
+def test_folder_reader_without_cancellation_lists_everything(tmp_path):
+    from translation_tool.core.lang_merge_io import FolderReader
+
+    src = _many_dirs(tmp_path)
+
+    names = FolderReader(str(src)).list_all()
+
+    assert len(names) == 50 and "d0/f.txt" in names
+
+
+def test_folder_merge_cancelled_during_the_scan_never_starts_processing(
+    tmp_path, calls
+):
+    """取消發生在初始掃描：連第一個處理任務都不該開始。"""
+    src = _make_folder(tmp_path)
+    seen = []
+
+    def cancel_on_second_check():
+        seen.append(1)
+        return len(seen) >= 2
+
+    with cancel_scope(cancel_on_second_check), pytest.raises(TaskCancelled):
+        list(merge_zhcn_to_zhtw_from_folder(str(src), str(tmp_path / "out")))
+
+    assert calls == []

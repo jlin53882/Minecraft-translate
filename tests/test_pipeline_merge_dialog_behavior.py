@@ -202,12 +202,13 @@ def test_start_rejects_bad_directories(env, tmp_path, which, expected):
     assert dialog.open is True
 
 
-def test_start_creates_missing_output_dir(env, tmp_path):
+def test_start_accepts_a_new_output_dir_without_creating_it(env, tmp_path):
+    """對話框只檢查路徑；建立交給合併服務，取消時才分得出「新建的」並清掉。"""
     dialog = env.open()
     out = _find(dialog, ft.TextField, "輸出目錄")
     out.value = str(tmp_path / "new" / "out")
     _button(dialog, "確定執行").on_click(None)
-    assert (tmp_path / "new" / "out").is_dir()
+    assert not (tmp_path / "new" / "out").exists()
     assert not any("輸出目錄" in m for m in env.snacks)
 
 

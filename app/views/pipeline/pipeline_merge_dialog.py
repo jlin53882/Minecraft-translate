@@ -24,7 +24,7 @@ from app.services_impl.pipelines.merge_service import (
 from app.tasks.task_session import TaskSession  # noqa: F401
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog
-from app.ui.safe_file_picker import ensure_output_dir
+from app.ui.safe_file_picker import check_output_dir
 from app.ui.sync_text_field import SyncTextField
 from translation_tool.utils.config_manager import load_config
 
@@ -532,7 +532,8 @@ def _merge_start_merge(ctx, dialog):
     if not output:
         ctx.show_snack_bar("⚠️ 輸出目錄為必填欄位")
         return
-    output_error = ensure_output_dir(output)
+    # 只檢查、不建立：輸出資料夾由合併服務建立，取消時才分得出「新建的」並清掉
+    output_error = check_output_dir(output)
     if output_error:
         ctx.show_snack_bar(f"⚠️ {output_error}")
         return

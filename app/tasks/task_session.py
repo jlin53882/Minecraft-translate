@@ -226,7 +226,11 @@ class TaskSession:
         """
         with self._lock:
             self._start_logs.append((text, level))
-        self.add_log(text, level)
+            running = self.status == "RUNNING"
+        # 還沒 start()：只寫畫面。``start()`` 會換新的 task_id，現在鏡像到後台會掛在
+        # 「舊的」識別上，同一次執行就被拆成兩個 task；改由 start() 用新識別鏡像一次。
+        # 已經在執行中：這次執行的識別已經確定，直接鏡像。
+        self.add_log(text, level, mirror=running)
 
     def set_summary(self, summary: dict) -> None:
         """設定任務摘要統計（供 DONE 時 UI 取用）。"""
@@ -287,11 +291,10 @@ class TaskSession:
             self._amended = False
             self.task_id = uuid.uuid4().hex[:8]
             start_logs = list(self._start_logs)
-        for (
-            text,
-            level,
-        ) in start_logs:  # 清空日誌後把開頭訊息放回（後台已記錄過，不再鏡像）
-            self.add_log(text, level, mirror=False)
+        # 清空日誌後把開頭訊息放回；在新的 task_id 下鏡像到後台（add_start_log 在 start 前
+        # 沒有鏡像），這樣開頭訊息與「任務開始」「任務結束」屬於同一個執行識別
+        for text, level in start_logs:
+            self.add_log(text, level)
         self._log_lifecycle("任務開始")
         _notify(self, "start")
 

@@ -111,7 +111,8 @@ class PipelineActions:
             "zh_en_threshold": zh_en_threshold,
         }
         session.start()
-        os.makedirs(output_dir, exist_ok=True)
+        # 不在這裡建立輸出資料夾：合併服務要在建立之前記錄它原本存不存在，
+        # 取消時才能只刪「這次新建的」半成品
         if input_mode == "folder":
             return self.services.merge_folder(
                 input_dir=input_src, session=session, **options

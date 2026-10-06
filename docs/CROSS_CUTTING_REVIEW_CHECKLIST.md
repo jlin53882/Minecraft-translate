@@ -71,6 +71,9 @@ PR #169（UI 與後台日誌同步）歷經多輪審查才收斂。回顧後，�
 - [ ] 失敗時 UI 是否真的有可見的提示？對話框關閉後要再推一次 `page.update()`，避免遮罩殘留把 SnackBar 蓋住（`pipeline_one_click_dialog.py` 的 `_one_click_dispose_dialogs`）。
 - [ ] 完成訊息不可在失敗時仍顯示「已完成」。
 - [ ] 包裝呼叫端 handler 時（例如 `SyncTextField`）要「先同步、再呼叫」並保留 sync／async／零參數寫法，不可二選一；測試要模擬 Web 真實情況（`e.data` 是新值、`control.value` 是舊值），不能在測試裡先手動設好值。
+- [ ] 「取消時只清掉新建輸出」依賴「原本存不存在」：上游（對話框、`PipelineActions`）不得在服務之前先建立輸出資料夾，否則服務永遠看到「已存在」而不清理；上游只驗證路徑（`check_output_dir`）。
+- [ ] 長時間的初始掃描（`os.walk` 之類）本身要有取消檢查點；先建完整個清單才檢查取消，等於沒有檢查點。
+- [ ] 任務「開始前」寫入的訊息要等 `start()` 換新 `task_id` 後再鏡像到後台，否則同一次執行會被拆成兩個 task。
 - [ ] 清理動作（刪資料夾）成功與否要如實記錄：`ignore_errors=True` 之後不能無條件寫「已清理」。
 - [ ] 平台差異：新增檔案／資料夾選擇器一律用 `SafeFilePicker`（Flet Web 不支援 `get_directory_path`），並讓欄位可手動輸入。
 - [ ] 輸出資料夾不要求事先存在，用 `ensure_output_dir()` 自動建立；只有「輸入」才要求存在。
