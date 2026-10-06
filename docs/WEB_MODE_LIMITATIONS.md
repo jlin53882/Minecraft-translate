@@ -51,7 +51,9 @@ Flet 1.0.1 的 `FilePicker.get_directory_path()` 在 Web 模式會拋出 `FletUn
 
 ## 5. 測試時的注意事項
 
-- Playwright 的 `fill()` 不一定觸發真實輸入事件；驗證欄位同步時，可改用 `type()` 或輸入後按 Tab 失焦。
+- **Playwright 的 `fill()` 不可靠**：Flet Web 的畫面由 Flutter 繪製，欄位文字顯示在畫面上，不代表 Flutter 的輸入控制器收到了值。`fill()` 直接改 DOM 值、不經過真實的鍵盤事件，所以「畫面看得到路徑、後端卻是空字串或被截斷」是這種輸入方式的典型現象，不一定是應用程式的同步問題。
+- 驗證欄位同步請用**真實按鍵事件**：先點擊欄位，再用 `page.keyboard.type(文字, delay=20)` 逐字輸入，等約 300 ms（或按 Tab 失焦）後再按按鈕。
+- 判斷根因看後台 log：合併頁按下「開始合併」會記一行 `[合併] 開始按鈕：mode=…, folder=…, zips=…, output=…`，是後端當下實際收到的欄位值；一鍵流程有 `Pipeline one_click: input=[…], output=[…]`。畫面有值而 log 是空的才是同步問題。
 - Web 模式驗證**不能取代**桌面版（視窗事件、原生選擇器、打包與檔案鎖只存在於桌面版），見 `WINDOWS_VERIFICATION.md`。
 
 ## 相關文件

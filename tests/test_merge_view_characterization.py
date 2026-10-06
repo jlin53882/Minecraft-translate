@@ -430,3 +430,25 @@ def test_show_merge_summary_failed_list_shows_names(monkeypatch):
     )
     assert "├─ b.zip" in texts
     assert "│  └─ 未知錯誤" in texts
+
+
+def test_start_merge_logs_the_values_the_backend_actually_received(monkeypatch, caplog):
+    """畫面有值、後端是空的（Web 同步問題）時，後台 log 要能看出來。"""
+    import logging
+
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_widgets, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_widgets, "load_config", lambda: {"lang_merger": {}})
+    view = merge_view.MergeView(mock_page(), mock_filepicker())
+    view.input_mode_group.value = "folder"
+    view.folder_path_field.value = ""
+    view.output_dir_field.value = "C:/out"
+
+    with caplog.at_level(logging.INFO):
+        view.start_merge(None)
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(
+        "[合併] 開始按鈕" in m and "folder=''" in m and "C:/out" in m for m in messages
+    )

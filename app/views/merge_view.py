@@ -25,7 +25,7 @@ from app.views._log import LogView
 from app.views.config.config_actions import load_config_into_view
 from app.views.merge.merge_widgets import MergeWidgetsMixin
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_error, log_warning
+from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
 
 class MergeView(MergeWidgetsMixin, ft.Column):
@@ -219,9 +219,19 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             self.folder_path_field.value = result
             self.page.update()
 
+    def _log_start_inputs(self, input_mode) -> None:
+        """診斷：記錄按下按鈕當下「後端」實際收到的欄位值；畫面上看得到、後端卻是空的
+        （Web 輸入事件沒同步）時，只看後台 log 就能分辨，不必猜。"""
+        log_info(
+            f"[合併] 開始按鈕：mode={input_mode!r}, "
+            f"folder={self.folder_path_field.value!r}, "
+            f"zips={len(self.selected_zips)}, output={self.output_dir_field.value!r}"
+        )
+
     def start_merge(self, e: ft.ControlEvent) -> None:
         """處理開始合併按鈕事件。"""
         input_mode = self.input_mode_group.value
+        self._log_start_inputs(input_mode)
         if input_mode == "folder":
             if not (self.folder_path_field.value or "").strip():
                 show_snack(self.page, "請先選擇來源資料夾")
