@@ -301,8 +301,12 @@ class ScanPanel(ft.Column):
         """預設值取自 config 的 translation_db.zip_source（沒設定則「自訂補充」），
         每次切到本頁籤重讀；使用者在畫面上手動選過就保留他的選擇。
         """
+        # 選項順序跟隨設定的 translation_db.priority（優先序高的在前）
+        priority = current_settings().priority
+        order = [c for c in priority if c in ZIP_SOURCES]
+        order += [c for c in ZIP_SOURCES if c not in order]
         kit.set_dropdown_options(
-            self.source_dd, [(str(c), SOURCE_NAMES[c]) for c in ZIP_SOURCES]
+            self.source_dd, [(str(c), SOURCE_NAMES[c]) for c in order]
         )
         if not self._source_touched:
             default = current_settings().zip_source

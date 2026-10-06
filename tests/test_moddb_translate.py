@@ -14,7 +14,7 @@ from app.services_impl.moddb_translate_service import (
 )
 from app.tasks.task_session import TaskSession
 from app.views.moddb import translate_panel
-from tests.conftest import mock_page
+from tests.conftest import mock_filepicker, mock_page
 from translation_tool.translation_db import (
     KIND_LANG,
     DbSettings,
@@ -484,3 +484,41 @@ def test_config_db_path_field_cleans_quotes_and_checks_existence(db_path):
     field.value = ""
     check()
     assert field.helper.startswith("空白")
+
+
+def test_source_dropdowns_follow_config_priority(tmp_path, monkeypatch):
+    """來源下拉的選項順序跟隨 translation_db.priority；改設定後切回頁籤就會更新。"""
+    from app.views.moddb import entries_panel, scan_panel
+    from app.views.moddb import source_filter as sf
+    from translation_tool.translation_db.schema import (
+        SRC_CUSTOM,
+        SRC_MANUAL,
+        SRC_SUBTITLE,
+    )
+
+    path = tmp_path / "p.db"
+    state = {"priority": (SRC_SUBTITLE, SRC_MANUAL, SRC_CUSTOM)}
+
+    def fake_settings():
+        full = state["priority"] + tuple(
+            c for c in range(7) if c not in state["priority"]
+        )
+        return DbSettings(path=str(path), priority=full)
+
+    monkeypatch.setattr(sf, "current_settings", fake_settings)
+    monkeypatch.setattr(scan_panel, "current_settings", fake_settings)
+    monkeypatch.setattr(moddb_service, "load_db_settings", fake_settings)
+
+    flt = sf.SourceFilter(lambda: None)
+    keys = [o.key for o in flt.dropdown.options]
+    assert keys[:4] == ["__all__", str(SRC_SUBTITLE), str(SRC_MANUAL), str(SRC_CUSTOM)]
+
+    state["priority"] = (SRC_MANUAL, SRC_CUSTOM, SRC_SUBTITLE)
+    flt.refresh()
+    keys = [o.key for o in flt.dropdown.options]
+    assert keys[:4] == ["__all__", str(SRC_MANUAL), str(SRC_CUSTOM), str(SRC_SUBTITLE)]
+
+    panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
+    zip_keys = [o.key for o in panel.source_dd.options]
+    assert zip_keys[:3] == [str(SRC_MANUAL), str(SRC_CUSTOM), str(SRC_SUBTITLE)]
+    assert entries_panel.SourceFilter is sf.SourceFilter

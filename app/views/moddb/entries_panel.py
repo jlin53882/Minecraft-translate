@@ -292,6 +292,7 @@ class EntriesPanel(ft.Column):
             self._render_list()
             self._show_editor(None)
             return
+        self.source_filter.refresh()
         versions = db.versions()
         kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
         if self.version not in versions:

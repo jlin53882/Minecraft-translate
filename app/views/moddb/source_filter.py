@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-import flet as ft
-
-from app.services_impl.moddb_service import SOURCE_NAMES
+from app.services_impl.moddb_service import SOURCE_NAMES, current_settings
 from app.ui import kit
 
 ALL_SOURCES = "__all__"
@@ -22,9 +20,17 @@ class SourceFilter:
             dense=True,
             width=200,
             value=ALL_SOURCES,
-            options=[ft.dropdown.Option(key=ALL_SOURCES, text="全部來源")]
-            + [ft.dropdown.Option(key=str(c), text=n) for c, n in SOURCE_NAMES.items()],
+            options=[],
             on_select=lambda _e: on_change(),
+        )
+        self.refresh()
+
+    def refresh(self) -> None:
+        """選項順序跟隨設定的 translation_db.priority（每次切到條目校對頁籤重讀）。"""
+        order = current_settings().priority
+        kit.set_dropdown_options(
+            self.dropdown,
+            [(ALL_SOURCES, "全部來源"), *((str(c), SOURCE_NAMES[c]) for c in order)],
         )
 
     @property
