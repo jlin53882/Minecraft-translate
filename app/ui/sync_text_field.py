@@ -6,7 +6,8 @@ Web 模式手動輸入的內容要等失焦／送出才會進到 ``.value``，�
 
 ``app/`` 內一律用 ``SyncTextField``（``tests/test_text_field_value_sync.py`` 的 AST
 契約測試強制），不要直接建立 ``ft.TextField``。多行／密碼／唯讀欄位不掛：每個按鍵都往返，
-對大段文字不划算。呼叫端自己指定 ``on_change`` 時完全不動。
+對大段文字不划算。呼叫端自己指定 ``on_change`` 時仍會先做後端快取同步，再執行
+呼叫端 handler。
 """
 
 from __future__ import annotations
@@ -35,6 +36,31 @@ def _sync_value(e) -> None:
             e.control.value = value
 
 
+def _sync_change(e) -> None:
+    """把 ``on_change`` 的完整文字寫入後端，但不要反向推回瀏覽器。
+
+    Flet Web 的輸入事件可能在使用者還在打字時連續抵達。若這裡直接設定
+    ``control.value``，Flet 會把每次同步再當成一次 UI 更新送回瀏覽器；來回
+    更新競速時，較早的值可能覆蓋較新的值，造成長路徑只剩中間或尾端文字。
+    ``_values`` 是 Flet 控制項的後端快取；只更新快取、不標記 dirty，讓呼叫端
+    能立即讀到新值，同時避免每個按鍵觸發反向更新。
+    """
+    control = getattr(e, "control", None)
+    value = getattr(e, "data", None)
+    if control is None or not isinstance(value, str):
+        return
+
+    values = getattr(control, "_values", None)
+    if isinstance(values, dict):
+        if value:
+            values["value"] = value
+        else:
+            values.pop("value", None)
+    else:
+        # 測試替身或未使用 Flet Prop 的控制項仍維持可讀行為。
+        control.value = value
+
+
 def _sync_blur(e) -> None:
     """失焦：先記錄後端「控制項的值」與「事件帶來的值」（診斷用），再同步。
 
@@ -57,6 +83,7 @@ def _sync_blur(e) -> None:
 
 # 內建的同步 handler 本身就是「已同步」：init 再次確認時不可再包一層
 _sync_value._sync_wrapped = True
+_sync_change._sync_wrapped = True
 _sync_blur._sync_wrapped = True
 
 
@@ -114,7 +141,7 @@ class SyncTextField(ft.TextField):
         )
         if editable and (single_line or kwargs.get("on_change") is not None):
             # 有呼叫端 handler 時任何型態的欄位都要先同步（多行也一樣）；沒有時只補單行
-            kwargs["on_change"] = _synced(kwargs.get("on_change"), _sync_value)
+            kwargs["on_change"] = _synced(kwargs.get("on_change"), _sync_change)
         if single_line:
             kwargs["on_blur"] = _synced(kwargs.get("on_blur"), _sync_blur)
         super().__init__(*args, **kwargs)
@@ -125,7 +152,7 @@ class SyncTextField(ft.TextField):
         if self.read_only:
             return
         if self.on_change is not None or not (self.multiline or self.password):
-            self.on_change = _synced(self.on_change, _sync_value)
+            self.on_change = _synced(self.on_change, _sync_change)
         if not (self.multiline or self.password):
             self.on_blur = _synced(self.on_blur, _sync_blur)
 

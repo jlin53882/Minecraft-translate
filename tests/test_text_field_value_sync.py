@@ -104,6 +104,31 @@ def test_change_event_value_overwrites_stale_control_value():
     assert control.value == "新路徑"
 
 
+def test_web_change_without_event_name_updates_backend_cache_without_dirty_patch():
+    """實際 Web 事件沒有可靠的 name 時，也要同步且不能反推舊值到瀏覽器。"""
+    from types import SimpleNamespace
+
+    from app.ui.sync_text_field import _sync_change
+
+    control = SimpleNamespace(value="舊路徑", _values={"value": "舊路徑"}, _dirty={})
+    _sync_change(SimpleNamespace(control=control, data="C:\\Users\\完整長路徑"))
+
+    assert control._values["value"] == "C:\\Users\\完整長路徑"
+    assert control._dirty == {}
+
+
+def test_web_change_can_sync_deletion_to_empty_value():
+    from types import SimpleNamespace
+
+    from app.ui.sync_text_field import _sync_change
+
+    control = SimpleNamespace(value="舊值", _values={"value": "舊值"}, _dirty={})
+    _sync_change(SimpleNamespace(control=control, data=""))
+
+    assert control._values == {}
+    assert control._dirty == {}
+
+
 def test_single_line_field_has_blur_fallback():
     assert kit.text_field("路徑").on_blur is not None
     assert kit.text_field("x", multiline=True).on_blur is None
