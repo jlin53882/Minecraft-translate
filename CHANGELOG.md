@@ -38,6 +38,7 @@
 - 合併頁單欄位寫入改走 ConfigStore（只改被修改的欄位，也會通知外殼）。
 
 ### Bug Fixes
+- **Flet Web 手動輸入的路徑沒同步到後端**：`kit.text_field` 的單行欄位預設掛空的 `on_change`，讓輸入值即時回到 `.value`（一鍵流程曾收到 `input=[], output=[]`）。
 - **Flet Web 不支援資料夾選擇器**：新增 `SafeFilePicker`（`app/ui/safe_file_picker.py`），`get_directory_path`／`pick_files`／`save_file` 在不支援的平台改為顯示提示並視為取消，不再拋出未捕捉的 `FletUnsupportedPlatformException`；欄位保持可手動輸入（Web 模式輸入的是執行程式那台電腦的路徑）。
 - **輸出資料夾不必事先存在**：一鍵製作、提取、合併的輸出目錄改為自動建立（路徑是檔案或無法建立時才提示）。
 - **一鍵製作輸入驗證失敗時對話框遮罩殘留**：關閉對話框時，移除 overlay 後再推一次更新，避免緊接著的 SnackBar 被殘留遮罩蓋住（Windows 煙霧測試發現）。

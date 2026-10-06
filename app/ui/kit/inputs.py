@@ -75,6 +75,10 @@ def button(
     )
 
 
+def _sync_value(e) -> None:
+    """不做事：只是讓前端在每次輸入時把值送回後端（見 ``text_field``）。"""
+
+
 def text_field(
     label: str | None = None,
     *,
@@ -95,7 +99,15 @@ def text_field(
     suffix: ft.Control | None = None,
     dense: bool = True,
 ) -> ft.TextField:
-    """統一外觀的輸入框（深 / 淺色皆適用）。``mono=True`` 用等寬字（路徑、key、JSON）。"""
+    """統一外觀的輸入框（深 / 淺色皆適用）。``mono=True`` 用等寬字（路徑、key、JSON）。
+
+    單行欄位沒有指定 ``on_change`` 時掛一個空的處理函式：Flet 只有在控制項有事件
+    處理函式時才即時把輸入值同步回後端，否則 Web 模式手動輸入的路徑要等到失焦／送出
+    才會進到 ``.value``，按「執行」時讀到空字串（一鍵流程 ``input=[]``）。多行／密碼
+    欄位不掛（每個按鍵都往返、對大段文字不划算）。
+    """
+    if on_change is None and not multiline and not password:
+        on_change = _sync_value
     return ft.TextField(
         label=label,
         hint_text=hint,
