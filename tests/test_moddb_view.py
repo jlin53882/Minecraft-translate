@@ -740,3 +740,13 @@ def test_ui_handler_skips_records_already_written_to_the_session():
     finally:
         log.removeHandler(handler)
     assert [e.text for e in session.snapshot()["logs"]] == ["兩邊都要"]
+
+
+def test_visible_segments_exposes_newline_spaces_and_tokens():
+    from app.views.moddb.formatting import visible_segments
+
+    segs = visible_segments("Hi %2$s \n")
+    assert ("%2$s", "token") in segs
+    assert ("·", "space") in segs
+    assert ("↵", "newline") in segs
+    assert "".join(s for s, k in segs if k == "text") == "Hi \n"

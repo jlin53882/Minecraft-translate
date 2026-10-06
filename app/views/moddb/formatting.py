@@ -81,6 +81,33 @@ def visible_breaks(text: str) -> str:
     return " ".join(flat.split())
 
 
+_VISIBLE_RE = re.compile(_TOKEN_RE.pattern + r"|^[ \t]+|[ \t]+$", re.MULTILINE)
+
+
+def visible_segments(text: str) -> list[tuple[str, str]]:
+    """把特殊字元攤開成 ``[(顯示文字, 種類)]``；種類為 text / token / newline / space。
+
+    換行顯示成 ``↵`` 並真的換行；行首行尾的空白顯示成 ``·``；格式碼、佔位符標成 token。
+    """
+    text = (text or "").replace("\r\n", "\n")
+    out: list[tuple[str, str]] = []
+    pos = 0
+    for m in _VISIBLE_RE.finditer(text):
+        if m.start() > pos:
+            out.append((text[pos : m.start()], "text"))
+        raw = m.group(0)
+        if raw == "\n":
+            out += [("↵", "newline"), ("\n", "text")]
+        elif raw.strip(" \t") == "":
+            out.append(("·" * len(raw.replace("\t", "    ")), "space"))
+        else:
+            out.append((raw, "token"))
+        pos = m.end()
+    if pos < len(text):
+        out.append((text[pos:], "text"))
+    return out
+
+
 def format_tokens(text: str) -> Counter[str]:
     """文字中的換行、`§` 格式碼、`%s` 類佔位符、Patchouli `$(…)`、`{0}` 的出現次數。"""
     return Counter(m.group(0).replace("\r", "") for m in _TOKEN_RE.finditer(text or ""))
