@@ -11,10 +11,12 @@ import os
 import zipfile
 from collections import defaultdict
 from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any
 
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
+from ..utils.cancellation import raise_if_cancelled
 from ..utils.config_manager import load_config
 from ..utils.log_unit import log_debug, log_error, log_exception, log_info
 from ..utils.text_processor import load_replace_rules
@@ -27,6 +29,30 @@ from .lang_merge_content import (
 from .lang_merge_content_copy import detect_content_wrapper_prefix
 from .lang_merge_io import FolderReader, ZipReader
 from .lang_merge_pipeline import _process_single_mod, detect_mod_wrapper_prefix
+
+# 掃描檔名清單時每隔多少筆檢查一次取消（逐筆檢查成本小，但清單可達數十萬筆）。
+_CANCEL_CHECK_EVERY = 256
+
+
+def _checkpoint(index: int) -> None:
+    """長迴圈的取消檢查點：每 _CANCEL_CHECK_EVERY 筆檢查一次，已取消則拋出 TaskCancelled。"""
+    if index % _CANCEL_CHECK_EVERY == 0:
+        raise_if_cancelled()
+
+
+@contextmanager
+def _cancel_pending_on_exit(futures: list) -> Generator[None, None, None]:
+    """離開時取消尚未開始的任務。
+
+    要放在 ``with executor`` 之後（內層先離開）：取消、關閉 generator 或例外時，
+    佇列中還沒開始的任務直接丟棄，執行緒池只需等「正在執行」的少數任務，
+    而不是把整個佇列跑完才結束。
+    """
+    try:
+        yield
+    finally:
+        for fut in futures:
+            fut.cancel()
 
 
 def _scale_progress(value: float, start: float, end: float) -> float:
@@ -185,7 +211,8 @@ def merge_zhcn_to_zhtw_from_zip(
             #    else:
             #        other_files.append(normalized)
 
-            for file_path in zf.namelist():
+            for index, file_path in enumerate(zf.namelist()):
+                _checkpoint(index)
                 normalized = file_path.replace("\\", "/")
                 if normalized.endswith("/") or not normalized:
                     continue
@@ -251,7 +278,10 @@ def merge_zhcn_to_zhtw_from_zip(
             futures = []
             # 所有任務共用同一個累計讀取預算（防止大量合法大小成員的 ZIP bomb）
             zip_budget = ZipReadBudget.for_pack(label=str(zip_file))
-            with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
+            with (
+                ContextThreadPoolExecutor(max_workers=max_workers) as executor,
+                _cancel_pending_on_exit(futures),
+            ):
                 # ✅ 優化點：在啟動 ThreadPool 前，先完成一次性的路徑標準化快取
                 all_names_raw = zf.namelist()
                 all_files_cache = [n.lower().replace("\\", "/") for n in all_names_raw]
@@ -263,6 +293,7 @@ def merge_zhcn_to_zhtw_from_zip(
 
                 # 提交每個 mod 的處理（這裡每個 mod 的 paths 會包含 zh_cn/zh_tw/en_us 任一或多個）
                 for mod_key, paths in mods_to_process.items():
+                    raise_if_cancelled()
                     futures.append(
                         executor.submit(
                             _process_single_mod,
@@ -282,6 +313,7 @@ def merge_zhcn_to_zhtw_from_zip(
                 # 提交其他檔案處理（例如圖片、md、json5、localized files 等）
                 patchouli_eff_cache: dict = {}
                 for input_path in eligible_other_files:
+                    raise_if_cancelled()
                     futures.append(
                         executor.submit(
                             _process_content_or_copy_file,
@@ -305,6 +337,7 @@ def merge_zhcn_to_zhtw_from_zip(
 
                 completed = 0
                 for fut in concurrent.futures.as_completed(futures):
+                    raise_if_cancelled()
                     completed += 1  # noqa: SIM113
                     try:
                         res = fut.result()
@@ -515,7 +548,8 @@ def merge_zhcn_to_zhtw_from_folder(
         lang_files_by_mod = defaultdict(dict)
         other_files: list[str] = []
 
-        for file_path in all_names:
+        for index, file_path in enumerate(all_names):
+            _checkpoint(index)
             normalized = file_path.replace("\\", "/")
             if normalized.endswith("/") or not normalized:
                 continue
@@ -564,7 +598,10 @@ def merge_zhcn_to_zhtw_from_folder(
             max_workers = max_allowed_workers
 
         futures = []
-        with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
+        with (
+            ContextThreadPoolExecutor(max_workers=max_workers) as executor,
+            _cancel_pending_on_exit(futures),
+        ):
             all_files_cache = [n.lower().replace("\\", "/") for n in all_names]
             # 包裝前綴只算一次,避免每個 mod / 內容檔各掃一次全部檔名
             mod_wrapper_prefix = detect_mod_wrapper_prefix(all_names)
@@ -572,6 +609,7 @@ def merge_zhcn_to_zhtw_from_folder(
             content_wrapper_prefix = detect_content_wrapper_prefix(all_names)
 
             for mod_key, paths in mods_to_process.items():
+                raise_if_cancelled()
                 futures.append(
                     executor.submit(
                         _process_single_mod,
@@ -589,6 +627,7 @@ def merge_zhcn_to_zhtw_from_folder(
 
             patchouli_eff_cache: dict = {}
             for input_path in eligible_other_files:
+                raise_if_cancelled()
                 futures.append(
                     executor.submit(
                         _process_content_or_copy_file,
@@ -612,6 +651,7 @@ def merge_zhcn_to_zhtw_from_folder(
 
             completed = 0
             for fut in concurrent.futures.as_completed(futures):
+                raise_if_cancelled()
                 completed += 1  # noqa: SIM113
                 try:
                     res = fut.result()

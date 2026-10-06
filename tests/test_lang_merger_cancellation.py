@@ -1,0 +1,96 @@
+"""#170：核心合併在單一 update 內也能取消（檔名掃描、任務提交、佇列中的任務）。"""
+
+from __future__ import annotations
+
+import threading
+import zipfile
+
+import pytest
+
+from translation_tool.core import lang_merger
+from translation_tool.core.lang_merger import (
+    merge_zhcn_to_zhtw_from_folder,
+    merge_zhcn_to_zhtw_from_zip,
+)
+from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
+
+MODS = 60
+
+
+@pytest.fixture
+def calls(monkeypatch):
+    """把真正的處理函式換成計數的假函式；單一工作執行緒讓佇列行為可預測。"""
+    seen: list[str] = []
+    lock = threading.Lock()
+
+    def fake_mod(*args, **kwargs):
+        with lock:
+            seen.append("mod")
+        return {"success": True, "log": "ok"}
+
+    monkeypatch.setattr(lang_merger, "_process_single_mod", fake_mod)
+    monkeypatch.setattr(lang_merger.os, "cpu_count", lambda: 2)  # → 1 個工作執行緒
+    return seen
+
+
+def _make_folder(tmp_path):
+    src = tmp_path / "in"
+    for i in range(MODS):
+        lang = src / f"mod{i}" / "assets" / f"m{i}" / "lang"
+        lang.mkdir(parents=True)
+        (lang / "en_us.json").write_text('{"a": "b"}', encoding="utf-8")
+    return src
+
+
+def _make_zip(tmp_path):
+    path = tmp_path / "in.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        for i in range(MODS):
+            zf.writestr(f"mod{i}/assets/m{i}/lang/en_us.json", '{"a": "b"}')
+    return path
+
+
+def test_folder_cancel_before_start_processes_nothing(tmp_path, calls):
+    src = _make_folder(tmp_path)
+    with cancel_scope(lambda: True), pytest.raises(TaskCancelled):
+        list(merge_zhcn_to_zhtw_from_folder(str(src), str(tmp_path / "out")))
+    assert calls == []
+
+
+def test_folder_cancel_in_the_middle_stops_inside_one_update(tmp_path, calls):
+    """第一個任務完成後取消：佇列中還沒開始的任務被丟棄，不會把 60 個都跑完。"""
+    src = _make_folder(tmp_path)
+    with cancel_scope(lambda: len(calls) >= 1), pytest.raises(TaskCancelled):
+        list(merge_zhcn_to_zhtw_from_folder(str(src), str(tmp_path / "out")))
+    assert 1 <= len(calls) < MODS // 2
+
+
+def test_zip_cancel_before_start_processes_nothing(tmp_path, calls):
+    zip_path = _make_zip(tmp_path)
+    with cancel_scope(lambda: True), pytest.raises(TaskCancelled):
+        list(merge_zhcn_to_zhtw_from_zip(str(zip_path), str(tmp_path / "out")))
+    assert calls == []
+
+
+def test_zip_cancel_in_the_middle_stops_inside_one_update(tmp_path, calls):
+    zip_path = _make_zip(tmp_path)
+    with cancel_scope(lambda: len(calls) >= 1), pytest.raises(TaskCancelled):
+        list(merge_zhcn_to_zhtw_from_zip(str(zip_path), str(tmp_path / "out")))
+    assert 1 <= len(calls) < MODS // 2
+
+
+def test_closing_the_generator_discards_queued_work(tmp_path, calls):
+    """consumer 關閉 generator（#155 的取消路徑）時，佇列中的任務同樣被丟棄。"""
+    src = _make_folder(tmp_path)
+    gen = merge_zhcn_to_zhtw_from_folder(str(src), str(tmp_path / "out"))
+    for update in gen:
+        if update.get("pending_count") is not None and calls:
+            break
+    gen.close()
+    assert len(calls) < MODS // 2
+
+
+def test_without_cancel_everything_is_processed(tmp_path, calls):
+    src = _make_folder(tmp_path)
+    list(merge_zhcn_to_zhtw_from_folder(str(src), str(tmp_path / "out")))
+    assert len(calls) == MODS
