@@ -21,6 +21,10 @@ import flet as ft
 from app.ui.design import C
 from app.ui.sync_text_field import SyncTextField
 from app.views.pipeline.pipeline_config import normalize_extract_mode
+from app.views.pipeline.pipeline_one_click_lifecycle import (
+    _one_click_dispose_dialogs,
+    _one_click_present_dialog,
+)
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_warning
 
@@ -95,6 +99,11 @@ def open_one_click_dialog(
         on_execute=on_execute,
         show_snack_bar=show_snack_bar,
     )
+    # Flet 0.85+ 的 Web 對話框必須交給 page.show_dialog / pop_dialog 管理；
+    # 測試用頁面或舊版 Flet 沒有這組 API 時，才退回 overlay 相容流程。
+    ctx.uses_dialog_api = callable(getattr(page, "show_dialog", None)) and callable(
+        getattr(page, "pop_dialog", None)
+    )
     lang_merger_cfg, output_zip_name, translate_output_subfolder = (
         _one_click_init_config_defaults(ctx)
     )
@@ -130,11 +139,7 @@ def open_one_click_dialog(
 
     ctx._do_execute = functools.partial(_one_click__do_execute, ctx)
 
-    d1 = ctx.build_dialog(1)
-    ctx.dialogs.append(d1)
-    ctx.page.overlay.append(d1)
-    d1.open = True
-    ctx.page.update()
+    _one_click_present_dialog(ctx, ctx.build_dialog(1))
 
 
 def _one_click_init_config_defaults(ctx):
@@ -205,27 +210,6 @@ def _one_click_init_state(
     )
 
 
-def _one_click_dispose_dialogs(ctx) -> None:
-    """關閉並移除目前的對話框。
-
-    必須先把 ``open=False`` 送到前端（page.update），再從 overlay 移除；
-    直接移除會讓前端的 dialog route 留在畫面上（殘影＋擋住整個頁面）。
-    """
-    for d in ctx.dialogs:
-        d.open = False
-    ctx.page.update()
-    removed = False
-    for d in ctx.dialogs:
-        if d in ctx.page.overlay:
-            ctx.page.overlay.remove(d)
-            removed = True
-    ctx.dialogs.clear()
-    if removed:
-        # 移除後也要再推一次：否則緊接著的 SnackBar／進度面板（輸入驗證失敗時）
-        # 會與「移除 overlay」擠在同一次更新，對話框遮罩殘留、提示被蓋住。
-        ctx.page.update()
-
-
 def _one_click_rebuild_ui(ctx):
     _one_click_dispose_dialogs(ctx)
 
@@ -234,10 +218,7 @@ def _one_click_rebuild_ui(ctx):
     ctx.step_label.value = f"{step}/4"
 
     dlg = ctx.build_dialog(step)
-    ctx.dialogs.append(dlg)
-    ctx.page.overlay.append(dlg)
-    dlg.open = True
-    ctx.page.update()
+    _one_click_present_dialog(ctx, dlg)
 
 
 def _one_click_close_all(ctx):
@@ -728,9 +709,10 @@ def _one_click_build_dialog(ctx, step: int):
 
     actions = []
     if step > 1:
-        actions.append(ft.TextButton("上一個", on_click=lambda e: ctx._go_prev()))
+        # Web 版使用標準 Button，避免 AlertDialog 內的 TextButton 事件未送達。
+        actions.append(ft.Button("上一個", on_click=lambda e: ctx._go_prev()))
     if step < 4:
-        actions.append(ft.TextButton("下一個", on_click=lambda e: ctx._go_next()))
+        actions.append(ft.Button("下一個", on_click=lambda e: ctx._go_next()))
     else:
         actions.append(
             ft.Button(
@@ -741,7 +723,7 @@ def _one_click_build_dialog(ctx, step: int):
                 on_click=lambda e: ctx._do_execute(),
             )
         )
-    actions.append(ft.TextButton("取消", on_click=lambda e: ctx.close_all()))
+    actions.append(ft.Button("取消", on_click=lambda e: ctx.close_all()))
 
     dlg = ft.AlertDialog(
         modal=True,
