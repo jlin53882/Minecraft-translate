@@ -103,3 +103,42 @@ def test_legacy_response_shapes_are_rejected_and_sent_to_retry_flow(
     assert rejected is True
     assert "root must contain exactly the items property" in warning.call_args.args[0]
     runtime.budget_tracker.on_truncated.assert_called_once_with("STOP", kind="missing")
+
+
+def test_incomplete_response_is_rejected_now_that_schema_has_no_length_limit(
+    batch_context, monkeypatch
+):
+    """Schema 不再要求「剛好 N 筆」，少回的批次必須由程式端擋下，不可合併。"""
+    runtime, round_data = batch_context
+    warning = Mock()
+    monkeypatch.setattr("translation_tool.core.lm_translator_main.log_warning", warning)
+
+    merged, rejected = _merge_batch_response(
+        runtime,
+        round_data,
+        '{"items":[{"id":"1","value":"鑽石劍"}]}',
+        {"finish_reason": "STOP"},
+    )
+
+    assert merged is None and rejected is True
+    assert "missing IDs=['0']" in warning.call_args.args[0]
+    runtime.budget_tracker.on_truncated.assert_called_once_with("STOP", kind="missing")
+
+
+def test_response_with_extra_items_beyond_the_batch_is_rejected(
+    batch_context, monkeypatch
+):
+    runtime, round_data = batch_context
+    warning = Mock()
+    monkeypatch.setattr("translation_tool.core.lm_translator_main.log_warning", warning)
+    response = (
+        '{"items":[{"id":"0","value":"鐵錠"},{"id":"1","value":"鑽石劍"},'
+        '{"id":"2","value":"多出來的"}]}'
+    )
+
+    merged, rejected = _merge_batch_response(
+        runtime, round_data, response, {"finish_reason": "STOP"}
+    )
+
+    assert merged is None and rejected is True
+    assert "unexpected IDs=['2']" in warning.call_args.args[0]
