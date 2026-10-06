@@ -618,8 +618,25 @@ def test_all_models_missing_is_a_terminal_failure_not_an_untranslated_auto(env):
     assert env.model_calls == ["m1", "m2"]  # 各只試一次
 
 
-def test_missing_model_plus_lost_probe_claim_is_exhausted(env):
-    """m1 404、m2 的探測名額被別的 worker 領走：沒有任何模型能送 → 耗盡。"""
+def test_rpd_then_missing_model_is_terminal_not_a_shrink(env):
+    """m1 先 RPD、m2 才 404（與 404 → RPD 順序相反）：同樣沒有任何模型能用 → 耗盡。"""
+    env.model_outcomes = {"m1": rpd(), "m2": not_found()}
+    env.outcomes = {"k0": OK_JSON, "k1": OK_JSON, "k2": OK_JSON}
+
+    result, status = env.translate(
+        1, models=("m1", "m2")
+    )  # 剩最後一筆：縮到極限會回填原文
+
+    assert status == "ALL_KEYS_EXHAUSTED"
+    assert not result  # 沒有任何 _untranslated 回填
+    assert env.model_calls == ["m1", "m2"]
+
+
+@pytest.mark.parametrize(
+    "models", [("m2", "m1"), ("m1", "m2")], ids=["404-first", "lost-probe-first"]
+)
+def test_missing_model_plus_lost_probe_claim_is_exhausted(env, models):
+    """一個模型 404、另一個的探測名額被別的 worker 領走（兩種順序）：沒有任何模型能送 → 耗盡。"""
     quota = get_model_quota_registry()
     quota.mark_exhausted("m1")
     env.clock.t += DEFAULT_PROBE_INTERVAL_SEC + 1
@@ -627,7 +644,7 @@ def test_missing_model_plus_lost_probe_claim_is_exhausted(env):
     env.model_outcomes = {"m2": not_found()}
     env.outcomes = {"k0": OK_JSON, "k1": OK_JSON, "k2": OK_JSON}
 
-    result, status = env.translate(2, models=("m2", "m1"))
+    result, status = env.translate(1, models=models)
 
     assert status == "ALL_KEYS_EXHAUSTED"
     assert not result

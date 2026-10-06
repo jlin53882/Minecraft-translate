@@ -748,18 +748,29 @@ def _plan_model_indices(runtime: _BatchRuntime, quota) -> list[int] | None:
 
 
 def _dead_end_outcome(
-    runtime: _BatchRuntime, model_indices: list[int], skipped_by_quota: set[int]
+    runtime: _BatchRuntime,
+    quota,
+    model_indices: list[int],
+    skipped_by_quota: set[int],
 ) -> _BatchRoundOutcome | None:
     """這一輪沒有任何模型能送請求（都是 404 或被每日配額擋住）時的終止結果；否則回傳 None。
 
-    縮小 batch 對這種情況沒有用，而且會把原文回填成「已翻譯」。
+    看的是模型「現在」的狀態，而不是它怎麼變成被擋住的：claim 時就被擋下、這一輪送出請求後才
+    收到 RPD、探測名額被其他 worker 領走，結果都一樣。縮小 batch 對這種情況沒有用，而且會把原文
+    回填成「已翻譯」。
     """
+    blocked_now = {
+        index
+        for index in model_indices
+        if index in skipped_by_quota
+        or quota.is_blocked(runtime.model_pool[index], runtime.quota_owner)
+    }
     if not all(
-        index in runtime.missing_models or index in skipped_by_quota
+        index in runtime.missing_models or index in blocked_now
         for index in model_indices
     ):
         return None
-    if skipped_by_quota:
+    if blocked_now:
         log_warning(
             "[🚫] 沒有可用的模型：其餘模型今日配額已用盡或正由其他 worker 探測中"
         )
@@ -877,7 +888,7 @@ def _attempt_batch(
                 continue
             return _BatchRoundOutcome(action)
 
-    dead_end = _dead_end_outcome(runtime, model_indices, skipped_by_quota)
+    dead_end = _dead_end_outcome(runtime, quota, model_indices, skipped_by_quota)
     if dead_end is not None:
         return dead_end
 
