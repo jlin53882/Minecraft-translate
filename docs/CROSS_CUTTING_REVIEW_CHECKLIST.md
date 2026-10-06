@@ -69,6 +69,8 @@ PR #169（UI 與後台日誌同步）歷經多輪審查才收斂。回顧後，�
 - [ ] 一鍵流程可略過缺少的輸入（`skip_missing_input=True`），一般流程不可。
 - [ ] 失敗時 UI 是否真的有可見的提示？對話框關閉後要再推一次 `page.update()`，避免遮罩殘留把 SnackBar 蓋住（`pipeline_one_click_dialog.py` 的 `_one_click_dispose_dialogs`）。
 - [ ] 完成訊息不可在失敗時仍顯示「已完成」。
+- [ ] 平台差異：新增檔案／資料夾選擇器一律用 `SafeFilePicker`（Flet Web 不支援 `get_directory_path`），並讓欄位可手動輸入。
+- [ ] 輸出資料夾不要求事先存在，用 `ensure_output_dir()` 自動建立；只有「輸入」才要求存在。
 
 ## 7. 批次修改與工具
 

@@ -38,6 +38,8 @@
 - 合併頁單欄位寫入改走 ConfigStore（只改被修改的欄位，也會通知外殼）。
 
 ### Bug Fixes
+- **Flet Web 不支援資料夾選擇器**：新增 `SafeFilePicker`（`app/ui/safe_file_picker.py`），`get_directory_path`／`pick_files`／`save_file` 在不支援的平台改為顯示提示並視為取消，不再拋出未捕捉的 `FletUnsupportedPlatformException`；欄位保持可手動輸入（Web 模式輸入的是執行程式那台電腦的路徑）。
+- **輸出資料夾不必事先存在**：一鍵製作、提取、合併的輸出目錄改為自動建立（路徑是檔案或無法建立時才提示）。
 - **一鍵製作輸入驗證失敗時對話框遮罩殘留**：關閉對話框時，移除 overlay 後再推一次更新，避免緊接著的 SnackBar 被殘留遮罩蓋住（Windows 煙霧測試發現）。
 - **資料夾合併遇到不存在的輸入資料夾不再顯示「翻譯已完成」**：核心改回報 `error=True` 並帶出路徑；服務層記為資料夾失敗（階段 1 失敗、略過階段 2、任務狀態 ERROR）。一鍵流程對提取沒有產生的來源（例如沒有 Patchouli 書籍）以 `skip_missing_input=True` 明確略過，不會整個流程失敗。ZIP 合併同理：缺檔的 ZIP 現在記為該 ZIP 失敗（帶出路徑），其餘 ZIP 照常處理。路徑存在但型別不對（資料夾模式收到檔案／ZIP、ZIP 模式收到資料夾）同樣判為失敗；一鍵流程的 `skip_missing_input` 只略過「路徑不存在」。
 - **語言合併（#109）**：ZIP 累計讀取預算用盡時回報不完整輸出，不再顯示「全部處理完成」。
