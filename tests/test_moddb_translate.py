@@ -522,3 +522,20 @@ def test_source_dropdowns_follow_config_priority(tmp_path, monkeypatch):
     zip_keys = [o.key for o in panel.source_dd.options]
     assert zip_keys[:3] == [str(SRC_MANUAL), str(SRC_CUSTOM), str(SRC_SUBTITLE)]
     assert entries_panel.SourceFilter is sf.SourceFilter
+
+
+def test_translate_panel_explains_zero_limit_means_all(db_path):
+    seed(db_path)
+    db = TranslationDB(db_path)
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: db)
+    panel.refresh_scope()
+    assert "不限" in panel.limit_field.label
+    panel.limit_field.value = "0"
+    panel._on_limit_changed()
+    assert "上限為 0（不限）" in panel.count_text.value
+    assert "全部 3 筆" in panel.count_text.value
+    panel.limit_field.value = "2"
+    panel._on_limit_changed()
+    assert "上限 2 筆" in panel.count_text.value
+    assert "最多翻譯 2 筆" in panel.count_text.value
+    db.close()

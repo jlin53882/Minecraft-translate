@@ -30,6 +30,7 @@ from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 _POLL_INTERVAL_SEC = 0.2
 ALL_MODS = "__all__"
+LARGE_RUN_WARNING = 5000  # 不限筆數且超過這個數量時提醒額度
 
 
 class TranslatePanel(ft.Column):
@@ -57,11 +58,11 @@ class TranslatePanel(ft.Column):
             label="模組", dense=True, width=260, on_select=self._on_scope_changed
         )
         self.limit_field = kit.text_field(
-            "單次上限（筆）",
-            hint="0 = 不限",
+            "單次上限（筆，0 = 不限）",
+            hint="例如 2000",
             value=str(DEFAULT_LIMIT),
-            width=160,
-            on_change=lambda _e: self._refresh_counts(),
+            width=220,
+            on_change=lambda _e: self._on_limit_changed(),
         )
         self.count_text = ft.Text("", size=13, color=C.TEXT)
         self.reuse_row = kit.SwitchRow(
@@ -212,8 +213,26 @@ class TranslatePanel(ft.Column):
             return
         missing = db.count_untranslated(version, self.mod_ids())
         limit = self.limit()
-        will = missing if not limit else min(missing, limit)
-        self.count_text.value = f"此範圍有 {format_count(missing)} 筆未翻譯，本次最多翻譯 {format_count(will)} 筆"
+        if limit:
+            will = min(missing, limit)
+            self.count_text.value = (
+                f"此範圍有 {format_count(missing)} 筆未翻譯，"
+                f"上限 {format_count(limit)} 筆，本次最多翻譯 {format_count(will)} 筆"
+            )
+            return
+        self.count_text.value = (
+            f"此範圍有 {format_count(missing)} 筆未翻譯，上限為 0（不限），"
+            f"本次會翻譯全部 {format_count(missing)} 筆"
+            + (
+                "；筆數很多，會消耗大量 API 額度，建議先按「先預覽」確認"
+                if missing > LARGE_RUN_WARNING
+                else ""
+            )
+        )
+
+    def _on_limit_changed(self) -> None:
+        self._refresh_counts()
+        self._safe_update()
 
     # ------------------------------------------------------------------ 事件
     def build_options(self, *, dry_run: bool = False) -> TranslateOptions:
