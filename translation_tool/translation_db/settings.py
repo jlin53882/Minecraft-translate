@@ -115,5 +115,5 @@ def open_db(settings: DbSettings, *, create: bool = False) -> TranslationDB | No
         try:
             return TranslationDB(path, priority=settings.priority, create=create)
         except Exception as exc:  # noqa: BLE001 - 資料庫問題不應中斷翻譯
-            log_warning(f"⚠️ 預翻譯資料庫無法開啟，已略過：{path}（{exc}）")
+            log_warning(f"⚠️ 預翻譯資料庫無法開啟，已略過：{path}（{exc!r}）")
             return None

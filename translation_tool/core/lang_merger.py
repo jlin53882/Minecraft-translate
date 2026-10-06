@@ -84,7 +84,7 @@ def merge_zhcn_to_zhtw_from_zip(
             .get("replace_rules_path", "replace_rules.json")
         )
     except Exception as e:  # noqa: BLE001
-        log_error(f"載入替換規則失敗: {e}")
+        log_error(f"載入替換規則失敗: {e!r}")
         yield {
             "progress": _scale_progress(0.0, progress_start, progress_end),
             "error": True,
@@ -296,7 +296,7 @@ def merge_zhcn_to_zhtw_from_zip(
                     try:
                         res = fut.result()
                     except Exception as e:  # noqa: BLE001
-                        log_error(f"處理時發生未預期錯誤: {e}")
+                        log_error(f"處理時發生未預期錯誤: {e!r}")
                         res = {"success": False, "error": True}
 
                     progress = _scale_progress(
@@ -438,7 +438,7 @@ def merge_zhcn_to_zhtw_from_folder(
             .get("replace_rules_path", "replace_rules.json")
         )
     except Exception as e:  # noqa: BLE001
-        log_error(f"載入替換規則失敗: {e}")
+        log_error(f"載入替換規則失敗: {e!r}")
         yield {
             "progress": _scale_progress(0.0, progress_start, progress_end),
             "error": True,
@@ -588,7 +588,7 @@ def merge_zhcn_to_zhtw_from_folder(
                 try:
                     res = fut.result()
                 except Exception as e:  # noqa: BLE001
-                    log_error(f"處理時發生未預期錯誤: {e}")
+                    log_error(f"處理時發生未預期錯誤: {e!r}")
                     res = {"success": False, "error": True}
 
                 progress = _scale_progress(

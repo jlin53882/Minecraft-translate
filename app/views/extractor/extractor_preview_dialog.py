@@ -21,7 +21,7 @@ from app.views._log import LogView
 from app.views.extractor import extractor_dialog as _extractor_dialog
 from app.views.extractor.extractor_dialog_helpers import format_size
 from app.views.extractor.extractor_state import PreviewState
-from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
 # 背景任務 → UI 的刷新間隔（秒）
 _UI_FLUSH_INTERVAL_SEC = 0.2
@@ -403,6 +403,7 @@ def _preview_do_scan(ctx):
             if "result" in update:
                 ctx.preview_state.result = update["result"]
     except Exception as ex:  # noqa: BLE001 - 錯誤要回報到 UI
+        log_error(f"[提取預覽] 掃描失敗：{ex!r}", exc_info=True)
         ctx.preview_state.error = str(ex)
     finally:
         # 不論成功、失敗或取消都要標記完成，避免 UI poller 永遠等待

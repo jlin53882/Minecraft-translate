@@ -25,6 +25,7 @@ from app.views.rules.rules_actions import (
 from app.views.rules.rules_state import RulesTableState
 from app.views.rules.rules_table import create_rule_row as rules_create_row
 from app.views.rules.rules_widgets import RulesWidgetsMixin
+from translation_tool.utils.log_unit import log_error
 from translation_tool.utils.text_processor import apply_replace_rules
 
 
@@ -400,6 +401,7 @@ class RulesView(RulesWidgetsMixin, ft.Column):
             try:
                 rules_data = self._load_rules_core()
             except Exception as err:  # noqa: BLE001 - 失敗要顯示在 UI
+                log_error(f"[Rules] 載入規則失敗：{err!r}", exc_info=True)
                 self._run_on_ui_thread(self._handle_reload_failure, err)
                 return
             self._run_on_ui_thread(self._handle_reload_success, rules_data)

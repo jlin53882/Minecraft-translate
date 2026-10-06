@@ -379,7 +379,7 @@ class CacheShardPanel(ft.Container):
         try:
             raw = json.loads(fp.read_text(encoding="utf-8"))
         except Exception as e:  # noqa: BLE001
-            log_warning(f"載入 shard 資料失敗: {e}")
+            log_warning(f"載入 shard 資料失敗: {e!r}")
             return None
 
         if isinstance(raw, dict):

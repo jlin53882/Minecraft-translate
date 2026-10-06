@@ -21,6 +21,7 @@ import flet as ft
 from app.ui.design import C
 from app.views.pipeline.pipeline_config import normalize_extract_mode
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_warning
 
 
 def _load_version_data():
@@ -34,7 +35,8 @@ def _load_version_data():
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:  # noqa: BLE001 - 讀不到版本資料時使用空設定，UI 仍可開啟
+        except Exception as exc:  # noqa: BLE001 - 讀不到版本資料時使用空設定，UI 仍可開啟
+            log_warning(f"讀取版本資料失敗，使用空設定：{config_path}: {exc!r}")
             return {}
     return {}
 

@@ -21,7 +21,7 @@ from app.ui.snack import show_snack
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from app.views.bundler.bundler_widgets import BundlerWidgetsMixin
-from translation_tool.utils.log_unit import log_debug, log_error
+from translation_tool.utils.log_unit import log_debug, log_error, log_warning
 from translation_tool.utils.ui_mirror import mirror_lines
 
 OUTPUT_ZIP_NAME_PATH = "output_bundler.output_zip_name"
@@ -160,7 +160,10 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     self.version_data = json.load(f)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - 版本資料讀不到時用空設定，但要留下紀錄
+                log_warning(
+                    f"[Bundler] 讀取版本資料失敗，使用空設定：{config_path}: {exc!r}"
+                )
                 self.version_data = {}
         else:
             self.version_data = {}
@@ -501,7 +504,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
                     batcher.set_state(error_color=C.RED)
                 batcher.flush()
         except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，錯誤顯示於日誌
-            log_error(f"[打包] 打包執行失敗：{ex}\n{traceback.format_exc()}")
+            log_error(f"[打包] 打包執行失敗：{ex!r}\n{traceback.format_exc()}")
             batcher.add_lines([(f"[錯誤] {ex}", "error")])
             batcher.set_state(error_color=C.RED)
         finally:

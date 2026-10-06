@@ -368,7 +368,7 @@ def _save_entries_to_active_shards(
                 current_data = {}
             except Exception as e:  # noqa: BLE001
                 if logger:
-                    logger.warning(f"⚠️ 讀取舊分片失敗，將以空白分片續寫: {e}")
+                    logger.warning(f"⚠️ 讀取舊分片失敗，將以空白分片續寫: {e!r}")
 
             if len(current_data) >= rolling_shard_size:
                 _rotate_shard_if_needed_locked(

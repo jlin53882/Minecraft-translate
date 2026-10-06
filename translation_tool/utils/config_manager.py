@@ -390,7 +390,7 @@ def save_config(config, config_path: str | os.PathLike | None = None) -> bool:
         return True
 
     except Exception as e:  # noqa: BLE001
-        logging.error(f"錯誤：儲存或驗證設定檔失敗: {e}")  # noqa: LOG015
+        logging.error(f"錯誤：儲存或驗證設定檔失敗: {e!r}")  # noqa: LOG015
         return False
     finally:
         if temp_path is not None:

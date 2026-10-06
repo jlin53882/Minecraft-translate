@@ -525,7 +525,7 @@ def _extract_jar_icon(
 
     except Exception as ex:  # noqa: BLE001
         log_warning(
-            f"[IconPreview] 提取 JAR icon 失敗: {jar_path.name} / {modid} → {ex}"
+            f"[IconPreview] 提取 JAR icon 失敗: {jar_path.name} / {modid} → {ex!r}"
         )
 
     return None
@@ -575,8 +575,10 @@ def _run_jar_workers(jar_to_entries: dict[str, list], process_jar, progress_cb) 
                         uri = entry_icon_paths[e.key]
                         if uri:
                             e.icon_path = uri
-            except Exception:  # noqa: BLE001, S110
-                pass
+            except Exception as exc:  # noqa: BLE001 - 單一 JAR 圖示解析失敗不中止整批，但要留下是哪個 JAR
+                log_warning(
+                    f"[IconPreview] {jar_name} 圖示解析失敗：{exc!r}", exc_info=True
+                )
             processed += 1
             if progress_cb:
                 progress_cb(processed, total)
@@ -617,8 +619,8 @@ def _batch_extract_jar_icons(
         from app import icon_index as idx_module
 
         icon_index = idx_module.load_icon_index(source_root)
-    except Exception:  # noqa: BLE001, S110
-        pass
+    except Exception as exc:  # noqa: BLE001 - 預建索引載入失敗時改為逐 JAR 解析，但要留下紀錄
+        log_warning(f"[IconPreview] 載入預建圖示索引失敗，改為逐 JAR 解析：{exc!r}")
 
     if icon_index is not None:
         return _apply_icon_index(jar_to_entries, icon_index, progress_cb)
@@ -667,8 +669,10 @@ def _batch_extract_jar_icons(
             log_warning(
                 f"[IconPreview] 略過 {jar_name} 剩餘項目的圖示解析（累計讀取超限）"
             )
-        except Exception:  # noqa: BLE001, S110
-            pass
+        except Exception as exc:  # noqa: BLE001 - 單一 JAR 解析失敗保留已解析的部分，但要留下是哪個 JAR
+            log_warning(
+                f"[IconPreview] {jar_name} 圖示解析中斷：{exc!r}", exc_info=True
+            )
         return result_map
 
     processed = _run_jar_workers(jar_to_entries, _process_jar, progress_cb)

@@ -100,7 +100,7 @@ class CacheSearchEngine:
                 self.conn.commit()
         except sqlite3.OperationalError as e:
             # FTS5 可能不支援（SQLite 版本過舊）
-            log_warning(f"FTS5 初始化失敗，將使用基本搜尋: {e}")
+            log_warning(f"FTS5 初始化失敗，將使用基本搜尋: {e!r}")
 
         # 不論 FTS5 成功與否，都建立 basic 表格做為 fallback（雙保險）
         self._init_basic_table()

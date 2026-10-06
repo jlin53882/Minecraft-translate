@@ -289,7 +289,8 @@ def step3_inject_impl(
     for idx, jp in enumerate(json_files, start=1):
         try:
             source_md, items = load_items_from_json_fn(jp)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - 單一待注入檔讀取失敗：計入錯誤並繼續，但要留下是哪個檔
+            log_warning(f"[MD] 注入時略過無法讀取的待翻譯檔 {jp}: {exc!r}")
             skipped += 1
             error_files += 1
             progress_fn(session, progress_base + progress_span * (idx / max(1, total)))

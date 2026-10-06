@@ -23,7 +23,7 @@ def rebuild_index_on_startup() -> None:
         else:
             logger.error(f"啟動時全域搜尋索引重建失敗: {result.get('error')}")
     except Exception as ex:
-        logger.error(f"啟動時索引重建失敗: {ex}", exc_info=True)  # noqa: G201
+        logger.error(f"啟動時索引重建失敗: {ex!r}", exc_info=True)  # noqa: G201
 
 
 def start_background_startup_tasks() -> threading.Thread:

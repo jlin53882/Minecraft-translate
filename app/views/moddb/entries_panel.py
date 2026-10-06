@@ -694,7 +694,7 @@ class EntriesPanel(ft.Column):
             )
         except ValueError as exc:
             log_warning(
-                f"Mod 資料庫儲存被拒絕：{entry.mc_version} {entry.mod_id} {entry.key}（{exc}）"
+                f"Mod 資料庫儲存被拒絕：{entry.mc_version} {entry.mod_id} {entry.key}（{exc!r}）"
             )
             show_snack(self._page, str(exc), C.RED)
             return

@@ -25,6 +25,7 @@ from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog
 from app.views.extractor.extractor_state import PreviewState
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_error
 
 
 def open_extract_dialog(
@@ -303,6 +304,7 @@ def _extract_preview_worker(
             if "result" in update:
                 preview_state.result = update["result"]
     except Exception as ex:  # noqa: BLE001 - 錯誤要顯示在對話框
+        log_error(f"[Pipeline] 提取預覽失敗：{ex!r}", exc_info=True)
         preview_state.error = str(ex)
     finally:
         # 不論結果如何都標記完成，避免輪詢永遠不結束

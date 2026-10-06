@@ -110,7 +110,7 @@ class QCBase:
                         batcher.set_state(error=True)
                     batcher.flush()
             except Exception as ex:  # noqa: BLE001 - 背景執行緒需把錯誤回報到 UI
-                log_error(f"QC 任務失敗: {ex}\n{traceback.format_exc()}")
+                log_error(f"QC 任務失敗: {ex!r}\n{traceback.format_exc()}")
                 batcher.add_lines([(f"[錯誤] 任務執行失敗：{ex}", "error")])
                 batcher.set_state(error=True)
             finally:

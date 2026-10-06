@@ -14,6 +14,8 @@ from typing import Any
 
 import orjson as json
 
+from translation_tool.utils.log_unit import log_warning
+
 log = logging.getLogger(__name__)
 
 
@@ -63,7 +65,8 @@ def build_cache_overview(
                 active_data = json.loads(active_path.read_bytes())
                 if isinstance(active_data, dict):
                     active_entries = len(active_data)
-        except Exception:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
+        except Exception as exc:  # noqa: BLE001 - 讀取失敗不中斷總覽，但要留下紀錄
+            log_warning(f"[CacheOverview] 讀取 {cache_type} 作用中分片失敗：{exc!r}")
             active_entries = 0
 
         if dirty:
@@ -86,7 +89,8 @@ def build_cache_overview(
                 translation_config.get("cache_directory", cache_dir_name)
             ).resolve()
         )
-    except Exception:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
+    except Exception as exc:  # noqa: BLE001 - 讀取失敗不中斷總覽，但要留下紀錄
+        log_warning(f"[CacheOverview] 解析快取根目錄失敗：{exc!r}")
         cache_root = ""
 
     return {

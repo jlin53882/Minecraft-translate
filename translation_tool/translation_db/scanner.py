@@ -134,7 +134,7 @@ def load_rules() -> list:
             .get("replace_rules_path", "replace_rules.json")
         )
     except Exception as exc:  # noqa: BLE001 - 規則檔問題不應讓掃描失敗，只是略過替換
-        log_warning(f"載入替換規則失敗，略過替換：{exc}")
+        log_warning(f"載入替換規則失敗，略過替換：{exc!r}")
         return []
 
 

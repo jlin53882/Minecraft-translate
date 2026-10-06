@@ -473,7 +473,7 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
             if not current():
                 return
-            log_error(f"[IconPreview] 掃描失敗: {ex}")
+            log_error(f"[IconPreview] 掃描失敗: {ex!r}")
             show_snack(
                 self.page,
                 f"❌ 掃描失敗：{ex}",

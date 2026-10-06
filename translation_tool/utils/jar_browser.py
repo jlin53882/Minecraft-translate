@@ -105,7 +105,7 @@ def _scan_single_jar(
                             # 誤以為內容完整），由呼叫端視為「沒有內容」。
                             log_error(
                                 f"[jar_browser] 略過整個 JAR（累計讀取超過安全上限）: "
-                                f"{jar_path.name} - {budget_err}"
+                                f"{jar_path.name} - {budget_err!r}"
                             )
                             if failure_callback:
                                 failure_callback(jar_path)
@@ -114,7 +114,7 @@ def _scan_single_jar(
                             if skipped_callback:
                                 skipped_callback(jar_path)
                             log_warning(
-                                f"[jar_browser] 略過過大檔案 {jar_path.name}!{name}: {size_err}"
+                                f"[jar_browser] 略過過大檔案 {jar_path.name}!{name}: {size_err!r}"
                             )
                         except UnicodeDecodeError:
                             # Binary 檔案（如 .png）：不解碼，設為 None 表示 caller 自行處理
@@ -125,7 +125,7 @@ def _scan_single_jar(
         if failure_callback:
             failure_callback(jar_path)
     except Exception as ex:  # noqa: BLE001
-        log_error(f"[jar_browser] 讀取失敗: {jar_path.name} - {ex}")
+        log_error(f"[jar_browser] 讀取失敗: {jar_path.name} - {ex!r}")
         if failure_callback:
             failure_callback(jar_path)
     return jar_path, result

@@ -151,7 +151,7 @@ def initialize_translation_cache():
             _clear_partial_state(state)
             state.init_failed_at = _monotonic()
             state.write_reject_logged = False
-            log.error(f"快取系統初始化失敗: {e}", exc_info=True)  # noqa: G201
+            log.error(f"快取系統初始化失敗: {e!r}", exc_info=True)  # noqa: G201
 
 
 def is_cache_initialized() -> bool:
@@ -268,7 +268,7 @@ def save_translation_cache(cache_type: str, write_new_shard: bool = True):
             cache_store.restore_session_entries_if_absent(
                 state.session_new_entries, state.is_dirty, cache_type, data_to_save
             )
-        log.error(f"❌ 儲存 {cache_type} 失敗: {e}", exc_info=True)  # noqa: G201
+        log.error(f"❌ 儲存 {cache_type} 失敗: {e!r}", exc_info=True)  # noqa: G201
         return False
 
 

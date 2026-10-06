@@ -659,7 +659,7 @@ def translate_ftb_pending_to_zh_tw(
             )
 
         except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-            log_error(f"⚠️ [FTB-LM] DRY-RUN preview 輸出失敗：{e}")
+            log_error(f"⚠️ [FTB-LM] DRY-RUN preview 輸出失敗：{e!r}")
 
         return {
             "dry_run": True,

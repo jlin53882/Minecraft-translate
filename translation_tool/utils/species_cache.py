@@ -64,7 +64,7 @@ except ImportError:
         "未找到 Wikipedia 函式庫 (請執行 pip install wikipedia)。線上查詢功能將不可用。"
     )
 except Exception as e:  # noqa: BLE001 - 選用的第三方套件匯入可能出現各種失敗
-    log.error(f"載入 Wikipedia 函式庫時發生未知錯誤: {e}")
+    log.error(f"載入 Wikipedia 函式庫時發生未知錯誤: {e!r}")
 
 
 def initialize_species_cache():
@@ -149,7 +149,7 @@ def query_wikipedia_and_update_cache(species_name: str) -> str | None:
                     writer = csv.writer(f, delimiter="\t")
                     writer.writerow([species_name, common_name])
             except OSError as e:
-                log.error(f"寫入快取檔案 {_CACHE_FILE} 失敗: {e}")
+                log.error(f"寫入快取檔案 {_CACHE_FILE} 失敗: {e!r}")
 
         return common_name
 
@@ -166,7 +166,7 @@ def query_wikipedia_and_update_cache(species_name: str) -> str | None:
             return query_wikipedia_and_update_cache(e.options[0])
         return None
     except Exception as e:  # noqa: BLE001 - wikipedia 套件可能拋出多種執行期錯誤
-        log.error(f"線上查詢 '{species_name}' 時發生未知網路或API錯誤: {e}")
+        log.error(f"線上查詢 '{species_name}' 時發生未知網路或API錯誤: {e!r}")
         _species_cache_data[species_name] = ""  # 僅更新記憶體快取
         return None
 

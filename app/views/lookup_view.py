@@ -16,6 +16,7 @@ from app.services_impl.pipelines.lookup_service import (
 )
 from app.ui import kit
 from app.ui.design import C
+from translation_tool.utils.log_unit import log_error
 
 RECENT_LIMIT = 6  # 「最近查詢」最多顯示幾筆（只存在這次開啟的程式內）
 
@@ -218,6 +219,7 @@ class LookupView(ft.Column):
             result = run_manual_lookup_service(name)
             color = C.TEXT
         except Exception as ex:  # noqa: BLE001 - 失敗也要恢復按鈕並顯示原因
+            log_error(f"[Lookup] 單筆查詢失敗（{name!r}）：{ex!r}", exc_info=True)
             result = f"查詢失敗：{ex}"
             color = C.RED
 
@@ -264,6 +266,7 @@ class LookupView(ft.Column):
                 if update.get("progress"):
                     state["progress"] = update.get("progress")
         except Exception as ex:  # noqa: BLE001 - 失敗也要恢復按鈕並顯示原因
+            log_error(f"[Lookup] 批次查詢失敗：{ex!r}", exc_info=True)
             state["text"] = f"批次查詢失敗：{ex}"
         finally:
 

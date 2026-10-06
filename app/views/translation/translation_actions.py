@@ -308,7 +308,7 @@ async def _poll_session(view, alive=lambda: True):
         try:
             _sync_from_session(view)
         except RuntimeError as e:
-            log_warning(f"翻譯頁 UI 輪詢停止：{e}")
+            log_warning(f"翻譯頁 UI 輪詢停止：{e!r}")
             view._ui_timer_running = False
             break
         if alive() and view._ui_timer_running:

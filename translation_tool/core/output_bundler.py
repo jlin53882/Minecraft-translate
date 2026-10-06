@@ -141,7 +141,7 @@ def _remove_quietly(path: str) -> None:
     except FileNotFoundError:
         pass
     except OSError as ex:
-        log_warning(f"無法移除 {path}: {ex}")
+        log_warning(f"無法移除 {path}: {ex!r}")
 
 
 def _commit_state(output_zip_path: str, fingerprint: str) -> None:
@@ -610,7 +610,7 @@ def bundle_outputs_generator(
         yield {"progress": 1.0, "log": "--- " + "；".join(log_parts) + " ---"}
 
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
-        log_error(f"打包時發生嚴重錯誤: {e}", exc_info=True)
+        log_error(f"打包時發生嚴重錯誤: {e!r}", exc_info=True)
         yield {"progress": 1.0, "log": f"錯誤：打包失敗: {e}", "error": True}
         # 失敗時保留既有的有效 ZIP（尚未 os.replace）；僅讓狀態失效，下次必定重建。
         _remove_quietly(_state_path(output_zip_path))

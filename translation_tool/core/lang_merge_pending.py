@@ -24,7 +24,7 @@ def remove_empty_dirs_impl(root_dir: str, *, logger_override=None) -> None:
             if not os.listdir(dirpath):
                 os.rmdir(dirpath)
         except OSError as e:
-            log_warning(f"刪除空目錄失敗 {dirpath}: {e}")
+            log_warning(f"刪除空目錄失敗 {dirpath}: {e!r}")
 
 
 def export_filtered_pending_impl(
@@ -103,7 +103,7 @@ def export_filtered_pending_impl(
                 try:
                     os.remove(out_path)
                 except OSError as exc:
-                    log_warning(f"刪除過期整理檔失敗 {out_path}: {exc}")
+                    log_warning(f"刪除過期整理檔失敗 {out_path}: {exc!r}")
         if dirpath != output_root:
             try:
                 if not os.listdir(dirpath):

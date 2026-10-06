@@ -427,7 +427,7 @@ def load_custom_translations(folder_path: str, filename="table.tsv") -> dict[str
                 custom_map[str(row["source"])] = str(row["translation"])
         log_info(f"成功從 {file_path} 載入 {len(custom_map)} 條自訂翻譯。")
     except Exception as e:  # noqa: BLE001
-        log_error(f"讀取自訂翻譯檔 {file_path} 失敗: {e}")
+        log_error(f"讀取自訂翻譯檔 {file_path} 失敗: {e!r}")
     return custom_map
 
 

@@ -31,7 +31,7 @@ def load_shard_file(path: Path) -> dict[str, Any]:
         data = json.loads(path.read_bytes())
         return data if isinstance(data, dict) else {}
     except Exception as e:  # noqa: BLE001 載入失敗不應中斷其他分片
-        logger.warning(f"載入分片失敗 {path}: {e}")
+        logger.warning(f"載入分片失敗 {path}: {e!r}")
         return {}
 
 

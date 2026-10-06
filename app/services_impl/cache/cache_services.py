@@ -188,7 +188,7 @@ def cache_search_service(
         if result is not None:
             return result
     except Exception as e:  # noqa: BLE001
-        log_warning(f"搜尋引擎失敗，降級使用線性掃描: {e}")
+        log_warning(f"搜尋引擎失敗，降級使用線性掃描: {e!r}")
 
     return _search_linear(cache_type, q, mode, limit)
 
@@ -241,7 +241,7 @@ def cache_rebuild_index_service() -> dict[str, Any]:
         }
 
     except Exception as e:  # noqa: BLE001
-        log_error(f"重建搜尋索引失敗: {e}")
+        log_error(f"重建搜尋索引失敗: {e!r}")
         return {
             "success": False,
             "total_indexed": 0,

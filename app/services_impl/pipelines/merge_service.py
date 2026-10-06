@@ -174,7 +174,7 @@ def _merge_one_zip(
 
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
-        logger.error(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}")
+        logger.error(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e!r}\n{tb}")
         _session_log(
             session, f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}", "error"
         )
@@ -384,7 +384,7 @@ def _run_extracted_stage2(
         if not folder_errors:
             _session_log(session, "[階段 2/2 完成]")
     except Exception as stage2_err:  # noqa: BLE001
-        logger.warning(f"[階段 2/2 錯誤]: {stage2_err}")
+        logger.warning(f"[階段 2/2 錯誤]: {stage2_err!r}")
         _session_log(session, f"[階段 2/2 錯誤]: {stage2_err}", "error")
         folder_errors.append(str(stage2_err))
 
@@ -483,7 +483,7 @@ def run_merge_folder_batch_service(
 
         except Exception as e:  # noqa: BLE001
             tb = traceback.format_exc()
-            logger.error(f"[資料夾] 錯誤：{input_dir}\n{e}\n{tb}")
+            logger.error(f"[資料夾] 錯誤：{input_dir}\n{e!r}\n{tb}")
             _session_log(session, f"[資料夾] 錯誤：{input_dir}\n{e}\n{tb}", "error")
             folder_errors.append(str(e))
 

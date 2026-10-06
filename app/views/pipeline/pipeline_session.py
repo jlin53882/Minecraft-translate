@@ -154,7 +154,7 @@ class PipelineRunner:
                 success = True
             except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，確保按鈕會恢復
                 # UI 只顯示一行摘要；完整堆疊只寫後台，排查時才有根因
-                log_error(f"[Pipeline] 一鍵製作失敗：{ex}\n{traceback.format_exc()}")
+                log_error(f"[Pipeline] 一鍵製作失敗：{ex!r}\n{traceback.format_exc()}")
                 self.ui_view(self._panel.add_log, f"❌ 流程失敗：{ex}", "error")
             finally:
                 self.ui_view(self._finish_sequence, success, on_end)
@@ -201,7 +201,7 @@ class PipelineRunner:
         except TaskCancelled:
             session.finish()  # 取消也要 terminal（TaskManager 不可殘留 active；重複 finish 無害）
         except Exception as ex:  # noqa: BLE001 - 背景步驟邊界：任何錯誤都轉成步驟失敗
-            log_error(f"[Pipeline] {name} 失敗：{ex}\n{traceback.format_exc()}")
+            log_error(f"[Pipeline] {name} 失敗：{ex!r}\n{traceback.format_exc()}")
             # 完整堆疊已在上面寫入後台，畫面只顯示例外類型與訊息，不重複鏡像
             add_log_unmirrored(
                 session,

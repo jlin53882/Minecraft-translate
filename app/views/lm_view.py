@@ -172,7 +172,7 @@ class LMView(ft.Column):
         try:
             info = summarize_database()
         except Exception as exc:  # noqa: BLE001 - 資料庫問題只影響提示文字，不應讓頁面載入失敗
-            log_warning(f"讀取 Mod 資料庫摘要失敗：{exc}")
+            log_warning(f"讀取 Mod 資料庫摘要失敗：{exc!r}")
             info = {"problem": f"讀取摘要失敗（{exc}），詳情請看後台 log"}
         if info is not None and info.get("problem"):
             self.db_info.value = f"⚠ 資料庫無法使用：{info['problem']}"

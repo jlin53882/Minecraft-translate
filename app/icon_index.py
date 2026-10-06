@@ -211,7 +211,7 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
                 if progress_cb:
                     progress_cb(done, total)
             except Exception as ex:  # noqa: BLE001
-                log_warning(f"[IconIndex] JAR 處理失敗 {jar.name}: {ex}")
+                log_warning(f"[IconIndex] JAR 處理失敗 {jar.name}: {ex!r}")
             if done % 50 == 0 or done == total:
                 log_info(
                     f"[IconIndex] 進度：{done}/{total} JARs，已建立 {len(index)} 個 icon 索引"
@@ -254,5 +254,5 @@ def load_icon_index(mods_dir: Path) -> dict[str, str] | None:
         )
         return data["index"]
     except Exception as ex:  # noqa: BLE001
-        log_warning(f"[IconIndex] 索引載入失敗：{ex}")
+        log_warning(f"[IconIndex] 索引載入失敗：{ex!r}")
         return None

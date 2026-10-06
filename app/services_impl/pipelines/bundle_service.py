@@ -271,7 +271,7 @@ def run_bundling_service(
                 yield filtered
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
-        logger.error(f"[致命錯誤] 打包服務失敗：{e}\n{full_traceback}")
+        logger.error(f"[致命錯誤] 打包服務失敗：{e!r}\n{full_traceback}")
         yield {
             "log": f"[致命錯誤] 打包服務失敗：{e}\n{full_traceback}",
             "error": True,

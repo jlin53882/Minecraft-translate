@@ -187,7 +187,7 @@ def translate_directory_generator(
                 shutil.copy2(src_path, dst_path)
                 copied_count += 1
             except Exception as e:  # noqa: BLE001
-                log_error(f"複製檔案 {src_path} 失敗: {e}")
+                log_error(f"複製檔案 {src_path} 失敗: {e!r}")
 
     log_info(f"複製階段完成，總共複製了 {copied_count} 個非翻譯檔案。")
     yield {"progress": 1.0}
