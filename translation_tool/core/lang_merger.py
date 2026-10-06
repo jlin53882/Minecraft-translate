@@ -447,10 +447,14 @@ def merge_zhcn_to_zhtw_from_folder(
 
     if not os.path.exists(input_dir):
         full_path = os.path.abspath(input_dir)
-        log_warning(f"資料夾不存在，已跳過: {full_path}")
+        message = f"輸入資料夾不存在，無法合併: {full_path}"
+        log_error(message)
+        # 軟性錯誤：服務層會記為資料夾失敗（跳過階段 2、任務標為 ERROR），
+        # 不能回報 error=False，否則缺資料夾會顯示「翻譯已完成」。
         yield {
             "progress": _scale_progress(1.0, progress_start, progress_end),
-            "error": False,
+            "log": message,
+            "error": True,
         }
         return
 

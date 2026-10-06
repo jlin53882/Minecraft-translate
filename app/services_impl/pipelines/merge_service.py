@@ -411,6 +411,52 @@ def _fatal_folder_error(
     return error_summary
 
 
+def _run_folder_stages(
+    input_dir: str,
+    output_dir: str,
+    session,
+    only_process_lang,
+    options: dict,
+    progress_start: float,
+    progress_end: float,
+    folder_errors: list[str],
+) -> None:
+    """階段 1（zh_cn → zh_tw）與階段 2（XX_extracted → assets），錯誤累積在 folder_errors。"""
+    _run_folder_stage1(
+        input_dir,
+        output_dir,
+        session,
+        only_process_lang,
+        options,
+        progress_start,
+        progress_end,
+        folder_errors,
+    )
+
+    if folder_errors:
+        _session_log(
+            session,
+            "[階段 1/2 失敗] zh_cn → zh_tw 處理發生錯誤："
+            + "；".join(dict.fromkeys(folder_errors)),
+            "error",
+        )
+    else:
+        _session_log(session, f"[資料夾] 完成：{os.path.basename(input_dir)}")
+        _session_log(session, "[階段 1/2 完成] zh_cn → zh_tw 翻譯已完成")
+
+    # 階段 2 (2026-08-02 PR-XX merge-asset-integration):
+    # 從 input_dir 內 XX_extracted/ 的 lang 檔 key-by-key 合併進
+    # output_dir/lang_output/assets/{modid}/lang/{xx_yy}.json
+    # config flag "enable_extracted_to_assets_merge" 控制是否跑。
+    _run_extracted_stage2(
+        folder_errors,
+        output_dir,
+        session,
+        progress_start,
+        progress_end,
+    )
+
+
 def run_merge_folder_batch_service(
     input_dir: str,
     output_dir: str,
@@ -423,10 +469,16 @@ def run_merge_folder_batch_service(
     progress_start: float = 0.0,
     progress_end: float = 1.0,
     finish_session: bool = True,
+    skip_missing_input: bool = False,
 ):
     """以資料夾為單位進行合併（支援 generator merge）。
 
     與 run_merge_zip_batch_service 結構相同，但使用 merge_zhcn_to_zhtw_from_folder。
+
+    輸入資料夾不存在時預設視為失敗（階段 1 失敗、略過階段 2、任務標為 ERROR），
+    不會顯示「翻譯已完成」。``skip_missing_input=True`` 給一鍵流程使用：提取沒有產生
+    某類內容（例如沒有 Patchouli 書籍）時不會建立輸出資料夾，這時明確記錄「略過」並視為
+    沒有工作可做，而不是失敗。
     """
     ensure_pipeline_logging()
     UI_LOG_HANDLER.set_session(session)
@@ -444,42 +496,31 @@ def run_merge_folder_batch_service(
     try:
         _session_log(session, f"[資料夾] 開始處理：{os.path.basename(input_dir)}")
 
+        skipped = skip_missing_input and not os.path.isdir(input_dir)
+        if skipped:
+            _session_log(
+                session,
+                f"[資料夾] 略過：輸入資料夾不存在（本次提取沒有產生這類內容）：{input_dir}",
+                "warning",
+            )
+
         try:
-            _run_folder_stage1(
-                input_dir,
-                output_dir,
-                session,
-                only_process_lang,
-                {
-                    "process_zh_cn": process_zh_cn,
-                    "patchouli_skip": patchouli_skip,
-                    "patchouli_threshold": patchouli_threshold,
-                    "zh_en_threshold": zh_en_threshold,
-                },
-                progress_start,
-                progress_end,
-                folder_errors,
-            )
-
-            if folder_errors:
-                _session_log(
-                    session, "[階段 1/2 失敗] zh_cn → zh_tw 處理發生錯誤", "error"
+            if not skipped:
+                _run_folder_stages(
+                    input_dir,
+                    output_dir,
+                    session,
+                    only_process_lang,
+                    {
+                        "process_zh_cn": process_zh_cn,
+                        "patchouli_skip": patchouli_skip,
+                        "patchouli_threshold": patchouli_threshold,
+                        "zh_en_threshold": zh_en_threshold,
+                    },
+                    progress_start,
+                    progress_end,
+                    folder_errors,
                 )
-            else:
-                _session_log(session, f"[資料夾] 完成：{os.path.basename(input_dir)}")
-                _session_log(session, "[階段 1/2 完成] zh_cn → zh_tw 翻譯已完成")
-
-            # 階段 2 (2026-08-02 PR-XX merge-asset-integration):
-            # 從 input_dir 內 XX_extracted/ 的 lang 檔 key-by-key 合併進
-            # output_dir/lang_output/assets/{modid}/lang/{xx_yy}.json
-            # config flag "enable_extracted_to_assets_merge" 控制是否跑。
-            _run_extracted_stage2(
-                folder_errors,
-                output_dir,
-                session,
-                progress_start,
-                progress_end,
-            )
 
         except Exception as e:  # noqa: BLE001
             tb = traceback.format_exc()

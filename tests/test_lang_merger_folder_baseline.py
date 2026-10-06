@@ -212,4 +212,6 @@ def test_merge_folder_missing_input_dir(tmp_path: Path, monkeypatch) -> None:
     )
 
     assert updates[-1]["progress"] == 1.0
-    assert not updates[-1].get("error", False)
+    # 輸入資料夾不存在是錯誤（不能讓上層顯示「翻譯已完成」），並帶出明確訊息
+    assert updates[-1].get("error") is True
+    assert "輸入資料夾不存在" in updates[-1]["log"]

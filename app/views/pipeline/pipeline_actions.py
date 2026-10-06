@@ -219,6 +219,7 @@ class PipelineActions:
                     progress_start=source_index / total_sources,
                     progress_end=(source_index + 1) / total_sources,
                     finish_session=False,
+                    skip_missing_input=True,
                     **merge_options,
                 )
                 if session_failed(session) or is_cancelled():
