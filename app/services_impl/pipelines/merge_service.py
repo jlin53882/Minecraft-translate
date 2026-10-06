@@ -22,10 +22,16 @@ from translation_tool.core.lang_merger import (
     merge_zhcn_to_zhtw_from_folder,
     merge_zhcn_to_zhtw_from_zip,
 )
-from translation_tool.utils.cancellation import raise_if_cancelled
+from translation_tool.utils.cancellation import TaskCancelled
 from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
+
+
+def _raise_if_session_cancelled(session) -> None:
+    """在合併服務自己的檢查點讀取 session 取消旗標。"""
+    if getattr(session, "cancel_requested", False) is True:
+        raise TaskCancelled()
 
 
 def _cleanup_cancelled_output(
@@ -173,7 +179,7 @@ def _merge_one_zip(
             patchouli_threshold=patchouli_threshold,
             zh_en_threshold=zh_en_threshold,
         ):
-            raise_if_cancelled()  # 取消檢查點：每個 update
+            _raise_if_session_cancelled(session)  # 取消檢查點：每個 update
             # ---- log ----
             if update.get("log"):
                 session.add_log(update["log"])
@@ -216,13 +222,7 @@ def run_merge_zip_batch_service(
     patchouli_threshold: float | None = None,
     zh_en_threshold: int | None = None,
 ):
-    """
-    以 ZIP 為單位進行合併（支援 generator merge）
-    - ZIP 層級 progress
-    - merge_zhcn_to_zhtw_from_zip 內部 progress 疊加
-    - log / error 完整轉交給 session
-    - 批次完成時 yield 統計摘要
-    """
+    """以 ZIP 為單位合併，逐 ZIP 回報進度、日誌與統計摘要。"""
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
     ensure_pipeline_logging()
     UI_LOG_HANDLER.set_session(session)
@@ -251,7 +251,7 @@ def run_merge_zip_batch_service(
             return
 
         for idx, zip_path in enumerate(zip_paths):
-            raise_if_cancelled()  # 取消檢查點：ZIP 與 ZIP 之間
+            _raise_if_session_cancelled(session)  # 取消檢查點：ZIP 與 ZIP 之間
             zip_name = Path(zip_path).name
             zip_base_progress = idx / total
 
@@ -336,7 +336,7 @@ def _run_folder_stage1(
         progress_end=progress_start + (progress_end - progress_start) * 0.90,
     ):
         # 取消檢查點：每個 update 之後（停止消費即中止核心 generator 的後續處理）
-        raise_if_cancelled()
+        _raise_if_session_cancelled(session)
         if update.get("log"):
             session.add_log(update["log"])
         if "progress" in update and update["progress"] is not None:
@@ -383,7 +383,7 @@ def _run_extracted_stage2(
                 lang_merger.get("pending_organized_folder_name", "待翻譯整理需翻譯"),
             ),
         ):
-            raise_if_cancelled()  # 取消檢查點：階段 2 每個 update
+            _raise_if_session_cancelled(session)  # 取消檢查點：階段 2 每個 update
             if update.get("log"):
                 session.add_log(update["log"])
             if "progress" in update and update["progress"] is not None:

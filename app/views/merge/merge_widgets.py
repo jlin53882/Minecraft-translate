@@ -31,6 +31,7 @@ class MergeWidgetsMixin:
             None  # 2026-08-04: snapshot for _open_output_folder
         )
         self.selected_zips: list[str] = []
+        self.zip_path_field = None
         # 合併統計（用於 DONE 時顯示摘要）
         # 2026-08-04: 兼容 ZIP + Folder 兩種模式
         self._merge_stats: dict[str, Any] = {}
@@ -143,6 +144,14 @@ class MergeWidgetsMixin:
             tooltip="開始執行合併流程",
             on_click=self.start_merge,
         )
+        self.cancel_button = kit.button(
+            "取消",
+            "danger",
+            icon=ft.Icons.STOP_CIRCLE_OUTLINED,
+            tooltip="在目前檢查點停止合併",
+            on_click=self.cancel_merge,
+        )
+        self.cancel_button.visible = False
 
         self.input_mode_group = ft.RadioGroup(
             content=ft.Row(
@@ -163,12 +172,20 @@ class MergeWidgetsMixin:
             mono=True,
             expand=True,
         )
+        # Web 模式無法使用原生檔案選擇器，保留可用真實鍵盤輸入的 ZIP 路徑欄位。
+        self.zip_path_field = kit.text_field(
+            hint="Web 可直接輸入 ZIP 完整路徑",
+            icon=ft.Icons.ARCHIVE_OUTLINED,
+            mono=True,
+            expand=True,
+        )
         self.zip_panel = ft.Container(
             visible=False,
             content=ft.Column(
                 [
                     ft.Row(
                         [
+                            self.zip_path_field,
                             self.pick_zip_button,
                             ft.Text(
                                 "可加入多個 ZIP，會依序合併。",
@@ -489,6 +506,7 @@ class MergeWidgetsMixin:
                         spacing=8,
                     ),
                     self.start_button,
+                    self.cancel_button,
                     ft.Row([self.status_chip], wrap=True),
                     self.progress_bar,
                 ],

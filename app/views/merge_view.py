@@ -24,6 +24,7 @@ from app.ui.status_chip import set_chip_status
 from app.views._log import LogView
 from app.views.config.config_actions import load_config_into_view
 from app.views.merge.merge_widgets import MergeWidgetsMixin
+from translation_tool.utils.cancellation import TaskCancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
@@ -225,8 +226,27 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         log_info(
             f"[合併] 開始按鈕：mode={input_mode!r}, "
             f"folder={self.folder_path_field.value!r}, "
-            f"zips={len(self.selected_zips)}, output={self.output_dir_field.value!r}"
+            f"zips={len(self._zip_paths_for_run())}, output={self.output_dir_field.value!r}"
         )
+
+    def _zip_paths_for_run(self) -> list[str]:
+        """合併目前選取的 ZIP，並納入 Web 可手動輸入的單一 ZIP 路徑。"""
+        paths = list(self.selected_zips)
+        typed = (self.zip_path_field.value if self.zip_path_field else "") or ""
+        typed = typed.strip()
+        if typed and typed not in paths:
+            paths.append(typed)
+        return paths
+
+    def cancel_merge(self, e: ft.ControlEvent | None = None) -> None:
+        """要求目前合併在下一個檢查點停止。"""
+        if self.session.snapshot().get("status") != "RUNNING":
+            return
+        self.session.request_cancel()
+        self.cancel_button.disabled = True
+        self._set_status("取消中…", "gold")
+        self.session.add_log("[系統] 使用者要求取消合併", level="warning")
+        self.page.update()
 
     def start_merge(self, e: ft.ControlEvent) -> None:
         """處理開始合併按鈕事件。"""
@@ -237,7 +257,8 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                 show_snack(self.page, "請先選擇來源資料夾")
                 return
         else:
-            if not self.selected_zips:
+            zip_paths = self._zip_paths_for_run()
+            if not zip_paths:
                 show_snack(self.page, "請先選擇 ZIP 檔案")
                 return
         if not (self.output_dir_field.value or "").strip():
@@ -245,6 +266,8 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             return
 
         self.start_button.disabled = True
+        self.cancel_button.visible = True
+        self.cancel_button.disabled = False
         self.zip_list_view.disabled = True
         # PR refactor/unified-log-view: LogView widget API 不暴露 .controls
         # (LogView 是 ft.Container,內部有 _list_view 控制項)。
@@ -268,6 +291,9 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         def _run_merge():
             try:
                 _run_merge_service()
+            except TaskCancelled:
+                # 取消屬於正常終止，不讓背景執行緒把 traceback 噴到 Web 主控台。
+                self.session.add_log("[取消] 合併已停止", level="warning")
             except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束
                 # 完整堆疊寫後台；畫面顯示例外類型與訊息，並指向後台 log
                 log_error(
@@ -303,9 +329,7 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                     pass
             else:
                 for _ in run_merge_zip_batch_service(
-                    zip_paths=list(
-                        self.selected_zips
-                    ),  # 2026-08-04 A4: 傳副本避免 race condition
+                    zip_paths=list(self._zip_paths_for_run()),
                     output_dir=self.output_dir_field.value,
                     session=self.session,
                     only_process_lang=self.only_lang_checkbox.value,
@@ -369,7 +393,12 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             if status == "RUNNING":
                 self._set_status("執行中", C.DIA_BG)
             elif status == "DONE":
-                self._set_status("任務完成", C.EM_BG)
+                cancelled = bool(getattr(self.session, "cancel_requested", False))
+                self._set_status(
+                    "已取消" if cancelled else "任務完成",
+                    "gold" if cancelled else C.EM_BG,
+                )
+                self.cancel_button.visible = False
                 snap_summary = snap.get("summary")
                 if snap_summary:
                     self._merge_stats = snap_summary
@@ -397,11 +426,13 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                         "failed_zips": failed_zips,
                         "failed_zip_details": failed_zip_details,
                     }
-                self._show_merge_summary(self._merge_stats)
+                if not cancelled:
+                    self._show_merge_summary(self._merge_stats)
                 # 2026-08-02:DONE/ERROR 後停止 poller,避免無限 background update
                 self._ui_stop.set()
             elif status == "ERROR":
                 self._set_status("任務發生錯誤", C.RED_BG)
+                self.cancel_button.visible = False
                 self._ui_stop.set()
 
             self.progress_bar.value = progress
