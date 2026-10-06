@@ -75,13 +75,13 @@ class EntriesPanel(ft.Column):
             self.filter_card,
             ft.Row(
                 [
-                    ft.Column([self.list_card], scroll=ft.ScrollMode.AUTO, expand=4),
+                    ft.Column([self.list_card], expand=4),
                     ft.Column([self.editor_card], scroll=ft.ScrollMode.AUTO, expand=6),
                     ft.Column([self.history_card], scroll=ft.ScrollMode.AUTO, expand=3),
                 ],
                 spacing=12,
                 expand=True,
-                vertical_alignment=ft.CrossAxisAlignment.START,
+                vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
         ]
 
@@ -109,16 +109,37 @@ class EntriesPanel(ft.Column):
         )
 
     def _build_list_card(self) -> None:
-        self.list_view = ft.ListView(spacing=0, height=520)
+        # 清單高度跟著視窗伸縮（expand），捲軸常駐顯示（全域主題預設只在滑過時出現）
+        self.list_view = ft.ListView(spacing=0, expand=True)
         self.pager = kit.Pager(0, page_size=PAGE_SIZE, on_change=self._on_page)
         self.count_badge = ft.Text("", size=12, color=C.MUTED)
         self.list_card = kit.section_card(
             "條目",
-            ft.Column([self.list_view, self.pager], spacing=0),
+            ft.Column(
+                [
+                    ft.Container(
+                        self.list_view,
+                        expand=True,
+                        theme=ft.Theme(
+                            scrollbar_theme=ft.ScrollbarTheme(
+                                thickness=8,
+                                radius=4,
+                                thumb_color=C.LINE2,
+                                main_axis_margin=2,
+                                thumb_visibility=True,
+                            )
+                        ),
+                    ),
+                    self.pager,
+                ],
+                spacing=0,
+                expand=True,
+            ),
             icon=ft.Icons.LIST_ALT,
             tone="dia",
             flush=True,
             actions=[self.count_badge],
+            expand=True,
         )
 
     def _build_editor_inputs(self) -> None:
