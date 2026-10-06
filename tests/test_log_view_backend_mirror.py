@@ -150,3 +150,24 @@ def test_in_new_task_gives_each_worker_run_its_own_attribution():
     assert len(seen) == 2 and None not in seen and seen[0] != seen[1]
     assert str(seen[0]).startswith("qc-")
     assert ui_mirror.current_task() is None  # 不外洩到呼叫端
+
+
+def test_preview_poller_forwards_with_the_scan_tasks_identity(caplog):
+    """poller 跑在 UI 執行緒（沒有任務歸屬）：明確帶掃描工作的任務識別，去重只被該任務的後台記錄抵銷。"""
+    from types import SimpleNamespace
+
+    from app.views.extractor.extractor_preview_dialog import _preview_add_log
+
+    ui_mirror.ensure_tracker()
+    ctx = SimpleNamespace(log_view=_view())
+    with caplog.at_level(logging.INFO):
+        with ui_mirror.task_scope("scan-A"):
+            logging.getLogger("core").info("掃描 a.jar")  # 掃描 A 的核心流程寫的
+        with ui_mirror.task_scope("scan-B"):
+            logging.getLogger("core").info("掃描 b.jar")  # 另一個同時進行的掃描 B
+        # UI 執行緒轉送 A 的內容：被 A 的記錄抵銷
+        _preview_add_log(ctx, "掃描 a.jar", update=False, forwarded=True, task="scan-A")
+        # 轉送 A 的 b.jar 內容（只有 B 寫過）：不能被 B 的記錄抵銷
+        _preview_add_log(ctx, "掃描 b.jar", update=False, forwarded=True, task="scan-A")
+
+    assert [r.getMessage() for r in _mirrored(caplog)] == ["掃描 b.jar"]

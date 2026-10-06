@@ -79,22 +79,28 @@ def task_scope(task: object | None):
         _CURRENT_TASK.reset(token)
 
 
+def new_task_id(label: str = "ui") -> str:
+    """產生一個唯一的任務識別（``<label>-<8 碼>``）。"""
+    return f"{label}-{uuid.uuid4().hex[:8]}"
+
+
 @contextlib.contextmanager
-def new_task_scope(label: str = "ui"):
+def new_task_scope(label: str = "ui", task: object | None = None):
     """為「沒有 ``TaskSession``、背景執行緒直接消費 generator」的工作建立一個唯一的任務歸屬。
 
     提取對話框、打包、QC 這類路徑沒有 session，但它們的核心流程與執行緒池寫出的後台記錄、
     以及同一條執行緒轉送給畫面的訊息，需要屬於同一個任務才分得出「同時執行的另一個任務」。
+    ``task`` 可預先指定（呼叫端要在別的執行緒用同一個識別轉送訊息時，先 ``new_task_id()`` 存起來）。
     """
-    with task_scope(f"{label}-{uuid.uuid4().hex[:8]}") as scope:
+    with task_scope(task if task is not None else new_task_id(label)) as scope:
         yield scope
 
 
-def in_new_task(label: str, func: Callable) -> Callable:
+def in_new_task(label: str, func: Callable, *, task: object | None = None) -> Callable:
     """回傳在「新任務歸屬」裡執行 ``func`` 的函式（給背景工作執行緒的 ``target`` 用）。"""
 
     def runner(*args, **kwargs):
-        with new_task_scope(label):
+        with new_task_scope(label, task):
             return func(*args, **kwargs)
 
     return runner

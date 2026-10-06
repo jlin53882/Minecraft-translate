@@ -410,7 +410,7 @@ class QCView(ft.Column):
                 self.set_controls_disabled(False)
                 return
             message = f"[系統] 開始執行 Key 缺失檢查｜原文：{en_dir}｜譯文：{tw_dir}｜輸出：{out_dir}"
-            self.log_view.add(message, level="system")
+            self.log_view.add(message, level="system", dedupe=False)
             target_func = run_untranslated_check_service
             args = (en_dir, tw_dir, out_dir)
 
@@ -424,7 +424,7 @@ class QCView(ft.Column):
                 self.set_controls_disabled(False)
                 return
             message = f"[系統] 開始執行 JSON 資料夾簡繁差異比較｜簡中：{cn_dir}｜繁中：{tw_dir}｜輸出：{out_dir}"
-            self.log_view.add(message, level="system")
+            self.log_view.add(message, level="system", dedupe=False)
             target_func = run_variant_compare_service
             args = (cn_dir, tw_dir, out_dir)
 
@@ -437,7 +437,7 @@ class QCView(ft.Column):
                 self.set_controls_disabled(False)
                 return
             message = f"[系統] 開始執行 TSV 單檔案簡繁差異比較｜TSV：{tsv_path}｜輸出：{out_csv_path}"
-            self.log_view.add(message, level="system")
+            self.log_view.add(message, level="system", dedupe=False)
             target_func = run_variant_compare_tsv_service
             args = (tsv_path, out_csv_path)
 

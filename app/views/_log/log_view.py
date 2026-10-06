@@ -136,6 +136,7 @@ class LogView(ft.Container):
         mirror: bool = True,
         mirror_text: str | None = None,
         dedupe: bool = False,
+        task: object | None = None,
     ) -> None:
         """新增一行 log（給 reset 動作、純事件用）。
 
@@ -160,6 +161,9 @@ class LogView(ft.Container):
                 ``True``，後台已有相同內容就不重複寫；預設 ``False`` 代表這是 UI 自己的事件
                 （按鈕、重置、驗證失敗…），後台一定沒有對應記錄，必須無條件寫入——
                 否則剛好同文字的別筆後台記錄會讓它被吃掉。
+            task: 轉送內容所屬的任務識別。UI 執行緒本身沒有任務歸屬，轉送背景工作的內容時
+                要明確傳入該工作的任務識別（見 ``ui_mirror.new_task_id``），去重才只會被
+                同一任務的後台記錄抵銷；沒給時用目前 context 的歸屬。
         """
         if not text:
             return
@@ -169,6 +173,7 @@ class LogView(ft.Container):
                 mirror_text if mirror_text is not None else text,
                 level,
                 dedupe=dedupe,
+                task=task,
             )
 
         # 等級過濾（不在白名單就跳過）

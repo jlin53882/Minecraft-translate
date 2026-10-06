@@ -395,7 +395,7 @@ class TranslationView(ft.Column):
         取代原本的裸 controls.append + manual truncate 邏輯。
         LogView 內部已有 show_levels 過濾、max_lines 截斷、等寬字與等級顏色。
         """
-        self.log_view.add(line, level="system")
+        self.log_view.add(line, level="system", dedupe=False)
 
     def _clear_logs(self):
         """清除日誌檢視區的所有內容"""

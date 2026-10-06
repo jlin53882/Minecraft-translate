@@ -451,7 +451,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         PR refactor/unified-log-view: 取代原本的 color='cyan400' bug。
         顏色由 LogView 根據 level 自動從 theme 取。
         """
-        self.log_view.add(msg, level=level)
+        self.log_view.add(msg, level=level, dedupe=False)
 
     # 背景打包時，日誌/進度以此間隔批次推到畫面
     _UI_FLUSH_INTERVAL_SEC = 0.2

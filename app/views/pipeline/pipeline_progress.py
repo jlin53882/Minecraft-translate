@@ -143,7 +143,7 @@ class PipelineProgressPanel:
                 level = "system"
             elif msg.startswith("❌"):
                 level = "error"
-        self.log_view.add(f">> {msg}", level=level, mirror_text=msg)
+        self.log_view.add(f">> {msg}", level=level, mirror_text=msg, dedupe=False)
 
     def finish_step(self, step_num: int, success: bool, cancelled: bool = False):
         if cancelled:

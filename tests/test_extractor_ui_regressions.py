@@ -341,9 +341,27 @@ class TestFixAddLogArgType:
 
     def test_cancelled_log_uses_warning_level(self):
         """「任務已取消」log 必須用 level=\"warning\"(不是 color string)。"""
-        src = _read(EXTRACTOR_DIALOG)
-        # AST-level:找 "任務已取消" 字串後面有 level="warning"
-        assert 'add_log("[系統] 任務已取消", level="warning")' in src, (
+        import ast
+
+        tree = ast.parse(_read(EXTRACTOR_DIALOG))
+        # AST-level:找 add_log("[系統] 任務已取消", ...) 且帶 level="warning"
+        # （不比對原始碼字串，才不會被其他關鍵字參數如 forwarded= 影響）
+        found = any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "add_log"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == "[系統] 任務已取消"
+            and any(
+                kw.arg == "level"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value == "warning"
+                for kw in node.keywords
+            )
+            for node in ast.walk(tree)
+        )
+        assert found, (
             "回歸:[系統] 任務已取消 沒用 level=warning "
             "(原本傳 theme.ORANGE_700 color 字串,LogView 會 silent return)"
         )
