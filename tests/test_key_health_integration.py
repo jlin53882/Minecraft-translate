@@ -777,6 +777,23 @@ def test_probe_lease_covers_the_clients_whole_connection_retry_budget(env):
     assert seen == [False]
 
 
+def test_http_200_with_a_malformed_gemini_envelope_still_clears_the_exhaustion(env):
+    """HTTP 200 但回應缺少 candidates/content/parts/text：用戶端拋出格式異常，
+    也已證明沒有被 RPD 拒絕，配額紀錄要清除（翻譯失敗由 batch 流程自己處理）。"""
+    from translation_tool.core.lm_api_client import GeminiResponseFormatError
+
+    _exhaust_m1_and_wait_for_probe(env)
+    quota = get_model_quota_registry()
+
+    def bad_envelope(**kwargs):
+        raise GeminiResponseFormatError("Gemini 回傳格式異常: {}")
+
+    with patch.object(main, "call_gemini_requests", side_effect=bad_envelope):
+        env.translate(1)
+
+    assert not quota.is_exhausted("m1")
+
+
 def test_single_key_rpd_behaviour(env):
     env.keys = ["k0"]
     env.outcomes = {"k0": rpd()}

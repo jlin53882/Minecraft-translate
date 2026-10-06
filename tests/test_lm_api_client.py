@@ -185,3 +185,29 @@ def test_worst_case_request_sec_covers_every_connection_attempt_and_backoff():
     )
     assert backoff == expected
     assert client.worst_case_request_sec(-5) == expected  # 負的逾時不產生負的租約
+
+
+def test_malformed_gemini_envelope_raises_a_dedicated_runtime_error_subclass():
+    """HTTP 已成功但回應格式異常：例外是 RuntimeError 的子類（既有行為不變），呼叫端可據此分辨。"""
+    from unittest.mock import Mock, patch
+
+    import pytest
+
+    from translation_tool.core import lm_api_client as client
+
+    response = Mock(ok=True)
+    response.json.return_value = {"promptFeedback": {"blockReason": "SAFETY"}}
+
+    with (
+        patch.object(client, "_post_with_retry", return_value=response),
+        pytest.raises(client.GeminiResponseFormatError) as info,
+    ):
+        client.call_gemini_requests(
+            model_name="m",
+            system_prompt="s",
+            payload={"items": [{"id": "0", "value": "x"}]},
+            api_key="k",
+            temperature=0.2,
+        )
+
+    assert isinstance(info.value, RuntimeError)

@@ -88,6 +88,13 @@ def _build_translation_response_schema(payload: dict) -> dict:
     return schema
 
 
+class GeminiResponseFormatError(RuntimeError):
+    """HTTP 請求已成功，但 Gemini 的回應缺少預期的 candidates/content/parts/text。
+
+    仍是 ``RuntimeError`` 的子類（既有行為不變）；呼叫端可據此知道「這次沒有被配額拒絕」。
+    """
+
+
 def worst_case_request_sec(timeout: float) -> float:
     """一次 ``call_gemini_requests`` 最壞情況會花多久（秒）：給探測租約這類需要涵蓋整段的呼叫端用。
 
@@ -229,7 +236,7 @@ def call_gemini_requests(
     try:
         return result["candidates"][0]["content"]["parts"][0]["text"]
     except Exception:  # noqa: BLE001
-        raise RuntimeError(
+        raise GeminiResponseFormatError(
             "Gemini 回傳格式異常: "
             f"{redact_text(json.dumps(result, ensure_ascii=False))[:2000]}"
         )

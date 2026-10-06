@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 import requests
 
 from translation_tool.core.lm_api_client import (
+    GeminiResponseFormatError,
     call_gemini_requests,
     worst_case_request_sec,
 )
@@ -697,6 +698,14 @@ def _merge_batch_response(
     return merged, False
 
 
+def _clear_quota_on_http_success(
+    quota, error: Exception, model_name: str, started: float
+) -> None:
+    """HTTP 200 但回應格式異常：已證明沒有被 RPD 拒絕，配額紀錄一樣清除（翻譯失敗另外處理）。"""
+    if isinstance(error, GeminiResponseFormatError):
+        quota.mark_ok(model_name, started_at=started)
+
+
 def _abandon_model(
     runtime: _BatchRuntime,
     quota,
@@ -810,6 +819,7 @@ def _attempt_batch(
         )
         output_cap = None
         cap_source = "global"
+        started = quota.now()  # 只有「耗盡紀錄之後才開始」的成功能清除紀錄
         try:
             model_override = model_output_token_cap(runtime.lm_cfg, model_name)
             cap_source = "per_model" if model_override is not None else "global"
@@ -823,7 +833,6 @@ def _attempt_batch(
                 f"[→] 嘗試模型 {model_name} | Batch={len(round_data.current_batch)}"
                 f"/{runtime.batch_size} | 翻譯總量={runtime.original_total}"
             )
-            started = quota.now()  # 只有「耗盡紀錄之後才開始」的成功能清除紀錄
             raw_text = call_gemini_requests(
                 model_name=model_name,
                 system_prompt=prompt,
@@ -881,6 +890,7 @@ def _attempt_batch(
                 interruptible_sleep(runtime.rpm_cooldown_sec)
             return _BatchRoundOutcome()
         except Exception as error:  # noqa: BLE001
+            _clear_quota_on_http_success(quota, error, model_name, started)
             action = _handle_batch_error(
                 runtime,
                 error,
