@@ -95,6 +95,7 @@ def text_field(
     tooltip: str | None = None,
     suffix: ft.Control | None = None,
     dense: bool = True,
+    path: bool = False,
 ) -> ft.TextField:
     """統一外觀的輸入框（深 / 淺色皆適用）。``mono=True`` 用等寬字（路徑、key、JSON）。
 
@@ -110,6 +111,7 @@ def text_field(
         max_lines=max_lines,
         read_only=read_only,
         password=password,
+        path_input=path,
         can_reveal_password=password,
         on_change=on_change,
         on_submit=on_submit,

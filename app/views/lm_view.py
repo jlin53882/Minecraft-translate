@@ -81,12 +81,14 @@ class LMView(ft.Column):
             icon=ft.Icons.FOLDER_OUTLINED,
             mono=True,
             expand=True,
+            path=True,
         )
         self.output_path = kit.text_field(
             hint=f"留空會使用：{get_lm_translate_folder_name()}",
             icon=ft.Icons.FOLDER_COPY_OUTLINED,
             mono=True,
             expand=True,
+            path=True,
         )
 
         # 參數（SwitchRow 負責版面，這裡保留 Switch 本體讓外部 / 測試讀寫 .value）

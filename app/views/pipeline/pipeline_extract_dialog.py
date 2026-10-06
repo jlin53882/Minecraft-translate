@@ -106,6 +106,7 @@ def _extract_init_state_and_fields(ctx, input_path, output_path):
         value=input_path,
         expand=True,
         border_color=C.DIA,
+        path_input=True,
     )
     ctx.output_field = SyncTextField(
         label="輸出目錄",
@@ -115,6 +116,7 @@ def _extract_init_state_and_fields(ctx, input_path, output_path):
         value=output_path,
         expand=True,
         border_color=C.DIA,
+        path_input=True,
     )
 
     ctx.radio_group = ft.RadioGroup(

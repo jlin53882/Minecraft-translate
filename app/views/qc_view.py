@@ -122,13 +122,13 @@ class QCView(ft.Column):
 
         # --- 「簡繁差異比較 (JSON 資料夾模式)」的 UI 元件 ---
         self.cn_dir_textfield = kit.text_field(
-            "簡中 (zh_cn) 來源資料夾 (JSON)", mono=True, expand=True
+            "簡中 (zh_cn) 來源資料夾 (JSON)", mono=True, expand=True, path=True
         )
         self.tw_dir_textfield_2 = kit.text_field(
-            "繁中 (zh_tw) 來源資料夾 (JSON)", mono=True, expand=True
+            "繁中 (zh_tw) 來源資料夾 (JSON)", mono=True, expand=True, path=True
         )
         self.compare_out_dir_textfield = kit.text_field(
-            "JSON 差異報告 輸出資料夾", mono=True, expand=True
+            "JSON 差異報告 輸出資料夾", mono=True, expand=True, path=True
         )
         self.compare_start_button = kit.button(
             "啟動：JSON 資料夾差異比對",
@@ -139,10 +139,10 @@ class QCView(ft.Column):
 
         # --- 「簡繁差異比較 (TSV 單檔案模式)」的 UI 元件 ---
         self.tsv_file_textfield = kit.text_field(
-            "簡繁差異 TSV 檔案路徑", mono=True, expand=True
+            "簡繁差異 TSV 檔案路徑", mono=True, expand=True, path=True
         )
         self.tsv_out_file_textfield = kit.text_field(
-            "TSV 差異報告 輸出檔案 (.csv)", mono=True, expand=True
+            "TSV 差異報告 輸出檔案 (.csv)", mono=True, expand=True, path=True
         )
         self.compare_tsv_start_button = kit.button(
             "啟動：TSV 單檔案差異比對",

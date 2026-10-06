@@ -126,13 +126,11 @@ class ExtractorView(ft.Column):
 
         # 1. Configuration Section Components
         self.mods_dir_textfield = kit.text_field(
-            hint="./mods 或 %USERPROFILE%/Mods", mono=True, expand=True
+            hint="./mods 或 %USERPROFILE%/Mods", mono=True, expand=True, path=True
         )
 
         self.output_dir_textfield = kit.text_field(
-            hint="（未指定將自動產生）",
-            mono=True,
-            expand=True,
+            hint="（未指定將自動產生）", mono=True, expand=True, path=True
         )
         self.output_dir_textfield.helper = "（請選擇或直接輸入輸出資料夾）"
         self.output_dir_textfield.helper_style = ft.TextStyle(size=11, color=C.DIM)

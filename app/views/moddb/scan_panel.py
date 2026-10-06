@@ -125,6 +125,7 @@ class ScanPanel(ft.Column):
             icon=ft.Icons.FOLDER_OUTLINED,
             mono=True,
             expand=True,
+            path=True,
         )
         self.zip_pick_btn = kit.pick_button(
             ft.Icons.FOLDER_ZIP_OUTLINED, "選擇 ZIP 檔", self._pick_zip

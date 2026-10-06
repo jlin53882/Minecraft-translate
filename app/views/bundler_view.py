@@ -62,17 +62,20 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             mono=True,
             expand=True,
             on_change=self._on_meta_change,
+            path=True,
         )
         self.root_dir_field = kit.text_field(
             hint="包含所有翻譯產出的最上層資料夾",
             mono=True,
             expand=True,
             on_change=self._on_root_dir_change,
+            path=True,
         )
         self.output_zip_field = kit.text_field(
             hint="留空則自動帶入翻譯專案根目錄+設定檔檔名",
             mono=True,
             expand=True,
+            path=True,
         )
         self._config_output_zip_name = "可使用翻譯.zip"
         self.extra_folders_view = ft.ListView(spacing=6, auto_scroll=False)

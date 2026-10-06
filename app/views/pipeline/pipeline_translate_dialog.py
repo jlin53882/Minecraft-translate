@@ -115,6 +115,7 @@ def _translate_init_state_and_fields(ctx, input_path, output_path):
         value=ctx.default_input,
         expand=True,
         border_color=C.DIA,
+        path_input=True,
     )
     ctx.translate_output_field = SyncTextField(
         label="輸出目錄",
@@ -124,6 +125,7 @@ def _translate_init_state_and_fields(ctx, input_path, output_path):
         value=ctx.default_output,
         expand=True,
         border_color=C.DIA,
+        path_input=True,
     )
 
     ctx.dry_run_switch = ft.Switch(label="Dry Run（只分析不翻譯）", value=False)

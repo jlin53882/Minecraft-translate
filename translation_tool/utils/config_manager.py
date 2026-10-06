@@ -30,6 +30,7 @@ from translation_tool.utils.config_schema import (
     sensitive_paths,
 )
 from translation_tool.utils.fs_utils import fsync_directory
+from translation_tool.utils.path_text import normalize_path_text
 from translation_tool.utils.redaction import RedactingFormatter, register_secrets
 from translation_tool.utils.ui_mirror import install_task_record_factory
 
@@ -113,7 +114,9 @@ def resolve_project_path(path_like: str | os.PathLike | None) -> Path:
     if path_like is None:
         return PROJECT_ROOT
 
-    p = Path(path_like)
+    # 使用者貼上的路徑可能帶引號（檔案總管「複製為路徑」）；這裡是所有相對路徑的共同入口
+    cleaned = normalize_path_text(path_like)
+    p = Path(cleaned) if cleaned else Path(path_like)
     if p.is_absolute():
         return p
     return PROJECT_ROOT / p

@@ -116,6 +116,7 @@ class MergeWidgetsMixin:
             icon=ft.Icons.FOLDER_COPY_OUTLINED,
             mono=True,
             expand=True,
+            path=True,
         )
 
         self.zip_list_view = ft.ListView(height=160, spacing=4, auto_scroll=False)
@@ -171,6 +172,7 @@ class MergeWidgetsMixin:
             icon=ft.Icons.FOLDER_OUTLINED,
             mono=True,
             expand=True,
+            path=True,
         )
         # Web 模式無法使用原生檔案選擇器，保留可用真實鍵盤輸入的 ZIP 路徑欄位。
         self.zip_path_field = kit.text_field(
@@ -178,6 +180,7 @@ class MergeWidgetsMixin:
             icon=ft.Icons.ARCHIVE_OUTLINED,
             mono=True,
             expand=True,
+            path=True,
         )
         self.zip_panel = ft.Container(
             visible=False,

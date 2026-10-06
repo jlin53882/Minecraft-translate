@@ -26,6 +26,7 @@ from translation_tool.translation_db.schema import (
     register_source_names,
 )
 from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.path_text import normalize_path_text, strip_path_quotes
 
 DEFAULT_DB_FILE = "mod_translation.db"
 
@@ -59,24 +60,9 @@ class DbSettings:
         return path / DEFAULT_DB_FILE if path.is_dir() else path
 
 
-_QUOTES = "\"'“”‘’「」"
-
-
-def normalize_db_path(value: object) -> str:
-    """整理使用者填的資料庫路徑：去掉前後空白與引號。
-
-    Windows 檔案總管「複製為路徑」會帶雙引號（``"C:\\...\\x.db"``），直接當路徑會被
-    當成相對路徑而找不到檔案。
-    """
-    text = str(value or "").strip()
-    while len(text) >= 2 and text[0] in _QUOTES and text[-1] in _QUOTES:
-        text = text[1:-1].strip()
-    return text.strip(_QUOTES).strip()
-
-
-def strip_quotes(text: str) -> str:
-    """只去掉前後的引號（輸入中使用：不動空白，路徑中間與結尾可能還在打字）。"""
-    return text.strip(_QUOTES)
+# 路徑文字整理共用 utils.path_text（資料庫路徑、各頁路徑欄位、路徑解析同一套規則）
+normalize_db_path = normalize_path_text
+strip_quotes = strip_path_quotes
 
 
 def describe_db_path(path_text: object) -> tuple[str, str, Path]:
