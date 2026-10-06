@@ -24,14 +24,12 @@ def build_suggestions(detail, tab: str, on_apply) -> list[ft.Control]:
                         source_label(r.source) if r.zh_tw else "",
                         "" if r.same_text else "原文不同",
                     ],
-                    apply=r.zh_tw
-                    if (r.zh_tw and r.zh_tw != entry.zh_tw and r.same_text)
-                    else None,
+                    apply=r.zh_tw if (r.zh_tw and r.zh_tw != entry.zh_tw) else None,
                     same=r.zh_tw == entry.zh_tw,
                     on_apply=on_apply,
                 )
             )
-        hint = "原文相同的版本，手動儲存時會一併被取代；標示「原文不同」者不會被動到。"
+        hint = "可按「套用」把該版本的譯文帶入輸入框（不會自動儲存）。原文相同的版本，手動儲存時會一併被取代；標示「原文不同」者不會被動到，套用前請先確認意思一致。"
     else:
         groups: dict[str, list] = {}
         for r in detail.same_text:

@@ -306,3 +306,41 @@ def test_entries_version_dropdown_has_no_duplicates_after_repeated_refresh(db_pa
     keys = [o.key for o in panel.version_dd.options]
     assert keys == ["1.21.1", "1.20.1"] and len(keys) == len(set(keys))
     db.close()
+
+
+def test_same_key_suggestion_offers_apply_even_when_source_differs():
+    """同鍵值、其他版本的原文不同時也能「套用」（只是帶入輸入框，不自動儲存）。"""
+    from types import SimpleNamespace as NS
+
+    from app.views.moddb.suggestions import build_suggestions
+
+    def apply_buttons(control):
+        found = []
+        if getattr(control, "content", None) == "套用":
+            found.append(control)
+        for attr in ("controls", "content"):
+            child = getattr(control, attr, None)
+            if isinstance(child, list):
+                for c in child:
+                    found.extend(apply_buttons(c))
+            elif child is not None and not isinstance(child, str):
+                found.extend(apply_buttons(child))
+        return found
+
+    applied: list[str] = []
+    detail = NS(
+        entry=NS(zh_tw="", en_us="Distribution Interval [ticks]"),
+        same_key=[
+            NS(
+                mc_version="1.20.1", source=3, zh_tw="分配間隔 [ticks]", same_text=False
+            ),
+            NS(mc_version="1.19.2", source=None, zh_tw="", same_text=False),
+        ],
+        same_text=[],
+    )
+    controls = build_suggestions(detail, "key", applied.append)
+    buttons = apply_buttons(controls[0])
+    assert len(buttons) == 1
+    buttons[0].on_click(None)
+    assert applied == ["分配間隔 [ticks]"]
+    assert apply_buttons(controls[1]) == []  # 沒有譯文的版本不提供套用
