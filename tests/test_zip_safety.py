@@ -234,3 +234,22 @@ def test_quarantine_copy_from_zip_normal_path_still_works(tmp_path):
     copied = list(out.rglob("x.json"))
     assert len(copied) == 1
     assert Path(str(copied[0]) + ".reason.txt").read_text(encoding="utf-8") == "bad"
+
+
+def test_safe_join_ignores_realpath_mismatch_without_any_link(tmp_path, monkeypatch):
+    """沒有任何 symlink/junction、只是 realpath 解析結果不同（如 OneDrive）時不應誤判逃逸。"""
+    import os
+
+    from translation_tool.utils import zip_safety
+
+    real = os.path.realpath
+
+    def odd_realpath(path, *a, **k):
+        if str(path).endswith("a.json"):
+            return os.path.join(os.path.sep, "somewhere", "else", "a.json")
+        return real(path, *a, **k)
+
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(zip_safety.os.path, "realpath", odd_realpath)
+    assert safe_join(root, "待翻譯", "a.json").endswith("a.json")
