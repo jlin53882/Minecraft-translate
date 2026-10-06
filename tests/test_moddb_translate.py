@@ -397,3 +397,16 @@ def test_entries_panel_changed_filter_and_editor_note(db_path):
     panel.select(panel.rows[0].id)
     assert any("Steel Casing II" in t for t in texts_of(panel.meta_col))
     db.close()
+
+
+def test_pager_buttons_get_fresh_unique_keys_on_every_render():
+    """Flet 比對新舊清單會把內容相同的項目配對，頁數變少時殘留舊頁碼；key 全新才不會配對。"""
+    from app.ui.kit.inputs import Pager
+
+    pager = Pager(3650, page_size=50)
+    before = [c.key for c in pager.buttons.controls]
+    pager.set_state(34, 1)
+    after = [c.key for c in pager.buttons.controls]
+    assert len(set(before)) == len(before) and len(set(after)) == len(after)
+    assert not set(before) & set(after)
+    assert len(after) == 3  # ‹ 1 ›：只有一頁

@@ -378,6 +378,7 @@ class Pager(ft.Container):
         self.on_change = on_change
         self.total_items = max(0, total_items)
         self._current = 1
+        self._render_gen = 0
         self.summary = ft.Text(size=12, color=C.MUTED)
         self.buttons = ft.Row(spacing=4, tight=True)
         super().__init__(
@@ -416,6 +417,10 @@ class Pager(ft.Container):
             self.summary.value = (
                 f"第 {first:,}–{last:,} {self.unit} / {self.total_items:,}"
             )
+        # 每次重畫都給按鈕全新的 key：Flet 比對「新舊清單」時會把內容相同的項目當成
+        # 移動而配對，頁數變少時會殘留舊頁碼（例如只有 1 頁卻還顯示 3、4、5…73）。
+        # key 不重複就只會產生單純的刪除／新增，不會配對錯誤。
+        self._render_gen += 1
         controls: list[ft.Control] = [
             self._cell(
                 ft.Icons.CHEVRON_LEFT, self._current - 1, enabled=self._current > 1
@@ -435,6 +440,8 @@ class Pager(ft.Container):
                 enabled=self._current < self.total_pages,
             )
         )
+        for index, cell in enumerate(controls):
+            cell.key = f"pager{id(self)}-{self._render_gen}-{index}"
         self.buttons.controls = controls
 
     def _cell(
