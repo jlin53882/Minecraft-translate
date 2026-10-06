@@ -8,7 +8,12 @@ import logging
 from typing import Any
 
 from translation_tool.utils.redaction import redact_secrets
-from translation_tool.utils.ui_mirror import MIRROR_FLAG, accepted_params
+from translation_tool.utils.ui_mirror import (
+    MIRROR_FLAG,
+    accepted_params,
+    set_current_task,
+    task_key,
+)
 
 
 class UISessionLogHandler(logging.Handler):
@@ -20,8 +25,13 @@ class UISessionLogHandler(logging.Handler):
         self._session: Any = None
 
     def set_session(self, session: Any) -> None:
-        """動態綁定 TaskSession。"""
+        """動態綁定 TaskSession，並把目前 context（執行緒）歸屬到該任務。
+
+        服務在背景執行緒的入口呼叫它，之後這條執行緒寫出的後台記錄都帶這個任務識別，
+        UI→後台鏡像去重才分得出「同時執行的不同任務、相同文字」。
+        """
         self._session = session
+        set_current_task(task_key(session) if session is not None else None)
 
     def emit(self, record: logging.LogRecord) -> None:
         """發送日誌記錄到 UI。

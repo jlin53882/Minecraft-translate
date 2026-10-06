@@ -158,3 +158,81 @@ def test_fatal_folder_merge_error_is_written_to_backend_once(caplog):
 
     fatal = [r for r in caplog.records if "資料夾合併失敗" in r.getMessage()]
     assert len(fatal) == 1
+
+
+# ---------------------------------------------------------------- 同時執行的不同任務
+
+
+def test_concurrent_tasks_with_the_same_text_do_not_excuse_each_other(caplog):
+    """任務 A 的後台記錄只能抵銷 A 自己的 UI 行；B 剛好同文字時 B 的那行仍要補寫。"""
+    a, b = TaskSession(name="A"), TaskSession(name="B")
+    with caplog.at_level(logging.INFO):
+        with ui_mirror.task_scope(a.task_id):
+            logging.getLogger("core").info("完成")  # 任務 A 的核心流程自己寫的後台 log
+        b.add_log("完成")  # B 只有 UI：不能被 A 的記錄吃掉
+        a.add_log("完成")  # A 的 UI 轉送：被 A 自己的記錄抵銷
+
+    mirrored = [
+        r.getMessage() for r in caplog.records if getattr(r, "ui_mirrored", False)
+    ]
+    assert mirrored == ["[B] 完成"]
+
+
+def test_backend_record_from_an_unknown_task_is_compatible_with_any_task(caplog):
+    """沒有任務歸屬的後台記錄（例如 ThreadPoolExecutor 工作執行緒）退回只比文字＋時間窗。"""
+    session = TaskSession(name="X")
+    with caplog.at_level(logging.INFO):
+        logging.getLogger("core").info("池內訊息")  # 沒有 task scope
+        session.add_log("池內訊息")
+
+    assert not [r for r in caplog.records if getattr(r, "ui_mirrored", False)]
+
+
+def test_tracker_task_attribution_follows_each_thread(caplog):
+    """每條執行緒各自的 context：只有 B 的執行緒寫了後台記錄，A 的同文字 UI 行仍要補寫。"""
+    import threading
+
+    a, b = TaskSession(name="A"), TaskSession(name="B")
+    ready = threading.Barrier(2)
+
+    def worker(session, writes):
+        ui_mirror.set_current_task(session.task_id)  # 等同服務入口的 set_session
+        ready.wait()
+        if writes:
+            logging.getLogger("core").info("同時的訊息")
+
+    with caplog.at_level(logging.INFO):
+        threads = [
+            threading.Thread(target=worker, args=(a, False)),
+            threading.Thread(target=worker, args=(b, True)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        a.add_log("同時的訊息")  # A 的執行緒沒寫後台：B 的記錄不能抵銷它
+        b.add_log("同時的訊息")  # B 自己的記錄抵銷
+
+    mirrored = [
+        r.getMessage() for r in caplog.records if getattr(r, "ui_mirrored", False)
+    ]
+    assert mirrored == ["[A] 同時的訊息"]
+
+
+def test_set_session_binds_the_current_context_to_the_task():
+    from translation_tool.utils.ui_logging_handler import UISessionLogHandler
+
+    handler = UISessionLogHandler()
+    session = TaskSession(name="綁定")
+    handler.set_session(session)
+    assert ui_mirror.current_task() == session.task_id
+    handler.set_session(None)
+    assert ui_mirror.current_task() is None
+
+
+def test_tracker_consume_skips_other_tasks_but_keeps_their_entries():
+    tracker, _ = _tracker()
+    tracker.remember("L", "A")
+    assert tracker.consume("L", "B") is False  # 屬於 A，B 不能抵銷
+    assert tracker.consume("L", "A") is True  # A 仍可抵銷
+    assert tracker.consume("L", "A") is False

@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import inspect
 import logging
 import threading
@@ -47,14 +49,53 @@ _SEEN_LIMIT = 1000
 _SEEN_WINDOW_SEC = 5.0
 
 
+# 目前執行緒（context）正在執行的任務識別。服務入口設定一次（見 ``UISessionLogHandler.set_session``），
+# 之後同一條執行緒寫出的後台記錄都屬於這個任務；追蹤器以它區分「同時執行、文字相同」的不同任務。
+# 注意：``ThreadPoolExecutor`` 的工作執行緒不會繼承 context，在那裡寫的記錄任務為 ``None``，
+# 這種記錄「無法判斷歸屬」，與任何任務都視為相容（退回只比文字＋時間窗的行為）。
+_CURRENT_TASK: contextvars.ContextVar[object | None] = contextvars.ContextVar(
+    "ui_mirror_current_task", default=None
+)
+
+
+def set_current_task(task: object | None) -> None:
+    """設定目前 context 的任務識別（``None`` 代表沒有任務）。"""
+    _CURRENT_TASK.set(task)
+
+
+def current_task() -> object | None:
+    return _CURRENT_TASK.get()
+
+
+@contextlib.contextmanager
+def task_scope(task: object | None):
+    """暫時把目前 context 歸屬到某個任務（測試或不經 ``set_session`` 的呼叫端用）。"""
+    token = _CURRENT_TASK.set(task)
+    try:
+        yield
+    finally:
+        _CURRENT_TASK.reset(token)
+
+
+def task_key(session: object) -> object:
+    """session 的任務識別：優先用 ``task_id``，替身 session 退回物件 id。"""
+    return getattr(session, "task_id", None) or id(session)
+
+
+def _same_task(a: object | None, b: object | None) -> bool:
+    """兩邊都知道歸屬且不同才算不同任務；任一邊未知（``None``）視為相容。"""
+    return a is None or b is None or a == b
+
+
 class _Seen:
     """一筆後台訊息行（occurrence 層級）；被抵銷或過期後標記，之後淘汰時不會再被誤算。"""
 
-    __slots__ = ("consumed", "text", "ts")
+    __slots__ = ("consumed", "task", "text", "ts")
 
-    def __init__(self, text: str, ts: float) -> None:
+    def __init__(self, text: str, ts: float, task: object | None = None) -> None:
         self.text = text
         self.ts = ts
+        self.task = task
         self.consumed = False
 
 
@@ -92,16 +133,16 @@ class _BackendSeenTracker(logging.Handler):
             message = record.getMessage()
         except Exception:  # noqa: BLE001 - handler 內不可再丟例外
             return
-        self.remember(message)
+        self.remember(message, current_task())
 
-    def remember(self, message: str) -> None:
+    def remember(self, message: str, task: object | None = None) -> None:
         lines = [ln.strip() for ln in message.splitlines() if ln.strip()]
         if not lines:
             return
         now = self._clock()
         with self._guard:
             for line in lines:
-                entry = _Seen(line, now)
+                entry = _Seen(line, now, task)
                 self._entries.append(entry)
                 self._pending.setdefault(line, deque()).append(entry)
             while len(self._entries) > self._limit:
@@ -121,8 +162,8 @@ class _BackendSeenTracker(logging.Handler):
             if not queue:
                 del self._pending[entry.text]
 
-    def consume(self, line: str) -> bool:
-        """若後台最近（時間窗內）寫過這一行，抵銷最舊的一筆並回傳 True。"""
+    def consume(self, line: str, task: object | None = None) -> bool:
+        """若後台最近（時間窗內、同一任務或歸屬未知）寫過這一行，抵銷最舊的一筆並回傳 True。"""
         key = line.strip()
         if not key:
             return True
@@ -134,7 +175,11 @@ class _BackendSeenTracker(logging.Handler):
             if not queue:
                 self._pending.pop(key, None)
                 return False
-            queue.popleft().consumed = True
+            match = next((e for e in queue if _same_task(e.task, task)), None)
+            if match is None:
+                return False  # 有同文字，但屬於另一個同時執行的任務
+            queue.remove(match)
+            match.consumed = True
             if not queue:
                 del self._pending[key]
             return True
@@ -162,6 +207,7 @@ def mirror_to_backend(
     prefix: str = "",
     logger: logging.Logger | None = None,
     dedupe: bool = True,
+    task: object | None = None,
 ) -> bool:
     """把一則 UI 訊息寫入後台 log；回傳是否真的寫入。
 
@@ -171,17 +217,22 @@ def mirror_to_backend(
         prefix: 只加在後台的前綴（例如任務名稱），UI 維持原文。
         logger: 指定後台 logger（預設 ``app.ui``）；模組自己的 logger 能讓 log 檔看出來源。
         dedupe: 後台最近已寫過的行不重複寫入。
+        task: 這則訊息所屬的任務識別；沒給時用目前 context 的任務（見 ``set_current_task``）。
+            去重只會被「同一任務或歸屬未知」的後台記錄抵銷，同時執行的另一個任務
+            剛好寫出相同文字時不會互相吃掉。
     """
     if not text:
         return False
     try:
         ensure_tracker()
+        if task is None:
+            task = current_task()
         body = redact_secrets(text)
         if dedupe:
             kept = [
                 ln
                 for ln in body.splitlines()
-                if ln.strip() and not BACKEND_SEEN_TRACKER.consume(ln)
+                if ln.strip() and not BACKEND_SEEN_TRACKER.consume(ln, task)
             ]
             if not kept:
                 return False

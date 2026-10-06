@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import uuid
 from collections import deque
 from collections.abc import Callable
 
@@ -109,6 +110,8 @@ class TaskSession:
         """
         self.name = name
         self.view_key = view_key
+        # 任務識別：UI→後台鏡像去重用，區分同時執行的不同任務
+        self.task_id = uuid.uuid4().hex[:8]
         self.progress: float = 0.0
         self.status: str = "IDLE"  # IDLE / RUNNING / DONE / ERROR
         self.error: bool = False
@@ -179,7 +182,10 @@ class TaskSession:
             self.logs.append(entry)
         if mirror and source not in BACKEND_SOURCES:
             mirror_to_backend(
-                text, level, prefix=f"[{self.name}] " if self.name else ""
+                text,
+                level,
+                prefix=f"[{self.name}] " if self.name else "",
+                task=self.task_id,
             )
 
     def set_error(self) -> None:
