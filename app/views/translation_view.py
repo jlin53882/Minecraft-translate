@@ -32,27 +32,31 @@ from app.views.translation.translation_panels import (
     build_path_row,
 )
 from app.views.translation.translation_state import TranslationRunState
-from translation_tool.utils.log_unit import log_warning
+from translation_tool.utils.log_unit import log_error, log_warning
 
 # 可選匯入：避免某個 service 暫時不可用時，整頁無法開啟
 try:
     from app.services_impl.pipelines.ftb_service import run_ftb_translation_service
-except Exception:  # noqa: BLE001
+except Exception as _exc:  # noqa: BLE001 - 服務載入失敗時整頁仍可開啟，但原因必須留在 log
+    log_error("FTB 翻譯服務載入失敗，翻譯頁的 FTB 功能將無法使用", exc_info=True)
     run_ftb_translation_service = None
 
 try:
     from app.services_impl.pipelines.kubejs_service import run_kubejs_tooltip_service
-except Exception:  # noqa: BLE001
+except Exception as _exc:  # noqa: BLE001 - 服務載入失敗時整頁仍可開啟，但原因必須留在 log
+    log_error("KubeJS 翻譯服務載入失敗，翻譯頁的 KubeJS 功能將無法使用", exc_info=True)
     run_kubejs_tooltip_service = None
 
 try:
     from app.services_impl.pipelines.md_service import run_md_translation_service
-except Exception:  # noqa: BLE001
+except Exception as _exc:  # noqa: BLE001 - 服務載入失敗時整頁仍可開啟，但原因必須留在 log
+    log_error("Markdown 翻譯服務載入失敗，翻譯頁的 MD 功能將無法使用", exc_info=True)
     run_md_translation_service = None
 
 try:
     from app.tasks.task_session import TaskSession
-except Exception:  # noqa: BLE001
+except Exception as _exc:  # noqa: BLE001 - 載入失敗時整頁仍可開啟，但原因必須留在 log
+    log_error("TaskSession 載入失敗，翻譯頁將無法建立任務", exc_info=True)
     TaskSession = None
 
 
@@ -391,7 +395,7 @@ class TranslationView(ft.Column):
         取代原本的裸 controls.append + manual truncate 邏輯。
         LogView 內部已有 show_levels 過濾、max_lines 截斷、等寬字與等級顏色。
         """
-        self.log_view.add(line, level="system")
+        self.log_view.add(line, level="system", dedupe=False)
 
     def _clear_logs(self):
         """清除日誌檢視區的所有內容"""

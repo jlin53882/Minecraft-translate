@@ -23,8 +23,12 @@ from app.services_impl.pipelines.extract_service import (
 )
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog
+from app.ui.safe_file_picker import ensure_output_dir
+from app.ui.sync_text_field import SyncTextField
 from app.views.extractor.extractor_state import PreviewState
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_error
+from translation_tool.utils.ui_mirror import in_new_task
 
 
 def open_extract_dialog(
@@ -94,7 +98,7 @@ def _extract_init_state_and_fields(ctx, input_path, output_path):
         "lang_codes", ["en_us", "zh_cn", "zh_tw"]
     )
 
-    ctx.mods_field = ft.TextField(
+    ctx.mods_field = SyncTextField(
         label="Mod 來源",
         hint_text=f"自動帶入：{input_path}"
         if input_path
@@ -103,7 +107,7 @@ def _extract_init_state_and_fields(ctx, input_path, output_path):
         expand=True,
         border_color=C.DIA,
     )
-    ctx.output_field = ft.TextField(
+    ctx.output_field = SyncTextField(
         label="輸出目錄",
         hint_text=f"自動帶入：{output_path}"
         if output_path
@@ -216,8 +220,9 @@ def _extract_start_extraction(ctx, dialog):
     if not output:
         ctx.show_snack_bar("⚠️ 輸出目錄為必填欄位")
         return
-    if not os.path.isdir(output):
-        ctx.show_snack_bar("⚠️ 輸出目錄不存在")
+    output_error = ensure_output_dir(output)
+    if output_error:
+        ctx.show_snack_bar(f"⚠️ {output_error}")
         return
 
     selected_codes = [
@@ -303,6 +308,7 @@ def _extract_preview_worker(
             if "result" in update:
                 preview_state.result = update["result"]
     except Exception as ex:  # noqa: BLE001 - 錯誤要顯示在對話框
+        log_error(f"[Pipeline] 提取預覽失敗：{ex!r}", exc_info=True)
         preview_state.error = str(ex)
     finally:
         # 不論結果如何都標記完成，避免輪詢永遠不結束
@@ -443,13 +449,16 @@ def _extract_show_preview_result(ctx, dialog):
     cancel_event = threading.Event()
 
     threading.Thread(
-        target=functools.partial(
-            _extract_preview_worker,
-            preview_state,
-            mods,
-            mode,
-            selected_codes,
-            cancel_event,
+        target=in_new_task(
+            "pipeline-extract-preview",
+            functools.partial(
+                _extract_preview_worker,
+                preview_state,
+                mods,
+                mode,
+                selected_codes,
+                cancel_event,
+            ),
         ),
         daemon=True,
     ).start()

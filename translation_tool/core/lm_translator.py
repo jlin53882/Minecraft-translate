@@ -607,7 +607,7 @@ def _scan_directory_files(root: Path) -> list[Path]:
     try:
         patchouli_files, lang_files, files = scan_translatable_files(root)
     except Exception as error:  # noqa: BLE001
-        log_warning(f"⚠️ 掃描可翻譯檔案失敗，已跳過本次掃描：{error}")
+        log_warning(f"⚠️ 掃描可翻譯檔案失敗，已跳過本次掃描：{error!r}")
         patchouli_files, lang_files, files = [], [], []
     log_info(f"🔍 掃描完成：Patchouli={len(patchouli_files)}，Lang={len(lang_files)}")
     return files

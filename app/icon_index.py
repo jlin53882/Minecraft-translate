@@ -12,12 +12,13 @@ import json
 import re
 import zipfile
 from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 
 from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 from translation_tool.utils.zip_safety import (
     ArchiveBudgetError,
     ZipReadBudget,
@@ -64,7 +65,8 @@ def _iter_entries_from_lang_files(zf: zipfile.ZipFile) -> Iterator[tuple[str, st
             continue
         try:
             content = read_limited(zf, name).decode("utf-8", errors="ignore")
-        except Exception:  # noqa: BLE001, S112
+        except Exception as exc:  # noqa: BLE001 - 單一 lang 檔讀不出來就略過，但要留下是哪個檔案
+            log_warning(f"[IconIndex] 略過無法讀取的 lang 檔 {name}: {exc!r}")
             continue
         for line in content.splitlines():
             line = line.strip()
@@ -109,7 +111,10 @@ def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
                     )
                 except ArchiveBudgetError:
                     raise  # 整包累計超限：交給外層處理
-                except Exception:  # noqa: BLE001, S112
+                except Exception as exc:  # noqa: BLE001 - 單一 lang 檔讀不出來就略過，但要留下是哪個檔案
+                    log_warning(
+                        f"[IconIndex] 略過無法讀取的 lang 檔 {jar_path.name}!/{name}: {exc!r}"
+                    )
                     continue
                 for line in content.splitlines():
                     line = line.strip()
@@ -149,8 +154,11 @@ def _process_single_jar(args: tuple[Path, str]) -> dict[str, str]:
     except ArchiveBudgetError:
         # 累計讀取超過安全上限（budget 已記錄警告）：保留已建立的部分索引，不中止整個索引建置
         log_warning(f"[IconIndex] {jar_path.name} 累計讀取超限，僅保留已解析的部分索引")
-    except Exception:  # noqa: BLE001, S110
-        pass
+    except Exception as exc:  # noqa: BLE001 - 單一 JAR 索引失敗不中止整體，但要留下堆疊
+        log_warning(
+            f"[IconIndex] {jar_path.name} 索引建立失敗，僅保留已解析的部分索引：{exc!r}",
+            exc_info=True,
+        )
     return results
 
 
@@ -189,7 +197,7 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
         load_config().get("translator", {}).get("parallel_execution_workers", 8)
     )
     max_workers = max(1, config_workers) if isinstance(config_workers, int) else 8
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(_process_single_jar, (jar, modid)): (jar, modid)
             for jar, modid in jar_modid_pairs
@@ -204,7 +212,7 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
                 if progress_cb:
                     progress_cb(done, total)
             except Exception as ex:  # noqa: BLE001
-                log_warning(f"[IconIndex] JAR 處理失敗 {jar.name}: {ex}")
+                log_warning(f"[IconIndex] JAR 處理失敗 {jar.name}: {ex!r}")
             if done % 50 == 0 or done == total:
                 log_info(
                     f"[IconIndex] 進度：{done}/{total} JARs，已建立 {len(index)} 個 icon 索引"
@@ -247,5 +255,5 @@ def load_icon_index(mods_dir: Path) -> dict[str, str] | None:
         )
         return data["index"]
     except Exception as ex:  # noqa: BLE001
-        log_warning(f"[IconIndex] 索引載入失敗：{ex}")
+        log_warning(f"[IconIndex] 索引載入失敗：{ex!r}")
         return None

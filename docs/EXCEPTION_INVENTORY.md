@@ -4,19 +4,19 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **267** 項；其中 **138** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **271** 項；其中 **122** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 224 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
-| UI／畫面保護 | 28 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
-| 盡力而為（靜默） | 15 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
+| 已記錄／回報 | 236 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
+| 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
 | 位置 | 規則 | 分類 | 原因／處理 |
 |---|---|---|---|
-| `app/icon_index.py:_iter_entries_from_lang_files` | BLE001/S112 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/icon_index.py:_process_single_jar` | BLE001/S112 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/icon_index.py:_process_single_jar` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/icon_index.py:_iter_entries_from_lang_files` | BLE001 | 已記錄／回報 | 單一 lang 檔讀不出來就略過，但要留下是哪個檔案 |
+| `app/icon_index.py:_process_single_jar` | BLE001 | 已記錄／回報 | 單一 lang 檔讀不出來就略過，但要留下是哪個檔案 |
+| `app/icon_index.py:_process_single_jar` | BLE001 | 已記錄／回報 | 單一 JAR 索引失敗不中止整體，但要留下堆疊 |
 | `app/icon_index.py:build_icon_index` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/icon_index.py:load_icon_index` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/icon_reader.py:_ZipCache.get` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
@@ -44,11 +44,13 @@
 | `app/shell/app_shell.py:read_app_version` | BLE001 | UI／畫面保護 | 版本只是裝飾，讀不到不影響啟動 |
 | `app/shell/app_shell.py:AppShell._on_resize` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/shell/app_shell.py:_default_mode` | BLE001 | 已記錄／回報 | 設定壞掉時用預設深色 |
+| `app/ui/safe_file_picker.py:SafeFilePicker._notify_unsupported` | BLE001 | 已記錄／回報 | 控制項未掛載時只能記錄 |
+| `app/ui/safe_file_picker.py:SafeFilePicker._is_web` | BLE001 | UI／畫面保護 | 控制項尚未掛載：視為非 Web，交給原本的行為 |
 | `app/ui/snack.py:_clear_existing_snacks` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/ui/snack.py:_show_snack_dialog` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/ui/snack.py:_show_snack_dialog` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/ui/snack.py:show_snack` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/bundler_view.py:BundlerView._load_version_data` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/bundler_view.py:BundlerView._load_version_data` | BLE001 | 已記錄／回報 | 版本資料讀不到時用空設定，但要留下紀錄 |
 | `app/views/bundler_view.py:BundlerView._bundling_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，錯誤顯示於日誌 |
 | `app/views/cache_manager/cache_actions.py:run_cache_action.execute_work` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
 | `app/views/cache_manager/cache_history_store.py:history_load_active` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -94,9 +96,9 @@
 | `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._collect_jar_modids` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview/icon_cache.py:_follow_parent_chain` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/icon_preview/icon_cache.py:_extract_jar_icon` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/icon_preview/icon_cache.py:_run_jar_workers` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons._process_jar` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/views/icon_preview/icon_cache.py:_run_jar_workers` | BLE001 | 已記錄／回報 | 單一 JAR 圖示解析失敗不中止整批，但要留下是哪個 JAR |
+| `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons` | BLE001 | 已記錄／回報 | 預建索引載入失敗時改為逐 JAR 解析，但要留下紀錄 |
+| `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons._process_jar` | BLE001 | 已記錄／回報 | 單一 JAR 解析失敗保留已解析的部分，但要留下是哪個 JAR |
 | `app/views/icon_preview_row.py:_ensure_icon_size` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/icon_preview_view.py:IconPreviewView._load_async` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
 | `app/views/lm_view.py:LMView._on_db_option_changed` | BLE001 | 已記錄／回報 | 頁面尚未掛載時只是不即時更新提示 |
@@ -104,18 +106,18 @@
 | `app/views/lm_view.py:LMView.refresh_key_stat` | BLE001 | UI／畫面保護 | 讀不到設定時只是不顯示 |
 | `app/views/lookup_view.py:LookupView.single_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/lookup_view.py:LookupView.batch_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
-| `app/views/merge_view.py:MergeView._broadcast_config_change_to_config_view` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/merge_view.py:MergeView._on_merge_field_changed` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/merge_view.py:MergeView.start_merge._run_merge` | BLE001 | 已記錄／回報 | 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束 |
+| `app/views/merge_view.py:MergeView._broadcast_config_change_to_config_view` | BLE001 | 已記錄／回報 | 通知失敗不影響合併頁，但要留下紀錄 |
+| `app/views/merge_view.py:MergeView._on_merge_field_changed` | BLE001 | 已記錄／回報 | 欄位寫入失敗不可中斷 UI，但設定沒存成功必須留下紀錄 |
+| `app/views/merge_view.py:MergeView._run_merge_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束 |
 | `app/views/merge_view.py:MergeView._sync_ui_once` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/merge_view.py:MergeView._close_dialog_overlay` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/moddb/entries_panel.py:EntriesPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
 | `app/views/moddb/overview_panel.py:OverviewPanel.refresh` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料 |
 | `app/views/moddb/scan_panel.py:ScanPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響掃描本身 |
 | `app/views/moddb_view.py:ModDbView._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
-| `app/views/pipeline/pipeline_bundle_dialog.py:_load_version_data` | BLE001 | UI／畫面保護 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
+| `app/views/pipeline/pipeline_bundle_dialog.py:_load_version_data` | BLE001 | 已記錄／回報 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
 | `app/views/pipeline/pipeline_extract_dialog.py:_extract_preview_worker` | BLE001 | 已記錄／回報 | 錯誤要顯示在對話框 |
-| `app/views/pipeline/pipeline_one_click_dialog.py:_load_version_data` | BLE001 | UI／畫面保護 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
+| `app/views/pipeline/pipeline_one_click_dialog.py:_load_version_data` | BLE001 | 已記錄／回報 | 讀不到版本資料時使用空設定，UI 仍可開啟 |
 | `app/views/pipeline/pipeline_session.py:PipelineRunner.start_sequence.worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，確保按鈕會恢復 |
 | `app/views/pipeline/pipeline_session.py:PipelineRunner.run_step` | BLE001 | 已記錄／回報 | 背景步驟邊界：任何錯誤都轉成步驟失敗 |
 | `app/views/qc_base.py:QCBase.task_worker.run` | BLE001 | 已記錄／回報 | 背景執行緒需把錯誤回報到 UI |
@@ -137,10 +139,10 @@
 | `app/views/translation/translation_actions.py:run_md` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/translation/translation_actions.py:run_md.worker` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/translation/translation_actions.py:run_md.worker` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/translation_view.py:<module>` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/translation_view.py:<module>` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/translation_view.py:<module>` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/translation_view.py:<module>` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/translation_view.py:<module>` | BLE001 | 已記錄／回報 | 服務載入失敗時整頁仍可開啟，但原因必須留在 log |
+| `app/views/translation_view.py:<module>` | BLE001 | 已記錄／回報 | 服務載入失敗時整頁仍可開啟，但原因必須留在 log |
+| `app/views/translation_view.py:<module>` | BLE001 | 已記錄／回報 | 服務載入失敗時整頁仍可開啟，但原因必須留在 log |
+| `app/views/translation_view.py:<module>` | BLE001 | 已記錄／回報 | 載入失敗時整頁仍可開啟，但原因必須留在 log |
 | `translation_tool/checkers/english_residue_checker.py:check_english_residue_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/checkers/untranslated_checker.py:check_untranslated_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/checkers/variant_comparator.py:compare_variants_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
@@ -169,7 +171,7 @@
 | `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | 既有 zh_tw 讀不出來時視為空白，但要留下紀錄 |
 | `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -191,7 +193,7 @@
 | `translation_tool/core/lang_merge_io.py:quarantine_copy` | BLE001 | 已記錄／回報 | 隔離副本寫入失敗不可中斷合併，但要留下紀錄 |
 | `translation_tool/core/lang_merge_pending.py:export_filtered_pending_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merge_pipeline.py:_process_single_mod._safe_read_lang_json` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/lang_merge_pipeline.py:_process_single_mod` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/lang_merge_pipeline.py:_process_single_mod` | BLE001 | 已記錄／回報 | 既有輸出讀不出來時從空白重建，但要留下是哪個檔 |
 | `translation_tool/core/lang_merge_pipeline.py:_process_single_mod` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merge_zip_io.py:quarantine_copy_from_zip` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merger.py:merge_zhcn_to_zhtw_from_zip` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -217,8 +219,8 @@
 | `translation_tool/core/lm_translator_shared_loop.py:translate_items_with_cache_loop` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_shared_loop.py:translate_items_with_cache_loop` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/md_translation_progress.py:_ProgressProxy.set_progress` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷翻譯 |
-| `translation_tool/core/md_translation_stats.py:count_md_pending_docs` | BLE001/S112 | 盡力而為（靜默） | 統計僅計入可解析的待翻譯檔，壞檔略過 |
-| `translation_tool/core/md_translation_steps.py:step3_inject_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/core/md_translation_stats.py:count_md_pending_docs` | BLE001 | 已記錄／回報 | 統計僅計入可解析的待翻譯檔，壞檔略過但要記錄是哪個檔 |
+| `translation_tool/core/md_translation_steps.py:step3_inject_impl` | BLE001 | 已記錄／回報 | 單一待注入檔讀取失敗：計入錯誤並繼續，但要留下是哪個檔 |
 | `translation_tool/core/output_bundler.py:bundle_outputs_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/output_bundler.py:bundle_outputs_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/output_bundler.py:bundle_outputs_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
@@ -256,8 +258,8 @@
 | `translation_tool/translation_db/identity.py:patchouli_dir_names` | BLE001 | 已記錄／回報 | 設定不可用時退回預設，不影響身分計算 |
 | `translation_tool/translation_db/scanner.py:load_rules` | BLE001 | 已記錄／回報 | 規則檔問題不應讓掃描失敗，只是略過替換 |
 | `translation_tool/translation_db/settings.py:open_db` | BLE001 | 已記錄／回報 | 資料庫問題不應中斷翻譯 |
-| `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
-| `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
+| `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 讀取失敗不中斷總覽，但要留下紀錄 |
+| `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 讀取失敗不中斷總覽，但要留下紀錄 |
 | `translation_tool/utils/cache_search.py:CacheSearchEngine.index_batch` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/cache_search.py:build_index_entries` | BLE001 | 已記錄／回報 | 單筆壞資料不影響整體索引 |
 | `translation_tool/utils/cache_search_facade.py:CacheSearchFacade.is_search_index_current` | BLE001 | 已記錄／回報 | 判斷失敗就當作需要重建 |
@@ -281,3 +283,5 @@
 | `translation_tool/utils/text_processor.py:load_custom_translations` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/text_processor.py:convert_snbt_file_inplace` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/ui_logging_handler.py:UISessionLogHandler.emit` | BLE001/S110 | 盡力而為（靜默） | 在 handler 內記錄錯誤會遞迴 |
+| `translation_tool/utils/ui_mirror.py:_BackendSeenTracker.emit` | BLE001 | 盡力而為（靜默） | handler 內不可再丟例外 |
+| `translation_tool/utils/ui_mirror.py:mirror_to_backend` | BLE001 | 盡力而為（靜默） | 鏡像失敗不可影響 UI 或任務本身 |

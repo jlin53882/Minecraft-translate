@@ -167,3 +167,87 @@ def test_start_logs_survive_start_and_keep_their_order():
     texts = [e.text for e in session.snapshot()["logs"]]
     assert texts == ["提示", "work"]
     assert [e.seq for e in session.snapshot()["logs"]] == [0, 1]
+
+
+def test_pre_start_log_and_lifecycle_records_share_one_execution_id(caplog):
+    """add_start_log 在 start() 前寫入：後台記錄必須掛在「這次執行」的 task_id，不是舊的。"""
+    import logging
+
+    from app.tasks.task_session import TaskSession
+    from translation_tool.utils import ui_mirror
+
+    ui_mirror.install_task_record_factory()
+    session = TaskSession(name="機器翻譯")
+    id_before_start = session.task_id
+    with caplog.at_level(logging.INFO):
+        session.add_start_log("[資訊] 未指定輸出，使用預設")
+        session.start()
+        session.finish()
+
+    mine = [r for r in caplog.records if getattr(r, "task_name", None) == "機器翻譯"]
+    by_text = {r.getMessage(): r.task_id for r in mine}
+    assert session.task_id != id_before_start  # start() 確實換了識別
+    assert by_text["[資訊] 未指定輸出，使用預設"] == session.task_id
+    assert by_text["任務開始"] == session.task_id
+    assert {r.task_id for r in mine} == {session.task_id}  # 沒有任何記錄掛在舊識別上
+    # 後台只出現一次
+    assert [r.getMessage() for r in mine].count("[資訊] 未指定輸出，使用預設") == 1
+
+
+def test_start_log_added_while_running_is_mirrored_with_the_current_id(caplog):
+    import logging
+
+    from app.tasks.task_session import TaskSession
+    from translation_tool.utils import ui_mirror
+
+    ui_mirror.install_task_record_factory()
+    session = TaskSession(name="執行中")
+    session.start()
+    with caplog.at_level(logging.INFO):
+        session.add_start_log("執行中才加入的開頭訊息")
+
+    rec = [r for r in caplog.records if "執行中才加入" in r.getMessage()]
+    assert len(rec) == 1 and rec[0].task_id == session.task_id
+
+
+def test_start_clears_the_previous_runs_summary():
+    """重用同一個 session：第二次執行（很早就取消／例外）不能帶著第一次的摘要。"""
+    from app.tasks.task_session import TaskSession
+
+    session = TaskSession(name="合併")
+    session.start()
+    session.set_summary({"success_folders": 1})
+    session.finish()
+    assert session.snapshot()["summary"] == {"success_folders": 1}
+
+    session.start()  # 第二次：還沒 set_summary 就結束
+
+    assert session.snapshot()["summary"] is None
+
+
+def test_second_run_lifecycle_log_does_not_repeat_the_first_runs_summary(caplog):
+    import logging
+
+    from app.tasks.task_session import TaskSession
+    from translation_tool.utils import ui_mirror
+
+    ui_mirror.install_task_record_factory()
+    session = TaskSession(name="合併")
+    session.start()
+    session.set_summary({"marker": "第一次的結果"})
+    session.finish()
+
+    with caplog.at_level(logging.INFO):
+        session.start()
+        session.finish()  # 第二次沒有任何摘要
+
+    ends = [
+        r.getMessage() for r in caplog.records if r.getMessage().startswith("任務結束")
+    ]
+    assert ends and "第一次的結果" not in ends[-1]
+
+
+def test_new_session_has_no_summary():
+    from app.tasks.task_session import TaskSession
+
+    assert TaskSession().summary is None

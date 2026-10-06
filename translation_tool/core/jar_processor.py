@@ -20,6 +20,7 @@ from translation_tool.core.jar_processor_preview import (
     preview_extraction_generator_impl,
 )
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_error
 
 BOOK_PATH_REGEX_DUAL_STRUCTURE = re.compile(
     r"^(assets|data)/([^/]+)/"
@@ -268,6 +269,7 @@ def extract_dual_files_generator(
             else:
                 yield {**update, "phase": "lang"}
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
+        log_error(f"[Dual] Lang 提取失敗：{e!r}", exc_info=True)
         lang_error = str(e)
     if lang_stats:
         yield {"phase": "lang", "stats": lang_stats}
@@ -303,6 +305,7 @@ def extract_dual_files_generator(
             else:
                 yield {**update, "phase": "book"}
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
+        log_error(f"[Dual] Book 提取失敗：{e!r}", exc_info=True)
         book_error = str(e)
     # Phase 3 fix: book phase 結束後補一個 combined yield(無 phase,不污染 sub-dict),
     # 確保 run_extraction_loop 頂層 stats["success"] 是 lang+book 合計。

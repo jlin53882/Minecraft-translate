@@ -31,6 +31,7 @@ from translation_tool.utils.config_schema import (
 )
 from translation_tool.utils.fs_utils import fsync_directory
 from translation_tool.utils.redaction import RedactingFormatter, register_secrets
+from translation_tool.utils.ui_mirror import install_task_record_factory
 
 log = logging.getLogger(__name__)
 
@@ -390,7 +391,7 @@ def save_config(config, config_path: str | os.PathLike | None = None) -> bool:
         return True
 
     except Exception as e:  # noqa: BLE001
-        logging.error(f"錯誤：儲存或驗證設定檔失敗: {e}")  # noqa: LOG015
+        logging.error(f"錯誤：儲存或驗證設定檔失敗: {e!r}")  # noqa: LOG015
         return False
     finally:
         if temp_path is not None:
@@ -439,6 +440,8 @@ def setup_logging(config):
     for handler in handlers:
         handler.setFormatter(RedactingFormatter(log_format))
 
+    # 每筆記錄在寫 log 的執行緒帶上任務標籤，app.log 才分得出同時執行的各任務（見 ui_mirror）
+    install_task_record_factory()
     logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
     logging.info("日誌系統已成功設定。")  # noqa: LOG015
 

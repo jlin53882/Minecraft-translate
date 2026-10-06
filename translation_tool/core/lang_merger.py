@@ -11,10 +11,14 @@ import os
 import zipfile
 from collections import defaultdict
 from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any
 
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
+
+from ..utils.cancellation import raise_if_cancelled
 from ..utils.config_manager import load_config
-from ..utils.log_unit import log_debug, log_error, log_exception, log_info, log_warning
+from ..utils.log_unit import log_debug, log_error, log_exception, log_info
 from ..utils.text_processor import load_replace_rules
 from ..utils.zip_safety import ZipReadBudget
 from .lang_merge_content import (
@@ -25,6 +29,30 @@ from .lang_merge_content import (
 from .lang_merge_content_copy import detect_content_wrapper_prefix
 from .lang_merge_io import FolderReader, ZipReader
 from .lang_merge_pipeline import _process_single_mod, detect_mod_wrapper_prefix
+
+# 掃描檔名清單時每隔多少筆檢查一次取消（逐筆檢查成本小，但清單可達數十萬筆）。
+_CANCEL_CHECK_EVERY = 256
+
+
+def _checkpoint(index: int) -> None:
+    """長迴圈的取消檢查點：每 _CANCEL_CHECK_EVERY 筆檢查一次，已取消則拋出 TaskCancelled。"""
+    if index % _CANCEL_CHECK_EVERY == 0:
+        raise_if_cancelled()
+
+
+@contextmanager
+def _cancel_pending_on_exit(futures: list) -> Generator[None, None, None]:
+    """離開時取消尚未開始的任務。
+
+    要放在 ``with executor`` 之後（內層先離開）：取消、關閉 generator 或例外時，
+    佇列中還沒開始的任務直接丟棄，執行緒池只需等「正在執行」的少數任務，
+    而不是把整個佇列跑完才結束。
+    """
+    try:
+        yield
+    finally:
+        for fut in futures:
+            fut.cancel()
 
 
 def _scale_progress(value: float, start: float, end: float) -> float:
@@ -84,7 +112,7 @@ def merge_zhcn_to_zhtw_from_zip(
             .get("replace_rules_path", "replace_rules.json")
         )
     except Exception as e:  # noqa: BLE001
-        log_error(f"載入替換規則失敗: {e}")
+        log_error(f"載入替換規則失敗: {e!r}")
         yield {
             "progress": _scale_progress(0.0, progress_start, progress_end),
             "error": True,
@@ -94,13 +122,26 @@ def merge_zhcn_to_zhtw_from_zip(
     # --- 新增：檢查 ZIP 檔案是否存在 ---
     if not os.path.exists(zip_file):
         full_path = os.path.abspath(zip_file)  # 取得絕對路徑，方便除錯
-        log_warning(f"檔案不存在，已跳過: {full_path}")
+        message = f"輸入 ZIP 不存在，無法合併: {full_path}"
+        log_error(message)
+        # 軟性錯誤：批次服務會把這個 ZIP 記為失敗並繼續處理下一個 ZIP（不會中斷整批），
+        # 不能回報 error=False，否則缺檔會被當成成功完成。
         yield {
             "progress": _scale_progress(1.0, progress_start, progress_end),
-            # "log": f"跳過：找不到檔案 {full_path}",
-            "error": False,  # 設為 False 是為了讓程式繼續執行下一個任務而不中斷
+            "log": message,
+            "error": True,
         }
         return  # 直接結束這個產生器，不執行後面的 ZipFile 開啟動作
+    if not os.path.isfile(zip_file):
+        # 路徑存在但不是檔案（例如資料夾）：不能交給 ZipFile，否則錯誤訊息很不直觀
+        message = f"輸入路徑不是 ZIP 檔案，無法合併: {os.path.abspath(zip_file)}"
+        log_error(message)
+        yield {
+            "progress": _scale_progress(1.0, progress_start, progress_end),
+            "log": message,
+            "error": True,
+        }
+        return
     # --------------------------------
 
     try:
@@ -120,7 +161,8 @@ def merge_zhcn_to_zhtw_from_zip(
 
             if all_names:
                 top_prefixes = set()
-                for name in all_names:
+                for index, name in enumerate(all_names):
+                    _checkpoint(index)
                     parts = name.replace("\\", "/").split("/")
                     if parts and parts[0]:
                         top_prefixes.add(parts[0])
@@ -170,7 +212,8 @@ def merge_zhcn_to_zhtw_from_zip(
             #    else:
             #        other_files.append(normalized)
 
-            for file_path in zf.namelist():
+            for index, file_path in enumerate(all_names):
+                _checkpoint(index)
                 normalized = file_path.replace("\\", "/")
                 if normalized.endswith("/") or not normalized:
                     continue
@@ -236,11 +279,12 @@ def merge_zhcn_to_zhtw_from_zip(
             futures = []
             # 所有任務共用同一個累計讀取預算（防止大量合法大小成員的 ZIP bomb）
             zip_budget = ZipReadBudget.for_pack(label=str(zip_file))
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=max_workers
-            ) as executor:
+            with (
+                ContextThreadPoolExecutor(max_workers=max_workers) as executor,
+                _cancel_pending_on_exit(futures),
+            ):
                 # ✅ 優化點：在啟動 ThreadPool 前，先完成一次性的路徑標準化快取
-                all_names_raw = zf.namelist()
+                all_names_raw = all_names  # 同一份清單：不再重複呼叫 namelist()
                 all_files_cache = [n.lower().replace("\\", "/") for n in all_names_raw]
                 # 包裝前綴只算一次,避免每個 mod / 內容檔各掃一次全部檔名
                 mod_wrapper_prefix = detect_mod_wrapper_prefix(all_names_raw)
@@ -250,6 +294,7 @@ def merge_zhcn_to_zhtw_from_zip(
 
                 # 提交每個 mod 的處理（這裡每個 mod 的 paths 會包含 zh_cn/zh_tw/en_us 任一或多個）
                 for mod_key, paths in mods_to_process.items():
+                    raise_if_cancelled()
                     futures.append(
                         executor.submit(
                             _process_single_mod,
@@ -269,6 +314,7 @@ def merge_zhcn_to_zhtw_from_zip(
                 # 提交其他檔案處理（例如圖片、md、json5、localized files 等）
                 patchouli_eff_cache: dict = {}
                 for input_path in eligible_other_files:
+                    raise_if_cancelled()
                     futures.append(
                         executor.submit(
                             _process_content_or_copy_file,
@@ -292,11 +338,12 @@ def merge_zhcn_to_zhtw_from_zip(
 
                 completed = 0
                 for fut in concurrent.futures.as_completed(futures):
+                    raise_if_cancelled()
                     completed += 1  # noqa: SIM113
                     try:
                         res = fut.result()
                     except Exception as e:  # noqa: BLE001
-                        log_error(f"處理時發生未預期錯誤: {e}")
+                        log_error(f"處理時發生未預期錯誤: {e!r}")
                         res = {"success": False, "error": True}
 
                     progress = _scale_progress(
@@ -438,7 +485,7 @@ def merge_zhcn_to_zhtw_from_folder(
             .get("replace_rules_path", "replace_rules.json")
         )
     except Exception as e:  # noqa: BLE001
-        log_error(f"載入替換規則失敗: {e}")
+        log_error(f"載入替換規則失敗: {e!r}")
         yield {
             "progress": _scale_progress(0.0, progress_start, progress_end),
             "error": True,
@@ -447,10 +494,25 @@ def merge_zhcn_to_zhtw_from_folder(
 
     if not os.path.exists(input_dir):
         full_path = os.path.abspath(input_dir)
-        log_warning(f"資料夾不存在，已跳過: {full_path}")
+        message = f"輸入資料夾不存在，無法合併: {full_path}"
+        log_error(message)
+        # 軟性錯誤：服務層會記為資料夾失敗（跳過階段 2、任務標為 ERROR），
+        # 不能回報 error=False，否則缺資料夾會顯示「翻譯已完成」。
         yield {
             "progress": _scale_progress(1.0, progress_start, progress_end),
-            "error": False,
+            "log": message,
+            "error": True,
+        }
+        return
+    if not os.path.isdir(input_dir):
+        # 路徑存在但不是資料夾（例如誤填成 ZIP 或一般檔案）：os.walk 對檔案不會報錯、
+        # 只會回傳空內容，結果會變成「找不到任何可處理的文件」的假成功，所以明確判為錯誤。
+        message = f"輸入路徑不是資料夾，無法合併: {os.path.abspath(input_dir)}"
+        log_error(message)
+        yield {
+            "progress": _scale_progress(1.0, progress_start, progress_end),
+            "log": message,
+            "error": True,
         }
         return
 
@@ -466,7 +528,8 @@ def merge_zhcn_to_zhtw_from_folder(
 
         if all_names:
             top_prefixes = set()
-            for name in all_names:
+            for index, name in enumerate(all_names):
+                _checkpoint(index)
                 parts = name.replace("\\", "/").split("/")
                 if parts and parts[0]:
                     top_prefixes.add(parts[0])
@@ -487,7 +550,8 @@ def merge_zhcn_to_zhtw_from_folder(
         lang_files_by_mod = defaultdict(dict)
         other_files: list[str] = []
 
-        for file_path in all_names:
+        for index, file_path in enumerate(all_names):
+            _checkpoint(index)
             normalized = file_path.replace("\\", "/")
             if normalized.endswith("/") or not normalized:
                 continue
@@ -536,7 +600,10 @@ def merge_zhcn_to_zhtw_from_folder(
             max_workers = max_allowed_workers
 
         futures = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        with (
+            ContextThreadPoolExecutor(max_workers=max_workers) as executor,
+            _cancel_pending_on_exit(futures),
+        ):
             all_files_cache = [n.lower().replace("\\", "/") for n in all_names]
             # 包裝前綴只算一次,避免每個 mod / 內容檔各掃一次全部檔名
             mod_wrapper_prefix = detect_mod_wrapper_prefix(all_names)
@@ -544,6 +611,7 @@ def merge_zhcn_to_zhtw_from_folder(
             content_wrapper_prefix = detect_content_wrapper_prefix(all_names)
 
             for mod_key, paths in mods_to_process.items():
+                raise_if_cancelled()
                 futures.append(
                     executor.submit(
                         _process_single_mod,
@@ -561,6 +629,7 @@ def merge_zhcn_to_zhtw_from_folder(
 
             patchouli_eff_cache: dict = {}
             for input_path in eligible_other_files:
+                raise_if_cancelled()
                 futures.append(
                     executor.submit(
                         _process_content_or_copy_file,
@@ -584,11 +653,12 @@ def merge_zhcn_to_zhtw_from_folder(
 
             completed = 0
             for fut in concurrent.futures.as_completed(futures):
+                raise_if_cancelled()
                 completed += 1  # noqa: SIM113
                 try:
                     res = fut.result()
                 except Exception as e:  # noqa: BLE001
-                    log_error(f"處理時發生未預期錯誤: {e}")
+                    log_error(f"處理時發生未預期錯誤: {e!r}")
                     res = {"success": False, "error": True}
 
                 progress = _scale_progress(

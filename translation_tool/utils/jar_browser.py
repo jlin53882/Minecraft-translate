@@ -19,11 +19,12 @@ import os
 import re
 import zipfile
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error, log_warning
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 from translation_tool.utils.zip_safety import (
     ArchiveBudgetError,
     ZipReadBudget,
@@ -105,7 +106,7 @@ def _scan_single_jar(
                             # 誤以為內容完整），由呼叫端視為「沒有內容」。
                             log_error(
                                 f"[jar_browser] 略過整個 JAR（累計讀取超過安全上限）: "
-                                f"{jar_path.name} - {budget_err}"
+                                f"{jar_path.name} - {budget_err!r}"
                             )
                             if failure_callback:
                                 failure_callback(jar_path)
@@ -114,7 +115,7 @@ def _scan_single_jar(
                             if skipped_callback:
                                 skipped_callback(jar_path)
                             log_warning(
-                                f"[jar_browser] 略過過大檔案 {jar_path.name}!{name}: {size_err}"
+                                f"[jar_browser] 略過過大檔案 {jar_path.name}!{name}: {size_err!r}"
                             )
                         except UnicodeDecodeError:
                             # Binary 檔案（如 .png）：不解碼，設為 None 表示 caller 自行處理
@@ -125,7 +126,7 @@ def _scan_single_jar(
         if failure_callback:
             failure_callback(jar_path)
     except Exception as ex:  # noqa: BLE001
-        log_error(f"[jar_browser] 讀取失敗: {jar_path.name} - {ex}")
+        log_error(f"[jar_browser] 讀取失敗: {jar_path.name} - {ex!r}")
         if failure_callback:
             failure_callback(jar_path)
     return jar_path, result
@@ -197,7 +198,7 @@ def scan_jars(
     for jar_path in jar_files:
         results.budgets[jar_path] = ZipReadBudget(label=jar_path.name)
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    with ContextThreadPoolExecutor(max_workers=workers) as executor:
         future_to_jar = {
             executor.submit(
                 _scan_single_jar,

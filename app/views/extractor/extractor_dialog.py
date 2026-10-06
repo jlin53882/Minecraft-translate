@@ -43,6 +43,7 @@ from app.views.extractor.extractor_dialog_ui import (
     _extractor_update_stats,
 )
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
+from translation_tool.utils.ui_mirror import in_new_task
 
 # ============================================================
 # Debug log helper (2026-07-11 規格重整)
@@ -280,11 +281,11 @@ def _extractor_on_update(ctx, update: dict) -> None:
         pct = update.get("progress", 0)
         log_msg = update.get("log", f"正在處理 {current}/{total}")
         ctx.state["progress"] = pct
-        ctx.add_log(log_msg)
+        ctx.add_log(log_msg, forwarded=True)  # 核心流程 yield 的 log：後台可能已有
         ctx.update_progress(pct, log_msg)
 
     elif "error" in update:
-        ctx.add_log(f"[ERROR] {update['error']}", level="error")
+        ctx.add_log(f"[ERROR] {update['error']}", level="error", forwarded=True)
 
 
 def _extractor_report_result(ctx, result_stats: dict, cancelled_flag: list) -> None:
@@ -293,7 +294,7 @@ def _extractor_report_result(ctx, result_stats: dict, cancelled_flag: list) -> N
     if cancelled_flag[0]:
         ctx.state["cancelled"] = True
         # 用 level="warning"：傳顏色字串給 level 會被 LogView 當成不在白名單而整行不顯示
-        ctx.add_log("[系統] 任務已取消", level="warning")
+        ctx.add_log("[系統] 任務已取消", level="warning", forwarded=False)
 
     # ✅ 真正的「整段完成」只在這裡發生（用 Service 回傳的累計 stats）
     # 避免逐 jar 誤觸發「[完成] 0/0/0」假訊息。
@@ -307,6 +308,7 @@ def _extractor_report_result(ctx, result_stats: dict, cancelled_flag: list) -> N
         ctx.add_log(
             f"[取消] 已處理部分：成功 {result_stats['success']} / 跳過 {result_stats['warnings']} / 失敗 {result_stats['failures']}",
             level="warning",
+            forwarded=False,
         )
         ctx.update_progress(ctx.state["progress"], "已取消")
     else:
@@ -314,6 +316,7 @@ def _extractor_report_result(ctx, result_stats: dict, cancelled_flag: list) -> N
         ctx.add_log(
             f"[完成] 成功 {result_stats['success']} / 跳過 {result_stats['warnings']} / 失敗 {result_stats['failures']}",
             level="system",
+            forwarded=False,
         )
         ctx.update_progress(1.0, "任務完成")
     ctx.update_stats(
@@ -380,8 +383,10 @@ def _extractor_run_extraction(ctx):
 
     except Exception as ex:  # noqa: BLE001
         # 用 traceback.format_exc() 印完整堆疊,讓 user 看到錯誤根因。
-        ctx.add_log(f"[ERROR] {ex}", level="error")
-        ctx.add_log(f"[TRACEBACK]\n{traceback.format_exc()}", level="error")
+        ctx.add_log(f"[ERROR] {ex}", level="error", forwarded=False)
+        ctx.add_log(
+            f"[TRACEBACK]\n{traceback.format_exc()}", level="error", forwarded=False
+        )
         ctx.state["stats"]["failures"] = 1
         ctx.update_stats(0, 0, 1)
 
@@ -455,7 +460,11 @@ def _extractor_on_start_click(ctx, e):
     log_debug(
         f"[BTN] on_start_click spawning run_extraction thread (mode={ctx.mode!r})"
     )
-    threading.Thread(target=ctx.run_extraction, daemon=True).start()
+    # 這條執行緒直接消費提取 generator（沒有 TaskSession）：給它自己的任務歸屬，
+    # 核心流程與執行緒池寫出的後台記錄才分得出是哪一次提取。
+    threading.Thread(
+        target=in_new_task("extractor", ctx.run_extraction), daemon=True
+    ).start()
 
 
 def _extractor_on_cancel_click(ctx, e):

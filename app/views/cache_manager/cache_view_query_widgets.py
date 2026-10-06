@@ -4,6 +4,7 @@ import flet as ft
 
 # UI 共用元件：總覽區使用新 UI kit。
 from app.ui.design import C
+from app.ui.sync_text_field import SyncTextField
 from app.views.cache_manager.cache_state import (
     CacheHistoryState,
     CacheQueryState,
@@ -52,7 +53,7 @@ class CacheQueryWidgetsMixin:
 
     def _build_query_inputs(self) -> None:
         """查詢輸入列：關鍵字、模式、分類、搜尋／清空按鈕。"""
-        self.tf_query_input = ft.TextField(
+        self.tf_query_input = SyncTextField(
             label="輸入 key / dst / 關鍵字",
             width=360,
             tooltip="輸入要搜尋的 key、dst 或關鍵字",
@@ -113,7 +114,7 @@ class CacheQueryWidgetsMixin:
         self.query_detail_src = ft.Text(
             "-", selectable=True, no_wrap=False, text_align=ft.TextAlign.LEFT
         )
-        self.query_detail_dst = ft.TextField(
+        self.query_detail_dst = SyncTextField(
             value="",
             multiline=True,
             min_lines=4,
@@ -132,7 +133,7 @@ class CacheQueryWidgetsMixin:
             "未選取歷史紀錄", size=11, color=C.MUTED
         )
         self.query_history_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO)
-        self.query_history_preview = ft.TextField(
+        self.query_history_preview = SyncTextField(
             read_only=True,
             multiline=True,
             min_lines=3,
@@ -283,7 +284,7 @@ class CacheQueryWidgetsMixin:
             "未選取歷史紀錄", size=11, color=C.MUTED
         )
         self.shard_history_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO)
-        self.shard_history_preview = ft.TextField(
+        self.shard_history_preview = SyncTextField(
             read_only=True,
             multiline=True,
             min_lines=3,
@@ -469,7 +470,7 @@ class CacheQueryWidgetsMixin:
         self.btn_page_prev = ft.OutlinedButton("<", on_click=self._on_page_prev)
         self.btn_page_next = ft.OutlinedButton(">", on_click=self._on_page_next)
         self.btn_page_last = ft.OutlinedButton(">>", on_click=self._on_page_last)
-        self.tf_page_jump = ft.TextField(
+        self.tf_page_jump = SyncTextField(
             width=70,
             value="1",
             text_align=ft.TextAlign.CENTER,

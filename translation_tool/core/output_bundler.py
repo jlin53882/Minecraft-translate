@@ -40,28 +40,65 @@ def _hash_file(path: str) -> str:
     return h.hexdigest()
 
 
-def _walk_files(folder: str) -> list[tuple[str, str]]:
+def _norm(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _output_artifacts(output_zip_path: str) -> frozenset[str]:
+    """打包自己產生的檔案（ZIP、暫存 ZIP、狀態檔與其暫存）。
+
+    輸出 ZIP 放在來源資料夾內時（預設就是），這些檔案不得被當成來源掃描或寫進 ZIP：
+    暫存 ZIP 正在被寫入，掃到它會把自己再壓一次（卡住或壞掉），也會讓指紋每次都不同。
+    """
+    state = _state_path(output_zip_path)
+    return frozenset(
+        _norm(p)
+        for p in (output_zip_path, output_zip_path + ".tmp", state, state + ".tmp")
+    )
+
+
+# 打包留下的暫存／狀態檔，不論屬於哪個輸出 ZIP 都不是來源（例如以前用別的檔名輸出、
+# 失敗時殘留的 other.zip.tmp）。
+_STRAY_SUFFIXES = (".zip.tmp", BUNDLE_STATE_SUFFIX, BUNDLE_STATE_SUFFIX + ".tmp")
+
+
+def _is_artifact(path: str, exclude: frozenset[str] | None) -> bool:
+    if os.path.basename(path).lower().endswith(_STRAY_SUFFIXES):
+        return True
+    return bool(exclude) and _norm(path) in exclude
+
+
+def _walk_files(
+    folder: str, exclude: frozenset[str] | None = None
+) -> list[tuple[str, str]]:
     """遞迴列出資料夾內的 (相對路徑, 絕對路徑)，排序以確保指紋穩定。"""
     found: list[tuple[str, str]] = []
     for root, dirs, files in os.walk(folder):
         dirs.sort()
         for name in sorted(files):
             full = os.path.join(root, name)
+            if _is_artifact(full, exclude):
+                continue
             found.append((os.path.relpath(full, folder).replace("\\", "/"), full))
     return found
 
 
 def _collect_sources(
-    input_root_dir: str, extra_folders: list[str] | None
+    input_root_dir: str,
+    extra_folders: list[str] | None,
+    exclude: frozenset[str] | None = None,
 ) -> list[tuple[str, str, str]]:
     """列出所有可能進入 ZIP 的來源檔：(來源標籤, 相對路徑, 絕對路徑)。"""
-    sources = [("in", rel, full) for rel, full in _walk_files(input_root_dir)]
+    sources = [("in", rel, full) for rel, full in _walk_files(input_root_dir, exclude)]
     for index, extra in enumerate(extra_folders or []):
         label = f"x{index}"
         if os.path.isfile(extra):
-            sources.append((label, os.path.basename(extra), extra))
+            if not _is_artifact(extra, exclude):
+                sources.append((label, os.path.basename(extra), extra))
         elif os.path.isdir(extra):
-            sources.extend((label, rel, full) for rel, full in _walk_files(extra))
+            sources.extend(
+                (label, rel, full) for rel, full in _walk_files(extra, exclude)
+            )
     return sources
 
 
@@ -141,7 +178,7 @@ def _remove_quietly(path: str) -> None:
     except FileNotFoundError:
         pass
     except OSError as ex:
-        log_warning(f"無法移除 {path}: {ex}")
+        log_warning(f"無法移除 {path}: {ex!r}")
 
 
 def _commit_state(output_zip_path: str, fingerprint: str) -> None:
@@ -203,6 +240,7 @@ def _iter_add_folder_to_zip(
     folder_path: str,
     base_path_in_zip: str,
     seen_files: dict | None = None,
+    exclude: frozenset[str] | None = None,
 ) -> Generator[None, None, tuple[int, dict]]:
     """逐檔寫入 ZIP 的 generator 版本：每寫完一個檔案 yield 一次，回傳 (檔案數, seen_files)。"""
     added_count = 0
@@ -216,6 +254,8 @@ def _iter_add_folder_to_zip(
     for root, _, files in os.walk(folder_path):
         for file in files:
             file_path = os.path.join(root, file)
+            if _is_artifact(file_path, exclude):
+                continue
             relative_path = os.path.relpath(file_path, folder_path)
             archive_name = os.path.join(base_path_in_zip, relative_path).replace(
                 "\\", "/"
@@ -349,10 +389,11 @@ def bundle_outputs_generator(
 
     seen_files: dict = {}
     tmp_zip_path = output_zip_path + ".tmp"
+    exclude = _output_artifacts(output_zip_path)
     committed = False
 
     try:
-        sources = _collect_sources(input_root_dir, extra_folders)
+        sources = _collect_sources(input_root_dir, extra_folders, exclude)
         fingerprint = _compute_fingerprint(
             sources, description, min_format, max_format, pack_image_path
         )
@@ -477,7 +518,9 @@ def bundle_outputs_generator(
 
                 base = "" if folder_name.lower() == "root" else folder_name
                 count, seen_files = yield from tracker.run(
-                    _iter_add_folder_to_zip(zf, full_source_path, base, seen_files)
+                    _iter_add_folder_to_zip(
+                        zf, full_source_path, base, seen_files, exclude
+                    )
                 )
 
                 if count > 0:
@@ -496,7 +539,7 @@ def bundle_outputs_generator(
 
             for entry in os.listdir(input_root_dir):
                 full_path = os.path.join(input_root_dir, entry)
-                if os.path.isfile(full_path):
+                if os.path.isfile(full_path) and not _is_artifact(full_path, exclude):
                     archive_name = entry
                     if archive_name in seen_files:
                         base, ext = os.path.splitext(archive_name)
@@ -531,6 +574,8 @@ def bundle_outputs_generator(
                         continue
 
                     if os.path.isfile(extra_path):
+                        if _is_artifact(extra_path, exclude):
+                            continue
                         file_name = os.path.basename(extra_path)
                         archive_name = file_name
                         if archive_name in seen_files:
@@ -554,7 +599,9 @@ def bundle_outputs_generator(
                             src = os.path.join(extra_path, entry)
                             if os.path.isdir(src):
                                 count, seen_files = yield from tracker.run(
-                                    _iter_add_folder_to_zip(zf, src, "", seen_files)
+                                    _iter_add_folder_to_zip(
+                                        zf, src, "", seen_files, exclude
+                                    )
                                 )
                                 total_files_added += count
                                 yield {
@@ -564,7 +611,7 @@ def bundle_outputs_generator(
                                 log_debug(
                                     f"額外資料夾 '{parent_name}/{entry}': +{count} 個檔案"
                                 )
-                            elif os.path.isfile(src):
+                            elif os.path.isfile(src) and not _is_artifact(src, exclude):
                                 archive_name = entry
                                 if archive_name in seen_files:
                                     base, ext = os.path.splitext(archive_name)
@@ -610,8 +657,8 @@ def bundle_outputs_generator(
         yield {"progress": 1.0, "log": "--- " + "；".join(log_parts) + " ---"}
 
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
-        log_error(f"打包時發生嚴重錯誤: {e}", exc_info=True)
-        yield {"progress": 1.0, "log": f"錯誤：打包失敗: {e}", "error": True}
+        log_error(f"打包時發生嚴重錯誤: {e!r}", exc_info=True)
+        yield {"progress": 1.0, "log": f"打包時發生嚴重錯誤: {e!r}", "error": True}
         # 失敗時保留既有的有效 ZIP（尚未 os.replace）；僅讓狀態失效，下次必定重建。
         _remove_quietly(_state_path(output_zip_path))
     finally:

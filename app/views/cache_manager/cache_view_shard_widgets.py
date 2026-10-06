@@ -6,6 +6,7 @@ from app.ui import kit
 
 # UI 共用元件：總覽區使用新 UI kit。
 from app.ui.design import C
+from app.ui.sync_text_field import SyncTextField
 from app.views.cache_manager.cache_state import (
     CacheShardState,
 )
@@ -57,7 +58,7 @@ class CacheShardWidgetsMixin:
 
     def _build_shard_key_widgets(self) -> None:
         """分片 key 清單：篩選、清單、分頁按鈕。"""
-        self.tf_shard_key_filter = ft.TextField(
+        self.tf_shard_key_filter = SyncTextField(
             label="過濾 key",
             hint_text="輸入關鍵字快速過濾",
             dense=True,
@@ -102,7 +103,7 @@ class CacheShardWidgetsMixin:
         self.btn_shard_src_raw = ft.OutlinedButton(
             "</> 原始碼", on_click=self._on_shard_src_raw_mode
         )
-        self.shard_src_field = ft.TextField(
+        self.shard_src_field = SyncTextField(
             value="",
             read_only=True,
             multiline=True,
@@ -127,7 +128,7 @@ class CacheShardWidgetsMixin:
         self.shard_dst_loaded_sig = self._shard_state.dst_loaded_sig
         self.shard_dst_original = self._shard_state.dst_original
         self.shard_dst_meta = ft.Text("DST：請先選擇 key", size=11, color=C.MUTED)
-        self.shard_dst_field = ft.TextField(
+        self.shard_dst_field = SyncTextField(
             value="",
             multiline=True,
             min_lines=6,

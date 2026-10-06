@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import threading
+import traceback
 
 import flet as ft
 
@@ -20,7 +21,8 @@ from app.ui.snack import show_snack
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from app.views.bundler.bundler_widgets import BundlerWidgetsMixin
-from translation_tool.utils.log_unit import log_debug
+from translation_tool.utils.log_unit import log_debug, log_error, log_warning
+from translation_tool.utils.ui_mirror import in_new_task, mirror_lines
 
 OUTPUT_ZIP_NAME_PATH = "output_bundler.output_zip_name"
 
@@ -158,7 +160,10 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     self.version_data = json.load(f)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - 版本資料讀不到時用空設定，但要留下紀錄
+                log_warning(
+                    f"[Bundler] 讀取版本資料失敗，使用空設定：{config_path}: {exc!r}"
+                )
                 self.version_data = {}
         else:
             self.version_data = {}
@@ -425,11 +430,16 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         self.status_text.value = "打包中…"
         self.status_text.color = C.TEXT
         self.progress_bar.color = C.EM
-        self._append_log("開始執行打包...", level="info")
+        message = (
+            f"開始執行打包｜根目錄：{root_dir}｜輸出 ZIP：{output_zip}"
+            f"｜版本：{version or '（未指定）'}｜額外資料夾：{len(self.extra_folders)} 個"
+            f"｜封面圖：{pack_image or '（無）'}"
+        )
+        self._append_log(message, level="info")
         self._page.update()
 
         thread = threading.Thread(
-            target=self._bundling_worker,
+            target=in_new_task("bundler", self._bundling_worker),
             args=(root_dir, output_zip, version, description, pack_image),
             daemon=True,
         )
@@ -441,7 +451,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         PR refactor/unified-log-view: 取代原本的 color='cyan400' bug。
         顏色由 LogView 根據 level 自動從 theme 取。
         """
-        self.log_view.add(msg, level=level)
+        self.log_view.add(msg, level=level, dedupe=False)
 
     # 背景打包時，日誌/進度以此間隔批次推到畫面
     _UI_FLUSH_INTERVAL_SEC = 0.2
@@ -485,15 +495,16 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
 
             for update in bundle_outputs_generator(**generator_kwargs):
                 log_msg = update.get("log", "")
-                batcher.add_lines(
-                    [(line, "info") for line in log_msg.split("\n") if line.strip()]
-                )
+                lines = [(line, "info") for line in log_msg.split("\n") if line.strip()]
+                mirror_lines(lines, prefix="[打包] ")
+                batcher.add_lines(lines)
                 if "progress" in update:
                     batcher.set_state(progress=update["progress"])
                 if update.get("error"):
                     batcher.set_state(error_color=C.RED)
                 batcher.flush()
         except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，錯誤顯示於日誌
+            log_error(f"[打包] 打包執行失敗：{ex!r}\n{traceback.format_exc()}")
             batcher.add_lines([(f"[錯誤] {ex}", "error")])
             batcher.set_state(error_color=C.RED)
         finally:

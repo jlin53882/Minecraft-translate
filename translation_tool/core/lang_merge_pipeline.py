@@ -13,7 +13,7 @@ from typing import Any
 
 import orjson as json
 
-from ..utils.log_unit import log_error, log_exception, log_info
+from ..utils.log_unit import log_error, log_exception, log_info, log_warning
 from ..utils.text_processor import apply_replace_rules, recursive_translate_dict
 from ..utils.zip_safety import UnsafePathError, safe_join
 from .lang_codec import dump_lang_text, parse_lang_text
@@ -191,7 +191,11 @@ def _process_single_mod(
             try:
                 with open(final_output_path, "rb") as f:
                     final_tw = json.loads(f.read())
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - 既有輸出讀不出來時從空白重建，但要留下是哪個檔
+                log_warning(
+                    f"{log_prefix}既有輸出 zh_tw.json 無法讀取，將從空白內容重建："
+                    f"{final_output_path}: {exc!r}"
+                )
                 final_tw = {}
         else:
             final_tw = {}
@@ -276,7 +280,7 @@ def _process_single_mod(
         }
 
     except UnsafePathError as exc:
-        log_error(f"{log_prefix}拒絕不安全的輸出路徑，已略過此模組: {exc}")
+        log_error(f"{log_prefix}拒絕不安全的輸出路徑，已略過此模組: {exc!r}")
         return {"success": False, "error": True}
     except Exception as exc:  # noqa: BLE001
         log_exception(f"{log_prefix}處理失敗: {exc}")

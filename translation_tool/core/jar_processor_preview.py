@@ -23,11 +23,12 @@ import re
 import threading
 import zipfile
 from collections.abc import Callable, Generator
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 from typing import Any
 
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
 log = logging.getLogger(__name__)
 
@@ -250,7 +251,7 @@ def preview_extraction_generator_impl(
     scan_lock = threading.Lock()  # 保護 scan_results 的寫入
     done_count = [0]  # 已完成的 JAR 數量（用 list 包裝以便跨執行緒修改）
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    with ContextThreadPoolExecutor(max_workers=workers) as executor:
         future_to_jar = {
             executor.submit(
                 _scan_single_jar_for_preview,

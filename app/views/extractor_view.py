@@ -490,7 +490,7 @@ class ExtractorView(ft.Column):
             # 純字串（reset / auto-fill 等純事件 log），預設 system 等級
             text = str(entry_or_str)
             level = "system"
-        self.log_view.add(text, level=level)
+        self.log_view.add(text, level=level, dedupe=False)
 
     # ==================================================
     # Worker Logic

@@ -213,7 +213,11 @@ def build_bundle_staging(sources: list[str], staging_dir: str) -> dict:
             copied += 1
 
         if isinstance(state, dict):
-            data = json.dumps(state, ensure_ascii=False, indent=2).encode("utf-8")
+            # 與完整重建時的文字模式寫入保持相同換行格式，避免 Windows 增量結果與參考結果不同。
+            json_text = json.dumps(state, ensure_ascii=False, indent=2)
+            if os.linesep != "\n":
+                json_text = json_text.replace("\n", os.linesep)
+            data = json_text.encode("utf-8")
             try:
                 with open(dst, "rb") as f:
                     same = f.read() == data
@@ -267,9 +271,9 @@ def run_bundling_service(
                 yield filtered
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
-        logger.error(f"[致命錯誤] 打包服務失敗：{e}\n{full_traceback}")
+        logger.error(f"[致命錯誤] 打包服務失敗：{e!r}\n{full_traceback}")
         yield {
-            "log": f"[致命錯誤] 打包服務失敗：{e}\n{full_traceback}",
+            "log": f"[致命錯誤] 打包服務失敗：{e!r}\n{full_traceback}",
             "error": True,
             "progress": 0,
         }

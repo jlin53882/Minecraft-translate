@@ -75,7 +75,7 @@ MergeView（頁面標題「語系比對合併」）整合 en_us、zh_cn、zh_tw 
 [UI] start_merge()
   ├─ 驗證：folder 需 folder_path / zip 需 selected_zips、需輸出資料夾
   ├─ 鎖 UI + session.start() + _start_ui_poller()
-  └─ _run_merge() [thread]
+  └─ _run_merge_worker() [thread]
        ├─ folder → run_merge_folder_batch_service(input_dir, output_dir, session, ...)
        │     ├─ 階段 1：merge_zhcn_to_zhtw_from_folder
        │     └─ 階段 2：merge_extracted_to_assets（`enable_extracted_to_assets_merge` 開啟且階段 1 無錯誤時）
@@ -88,7 +88,7 @@ service 結束時以 session.set_summary() 寫入統計摘要
 
 ## Poller 同步（_start_ui_poller）
 
-輪詢在 **Flet event loop** 上執行：`_start_ui_poller()` 經 `self._poller`（`PollerHandle`）啟動 `_poll_merge(alive)`，每 0.1 秒 `await asyncio.sleep` 並呼叫 `_sync_ui_once()`（讀取 `session.snapshot()`）；不再另開 `time.sleep` 的 poll 執行緒。合併的背景工作 `_run_merge` 若丟出例外會把 session 轉為 ERROR（否則輪詢等不到結束）。
+輪詢在 **Flet event loop** 上執行：`_start_ui_poller()` 經 `self._poller`（`PollerHandle`）啟動 `_poll_merge(alive)`，每 0.1 秒 `await asyncio.sleep` 並呼叫 `_sync_ui_once()`（讀取 `session.snapshot()`）；不再另開 `time.sleep` 的 poll 執行緒。合併的背景工作 `_run_merge_worker` 若丟出例外會把 session 轉為 ERROR（否則輪詢等不到結束）。
 
 **Lifecycle（#114）**：`will_unmount()` 停止輪詢（idempotent）；`did_mount()` 在合併仍被追蹤（`_merge_tracking` 且 `_ui_stop` 未設定）時接續輪詢，合併於卸載期間結束時補上最終狀態與摘要（只顯示一次）。每次 `_sync_ui_once()` 的內容：
 - `progress` → `progress_bar.value`

@@ -196,4 +196,4 @@ def quarantine_copy_from_zip(
         log_warning(f"[隔離] 檔案已複製至 {target_path}（原因: {reason}）")
 
     except Exception as e:  # noqa: BLE001
-        log_error(f"[隔離失敗] 無法複製檔案 {zip_path}: {e}", exc_info=True)
+        log_error(f"[隔離失敗] 無法複製檔案 {zip_path}: {e!r}", exc_info=True)

@@ -12,6 +12,7 @@ from typing import Any
 
 import orjson as json
 
+from ..utils.cancellation import raise_if_cancelled
 from ..utils.log_unit import log_warning
 from ..utils.zip_safety import (
     MAX_FILE_BYTES,
@@ -111,14 +112,25 @@ class FolderReader(DirReader):
         with open(path, "rb") as f:
             return f.read()
 
-    def list_all(self) -> list[str]:
-        result: list[str] = []
-        for root, dirs, files in os.walk(self._root):
+    def iter_all(self):
+        """逐筆列出所有檔案的相對路徑；每進入一個資料夾檢查一次取消。
+
+        來源有幾十萬個檔案（或網路／慢速磁碟）時，完整 ``os.walk`` 本身就可能跑很久；
+        先把整個清單建好才檢查取消，使用者按取消後要等掃完才有反應。
+        """
+        scanned = 0
+        for root, _dirs, files in os.walk(self._root):
+            raise_if_cancelled()
             for file in files:
+                scanned += 1
+                if scanned % 256 == 0:  # 單一資料夾有幾十萬個檔案時也要能中斷
+                    raise_if_cancelled()
                 full = os.path.join(root, file)
                 rel = os.path.relpath(full, self._root)
-                result.append(rel.replace("\\", "/"))
-        return result
+                yield rel.replace("\\", "/")
+
+    def list_all(self) -> list[str]:
+        return list(self.iter_all())
 
     def exists(self, rel_path: str) -> bool:
         return os.path.isfile(self._full(rel_path))

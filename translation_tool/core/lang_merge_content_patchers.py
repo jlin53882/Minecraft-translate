@@ -33,7 +33,7 @@ def patch_localized_content_json_impl(
         try:
             cn_data = json_module.loads(raw_text)
         except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
-            log_warning(f"{log_prefix} zh_cn JSON 無法解析，已跳過該檔案: {e}")
+            log_warning(f"{log_prefix} zh_cn JSON 無法解析，已跳過該檔案: {e!r}")
             quarantine_copy_fn(
                 reader=reader,
                 rel_path=cn_path,
@@ -70,7 +70,7 @@ def patch_localized_content_json_impl(
                     if new_content_bytes == existing_normalized_bytes:
                         should_write = False
             except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
-                log_warning(f"{log_prefix} 無法載入現有 TW 檔案 ({e})，將覆蓋寫入")
+                log_warning(f"{log_prefix} 無法載入現有 TW 檔案 ({e!r})，將覆蓋寫入")
 
         if should_write:
             os.makedirs(os.path.dirname(tw_output_path), exist_ok=True)
@@ -86,7 +86,7 @@ def patch_localized_content_json_impl(
             "pending_count": 0,
         }
     except Exception as exc:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
-        log_error(f"處理內容 JSON 檔案 {cn_path} 發生錯誤: {exc}", exc_info=True)
+        log_error(f"處理內容 JSON 檔案 {cn_path} 發生錯誤: {exc!r}", exc_info=True)
         return {
             "success": False,
             "error": True,

@@ -111,7 +111,8 @@ class PipelineActions:
             "zh_en_threshold": zh_en_threshold,
         }
         session.start()
-        os.makedirs(output_dir, exist_ok=True)
+        # 不在這裡建立輸出資料夾：合併服務要在建立之前記錄它原本存不存在，
+        # 取消時才能只刪「這次新建的」半成品
         if input_mode == "folder":
             return self.services.merge_folder(
                 input_dir=input_src, session=session, **options
@@ -219,6 +220,7 @@ class PipelineActions:
                     progress_start=source_index / total_sources,
                     progress_end=(source_index + 1) / total_sources,
                     finish_session=False,
+                    skip_missing_input=True,
                     **merge_options,
                 )
                 if session_failed(session) or is_cancelled():
@@ -237,7 +239,8 @@ class PipelineActions:
         try:
             inputs = [d for d in cfg.translate_input_dirs if _has_files(d)]
             if not inputs:
-                session.add_log("[系統] 沒有待翻譯內容，略過翻譯")
+                message = "[系統] 沒有待翻譯內容，略過翻譯"
+                session.add_log(message)
                 return
             os.makedirs(cfg.translate_output_dir, exist_ok=True)
             for src in inputs:
@@ -264,12 +267,14 @@ class PipelineActions:
             stats = self.services.build_staging(
                 cfg.bundle_sources, cfg.bundle_staging_dir
             )
-            session.add_log(
+            message = (
                 f"[系統] 打包暫存完成：複製 {stats['copied']} 個、合併 {stats['merged']} 個檔案"
                 + _staging_reuse_note(stats)
             )
+            session.add_log(message)
             if not stats["copied"] and not stats["merged"]:
-                session.add_log("❌ 沒有可打包的翻譯檔案", level="error")
+                message = "❌ 沒有可打包的翻譯檔案"
+                session.add_log(message, level="error")
                 session.set_error()
                 return
             yield from self.bundle(

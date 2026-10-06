@@ -23,6 +23,7 @@ from typing import Any
 
 from translation_tool.utils.redaction import RedactingFormatter
 from translation_tool.utils.ui_logging_handler import UISessionLogHandler
+from translation_tool.utils.ui_mirror import ensure_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,9 @@ def validate_log_format(format_string: str) -> str:
     if not isinstance(format_string, str) or not format_string.strip():
         raise ValueError("logging.log_format 必須是非空字串")
 
-    formatter = logging.Formatter(format_string)
+    # 與執行期使用同一個 formatter 與同一份記錄欄位契約：``task_id`` / ``task_name`` /
+    # ``task_tag`` 是 LogRecord 工廠提供的正式欄位，自訂格式可以使用；未知欄位仍會被拒絕。
+    formatter = RedactingFormatter(format_string)
     record = logging.LogRecord(
         name="validation",
         level=logging.INFO,
@@ -134,6 +137,9 @@ def validate_log_format(format_string: str) -> str:
         args=(),
         exc_info=None,
     )
+    record.task_id = ""
+    record.task_name = ""
+    record.task_tag = ""
     try:
         formatter.format(record)
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -179,6 +185,7 @@ def update_logger_config(config_loader, *, logger_name: str = "translation_tool"
 
     if UI_LOG_HANDLER not in root_logger.handlers:
         root_logger.addHandler(UI_LOG_HANDLER)
+    ensure_tracker()  # UI→後台鏡像去重用（見 translation_tool.utils.ui_mirror）
 
     target_logger.setLevel(_numeric_level)
     target_logger.propagate = True

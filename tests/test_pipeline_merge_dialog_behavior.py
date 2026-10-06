@@ -179,7 +179,7 @@ def test_input_mode_switch_toggles_row_visibility(env):
         ("src_empty", "⚠️ 輸入來源為必填欄位"),
         ("src_missing", "⚠️ 輸入來源資料夾不存在"),
         ("out_empty", "⚠️ 輸出目錄為必填欄位"),
-        ("out_missing", "⚠️ 輸出目錄不存在"),
+        ("out_is_file", "⚠️ 輸出目錄路徑是檔案，不是資料夾"),
     ],
 )
 def test_start_rejects_bad_directories(env, tmp_path, which, expected):
@@ -193,11 +193,23 @@ def test_start_rejects_bad_directories(env, tmp_path, which, expected):
     elif which == "out_empty":
         out.value = ""
     else:
-        out.value = str(tmp_path / "nope")
+        file_path = tmp_path / "out.txt"
+        file_path.write_text("x")
+        out.value = str(file_path)
     _button(dialog, "確定執行").on_click(None)
     assert env.snacks == [expected]
     assert env.runs == []
     assert dialog.open is True
+
+
+def test_start_accepts_a_new_output_dir_without_creating_it(env, tmp_path):
+    """對話框只檢查路徑；建立交給合併服務，取消時才分得出「新建的」並清掉。"""
+    dialog = env.open()
+    out = _find(dialog, ft.TextField, "輸出目錄")
+    out.value = str(tmp_path / "new" / "out")
+    _button(dialog, "確定執行").on_click(None)
+    assert not (tmp_path / "new" / "out").exists()
+    assert not any("輸出目錄" in m for m in env.snacks)
 
 
 def test_start_rejects_when_no_language_code_selected(env):

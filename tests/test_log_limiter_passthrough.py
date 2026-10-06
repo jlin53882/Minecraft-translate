@@ -148,3 +148,11 @@ def test_batch_lookup_result_survives_limiter(monkeypatch):
     results = [u["result"] for u in updates if u.get("result")]
     assert results, updates
     assert "Canis lupus-zh" in results[-1]
+
+
+def test_batch_lookup_invalid_json_is_written_as_plain_backend_log(caplog):
+    with caplog.at_level("ERROR"):
+        updates = list(lookup_service.run_batch_lookup_service("{"))
+
+    assert updates == [{"log": "輸入的不是有效的 JSON 格式。", "error": True}]
+    assert caplog.records[-1].message == "輸入的不是有效的 JSON 格式。"

@@ -155,7 +155,7 @@ def translate_md_pending(
         try:
             _, items = load_pending_doc(jp)
         except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-            log_warning(f"[MD-LM] 載入待翻譯文件失敗: {jp} ({e})")
+            log_warning(f"[MD-LM] 載入待翻譯文件失敗: {jp} ({e!r})")
             continue
 
         for it in items:
@@ -282,7 +282,7 @@ def translate_md_pending(
             log_info(f"🧪 [MD-LM] DRY-RUN cache-hit preview：{p2}")
 
         except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-            log_warning(f"⚠️ [MD-LM] DRY-RUN preview 輸出失敗：{e}")
+            log_warning(f"⚠️ [MD-LM] DRY-RUN preview 輸出失敗：{e!r}")
 
         log_info("ℹ️ [MD-LM] dry-run 模式：不翻譯、不寫檔。")
         log_info("總花費時間：%s", get_formatted_duration(start_time))
@@ -349,7 +349,7 @@ def translate_md_pending(
                 extra={},
             )
         except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-            log_warning(f"[MD-LM] 記錄翻譯結果失敗: {e}")
+            log_warning(f"[MD-LM] 記錄翻譯結果失敗: {e!r}")
 
     def on_batch_flushed() -> None:
         """刷新批次緩衝區。"""
@@ -357,7 +357,7 @@ def translate_md_pending(
             touch.touch("noop")
             touch.flush(_writer)
         except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-            log_warning(f"[MD-LM] 批次刷新失敗: {e}")
+            log_warning(f"[MD-LM] 批次刷新失敗: {e!r}")
 
     on_progress = make_progress_hook(
         lambda value: progress(session, value),
@@ -411,7 +411,7 @@ def translate_md_pending(
         try:
             data, items = load_pending_doc(jp)
         except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-            log_warning(f"[MD-LM] 略過讀取失敗：{jp} ({e})")
+            log_warning(f"[MD-LM] 略過讀取失敗：{jp} ({e!r})")
             continue
 
         out_items: List[Dict[str, Any]] = []
@@ -460,7 +460,7 @@ def translate_md_pending(
         rec.export_json(out_root / "LM翻譯後" / "translation_map_md.json")
         rec.export_csv(out_root / "LM翻譯後" / "translation_map_md.csv")
     except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-        log_warning(f"[MD-LM] 匯出 translation_map 失敗: {e}")
+        log_warning(f"[MD-LM] 匯出 translation_map 失敗: {e!r}")
 
     if missing:
         log_warning(f"⚠️ [MD-LM] 有 {missing} 個 item 沒拿到翻譯結果（已保留原文）。")

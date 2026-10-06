@@ -10,6 +10,7 @@ from app.ui import design
 from app.ui.design import C
 from app.ui.design import tone as get_tone
 from app.ui.kit.basics import expand_kwargs
+from app.ui.sync_text_field import SyncTextField
 
 BUTTON_HEIGHTS = {"sm": 30, "md": 36, "lg": 44}
 BUTTON_KINDS = ("primary", "secondary", "gold", "danger", "ghost")
@@ -95,8 +96,11 @@ def text_field(
     suffix: ft.Control | None = None,
     dense: bool = True,
 ) -> ft.TextField:
-    """統一外觀的輸入框（深 / 淺色皆適用）。``mono=True`` 用等寬字（路徑、key、JSON）。"""
-    return ft.TextField(
+    """統一外觀的輸入框（深 / 淺色皆適用）。``mono=True`` 用等寬字（路徑、key、JSON）。
+
+    單行欄位由 ``SyncTextField`` 保證輸入值即時同步回後端（見該類別說明）。
+    """
+    return SyncTextField(
         label=label,
         hint_text=hint,
         value=value if value is not None else "",
@@ -152,8 +156,8 @@ def _field_style() -> dict:
 
 
 def field(**kwargs) -> ft.TextField:
-    """舊式 ``ft.TextField(...)`` 的直接替代：同樣的參數，套上設計系統外觀（呼叫端給的值優先）。"""
-    return ft.TextField(**{**_field_style(), **kwargs})
+    """舊式 ``SyncTextField(...)`` 的直接替代：同樣的參數，套上設計系統外觀（呼叫端給的值優先）。"""
+    return SyncTextField(**{**_field_style(), **kwargs})
 
 
 def dropdown(**kwargs) -> ft.Dropdown:

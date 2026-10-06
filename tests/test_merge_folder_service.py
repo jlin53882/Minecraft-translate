@@ -86,10 +86,10 @@ def test_run_merge_folder_batch_service_completes_without_error(
     assert results[-1]["summary"]["failed_folders"] == 0
 
 
-def test_run_merge_folder_batch_service_nonexistent_folder_yields_without_error(
+def test_run_merge_folder_batch_service_nonexistent_folder_is_a_failure(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """測試資料夾不存在時 service 不拋例外且 failed_folders=1。"""
+    """資料夾不存在時 service 不拋例外，但必須回報失敗（failed_folders=1、error=True）。"""
     input_dir = tmp_path / "nonexistent"
     output_dir = tmp_path / "out"
     output_dir.mkdir()
@@ -112,8 +112,37 @@ def test_run_merge_folder_batch_service_nonexistent_folder_yields_without_error(
     )
 
     assert results[-1]["progress"] == 1.0
+    assert results[-1].get("error") is True
+    assert results[-1]["summary"]["success_folders"] == 0
+    assert results[-1]["summary"]["failed_folders"] == 1
+
+
+def test_run_merge_folder_batch_service_skip_missing_input_is_not_a_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """一鍵流程用 skip_missing_input：提取沒產生的來源明確略過，不算失敗也不跑階段。"""
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    monkeypatch.setattr(merge_service, "ensure_pipeline_logging", lambda: None)
+    monkeypatch.setattr(merge_service, "UI_LOG_HANDLER", _FakeUIHandler())
+
+    def _must_not_run(*_a, **_k):
+        raise AssertionError("輸入資料夾不存在時不應執行合併階段")
+
+    monkeypatch.setattr(merge_service, "merge_zhcn_to_zhtw_from_folder", _must_not_run)
+
+    session = _FakeSession()
+    results = list(
+        merge_service.run_merge_folder_batch_service(
+            input_dir=str(tmp_path / "no_books"),
+            output_dir=str(output_dir),
+            session=session,
+            only_process_lang=False,
+            skip_missing_input=True,
+        )
+    )
+
     assert not results[-1].get("error", False)
-    assert results[-1]["summary"]["success_folders"] == 1
     assert results[-1]["summary"]["failed_folders"] == 0
 
 

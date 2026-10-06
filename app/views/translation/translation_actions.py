@@ -3,25 +3,61 @@ from __future__ import annotations
 import asyncio
 import functools
 import threading
+import traceback
 
 import flet as ft  # noqa: F401
 
-from app.tasks.task_session import tag_session
+from app.tasks.task_session import add_log_unmirrored, tag_session
 from app.ui.design import C
 from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_error, log_warning
+from translation_tool.utils.ui_mirror import session_task_scope
 
 
 # =========================================================
 # 執行緒安全的 UI 更新包裝函式（ATK-004 / ATK-017 修復）
 # =========================================================
-def _safe_add_log(view, message: str):
-    """執行緒安全地寫入 session log。view 已卸載時靜靜忽略。"""
+def _safe_add_log(view, message: str, level: str = "info", *, mirror: bool = True):
+    """執行緒安全地寫入 session log。view 已卸載時靜靜忽略。
+
+    ``mirror=False``：呼叫端已自行把更完整的內容寫進後台時使用，避免後台重複。
+    """
     try:
         if hasattr(view, "session") and view.session is not None:
-            view.session.add_log(message)
+            if not mirror:
+                add_log_unmirrored(view.session, message, level)
+            elif level == "info":
+                view.session.add_log(message)
+            else:
+                view.session.add_log(message, level=level)
     except Exception:  # noqa: BLE001, S110
         pass  # view 已卸載或 session 已 GC，忽略
+
+
+def _log_task_start(view, label: str, in_dir: str, out_dir, dry_run: bool, **steps):
+    """在任務日誌開頭寫下輸入、輸出與步驟設定，排查時才知道這次是用什麼參數跑的。"""
+    enabled = "、".join(name for name, on in steps.items() if on) or "（無）"
+    _safe_add_log(
+        view,
+        f"[系統] 開始 {label}：{'模擬執行（不送出 API）' if dry_run else '正式執行'}"
+        f"｜輸入：{in_dir}｜輸出：{out_dir or '（預設位置）'}｜步驟：{enabled}",
+    )
+
+
+def _report_service_failure(view, label: str, ex: Exception, in_dir: str) -> None:
+    """服務拋出未預期例外：完整堆疊寫後台，畫面顯示例外類型、訊息與去向。"""
+    # 服務結束時已清掉這條執行緒的任務歸屬：重新歸屬再寫堆疊，才不會串進別的任務畫面
+    with session_task_scope(view.session):
+        log_error(
+            f"[UI] {label} 服務執行失敗（輸入：{in_dir}）：{ex!r}\n{traceback.format_exc()}"
+        )
+    _safe_add_log(
+        view,
+        f"[UI] {label} 服務執行失敗：{type(ex).__name__}: {ex}"
+        "（完整堆疊已寫入後台 log）",
+        "error",
+        mirror=False,
+    )
 
 
 def _safe_page_update(view):
@@ -65,7 +101,19 @@ def run_ftb(view, *, dry_run: bool):
     try:
         view.session.start()
     except Exception as e:  # noqa: BLE001
-        log_warning(f"FTB session.start() 失敗: {e}")
+        log_warning(f"FTB session.start() 失敗: {e!r}", exc_info=True)
+    _log_task_start(
+        view,
+        "FTB 任務翻譯",
+        in_dir,
+        out_dir,
+        dry_run,
+        匯出=view.ftb_step_export.value,
+        清理=view.ftb_step_clean.value,
+        翻譯=view.ftb_step_translate.value,
+        注入=view.ftb_step_inject.value,
+        寫入新快取=view.ftb_write_new_cache.value,
+    )
 
     def worker():
         """执行 FTB 翻译服务"""
@@ -84,13 +132,13 @@ def run_ftb(view, *, dry_run: bool):
         except Exception as ex:  # noqa: BLE001
             try:
                 if hasattr(view.session, "add_log"):
-                    _safe_add_log(view, f"[UI] 服務執行失敗：{ex}")
+                    _report_service_failure(view, "FTB 任務翻譯", ex, in_dir)
                 if hasattr(view.session, "set_error"):
                     view.session.set_error()
                 if hasattr(view.session, "finish"):
                     view.session.finish()  # set_error() → finish()：TaskManager 才會離開 active
             except Exception as e:  # noqa: BLE001
-                log_error(f"記錄 FTB 執行失敗時發生錯誤: {e}")
+                log_error(f"記錄 FTB 執行失敗時發生錯誤: {e!r}", exc_info=True)
 
     threading.Thread(target=worker, daemon=True).start()
     view._start_ui_timer()
@@ -123,7 +171,18 @@ def run_kjs(view, *, dry_run: bool):
     try:
         view.session.start()
     except Exception as e:  # noqa: BLE001
-        log_warning(f"FTB session.start() 失敗: {e}")
+        log_warning(f"KubeJS session.start() 失敗: {e!r}", exc_info=True)
+    _log_task_start(
+        view,
+        "KubeJS 任務翻譯",
+        in_dir,
+        out_dir,
+        dry_run,
+        提取=view.kjs_step_extract.value,
+        翻譯=view.kjs_step_translate.value,
+        注入=view.kjs_step_inject.value,
+        寫入新快取=view.kjs_write_new_cache.value,
+    )
 
     def worker():
         """执行 KubeJS 翻译服务"""
@@ -141,13 +200,13 @@ def run_kjs(view, *, dry_run: bool):
         except Exception as ex:  # noqa: BLE001
             try:
                 if hasattr(view.session, "add_log"):
-                    _safe_add_log(view, f"[UI] 服務執行失敗：{ex}")
+                    _report_service_failure(view, "KubeJS 任務翻譯", ex, in_dir)
                 if hasattr(view.session, "set_error"):
                     view.session.set_error()
                 if hasattr(view.session, "finish"):
                     view.session.finish()  # set_error() → finish()：TaskManager 才會離開 active
             except Exception as e:  # noqa: BLE001
-                log_error(f"記錄 KubeJS 執行失敗時發生錯誤: {e}")
+                log_error(f"記錄 KubeJS 執行失敗時發生錯誤: {e!r}", exc_info=True)
 
     threading.Thread(target=worker, daemon=True).start()
     view._start_ui_timer()
@@ -180,7 +239,18 @@ def run_md(view, *, dry_run: bool):
     try:
         view.session.start()
     except Exception as e:  # noqa: BLE001
-        log_warning(f"FTB session.start() 失敗: {e}")
+        log_warning(f"MD session.start() 失敗: {e!r}", exc_info=True)
+    _log_task_start(
+        view,
+        "MD 任務翻譯",
+        in_dir,
+        out_dir,
+        dry_run,
+        提取=view.md_step_extract.value,
+        翻譯=view.md_step_translate.value,
+        注入=view.md_step_inject.value,
+        寫入新快取=view.md_write_new_cache.value,
+    )
 
     def worker():
         """执行 MD 翻译服务"""
@@ -199,13 +269,13 @@ def run_md(view, *, dry_run: bool):
         except Exception as ex:  # noqa: BLE001
             try:
                 if hasattr(view.session, "add_log"):
-                    _safe_add_log(view, f"[UI] 服務執行失敗：{ex}")
+                    _report_service_failure(view, "MD 任務翻譯", ex, in_dir)
                 if hasattr(view.session, "set_error"):
                     view.session.set_error()
                 if hasattr(view.session, "finish"):
                     view.session.finish()  # set_error() → finish()：TaskManager 才會離開 active
             except Exception as e:  # noqa: BLE001
-                log_error(f"記錄 MD 執行失敗時發生錯誤: {e}")
+                log_error(f"記錄 MD 執行失敗時發生錯誤: {e!r}", exc_info=True)
 
     threading.Thread(target=worker, daemon=True).start()
     view._start_ui_timer()
@@ -243,7 +313,7 @@ async def _poll_session(view, alive=lambda: True):
         try:
             _sync_from_session(view)
         except RuntimeError as e:
-            log_warning(f"翻譯頁 UI 輪詢停止：{e}")
+            log_warning(f"翻譯頁 UI 輪詢停止：{e!r}")
             view._ui_timer_running = False
             break
         if alive() and view._ui_timer_running:

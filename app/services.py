@@ -40,9 +40,9 @@ def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
                 yield filtered
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         full_traceback = traceback.format_exc()
-        logger.error(f"[致命錯誤] 未翻譯檢查失敗：{e}\n{full_traceback}")
+        logger.error(f"[致命錯誤] 未翻譯檢查失敗：{e!r}\n{full_traceback}")
         yield {
-            "log": f"[致命錯誤] 未翻譯檢查失敗：{e}\n{full_traceback}",
+            "log": f"[致命錯誤] 未翻譯檢查失敗：{e!r}\n{full_traceback}",
             "error": True,
             "progress": 0,
         }
@@ -57,9 +57,9 @@ def run_variant_compare_service(cn_dir: str, tw_dir: str, out_dir: str):
                 yield filtered
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         full_traceback = traceback.format_exc()
-        logger.error(f"[致命錯誤] 簡繁差異比較失敗：{e}\n{full_traceback}")
+        logger.error(f"[致命錯誤] 簡繁差異比較失敗：{e!r}\n{full_traceback}")
         yield {
-            "log": f"[致命錯誤] 簡繁差異比較失敗：{e}\n{full_traceback}",
+            "log": f"[致命錯誤] 簡繁差異比較失敗：{e!r}\n{full_traceback}",
             "error": True,
             "progress": 0,
         }
@@ -74,9 +74,9 @@ def run_english_residue_check_service(input_dir: str, out_dir: str):
                 yield filtered
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         full_traceback = traceback.format_exc()
-        logger.error(f"[致命錯誤] 殘留英文檢查失敗：{e}\n{full_traceback}")
+        logger.error(f"[致命錯誤] 殘留英文檢查失敗：{e!r}\n{full_traceback}")
         yield {
-            "log": f"[致命錯誤] 殘留英文檢查失敗：{e}\n{full_traceback}",
+            "log": f"[致命錯誤] 殘留英文檢查失敗：{e!r}\n{full_traceback}",
             "error": True,
             "progress": 0,
         }
@@ -91,9 +91,9 @@ def run_variant_compare_tsv_service(tsv_path: str, output_csv_path: str):
                 yield filtered
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         full_traceback = traceback.format_exc()
-        logger.error(f"[致命錯誤] TSV 簡繁差異比較失敗：{e}\n{full_traceback}")
+        logger.error(f"[致命錯誤] TSV 簡繁差異比較失敗：{e!r}\n{full_traceback}")
         yield {
-            "log": f"[致命錯誤] TSV 簡繁差異比較失敗：{e}\n{full_traceback}",
+            "log": f"[致命錯誤] TSV 簡繁差異比較失敗：{e!r}\n{full_traceback}",
             "error": True,
             "progress": 0,
         }

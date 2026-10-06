@@ -24,7 +24,7 @@ from translation_tool.utils.config_manager import (
     get_batch_write_interval,
     load_config,
 )
-from translation_tool.utils.log_unit import log_debug, log_warning
+from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 DEFAULT_LM_TRANSLATE_FOLDER_NAME = "LM翻譯後"
 
@@ -172,7 +172,7 @@ class LMView(ft.Column):
         try:
             info = summarize_database()
         except Exception as exc:  # noqa: BLE001 - 資料庫問題只影響提示文字，不應讓頁面載入失敗
-            log_warning(f"讀取 Mod 資料庫摘要失敗：{exc}")
+            log_warning(f"讀取 Mod 資料庫摘要失敗：{exc!r}")
             info = {"problem": f"讀取摘要失敗（{exc}），詳情請看後台 log"}
         if info is not None and info.get("problem"):
             self.db_info.value = f"⚠ 資料庫無法使用：{info['problem']}"
@@ -397,6 +397,11 @@ class LMView(ft.Column):
 
     def start_clicked(self, e):
         """處理開始翻譯按鈕點擊事件"""
+        # 診斷：後端按下按鈕當下實際收到的輸入／輸出路徑（Web 欄位沒同步時可直接比對畫面）
+        log_info(
+            f"[LM翻譯] 開始按鈕：input={self.input_path.value!r}, "
+            f"output={self.output_path.value!r}"
+        )
         if self._ui_timer_running:
             # 任務執行中：避免重複啟動（會重複送出 API 並同時寫入同一輸出/快取）
             show_snack(self.page, "翻譯正在執行中，請等待完成或先取消", C.GOLD)

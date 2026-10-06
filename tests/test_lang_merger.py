@@ -32,9 +32,10 @@ class TestLangMergerFileNotFound:
         )
         result = next(result_gen)
 
-        # 應該回傳 progress: 1.0 和 error: False（因為是預期中的情況）
+        # 缺檔要回報為（軟性）錯誤並帶出路徑，批次服務才會把這個 ZIP 記為失敗
         assert result["progress"] == 1.0
-        assert result["error"] is False
+        assert result["error"] is True
+        assert "輸入 ZIP 不存在" in result["log"] and "nonexistent.zip" in result["log"]
 
 
 class TestLangMergerBadZip:

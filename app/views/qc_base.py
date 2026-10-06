@@ -15,6 +15,7 @@ from app.ui.design import C
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from translation_tool.utils.log_unit import log_error
+from translation_tool.utils.ui_mirror import in_new_task, mirror_lines
 
 _UI_FLUSH_INTERVAL_SEC = 0.2
 
@@ -101,6 +102,7 @@ class QCBase:
                         if line.strip()
                     ]
                     if lines:
+                        mirror_lines(lines, prefix="[QC] ")
                         batcher.add_lines(lines)
                     if "progress" in update:
                         batcher.set_state(progress=update["progress"])
@@ -108,14 +110,14 @@ class QCBase:
                         batcher.set_state(error=True)
                     batcher.flush()
             except Exception as ex:  # noqa: BLE001 - 背景執行緒需把錯誤回報到 UI
-                log_error(f"QC 任務失敗: {ex}\n{traceback.format_exc()}")
+                log_error(f"QC 任務失敗: {ex!r}\n{traceback.format_exc()}")
                 batcher.add_lines([(f"[錯誤] 任務執行失敗：{ex}", "error")])
                 batcher.set_state(error=True)
             finally:
                 batcher.set_state(done=True)
                 batcher.flush(force=True)
 
-        threading.Thread(target=run, daemon=True).start()
+        threading.Thread(target=in_new_task("qc", run), daemon=True).start()
 
     @property
     def page(self):

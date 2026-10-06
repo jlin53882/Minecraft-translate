@@ -13,6 +13,7 @@ import flet as ft
 
 from app.ui import kit
 from app.ui.design import C
+from app.ui.safe_file_picker import ensure_output_dir
 from app.ui.snack import show_snack
 from app.views.pipeline.pipeline_actions import PipelineActions, session_failed
 from app.views.pipeline.pipeline_bundle_dialog import open_bundle_dialog
@@ -316,8 +317,9 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
         if not input_dir or not os.path.isdir(input_dir):
             show_snack(self._page, "❌ Mod 來源不存在或未選擇")
             return None
-        if not output_dir or not os.path.isdir(output_dir):
-            show_snack(self._page, "❌ 輸出目錄不存在或未選擇")
+        output_error = ensure_output_dir(output_dir)
+        if output_error:
+            show_snack(self._page, f"❌ {output_error}")
             return None
 
         mode = normalize_extract_mode(config.get("mode"))

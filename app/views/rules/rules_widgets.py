@@ -4,6 +4,7 @@ import flet as ft
 
 from app.ui import design, kit
 from app.ui.design import C
+from app.ui.sync_text_field import SyncTextField
 
 
 class RulesWidgetsMixin:
@@ -49,7 +50,7 @@ class RulesWidgetsMixin:
 
         self.total_pages_text_label = ft.Text(" / 1 頁", size=13, color=C.MUTED)
 
-        self.page_jump_field = ft.TextField(
+        self.page_jump_field = SyncTextField(
             value=str(self.current_page),
             width=70,
             dense=True,

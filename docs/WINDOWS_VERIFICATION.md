@@ -102,6 +102,17 @@ dist\MinecraftTranslator\
 | #139 | Snackbar 與底部狀態列重疊 | 原觀察來自 Windows 11 / Flet 1.0.1 / Chrome 的截圖。開發環境會用網頁版重現；若網頁版與桌面版行為不同，請在 Windows 桌面版再確認 |
 | #147 | oauthlib CVE | 不需要 Windows；需要確認 Flet 是否會進入 PKCE Authorization Code 流程（程式／依賴分析） |
 
+### 4.1 日誌／任務歸屬煙霧測試（PR #169，Flet Web，491 個 JAR）
+
+| # | 項目 | 步驟 | 預期結果 |
+|---|---|---|---|
+| 4.1.1 | 雙任務並行 | 開兩個 Flet Web 分頁，同時各執行一次 DUAL 提取（輸出路徑不同） | `app.log` 每一行都帶 `[task=extractor/extractor-…]`，兩個任務的 task 不同；畫面上的輸出路徑、成功／跳過／失敗數與對應 task 的後台紀錄一致 |
+| 4.1.2 | 一鍵流程輸入失敗 | 一鍵製作的 Mod 來源填不存在的路徑，走完 4 個步驟按「確定執行」 | 對話框完全關閉、遮罩不殘留；畫面可見「❌ Mod 來源不存在或未選擇」提示；後台有對應 ERROR 的 `[UI] SnackBar` 紀錄；不啟動任何任務 |
+
+Flet Web 補充（限制與未來擴充方向見 `WEB_MODE_LIMITATIONS.md`）：`FilePicker.get_directory_path()` 在 Web 不支援，現在改為提示「請直接輸入執行程式那台電腦上的路徑」；輸出資料夾不存在時會自動建立，所以 Web 可手動輸入新的輸出路徑走完整流程。
+
+2026-10-06 首次結果：4.1.1 通過（兩任務各成功 3374／3373，無失敗）；4.1.2 的後台紀錄正確，但對話框停在「打包資源設定 4/4」、遮罩殘留、提示未顯示——已修正對話框關閉流程（移除 overlay 後再推一次更新，見 `_one_click_dispose_dialogs`），**待 Windows 重測 4.1.2**。
+
 ## 5. 不需要 Windows（網頁版 smoke 可驗證）
 
 這些項目可用 `tools/ui_smoke.py`（真實 Flet 網頁版＋Playwright）驗證；外網被封鎖的環境改用 `tools/ui_smoke_offline.py`（把 CanvasKit／字型導向本機檔案，參數相同）：

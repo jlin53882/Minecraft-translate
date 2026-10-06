@@ -13,7 +13,11 @@ from pathlib import Path
 from typing import Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
-from app.services_impl.pipelines._pipeline_logging import ensure_pipeline_logging
+from app.services_impl.pipelines._pipeline_logging import (
+    ensure_pipeline_logging,
+    mirror_session_log,
+)
+from app.tasks.task_session import add_log_unmirrored
 from translation_tool.translation_db import (
     SOURCE_NAMES,
     DbSettings,
@@ -113,8 +117,8 @@ def pack_format_hint(label: str) -> str:
         if info:
             lo, hi = info.get("min_format"), info.get("max_format")
             return f"pack_format {lo}" if lo == hi else f"pack_format {lo}–{hi}"
-    except (OSError, ValueError):
-        pass
+    except (OSError, ValueError) as exc:
+        logger.warning("讀取版本對照檔失敗（%s）：%s", VERSION_FILE, exc)
     return ""
 
 
@@ -143,21 +147,9 @@ def summarize_database() -> dict[str, Any] | None:
         db.close()
 
 
-_LEVELS = {"warning": logging.WARNING, "error": logging.ERROR}
-
-
 def _log_both(session, text: str, level: str = "info") -> None:
-    """掃描進度同時寫入 UI（session）與後台 log。
-
-    ``ui_mirrored`` 讓 UI log handler 略過這筆，避免同一行在畫面出現兩次。
-    """
-    session.add_log(text, level=level)
-    logger.log(
-        _LEVELS.get(level, logging.INFO),
-        "[Mod 資料庫掃描] %s",
-        text,
-        extra={"ui_mirrored": True},
-    )
+    """掃描進度同時寫入 UI（session）與後台 log（加 ``[Mod 資料庫掃描]`` 前綴）。"""
+    mirror_session_log(session, logger, text, level, prefix="[Mod 資料庫掃描] ")
 
 
 def run_moddb_scan_service(
@@ -222,8 +214,11 @@ def run_moddb_scan_service(
             traceback.format_exc(),
             extra={"ui_mirrored": True},
         )
-        session.add_log(
-            f"[致命錯誤] 掃描失敗：{exc}（詳細堆疊請看後台 log）", level="error"
+        # 完整堆疊已寫入後台（上面的 logger.error）；畫面只顯示摘要，不重複鏡像
+        add_log_unmirrored(
+            session,
+            f"[致命錯誤] 掃描失敗：{exc}（詳細堆疊請看後台 log）",
+            "error",
         )
         session.set_error()
     finally:

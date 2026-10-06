@@ -5,6 +5,8 @@
 
 import asyncio
 import threading
+import traceback
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -16,15 +18,17 @@ from app.services_impl.pipelines.merge_service import (
     run_merge_folder_batch_service,
     run_merge_zip_batch_service,
 )
-from app.tasks.task_session import TaskSession
+from app.tasks.task_session import TaskSession, add_log_unmirrored
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.ui.status_chip import set_chip_status
 from app.views._log import LogView
 from app.views.config.config_actions import load_config_into_view
 from app.views.merge.merge_widgets import MergeWidgetsMixin
+from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_warning
+from translation_tool.utils.log_unit import log_error, log_info, log_warning
+from translation_tool.utils.ui_mirror import session_task_scope
 
 
 class MergeView(MergeWidgetsMixin, ft.Column):
@@ -107,8 +111,11 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                 try:
                     cfg = load_config()
                     load_config_into_view(inner, cfg)
-                except Exception:  # noqa: BLE001, S110
-                    pass
+                except Exception as exc:  # noqa: BLE001 - 通知失敗不影響合併頁，但要留下紀錄
+                    log_warning(
+                        f"[MergeView] 同步設定到已開啟的頁面失敗：{exc!r}",
+                        exc_info=True,
+                    )
 
     def _on_merge_field_changed(self, key: str, value: Any) -> None:
         """寫入 lang_merger 單一欄位到 config.json，支援兩邊同步。"""
@@ -116,8 +123,11 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             # 經由 ConfigStore：只改這一個欄位、受寫入鎖保護、並通知外殼等訂閱者
             config_store.set_value(f"lang_merger.{key}", value)
             self._broadcast_config_change_to_config_view()
-        except Exception:  # noqa: BLE001, S110
-            pass
+        except Exception as exc:  # noqa: BLE001 - 欄位寫入失敗不可中斷 UI，但設定沒存成功必須留下紀錄
+            log_warning(
+                f"[MergeView] 寫入設定 lang_merger.{key}={value!r} 失敗：{exc!r}",
+                exc_info=True,
+            )
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker) -> None:
         """初始化 MergeView。"""
@@ -212,15 +222,122 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             self.folder_path_field.value = result
             self.page.update()
 
+    def _log_start_inputs(self, input_mode, zip_count: int) -> None:
+        """診斷：記錄按下按鈕當下「後端」實際收到的欄位值；畫面上看得到、後端卻是空的
+        （Web 輸入事件沒同步）時，只看後台 log 就能分辨，不必猜。"""
+        log_info(
+            f"[合併] 開始按鈕：mode={input_mode!r}, "
+            f"folder={self.folder_path_field.value!r}, "
+            f"zips={zip_count}, output={self.output_dir_field.value!r}"
+        )
+
+    def _zip_paths_for_run(self) -> list[str]:
+        """合併目前選取的 ZIP，並納入 Web 可手動輸入的單一 ZIP 路徑。"""
+        paths = list(self.selected_zips)
+        field = self.zip_path_field
+        typed = (field.value if field is not None else "") or ""
+        typed = typed.strip()
+        if typed and typed not in paths:
+            paths.append(typed)
+        return paths
+
+    def cancel_merge(self, e: ft.ControlEvent | None = None) -> None:
+        """要求目前合併在下一個檢查點停止。"""
+        if self.session.snapshot().get("status") != "RUNNING":
+            return
+        self.session.request_cancel()
+        self.cancel_button.disabled = True
+        self._set_status("取消中…", "gold")
+        self.session.add_log("[系統] 使用者要求取消合併", level="warning")
+        self.page.update()
+
+    def _run_merge_worker(
+        self, input_mode: str, zip_paths: list[str] | None = None
+    ) -> None:
+        """背景執行緒入口：執行合併並處理取消與失敗（不讓例外逸出執行緒）。"""
+        try:
+            # cancel_scope：核心合併（lang_merger）的檢查點讀同一個取消旗標，
+            # 取消才能在單一 update 內生效，不必等到 update 邊界
+            with cancel_scope(
+                lambda: bool(getattr(self.session, "cancel_requested", False))
+            ):
+                self._run_merge_service(input_mode, zip_paths)
+        except TaskCancelled:
+            # 取消屬於正常終止，不讓背景執行緒把 traceback 噴到 Web 主控台。
+            self.session.add_log("[取消] 合併已停止", level="warning")
+        except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束
+            # 完整堆疊寫後台；畫面顯示例外類型與訊息，並指向後台 log
+            # 服務結束時已 set_session(None) 清掉這條執行緒的任務歸屬；沒有歸屬的記錄會
+            # 退回「最近綁定的 session」，可能把這個任務的完整堆疊送進別的任務畫面，
+            # 所以邊界上重新歸屬到自己的任務再寫
+            with session_task_scope(self.session):
+                log_error(
+                    f"[MergeView] 合併執行失敗（模式：{input_mode}，"
+                    f"輸出：{self.output_dir_field.value}）：{ex!r}\n{traceback.format_exc()}"
+                )
+            add_log_unmirrored(
+                self.session,
+                f"[錯誤] 合併執行失敗：{type(ex).__name__}: {ex}（完整堆疊已寫入後台 log）",
+                "error",
+            )
+            self.session.set_error()
+            self.session.finish()  # set_error() → finish()：TaskManager 才會離開 active
+
+    def _run_merge_service(
+        self, input_mode: str, zip_paths: list[str] | None = None
+    ) -> None:
+        """依輸入模式呼叫對應的合併服務並消耗其 generator。"""
+        if input_mode == "folder":
+            for _ in run_merge_folder_batch_service(
+                input_dir=self.folder_path_field.value,
+                output_dir=self.output_dir_field.value,
+                session=self.session,
+                only_process_lang=self.only_lang_checkbox.value,
+                process_zh_cn=self.process_zh_cn_switch.value,
+                patchouli_skip=self.patchouli_skip_zh_cn_switch.value,
+                patchouli_threshold=self._safe_float(
+                    self.patchouli_threshold_field.value or ""
+                )
+                or 0.5,
+                zh_en_threshold=self._safe_int(
+                    self.zh_en_letter_threshold_field.value or ""
+                )
+                or 2,
+            ):
+                pass
+        else:
+            for _ in run_merge_zip_batch_service(
+                zip_paths=list(
+                    zip_paths if zip_paths is not None else self._zip_paths_for_run()
+                ),
+                output_dir=self.output_dir_field.value,
+                session=self.session,
+                only_process_lang=self.only_lang_checkbox.value,
+                process_zh_cn=self.process_zh_cn_switch.value,
+                patchouli_skip=self.patchouli_skip_zh_cn_switch.value,
+                patchouli_threshold=self._safe_float(
+                    self.patchouli_threshold_field.value or ""
+                )
+                or 0.5,
+                zh_en_threshold=self._safe_int(
+                    self.zh_en_letter_threshold_field.value or ""
+                )
+                or 2,
+            ):
+                pass
+
     def start_merge(self, e: ft.ControlEvent) -> None:
         """處理開始合併按鈕事件。"""
         input_mode = self.input_mode_group.value
+        # 開始當下只取一次 ZIP 清單：驗證、開始訊息、背景工作都用同一份
+        zip_paths = self._zip_paths_for_run()
+        self._log_start_inputs(input_mode, len(zip_paths))
         if input_mode == "folder":
             if not (self.folder_path_field.value or "").strip():
                 show_snack(self.page, "請先選擇來源資料夾")
                 return
         else:
-            if not self.selected_zips:
+            if not zip_paths:
                 show_snack(self.page, "請先選擇 ZIP 檔案")
                 return
         if not (self.output_dir_field.value or "").strip():
@@ -228,6 +345,8 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             return
 
         self.start_button.disabled = True
+        self.cancel_button.visible = True
+        self.cancel_button.disabled = False
         self.zip_list_view.disabled = True
         # PR refactor/unified-log-view: LogView widget API 不暴露 .controls
         # (LogView 是 ft.Container,內部有 _list_view 控制項)。
@@ -238,59 +357,19 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         self._set_status("執行中", C.DIA_BG)
 
         self.session.start()
-        self.session.add_log("[系統] 開始合併任務")
+        source_desc = (
+            f"資料夾 {self.folder_path_field.value}"
+            if input_mode == "folder"
+            else f"{len(zip_paths)} 個 ZIP"
+        )
+        self.session.add_log(
+            f"[系統] 開始合併任務｜來源：{source_desc}｜輸出：{self.output_dir_field.value}"
+        )
         self._start_ui_poller()
 
-        def _run_merge():
-            try:
-                _run_merge_service()
-            except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束
-                log_warning(f"[MergeView] 合併執行失敗：{ex!r}")
-                self.session.add_log(f"[錯誤] 合併執行失敗：{ex}", level="error")
-                self.session.set_error()
-                self.session.finish()  # set_error() → finish()：TaskManager 才會離開 active
-
-        def _run_merge_service():
-            if input_mode == "folder":
-                for _ in run_merge_folder_batch_service(
-                    input_dir=self.folder_path_field.value,
-                    output_dir=self.output_dir_field.value,
-                    session=self.session,
-                    only_process_lang=self.only_lang_checkbox.value,
-                    process_zh_cn=self.process_zh_cn_switch.value,
-                    patchouli_skip=self.patchouli_skip_zh_cn_switch.value,
-                    patchouli_threshold=self._safe_float(
-                        self.patchouli_threshold_field.value or ""
-                    )
-                    or 0.5,
-                    zh_en_threshold=self._safe_int(
-                        self.zh_en_letter_threshold_field.value or ""
-                    )
-                    or 2,
-                ):
-                    pass
-            else:
-                for _ in run_merge_zip_batch_service(
-                    zip_paths=list(
-                        self.selected_zips
-                    ),  # 2026-08-04 A4: 傳副本避免 race condition
-                    output_dir=self.output_dir_field.value,
-                    session=self.session,
-                    only_process_lang=self.only_lang_checkbox.value,
-                    process_zh_cn=self.process_zh_cn_switch.value,
-                    patchouli_skip=self.patchouli_skip_zh_cn_switch.value,
-                    patchouli_threshold=self._safe_float(
-                        self.patchouli_threshold_field.value or ""
-                    )
-                    or 0.5,
-                    zh_en_threshold=self._safe_int(
-                        self.zh_en_letter_threshold_field.value or ""
-                    )
-                    or 2,
-                ):
-                    pass
-
-        threading.Thread(target=_run_merge, daemon=True).start()
+        threading.Thread(
+            target=partial(self._run_merge_worker, input_mode, zip_paths), daemon=True
+        ).start()
 
     def _start_ui_poller(self) -> None:
         """啟動 UI 輪詢器（在 Flet event loop 上），定期同步進度與日誌。
@@ -337,7 +416,12 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             if status == "RUNNING":
                 self._set_status("執行中", C.DIA_BG)
             elif status == "DONE":
-                self._set_status("任務完成", C.EM_BG)
+                cancelled = bool(getattr(self.session, "cancel_requested", False))
+                self._set_status(
+                    "已取消" if cancelled else "任務完成",
+                    "gold" if cancelled else C.EM_BG,
+                )
+                self.cancel_button.visible = False
                 snap_summary = snap.get("summary")
                 if snap_summary:
                     self._merge_stats = snap_summary
@@ -365,11 +449,13 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                         "failed_zips": failed_zips,
                         "failed_zip_details": failed_zip_details,
                     }
-                self._show_merge_summary(self._merge_stats)
+                if not cancelled:
+                    self._show_merge_summary(self._merge_stats)
                 # 2026-08-02:DONE/ERROR 後停止 poller,避免無限 background update
                 self._ui_stop.set()
             elif status == "ERROR":
                 self._set_status("任務發生錯誤", C.RED_BG)
+                self.cancel_button.visible = False
                 self._ui_stop.set()
 
             self.progress_bar.value = progress

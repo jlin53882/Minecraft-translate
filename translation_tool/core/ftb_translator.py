@@ -38,6 +38,7 @@ from translation_tool.utils.log_unit import (
     log_info,
     log_warning,
 )
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
 from ..plugins.ftbquests.ftbquests_snbt_extractor import process_quest_folder
 from ..utils.config_manager import load_config
@@ -154,7 +155,7 @@ def translate_directory_generator(
         else:
             max_workers = max_allowed_workers
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_file = {
                 executor.submit(
                     _translate_single_file,
@@ -187,7 +188,7 @@ def translate_directory_generator(
                 shutil.copy2(src_path, dst_path)
                 copied_count += 1
             except Exception as e:  # noqa: BLE001
-                log_error(f"複製檔案 {src_path} 失敗: {e}")
+                log_error(f"複製檔案 {src_path} 失敗: {e!r}")
 
     log_info(f"複製階段完成，總共複製了 {copied_count} 個非翻譯檔案。")
     yield {"progress": 1.0}

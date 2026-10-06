@@ -39,7 +39,7 @@ import flet as ft
 from app.ui import design
 from app.ui.design import C
 from app.ui.design import tone as get_tone
-from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.redaction import redact_secrets
 
 # 舊呼叫端傳的是「背景色」（RED_600 / GREEN_600 / C.EM …）。新設計的 toast 是中性面板 + 語意色，
@@ -163,12 +163,16 @@ def show_snack(
         ft.SnackBar 實例 (可用於後續手動管理)
     """
     message = redact_secrets(message)  # 提示訊息可能帶有使用者輸入或例外文字（#125）
-    log_info(f"[UI] SnackBar: {message}")
+    tone_name, _icon = snack_style(color)
+    # 提示只出現在畫面上，後台 log 要有對應等級：紅色=錯誤、金色=警告，
+    # 這樣只看警告以上的 log 檔不會漏掉使用者看到的錯誤提示。
+    {"red": log_error, "gold": log_warning}.get(tone_name, log_info)(
+        f"[UI] SnackBar: {message}"
+    )
 
     if clear_existing:
         _clear_existing_snacks(page)
 
-    tone_name, _icon = snack_style(color)
     tone = get_tone(tone_name)
     # text_color 是舊版「彩色底上的文字色」；新版用語意色當文字、邊框帶同色系，參數只為相容而保留。
     # content 維持單一 ft.Text（既有呼叫端 / 測試會讀 snack.content.value）

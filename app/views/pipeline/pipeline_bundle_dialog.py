@@ -18,7 +18,9 @@ import flet as ft
 from app.services_impl.pipelines.extract_service import open_output_folder
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog
+from app.ui.sync_text_field import SyncTextField
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_warning
 
 
 def _load_version_data():
@@ -32,7 +34,8 @@ def _load_version_data():
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:  # noqa: BLE001 - 讀不到版本資料時使用空設定，UI 仍可開啟
+        except Exception as exc:  # noqa: BLE001 - 讀不到版本資料時使用空設定，UI 仍可開啟
+            log_warning(f"讀取版本資料失敗，使用空設定：{config_path}: {exc!r}")
             return {}
     return {}
 
@@ -115,7 +118,7 @@ def _bundle_init_state_and_fields(ctx, input_path, output_path):
         os.path.join(output_path, output_zip_name) if output_path else ""
     )
 
-    ctx.bundle_input_field = ft.TextField(
+    ctx.bundle_input_field = SyncTextField(
         label="輸入來源",
         hint_text=f"自動帶入：{ctx.default_input}"
         if ctx.default_input
@@ -124,7 +127,7 @@ def _bundle_init_state_and_fields(ctx, input_path, output_path):
         expand=True,
         border_color=C.ENCH,
     )
-    ctx.bundle_output_zip_field = ft.TextField(
+    ctx.bundle_output_zip_field = SyncTextField(
         label="輸出 ZIP 檔案",
         hint_text=f"自動帶入：{ctx.default_output_zip}"
         if ctx.default_output_zip
@@ -138,7 +141,7 @@ def _bundle_init_state_and_fields(ctx, input_path, output_path):
 
 def _bundle_build_version_widgets(ctx):
     """版本選擇相關控制項。"""
-    ctx.description_field = ft.TextField(
+    ctx.description_field = SyncTextField(
         label="檔案敘述",
         hint_text="直接輸入文字，或使用 § 顏色代碼",
         expand=True,
@@ -153,7 +156,7 @@ def _bundle_build_version_widgets(ctx):
     ctx.selected_version = None
 
     ctx.version_toggle_label = ft.Text("", size=12, expand=True)
-    version_search = ft.TextField(
+    version_search = SyncTextField(
         label="搜尋版本",
         hint_text="輸入版本關鍵字...",
         expand=True,
@@ -184,7 +187,7 @@ def _bundle_build_version_widgets(ctx):
 def _bundle_build_extra_widgets(ctx) -> None:
     """封面圖片與額外資料夾控制項、handler 綁定。"""
 
-    ctx.pack_image_field = ft.TextField(
+    ctx.pack_image_field = SyncTextField(
         label="封面圖片（可留空）",
         hint_text="選擇 pack.png 圖片",
         expand=True,

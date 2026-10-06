@@ -7,6 +7,7 @@ import flet as ft
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.design import tone as get_tone
+from app.ui.sync_text_field import SyncTextField
 
 
 def _has_files(path: str) -> bool:
@@ -25,7 +26,7 @@ class PipelineWidgetsMixin:
 
     def _add_key_field(self, initial_value=""):
         new_row = ft.Row(spacing=10)
-        key_tf = ft.TextField(
+        key_tf = SyncTextField(
             value=initial_value,
             label=f"API Key {len(self.keys_container.controls) + 1}",
             expand=True,

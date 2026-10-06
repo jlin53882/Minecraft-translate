@@ -383,8 +383,15 @@ def process_content_or_copy_file_impl(
                 target = safe_join(_pp_dir, pending_name, normalized_root, rel_path)
             else:
                 target = safe_join(_pp_dir, normalized_root, rel_path)
-        except UnsafePathError:
-            log_error(f"[Patchouli] 拒絕不安全路徑: {rel_path}")
+        except UnsafePathError as exc:
+            log_error(
+                "[Patchouli] 拒絕不安全路徑: root=%r normalized_root=%r "
+                "rel_path=%r reason=%s",
+                _pp_dir,
+                normalized_root,
+                rel_path,
+                exc,
+            )
             return {"success": False, "error": True}
         os.makedirs(os.path.dirname(target), exist_ok=True)
 
@@ -405,7 +412,7 @@ def process_content_or_copy_file_impl(
                 else:
                     log_debug(f"[Patchouli] 內容一致，略過寫入: {target}")
             except Exception as e:  # noqa: BLE001
-                log_error(f"[Patchouli] 寫入失敗: {e}")
+                log_error(f"[Patchouli] 寫入失敗: {e!r}")
                 raw_bytes = reader.read_bytes(input_path)
                 should_write = True
                 if os.path.isfile(target):
@@ -559,7 +566,11 @@ def process_content_or_copy_file_impl(
                         try:
                             with open(final_output_path, "rb") as f:
                                 existing = json_module.loads(f.read())
-                        except Exception:  # noqa: BLE001
+                        except Exception as exc:  # noqa: BLE001 - 既有 zh_tw 讀不出來時視為空白，但要留下紀錄
+                            log_warning(
+                                f"{log_prefix} 既有 zh_tw.json 無法讀取，將視為空白內容："
+                                f"{final_output_path}: {exc!r}"
+                            )
                             existing = {}
                     else:
                         existing = {}
@@ -667,7 +678,7 @@ def process_content_or_copy_file_impl(
                 log_info(log_msg)
                 return {"success": True}
             except Exception as e:  # noqa: BLE001
-                log_error(f"處理 {input_path} 時發生未預期錯誤: {e}")
+                log_error(f"處理 {input_path} 時發生未預期錯誤: {e!r}")
                 return {"success": False, "error": True}
 
         if ext == ".json" and is_localized_cn_file:
@@ -723,5 +734,5 @@ def process_content_or_copy_file_impl(
         log_info(f"{log_prefix} 未知本地化檔案類型 ({ext}) 直接複製完成。")
         return {"success": True}
     except Exception as exc:  # noqa: BLE001
-        log_error(f"處理內容檔案 {input_path} 時發生錯誤: {exc}", exc_info=True)
+        log_error(f"處理內容檔案 {input_path} 時發生錯誤: {exc!r}", exc_info=True)
         return {"success": False, "error": True}

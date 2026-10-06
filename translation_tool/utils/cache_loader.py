@@ -7,13 +7,13 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 import orjson as json
 
 from translation_tool.utils.cache_shards import list_shards_oldest_first
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ def load_shard_file(path: Path) -> dict[str, Any]:
         data = json.loads(path.read_bytes())
         return data if isinstance(data, dict) else {}
     except Exception as e:  # noqa: BLE001 載入失敗不應中斷其他分片
-        logger.warning(f"載入分片失敗 {path}: {e}")
+        logger.warning(f"載入分片失敗 {path}: {e!r}")
         return {}
 
 
@@ -58,7 +58,7 @@ def load_cache_type(
         translation_cache[cache_type] = {}
         return
 
-    with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+    with ContextThreadPoolExecutor(max_workers=parallel_workers) as executor:
         results = list(executor.map(load_shard_file, json_files))
 
     temp_cache: dict[str, Any] = {}

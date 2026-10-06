@@ -8,6 +8,7 @@ import flet as ft  # noqa: F401
 
 from app.ui.design import C
 from app.ui.snack import show_snack
+from translation_tool.utils.log_unit import log_error
 
 
 def translate_regex_error(err: re.error) -> str:
@@ -55,6 +56,7 @@ def perform_reload(view):
         rules_data = view._load_rules_core()
         view._run_on_ui_thread(lambda: view._handle_reload_success(rules_data))
     except Exception as err:  # noqa: BLE001
+        log_error(f"[Rules] 重新載入規則失敗：{err!r}", exc_info=True)
         view._run_on_ui_thread(lambda err=err: view._handle_reload_failure(err))
 
 

@@ -98,7 +98,17 @@ class TaskManager:
                 self._sessions[sid] = weakref.ref(session)
                 weakref.finalize(session, self._drop, sid)
             elif info is None:
-                return  # 沒有 start 過的 session（例如單元測試直接呼叫 finish）
+                if event == "error":
+                    # 結束（finish）之後才補標失敗（例如流水線安全網）：更正「最近完成」裡的結果，
+                    # 不然 TaskSession 是 ERROR、頂列／通知卻顯示 DONE。
+                    for done in self._recent:
+                        if done.id == sid and done.status != STATUS_ERROR:
+                            done.status = STATUS_ERROR
+                            break
+                    else:
+                        return
+                else:
+                    return  # 沒有 start 過的 session（例如單元測試直接呼叫 finish）
             elif event == "progress":
                 info.progress = float(getattr(session, "progress", info.progress))
             elif event == "error":

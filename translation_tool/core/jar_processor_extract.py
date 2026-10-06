@@ -20,6 +20,8 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor, run_in_context
+
 from ..utils.config_manager import load_config
 from ..utils.log_unit import log_error
 from ..utils.zip_safety import (
@@ -279,8 +281,9 @@ def run_extraction_process_impl(
         finally:
             scan_done.set()
 
+    # run_in_context：背景預掃描寫出的後台記錄要帶著建立它的任務歸屬
     scan_thread = threading.Thread(
-        target=_scan_in_background, name="scan-jars-bg", daemon=True
+        target=run_in_context(_scan_in_background), name="scan-jars-bg", daemon=True
     )
     scan_thread.start()
 
@@ -399,7 +402,7 @@ def run_extraction_process_impl(
 
     _ex_start = time_module.time()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ContextThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_jar = {}
         for jar in eligible_jars:
             _t_jar_submit = time_module.time()
@@ -449,8 +452,9 @@ def run_extraction_process_impl(
                 }
             except Exception as exc:  # noqa: BLE001
                 failed_jars.append(os.path.basename(jar_path))
+                # 第一行與下面 yield 給 UI 的文字相同，鏡像時後台不會重複記錄
                 log_error(
-                    "提取 %s 時產生例外: %s (wall=%.1fs)",
+                    "[ERROR] 提取 %s 時產生例外\n原因：%r (wall=%.1fs)",
                     os.path.basename(jar_path),
                     exc,
                     wall_time,

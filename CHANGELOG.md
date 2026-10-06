@@ -11,6 +11,11 @@
 
 > 主要內容：UI 全面重新設計（PR #106）。版本號尚未決定。
 
+### Docs
+- `docs/WEB_MODE_LIMITATIONS.md` 說明 Playwright `fill()` 在 Flet Web 不可靠，並給出以真實按鍵驗證欄位同步的步驟。
+- 新增 `docs/WEB_MODE_LIMITATIONS.md`：Flet Web 模式限制（不能選資料夾、只能輸入主機路徑）與未來擴充方向。
+- 新增 `docs/CROSS_CUTTING_REVIEW_CHECKLIST.md`：橫切改動（日誌／任務生命週期／併發）提交前自查清單。
+
 ### Features
 - **Mod 翻譯資料庫**：分版本的翻譯記憶庫（SQLite）。掃描 mods 資料夾的 jar（含 `META-INF/jarjar` 內嵌 jar、Patchouli 書籍）建立；機器翻譯的查詢順序為「資料庫 → 快取 → AI」，翻譯結果自動寫回（只新增、不覆蓋，其他版本相同原文的空白一併補上）；在「Mod 資料庫」頁可手動校對，儲存時同步所有版本中原文相同的條目（可還原）。可匯入翻譯 ZIP（zh_tw 不判讀、直接匯入），並可選擇是否判斷清理英文內容；譯文逐字保存（換行、格式碼、前後空白）。詳見 `docs/MOD_TRANSLATION_DB.md`。
 - **UI 全面重新設計（Deepslate & Emerald）**：依 `docs/design/ui-redesign/` 設計稿重做全部頁面；深色 / 淺色主題（偏好存於 `ui.theme_mode`），切換不需重建畫面。
@@ -24,11 +29,40 @@
 - **token 預算切批（#108）**：依 token 預算切批、學習式預算、`maxOutputTokens`、`finishReason` / 用量診斷；可用 `token_budget_enabled` 關閉。
 
 ### Improvements
+- **UI 與後台日誌自動同步**：寫進畫面的訊息（`TaskSession.add_log`、`LogView.add`、批次推畫面的提取／打包／QC 路徑）會自動鏡像到後台 log，不必每個呼叫點自己配對 `log_info`。核心流程已經自己 log 過的訊息會去重（`translation_tool/utils/ui_mirror.py`，相同文字每筆後台記錄只抵銷一次），鏡像記錄帶 `ui_mirrored` 標記，UI log handler 會略過，不會在畫面重複。任務開始／結束（狀態、耗時、摘要）也寫入後台。
+- **`app.log` 每一行標示所屬任務**：安裝 LogRecord 工廠，在寫 log 的執行緒把任務（`contextvars`，執行緒池也繼承）帶進記錄；`RedactingFormatter` 自動在 `%(message)s` 前加上 `[task=<任務名稱>/<識別>] `（沒有任務時不加）。同時執行多個任務時，檔案裡交錯的每一行都看得出是哪個任務——不論是核心流程直接寫的、執行緒池內寫的，還是 UI 替任務補寫的訊息。多行訊息與 traceback 的**每個實體行**也帶任務標籤（續行補 `[task=…]`，空行保留標籤）；`log_format` 驗證器與執行期使用同一個 `RedactingFormatter`／記錄欄位契約，自訂格式可以使用 `%(task_tag)s`／`%(task_name)s`／`%(task_id)s`（沒有任務時是空字串），`%(message)-80s` 這類帶寬度／精度的寫法也會自動插入標籤，未知欄位仍被拒絕。
+- **任務終止狀態三邊一致**：`TaskSession.is_finished` 以真正的 lifecycle 判斷（`ERROR` 但尚未 `finish()` 不算結束），`UISessionLogHandler` 清理 routing 時不再誤刪另一個「已標記失敗、仍在收尾」的任務；結束後才 `set_error()`（流水線安全網）會更正 `TaskManager` 最近完成清單的結果，並在後台另寫一筆「任務結果更正」（不重複寫「任務結束」）；`TaskSession.task_id` 每次 `start()` 重新產生，識別的是「這一次執行」。
+- **後台記錄依任務送進各自的畫面**：`UISessionLogHandler` 從單一全域 session 改為 `{任務: session}` 路由——同時執行多個任務時，後台記錄不再全部送進最後綁定的那個任務畫面；沒有任務歸屬的記錄仍退回「最近綁定的 session」，已知任務但未登記的記錄不送。預覽 poller（UI 執行緒）轉送掃描內容時明確帶掃描工作的任務識別；`LogView.add(dedupe=…)`／`ctx.add_log(forwarded=…)` 每個呼叫點必須明確表態（AST 契約測試把關）。
+- **同時執行的任務不再互相抵銷去重**：服務入口（`UISessionLogHandler.set_session`）以 `contextvars` 把目前執行緒歸屬到任務，追蹤器只讓「同一任務或歸屬未知」的後台記錄抵銷畫面訊息；新增 `tests/test_log_pair_contract.py`，用 AST 掃描「同一個 except 區塊同時有後台記錄與會被鏡像的畫面訊息」，兩邊文字不同就讓測試失敗。執行緒池與背景執行緒也帶著任務歸屬：`ContextThreadPoolExecutor` 取代 12 個檔案內的 `ThreadPoolExecutor`、核心流程自己開的 Thread 用 `run_in_context`、直接消費 generator 的 UI 工作執行緒（提取／預覽／打包／QC）以 `in_new_task` 取得自己的任務歸屬；`LogView.add` 預設視為 UI 自己的事件（無條件寫後台），只有轉送核心流程內容的呼叫點才去重。契約測試禁止日後直接使用 `ThreadPoolExecutor`。
+- **任務結束只記錄一次**：`TaskSession.finish()` 冪等——流水線步驟自己 finish 之後，安全網再呼叫（含 `set_error()`）不會重複寫後台「任務結束」或重複通知觀察者；`start()` 會重新啟用。
+- **日誌詳細度**：在 `except` 區塊內記 ERROR 會自動附上 traceback；翻譯頁、合併、流水線的失敗訊息補上例外類型、輸入／輸出路徑與「完整堆疊已寫入後台 log」；任務開始訊息列出輸入、輸出與步驟設定（翻譯、合併、QC、打包）；圖示索引、MD 統計、快取歷史、版本對照檔等原本靜默略過的錯誤改為留下警告。；全專案例外處理經 AST 掃描逐項檢視（547 個 `except`），補上例外類型（`{e}`→`{e!r}`）、堆疊與是哪個檔案／JAR；`show_snack` 的後台等級依顏色對應（紅=錯誤、金=警告）；服務載入失敗、既有輸出無法讀取而改寫、批次翻譯例外等原本只在畫面或完全無紀錄的情況都會寫入後台
 - 設定存檔的訂閱者通知一律在寫入鎖釋放後執行，並統一所有 app 層寫入的鎖（避免巢狀寫入死鎖與並行寫出壞檔）。
 - AppShell 的 UI 更新改為排程回 Flet event loop 並節流；新增 `AppShell.dispose()` 與 `page.on_close` teardown。
 - 合併頁單欄位寫入改走 ConfigStore（只改被修改的欄位，也會通知外殼）。
 
 ### Bug Fixes
+- **兩個合併同時使用同一個輸出資料夾時，取消一個會刪掉另一個的成果**：新增輸出資料夾的獨占租約（`app/services_impl/pipelines/output_lease.py`，資料夾與 ZIP 服務共用；路徑正規化、包含關係也算衝突），第二個任務明確失敗而不是共用；清理完才釋放租約。
+- **ZIP／資料夾合併的第一輪掃描（包裝前綴）沒有取消檢查點**：兩輪都有檢查點，並重用同一份檔名清單（不再重複呼叫 `namelist()`）；`FolderReader.iter_all()` 在單一資料夾內也每 256 個檔案檢查一次。
+- **`TaskSession.start()` 沒清上一次執行的摘要**：重用 session 時，下一次很早取消的執行會在「任務結束」log 與 snapshot 帶著上一次的摘要。
+- **任務開始前寫入的訊息掛在舊的 `task_id`**：`add_start_log()` 在 `start()` 前鏡像到後台，`start()` 又換新識別，同一次執行被拆成兩個 task；改為 `start()` 後用新識別鏡像一次。
+- **單步 Pipeline 合併取消後新建輸出沒被刪**：對話框與 `PipelineActions.merge` 先建立了輸出資料夾，服務看到「原本就存在」所以不清理；改為對話框只驗證路徑（`check_output_dir`）、輸出資料夾由服務建立。
+- **資料夾合併的初始掃描無法取消**：`FolderReader.list_all()` 要整個 `os.walk` 跑完才回傳；新增 `iter_all()`，每進入一個資料夾檢查一次取消。
+- **Web 的「儲存檔案」對話框仍會拋例外**：Flet Web 的 `save_file` 沒有 `src_bytes` 時拋 `ValueError`（不是 `FletUnsupportedPlatformException`），`SafeFilePicker.save_file` 改為進入 Flet 之前先判斷 Web。
+- **`SyncTextField` 與呼叫端自己的 `on_change`／`on_blur` 串起來**：先把 Web 事件的新值寫回控制項，再呼叫呼叫端的 handler（保留 async 與零參數寫法）；原本呼叫端有自己的 handler 時不會同步，handler 讀到的 `e.control.value` 仍是舊值（一鍵流程的輸出 ZIP、閾值等欄位）。
+- **工作執行緒邊界的錯誤堆疊重新歸屬到自己的任務**（語系合併頁、翻譯頁）：服務結束時已清掉任務歸屬，邊界 `log_error` 會退回「最近綁定的 session」而送進別的任務畫面。新增 `session_task_scope()`。
+- 合併頁開始訊息與背景工作共用同一份 ZIP 清單（手動輸入 ZIP 時不再顯示「0 個 ZIP」）；取消後清理失敗不再記成「已清理」。
+- 語系合併頁新增「取消」按鈕、可手動輸入 ZIP 完整路徑（Web 無法使用原生選擇器）；合併服務的取消檢查點同時認 session 取消旗標與流水線的 `cancel_scope`，合併頁的背景執行緒註冊 `cancel_scope`，核心合併的檢查點才能在單一 update 內生效；正常取消不再讓背景執行緒噴出 traceback。
+- Web 欄位同步診斷：單行欄位失焦時記一行 `[欄位同步] blur`（控制項值與事件資料），機器翻譯頁按「開始翻譯」時記一行 `[LM翻譯] 開始按鈕`（後端實際收到的輸入／輸出路徑），畫面有值而後端讀到舊值時可直接從 log 判斷原因。
+- 合併頁按下「開始合併」時，後台記錄當下實際收到的欄位值（診斷用），畫面有值而後端是空的時可直接從 log 分辨。
+- **打包時任意殘留的 `*.zip.tmp`／`*.bundle-state.json` 被加入 ZIP**：排除清單原本只認「這次輸出 ZIP」自己的暫存與狀態檔，以前用別的檔名輸出、失敗殘留的暫存檔仍會被打包。現在凡是 `.zip.tmp`、`.bundle-state.json`、`.bundle-state.json.tmp` 結尾的檔案一律不是來源。
+- **語言合併可在單一 update 內取消**（#170）：`lang_merger.py` 在檔名掃描（每 256 筆）、任務提交、完成迴圈加入取消檢查點；取消或關閉 generator 時，佇列中還沒開始的任務直接丟棄，只等正在執行的少數任務，不再把整個佇列跑完才停止。
+- **一鍵流程對話框在 Flet Web 殘留／按鈕無反應**：Flet 0.85+ 改用 `page.show_dialog()` / `page.pop_dialog()` 管理對話框生命週期（沒有這組 API 的頁面仍走 overlay 相容流程），精靈按鈕改用標準 `ft.Button`，避免 Web 的 `TextButton` 事件沒送達。生命週期函式拆到 `pipeline_one_click_lifecycle.py`。
+- **輸出 ZIP 放在來源資料夾內時打包卡住**：預設輸出路徑就在來源資料夾內，失敗留下的暫存 ZIP（`.zip.tmp`）、輸出 ZIP 與狀態檔會被當成來源掃描，甚至把自己再壓一次。現在打包自己的產物（ZIP、暫存、狀態檔）一律排除在指紋與壓縮之外，也讓「來源未變動就沿用」在預設路徑下能成立。
+- **Flet Web 手動輸入的路徑沒同步到後端**：新增 `SyncTextField`（`app/ui/sync_text_field.py`），單行欄位預設掛空的 `on_change`，讓輸入值即時回到 `.value`（一鍵流程曾收到 `input=[], output=[]`、打包對話框的輸出 ZIP 欄位仍用預設路徑）。`app/` 內全部 `ft.TextField` 改用它（含各流程對話框），並由 AST 契約測試強制。
+- **Flet Web 不支援資料夾選擇器**：新增 `SafeFilePicker`（`app/ui/safe_file_picker.py`），`get_directory_path`／`pick_files`／`save_file` 在不支援的平台改為顯示提示並視為取消，不再拋出未捕捉的 `FletUnsupportedPlatformException`；欄位保持可手動輸入（Web 模式輸入的是執行程式那台電腦的路徑）。
+- **輸出資料夾不必事先存在**：一鍵製作、提取、合併的輸出目錄改為自動建立（路徑是檔案或無法建立時才提示）。
+- **一鍵製作輸入驗證失敗時對話框遮罩殘留**：關閉對話框時，移除 overlay 後再推一次更新，避免緊接著的 SnackBar 被殘留遮罩蓋住（Windows 煙霧測試發現）。
+- **資料夾合併遇到不存在的輸入資料夾不再顯示「翻譯已完成」**：核心改回報 `error=True` 並帶出路徑；服務層記為資料夾失敗（階段 1 失敗、略過階段 2、任務狀態 ERROR）。一鍵流程對提取沒有產生的來源（例如沒有 Patchouli 書籍）以 `skip_missing_input=True` 明確略過，不會整個流程失敗。ZIP 合併同理：缺檔的 ZIP 現在記為該 ZIP 失敗（帶出路徑），其餘 ZIP 照常處理。路徑存在但型別不對（資料夾模式收到檔案／ZIP、ZIP 模式收到資料夾）同樣判為失敗；一鍵流程的 `skip_missing_input` 只略過「路徑不存在」。
 - **語言合併（#109）**：ZIP 累計讀取預算用盡時回報不完整輸出，不再顯示「全部處理完成」。
 - **JAR 提取（#111）**：`scan_jars` 支援明確的 `jar_files`，預掃描清單與實際提取清單一致。
 - 全部 API Key 冷卻時，429 RPM 重試不再改領其他冷卻中的 Key。

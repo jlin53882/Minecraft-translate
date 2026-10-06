@@ -55,6 +55,15 @@ def _get_caller_logger_name() -> str:
     return _THIS_MODULE
 
 
+def _mentions_traceback(msg: Any, args: tuple[Any, ...]) -> bool:
+    """訊息或參數內是否已經含有手動格式化的 traceback 文字。"""
+    if "Traceback (most recent call last)" in str(msg):
+        return True
+    return any(
+        isinstance(a, str) and "Traceback (most recent call last)" in a for a in args
+    )
+
+
 def _log(level: int, msg: str, *args: Any, **kwargs: Any) -> None:
     """
     內部統一入口：
@@ -69,6 +78,17 @@ def _log(level: int, msg: str, *args: Any, **kwargs: Any) -> None:
         # caller -> log_xxx -> _log -> logger.log  => stacklevel=3
         if "stacklevel" not in kwargs:
             kwargs["stacklevel"] = 3
+
+        # 在 except 區塊裡記 ERROR 時自動附上 traceback：只有訊息沒有堆疊的錯誤，
+        # 在 log 檔裡看不出是哪一行出事。呼叫端已自己帶堆疊（exc_info 或訊息內含
+        # Traceback）時不重複附加。
+        if (
+            level >= logging.ERROR
+            and "exc_info" not in kwargs
+            and sys.exc_info()[0] is not None
+            and not _mentions_traceback(msg, args)
+        ):
+            kwargs["exc_info"] = True
 
         logger.log(level, msg, *args, **kwargs)
     except Exception:  # noqa: BLE001, S110 - logging 自身失敗不可再記錄（會遞迴），也不可中斷呼叫端

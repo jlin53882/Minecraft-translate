@@ -34,6 +34,7 @@ from app.shell.topbar import TopBar
 from app.ui import design
 from app.ui.design import C
 from app.ui.keyboard_shortcuts import create_keyboard_handler
+from app.ui.safe_file_picker import SafeFilePicker
 from app.ui.snack import show_snack
 from app.view_registry import (
     DEFAULT_VIEW_KEY,
@@ -132,7 +133,7 @@ class AppShell:
         find_interrupted_tasks: Callable[[], object] | None = None,
     ) -> None:
         self.page = page
-        self.file_picker = file_picker or ft.FilePicker()
+        self.file_picker = file_picker or SafeFilePicker()
         self._key_snapshot = key_snapshot or _default_key_snapshot
         self._config_loader = config_loader or _default_config_loader
         self.tasks = task_manager or TaskManager()

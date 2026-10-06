@@ -199,14 +199,14 @@ class CacheView(
             # 控件尚未添加到 page，略過
             pass
         except Exception as e:  # noqa: BLE001
-            log_error(f"[CacheView] 更新失敗: {e}")
+            log_error(f"[CacheView] 更新失敗: {e!r}")
 
     def _batch_refresh(self):
         """批量刷新所有區域（用於初始載入）"""
         try:
             self.update()
         except Exception as e:  # noqa: BLE001
-            log_error(f"[CacheView] 批量刷新失敗: {e}")
+            log_error(f"[CacheView] 批量刷新失敗: {e!r}")
 
     # =========================================================
     # Lifecycle
@@ -272,7 +272,7 @@ class CacheView(
             # PR5-7: 使用批量刷新優化初始載入
             self._batch_refresh()
         except Exception as ex:  # noqa: BLE001
-            log_error(f"CacheView did_mount failed: {ex}")
+            log_error(f"CacheView did_mount failed: {ex!r}")
             log_error(traceback.format_exc())
             self.overview_status.value = "狀態：初始化失敗"
             self.overview_status.color = C.RED

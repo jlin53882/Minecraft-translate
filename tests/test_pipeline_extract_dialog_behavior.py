@@ -185,6 +185,19 @@ def test_reopen_reads_fresh_config(env):
     assert len(env.page.overlay) == 2
 
 
+def _make_file(path):
+    path.write_text("x")
+    return str(path)
+
+
+def test_missing_output_dir_is_created_instead_of_rejected(env):
+    target = env.out / "new" / "deeper"
+    dialog = env.open(output_path=str(target))
+    _button(dialog, "確定執行").on_click(None)
+    assert target.is_dir()
+    assert not any("輸出目錄" in m for m in env.snacks)
+
+
 # ---------- 驗證訊息 ----------
 
 
@@ -194,7 +207,10 @@ def test_reopen_reads_fresh_config(env):
         (lambda e: {"input_path": ""}, "⚠️ Mod 來源為必填欄位"),
         (lambda e: {"input_path": str(e.mods / "nope")}, "⚠️ Mod 來源資料夾不存在"),
         (lambda e: {"output_path": ""}, "⚠️ 輸出目錄為必填欄位"),
-        (lambda e: {"output_path": str(e.out / "nope")}, "⚠️ 輸出目錄不存在"),
+        (
+            lambda e: {"output_path": _make_file(e.out / "f.txt")},
+            "⚠️ 輸出目錄路徑是檔案，不是資料夾",
+        ),
     ],
 )
 def test_confirm_validation_blocks_run_and_keeps_dialog_open(env, setup, message):

@@ -17,6 +17,7 @@ import flet as ft
 from app.services_impl.pipelines.extract_service import open_output_folder
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog
+from app.ui.sync_text_field import SyncTextField
 from translation_tool.utils.config_manager import load_config
 
 
@@ -106,7 +107,7 @@ def _translate_init_state_and_fields(ctx, input_path, output_path):
         else ""
     )
 
-    ctx.translate_input_field = ft.TextField(
+    ctx.translate_input_field = SyncTextField(
         label="翻譯目標",
         hint_text=f"自動帶入：{ctx.default_input}"
         if ctx.default_input
@@ -115,7 +116,7 @@ def _translate_init_state_and_fields(ctx, input_path, output_path):
         expand=True,
         border_color=C.DIA,
     )
-    ctx.translate_output_field = ft.TextField(
+    ctx.translate_output_field = SyncTextField(
         label="輸出目錄",
         hint_text=f"自動帶入：{ctx.default_output}"
         if ctx.default_output

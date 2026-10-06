@@ -41,6 +41,7 @@ from translation_tool.utils.text_processor import (
     load_replace_rules,
     recursive_translate_dict,
 )
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 from translation_tool.utils.zip_safety import (
     MAX_FILE_BYTES,
     ArchiveBudgetError,
@@ -134,7 +135,7 @@ def load_rules() -> list:
             .get("replace_rules_path", "replace_rules.json")
         )
     except Exception as exc:  # noqa: BLE001 - 規則檔問題不應讓掃描失敗，只是略過替換
-        log_warning(f"載入替換規則失敗，略過替換：{exc}")
+        log_warning(f"載入替換規則失敗，略過替換：{exc!r}")
         return []
 
 
@@ -488,7 +489,7 @@ def scan_folder_generator(
     }
 
     done = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+    with ContextThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futures = {
             pool.submit(scan_jar, j, options, dirs, should_cancel): j for j in jars
         }

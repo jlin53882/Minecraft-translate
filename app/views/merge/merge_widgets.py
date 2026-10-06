@@ -10,6 +10,7 @@ from app.ui import kit
 from app.ui.design import C
 from app.ui.poller import PollerHandle
 from app.ui.status_chip import apply_status_style
+from app.ui.sync_text_field import SyncTextField
 from app.views._log import LogView
 from translation_tool.utils.config_manager import load_config
 
@@ -30,6 +31,7 @@ class MergeWidgetsMixin:
             None  # 2026-08-04: snapshot for _open_output_folder
         )
         self.selected_zips: list[str] = []
+        self.zip_path_field = None
         # 合併統計（用於 DONE 時顯示摘要）
         # 2026-08-04: 兼容 ZIP + Folder 兩種模式
         self._merge_stats: dict[str, Any] = {}
@@ -67,7 +69,7 @@ class MergeWidgetsMixin:
         # patchouli_effective_translation_threshold: 有效翻譯比例閾值（0.0~1.0）
         # 用於判斷 Patchouli Book 的 zh 語言資料夾是否有「有效翻譯」
         # 當 zh_tw 或 zh_cn 的有效翻譯比例 >= 此閾值時，會觸發跳過 en_us（如果 patchouli_skip_zh_cn_switch=True）
-        self.patchouli_threshold_field = ft.TextField(
+        self.patchouli_threshold_field = SyncTextField(
             value="0.5",
             width=96,
             hint_text="空白用預設值",
@@ -86,7 +88,7 @@ class MergeWidgetsMixin:
         """輸出資料夾、清單、狀態、日誌與按鈕控制項。"""
         # zh_en_letter_threshold: zh_tw 英文含量的閾值
         # 用於 is_already_zh() 判斷：超過此數值的英文字母視為英文內容
-        self.zh_en_letter_threshold_field = ft.TextField(
+        self.zh_en_letter_threshold_field = SyncTextField(
             value="2",
             width=64,
             hint_text="空白用預設值",
@@ -142,6 +144,14 @@ class MergeWidgetsMixin:
             tooltip="開始執行合併流程",
             on_click=self.start_merge,
         )
+        self.cancel_button = kit.button(
+            "取消",
+            "danger",
+            icon=ft.Icons.STOP_CIRCLE_OUTLINED,
+            tooltip="在目前檢查點停止合併",
+            on_click=self.cancel_merge,
+        )
+        self.cancel_button.visible = False
 
         self.input_mode_group = ft.RadioGroup(
             content=ft.Row(
@@ -162,12 +172,20 @@ class MergeWidgetsMixin:
             mono=True,
             expand=True,
         )
+        # Web 模式無法使用原生檔案選擇器，保留可用真實鍵盤輸入的 ZIP 路徑欄位。
+        self.zip_path_field = kit.text_field(
+            hint="Web 可直接輸入 ZIP 完整路徑",
+            icon=ft.Icons.ARCHIVE_OUTLINED,
+            mono=True,
+            expand=True,
+        )
         self.zip_panel = ft.Container(
             visible=False,
             content=ft.Column(
                 [
                     ft.Row(
                         [
+                            self.zip_path_field,
                             self.pick_zip_button,
                             ft.Text(
                                 "可加入多個 ZIP，會依序合併。",
@@ -488,6 +506,7 @@ class MergeWidgetsMixin:
                         spacing=8,
                     ),
                     self.start_button,
+                    self.cancel_button,
                     ft.Row([self.status_chip], wrap=True),
                     self.progress_bar,
                 ],

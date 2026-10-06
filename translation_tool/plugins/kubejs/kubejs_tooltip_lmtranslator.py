@@ -20,7 +20,7 @@ Rich Text Shield：shield_text() / unshield_text() 保護 KubeJS 格式（彩色
 from __future__ import annotations
 
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -56,6 +56,7 @@ from translation_tool.plugins.shared.rich_text_shield import (
 )
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning, progress
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
 
 # -------------------------
@@ -249,7 +250,7 @@ def translate_kubejs_pending_to_zh_tw(
             mapping = read_json_dict(src)
             return src, int(count_translatable_keys(mapping))
         except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-            log_warning(f"[KubeJS-LM] 讀取 JSON 失敗 {src}: {e}")
+            log_warning(f"[KubeJS-LM] 讀取 JSON 失敗 {src}: {e!r}")
             return src, 0
 
     max_workers = int(
@@ -257,7 +258,7 @@ def translate_kubejs_pending_to_zh_tw(
     )
     max_workers = max(1, max_workers)
 
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+    with ContextThreadPoolExecutor(max_workers=max_workers) as ex:
         futs = [ex.submit(_count_one, p) for p in json_files]
         for fu in as_completed(futs):
             src, c = fu.result()
@@ -306,7 +307,7 @@ def translate_kubejs_pending_to_zh_tw(
             global_total_hit += len(cached_items)
             global_total_to_translate += len(items_to_translate)
         except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-            log_warning(f"[KubeJS-LM] 預掃描失敗 {src}: {e}")
+            log_warning(f"[KubeJS-LM] 預掃描失敗 {src}: {e!r}")
 
     log_info(
         f"🔎 [KubeJS-LM] 待翻譯檔案數：{len(json_files)}；總 keys：{global_total_keys}\n"
@@ -415,7 +416,7 @@ def translate_kubejs_pending_to_zh_tw(
                         extra={"dst_file": dst.relative_to(out_dir).as_posix()},
                     )
                 except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-                    log_warning(f"[KubeJS-LM] 記錄快取命中失敗: {e}")
+                    log_warning(f"[KubeJS-LM] 記錄快取命中失敗: {e!r}")
 
         file_id = dst.as_posix()
         _file_write_table[file_id] = (dst, out_map)
@@ -484,7 +485,7 @@ def translate_kubejs_pending_to_zh_tw(
             )
 
         except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-            log_warning(f"⚠️ [KubeJS-LM] DRY-RUN preview 輸出失敗：{e}")
+            log_warning(f"⚠️ [KubeJS-LM] DRY-RUN preview 輸出失敗：{e!r}")
 
         progress(1.0)
         return {
@@ -544,12 +545,12 @@ def translate_kubejs_pending_to_zh_tw(
                     extra={"dst_file": st["dst"].relative_to(out_dir).as_posix()},
                 )
             except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-                log_warning(f"[KubeJS-LM] 記錄翻譯結果失敗: {e}")
+                log_warning(f"[KubeJS-LM] 記錄翻譯結果失敗: {e!r}")
 
             try:
                 touch.touch(st["file_id"])
             except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-                log_warning(f"[KubeJS-LM] touch 失敗: {e}")
+                log_warning(f"[KubeJS-LM] touch 失敗: {e!r}")
 
         def on_batch_flushed() -> None:
             # write touched files each batch
@@ -557,7 +558,7 @@ def translate_kubejs_pending_to_zh_tw(
             try:
                 touch.flush(_writer)
             except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
-                log_warning(f"[KubeJS-LM] 批次刷新失敗，使用 fallback 寫入: {e}")
+                log_warning(f"[KubeJS-LM] 批次刷新失敗，使用 fallback 寫入: {e!r}")
                 for fid, (dstp, data) in _file_write_table.items():
                     write_json_dict(dstp, data)
 

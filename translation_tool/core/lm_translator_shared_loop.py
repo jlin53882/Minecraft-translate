@@ -26,7 +26,7 @@ from translation_tool.utils.cache_manager import (
 )
 from translation_tool.utils.cancellation import TaskCancelled, is_cancelled
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_info
+from translation_tool.utils.log_unit import log_error, log_info
 from translation_tool.utils.redaction import redact_text
 
 
@@ -188,6 +188,8 @@ def translate_items_with_cache_loop(
             return cancelled_result()
         except Exception as e:  # noqa: BLE001
             last_error = redact_text(e)
+            # 堆疊只寫後台（經 RedactingFormatter 遮蔽機密）；畫面顯示一行摘要
+            log_error(f"[SharedLM] 翻譯發生異常: {last_error}", exc_info=True)
             emit_progress(f"❌ [SharedLM] 翻譯發生異常: {last_error}")
             return TranslateLoopResult(
                 status="FAILED",

@@ -241,7 +241,9 @@ def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
         try:
             tmp_path.unlink(missing_ok=True)
         except OSError as cleanup_error:
-            log_warning(f"[MergeExt→Assets] 無法清理暫存檔 {tmp_path}: {cleanup_error}")
+            log_warning(
+                f"[MergeExt→Assets] 無法清理暫存檔 {tmp_path}: {cleanup_error!r}"
+            )
 
 
 def _cleanup_single_mod_extracted(
@@ -296,7 +298,7 @@ def _cleanup_single_mod_extracted(
                     current.rmdir()
                     current = parent
             except OSError as exc:
-                log_warning(f"[MergeExt→Assets] cleanup 失敗 ({modid}): {exc}")
+                log_warning(f"[MergeExt→Assets] cleanup 失敗 ({modid}): {exc!r}")
         return cleaned
 
     # Backward-compatible fallback for callers/tests that only provide modid.
@@ -314,7 +316,7 @@ def _cleanup_single_mod_extracted(
                 return True
             except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                 # 2026-08-04: log warning instead of silent pass
-                log_warning(f"[MergeExt→Assets] cleanup 失敗 ({modid}): {e}")
+                log_warning(f"[MergeExt→Assets] cleanup 失敗 ({modid}): {e!r}")
     return False
 
 
@@ -403,7 +405,7 @@ def normalize_pending_extracted_wrappers(
                     moved += 1
                 except (OSError, TypeError, ValueError) as exc:
                     log_warning(
-                        f"[MergeExt→Assets] pending 合併失敗，保留來源: {source}: {exc}"
+                        f"[MergeExt→Assets] pending 合併失敗，保留來源: {source}: {exc!r}"
                     )
                 continue
             shutil.move(str(source), str(destination))
@@ -612,7 +614,9 @@ def merge_extracted_to_assets(
                             lang_output_dir, modid, scanned_sources
                         )
                     except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
-                        log_warning(f"[MergeExt→Assets] cleanup 失敗 ({modid}): {exc}")
+                        log_warning(
+                            f"[MergeExt→Assets] cleanup 失敗 ({modid}): {exc!r}"
+                        )
                     mod_added_count = len(set(final_tw) - set(existing_tw))
                     if mod_added_count > 0:
                         total_added += mod_added_count
@@ -697,7 +701,7 @@ def merge_extracted_to_assets(
 
     except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
         tb = traceback.format_exc()
-        log_warning(f"[MergeExt→Assets] 錯誤: {exc}\n{tb}")
+        log_warning(f"[MergeExt→Assets] 錯誤: {exc!r}\n{tb}")
         if session is not None:
-            _safe_session_log(session, f"[MergeExt→Assets] 錯誤: {exc}")
+            _safe_session_log(session, f"[MergeExt→Assets] 錯誤: {exc!r}")
         yield {"progress": 1.0, "log": None, "error": True}

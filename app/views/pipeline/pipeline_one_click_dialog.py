@@ -19,8 +19,14 @@ import types
 import flet as ft
 
 from app.ui.design import C
+from app.ui.sync_text_field import SyncTextField
 from app.views.pipeline.pipeline_config import normalize_extract_mode
+from app.views.pipeline.pipeline_one_click_lifecycle import (
+    _one_click_dispose_dialogs,
+    _one_click_present_dialog,
+)
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_warning
 
 
 def _load_version_data():
@@ -34,7 +40,8 @@ def _load_version_data():
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:  # noqa: BLE001 - 讀不到版本資料時使用空設定，UI 仍可開啟
+        except Exception as exc:  # noqa: BLE001 - 讀不到版本資料時使用空設定，UI 仍可開啟
+            log_warning(f"讀取版本資料失敗，使用空設定：{config_path}: {exc!r}")
             return {}
     return {}
 
@@ -92,6 +99,11 @@ def open_one_click_dialog(
         on_execute=on_execute,
         show_snack_bar=show_snack_bar,
     )
+    # Flet 0.85+ 的 Web 對話框必須交給 page.show_dialog / pop_dialog 管理；
+    # 測試用頁面或舊版 Flet 沒有這組 API 時，才退回 overlay 相容流程。
+    ctx.uses_dialog_api = callable(getattr(page, "show_dialog", None)) and callable(
+        getattr(page, "pop_dialog", None)
+    )
     lang_merger_cfg, output_zip_name, translate_output_subfolder = (
         _one_click_init_config_defaults(ctx)
     )
@@ -127,11 +139,7 @@ def open_one_click_dialog(
 
     ctx._do_execute = functools.partial(_one_click__do_execute, ctx)
 
-    d1 = ctx.build_dialog(1)
-    ctx.dialogs.append(d1)
-    ctx.page.overlay.append(d1)
-    d1.open = True
-    ctx.page.update()
+    _one_click_present_dialog(ctx, ctx.build_dialog(1))
 
 
 def _one_click_init_config_defaults(ctx):
@@ -202,21 +210,6 @@ def _one_click_init_state(
     )
 
 
-def _one_click_dispose_dialogs(ctx) -> None:
-    """關閉並移除目前的對話框。
-
-    必須先把 ``open=False`` 送到前端（page.update），再從 overlay 移除；
-    直接移除會讓前端的 dialog route 留在畫面上（殘影＋擋住整個頁面）。
-    """
-    for d in ctx.dialogs:
-        d.open = False
-    ctx.page.update()
-    for d in ctx.dialogs:
-        if d in ctx.page.overlay:
-            ctx.page.overlay.remove(d)
-    ctx.dialogs.clear()
-
-
 def _one_click_rebuild_ui(ctx):
     _one_click_dispose_dialogs(ctx)
 
@@ -225,10 +218,7 @@ def _one_click_rebuild_ui(ctx):
     ctx.step_label.value = f"{step}/4"
 
     dlg = ctx.build_dialog(step)
-    ctx.dialogs.append(dlg)
-    ctx.page.overlay.append(dlg)
-    dlg.open = True
-    ctx.page.update()
+    _one_click_present_dialog(ctx, dlg)
 
 
 def _one_click_close_all(ctx):
@@ -375,7 +365,7 @@ def _one_click_step2_widgets(ctx):
             e.control.value, int, ctx.zh_en_threshold_default
         )
 
-    patchouli_thresh_field = ft.TextField(
+    patchouli_thresh_field = SyncTextField(
         on_change=on_patchouli_threshold,
         value=str(ctx.state["patchouli_threshold"]),
         width=100,
@@ -385,7 +375,7 @@ def _one_click_step2_widgets(ctx):
         hint_text="空白用預設值",
     )
 
-    zh_en_field = ft.TextField(
+    zh_en_field = SyncTextField(
         on_change=on_zh_en_threshold,
         value=str(ctx.state["zh_en_threshold"]),
         width=80,
@@ -418,14 +408,14 @@ def _one_click__build_step3(ctx):
 
     write_cache_sw.on_change = on_write_cache
 
-    _translate_input_field = ft.TextField(
+    _translate_input_field = SyncTextField(
         label="翻譯目標",
         hint_text="自動帶入整理後的待翻譯資料夾",
         value=ctx.state["translate_input"],
         expand=True,
         border_color=C.DIA,
     )
-    _translate_output_field = ft.TextField(
+    _translate_output_field = SyncTextField(
         label="輸出目錄",
         hint_text="自動帶入：{output}/lm_translate/<翻譯輸出子資料夾>",
         value=ctx.state["translate_output"],
@@ -618,7 +608,7 @@ def _one_click_step4_version_widgets(ctx):
     def on_zip_output(e):
         ctx.state["zip_output"] = e.control.value
 
-    bundle_input_field = ft.TextField(
+    bundle_input_field = SyncTextField(
         read_only=True,  # 只顯示：實際打包來源由流程自動決定（見 PipelineConfig.bundle_sources）
         label="輸入來源",
         hint_text="自動帶入翻譯完成後的輸出",
@@ -626,7 +616,7 @@ def _one_click_step4_version_widgets(ctx):
         expand=True,
         border_color=C.ENCH,
     )
-    zip_output_field = ft.TextField(
+    zip_output_field = SyncTextField(
         on_change=on_zip_output,
         label="輸出 ZIP 檔案",
         value=ctx.state["zip_output"],
@@ -634,7 +624,7 @@ def _one_click_step4_version_widgets(ctx):
         border_color=C.ENCH,
     )
 
-    desc_field = ft.TextField(
+    desc_field = SyncTextField(
         on_change=on_description,
         label="檔案敘述",
         hint_text="直接輸入文字，或使用 § 顏色代碼",
@@ -642,7 +632,7 @@ def _one_click_step4_version_widgets(ctx):
         expand=True,
         border_color=C.ENCH,
     )
-    pack_image_field = ft.TextField(
+    pack_image_field = SyncTextField(
         label="封面圖片（可留空）",
         value=ctx.state["pack_image"] or "",
         expand=True,
@@ -719,9 +709,10 @@ def _one_click_build_dialog(ctx, step: int):
 
     actions = []
     if step > 1:
-        actions.append(ft.TextButton("上一個", on_click=lambda e: ctx._go_prev()))
+        # Web 版使用標準 Button，避免 AlertDialog 內的 TextButton 事件未送達。
+        actions.append(ft.Button("上一個", on_click=lambda e: ctx._go_prev()))
     if step < 4:
-        actions.append(ft.TextButton("下一個", on_click=lambda e: ctx._go_next()))
+        actions.append(ft.Button("下一個", on_click=lambda e: ctx._go_next()))
     else:
         actions.append(
             ft.Button(
@@ -732,7 +723,7 @@ def _one_click_build_dialog(ctx, step: int):
                 on_click=lambda e: ctx._do_execute(),
             )
         )
-    actions.append(ft.TextButton("取消", on_click=lambda e: ctx.close_all()))
+    actions.append(ft.Button("取消", on_click=lambda e: ctx.close_all()))
 
     dlg = ft.AlertDialog(
         modal=True,

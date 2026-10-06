@@ -6,6 +6,7 @@ import flet as ft
 
 from app.ui.design import C
 from app.views._log import LogView
+from translation_tool.utils.ui_mirror import mirror_to_backend
 
 
 def _extractor_build_progress_and_stats(ctx) -> None:
@@ -246,7 +247,7 @@ def _extractor_flush_ui(ctx, force: bool = False):
     ctx.batcher.flush(force=force)
 
 
-def _extractor_add_log(ctx, msg: str, level: str = "info"):
+def _extractor_add_log(ctx, msg: str, level: str = "info", *, forwarded: bool = False):
     """PR refactor/unified-log-view: 改用 LogView 統一處理等級顏色。
 
     level: debug/info/warning/error/system，預設 info
@@ -260,6 +261,10 @@ def _extractor_add_log(ctx, msg: str, level: str = "info"):
             level = "error"
         elif msg.startswith("[完成"):
             level = "system"
+    # 批次推畫面的路徑不經過 LogView.add，所以在入口鏡像到後台（已記錄過的內容會去重）
+    # forwarded=True：轉送核心流程 yield 的 log（後台可能已有，去重）；
+    # 預設是對話框自己的事件（開始／取消／完成／錯誤），後台沒有對應記錄，無條件寫入。
+    mirror_to_backend(msg, level, dedupe=forwarded)
     ctx.batcher.add_lines([(f">> {msg}", level)])
     ctx.flush_ui()
 
@@ -335,6 +340,6 @@ def _extractor_ui_start(ctx) -> None:
     按鈕與 modal 切換已在 on_start_click（UI 執行緒）完成，這裡只送 log。
     """
     ctx.update_progress(0, "開始任務...")
-    ctx.add_log(f"[系統] 開始提取 ({ctx.mode})...", level="system")
-    ctx.add_log(f"[系統] 來源：{ctx.mods_dir}", level="system")
-    ctx.add_log(f"[系統] 輸出：{ctx.final_output}", level="system")
+    ctx.add_log(f"[系統] 開始提取 ({ctx.mode})...", level="system", forwarded=False)
+    ctx.add_log(f"[系統] 來源：{ctx.mods_dir}", level="system", forwarded=False)
+    ctx.add_log(f"[系統] 輸出：{ctx.final_output}", level="system", forwarded=False)

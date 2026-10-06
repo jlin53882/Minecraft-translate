@@ -36,13 +36,14 @@ def _parse_index(fp: Path) -> dict[str, list[dict]]:
         lines = fp.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError):  # 讀不到的檔案視為沒有紀錄（與原行為一致）
         return by_key
-    for ln in lines:
+    for lineno, ln in enumerate(lines, start=1):
         ln = ln.strip()
         if not ln:
             continue
         try:
             ev = json.loads(ln)
-        except ValueError:  # 損毀的歷史行略過，其餘行照常讀取（與原行為一致）
+        except ValueError as exc:  # 損毀的歷史行略過，其餘行照常讀取（與原行為一致）
+            log_warning(f"略過損毀的快取歷史記錄（第 {lineno} 行）：{exc!r}")
             continue
         by_key.setdefault(str(ev.get("key", "")), []).append(ev)
     return by_key
@@ -144,7 +145,7 @@ def history_load_active(cache_root: str, cache_type: str):
         if not isinstance(active, dict):
             raise ValueError("active format error")  # noqa: TRY004
     except Exception as e:  # noqa: BLE001
-        log_warning(f"載入 active 失敗，使用預設值: {e}")
+        log_warning(f"載入 active 失敗，使用預設值: {e!r}")
         active = history_active_default(cache_type)
         active_path.write_text(
             json.dumps(active, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -214,7 +215,7 @@ def _append_mirror(json_path: Path, event: dict, max_per_file: int) -> None:
                 if isinstance(raw, list):
                     arr = raw
             except Exception as e:  # noqa: BLE001
-                log_warning(f"載入歷史記錄失敗，使用空陣列: {e}")
+                log_warning(f"載入歷史記錄失敗，使用空陣列: {e!r}")
                 arr = []
         arr.append(event)
         if len(arr) > max_per_file:
@@ -223,7 +224,7 @@ def _append_mirror(json_path: Path, event: dict, max_per_file: int) -> None:
             json.dumps(arr, ensure_ascii=False, indent=2), encoding="utf-8"
         )
     except Exception as e:  # noqa: BLE001 - 鏡像是衍生資料，失敗只記錄
-        log_warning(f"寫入歷史 json 鏡像失敗: {e}")
+        log_warning(f"寫入歷史 json 鏡像失敗: {e!r}")
 
 
 def history_load_recent(

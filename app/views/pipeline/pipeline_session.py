@@ -24,7 +24,7 @@ import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from app.tasks.task_session import TaskSession, tag_session
+from app.tasks.task_session import TaskSession, add_log_unmirrored, tag_session
 from app.ui.poller import PollerHandle
 from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
 from translation_tool.utils.log_unit import log_error, log_warning
@@ -153,7 +153,8 @@ class PipelineRunner:
                         return
                 success = True
             except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，確保按鈕會恢復
-                log_error(f"[Pipeline] 一鍵製作失敗：{ex}\n{traceback.format_exc()}")
+                # UI 只顯示一行摘要；完整堆疊只寫後台，排查時才有根因
+                log_error(f"[Pipeline] 一鍵製作失敗：{ex!r}\n{traceback.format_exc()}")
                 self.ui_view(self._panel.add_log, f"❌ 流程失敗：{ex}", "error")
             finally:
                 self.ui_view(self._finish_sequence, success, on_end)
@@ -200,8 +201,13 @@ class PipelineRunner:
         except TaskCancelled:
             session.finish()  # 取消也要 terminal（TaskManager 不可殘留 active；重複 finish 無害）
         except Exception as ex:  # noqa: BLE001 - 背景步驟邊界：任何錯誤都轉成步驟失敗
-            log_error(f"[Pipeline] {name} 失敗：{ex}\n{traceback.format_exc()}")
-            session.add_log(f"❌ 錯誤：{ex}", level="error")
+            log_error(f"[Pipeline] {name} 失敗：{ex!r}\n{traceback.format_exc()}")
+            # 完整堆疊已在上面寫入後台，畫面只顯示例外類型與訊息，不重複鏡像
+            add_log_unmirrored(
+                session,
+                f"❌ 錯誤：{type(ex).__name__}: {ex}（完整堆疊已寫入後台 log）",
+                "error",
+            )
             session.set_error()
             session.finish()  # 安全網：順序 set_error() → finish()
         finally:
@@ -224,7 +230,8 @@ class PipelineRunner:
                 self._panel.add_log(f"⏹ {name} 已取消", "warning")
                 self._update_progress(1.0, "已取消")
                 return
-            self._panel.add_log(f"✅ {name} 完成" if ok else f"❌ {name} 失敗")
+            message = f"✅ {name} 完成" if ok else f"❌ {name} 失敗"
+            self._panel.add_log(message)
             self._update_progress(1.0, "完成" if ok else "失敗")
 
         self.ui_view(_finish)

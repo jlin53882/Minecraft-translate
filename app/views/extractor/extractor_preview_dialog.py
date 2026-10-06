@@ -21,7 +21,8 @@ from app.views._log import LogView
 from app.views.extractor import extractor_dialog as _extractor_dialog
 from app.views.extractor.extractor_dialog_helpers import format_size
 from app.views.extractor.extractor_state import PreviewState
-from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.log_unit import log_error, log_info, log_warning
+from translation_tool.utils.ui_mirror import in_new_task, new_task_id
 
 # 背景任務 → UI 的刷新間隔（秒）
 _UI_FLUSH_INTERVAL_SEC = 0.2
@@ -202,7 +203,15 @@ def _preview_build_dialog(ctx, dialog_width) -> None:
     ctx.on_preview_dismiss = functools.partial(_preview_on_preview_dismiss, ctx)
 
 
-def _preview_add_log(ctx, msg, level: str = "info", update: bool = True):
+def _preview_add_log(
+    ctx,
+    msg,
+    level: str = "info",
+    update: bool = True,
+    *,
+    forwarded: bool = False,
+    task: object | None = None,
+):
     """PR refactor/unified-log-view: 改用 LogView.add() 統一處理等級顏色。
 
     level: debug/info/warning/error/system，預設 info
@@ -216,7 +225,14 @@ def _preview_add_log(ctx, msg, level: str = "info", update: bool = True):
             level = "error"
         elif msg.startswith("[完成"):
             level = "system"
-    ctx.log_view.add(f">> {msg}", level=level, update=update)
+    ctx.log_view.add(
+        f">> {msg}",
+        level=level,
+        update=update,
+        mirror_text=msg,
+        dedupe=forwarded,
+        task=task,
+    )
 
 
 def _preview_result_controls(ctx, result: dict) -> list:
@@ -403,6 +419,7 @@ def _preview_do_scan(ctx):
             if "result" in update:
                 ctx.preview_state.result = update["result"]
     except Exception as ex:  # noqa: BLE001 - 錯誤要回報到 UI
+        log_error(f"[提取預覽] 掃描失敗：{ex!r}", exc_info=True)
         ctx.preview_state.error = str(ex)
     finally:
         # 不論成功、失敗或取消都要標記完成，避免 UI poller 永遠等待
@@ -423,7 +440,13 @@ async def _preview_ui_poller(ctx):
         if cur_log:
             ctx.status_text.value = cur_log
             if cur_log != last_log:
-                ctx.add_log(cur_log, update=False)
+                # 掃描流程的 log：poller 跑在 UI 執行緒（沒有任務歸屬），明確帶掃描工作的任務識別
+                ctx.add_log(
+                    cur_log,
+                    update=False,
+                    forwarded=True,
+                    task=getattr(ctx, "scan_task", None),
+                )
                 last_log = cur_log
         if finished:
             break
@@ -439,7 +462,9 @@ async def _preview_ui_poller(ctx):
     ctx.state["running"] = False
 
     if final_error:
-        ctx.add_log(f"[ERROR] {final_error}", level="error", update=False)
+        ctx.add_log(
+            f"[ERROR] {final_error}", level="error", update=False, forwarded=False
+        )
         ctx.status_text.value = f"預覽失敗：{final_error}"
         ctx.progress_bar.value = 0
         ctx.progress_pct.value = "--"
@@ -448,7 +473,12 @@ async def _preview_ui_poller(ctx):
         ctx.page.update()
     elif final_result:
         results = final_result.get("preview_results", [])
-        ctx.add_log(f"[完成] 找到 {len(results)} 個 JAR", level="system", update=False)
+        ctx.add_log(
+            f"[完成] 找到 {len(results)} 個 JAR",
+            level="system",
+            update=False,
+            forwarded=False,
+        )
         ctx.show_result_dialog(final_result)
     else:
         if ctx.state["cancelled"]:
@@ -491,10 +521,18 @@ def _preview_start_scan(ctx):
     ctx.start_button.disabled = True
     ctx.page.update()
 
-    ctx.add_log(f"[系統] 開始預覽 {ctx.mode.upper()} 掃描...", level="system")
+    ctx.add_log(
+        f"[系統] 開始預覽 {ctx.mode.upper()} 掃描...", level="system", forwarded=False
+    )
 
+    ctx.scan_task = new_task_id("extract-preview")
     threading.Thread(
-        target=functools.partial(_preview_do_scan, ctx), daemon=True
+        target=in_new_task(
+            "extract-preview",
+            functools.partial(_preview_do_scan, ctx),
+            task=ctx.scan_task,
+        ),
+        daemon=True,
     ).start()
 
     async def poller():

@@ -9,10 +9,17 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
+import uuid
 from collections import deque
 from collections.abc import Callable
 
 from translation_tool.utils.redaction import redact_secrets
+from translation_tool.utils.ui_mirror import (
+    BACKEND_SOURCES,
+    accepted_params,
+    mirror_to_backend,
+)
 
 from .log_entry import LogEntry
 
@@ -48,6 +55,22 @@ def tag_session(session, name: str, view_key: str | None = None):
     except AttributeError:
         pass
     return session
+
+
+def add_log_unmirrored(session, text: str, level: str = "info") -> None:
+    """寫進任務畫面日誌但不鏡像到後台（呼叫端已把更完整的內容寫進後台時使用）。
+
+    舊版 / 測試替身 session 的 ``add_log`` 可能沒有 ``level`` 或 ``mirror`` 參數，
+    以函式簽章判斷要傳哪些（不靠捕捉 ``TypeError``：那會把 ``add_log`` 內部真正的
+    ``TypeError`` 也當成「不支援」而重複呼叫）。
+    """
+    accepted = accepted_params(session.add_log)
+    kwargs: dict[str, object] = {}
+    if accepted is None or "level" in accepted:
+        kwargs["level"] = level
+    if accepted is None or "mirror" in accepted:
+        kwargs["mirror"] = False
+    session.add_log(text, **kwargs)
 
 
 def _notify(session: TaskSession, event: str) -> None:
@@ -87,6 +110,9 @@ class TaskSession:
         """
         self.name = name
         self.view_key = view_key
+        # 任務識別：UI→後台鏡像去重用，區分同時執行的不同任務
+        # （每次 start() 重新產生：識別的是「這一次執行」而不是 session 物件，見 start）
+        self.task_id = uuid.uuid4().hex[:8]
         self.progress: float = 0.0
         self.status: str = "IDLE"  # IDLE / RUNNING / DONE / ERROR
         self.error: bool = False
@@ -96,6 +122,21 @@ class TaskSession:
         self._start_logs: list[tuple[str, str]] = []
         self._lock = threading.Lock()
         self._cancel_event = threading.Event()
+        self._started_at: float | None = None
+        self._finished = False  # finish() 的終止通知只送一次（見 finish）
+        self._amended = False  # 結束後才 set_error() 的更正紀錄只寫一次（見 set_error）
+        self.summary: dict | None = None  # 這一次執行的摘要；start() 會清掉上一次的
+
+    # ---------- 後台生命週期紀錄 ----------
+
+    def _log_lifecycle(self, text: str, level: str = "info") -> None:
+        """任務開始 / 結束寫進後台 log（不進畫面），讓 log 檔能看出每個任務的邊界、結果與耗時。
+
+        任務名稱與識別由 ``app.log`` 每一行的任務標籤（``[task=名稱/識別]``）標示，不再另加文字前綴。
+        """
+        mirror_to_backend(
+            text, level, dedupe=False, task=self.task_id, task_name=self.name
+        )
 
     # ---------- 狀態寫入（Worker 使用） ----------
 
@@ -110,16 +151,26 @@ class TaskSession:
         text: str,
         level: str = "info",
         source: str = "ui",
+        *,
+        mirror: bool = True,
     ) -> None:
         """
         新增日誌事件。
 
         支援舊 caller（只傳 text）：level/source 皆使用 default。
 
+        UI 與後台同步：寫進畫面的訊息會自動鏡像到後台 log（帶任務名稱前綴），
+        所以呼叫端不必再自己配對 ``log_info``。以下情況不會鏡像：
+
+        - ``source`` 是 ``logger`` / ``backend``：訊息本來就來自後台。
+        - ``mirror=False``：呼叫端已自行寫入後台（例如 ``mirror_session_log``）。
+        - 後台最近已記錄過相同內容（核心流程自己 log 後又 yield 給 UI 的那一份）。
+
         Args:
             text:   日誌文字
             level:  等級（debug/info/warning/error/system）
             source: 來源標記
+            mirror: 是否鏡像到後台 log
         """
         if not text:
             return
@@ -134,12 +185,37 @@ class TaskSession:
             )
             self._next_seq += 1
             self.logs.append(entry)
+        if mirror and source not in BACKEND_SOURCES:
+            mirror_to_backend(text, level, task=self.task_id, task_name=self.name)
+
+    @property
+    def is_finished(self) -> bool:
+        """這一次執行是否已經 ``finish()``（真正的終止狀態；``ERROR`` 但尚未 finish 不算）。
+
+        ``set_error()`` 只是標記失敗，服務通常在 ``finally`` 才呼叫 ``finish()``，
+        所以不能用 ``status in ("DONE", "ERROR")`` 判斷任務是否已結束。
+        """
+        return self._finished
 
     def set_error(self) -> None:
-        """設定錯誤狀態。"""
+        """設定錯誤狀態。
+
+        在 ``finish()`` 之後才呼叫（例如流水線的安全網在步驟自己 finish 之後補標失敗），
+        終止結果是「更正」：``status`` 改為 ERROR、觀察者收到 ``error`` 事件
+        （``TaskManager`` 據此把最近完成清單裡的 DONE 改成 ERROR），後台另寫**一筆**
+        「任務結果更正」紀錄——不重複寫「任務結束」，但三邊（session／TaskManager／後台）一致。
+        """
         with self._lock:
+            was_done = self._finished and not self.error
             self.error = True
             self.status = "ERROR"
+            amend = was_done and not self._amended
+            if amend:
+                self._amended = True
+        if amend:
+            self._log_lifecycle(
+                "任務結果更正：DONE → ERROR（結束後才標記失敗）", "error"
+            )
         _notify(self, "error")
 
     def add_start_log(self, text: str, level: str = "info") -> None:
@@ -151,7 +227,11 @@ class TaskSession:
         """
         with self._lock:
             self._start_logs.append((text, level))
-        self.add_log(text, level)
+            running = self.status == "RUNNING"
+        # 還沒 start()：只寫畫面。``start()`` 會換新的 task_id，現在鏡像到後台會掛在
+        # 「舊的」識別上，同一次執行就被拆成兩個 task；改由 start() 用新識別鏡像一次。
+        # 已經在執行中：這次執行的識別已經確定，直接鏡像。
+        self.add_log(text, level, mirror=running)
 
     def set_summary(self, summary: dict) -> None:
         """設定任務摘要統計（供 DONE 時 UI 取用）。"""
@@ -167,6 +247,26 @@ class TaskSession:
         with self._lock:
             self.progress = 1.0
             self.status = "ERROR" if self.error else "DONE"
+            already_finished = self._finished
+            self._finished = True
+            status = self.status
+            summary = self.summary
+            log_count = len(self.logs)
+            started = self._started_at
+        if already_finished:
+            # 流水線的安全網（例外／取消路徑）會在步驟自己 finish 之後再呼叫一次；
+            # 狀態仍照上面更新（set_error 之後的第二次 finish 要維持 ERROR），
+            # 但後台的「任務結束」紀錄與觀察者通知只送一次。
+            return
+        elapsed = f"，耗時 {time.monotonic() - started:.1f}s" if started else ""
+        summary_text = str(summary) if summary else ""
+        if len(summary_text) > 500:
+            summary_text = summary_text[:500] + "…（已截斷）"
+        extra = f"，摘要：{summary_text}" if summary_text else ""
+        self._log_lifecycle(
+            f"任務結束：{status}{elapsed}，畫面日誌 {log_count} 筆{extra}",
+            "error" if status == "ERROR" else "info",
+        )
         _notify(self, "finish")
 
     def request_cancel(self) -> None:
@@ -187,9 +287,17 @@ class TaskSession:
             self._next_seq = 0
             self.error = False
             self.status = "RUNNING"
+            self._started_at = time.monotonic()
+            self._finished = False
+            self._amended = False
+            self.summary = None  # 重用同一個 session：不能把上一次執行的摘要帶進這一次
+            self.task_id = uuid.uuid4().hex[:8]
             start_logs = list(self._start_logs)
-        for text, level in start_logs:  # 清空日誌後把開頭訊息放回
+        # 清空日誌後把開頭訊息放回；在新的 task_id 下鏡像到後台（add_start_log 在 start 前
+        # 沒有鏡像），這樣開頭訊息與「任務開始」「任務結束」屬於同一個執行識別
+        for text, level in start_logs:
             self.add_log(text, level)
+        self._log_lifecycle("任務開始")
         _notify(self, "start")
 
     # ---------- UI 讀取（UI 使用） ----------
@@ -212,5 +320,5 @@ class TaskSession:
                 "log_texts": [e.text for e in self.logs],
                 "status": self.status,
                 "error": self.error,
-                "summary": getattr(self, "summary", None),
+                "summary": self.summary,
             }

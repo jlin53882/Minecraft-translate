@@ -70,7 +70,7 @@ def walk_snbt_file(path: str) -> Compound | None:
         with open(path, "r", encoding="utf-8") as f:
             return snbt.load(f)
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
-        log_error(f"❌ SNBT 解析失敗: {path} -> {e}")
+        log_error(f"❌ SNBT 解析失敗: {path} -> {e!r}")
         return None
 
 

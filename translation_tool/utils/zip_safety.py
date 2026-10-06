@@ -177,7 +177,9 @@ def read_limited(
 def _is_within(root: str, path: str) -> bool:
     """path 是否位於 root 內（以 commonpath 判斷，不是字串前綴）。"""
     try:
-        return os.path.commonpath([root, path]) == root
+        root_norm = os.path.normcase(os.path.abspath(root))
+        path_norm = os.path.normcase(os.path.abspath(path))
+        return os.path.commonpath([root_norm, path_norm]) == root_norm
     except ValueError:  # 不同磁碟機
         return False
 

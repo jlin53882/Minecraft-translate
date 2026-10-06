@@ -19,6 +19,7 @@ from translation_tool.core.translatable_extractor import (
     find_patchouli_json,
     is_lang_file,
 )
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
 from ..utils.log_unit import log_error, log_info, log_warning
 
@@ -51,7 +52,7 @@ def scan_translatable_files(root: Path) -> tuple[list[Path], list[Path], list[Pa
         files = patchouli_files + lang_files
         return patchouli_files, lang_files, files
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
-        log_warning(f"掃描 {root} 時失敗: {e}")
+        log_warning(f"掃描 {root} 時失敗: {e!r}")
         return [], [], []
 
 
@@ -96,10 +97,10 @@ def extract_items_parallel(
                 "items": extracted_items,
             }
         except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
-            log_error(f"❌ 檔案處理失敗 {f.name}: {e}")
+            log_error(f"❌ 檔案處理失敗 {f.name}: {e!r}")
             return None
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=work_thread) as executor:
+    with ContextThreadPoolExecutor(max_workers=work_thread) as executor:
         future_to_file = {executor.submit(process_file_task, f): f for f in files}
         for future in concurrent.futures.as_completed(future_to_file):
             result = future.result()
