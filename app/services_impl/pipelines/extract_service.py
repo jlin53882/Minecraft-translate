@@ -411,9 +411,9 @@ def run_lang_extraction_service(
         )
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
-        logger.error(f"[致命錯誤] Lang 檔案提取失敗：{e!r}\n{full_traceback}")
+        # 畫面與後台各一份：只經 _session_log 寫入（它同時寫 session 與後台），不要再另外 logger.error
         _session_log(
-            session, f"[致命錯誤] Lang 檔案提取失敗：{e}\n{full_traceback}", "error"
+            session, f"[致命錯誤] Lang 檔案提取失敗：{e!r}\n{full_traceback}", "error"
         )
         _end_failed(session, manage_session)
         GLOBAL_LOG_LIMITER.flush()
@@ -458,9 +458,8 @@ def run_book_extraction_service(
         )
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
-        logger.error(f"[致命錯誤] Book 檔案提取失敗：{e!r}\n{full_traceback}")
         _session_log(
-            session, f"[致命錯誤] Book 檔案提取失敗：{e}\n{full_traceback}", "error"
+            session, f"[致命錯誤] Book 檔案提取失敗：{e!r}\n{full_traceback}", "error"
         )
         _end_failed(session, manage_session)
         GLOBAL_LOG_LIMITER.flush()
@@ -493,9 +492,8 @@ def run_dual_extraction_service(
         _run_extraction_with_session(generator, session, "Dual")
     except Exception as e:  # noqa: BLE001
         full_traceback = traceback.format_exc()
-        logger.error(f"[致命錯誤] Dual 提取失敗：{e!r}\n{full_traceback}")
         _session_log(
-            session, f"[致命錯誤] Dual 提取失敗：{e}\n{full_traceback}", "error"
+            session, f"[致命錯誤] Dual 提取失敗：{e!r}\n{full_traceback}", "error"
         )
         _end_failed(session, True)
         GLOBAL_LOG_LIMITER.flush()

@@ -9,6 +9,7 @@ from app.services_impl.config_service import _load_app_config
 from app.services_impl.logging_service import (
     update_logger_config as apply_logger_config,
 )
+from app.tasks.task_session import add_log_unmirrored
 from translation_tool.utils.ui_mirror import mirror_to_backend
 
 
@@ -23,17 +24,7 @@ def mirror_session_log(
     ``ui_mirrored`` 標記讓 ``UISessionLogHandler`` 略過，避免回灌 UI 造成畫面重複。
     ``prefix`` 只加在後台，UI 維持原文。
     """
-    for call in (
-        lambda: session.add_log(text, level=level, mirror=False),
-        # 相容舊版介面（測試替身或舊 session）：沒有 mirror 參數就退回，並由下面自行鏡像
-        lambda: session.add_log(text, level=level),
-        lambda: session.add_log(text),
-    ):
-        try:
-            call()
-            break
-        except TypeError:
-            continue
+    add_log_unmirrored(session, text, level)
     mirror_to_backend(text, level, prefix=prefix, logger=logger)
 
 

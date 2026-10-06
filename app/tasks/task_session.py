@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
 import time
@@ -52,15 +53,36 @@ def tag_session(session, name: str, view_key: str | None = None):
     return session
 
 
+def _accepted_params(func) -> set[str] | None:
+    """函式可接受的關鍵字參數名稱；有 ``**kwargs`` 或無法檢查時回傳 ``None``（視為都接受）。"""
+    try:
+        params = inspect.signature(func).parameters.values()
+    except (TypeError, ValueError):
+        return None
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params):
+        return None
+    return {
+        p.name
+        for p in params
+        if p.kind
+        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
+
+
 def add_log_unmirrored(session, text: str, level: str = "info") -> None:
     """寫進任務畫面日誌但不鏡像到後台（呼叫端已把更完整的內容寫進後台時使用）。
 
-    舊版 / 測試替身 session 沒有 ``mirror`` 參數，退回只傳文字與等級。
+    舊版 / 測試替身 session 的 ``add_log`` 可能沒有 ``level`` 或 ``mirror`` 參數，
+    以函式簽章判斷要傳哪些（不靠捕捉 ``TypeError``：那會把 ``add_log`` 內部真正的
+    ``TypeError`` 也當成「不支援」而重複呼叫）。
     """
-    try:
-        session.add_log(text, level=level, mirror=False)
-    except TypeError:
-        session.add_log(text, level=level)
+    accepted = _accepted_params(session.add_log)
+    kwargs: dict[str, object] = {}
+    if accepted is None or "level" in accepted:
+        kwargs["level"] = level
+    if accepted is None or "mirror" in accepted:
+        kwargs["mirror"] = False
+    session.add_log(text, **kwargs)
 
 
 def _notify(session: TaskSession, event: str) -> None:

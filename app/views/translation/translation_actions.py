@@ -7,7 +7,7 @@ import traceback
 
 import flet as ft  # noqa: F401
 
-from app.tasks.task_session import tag_session
+from app.tasks.task_session import add_log_unmirrored, tag_session
 from app.ui.design import C
 from app.ui.snack import show_snack
 from translation_tool.utils.log_unit import log_error, log_warning
@@ -23,10 +23,12 @@ def _safe_add_log(view, message: str, level: str = "info", *, mirror: bool = Tru
     """
     try:
         if hasattr(view, "session") and view.session is not None:
-            try:
-                view.session.add_log(message, level=level, mirror=mirror)
-            except TypeError:  # 舊版 / 替身 session 沒有 mirror 或 level 參數
+            if not mirror:
+                add_log_unmirrored(view.session, message, level)
+            elif level == "info":
                 view.session.add_log(message)
+            else:
+                view.session.add_log(message, level=level)
     except Exception:  # noqa: BLE001, S110
         pass  # view 已卸載或 session 已 GC，忽略
 

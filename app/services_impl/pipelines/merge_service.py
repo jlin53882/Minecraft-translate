@@ -174,9 +174,8 @@ def _merge_one_zip(
 
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
-        logger.error(f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e!r}\n{tb}")
         _session_log(
-            session, f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e}\n{tb}", "error"
+            session, f"[ZIP {idx + 1}/{total}] 錯誤：{zip_name}\n{e!r}\n{tb}", "error"
         )
         zip_errors.append(str(e))
     return zip_errors
@@ -185,8 +184,7 @@ def _merge_one_zip(
 def _fatal_zip_error(session, stats: dict, output_dir: str, error: Exception) -> dict:
     """ZIP 合併的致命錯誤：記錄並寫入摘要（即使失敗也要回報）；``set_error``／finish 由呼叫端處理。"""
     tb = traceback.format_exc()
-    logger.error(f"[致命錯誤] ZIP 合併失敗：{error}\n{tb}")
-    _session_log(session, f"[致命錯誤] ZIP 合併失敗：{error}\n{tb}", "error")
+    _session_log(session, f"[致命錯誤] ZIP 合併失敗：{error!r}\n{tb}", "error")
     error_summary = _zip_summary(stats, output_dir)
     session.set_summary(error_summary)
     return error_summary
@@ -384,8 +382,7 @@ def _run_extracted_stage2(
         if not folder_errors:
             _session_log(session, "[階段 2/2 完成]")
     except Exception as stage2_err:  # noqa: BLE001
-        logger.warning(f"[階段 2/2 錯誤]: {stage2_err!r}")
-        _session_log(session, f"[階段 2/2 錯誤]: {stage2_err}", "error")
+        _session_log(session, f"[階段 2/2 錯誤]: {stage2_err!r}", "error")
         folder_errors.append(str(stage2_err))
 
 
@@ -403,8 +400,7 @@ def _fatal_folder_error(
 ) -> dict:
     """資料夾合併的致命錯誤：記錄、寫入摘要並 ``set_error()``；回傳摘要（finish 由呼叫端決定）。"""
     tb = traceback.format_exc()
-    logger.error(f"[致命錯誤] 資料夾合併失敗：{error}\n{tb}")
-    _session_log(session, f"[致命錯誤] 資料夾合併失敗：{error}\n{tb}", "error")
+    _session_log(session, f"[致命錯誤] 資料夾合併失敗：{error!r}\n{tb}", "error")
     error_summary = _folder_summary(stats, output_dir)
     session.set_summary(error_summary)
     session.set_error()
@@ -524,8 +520,7 @@ def run_merge_folder_batch_service(
 
         except Exception as e:  # noqa: BLE001
             tb = traceback.format_exc()
-            logger.error(f"[資料夾] 錯誤：{input_dir}\n{e!r}\n{tb}")
-            _session_log(session, f"[資料夾] 錯誤：{input_dir}\n{e}\n{tb}", "error")
+            _session_log(session, f"[資料夾] 錯誤：{input_dir}\n{e!r}\n{tb}", "error")
             folder_errors.append(str(e))
 
         _record_folder_result(stats, input_dir, folder_errors)

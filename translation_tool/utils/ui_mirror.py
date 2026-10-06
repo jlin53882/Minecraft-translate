@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections import Counter, deque
+import time
+from collections import deque
 from collections.abc import Iterable
 
 from translation_tool.utils.redaction import redact_secrets
@@ -39,15 +40,48 @@ _LEVELS = {
 
 _SEEN_LIMIT = 1000
 
+#: 後台記錄只在這段時間內能抵銷 UI 的同文字訊息。核心流程是「先 log、緊接著 yield 給 UI」，
+#: 兩者相隔毫秒；設定時間窗是避免上一個任務留下的同文字後台記錄，誤抵銷這個任務
+#: 真正只有 UI 的訊息。
+_SEEN_WINDOW_SEC = 5.0
+
+
+class _Seen:
+    """一筆後台訊息行（occurrence 層級）；被抵銷或過期後標記，之後淘汰時不會再被誤算。"""
+
+    __slots__ = ("consumed", "text", "ts")
+
+    def __init__(self, text: str, ts: float) -> None:
+        self.text = text
+        self.ts = ts
+        self.consumed = False
+
 
 class _BackendSeenTracker(logging.Handler):
-    """記住最近寫進後台的訊息行，讓鏡像時可略過「後台早就有」的那一份。"""
+    """記住最近寫進後台的訊息行，讓鏡像時可略過「後台早就有」的那一份。
 
-    def __init__(self, limit: int = _SEEN_LIMIT) -> None:
+    資料結構以「每一筆 occurrence」為單位：
+
+    - ``_entries``：依寫入順序的全部記錄，超過 ``limit`` 從最舊的淘汰。
+    - ``_pending``：每個文字尚未被抵銷的記錄（FIFO）。抵銷時取該文字最舊的一筆。
+
+    淘汰時直接丟掉那一筆具體的記錄；已抵銷／過期的記錄早已不在 ``_pending``，
+    所以淘汰舊的已抵銷記錄不會影響之後新寫入的同文字記錄（過去用計數器猜
+    occurrence 歸屬，超過 limit 後會把新的有效記錄一起忘掉）。
+    """
+
+    def __init__(
+        self,
+        limit: int = _SEEN_LIMIT,
+        window_sec: float = _SEEN_WINDOW_SEC,
+        clock=time.monotonic,
+    ) -> None:
         super().__init__(level=logging.NOTSET)
         self._limit = limit
-        self._order: deque[str] = deque()
-        self._counts: Counter[str] = Counter()
+        self._window = window_sec
+        self._clock = clock
+        self._entries: deque[_Seen] = deque()
+        self._pending: dict[str, deque[_Seen]] = {}
         self._guard = threading.Lock()
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -63,34 +97,51 @@ class _BackendSeenTracker(logging.Handler):
         lines = [ln.strip() for ln in message.splitlines() if ln.strip()]
         if not lines:
             return
+        now = self._clock()
         with self._guard:
             for line in lines:
-                self._order.append(line)
-                self._counts[line] += 1
-            while len(self._order) > self._limit:
-                oldest = self._order.popleft()
-                if self._counts.get(oldest, 0) > 0:
-                    self._counts[oldest] -= 1
-                    if self._counts[oldest] <= 0:
-                        del self._counts[oldest]
+                entry = _Seen(line, now)
+                self._entries.append(entry)
+                self._pending.setdefault(line, deque()).append(entry)
+            while len(self._entries) > self._limit:
+                self._discard(self._entries.popleft())
+
+    def _discard(self, entry: _Seen) -> None:
+        """從待抵銷清單移除一筆（呼叫端須持有鎖）。已抵銷／過期的不在清單內。"""
+        if entry.consumed:
+            return
+        entry.consumed = True
+        queue = self._pending.get(entry.text)
+        if queue:
+            try:
+                queue.remove(entry)
+            except ValueError:
+                pass
+            if not queue:
+                del self._pending[entry.text]
 
     def consume(self, line: str) -> bool:
-        """若後台最近寫過這一行，抵銷一次並回傳 True。"""
+        """若後台最近（時間窗內）寫過這一行，抵銷最舊的一筆並回傳 True。"""
         key = line.strip()
         if not key:
             return True
+        now = self._clock()
         with self._guard:
-            if self._counts.get(key, 0) > 0:
-                self._counts[key] -= 1
-                if self._counts[key] <= 0:
-                    del self._counts[key]
-                return True
-        return False
+            queue = self._pending.get(key)
+            while queue and now - queue[0].ts > self._window:
+                queue.popleft().consumed = True  # 過期：不能再抵銷
+            if not queue:
+                self._pending.pop(key, None)
+                return False
+            queue.popleft().consumed = True
+            if not queue:
+                del self._pending[key]
+            return True
 
     def clear(self) -> None:
         with self._guard:
-            self._order.clear()
-            self._counts.clear()
+            self._entries.clear()
+            self._pending.clear()
 
 
 BACKEND_SEEN_TRACKER = _BackendSeenTracker()
