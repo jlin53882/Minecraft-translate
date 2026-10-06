@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import flet as ft
 
-from app.services_impl.moddb_service import TranslationDB, open_database
+from app.services_impl.moddb_service import (
+    TranslationDB,
+    current_settings,
+    open_database,
+    warm_stats_quietly,
+)
 from app.ui import kit
 from app.views.moddb.entries_panel import EntriesPanel
 from app.views.moddb.overview_panel import OverviewPanel
@@ -33,6 +38,7 @@ class ModDbView(ft.Column):
         self.file_picker = file_picker
         self._db: TranslationDB | None = None
         self._db_loaded = False
+        self._db_sig: tuple | None = None
         self.tab = "overview"
 
         self.overview = OverviewPanel(
@@ -72,9 +78,16 @@ class ModDbView(ft.Column):
     def get_db(self) -> TranslationDB | None:
         """目前的資料庫（沒有檔案時回傳 None，掃描完成後會重新開啟）。"""
         if not self._db_loaded:
+            self._db_sig = self._settings_signature()
             self._db = open_database(create=False)
             self._db_loaded = True
         return self._db
+
+    @staticmethod
+    def _settings_signature() -> tuple:
+        """資料庫路徑與來源優先序；兩者變了才需要重新開啟連線。"""
+        settings = current_settings()
+        return (str(settings.resolved_path()), settings.priority)
 
     def reload_db(self) -> None:
         """關閉並重新開啟（資料庫路徑或優先序設定變更、掃描建立新檔後）。"""
@@ -110,11 +123,20 @@ class ModDbView(ft.Column):
         self.show_tab("entries")
 
     def _on_scan_finished(self) -> None:
-        self.reload_db()
+        # 連線看得到其他連線已提交的資料；只有「原本沒有資料庫檔案」才需要重新開啟
+        if self._db is None:
+            self.reload_db()
         self.overview.refresh()
 
     def _on_data_changed(self) -> None:
-        self.overview.refresh()
+        """手動儲存後：總覽的統計等切到總覽頁時才更新（它要重算數十萬筆，不能卡在每次儲存）。
+
+        統計快取已因寫入失效，這裡在背景先算好，之後切到總覽頁就是即時的。
+        """
+        db = self._db
+        run_thread = getattr(self._page, "run_thread", None)
+        if db is not None and callable(run_thread):
+            run_thread(warm_stats_quietly, db)
 
     # ------------------------------------------------------------------ 生命週期
     def will_unmount(self) -> None:
@@ -122,8 +144,11 @@ class ModDbView(ft.Column):
         self.translate.will_unmount()
 
     def did_mount(self) -> None:
-        # 從別的頁（例如機器翻譯寫回新資料）切回來時，重新載入
-        self.reload_db()
+        # 從別的頁（例如機器翻譯寫回新資料）切回來時：連線本來就看得到新資料，
+        # 不必重開（重開會丟掉 SQLite 的頁面快取，數十萬筆時每次都是冷啟動）；
+        # 只有資料庫路徑／優先序設定變了、或原本沒有資料庫檔案才重新開啟
+        if self._db is None or self._db_sig != self._settings_signature():
+            self.reload_db()
         self.show_tab(self.tab)
 
     def _safe_update(self) -> None:

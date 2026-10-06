@@ -21,6 +21,7 @@ from translation_tool.translation_db import (
     ScanItem,
     TranslationDB,
 )
+from translation_tool.translation_db.models import WriteBackItem
 from translation_tool.translation_db.schema import SRC_AI, SRC_JAR_TW
 
 
@@ -648,3 +649,67 @@ def test_translate_panel_cache_switch_defaults_on(db_path):
     panel.cache_row.value = False
     assert panel.build_options().write_cache is False
     db.close()
+
+
+def test_stat_cache_is_reused_until_data_changes_and_survives_reopen(db_path):
+    """總覽統計有快取：資料沒變不重算（含重開連線）；寫入後世代遞增、快取失效。"""
+    seed(db_path)
+    db = TranslationDB(db_path)
+    calls = []
+    real = db._overview_uncached
+    db._overview_uncached = lambda: calls.append(1) or real()
+    first = db.overview()
+    assert db.overview() == first and len(calls) == 1  # 第二次讀快取
+
+    db2 = TranslationDB(db_path)  # 重開連線（等同重開程式）
+    calls2 = []
+    real2 = db2._overview_uncached
+    db2._overview_uncached = lambda: calls2.append(1) or real2()
+    assert db2.overview() == first and calls2 == []
+
+    db2.ingest("1.21.1", [ScanItem(KIND_LANG, "zed", "item.zed.a", "Zed Block")])
+    after = db.overview()  # db 這條連線也會發現資料世代變了
+    assert len(calls) == 2 and after["mods"] == first["mods"] + 1
+    db.close()
+    db2.close()
+
+
+def test_list_counts_are_cached_per_filter_and_invalidated_by_writes(db_path):
+    seed(db_path)
+    db = TranslationDB(db_path)
+    counted = []
+    real_one = db._one
+
+    def spy(sql, params=()):
+        if sql.startswith("SELECT COUNT(*) FROM entry e"):
+            counted.append(sql)
+        return real_one(sql, params)
+
+    db._one = spy
+    assert db.list_entries("1.21.1", state="none")[1] == 3
+    db.list_entries("1.21.1", state="none", offset=1)  # 翻頁不重數
+    assert len(counted) == 1
+    db.list_entries("1.21.1", state="ok")  # 不同條件才重數
+    assert len(counted) == 2
+    db.write_back(
+        "1.21.1", [WriteBackItem(KIND_LANG, "foo", "item.foo.b", "Infused Alloy", "譯")]
+    )
+    assert db.list_entries("1.21.1", state="none")[1] == 2  # 寫入後快取失效、結果正確
+    assert len(counted) == 3
+    assert db.count_untranslated("1.21.1") == 2
+    db.close()
+
+
+def test_moddb_view_keeps_the_connection_when_returning_to_the_page(db_path):
+    """切回頁面不重開連線（重開會丟掉 SQLite 頁面快取）；設定變了才重開。"""
+    from app.views import moddb_view
+
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    first = view.get_db()
+    assert first is not None
+    view.did_mount()
+    assert view.get_db() is first
+    view._db_sig = ("changed", ())
+    view.did_mount()
+    assert view.get_db() is not first

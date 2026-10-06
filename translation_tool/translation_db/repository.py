@@ -14,6 +14,7 @@ Mod 翻譯資料庫的 SQLite 存取層：所有 SQL 都在這裡，上層只接
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
@@ -21,6 +22,7 @@ import uuid
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from translation_tool.translation_db.models import (
     EntryDetail,
@@ -124,7 +126,53 @@ class TranslationDB:
                 self._conn.rollback()
                 raise
             else:
+                # 資料有變動：遞增世代，讓統計快取（stat_cache）失效
+                self._conn.execute(
+                    "INSERT INTO meta (key, value) VALUES ('data_gen', '1') "
+                    "ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1"
+                )
                 self._conn.commit()
+
+    def _data_gen(self) -> str:
+        row = self._one("SELECT value FROM meta WHERE key = 'data_gen'")
+        return row[0] if row else "0"
+
+    def _cached(self, key: str, compute: Callable[[], Any]) -> Any:
+        """昂貴統計的快取：資料世代沒變就直接回傳上次算好的結果（JSON 存在資料庫內）。
+
+        數十萬筆條目的總覽統計要 1 秒以上；資料沒變時（切換頁籤、翻頁、重開程式）
+        直接讀快取。唯讀連線或舊資料庫沒有快取表時，退回每次重算。
+        """
+        try:
+            gen = self._data_gen()
+            row = self._one(
+                "SELECT value FROM stat_cache WHERE key = ? AND gen = ?", (key, gen)
+            )
+            if row is not None:
+                return json.loads(row[0])
+        except sqlite3.Error:
+            return compute()
+        value = compute()
+        if not self.readonly:
+            try:
+                with self._lock:
+                    self._conn.execute("DELETE FROM stat_cache WHERE gen <> ?", (gen,))
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO stat_cache (key, gen, value) "
+                        "VALUES (?,?,?)",
+                        (key, gen, json.dumps(value, ensure_ascii=False)),
+                    )
+                    self._conn.commit()
+            except sqlite3.Error:
+                pass  # 快取寫不進去（被其他連線鎖住等）不影響結果
+        return value
+
+    def warm_stats(self) -> None:
+        """預先算好總覽統計並存入快取（大量寫入後在背景呼叫，之後切到總覽頁就是即時的）。"""
+        stats = self.version_stats()
+        self.overview()
+        if stats:
+            self.missing_by_mod(stats[0].mc_version)
 
     def _q(self, sql: str, params: Iterable = ()) -> list[tuple]:
         with self._lock:
@@ -331,6 +379,10 @@ class TranslationDB:
         ]
 
     def version_stats(self) -> list[VersionStat]:
+        rows = self._cached("version_stats", self._version_stats_rows)
+        return [VersionStat(*r) for r in rows]
+
+    def _version_stats_rows(self) -> list[list]:
         rows = self._q(
             """
             SELECT e.mc_version,
@@ -346,12 +398,15 @@ class TranslationDB:
             (SRC_MANUAL, SRC_JAR_TW, SRC_JAR_CN, SRC_AI),
         )
         return [
-            VersionStat(v, t, m or 0, j or 0, c or 0, a or 0, u or 0)
+            [v, t, m or 0, j or 0, c or 0, a or 0, u or 0]
             for v, t, m, j, c, a, u in rows
         ]
 
     def overview(self) -> dict:
-        """總覽頁的全域數字。"""
+        """總覽頁的全域數字（有快取，見 ``_cached``）。"""
+        return self._cached("overview", self._overview_uncached)
+
+    def _overview_uncached(self) -> dict:
         mods = self._one("SELECT COUNT(DISTINCT mod_id) FROM entry")[0]
         content = self._one(
             "SELECT COUNT(*) FROM (SELECT 1 FROM entry GROUP BY kind, mod_id, key, en_us)"
@@ -378,7 +433,12 @@ class TranslationDB:
         }
 
     def missing_by_mod(self, version: str, limit: int = 10) -> list[dict]:
-        """缺譯最多的模組。"""
+        """缺譯最多的模組（有快取，見 ``_cached``）。"""
+        return self._cached(
+            f"missing:{version}:{limit}", lambda: self._missing_by_mod(version, limit)
+        )
+
+    def _missing_by_mod(self, version: str, limit: int) -> list[dict]:
         rows = self._q(
             """
             SELECT e.mod_id, COUNT(*) AS total, SUM(f.entry_id IS NULL) AS missing
@@ -488,7 +548,7 @@ class TranslationDB:
             )
         cond = " AND ".join(where)
         base = f"FROM entry e LEFT JOIN effective f ON f.entry_id = e.id WHERE {cond}"
-        total = self._one(f"SELECT COUNT(*) {base}", params)[0]
+        total = self._cached_count(f"SELECT COUNT(*) {base}", params)
         rows = self._q(
             f"SELECT {_ENTRY_COLS}, f.zh_tw, f.source, f.checker, "
             f"CASE WHEN f.entry_id IS NULL THEN 0 ELSE {self._DIFF_SQL} END "
@@ -802,11 +862,22 @@ class TranslationDB:
     ) -> int:
         """某版本「有原文、沒有任何譯文」的條目數（可限定模組）。"""
         where, extra = self._untranslated_where(mod_ids)
-        return self._one(
+        sql = (
             "SELECT COUNT(*) FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
-            f"WHERE {where}",
-            [version, *extra],
-        )[0]
+            f"WHERE {where}"
+        )
+        params = [version, *extra]
+        return self._cached_count(sql, params)
+
+    def _cached_count(self, sql: str, params: list) -> int:
+        """筆數查詢的快取（同樣的條件在資料沒變時不重算；翻頁不必每頁重數）。"""
+        key = (
+            "count:"
+            + hashlib.sha1(
+                json.dumps([sql, params], ensure_ascii=False).encode("utf-8")
+            ).hexdigest()
+        )
+        return self._cached(key, lambda: self._one(sql, params)[0])
 
     def untranslated_entries(
         self,

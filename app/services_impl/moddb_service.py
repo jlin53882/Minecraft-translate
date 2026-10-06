@@ -74,6 +74,7 @@ __all__ = [
     "strip_quotes",
     "summarize_database",
     "version_choices",
+    "warm_stats_quietly",
 ]
 
 logger = logging.getLogger(__name__)
@@ -160,6 +161,14 @@ def _log_both(session, text: str, level: str = "info") -> None:
     mirror_session_log(session, logger, text, level, prefix="[Mod 資料庫掃描] ")
 
 
+def warm_stats_quietly(db: TranslationDB) -> None:
+    """寫入後預先算好總覽統計（在背景任務執行緒做，之後切到總覽頁就不必等）。"""
+    try:
+        db.warm_stats()
+    except Exception as exc:  # noqa: BLE001 - 統計預熱失敗不影響任務結果
+        logger.debug("統計預熱略過：%s", exc)
+
+
 def run_moddb_scan_service(
     folder: str,
     options: ScanOptions,
@@ -231,6 +240,8 @@ def run_moddb_scan_service(
         session.set_error()
     finally:
         if db is not None:
+            if not options.dry_run:
+                warm_stats_quietly(db)
             db.close()
         UI_LOG_HANDLER.set_session(None)
         if manage_session:

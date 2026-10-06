@@ -13,7 +13,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.services_impl.logging_service import UI_LOG_HANDLER
-from app.services_impl.moddb_service import database_problem, open_database
+from app.services_impl.moddb_service import (
+    database_problem,
+    open_database,
+    warm_stats_quietly,
+)
 from app.services_impl.pipelines._pipeline_logging import (
     ensure_pipeline_logging,
     mirror_session_log,
@@ -267,6 +271,8 @@ def run_moddb_translate_service(
         session.set_error()
     finally:
         if db is not None:
+            if not options.dry_run:
+                warm_stats_quietly(db)
             db.close()
         UI_LOG_HANDLER.set_session(None)
         if manage_session:
