@@ -348,3 +348,21 @@ def test_resume_interrupted_restores_the_original_database_choice(
         "use_translation_db": expected[0],
         "translation_db_version": expected[1],
     }
+
+
+def test_start_clicked_logs_the_paths_the_backend_received(monkeypatch, caplog):
+    """畫面有值而後端是空的（Web 同步問題）時，後台 log 要能看出來。"""
+    import logging
+
+    monkeypatch.setattr(lm_view, "TaskSession", _Session)
+    view = lm_view.LMView(mock_page(), mock_filepicker())
+    view.input_path.value = ""
+    view.output_path.value = "C:/out"
+
+    with caplog.at_level(logging.INFO):
+        view.start_clicked(None)
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(
+        "[LM翻譯] 開始按鈕" in m and "input=''" in m and "C:/out" in m for m in messages
+    )

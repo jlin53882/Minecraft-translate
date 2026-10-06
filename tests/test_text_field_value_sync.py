@@ -75,3 +75,25 @@ def test_sync_text_field_covers_dialog_style_fields():
     assert SyncTextField(multiline=True).on_change is None
     assert SyncTextField(password=True).on_change is None
     assert SyncTextField(read_only=True).on_change is None
+
+
+def test_blur_handler_logs_what_the_backend_sees(caplog):
+    """失焦時記錄控制項值與事件資料，Web 同步問題可直接從 log 判斷。"""
+    import logging
+    from types import SimpleNamespace
+
+    from app.ui.sync_text_field import _sync_blur
+
+    control = SimpleNamespace(value="舊路徑", label="輸入", hint_text="請選擇")
+    with caplog.at_level(logging.INFO):
+        _sync_blur(SimpleNamespace(control=control, data="新路徑"))
+
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "[欄位同步] blur" in text and "舊路徑" in text and "新路徑" in text
+    assert control.value == "舊路徑"  # 控制項已有值時不被事件資料覆蓋（既有規則不變）
+
+
+def test_single_line_field_blur_uses_the_logging_handler():
+    from app.ui.sync_text_field import SyncTextField, _sync_blur
+
+    assert SyncTextField(label="x").on_blur is _sync_blur

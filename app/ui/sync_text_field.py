@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import flet as ft
 
+from translation_tool.utils.log_unit import log_info
+
 
 def _sync_value(e) -> None:
     """把 Web 事件中的最新值寫回後端控制項。"""
@@ -25,6 +27,26 @@ def _sync_value(e) -> None:
         # 不可再用事件資料覆蓋它。只有控制項仍是空值時才使用非空 fallback。
         if not current and value:
             e.control.value = value
+
+
+def _sync_blur(e) -> None:
+    """失焦：先記錄後端「控制項的值」與「事件帶來的值」（診斷用），再同步。
+
+    畫面有值、後端卻讀到舊值時，這一行能分辨兩種情況：事件根本沒送到 Python
+    （log 完全沒有這行），或事件到了但控制項的值沒更新（兩個值不同）。
+    每次編輯只在失焦時記一行，不會每個按鍵都寫。
+    """
+    control = getattr(e, "control", None)
+    if control is not None:
+        current = getattr(control, "value", None)
+        data = getattr(e, "data", None)
+        log_info(
+            f"[欄位同步] blur：label={getattr(control, 'label', None)!r}, "
+            f"hint={getattr(control, 'hint_text', None)!r}, "
+            f"控制項值={current!r}（{len(current or '')} 字）, "
+            f"事件資料={data!r}（{len(data) if isinstance(data, str) else 'n/a'}）"
+        )
+    _sync_value(e)
 
 
 class SyncTextField(ft.TextField):
@@ -42,7 +64,7 @@ class SyncTextField(ft.TextField):
             if kwargs.get("on_change") is None:
                 kwargs["on_change"] = _sync_value
             if kwargs.get("on_blur") is None:
-                kwargs["on_blur"] = _sync_value
+                kwargs["on_blur"] = _sync_blur
         super().__init__(*args, **kwargs)
         self._ensure_sync_handlers()
 
@@ -53,7 +75,7 @@ class SyncTextField(ft.TextField):
         if self.on_change is None:
             self.on_change = _sync_value
         if self.on_blur is None:
-            self.on_blur = _sync_value
+            self.on_blur = _sync_blur
 
     def init(self):
         super().init()
