@@ -86,3 +86,22 @@ def test_zip_inside_an_extra_folder_is_excluded(tmp_path):
     names = _names(zip_path)
     assert "out.zip" not in names
     assert "f.txt" in names
+
+
+def test_stray_tmp_and_state_files_of_other_zips_are_ignored(tmp_path):
+    """別的輸出檔名留下的 *.zip.tmp／狀態檔（Windows 實測 A5）也不得被打包。"""
+    src = _make_source(tmp_path)
+    (src / "other.zip.tmp").write_bytes(b"leftover")
+    (src / "mod_a" / "old.zip.tmp").write_bytes(b"leftover in subfolder")
+    (src / "other.zip.bundle-state.json").write_text("{}", encoding="utf-8")
+    (src / "other.zip.bundle-state.json.tmp").write_text("{}", encoding="utf-8")
+    zip_path = tmp_path / "out" / "result.zip"
+    zip_path.parent.mkdir()
+
+    _run(src, zip_path)
+
+    names = _names(zip_path)
+    assert not any(
+        n.endswith((".zip.tmp", ".bundle-state.json", ".json.tmp")) for n in names
+    )
+    assert "notes.txt" in names and "mod_a/assets/lang.json" in names

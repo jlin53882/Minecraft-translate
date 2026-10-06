@@ -39,6 +39,7 @@
 - 合併頁單欄位寫入改走 ConfigStore（只改被修改的欄位，也會通知外殼）。
 
 ### Bug Fixes
+- **打包時任意殘留的 `*.zip.tmp`／`*.bundle-state.json` 被加入 ZIP**：排除清單原本只認「這次輸出 ZIP」自己的暫存與狀態檔，以前用別的檔名輸出、失敗殘留的暫存檔仍會被打包。現在凡是 `.zip.tmp`、`.bundle-state.json`、`.bundle-state.json.tmp` 結尾的檔案一律不是來源。
 - **語言合併可在單一 update 內取消**（#170）：`lang_merger.py` 在檔名掃描（每 256 筆）、任務提交、完成迴圈加入取消檢查點；取消或關閉 generator 時，佇列中還沒開始的任務直接丟棄，只等正在執行的少數任務，不再把整個佇列跑完才停止。
 - **一鍵流程對話框在 Flet Web 殘留／按鈕無反應**：Flet 0.85+ 改用 `page.show_dialog()` / `page.pop_dialog()` 管理對話框生命週期（沒有這組 API 的頁面仍走 overlay 相容流程），精靈按鈕改用標準 `ft.Button`，避免 Web 的 `TextButton` 事件沒送達。生命週期函式拆到 `pipeline_one_click_lifecycle.py`。
 - **輸出 ZIP 放在來源資料夾內時打包卡住**：預設輸出路徑就在來源資料夾內，失敗留下的暫存 ZIP（`.zip.tmp`）、輸出 ZIP 與狀態檔會被當成來源掃描，甚至把自己再壓一次。現在打包自己的產物（ZIP、暫存、狀態檔）一律排除在指紋與壓縮之外，也讓「來源未變動就沿用」在預設路徑下能成立。

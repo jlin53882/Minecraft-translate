@@ -57,7 +57,14 @@ def _output_artifacts(output_zip_path: str) -> frozenset[str]:
     )
 
 
+# 打包留下的暫存／狀態檔，不論屬於哪個輸出 ZIP 都不是來源（例如以前用別的檔名輸出、
+# 失敗時殘留的 other.zip.tmp）。
+_STRAY_SUFFIXES = (".zip.tmp", BUNDLE_STATE_SUFFIX, BUNDLE_STATE_SUFFIX + ".tmp")
+
+
 def _is_artifact(path: str, exclude: frozenset[str] | None) -> bool:
+    if os.path.basename(path).lower().endswith(_STRAY_SUFFIXES):
+        return True
     return bool(exclude) and _norm(path) in exclude
 
 
