@@ -29,12 +29,12 @@ from app.shell.palette import (
 from app.shell.resume_prompt import ResumePrompt
 from app.shell.sidebar import SIDEBAR_WIDTH_COMPACT, Sidebar
 from app.shell.statusbar import StatusBar
-from app.ui.safe_file_picker import SafeFilePicker
 from app.shell.task_manager import TaskInfo, TaskManager
 from app.shell.topbar import TopBar
 from app.ui import design
 from app.ui.design import C
 from app.ui.keyboard_shortcuts import create_keyboard_handler
+from app.ui.safe_file_picker import SafeFilePicker
 from app.ui.snack import show_snack
 from app.view_registry import (
     DEFAULT_VIEW_KEY,
