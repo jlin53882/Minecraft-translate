@@ -2,7 +2,7 @@
 
 流程：先沿用其他版本已有的相同譯文（不呼叫 AI）→ 挑出仍未翻譯的條目（可限定模組與筆數）
 → 分批機翻 → 每批檢查特殊字元（換行、`§`、`%s` 等）是否與原文一致 → 一致者以「AI 機翻」
-來源寫回。只填空白、不覆蓋任何既有譯文；來源優先序最低，之後的人工或匯入譯文會自動蓋過。
+來源寫回。只填空白、不覆蓋任何既有譯文；來源優先序最低，之後的人工或匯入譯文會自動蓋過。結果預設也會寫入翻譯快取（可關閉）。
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from translation_tool.core.lm_translator_skeleton import (
 )
 from translation_tool.translation_db.models import WriteBackItem
 from translation_tool.translation_db.schema import KIND_LANG
+from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache
 from translation_tool.utils.cancellation import (
     TaskCancelled,
     cancel_scope,
@@ -49,6 +50,7 @@ class TranslateOptions:
     limit: int = DEFAULT_LIMIT  # 單次最多翻幾筆；0 = 不限
     dry_run: bool = False
     reuse_other_versions: bool = True
+    write_cache: bool = True  # 結果除了寫入資料庫，也寫入翻譯快取（「快取資料」資料夾）
 
 
 @dataclass
@@ -100,7 +102,7 @@ def _log(session, text: str, level: str = "info") -> None:
 
 
 def _noop_cache(*_args, **_kwargs) -> bool:
-    """機翻結果的唯一儲存處是資料庫，不另外寫入翻譯快取。"""
+    """不寫翻譯快取時使用（結果只存進資料庫）。"""
     return True
 
 
@@ -182,10 +184,10 @@ def _translate_rows(
             items,
             total_for_smart=len(items),
             translate_batch_smart=translate_batch,
-            write_new_cache=False,
-            reload_cache=False,
-            cache_add=_noop_cache,
-            cache_save=_noop_cache,
+            write_new_cache=options.write_cache,
+            reload_cache=options.write_cache,
+            cache_add=add_to_cache if options.write_cache else _noop_cache,
+            cache_save=save_translation_cache if options.write_cache else _noop_cache,
             hooks=TranslatorHooks(
                 on_translated_item=on_translated_item,
                 on_batch_flushed=flush,

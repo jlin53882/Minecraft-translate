@@ -70,6 +70,12 @@ class TranslatePanel(ft.Column):
             "其他版本已有「模組、鍵值、原文都相同」的譯文時直接補上，不呼叫 AI、不耗額度",
             True,
         )
+        self.cache_row = kit.SwitchRow(
+            "同時寫入翻譯快取",
+            "結果除了寫進資料庫，也寫入「快取資料」資料夾的翻譯快取，原本的機器翻譯頁也能直接命中。"
+            "（設定裡 enable_cache_saving 關閉時不會寫入）",
+            True,
+        )
         self.scope_card = kit.section_card(
             "1　選擇要機翻的範圍",
             ft.Column(
@@ -81,6 +87,7 @@ class TranslatePanel(ft.Column):
                     ),
                     self.count_text,
                     self.reuse_row,
+                    self.cache_row,
                     kit.hint_text(
                         "只翻譯「沒有任何譯文」的條目，不會動既有的人工、模組自帶或匯入譯文。"
                         "結果標記為「AI 機翻」（優先序最低，之後補上人工或匯入的譯文會自動蓋過）。"
@@ -242,6 +249,7 @@ class TranslatePanel(ft.Column):
             limit=self.limit(),
             dry_run=dry_run,
             reuse_other_versions=bool(self.reuse_row.value),
+            write_cache=bool(self.cache_row.value),
         )
 
     def start_clicked(self, _e=None, *, dry_run: bool = False) -> None:

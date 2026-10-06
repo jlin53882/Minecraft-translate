@@ -35,6 +35,25 @@ def db_path(tmp_path, monkeypatch):
     return path
 
 
+@pytest.fixture(autouse=True)
+def fake_cache(monkeypatch):
+    """不碰真正的翻譯快取：記錄 add_to_cache 被呼叫的內容。"""
+    added: list[tuple] = []
+    monkeypatch.setattr(
+        moddb_translate_service,
+        "add_to_cache",
+        lambda ctype, key, src, dst, **kw: added.append((ctype, key, src, dst)) or True,
+    )
+    monkeypatch.setattr(
+        moddb_translate_service, "save_translation_cache", lambda *a, **k: True
+    )
+    monkeypatch.setattr(
+        "translation_tool.core.lm_translator_shared_loop.reload_translation_cache",
+        lambda *a, **k: None,
+    )
+    return added
+
+
 def seed(path):
     db = TranslationDB(path)
     db.ingest(
@@ -601,3 +620,31 @@ def test_remote_error_detail_shows_server_message_without_secrets():
     detail = _remote_error_detail(err)
     assert "generation_config" in detail and "AIzaSy" not in detail
     assert _remote_error_detail(Exception("x")) == ""
+
+
+def test_service_writes_translation_cache_by_default_and_can_skip(
+    db_path, monkeypatch, fake_cache
+):
+    seed(db_path)
+    fake_engine(monkeypatch, lambda t: "翻:" + t)
+    run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))
+    assert ("lang", "item.foo.b", "Infused Alloy", "翻:Infused Alloy") in fake_cache
+
+    fake_cache.clear()
+    db = TranslationDB(db_path)
+    with db._tx() as conn:  # 讓 foo.b 回到未翻譯，才會再翻一次
+        conn.execute("DELETE FROM translation WHERE source = ?", (SRC_AI,))
+        conn.execute("DELETE FROM effective WHERE source = ?", (SRC_AI,))
+    db.close()
+    run(TranslateOptions(version="1.21.1", mod_ids=("foo",), write_cache=False))
+    assert fake_cache == []
+
+
+def test_translate_panel_cache_switch_defaults_on(db_path):
+    seed(db_path)
+    db = TranslationDB(db_path)
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: db)
+    assert panel.build_options().write_cache is True
+    panel.cache_row.value = False
+    assert panel.build_options().write_cache is False
+    db.close()
