@@ -1,4 +1,4 @@
-"""app/views/moddb_view.py：Mod 資料庫頁（總覽／條目校對／掃描匯入）。
+"""app/views/moddb_view.py：Mod 資料庫頁（總覽／條目校對／掃描匯入／批次機翻）。
 
 資料庫是分版本的翻譯記憶庫：掃描 jar 建立、翻譯結果自動寫回、可在這裡手動校對。
 頁面本身只負責切換頁籤與持有資料庫連線；各頁籤在 ``app/views/moddb/``。
@@ -13,9 +13,15 @@ from app.ui import kit
 from app.views.moddb.entries_panel import EntriesPanel
 from app.views.moddb.overview_panel import OverviewPanel
 from app.views.moddb.scan_panel import ScanPanel
+from app.views.moddb.translate_panel import TranslatePanel
 from translation_tool.utils.log_unit import log_debug
 
-TABS = (("overview", "總覽"), ("entries", "條目校對"), ("scan", "掃描匯入"))
+TABS = (
+    ("overview", "總覽"),
+    ("entries", "條目校對"),
+    ("scan", "掃描匯入"),
+    ("translate", "批次機翻"),
+)
 
 
 class ModDbView(ft.Column):
@@ -39,10 +45,14 @@ class ModDbView(ft.Column):
         self.scan = ScanPanel(
             page, file_picker, self.get_db, on_finished=self._on_scan_finished
         )
+        self.translate = TranslatePanel(
+            page, self.get_db, on_finished=self._on_scan_finished
+        )
         self._panels = {
             "overview": self.overview,
             "entries": self.entries,
             "scan": self.scan,
+            "translate": self.translate,
         }
         self.body = ft.Container(expand=True)
         self.tab_seg = kit.Segmented(list(TABS), "overview", self.show_tab)
@@ -83,6 +93,8 @@ class ModDbView(ft.Column):
             self.entries.refresh()
         elif key == "scan":
             self.scan.refresh_versions()
+        elif key == "translate":
+            self.translate.refresh_scope()
         self.body.content = panel
         if update:
             self._safe_update()
@@ -107,6 +119,7 @@ class ModDbView(ft.Column):
     # ------------------------------------------------------------------ 生命週期
     def will_unmount(self) -> None:
         self.scan.will_unmount()
+        self.translate.will_unmount()
 
     def did_mount(self) -> None:
         # 從別的頁（例如機器翻譯寫回新資料）切回來時，重新載入

@@ -18,7 +18,7 @@ import json
 import sqlite3
 import threading
 import uuid
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -761,6 +761,80 @@ class TranslationDB:
                             touched.append(bid)
             self._refresh(conn, touched)
         return stats
+
+    # --------------------------------------------------------- 批次機翻（資料庫內）
+    def _untranslated_where(self, mod_ids: Sequence[str] | None) -> tuple[str, list]:
+        where = "e.mc_version = ? AND f.entry_id IS NULL AND e.en_us <> ''"
+        params: list = []
+        if mod_ids:
+            where += f" AND e.mod_id IN ({','.join('?' * len(mod_ids))})"
+            params += list(mod_ids)
+        return where, params
+
+    def count_untranslated(
+        self, version: str, mod_ids: Sequence[str] | None = None
+    ) -> int:
+        """某版本「有原文、沒有任何譯文」的條目數（可限定模組）。"""
+        where, extra = self._untranslated_where(mod_ids)
+        return self._one(
+            "SELECT COUNT(*) FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
+            f"WHERE {where}",
+            [version, *extra],
+        )[0]
+
+    def untranslated_entries(
+        self,
+        version: str,
+        mod_ids: Sequence[str] | None = None,
+        limit: int | None = None,
+    ) -> list[tuple[int, str, str, str, str]]:
+        """未翻譯條目 ``(id, 類型, 模組, 鍵值, 原文)``；順序固定，重跑會接續同一批。"""
+        where, extra = self._untranslated_where(mod_ids)
+        sql = (
+            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
+            "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
+            f"WHERE {where} ORDER BY e.mod_id, e.kind, e.key"
+        )
+        params: list = [version, *extra]
+        if limit is not None and limit > 0:
+            sql += " LIMIT ?"
+            params.append(limit)
+        return self._q(sql, params)
+
+    def reuse_from_other_versions(
+        self, version: str, mod_ids: Sequence[str] | None = None
+    ) -> int:
+        """其他版本已有「類型／模組／鍵值／原文都相同」的譯文時直接沿用（不呼叫 AI）。
+
+        只填沒有任何譯文的條目；沿用時保留原本的來源標記。回傳補上的條目數。
+        """
+        where, extra = self._untranslated_where(mod_ids)
+        with self._tx() as conn:
+            rows = conn.execute(
+                "SELECT e.id, f2.source, f2.zh_tw FROM entry e "
+                "LEFT JOIN effective f ON f.entry_id = e.id "
+                "JOIN entry e2 ON e2.kind = e.kind AND e2.mod_id = e.mod_id "
+                "AND e2.key = e.key AND e2.en_us = e.en_us "
+                "AND e2.mc_version <> e.mc_version "
+                "JOIN effective f2 ON f2.entry_id = e2.id "
+                f"WHERE {where} ORDER BY e.id, f2.rowid",
+                [version, *extra],
+            ).fetchall()
+            seen: set[int] = set()
+            touched: list[int] = []
+            for eid, source, zh_tw in rows:
+                if eid in seen:
+                    continue
+                seen.add(eid)
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO translation (entry_id, source, zh_tw) "
+                    "VALUES (?,?,?)",
+                    (eid, source, zh_tw),
+                )
+                if cur.rowcount:
+                    touched.append(eid)
+            self._refresh(conn, touched)
+        return len(touched)
 
     # ------------------------------------------------------- 翻譯流程查詢
     def load_mod(self, mod_id: str) -> list[tuple[str, str, str, str, str, int]]:

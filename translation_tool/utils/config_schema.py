@@ -222,6 +222,15 @@ SETTINGS: tuple[Setting, ...] = (
         default=True,
     ),
     Setting(
+        "translation_db.zip_source",
+        "str",
+        "翻譯 ZIP 匯入的預設來源標記",
+        "general",
+        C_TDB,
+        "Mod 資料庫「掃描匯入 → 翻譯 ZIP」的「譯文來源標記」預設值。可用名稱：自訂補充、町宮字幕組、i18n 轉換、模組自帶繁中、人工；填錯時使用「自訂補充」",
+        default="自訂補充",
+    ),
+    Setting(
         "translation_db.priority",
         "lines",
         "來源優先順序（每行一個，上方優先）",

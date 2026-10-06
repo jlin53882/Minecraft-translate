@@ -23,6 +23,7 @@ from app.ui import design, kit
 from app.ui.design import C
 from app.ui.mc_text import mc_text_spans
 from app.ui.snack import show_snack
+from app.views.moddb.char_inspector import CharInspector, scrolling_list
 from app.views.moddb.formatting import (
     KIND_LABELS,
     STATE_LABELS,
@@ -33,7 +34,6 @@ from app.views.moddb.formatting import (
     source_label,
     source_tone,
     token_issues,
-    visible_segments,
     whitespace_note,
 )
 from translation_tool.utils.log_unit import (
@@ -118,19 +118,7 @@ class EntriesPanel(ft.Column):
             "條目",
             ft.Column(
                 [
-                    ft.Container(
-                        self.list_view,
-                        expand=True,
-                        theme=ft.Theme(
-                            scrollbar_theme=ft.ScrollbarTheme(
-                                thickness=8,
-                                radius=4,
-                                thumb_color=C.LINE2,
-                                main_axis_margin=2,
-                                thumb_visibility=True,
-                            )
-                        ),
-                    ),
+                    scrolling_list(self.list_view),
                     self.pager,
                 ],
                 spacing=0,
@@ -200,31 +188,7 @@ class EntriesPanel(ft.Column):
             size="sm",
             on_click=lambda _e: self._copy_source(),
         )
-        self.show_chars_row = kit.SwitchRow(
-            "顯示特殊字元",
-            "把換行（↵）、行首行尾空白（·）、格式碼與佔位符攤開，原文與譯文對照",
-            False,
-            on_change=lambda _e: self._update_format_hints_and_refresh(),
-            divider=False,
-        )
-        self.src_chars = ft.Text("", size=13, selectable=True, color=C.TEXT)
-        self.tw_chars = ft.Text("", size=13, selectable=True, color=C.TEXT)
-        self.chars_box = ft.Container(
-            ft.Column(
-                [
-                    kit.section_label("原文（特殊字元）"),
-                    self.src_chars,
-                    kit.section_label("譯文（特殊字元）"),
-                    self.tw_chars,
-                ],
-                spacing=6,
-            ),
-            padding=12,
-            bgcolor=C.PANEL2,
-            border_radius=design.RADIUS_CONTROL,
-            border=ft.Border.all(1, C.LINE),
-            visible=False,
-        )
+        self.chars = CharInspector(self._update_format_hints_and_refresh)
         self.confirm_btn = kit.button(
             "審核（確認目前譯文）",
             "gold",
@@ -264,8 +228,8 @@ class EntriesPanel(ft.Column):
                 ft.Row([kit.section_label("譯文 zh_tw"), self.source_chip], spacing=8),
                 self.tw_field,
                 self.token_hint,
-                self.show_chars_row,
-                self.chars_box,
+                self.chars.row,
+                self.chars.box,
                 self.mc_preview,
                 self.meta_col,
                 self.impact_box,
@@ -720,29 +684,7 @@ class EntriesPanel(ft.Column):
         self.mc_preview.visible = has_codes
         self.mc_preview.value = ""
         self.mc_preview.spans = mc_text_spans(text, C.TEXT, 14) if has_codes else []
-        self._render_chars(entry.en_us if entry else "", text)
-
-    @staticmethod
-    def _char_spans(text: str) -> list[ft.TextSpan]:
-        styles = {
-            "newline": ft.TextStyle(color=C.GOLD, weight=ft.FontWeight.BOLD),
-            "space": ft.TextStyle(color=C.RED, weight=ft.FontWeight.BOLD),
-            "token": ft.TextStyle(color=C.DIA, weight=ft.FontWeight.BOLD),
-        }
-        return [
-            ft.TextSpan(seg, styles.get(kind))
-            for seg, kind in visible_segments(text)
-        ]
-
-    def _render_chars(self, source: str, text: str) -> None:
-        on = bool(self.show_chars_row.value)
-        self.chars_box.visible = on
-        if not on:
-            return
-        self.src_chars.value = ""
-        self.src_chars.spans = self._char_spans(source) or [ft.TextSpan("（無）")]
-        self.tw_chars.value = ""
-        self.tw_chars.spans = self._char_spans(text) or [ft.TextSpan("（尚無譯文）")]
+        self.chars.render(entry.en_us if entry else "", text)
 
     def _update_format_hints_and_refresh(self) -> None:
         self._update_format_hints()
