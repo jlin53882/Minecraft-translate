@@ -606,3 +606,39 @@ def test_model_quota_registry_defaults_to_the_next_pacific_midnight():
     reg = ModelQuotaRegistry(lambda: now)
 
     assert reg.mark_exhausted("m1") == _utc(2026, 10, 7, 7, 0)
+
+
+def test_model_quota_snapshot_lists_only_exhausted_models_in_order():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(clock)
+    reg.mark_exhausted("m2", until=clock.t + 600)
+    reg.mark_exhausted("m1", until=clock.t - 1)  # 已到期，不列出
+
+    snap = reg.snapshot(["m1", "m2", "m3"])
+
+    assert [h.model for h in snap] == ["m2"]
+    assert snap[0].seconds_remaining == 600
+    assert snap[0].reset_at == clock.t + 600
+
+
+def test_get_model_quota_snapshot_only_covers_enabled_models():
+    from unittest.mock import patch
+
+    from translation_tool.core import lm_config_rules as rules
+    from translation_tool.core.lm_key_health import get_model_quota_registry
+
+    registry = get_model_quota_registry()
+    registry.mark_exhausted("on", until=registry._clock() + 600)
+    registry.mark_exhausted("off", until=registry._clock() + 600)
+    cfg = {
+        "lm_translator": {
+            "models": {"on": {"enabled": True}, "off": {"enabled": False}}
+        }
+    }
+
+    with patch.object(rules, "load_config", return_value=cfg):
+        snap = rules.get_model_quota_snapshot()
+
+    assert [h.model for h in snap] == ["on"]

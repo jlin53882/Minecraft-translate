@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import threading
 import time
@@ -18,6 +19,7 @@ from app.services_impl.key_health_service import (
     STATUS_COOLING,
     STATUS_PROBING,
     KeyHealth,
+    ModelQuotaHealth,
 )
 from app.shell.task_manager import STATUS_ERROR, TaskManager
 from app.ui import design, kit
@@ -91,6 +93,23 @@ def _default_key_snapshot() -> list[KeyHealth]:
     return get_key_health_snapshot()
 
 
+def _default_model_quota_snapshot() -> list[ModelQuotaHealth]:
+    from app.services_impl.key_health_service import get_model_quota_snapshot
+
+    return get_model_quota_snapshot()
+
+
+def format_quota_reset(model: ModelQuotaHealth) -> str:
+    """「約 X 小時 Y 分鐘後重置（本機時間 HH:MM）」。"""
+    minutes = max(0, int(model.seconds_remaining // 60))
+    hours, minutes = divmod(minutes, 60)
+    remaining = f"{hours} 小時 {minutes} 分鐘" if hours else f"{minutes} 分鐘"
+    reset_at = (
+        dt.datetime.fromtimestamp(model.reset_at, dt.UTC).astimezone().strftime("%H:%M")
+    )
+    return f"約 {remaining}後重置（{reset_at}）"
+
+
 class DashboardView(ft.Column):
     """工作台。``set_shell`` 由外殼在頁面建立後呼叫，提供導覽與任務事件。"""
 
@@ -101,10 +120,12 @@ class DashboardView(ft.Column):
         cache_overview_loader: Callable[[], dict] = _default_cache_overview,
         rules_count_loader: Callable[[], int] = _default_rules_count,
         key_snapshot_loader: Callable[[], list] = _default_key_snapshot,
+        model_quota_loader: Callable[[], list] = _default_model_quota_snapshot,
         moddb_loader: Callable[[], dict | None] = _default_moddb_summary,
     ) -> None:
         super().__init__(expand=True, spacing=18, scroll=ft.ScrollMode.AUTO)
         self._moddb_loader = moddb_loader
+        self._model_quota_loader = model_quota_loader
         self._moddb: dict | None = None
         activity_card, cache_card, flow_card = self._init_dashboard_state_and_cards(
             cache_overview_loader, key_snapshot_loader, page, rules_count_loader
@@ -342,11 +363,17 @@ class DashboardView(ft.Column):
         except Exception:
             logger.debug("工作台讀取 Key 狀態失敗", exc_info=True)
             keys = []
+        try:
+            exhausted_models = self._model_quota_loader()
+        except Exception:
+            logger.debug("工作台讀取模型配額狀態失敗", exc_info=True)
+            exhausted_models = []
         tasks = self._tasks
         return build_dashboard_data(
             cache_overview=self._cache_overview,
             rules_count=self._rules_count,
             key_snapshot=keys,
+            model_quota=exhausted_models,
             active=tasks.active() if tasks else [],
             recent=tasks.recent(20) if tasks else [],
         )
@@ -473,7 +500,10 @@ class DashboardView(ft.Column):
                 icon=ft.Icons.HISTORY,
             )
         ]
-        self.keys_column.controls = [self._key_row(k) for k in data.key_rows] or [
+        self.keys_column.controls = [
+            *(self._key_row(k) for k in data.key_rows),
+            *(self._model_quota_row(m) for m in data.model_rows),
+        ] or [
             kit.empty_state(
                 "尚未設定 API Key",
                 "到設定頁新增 Gemini API Key",
@@ -624,6 +654,35 @@ class DashboardView(ft.Column):
                         expand=True,
                     ),
                     kit.chip(text, tone_name),
+                ],
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+        )
+
+    @staticmethod
+    def _model_quota_row(model: ModelQuotaHealth) -> ft.Control:
+        """今日每日配額（RPD）用盡的模型；同專案的所有 Key 共用這份額度。"""
+        return ft.Container(
+            padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            bgcolor=C.PANEL2,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=design.RADIUS_CONTROL,
+            content=ft.Row(
+                [
+                    ft.Text(
+                        f"模型 {model.model}",
+                        size=13,
+                        weight=ft.FontWeight.W_600,
+                        color=C.TEXT,
+                    ),
+                    ft.Text(
+                        format_quota_reset(model),
+                        size=12,
+                        color=C.MUTED,
+                        expand=True,
+                    ),
+                    kit.chip("今日額度用盡", "red"),
                 ],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,

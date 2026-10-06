@@ -330,6 +330,30 @@ def test_dashboard_shows_loaded_numbers():
     assert len(view.cache_column.controls) == 2
 
 
+def test_dashboard_lists_models_whose_daily_quota_is_exhausted():
+    from app.services_impl.key_health_service import ModelQuotaHealth
+
+    view = _dashboard(
+        model_quota_loader=lambda: [ModelQuotaHealth("gemini-x", 5400.0, 1_000_000.0)]
+    )
+    view.reload(sync=True)
+
+    # key 為空時不再顯示「尚未設定 API Key」，而是顯示耗盡的模型
+    assert len(view.keys_column.controls) == 1
+    row = view.keys_column.controls[0].content.controls
+    assert row[0].value == "模型 gemini-x"
+    assert "1 小時 30 分鐘" in row[1].value
+
+
+def test_dashboard_survives_failing_model_quota_loader():
+    def boom():
+        raise OSError("registry")
+
+    view = _dashboard(model_quota_loader=boom)
+    view.reload(sync=True)
+    assert view.stat_cache.value_text.value == "150"
+
+
 def test_dashboard_survives_failing_loaders():
     def boom():
         raise OSError("disk")

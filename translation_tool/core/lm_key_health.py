@@ -202,6 +202,15 @@ def next_quota_reset(now: float) -> float:
     return midnight.timestamp()
 
 
+@dataclass(frozen=True)
+class ModelQuotaHealth:
+    """單一模型今日配額耗盡的狀態快照（給 UI 顯示）。"""
+
+    model: str
+    seconds_remaining: float
+    reset_at: float  # epoch 秒
+
+
 class ModelQuotaRegistry:
     """已確定每日配額（RPD）用盡的模型（執行緒安全）。"""
 
@@ -232,6 +241,17 @@ class ModelQuotaRegistry:
         if until is None:
             return 0.0
         return max(0.0, until - self._clock())
+
+    def snapshot(self, models: Sequence[str]) -> list[ModelQuotaHealth]:
+        """依傳入順序回傳「目前耗盡中」的模型（沒耗盡的不列出）。"""
+        now = self._clock()
+        with self._lock:
+            until = dict(self._until)
+        return [
+            ModelQuotaHealth(model, until[model] - now, until[model])
+            for model in models
+            if until.get(model, 0.0) > now
+        ]
 
     def soonest_reset_in(self, models: Sequence[str]) -> float | None:
         """指定模型中最早恢復還要幾秒；沒有任何耗盡紀錄時回傳 None。"""

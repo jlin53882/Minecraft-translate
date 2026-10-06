@@ -9,13 +9,15 @@ import threading
 from collections.abc import Collection
 from typing import Any
 
-from ..utils.config_manager import load_config, load_config_shared
+from ..utils.config_manager import get_models_config, load_config, load_config_shared
 from ..utils.log_unit import log_debug, log_error, log_info, log_warning
 from .lm_key_health import (
     DEFAULT_COOLDOWN_SEC,
     RECORDED_REASONS,
     KeyHealth,
+    ModelQuotaHealth,
     get_key_health_registry,
+    get_model_quota_registry,
     mask_key,
 )
 
@@ -128,6 +130,16 @@ def get_key_health_snapshot() -> list[KeyHealth]:
     registry = get_key_health_registry()
     registry.prune(keys)
     return registry.snapshot(keys)
+
+
+def get_model_quota_snapshot() -> list[ModelQuotaHealth]:
+    """今日每日配額（RPD）已用盡的啟用模型（給 UI 顯示）；依設定檔的模型順序。"""
+    models = [
+        name
+        for name, cfg in get_models_config(load_config()).items()
+        if cfg.get("enabled", False)
+    ]
+    return get_model_quota_registry().snapshot(models)
 
 
 def claim_api_key(exclude: Collection[int] = ()) -> tuple[int, str] | None:
