@@ -111,6 +111,7 @@ class TaskSession:
         self.name = name
         self.view_key = view_key
         # 任務識別：UI→後台鏡像去重用，區分同時執行的不同任務
+        # （每次 start() 重新產生：識別的是「這一次執行」而不是 session 物件，見 start）
         self.task_id = uuid.uuid4().hex[:8]
         self.progress: float = 0.0
         self.status: str = "IDLE"  # IDLE / RUNNING / DONE / ERROR
@@ -123,6 +124,7 @@ class TaskSession:
         self._cancel_event = threading.Event()
         self._started_at: float | None = None
         self._finished = False  # finish() 的終止通知只送一次（見 finish）
+        self._amended = False  # 結束後才 set_error() 的更正紀錄只寫一次（見 set_error）
 
     # ---------- 後台生命週期紀錄 ----------
 
@@ -188,11 +190,34 @@ class TaskSession:
                 task=self.task_id,
             )
 
+    @property
+    def is_finished(self) -> bool:
+        """這一次執行是否已經 ``finish()``（真正的終止狀態；``ERROR`` 但尚未 finish 不算）。
+
+        ``set_error()`` 只是標記失敗，服務通常在 ``finally`` 才呼叫 ``finish()``，
+        所以不能用 ``status in ("DONE", "ERROR")`` 判斷任務是否已結束。
+        """
+        return self._finished
+
     def set_error(self) -> None:
-        """設定錯誤狀態。"""
+        """設定錯誤狀態。
+
+        在 ``finish()`` 之後才呼叫（例如流水線的安全網在步驟自己 finish 之後補標失敗），
+        終止結果是「更正」：``status`` 改為 ERROR、觀察者收到 ``error`` 事件
+        （``TaskManager`` 據此把最近完成清單裡的 DONE 改成 ERROR），後台另寫**一筆**
+        「任務結果更正」紀錄——不重複寫「任務結束」，但三邊（session／TaskManager／後台）一致。
+        """
         with self._lock:
+            was_done = self._finished and not self.error
             self.error = True
             self.status = "ERROR"
+            amend = was_done and not self._amended
+            if amend:
+                self._amended = True
+        if amend:
+            self._log_lifecycle(
+                "任務結果更正：DONE → ERROR（結束後才標記失敗）", "error"
+            )
         _notify(self, "error")
 
     def add_start_log(self, text: str, level: str = "info") -> None:
@@ -262,6 +287,8 @@ class TaskSession:
             self.status = "RUNNING"
             self._started_at = time.monotonic()
             self._finished = False
+            self._amended = False
+            self.task_id = uuid.uuid4().hex[:8]
             start_logs = list(self._start_logs)
         for (
             text,

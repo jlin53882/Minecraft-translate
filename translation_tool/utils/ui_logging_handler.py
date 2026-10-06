@@ -17,8 +17,6 @@ from translation_tool.utils.ui_mirror import (
     task_key,
 )
 
-_FINISHED = frozenset({"DONE", "ERROR"})
-
 
 class UISessionLogHandler(logging.Handler):
     """將 Python logging 訊息轉送到 TaskSession（UI）。
@@ -53,7 +51,7 @@ class UISessionLogHandler(logging.Handler):
         後台→UI 轉送也依它送進正確任務的畫面。
 
         傳入 ``None`` 解除目前任務的綁定；若呼叫的執行緒沒有任務歸屬（例如 generator 在別條
-        執行緒被關閉），無法知道要解除誰，只清掉已結束（DONE／ERROR）的綁定。
+        執行緒被關閉），無法知道要解除誰，只清掉已 ``finish()`` 的綁定。
         """
         with self._registry_lock:
             if session is not None:
@@ -67,7 +65,10 @@ class UISessionLogHandler(logging.Handler):
             if current is not None:
                 self._sessions.pop(current, None)
             for key, bound in list(self._sessions.items()):
-                if getattr(bound, "status", None) in _FINISHED:
+                # 以真正的 lifecycle（finish 過）判斷，不能看 status：``set_error()`` 只是標記失敗，
+                # 服務通常在 finally 才 finish()，ERROR 但尚未 finish 的任務後面還會有記錄。
+                # ``is True``：替身（MagicMock）的屬性是真值物件，不能當成已結束。
+                if getattr(bound, "is_finished", False) is True:
                     del self._sessions[key]
             self._latest = next(reversed(self._sessions.values()), None)
         set_current_task(None)

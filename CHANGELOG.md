@@ -24,6 +24,7 @@
 
 ### Improvements
 - **UI 與後台日誌自動同步**：寫進畫面的訊息（`TaskSession.add_log`、`LogView.add`、批次推畫面的提取／打包／QC 路徑）會自動鏡像到後台 log，不必每個呼叫點自己配對 `log_info`。核心流程已經自己 log 過的訊息會去重（`translation_tool/utils/ui_mirror.py`，相同文字每筆後台記錄只抵銷一次），鏡像記錄帶 `ui_mirrored` 標記，UI log handler 會略過，不會在畫面重複。任務開始／結束（狀態、耗時、摘要）也寫入後台。
+- **任務終止狀態三邊一致**：`TaskSession.is_finished` 以真正的 lifecycle 判斷（`ERROR` 但尚未 `finish()` 不算結束），`UISessionLogHandler` 清理 routing 時不再誤刪另一個「已標記失敗、仍在收尾」的任務；結束後才 `set_error()`（流水線安全網）會更正 `TaskManager` 最近完成清單的結果，並在後台另寫一筆「任務結果更正」（不重複寫「任務結束」）；`TaskSession.task_id` 每次 `start()` 重新產生，識別的是「這一次執行」。
 - **後台記錄依任務送進各自的畫面**：`UISessionLogHandler` 從單一全域 session 改為 `{任務: session}` 路由——同時執行多個任務時，後台記錄不再全部送進最後綁定的那個任務畫面；沒有任務歸屬的記錄仍退回「最近綁定的 session」，已知任務但未登記的記錄不送。預覽 poller（UI 執行緒）轉送掃描內容時明確帶掃描工作的任務識別；`LogView.add(dedupe=…)`／`ctx.add_log(forwarded=…)` 每個呼叫點必須明確表態（AST 契約測試把關）。
 - **同時執行的任務不再互相抵銷去重**：服務入口（`UISessionLogHandler.set_session`）以 `contextvars` 把目前執行緒歸屬到任務，追蹤器只讓「同一任務或歸屬未知」的後台記錄抵銷畫面訊息；新增 `tests/test_log_pair_contract.py`，用 AST 掃描「同一個 except 區塊同時有後台記錄與會被鏡像的畫面訊息」，兩邊文字不同就讓測試失敗。執行緒池與背景執行緒也帶著任務歸屬：`ContextThreadPoolExecutor` 取代 12 個檔案內的 `ThreadPoolExecutor`、核心流程自己開的 Thread 用 `run_in_context`、直接消費 generator 的 UI 工作執行緒（提取／預覽／打包／QC）以 `in_new_task` 取得自己的任務歸屬；`LogView.add` 預設視為 UI 自己的事件（無條件寫後台），只有轉送核心流程內容的呼叫點才去重。契約測試禁止日後直接使用 `ThreadPoolExecutor`。
 - **任務結束只記錄一次**：`TaskSession.finish()` 冪等——流水線步驟自己 finish 之後，安全網再呼叫（含 `set_error()`）不會重複寫後台「任務結束」或重複通知觀察者；`start()` 會重新啟用。

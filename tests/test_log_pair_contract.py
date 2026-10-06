@@ -42,25 +42,24 @@ MIRRORING_UI_CALLS = {
     "add_start_log",
 }
 
-#: (相對路徑, 函式名稱) -> 為什麼這一組成對寫法是安全的（人工確認過）
-REVIEWED: dict[tuple[str, str], str] = {
+#: (相對路徑, 函式名稱, 該函式內第幾個 except) -> 為什麼這一組成對寫法是安全的（人工確認過）
+REVIEWED: dict[tuple[str, str, int], str] = {
     (
         "app/services_impl/pipelines/_task_runner.py",
         "run_callable_task",
+        1,
     ): "if/else 互斥：只會走 mirror_session_log 或 logger.error 其中一條",
     (
         "translation_tool/core/jar_processor_extract.py",
         "run_extraction_process_impl",
+        0,
     ): "後台第一行與畫面文字相同（[ERROR] 提取 … 時產生例外），細節接在後面；多行訊息逐行去重",
     (
         "translation_tool/core/lang_merge_extracted_assets.py",
         "merge_extracted_to_assets",
+        0,
     ): "後台第一行與畫面文字相同（… 錯誤: {exc!r}），後面接 traceback；"
     "由 test_merge_ext_assets_fatal_exception_is_written_to_backend_once 鎖住",
-    (
-        "app/services_impl/pipelines/lookup_service.py",
-        "run_batch_lookup_service",
-    ): "backend 與 UI 使用同一個 message 變數",
 }
 
 
@@ -86,6 +85,24 @@ def _is_unmirrored(node: ast.Call) -> bool:
     )
 
 
+def _handler_ordinal(tree: ast.AST, handler: ast.ExceptHandler, func_name: str) -> int:
+    """這個 ``except`` 是所屬函式內由上而下的第幾個（0 起算）。
+
+    比行號穩定（改動其他行不影響），又能區分同一個函式裡的不同 ``except``，
+    ``REVIEWED`` 的豁免才不會順便放過同函式日後新增的其他 ``except``。
+    """
+    ordinal = 0
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ExceptHandler)
+            and _enclosing_function(tree, node.lineno) == func_name
+        ):
+            if node is handler:
+                return ordinal
+            ordinal += 1
+    return ordinal
+
+
 def _enclosing_function(tree: ast.AST, lineno: int) -> str:
     best = None
     for node in ast.walk(tree):
@@ -98,11 +115,11 @@ def _enclosing_function(tree: ast.AST, lineno: int) -> str:
     return best.name if best else "<module>"
 
 
-def _handler_pairs():
+def _handler_pairs(base: Path = ROOT, dirs: tuple[str, ...] = SCAN_DIRS):
     """回傳 [(相對路徑, 函式, 行號, 後台文字集合, 畫面文字集合)]（只含畫面訊息會被鏡像的）。"""
     found = []
-    for scan in SCAN_DIRS:
-        for path in sorted((ROOT / scan).rglob("*.py")):
+    for scan in dirs:
+        for path in sorted((base / scan).rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for handler in ast.walk(tree):
                 if not isinstance(handler, ast.ExceptHandler):
@@ -142,10 +159,12 @@ def _handler_pairs():
                             if is_log_key and not is_none:
                                 ui.append(ast.unparse(value))
                 if backend and ui:
+                    func = _enclosing_function(tree, handler.lineno)
                     found.append(
                         (
-                            str(path.relative_to(ROOT)).replace("\\", "/"),
-                            _enclosing_function(tree, handler.lineno),
+                            str(path.relative_to(base)).replace("\\", "/"),
+                            func,
+                            _handler_ordinal(tree, handler, func),
                             handler.lineno,
                             {t for t in backend if t},
                             {t for t in ui if t},
@@ -154,24 +173,35 @@ def _handler_pairs():
     return found
 
 
-def test_backend_and_ui_messages_in_one_handler_use_identical_text():
+def _unmatched_problems(pairs, reviewed=None):
+    reviewed = REVIEWED if reviewed is None else reviewed
     problems = []
-    for rel, func, lineno, backend, ui in _handler_pairs():
-        if backend & ui:
-            continue  # 有一組文字完全相同 → 去重會抵銷
-        if (rel, func) in REVIEWED:
-            continue
-        problems.append(f"{rel}:{lineno} ({func})")
+    for rel, func, ordinal, lineno, backend, ui in pairs:
+        unmatched = sorted(ui - backend)
+        if unmatched and (rel, func, ordinal) not in reviewed:
+            problems.append(
+                f"{rel}:{lineno} ({func}#{ordinal}) 沒有對應後台記錄的畫面訊息：{unmatched}"
+            )
+    return problems
+
+
+def test_backend_and_ui_messages_in_one_handler_use_identical_text():
+    """每一則會被鏡像的畫面訊息，都必須有一則文字完全相同的後台記錄（去重才抵銷得到）。
+
+    過去只要「有任何一組相同」整個 handler 就放行，漏掉同一個 handler 內其他不一致的訊息；
+    現在逐一檢查畫面訊息。後台多寫的記錄（畫面沒有對應）沒關係。
+    """
+    problems = _unmatched_problems(_handler_pairs())
     assert not problems, (
-        "同一個 except 區塊同時有後台記錄與會被鏡像的畫面訊息，但兩邊文字不同，"
+        "同一個 except 區塊同時有後台記錄與會被鏡像的畫面訊息，但某則畫面訊息沒有文字相同的後台記錄，"
         "後台會對同一個事件記兩次。請讓兩邊文字一致（例如都用 {e!r}），"
-        "或畫面訊息改用 add_log_unmirrored；確認安全後才登記到 REVIEWED：\n  "
-        + "\n  ".join(problems)
+        "或畫面訊息改用 add_log_unmirrored；確認安全後才登記到 REVIEWED"
+        "（鍵是 (路徑, 函式, 該函式內第幾個 except)）：\n  " + "\n  ".join(problems)
     )
 
 
 def test_reviewed_entries_are_not_stale():
-    pairs = {(rel, func) for rel, func, *_ in _handler_pairs()}
+    pairs = {(rel, func, ordinal) for rel, func, ordinal, *_ in _handler_pairs()}
     stale = [key for key in REVIEWED if key not in pairs]
     assert not stale, f"REVIEWED 內已不存在的項目，請移除：{stale}"
 
@@ -277,3 +307,45 @@ def test_forwarded_true_is_only_used_where_core_output_is_relayed():
     assert allowed <= found, (
         f"allowed 內已不再使用轉送標記的檔案，請移除：{sorted(allowed - found)}"
     )
+
+
+# ---------------------------------------------------------------- 契約本身的行為（合成程式碼）
+
+
+_SYNTHETIC = """
+def worker(session, logger):
+    try:
+        run()
+    except ValueError as exc:
+        logger.error(f"a {exc!r}")
+        logger.error(f"b {exc!r}")
+        session.add_log(f"a {exc!r}")
+        session.add_log(f"c {exc!r}")
+    except KeyError as exc:
+        logger.error(f"d {exc!r}")
+        session.add_log(f"d {exc}")
+"""
+
+
+def _synthetic_pairs(tmp_path):
+    pkg = tmp_path / "app"
+    pkg.mkdir()
+    (pkg / "mod.py").write_text(_SYNTHETIC, encoding="utf-8")
+    return _handler_pairs(tmp_path, ("app",))
+
+
+def test_every_ui_message_needs_a_matching_backend_record_not_just_one(tmp_path):
+    """舊規則「有任何一組相同就放行」會放過 handler 內其他不一致的訊息。"""
+    problems = _unmatched_problems(_synthetic_pairs(tmp_path), reviewed={})
+    joined = "\n".join(problems)
+    assert (
+        "worker#0" in joined and "f'c {exc!r}'" in joined
+    )  # 第一個 handler：a 相同但 c 沒有
+    assert "worker#1" in joined  # 第二個 handler：{exc!r} vs {exc}
+
+
+def test_a_reviewed_exemption_covers_only_that_one_except(tmp_path):
+    """豁免鍵含 except 序號：同一個函式日後新增的其他 except 不會被順便放過。"""
+    reviewed = {("app/mod.py", "worker", 0): "人工確認過"}
+    problems = _unmatched_problems(_synthetic_pairs(tmp_path), reviewed=reviewed)
+    assert len(problems) == 1 and "worker#1" in problems[0]
