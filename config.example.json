@@ -18,7 +18,7 @@
     },
     "translation_db": {
         "enabled": true,
-        "path": "mod_translation.db",
+        "path": "",
         "version": "",
         "cross_version": true,
         "write_back": true,

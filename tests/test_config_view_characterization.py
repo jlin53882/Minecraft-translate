@@ -392,7 +392,7 @@ def test_config_view_uses_stacked_layout_on_narrow_screens(monkeypatch):
         },
     )
     view = ConfigView(mock_page())
-    layout = view.scroll_container.controls[1]
+    layout = view.scroll_container.controls[2]
     assert isinstance(layout, ft.ResponsiveRow)
     assert [control.col for control in layout.controls] == [
         {"xs": 12, "md": 3},

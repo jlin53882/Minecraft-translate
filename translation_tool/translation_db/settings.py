@@ -29,7 +29,7 @@ class DbSettings:
     """``translation_db`` 設定的快照。"""
 
     enabled: bool = True
-    path: str = DEFAULT_DB_FILE
+    path: str = ""  # 空白 = 資料目錄內的預設檔名；首次建立資料庫時會寫入實際路徑
     version: str = ""
     cross_version: bool = True
     write_back: bool = True
@@ -73,7 +73,7 @@ def load_db_settings(config: dict | None = None) -> DbSettings:
     cfg = config.get("translation_db", {}) or {}
     return DbSettings(
         enabled=bool(cfg.get("enabled", True)),
-        path=str(cfg.get("path") or DEFAULT_DB_FILE),
+        path=str(cfg.get("path") or "").strip(),
         version=str(cfg.get("version") or "").strip(),
         cross_version=bool(cfg.get("cross_version", True)),
         write_back=bool(cfg.get("write_back", True)),
@@ -105,6 +105,29 @@ def database_problem(settings: DbSettings) -> str:
     return ""
 
 
+def remember_db_path(settings: DbSettings, path: Path) -> bool:
+    """設定的資料庫路徑是空白時，把實際建立的路徑寫進 config.json（設定頁會顯示）。
+
+    只在路徑空白時寫入，不會覆蓋使用者自己填的路徑；寫入失敗不影響資料庫本身。
+    """
+    if settings.path.strip():
+        return False
+    try:
+        from translation_tool.utils.config_manager import load_config, save_config
+
+        config = load_config()
+        block = config.setdefault("translation_db", {})
+        if str(block.get("path") or "").strip():
+            return False
+        block["path"] = str(path)
+        if save_config(config):
+            log_info(f"📚 已把資料庫路徑寫入設定：{path}")
+            return True
+    except Exception as exc:  # noqa: BLE001 - 寫設定失敗不應中斷建立資料庫
+        log_warning(f"⚠️ 無法把資料庫路徑寫入設定：{exc!r}")
+    return False
+
+
 def open_db(settings: DbSettings, *, create: bool = False) -> TranslationDB | None:
     """開啟設定指定的資料庫。
 
@@ -116,8 +139,12 @@ def open_db(settings: DbSettings, *, create: bool = False) -> TranslationDB | No
         if not path.is_file() and not create:
             log_info(f"📚 預翻譯資料庫尚未建立（{path}），已略過")
             return None
+        existed = path.is_file()
         try:
-            return TranslationDB(path, priority=settings.priority, create=create)
+            db = TranslationDB(path, priority=settings.priority, create=create)
+            if create and not existed and path.is_file():
+                remember_db_path(settings, path)
+            return db
         except Exception as exc:  # noqa: BLE001 - 資料庫問題不應中斷翻譯
             log_warning(f"⚠️ 預翻譯資料庫無法開啟，已略過：{path}（{exc!r}）")
             return None

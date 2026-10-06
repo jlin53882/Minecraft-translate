@@ -182,8 +182,8 @@ SETTINGS: tuple[Setting, ...] = (
         "資料庫檔案（SQLite）",
         "general",
         C_TDB,
-        "相對路徑以資料目錄為基準；不存在時，到「Mod 資料庫」頁掃描 jar 會自動建立",
-        default="mod_translation.db",
+        "預設空白（使用資料目錄內的 mod_translation.db）；第一次建立資料庫時會自動寫入實際路徑。相對路徑以資料目錄為基準",
+        default="",
     ),
     Setting(
         "translation_db.version",

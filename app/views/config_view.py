@@ -31,6 +31,7 @@ from app.views.config.config_form import (
     build_key_field,
     build_key_row,
 )
+from app.views.config.db_location import DbLocationBanner
 from app.views.config.settings_form import build_controls, build_pages
 from app.views.config.settings_schema import NAV_PAGES
 
@@ -65,6 +66,7 @@ class ConfigView(ft.Column):
         self._selected_nav = "general"
 
         self._init_controls()
+        self.db_location = DbLocationBanner()
 
         self.scroll_container = ft.Column(
             scroll=ft.ScrollMode.ADAPTIVE,
@@ -72,6 +74,7 @@ class ConfigView(ft.Column):
             spacing=15,
             controls=[
                 self._build_header(),
+                self.db_location,
                 ft.ResponsiveRow(
                     controls=[
                         ft.Container(
@@ -384,7 +387,13 @@ class ConfigView(ft.Column):
     def load_config(self):
         """載入設定檔"""
         config = load_config_json()
-        return load_config_into_view(self, config)
+        result = load_config_into_view(self, config)
+        self.db_location.refresh()
+        return result
+
+    def did_mount(self):
+        """切回設定頁時重新確認資料庫位置（其他頁可能剛建立了資料庫）。"""
+        self.db_location.safe_refresh()
 
     def _success_color(self):
         """取得成功顏色"""

@@ -214,9 +214,7 @@ def test_list_entries_filters_by_source_even_when_not_effective(db_path):
             (eid, SRC_MANUAL, "鋼製外殼（人工）"),
         )
         db._refresh(conn, [eid])
-    keys = lambda src: [
-        r.key for r in db.list_entries("1.21.1", source=src)[0]
-    ]
+    keys = lambda src: [r.key for r in db.list_entries("1.21.1", source=src)[0]]
     assert keys(SRC_SUBTITLE) == ["item.foo.a"]
     assert keys(SRC_MANUAL) == ["item.foo.a"]
     assert keys(SRC_AI) == []
@@ -240,3 +238,45 @@ def test_entries_panel_source_filter(db_path):
     panel._on_source()
     assert panel.total == 4
     db.close()
+
+
+def test_blank_db_path_is_remembered_when_database_is_created(tmp_path, monkeypatch):
+    """路徑空白時，第一次建立資料庫會把實際路徑寫進 config；已填的路徑不被覆蓋。"""
+    from translation_tool.translation_db import settings as db_settings
+
+    saved: list[dict] = []
+    monkeypatch.setattr(
+        "translation_tool.utils.config_manager.load_config",
+        lambda *a, **k: {"translation_db": {"path": ""}},
+    )
+    monkeypatch.setattr(
+        "translation_tool.utils.config_manager.save_config",
+        lambda cfg, *a, **k: saved.append(cfg) or True,
+    )
+    target = tmp_path / "sub" / "mod_translation.db"
+    monkeypatch.setattr(DbSettings, "resolved_path", lambda self: target)
+    target.parent.mkdir()
+
+    db = db_settings.open_db(DbSettings(path=""), create=True)
+    assert db is not None
+    db.close()
+    assert saved and saved[0]["translation_db"]["path"] == str(target)
+
+    saved.clear()
+    other = tmp_path / "again.db"
+    monkeypatch.setattr(DbSettings, "resolved_path", lambda self: other)
+    db = db_settings.open_db(DbSettings(path="custom.db"), create=True)
+    db.close()
+    assert saved == []  # 使用者自己填過路徑 → 不覆蓋
+
+
+def test_db_location_banner_shows_folder_and_status(db_path):
+    from app.views.config.db_location import DbLocationBanner
+    from tests.test_moddb_view import texts_of
+
+    banner = DbLocationBanner()
+    assert banner.folder_text.value == str(db_path.parent)
+    assert "尚未建立" in texts_of(banner.status_box)
+    seed(db_path)
+    banner.refresh()
+    assert "已建立" in texts_of(banner.status_box)

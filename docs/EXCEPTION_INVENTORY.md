@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **273** 項；其中 **122** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **275** 項；其中 **122** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 238 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 240 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 16 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -89,6 +89,7 @@
 | `app/views/cache_view.py:CacheView._finish_mount` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView._on_page_resized` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView.commit_ui` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/config/db_location.py:DbLocationBanner.safe_refresh` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響設定頁 |
 | `app/views/dashboard_view.py:DashboardView._apply_on_ui` | BLE001 | 已記錄／回報 | 沒有 event loop（測試）就直接套用 |
 | `app/views/extractor/extractor_dialog.py:_extractor_run_extraction` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/extractor/extractor_preview_dialog.py:_preview_do_scan` | BLE001 | 已記錄／回報 | 錯誤要回報到 UI |
@@ -259,6 +260,7 @@
 | `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
 | `translation_tool/translation_db/identity.py:patchouli_dir_names` | BLE001 | 已記錄／回報 | 設定不可用時退回預設，不影響身分計算 |
 | `translation_tool/translation_db/scanner.py:load_rules` | BLE001 | 已記錄／回報 | 規則檔問題不應讓掃描失敗，只是略過替換 |
+| `translation_tool/translation_db/settings.py:remember_db_path` | BLE001 | 已記錄／回報 | 寫設定失敗不應中斷建立資料庫 |
 | `translation_tool/translation_db/settings.py:open_db` | BLE001 | 已記錄／回報 | 資料庫問題不應中斷翻譯 |
 | `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 讀取失敗不中斷總覽，但要留下紀錄 |
 | `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 讀取失敗不中斷總覽，但要留下紀錄 |
