@@ -18,14 +18,17 @@ from translation_tool.utils.log_unit import log_info
 
 def _sync_value(e) -> None:
     """把 Web 事件中的最新值寫回後端控制項。"""
-    # Flet Web 事件送達 Python 前會先同步控制項的 value；優先讀控制項，
-    # 避免把 renderer 的增量／舊事件資料誤當成完整路徑。
     if e is not None and getattr(e, "control", None) is not None:
         value = getattr(e, "data", None)
         current = getattr(e.control, "value", "")
-        # 部分 Web renderer 的 blur 事件 data 會是空字串；控制項已有值時
-        # 不可再用事件資料覆蓋它。只有控制項仍是空值時才使用非空 fallback。
-        if not current and value:
+        event_name = getattr(e, "name", None)
+        # Web 的 change 事件可能已帶回新文字，但 Python 控制項仍保留舊值；
+        # change 資料是這次輸入的完整值，必須優先寫回控制項。
+        if event_name == "change" and isinstance(value, str):
+            e.control.value = value
+        # blur 事件有些 renderer 只送空資料，不能因此清除原本的值；
+        # 只有控制項仍為空時，才使用非空事件資料作為補救。
+        elif not current and value:
             e.control.value = value
 
 

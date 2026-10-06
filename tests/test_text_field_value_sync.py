@@ -36,6 +36,20 @@ def test_sync_handler_does_not_clear_existing_value_on_empty_blur_event():
     assert control.value == "完整路徑"
 
 
+def test_change_event_value_overwrites_stale_control_value():
+    """Web change 事件帶回新值時，不得保留 Python 端的舊值。"""
+    from types import SimpleNamespace
+
+    from app.ui.sync_text_field import _sync_value
+
+    control = SimpleNamespace(value="舊路徑")
+    _sync_value(
+        SimpleNamespace(control=control, data="新路徑", name="change")
+    )
+
+    assert control.value == "新路徑"
+
+
 def test_single_line_field_has_blur_fallback():
     assert kit.text_field("路徑").on_blur is not None
     assert kit.text_field("x", multiline=True).on_blur is None
