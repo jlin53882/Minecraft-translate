@@ -349,6 +349,24 @@ class EntriesPanel(ft.Column):
         ]
         # 換篩選／換頁後清單內容大幅改變：全新 key 避免 Flet 配對舊項目而殘留上一份清單
         self.list_view.controls = kit.rekey(tiles, "entry")
+        self._scroll_list_to_top()
+
+    def _scroll_list_to_top(self) -> None:
+        """換篩選／換頁後回到清單最上方（否則沿用上一份清單的捲動位置，第一筆會被標題蓋住）。"""
+        run_task = getattr(self._page, "run_task", None)
+        if not callable(run_task):
+            return
+
+        async def to_top() -> None:
+            try:
+                await self.list_view.scroll_to(offset=0, duration=0)
+            except Exception as exc:  # noqa: BLE001 - 尚未掛上頁面時不影響清單
+                log_debug(f"清單捲回頂端略過：{exc}")
+
+        try:
+            run_task(to_top)
+        except Exception as exc:  # noqa: BLE001 - 排程失敗不影響清單
+            log_debug(f"清單捲回頂端排程失敗：{exc}")
 
     def _row_tile(self, row: EntryRow) -> ft.Control:
         tone = design.tone(STATE_TONES[row.state])

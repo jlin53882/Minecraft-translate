@@ -442,7 +442,18 @@ class Pager(ft.Container):
         )
         for index, cell in enumerate(controls):
             cell.key = f"pager{id(self)}-{self._render_gen}-{index}"
-        self.buttons.controls = controls
+        # 整列換成新的 Row（而不是改它的 controls 清單）：Flet 對「同一個清單大幅增減項目」的
+        # 比對會出錯（殘留舊頁碼、甚至整列消失）；換掉整個控制項只會產生單一的取代操作。
+        row = ft.Row(
+            controls,
+            spacing=4,
+            tight=True,
+            key=f"pagerrow{id(self)}-{self._render_gen}",
+        )
+        self.buttons = row
+        content = self.content
+        if isinstance(content, ft.Row) and len(content.controls) >= 2:
+            content.controls[1] = row
 
     def _cell(
         self,

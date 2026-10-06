@@ -1021,3 +1021,44 @@ def test_preview_shows_how_many_would_be_reused_and_excludes_them(db_path, monke
         TranslateOptions(version="1.21.1", dry_run=True, reuse_other_versions=False)
     )
     assert off["summary"]["reused"] == 0 and off["summary"]["candidates"] == 3
+
+
+def test_pager_replaces_the_whole_button_row_on_each_render():
+    """頁碼列整列換新控制項：同一個 buttons 清單被大幅增減時 Flet 會殘留／整列消失。"""
+    from app.ui.kit.inputs import Pager
+
+    pager = Pager(3650, page_size=50)
+    first_row = pager.buttons
+    assert pager.content.controls[1] is first_row
+    pager.set_state(34, 1)
+    assert pager.buttons is not first_row  # 換了新的 Row
+    assert pager.content.controls[1] is pager.buttons  # 並且真的掛回版面
+    assert len(pager.buttons.controls) == 3  # ‹ 1 ›
+    pager.set_state(2400, 5)
+    assert (
+        pager.content.controls[1] is pager.buttons and len(pager.buttons.controls) > 3
+    )
+
+
+def test_entries_list_scrolls_back_to_top_when_content_changes(db_path):
+    from app.views.moddb import entries_panel
+
+    seed(db_path)
+    db = TranslationDB(db_path)
+    scheduled: list = []
+    page = mock_page()
+    page.run_task = lambda fn, *a, **k: scheduled.append(fn)
+    panel = entries_panel.EntriesPanel(page, lambda: db)
+    panel.refresh()
+    assert scheduled, "換清單內容時要排程把清單捲回頂端"
+    offsets: list = []
+
+    async def fake_scroll(**kwargs):
+        offsets.append(kwargs)
+
+    panel.list_view.scroll_to = fake_scroll
+    import asyncio
+
+    asyncio.run(scheduled[-1]())
+    assert offsets == [{"offset": 0, "duration": 0}]
+    db.close()
