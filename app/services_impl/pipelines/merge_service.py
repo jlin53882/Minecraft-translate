@@ -22,14 +22,15 @@ from translation_tool.core.lang_merger import (
     merge_zhcn_to_zhtw_from_folder,
     merge_zhcn_to_zhtw_from_zip,
 )
-from translation_tool.utils.cancellation import TaskCancelled
+from translation_tool.utils.cancellation import TaskCancelled, raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
 
 
 def _raise_if_session_cancelled(session) -> None:
-    """在合併服務自己的檢查點讀取 session 取消旗標。"""
+    """合併服務自己的取消檢查點：session 旗標（合併頁取消）或 cancel_scope（流水線取消）。"""
+    raise_if_cancelled()
     if getattr(session, "cancel_requested", False) is True:
         raise TaskCancelled()
 
