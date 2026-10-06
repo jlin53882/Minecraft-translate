@@ -23,6 +23,7 @@
         "cross_version": true,
         "write_back": true,
         "sync_manual": true,
+        "zip_source": "自訂補充",
         "priority": [
             "人工",
             "町宮字幕組",

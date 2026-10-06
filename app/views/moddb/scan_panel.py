@@ -129,15 +129,15 @@ class ScanPanel(ft.Column):
             ft.Icons.FOLDER_ZIP_OUTLINED, "選擇 ZIP 檔", self._pick_zip
         )
         self.zip_pick_btn.visible = False
+        self._source_touched = False
         self.source_dd = kit.dropdown(
             label="譯文來源標記",
             dense=True,
             value=str(SRC_CUSTOM),
-            options=[
-                ft.dropdown.Option(key=str(code), text=SOURCE_NAMES[code])
-                for code in ZIP_SOURCES
-            ],
+            options=[],
+            on_select=self._on_source_selected,
         )
+        self._refresh_source_options()
         self.source_dd.visible = False
         self.mode_note = kit.hint_text(
             "ZIP 內的 lang／patchouli 的 zh_tw 一律不判讀、不清理、不套規則，直接匯入（包含沒有中文的值）。"
@@ -293,8 +293,27 @@ class ScanPanel(ft.Column):
             tone="em",
         )
 
+    # ------------------------------------------------------------ 譯文來源
+    def _on_source_selected(self, _e=None) -> None:
+        self._source_touched = True
+
+    def _refresh_source_options(self) -> None:
+        """預設值取自 config 的 translation_db.zip_source（沒設定則「自訂補充」），
+        每次切到本頁籤重讀；使用者在畫面上手動選過就保留他的選擇。
+        """
+        self.source_dd.options = [
+            ft.dropdown.Option(key=str(code), text=SOURCE_NAMES[code])
+            for code in ZIP_SOURCES
+        ]
+        if not self._source_touched:
+            default = current_settings().zip_source
+            if default not in ZIP_SOURCES:
+                default = SRC_CUSTOM
+            self.source_dd.value = str(default)
+
     # --------------------------------------------------------------- 版本清單
     def refresh_versions(self) -> None:
+        self._refresh_source_options()
         db = self._get_db()
         self._versions = version_choices(db)
         self._render_versions()

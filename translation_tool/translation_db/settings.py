@@ -35,6 +35,7 @@ class DbSettings:
     write_back: bool = True
     sync_manual: bool = True
     priority: tuple[int, ...] = DEFAULT_PRIORITY
+    zip_source: int | None = None  # 翻譯 ZIP 匯入時，「譯文來源標記」的預設來源
 
     @property
     def usable(self) -> bool:
@@ -78,6 +79,9 @@ def load_db_settings(config: dict | None = None) -> DbSettings:
         write_back=bool(cfg.get("write_back", True)),
         sync_manual=bool(cfg.get("sync_manual", True)),
         priority=parse_priority(cfg.get("priority")),
+        zip_source={name: code for code, name in SOURCE_NAMES.items()}.get(
+            str(cfg.get("zip_source") or "").strip()
+        ),
     )
 
 

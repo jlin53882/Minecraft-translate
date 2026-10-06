@@ -485,7 +485,11 @@ def scan_folder_generator(
     dirs = patchouli_dir_names()
     yield {
         "progress": 0.0,
-        "log": f"🔍 找到 {len(jars)} 個 jar，版本 {options.version}",
+        "log": (
+            f"🔍 找到 {len(jars)} 個翻譯檔（ZIP／jar），版本 {options.version}"
+            if options.translated
+            else f"🔍 找到 {len(jars)} 個 jar，版本 {options.version}"
+        ),
     }
 
     done = 0
@@ -551,7 +555,8 @@ def scan_folder_generator(
 
     state = "已取消（已處理的檔案已寫入，其餘未處理）" if report.cancelled else "完成"
     if options.dry_run or db is None:
-        summary = f"🔎 預覽{state}：{report.jars_with_lang} 個 jar 含語言檔，共 {report.items_found} 項（未寫入）"
+        unit = "個檔案" if options.translated else "個 jar"
+        summary = f"🔎 預覽{state}：{report.jars_with_lang} {unit}含語言檔，共 {report.items_found} 項（未寫入）"
     else:
         db.record_scan(options.version, str(folder), report.as_dict())
         summary = (
