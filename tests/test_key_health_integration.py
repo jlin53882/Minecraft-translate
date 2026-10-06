@@ -509,6 +509,98 @@ def test_success_of_a_request_started_before_the_exhaustion_keeps_the_record(env
     assert quota.is_exhausted("m1")  # 沒被先前送出的成功請求洗掉
 
 
+def not_found():
+    return _http_error(404, text="model not found")
+
+
+def _exhaust_m1_and_wait_for_probe(env: Env, models=("m1",)) -> None:
+    """m1 RPD 耗盡，並讓時間走到下一次探測。"""
+    env.model_outcomes = {"m1": rpd()}
+    env.outcomes = {"k0": OK_JSON, "k1": OK_JSON, "k2": OK_JSON}
+    env.translate(1, models=models)
+    env.clock.t += DEFAULT_PROBE_INTERVAL_SEC + 1
+    env.calls.clear()
+    env.model_calls.clear()
+
+
+@pytest.mark.parametrize("transient", [rpm, overloaded], ids=["rpm", "overload"])
+def test_probe_hit_by_a_transient_error_is_retried_on_the_same_model(env, transient):
+    """探測請求遇到 RPM／503 overload：必須在同一次探測內重試，不能被自己的探測鎖擋掉。"""
+    _exhaust_m1_and_wait_for_probe(env)
+    env.model_outcomes = {"m1": [transient(), OK_JSON]}
+
+    result, status = env.translate(1)
+
+    assert status == "AUTO"
+    assert len(result) == 1
+    assert env.model_calls == ["m1", "m1"]  # 探測 + 重試
+    assert not get_model_quota_registry().is_exhausted("m1")  # 重試成功：恢復
+
+
+def test_probe_lost_to_another_worker_reports_exhausted_instead_of_shrinking(env):
+    """另一個 worker 已領走探測名額：沒送任何請求，不能 SHRINK 後把原文回填成 AUTO。"""
+    _exhaust_m1_and_wait_for_probe(env)
+    quota = get_model_quota_registry()
+    assert quota.claim("m1", object())  # 別的 worker 正在探測
+
+    result, status = env.translate(2)
+
+    assert status == "ALL_KEYS_EXHAUSTED"
+    assert not result
+    assert env.calls == []
+
+
+def test_probe_race_between_the_blocked_check_and_the_claim_is_exhausted(env):
+    """TOCTOU：開頭的 is_blocked 檢查通過、之後 claim 才被別人搶走 → 仍是耗盡，不是 SHRINK。"""
+    _exhaust_m1_and_wait_for_probe(env)
+    quota = get_model_quota_registry()
+    assert quota.claim("m1", object())
+
+    with patch.object(quota, "is_blocked", return_value=False):
+        result, status = env.translate(2)
+
+    assert status == "ALL_KEYS_EXHAUSTED"
+    assert not result
+    assert env.calls == []
+
+
+def test_probe_lost_to_another_worker_falls_back_to_the_next_model(env):
+    _exhaust_m1_and_wait_for_probe(env, models=("m1", "m2"))
+    get_model_quota_registry().claim("m1", object())
+    env.model_outcomes = {"m2": OK_JSON}
+
+    result, status = env.translate(1, models=("m1", "m2"))
+
+    assert status == "AUTO"
+    assert len(result) == 1
+    assert env.model_calls == ["m2"]
+
+
+def test_pinned_model_hitting_rpd_unpins_and_falls_back_to_the_alternate(env):
+    """m1 先 503 overload（被釘住重試），再遇 RPD：必須解除釘選並真的改用 m2。"""
+    env.model_outcomes = {"m1": [overloaded(), rpd()], "m2": OK_JSON}
+    env.outcomes = {"k0": OK_JSON, "k1": OK_JSON, "k2": OK_JSON}
+
+    result, status = env.translate(1, models=("m1", "m2"))
+
+    assert status == "AUTO"
+    assert len(result) == 1
+    assert env.model_calls == ["m1", "m1", "m2"]
+    assert get_model_quota_registry().is_exhausted("m1")
+
+
+def test_missing_model_then_rpd_is_terminal_not_a_shrink(env):
+    """m1 不存在(404)、m2 RPD：沒有任何模型能用 → 耗盡；不能 SHRINK 後回填原文。"""
+    env.model_outcomes = {"m1": not_found(), "m2": rpd()}
+    env.outcomes = {"k0": OK_JSON, "k1": OK_JSON, "k2": OK_JSON}
+
+    result, status = env.translate(2, models=("m1", "m2"))
+
+    assert status == "ALL_KEYS_EXHAUSTED"
+    assert not result
+    assert env.model_calls == ["m1", "m2"]  # 各只試一次；404 的 m1 不會每輪重打
+
+
 def test_single_key_rpd_behaviour(env):
     env.keys = ["k0"]
     env.outcomes = {"k0": rpd()}

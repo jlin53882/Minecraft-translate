@@ -662,26 +662,81 @@ def test_next_quota_reset_fallback_never_lands_later_than_the_real_reset():
         )
 
 
-def test_model_quota_claim_blocks_until_the_probe_interval_then_grants_one_probe():
+def test_model_quota_claim_blocks_until_the_probe_interval_then_grants_one_lease():
     from translation_tool.core.lm_key_health import ModelQuotaRegistry
 
     clock = Clock()
     reg = ModelQuotaRegistry(clock, probe_interval=600)
+    a, b = object(), object()
 
-    assert reg.claim("m1") is True  # 沒耗盡：直接放行
+    assert reg.claim("m1", a) is True  # 沒耗盡：直接放行
     reg.mark_exhausted("m1", until=clock.t + 86_400)
-    assert reg.is_blocked("m1") is True
-    assert reg.claim("m1") is False
+    assert reg.is_blocked("m1", a) is True
+    assert reg.claim("m1", a) is False
 
     clock.t += 601  # 輪到探測
-    assert reg.is_blocked("m1") is False
-    assert reg.claim("m1") is True  # 第一個領到探測名額
-    assert reg.claim("m1") is False  # 同一時間的其他 worker 不能再探測
-    assert reg.is_blocked("m1") is True
+    assert reg.is_blocked("m1", a) is False
+    assert reg.claim("m1", a) is True  # a 領到探測租約
+    assert reg.claim("m1", b) is False  # 租約期間其他 worker 不能再探測
+    assert reg.is_blocked("m1", b) is True
+    assert reg.is_blocked("m1", a) is False  # 持有者不被擋
     assert reg.is_exhausted("m1") is True  # 探測期間仍算耗盡（儀表板照常顯示）
 
+
+def test_model_quota_lease_holder_can_reenter_for_transient_retries():
+    """探測遇到 RPM／503 要在同一個租約內重試：持有者可重入，別人仍被擋。"""
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(clock, probe_interval=600)
+    a, b = object(), object()
+    reg.mark_exhausted("m1", until=clock.t + 86_400)
     clock.t += 601
-    assert reg.claim("m1") is True  # 下一個探測週期
+    assert reg.claim("m1", a) is True
+
+    clock.t += 30  # 等待 RPM 重試
+    assert reg.claim("m1", a) is True
+    assert reg.claim("m1", b) is False
+
+
+def test_model_quota_lease_outcomes_rpd_rearms_release_rearms_ok_clears():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(clock, probe_interval=600)
+    a, b = object(), object()
+    reg.mark_exhausted("m1", until=clock.t + 86_400)
+    clock.t += 601
+    assert reg.claim("m1", a)
+
+    reg.mark_exhausted("m1", until=clock.t + 86_400)  # 探測遇到 RPD：租約收回、重新計時
+    assert reg.claim("m1", a) is False
+    assert reg.claim("m1", b) is False
+
+    clock.t += 601
+    assert reg.claim("m1", a)
+    reg.release_owner(a)  # 探測以其他方式結束：收回租約並重新計時
+    assert reg.claim("m1", b) is False
+    clock.t += 601
+    assert reg.claim("m1", b) is True
+
+    reg.mark_ok("m1", started_at=clock.t)  # 探測成功：整筆紀錄清除
+    assert reg.claim("m1", a) is True
+    assert reg.is_exhausted("m1") is False
+
+
+def test_model_quota_lease_expires_if_the_holder_never_releases():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(clock, probe_interval=600, lease_ttl=300)
+    a, b = object(), object()
+    reg.mark_exhausted("m1", until=clock.t + 86_400)
+    clock.t += 601
+    assert reg.claim("m1", a)
+
+    clock.t += 301  # 持有者異常結束：租約逾時，換別人探測
+    assert reg.claim("m1", b) is True
 
 
 def test_model_quota_mark_ok_ignores_requests_that_started_before_the_exhaustion():

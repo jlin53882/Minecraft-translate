@@ -19,7 +19,8 @@
 - **任務追蹤**：`TaskManager` 統一收集 `TaskSession`，任務執行中切換頁面不中斷，頂列 / 側欄 / 狀態列同步顯示。
 - **共用 UI kit**：`app/ui/kit/`（按鈕、Chip、卡片、進度、空 / 載入 / 錯誤狀態等）與語意色主題 `app/ui/design.py`。
 - **ConfigStore**：設定的讀 / 寫 / 變更通知單一入口，存檔後外殼（Key 狀態、模型、主題）立即更新。
-- **API Key 健康度（#113）**：RPD 耗盡 / 403 的 Key 冷卻一段時間不再被請求（以 Key 指紋識別，不是 index）；全部冷卻時每個 cycle 只試探一把。
+- **API Key 健康度（#113）**：403 無權限的 Key 冷卻一段時間不再被請求（以 Key 指紋識別，不是 index）；全部冷卻時每個 cycle 只試探一把。
+- **同專案模式的模型配額（PR #171）**：Gemini 的每日配額（RPD）算在「專案 × 模型」，所以 429 RPD 改記在模型上、依序換下一個模型而不是換 Key；耗盡的模型到太平洋時間午夜（台灣夏令 15:00 / 冬令 16:00）才恢復，期間每 10 分鐘放行一個探測請求（探測遇到 RPM / 503 可在同一次探測內重試）；全部模型都耗盡才回報 `ALL_KEYS_EXHAUSTED`。工作台會列出今日額度用盡的模型。
 - **token 預算切批（#108）**：依 token 預算切批、學習式預算、`maxOutputTokens`、`finishReason` / 用量診斷；可用 `token_budget_enabled` 關閉。
 
 ### Improvements
