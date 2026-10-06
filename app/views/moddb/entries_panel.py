@@ -293,7 +293,7 @@ class EntriesPanel(ft.Column):
             self._show_editor(None)
             return
         versions = db.versions()
-        self.version_dd.options = [ft.dropdown.Option(v) for v in versions]
+        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
         if self.version not in versions:
             wanted = current_settings().version
             self.version = (
@@ -306,10 +306,9 @@ class EntriesPanel(ft.Column):
     def _load_mods(self) -> None:
         db = self.db()
         mods = db.mods(self.version) if (db and self.version) else []
-        self.mod_dd.options = [
-            ft.dropdown.Option(ALL_MODS),
-            *(ft.dropdown.Option(m) for m in mods),
-        ]
+        kit.set_dropdown_options(
+            self.mod_dd, [(ALL_MODS, ALL_MODS), *((m, m) for m in mods)]
+        )
         if self.mod_id not in mods:
             self.mod_id = None
         self.mod_dd.value = self.mod_id or ALL_MODS

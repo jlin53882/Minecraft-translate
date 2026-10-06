@@ -172,7 +172,7 @@ class TranslatePanel(ft.Column):
         """切到本頁籤時重讀資料庫的版本與模組清單，保留目前選擇。"""
         db = self._get_db()
         versions = db.versions() if db else []
-        self.version_dd.options = [ft.dropdown.Option(v) for v in versions]
+        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
         if self.version_dd.value not in versions:
             self.version_dd.value = versions[0] if versions else None
         self._refresh_mods()
@@ -182,9 +182,9 @@ class TranslatePanel(ft.Column):
         db = self._get_db()
         version = self.version_dd.value
         mods = db.mods(version) if db and version else []
-        self.mod_dd.options = [ft.dropdown.Option(key=ALL_MODS, text="全部模組")] + [
-            ft.dropdown.Option(m) for m in mods
-        ]
+        kit.set_dropdown_options(
+            self.mod_dd, [(ALL_MODS, "全部模組"), *((m, m) for m in mods)]
+        )
         if self.mod_dd.value not in [ALL_MODS, *mods]:
             self.mod_dd.value = ALL_MODS
 

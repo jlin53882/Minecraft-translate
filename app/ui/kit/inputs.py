@@ -168,6 +168,21 @@ def dropdown(**kwargs) -> ft.Dropdown:
     return ft.Dropdown(**{**style, **kwargs})
 
 
+def set_dropdown_options(dd: ft.Dropdown, pairs: Sequence[tuple[str, str]]) -> bool:
+    """更新下拉選項：重複的 key 只留一個；內容沒變就不動，避免每次切頁都重建選項。
+
+    ``pairs`` 為 ``(key, 顯示文字)``。回傳是否真的改了選項。
+    """
+    unique: dict[str, str] = {}
+    for key, text in pairs:
+        unique.setdefault(str(key), str(text))
+    current = [(o.key, o.text) for o in dd.options]
+    if current == list(unique.items()):
+        return False
+    dd.options = [ft.dropdown.Option(key=k, text=t) for k, t in unique.items()]
+    return True
+
+
 def pick_button(
     icon: str = ft.Icons.FOLDER_OPEN,
     tooltip: str | None = None,

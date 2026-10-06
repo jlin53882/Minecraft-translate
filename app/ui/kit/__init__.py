@@ -40,6 +40,7 @@ from app.ui.kit.inputs import (
     field,
     page_window,
     pick_button,
+    set_dropdown_options,
     text_field,
 )
 from app.ui.kit.progress import ProgressRing, clamp01, progress_bar
@@ -72,6 +73,7 @@ __all__ = [
     "progress_bar",
     "section_card",
     "section_label",
+    "set_dropdown_options",
     "stat_card",
     "text_field",
     "tone_icon",

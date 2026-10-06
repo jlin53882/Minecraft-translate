@@ -280,3 +280,29 @@ def test_db_location_banner_shows_folder_and_status(db_path):
     seed(db_path)
     banner.refresh()
     assert "已建立" in texts_of(banner.status_box)
+
+
+def test_set_dropdown_options_dedupes_and_skips_when_unchanged():
+    from app.ui import kit
+
+    dd = kit.dropdown(label="x")
+    assert kit.set_dropdown_options(dd, [("a", "A"), ("b", "B"), ("a", "A2")])
+    assert [(o.key, o.text) for o in dd.options] == [("a", "A"), ("b", "B")]
+    first = list(dd.options)
+    assert kit.set_dropdown_options(dd, [("a", "A"), ("b", "B")]) is False
+    assert dd.options == first  # 內容沒變 → 同一批物件，不重建
+    assert kit.set_dropdown_options(dd, [("a", "A")])
+    assert len(dd.options) == 1
+
+
+def test_entries_version_dropdown_has_no_duplicates_after_repeated_refresh(db_path):
+    from app.views.moddb import entries_panel
+
+    seed(db_path)
+    db = TranslationDB(db_path)
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    for _ in range(3):
+        panel.refresh()
+    keys = [o.key for o in panel.version_dd.options]
+    assert keys == ["1.21.1", "1.20.1"] and len(keys) == len(set(keys))
+    db.close()
