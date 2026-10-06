@@ -39,6 +39,7 @@
 - 合併頁單欄位寫入改走 ConfigStore（只改被修改的欄位，也會通知外殼）。
 
 ### Bug Fixes
+- **輸出 ZIP 放在來源資料夾內時打包卡住**：預設輸出路徑就在來源資料夾內，失敗留下的暫存 ZIP（`.zip.tmp`）、輸出 ZIP 與狀態檔會被當成來源掃描，甚至把自己再壓一次。現在打包自己的產物（ZIP、暫存、狀態檔）一律排除在指紋與壓縮之外，也讓「來源未變動就沿用」在預設路徑下能成立。
 - **Flet Web 手動輸入的路徑沒同步到後端**：新增 `SyncTextField`（`app/ui/sync_text_field.py`），單行欄位預設掛空的 `on_change`，讓輸入值即時回到 `.value`（一鍵流程曾收到 `input=[], output=[]`、打包對話框的輸出 ZIP 欄位仍用預設路徑）。`app/` 內全部 `ft.TextField` 改用它（含各流程對話框），並由 AST 契約測試強制。
 - **Flet Web 不支援資料夾選擇器**：新增 `SafeFilePicker`（`app/ui/safe_file_picker.py`），`get_directory_path`／`pick_files`／`save_file` 在不支援的平台改為顯示提示並視為取消，不再拋出未捕捉的 `FletUnsupportedPlatformException`；欄位保持可手動輸入（Web 模式輸入的是執行程式那台電腦的路徑）。
 - **輸出資料夾不必事先存在**：一鍵製作、提取、合併的輸出目錄改為自動建立（路徑是檔案或無法建立時才提示）。
