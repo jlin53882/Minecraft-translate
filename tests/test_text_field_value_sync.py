@@ -14,6 +14,33 @@ def test_explicit_handler_is_kept():
     assert kit.text_field("x", on_change=handler).on_change is handler
 
 
+def test_sync_handler_writes_event_value_back_to_control():
+    from types import SimpleNamespace
+
+    from app.ui.sync_text_field import _sync_value
+
+    control = SimpleNamespace(value="")
+    _sync_value(SimpleNamespace(control=control, data="使用者剛輸入的值"))
+
+    assert control.value == "使用者剛輸入的值"
+
+
+def test_sync_handler_does_not_clear_existing_value_on_empty_blur_event():
+    from types import SimpleNamespace
+
+    from app.ui.sync_text_field import _sync_value
+
+    control = SimpleNamespace(value="完整路徑")
+    _sync_value(SimpleNamespace(control=control, data=""))
+
+    assert control.value == "完整路徑"
+
+
+def test_single_line_field_has_blur_fallback():
+    assert kit.text_field("路徑").on_blur is not None
+    assert kit.text_field("x", multiline=True).on_blur is None
+
+
 def test_multiline_and_password_fields_do_not_round_trip_every_key():
     assert kit.text_field("x", multiline=True).on_change is None
     assert kit.text_field("x", password=True).on_change is None

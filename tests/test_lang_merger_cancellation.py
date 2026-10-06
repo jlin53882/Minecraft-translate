@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import threading
 import zipfile
+from pathlib import Path
 
 import pytest
 
+from app.services_impl.pipelines import merge_service
+from app.tasks.task_session import TaskSession
 from translation_tool.core import lang_merger
 from translation_tool.core.lang_merger import (
     merge_zhcn_to_zhtw_from_folder,
@@ -94,3 +97,49 @@ def test_without_cancel_everything_is_processed(tmp_path, calls):
     src = _make_folder(tmp_path)
     list(merge_zhcn_to_zhtw_from_folder(str(src), str(tmp_path / "out")))
     assert len(calls) == MODS
+
+
+def test_folder_service_removes_new_output_when_cancelled(tmp_path, monkeypatch):
+    """服務層取消時清掉本次新建的資料夾，避免留下半成品。"""
+    output = tmp_path / "out"
+
+    def cancelled(*args, **kwargs):
+        (Path(kwargs.get("output_dir", args[1]))).mkdir(parents=True)
+        args[2].request_cancel()
+        raise TaskCancelled()
+
+    monkeypatch.setattr(merge_service, "_run_folder_stages", cancelled)
+    session = TaskSession()
+    session.start()
+
+    with pytest.raises(TaskCancelled):
+        list(
+            merge_service.run_merge_folder_batch_service(
+                str(tmp_path / "input"), str(output), session, True
+            )
+        )
+
+    assert not output.exists()
+
+
+def test_zip_service_removes_new_output_when_cancelled(tmp_path, monkeypatch):
+    """ZIP 服務層取消時同樣不保留新建半成品。"""
+    output = tmp_path / "out"
+
+    def cancelled(*args, **kwargs):
+        (Path(kwargs.get("output_dir", args[1]))).mkdir(parents=True)
+        args[2].request_cancel()
+        raise TaskCancelled()
+
+    monkeypatch.setattr(merge_service, "_merge_one_zip", cancelled)
+    session = TaskSession()
+    session.start()
+
+    with pytest.raises(TaskCancelled):
+        list(
+            merge_service.run_merge_zip_batch_service(
+                [str(tmp_path / "input.zip")], str(output), session, True
+            )
+        )
+
+    assert not output.exists()

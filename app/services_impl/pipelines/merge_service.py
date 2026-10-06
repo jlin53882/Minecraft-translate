@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import traceback
 from pathlib import Path
 
@@ -25,6 +26,17 @@ from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
+
+
+def _cleanup_cancelled_output(output_dir: str, existed_before: bool, finished: bool, session) -> None:
+    """取消新建的合并输出时移除半成品；不碰使用者原本存在的目录。"""
+    if finished or existed_before or not getattr(session, "cancel_requested", False):
+        return
+    try:
+        shutil.rmtree(output_dir, ignore_errors=True)
+        _session_log(session, f"[取消] 已清理半成品輸出：{output_dir}", "info")
+    except OSError as exc:
+        _session_log(session, f"[取消] 清理半成品輸出失敗：{output_dir}；{exc!r}", "warning")
 
 
 def _session_log(session, text: str, level: str = "info") -> None:
@@ -210,7 +222,7 @@ def run_merge_zip_batch_service(
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
     ensure_pipeline_logging()
     UI_LOG_HANDLER.set_session(session)
-
+    output_existed_before = os.path.exists(output_dir)
     # 統計計數器
     stats = {
         "total_zips": len(zip_paths),
@@ -221,7 +233,6 @@ def run_merge_zip_batch_service(
     }
 
     finished = False  # generator 被 close（取消）時由 finally 補 finish
-
     try:
         total = len(zip_paths)
         if total == 0:
@@ -284,6 +295,7 @@ def run_merge_zip_batch_service(
         finished = True
 
     finally:
+        _cleanup_cancelled_output(output_dir, output_existed_before, finished, session)
         # ⭐ 避免 handler 留著舊 session
         UI_LOG_HANDLER.set_session(None)
         if not finished:
@@ -478,6 +490,7 @@ def run_merge_folder_batch_service(
     """
     ensure_pipeline_logging()
     UI_LOG_HANDLER.set_session(session)
+    output_existed_before = os.path.exists(output_dir)
 
     stats = {
         "total_folders": 1,
@@ -540,6 +553,9 @@ def run_merge_folder_batch_service(
         yield {"progress": 1.0, "log": None, "error": True, "summary": error_summary}
 
     finally:
+        _cleanup_cancelled_output(
+            output_dir, output_existed_before, finished, session
+        )
         UI_LOG_HANDLER.set_session(None)
         if finish_session and not finished:
             session.finish()  # 取消（generator.close）等沒走到 finish 的路徑

@@ -15,16 +15,48 @@ import flet as ft
 
 
 def _sync_value(e) -> None:
-    """不做事：只是讓前端在每次輸入時把值送回後端。"""
+    """把 Web 事件中的最新值寫回後端控制項。"""
+    # Flet Web 事件送達 Python 前會先同步控制項的 value；優先讀控制項，
+    # 避免把 renderer 的增量／舊事件資料誤當成完整路徑。
+    if e is not None and getattr(e, "control", None) is not None:
+        value = getattr(e, "data", None)
+        current = getattr(e.control, "value", "")
+        # 部分 Web renderer 的 blur 事件 data 會是空字串；控制項已有值時
+        # 不可再用事件資料覆蓋它。只有控制項仍是空值時才使用非空 fallback。
+        if not current and value:
+            e.control.value = value
 
 
 class SyncTextField(ft.TextField):
+    def __init__(self, *args, **kwargs):
+        """在控制項建立前就註冊 Web 同步事件。"""
+        # Flet 會在基底建構子內準備事件註冊資料；要在 super() 前傳入，
+        # 才能確保 Web renderer 真的把 handler 發佈到前端，而不是只改到
+        # Python 物件上的屬性。
+        is_single_line = not (
+            kwargs.get("multiline", False)
+            or kwargs.get("password", False)
+            or kwargs.get("read_only", False)
+        )
+        if is_single_line:
+            if kwargs.get("on_change") is None:
+                kwargs["on_change"] = _sync_value
+            if kwargs.get("on_blur") is None:
+                kwargs["on_blur"] = _sync_value
+        super().__init__(*args, **kwargs)
+        self._ensure_sync_handlers()
+
+    def _ensure_sync_handlers(self) -> None:
+        """為可編輯單行欄位註冊輸入與失焦同步事件。"""
+        if self.multiline or self.password or self.read_only:
+            return
+        if self.on_change is None:
+            self.on_change = _sync_value
+        if self.on_blur is None:
+            self.on_blur = _sync_value
+
     def init(self):
         super().init()
-        if (
-            self.on_change is None
-            and not self.multiline
-            and not self.password
-            and not self.read_only  # 唯讀欄位使用者改不了，不需要同步
-        ):
-            self.on_change = _sync_value
+        # Flet 生命週期可能在不同 renderer 以不同順序呼叫 init；再次確保
+        # handler 存在，避免 Web renderer 在第一次 build 時遺漏事件註冊。
+        self._ensure_sync_handlers()
