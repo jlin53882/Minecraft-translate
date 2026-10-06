@@ -352,9 +352,19 @@ def test_same_key_suggestion_offers_apply_even_when_source_differs():
         entry=NS(zh_tw="", en_us="Distribution Interval [ticks]"),
         same_key=[
             NS(
-                mc_version="1.20.1", source=3, zh_tw="分配間隔 [ticks]", same_text=False
+                mc_version="1.20.1",
+                source=3,
+                zh_tw="分配間隔 [ticks]",
+                same_text=False,
+                en_us="",  # 由翻譯 ZIP 匯入：只有鍵值與譯文，沒有原文
             ),
-            NS(mc_version="1.19.2", source=None, zh_tw="", same_text=False),
+            NS(
+                mc_version="1.19.2",
+                source=None,
+                zh_tw="",
+                same_text=False,
+                en_us="",
+            ),
         ],
         same_text=[],
     )
@@ -364,6 +374,27 @@ def test_same_key_suggestion_offers_apply_even_when_source_differs():
     buttons[0].on_click(None)
     assert applied == ["分配間隔 [ticks]"]
     assert apply_buttons(controls[1]) == []  # 沒有譯文的版本不提供套用
+
+    # 其他版本的原文要直接顯示出來供對照；沒有原文標「原文未知」，有但不同標「原文不同」
+    from tests.test_moddb_view import texts_of
+
+    first = texts_of(controls[0])
+    assert any("原文：（未知" in t for t in first) and "原文未知" in first
+    detail.same_key.append(
+        NS(
+            mc_version="1.18.2",
+            source=1,
+            zh_tw="舊譯",
+            same_text=False,
+            en_us="Distribution Interval",
+        )
+    )
+    third = texts_of(build_suggestions(detail, "key", applied.append)[2])
+    assert "原文：Distribution Interval" in third and "原文不同" in third
+    detail.same_key[2].same_text = True
+    assert "原文不同" not in texts_of(
+        build_suggestions(detail, "key", applied.append)[2]
+    )
 
 
 def test_changed_filter_lists_entries_with_a_pending_source_change(db_path):
