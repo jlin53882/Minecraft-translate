@@ -652,6 +652,25 @@ def test_probe_lease_is_released_when_the_probe_falls_through_to_another_model(
     assert env.model_calls.count("m2") == 4
 
 
+def test_slow_probe_keeps_its_lease_for_the_whole_request_timeout(env):
+    """探測請求最久可飛行 rate_limit.timeout（預設 600 秒）：期間其他 worker 不能搶到第二個探測。"""
+    _exhaust_m1_and_wait_for_probe(env)
+    quota = get_model_quota_registry()
+    seen: list[bool] = []
+
+    def slow_api(**kwargs):
+        env.clock.t += 400  # 比舊的 300 秒租約久、比請求逾時短
+        seen.append(quota.claim("m1", object()))  # 另一個 worker 此時想探測
+        return OK_JSON
+
+    with patch.object(main, "call_gemini_requests", side_effect=slow_api):
+        result, status = env.translate(1)
+
+    assert status == "AUTO"
+    assert len(result) == 1
+    assert seen == [False]
+
+
 def test_single_key_rpd_behaviour(env):
     env.keys = ["k0"]
     env.outcomes = {"k0": rpd()}

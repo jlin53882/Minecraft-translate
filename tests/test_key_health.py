@@ -777,3 +777,75 @@ def test_model_quota_mark_ok_ignores_requests_that_started_before_the_exhaustion
     assert reg.mark_ok("m1", started_at=clock.t) is True
     assert reg.is_exhausted("m1") is False
     assert reg.mark_ok("m1", started_at=clock.t) is False  # 沒有紀錄可清
+
+
+def test_model_quota_lease_length_can_cover_a_slow_probe_request():
+    """租約要比探測請求可能飛行的時間長：慢速探測期間其他 worker 不能搶到第二個探測。"""
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(clock, probe_interval=600)
+    a, b = object(), object()
+    reg.mark_exhausted("m1", until=clock.t + 86_400)
+    clock.t += 601
+    assert reg.claim("m1", a, lease_sec=660)  # 請求逾時 600 秒 + 餘裕
+
+    clock.t += 650  # 慢速探測仍在飛行中
+    assert reg.claim("m1", b) is False
+    clock.t += 20  # 租約逾時
+    assert reg.claim("m1", b) is True
+
+
+def test_quota_reset_window_is_a_single_instant_with_tzdata_and_a_range_without():
+    from unittest.mock import patch
+    from zoneinfo import ZoneInfoNotFoundError
+
+    from translation_tool.core import lm_key_health as health
+
+    now = _utc(2026, 12, 1, 7, 30)
+    assert (
+        health.quota_reset_window(now) == (_utc(2026, 12, 1, 8, 0),) * 2
+    )  # 太平洋 11/30 23:30
+
+    with patch.object(health, "ZoneInfo", side_effect=ZoneInfoNotFoundError("x")):
+        # 冬令 07:30 UTC：真實重置是今天 08:00 UTC（UTC-8 午夜）；UTC-7 的下一個午夜是明天 07:00
+        assert health.quota_reset_window(now) == (
+            _utc(2026, 12, 1, 8, 0),
+            _utc(2026, 12, 2, 7, 0),
+        )
+        # 夏令 06:30 UTC：真實重置是今天 07:00 UTC，UTC-8 午夜是 08:00
+        assert health.quota_reset_window(_utc(2026, 10, 6, 6, 30)) == (
+            _utc(2026, 10, 6, 7, 0),
+            _utc(2026, 10, 6, 8, 0),
+        )
+
+
+def test_uncertain_reset_window_keeps_a_single_owner_probe_after_the_early_deadline():
+    """沒有 tzdata：較早的期限只是「可能已恢復」，不能直接全面放行（一擁而上送 RPD 請求）。"""
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(clock, probe_interval=600)
+    a, b = object(), object()
+    reg.mark_exhausted("m1", until=clock.t + 100, grace_until=clock.t + 4000)
+
+    clock.t += 700  # 過了較早的期限（也過了探測間隔），但還在不確定視窗內
+    assert reg.is_exhausted("m1") is False  # 顯示上不再算「耗盡」
+    assert reg.claim("m1", a) is True  # 第一個 worker 領到探測租約
+    assert reg.claim("m1", b) is False  # 其他 worker 仍被擋下
+    assert reg.is_blocked("m1", b) is True
+    assert reg.claim("m1", a) is True  # 持有者可重入重試
+
+    assert reg.mark_ok("m1", started_at=clock.t) is True  # 探測成功：恢復
+    assert reg.claim("m1", b) is True
+
+
+def test_certain_deadline_without_grace_unblocks_everyone_as_before():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(clock, probe_interval=600)
+    reg.mark_exhausted("m1", until=clock.t + 100)
+    clock.t += 101
+    assert reg.claim("m1", object()) is True
+    assert reg.claim("m1", object()) is True

@@ -192,19 +192,27 @@ def _next_midnight(now: float, tz: tzinfo) -> float:
     ).timestamp()
 
 
-def next_quota_reset(now: float) -> float:
-    """``now``（epoch 秒）之後的下一個太平洋時間午夜 00:00（epoch 秒），夏令時間自動處理。
+def quota_reset_window(now: float) -> tuple[float, float]:
+    """``now`` 之後下一次配額重置的 (最早, 最晚) 時間（epoch 秒）。
 
-    沒有時區資料庫時（例如沒裝 tzdata 的 Windows）：實際重置時間必為 UTC-7（夏令）或 UTC-8（冬令）
-    的午夜之一，所以取兩者中較早的一個——只會提早探測，絕不會比實際重置晚。
+    有時區資料庫時兩者相同（太平洋時間午夜，夏令時間自動處理）。沒有時區資料庫時（例如沒裝
+    tzdata 的 Windows），實際重置必為 UTC-7（夏令）或 UTC-8（冬令）的午夜之一，所以回傳兩者：
+    最早的時間只是「可能已恢復」，在最晚的時間之前仍須由單一探測確認（見 ``ModelQuotaRegistry``）。
     """
     try:
         tz = ZoneInfo(QUOTA_RESET_TZ)
     except ZoneInfoNotFoundError:
-        return min(
+        candidates = [
             _next_midnight(now, timezone(timedelta(hours=hours))) for hours in (-7, -8)
-        )
-    return _next_midnight(now, tz)
+        ]
+        return min(candidates), max(candidates)
+    reset = _next_midnight(now, tz)
+    return reset, reset
+
+
+def next_quota_reset(now: float) -> float:
+    """``now``（epoch 秒）之後最早可能的配額重置時間（太平洋時間午夜；沒有時區資料庫時取較早者）。"""
+    return quota_reset_window(now)[0]
 
 
 @dataclass(frozen=True)
@@ -217,8 +225,11 @@ class ModelQuotaHealth:
 
 
 DEFAULT_PROBE_INTERVAL_SEC = 600.0
-# 探測租約的保底逾時：持有者異常結束又沒釋放時，不會永遠卡住其他 worker。
-DEFAULT_PROBE_LEASE_SEC = 300.0
+# 探測租約的保底逾時：必須比探測請求可能飛行的時間（請求逾時）長，否則慢速探測期間
+# 其他 worker 會搶到第二個探測；持有者異常結束又沒釋放時，也不會永遠卡住其他 worker。
+PROBE_LEASE_MARGIN_SEC = 60.0
+# 預設租約長度：預設請求逾時（rate_limit.timeout = 600 秒）+ 餘裕；實際使用時由呼叫端依設定傳入。
+DEFAULT_PROBE_LEASE_SEC = 660.0
 
 
 class ModelQuotaRegistry:
@@ -246,6 +257,7 @@ class ModelQuotaRegistry:
         self._lease_ttl = lease_ttl
         self._lock = threading.Lock()
         self._until: dict[str, float] = {}
+        self._hard_until: dict[str, float] = {}  # 紀錄真正失效的時間（>= _until）
         self._marked_at: dict[str, float] = {}
         self._next_probe: dict[str, float] = {}
         self._lease: dict[str, tuple[object, float]] = {}  # model -> (owner, 到期時間)
@@ -253,13 +265,24 @@ class ModelQuotaRegistry:
     def now(self) -> float:
         return self._clock()
 
-    def mark_exhausted(self, model: str, until: float | None = None) -> float:
-        """記錄模型今日配額用盡（同時收回探測租約並重新計時）。預設持續到下一個太平洋午夜。"""
+    def mark_exhausted(
+        self,
+        model: str,
+        until: float | None = None,
+        grace_until: float | None = None,
+    ) -> float:
+        """記錄模型今日配額用盡（同時收回探測租約並重新計時）。預設持續到下一個太平洋午夜。
+
+        ``grace_until``：重置時間不確定（沒有時區資料庫）時的最晚可能時間。``until`` 到了之後
+        紀錄不會直接失效，而是進入「不確定視窗」：仍由單一探測確認，到 ``grace_until`` 才完全失效。
+        """
         now = self._clock()
         if until is None:
-            until = next_quota_reset(now)
+            until, grace_until = quota_reset_window(now)
+        hard_until = max(until, grace_until if grace_until is not None else until)
         with self._lock:
             self._until[model] = until
+            self._hard_until[model] = hard_until
             self._marked_at[model] = now
             self._next_probe[model] = now + self._probe_interval
             self._lease.pop(model, None)
@@ -280,7 +303,13 @@ class ModelQuotaRegistry:
                 and started_at < marked_at
             ):
                 return False
-            for table in (self._until, self._marked_at, self._next_probe, self._lease):
+            for table in (
+                self._until,
+                self._hard_until,
+                self._marked_at,
+                self._next_probe,
+                self._lease,
+            ):
                 table.pop(model, None)
             return True
 
@@ -288,9 +317,9 @@ class ModelQuotaRegistry:
         return self.seconds_remaining(model) > 0
 
     def _claimable_locked(self, model: str, owner: object, now: float) -> bool:
-        until = self._until.get(model)
+        until = self._hard_until.get(model)
         if until is None or until <= now:
-            return True  # 沒耗盡
+            return True  # 沒耗盡（或已確定過了重置時間）
         lease = self._lease.get(model)
         if lease is not None and lease[1] > now:
             return lease[0] is owner  # 租約有效：只有持有者能（重入）使用
@@ -303,23 +332,25 @@ class ModelQuotaRegistry:
         """
         now = self._clock()
         with self._lock:
-            until = self._until.get(model)
+            until = self._hard_until.get(model)
             if until is None or until <= now:
                 return False
             return not self._claimable_locked(model, owner, now)
 
-    def claim(self, model: str, owner: object) -> bool:
+    def claim(self, model: str, owner: object, lease_sec: float | None = None) -> bool:
         """``owner`` 現在可以對這個模型送請求嗎？
 
         沒耗盡 → True；耗盡 → 只有輪到探測、或本來就持有租約時回傳 True（必要時發出租約）。
+        ``lease_sec`` 是租約長度，必須比探測請求可能飛行的時間（請求逾時）長；預設用建構時的值。
         """
         now = self._clock()
         with self._lock:
             if not self._claimable_locked(model, owner, now):
                 return False
-            until = self._until.get(model)
+            until = self._hard_until.get(model)
             if until is not None and until > now:
-                self._lease[model] = (owner, now + self._lease_ttl)
+                ttl = self._lease_ttl if lease_sec is None else lease_sec
+                self._lease[model] = (owner, now + ttl)
             return True
 
     def release(self, model: str, owner: object) -> None:
@@ -372,6 +403,7 @@ class ModelQuotaRegistry:
     def clear(self) -> None:
         with self._lock:
             self._until.clear()
+            self._hard_until.clear()
             self._marked_at.clear()
             self._next_probe.clear()
             self._lease.clear()

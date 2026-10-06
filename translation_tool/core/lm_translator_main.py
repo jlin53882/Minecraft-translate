@@ -18,7 +18,10 @@ from translation_tool.core.lm_batch_budget import (
 )
 from translation_tool.core.lm_config_rules import ApiKeyCycle
 from translation_tool.core.lm_config_schema import model_output_token_cap
-from translation_tool.core.lm_key_health import get_model_quota_registry
+from translation_tool.core.lm_key_health import (
+    PROBE_LEASE_MARGIN_SEC,
+    get_model_quota_registry,
+)
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.utils.cancellation import interruptible_sleep
 from translation_tool.utils.config_manager import get_models_config, load_config
@@ -706,6 +709,15 @@ def _merge_batch_response(
     return merged, False
 
 
+def _probe_lease_sec(runtime: _BatchRuntime) -> float:
+    """探測租約長度：請求逾時（``rate_limit.timeout``，預設 600 秒）+ 餘裕。"""
+    try:
+        timeout = float((runtime.lm_cfg.get("rate_limit") or {}).get("timeout", 600))
+    except (TypeError, ValueError):
+        timeout = 600.0
+    return max(timeout, 0.0) + PROBE_LEASE_MARGIN_SEC
+
+
 def _plan_model_indices(runtime: _BatchRuntime, quota) -> list[int] | None:
     """這一輪要走的模型索引；所有可用模型都被每日配額擋住時回傳 None（= 耗盡，不送請求）。"""
     owner = runtime.quota_owner
@@ -765,7 +777,7 @@ def _attempt_batch(
         if model_index in runtime.missing_models:
             continue
         model_name = runtime.model_pool[model_index]
-        if not quota.claim(model_name, owner):
+        if not quota.claim(model_name, owner, _probe_lease_sec(runtime)):
             # 今日配額已用盡且還沒輪到探測（或探測名額被其他 worker 領走）：不白打請求
             skipped_by_quota.add(model_index)
             continue
