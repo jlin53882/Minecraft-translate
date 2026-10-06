@@ -430,3 +430,26 @@ def test_ok_filter_never_lists_untranslated_entries(db_path):
     ok_keys = {c.key for c in panel.list_view.controls}
     assert len(ok_keys) == len(panel.rows) and not ok_keys & none_keys
     db.close()
+
+
+def test_db_path_strips_quotes_and_accepts_a_folder(tmp_path, monkeypatch):
+    """檔案總管「複製為路徑」會帶引號；填資料夾時使用其中的預設檔名。"""
+    from translation_tool.translation_db.settings import (
+        DEFAULT_DB_FILE,
+        load_db_settings,
+        normalize_db_path,
+    )
+
+    target = tmp_path / "data" / "mod_translation.db"
+    assert normalize_db_path(f'"{target}"') == str(target)
+    assert normalize_db_path(f"  '{target}'  ") == str(target)
+    assert normalize_db_path("“x.db”") == "x.db"
+    assert normalize_db_path(None) == ""
+
+    settings = load_db_settings({"translation_db": {"path": f'"{target}"'}})
+    assert settings.path == str(target) and settings.resolved_path() == target
+
+    folder = tmp_path / "dbdir"
+    folder.mkdir()
+    folder_settings = DbSettings(path=str(folder))
+    assert folder_settings.resolved_path() == folder / DEFAULT_DB_FILE

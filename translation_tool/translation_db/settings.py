@@ -45,7 +45,24 @@ class DbSettings:
     def resolved_path(self) -> Path:
         from translation_tool.utils.config_manager import resolve_project_path
 
-        return resolve_project_path(self.path or DEFAULT_DB_FILE)
+        path = resolve_project_path(self.path or DEFAULT_DB_FILE)
+        # 填的是資料夾：使用該資料夾內的預設檔名
+        return path / DEFAULT_DB_FILE if path.is_dir() else path
+
+
+_QUOTES = "\"'“”‘’「」"
+
+
+def normalize_db_path(value: object) -> str:
+    """整理使用者填的資料庫路徑：去掉前後空白與引號。
+
+    Windows 檔案總管「複製為路徑」會帶雙引號（``"C:\\...\\x.db"``），直接當路徑會被
+    當成相對路徑而找不到檔案。
+    """
+    text = str(value or "").strip()
+    while len(text) >= 2 and text[0] in _QUOTES and text[-1] in _QUOTES:
+        text = text[1:-1].strip()
+    return text.strip(_QUOTES).strip()
 
 
 def parse_priority(names: Any) -> tuple[int, ...]:
@@ -73,7 +90,7 @@ def load_db_settings(config: dict | None = None) -> DbSettings:
     cfg = config.get("translation_db", {}) or {}
     return DbSettings(
         enabled=bool(cfg.get("enabled", True)),
-        path=str(cfg.get("path") or "").strip(),
+        path=normalize_db_path(cfg.get("path")),
         version=str(cfg.get("version") or "").strip(),
         cross_version=bool(cfg.get("cross_version", True)),
         write_back=bool(cfg.get("write_back", True)),
