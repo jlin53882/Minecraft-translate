@@ -8,7 +8,10 @@ from dataclasses import dataclass, field
 
 import requests
 
-from translation_tool.core.lm_api_client import call_gemini_requests
+from translation_tool.core.lm_api_client import (
+    call_gemini_requests,
+    worst_case_request_sec,
+)
 from translation_tool.core.lm_batch_actions import BatchAction, decide_batch_action
 from translation_tool.core.lm_batch_budget import (
     BudgetConfig,
@@ -716,12 +719,12 @@ def _abandon_model(
 
 
 def _probe_lease_sec(runtime: _BatchRuntime) -> float:
-    """探測租約長度：請求逾時（``rate_limit.timeout``，預設 600 秒）+ 餘裕。"""
+    """探測租約長度：涵蓋用戶端整段最壞耗時（連線重試 × 逾時 + 退避）+ 餘裕。"""
     try:
         timeout = float((runtime.lm_cfg.get("rate_limit") or {}).get("timeout", 600))
     except (TypeError, ValueError):
         timeout = 600.0
-    return max(timeout, 0.0) + PROBE_LEASE_MARGIN_SEC
+    return worst_case_request_sec(timeout) + PROBE_LEASE_MARGIN_SEC
 
 
 def _plan_model_indices(runtime: _BatchRuntime, quota) -> list[int] | None:
@@ -756,15 +759,17 @@ def _dead_end_outcome(
     """這一輪沒有任何模型能送請求（都是 404 或被每日配額擋住）時的終止結果；否則回傳 None。
 
     看的是模型「現在」的狀態，而不是它怎麼變成被擋住的：claim 時就被擋下、這一輪送出請求後才
-    收到 RPD、探測名額被其他 worker 領走，結果都一樣。縮小 batch 對這種情況沒有用，而且會把原文
-    回填成「已翻譯」。
+    收到 RPD、探測名額被其他 worker 領走，結果都一樣。搶不到探測名額的模型若已被對方恢復，則重試
+    這一輪。縮小 batch 對沒有任何模型可用的情況沒有用，而且會把原文回填成「已翻譯」。
     """
     blocked_now = {
         index
         for index in model_indices
-        if index in skipped_by_quota
-        or quota.is_blocked(runtime.model_pool[index], runtime.quota_owner)
+        if quota.is_blocked(runtime.model_pool[index], runtime.quota_owner)
     }
+    if skipped_by_quota - blocked_now - runtime.missing_models:
+        # 搶不到探測名額的模型，在我們收尾前已被贏得探測的 worker 恢復了：重新走這一輪，不能誤報耗盡。
+        return _BatchRoundOutcome(BatchAction.RETRY_SAME_MODEL)
     if not all(
         index in runtime.missing_models or index in blocked_now
         for index in model_indices

@@ -168,3 +168,20 @@ class TestModuleImports:
         from translation_tool.core.lm_api_client import call_gemini_requests
 
         assert callable(call_gemini_requests)
+
+
+def test_worst_case_request_sec_covers_every_connection_attempt_and_backoff():
+    from translation_tool.core import lm_api_client as client
+
+    timeout = 100.0
+    worst = client.worst_case_request_sec(timeout)
+
+    # 每次連線嘗試都可能套用完整逾時，再加上嘗試之間的指數退避（含最大 jitter）
+    assert worst >= client.NETWORK_RETRY_ATTEMPTS * timeout
+    backoff = worst - client.NETWORK_RETRY_ATTEMPTS * timeout
+    expected = sum(
+        client.NETWORK_RETRY_BASE_SEC * (2 ** (n - 1)) + client.NETWORK_RETRY_BASE_SEC
+        for n in range(1, client.NETWORK_RETRY_ATTEMPTS)
+    )
+    assert backoff == expected
+    assert client.worst_case_request_sec(-5) == expected  # 負的逾時不產生負的租約

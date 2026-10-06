@@ -555,13 +555,44 @@ def test_probe_race_between_the_blocked_check_and_the_claim_is_exhausted(env):
     _exhaust_m1_and_wait_for_probe(env)
     quota = get_model_quota_registry()
     assert quota.claim("m1", object())
+    real_is_blocked = quota.is_blocked
+    calls = {"n": 0}
 
-    with patch.object(quota, "is_blocked", return_value=False):
+    def lying_once(model, owner=None):
+        calls["n"] += 1
+        return (
+            False if calls["n"] == 1 else real_is_blocked(model, owner)
+        )  # 只有開頭的閘門被騙過
+
+    with patch.object(quota, "is_blocked", side_effect=lying_once):
         result, status = env.translate(2)
 
     assert status == "ALL_KEYS_EXHAUSTED"
     assert not result
     assert env.calls == []
+
+
+def test_model_recovered_by_the_winning_probe_is_retried_not_declared_exhausted(env):
+    """搶不到探測名額後，贏得探測的 worker 成功並清除了紀錄：這一輪要重試，不能誤報耗盡。"""
+    _exhaust_m1_and_wait_for_probe(env)
+    quota = get_model_quota_registry()
+    real_claim = quota.claim
+    state = {"first": True}
+
+    def claim_lost_then_recovered(model, owner, lease_sec=None):
+        if state["first"]:
+            state["first"] = False
+            quota.mark_ok(model)  # 另一個 worker 的探測剛好成功，紀錄被清除
+            return False  # 但我們這次 claim 已經輸了
+        return real_claim(model, owner, lease_sec)
+
+    env.model_outcomes = {"m1": OK_JSON}
+    with patch.object(quota, "claim", side_effect=claim_lost_then_recovered):
+        result, status = env.translate(1)
+
+    assert status == "AUTO"
+    assert len(result) == 1
+    assert env.model_calls == ["m1"]
 
 
 def test_probe_lost_to_another_worker_falls_back_to_the_next_model(env):
@@ -724,6 +755,26 @@ def test_http_200_from_a_probe_clears_the_exhaustion_even_if_the_body_is_unusabl
 
     assert env.model_calls[0] == "m1"  # 探測
     assert not quota.is_exhausted("m1")  # 額度已恢復，不再顯示「今日額度用盡」
+
+
+def test_probe_lease_covers_the_clients_whole_connection_retry_budget(env):
+    """用戶端最多 3 次連線嘗試、每次都套用 rate_limit.timeout：探測租約要涵蓋整段，
+    不能只涵蓋一次請求逾時，否則連線失敗期間別的 worker 會搶到第二個探測。"""
+    _exhaust_m1_and_wait_for_probe(env)
+    quota = get_model_quota_registry()
+    seen: list[bool] = []
+
+    def worst_case_api(**kwargs):
+        env.clock.t += 1700  # 約 3 次連線嘗試 × 600 秒逾時（比 1 次逾時 + 60 秒長得多）
+        seen.append(quota.claim("m1", object()))
+        return OK_JSON
+
+    with patch.object(main, "call_gemini_requests", side_effect=worst_case_api):
+        result, status = env.translate(1)
+
+    assert status == "AUTO"
+    assert len(result) == 1
+    assert seen == [False]
 
 
 def test_single_key_rpd_behaviour(env):

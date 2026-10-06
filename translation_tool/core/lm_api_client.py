@@ -88,6 +88,19 @@ def _build_translation_response_schema(payload: dict) -> dict:
     return schema
 
 
+def worst_case_request_sec(timeout: float) -> float:
+    """一次 ``call_gemini_requests`` 最壞情況會花多久（秒）：給探測租約這類需要涵蓋整段的呼叫端用。
+
+    連線階段最多 ``NETWORK_RETRY_ATTEMPTS`` 次嘗試，每次都可能套用完整的 ``timeout``，
+    嘗試之間還有指數退避（含最大 jitter）。
+    """
+    backoff = sum(
+        NETWORK_RETRY_BASE_SEC * (2 ** (attempt - 1)) + NETWORK_RETRY_BASE_SEC
+        for attempt in range(1, NETWORK_RETRY_ATTEMPTS)
+    )
+    return NETWORK_RETRY_ATTEMPTS * max(timeout, 0.0) + backoff
+
+
 def _post_with_retry(url: str, **kwargs) -> requests.Response:
     """requests.post，遇到連線階段的暫時性錯誤時指數退避重試（含 jitter）。"""
     for attempt in range(1, NETWORK_RETRY_ATTEMPTS + 1):
