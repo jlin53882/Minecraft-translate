@@ -339,13 +339,15 @@ class EntriesPanel(ft.Column):
 
     def _render_list(self) -> None:
         self.count_badge.value = f"{format_count(self.total)} 筆"
-        self.list_view.controls = [self._row_tile(r) for r in self.rows] or [
+        tiles = [self._row_tile(r) for r in self.rows] or [
             kit.empty_state(
                 "沒有符合的條目",
                 "調整上方篩選，或先到「掃描匯入」建立資料",
                 icon=ft.Icons.SEARCH_OFF,
             )
         ]
+        # 換篩選／換頁後清單內容大幅改變：全新 key 避免 Flet 配對舊項目而殘留上一份清單
+        self.list_view.controls = kit.rekey(tiles, "entry")
 
     def _row_tile(self, row: EntryRow) -> ft.Control:
         tone = design.tone(STATE_TONES[row.state])

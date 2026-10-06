@@ -410,3 +410,23 @@ def test_pager_buttons_get_fresh_unique_keys_on_every_render():
     assert len(set(before)) == len(before) and len(set(after)) == len(after)
     assert not set(before) & set(after)
     assert len(after) == 3  # ‹ 1 ›：只有一頁
+
+
+def test_ok_filter_never_lists_untranslated_entries(db_path):
+    """「有譯文」篩選不會出現（未翻譯）的條目；切換篩選後清單項目的 key 全新。"""
+    from app.views.moddb import entries_panel
+
+    seed(db_path)
+    db = TranslationDB(db_path)
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    panel.show_filter("none")
+    panel._load_list()
+    none_keys = {c.key for c in panel.list_view.controls}
+    assert {r.zh_tw for r in panel.rows} == {""}
+    panel.show_filter("ok")
+    panel._load_list()
+    assert panel.rows and all(r.zh_tw for r in panel.rows)
+    ok_keys = {c.key for c in panel.list_view.controls}
+    assert len(ok_keys) == len(panel.rows) and not ok_keys & none_keys
+    db.close()
