@@ -439,12 +439,23 @@ class TranslationDB:
         kind: str | None = None,
         state: str = "all",
         query: str = "",
+        source: int | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[EntryRow], int]:
-        """條目清單（含總筆數）。state：all / none / diff / manual / ok。"""
+        """條目清單（含總筆數）。state：all / none / diff / manual / ok。
+
+        ``source``：只列出「有該來源譯文」的條目（不論最後採用的是哪個來源，
+        所以新匯入的來源即使排在較低優先序、沒被採用，也找得到）。
+        """
         where = ["e.mc_version = ?"]
         params: list = [version]
+        if source is not None:
+            where.append(
+                "EXISTS (SELECT 1 FROM translation ts WHERE ts.entry_id = e.id "
+                "AND ts.source = ? AND ts.zh_tw <> '')"
+            )
+            params.append(int(source))
         if mod_id:
             where.append("e.mod_id = ?")
             params.append(mod_id)

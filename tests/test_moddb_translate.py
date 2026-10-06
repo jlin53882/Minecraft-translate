@@ -194,3 +194,49 @@ def test_translate_panel_runs_and_shows_summary(db_path, monkeypatch):
     assert panel.status_chip.label.value == "機翻完成"
     assert panel.stat_written.value_text.value == "2"
     db.close()
+
+
+def test_list_entries_filters_by_source_even_when_not_effective(db_path):
+    """來源篩選看「有沒有該來源的譯文」，不論最後採用哪個（新匯入但被蓋過的也找得到）。"""
+    from translation_tool.translation_db.schema import SRC_MANUAL, SRC_SUBTITLE
+
+    seed(db_path)
+    db = TranslationDB(db_path)
+    rows = {r.key: r for r in db.list_entries("1.21.1")[0]}
+    eid = rows["item.foo.a"].id
+    with db._tx() as conn:  # 町宮字幕組也有一筆，但被較高優先序的人工蓋過
+        conn.execute(
+            "INSERT INTO translation (entry_id, source, zh_tw) VALUES (?,?,?)",
+            (eid, SRC_SUBTITLE, "鋼鐵外殼"),
+        )
+        conn.execute(
+            "INSERT INTO translation (entry_id, source, zh_tw) VALUES (?,?,?)",
+            (eid, SRC_MANUAL, "鋼製外殼（人工）"),
+        )
+        db._refresh(conn, [eid])
+    keys = lambda src: [
+        r.key for r in db.list_entries("1.21.1", source=src)[0]
+    ]
+    assert keys(SRC_SUBTITLE) == ["item.foo.a"]
+    assert keys(SRC_MANUAL) == ["item.foo.a"]
+    assert keys(SRC_AI) == []
+    assert len(keys(None)) == 4
+    db.close()
+
+
+def test_entries_panel_source_filter(db_path):
+    from app.views.moddb import entries_panel
+    from translation_tool.translation_db.schema import SRC_JAR_TW
+
+    seed(db_path)
+    db = TranslationDB(db_path)
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    assert panel.total == 4
+    panel.source_filter.dropdown.value = str(SRC_JAR_TW)
+    panel._on_source()
+    assert panel.total == 1  # 只有 foo.a 有「模組自帶繁中」
+    panel.source_filter.dropdown.value = "__all__"
+    panel._on_source()
+    assert panel.total == 4
+    db.close()

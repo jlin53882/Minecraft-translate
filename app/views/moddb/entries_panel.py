@@ -36,6 +36,8 @@ from app.views.moddb.formatting import (
     token_issues,
     whitespace_note,
 )
+from app.views.moddb.source_filter import SourceFilter
+from app.views.moddb.suggestions import build_suggestions
 from translation_tool.utils.log_unit import (
     log_debug,
     log_exception,
@@ -94,6 +96,7 @@ class EntriesPanel(ft.Column):
         self.mod_dd = kit.dropdown(
             label="模組", dense=True, width=220, on_select=self._on_mod
         )
+        self.source_filter = SourceFilter(self._on_source)
         self.search = kit.text_field(
             "搜尋", hint="原文、譯文或鍵值", expand=True, on_submit=self._on_search
         )
@@ -103,7 +106,13 @@ class EntriesPanel(ft.Column):
         self.filter_card = kit.section_card(
             None,
             ft.Row(
-                [self.version_dd, self.mod_dd, self.search, self.state_seg],
+                [
+                    self.version_dd,
+                    self.mod_dd,
+                    self.source_filter.dropdown,
+                    self.search,
+                    self.state_seg,
+                ],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
@@ -315,6 +324,7 @@ class EntriesPanel(ft.Column):
                 mod_id=self.mod_id,
                 state=self.state,
                 query=self.query,
+                source=self.source_filter.code,
                 limit=PAGE_SIZE,
                 offset=(page - 1) * PAGE_SIZE,
             )
@@ -445,100 +455,10 @@ class EntriesPanel(ft.Column):
         self._render_history()
 
     def _render_suggestions(self) -> None:
-        detail = self.detail
-        if detail is None:
+        if self.detail is None:
             return
-        entry = detail.entry
-        self.sug_col.controls = []
-        if self.sug_tab == "key":
-            rows = detail.same_key
-            for r in rows:
-                self.sug_col.controls.append(
-                    self._sug_item(
-                        r.zh_tw,
-                        [
-                            r.mc_version,
-                            source_label(r.source) if r.zh_tw else "",
-                            "" if r.same_text else "原文不同",
-                        ],
-                        apply=r.zh_tw
-                        if (r.zh_tw and r.zh_tw != entry.zh_tw and r.same_text)
-                        else None,
-                        same=r.zh_tw == entry.zh_tw,
-                    )
-                )
-            hint = (
-                "原文相同的版本，手動儲存時會一併被取代；標示「原文不同」者不會被動到。"
-            )
-        else:
-            groups: dict[str, list] = {}
-            for r in detail.same_text:
-                groups.setdefault(r.zh_tw, []).append(r)
-            rows = detail.same_text
-            for tw, items in groups.items():
-                tags = [
-                    f"{x.mod_id}・{x.key.split('.')[-1]}・{x.mc_version}"
-                    for x in items[:6]
-                ]
-                if len(items) > 6:
-                    tags.append(f"…共 {len(items)} 筆")
-                self.sug_col.controls.append(
-                    self._sug_item(
-                        tw,
-                        tags,
-                        apply=tw if (tw and tw != entry.zh_tw) else None,
-                        same=tw == entry.zh_tw,
-                        count=len(items),
-                    )
-                )
-            hint = f"原文「{shorten(entry.en_us, 24)}」在其他鍵值／模組的譯法，用來檢查用詞一致性；只供參考。"
-        if not rows:
-            self.sug_col.controls.append(kit.hint_text("沒有符合的資料"))
-        else:
-            self.sug_col.controls.append(kit.hint_text(hint))
-
-    def _sug_item(
-        self,
-        text: str,
-        tags: list[str],
-        *,
-        apply: str | None,
-        same: bool,
-        count: int = 0,
-    ) -> ft.Control:
-        title = text if text else "（未翻譯）"
-        head = ft.Text(
-            title + (f"  × {count}" if count else ""),
-            size=14,
-            color=C.MUTED if same or not text else C.TEXT,
-            selectable=True,
-            expand=True,
-        )
-        row: list[ft.Control] = [head]
-        if apply:
-            row.append(
-                kit.button(
-                    "套用",
-                    "secondary",
-                    size="sm",
-                    on_click=lambda _e, t=apply: self._apply_suggestion(t),
-                )
-            )
-        return ft.Container(
-            padding=ft.Padding.symmetric(vertical=8),
-            border=ft.Border.only(bottom=ft.BorderSide(1, C.LINE)),
-            content=ft.Column(
-                [
-                    ft.Row(row, vertical_alignment=ft.CrossAxisAlignment.START),
-                    ft.Row(
-                        [kit.chip(t, "neutral") for t in tags if t]
-                        + ([kit.chip("與目前相同", "em")] if same and text else []),
-                        spacing=6,
-                        wrap=True,
-                    ),
-                ],
-                spacing=4,
-            ),
+        self.sug_col.controls = build_suggestions(
+            self.detail, self.sug_tab, self._apply_suggestion
         )
 
     def _render_history(self) -> None:
@@ -608,6 +528,10 @@ class EntriesPanel(ft.Column):
     def _on_mod(self, e) -> None:
         value = e.control.value
         self.mod_id = None if value in (None, "", ALL_MODS) else value
+        self._load_list()
+        self._safe_update()
+
+    def _on_source(self) -> None:
         self._load_list()
         self._safe_update()
 
