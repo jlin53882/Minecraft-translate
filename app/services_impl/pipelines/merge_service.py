@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 def _cleanup_cancelled_output(
     output_dir: str, existed_before: bool, finished: bool, session
 ) -> None:
-    """取消新建的合并输出时移除半成品；不碰使用者原本存在的目录。"""
+    """取消時移除本次新建的合併輸出（半成品）；不碰使用者原本就存在的目錄。"""
     if finished or existed_before or not getattr(session, "cancel_requested", False):
         return
     try:
