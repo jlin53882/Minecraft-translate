@@ -149,6 +149,8 @@ class ModDbView(ft.Column):
         # 只有資料庫路徑／優先序設定變了、或原本沒有資料庫檔案才重新開啟
         if self._db is None or self._db_sig != self._settings_signature():
             self.reload_db()
+        self.scan.resume()
+        self.translate.resume()
         self.show_tab(self.tab)
 
     def _safe_update(self) -> None:

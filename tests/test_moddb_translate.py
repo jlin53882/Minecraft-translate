@@ -713,3 +713,51 @@ def test_moddb_view_keeps_the_connection_when_returning_to_the_page(db_path):
     view._db_sig = ("changed", ())
     view.did_mount()
     assert view.get_db() is not first
+
+
+def test_translate_panel_resume_restarts_polling_after_navigating_away(
+    db_path, monkeypatch
+):
+    """換頁會停止輪詢；切回來必須接續，否則任務結束後畫面永遠卡在「取消中／機翻中」。"""
+    import asyncio
+
+    seed(db_path)
+    started: list[int] = []
+    monkeypatch.setattr(
+        translate_panel.PollerHandle,
+        "start",
+        lambda self, page, handler: started.append(1) or True,
+    )
+    db = TranslationDB(db_path)
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: db)
+    panel.resume()
+    assert started == []  # 沒有任務：不啟動
+
+    panel.session = TaskSession()
+    panel._running = True
+    panel.will_unmount()  # 換頁：輪詢停止（任務仍在背景執行）
+    panel.resume()  # 切回來
+    assert started == [1]
+
+    # 輪詢中發生未預期錯誤：恢復按鈕並標明原因，不能永遠卡住
+    def boom():
+        raise ValueError("render failed")
+
+    panel.sync_from_session = boom
+    panel._set_running(True)
+    asyncio.run(panel._poll())
+    assert panel._running is False and panel.start_btn.disabled is False
+    assert "畫面更新失敗" in panel.status_chip.label.value
+    db.close()
+
+
+def test_moddb_view_did_mount_resumes_pollers(db_path, monkeypatch):
+    from app.views import moddb_view
+
+    seed(db_path)
+    view = moddb_view.ModDbView(mock_page(), mock_filepicker())
+    resumed: list[str] = []
+    monkeypatch.setattr(view.scan, "resume", lambda: resumed.append("scan"))
+    monkeypatch.setattr(view.translate, "resume", lambda: resumed.append("translate"))
+    view.did_mount()
+    assert resumed == ["scan", "translate"]

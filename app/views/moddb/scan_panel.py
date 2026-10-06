@@ -487,14 +487,26 @@ class ScanPanel(ft.Column):
     def will_unmount(self) -> None:
         self._poller.stop()
 
+    def resume(self) -> None:
+        """重新掛載（換頁後切回來）：任務還在追蹤就接續輪詢，已結束的補上最終狀態與摘要。"""
+        if self.session is not None and self._running and not self._poller.running:
+            self._poller.start(self._page, self._poll)
+
+    def _abort_polling(self) -> None:
+        """輪詢失敗時收尾：恢復按鈕、狀態標明原因，避免畫面卡在「掃描中」。"""
+        self._running = False
+        self._set_running(False)
+        self._set_status("畫面更新失敗，請查看日誌（任務可能已結束）", "red")
+        self._safe_update()
+
     # ------------------------------------------------------------------ 輪詢
     async def _poll(self, alive=lambda: True) -> None:
         while alive() and self._running:
             try:
                 self.sync_from_session()
-            except RuntimeError as exc:
-                log_debug(f"掃描輪詢停止：{exc}")
-                self._running = False
+            except Exception as exc:  # noqa: BLE001 - 輪詢失敗不能讓畫面永遠卡在「執行中」
+                log_warning(f"掃描輪詢中止：{exc!r}")
+                self._abort_polling()
                 break
             if alive() and self._running:
                 await asyncio.sleep(_POLL_INTERVAL_SEC)
