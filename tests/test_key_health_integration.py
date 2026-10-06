@@ -20,6 +20,7 @@ import requests
 from translation_tool.core import lm_config_rules as rules
 from translation_tool.core import lm_translator_main as main
 from translation_tool.core.lm_key_health import (
+    DEFAULT_PROBE_INTERVAL_SEC,
     STATUS_COOLING,
     STATUS_OK,
     get_key_health_registry,
@@ -418,8 +419,7 @@ def test_models_recover_at_the_next_pacific_midnight(env):
     assert not quota.is_exhausted("m1")
 
 
-def test_a_successful_request_clears_the_model_exhaustion_record(env):
-    """使用者升級方案等情況：該模型成功就立刻恢復，不必等到重置。"""
+def test_expired_record_does_not_block_and_other_models_still_work(env):
     quota = get_model_quota_registry()
     quota.mark_exhausted("m1", until=env.clock.t + 3600)
     quota.mark_exhausted("m2", until=env.clock.t - 1)  # 已到期的紀錄
@@ -430,6 +430,83 @@ def test_a_successful_request_clears_the_model_exhaustion_record(env):
     assert status == "AUTO"
     assert env.model_calls == ["m2"]  # m1 仍耗盡被跳過，到期的 m2 被請求
     assert len(result) == 1
+
+
+def test_exhausted_model_is_probed_after_the_interval_and_recovers_on_success(env):
+    """使用者升級方案：耗盡的模型每隔一段時間探測一次，成功就立刻恢復（不必等到午夜）。"""
+    quota = get_model_quota_registry()
+    env.model_outcomes = {"m1": rpd(), "m2": OK_JSON}
+    env.outcomes = {"k0": OK_JSON, "k1": OK_JSON, "k2": OK_JSON}
+    env.translate(1, models=("m1", "m2"))
+    assert quota.is_exhausted("m1")
+    env.model_calls.clear()
+
+    env.translate(2, models=("m1", "m2"))  # 還沒到探測時間：完全不碰 m1
+    assert "m1" not in env.model_calls
+
+    env.clock.t += DEFAULT_PROBE_INTERVAL_SEC + 1
+    env.model_outcomes = {"m1": OK_JSON, "m2": OK_JSON}  # 升級了：m1 現在有額度
+    env.model_calls.clear()
+    result, status = env.translate(2, models=("m1", "m2"))
+
+    assert status == "AUTO"
+    assert len(result) == 2
+    assert env.model_calls[0] == "m1"  # 探測請求
+    assert not quota.is_exhausted("m1")  # 探測成功：恢復
+    assert env.model_calls.count("m1") == 2  # 之後的批次也恢復使用 m1
+
+
+def test_failed_probe_keeps_the_model_exhausted_until_the_next_interval(env):
+    quota = get_model_quota_registry()
+    env.model_outcomes = {"m1": rpd(), "m2": OK_JSON}
+    env.outcomes = {"k0": OK_JSON, "k1": OK_JSON, "k2": OK_JSON}
+    env.translate(1, models=("m1", "m2"))
+    env.clock.t += DEFAULT_PROBE_INTERVAL_SEC + 1
+    env.model_calls.clear()
+
+    result, status = env.translate(3, models=("m1", "m2"))  # 探測仍是 429
+
+    assert status == "AUTO"
+    assert len(result) == 3
+    assert env.model_calls.count("m1") == 1  # 只探測一次，其餘批次直接用 m2
+    assert quota.is_exhausted("m1")
+
+
+def test_all_models_exhausted_still_probes_once_the_interval_has_passed(env):
+    env.model_outcomes = {"m1": rpd()}
+    env.outcomes = {"k0": OK_JSON, "k1": OK_JSON, "k2": OK_JSON}
+    env.translate(1)
+    env.calls.clear()
+
+    _result, status = env.translate(1)  # 還沒到探測時間：不送請求
+    assert status == "ALL_KEYS_EXHAUSTED"
+    assert env.calls == []
+
+    env.clock.t += DEFAULT_PROBE_INTERVAL_SEC + 1
+    env.model_outcomes = {"m1": OK_JSON}  # 額度恢復
+    result, status = env.translate(1)
+
+    assert status == "AUTO"
+    assert len(result) == 1
+    assert len(env.calls) == 1
+
+
+def test_success_of_a_request_started_before_the_exhaustion_keeps_the_record(env):
+    """併發：m1 的請求在 RPD 前送出、另一個 worker 的 429 先完成，之後該請求才成功 → 紀錄保留。"""
+    quota = get_model_quota_registry()
+
+    def api(**kwargs):
+        # 這個請求「執行期間」，另一個 worker 對同一模型收到 429 並記錄耗盡
+        env.clock.t += 5
+        quota.mark_exhausted("m1")
+        return OK_JSON
+
+    with patch.object(main, "call_gemini_requests", side_effect=api):
+        result, status = env.translate(1)
+
+    assert status == "AUTO"
+    assert len(result) == 1
+    assert quota.is_exhausted("m1")  # 沒被先前送出的成功請求洗掉
 
 
 def test_single_key_rpd_behaviour(env):

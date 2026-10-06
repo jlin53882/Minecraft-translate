@@ -563,7 +563,7 @@ def _handle_batch_error(
                 f"約 {_format_remaining(quota.seconds_remaining(model_name))} 後重置"
             )
             has_next_model = any(
-                not quota.is_exhausted(name) for name in runtime.model_pool
+                not quota.is_blocked(name) for name in runtime.model_pool
             )
             return decide_batch_action(
                 error_kind, quota_kind="rpd", has_next_model=has_next_model
@@ -683,14 +683,14 @@ def _attempt_batch(
 ) -> _BatchRoundOutcome:
     """Try the model pool and return an explicit action for the outer state machine."""
     quota = get_model_quota_registry()
-    if all(quota.is_exhausted(name) for name in runtime.model_pool):
+    if all(quota.is_blocked(name) for name in runtime.model_pool):
         log_warning(
             "[🚫] 所有啟用的模型今日配額（RPD）都已用盡，"
             f"最快約 {_format_remaining(quota.soonest_reset_in(runtime.model_pool) or 0)} 後重置"
         )
         return _BatchRoundOutcome(BatchAction.EXHAUSTED)
     pinned = runtime.pinned_model_index
-    if pinned is not None and quota.is_exhausted(runtime.model_pool[pinned]):
+    if pinned is not None and quota.is_blocked(runtime.model_pool[pinned]):
         runtime.pinned_model_index = None  # 被釘住的模型已耗盡：改走完整模型池
     model_indices = (
         [runtime.pinned_model_index]
@@ -699,8 +699,8 @@ def _attempt_batch(
     )
     for model_index in model_indices:
         model_name = runtime.model_pool[model_index]
-        if quota.is_exhausted(model_name):
-            continue  # 今日配額已用盡：不再白打請求
+        if not quota.claim(model_name):
+            continue  # 今日配額已用盡且還沒輪到探測：不再白打請求
         prompt = (
             runtime.lang_prompt
             if runtime.batch_profile in {"lang", "kubejs"}
@@ -721,6 +721,7 @@ def _attempt_batch(
                 f"[→] 嘗試模型 {model_name} | Batch={len(round_data.current_batch)}"
                 f"/{runtime.batch_size} | 翻譯總量={runtime.original_total}"
             )
+            started = quota.now()  # 只有「耗盡紀錄之後才開始」的成功能清除紀錄
             raw_text = call_gemini_requests(
                 model_name=model_name,
                 system_prompt=prompt,
@@ -769,7 +770,7 @@ def _attempt_batch(
             ]
             runtime.batch_size = min(runtime.batch_size, len(runtime.remaining_items))
             runtime.key_cycle.record_success()
-            quota.mark_ok(model_name)  # 成功代表配額已恢復（例如升級方案）
+            quota.mark_ok(model_name, started_at=started)  # 探測成功 = 配額已恢復
             runtime.pinned_model_index = None
             if not runtime.remaining_items and runtime.rpm_cooldown_sec > 0:
                 interruptible_sleep(runtime.rpm_cooldown_sec)

@@ -642,3 +642,62 @@ def test_get_model_quota_snapshot_only_covers_enabled_models():
         snap = rules.get_model_quota_snapshot()
 
     assert [h.model for h in snap] == ["on"]
+
+
+def test_next_quota_reset_fallback_never_lands_later_than_the_real_reset():
+    """沒有 tzdata：冬令提早探測後再遇 RPD，下一次到期仍是當天 08:00 UTC，不是隔天 07:00。"""
+    from unittest.mock import patch
+    from zoneinfo import ZoneInfoNotFoundError
+
+    from translation_tool.core import lm_key_health as health
+
+    with patch.object(health, "ZoneInfo", side_effect=ZoneInfoNotFoundError("x")):
+        # 冬令 07:30 UTC（真實重置 08:00 UTC 之前的 30 分鐘）
+        assert health.next_quota_reset(_utc(2026, 12, 1, 7, 30)) == _utc(
+            2026, 12, 1, 8, 0
+        )
+        # 夏令：真實重置是 07:00 UTC，備援不得更晚
+        assert health.next_quota_reset(_utc(2026, 10, 6, 10, 0)) == _utc(
+            2026, 10, 7, 7, 0
+        )
+
+
+def test_model_quota_claim_blocks_until_the_probe_interval_then_grants_one_probe():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(clock, probe_interval=600)
+
+    assert reg.claim("m1") is True  # 沒耗盡：直接放行
+    reg.mark_exhausted("m1", until=clock.t + 86_400)
+    assert reg.is_blocked("m1") is True
+    assert reg.claim("m1") is False
+
+    clock.t += 601  # 輪到探測
+    assert reg.is_blocked("m1") is False
+    assert reg.claim("m1") is True  # 第一個領到探測名額
+    assert reg.claim("m1") is False  # 同一時間的其他 worker 不能再探測
+    assert reg.is_blocked("m1") is True
+    assert reg.is_exhausted("m1") is True  # 探測期間仍算耗盡（儀表板照常顯示）
+
+    clock.t += 601
+    assert reg.claim("m1") is True  # 下一個探測週期
+
+
+def test_model_quota_mark_ok_ignores_requests_that_started_before_the_exhaustion():
+    from translation_tool.core.lm_key_health import ModelQuotaRegistry
+
+    clock = Clock()
+    reg = ModelQuotaRegistry(clock)
+    started_before = clock.t
+    clock.t += 5
+    reg.mark_exhausted("m1", until=clock.t + 3600)  # 另一個 worker 的 429
+
+    # 耗盡「之前」送出的請求之後才完成：不能洗掉較新的耗盡紀錄
+    assert reg.mark_ok("m1", started_at=started_before) is False
+    assert reg.is_exhausted("m1") is True
+
+    # 耗盡「之後」才開始的請求（探測）成功：清除
+    assert reg.mark_ok("m1", started_at=clock.t) is True
+    assert reg.is_exhausted("m1") is False
+    assert reg.mark_ok("m1", started_at=clock.t) is False  # 沒有紀錄可清

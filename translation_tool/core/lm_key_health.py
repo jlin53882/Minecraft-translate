@@ -185,21 +185,26 @@ def get_key_health_registry() -> KeyHealthRegistry:
 QUOTA_RESET_TZ = "America/Los_Angeles"
 
 
-def _quota_reset_tzinfo() -> tzinfo:
-    try:
-        return ZoneInfo(QUOTA_RESET_TZ)
-    except ZoneInfoNotFoundError:
-        # 沒有時區資料庫（例如沒裝 tzdata 的 Windows）：退回固定的 UTC-7（夏令）。
-        # 冬令時會比實際重置早 1 小時重新探測一次；探測失敗只會再被記錄一次，不影響正確性。
-        return timezone(timedelta(hours=-7))
+def _next_midnight(now: float, tz: tzinfo) -> float:
+    today = datetime.fromtimestamp(now, tz).date()
+    return datetime.combine(
+        today + timedelta(days=1), dt_time.min, tzinfo=tz
+    ).timestamp()
 
 
 def next_quota_reset(now: float) -> float:
-    """``now``（epoch 秒）之後的下一個太平洋時間午夜 00:00（epoch 秒），夏令時間自動處理。"""
-    tz = _quota_reset_tzinfo()
-    today = datetime.fromtimestamp(now, tz).date()
-    midnight = datetime.combine(today + timedelta(days=1), dt_time.min, tzinfo=tz)
-    return midnight.timestamp()
+    """``now``（epoch 秒）之後的下一個太平洋時間午夜 00:00（epoch 秒），夏令時間自動處理。
+
+    沒有時區資料庫時（例如沒裝 tzdata 的 Windows）：實際重置時間必為 UTC-7（夏令）或 UTC-8（冬令）
+    的午夜之一，所以取兩者中較早的一個——只會提早探測，絕不會比實際重置晚。
+    """
+    try:
+        tz = ZoneInfo(QUOTA_RESET_TZ)
+    except ZoneInfoNotFoundError:
+        return min(
+            _next_midnight(now, timezone(timedelta(hours=hours))) for hours in (-7, -8)
+        )
+    return _next_midnight(now, tz)
 
 
 @dataclass(frozen=True)
@@ -211,29 +216,89 @@ class ModelQuotaHealth:
     reset_at: float  # epoch 秒
 
 
-class ModelQuotaRegistry:
-    """已確定每日配額（RPD）用盡的模型（執行緒安全）。"""
+DEFAULT_PROBE_INTERVAL_SEC = 600.0
 
-    def __init__(self, clock: Callable[[], float] = time.time) -> None:
+
+class ModelQuotaRegistry:
+    """已確定每日配額（RPD）用盡的模型（執行緒安全）。
+
+    耗盡的模型到太平洋午夜才算恢復，但期間每隔 ``probe_interval`` 秒會放行**一個**探測請求
+    （``claim``）：成功代表額度已恢復（例如使用者升級方案）就清除紀錄，失敗則重新計時。
+    只有「在耗盡紀錄之後才開始」的請求成功才能清除紀錄（``mark_ok``），否則併發時
+    「耗盡前就送出、之後才完成」的請求會把較新的耗盡紀錄洗掉。
+    """
+
+    def __init__(
+        self,
+        clock: Callable[[], float] = time.time,
+        probe_interval: float = DEFAULT_PROBE_INTERVAL_SEC,
+    ) -> None:
         self._clock = clock
+        self._probe_interval = probe_interval
         self._lock = threading.Lock()
         self._until: dict[str, float] = {}
+        self._marked_at: dict[str, float] = {}
+        self._next_probe: dict[str, float] = {}
+
+    def now(self) -> float:
+        return self._clock()
 
     def mark_exhausted(self, model: str, until: float | None = None) -> float:
         """記錄模型今日配額用盡；預設持續到下一個太平洋午夜。回傳到期時間（epoch 秒）。"""
+        now = self._clock()
         if until is None:
-            until = next_quota_reset(self._clock())
+            until = next_quota_reset(now)
         with self._lock:
             self._until[model] = until
+            self._marked_at[model] = now
+            self._next_probe[model] = now + self._probe_interval
         return until
 
-    def mark_ok(self, model: str) -> bool:
-        """這個模型成功了：清除耗盡紀錄。回傳是否真的清掉了紀錄。"""
+    def mark_ok(self, model: str, started_at: float | None = None) -> bool:
+        """這個模型成功了：清除耗盡紀錄。回傳是否真的清掉了紀錄。
+
+        ``started_at`` 是該請求的開始時間；早於耗盡紀錄的請求（耗盡前就送出）不會清除紀錄。
+        """
         with self._lock:
-            return self._until.pop(model, None) is not None
+            if model not in self._until:
+                return False
+            marked_at = self._marked_at.get(model)
+            if (
+                started_at is not None
+                and marked_at is not None
+                and started_at < marked_at
+            ):
+                return False
+            self._until.pop(model, None)
+            self._marked_at.pop(model, None)
+            self._next_probe.pop(model, None)
+            return True
 
     def is_exhausted(self, model: str) -> bool:
         return self.seconds_remaining(model) > 0
+
+    def is_blocked(self, model: str) -> bool:
+        """耗盡且還沒輪到探測：不該送請求（不消耗探測名額）。"""
+        now = self._clock()
+        with self._lock:
+            until = self._until.get(model)
+            return (
+                until is not None
+                and until > now
+                and now < self._next_probe.get(model, until)
+            )
+
+    def claim(self, model: str) -> bool:
+        """現在可以對這個模型送請求嗎？沒耗盡 → True；耗盡 → 只有輪到探測時回傳 True（並消耗名額）。"""
+        now = self._clock()
+        with self._lock:
+            until = self._until.get(model)
+            if until is None or until <= now:
+                return True
+            if now < self._next_probe.get(model, until):
+                return False
+            self._next_probe[model] = now + self._probe_interval
+            return True
 
     def seconds_remaining(self, model: str) -> float:
         with self._lock:
@@ -261,6 +326,8 @@ class ModelQuotaRegistry:
     def clear(self) -> None:
         with self._lock:
             self._until.clear()
+            self._marked_at.clear()
+            self._next_probe.clear()
 
 
 _MODEL_QUOTA_REGISTRY = ModelQuotaRegistry()
