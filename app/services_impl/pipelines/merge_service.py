@@ -17,6 +17,7 @@ from app.services_impl.pipelines._pipeline_logging import (
     ensure_pipeline_logging,
     mirror_session_log,
 )
+from app.services_impl.pipelines.output_lease import acquire_output_lease
 from translation_tool.core.lang_merge_extracted_assets import merge_extracted_to_assets
 from translation_tool.core.lang_merger import (
     merge_zhcn_to_zhtw_from_folder,
@@ -55,6 +56,21 @@ def _cleanup_cancelled_output(
         _session_log(session, f"[取消] 半成品輸出未完全清除：{output_dir}", "warning")
     else:
         _session_log(session, f"[取消] 已清理半成品輸出：{output_dir}", "info")
+
+
+def _claim_output(output_dir: str):
+    """取得輸出資料夾的獨占租約，並在租約內記錄它原本存不存在（見 output_lease.py）。"""
+    lease = acquire_output_lease(output_dir)
+    return lease, os.path.exists(output_dir)
+
+
+def _release_merge_output(output_dir, existed_before, finished, session, lease) -> None:
+    """取消時清掉新建的輸出，**清完才**釋放租約（別的任務不會在清理中途闖進來）。"""
+    try:
+        _cleanup_cancelled_output(output_dir, existed_before, finished, session)
+    finally:
+        if lease is not None:
+            lease.release()
 
 
 def _session_log(session, text: str, level: str = "info") -> None:
@@ -234,9 +250,8 @@ def run_merge_zip_batch_service(
     # ⭐ 每次任務開始，都重新讀取一次 config 並設定 Logger
     ensure_pipeline_logging()
     UI_LOG_HANDLER.set_session(session)
-    output_existed_before = os.path.exists(output_dir)
-    # 統計計數器
-    stats = {
+    output_existed_before, lease = True, None
+    stats = {  # 統計計數器
         "total_zips": len(zip_paths),
         "success_zips": 0,
         "failed_zips": 0,
@@ -246,6 +261,7 @@ def run_merge_zip_batch_service(
 
     finished = False  # generator 被 close（取消）時由 finally 補 finish
     try:
+        lease, output_existed_before = _claim_output(output_dir)  # 被占用 → 錯誤路徑
         total = len(zip_paths)
         if total == 0:
             _session_log(session, "[系統] 未選擇任何 ZIP 檔案", "warning")
@@ -307,11 +323,14 @@ def run_merge_zip_batch_service(
         finished = True
 
     finally:
-        _cleanup_cancelled_output(output_dir, output_existed_before, finished, session)
-        # ⭐ 避免 handler 留著舊 session
-        UI_LOG_HANDLER.set_session(None)
-        if not finished:
-            session.finish()
+        try:
+            _release_merge_output(
+                output_dir, output_existed_before, finished, session, lease
+            )
+        finally:
+            UI_LOG_HANDLER.set_session(None)
+            if not finished:
+                session.finish()
 
 
 def _set_monotonic_progress(session, value: float) -> None:
@@ -502,7 +521,7 @@ def run_merge_folder_batch_service(
     """
     ensure_pipeline_logging()
     UI_LOG_HANDLER.set_session(session)
-    output_existed_before = os.path.exists(output_dir)
+    output_existed_before, lease = True, None
 
     stats = {
         "total_folders": 1,
@@ -515,6 +534,7 @@ def run_merge_folder_batch_service(
     finished = False  # generator 被 close（取消）時，yield 之後的 finish 不會執行；finally 補上
 
     try:
+        lease, output_existed_before = _claim_output(output_dir)  # 被占用 → 錯誤路徑
         _session_log(session, f"[資料夾] 開始處理：{os.path.basename(input_dir)}")
 
         # 只有「路徑不存在」才能略過；存在但型別不對（例如是檔案）一律交給核心判為錯誤
@@ -565,7 +585,11 @@ def run_merge_folder_batch_service(
         yield {"progress": 1.0, "log": None, "error": True, "summary": error_summary}
 
     finally:
-        _cleanup_cancelled_output(output_dir, output_existed_before, finished, session)
-        UI_LOG_HANDLER.set_session(None)
-        if finish_session and not finished:
-            session.finish()  # 取消（generator.close）等沒走到 finish 的路徑
+        try:
+            _release_merge_output(
+                output_dir, output_existed_before, finished, session, lease
+            )
+        finally:
+            UI_LOG_HANDLER.set_session(None)
+            if finish_session and not finished:
+                session.finish()  # 取消（generator.close）等沒走到 finish 的路徑

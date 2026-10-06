@@ -118,9 +118,13 @@ class FolderReader(DirReader):
         來源有幾十萬個檔案（或網路／慢速磁碟）時，完整 ``os.walk`` 本身就可能跑很久；
         先把整個清單建好才檢查取消，使用者按取消後要等掃完才有反應。
         """
+        scanned = 0
         for root, _dirs, files in os.walk(self._root):
             raise_if_cancelled()
             for file in files:
+                scanned += 1
+                if scanned % 256 == 0:  # 單一資料夾有幾十萬個檔案時也要能中斷
+                    raise_if_cancelled()
                 full = os.path.join(root, file)
                 rel = os.path.relpath(full, self._root)
                 yield rel.replace("\\", "/")

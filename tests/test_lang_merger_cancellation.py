@@ -249,3 +249,64 @@ def test_folder_merge_cancelled_during_the_scan_never_starts_processing(
         list(merge_zhcn_to_zhtw_from_folder(str(src), str(tmp_path / "out")))
 
     assert calls == []
+
+
+def _spy_checkpoints(monkeypatch):
+    seen = []
+    original = lang_merger._checkpoint
+
+    def spy(index):
+        seen.append(index)
+        return original(index)
+
+    monkeypatch.setattr(lang_merger, "_checkpoint", spy)
+    return seen
+
+
+def test_zip_first_pass_prefix_scan_has_its_own_checkpoints(
+    tmp_path, calls, monkeypatch
+):
+    """ZIP 的第一輪（包裝前綴掃描）與第二輪（分類）都要有檢查點：索引會從 0 開始兩次。"""
+    zip_path = _make_zip(tmp_path)
+    seen = _spy_checkpoints(monkeypatch)
+
+    list(merge_zhcn_to_zhtw_from_zip(str(zip_path), str(tmp_path / "out")))
+
+    assert seen.count(0) >= 2
+    assert max(seen) >= MODS - 1
+
+
+def test_folder_first_pass_prefix_scan_has_its_own_checkpoints(
+    tmp_path, calls, monkeypatch
+):
+    src = _make_folder(tmp_path)
+    seen = _spy_checkpoints(monkeypatch)
+
+    list(merge_zhcn_to_zhtw_from_folder(str(src), str(tmp_path / "out")))
+
+    assert seen.count(0) >= 2
+
+
+def test_zip_cancelled_in_the_first_scan_never_starts_processing(tmp_path, calls):
+    zip_path = _make_zip(tmp_path)
+    with cancel_scope(lambda: True), pytest.raises(TaskCancelled):
+        list(merge_zhcn_to_zhtw_from_zip(str(zip_path), str(tmp_path / "out")))
+    assert calls == []
+
+
+def test_folder_reader_checks_inside_a_single_huge_directory(tmp_path):
+    """單一資料夾有大量檔案時，也要每 256 個檢查一次取消（不只是每個資料夾）。"""
+    from translation_tool.core.lang_merge_io import FolderReader
+
+    flat = tmp_path / "flat"
+    flat.mkdir()
+    for i in range(600):
+        (flat / f"f{i}.txt").write_text("x", encoding="utf-8")
+    checks = []
+
+    def cancel_on_third_check():
+        checks.append(1)
+        return len(checks) >= 3  # 進資料夾 1 次 + 檔案 256、512 各 1 次
+
+    with cancel_scope(cancel_on_third_check), pytest.raises(TaskCancelled):
+        FolderReader(str(flat)).list_all()

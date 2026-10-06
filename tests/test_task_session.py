@@ -208,3 +208,46 @@ def test_start_log_added_while_running_is_mirrored_with_the_current_id(caplog):
 
     rec = [r for r in caplog.records if "執行中才加入" in r.getMessage()]
     assert len(rec) == 1 and rec[0].task_id == session.task_id
+
+
+def test_start_clears_the_previous_runs_summary():
+    """重用同一個 session：第二次執行（很早就取消／例外）不能帶著第一次的摘要。"""
+    from app.tasks.task_session import TaskSession
+
+    session = TaskSession(name="合併")
+    session.start()
+    session.set_summary({"success_folders": 1})
+    session.finish()
+    assert session.snapshot()["summary"] == {"success_folders": 1}
+
+    session.start()  # 第二次：還沒 set_summary 就結束
+
+    assert session.snapshot()["summary"] is None
+
+
+def test_second_run_lifecycle_log_does_not_repeat_the_first_runs_summary(caplog):
+    import logging
+
+    from app.tasks.task_session import TaskSession
+    from translation_tool.utils import ui_mirror
+
+    ui_mirror.install_task_record_factory()
+    session = TaskSession(name="合併")
+    session.start()
+    session.set_summary({"marker": "第一次的結果"})
+    session.finish()
+
+    with caplog.at_level(logging.INFO):
+        session.start()
+        session.finish()  # 第二次沒有任何摘要
+
+    ends = [
+        r.getMessage() for r in caplog.records if r.getMessage().startswith("任務結束")
+    ]
+    assert ends and "第一次的結果" not in ends[-1]
+
+
+def test_new_session_has_no_summary():
+    from app.tasks.task_session import TaskSession
+
+    assert TaskSession().summary is None

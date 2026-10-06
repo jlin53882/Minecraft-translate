@@ -125,6 +125,7 @@ class TaskSession:
         self._started_at: float | None = None
         self._finished = False  # finish() 的終止通知只送一次（見 finish）
         self._amended = False  # 結束後才 set_error() 的更正紀錄只寫一次（見 set_error）
+        self.summary: dict | None = None  # 這一次執行的摘要；start() 會清掉上一次的
 
     # ---------- 後台生命週期紀錄 ----------
 
@@ -249,7 +250,7 @@ class TaskSession:
             already_finished = self._finished
             self._finished = True
             status = self.status
-            summary = getattr(self, "summary", None)
+            summary = self.summary
             log_count = len(self.logs)
             started = self._started_at
         if already_finished:
@@ -289,6 +290,7 @@ class TaskSession:
             self._started_at = time.monotonic()
             self._finished = False
             self._amended = False
+            self.summary = None  # 重用同一個 session：不能把上一次執行的摘要帶進這一次
             self.task_id = uuid.uuid4().hex[:8]
             start_logs = list(self._start_logs)
         # 清空日誌後把開頭訊息放回；在新的 task_id 下鏡像到後台（add_start_log 在 start 前
@@ -318,5 +320,5 @@ class TaskSession:
                 "log_texts": [e.text for e in self.logs],
                 "status": self.status,
                 "error": self.error,
-                "summary": getattr(self, "summary", None),
+                "summary": self.summary,
             }

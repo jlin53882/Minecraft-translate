@@ -161,7 +161,8 @@ def merge_zhcn_to_zhtw_from_zip(
 
             if all_names:
                 top_prefixes = set()
-                for name in all_names:
+                for index, name in enumerate(all_names):
+                    _checkpoint(index)
                     parts = name.replace("\\", "/").split("/")
                     if parts and parts[0]:
                         top_prefixes.add(parts[0])
@@ -211,7 +212,7 @@ def merge_zhcn_to_zhtw_from_zip(
             #    else:
             #        other_files.append(normalized)
 
-            for index, file_path in enumerate(zf.namelist()):
+            for index, file_path in enumerate(all_names):
                 _checkpoint(index)
                 normalized = file_path.replace("\\", "/")
                 if normalized.endswith("/") or not normalized:
@@ -283,7 +284,7 @@ def merge_zhcn_to_zhtw_from_zip(
                 _cancel_pending_on_exit(futures),
             ):
                 # ✅ 優化點：在啟動 ThreadPool 前，先完成一次性的路徑標準化快取
-                all_names_raw = zf.namelist()
+                all_names_raw = all_names  # 同一份清單：不再重複呼叫 namelist()
                 all_files_cache = [n.lower().replace("\\", "/") for n in all_names_raw]
                 # 包裝前綴只算一次,避免每個 mod / 內容檔各掃一次全部檔名
                 mod_wrapper_prefix = detect_mod_wrapper_prefix(all_names_raw)
@@ -527,7 +528,8 @@ def merge_zhcn_to_zhtw_from_folder(
 
         if all_names:
             top_prefixes = set()
-            for name in all_names:
+            for index, name in enumerate(all_names):
+                _checkpoint(index)
                 parts = name.replace("\\", "/").split("/")
                 if parts and parts[0]:
                     top_prefixes.add(parts[0])

@@ -41,6 +41,9 @@
 - 合併頁單欄位寫入改走 ConfigStore（只改被修改的欄位，也會通知外殼）。
 
 ### Bug Fixes
+- **兩個合併同時使用同一個輸出資料夾時，取消一個會刪掉另一個的成果**：新增輸出資料夾的獨占租約（`app/services_impl/pipelines/output_lease.py`，資料夾與 ZIP 服務共用；路徑正規化、包含關係也算衝突），第二個任務明確失敗而不是共用；清理完才釋放租約。
+- **ZIP／資料夾合併的第一輪掃描（包裝前綴）沒有取消檢查點**：兩輪都有檢查點，並重用同一份檔名清單（不再重複呼叫 `namelist()`）；`FolderReader.iter_all()` 在單一資料夾內也每 256 個檔案檢查一次。
+- **`TaskSession.start()` 沒清上一次執行的摘要**：重用 session 時，下一次很早取消的執行會在「任務結束」log 與 snapshot 帶著上一次的摘要。
 - **任務開始前寫入的訊息掛在舊的 `task_id`**：`add_start_log()` 在 `start()` 前鏡像到後台，`start()` 又換新識別，同一次執行被拆成兩個 task；改為 `start()` 後用新識別鏡像一次。
 - **單步 Pipeline 合併取消後新建輸出沒被刪**：對話框與 `PipelineActions.merge` 先建立了輸出資料夾，服務看到「原本就存在」所以不清理；改為對話框只驗證路徑（`check_output_dir`）、輸出資料夾由服務建立。
 - **資料夾合併的初始掃描無法取消**：`FolderReader.list_all()` 要整個 `os.walk` 跑完才回傳；新增 `iter_all()`，每進入一個資料夾檢查一次取消。
