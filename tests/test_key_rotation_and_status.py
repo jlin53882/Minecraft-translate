@@ -125,6 +125,7 @@ class Env:
     outcomes: dict[str, object] = field(default_factory=dict)
     calls: list[str] = field(default_factory=list)
     models: list[str] = field(default_factory=list)
+    model_outcomes: dict[str, object] = field(default_factory=dict)
 
     def fake_api(self, **kwargs):
         """依「實際使用的 key」決定回應。
@@ -135,7 +136,12 @@ class Env:
         key = kwargs["api_key"]
         self.calls.append(key)
         self.models.append(kwargs["model_name"])
-        outcome = self.outcomes[key]
+        model = kwargs["model_name"]
+        outcome = (
+            self.model_outcomes[model]
+            if model in self.model_outcomes
+            else self.outcomes[key]
+        )
         if isinstance(outcome, list):
             outcome = outcome.pop(0) if len(outcome) > 1 else outcome[0]
         if isinstance(outcome, Exception):
@@ -235,23 +241,52 @@ def test_403_single_key_is_terminal_after_one_attempt(env):
 # ---------------------------------------------------------------------------
 
 
-def test_429_rpd_first_key_exhausted_second_key_succeeds(env):
+def test_429_rpd_single_model_does_not_rotate_keys(env):
+    """同專案模式：RPD 額度是專案 × 模型，換 key 沒用，所以只打一次就回報耗盡。"""
     env.outcomes = {"key0": _rpd(), "key1": _OK_JSON}
 
     result, status = main.translate_batch_smart(_items(), 1)
 
-    assert env.calls == ["key0", "key1"]
-    assert status == "AUTO"  # 不可提前 ALL_KEYS_EXHAUSTED
-    assert _texts(result) == ["你好"]
+    assert env.calls == ["key0"]
+    assert result == []
+    assert status == "ALL_KEYS_EXHAUSTED"
 
 
-def test_429_rpd_all_keys_exhausted_only_after_every_key_was_tried(env):
-    env.outcomes = {"key0": _rpd(), "key1": _rpd()}
+def test_429_rpd_first_model_exhausted_second_model_succeeds(env):
+    env.use_models("m1", "m2")
+    env.model_outcomes = {"m1": _rpd(), "m2": _OK_JSON}
+    env.outcomes = {"key0": _OK_JSON, "key1": _OK_JSON}
 
     result, status = main.translate_batch_smart(_items(), 1)
 
-    assert env.calls == ["key0", "key1"]
+    assert env.models == ["m1", "m2"]
+    assert status == "AUTO"
+    assert _texts(result) == ["你好"]
+
+
+def test_429_rpd_all_models_exhausted_only_after_every_model_was_tried(env):
+    env.use_models("m1", "m2", "m3")
+    env.model_outcomes = {"m1": _rpd(), "m2": _rpd(), "m3": _rpd()}
+    env.outcomes = {"key0": _OK_JSON, "key1": _OK_JSON}
+
+    result, status = main.translate_batch_smart(_items(), 1)
+
+    assert env.models == ["m1", "m2", "m3"]  # 每個模型各試一次，不重複
+    assert len(env.calls) == 3
     assert result == []
+    assert status == "ALL_KEYS_EXHAUSTED"
+
+
+def test_429_rpd_one_key_many_models_tries_each_model_then_ends(env):
+    env.keys = ["only"]
+    env.use_models("m1", "m2")
+    env.model_outcomes = {"m1": _rpd(), "m2": _rpd()}
+    env.outcomes = {"only": _OK_JSON}
+
+    _result, status = main.translate_batch_smart(_items(), 1)
+
+    assert env.calls == ["only", "only"]
+    assert env.models == ["m1", "m2"]
     assert status == "ALL_KEYS_EXHAUSTED"
 
 
@@ -295,13 +330,13 @@ def test_429_unparseable_body_fallback_second_key_succeeds(env):
     assert _texts(result) == ["你好"]
 
 
-def test_429_three_keys_all_rpd_every_key_tried_in_order(env):
+def test_429_three_keys_rpd_still_requests_only_once(env):
     env.keys = ["key0", "key1", "key2"]
     env.outcomes = {"key0": _rpd(), "key1": _rpd(), "key2": _rpd()}
 
     _result, status = main.translate_batch_smart(_items(), 1)
 
-    assert env.calls == ["key0", "key1", "key2"]
+    assert env.calls == ["key0"]
     assert status == "ALL_KEYS_EXHAUSTED"
 
 
@@ -518,14 +553,14 @@ def test_success_resets_failed_keys_when_failure_memory_is_disabled(env):
     """記憶關閉（key_failure_cooldown_sec = 0）時維持 #112 的行為：每個 cycle 重新開始。
 
     同一次 translate_batch_smart 處理兩個 batch。
-    batch 1：key0 → 429 RPD（key0 被標記失敗）→ 改用 key1 成功 → production 必須 reset。
+    batch 1：key0 → 429（無法判斷種類，key0 在本 cycle 被標記失敗）→ 改用 key1 成功 → production 必須 reset。
     batch 2：key0 重新有資格被使用，所以輪到的 key0 真的被領取並成功。
 
     沒有 reset 的話，key0 會一直留在失敗清單，batch 2 會跳過它改用 key1。
     （不是兩次獨立的 translate 呼叫：每次呼叫本來就會建立新的 ApiKeyCycle。）
     """
     env.cfg.return_value = _config({"m1": True}, lang_batch=1)
-    env.outcomes = {"key0": [_rpd(), _OK_JSON], "key1": _OK_JSON}
+    env.outcomes = {"key0": [_unknown_quota(), _OK_JSON], "key1": _OK_JSON}
 
     with patch.object(rules, "get_key_failure_cooldown_sec", return_value=0):
         result, status = main.translate_batch_smart(_two_batch_items(), 2)
@@ -535,17 +570,30 @@ def test_success_resets_failed_keys_when_failure_memory_is_disabled(env):
     assert _texts(result) == ["你好", "你好"]
 
 
-def test_rpd_exhausted_key_is_not_requested_again_by_the_next_batch(env):
-    """issue #113：key0 已確定 RPD 耗盡，同一次呼叫的下一個 batch 直接用 key1，不再白打 key0。
+def test_forbidden_key_is_not_requested_again_by_the_next_batch(env):
+    """issue #113：key0 已確定 403，同一次呼叫的下一個 batch 直接用 key1，不再白打 key0。
 
     cycle 仍會在成功後 reset（失敗紀錄清空），但 key0 在共用的 key 健康狀態裡冷卻中。
     """
     env.cfg.return_value = _config({"m1": True}, lang_batch=1)
-    env.outcomes = {"key0": [_rpd(), _OK_JSON], "key1": _OK_JSON}
+    env.outcomes = {"key0": [_forbidden(), _OK_JSON], "key1": _OK_JSON}
 
     result, status = main.translate_batch_smart(_two_batch_items(), 2)
 
     assert env.calls == ["key0", "key1", "key1"]  # key0 只被請求一次
+    assert status == "AUTO"
+    assert _texts(result) == ["你好", "你好"]
+
+
+def test_rpd_exhausted_model_is_not_requested_again_by_the_next_batch(env):
+    """同專案模式：m1 已確定 RPD 耗盡，同一次呼叫的下一個 batch 直接用 m2，不再白打 m1。"""
+    env.cfg.return_value = _config({"m1": True, "m2": True}, lang_batch=1)
+    env.model_outcomes = {"m1": _rpd(), "m2": _OK_JSON}
+    env.outcomes = {"key0": _OK_JSON, "key1": _OK_JSON}
+
+    result, status = main.translate_batch_smart(_two_batch_items(), 2)
+
+    assert env.models == ["m1", "m2", "m2"]  # m1 只被請求一次
     assert status == "AUTO"
     assert _texts(result) == ["你好", "你好"]
 

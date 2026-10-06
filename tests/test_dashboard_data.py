@@ -121,3 +121,29 @@ def test_dashboard_data_activity_limit_and_empty_inputs():
     )
     assert len(data.activity) == 6 and data.total_entries == 0
     assert data.keys.text == "未設定 Key" and data.rules_count is None
+
+
+def test_dashboard_data_carries_exhausted_models():
+    from app.services_impl.key_health_service import ModelQuotaHealth
+
+    exhausted = ModelQuotaHealth("gemini-x", 3600.0, 1_000_000.0)
+    data = build_dashboard_data(
+        cache_overview=None,
+        rules_count=None,
+        key_snapshot=[],
+        model_quota=[exhausted],
+        active=[],
+        recent=[],
+    )
+    assert data.model_rows == [exhausted]
+    # 沒傳時預設為空：舊呼叫端不受影響
+    assert (
+        build_dashboard_data(
+            cache_overview=None,
+            rules_count=None,
+            key_snapshot=[],
+            active=[],
+            recent=[],
+        ).model_rows
+        == []
+    )

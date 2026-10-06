@@ -113,7 +113,7 @@ LMView 本身不直接操作 cache_manager，只透過 `write_new_cache_switch` 
 - **404** → 模型不存在，跳過該模型
 - **403** → Key 無權限，`mark_failed(reason="forbidden")` 換 Key；無 Key 可換 → RuntimeError「所有 API Key 均無權限」
 - **400** 含 FAILED_PRECONDITION → RuntimeError（此地區未啟用 Gemini 免費方案）；`maxOutputTokens` 不被模型支援 → 換下一個模型（無則報錯請調低上限）；其餘縮小 batch
-- **429** → 解析 Quota ID：RPM 依 API 回傳的 `retry_after` 等待（無值時 10 秒）後重試同一把 Key；RPD 標記該 Key 失敗並換 Key；其他配額錯誤也換 Key。所有 Key 耗盡回傳 `"ALL_KEYS_EXHAUSTED"`。此等待與 `rpm_cooldown_sec` 無關，冷卻設為 0 時仍會依 API 要求等待
+- **429** → 解析 Quota ID：RPM 依 API 回傳的 `retry_after` 等待（無值時 10 秒）後重試同一把 Key；RPD（同專案模式）把**該模型**標記為今日耗盡並換下一個模型——配額算在「專案 × 模型」，換 Key 沒有幫助，所以不換 Key；耗盡的模型到太平洋時間午夜（台灣夏令 15:00 / 冬令 16:00）才恢復。所有啟用的模型都耗盡才回傳 `"ALL_KEYS_EXHAUSTED"`；其他配額錯誤才換 Key。此等待與 `rpm_cooldown_sec` 無關，冷卻設為 0 時仍會依 API 要求等待
 
 ## 檔案結構
 

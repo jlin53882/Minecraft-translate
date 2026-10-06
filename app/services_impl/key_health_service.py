@@ -5,18 +5,22 @@
 
 from translation_tool.core.lm_config_rules import (
     get_key_health_snapshot,
+    get_model_quota_snapshot,
     validate_api_keys_from_ui,
 )
 from translation_tool.core.lm_key_health import (
     STATUS_COOLING,
     STATUS_PROBING,
     KeyHealth,
+    ModelQuotaHealth,
 )
 
 __all__ = [
     "STATUS_COOLING",
     "STATUS_PROBING",
     "KeyHealth",
+    "ModelQuotaHealth",
     "get_key_health_snapshot",
+    "get_model_quota_snapshot",
     "validate_api_keys_from_ui",
 ]

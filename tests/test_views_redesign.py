@@ -330,6 +330,49 @@ def test_dashboard_shows_loaded_numbers():
     assert len(view.cache_column.controls) == 2
 
 
+def test_dashboard_lists_models_whose_daily_quota_is_exhausted():
+    from app.services_impl.key_health_service import ModelQuotaHealth
+
+    view = _dashboard(
+        model_quota_loader=lambda: [ModelQuotaHealth("gemini-x", 5400.0, 1_000_000.0)]
+    )
+    view.reload(sync=True)
+
+    # key 為空時不再顯示「尚未設定 API Key」，而是顯示耗盡的模型
+    assert len(view.keys_column.controls) == 1
+    label, subtitle = view.keys_column.controls[0].content.controls[0].controls
+    assert label.value == "模型 gemini-x"
+    assert "1 小時 30 分鐘" in subtitle.value
+
+
+def test_dashboard_marks_a_model_in_the_uncertain_reset_window_as_being_checked():
+    from app.services_impl.key_health_service import ModelQuotaHealth
+
+    view = _dashboard(
+        model_quota_loader=lambda: [
+            ModelQuotaHealth("gemini-x", 0.0, 1_000_000.0, uncertain=True)
+        ]
+    )
+    view.reload(sync=True)
+
+    label, subtitle = view.keys_column.controls[0].content.controls[0].controls
+    assert label.value == "模型 gemini-x"
+    assert (
+        subtitle.value == "重置時間不確定，正在探測是否已恢復"
+    )  # 不是「約 0 分鐘後重置」
+    chip_text = view.keys_column.controls[0].content.controls[1].content.controls[0]
+    assert chip_text.value == "確認中"
+
+
+def test_dashboard_survives_failing_model_quota_loader():
+    def boom():
+        raise OSError("registry")
+
+    view = _dashboard(model_quota_loader=boom)
+    view.reload(sync=True)
+    assert view.stat_cache.value_text.value == "150"
+
+
 def test_dashboard_survives_failing_loaders():
     def boom():
         raise OSError("disk")

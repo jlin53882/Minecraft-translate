@@ -4,11 +4,15 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import requests
 
-from translation_tool.core.lm_api_client import call_gemini_requests
+from translation_tool.core.lm_api_client import (
+    GeminiResponseFormatError,
+    call_gemini_requests,
+    worst_case_request_sec,
+)
 from translation_tool.core.lm_batch_actions import BatchAction, decide_batch_action
 from translation_tool.core.lm_batch_budget import (
     BudgetConfig,
@@ -18,6 +22,10 @@ from translation_tool.core.lm_batch_budget import (
 )
 from translation_tool.core.lm_config_rules import ApiKeyCycle
 from translation_tool.core.lm_config_schema import model_output_token_cap
+from translation_tool.core.lm_key_health import (
+    PROBE_LEASE_MARGIN_SEC,
+    get_model_quota_registry,
+)
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.utils.cancellation import interruptible_sleep
 from translation_tool.utils.config_manager import get_models_config, load_config
@@ -334,6 +342,10 @@ class _BatchRuntime:
     all_results: list[dict]
     completed_calls: int = 0
     pinned_model_index: int | None = None
+    # 同專案模式的模型配額：本次呼叫用來持有「探測租約」的身分（見 ModelQuotaRegistry）、
+    # 已確定不存在（404）的模型。
+    quota_owner: object = field(default_factory=object)
+    missing_models: set[int] = field(default_factory=set)
     rpm_cooldown_sec: float = RPM_COOLDOWN_SEC
     key_rotation_buffer_sec: float = 5
     overload_retry_sec: float = OVERLOAD_RETRY_WAIT_SEC
@@ -353,6 +365,23 @@ class _BatchRound:
 class _BatchRoundOutcome:
     action: BatchAction | None = None
     learned_budget: bool = False
+
+
+def _format_remaining(seconds: float) -> str:
+    """把剩餘秒數轉成「X 小時 Y 分鐘」給日誌看。"""
+    minutes = max(0, int(seconds // 60))
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} 小時 {minutes} 分鐘" if hours else f"{minutes} 分鐘"
+
+
+def _usable_model_indices(runtime: _BatchRuntime, quota) -> list[int]:
+    """還能嘗試的模型：不是 404、對本次呼叫而言也沒有被每日配額擋住。"""
+    return [
+        index
+        for index, name in enumerate(runtime.model_pool)
+        if index not in runtime.missing_models
+        and not quota.is_blocked(name, runtime.quota_owner)
+    ]
 
 
 def _prompt_text(value: object, fallback: str) -> str:
@@ -493,6 +522,7 @@ def _handle_batch_error(
         runtime.key_cycle.clear_overload()
 
     if error_kind == "model_missing":
+        runtime.missing_models.add(model_index)  # 之後的輪次不再重打這個模型
         log_info(
             f"[⛔] 模型 {runtime.model_pool[model_index]} 不存在或無法使用，跳過此模型"
         )
@@ -545,12 +575,19 @@ def _handle_batch_error(
             log_error(f"[⚠️] 無法解析 429 JSON，使用備援：{redact_text(parse_error)}")
 
         if quota_kind == "rpd":
+            # 同專案模式：RPD 算在「專案 × 模型」，所有 key 共用同一份額度。
+            # 記在模型上（到太平洋時間午夜才恢復）→ 換下一個模型；全部模型都耗盡才結束。
+            model_name = runtime.model_pool[model_index]
+            quota = get_model_quota_registry()
+            quota.mark_exhausted(model_name)
             log_warning(
-                f"[🚫] 每日限額已滿 (RPD)：Key Index {runtime.key_cycle.current_index}"
+                f"[🚫] 每日限額已滿 (RPD)：模型 {model_name}（所有 Key 共用同一專案額度），"
+                f"約 {_format_remaining(quota.seconds_remaining(model_name))} 後重置"
             )
-            if not runtime.key_cycle.mark_failed(reason="rpd"):
-                return BatchAction.EXHAUSTED
-            return BatchAction.ROTATE_KEY
+            usable = _usable_model_indices(runtime, quota)
+            return decide_batch_action(
+                error_kind, quota_kind="rpd", has_next_model=bool(usable)
+            ).action
         if quota_kind == "rpm":
             wait_time = retry_after or 10
             log_info(f"[⏳] 每分鐘頻率限制 (RPM)：等待 {wait_time} 秒")
@@ -661,17 +698,121 @@ def _merge_batch_response(
     return merged, False
 
 
+def _clear_quota_on_http_success(
+    quota, error: Exception, model_name: str, started: float
+) -> None:
+    """HTTP 200 但回應格式異常：已證明沒有被 RPD 拒絕，配額紀錄一樣清除（翻譯失敗另外處理）。"""
+    if isinstance(error, GeminiResponseFormatError):
+        quota.mark_ok(model_name, started_at=started)
+
+
+def _abandon_model(
+    runtime: _BatchRuntime,
+    quota,
+    model_index: int,
+    model_indices: list[int],
+    pinned_round: bool,
+) -> None:
+    """放棄目前的模型、改試其他模型的單一入口。
+
+    - 收回它的探測租約並重新計時（只有同一模型的 RPM／503 重試才保留租約）。
+    - 這一輪是「被釘住」的（503 overload 重試只走那一個模型）：解除釘選，並把整個模型池加進這一輪
+      的候選，否則迴圈只有被釘住的模型，放棄後其他模型根本不會被試到。
+    """
+    quota.release(runtime.model_pool[model_index], runtime.quota_owner)
+    if pinned_round:
+        runtime.pinned_model_index = None
+        model_indices.extend(
+            [i for i in range(len(runtime.model_pool)) if i not in model_indices]
+        )
+
+
+def _probe_lease_sec(runtime: _BatchRuntime) -> float:
+    """探測租約長度：涵蓋用戶端整段最壞耗時（連線重試 × 逾時 + 退避）+ 餘裕。"""
+    try:
+        timeout = float((runtime.lm_cfg.get("rate_limit") or {}).get("timeout", 600))
+    except (TypeError, ValueError):
+        timeout = 600.0
+    return worst_case_request_sec(timeout) + PROBE_LEASE_MARGIN_SEC
+
+
+def _plan_model_indices(runtime: _BatchRuntime, quota) -> list[int] | None:
+    """這一輪要走的模型索引；所有可用模型都被每日配額擋住時回傳 None（= 耗盡，不送請求）。"""
+    owner = runtime.quota_owner
+    live = [
+        i for i in range(len(runtime.model_pool)) if i not in runtime.missing_models
+    ]
+    if live and all(quota.is_blocked(runtime.model_pool[i], owner) for i in live):
+        log_warning(
+            "[🚫] 所有啟用的模型今日配額（RPD）都已用盡，"
+            f"最快約 {_format_remaining(quota.soonest_reset_in(runtime.model_pool) or 0)} 後重置"
+        )
+        return None
+    pinned = runtime.pinned_model_index
+    if pinned is not None and quota.is_blocked(runtime.model_pool[pinned], owner):
+        runtime.pinned_model_index = None  # 被釘住的模型已耗盡：改走完整模型池
+    indices = (
+        [runtime.pinned_model_index]
+        if runtime.pinned_model_index is not None
+        else list(range(len(runtime.model_pool)))
+    )
+    return indices
+
+
+def _dead_end_outcome(
+    runtime: _BatchRuntime,
+    quota,
+    model_indices: list[int],
+    skipped_by_quota: set[int],
+) -> _BatchRoundOutcome | None:
+    """這一輪沒有任何模型能送請求（都是 404 或被每日配額擋住）時的終止結果；否則回傳 None。
+
+    看的是模型「現在」的狀態，而不是它怎麼變成被擋住的：claim 時就被擋下、這一輪送出請求後才
+    收到 RPD、探測名額被其他 worker 領走，結果都一樣。搶不到探測名額的模型若已被對方恢復，則重試
+    這一輪。縮小 batch 對沒有任何模型可用的情況沒有用，而且會把原文回填成「已翻譯」。
+    """
+    blocked_now = {
+        index
+        for index in model_indices
+        if quota.is_blocked(runtime.model_pool[index], runtime.quota_owner)
+    }
+    if skipped_by_quota - blocked_now - runtime.missing_models:
+        # 搶不到探測名額的模型，在我們收尾前已被贏得探測的 worker 恢復了：重新走這一輪，不能誤報耗盡。
+        return _BatchRoundOutcome(BatchAction.RETRY_SAME_MODEL)
+    if not all(
+        index in runtime.missing_models or index in blocked_now
+        for index in model_indices
+    ):
+        return None
+    if blocked_now:
+        log_warning(
+            "[🚫] 沒有可用的模型：其餘模型今日配額已用盡或正由其他 worker 探測中"
+        )
+        return _BatchRoundOutcome(BatchAction.EXHAUSTED)
+    log_error("[❌] 所有啟用的模型都不存在或無法使用，請檢查模型名稱設定")
+    return _BatchRoundOutcome(BatchAction.FAIL)
+
+
 def _attempt_batch(
     runtime: _BatchRuntime, round_data: _BatchRound
 ) -> _BatchRoundOutcome:
     """Try the model pool and return an explicit action for the outer state machine."""
-    model_indices = (
-        [runtime.pinned_model_index]
-        if runtime.pinned_model_index is not None
-        else range(len(runtime.model_pool))
-    )
+    quota = get_model_quota_registry()
+    owner = runtime.quota_owner
+    model_indices = _plan_model_indices(runtime, quota)
+    if model_indices is None:
+        return _BatchRoundOutcome(BatchAction.EXHAUSTED)
+    pinned_round = runtime.pinned_model_index is not None
+    skipped_by_quota: set[int] = set()
     for model_index in model_indices:
+        if model_index in runtime.missing_models:
+            continue
         model_name = runtime.model_pool[model_index]
+        lease_sec = _probe_lease_sec(runtime)
+        if not quota.claim(model_name, owner, lease_sec):
+            # 今日配額已用盡且還沒輪到探測（或探測名額被其他 worker 領走）：不白打請求
+            skipped_by_quota.add(model_index)
+            continue
         prompt = (
             runtime.lang_prompt
             if runtime.batch_profile in {"lang", "kubejs"}
@@ -679,6 +820,7 @@ def _attempt_batch(
         )
         output_cap = None
         cap_source = "global"
+        started = quota.now()  # 只有「耗盡紀錄之後才開始」的成功能清除紀錄
         try:
             model_override = model_output_token_cap(runtime.lm_cfg, model_name)
             cap_source = "per_model" if model_override is not None else "global"
@@ -692,16 +834,21 @@ def _attempt_batch(
                 f"[→] 嘗試模型 {model_name} | Batch={len(round_data.current_batch)}"
                 f"/{runtime.batch_size} | 翻譯總量={runtime.original_total}"
             )
-            raw_text = call_gemini_requests(
-                model_name=model_name,
-                system_prompt=prompt,
-                payload=round_data.payload,
-                api_key=runtime.key_cycle.claim(),
-                temperature=runtime.model_temperature,
-                max_output_tokens=output_cap,
-                meta_out=api_meta,
-            ).strip()
+            with quota.hold_probe_lease(model_name, owner, lease_sec):
+                raw_text = call_gemini_requests(
+                    model_name=model_name,
+                    system_prompt=prompt,
+                    payload=round_data.payload,
+                    api_key=runtime.key_cycle.claim(),
+                    temperature=runtime.model_temperature,
+                    max_output_tokens=output_cap,
+                    meta_out=api_meta,
+                ).strip()
+            # HTTP 200 已證明沒有被 RPD 拒絕：配額紀錄在這裡就清除；回應內容的問題（空、截斷、
+            # 格式不符）由 batch 流程自己處理，不影響配額狀態。
+            quota.mark_ok(model_name, started_at=started)
             if not raw_text:
+                _abandon_model(runtime, quota, model_index, model_indices, pinned_round)
                 continue
             finish_reason = api_meta.get("finish_reason")
             if finish_reason == "MAX_TOKENS" or _is_truncated_response(raw_text):
@@ -745,6 +892,7 @@ def _attempt_batch(
                 interruptible_sleep(runtime.rpm_cooldown_sec)
             return _BatchRoundOutcome()
         except Exception as error:  # noqa: BLE001
+            _clear_quota_on_http_success(quota, error, model_name, started)
             action = _handle_batch_error(
                 runtime,
                 error,
@@ -753,8 +901,13 @@ def _attempt_batch(
                 cap_source=cap_source,
             )
             if action is BatchAction.NEXT_MODEL:
+                _abandon_model(runtime, quota, model_index, model_indices, pinned_round)
                 continue
             return _BatchRoundOutcome(action)
+
+    dead_end = _dead_end_outcome(runtime, quota, model_indices, skipped_by_quota)
+    if dead_end is not None:
+        return dead_end
 
     # Model pool exhausted: the outer loop must shrink/skip this prefix,
     # rather than treating the exhausted pool as an endless next-model retry.
@@ -772,63 +925,72 @@ def _run_batch_state_machine(
     runtime = _build_batch_runtime(batch_items, total)
     if runtime is None:
         return [], "FAILED"
-
-    while runtime.remaining_items:
-        round_data = _prepare_batch(runtime)
-        outcome = _attempt_batch(runtime, round_data)
-        if outcome.action in {
-            BatchAction.RETRY_SAME_MODEL,
-            BatchAction.RETRY_SAME_KEY,
-            BatchAction.ROTATE_KEY,
-            BatchAction.NEXT_MODEL,
-        }:
-            continue
-        if outcome.action is BatchAction.EXHAUSTED:
-            return None, "ALL_KEYS_EXHAUSTED"
-        if outcome.action is BatchAction.FAIL:
-            return runtime.all_results, "FAILED"
-        if outcome.action is BatchAction.PARTIAL:
-            return runtime.all_results, "PARTIAL"
-        if outcome.action is not BatchAction.SHRINK_BATCH:
-            continue
-
-        if outcome.learned_budget:
-            next_fit = select_batch_size(
-                runtime.remaining_items,
-                runtime.batch_profile,
-                runtime.batch_size,
-                runtime.lm_cfg,
-                fixed_input_tokens=runtime.fixed_input_tokens,
-            )
-            if next_fit < len(round_data.current_batch):
+    try:
+        while runtime.remaining_items:
+            round_data = _prepare_batch(runtime)
+            outcome = _attempt_batch(runtime, round_data)
+            if outcome.action in {
+                BatchAction.RETRY_SAME_MODEL,
+                BatchAction.RETRY_SAME_KEY,
+                BatchAction.ROTATE_KEY,
+                BatchAction.NEXT_MODEL,
+            }:
+                continue
+            if outcome.action is BatchAction.EXHAUSTED:
+                return None, "ALL_KEYS_EXHAUSTED"
+            if outcome.action is BatchAction.FAIL:
+                return runtime.all_results, "FAILED"
+            if outcome.action is BatchAction.PARTIAL:
+                return runtime.all_results, "PARTIAL"
+            if outcome.action is not BatchAction.SHRINK_BATCH:
                 continue
 
-        shrink_factor = float(runtime.lm_cfg.get("batch_shrink_factor", 0.75) or 0.75)
-        basis = min(runtime.batch_size, len(round_data.current_batch))
-        new_size = int(basis * shrink_factor)
-        min_size = int(runtime.lm_cfg.get("min_batch_size", 50) or 50)
-        if runtime.batch_profile == "lang" and new_size < MIN_LANG_BATCH_SIZE:
-            new_size = MIN_LANG_BATCH_SIZE if basis > MIN_LANG_BATCH_SIZE else 0
-        elif new_size < min_size:
-            new_size = min_size if basis > min_size else 0
+            if outcome.learned_budget:
+                next_fit = select_batch_size(
+                    runtime.remaining_items,
+                    runtime.batch_profile,
+                    runtime.batch_size,
+                    runtime.lm_cfg,
+                    fixed_input_tokens=runtime.fixed_input_tokens,
+                )
+                if next_fit < len(round_data.current_batch):
+                    continue
 
-        if new_size <= 0 or new_size == basis:
-            log_warning(f"[⚠️] Batch Size 已縮至極限 ({basis})，回填原文並繼續後續項目")
-            runtime.all_results.extend(
-                {**item, "_untranslated": True} for item in round_data.current_batch
+            shrink_factor = float(
+                runtime.lm_cfg.get("batch_shrink_factor", 0.75) or 0.75
             )
-            runtime.remaining_items = runtime.remaining_items[
-                len(round_data.current_batch) :
-            ]
-            runtime.batch_size = min(
-                len(runtime.remaining_items),
-                MIN_LANG_BATCH_SIZE if runtime.batch_profile == "lang" else min_size,
-            )
-            continue
-        log_info(f"[↓] 調整 Batch：{basis} → {new_size}")
-        runtime.batch_size = new_size
+            basis = min(runtime.batch_size, len(round_data.current_batch))
+            new_size = int(basis * shrink_factor)
+            min_size = int(runtime.lm_cfg.get("min_batch_size", 50) or 50)
+            if runtime.batch_profile == "lang" and new_size < MIN_LANG_BATCH_SIZE:
+                new_size = MIN_LANG_BATCH_SIZE if basis > MIN_LANG_BATCH_SIZE else 0
+            elif new_size < min_size:
+                new_size = min_size if basis > min_size else 0
 
-    return runtime.all_results, "AUTO"
+            if new_size <= 0 or new_size == basis:
+                log_warning(
+                    f"[⚠️] Batch Size 已縮至極限 ({basis})，回填原文並繼續後續項目"
+                )
+                runtime.all_results.extend(
+                    {**item, "_untranslated": True} for item in round_data.current_batch
+                )
+                runtime.remaining_items = runtime.remaining_items[
+                    len(round_data.current_batch) :
+                ]
+                runtime.batch_size = min(
+                    len(runtime.remaining_items),
+                    MIN_LANG_BATCH_SIZE
+                    if runtime.batch_profile == "lang"
+                    else min_size,
+                )
+                continue
+            log_info(f"[↓] 調整 Batch：{basis} → {new_size}")
+            runtime.batch_size = new_size
+
+        return runtime.all_results, "AUTO"
+    finally:
+        # 不論怎麼結束，都收回這次呼叫持有的探測租約（成功時紀錄已被清除，這裡不會有東西）。
+        get_model_quota_registry().release_owner(runtime.quota_owner)
 
 
 # 暫保舊名稱供外部整合程式相容；現役入口與內部呼叫已不再依賴 old 命名。
