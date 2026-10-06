@@ -15,6 +15,9 @@ import flet as ft
 from app.services_impl.moddb_translate_service import (
     DEFAULT_LIMIT,
     TranslateOptions,
+    estimate_batch_count,
+    format_duration,
+    format_live,
     run_moddb_translate_service,
 )
 from app.tasks.task_session import TaskSession, tag_session
@@ -104,6 +107,8 @@ class TranslatePanel(ft.Column):
         self.status_chip = ft.Chip(label=ft.Text("尚未開始"))
         apply_status_style(self.status_chip, "neutral")
         self.progress_bar = kit.progress_bar(0, "em", height=8)
+        # 批次、已處理筆數、已用時間、預估剩餘時間、預計完成時刻（每批結束更新）
+        self.live_text = ft.Text("", size=12.5, color=C.MUTED, selectable=True)
         ui_cfg = load_ui_logging_config(load_config)
         self.log_view = LogView(
             page=self._page, mode="tail", tail_lines=ui_cfg.get("tail_lines", 250)
@@ -166,6 +171,7 @@ class TranslatePanel(ft.Column):
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self.progress_bar,
+                    self.live_text,
                     self.log_view,
                     ft.Row(list(self._stat_cards), spacing=10),
                 ],
@@ -225,11 +231,13 @@ class TranslatePanel(ft.Column):
             self.count_text.value = (
                 f"此範圍有 {format_count(missing)} 筆未翻譯，"
                 f"上限 {format_count(limit)} 筆，本次最多翻譯 {format_count(will)} 筆"
+                f"（預估約 {estimate_batch_count(will):,} 批）"
             )
             return
         self.count_text.value = (
             f"此範圍有 {format_count(missing)} 筆未翻譯，上限為 0（不限），"
             f"本次會翻譯全部 {format_count(missing)} 筆"
+            f"（預估約 {estimate_batch_count(missing):,} 批）"
             + (
                 "；筆數很多，會消耗大量 API 額度，建議先按「先預覽」確認"
                 if missing > LARGE_RUN_WARNING
@@ -265,6 +273,7 @@ class TranslatePanel(ft.Column):
         self._set_status("預覽中" if dry_run else "機翻中", "dia")
         self._set_running(True)
         self.progress_bar.value = 0
+        self.live_text.value = ""
         self.log_view.clear()
         self._reset_stats()
         self._safe_update()
@@ -323,8 +332,16 @@ class TranslatePanel(ft.Column):
         self.progress_bar.value = float(snap.get("progress", 0) or 0)
         self.log_view.sync_entries(snap.get("logs", []) or [], update=False)
         status = (snap.get("status") or "").upper()
+        live = (snap.get("summary") or {}).get("live")
+        if live and status not in ("DONE", "ERROR"):
+            self.live_text.value = format_live(live)
         if status in ("DONE", "ERROR"):
             summary = snap.get("summary") or {}
+            if summary.get("batches"):
+                self.live_text.value = (
+                    f"共送出 {summary['batches']:,} 批，"
+                    f"耗時 {format_duration(summary.get('elapsed_sec'))}"
+                )
             if status == "ERROR":
                 self._set_status("機翻發生錯誤", "red")
             elif getattr(session, "cancel_requested", False):

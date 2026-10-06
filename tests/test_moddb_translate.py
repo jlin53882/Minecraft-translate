@@ -582,7 +582,7 @@ def test_service_aborts_when_every_item_keeps_failing(db_path, monkeypatch):
     assert len(calls) < 3  # foo 有 3 筆未翻譯，一筆一批時第 2 筆失敗後就停止
 
 
-def _skeleton_one_per_batch(real):
+def _skeleton_one_per_batch(real, report_progress=False):
     def wrapper(items, **kwargs):
         hooks = kwargs["hooks"]
         translate = kwargs["translate_batch_smart"]
@@ -598,6 +598,8 @@ def _skeleton_one_per_batch(real):
                 hooks.on_translated_item(result)
                 processed += 1
             hooks.on_batch_flushed()
+            if report_progress and hooks.on_progress:
+                hooks.on_progress(processed / len(items), "✅ 批次完成", 0.0)
         return NS(status="DONE", processed=processed, last_error=None)
 
     return wrapper
@@ -891,3 +893,91 @@ def test_priority_field_previews_new_custom_sources(db_path, monkeypatch):
     field.value = "人工\n町宮字幕組"
     check()
     assert "所有名稱都是已存在的來源" in field.helper
+
+
+def test_run_progress_estimates_batches_eta_and_formats():
+    from translation_tool.translation_db.run_progress import (
+        RunProgress,
+        estimate_batches,
+        format_duration,
+        format_live,
+    )
+
+    assert format_duration(65) == "1:05" and format_duration(3725) == "1:02:05"
+    assert format_duration(None) == "—" and format_duration(-1) == "—"
+    assert (
+        estimate_batches(
+            {"lang": 12725, "patchouli": 250}, lambda k: 300 if k == "lang" else 100
+        )
+        == 43 + 3
+    )
+
+    progress = RunProgress(total=1000, planned_batches=4, started=100.0)
+    assert progress.estimated_batches() == 4 and progress.eta_seconds(now=110.0) is None
+    assert (
+        progress.update(300) is True and progress.update(300) is False
+    )  # 沒增加不算新批
+    live = progress.live(now=160.0)  # 60 秒做完 300 筆 → 剩 700 筆約 140 秒
+    assert live["batch_done"] == 1 and round(live["eta_sec"]) == 140
+    assert progress.estimated_batches() == 1 + 3  # 平均每批 300，剩 700 → 再 3 批
+    progress.update(450)  # 批次縮小（150 筆）→ 預估總批數增加
+    assert progress.estimated_batches() == 2 + 3
+    line = format_live(progress.live(now=200.0))
+    assert "第 2 / 約 5 批" in line and "已處理 450 / 1,000 筆（45%）" in line
+    assert "已用 1:40" in line and "預估剩餘" in line and "完成" in line
+
+
+def test_service_logs_batches_eta_and_reports_totals(db_path, monkeypatch):
+    seed(db_path)
+    fake_engine(monkeypatch, lambda t: "翻:" + t)
+    # 每批 1 筆 → foo 有 2 筆未翻譯會跑 2 批
+    monkeypatch.setattr(
+        moddb_translate_service, "_get_default_batch_size", lambda kind, size: 1
+    )
+    monkeypatch.setattr(
+        moddb_translate_service,
+        "run_translator_skeleton",
+        _skeleton_one_per_batch(None, report_progress=True),
+    )
+    session = TaskSession()
+    run_moddb_translate_service(
+        TranslateOptions(version="1.21.1", mod_ids=("foo",)), session
+    )
+    texts = [e.text for e in session.snapshot()["logs"]]
+    assert any("預估約 2 批" in t for t in texts)  # 開始前先告知批數
+    assert any(t.startswith("⏱ 第 1 / 約 2 批") for t in texts)
+    assert any("第 2 / 約 2 批" in t and "已處理 2 / 2 筆（100%）" in t for t in texts)
+    summary = session.snapshot()["summary"]
+    assert summary["batches"] == 2 and summary["elapsed_sec"] >= 0
+    assert any("共送出 2 批" in t for t in texts)
+
+
+def test_preview_and_panel_show_batch_estimates_and_live_line(db_path):
+    seed(db_path)
+    db = TranslationDB(db_path)
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: db)
+    panel.refresh_scope()
+    panel.limit_field.value = "0"
+    panel._refresh_counts()
+    assert "預估約 1 批" in panel.count_text.value  # 3 筆、每批 300 → 1 批
+
+    panel.session = TaskSession()
+    panel.session.start()
+    panel.session.set_summary(
+        {
+            "live": {
+                "batch_done": 2,
+                "batch_est": 5,
+                "processed": 600,
+                "total": 1500,
+                "elapsed_sec": 90.0,
+                "eta_sec": 135.0,
+                "finish_ts": None,
+            }
+        }
+    )
+    panel._running = True
+    panel.sync_from_session()
+    assert "第 2 / 約 5 批" in panel.live_text.value
+    assert "預估剩餘 2:15" in panel.live_text.value
+    db.close()

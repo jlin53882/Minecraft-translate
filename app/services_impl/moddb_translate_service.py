@@ -25,11 +25,18 @@ from app.services_impl.pipelines._pipeline_logging import (
 from app.tasks.task_session import add_log_unmirrored
 from app.views.moddb.formatting import token_issues
 from translation_tool.core.lm_translator_main import translate_batch_smart
+from translation_tool.core.lm_translator_shared_loop import _get_default_batch_size
 from translation_tool.core.lm_translator_skeleton import (
     TranslatorHooks,
     run_translator_skeleton,
 )
 from translation_tool.translation_db.models import WriteBackItem
+from translation_tool.translation_db.run_progress import (
+    RunProgress,
+    estimate_batches,
+    format_duration,
+    format_live,
+)
 from translation_tool.translation_db.schema import KIND_LANG
 from translation_tool.utils.cache_manager import add_to_cache, save_translation_cache
 from translation_tool.utils.cancellation import (
@@ -37,6 +44,19 @@ from translation_tool.utils.cancellation import (
     cancel_scope,
     is_cancelled,
 )
+
+# View 經由本模組取用進度格式化函式（View 不直接 import translation_tool 引擎）
+__all__ = [
+    "ABORT_AFTER_FAILURES",
+    "DEFAULT_LIMIT",
+    "TranslateOptions",
+    "TranslateReport",
+    "estimate_batch_count",
+    "format_duration",
+    "format_live",
+    "plan_batches",
+    "run_moddb_translate_service",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +90,8 @@ class TranslateReport:
     dry_run: bool = False
     remaining: int = 0  # 該範圍內仍未翻譯的筆數
     flagged_samples: list[str] = field(default_factory=list)
+    batches: int = 0  # 實際完成的批數
+    elapsed_sec: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -81,6 +103,8 @@ class TranslateReport:
             "status": self.status,
             "dry_run": self.dry_run,
             "remaining": self.remaining,
+            "batches": self.batches,
+            "elapsed_sec": self.elapsed_sec,
         }
 
 
@@ -99,6 +123,24 @@ def build_items(rows: list[tuple[int, str, str, str, str]]) -> list[dict[str, An
         }
         for eid, kind, mod_id, key, en_us in rows
     ]
+
+
+def plan_batches(items: list[dict[str, Any]]) -> int:
+    """依設定的每批筆數估計總批數（各類型分開算；實際遇到錯誤縮小批次時會更多）。"""
+    counts: dict[str, int] = {}
+    for item in items:
+        kind = str(item.get("cache_type") or "lang")
+        counts[kind] = counts.get(kind, 0) + 1
+    return estimate_batches(counts, lambda kind: _get_default_batch_size(kind, None))
+
+
+def estimate_batch_count(total: int, cache_type: str = "lang") -> int:
+    """筆數 → 預估批數（畫面在開始前顯示；依設定的每批筆數）。"""
+    if total <= 0:
+        return 0
+    return estimate_batches(
+        {cache_type: total}, lambda k: _get_default_batch_size(k, None)
+    )
 
 
 def _log(session, text: str, level: str = "info") -> None:
@@ -124,7 +166,8 @@ def _select_rows(session, db, options: TranslateOptions, report: TranslateReport
         _log(
             session,
             f"🔎 預覽：{report.remaining} 筆未翻譯，本次將翻譯前 {len(rows)} 筆"
-            "（未呼叫 AI、未寫入）",
+            f"，預估約 {plan_batches(build_items(rows)):,} 批（未呼叫 AI、未寫入；"
+            "實際時間依 API 速度而定，開始後每批結束會更新預估）",
         )
         for _eid, _kind, mod_id, key, en_us in rows[:5]:
             _log(session, f"　{mod_id} / {key}：{en_us[:60]!r}")
@@ -176,6 +219,10 @@ def _translate_rows(
         session.set_progress(progress)
         if message:
             _log(session, message)
+        if tracker.update(round(progress * len(items))):
+            _log(session, f"⏱ {tracker.line()}")
+        # 即時資料交給畫面（任務結束時會被最終摘要取代）
+        session.set_summary({**report.as_dict(), "live": tracker.live()})
 
     def translate_batch(batch, batch_total):
         if cancelled() or is_cancelled() or failures["aborted"]:
@@ -183,6 +230,8 @@ def _translate_rows(
         return translate_batch_smart(batch, total=batch_total)
 
     items = build_items(rows)
+    tracker = RunProgress(total=len(items), planned_batches=plan_batches(items))
+    _log(session, tracker.start_line())
     with cancel_scope(cancelled):
         result = run_translator_skeleton(
             items,
@@ -200,6 +249,8 @@ def _translate_rows(
         )
     flush()
     report.status = "ABORTED" if failures["aborted"] else result.status
+    report.batches = tracker.batches_done
+    report.elapsed_sec = tracker.elapsed()
     if failures["aborted"]:
         _log(
             session,
@@ -213,7 +264,8 @@ def _translate_rows(
         session,
         f"完成（狀態 {report.status}）：AI 回傳 {report.translated} 筆、"
         f"寫入 {report.written} 筆、特殊字元不一致未寫入 {report.flagged} 筆；"
-        f"此範圍仍有 {report.remaining} 筆未翻譯",
+        f"此範圍仍有 {report.remaining} 筆未翻譯；"
+        f"共送出 {report.batches:,} 批，耗時 {format_duration(report.elapsed_sec)}",
         "warning" if report.status != "DONE" or report.flagged else "info",
     )
     if result.last_error:
