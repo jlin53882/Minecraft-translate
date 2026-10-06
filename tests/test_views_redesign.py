@@ -340,9 +340,9 @@ def test_dashboard_lists_models_whose_daily_quota_is_exhausted():
 
     # key 為空時不再顯示「尚未設定 API Key」，而是顯示耗盡的模型
     assert len(view.keys_column.controls) == 1
-    row = view.keys_column.controls[0].content.controls
-    assert row[0].value == "模型 gemini-x"
-    assert "1 小時 30 分鐘" in row[1].value
+    label, subtitle = view.keys_column.controls[0].content.controls[0].controls
+    assert label.value == "模型 gemini-x"
+    assert "1 小時 30 分鐘" in subtitle.value
 
 
 def test_dashboard_survives_failing_model_quota_loader():

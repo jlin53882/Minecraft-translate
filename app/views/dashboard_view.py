@@ -670,16 +670,21 @@ class DashboardView(ft.Column):
             border_radius=design.RADIUS_CONTROL,
             content=ft.Row(
                 [
-                    ft.Text(
-                        f"模型 {model.model}",
-                        size=13,
-                        weight=ft.FontWeight.W_600,
-                        color=C.TEXT,
-                    ),
-                    ft.Text(
-                        format_quota_reset(model),
-                        size=12,
-                        color=C.MUTED,
+                    ft.Column(
+                        [
+                            ft.Text(
+                                f"模型 {model.model}",
+                                size=13,
+                                weight=ft.FontWeight.W_600,
+                                color=C.TEXT,
+                            ),
+                            ft.Text(
+                                format_quota_reset(model),
+                                size=12,
+                                color=C.MUTED,
+                            ),
+                        ],
+                        spacing=2,
                         expand=True,
                     ),
                     kit.chip("今日額度用盡", "red"),
