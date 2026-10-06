@@ -449,8 +449,9 @@ def run_extraction_process_impl(
                 }
             except Exception as exc:  # noqa: BLE001
                 failed_jars.append(os.path.basename(jar_path))
+                # 第一行與下面 yield 給 UI 的文字相同，鏡像時後台不會重複記錄
                 log_error(
-                    "提取 %s 時產生例外: %s (wall=%.1fs)",
+                    "[ERROR] 提取 %s 時產生例外\n原因：%r (wall=%.1fs)",
                     os.path.basename(jar_path),
                     exc,
                     wall_time,

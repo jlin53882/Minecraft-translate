@@ -472,9 +472,9 @@ def run_merge_folder_batch_service(
     與 run_merge_zip_batch_service 結構相同，但使用 merge_zhcn_to_zhtw_from_folder。
 
     輸入資料夾不存在時預設視為失敗（階段 1 失敗、略過階段 2、任務標為 ERROR），
-    不會顯示「翻譯已完成」。``skip_missing_input=True`` 給一鍵流程使用：提取沒有產生
-    某類內容（例如沒有 Patchouli 書籍）時不會建立輸出資料夾，這時明確記錄「略過」並視為
-    沒有工作可做，而不是失敗。
+    不會顯示「翻譯已完成」；路徑存在但不是資料夾也視為失敗。``skip_missing_input=True``
+    給一鍵流程使用：提取沒有產生某類內容（例如沒有 Patchouli 書籍）時不會建立輸出資料夾，
+    這時明確記錄「略過」並視為沒有工作可做，而不是失敗（只限路徑不存在；型別不對仍是失敗）。
     """
     ensure_pipeline_logging()
     UI_LOG_HANDLER.set_session(session)
@@ -492,7 +492,8 @@ def run_merge_folder_batch_service(
     try:
         _session_log(session, f"[資料夾] 開始處理：{os.path.basename(input_dir)}")
 
-        skipped = skip_missing_input and not os.path.isdir(input_dir)
+        # 只有「路徑不存在」才能略過；存在但型別不對（例如是檔案）一律交給核心判為錯誤
+        skipped = skip_missing_input and not os.path.exists(input_dir)
         if skipped:
             _session_log(
                 session,

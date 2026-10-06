@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
 import time
@@ -207,3 +208,19 @@ def mirror_lines(
     """批次鏡像 ``(文字, 等級)``；給「背景執行緒累積 UI 行、再批次推畫面」的路徑使用。"""
     for text, level in lines:
         mirror_to_backend(text, level, prefix=prefix, logger=logger)
+
+
+def accepted_params(func) -> set[str] | None:
+    """函式可接受的關鍵字參數名稱；有 ``**kwargs`` 或無法檢查時回傳 ``None``（視為都接受）。"""
+    try:
+        params = inspect.signature(func).parameters.values()
+    except (TypeError, ValueError):
+        return None
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params):
+        return None
+    return {
+        p.name
+        for p in params
+        if p.kind
+        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }

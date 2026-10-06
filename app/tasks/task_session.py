@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 import threading
 import time
@@ -15,7 +14,11 @@ from collections import deque
 from collections.abc import Callable
 
 from translation_tool.utils.redaction import redact_secrets
-from translation_tool.utils.ui_mirror import BACKEND_SOURCES, mirror_to_backend
+from translation_tool.utils.ui_mirror import (
+    BACKEND_SOURCES,
+    accepted_params,
+    mirror_to_backend,
+)
 
 from .log_entry import LogEntry
 
@@ -53,22 +56,6 @@ def tag_session(session, name: str, view_key: str | None = None):
     return session
 
 
-def _accepted_params(func) -> set[str] | None:
-    """函式可接受的關鍵字參數名稱；有 ``**kwargs`` 或無法檢查時回傳 ``None``（視為都接受）。"""
-    try:
-        params = inspect.signature(func).parameters.values()
-    except (TypeError, ValueError):
-        return None
-    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params):
-        return None
-    return {
-        p.name
-        for p in params
-        if p.kind
-        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
-    }
-
-
 def add_log_unmirrored(session, text: str, level: str = "info") -> None:
     """寫進任務畫面日誌但不鏡像到後台（呼叫端已把更完整的內容寫進後台時使用）。
 
@@ -76,7 +63,7 @@ def add_log_unmirrored(session, text: str, level: str = "info") -> None:
     以函式簽章判斷要傳哪些（不靠捕捉 ``TypeError``：那會把 ``add_log`` 內部真正的
     ``TypeError`` 也當成「不支援」而重複呼叫）。
     """
-    accepted = _accepted_params(session.add_log)
+    accepted = accepted_params(session.add_log)
     kwargs: dict[str, object] = {}
     if accepted is None or "level" in accepted:
         kwargs["level"] = level
@@ -132,6 +119,7 @@ class TaskSession:
         self._lock = threading.Lock()
         self._cancel_event = threading.Event()
         self._started_at: float | None = None
+        self._finished = False  # finish() 的終止通知只送一次（見 finish）
 
     # ---------- 後台生命週期紀錄 ----------
 
@@ -226,10 +214,17 @@ class TaskSession:
         with self._lock:
             self.progress = 1.0
             self.status = "ERROR" if self.error else "DONE"
+            already_finished = self._finished
+            self._finished = True
             status = self.status
             summary = getattr(self, "summary", None)
             log_count = len(self.logs)
             started = self._started_at
+        if already_finished:
+            # 流水線的安全網（例外／取消路徑）會在步驟自己 finish 之後再呼叫一次；
+            # 狀態仍照上面更新（set_error 之後的第二次 finish 要維持 ERROR），
+            # 但後台的「任務結束」紀錄與觀察者通知只送一次。
+            return
         elapsed = f"，耗時 {time.monotonic() - started:.1f}s" if started else ""
         summary_text = str(summary) if summary else ""
         if len(summary_text) > 500:
@@ -260,6 +255,7 @@ class TaskSession:
             self.error = False
             self.status = "RUNNING"
             self._started_at = time.monotonic()
+            self._finished = False
             start_logs = list(self._start_logs)
         for (
             text,

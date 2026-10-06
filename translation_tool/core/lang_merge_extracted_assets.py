@@ -703,5 +703,5 @@ def merge_extracted_to_assets(
         tb = traceback.format_exc()
         log_warning(f"[MergeExt→Assets] 錯誤: {exc!r}\n{tb}")
         if session is not None:
-            _safe_session_log(session, f"[MergeExt→Assets] 錯誤: {exc}")
+            _safe_session_log(session, f"[MergeExt→Assets] 錯誤: {exc!r}")
         yield {"progress": 1.0, "log": None, "error": True}

@@ -104,6 +104,16 @@ def merge_zhcn_to_zhtw_from_zip(
             "error": True,
         }
         return  # 直接結束這個產生器，不執行後面的 ZipFile 開啟動作
+    if not os.path.isfile(zip_file):
+        # 路徑存在但不是檔案（例如資料夾）：不能交給 ZipFile，否則錯誤訊息很不直觀
+        message = f"輸入路徑不是 ZIP 檔案，無法合併: {os.path.abspath(zip_file)}"
+        log_error(message)
+        yield {
+            "progress": _scale_progress(1.0, progress_start, progress_end),
+            "log": message,
+            "error": True,
+        }
+        return
     # --------------------------------
 
     try:
@@ -454,6 +464,17 @@ def merge_zhcn_to_zhtw_from_folder(
         log_error(message)
         # 軟性錯誤：服務層會記為資料夾失敗（跳過階段 2、任務標為 ERROR），
         # 不能回報 error=False，否則缺資料夾會顯示「翻譯已完成」。
+        yield {
+            "progress": _scale_progress(1.0, progress_start, progress_end),
+            "log": message,
+            "error": True,
+        }
+        return
+    if not os.path.isdir(input_dir):
+        # 路徑存在但不是資料夾（例如誤填成 ZIP 或一般檔案）：os.walk 對檔案不會報錯、
+        # 只會回傳空內容，結果會變成「找不到任何可處理的文件」的假成功，所以明確判為錯誤。
+        message = f"輸入路徑不是資料夾，無法合併: {os.path.abspath(input_dir)}"
+        log_error(message)
         yield {
             "progress": _scale_progress(1.0, progress_start, progress_end),
             "log": message,

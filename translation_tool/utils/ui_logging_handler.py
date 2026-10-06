@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from translation_tool.utils.redaction import redact_secrets
-from translation_tool.utils.ui_mirror import MIRROR_FLAG
+from translation_tool.utils.ui_mirror import MIRROR_FLAG, accepted_params
 
 
 class UISessionLogHandler(logging.Handler):
@@ -46,11 +46,15 @@ class UISessionLogHandler(logging.Handler):
             else:
                 level, ui_msg = "debug", msg
 
-            try:
-                self._session.add_log(ui_msg, level=level, source="logger")
-            except TypeError:
-                # 舊版 session 只接受 text
-                self._session.add_log(ui_msg)
+            # 舊版 / 替身 session 只接受 text：以函式簽章判斷，不靠捕捉 TypeError
+            # （那會把 add_log 內部真正的 TypeError 也當成「不支援」而重複呼叫）。
+            accepted = accepted_params(self._session.add_log)
+            kwargs = {}
+            if accepted is None or "level" in accepted:
+                kwargs["level"] = level
+            if accepted is None or "source" in accepted:
+                kwargs["source"] = "logger"
+            self._session.add_log(ui_msg, **kwargs)
 
         except Exception:  # noqa: BLE001, S110 - 在 handler 內記錄錯誤會遞迴
             # logging handler 內部絕對不能炸
