@@ -29,6 +29,7 @@ from app.shell.palette import (
 from app.shell.resume_prompt import ResumePrompt
 from app.shell.sidebar import SIDEBAR_WIDTH_COMPACT, Sidebar
 from app.shell.statusbar import StatusBar
+from app.ui.safe_file_picker import SafeFilePicker
 from app.shell.task_manager import TaskInfo, TaskManager
 from app.shell.topbar import TopBar
 from app.ui import design
@@ -132,7 +133,7 @@ class AppShell:
         find_interrupted_tasks: Callable[[], object] | None = None,
     ) -> None:
         self.page = page
-        self.file_picker = file_picker or ft.FilePicker()
+        self.file_picker = file_picker or SafeFilePicker()
         self._key_snapshot = key_snapshot or _default_key_snapshot
         self._config_loader = config_loader or _default_config_loader
         self.tasks = task_manager or TaskManager()

@@ -15,6 +15,7 @@ import flet as ft
 from app.ui import design, kit
 from app.ui.debounce import Debouncer
 from app.ui.design import C
+from app.ui.safe_file_picker import SafeFilePicker
 from app.ui.snack import show_snack
 from app.views.icon_preview.detail_mixin import IconPreviewDetailMixin
 from app.views.icon_preview.entries_cache import _load_entries_cache_l2
@@ -132,8 +133,8 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         # =========================
         # Folder Picker
         # =========================
-        self.source_picker = ft.FilePicker(on_upload=self._on_pick_source)
-        self.review_picker = ft.FilePicker(on_upload=self._on_pick_review)
+        self.source_picker = SafeFilePicker(on_upload=self._on_pick_source)
+        self.review_picker = SafeFilePicker(on_upload=self._on_pick_review)
         # FilePicker 是 Service，自動通過 init() 註冊，不需要添加到 page.overlay
 
         # ===== 分頁設定 =====

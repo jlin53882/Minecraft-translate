@@ -24,6 +24,7 @@ from app.services_impl.pipelines.merge_service import (
 from app.tasks.task_session import TaskSession  # noqa: F401
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog
+from app.ui.safe_file_picker import ensure_output_dir
 from translation_tool.utils.config_manager import load_config
 
 
@@ -530,8 +531,9 @@ def _merge_start_merge(ctx, dialog):
     if not output:
         ctx.show_snack_bar("⚠️ 輸出目錄為必填欄位")
         return
-    if not os.path.isdir(output):
-        ctx.show_snack_bar("⚠️ 輸出目錄不存在")
+    output_error = ensure_output_dir(output)
+    if output_error:
+        ctx.show_snack_bar(f"⚠️ {output_error}")
         return
 
     only_lang = ctx.merge_only_lang_checkbox.value

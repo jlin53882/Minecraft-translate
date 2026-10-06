@@ -23,6 +23,7 @@ from app.services_impl.pipelines.extract_service import (
 )
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog
+from app.ui.safe_file_picker import ensure_output_dir
 from app.views.extractor.extractor_state import PreviewState
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error
@@ -218,8 +219,9 @@ def _extract_start_extraction(ctx, dialog):
     if not output:
         ctx.show_snack_bar("⚠️ 輸出目錄為必填欄位")
         return
-    if not os.path.isdir(output):
-        ctx.show_snack_bar("⚠️ 輸出目錄不存在")
+    output_error = ensure_output_dir(output)
+    if output_error:
+        ctx.show_snack_bar(f"⚠️ {output_error}")
         return
 
     selected_codes = [
