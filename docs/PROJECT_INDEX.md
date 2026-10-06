@@ -301,6 +301,7 @@ app/
 | `translation_tool/core/lm_config_rules.py` | LM API 行為設定（batch size / temperature 等）|
 | `translation_tool/utils/config_manager.py` | 應用程式設定管理 |
 | `docs/PR_WORKFLOW.md` | PR 工作流程規範 |
+| `docs/CROSS_CUTTING_REVIEW_CHECKLIST.md` | 橫切改動（日誌／任務生命週期／併發）審查清單 |
 | `docs/PROJECT_STRUCTURE.md` | 專案結構與模組職責 |
 
 ## 10. View 架構文件（docs/）

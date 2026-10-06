@@ -213,10 +213,16 @@ def _one_click_dispose_dialogs(ctx) -> None:
     for d in ctx.dialogs:
         d.open = False
     ctx.page.update()
+    removed = False
     for d in ctx.dialogs:
         if d in ctx.page.overlay:
             ctx.page.overlay.remove(d)
+            removed = True
     ctx.dialogs.clear()
+    if removed:
+        # 移除後也要再推一次：否則緊接著的 SnackBar／進度面板（輸入驗證失敗時）
+        # 會與「移除 overlay」擠在同一次更新，對話框遮罩殘留、提示被蓋住。
+        ctx.page.update()
 
 
 def _one_click_rebuild_ui(ctx):
