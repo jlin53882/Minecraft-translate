@@ -28,7 +28,9 @@ from translation_tool.utils.config_manager import load_config
 logger = logging.getLogger(__name__)
 
 
-def _cleanup_cancelled_output(output_dir: str, existed_before: bool, finished: bool, session) -> None:
+def _cleanup_cancelled_output(
+    output_dir: str, existed_before: bool, finished: bool, session
+) -> None:
     """取消新建的合并输出时移除半成品；不碰使用者原本存在的目录。"""
     if finished or existed_before or not getattr(session, "cancel_requested", False):
         return
@@ -36,7 +38,9 @@ def _cleanup_cancelled_output(output_dir: str, existed_before: bool, finished: b
         shutil.rmtree(output_dir, ignore_errors=True)
         _session_log(session, f"[取消] 已清理半成品輸出：{output_dir}", "info")
     except OSError as exc:
-        _session_log(session, f"[取消] 清理半成品輸出失敗：{output_dir}；{exc!r}", "warning")
+        _session_log(
+            session, f"[取消] 清理半成品輸出失敗：{output_dir}；{exc!r}", "warning"
+        )
 
 
 def _session_log(session, text: str, level: str = "info") -> None:
@@ -553,9 +557,7 @@ def run_merge_folder_batch_service(
         yield {"progress": 1.0, "log": None, "error": True, "summary": error_summary}
 
     finally:
-        _cleanup_cancelled_output(
-            output_dir, output_existed_before, finished, session
-        )
+        _cleanup_cancelled_output(output_dir, output_existed_before, finished, session)
         UI_LOG_HANDLER.set_session(None)
         if finish_session and not finished:
             session.finish()  # 取消（generator.close）等沒走到 finish 的路徑
