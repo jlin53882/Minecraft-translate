@@ -72,6 +72,7 @@ class TranslatePanel(ft.Column):
             "先沿用其他版本的相同譯文",
             "其他版本已有「模組、鍵值、原文都相同」的譯文時直接補上，不呼叫 AI、不耗額度",
             True,
+            on_change=lambda _e: self._on_limit_changed(),
         )
         self.cache_row = kit.SwitchRow(
             "同時寫入翻譯快取",
@@ -225,25 +226,26 @@ class TranslatePanel(ft.Column):
             self.count_text.value = "資料庫還沒有資料，請先到「掃描匯入」建立"
             return
         missing = db.count_untranslated(version, self.mod_ids())
-        limit = self.limit()
-        if limit:
-            will = min(missing, limit)
-            self.count_text.value = (
-                f"此範圍有 {format_count(missing)} 筆未翻譯，"
-                f"上限 {format_count(limit)} 筆，本次最多翻譯 {format_count(will)} 筆"
-                f"（預估約 {estimate_batch_count(will):,} 批）"
-            )
-            return
-        self.count_text.value = (
-            f"此範圍有 {format_count(missing)} 筆未翻譯，上限為 0（不限），"
-            f"本次會翻譯全部 {format_count(missing)} 筆"
-            f"（預估約 {estimate_batch_count(missing):,} 批）"
-            + (
-                "；筆數很多，會消耗大量 API 額度，建議先按「先預覽」確認"
-                if missing > LARGE_RUN_WARNING
-                else ""
-            )
+        reusable = (
+            db.count_reusable(version, self.mod_ids()) if self.reuse_row.value else 0
         )
+        limit = self.limit()
+        to_ai = max(0, missing - reusable)  # 沿用其他版本的不送 AI
+        will = min(to_ai, limit) if limit else to_ai
+        text = f"此範圍有 {format_count(missing)} 筆未翻譯"
+        if reusable:
+            text += (
+                f"，其中約 {format_count(reusable)} 筆其他版本已有相同譯文、"
+                "開始時會直接沿用（原文不同的不算）"
+            )
+        text += f"；上限 {format_count(limit)} 筆" if limit else "；上限為 0（不限）"
+        text += (
+            f"，本次送 AI 翻譯{'最多 ' if limit else '全部 '}{format_count(will)} 筆"
+            f"（預估約 {estimate_batch_count(will):,} 批）"
+        )
+        if not limit and will > LARGE_RUN_WARNING:
+            text += "；筆數很多，會消耗大量 API 額度，建議先按「先預覽」確認"
+        self.count_text.value = text
 
     def _on_limit_changed(self) -> None:
         self._refresh_counts()

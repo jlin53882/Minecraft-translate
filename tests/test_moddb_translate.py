@@ -553,11 +553,18 @@ def test_translate_panel_explains_zero_limit_means_all(db_path):
     panel.limit_field.value = "0"
     panel._on_limit_changed()
     assert "上限為 0（不限）" in panel.count_text.value
-    assert "全部 3 筆" in panel.count_text.value
+    # 3 筆未翻譯中，bar.a 其他版本有相同內容的譯文 → 沿用 1 筆，送 AI 全部 2 筆
+    assert "其中約 1 筆其他版本已有相同譯文" in panel.count_text.value
+    assert "送 AI 翻譯全部 2 筆" in panel.count_text.value
     panel.limit_field.value = "2"
     panel._on_limit_changed()
     assert "上限 2 筆" in panel.count_text.value
-    assert "最多翻譯 2 筆" in panel.count_text.value
+    assert "送 AI 翻譯最多 2 筆" in panel.count_text.value
+    panel.reuse_row.value = False  # 關掉沿用：3 筆全部送 AI
+    panel.limit_field.value = "0"
+    panel._on_limit_changed()
+    assert "送 AI 翻譯全部 3 筆" in panel.count_text.value
+    assert "其他版本已有相同譯文" not in panel.count_text.value
     db.close()
 
 
@@ -981,3 +988,36 @@ def test_preview_and_panel_show_batch_estimates_and_live_line(db_path):
     assert "第 2 / 約 5 批" in panel.live_text.value
     assert "預估剩餘 2:15" in panel.live_text.value
     db.close()
+
+
+def test_preview_shows_how_many_would_be_reused_and_excludes_them(db_path, monkeypatch):
+    """預覽不寫入，但要告訴使用者：多少筆會沿用其他版本（原文相同才算）、多少筆實際送 AI。"""
+    seed(db_path)
+    db = TranslationDB(db_path)
+    # 其他版本同鍵值但「原文不同」→ 不能沿用
+    db.ingest(
+        "1.20.1",
+        [ScanItem(KIND_LANG, "foo", "item.foo.b", "Infused Alloy v1", "舊版譯文")],
+    )
+    assert db.count_reusable("1.21.1") == 1  # 只有 bar.a（原文相同）
+    assert [r[3] for r in db.untranslated_entries("1.21.1", exclude_reusable=True)] == [
+        "item.foo.b",
+        "item.foo.c",
+    ]
+    db.close()
+
+    snap = run(TranslateOptions(version="1.21.1", dry_run=True))
+    texts = [e.text for e in snap["logs"]]
+    assert any(
+        "其中約 1 筆其他版本已有相同譯文" in t and "原文不同的不會沿用" in t
+        for t in texts
+    )
+    assert any("本次將送 AI 翻譯 2 筆" in t for t in texts)
+    assert snap["summary"]["reused"] == 1
+    assert snap["summary"]["candidates"] == 2  # 送 AI 的只有 foo.b、foo.c
+    assert snap["summary"]["remaining"] == 3
+
+    off = run(
+        TranslateOptions(version="1.21.1", dry_run=True, reuse_other_versions=False)
+    )
+    assert off["summary"]["reused"] == 0 and off["summary"]["candidates"] == 3

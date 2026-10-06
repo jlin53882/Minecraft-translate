@@ -864,6 +864,21 @@ class TranslationDB:
             params += list(mod_ids)
         return where, params
 
+    # 其他版本已有「類型／模組／鍵值／原文都相同」的生效譯文（可直接沿用，不必呼叫 AI）
+    _REUSABLE_SQL = """EXISTS (
+        SELECT 1 FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
+        WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
+          AND e2.en_us = e.en_us AND e2.mc_version <> e.mc_version)"""
+
+    def count_reusable(self, version: str, mod_ids: Sequence[str] | None = None) -> int:
+        """未翻譯條目中，其他版本已有相同內容譯文、開始機翻時會直接沿用的筆數。"""
+        where, extra = self._untranslated_where(mod_ids)
+        sql = (
+            "SELECT COUNT(*) FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
+            f"WHERE {where} AND {self._REUSABLE_SQL}"
+        )
+        return self._cached_count(sql, [version, *extra])
+
     def count_untranslated(
         self, version: str, mod_ids: Sequence[str] | None = None
     ) -> int:
@@ -891,9 +906,16 @@ class TranslationDB:
         version: str,
         mod_ids: Sequence[str] | None = None,
         limit: int | None = None,
+        *,
+        exclude_reusable: bool = False,
     ) -> list[tuple[int, str, str, str, str]]:
-        """未翻譯條目 ``(id, 類型, 模組, 鍵值, 原文)``；順序固定，重跑會接續同一批。"""
+        """未翻譯條目 ``(id, 類型, 模組, 鍵值, 原文)``；順序固定，重跑會接續同一批。
+
+        ``exclude_reusable``：排除「其他版本已有相同內容譯文」的條目（那些會直接沿用，不送 AI）。
+        """
         where, extra = self._untranslated_where(mod_ids)
+        if exclude_reusable:
+            where += f" AND NOT {self._REUSABLE_SQL}"
         sql = (
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
             "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "

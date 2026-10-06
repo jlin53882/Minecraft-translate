@@ -159,13 +159,25 @@ def _select_rows(session, db, options: TranslateOptions, report: TranslateReport
         report.reused = db.reuse_from_other_versions(options.version, mods)
         if report.reused:
             _log(session, f"♻️ 沿用其他版本相同譯文 {report.reused} 筆（未呼叫 AI）")
-    rows = db.untranslated_entries(options.version, mods, options.limit or None)
+    # 預覽不寫入，所以沿用的筆數用查詢估算，並從「要送 AI 的條目」中排除
+    preview_reuse = options.dry_run and options.reuse_other_versions
+    rows = db.untranslated_entries(
+        options.version, mods, options.limit or None, exclude_reusable=preview_reuse
+    )
     report.candidates = len(rows)
     report.remaining = db.count_untranslated(options.version, mods)
     if options.dry_run:
+        if preview_reuse:
+            report.reused = db.count_reusable(options.version, mods)
+            _log(
+                session,
+                f"♻️ 預覽：其中約 {report.reused:,} 筆其他版本已有相同譯文，"
+                "開始機翻時會直接沿用（不呼叫 AI）；"
+                "只有「模組、鍵值、原文都相同」才算，原文不同的不會沿用",
+            )
         _log(
             session,
-            f"🔎 預覽：{report.remaining} 筆未翻譯，本次將翻譯前 {len(rows)} 筆"
+            f"🔎 預覽：{report.remaining:,} 筆未翻譯，本次將送 AI 翻譯 {len(rows):,} 筆"
             f"，預估約 {plan_batches(build_items(rows)):,} 批（未呼叫 AI、未寫入；"
             "實際時間依 API 速度而定，開始後每批結束會更新預估）",
         )
