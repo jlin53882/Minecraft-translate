@@ -190,3 +190,38 @@ def test_single_line_field_blur_uses_the_logging_handler():
     from app.ui.sync_text_field import SyncTextField, _sync_blur
 
     assert SyncTextField(label="x").on_blur is _sync_blur
+
+
+def test_change_sync_on_a_real_flet_control_updates_value_without_a_reverse_patch():
+    """釘住 Flet 的實際行為：只寫後端快取，``.value`` 讀得到新值，且不標記 dirty（不推回瀏覽器）。
+
+    其他測試用替身；這個用真正的控制項，Flet 升級改了內部結構時會在這裡先失敗。
+    """
+    from types import SimpleNamespace
+
+    from app.ui.sync_text_field import SyncTextField, _sync_change
+
+    field = SyncTextField(label="x")
+    field._dirty.clear()
+
+    _sync_change(SimpleNamespace(control=field, data="C:\\完整\\新路徑", name="change"))
+
+    assert field.value == "C:\\完整\\新路徑"
+    assert field._dirty == {}
+
+    _sync_change(SimpleNamespace(control=field, data="", name="change"))
+
+    assert field.value == ""
+    assert field._dirty == {}
+
+
+def test_direct_assignment_would_mark_the_field_dirty():
+    """對照組：一般賦值會標記 dirty（也就是會反向推回瀏覽器），這正是 change 同步要避免的。"""
+    from app.ui.sync_text_field import SyncTextField
+
+    field = SyncTextField(label="x")
+    field._dirty.clear()
+
+    field.value = "直接設定"
+
+    assert field._dirty

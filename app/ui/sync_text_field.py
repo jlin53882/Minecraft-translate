@@ -1,13 +1,23 @@
-"""輸入值會即時同步回後端的單行 ``TextField``。
+"""輸入值會即時同步回後端的 ``TextField``。
 
-Flet 只有在控制項掛了事件處理函式時，才會在每次輸入時把值送回 Python；沒有的話，
-Web 模式手動輸入的內容要等失焦／送出才會進到 ``.value``，按「執行」時就讀到舊值
-（一鍵流程 ``input=[]``、打包輸出 ZIP 仍用預設路徑）。
+背景：Flet Web 的輸入事件到了 Python，但控制項的 ``.value`` 可能還是舊值
+（一鍵流程 ``input=[]``、機器翻譯頁用舊路徑掃描、打包輸出 ZIP 仍用預設路徑）。
 
-``app/`` 內一律用 ``SyncTextField``（``tests/test_text_field_value_sync.py`` 的 AST
-契約測試強制），不要直接建立 ``ft.TextField``。多行／密碼／唯讀欄位不掛：每個按鍵都往返，
-對大段文字不划算。呼叫端自己指定 ``on_change`` 時仍會先做後端快取同步，再執行
-呼叫端 handler。
+行為（``app/`` 內一律用 ``SyncTextField``，``tests/test_text_field_value_sync.py`` 的 AST
+契約測試強制，不要直接建立 ``ft.TextField``）：
+
+* 可編輯單行欄位，沒有指定 handler：自動掛 ``on_change``（同步輸入值）與 ``on_blur``
+  （同步並記一行診斷 log）。
+* 呼叫端自己指定了 ``on_change`` / ``on_blur``：**先同步、再呼叫它**（單行欄位的 ``on_blur``
+  也一樣）。呼叫端 handler 直接讀 ``e.control.value`` 才會是新值；保留 sync／async／零參數寫法，
+  重複套用不會再包一層。
+* 多行、密碼欄位：只有呼叫端自己指定了 ``on_change`` 時才先同步再呼叫；沒有指定就不掛
+  （每個按鍵都往返，對大段文字不划算）。
+* 唯讀欄位：不掛（使用者改不了）。
+
+``change`` 事件只更新 Flet 控制項的後端快取（``_values``），**不標記 dirty**：Flet 的差異計算
+只看 ``_dirty``，所以不會把值再推回瀏覽器；直接 ``control.value = …`` 會觸發反向更新，使用者
+還在打字時，較早的值可能蓋掉較新的值（長路徑只剩中間或尾端）。
 """
 
 from __future__ import annotations
