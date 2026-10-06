@@ -276,7 +276,7 @@ def test_db_location_banner_shows_folder_and_status(db_path):
 
     banner = DbLocationBanner()
     assert banner.folder_text.value == str(db_path.parent)
-    assert "尚未建立" in texts_of(banner.status_box)
+    assert "找不到" in texts_of(banner.status_box)
     seed(db_path)
     banner.refresh()
     assert "已建立" in texts_of(banner.status_box)
@@ -453,3 +453,34 @@ def test_db_path_strips_quotes_and_accepts_a_folder(tmp_path, monkeypatch):
     folder.mkdir()
     folder_settings = DbSettings(path=str(folder))
     assert folder_settings.resolved_path() == folder / DEFAULT_DB_FILE
+
+
+def test_config_db_path_field_cleans_quotes_and_checks_existence(db_path):
+    """設定頁路徑欄位：貼上帶引號的路徑自動去引號，並即時顯示檔案是否存在。"""
+    from app.ui import kit
+    from app.views.config.db_location import DbLocationBanner, attach_path_hooks
+    from tests.test_moddb_view import texts_of
+
+    field = kit.field(label="資料庫檔案", helper="原本的說明")
+    banner = DbLocationBanner()
+    check = attach_path_hooks(field, banner)
+
+    seed(db_path)
+    field.value = f'"{db_path}"'
+    field.on_change(SimpleNamespace(control=field, data=field.value))
+    assert field.value == str(db_path)  # 輸入當下就去掉引號
+    assert field.helper.startswith("✓ 找到資料庫") and "原本的說明" in field.helper
+    assert "已建立" in texts_of(banner.status_box)  # 上方資訊列同步預覽
+
+    missing = db_path.parent / "nope" / "x.db"
+    field.value = f"  {missing}  "
+    field.on_change(SimpleNamespace(control=field, data=field.value))
+    assert field.value == f"  {missing}  "  # 輸入中不動空白（可能還在打字）
+    field.on_blur(SimpleNamespace(control=field))
+    assert field.value == str(missing)  # 離開欄位才整理前後空白
+    assert "找不到" in field.helper
+    assert "找不到" in texts_of(banner.status_box)
+
+    field.value = ""
+    check()
+    assert field.helper.startswith("空白")

@@ -65,6 +65,38 @@ def normalize_db_path(value: object) -> str:
     return text.strip(_QUOTES).strip()
 
 
+def strip_quotes(text: str) -> str:
+    """只去掉前後的引號（輸入中使用：不動空白，路徑中間與結尾可能還在打字）。"""
+    return text.strip(_QUOTES)
+
+
+def describe_db_path(path_text: object) -> tuple[str, str, Path]:
+    """檢查使用者填的資料庫路徑，回傳 ``(等級, 說明, 實際檔案路徑)``。
+
+    等級：``ok`` 找到可用的資料庫／``info`` 檔案尚未建立但位置可用／``warn`` 有問題。
+    輸入欄位邊打邊呼叫（唯讀檢查，不會建立或修改任何檔案）。
+    """
+    settings = DbSettings(path=normalize_db_path(path_text))
+    path = settings.resolved_path()
+    blank = not settings.path
+    if path.is_file():
+        kind = classify_database(path)
+        if kind == DB_FOREIGN:
+            return (
+                "warn",
+                f"檔案存在，但不是 Mod 翻譯資料庫（為避免污染不會使用）：{path}",
+                path,
+            )
+        if kind == DB_NEWER:
+            return "warn", f"資料庫版本比本程式新，請更新程式後再使用：{path}", path
+        return "ok", f"✓ 找到資料庫：{path}", path
+    if blank:
+        return "info", f"空白：使用資料目錄內的預設位置（尚未建立）：{path}", path
+    if not path.parent.is_dir():
+        return "warn", f"找不到這個檔案，連資料夾也不存在：{path.parent}", path
+    return "warn", f"找不到資料庫檔案（資料夾存在）：{path}", path
+
+
 def parse_priority(names: Any) -> tuple[int, ...]:
     """把來源名稱清單轉成代碼優先序；未列出的來源依預設順序接在後面。"""
     by_name = {name: code for code, name in SOURCE_NAMES.items()}

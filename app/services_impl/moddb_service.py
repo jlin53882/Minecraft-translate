@@ -39,6 +39,11 @@ from translation_tool.translation_db.schema import (
     SRC_SUBTITLE,
 )
 from translation_tool.translation_db.settings import database_problem as _db_problem
+from translation_tool.translation_db.settings import (
+    describe_db_path,
+    normalize_db_path,
+    strip_quotes,
+)
 from translation_tool.utils.cancellation import cancel_scope
 from translation_tool.utils.config_manager import load_config
 
@@ -60,10 +65,13 @@ __all__ = [
     "VersionStat",
     "current_settings",
     "database_problem",
+    "describe_db_path",
     "load_db_settings",
+    "normalize_db_path",
     "open_database",
     "pack_format_hint",
     "run_moddb_scan_service",
+    "strip_quotes",
     "summarize_database",
     "version_choices",
 ]
