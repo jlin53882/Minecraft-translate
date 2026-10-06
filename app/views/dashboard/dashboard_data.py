@@ -10,7 +10,7 @@ import datetime as dt
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from app.services_impl.key_health_service import KeyHealth
+from app.services_impl.key_health_service import KeyHealth, ModelQuotaHealth
 from app.shell.task_manager import STATUS_ERROR, TaskInfo
 from app.shell.topbar import KeySummary, summarize_keys
 
@@ -61,6 +61,9 @@ class DashboardData:
     rules_count: int | None = None
     keys: KeySummary | None = None
     key_rows: list[KeyHealth] = field(default_factory=list)
+    model_rows: list[ModelQuotaHealth] = field(
+        default_factory=list
+    )  # 今日配額用盡的模型
     steps: list[StepStatus] = field(default_factory=list)
     activity: list[TaskInfo] = field(default_factory=list)
     tasks_done: int = 0
@@ -145,6 +148,7 @@ def build_dashboard_data(
     cache_overview: dict | None,
     rules_count: int | None,
     key_snapshot: Sequence[KeyHealth],
+    model_quota: Sequence[ModelQuotaHealth] = (),
     active: Sequence[TaskInfo],
     recent: Sequence[TaskInfo],
     activity_limit: int = 6,
@@ -160,6 +164,7 @@ def build_dashboard_data(
         rules_count=rules_count,
         keys=summarize_keys(key_snapshot),
         key_rows=list(key_snapshot),
+        model_rows=list(model_quota),
         steps=build_step_statuses(active, recent),
         activity=activity,
         tasks_done=sum(1 for t in recent if t.status != STATUS_ERROR),

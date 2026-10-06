@@ -9,13 +9,15 @@ import threading
 from collections.abc import Collection
 from typing import Any
 
-from ..utils.config_manager import load_config, load_config_shared
+from ..utils.config_manager import get_models_config, load_config, load_config_shared
 from ..utils.log_unit import log_debug, log_error, log_info, log_warning
 from .lm_key_health import (
     DEFAULT_COOLDOWN_SEC,
     RECORDED_REASONS,
     KeyHealth,
+    ModelQuotaHealth,
     get_key_health_registry,
+    get_model_quota_registry,
     mask_key,
 )
 
@@ -111,7 +113,10 @@ def get_api_key_count() -> int:
 
 
 def get_key_failure_cooldown_sec() -> float:
-    """已確定失敗（RPD 耗盡 / 403）的 key 要冷卻多久（秒）；0 = 不記憶（issue #113）。"""
+    """已確定 403 無權限的 key 要冷卻多久（秒）；0 = 不記憶（issue #113）。
+
+    同專案模式下 RPD 耗盡記在「模型」上（``ModelQuotaRegistry``），不使用這個設定。
+    """
     raw = load_config().get("lm_translator", {}).get("key_failure_cooldown_sec")
     if raw is None or isinstance(raw, bool):
         return DEFAULT_COOLDOWN_SEC
@@ -128,6 +133,16 @@ def get_key_health_snapshot() -> list[KeyHealth]:
     registry = get_key_health_registry()
     registry.prune(keys)
     return registry.snapshot(keys)
+
+
+def get_model_quota_snapshot() -> list[ModelQuotaHealth]:
+    """今日每日配額（RPD）已用盡的啟用模型（給 UI 顯示）；依設定檔的模型順序。"""
+    models = [
+        name
+        for name, cfg in get_models_config(load_config()).items()
+        if cfg.get("enabled", False)
+    ]
+    return get_model_quota_registry().snapshot(models)
 
 
 def claim_api_key(exclude: Collection[int] = ()) -> tuple[int, str] | None:
@@ -199,8 +214,13 @@ class ApiKeyCycle:
 
     **跨批次的失敗記憶（issue #113）**
 
-    本類別每個 cycle 都是新的，但「已確定 RPD 耗盡 / 403」的 key 會記在 ``lm_key_health`` 的共用
-    registry（冷卻 ``key_failure_cooldown_sec``）：
+    本類別每個 cycle 都是新的，但「已確定 403 無權限」的 key 會記在 ``lm_key_health`` 的共用
+    registry（冷卻 ``key_failure_cooldown_sec``）。
+
+    注意（同專案模式）：**每日配額（RPD）不再記在 key 上**——Gemini 的 RPD 算在「專案 × 模型」，
+    換 key 拿不到額度，所以 RPD 耗盡改記在模型上（``ModelQuotaRegistry``，由
+    ``lm_translator_main`` 處理並換模型）。``mark_failed(reason="rpd")`` 只是 registry 保留的通用
+    能力，現行翻譯流程不會呼叫它；請勿把 RPD 接回 key 輪替。
 
     - claim() 會先跳過冷卻中的 key，所以已耗盡的 key 不會在每個批次都被再請求一次。
     - 沒有任何健康的 key 時，每個 cycle 最多「試探」冷卻最快到期的**那一把**；試探失敗才算耗盡
@@ -303,8 +323,9 @@ class ApiKeyCycle:
     def mark_failed(self, reason: str | None = None) -> bool:
         """標記剛才實際使用的 key 為失敗。回傳 True = 還有尚未嘗試的 key 可用。
 
-        reason 為 "rpd"（每日配額用盡）或 "forbidden"（403）時，另外把這把 key 記進共用的
-        key 健康狀態，之後的批次會跳過它直到冷卻到期（issue #113）。其他情況不記錄。
+        reason 為 "forbidden"（403）時，另外把這把 key 記進共用的 key 健康狀態，之後的批次會
+        跳過它直到冷卻到期（issue #113）。"rpd" 是 registry 的通用能力，現行流程不使用（RPD 記在
+        模型上，見 ``ModelQuotaRegistry``）。其他情況不記錄。
         """
         if self.current_index is not None:
             self._failed.add(self.current_index)

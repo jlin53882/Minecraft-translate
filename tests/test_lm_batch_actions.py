@@ -17,7 +17,26 @@ def test_error_to_action_decision_is_pure_and_covers_key_health_paths():
     )
     assert (
         decide_batch_action(
-            "rate_limited", quota_kind="rpd", has_alternative_key=False
+            "rate_limited", quota_kind="rpd", has_next_model=False
+        ).action
+        is BatchAction.EXHAUSTED
+    )
+    # 同專案模式：RPD 換 key 沒用（即使有其他 key），只看還有沒有下一個模型。
+    assert (
+        decide_batch_action(
+            "rate_limited",
+            quota_kind="rpd",
+            has_alternative_key=True,
+            has_next_model=True,
+        ).action
+        is BatchAction.NEXT_MODEL
+    )
+    assert (
+        decide_batch_action(
+            "rate_limited",
+            quota_kind="rpd",
+            has_alternative_key=True,
+            has_next_model=False,
         ).action
         is BatchAction.EXHAUSTED
     )

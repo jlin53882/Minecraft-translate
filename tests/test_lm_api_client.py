@@ -168,3 +168,96 @@ class TestModuleImports:
         from translation_tool.core.lm_api_client import call_gemini_requests
 
         assert callable(call_gemini_requests)
+
+
+def test_worst_case_request_sec_covers_every_connection_attempt_and_backoff():
+    from translation_tool.core import lm_api_client as client
+
+    timeout = 100.0
+    worst = client.worst_case_request_sec(timeout)
+
+    # 每次連線嘗試都可能套用完整逾時，再加上嘗試之間的指數退避（含最大 jitter）
+    assert worst >= client.NETWORK_RETRY_ATTEMPTS * timeout
+    backoff = worst - client.NETWORK_RETRY_ATTEMPTS * timeout
+    expected = sum(
+        client.NETWORK_RETRY_BASE_SEC * (2 ** (n - 1)) + client.NETWORK_RETRY_BASE_SEC
+        for n in range(1, client.NETWORK_RETRY_ATTEMPTS)
+    )
+    assert backoff == expected
+    assert client.worst_case_request_sec(-5) == expected  # 負的逾時不產生負的租約
+
+
+def test_malformed_gemini_envelope_raises_a_dedicated_runtime_error_subclass():
+    """HTTP 已成功但回應格式異常：例外是 RuntimeError 的子類（既有行為不變），呼叫端可據此分辨。"""
+    from unittest.mock import Mock, patch
+
+    import pytest
+
+    from translation_tool.core import lm_api_client as client
+
+    response = Mock(ok=True)
+    response.json.return_value = {"promptFeedback": {"blockReason": "SAFETY"}}
+
+    with (
+        patch.object(client, "_post_with_retry", return_value=response),
+        pytest.raises(client.GeminiResponseFormatError) as info,
+    ):
+        client.call_gemini_requests(
+            model_name="m",
+            system_prompt="s",
+            payload={"items": [{"id": "0", "value": "x"}]},
+            api_key="k",
+            temperature=0.2,
+        )
+
+    assert isinstance(info.value, RuntimeError)
+
+
+def test_http_200_with_an_invalid_json_body_raises_the_format_error():
+    """HTTP 200 但 body 不是有效 JSON：一樣是「HTTP 已成功、回應格式異常」。"""
+    from unittest.mock import Mock, patch
+
+    import pytest
+
+    from translation_tool.core import lm_api_client as client
+
+    response = Mock(ok=True)
+    response.json.side_effect = ValueError("Expecting value")
+
+    with (
+        patch.object(client, "_post_with_retry", return_value=response),
+        pytest.raises(client.GeminiResponseFormatError),
+    ):
+        client.call_gemini_requests(
+            model_name="m",
+            system_prompt="s",
+            payload={"items": [{"id": "0", "value": "x"}]},
+            api_key="k",
+            temperature=0.2,
+            meta_out={},
+        )
+
+
+def test_http_200_with_an_unexpected_json_type_raises_the_format_error():
+    """HTTP 200 且 JSON 合法、但最外層不是 object：extract_response_meta 也不能漏出別種例外。"""
+    from unittest.mock import Mock, patch
+
+    import pytest
+
+    from translation_tool.core import lm_api_client as client
+
+    response = Mock(ok=True)
+    response.json.return_value = ["not", "an", "object"]
+
+    with (
+        patch.object(client, "_post_with_retry", return_value=response),
+        pytest.raises(client.GeminiResponseFormatError),
+    ):
+        client.call_gemini_requests(
+            model_name="m",
+            system_prompt="s",
+            payload={"items": [{"id": "0", "value": "x"}]},
+            api_key="k",
+            temperature=0.2,
+            meta_out={},
+        )

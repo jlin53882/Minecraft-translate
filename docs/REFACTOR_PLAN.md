@@ -182,7 +182,7 @@
 
 | 里程碑 | 內容 | 驗收 |
 |---|---|---|
-| M1 #113 ✅ | 金鑰健康狀態：RPD 耗盡 / 403 的 key 冷卻一段時間不再被請求；全部冷卻時仍探測一次；快照供 UI 顯示 | 已耗盡的 key 在冷卻期內只被請求一次；冷卻到期再給一次機會；ATK-009 並發分散不退化 |
+| M1 #113 ✅ | 金鑰健康狀態：403 無權限的 key 冷卻一段時間不再被請求；全部冷卻時仍探測一次；快照供 UI 顯示。**同專案模式（PR #171）：RPD 耗盡改記在「模型」上（`ModelQuotaRegistry`），依序換模型、不換 key** | 403 的 key 在冷卻期內只被請求一次；冷卻到期再給一次機會；ATK-009 並發分散不退化；耗盡的模型每 10 分鐘只放行一個探測 |
 | M2 主題 ✅ | 設計 token 對應 `ft.ColorScheme`，`page.theme` / `page.dark_theme`，預設深色，切換不需重建畫面 | 語意色常數；深淺兩組 scheme 有測試 |
 | M3 UI kit ✅ | `app/ui/kit/`：PageHeader、SectionCard、PathField、SwitchRow、StatCard、Chip、進度、RunPanel、Pager… | 各元件有結構測試 |
 | M4 外殼 ✅ | `ViewSpec` 取代三張平行表；側欄分組、頂列（任務膠囊、API 狀態）、狀態列、快速跳轉；`TaskManager` | main.py 精簡；導覽與任務事件有測試 |
@@ -195,10 +195,10 @@
 
 | 問題 | 決策 | 理由 |
 |---|---|---|
-| 記什麼 | RPD 耗盡（429 `PERDAY` / `DAILY`）與 403 無權限；**不記** 429 RPM、503 overload | 後兩者是暫時性的，不應長期排除 |
-| 記多久 | 固定冷卻（設定 `key_failure_cooldown_sec`，預設 3600 秒），到期再給一次機會 | 不依賴時區資料庫（Windows 沒有 tzdata）；浪費上限為每把 key 每小時一次請求 |
+| 記什麼 | **key 層級**：403 無權限；**模型層級**（同專案模式）：RPD 耗盡（429 `PERDAY` / `DAILY`）。**不記** 429 RPM、503 overload | 後兩者是暫時性的，不應長期排除；RPD 算在「專案 × 模型」，換 key 沒有幫助 |
+| 記多久 | 403：固定冷卻（設定 `key_failure_cooldown_sec`，預設 3600 秒），到期再給一次機會。RPD：到下一個太平洋時間午夜（`America/Los_Angeles`，依賴 `tzdata`），期間每 10 分鐘放行一個探測 | 403 的浪費上限為每把 key 每小時一次請求；RPD 對齊 Gemini 實際重置時間 |
 | 記在哪裡 | 獨立的 key 健康狀態 registry（模組層級、執行緒安全），**以 key 的雜湊識別**而不是 index | 設定檔 key 增減或換順序時狀態仍對得上；不把原始 key 放進狀態或日誌 |
-| 全部都在冷卻 | 仍探測「冷卻最快到期」的那一把，失敗才回 `ALL_KEYS_EXHAUSTED` | 保證能自動恢復，且不會無聲卡住 |
+| 全部都在冷卻 | key（403）：仍探測「冷卻最快到期」的那一把，失敗才回 `ALL_KEYS_EXHAUSTED`。模型（RPD）：所有模型都耗盡且都沒輪到探測時，完全不送請求並回 `ALL_KEYS_EXHAUSTED` | 保證能自動恢復，且不會無聲卡住 |
 | 使用者可見性 | log 一行說明，並提供 `snapshot()` 給 UI（頂列 API 狀態、設定頁金鑰列表、流水線金鑰列） | 設計稿的金鑰健康度顯示共用這份狀態 |
 
 測試隔離：根目錄 `conftest.py` 會在每個測試前後重置 key 健康狀態與 token 預算。

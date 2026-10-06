@@ -88,6 +88,31 @@ def _build_translation_response_schema(payload: dict) -> dict:
     return schema
 
 
+class GeminiResponseFormatError(RuntimeError):
+    """HTTP 請求已成功，但 Gemini 的回應缺少預期的 candidates/content/parts/text。
+
+    仍是 ``RuntimeError`` 的子類（既有行為不變）；呼叫端可據此知道「這次沒有被配額拒絕」。
+    """
+
+
+def worst_case_request_sec(timeout: float) -> float:
+    """一次 ``call_gemini_requests`` 最壞情況會花多久（秒）：給探測租約這類需要涵蓋整段的呼叫端用。
+
+    連線階段最多 ``NETWORK_RETRY_ATTEMPTS`` 次嘗試，每次都可能套用完整的 ``timeout``，
+    嘗試之間還有指數退避（含最大 jitter）。
+
+    注意：``requests`` 的 timeout 不是整段 wall-clock 上限（慢速傳輸、多位址連線都可能超過），所以
+    這只是實務上保守的預算，不是嚴格上限。探測租約因此另外靠「心跳續租」
+    （``ModelQuotaRegistry.hold_probe_lease``）涵蓋請求還活著的整段時間；這個預算只是持有者異常
+    結束時租約的保底長度。
+    """
+    backoff = sum(
+        NETWORK_RETRY_BASE_SEC * (2 ** (attempt - 1)) + NETWORK_RETRY_BASE_SEC
+        for attempt in range(1, NETWORK_RETRY_ATTEMPTS)
+    )
+    return NETWORK_RETRY_ATTEMPTS * max(timeout, 0.0) + backoff
+
+
 def _post_with_retry(url: str, **kwargs) -> requests.Response:
     """requests.post，遇到連線階段的暫時性錯誤時指數退避重試（含 jitter）。"""
     for attempt in range(1, NETWORK_RETRY_ATTEMPTS + 1):
@@ -208,15 +233,28 @@ def call_gemini_requests(
             response=response,
         )
 
-    result = response.json()
+    # HTTP 已成功：之後任何解析問題（不是 JSON、最外層型別不對、缺欄位）都是「回應格式異常」，
+    # 與配額無關（呼叫端據此知道這次沒有被配額拒絕）。
+    try:
+        result = response.json()
+    except Exception as exc:
+        raise GeminiResponseFormatError(
+            f"Gemini 回傳不是有效的 JSON: {redact_text(exc)}"
+        ) from exc
 
     if meta_out is not None:
-        meta_out.update(extract_response_meta(result))
+        try:
+            meta_out.update(extract_response_meta(result))
+        except Exception as exc:
+            raise GeminiResponseFormatError(
+                "Gemini 回傳格式異常: "
+                f"{redact_text(json.dumps(result, ensure_ascii=False, default=str))[:2000]}"
+            ) from exc
 
     try:
         return result["candidates"][0]["content"]["parts"][0]["text"]
     except Exception:  # noqa: BLE001
-        raise RuntimeError(
+        raise GeminiResponseFormatError(
             "Gemini 回傳格式異常: "
-            f"{redact_text(json.dumps(result, ensure_ascii=False))[:2000]}"
+            f"{redact_text(json.dumps(result, ensure_ascii=False, default=str))[:2000]}"
         )
