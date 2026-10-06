@@ -31,6 +31,7 @@ from translation_tool.translation_db.models import (
     SameKeyRow,
     SameTextRow,
     ScanItem,
+    SrcChangeRow,
     TranslationRow,
     VersionStat,
     WriteBackItem,
@@ -443,7 +444,7 @@ class TranslationDB:
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[EntryRow], int]:
-        """條目清單（含總筆數）。state：all / none / diff / manual / ok。
+        """條目清單（含總筆數）。state：all / none / diff / changed / manual / ok。
 
         ``source``：只列出「有該來源譯文」的條目（不論最後採用的是哪個來源，
         所以新匯入的來源即使排在較低優先序、沒被採用，也找得到）。
@@ -473,6 +474,12 @@ class TranslationDB:
             where.append("f.entry_id IS NULL")
         elif state == "diff":
             where.append(f"f.entry_id IS NOT NULL AND {self._DIFF_SQL}")
+        elif state == "changed":  # 掃描時發現原文改了（資料庫仍保留舊原文）
+            where.append(
+                "EXISTS (SELECT 1 FROM src_change sc WHERE sc.kind = e.kind "
+                "AND sc.mc_version = e.mc_version AND sc.mod_id = e.mod_id "
+                "AND sc.key = e.key)"
+            )
         elif state == "manual":
             where.append(f"f.source = {SRC_MANUAL} AND NOT {self._DIFF_SQL}")
         elif state == "ok":
@@ -551,6 +558,14 @@ class TranslationDB:
                 )
             ]
         )
+        detail.src_changes = [
+            SrcChangeRow(*r)
+            for r in self._q(
+                "SELECT old_en, new_en, detected_at FROM src_change "
+                "WHERE kind=? AND mc_version=? AND mod_id=? AND key=? ORDER BY id DESC",
+                (entry.kind, entry.mc_version, entry.mod_id, entry.key),
+            )
+        ]
         detail.history = [
             HistoryRow(*r)
             for r in self._q(

@@ -187,6 +187,7 @@ class StatCard(ft.Container):
         delta: str | None = None,
         delta_tone: str = "em",
         expand: bool | int = False,
+        action: ft.Control | None = None,
     ) -> None:
         head: list[ft.Control] = []
         if icon:
@@ -215,6 +216,11 @@ class StatCard(ft.Container):
                     ),
                     self.value_text,
                     self.delta_text,
+                    *(
+                        [ft.Row([action], alignment=ft.MainAxisAlignment.END)]
+                        if action is not None
+                        else []
+                    ),
                 ],
                 spacing=4,
                 tight=True,
@@ -250,6 +256,7 @@ def stat_card(
     delta: str | None = None,
     delta_tone: str = "em",
     expand: bool | int = False,
+    action: ft.Control | None = None,
 ) -> StatCard:
     """``StatCard`` 的函式寫法。"""
     return StatCard(
@@ -260,6 +267,7 @@ def stat_card(
         delta=delta,
         delta_tone=delta_tone,
         expand=expand,
+        action=action,
     )
 
 

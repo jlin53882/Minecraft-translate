@@ -16,11 +16,18 @@ STATE_LABELS = {
     "all": "全部",
     "none": "未翻譯",
     "diff": "版本不同",
+    "changed": "原文已變動",
     "manual": "人工",
     "ok": "有譯文",
 }
 # 條目狀態 → 強調色組（design.tone 的名稱）
-STATE_TONES = {"none": "neutral", "diff": "gold", "manual": "ench", "ok": "dia"}
+STATE_TONES = {
+    "none": "neutral",
+    "diff": "gold",
+    "changed": "gold",
+    "manual": "ench",
+    "ok": "dia",
+}
 KIND_LABELS = {"lang": "語言檔", "patchouli": "Patchouli 手冊"}
 
 

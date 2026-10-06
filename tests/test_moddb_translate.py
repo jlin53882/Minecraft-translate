@@ -344,3 +344,56 @@ def test_same_key_suggestion_offers_apply_even_when_source_differs():
     buttons[0].on_click(None)
     assert applied == ["分配間隔 [ticks]"]
     assert apply_buttons(controls[1]) == []  # 沒有譯文的版本不提供套用
+
+
+def test_changed_filter_lists_entries_with_a_pending_source_change(db_path):
+    seed(db_path)
+    db = TranslationDB(db_path)
+    # 再掃一次，foo.a 的原文改了 → 記為 src_change（資料庫保留舊原文）
+    db.ingest(
+        "1.21.1", [ScanItem(KIND_LANG, "foo", "item.foo.a", "Steel Casing II", "新")]
+    )
+    rows, total = db.list_entries("1.21.1", state="changed")
+    assert total == 1 and rows[0].key == "item.foo.a"
+    assert rows[0].en_us == "Steel Casing"
+    detail = db.entry_detail(rows[0].id)
+    assert [(c.old_en, c.new_en) for c in detail.src_changes] == [
+        ("Steel Casing", "Steel Casing II")
+    ]
+    assert db.list_entries("1.21.1", state="all")[1] == 4
+    db.close()
+
+
+def test_overview_stat_cards_jump_to_filtered_entries(db_path):
+    from app.views.moddb import overview_panel
+
+    seed(db_path)
+    db = TranslationDB(db_path)
+    jumps: list[tuple] = []
+    panel = overview_panel.OverviewPanel(
+        mock_page(), lambda: db, open_entries=lambda *a: jumps.append(a)
+    )
+    panel.refresh()
+    panel.diff_btn.on_click(None)
+    panel.changed_btn.on_click(None)
+    assert jumps == [("diff", None, None), ("changed", None, None)]
+    db.close()
+
+
+def test_entries_panel_changed_filter_and_editor_note(db_path):
+    from app.views.moddb import entries_panel
+    from tests.test_moddb_view import texts_of
+
+    seed(db_path)
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1", [ScanItem(KIND_LANG, "foo", "item.foo.a", "Steel Casing II", "新")]
+    )
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    panel.show_filter("changed")
+    panel._load_list()
+    assert panel.total == 1
+    panel.select(panel.rows[0].id)
+    assert any("Steel Casing II" in t for t in texts_of(panel.meta_col))
+    db.close()

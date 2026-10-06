@@ -448,6 +448,16 @@ class EntriesPanel(ft.Column):
                 spacing=6,
                 wrap=True,
             ),
+            *(
+                ft.Column(
+                    [
+                        kit.chip("掃描到原文已變動（尚未採用）", "gold"),
+                        kit.mono_text(f"新原文：{c.new_en}", size=12),
+                    ],
+                    spacing=4,
+                )
+                for c in detail.src_changes[:1]
+            ),
         ]
         self._update_impact()
         self._render_suggestions()

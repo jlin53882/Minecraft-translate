@@ -49,20 +49,6 @@ class OverviewPanel(ft.Column):
         )
         self.missing_col = ft.Column(spacing=0)
         self.scans_col = ft.Column(spacing=8)
-        self.diff_btn = kit.button(
-            "檢視差異條目",
-            "secondary",
-            size="sm",
-            icon=ft.Icons.COMPARE_ARROWS,
-            on_click=lambda _e: self._goto_entries("diff"),
-        )
-        self.diff_help_btn = ft.IconButton(
-            icon=ft.Icons.HELP_OUTLINE,
-            icon_size=20,
-            icon_color=C.MUTED,
-            tooltip="說明",
-            on_click=lambda _e: self._show_diff_help(),
-        )
         self.refresh_btn = kit.button(
             "重新整理",
             "secondary",
@@ -89,11 +75,6 @@ class OverviewPanel(ft.Column):
                         self.stat_changed,
                     ],
                     spacing=12,
-                ),
-                ft.Row(
-                    [self.diff_help_btn, self.diff_btn],
-                    alignment=ft.MainAxisAlignment.END,
-                    spacing=4,
                 ),
                 kit.section_card(
                     "各版本翻譯進度",
@@ -122,6 +103,29 @@ class OverviewPanel(ft.Column):
         ]
 
     def _build_stat_cards(self) -> None:
+        self.diff_btn = kit.button(
+            "檢視",
+            "secondary",
+            size="sm",
+            icon=ft.Icons.COMPARE_ARROWS,
+            tooltip="跳到條目校對，只看「版本不同」的條目",
+            on_click=lambda _e: self._goto_entries("diff"),
+        )
+        self.diff_help_btn = ft.IconButton(
+            icon=ft.Icons.HELP_OUTLINE,
+            icon_size=20,
+            icon_color=C.MUTED,
+            tooltip="說明",
+            on_click=lambda _e: self._show_diff_help(),
+        )
+        self.changed_btn = kit.button(
+            "檢視",
+            "secondary",
+            size="sm",
+            icon=ft.Icons.EDIT_NOTE,
+            tooltip="跳到條目校對，只看「原文已變動」的條目",
+            on_click=lambda _e: self._goto_entries("changed"),
+        )
         self.stat_mods = kit.stat_card(
             "模組",
             "—",
@@ -142,6 +146,7 @@ class OverviewPanel(ft.Column):
             delta="相同內容、各版本譯文不一致",
             delta_tone="neutral",
             expand=1,
+            action=ft.Row([self.diff_help_btn, self.diff_btn], spacing=4, tight=True),
         )
         self.stat_changed = kit.stat_card(
             "原文已變動",
@@ -151,6 +156,7 @@ class OverviewPanel(ft.Column):
             delta="鍵值相同但原文改了（掃描時略過）",
             delta_tone="neutral",
             expand=1,
+            action=self.changed_btn,
         )
 
     # ------------------------------------------------------------------ 載入
@@ -330,13 +336,13 @@ class OverviewPanel(ft.Column):
             self._open_scan()
 
     def _show_diff_help(self) -> None:
-        """說明「檢視差異條目」查的是什麼，以及為何可能是空白。"""
+        """說明「跨版本譯文不同」查的是什麼，以及為何可能是空白。"""
         show_dialog = getattr(self._page, "show_dialog", None)
         if not callable(show_dialog):
             return
         show_dialog(
             ft.AlertDialog(
-                title=ft.Text("關於「檢視差異條目」"),
+                title=ft.Text("關於「跨版本譯文不同」"),
                 content=ft.Text(
                     "會跳到「條目校對」並套用「版本不同」篩選，列出對應上方"
                     "「跨版本譯文不同」的條目：同一個模組、同一個鍵值、原文相同，"
@@ -344,7 +350,7 @@ class OverviewPanel(ft.Column):
                     "資料庫只有一個遊戲版本時沒有其他版本可以比較，結果一定是空白；"
                     "匯入第二個版本後才會出現。\n\n"
                     "注意：這不是「原文已變動」。原文已變動是鍵值相同但英文原文改了"
-                    "（掃描時略過），不會顯示在這個清單。",
+                    "（掃描時略過），請用右邊「原文已變動」卡片的「檢視」查看。",
                     selectable=True,
                     width=420,
                 ),
