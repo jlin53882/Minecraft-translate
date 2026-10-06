@@ -15,10 +15,12 @@ from app.services_impl.moddb_service import (
     current_settings,
     describe_db_path,
     normalize_db_path,
+    preview_new_source_names,
     strip_quotes,
 )
 from app.ui import design, kit
 from app.ui.design import C
+from app.ui.sync_text_field import _sync_change, _synced
 from translation_tool.utils.log_unit import log_debug
 
 
@@ -137,4 +139,33 @@ def attach_path_hooks(
 
     field.on_change = chain(field.on_change, strip_quotes)
     field.on_blur = chain(field.on_blur, normalize_db_path)
+    return check
+
+
+def attach_priority_hooks(field: ft.TextField) -> Callable[[], None]:
+    """來源優先順序輸入框：即時列出「將新增的自訂來源」，打錯字也看得出來。
+
+    名稱對得上內建或已登錄的來源就沿用；其他名稱儲存後會新增為自訂來源。
+    回傳「重新檢查」函式（載入設定後呼叫）。
+    """
+    base_helper = field.helper if isinstance(field.helper, str) else ""
+
+    def check() -> None:
+        _known, new = preview_new_source_names(field.value or "")
+        note = (
+            f"將新增自訂來源：{'、'.join(new)}（儲存後登錄；若是打錯字，請先修正）"
+            if new
+            else "所有名稱都是已存在的來源。"
+        )
+        field.helper = f"{note}\n{base_helper}" if base_helper else note
+        field.helper_style = ft.TextStyle(size=11.5, color=C.GOLD if new else C.MUTED)
+
+    def handler(e=None):
+        check()
+        try:
+            field.update()
+        except Exception as exc:  # noqa: BLE001 - 尚未掛上頁面時不影響輸入
+            log_debug(f"來源優先順序欄位更新略過：{exc}")
+
+    field.on_change = _synced(handler, _sync_change)
     return check

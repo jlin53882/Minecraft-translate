@@ -20,6 +20,7 @@ from app.services_impl.moddb_service import (
     SRC_SUBTITLE,
     ScanOptions,
     current_settings,
+    custom_source_codes,
     pack_format_hint,
     run_moddb_scan_service,
     version_choices,
@@ -302,15 +303,19 @@ class ScanPanel(ft.Column):
         每次切到本頁籤重讀；使用者在畫面上手動選過就保留他的選擇。
         """
         # 選項順序跟隨設定的 translation_db.priority（優先序高的在前）
-        priority = current_settings().priority
-        order = [c for c in priority if c in ZIP_SOURCES]
-        order += [c for c in ZIP_SOURCES if c not in order]
+        settings = current_settings()
+        allowed = [
+            *ZIP_SOURCES,
+            *custom_source_codes(),
+        ]  # 自訂來源也能當 ZIP 的來源標記
+        order = [c for c in settings.priority if c in allowed]
+        order += [c for c in allowed if c not in order]
         kit.set_dropdown_options(
             self.source_dd, [(str(c), SOURCE_NAMES[c]) for c in order]
         )
         if not self._source_touched:
-            default = current_settings().zip_source
-            if default not in ZIP_SOURCES:
+            default = settings.zip_source
+            if default not in allowed:
                 default = SRC_CUSTOM
             self.source_dd.value = str(default)
 

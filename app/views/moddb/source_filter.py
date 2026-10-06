@@ -30,7 +30,10 @@ class SourceFilter:
         order = current_settings().priority
         kit.set_dropdown_options(
             self.dropdown,
-            [(ALL_SOURCES, "全部來源"), *((str(c), SOURCE_NAMES[c]) for c in order)],
+            [
+                (ALL_SOURCES, "全部來源"),
+                *((str(c), SOURCE_NAMES.get(c, f"來源 {c}")) for c in order),
+            ],
         )
 
     @property

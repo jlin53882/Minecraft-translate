@@ -761,3 +761,133 @@ def test_moddb_view_did_mount_resumes_pollers(db_path, monkeypatch):
     monkeypatch.setattr(view.translate, "resume", lambda: resumed.append("translate"))
     view.did_mount()
     assert resumed == ["scan", "translate"]
+
+
+@pytest.fixture
+def clean_custom_sources():
+    """自訂來源會就地加進全域 SOURCE_NAMES；測試結束後移除，避免影響其他測試。"""
+    from translation_tool.translation_db.schema import SOURCE_NAMES
+
+    yield
+    for code in [c for c in SOURCE_NAMES if c >= 100]:
+        del SOURCE_NAMES[code]
+
+
+def _cfg(path, lines):
+    return {"translation_db": {"path": str(path), "priority": lines}}
+
+
+def test_new_names_in_priority_become_custom_sources(db_path, clean_custom_sources):
+    """在「來源優先順序」輸入新名稱 → 登錄為自訂來源（代碼 100 起），並出現在各處選單。"""
+    from translation_tool.translation_db.schema import SOURCE_NAMES
+    from translation_tool.translation_db.settings import load_db_settings
+
+    seed(db_path)
+    lines = ["人工", "測試", "町宮字幕組", "自訂補充", "模組自帶繁中", "i18n 轉換"]
+    settings = load_db_settings(_cfg(db_path, lines))
+    assert SOURCE_NAMES[100] == "測試"
+    assert settings.priority[:3] == (6, 100, 3)  # 人工、測試、町宮字幕組
+    assert set(settings.priority) >= {0, 1, 2, 3, 4, 5, 6, 100}  # 沒列出的仍補在後面
+
+    # 代碼穩定：重讀不變；再新增一個拿到下一個代碼；從設定移除也不會消失或重用代碼
+    load_db_settings(_cfg(db_path, [*lines, "新來源B"]))
+    assert SOURCE_NAMES[101] == "新來源B" and SOURCE_NAMES[100] == "測試"
+    removed = load_db_settings(_cfg(db_path, ["人工"]))
+    assert 100 in removed.priority and 101 in removed.priority
+    assert removed.priority[-2:] == (100, 101)  # 沒列出的自訂來源依代碼接在最後
+
+
+def test_typo_in_builtin_name_creates_a_separate_custom_source(
+    db_path, clean_custom_sources, monkeypatch
+):
+    from translation_tool.translation_db.schema import SOURCE_NAMES
+    from translation_tool.translation_db.settings import (
+        load_db_settings,
+        preview_new_source_names,
+    )
+
+    seed(db_path)
+    monkeypatch.setattr(
+        "translation_tool.translation_db.settings.load_db_settings",
+        lambda *a, **k: DbSettings(path=str(db_path)),
+    )
+    load_db_settings(_cfg(db_path, ["釘宮翻譯組", "町宮字幕組"]))
+    assert SOURCE_NAMES[100] == "釘宮翻譯組" and SOURCE_NAMES[3] == "町宮字幕組"
+    # 設定頁即時提示：哪些是已存在的、哪些會被新增
+    known, new = preview_new_source_names("人工\n町宮字幕組\n釘宮翻譯組\n另一個")
+    assert known == ["人工", "町宮字幕組", "釘宮翻譯組"] and new == ["另一個"]
+
+
+def test_custom_source_works_end_to_end(db_path, clean_custom_sources, monkeypatch):
+    """自訂來源可寫入譯文、被篩選、顯示名稱，並算進進度條；ZIP 匯入選單也找得到。"""
+    from app.views.moddb import entries_panel, scan_panel
+    from app.views.moddb.formatting import source_label
+    from translation_tool.translation_db.settings import load_db_settings
+
+    seed(db_path)
+    cfg = _cfg(db_path, ["人工", "測試"])
+    monkeypatch.setattr(
+        moddb_service, "load_db_settings", lambda: load_db_settings(cfg)
+    )
+    code = load_db_settings(cfg).priority[1]
+    assert code == 100 and source_label(code) == "測試"
+
+    db = TranslationDB(db_path, priority=load_db_settings(cfg).priority)
+    db.write_back(
+        "1.21.1",
+        [WriteBackItem(KIND_LANG, "foo", "item.foo.b", "Infused Alloy", "測試譯文")],
+        source=code,
+    )
+    rows, total = db.list_entries("1.21.1", source=code)
+    assert total == 1 and rows[0].source == code and rows[0].zh_tw == "測試譯文"
+    stat = next(s for s in db.version_stats() if s.mc_version == "1.21.1")
+    assert stat.untranslated == 2 and stat.jar >= 1  # 自訂來源算進藍色段，不會消失
+
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+    panel.refresh()
+    assert "測試" in [o.text for o in panel.source_filter.dropdown.options]
+
+    scan = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: db)
+    assert str(code) in [o.key for o in scan.source_dd.options]
+    db.close()
+
+
+def test_names_typed_before_the_database_exists_are_registered_on_creation(
+    tmp_path, clean_custom_sources
+):
+    from translation_tool.translation_db.schema import SOURCE_NAMES
+    from translation_tool.translation_db.settings import (
+        load_db_settings,
+        open_db,
+        read_custom_sources,
+    )
+
+    path = tmp_path / "new" / "x.db"
+    cfg = _cfg(path, ["人工", "測試"])
+    settings = load_db_settings(cfg)
+    assert 100 not in settings.priority  # 資料庫還沒有，無處登錄
+    db = open_db(settings, create=True)
+    assert db is not None
+    assert read_custom_sources(path) == {"測試": 100} and SOURCE_NAMES[100] == "測試"
+    assert db.priority[:2] == (6, 100)
+    db.close()
+
+
+def test_priority_field_previews_new_custom_sources(db_path, monkeypatch):
+    from app.ui import kit
+    from app.views.config.db_location import attach_priority_hooks
+    from translation_tool.translation_db.settings import load_db_settings
+
+    seed(db_path)
+    monkeypatch.setattr(
+        "translation_tool.translation_db.settings.load_db_settings",
+        lambda *a, **k: load_db_settings(_cfg(db_path, [])),
+    )
+    field = kit.field(label="優先序", multiline=True, helper="說明")
+    check = attach_priority_hooks(field)
+    field.value = "人工\n測試\n釘宮翻譯組"
+    field.on_change(SimpleNamespace(control=field, data=field.value))
+    assert "將新增自訂來源：測試、釘宮翻譯組" in field.helper and "說明" in field.helper
+    field.value = "人工\n町宮字幕組"
+    check()
+    assert "所有名稱都是已存在的來源" in field.helper

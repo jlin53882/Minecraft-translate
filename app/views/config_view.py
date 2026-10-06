@@ -31,7 +31,11 @@ from app.views.config.config_form import (
     build_key_field,
     build_key_row,
 )
-from app.views.config.db_location import DbLocationBanner, attach_path_hooks
+from app.views.config.db_location import (
+    DbLocationBanner,
+    attach_path_hooks,
+    attach_priority_hooks,
+)
 from app.views.config.settings_form import build_controls, build_pages
 from app.views.config.settings_schema import NAV_PAGES
 
@@ -69,6 +73,9 @@ class ConfigView(ft.Column):
         self.db_location = DbLocationBanner()
         self._check_db_path = attach_path_hooks(
             self.controls_map["translation_db.path"], self.db_location
+        )
+        self._check_priority = attach_priority_hooks(
+            self.controls_map["translation_db.priority"]
         )
 
         self.scroll_container = ft.Column(
@@ -393,6 +400,7 @@ class ConfigView(ft.Column):
         result = load_config_into_view(self, config)
         self.db_location.refresh()
         self._check_db_path()
+        self._check_priority()
         return result
 
     def did_mount(self):

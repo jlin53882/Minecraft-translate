@@ -30,6 +30,7 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 from translation_tool.translation_db.schema import (
+    CUSTOM_SOURCE_BASE,
     SRC_AI,
     SRC_CUSTOM,
     SRC_I18N,
@@ -42,6 +43,7 @@ from translation_tool.translation_db.settings import database_problem as _db_pro
 from translation_tool.translation_db.settings import (
     describe_db_path,
     normalize_db_path,
+    preview_new_source_names,
     strip_quotes,
 )
 from translation_tool.utils.cancellation import cancel_scope
@@ -64,12 +66,14 @@ __all__ = [
     "TranslationDB",
     "VersionStat",
     "current_settings",
+    "custom_source_codes",
     "database_problem",
     "describe_db_path",
     "load_db_settings",
     "normalize_db_path",
     "open_database",
     "pack_format_hint",
+    "preview_new_source_names",
     "run_moddb_scan_service",
     "strip_quotes",
     "summarize_database",
@@ -85,6 +89,11 @@ VERSION_FILE = (
     / "core"
     / "resource_pack_version.json"
 )
+
+
+def custom_source_codes() -> list[int]:
+    """使用者自訂來源（在設定「來源優先順序」輸入的新名稱）的代碼，依代碼排序。"""
+    return sorted(c for c in SOURCE_NAMES if c >= CUSTOM_SOURCE_BASE)
 
 
 def current_settings() -> DbSettings:

@@ -43,6 +43,20 @@ SOURCE_NAMES: dict[int, str] = {
     SRC_MANUAL: "人工",
 }
 
+BUILTIN_SOURCE_NAMES: dict[int, str] = dict(SOURCE_NAMES)
+
+# 使用者在設定「來源優先順序」輸入的新名稱會成為自訂來源：代碼從這裡開始往上配發，
+# 登錄在資料庫 meta（custom_sources），寫入後不可更動、不重複使用。
+CUSTOM_SOURCE_BASE = 100
+
+
+def register_source_names(registry: dict[str, int]) -> None:
+    """把資料庫登錄的自訂來源名稱加進 ``SOURCE_NAMES``（就地更新，所有模組同時看得到）。"""
+    for name, code in registry.items():
+        if code >= CUSTOM_SOURCE_BASE:
+            SOURCE_NAMES[int(code)] = name
+
+
 # 預設優先序（先者優先）；已校驗（checker 不為空）者永遠最優先
 DEFAULT_PRIORITY: tuple[int, ...] = (
     SRC_MANUAL,

@@ -109,6 +109,12 @@ class TranslationDB:
             self._conn.close()
             raise
 
+    def set_priority(self, priority: tuple[int, ...]) -> None:
+        """改變來源優先序（例如新登錄了自訂來源）；有變動就重建生效譯文。"""
+        self.priority = tuple(priority)
+        self._rank = rank_sql(self.priority, "t.source")
+        self._sync_priority()
+
     # ------------------------------------------------------------------ 基礎
     def close(self) -> None:
         """關閉連線。"""
@@ -388,14 +394,15 @@ class TranslationDB:
             SELECT e.mc_version,
                    COUNT(*),
                    SUM(f.source = ?),
-                   SUM(f.source IN (?, 3, 4, 5)),
+                   SUM(f.source IS NOT NULL AND f.source NOT IN (?, ?, ?)),
                    SUM(f.source = ?),
                    SUM(f.source = ?),
                    SUM(f.entry_id IS NULL)
             FROM entry e LEFT JOIN effective f ON f.entry_id = e.id
             GROUP BY e.mc_version ORDER BY COUNT(*) DESC
             """,
-            (SRC_MANUAL, SRC_JAR_TW, SRC_JAR_CN, SRC_AI),
+            # 自訂來源與「模組自帶／字幕組…」同屬藍色段：凡不是人工、簡中轉繁、AI 的都算
+            (SRC_MANUAL, SRC_MANUAL, SRC_JAR_CN, SRC_AI, SRC_JAR_CN, SRC_AI),
         )
         return [
             [v, t, m or 0, j or 0, c or 0, a or 0, u or 0]
