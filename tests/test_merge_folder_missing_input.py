@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from app.services_impl.pipelines.merge_service import run_merge_folder_batch_service
@@ -71,3 +72,42 @@ def test_one_click_merge_step_tolerates_missing_extract_outputs(tmp_path):
         pass
 
     assert seen == [True, True]
+
+
+def test_zip_batch_counts_a_missing_zip_as_failed_and_keeps_going(tmp_path):
+    """ZIP 批次：缺檔的 ZIP 記為失敗（含路徑原因），其餘 ZIP 照常處理，不能顯示完成。"""
+    import zipfile
+
+    from app.services_impl.pipelines.merge_service import run_merge_zip_batch_service
+
+    good = tmp_path / "good.zip"
+    with zipfile.ZipFile(good, "w") as zf:
+        zf.writestr(
+            "assets/demo/lang/zh_cn.json",
+            json.dumps({"item.demo": "物品"}, ensure_ascii=False),
+        )
+        zf.writestr("assets/demo/lang/en_us.json", json.dumps({"item.demo": "Item"}))
+    missing = tmp_path / "missing.zip"
+
+    session = TaskSession()
+    session.start()
+    results = list(
+        run_merge_zip_batch_service(
+            [str(missing), str(good)],
+            str(tmp_path / "out"),
+            session,
+            only_process_lang=True,
+        )
+    )
+
+    summary = results[-1]["summary"]
+    assert summary["total_zips"] == 2
+    assert summary["failed_zips"] == 1
+    assert summary["success_zips"] == 1
+    failed = summary["failed_zips_list"][0]
+    assert failed["name"] == "missing.zip"
+    assert "輸入 ZIP 不存在" in failed["error"]
+
+    texts = "\n".join(e.text for e in session.snapshot()["logs"])
+    assert "[ZIP 1/2] 失敗：missing.zip" in texts
+    assert "[ZIP 2/2] 完成：good.zip" in texts

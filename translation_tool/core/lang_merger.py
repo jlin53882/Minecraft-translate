@@ -14,7 +14,7 @@ from collections.abc import Generator
 from typing import Any
 
 from ..utils.config_manager import load_config
-from ..utils.log_unit import log_debug, log_error, log_exception, log_info, log_warning
+from ..utils.log_unit import log_debug, log_error, log_exception, log_info
 from ..utils.text_processor import load_replace_rules
 from ..utils.zip_safety import ZipReadBudget
 from .lang_merge_content import (
@@ -94,11 +94,14 @@ def merge_zhcn_to_zhtw_from_zip(
     # --- 新增：檢查 ZIP 檔案是否存在 ---
     if not os.path.exists(zip_file):
         full_path = os.path.abspath(zip_file)  # 取得絕對路徑，方便除錯
-        log_warning(f"檔案不存在，已跳過: {full_path}")
+        message = f"輸入 ZIP 不存在，無法合併: {full_path}"
+        log_error(message)
+        # 軟性錯誤：批次服務會把這個 ZIP 記為失敗並繼續處理下一個 ZIP（不會中斷整批），
+        # 不能回報 error=False，否則缺檔會被當成成功完成。
         yield {
             "progress": _scale_progress(1.0, progress_start, progress_end),
-            # "log": f"跳過：找不到檔案 {full_path}",
-            "error": False,  # 設為 False 是為了讓程式繼續執行下一個任務而不中斷
+            "log": message,
+            "error": True,
         }
         return  # 直接結束這個產生器，不執行後面的 ZipFile 開啟動作
     # --------------------------------
